@@ -3,7 +3,7 @@
 // ตั้งค่า URL ของ Backend Server
 // ตอนทดสอบบนเครื่องจะใช้ 'http://localhost:3001'
 // ตอนนำขึ้นระบบจริง เราจะเปลี่ยนเป็น URL ของ Render.com
-const API_BASE_URL = 'http://localhost:5000';
+const API_BASE_URL = 'https://tsh-safety-backend.onrender.com'; 
 
 /**
  * ฟังก์ชันกลางสำหรับเรียกใช้ API ทั้งหมด

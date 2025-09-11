@@ -12,7 +12,11 @@ const jwt = require('jsonwebtoken');
 const { v4: uuidv4 } = require('uuid');
 
 const app = express();
-app.use(cors());
+app.use(cors({
+    origin: '*', // อนุญาตให้ทุกโดเมนเรียกใช้ API นี้ได้
+    methods: ['GET', 'POST', 'PUT', 'DELETE'], // อนุญาต Method ที่เราใช้
+    allowedHeaders: ['Content-Type', 'Authorization'] // (สำคัญ) อนุญาตให้ส่ง Header ที่จำเป็นสำหรับ Token
+}));
 app.use(express.json({ limit: '10mb' }));
 
 // --- Database Connection ---
