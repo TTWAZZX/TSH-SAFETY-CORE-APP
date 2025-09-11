@@ -1,0 +1,4 @@
+AttendanceID,SessionID,EmployeeID,EmployeeName,Team,PatrolType,Status
+2ca5d925-8130-42c2-9406-daeb25607435,03be1b2b-9b14-409e-aa3c-938debcfde93,012649,ยุทธศักดิ์  มุ่งหมาย,Management,Top Management Safety Patrol (Monthly),Attended
+8f3d374e-ed64-4b4f-a082-c019a3f977cd,03be1b2b-9b14-409e-aa3c-938debcfde93,009018,Mr. Niphon Prasertphol,Management,Top Management Safety Patrol (Monthly),Attended
+13b172b8-3433-42c3-ab42-7816b5b290e0,03be1b2b-9b14-409e-aa3c-938debcfde93,009018,Mr. Niphon Prasertphol,Management,Top Management Safety Patrol (Monthly),Attended

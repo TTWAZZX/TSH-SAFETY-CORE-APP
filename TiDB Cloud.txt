@@ -1,0 +1,20 @@
+TiDB Cloud
+
+Generated! Password : SXJ6n8rHyxJWoZeH
+
+Connection String : mysql://2cX2zWRRWjYKzZX.root:SXJ6n8rHyxJWoZeH@gateway01.ap-southeast-1.prod.aws.tidbcloud.com:4000/test
+
+
+DB_HOST=gateway01.ap-southeast-1.prod.aws.tidbcloud.com
+DB_PORT=4000
+DB_USER=2cX2zWRRWjYKzZX.root
+DB_PASSWORD=SXJ6n8rHyxJWoZeH
+DB_NAME=test
+
+JWT_SECRET="sattaya-wongchomphu"
+
+token : "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpZCI6IjAxMjYwOSIsIm5hbWUiOiJTYXR0YXlhIFdvbmdjaG9tcGh1IiwiZGVwYXJ0bWVudCI6IlNIRSIsInJvbGUiOiJBZG1pbiIsInRlYW0iOiJTdXBlcnZpc29yIiwiaWF0IjoxNzU3NDk1NTg5LCJleHAiOjE3NTc1MTcxODl9.tTsiknD3ukgSO28LQG1lOUd8ZJWUcu_GDBnK9A3lBm8"
+
+แยก services.js, app.js, index.html, และ style.ss คนละไฟล์ได้ไหม ขอทีละไฟล์เริ่มที่ style.css ก่อ
+
+YYYY-MM-DD HH:MM:SS
