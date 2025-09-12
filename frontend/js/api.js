@@ -1,23 +1,13 @@
-// js/api.js
+// js/api.js (เวอร์ชันแก้ไขแล้ว)
 
-// ตั้งค่า URL ของ Backend Server
-// ตอนทดสอบบนเครื่องจะใช้ 'http://localhost:3001'
-// ตอนนำขึ้นระบบจริง เราจะเปลี่ยนเป็น URL ของ Render.com
-const API_BASE_URL = 'https://tsh-safety-backend.onrender.com'; 
+import { showError } from './ui.js';
 
-/**
- * ฟังก์ชันกลางสำหรับเรียกใช้ API ทั้งหมด
- * @param {string} endpoint - The API endpoint to call (e.g., '/api/employees')
- * @param {object} options - Configuration for the fetch request (method, body, etc.)
- * @returns {Promise<any>} - The JSON response from the server
- */
+const API_BASE_URL = 'http://localhost:5000'; // <--- เปลี่ยนเป็น URL ของ Server ในเครื่องเรา
+
 export async function apiFetch(endpoint, options = {}) {
     const { body, ...customOptions } = options;
-    const headers = {
-        'Content-Type': 'application/json',
-    };
 
-    // ดึง Token ที่บันทึกไว้มาใส่ใน Header เพื่อยืนยันตัวตน
+    const headers = {};
     const token = localStorage.getItem('sessionToken');
     if (token) {
         headers['Authorization'] = `Bearer ${token}`;
@@ -29,18 +19,31 @@ export async function apiFetch(endpoint, options = {}) {
     };
 
     if (body) {
-        config.body = JSON.stringify(body);
+        if (body instanceof FormData) {
+            config.body = body;
+        } else {
+            headers['Content-Type'] = 'application/json';
+            config.body = JSON.stringify(body);
+        }
     }
 
     try {
         const response = await fetch(`${API_BASE_URL}${endpoint}`, config);
 
         if (!response.ok) {
-            const errorData = await response.json();
+            // --- ▼▼▼ ส่วนที่แก้ไขทั้งหมด ▼▼▼ ---
+            const resClone = response.clone(); // 1. "ถ่ายเอกสาร" Response เก็บไว้
+            let errorData;
+            try {
+                errorData = await response.json(); // 2. พยายามใช้ "คูปองตัวจริง" อ่านเป็น JSON
+            } catch (e) {
+                // 3. ถ้าตัวจริงอ่านเป็น JSON ไม่ได้ ให้ใช้ "คูปองสำเนา" อ่านเป็น Text แทน
+                errorData = { message: await resClone.text() };
+            }
             throw new Error(errorData.message || `Error ${response.status}`);
+            // --- ▲▲▲ สิ้นสุดส่วนที่แก้ไข ▲▲▲ ---
         }
         
-        // สำหรับ request ที่ไม่มี content ตอบกลับ (เช่น DELETE)
         if (response.status === 204 || response.headers.get("content-length") === "0") {
             return { success: true };
         }
@@ -48,8 +51,7 @@ export async function apiFetch(endpoint, options = {}) {
         return await response.json();
     } catch (error) {
         console.error('API Fetch Error:', error);
-        // ในอนาคตเราจะ import showError จาก ui.js มาใช้ตรงนี้
-        alert(`API Error: ${error.message}`); 
+        showError(error);
         throw error;
     }
 }

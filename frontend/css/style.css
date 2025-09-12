@@ -75,3 +75,96 @@ body { font-family: 'Kanit', sans-serif; background-color: #f1f5f9; }
     border-color: #334155;
     border-top-color: #60a5fa;
 }
+.form-input.with-icon {
+  padding-left: 2.5rem; /* 40px */
+}
+
+/* css/style.css */
+
+/* --- Advanced Form Styles --- */
+.form-group {
+    position: relative;
+}
+
+.form-field {
+    border: 1px solid #D1D5DB; /* slate-300 */
+    transition: border-color 0.2s;
+}
+
+.dark .form-field {
+    border-color: #4B5563; /* slate-600 */
+    background-color: #1F2937; /* slate-800 */
+}
+
+/* Floating Label Styling */
+.form-field:focus,
+.form-field:not(:placeholder-shown) {
+    border-color: #3B82F6; /* blue-500 */
+    outline: none;
+}
+
+.form-label-floating {
+    position: absolute;
+    top: 50%;
+    left: 1rem;
+    transform: translateY(-50%);
+    pointer-events: none;
+    transition: all 0.2s ease-out;
+    color: #6B7280; /* slate-500 */
+    background-color: white;
+    padding: 0 0.25rem;
+}
+
+.dark .form-label-floating {
+    background-color: #1F2937; /* slate-800 */
+    color: #9CA3AF; /* slate-400 */
+}
+
+.form-field:focus ~ .form-label-floating,
+.form-field:not(:placeholder-shown) ~ .form-label-floating {
+    top: 0;
+    font-size: 0.75rem; /* 12px */
+    color: #3B82F6; /* blue-500 */
+}
+
+/* Error State */
+.form-field.is-invalid {
+    border-color: #EF4444; /* red-500 */
+}
+
+.form-field.is-invalid ~ .form-label-floating {
+    color: #EF4444; /* red-500 */
+}
+
+.error-message {
+    font-size: 0.875rem; /* 14px */
+    color: #EF4444; /* red-500 */
+    margin-top: 0.5rem;
+}
+
+@keyframes toast-in {
+    from {
+        opacity: 0;
+        transform: translateX(100%);
+    }
+    to {
+        opacity: 1;
+        transform: translateX(0);
+    }
+}
+@keyframes toast-out {
+    from {
+        opacity: 1;
+        transform: translateX(0);
+    }
+    to {
+        opacity: 0;
+        transform: translateX(100%);
+    }
+}
+.animate-toast-in {
+    animation: toast-in 0.5s forwards;
+}
+.animate-toast-out {
+    animation: toast-out 0.5s forwards;
+}

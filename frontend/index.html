@@ -18,6 +18,14 @@
     
     <link rel="stylesheet" href="css/style.css">
 
+    <link href="https://fonts.googleapis.com/css2?family=Kanit:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+    
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/flatpickr/dist/flatpickr.min.css">
+    <script src="https://cdn.jsdelivr.net/npm/flatpickr"></script>
+    <script src="https://npmcdn.com/flatpickr/dist/l10n/th.js"></script>
+
+    <link rel="stylesheet" href="css/style.css">
+
     <script>
         // Dark mode switcher logic (can stay here as it needs to run early)
         if (localStorage.getItem('theme') === 'dark' || (!('theme' in localStorage) && window.matchMedia('(prefers-color-scheme: dark)').matches)) {
@@ -96,8 +104,6 @@
                 </div>
             </nav>
             <div class="px-4 mt-auto space-y-2 border-t dark:border-slate-800 pt-4">
-                <button id="admin-login-btn" class="w-full btn btn-secondary">Admin Login</button>
-                <button id="admin-logout-btn" class="hidden w-full btn bg-yellow-400 text-black hover:bg-yellow-500">Logout Admin</button>
                 <button id="user-logout-btn" class="w-full btn btn-secondary">ออกจากระบบ</button>
             </div>
         </aside>

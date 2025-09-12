@@ -40,6 +40,8 @@ const pageLoaders = {
 };
 
 // --- Navigation ---
+// js/main.js
+
 function navigateTo(pageId) {
     if (!pageLoaders[pageId]) {
         pageId = 'dashboard';
@@ -58,6 +60,11 @@ function navigateTo(pageId) {
 
     if (targetPage && pageLoaders[pageId]) {
         pageLoaders[pageId]();
+    }
+
+    // --- เพิ่มบรรทัดนี้เข้าไปครับ ---
+    if (targetPage) {
+        targetPage.classList.add('active');
     }
 }
 

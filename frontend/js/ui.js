@@ -70,18 +70,93 @@ export function showError(error) {
     showInfoModal('เกิดข้อผิดพลาด', `ไม่สามารถทำรายการได้: ${errorMessage || 'กรุณาลองใหม่อีกครั้ง'}`);
 }
 
+// js/ui.js
+
+// --- ▼▼▼ แทนที่ฟังก์ชันนี้ทั้งหมด ▼▼▼ ---
 export function showDocumentModal(originalUrl, title = 'แสดงเอกสาร') {
-    const isImage = originalUrl.match(/\.(jpeg|jpg|gif|png|webp|avif)$/i) || originalUrl.includes('googleusercontent.com');
+    // --- เงื่อนไขที่อัปเดตให้รู้จัก Cloudinary ---
+    const isImage = originalUrl.includes('cloudinary.com') || 
+                  originalUrl.includes('googleusercontent.com') ||
+                  originalUrl.match(/\.(jpeg|jpg|gif|png|webp|avif)$/i);
 
     let contentHtml = '';
     if (isImage) {
-        contentHtml = `<div class="w-full h-full flex items-center justify-center"><img src="${originalUrl}" class="max-w-full max-h-full object-contain"></div>`;
+        // ถ้าเป็นรูปภาพ (รวมถึงจาก Cloudinary) ให้แสดงด้วย <img>
+        contentHtml = `<div class="w-full h-full flex items-center justify-center bg-slate-800/50 p-4">
+                           <img src="${originalUrl}" class="max-w-full max-h-full object-contain rounded-lg shadow-xl">
+                       </div>`;
     } else {
-        // ใช้ Google Docs Viewer สำหรับไฟล์อื่นๆ เช่น PDF, DOCX
+        // ถ้าเป็นไฟล์ประเภทอื่น ให้ใช้ Google Docs Viewer เหมือนเดิม
         const viewerUrl = `https://docs.google.com/gview?url=${encodeURIComponent(originalUrl)}&embedded=true`;
         contentHtml = `<iframe src="${viewerUrl}" class="w-full h-full" frameborder="0"></iframe>`;
     }
 
     // เรียกใช้ openModal เดิม แต่กำหนดขนาดให้ใหญ่ขึ้น
-    openModal(title, contentHtml, 'max-w-6xl h-[90vh]');
+    // และเพิ่มคลาส no-padding เพื่อให้รูปภาพแสดงได้เต็มพื้นที่
+    openModal(title, contentHtml, 'max-w-6xl h-[90vh] no-padding');
+}
+
+/**
+ * แสดง Toast Notification ที่มุมจอ
+ * @param {string} message - ข้อความที่จะแสดง
+ * @param {string} type - ประเภท 'success' (เขียว) หรือ 'error' (แดง)
+ */
+export function showToast(message, type = 'success') {
+    // สร้าง Container สำหรับ Toast ถ้ายังไม่มี
+    let toastContainer = document.getElementById('toast-container');
+    if (!toastContainer) {
+        toastContainer = document.createElement('div');
+        toastContainer.id = 'toast-container';
+        toastContainer.className = 'fixed top-5 right-5 z-50 space-y-3';
+        document.body.appendChild(toastContainer);
+    }
+
+    const toast = document.createElement('div');
+    const bgColor = type === 'success' ? 'bg-green-500' : 'bg-red-500';
+    
+    toast.className = `p-4 text-white rounded-lg shadow-lg ${bgColor} transform transition-all duration-300 ease-in-out animate-toast-in`;
+    toast.textContent = message;
+
+    toastContainer.appendChild(toast);
+
+    // ตั้งเวลาให้ Toast หายไป
+    setTimeout(() => {
+        toast.classList.add('animate-toast-out');
+        // รอ animation จบแล้วค่อยลบ Element
+        toast.addEventListener('animationend', () => {
+            toast.remove();
+        });
+    }, 3000); // 3 วินาที
+}
+
+/**
+ * แสดง Modal สำหรับยืนยันการกระทำ
+ * @param {string} title - หัวข้อ
+ * @param {string} message - ข้อความคำถาม
+ * @returns {Promise<boolean>} - trả về true ถ้าผู้ใช้กดยืนยัน, false ถ้ายกเลิก
+ */
+export function showConfirmationModal(title, message) {
+    return new Promise((resolve) => {
+        const contentHtml = `
+            <p>${message}</p>
+            <div class="text-right mt-6 space-x-2">
+                <button id="modal-cancel-btn" class="btn btn-secondary">ยกเลิก</button>
+                <button id="modal-confirm-btn" class="btn btn-danger">ยืนยัน</button>
+            </div>
+        `;
+        openModal(title, contentHtml, 'max-w-md');
+
+        const confirmBtn = document.getElementById('modal-confirm-btn');
+        const cancelBtn = document.getElementById('modal-cancel-btn');
+
+        const handleResolve = (value) => {
+            closeModal();
+            resolve(value);
+        };
+        
+        confirmBtn.addEventListener('click', () => handleResolve(true), { once: true });
+        cancelBtn.addEventListener('click', () => handleResolve(false), { once: true });
+        document.getElementById('modal-backdrop').addEventListener('click', () => handleResolve(false), { once: true });
+        document.getElementById('modal-close-btn').addEventListener('click', () => handleResolve(false), { once: true });
+    });
 }
