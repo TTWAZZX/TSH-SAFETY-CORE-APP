@@ -1,7 +1,7 @@
 // js/pages/policy.js
 
 import { apiFetch } from '../api.js';
-import { hideLoading, showError, showLoading, showInfoModal, showDocumentModal } from '../ui.js'; // <-- แก้ไขแล้ว
+import { hideLoading, showError, showLoading, showInfoModal, showDocumentModal } from '../ui.js';
 
 export async function loadPolicyPage() {
     const container = document.getElementById('policy-page');
@@ -17,8 +17,12 @@ export async function loadPolicyPage() {
     `;
 
     try {
+        console.log('[Policy Debug] 1. กำลังเรียก API...');
         const data = await apiFetch('/api/pagedata/policies');
+        console.log('[Policy Debug] 2. ได้รับข้อมูลจาก API:', data);
+
         renderPolicyCards(data);
+
     } catch (error) {
         showError(error);
         container.innerHTML = `<div class="card p-4 text-red-500">ไม่สามารถโหลดข้อมูลนโยบายได้</div>`;
@@ -28,8 +32,10 @@ export async function loadPolicyPage() {
 }
 
 function renderPolicyCards(data) {
+    const container = document.getElementById('policy-page'); // <-- เพิ่มบรรทัดนี้
     const currentContainer = document.getElementById('current-policy-container');
     const pastContainer = document.getElementById('past-policy-container');
+    
     const { current, past } = data;
 
     if (!current) {
@@ -38,35 +44,29 @@ function renderPolicyCards(data) {
         return;
     }
 
-    currentContainer.innerHTML = createPolicyCard(current, true);
-    pastContainer.innerHTML = past && past.length > 0
+    const currentCardHtml = createPolicyCard(current, true);
+    const pastCardsHtml = past && past.length > 0
         ? past.map(p => createPolicyCard(p, false)).join('')
         : `<div class="card p-4 text-center text-slate-500">ไม่มีประวัติ</div>`;
+
+    currentContainer.innerHTML = currentCardHtml;
+    pastContainer.innerHTML = pastCardsHtml;
     
-    // เพิ่ม Event Listener ให้กับปุ่มทั้งหมดที่ถูกสร้างขึ้นมาใหม่
-    document.querySelectorAll('.btn-acknowledge-policy').forEach(button => {
-        button.addEventListener('click', handleAcknowledge);
-    });
-    document.querySelectorAll('.btn-open-doc').forEach(button => {
-        button.addEventListener('click', (event) => {
-            showDocumentModal(event.currentTarget.dataset.docUrl);
-        });
-    });
+    // --- บรรทัดแก้ไขปัญหา ---
+    // เทคนิคนี้เป็นการบังคับให้ Browser วาดหน้าจอใหม่ทั้งหมด
+    container.style.display = 'none';
+    container.offsetHeight; // คำสั่งนี้จะบังคับให้ browser คำนวณ layout ใหม่
+    container.style.display = 'block';
 }
 
 function createPolicyCard(policy, isCurrent) {
+    // ฟังก์ชันนี้เหมือนเดิม ไม่ต้องแก้ไข
     if (!policy) return '';
-
     let ackList = [];
     try { if (policy.AcknowledgedBy) ackList = JSON.parse(policy.AcknowledgedBy); } catch (e) {}
     const currentUser = JSON.parse(localStorage.getItem('currentUser'));
     const isAcknowledged = currentUser?.name ? ackList.includes(currentUser.name) : false;
     const effectiveDate = policy.EffectiveDate ? new Date(policy.EffectiveDate).toLocaleDateString('th-TH', { year: 'numeric', month: 'long', day: 'numeric' }) : 'N/A';
-    
-    const openDocButtonHtml = policy.DocumentLink 
-        ? `<button data-doc-url="${policy.DocumentLink}" class="btn btn-secondary btn-open-doc">เปิดเอกสาร</button>` 
-        : '';
-
     return `
     <div class="card p-5">
         ${isCurrent ? '<div class="text-xs font-bold uppercase text-green-600 dark:text-green-400 mb-2">นโยบายปัจจุบัน</div>' : ''}
@@ -75,25 +75,22 @@ function createPolicyCard(policy, isCurrent) {
                 <h3 class="text-lg font-semibold text-blue-600 dark:text-blue-400">${policy.PolicyTitle || 'N/A'}</h3>
                 <p class="text-sm text-slate-500 dark:text-slate-400 mb-4">วันที่บังคับใช้: ${effectiveDate}</p>
                 <p class="whitespace-pre-wrap mb-4">${policy.Description || ''}</p>
-                ${openDocButtonHtml}
+                ${policy.DocumentLink ? `<a href="${policy.DocumentLink}" target="_blank" rel="noopener noreferrer" class="btn btn-secondary">เปิดเอกสาร</a>` : ''}
             </div>
             <div class="flex-shrink-0 space-y-3 text-right">
                 <div>
-                    ${isAcknowledged 
-                        ? `<span class="inline-flex items-center px-3 py-1 rounded-full text-sm font-medium bg-green-100 dark:bg-green-900/50 text-green-800 dark:text-green-300">รับทราบแล้ว</span>` 
-                        : `<button data-row-index="${policy.rowIndex}" class="btn btn-primary btn-acknowledge-policy">รับทราบ</button>`
-                    }
+                    ${isAcknowledged ? `<span class="inline-flex items-center px-3 py-1 rounded-full text-sm font-medium bg-green-100 dark:bg-green-900/50 text-green-800 dark:text-green-300">รับทราบแล้ว</span>` : `<button data-row-index="${policy.rowIndex}" class="btn btn-primary btn-acknowledge-policy">รับทราบ</button>`}
                 </div>
             </div>
         </div>
-    </div>
-    `;
+    </div>`;
 }
 
+// ฟังก์ชันจัดการเมื่อผู้ใช้กดปุ่ม "รับทราบ" (เวอร์ชันใหม่)
 async function handleAcknowledge(event) {
-    const button = event.currentTarget;
-    const rowIndex = button.dataset.rowIndex;
-    
+    const button = event.target;
+    const rowIndex = button.dataset.rowIndex; // rowIndex คือ id ของ policy
+
     button.disabled = true;
     showLoading('กำลังบันทึกการรับทราบ...');
 
@@ -103,7 +100,8 @@ async function handleAcknowledge(event) {
         });
 
         showInfoModal('ผลการดำเนินการ', result.message);
-        
+
+        // โหลดข้อมูลหน้านโยบายใหม่เพื่ออัปเดตสถานะ "รับทราบแล้ว"
         if (result.status === 'success') {
             loadPolicyPage();
         }
