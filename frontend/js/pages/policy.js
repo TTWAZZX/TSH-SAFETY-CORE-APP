@@ -1,19 +1,18 @@
 // js/pages/policy.js
 
 import { apiFetch } from '../api.js';
-import { hideLoading, showError, showInfoModal } from '../ui.js';
+import { hideLoading, showError, showLoading, showInfoModal, showDocumentModal } from '../ui.js'; // <-- แก้ไขแล้ว
 
-// ฟังก์ชันหลักสำหรับโหลดและแสดงผลหน้า Policy
 export async function loadPolicyPage() {
     const container = document.getElementById('policy-page');
     container.innerHTML = `
         <div class="flex justify-between items-center mb-4">
             <h2 class="text-xl font-semibold">นโยบายความปลอดภัย</h2>
-            </div>
-        <div id="current-policy-container" class="mb-6"><p>กำลังโหลดนโยบายปัจจุบัน...</p></div>
+        </div>
+        <div id="current-policy-container" class="mb-6"><p class="card p-4">กำลังโหลดนโยบายปัจจุบัน...</p></div>
         <div>
             <h3 class="text-lg font-semibold mb-3 border-b dark:border-slate-700 pb-2">ประวัติ</h3>
-            <div id="past-policy-container" class="space-y-4"><p>กำลังโหลดประวัติ...</p></div>
+            <div id="past-policy-container" class="space-y-4"><p class="card p-4">กำลังโหลดประวัติ...</p></div>
         </div>
     `;
 
@@ -28,46 +27,45 @@ export async function loadPolicyPage() {
     }
 }
 
-// ฟังก์ชันสำหรับนำข้อมูลที่ได้มาสร้างเป็นการ์ดแสดงผล
 function renderPolicyCards(data) {
     const currentContainer = document.getElementById('current-policy-container');
     const pastContainer = document.getElementById('past-policy-container');
-
     const { current, past } = data;
 
     if (!current) {
         currentContainer.innerHTML = `<div class="card p-4">ไม่พบนโยบายปัจจุบัน</div>`;
-        pastContainer.innerHTML = '';
+        pastContainer.innerHTML = `<div class="card p-4">ไม่มีประวัติ</div>`;
         return;
     }
 
     currentContainer.innerHTML = createPolicyCard(current, true);
-    pastContainer.innerHTML = past.length > 0 
-        ? past.map(p => createPolicyCard(p, false)).join('') 
-        : '<div class="card p-4">ไม่มีประวัติ</div>';
-
-    // เพิ่ม Event Listener ให้กับปุ่ม "รับทราบ" ที่สร้างขึ้นมา
+    pastContainer.innerHTML = past && past.length > 0
+        ? past.map(p => createPolicyCard(p, false)).join('')
+        : `<div class="card p-4 text-center text-slate-500">ไม่มีประวัติ</div>`;
+    
+    // เพิ่ม Event Listener ให้กับปุ่มทั้งหมดที่ถูกสร้างขึ้นมาใหม่
     document.querySelectorAll('.btn-acknowledge-policy').forEach(button => {
         button.addEventListener('click', handleAcknowledge);
     });
+    document.querySelectorAll('.btn-open-doc').forEach(button => {
+        button.addEventListener('click', (event) => {
+            showDocumentModal(event.currentTarget.dataset.docUrl);
+        });
+    });
 }
 
-// ฟังก์ชันสร้าง HTML สำหรับการ์ดนโยบาย 1 ใบ
 function createPolicyCard(policy, isCurrent) {
     if (!policy) return '';
 
-    // ข้อมูลการรับทราบ (AcknowledgedBy) ในฐานข้อมูลเป็น TEXT ที่เก็บ JSON string
     let ackList = [];
-    try {
-        if (policy.AcknowledgedBy) ackList = JSON.parse(policy.AcknowledgedBy);
-    } catch (e) {
-        console.warn("Could not parse AcknowledgedBy JSON for policy:", policy.rowIndex);
-    }
-
-    const currentUser = JSON.parse(localStorage.getItem('currentUser')); // ดึงข้อมูลผู้ใช้ปัจจุบัน
+    try { if (policy.AcknowledgedBy) ackList = JSON.parse(policy.AcknowledgedBy); } catch (e) {}
+    const currentUser = JSON.parse(localStorage.getItem('currentUser'));
     const isAcknowledged = currentUser?.name ? ackList.includes(currentUser.name) : false;
-
-    const effectiveDate = policy.EffectiveDate ? new Date(policy.EffectiveDate).toLocaleDateString('th-TH') : 'N/A';
+    const effectiveDate = policy.EffectiveDate ? new Date(policy.EffectiveDate).toLocaleDateString('th-TH', { year: 'numeric', month: 'long', day: 'numeric' }) : 'N/A';
+    
+    const openDocButtonHtml = policy.DocumentLink 
+        ? `<button data-doc-url="${policy.DocumentLink}" class="btn btn-secondary btn-open-doc">เปิดเอกสาร</button>` 
+        : '';
 
     return `
     <div class="card p-5">
@@ -77,7 +75,7 @@ function createPolicyCard(policy, isCurrent) {
                 <h3 class="text-lg font-semibold text-blue-600 dark:text-blue-400">${policy.PolicyTitle || 'N/A'}</h3>
                 <p class="text-sm text-slate-500 dark:text-slate-400 mb-4">วันที่บังคับใช้: ${effectiveDate}</p>
                 <p class="whitespace-pre-wrap mb-4">${policy.Description || ''}</p>
-                ${policy.DocumentLink ? `<a href="${policy.DocumentLink}" target="_blank" rel="noopener noreferrer" class="btn btn-secondary">เปิดเอกสาร</a>` : ''}
+                ${openDocButtonHtml}
             </div>
             <div class="flex-shrink-0 space-y-3 text-right">
                 <div>
@@ -86,32 +84,33 @@ function createPolicyCard(policy, isCurrent) {
                         : `<button data-row-index="${policy.rowIndex}" class="btn btn-primary btn-acknowledge-policy">รับทราบ</button>`
                     }
                 </div>
-                </div>
+            </div>
         </div>
     </div>
     `;
 }
 
-// ฟังก์ชันจัดการเมื่อผู้ใช้กดปุ่ม "รับทราบ"
 async function handleAcknowledge(event) {
-    const rowIndex = event.target.dataset.rowIndex;
+    const button = event.currentTarget;
+    const rowIndex = button.dataset.rowIndex;
+    
+    button.disabled = true;
     showLoading('กำลังบันทึกการรับทราบ...');
 
     try {
-        // *** Placeholder for Acknowledge API Call ***
-        // เรายังไม่มี API สำหรับการรับทราบ เราจะสร้างมันในขั้นตอนถัดๆ ไป
-        // ตอนนี้จะแสดงแค่ข้อความจำลอง
-        await new Promise(resolve => setTimeout(resolve, 1000)); // จำลองการรอ
+        const result = await apiFetch(`/api/policies/${rowIndex}/acknowledge`, { 
+            method: 'POST' 
+        });
 
-        // หลังจากมี API แล้ว เราจะเรียกใช้และโหลดหน้าใหม่
-        // const result = await apiFetch(`/api/policies/acknowledge`, { method: 'POST', body: { rowIndex } });
-        // showInfoModal('สำเร็จ', result.message);
-        // loadPolicyPage();
-
-        showInfoModal('จำลอง', 'ฟังก์ชัน "รับทราบ" ยังไม่เปิดใช้งาน');
+        showInfoModal('ผลการดำเนินการ', result.message);
+        
+        if (result.status === 'success') {
+            loadPolicyPage();
+        }
 
     } catch (error) {
         showError(error);
+        button.disabled = false;
     } finally {
         hideLoading();
     }

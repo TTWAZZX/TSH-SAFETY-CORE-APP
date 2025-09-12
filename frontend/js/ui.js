@@ -69,3 +69,19 @@ export function showError(error) {
 
     showInfoModal('เกิดข้อผิดพลาด', `ไม่สามารถทำรายการได้: ${errorMessage || 'กรุณาลองใหม่อีกครั้ง'}`);
 }
+
+export function showDocumentModal(originalUrl, title = 'แสดงเอกสาร') {
+    const isImage = originalUrl.match(/\.(jpeg|jpg|gif|png|webp|avif)$/i) || originalUrl.includes('googleusercontent.com');
+
+    let contentHtml = '';
+    if (isImage) {
+        contentHtml = `<div class="w-full h-full flex items-center justify-center"><img src="${originalUrl}" class="max-w-full max-h-full object-contain"></div>`;
+    } else {
+        // ใช้ Google Docs Viewer สำหรับไฟล์อื่นๆ เช่น PDF, DOCX
+        const viewerUrl = `https://docs.google.com/gview?url=${encodeURIComponent(originalUrl)}&embedded=true`;
+        contentHtml = `<iframe src="${viewerUrl}" class="w-full h-full" frameborder="0"></iframe>`;
+    }
+
+    // เรียกใช้ openModal เดิม แต่กำหนดขนาดให้ใหญ่ขึ้น
+    openModal(title, contentHtml, 'max-w-6xl h-[90vh]');
+}
