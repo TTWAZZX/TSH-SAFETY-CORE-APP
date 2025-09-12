@@ -10,6 +10,29 @@ const cors = require('cors');
 const mysql = require('mysql2/promise');
 const jwt = require('jsonwebtoken');
 const { v4: uuidv4 } = require('uuid');
+const cloudinary = require('cloudinary').v2;
+const { CloudinaryStorage } = require('multer-storage-cloudinary');
+const multer = require('multer');
+
+// --- ตั้งค่า Cloudinary ---
+cloudinary.config({
+  cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
+  api_key: process.env.CLOUDINARY_API_KEY,
+  api_secret: process.env.CLOUDINARY_API_SECRET
+});
+
+const storage = new CloudinaryStorage({
+  cloudinary: cloudinary,
+  params: {
+    folder: 'safety_policies', // ชื่อโฟลเดอร์ที่จะเก็บใน Cloudinary
+    format: async (req, file) => 'pdf', // บังคับให้เป็น PDF หรืออื่นๆ ตามต้องการ
+    public_id: (req, file) => `${Date.now()}-${file.originalname}`,
+  },
+});
+
+const upload = multer({ storage: storage });
+
+
 
 const app = express();
 app.use(cors({
@@ -314,6 +337,16 @@ app.post('/api/yokoten/acknowledge', authenticateToken, async (req, res) => {
         console.error("Error acknowledging Yokoten topic:", error);
         res.status(500).json({ status: 'error', message: 'เกิดข้อผิดพลาดในการบันทึกข้อมูล' });
     }
+});
+
+// --- สร้าง API Endpoint ใหม่สำหรับอัปโหลดไฟล์ ---
+// เราจะใช้ `upload.single('document')` โดย 'document' คือชื่อ field ที่จะส่งมาจาก frontend
+app.post('/api/upload/document', authenticateToken, isAdmin, upload.single('document'), (req, res) => {
+    if (!req.file) {
+        return res.status(400).json({ success: false, message: 'No file uploaded.' });
+    }
+    // `req.file.path` จะเป็น URL ที่ Cloudinary สร้างให้
+    res.json({ success: true, message: 'File uploaded successfully', url: req.file.path });
 });
 
 
