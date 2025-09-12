@@ -10,6 +10,7 @@ import { loadPolicyPage } from './pages/policy.js';
 import { loadCommitteePage } from './pages/committee.js';
 import { loadPatrolCccfPage } from './pages/patrol.js';
 import { loadKpiPage } from './pages/kpi.js';
+// import { loadYokotenPage } from './pages/yokoten.js'; // <--- คอมเมนต์บรรทัดนี้
 import { loadYokotenPage } from './pages/yokoten.js';
 
 
@@ -33,8 +34,8 @@ const pageLoaders = {
     'patrol-cccf': loadPatrolCccfPage,
     'machine-safety': () => loadPlaceholderPage('machine-safety-page', 'Machine Device'),
     'training': () => loadPlaceholderPage('training-page', 'Safety Training'),
-    'accident': () => loadPlaceholderPage('accident-page', 'รายงานอุบัติเหตุ'),
-    'yokoten': loadYokotenPage,
+    // 'yokoten': loadYokotenPage, // <--- คอมเมนต์บรรทัดนี้ด้วย
+    'employee': () => loadPlaceholderPage('employee-page', 'จัดการพนักงาน'),
     'employee': () => loadPlaceholderPage('employee-page', 'จัดการพนักงาน'),
 };
 
