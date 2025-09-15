@@ -5,6 +5,14 @@
 
 // SECTION 1: SETUP AND CONFIGURATION
 require('dotenv').config();
+
+// --- ▼▼▼ เพิ่มโค้ดตรวจสอบ 4 บรรทัดนี้ ▼▼▼ ---
+console.log("--- Verifying Cloudinary Credentials ---");
+console.log("Cloud Name:", process.env.CLOUDINARY_CLOUD_NAME ? "Loaded" : "!! MISSING !!");
+console.log("API Key:", process.env.CLOUDINARY_API_KEY ? "Loaded" : "!! MISSING !!");
+console.log("API Secret:", process.env.CLOUDINARY_API_SECRET ? "Loaded" : "!! MISSING !!");
+console.log("--------------------------------------");
+
 const express = require('express');
 const cors = require('cors');
 const mysql = require('mysql2/promise');
@@ -23,10 +31,25 @@ cloudinary.config({
 
 const storage = new CloudinaryStorage({
   cloudinary: cloudinary,
-  params: {
-    folder: 'safety_policies', // ชื่อโฟลเดอร์ที่จะเก็บใน Cloudinary
-    format: async (req, file) => 'pdf', // บังคับให้เป็น PDF หรืออื่นๆ ตามต้องการ
-    public_id: (req, file) => `${Date.now()}-${file.originalname}`,
+  params: (req, file) => { // <--- เปลี่ยนจาก Object เป็นฟังก์ชัน
+    // กำหนดประเภทไฟล์เริ่มต้นให้เป็น 'raw' สำหรับเอกสารทั่วไป
+    let resource_type = 'raw';
+
+    // ตรวจสอบ mimetype ของไฟล์
+    if (file.mimetype.startsWith('image')) {
+      resource_type = 'image';
+    } else if (file.mimetype.startsWith('video')) {
+      resource_type = 'video';
+    }
+    // ถ้าไม่ใช่ทั้ง image และ video ก็จะเป็น 'raw' ตามค่าเริ่มต้น
+
+    return {
+      folder: 'tsh_safety_app',
+      public_id: `${Date.now()}-${file.originalname}`,
+      resource_type: resource_type, // ส่งค่าที่ถูกต้องเข้าไป
+      access_mode: 'public',
+      overwrite: true,
+    };
   },
 });
 
@@ -190,39 +213,6 @@ app.delete('/api/policies/:id', authenticateToken, isAdmin, async (req, res) => 
 });
 
 // API สำหรับรับทราบ Policy (ย้ายมาไว้รวมกัน)
-app.post('/api/policies/:rowIndex/acknowledge', authenticateToken, async (req, res) => {
-    const { rowIndex } = req.params;
-    const { name } = req.user; // ดึงชื่อผู้ใช้จาก Token ที่ผ่าน authenticateToken มาแล้ว
-
-    try {
-        const [policies] = await pool.query('SELECT AcknowledgedBy FROM Policies WHERE id = ?', [rowIndex]);
-        if (policies.length === 0) {
-            return res.status(404).json({ status: 'error', message: 'ไม่พบนโยบาย' });
-        }
-
-        let ackList = [];
-        try {
-            if (policies[0].AcknowledgedBy) {
-                ackList = JSON.parse(policies[0].AcknowledgedBy);
-            }
-        } catch (e) {
-            // กรณีข้อมูลเดิมไม่ใช่ JSON ที่ถูกต้อง
-        }
-
-        if (!ackList.includes(name)) {
-            ackList.push(name);
-        }
-        
-        await pool.query('UPDATE Policies SET AcknowledgedBy = ? WHERE id = ?', [JSON.stringify(ackList), rowIndex]);
-        
-        res.json({ status: 'success', message: 'บันทึกการรับทราบเรียบร้อยแล้ว' });
-
-    } catch (error) {
-        console.error("Acknowledge Error:", error);
-        res.status(500).json({ status: 'error', message: 'เกิดข้อผิดพลาดในการบันทึกข้อมูล' });
-    }
-});
-
 app.get('/api/pagedata/committees', authenticateToken, async (req, res) => {
     try {
         const [allItems] = await pool.query('SELECT *, id as rowIndex FROM Committees ORDER BY TermStartDate DESC');
@@ -340,12 +330,17 @@ app.post('/api/yokoten/acknowledge', authenticateToken, async (req, res) => {
 });
 
 // --- สร้าง API Endpoint ใหม่สำหรับอัปโหลดไฟล์ ---
-// เราจะใช้ `upload.single('document')` โดย 'document' คือชื่อ field ที่จะส่งมาจาก frontend
+// server.js
 app.post('/api/upload/document', authenticateToken, isAdmin, upload.single('document'), (req, res) => {
     if (!req.file) {
         return res.status(400).json({ success: false, message: 'No file uploaded.' });
     }
-    // `req.file.path` จะเป็น URL ที่ Cloudinary สร้างให้
+
+    // --- ▼▼▼ เพิ่มโค้ด Debug 3 บรรทัดนี้ ▼▼▼ ---
+    console.log('--- Cloudinary Upload Response ---');
+    console.log(req.file);
+    console.log('------------------------------------');
+
     res.json({ success: true, message: 'File uploaded successfully', url: req.file.path });
 });
 
@@ -354,7 +349,7 @@ app.post('/api/upload/document', authenticateToken, isAdmin, upload.single('docu
 // SECTION 4: GENERIC CRUD (สำหรับ Admin Panel)
 // =================================================================
 const tablesForCrud = [
-    'Employees', 'Policies', 'Committees', 'KPIAnnouncements', 'KPIData',
+    'Employees', 'Committees', 'KPIAnnouncements', 'KPIData',
     'Patrol_Sessions', 'Patrol_Attendance', 'Patrol_Issues',
     'CCCF_Activity', 'CCCF_Targets', 'ManHours', 'AccidentReports',
     'TrainingStatus', 'SCW_Documents', 'OJT_Department_Status',
