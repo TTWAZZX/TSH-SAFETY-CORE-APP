@@ -5,8 +5,6 @@ import { hideLoading, showError, showLoading, showInfoModal, openModal, closeMod
 
 // Global variables for this page
 let allPolicies = [];
-const currentUser = JSON.parse(localStorage.getItem('currentUser'));
-const isAdmin = currentUser?.role === 'Admin';
 let policyEventListenersInitialized = false; // **ตัวแปร Flag ที่เพิ่มเข้ามา**
 
 // --- SVG Icons สำหรับใส่ใน Input ---
@@ -68,6 +66,9 @@ function setupPolicyPageEventListeners() {
 }
 
 export async function loadPolicyPage() {
+    const currentUser = JSON.parse(localStorage.getItem('currentUser'));
+    const isAdmin = currentUser?.role === 'Admin';
+
     const container = document.getElementById('policy-page');
     const adminButtonHtml = isAdmin ? `
         <button id="btn-add-policy" class="btn btn-primary">
@@ -128,6 +129,9 @@ function renderPolicyCards(data) {
 
 function createPolicyCard(policy, isCurrent) {
     if (!policy) return '';
+
+    const currentUser = JSON.parse(localStorage.getItem('currentUser'));
+    const isAdmin = currentUser?.role === 'Admin';
 
     // --- ส่วนนี้คือโค้ดเดิม ไม่ต้องแก้ไข ---
     let ackList = [];

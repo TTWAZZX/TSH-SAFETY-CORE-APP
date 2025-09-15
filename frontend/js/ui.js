@@ -72,27 +72,33 @@ export function showError(error) {
 
 // js/ui.js
 
-// --- ▼▼▼ แทนที่ฟังก์ชันนี้ทั้งหมด ▼▼▼ ---
+// --- ▼▼▼ แทนที่ฟังก์ชันนี้ทั้งหมดด้วยโค้ดใหม่ ▼▼▼ ---
 export function showDocumentModal(originalUrl, title = 'แสดงเอกสาร') {
-    // --- เงื่อนไขที่อัปเดตให้รู้จัก Cloudinary ---
-    const isImage = originalUrl.includes('cloudinary.com') || 
+    // ตรวจสอบว่าเป็นรูปภาพหรือไม่ (ปรับปรุงให้รองรับ Cloudinary ได้ดีขึ้น)
+    const isImage = originalUrl.includes('cloudinary.com/image/') || 
                   originalUrl.includes('googleusercontent.com') ||
                   originalUrl.match(/\.(jpeg|jpg|gif|png|webp|avif)$/i);
+    
+    // ตรวจสอบว่าเป็นไฟล์ PDF หรือไม่
+    const isPdf = originalUrl.toLowerCase().endsWith('.pdf');
 
     let contentHtml = '';
+
     if (isImage) {
-        // ถ้าเป็นรูปภาพ (รวมถึงจาก Cloudinary) ให้แสดงด้วย <img>
-        contentHtml = `<div class="w-full h-full flex items-center justify-center bg-slate-800/50 p-4">
-                           <img src="${originalUrl}" class="max-w-full max-h-full object-contain rounded-lg shadow-xl">
-                       </div>`;
+        contentHtml = `
+            <div class="w-full h-full flex items-center justify-center bg-slate-800/50 p-4">
+                <img src="${originalUrl}" class="max-w-full max-h-full object-contain rounded-lg shadow-xl">
+            </div>`;
+    } else if (isPdf) {
+        // --- Logic ใหม่สำหรับ PDF: ใช้ <embed> ของเบราว์เซอร์โดยตรง ---
+        contentHtml = `<embed src="${originalUrl}" type="application/pdf" width="100%" height="100%">`;
     } else {
-        // ถ้าเป็นไฟล์ประเภทอื่น ให้ใช้ Google Docs Viewer เหมือนเดิม
+        // --- Logic เดิม: ใช้ Google Viewer สำหรับไฟล์ประเภทอื่นๆ ---
         const viewerUrl = `https://docs.google.com/gview?url=${encodeURIComponent(originalUrl)}&embedded=true`;
         contentHtml = `<iframe src="${viewerUrl}" class="w-full h-full" frameborder="0"></iframe>`;
     }
 
-    // เรียกใช้ openModal เดิม แต่กำหนดขนาดให้ใหญ่ขึ้น
-    // และเพิ่มคลาส no-padding เพื่อให้รูปภาพแสดงได้เต็มพื้นที่
+    // เรียกใช้ openModal เดิม แต่เพิ่มคลาส no-padding เพื่อให้แสดงผลได้เต็มพื้นที่
     openModal(title, contentHtml, 'max-w-6xl h-[90vh] no-padding');
 }
 

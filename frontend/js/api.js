@@ -2,7 +2,21 @@
 
 import { showError } from './ui.js';
 
-const API_BASE_URL = 'http://localhost:5000'; // <--- เปลี่ยนเป็น URL ของ Server ในเครื่องเรา
+// --- API Configuration (Automatic) ---
+
+let API_BASE_URL;
+
+if (window.location.hostname === '127.0.0.1' || window.location.hostname === 'localhost') {
+    // ถ้าเรารันอยู่ในเครื่อง
+    API_BASE_URL = 'http://localhost:5000';
+    console.log('Running in DEVELOPMENT mode. API is at:', API_BASE_URL);
+} else {
+    // ถ้าเรารันอยู่ที่อื่น (เช่น onrender.com)
+    API_BASE_URL = 'https://tsh-safety-backend.onrender.com';
+    console.log('Running in PRODUCTION mode. API is at:', API_BASE_URL);
+}
+
+// export default API_BASE_URL; // ถ้าคุณใช้ export default
 
 export async function apiFetch(endpoint, options = {}) {
     const { body, ...customOptions } = options;
