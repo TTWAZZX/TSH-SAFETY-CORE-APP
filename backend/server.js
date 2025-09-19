@@ -212,17 +212,100 @@ app.delete('/api/policies/:id', authenticateToken, isAdmin, async (req, res) => 
     }
 });
 
-// API สำหรับรับทราบ Policy (ย้ายมาไว้รวมกัน)
+// =================================================================
+// SECTION: COMMITTEES CRUD
+// =================================================================
+
+// --- ▼▼▼ แทนที่ 3 ฟังก์ชันนี้ด้วยเวอร์ชันใหม่ ▼▼▼ ---
+
 app.get('/api/pagedata/committees', authenticateToken, async (req, res) => {
     try {
         const [allItems] = await pool.query('SELECT *, id as rowIndex FROM Committees ORDER BY TermStartDate DESC');
         if (allItems.length === 0) return res.json({ current: null, past: [] });
+
+        // --- โค้ดส่วนที่แก้ไขให้ทำงานได้ถูกต้อง 100% ---
+        allItems.forEach(item => {
+            // ตรวจสอบว่ามีข้อมูลและไม่ใช่ string ว่างๆ ก่อนที่จะ parse
+            if (item.SubCommitteeData && typeof item.SubCommitteeData === 'string') {
+                try {
+                    item.SubCommitteeData = JSON.parse(item.SubCommitteeData);
+                } catch (e) {
+                    item.SubCommitteeData = []; // ถ้า parse ไม่ได้ ให้เป็น array ว่าง
+                }
+            } else {
+                // ถ้าเป็น null, undefined, หรือไม่ใช่ string ให้เป็น array ว่าง
+                item.SubCommitteeData = [];
+            }
+        });
+        // --- สิ้นสุดส่วนที่แก้ไข ---
+
         let currentItem = allItems.find(p => p.IsCurrent === 1) || allItems[0];
         const pastItems = allItems.filter(p => p.id !== currentItem.id);
         res.json({ current: currentItem, past: pastItems });
     } catch (error) {
         console.error("Error fetching page data for Committees:", error);
         res.status(500).json({ success: false, message: 'เกิดข้อผิดพลาดในการดึงข้อมูลคณะกรรมการ' });
+    }
+});
+
+// POST: สร้าง Committee ใหม่
+app.post('/api/committees', authenticateToken, isAdmin, async (req, res) => {
+    const { CommitteeTitle, TermStartDate, TermEndDate, MainOrgChartLink, IsCurrent } = req.body;
+    // สร้าง SubCommitteeData เริ่มต้นเป็น Array ว่าง
+    const SubCommitteeData = JSON.stringify([]); 
+
+    if (!CommitteeTitle || !TermStartDate || !TermEndDate) {
+        return res.status(400).json({ success: false, message: 'กรุณากรอกข้อมูลที่จำเป็นให้ครบถ้วน' });
+    }
+    try {
+        if (IsCurrent) {
+            await pool.query('UPDATE Committees SET IsCurrent = 0 WHERE IsCurrent = 1');
+        }
+        const [result] = await pool.query(
+            'INSERT INTO Committees (CommitteeTitle, TermStartDate, TermEndDate, MainOrgChartLink, IsCurrent, SubCommitteeData) VALUES (?, ?, ?, ?, ?, ?)',
+            [CommitteeTitle, TermStartDate, TermEndDate, MainOrgChartLink, IsCurrent ? 1 : 0, SubCommitteeData]
+        );
+        res.status(201).json({ success: true, message: 'สร้างข้อมูลคณะกรรมการชุดใหม่สำเร็จ', insertedId: result.insertId });
+    } catch (error) {
+        console.error("Error creating committee:", error);
+        res.status(500).json({ success: false, message: 'ไม่สามารถสร้างข้อมูลได้' });
+    }
+});
+
+// PUT: อัปเดต Committee ที่มีอยู่
+app.put('/api/committees/:id', authenticateToken, isAdmin, async (req, res) => {
+    const { id } = req.params;
+    const { CommitteeTitle, TermStartDate, TermEndDate, MainOrgChartLink, IsCurrent, SubCommitteeData } = req.body;
+    
+    // แปลง Object จาก Frontend กลับเป็น JSON string ก่อนบันทึก
+    const subDataString = JSON.stringify(SubCommitteeData || []);
+
+    if (!CommitteeTitle || !TermStartDate || !TermEndDate) {
+        return res.status(400).json({ success: false, message: 'กรุณากรอกข้อมูลที่จำเป็นให้ครบถ้วน' });
+    }
+    try {
+        if (IsCurrent) {
+            await pool.query('UPDATE Committees SET IsCurrent = 0 WHERE IsCurrent = 1 AND id != ?', [id]);
+        }
+        await pool.query(
+            'UPDATE Committees SET CommitteeTitle = ?, TermStartDate = ?, TermEndDate = ?, MainOrgChartLink = ?, IsCurrent = ?, SubCommitteeData = ? WHERE id = ?',
+            [CommitteeTitle, TermStartDate, TermEndDate, MainOrgChartLink, IsCurrent ? 1 : 0, subDataString, id]
+        );
+        res.json({ success: true, message: 'อัปเดตข้อมูลสำเร็จ' });
+    } catch (error) {
+        console.error(`Error updating committee ${id}:`, error);
+        res.status(500).json({ success: false, message: 'ไม่สามารถอัปเดตข้อมูลได้' });
+    }
+});
+// DELETE: ลบ Committee
+app.delete('/api/committees/:id', authenticateToken, isAdmin, async (req, res) => {
+    const { id } = req.params;
+    try {
+        await pool.query('DELETE FROM Committees WHERE id = ?', [id]);
+        res.json({ success: true, message: 'ลบข้อมูลสำเร็จ' });
+    } catch (error) {
+        console.error(`Error deleting committee ${id}:`, error);
+        res.status(500).json({ success: false, message: 'ไม่สามารถลบข้อมูลได้' });
     }
 });
 
@@ -349,7 +432,7 @@ app.post('/api/upload/document', authenticateToken, isAdmin, upload.single('docu
 // SECTION 4: GENERIC CRUD (สำหรับ Admin Panel)
 // =================================================================
 const tablesForCrud = [
-    'Employees', 'Committees', 'KPIAnnouncements', 'KPIData',
+    'Employees', 'KPIAnnouncements', 'KPIData',
     'Patrol_Sessions', 'Patrol_Attendance', 'Patrol_Issues',
     'CCCF_Activity', 'CCCF_Targets', 'ManHours', 'AccidentReports',
     'TrainingStatus', 'SCW_Documents', 'OJT_Department_Status',
