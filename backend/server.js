@@ -311,11 +311,22 @@ app.delete('/api/committees/:id', authenticateToken, isAdmin, async (req, res) =
 
 app.get('/api/pagedata/kpi-announcements', authenticateToken, async (req, res) => {
     try {
-        const [allItems] = await pool.query('SELECT *, AnnouncementID as rowIndex FROM KPIAnnouncements ORDER BY EffectiveDate DESC');
-        if (allItems.length === 0) return res.json({ current: null, past: [] });
+        const [allItems] = await pool.query('SELECT *, AnnouncementID as id FROM KPIAnnouncements ORDER BY EffectiveDate DESC');
+
+        // --- ส่วนที่เพิ่มเข้ามา ---
+        // ดึงปีทั้งหมดที่มีอยู่จากข้อมูลประกาศ
+        const availableYears = [...new Set(allItems.map(item => new Date(item.EffectiveDate).getFullYear()))];
+
+        if (allItems.length === 0) {
+            return res.json({ current: null, past: [], availableYears: [] });
+        }
+
         let currentItem = allItems.find(p => p.IsCurrent === 1) || allItems[0];
         const pastItems = allItems.filter(p => p.AnnouncementID !== currentItem.AnnouncementID);
-        res.json({ current: currentItem, past: pastItems });
+
+        // ส่ง availableYears กลับไปด้วย
+        res.json({ current: currentItem, past: pastItems, availableYears: availableYears });
+
     } catch (error) {
         console.error("Error fetching KPI Announcements:", error);
         res.status(500).json({ success: false, message: 'เกิดข้อผิดพลาดในการดึงข้อมูลประกาศ KPI' });
@@ -427,12 +438,105 @@ app.post('/api/upload/document', authenticateToken, isAdmin, upload.single('docu
     res.json({ success: true, message: 'File uploaded successfully', url: req.file.path });
 });
 
+// =================================================================
+// SECTION: KPI DATA & ANNOUNCEMENTS CRUD
+// =================================================================
+
+// --- KPI Announcements ---
+app.post('/api/kpiannouncements', authenticateToken, isAdmin, async (req, res) => {
+    const { AnnouncementTitle, EffectiveDate, IsCurrent } = req.body;
+    if (!AnnouncementTitle || !EffectiveDate) return res.status(400).json({ message: 'กรุณากรอกข้อมูลให้ครบถ้วน' });
+    try {
+        if (IsCurrent) {
+            await pool.query('UPDATE KPIAnnouncements SET IsCurrent = 0 WHERE IsCurrent = 1');
+        }
+        await pool.query('INSERT INTO KPIAnnouncements (AnnouncementTitle, EffectiveDate, IsCurrent) VALUES (?, ?, ?)', [AnnouncementTitle, EffectiveDate, IsCurrent ? 1 : 0]);
+        res.status(201).json({ success: true, message: 'สร้างประกาศ KPI ใหม่สำเร็จ' });
+    } catch (error) {
+        console.error("Error creating KPI announcement:", error);
+        res.status(500).json({ success: false, message: 'ไม่สามารถสร้างประกาศได้' });
+    }
+});
+
+app.put('/api/kpiannouncements/:id', authenticateToken, isAdmin, async (req, res) => {
+    const { id } = req.params;
+    const { AnnouncementTitle, EffectiveDate, IsCurrent } = req.body;
+    if (!AnnouncementTitle || !EffectiveDate) return res.status(400).json({ message: 'กรุณากรอกข้อมูลให้ครบถ้วน' });
+    try {
+        if (IsCurrent) {
+            await pool.query('UPDATE KPIAnnouncements SET IsCurrent = 0 WHERE IsCurrent = 1 AND AnnouncementID != ?', [id]);
+        }
+        await pool.query('UPDATE KPIAnnouncements SET AnnouncementTitle = ?, EffectiveDate = ?, IsCurrent = ? WHERE AnnouncementID = ?', [AnnouncementTitle, EffectiveDate, IsCurrent ? 1 : 0, id]);
+        res.json({ success: true, message: 'อัปเดตประกาศสำเร็จ' });
+    } catch (error) {
+        console.error("Error updating KPI announcement:", error);
+        res.status(500).json({ success: false, message: 'ไม่สามารถอัปเดตประกาศได้' });
+    }
+});
+
+
+// --- KPI Data ---
+app.post('/api/kpidata', authenticateToken, isAdmin, async (req, res) => {
+    try {
+        await pool.query('INSERT INTO KPIData SET ?', req.body);
+        res.status(201).json({ success: true, message: 'เพิ่มตัวชี้วัด KPI ใหม่สำเร็จ' });
+    } catch (error) {
+        console.error("Error creating KPI data:", error);
+        res.status(500).json({ success: false, message: 'ไม่สามารถเพิ่มตัวชี้วัดได้' });
+    }
+});
+
+app.put('/api/kpidata/:id', authenticateToken, isAdmin, async (req, res) => {
+    const { id } = req.params;
+    try {
+        await pool.query('UPDATE KPIData SET ? WHERE id = ?', [req.body, id]);
+        res.json({ success: true, message: 'อัปเดตข้อมูล KPI สำเร็จ' });
+    } catch (error) {
+        console.error("Error updating KPI data:", error);
+        res.status(500).json({ success: false, message: 'ไม่สามารถอัปเดตข้อมูลได้' });
+    }
+});
+
+app.delete('/api/kpidata/:id', authenticateToken, isAdmin, async (req, res) => {
+    const { id } = req.params;
+    try {
+        await pool.query('DELETE FROM KPIData WHERE id = ?', [id]);
+        res.json({ success: true, message: 'ลบตัวชี้วัดสำเร็จ' });
+    } catch (error) {
+        console.error("Error deleting KPI data:", error);
+        res.status(500).json({ success: false, message: 'ไม่สามารถลบตัวชี้วัดได้' });
+    }
+});
+
+// GET All KPI Announcements
+app.get('/api/kpiannouncements', authenticateToken, isAdmin, async (req, res) => {
+    try {
+        const [rows] = await pool.query('SELECT *, AnnouncementID as id FROM KPIAnnouncements ORDER BY EffectiveDate DESC');
+        res.json(rows);
+    } catch (error) {
+        res.status(500).json({ success: false, message: 'Could not fetch KPI Announcements' });
+    }
+});
+
+// DELETE a KPI Announcement
+app.delete('/api/kpiannouncements/:id', authenticateToken, isAdmin, async (req, res) => {
+    const { id } = req.params;
+    try {
+        // อาจจะต้องลบ KPI Data ที่เกี่ยวข้องด้วย (Optional)
+        // await pool.query('DELETE FROM KPIData WHERE AnnouncementID = ?', [id]);
+        await pool.query('DELETE FROM KPIAnnouncements WHERE AnnouncementID = ?', [id]);
+        res.json({ success: true, message: 'ลบประกาศสำเร็จ' });
+    } catch (error) {
+        res.status(500).json({ success: false, message: 'ไม่สามารถลบประกาศได้' });
+    }
+});
+
 
 // =================================================================
 // SECTION 4: GENERIC CRUD (สำหรับ Admin Panel)
 // =================================================================
 const tablesForCrud = [
-    'Employees', 'KPIAnnouncements', 'KPIData',
+    'Employees',
     'Patrol_Sessions', 'Patrol_Attendance', 'Patrol_Issues',
     'CCCF_Activity', 'CCCF_Targets', 'ManHours', 'AccidentReports',
     'TrainingStatus', 'SCW_Documents', 'OJT_Department_Status',
