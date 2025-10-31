@@ -1,12 +1,12 @@
-// api/index.js  (CommonJS บน Node 18)
-// ฟังก์ชันเดียว รองรับทุกเส้นทาง /api/* ด้วย serverless-express
+// api/[...all].js
+// Express on Vercel with catch-all route: /api/*
+// ไม่ต้องมี vercel.json ก็จับทุกเส้นทาง /api/... ให้ Express ได้
 
 const serverlessExpress = require('@vendia/serverless-express');
 const express = require('express');
 const cors = require('cors');
 const jwt = require('jsonwebtoken');
 const mysql = require('mysql2/promise');
-
 const multer = require('multer');
 const cloudinary = require('cloudinary').v2;
 const { CloudinaryStorage } = require('multer-storage-cloudinary');
@@ -76,7 +76,7 @@ function isAdmin(req, res, next) {
   return res.status(403).json({ success:false, message:'Permission denied. Admin only.' });
 }
 
-// ---------- ROUTES (ตัวอย่างหลัก; เพิ่ม/ย้ายจาก server.js เดิมได้เลย) ----------
+// ---------- ROUTES ตัวอย่างหลัก (คัดจาก server.js คุณมาใส่เพิ่มได้) ----------
 
 // Login
 app.post('/api/login', async (req, res) => {
@@ -104,7 +104,7 @@ app.post('/api/login', async (req, res) => {
   }
 });
 
-// Verify session (refresh token)
+// Verify session
 app.post('/api/session/verify', (req, res) => {
   const { token } = req.body || {};
   if (!token) return res.json({ success:false });
@@ -116,7 +116,7 @@ app.post('/api/session/verify', (req, res) => {
   });
 });
 
-// PageData: Policies
+// PageData: Policies (ตัวอย่าง)
 app.get('/api/pagedata/policies', authenticateToken, async (req, res) => {
   try {
     const pool = await getPool();
@@ -131,16 +131,12 @@ app.get('/api/pagedata/policies', authenticateToken, async (req, res) => {
   }
 });
 
-// Upload Document to Cloudinary (admin only)
+// Upload (admin only)
 app.post('/api/upload/document', authenticateToken, isAdmin, upload.single('document'), (req, res) => {
   if (!req.file?.path) return res.status(400).json({ success:false, message:'Upload failed' });
   res.status(201).json({ success:true, fileUrl: req.file.path });
 });
 
-// TODO: ย้าย/เพิ่มเส้นทางอื่น ๆ จาก server.js เดิม เช่น
-// Committees, KPI, KPI announcements, Patrol/CCCF, Yokoten ฯลฯ
-// ตัวอย่างแพทเทิร์น:
-// app.get('/api/pagedata/committees', authenticateToken, async (req,res)=>{ ... });
-// app.get('/api/kpidata/:year', authenticateToken, async (req,res)=>{ ... });
+// TODO: เพิ่ม routes อื่น ๆ ของคุณที่นี่ (committees / kpi / kpiannouncements / patrol-cccf / yokoten ...)
 
 module.exports = serverlessExpress({ app });
