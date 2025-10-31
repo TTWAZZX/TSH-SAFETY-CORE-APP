@@ -1,4 +1,3 @@
-// api/pagedata/policies.js
 const { getPool } = require('../_db');
 
 module.exports = async (req, res) => {
