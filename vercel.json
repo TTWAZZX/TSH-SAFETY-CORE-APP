@@ -1,0 +1,12 @@
+{
+  "functions": {
+    "api/index.js": {
+      "runtime": "nodejs18.x",
+      "memory": 1024,
+      "maxDuration": 10
+    }
+  },
+  "rewrites": [
+    { "source": "/api/(.*)", "destination": "/api/index.js" }
+  ]
+}
