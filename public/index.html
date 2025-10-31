@@ -1,0 +1,153 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+    <base target="_top">
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>TSH Safety Core Activity</title>
+    
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.sheetjs.com/xlsx-latest/package/dist/xlsx.full.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script> <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2.0.0"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+    
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Kanit:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+    
+    <link rel="stylesheet" href="css/style.css">
+
+    <link href="https://fonts.googleapis.com/css2?family=Kanit:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+    
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/flatpickr/dist/flatpickr.min.css">
+    <script src="https://cdn.jsdelivr.net/npm/flatpickr"></script>
+    <script src="https://npmcdn.com/flatpickr/dist/l10n/th.js"></script>
+
+    <link rel="stylesheet" href="css/style.css">
+
+    <script>
+        // Dark mode switcher logic (can stay here as it needs to run early)
+        if (localStorage.getItem('theme') === 'dark' || (!('theme' in localStorage) && window.matchMedia('(prefers-color-scheme: dark)').matches)) {
+            document.documentElement.classList.add('dark');
+        } else {
+            document.documentElement.classList.remove('dark');
+        }
+    </script>
+</head>
+<body class="text-slate-900 dark:text-slate-200">
+
+    <div id="session-loader" class="fixed inset-0 z-50 flex flex-col items-center justify-center bg-slate-900/90 text-white">
+        <div class="animate-spin rounded-full h-16 w-16 border-t-2 border-b-2 border-white mb-4"></div>
+        <p id="loading-message" class="text-lg loading-message-pulse">กำลังตรวจสอบเซสชัน...</p>
+    </div>
+
+    <div id="login-overlay" class="hidden fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-100 dark:bg-slate-900">
+        <div class="w-full max-w-4xl flex flex-row card overflow-hidden">
+            <div class="hidden md:block md:w-1/2 relative">
+                <div class="absolute inset-0 bg-no-repeat bg-center bg-cover" style="background-image: url('https://lh3.googleusercontent.com/d/1Lq60zK89RTczxeERT_vb6op3BTcIyOlI');"></div>
+                <div class="absolute inset-0 flex flex-col justify-end items-start p-8 text-white bg-gradient-to-t from-black/60 to-transparent">
+                    <h2 class="text-3xl font-bold mb-2" style="text-shadow: 1px 1px 4px rgba(0,0,0,0.5);">Safety is our #1 Priority</h2>
+                    <p class="text-sm">ระบบจัดการกิจกรรมด้านความปลอดภัย</p>
+                </div>
+            </div>
+            <div class="w-full md:w-1/2 p-8 flex flex-col justify-center">
+                <div class="w-full max-w-sm mx-auto">
+                    <div class="text-center mb-6">
+                        <img src="https://lh3.googleusercontent.com/d/1I-KYA5pgwzXBwnn810G2e5LTQ4qvpfOa" alt="TSH Logo" class="w-20 h-auto mx-auto mb-4">
+                        <h2 class="text-2xl font-bold text-slate-900 dark:text-white">ยินดีต้อนรับ</h2>
+                        <p class="mt-1 text-sm text-slate-500 dark:text-slate-400">เข้าสู่ระบบ Safety Core Activity</p>
+                    </div>
+                    <form id="login-form" class="space-y-4">
+                        <div><label for="login-employee-id" class="text-sm font-medium">รหัสพนักงาน</label><input id="login-employee-id" name="employeeId" type="text" required maxlength="6" class="w-full mt-1 px-3 py-2 form-input"></div>
+                        <div><label for="login-password" class="text-sm font-medium">รหัสผ่าน</label><input id="login-password" name="password" type="password" required class="w-full mt-1 px-3 py-2 form-input"><p class="mt-1 text-xs text-slate-500 dark:text-slate-400">รหัสผ่านคือรหัสพนักงาน 6 หลัก</p></div>
+                        <div><button type="submit" class="w-full btn btn-primary mt-2">เข้าสู่ระบบ</button></div>
+                        <div id="login-error" class="text-sm text-center text-red-600 font-medium h-4"></div>
+                    </form>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div id="app-container" class="flex h-screen">
+        <aside id="sidebar" class="bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-200 w-64 flex-shrink-0 flex-col space-y-2 py-4 absolute inset-y-0 left-0 md:relative md:translate-x-0 transform -translate-x-full z-30 border-r dark:border-slate-800">
+            <div class="px-4 pb-2 border-b dark:border-slate-800 flex items-center space-x-3">
+                <img src="https://lh3.googleusercontent.com/d/1I-KYA5pgwzXBwnn810G2e5LTQ4qvpfOa" alt="TSH Logo" class="w-10 h-auto">
+                <div><h2 class="text-lg font-bold">TSH Safety Core</h2><span class="text-xs text-slate-500 dark:text-slate-400">Activity System</span></div>
+            </div>
+            <nav id="main-nav" class="flex-grow px-2">
+                <ul class="space-y-1">
+                    <li><a href="#dashboard" data-action="navigate" class="nav-link flex items-center px-4 py-2 text-sm font-medium rounded-lg hover:bg-slate-100 dark:hover:bg-slate-700/50"><span>ภาพรวม</span></a></li>
+                    <li><a href="#search" data-action="navigate" class="nav-link flex items-center px-4 py-2 text-sm font-medium rounded-lg hover:bg-slate-100 dark:hover:bg-slate-700/50"><span>ค้นหารายบุคคล</span></a></li>
+                </ul>
+                <div class="pt-4 mt-4 space-y-1 border-t dark:border-slate-800" id="main-menu-links">
+                    <p class="px-4 pt-2 pb-1 text-xs font-semibold text-slate-400 uppercase">เมนูหลัก</p>
+                    <ul class="space-y-1">
+                        <li><a href="#policy" data-action="navigate" class="nav-link flex items-center px-4 py-2 text-sm font-medium rounded-lg hover:bg-slate-100 dark:hover:bg-slate-700/50"><span>นโยบายความปลอดภัย</span></a></li>
+                        <li><a href="#committee" data-action="navigate" class="nav-link flex items-center px-4 py-2 text-sm font-medium rounded-lg hover:bg-slate-100 dark:hover:bg-slate-700/50"><span>คณะกรรมการความปลอดภัย</span></a></li>
+                        <li><a href="#kpi" data-action="navigate" class="nav-link flex items-center px-4 py-2 text-sm font-medium rounded-lg hover:bg-slate-100 dark:hover:bg-slate-700/50"><span>KPI</span></a></li>
+                        <li><a href="#patrol-cccf" data-action="navigate" class="nav-link flex items-center px-4 py-2 text-sm font-medium rounded-lg hover:bg-slate-100 dark:hover:bg-slate-700/50"><span>Patrol & CCCF</span></a></li>
+                        <li><a href="#machine-safety" data-action="navigate" class="nav-link flex items-center px-4 py-2 text-sm font-medium rounded-lg hover:bg-slate-100 dark:hover:bg-slate-700/50"><span>Machine Device</span></a></li>
+                        <li><a href="#ojt" data-action="navigate" class="nav-link flex items-center px-4 py-2 text-sm font-medium rounded-lg hover:bg-slate-100 dark:hover:bg-slate-700/50"><span>Stop - Call - Wait</span></a></li>
+                        <li><a href="#training" data-action="navigate" class="nav-link flex items-center px-4 py-2 text-sm font-medium rounded-lg hover:bg-slate-100 dark:hover:bg-slate-700/50"><span>Safety Training</span></a></li>
+                        <li><a href="#accident" data-action="navigate" class="nav-link flex items-center px-4 py-2 text-sm font-medium rounded-lg hover:bg-slate-100 dark:hover:bg-slate-700/50"><span>รายงานอุบัติเหตุ</span></a></li>
+                        <li><a href="#yokoten" data-action="navigate" class="nav-link flex items-center px-4 py-2 text-sm font-medium rounded-lg hover:bg-slate-100 dark:hover:bg-slate-700/50"><span>YOKOTEN</span></a></li>
+                    </ul>
+                </div>
+                <div id="admin-menu-section" class="admin-feature hidden">
+                    <div class="pt-4 mt-4 space-y-1 border-t dark:border-slate-800">
+                        <p class="px-4 pt-2 pb-1 text-xs font-semibold text-slate-400 uppercase">Admin</p>
+                        <ul class="space-y-1">
+                            <li><a href="#employee" data-action="navigate" class="nav-link flex items-center px-4 py-2 text-sm font-medium rounded-lg hover:bg-slate-100 dark:hover:bg-slate-700/50"><span>จัดการพนักงาน</span></a></li>
+                        </ul>
+                    </div>
+                </div>
+            </nav>
+            <div class="px-4 mt-auto space-y-2 border-t dark:border-slate-800 pt-4">
+                <button id="user-logout-btn" class="w-full btn btn-secondary">ออกจากระบบ</button>
+            </div>
+        </aside>
+
+        <div class="flex-1 flex flex-col overflow-hidden">
+            <header class="flex-shrink-0 flex justify-between items-center p-4 bg-white dark:bg-slate-900 border-b dark:border-slate-800">
+                <div class="flex items-center">
+                    <button id="sidebar-toggle" class="md:hidden text-slate-600 dark:text-slate-300 focus:outline-none"><svg class="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h16"></path></svg></button>
+                    <h1 id="page-title" class="text-xl font-semibold ml-2 md:ml-4"></h1>
+                </div>
+                <div class="flex items-center space-x-4">
+                    <button id="dark-mode-toggle" class="p-2 rounded-full hover:bg-slate-100 dark:hover:bg-slate-700 focus:outline-none"><svg id="sun-icon" class="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 3v1m0 16v1m9-9h-1M4 12H3m15.364 6.364l-.707-.707M6.343 6.343l-.707-.707m12.728 0l-.707.707M6.343 17.657l-.707.707M12 12a5 5 0 100-10 5 5 0 000 10z"></path></svg><svg id="moon-icon" class="w-6 h-6 hidden" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20.354 15.354A9 9 0 018.646 3.646 9.003 9.003 0 0012 21a9.003 9.003 0 008.354-5.646z"></path></svg></button>
+                    <div id="user-info" class="text-sm text-right"></div>
+                </div>
+            </header>
+            <main class="flex-1 overflow-x-hidden overflow-y-auto p-4 md:p-6">
+                <div id="dashboard-page" class="page-content"></div>
+                <div id="search-page" class="page-content"></div>
+                <div id="ojt-page" class="page-content"></div>
+                <div id="policy-page" class="page-content"></div>
+                <div id="committee-page" class="page-content"></div>
+                <div id="kpi-page" class="page-content"></div>
+                <div id="employee-page" class="page-content"></div>
+                <div id="patrol-cccf-page" class="page-content"></div>
+                <div id="machine-safety-page" class="page-content"></div>
+                <div id="training-page" class="page-content"></div>
+                <div id="accident-page" class="page-content"></div>
+                <div id="yokoten-page" class="page-content"></div>
+            </main>
+        </div>
+    </div>
+
+    <div id="modal-wrapper" class="hidden fixed inset-0 z-40 flex items-center justify-center p-2 md:p-4">
+        <div id="modal-backdrop" class="absolute inset-0 bg-slate-900 bg-opacity-75"></div>
+        <div id="modal-container" class="relative p-4 md:p-6 w-full max-w-2xl max-h-[90vh] flex flex-col card">
+            <div class="flex justify-between items-center border-b dark:border-slate-700 pb-3 mb-4 flex-shrink-0">
+                <h3 id="modal-title" class="text-xl font-bold"></h3>
+                <button id="modal-close-btn" class="text-slate-400 hover:text-slate-800 dark:hover:text-slate-200 text-3xl font-light">×</button>
+            </div>
+            <div id="modal-body" class="flex-grow overflow-auto pr-2"></div>
+        </div>
+    </div>
+
+    <script type="module" src="js/main.js"></script>
+    
+</body>
+</html>

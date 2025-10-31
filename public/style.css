@@ -1,0 +1,175 @@
+body { font-family: 'Kanit', sans-serif; background-color: #f1f5f9; }
+.dark body { background-color: #020617; }
+.card { background-color: #ffffff; border-radius: 12px; box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.07), 0 2px 4px -2px rgb(0 0 0 / 0.07); transition: all 0.2s ease-in-out; }
+.dark .card { background-color: #1e293b; border: 1px solid #334155; }
+.form-input, .form-select, .form-textarea, .form-checkbox, .form-multiselect { border-radius: 8px; transition: all 0.2s ease-in-out; }
+.form-input, .form-select, .form-textarea { background-color: #f8fafc; border: 1px solid #cbd5e1; }
+.dark .form-input, .dark .form-select, .dark .form-textarea { background-color: #334155; border-color: #475569; color: #f1f5f9; }
+.form-input:focus, .form-select:focus, .form-textarea:focus { outline: none; border-color: #2563eb; box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.4); }
+.form-checkbox { color: #2563eb; }
+.btn { padding: 0.625rem 1.25rem; border-radius: 8px; font-weight: 500; border: 1px solid transparent; display: inline-flex; align-items: center; justify-content: center;  
+    transition: all 0.2s ease-in-out;  
+}
+.btn:hover {
+    transform: translateY(-2px);
+    filter: brightness(1.1);
+}
+.btn:active {
+    transform: translateY(0px);
+    filter: brightness(1);
+}
+.btn:disabled { cursor: not-allowed; opacity: 0.7; transform: none; filter: none; }
+.btn-sm { padding: 0.25rem 0.5rem; font-size: 0.875rem; }
+.btn-primary { background-color: #2563eb; color: white; } .btn-primary:hover:not(:disabled) { background-color: #1d4ed8; }
+.btn-secondary { background-color: #ffffff; color: #1e293b; border-color: #cbd5e1; } .btn-secondary:hover:not(:disabled) { background-color: #f8fafc; }
+.dark .btn-secondary { background-color: #334155; color: #f1f5f9; border-color: #475569; } .dark .btn-secondary:hover:not(:disabled) { background-color: #475569; }
+#sidebar { transition: transform 0.3s ease-in-out; }
+.page-content { display: none; } .page-content.active { display: block; }
+.nav-link.active { background-color: #2563eb; color: white; }
+#app-container { display: none; } 
+::-webkit-scrollbar { width: 8px; height: 8px; } ::-webkit-scrollbar-track { background: #e2e8f0; } ::-webkit-scrollbar-thumb { background: #94a3b8; border-radius: 10px; }
+.dark ::-webkit-scrollbar-track { background: #1e293b; } .dark ::-webkit-scrollbar-thumb { background: #475569; }
+.tab-button { padding: 0.5rem 1rem; border: none; background: transparent; cursor: pointer; border-bottom: 3px solid transparent; font-weight: 500; color: #64748b; }
+.dark .tab-button { color: #94a3b8; } .tab-button.active { color: #2563eb; border-bottom-color: #2563eb; } .dark .tab-button.active { color: #60a5fa; border-bottom-color: #60a5fa; }
+.tab-content { display: none; } .tab-content.active { display: block; }
+.status-badge { display: inline-block; padding: 0.2rem 0.6rem; border-radius: 9999px; font-weight: 500; font-size: 0.75rem; text-align: center; }
+.status-normal { background-color: #dcfce7; color: #166534; } .dark .status-normal { background-color: #14532d; color: #bbf7d0; }
+.status-expiring { background-color: #fef9c3; color: #854d0e; } .dark .status-expiring { background-color: #713f12; color: #fde047; }
+.status-expired { background-color: #fee2e2; color: #991b1b; } .dark .status-expired { background-color: #7f1d1d; color: #fca5a5; }
+.progress-bar-bg { background-color: #e5e7eb; } .dark .progress-bar-bg { background-color: #4b5563; }
+.progress-bar-fg { background-color: #2563eb; transition: width 0.5s ease-in-out; }
+.progress-bar-fg.is-green { background-color: #22c55e; }
+.progress-bar-fg.is-yellow { background-color: #f59e0b; }
+.progress-bar-fg.is-red { background-color: #ef4444; }
+
+@keyframes pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.7; }
+}
+.loading-message-pulse {
+    animation: pulse 1.5s infinite ease-in-out;
+}
+.inline-loader-container {
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    align-items: center;
+    min-height: 100px;
+    background-color: rgba(255, 255, 255, 0.7);
+    border-radius: 8px;
+    position: relative;
+    z-index: 10;
+}
+.dark .inline-loader-container {
+    background-color: rgba(30, 41, 59, 0.7);
+}
+.inline-loader-spinner {
+    animation: spin 1s linear infinite;
+    border: 4px solid #f3f3f3;
+    border-top: 4px solid #3b82f6;
+    border-radius: 50%;
+    width: 40px;
+    height: 40px;
+}
+.dark .inline-loader-spinner {
+    border-color: #334155;
+    border-top-color: #60a5fa;
+}
+.form-input.with-icon {
+  padding-left: 2.5rem; /* 40px */
+}
+
+/* css/style.css */
+
+/* --- Advanced Form Styles --- */
+.form-group {
+    position: relative;
+}
+
+.form-field {
+    border: 1px solid #D1D5DB; /* slate-300 */
+    transition: border-color 0.2s;
+}
+
+.dark .form-field {
+    border-color: #4B5563; /* slate-600 */
+    background-color: #1F2937; /* slate-800 */
+}
+
+/* Floating Label Styling */
+.form-field:focus,
+.form-field:not(:placeholder-shown) {
+    border-color: #3B82F6; /* blue-500 */
+    outline: none;
+}
+
+.form-label-floating {
+    position: absolute;
+    top: 50%;
+    left: 1rem;
+    transform: translateY(-50%);
+    pointer-events: none;
+    transition: all 0.2s ease-out;
+    color: #6B7280; /* slate-500 */
+    background-color: white;
+    padding: 0 0.25rem;
+}
+
+.dark .form-label-floating {
+    background-color: #1F2937; /* slate-800 */
+    color: #9CA3AF; /* slate-400 */
+}
+
+.form-field:focus ~ .form-label-floating,
+.form-field:not(:placeholder-shown) ~ .form-label-floating {
+    top: 0;
+    font-size: 0.75rem; /* 12px */
+    color: #3B82F6; /* blue-500 */
+}
+
+/* Error State */
+.form-field.is-invalid {
+    border-color: #EF4444; /* red-500 */
+}
+
+.form-field.is-invalid ~ .form-label-floating {
+    color: #EF4444; /* red-500 */
+}
+
+.error-message {
+    font-size: 0.875rem; /* 14px */
+    color: #EF4444; /* red-500 */
+    margin-top: 0.5rem;
+}
+
+@keyframes toast-in {
+    from {
+        opacity: 0;
+        transform: translateX(100%);
+    }
+    to {
+        opacity: 1;
+        transform: translateX(0);
+    }
+}
+@keyframes toast-out {
+    from {
+        opacity: 1;
+        transform: translateX(0);
+    }
+    to {
+        opacity: 0;
+        transform: translateX(100%);
+    }
+}
+.animate-toast-in {
+    animation: toast-in 0.5s forwards;
+}
+.animate-toast-out {
+    animation: toast-out 0.5s forwards;
+}
+.form-label-floating.is-active {
+    top: 0;
+    font-size: 0.75rem;
+    color: #3B82F6; /* blue-500 */
+}

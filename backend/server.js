@@ -309,24 +309,47 @@ app.delete('/api/committees/:id', authenticateToken, isAdmin, async (req, res) =
     }
 });
 
-app.get('/api/pagedata/kpi-announcements', authenticateToken, async (req, res) => {
+// API สำหรับรับทราบ Policy (ย้ายมาไว้รวมกัน)
+app.post('/api/policies/:rowIndex/acknowledge', authenticateToken, async (req, res) => {
+    const { rowIndex } = req.params;
+    const { name } = req.user; // ดึงชื่อผู้ใช้จาก Token ที่ผ่าน authenticateToken มาแล้ว
+
     try {
-        const [allItems] = await pool.query('SELECT *, AnnouncementID as id FROM KPIAnnouncements ORDER BY EffectiveDate DESC');
-
-        // --- ส่วนที่เพิ่มเข้ามา ---
-        // ดึงปีทั้งหมดที่มีอยู่จากข้อมูลประกาศ
-        const availableYears = [...new Set(allItems.map(item => new Date(item.EffectiveDate).getFullYear()))];
-
-        if (allItems.length === 0) {
-            return res.json({ current: null, past: [], availableYears: [] });
+        const [policies] = await pool.query('SELECT AcknowledgedBy FROM Policies WHERE id = ?', [rowIndex]);
+        if (policies.length === 0) {
+            return res.status(404).json({ status: 'error', message: 'ไม่พบนโยบาย' });
         }
 
+        let ackList = [];
+        try {
+            if (policies[0].AcknowledgedBy) {
+                ackList = JSON.parse(policies[0].AcknowledgedBy);
+            }
+        } catch (e) {
+            // กรณีข้อมูลเดิมไม่ใช่ JSON ที่ถูกต้อง
+        }
+
+        if (!ackList.includes(name)) {
+            ackList.push(name);
+        }
+        
+        await pool.query('UPDATE Policies SET AcknowledgedBy = ? WHERE id = ?', [JSON.stringify(ackList), rowIndex]);
+        
+        res.json({ status: 'success', message: 'บันทึกการรับทราบเรียบร้อยแล้ว' });
+
+    } catch (error) {
+        console.error("Acknowledge Error:", error);
+        res.status(500).json({ status: 'error', message: 'เกิดข้อผิดพลาดในการบันทึกข้อมูล' });
+    }
+});
+
+app.get('/api/pagedata/kpi-announcements', authenticateToken, async (req, res) => {
+    try {
+        const [allItems] = await pool.query('SELECT *, AnnouncementID as rowIndex FROM KPIAnnouncements ORDER BY EffectiveDate DESC');
+        if (allItems.length === 0) return res.json({ current: null, past: [] });
         let currentItem = allItems.find(p => p.IsCurrent === 1) || allItems[0];
         const pastItems = allItems.filter(p => p.AnnouncementID !== currentItem.AnnouncementID);
-
-        // ส่ง availableYears กลับไปด้วย
-        res.json({ current: currentItem, past: pastItems, availableYears: availableYears });
-
+        res.json({ current: currentItem, past: pastItems });
     } catch (error) {
         console.error("Error fetching KPI Announcements:", error);
         res.status(500).json({ success: false, message: 'เกิดข้อผิดพลาดในการดึงข้อมูลประกาศ KPI' });
