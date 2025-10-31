@@ -181,3 +181,14 @@ export function showDocumentModal(originalUrl, title = 'แสดงเอกส
 
     openModal(title, contentHtml, 'max-w-6xl h-[90vh] no-padding');
 }
+
+// เพิ่มฟังก์ชันไว้ท้ายไฟล์ ui.js
+export function handleApiError(error) {
+  hideLoading();
+  console.error('API Error:', error);
+  const message =
+    (error && error.message) ||
+    (typeof error === 'object' ? JSON.stringify(error) : error) ||
+    'ไม่สามารถเชื่อมต่อกับเซิร์ฟเวอร์ได้';
+  showToast(`❌ ${message}`, 'error');
+}

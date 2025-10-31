@@ -23,20 +23,17 @@ const AppState = {
 };
 
 // --- Page Loaders ---
-// ตอนนี้เราสามารถเรียกใช้ฟังก์ชันที่ Import เข้ามาได้แล้ว
 const pageLoaders = {
-    'dashboard': () => loadPlaceholderPage('dashboard-page', 'ภาพรวม (Dashboard)'),
-    'search': () => loadPlaceholderPage('search-page', 'ค้นหารายบุคคล'),
-    'ojt': () => loadPlaceholderPage('ojt-page', 'Stop - Call - Wait'),
-    'policy': loadPolicyPage,
-    'committee': loadCommitteePage,
-    'kpi': loadKpiPage,
-    'patrol-cccf': loadPatrolCccfPage,
-    'machine-safety': () => loadPlaceholderPage('machine-safety-page', 'Machine Device'),
-    'training': () => loadPlaceholderPage('training-page', 'Safety Training'),
-    // 'yokoten': loadYokotenPage, // <--- คอมเมนต์บรรทัดนี้ด้วย
-    'employee': () => loadPlaceholderPage('employee-page', 'จัดการพนักงาน'),
-    'employee': () => loadPlaceholderPage('employee-page', 'จัดการพนักงาน'),
+  'dashboard': () => loadPlaceholderPage('dashboard-page', 'ภาพรวม (Dashboard)'),
+  'search': () => loadPlaceholderPage('search-page', 'ค้นหารายบุคคล'),
+  'ojt': () => loadPlaceholderPage('ojt-page', 'Stop - Call - Wait'),
+  'policy': loadPolicyPage,
+  'committee': loadCommitteePage,
+  'kpi': loadKpiPage,
+  'patrol-cccf': loadPatrolCccfPage,
+  'machine-safety': () => loadPlaceholderPage('machine-safety-page', 'Machine Device'),
+  'training': () => loadPlaceholderPage('training-page', 'Safety Training'),
+  'employee': () => loadPlaceholderPage('employee-page', 'จัดการพนักงาน'),
 };
 
 // --- Navigation ---
@@ -70,45 +67,46 @@ function navigateTo(pageId) {
 
 // --- Authentication ---
 async function handleLogin(e) {
-    e.preventDefault();
-    const btn = e.target.querySelector('button[type="submit"]');
-    btn.disabled = true;
-    btn.innerHTML = '<div class="animate-spin rounded-full h-5 w-5 border-t-2 border-b-2 border-white mx-auto"></div>';
-    document.getElementById('login-error').textContent = '';
-    
-    const employeeId = document.getElementById('login-employee-id').value;
-    const password = document.getElementById('login-password').value;
+  e.preventDefault();
+  const btn = e.target.querySelector('button[type="submit"]');
+  btn.disabled = true;
+  btn.innerHTML = '<div class="animate-spin rounded-full h-5 w-5 border-t-2 border-b-2 border-white mx-auto"></div>';
+  document.getElementById('login-error').textContent = '';
 
-    try {
-        const res = await apiFetch('/api/login', {
-            method: 'POST',
-            body: { employeeId, password }
-        });
+  const employeeId = document.getElementById('login-employee-id').value;
+  const password   = document.getElementById('login-password').value;
 
-        if (res.success) {
-            AppState.sessionToken = res.token;
-            localStorage.setItem('sessionToken', AppState.sessionToken);
-            startApp(res.user);
-        }
-    } catch (error) {
-        document.getElementById('login-error').textContent = error.message || 'Login failed.';
-    } finally {
-        btn.disabled = false;
-        btn.textContent = 'เข้าสู่ระบบ';
+  try {
+    const res = await apiFetch('/login', {   // <<< เปลี่ยนจาก '/api/login'
+      method: 'POST',
+      body: { employeeId, password }
+    });
+
+    if (res.success) {
+      // ให้ชื่อ key ตรงกับที่ api.js อ่านอยู่ (jwt)
+      localStorage.setItem('jwt', res.token);
+      startApp(res.user);
+    } else {
+      document.getElementById('login-error').textContent = res.message || 'Login failed.';
     }
+  } catch (error) {
+    document.getElementById('login-error').textContent = error.message || 'Login failed.';
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'เข้าสู่ระบบ';
+  }
 }
 
 function handleLogout() {
-    showLoading('กำลังออกจากระบบ...');
-    localStorage.removeItem('sessionToken');
-    localStorage.removeItem('currentUser');
-    AppState.sessionToken = null;
-    AppState.currentUser = null;
-    AppState.isAdmin = false;
-    
-    document.getElementById('app-container').style.display = 'none';
-    document.getElementById('login-overlay').classList.remove('hidden');
-    hideLoading();
+  showLoading('กำลังออกจากระบบ...');
+  localStorage.removeItem('jwt');    // <<< แทน sessionToken
+  localStorage.removeItem('currentUser');
+  AppState.currentUser = null;
+  AppState.isAdmin = false;
+
+  document.getElementById('app-container').style.display = 'none';
+  document.getElementById('login-overlay').classList.remove('hidden');
+  hideLoading();
 }
 
 function startApp(user) {
@@ -124,29 +122,29 @@ function startApp(user) {
 }
 
 async function initializeSession() {
-    AppState.sessionToken = localStorage.getItem('sessionToken');
-    if (AppState.sessionToken) {
-        showLoading('กำลังตรวจสอบเซสชัน...');
-        try {
-            const result = await apiFetch('/api/session/verify', { 
-                method: 'POST',
-                body: { token: AppState.sessionToken }
-            });
+  const token = localStorage.getItem('jwt');   // <<< เปลี่ยนจาก sessionToken
+  if (token) {
+    showLoading('กำลังตรวจสอบเซสชัน...');
+    try {
+      const result = await apiFetch('/session/verify', {   // <<< เปลี่ยนจาก '/api/session/verify'
+        method: 'POST',
+        body: { token }
+      });
 
-            if (result && result.success) {
-                AppState.sessionToken = result.token; 
-                localStorage.setItem('sessionToken', AppState.sessionToken);
-                startApp(result.user);
-            } else {
-                handleLogout();
-            }
-        } catch (error) {
-            handleLogout();
-        }
-    } else {
-        document.getElementById('login-overlay').classList.remove('hidden');
-        hideLoading();
+      if (result && result.success) {
+        // เก็บ token (ถ้า API ออก token ใหม่)
+        if (result.token) localStorage.setItem('jwt', result.token);
+        startApp(result.user);
+      } else {
+        handleLogout();
+      }
+    } catch (error) {
+      handleLogout();
     }
+  } else {
+    document.getElementById('login-overlay').classList.remove('hidden');
+    hideLoading();
+  }
 }
 
 // --- Placeholder for pages ---

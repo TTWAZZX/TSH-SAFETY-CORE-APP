@@ -99,7 +99,7 @@ export async function loadPolicyPage() {
     try {
         const data = await apiFetch('/api/pagedata/policies'); // <--- แก้เป็น pagedata
         console.log("1. Data received from API:", data); // <--- เพิ่มบรรทัดนี้
-        allPolicies = [data.current, ...data.past].filter(Boolean);
+        allPolicies = [data.current, ...(data.past || [])].filter(Boolean);
         renderPolicyCards(data);
     } catch (error) {
         showError(error);

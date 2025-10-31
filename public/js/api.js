@@ -1,97 +1,71 @@
-/* public/js/api.js
- * Centralized API helper
- * - Production: ใช้ path เดียวกันกับเว็บ (เช่น /api/...)
- * - Development (localhost): ชี้ไปที่ backend local (http://localhost:5000)
- * - แนวคิด: เลิก hardcode https://tsh-safety-backend.onrender.com
- */
+// public/js/api.js
+// เรียก API แบบ relative path: /api/xxx  (ไม่ผูกกับ Render/Vercel ใดๆ)
+// ใช้ได้ทั้งหน้าเว็บบน Vercel และการเทสในเครื่อง
 
-import { showError } from './ui.js';
+const API_PREFIX = ''; // ให้เว้นว่างไว้ เพื่อใช้เส้นทางแบบ /api/...
 
-const DEV_HOSTNAMES = new Set(['localhost', '127.0.0.1']);
+// ตัวช่วย: แปลง body เป็น JSON และเติม header ให้ครบ
+function buildOptions(options = {}) {
+  const opts = { ...options };
+  opts.headers = { 'Content-Type': 'application/json', ...(options.headers || {}) };
 
-/** ใน Production ให้เว้นว่าง เพื่อให้ fetch('/api/...') ยิงโดเมนเดียวกับเว็บ */
-let API_BASE_URL = '';
+  // แนบ Bearer token อัตโนมัติ ถ้ามีเก็บไว้ใน localStorage
+  const token = localStorage.getItem('jwt');
+  if (token) opts.headers.Authorization = `Bearer ${token}`;
 
-/** Development: ใช้ backend local ได้ตามต้องการ */
-if (DEV_HOSTNAMES.has(location.hostname)) {
-  // เปลี่ยนพอร์ตได้ตามที่คุณใช้รัน backend ในเครื่อง
-  API_BASE_URL = 'http://localhost:5000';
+  // แปลง object เป็น JSON string ให้เองถ้าเป็น body แบบ object
+  if (opts.body && typeof opts.body === 'object' && !(opts.body instanceof FormData)) {
+    opts.body = JSON.stringify(opts.body);
+  }
+  return opts;
 }
 
-/** (ถ้าจำเป็น) ให้ไฟล์อื่นอ่านค่าได้ */
-export function getApiBaseUrl() {
-  return API_BASE_URL;
-}
-
-/**
- * apiFetch — ตัวช่วยเรียก API กลาง
- * รองรับ:
- *  - แนบ JWT จาก localStorage (key: sessionToken)
- *  - Body ได้ทั้ง JSON และ FormData (เช่น อัปโหลดไฟล์)
- *  - โยน Error พร้อมข้อความจากเซิร์ฟเวอร์ (JSON หรือ text)
- *  - รองรับ 204 No Content
- *
- * @param {string} endpoint เช่น '/api/login' หรือ '/api/pagedata/policies'
- * @param {RequestInit & { body?: any }} options
- * @returns {Promise<any>}
- */
+// ฟังก์ชันหลักไว้เรียก API ทุก endpoint
 export async function apiFetch(endpoint, options = {}) {
-  const { body, headers: customHeaders, ...rest } = options;
-
-  // แนบ token ถ้ามี
-  const headers = new Headers(customHeaders || {});
-  const token = localStorage.getItem('sessionToken');
-  if (token) headers.set('Authorization', `Bearer ${token}`);
-
-  // จัดรูปแบบ body อัตโนมัติ
-  const init = { ...rest, headers };
-
-  if (body !== undefined && body !== null) {
-    if (body instanceof FormData) {
-      // FormData ไม่ต้อง set Content-Type (ให้ browser ใส่ boundary เอง)
-      init.body = body;
-    } else {
-      headers.set('Content-Type', 'application/json');
-      init.body = JSON.stringify(body);
-    }
-  }
-
-  const url = `${API_BASE_URL}${endpoint}`;
-
+  const url = `${API_PREFIX}/api${endpoint.startsWith('/') ? '' : '/'}${endpoint}`;
   try {
-    const response = await fetch(url, init);
-
-    if (!response.ok) {
-      // พยายามอ่าน error จาก JSON ก่อน
-      const resClone = response.clone();
-      let errorData = { message: `HTTP ${response.status}` };
-
+    const res = await fetch(url, buildOptions(options));
+    // รองรับ 204/empty body
+    if (res.status === 204 || res.headers.get('content-length') === '0') return { success: true };
+    if (!res.ok) {
+      let msg = `HTTP ${res.status}`;
       try {
-        errorData = await response.json();
-      } catch {
-        // ถ้าไม่ใช่ JSON ให้ลองอ่านเป็น text
-        try {
-          errorData = { message: await resClone.text() };
-        } catch {
-          // ใช้ค่าเริ่มต้น
-        }
-      }
-
-      const message = errorData?.message || `Error ${response.status}`;
-      throw new Error(message);
+        const err = await res.json();
+        msg = err.message || msg;
+      } catch { /* ignore */ }
+      throw new Error(msg);
     }
-
-    // กรณีพวก 204 หรือไม่มีเนื้อหา
-    if (response.status === 204 || response.headers.get('content-length') === '0') {
-      return { success: true };
-    }
-
-    // ปกติ: อ่านเป็น JSON
-    return await response.json();
-  } catch (error) {
-    // โชว์ error แบบรวมศูนย์
-    console.error('API Fetch Error:', error);
-    showError?.(error);
-    throw error;
+    return await res.json();
+  } catch (err) {
+    console.error('API Fetch Error:', err);
+    throw err;
   }
+}
+
+// ตัวช่วย login / logout ตัวอย่าง
+export async function login(employeeId, password) {
+  const data = await apiFetch('/login', { method: 'POST', body: { employeeId, password } });
+  if (data?.token) localStorage.setItem('jwt', data.token);
+  return data;
+}
+export function logout() { localStorage.removeItem('jwt'); }
+
+// ตัวอย่างดึงนโยบาย
+export function getPolicies() {
+  return apiFetch('/pagedata/policies', { method: 'GET' });
+}
+
+// อัปโหลดเอกสาร (Admin) — ส่งเป็น FormData
+export async function uploadDocument(file) {
+  const form = new FormData();
+  form.append('document', file);
+  // อย่าตั้ง Content-Type เอง ปล่อยให้ browser ใส่ boundary
+  const token = localStorage.getItem('jwt');
+  const res = await fetch('/api/upload/document', {
+    method: 'POST',
+    headers: token ? { Authorization: `Bearer ${token}` } : {},
+    body: form
+  });
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  return await res.json();
 }

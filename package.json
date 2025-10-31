@@ -1,4 +1,7 @@
 {
+  "name": "tsh-safety-core-app",
+  "version": "1.0.0",
+  "private": true,
   "dependencies": {
     "@vendia/serverless-express": "^4.10.2",
     "express": "^4.19.2",

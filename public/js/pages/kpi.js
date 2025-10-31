@@ -28,7 +28,7 @@ export async function loadKpiPage(year = null) {
         const yearToDisplay = year || new Date(current.EffectiveDate).getFullYear();
         allKpiDataForYear = await apiFetch(`/api/kpidata/${yearToDisplay}`);
         
-        const allAnnouncements = [current, ...past];
+        const allAnnouncements = [current, ...(past || [])];
         const announcementForYear = allAnnouncements.find(a => new Date(a.EffectiveDate).getFullYear() == yearToDisplay) || current;
 
         renderKpiDashboard(container, announcementForYear, allKpiDataForYear, isAdmin, availableYears, yearToDisplay);
