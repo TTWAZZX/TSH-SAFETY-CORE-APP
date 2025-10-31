@@ -25,12 +25,12 @@ app.use(express.json({ limit: '10mb' }));
 let pool;
 async function getPool() {
   if (!pool) {
-    pool = mysql.createPool({
+    pool = await mysql.createPool({
       uri: process.env.DATABASE_URL,
-      ssl: { rejectUnauthorized: true },
+      ssl: { minVersion: 'TLSv1.2', rejectUnauthorized: true },
       waitForConnections: true,
       connectionLimit: 10,
-      queueLimit: 0,
+      queueLimit: 0
     });
   }
   return pool;
@@ -138,5 +138,45 @@ app.post('/api/upload/document', authenticateToken, isAdmin, upload.single('docu
 });
 
 // TODO: เพิ่ม routes อื่น ๆ ของคุณที่นี่ (committees / kpi / kpiannouncements / patrol-cccf / yokoten ...)
+// ----- HEALTH CHECK (วางเหนือ module.exports) -----
+app.get('/api/health', async (req, res) => {
+  try {
+    const env = {
+      DATABASE_URL: !!process.env.DATABASE_URL,
+      JWT_SECRET: !!process.env.JWT_SECRET,
+      CLOUDINARY_CLOUD_NAME: !!process.env.CLOUDINARY_CLOUD_NAME,
+      CLOUDINARY_API_KEY: !!process.env.CLOUDINARY_API_KEY,
+      CLOUDINARY_API_SECRET: !!process.env.CLOUDINARY_API_SECRET,
+    };
+
+    // ทดสอบต่อ DB
+    const pool = await getPool();
+    const [rows] = await pool.query('SELECT VERSION() AS version');
+    res.json({
+      ok: true,
+      env,
+      db: { ok: true, version: rows?.[0]?.version || null }
+    });
+  } catch (e) {
+    console.error('HEALTH ERROR:', e);
+    res.status(500).json({
+      ok: false,
+      message: e.message || 'health failed',
+      name: e.name,
+      code: e.code
+    });
+  }
+});
+
+// ----- TEMP: test login without DB (ลบออกเมื่อเสร็จ)
+app.post('/api/test-login', (req, res) => {
+  const { employeeId } = req.body || {};
+  if (!employeeId) return res.status(400).json({ success:false, message:'no id' });
+  const userData = { id: employeeId, name: 'Test User', department: 'IT', role: 'Admin', team: 'Core' };
+  const token = jwt.sign(userData, process.env.JWT_SECRET || 'devsecret', { expiresIn: '6h' });
+  res.json({ success: true, user: userData, token });
+});
+
 
 module.exports = serverlessExpress({ app });
+
