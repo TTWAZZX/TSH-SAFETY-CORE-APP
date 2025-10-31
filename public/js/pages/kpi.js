@@ -281,6 +281,7 @@ function drawKpiChart(kpi) {
         }
     });
 }
+
 function showKpiForm(kpi = null) {
     const isEditing = kpi !== null;
     const title = isEditing ? 'แก้ไขตัวชี้วัด KPI' : 'เพิ่มตัวชี้วัด KPI ใหม่';
