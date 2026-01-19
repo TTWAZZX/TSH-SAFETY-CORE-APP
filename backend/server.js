@@ -21,6 +21,9 @@ const { v4: uuidv4 } = require('uuid');
 const cloudinary = require('cloudinary').v2;
 const { CloudinaryStorage } = require('multer-storage-cloudinary');
 const multer = require('multer');
+const patrolRoutes = require('./routes/patrol'); // ✅ เพิ่มบรรทัดนี้
+const adminRoutes = require('./routes/admin');
+const cccfRoutes = require('./routes/cccf');     // ✅ เพิ่มบรรทัดนี้
 
 // --- ตั้งค่า Cloudinary ---
 cloudinary.config({
@@ -63,25 +66,10 @@ app.use(cors({
     methods: ['GET', 'POST', 'PUT', 'DELETE'], // อนุญาต Method ที่เราใช้
     allowedHeaders: ['Content-Type', 'Authorization'] // (สำคัญ) อนุญาตให้ส่ง Header ที่จำเป็นสำหรับ Token
 }));
-app.use(express.json({ limit: '10mb' }));
+app.use(express.json({ limit: '50mb' }));
+app.use(express.urlencoded({ limit: '50mb', extended: true }));
 
-// --- Database Connection ---
-let pool;
-try {
-    pool = mysql.createPool({
-        uri: process.env.DATABASE_URL,
-        ssl: {
-            rejectUnauthorized: true
-        },
-        waitForConnections: true,
-        connectionLimit: 10,
-        queueLimit: 0
-    });
-    console.log("✅ Database connection pool created successfully.");
-} catch (error) {
-    console.error("❌ FATAL ERROR: Could not create database connection pool.", error);
-    process.exit(1);
-}
+const pool = require('./db');
 
 // Middleware สำหรับตรวจสอบ Token
 const authenticateToken = (req, res, next) => {
@@ -554,10 +542,14 @@ app.delete('/api/kpiannouncements/:id', authenticateToken, isAdmin, async (req, 
     }
 });
 
-
 // =================================================================
 // SECTION 4: GENERIC CRUD (สำหรับ Admin Panel)
 // =================================================================
+// --- เชื่อมต่อ Route ใหม่ ---
+app.use('/api/patrol', patrolRoutes); // เมื่อเรียก /api/patrol/... ให้ไปใช้ไฟล์ patrol.js
+app.use('/api/admin', adminRoutes);
+app.use('/api/cccf', cccfRoutes);     // เมื่อเรียก /api/cccf/... ให้ไปใช้ไฟล์ cccf.js
+
 const tablesForCrud = [
     'Employees',
     'Patrol_Sessions', 'Patrol_Attendance', 'Patrol_Issues',
