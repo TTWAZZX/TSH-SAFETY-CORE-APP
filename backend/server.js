@@ -24,6 +24,7 @@ const multer = require('multer');
 const patrolRoutes = require('./routes/patrol'); // ✅ เพิ่มบรรทัดนี้
 const adminRoutes = require('./routes/admin');
 const cccfRoutes = require('./routes/cccf');     // ✅ เพิ่มบรรทัดนี้
+const masterRoutes = require('./routes/master'); // ✅ 1. เพิ่มบรรทัดนี้ (Import)
 
 // --- ตั้งค่า Cloudinary ---
 cloudinary.config({
@@ -549,6 +550,7 @@ app.delete('/api/kpiannouncements/:id', authenticateToken, isAdmin, async (req, 
 app.use('/api/patrol', patrolRoutes); // เมื่อเรียก /api/patrol/... ให้ไปใช้ไฟล์ patrol.js
 app.use('/api/admin', adminRoutes);
 app.use('/api/cccf', cccfRoutes);     // เมื่อเรียก /api/cccf/... ให้ไปใช้ไฟล์ cccf.js
+app.use('/api/master', masterRoutes); // Endpoint จะเป็น /api/master/departments
 
 const tablesForCrud = [
     'Employees',
@@ -619,6 +621,107 @@ tablesForCrud.forEach(table => {
             res.status(500).json({ status: 'error', message: `Could not delete data from ${table}` });
         }
     });
+});
+
+// ==========================================
+// 👥 EMPLOYEES MANAGEMENT (เพิ่มใหม่)
+// ==========================================
+
+// GET: ดึงพนักงานทั้งหมด
+app.get('/api/employees', async (req, res) => {
+    try {
+        const [rows] = await pool.query('SELECT * FROM Employees ORDER BY EmployeeName ASC');
+        res.json({ success: true, data: rows });
+    } catch (err) {
+        res.status(500).json({ success: false, message: err.message });
+    }
+});
+
+// GET: ดึงพนักงานรายคน
+app.get('/api/employees/:id', async (req, res) => {
+    try {
+        const [rows] = await pool.query('SELECT * FROM Employees WHERE EmployeeID = ?', [req.params.id]);
+        if (rows.length === 0) return res.status(404).json({ success: false, message: 'Not found' });
+        res.json({ success: true, data: rows[0] });
+    } catch (err) {
+        res.status(500).json({ success: false, message: err.message });
+    }
+});
+
+// POST: เพิ่มพนักงานใหม่
+app.post('/api/employees', async (req, res) => {
+    // รับค่า Position แทน Team (ตามที่แก้ Frontend ล่าสุด)
+    const { EmployeeID, EmployeeName, Department, Position, Role, Team } = req.body;
+    
+    // Fallback: ถ้าส่งมาเป็น Team ให้ใช้เป็น Position หรือถ้าส่ง Position มาก็ใช้เลย
+    const finalPosition = Position || Team; 
+
+    try {
+        await pool.query(
+            'INSERT INTO Employees (EmployeeID, EmployeeName, Department, Position, Role) VALUES (?, ?, ?, ?, ?)',
+            [EmployeeID, EmployeeName, Department, finalPosition, Role]
+        );
+        res.json({ success: true, message: 'เพิ่มพนักงานสำเร็จ' });
+    } catch (err) {
+        if (err.code === 'ER_DUP_ENTRY') {
+            return res.status(400).json({ success: false, message: 'รหัสพนักงานนี้มีอยู่แล้ว' });
+        }
+        res.status(500).json({ success: false, message: err.message });
+    }
+});
+
+// PUT: แก้ไขพนักงาน
+app.put('/api/employees/:id', async (req, res) => {
+    const { EmployeeName, Department, Position, Role, Team } = req.body;
+    const finalPosition = Position || Team;
+
+    try {
+        const [result] = await pool.query(
+            'UPDATE Employees SET EmployeeName=?, Department=?, Position=?, Role=? WHERE EmployeeID=?',
+            [EmployeeName, Department, finalPosition, Role, req.params.id]
+        );
+        if (result.affectedRows === 0) return res.status(404).json({ success: false, message: 'ไม่พบพนักงาน' });
+        res.json({ success: true, message: 'อัปเดตข้อมูลสำเร็จ' });
+    } catch (err) {
+        res.status(500).json({ success: false, message: err.message });
+    }
+});
+
+// DELETE: ลบพนักงาน
+app.delete('/api/employees/:id', async (req, res) => {
+    try {
+        await pool.query('DELETE FROM Employees WHERE EmployeeID = ?', [req.params.id]);
+        res.json({ success: true, message: 'ลบข้อมูลสำเร็จ' });
+    } catch (err) {
+        res.status(500).json({ success: false, message: err.message });
+    }
+});
+
+// Import (Fallback) -> ปรับให้รองรับ Position
+app.post('/api/admin/employees/import', async (req, res) => {
+    const { data } = req.body;
+    if (!data || !Array.isArray(data)) return res.status(400).json({ success: false, message: 'Invalid data' });
+
+    const connection = await pool.getConnection();
+    try {
+        await connection.beginTransaction();
+        for (const emp of data) {
+            const position = emp.Position || emp.Team || ''; // รองรับทั้งสองชื่อ
+            await connection.query(
+                `INSERT INTO Employees (EmployeeID, EmployeeName, Department, Position, Role) 
+                 VALUES (?, ?, ?, ?, ?) 
+                 ON DUPLICATE KEY UPDATE EmployeeName=VALUES(EmployeeName), Department=VALUES(Department), Position=VALUES(Position), Role=VALUES(Role)`,
+                [emp.EmployeeID, emp.EmployeeName, emp.Department, position, emp.Role]
+            );
+        }
+        await connection.commit();
+        res.json({ success: true, message: `Imported ${data.length} rows` });
+    } catch (err) {
+        await connection.rollback();
+        res.status(500).json({ success: false, message: err.message });
+    } finally {
+        connection.release();
+    }
 });
 
 // =================================================================

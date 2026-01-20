@@ -173,3 +173,44 @@ body { font-family: 'Kanit', sans-serif; background-color: #f1f5f9; }
     font-size: 0.75rem;
     color: #3B82F6; /* blue-500 */
 }
+
+/* --- เติมต่อท้ายใน style.css --- */
+
+/* 1. Animation สำหรับการสลับ Tab ให้ดูนุ่มนวล */
+@keyframes fadeIn {
+    from { opacity: 0; transform: translateY(5px); }
+    to { opacity: 1; transform: translateY(0); }
+}
+.animate-fade-in {
+    animation: fadeIn 0.3s ease-out forwards;
+}
+
+/* 2. Loading Spinner หมุนติ้วๆ เวลาโหลดข้อมูล */
+.loading-spinner {
+    display: inline-block;
+    width: 1.5rem;
+    height: 1.5rem;
+    border: 3px solid rgba(59, 130, 246, 0.3); /* สีฟ้าจางๆ */
+    border-radius: 50%;
+    border-top-color: #3b82f6; /* สีฟ้าเข้ม */
+    animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+    to { transform: rotate(360deg); }
+}
+
+/* 3. Custom Scrollbar (สำหรับ List ยาวๆ ให้ดูสะอาดตา) */
+.custom-scrollbar::-webkit-scrollbar {
+    width: 6px;
+}
+.custom-scrollbar::-webkit-scrollbar-track {
+    background: transparent;
+}
+.custom-scrollbar::-webkit-scrollbar-thumb {
+    background-color: #cbd5e1;
+    border-radius: 20px;
+}
+.dark .custom-scrollbar::-webkit-scrollbar-thumb {
+    background-color: #475569;
+}

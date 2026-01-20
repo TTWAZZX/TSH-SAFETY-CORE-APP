@@ -1,390 +1,623 @@
-// js/pages/kpi.js (เวอร์ชันสมบูรณ์ + Year Selector)
-
 import { apiFetch } from '../api.js';
-import { hideLoading, showError, showToast, openModal, closeModal, showConfirmationModal, showDocumentModal } from '../ui.js';
+import { hideLoading, showLoading, showError, showToast, openModal, closeModal, showConfirmationModal, showDocumentModal } from '../ui.js';
 
 let chartInstances = {};
 let allKpiDataForYear = [];
+let currentAnnouncementId = null;
 let kpiEventListenersAttached = false;
 
-// --- Main Page Flow ---
+// --- Main Page Loader ---
 export async function loadKpiPage(year = null) {
+    console.log("📊 Loading KPI Page...");
     const container = document.getElementById('kpi-page');
-    container.innerHTML = `<div class="card p-6 text-center">กำลังโหลดข้อมูล KPI...</div>`;
-    const currentUser = JSON.parse(localStorage.getItem('currentUser'));
-    const isAdmin = currentUser?.role === 'Admin';
+    
+    // Initialize Listeners Once
+    if (!kpiEventListenersAttached) {
+        setupKpiEventListeners();
+        kpiEventListenersAttached = true;
+    }
 
+    // ✅ 1. ตรวจสอบข้อมูลผู้ใช้และสิทธิ์ Admin (Robust Check)
+    const userStr = localStorage.getItem('currentUser');
+    const currentUser = userStr ? JSON.parse(userStr) : null;
+    
+    const isAdmin = currentUser && (
+        (currentUser.role && currentUser.role.toLowerCase() === 'admin') || 
+        (currentUser.Role && currentUser.Role.toLowerCase() === 'admin') ||
+        (currentUser.id === 'admin')
+    );
+
+    // 1. Setup Loading State
+    container.innerHTML = `
+        <div class="flex flex-col items-center justify-center h-64 text-slate-400">
+            <div class="animate-spin rounded-full h-10 w-10 border-4 border-blue-500 border-t-transparent mb-4"></div>
+            <span class="text-sm font-medium">Loading KPI Data...</span>
+        </div>`;
+
+    // 2. Fetch Data
     try {
-        const annData = await apiFetch('/api/pagedata/kpi-announcements');
-        const { current, availableYears, past } = annData;
+        const annData = await apiFetch('/pagedata/kpi-announcements');
+        const { current, past } = annData;
 
-        if (!current) {
-            container.innerHTML = `<div class="card p-6 text-center text-slate-500">ยังไม่มีการสร้างประกาศ KPI<br>${isAdmin ? '<button id="btn-manage-anns" class="btn btn-primary mt-4">สร้างประกาศแรก</button>' : ''}</div>`;
-            if (isAdmin && !kpiEventListenersAttached) setupKpiEventListeners();
-            hideLoading();
-            return;
+        const allAnnouncements = [current, ...(past || [])].filter(Boolean);
+        const calculatedYears = new Set();
+        allAnnouncements.forEach(ann => {
+            if(ann.EffectiveDate) calculatedYears.add(new Date(ann.EffectiveDate).getFullYear());
+        });
+        calculatedYears.add(new Date().getFullYear());
+        const availableYears = Array.from(calculatedYears).sort((a, b) => b - a);
+
+        let yearToDisplay = year ? parseInt(year) : (current ? new Date(current.EffectiveDate).getFullYear() : new Date().getFullYear());
+        allKpiDataForYear = await apiFetch(`/kpidata/${yearToDisplay}`);
+        
+        const announcementForYear = allAnnouncements.find(a => new Date(a.EffectiveDate).getFullYear() == yearToDisplay) || current;
+        
+        if (announcementForYear && new Date(announcementForYear.EffectiveDate).getFullYear() == yearToDisplay) {
+            currentAnnouncementId = announcementForYear.id || announcementForYear.AnnouncementID;
+        } else {
+            currentAnnouncementId = null;
         }
 
-        const yearToDisplay = year || new Date(current.EffectiveDate).getFullYear();
-        allKpiDataForYear = await apiFetch(`/api/kpidata/${yearToDisplay}`);
-        
-        const allAnnouncements = [current, ...(past || [])];
-        const announcementForYear = allAnnouncements.find(a => new Date(a.EffectiveDate).getFullYear() == yearToDisplay) || current;
+        const displayAnnouncement = (currentAnnouncementId) ? announcementForYear : { 
+            AnnouncementTitle: `KPI Overview ${yearToDisplay}`,
+            id: null
+        };
 
-        renderKpiDashboard(container, announcementForYear, allKpiDataForYear, isAdmin, availableYears, yearToDisplay);
+        // ✅ ส่งค่า isAdmin ไปให้ฟังก์ชัน Render
+        renderKpiDashboard(container, displayAnnouncement, allKpiDataForYear, isAdmin, availableYears, yearToDisplay);
 
     } catch (error) {
-        showError(error);
-        container.innerHTML = `<div class="card p-6 text-red-500">ไม่สามารถโหลดข้อมูล KPI ได้</div>`;
-    } finally {
-        hideLoading();
-    }
+        console.error(error);
+        container.innerHTML = `<div class="p-6 bg-red-50 text-red-600 rounded-xl text-center">Failed to load data: ${error.message}</div>`;
+    } 
 }
 
 function renderKpiDashboard(container, announcement, kpiData, isAdmin, availableYears, selectedYear) {
     Object.values(chartInstances).forEach(chart => chart.destroy());
     chartInstances = {};
 
-    const yearSelectorHtml = (availableYears && availableYears.length > 0) ? `
-        <select id="kpi-year-select" class="form-input text-base mt-2">
-            ${availableYears.map(y => `<option value="${y}" ${y == selectedYear ? 'selected' : ''}>ปีงบประมาณ ${y}</option>`).join('')}
-        </select>
-    ` : '';
+    const summaryHtml = renderSummaryWidgets(kpiData);
 
-    const adminButtonHtml = isAdmin ? `<div class="flex items-center gap-4"><button id="btn-manage-anns" class="btn btn-secondary">จัดการประกาศ</button><button id="btn-add-kpi" class="btn btn-primary">+ เพิ่มตัวชี้วัดใหม่</button></div>` : '';
-    const docButtonHtml = announcement.DocumentLink ? `<div class="mt-4"><a href="${announcement.DocumentLink}" data-action="view-doc" data-title="ประกาศ KPI: ${announcement.AnnouncementTitle}" class="btn btn-secondary">ดูเอกสารประกาศ</a></div>` : '';
-    const kpiCardsHtml = kpiData.length > 0 ? kpiData.map(kpi => createKpiMetricCard(kpi, isAdmin)).join('') : `<div class="col-span-1 md:col-span-2 xl:col-span-3 text-center py-16 card"><svg class="mx-auto h-12 w-12 text-slate-400" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M3.75 3v11.25A2.25 2.25 0 006 16.5h2.25M3.75 3h-1.5m1.5 0h16.5m0 0h1.5m-1.5 0v11.25A2.25 2.25 0 0118 16.5h-2.25m-7.5 0h7.5m-7.5 0l-1 1.5m-5.25-11.25L2.25 6l1.5 1.5m5.25-3L6.75 6l1.5 1.5m5.25-3l1.5 1.5l1.5-1.5m-7.5 7.5l1.5 1.5l1.5-1.5M3 10.5h18" /></svg><h3 class="mt-2 text-sm font-semibold text-slate-900 dark:text-white">ไม่มีข้อมูลตัวชี้วัด</h3><p class="mt-1 text-sm text-slate-500">ยังไม่มีการเพิ่มข้อมูล KPI สำหรับปีนี้</p>${isAdmin ? `<div class="mt-6"><button id="btn-add-kpi-empty" class="btn btn-primary">+ เพิ่มตัวชี้วัดแรก</button></div>` : ''}</div>`;
+    const yearSelectorHtml = `
+        <div class="flex items-center gap-3 bg-white px-3 py-1.5 rounded-lg border border-slate-200 shadow-sm">
+            <span class="text-xs font-bold text-slate-500 uppercase tracking-wider">Fiscal Year</span>
+            <select id="kpi-year-select" class="text-sm font-semibold text-slate-700 bg-transparent border-none focus:ring-0 cursor-pointer py-0">
+                ${availableYears.map(y => `<option value="${y}" ${y == selectedYear ? 'selected' : ''}>${y}</option>`).join('')}
+            </select>
+        </div>
+    `;
+
+    // ✅ ซ่อน Toolbar ทั้งหมดถ้าไม่ใช่ Admin
+    const adminButtonHtml = isAdmin ? `
+        <div class="flex items-center gap-2 mt-4 lg:mt-0 flex-wrap justify-end">
+            <div class="flex bg-white rounded-lg border border-slate-200 shadow-sm p-1">
+                <button id="btn-export-excel" class="px-3 py-1.5 text-xs font-medium text-slate-600 hover:text-slate-800 hover:bg-slate-50 rounded flex items-center gap-1 transition-colors">
+                    Export
+                </button>
+                <div class="w-px bg-slate-200 my-1 mx-1"></div>
+                <button id="btn-import-excel" class="px-3 py-1.5 text-xs font-medium text-slate-600 hover:text-slate-800 hover:bg-slate-50 rounded flex items-center gap-1 transition-colors">
+                    Import
+                </button>
+            </div>
+            <input type="file" id="kpi-file-import" class="hidden" accept=".xlsx, .xls" />
+
+            <div class="h-6 w-px bg-slate-300 mx-2 hidden md:block"></div>
+
+            <button id="btn-manage-anns" class="btn bg-white border border-slate-300 text-slate-700 hover:bg-slate-50 text-xs font-bold px-4 py-2 rounded-lg shadow-sm transition-all">
+                จัดการประกาศ (Announcements)
+            </button>
+            <button id="btn-add-kpi" class="btn bg-slate-800 hover:bg-slate-900 text-white text-xs font-bold px-4 py-2 rounded-lg shadow-md flex items-center gap-2 transition-all">
+                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/></svg>
+                เพิ่ม KPI
+            </button>
+        </div>` : '';
+
+    const docButtonHtml = announcement.DocumentLink ? `
+        <a href="${announcement.DocumentLink}" data-action="view-doc" data-title="${announcement.AnnouncementTitle}" 
+           class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-blue-50 text-blue-600 hover:bg-blue-100 text-xs font-bold transition-colors mt-2">
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/></svg>
+            View Official Document
+        </a>` : '';
+
+    let kpiCardsHtml = '';
+    if (kpiData.length > 0) {
+        // ✅ ส่งค่า isAdmin ไปให้ฟังก์ชันสร้าง Card
+        kpiCardsHtml = kpiData.map(kpi => createKpiMetricCard(kpi, isAdmin)).join('');
+    } else {
+        const emptyMessage = announcement.id 
+            ? `Ready to track performance? Click "Add KPI" or Import from Excel.` 
+            : `<span class="text-red-500 font-bold">⚠️ Warning: No announcement created for ${selectedYear}. Please create one first.</span>`;
+
+        kpiCardsHtml = `
+            <div class="col-span-full py-20 text-center bg-slate-50/50 rounded-2xl border-2 border-dashed border-slate-200">
+                <div class="bg-white p-4 rounded-full shadow-sm w-16 h-16 flex items-center justify-center mx-auto mb-4">
+                    <svg class="w-8 h-8 text-slate-300" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"/></svg>
+                </div>
+                <h3 class="text-lg font-bold text-slate-700">No KPIs Found</h3>
+                <p class="text-sm text-slate-500 mt-1">${emptyMessage}</p>
+            </div>`;
+    }
 
     container.innerHTML = `
-        <div id="kpi-dashboard-view">
-            <div class="flex justify-between items-start mb-6 flex-wrap gap-4">
-                <div>
-                    <h3 class="font-bold text-xl">${announcement.AnnouncementTitle}</h3>
-                    ${yearSelectorHtml}
+        <div id="kpi-dashboard-view" class="animate-fade-in">
+            <div class="flex flex-col lg:flex-row justify-between items-start lg:items-center mb-8 gap-4">
+                <div class="flex-grow">
+                    <h3 class="font-bold text-2xl text-slate-800 dark:text-white leading-tight flex items-center gap-2">
+                        <span class="bg-slate-800 text-white w-8 h-8 rounded-lg flex items-center justify-center text-sm">KPI</span>
+                        ${announcement.AnnouncementTitle}
+                    </h3>
+                    ${docButtonHtml}
                 </div>
-                ${adminButtonHtml}
+                <div class="flex flex-col items-end gap-3 w-full lg:w-auto">
+                    ${yearSelectorHtml}
+                    ${adminButtonHtml}
+                </div>
             </div>
-            ${docButtonHtml}
-            <div id="kpi-cards-container" class="grid grid-cols-1 md:grid-cols-2 xl:col-span-3 gap-6 mt-6">${kpiCardsHtml}</div>
+            
+            ${summaryHtml}
+
+            <div id="kpi-cards-container" class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-2 gap-6 pb-8">
+                ${kpiCardsHtml}
+            </div>
         </div>`;
 
-    kpiData.forEach(drawKpiChart);
-
-    if (!kpiEventListenersAttached) {
-        setupKpiEventListeners();
-        kpiEventListenersAttached = true;
+    if (kpiData.length > 0) {
+        requestAnimationFrame(() => { kpiData.forEach(drawKpiChart); });
     }
 
     const yearSelect = document.getElementById('kpi-year-select');
     if (yearSelect) {
-        yearSelect.addEventListener('change', (event) => {
-            const newYear = event.target.value;
-            loadKpiPage(newYear);
-        });
+        yearSelect.addEventListener('change', (event) => loadKpiPage(event.target.value));
     }
 }
 
+function renderSummaryWidgets(kpiData) {
+    if (!kpiData || kpiData.length === 0) return '';
 
-// --- Event Handling ---
-function setupKpiEventListeners() {
-    const container = document.getElementById('kpi-page');
-    if (!container) return;
-    container.addEventListener('click', async (event) => {
-        const addBtn = event.target.closest('#btn-add-kpi, #btn-add-kpi-empty');
-        const manageAnnsBtn = event.target.closest('#btn-manage-anns');
-        const editBtn = event.target.closest('.btn-edit-kpi');
-        const deleteBtn = event.target.closest('.btn-delete-kpi');
-        const viewDocBtn = event.target.closest('[data-action="view-doc"]');
+    const total = kpiData.length;
+    let onTrack = 0;
+    let offTrack = 0;
 
-        if (addBtn) showKpiForm();
-        else if (manageAnnsBtn) showAnnouncementManager();
-        else if (editBtn) {
-            const kpiToEdit = allKpiDataForYear.find(k => k.id == editBtn.dataset.id);
-            if (kpiToEdit) showKpiForm(kpiToEdit);
-        } else if (deleteBtn) {
-            const kpiMetric = allKpiDataForYear.find(k => k.id == deleteBtn.dataset.id)?.Metric || 'รายการนี้';
-            const confirmed = await showConfirmationModal('ยืนยันการลบ', `คุณต้องการลบตัวชี้วัด "${kpiMetric}" ใช่หรือไม่?`);
-            if (confirmed) handleDeleteKpi(deleteBtn.dataset.id);
-        } else if (viewDocBtn) {
-            event.preventDefault();
-            showDocumentModal(viewDocBtn.href, viewDocBtn.dataset.title || 'เอกสาร');
+    kpiData.forEach(kpi => {
+        const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+        let sumActual = 0;
+        
+        months.forEach(m => {
+            const val = kpi[m];
+            if (val !== null && val !== '' && val !== undefined) {
+                sumActual += parseFloat(val);
+            }
+        });
+
+        // Safety Logic: น้อยกว่าหรือเท่ากับเป้าหมาย = ดี (สีเขียว)
+        if (sumActual <= parseFloat(kpi.Target)) {
+            onTrack++;
+        } else {
+            offTrack++;
+        }
+    });
+
+    return `
+    <div class="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
+        <div class="bg-white dark:bg-slate-800 p-5 rounded-2xl shadow-sm border border-slate-200 dark:border-slate-700 flex items-center justify-between relative overflow-hidden group">
+            <div class="relative z-10">
+                <div class="text-sm font-bold text-slate-400 uppercase tracking-wide">Total Metrics</div>
+                <div class="text-3xl font-bold text-slate-800 dark:text-white mt-1">${total}</div>
+            </div>
+            <div class="w-12 h-12 bg-slate-100 rounded-xl flex items-center justify-center text-slate-500 group-hover:bg-blue-50 group-hover:text-blue-600 transition-colors">
+                <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-3 7h3m-3 4h3m-6-4h.01M9 16h.01"/></svg>
+            </div>
+        </div>
+
+        <div class="bg-white dark:bg-slate-800 p-5 rounded-2xl shadow-sm border border-slate-200 dark:border-slate-700 flex items-center justify-between group">
+            <div>
+                <div class="text-sm font-bold text-emerald-600/80 uppercase tracking-wide">On Track</div>
+                <div class="text-3xl font-bold text-emerald-600 mt-1">${onTrack}</div>
+                <div class="text-xs text-slate-400 mt-1">Within safety limits</div>
+            </div>
+            <div class="w-12 h-12 bg-emerald-50 rounded-xl flex items-center justify-center text-emerald-600">
+                <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+            </div>
+        </div>
+
+        <div class="bg-white dark:bg-slate-800 p-5 rounded-2xl shadow-sm border border-slate-200 dark:border-slate-700 flex items-center justify-between group">
+            <div>
+                <div class="text-sm font-bold text-red-500/80 uppercase tracking-wide">Needs Attention</div>
+                <div class="text-3xl font-bold text-red-600 mt-1">${offTrack}</div>
+                <div class="text-xs text-slate-400 mt-1">Exceeded safety limits</div>
+            </div>
+            <div class="w-12 h-12 bg-red-50 rounded-xl flex items-center justify-center text-red-600 animate-pulse">
+                <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/></svg>
+            </div>
+        </div>
+    </div>`;
+}
+
+function drawKpiChart(kpi) {
+    const ctx = document.getElementById(`kpi-chart-${kpi.id}`);
+    if (!ctx) return;
+
+    if (typeof ChartDataLabels !== 'undefined') {
+        Chart.register(ChartDataLabels);
+    }
+
+    const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+    
+    const dataPoints = months.map(m => {
+        const val = kpi[m];
+        return (val !== null && val !== undefined && val !== '') ? parseFloat(val) : null;
+    });
+    
+    const target = parseFloat(kpi.Target);
+
+    const barColors = dataPoints.map(val => {
+        if (val === null) return 'transparent';
+        return val <= target ? '#10B981' : '#EF4444'; 
+    });
+
+    new Chart(ctx, {
+        type: 'bar',
+        data: {
+            labels: months,
+            datasets: [
+                { 
+                    label: 'Actual', 
+                    data: dataPoints, 
+                    backgroundColor: barColors, 
+                    borderRadius: 4, 
+                    barPercentage: 0.6,
+                    minBarLength: 5,
+                    order: 2,
+                    datalabels: {
+                        anchor: 'end',
+                        align: 'top',
+                        offset: -2, 
+                        color: (c) => c.dataset.data[c.dataIndex] > target ? '#DC2626' : '#64748B',
+                        font: { family: 'Kanit', weight: 'bold', size: 10 },
+                        formatter: (val) => val === null ? '' : val
+                    }
+                },
+                { 
+                    label: 'Target Limit', 
+                    data: Array(12).fill(target), 
+                    type: 'line', 
+                    borderColor: '#F59E0B', 
+                    borderWidth: 2, 
+                    borderDash: [5, 5], 
+                    pointRadius: 0, 
+                    fill: false, 
+                    order: 1,
+                    datalabels: { display: false } 
+                }
+            ]
+        },
+        options: {
+            responsive: true, 
+            maintainAspectRatio: false,
+            layout: { padding: { top: 20 } },
+            scales: { 
+                y: { 
+                    beginAtZero: true, 
+                    grid: { color: '#F1F5F9' }, 
+                    ticks: { font: { family: 'Kanit', size: 10 }, display: false } 
+                }, 
+                x: { 
+                    grid: { display: false }, 
+                    ticks: { font: { family: 'Kanit', size: 10 } } 
+                } 
+            },
+            plugins: { 
+                legend: { 
+                    display: true, 
+                    position: 'bottom', 
+                    labels: { 
+                        usePointStyle: true, 
+                        boxWidth: 6, 
+                        font: { family: 'Kanit', size: 10 },
+                        filter: item => !item.text.includes('Target')
+                    } 
+                }, 
+                tooltip: { 
+                    backgroundColor: 'rgba(15, 23, 42, 0.95)', 
+                    titleFont: { family: 'Kanit' }, 
+                    bodyFont: { family: 'Kanit' },
+                    callbacks: {
+                        label: (c) => {
+                            const val = c.raw;
+                            if (val === null) return 'No Data';
+                            const status = val <= target ? 'Safe' : 'Warning';
+                            return ` Value: ${val} | ${status}`;
+                        }
+                    }
+                } 
+            }
         }
     });
 }
 
-// --- Announcement Manager ---
-async function showAnnouncementManager() {
-    openModal('จัดการประกาศ KPI', '<div id="ann-list-container">กำลังโหลด...</div><div class="mt-6 text-right border-t dark:border-slate-700 pt-4"><button id="btn-add-ann" class="btn btn-primary">+ เพิ่มประกาศใหม่</button></div>', 'max-w-4xl');
-    document.getElementById('btn-add-ann').addEventListener('click', () => showAnnouncementForm());
-    try {
-        const announcements = await apiFetch('/api/kpiannouncements');
-        const listContainer = document.getElementById('ann-list-container');
-        if (announcements.length === 0) {
-            listContainer.innerHTML = '<p class="text-center text-slate-500 py-8">ยังไม่มีประกาศ</p>';
-            return;
-        }
-        const listHtml = announcements.map(ann => `
-            <div class="flex justify-between items-center p-3 border-b dark:border-slate-700 last:border-b-0">
-                <div>
-                    <p class="font-medium">${ann.AnnouncementTitle}</p>
-                    <p class="text-sm text-slate-500">มีผลบังคับใช้: ${new Date(ann.EffectiveDate).toLocaleDateString('th-TH')}</p>
-                </div>
-                <div class="flex items-center gap-2">
-                    ${ann.IsCurrent ? '<span class="text-sm font-medium text-green-500 px-3">ใช้งานอยู่</span>' : `<button data-id="${ann.id}" class="btn btn-secondary btn-sm btn-set-ann-current">ตั้งเป็นปัจจุบัน</button>`}
-                    <button data-id="${ann.id}" class="btn btn-secondary btn-sm btn-edit-ann">แก้ไข</button>
-                    <button data-id="${ann.id}" class="btn btn-danger btn-sm btn-delete-ann">ลบ</button>
-                </div>
-            </div>`).join('');
-        listContainer.innerHTML = `<div class="space-y-2">${listHtml}</div>`;
-        listContainer.addEventListener('click', async (event) => {
-            const target = event.target;
-            const annId = target.dataset.id;
-            if (!annId) return;
-            if (target.matches('.btn-edit-ann')) {
-                const annToEdit = announcements.find(a => a.id == annId);
-                if(annToEdit) showAnnouncementForm(annToEdit);
-            } else if (target.matches('.btn-delete-ann')) {
-                const annTitle = announcements.find(a => a.id == annId)?.AnnouncementTitle || 'รายการนี้';
-                const confirmed = await showConfirmationModal('ยืนยันการลบ', `คุณต้องการลบประกาศ "${annTitle}" ใช่หรือไม่?`);
-                if (confirmed) {
-                    await apiFetch(`/api/kpiannouncements/${annId}`, { method: 'DELETE' });
-                    showToast('ลบประกาศสำเร็จ');
-                    showAnnouncementManager();
-                }
-            } else if (target.matches('.btn-set-ann-current')) {
-                await apiFetch(`/api/kpiannouncements/${annId}`, { method: 'PUT', body: { IsCurrent: 1 } });
-                showToast('ตั้งเป็นประกาศปัจจุบันสำเร็จ');
-                showAnnouncementManager();
-                loadKpiPage();
-            }
-        });
-    } catch (error) { showError(error); }
-}
-
-function showAnnouncementForm(ann = null) {
-    const isEditing = ann !== null;
-    const title = isEditing ? 'แก้ไขประกาศ KPI' : 'สร้างประกาศ KPI ใหม่';
-    const effectiveDate = ann?.EffectiveDate ? new Date(ann.EffectiveDate).toISOString().split('T')[0] : '';
-    const formHtml = `
-        <form id="ann-form" class="space-y-4">
-            <input type="hidden" name="AnnouncementID" value="${ann?.id || ''}">
-            <div class="form-group"><input type="text" name="AnnouncementTitle" class="form-field w-full rounded-lg p-3" value="${ann?.AnnouncementTitle || ''}" required placeholder=" "><label class="form-label-floating">ชื่อประกาศ *</label></div>
-            <div class="form-group"><input type="text" id="ann-effective-date" name="EffectiveDate" class="form-field w-full rounded-lg p-3" value="${effectiveDate}" required placeholder=" "><label class="form-label-floating">วันที่มีผล *</label></div>
-            <div class="form-group"><label class="form-label block mb-1 text-sm">เอกสารแนบ</label><div id="file-upload-area-ann"></div><input type="hidden" id="AnnDocumentLink" name="DocumentLink" value="${ann?.DocumentLink || ''}"></div>
-            <div class="rounded-lg border dark:border-slate-700 p-4 flex items-center justify-between"><span class="text-slate-800 dark:text-slate-200 font-medium">ตั้งเป็นประกาศปัจจุบัน</span><label class="relative inline-flex items-center cursor-pointer"><input type="checkbox" name="IsCurrent" class="sr-only peer" ${ann?.IsCurrent ? 'checked' : ''}><div class="w-11 h-6 bg-slate-200 ..."></div></label></div>
-            <div class="flex justify-end ..."><button type="button" class="btn btn-secondary" id="btn-cancel-ann-modal">ยกเลิก</button><button type="submit" class="btn btn-primary">${isEditing ? 'บันทึก' : 'สร้าง'}</button></div>
-        </form>
-    `;
-    openModal(title, formHtml, 'max-w-2xl no-padding');
-    flatpickr("#ann-effective-date", { altInput: true, altFormat: "j F Y", dateFormat: "Y-m-d", locale: "th" });
-    // updateFileUploadUI logic for announcement is needed here
-    document.getElementById('ann-form').addEventListener('submit', handleAnnouncementFormSubmit);
-    document.getElementById('btn-cancel-ann-modal').addEventListener('click', showAnnouncementManager);
-}
-
-async function handleAnnouncementFormSubmit(event) {
-    event.preventDefault();
-    const form = event.target;
-    const formData = new FormData(form);
-    const data = Object.fromEntries(formData.entries());
-    data.IsCurrent = form.querySelector('[name="IsCurrent"]').checked;
-    const method = data.AnnouncementID ? 'PUT' : 'POST';
-    const endpoint = data.AnnouncementID ? `/api/kpiannouncements/${data.AnnouncementID}` : '/api/kpiannouncements';
-    try {
-        await apiFetch(endpoint, { method: method, body: data });
-        showToast(data.AnnouncementID ? 'แก้ไขประกาศสำเร็จ' : 'สร้างประกาศสำเร็จ');
-        showAnnouncementManager();
-        loadKpiPage();
-    } catch (error) { showError(error); }
-}
-
-// --- KPI Metric Card and Form Functions (Unchanged) ---
-// (The functions createKpiMetricCard, drawKpiChart, showKpiForm, handleKpiFormSubmit, handleDeleteKpi remain here, exactly as they were in the previous version)
 function createKpiMetricCard(kpi, isAdmin) {
     const chartId = `kpi-chart-${kpi.id}`;
+    // ✅ ซ่อนปุ่มแก้ไข/ลบ ถ้าไม่ใช่ Admin
     const adminButtons = isAdmin ? `
-        <div class="absolute top-4 right-4 space-x-2">
-            <button data-id="${kpi.id}" class="btn btn-secondary btn-sm !p-2 btn-edit-kpi" title="แก้ไข"><svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" viewBox="0 0 20 20" fill="currentColor"><path d="M17.414 2.586a2 2 0 00-2.828 0L7 10.172V13h2.828l7.586-7.586a2 2 0 000-2.828z" /><path fill-rule="evenodd" d="M2 6a2 2 0 012-2h4a1 1 0 010 2H4v10h10v-4a1 1 0 112 0v4a2 2 0 01-2 2H4a2 2 0 01-2-2V6z" clip-rule="evenodd" /></svg></button>
-            <button data-id="${kpi.id}" class="btn btn-danger btn-sm !p-2 btn-delete-kpi" title="ลบ"><svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M9 2a1 1 0 00-.894.553L7.382 4H4a1 1 0 000 2v10a2 2 0 002 2h8a2 2 0 002-2V6a1 1 0 100-2h-3.382l-.724-1.447A1 1 0 0011 2H9zM7 8a1 1 0 012 0v6a1 1 0 11-2 0V8zm5-1a1 1 0 00-1 1v6a1 1 0 102 0V8a1 1 0 00-1-1z" clip-rule="evenodd" /></svg></button>
+        <div class="absolute top-4 right-4 flex gap-1 bg-white p-1 rounded-lg shadow-sm border border-slate-100 opacity-0 group-hover:opacity-100 transition-opacity z-10 transform scale-95 group-hover:scale-100 duration-200">
+            <button data-id="${kpi.id}" class="btn-edit-kpi p-1.5 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded transition-colors" title="Edit">
+                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z"/></svg>
+            </button>
+            <button data-id="${kpi.id}" class="btn-delete-kpi p-1.5 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded transition-colors" title="Delete">
+                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg>
+            </button>
         </div>` : '';
+
     return `
-        <div class="card p-6 flex flex-col relative">
+        <div class="bg-white p-6 rounded-2xl shadow-sm border border-slate-200 hover:shadow-lg hover:border-blue-300 transition-all duration-300 relative group">
             ${adminButtons}
-            <h3 class="font-semibold text-lg flex-grow pr-20">${kpi.Metric}</h3>
-            <p class="text-sm text-slate-500 dark:text-slate-400">เป้าหมาย: ${kpi.Target} ${kpi.Unit || ''}</p>
-            <div class="text-xs text-slate-500 dark:text-slate-400 mb-2">${kpi.Department || ''}</div>
-            <div class="flex-grow min-h-[250px] mt-4"><canvas id="${chartId}"></canvas></div>
+            <div class="mb-4 pr-10">
+                <div class="flex items-center gap-2 mb-2">
+                    <span class="px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider bg-slate-100 text-slate-500 border border-slate-200">
+                        ${kpi.Department || 'General'}
+                    </span>
+                </div>
+                <h3 class="font-bold text-lg text-slate-800 leading-snug truncate" title="${kpi.Metric}">${kpi.Metric}</h3>
+                <div class="mt-1 text-sm text-slate-500">
+                    Target Limit: <span class="font-bold text-amber-500">${parseFloat(kpi.Target).toLocaleString()}</span> <span class="text-xs text-slate-400">${kpi.Unit || ''}</span>
+                </div>
+            </div>
+            <div class="h-48 w-full"><canvas id="${chartId}"></canvas></div>
         </div>
     `;
 }
-function drawKpiChart(kpi) {
-    const canvasId = `kpi-chart-${kpi.id}`;
-    const ctx = document.getElementById(canvasId);
-    if (!ctx) return;
-    const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-    const actualData = months.map(m => kpi[m] !== null && kpi[m] !== undefined ? parseFloat(kpi[m]) : null);
-    const annualTarget = parseFloat(kpi.Target);
-    const backgroundColors = actualData.map(val => {
-        if (val === null || isNaN(annualTarget)) return 'rgba(59, 130, 246, 0.5)';
-        return val >= annualTarget ? 'rgba(34, 197, 94, 0.5)' : 'rgba(239, 68, 68, 0.5)';
+
+function setupKpiEventListeners() {
+    document.addEventListener('click', async (event) => {
+        if (!event.target.closest('#kpi-page') && !event.target.closest('#modal-container')) return;
+        const target = event.target;
+        
+        if (target.closest('#btn-add-kpi')) { 
+            if (!currentAnnouncementId) { showToast('⚠️ Please create an announcement for this year first.', 'error'); return; }
+            showKpiForm(null, currentAnnouncementId); return; 
+        }
+
+        if (target.closest('#btn-manage-anns')) { showAnnouncementManager(); return; }
+
+        const editBtn = target.closest('.btn-edit-kpi');
+        if (editBtn) {
+            const kpi = allKpiDataForYear.find(k => String(k.id) === String(editBtn.dataset.id));
+            if (kpi) showKpiForm(kpi); return;
+        }
+
+        const deleteBtn = target.closest('.btn-delete-kpi');
+        if (deleteBtn) {
+            const id = deleteBtn.dataset.id;
+            const kpiName = allKpiDataForYear.find(k => String(k.id) === String(id))?.Metric || 'Item';
+            const confirmed = await showConfirmationModal('Confirm Deletion', `Delete metric "${kpiName}"?`);
+            if (confirmed) handleDeleteKpi(id); return;
+        }
+
+        const viewDocBtn = target.closest('[data-action="view-doc"]');
+        if (viewDocBtn) {
+            event.preventDefault();
+            showDocumentModal(viewDocBtn.href, viewDocBtn.dataset.title || 'Document'); return;
+        }
+        
+        if (target.closest('#btn-export-excel')) { handleExportExcel(); return; }
+        if (target.closest('#btn-import-excel')) {
+            if (!currentAnnouncementId) { showToast('⚠️ Create an announcement first.', 'error'); return; }
+            document.getElementById('kpi-file-import').click(); return;
+        }
+
+        if (target.matches('#btn-add-ann-modal')) showAnnouncementForm();
     });
-    const datasets = [{
-        label: `ผลงานจริง`,
-        data: actualData,
-        backgroundColor: backgroundColors,
-        borderColor: backgroundColors.map(c => c.replace('0.5', '1')),
-        borderWidth: 1,
-        type: 'bar',
-        order: 2
-    }];
-    if (!isNaN(annualTarget)) {
-        datasets.push({
-            label: 'เป้าหมาย',
-            data: Array(12).fill(annualTarget),
-            borderColor: '#F59E0B',
-            borderWidth: 2,
-            fill: false,
-            pointRadius: 0,
-            type: 'line',
-            order: 1
-        });
-    }
-    chartInstances[canvasId] = new Chart(ctx, {
-        type: 'bar',
-        data: { labels: months, datasets: datasets },
-        options: {
-            responsive: true,
-            maintainAspectRatio: false,
-            scales: { y: { beginAtZero: true } },
-            plugins: {
-                legend: { position: 'bottom', labels: { boxWidth: 20 } },
-                tooltip: {
-                    callbacks: {
-                        label: function(context) {
-                            let label = context.dataset.label || '';
-                            if (label) {
-                                label += ': ';
-                            }
-                            if (context.parsed.y !== null) {
-                                label += context.parsed.y.toLocaleString();
-                            }
-                            if (context.dataset.type === 'bar' && !isNaN(annualTarget)) {
-                                const diff = context.parsed.y - annualTarget;
-                                const sign = diff >= 0 ? '+' : '';
-                                label += ` (${sign}${diff.toLocaleString()} vs Target)`;
-                            }
-                            return label;
-                        }
-                    }
-                }
-            }
+
+    document.addEventListener('change', async (e) => {
+        if (e.target.id === 'kpi-file-import') {
+            const file = e.target.files[0];
+            if (file) handleImportExcel(file);
+            e.target.value = '';
         }
     });
 }
 
-function showKpiForm(kpi = null) {
-    const isEditing = kpi !== null;
-    const title = isEditing ? 'แก้ไขตัวชี้วัด KPI' : 'เพิ่มตัวชี้วัด KPI ใหม่';
-    const yearText = document.querySelector('#kpi-dashboard-view .text-sm.text-slate-500');
-    const year = kpi?.Year || (yearText ? new Date(yearText.textContent.split(' ')[1]).getFullYear() : new Date().getFullYear());
-    const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-    const currentMonth = new Date().getMonth();
-    const currentYear = new Date().getFullYear();
-    const monthlyInputs = months.map((month, index) => {
-        const value = kpi?.[month];
-        const isFutureMonth = (year > currentYear) || (year === currentYear && index > currentMonth);
-        let placeholder = 'ยังไม่มีข้อมูล';
-        let isDisabled = false;
-        let extraClasses = 'bg-slate-50 dark:bg-slate-700/50';
-        if (isFutureMonth) {
-            placeholder = 'ยังไม่ถึงเดือนที่ต้องกรอก';
-            isDisabled = true;
-            extraClasses = 'bg-slate-200 dark:bg-slate-800 cursor-not-allowed';
+function handleExportExcel() {
+    if (!allKpiDataForYear || allKpiDataForYear.length === 0) {
+        const emptyData = [{ Metric: "Accident Rate", Department: "Safety", Unit: "Cases", Target: 0, Jan: 0, Feb: 0 }];
+        const ws = XLSX.utils.json_to_sheet(emptyData);
+        const wb = XLSX.utils.book_new();
+        XLSX.utils.book_append_sheet(wb, ws, "KPI_Template");
+        XLSX.writeFile(wb, "KPI_Template.xlsx");
+        return;
+    }
+    const cleanData = allKpiDataForYear.map(item => {
+        const { id, AnnouncementID, CreatedAt, UpdatedAt, Year, ...rest } = item;
+        return rest;
+    });
+    const ws = XLSX.utils.json_to_sheet(cleanData);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, "KPI_Data");
+    XLSX.writeFile(wb, `KPI_Export_${new Date().getFullYear()}.xlsx`);
+}
+
+async function handleImportExcel(file) {
+    showLoading('Importing Data...');
+    try {
+        const data = await file.arrayBuffer();
+        const workbook = XLSX.read(data);
+        const worksheet = workbook.Sheets[workbook.SheetNames[0]];
+        const jsonData = XLSX.utils.sheet_to_json(worksheet);
+
+        if (!currentAnnouncementId) throw new Error('Announcement ID not found.');
+
+        const year = document.getElementById('kpi-year-select').value;
+        let successCount = 0;
+
+        for (const row of jsonData) {
+            const payload = {
+                AnnouncementID: currentAnnouncementId,
+                Year: year,
+                Metric: row.Metric || 'New KPI',
+                Department: row.Department || '',
+                Unit: row.Unit || '',
+                Target: row.Target || 0,
+                Jan: row.Jan, Feb: row.Feb, Mar: row.Mar, Apr: row.Apr, May: row.May, Jun: row.Jun,
+                Jul: row.Jul, Aug: row.Aug, Sep: row.Sep, Oct: row.Oct, Nov: row.Nov, Dec: row.Dec
+            };
+            await apiFetch('/kpidata', { method: 'POST', body: payload });
+            successCount++;
         }
-        return `
-        <div class="form-group">
-            <input 
-                type="number" 
-                step="any" 
-                id="kpi-${month}" 
-                name="${month}" 
-                class="form-field w-full rounded-lg p-3 ${extraClasses}" 
-                value="${value ?? ''}" 
-                placeholder="${placeholder}"
-                ${isDisabled ? 'disabled' : ''}
-            >
-            <label for="kpi-${month}" class="form-label-floating ${value !== null && value !== undefined ? 'is-active' : ''}">${month}</label>
-        </div>`;
-    }).join('');
-    const formHtml = `
-        <form id="kpi-form" novalidate>
-            <div class="p-6 space-y-6">
-                <input type="hidden" name="id" value="${kpi?.id || ''}">
-                <input type="hidden" name="Year" value="${year}">
-                <div class="form-group">
-                    <input type="text" id="kpi-Metric" name="Metric" class="form-field w-full rounded-lg p-3" value="${kpi?.Metric || ''}" required placeholder=" ">
-                    <label for="kpi-Metric" class="form-label-floating">ชื่อตัวชี้วัด *</label>
-                </div>
-                <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
-                    <div class="form-group"><input type="text" id="kpi-Department" name="Department" class="form-field w-full rounded-lg p-3" value="${kpi?.Department || ''}" placeholder=" "><label for="kpi-Department" class="form-label-floating">แผนก</label></div>
-                    <div class="form-group"><input type="text" id="kpi-Unit" name="Unit" class="form-field w-full rounded-lg p-3" value="${kpi?.Unit || ''}" placeholder=" "><label for="kpi-Unit" class="form-label-floating">หน่วยนับ</label></div>
-                    <div class="form-group"><input type="number" step="any" id="kpi-Target" name="Target" class="form-field w-full rounded-lg p-3" value="${kpi?.Target || ''}" required placeholder=" "><label for="kpi-Target" class="form-label-floating">เป้าหมายรายปี *</label></div>
-                </div>
-                <div>
-                    <h4 class="text-base font-semibold mb-3 border-b dark:border-slate-600 pb-2">ข้อมูลรายเดือน</h4>
-                    <div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-4">
-                        ${monthlyInputs}
-                    </div>
-                </div>
-            </div>
-            <div class="flex justify-end items-center gap-3 p-4 bg-slate-50 dark:bg-slate-800/50 border-t dark:border-slate-700 rounded-b-xl">
-                <button type="button" class="btn btn-secondary" id="btn-cancel-modal">ยกเลิก</button>
-                <button type="submit" class="btn btn-primary" id="btn-submit-kpi"><span>${isEditing ? 'บันทึกการเปลี่ยนแปลง' : 'สร้างตัวชี้วัด'}</span><div class="loader hidden animate-spin ..."></div></button>
-            </div>
-        </form>
-    `;
-    openModal(title, formHtml, 'max-w-4xl no-padding');
-    document.getElementById('kpi-form').addEventListener('submit', handleKpiFormSubmit);
-    document.getElementById('btn-cancel-modal').addEventListener('click', closeModal);
-}
-async function handleKpiFormSubmit(event) {
-    event.preventDefault();
-    const form = event.target;
-    if (!form.Metric.value || !form.Target.value) {
-        return showToast('กรุณากรอกข้อมูลที่จำเป็น (*) ให้ครบถ้วน', 'error');
-    }
-    const submitBtn = document.getElementById('btn-submit-kpi');
-    const btnText = submitBtn.querySelector('span');
-    const btnLoader = submitBtn.querySelector('.loader');
-    submitBtn.disabled = true;
-    btnText.classList.add('hidden');
-    btnLoader.classList.remove('hidden');
-    const formData = new FormData(form);
-    const data = Object.fromEntries(formData.entries());
-    const method = data.id ? 'PUT' : 'POST';
-    const endpoint = data.id ? `/api/kpidata/${data.id}` : '/api/kpidata';
-    try {
-        const result = await apiFetch(endpoint, { method: method, body: data });
-        closeModal();
-        await loadKpiPage();
-        showToast(result.message);
+
+        showToast(`Successfully imported ${successCount} items.`);
+        loadKpiPage(year);
+
     } catch (error) {
-        // Error is shown from apiFetch
-    } finally {
-        submitBtn.disabled = false;
-        btnText.classList.remove('hidden');
-        btnLoader.classList.add('hidden');
-    }
-}
-async function handleDeleteKpi(kpiId) {
-    showLoading('กำลังลบข้อมูล...');
-    try {
-        await apiFetch(`/api/kpidata/${kpiId}`, { method: 'DELETE' });
-        await loadKpiPage();
-        showToast('ลบตัวชี้วัดสำเร็จ');
-    } catch (error) {
-        // Error is shown from apiFetch
+        showError(error);
     } finally {
         hideLoading();
     }
+}
+
+async function showAnnouncementManager() {
+    openModal('Announcement Management', '<div id="ann-list-content">Loading...</div>', 'max-w-4xl');
+    try {
+        const announcements = await apiFetch('/kpiannouncements');
+        const contentEl = document.getElementById('ann-list-content');
+        const addBtn = `<div class="text-right mb-4"><button id="btn-add-ann-modal" class="btn btn-primary text-sm shadow-sm">+ New Announcement</button></div>`;
+        const listHtml = announcements.map(ann => `
+            <div class="flex justify-between items-center p-4 bg-white border border-slate-200 rounded-xl mb-3 shadow-sm hover:shadow-md transition-all">
+                <div>
+                    <div class="font-bold text-slate-800 text-lg">${ann.AnnouncementTitle}</div>
+                    <div class="text-sm text-slate-500 mt-1 flex items-center gap-2">
+                        <span class="bg-slate-100 px-2 py-0.5 rounded text-xs font-mono">FY ${new Date(ann.EffectiveDate).getFullYear()}</span>
+                        ${ann.IsCurrent ? '<span class="text-green-600 bg-green-50 px-2 py-0.5 rounded text-xs font-bold border border-green-100">Current Active</span>' : '<span class="text-slate-400 text-xs">Archived</span>'}
+                    </div>
+                </div>
+                <div class="flex gap-2">
+                    ${!ann.IsCurrent ? `<button class="btn btn-sm btn-white border border-slate-300 text-slate-600 hover:bg-slate-50 btn-set-curr-ann" data-id="${ann.id}">Set Active</button>` : ''}
+                    <button class="btn btn-sm btn-white border border-red-200 text-red-500 hover:bg-red-50 btn-del-ann" data-id="${ann.id}">Delete</button>
+                </div>
+            </div>`).join('');
+        contentEl.innerHTML = addBtn + (listHtml || '<div class="text-center text-slate-400 py-8">No announcements found.</div>');
+
+        document.getElementById('btn-add-ann-modal').addEventListener('click', showAnnouncementForm);
+        contentEl.querySelectorAll('.btn-del-ann').forEach(btn => btn.addEventListener('click', async () => { 
+            if(confirm('Delete this announcement?')) { 
+                await apiFetch(`/kpiannouncements/${btn.dataset.id}`, { method: 'DELETE' }); 
+                showAnnouncementManager(); loadKpiPage(); 
+            } 
+        }));
+        contentEl.querySelectorAll('.btn-set-curr-ann').forEach(btn => btn.addEventListener('click', async () => { 
+            const annToUpdate = announcements.find(a => String(a.id) === String(btn.dataset.id));
+            if(annToUpdate) {
+                const updatedData = { ...annToUpdate, IsCurrent: 1 };
+                await apiFetch(`/kpiannouncements/${btn.dataset.id}`, { method: 'PUT', body: updatedData }); 
+                showAnnouncementManager(); loadKpiPage();
+            }
+        }));
+    } catch (e) { document.getElementById('ann-list-content').innerHTML = `<span class="text-red-500">Error: ${e.message}</span>`; }
+}
+
+function showAnnouncementForm() {
+    const html = `
+        <form id="ann-form" class="space-y-5 px-1">
+            <div><label class="block text-sm font-bold text-slate-700 mb-1">Title *</label><input type="text" name="AnnouncementTitle" class="form-input w-full rounded-lg" required placeholder="e.g., Safety Goals 2024"></div>
+            <div><label class="block text-sm font-bold text-slate-700 mb-1">Effective Date</label><input type="text" id="ann-date" name="EffectiveDate" class="form-input w-full rounded-lg" required></div>
+            <div><label class="block text-sm font-bold text-slate-700 mb-1">Document Link (Optional)</label><input type="text" name="DocumentLink" class="form-input w-full rounded-lg" placeholder="https://..."></div>
+            <div class="flex items-center gap-2 pt-2"><input type="checkbox" name="IsCurrent" id="is-curr-ann" class="rounded text-blue-600 focus:ring-blue-500"> <label for="is-curr-ann" class="text-sm font-medium text-slate-700">Set as Current Active Announcement</label></div>
+            <div class="text-right pt-4 border-t"><button type="submit" class="btn btn-primary px-6">Create</button></div>
+        </form>`;
+    openModal('Create New Announcement', html, 'max-w-lg');
+    flatpickr("#ann-date", { locale: "th", dateFormat: "Y-m-d", defaultDate: "today" });
+
+    document.getElementById('ann-form').addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const formData = new FormData(e.target);
+        const data = Object.fromEntries(formData.entries());
+        data.IsCurrent = e.target.querySelector('[name="IsCurrent"]').checked ? 1 : 0;
+        try {
+            await apiFetch('/kpiannouncements', { method: 'POST', body: data });
+            closeModal(); showAnnouncementManager(); loadKpiPage();
+        } catch (err) { showError(err); }
+    });
+}
+
+function showKpiForm(kpi = null, announcementId = null) {
+    const isEditing = kpi !== null;
+    const title = isEditing ? 'Edit KPI Metric' : 'Add New KPI Metric';
+    
+    const yearSelect = document.getElementById('kpi-year-select');
+    const selectedYear = kpi?.Year || (yearSelect ? yearSelect.value : new Date().getFullYear());
+    const annIdToUse = kpi?.AnnouncementID || announcementId;
+    const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+    
+    const monthlyInputs = months.map((month) => {
+        const value = kpi?.[month];
+        return `
+        <div class="flex flex-col">
+            <label class="text-[10px] font-bold text-slate-400 uppercase mb-1 pl-1">${month}</label>
+            <input type="number" step="any" name="${month}" class="form-input w-full text-sm rounded-lg border-slate-200 focus:border-blue-500 focus:ring-1 focus:ring-blue-500 text-center" value="${value ?? ''}" placeholder="-">
+        </div>`;
+    }).join('');
+
+    const formHtml = `
+        <form id="kpi-form" novalidate class="space-y-6">
+            <input type="hidden" name="id" value="${kpi?.id || ''}">
+            <input type="hidden" name="Year" value="${selectedYear}">
+            <input type="hidden" name="AnnouncementID" value="${annIdToUse || ''}">
+            
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                <div><label class="block text-sm font-bold text-slate-700 mb-1">Metric Name *</label><input type="text" name="Metric" class="form-input w-full rounded-lg font-medium" value="${kpi?.Metric || ''}" required placeholder="e.g., Zero Accident"></div>
+                <div><label class="block text-sm font-bold text-slate-700 mb-1">Department</label><input type="text" name="Department" class="form-input w-full rounded-lg" value="${kpi?.Department || ''}" placeholder="e.g., Safety"></div>
+            </div>
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                <div><label class="block text-sm font-bold text-slate-700 mb-1">Unit</label><input type="text" name="Unit" class="form-input w-full rounded-lg" value="${kpi?.Unit || ''}" placeholder="e.g., Cases"></div>
+                <div><label class="block text-sm font-bold text-slate-700 mb-1">Target Limit (Max Allowed) *</label><input type="number" step="any" name="Target" class="form-input w-full rounded-lg border-amber-200 focus:border-amber-500 bg-amber-50/30 font-bold text-amber-700" value="${kpi?.Target || ''}" required></div>
+            </div>
+            
+            <div class="bg-slate-50 p-4 rounded-xl border border-slate-200">
+                <label class="block text-sm font-bold mb-3 text-slate-700 flex items-center gap-2">
+                    <svg class="w-4 h-4 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"/></svg>
+                    Monthly Data (Actual)
+                </label>
+                <div class="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-6 gap-3">${monthlyInputs}</div>
+            </div>
+
+            <div class="flex justify-end gap-3 pt-2 border-t">
+                <button type="button" class="btn px-5 py-2.5 rounded-lg text-slate-600 hover:bg-slate-100 font-medium transition-colors" onclick="document.getElementById('modal-close-btn').click()">Cancel</button>
+                <button type="submit" class="btn px-6 py-2.5 rounded-lg bg-slate-800 text-white hover:bg-slate-900 font-bold shadow-md transition-colors" id="btn-submit-kpi">Save KPI</button>
+            </div>
+        </form>`;
+    openModal(title, formHtml, 'max-w-4xl');
+    document.getElementById('kpi-form').addEventListener('submit', handleKpiFormSubmit);
+}
+
+async function handleKpiFormSubmit(event) {
+    event.preventDefault();
+    const form = event.target;
+    if (!form.Metric.value || !form.Target.value) return showToast('Metric Name and Target are required.', 'error');
+    
+    const submitBtn = document.getElementById('btn-submit-kpi');
+    submitBtn.disabled = true; submitBtn.innerHTML = '<span class="animate-spin inline-block w-4 h-4 border-2 border-white border-t-transparent rounded-full mr-2"></span>Saving...';
+    
+    const formData = new FormData(form);
+    const data = Object.fromEntries(formData.entries());
+    
+    if (!data.AnnouncementID) { showToast('Missing Announcement ID', 'error'); submitBtn.disabled = false; return; }
+    
+    const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+    months.forEach(m => { if (data[m] === '') data[m] = null; });
+    
+    const method = data.id ? 'PUT' : 'POST';
+    const endpoint = data.id ? `/kpidata/${data.id}` : '/kpidata';
+    
+    try {
+        await apiFetch(endpoint, { method: method, body: data });
+        closeModal(); await loadKpiPage(data.Year); showToast('KPI Saved Successfully', 'success');
+    } catch (error) { showError(error); } finally { if(submitBtn) { submitBtn.disabled = false; submitBtn.textContent = 'Save KPI'; } }
+}
+
+async function handleDeleteKpi(kpiId) {
+    hideLoading(); showLoading('Deleting...');
+    try {
+        await apiFetch(`/kpidata/${kpiId}`, { method: 'DELETE' });
+        await loadKpiPage(document.getElementById('kpi-year-select')?.value);
+        showToast('KPI Deleted');
+    } catch (error) { showError(error); } finally { hideLoading(); }
 }

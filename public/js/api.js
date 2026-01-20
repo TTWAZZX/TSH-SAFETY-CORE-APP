@@ -1,7 +1,6 @@
 // public/js/api.js
-// ป้องกันการเติม /api ซ้ำ และแนบ JWT ให้เอง
 
-const API_PREFIX = ''; // same-origin
+const API_PREFIX = 'http://localhost:5000'; // ✅ ชี้ไปที่ Server Port 5000
 
 function buildOptions(options = {}) {
   const opts = { ...options };
@@ -22,7 +21,12 @@ export async function apiFetch(endpoint, options = {}) {
   if (!path.startsWith('/')) path = '/' + path;
   if (!path.startsWith('/api/')) path = '/api' + path;
 
-  const res = await fetch(path, buildOptions(options));
+  // 🔴 จุดที่แก้ไข: เอา API_PREFIX มาต่อข้างหน้า path
+  const fullUrl = API_PREFIX + path; 
+  console.log(`Fetching: ${fullUrl}`); // ดู Log เพื่อความชัวร์
+
+  const res = await fetch(fullUrl, buildOptions(options)); // ✅ ใช้ fullUrl แทน path เพียวๆ
+
   if (res.status === 204 || res.headers.get('content-length') === '0') return { success: true };
   if (!res.ok) {
     let msg = `HTTP ${res.status}`;

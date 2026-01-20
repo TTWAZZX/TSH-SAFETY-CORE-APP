@@ -1,409 +1,336 @@
-// js/pages/policy.js
-
 import { apiFetch } from '../api.js';
-import { hideLoading, showError, showLoading, showInfoModal, openModal, closeModal, showDocumentModal, showToast } from '../ui.js';
+import { hideLoading, showError, showLoading, openModal, closeModal, showDocumentModal, showToast, showConfirmationModal } from '../ui.js';
 
-// Global variables for this page
+// --- Global State ---
 let allPolicies = [];
-let policyEventListenersInitialized = false; // **ตัวแปร Flag ที่เพิ่มเข้ามา**
+let policyEventListenersInitialized = false;
 
-// --- SVG Icons สำหรับใส่ใน Input ---
-    const titleIcon = `<svg class="w-5 h-5 text-slate-400" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor"><path d="M5.433 13.917l1.262-3.155A4 4 0 017.58 9.42l6.92-6.918a2.121 2.121 0 013 3l-6.92 6.918c-.383.383-.84.685-1.343.886l-3.154 1.262a.5.5 0 01-.65-.65z" /><path d="M3.5 5.75c0-.69.56-1.25 1.25-1.25H10A.75.75 0 0010 3H4.75A2.75 2.75 0 002 5.75v9.5A2.75 2.75 0 004.75 18h9.5A2.75 2.75 0 0017 15.25V10a.75.75 0 00-1.5 0v5.25c0 .69-.56 1.25-1.25 1.25h-9.5c-.69 0-1.25-.56-1.25-1.25v-9.5z" /></svg>`;
-    const dateIcon = `<svg class="w-5 h-5 text-slate-400" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M5.75 2a.75.75 0 01.75.75V4h7V2.75a.75.75 0 011.5 0V4h.25A2.75 2.75 0 0118 6.75v8.5A2.75 2.75 0 0115.25 18H4.75A2.75 2.75 0 012 15.25v-8.5A2.75 2.75 0 014.75 4H5V2.75A.75.75 0 015.75 2zm-1 5.5c0-.414.336-.75.75-.75h10.5a.75.75 0 010 1.5H5.5a.75.75 0 01-.75-.75z" clip-rule="evenodd" /></svg>`;
-    const linkIcon = `<svg class="w-5 h-5 text-slate-400" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor"><path d="M12.232 4.232a2.5 2.5 0 013.536 3.536l-1.225 1.224a.75.75 0 001.061 1.06l1.224-1.224a4 4 0 00-5.656-5.656l-3 3a4 4 0 00.225 5.865.75.75 0 00.977-1.138 2.5 2.5 0 01-.142-3.665l3-3z" /><path d="M8.603 14.397a2.5 2.5 0 01-3.536-3.536l1.225-1.224a.75.75 0 00-1.061-1.06l-1.224 1.224a4 4 0 005.656 5.656l3-3a4 4 0 00-.225-5.865.75.75 0 00-.977 1.138 2.5 2.5 0 01.142 3.665l-3 3z" /></svg>`;
-
-
-// --- Event Listener หลักของหน้า (เวอร์ชันปรับปรุง) ---
-function setupPolicyPageEventListeners() {
+// --- Main Page Loader ---
+export async function loadPolicyPage() {
+    console.log("📄 Loading Policy Page...");
     const container = document.getElementById('policy-page');
-    if (!container) return; // ป้องกัน Error ถ้าไม่มี container
+    
+    // Initialize Listeners Once
+    if (!policyEventListenersInitialized) {
+        setupPolicyPageEventListeners();
+        policyEventListenersInitialized = true;
+    }
 
-    container.addEventListener('click', async (event) => {
+    // ✅ 1. ตรวจสอบข้อมูลผู้ใช้และสิทธิ์ Admin
+    const userStr = localStorage.getItem('currentUser');
+    const currentUser = userStr ? JSON.parse(userStr) : null;
+
+    // เช็คสิทธิ์แบบละเอียด (รองรับทั้งตัวเล็ก/ตัวใหญ่)
+    const isAdmin = currentUser && (
+        (currentUser.role && currentUser.role.toLowerCase() === 'admin') || 
+        (currentUser.Role && currentUser.Role.toLowerCase() === 'admin') ||
+        (currentUser.id === 'admin') // Hardcode เผื่อฉุกเฉิน
+    );
+
+    // Debug: ดูว่าระบบมองว่าเป็น Admin หรือไม่
+    console.log(`Current User: ${currentUser?.name}, Role: ${currentUser?.role}, IsAdmin: ${isAdmin}`);
+
+    // 1. Setup Layout Structure
+    container.innerHTML = `
+        <div class="p-6 max-w-7xl mx-auto space-y-8 animate-fade-in">
+            
+            <div class="flex flex-col md:flex-row justify-between items-end gap-4 border-b border-slate-200 pb-5">
+                <div>
+                    <h1 class="text-2xl font-bold text-slate-800 flex items-center gap-2">
+                        <svg class="w-6 h-6 text-slate-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/></svg>
+                        นโยบายความปลอดภัย (Safety Policy)
+                    </h1>
+                    <p class="text-sm text-slate-500 mt-1">ข้อกำหนดและแนวทางปฏิบัติด้านความปลอดภัย อาชีวอนามัย และสภาพแวดล้อมในการทำงาน</p>
+                </div>
+                
+                ${isAdmin ? `
+                <button id="btn-add-policy" class="flex items-center gap-2 bg-slate-800 hover:bg-slate-900 text-white px-4 py-2 rounded-lg text-sm font-medium transition-colors shadow-sm">
+                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/></svg>
+                    เพิ่มนโยบายใหม่
+                </button>` : ''}
+            </div>
+
+            <div id="current-policy-container">
+                <div class="py-12 text-center text-slate-400">
+                    <div class="inline-block animate-spin rounded-full h-8 w-8 border-4 border-blue-500 border-t-transparent mb-3"></div>
+                    <p>กำลังโหลดข้อมูล...</p>
+                </div>
+            </div>
+
+            <div>
+                <h3 class="text-lg font-bold text-slate-700 mb-4 flex items-center gap-2 border-l-4 border-slate-300 pl-3">
+                    <svg class="w-5 h-5 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+                    ประวัติย้อนหลัง (History)
+                </h3>
+                <div id="past-policy-container" class="grid grid-cols-1 md:grid-cols-2 gap-4"></div>
+            </div>
+        </div>
+    `;
+
+    // 2. Fetch Data
+    try {
+        const data = await apiFetch('/pagedata/policies'); 
+        
+        let current = data.current;
+        let past = data.past || [];
+
+        // Fallback กรณี API ส่งมาเป็น Array รวม
+        if (Array.isArray(data)) {
+             current = data.find(p => p.IsCurrent == 1) || data[0];
+             past = data.filter(p => p.id !== current?.id);
+        }
+
+        allPolicies = [current, ...past].filter(Boolean);
+
+        // ✅ ส่งค่า isAdmin ไปให้ฟังก์ชัน Render
+        renderCurrentPolicy(current, isAdmin);
+        renderPastPolicies(past, isAdmin);
+
+    } catch (error) {
+        console.error("Error loading policies:", error);
+        document.getElementById('current-policy-container').innerHTML = `
+            <div class="bg-red-50 text-red-600 p-4 rounded-lg border border-red-200 text-center">
+                เกิดข้อผิดพลาดในการโหลดข้อมูล: ${error.message}
+            </div>`;
+    }
+}
+
+// --- Render Functions ---
+function renderCurrentPolicy(policy, isAdmin) {
+    const container = document.getElementById('current-policy-container');
+    
+    if (!policy) {
+        container.innerHTML = `
+            <div class="p-10 text-center bg-slate-50 rounded-xl border border-dashed border-slate-300">
+                <svg class="w-12 h-12 mx-auto mb-3 text-slate-300" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/></svg>
+                <p class="text-slate-500">ยังไม่มีการประกาศนโยบายปัจจุบัน</p>
+            </div>`;
+        return;
+    }
+
+    container.innerHTML = `
+        <div class="bg-white rounded-xl shadow-lg border border-slate-200 overflow-hidden relative group transition-all hover:shadow-xl">
+            <div class="absolute top-0 left-0 w-1 h-full bg-blue-600"></div>
+            
+            <div class="p-6 md:p-8">
+                <div class="flex flex-col md:flex-row justify-between items-start gap-4 mb-6">
+                    <div>
+                        <div class="flex items-center gap-2 mb-3">
+                            <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-bold bg-blue-100 text-blue-700 border border-blue-200">
+                                <svg class="w-3 h-3 mr-1" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clip-rule="evenodd"/></svg>
+                                ฉบับปัจจุบัน (Active)
+                            </span>
+                            <span class="text-xs text-slate-400 font-mono">ID: ${policy.id || policy.PolicyID}</span>
+                        </div>
+                        <h2 class="text-2xl md:text-3xl font-bold text-slate-800 leading-tight">
+                            ${policy.PolicyTitle}
+                        </h2>
+                        <div class="flex items-center gap-2 mt-2 text-sm text-slate-500">
+                            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"/></svg>
+                            วันที่มีผลบังคับใช้: <span class="font-semibold text-slate-700">${formatDate(policy.EffectiveDate)}</span>
+                        </div>
+                    </div>
+
+                    ${isAdmin ? `
+                    <div class="flex gap-2">
+                        <button class="btn-edit-policy p-2 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors" data-id="${policy.id || policy.PolicyID}" title="แก้ไข">
+                            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z"/></svg>
+                        </button>
+                    </div>` : ''}
+                </div>
+
+                <div class="prose prose-slate max-w-none bg-slate-50/80 p-6 rounded-lg border border-slate-100 text-slate-700">
+                    <p class="whitespace-pre-wrap leading-relaxed">${policy.Description || 'ไม่มีรายละเอียดเพิ่มเติม'}</p>
+                </div>
+
+                ${policy.DocumentLink ? `
+                <div class="mt-6 pt-4 border-t border-slate-100">
+                    <a href="${policy.DocumentLink}" data-action="view-doc" class="inline-flex items-center gap-2 px-4 py-2 bg-slate-800 text-white text-sm font-medium rounded-lg hover:bg-slate-900 transition-colors shadow-sm">
+                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"/></svg>
+                        เปิดดูเอกสารแนบ (View Document)
+                    </a>
+                </div>` : ''}
+            </div>
+        </div>
+    `;
+}
+
+function renderPastPolicies(policies, isAdmin) {
+    const container = document.getElementById('past-policy-container');
+    
+    if (!policies.length) {
+        container.innerHTML = `<p class="text-slate-400 text-sm col-span-full italic">ไม่มีประวัติย้อนหลัง</p>`;
+        return;
+    }
+
+    container.innerHTML = policies.map(p => `
+        <div class="bg-white p-4 rounded-xl border border-slate-200 hover:border-blue-300 transition-all shadow-sm group flex justify-between items-start">
+            <div>
+                <h4 class="font-semibold text-slate-800 group-hover:text-blue-700 transition-colors">${p.PolicyTitle}</h4>
+                <div class="text-xs text-slate-500 mt-1 flex items-center gap-2">
+                    <span class="bg-slate-100 px-2 py-0.5 rounded">ปี ${new Date(p.EffectiveDate).getFullYear() + 543}</span>
+                    <span>${formatDate(p.EffectiveDate)}</span>
+                </div>
+                ${p.DocumentLink ? `
+                <a href="${p.DocumentLink}" data-action="view-doc" class="text-xs text-blue-500 hover:underline mt-2 inline-flex items-center gap-1">
+                    <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1"/></svg>
+                    เอกสารแนบ
+                </a>` : ''}
+            </div>
+            
+            ${isAdmin ? `
+            <div class="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                <button class="btn-edit-policy p-1.5 text-slate-400 hover:text-blue-600 rounded" data-id="${p.id || p.PolicyID}">
+                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z"/></svg>
+                </button>
+                <button class="btn-delete-policy p-1.5 text-slate-400 hover:text-red-600 rounded" data-id="${p.id || p.PolicyID}">
+                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg>
+                </button>
+            </div>` : ''}
+        </div>
+    `).join('');
+}
+
+// --- Event Handling ---
+function setupPolicyPageEventListeners() {
+    document.addEventListener('click', async (event) => {
+        if (!event.target.closest('#policy-page')) return;
+        
         const target = event.target;
 
-        // --- จัดการปุ่มต่างๆ ด้วย if ... else if ---
-        const addBtn = target.closest('#btn-add-policy');
-        const editBtn = target.closest('.btn-edit-policy');
-        const deleteBtn = target.closest('.btn-delete-policy');
-        const ackBtn = target.closest('.btn-acknowledge-policy');
-        const viewDocBtn = target.closest('[data-action="view-doc"]');
-
-        if (addBtn) {
+        if (target.closest('#btn-add-policy')) {
             showPolicyForm();
+            return;
+        }
 
-        } else if (editBtn) {
+        const editBtn = target.closest('.btn-edit-policy');
+        if (editBtn) {
             const policyId = editBtn.dataset.id;
-            const policyToEdit = allPolicies.find(p => p.id == policyId);
+            const policyToEdit = allPolicies.find(p => String(p.id || p.PolicyID) === String(policyId));
             if (policyToEdit) showPolicyForm(policyToEdit);
+            return;
+        }
 
-        } else if (deleteBtn) {
+        const deleteBtn = target.closest('.btn-delete-policy');
+        if (deleteBtn) {
             const policyId = deleteBtn.dataset.id;
-            const policyTitle = allPolicies.find(p => p.id == policyId)?.PolicyTitle || 'รายการนี้';
+            const confirmed = await showConfirmationModal('ยืนยันการลบ', 'คุณต้องการลบนโยบายนี้ใช่หรือไม่? การกระทำนี้ไม่สามารถย้อนกลับได้');
             
-            if (confirm(`คุณต้องการลบนโยบาย "${policyTitle}" ใช่หรือไม่?`)) {
+            if (confirmed) {
                 showLoading('กำลังลบข้อมูล...');
                 try {
-                    await apiFetch(`/api/policies/${policyId}`, { method: 'DELETE' });
-                    closeModal(); // ปิด Modal เผื่อมีเปิดค้าง
-                    await loadPolicyPage(); // โหลดหน้าใหม่
-                    showInfoModal('สำเร็จ', 'ลบนโยบายเรียบร้อยแล้ว');
+                    await apiFetch(`/policies/${policyId}`, { method: 'DELETE' });
+                    await loadPolicyPage(); 
+                    showToast('ลบข้อมูลเรียบร้อยแล้ว', 'success');
                 } catch (error) {
                     showError(error);
                 } finally {
                     hideLoading();
                 }
             }
-        } else if (ackBtn) {
-            await handleAcknowledge(ackBtn);
-            
-        } else if (viewDocBtn) {
-            event.preventDefault(); // หยุดไม่ให้ลิงก์ทำงานปกติ
-            const url = viewDocBtn.href;
-            const title = viewDocBtn.closest('.card').querySelector('h3').textContent;
-            showDocumentModal(url, `เอกสาร: ${title}`);
+            return;
+        }
+
+        const viewDocBtn = target.closest('[data-action="view-doc"]');
+        if (viewDocBtn) {
+            event.preventDefault();
+            showDocumentModal(viewDocBtn.href, 'เอกสารแนบ');
+            return;
         }
     });
 }
 
-export async function loadPolicyPage() {
-    const currentUser = JSON.parse(localStorage.getItem('currentUser'));
-    const isAdmin = currentUser?.role === 'Admin';
-
-    const container = document.getElementById('policy-page');
-    const adminButtonHtml = isAdmin ? `
-        <button id="btn-add-policy" class="btn btn-primary">
-            <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 mr-2" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M10 3a1 1 0 011 1v5h5a1 1 0 110 2h-5v5a1 1 0 11-2 0v-5H4a1 1 0 110-2h5V4a1 1 0 011-1z" clip-rule="evenodd" /></svg>
-            เพิ่มนโยบายใหม่
-        </button>` : '';
-
-    container.innerHTML = `
-        <div class="flex justify-between items-center mb-6 flex-wrap gap-4">
-            <h2 class="text-2xl font-bold">นโยบายความปลอดภัย</h2>
-            ${adminButtonHtml}
-        </div>
-        <div id="current-policy-container" class="mb-6"><div class="card p-4">กำลังโหลดนโยบายปัจจุบัน...</div></div>
-        <div>
-            <h3 class="text-lg font-semibold mb-3 border-b dark:border-slate-700 pb-2">ประวัติ</h3>
-            <div id="past-policy-container" class="space-y-4"><div class="card p-4">กำลังโหลดประวัติ...</div></div>
-        </div>
-    `;
-
-    // --- **ส่วนที่แก้ไข** ---
-    // ย้ายการเรียกใช้ Event Listener มาไว้ตรงนี้ และเรียกแค่ครั้งแรกครั้งเดียว
-    if (!policyEventListenersInitialized) {
-        setupPolicyPageEventListeners();
-        policyEventListenersInitialized = true;
-    }
-    // --- **สิ้นสุดส่วนที่แก้ไข** ---
-
-    try {
-        const data = await apiFetch('/api/pagedata/policies'); // <--- แก้เป็น pagedata
-        console.log("1. Data received from API:", data); // <--- เพิ่มบรรทัดนี้
-        allPolicies = [data.current, ...(data.past || [])].filter(Boolean);
-        renderPolicyCards(data);
-    } catch (error) {
-        showError(error);
-        container.innerHTML = `<div class="card p-4 text-red-500">ไม่สามารถโหลดข้อมูลนโยบายได้</div>`;
-    } finally {
-        hideLoading();
-    }
-}
-
-function renderPolicyCards(data) {
-    console.log("2. renderPolicyCards called with:", data); // <--- เพิ่มบรรทัดนี้
-    const currentContainer = document.getElementById('current-policy-container');
-    const pastContainer = document.getElementById('past-policy-container');
-    const { current, past } = data;
-
-    if (!current) {
-        currentContainer.innerHTML = `<div class="card p-4">ไม่พบนโยบายปัจจุบัน</div>`;
-    } else {
-        currentContainer.innerHTML = createPolicyCard(current, true);
-    }
-    pastContainer.innerHTML = past && past.length > 0
-        ? past.map(p => createPolicyCard(p, false)).join('')
-        : `<div class="card p-4 text-center text-slate-500">ไม่มีประวัติ</div>`;
-}
-
-// js/pages/policy.js
-
-function createPolicyCard(policy, isCurrent) {
-    if (!policy) return '';
-
-    const currentUser = JSON.parse(localStorage.getItem('currentUser'));
-    const isAdmin = currentUser?.role === 'Admin';
-
-    // --- ส่วนนี้คือโค้ดเดิม ไม่ต้องแก้ไข ---
-    let ackList = [];
-    try { if (policy.AcknowledgedBy) ackList = JSON.parse(policy.AcknowledgedBy); } catch (e) {}
-    
-    const isAcknowledged = currentUser?.name ? ackList.includes(currentUser.name) : false;
-    const effectiveDate = policy.EffectiveDate ? new Date(policy.EffectiveDate).toISOString().split('T')[0] : '';
-    const displayDate = effectiveDate ? new Date(effectiveDate).toLocaleDateString('th-TH', { year: 'numeric', month: 'long', day: 'numeric' }) : 'N/A';
-
-    const adminButtons = isAdmin ? `
-        <div class="mt-4 pt-4 border-t dark:border-slate-700 flex items-center gap-3">
-            <button data-id="${policy.id}" class="btn btn-secondary btn-sm btn-edit-policy">แก้ไข</button>
-            <button data-id="${policy.id}" class="btn btn-danger btn-sm btn-delete-policy">ลบ</button>
-        </div>
-    ` : '';
-    
-    // --- จุดที่แก้ไข ---
-    // เราต้องประกาศตัวแปร const cardHtml = ก่อน แล้วตามด้วย ` (backtick)
-    const cardHtml = `
-    <div class="card p-5" id="policy-card-${policy.id}">
-        ${isCurrent ? '<div class="text-xs font-bold uppercase text-green-600 dark:text-green-400 mb-2">นโยบายปัจจุบัน</div>' : ''}
-        <div class="flex justify-between items-start flex-wrap gap-4">
-            <div class="flex-grow">
-                <h3 class="text-lg font-semibold text-blue-600 dark:text-blue-400">${policy.PolicyTitle || 'N/A'}</h3>
-                <p class="text-sm text-slate-500 dark:text-slate-400 mb-4">วันที่บังคับใช้: ${displayDate}</p>
-                <p class="whitespace-pre-wrap mb-4">${policy.Description || ''}</p>
-                ${policy.DocumentLink ? `<a href="${policy.DocumentLink}" data-action="view-doc" class="btn btn-secondary">เปิดเอกสาร</a>` : ''}
-            </div>
-            <div class="flex-shrink-0 space-y-3 text-right">
-                <div>
-                    ${isAcknowledged ? 
-                        `<span class="inline-flex items-center px-3 py-1 rounded-full text-sm font-medium bg-green-100 dark:bg-green-900/50 text-green-800 dark:text-green-300">รับทราบแล้ว</span>` : 
-                        `<button data-row-index="${policy.id}" class="btn btn-primary btn-acknowledge-policy">รับทราบ</button>`
-                    }
-                </div>
-            </div>
-        </div>
-        ${adminButtons}
-    </div>`;
-
-    // console.log ของเรายังอยู่เหมือนเดิม
-    console.log(`3. HTML generated for policy ID ${policy.id}:`, cardHtml);
-    
-    // และ return ตัวแปรที่เพิ่งสร้าง
-    return cardHtml;
-}
-
-function updateFileUploadUI(fileUrl) {
-    const container = document.getElementById('file-upload-area');
-    if (!container) return;
-
-    if (fileUrl) {
-        // UI กรณีมีไฟล์อยู่แล้ว (ตอนแก้ไข หรือหลังอัปโหลดสำเร็จ)
-        container.innerHTML = `
-            <div class="flex items-center justify-between p-3 border rounded-lg bg-slate-50 dark:bg-slate-700 dark:border-slate-600">
-                <a href="${fileUrl}" target="_blank" rel="noopener noreferrer" class="text-blue-500 hover:underline truncate text-sm">
-                    ดูไฟล์ปัจจุบัน
-                </a>
-                <button type="button" id="btn-remove-file" class="btn btn-secondary btn-sm">เปลี่ยนไฟล์</button>
-            </div>
-        `;
-        document.getElementById('btn-remove-file').addEventListener('click', () => {
-            document.getElementById('DocumentLink').value = '';
-            updateFileUploadUI(null);
-        });
-    } else {
-        // UI กรณีที่ยังไม่มีไฟล์ หรือต้องการอัปโหลดใหม่
-        container.innerHTML = `
-            <input type="file" id="file-input" class="form-input text-sm" accept=".pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.jpg,.jpeg,.png">
-            <div id="upload-progress" class="hidden mt-2 text-sm text-slate-500">
-                <div class="animate-spin rounded-full h-4 w-4 border-t-2 border-b-2 border-blue-500 inline-block mr-2"></div>
-                กำลังอัปโหลด...
-            </div>
-        `;
-        document.getElementById('file-input').addEventListener('change', handleFileUpload);
-    }
-}
-
-async function handleFileUpload(event) {
-    const fileInput = event.target;
-    const file = fileInput.files[0];
-    if (!file) return;
-
-    const progressEl = document.getElementById('upload-progress');
-    progressEl.classList.remove('hidden');
-    fileInput.disabled = true;
-
-    const formData = new FormData();
-    formData.append('document', file); // 'document' ต้องตรงกับชื่อใน `upload.single()` ที่ backend
-
-    try {
-        const result = await apiFetch('/api/upload/document', {
-            method: 'POST',
-            body: formData,
-        });
-
-        if (result.success) {
-            document.getElementById('DocumentLink').value = result.url;
-            updateFileUploadUI(result.url); // อัปเดต UI ให้แสดงว่าอัปโหลดสำเร็จ
-            showToast('อัปโหลดไฟล์สำเร็จ');
-        }
-    } catch (error) {
-        // showError(error) ถูกเรียกจาก apiFetch แล้ว
-        updateFileUploadUI(null); // กลับไปหน้าอัปโหลดใหม่
-    }
-}
-
-function createPolicyFormHtml(policy, effectiveDate) {
-    const isEditing = policy !== null;
-    
-    // *** ผมได้แก้ไขโครงสร้าง HTML ที่ซ้อนกันผิดพลาดให้ในนี้แล้ว ***
-    return `
-      <form id="policy-form" class="space-y-4" novalidate>
-        <div id="modal-content-body" class="p-6 space-y-6">
-            <input type="hidden" name="id" value="${policy?.id || ''}">
-            
-            <div class="form-group">
-                <input type="text" id="PolicyTitle" name="PolicyTitle" class="form-field w-full rounded-lg p-3" value="${policy?.PolicyTitle || ''}" required placeholder=" ">
-                <label for="PolicyTitle" class="form-label-floating">หัวข้อนโยบาย *</label>
-                <div class="error-message hidden mt-1 text-sm text-red-500">กรุณากรอกหัวข้อ</div>
-            </div>
-
-            <div class="form-group">
-                <textarea id="Description" name="Description" class="form-field w-full rounded-lg p-3" rows="5" placeholder=" ">${policy?.Description || ''}</textarea>
-                <label for="Description" class="form-label-floating">รายละเอียด</label>
-            </div>
-
-            <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
-                <div class="form-group">
-                    <input type="text" id="EffectiveDate" name="EffectiveDate" class="form-field w-full rounded-lg p-3" value="${effectiveDate}" required placeholder=" ">
-                    <label for="EffectiveDate" class="form-label-floating">วันที่บังคับใช้ *</label>
-                    <div class="error-message hidden mt-1 text-sm text-red-500">กรุณาเลือกวันที่</div>
-                </div>
-                <div class="form-group">
-                    <label class="form-label block mb-1 text-sm text-slate-700 dark:text-slate-300">เอกสารแนบ</label>
-                    <div id="file-upload-area"></div>
-                    <input type="hidden" id="DocumentLink" name="DocumentLink" value="${policy?.DocumentLink || ''}">
-                </div>
-            </div>
-
-            <div class="rounded-lg border dark:border-slate-700 p-4 flex items-center justify-between">
-                <span class="text-slate-800 dark:text-slate-200 font-medium">ตั้งเป็นนโยบายปัจจุบัน</span>
-                <label for="IsCurrent" class="relative inline-flex items-center cursor-pointer">
-                    <input type="checkbox" id="IsCurrent" name="IsCurrent" class="sr-only peer" ${policy?.IsCurrent ? 'checked' : ''}>
-                    <div class="w-11 h-6 bg-slate-200 dark:bg-slate-600 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-0.5 after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all dark:border-slate-500 peer-checked:bg-blue-600"></div>
-                </label>
-            </div>
-        </div>
-        <div id="modal-content-footer" class="flex justify-end items-center gap-3 p-4 bg-slate-50 dark:bg-slate-800/50 border-t dark:border-slate-700 rounded-b-xl">
-            <button type="button" class="btn btn-secondary" id="btn-cancel-modal">ยกเลิก</button>
-            <button type="submit" class="btn btn-primary" id="btn-submit-policy">
-                <span>${isEditing ? 'บันทึกการเปลี่ยนแปลง' : 'สร้างนโยบาย'}</span>
-                <div class="loader hidden animate-spin rounded-full h-5 w-5 border-t-2 border-b-2 border-white"></div>
-            </button>
-        </div>
-      </form>
-    `;
-}
-
-function initializeFormLogic(policy) {
-    updateFileUploadUI(policy?.DocumentLink || null);
-
-    flatpickr("#EffectiveDate", {
-        altInput: true,
-        altFormat: "j F Y",
-        dateFormat: "Y-m-d",
-        locale: "th",
-    });
-
-    const form = document.getElementById('policy-form');
-    form.querySelectorAll('[required]').forEach(input => {
-        input.addEventListener('blur', () => validateInput(input));
-        input.addEventListener('input', () => {
-            if (input.classList.contains('is-invalid')) validateInput(input);
-        });
-    });
-
-    form.addEventListener('submit', handlePolicyFormSubmit);
-    document.getElementById('btn-cancel-modal').addEventListener('click', closeModal);
-}
-
+// --- Form & Modal Logic ---
 function showPolicyForm(policy = null) {
     const isEditing = policy !== null;
-    const title = isEditing ? 'แก้ไขนโยบาย' : 'สร้างนโยบายใหม่';
-    const effectiveDate = policy?.EffectiveDate ? new Date(policy.EffectiveDate).toISOString().split('T')[0] : '';
-
-    // 1. สร้าง HTML จากฟังก์ชันที่แยกไว้
-    const formHtml = createPolicyFormHtml(policy, effectiveDate);
+    const title = isEditing ? 'แก้ไขนโยบาย' : 'เพิ่มนโยบายใหม่';
     
-    // 2. เปิด Modal
-    openModal(title, formHtml, 'max-w-3xl no-padding');
-    
-    // 3. เรียกใช้ Logic เพื่อทำให้ฟอร์มทำงาน
-    initializeFormLogic(policy);
-}
+    const html = `
+        <form id="policy-form" class="space-y-5 px-1">
+            <input type="hidden" name="id" value="${policy?.id || policy?.PolicyID || ''}">
+            
+            <div class="bg-blue-50 text-blue-800 p-3 rounded-lg text-sm border border-blue-100 flex gap-2">
+                <svg class="w-5 h-5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+                <span>กรุณาใส่ลิงก์เอกสารจากแหล่งที่เชื่อถือได้ (เช่น SharePoint, Google Drive)</span>
+            </div>
 
-// --- เพิ่มฟังก์ชันสำหรับ Validate Input ---
-function validateInput(input) {
-    const errorMessage = input.parentElement.querySelector('.error-message');
-    if (!input.checkValidity()) {
-        input.classList.add('is-invalid');
-        errorMessage.classList.remove('hidden');
-        return false;
-    } else {
-        input.classList.remove('is-invalid');
-        errorMessage.classList.add('hidden');
-        return true;
-    }
-}
+            <div>
+                <label class="block text-sm font-bold text-slate-700 mb-1">หัวข้อนโยบาย <span class="text-red-500">*</span></label>
+                <div class="relative">
+                    <input type="text" name="PolicyTitle" class="form-input w-full rounded-lg" 
+                           value="${policy?.PolicyTitle || ''}" required placeholder="ระบุชื่อนโยบาย (เช่น นโยบายความปลอดภัย ปี 2567)">
+                </div>
+            </div>
 
-// --- แก้ไข handlePolicyFormSubmit ให้มีการ Validate ก่อนส่ง ---
-async function handlePolicyFormSubmit(event) {
-    event.preventDefault();
-    const form = event.target;
-    let isFormValid = true;
-    form.querySelectorAll('[required]').forEach(input => {
-        if (!validateInput(input)) {
-            isFormValid = false;
-        }
+            <div>
+                <label class="block text-sm font-bold text-slate-700 mb-1">รายละเอียด (Description)</label>
+                <textarea name="Description" class="form-textarea w-full rounded-lg h-24 resize-none" 
+                          placeholder="รายละเอียดเพิ่มเติม...">${policy?.Description || ''}</textarea>
+            </div>
+
+            <div class="grid grid-cols-2 gap-4">
+                <div>
+                    <label class="block text-sm font-bold text-slate-700 mb-1">วันที่บังคับใช้ <span class="text-red-500">*</span></label>
+                    <input type="text" id="EffectiveDate" name="EffectiveDate" class="form-input w-full rounded-lg bg-white" 
+                           value="${policy?.EffectiveDate ? new Date(policy.EffectiveDate).toISOString().split('T')[0] : ''}" required>
+                </div>
+                <div>
+                    <label class="block text-sm font-bold text-slate-700 mb-1">ลิงก์เอกสาร (URL)</label>
+                    <input type="text" name="DocumentLink" class="form-input w-full rounded-lg" 
+                           value="${policy?.DocumentLink || ''}" placeholder="https://...">
+                </div>
+            </div>
+
+            <div class="flex items-center gap-2 py-2">
+                <input type="checkbox" id="IsCurrent" name="IsCurrent" class="rounded text-blue-600 w-4 h-4 focus:ring-blue-500" 
+                       ${policy?.IsCurrent ? 'checked' : ''}>
+                <label for="IsCurrent" class="text-sm font-medium text-slate-700 cursor-pointer select-none">ตั้งเป็นนโยบายฉบับปัจจุบัน (Active)</label>
+            </div>
+
+            <div class="flex justify-end gap-3 mt-6 pt-4 border-t border-slate-100">
+                <button type="button" class="px-5 py-2.5 rounded-lg text-slate-600 hover:bg-slate-100 text-sm font-medium transition-colors" onclick="document.getElementById('modal-close-btn').click()">ยกเลิก</button>
+                <button type="submit" class="px-6 py-2.5 rounded-lg bg-slate-800 text-white hover:bg-slate-900 text-sm font-bold shadow-md transition-colors">บันทึกข้อมูล</button>
+            </div>
+        </form>
+    `;
+
+    openModal(title, html, 'max-w-2xl');
+
+    flatpickr("#EffectiveDate", { 
+        locale: "th", 
+        dateFormat: "Y-m-d",
+        defaultDate: policy?.EffectiveDate || "today"
     });
 
-    if (!isFormValid) {
-        showToast('กรุณากรอกข้อมูลที่จำเป็นให้ครบถ้วน', 'error');
-        return;
-    }
-    
-    // ... โค้ดส่วนที่เหลือของ handlePolicyFormSubmit เหมือนเดิม ...
-    const submitBtn = document.getElementById('btn-submit-policy');
-    const btnText = submitBtn.querySelector('span');
-    const btnLoader = submitBtn.querySelector('.loader');
+    document.getElementById('policy-form').addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const submitBtn = e.target.querySelector('button[type="submit"]');
+        submitBtn.disabled = true;
+        submitBtn.innerHTML = '<span class="animate-spin inline-block w-4 h-4 border-2 border-white border-t-transparent rounded-full mr-2"></span> กำลังบันทึก...';
 
-    submitBtn.disabled = true;
-    btnText.classList.add('hidden');
-    btnLoader.classList.remove('hidden');
+        const formData = new FormData(e.target);
+        const data = Object.fromEntries(formData.entries());
+        data.IsCurrent = e.target.querySelector('#IsCurrent').checked ? 1 : 0;
 
-    const formData = new FormData(form);
-    const data = Object.fromEntries(formData.entries());
-    data.IsCurrent = form.querySelector('#IsCurrent').checked;
+        try {
+            const method = data.id ? 'PUT' : 'POST';
+            const url = data.id ? `/policies/${data.id}` : '/policies'; 
 
-    const method = data.id ? 'PUT' : 'POST';
-    const endpoint = data.id ? `/api/policies/${data.id}` : '/api/policies';
+            await apiFetch(url, { method, body: data });
 
-    try {
-        const result = await apiFetch(endpoint, { method: method, body: data });
-        closeModal();
-        await loadPolicyPage();
-        showToast(result.message);
-    } catch (error) {
-        showError(error);
-    } finally {
-        submitBtn.disabled = false;
-        btnText.classList.remove('hidden');
-        btnLoader.classList.add('hidden');
-    }
+            closeModal();
+            showToast('บันทึกข้อมูลเรียบร้อยแล้ว', 'success');
+            await loadPolicyPage(); 
+        } catch (error) {
+            showError(error);
+        } finally {
+            submitBtn.disabled = false;
+            submitBtn.textContent = 'บันทึกข้อมูล';
+        }
+    });
 }
 
-async function handleAcknowledge(button) {
-    const rowIndex = button.dataset.rowIndex;
-    button.disabled = true;
-    showLoading('กำลังบันทึกการรับทราบ...');
-    try {
-        const result = await apiFetch(`/api/policies/${rowIndex}/acknowledge`, { method: 'POST' });
-        if (result.status === 'success') {
-            await loadPolicyPage();
-        } else {
-            showInfoModal('ผิดพลาด', result.message);
-            button.disabled = false;
-        }
-    } catch (error) {
-        showError(error);
-        button.disabled = false;
-    } finally {
-        hideLoading();
-    }
+function formatDate(dateStr) {
+    if (!dateStr) return '-';
+    return new Date(dateStr).toLocaleDateString('th-TH', { year: 'numeric', month: 'long', day: 'numeric' });
 }

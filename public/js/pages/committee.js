@@ -1,462 +1,316 @@
-// public/js/pages/committee.js
-// เวอร์ชันเข้ากับ backend ปัจจุบัน (pagedata/committees => { success, items })
-
 import { apiFetch } from '../api.js';
 import {
   showLoading, hideLoading, showError, showToast,
   openModal, closeModal, showConfirmationModal, showDocumentModal
 } from '../ui.js';
 
-// --- Utils ---
+let allCommittees = [];
+let committeeEventListenersInitialized = false;
+let tempSubCommittees = [];
+
 function parseSubData(maybeJson) {
+  if (!maybeJson) return [];
   if (Array.isArray(maybeJson)) return maybeJson;
   if (typeof maybeJson === 'string') {
     try { return JSON.parse(maybeJson); } catch { return []; }
   }
   return [];
 }
+
 function normalizeCommittee(raw) {
+  if (!raw) return null;
   const c = { ...raw };
   c.SubCommitteeData = parseSubData(raw.SubCommitteeData);
   return c;
 }
 
-// --- Global Variables ---
-let activeCommitteeDataInModal = null;
-let allCommittees = [];
-let committeeEventListenersInitialized = false;
-
-// --- Main Page Flow ---
 export async function loadCommitteePage() {
   const container = document.getElementById('committee-page');
-  const currentUser = JSON.parse(localStorage.getItem('currentUser'));
-  const isAdmin = currentUser?.role === 'Admin';
-
-  const adminButtonHtml = isAdmin ? `
-    <button id="btn-add-committee" class="btn btn-primary">
-      <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 mr-2" viewBox="0 0 20 20" fill="currentColor">
-        <path fill-rule="evenodd" d="M10 3a1 1 0 011 1v5h5a1 1 0 110 2h-5v5a1 1 0 11-2 0v-5H4a1 1 0 110-2h5V4a1 1 0 011-1z" clip-rule="evenodd" />
-      </svg>
-      เพิ่มคณะกรรมการชุดใหญ่
-    </button>` : '';
-
-  container.innerHTML = `
-    <div class="flex justify-between items-center mb-6 flex-wrap gap-4">
-      <h2 class="text-2xl font-bold">คณะกรรมการความปลอดภัย</h2>
-      ${adminButtonHtml}
-    </div>
-    <div id="current-committee-container" class="mb-6">
-      <div class="card p-4">กำลังโหลดข้อมูลปัจจุบัน...</div>
-    </div>
-    <div>
-      <h3 class="text-lg font-semibold mb-3 border-b dark:border-slate-700 pb-2">ประวัติ</h3>
-      <div id="past-committee-container" class="space-y-4">
-        <div class="card p-4">กำลังโหลดประวัติ...</div>
-      </div>
-    </div>
-  `;
-
+  
   if (!committeeEventListenersInitialized) {
     setupCommitteeEventListeners();
     committeeEventListenersInitialized = true;
   }
 
-  showLoading('กำลังโหลดข้อมูลคณะกรรมการ...');
-  try {
-    // ใช้ path แบบไม่ใส่ /api นำหน้า แล้วให้ apiFetch เติมให้เอง
-    const data = await apiFetch('/pagedata/committees'); // => { success, items }
-    const items = (data?.items || []).map(normalizeCommittee);
+  // ✅ 1. Get User & Check Admin Role (Robust Check)
+  const userStr = localStorage.getItem('currentUser');
+  const currentUser = userStr ? JSON.parse(userStr) : null;
+  
+  const isAdmin = currentUser && (
+      (currentUser.role && currentUser.role.toLowerCase() === 'admin') || 
+      (currentUser.Role && currentUser.Role.toLowerCase() === 'admin') ||
+      (currentUser.id === 'admin') // Hardcode admin ID just in case
+  );
 
-    if (!items.length) {
+  container.innerHTML = `
+    <div class="p-6 max-w-7xl mx-auto space-y-8 animate-fade-in">
+        <div class="flex flex-col md:flex-row justify-between items-end gap-4 border-b border-slate-200 pb-5">
+            <div>
+                <h1 class="text-2xl font-bold text-slate-800 flex items-center gap-2">
+                    <svg class="w-6 h-6 text-slate-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0z"/></svg>
+                    คณะกรรมการความปลอดภัย
+                </h1>
+                <p class="text-sm text-slate-500 mt-1">โครงสร้างคณะกรรมการและคณะทำงาน</p>
+            </div>
+            
+            ${isAdmin ? `
+            <button id="btn-add-committee" class="flex items-center gap-2 bg-slate-800 hover:bg-slate-900 text-white px-4 py-2 rounded-lg text-sm font-medium transition-colors shadow-sm">
+                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/></svg>
+                เพิ่มคณะกรรมการ
+            </button>` : ''}
+        </div>
+
+        <div id="current-committee-container">
+            <div class="py-12 text-center text-slate-400">
+                <div class="inline-block animate-spin rounded-full h-8 w-8 border-4 border-blue-500 border-t-transparent mb-3"></div>
+                <p>กำลังโหลดข้อมูล...</p>
+            </div>
+        </div>
+
+        <div>
+            <h3 class="text-lg font-bold text-slate-700 mb-4 border-l-4 border-slate-300 pl-3">ประวัติย้อนหลัง</h3>
+            <div id="past-committee-container" class="space-y-4"></div>
+        </div>
+    </div>
+  `;
+
+  try {
+    const data = await apiFetch('/pagedata/committees'); 
+    let items = [];
+    
+    if (data.current || data.past) {
+        if (data.current) items.push(data.current);
+        if (data.past && Array.isArray(data.past)) items.push(...data.past);
+    } else if (Array.isArray(data)) {
+        items = data;
+    } else if (data && data.items) {
+        items = data.items;
+    }
+
+    items = items.map(normalizeCommittee).filter(Boolean);
+
+    if (items.length === 0) {
       document.getElementById('current-committee-container').innerHTML =
-        `<div class="card p-4">ไม่พบคณะกรรมการชุดปัจจุบัน</div>`;
-      document.getElementById('past-committee-container').innerHTML =
-        `<div class="card p-4 text-center text-slate-500">ไม่มีประวัติ</div>`;
+        `<div class="p-8 text-center text-slate-500 bg-slate-50 rounded-xl border border-dashed border-slate-300">ไม่พบข้อมูลคณะกรรมการ</div>`;
+      document.getElementById('past-committee-container').innerHTML = `<div class="text-sm text-slate-400 pl-4">ไม่มีประวัติ</div>`;
       return;
     }
 
-    const current = items.find(x => Number(x.IsCurrent) === 1) || items[0] || null;
-    const past = items.filter(x => current ? x.id !== current.id : true);
+    const current = items.find(x => Number(x.IsCurrent) === 1) || items[0];
+    const past = items.filter(x => x.id !== current.id);
 
     allCommittees = [current, ...past].filter(Boolean);
-    renderCommitteeCards({ current, past });
+    // ✅ 3. Pass isAdmin to render function
+    renderCommitteeCards({ current, past }, isAdmin);
+
   } catch (error) {
-    showError(error);
-    container.innerHTML = `<div class="card p-4 text-red-500">ไม่สามารถโหลดข้อมูลได้</div>`;
-  } finally {
-    hideLoading();
+    console.error(error);
+    container.innerHTML = `<div class="bg-red-50 text-red-600 p-4 rounded text-center">โหลดข้อมูลไม่สำเร็จ: ${error.message}</div>`;
   }
 }
 
-function renderCommitteeCards(data) {
+function renderCommitteeCards(data, isAdmin) {
   const currentContainer = document.getElementById('current-committee-container');
   const pastContainer = document.getElementById('past-committee-container');
   const { current, past } = data;
 
-  if (!current) {
-    currentContainer.innerHTML = `<div class="card p-4">ไม่พบคณะกรรมการชุดปัจจุบัน</div>`;
+  if (current) currentContainer.innerHTML = createCommitteeCard(current, true, isAdmin);
+  
+  if (past && past.length > 0) {
+      pastContainer.innerHTML = past.map(c => createCommitteeCard(c, false, isAdmin)).join('');
   } else {
-    currentContainer.innerHTML = createCommitteeCard(current, true);
+      pastContainer.innerHTML = `<div class="text-sm text-slate-400 pl-4 italic">ไม่มีประวัติย้อนหลัง</div>`;
   }
-
-  pastContainer.innerHTML = past && past.length > 0
-    ? past.map(c => createCommitteeCard(c, false)).join('')
-    : `<div class="card p-4 text-center text-slate-500">ไม่มีประวัติ</div>`;
 }
 
-// --- Event Handling ---
-function setupCommitteeEventListeners() {
-  const container = document.getElementById('committee-page');
-  if (!container) return;
-
-  container.addEventListener('click', async (event) => {
-    const target = event.target;
-    const addBtn = target.closest('#btn-add-committee');
-    const editBtn = target.closest('.btn-edit-committee');
-    const deleteBtn = target.closest('.btn-delete-committee');
-    const viewDocBtn = target.closest('[data-action="view-doc"]');
-    const viewHistoryBtn = target.closest('.btn-view-history');
-    const toggleAccordionBtn = target.closest('.accordion-toggle');
-    const setCurrentBtn = target.closest('.btn-set-current');
-
-    if (addBtn) {
-      showCommitteeForm();
-    } else if (editBtn) {
-      const committeeId = editBtn.dataset.id;
-      const committeeToEdit = allCommittees.find(c => String(c.id) === String(committeeId));
-      if (committeeToEdit) showCommitteeForm(committeeToEdit);
-    } else if (deleteBtn) {
-      const committeeId = deleteBtn.dataset.id;
-      const committeeTitle = allCommittees.find(c => String(c.id) === String(committeeId))?.CommitteeTitle || 'รายการนี้';
-      const confirmed = await showConfirmationModal('ยืนยันการลบ', `คุณต้องการลบข้อมูลคณะกรรมการ "${committeeTitle}" ใช่หรือไม่?`);
-      if (confirmed) {
-        const cardToRemove = document.getElementById(`committee-card-${committeeId}`);
-        if (cardToRemove) {
-          cardToRemove.style.transition = 'opacity 0.5s';
-          cardToRemove.style.opacity = '0';
-          setTimeout(() => cardToRemove.remove(), 500);
-        }
-        try {
-          await apiFetch(`/committees/${committeeId}`, { method: 'DELETE' });
-          showToast('ลบข้อมูลสำเร็จ');
-        } catch (error) {
-          loadCommitteePage();
-        }
-      }
-    } else if (viewDocBtn) {
-      event.preventDefault();
-      showDocumentModal(viewDocBtn.href, viewDocBtn.dataset.title || 'เอกสาร');
-    } else if (viewHistoryBtn) {
-      const committeeId = viewHistoryBtn.dataset.committeeId;
-      const department = viewHistoryBtn.dataset.department;
-      const committee = allCommittees.find(c => String(c.id) === String(committeeId));
-      const subCommittee = committee?.SubCommitteeData?.find(sc => sc.department === department);
-      if (subCommittee) showHistoryModal(subCommittee);
-    } else if (toggleAccordionBtn) {
-      const content = toggleAccordionBtn.nextElementSibling;
-      const icon = toggleAccordionBtn.querySelector('svg');
-      content.classList.toggle('hidden');
-      icon?.classList.toggle('rotate-180');
-    } else if (setCurrentBtn) {
-      const committeeId = setCurrentBtn.dataset.id;
-      const committeeTitle = allCommittees.find(c => String(c.id) === String(committeeId))?.CommitteeTitle || 'รายการนี้';
-      const confirmed = await showConfirmationModal('ยืนยันการตั้งเป็นชุดปัจจุบัน', `การกระทำนี้จะทำให้ "${committeeTitle}" กลายเป็นคณะกรรมการชุดปัจจุบัน ต้องการดำเนินการต่อหรือไม่?`);
-      if (confirmed) handleSetCurrentCommittee(committeeId);
-    }
-  });
-}
-
-async function handleSetCurrentCommittee(committeeId) {
-  showLoading('กำลังอัปเดตสถานะ...');
-  try {
-    await apiFetch(`/committees/${committeeId}`, { method: 'PUT', body: { IsCurrent: 1 } });
-    await loadCommitteePage();
-    showToast('อัปเดตสถานะเป็นชุดปัจจุบันสำเร็จ');
-  } catch (error) {
-    // แสดง error ผ่าน apiFetch แล้ว
-  } finally { hideLoading(); }
-}
-
-// --- UI Components & Forms ---
-function createCommitteeCard(committee, isCurrent) {
-  const currentUser = JSON.parse(localStorage.getItem('currentUser'));
-  const isAdmin = currentUser?.role === 'Admin';
-  const formatDate = (d) => d ? new Date(d).toLocaleDateString('th-TH', { year: 'numeric', month: 'long', day: 'numeric' }) : 'N/A';
-
+function createCommitteeCard(committee, isCurrent, isAdmin) {
+  const formatDate = (d) => {
+      if(!d) return 'N/A';
+      const date = new Date(d);
+      return isNaN(date.getTime()) ? d : date.toLocaleDateString('th-TH', { year: 'numeric', month: 'long', day: 'numeric' });
+  };
+  
   const subList = Array.isArray(committee.SubCommitteeData) ? committee.SubCommitteeData : [];
+  
   const subCommitteesHtml = subList.length > 0
-    ? `<div class="p-4 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">${
-        subList.map(sc => {
-          const versions = Array.isArray(sc.versions) ? sc.versions.slice().sort((a,b)=> (b.version||0)-(a.version||0)) : [];
-          const latest = versions[0] || null;
-          const statusDotColor = sc.activeLink ? 'bg-green-500' : 'bg-slate-400';
-          const lastUpdatedText = latest?.effectiveDate ? formatDate(latest.effectiveDate) : 'ยังไม่มีข้อมูล';
-          const versionText = latest?.version ? `v.${latest.version}` : '-';
-          return `
-            <div class="card flex flex-col">
-              <div class="p-4 border-b dark:border-slate-700 flex items-center gap-3">
-                <span class="h-3 w-3 rounded-full ${statusDotColor}"></span>
-                <h5 class="font-semibold text-slate-800 dark:text-slate-200 flex-grow">${sc.department || '-'}</h5>
+    ? `<div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 mt-4">
+        ${subList.map(sc => `
+           <div class="bg-slate-50 p-3 rounded-lg border border-slate-200 hover:border-blue-300 hover:shadow-sm transition-all group">
+              <div class="flex items-start justify-between mb-2">
+                 <h5 class="font-semibold text-slate-700 text-sm">${sc.department}</h5>
+                 ${sc.activeLink ? `<span class="flex h-2 w-2 relative"><span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-400 opacity-75"></span><span class="relative inline-flex rounded-full h-2 w-2 bg-green-500"></span></span>` : ''}
               </div>
-              <div class="p-4 flex-grow space-y-2 text-sm">
-                <div class="flex justify-between"><span class="text-slate-500 dark:text-slate-400">อัปเดตล่าสุด:</span><span class="font-medium">${lastUpdatedText}</span></div>
-                <div class="flex justify-between"><span class="text-slate-500 dark:text-slate-400">เวอร์ชันปัจจุบัน:</span><span class="font-medium">${versionText}</span></div>
-              </div>
-              <div class="p-4 border-t dark:border-slate-700 flex justify-end items-center gap-2">
-                <button data-committee-id="${committee.id}" data-department="${sc.department}" class="btn btn-secondary btn-sm btn-view-history" ${versions.length === 0 ? 'disabled' : ''}>ดูประวัติ</button>
-                ${sc.activeLink ? `<a href="${sc.activeLink}" data-action="view-doc" data-title="ผังปัจจุบัน: ${sc.department}" class="btn btn-primary btn-sm">ดูผังปัจจุบัน</a>` : `<button class="btn btn-secondary btn-sm" disabled>ไม่มีผัง</button>`}
-              </div>
-            </div>`;
-        }).join('')
-      }</div>`
-    : '<p class="text-sm text-slate-500 p-4">ไม่มีข้อมูล Sub-committee</p>';
-
-  let adminButtons = '';
-  if (isAdmin) {
-    const setCurrentButton = !isCurrent ? `<button data-id="${committee.id}" class="btn btn-secondary btn-sm btn-set-current">⭐ ตั้งเป็นชุดปัจจุบัน</button>` : '';
-    adminButtons = `
-      <div class="mt-4 pt-4 border-t dark:border-slate-700 flex items-center gap-3">
-        <button data-id="${committee.id}" class="btn btn-secondary btn-sm btn-edit-committee">แก้ไข</button>
-        <button data-id="${committee.id}" class="btn btn-danger btn-sm btn-delete-committee">ลบ</button>
-        ${setCurrentButton}
-      </div>`;
-  }
+              ${sc.activeLink ? 
+                `<a href="${sc.activeLink}" data-action="view-doc" data-title="ผัง: ${sc.department}" class="text-xs text-blue-600 hover:text-blue-800 font-medium inline-flex items-center gap-1 group-hover:underline">
+                   <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1"/></svg>
+                   ดูผังองค์กร
+                 </a>` : 
+                `<span class="text-xs text-slate-400 flex items-center gap-1">ไม่มีเอกสาร</span>`
+              }
+           </div>
+        `).join('')}
+      </div>`
+    : '<div class="text-center p-6 bg-slate-50 rounded-lg border border-slate-200 border-dashed text-slate-400 text-sm">ยังไม่มีข้อมูลคณะทำงานย่อย</div>';
 
   return `
-  <div class="card overflow-hidden" id="committee-card-${committee.id}">
-    <div class="p-5">
-      <div class="flex justify-between items-start mb-2">
-        <div>${isCurrent ? `<div class="text-xs font-bold uppercase text-green-600 dark:text-green-400">ชุดปัจจุบัน</div>` : ''}</div>
+  <div class="bg-white rounded-xl shadow-sm border ${isCurrent ? 'border-blue-200 ring-1 ring-blue-100' : 'border-slate-200'} overflow-hidden transition-all hover:shadow-md" id="committee-card-${committee.id}">
+    
+    <div class="p-5 ${isCurrent ? 'bg-gradient-to-r from-blue-50 to-white' : 'bg-white'} border-b border-slate-100 flex justify-between items-start">
+      <div class="flex-grow">
+           ${isCurrent ? `<span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-bold bg-blue-100 text-blue-700 mb-2 border border-blue-200">ชุดปัจจุบัน</span>` : ''}
+           <h3 class="text-xl font-bold text-slate-800 ${isCurrent ? 'text-blue-900' : ''}">${committee.CommitteeTitle}</h3>
+           <div class="flex items-center gap-4 mt-2 text-sm text-slate-500">
+             <span class="flex items-center gap-1.5">
+               <svg class="w-4 h-4 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"/></svg>
+               ${formatDate(committee.TermStartDate)} - ${formatDate(committee.TermEndDate)}
+             </span>
+           </div>
       </div>
-      <h3 class="text-lg font-semibold text-blue-600 dark:text-blue-400">${committee.CommitteeTitle || 'N/A'}</h3>
-      <p class="text-sm text-slate-500 dark:text-slate-400 mb-4">วาระ: ${formatDate(committee.TermStartDate)} - ${formatDate(committee.TermEndDate)}</p>
-      <div class="mt-4">
-        ${committee.MainOrgChartLink ? `<a href="${committee.MainOrgChartLink}" data-action="view-doc" data-title="ผังองค์กรหลัก" class="btn btn-secondary">ผังองค์กรหลัก</a>` : ''}
-      </div>
-      ${adminButtons}
+      
+      ${isAdmin ? `
+      <div class="flex gap-1">
+           <button data-id="${committee.id}" class="btn-edit-committee p-2 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"><svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z"/></svg></button>
+           <button data-id="${committee.id}" class="btn-delete-committee p-2 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors"><svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg></button>
+      </div>` : ''}
     </div>
-    <div class="bg-slate-100 dark:bg-slate-800">
-      <h4 class="p-4 text-sm font-semibold border-b dark:border-slate-700">Sub-committees</h4>
-      ${subCommitteesHtml}
+
+    <div class="p-6">
+      ${committee.MainOrgChartLink ? 
+        `<div class="mb-6">
+           <a href="${committee.MainOrgChartLink}" data-action="view-doc" data-title="ผังองค์กรหลัก" 
+              class="inline-flex items-center gap-2 px-4 py-2 bg-slate-800 text-white text-sm font-medium rounded-lg hover:bg-slate-700 transition-colors shadow-sm">
+              <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"/></svg>
+              ดูผังองค์กรหลัก (Main Chart)
+           </a>
+         </div>` : ''}
+
+      <div>
+        <h4 class="text-xs font-bold text-slate-400 uppercase tracking-wider mb-3 flex items-center gap-2">
+            <span class="w-8 h-px bg-slate-200"></span> คณะทำงานย่อย (Sub-Committees)
+        </h4>
+        ${subCommitteesHtml}
+      </div>
     </div>
   </div>`;
 }
 
-function showHistoryModal(subCommittee) {
-  const versions = (Array.isArray(subCommittee.versions) ? subCommittee.versions : []).slice().sort((a,b)=> (b.version||0)-(a.version||0));
-  const historyHtml = versions.map(v => `
-    <li class="flex justify-between items-center py-2 border-b dark:border-slate-700 last:border-b-0">
-      <span class="text-sm">เวอร์ชัน ${v.version || '-'} (มีผล ${v.effectiveDate ? new Date(v.effectiveDate).toLocaleDateString('th-TH') : '-'})</span>
-      <a href="${v.link}" data-action="view-doc" data-title="ประวัติ: ${subCommittee.department} v.${v.version || '-'}" class="btn btn-secondary btn-sm">ดูเอกสาร</a>
-    </li>`).join('');
-  openModal(`ประวัติ: ${subCommittee.department}`, `<ul class="space-y-2">${historyHtml || '<li class="p-2 text-slate-500">ไม่มีประวัติ</li>'}</ul>`);
+function openCommitteeForm(committee = null) {
+  const isEditing = !!committee;
+  tempSubCommittees = committee ? parseSubData(JSON.stringify(committee.SubCommitteeData)) : [];
+
+  const html = `
+    <form id="committee-form" class="space-y-5 px-1" novalidate>
+        <input type="hidden" name="id" value="${committee?.id || ''}">
+        
+        <div class="bg-blue-50 text-blue-800 p-3 rounded-lg text-sm border border-blue-100 flex gap-2">
+            <svg class="w-5 h-5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+            กรุณากรอกข้อมูลวาระและลิงก์เอกสารให้ถูกต้อง
+        </div>
+
+        <div>
+            <label class="block text-sm font-bold text-slate-700 mb-1">ชื่อคณะกรรมการ *</label>
+            <input type="text" name="CommitteeTitle" class="form-input w-full rounded-lg" value="${committee?.CommitteeTitle || ''}" required>
+        </div>
+
+        <div class="grid grid-cols-2 gap-4">
+            <div><label class="block text-sm font-bold text-slate-700 mb-1">วันเริ่มวาระ</label><input type="text" id="TermStartDate" name="TermStartDate" class="form-input w-full rounded-lg bg-white" value="${committee?.TermStartDate ? new Date(committee.TermStartDate).toISOString().split('T')[0] : ''}"></div>
+            <div><label class="block text-sm font-bold text-slate-700 mb-1">วันสิ้นสุดวาระ</label><input type="text" id="TermEndDate" name="TermEndDate" class="form-input w-full rounded-lg bg-white" value="${committee?.TermEndDate ? new Date(committee.TermEndDate).toISOString().split('T')[0] : ''}"></div>
+        </div>
+
+        <div>
+            <label class="block text-sm font-bold text-slate-700 mb-1">ลิงก์ผังองค์กรหลัก</label>
+            <input type="text" name="MainOrgChartLink" class="form-input w-full rounded-lg text-sm" value="${committee?.MainOrgChartLink || ''}">
+        </div>
+
+        <div class="flex items-center gap-2 py-2">
+            <input type="checkbox" id="IsCurrent" name="IsCurrent" class="rounded text-blue-600" ${committee?.IsCurrent ? 'checked' : ''}>
+            <label for="IsCurrent" class="text-sm font-medium text-slate-700 cursor-pointer">ตั้งเป็นชุดปัจจุบัน</label>
+        </div>
+
+        <div class="border-t border-slate-200 pt-4 mt-4">
+            <div class="flex justify-between items-center mb-3">
+                <label class="block text-sm font-bold text-slate-700">คณะอนุกรรมการ</label>
+                <button type="button" id="btn-add-sub" class="text-xs bg-slate-100 text-slate-700 px-3 py-1.5 rounded-lg hover:bg-slate-200">+ เพิ่มรายการ</button>
+            </div>
+            <div id="sub-committee-list" class="space-y-2 max-h-48 overflow-y-auto p-2 bg-slate-50 rounded-lg border border-slate-200"></div>
+        </div>
+
+        <div class="flex justify-end gap-3 mt-6 pt-4 border-t border-slate-100">
+            <button type="button" class="px-5 py-2.5 rounded-lg text-slate-600 hover:bg-slate-100 text-sm font-medium" onclick="document.getElementById('modal-close-btn').click()">ยกเลิก</button>
+            <button type="submit" class="px-6 py-2.5 rounded-lg bg-slate-800 text-white hover:bg-slate-900 text-sm font-bold shadow-md">บันทึกข้อมูล</button>
+        </div>
+    </form>
+  `;
+
+  openModal(isEditing ? 'แก้ไขข้อมูล' : 'เพิ่มคณะกรรมการ', html, 'max-w-3xl');
+  flatpickr("#TermStartDate", { locale: "th", dateFormat: "Y-m-d" });
+  flatpickr("#TermEndDate", { locale: "th", dateFormat: "Y-m-d" });
+  renderSubCommitteeList();
+
+  document.getElementById('btn-add-sub').addEventListener('click', () => {
+      const deptName = prompt("ระบุชื่อหน่วยงาน/แผนกย่อย:");
+      if (deptName && deptName.trim()) {
+          tempSubCommittees.push({ department: deptName.trim(), activeLink: "" });
+          renderSubCommitteeList();
+      }
+  });
+
+  document.getElementById('committee-form').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const formData = new FormData(e.target);
+      const data = Object.fromEntries(formData.entries());
+      data.IsCurrent = e.target.querySelector('#IsCurrent').checked ? 1 : 0;
+      data.SubCommitteeData = JSON.stringify(tempSubCommittees);
+      const method = data.id ? 'PUT' : 'POST';
+      const url = data.id ? `/committees/${data.id}` : '/committees';
+      try {
+          showLoading('กำลังบันทึก...');
+          await apiFetch(url, { method, body: data });
+          closeModal(); await loadCommitteePage(); showToast('บันทึกข้อมูลสำเร็จ', 'success');
+      } catch (err) { showError(err); } finally { hideLoading(); }
+  });
 }
 
-function createCommitteeFormHtml(committeeData, termStart, termEnd) {
-    const isEditing = committeeData.id != null;
-    let subCommitteesHtml = (committeeData.SubCommitteeData || []).map(sc => `
-        <div class="flex items-center justify-between p-3 rounded-lg border dark:border-slate-600" data-dept-row="${sc.department}">
-            <span class="font-medium">${sc.department}</span>
-            <div class="space-x-2">
-                ${sc.activeLink ? `<a href="${sc.activeLink}" target="_blank" class="text-blue-500 text-sm hover:underline">ดูไฟล์</a>` : '<span class="text-sm text-slate-400">ไม่มีไฟล์</span>'}
-                <button type="button" data-department="${sc.department}" class="btn btn-secondary btn-sm btn-update-sub">อัปเดตผัง</button>
-                <button type="button" data-department="${sc.department}" class="btn btn-danger btn-sm btn-delete-sub">ลบ</button>
+function renderSubCommitteeList() {
+    const listEl = document.getElementById('sub-committee-list');
+    if (!listEl) return;
+    if (tempSubCommittees.length === 0) { listEl.innerHTML = `<div class="text-center text-xs text-slate-400 py-2">ยังไม่มีรายการย่อย</div>`; return; }
+    listEl.innerHTML = tempSubCommittees.map((sub, index) => `
+        <div class="flex items-center justify-between bg-white p-2.5 rounded border border-slate-200 shadow-sm">
+            <span class="text-sm font-semibold text-slate-700 pl-1">${sub.department}</span>
+            <div class="flex gap-2 items-center">
+                <input type="text" placeholder="ลิงก์เอกสาร" class="text-xs border rounded px-2 py-1 w-48" value="${sub.activeLink || ''}" onchange="updateSubLink(${index}, this.value)">
+                <button type="button" class="text-slate-400 hover:text-red-500" onclick="removeSub(${index})">×</button>
             </div>
         </div>`).join('');
-    return `
-      <form id="committee-form" novalidate>
-        <div class="p-6 space-y-6">
-            <input type="hidden" name="id" value="${committeeData.id || ''}">
-            <div class="form-group"><input type="text" id="CommitteeTitle" name="CommitteeTitle" class="form-field w-full rounded-lg p-3" value="${committeeData.CommitteeTitle || ''}" required placeholder=" "><label for="CommitteeTitle" class="form-label-floating">ชื่อคณะกรรมการชุดใหญ่ *</label></div>
-            <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
-                <div class="form-group"><input type="text" id="TermStartDate" name="TermStartDate" class="form-field w-full rounded-lg p-3" value="${termStart}" required placeholder=" "><label for="TermStartDate" class="form-label-floating">วันเริ่มวาระ *</label></div>
-                <div class="form-group"><input type="text" id="TermEndDate" name="TermEndDate" class="form-field w-full rounded-lg p-3" value="${termEnd}" required placeholder=" "><label for="TermEndDate" class="form-label-floating">วันสิ้นสุดวาระ *</label></div>
-            </div>
-            <div class="form-group"><label class="form-label block mb-1 text-sm">ผังองค์กรหลัก</label><div id="file-upload-area-main"></div><input type="hidden" id="MainOrgChartLink" name="MainOrgChartLink" value="${committeeData.MainOrgChartLink || ''}"></div>
-            <div class="rounded-lg border dark:border-slate-700 p-4 flex items-center justify-between"><span class="text-slate-800 dark:text-slate-200 font-medium">ตั้งเป็นชุดปัจจุบัน</span><label for="IsCurrent" class="relative inline-flex items-center cursor-pointer"><input type="checkbox" id="IsCurrent" name="IsCurrent" class="sr-only peer" ${committeeData.IsCurrent ? 'checked' : ''}><div class="w-11 h-6 bg-slate-200 ..."></div></label></div>
-            <div>
-                <h4 class="text-lg font-semibold mb-3 border-b dark:border-slate-600 pb-2">จัดการ Sub-committees</h4>
-                <div id="sub-committee-list" class="space-y-3">${subCommitteesHtml}</div>
-                <div class="flex items-center gap-2 mt-4"><input type="text" id="new-dept-name" class="form-input" placeholder="ชื่อหน่วยงานใหม่..."><button type="button" id="btn-add-dept" class="btn btn-secondary">เพิ่มหน่วยงาน</button></div>
-            </div>
-        </div>
-        <div class="flex justify-end ..."><button type="button" id="btn-cancel-modal" class="btn btn-secondary">ยกเลิก</button><button type="submit" id="btn-submit-committee" class="btn btn-primary"><span>${isEditing ? 'บันทึกการเปลี่ยนแปลง' : 'สร้างข้อมูล'}</span><div class="loader hidden ..."></div></button></div>
-      </form>`;
+    window.removeSub = (index) => { tempSubCommittees.splice(index, 1); renderSubCommitteeList(); };
+    window.updateSubLink = (index, val) => { tempSubCommittees[index].activeLink = val; };
 }
 
-function initializeFormLogic(committee) {
-    flatpickr("#TermStartDate", { altInput: true, altFormat: "j F Y", dateFormat: "Y-m-d", locale: "th" });
-    flatpickr("#TermEndDate", { altInput: true, altFormat: "j F Y", dateFormat: "Y-m-d", locale: "th" });
-    updateFileUploadUI('main', committee?.MainOrgChartLink || '');
-    const form = document.getElementById('committee-form');
-    form.addEventListener('submit', handleCommitteeFormSubmit);
-    document.getElementById('btn-cancel-modal').addEventListener('click', closeModal);
-    document.getElementById('btn-add-dept').addEventListener('click', handleAddDepartment);
-    document.getElementById('sub-committee-list').addEventListener('click', (event) => {
-        if (event.target.closest('.btn-update-sub')) handleUpdateSubCommittee(event.target.closest('.btn-update-sub').dataset.department);
-        else if (event.target.closest('.btn-delete-sub')) handleDeleteDepartment(event.target.closest('.btn-delete-sub').dataset.department);
-    });
-}
-
-function showCommitteeForm(committee = null) {
-    activeCommitteeDataInModal = JSON.parse(JSON.stringify(committee || { CommitteeTitle: '', TermStartDate: '', TermEndDate: '', MainOrgChartLink: '', IsCurrent: false, SubCommitteeData: [] }));
-    const isEditing = committee !== null;
-    const title = isEditing ? 'แก้ไขข้อมูลคณะกรรมการ' : 'เพิ่มข้อมูลคณะกรรมการ';
-    const termStart = committee?.TermStartDate ? new Date(committee.TermStartDate).toISOString().split('T')[0] : '';
-    const termEnd = committee?.TermEndDate ? new Date(committee.TermEndDate).toISOString().split('T')[0] : '';
-    const formHtml = createCommitteeFormHtml(activeCommitteeDataInModal, termStart, termEnd);
-    openModal(title, formHtml, 'max-w-3xl no-padding');
-    initializeFormLogic(activeCommitteeDataInModal);
-}
-
-// --- Form & Upload & Sub-committee Logic ---
-function getCurrentFormState() {
-    const form = document.getElementById('committee-form');
-    if (!form) return activeCommitteeDataInModal;
-    const currentState = JSON.parse(JSON.stringify(activeCommitteeDataInModal));
-    currentState.CommitteeTitle = form.CommitteeTitle.value;
-    currentState.TermStartDate = form.TermStartDate.value;
-    currentState.TermEndDate = form.TermEndDate.value;
-    currentState.MainOrgChartLink = form.MainOrgChartLink.value;
-    currentState.IsCurrent = form.IsCurrent.checked;
-    return currentState;
-}
-
-async function handleCommitteeFormSubmit(event) {
-    event.preventDefault();
-    const submitBtn = document.getElementById('btn-submit-committee');
-    const btnText = submitBtn.querySelector('span');
-    const btnLoader = submitBtn.querySelector('.loader');
-    const data = getCurrentFormState();
-    if (!data.CommitteeTitle || !data.TermStartDate || !data.TermEndDate) {
-        return showToast('กรุณากรอกข้อมูลที่จำเป็นให้ครบถ้วน', 'error');
+function setupCommitteeEventListeners() {
+  document.addEventListener('click', async (event) => {
+    if (!event.target.closest('#committee-page')) return;
+    const target = event.target;
+    if (target.closest('#btn-add-committee')) { openCommitteeForm(); return; }
+    const editBtn = target.closest('.btn-edit-committee');
+    if (editBtn) {
+      const id = editBtn.dataset.id;
+      const committee = allCommittees.find(c => String(c.id) === String(id));
+      if (committee) openCommitteeForm(committee);
+      return;
     }
-    submitBtn.disabled = true;
-    btnText.classList.add('hidden');
-    btnLoader.classList.remove('hidden');
-    const method = data.id ? 'PUT' : 'POST';
-    const endpoint = data.id ? `/api/committees/${data.id}` : '/api/committees';
-    try {
-        const result = await apiFetch(endpoint, { method: method, body: data });
-        closeModal();
-        await loadCommitteePage();
-        showToast(result.message);
-    } catch (error) { /* Error shown from apiFetch */ }
-    finally {
-        submitBtn.disabled = false;
-        btnText.classList.remove('hidden');
-        btnLoader.classList.add('hidden');
+    const deleteBtn = target.closest('.btn-delete-committee');
+    if (deleteBtn) {
+      const id = deleteBtn.dataset.id;
+      const confirmed = await showConfirmationModal('ยืนยันการลบ', `คุณต้องการลบข้อมูลนี้ใช่หรือไม่?`);
+      if (confirmed) {
+          showLoading('กำลังลบ...');
+          try { await apiFetch(`/committees/${id}`, { method: 'DELETE' }); await loadCommitteePage(); showToast('ลบข้อมูลสำเร็จ', 'success'); } 
+          catch(err) { showError(err); } finally { hideLoading(); }
+      }
+      return;
     }
-}
-
-// --- Sub-committee specific functions ---
-function handleAddDepartment() {
-    const currentState = getCurrentFormState();
-    const input = document.getElementById('new-dept-name');
-    const deptName = input.value.trim();
-    if (!deptName) return showToast('กรุณาใส่ชื่อหน่วยงาน', 'error');
-    if (currentState.SubCommitteeData.find(sc => sc.department === deptName)) {
-        return showToast('มีหน่วยงานนี้อยู่แล้ว', 'error');
-    }
-    currentState.SubCommitteeData.push({ department: deptName, activeLink: '', versions: [] });
-    activeCommitteeDataInModal = currentState;
-    showCommitteeForm(activeCommitteeDataInModal);
-}
-
-function handleDeleteDepartment(department) {
-    if (confirm(`คุณต้องการลบหน่วยงาน "${department}" และประวัติทั้งหมดใช่หรือไม่?`)) {
-        const currentState = getCurrentFormState();
-        currentState.SubCommitteeData = currentState.SubCommitteeData.filter(sc => sc.department !== department);
-        activeCommitteeDataInModal = currentState;
-        showCommitteeForm(currentState);
-    }
-}
-
-async function handleUpdateSubCommittee(department) {
-    // This now opens a modal for date selection
-    const formHtml = `...`; // As defined in previous responses
-    openModal(`อัปเดตผัง: ${department}`, formHtml, 'max-w-xl');
-
-    const datePicker = flatpickr("#sub-committee-date-input", {
-        altInput: true,
-        altFormat: "j F Y",
-        dateFormat: "Y-m-d",
-        locale: "th",
-        defaultDate: "today"
-    });
-
-    document.getElementById('btn-confirm-sub-upload').addEventListener('click', async () => {
-        const fileInput = document.getElementById('sub-committee-file-input');
-        const file = fileInput.files[0];
-        if (!file || !datePicker.selectedDates.length) {
-            return showToast('กรุณาเลือกไฟล์และวันที่', 'error');
-        }
-        
-        const newUrl = await uploadFile(file);
-        if (newUrl) {
-            const currentState = getCurrentFormState();
-            const subCommittee = currentState.SubCommitteeData.find(sc => sc.department === department);
-            if (subCommittee) {
-                subCommittee.activeLink = newUrl;
-                subCommittee.versions.push({
-                    version: subCommittee.versions.length + 1,
-                    link: newUrl,
-                    effectiveDate: datePicker.selectedDates[0].toISOString()
-                });
-                activeCommitteeDataInModal = currentState;
-                closeModal();
-                showCommitteeForm(activeCommitteeDataInModal);
-                showToast('อัปเดตผังสำเร็จ');
-            }
-        }
-    });
-
-    document.getElementById('btn-cancel-sub-modal').addEventListener('click', closeModal);
-}
-
-
-// --- Generic Upload Helper Functions ---
-function openFileUpload() {
-    return new Promise(resolve => {
-        const input = document.createElement('input');
-        input.type = 'file';
-        input.accept = ".pdf,.jpg,.jpeg,.png";
-        input.onchange = () => resolve(input.files[0] || null);
-        input.click();
-    });
-}
-
-async function uploadFile(file) {
-    const formData = new FormData();
-    formData.append('document', file);
-    try {
-        const result = await apiFetch('/api/upload/document', { method: 'POST', body: formData });
-        return result.url;
-    } catch (error) { return null; }
-}
-
-function updateFileUploadUI(type, fileUrl) {
-    const container = document.getElementById(`file-upload-area-${type}`);
-    const hiddenInput = document.getElementById(type === 'main' ? 'MainOrgChartLink' : 'SubOrgChartLink');
-    if (!container || !hiddenInput) return;
-    if (fileUrl) {
-        container.innerHTML = `<div class="flex items-center justify-between p-3 border rounded-lg bg-slate-50 dark:bg-slate-700 dark:border-slate-600"><a href="${fileUrl}" target="_blank" rel="noopener noreferrer" class="text-blue-500 hover:underline truncate text-sm">ดูไฟล์ปัจจุบัน</a><button type="button" data-type="${type}" class="btn btn-secondary btn-sm btn-remove-file">เปลี่ยนไฟล์</button></div>`;
-        container.querySelector('.btn-remove-file').addEventListener('click', () => {
-            hiddenInput.value = '';
-            updateFileUploadUI(type, null);
-        });
-    } else {
-        container.innerHTML = `<input type="file" data-type="${type}" class="form-input text-sm file-input" accept=".pdf,.jpg,.jpeg,.png">`;
-        container.querySelector('.file-input').addEventListener('change', async (event) => {
-            const file = event.target.files[0];
-            if(!file) return;
-            showToast('กำลังอัปโหลดผังหลัก...');
-            const newUrl = await uploadFile(file);
-            if(newUrl) {
-                hiddenInput.value = newUrl;
-                updateFileUploadUI(type, newUrl);
-                showToast('อัปโหลดสำเร็จ!');
-            }
-        });
-    }
+    const viewDocBtn = target.closest('[data-action="view-doc"]');
+    if (viewDocBtn) { event.preventDefault(); showDocumentModal(viewDocBtn.href, 'เอกสาร'); return; }
+  });
 }
