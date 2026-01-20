@@ -727,7 +727,12 @@ app.post('/api/admin/employees/import', async (req, res) => {
 // =================================================================
 // SECTION 5: START THE SERVER
 // =================================================================
-const PORT = process.env.PORT || 5000;
-app.listen(PORT, () => {
-    console.log(`✅ TSH Safety App Server (FINAL) is running on http://localhost:${PORT}`);
-});
+// โค้ดใหม่ (เพื่อให้รันได้ทั้ง Local และ Vercel)
+if (require.main === module) {
+    const PORT = process.env.PORT || 5000;
+    app.listen(PORT, () => {
+        console.log(`Server running on port ${PORT}`);
+    });
+}
+
+module.exports = app; // ต้อง export app เพื่อให้ Vercel เรียกใช้ได้
