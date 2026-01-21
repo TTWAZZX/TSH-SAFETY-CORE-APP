@@ -727,12 +727,15 @@ app.post('/api/admin/employees/import', async (req, res) => {
 // =================================================================
 // SECTION 5: START THE SERVER
 // =================================================================
-// โค้ดใหม่ (เพื่อให้รันได้ทั้ง Local และ Vercel)
+// ✅ แก้ไขส่วนท้ายไฟล์เป็นแบบนี้ครับ
+const PORT = process.env.PORT || 5000;
+
+// ถ้าเป็นการรันในเครื่อง (Local) ให้ Start Server เลย
 if (require.main === module) {
-    const PORT = process.env.PORT || 5000;
     app.listen(PORT, () => {
         console.log(`Server running on port ${PORT}`);
     });
 }
 
-module.exports = app; // ต้อง export app เพื่อให้ Vercel เรียกใช้ได้
+// ส่งออก app ให้ Vercel เอาไปใช้ (สำคัญมาก!)
+module.exports = app;
