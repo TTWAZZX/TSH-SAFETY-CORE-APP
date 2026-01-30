@@ -1,5 +1,7 @@
-import { apiFetch } from '../api.js';
+import { API } from '../api.js';
 import { hideLoading, showError, showLoading, openModal, closeModal, showDocumentModal, showToast, showConfirmationModal } from '../ui.js';
+import { normalizeApiArray, normalizeApiObject } from '../utils/normalize.js';
+
 
 // --- Global State ---
 let allPolicies = [];
@@ -69,20 +71,26 @@ export async function loadPolicyPage() {
 
     // 2. Fetch Data
     try {
-        const data = await apiFetch('/pagedata/policies'); 
-        
-        let current = data.current;
-        let past = data.past || [];
+        const raw = await API.get('/pagedata/policies');
+        const data = normalizeApiObject(raw);
 
-        // Fallback กรณี API ส่งมาเป็น Array รวม
-        if (Array.isArray(data)) {
-             current = data.find(p => p.IsCurrent == 1) || data[0];
-             past = data.filter(p => p.id !== current?.id);
+        let current = null;
+        let past = [];
+
+        // case 1: API ส่ง current / past มาแยก
+        if (data.current || data.past) {
+            current = normalizeApiObject(data.current);
+            past = normalizeApiArray(data.past);
+        }
+        // case 2: API ส่งมาเป็น array รวม
+        else {
+            const list = normalizeApiArray(data);
+            current = list.find(p => p.IsCurrent == 1) || list[0] || null;
+            past = list.filter(p => String(p.id) !== String(current?.id));
         }
 
         allPolicies = [current, ...past].filter(Boolean);
 
-        // ✅ ส่งค่า isAdmin ไปให้ฟังก์ชัน Render
         renderCurrentPolicy(current, isAdmin);
         renderPastPolicies(past, isAdmin);
 
@@ -96,8 +104,10 @@ export async function loadPolicyPage() {
 }
 
 // --- Render Functions ---
-function renderCurrentPolicy(policy, isAdmin) {
+function renderCurrentPolicy(rawPolicy, isAdmin) {
     const container = document.getElementById('current-policy-container');
+    const policy = normalizeApiObject(rawPolicy);
+
     
     if (!policy) {
         container.innerHTML = `
@@ -120,7 +130,7 @@ function renderCurrentPolicy(policy, isAdmin) {
                                 <svg class="w-3 h-3 mr-1" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clip-rule="evenodd"/></svg>
                                 ฉบับปัจจุบัน (Active)
                             </span>
-                            <span class="text-xs text-slate-400 font-mono">ID: ${policy.id || policy.PolicyID}</span>
+                            <span class="text-xs text-slate-400 font-mono">ID: ${policy.id}</span>
                         </div>
                         <h2 class="text-2xl md:text-3xl font-bold text-slate-800 leading-tight">
                             ${policy.PolicyTitle}
@@ -155,41 +165,78 @@ function renderCurrentPolicy(policy, isAdmin) {
     `;
 }
 
-function renderPastPolicies(policies, isAdmin) {
+function renderPastPolicies(rawPolicies, isAdmin) {
     const container = document.getElementById('past-policy-container');
-    
-    if (!policies.length) {
-        container.innerHTML = `<p class="text-slate-400 text-sm col-span-full italic">ไม่มีประวัติย้อนหลัง</p>`;
+    const list = normalizeApiArray(rawPolicies);
+
+    if (!list.length) {
+        container.innerHTML = `
+            <p class="text-slate-400 text-sm col-span-full italic">
+                ไม่มีประวัติย้อนหลัง
+            </p>`;
         return;
     }
 
-    container.innerHTML = policies.map(p => `
-        <div class="bg-white p-4 rounded-xl border border-slate-200 hover:border-blue-300 transition-all shadow-sm group flex justify-between items-start">
-            <div>
-                <h4 class="font-semibold text-slate-800 group-hover:text-blue-700 transition-colors">${p.PolicyTitle}</h4>
-                <div class="text-xs text-slate-500 mt-1 flex items-center gap-2">
-                    <span class="bg-slate-100 px-2 py-0.5 rounded">ปี ${new Date(p.EffectiveDate).getFullYear() + 543}</span>
-                    <span>${formatDate(p.EffectiveDate)}</span>
+    container.innerHTML = list.map(raw => {
+        const p = normalizeApiObject(raw); // ✅ normalize ต่อ 1 item
+
+        return `
+            <div class="bg-white p-4 rounded-xl border border-slate-200 hover:border-blue-300 transition-all shadow-sm group flex justify-between items-start">
+                <div>
+                    <h4 class="font-semibold text-slate-800 group-hover:text-blue-700 transition-colors">
+                        ${p.PolicyTitle || '-'}
+                    </h4>
+
+                    <div class="text-xs text-slate-500 mt-1 flex items-center gap-2">
+                        <span class="bg-slate-100 px-2 py-0.5 rounded">
+                            ปี ${p.EffectiveDate ? new Date(p.EffectiveDate).getFullYear() + 543 : '-'}
+                        </span>
+                        <span>${formatDate(p.EffectiveDate)}</span>
+                    </div>
+
+                    ${p.DocumentLink ? `
+                        <a href="${p.DocumentLink}"
+                           data-action="view-doc"
+                           class="text-xs text-blue-500 hover:underline mt-2 inline-flex items-center gap-1">
+                            <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                      d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1"/>
+                            </svg>
+                            เอกสารแนบ
+                        </a>
+                    ` : ''}
                 </div>
-                ${p.DocumentLink ? `
-                <a href="${p.DocumentLink}" data-action="view-doc" class="text-xs text-blue-500 hover:underline mt-2 inline-flex items-center gap-1">
-                    <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1"/></svg>
-                    เอกสารแนบ
-                </a>` : ''}
+
+                ${isAdmin ? `
+                    <div class="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                        <button class="btn-edit-policy p-1.5 text-slate-400 hover:text-blue-600 rounded"
+                                data-id="${p.id}">
+                            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                      d="M15.232 5.232l3.536 3.536m-2.036-5.036
+                                         a2.5 2.5 0 113.536 3.536
+                                         L6.5 21.036H3v-3.572L16.732 3.732z"/>
+                            </svg>
+                        </button>
+
+                        <button class="btn-delete-policy p-1.5 text-slate-400 hover:text-red-600 rounded"
+                                data-id="${p.id}">
+                            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                      d="M19 7l-.867 12.142A2 2 0 0116.138 21
+                                         H7.862a2 2 0 01-1.995-1.858
+                                         L5 7m5 4v6m4-6v6
+                                         m1-10V4a1 1 0 00-1-1h-4
+                                         a1 1 0 00-1 1v3M4 7h16"/>
+                            </svg>
+                        </button>
+                    </div>
+                ` : ''}
             </div>
-            
-            ${isAdmin ? `
-            <div class="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                <button class="btn-edit-policy p-1.5 text-slate-400 hover:text-blue-600 rounded" data-id="${p.id || p.PolicyID}">
-                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z"/></svg>
-                </button>
-                <button class="btn-delete-policy p-1.5 text-slate-400 hover:text-red-600 rounded" data-id="${p.id || p.PolicyID}">
-                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg>
-                </button>
-            </div>` : ''}
-        </div>
-    `).join('');
+        `;
+    }).join('');
 }
+
 
 // --- Event Handling ---
 function setupPolicyPageEventListeners() {
@@ -206,7 +253,10 @@ function setupPolicyPageEventListeners() {
         const editBtn = target.closest('.btn-edit-policy');
         if (editBtn) {
             const policyId = editBtn.dataset.id;
-            const policyToEdit = allPolicies.find(p => String(p.id || p.PolicyID) === String(policyId));
+            const policyToEdit = allPolicies.find(
+                p => String(p.id) === String(policyId)
+            );
+
             if (policyToEdit) showPolicyForm(policyToEdit);
             return;
         }
@@ -219,7 +269,7 @@ function setupPolicyPageEventListeners() {
             if (confirmed) {
                 showLoading('กำลังลบข้อมูล...');
                 try {
-                    await apiFetch(`/policies/${policyId}`, { method: 'DELETE' });
+                    await API.delete(`/policies/${policyId}`);
                     await loadPolicyPage(); 
                     showToast('ลบข้อมูลเรียบร้อยแล้ว', 'success');
                 } catch (error) {
@@ -241,13 +291,15 @@ function setupPolicyPageEventListeners() {
 }
 
 // --- Form & Modal Logic ---
-function showPolicyForm(policy = null) {
+function showPolicyForm(rawPolicy = null) {
+    const policy = normalizeApiObject(rawPolicy);
+
     const isEditing = policy !== null;
     const title = isEditing ? 'แก้ไขนโยบาย' : 'เพิ่มนโยบายใหม่';
     
     const html = `
         <form id="policy-form" class="space-y-5 px-1">
-            <input type="hidden" name="id" value="${policy?.id || policy?.PolicyID || ''}">
+            <input type="hidden" name="id" value="${policy?.id || ''}">
             
             <div class="bg-blue-50 text-blue-800 p-3 rounded-lg text-sm border border-blue-100 flex gap-2">
                 <svg class="w-5 h-5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
@@ -274,11 +326,35 @@ function showPolicyForm(policy = null) {
                     <input type="text" id="EffectiveDate" name="EffectiveDate" class="form-input w-full rounded-lg bg-white" 
                            value="${policy?.EffectiveDate ? new Date(policy.EffectiveDate).toISOString().split('T')[0] : ''}" required>
                 </div>
+                <div class="grid grid-cols-1 gap-3">
                 <div>
                     <label class="block text-sm font-bold text-slate-700 mb-1">ลิงก์เอกสาร (URL)</label>
-                    <input type="text" name="DocumentLink" class="form-input w-full rounded-lg" 
-                           value="${policy?.DocumentLink || ''}" placeholder="https://...">
+                    <input type="text"
+                        name="DocumentLink"
+                        class="form-input w-full rounded-lg"
+                        value="${policy?.DocumentLink || ''}"
+                        placeholder="https://...">
                 </div>
+
+                <div>
+                    <label class="block text-sm font-bold text-slate-700 mb-1">
+                    หรืออัปโหลดไฟล์ (PDF / DOCX)
+                    </label>
+                    <input type="file"
+                        name="PolicyFile"
+                        accept=".pdf,.doc,.docx"
+                        class="block w-full text-sm text-slate-600
+                                file:mr-4 file:py-2 file:px-4
+                                file:rounded-lg file:border-0
+                                file:text-sm file:font-semibold
+                                file:bg-slate-100 file:text-slate-700
+                                hover:file:bg-slate-200">
+                    <p class="text-xs text-slate-400 mt-1">
+                    * ถ้าเลือกไฟล์ ระบบจะใช้ไฟล์แทนลิงก์
+                    </p>
+                </div>
+                </div>
+
             </div>
 
             <div class="flex items-center gap-2 py-2">
@@ -304,30 +380,70 @@ function showPolicyForm(policy = null) {
 
     document.getElementById('policy-form').addEventListener('submit', async (e) => {
         e.preventDefault();
-        const submitBtn = e.target.querySelector('button[type="submit"]');
-        submitBtn.disabled = true;
-        submitBtn.innerHTML = '<span class="animate-spin inline-block w-4 h-4 border-2 border-white border-t-transparent rounded-full mr-2"></span> กำลังบันทึก...';
 
-        const formData = new FormData(e.target);
-        const data = Object.fromEntries(formData.entries());
-        data.IsCurrent = e.target.querySelector('#IsCurrent').checked ? 1 : 0;
+        const formEl = e.target;
+        const submitBtn = formEl.querySelector('button[type="submit"]');
+        submitBtn.disabled = true;
+        submitBtn.innerHTML =
+            '<span class="animate-spin inline-block w-4 h-4 border-2 border-white border-t-transparent rounded-full mr-2"></span> กำลังบันทึก...';
+
+        const formData = new FormData(formEl);
 
         try {
-            const method = data.id ? 'PUT' : 'POST';
-            const url = data.id ? `/policies/${data.id}` : '/policies'; 
+            showLoading('กำลังบันทึก...');
 
-            await apiFetch(url, { method, body: data });
+            // ----------------------------
+            // 1) ถ้ามีไฟล์ → upload ก่อน
+            // ----------------------------
+            const file = formData.get('PolicyFile');
+
+            if (file && file.size > 0) {
+            const uploadData = new FormData();
+            uploadData.append('file', file);
+
+            const uploadRes = await API.post('/files/upload', uploadData, {
+                headers: { 'Content-Type': 'multipart/form-data' }
+            });
+
+            if (!uploadRes?.url) {
+                throw new Error('อัปโหลดไฟล์ไม่สำเร็จ');
+            }
+
+            // ใช้ URL จากไฟล์แทน
+            formData.set('DocumentLink', uploadRes.url);
+            }
+
+            // ไม่ต้องส่งไฟล์ไปที่ /policies
+            formData.delete('PolicyFile');
+
+            // ----------------------------
+            // 2) แปลง FormData → Object
+            // ----------------------------
+            const data = Object.fromEntries(formData.entries());
+            data.IsCurrent = formEl.querySelector('#IsCurrent').checked ? 1 : 0;
+
+            // ----------------------------
+            // 3) Save policy
+            // ----------------------------
+            if (data.id) {
+            await API.put(`/policies/${data.id}`, data);
+            } else {
+            await API.post('/policies', data);
+            }
 
             closeModal();
             showToast('บันทึกข้อมูลเรียบร้อยแล้ว', 'success');
-            await loadPolicyPage(); 
+            await loadPolicyPage();
+
         } catch (error) {
             showError(error);
         } finally {
+            hideLoading();
             submitBtn.disabled = false;
             submitBtn.textContent = 'บันทึกข้อมูล';
         }
     });
+
 }
 
 function formatDate(dateStr) {

@@ -1,13 +1,16 @@
 import { showLoading, hideLoading, showToast, showError } from '../ui.js';
-import { apiFetch } from '../api.js';
+import { API } from '../api.js';
 
 // --- 🎨 GLOBAL STATE ---
 let currentTab = 'scheduler';
+let allEmployeesCache = [];
+let calendarInstance = null; // เก็บตัวแปรปฏิทิน
+let currentViewMode = 'list'; // 'list' หรือ 'calendar'
 
 export async function loadAdminPage() {
     const container = document.getElementById('admin-page');
 
-    // 1. HEADER & NAVIGATION (Professional Style)
+    // 1. HEADER & NAVIGATION
     const headerHtml = `
         <div class="mb-8 animate-fade-in">
             <div class="flex flex-col md:flex-row justify-between items-end gap-4 border-b border-slate-200 pb-5">
@@ -16,20 +19,12 @@ export async function loadAdminPage() {
                         <svg class="w-7 h-7 text-slate-700" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/></svg>
                         System Console
                     </h1>
-                    <p class="text-sm text-slate-500 mt-1">
-                        ศูนย์ควบคุมการตั้งค่าระบบและจัดตารางเวร (Configuration & Scheduler)
-                    </p>
+                    <p class="text-sm text-slate-500 mt-1">ศูนย์ควบคุมการตั้งค่าระบบและจัดตารางเวร</p>
                 </div>
                 
                 <div class="flex bg-slate-100 p-1 rounded-lg border border-slate-200">
-                    <button id="tab-btn-scheduler" onclick="switchAdminTab('scheduler')" class="px-4 py-2 text-sm font-medium rounded-md transition-all flex items-center gap-2">
-                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"/></svg>
-                        Schedule
-                    </button>
-                    <button id="tab-btn-master" onclick="switchAdminTab('master')" class="px-4 py-2 text-sm font-medium rounded-md transition-all flex items-center gap-2">
-                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 7v10c0 2.21 3.582 4 8 4s8-1.79 8-4V7M4 7c0 2.21 3.582 4 8 4s8-1.79 8-4M4 7c0-2.21 3.582-4 8-4s8 1.79 8 4m0 5c0 2.21-3.582 4-8 4s-8-1.79-8-4"/></svg>
-                        Master Data
-                    </button>
+                    <button id="tab-btn-scheduler" onclick="switchAdminTab('scheduler')" class="px-4 py-2 text-sm font-medium rounded-md transition-all flex items-center gap-2">Schedule</button>
+                    <button id="tab-btn-master" onclick="switchAdminTab('master')" class="px-4 py-2 text-sm font-medium rounded-md transition-all flex items-center gap-2">Master Data</button>
                 </div>
             </div>
         </div>
@@ -42,30 +37,27 @@ export async function loadAdminPage() {
         </div>
     `;
 
-    // Expose functions to window
+    // Expose Functions
     window.switchAdminTab = renderTabContent;
     window.addMasterData = addMasterData;
     window.deleteMasterData = deleteMasterData;
-    window.deleteSchedule = deleteSchedule; // For Scheduler
+    window.deleteSchedule = deleteSchedule;
+    window.filterEmployeesInTeam = filterEmployeesInTeam;
+    window.updateSelectedCount = updateSelectedCount;
+    window.loadSchedules = loadSchedules; // สำคัญสำหรับปุ่ม Filter
+    window.toggleViewMode = toggleViewMode; // ปุ่มสลับมุมมอง
 
-    // Start at Scheduler
     renderTabContent('scheduler');
 }
 
-// --- 🔄 TAB RENDER LOGIC ---
 async function renderTabContent(tabName) {
     currentTab = tabName;
     const contentArea = document.getElementById('admin-content-area');
-    
-    // Update Tab Styles
     const activeClass = "bg-white text-slate-800 shadow-sm";
     const inactiveClass = "text-slate-500 hover:text-slate-700 hover:bg-slate-200/50";
 
-    const btnScheduler = document.getElementById('tab-btn-scheduler');
-    const btnMaster = document.getElementById('tab-btn-master');
-
-    if(btnScheduler) btnScheduler.className = `px-4 py-2 text-sm font-medium rounded-md transition-all flex items-center gap-2 ${tabName === 'scheduler' ? activeClass : inactiveClass}`;
-    if(btnMaster) btnMaster.className = `px-4 py-2 text-sm font-medium rounded-md transition-all flex items-center gap-2 ${tabName === 'master' ? activeClass : inactiveClass}`;
+    document.getElementById('tab-btn-scheduler').className = `px-4 py-2 text-sm font-medium rounded-md transition-all flex items-center gap-2 ${tabName === 'scheduler' ? activeClass : inactiveClass}`;
+    document.getElementById('tab-btn-master').className = `px-4 py-2 text-sm font-medium rounded-md transition-all flex items-center gap-2 ${tabName === 'master' ? activeClass : inactiveClass}`;
 
     contentArea.innerHTML = '<div class="flex justify-center py-20"><span class="loading-spinner w-8 h-8 border-4 border-blue-500 border-t-transparent rounded-full animate-spin"></span></div>';
 
@@ -73,238 +65,346 @@ async function renderTabContent(tabName) {
     else await renderMasterData(contentArea);
 }
 
-// ==========================================
-// 📅 TAB: SCHEDULER (Logic เดิม แต่เปลี่ยน UI)
-// ==========================================
+// ===================== SCHEDULER =====================
 async function renderScheduler(container) {
+    const today = new Date();
+    const currentMonth = today.getMonth() + 1; // 1-12
+    const currentYear = today.getFullYear();
+
     container.innerHTML = `
         <div class="grid grid-cols-1 lg:grid-cols-12 gap-8 animate-fade-in">
             
             <div class="lg:col-span-4 space-y-6">
                 <div class="bg-white rounded-xl p-6 shadow-sm border border-slate-200 sticky top-6">
-                    <div class="flex items-center gap-3 mb-6 pb-4 border-b border-slate-100">
-                        <div class="w-10 h-10 rounded-full bg-blue-50 flex items-center justify-center text-blue-600">
-                            <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"/></svg>
+                    <h3 class="font-bold text-slate-800 mb-4 border-b pb-2">Assign Team</h3>
+                    <form id="form-scheduler" onsubmit="return false;" class="space-y-6">
+                        <div>
+                            <label class="block text-xs font-bold text-slate-500 uppercase mb-2">1. Select Date</label>
+                            <input type="date" name="ScheduledDate" class="form-input w-full rounded-lg border-slate-300" required>
                         </div>
                         <div>
-                            <h3 class="font-bold text-slate-800">Create Schedule</h3>
-                            <p class="text-xs text-slate-500">กำหนดวันและทีมเดินตรวจ</p>
+                            <label class="block text-xs font-bold text-slate-500 uppercase mb-2">2. Allocate Teams</label>
+                            <div id="team-allocator-container" class="space-y-3 max-h-[400px] overflow-y-auto pr-2 custom-scrollbar">Loading...</div>
                         </div>
-                    </div>
-
-                    <form id="form-scheduler" onsubmit="return false;" class="space-y-5">
-                        <div>
-                            <label class="block text-xs font-bold text-slate-500 uppercase tracking-wide mb-2">Select Date</label>
-                            <input type="date" name="ScheduledDate" class="form-input w-full rounded-lg border-slate-300 text-sm focus:ring-blue-500 focus:border-blue-500" required>
-                        </div>
-                        
-                        <div>
-                            <div class="flex justify-between items-end mb-2">
-                                <label class="block text-xs font-bold text-slate-500 uppercase tracking-wide">Select Teams</label>
-                                <button onclick="loadTeamsForCheckbox()" class="text-[10px] text-blue-600 hover:underline font-medium">Refresh List</button>
-                            </div>
-                            <div id="checkbox-teams" class="space-y-1 max-h-[300px] overflow-y-auto p-2 bg-slate-50 rounded-lg border border-slate-200 custom-scrollbar">
-                                <div class="text-center py-8 text-slate-400 text-xs">Loading teams...</div>
-                            </div>
-                        </div>
-
-                        <button id="btn-save-schedule" class="w-full btn bg-slate-800 hover:bg-slate-900 text-white py-2.5 rounded-lg shadow-md transition-all font-medium text-sm">
-                            Save Schedule
+                        <button id="btn-save-schedule" class="w-full btn bg-indigo-600 hover:bg-indigo-700 text-white py-3 rounded-xl font-bold shadow-lg shadow-indigo-200 transition-all">
+                            Confirm Schedule
                         </button>
                     </form>
                 </div>
             </div>
 
             <div class="lg:col-span-8">
-                <div class="flex justify-between items-center mb-6">
-                    <h3 class="font-bold text-lg text-slate-800 flex items-center gap-2">
-                        Upcoming Schedules
-                        <span id="schedule-count" class="text-xs font-bold bg-slate-200 text-slate-600 px-2 py-0.5 rounded-full">0</span>
-                    </h3>
-                    <button onclick="loadSchedules()" class="text-sm text-blue-600 hover:text-blue-800 flex items-center gap-1 font-medium">
-                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg>
-                        Refresh
-                    </button>
+                <div class="flex flex-col sm:flex-row justify-between items-center mb-6 gap-4 bg-white p-3 rounded-xl border border-slate-200 shadow-sm">
+                    
+                    <div class="flex items-center gap-2">
+                        <select id="filter-month" onchange="loadSchedules()" class="form-select text-sm border-slate-200 rounded-lg py-1.5 pl-3 pr-8 font-medium text-slate-700 bg-slate-50 focus:ring-indigo-500">
+                            ${Array.from({length: 12}, (_, i) => {
+                                const m = i + 1;
+                                return `<option value="${m}" ${m === currentMonth ? 'selected' : ''}>${new Date(0, i).toLocaleString('en-US', {month: 'long'})}</option>`;
+                            }).join('')}
+                        </select>
+                        <select id="filter-year" onchange="loadSchedules()" class="form-select text-sm border-slate-200 rounded-lg py-1.5 pl-3 pr-8 font-medium text-slate-700 bg-slate-50 focus:ring-indigo-500">
+                            ${[currentYear-1, currentYear, currentYear+1].map(y => `<option value="${y}" ${y === currentYear ? 'selected' : ''}>${y}</option>`).join('')}
+                        </select>
+                    </div>
+
+                    <div class="flex bg-slate-100 p-1 rounded-lg">
+                        <button onclick="toggleViewMode('list')" id="btn-view-list" class="px-3 py-1.5 rounded-md text-xs font-bold flex items-center gap-2 transition-all bg-white shadow-sm text-slate-800">
+                            <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 10h16M4 14h16M4 18h16"/></svg> List
+                        </button>
+                        <button onclick="toggleViewMode('calendar')" id="btn-view-calendar" class="px-3 py-1.5 rounded-md text-xs font-bold flex items-center gap-2 transition-all text-slate-500 hover:text-slate-700">
+                            <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"/></svg> Calendar
+                        </button>
+                    </div>
                 </div>
 
-                <div id="list-schedules" class="grid grid-cols-1 md:grid-cols-2 gap-4">
-                     <div class="col-span-full py-12 text-center text-slate-400 bg-slate-50 rounded-xl border border-dashed border-slate-300">
-                        Loading data...
-                     </div>
+                <div id="scheduler-content-wrapper" class="relative">
+                    <div id="list-view-container" class="space-y-4 animate-fade-in">
+                        <div class="py-12 text-center text-slate-400 bg-slate-50 rounded-xl border border-dashed border-slate-300">Loading...</div>
+                    </div>
+                    
+                    <div id="calendar-view-container" class="hidden bg-white p-4 rounded-xl border border-slate-200 shadow-sm animate-fade-in">
+                        <div id="calendar"></div>
+                    </div>
                 </div>
             </div>
         </div>
     `;
 
-    await loadTeamsForCheckbox();
-    await loadSchedules();
+    await Promise.all([loadTeamsAndEmployees(), loadSchedules()]);
     setupSchedulerEvents();
 }
 
-async function loadTeamsForCheckbox() {
-    const teamContainer = document.getElementById('checkbox-teams');
-    try {
-        const res = await apiFetch('/master/teams'); 
-        if(res.success && res.data.length > 0) {
-            teamContainer.innerHTML = res.data.map(t => `
-                <label class="flex items-center gap-3 p-2 rounded hover:bg-white cursor-pointer transition-colors border border-transparent hover:border-slate-200 group">
-                    <input type="checkbox" name="Teams" value="${t.Name}" 
-                           class="form-checkbox h-4 w-4 text-blue-600 border-slate-300 rounded focus:ring-blue-500">
-                    <span class="text-sm font-medium text-slate-600 group-hover:text-slate-800">${t.Name}</span>
-                </label>
-            `).join('');
-        } else {
-             teamContainer.innerHTML = `<div class="text-center py-4 text-xs text-slate-400">No teams found. Add in Master Data.</div>`;
-        }
-    } catch (err) { 
-        teamContainer.innerHTML = `<div class="text-center text-red-400 text-xs py-4">Error loading teams</div>`;
+// 🔄 Toggle View Logic
+window.toggleViewMode = (mode) => {
+    currentViewMode = mode;
+    const listContainer = document.getElementById('list-view-container');
+    const calContainer = document.getElementById('calendar-view-container');
+    const btnList = document.getElementById('btn-view-list');
+    const btnCal = document.getElementById('btn-view-calendar');
+    
+    // Style Update
+    const activeClass = "bg-white shadow-sm text-slate-800";
+    const inactiveClass = "text-slate-500 hover:text-slate-700";
+
+    if(mode === 'list') {
+        listContainer.classList.remove('hidden');
+        calContainer.classList.add('hidden');
+        btnList.className = `px-3 py-1.5 rounded-md text-xs font-bold flex items-center gap-2 transition-all ${activeClass}`;
+        btnCal.className = `px-3 py-1.5 rounded-md text-xs font-bold flex items-center gap-2 transition-all ${inactiveClass}`;
+    } else {
+        listContainer.classList.add('hidden');
+        calContainer.classList.remove('hidden');
+        btnList.className = `px-3 py-1.5 rounded-md text-xs font-bold flex items-center gap-2 transition-all ${inactiveClass}`;
+        btnCal.className = `px-3 py-1.5 rounded-md text-xs font-bold flex items-center gap-2 transition-all ${activeClass}`;
+        
+        // Render Calendar if not already rendered
+        // Note: FullCalendar needs to be rendered when visible
+        setTimeout(() => {
+            if(calendarInstance) calendarInstance.render(); 
+            else loadSchedules(); // Force reload to init calendar
+        }, 100);
     }
 }
 
-async function loadSchedules() {
-    const listContainer = document.getElementById('list-schedules');
-    const countEl = document.getElementById('schedule-count');
-
+// 📦 Load Teams & Employees (เหมือนเดิม)
+async function loadTeamsAndEmployees() {
+    const container = document.getElementById('team-allocator-container');
     try {
-        const res = await apiFetch('/admin/schedules'); 
-        
-        if(!res.success || res.data.length === 0) {
-            listContainer.innerHTML = `
-                <div class="col-span-full py-16 flex flex-col items-center justify-center text-slate-400 bg-slate-50 rounded-xl border border-dashed border-slate-200">
-                    <svg class="w-12 h-12 mb-2 text-slate-300" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"/></svg>
-                    <p class="font-medium text-sm">No Active Schedules</p>
-                </div>`;
-            if(countEl) countEl.innerText = "0";
-            return;
-        }
+        const [teamsRes, empsRes] = await Promise.all([
+            API.get('/master/teams'),
+            API.get('/employees')
+        ]);
 
-        const grouped = res.data.reduce((acc, curr) => {
-            const date = curr.ScheduledDate.split('T')[0];
-            if(!acc[date]) acc[date] = [];
-            acc[date].push(curr);
-            return acc;
-        }, {});
+        allEmployeesCache = (empsRes.success || Array.isArray(empsRes.data)) ? (empsRes.data || empsRes) : [];
+        if (!Array.isArray(allEmployeesCache)) allEmployeesCache = [];
 
-        if(countEl) countEl.innerText = Object.keys(grouped).length;
-
-        listContainer.innerHTML = Object.entries(grouped)
-            .sort((a, b) => new Date(b[0]) - new Date(a[0]))
-            .map(([date, items]) => {
-                const dateObj = new Date(date);
-                const dayName = dateObj.toLocaleDateString('en-US', { weekday: 'long' });
-                const fullDate = dateObj.toLocaleDateString('th-TH', { day: 'numeric', month: 'long', year: 'numeric' });
-                
+        if (teamsRes.data.length > 0) {
+            container.innerHTML = teamsRes.data.map(team => {
+                const teamIdSafe = team.Name.replace(/\s+/g, '-');
                 return `
-                <div class="bg-white p-5 rounded-xl border border-slate-200 shadow-sm hover:shadow-md transition-all group">
-                    <div class="flex justify-between items-start mb-4">
-                        <div class="flex items-center gap-4">
-                            <div class="bg-blue-50 text-blue-700 px-3 py-2 rounded-lg text-center min-w-[60px] border border-blue-100">
-                                <div class="text-[10px] font-bold uppercase tracking-wider">${dateObj.toLocaleDateString('en-US', { month: 'short' })}</div>
-                                <div class="text-xl font-bold leading-none">${dateObj.getDate()}</div>
-                            </div>
+                <div class="border border-slate-200 rounded-lg overflow-hidden bg-slate-50 transition-all team-card" data-team-name="${team.Name}" data-team-id="${teamIdSafe}">
+                    <div class="p-3 bg-white flex items-center justify-between cursor-pointer" onclick="document.getElementById('body-${teamIdSafe}').classList.toggle('hidden');">
+                        <div class="flex items-center gap-3">
+                            <input type="checkbox" class="team-checkbox w-5 h-5 text-indigo-600 rounded" value="${team.Name}" onclick="event.stopPropagation()">
                             <div>
-                                <h4 class="font-bold text-slate-800 text-sm">${dayName}</h4>
-                                <p class="text-xs text-slate-500">${fullDate}</p>
+                                <span class="font-bold text-slate-700 text-sm">${team.Name}</span>
+                                <span id="count-badge-${teamIdSafe}" class="ml-2 text-[10px] bg-slate-100 text-slate-500 px-1.5 py-0.5 rounded-full hidden">0 selected</span>
                             </div>
                         </div>
-                        <span class="text-[10px] font-bold text-slate-500 bg-slate-100 px-2 py-1 rounded border border-slate-200">
-                            ${items.length} Teams
-                        </span>
+                        <svg class="w-4 h-4 text-slate-400" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/></svg>
                     </div>
-                    <div class="flex flex-wrap gap-2">
-                        ${items.map(item => `
-                            <div class="relative flex items-center gap-1.5 bg-slate-50 px-2.5 py-1 rounded text-xs font-medium text-slate-600 border border-slate-200 group/item hover:border-red-200 hover:bg-red-50 hover:text-red-600 transition-all cursor-default">
-                                <span>${item.TeamName}</span>
-                                <button onclick="deleteSchedule(${item.ScheduleID})" class="ml-1 opacity-0 group-hover/item:opacity-100 transition-opacity p-0.5 hover:bg-red-200 rounded-full" title="Remove Team">
-                                    <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg>
-                                </button>
-                            </div>
-                        `).join('')}
+                    <div id="body-${teamIdSafe}" class="hidden border-t border-slate-100 bg-white p-3">
+                        <input type="text" placeholder="Search..." class="w-full text-xs border-slate-200 rounded mb-2" onkeyup="filterEmployeesInTeam(this, '${teamIdSafe}')">
+                        <div class="max-h-[150px] overflow-y-auto space-y-1 custom-scrollbar member-list-${teamIdSafe}">
+                            ${renderEmployeeCheckboxes(teamIdSafe)}
+                        </div>
                     </div>
-                </div>
-            `}).join('');
+                </div>`;
+            }).join('');
+        } else { container.innerHTML = `<div class="text-center text-xs">No teams found.</div>`; }
+    } catch (err) { container.innerHTML = `Error loading data`; }
+}
 
-    } catch (err) { 
-        console.error(err);
+function renderEmployeeCheckboxes(teamIdSafe) {
+    return allEmployeesCache.map(emp => `
+        <label class="flex items-center gap-2 p-1.5 hover:bg-slate-50 rounded cursor-pointer">
+            <input type="checkbox" name="members-${teamIdSafe}" value="${emp.EmployeeID}" class="w-3.5 h-3.5 text-indigo-500 rounded" onchange="updateSelectedCount('${teamIdSafe}')">
+            <div class="flex-1 min-w-0"><div class="text-xs font-medium truncate">${emp.EmployeeName}</div></div>
+        </label>
+    `).join('');
+}
+
+window.updateSelectedCount = (teamIdSafe) => {
+    const count = document.querySelectorAll(`input[name="members-${teamIdSafe}"]:checked`).length;
+    const badge = document.getElementById(`count-badge-${teamIdSafe}`);
+    const teamCheckbox = document.querySelector(`.team-card[data-team-id="${teamIdSafe}"] .team-checkbox`);
+    if (badge) {
+        badge.innerText = `${count} selected`;
+        badge.classList.remove('hidden');
+        if(count === 0) badge.classList.add('hidden');
     }
+    if (teamCheckbox && count > 0) teamCheckbox.checked = true;
+};
+
+window.filterEmployeesInTeam = (input, teamIdSafe) => {
+    const filter = input.value.toLowerCase();
+    document.querySelectorAll(`.member-list-${teamIdSafe} label`).forEach(label => {
+        label.style.display = label.textContent.toLowerCase().includes(filter) ? "flex" : "none";
+    });
+};
+
+// 📅 Load Schedules (List & Calendar)
+async function loadSchedules() {
+    const listContainer = document.getElementById('list-view-container');
+    const month = document.getElementById('filter-month').value;
+    const year = document.getElementById('filter-year').value;
+
+    try {
+        // ส่ง params ไป Backend
+        const res = await API.get(`/admin/schedules?month=${month}&year=${year}`);
+        const data = (res.success) ? res.data : [];
+
+        // 1. Render List View
+        if (data.length === 0) {
+            listContainer.innerHTML = `<div class="text-center py-16 text-slate-400 border border-dashed rounded-xl bg-slate-50">No schedules for ${month}/${year}</div>`;
+        } else {
+            const grouped = data.reduce((acc, curr) => {
+                const d = curr.ScheduledDate.split('T')[0];
+                if (!acc[d]) acc[d] = [];
+                acc[d].push(curr);
+                return acc;
+            }, {});
+
+            listContainer.innerHTML = Object.entries(grouped)
+                .sort((a, b) => new Date(b[0]) - new Date(a[0])) // เรียงจากวันที่ล่าสุด (ในเดือนนั้น) ลงมา
+                .map(([date, items]) => {
+                    const dObj = new Date(date);
+                    const fullDate = dObj.toLocaleDateString('th-TH', { dateStyle: 'long' });
+                    return `
+                    <div class="bg-white p-4 rounded-xl border border-slate-200 shadow-sm">
+                        <div class="flex gap-4 mb-3 border-b pb-2">
+                            <div class="bg-indigo-50 text-indigo-700 px-3 py-1 rounded text-center border border-indigo-100">
+                                <div class="text-xs font-bold uppercase">${dObj.toLocaleDateString('en-US', { month: 'short' })}</div>
+                                <div class="text-xl font-bold">${dObj.getDate()}</div>
+                            </div>
+                            <div><h4 class="font-bold text-slate-800">${fullDate}</h4><p class="text-xs text-slate-500">${items.length} Teams</p></div>
+                        </div>
+                        <div class="space-y-2">
+                            ${items.map(item => `
+                                <div class="bg-slate-50 p-2 rounded border border-slate-100 flex justify-between items-start">
+                                    <div>
+                                        <div class="font-bold text-sm text-slate-700">${item.TeamName}</div>
+                                        <div class="text-xs text-slate-500 mt-1">
+                                            ${item.Members ? item.Members.split(',').map(m => `<span class="inline-block bg-white border px-1 rounded mr-1 mb-1 shadow-sm">${m.trim()}</span>`).join('') : '<span class="italic text-slate-400">No members</span>'}
+                                        </div>
+                                    </div>
+                                    <button onclick="deleteSchedule(${item.ScheduleID})" class="text-slate-300 hover:text-red-500 p-1"><svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg></button>
+                                </div>
+                            `).join('')}
+                        </div>
+                    </div>`;
+                }).join('');
+        }
+
+        // 2. Render Calendar View
+        initCalendar(data);
+
+    } catch (err) { console.error(err); }
+}
+
+function initCalendar(eventsData) {
+    const calendarEl = document.getElementById('calendar');
+    if (!calendarEl || !window.FullCalendar) return;
+
+    // Transform Data for FullCalendar
+    const events = eventsData.map(item => ({
+        title: item.TeamName,
+        start: item.ScheduledDate.split('T')[0],
+        extendedProps: { members: item.Members, id: item.ScheduleID },
+        backgroundColor: '#4f46e5', // Indigo-600
+        borderColor: '#4338ca'
+    }));
+
+    calendarInstance = new FullCalendar.Calendar(calendarEl, {
+        initialView: 'dayGridMonth',
+        headerToolbar: false, // ซ่อน Toolbar เดิม เพราะเรามี Dropdown ของเราเองแล้ว
+        initialDate: `${document.getElementById('filter-year').value}-${document.getElementById('filter-month').value.padStart(2,'0')}-01`,
+        height: 'auto',
+        events: events,
+        eventClick: function(info) {
+            alert(`Team: ${info.event.title}\nMembers: ${info.event.extendedProps.members || 'None'}`);
+        }
+    });
+
+    calendarInstance.render();
 }
 
 function setupSchedulerEvents() {
     const btnSave = document.getElementById('btn-save-schedule');
     const form = document.getElementById('form-scheduler');
-    
     const newBtn = btnSave.cloneNode(true);
     btnSave.parentNode.replaceChild(newBtn, btnSave);
 
     newBtn.onclick = async () => {
-        const dateInput = form.querySelector('input[name="ScheduledDate"]');
-        const date = dateInput.value;
-        const selectedTeams = Array.from(document.querySelectorAll('input[name="Teams"]:checked')).map(cb => cb.value);
-
-        if(!date) return showToast('Please select a date', 'error');
-        if(selectedTeams.length === 0) return showToast('Please select at least one team', 'error');
-
+        // ✅ 1. ย้ายตัวแปรนี้ออกมานอก try เพื่อให้ finally มองเห็น
+        const originalContent = newBtn.innerHTML; 
+        
         try {
-            const originalContent = newBtn.innerHTML;
-            newBtn.disabled = true;
-            newBtn.innerHTML = `<span class="loading-spinner w-4 h-4 border-white border-t-transparent"></span> Saving...`;
+            const dateInput = form.querySelector('input[name="ScheduledDate"]');
+            const date = dateInput.value;
+            const allocations = [];
 
-            const res = await apiFetch('/admin/schedule/create', {
-                method: 'POST',
-                body: { ScheduledDate: date, Teams: selectedTeams }
+            // ... (Logic วนลูปหา Team และ Member เหมือนเดิม ไม่ต้องแก้) ...
+            document.querySelectorAll('.team-card').forEach(card => {
+                const cb = card.querySelector('.team-checkbox');
+                if (cb.checked) {
+                    const teamName = cb.value;
+                    const teamIdSafe = card.dataset.teamId || card.dataset.teamName.replace(/\s+/g, '-');
+                    const members = Array.from(card.querySelectorAll(`input[name="members-${teamIdSafe}"]:checked`)).map(c => c.value);
+                    allocations.push({ TeamName: teamName, MemberIDs: members });
+                }
             });
 
-            if(res.success || res.status === 'success') {
-                showToast('Schedule created successfully', 'success');
-                loadSchedules();
-                dateInput.value = '';
-                document.querySelectorAll('input[name="Teams"]').forEach(cb => cb.checked = false);
-            } else {
-                showError(res.message || 'Error creating schedule');
-            }
-        } catch(err) {
-            showError(err);
+            if (!date) return showToast('Please select a date', 'error');
+            if (allocations.length === 0) return showToast('Select at least one team', 'error');
+
+            newBtn.disabled = true;
+            newBtn.innerHTML = `Saving...`;
+
+            await API.post('/admin/schedule/create', {
+                ScheduledDate: date,
+                Allocations: allocations
+            });
+
+            showToast('Success', 'success');
+            loadSchedules();
+            
+            // Reset Form
+            dateInput.value = '';
+            document.querySelectorAll('input[type="checkbox"]').forEach(c => c.checked = false);
+            document.querySelectorAll('[id^="count-badge-"]').forEach(el => el.classList.add('hidden'));
+            document.querySelectorAll('div[id^="body-"]').forEach(el => el.classList.add('hidden'));
+
+        } catch (err) {
+            showError(err.message);
         } finally {
+            // ✅ 2. ตอนนี้เรียกใช้ originalContent ได้แล้ว ไม่ error
             newBtn.disabled = false;
-            newBtn.innerHTML = 'Save Schedule';
+            newBtn.innerHTML = originalContent; 
         }
     };
 }
 
 window.deleteSchedule = async (id) => {
-    if(!confirm('Are you sure you want to remove this schedule item?')) return;
+    if(!confirm('Delete this item?')) return;
     try {
-        const res = await apiFetch(`/admin/schedule/${id}`, { method: 'DELETE' });
-        if(res.success || res.status === 'success') {
-            showToast('Item removed', 'success');
-            loadSchedules();
-        } else {
-            showError(res.message);
-        }
+        const res = await API.delete(`/admin/schedule/${id}`);
+        if(res.success) { showToast('Deleted', 'success'); loadSchedules(); }
+        else showError(res.message);
     } catch(err) { showError(err); }
 };
 
-
 // ==========================================
-// 💾 TAB: MASTER DATA
+// 💾 TAB: MASTER DATA (ส่วนนี้เหมือนเดิม)
 // ==========================================
 async function renderMasterData(container) {
     container.innerHTML = `
         <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 animate-fade-in">
-            ${renderMasterCard('departments', '🏢', 'Departments', 'แผนก')}
-            ${renderMasterCard('teams', '👷', 'Teams', 'ทีม (สำหรับจัดเวร)')}
-            ${renderMasterCard('positions', '💼', 'Positions', 'ตำแหน่ง (สำหรับพนักงาน)')} ${renderMasterCard('roles', '🔑', 'System Roles', 'สิทธิ์การใช้งาน')}
+            ${renderMasterCard('departments', 'Departments', 'แผนก')}
+            ${renderMasterCard('teams', 'Teams', 'ทีม (สำหรับจัดเวร)')}
+            ${renderMasterCard('positions', 'Positions', 'ตำแหน่ง (สำหรับพนักงาน)')} 
+            ${renderMasterCard('roles', 'System Roles', 'สิทธิ์การใช้งาน')}
         </div>
     `;
 
     loadMasterList('departments');
     loadMasterList('teams');
-    loadMasterList('positions'); // โหลดตำแหน่ง
+    loadMasterList('positions');
     loadMasterList('roles');
 }
 
-function renderMasterCard(type, iconStr, title, subtitle) {
-    // Note: iconStr is unused in this Pro version as we use specific SVGs, keeping arg for compatibility
+function renderMasterCard(type, title, subtitle) {
     let svgIcon = '';
     if(type === 'departments') svgIcon = `<svg class="w-6 h-6 text-slate-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4"/></svg>`;
     else if(type === 'teams') svgIcon = `<svg class="w-6 h-6 text-slate-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0z"/></svg>`;
@@ -345,7 +445,8 @@ async function loadMasterList(type) {
     const listEl = document.getElementById(`list-${type}`);
     const countEl = document.getElementById(`count-${type}`);
     try {
-        const res = await apiFetch(`/master/${type}`);
+        const res = await API.get(`/master/${type}`);
+        if (!res.success) throw new Error(res.message);
         if(res.success) {
             if(countEl) countEl.innerText = res.data.length;
             
@@ -376,7 +477,7 @@ async function addMasterData(type) {
     const name = input.value.trim();
     if(!name) return showToast('Please enter a name', 'error');
     try {
-        const res = await apiFetch(`/master/${type}`, { method: 'POST', body: { Name: name } });
+        const res = await API.post(`/master/${type}`, { Name: name });
         if(res.success) { 
             showToast('Added successfully', 'success'); 
             input.value = ''; 
@@ -390,7 +491,7 @@ async function addMasterData(type) {
 async function deleteMasterData(type, id) {
     if(!confirm('Are you sure you want to delete this item?')) return;
     try {
-        const res = await apiFetch(`/master/${type}/${id}`, { method: 'DELETE' });
+        const res = await API.delete(`/master/${type}/${id}`);
         if(res.success) { 
             showToast('Deleted successfully', 'success'); 
             loadMasterList(type); 
@@ -399,3 +500,17 @@ async function deleteMasterData(type, id) {
         }
     } catch(err) { showError(err); }
 }
+
+// ✅ เพิ่มฟังก์ชันนี้ไว้ท้ายไฟล์
+window.printScheduleReport = () => {
+    // 1. เปลี่ยน Title ชั่วคราว (เพื่อเป็นชื่อไฟล์ตอน Save PDF)
+    const originalTitle = document.title;
+    const today = new Date().toISOString().split('T')[0];
+    document.title = `Patrol_Schedule_Report_${today}`;
+
+    // 2. เรียกคำสั่ง Print
+    window.print();
+
+    // 3. คืนค่า Title เดิม
+    document.title = originalTitle;
+};

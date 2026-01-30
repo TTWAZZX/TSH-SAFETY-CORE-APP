@@ -1,5 +1,5 @@
 import { showLoading, hideLoading, showToast, showError, openModal, closeModal } from '../ui.js';
-import { apiFetch } from '../api.js';
+import { API } from '../api.js';
 
 let allEmployees = [];
 
@@ -86,14 +86,18 @@ export async function loadEmployeePage() {
     window.deleteEmployee = deleteEmployee;
     window.editEmployee = (id) => {
         const emp = allEmployees.find(e => e.EmployeeID == id); 
-        if(emp) openEmployeeModal(emp);
+        if (emp) openEmployeeModal(emp);
     };
+
+    // ✅ เพิ่มบรรทัดนี้
+    window.closeModal = closeModal;
+
 }
 
 // --- Data Fetching ---
 async function fetchEmployees() {
     try {
-        const res = await apiFetch('/admin/employees');
+        const res = await API.get('/admin/employees');
         if (res.success) {
             allEmployees = res.data;
             renderEmployees(allEmployees);
@@ -211,10 +215,7 @@ async function handleExcelUpload(e) {
 
         if (formattedRows.length === 0) throw new Error("ไม่พบข้อมูลที่ถูกต้อง กรุณาตรวจสอบหัวตาราง");
 
-        const res = await apiFetch('/admin/employees/import', {
-            method: 'POST',
-            body: { data: formattedRows }
-        });
+        const res = await API.post('/admin/employees/import', { data: formattedRows });
 
         if (res.success) {
             showToast(`นำเข้าสำเร็จ ${formattedRows.length} รายการ`, 'success');
@@ -236,9 +237,9 @@ async function openEmployeeModal(emp = null) {
     try {
         // Fetch Master Data
         const [depts, positions, roles] = await Promise.all([
-            apiFetch('/master/departments'),
-            apiFetch('/master/positions'), // เรียก API ตำแหน่ง
-            apiFetch('/master/roles')
+            API.get('/master/departments'),
+            API.get('/master/positions'),
+            API.get('/master/roles')
         ]);
 
         const isEdit = !!emp;
@@ -343,9 +344,9 @@ async function saveEmployee(e) {
 
         let res;
         if (isEdit) {
-             res = await apiFetch(`/employees/${data.EmployeeID}`, { method: 'PUT', body: payload });
+             res = await API.put(`/employees/${data.EmployeeID}`, payload);
         } else {
-             res = await apiFetch(`/employees`, { method: 'POST', body: payload });
+             res = await API.post('/employees', payload);
         }
 
         if (res.success || res.status === 'success') {
@@ -356,15 +357,7 @@ async function saveEmployee(e) {
             throw new Error(res.message || 'เกิดข้อผิดพลาด');
         }
     } catch (err) {
-        // Fallback for compatibility
-        try {
-             await apiFetch('/admin/employees/import', { method: 'POST', body: { data: [data] } });
-             showToast('บันทึกข้อมูลเรียบร้อย', 'success');
-             closeModal();
-             fetchEmployees();
-        } catch(fallbackErr) {
-             showError(err);
-        }
+        showError(err);
     } finally {
         hideLoading();
     }
@@ -374,7 +367,7 @@ async function deleteEmployee(id) {
     if(!confirm(`ยืนยันการลบพนักงานรหัส: ${id}?\nการกระทำนี้ไม่สามารถย้อนกลับได้`)) return;
     try {
         showLoading('กำลังลบ...');
-        await apiFetch(`/employees/${id}`, { method: 'DELETE' });
+        await API.delete(`/employees/${id}`);
         showToast('ลบพนักงานเรียบร้อย', 'success');
         fetchEmployees();
     } catch(err) {

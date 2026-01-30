@@ -1,4 +1,6 @@
-import { apiFetch } from '../api.js';
+import { API } from '../api.js';
+import { normalizeApiArray } from '../utils/normalize.js';
+
 import {
   showLoading, hideLoading, showError, showToast,
   openModal, closeModal, showConfirmationModal, showDocumentModal
@@ -7,6 +9,9 @@ import {
 let allCommittees = [];
 let committeeEventListenersInitialized = false;
 let tempSubCommittees = [];
+
+const getCommitteeId = (c) => c?.id ?? c?.CommitteeID;
+const normalizeId = (v) => String(v ?? '');
 
 function parseSubData(maybeJson) {
   if (!maybeJson) return [];
@@ -20,9 +25,11 @@ function parseSubData(maybeJson) {
 function normalizeCommittee(raw) {
   if (!raw) return null;
   const c = { ...raw };
+  c.id = getCommitteeId(raw);            // ⭐ เพิ่ม
   c.SubCommitteeData = parseSubData(raw.SubCommitteeData);
   return c;
 }
+
 
 export async function loadCommitteePage() {
   const container = document.getElementById('committee-page');
@@ -75,7 +82,13 @@ export async function loadCommitteePage() {
   `;
 
   try {
-    const data = await apiFetch('/pagedata/committees'); 
+    const res = await API.get('/pagedata/committees');
+
+    if (res?.success === false) {
+      throw new Error(res.message || 'โหลดข้อมูลคณะกรรมการไม่สำเร็จ');
+    }
+
+    const data = res.data ?? res;
     let items = [];
     
     if (data.current || data.past) {
@@ -97,7 +110,8 @@ export async function loadCommitteePage() {
     }
 
     const current = items.find(x => Number(x.IsCurrent) === 1) || items[0];
-    const past = items.filter(x => x.id !== current.id);
+    const currentId = normalizeId(getCommitteeId(current));
+    const past = items.filter(x => normalizeId(getCommitteeId(x)) !== currentId);
 
     allCommittees = [current, ...past].filter(Boolean);
     // ✅ 3. Pass isAdmin to render function
@@ -153,7 +167,7 @@ function createCommitteeCard(committee, isCurrent, isAdmin) {
     : '<div class="text-center p-6 bg-slate-50 rounded-lg border border-slate-200 border-dashed text-slate-400 text-sm">ยังไม่มีข้อมูลคณะทำงานย่อย</div>';
 
   return `
-  <div class="bg-white rounded-xl shadow-sm border ${isCurrent ? 'border-blue-200 ring-1 ring-blue-100' : 'border-slate-200'} overflow-hidden transition-all hover:shadow-md" id="committee-card-${committee.id}">
+  <div class="bg-white rounded-xl shadow-sm border ${isCurrent ? 'border-blue-200 ring-1 ring-blue-100' : 'border-slate-200'} overflow-hidden transition-all hover:shadow-md">
     
     <div class="p-5 ${isCurrent ? 'bg-gradient-to-r from-blue-50 to-white' : 'bg-white'} border-b border-slate-100 flex justify-between items-start">
       <div class="flex-grow">
@@ -167,11 +181,40 @@ function createCommitteeCard(committee, isCurrent, isAdmin) {
            </div>
       </div>
       
-      ${isAdmin ? `
-      <div class="flex gap-1">
-           <button data-id="${committee.id}" class="btn-edit-committee p-2 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"><svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z"/></svg></button>
-           <button data-id="${committee.id}" class="btn-delete-committee p-2 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors"><svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg></button>
-      </div>` : ''}
+        ${isAdmin ? `
+          <div class="flex gap-1">
+            <!-- ✏️ Edit -->
+            <button
+              data-id="${committee.id}"
+              class="btn-edit-committee p-2 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
+              title="แก้ไขข้อมูล"
+            >
+              <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                  d="M15.232 5.232l3.536 3.536
+                    m-2.036-5.036a2.5 2.5 0 113.536 3.536
+                    L6.5 21.036H3v-3.572L16.732 3.732z"/>
+              </svg>
+            </button>
+
+            <!-- 🗑 Delete -->
+            <button
+              data-id="${committee.id}"
+              class="btn-delete-committee p-2 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors"
+              title="ลบข้อมูล"
+            >
+              <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                  d="M19 7l-.867 12.142A2 2 0 0116.138 21
+                    H7.862a2 2 0 01-1.995-1.858
+                    L5 7m5 4v6m4-6v6
+                    m1-10V4a1 1 0 00-1-1h-4
+                    a1 1 0 00-1 1v3M4 7h16"/>
+              </svg>
+            </button>
+          </div>
+        ` : ''}
+
     </div>
 
     <div class="p-6">
@@ -196,11 +239,13 @@ function createCommitteeCard(committee, isCurrent, isAdmin) {
 
 function openCommitteeForm(committee = null) {
   const isEditing = !!committee;
-  tempSubCommittees = committee ? parseSubData(JSON.stringify(committee.SubCommitteeData)) : [];
+  tempSubCommittees = committee
+    ? parseSubData(committee.SubCommitteeData)
+    : [];
 
   const html = `
     <form id="committee-form" class="space-y-5 px-1" novalidate>
-        <input type="hidden" name="id" value="${committee?.id || ''}">
+        <input type="hidden" name="id" value="${committee ? getCommitteeId(committee) : ''}">
         
         <div class="bg-blue-50 text-blue-800 p-3 rounded-lg text-sm border border-blue-100 flex gap-2">
             <svg class="w-5 h-5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
@@ -217,9 +262,36 @@ function openCommitteeForm(committee = null) {
             <div><label class="block text-sm font-bold text-slate-700 mb-1">วันสิ้นสุดวาระ</label><input type="text" id="TermEndDate" name="TermEndDate" class="form-input w-full rounded-lg bg-white" value="${committee?.TermEndDate ? new Date(committee.TermEndDate).toISOString().split('T')[0] : ''}"></div>
         </div>
 
-        <div>
-            <label class="block text-sm font-bold text-slate-700 mb-1">ลิงก์ผังองค์กรหลัก</label>
-            <input type="text" name="MainOrgChartLink" class="form-input w-full rounded-lg text-sm" value="${committee?.MainOrgChartLink || ''}">
+        <div class="space-y-2">
+          <label class="block text-sm font-bold text-slate-700">
+            ผังองค์กรหลัก
+          </label>
+
+          <!-- 🔗 URL -->
+          <input
+            type="text"
+            name="MainOrgChartLink"
+            class="form-input w-full rounded-lg text-sm"
+            placeholder="หรือวางลิงก์เอกสาร"
+            value="${committee?.MainOrgChartLink || ''}"
+          >
+
+          <!-- 📎 FILE -->
+          <input
+            type="file"
+            name="MainOrgChartFile"
+            accept=".pdf,.png,.jpg,.jpeg"
+            class="block w-full text-xs text-slate-500
+                  file:mr-4 file:py-2 file:px-4
+                  file:rounded-lg file:border-0
+                  file:text-sm file:font-semibold
+                  file:bg-slate-100 file:text-slate-700
+                  hover:file:bg-slate-200"
+          >
+
+          <p class="text-xs text-slate-400">
+            รองรับ PDF / รูปภาพ (ถ้าเลือกไฟล์ จะใช้ไฟล์แทนลิงก์)
+          </p>
         </div>
 
         <div class="flex items-center gap-2 py-2">
@@ -236,7 +308,11 @@ function openCommitteeForm(committee = null) {
         </div>
 
         <div class="flex justify-end gap-3 mt-6 pt-4 border-t border-slate-100">
-            <button type="button" class="px-5 py-2.5 rounded-lg text-slate-600 hover:bg-slate-100 text-sm font-medium" onclick="document.getElementById('modal-close-btn').click()">ยกเลิก</button>
+            <button type="button"
+            onclick="closeModal()"
+            class="px-5 py-2.5 rounded-lg text-slate-600 hover:bg-slate-100 text-sm font-medium">
+              ยกเลิก
+            </button>
             <button type="submit" class="px-6 py-2.5 rounded-lg bg-slate-800 text-white hover:bg-slate-900 text-sm font-bold shadow-md">บันทึกข้อมูล</button>
         </div>
     </form>
@@ -256,19 +332,68 @@ function openCommitteeForm(committee = null) {
   });
 
   document.getElementById('committee-form').addEventListener('submit', async (e) => {
-      e.preventDefault();
-      const formData = new FormData(e.target);
+    e.preventDefault();
+
+    const formEl = e.target;
+    const formData = new FormData(formEl);
+
+    try {
+      showLoading('กำลังบันทึก...');
+
+      // ----------------------------
+      // 1) ถ้ามีไฟล์แนบ → upload ก่อน
+      // ----------------------------
+      const file = formData.get('MainOrgChartFile');
+
+      if (file && file.size > 0) {
+        const uploadData = new FormData();
+        uploadData.append('file', file);
+
+        const uploadRes = await API.post('/files/upload', uploadData, {
+          headers: { 'Content-Type': 'multipart/form-data' }
+        });
+
+        if (!uploadRes?.url) {
+          throw new Error('อัปโหลดไฟล์ไม่สำเร็จ');
+        }
+
+        // ใช้ URL จากไฟล์แทนลิงก์ที่กรอก
+        formData.set('MainOrgChartLink', uploadRes.url);
+      }
+
+      // ไม่ต้องส่ง field file ไปที่ /committees
+      formData.delete('MainOrgChartFile');
+
+      // ----------------------------
+      // 2) แปลง FormData → object
+      // ----------------------------
       const data = Object.fromEntries(formData.entries());
-      data.IsCurrent = e.target.querySelector('#IsCurrent').checked ? 1 : 0;
+
+      data.IsCurrent = formEl.querySelector('#IsCurrent').checked ? 1 : 0;
       data.SubCommitteeData = JSON.stringify(tempSubCommittees);
-      const method = data.id ? 'PUT' : 'POST';
-      const url = data.id ? `/committees/${data.id}` : '/committees';
-      try {
-          showLoading('กำลังบันทึก...');
-          await apiFetch(url, { method, body: data });
-          closeModal(); await loadCommitteePage(); showToast('บันทึกข้อมูลสำเร็จ', 'success');
-      } catch (err) { showError(err); } finally { hideLoading(); }
+
+      // ----------------------------
+      // 3) บันทึกข้อมูลคณะกรรมการ
+      // ----------------------------
+      if (data.id) {
+        // 🔁 แก้ไข
+        await API.put(`/committees/${data.id}`, data);
+      } else {
+        // ➕ เพิ่มใหม่
+        await API.post('/committees', data);
+      }
+
+      closeModal();
+      await loadCommitteePage();
+      showToast('บันทึกข้อมูลสำเร็จ', 'success');
+
+    } catch (err) {
+      showError(err);
+    } finally {
+      hideLoading();
+    }
   });
+
 }
 
 function renderSubCommitteeList() {
@@ -295,18 +420,32 @@ function setupCommitteeEventListeners() {
     const editBtn = target.closest('.btn-edit-committee');
     if (editBtn) {
       const id = editBtn.dataset.id;
-      const committee = allCommittees.find(c => String(c.id) === String(id));
+      const committee = allCommittees.find(
+        c => normalizeId(getCommitteeId(c)) === normalizeId(id)
+      );
       if (committee) openCommitteeForm(committee);
       return;
     }
+
     const deleteBtn = target.closest('.btn-delete-committee');
     if (deleteBtn) {
       const id = deleteBtn.dataset.id;
       const confirmed = await showConfirmationModal('ยืนยันการลบ', `คุณต้องการลบข้อมูลนี้ใช่หรือไม่?`);
       if (confirmed) {
           showLoading('กำลังลบ...');
-          try { await apiFetch(`/committees/${id}`, { method: 'DELETE' }); await loadCommitteePage(); showToast('ลบข้อมูลสำเร็จ', 'success'); } 
-          catch(err) { showError(err); } finally { hideLoading(); }
+          try {
+            const res = await API.delete(`/committees/${id}`);
+            if (res?.success === false) {
+              throw new Error(res.message || 'ลบข้อมูลไม่สำเร็จ');
+            }
+
+            await loadCommitteePage();
+            showToast('ลบข้อมูลสำเร็จ', 'success');
+          } catch (err) {
+            showError(err);
+          } finally {
+            hideLoading();
+          }
       }
       return;
     }

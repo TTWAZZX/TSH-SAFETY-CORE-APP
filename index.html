@@ -12,6 +12,7 @@
     <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2.0.0"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+    <script src="public/js/fullcalendar.js"></script>
     
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -188,7 +189,90 @@
         </div>
     </div>
 
+    <!-- โหลด session.js ก่อนเสมอ -->
+    <script src="public/js/session.js"></script>
+
+    <script>
+    document.addEventListener('DOMContentLoaded', async () => {
+
+        const loginOverlay = document.getElementById('login-overlay');
+        const appContainer = document.getElementById('app-container');
+        const loginForm = document.getElementById('login-form');
+        const logoutBtn = document.getElementById('user-logout-btn');
+        const userInfoBox = document.getElementById('user-info');
+
+        /* =========================
+        1. ตรวจสอบ Session ตอนเปิดเว็บ
+        ========================= */
+        try {
+            const isLoggedIn = await TSHSession.verifySession();
+
+            if (isLoggedIn) {
+                loginOverlay.classList.add('hidden');
+                appContainer.classList.remove('hidden');
+
+                const user = TSHSession.getUser();
+                if (user && userInfoBox) {
+                    userInfoBox.innerHTML = `
+                        <div>${user.name}</div>
+                        <div class="text-xs text-slate-500">${user.department}</div>
+                    `;
+                }
+            } else {
+                loginOverlay.classList.remove('hidden');
+                appContainer.classList.add('hidden');
+            }
+        } catch (err) {
+            console.error('Session verify error:', err);
+            loginOverlay.classList.remove('hidden');
+            appContainer.classList.add('hidden');
+        }
+
+        /* =========================
+        2. Login Form
+        ========================= */
+        if (loginForm) {
+            loginForm.addEventListener('submit', async (e) => {
+                e.preventDefault();
+
+                const empId = document.getElementById('login-employee-id').value;
+                const pwd = document.getElementById('login-password').value;
+                const errorBox = document.getElementById('login-error');
+
+                errorBox.textContent = '';
+
+                const ok = await TSHSession.login(empId, pwd);
+                if (ok) {
+                    loginOverlay.classList.add('hidden');
+                    appContainer.classList.remove('hidden');
+
+                    const user = TSHSession.getUser();
+                    if (user && userInfoBox) {
+                        userInfoBox.innerHTML = `
+                            <div>${user.name}</div>
+                            <div class="text-xs text-slate-500">${user.department}</div>
+                        `;
+                    }
+                } else {
+                    errorBox.textContent = 'เข้าสู่ระบบไม่สำเร็จ กรุณาตรวจสอบข้อมูล';
+                }
+            });
+        }
+
+        /* =========================
+        3. Logout
+        ========================= */
+        if (logoutBtn) {
+            logoutBtn.addEventListener('click', () => {
+                TSHSession.logout();
+            });
+        }
+
+    });
+    </script>
+
+    <!-- main.js โหลดหลังสุด -->
     <script type="module" src="public/js/main.js"></script>
-    
+
 </body>
 </html>

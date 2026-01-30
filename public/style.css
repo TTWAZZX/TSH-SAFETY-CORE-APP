@@ -214,3 +214,49 @@ body { font-family: 'Kanit', sans-serif; background-color: #f1f5f9; }
 .dark .custom-scrollbar::-webkit-scrollbar-thumb {
     background-color: #475569;
 }
+
+@media print {
+    /* ซ่อนทุกอย่างที่ไม่จำเป็น */
+    body * {
+        visibility: hidden;
+    }
+    
+    /* ซ่อน Sidebar, Header, ปุ่มกดต่างๆ */
+    #sidebar, header, .btn, button, form, input, select {
+        display: none !important;
+    }
+
+    /* แสดงเฉพาะส่วนรายการตารางเวร */
+    #admin-page, #admin-page * {
+        visibility: visible;
+    }
+
+    /* จัดตำแหน่งให้ตารางอยู่ตรงกลางกระดาษ */
+    #admin-page {
+        position: absolute;
+        left: 0;
+        top: 0;
+        width: 100%;
+        margin: 0;
+        padding: 20px;
+        background: white;
+    }
+
+    /* ปรับแต่งการ์ดให้ดูดีบนกระดาษ */
+    .bg-white {
+        border: 1px solid #ddd;
+        box-shadow: none;
+        break-inside: avoid; /* ห้ามตัดครึ่งหน้าระหว่างการ์ด */
+    }
+
+    /* ขยายให้เต็มความกว้างกระดาษ */
+    .lg\:col-span-7, .lg\:col-span-12 {
+        width: 100% !important;
+        grid-column: span 12 / span 12 !important;
+    }
+    
+    /* ซ่อนฝั่งซ้าย (ฟอร์มจัดตาราง) เวลาปริ้นท์ */
+    .lg\:col-span-5 {
+        display: none !important;
+    }
+}

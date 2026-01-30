@@ -1,5 +1,7 @@
-import { apiFetch } from '../api.js';
+import { API } from '../api.js';
 import { hideLoading, showLoading, showError, showToast, openModal, closeModal, showConfirmationModal, showDocumentModal } from '../ui.js';
+import { normalizeApiArray } from '../utils/normalize.js';
+
 
 let chartInstances = {};
 let allKpiDataForYear = [];
@@ -36,7 +38,7 @@ export async function loadKpiPage(year = null) {
 
     // 2. Fetch Data
     try {
-        const annData = await apiFetch('/pagedata/kpi-announcements');
+        const annData = await API.get('/pagedata/kpi-announcements');
         const { current, past } = annData;
 
         const allAnnouncements = [current, ...(past || [])].filter(Boolean);
@@ -48,13 +50,15 @@ export async function loadKpiPage(year = null) {
         const availableYears = Array.from(calculatedYears).sort((a, b) => b - a);
 
         let yearToDisplay = year ? parseInt(year) : (current ? new Date(current.EffectiveDate).getFullYear() : new Date().getFullYear());
-        allKpiDataForYear = await apiFetch(`/kpidata/${yearToDisplay}`);
+        allKpiDataForYear = await API.get(`/kpidata/${yearToDisplay}`);
         
         const announcementForYear = allAnnouncements.find(a => new Date(a.EffectiveDate).getFullYear() == yearToDisplay) || current;
         
         if (announcementForYear && new Date(announcementForYear.EffectiveDate).getFullYear() == yearToDisplay) {
-            currentAnnouncementId = announcementForYear.id || announcementForYear.AnnouncementID;
-        } else {
+            currentAnnouncementId = String(
+                announcementForYear.id ?? announcementForYear.AnnouncementID ?? ''
+            );
+                    } else {
             currentAnnouncementId = null;
         }
 
@@ -460,7 +464,7 @@ async function handleImportExcel(file) {
                 Jan: row.Jan, Feb: row.Feb, Mar: row.Mar, Apr: row.Apr, May: row.May, Jun: row.Jun,
                 Jul: row.Jul, Aug: row.Aug, Sep: row.Sep, Oct: row.Oct, Nov: row.Nov, Dec: row.Dec
             };
-            await apiFetch('/kpidata', { method: 'POST', body: payload });
+            await API.post('/kpidata', payload);
             successCount++;
         }
 
@@ -477,7 +481,7 @@ async function handleImportExcel(file) {
 async function showAnnouncementManager() {
     openModal('Announcement Management', '<div id="ann-list-content">Loading...</div>', 'max-w-4xl');
     try {
-        const announcements = await apiFetch('/kpiannouncements');
+        const announcements = await API.get('/kpiannouncements');
         const contentEl = document.getElementById('ann-list-content');
         const addBtn = `<div class="text-right mb-4"><button id="btn-add-ann-modal" class="btn btn-primary text-sm shadow-sm">+ New Announcement</button></div>`;
         const listHtml = announcements.map(ann => `
@@ -499,7 +503,7 @@ async function showAnnouncementManager() {
         document.getElementById('btn-add-ann-modal').addEventListener('click', showAnnouncementForm);
         contentEl.querySelectorAll('.btn-del-ann').forEach(btn => btn.addEventListener('click', async () => { 
             if(confirm('Delete this announcement?')) { 
-                await apiFetch(`/kpiannouncements/${btn.dataset.id}`, { method: 'DELETE' }); 
+                await API.delete(`/kpiannouncements/${btn.dataset.id}`); 
                 showAnnouncementManager(); loadKpiPage(); 
             } 
         }));
@@ -507,7 +511,7 @@ async function showAnnouncementManager() {
             const annToUpdate = announcements.find(a => String(a.id) === String(btn.dataset.id));
             if(annToUpdate) {
                 const updatedData = { ...annToUpdate, IsCurrent: 1 };
-                await apiFetch(`/kpiannouncements/${btn.dataset.id}`, { method: 'PUT', body: updatedData }); 
+                await API.put(`/kpiannouncements/${btn.dataset.id}`, updatedData);
                 showAnnouncementManager(); loadKpiPage();
             }
         }));
@@ -517,25 +521,73 @@ async function showAnnouncementManager() {
 function showAnnouncementForm() {
     const html = `
         <form id="ann-form" class="space-y-5 px-1">
-            <div><label class="block text-sm font-bold text-slate-700 mb-1">Title *</label><input type="text" name="AnnouncementTitle" class="form-input w-full rounded-lg" required placeholder="e.g., Safety Goals 2024"></div>
-            <div><label class="block text-sm font-bold text-slate-700 mb-1">Effective Date</label><input type="text" id="ann-date" name="EffectiveDate" class="form-input w-full rounded-lg" required></div>
-            <div><label class="block text-sm font-bold text-slate-700 mb-1">Document Link (Optional)</label><input type="text" name="DocumentLink" class="form-input w-full rounded-lg" placeholder="https://..."></div>
-            <div class="flex items-center gap-2 pt-2"><input type="checkbox" name="IsCurrent" id="is-curr-ann" class="rounded text-blue-600 focus:ring-blue-500"> <label for="is-curr-ann" class="text-sm font-medium text-slate-700">Set as Current Active Announcement</label></div>
-            <div class="text-right pt-4 border-t"><button type="submit" class="btn btn-primary px-6">Create</button></div>
-        </form>`;
+            <div>
+                <label class="block text-sm font-bold text-slate-700 mb-1">Title *</label>
+                <input type="text" name="AnnouncementTitle"
+                       class="form-input w-full rounded-lg"
+                       required placeholder="e.g., Safety Goals 2024">
+            </div>
+
+            <div>
+                <label class="block text-sm font-bold text-slate-700 mb-1">Effective Date</label>
+                <input type="text" id="ann-date" name="EffectiveDate"
+                       class="form-input w-full rounded-lg" required>
+            </div>
+
+            <!-- 🔗 Link -->
+            <div>
+                <label class="block text-sm font-bold text-slate-700 mb-1">
+                    Document Link (Optional)
+                </label>
+                <input type="text" name="DocumentLink"
+                       class="form-input w-full rounded-lg"
+                       placeholder="https://...">
+            </div>
+
+            <!-- 📎 File Upload -->
+            <div>
+                <label class="block text-sm font-bold text-slate-700 mb-1">
+                    Or Upload File (PDF / DOCX)
+                </label>
+                <input type="file"
+                       name="AnnouncementFile"
+                       accept=".pdf,.doc,.docx"
+                       class="block w-full text-sm text-slate-600
+                              file:mr-4 file:py-2 file:px-4
+                              file:rounded-lg file:border-0
+                              file:text-sm file:font-semibold
+                              file:bg-slate-100 file:text-slate-700
+                              hover:file:bg-slate-200">
+                <p class="text-xs text-slate-400 mt-1">
+                    * If file is selected, it will override the link
+                </p>
+            </div>
+
+            <div class="flex items-center gap-2 pt-2">
+                <input type="checkbox" name="IsCurrent" id="is-curr-ann"
+                       class="rounded text-blue-600 focus:ring-blue-500">
+                <label for="is-curr-ann"
+                       class="text-sm font-medium text-slate-700">
+                    Set as Current Active Announcement
+                </label>
+            </div>
+
+            <div class="text-right pt-4 border-t">
+                <button type="submit"
+                        class="btn btn-primary px-6">
+                    Create
+                </button>
+            </div>
+        </form>
+    `;
+
     openModal('Create New Announcement', html, 'max-w-lg');
     flatpickr("#ann-date", { locale: "th", dateFormat: "Y-m-d", defaultDate: "today" });
 
-    document.getElementById('ann-form').addEventListener('submit', async (e) => {
-        e.preventDefault();
-        const formData = new FormData(e.target);
-        const data = Object.fromEntries(formData.entries());
-        data.IsCurrent = e.target.querySelector('[name="IsCurrent"]').checked ? 1 : 0;
-        try {
-            await apiFetch('/kpiannouncements', { method: 'POST', body: data });
-            closeModal(); showAnnouncementManager(); loadKpiPage();
-        } catch (err) { showError(err); }
-    });
+    document
+        .getElementById('ann-form')
+        .addEventListener('submit', handleAnnouncementSubmit);
+
 }
 
 function showKpiForm(kpi = null, announcementId = null) {
@@ -588,6 +640,58 @@ function showKpiForm(kpi = null, announcementId = null) {
     document.getElementById('kpi-form').addEventListener('submit', handleKpiFormSubmit);
 }
 
+async function handleAnnouncementSubmit(e) {
+    e.preventDefault();
+
+    const form = e.target;
+    const submitBtn = form.querySelector('button[type="submit"]');
+    if (submitBtn.disabled) return;
+
+    submitBtn.disabled = true;
+    submitBtn.innerHTML =
+      '<span class="animate-spin inline-block w-4 h-4 border-2 border-white border-t-transparent rounded-full mr-2"></span>Saving...';
+
+    const formData = new FormData(form);
+
+    try {
+        showLoading('Saving announcement...');
+
+        // 📎 Upload file (optional)
+        const file = formData.get('AnnouncementFile');
+        if (file instanceof File && file.size > 0) {
+            const uploadData = new FormData();
+            uploadData.append('file', file);
+
+            const uploadRes = await API.post('/files/upload', uploadData);
+
+            if (!uploadRes?.url) {
+                throw new Error('File upload failed');
+            }
+
+            formData.set('DocumentLink', uploadRes.url);
+        }
+
+        formData.delete('AnnouncementFile');
+
+        const data = Object.fromEntries(formData.entries());
+        data.IsCurrent = form.querySelector('[name="IsCurrent"]').checked ? 1 : 0;
+
+        await API.post('/kpiannouncements', data);
+
+        closeModal();
+        showToast('Announcement created successfully', 'success');
+        await showAnnouncementManager();
+        await loadKpiPage();
+
+    } catch (err) {
+        showError(err);
+    } finally {
+        hideLoading();
+        submitBtn.disabled = false;
+        submitBtn.textContent = 'Create';
+    }
+}
+
 async function handleKpiFormSubmit(event) {
     event.preventDefault();
     const form = event.target;
@@ -608,15 +712,18 @@ async function handleKpiFormSubmit(event) {
     const endpoint = data.id ? `/kpidata/${data.id}` : '/kpidata';
     
     try {
-        await apiFetch(endpoint, { method: method, body: data });
-        closeModal(); await loadKpiPage(data.Year); showToast('KPI Saved Successfully', 'success');
+        if (data.id) {
+            await API.put(`/kpidata/${data.id}`, data);
+        } else {
+            await API.post('/kpidata', data);
+        } closeModal(); await loadKpiPage(data.Year); showToast('KPI Saved Successfully', 'success');
     } catch (error) { showError(error); } finally { if(submitBtn) { submitBtn.disabled = false; submitBtn.textContent = 'Save KPI'; } }
 }
 
 async function handleDeleteKpi(kpiId) {
     hideLoading(); showLoading('Deleting...');
     try {
-        await apiFetch(`/kpidata/${kpiId}`, { method: 'DELETE' });
+        await API.delete(`/kpidata/${kpiId}`);
         await loadKpiPage(document.getElementById('kpi-year-select')?.value);
         showToast('KPI Deleted');
     } catch (error) { showError(error); } finally { hideLoading(); }

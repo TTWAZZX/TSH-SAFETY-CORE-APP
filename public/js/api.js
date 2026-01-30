@@ -1,64 +1,72 @@
-// ถ้าอยู่บน Vercel หรือ Production ให้ใช้ path เริ่มต้นเป็น /api
-// ถ้าอยู่ Local ให้ใช้ http://localhost:5000/api
-const BASE_URL = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1'
-    ? 'http://localhost:5000/api'
-    : '/api';
+// public/js/api.js
+// ===============================
+// Central API Wrapper (Vercel-ready)
+// ===============================
 
-function buildOptions(options = {}) {
-    const opts = { ...options };
-    opts.headers = { 'Content-Type': 'application/json', ...(options.headers || {}) };
-
-    const token = localStorage.getItem('jwt');
-    if (token) opts.headers.Authorization = `Bearer ${token}`;
-
-    if (opts.body && typeof opts.body === 'object' && !(opts.body instanceof FormData)) {
-        opts.body = JSON.stringify(opts.body);
-    }
-    return opts;
-}
+// ✅ รองรับทั้ง localhost และ Vercel
+const API_BASE =
+    import.meta?.env?.VITE_API_BASE ||
+    window.API_BASE ||
+    'http://localhost:5000/api';
 
 export async function apiFetch(endpoint, options = {}) {
-    // 1. จัดการ Endpoint ให้สะอาด (ลบ /api ข้างหน้าออกถ้ามี เพื่อป้องกันการซ้ำ)
-    // เพราะ BASE_URL เรามี /api เตรียมไว้ให้อยู่แล้ว
-    let cleanPath = endpoint || '';
-    if (cleanPath.startsWith('/api/')) {
-        cleanPath = cleanPath.replace('/api/', '/');
-    }
-    if (!cleanPath.startsWith('/')) {
-        cleanPath = '/' + cleanPath;
+    const token = TSHSession.getToken();
+
+    const headers = {
+        ...(options.headers || {})
+    };
+
+    // ✅ ใส่ Content-Type เฉพาะตอนที่ body เป็น JSON
+    if (!(options.body instanceof FormData)) {
+        headers['Content-Type'] = 'application/json';
     }
 
-    // 2. รวม URL: BASE_URL + cleanPath
-    // ตัวอย่าง: "http://localhost:5000/api" + "/login"
-    const fullUrl = BASE_URL + cleanPath; 
-    
-    console.log(`Fetching: ${fullUrl}`); // Debug ดู URL จริง
-
-    const res = await fetch(fullUrl, buildOptions(options));
-
-    if (res.status === 204 || res.headers.get('content-length') === '0') return { success: true };
-    
-    if (!res.ok) {
-        let msg = `HTTP ${res.status}`;
-        try { 
-            const err = await res.json(); 
-            msg = err.message || msg; 
-        } catch {}
-        throw new Error(msg);
+    if (token) {
+        headers['Authorization'] = `Bearer ${token}`;
     }
-    
-    return await res.json();
+
+    try {
+        const res = await fetch(`${API_BASE}${endpoint}`, {
+            ...options,
+            headers
+        });
+
+        if (res.status === 401 || res.status === 403) {
+            console.warn('Session expired. Logging out...');
+            TSHSession.logout();
+            throw new Error('Session expired');
+        }
+
+        const contentType = res.headers.get('content-type');
+        if (!contentType || !contentType.includes('application/json')) {
+            return res;
+        }
+
+        const data = await res.json();
+        if (!res.ok) throw data;
+
+        return data;
+
+    } catch (err) {
+        console.error('API Error:', err);
+        throw err;
+    }
 }
 
-export async function login(employeeId, password) {
-    // เรียกใช้ได้เลย ไม่ต้องใส่ /api ข้างหน้าแล้ว เพราะ apiFetch จัดการให้
-    const data = await apiFetch('/login', { method: 'POST', body: { employeeId, password } });
-    if (data?.token) localStorage.setItem('jwt', data.token);
-    return data;
-}
-
-export function logout() { 
-    localStorage.removeItem('jwt'); 
-    // อาจจะเพิ่ม logic ให้ redirect ไปหน้า login ด้วยก็ได้
-    window.location.reload();
-}
+export const API = {
+    get: (url) => apiFetch(url),
+    post: (url, body) =>
+        apiFetch(url, {
+            method: 'POST',
+            body: body instanceof FormData ? body : JSON.stringify(body)
+        }),
+    put: (url, body) =>
+        apiFetch(url, {
+            method: 'PUT',
+            body: body instanceof FormData ? body : JSON.stringify(body)
+        }),
+    delete: (url) =>
+        apiFetch(url, {
+            method: 'DELETE'
+        })
+};
