@@ -5,85 +5,113 @@
 
 // SECTION 1: SETUP AND CONFIGURATION
 require('dotenv').config();
+const path = require('path');
 
-// --- ▼▼▼ เพิ่มโค้ดตรวจสอบ 4 บรรทัดนี้ ▼▼▼ ---
+// --- ▼▼▼ ตรวจสอบ Cloudinary Credentials ▼▼▼ ---
 console.log("--- Verifying Cloudinary Credentials ---");
 console.log("Cloud Name:", process.env.CLOUDINARY_CLOUD_NAME ? "Loaded" : "!! MISSING !!");
 console.log("API Key:", process.env.CLOUDINARY_API_KEY ? "Loaded" : "!! MISSING !!");
 console.log("API Secret:", process.env.CLOUDINARY_API_SECRET ? "Loaded" : "!! MISSING !!");
 console.log("--------------------------------------");
 
+// --- Core Dependencies ---
 const express = require('express');
 const cors = require('cors');
 const mysql = require('mysql2/promise');
 const jwt = require('jsonwebtoken');
 const { v4: uuidv4 } = require('uuid');
+
+// --- Upload / Cloudinary ---
 const cloudinary = require('cloudinary').v2;
 const { CloudinaryStorage } = require('multer-storage-cloudinary');
 const multer = require('multer');
-const patrolRoutes = require('./routes/patrol'); // ✅ เพิ่มบรรทัดนี้
+
+// --- Routes ---
+const patrolRoutes = require('./routes/patrol');
 const adminRoutes = require('./routes/admin');
-const cccfRoutes = require('./routes/cccf');     // ✅ เพิ่มบรรทัดนี้
-const masterRoutes = require('./routes/master'); // ✅ 1. เพิ่มบรรทัดนี้ (Import)
+const cccfRoutes = require('./routes/cccf');
+const masterRoutes = require('./routes/master');
 
-// --- ตั้งค่า Cloudinary ---
-cloudinary.config({
-  cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
-  api_key: process.env.CLOUDINARY_API_KEY,
-  api_secret: process.env.CLOUDINARY_API_SECRET
-});
-
-const storage = new CloudinaryStorage({
-  cloudinary: cloudinary,
-  params: (req, file) => { // <--- เปลี่ยนจาก Object เป็นฟังก์ชัน
-    // กำหนดประเภทไฟล์เริ่มต้นให้เป็น 'raw' สำหรับเอกสารทั่วไป
-    let resource_type = 'raw';
-
-    // ตรวจสอบ mimetype ของไฟล์
-    if (file.mimetype.startsWith('image')) {
-      resource_type = 'image';
-    } else if (file.mimetype.startsWith('video')) {
-      resource_type = 'video';
-    }
-    // ถ้าไม่ใช่ทั้ง image และ video ก็จะเป็น 'raw' ตามค่าเริ่มต้น
-
-    return {
-      folder: 'tsh_safety_app',
-      public_id: `${Date.now()}-${file.originalname}`,
-      resource_type: resource_type, // ส่งค่าที่ถูกต้องเข้าไป
-      access_mode: 'public',
-      overwrite: true,
-    };
-  },
-});
-
-const upload = multer({ storage: storage });
-
-
-
+// =================================================================
+// APP INITIALIZATION  ⚠️ สำคัญมาก ต้องอยู่ก่อน app.use ทุกตัว
+// =================================================================
 const app = express();
+
+// =================================================================
+// MIDDLEWARE
+// =================================================================
 app.use(cors({
-    origin: '*', // อนุญาตให้ทุกโดเมนเรียกใช้ API นี้ได้
-    methods: ['GET', 'POST', 'PUT', 'DELETE'], // อนุญาต Method ที่เราใช้
-    allowedHeaders: ['Content-Type', 'Authorization'] // (สำคัญ) อนุญาตให้ส่ง Header ที่จำเป็นสำหรับ Token
+    origin: '*',
+    methods: ['GET', 'POST', 'PUT', 'DELETE'],
+    allowedHeaders: ['Content-Type', 'Authorization']
 }));
+
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ limit: '50mb', extended: true }));
 
+// --- Serve Frontend (Static Files) ---
+app.use(express.static(path.join(__dirname, '../public')));
+
+// ================================
+// HEALTH CHECK (for localhost / Render)
+// ================================
+app.get("/api/health", (req, res) => {
+    res.json({ status: "ok", env: process.env.NODE_ENV || "local" });
+});
+
+// =================================================================
+// CLOUDINARY CONFIG
+// =================================================================
+cloudinary.config({
+    cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
+    api_key: process.env.CLOUDINARY_API_KEY,
+    api_secret: process.env.CLOUDINARY_API_SECRET
+});
+
+const storage = new CloudinaryStorage({
+    cloudinary,
+    params: (req, file) => {
+        let resource_type = 'raw';
+        if (file.mimetype.startsWith('image')) resource_type = 'image';
+        else if (file.mimetype.startsWith('video')) resource_type = 'video';
+
+        return {
+            folder: 'tsh_safety_app',
+            public_id: `${Date.now()}-${file.originalname}`,
+            resource_type,
+            access_mode: 'public',
+            overwrite: true,
+        };
+    }
+});
+
+const upload = multer({ storage });
+
+// =================================================================
+// DATABASE
+// =================================================================
 const pool = require('./db');
 
-// Middleware สำหรับตรวจสอบ Token
+// =================================================================
+// AUTH MIDDLEWARE
+// =================================================================
 const authenticateToken = (req, res, next) => {
     const authHeader = req.headers['authorization'];
     const token = authHeader && authHeader.split(' ')[1];
-    if (token == null) return res.status(401).json({ success: false, message: 'No token provided' });
+
+    if (!token) {
+        return res.status(401).json({ success: false, message: 'No token provided' });
+    }
 
     jwt.verify(token, process.env.JWT_SECRET, (err, user) => {
-        if (err) return res.status(403).json({ success: false, message: 'Token is not valid' });
+        if (err) {
+            return res.status(403).json({ success: false, message: 'Token is not valid' });
+        }
         req.user = user;
         next();
     });
 };
+
 
 // =================================================================
 // SECTION 2: AUTHENTICATION & SESSION MANAGEMENT
@@ -562,7 +590,6 @@ const tablesForCrud = [
 
 tablesForCrud.forEach(table => {
     const endpoint = `/api/${table.toLowerCase()}`;
-    const primaryKeyResult = pool.query(`SHOW KEYS FROM \`${table}\` WHERE Key_name = 'PRIMARY'`);
 
     // GET ALL
     app.get(endpoint, authenticateToken, async (req, res) => {
@@ -573,55 +600,46 @@ tablesForCrud.forEach(table => {
             res.status(500).json({ status: 'error', message: `Could not fetch data from ${table}` });
         }
     });
-    
-    // ADD NEW (POST)
+
+    // ADD NEW
     app.post(endpoint, authenticateToken, async (req, res) => {
         try {
             const columns = Object.keys(req.body);
             const values = Object.values(req.body);
             const query = `INSERT INTO \`${table}\` (\`${columns.join('`,`')}\`) VALUES (?)`;
             await pool.query(query, [values]);
-            res.status(201).json({ status: 'success', message: 'เพิ่มข้อมูลใหม่สำเร็จ' });
+            res.status(201).json({ status: 'success' });
         } catch (error) {
-            console.error(`Error adding to ${table}:`, error);
-            res.status(500).json({ status: 'error', message: `Could not add data to ${table}` });
+            res.status(500).json({ status: 'error' });
         }
     });
 
-    // UPDATE (PUT)
-    // หมายเหตุ: การ Update นี้จะใช้ 'id' เป็นตัวอ้างอิงหลัก หากตารางไหนไม่มี 'id' อาจจะต้องปรับแก้
+    // UPDATE
     app.put(`${endpoint}/:id`, authenticateToken, async (req, res) => {
         try {
-             const { id } = req.params;
-            const columns = Object.keys(req.body).map(key => `\`${key}\` = ?`).join(',');
-            const values = [...Object.values(req.body), id];
-            const query = `UPDATE \`${table}\` SET ${columns} WHERE id = ?`; // สมมติว่า PK คือ 'id'
-            const [result] = await pool.query(query, values);
-             if (result.affectedRows === 0) {
-                return res.status(404).json({ status: 'error', message: 'Item not found for update' });
-            }
-            res.json({ status: 'success', message: 'อัปเดตข้อมูลสำเร็จ' });
+            const columns = Object.keys(req.body).map(k => `\`${k}\`=?`).join(',');
+            const values = [...Object.values(req.body), req.params.id];
+            await pool.query(
+              `UPDATE \`${table}\` SET ${columns} WHERE id = ?`,
+              values
+            );
+            res.json({ status: 'success' });
         } catch (error) {
-            console.error(`Error updating ${table}:`, error);
-            res.status(500).json({ status: 'error', message: `Could not update data in ${table}` });
+            res.status(500).json({ status: 'error' });
         }
     });
 
     // DELETE
     app.delete(`${endpoint}/:id`, authenticateToken, async (req, res) => {
         try {
-            const { id } = req.params;
-            const [result] = await pool.query(`DELETE FROM \`${table}\` WHERE id = ?`, [id]); // สมมติว่า PK คือ 'id'
-            if (result.affectedRows === 0) {
-                return res.status(404).json({ status: 'error', message: 'Item not found for deletion' });
-            }
-            res.json({ status: 'success', message: 'ลบข้อมูลสำเร็จ' });
+            await pool.query(`DELETE FROM \`${table}\` WHERE id = ?`, [req.params.id]);
+            res.json({ status: 'success' });
         } catch (error) {
-            console.error(`Error deleting from ${table}:`, error);
-            res.status(500).json({ status: 'error', message: `Could not delete data from ${table}` });
+            res.status(500).json({ status: 'error' });
         }
     });
 });
+
 
 // ==========================================
 // 👥 EMPLOYEES MANAGEMENT (เพิ่มใหม่)
@@ -723,6 +741,19 @@ app.post('/api/admin/employees/import', async (req, res) => {
         connection.release();
     }
 });
+
+app.get("/api/health", (req, res) => {
+    res.json({ status: "ok" });
+});
+
+
+// ==========================================
+// FRONTEND FALLBACK (SPA)
+// ==========================================
+app.get(/.*/, (req, res) => {
+    res.sendFile(path.join(__dirname, "../index.html"));
+});
+
 
 // =================================================================
 // SECTION 5: START THE SERVER

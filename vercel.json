@@ -10,7 +10,7 @@
       "use": "@vercel/static"
     },
     {
-      "src": "*.html",
+      "src": "index.html",
       "use": "@vercel/static"
     }
   ],
@@ -18,10 +18,6 @@
     {
       "src": "/api/(.*)",
       "dest": "/backend/server.js"
-    },
-    {
-      "src": "/public/(.*)",
-      "dest": "/public/$1"
     },
     {
       "src": "/(.*)",
