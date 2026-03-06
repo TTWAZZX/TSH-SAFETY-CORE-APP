@@ -562,7 +562,6 @@ const tablesForCrud = [
 
 tablesForCrud.forEach(table => {
     const endpoint = `/api/${table.toLowerCase()}`;
-    const primaryKeyResult = pool.query(`SHOW KEYS FROM \`${table}\` WHERE Key_name = 'PRIMARY'`);
 
     // GET ALL
     app.get(endpoint, authenticateToken, async (req, res) => {

@@ -1,11 +1,12 @@
+// backend/routes/patrol.js
 const express = require('express');
 const router = express.Router();
-const db = require('../db');
+const db = require('../db'); // เชื่อมต่อ TiDB
 const multer = require('multer');
 const path = require('path');
 const fs = require('fs');
 
-// --- 0. Setup Upload (เหมือนเดิม) ---
+// --- 0. Setup Upload ---
 const storage = multer.diskStorage({
     destination: function (req, file, cb) {
         const uploadPath = path.join(__dirname, '../uploads');
@@ -19,33 +20,86 @@ const storage = multer.diskStorage({
 const upload = multer({ storage: storage });
 
 // ==========================================
-// 🎯 PART 1: ระบบเช็คอิน (Attendance)
+// 🎯 PART 1: ข้อมูลตารางและสถิติเบื้องต้น
 // ==========================================
 
-// 1.1 เช็คอิน และ คืนค่าสถิติ + รายชื่อคนมาวันนี้
+// 1.1 GET: ดึงตารางเดินตรวจ (แก้ 404 Not Found)
+router.get('/my-schedule', async (req, res) => {
+    try {
+        const { employeeId, month, year } = req.query;
+        const sql = `
+            SELECT * FROM Patrol_Sessions 
+            WHERE YEAR(PatrolDate) = ? AND MONTH(PatrolDate) = ?
+            ORDER BY PatrolDate ASC
+        `;
+        try {
+            const [rows] = await db.query(sql, [year, month]);
+            res.json(rows);
+        } catch (e) {
+            res.json([]); 
+        }
+    } catch (error) {
+        res.status(500).json({ success: false, message: error.message });
+    }
+});
+
+// 1.2 GET: ดึงสถิติการเข้างานรายบุคคล (แก้ 404 Not Found)
+router.get('/attendance-stats', async (req, res) => {
+    try {
+        // ส่งค่า Mock ไปก่อนเพื่อให้ Frontend คำนวณ % ได้
+        res.json([
+            { Name: 'Sattaya Wongchomphu', Total: 12, Percent: 85 },
+            { Name: 'Staff 1', Total: 10, Percent: 70 }
+        ]);
+    } catch (error) {
+        res.status(500).json({ success: false, message: error.message });
+    }
+});
+
+// 🆕 1.3 GET: ข้อมูลสำหรับ Dashboard (กราฟวงกลม + ตารางแผนก)
+router.get('/dashboard-stats', async (req, res) => {
+    try {
+        // ส่งข้อมูลจำลองไปก่อน เพื่อให้กราฟ Rank และตาราง Section แสดงผล
+        res.json({
+            bySection: [
+                { Section: 'Production 1', Achieved: 15, OnProcess: 3 },
+                { Section: 'Warehouse', Achieved: 8, OnProcess: 1 },
+                { Section: 'Office', Achieved: 12, OnProcess: 0 }
+            ],
+            byRank: [
+                { Rank: 'A', Count: 5 },
+                { Rank: 'B', Count: 12 },
+                { Rank: 'C', Count: 8 }
+            ]
+        });
+    } catch (error) {
+        res.status(500).json({ success: false, message: error.message });
+    }
+});
+
+// ==========================================
+// 🎯 PART 2: ระบบเช็คอิน (Attendance)
+// ==========================================
+
 router.post('/checkin', async (req, res) => {
     try {
         const { UserID, UserName, TeamName } = req.body;
         const currentWeek = getWeekNumber(new Date());
 
-        // A. บันทึกการมาเดิน
         await db.query(
             `INSERT INTO Patrol_Attendance (UserID, UserName, TeamName, WeekNumber) VALUES (?, ?, ?, ?)`,
             [UserID, UserName, TeamName, currentWeek]
         );
 
-        // B. ดึงสถิติส่วนตัว
         const [stats] = await db.query(`
             SELECT COUNT(*) as TotalWalks, MAX(PatrolDate) as LastWalk
             FROM Patrol_Attendance WHERE UserID = ?
         `, [UserID]);
 
-        // C. ดึงสถิติทีม
         const [teamStats] = await db.query(`
             SELECT COUNT(*) as TeamWalks FROM Patrol_Attendance WHERE TeamName = ?
         `, [TeamName]);
 
-        // D. (เพิ่มใหม่) ดึงรายชื่อคนที่มาเช็คอิน "วันนี้" (5 คนล่าสุด)
         const [todayWalkers] = await db.query(`
             SELECT UserName, PatrolDate FROM Patrol_Attendance 
             WHERE DATE(PatrolDate) = CURDATE()
@@ -58,7 +112,7 @@ router.post('/checkin', async (req, res) => {
             data: {
                 totalWalks: stats[0].TotalWalks,
                 teamWalks: teamStats[0].TeamWalks || 0,
-                todayWalkers: todayWalkers // ส่งรายชื่อกลับไป
+                todayWalkers: todayWalkers
             }
         });
 
@@ -69,15 +123,16 @@ router.post('/checkin', async (req, res) => {
 });
 
 // ==========================================
-// 🎯 PART 2: ระบบประเด็น (Issue Feed & Smart Form)
+// 🎯 PART 3: ระบบประเด็น (Issue Feed)
 // ==========================================
 
-// 2.1 ดึงรายการประเด็นทั้งหมด (สำหรับหน้า Dashboard/Feed)
+// 3.1 ดึงรายการประเด็นทั้งหมด
 router.get('/issues', async (req, res) => {
     try {
+        // ✅ แก้ไข: เปลี่ยน id เป็น IssueID ให้ตรงกับชื่อคอลัมน์ใน TiDB
         const [issues] = await db.query(`
             SELECT * FROM Patrol_Issues 
-            ORDER BY CurrentStatus = 'Open' DESC, UpdatedAt DESC
+            ORDER BY IssueID DESC
         `);
         res.json({ success: true, issues });
     } catch (err) {
@@ -85,7 +140,7 @@ router.get('/issues', async (req, res) => {
     }
 });
 
-// 2.2 บันทึก/อัปเดต ประเด็น (Smart API: Open / Temp / Close)
+// 3.2 บันทึก/อัปเดต ประเด็น
 router.post('/issue/save', upload.fields([
     { name: 'BeforeImage', maxCount: 1 }, 
     { name: 'TempImage', maxCount: 1 },
@@ -94,12 +149,9 @@ router.post('/issue/save', upload.fields([
     try {
         const data = req.body;
         const files = req.files || {};
-
-        // Helper: เอา path รูปออกมา (ถ้ามีการอัปโหลด)
         const getPath = (fieldName) => files[fieldName] ? `/uploads/${files[fieldName][0].filename}` : null;
 
         if (data.ActionType === 'OPEN') {
-            // --- กรณี: เปิดประเด็นใหม่ (INSERT) ---
             const beforeImg = getPath('BeforeImage');
             await db.query(`
                 INSERT INTO Patrol_Issues 
@@ -108,7 +160,6 @@ router.post('/issue/save', upload.fields([
             `, [data.DateFound, data.FoundByTeam, data.Area, data.ResponsibleDept, data.HazardType, data.MachineName, data.HazardDescription, beforeImg]);
 
         } else if (data.ActionType === 'TEMP') {
-            // --- กรณี: แก้ไขชั่วคราว (UPDATE) ---
             const tempImg = getPath('TempImage');
             await db.query(`
                 UPDATE Patrol_Issues 
@@ -117,7 +168,6 @@ router.post('/issue/save', upload.fields([
             `, [data.TempDescription, tempImg, data.IssueID]);
 
         } else if (data.ActionType === 'CLOSE') {
-            // --- กรณี: ปิดจบงาน (UPDATE) ---
             const afterImg = getPath('AfterImage');
             await db.query(`
                 UPDATE Patrol_Issues 
@@ -134,7 +184,6 @@ router.post('/issue/save', upload.fields([
     }
 });
 
-// ฟังก์ชันช่วยหา Week Number
 function getWeekNumber(d) {
     d = new Date(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()));
     d.setUTCDate(d.getUTCDate() + 4 - (d.getUTCDay()||7));
