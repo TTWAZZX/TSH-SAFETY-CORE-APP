@@ -1,0 +1,20 @@
+{
+  "name": "tsh-safety-core-app",
+  "version": "1.0.0",
+  "private": true,
+  "dependencies": {
+    "@vendia/serverless-express": "^4.10.2",
+    "bcryptjs": "^2.4.3",
+    "cloudinary": "^2.9.0",
+    "cors": "^2.8.5",
+    "dotenv": "^17.2.3",
+    "express": "^4.22.1",
+    "express-rate-limit": "^7.5.0",
+    "jsonwebtoken": "^9.0.3",
+    "mime-types": "^3.0.2",
+    "multer": "^1.4.5-lts.1",
+    "multer-storage-cloudinary": "^4.0.0",
+    "mysql2": "^3.16.0",
+    "uuid": "^13.0.0"
+  }
+}

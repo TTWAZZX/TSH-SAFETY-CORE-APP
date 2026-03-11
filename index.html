@@ -1,0 +1,423 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+    <base target="_top">
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>TSH Safety Core Activity</title>
+    
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.sheetjs.com/xlsx-latest/package/dist/xlsx.full.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script> 
+    <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2.0.0"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+    <script src="public/js/fullcalendar.js"></script>
+    
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Kanit:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+    
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/flatpickr/dist/flatpickr.min.css">
+    <script src="https://cdn.jsdelivr.net/npm/flatpickr"></script>
+    <script src="https://npmcdn.com/flatpickr/dist/l10n/th.js"></script>
+
+    <link rel="stylesheet" href="public/style.css">
+
+    <script>
+        // Dark mode disabled — always light
+        document.documentElement.classList.remove('dark');
+        localStorage.removeItem('theme');
+    </script>
+</head>
+
+<body class="text-slate-900 dark:text-slate-200 bg-slate-50 dark:bg-slate-950 font-[Kanit]">
+
+    <div id="login-overlay" class="hidden fixed inset-0 z-50 flex items-center justify-center overflow-hidden" style="background: linear-gradient(135deg, #f0fdf4 0%, #ecfdf5 50%, #f8fafc 100%);">
+
+        <!-- Background decorative glows -->
+        <div class="absolute inset-0 overflow-hidden pointer-events-none">
+            <div class="absolute -top-32 -right-32 w-96 h-96 rounded-full" style="background: radial-gradient(circle, rgba(16,185,129,0.1), transparent 70%)"></div>
+            <div class="absolute -bottom-32 -left-32 w-96 h-96 rounded-full" style="background: radial-gradient(circle, rgba(13,148,136,0.08), transparent 70%)"></div>
+            <!-- Grid pattern -->
+            <svg class="absolute inset-0 w-full h-full" xmlns="http://www.w3.org/2000/svg" style="opacity:0.04">
+                <defs>
+                    <pattern id="login-grid" width="60" height="60" patternUnits="userSpaceOnUse">
+                        <path d="M 60 0 L 0 0 0 60" fill="none" stroke="#064e3b" stroke-width="0.8"/>
+                    </pattern>
+                </defs>
+                <rect width="100%" height="100%" fill="url(#login-grid)"/>
+            </svg>
+        </div>
+
+        <!-- Login Card -->
+        <div class="relative w-full max-w-3xl mx-4 flex overflow-hidden rounded-2xl bg-white" style="box-shadow: 0 20px 60px rgba(0,0,0,0.1), 0 0 0 1px rgba(0,0,0,0.05); min-height: 500px;">
+
+            <!-- Left: Brand Panel -->
+            <div class="hidden md:flex md:w-5/12 flex-col justify-between p-10 relative overflow-hidden" style="background: linear-gradient(155deg, #064e3b 0%, #065f46 55%, #0d9488 100%);">
+                <!-- Dot pattern overlay -->
+                <div class="absolute inset-0" style="opacity:0.12">
+                    <svg width="100%" height="100%" xmlns="http://www.w3.org/2000/svg">
+                        <defs>
+                            <pattern id="dots" width="18" height="18" patternUnits="userSpaceOnUse">
+                                <circle cx="9" cy="9" r="1.2" fill="white"/>
+                            </pattern>
+                        </defs>
+                        <rect width="100%" height="100%" fill="url(#dots)"/>
+                    </svg>
+                </div>
+                <div class="absolute -bottom-24 -right-24 w-64 h-64 rounded-full" style="background: radial-gradient(circle, rgba(255,255,255,0.12), transparent 70%)"></div>
+                <div class="absolute -top-10 -left-10 w-40 h-40 rounded-full" style="background: radial-gradient(circle, rgba(255,255,255,0.08), transparent 70%)"></div>
+
+                <!-- Brand top -->
+                <div class="relative z-10">
+                    <img src="https://lh3.googleusercontent.com/d/1I-KYA5pgwzXBwnn810G2e5LTQ4qvpfOa" alt="TSH Logo" class="w-14 h-auto mb-6" style="filter: brightness(0) invert(1); opacity:0.95">
+                    <h1 class="text-2xl font-bold text-white leading-snug">TSH Safety<br>Core Activity</h1>
+                    <p class="mt-3 text-sm leading-relaxed" style="color: rgba(209,250,229,0.9)">ระบบบริหารจัดการกิจกรรม<br>ด้านความปลอดภัยในการทำงาน</p>
+                </div>
+
+                <!-- Badge -->
+                <div class="relative z-10 space-y-3">
+                    <div class="flex items-center gap-3 rounded-xl px-4 py-3" style="background: rgba(255,255,255,0.15); backdrop-filter: blur(10px);">
+                        <div class="flex-shrink-0 w-9 h-9 rounded-full flex items-center justify-center" style="background: rgba(255,255,255,0.2)">
+                            <svg class="w-4 h-4 text-white" fill="currentColor" viewBox="0 0 24 24">
+                                <path d="M12 1L3 5v6c0 5.55 3.84 10.74 9 12 5.16-1.26 9-6.45 9-12V5l-9-4z"/>
+                            </svg>
+                        </div>
+                        <div>
+                            <p class="text-white text-xs font-semibold">Safety First Policy</p>
+                            <p class="text-xs" style="color:rgba(167,243,208,0.9)">ความปลอดภัยคืออันดับหนึ่ง</p>
+                        </div>
+                    </div>
+                    <p class="text-xs px-1" style="color:rgba(110,231,183,0.7)">© 2025 Thai Summit Harness Co., Ltd.</p>
+                </div>
+            </div>
+
+            <!-- Right: Form Panel (White) -->
+            <div class="flex-1 flex flex-col justify-center px-8 py-10 md:px-10 bg-white">
+
+                <!-- Mobile logo -->
+                <div class="md:hidden text-center mb-7">
+                    <img src="https://lh3.googleusercontent.com/d/1I-KYA5pgwzXBwnn810G2e5LTQ4qvpfOa" alt="TSH Logo" class="w-12 h-auto mx-auto mb-3">
+                    <p class="text-xs text-slate-400">TSH Safety Core Activity</p>
+                </div>
+
+                <div class="w-full max-w-xs mx-auto">
+
+                    <!-- Header -->
+                    <div class="mb-7">
+                        <h2 class="text-xl font-bold text-slate-800">เข้าสู่ระบบ</h2>
+                        <p class="mt-1 text-xs text-slate-400">กรุณากรอกข้อมูลเพื่อเข้าใช้งานระบบ</p>
+                    </div>
+
+                    <!-- Form -->
+                    <form id="login-form" class="space-y-4">
+
+                        <!-- Employee ID -->
+                        <div>
+                            <label class="block text-xs font-semibold mb-1.5 text-slate-600 tracking-wide">รหัสพนักงาน</label>
+                            <div class="relative">
+                                <span class="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+                                    <svg class="w-4 h-4 text-slate-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                                        <path stroke-linecap="round" stroke-linejoin="round" d="M10 6H5a2 2 0 00-2 2v9a2 2 0 002 2h14a2 2 0 002-2V8a2 2 0 00-2-2h-5m-4 0V5a2 2 0 114 0v1m-4 0a2 2 0 104 0m-5 8a2 2 0 100-4 2 2 0 000 4zm0 0c1.306 0 2.417.835 2.83 2M9 14a3.001 3.001 0 00-2.83 2M15 11h3m-3 4h2"/>
+                                    </svg>
+                                </span>
+                                <input id="login-employee-id" name="employeeId" type="text" required autocomplete="username"
+                                    placeholder="กรอกรหัสพนักงาน"
+                                    class="w-full pl-9 pr-3 py-2.5 text-sm text-slate-800 bg-slate-50 rounded-lg outline-none transition-all duration-200 border border-slate-200"
+                                    onfocus="this.style.borderColor='#059669'; this.style.boxShadow='0 0 0 3px rgba(5,150,105,0.12)'; this.style.background='#fff'"
+                                    onblur="this.style.borderColor=''; this.style.boxShadow='none'; this.style.background=''">
+                            </div>
+                        </div>
+
+                        <!-- Password -->
+                        <div>
+                            <label class="block text-xs font-semibold mb-1.5 text-slate-600 tracking-wide">รหัสผ่าน</label>
+                            <div class="relative">
+                                <span class="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+                                    <svg class="w-4 h-4 text-slate-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                                        <path stroke-linecap="round" stroke-linejoin="round" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"/>
+                                    </svg>
+                                </span>
+                                <input id="login-password" name="password" type="password" required autocomplete="current-password"
+                                    placeholder="กรอกรหัสผ่าน"
+                                    class="w-full pl-9 pr-10 py-2.5 text-sm text-slate-800 bg-slate-50 rounded-lg outline-none transition-all duration-200 border border-slate-200"
+                                    onfocus="this.style.borderColor='#059669'; this.style.boxShadow='0 0 0 3px rgba(5,150,105,0.12)'; this.style.background='#fff'"
+                                    onblur="this.style.borderColor=''; this.style.boxShadow='none'; this.style.background=''">
+                                <button type="button" id="toggle-password-btn" tabindex="-1"
+                                    class="absolute inset-y-0 right-0 pr-3 flex items-center text-slate-400 hover:text-slate-600 transition-colors">
+                                    <svg id="eye-open" class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                                        <path stroke-linecap="round" stroke-linejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/>
+                                        <path stroke-linecap="round" stroke-linejoin="round" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"/>
+                                    </svg>
+                                    <svg id="eye-closed" class="w-4 h-4 hidden" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                                        <path stroke-linecap="round" stroke-linejoin="round" d="M13.875 18.825A10.05 10.05 0 0112 19c-4.478 0-8.268-2.943-9.543-7a9.97 9.97 0 011.563-3.029m5.858.908a3 3 0 114.243 4.243M9.878 9.878l4.242 4.242M9.88 9.88l-3.29-3.29m7.532 7.532l3.29 3.29M3 3l3.59 3.59m0 0A9.953 9.953 0 0112 5c4.478 0 8.268 2.943 9.543 7a10.025 10.025 0 01-4.132 5.411m0 0L21 21"/>
+                                    </svg>
+                                </button>
+                            </div>
+                        </div>
+
+                        <!-- Error message -->
+                        <div id="login-error" class="text-xs font-medium text-red-500 min-h-[1.25rem]"></div>
+
+                        <!-- Submit button -->
+                        <button type="submit" id="login-submit-btn"
+                            class="w-full py-2.5 rounded-lg text-sm font-semibold text-white transition-all duration-200 mt-1"
+                            style="background: linear-gradient(135deg, #059669, #0d9488); box-shadow: 0 4px 15px rgba(5,150,105,0.3);"
+                            onmouseover="this.style.transform='translateY(-1px)'; this.style.boxShadow='0 6px 20px rgba(5,150,105,0.4)'"
+                            onmouseout="this.style.transform=''; this.style.boxShadow='0 4px 15px rgba(5,150,105,0.3)'">
+                            เข้าสู่ระบบ
+                        </button>
+                    </form>
+
+                    <!-- Security note -->
+                    <div class="mt-6 flex items-center justify-center gap-1.5 text-xs text-slate-400">
+                        <svg class="w-3 h-3 flex-shrink-0" fill="currentColor" viewBox="0 0 24 24">
+                            <path d="M12 1L3 5v6c0 5.55 3.84 10.74 9 12 5.16-1.26 9-6.45 9-12V5l-9-4z"/>
+                        </svg>
+                        <span>ระบบเข้ารหัส · เฉพาะผู้มีสิทธิ์เข้าใช้งาน</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div id="app-container" class="flex h-screen overflow-hidden hidden"> 
+        
+        <aside id="sidebar" class="w-64 flex-shrink-0 flex flex-col py-4 absolute inset-y-0 left-0 md:relative md:translate-x-0 transform -translate-x-full z-30 transition-transform duration-300 text-white" style="background: linear-gradient(160deg, #064e3b 0%, #065f46 55%, #0d9488 100%); box-shadow: 4px 0 20px rgba(6,78,59,0.2);">
+            <!-- Dot pattern -->
+            <div class="absolute inset-0 pointer-events-none overflow-hidden" style="opacity:0.07">
+                <svg width="100%" height="100%" xmlns="http://www.w3.org/2000/svg">
+                    <defs><pattern id="sidebar-dots" width="18" height="18" patternUnits="userSpaceOnUse"><circle cx="9" cy="9" r="1.1" fill="white"/></pattern></defs>
+                    <rect width="100%" height="100%" fill="url(#sidebar-dots)"/>
+                </svg>
+            </div>
+
+            <!-- Logo -->
+            <div class="relative z-10 px-5 pb-4 border-b flex items-center space-x-3" style="border-color:rgba(255,255,255,0.15)">
+                <img src="https://lh3.googleusercontent.com/d/1I-KYA5pgwzXBwnn810G2e5LTQ4qvpfOa" alt="TSH Logo" class="w-9 h-auto" style="filter:brightness(0) invert(1); opacity:0.95">
+                <div>
+                    <h2 class="text-sm font-bold leading-tight text-white">TSH Safety Core</h2>
+                    <span class="text-xs" style="color:rgba(167,243,208,0.75)">Activity System</span>
+                </div>
+            </div>
+
+            <!-- Nav -->
+            <nav id="main-nav" class="relative z-10 flex-grow px-3 pt-3 overflow-y-auto custom-scrollbar">
+                <ul class="space-y-0.5">
+                    <li><a href="#dashboard" data-action="navigate" class="nav-link flex items-center px-3 py-2 text-sm font-medium rounded-lg transition-colors" style="color:rgba(209,250,229,0.9)"><span>ภาพรวม</span></a></li>
+                    <li><a href="#search" data-action="navigate" class="nav-link flex items-center px-3 py-2 text-sm font-medium rounded-lg transition-colors" style="color:rgba(209,250,229,0.9)"><span>ค้นหารายบุคคล</span></a></li>
+                </ul>
+                <div class="pt-4 mt-4 space-y-0.5 border-t" style="border-color:rgba(255,255,255,0.12)">
+                    <p class="px-3 pt-1 pb-2 text-xs font-semibold uppercase tracking-wider" style="color:rgba(110,231,183,0.6)">เมนูหลัก</p>
+                    <ul class="space-y-0.5">
+                        <li><a href="#policy" data-action="navigate" class="nav-link flex items-center px-3 py-2 text-sm font-medium rounded-lg transition-colors" style="color:rgba(209,250,229,0.9)"><span>นโยบายความปลอดภัย</span></a></li>
+                        <li><a href="#committee" data-action="navigate" class="nav-link flex items-center px-3 py-2 text-sm font-medium rounded-lg transition-colors" style="color:rgba(209,250,229,0.9)"><span>คณะกรรมการความปลอดภัย</span></a></li>
+                        <li><a href="#kpi" data-action="navigate" class="nav-link flex items-center px-3 py-2 text-sm font-medium rounded-lg transition-colors" style="color:rgba(209,250,229,0.9)"><span>KPI</span></a></li>
+
+                        <li class="relative group">
+                            <button class="nav-link flex items-center justify-between w-full px-3 py-2 text-sm font-medium rounded-lg transition-colors" style="color:rgba(209,250,229,0.9)" onclick="document.getElementById('submenu-patrol').classList.toggle('hidden')">
+                                <span class="flex items-center gap-2">
+                                    <svg class="w-4 h-4 opacity-70" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-3 7h3m-3 4h3m-6-4h.01M9 16h.01" /></svg>
+                                    Patrol & CCCF
+                                </span>
+                                <svg class="w-3.5 h-3.5 opacity-60 transition-transform" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7" /></svg>
+                            </button>
+                            <ul id="submenu-patrol" class="hidden pl-8 mt-0.5 space-y-0.5">
+                                <li><a href="#patrol" data-action="navigate" class="block px-3 py-1.5 text-sm rounded-lg transition-colors" style="color:rgba(167,243,208,0.8)">Safety Patrol</a></li>
+                                <li><a href="#cccf" data-action="navigate" class="block px-3 py-1.5 text-sm rounded-lg transition-colors" style="color:rgba(167,243,208,0.8)">CCCF Activity</a></li>
+                            </ul>
+                        </li>
+
+                        <li><a href="#machine-safety" data-action="navigate" class="nav-link flex items-center px-3 py-2 text-sm font-medium rounded-lg transition-colors" style="color:rgba(209,250,229,0.9)"><span>Machine Device</span></a></li>
+                        <li><a href="#ojt" data-action="navigate" class="nav-link flex items-center px-3 py-2 text-sm font-medium rounded-lg transition-colors" style="color:rgba(209,250,229,0.9)"><span>Stop - Call - Wait</span></a></li>
+                        <li><a href="#training" data-action="navigate" class="nav-link flex items-center px-3 py-2 text-sm font-medium rounded-lg transition-colors" style="color:rgba(209,250,229,0.9)"><span>Safety Training</span></a></li>
+                        <li><a href="#accident" data-action="navigate" class="nav-link flex items-center px-3 py-2 text-sm font-medium rounded-lg transition-colors" style="color:rgba(209,250,229,0.9)"><span>รายงานอุบัติเหตุ</span></a></li>
+                        <li><a href="#yokoten" data-action="navigate" class="nav-link flex items-center px-3 py-2 text-sm font-medium rounded-lg transition-colors" style="color:rgba(209,250,229,0.9)"><span>YOKOTEN</span></a></li>
+                    </ul>
+                </div>
+                <div id="admin-menu-section" class="admin-feature hidden">
+                    <div class="pt-4 mt-4 space-y-0.5 border-t" style="border-color:rgba(255,255,255,0.12)">
+                        <p class="px-3 pt-1 pb-2 text-xs font-semibold uppercase tracking-wider" style="color:rgba(110,231,183,0.6)">Admin Console</p>
+                        <ul class="space-y-0.5">
+                            <li>
+                                <a href="#employee" data-action="navigate" class="nav-link flex items-center px-3 py-2 text-sm font-medium rounded-lg transition-colors" style="color:rgba(209,250,229,0.9)">
+                                    <span>จัดการพนักงาน (Members)</span>
+                                </a>
+                            </li>
+                            <li>
+                                <a href="#admin" data-action="navigate" class="nav-link flex items-center px-3 py-2 text-sm font-medium rounded-lg transition-colors" style="color:rgba(209,250,229,0.9)">
+                                    <span>จัดตารางเวร (Scheduler)</span>
+                                </a>
+                            </li>
+                        </ul>
+                    </div>
+                </div>
+            </nav>
+
+            <!-- Logout -->
+            <div class="relative z-10 px-4 pt-4 border-t" style="border-color:rgba(255,255,255,0.15)">
+                <button id="user-logout-btn" class="w-full py-2 rounded-lg text-sm font-medium text-white transition-all" style="background:rgba(255,255,255,0.12); border:1px solid rgba(255,255,255,0.15);" onmouseover="this.style.background='rgba(255,255,255,0.2)'" onmouseout="this.style.background='rgba(255,255,255,0.12)'">ออกจากระบบ</button>
+            </div>
+        </aside>
+
+        <div class="flex-1 flex flex-col overflow-hidden" style="background: linear-gradient(135deg, #f0fdf4 0%, #ecfdf5 60%, #f8fafc 100%);">
+            <header class="flex-shrink-0 flex justify-between items-center px-5 py-3.5 bg-white border-b border-slate-200 z-20" style="box-shadow: 0 1px 8px rgba(0,0,0,0.06);">
+                <div class="flex items-center">
+                    <button id="sidebar-toggle" class="md:hidden text-slate-500 focus:outline-none mr-3"><svg class="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h16"></path></svg></button>
+                    <h1 id="page-title" class="text-lg font-bold text-slate-800 truncate">ภาพรวม</h1>
+                </div>
+                <div class="flex items-center space-x-3">
+                    <div id="user-info" class="text-sm text-right font-medium text-slate-700"></div>
+                </div>
+            </header>
+            
+            <main class="flex-1 overflow-x-hidden overflow-y-auto p-4 md:p-6 relative">
+                
+                <div id="dashboard-page" class="page-content h-full hidden"></div>
+
+                <div id="search-page" class="page-content h-full hidden"></div>
+
+                <div id="policy-page" class="page-content h-full hidden">
+                    <div class="flex flex-col items-center justify-center h-64 text-slate-400">
+                        <div class="animate-spin rounded-full h-10 w-10 border-4 border-emerald-500 border-t-transparent mb-3"></div>
+                        กำลังโหลดข้อมูล...
+                    </div>
+                </div>
+
+                <div id="committee-page" class="page-content h-full hidden"></div>
+
+                <div id="kpi-page" class="page-content h-full hidden"></div>
+
+                <div id="patrol-page" class="page-content h-full hidden"></div>
+
+                <div id="cccf-page" class="page-content h-full hidden"></div>
+
+                <div id="yokoten-page" class="page-content h-full hidden"></div>
+
+                <div id="ojt-page" class="page-content h-full hidden"></div>
+                <div id="employee-page" class="page-content h-full hidden"></div>
+                <div id="machine-safety-page" class="page-content h-full hidden"></div>
+                <div id="training-page" class="page-content h-full hidden"></div>
+                <div id="accident-page" class="page-content h-full hidden"></div>
+
+                <div id="admin-page" class="page-content h-full hidden"></div>
+
+            </main>
+        </div>
+    </div>
+
+    <div id="modal-wrapper" class="hidden fixed inset-0 z-40 flex items-center justify-center p-2 md:p-4 opacity-0 transition-opacity duration-300">
+        <div id="modal-backdrop" class="absolute inset-0 bg-slate-900 bg-opacity-75 backdrop-blur-sm transition-opacity"></div>
+        <div id="modal-container" class="relative p-0 w-full max-w-2xl max-h-[90vh] flex flex-col card transform scale-95 transition-transform duration-300 shadow-2xl rounded-xl overflow-hidden">
+            <div class="flex justify-between items-center border-b dark:border-slate-700 p-4 bg-slate-50 dark:bg-slate-800 flex-shrink-0">
+                <h3 id="modal-title" class="text-lg font-bold text-slate-800 dark:text-white"></h3>
+                <button id="modal-close-btn" class="text-slate-400 hover:text-red-500 text-2xl transition-colors">×</button>
+            </div>
+            <div id="modal-body" class="flex-grow overflow-y-auto p-4 md:p-6 bg-white dark:bg-slate-900"></div>
+        </div>
+    </div>
+
+    <!-- โหลด session.js ก่อนเสมอ -->
+    <script src="public/js/session.js"></script>
+
+    <script>
+    document.addEventListener('DOMContentLoaded', async () => {
+
+        const loginOverlay = document.getElementById('login-overlay');
+        const appContainer = document.getElementById('app-container');
+        const loginForm = document.getElementById('login-form');
+        const logoutBtn = document.getElementById('user-logout-btn');
+        const userInfoBox = document.getElementById('user-info');
+
+        /* =========================
+        1. ตรวจสอบ Session ตอนเปิดเว็บ
+        ========================= */
+        try {
+            const isLoggedIn = await TSHSession.verifySession();
+
+            if (isLoggedIn) {
+                loginOverlay.classList.add('hidden');
+                appContainer.classList.remove('hidden');
+
+                const user = TSHSession.getUser();
+                if (user && userInfoBox) {
+                    userInfoBox.innerHTML = `
+                        <div>${user.name}</div>
+                        <div class="text-xs text-slate-500">${user.department}</div>
+                    `;
+                }
+            } else {
+                loginOverlay.classList.remove('hidden');
+                appContainer.classList.add('hidden');
+            }
+        } catch (err) {
+            console.error('Session verify error:', err);
+            loginOverlay.classList.remove('hidden');
+            appContainer.classList.add('hidden');
+        }
+
+        /* =========================
+        2. Login Form
+        ========================= */
+        if (loginForm) {
+            loginForm.addEventListener('submit', async (e) => {
+                e.preventDefault();
+
+                const empId = document.getElementById('login-employee-id').value;
+                const pwd = document.getElementById('login-password').value;
+                const errorBox = document.getElementById('login-error');
+
+                errorBox.textContent = '';
+
+                const ok = await TSHSession.login(empId, pwd);
+                if (ok) {
+                    loginOverlay.classList.add('hidden');
+                    appContainer.classList.remove('hidden');
+
+                    const user = TSHSession.getUser();
+                    if (user && userInfoBox) {
+                        userInfoBox.innerHTML = `
+                            <div>${user.name}</div>
+                            <div class="text-xs text-slate-500">${user.department}</div>
+                        `;
+                    }
+                } else {
+                    errorBox.textContent = 'เข้าสู่ระบบไม่สำเร็จ กรุณาตรวจสอบข้อมูล';
+                }
+            });
+        }
+
+        /* =========================
+        3. Logout
+        ========================= */
+        if (logoutBtn) {
+            logoutBtn.addEventListener('click', () => {
+                TSHSession.logout();
+            });
+        }
+
+        /* =========================
+        4. Toggle Password Visibility
+        ========================= */
+        const toggleBtn = document.getElementById('toggle-password-btn');
+        const pwdInput = document.getElementById('login-password');
+        const eyeOpen = document.getElementById('eye-open');
+        const eyeClosed = document.getElementById('eye-closed');
+        if (toggleBtn && pwdInput) {
+            toggleBtn.addEventListener('click', () => {
+                const isPassword = pwdInput.type === 'password';
+                pwdInput.type = isPassword ? 'text' : 'password';
+                eyeOpen.classList.toggle('hidden', isPassword);
+                eyeClosed.classList.toggle('hidden', !isPassword);
+            });
+        }
+
+    });
+    </script>
+
+    <!-- main.js โหลดหลังสุด -->
+    <script type="module" src="public/js/main.js"></script>
+
+</body>
+</html>

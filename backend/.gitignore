@@ -1,0 +1,9 @@
+# Node.js dependencies
+node_modules/
+npm-debug.log
+
+# Environment variables
+.env
+
+# IDE/Editor specific files
+.vscode/
