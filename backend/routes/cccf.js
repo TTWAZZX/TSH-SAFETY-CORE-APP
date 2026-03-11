@@ -52,14 +52,18 @@ router.get('/form-a-worker', async (req, res) => {
 // POST /cccf/form-a-worker
 router.post('/form-a-worker', async (req, res) => {
     try {
+        // ดึงข้อมูลพนักงานจาก JWT — ไม่รับจาก req.body เพื่อป้องกันการปลอมข้อมูล
+        const EmployeeName = req.user.name;
+        const EmployeeID   = req.user.id;
+        const Department   = req.user.department;
+
         const {
-            EmployeeName, EmployeeID, Department, SubmitDate,
-            JobArea, Equipment,
+            SubmitDate, JobArea, Equipment,
             HazardDescription, HowItHappened, BodyPart, Suggestion,
             StopType, Rank
         } = req.body;
 
-        if (!EmployeeName || !EmployeeID || !Department || !HazardDescription || !StopType || !Rank) {
+        if (!HazardDescription || !StopType || !Rank) {
             return res.status(400).json({ success: false, message: 'กรุณากรอกข้อมูลให้ครบถ้วน' });
         }
 
@@ -72,7 +76,7 @@ router.post('/form-a-worker', async (req, res) => {
                 EmployeeName, EmployeeID, Department, SubmitDate || new Date(),
                 JobArea || '', Equipment || '',
                 HazardDescription, HowItHappened || '', BodyPart || '', Suggestion || '',
-                StopType, Rank, req.user?.name || EmployeeName
+                StopType, Rank, EmployeeName
             ]
         );
         res.json({ success: true, message: 'ส่งแบบฟอร์ม CCCF สำเร็จ' });
@@ -114,11 +118,11 @@ router.get('/form-a-permanent', async (req, res) => {
 // POST /cccf/form-a-permanent  (with optional file upload)
 router.post('/form-a-permanent', upload.single('FormFile'), async (req, res) => {
     try {
-        const { SubmitterName, Department, JobArea, SubmitDate, Summary, AssigneeID } = req.body;
+        // ดึงข้อมูลผู้ส่งจาก JWT — ไม่รับจาก req.body เพื่อป้องกันการปลอมข้อมูล
+        const SubmitterName = req.user.name;
+        const Department    = req.user.department;
 
-        if (!SubmitterName || !Department) {
-            return res.status(400).json({ success: false, message: 'กรุณากรอกข้อมูลให้ครบถ้วน' });
-        }
+        const { JobArea, SubmitDate, Summary, AssigneeID } = req.body;
 
         const fileUrl = req.file?.path || req.file?.secure_url || null;
 
@@ -129,7 +133,7 @@ router.post('/form-a-permanent', upload.single('FormFile'), async (req, res) => 
             [
                 SubmitterName, Department, JobArea || '', SubmitDate || new Date(),
                 Summary || '', fileUrl, AssigneeID || null,
-                req.user?.name || SubmitterName
+                SubmitterName
             ]
         );
         res.json({ success: true, message: 'ส่งเอกสาร CCCF Permanent สำเร็จ' });

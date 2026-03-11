@@ -82,10 +82,10 @@ router.get('/dashboard-stats', async (req, res) => {
 
 router.post('/checkin', async (req, res) => {
     try {
-        const { UserID, UserName, TeamName } = req.body;
-        if (!UserID || !UserName) {
-            return res.status(400).json({ success: false, message: 'กรุณาระบุ UserID และ UserName' });
-        }
+        // ดึงข้อมูลผู้ใช้จาก JWT (req.user) ไม่รับจาก req.body เพื่อป้องกันการปลอมแปลง
+        const UserID   = req.user.id;
+        const UserName = req.user.name;
+        const TeamName = req.user.team || '';
         const currentWeek = getWeekNumber(new Date());
         await db.query(
             'INSERT INTO Patrol_Attendance (UserID, UserName, TeamName, WeekNumber) VALUES (?, ?, ?, ?)',

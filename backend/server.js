@@ -16,17 +16,19 @@ const { authenticateToken, isAdmin } = require('./middleware/auth');
 const { storage: cloudinaryStorage, fileFilter } = require('./cloudinary');
 const pool       = require('./db');
 
-const patrolRoutes = require('./routes/patrol');
-const adminRoutes  = require('./routes/admin');
-const cccfRoutes   = require('./routes/cccf');
-const masterRoutes = require('./routes/master');
+const patrolRoutes        = require('./routes/patrol');
+const adminRoutes         = require('./routes/admin');
+const cccfRoutes          = require('./routes/cccf');
+const masterRoutes        = require('./routes/master');
+const machineSafetyRoutes = require('./routes/machine-safety');
+const ojtRoutes           = require('./routes/ojt');
 
 // =================================================================
 // SECTION 1: SETUP
 // =================================================================
 
 // --- CORS: restrict to known origins ---
-const allowedOrigins = (process.env.ALLOWED_ORIGINS || 'http://localhost:5000,http://localhost:3000')
+const allowedOrigins = (process.env.ALLOWED_ORIGINS || 'http://localhost:5000,http://localhost:3000,http://127.0.0.1:5500,http://localhost:5500')
     .split(',').map(o => o.trim());
 
 const app = express();
@@ -514,10 +516,12 @@ app.post('/api/upload/document', authenticateToken, isAdmin, upload.single('docu
 // SECTION 4: ROUTE MOUNTS
 // FIX: all 4 routers were mounted WITHOUT any auth middleware
 // =================================================================
-app.use('/api/patrol', authenticateToken, patrolRoutes);
-app.use('/api/admin',  authenticateToken, isAdmin, adminRoutes);   // admin operations require Admin role
-app.use('/api/cccf',   authenticateToken, cccfRoutes);
-app.use('/api/master', authenticateToken, masterRoutes);
+app.use('/api/patrol',          authenticateToken, patrolRoutes);
+app.use('/api/admin',          authenticateToken, isAdmin, adminRoutes);
+app.use('/api/cccf',           authenticateToken, cccfRoutes);
+app.use('/api/master',         authenticateToken, masterRoutes);
+app.use('/api/machine-safety', authenticateToken, machineSafetyRoutes);
+app.use('/api/ojt',           authenticateToken, ojtRoutes);
 
 // =================================================================
 // SECTION 4B: GENERIC CRUD
