@@ -24,6 +24,7 @@ export async function loadAdminPage() {
                 
                 <div class="flex bg-slate-100 p-1 rounded-lg border border-slate-200">
                     <button id="tab-btn-scheduler" onclick="switchAdminTab('scheduler')" class="px-4 py-2 text-sm font-medium rounded-md transition-all flex items-center gap-2">Schedule</button>
+                    <button id="tab-btn-employees" onclick="switchAdminTab('employees')" class="px-4 py-2 text-sm font-medium rounded-md transition-all flex items-center gap-2">Employees</button>
                     <button id="tab-btn-master" onclick="switchAdminTab('master')" class="px-4 py-2 text-sm font-medium rounded-md transition-all flex items-center gap-2">Master Data</button>
                 </div>
             </div>
@@ -57,11 +58,13 @@ async function renderTabContent(tabName) {
     const inactiveClass = "text-slate-500 hover:text-slate-700 hover:bg-slate-200/50";
 
     document.getElementById('tab-btn-scheduler').className = `px-4 py-2 text-sm font-medium rounded-md transition-all flex items-center gap-2 ${tabName === 'scheduler' ? activeClass : inactiveClass}`;
+    document.getElementById('tab-btn-employees').className = `px-4 py-2 text-sm font-medium rounded-md transition-all flex items-center gap-2 ${tabName === 'employees' ? activeClass : inactiveClass}`;
     document.getElementById('tab-btn-master').className = `px-4 py-2 text-sm font-medium rounded-md transition-all flex items-center gap-2 ${tabName === 'master' ? activeClass : inactiveClass}`;
 
     contentArea.innerHTML = '<div class="flex justify-center py-20"><span class="loading-spinner w-8 h-8 border-4 border-emerald-500 border-t-transparent rounded-full animate-spin"></span></div>';
 
     if (tabName === 'scheduler') await renderScheduler(contentArea);
+    else if (tabName === 'employees') await renderEmployeesTab(contentArea);
     else await renderMasterData(contentArea);
 }
 
@@ -500,6 +503,329 @@ async function deleteMasterData(type, id) {
         }
     } catch(err) { showError(err); }
 }
+
+// ==========================================
+// 👥 TAB: EMPLOYEES — จัดการพนักงานทั้งหมด
+// ==========================================
+
+let _empCache = [];
+let _deptCache = [];
+let _teamCache = [];
+let _roleCache = [];
+let _empSearch = '';
+
+async function renderEmployeesTab(container) {
+    container.innerHTML = `
+        <div class="animate-fade-in space-y-4">
+
+            <!-- Toolbar -->
+            <div class="bg-white rounded-xl border border-slate-200 shadow-sm p-4 flex flex-col sm:flex-row gap-3 items-start sm:items-center justify-between">
+                <div class="flex gap-2 flex-1 w-full sm:max-w-sm">
+                    <input type="text" id="emp-search-input" placeholder="ค้นหาชื่อ / รหัส / หน่วยงาน..."
+                        class="form-input w-full rounded-lg text-sm border-slate-200"
+                        oninput="window._empFilterAndRender(this.value)">
+                </div>
+                <div class="flex gap-2">
+                    <button onclick="window._openImportModal()" class="btn bg-slate-100 hover:bg-slate-200 text-slate-700 text-sm px-3 py-2 rounded-lg font-medium flex items-center gap-2 transition-colors">
+                        <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12"/></svg>
+                        Import Excel
+                    </button>
+                    <button onclick="window._openAddEmpModal()" class="btn bg-emerald-600 hover:bg-emerald-700 text-white text-sm px-4 py-2 rounded-lg font-medium flex items-center gap-2 transition-colors shadow-sm shadow-emerald-100">
+                        <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/></svg>
+                        เพิ่มพนักงาน
+                    </button>
+                </div>
+            </div>
+
+            <!-- Table -->
+            <div class="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
+                <div id="emp-table-wrap" class="overflow-x-auto">
+                    <div class="py-16 text-center text-slate-400">กำลังโหลด...</div>
+                </div>
+            </div>
+        </div>
+    `;
+
+    window._empFilterAndRender = (q) => {
+        _empSearch = q.toLowerCase();
+        _renderEmpTable();
+    };
+
+    // Load master data + employees พร้อมกัน
+    const [empsRes, deptsRes, teamsRes, rolesRes] = await Promise.all([
+        API.get('/employees').catch(() => ({ data: [] })),
+        API.get('/master/departments').catch(() => ({ data: [] })),
+        API.get('/master/teams').catch(() => ({ data: [] })),
+        API.get('/master/roles').catch(() => ({ data: [] })),
+    ]);
+    _empCache   = empsRes?.data  || [];
+    _deptCache  = deptsRes?.data || [];
+    _teamCache  = teamsRes?.data || [];
+    _roleCache  = rolesRes?.data || [];
+
+    _renderEmpTable();
+}
+
+function _renderEmpTable() {
+    const wrap = document.getElementById('emp-table-wrap');
+    if (!wrap) return;
+
+    const filtered = _empCache.filter(e =>
+        !_empSearch ||
+        (e.EmployeeName || '').toLowerCase().includes(_empSearch) ||
+        (e.EmployeeID   || '').toLowerCase().includes(_empSearch) ||
+        (e.Department   || '').toLowerCase().includes(_empSearch) ||
+        (e.Team         || '').toLowerCase().includes(_empSearch)
+    );
+
+    if (filtered.length === 0) {
+        wrap.innerHTML = `<div class="py-16 text-center text-slate-400 text-sm">ไม่พบข้อมูลพนักงาน</div>`;
+        return;
+    }
+
+    wrap.innerHTML = `
+        <table class="w-full text-sm">
+            <thead>
+                <tr class="bg-slate-50 border-b border-slate-200 text-left">
+                    <th class="px-4 py-3 text-[11px] font-bold text-slate-500 uppercase">รหัสพนักงาน</th>
+                    <th class="px-4 py-3 text-[11px] font-bold text-slate-500 uppercase">ชื่อ-นามสกุล</th>
+                    <th class="px-4 py-3 text-[11px] font-bold text-slate-500 uppercase">หน่วยงาน</th>
+                    <th class="px-4 py-3 text-[11px] font-bold text-slate-500 uppercase">ทีม</th>
+                    <th class="px-4 py-3 text-[11px] font-bold text-slate-500 uppercase">ตำแหน่ง</th>
+                    <th class="px-4 py-3 text-[11px] font-bold text-slate-500 uppercase">Role</th>
+                    <th class="px-4 py-3 text-[11px] font-bold text-slate-500 uppercase text-right">จัดการ</th>
+                </tr>
+            </thead>
+            <tbody class="divide-y divide-slate-100">
+                ${filtered.map(emp => `
+                    <tr class="hover:bg-slate-50 transition-colors group">
+                        <td class="px-4 py-3 font-mono text-xs text-slate-500">${emp.EmployeeID}</td>
+                        <td class="px-4 py-3 font-semibold text-slate-800">${emp.EmployeeName || '—'}</td>
+                        <td class="px-4 py-3 text-slate-600">${emp.Department || '—'}</td>
+                        <td class="px-4 py-3 text-slate-600">${emp.Team || '—'}</td>
+                        <td class="px-4 py-3 text-slate-600">${emp.Position || '—'}</td>
+                        <td class="px-4 py-3">
+                            <span class="text-[11px] font-bold px-2 py-0.5 rounded-full ${emp.Role === 'Admin' ? 'bg-red-100 text-red-600' : 'bg-slate-100 text-slate-500'}">
+                                ${emp.Role || 'User'}
+                            </span>
+                        </td>
+                        <td class="px-4 py-3 text-right">
+                            <div class="flex gap-1 justify-end opacity-0 group-hover:opacity-100 transition-opacity">
+                                <button onclick="window._openEditEmpModal('${emp.EmployeeID}')" class="p-1.5 text-slate-400 hover:text-emerald-600 hover:bg-emerald-50 rounded-lg transition-colors">
+                                    <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"/></svg>
+                                </button>
+                                <button onclick="window._deleteEmployee('${emp.EmployeeID}', '${(emp.EmployeeName || '').replace(/'/g, "\\'")}')" class="p-1.5 text-slate-400 hover:text-red-500 hover:bg-red-50 rounded-lg transition-colors">
+                                    <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg>
+                                </button>
+                            </div>
+                        </td>
+                    </tr>
+                `).join('')}
+            </tbody>
+        </table>
+        <div class="px-4 py-2 border-t border-slate-100 text-xs text-slate-400">
+            แสดง ${filtered.length} จาก ${_empCache.length} รายการ
+        </div>
+    `;
+}
+
+function _empFormFields(emp = {}) {
+    const deptOpts = _deptCache.map(d => `<option value="${d.Name}" ${d.Name === emp.Department ? 'selected' : ''}>${d.Name}</option>`).join('');
+    const teamOpts = _teamCache.map(t => `<option value="${t.Name}" ${t.Name === emp.Team ? 'selected' : ''}>${t.Name}</option>`).join('');
+    const roleOpts = ['User', 'Admin', 'Viewer'].map(r => `<option value="${r}" ${r === (emp.Role || 'User') ? 'selected' : ''}>${r}</option>`).join('');
+    return `
+        <div class="grid grid-cols-2 gap-3">
+            <div>
+                <label class="block text-xs font-bold text-slate-500 uppercase mb-1">รหัสพนักงาน <span class="text-red-500">*</span></label>
+                <input type="text" name="EmployeeID" class="form-input w-full rounded-lg text-sm ${emp.EmployeeID ? 'bg-slate-50 cursor-not-allowed' : ''}"
+                    value="${emp.EmployeeID || ''}" ${emp.EmployeeID ? 'readonly' : 'required'} placeholder="EMP001">
+            </div>
+            <div>
+                <label class="block text-xs font-bold text-slate-500 uppercase mb-1">ชื่อ-นามสกุล <span class="text-red-500">*</span></label>
+                <input type="text" name="EmployeeName" class="form-input w-full rounded-lg text-sm" required value="${emp.EmployeeName || ''}" placeholder="ชื่อ นามสกุล">
+            </div>
+            <div>
+                <label class="block text-xs font-bold text-slate-500 uppercase mb-1">หน่วยงาน</label>
+                <select name="Department" class="form-select w-full rounded-lg text-sm">
+                    <option value="">-- เลือกหน่วยงาน --</option>
+                    ${deptOpts}
+                </select>
+            </div>
+            <div>
+                <label class="block text-xs font-bold text-slate-500 uppercase mb-1">ทีม</label>
+                <select name="Team" class="form-select w-full rounded-lg text-sm">
+                    <option value="">-- เลือกทีม --</option>
+                    ${teamOpts}
+                </select>
+            </div>
+            <div>
+                <label class="block text-xs font-bold text-slate-500 uppercase mb-1">ตำแหน่ง</label>
+                <input type="text" name="Position" class="form-input w-full rounded-lg text-sm" value="${emp.Position || ''}" placeholder="เช่น พนักงานผลิต">
+            </div>
+            <div>
+                <label class="block text-xs font-bold text-slate-500 uppercase mb-1">Role (สิทธิ์)</label>
+                <select name="Role" class="form-select w-full rounded-lg text-sm">${roleOpts}</select>
+            </div>
+        </div>
+    `;
+}
+
+window._openAddEmpModal = () => {
+    const { openModal, closeModal } = window._uiHelpers || {};
+    const _open  = window.openModal  || (typeof openModal  !== 'undefined' ? openModal  : null);
+    const _close = window.closeModal || (typeof closeModal !== 'undefined' ? closeModal : null);
+    if (!_open) return;
+    _open('เพิ่มพนักงานใหม่', `
+        <form id="emp-add-form" class="space-y-4">
+            ${_empFormFields()}
+            <div class="flex justify-end gap-2 pt-3 border-t">
+                <button type="button" onclick="window.closeModal && window.closeModal()" class="btn bg-slate-100 text-slate-700 px-4 py-2 rounded-lg text-sm">ยกเลิก</button>
+                <button type="submit" class="btn bg-emerald-600 text-white px-5 py-2 rounded-lg text-sm font-medium">บันทึก</button>
+            </div>
+        </form>
+    `, 'max-w-lg');
+    setTimeout(() => {
+        document.getElementById('emp-add-form')?.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const fd = new FormData(e.target);
+            const body = Object.fromEntries(fd.entries());
+            try {
+                await API.post('/employees', body);
+                showToast('เพิ่มพนักงานสำเร็จ', 'success');
+                window.closeModal && window.closeModal();
+                const res = await API.get('/employees').catch(() => ({ data: [] }));
+                _empCache = res?.data || [];
+                _renderEmpTable();
+            } catch (err) {
+                showError(err?.message || 'ไม่สามารถเพิ่มพนักงานได้');
+            }
+        });
+    }, 50);
+};
+
+window._openEditEmpModal = (empId) => {
+    const emp = _empCache.find(e => e.EmployeeID === empId);
+    if (!emp) return;
+    const _open = window.openModal;
+    if (!_open) return;
+    _open(`แก้ไขพนักงาน: ${emp.EmployeeName}`, `
+        <form id="emp-edit-form" class="space-y-4">
+            ${_empFormFields(emp)}
+            <div class="flex justify-end gap-2 pt-3 border-t">
+                <button type="button" onclick="window.closeModal && window.closeModal()" class="btn bg-slate-100 text-slate-700 px-4 py-2 rounded-lg text-sm">ยกเลิก</button>
+                <button type="submit" class="btn bg-emerald-600 text-white px-5 py-2 rounded-lg text-sm font-medium">บันทึก</button>
+            </div>
+        </form>
+    `, 'max-w-lg');
+    setTimeout(() => {
+        document.getElementById('emp-edit-form')?.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const fd = new FormData(e.target);
+            const body = Object.fromEntries(fd.entries());
+            try {
+                await API.put(`/employees/${empId}`, body);
+                showToast('อัปเดตข้อมูลสำเร็จ', 'success');
+                window.closeModal && window.closeModal();
+                // อัปเดต cache แทนการ fetch ใหม่
+                const idx = _empCache.findIndex(e => e.EmployeeID === empId);
+                if (idx !== -1) _empCache[idx] = { ..._empCache[idx], ...body };
+                _renderEmpTable();
+            } catch (err) {
+                showError(err?.message || 'ไม่สามารถอัปเดตข้อมูลได้');
+            }
+        });
+    }, 50);
+};
+
+window._deleteEmployee = async (empId, empName) => {
+    if (!confirm(`ยืนยันลบพนักงาน "${empName}" (${empId})?`)) return;
+    try {
+        await API.delete(`/employees/${empId}`);
+        showToast('ลบข้อมูลสำเร็จ', 'success');
+        _empCache = _empCache.filter(e => e.EmployeeID !== empId);
+        _renderEmpTable();
+    } catch (err) {
+        showError(err?.message || 'ไม่สามารถลบข้อมูลได้');
+    }
+};
+
+window._openImportModal = () => {
+    const _open = window.openModal;
+    if (!_open) return;
+    _open('Import พนักงานจาก Excel', `
+        <div class="space-y-4">
+            <div class="bg-amber-50 border border-amber-200 rounded-xl p-3 text-sm text-amber-800">
+                <p class="font-bold mb-1">รูปแบบไฟล์ Excel ที่รองรับ:</p>
+                <p class="text-xs">คอลัมน์: <code class="bg-amber-100 px-1 rounded">EmployeeID</code>, <code class="bg-amber-100 px-1 rounded">EmployeeName</code>, <code class="bg-amber-100 px-1 rounded">Department</code>, <code class="bg-amber-100 px-1 rounded">Team</code>, <code class="bg-amber-100 px-1 rounded">Role</code></p>
+                <p class="text-xs mt-1">ถ้า EmployeeID ซ้ำ จะอัปเดตข้อมูลเดิม (Upsert)</p>
+            </div>
+            <div id="import-drop-zone" class="border-2 border-dashed border-slate-300 rounded-xl p-8 text-center cursor-pointer hover:border-emerald-400 hover:bg-emerald-50 transition-all">
+                <svg class="w-10 h-10 mx-auto text-slate-300 mb-2" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12"/></svg>
+                <p class="text-sm text-slate-500">คลิกเพื่อเลือกไฟล์ หรือลากมาวาง</p>
+                <p class="text-xs text-slate-400 mt-1">.xlsx หรือ .xls เท่านั้น</p>
+                <input type="file" id="import-file-input" accept=".xlsx,.xls" class="hidden">
+            </div>
+            <div id="import-result" class="hidden text-sm"></div>
+            <div class="flex justify-end gap-2 pt-2 border-t">
+                <button onclick="window.closeModal && window.closeModal()" class="btn bg-slate-100 text-slate-700 px-4 py-2 rounded-lg text-sm">ปิด</button>
+                <button id="import-btn" onclick="window._doImport()" class="btn bg-emerald-600 text-white px-5 py-2 rounded-lg text-sm font-medium">นำเข้าข้อมูล</button>
+            </div>
+        </div>
+    `, 'max-w-md');
+    setTimeout(() => {
+        const zone  = document.getElementById('import-drop-zone');
+        const input = document.getElementById('import-file-input');
+        zone?.addEventListener('click', () => input?.click());
+        input?.addEventListener('change', () => {
+            if (input.files[0]) zone.querySelector('p').textContent = input.files[0].name;
+        });
+    }, 50);
+};
+
+window._doImport = async () => {
+    const input = document.getElementById('import-file-input');
+    const resultEl = document.getElementById('import-result');
+    const btn = document.getElementById('import-btn');
+    if (!input?.files[0]) { showToast('กรุณาเลือกไฟล์ก่อน', 'error'); return; }
+
+    // ใช้ SheetJS (XLSX) ที่โหลดผ่าน CDN แล้วใน index.html
+    if (!window.XLSX) { showError('ไม่พบ SheetJS library'); return; }
+
+    btn.disabled = true; btn.textContent = 'กำลังนำเข้า...';
+    try {
+        const buf = await input.files[0].arrayBuffer();
+        const wb  = XLSX.read(buf, { type: 'array' });
+        const ws  = wb.Sheets[wb.SheetNames[0]];
+        const data = XLSX.utils.sheet_to_json(ws);
+
+        if (data.length === 0) { showToast('ไฟล์ไม่มีข้อมูล', 'error'); return; }
+
+        const normalized = data.map(row => ({
+            EmployeeID:   String(row['EmployeeID']   || row['ID']          || row['รหัสพนักงาน'] || '').trim(),
+            EmployeeName: String(row['EmployeeName'] || row['Name']        || row['ชื่อ-นามสกุล'] || '').trim(),
+            Department:   String(row['Department']   || row['Dept']        || row['หน่วยงาน']    || '').trim(),
+            Team:         String(row['Team']         || row['ทีม']          || '').trim(),
+            Role:         String(row['Role']         || row['สิทธิ์']       || 'User').trim(),
+        })).filter(r => r.EmployeeID && r.EmployeeName);
+
+        const res = await API.post('/admin/employees/import', { data: normalized });
+        resultEl.className = 'text-sm text-emerald-700 bg-emerald-50 p-3 rounded-lg';
+        resultEl.textContent = res.message || `นำเข้าสำเร็จ ${normalized.length} รายการ`;
+        resultEl.classList.remove('hidden');
+        showToast('Import สำเร็จ', 'success');
+
+        // refresh cache
+        const empsRes = await API.get('/employees').catch(() => ({ data: [] }));
+        _empCache = empsRes?.data || [];
+        _renderEmpTable();
+    } catch (err) {
+        resultEl.className = 'text-sm text-red-600 bg-red-50 p-3 rounded-lg';
+        resultEl.textContent = err?.message || 'เกิดข้อผิดพลาด';
+        resultEl.classList.remove('hidden');
+    } finally {
+        btn.disabled = false; btn.textContent = 'นำเข้าข้อมูล';
+    }
+};
 
 // ✅ เพิ่มฟังก์ชันนี้ไว้ท้ายไฟล์
 window.printScheduleReport = () => {

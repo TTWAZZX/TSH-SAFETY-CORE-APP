@@ -3,8 +3,7 @@ import { API } from '../api.js';
 import { normalizeApiArray, normalizeApiObject } from '../utils/normalize.js';
 
 // ─── Auth ─────────────────────────────────────────────────────────────────────
-const userStr = localStorage.getItem('currentUser');
-const currentUser = userStr ? JSON.parse(userStr) : { name: 'Staff', id: 'EMP001', team: 'Safety Team', role: 'User' };
+const currentUser = TSHSession.getUser() || { name: 'Staff', id: 'EMP001', department: '', team: 'Safety Team', role: 'User' };
 const isAdmin = !!(
     (currentUser.role && currentUser.role.toLowerCase() === 'admin') ||
     (currentUser.Role && currentUser.Role.toLowerCase() === 'admin')

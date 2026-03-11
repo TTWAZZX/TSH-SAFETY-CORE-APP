@@ -63,7 +63,7 @@ export async function loadCommitteePage() {
     committeeEventListenersInitialized = true;
   }
 
-  const currentUser = JSON.parse(localStorage.getItem('currentUser') || 'null');
+  const currentUser = TSHSession.getUser();
   const isAdmin = currentUser && (
     currentUser.role?.toLowerCase() === 'admin' ||
     currentUser.Role?.toLowerCase() === 'admin' ||

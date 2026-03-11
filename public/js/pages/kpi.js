@@ -12,9 +12,8 @@ let _selectedYear = null;
 
 // ─── helpers ────────────────────────────────────────────────────────────────
 function getIsAdmin() {
-    const u = localStorage.getItem('currentUser');
-    if (!u) return false;
-    const cu = JSON.parse(u);
+    const cu = TSHSession.getUser();
+    if (!cu) return false;
     return !!(
         (cu.role  && cu.role.toLowerCase()  === 'admin') ||
         (cu.Role  && cu.Role.toLowerCase()  === 'admin') ||

@@ -15,6 +15,8 @@ import { loadKpiPage } from './pages/kpi.js';
 import { loadYokotenPage } from './pages/yokoten.js';
 import { loadAdminPage } from './pages/admin.js';
 import { loadEmployeePage } from './pages/employee.js';
+import { loadMachineSafetyPage } from './pages/machine-safety.js';
+import { loadOjtPage } from './pages/ojt.js';
 
 // ======================================================
 // Global App State
@@ -176,6 +178,12 @@ async function handleRouting() {
             break;
         case 'employee':
             loadEmployeePage();
+            break;
+        case 'machine-safety':
+            await loadMachineSafetyPage();
+            break;
+        case 'ojt':
+            await loadOjtPage();
             break;
         default:
             loadPlaceholderPage(targetId, hash);

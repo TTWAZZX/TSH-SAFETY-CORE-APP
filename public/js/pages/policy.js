@@ -15,8 +15,7 @@ export async function loadPolicyPage() {
         policyEventListenersInitialized = true;
     }
 
-    const userStr = localStorage.getItem('currentUser');
-    const currentUser = userStr ? JSON.parse(userStr) : null;
+    const currentUser = TSHSession.getUser();
     const isAdmin = currentUser && (
         (currentUser.role && currentUser.role.toLowerCase() === 'admin') ||
         (currentUser.Role && currentUser.Role.toLowerCase() === 'admin') ||

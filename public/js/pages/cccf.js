@@ -2,8 +2,7 @@ import { API } from '../api.js';
 import { showLoading, hideLoading, showError, showToast, openModal, closeModal, showConfirmationModal } from '../ui.js';
 
 // ─── Auth ─────────────────────────────────────────────────────────────────────
-const userStr = localStorage.getItem('currentUser');
-const currentUser = userStr ? JSON.parse(userStr) : { name: '', id: '', team: '', role: 'User' };
+const currentUser = TSHSession.getUser() || { name: '', id: '', department: '', team: '', role: 'User' };
 const isAdmin = !!(
     currentUser.role?.toLowerCase() === 'admin' ||
     currentUser.Role?.toLowerCase() === 'admin'
@@ -460,7 +459,11 @@ function renderPermanentDeptGrid() {
 
 // ─── Worker Form Modal ────────────────────────────────────────────────────────
 function openWorkerForm() {
-    const deptOptions = _departments.map(d => `<option value="${d.Name || d}">${d.Name || d}</option>`).join('');
+    const userDept    = currentUser.department || '';
+    const deptOptions = _departments.map(d => {
+        const name = d.Name || d;
+        return `<option value="${name}" ${name === userDept ? 'selected' : ''}>${name}</option>`;
+    }).join('');
     const today = new Date().toISOString().split('T')[0];
 
     openModal('CCCF Form A — Worker', `
@@ -480,19 +483,20 @@ function openWorkerForm() {
           </div>
           <div class="p-4 grid grid-cols-2 gap-3">
             <div>
-              <label class="block text-[10px] font-bold text-slate-400 uppercase mb-1">ชื่อพนักงาน <span class="text-red-500">*</span></label>
-              <input type="text" name="EmployeeName" class="form-input w-full rounded-xl text-sm" required value="${currentUser.name || ''}" placeholder="ชื่อ-นามสกุล">
+              <label class="block text-[10px] font-bold text-slate-400 uppercase mb-1">ชื่อพนักงาน</label>
+              <input type="text" name="EmployeeName" class="form-input w-full rounded-xl text-sm bg-slate-50 text-slate-500 cursor-not-allowed" readonly value="${currentUser.name || ''}">
             </div>
             <div>
-              <label class="block text-[10px] font-bold text-slate-400 uppercase mb-1">รหัสพนักงาน <span class="text-red-500">*</span></label>
-              <input type="text" name="EmployeeID" class="form-input w-full rounded-xl text-sm" required value="${currentUser.id || ''}" placeholder="EMP001">
+              <label class="block text-[10px] font-bold text-slate-400 uppercase mb-1">รหัสพนักงาน</label>
+              <input type="text" name="EmployeeID" class="form-input w-full rounded-xl text-sm bg-slate-50 text-slate-500 cursor-not-allowed" readonly value="${currentUser.id || ''}">
             </div>
             <div>
-              <label class="block text-[10px] font-bold text-slate-400 uppercase mb-1">หน่วยงาน <span class="text-red-500">*</span></label>
-              <select name="Department" class="form-select w-full rounded-xl text-sm" required>
+              <label class="block text-[10px] font-bold text-slate-400 uppercase mb-1">หน่วยงาน</label>
+              <select name="Department" class="form-select w-full rounded-xl text-sm bg-slate-50 text-slate-500 cursor-not-allowed" disabled>
                 <option value="">-- เลือกหน่วยงาน --</option>
                 ${deptOptions}
               </select>
+              <input type="hidden" name="Department" value="${userDept}">
             </div>
             <div>
               <label class="block text-[10px] font-bold text-slate-400 uppercase mb-1">วันที่ลงข้อมูล <span class="text-red-500">*</span></label>
@@ -621,7 +625,11 @@ function openWorkerForm() {
 
 // ─── Permanent Form Modal ────────────────────────────────────────────────────
 function openPermanentForm() {
-    const deptOptions = _departments.map(d => `<option value="${d.Name || d}">${d.Name || d}</option>`).join('');
+    const userDept    = currentUser.department || '';
+    const deptOptions = _departments.map(d => {
+        const name = d.Name || d;
+        return `<option value="${name}" ${name === userDept ? 'selected' : ''}>${name}</option>`;
+    }).join('');
     const today = new Date().toISOString().split('T')[0];
 
     openModal('CCCF Form A — Permanent (ส่งผลการดำเนินการถาวร)', `
@@ -632,15 +640,16 @@ function openPermanentForm() {
         </div>
         <div class="grid grid-cols-2 gap-3">
           <div>
-            <label class="block text-[10px] font-bold text-slate-400 uppercase mb-1.5">ชื่อผู้ส่ง <span class="text-red-500">*</span></label>
-            <input type="text" name="SubmitterName" class="form-input w-full rounded-xl text-sm" required value="${currentUser.name || ''}">
+            <label class="block text-[10px] font-bold text-slate-400 uppercase mb-1.5">ชื่อผู้ส่ง</label>
+            <input type="text" name="SubmitterName" class="form-input w-full rounded-xl text-sm bg-slate-50 text-slate-500 cursor-not-allowed" readonly value="${currentUser.name || ''}">
           </div>
           <div>
-            <label class="block text-[10px] font-bold text-slate-400 uppercase mb-1.5">หน่วยงาน <span class="text-red-500">*</span></label>
-            <select name="Department" class="form-select w-full rounded-xl text-sm" required>
+            <label class="block text-[10px] font-bold text-slate-400 uppercase mb-1.5">หน่วยงาน</label>
+            <select name="Department" class="form-select w-full rounded-xl text-sm bg-slate-50 text-slate-500 cursor-not-allowed" disabled>
               <option value="">-- เลือกหน่วยงาน --</option>
               ${deptOptions}
             </select>
+            <input type="hidden" name="Department" value="${userDept}">
           </div>
           <div>
             <label class="block text-[10px] font-bold text-slate-400 uppercase mb-1.5">ชื่องาน / พื้นที่ <span class="text-red-500">*</span></label>
