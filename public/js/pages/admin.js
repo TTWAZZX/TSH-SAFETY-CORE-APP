@@ -1,4 +1,4 @@
-import { showToast, showError } from '../ui.js';
+import { showToast, showError, openModal, closeModal } from '../ui.js';
 import { API } from '../api.js';
 
 // ─── Global State ─────────────────────────────────────────────────────────────
@@ -61,7 +61,8 @@ export async function loadAdminPage() {
             <div id="admin-content-area" class="relative min-h-[500px]"></div>
         </div>`;
 
-    // Expose globals
+    // Expose globals — including modal helpers for inline onclick handlers in HTML strings
+    window.closeModal          = closeModal;
     window._adminTab           = switchTab;
     window.switchAdminTab      = switchTab;
     window.addMasterData       = addMasterData;
@@ -628,8 +629,7 @@ window.addMasterData = async (type) => {
 };
 
 window.editMasterData = (type, id, currentName) => {
-    if (!window.openModal) return;
-    window.openModal(`แก้ไข ${type}`, `
+    openModal(`แก้ไข ${type}`, `
         <form id="edit-master-form" class="space-y-4">
             <div>
                 <label class="block text-xs font-bold text-slate-500 uppercase mb-1.5">ชื่อใหม่</label>
@@ -647,7 +647,7 @@ window.editMasterData = (type, id, currentName) => {
             if (!name) return;
             try {
                 const res = await API.put(`/master/${type}/${id}`, { Name: name });
-                if (res.success) { showToast('แก้ไขสำเร็จ', 'success'); window.closeModal?.(); loadMasterList(type); }
+                if (res.success) { showToast('แก้ไขสำเร็จ', 'success'); closeModal(); loadMasterList(type); }
                 else showError(res.message);
             } catch (err) { showError(err.message); }
         });
@@ -843,8 +843,7 @@ function _empFormFields(emp = {}) {
 }
 
 window._openAddEmpModal = () => {
-    if (!window.openModal) return;
-    window.openModal('เพิ่มพนักงานใหม่', `
+    openModal('เพิ่มพนักงานใหม่', `
         <form id="emp-add-form" class="space-y-4">
             ${_empFormFields()}
             <div class="flex justify-end gap-2 pt-3 border-t">
@@ -859,7 +858,7 @@ window._openAddEmpModal = () => {
             try {
                 await API.post('/admin/employee/create', body);
                 showToast('เพิ่มพนักงานสำเร็จ', 'success');
-                window.closeModal?.();
+                closeModal();
                 const res = await API.get('/employees').catch(() => ({ data: [] }));
                 _empCache = res?.data || [];
                 _renderEmpTable();
@@ -870,8 +869,8 @@ window._openAddEmpModal = () => {
 
 window._openEditEmpModal = (empId) => {
     const emp = _empCache.find(e => e.EmployeeID === empId);
-    if (!emp || !window.openModal) return;
-    window.openModal(`แก้ไขพนักงาน: ${emp.EmployeeName}`, `
+    if (!emp) return;
+    openModal(`แก้ไขพนักงาน: ${emp.EmployeeName}`, `
         <form id="emp-edit-form" class="space-y-4">
             ${_empFormFields(emp)}
             <div class="flex justify-end gap-2 pt-3 border-t">
@@ -886,7 +885,7 @@ window._openEditEmpModal = (empId) => {
             try {
                 await API.put(`/admin/employee/${empId}`, body);
                 showToast('อัปเดตข้อมูลสำเร็จ', 'success');
-                window.closeModal?.();
+                closeModal();
                 const idx = _empCache.findIndex(e => e.EmployeeID === empId);
                 if (idx !== -1) _empCache[idx] = { ..._empCache[idx], ...body };
                 _renderEmpTable();
@@ -896,8 +895,7 @@ window._openEditEmpModal = (empId) => {
 };
 
 window._openResetPwModal = (empId, empName) => {
-    if (!window.openModal) return;
-    window.openModal(`รีเซ็ตรหัสผ่าน: ${empName}`, `
+    openModal(`รีเซ็ตรหัสผ่าน: ${empName}`, `
         <form id="reset-pw-form" class="space-y-4">
             <div class="bg-amber-50 border border-amber-200 rounded-xl p-3 text-xs text-amber-800">
                 รหัสผ่านใหม่จะถูกเข้ารหัส (bcrypt) ทันที — ผู้ใช้ต้องเข้าสู่ระบบด้วยรหัสใหม่
@@ -932,17 +930,14 @@ window._openResetPwModal = (empId, empName) => {
             try {
                 await API.post(`/admin/employee/${empId}/reset-password`, { newPassword: pw.value });
                 showToast(`รีเซ็ตรหัสผ่านของ ${empName} สำเร็จ`, 'success');
-                window.closeModal?.();
+                closeModal();
             } catch (err) { showError(err?.message || 'รีเซ็ตรหัสผ่านไม่สำเร็จ'); }
         });
     }, 50);
 };
 
 window._deleteEmployee = async (empId, empName) => {
-    if (!window.openModal) {
-        if (!confirm(`ลบพนักงาน "${empName}" (${empId})?`)) return;
-    } else {
-        window.openModal('ยืนยันการลบ', `
+    openModal('ยืนยันการลบ', `
             <div class="space-y-4">
                 <div class="bg-red-50 border border-red-200 rounded-xl p-4">
                     <p class="font-bold text-red-700 text-sm mb-1">กำลังจะลบพนักงานต่อไปนี้</p>
@@ -954,30 +949,21 @@ window._deleteEmployee = async (empId, empName) => {
                     <button id="confirm-delete-emp-btn" class="btn bg-red-600 hover:bg-red-700 text-white px-5 py-2 rounded-lg text-sm font-medium">ลบข้อมูล</button>
                 </div>
             </div>`, 'max-w-sm');
-        setTimeout(() => {
-            document.getElementById('confirm-delete-emp-btn')?.addEventListener('click', async () => {
-                try {
-                    await API.delete(`/admin/employee/${empId}`);
-                    showToast('ลบข้อมูลสำเร็จ', 'success');
-                    window.closeModal?.();
-                    _empCache = _empCache.filter(e => e.EmployeeID !== empId);
-                    _renderEmpTable();
-                } catch (err) { showError(err?.message || 'ลบไม่สำเร็จ'); }
-            });
-        }, 50);
-        return;
-    }
-    try {
-        await API.delete(`/admin/employee/${empId}`);
-        showToast('ลบข้อมูลสำเร็จ', 'success');
-        _empCache = _empCache.filter(e => e.EmployeeID !== empId);
-        _renderEmpTable();
-    } catch (err) { showError(err?.message || 'ลบไม่สำเร็จ'); }
+    setTimeout(() => {
+        document.getElementById('confirm-delete-emp-btn')?.addEventListener('click', async () => {
+            try {
+                await API.delete(`/admin/employee/${empId}`);
+                showToast('ลบข้อมูลสำเร็จ', 'success');
+                closeModal();
+                _empCache = _empCache.filter(e => e.EmployeeID !== empId);
+                _renderEmpTable();
+            } catch (err) { showError(err?.message || 'ลบไม่สำเร็จ'); }
+        });
+    }, 50);
 };
 
 window._openImportModal = () => {
-    if (!window.openModal) return;
-    window.openModal('Import พนักงานจาก Excel', `
+    openModal('Import พนักงานจาก Excel', `
         <div class="space-y-4">
             <div class="bg-amber-50 border border-amber-200 rounded-xl p-3 text-xs text-amber-800">
                 <p class="font-bold mb-1">คอลัมน์ที่รองรับ:</p>

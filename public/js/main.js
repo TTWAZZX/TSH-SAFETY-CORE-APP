@@ -14,7 +14,6 @@ import { loadCccfPage } from './pages/cccf.js';
 import { loadKpiPage } from './pages/kpi.js';
 import { loadYokotenPage } from './pages/yokoten.js';
 import { loadAdminPage } from './pages/admin.js';
-import { loadEmployeePage } from './pages/employee.js';
 import { loadMachineSafetyPage } from './pages/machine-safety.js';
 import { loadOjtPage } from './pages/ojt.js';
 import { loadTrainingPage } from './pages/training.js';
@@ -184,7 +183,10 @@ async function handleRouting() {
             else alert('ไม่มีสิทธิ์เข้าหน้านี้');
             break;
         case 'employee':
-            loadEmployeePage();
+            // รวมเข้า System Console แล้ว — redirect ไป #admin tab employees
+            window.location.hash = 'admin';
+            await loadAdminPage();
+            setTimeout(() => window._adminTab?.('employees'), 100);
             break;
         case 'machine-safety':
             await loadMachineSafetyPage();

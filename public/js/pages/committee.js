@@ -1,5 +1,4 @@
 import { API } from '../api.js';
-import { normalizeApiArray } from '../utils/normalize.js';
 
 import {
   showLoading, hideLoading, showError, showToast,
@@ -9,6 +8,7 @@ import {
 let allCommittees = [];
 let committeeEventListenersInitialized = false;
 let tempSubCommittees = [];
+let expandedAccordions = new Set();
 
 const getCommitteeId = (c) => c?.id ?? c?.CommitteeID;
 const normalizeId   = (v) => String(v ?? '');
@@ -57,6 +57,7 @@ const avatarColor = (i) => AVATAR_PALETTE[i % AVATAR_PALETTE.length];
 ═══════════════════════════════════════════════ */
 export async function loadCommitteePage() {
   const container = document.getElementById('committee-page');
+  window.closeModal = closeModal;
 
   if (!committeeEventListenersInitialized) {
     setupCommitteeEventListeners();
@@ -156,7 +157,7 @@ function renderPage(container, { current, past }, isAdmin, totalCount) {
     </div>
 
     <!-- ── STATS BAR ── -->
-    <div class="grid grid-cols-3 gap-3">
+    <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
       <div class="bg-white rounded-xl p-4 border border-slate-100 shadow-sm flex items-center gap-3">
         <div class="w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0" style="background:#ecfdf5">
           <svg class="w-5 h-5" style="color:#059669" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -219,28 +220,59 @@ function renderPage(container, { current, past }, isAdmin, totalCount) {
     <!-- ── PAST COMMITTEES ACCORDION ── -->
     ${past.length > 0 ? `
     <div>
-      <div class="flex items-center gap-3 mb-3">
-        <h3 class="text-sm font-bold text-slate-500 uppercase tracking-wider">ประวัติย้อนหลัง</h3>
-        <span class="px-2 py-0.5 bg-slate-100 text-slate-500 text-xs font-semibold rounded-full">${past.length} รายการ</span>
-        <span class="flex-1 h-px bg-slate-200"></span>
+      <div class="flex flex-col sm:flex-row sm:items-center gap-3 mb-3">
+        <div class="flex items-center gap-3 min-w-0">
+          <h3 class="text-sm font-bold text-slate-500 uppercase tracking-wider whitespace-nowrap">ประวัติย้อนหลัง</h3>
+          <span class="px-2 py-0.5 bg-slate-100 text-slate-500 text-xs font-semibold rounded-full">${past.length} รายการ</span>
+        </div>
+        <span class="hidden sm:block flex-1 h-px bg-slate-200"></span>
+        <input id="past-search" type="text" placeholder="ค้นหาชื่อคณะกรรมการ..."
+               class="text-sm border border-slate-200 rounded-xl px-3 py-1.5 bg-white w-full sm:w-56
+                      focus:outline-none focus:border-emerald-400 transition-colors">
       </div>
       <div id="past-committee-container" class="space-y-2">
         ${past.map((c, i) => createAccordionItem(c, i, isAdmin)).join('')}
       </div>
+      <p id="past-empty-msg" class="hidden text-center text-sm text-slate-400 py-6">ไม่พบรายการที่ค้นหา</p>
     </div>` : ''}
 
   </div>`;
 
-  /* bind accordion toggles */
+  /* bind accordion toggles — restore + track expanded state */
   container.querySelectorAll('.accordion-toggle').forEach(btn => {
+    const bodyId = btn.dataset.target;
+    const body   = document.getElementById(bodyId);
+    const icon   = btn.querySelector('.acc-icon');
+    if (expandedAccordions.has(bodyId)) {
+      body.classList.remove('hidden');
+      icon.style.transform = 'rotate(180deg)';
+    }
     btn.addEventListener('click', () => {
-      const body = document.getElementById(btn.dataset.target);
-      const icon = btn.querySelector('.acc-icon');
       const closing = !body.classList.contains('hidden');
       body.classList.toggle('hidden', closing);
       icon.style.transform = closing ? '' : 'rotate(180deg)';
+      if (closing) expandedAccordions.delete(bodyId);
+      else expandedAccordions.add(bodyId);
     });
   });
+
+  /* past committee search */
+  const searchInput = document.getElementById('past-search');
+  if (searchInput) {
+    searchInput.addEventListener('input', () => {
+      const q = searchInput.value.trim().toLowerCase();
+      const items = document.querySelectorAll('#past-committee-container > div');
+      let visible = 0;
+      items.forEach(el => {
+        const title = el.querySelector('p.font-semibold')?.textContent?.toLowerCase() ?? '';
+        const show  = !q || title.includes(q);
+        el.classList.toggle('hidden', !show);
+        if (show) visible++;
+      });
+      const emptyMsg = document.getElementById('past-empty-msg');
+      if (emptyMsg) emptyMsg.classList.toggle('hidden', visible > 0);
+    });
+  }
 }
 
 /* ═══════════════════════════════════════════════
@@ -286,7 +318,7 @@ function createCurrentHeroCard(committee, isAdmin) {
             <span class="w-1.5 h-1.5 rounded-full bg-emerald-300 animate-pulse inline-block"></span>
             ชุดปัจจุบัน
           </span>
-          <h2 class="text-xl md:text-2xl font-bold text-white leading-snug truncate">${committee.CommitteeTitle}</h2>
+          <h2 class="text-xl md:text-2xl font-bold text-white leading-snug truncate" title="${committee.CommitteeTitle}">${committee.CommitteeTitle}</h2>
           <p class="flex items-center gap-1.5 mt-2 text-sm" style="color:rgba(167,243,208,0.9)">
             <svg class="w-4 h-4 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
@@ -478,8 +510,9 @@ function createAccordionItem(committee, index, isAdmin) {
         ${committee.MainOrgChartLink ? `
         <div class="mb-4">
           <a href="${committee.MainOrgChartLink}" data-action="view-doc" data-title="ผังองค์กรหลัก"
-             class="inline-flex items-center gap-2 px-4 py-2 bg-slate-800 text-white text-xs
-                    font-semibold rounded-lg hover:bg-slate-700 transition-colors">
+             class="inline-flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-semibold text-white
+                    transition-all hover:shadow-md active:scale-95"
+             style="background:linear-gradient(135deg,#059669,#0d9488);box-shadow:0 2px 8px rgba(5,150,105,0.25)">
             <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
                 d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9
@@ -550,14 +583,28 @@ function openCommitteeForm(committee = null) {
     <!-- ผังองค์กรหลัก -->
     <div class="space-y-2">
       <label class="block text-sm font-bold text-slate-700">ผังองค์กรหลัก</label>
-      <input type="text" name="MainOrgChartLink" class="form-input w-full rounded-xl text-sm"
-             placeholder="วางลิงก์เอกสาร (URL)" value="${committee?.MainOrgChartLink || ''}">
-      <input type="file" name="MainOrgChartFile" accept=".pdf,.png,.jpg,.jpeg"
-             class="block w-full text-xs text-slate-500
-                    file:mr-3 file:py-2 file:px-4 file:rounded-lg file:border-0
-                    file:text-xs file:font-semibold file:bg-emerald-50 file:text-emerald-700
-                    hover:file:bg-emerald-100 transition-all">
-      <p class="text-xs text-slate-400">รองรับ PDF / รูปภาพ — ถ้าเลือกไฟล์จะใช้ไฟล์แทนลิงก์</p>
+      <div class="flex gap-1 p-1 bg-slate-100 rounded-xl w-fit text-xs font-semibold">
+        <button type="button" id="org-tab-url"
+                class="px-3 py-1.5 rounded-lg transition-all bg-white text-slate-700 shadow-sm">
+          ลิงก์ URL
+        </button>
+        <button type="button" id="org-tab-file"
+                class="px-3 py-1.5 rounded-lg transition-all text-slate-400 hover:text-slate-600">
+          อัปโหลดไฟล์
+        </button>
+      </div>
+      <div id="org-panel-url">
+        <input type="text" name="MainOrgChartLink" id="org-link-input" class="form-input w-full rounded-xl text-sm"
+               placeholder="วางลิงก์เอกสาร (URL)" value="${committee?.MainOrgChartLink || ''}">
+      </div>
+      <div id="org-panel-file" class="hidden">
+        <input type="file" name="MainOrgChartFile" accept=".pdf,.png,.jpg,.jpeg"
+               class="block w-full text-xs text-slate-500
+                      file:mr-3 file:py-2 file:px-4 file:rounded-lg file:border-0
+                      file:text-xs file:font-semibold file:bg-emerald-50 file:text-emerald-700
+                      hover:file:bg-emerald-100 transition-all">
+        <p class="text-xs text-slate-400 mt-1">รองรับ PDF / PNG / JPG — สูงสุด 20 MB</p>
+      </div>
     </div>
 
     <!-- เป็นชุดปัจจุบัน -->
@@ -611,6 +658,27 @@ function openCommitteeForm(committee = null) {
   flatpickr('#TermEndDate',   { locale: 'th', dateFormat: 'Y-m-d' });
   renderSubCommitteeList();
 
+  /* URL / file tab toggle */
+  const tabUrl  = document.getElementById('org-tab-url');
+  const tabFile = document.getElementById('org-tab-file');
+  const panelUrl  = document.getElementById('org-panel-url');
+  const panelFile = document.getElementById('org-panel-file');
+  const activeTab   = 'bg-white text-slate-700 shadow-sm';
+  const inactiveTab = 'text-slate-400 hover:text-slate-600';
+  tabUrl.addEventListener('click', () => {
+    tabUrl.className  = `px-3 py-1.5 rounded-lg transition-all ${activeTab}`;
+    tabFile.className = `px-3 py-1.5 rounded-lg transition-all ${inactiveTab}`;
+    panelUrl.classList.remove('hidden');
+    panelFile.classList.add('hidden');
+  });
+  tabFile.addEventListener('click', () => {
+    tabFile.className = `px-3 py-1.5 rounded-lg transition-all ${activeTab}`;
+    tabUrl.className  = `px-3 py-1.5 rounded-lg transition-all ${inactiveTab}`;
+    panelFile.classList.remove('hidden');
+    panelUrl.classList.add('hidden');
+    document.getElementById('org-link-input').value = '';
+  });
+
   /* inline add */
   const addBtn   = document.getElementById('btn-add-sub');
   const nameInput = document.getElementById('new-sub-name');
@@ -640,8 +708,8 @@ function openCommitteeForm(committee = null) {
       const file = formData.get('MainOrgChartFile');
       if (file && file.size > 0) {
         const up = new FormData();
-        up.append('file', file);
-        const upRes = await API.post('/files/upload', up, { headers: { 'Content-Type': 'multipart/form-data' } });
+        up.append('document', file);
+        const upRes = await API.post('/upload/document', up, { headers: { 'Content-Type': 'multipart/form-data' } });
         if (!upRes?.url) throw new Error('อัปโหลดไฟล์ไม่สำเร็จ');
         formData.set('MainOrgChartLink', upRes.url);
       }
@@ -688,21 +756,37 @@ function renderSubCommitteeList() {
   listEl.innerHTML = tempSubCommittees.map((sub, i) => {
     const c    = avatarColor(i);
     const init = getDeptInitials(sub.department);
+    const isFirst = i === 0;
+    const isLast  = i === tempSubCommittees.length - 1;
     return `
-    <div class="flex items-center gap-3 bg-white border border-slate-200 rounded-xl p-3 shadow-sm">
+    <div class="flex items-center gap-2 bg-white border border-slate-200 rounded-xl p-3 shadow-sm" data-sub-idx="${i}">
+      <div class="flex flex-col gap-0.5 flex-shrink-0">
+        <button type="button" data-action="sub-up" data-idx="${i}"
+                class="p-0.5 rounded text-slate-300 hover:text-emerald-600 hover:bg-emerald-50 transition-colors
+                       ${isFirst ? 'invisible' : ''}">
+          <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 15l7-7 7 7"/>
+          </svg>
+        </button>
+        <button type="button" data-action="sub-down" data-idx="${i}"
+                class="p-0.5 rounded text-slate-300 hover:text-emerald-600 hover:bg-emerald-50 transition-colors
+                       ${isLast ? 'invisible' : ''}">
+          <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M19 9l-7 7-7-7"/>
+          </svg>
+        </button>
+      </div>
       <div class="w-8 h-8 rounded-lg flex items-center justify-center text-xs font-bold flex-shrink-0"
            style="background:${c.bg};color:${c.fg}">${init}</div>
-      <span class="text-sm font-medium text-slate-700 w-28 flex-shrink-0 truncate"
+      <span class="text-sm font-medium text-slate-700 flex-shrink-0 max-w-[7rem] truncate"
             title="${sub.department}">${sub.department}</span>
       <input type="text" placeholder="ลิงก์เอกสาร (URL)"
-             class="flex-1 text-xs border border-slate-200 rounded-lg px-3 py-1.5 bg-slate-50
+             class="sub-link-input flex-1 text-xs border border-slate-200 rounded-lg px-3 py-1.5 bg-slate-50
                     focus:outline-none focus:border-emerald-400 transition-colors min-w-0"
-             value="${sub.activeLink || ''}"
-             onchange="window._updateSubLink(${i}, this.value)">
-      <button type="button"
+             data-idx="${i}" value="${sub.activeLink || ''}">
+      <button type="button" data-action="sub-remove" data-idx="${i}"
               class="flex-shrink-0 p-1.5 text-slate-300 hover:text-red-500 hover:bg-red-50
-                     rounded-lg transition-colors"
-              onclick="window._removeSub(${i})">
+                     rounded-lg transition-colors">
         <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
           <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
         </svg>
@@ -710,8 +794,28 @@ function renderSubCommitteeList() {
     </div>`;
   }).join('');
 
-  window._removeSub     = (i) => { tempSubCommittees.splice(i, 1); renderSubCommitteeList(); };
-  window._updateSubLink = (i, v) => { tempSubCommittees[i].activeLink = v; };
+  /* event delegation for reorder / remove / link update */
+  listEl.onclick = (e) => {
+    const action = e.target.closest('[data-action]')?.dataset.action;
+    if (!action) return;
+    const idx = parseInt(e.target.closest('[data-action]').dataset.idx, 10);
+    if (action === 'sub-remove') {
+      tempSubCommittees.splice(idx, 1);
+      renderSubCommitteeList();
+    } else if (action === 'sub-up' && idx > 0) {
+      [tempSubCommittees[idx - 1], tempSubCommittees[idx]] = [tempSubCommittees[idx], tempSubCommittees[idx - 1]];
+      renderSubCommitteeList();
+    } else if (action === 'sub-down' && idx < tempSubCommittees.length - 1) {
+      [tempSubCommittees[idx], tempSubCommittees[idx + 1]] = [tempSubCommittees[idx + 1], tempSubCommittees[idx]];
+      renderSubCommitteeList();
+    }
+  };
+  listEl.onchange = (e) => {
+    if (e.target.classList.contains('sub-link-input')) {
+      const idx = parseInt(e.target.dataset.idx, 10);
+      tempSubCommittees[idx].activeLink = e.target.value.trim();
+    }
+  };
 }
 
 /* ═══════════════════════════════════════════════
