@@ -290,7 +290,29 @@ closeModal();
 
 ## Frontend UI Design System
 
+> **ห้ามใช้ emoji ทุกชนิดใน UI** — ใช้ inline SVG แทนทั้งหมด
+
 ไฟล์อ้างอิง (ห้ามแก้ไข): `committee.js`, `policy.js`, `patrol.js`, `kpi.js`, `cccf.js`
+
+### Restyle Status
+| File | Status |
+|------|--------|
+| `machine-safety.js` | done |
+| `ojt.js` | done |
+| `safety-culture.js` | done |
+| `hiyari.js` | pending |
+| `ky.js` | pending |
+| `fourm.js` | pending |
+| `yokoten.js` | pending |
+| `accident.js` | pending |
+| `training.js` | pending |
+| `contractor.js` | pending |
+| `admin.js` | pending |
+
+### Page Wrapper Pattern
+```js
+`<div class="max-w-5xl mx-auto space-y-6 animate-fade-in pb-10">...</div>`
+```
 
 ### Header Pattern (ทุก page ต้องใช้ pattern นี้)
 ```html
@@ -342,15 +364,21 @@ closeModal();
 ```
 ใช้ `animate-pulse` บน dot สำหรับ status "active/valid/ผ่าน"
 
-### Container Pattern
+### Container / Loading Pattern
 - Filter bar: `<div class="card p-4">...</div>`
 - Table: `<div class="card overflow-hidden">...</div>`
-- Loading: `<div class="animate-spin rounded-full h-10 w-10 border-4 border-emerald-500 border-t-transparent"></div>`
+- Loading spinner: `<div class="animate-spin rounded-full h-10 w-10 border-4 border-emerald-500 border-t-transparent"></div>`
 
-### No Emoji Policy
-**ห้ามใช้ emoji ทุกชนิดใน UI** — ใช้ inline SVG แทนทั้งหมด
-- ไฟล์ที่ restyled แล้ว: `machine-safety.js`, `ojt.js`, `safety-culture.js`
-- ไฟล์ที่ยังรอ restyle: `hiyari.js`, `ky.js`, `fourm.js`, `yokoten.js`, `accident.js`, `training.js`, `contractor.js`
+### Empty State Pattern
+```html
+<div class="text-center py-16 text-slate-400">
+  <div class="w-16 h-16 rounded-2xl bg-slate-100 flex items-center justify-center mx-auto mb-4">
+    <svg class="w-8 h-8 opacity-40" .../>
+  </div>
+  <p class="font-medium">ไม่มีข้อมูล</p>
+  <p class="text-sm mt-1">DESCRIPTION</p>
+</div>
+```
 
 ## Common Pitfalls
 
