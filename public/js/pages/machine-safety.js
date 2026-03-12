@@ -56,18 +56,18 @@ function _renderPage(container) {
 
         <!-- Header -->
         <div class="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
-            <div class="flex items-center gap-3">
-                <div class="w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0"
-                     style="background: linear-gradient(135deg, #059669, #059669);">
-                    <svg class="w-5 h-5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"/>
-                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/>
-                    </svg>
-                </div>
-                <div>
-                    <h1 class="text-xl font-bold text-slate-800">Machine Safety Devices</h1>
-                    <p class="text-xs text-slate-400 mt-0.5">Safety Device Standard และ Layout & Checkpoint ของเครื่องจักร</p>
-                </div>
+            <div>
+                <h1 class="text-2xl font-bold text-slate-800 flex items-center gap-2.5">
+                    <span class="w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0"
+                          style="background:linear-gradient(135deg,#059669,#0d9488);box-shadow:0 2px 10px rgba(5,150,105,0.3)">
+                        <svg class="w-5 h-5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"/>
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/>
+                        </svg>
+                    </span>
+                    Machine Safety Devices
+                </h1>
+                <p class="text-sm text-slate-500 mt-1 ml-11">Safety Device Standard และ Layout & Checkpoint ของเครื่องจักร</p>
             </div>
             ${_isAdmin ? `
             <button onclick="window._msdOpenAdd()" class="btn btn-primary flex items-center gap-2 text-sm px-4 py-2">
@@ -78,24 +78,52 @@ function _renderPage(container) {
 
         <!-- Summary Cards -->
         <div class="grid grid-cols-2 lg:grid-cols-4 gap-4">
-            <div class="card p-4">
-                <p class="text-xs text-slate-500 font-medium">เครื่องจักรทั้งหมด</p>
-                <p class="text-3xl font-bold text-slate-800 mt-1">${total}</p>
+            <div class="bg-white rounded-xl p-4 border border-slate-100 shadow-sm flex items-center gap-3">
+                <div class="w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0" style="background:#ecfdf5">
+                    <svg class="w-5 h-5" style="color:#059669" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"/>
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/>
+                    </svg>
+                </div>
+                <div>
+                    <p class="text-2xl font-bold text-slate-800">${total}</p>
+                    <p class="text-xs text-slate-500">เครื่องจักรทั้งหมด</p>
+                </div>
             </div>
-            <div class="card p-4 border-emerald-200">
-                <p class="text-xs text-emerald-600 font-medium">มีครบทั้ง 2 รายการ</p>
-                <p class="text-3xl font-bold text-emerald-600 mt-1">${compliant}</p>
-                <p class="text-xs text-slate-400 mt-0.5">Safety Std. + Layout</p>
+            <div class="bg-white rounded-xl p-4 border border-slate-100 shadow-sm flex items-center gap-3">
+                <div class="w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0" style="background:#d1fae5">
+                    <svg class="w-5 h-5 text-emerald-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/>
+                    </svg>
+                </div>
+                <div>
+                    <p class="text-2xl font-bold text-emerald-600">${compliant}</p>
+                    <p class="text-xs text-slate-500">ครบทั้ง 2 รายการ</p>
+                </div>
             </div>
-            <div class="card p-4 border-amber-200">
-                <p class="text-xs text-amber-600 font-medium">มีบางส่วน</p>
-                <p class="text-3xl font-bold text-amber-600 mt-1">${partial}</p>
+            <div class="bg-white rounded-xl p-4 border border-slate-100 shadow-sm flex items-center gap-3">
+                <div class="w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0" style="background:#fef3c7">
+                    <svg class="w-5 h-5 text-amber-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/>
+                    </svg>
+                </div>
+                <div>
+                    <p class="text-2xl font-bold text-amber-600">${partial}</p>
+                    <p class="text-xs text-slate-500">มีบางส่วน</p>
+                </div>
             </div>
-            <div class="card p-4 border-blue-200">
-                <p class="text-xs text-blue-600 font-medium">Compliance</p>
-                <p class="text-3xl font-bold text-blue-600 mt-1">${pct}%</p>
-                <div class="mt-2 w-full bg-slate-100 rounded-full h-1.5">
-                    <div class="h-1.5 rounded-full" style="width:${pct}%; background:linear-gradient(90deg,#3b82f6,#06b6d4)"></div>
+            <div class="bg-white rounded-xl p-4 border border-slate-100 shadow-sm flex items-center gap-3">
+                <div class="w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0" style="background:#dbeafe">
+                    <svg class="w-5 h-5 text-blue-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"/>
+                    </svg>
+                </div>
+                <div>
+                    <p class="text-2xl font-bold text-blue-600">${pct}%</p>
+                    <p class="text-xs text-slate-500">Compliance</p>
+                    <div class="mt-1.5 w-full bg-slate-100 rounded-full h-1.5">
+                        <div class="h-1.5 rounded-full" style="width:${pct}%;background:linear-gradient(90deg,#3b82f6,#06b6d4)"></div>
+                    </div>
                 </div>
             </div>
         </div>
@@ -107,17 +135,20 @@ function _renderPage(container) {
                 มีไฟล์แนบ
             </span>
             <span class="flex items-center gap-1.5">
-                <span class="inline-flex items-center justify-center w-5 h-5 rounded-full bg-red-100 text-red-500 font-bold text-xs">✗</span>
+                <span class="inline-flex items-center justify-center w-5 h-5 rounded-full bg-slate-100 text-slate-400 font-bold text-xs">✗</span>
                 ยังไม่มีไฟล์
             </span>
             <span class="flex items-center gap-1.5">
-                <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-blue-100 text-blue-600 font-semibold">📁 ไฟล์</span>
+                <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-blue-100 text-blue-600 font-semibold">
+                    <svg class="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/></svg>
+                    ไฟล์
+                </span>
                 กดเพื่อดู/ดาวน์โหลด/ปริ้น
             </span>
         </div>
 
         <!-- Filter Bar -->
-        <div class="bg-white rounded-xl border border-slate-200 p-4 shadow-sm flex flex-wrap gap-3 items-center">
+        <div class="card p-4 flex flex-wrap gap-3 items-center">
             <div class="relative flex-1 min-w-[180px]">
                 <svg class="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-4.35-4.35M17 11A6 6 0 115 11a6 6 0 0112 0z"/></svg>
                 <input id="msd-search" type="text" placeholder="ค้นหาชื่อ / รหัสเครื่องจักร..."
@@ -142,7 +173,7 @@ function _renderPage(container) {
         </div>
 
         <!-- Table -->
-        <div class="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
+        <div class="card overflow-hidden">
             <div id="msd-table-wrap" class="overflow-x-auto">
                 ${_renderTable()}
             </div>
@@ -171,10 +202,10 @@ function _renderTable() {
         const isPartial  = hasSafety !== hasLayout;
 
         const statusBadge = isFull
-            ? `<span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-semibold bg-emerald-100 text-emerald-700">✅ ครบ</span>`
+            ? `<span class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold bg-emerald-100 text-emerald-700"><span class="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse inline-block"></span>ครบ</span>`
             : isPartial
-            ? `<span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-semibold bg-amber-100 text-amber-700">⚠️ บางส่วน</span>`
-            : `<span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-semibold bg-red-100 text-red-500">❌ ไม่มี</span>`;
+            ? `<span class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold bg-amber-100 text-amber-700"><span class="w-1.5 h-1.5 rounded-full bg-amber-400 inline-block"></span>บางส่วน</span>`
+            : `<span class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold bg-slate-100 text-slate-500"><span class="w-1.5 h-1.5 rounded-full bg-slate-300 inline-block"></span>ยังไม่มี</span>`;
 
         const tick = (v) => v
             ? `<span class="inline-flex items-center justify-center w-6 h-6 rounded-full bg-emerald-100 text-emerald-600 text-xs font-bold">✓</span>`
@@ -415,7 +446,7 @@ window._msdDelete = async function(id, name) {
 // ─── Files Modal ──────────────────────────────────────────────────────────────
 // defaultTab: 'SafetyDeviceStandard' | 'LayoutCheckpoint'
 window._msdOpenFiles = async function(machineId, machineName, defaultTab = 'SafetyDeviceStandard') {
-    UI.openModal(`📁 ไฟล์แนบ — ${machineName}`, `
+    UI.openModal(`ไฟล์แนบ — ${machineName}`, `
         <div id="msd-files-body">
             <div class="flex justify-center py-8">
                 <div class="animate-spin rounded-full h-8 w-8 border-4 border-emerald-500 border-t-transparent"></div>

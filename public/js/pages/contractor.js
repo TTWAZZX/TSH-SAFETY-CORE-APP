@@ -91,18 +91,18 @@ function buildPageShell(isAdmin) {
 
         <!-- Page Header -->
         <div class="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
-            <div class="flex items-center gap-3">
-                <div class="w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0"
-                     style="background: linear-gradient(135deg, #0284c7, #7c3aed);">
-                    <svg class="w-5 h-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                          d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-2 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4"/>
-                    </svg>
-                </div>
-                <div>
-                    <h1 class="text-xl font-bold text-slate-800">Contractor Control</h1>
-                    <p class="text-xs text-slate-400 mt-0.5">ระบบและเอกสารสำหรับผู้รับเหมา · Thai Summit Harness Co., Ltd.</p>
-                </div>
+            <div>
+                <h1 class="text-2xl font-bold text-slate-800 flex items-center gap-2.5">
+                    <span class="w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0"
+                          style="background:linear-gradient(135deg,#0284c7,#7c3aed);box-shadow:0 2px 10px rgba(2,132,199,0.3)">
+                        <svg class="w-5 h-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                              d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-2 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4"/>
+                        </svg>
+                    </span>
+                    Contractor Control
+                </h1>
+                <p class="text-sm text-slate-500 mt-1 ml-11">ระบบและเอกสารสำหรับผู้รับเหมา · Thai Summit Harness Co., Ltd.</p>
             </div>
             ${isAdmin ? `
             <button id="btn-upload-doc"

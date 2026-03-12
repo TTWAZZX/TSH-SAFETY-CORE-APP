@@ -104,18 +104,18 @@ function buildShell() {
     return `
     <div class="max-w-6xl mx-auto space-y-5 animate-fade-in pb-10">
         <!-- Header -->
-        <div class="flex items-center gap-3">
-            <div class="w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0"
-                 style="background:linear-gradient(135deg,#6366f1,#0284c7);">
-                <svg class="w-5 h-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                      d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/>
-                </svg>
-            </div>
-            <div>
-                <h1 class="text-xl font-bold text-slate-800">4M Change</h1>
-                <p class="text-xs text-slate-400 mt-0.5">Man · Machine · Material · Method · Thai Summit Harness Co., Ltd.</p>
-            </div>
+        <div>
+            <h1 class="text-2xl font-bold text-slate-800 flex items-center gap-2.5">
+                <span class="w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0"
+                      style="background:linear-gradient(135deg,#6366f1,#0284c7);box-shadow:0 2px 10px rgba(99,102,241,0.3)">
+                    <svg class="w-5 h-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                          d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/>
+                    </svg>
+                </span>
+                4M Change
+            </h1>
+            <p class="text-sm text-slate-500 mt-1 ml-11">Man · Machine · Material · Method · Thai Summit Harness Co., Ltd.</p>
         </div>
 
         <!-- Tabs -->

@@ -83,18 +83,18 @@ function buildShell() {
     <div class="max-w-6xl mx-auto space-y-5 animate-fade-in pb-10">
 
         <!-- Header -->
-        <div class="flex items-center gap-3">
-            <div class="w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0"
-                 style="background: linear-gradient(135deg, #6366f1, #8b5cf6);">
-                <svg class="w-5 h-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                      d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.347.347A3.001 3.001 0 0112 21a3.001 3.001 0 01-2.789-4.1l-.347-.347z"/>
-                </svg>
-            </div>
-            <div>
-                <h1 class="text-xl font-bold text-slate-800">KY Ability</h1>
-                <p class="text-xs text-slate-400 mt-0.5">Kiken Yochi — กิจกรรมทำนายอันตราย · Thai Summit Harness Co., Ltd.</p>
-            </div>
+        <div>
+            <h1 class="text-2xl font-bold text-slate-800 flex items-center gap-2.5">
+                <span class="w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0"
+                      style="background:linear-gradient(135deg,#6366f1,#8b5cf6);box-shadow:0 2px 10px rgba(99,102,241,0.3)">
+                    <svg class="w-5 h-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                          d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.347.347A3.001 3.001 0 0112 21a3.001 3.001 0 01-2.789-4.1l-.347-.347z"/>
+                    </svg>
+                </span>
+                KY Ability
+            </h1>
+            <p class="text-sm text-slate-500 mt-1 ml-11">Kiken Yochi — กิจกรรมทำนายอันตราย · Thai Summit Harness Co., Ltd.</p>
         </div>
 
         <!-- Tabs -->
@@ -244,7 +244,7 @@ function renderCompletionTracker(kpi, pendingDepts) {
             <div class="flex flex-wrap gap-1.5">
                 ${pendingDepts.map(d => `<span class="px-2.5 py-1 rounded-lg bg-red-50 text-red-600 text-xs font-medium border border-red-100">${d}</span>`).join('')}
             </div>
-        </div>` : `<p class="text-sm text-emerald-600 font-semibold">✓ ทุกแผนกส่งแล้วเดือนนี้</p>`}`;
+        </div>` : `<p class="text-sm text-emerald-600 font-semibold flex items-center gap-1"><svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"/></svg>ทุกแผนกส่งแล้วเดือนนี้</p>`}`;
 }
 
 function renderLineChart(monthly) {
@@ -495,11 +495,11 @@ function setupFormListeners() {
     // Attachment preview
     document.getElementById('ky-attachment')?.addEventListener('change', (e) => {
         const n = e.target.files[0]?.name || '';
-        document.getElementById('ky-attachment-name').textContent = n ? `📎 ${n}` : '';
+        document.getElementById('ky-attachment-name').textContent = n ? n : '';
     });
     document.getElementById('ky-video')?.addEventListener('change', (e) => {
         const n = e.target.files[0]?.name || '';
-        document.getElementById('ky-video-name').textContent = n ? `🎬 ${n}` : '';
+        document.getElementById('ky-video-name').textContent = n ? n : '';
     });
 
     // Add participant

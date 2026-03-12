@@ -41,18 +41,18 @@ export async function loadYokotenPage() {
         <div class="animate-fade-in space-y-6">
             <!-- Header -->
             <div class="flex items-start justify-between gap-4 flex-wrap">
-                <div class="flex items-center gap-4">
-                    <div class="w-12 h-12 rounded-2xl flex items-center justify-center shadow-lg flex-shrink-0"
-                         style="background:linear-gradient(135deg,#059669,#0d9488)">
-                        <svg class="w-6 h-6 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                                d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.347.347A3.001 3.001 0 0112 21a3.001 3.001 0 01-2.789-4.1l-.347-.347z"/>
-                        </svg>
-                    </div>
-                    <div>
-                        <h1 class="text-2xl font-bold text-slate-800 dark:text-slate-100">Yokoten</h1>
-                        <p class="text-xs text-slate-400 mt-0.5">แบ่งปันบทเรียนและความรู้ด้านความปลอดภัย</p>
-                    </div>
+                <div>
+                    <h1 class="text-2xl font-bold text-slate-800 flex items-center gap-2.5">
+                        <span class="w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0"
+                              style="background:linear-gradient(135deg,#059669,#0d9488);box-shadow:0 2px 10px rgba(5,150,105,0.3)">
+                            <svg class="w-5 h-5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                    d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.347.347A3.001 3.001 0 0112 21a3.001 3.001 0 01-2.789-4.1l-.347-.347z"/>
+                            </svg>
+                        </span>
+                        Yokoten
+                    </h1>
+                    <p class="text-sm text-slate-500 mt-1 ml-11">แบ่งปันบทเรียนและความรู้ด้านความปลอดภัย</p>
                 </div>
                 ${_isAdmin ? `
                 <button onclick="window._yokAddTopic()"
@@ -476,7 +476,7 @@ function openTopicForm(topic) {
         </form>
     `;
 
-    UI.openModal(isEdit ? '✏️ แก้ไขหัวข้อ Yokoten' : '➕ เพิ่มหัวข้อ Yokoten', html, 'max-w-lg');
+    UI.openModal(isEdit ? 'แก้ไขหัวข้อ Yokoten' : 'เพิ่มหัวข้อ Yokoten', html, 'max-w-lg');
 
     setTimeout(() => {
         document.getElementById('yok-topic-form')?.addEventListener('submit', async (e) => {

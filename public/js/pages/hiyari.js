@@ -92,18 +92,18 @@ function buildShell() {
     <div class="max-w-6xl mx-auto space-y-5 animate-fade-in pb-10">
 
         <!-- Header -->
-        <div class="flex items-center gap-3">
-            <div class="w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0"
-                 style="background: linear-gradient(135deg, #f97316, #ef4444);">
-                <svg class="w-5 h-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                      d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/>
-                </svg>
-            </div>
-            <div>
-                <h1 class="text-xl font-bold text-slate-800">Hiyari-Hatto</h1>
-                <p class="text-xs text-slate-400 mt-0.5">รายงานเหตุการณ์เฉียดอุบัติเหตุ (Near Miss) · Thai Summit Harness Co., Ltd.</p>
-            </div>
+        <div>
+            <h1 class="text-2xl font-bold text-slate-800 flex items-center gap-2.5">
+                <span class="w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0"
+                      style="background:linear-gradient(135deg,#f97316,#ef4444);box-shadow:0 2px 10px rgba(249,115,22,0.3)">
+                    <svg class="w-5 h-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                          d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/>
+                    </svg>
+                </span>
+                Hiyari-Hatto
+            </h1>
+            <p class="text-sm text-slate-500 mt-1 ml-11">รายงานเหตุการณ์เฉียดอุบัติเหตุ (Near Miss) · Thai Summit Harness Co., Ltd.</p>
         </div>
 
         <!-- Tabs -->
@@ -675,7 +675,7 @@ async function fetchAndRenderManage(statusFilter) {
                 </td>
                 <td class="px-4 py-3 text-slate-600 text-xs max-w-[200px]">
                     <div class="truncate">${r.Description || '-'}</div>
-                    ${r.Location ? `<div class="text-slate-400 mt-0.5">📍 ${r.Location}</div>` : ''}
+                    ${r.Location ? `<div class="text-slate-400 mt-0.5 flex items-center gap-1"><svg class="w-3 h-3 inline-block flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 11a3 3 0 11-6 0 3 3 0 016 0z"/></svg>${r.Location}</div>` : ''}
                 </td>
                 <td class="px-4 py-3">
                     <span class="px-2 py-0.5 rounded-full text-xs font-semibold ${RISK_BADGE[r.RiskLevel] || 'bg-slate-100 text-slate-500'}">

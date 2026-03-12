@@ -68,18 +68,18 @@ function _renderPage(container) {
 
         <!-- Page Header -->
         <div class="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
-            <div class="flex items-center gap-3">
-                <div class="w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0"
-                     style="background: linear-gradient(135deg, #059669, #059669);">
-                    <svg class="w-5 h-5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                              d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253"/>
-                    </svg>
-                </div>
-                <div>
-                    <h1 class="text-xl font-bold text-slate-800">Safety Training</h1>
-                    <p class="text-xs text-slate-400 mt-0.5">บันทึกและติดตามผลการอบรมความปลอดภัย</p>
-                </div>
+            <div>
+                <h1 class="text-2xl font-bold text-slate-800 flex items-center gap-2.5">
+                    <span class="w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0"
+                          style="background:linear-gradient(135deg,#059669,#0d9488);box-shadow:0 2px 10px rgba(5,150,105,0.3)">
+                        <svg class="w-5 h-5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                  d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253"/>
+                        </svg>
+                    </span>
+                    Safety Training
+                </h1>
+                <p class="text-sm text-slate-500 mt-1 ml-11">บันทึกและติดตามผลการอบรมความปลอดภัย</p>
             </div>
             <div class="flex items-center gap-2 flex-wrap">
                 <!-- Year Filter -->
@@ -422,8 +422,8 @@ function _renderRecordsTable() {
             ? new Date(r.TrainingDate).toLocaleDateString('th-TH', { day: '2-digit', month: 'short', year: '2-digit' })
             : '—';
         const passed = r.IsPassed ?
-            `<span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-semibold bg-emerald-100 text-emerald-700">✓ ผ่าน</span>`
-            : `<span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-semibold bg-red-100 text-red-500">✗ ไม่ผ่าน</span>`;
+            `<span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-semibold bg-emerald-100 text-emerald-700"><span class="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse inline-block"></span>ผ่าน</span>`
+            : `<span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-semibold bg-red-100 text-red-500"><span class="w-1.5 h-1.5 rounded-full bg-red-400 inline-block"></span>ไม่ผ่าน</span>`;
         const adminBtns = _isAdmin ? `
             <button onclick="window._trOpenRecordForm(${JSON.stringify(r).replace(/'/g,"\\'")})"
                 class="p-1.5 text-slate-400 hover:text-emerald-600 hover:bg-emerald-50 rounded-lg transition-colors" title="แก้ไข">
@@ -553,7 +553,7 @@ window._trOpenRecordForm = function(record = null) {
                 <div id="tr-emp-dropdown" class="hidden absolute z-20 left-0 right-0 top-full mt-1 bg-white border border-slate-200 rounded-xl shadow-lg max-h-48 overflow-y-auto"></div>
             </div>
             <div id="tr-emp-info" class="${r?.EmployeeID ? '' : 'hidden'} mt-1.5 text-xs text-emerald-700 bg-emerald-50 rounded-lg px-3 py-1.5 border border-emerald-100">
-                ${r?.EmployeeName ? `✓ ${r.EmployeeName} · ${r.Department || ''}` : ''}
+                ${r?.EmployeeName ? `<svg class="w-3.5 h-3.5 inline-block mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"/></svg>${r.EmployeeName} · ${r.Department || ''}` : ''}
             </div>
         </div>
 
@@ -678,7 +678,7 @@ window._trSelectEmp = function(id, name, dept) {
     const info    = document.getElementById('tr-emp-info');
     const dd      = document.getElementById('tr-emp-dropdown');
     if (input) input.value = id;
-    if (info)  { info.textContent = `✓ ${name} · ${dept}`; info.classList.remove('hidden'); }
+    if (info)  { info.textContent = `${name} · ${dept}`; info.classList.remove('hidden'); }
     if (dd)    dd.classList.add('hidden');
 };
 

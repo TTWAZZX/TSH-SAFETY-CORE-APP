@@ -92,18 +92,18 @@ function _renderPage(container) {
 
         <!-- Page Header -->
         <div class="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
-            <div class="flex items-center gap-3">
-                <div class="w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0"
-                     style="background: linear-gradient(135deg, #dc2626, #b91c1c);">
-                    <svg class="w-5 h-5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                              d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/>
-                    </svg>
-                </div>
-                <div>
-                    <h1 class="text-xl font-bold text-slate-800">รายงานอุบัติเหตุ</h1>
-                    <p class="text-xs text-slate-400 mt-0.5">Accident Report &amp; Safety Analytics · Thai Summit Harness</p>
-                </div>
+            <div>
+                <h1 class="text-2xl font-bold text-slate-800 flex items-center gap-2.5">
+                    <span class="w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0"
+                          style="background:linear-gradient(135deg,#dc2626,#b91c1c);box-shadow:0 2px 10px rgba(220,38,38,0.3)">
+                        <svg class="w-5 h-5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                  d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/>
+                        </svg>
+                    </span>
+                    รายงานอุบัติเหตุ
+                </h1>
+                <p class="text-sm text-slate-500 mt-1 ml-11">Accident Report &amp; Safety Analytics · Thai Summit Harness</p>
             </div>
             <div class="flex items-center gap-2 flex-wrap">
                 <select id="acc-year-filter" onchange="window._accSetYear()" class="form-input text-sm py-1.5 px-3">
@@ -338,9 +338,9 @@ function _renderAnalytics() {
     const maxRoot   = rootCauses[0]?.cnt || 1;
 
     const riskBadge = (score) => {
-        if (score >= 10) return `<span class="inline-flex px-2 py-0.5 rounded-full text-xs font-bold bg-red-100 text-red-700">🔴 High</span>`;
-        if (score >= 5)  return `<span class="inline-flex px-2 py-0.5 rounded-full text-xs font-bold bg-orange-100 text-orange-700">🟠 Med</span>`;
-        return `<span class="inline-flex px-2 py-0.5 rounded-full text-xs font-bold bg-amber-100 text-amber-700">🟡 Low</span>`;
+        if (score >= 10) return `<span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-bold bg-red-100 text-red-700"><span class="w-1.5 h-1.5 rounded-full bg-red-500 inline-block"></span>High</span>`;
+        if (score >= 5)  return `<span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-bold bg-orange-100 text-orange-700"><span class="w-1.5 h-1.5 rounded-full bg-orange-500 inline-block"></span>Med</span>`;
+        return `<span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-bold bg-amber-100 text-amber-700"><span class="w-1.5 h-1.5 rounded-full bg-amber-400 inline-block"></span>Low</span>`;
     };
 
     return `
@@ -380,7 +380,7 @@ function _renderAnalytics() {
                                     return `
                                     <tr class="hover:bg-slate-50 transition-colors ${rowBg}">
                                         <td class="px-3 py-3 font-bold text-slate-500 ${i===0?'text-red-600':''}">${i+1}</td>
-                                        <td class="px-3 py-3 font-semibold text-slate-800">${d.Department || '—'}${d.fatal>0?` <span class="text-xs text-white bg-slate-800 rounded px-1">☠ Fatal</span>`:''}</td>
+                                        <td class="px-3 py-3 font-semibold text-slate-800">${d.Department || '—'}${d.fatal>0?` <span class="text-xs text-white bg-slate-800 rounded px-1">Fatal</span>`:''}</td>
                                         <td class="px-3 py-3 text-center text-slate-700 font-bold">${d.total}</td>
                                         <td class="px-3 py-3 text-center text-orange-600 font-semibold">${d.recordable||0}</td>
                                         <td class="px-3 py-3 text-center text-red-600 font-semibold">${d.lostDays||0}</td>
@@ -539,7 +539,7 @@ function _renderReportsTable() {
         const tc  = TYPE_COLOR[r.AccidentType]  || { bg: 'bg-slate-100', text: 'text-slate-600' };
         const sc  = SEV_COLOR[r.Severity]       || { bg: 'bg-slate-100', text: 'text-slate-600' };
         const statusBadge = r.Status === 'Closed'
-            ? `<span class="inline-flex px-2 py-0.5 rounded-full text-xs font-semibold bg-slate-100 text-slate-500">✓ Closed</span>`
+            ? `<span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-semibold bg-slate-100 text-slate-500"><span class="w-1.5 h-1.5 rounded-full bg-slate-400 inline-block"></span>Closed</span>`
             : `<span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-semibold bg-amber-100 text-amber-700"><span class="w-1.5 h-1.5 rounded-full bg-amber-500 animate-pulse inline-block"></span>Open</span>`;
         const adminBtns = _isAdmin ? `
             <button onclick="window._accOpenForm(${JSON.stringify(r).replace(/'/g,"\\'")})"
@@ -675,7 +675,7 @@ window._accOpenForm = function(record = null) {
                 <div id="acc-emp-dropdown" class="hidden absolute z-20 left-0 right-0 top-full mt-1 bg-white border border-slate-200 rounded-xl shadow-lg max-h-48 overflow-y-auto"></div>
             </div>
             <div id="acc-emp-info" class="${r?.EmployeeID ? '' : 'hidden'} mt-1.5 text-xs text-emerald-700 bg-emerald-50 rounded-lg px-3 py-1.5 border border-emerald-100">
-                ${r?.EmployeeName ? `✓ ${r.EmployeeName} · ${r.Department || ''}` : ''}
+                ${r?.EmployeeName ? `<svg class="w-3.5 h-3.5 inline-block mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"/></svg>${r.EmployeeName} · ${r.Department || ''}` : ''}
             </div>
         </div>
 
@@ -836,7 +836,7 @@ window._accSelectEmp = function(id, name, dept) {
     const info  = document.getElementById('acc-emp-info');
     const dd    = document.getElementById('acc-emp-dropdown');
     if (input) input.value = id;
-    if (info)  { info.textContent = `✓ ${name} · ${dept}`; info.classList.remove('hidden'); }
+    if (info)  { info.textContent = `${name} · ${dept}`; info.classList.remove('hidden'); }
     if (dd)    dd.classList.add('hidden');
 };
 

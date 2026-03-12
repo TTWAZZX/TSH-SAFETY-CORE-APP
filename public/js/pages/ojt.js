@@ -22,10 +22,10 @@ function _calcStatus(nextReviewDate) {
 }
 
 const STATUS_META = {
-    'valid':    { label: 'Valid',       bg: 'bg-emerald-100', text: 'text-emerald-700', icon: '✅', row: '' },
-    'due-soon': { label: 'Due Soon',    bg: 'bg-amber-100',   text: 'text-amber-700',   icon: '⚠️', row: 'bg-amber-50/40' },
-    'overdue':  { label: 'Overdue',     bg: 'bg-red-100',     text: 'text-red-600',     icon: '🔴', row: 'bg-red-50/40' },
-    'no-data':  { label: 'ยังไม่มีข้อมูล', bg: 'bg-slate-100', text: 'text-slate-500', icon: '—',  row: '' },
+    'valid':    { label: 'Valid',           bg: 'bg-emerald-100', text: 'text-emerald-700', dot: 'bg-emerald-400 animate-pulse', row: '' },
+    'due-soon': { label: 'Due Soon',        bg: 'bg-amber-100',   text: 'text-amber-700',   dot: 'bg-amber-400',               row: 'bg-amber-50/40' },
+    'overdue':  { label: 'Overdue',         bg: 'bg-red-100',     text: 'text-red-600',     dot: 'bg-red-400',                 row: 'bg-red-50/40' },
+    'no-data':  { label: 'ยังไม่มีข้อมูล', bg: 'bg-slate-100',   text: 'text-slate-500',   dot: 'bg-slate-300',               row: '' },
 };
 
 // ─── Entry Point ──────────────────────────────────────────────────────────────
@@ -68,21 +68,21 @@ function _renderPage(container) {
     const pct     = (total - noData) ? Math.round(valid * 100 / (total - noData)) : 0;
 
     container.innerHTML = `
-    <div class="space-y-5">
+    <div class="max-w-5xl mx-auto space-y-6 animate-fade-in pb-10">
 
         <!-- Header -->
         <div class="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
-            <div class="flex items-center gap-3">
-                <div class="w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0"
-                     style="background: linear-gradient(135deg, #059669, #059669);">
-                    <svg class="w-5 h-5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/>
-                    </svg>
-                </div>
-                <div>
-                    <h1 class="text-xl font-bold text-slate-800">Stop · Call · Wait</h1>
-                    <p class="text-xs text-slate-400 mt-0.5">มาตรฐานความปลอดภัยและสถานะการอบรม OJT รายแผนก</p>
-                </div>
+            <div>
+                <h1 class="text-2xl font-bold text-slate-800 flex items-center gap-2.5">
+                    <span class="w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0"
+                          style="background:linear-gradient(135deg,#dc2626,#ea580c);box-shadow:0 2px 10px rgba(220,38,38,0.3)">
+                        <svg class="w-5 h-5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/>
+                        </svg>
+                    </span>
+                    Stop · Call · Wait
+                </h1>
+                <p class="text-sm text-slate-500 mt-1 ml-11">มาตรฐานความปลอดภัยและสถานะการอบรม OJT รายแผนก</p>
             </div>
             ${_isAdmin ? `
             <button onclick="window._ojtEditStandard()" class="btn btn-secondary flex items-center gap-2 text-sm px-4 py-2">
@@ -123,35 +123,68 @@ function _renderPage(container) {
 
         <!-- Stats Cards -->
         <div class="grid grid-cols-2 lg:grid-cols-5 gap-4">
-            <div class="card p-4">
-                <p class="text-xs text-slate-500 font-medium">แผนกทั้งหมด</p>
-                <p class="text-3xl font-bold text-slate-800 mt-1">${total}</p>
-            </div>
-            <div class="card p-4 border-emerald-200 cursor-pointer hover:shadow-md transition-shadow" onclick="window._ojtSetFilter('valid')">
-                <p class="text-xs text-emerald-600 font-medium">✅ Valid</p>
-                <p class="text-3xl font-bold text-emerald-600 mt-1">${valid}</p>
-            </div>
-            <div class="card p-4 border-amber-200 cursor-pointer hover:shadow-md transition-shadow" onclick="window._ojtSetFilter('due-soon')">
-                <p class="text-xs text-amber-600 font-medium">⚠️ Due Soon</p>
-                <p class="text-3xl font-bold text-amber-600 mt-1">${dueSoon}</p>
-                <p class="text-xs text-slate-400">≤ 30 วัน</p>
-            </div>
-            <div class="card p-4 border-red-200 cursor-pointer hover:shadow-md transition-shadow" onclick="window._ojtSetFilter('overdue')">
-                <p class="text-xs text-red-600 font-medium">🔴 Overdue</p>
-                <p class="text-3xl font-bold text-red-600 mt-1">${overdue}</p>
-            </div>
-            <div class="card p-4 border-blue-200">
-                <p class="text-xs text-blue-600 font-medium">Compliance</p>
-                <p class="text-3xl font-bold text-blue-600 mt-1">${pct}%</p>
-                <div class="mt-2 w-full bg-slate-100 rounded-full h-1.5">
-                    <div class="h-1.5 rounded-full" style="width:${pct}%; background:linear-gradient(90deg,#10b981,#059669)"></div>
+            <div class="bg-white rounded-xl p-4 border border-slate-100 shadow-sm flex items-center gap-3">
+                <div class="w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0" style="background:#f1f5f9">
+                    <svg class="w-5 h-5 text-slate-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4"/>
+                    </svg>
                 </div>
-                <p class="text-xs text-slate-400 mt-1">จาก ${total - noData} แผนกที่มีข้อมูล</p>
+                <div>
+                    <p class="text-2xl font-bold text-slate-800">${total}</p>
+                    <p class="text-xs text-slate-500">แผนกทั้งหมด</p>
+                </div>
+            </div>
+            <div class="bg-white rounded-xl p-4 border border-emerald-100 shadow-sm flex items-center gap-3 cursor-pointer hover:shadow-md transition-shadow" onclick="window._ojtSetFilter('valid')">
+                <div class="w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0" style="background:#d1fae5">
+                    <svg class="w-5 h-5 text-emerald-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/>
+                    </svg>
+                </div>
+                <div>
+                    <p class="text-2xl font-bold text-emerald-600">${valid}</p>
+                    <p class="text-xs text-slate-500">Valid</p>
+                </div>
+            </div>
+            <div class="bg-white rounded-xl p-4 border border-amber-100 shadow-sm flex items-center gap-3 cursor-pointer hover:shadow-md transition-shadow" onclick="window._ojtSetFilter('due-soon')">
+                <div class="w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0" style="background:#fef3c7">
+                    <svg class="w-5 h-5 text-amber-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"/>
+                    </svg>
+                </div>
+                <div>
+                    <p class="text-2xl font-bold text-amber-600">${dueSoon}</p>
+                    <p class="text-xs text-slate-500">Due Soon <span class="text-slate-400">(≤30 วัน)</span></p>
+                </div>
+            </div>
+            <div class="bg-white rounded-xl p-4 border border-red-100 shadow-sm flex items-center gap-3 cursor-pointer hover:shadow-md transition-shadow" onclick="window._ojtSetFilter('overdue')">
+                <div class="w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0" style="background:#fee2e2">
+                    <svg class="w-5 h-5 text-red-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/>
+                    </svg>
+                </div>
+                <div>
+                    <p class="text-2xl font-bold text-red-600">${overdue}</p>
+                    <p class="text-xs text-slate-500">Overdue</p>
+                </div>
+            </div>
+            <div class="bg-white rounded-xl p-4 border border-slate-100 shadow-sm flex items-center gap-3">
+                <div class="w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0" style="background:#dbeafe">
+                    <svg class="w-5 h-5 text-blue-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"/>
+                    </svg>
+                </div>
+                <div class="flex-1">
+                    <p class="text-2xl font-bold text-blue-600">${pct}%</p>
+                    <p class="text-xs text-slate-500">Compliance</p>
+                    <div class="mt-1.5 w-full bg-slate-100 rounded-full h-1.5">
+                        <div class="h-1.5 rounded-full" style="width:${pct}%;background:linear-gradient(90deg,#10b981,#059669)"></div>
+                    </div>
+                </div>
             </div>
         </div>
 
         <!-- Filters -->
-        <div class="bg-white rounded-xl border border-slate-200 p-4 shadow-sm flex flex-wrap gap-3 items-center">
+        <div class="card p-4 flex flex-wrap gap-3 items-center">
             <div class="relative flex-1 min-w-[180px]">
                 <svg class="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-4.35-4.35M17 11A6 6 0 115 11a6 6 0 0112 0z"/></svg>
                 <input id="ojt-search" type="text" placeholder="ค้นหาชื่อแผนก..."
@@ -162,10 +195,10 @@ function _renderPage(container) {
             <select id="ojt-status" class="text-sm border border-slate-200 rounded-lg px-3 py-2 outline-none focus:border-emerald-400"
                 onchange="window._ojtFilter()">
                 <option value="">ทุกสถานะ</option>
-                <option value="valid"    ${_filterStatus==='valid'?'selected':''}>✅ Valid</option>
-                <option value="due-soon" ${_filterStatus==='due-soon'?'selected':''}>⚠️ Due Soon</option>
-                <option value="overdue"  ${_filterStatus==='overdue'?'selected':''}>🔴 Overdue</option>
-                <option value="no-data"  ${_filterStatus==='no-data'?'selected':''}>— ยังไม่มีข้อมูล</option>
+                <option value="valid"    ${_filterStatus==='valid'?'selected':''}>Valid</option>
+                <option value="due-soon" ${_filterStatus==='due-soon'?'selected':''}>Due Soon (≤30 วัน)</option>
+                <option value="overdue"  ${_filterStatus==='overdue'?'selected':''}>Overdue</option>
+                <option value="no-data"  ${_filterStatus==='no-data'?'selected':''}>ยังไม่มีข้อมูล</option>
             </select>
             ${_filterStatus || _search ? `
             <button onclick="window._ojtClearFilter()" class="text-xs text-slate-500 underline hover:text-slate-700">ล้างตัวกรอง</button>` : ''}
@@ -173,7 +206,7 @@ function _renderPage(container) {
         </div>
 
         <!-- Table -->
-        <div class="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
+        <div class="card overflow-hidden">
             <div id="ojt-table-wrap" class="overflow-x-auto">
                 ${_renderTable()}
             </div>
@@ -185,20 +218,36 @@ function _renderPage(container) {
 }
 
 // ─── SCW Cards ────────────────────────────────────────────────────────────────
+const SCW_ICONS = [
+    `<svg class="w-5 h-5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M18.364 18.364A9 9 0 005.636 5.636m12.728 12.728A9 9 0 015.636 5.636m12.728 12.728L5.636 5.636"/></svg>`,
+    `<svg class="w-5 h-5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 5a2 2 0 012-2h3.28a1 1 0 01.948.684l1.498 4.493a1 1 0 01-.502 1.21l-2.257 1.13a11.042 11.042 0 005.516 5.516l1.13-2.257a1 1 0 011.21-.502l4.493 1.498a1 1 0 01.684.949V19a2 2 0 01-2 2h-1C9.716 21 3 14.284 3 6V5z"/></svg>`,
+    `<svg class="w-5 h-5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>`,
+];
+const SCW_GRADIENTS = [
+    'linear-gradient(135deg,#dc2626,#ea580c)',
+    'linear-gradient(135deg,#d97706,#f59e0b)',
+    'linear-gradient(135deg,#2563eb,#0284c7)',
+];
+
 function _renderSCWCards() {
     const defaults = [
-        { icon: '🛑', color: 'red',   title: 'STOP — หยุด', text: 'หยุดการทำงานทันทีเมื่อพบสิ่งผิดปกติหรือไม่แน่ใจในความปลอดภัย อย่าฝืนทำงานต่อ' },
-        { icon: '📞', color: 'amber', title: 'CALL — โทร',  text: 'แจ้งหัวหน้างานหรือผู้รับผิดชอบทันที อธิบายปัญหาที่พบให้ชัดเจน' },
-        { icon: '⏳', color: 'blue',  title: 'WAIT — รอ',   text: 'รอการตอบสนองจากผู้รับผิดชอบ ห้ามเริ่มงานต่อจนกว่าจะได้รับอนุญาต' },
+        { color: 'red',   title: 'STOP — หยุด', text: 'หยุดการทำงานทันทีเมื่อพบสิ่งผิดปกติหรือไม่แน่ใจในความปลอดภัย อย่าฝืนทำงานต่อ' },
+        { color: 'amber', title: 'CALL — โทร',  text: 'แจ้งหัวหน้างานหรือผู้รับผิดชอบทันที อธิบายปัญหาที่พบให้ชัดเจน' },
+        { color: 'blue',  title: 'WAIT — รอ',   text: 'รอการตอบสนองจากผู้รับผิดชอบ ห้ามเริ่มงานต่อจนกว่าจะได้รับอนุญาต' },
     ];
     const items = (_standard?.Content?.trim()) ? _parseStandardContent(_standard.Content) : defaults;
 
     return items.map((item, i) => {
-        const c = item.color || ['red','amber','blue'][i] || 'slate';
+        const c        = item.color || ['red','amber','blue'][i] || 'slate';
+        const svgIcon  = SCW_ICONS[i]     || SCW_ICONS[0];
+        const gradient = SCW_GRADIENTS[i] || SCW_GRADIENTS[0];
         return `
         <div class="rounded-xl p-5 border border-${c}-200 bg-${c}-50">
             <div class="flex items-center gap-3 mb-3">
-                <span class="text-2xl">${item.icon || ['🛑','📞','⏳'][i]}</span>
+                <div class="w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0"
+                     style="background:${gradient}">
+                    ${svgIcon}
+                </div>
                 <h3 class="font-bold text-${c}-700">${item.title}</h3>
             </div>
             <p class="text-sm text-slate-700 leading-relaxed">${item.text}</p>
@@ -207,19 +256,18 @@ function _renderSCWCards() {
 }
 
 function _parseStandardContent(html) {
-    const div = document.createElement('div');
+    const div    = document.createElement('div');
     div.innerHTML = html;
-    const icons  = ['🛑','📞','⏳'];
     const colors = ['red','amber','blue'];
     const result = [];
     let idx = 0;
     div.querySelectorAll('h3').forEach(h3 => {
         const p = h3.nextElementSibling;
-        result.push({ icon: icons[idx]||'📋', color: colors[idx]||'slate', title: h3.textContent, text: p?.textContent || '' });
+        result.push({ color: colors[idx] || 'slate', title: h3.textContent, text: p?.textContent || '' });
         idx++;
     });
     if (result.length === 0) {
-        result.push({ icon: '📋', color: 'slate', title: 'มาตรฐาน SCW', text: div.textContent });
+        result.push({ color: 'slate', title: 'มาตรฐาน SCW', text: div.textContent });
     }
     return result;
 }
@@ -235,7 +283,12 @@ function _renderTable() {
 
     if (filtered.length === 0) {
         return `<div class="flex flex-col items-center justify-center py-16 text-slate-400">
-            <p class="font-medium">ไม่พบข้อมูล</p>
+            <div class="w-16 h-16 rounded-2xl bg-slate-100 flex items-center justify-center mx-auto mb-4">
+                <svg class="w-8 h-8 opacity-40" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4"/>
+                </svg>
+            </div>
+            <p class="font-medium text-slate-500">ไม่พบข้อมูล</p>
         </div>`;
     }
 
@@ -285,8 +338,9 @@ function _renderTable() {
             <td class="px-4 py-3 text-center text-sm text-slate-500">${r.AttendeeCount || '—'}</td>
             <td class="px-4 py-3 text-center text-sm text-slate-400">${r.ReviewIntervalMonths || 12} เดือน</td>
             <td class="px-4 py-3 text-center">
-                <span class="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-semibold ${meta.bg} ${meta.text}">
-                    ${meta.icon} ${meta.label}
+                <span class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold ${meta.bg} ${meta.text}">
+                    <span class="w-1.5 h-1.5 rounded-full inline-block ${meta.dot}"></span>
+                    ${meta.label}
                 </span>
             </td>
             ${_isAdmin ? `<td class="px-4 py-3"><div class="flex items-center gap-1">${editBtn}</div></td>` : ''}
@@ -371,8 +425,9 @@ function _ojtFormHtml(department, r = {}) {
             </div>
         </div>
 
-        <div id="ojt-next-preview" class="${r.OJTDate ? '' : 'hidden'} text-xs text-emerald-600 bg-emerald-50 rounded-xl px-3 py-2 border border-emerald-100">
-            📅 วันที่ทวนสอบถัดไป: <strong id="ojt-next-date-text">${r.NextReviewDate ? new Date(r.NextReviewDate).toLocaleDateString('th-TH', {day:'2-digit',month:'long',year:'numeric'}) : ''}</strong>
+        <div id="ojt-next-preview" class="${r.OJTDate ? '' : 'hidden'} flex items-center gap-2 text-xs text-emerald-700 bg-emerald-50 rounded-xl px-3 py-2 border border-emerald-100">
+            <svg class="w-3.5 h-3.5 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"/></svg>
+            วันที่ทวนสอบถัดไป: <strong id="ojt-next-date-text">${r.NextReviewDate ? new Date(r.NextReviewDate).toLocaleDateString('th-TH', {day:'2-digit',month:'long',year:'numeric'}) : ''}</strong>
         </div>
 
         <div class="grid grid-cols-2 gap-4">

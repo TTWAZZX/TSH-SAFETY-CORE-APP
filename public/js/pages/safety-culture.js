@@ -26,23 +26,32 @@ const TOPIC_LABELS = [
     'แยกขยะถูกต้อง',
 ];
 
-const TOPIC_ICONS = ['🚶','📵','🦓','☝️','🤲','⛑️','♻️'];
+// SVG placeholders for principle cards (w-14 h-14)
+const TOPIC_SVG = [
+    `<svg class="w-14 h-14 text-emerald-300" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M3 8.25V18a2.25 2.25 0 002.25 2.25h13.5A2.25 2.25 0 0021 18V8.25m-18 0V6a2.25 2.25 0 012.25-2.25h13.5A2.25 2.25 0 0121 6v2.25m-18 0h18M5.25 6h.008v.008H5.25V6zm.375 0a.375.375 0 11-.75 0 .375.375 0 01.75 0zm4.125 0h.008v.008H9.75V6zm.375 0a.375.375 0 11-.75 0 .375.375 0 01.75 0zm4.125 0h.008v.008H14.25V6zm.375 0a.375.375 0 11-.75 0 .375.375 0 01.75 0z"/></svg>`,
+    `<svg class="w-14 h-14 text-emerald-300" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M10.5 1.5H8.25A2.25 2.25 0 006 3.75v16.5a2.25 2.25 0 002.25 2.25h7.5A2.25 2.25 0 0018 20.25V3.75a2.25 2.25 0 00-2.25-2.25H13.5m-3 0V3h3V1.5m-3 0h3m-3 18h3M3 3l18 18"/></svg>`,
+    `<svg class="w-14 h-14 text-emerald-300" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M9 6.75V15m6-6v8.25m.503 3.498l4.875-2.437c.381-.19.622-.58.622-1.006V4.82c0-.836-.88-1.38-1.628-1.006l-3.869 1.934c-.317.159-.69.159-1.006 0L9.503 3.252a1.125 1.125 0 00-1.006 0L3.622 5.689C3.24 5.88 3 6.27 3 6.695V19.18c0 .836.88 1.38 1.628 1.006l3.869-1.934c.317-.159.69-.159 1.006 0l4.994 2.497c.317.158.69.158 1.006 0z"/></svg>`,
+    `<svg class="w-14 h-14 text-emerald-300" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M15.042 21.672L13.684 16.6m0 0l-2.51 2.225.569-9.47 5.227 7.917-3.286-.672zm-7.518-.267A8.25 8.25 0 1120.25 10.5M8.288 14.212A5.25 5.25 0 1117.25 10.5"/></svg>`,
+    `<svg class="w-14 h-14 text-emerald-300" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M10.05 4.575a1.575 1.575 0 10-3.15 0v3m3.15-3v-1.5a1.575 1.575 0 013.15 0v1.5m-3.15 0l.07 5.695a1.575 1.575 0 01-1.548 1.625 8.269 8.269 0 01-3.371-.999 21.571 21.571 0 01-1.364-.988 1.575 1.575 0 112.004-2.43c.09.063.183.133.274.195v-2.502zm0 0H9m7.5 3a3 3 0 00-3-3h-1.5a3 3 0 00-3 3v3.75a3 3 0 003 3h1.5a3 3 0 003-3V7.575z"/></svg>`,
+    `<svg class="w-14 h-14 text-emerald-300" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M9 12.75L11.25 15 15 9.75m-3-7.036A11.959 11.959 0 013.598 6 11.99 11.99 0 003 9.749c0 5.592 3.824 10.29 9 11.623 5.176-1.332 9-6.03 9-11.622 0-1.31-.21-2.571-.598-3.751h-.152c-3.196 0-6.1-1.248-8.25-3.285z"/></svg>`,
+    `<svg class="w-14 h-14 text-emerald-300" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M16.023 9.348h4.992v-.001M2.985 19.644v-4.992m0 0h4.992m-4.993 0l3.181 3.183a8.25 8.25 0 0013.803-3.7M4.031 9.865a8.25 8.25 0 0113.803-3.7l3.181 3.182m0-4.991v4.99"/></svg>`,
+];
 
 const PPE_ITEMS = [
-    { key: 'Helmet',     label: 'Safety Helmet',  icon: '⛑️' },
-    { key: 'Glasses',    label: 'Safety Glasses', icon: '🥽' },
-    { key: 'Gloves',     label: 'Gloves',         icon: '🧤' },
-    { key: 'Shoes',      label: 'Safety Shoes',   icon: '👞' },
-    { key: 'FaceShield', label: 'Face Shield',     icon: '🛡️' },
-    { key: 'EarPlug',    label: 'Ear Plug',        icon: '🔇' },
+    { key: 'Helmet',     label: 'Safety Helmet',  icon: `<svg class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12.75L11.25 15 15 9.75m-3-7.036A11.959 11.959 0 013.598 6 11.99 11.99 0 003 9.749c0 5.592 3.824 10.29 9 11.623 5.176-1.332 9-6.03 9-11.622 0-1.31-.21-2.571-.598-3.751h-.152c-3.196 0-6.1-1.248-8.25-3.285z"/></svg>` },
+    { key: 'Glasses',    label: 'Safety Glasses', icon: `<svg class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.036 12.322a1.012 1.012 0 010-.639C3.423 7.51 7.36 4.5 12 4.5c4.638 0 8.573 3.007 9.963 7.178.07.207.07.431 0 .639C20.577 16.49 16.64 19.5 12 19.5c-4.638 0-8.573-3.007-9.963-7.178z"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/></svg>` },
+    { key: 'Gloves',     label: 'Gloves',         icon: `<svg class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.05 4.575a1.575 1.575 0 10-3.15 0v3m3.15-3v-1.5a1.575 1.575 0 013.15 0v1.5m-3.15 0l.07 5.695a1.575 1.575 0 01-1.548 1.625 8.269 8.269 0 01-3.371-.999 21.571 21.571 0 01-1.364-.988 1.575 1.575 0 112.004-2.43c.09.063.183.133.274.195v-2.502zm0 0H9m7.5 3a3 3 0 00-3-3h-1.5a3 3 0 00-3 3v3.75a3 3 0 003 3h1.5a3 3 0 003-3V7.575z"/></svg>` },
+    { key: 'Shoes',      label: 'Safety Shoes',   icon: `<svg class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.362 5.214A8.252 8.252 0 0112 21 8.25 8.25 0 016.038 7.048 8.287 8.287 0 009 9.6a8.983 8.983 0 013.361-6.867 8.21 8.21 0 003 2.48z"/></svg>` },
+    { key: 'FaceShield', label: 'Face Shield',    icon: `<svg class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20.25 7.5l-.625 10.632a2.25 2.25 0 01-2.247 2.118H6.622a2.25 2.25 0 01-2.247-2.118L3.75 7.5M10 11.25h4M3.375 7.5h17.25c.621 0 1.125-.504 1.125-1.125v-1.5c0-.621-.504-1.125-1.125-1.125H3.375c-.621 0-1.125.504-1.125 1.125v1.5c0 .621.504 1.125 1.125 1.125z"/></svg>` },
+    { key: 'EarPlug',    label: 'Ear Plug',       icon: `<svg class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19.114 5.636a9 9 0 010 12.728M16.463 8.288a5.25 5.25 0 010 7.424M6.75 8.25l4.72-4.72a.75.75 0 011.28.53v15.88a.75.75 0 01-1.28.53l-4.72-4.72H4.51c-.88 0-1.704-.507-1.938-1.354A9.01 9.01 0 012.25 12c0-.83.112-1.633.322-2.396C2.806 8.756 3.63 8.25 4.51 8.25H6.75z"/></svg>` },
 ];
 
 function getMaturity(avg) {
     const v = parseFloat(avg);
-    if (v <= 2.0) return { label: 'Reactive',    color: 'text-red-600',     bg: 'bg-red-100',      border: 'border-red-300',     icon: '⚠️' };
-    if (v <= 3.0) return { label: 'Basic',        color: 'text-amber-600',   bg: 'bg-amber-100',    border: 'border-amber-300',   icon: '📋' };
-    if (v <= 4.0) return { label: 'Proactive',    color: 'text-blue-600',    bg: 'bg-blue-100',     border: 'border-blue-300',    icon: '🔵' };
-    return               { label: 'Generative',   color: 'text-emerald-600', bg: 'bg-emerald-100',  border: 'border-emerald-300', icon: '🌿' };
+    if (v <= 2.0) return { label: 'Reactive',    color: 'text-red-600',     bg: 'bg-red-100',      border: 'border-red-300',     dot: 'bg-red-400' };
+    if (v <= 3.0) return { label: 'Basic',        color: 'text-amber-600',   bg: 'bg-amber-100',    border: 'border-amber-300',   dot: 'bg-amber-400' };
+    if (v <= 4.0) return { label: 'Proactive',    color: 'text-blue-600',    bg: 'bg-blue-100',     border: 'border-blue-300',    dot: 'bg-blue-400' };
+    return               { label: 'Generative',   color: 'text-emerald-600', bg: 'bg-emerald-100',  border: 'border-emerald-300', dot: 'bg-emerald-400 animate-pulse' };
 }
 
 function esc(s) {
@@ -83,11 +92,19 @@ export async function loadSafetyCulturePage() {
 function buildShellHtml() {
     const years = [...Array(5)].map((_, i) => new Date().getFullYear() - i);
     return `
-    <div class="space-y-5 animate-fade-in">
+    <div class="max-w-6xl mx-auto space-y-6 animate-fade-in pb-10">
         <div class="flex flex-col md:flex-row md:items-center justify-between gap-3">
             <div>
-                <h2 class="text-xl font-bold text-slate-800">Safety &amp; Environment Culture</h2>
-                <p class="text-sm text-slate-500 mt-0.5">วัฒนธรรมความปลอดภัยและสิ่งแวดล้อม</p>
+                <h1 class="text-2xl font-bold text-slate-800 flex items-center gap-2.5">
+                    <span class="w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0"
+                          style="background:linear-gradient(135deg,#059669,#0d9488);box-shadow:0 2px 10px rgba(5,150,105,0.3)">
+                        <svg class="w-5 h-5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12.75L11.25 15 15 9.75m-3-7.036A11.959 11.959 0 013.598 6 11.99 11.99 0 003 9.749c0 5.592 3.824 10.29 9 11.623 5.176-1.332 9-6.03 9-11.622 0-1.31-.21-2.571-.598-3.751h-.152c-3.196 0-6.1-1.248-8.25-3.285z"/>
+                        </svg>
+                    </span>
+                    Safety &amp; Environment Culture
+                </h1>
+                <p class="text-sm text-slate-500 mt-1 ml-11">วัฒนธรรมความปลอดภัยและสิ่งแวดล้อม</p>
             </div>
             <div class="flex items-center gap-2">
                 <select id="sc-year-filter" onchange="window._scSetYear(this.value)" class="form-select text-sm">
@@ -99,16 +116,16 @@ function buildShellHtml() {
                 </button>
             </div>
         </div>
-        <div id="sc-tabs" class="flex gap-2 flex-wrap bg-slate-50 p-1.5 rounded-xl border border-slate-100">
+        <div id="sc-tabs" class="flex gap-1 flex-wrap bg-slate-100 p-1.5 rounded-xl">
             ${[
-                { id:'principles', label:'วัฒนธรรมความปลอดภัย', icon:'🛡️' },
-                { id:'dashboard',  label:'Dashboard',            icon:'📊' },
-                { id:'assessment', label:'ผลการประเมิน',          icon:'📋' },
-                { id:'ppe',        label:'PPE Control',           icon:'⛑️' },
+                { id:'principles', label:'วัฒนธรรมความปลอดภัย' },
+                { id:'dashboard',  label:'Dashboard'            },
+                { id:'assessment', label:'ผลการประเมิน'          },
+                { id:'ppe',        label:'PPE Control'           },
             ].map(t => `
                 <button id="sct-${t.id}" onclick="window._scSetTab('${t.id}')"
-                    class="sc-tab px-4 py-2.5 text-sm font-medium rounded-lg transition-colors whitespace-nowrap ${_activeTab===t.id?'bg-emerald-600 text-white shadow-sm':'text-slate-600 hover:bg-slate-100'}">
-                    ${t.icon} ${t.label}
+                    class="sc-tab px-4 py-2.5 text-sm font-semibold rounded-lg transition-all whitespace-nowrap ${_activeTab===t.id?'bg-white text-emerald-700 shadow-sm':'text-slate-500 hover:text-slate-700'}">
+                    ${t.label}
                 </button>`).join('')}
         </div>
         <div id="sc-content"></div>
@@ -187,14 +204,14 @@ function renderCurrentTab() {
 // ── Tab: Principles ───────────────────────────────────────────────────
 function buildPrinciplesHtml() {
     const cards = _principles.map(p => {
-        const idx = p.SortOrder - 1;
-        const icon = TOPIC_ICONS[idx] || '🛡️';
+        const idx   = p.SortOrder - 1;
+        const icon  = TOPIC_SVG[idx] || TOPIC_SVG[5];
         const isPPE = p.SortOrder === 6;
         return `
         <div class="card overflow-hidden hover:shadow-md transition-shadow flex flex-col">
             ${p.ImageUrl
                 ? `<img src="${esc(p.ImageUrl)}" alt="${esc(p.Title)}" class="w-full h-44 object-cover">`
-                : `<div class="w-full h-44 flex items-center justify-center text-5xl flex-shrink-0" style="background:linear-gradient(135deg,#f0fdf4,#ecfdf5)">${icon}</div>`
+                : `<div class="w-full h-44 flex items-center justify-center flex-shrink-0" style="background:linear-gradient(135deg,#f0fdf4,#ecfdf5)">${icon}</div>`
             }
             <div class="p-4 flex flex-col flex-1">
                 <div class="flex items-start gap-2 mb-2">
@@ -205,7 +222,7 @@ function buildPrinciplesHtml() {
                 <p class="text-xs text-slate-500 leading-relaxed flex-1">${esc(p.Description)}</p>
                 <div class="mt-3 flex flex-col gap-1.5">
                     ${p.AttachmentUrl ? `<a href="${esc(p.AttachmentUrl)}" target="_blank" rel="noopener" class="inline-flex items-center gap-1 text-xs text-emerald-600 hover:underline font-medium"><svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/></svg>${esc(p.AttachmentName||'ดาวน์โหลดเอกสาร')}</a>` : ''}
-                    ${isPPE ? `<button onclick="window._scSetTab('ppe')" class="text-left text-xs text-blue-600 hover:underline font-medium">⛑️ ดู PPE Inspection Checklist →</button>` : ''}
+                    ${isPPE ? `<button onclick="window._scSetTab('ppe')" class="text-left inline-flex items-center gap-1 text-xs text-blue-600 hover:underline font-medium"><svg class="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12.75L11.25 15 15 9.75m-3-7.036A11.959 11.959 0 013.598 6 11.99 11.99 0 003 9.749c0 5.592 3.824 10.29 9 11.623 5.176-1.332 9-6.03 9-11.622 0-1.31-.21-2.571-.598-3.751h-.152c-3.196 0-6.1-1.248-8.25-3.285z"/></svg>ดู PPE Inspection Checklist →</button>` : ''}
                 </div>
             </div>
         </div>`;
@@ -235,7 +252,7 @@ function buildAssessmentHtml() {
             <td class="px-3 py-3 text-center text-xs text-slate-400 italic">PPE*</td>
             ${scoreCell(a.T7_Score)}
             <td class="px-4 py-3 text-center">${avg ? `<span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-bold ${mat.bg} ${mat.color}">${avg}</span>` : '-'}</td>
-            <td class="px-4 py-3 text-center text-xs">${mat ? `<span class="font-semibold ${mat.color}">${mat.icon} ${mat.label}</span>` : '-'}</td>
+            <td class="px-4 py-3 text-center text-xs">${mat ? `<span class="inline-flex items-center gap-1.5 font-semibold ${mat.color}"><span class="w-1.5 h-1.5 rounded-full inline-block ${mat.dot}"></span>${mat.label}</span>` : '-'}</td>
             ${_isAdmin ? `<td class="px-4 py-3 whitespace-nowrap">
                 <button onclick="window._scEditAssessment('${a.AssessmentID}')" class="p-1.5 rounded text-slate-400 hover:text-emerald-600 hover:bg-slate-100 transition-colors" title="แก้ไข"><svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"/></svg></button>
                 <button onclick="window._scDeleteAssessment('${a.AssessmentID}')" class="p-1.5 rounded text-slate-400 hover:text-red-500 hover:bg-red-50 transition-colors" title="ลบ"><svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg></button>
@@ -307,12 +324,13 @@ function buildPPEHtml() {
     const summaryCards = PPE_ITEMS.map(item => {
         const { ok, total, pct } = itemStats[item.key];
         const p = pct !== null ? parseFloat(pct) : null;
-        const cls = p===null ? 'border-slate-200 bg-slate-50 text-slate-400'
-                  : p>=90   ? 'border-emerald-200 bg-emerald-50 text-emerald-700'
-                  : p>=70   ? 'border-amber-200 bg-amber-50 text-amber-700'
-                  :           'border-red-200 bg-red-50 text-red-700';
+        const cls = p===null ? 'border-slate-100 bg-slate-50 text-slate-400'
+                  : p>=90   ? 'border-emerald-100 bg-emerald-50 text-emerald-700'
+                  : p>=70   ? 'border-amber-100 bg-amber-50 text-amber-700'
+                  :           'border-red-100 bg-red-50 text-red-700';
+        const iconCls = p===null?'text-slate-400':p>=90?'text-emerald-500':p>=70?'text-amber-500':'text-red-500';
         return `<div class="border rounded-xl p-4 text-center ${cls}">
-            <div class="text-2xl mb-1">${item.icon}</div>
+            <div class="flex justify-center mb-2 ${iconCls}">${item.icon}</div>
             <div class="text-xs font-medium opacity-75">${item.label}</div>
             <div class="text-2xl font-bold mt-1">${p!==null?p+'%':'–'}</div>
             <div class="text-xs mt-0.5 opacity-70">${ok}/${total} รายการ</div>
@@ -355,7 +373,9 @@ function buildPPEHtml() {
                     <p class="text-sm text-slate-500 font-medium">Overall PPE Compliance — ปี ${_filterYear}</p>
                     <p class="text-4xl font-bold mt-1 ${parseFloat(overallPct)>=90?'text-emerald-600':parseFloat(overallPct)>=70?'text-amber-600':'text-red-600'}">${overallPct}%</p>
                 </div>
-                <div class="text-5xl">${parseFloat(overallPct)>=90?'🏆':parseFloat(overallPct)>=70?'⚠️':'❌'}</div>
+                <div class="w-12 h-12 rounded-xl flex items-center justify-center flex-shrink-0 ${parseFloat(overallPct)>=90?'bg-emerald-100':parseFloat(overallPct)>=70?'bg-amber-100':'bg-red-100'}">
+                    <svg class="w-6 h-6 ${parseFloat(overallPct)>=90?'text-emerald-600':parseFloat(overallPct)>=70?'text-amber-500':'text-red-500'}" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12.75L11.25 15 15 9.75m-3-7.036A11.959 11.959 0 013.598 6 11.99 11.99 0 003 9.749c0 5.592 3.824 10.29 9 11.623 5.176-1.332 9-6.03 9-11.622 0-1.31-.21-2.571-.598-3.751h-.152c-3.196 0-6.1-1.248-8.25-3.285z"/></svg>
+                </div>
             </div>
             <div class="bg-slate-100 rounded-full h-3"><div class="h-3 rounded-full ${parseFloat(overallPct)>=90?'bg-emerald-500':parseFloat(overallPct)>=70?'bg-amber-500':'bg-red-500'}" style="width:${Math.min(overallPct,100)}%"></div></div>
         </div>` : `<div class="card p-4 text-center text-slate-400 text-sm">ยังไม่มีข้อมูล PPE Inspection สำหรับปี ${_filterYear}</div>`}
@@ -381,7 +401,7 @@ function buildPPEHtml() {
                             <th class="px-4 py-3 text-left text-xs font-semibold text-slate-500 uppercase whitespace-nowrap">วันที่ตรวจ</th>
                             <th class="px-4 py-3 text-left text-xs font-semibold text-slate-500 uppercase">พื้นที่</th>
                             <th class="px-4 py-3 text-left text-xs font-semibold text-slate-500 uppercase">ผู้ตรวจ</th>
-                            ${PPE_ITEMS.map(i=>`<th class="px-2 py-3 text-center text-lg" title="${i.label}">${i.icon}</th>`).join('')}
+                            ${PPE_ITEMS.map(i=>`<th class="px-2 py-3 text-center text-slate-500" title="${i.label}"><div class="flex justify-center">${i.icon}</div></th>`).join('')}
                             <th class="px-4 py-3 text-center text-xs font-semibold text-slate-500 uppercase whitespace-nowrap">Compliance %</th>
                             <th class="px-4 py-3"></th>
                         </tr>
@@ -412,18 +432,20 @@ function buildDashboardHtml() {
     const ppeScore = ppePct !== null ? ((ppePct/100)*4+1).toFixed(2) : null;
 
     const scoreCards = [
-        { label:'เดินบน Walk Way',    val:avg?.avg_t1, icon:'🚶' },
-        { label:'ไม่ใช้โทรศัพท์',    val:avg?.avg_t2, icon:'📵' },
-        { label:'ข้ามถนนทางม้าลาย',  val:avg?.avg_t3, icon:'🦓' },
-        { label:'หยุดยืนชี้นิ้ว',     val:avg?.avg_t4, icon:'☝️' },
-        { label:'ไม่ล้วงกระเป๋า',    val:avg?.avg_t5, icon:'🤲' },
-        { label:'PPE Control',        val:ppeScore,    icon:'⛑️', note:'(จาก PPE%)' },
-        { label:'แยกขยะถูกต้อง',     val:avg?.avg_t7, icon:'♻️' },
+        { label:'เดินบน Walk Way',    val:avg?.avg_t1, code:'T1' },
+        { label:'ไม่ใช้โทรศัพท์',    val:avg?.avg_t2, code:'T2' },
+        { label:'ข้ามถนนทางม้าลาย',  val:avg?.avg_t3, code:'T3' },
+        { label:'หยุดยืนชี้นิ้ว',     val:avg?.avg_t4, code:'T4' },
+        { label:'ไม่ล้วงกระเป๋า',    val:avg?.avg_t5, code:'T5' },
+        { label:'PPE Control',        val:ppeScore,    code:'T6', note:'(จาก PPE%)' },
+        { label:'แยกขยะถูกต้อง',     val:avg?.avg_t7, code:'T7' },
     ].map(c => {
         const v = c.val!=null ? parseFloat(c.val) : null;
         const cls = scoreColor(v);
         return `<div class="card p-4 text-center">
-            <div class="text-xl mb-1">${c.icon}</div>
+            <div class="flex justify-center mb-2">
+                <span class="w-8 h-8 rounded-xl flex items-center justify-center text-xs font-bold text-white" style="background:linear-gradient(135deg,#059669,#0d9488)">${c.code}</span>
+            </div>
             <div class="text-xs text-slate-500 leading-tight mb-2">${c.label}${c.note?`<br><span class="opacity-60">${c.note}</span>`:''}</div>
             <div class="text-2xl font-bold ${cls}">${v!=null?v.toFixed(1):'–'}</div>
             <div class="text-xs text-slate-400">/ 5.0</div>
@@ -457,7 +479,7 @@ function buildDashboardHtml() {
                     <p class="text-sm text-slate-500 font-medium">Culture Maturity Level — ปี ${_filterYear}</p>
                     <div class="flex items-center gap-3 mt-2">
                         <span class="text-4xl font-bold ${mat.color}">${overallAvg}</span>
-                        <span class="inline-flex items-center gap-1.5 px-4 py-1.5 rounded-full font-bold text-sm ${mat.bg} ${mat.color}">${mat.icon} ${mat.label}</span>
+                        <span class="inline-flex items-center gap-1.5 px-4 py-1.5 rounded-full font-bold text-sm ${mat.bg} ${mat.color}"><span class="w-2 h-2 rounded-full inline-block ${mat.dot}"></span>${mat.label}</span>
                     </div>
                 </div>
                 <div class="hidden md:block text-right text-sm text-slate-500">
@@ -466,8 +488,10 @@ function buildDashboardHtml() {
                 </div>
             </div>
         </div>` : `
-        <div class="card p-6 text-center text-slate-400">
-            <p class="text-2xl mb-2">📊</p>
+        <div class="card p-10 text-center text-slate-400">
+            <div class="w-16 h-16 rounded-2xl bg-slate-100 flex items-center justify-center mx-auto mb-4">
+                <svg class="w-8 h-8 opacity-40" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"/></svg>
+            </div>
             <p>ยังไม่มีข้อมูลการประเมิน — กรุณาบันทึกผลในแท็บ "ผลการประเมิน"</p>
         </div>`}
 
@@ -570,7 +594,7 @@ function initCharts() {
 function openPrincipleForm(id) {
     const p = _principles.find(x => x.PrincipleID === id);
     if (!p) return;
-    UI.openModal(`✏️ แก้ไขหัวข้อที่ ${p.SortOrder}`, `
+    UI.openModal(`แก้ไขหัวข้อที่ ${p.SortOrder}`, `
     <form id="sc-pf" class="space-y-4">
         <input type="hidden" name="PrincipleID" value="${esc(p.PrincipleID)}">
         <div><label class="block text-sm font-semibold text-slate-700 mb-1.5">ชื่อหัวข้อ</label>
@@ -612,7 +636,7 @@ function openAssessmentForm(id) {
     <div><label class="block text-sm font-semibold text-slate-700 mb-1">${label}</label>
         <input name="${name}" type="number" min="1" max="5" step="0.1" value="${val!=null&&val!=undefined?val:''}" placeholder="1–5" class="form-input w-full"></div>`;
 
-    UI.openModal(a?'✏️ แก้ไขผลการประเมิน':'📋 บันทึกผลการประเมิน', `
+    UI.openModal(a?'แก้ไขผลการประเมิน':'บันทึกผลการประเมิน', `
     <form id="sc-af" class="space-y-4">
         ${a?`<input type="hidden" name="AssessmentID" value="${a.AssessmentID}">` : ''}
         <div class="grid grid-cols-2 gap-4">
@@ -674,7 +698,7 @@ function openPPEForm() {
     const checklist = PPE_ITEMS.map(item => `
     <div class="flex flex-col sm:flex-row sm:items-center justify-between py-2.5 border-b border-slate-100 gap-2">
         <div class="flex items-center gap-2 min-w-0">
-            <span class="text-xl flex-shrink-0">${item.icon}</span>
+            <span class="flex-shrink-0 text-slate-500">${item.icon}</span>
             <span class="text-sm font-medium text-slate-700">${item.label}</span>
         </div>
         <div class="flex gap-3 flex-shrink-0">
@@ -693,7 +717,7 @@ function openPPEForm() {
         </div>
     </div>`).join('');
 
-    UI.openModal('⛑️ บันทึกผล PPE Inspection', `
+    UI.openModal('บันทึกผล PPE Inspection', `
     <form id="sc-ppef" class="space-y-4">
         <div class="grid grid-cols-2 gap-4">
             <div><label class="block text-sm font-semibold text-slate-700 mb-1.5">วันที่ตรวจ</label>
@@ -738,7 +762,7 @@ function viewPPERecord(id) {
     const rows = PPE_ITEMS.map(item => {
         const v = r[item.key];
         return `<div class="flex items-center justify-between py-2 border-b border-slate-100 last:border-0">
-            <div class="flex items-center gap-2"><span>${item.icon}</span><span class="text-sm text-slate-700">${item.label}</span></div>
+            <div class="flex items-center gap-2"><span class="text-slate-500">${item.icon}</span><span class="text-sm text-slate-700">${item.label}</span></div>
             <span class="text-sm font-semibold ${v==='Compliant'?'text-emerald-600':v==='Non-Compliant'?'text-red-500':'text-slate-400'}">
                 ${v==='Compliant'?'✓ Compliant':v==='Non-Compliant'?'✗ Non-Compliant':'— N/A'}
             </span>
@@ -746,7 +770,7 @@ function viewPPERecord(id) {
     }).join('');
     const pct = parseFloat(r.CompliancePct||0);
     const pctCls = pct>=90?'text-emerald-600':pct>=70?'text-amber-600':'text-red-600';
-    UI.openModal('⛑️ ผล PPE Inspection', `
+    UI.openModal('ผล PPE Inspection', `
     <div class="space-y-4">
         <div class="grid grid-cols-2 gap-3 text-sm">
             <div><span class="text-slate-500">วันที่ตรวจ: </span><span class="font-medium">${fmtDate(r.InspectionDate)}</span></div>
