@@ -33,6 +33,18 @@ router.post('/departments', isAdmin, async (req, res) => {
     }
 });
 
+router.put('/departments/:id', isAdmin, async (req, res) => {
+    const { Name } = req.body;
+    if (!Name) return res.status(400).json({ success: false, message: 'กรุณาระบุชื่อแผนก' });
+    try {
+        await pool.query('UPDATE Master_Departments SET Name = ? WHERE id = ?', [Name, req.params.id]);
+        res.json({ success: true, message: 'แก้ไขชื่อแผนกสำเร็จ' });
+    } catch (err) {
+        if (err.code === 'ER_DUP_ENTRY') return res.status(400).json({ success: false, message: 'ชื่อแผนกนี้มีอยู่แล้ว' });
+        res.status(500).json({ success: false, message: 'ไม่สามารถแก้ไขข้อมูลได้' });
+    }
+});
+
 router.delete('/departments/:id', isAdmin, async (req, res) => {
     try {
         await pool.query('DELETE FROM Master_Departments WHERE id = ?', [req.params.id]);
@@ -66,6 +78,18 @@ router.post('/teams', isAdmin, async (req, res) => {
             return res.status(400).json({ success: false, message: 'ชื่อทีมนี้มีอยู่แล้ว' });
         }
         res.status(500).json({ success: false, message: 'ไม่สามารถเพิ่มทีมได้' });
+    }
+});
+
+router.put('/teams/:id', isAdmin, async (req, res) => {
+    const { Name } = req.body;
+    if (!Name) return res.status(400).json({ success: false, message: 'กรุณาระบุชื่อทีม' });
+    try {
+        await pool.query('UPDATE Master_Teams SET Name = ? WHERE id = ?', [Name, req.params.id]);
+        res.json({ success: true, message: 'แก้ไขชื่อทีมสำเร็จ' });
+    } catch (err) {
+        if (err.code === 'ER_DUP_ENTRY') return res.status(400).json({ success: false, message: 'ชื่อทีมนี้มีอยู่แล้ว' });
+        res.status(500).json({ success: false, message: 'ไม่สามารถแก้ไขข้อมูลได้' });
     }
 });
 
@@ -105,10 +129,22 @@ router.post('/roles', isAdmin, async (req, res) => {
     }
 });
 
+router.put('/roles/:id', isAdmin, async (req, res) => {
+    const { Name } = req.body;
+    if (!Name) return res.status(400).json({ success: false, message: 'กรุณาระบุชื่อ Role' });
+    try {
+        await pool.query('UPDATE Master_Roles SET Name = ? WHERE id = ?', [Name, req.params.id]);
+        res.json({ success: true, message: 'แก้ไข Role สำเร็จ' });
+    } catch (err) {
+        if (err.code === 'ER_DUP_ENTRY') return res.status(400).json({ success: false, message: 'Role นี้มีอยู่แล้ว' });
+        res.status(500).json({ success: false, message: 'ไม่สามารถแก้ไขข้อมูลได้' });
+    }
+});
+
 router.delete('/roles/:id', isAdmin, async (req, res) => {
     try {
         await pool.query('DELETE FROM Master_Roles WHERE id = ?', [req.params.id]);
-        res.json({ success: true, message: 'Deleted' });
+        res.json({ success: true, message: 'ลบข้อมูลสำเร็จ' });
     } catch (err) {
         res.status(500).json({ success: false, message: 'ไม่สามารถลบข้อมูลได้' });
     }
@@ -141,10 +177,22 @@ router.post('/positions', isAdmin, async (req, res) => {
     }
 });
 
+router.put('/positions/:id', isAdmin, async (req, res) => {
+    const { Name } = req.body;
+    if (!Name) return res.status(400).json({ success: false, message: 'กรุณาระบุชื่อตำแหน่ง' });
+    try {
+        await pool.query('UPDATE Master_Positions SET Name = ? WHERE id = ?', [Name, req.params.id]);
+        res.json({ success: true, message: 'แก้ไขตำแหน่งสำเร็จ' });
+    } catch (err) {
+        if (err.code === 'ER_DUP_ENTRY') return res.status(400).json({ success: false, message: 'ชื่อตำแหน่งนี้มีอยู่แล้ว' });
+        res.status(500).json({ success: false, message: 'ไม่สามารถแก้ไขข้อมูลได้' });
+    }
+});
+
 router.delete('/positions/:id', isAdmin, async (req, res) => {
     try {
         await pool.query('DELETE FROM Master_Positions WHERE id = ?', [req.params.id]);
-        res.json({ success: true, message: 'Operation successful' });
+        res.json({ success: true, message: 'ลบข้อมูลสำเร็จ' });
     } catch (err) {
         res.status(500).json({ success: false, message: 'ไม่สามารถลบข้อมูลได้' });
     }

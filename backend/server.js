@@ -26,6 +26,10 @@ const trainingRoutes      = require('./routes/training');
 const accidentRoutes      = require('./routes/accident');
 const yokotenRoutes       = require('./routes/yokoten');
 const safetyCultureRoutes = require('./routes/safety-culture');
+const contractorRoutes    = require('./routes/contractor');
+const hiyariRoutes        = require('./routes/hiyari');
+const kyRoutes            = require('./routes/ky');
+const fourmRoutes         = require('./routes/fourm');
 
 // =================================================================
 // SECTION 1: SETUP
@@ -475,6 +479,10 @@ app.use('/api/training',      authenticateToken, trainingRoutes);
 app.use('/api/accident',      authenticateToken, accidentRoutes);
 app.use('/api/yokoten',        authenticateToken, yokotenRoutes);
 app.use('/api/safety-culture', authenticateToken, safetyCultureRoutes);
+app.use('/api/contractor',    authenticateToken, contractorRoutes);
+app.use('/api/hiyari',        authenticateToken, hiyariRoutes);
+app.use('/api/ky',            authenticateToken, kyRoutes);
+app.use('/api/fourm',         authenticateToken, fourmRoutes);
 
 // =================================================================
 // SECTION 4B: GENERIC CRUD
