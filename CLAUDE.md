@@ -288,6 +288,70 @@ closeModal();
 // <button onclick="window.closeModal&&window.closeModal()">ยกเลิก</button>
 ```
 
+## Frontend UI Design System
+
+ไฟล์อ้างอิง (ห้ามแก้ไข): `committee.js`, `policy.js`, `patrol.js`, `kpi.js`, `cccf.js`
+
+### Header Pattern (ทุก page ต้องใช้ pattern นี้)
+```html
+<div>
+  <h1 class="text-2xl font-bold text-slate-800 flex items-center gap-2.5">
+    <span class="w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0"
+          style="background:linear-gradient(135deg,#COLOR1,#COLOR2);box-shadow:0 2px 10px rgba(R,G,B,0.3)">
+      <svg class="w-5 h-5 text-white" .../>
+    </span>
+    PAGE TITLE
+  </h1>
+  <p class="text-sm text-slate-500 mt-1 ml-11">SUBTITLE</p>
+</div>
+```
+
+### Accent Colors per Module
+| Module | Gradient | Shadow rgba |
+|--------|----------|-------------|
+| machine-safety | `#059669 → #0d9488` | `5,150,105` |
+| ojt/scw | `#dc2626 → #ea580c` | `220,38,38` |
+| safety-culture | `#059669 → #0d9488` | `5,150,105` |
+| hiyari | `#f97316 → #ef4444` | `249,115,22` |
+| ky | `#6366f1 → #8b5cf6` | `99,102,241` |
+| fourm (4M) | `#6366f1 → #0284c7` | `99,102,241` |
+| yokoten | `#0ea5e9 → #6366f1` | `14,165,233` |
+| accident | `#dc2626 → #9f1239` | `220,38,38` |
+| training | `#0284c7 → #0891b2` | `2,132,199` |
+| contractor | `#d97706 → #b45309` | `217,119,6` |
+
+### Stats Card Pattern
+```html
+<div class="bg-white rounded-xl p-4 border border-slate-100 shadow-sm flex items-center gap-3">
+  <div class="w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0 bg-{color}-50">
+    <svg class="w-5 h-5 text-{color}-500" .../>
+  </div>
+  <div>
+    <p class="text-2xl font-bold text-slate-800">VALUE</p>
+    <p class="text-xs text-slate-500">LABEL</p>
+  </div>
+</div>
+```
+
+### Status Badge / Chip Pattern
+```html
+<span class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold bg-{color}-100 text-{color}-700">
+  <span class="w-1.5 h-1.5 rounded-full bg-{color}-400 inline-block"></span>
+  LABEL
+</span>
+```
+ใช้ `animate-pulse` บน dot สำหรับ status "active/valid/ผ่าน"
+
+### Container Pattern
+- Filter bar: `<div class="card p-4">...</div>`
+- Table: `<div class="card overflow-hidden">...</div>`
+- Loading: `<div class="animate-spin rounded-full h-10 w-10 border-4 border-emerald-500 border-t-transparent"></div>`
+
+### No Emoji Policy
+**ห้ามใช้ emoji ทุกชนิดใน UI** — ใช้ inline SVG แทนทั้งหมด
+- ไฟล์ที่ restyled แล้ว: `machine-safety.js`, `ojt.js`, `safety-culture.js`
+- ไฟล์ที่ยังรอ restyle: `hiyari.js`, `ky.js`, `fourm.js`, `yokoten.js`, `accident.js`, `training.js`, `contractor.js`
+
 ## Common Pitfalls
 
 1. **อย่าเขียนไฟล์ลง disk** — ใช้ Cloudinary เสมอ
