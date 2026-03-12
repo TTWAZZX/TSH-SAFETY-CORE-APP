@@ -58,7 +58,7 @@ function _renderPage(container) {
         <div class="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
             <div class="flex items-center gap-3">
                 <div class="w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0"
-                     style="background: linear-gradient(135deg, #2563eb, #7c3aed);">
+                     style="background: linear-gradient(135deg, #059669, #059669);">
                     <svg class="w-5 h-5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"/>
                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/>
@@ -294,33 +294,33 @@ function _machineFormHtml(m = {}) {
     <form id="msd-form" class="space-y-4">
         <div class="grid grid-cols-2 gap-4">
             <div>
-                <label class="block text-sm font-medium text-slate-700 mb-1">รหัสเครื่องจักร <span class="text-red-500">*</span></label>
+                <label class="block text-sm font-semibold text-slate-700 mb-1.5">รหัสเครื่องจักร <span class="text-red-500">*</span></label>
                 <input name="MachineCode" required value="${m.MachineCode || ''}" placeholder="เช่น MC-001"
-                    class="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg outline-none focus:border-emerald-400 focus:ring-2 focus:ring-emerald-100">
+                    class="form-input w-full">
             </div>
             <div>
-                <label class="block text-sm font-medium text-slate-700 mb-1">ชื่อเครื่องจักร <span class="text-red-500">*</span></label>
+                <label class="block text-sm font-semibold text-slate-700 mb-1.5">ชื่อเครื่องจักร <span class="text-red-500">*</span></label>
                 <input name="MachineName" required value="${m.MachineName || ''}" placeholder="ชื่อเครื่องจักร"
-                    class="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg outline-none focus:border-emerald-400 focus:ring-2 focus:ring-emerald-100">
+                    class="form-input w-full">
             </div>
         </div>
         <div class="grid grid-cols-2 gap-4">
             <div>
-                <label class="block text-sm font-medium text-slate-700 mb-1">แผนก</label>
+                <label class="block text-sm font-semibold text-slate-700 mb-1.5">แผนก</label>
                 <select name="Department"
-                    class="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg outline-none focus:border-emerald-400 focus:ring-2 focus:ring-emerald-100">
+                    class="form-input w-full">
                     <option value="">— เลือกแผนก —</option>
                     ${_deptOptions(m.Department || '')}
                 </select>
             </div>
             <div>
-                <label class="block text-sm font-medium text-slate-700 mb-1">พื้นที่ / Line</label>
+                <label class="block text-sm font-semibold text-slate-700 mb-1.5">พื้นที่ / Line</label>
                 <input name="Area" value="${m.Area || ''}" placeholder="เช่น Line A, Zone 2"
-                    class="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg outline-none focus:border-emerald-400 focus:ring-2 focus:ring-emerald-100">
+                    class="form-input w-full">
             </div>
         </div>
 
-        <div class="bg-slate-50 rounded-lg p-3 border border-slate-200">
+        <div class="bg-slate-50 rounded-xl p-3 border border-slate-100">
             <label class="flex items-center gap-3 cursor-pointer">
                 <input type="checkbox" name="HasRiskAssessment" ${m.HasRiskAssessment ? 'checked' : ''}
                     class="w-4 h-4 rounded accent-emerald-500">
@@ -329,19 +329,17 @@ function _machineFormHtml(m = {}) {
         </div>
 
         <div>
-            <label class="block text-sm font-medium text-slate-700 mb-1">หมายเหตุ</label>
+            <label class="block text-sm font-semibold text-slate-700 mb-1.5">หมายเหตุ</label>
             <textarea name="Remark" rows="2" placeholder="หมายเหตุเพิ่มเติม"
-                class="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg outline-none focus:border-emerald-400 focus:ring-2 focus:ring-emerald-100 resize-none">${m.Remark || ''}</textarea>
+                class="form-textarea w-full resize-none">${m.Remark || ''}</textarea>
         </div>
 
         <div id="msd-form-error" class="text-sm text-red-500 hidden"></div>
 
-        <div class="flex justify-end gap-3 pt-3 border-t border-slate-200">
+        <div class="flex justify-end gap-3 pt-3 border-t border-slate-100">
             <button type="button" onclick="window._UI_closeModal()"
-                class="px-5 py-2 text-sm font-medium text-slate-600 bg-slate-100 hover:bg-slate-200 rounded-lg transition-colors">ยกเลิก</button>
-            <button type="submit"
-                class="px-5 py-2 text-sm font-semibold text-white rounded-lg transition-all"
-                style="background:linear-gradient(135deg,#059669,#0d9488)">บันทึก</button>
+                class="btn btn-secondary px-5">ยกเลิก</button>
+            <button type="submit" class="btn btn-primary px-5">บันทึก</button>
         </div>
     </form>`;
 }
@@ -520,15 +518,13 @@ function _fileList(files, machineId, machineName, category) {
             <p class="text-sm font-semibold text-slate-700 mb-3">อัปโหลดไฟล์ ${catLabel}</p>
             <form id="upload-form-${category}" data-category="${category}" class="space-y-3">
                 <input name="FileLabel" placeholder="ชื่อ / คำอธิบาย เช่น Standard v2.1"
-                    class="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg outline-none focus:border-${color}-400">
+                    class="form-input w-full">
                 <input type="file" name="file" required
                     accept=".pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.jpg,.jpeg,.png"
                     class="w-full text-sm text-slate-500 file:mr-3 file:py-1.5 file:px-4 file:rounded-lg file:border-0 file:text-xs file:font-semibold file:bg-${color}-50 file:text-${color}-600 hover:file:bg-${color}-100">
                 <div class="upload-error-${category} text-sm text-red-500 hidden"></div>
                 <div class="flex justify-end">
-                    <button type="submit"
-                        class="px-4 py-2 text-sm font-semibold text-white rounded-lg"
-                        style="background:linear-gradient(135deg,#059669,#0d9488)">อัปโหลด</button>
+                    <button type="submit" class="btn btn-primary px-4">อัปโหลด</button>
                 </div>
             </form>
         </div>` : '';

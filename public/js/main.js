@@ -17,6 +17,9 @@ import { loadAdminPage } from './pages/admin.js';
 import { loadEmployeePage } from './pages/employee.js';
 import { loadMachineSafetyPage } from './pages/machine-safety.js';
 import { loadOjtPage } from './pages/ojt.js';
+import { loadTrainingPage } from './pages/training.js';
+import { loadAccidentPage } from './pages/accident.js';
+import { loadSafetyCulturePage } from './pages/safety-culture.js';
 
 // ======================================================
 // Global App State
@@ -184,6 +187,15 @@ async function handleRouting() {
             break;
         case 'ojt':
             await loadOjtPage();
+            break;
+        case 'training':
+            await loadTrainingPage();
+            break;
+        case 'accident':
+            await loadAccidentPage();
+            break;
+        case 'safety-culture':
+            await loadSafetyCulturePage();
             break;
         default:
             loadPlaceholderPage(targetId, hash);

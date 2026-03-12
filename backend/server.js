@@ -22,6 +22,10 @@ const cccfRoutes          = require('./routes/cccf');
 const masterRoutes        = require('./routes/master');
 const machineSafetyRoutes = require('./routes/machine-safety');
 const ojtRoutes           = require('./routes/ojt');
+const trainingRoutes      = require('./routes/training');
+const accidentRoutes      = require('./routes/accident');
+const yokotenRoutes       = require('./routes/yokoten');
+const safetyCultureRoutes = require('./routes/safety-culture');
 
 // =================================================================
 // SECTION 1: SETUP
@@ -447,61 +451,6 @@ app.delete('/api/kpidata/:id', authenticateToken, isAdmin, async (req, res) => {
 });
 
 // =================================================================
-// SECTION: YOKOTEN
-// =================================================================
-
-app.get('/api/yokoten/pagedata', authenticateToken, async (req, res) => {
-    const user = req.user;
-    try {
-        const [allTopics] = await pool.query('SELECT * FROM YokotenTopics ORDER BY DateIssued DESC');
-        const [myHistory] = await pool.query(
-            'SELECT * FROM YokotenResponses WHERE EmployeeID = ? ORDER BY ResponseDate DESC',
-            [user.id]
-        );
-        const unacknowledgedCount = allTopics.length - myHistory.length;
-        const lastAcknowledgedDate = myHistory.length > 0
-            ? new Date(myHistory[0].ResponseDate).toLocaleDateString('th-TH')
-            : 'N/A';
-        res.json({
-            success: true,
-            data: { allTopics, myHistory, userStats: { unacknowledgedCount, acknowledgedCount: myHistory.length, lastAcknowledgedDate } },
-        });
-    } catch (error) {
-        console.error('Error fetching Yokoten page data:', error);
-        res.status(500).json({ success: false, message: 'เกิดข้อผิดพลาดในการดึงข้อมูล Yokoten' });
-    }
-});
-
-app.post('/api/yokoten/acknowledge', authenticateToken, async (req, res) => {
-    const user = req.user;
-    const { yokotenId, isRelated, comment } = req.body;
-    try {
-        const [topicRows] = await pool.query('SELECT * FROM YokotenTopics WHERE YokotenID = ?', [yokotenId]);
-        if (topicRows.length === 0) {
-            return res.status(404).json({ status: 'error', message: 'ไม่พบหัวข้อ Yokoten' });
-        }
-        const topic = topicRows[0];
-        const newResponse = {
-            ResponseID: uuidv4(),
-            YokotenID: yokotenId,
-            TopicDescription: topic.TopicDescription,
-            EmployeeID: user.id,
-            EmployeeName: user.name,
-            Department: user.department,
-            ResponseDate: new Date(),
-            IsRelated: isRelated,
-            Comment: comment || '',
-            RecordedBy: 'User',
-        };
-        await pool.query('INSERT INTO YokotenResponses SET ?', newResponse);
-        res.status(201).json({ status: 'success', message: 'บันทึกการรับทราบสำเร็จ', newResponse });
-    } catch (error) {
-        console.error('Error acknowledging Yokoten topic:', error);
-        res.status(500).json({ status: 'error', message: 'เกิดข้อผิดพลาดในการบันทึกข้อมูล' });
-    }
-});
-
-// =================================================================
 // SECTION: DOCUMENT UPLOAD
 // =================================================================
 
@@ -522,6 +471,10 @@ app.use('/api/cccf',           authenticateToken, cccfRoutes);
 app.use('/api/master',         authenticateToken, masterRoutes);
 app.use('/api/machine-safety', authenticateToken, machineSafetyRoutes);
 app.use('/api/ojt',           authenticateToken, ojtRoutes);
+app.use('/api/training',      authenticateToken, trainingRoutes);
+app.use('/api/accident',      authenticateToken, accidentRoutes);
+app.use('/api/yokoten',        authenticateToken, yokotenRoutes);
+app.use('/api/safety-culture', authenticateToken, safetyCultureRoutes);
 
 // =================================================================
 // SECTION 4B: GENERIC CRUD

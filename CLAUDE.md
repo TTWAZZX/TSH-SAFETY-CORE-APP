@@ -11,7 +11,7 @@
 |-------|-----------|
 | Frontend | Vanilla JS SPA, Tailwind CSS (CDN), Chart.js, Flatpickr, FullCalendar, SheetJS, html2canvas, jsPDF |
 | Font | Kanit (Google Fonts) |
-| Backend | Node.js + Express v4 |
+| Backend | Node.js + Express v5 |
 | Database | TiDB Cloud (MySQL-compatible) via `mysql2` connection pool |
 | File Storage | Cloudinary (images + documents) |
 | Auth | JWT (6h expiry) + bcrypt passwords |
@@ -39,6 +39,8 @@ TSH-SAFETY-CORE-APP/
 │           ├── committee.js
 │           ├── employee.js
 │           ├── kpi.js
+│           ├── machine-safety.js
+│           ├── ojt.js
 │           ├── patrol.js
 │           ├── policy.js
 │           └── yokoten.js
@@ -54,7 +56,9 @@ TSH-SAFETY-CORE-APP/
         ├── patrol.js
         ├── admin.js
         ├── cccf.js
-        └── master.js
+        ├── master.js
+        ├── machine-safety.js
+        └── ojt.js
 ```
 
 ## Environment Variables
@@ -102,15 +106,21 @@ node server.js      # runs on PORT=5000
 | Prefix | Auth | Module |
 |--------|------|--------|
 | `/api/login` | none | Login |
+| `/api/login` | none | Login |
+| `/api/change-password` | User | เปลี่ยนรหัสผ่าน |
+| `/api/session/verify` | User | Refresh JWT |
 | `/api/patrol/*` | User | Patrol routes |
 | `/api/admin/*` | Admin | Admin routes |
 | `/api/cccf/*` | User | CCCF routes |
 | `/api/master/*` | User | Master data |
+| `/api/machine-safety/*` | User | Machine & Device Safety |
+| `/api/ojt/*` | User | Stop-Call-Wait (OJT/SCW) |
 | `/api/employees` | User/Admin | Employee CRUD |
 | `/api/policies` | User/Admin | Policy CRUD |
 | `/api/committees` | User/Admin | Committee CRUD |
 | `/api/kpidata/*` | User/Admin | KPI data CRUD |
 | `/api/yokoten/*` | User | Yokoten CRUD |
+| `/api/upload/document` | Admin | Cloudinary file upload |
 
 ### Generic CRUD Tables
 ตารางเหล่านี้มี auto-generated CRUD endpoints (GET/POST/PUT/DELETE):
@@ -150,6 +160,8 @@ Primary key ของ generic CRUD คือ `id` — ยกเว้น `Employ
 | **Policy** | นโยบายความปลอดภัย, รับทราบนโยบาย |
 | **Committee** | คณะกรรมการความปลอดภัย, SubCommittee (JSON array) |
 | **Employee** | จัดการพนักงาน, bulk import via Excel |
+| **Machine Safety** | ข้อมูลเครื่องจักร/อุปกรณ์ความปลอดภัย, เอกสารเชื่อมโยงกับเครื่องจักร |
+| **OJT / SCW** | Stop-Call-Wait, OJT Department Status, เอกสาร SCW |
 | **Admin** | สรุปข้อมูล, จัดการระบบ |
 | **Master** | ข้อมูล master ต่างๆ |
 
@@ -215,3 +227,6 @@ State variables ใน admin.js: `_empCache`, `_deptCache`, `_teamCache`, `_role
 6. **Frontend เป็น SPA** — ทุก page อยู่ใน `index.html`, JS แยกตาม page ใน `public/js/pages/`
 7. **localStorage key mismatch (fixed)** — `tsh_user` คือ key จริง แต่ใช้ `TSHSession.getUser()` เสมอ ไม่อ่าน localStorage โดยตรง
 8. **Form fields ที่มาจาก JWT** — ต้อง `readonly`/`disabled` + `<input type="hidden">` เพื่อส่งค่าให้ form ได้รวม
+9. **Express v5** — ใช้จริงใน production (`package.json` ระบุ `"express": "^5.1.0"`) ต่างจาก v4 ตรงที่ error handling และ async route errors
+10. **bcrypt + bcryptjs** — มีทั้งสองตัวใน dependencies (ซ้ำซ้อน) — code ใช้ `bcryptjs` เท่านั้น, `bcrypt` เป็น native binding ที่ไม่จำเป็น
+11. **`backend/uploads/`** — มีบน local เท่านั้น ไม่มีบน Vercel (Vercel read-only filesystem) — ไฟล์จริงต้องอยู่บน Cloudinary

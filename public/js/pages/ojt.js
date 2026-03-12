@@ -71,23 +71,28 @@ function _renderPage(container) {
     <div class="space-y-5">
 
         <!-- Header -->
-        <div class="flex flex-wrap items-center justify-between gap-3">
-            <div>
-                <h2 class="text-xl font-bold text-slate-800">Stop · Call · Wait</h2>
-                <p class="text-sm text-slate-500 mt-0.5">มาตรฐานความปลอดภัยและสถานะการอบรม OJT รายแผนก</p>
+        <div class="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
+            <div class="flex items-center gap-3">
+                <div class="w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0"
+                     style="background: linear-gradient(135deg, #059669, #059669);">
+                    <svg class="w-5 h-5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/>
+                    </svg>
+                </div>
+                <div>
+                    <h1 class="text-xl font-bold text-slate-800">Stop · Call · Wait</h1>
+                    <p class="text-xs text-slate-400 mt-0.5">มาตรฐานความปลอดภัยและสถานะการอบรม OJT รายแผนก</p>
+                </div>
             </div>
             ${_isAdmin ? `
-            <div class="flex gap-2">
-                <button onclick="window._ojtEditStandard()"
-                    class="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-semibold text-slate-700 bg-white border border-slate-200 hover:bg-slate-50 transition-all shadow-sm">
-                    <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"/></svg>
-                    แก้ไขมาตรฐาน SCW
-                </button>
-            </div>` : ''}
+            <button onclick="window._ojtEditStandard()" class="btn btn-secondary flex items-center gap-2 text-sm px-4 py-2">
+                <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"/></svg>
+                แก้ไขมาตรฐาน SCW
+            </button>` : ''}
         </div>
 
         <!-- SCW Standard Panel -->
-        <div class="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
+        <div class="card overflow-hidden">
             <button onclick="window._ojtToggleStandard()" id="scw-toggle-btn"
                 class="w-full flex items-center justify-between px-5 py-4 text-left hover:bg-slate-50 transition-colors">
                 <div class="flex items-center gap-3">
@@ -118,24 +123,24 @@ function _renderPage(container) {
 
         <!-- Stats Cards -->
         <div class="grid grid-cols-2 lg:grid-cols-5 gap-4">
-            <div class="bg-white rounded-xl p-4 border border-slate-200 shadow-sm">
+            <div class="card p-4">
                 <p class="text-xs text-slate-500 font-medium">แผนกทั้งหมด</p>
                 <p class="text-3xl font-bold text-slate-800 mt-1">${total}</p>
             </div>
-            <div class="bg-white rounded-xl p-4 border border-emerald-200 shadow-sm cursor-pointer hover:shadow-md transition-shadow" onclick="window._ojtSetFilter('valid')">
+            <div class="card p-4 border-emerald-200 cursor-pointer hover:shadow-md transition-shadow" onclick="window._ojtSetFilter('valid')">
                 <p class="text-xs text-emerald-600 font-medium">✅ Valid</p>
                 <p class="text-3xl font-bold text-emerald-600 mt-1">${valid}</p>
             </div>
-            <div class="bg-white rounded-xl p-4 border border-amber-200 shadow-sm cursor-pointer hover:shadow-md transition-shadow" onclick="window._ojtSetFilter('due-soon')">
+            <div class="card p-4 border-amber-200 cursor-pointer hover:shadow-md transition-shadow" onclick="window._ojtSetFilter('due-soon')">
                 <p class="text-xs text-amber-600 font-medium">⚠️ Due Soon</p>
                 <p class="text-3xl font-bold text-amber-600 mt-1">${dueSoon}</p>
                 <p class="text-xs text-slate-400">≤ 30 วัน</p>
             </div>
-            <div class="bg-white rounded-xl p-4 border border-red-200 shadow-sm cursor-pointer hover:shadow-md transition-shadow" onclick="window._ojtSetFilter('overdue')">
+            <div class="card p-4 border-red-200 cursor-pointer hover:shadow-md transition-shadow" onclick="window._ojtSetFilter('overdue')">
                 <p class="text-xs text-red-600 font-medium">🔴 Overdue</p>
                 <p class="text-3xl font-bold text-red-600 mt-1">${overdue}</p>
             </div>
-            <div class="bg-white rounded-xl p-4 border border-blue-200 shadow-sm">
+            <div class="card p-4 border-blue-200">
                 <p class="text-xs text-blue-600 font-medium">Compliance</p>
                 <p class="text-3xl font-bold text-blue-600 mt-1">${pct}%</p>
                 <div class="mt-2 w-full bg-slate-100 rounded-full h-1.5">
@@ -341,24 +346,24 @@ window._ojtClearFilter = function() {
 function _ojtFormHtml(department, r = {}) {
     return `
     <form id="ojt-form" class="space-y-4">
-        <div class="bg-slate-50 rounded-lg px-4 py-3 border border-slate-200">
-            <p class="text-xs text-slate-500 font-medium">แผนก</p>
+        <div class="bg-emerald-50 border border-emerald-100 rounded-xl px-4 py-3">
+            <p class="text-xs text-emerald-700 font-medium">แผนก</p>
             <p class="text-base font-bold text-slate-800 mt-0.5">${department}</p>
             <input type="hidden" name="Department" value="${_esc(department)}">
         </div>
 
         <div class="grid grid-cols-2 gap-4">
             <div>
-                <label class="block text-sm font-medium text-slate-700 mb-1">วันที่จัดอบรม OJT <span class="text-red-500">*</span></label>
+                <label class="block text-sm font-semibold text-slate-700 mb-1.5">วันที่จัดอบรม OJT <span class="text-red-500">*</span></label>
                 <input name="OJTDate" type="date" required value="${r.OJTDate?.split('T')[0]||''}"
                     oninput="window._ojtCalcNextDate()"
-                    class="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg outline-none focus:border-emerald-400 focus:ring-2 focus:ring-emerald-100">
+                    class="form-input w-full">
             </div>
             <div>
-                <label class="block text-sm font-medium text-slate-700 mb-1">รอบทบทวน</label>
+                <label class="block text-sm font-semibold text-slate-700 mb-1.5">รอบทบทวน</label>
                 <select name="ReviewIntervalMonths" id="ojt-interval"
                     onchange="window._ojtCalcNextDate()"
-                    class="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg outline-none focus:border-emerald-400 focus:ring-2 focus:ring-emerald-100">
+                    class="form-input w-full">
                     <option value="6"  ${(r.ReviewIntervalMonths||12)==6 ?'selected':''}>6 เดือน</option>
                     <option value="12" ${(r.ReviewIntervalMonths||12)==12?'selected':''}>12 เดือน (1 ปี)</option>
                     <option value="24" ${(r.ReviewIntervalMonths||12)==24?'selected':''}>24 เดือน (2 ปี)</option>
@@ -366,38 +371,36 @@ function _ojtFormHtml(department, r = {}) {
             </div>
         </div>
 
-        <div id="ojt-next-preview" class="${r.OJTDate ? '' : 'hidden'} text-xs text-emerald-600 bg-emerald-50 rounded-lg px-3 py-2 border border-emerald-200">
+        <div id="ojt-next-preview" class="${r.OJTDate ? '' : 'hidden'} text-xs text-emerald-600 bg-emerald-50 rounded-xl px-3 py-2 border border-emerald-100">
             📅 วันที่ทวนสอบถัดไป: <strong id="ojt-next-date-text">${r.NextReviewDate ? new Date(r.NextReviewDate).toLocaleDateString('th-TH', {day:'2-digit',month:'long',year:'numeric'}) : ''}</strong>
         </div>
 
         <div class="grid grid-cols-2 gap-4">
             <div>
-                <label class="block text-sm font-medium text-slate-700 mb-1">ผู้ฝึกสอน / วิทยากร</label>
+                <label class="block text-sm font-semibold text-slate-700 mb-1.5">ผู้ฝึกสอน / วิทยากร</label>
                 <input name="TrainerName" value="${r.TrainerName||''}"
                     placeholder="ชื่อผู้ฝึกสอน"
-                    class="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg outline-none focus:border-emerald-400 focus:ring-2 focus:ring-emerald-100">
+                    class="form-input w-full">
             </div>
             <div>
-                <label class="block text-sm font-medium text-slate-700 mb-1">จำนวนผู้เข้าร่วม (คน)</label>
+                <label class="block text-sm font-semibold text-slate-700 mb-1.5">จำนวนผู้เข้าร่วม (คน)</label>
                 <input name="AttendeeCount" type="number" min="0" value="${r.AttendeeCount||''}"
                     placeholder="0"
-                    class="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg outline-none focus:border-emerald-400 focus:ring-2 focus:ring-emerald-100">
+                    class="form-input w-full">
             </div>
         </div>
 
         <div>
-            <label class="block text-sm font-medium text-slate-700 mb-1">หมายเหตุ</label>
+            <label class="block text-sm font-semibold text-slate-700 mb-1.5">หมายเหตุ</label>
             <textarea name="Notes" rows="2" placeholder="หมายเหตุ (ถ้ามี)"
-                class="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg outline-none focus:border-emerald-400 focus:ring-2 focus:ring-emerald-100 resize-none">${r.Notes||''}</textarea>
+                class="form-textarea w-full resize-none">${r.Notes||''}</textarea>
         </div>
 
         <div id="ojt-form-error" class="text-sm text-red-500 hidden"></div>
-        <div class="flex justify-end gap-3 pt-3 border-t border-slate-200">
+        <div class="flex justify-end gap-3 pt-3 border-t border-slate-100">
             <button type="button" onclick="window._UI_closeModal()"
-                class="px-5 py-2 text-sm font-medium text-slate-600 bg-slate-100 hover:bg-slate-200 rounded-lg transition-colors">ยกเลิก</button>
-            <button type="submit"
-                class="px-5 py-2 text-sm font-semibold text-white rounded-lg transition-all"
-                style="background:linear-gradient(135deg,#059669,#0d9488)">บันทึก</button>
+                class="btn btn-secondary px-5">ยกเลิก</button>
+            <button type="submit" class="btn btn-primary px-5">บันทึก</button>
         </div>
     </form>`;
 }
@@ -463,19 +466,17 @@ window._ojtEditStandard = function() {
     const current = _standard?.Content || '';
     UI.openModal('แก้ไขมาตรฐาน Stop · Call · Wait', `
         <form id="scw-edit-form" class="space-y-4">
-            <p class="text-xs text-slate-500 bg-slate-50 rounded-lg p-3 border border-slate-200">
+            <p class="text-xs text-emerald-700 bg-emerald-50 rounded-xl p-3 border border-emerald-100">
                 ใช้ <code>&lt;h3&gt;หัวข้อ&lt;/h3&gt;&lt;p&gt;เนื้อหา&lt;/p&gt;</code> จำนวน 3 ชุด (Stop / Call / Wait)
             </p>
             <textarea name="Content" rows="12"
-                class="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg outline-none focus:border-emerald-400 font-mono"
+                class="form-textarea w-full font-mono"
                 style="resize:vertical">${current}</textarea>
             <div id="scw-edit-error" class="text-sm text-red-500 hidden"></div>
-            <div class="flex justify-end gap-3 pt-3 border-t border-slate-200">
+            <div class="flex justify-end gap-3 pt-3 border-t border-slate-100">
                 <button type="button" onclick="window._UI_closeModal()"
-                    class="px-5 py-2 text-sm font-medium text-slate-600 bg-slate-100 hover:bg-slate-200 rounded-lg">ยกเลิก</button>
-                <button type="submit"
-                    class="px-5 py-2 text-sm font-semibold text-white rounded-lg"
-                    style="background:linear-gradient(135deg,#059669,#0d9488)">บันทึก</button>
+                    class="btn btn-secondary px-5">ยกเลิก</button>
+                <button type="submit" class="btn btn-primary px-5">บันทึก</button>
             </div>
         </form>`);
 
