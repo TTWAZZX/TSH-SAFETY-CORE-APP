@@ -167,10 +167,40 @@ app.post('/api/session/verify', authenticateToken, (req, res) => {
 app.get('/api/pagedata/policies', authenticateToken, async (req, res) => {
     try {
         const [allItems] = await pool.query('SELECT *, id as rowIndex FROM Policies ORDER BY EffectiveDate DESC');
-        if (allItems.length === 0) return res.json({ current: null, past: [] });
-        const currentItem = allItems.find(p => p.IsCurrent === 1) || allItems[0];
-        const pastItems = allItems.filter(p => p.id !== currentItem.id);
-        res.json({ current: currentItem, past: pastItems });
+        if (allItems.length === 0) return res.json({ current: null, past: [], totalEmployees: 0 });
+
+        // Total employees
+        const [[{ total }]] = await pool.query('SELECT COUNT(*) as total FROM Employees').catch(() => [[{ total: 0 }]]);
+
+        // Ack counts per policy from new table
+        const [ackCounts] = await pool.query(
+            'SELECT PolicyID, COUNT(*) as cnt FROM Policy_Acknowledgements GROUP BY PolicyID'
+        ).catch(() => [[]]);
+        const ackMap = {};
+        ackCounts.forEach(r => { ackMap[r.PolicyID] = Number(r.cnt); });
+
+        // Current user's acknowledged policies
+        const [userAcks] = await pool.query(
+            'SELECT PolicyID FROM Policy_Acknowledgements WHERE UserID = ?', [req.user.id]
+        ).catch(() => [[]]);
+        const userAckSet = new Set(userAcks.map(r => r.PolicyID));
+
+        // Version numbers (sorted ascending by date)
+        const sorted = [...allItems].sort((a, b) => new Date(a.EffectiveDate) - new Date(b.EffectiveDate));
+        const versionMap = {};
+        sorted.forEach((p, i) => { versionMap[p.id] = i + 1; });
+
+        const withStats = allItems.map(p => ({
+            ...p,
+            ackCount: ackMap[p.id] || 0,
+            totalEmployees: total,
+            userAcknowledged: userAckSet.has(p.id),
+            version: versionMap[p.id]
+        }));
+
+        const current = withStats.find(p => p.IsCurrent == 1) || withStats[0] || null;
+        const past = withStats.filter(p => p.id !== current?.id);
+        res.json({ current, past, totalEmployees: total });
     } catch (error) {
         console.error('Error fetching Policies:', error);
         res.status(500).json({ success: false, message: 'เกิดข้อผิดพลาดในการดึงข้อมูลนโยบาย' });
@@ -178,15 +208,15 @@ app.get('/api/pagedata/policies', authenticateToken, async (req, res) => {
 });
 
 app.post('/api/policies', authenticateToken, isAdmin, async (req, res) => {
-    const { PolicyTitle, Description, EffectiveDate, DocumentLink, IsCurrent } = req.body;
+    const { PolicyTitle, Description, EffectiveDate, DocumentLink, IsCurrent, Category, ReviewDate } = req.body;
     if (!PolicyTitle || !EffectiveDate) {
         return res.status(400).json({ success: false, message: 'กรุณากรอกหัวข้อและวันที่บังคับใช้' });
     }
     try {
         if (IsCurrent) await pool.query('UPDATE Policies SET IsCurrent = 0 WHERE IsCurrent = 1');
         const [result] = await pool.query(
-            'INSERT INTO Policies (PolicyTitle, Description, EffectiveDate, DocumentLink, IsCurrent) VALUES (?, ?, ?, ?, ?)',
-            [PolicyTitle, Description, EffectiveDate, DocumentLink, IsCurrent ? 1 : 0]
+            'INSERT INTO Policies (PolicyTitle, Description, EffectiveDate, DocumentLink, IsCurrent, Category, ReviewDate) VALUES (?, ?, ?, ?, ?, ?, ?)',
+            [PolicyTitle, Description || null, EffectiveDate, DocumentLink || null, IsCurrent ? 1 : 0, Category || null, ReviewDate || null]
         );
         res.status(201).json({ success: true, message: 'สร้างนโยบายใหม่สำเร็จ', insertedId: result.insertId });
     } catch (error) {
@@ -197,15 +227,15 @@ app.post('/api/policies', authenticateToken, isAdmin, async (req, res) => {
 
 app.put('/api/policies/:id', authenticateToken, isAdmin, async (req, res) => {
     const { id } = req.params;
-    const { PolicyTitle, Description, EffectiveDate, DocumentLink, IsCurrent } = req.body;
+    const { PolicyTitle, Description, EffectiveDate, DocumentLink, IsCurrent, Category, ReviewDate } = req.body;
     if (!PolicyTitle || !EffectiveDate) {
         return res.status(400).json({ success: false, message: 'กรุณากรอกหัวข้อและวันที่บังคับใช้' });
     }
     try {
         if (IsCurrent) await pool.query('UPDATE Policies SET IsCurrent = 0 WHERE IsCurrent = 1 AND id != ?', [id]);
         await pool.query(
-            'UPDATE Policies SET PolicyTitle = ?, Description = ?, EffectiveDate = ?, DocumentLink = ?, IsCurrent = ? WHERE id = ?',
-            [PolicyTitle, Description, EffectiveDate, DocumentLink, IsCurrent ? 1 : 0, id]
+            'UPDATE Policies SET PolicyTitle = ?, Description = ?, EffectiveDate = ?, DocumentLink = ?, IsCurrent = ?, Category = ?, ReviewDate = ? WHERE id = ?',
+            [PolicyTitle, Description || null, EffectiveDate, DocumentLink || null, IsCurrent ? 1 : 0, Category || null, ReviewDate || null, id]
         );
         res.json({ success: true, message: 'อัปเดตนโยบายสำเร็จ' });
     } catch (error) {
@@ -217,6 +247,7 @@ app.put('/api/policies/:id', authenticateToken, isAdmin, async (req, res) => {
 app.delete('/api/policies/:id', authenticateToken, isAdmin, async (req, res) => {
     const { id } = req.params;
     try {
+        await pool.query('DELETE FROM Policy_Acknowledgements WHERE PolicyID = ?', [id]).catch(() => {});
         await pool.query('DELETE FROM Policies WHERE id = ?', [id]);
         res.json({ success: true, message: 'ลบนโยบายสำเร็จ' });
     } catch (error) {
@@ -225,28 +256,56 @@ app.delete('/api/policies/:id', authenticateToken, isAdmin, async (req, res) => 
     }
 });
 
-// Policy Acknowledge — single canonical handler (removed duplicate at /api/policies/:rowIndex/acknowledge)
+// POST /api/policies/:id/acknowledge — uses dedicated table (idempotent)
 app.post('/api/policies/:id/acknowledge', authenticateToken, async (req, res) => {
     const { id } = req.params;
-    const { name } = req.user;
+    const { id: UserID, name: UserName, department: Department } = req.user;
     try {
-        const [rows] = await pool.query('SELECT AcknowledgedBy FROM Policies WHERE id = ?', [id]);
+        const [rows] = await pool.query('SELECT id FROM Policies WHERE id = ?', [id]);
         if (rows.length === 0) return res.status(404).json({ message: 'ไม่พบนโยบาย' });
-
-        let ackList = [];
-        try { if (rows[0].AcknowledgedBy) ackList = JSON.parse(rows[0].AcknowledgedBy); } catch (_) {}
-
-        if (!ackList.includes(name)) {
-            ackList.push(name);
-        } else {
-            return res.json({ status: 'info', message: 'คุณได้รับทราบข้อมูลนี้แล้ว' });
-        }
-
-        await pool.query('UPDATE Policies SET AcknowledgedBy = ? WHERE id = ?', [JSON.stringify(ackList), id]);
-        res.json({ status: 'success', message: 'รับทราบข้อมูลเรียบร้อยแล้ว' });
+        await pool.query(
+            'INSERT IGNORE INTO Policy_Acknowledgements (PolicyID, UserID, UserName, Department) VALUES (?, ?, ?, ?)',
+            [id, UserID, UserName || null, Department || null]
+        );
+        res.json({ status: 'success', message: 'รับทราบนโยบายเรียบร้อยแล้ว' });
     } catch (error) {
         console.error('Error acknowledging policy:', error);
         res.status(500).json({ status: 'error', message: 'เกิดข้อผิดพลาดในการบันทึกข้อมูล' });
+    }
+});
+
+// GET /api/policies/:id/acknowledgements — Admin: who acked + who hasn't
+app.get('/api/policies/:id/acknowledgements', authenticateToken, isAdmin, async (req, res) => {
+    const { id } = req.params;
+    try {
+        const [acked] = await pool.query(
+            'SELECT UserID, UserName, Department, AcknowledgedAt FROM Policy_Acknowledgements WHERE PolicyID = ? ORDER BY AcknowledgedAt DESC',
+            [id]
+        );
+        const [notAcked] = await pool.query(
+            `SELECT e.EmployeeID, e.EmployeeName AS Name, e.Department
+             FROM Employees e
+             WHERE e.EmployeeID NOT IN (SELECT UserID FROM Policy_Acknowledgements WHERE PolicyID = ?)
+             ORDER BY e.Department, e.EmployeeName`,
+            [id]
+        );
+        res.json({ acknowledged: acked, notAcknowledged: notAcked, ackCount: acked.length, totalEmployees: acked.length + notAcked.length });
+    } catch (error) {
+        console.error(`Error fetching acknowledgements for policy ${id}:`, error);
+        res.status(500).json({ success: false, message: 'เกิดข้อผิดพลาด' });
+    }
+});
+
+// PUT /api/policies/:id/restore — Admin: set old policy as current
+app.put('/api/policies/:id/restore', authenticateToken, isAdmin, async (req, res) => {
+    const { id } = req.params;
+    try {
+        await pool.query('UPDATE Policies SET IsCurrent = 0 WHERE IsCurrent = 1');
+        await pool.query('UPDATE Policies SET IsCurrent = 1 WHERE id = ?', [id]);
+        res.json({ success: true, message: 'ตั้งเป็นฉบับปัจจุบันเรียบร้อยแล้ว' });
+    } catch (error) {
+        console.error(`Error restoring policy ${id}:`, error);
+        res.status(500).json({ success: false, message: 'ไม่สามารถกู้คืนนโยบายได้' });
     }
 });
 
@@ -276,15 +335,15 @@ app.get('/api/pagedata/committees', authenticateToken, async (req, res) => {
 });
 
 app.post('/api/committees', authenticateToken, isAdmin, async (req, res) => {
-    const { CommitteeTitle, TermStartDate, TermEndDate, MainOrgChartLink, IsCurrent } = req.body;
+    const { CommitteeTitle, TermStartDate, TermEndDate, MainOrgChartLink, AppointmentDocLink, IsCurrent, SubCommitteeData } = req.body;
     if (!CommitteeTitle || !TermStartDate || !TermEndDate) {
         return res.status(400).json({ success: false, message: 'กรุณากรอกข้อมูลที่จำเป็นให้ครบถ้วน' });
     }
     try {
         if (IsCurrent) await pool.query('UPDATE Committees SET IsCurrent = 0 WHERE IsCurrent = 1');
         const [result] = await pool.query(
-            'INSERT INTO Committees (CommitteeTitle, TermStartDate, TermEndDate, MainOrgChartLink, IsCurrent, SubCommitteeData) VALUES (?, ?, ?, ?, ?, ?)',
-            [CommitteeTitle, TermStartDate, TermEndDate, MainOrgChartLink, IsCurrent ? 1 : 0, JSON.stringify([])]
+            'INSERT INTO Committees (CommitteeTitle, TermStartDate, TermEndDate, MainOrgChartLink, AppointmentDocLink, IsCurrent, SubCommitteeData) VALUES (?, ?, ?, ?, ?, ?, ?)',
+            [CommitteeTitle, TermStartDate, TermEndDate, MainOrgChartLink || null, AppointmentDocLink || null, IsCurrent ? 1 : 0, JSON.stringify(SubCommitteeData || [])]
         );
         res.status(201).json({ success: true, message: 'สร้างข้อมูลคณะกรรมการชุดใหม่สำเร็จ', insertedId: result.insertId });
     } catch (error) {
@@ -295,15 +354,15 @@ app.post('/api/committees', authenticateToken, isAdmin, async (req, res) => {
 
 app.put('/api/committees/:id', authenticateToken, isAdmin, async (req, res) => {
     const { id } = req.params;
-    const { CommitteeTitle, TermStartDate, TermEndDate, MainOrgChartLink, IsCurrent, SubCommitteeData } = req.body;
+    const { CommitteeTitle, TermStartDate, TermEndDate, MainOrgChartLink, AppointmentDocLink, IsCurrent, SubCommitteeData } = req.body;
     if (!CommitteeTitle || !TermStartDate || !TermEndDate) {
         return res.status(400).json({ success: false, message: 'กรุณากรอกข้อมูลที่จำเป็นให้ครบถ้วน' });
     }
     try {
         if (IsCurrent) await pool.query('UPDATE Committees SET IsCurrent = 0 WHERE IsCurrent = 1 AND id != ?', [id]);
         await pool.query(
-            'UPDATE Committees SET CommitteeTitle = ?, TermStartDate = ?, TermEndDate = ?, MainOrgChartLink = ?, IsCurrent = ?, SubCommitteeData = ? WHERE id = ?',
-            [CommitteeTitle, TermStartDate, TermEndDate, MainOrgChartLink, IsCurrent ? 1 : 0, JSON.stringify(SubCommitteeData || []), id]
+            'UPDATE Committees SET CommitteeTitle = ?, TermStartDate = ?, TermEndDate = ?, MainOrgChartLink = ?, AppointmentDocLink = ?, IsCurrent = ?, SubCommitteeData = ? WHERE id = ?',
+            [CommitteeTitle, TermStartDate, TermEndDate, MainOrgChartLink || null, AppointmentDocLink || null, IsCurrent ? 1 : 0, JSON.stringify(SubCommitteeData || []), id]
         );
         res.json({ success: true, message: 'อัปเดตข้อมูลสำเร็จ' });
     } catch (error) {
@@ -320,6 +379,19 @@ app.delete('/api/committees/:id', authenticateToken, isAdmin, async (req, res) =
     } catch (error) {
         console.error(`Error deleting committee ${id}:`, error);
         res.status(500).json({ success: false, message: 'ไม่สามารถลบข้อมูลได้' });
+    }
+});
+
+// PUT /api/committees/:id/restore — Admin: set old committee as current
+app.put('/api/committees/:id/restore', authenticateToken, isAdmin, async (req, res) => {
+    const { id } = req.params;
+    try {
+        await pool.query('UPDATE Committees SET IsCurrent = 0 WHERE IsCurrent = 1');
+        await pool.query('UPDATE Committees SET IsCurrent = 1 WHERE id = ?', [id]);
+        res.json({ success: true, message: 'ตั้งเป็นคณะกรรมการชุดปัจจุบันเรียบร้อยแล้ว' });
+    } catch (error) {
+        console.error(`Error restoring committee ${id}:`, error);
+        res.status(500).json({ success: false, message: 'ไม่สามารถกู้คืนข้อมูลได้' });
     }
 });
 

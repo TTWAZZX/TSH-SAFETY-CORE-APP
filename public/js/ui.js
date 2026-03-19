@@ -201,32 +201,265 @@ export function showConfirmationModal(title, message) {
     });
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// ENTERPRISE DOCUMENT VIEWER — standalone overlay (not using openModal)
+// ─────────────────────────────────────────────────────────────────────────────
+
 /**
  * แสดงเอกสารใน Modal
  */
-export function showDocumentModal(originalUrl, title = 'แสดงเอกสาร') {
-    const isImage = originalUrl.includes('cloudinary.com/image/') || 
-                   originalUrl.includes('googleusercontent.com') ||
-                   originalUrl.match(/\.(jpeg|jpg|gif|png|webp|avif)$/i);
-    
-    const isPdf = originalUrl.toLowerCase().endsWith('.pdf');
+export function showDocumentModal(originalUrl, title = 'เอกสาร') {
+    const url = (originalUrl || '').trim();
 
-    let contentHtml = '';
+    // ─── File type detection ───
+    const isImage  = /\.(jpeg|jpg|gif|png|webp|avif)$/i.test(url) ||
+                     url.includes('googleusercontent.com') ||
+                     (url.includes('cloudinary.com') && /\/image\//.test(url) && !/\.pdf/i.test(url));
+    const isPdf    = /\.pdf$/i.test(url) || (url.includes('cloudinary.com') && /\.pdf/i.test(url));
+    const isWord   = /\.docx?$/i.test(url);
+    const isExcel  = /\.xlsx?$/i.test(url);
+    const isPpt    = /\.pptx?$/i.test(url);
+    const isOffice = isWord || isExcel || isPpt;
 
-    if (isImage) {
-        contentHtml = `
-            <div class="w-full h-full flex items-center justify-center bg-slate-900/90 p-4 min-h-[50vh]">
-                <img src="${originalUrl}" class="max-w-full max-h-[80vh] object-contain rounded shadow-2xl">
-            </div>`;
-    } else if (isPdf) {
-        contentHtml = `<embed src="${originalUrl}" type="application/pdf" width="100%" height="600px" class="rounded-b-lg">`;
-    } else {
-        // ใช้ Google Docs Viewer สำหรับไฟล์ Office
-        const viewerUrl = `https://docs.google.com/gview?url=${encodeURIComponent(originalUrl)}&embedded=true`;
-        contentHtml = `<iframe src="${viewerUrl}" class="w-full h-[80vh]" frameborder="0"></iframe>`;
-    }
+    // ─── Per-type config ───
+    const TYPE_CFG = {
+        pdf:   { label: 'PDF',        color: '#dc2626', bg: '#fef2f2', iconPath: 'M7 21h10a2 2 0 002-2V9.414a1 1 0 00-.293-.707l-5.414-5.414A1 1 0 0012.586 3H7a2 2 0 00-2 2v14a2 2 0 002 2z' },
+        word:  { label: 'Word',       color: '#2563eb', bg: '#eff6ff', iconPath: 'M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z' },
+        excel: { label: 'Excel',      color: '#16a34a', bg: '#f0fdf4', iconPath: 'M3 10h18M3 14h18M10 3v18M14 3v18M5 3h14a2 2 0 012 2v14a2 2 0 01-2 2H5a2 2 0 01-2-2V5a2 2 0 012-2z' },
+        ppt:   { label: 'PowerPoint', color: '#ea580c', bg: '#fff7ed', iconPath: 'M7 21h10a2 2 0 002-2V9.414a1 1 0 00-.293-.707l-5.414-5.414A1 1 0 0012.586 3H7a2 2 0 00-2 2v14a2 2 0 002 2z' },
+        image: { label: 'รูปภาพ',      color: '#7c3aed', bg: '#faf5ff', iconPath: 'M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z' },
+        other: { label: 'เอกสาร',      color: '#475569', bg: '#f8fafc', iconPath: 'M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z' },
+    };
+    const typeKey = isPdf ? 'pdf' : isWord ? 'word' : isExcel ? 'excel' : isPpt ? 'ppt' : isImage ? 'image' : 'other';
+    const cfg     = TYPE_CFG[typeKey];
+    const filename = decodeURIComponent(url.split('/').pop().split('?')[0]) || title || 'เอกสาร';
 
-    openModal(title, contentHtml, 'max-w-5xl no-padding');
+    // ─── Viewer source ───
+    let viewerSrc = url;
+    if (isPdf)         viewerSrc = `https://drive.google.com/viewerng/viewer?embedded=true&url=${encodeURIComponent(url)}`;
+    else if (isOffice) viewerSrc = `https://docs.google.com/gview?url=${encodeURIComponent(url)}&embedded=true`;
+
+    // ─── Remove any existing viewer ───
+    document.getElementById('__dv_overlay')?.remove();
+
+    // ─── Shared inline-style helpers (safe outside Tailwind CDN scope) ───
+    const S = {
+        overlay:  'position:fixed;inset:0;z-index:9999;display:flex;flex-direction:column;background:rgba(2,6,23,0.96);opacity:0;transition:opacity 0.2s ease',
+        toolbar:  'display:flex;align-items:center;justify-content:space-between;padding:10px 16px;background:#ffffff;border-bottom:1px solid #e2e8f0;flex-shrink:0;gap:12px',
+        filebox:  `width:38px;height:38px;border-radius:10px;display:flex;align-items:center;justify-content:center;flex-shrink:0;background:${cfg.bg}`,
+        content:  'flex:1;position:relative;overflow:hidden',
+        loader:   'position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;background:rgba(2,6,23,0.9);z-index:10;gap:14px',
+        spinner:  'width:44px;height:44px;border-radius:50%;border:4px solid #059669;border-top-color:transparent;animation:__dv_spin 0.8s linear infinite',
+        btnBase:  'display:inline-flex;align-items:center;gap:5px;padding:6px 12px;font-size:12px;font-weight:600;border-radius:8px;text-decoration:none;border:none;cursor:pointer;font-family:Kanit,sans-serif;transition:background 0.15s',
+        zoomWrap: 'display:flex;align-items:center;gap:2px;background:#f1f5f9;border-radius:8px;padding:2px',
+        zoomBtn:  'padding:6px 8px;border:none;background:transparent;cursor:pointer;border-radius:6px;color:#475569;line-height:1;transition:background 0.15s',
+    };
+
+    const zoomControls = isImage ? `
+        <div style="${S.zoomWrap}">
+            <button id="__dv_zout" title="ซูมออก" style="${S.zoomBtn}">
+                <svg width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0zM13 10H7"/></svg>
+            </button>
+            <span id="__dv_pct" style="font-size:12px;font-weight:700;color:#475569;min-width:38px;text-align:center;font-family:Kanit,sans-serif">100%</span>
+            <button id="__dv_zin" title="ซูมเข้า" style="${S.zoomBtn}">
+                <svg width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0zM10 7v6m3-3H7"/></svg>
+            </button>
+            <button id="__dv_zfit" title="พอดีหน้าจอ (1:1)" style="${S.zoomBtn}">
+                <svg width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M4 8V4m0 0h4M4 4l5 5m11-5h-4m4 0v4m0-4l-5 5M4 16v4m0 0h4m-4 0l5-5m11 5l-5-5m5 5v-4m0 4h-4"/></svg>
+            </button>
+        </div>` : '';
+
+    const viewerContent = isImage
+        ? `<div id="__dv_wrap" style="width:100%;height:100%;display:flex;align-items:center;justify-content:center;overflow:hidden;user-select:none">
+               <img id="__dv_img" src="${url}" alt="${title}" draggable="false"
+                    style="max-width:100%;max-height:100%;object-fit:contain;transform-origin:center center;transform:scale(1) translate(0px,0px);will-change:transform;user-select:none;pointer-events:none"
+                    onload="document.getElementById('__dv_loader').style.display='none'"
+                    onerror="document.getElementById('__dv_loader').innerHTML='<p style=\\'color:#f87171;font-size:14px;font-family:Kanit,sans-serif\\'>โหลดรูปภาพไม่ได้</p><a href=\\'${url}\\' target=\\'_blank\\' style=\\'color:#34d399;font-size:13px;margin-top:8px;display:block\\'>เปิดในแท็บใหม่</a>'">
+           </div>`
+        : `<iframe src="${viewerSrc}" style="width:100%;height:100%;border:0;background:#f8fafc"
+                   onload="document.getElementById('__dv_loader').style.display='none'"
+                   onerror="document.getElementById('__dv_loader').innerHTML='<p style=\\'color:#f87171;font-size:14px;font-family:Kanit,sans-serif\\'>โหลดเอกสารไม่ได้</p><a href=\\'${url}\\' target=\\'_blank\\' style=\\'color:#34d399;font-size:13px;margin-top:8px;display:block\\'>เปิดในแท็บใหม่แทน</a>'">
+           </iframe>`;
+
+    const overlay = document.createElement('div');
+    overlay.id = '__dv_overlay';
+    overlay.style.cssText = S.overlay;
+    overlay.innerHTML = `
+        <style>@keyframes __dv_spin{to{transform:rotate(360deg)}}</style>
+
+        <!-- Toolbar -->
+        <div style="${S.toolbar}">
+
+            <!-- Left: file info -->
+            <div style="display:flex;align-items:center;gap:12px;min-width:0;flex:1">
+                <div style="${S.filebox}">
+                    <svg width="20" height="20" fill="none" stroke="${cfg.color}" stroke-width="1.8"
+                         stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24">
+                        <path d="${cfg.iconPath}"/>
+                    </svg>
+                </div>
+                <div style="min-width:0">
+                    <p style="font-size:14px;font-weight:700;color:#1e293b;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:min(420px,45vw);font-family:Kanit,sans-serif">${title || filename}</p>
+                    <p style="font-size:11px;color:#94a3b8;margin-top:1px;font-family:Kanit,sans-serif">
+                        <span style="display:inline-flex;align-items:center;gap:4px;padding:1px 7px;border-radius:999px;font-weight:700;font-size:10px;background:${cfg.bg};color:${cfg.color}">${cfg.label}</span>
+                        &nbsp;${filename}
+                    </p>
+                </div>
+            </div>
+
+            <!-- Right: actions -->
+            <div style="display:flex;align-items:center;gap:6px;flex-shrink:0">
+
+                ${zoomControls}
+
+                <!-- Open in new tab -->
+                <a href="${url}" target="_blank" rel="noopener"
+                   style="${S.btnBase}background:#f1f5f9;color:#475569"
+                   onmouseover="this.style.background='#e2e8f0'" onmouseout="this.style.background='#f1f5f9'">
+                    <svg width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+                        <path d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"/>
+                    </svg>
+                    เปิดในแท็บใหม่
+                </a>
+
+                <!-- Download -->
+                <button id="__dv_dl"
+                        style="${S.btnBase}background:#ecfdf5;color:#059669"
+                        onmouseover="this.style.background='#d1fae5'" onmouseout="this.style.background='#ecfdf5'">
+                    <svg width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+                        <path d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/>
+                    </svg>
+                    ดาวน์โหลด
+                </button>
+
+                <!-- Close -->
+                <button id="__dv_close" title="ปิด (Esc)"
+                        style="padding:8px;border:none;background:transparent;cursor:pointer;border-radius:8px;color:#64748b;margin-left:4px;transition:all 0.15s"
+                        onmouseover="this.style.background='#fee2e2';this.style.color='#dc2626'"
+                        onmouseout="this.style.background='transparent';this.style.color='#64748b'">
+                    <svg width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+                        <path d="M6 18L18 6M6 6l12 12"/>
+                    </svg>
+                </button>
+            </div>
+        </div>
+
+        <!-- Viewer -->
+        <div style="${S.content}">
+            <div id="__dv_loader" style="${S.loader}">
+                <div style="${S.spinner}"></div>
+                <p style="color:#94a3b8;font-size:14px;font-family:Kanit,sans-serif">กำลังโหลด ${cfg.label}...</p>
+                <p style="color:#475569;font-size:12px;font-family:Kanit,sans-serif">อาจใช้เวลาสักครู่</p>
+            </div>
+            ${viewerContent}
+        </div>
+    `;
+
+    document.body.appendChild(overlay);
+    requestAnimationFrame(() => { overlay.style.opacity = '1'; });
+
+    // ─── Close logic ───
+    const closeViewer = () => {
+        overlay.style.opacity = '0';
+        setTimeout(() => {
+            overlay.remove();
+            document.removeEventListener('keydown', _keyHandler);
+            document.removeEventListener('mousemove', _onMouseMove);
+            document.removeEventListener('mouseup', _onMouseUp);
+        }, 200);
+    };
+    const _keyHandler = (e) => { if (e.key === 'Escape') closeViewer(); };
+    document.getElementById('__dv_close').addEventListener('click', closeViewer);
+    document.addEventListener('keydown', _keyHandler);
+
+    // ─── Download (fetch-blob for cross-origin support) ───
+    document.getElementById('__dv_dl').addEventListener('click', async () => {
+        try {
+            const res  = await fetch(url, { mode: 'cors' });
+            if (!res.ok) throw new Error('fetch failed');
+            const blob = await res.blob();
+            const burl = URL.createObjectURL(blob);
+            const a    = document.createElement('a');
+            a.href = burl; a.download = filename;
+            document.body.appendChild(a); a.click();
+            document.body.removeChild(a);
+            setTimeout(() => URL.revokeObjectURL(burl), 5000);
+        } catch {
+            // Fallback: open in new tab (browser will handle download)
+            window.open(url, '_blank', 'noopener');
+        }
+    });
+
+    // ─── Image zoom & pan ───
+    if (!isImage) return;
+
+    let _scale = 1, _tx = 0, _ty = 0;
+    let _drag = false, _sx = 0, _sy = 0, _stx = 0, _sty = 0;
+
+    const img   = document.getElementById('__dv_img');
+    const wrap  = document.getElementById('__dv_wrap');
+    const pctEl = document.getElementById('__dv_pct');
+    const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, v));
+
+    const applyTransform = () => {
+        img.style.transform = `scale(${_scale}) translate(${_tx}px,${_ty}px)`;
+        if (pctEl) pctEl.textContent = `${Math.round(_scale * 100)}%`;
+        wrap.style.cursor = _scale > 1 ? (_drag ? 'grabbing' : 'grab') : 'default';
+    };
+
+    const zoom = (factor, min = 0.1, max = 10) => {
+        _scale = clamp(_scale * factor, min, max);
+        if (_scale <= 1) { _tx = 0; _ty = 0; }
+        applyTransform();
+    };
+
+    document.getElementById('__dv_zin') .addEventListener('click', () => zoom(1.25));
+    document.getElementById('__dv_zout').addEventListener('click', () => zoom(0.8));
+    document.getElementById('__dv_zfit').addEventListener('click', () => { _scale = 1; _tx = 0; _ty = 0; applyTransform(); });
+
+    // Mouse-wheel zoom (centered on cursor)
+    wrap.addEventListener('wheel', (e) => {
+        e.preventDefault();
+        zoom(e.deltaY < 0 ? 1.1 : 0.91);
+    }, { passive: false });
+
+    // Drag to pan
+    wrap.addEventListener('mousedown', (e) => {
+        if (_scale <= 1) return;
+        _drag = true; _sx = e.clientX; _sy = e.clientY; _stx = _tx; _sty = _ty;
+        wrap.style.cursor = 'grabbing';
+    });
+
+    const _onMouseMove = (e) => {
+        if (!_drag) return;
+        _tx = _stx + (e.clientX - _sx) / _scale;
+        _ty = _sty + (e.clientY - _sy) / _scale;
+        applyTransform();
+    };
+    const _onMouseUp = () => {
+        if (!_drag) return;
+        _drag = false;
+        wrap.style.cursor = _scale > 1 ? 'grab' : 'default';
+    };
+
+    // Touch pinch-zoom
+    let _lastDist = 0;
+    wrap.addEventListener('touchstart', (e) => {
+        if (e.touches.length === 2) {
+            _lastDist = Math.hypot(e.touches[0].clientX - e.touches[1].clientX, e.touches[0].clientY - e.touches[1].clientY);
+        }
+    }, { passive: true });
+    wrap.addEventListener('touchmove', (e) => {
+        if (e.touches.length === 2) {
+            e.preventDefault();
+            const dist = Math.hypot(e.touches[0].clientX - e.touches[1].clientX, e.touches[0].clientY - e.touches[1].clientY);
+            if (_lastDist > 0) zoom(dist / _lastDist);
+            _lastDist = dist;
+        }
+    }, { passive: false });
+
+    document.addEventListener('mousemove', _onMouseMove);
+    document.addEventListener('mouseup', _onMouseUp);
 }
 
 export function handleApiError(error) {
