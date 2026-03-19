@@ -48,7 +48,17 @@ async function ensureTables() {
     // Migrate: add FileCategory if table existed before this version
     try {
         await db.query(`ALTER TABLE Machine_Safety_Files ADD COLUMN FileCategory VARCHAR(50) NOT NULL DEFAULT 'SafetyDeviceStandard'`);
-    } catch (_) { /* column already exists — ignore */ }
+    } catch (_) { /* already exists */ }
+
+    // Migrate: enterprise fields
+    const migrations = [
+        `ALTER TABLE Machine_Safety ADD COLUMN Status ENUM('active','maintenance','inactive') NOT NULL DEFAULT 'active'`,
+        `ALTER TABLE Machine_Safety ADD COLUMN RiskLevel ENUM('low','medium','high','critical') NOT NULL DEFAULT 'low'`,
+        `ALTER TABLE Machine_Safety ADD COLUMN NextInspectionDate DATE DEFAULT NULL`,
+    ];
+    for (const sql of migrations) {
+        try { await db.query(sql); } catch (_) { /* already exists */ }
+    }
 
     tablesReady = true;
 }
@@ -99,23 +109,51 @@ router.get('/:id/files', async (req, res) => {
 router.post('/', isAdmin, async (req, res) => {
     try {
         await ensureTables();
-        const { MachineCode, MachineName, Department, Area, HasRiskAssessment, Remark } = req.body;
+        const { MachineCode, MachineName, Department, Area, HasRiskAssessment, Remark,
+                Status, RiskLevel, NextInspectionDate } = req.body;
 
         if (!MachineCode || !MachineName) {
             return res.status(400).json({ success: false, message: 'กรุณากรอกรหัสและชื่อเครื่องจักร' });
         }
 
-        await db.query(
+        const validStatus    = ['active','maintenance','inactive'];
+        const validRiskLevel = ['low','medium','high','critical'];
+
+        const [result] = await db.query(
             `INSERT INTO Machine_Safety
-             (MachineCode, MachineName, Department, Area, HasRiskAssessment, Remark, CreatedBy)
-             VALUES (?, ?, ?, ?, ?, ?, ?)`,
+             (MachineCode, MachineName, Department, Area, HasRiskAssessment, Remark,
+              Status, RiskLevel, NextInspectionDate, CreatedBy)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
             [
                 MachineCode, MachineName, Department || '', Area || '',
-                HasRiskAssessment ? 1 : 0,
-                Remark || '', req.user.name
+                HasRiskAssessment ? 1 : 0, Remark || '',
+                validStatus.includes(Status) ? Status : 'active',
+                validRiskLevel.includes(RiskLevel) ? RiskLevel : 'low',
+                NextInspectionDate || null,
+                req.user.name
             ]
         );
-        res.json({ success: true, message: 'เพิ่มข้อมูลเครื่องจักรสำเร็จ' });
+        res.json({ success: true, message: 'เพิ่มข้อมูลเครื่องจักรสำเร็จ', id: result.insertId });
+    } catch (err) {
+        res.status(500).json({ success: false, message: err.message });
+    }
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// POST /api/machine-safety/:id/links  — add URL link (no file upload, admin)
+// ─────────────────────────────────────────────────────────────────────────────
+router.post('/:id/links', isAdmin, async (req, res) => {
+    try {
+        const { FileCategory, FileLabel, FileUrl } = req.body;
+        if (!FileUrl) return res.status(400).json({ success: false, message: 'กรุณาระบุ URL' });
+        const validCategories = ['SafetyDeviceStandard', 'LayoutCheckpoint'];
+        const category = validCategories.includes(FileCategory) ? FileCategory : 'SafetyDeviceStandard';
+        await db.query(
+            `INSERT INTO Machine_Safety_Files (MachineID, FileCategory, FileLabel, FileUrl, UploadedBy)
+             VALUES (?, ?, ?, ?, ?)`,
+            [req.params.id, category, FileLabel || FileUrl, FileUrl, req.user.name]
+        );
+        res.json({ success: true, message: 'เพิ่ม URL สำเร็จ' });
     } catch (err) {
         res.status(500).json({ success: false, message: err.message });
     }
@@ -127,22 +165,29 @@ router.post('/', isAdmin, async (req, res) => {
 router.put('/:id', isAdmin, async (req, res) => {
     try {
         await ensureTables();
-        const { MachineCode, MachineName, Department, Area, HasRiskAssessment, Remark } = req.body;
+        const { MachineCode, MachineName, Department, Area, HasRiskAssessment, Remark,
+                Status, RiskLevel, NextInspectionDate } = req.body;
 
         if (!MachineCode || !MachineName) {
             return res.status(400).json({ success: false, message: 'กรุณากรอกรหัสและชื่อเครื่องจักร' });
         }
 
+        const validStatus    = ['active','maintenance','inactive'];
+        const validRiskLevel = ['low','medium','high','critical'];
+
         await db.query(
             `UPDATE Machine_Safety SET
              MachineCode=?, MachineName=?, Department=?, Area=?,
-             HasRiskAssessment=?, Remark=?, UpdatedBy=?
+             HasRiskAssessment=?, Remark=?,
+             Status=?, RiskLevel=?, NextInspectionDate=?, UpdatedBy=?
              WHERE id=?`,
             [
                 MachineCode, MachineName, Department || '', Area || '',
-                HasRiskAssessment ? 1 : 0,
-                Remark || '', req.user.name,
-                req.params.id
+                HasRiskAssessment ? 1 : 0, Remark || '',
+                validStatus.includes(Status) ? Status : 'active',
+                validRiskLevel.includes(RiskLevel) ? RiskLevel : 'low',
+                NextInspectionDate || null,
+                req.user.name, req.params.id
             ]
         );
         res.json({ success: true, message: 'อัปเดตข้อมูลเครื่องจักรสำเร็จ' });

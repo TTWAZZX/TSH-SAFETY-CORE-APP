@@ -479,12 +479,39 @@ app.get('/api/kpidata/:year', authenticateToken, async (req, res) => {
     }
 });
 
-// FIX: whitelist fields to prevent mass assignment (was: INSERT INTO KPIData SET ?  with raw req.body)
+// FIX: whitelist fields to prevent mass assignment
 const KPI_DATA_FIELDS = [
-    'Year', 'AnnouncementID', 'Category', 'MetricName', 'Target', 'Actual', 'Unit',
+    'Year', 'AnnouncementID', 'Metric', 'Department', 'Target', 'Unit',
+    'Direction', 'Weight',
     'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec',
-    'Q1', 'Q2', 'Q3', 'Q4',
 ];
+
+// Bulk update: PUT /api/kpidata/bulk  — must be declared BEFORE /:id route
+app.put('/api/kpidata/bulk', authenticateToken, isAdmin, async (req, res) => {
+    const updates = req.body;
+    if (!Array.isArray(updates) || updates.length === 0)
+        return res.json({ success: true, updated: 0 });
+    const conn = await pool.getConnection();
+    try {
+        await conn.beginTransaction();
+        let updated = 0;
+        for (const row of updates) {
+            const { id, ...fields } = row;
+            if (!id) continue;
+            const safe = Object.fromEntries(Object.entries(fields).filter(([k]) => KPI_DATA_FIELDS.includes(k)));
+            if (Object.keys(safe).length === 0) continue;
+            await conn.query('UPDATE KPIData SET ? WHERE id = ?', [safe, id]);
+            updated++;
+        }
+        await conn.commit();
+        res.json({ success: true, updated });
+    } catch (err) {
+        await conn.rollback();
+        res.status(500).json({ success: false, message: err.message });
+    } finally {
+        conn.release();
+    }
+});
 
 app.post('/api/kpidata', authenticateToken, isAdmin, async (req, res) => {
     const safeData = Object.fromEntries(Object.entries(req.body).filter(([k]) => KPI_DATA_FIELDS.includes(k)));

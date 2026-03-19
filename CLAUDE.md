@@ -142,6 +142,10 @@ node server.js      # runs on PORT=5000
 | `/api/policies` | User/Admin | Policy CRUD |
 | `/api/committees` | User/Admin | Committee CRUD |
 | `/api/kpidata/*` | User/Admin | KPI data CRUD |
+| `/api/kpidata/bulk` | Admin | Bulk update KPI rows (PUT — must be declared BEFORE `/:id`) |
+| `/api/machine-safety/:id/files` | Admin | Upload file to machine (multer field: `file`) |
+| `/api/machine-safety/:id/links` | Admin | Add URL link to machine (no file upload) |
+| `/api/machine-safety/files/:fileId` | Admin | Delete a file record |
 | `/api/upload/document` | Admin | Cloudinary file upload (field name: `document`) |
 
 ### Generic CRUD Tables
@@ -297,7 +301,8 @@ closeModal();
 ### Restyle Status
 | File | Status |
 |------|--------|
-| `machine-safety.js` | done |
+| `kpi.js` | done (enterprise) |
+| `machine-safety.js` | done (enterprise) |
 | `ojt.js` | done |
 | `safety-culture.js` | done |
 | `hiyari.js` | pending |
@@ -310,11 +315,27 @@ closeModal();
 | `admin.js` | pending |
 
 ### Page Wrapper Pattern
+**ห้ามใส่ `max-w-*` หรือ `mx-auto` ใน page wrapper** — `<main>` ใน `index.html` จัดการ `p-4 md:p-6` ให้แล้ว
+
 ```js
-`<div class="max-w-5xl mx-auto space-y-6 animate-fade-in pb-10">...</div>`
+`<div class="space-y-6 animate-fade-in pb-10">...</div>`
 ```
 
-### Header Pattern (ทุก page ต้องใช้ pattern นี้)
+### Hero Header Pattern (Enterprise pages — kpi.js, machine-safety.js)
+```html
+<div class="relative overflow-hidden rounded-2xl" style="background:linear-gradient(135deg,#064e3b 0%,#065f46 55%,#0d9488 100%)">
+  <!-- dot pattern -->
+  <div class="absolute inset-0 opacity-10 pointer-events-none">
+    <svg width="100%" height="100%"><defs><pattern id="dots" width="24" height="24" patternUnits="userSpaceOnUse"><circle cx="12" cy="12" r="1.3" fill="white"/></pattern></defs><rect width="100%" height="100%" fill="url(#dots)"/></svg>
+  </div>
+  <div class="relative z-10 p-6">
+    <!-- title + action buttons -->
+    <!-- stats strip: grid of rounded-xl px-4 py-3 text-center cards with rgba(255,255,255,0.12) bg -->
+  </div>
+</div>
+```
+
+### Header Pattern (non-hero pages)
 ```html
 <div>
   <h1 class="text-2xl font-bold text-slate-800 flex items-center gap-2.5">
@@ -397,3 +418,8 @@ closeModal();
 13. **Upload field name** — `POST /api/upload/document` ใช้ field ชื่อ `document` (ไม่ใช่ `file`) — multer config กำหนดไว้ใน `cloudinary.js`
 14. **`Admin_AuditLogs` table** — ต้องสร้างด้วย SQL ก่อน (ดูด้านบน) — auditLog helper ใน admin.js จะ silent-fail ถ้าตารางยังไม่มี
 15. **`safeCount()` in system health** — ตาราง module ใหม่อาจยังไม่มีใน DB ทำให้ health check return `null` แทน error
+16. **Express route ordering** — `PUT /api/kpidata/bulk` ต้องประกาศ **ก่อน** `PUT /api/kpidata/:id` ไม่งั้น `/bulk` จะถูก match เป็น `:id`
+17. **Machine Safety file upload field** — `POST /api/machine-safety/:id/files` ใช้ multer field ชื่อ `file` (ไม่ใช่ `document`) ต่างจาก generic upload endpoint
+18. **Add machine → upload files** — ต้อง POST machine ก่อน → รับ `id` จาก response → แล้วค่อย upload files/links ทีละขั้น (multi-step creation)
+19. **KPI_DATA_FIELDS whitelist** — column จริงใน DB คือ `Metric`, `Department` (ไม่ใช่ `MetricName`, `Category`) — ตรวจ whitelist ใน `server.js` ก่อนแก้ field names
+20. **`machine-safety.js` enterprise fields** — `Status`, `RiskLevel`, `NextInspectionDate` ถูก auto-migrate ใน `ensureTables()` แล้ว ไม่ต้องรัน SQL แยก (แต่ถ้าสร้างตารางใหม่ให้รัน SQL ที่ให้ไว้ใน session)

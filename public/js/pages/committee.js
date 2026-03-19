@@ -170,7 +170,7 @@ function renderPage(container, { current, past }, isAdmin, totalCount) {
   }
 
   container.innerHTML = `
-  <div class="p-4 md:p-6 max-w-7xl mx-auto space-y-6 animate-fade-in pb-10">
+  <div class="space-y-6 animate-fade-in pb-10">
 
     <!-- ── HEADER ── -->
     <div class="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">

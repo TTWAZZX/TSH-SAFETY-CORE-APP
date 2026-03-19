@@ -35,7 +35,7 @@ export async function loadPolicyPage() {
     const isAdmin = currentUser.role?.toLowerCase() === 'admin';
 
     container.innerHTML = `
-        <div class="max-w-5xl mx-auto space-y-6 animate-fade-in pb-10">
+        <div class="space-y-6 animate-fade-in pb-10">
 
             <!-- Header -->
             <div class="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
