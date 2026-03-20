@@ -61,6 +61,7 @@ let _allDocs = [];
 let _activeCategory = 'all';
 let _searchQuery = '';
 let _listenersReady = false;
+let _statsCache = { total: 0, policy: 0, permit: 0 };
 
 // ─────────────────────────────────────────────────────────────────────────────
 // MAIN LOADER
@@ -68,6 +69,8 @@ let _listenersReady = false;
 export async function loadContractorPage() {
     const container = document.getElementById('contractor-page');
     if (!container) return;
+
+    window.closeModal = closeModal;
 
     const currentUser = TSHSession.getUser() || {};
     const isAdmin = currentUser.role === 'Admin' || currentUser.Role === 'Admin';
@@ -87,34 +90,60 @@ export async function loadContractorPage() {
 // ─────────────────────────────────────────────────────────────────────────────
 function buildPageShell(isAdmin) {
     return `
-    <div class="max-w-6xl mx-auto space-y-6 animate-fade-in pb-10">
+    <div class="space-y-6 animate-fade-in pb-10">
 
-        <!-- Page Header -->
-        <div class="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
-            <div>
-                <h1 class="text-2xl font-bold text-slate-800 flex items-center gap-2.5">
-                    <span class="w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0"
-                          style="background:linear-gradient(135deg,#0284c7,#7c3aed);box-shadow:0 2px 10px rgba(2,132,199,0.3)">
-                        <svg class="w-5 h-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                              d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-2 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4"/>
-                        </svg>
-                    </span>
-                    Contractor Control
-                </h1>
-                <p class="text-sm text-slate-500 mt-1 ml-11">ระบบและเอกสารสำหรับผู้รับเหมา · Thai Summit Harness Co., Ltd.</p>
-            </div>
-            ${isAdmin ? `
-            <button id="btn-upload-doc"
-                    class="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-semibold text-white transition-all"
-                    style="background: linear-gradient(135deg, #0284c7, #0369a1); box-shadow: 0 2px 8px rgba(2,132,199,0.3);"
-                    onmouseover="this.style.transform='translateY(-1px)'; this.style.boxShadow='0 4px 15px rgba(2,132,199,0.4)'"
-                    onmouseout="this.style.transform=''; this.style.boxShadow='0 2px 8px rgba(2,132,199,0.3)'">
-                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12"/>
+        <!-- Hero Header -->
+        <div class="relative overflow-hidden rounded-2xl"
+             style="background:linear-gradient(135deg,#064e3b 0%,#065f46 55%,#0d9488 100%)">
+            <!-- dot pattern -->
+            <div class="absolute inset-0 opacity-10 pointer-events-none">
+                <svg width="100%" height="100%">
+                    <defs><pattern id="con-dots" width="24" height="24" patternUnits="userSpaceOnUse">
+                        <circle cx="12" cy="12" r="1.3" fill="white"/>
+                    </pattern></defs>
+                    <rect width="100%" height="100%" fill="url(#con-dots)"/>
                 </svg>
-                อัปโหลดเอกสาร
-            </button>` : ''}
+            </div>
+            <!-- glow orb -->
+            <div class="absolute -top-16 -right-16 w-64 h-64 rounded-full pointer-events-none"
+                 style="background:radial-gradient(circle,rgba(251,191,36,0.15) 0%,transparent 70%)"></div>
+            <div class="relative z-10 p-6">
+                <!-- Title row -->
+                <div class="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 mb-6">
+                    <div class="flex items-center gap-3">
+                        <div class="w-12 h-12 rounded-2xl flex items-center justify-center flex-shrink-0"
+                             style="background:rgba(255,255,255,0.15);backdrop-filter:blur(8px)">
+                            <svg class="w-6 h-6 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                  d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-2 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4"/>
+                            </svg>
+                        </div>
+                        <div>
+                            <h1 class="text-2xl font-bold text-white leading-tight">Contractor Control</h1>
+                            <p class="text-sm text-white/70 mt-0.5">ระบบและเอกสารสำหรับผู้รับเหมา · Thai Summit Harness Co., Ltd.</p>
+                        </div>
+                    </div>
+                    ${isAdmin ? `
+                    <button id="btn-upload-doc"
+                            class="flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-semibold transition-all flex-shrink-0"
+                            style="background:rgba(255,255,255,0.15);backdrop-filter:blur(8px);color:#fff;border:1px solid rgba(255,255,255,0.25)"
+                            onmouseover="this.style.background='rgba(255,255,255,0.25)'"
+                            onmouseout="this.style.background='rgba(255,255,255,0.15)'">
+                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12"/>
+                        </svg>
+                        อัปโหลดเอกสาร
+                    </button>` : ''}
+                </div>
+                <!-- Stats strip -->
+                <div id="contractor-hero-stats" class="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                    ${[0,1,2,3].map(() => `
+                    <div class="rounded-xl px-4 py-3 text-center animate-pulse" style="background:rgba(255,255,255,0.10)">
+                        <div class="h-6 w-10 rounded bg-white/20 mx-auto mb-1"></div>
+                        <div class="h-3 w-16 rounded bg-white/15 mx-auto"></div>
+                    </div>`).join('')}
+                </div>
+            </div>
         </div>
 
         <!-- External Systems -->
@@ -310,6 +339,35 @@ function getFileIcon(ext) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// HERO STATS
+// ─────────────────────────────────────────────────────────────────────────────
+function _renderHeroStats() {
+    const wrap = document.getElementById('contractor-hero-stats');
+    if (!wrap) return;
+
+    // Update cache when fetching full list
+    if (_activeCategory === 'all' && !_searchQuery.trim()) {
+        _statsCache.total  = _allDocs.length;
+        _statsCache.policy = _allDocs.filter(d => d.Category === 'Contractor Policy').length;
+        _statsCache.permit = _allDocs.filter(d => d.Category === 'Work Permit').length;
+    }
+
+    const stats = [
+        { value: _statsCache.total,  label: 'เอกสารทั้งหมด',     icon: `<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/></svg>` },
+        { value: _statsCache.policy, label: 'Contractor Policy', icon: `<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"/></svg>` },
+        { value: _statsCache.permit, label: 'Work Permit',        icon: `<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>` },
+        { value: EXTERNAL_SYSTEMS.length, label: 'ระบบภายนอก',   icon: `<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"/></svg>` },
+    ];
+
+    wrap.innerHTML = stats.map(s => `
+        <div class="rounded-xl px-4 py-3 text-center" style="background:rgba(255,255,255,0.12)">
+            <div class="flex items-center justify-center gap-1.5 mb-0.5 text-white/70">${s.icon}</div>
+            <p class="text-2xl font-bold text-white leading-none">${s.value}</p>
+            <p class="text-xs text-white/70 mt-0.5">${s.label}</p>
+        </div>`).join('');
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // DATA
 // ─────────────────────────────────────────────────────────────────────────────
 async function fetchDocuments() {
@@ -320,13 +378,20 @@ async function fetchDocuments() {
 
         const res = await API.get(`/contractor/documents?${params.toString()}`);
         _allDocs = normalizeApiArray(res?.data ?? res);
+        _renderHeroStats();
         renderDocGrid();
     } catch (error) {
         console.error('Contractor docs error:', error);
         const grid = document.getElementById('doc-grid');
         if (grid) grid.innerHTML = `
-            <div class="col-span-full card p-8 text-center">
-                <p class="text-red-500 text-sm">เกิดข้อผิดพลาด: ${error.message}</p>
+            <div class="col-span-full text-center py-16 text-slate-400">
+                <div class="w-16 h-16 rounded-2xl bg-red-50 flex items-center justify-center mx-auto mb-4">
+                    <svg class="w-8 h-8 text-red-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/>
+                    </svg>
+                </div>
+                <p class="font-semibold text-slate-600">โหลดข้อมูลไม่สำเร็จ</p>
+                <p class="text-sm mt-1">ไม่สามารถโหลดรายการเอกสารได้</p>
             </div>`;
     }
 }

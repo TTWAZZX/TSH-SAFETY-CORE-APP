@@ -38,10 +38,10 @@ async function auditLog(req, action, targetType, targetId, detail) {
 // =============================================================================
 
 // GET /admin/employees
-router.get('/employees', async (req, res) => {
+router.get('/employees', async (_req, res) => {
     try {
         const [rows] = await db.query(
-            'SELECT EmployeeID, EmployeeName, Department, Team, Role FROM Employees ORDER BY Team, EmployeeName'
+            'SELECT EmployeeID, EmployeeName, Department, Unit, Team, Position, Role FROM Employees ORDER BY Department, EmployeeName'
         );
         res.json({ success: true, data: rows });
     } catch (err) {
@@ -51,7 +51,7 @@ router.get('/employees', async (req, res) => {
 
 // POST /admin/employee/create
 router.post('/employee/create', async (req, res) => {
-    const { EmployeeID, EmployeeName, Department, Team, Role } = req.body;
+    const { EmployeeID, EmployeeName, Department, Unit, Team, Position, Role } = req.body;
     if (!EmployeeID || !EmployeeName) {
         return res.status(400).json({ success: false, message: 'กรุณาระบุรหัสและชื่อพนักงาน' });
     }
@@ -62,10 +62,10 @@ router.post('/employee/create', async (req, res) => {
             return res.status(400).json({ success: false, message: 'รหัสพนักงานนี้มีอยู่ในระบบแล้ว' });
         }
         await db.query(
-            'INSERT INTO Employees (EmployeeID, EmployeeName, Department, Team, Role) VALUES (?, ?, ?, ?, ?)',
-            [EmployeeID, EmployeeName, Department || '', Team || '', role]
+            'INSERT INTO Employees (EmployeeID, EmployeeName, Department, Unit, Team, Position, Role) VALUES (?, ?, ?, ?, ?, ?, ?)',
+            [EmployeeID, EmployeeName, Department || '', Unit || '', Team || '', Position || '', role]
         );
-        await auditLog(req, 'CREATE_EMPLOYEE', 'Employee', EmployeeID, `ชื่อ: ${EmployeeName}, แผนก: ${Department}, Role: ${role}`);
+        await auditLog(req, 'CREATE_EMPLOYEE', 'Employee', EmployeeID, `ชื่อ: ${EmployeeName}, แผนก: ${Department}, หน่วย: ${Unit}, ตำแหน่ง: ${Position}, Role: ${role}`);
         res.json({ success: true, message: 'เพิ่มพนักงานเรียบร้อย' });
     } catch (err) {
         res.status(500).json({ success: false, message: err.message });
@@ -74,17 +74,17 @@ router.post('/employee/create', async (req, res) => {
 
 // PUT /admin/employee/:id  (เปลี่ยนจาก POST เพื่อ RESTful)
 router.put('/employee/:id', async (req, res) => {
-    const { EmployeeName, Department, Team, Role } = req.body;
+    const { EmployeeName, Department, Unit, Team, Position, Role } = req.body;
     const role = ALLOWED_ROLES.includes(Role) ? Role : undefined;
     if (!EmployeeName) {
         return res.status(400).json({ success: false, message: 'กรุณาระบุชื่อพนักงาน' });
     }
     try {
         await db.query(
-            'UPDATE Employees SET EmployeeName = ?, Department = ?, Team = ?, Role = ? WHERE EmployeeID = ?',
-            [EmployeeName, Department || '', Team || '', role || 'User', req.params.id]
+            'UPDATE Employees SET EmployeeName = ?, Department = ?, Unit = ?, Team = ?, Position = ?, Role = ? WHERE EmployeeID = ?',
+            [EmployeeName, Department || '', Unit || '', Team || '', Position || '', role || 'User', req.params.id]
         );
-        await auditLog(req, 'UPDATE_EMPLOYEE', 'Employee', req.params.id, `ชื่อ: ${EmployeeName}, Role: ${role}`);
+        await auditLog(req, 'UPDATE_EMPLOYEE', 'Employee', req.params.id, `ชื่อ: ${EmployeeName}, หน่วย: ${Unit}, ตำแหน่ง: ${Position}, Role: ${role}`);
         res.json({ success: true, message: 'อัปเดตข้อมูลเรียบร้อย' });
     } catch (err) {
         res.status(500).json({ success: false, message: err.message });
@@ -93,12 +93,12 @@ router.put('/employee/:id', async (req, res) => {
 
 // ── keep legacy POST route as alias so old frontend code still works ──────────
 router.post('/employee/update', async (req, res) => {
-    const { EmployeeID, EmployeeName, Department, Team, Role } = req.body;
+    const { EmployeeID, EmployeeName, Department, Unit, Team, Position, Role } = req.body;
     const role = ALLOWED_ROLES.includes(Role) ? Role : 'User';
     try {
         await db.query(
-            'UPDATE Employees SET EmployeeName = ?, Department = ?, Team = ?, Role = ? WHERE EmployeeID = ?',
-            [EmployeeName || '', Department || '', Team || '', role, EmployeeID]
+            'UPDATE Employees SET EmployeeName = ?, Department = ?, Unit = ?, Team = ?, Position = ?, Role = ? WHERE EmployeeID = ?',
+            [EmployeeName || '', Department || '', Unit || '', Team || '', Position || '', role, EmployeeID]
         );
         await auditLog(req, 'UPDATE_EMPLOYEE', 'Employee', EmployeeID, `Role: ${role}`);
         res.json({ success: true, message: 'อัปเดตข้อมูลเรียบร้อย' });
@@ -161,8 +161,10 @@ router.post('/employee/import', upload.single('file'), async (req, res) => {
         for (const row of data) {
             const id   = row['EmployeeID'] || row['ID']   || row['รหัสพนักงาน'];
             const name = row['EmployeeName'] || row['Name'] || row['ชื่อ-นามสกุล'];
-            const dept = row['Department']   || row['Dept'] || row['แผนก'] || '';
-            const team = row['Team']         || row['ทีม']  || '';
+            const dept = row['Department']   || row['Dept'] || row['แผนก']   || '';
+            const unit = row['Unit']         || row['หน่วย']                 || '';
+            const pos  = row['Position']     || row['ตำแหน่ง']               || '';
+            const team = row['Team']         || row['ทีม']                   || '';
             // Whitelist role — reject unknown values, fallback to 'User'
             const rawRole = row['Role'] || row['สิทธิ์'] || '';
             const role    = ALLOWED_ROLES.includes(rawRole) ? rawRole : 'User';
@@ -170,14 +172,16 @@ router.post('/employee/import', upload.single('file'), async (req, res) => {
             if (id && name) {
                 try {
                     await db.query(
-                        `INSERT INTO Employees (EmployeeID, EmployeeName, Department, Team, Role)
-                         VALUES (?, ?, ?, ?, ?)
+                        `INSERT INTO Employees (EmployeeID, EmployeeName, Department, Unit, Team, Position, Role)
+                         VALUES (?, ?, ?, ?, ?, ?, ?)
                          ON DUPLICATE KEY UPDATE
                            EmployeeName = VALUES(EmployeeName),
                            Department   = VALUES(Department),
+                           Unit         = VALUES(Unit),
                            Team         = VALUES(Team),
+                           Position     = VALUES(Position),
                            Role         = VALUES(Role)`,
-                        [id, name, dept, team, role]
+                        [id, name, dept, unit, team, pos, role]
                     );
                     successCount++;
                 } catch (e) {
@@ -199,7 +203,7 @@ router.post('/employee/import', upload.single('file'), async (req, res) => {
 // =============================================================================
 
 // GET /admin/schedules
-router.get('/schedules', async (req, res) => {
+router.get('/schedules', async (_req, res) => {
     try {
         const [rows] = await db.query('SELECT * FROM Patrol_Schedule ORDER BY ScheduledDate DESC');
         res.json({ success: true, data: rows });
@@ -408,6 +412,271 @@ router.get('/system-health', async (_req, res) => {
                 }
             }
         });
+    } catch (err) {
+        res.status(500).json({ success: false, message: err.message });
+    }
+});
+
+// =============================================================================
+// ORGANIZATION — departments + safety units
+// =============================================================================
+
+// One-time migration guard
+let _orgTablesReady = false;
+async function ensureOrgTables() {
+    if (_orgTablesReady) return;
+
+    // Add is_safety_core to Master_Departments if missing
+    try {
+        await db.query('ALTER TABLE Master_Departments ADD COLUMN is_safety_core TINYINT NOT NULL DEFAULT 0');
+    } catch (_) { /* column already exists */ }
+
+    // Safety Units table
+    await db.query(`
+        CREATE TABLE IF NOT EXISTS Master_SafetyUnits (
+            id            INT AUTO_INCREMENT PRIMARY KEY,
+            name          VARCHAR(100) NOT NULL,
+            short_code    VARCHAR(30),
+            department_id INT NOT NULL,
+            sort_order    INT DEFAULT 0,
+            created_at    TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE KEY uq_unit_dept (name, department_id),
+            INDEX idx_dept (department_id)
+        )
+    `);
+
+    _orgTablesReady = true;
+}
+
+// ─── GET /admin/org/departments ──────────────────────────────────────────────
+router.get('/org/departments', async (_req, res) => {
+    try {
+        await ensureOrgTables();
+        const [rows] = await db.query(`
+            SELECT d.id, d.Name, d.is_safety_core,
+                   COUNT(u.id) AS unit_count
+            FROM   Master_Departments d
+            LEFT JOIN Master_SafetyUnits u ON u.department_id = d.id
+            GROUP BY d.id, d.Name, d.is_safety_core
+            ORDER BY d.Name ASC
+        `);
+        res.json({ success: true, data: rows });
+    } catch (err) {
+        res.status(500).json({ success: false, message: err.message });
+    }
+});
+
+// ─── PUT /admin/org/departments/:id — toggle is_safety_core + rename ─────────
+router.put('/org/departments/:id', async (req, res) => {
+    try {
+        await ensureOrgTables();
+        const { Name, is_safety_core } = req.body;
+        if (!Name) return res.status(400).json({ success: false, message: 'กรุณาระบุชื่อแผนก' });
+        const flag = is_safety_core ? 1 : 0;
+        await db.query(
+            'UPDATE Master_Departments SET Name=?, is_safety_core=? WHERE id=?',
+            [Name, flag, req.params.id]
+        );
+        await auditLog(req, 'UPDATE_DEPT_ORG', 'Department', req.params.id,
+            `Name: ${Name}, is_safety_core: ${flag}`);
+        res.json({ success: true, message: 'อัปเดตข้อมูลแผนกสำเร็จ' });
+    } catch (err) {
+        res.status(500).json({ success: false, message: err.message });
+    }
+});
+
+// ─── GET /admin/org/units  (all) ─────────────────────────────────────────────
+router.get('/org/units', async (_req, res) => {
+    try {
+        await ensureOrgTables();
+        const [rows] = await db.query(
+            'SELECT * FROM Master_SafetyUnits ORDER BY department_id, sort_order, name ASC'
+        );
+        res.json({ success: true, data: rows });
+    } catch (err) {
+        res.status(500).json({ success: false, message: err.message });
+    }
+});
+
+// ─── GET /admin/org/units/:deptId  (per dept) ────────────────────────────────
+router.get('/org/units/:deptId', async (req, res) => {
+    try {
+        await ensureOrgTables();
+        const [rows] = await db.query(
+            'SELECT * FROM Master_SafetyUnits WHERE department_id=? ORDER BY sort_order, name ASC',
+            [req.params.deptId]
+        );
+        res.json({ success: true, data: rows });
+    } catch (err) {
+        res.status(500).json({ success: false, message: err.message });
+    }
+});
+
+// ─── POST /admin/org/units — add unit ────────────────────────────────────────
+router.post('/org/units', async (req, res) => {
+    try {
+        await ensureOrgTables();
+        const { name, short_code, department_id, sort_order } = req.body;
+        if (!name || !department_id)
+            return res.status(400).json({ success: false, message: 'กรุณาระบุชื่อ unit และ department_id' });
+        await db.query(
+            'INSERT INTO Master_SafetyUnits (name, short_code, department_id, sort_order) VALUES (?,?,?,?)',
+            [name, short_code || '', department_id, parseInt(sort_order) || 0]
+        );
+        await auditLog(req, 'CREATE_SAFETY_UNIT', 'SafetyUnit', name, `dept: ${department_id}`);
+        res.json({ success: true, message: 'เพิ่ม Safety Unit สำเร็จ' });
+    } catch (err) {
+        if (err.code === 'ER_DUP_ENTRY')
+            return res.status(400).json({ success: false, message: 'ชื่อ unit นี้มีอยู่ใน department แล้ว' });
+        res.status(500).json({ success: false, message: err.message });
+    }
+});
+
+// ─── PUT /admin/org/units/:id — edit unit ────────────────────────────────────
+router.put('/org/units/:id', async (req, res) => {
+    try {
+        await ensureOrgTables();
+        const { name, short_code, sort_order } = req.body;
+        if (!name) return res.status(400).json({ success: false, message: 'กรุณาระบุชื่อ unit' });
+        await db.query(
+            'UPDATE Master_SafetyUnits SET name=?, short_code=?, sort_order=? WHERE id=?',
+            [name, short_code || '', parseInt(sort_order) || 0, req.params.id]
+        );
+        await auditLog(req, 'UPDATE_SAFETY_UNIT', 'SafetyUnit', req.params.id, `name: ${name}`);
+        res.json({ success: true, message: 'แก้ไข Safety Unit สำเร็จ' });
+    } catch (err) {
+        res.status(500).json({ success: false, message: err.message });
+    }
+});
+
+// ─── DELETE /admin/org/units/:id — delete unit ───────────────────────────────
+router.delete('/org/units/:id', async (req, res) => {
+    try {
+        await db.query('DELETE FROM Master_SafetyUnits WHERE id=?', [req.params.id]);
+        await auditLog(req, 'DELETE_SAFETY_UNIT', 'SafetyUnit', req.params.id, null);
+        res.json({ success: true, message: 'ลบ Safety Unit สำเร็จ' });
+    } catch (err) {
+        res.status(500).json({ success: false, message: err.message });
+    }
+});
+
+// =============================================================================
+// PERMISSIONS — role matrix + per-user overrides
+// =============================================================================
+
+const ALL_PERMISSIONS = [
+    'VIEW_DASHBOARD', 'MANAGE_USERS', 'VIEW_REPORT',
+    'APPROVE_SAFETY', 'SUBMIT_SAFETY',
+];
+const ALL_ROLES = ['ADMIN', 'EXECUTIVE', 'MANAGER', 'STAFF', 'SAFETY_OFFICER'];
+
+// Role display labels
+const ROLE_LABELS = {
+    ADMIN:          'Admin',
+    EXECUTIVE:      'Executive',
+    MANAGER:        'Manager',
+    STAFF:          'Staff',
+    SAFETY_OFFICER: 'Safety Officer',
+};
+
+let _permTablesReady = false;
+async function ensurePermTables() {
+    if (_permTablesReady) return;
+
+    await db.query(`
+        CREATE TABLE IF NOT EXISTS Admin_RolePermissions (
+            id         INT AUTO_INCREMENT PRIMARY KEY,
+            role       VARCHAR(50)  NOT NULL,
+            permission VARCHAR(80)  NOT NULL,
+            granted    TINYINT      NOT NULL DEFAULT 1,
+            updated_at TIMESTAMP    DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+            UNIQUE KEY uq_role_perm (role, permission)
+        )
+    `);
+
+    await db.query(`
+        CREATE TABLE IF NOT EXISTS Admin_UserPermissions (
+            id         INT AUTO_INCREMENT PRIMARY KEY,
+            employee_id VARCHAR(50) NOT NULL,
+            permission  VARCHAR(80) NOT NULL,
+            granted     TINYINT     NOT NULL DEFAULT 1,
+            updated_at  TIMESTAMP   DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+            UNIQUE KEY uq_user_perm (employee_id, permission)
+        )
+    `);
+
+    // Seed defaults: ADMIN gets all; EXECUTIVE gets VIEW_*; MANAGER gets VIEW_* + SUBMIT; STAFF gets SUBMIT; SAFETY_OFFICER gets all except MANAGE_USERS
+    const defaults = [
+        ['ADMIN',          'VIEW_DASHBOARD', 1],
+        ['ADMIN',          'MANAGE_USERS',   1],
+        ['ADMIN',          'VIEW_REPORT',    1],
+        ['ADMIN',          'APPROVE_SAFETY', 1],
+        ['ADMIN',          'SUBMIT_SAFETY',  1],
+        ['EXECUTIVE',      'VIEW_DASHBOARD', 1],
+        ['EXECUTIVE',      'VIEW_REPORT',    1],
+        ['EXECUTIVE',      'APPROVE_SAFETY', 1],
+        ['EXECUTIVE',      'MANAGE_USERS',   0],
+        ['EXECUTIVE',      'SUBMIT_SAFETY',  0],
+        ['MANAGER',        'VIEW_DASHBOARD', 1],
+        ['MANAGER',        'VIEW_REPORT',    1],
+        ['MANAGER',        'SUBMIT_SAFETY',  1],
+        ['MANAGER',        'APPROVE_SAFETY', 0],
+        ['MANAGER',        'MANAGE_USERS',   0],
+        ['STAFF',          'VIEW_DASHBOARD', 1],
+        ['STAFF',          'SUBMIT_SAFETY',  1],
+        ['STAFF',          'VIEW_REPORT',    0],
+        ['STAFF',          'APPROVE_SAFETY', 0],
+        ['STAFF',          'MANAGE_USERS',   0],
+        ['SAFETY_OFFICER', 'VIEW_DASHBOARD', 1],
+        ['SAFETY_OFFICER', 'VIEW_REPORT',    1],
+        ['SAFETY_OFFICER', 'APPROVE_SAFETY', 1],
+        ['SAFETY_OFFICER', 'SUBMIT_SAFETY',  1],
+        ['SAFETY_OFFICER', 'MANAGE_USERS',   0],
+    ];
+    for (const [role, perm, granted] of defaults) {
+        await db.query(
+            'INSERT IGNORE INTO Admin_RolePermissions (role, permission, granted) VALUES (?,?,?)',
+            [role, perm, granted]
+        );
+    }
+
+    _permTablesReady = true;
+}
+
+// ─── GET /admin/permissions/matrix ───────────────────────────────────────────
+router.get('/permissions/matrix', async (_req, res) => {
+    try {
+        await ensurePermTables();
+        const [rows] = await db.query('SELECT role, permission, granted FROM Admin_RolePermissions');
+        // Shape: { ADMIN: { VIEW_DASHBOARD: 1, ... }, ... }
+        const matrix = {};
+        ALL_ROLES.forEach(r => {
+            matrix[r] = {};
+            ALL_PERMISSIONS.forEach(p => { matrix[r][p] = 0; });
+        });
+        rows.forEach(row => {
+            if (matrix[row.role]) matrix[row.role][row.permission] = row.granted;
+        });
+        res.json({ success: true, data: { matrix, roles: ALL_ROLES, permissions: ALL_PERMISSIONS, roleLabels: ROLE_LABELS } });
+    } catch (err) {
+        res.status(500).json({ success: false, message: err.message });
+    }
+});
+
+// ─── PUT /admin/permissions/matrix — bulk update ──────────────────────────────
+router.put('/permissions/matrix', async (req, res) => {
+    try {
+        await ensurePermTables();
+        const { role, permission, granted } = req.body;
+        if (!ALL_ROLES.includes(role) || !ALL_PERMISSIONS.includes(permission))
+            return res.status(400).json({ success: false, message: 'role หรือ permission ไม่ถูกต้อง' });
+        await db.query(
+            'INSERT INTO Admin_RolePermissions (role, permission, granted) VALUES (?,?,?) ON DUPLICATE KEY UPDATE granted=VALUES(granted)',
+            [role, permission, granted ? 1 : 0]
+        );
+        await auditLog(req, 'UPDATE_PERMISSION', 'RolePermission', `${role}:${permission}`,
+            `granted: ${granted ? 1 : 0}`);
+        res.json({ success: true, message: 'อัปเดต permission สำเร็จ' });
     } catch (err) {
         res.status(500).json({ success: false, message: err.message });
     }

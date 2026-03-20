@@ -61,6 +61,8 @@ export async function loadHiyariPage() {
     const user = TSHSession.getUser() || {};
     _isAdmin = user.role === 'Admin' || user.Role === 'Admin';
 
+    window.closeModal = closeModal;
+
     container.innerHTML = buildShell();
 
     if (!_listenersReady) {
@@ -75,49 +77,75 @@ export async function loadHiyariPage() {
     } catch (_) { _departments = []; }
 
     switchTab(_activeTab);
+    _loadHeroStats();   // async — fills stats strip without blocking tab render
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// TAB CONFIG
+// ─────────────────────────────────────────────────────────────────────────────
+function _getTabs() {
+    return [
+        { id: 'dashboard', label: 'Dashboard',     icon: `<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"/>` },
+        { id: 'submit',    label: 'รายงานใหม่',   icon: `<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8"/>` },
+        { id: 'history',   label: 'ประวัติ',       icon: `<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"/>` },
+        ...(_isAdmin ? [{ id: 'manage', label: 'จัดการ', icon: `<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/>` }] : []),
+    ];
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
 // SHELL
 // ─────────────────────────────────────────────────────────────────────────────
 function buildShell() {
-    const tabs = [
-        { id: 'dashboard', label: 'Dashboard' },
-        { id: 'submit',    label: 'รายงานใหม่' },
-        { id: 'history',   label: 'ประวัติรายงาน' },
-        ...(_isAdmin ? [{ id: 'manage', label: 'จัดการ (Admin)' }] : []),
-    ];
+    const tabHtml = _getTabs().map(t => `
+        <button id="hiyari-tab-btn-${t.id}" data-tab="${t.id}"
+            class="hiyari-tab flex items-center gap-1.5 px-4 py-3 text-xs font-semibold whitespace-nowrap transition-all border-b-2 border-transparent text-white/70 hover:text-white hover:border-white/40">
+            <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">${t.icon}</svg>
+            ${t.label}
+        </button>`).join('');
 
     return `
-    <div class="max-w-6xl mx-auto space-y-5 animate-fade-in pb-10">
+    <div class="space-y-6 animate-fade-in pb-10">
 
-        <!-- Header -->
-        <div>
-            <h1 class="text-2xl font-bold text-slate-800 flex items-center gap-2.5">
-                <span class="w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0"
-                      style="background:linear-gradient(135deg,#f97316,#ef4444);box-shadow:0 2px 10px rgba(249,115,22,0.3)">
-                    <svg class="w-5 h-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                          d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/>
-                    </svg>
-                </span>
-                Hiyari-Hatto
-            </h1>
-            <p class="text-sm text-slate-500 mt-1 ml-11">รายงานเหตุการณ์เฉียดอุบัติเหตุ (Near Miss) · Thai Summit Harness Co., Ltd.</p>
-        </div>
+        <!-- ═══ HERO HEADER ═══ -->
+        <div class="relative overflow-hidden rounded-2xl" style="background:linear-gradient(135deg,#064e3b 0%,#065f46 55%,#0d9488 100%)">
+            <!-- dot pattern -->
+            <div class="absolute inset-0 opacity-10 pointer-events-none">
+                <svg width="100%" height="100%"><defs><pattern id="hiyari-dots" width="24" height="24" patternUnits="userSpaceOnUse"><circle cx="12" cy="12" r="1.3" fill="white"/></pattern></defs><rect width="100%" height="100%" fill="url(#hiyari-dots)"/></svg>
+            </div>
+            <!-- glow orb -->
+            <div class="absolute -right-10 -top-10 w-52 h-52 rounded-full opacity-10 pointer-events-none"
+                 style="background:radial-gradient(circle,#fff,transparent 70%)"></div>
 
-        <!-- Tabs -->
-        <div class="flex gap-1 p-1 rounded-xl w-fit" style="background:#f1f5f9">
-            ${tabs.map(t => `
-            <button data-tab="${t.id}"
-                    class="hiyari-tab px-4 py-2 rounded-lg text-sm font-medium transition-all
-                           ${_activeTab === t.id ? 'bg-white shadow-sm text-orange-600 font-semibold' : 'text-slate-500 hover:text-slate-700'}">
-                ${t.label}
-            </button>`).join('')}
+            <div class="relative z-10 p-6">
+                <!-- Title row -->
+                <div class="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 mb-5">
+                    <div>
+                        <div class="flex items-center gap-2 mb-2">
+                            <span class="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold bg-white/20 text-white border border-white/30">
+                                <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                          d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/>
+                                </svg>
+                                Hiyari-Hatto
+                            </span>
+                        </div>
+                        <h1 class="text-xl md:text-2xl font-bold text-white leading-snug">รายงานเหตุการณ์เฉียดอุบัติเหตุ</h1>
+                        <p class="text-sm mt-1" style="color:rgba(167,243,208,0.85)">Near Miss Reporting · Thai Summit Harness Co., Ltd.</p>
+                    </div>
+                    <!-- Stats strip -->
+                    <div id="hiyari-hero-stats" class="grid grid-cols-2 md:grid-cols-4 gap-3 w-full md:w-auto flex-shrink-0"></div>
+                </div>
+
+                <!-- Tab bar -->
+                <div class="flex overflow-x-auto gap-0 -mb-px scrollbar-none">
+                    ${tabHtml}
+                </div>
+            </div>
         </div>
 
         <!-- Tab Content -->
-        <div id="hiyari-tab-content"></div>
+        <div id="hiyari-tab-content" class="min-h-[400px]"></div>
+
     </div>`;
 }
 
@@ -126,21 +154,67 @@ function buildShell() {
 // ─────────────────────────────────────────────────────────────────────────────
 async function switchTab(tab) {
     _activeTab = tab;
-    document.querySelectorAll('.hiyari-tab').forEach(btn => {
-        const active = btn.dataset.tab === tab;
-        btn.className = `hiyari-tab px-4 py-2 rounded-lg text-sm font-medium transition-all ${
-            active ? 'bg-white shadow-sm text-orange-600 font-semibold' : 'text-slate-500 hover:text-slate-700'
-        }`;
+
+    const active   = 'hiyari-tab flex items-center gap-1.5 px-4 py-3 text-xs font-bold whitespace-nowrap transition-all border-b-2 border-white text-white';
+    const inactive = 'hiyari-tab flex items-center gap-1.5 px-4 py-3 text-xs font-semibold whitespace-nowrap transition-all border-b-2 border-transparent text-white/70 hover:text-white hover:border-white/40';
+
+    _getTabs().forEach(t => {
+        const btn = document.getElementById(`hiyari-tab-btn-${t.id}`);
+        if (!btn) return;
+        btn.className = t.id === tab ? active : inactive;
+        btn.innerHTML = `<svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">${t.icon}</svg>${t.label}`;
     });
 
     const content = document.getElementById('hiyari-tab-content');
     if (!content) return;
+
+    content.innerHTML = `
+        <div class="flex flex-col items-center justify-center py-20 text-slate-400">
+            <div class="animate-spin rounded-full h-9 w-9 border-4 border-emerald-500 border-t-transparent mb-3"></div>
+            <p class="text-sm">กำลังโหลด...</p>
+        </div>`;
 
     switch (tab) {
         case 'dashboard': await renderDashboard(content); break;
         case 'submit':    renderSubmitForm(content);      break;
         case 'history':   await renderHistory(content);  break;
         case 'manage':    await renderManage(content);   break;
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// HERO STATS STRIP
+// ─────────────────────────────────────────────────────────────────────────────
+async function _loadHeroStats() {
+    const strip = document.getElementById('hiyari-hero-stats');
+    if (!strip) return;
+
+    // Skeleton while loading
+    strip.innerHTML = [1,2,3,4].map(() => `
+        <div class="rounded-xl px-4 py-3 text-center animate-pulse" style="background:rgba(255,255,255,0.12);min-width:80px">
+            <div class="h-7 bg-white/20 rounded-lg mb-1.5 mx-auto w-10"></div>
+            <div class="h-3 bg-white/15 rounded w-14 mx-auto"></div>
+        </div>`).join('');
+
+    try {
+        const year = new Date().getFullYear();
+        const res  = await API.get(`/hiyari/stats?year=${year}`);
+        const kpi  = res?.data?.kpi || {};
+
+        const stats = [
+            { value: kpi.total      ?? '—', label: 'ทั้งหมด',       color: '#6ee7b7' },
+            { value: kpi.open       ?? '—', label: 'รอดำเนินการ',    color: '#6ee7b7' },
+            { value: kpi.inProgress ?? '—', label: 'กำลังดำเนินการ', color: (kpi.inProgress > 0) ? '#fde68a' : '#6ee7b7' },
+            { value: kpi.closed     ?? '—', label: 'ปิดแล้ว',        color: '#6ee7b7' },
+        ];
+
+        strip.innerHTML = stats.map(s => `
+            <div class="rounded-xl px-4 py-3 text-center" style="background:rgba(255,255,255,0.12);backdrop-filter:blur(6px);min-width:80px">
+                <p class="text-2xl font-bold" style="color:${s.color}">${s.value}</p>
+                <p class="text-[11px] mt-0.5" style="color:rgba(167,243,208,0.85)">${s.label}</p>
+            </div>`).join('');
+    } catch {
+        strip.innerHTML = '';
     }
 }
 

@@ -19,6 +19,8 @@ export async function loadTrainingPage() {
     const user = TSHSession.getUser();
     _isAdmin = user?.role === 'Admin' || user?.Role === 'Admin';
 
+    window.closeModal = UI.closeModal;
+
     container.innerHTML = _spinnerHtml();
     await Promise.all([_fetchSummary(), _fetchCourses()]);
     _renderPage(container);
@@ -63,63 +65,82 @@ function _renderPage(container) {
     const curYear = new Date().getFullYear();
     for (let y = curYear; y >= curYear - 4; y--) years.push(y);
 
+    const trTabs = [
+        { key: 'dashboard', label: 'ภาพรวม',      icon: `<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"/>` },
+        { key: 'records',   label: 'รายละเอียด',  icon: `<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/>` },
+    ];
+
     container.innerHTML = `
-    <div class="max-w-5xl mx-auto space-y-6 animate-fade-in pb-10">
+    <div class="space-y-6 animate-fade-in pb-10">
 
-        <!-- Page Header -->
-        <div class="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
-            <div>
-                <h1 class="text-2xl font-bold text-slate-800 flex items-center gap-2.5">
-                    <span class="w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0"
-                          style="background:linear-gradient(135deg,#059669,#0d9488);box-shadow:0 2px 10px rgba(5,150,105,0.3)">
-                        <svg class="w-5 h-5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                                  d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253"/>
-                        </svg>
-                    </span>
-                    Safety Training
-                </h1>
-                <p class="text-sm text-slate-500 mt-1 ml-11">บันทึกและติดตามผลการอบรมความปลอดภัย</p>
+        <!-- ═══ HERO HEADER ═══ -->
+        <div class="relative overflow-hidden rounded-2xl" style="background:linear-gradient(135deg,#064e3b 0%,#065f46 55%,#0d9488 100%)">
+            <div class="absolute inset-0 opacity-10 pointer-events-none">
+                <svg width="100%" height="100%"><defs><pattern id="tr-dots" width="24" height="24" patternUnits="userSpaceOnUse"><circle cx="12" cy="12" r="1.3" fill="white"/></pattern></defs><rect width="100%" height="100%" fill="url(#tr-dots)"/></svg>
             </div>
-            <div class="flex items-center gap-2 flex-wrap">
-                <!-- Year Filter -->
-                <select id="tr-year-filter" onchange="window._trSetYear()"
-                    class="form-input text-sm py-1.5 px-3">
-                    ${years.map(y => `<option value="${y}" ${y === _year ? 'selected' : ''}>${y}</option>`).join('')}
-                </select>
-                ${_isAdmin ? `
-                <button onclick="window._trOpenRecordForm()" class="btn btn-primary flex items-center gap-2 text-sm px-4 py-2">
-                    <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/>
-                    </svg>
-                    บันทึกผลอบรม
-                </button>
-                <button onclick="window._trOpenCourseForm()" class="btn btn-secondary flex items-center gap-2 text-sm px-4 py-2">
-                    <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                              d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"/>
-                    </svg>
-                    จัดการหลักสูตร
-                </button>` : ''}
-            </div>
-        </div>
+            <div class="absolute -right-10 -top-10 w-52 h-52 rounded-full opacity-10 pointer-events-none"
+                 style="background:radial-gradient(circle,#fff,transparent 70%)"></div>
 
-        <!-- Tabs -->
-        <div class="flex border-b border-slate-200 gap-1">
-            ${[
-                { key: 'dashboard', label: 'ภาพรวม', icon: 'M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z' },
-                { key: 'records',   label: 'รายละเอียด', icon: 'M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z' },
-            ].map(t => `
-                <button onclick="window._trSetTab('${t.key}')"
-                    class="tr-tab-btn flex items-center gap-1.5 px-4 py-2.5 text-sm font-semibold border-b-2 transition-colors ${_activeTab === t.key
-                        ? 'border-emerald-500 text-emerald-600'
-                        : 'border-transparent text-slate-500 hover:text-slate-700'}"
-                    data-tab="${t.key}">
-                    <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="${t.icon}"/>
-                    </svg>
-                    ${t.label}
-                </button>`).join('')}
+            <div class="relative z-10 p-6">
+                <div class="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 mb-5">
+                    <div>
+                        <div class="flex items-center gap-2 mb-2">
+                            <span class="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold bg-white/20 text-white border border-white/30">
+                                <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                          d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253"/>
+                                </svg>
+                                Safety Training
+                            </span>
+                        </div>
+                        <h1 class="text-xl md:text-2xl font-bold text-white leading-snug">บันทึกและติดตามผลการอบรม</h1>
+                        <p class="text-sm mt-1" style="color:rgba(167,243,208,0.85)">Training Status · Thai Summit Harness Co., Ltd.</p>
+                    </div>
+                    <div class="flex flex-col sm:flex-row items-start sm:items-center gap-3 flex-shrink-0 w-full md:w-auto">
+                        <!-- Stats strip (data already loaded) -->
+                        <div class="grid grid-cols-2 sm:grid-cols-4 gap-3 w-full sm:w-auto">
+                            ${[
+                                { value: trainees, label: 'ผู้เข้าอบรม',  color: '#6ee7b7' },
+                                { value: total,    label: 'รายการทั้งหมด', color: '#6ee7b7' },
+                                { value: passed,   label: 'ผ่าน',         color: passed > 0 ? '#6ee7b7' : '#6ee7b7' },
+                                { value: pct + '%',label: 'Pass Rate',    color: pct >= 80 ? '#6ee7b7' : pct >= 60 ? '#fde68a' : '#fca5a5' },
+                            ].map(s => `
+                            <div class="rounded-xl px-4 py-3 text-center" style="background:rgba(255,255,255,0.12);backdrop-filter:blur(6px);min-width:80px">
+                                <p class="text-2xl font-bold" style="color:${s.color}">${s.value}</p>
+                                <p class="text-[11px] mt-0.5" style="color:rgba(167,243,208,0.85)">${s.label}</p>
+                            </div>`).join('')}
+                        </div>
+                        <!-- Actions -->
+                        <div class="flex items-center gap-2 flex-shrink-0">
+                            <select id="tr-year-filter" onchange="window._trSetYear()"
+                                class="rounded-xl px-3 py-2 text-xs font-semibold text-white border border-white/30 bg-white/15 outline-none">
+                                ${years.map(y => `<option value="${y}" ${y === _year ? 'selected' : ''} class="text-slate-800 bg-white">${y}</option>`).join('')}
+                            </select>
+                            ${_isAdmin ? `
+                            <button onclick="window._trOpenRecordForm()"
+                                class="flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-bold text-white border border-white/30 bg-white/15 hover:bg-white/25 transition-all whitespace-nowrap">
+                                <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/></svg>
+                                บันทึกอบรม
+                            </button>
+                            <button onclick="window._trOpenCourseForm()"
+                                class="flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-bold text-white border border-white/30 bg-white/15 hover:bg-white/25 transition-all whitespace-nowrap">
+                                <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"/></svg>
+                                หลักสูตร
+                            </button>` : ''}
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Tab bar -->
+                <div class="flex overflow-x-auto gap-0 -mb-px scrollbar-none">
+                    ${trTabs.map(t => `
+                    <button id="tr-tab-btn-${t.key}" onclick="window._trSetTab('${t.key}')" data-tab="${t.key}"
+                        class="tr-tab-btn flex items-center gap-1.5 px-4 py-3 text-xs font-${_activeTab === t.key ? 'bold' : 'semibold'} whitespace-nowrap transition-all border-b-2 ${_activeTab === t.key ? 'border-white text-white' : 'border-transparent text-white/70 hover:text-white hover:border-white/40'}">
+                        <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">${t.icon}</svg>
+                        ${t.label}
+                    </button>`).join('')}
+                </div>
+            </div>
         </div>
 
         <!-- Tab Panels -->
@@ -482,14 +503,14 @@ async function _loadAndRenderRecords() {
 // ─── Tab & Filter Handlers ─────────────────────────────────────────────────────
 window._trSetTab = async function(tab) {
     _activeTab = tab;
+
+    const active   = 'tr-tab-btn flex items-center gap-1.5 px-4 py-3 text-xs font-bold whitespace-nowrap transition-all border-b-2 border-white text-white';
+    const inactive = 'tr-tab-btn flex items-center gap-1.5 px-4 py-3 text-xs font-semibold whitespace-nowrap transition-all border-b-2 border-transparent text-white/70 hover:text-white hover:border-white/40';
+
     document.querySelectorAll('.tr-tab-btn').forEach(btn => {
-        const isActive = btn.dataset.tab === tab;
-        btn.className = btn.className.replace(
-            /border-emerald-500 text-emerald-600|border-transparent text-slate-500 hover:text-slate-700/g, ''
-        ).trim() + (isActive
-            ? ' border-emerald-500 text-emerald-600'
-            : ' border-transparent text-slate-500 hover:text-slate-700');
+        btn.className = btn.dataset.tab === tab ? active : inactive;
     });
+
     document.querySelectorAll('[id^="tr-panel-"]').forEach(p => p.classList.add('hidden'));
     const panel = document.getElementById(`tr-panel-${tab}`);
     if (panel) panel.classList.remove('hidden');

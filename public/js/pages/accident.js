@@ -47,6 +47,8 @@ export async function loadAccidentPage() {
     const user = TSHSession.getUser();
     _isAdmin = user?.role === 'Admin' || user?.Role === 'Admin';
 
+    window.closeModal = UI.closeModal;
+
     container.innerHTML = _spinnerHtml();
     await Promise.all([_fetchSummary(), _fetchAnalytics()]);
     _renderPage(container);
@@ -87,55 +89,83 @@ function _renderPage(container) {
     const curYear = new Date().getFullYear();
     for (let y = curYear; y >= curYear - 4; y--) years.push(y);
 
+    // Pre-compute stats from already-loaded _summary
+    const kpiS      = _summary?.kpi || {};
+    const daysSince = _summary?.daysSince ?? '—';
+
+    const accTabs = [
+        { key: 'dashboard', label: 'ภาพรวม',        icon: `<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"/>` },
+        { key: 'analytics', label: 'วิเคราะห์',     icon: `<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 12l3-3 3 3 4-4M8 21l4-4 4 4M3 4h18M4 4h16v12a1 1 0 01-1 1H5a1 1 0 01-1-1V4z"/>` },
+        { key: 'reports',   label: 'รายงานทั้งหมด', icon: `<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/>` },
+    ];
+
     container.innerHTML = `
-    <div class="max-w-5xl mx-auto space-y-6 animate-fade-in pb-10">
+    <div class="space-y-6 animate-fade-in pb-10">
 
-        <!-- Page Header -->
-        <div class="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
-            <div>
-                <h1 class="text-2xl font-bold text-slate-800 flex items-center gap-2.5">
-                    <span class="w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0"
-                          style="background:linear-gradient(135deg,#dc2626,#b91c1c);box-shadow:0 2px 10px rgba(220,38,38,0.3)">
-                        <svg class="w-5 h-5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                                  d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/>
-                        </svg>
-                    </span>
-                    รายงานอุบัติเหตุ
-                </h1>
-                <p class="text-sm text-slate-500 mt-1 ml-11">Accident Report &amp; Safety Analytics · Thai Summit Harness</p>
+        <!-- ═══ HERO HEADER ═══ -->
+        <div class="relative overflow-hidden rounded-2xl" style="background:linear-gradient(135deg,#064e3b 0%,#065f46 55%,#0d9488 100%)">
+            <div class="absolute inset-0 opacity-10 pointer-events-none">
+                <svg width="100%" height="100%"><defs><pattern id="acc-dots" width="24" height="24" patternUnits="userSpaceOnUse"><circle cx="12" cy="12" r="1.3" fill="white"/></pattern></defs><rect width="100%" height="100%" fill="url(#acc-dots)"/></svg>
             </div>
-            <div class="flex items-center gap-2 flex-wrap">
-                <select id="acc-year-filter" onchange="window._accSetYear()" class="form-input text-sm py-1.5 px-3">
-                    ${years.map(y => `<option value="${y}" ${y === _year ? 'selected' : ''}>${y}</option>`).join('')}
-                </select>
-                ${_isAdmin ? `
-                <button onclick="window._accOpenForm()" class="btn btn-primary flex items-center gap-2 text-sm px-4 py-2"
-                        style="background:linear-gradient(135deg,#dc2626,#b91c1c);box-shadow:0 2px 8px rgba(220,38,38,0.3)">
-                    <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/>
-                    </svg>
-                    บันทึกอุบัติเหตุ
-                </button>` : ''}
-            </div>
-        </div>
+            <div class="absolute -right-10 -top-10 w-52 h-52 rounded-full opacity-10 pointer-events-none"
+                 style="background:radial-gradient(circle,#fff,transparent 70%)"></div>
 
-        <!-- Tabs -->
-        <div class="flex border-b border-slate-200 gap-1">
-            ${[
-                { key: 'dashboard', label: 'ภาพรวม',     icon: 'M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z' },
-                { key: 'analytics', label: 'วิเคราะห์',  icon: 'M7 12l3-3 3 3 4-4M8 21l4-4 4 4M3 4h18M4 4h16v12a1 1 0 01-1 1H5a1 1 0 01-1-1V4z' },
-                { key: 'reports',   label: 'รายงานทั้งหมด', icon: 'M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z' },
-            ].map(t => `
-                <button onclick="window._accSetTab('${t.key}')"
-                    class="acc-tab-btn flex items-center gap-1.5 px-4 py-2.5 text-sm font-semibold border-b-2 transition-colors
-                    ${_activeTab === t.key ? 'border-red-500 text-red-600' : 'border-transparent text-slate-500 hover:text-slate-700'}"
-                    data-tab="${t.key}">
-                    <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="${t.icon}"/>
-                    </svg>
-                    ${t.label}
-                </button>`).join('')}
+            <div class="relative z-10 p-6">
+                <div class="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 mb-5">
+                    <div>
+                        <div class="flex items-center gap-2 mb-2">
+                            <span class="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold bg-white/20 text-white border border-white/30">
+                                <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                          d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/>
+                                </svg>
+                                Accident Report
+                            </span>
+                        </div>
+                        <h1 class="text-xl md:text-2xl font-bold text-white leading-snug">รายงานอุบัติเหตุ &amp; Safety Analytics</h1>
+                        <p class="text-sm mt-1" style="color:rgba(167,243,208,0.85)">Accident Report · Thai Summit Harness Co., Ltd.</p>
+                    </div>
+                    <div class="flex flex-col sm:flex-row items-start sm:items-center gap-3 flex-shrink-0 w-full md:w-auto">
+                        <!-- Stats strip (immediate — data already loaded) -->
+                        <div class="grid grid-cols-2 sm:grid-cols-4 gap-3 w-full sm:w-auto">
+                            ${[
+                                { value: daysSince,             label: 'วันปลอดอุบัติ',  color: (typeof daysSince === 'number' && daysSince < 30) ? '#fca5a5' : '#6ee7b7' },
+                                { value: kpiS.total      ?? '—', label: 'รวมทั้งหมด',    color: '#6ee7b7' },
+                                { value: kpiS.recordable ?? '—', label: 'Recordable',    color: '#6ee7b7' },
+                                { value: kpiS.nearMiss   ?? '—', label: 'Near Miss',     color: '#6ee7b7' },
+                            ].map(s => `
+                            <div class="rounded-xl px-4 py-3 text-center" style="background:rgba(255,255,255,0.12);backdrop-filter:blur(6px);min-width:80px">
+                                <p class="text-2xl font-bold" style="color:${s.color}">${s.value}</p>
+                                <p class="text-[11px] mt-0.5" style="color:rgba(167,243,208,0.85)">${s.label}</p>
+                            </div>`).join('')}
+                        </div>
+                        <div class="flex items-center gap-2 flex-shrink-0">
+                            <select id="acc-year-filter" onchange="window._accSetYear()"
+                                class="rounded-xl px-3 py-2 text-xs font-semibold text-white border border-white/30 bg-white/15 outline-none">
+                                ${years.map(y => `<option value="${y}" ${y === _year ? 'selected' : ''} class="text-slate-800 bg-white">${y}</option>`).join('')}
+                            </select>
+                            ${_isAdmin ? `
+                            <button onclick="window._accOpenForm()"
+                                class="flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-bold text-white border border-white/30 bg-white/15 hover:bg-white/25 transition-all whitespace-nowrap">
+                                <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/>
+                                </svg>
+                                บันทึกอุบัติเหตุ
+                            </button>` : ''}
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Tab bar -->
+                <div class="flex overflow-x-auto gap-0 -mb-px scrollbar-none">
+                    ${accTabs.map(t => `
+                    <button id="acc-tab-btn-${t.key}" onclick="window._accSetTab('${t.key}')" data-tab="${t.key}"
+                        class="acc-tab-btn flex items-center gap-1.5 px-4 py-3 text-xs font-${_activeTab === t.key ? 'bold' : 'semibold'} whitespace-nowrap transition-all border-b-2 ${_activeTab === t.key ? 'border-white text-white' : 'border-transparent text-white/70 hover:text-white hover:border-white/40'}">
+                        <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">${t.icon}</svg>
+                        ${t.label}
+                    </button>`).join('')}
+                </div>
+            </div>
         </div>
 
         <!-- Tab Panels -->
@@ -602,12 +632,14 @@ async function _loadAndRenderReports() {
 // ─── Tab & Filter Handlers ─────────────────────────────────────────────────────
 window._accSetTab = async function(tab) {
     _activeTab = tab;
+
+    const active   = 'acc-tab-btn flex items-center gap-1.5 px-4 py-3 text-xs font-bold whitespace-nowrap transition-all border-b-2 border-white text-white';
+    const inactive = 'acc-tab-btn flex items-center gap-1.5 px-4 py-3 text-xs font-semibold whitespace-nowrap transition-all border-b-2 border-transparent text-white/70 hover:text-white hover:border-white/40';
+
     document.querySelectorAll('.acc-tab-btn').forEach(btn => {
-        const active = btn.dataset.tab === tab;
-        btn.className = btn.className
-            .replace(/border-red-500 text-red-600|border-transparent text-slate-500 hover:text-slate-700/g, '').trim()
-            + (active ? ' border-red-500 text-red-600' : ' border-transparent text-slate-500 hover:text-slate-700');
+        btn.className = btn.dataset.tab === tab ? active : inactive;
     });
+
     document.querySelectorAll('[id^="acc-panel-"]').forEach(p => p.classList.add('hidden'));
     const panel = document.getElementById(`acc-panel-${tab}`);
     if (panel) panel.classList.remove('hidden');

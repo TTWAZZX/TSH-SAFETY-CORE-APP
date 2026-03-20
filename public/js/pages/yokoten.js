@@ -3,7 +3,7 @@ import * as UI from '../ui.js';
 import { apiFetch } from '../api.js';
 
 // ─── Global helpers for inline onclick ────────────────────────────────────────
-window._UI_closeModal = () => UI.closeModal();
+// (window.closeModal set in loadYokotenPage)
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 const CATEGORIES = ['ทั่วไป', 'อุปกรณ์', 'กระบวนการ', 'สิ่งแวดล้อม', 'พฤติกรรม'];
@@ -29,6 +29,112 @@ let _activeTab   = 'topics';
 let _filterRisk  = '';
 let _filterAck   = '';
 
+// ─── Tab Config ───────────────────────────────────────────────────────────────
+function _getYokTabs() {
+    return [
+        { id: 'topics',  label: 'หัวข้อ Yokoten', icon: `<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.347.347A3.001 3.001 0 0112 21a3.001 3.001 0 01-2.789-4.1l-.347-.347z"/>` },
+        { id: 'history', label: 'ประวัติแผนก',    icon: `<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4"/>` },
+        ...(_isAdmin ? [{ id: 'admin', label: 'จัดการ', icon: `<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/>` }] : []),
+    ];
+}
+
+// ─── Shell ─────────────────────────────────────────────────────────────────────
+function buildShell() {
+    const tabHtml = _getYokTabs().map(t => `
+        <button id="yok-tab-btn-${t.id}" onclick="window._yokSetTab('${t.id}')"
+            class="yok-tab flex items-center gap-1.5 px-4 py-3 text-xs font-semibold whitespace-nowrap transition-all border-b-2 border-transparent text-white/70 hover:text-white hover:border-white/40">
+            <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">${t.icon}</svg>
+            ${t.label}
+        </button>`).join('');
+
+    return `
+    <div class="space-y-6 animate-fade-in pb-10">
+
+        <!-- ═══ HERO HEADER ═══ -->
+        <div class="relative overflow-hidden rounded-2xl" style="background:linear-gradient(135deg,#064e3b 0%,#065f46 55%,#0d9488 100%)">
+            <div class="absolute inset-0 opacity-10 pointer-events-none">
+                <svg width="100%" height="100%"><defs><pattern id="yok-dots" width="24" height="24" patternUnits="userSpaceOnUse"><circle cx="12" cy="12" r="1.3" fill="white"/></pattern></defs><rect width="100%" height="100%" fill="url(#yok-dots)"/></svg>
+            </div>
+            <div class="absolute -right-10 -top-10 w-52 h-52 rounded-full opacity-10 pointer-events-none"
+                 style="background:radial-gradient(circle,#fff,transparent 70%)"></div>
+
+            <div class="relative z-10 p-6">
+                <div class="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 mb-5">
+                    <div>
+                        <div class="flex items-center gap-2 mb-2">
+                            <span class="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold bg-white/20 text-white border border-white/30">
+                                <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                          d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.347.347A3.001 3.001 0 0112 21a3.001 3.001 0 01-2.789-4.1l-.347-.347z"/>
+                                </svg>
+                                Yokoten
+                            </span>
+                        </div>
+                        <h1 class="text-xl md:text-2xl font-bold text-white leading-snug">แบ่งปันบทเรียนด้านความปลอดภัย</h1>
+                        <p class="text-sm mt-1" style="color:rgba(167,243,208,0.85)">Lesson Learned Sharing · Thai Summit Harness Co., Ltd.</p>
+                    </div>
+                    <div class="flex flex-col sm:flex-row items-start sm:items-center gap-3 flex-shrink-0 w-full md:w-auto">
+                        <!-- Stats strip -->
+                        <div id="yok-hero-stats" class="grid grid-cols-2 sm:grid-cols-4 gap-3 w-full sm:w-auto">
+                            ${[1,2,3,4].map(() => `
+                            <div class="rounded-xl px-4 py-3 text-center animate-pulse" style="background:rgba(255,255,255,0.12);min-width:80px">
+                                <div class="h-7 bg-white/20 rounded-lg mb-1.5 mx-auto w-10"></div>
+                                <div class="h-3 bg-white/15 rounded w-14 mx-auto"></div>
+                            </div>`).join('')}
+                        </div>
+                        <!-- Add button (admin) -->
+                        ${_isAdmin ? `
+                        <button onclick="window._yokAddTopic()"
+                            class="flex-shrink-0 flex items-center gap-1.5 px-4 py-2.5 rounded-xl text-xs font-bold text-white transition-all border border-white/30 bg-white/15 hover:bg-white/25">
+                            <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/>
+                            </svg>
+                            เพิ่มหัวข้อใหม่
+                        </button>` : ''}
+                    </div>
+                </div>
+
+                <!-- Tab bar -->
+                <div class="flex overflow-x-auto gap-0 -mb-px scrollbar-none">
+                    ${tabHtml}
+                </div>
+            </div>
+        </div>
+
+        <!-- Tab Content -->
+        <div id="yok-content" class="min-h-[400px]">
+            <div class="flex flex-col items-center justify-center py-20 text-slate-400">
+                <div class="animate-spin rounded-full h-9 w-9 border-4 border-emerald-500 border-t-transparent mb-3"></div>
+                <p class="text-sm">กำลังโหลด...</p>
+            </div>
+        </div>
+
+    </div>`;
+}
+
+// ─── Hero Stats (computed from loaded data) ───────────────────────────────────
+function _renderHeroStats() {
+    const strip = document.getElementById('yok-hero-stats');
+    if (!strip) return;
+    const total   = _topics.length;
+    const acked   = _topics.filter(t => t.myResponse).length;
+    const pending = total - acked;
+    const near    = _topics.filter(t => !t.myResponse && isNearDeadline(t.Deadline)).length;
+
+    const stats = [
+        { value: total,   label: 'หัวข้อทั้งหมด',  color: '#6ee7b7' },
+        { value: acked,   label: 'รับทราบแล้ว',    color: '#6ee7b7' },
+        { value: pending, label: 'รอรับทราบ',      color: pending > 0 ? '#fde68a' : '#6ee7b7' },
+        { value: near,    label: 'ใกล้ครบกำหนด',   color: near > 0   ? '#fca5a5' : '#6ee7b7' },
+    ];
+
+    strip.innerHTML = stats.map(s => `
+        <div class="rounded-xl px-4 py-3 text-center" style="background:rgba(255,255,255,0.12);backdrop-filter:blur(6px);min-width:80px">
+            <p class="text-2xl font-bold" style="color:${s.color}">${s.value}</p>
+            <p class="text-[11px] mt-0.5" style="color:rgba(167,243,208,0.85)">${s.label}</p>
+        </div>`).join('');
+}
+
 // ─── Entry Point ──────────────────────────────────────────────────────────────
 export async function loadYokotenPage() {
     const container = document.getElementById('yokoten-page');
@@ -37,54 +143,10 @@ export async function loadYokotenPage() {
     const user = window.TSHSession?.getUser() || {};
     _isAdmin = (user.role === 'Admin' || user.Role === 'Admin');
 
-    container.innerHTML = `
-        <div class="animate-fade-in space-y-6">
-            <!-- Header -->
-            <div class="flex items-start justify-between gap-4 flex-wrap">
-                <div>
-                    <h1 class="text-2xl font-bold text-slate-800 flex items-center gap-2.5">
-                        <span class="w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0"
-                              style="background:linear-gradient(135deg,#059669,#0d9488);box-shadow:0 2px 10px rgba(5,150,105,0.3)">
-                            <svg class="w-5 h-5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                                    d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.347.347A3.001 3.001 0 0112 21a3.001 3.001 0 01-2.789-4.1l-.347-.347z"/>
-                            </svg>
-                        </span>
-                        Yokoten
-                    </h1>
-                    <p class="text-sm text-slate-500 mt-1 ml-11">แบ่งปันบทเรียนและความรู้ด้านความปลอดภัย</p>
-                </div>
-                ${_isAdmin ? `
-                <button onclick="window._yokAddTopic()"
-                    class="btn btn-primary flex items-center gap-2">
-                    <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/>
-                    </svg>
-                    เพิ่มหัวข้อใหม่
-                </button>` : ''}
-            </div>
+    window.closeModal  = UI.closeModal;
+    window._yokSetTab  = (tab) => { _activeTab = tab; renderTab(tab); };
 
-            <!-- Tabs -->
-            <div class="flex gap-1 p-1 bg-slate-100 dark:bg-slate-800 rounded-xl w-fit">
-                <button onclick="window._yokSetTab('topics')" id="tab-topics"
-                    class="yok-tab px-4 py-2 rounded-lg text-sm font-medium transition-colors">
-                    หัวข้อ Yokoten
-                </button>
-                <button onclick="window._yokSetTab('history')" id="tab-history"
-                    class="yok-tab px-4 py-2 rounded-lg text-sm font-medium transition-colors">
-                    ประวัติแผนก
-                </button>
-                ${_isAdmin ? `
-                <button onclick="window._yokSetTab('admin')" id="tab-admin"
-                    class="yok-tab px-4 py-2 rounded-lg text-sm font-medium transition-colors">
-                    จัดการหัวข้อ
-                </button>` : ''}
-            </div>
-
-            <!-- Tab Content -->
-            <div id="yok-content"></div>
-        </div>
-    `;
+    container.innerHTML = buildShell();
 
     await refreshData();
 }
@@ -104,25 +166,24 @@ async function refreshData() {
     } finally {
         UI.hideLoading();
     }
+    _renderHeroStats();
     renderTab(_activeTab);
 }
 
 // ─── Tab Router ───────────────────────────────────────────────────────────────
-window._yokSetTab = (tab) => {
-    _activeTab = tab;
-    document.querySelectorAll('.yok-tab').forEach(btn => {
-        const active = btn.id === `tab-${tab}`;
-        btn.className = `yok-tab px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
-            active ? 'bg-white dark:bg-slate-700 text-emerald-600 shadow-sm font-semibold'
-                   : 'text-slate-500 hover:text-slate-700'
-        }`;
-    });
-    renderTab(tab);
-};
-
 function renderTab(tab) {
-    // Activate correct tab button
-    window._yokSetTab(tab);
+    _activeTab = tab;
+
+    const active   = 'yok-tab flex items-center gap-1.5 px-4 py-3 text-xs font-bold whitespace-nowrap transition-all border-b-2 border-white text-white';
+    const inactive = 'yok-tab flex items-center gap-1.5 px-4 py-3 text-xs font-semibold whitespace-nowrap transition-all border-b-2 border-transparent text-white/70 hover:text-white hover:border-white/40';
+
+    _getYokTabs().forEach(t => {
+        const btn = document.getElementById(`yok-tab-btn-${t.id}`);
+        if (!btn) return;
+        btn.className = t.id === tab ? active : inactive;
+        btn.innerHTML = `<svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">${t.icon}</svg>${t.label}`;
+    });
+
     const content = document.getElementById('yok-content');
     if (!content) return;
 
@@ -468,7 +529,7 @@ function openTopicForm(topic) {
             <div id="yt-error" class="text-sm text-red-500 font-medium hidden"></div>
 
             <div class="flex justify-end gap-3 pt-4 border-t border-slate-100 dark:border-slate-700">
-                <button type="button" onclick="window._UI_closeModal()" class="btn btn-secondary px-5">ยกเลิก</button>
+                <button type="button" onclick="window.closeModal&&window.closeModal()" class="btn btn-secondary px-5">ยกเลิก</button>
                 <button type="submit" id="yt-submit" class="btn btn-primary px-5">
                     ${isEdit ? 'บันทึกการแก้ไข' : 'เพิ่มหัวข้อ'}
                 </button>

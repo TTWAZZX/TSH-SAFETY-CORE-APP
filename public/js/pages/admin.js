@@ -9,6 +9,8 @@ let _calInst      = null;
 let _empCache     = [];
 let _deptCache    = [];
 let _teamCache    = [];
+let _posCache     = [];
+let _unitCache    = [];
 let _empSearch    = '';
 let _empPage      = 1;
 const EMP_PER_PAGE = 25;
@@ -21,14 +23,25 @@ const AUDIT_LIMIT  = 50;
 // Scheduler temp state
 let _allEmpCache  = [];
 
+// Organization tab state
+let _orgDepts      = [];   // { id, Name, is_safety_core, unit_count }
+let _orgUnits      = [];   // { id, name, department_id, short_code }
+let _orgSearch     = '';
+let _orgFilter     = 'all'; // 'all' | 'safety' | 'general'
+let _orgPage       = 1;
+let _orgFetchError = false;
+const ORG_PER_PAGE = 15;
+
 // ─── Tab Config ───────────────────────────────────────────────────────────────
 const TABS = [
-    { key: 'dashboard', label: 'ภาพรวม',       icon: `<svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"/></svg>` },
-    { key: 'scheduler', label: 'กำหนดการตรวจ',  icon: `<svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"/></svg>` },
-    { key: 'employees', label: 'ข้อมูลพนักงาน', icon: `<svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0z"/></svg>` },
-    { key: 'master',    label: 'Master Data',   icon: `<svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 7v10c0 2.21 3.582 4 8 4s8-1.79 8-4V7M4 7c0 2.21 3.582 4 8 4s8-1.79 8-4M4 7c0-2.21 3.582-4 8-4s8 1.79 8 4"/></svg>` },
-    { key: 'health',    label: 'System Health', icon: `<svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4.318 6.318a4.5 4.5 0 000 6.364L12 20.364l7.682-7.682a4.5 4.5 0 00-6.364-6.364L12 7.636l-1.318-1.318a4.5 4.5 0 00-6.364 0z"/></svg>` },
-    { key: 'audit',     label: 'Audit Log',     icon: `<svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"/></svg>` },
+    { key: 'dashboard',    label: 'ภาพรวม',           icon: `<svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"/></svg>` },
+    { key: 'scheduler',    label: 'กำหนดการตรวจ',      icon: `<svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"/></svg>` },
+    { key: 'employees',    label: 'ข้อมูลพนักงาน',     icon: `<svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0z"/></svg>` },
+    { key: 'organization', label: 'โครงสร้างองค์กร',   icon: `<svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4"/></svg>`, badge: 'NEW' },
+    { key: 'permissions',  label: 'สิทธิ์การใช้งาน',   icon: `<svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z"/></svg>`, badge: 'NEW' },
+    { key: 'master',       label: 'Master Data',       icon: `<svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 7v10c0 2.21 3.582 4 8 4s8-1.79 8-4V7M4 7c0 2.21 3.582 4 8 4s8-1.79 8-4M4 7c0-2.21 3.582-4 8-4s8 1.79 8 4"/></svg>` },
+    { key: 'health',       label: 'System Health',     icon: `<svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4.318 6.318a4.5 4.5 0 000 6.364L12 20.364l7.682-7.682a4.5 4.5 0 00-6.364-6.364L12 7.636l-1.318-1.318a4.5 4.5 0 00-6.364 0z"/></svg>` },
+    { key: 'audit',        label: 'Audit Log',         icon: `<svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"/></svg>` },
 ];
 
 // =============================================================================
@@ -38,28 +51,56 @@ export async function loadAdminPage() {
     const container = document.getElementById('admin-page');
     if (!container) return;
 
+    // Tab buttons — underline style ใช้ใน tab bar ใต้ hero
     const tabHtml = TABS.map(t => `
         <button id="tab-btn-${t.key}" onclick="window._adminTab('${t.key}')"
-            class="px-3 py-2 text-xs font-semibold rounded-md transition-all flex items-center gap-1.5">
+            class="flex items-center gap-1.5 px-4 py-3 text-xs font-semibold whitespace-nowrap transition-all border-b-2 border-transparent text-white/70 hover:text-white hover:border-white/40">
             ${t.icon}${t.label}
+            ${t.badge ? `<span class="ml-0.5 px-1.5 py-0.5 rounded text-[9px] font-bold bg-emerald-400/80 text-white leading-none">${t.badge}</span>` : ''}
         </button>`).join('');
 
     container.innerHTML = `
-        <div class="p-6 max-w-7xl mx-auto">
-            <div class="mb-6 animate-fade-in">
-                <div class="flex flex-col md:flex-row justify-between items-start md:items-end gap-4 border-b border-slate-200 pb-5">
+    <div class="animate-fade-in pb-10">
+
+        <!-- ═══ HERO HEADER ═══ -->
+        <div class="relative overflow-hidden" style="background:linear-gradient(135deg,#064e3b 0%,#065f46 55%,#0d9488 100%)">
+            <!-- dot pattern -->
+            <div class="absolute inset-0 opacity-10 pointer-events-none">
+                <svg width="100%" height="100%"><defs><pattern id="adm-dots" width="24" height="24" patternUnits="userSpaceOnUse"><circle cx="12" cy="12" r="1.3" fill="white"/></pattern></defs><rect width="100%" height="100%" fill="url(#adm-dots)"/></svg>
+            </div>
+            <!-- glow orb -->
+            <div class="absolute -right-16 -top-16 w-72 h-72 rounded-full opacity-10 pointer-events-none" style="background:radial-gradient(circle,#fff,transparent 70%)"></div>
+
+            <div class="relative z-10 max-w-7xl mx-auto px-6 pt-6">
+                <!-- Title row -->
+                <div class="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
                     <div>
-                        <h1 class="text-2xl font-bold text-slate-800 flex items-center gap-2">
-                            <svg class="w-7 h-7 text-slate-700" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/></svg>
-                            System Console
-                        </h1>
-                        <p class="text-sm text-slate-500 mt-1">ศูนย์ควบคุมการตั้งค่าระบบและจัดตารางเวร</p>
+                        <div class="flex items-center gap-2 mb-2">
+                            <span class="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold bg-white/20 text-white border border-white/30">
+                                <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/></svg>
+                                Admin Control Center
+                            </span>
+                        </div>
+                        <h1 class="text-xl md:text-2xl font-bold text-white leading-snug">System Console</h1>
+                        <p class="text-sm mt-1" style="color:rgba(167,243,208,0.85)">ศูนย์ควบคุมระบบ · องค์กร · สิทธิ์การใช้งาน</p>
                     </div>
-                    <div class="flex flex-wrap bg-slate-100 p-1 rounded-xl border border-slate-200 gap-0.5">${tabHtml}</div>
+                    <!-- Stats strip — filled by STEP 2 -->
+                    <div id="admin-hero-stats" class="grid grid-cols-3 md:grid-cols-3 gap-3 w-full md:w-auto"></div>
+                </div>
+
+                <!-- Tab bar — sits at bottom of hero -->
+                <div class="mt-5 flex overflow-x-auto gap-0 -mb-px scrollbar-none">
+                    ${tabHtml}
                 </div>
             </div>
+        </div>
+
+        <!-- Content area -->
+        <div class="max-w-7xl mx-auto px-6 pt-6">
             <div id="admin-content-area" class="relative min-h-[500px]"></div>
-        </div>`;
+        </div>
+
+    </div>`;
 
     // Expose globals — including modal helpers for inline onclick handlers in HTML strings
     window.closeModal          = closeModal;
@@ -75,27 +116,844 @@ export async function loadAdminPage() {
     window.toggleViewMode      = toggleViewMode;
 
     switchTab(_currentTab);
+    _loadHeroStats();   // async — fills stats strip without blocking tab render
+}
+
+// ─── Hero Stats Strip ──────────────────────────────────────────────────────────
+async function _loadHeroStats() {
+    const strip = document.getElementById('admin-hero-stats');
+    if (!strip) return;
+
+    // Placeholder skeleton while fetching
+    strip.innerHTML = [1,2,3].map(() => `
+        <div class="rounded-xl px-4 py-3 text-center animate-pulse" style="background:rgba(255,255,255,0.12);min-width:90px">
+            <div class="h-7 bg-white/20 rounded-lg mb-1.5 mx-auto w-12"></div>
+            <div class="h-3 bg-white/15 rounded w-16 mx-auto"></div>
+        </div>`).join('');
+
+    try {
+        const [dashRes, deptRes] = await Promise.all([
+            API.get('/admin/dashboard-stats').catch(() => ({ data: {} })),
+            API.get('/master/departments').catch(() => ({ data: [] })),
+        ]);
+        const d         = dashRes.data || {};
+        const depts     = deptRes.data || [];
+        const scDepts   = depts.filter(dep => dep.is_safety_core == 1).length;
+
+        const stats = [
+            { value: d.totalEmployees   ?? '—', label: 'พนักงานทั้งหมด',    color: '#6ee7b7' },
+            { value: scDepts || 10,             label: 'Safety Core Dept', color: '#6ee7b7' },
+            { value: d.openHiyari       ?? '—', label: 'Hiyari เปิดอยู่',  color: d.openHiyari > 0 ? '#fca5a5' : '#6ee7b7' },
+        ];
+
+        strip.innerHTML = stats.map(s => `
+            <div class="rounded-xl px-4 py-3 text-center" style="background:rgba(255,255,255,0.12);backdrop-filter:blur(6px);min-width:90px">
+                <p class="text-2xl font-bold" style="color:${s.color}">${s.value}</p>
+                <p class="text-[11px] mt-0.5" style="color:rgba(167,243,208,0.85)">${s.label}</p>
+            </div>`).join('');
+    } catch {
+        strip.innerHTML = ''; // silent fail — hero still looks fine without stats
+    }
 }
 
 function switchTab(key) {
     _currentTab = key;
-    const active   = 'bg-white text-slate-800 shadow-sm';
-    const inactive = 'text-slate-500 hover:text-slate-700 hover:bg-slate-200/50';
+    // Underline-style tab classes — active: white underline + white text; inactive: ghost
+    const active   = 'flex items-center gap-1.5 px-4 py-3 text-xs font-bold whitespace-nowrap transition-all border-b-2 border-white text-white';
+    const inactive = 'flex items-center gap-1.5 px-4 py-3 text-xs font-semibold whitespace-nowrap transition-all border-b-2 border-transparent text-white/70 hover:text-white hover:border-white/40';
     TABS.forEach(t => {
         const btn = document.getElementById(`tab-btn-${t.key}`);
-        if (btn) btn.className = `px-3 py-2 text-xs font-semibold rounded-md transition-all flex items-center gap-1.5 ${t.key === key ? active : inactive}`;
+        if (!btn) return;
+        const badgeHtml = t.badge
+            ? `<span class="ml-0.5 px-1.5 py-0.5 rounded text-[9px] font-bold bg-emerald-400/80 text-white leading-none">${t.badge}</span>`
+            : '';
+        btn.className = t.key === key ? active : inactive;
+        btn.innerHTML = `${t.icon}${t.label}${badgeHtml}`;
     });
+
     const area = document.getElementById('admin-content-area');
     if (!area) return;
-    area.innerHTML = `<div class="flex justify-center py-20"><span class="w-8 h-8 border-4 border-emerald-500 border-t-transparent rounded-full animate-spin inline-block"></span></div>`;
+    area.innerHTML = `
+        <div class="flex flex-col items-center justify-center py-20 text-slate-400">
+            <div class="inline-block animate-spin rounded-full h-9 w-9 border-4 border-emerald-500 border-t-transparent mb-3"></div>
+            <p class="text-sm">กำลังโหลด...</p>
+        </div>`;
 
-    if      (key === 'dashboard') renderDashboard(area);
-    else if (key === 'scheduler') renderScheduler(area);
-    else if (key === 'employees') renderEmployeesTab(area);
-    else if (key === 'master')    renderMasterData(area);
-    else if (key === 'health')    renderSystemHealth(area);
-    else if (key === 'audit')     renderAuditLog(area);
+    if      (key === 'dashboard')    renderDashboard(area);
+    else if (key === 'scheduler')    renderScheduler(area);
+    else if (key === 'employees')    renderEmployeesTab(area);
+    else if (key === 'organization') renderOrganization(area);
+    else if (key === 'permissions')  renderPermissions(area);
+    else if (key === 'master')       renderMasterData(area);
+    else if (key === 'health')       renderSystemHealth(area);
+    else if (key === 'audit')        renderAuditLog(area);
 }
+
+// =============================================================================
+// TAB: ORGANIZATION
+// =============================================================================
+async function renderOrganization(container) {
+    // Reset pagination on fresh load
+    _orgPage = 1;
+
+    // Skeleton layout — shows immediately while fetching
+    container.innerHTML = `
+    <div class="animate-fade-in space-y-5">
+
+        <!-- Stats Cards -->
+        <div id="org-stats-row" class="grid grid-cols-2 md:grid-cols-4 gap-4">
+            ${[1,2,3,4].map(() => `
+            <div class="bg-white rounded-xl p-4 border border-slate-100 shadow-sm animate-pulse">
+                <div class="h-8 bg-slate-100 rounded-lg w-12 mb-2"></div>
+                <div class="h-3 bg-slate-100 rounded w-20"></div>
+            </div>`).join('')}
+        </div>
+
+        <!-- Filter Bar -->
+        <div class="card p-4 flex flex-wrap gap-3 items-center">
+            <!-- Search -->
+            <div class="relative flex-1 min-w-[200px]">
+                <svg class="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400"
+                     fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                          d="M21 21l-4.35-4.35M17 11A6 6 0 115 11a6 6 0 0112 0z"/>
+                </svg>
+                <input id="org-search" type="text" placeholder="ค้นหาชื่อแผนก..."
+                    value="${_orgSearch}"
+                    class="w-full pl-9 pr-3 py-2 text-sm border border-slate-200 rounded-lg outline-none focus:border-emerald-400 focus:ring-2 focus:ring-emerald-100"
+                    oninput="window._orgFilter()">
+            </div>
+            <!-- Type filter -->
+            <div class="flex bg-slate-100 p-1 rounded-lg gap-0.5 flex-shrink-0">
+                ${[
+                    { v: 'all',     label: 'ทั้งหมด'          },
+                    { v: 'safety',  label: 'Safety Core'      },
+                    { v: 'general', label: 'หน่วยงานทั่วไป'   },
+                ].map(o => `
+                <button onclick="window._orgSetFilter('${o.v}')"
+                    id="org-type-${o.v}"
+                    class="px-3 py-1.5 rounded-md text-xs font-semibold transition-all
+                        ${_orgFilter === o.v ? 'bg-white shadow-sm text-slate-800' : 'text-slate-500 hover:text-slate-700'}">
+                    ${o.label}
+                </button>`).join('')}
+            </div>
+            <!-- Clear -->
+            <span id="org-clear-wrap" class="${_orgSearch || _orgFilter !== 'all' ? '' : 'hidden'}">
+                <button onclick="window._orgClearFilter()"
+                    class="text-xs text-slate-500 underline hover:text-slate-700">ล้างตัวกรอง</button>
+            </span>
+            <!-- Count badge -->
+            <span id="org-count" class="text-xs text-slate-400 ml-auto"></span>
+            <!-- Add dept button (admin only) -->
+            ${TSHSession.getUser()?.role === 'Admin' || TSHSession.getUser()?.Role === 'Admin' ? `
+            <button onclick="window._orgAddDept()"
+                class="flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-bold text-white transition-all shadow-sm"
+                style="background:linear-gradient(135deg,#065f46,#0d9488)">
+                <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/>
+                </svg>
+                เพิ่มแผนก
+            </button>` : ''}
+        </div>
+
+        <!-- Table -->
+        <div class="card overflow-hidden">
+            <div id="org-table-wrap">
+                <div class="flex items-center justify-center py-16 text-slate-400">
+                    <div class="inline-block animate-spin rounded-full h-8 w-8 border-4 border-emerald-500 border-t-transparent"></div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Pagination -->
+        <div id="org-pagination" class="flex justify-center gap-1"></div>
+
+    </div>`;
+
+    // Expose filter handlers
+    window._orgFilter      = _orgApplyFilter;
+    window._orgSetFilter   = _orgSetTypeFilter;
+    window._orgClearFilter = _orgClearFilter;
+
+    // Fetch data then render
+    await _orgFetchAll();
+
+    if (_orgFetchError) {
+        const wrap = document.getElementById('org-table-wrap');
+        if (wrap) wrap.innerHTML = `
+        <div class="text-center py-16 text-slate-400">
+            <div class="w-16 h-16 rounded-2xl bg-red-50 flex items-center justify-center mx-auto mb-4">
+                <svg class="w-8 h-8 text-red-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5"
+                          d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/>
+                </svg>
+            </div>
+            <p class="font-semibold text-slate-600">โหลดข้อมูลไม่สำเร็จ</p>
+            <p class="text-sm mt-1">ไม่สามารถเชื่อมต่อกับ API ได้</p>
+            <button onclick="window._adminTab('organization')"
+                class="mt-4 inline-flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-bold text-white shadow-sm"
+                style="background:linear-gradient(135deg,#065f46,#0d9488)">
+                <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                          d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/>
+                </svg>
+                ลองใหม่
+            </button>
+        </div>`;
+        // Fill stats with zeros on error
+        const statsEl = document.getElementById('org-stats-row');
+        if (statsEl) statsEl.innerHTML = [
+            { value: 0, label: 'แผนกทั้งหมด' },
+            { value: 0, label: 'Safety Core' },
+            { value: 0, label: 'หน่วยงานทั่วไป' },
+            { value: 0, label: 'Safety Units' },
+        ].map(c => `
+            <div class="bg-white rounded-xl p-4 border border-red-100 shadow-sm flex items-center gap-3 opacity-50">
+                <div class="w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0 bg-red-50">
+                    <svg class="w-5 h-5 text-red-300" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01"/>
+                    </svg>
+                </div>
+                <div>
+                    <p class="text-2xl font-bold text-slate-300">${c.value}</p>
+                    <p class="text-xs text-slate-400">${c.label}</p>
+                </div>
+            </div>`).join('');
+        return;
+    }
+
+    _orgRenderStats();
+    _orgRenderTable();
+}
+
+// ─── Fetch ─────────────────────────────────────────────────────────────────────
+async function _orgFetchAll() {
+    try {
+        const [dRes, uRes] = await Promise.all([
+            API.get('/admin/org/departments').catch(() => API.get('/master/departments')),
+            API.get('/admin/org/units').catch(() => ({ data: [] })),
+        ]);
+        _orgDepts      = dRes.data || [];
+        _orgUnits      = uRes.data || [];
+        _orgFetchError = false;
+    } catch {
+        _orgDepts      = [];
+        _orgUnits      = [];
+        _orgFetchError = true;
+    }
+}
+
+// ─── Stats Cards ───────────────────────────────────────────────────────────────
+function _orgRenderStats() {
+    const el = document.getElementById('org-stats-row');
+    if (!el) return;
+
+    const total   = _orgDepts.length;
+    const safety  = _orgDepts.filter(d => d.is_safety_core == 1).length;
+    const general = total - safety;
+    const units   = _orgUnits.length;
+
+    const cards = [
+        { value: total,   label: 'แผนกทั้งหมด',     icon: `<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4"/>`, bg: 'bg-slate-100', txt: 'text-slate-500' },
+        { value: safety,  label: 'Safety Core',     icon: `<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z"/>`, bg: 'bg-emerald-50', txt: 'text-emerald-500' },
+        { value: general, label: 'หน่วยงานทั่วไป',  icon: `<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0z"/>`, bg: 'bg-sky-50', txt: 'text-sky-500' },
+        { value: units,   label: 'Safety Units',    icon: `<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2V6zM14 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2V6zM4 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2v-2zM14 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2v-2z"/>`, bg: 'bg-violet-50', txt: 'text-violet-500' },
+    ];
+
+    el.innerHTML = cards.map(c => `
+        <div class="bg-white rounded-xl p-4 border border-slate-100 shadow-sm flex items-center gap-3">
+            <div class="w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0 ${c.bg}">
+                <svg class="w-5 h-5 ${c.txt}" fill="none" viewBox="0 0 24 24" stroke="currentColor">${c.icon}</svg>
+            </div>
+            <div>
+                <p class="text-2xl font-bold text-slate-800">${c.value}</p>
+                <p class="text-xs text-slate-500">${c.label}</p>
+            </div>
+        </div>`).join('');
+}
+
+// ─── Filter helpers ────────────────────────────────────────────────────────────
+function _orgGetFiltered() {
+    return _orgDepts.filter(d => {
+        if (_orgSearch && !d.Name.toLowerCase().includes(_orgSearch.toLowerCase())) return false;
+        if (_orgFilter === 'safety'  && d.is_safety_core != 1) return false;
+        if (_orgFilter === 'general' && d.is_safety_core == 1) return false;
+        return true;
+    });
+}
+
+function _orgApplyFilter() {
+    _orgSearch = document.getElementById('org-search')?.value || '';
+    _orgPage   = 1;
+    _orgRenderTable();
+    _orgUpdateClearBtn();
+}
+
+function _orgSetTypeFilter(v) {
+    _orgFilter = v;
+    _orgPage   = 1;
+    // Update pill button styles
+    ['all','safety','general'].forEach(k => {
+        const btn = document.getElementById(`org-type-${k}`);
+        if (!btn) return;
+        btn.className = `px-3 py-1.5 rounded-md text-xs font-semibold transition-all ${
+            k === v ? 'bg-white shadow-sm text-slate-800' : 'text-slate-500 hover:text-slate-700'
+        }`;
+    });
+    _orgRenderTable();
+    _orgUpdateClearBtn();
+}
+
+function _orgClearFilter() {
+    _orgSearch = '';
+    _orgFilter = 'all';
+    _orgPage   = 1;
+    const inp = document.getElementById('org-search');
+    if (inp) inp.value = '';
+    _orgSetTypeFilter('all');
+    _orgRenderTable();
+    _orgUpdateClearBtn();
+}
+
+function _orgUpdateClearBtn() {
+    const wrap = document.getElementById('org-clear-wrap');
+    if (wrap) wrap.className = (_orgSearch || _orgFilter !== 'all') ? '' : 'hidden';
+}
+
+window._orgGotoPage = function(p) {
+    _orgPage = p;
+    _orgRenderTable();
+    document.getElementById('org-table-wrap')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+};
+
+// ─── Table + Pagination — implemented in STEP 4 ────────────────────────────────
+function _orgRenderTable() {
+    const wrap = document.getElementById('org-table-wrap');
+    if (!wrap) return;
+    const filtered = _orgGetFiltered();
+    const total    = filtered.length;
+    const pages    = Math.ceil(total / ORG_PER_PAGE) || 1;
+    _orgPage       = Math.min(_orgPage, pages);
+    const slice    = filtered.slice((_orgPage - 1) * ORG_PER_PAGE, _orgPage * ORG_PER_PAGE);
+
+    // Count badge
+    const countEl = document.getElementById('org-count');
+    if (countEl) countEl.textContent = `แสดง ${total} / ${_orgDepts.length} แผนก`;
+
+    // Empty state
+    if (slice.length === 0) {
+        wrap.innerHTML = `
+        <div class="text-center py-16 text-slate-400">
+            <div class="w-16 h-16 rounded-2xl bg-slate-100 flex items-center justify-center mx-auto mb-4">
+                <svg class="w-8 h-8 opacity-40" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5"
+                          d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4"/>
+                </svg>
+            </div>
+            <p class="font-medium text-slate-500">ไม่พบแผนก</p>
+            <p class="text-sm mt-1">ลองเปลี่ยนคำค้นหาหรือตัวกรอง</p>
+        </div>`;
+        document.getElementById('org-pagination').innerHTML = '';
+        return;
+    }
+
+    // Table — full implementation added in STEP 4
+    const isAdmin = TSHSession.getUser()?.role === 'Admin' || TSHSession.getUser()?.Role === 'Admin';
+    const rows = slice.map(d => {
+        const isSafety  = d.is_safety_core == 1;
+        const unitCount = _orgUnits.filter(u => u.department_id === d.id).length;
+        return `
+        <tr class="border-b border-slate-100 hover:bg-slate-50/80 transition-colors">
+            <td class="px-4 py-3 text-sm font-semibold text-slate-800">${d.Name}</td>
+            <td class="px-4 py-3">
+                ${isSafety
+                    ? `<span class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold bg-emerald-100 text-emerald-700">
+                           <span class="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse inline-block"></span>Safety Core
+                       </span>`
+                    : `<span class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold bg-slate-100 text-slate-500">
+                           <span class="w-1.5 h-1.5 rounded-full bg-slate-300 inline-block"></span>ทั่วไป
+                       </span>`}
+            </td>
+            <td class="px-4 py-3 text-center">
+                ${isSafety
+                    ? `<button onclick="window._orgViewUnits(${d.id},'${d.Name.replace(/'/g,"\\'")}')"
+                           class="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-semibold bg-violet-50 text-violet-700 hover:bg-violet-100 transition-colors">
+                           <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2V6zM14 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2V6zM4 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2v-2zM14 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2v-2z"/></svg>
+                           ${unitCount} unit${unitCount !== 1 ? 's' : ''}
+                       </button>`
+                    : `<span class="text-xs text-slate-300">—</span>`}
+            </td>
+            ${isAdmin ? `
+            <td class="px-4 py-3">
+                <div class="flex items-center gap-1">
+                    <button onclick="window._orgEditDept(${d.id},'${d.Name.replace(/'/g,"\\'")}',${isSafety ? 1 : 0})"
+                        class="p-1.5 rounded-lg text-slate-400 hover:text-blue-600 hover:bg-blue-50 transition-colors" title="แก้ไข">
+                        <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"/></svg>
+                    </button>
+                </div>
+            </td>` : ''}
+        </tr>`;
+    }).join('');
+
+    wrap.innerHTML = `
+    <table class="w-full text-left border-collapse">
+        <thead>
+            <tr class="bg-slate-50 border-b-2 border-slate-200">
+                <th class="px-4 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wide">ชื่อแผนก / Section</th>
+                <th class="px-4 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wide">ประเภท</th>
+                <th class="px-4 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wide text-center">Safety Units</th>
+                ${isAdmin ? `<th class="px-4 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wide">จัดการ</th>` : ''}
+            </tr>
+        </thead>
+        <tbody>${rows}</tbody>
+    </table>`;
+
+    // Pagination
+    _orgRenderPagination(pages);
+}
+
+function _orgRenderPagination(pages) {
+    const el = document.getElementById('org-pagination');
+    if (!el || pages <= 1) { if (el) el.innerHTML = ''; return; }
+    const btnBase = 'px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors';
+    el.innerHTML = Array.from({ length: pages }, (_, i) => i + 1).map(p =>
+        `<button onclick="window._orgGotoPage(${p})"
+             class="${btnBase} ${p === _orgPage
+                 ? 'bg-emerald-600 text-white shadow-sm'
+                 : 'bg-white border border-slate-200 text-slate-600 hover:bg-slate-50'}">${p}</button>`
+    ).join('');
+}
+
+// ─── Modal: Add Department ─────────────────────────────────────────────────────
+window._orgAddDept = function() {
+    openModal('เพิ่มแผนกใหม่', `
+    <form id="org-dept-form" class="space-y-4">
+        <div>
+            <label class="block text-sm font-semibold text-slate-700 mb-1.5">
+                ชื่อแผนก / Section <span class="text-red-500">*</span>
+            </label>
+            <input name="Name" type="text" required
+                placeholder="เช่น QUALITY CONTROL SEC."
+                class="form-input w-full">
+        </div>
+        <div class="flex items-start gap-3 p-3 rounded-xl border border-slate-200 bg-slate-50">
+            <input name="is_safety_core" type="checkbox" id="chk-safety-core"
+                class="w-4 h-4 mt-0.5 text-emerald-600 rounded flex-shrink-0">
+            <div>
+                <label for="chk-safety-core" class="text-sm font-semibold text-slate-700 cursor-pointer">
+                    Safety Core Department
+                </label>
+                <p class="text-xs text-slate-400 mt-0.5">
+                    แผนกนี้ต้องทำ Safety Core Activity และมี Safety Units
+                </p>
+            </div>
+        </div>
+        <div id="org-dept-err" class="text-sm text-red-500 hidden"></div>
+        <div class="flex justify-end gap-3 pt-3 border-t border-slate-100">
+            <button type="button" onclick="window.closeModal&&window.closeModal()"
+                class="btn btn-secondary px-5">ยกเลิก</button>
+            <button type="submit" class="btn btn-primary px-5">เพิ่มแผนก</button>
+        </div>
+    </form>`, 'max-w-md');
+
+    setTimeout(() => {
+        document.getElementById('org-dept-form')?.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const fd   = new FormData(e.target);
+            const body = {
+                Name:           fd.get('Name')?.toString().trim(),
+                is_safety_core: fd.get('is_safety_core') ? 1 : 0,
+            };
+            const errEl = document.getElementById('org-dept-err');
+            try {
+                await API.post('/master/departments', { Name: body.Name });
+                // If safety core — update the flag immediately after creation
+                if (body.is_safety_core) {
+                    const dRes = await API.get('/admin/org/departments');
+                    const created = (dRes.data || []).find(d => d.Name === body.Name);
+                    if (created) await API.put(`/admin/org/departments/${created.id}`, body);
+                }
+                closeModal();
+                showToast('เพิ่มแผนกสำเร็จ', 'success');
+                await _orgFetchAll();
+                _orgRenderStats();
+                _orgRenderTable();
+            } catch (err) {
+                if (errEl) { errEl.textContent = err.message || 'เกิดข้อผิดพลาด'; errEl.classList.remove('hidden'); }
+            }
+        });
+    }, 50);
+};
+
+// ─── Modal: Edit Department ────────────────────────────────────────────────────
+window._orgEditDept = function(id, name, isSafety) {
+    openModal(`แก้ไขแผนก — ${name}`, `
+    <form id="org-edit-dept-form" class="space-y-4">
+        <div>
+            <label class="block text-sm font-semibold text-slate-700 mb-1.5">ชื่อแผนก <span class="text-red-500">*</span></label>
+            <input name="Name" type="text" required value="${name.replace(/"/g,'&quot;')}"
+                class="form-input w-full">
+        </div>
+        <div class="flex items-start gap-3 p-3 rounded-xl border border-slate-200 bg-slate-50">
+            <input name="is_safety_core" type="checkbox" id="chk-edit-safety"
+                ${isSafety ? 'checked' : ''}
+                class="w-4 h-4 mt-0.5 text-emerald-600 rounded flex-shrink-0">
+            <div>
+                <label for="chk-edit-safety" class="text-sm font-semibold text-slate-700 cursor-pointer">
+                    Safety Core Department
+                </label>
+                <p class="text-xs text-slate-400 mt-0.5">
+                    เปิด/ปิดการเป็น Safety Core และการมี Safety Units
+                </p>
+            </div>
+        </div>
+        <div id="org-edit-dept-err" class="text-sm text-red-500 hidden"></div>
+        <div class="flex justify-end gap-3 pt-3 border-t border-slate-100">
+            <button type="button" onclick="window.closeModal&&window.closeModal()"
+                class="btn btn-secondary px-5">ยกเลิก</button>
+            <button type="submit" class="btn btn-primary px-5">บันทึก</button>
+        </div>
+    </form>`, 'max-w-md');
+
+    setTimeout(() => {
+        document.getElementById('org-edit-dept-form')?.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const fd   = new FormData(e.target);
+            const body = {
+                Name:           fd.get('Name')?.toString().trim(),
+                is_safety_core: fd.get('is_safety_core') ? 1 : 0,
+            };
+            const errEl = document.getElementById('org-edit-dept-err');
+            try {
+                await API.put(`/admin/org/departments/${id}`, body);
+                closeModal();
+                showToast('บันทึกข้อมูลแผนกสำเร็จ', 'success');
+                await _orgFetchAll();
+                _orgRenderStats();
+                _orgRenderTable();
+                _loadHeroStats();   // refresh hero strip ด้วย
+            } catch (err) {
+                if (errEl) { errEl.textContent = err.message || 'เกิดข้อผิดพลาด'; errEl.classList.remove('hidden'); }
+            }
+        });
+    }, 50);
+};
+
+// ─── Modal: View/Manage Safety Units ──────────────────────────────────────────
+window._orgViewUnits = async function(deptId, deptName) {
+    openModal(`Safety Units — ${deptName}`, `
+    <div id="unit-modal-body" class="space-y-4">
+        <div class="flex items-center justify-center py-8">
+            <div class="animate-spin rounded-full h-8 w-8 border-4 border-emerald-500 border-t-transparent"></div>
+        </div>
+    </div>`, 'max-w-lg');
+
+    const isAdmin = TSHSession.getUser()?.role === 'Admin' || TSHSession.getUser()?.Role === 'Admin';
+
+    async function reloadUnits() {
+        const res  = await API.get(`/admin/org/units/${deptId}`);
+        const list = res.data || [];
+        const body = document.getElementById('unit-modal-body');
+        if (!body) return;
+
+        const unitRows = list.length === 0
+            ? `<div class="text-center py-8 text-slate-400 text-sm">ยังไม่มี Safety Unit</div>`
+            : list.map(u => `
+            <div class="flex items-center gap-3 px-3 py-2.5 rounded-xl border border-slate-100 bg-slate-50 hover:bg-slate-100 transition-colors">
+                <div class="w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0 bg-violet-100">
+                    <svg class="w-4 h-4 text-violet-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                              d="M4 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2V6z"/>
+                    </svg>
+                </div>
+                <div class="flex-1 min-w-0">
+                    <p class="text-sm font-semibold text-slate-800">${u.name}</p>
+                    ${u.short_code ? `<p class="text-xs text-slate-400">${u.short_code}</p>` : ''}
+                </div>
+                ${isAdmin ? `
+                <div class="flex gap-1 flex-shrink-0">
+                    <button onclick="window._orgEditUnit(${u.id},'${u.name.replace(/'/g,"\\'")}','${(u.short_code||'').replace(/'/g,"\\'")}',${deptId},'${deptName.replace(/'/g,"\\'")}');"
+                        class="p-1.5 rounded-lg text-slate-400 hover:text-blue-600 hover:bg-blue-50 transition-colors">
+                        <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"/></svg>
+                    </button>
+                    <button onclick="window._orgDeleteUnit(${u.id},'${u.name.replace(/'/g,"\\'")}',${deptId},'${deptName.replace(/'/g,"\\'")}');"
+                        class="p-1.5 rounded-lg text-slate-400 hover:text-red-500 hover:bg-red-50 transition-colors">
+                        <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg>
+                    </button>
+                </div>` : ''}
+            </div>`).join('');
+
+        body.innerHTML = `
+        <div class="space-y-2">${unitRows}</div>
+        ${isAdmin ? `
+        <div class="border-t border-slate-100 pt-4">
+            <form id="unit-add-form" class="flex gap-2 items-end">
+                <div class="flex-1">
+                    <label class="block text-xs font-semibold text-slate-600 mb-1">ชื่อ Unit <span class="text-red-500">*</span></label>
+                    <input name="name" type="text" required placeholder="เช่น PD1 Assy 3/1"
+                        class="form-input w-full text-sm">
+                </div>
+                <div class="w-28">
+                    <label class="block text-xs font-semibold text-slate-600 mb-1">Short Code</label>
+                    <input name="short_code" type="text" placeholder="เช่น PD1A31"
+                        class="form-input w-full text-sm">
+                </div>
+                <button type="submit"
+                    class="flex-shrink-0 px-4 py-2 rounded-xl text-xs font-bold text-white transition-all"
+                    style="background:linear-gradient(135deg,#065f46,#0d9488)">
+                    เพิ่ม
+                </button>
+            </form>
+            <div id="unit-add-err" class="text-xs text-red-500 mt-1 hidden"></div>
+        </div>` : ''}
+        <div class="flex justify-end pt-2 border-t border-slate-100">
+            <button onclick="window.closeModal&&window.closeModal()" class="btn btn-secondary px-5 text-sm">ปิด</button>
+        </div>`;
+
+        // Add unit form handler
+        document.getElementById('unit-add-form')?.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const fd  = new FormData(e.target);
+            const err = document.getElementById('unit-add-err');
+            try {
+                await API.post('/admin/org/units', {
+                    name:          fd.get('name')?.toString().trim(),
+                    short_code:    fd.get('short_code')?.toString().trim(),
+                    department_id: deptId,
+                });
+                showToast('เพิ่ม Safety Unit สำเร็จ', 'success');
+                e.target.reset();
+                await reloadUnits();
+                await _orgFetchAll();
+                _orgRenderStats();
+                _orgRenderTable();
+            } catch (ex) {
+                if (err) { err.textContent = ex.message || 'เกิดข้อผิดพลาด'; err.classList.remove('hidden'); }
+            }
+        });
+    }
+
+    await reloadUnits();
+};
+
+window._orgEditUnit = function(id, name, shortCode, deptId, deptName) {
+    openModal(`แก้ไข Unit — ${name}`, `
+    <form id="unit-edit-form" class="space-y-4">
+        <div>
+            <label class="block text-sm font-semibold text-slate-700 mb-1.5">ชื่อ Unit <span class="text-red-500">*</span></label>
+            <input name="name" type="text" required value="${name.replace(/"/g,'&quot;')}" class="form-input w-full">
+        </div>
+        <div>
+            <label class="block text-sm font-semibold text-slate-700 mb-1.5">Short Code</label>
+            <input name="short_code" type="text" value="${shortCode.replace(/"/g,'&quot;')}" class="form-input w-full">
+        </div>
+        <div id="unit-edit-err" class="text-sm text-red-500 hidden"></div>
+        <div class="flex justify-end gap-3 pt-3 border-t border-slate-100">
+            <button type="button" onclick="window._orgViewUnits(${deptId},'${deptName.replace(/'/g,"\\'")}');"
+                class="btn btn-secondary px-5">ยกเลิก</button>
+            <button type="submit" class="btn btn-primary px-5">บันทึก</button>
+        </div>
+    </form>`, 'max-w-sm');
+
+    setTimeout(() => {
+        document.getElementById('unit-edit-form')?.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const fd  = new FormData(e.target);
+            const err = document.getElementById('unit-edit-err');
+            try {
+                await API.put(`/admin/org/units/${id}`, {
+                    name:       fd.get('name')?.toString().trim(),
+                    short_code: fd.get('short_code')?.toString().trim(),
+                });
+                showToast('บันทึกสำเร็จ', 'success');
+                await window._orgViewUnits(deptId, deptName);
+                await _orgFetchAll();
+                _orgRenderTable();
+            } catch (ex) {
+                if (err) { err.textContent = ex.message || 'เกิดข้อผิดพลาด'; err.classList.remove('hidden'); }
+            }
+        });
+    }, 50);
+};
+
+window._orgDeleteUnit = async function(id, name, deptId, deptName) {
+    if (!confirm(`ลบ Unit "${name}"?`)) return;
+    try {
+        await API.delete(`/admin/org/units/${id}`);
+        showToast('ลบ Unit สำเร็จ', 'success');
+        await window._orgViewUnits(deptId, deptName);
+        await _orgFetchAll();
+        _orgRenderStats();
+        _orgRenderTable();
+    } catch (err) {
+        showError(err.message || 'เกิดข้อผิดพลาด');
+    }
+};
+
+// =============================================================================
+// TAB: PERMISSIONS — Role × Permission matrix
+// =============================================================================
+
+// Permission display labels
+const PERM_LABELS = {
+    VIEW_DASHBOARD: { label: 'ดู Dashboard',    desc: 'เข้าถึงหน้าภาพรวมระบบ',        color: 'sky'     },
+    MANAGE_USERS:   { label: 'จัดการ Users',    desc: 'เพิ่ม/แก้ไข/ลบพนักงาน',       color: 'rose'    },
+    VIEW_REPORT:    { label: 'ดูรายงาน',        desc: 'ดาวน์โหลดและดูรายงานทั้งหมด',  color: 'indigo'  },
+    APPROVE_SAFETY: { label: 'อนุมัติ Safety',  desc: 'อนุมัติกิจกรรมความปลอดภัย',    color: 'emerald' },
+    SUBMIT_SAFETY:  { label: 'บันทึก Safety',   desc: 'บันทึก/ส่งข้อมูลความปลอดภัย',  color: 'amber'   },
+};
+
+async function renderPermissions(container) {
+    container.innerHTML = `
+    <div class="animate-fade-in space-y-5">
+        <div class="flex items-center justify-between">
+            <div>
+                <h2 class="text-base font-bold text-slate-800">Permission Matrix</h2>
+                <p class="text-xs text-slate-400 mt-0.5">คลิกช่องตาราง เพื่อเปิด/ปิด permission ของแต่ละ role</p>
+            </div>
+            <span class="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold bg-amber-100 text-amber-700">
+                <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/></svg>
+                Admin only
+            </span>
+        </div>
+
+        <!-- Matrix card -->
+        <div class="card overflow-hidden">
+            <div id="perm-matrix-wrap" class="overflow-x-auto">
+                <div class="flex items-center justify-center py-16">
+                    <div class="inline-block animate-spin rounded-full h-8 w-8 border-4 border-emerald-500 border-t-transparent"></div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Legend -->
+        <div class="flex flex-wrap gap-4 text-xs text-slate-500">
+            <span class="flex items-center gap-1.5">
+                <span class="w-5 h-5 rounded-lg bg-emerald-500 flex items-center justify-center">
+                    <svg class="w-3 h-3 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="3" d="M5 13l4 4L19 7"/></svg>
+                </span>
+                อนุญาต (Granted)
+            </span>
+            <span class="flex items-center gap-1.5">
+                <span class="w-5 h-5 rounded-lg bg-slate-200 flex items-center justify-center">
+                    <svg class="w-3 h-3 text-slate-400" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="3" d="M6 18L18 6M6 6l12 12"/></svg>
+                </span>
+                ไม่อนุญาต (Denied)
+            </span>
+            <span class="flex items-center gap-1.5 ml-auto text-slate-400 italic">
+                * ADMIN role ไม่สามารถลดสิทธิ์ได้
+            </span>
+        </div>
+    </div>`;
+
+    await _permLoadMatrix();
+}
+
+async function _permLoadMatrix() {
+    const wrap = document.getElementById('perm-matrix-wrap');
+    if (!wrap) return;
+
+    try {
+        const res  = await API.get('/admin/permissions/matrix');
+        const { matrix, roles, permissions, roleLabels } = res.data;
+
+        const ROLE_COLORS = {
+            ADMIN:          { header: 'bg-slate-800 text-white',            pill: 'bg-slate-100 text-slate-700'     },
+            EXECUTIVE:      { header: 'bg-indigo-600 text-white',           pill: 'bg-indigo-50 text-indigo-700'    },
+            MANAGER:        { header: 'bg-sky-600 text-white',              pill: 'bg-sky-50 text-sky-700'          },
+            STAFF:          { header: 'bg-slate-500 text-white',            pill: 'bg-slate-100 text-slate-600'     },
+            SAFETY_OFFICER: { header: 'bg-emerald-600 text-white',          pill: 'bg-emerald-50 text-emerald-700'  },
+        };
+
+        const headerCells = roles.map(r => {
+            const rc = ROLE_COLORS[r] || { header: 'bg-slate-600 text-white' };
+            return `<th class="px-4 py-3 text-center min-w-[110px]">
+                <span class="inline-block px-2.5 py-1 rounded-lg text-[11px] font-bold ${rc.header}">
+                    ${roleLabels[r] || r}
+                </span>
+            </th>`;
+        }).join('');
+
+        const bodyRows = permissions.map(p => {
+            const pm = PERM_LABELS[p] || { label: p, desc: '', color: 'slate' };
+            const cells = roles.map(r => {
+                const granted  = matrix[r]?.[p] ? 1 : 0;
+                const isAdmin  = r === 'ADMIN';
+                const cellId   = `perm-${r}-${p}`;
+                return `<td class="px-4 py-4 text-center">
+                    <button id="${cellId}"
+                        onclick="${isAdmin ? '' : `window._permToggle('${r}','${p}',${granted ? 0 : 1})`}"
+                        class="w-8 h-8 rounded-lg inline-flex items-center justify-center transition-all
+                            ${granted
+                                ? 'bg-emerald-500 hover:bg-emerald-600 shadow-sm shadow-emerald-200'
+                                : 'bg-slate-200 hover:bg-slate-300'}
+                            ${isAdmin ? 'cursor-not-allowed opacity-80' : 'cursor-pointer'}"
+                        ${isAdmin ? 'title="ADMIN ไม่สามารถลดสิทธิ์ได้"' : `title="${granted ? 'คลิกเพื่อปิด' : 'คลิกเพื่อเปิด'}"`}>
+                        ${granted
+                            ? `<svg class="w-4 h-4 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="3" d="M5 13l4 4L19 7"/></svg>`
+                            : `<svg class="w-4 h-4 text-slate-400" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M6 18L18 6M6 6l12 12"/></svg>`}
+                    </button>
+                </td>`;
+            }).join('');
+
+            return `<tr class="border-b border-slate-100 hover:bg-slate-50/60 transition-colors">
+                <td class="px-5 py-4 min-w-[200px]">
+                    <p class="text-sm font-semibold text-slate-800">${pm.label}</p>
+                    <p class="text-xs text-slate-400 mt-0.5">${pm.desc}</p>
+                </td>
+                ${cells}
+            </tr>`;
+        }).join('');
+
+        wrap.innerHTML = `
+        <table class="w-full text-left border-collapse">
+            <thead>
+                <tr class="bg-slate-50 border-b-2 border-slate-200">
+                    <th class="px-5 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wide">Permission</th>
+                    ${headerCells}
+                </tr>
+            </thead>
+            <tbody>${bodyRows}</tbody>
+        </table>`;
+
+    } catch (err) {
+        wrap.innerHTML = `
+        <div class="text-center py-16 text-slate-400">
+            <div class="w-16 h-16 rounded-2xl bg-red-50 flex items-center justify-center mx-auto mb-4">
+                <svg class="w-8 h-8 text-red-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5"
+                          d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/>
+                </svg>
+            </div>
+            <p class="font-semibold text-slate-600">โหลด Permission Matrix ไม่สำเร็จ</p>
+            <p class="text-sm mt-1 text-slate-400">${err.message || 'ไม่สามารถเชื่อมต่อกับ API ได้'}</p>
+            <button onclick="window._adminTab('permissions')"
+                class="mt-4 inline-flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-bold text-white shadow-sm"
+                style="background:linear-gradient(135deg,#065f46,#0d9488)">
+                <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                          d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/>
+                </svg>
+                ลองใหม่
+            </button>
+        </div>`;
+    }
+}
+
+window._permToggle = async function(role, permission, granted) {
+    // Optimistic UI — flip the button immediately
+    const btn = document.getElementById(`perm-${role}-${permission}`);
+    if (btn) btn.style.opacity = '0.5';
+
+    try {
+        await API.put('/admin/permissions/matrix', { role, permission, granted });
+        showToast(`${granted ? 'เปิด' : 'ปิด'} ${PERM_LABELS[permission]?.label || permission} สำหรับ ${role}`, 'success');
+        await _permLoadMatrix();   // re-render matrix with fresh data
+    } catch (err) {
+        if (btn) btn.style.opacity = '1';
+        showError(err.message || 'เกิดข้อผิดพลาด');
+    }
+};
 
 // =============================================================================
 // TAB: DASHBOARD
@@ -701,14 +1559,18 @@ async function renderEmployeesTab(container) {
 
     window._empSearch = (q) => { _empSearch = q.toLowerCase(); _empPage = 1; _renderEmpTable(); };
 
-    const [empsRes, deptsRes, teamsRes] = await Promise.all([
+    const [empsRes, deptsRes, teamsRes, posRes, unitsRes] = await Promise.all([
         API.get('/employees').catch(() => ({ data: [] })),
         API.get('/master/departments').catch(() => ({ data: [] })),
         API.get('/master/teams').catch(() => ({ data: [] })),
+        API.get('/master/positions').catch(() => ({ data: [] })),
+        API.get('/admin/org/units').catch(() => ({ data: [] })),
     ]);
-    _empCache  = empsRes?.data  || [];
-    _deptCache = deptsRes?.data || [];
-    _teamCache = teamsRes?.data || [];
+    _empCache  = empsRes?.data   || [];
+    _deptCache = deptsRes?.data  || [];
+    _teamCache = teamsRes?.data  || [];
+    _posCache  = posRes?.data    || [];
+    _unitCache = unitsRes?.data  || [];
     _renderEmpTable();
 }
 
@@ -722,7 +1584,7 @@ function _renderEmpTable() {
         (e.EmployeeName||'').toLowerCase().includes(_empSearch) ||
         (e.EmployeeID  ||'').toLowerCase().includes(_empSearch) ||
         (e.Department  ||'').toLowerCase().includes(_empSearch) ||
-        (e.Team        ||'').toLowerCase().includes(_empSearch)
+        (e.Position    ||'').toLowerCase().includes(_empSearch)
     );
 
     const totalPages = Math.max(1, Math.ceil(filtered.length / EMP_PER_PAGE));
@@ -748,7 +1610,7 @@ function _renderEmpTable() {
                 <th class="px-4 py-3 text-[11px] font-bold text-slate-500 uppercase">รหัส</th>
                 <th class="px-4 py-3 text-[11px] font-bold text-slate-500 uppercase">ชื่อ-นามสกุล</th>
                 <th class="px-4 py-3 text-[11px] font-bold text-slate-500 uppercase">หน่วยงาน</th>
-                <th class="px-4 py-3 text-[11px] font-bold text-slate-500 uppercase">ทีม</th>
+                <th class="px-4 py-3 text-[11px] font-bold text-slate-500 uppercase">ตำแหน่ง</th>
                 <th class="px-4 py-3 text-[11px] font-bold text-slate-500 uppercase">Role</th>
                 <th class="px-4 py-3 text-[11px] font-bold text-slate-500 uppercase text-right">จัดการ</th>
             </tr>
@@ -759,7 +1621,7 @@ function _renderEmpTable() {
                 <td class="px-4 py-3 font-mono text-xs text-slate-500">${emp.EmployeeID}</td>
                 <td class="px-4 py-3 font-semibold text-slate-800 text-sm">${emp.EmployeeName||'—'}</td>
                 <td class="px-4 py-3 text-slate-600 text-xs">${emp.Department||'—'}</td>
-                <td class="px-4 py-3 text-slate-600 text-xs">${emp.Team||'—'}</td>
+                <td class="px-4 py-3 text-slate-600 text-xs">${emp.Position||'—'}</td>
                 <td class="px-4 py-3">${roleBadge(emp.Role)}</td>
                 <td class="px-4 py-3 text-right">
                     <div class="flex gap-1 justify-end opacity-0 group-hover:opacity-100 transition-opacity">
@@ -802,6 +1664,8 @@ window._exportEmpExcel = () => {
         'รหัสพนักงาน': e.EmployeeID,
         'ชื่อ-นามสกุล': e.EmployeeName,
         'หน่วยงาน':    e.Department,
+        'Unit':        e.Unit,
+        'ตำแหน่ง':     e.Position,
         'ทีม':         e.Team,
         'Role':        e.Role,
     }));
@@ -812,10 +1676,28 @@ window._exportEmpExcel = () => {
     showToast('Export สำเร็จ', 'success');
 };
 
+function _buildUnitOpts(deptName, selectedUnit = '') {
+    const dept      = _deptCache.find(d => d.Name === deptName);
+    const deptUnits = dept ? _unitCache.filter(u => u.department_id === dept.id) : [];
+    if (!deptUnits.length) return '<option value="">— ไม่มี Unit ในแผนกนี้ —</option>';
+    return '<option value="">— เลือก Unit —</option>' +
+        deptUnits.map(u => `<option value="${u.name}" ${u.name===selectedUnit?'selected':''}>${u.name}</option>`).join('');
+}
+
+window._empFilterUnits = (deptName) => {
+    const sel = document.getElementById('emp-unit-select');
+    if (!sel) return;
+    sel.innerHTML = _buildUnitOpts(deptName);
+    sel.disabled  = !deptName;
+};
+
 function _empFormFields(emp = {}) {
-    const dOpts = _deptCache.map(d=>`<option value="${d.Name}" ${d.Name===emp.Department?'selected':''}>${d.Name}</option>`).join('');
-    const tOpts = _teamCache.map(t=>`<option value="${t.Name}" ${t.Name===emp.Team?'selected':''}>${t.Name}</option>`).join('');
-    const rOpts = ['User','Admin','Viewer'].map(r=>`<option value="${r}" ${r===(emp.Role||'User')?'selected':''}>${r}</option>`).join('');
+    const dOpts   = _deptCache.map(d=>`<option value="${d.Name}" ${d.Name===emp.Department?'selected':''}>${d.Name}</option>`).join('');
+    const uOpts   = _buildUnitOpts(emp.Department || '', emp.Unit || '');
+    const noUnits = !emp.Department;
+    const pOpts   = _posCache.map(p=>`<option value="${p.Name}" ${p.Name===emp.Position?'selected':''}>${p.Name}</option>`).join('');
+    const tOpts   = _teamCache.map(t=>`<option value="${t.Name}" ${t.Name===emp.Team?'selected':''}>${t.Name}</option>`).join('');
+    const rOpts   = ['User','Admin','Viewer'].map(r=>`<option value="${r}" ${r===(emp.Role||'User')?'selected':''}>${r}</option>`).join('');
     return `
     <div class="grid grid-cols-2 gap-3">
         <div>
@@ -829,13 +1711,28 @@ function _empFormFields(emp = {}) {
         </div>
         <div>
             <label class="block text-xs font-bold text-slate-500 uppercase mb-1">หน่วยงาน</label>
-            <select name="Department" class="form-select w-full rounded-lg text-sm"><option value="">— เลือก —</option>${dOpts}</select>
+            <select name="Department" class="form-select w-full rounded-lg text-sm"
+                    onchange="window._empFilterUnits(this.value)">
+                <option value="">— เลือก —</option>${dOpts}
+            </select>
         </div>
         <div>
-            <label class="block text-xs font-bold text-slate-500 uppercase mb-1">ทีม</label>
+            <label class="block text-xs font-bold text-slate-500 uppercase mb-1">
+                Safety Unit
+                <span class="text-slate-400 normal-case font-normal text-[10px] ml-1">(เลือกแผนกก่อน)</span>
+            </label>
+            <select id="emp-unit-select" name="Unit" class="form-select w-full rounded-lg text-sm"
+                    ${noUnits ? 'disabled' : ''}>${uOpts}</select>
+        </div>
+        <div>
+            <label class="block text-xs font-bold text-slate-500 uppercase mb-1">ตำแหน่ง</label>
+            <select name="Position" class="form-select w-full rounded-lg text-sm"><option value="">— เลือก —</option>${pOpts}</select>
+        </div>
+        <div>
+            <label class="block text-xs font-bold text-slate-500 uppercase mb-1">ทีม <span class="text-slate-300 normal-case font-normal">(สำหรับตรวจ)</span></label>
             <select name="Team" class="form-select w-full rounded-lg text-sm"><option value="">— เลือก —</option>${tOpts}</select>
         </div>
-        <div>
+        <div class="col-span-2">
             <label class="block text-xs font-bold text-slate-500 uppercase mb-1">Role (สิทธิ์)</label>
             <select name="Role" class="form-select w-full rounded-lg text-sm">${rOpts}</select>
         </div>
@@ -967,7 +1864,7 @@ window._openImportModal = () => {
         <div class="space-y-4">
             <div class="bg-amber-50 border border-amber-200 rounded-xl p-3 text-xs text-amber-800">
                 <p class="font-bold mb-1">คอลัมน์ที่รองรับ:</p>
-                <code class="block bg-amber-100 px-2 py-1 rounded">EmployeeID, EmployeeName, Department, Team, Role</code>
+                <code class="block bg-amber-100 px-2 py-1 rounded">EmployeeID, EmployeeName, Department, Unit, Position, Team, Role</code>
                 <p class="mt-1">ถ้า EmployeeID ซ้ำ จะอัปเดตข้อมูลเดิม (Upsert)</p>
             </div>
             <div id="import-drop-zone" class="border-2 border-dashed border-slate-300 rounded-xl p-8 text-center cursor-pointer hover:border-emerald-400 hover:bg-emerald-50 transition-all">

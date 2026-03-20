@@ -65,6 +65,36 @@ async function ensureTables() {
         try { await db.query(`ALTER TABLE OJT_Records DROP COLUMN ${col}`); } catch (_) {}
     }
 
+    // OJT History (audit trail per department)
+    await db.query(`
+        CREATE TABLE IF NOT EXISTS OJT_History (
+            id                   INT AUTO_INCREMENT PRIMARY KEY,
+            Department           VARCHAR(100) NOT NULL,
+            OJTDate              DATE,
+            NextReviewDate       DATE,
+            ReviewIntervalMonths INT DEFAULT 12,
+            TrainerName          VARCHAR(255),
+            AttendeeCount        INT DEFAULT 0,
+            Notes                TEXT,
+            RecordedBy           VARCHAR(100),
+            RecordedAt           TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            INDEX idx_dept (Department)
+        )
+    `);
+
+    // SCW Documents (file attachments for Stop-Call-Wait)
+    await db.query(`
+        CREATE TABLE IF NOT EXISTS SCW_Documents (
+            id          INT AUTO_INCREMENT PRIMARY KEY,
+            Title       VARCHAR(255) NOT NULL,
+            FileURL     TEXT NOT NULL,
+            FileType    VARCHAR(50),
+            FileSizeKB  INT DEFAULT 0,
+            UploadedBy  VARCHAR(100),
+            UploadedAt  TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    `);
+
     tablesReady = true;
 }
 
@@ -173,7 +203,77 @@ router.post('/records', isAdmin, async (req, res) => {
                 Notes || '', req.user.name
             ]
         );
+        // Save to history
+        await db.query(
+            `INSERT INTO OJT_History
+             (Department, OJTDate, NextReviewDate, ReviewIntervalMonths, TrainerName, AttendeeCount, Notes, RecordedBy)
+             VALUES (?,?,?,?,?,?,?,?)`,
+            [Department, OJTDate, nextReviewDate, interval,
+             TrainerName || '', parseInt(AttendeeCount) || 0, Notes || '', req.user.name]
+        );
+
         res.json({ success: true, message: `บันทึก OJT แผนก ${Department} สำเร็จ` });
+    } catch (err) {
+        res.status(500).json({ success: false, message: err.message });
+    }
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// GET /api/ojt/history/:department  — OJT history for one department
+// ─────────────────────────────────────────────────────────────────────────────
+router.get('/history/:department', async (req, res) => {
+    try {
+        await ensureTables();
+        const [rows] = await db.query(
+            'SELECT * FROM OJT_History WHERE Department=? ORDER BY RecordedAt DESC LIMIT 20',
+            [req.params.department]
+        );
+        res.json({ success: true, data: rows });
+    } catch (err) {
+        res.status(500).json({ success: false, message: err.message });
+    }
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// GET /api/ojt/documents  — list SCW documents
+// ─────────────────────────────────────────────────────────────────────────────
+router.get('/documents', async (req, res) => {
+    try {
+        await ensureTables();
+        const [rows] = await db.query('SELECT * FROM SCW_Documents ORDER BY UploadedAt DESC');
+        res.json({ success: true, data: rows });
+    } catch (err) {
+        res.status(500).json({ success: false, message: err.message });
+    }
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// POST /api/ojt/documents  — save document metadata (admin)
+// ─────────────────────────────────────────────────────────────────────────────
+router.post('/documents', isAdmin, async (req, res) => {
+    try {
+        await ensureTables();
+        const { Title, FileURL, FileType, FileSizeKB } = req.body;
+        if (!Title || !FileURL) {
+            return res.status(400).json({ success: false, message: 'กรุณาระบุชื่อและ URL ไฟล์' });
+        }
+        await db.query(
+            'INSERT INTO SCW_Documents (Title, FileURL, FileType, FileSizeKB, UploadedBy) VALUES (?,?,?,?,?)',
+            [Title, FileURL, FileType || '', parseInt(FileSizeKB) || 0, req.user.name]
+        );
+        res.json({ success: true, message: 'อัปโหลดเอกสาร SCW สำเร็จ' });
+    } catch (err) {
+        res.status(500).json({ success: false, message: err.message });
+    }
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// DELETE /api/ojt/documents/:id  — delete SCW document (admin)
+// ─────────────────────────────────────────────────────────────────────────────
+router.delete('/documents/:id', isAdmin, async (req, res) => {
+    try {
+        await db.query('DELETE FROM SCW_Documents WHERE id=?', [req.params.id]);
+        res.json({ success: true, message: 'ลบเอกสาร SCW สำเร็จ' });
     } catch (err) {
         res.status(500).json({ success: false, message: err.message });
     }
