@@ -858,4 +858,94 @@ router.get('/attendance-overview', async (req, res) => {
     }
 });
 
+// ─── Self-Patrol (หัวหน้าส่วน/แผนก) ───────────────────────────────────────────
+
+router.get('/my-self-patrol', async (req, res) => {
+    const { year, month } = req.query;
+    const empId = req.user.id;
+    try {
+        const [[emp]] = await pool.query(
+            `SELECT mp.IsSupervisorPatrol, e.Position
+             FROM Employees e
+             LEFT JOIN Master_Positions mp ON mp.Name = e.Position
+             WHERE e.EmployeeID = ?`, [empId]);
+        if (!emp || !emp.IsSupervisorPatrol) {
+            return res.json({ success: true, data: { isSupervisorPatrol: false, checkins: [] } });
+        }
+        const [checkins] = await pool.query(
+            `SELECT * FROM Patrol_Self_Checkin WHERE EmployeeID = ? AND Year = ? AND Month = ? ORDER BY CheckinDate ASC`,
+            [empId, year, month]);
+        res.json({ success: true, data: { isSupervisorPatrol: true, position: emp.Position, checkins, target: 2 } });
+    } catch (err) {
+        res.status(500).json({ success: false, message: err.message });
+    }
+});
+
+router.post('/self-checkin', async (req, res) => {
+    const empId = req.user.id;
+    const { CheckinDate, Location, Notes } = req.body;
+    if (!CheckinDate) return res.status(400).json({ success: false, message: 'กรุณาระบุวันที่' });
+    const d = new Date(CheckinDate);
+    const year = d.getFullYear();
+    const month = d.getMonth() + 1;
+    try {
+        const [[emp]] = await pool.query(
+            `SELECT mp.IsSupervisorPatrol FROM Employees e
+             LEFT JOIN Master_Positions mp ON mp.Name = e.Position
+             WHERE e.EmployeeID = ?`, [empId]);
+        if (!emp?.IsSupervisorPatrol) {
+            return res.status(403).json({ success: false, message: 'ตำแหน่งของคุณไม่ได้กำหนดให้เดิน Self-Patrol' });
+        }
+        const [result] = await pool.query(
+            `INSERT INTO Patrol_Self_Checkin (EmployeeID, CheckinDate, Location, Notes, Year, Month) VALUES (?,?,?,?,?,?)`,
+            [empId, CheckinDate, Location || null, Notes || null, year, month]);
+        res.json({ success: true, message: 'บันทึกการเดินตรวจสำเร็จ', id: result.insertId });
+    } catch (err) {
+        res.status(500).json({ success: false, message: err.message });
+    }
+});
+
+router.delete('/self-checkin/:id', async (req, res) => {
+    const empId = req.user.id;
+    try {
+        const [[row]] = await pool.query('SELECT EmployeeID FROM Patrol_Self_Checkin WHERE id = ?', [req.params.id]);
+        if (!row) return res.status(404).json({ success: false, message: 'ไม่พบข้อมูล' });
+        if (row.EmployeeID !== empId && req.user.role !== 'Admin') {
+            return res.status(403).json({ success: false, message: 'ไม่มีสิทธิ์ลบรายการนี้' });
+        }
+        await pool.query('DELETE FROM Patrol_Self_Checkin WHERE id = ?', [req.params.id]);
+        res.json({ success: true, message: 'ลบสำเร็จ' });
+    } catch (err) {
+        res.status(500).json({ success: false, message: err.message });
+    }
+});
+
+router.get('/supervisor-overview', async (req, res) => {
+    const { year, month } = req.query;
+    try {
+        const [members] = await pool.query(
+            `SELECT e.EmployeeID, e.EmployeeName, e.Department, e.Position
+             FROM Employees e
+             JOIN Master_Positions mp ON mp.Name = e.Position AND mp.IsSupervisorPatrol = 1
+             ORDER BY e.Department, e.EmployeeName`);
+        const [checkins] = await pool.query(
+            `SELECT * FROM Patrol_Self_Checkin WHERE Year = ? AND Month = ?`, [year, month]);
+        const checkinMap = {};
+        checkins.forEach(c => {
+            if (!checkinMap[c.EmployeeID]) checkinMap[c.EmployeeID] = [];
+            checkinMap[c.EmployeeID].push(c);
+        });
+        const data = members.map(m => ({
+            ...m,
+            checkins: checkinMap[m.EmployeeID] || [],
+            attended: (checkinMap[m.EmployeeID] || []).length,
+            target: 2,
+            percent: Math.min(Math.round(((checkinMap[m.EmployeeID] || []).length / 2) * 100), 100),
+        }));
+        res.json({ success: true, data });
+    } catch (err) {
+        res.status(500).json({ success: false, message: err.message });
+    }
+});
+
 module.exports = router;

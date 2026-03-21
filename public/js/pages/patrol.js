@@ -26,6 +26,7 @@ let _allIssues      = [];
 let _activeFilter   = 'all';
 let _monthlySummary = [];
 let _myPlan         = null;  // personal monthly plan (team, sessions, compliance, roster)
+let _mySelfPatrol   = null;  // self-patrol data for supervisor positions
 let _overviewYear   = new Date().getFullYear();
 let _overviewData   = null;  // attendance overview cache
 
@@ -37,6 +38,8 @@ export async function loadPatrolPage() {
     window.openIssueForm = openIssueForm;
     window.handleCheckInSubmit = handleCheckInSubmit;
     window.openCarouselDetail = openCarouselDetail;
+    window.openSelfCheckinModal = openSelfCheckinModal;
+    window.deleteSelfCheckin = deleteSelfCheckin;
     window.switchOverviewYear = switchOverviewYear;
 
     const container = document.getElementById('patrol-page');
@@ -47,17 +50,19 @@ export async function loadPatrolPage() {
         const curMonth = now.getMonth() + 1;
         const curYear  = now.getFullYear();
 
-        const [scheduleRes, statsRes, issuesRes, summaryRes, planRes] = await Promise.all([
+        const [scheduleRes, statsRes, issuesRes, summaryRes, planRes, selfPatrolRes] = await Promise.all([
             API.get(`/patrol/my-schedule?employeeId=${currentUser.id}&month=${curMonth}&year=${curYear}`),
             API.get('/patrol/attendance-stats'),
             API.get('/patrol/issues'),
             API.get(`/patrol/monthly-summary?year=${curYear}&month=${curMonth}`).catch(() => ({ data: [] })),
             API.get(`/patrol/my-monthly-plan?year=${curYear}&month=${curMonth}`).catch(() => ({ data: null })),
+            API.get(`/patrol/my-self-patrol?year=${curYear}&month=${curMonth}`).catch(() => ({ data: null })),
         ]);
 
         _allIssues      = normalizeApiArray(issuesRes);
         _monthlySummary = summaryRes.data || [];
         _myPlan         = planRes.data || null;
+        _mySelfPatrol   = selfPatrolRes.data || null;
 
         renderDashboard(container, {
             schedule: normalizeApiArray(scheduleRes),
@@ -172,7 +177,11 @@ function renderDashboard(container, data) {
         const fab = document.getElementById('issue-fab');
         if (fab) fab.classList.toggle('hidden', tab !== 'issues');
         // lazy-load overview data on first switch
-        if (tab === 'overview' && !_overviewData) loadOverview(_overviewYear);
+        if (tab === 'overview' && !_overviewData) {
+            const now = new Date();
+            loadOverview(_overviewYear);
+            loadSupervisorOverview(now.getFullYear(), now.getMonth() + 1);
+        }
     };
     // expose for loadOverview to refresh hero stats when overview is active
     window._refreshOverviewHero = () => renderStatsStrip(getOverviewHeroStats());
@@ -356,6 +365,57 @@ function renderDashboard(container, data) {
             </div>
             <div class="grid grid-cols-7 gap-1 text-center">${generateMiniCalendarHTML(data.schedule)}</div>
           </div>
+
+          <!-- Self-Patrol Card (หัวหน้าส่วน/แผนก) — conditional -->
+          ${_mySelfPatrol?.isSupervisorPatrol ? (() => {
+            const sp = _mySelfPatrol;
+            const attended = sp.checkins.length;
+            const target   = sp.target || 2;
+            const pct      = Math.min(Math.round((attended / target) * 100), 100);
+            const done     = attended >= target;
+            return `
+          <div class="bg-white rounded-2xl shadow-sm border border-amber-100 overflow-hidden" style="box-shadow:0 4px 24px rgba(245,158,11,0.08)">
+            <div class="px-5 py-3.5 border-b border-amber-100 flex items-center justify-between" style="background:linear-gradient(135deg,#fffbeb,#fef3c7)">
+              <h3 class="font-bold text-amber-800 text-sm flex items-center gap-2">
+                <div class="w-7 h-7 rounded-lg flex items-center justify-center bg-amber-100">
+                  <svg class="w-4 h-4 text-amber-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z"/></svg>
+                </div>
+                การเดินตรวจ (Self-Patrol)
+              </h3>
+              <span class="text-[10px] font-bold px-2.5 py-1 rounded-full ${done ? 'bg-emerald-100 text-emerald-700' : 'bg-amber-200 text-amber-800'}">${attended}/${target} ครั้ง · ${pct}%</span>
+            </div>
+            <div class="p-5">
+              <div class="w-full bg-slate-100 rounded-full h-2 mb-4 overflow-hidden">
+                <div class="h-full rounded-full transition-all duration-700" style="width:${pct}%;background:${done?'linear-gradient(90deg,#059669,#10b981)':'linear-gradient(90deg,#f59e0b,#fbbf24)'}"></div>
+              </div>
+              ${sp.checkins.length === 0
+                ? `<p class="text-xs text-slate-400 text-center py-3 italic">ยังไม่มีการบันทึกเดือนนี้</p>`
+                : sp.checkins.map(c => {
+                    const d = new Date(c.CheckinDate);
+                    return `<div class="flex items-center gap-3 py-2 border-b border-slate-50 last:border-0">
+                      <div class="w-10 h-10 rounded-xl flex items-center justify-center bg-amber-50 flex-shrink-0">
+                        <div class="text-center">
+                          <div class="text-sm font-bold text-amber-700">${d.getDate()}</div>
+                          <div class="text-[8px] text-amber-400">${d.toLocaleString('th-TH',{month:'short'})}</div>
+                        </div>
+                      </div>
+                      <div class="flex-1 min-w-0">
+                        <p class="text-xs font-semibold text-slate-700">${c.Location || 'ไม่ระบุสถานที่'}</p>
+                        ${c.Notes ? `<p class="text-[10px] text-slate-400 truncate">${c.Notes}</p>` : ''}
+                      </div>
+                      <button onclick="deleteSelfCheckin(${c.id})" class="p-1 text-slate-300 hover:text-red-500 transition-colors flex-shrink-0">
+                        <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
+                      </button>
+                    </div>`;
+                  }).join('')}
+              <button onclick="openSelfCheckinModal()" class="mt-4 w-full py-2.5 rounded-xl text-xs font-bold text-white transition-all hover:opacity-90 active:scale-[0.98]" style="background:linear-gradient(135deg,#d97706,#f59e0b)">
+                <svg class="w-3.5 h-3.5 inline-block mr-1.5 -mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/></svg>
+                บันทึกการเดินตรวจ
+              </button>
+            </div>
+          </div>`;
+          })() : ''}
+
         </div>
 
         <div class="xl:col-span-1 space-y-5">
@@ -648,6 +708,44 @@ function renderDashboard(container, data) {
               </div>
               <span class="text-[9px] text-slate-400 font-mono flex-shrink-0 w-6 text-right">${r.Total}</span>
             </div>`).join('')}
+          </div>
+        </div>
+
+        <!-- Supervisor Patrol Overview -->
+        <div class="bg-white rounded-2xl shadow-sm border border-amber-100 overflow-hidden">
+          <div class="px-5 py-3.5 border-b border-amber-100 flex items-center justify-between bg-amber-50/50">
+            <h3 class="font-bold text-slate-700 text-sm flex items-center gap-2">
+              <div class="w-7 h-7 rounded-lg flex items-center justify-center bg-amber-100">
+                <svg class="w-4 h-4 text-amber-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z"/></svg>
+              </div>
+              การเดินตรวจหัวหน้าส่วน/แผนก
+              <span class="text-[9px] font-normal text-slate-400">(เป้าหมาย 2 ครั้ง/เดือน)</span>
+            </h3>
+            <span class="text-[10px] text-slate-400" id="sv-overview-subtitle"></span>
+          </div>
+          <div class="overflow-x-auto">
+            <table class="w-full text-xs text-left">
+              <thead class="text-[10px] uppercase bg-slate-50 border-b border-slate-100">
+                <tr>
+                  <th class="px-4 py-3 font-bold text-slate-400 w-8">#</th>
+                  <th class="px-4 py-3 font-bold text-slate-600">ชื่อ-สกุล</th>
+                  <th class="px-4 py-3 font-bold text-slate-400">ตำแหน่ง</th>
+                  <th class="px-4 py-3 font-bold text-slate-400">แผนก</th>
+                  <th class="px-4 py-3 font-bold text-slate-400 text-center">เดินแล้ว</th>
+                  <th class="px-4 py-3 font-bold text-slate-400 text-center">เป้า</th>
+                  <th class="px-4 py-3 font-bold text-slate-400 text-center">%</th>
+                  <th class="px-4 py-3 font-bold text-slate-400 text-center">สถานะ</th>
+                </tr>
+              </thead>
+              <tbody id="sv-overview-body">
+                <tr><td colspan="8" class="text-center py-8 text-slate-300 text-xs">
+                  <div class="inline-flex flex-col items-center gap-2">
+                    <div class="animate-spin rounded-full h-6 w-6 border-3 border-amber-400 border-t-transparent"></div>
+                    <span>กำลังโหลด...</span>
+                  </div>
+                </td></tr>
+              </tbody>
+            </table>
           </div>
         </div>
 
@@ -1316,6 +1414,102 @@ function switchOverviewYear(year) {
 window.filterOverviewTable = function(typeFilter) {
     if (_overviewData) renderOverviewTable(_overviewData.members, typeFilter);
 };
+
+// ─── Supervisor Overview ───────────────────────────────────────────────────────
+async function loadSupervisorOverview(year, month) {
+    const tbody  = document.getElementById('sv-overview-body');
+    const subEl  = document.getElementById('sv-overview-subtitle');
+    if (!tbody) return;
+    try {
+        const res = await API.get(`/patrol/supervisor-overview?year=${year}&month=${month}`);
+        const members = res.data || [];
+        if (subEl) {
+            const d = new Date(year, month - 1, 1);
+            subEl.textContent = d.toLocaleDateString('th-TH', { month: 'long', year: 'numeric' });
+        }
+        if (!members.length) {
+            tbody.innerHTML = `<tr><td colspan="8" class="text-center py-8 text-xs text-slate-400">ยังไม่มีข้อมูลหัวหน้าส่วน/แผนก<br><span class="text-[10px] text-slate-300">ตั้งค่า Self-Patrol ให้กับ Position ในหน้า Admin → Master Data → Positions</span></td></tr>`;
+            return;
+        }
+        tbody.innerHTML = members.map((m, i) => {
+            const done = m.attended >= m.target;
+            const half = m.attended > 0 && m.attended < m.target;
+            const statusCls = done  ? 'bg-emerald-100 text-emerald-700'
+                            : half ? 'bg-amber-100 text-amber-700'
+                            :        'bg-red-50 text-red-500';
+            const statusLbl = done ? 'ครบแล้ว' : half ? 'บางส่วน' : 'ยังไม่เดิน';
+            return `<tr class="border-b border-slate-50 hover:bg-slate-50 transition-colors">
+              <td class="px-4 py-3 text-slate-400 text-[10px] font-mono">${i+1}</td>
+              <td class="px-4 py-3 font-semibold text-slate-700">${m.EmployeeName}</td>
+              <td class="px-4 py-3 text-slate-500">${m.Position || '—'}</td>
+              <td class="px-4 py-3 text-slate-500">${m.Department || '—'}</td>
+              <td class="px-4 py-3 text-center font-bold ${done ? 'text-emerald-600' : 'text-amber-600'}">${m.attended}</td>
+              <td class="px-4 py-3 text-center text-slate-400">${m.target}</td>
+              <td class="px-4 py-3 text-center">
+                <div class="w-full bg-slate-100 rounded-full h-1.5 overflow-hidden">
+                  <div class="h-full rounded-full" style="width:${m.percent}%;background:${done?'#10b981':half?'#f59e0b':'#fca5a5'}"></div>
+                </div>
+                <span class="text-[10px] text-slate-500">${m.percent}%</span>
+              </td>
+              <td class="px-4 py-3 text-center">
+                <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold ${statusCls}">
+                  <span class="w-1.5 h-1.5 rounded-full inline-block ${done?'bg-emerald-400 animate-pulse':half?'bg-amber-400':'bg-red-300'}"></span>
+                  ${statusLbl}
+                </span>
+              </td>
+            </tr>`;
+        }).join('');
+    } catch {
+        tbody.innerHTML = `<tr><td colspan="8" class="text-center py-6 text-xs text-slate-400">โหลดไม่ได้</td></tr>`;
+    }
+}
+
+// ─── Self-Patrol Modal / Delete ───────────────────────────────────────────────
+function openSelfCheckinModal() {
+    const today = new Date().toISOString().split('T')[0];
+    openModal('บันทึกการเดินตรวจ (Self-Patrol)', `
+        <form id="self-checkin-form" class="space-y-4">
+          <div>
+            <label class="block text-xs font-bold text-slate-500 uppercase mb-1.5">วันที่เดินตรวจ</label>
+            <input type="date" id="sc-date" class="form-input w-full rounded-lg text-sm" value="${today}" max="${today}" required>
+          </div>
+          <div>
+            <label class="block text-xs font-bold text-slate-500 uppercase mb-1.5">สถานที่ / พื้นที่</label>
+            <input type="text" id="sc-location" class="form-input w-full rounded-lg text-sm" placeholder="เช่น โรงงาน 1, อาคาร A..." required>
+          </div>
+          <div>
+            <label class="block text-xs font-bold text-slate-500 uppercase mb-1.5">หมายเหตุ (ถ้ามี)</label>
+            <textarea id="sc-notes" rows="2" class="form-input w-full rounded-lg text-sm resize-none" placeholder="สิ่งที่พบ หรือรายละเอียดเพิ่มเติม..."></textarea>
+          </div>
+          <div class="flex justify-end gap-2 pt-2 border-t border-slate-100">
+            <button type="button" onclick="window.closeModal&&window.closeModal()" class="px-4 py-2 rounded-lg text-sm bg-slate-100 text-slate-600 hover:bg-slate-200 transition-colors">ยกเลิก</button>
+            <button type="submit" class="px-5 py-2 rounded-lg text-sm font-bold text-white" style="background:linear-gradient(135deg,#d97706,#f59e0b)">บันทึก</button>
+          </div>
+        </form>`, 'max-w-sm');
+    setTimeout(() => {
+        document.getElementById('self-checkin-form')?.addEventListener('submit', async e => {
+            e.preventDefault();
+            const CheckinDate = document.getElementById('sc-date')?.value;
+            const Location    = document.getElementById('sc-location')?.value.trim();
+            const Notes       = document.getElementById('sc-notes')?.value.trim();
+            if (!CheckinDate || !Location) { showToast('กรุณาระบุวันที่และสถานที่', 'error'); return; }
+            try {
+                const res = await API.post('/patrol/self-checkin', { CheckinDate, Location, Notes });
+                if (res.success) { showToast('บันทึกสำเร็จ', 'success'); closeModal(); loadPatrolPage(); }
+                else showError(res.message);
+            } catch (err) { showError(err.message); }
+        });
+    }, 50);
+}
+
+async function deleteSelfCheckin(id) {
+    if (!confirm('ลบรายการนี้?')) return;
+    try {
+        const res = await API.delete(`/patrol/self-checkin/${id}`);
+        if (res.success) { showToast('ลบสำเร็จ', 'success'); loadPatrolPage(); }
+        else showError(res.message);
+    } catch (err) { showError(err.message); }
+}
 
 // ─── Charts ───────────────────────────────────────────────────────────────────
 async function loadDashboardCharts() {

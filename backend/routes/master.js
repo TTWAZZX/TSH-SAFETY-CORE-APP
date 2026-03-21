@@ -178,14 +178,29 @@ router.post('/positions', isAdmin, async (req, res) => {
 });
 
 router.put('/positions/:id', isAdmin, async (req, res) => {
-    const { Name } = req.body;
+    const { Name, IsSupervisorPatrol } = req.body;
     if (!Name) return res.status(400).json({ success: false, message: 'กรุณาระบุชื่อตำแหน่ง' });
     try {
-        await pool.query('UPDATE Master_Positions SET Name = ? WHERE id = ?', [Name, req.params.id]);
+        await pool.query(
+            'UPDATE Master_Positions SET Name = ?, IsSupervisorPatrol = ? WHERE id = ?',
+            [Name, IsSupervisorPatrol ? 1 : 0, req.params.id]
+        );
         res.json({ success: true, message: 'แก้ไขตำแหน่งสำเร็จ' });
     } catch (err) {
         if (err.code === 'ER_DUP_ENTRY') return res.status(400).json({ success: false, message: 'ชื่อตำแหน่งนี้มีอยู่แล้ว' });
         res.status(500).json({ success: false, message: 'ไม่สามารถแก้ไขข้อมูลได้' });
+    }
+});
+
+router.put('/positions/:id/supervisor-toggle', isAdmin, async (req, res) => {
+    try {
+        const [[row]] = await pool.query('SELECT IsSupervisorPatrol FROM Master_Positions WHERE id = ?', [req.params.id]);
+        if (!row) return res.status(404).json({ success: false, message: 'ไม่พบตำแหน่ง' });
+        const newVal = row.IsSupervisorPatrol ? 0 : 1;
+        await pool.query('UPDATE Master_Positions SET IsSupervisorPatrol = ? WHERE id = ?', [newVal, req.params.id]);
+        res.json({ success: true, data: { IsSupervisorPatrol: newVal } });
+    } catch (err) {
+        res.status(500).json({ success: false, message: err.message });
     }
 });
 

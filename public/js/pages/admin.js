@@ -2580,7 +2580,52 @@ async function renderMasterData(container) {
     masterTypes.forEach(mt => loadMasterList(mt.key));
 }
 
+async function loadPositionsList() {
+    const listEl  = document.getElementById('list-positions');
+    const countEl = document.getElementById('count-positions');
+    try {
+        const res = await API.get('/master/positions');
+        if (!res.success) throw new Error(res.message);
+        if (countEl) countEl.textContent = res.data.length;
+        if (!res.data.length) { listEl.innerHTML = `<li class="text-center text-xs text-slate-300 py-10">ยังไม่มีข้อมูล</li>`; return; }
+        listEl.innerHTML = res.data.map((item, i) => `
+            <li class="group flex items-center gap-2 p-2 hover:bg-slate-50 rounded-lg transition-colors border border-transparent hover:border-slate-100">
+                <span class="text-[10px] text-slate-400 w-4 font-mono shrink-0">${i+1}</span>
+                <span class="text-xs font-medium text-slate-700 flex-1 truncate">${item.Name}</span>
+                ${item.IsSupervisorPatrol
+                    ? `<span class="text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-amber-100 text-amber-700 flex-shrink-0 whitespace-nowrap">Self-Patrol</span>`
+                    : ''}
+                <div class="flex gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
+                    <button onclick="toggleSupervisorPatrol(${item.id})"
+                        title="${item.IsSupervisorPatrol ? 'ปิด Self-Patrol' : 'เปิด Self-Patrol (หัวหน้าส่วน/แผนก)'}"
+                        class="p-1 rounded-md transition-colors ${item.IsSupervisorPatrol ? 'text-amber-500 hover:bg-amber-50' : 'text-slate-300 hover:text-amber-500 hover:bg-amber-50'}">
+                        <svg class="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+                    </button>
+                    <button onclick="editMasterData('positions',${item.id},'${(item.Name||'').replace(/'/g,"\\'")}')"
+                        class="p-1 text-slate-300 hover:text-indigo-600 hover:bg-indigo-50 rounded-md transition-colors">
+                        <svg class="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"/></svg>
+                    </button>
+                    <button onclick="deleteMasterData('positions',${item.id},'${(item.Name||'').replace(/'/g,"\\'")}')"
+                        class="p-1 text-slate-300 hover:text-red-500 hover:bg-red-50 rounded-md transition-colors">
+                        <svg class="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
+                    </button>
+                </div>
+            </li>`).join('');
+    } catch { listEl.innerHTML = `<li class="text-center text-red-400 text-xs py-4">โหลดไม่ได้</li>`; }
+}
+
+window.toggleSupervisorPatrol = async (id) => {
+    try {
+        const res = await API.put(`/master/positions/${id}/supervisor-toggle`, {});
+        if (res.success) {
+            showToast(res.data.IsSupervisorPatrol ? 'เปิด Self-Patrol สำหรับตำแหน่งนี้แล้ว' : 'ปิด Self-Patrol แล้ว', 'success');
+            loadPositionsList();
+        } else showError(res.message);
+    } catch (err) { showError(err.message); }
+};
+
 async function loadMasterList(type) {
+    if (type === 'positions') return loadPositionsList();
     const listEl  = document.getElementById(`list-${type}`);
     const countEl = document.getElementById(`count-${type}`);
     try {
