@@ -22,8 +22,9 @@ const SAFETY_IMAGES = [
 ];
 
 // ─── State ────────────────────────────────────────────────────────────────────
-let _allIssues = [];
-let _activeFilter = 'all';
+let _allIssues      = [];
+let _activeFilter   = 'all';
+let _monthlySummary = [];  // sessions จาก /patrol/monthly-summary (มี AreaName, TeamColor, PatrolRound)
 
 // ─── Main Load ────────────────────────────────────────────────────────────────
 export async function loadPatrolPage() {
@@ -38,17 +39,25 @@ export async function loadPatrolPage() {
     container.innerHTML = getSkeletonHTML();
 
     try {
-        const [scheduleRes, statsRes, issuesRes] = await Promise.all([
-            API.get(`/patrol/my-schedule?employeeId=${currentUser.id}&month=${new Date().getMonth()+1}&year=${new Date().getFullYear()}`),
+        const now = new Date();
+        const curMonth = now.getMonth() + 1;
+        const curYear  = now.getFullYear();
+
+        const [scheduleRes, statsRes, issuesRes, summaryRes] = await Promise.all([
+            API.get(`/patrol/my-schedule?employeeId=${currentUser.id}&month=${curMonth}&year=${curYear}`),
             API.get('/patrol/attendance-stats'),
-            API.get('/patrol/issues')
+            API.get('/patrol/issues'),
+            API.get(`/patrol/monthly-summary?year=${curYear}&month=${curMonth}`).catch(() => ({ data: [] })),
         ]);
 
-        _allIssues = normalizeApiArray(issuesRes);
+        _allIssues      = normalizeApiArray(issuesRes);
+        _monthlySummary = summaryRes.data || [];
+
         renderDashboard(container, {
             schedule: normalizeApiArray(scheduleRes),
-            stats: normalizeApiArray(statsRes),
-            issues: _allIssues
+            stats:    normalizeApiArray(statsRes),
+            issues:   _allIssues,
+            summary:  _monthlySummary,
         });
 
         setTimeout(() => initPromoCarousel(), 100);
@@ -205,16 +214,33 @@ function renderDashboard(container, data) {
                 </div>
                 <div class="flex-1 overflow-y-auto custom-scrollbar divide-y divide-slate-50" style="max-height:200px">
                   ${data.schedule.length > 0 ? data.schedule.map(item => {
-                    const d = new Date(item.ScheduledDate);
-                    const isTd = d.toDateString() === today.toDateString();
-                    return `<div class="flex items-center px-5 py-3 hover:bg-slate-50 transition-colors ${isTd ? 'bg-emerald-50/40' : ''}">
+                    const d     = new Date(item.ScheduledDate);
+                    const isTd  = d.toDateString() === today.toDateString();
+                    // หา area info จาก monthly-summary (match วันที่ + TeamID หรือ TeamName)
+                    const sumItem = _monthlySummary.find(s =>
+                        new Date(s.ScheduledDate).toDateString() === d.toDateString() &&
+                        (s.TeamID === item.TeamID || s.TeamName === item.TeamName)
+                    ) || item;
+                    const areaLabel  = sumItem.AreaName || sumItem.AreaCode || 'Factory Area';
+                    const teamColor  = sumItem.TeamColor || '#6366f1';
+                    const round      = sumItem.PatrolRound;
+                    const statusColor = { Pending:'bg-amber-100 text-amber-700', Completed:'bg-emerald-100 text-emerald-700', Missed:'bg-red-100 text-red-600' };
+                    const sc = statusColor[item.Status] || 'bg-slate-100 text-slate-400';
+                    return `<div class="flex items-center px-4 py-2.5 hover:bg-slate-50 transition-colors ${isTd ? 'bg-emerald-50/40' : ''}">
                       <div class="w-10 text-center border-r border-slate-100 pr-3 mr-3 flex-shrink-0">
                         <div class="text-lg font-bold ${isTd ? 'text-emerald-600' : 'text-slate-700'}">${d.getDate()}</div>
                         <div class="text-[9px] font-bold text-slate-400 uppercase">${d.toLocaleString('en-US',{month:'short'})}</div>
                       </div>
                       <div class="flex-1 min-w-0">
-                        <p class="text-xs font-bold text-slate-800 truncate">${item.TeamName}</p>
-                        <p class="text-[10px] text-slate-400">Factory Area</p>
+                        <div class="flex items-center gap-1.5 mb-0.5">
+                          <span class="w-2 h-2 rounded-full flex-shrink-0" style="background:${teamColor}"></span>
+                          <p class="text-xs font-bold text-slate-800 truncate">${item.TeamName}</p>
+                        </div>
+                        <div class="flex items-center gap-1.5">
+                          <span class="text-[9px] font-semibold text-slate-500">${areaLabel}</span>
+                          ${round ? `<span class="text-[8px] font-bold px-1.5 py-0.5 rounded-full bg-indigo-50 text-indigo-600">รอบ ${round}</span>` : ''}
+                          <span class="text-[8px] font-bold px-1.5 py-0.5 rounded-full ${sc}">${item.Status||'Pending'}</span>
+                        </div>
                       </div>
                       ${isTd ? `<span class="flex-shrink-0 text-[9px] font-bold text-emerald-600 bg-emerald-50 px-2 py-0.5 rounded-full border border-emerald-100">วันนี้</span>` : ''}
                     </div>`;
@@ -293,6 +319,50 @@ function renderDashboard(container, data) {
             </div>
             ${rank.needed ? `<p class="text-[10px] text-slate-400 mt-2 text-center">อีก <strong class="text-slate-600">${Math.max(0, rank.needed - walks)}</strong> ครั้ง จะขึ้นเป็น ${rank.nextLabel}</p>` : `<p class="text-[10px] text-emerald-600 font-bold mt-2 text-center">🏆 ระดับสูงสุดแล้ว</p>`}
           </div>
+
+          <!-- Team Roster This Month -->
+          ${(() => {
+            // สร้าง unique team-area จาก monthly summary
+            const seen = new Map();
+            (data.summary || []).forEach(s => {
+                if (!seen.has(s.TeamID || s.TeamName)) {
+                    seen.set(s.TeamID || s.TeamName, {
+                        name:  s.TeamName,
+                        color: s.TeamColor || '#6366f1',
+                        area:  s.AreaName  || s.AreaCode || '—',
+                        dates: [],
+                    });
+                }
+                seen.get(s.TeamID || s.TeamName).dates.push(new Date(s.ScheduledDate).getDate());
+            });
+            const teams = [...seen.values()];
+            if (teams.length === 0) return '';
+            return `
+          <div class="bg-white rounded-2xl shadow-sm border border-slate-100 p-5">
+            <h3 class="font-bold text-slate-700 text-sm flex items-center gap-2 mb-4">
+              <div class="w-7 h-7 rounded-lg flex items-center justify-center bg-indigo-50">
+                <svg class="w-4 h-4 text-indigo-500" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0z"/></svg>
+              </div>
+              ทีม Safety Patrol เดือนนี้
+            </h3>
+            <div class="space-y-2">
+              ${teams.map(t => `
+              <div class="flex items-center gap-2.5 p-2.5 rounded-xl bg-slate-50 border border-slate-100">
+                <span class="w-3 h-3 rounded-full flex-shrink-0" style="background:${t.color}"></span>
+                <div class="flex-1 min-w-0">
+                  <p class="text-xs font-bold text-slate-800">${t.name}</p>
+                  <p class="text-[10px] text-slate-500">${t.area}</p>
+                </div>
+                <div class="text-right flex-shrink-0">
+                  ${t.dates.sort((a,b)=>a-b).map(d =>
+                    `<span class="inline-block text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-white border border-slate-200 text-slate-600 mr-0.5">${d}</span>`
+                  ).join('')}
+                  <p class="text-[8px] text-slate-400 mt-0.5">วันพุธ</p>
+                </div>
+              </div>`).join('')}
+            </div>
+          </div>`;
+          })()}
 
           <!-- Safety Carousel -->
           <div id="promo-carousel" class="relative overflow-hidden rounded-2xl shadow-md h-80 bg-slate-900 group">

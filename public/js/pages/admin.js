@@ -39,7 +39,6 @@ const TABS = [
     { key: 'employees',    label: 'ข้อมูลพนักงาน',     icon: `<svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0z"/></svg>` },
     { key: 'organization', label: 'โครงสร้างองค์กร',   icon: `<svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4"/></svg>`, badge: 'NEW' },
     { key: 'permissions',  label: 'สิทธิ์การใช้งาน',   icon: `<svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z"/></svg>`, badge: 'NEW' },
-    { key: 'master',       label: 'Master Data',       icon: `<svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 7v10c0 2.21 3.582 4 8 4s8-1.79 8-4V7M4 7c0 2.21 3.582 4 8 4s8-1.79 8-4M4 7c0-2.21 3.582-4 8-4s8 1.79 8 4"/></svg>` },
     { key: 'health',       label: 'System Health',     icon: `<svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4.318 6.318a4.5 4.5 0 000 6.364L12 20.364l7.682-7.682a4.5 4.5 0 00-6.364-6.364L12 7.636l-1.318-1.318a4.5 4.5 0 00-6.364 0z"/></svg>` },
     { key: 'audit',        label: 'Audit Log',         icon: `<svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"/></svg>` },
 ];
@@ -184,7 +183,6 @@ function switchTab(key) {
     else if (key === 'employees')    renderEmployeesTab(area);
     else if (key === 'organization') renderOrganization(area);
     else if (key === 'permissions')  renderPermissions(area);
-    else if (key === 'master')       renderMasterData(area);
     else if (key === 'health')       renderSystemHealth(area);
     else if (key === 'audit')        renderAuditLog(area);
 }
@@ -268,6 +266,66 @@ async function renderOrganization(container) {
         <!-- Pagination -->
         <div id="org-pagination" class="flex justify-center gap-1"></div>
 
+        <!-- ─── Lookup Data: Teams & Positions ─── -->
+        <div class="pt-2">
+            <p class="text-xs font-bold text-slate-400 uppercase tracking-widest mb-3">ข้อมูลอ้างอิง (Teams &amp; Positions)</p>
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+
+                <!-- Teams -->
+                <div class="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden flex flex-col" style="max-height:400px">
+                    <div class="p-4 bg-gradient-to-b from-sky-50 to-white border-b flex justify-between items-center flex-shrink-0">
+                        <div class="flex items-center gap-2.5">
+                            <div class="p-1.5 bg-white rounded-lg border border-slate-200 shadow-sm">
+                                <svg class="w-4 h-4 text-slate-600" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0z"/></svg>
+                            </div>
+                            <div>
+                                <h3 class="font-bold text-slate-800 text-sm">Teams</h3>
+                                <p class="text-[10px] text-slate-500">ทีม</p>
+                            </div>
+                        </div>
+                        <span id="count-teams" class="text-[10px] font-bold bg-white px-2 py-0.5 rounded-full border border-slate-200 text-slate-500">0</span>
+                    </div>
+                    <div class="p-3 border-b border-slate-100 flex-shrink-0">
+                        <div class="flex gap-2">
+                            <input type="text" id="input-teams" class="form-input w-full pl-3 py-1.5 rounded-lg text-xs border-slate-300 focus:ring-1 focus:ring-slate-800"
+                                placeholder="เพิ่มทีมใหม่..." onkeypress="if(event.key==='Enter') addMasterData('teams')">
+                            <button onclick="addMasterData('teams')" class="px-3 bg-slate-800 hover:bg-slate-900 text-white rounded-lg text-xs font-bold transition-colors">+</button>
+                        </div>
+                    </div>
+                    <ul id="list-teams" class="flex-1 overflow-y-auto p-2 space-y-0.5 custom-scrollbar">
+                        <li class="text-center text-xs text-slate-400 py-8">กำลังโหลด...</li>
+                    </ul>
+                </div>
+
+                <!-- Positions -->
+                <div class="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden flex flex-col" style="max-height:400px">
+                    <div class="p-4 bg-gradient-to-b from-violet-50 to-white border-b flex justify-between items-center flex-shrink-0">
+                        <div class="flex items-center gap-2.5">
+                            <div class="p-1.5 bg-white rounded-lg border border-slate-200 shadow-sm">
+                                <svg class="w-4 h-4 text-slate-600" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 13.255A23.931 23.931 0 0112 15c-3.183 0-6.22-.62-9-1.745M16 6V4a2 2 0 00-2-2h-4a2 2 0 00-2 2v2m4 6h.01M5 20h14a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"/></svg>
+                            </div>
+                            <div>
+                                <h3 class="font-bold text-slate-800 text-sm">Positions</h3>
+                                <p class="text-[10px] text-slate-500">ตำแหน่ง</p>
+                            </div>
+                        </div>
+                        <span id="count-positions" class="text-[10px] font-bold bg-white px-2 py-0.5 rounded-full border border-slate-200 text-slate-500">0</span>
+                    </div>
+                    <div class="p-3 border-b border-slate-100 flex-shrink-0">
+                        <div class="flex gap-2">
+                            <input type="text" id="input-positions" class="form-input w-full pl-3 py-1.5 rounded-lg text-xs border-slate-300 focus:ring-1 focus:ring-slate-800"
+                                placeholder="เพิ่มตำแหน่งใหม่..." onkeypress="if(event.key==='Enter') addMasterData('positions')">
+                            <button onclick="addMasterData('positions')" class="px-3 bg-slate-800 hover:bg-slate-900 text-white rounded-lg text-xs font-bold transition-colors">+</button>
+                        </div>
+                    </div>
+                    <ul id="list-positions" class="flex-1 overflow-y-auto p-2 space-y-0.5 custom-scrollbar">
+                        <li class="text-center text-xs text-slate-400 py-8">กำลังโหลด...</li>
+                    </ul>
+                </div>
+
+            </div>
+        </div>
+
     </div>`;
 
     // Expose filter handlers
@@ -324,6 +382,8 @@ async function renderOrganization(container) {
 
     _orgRenderStats();
     _orgRenderTable();
+    loadMasterList('teams');
+    loadMasterList('positions');
 }
 
 // ─── Fetch ─────────────────────────────────────────────────────────────────────
@@ -806,6 +866,37 @@ const PERM_LABELS = {
 async function renderPermissions(container) {
     container.innerHTML = `
     <div class="animate-fade-in space-y-5">
+
+        <!-- System Roles -->
+        <div>
+            <p class="text-xs font-bold text-slate-400 uppercase tracking-widest mb-3">System Roles</p>
+            <div class="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden flex flex-col" style="max-height:340px">
+                <div class="p-4 bg-gradient-to-b from-rose-50 to-white border-b flex justify-between items-center flex-shrink-0">
+                    <div class="flex items-center gap-2.5">
+                        <div class="p-1.5 bg-white rounded-lg border border-slate-200 shadow-sm">
+                            <svg class="w-4 h-4 text-slate-600" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 7a2 2 0 012 2m4 0a6 6 0 01-7.743 5.743L11 17H9v2H7v2H4a1 1 0 01-1-1v-2.586a1 1 0 01.293-.707l5.964-5.964A6 6 0 1121 9z"/></svg>
+                        </div>
+                        <div>
+                            <h3 class="font-bold text-slate-800 text-sm">System Roles</h3>
+                            <p class="text-[10px] text-slate-500">สิทธิ์ระบบ (Admin / User / Viewer)</p>
+                        </div>
+                    </div>
+                    <span id="count-roles" class="text-[10px] font-bold bg-white px-2 py-0.5 rounded-full border border-slate-200 text-slate-500">0</span>
+                </div>
+                <div class="p-3 border-b border-slate-100 flex-shrink-0">
+                    <div class="flex gap-2">
+                        <input type="text" id="input-roles" class="form-input w-full pl-3 py-1.5 rounded-lg text-xs border-slate-300 focus:ring-1 focus:ring-slate-800"
+                            placeholder="เพิ่ม Role ใหม่..." onkeypress="if(event.key==='Enter') addMasterData('roles')">
+                        <button onclick="addMasterData('roles')" class="px-3 bg-slate-800 hover:bg-slate-900 text-white rounded-lg text-xs font-bold transition-colors">+</button>
+                    </div>
+                </div>
+                <ul id="list-roles" class="flex-1 overflow-y-auto p-2 space-y-0.5 custom-scrollbar">
+                    <li class="text-center text-xs text-slate-400 py-8">กำลังโหลด...</li>
+                </ul>
+            </div>
+        </div>
+
+        <!-- Permission Matrix -->
         <div class="flex items-center justify-between">
             <div>
                 <h2 class="text-base font-bold text-slate-800">Permission Matrix</h2>
@@ -846,6 +937,7 @@ async function renderPermissions(container) {
         </div>
     </div>`;
 
+    loadMasterList('roles');
     await _permLoadMatrix();
 }
 
@@ -1147,11 +1239,67 @@ async function renderScheduler(container) {
                 </div>
             </div>
         </div>
+    </div>
+
+    <!-- ══ SECTION: Team Management ══════════════════════════════════════ -->
+    <div class="mt-8 space-y-4 animate-fade-in">
+        <div class="flex items-center justify-between">
+            <p class="text-xs font-bold text-slate-400 uppercase tracking-widest flex items-center gap-2">
+                <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0z"/></svg>
+                จัดการทีม Top &amp; Management Safety Patrol
+            </p>
+            <button onclick="window._ptAddTeam()" class="flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-bold text-white shadow-sm" style="background:linear-gradient(135deg,#065f46,#0d9488)">
+                <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/></svg>
+                เพิ่มทีม
+            </button>
+        </div>
+        <div id="pt-teams-grid" class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
+            <div class="col-span-full flex justify-center py-10">
+                <div class="animate-spin rounded-full h-8 w-8 border-4 border-emerald-500 border-t-transparent"></div>
+            </div>
+        </div>
+    </div>
+
+    <!-- ══ SECTION: Rotation Matrix ══════════════════════════════════════ -->
+    <div class="mt-8 space-y-4 animate-fade-in">
+        <div class="flex flex-wrap items-center justify-between gap-3">
+            <p class="text-xs font-bold text-slate-400 uppercase tracking-widest flex items-center gap-2">
+                <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg>
+                ตารางหมุนเวียนพื้นที่รายเดือน
+            </p>
+            <div class="flex items-center gap-2">
+                <select id="rotation-year" class="text-sm border border-slate-200 rounded-lg px-3 py-1.5 outline-none focus:border-emerald-400">
+                    ${[cy-1,cy,cy+1].map(y=>`<option value="${y}" ${y===cy?'selected':''}>${y}</option>`).join('')}
+                </select>
+                <button onclick="window._ptLoadRotation()" class="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-50 transition-colors">
+                    <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg>
+                    โหลด
+                </button>
+                <button onclick="window._ptSaveRotation()" class="flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white transition-colors shadow-sm">
+                    <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg>
+                    บันทึก Rotation
+                </button>
+                <button onclick="window._ptGenSessions()" class="flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold rounded-lg text-white transition-colors shadow-sm" style="background:linear-gradient(135deg,#6366f1,#0284c7)">
+                    <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"/></svg>
+                    สร้าง Sessions อัตโนมัติ
+                </button>
+            </div>
+        </div>
+        <div class="card overflow-x-auto">
+            <div id="pt-rotation-wrap">
+                <div class="flex justify-center py-10">
+                    <div class="animate-spin rounded-full h-8 w-8 border-4 border-emerald-500 border-t-transparent"></div>
+                </div>
+            </div>
+        </div>
     </div>`;
 
     await Promise.all([loadTeamsAndEmployees(), loadSchedules()]);
     setupSchedulerEvents();
     setupBulkEvents();
+
+    // Load patrol team sections
+    await Promise.all([_ptLoadTeams(), _ptLoadRotation()]);
 }
 
 window.toggleViewMode = (mode) => {
@@ -1397,6 +1545,425 @@ window.printScheduleReport = () => {
     document.title = `Patrol_Schedule_${new Date().toISOString().split('T')[0]}`;
     window.print();
     document.title = orig;
+};
+
+// =============================================================================
+// PATROL TEAM MANAGEMENT (Scheduler sub-section)
+// =============================================================================
+
+const PT_GROUP_LABEL = { A: 'พุธที่ 1 & 3', B: 'พุธที่ 2 & 4' };
+const PT_TYPE_LABEL  = { top: 'Top Management (1 ครั้ง/เดือน)', management: 'Management (2 ครั้ง/เดือน)' };
+const MONTHS_TH_SHORT = ['ม.ค.','ก.พ.','มี.ค.','เม.ย.','พ.ค.','มิ.ย.','ก.ค.','ส.ค.','ก.ย.','ต.ค.','พ.ย.','ธ.ค.'];
+
+let _ptTeams = [];
+let _ptAreas = [];
+
+async function _ptLoadTeams() {
+    try {
+        const [tRes, aRes] = await Promise.all([
+            API.get('/patrol/teams'),
+            API.get('/patrol/areas'),
+        ]);
+        _ptTeams = tRes.data || [];
+        _ptAreas = aRes.data || [];
+    } catch { _ptTeams = []; _ptAreas = []; }
+    _ptRenderTeams();
+}
+
+function _ptRenderTeams() {
+    const grid = document.getElementById('pt-teams-grid');
+    if (!grid) return;
+
+    if (_ptTeams.length === 0) {
+        grid.innerHTML = `
+        <div class="col-span-full text-center py-12 text-slate-400">
+            <div class="w-14 h-14 rounded-2xl bg-slate-100 flex items-center justify-center mx-auto mb-3">
+                <svg class="w-7 h-7 opacity-40" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0z"/></svg>
+            </div>
+            <p class="font-medium text-sm">ยังไม่มีทีม</p>
+            <p class="text-xs mt-1">กดปุ่ม "เพิ่มทีม" เพื่อสร้างทีม Patrol</p>
+        </div>`;
+        return;
+    }
+
+    grid.innerHTML = _ptTeams.map(t => `
+    <div class="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
+        <!-- Team header -->
+        <div class="px-4 py-3 flex items-center justify-between border-b border-slate-100"
+             style="background:linear-gradient(135deg,${t.Color}18,transparent)">
+            <div class="flex items-center gap-2.5">
+                <span class="w-3 h-3 rounded-full flex-shrink-0" style="background:${t.Color}"></span>
+                <div>
+                    <p class="font-bold text-slate-800 text-sm">${t.Name}</p>
+                    <p class="text-[10px] text-slate-400">กลุ่ม ${t.PatrolGroup} · ${PT_GROUP_LABEL[t.PatrolGroup]}</p>
+                </div>
+            </div>
+            <div class="flex items-center gap-1">
+                <span class="text-[10px] font-bold bg-slate-100 text-slate-500 px-2 py-0.5 rounded-full">${t.MemberCount} คน</span>
+                <button onclick="window._ptEditTeam(${t.id})" class="p-1.5 text-slate-300 hover:text-blue-500 hover:bg-blue-50 rounded-lg transition-colors">
+                    <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"/></svg>
+                </button>
+                <button onclick="window._ptDeleteTeam(${t.id},'${t.Name.replace(/'/g,"\\'")}\")" class="p-1.5 text-slate-300 hover:text-red-500 hover:bg-red-50 rounded-lg transition-colors">
+                    <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg>
+                </button>
+            </div>
+        </div>
+        <!-- Members -->
+        <div id="pt-members-${t.id}" class="p-2 min-h-[60px]">
+            <div class="text-center text-xs text-slate-400 py-3">กำลังโหลด...</div>
+        </div>
+        <!-- Add member button -->
+        <div class="px-3 pb-3">
+            <button onclick="window._ptAddMember(${t.id},'${t.Name.replace(/'/g,"\\'")}\")"
+                class="w-full py-1.5 text-xs font-semibold rounded-lg border border-dashed border-slate-300 text-slate-400 hover:border-emerald-400 hover:text-emerald-600 hover:bg-emerald-50 transition-colors">
+                + เพิ่มสมาชิก
+            </button>
+        </div>
+    </div>`).join('');
+
+    // Load members for each team
+    _ptTeams.forEach(t => _ptLoadMembers(t.id));
+}
+
+async function _ptLoadMembers(teamId) {
+    const el = document.getElementById(`pt-members-${teamId}`);
+    if (!el) return;
+    try {
+        const res = await API.get(`/patrol/teams/${teamId}/members`);
+        const members = res.data || [];
+        if (members.length === 0) {
+            el.innerHTML = `<p class="text-center text-xs text-slate-300 py-3">ยังไม่มีสมาชิก</p>`;
+            return;
+        }
+        const top  = members.filter(m => m.PatrolType === 'top');
+        const mgmt = members.filter(m => m.PatrolType === 'management');
+        const renderGroup = (list, label, color) => list.length === 0 ? '' : `
+            <div class="px-2 pt-1.5">
+                <p class="text-[9px] font-bold uppercase text-${color}-500 mb-1">${label}</p>
+                ${list.map(m => `
+                <div class="flex items-center justify-between py-1 border-b border-slate-50 last:border-0">
+                    <div class="flex items-center gap-1.5 min-w-0">
+                        <div class="w-5 h-5 rounded-full flex items-center justify-center flex-shrink-0 bg-${color}-100 text-${color}-600 text-[9px] font-bold">
+                            ${(m.FirstName||'?').charAt(0)}
+                        </div>
+                        <p class="text-xs text-slate-700 truncate">${m.FirstName||''} ${m.LastName||''}</p>
+                    </div>
+                    <button onclick="window._ptRemoveMember(${teamId},${m.id})"
+                        class="p-1 text-slate-200 hover:text-red-500 flex-shrink-0 transition-colors">
+                        <svg class="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
+                    </button>
+                </div>`).join('')}
+            </div>`;
+        el.innerHTML = renderGroup(top, 'Top Management', 'rose') + renderGroup(mgmt, 'Management', 'indigo');
+    } catch { el.innerHTML = `<p class="text-center text-xs text-red-400 py-3">โหลดไม่ได้</p>`; }
+}
+
+// ── Add / Edit Team modal ──────────────────────────────────────────────────────
+window._ptAddTeam = function() {
+    openModal('เพิ่มทีม Patrol', `
+    <form id="pt-team-form" class="space-y-4">
+        <div>
+            <label class="block text-sm font-semibold text-slate-700 mb-1.5">ชื่อทีม <span class="text-red-500">*</span></label>
+            <input name="Name" required placeholder="เช่น ทีม 1" class="form-input w-full">
+        </div>
+        <div>
+            <label class="block text-sm font-semibold text-slate-700 mb-1.5">กลุ่มวันเดิน <span class="text-red-500">*</span></label>
+            <select name="PatrolGroup" class="form-input w-full">
+                <option value="A">กลุ่ม A — พุธที่ 1 & 3 ของเดือน</option>
+                <option value="B">กลุ่ม B — พุธที่ 2 & 4 ของเดือน</option>
+            </select>
+        </div>
+        <div>
+            <label class="block text-sm font-semibold text-slate-700 mb-1.5">สีทีม</label>
+            <input type="color" name="Color" value="#6366f1" class="h-9 w-full rounded-lg border border-slate-200 cursor-pointer">
+        </div>
+        <div id="pt-team-err" class="text-sm text-red-500 hidden"></div>
+        <div class="flex justify-end gap-3 pt-3 border-t border-slate-100">
+            <button type="button" onclick="window.closeModal&&window.closeModal()" class="btn btn-secondary px-5">ยกเลิก</button>
+            <button type="submit" class="btn btn-primary px-5">บันทึก</button>
+        </div>
+    </form>`, 'max-w-md');
+    setTimeout(() => {
+        document.getElementById('pt-team-form')?.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const fd = new FormData(e.target);
+            try {
+                await API.post('/patrol/teams', { Name: fd.get('Name'), PatrolGroup: fd.get('PatrolGroup'), Color: fd.get('Color') });
+                closeModal(); showToast('เพิ่มทีมสำเร็จ', 'success');
+                await _ptLoadTeams();
+            } catch (err) {
+                const el = document.getElementById('pt-team-err');
+                if (el) { el.textContent = err.message; el.classList.remove('hidden'); }
+            }
+        });
+    }, 50);
+};
+
+window._ptEditTeam = function(id) {
+    const t = _ptTeams.find(x => x.id === id);
+    if (!t) return;
+    openModal('แก้ไขทีม', `
+    <form id="pt-team-form" class="space-y-4">
+        <div>
+            <label class="block text-sm font-semibold text-slate-700 mb-1.5">ชื่อทีม</label>
+            <input name="Name" required value="${t.Name}" class="form-input w-full">
+        </div>
+        <div>
+            <label class="block text-sm font-semibold text-slate-700 mb-1.5">กลุ่มวันเดิน</label>
+            <select name="PatrolGroup" class="form-input w-full">
+                <option value="A" ${t.PatrolGroup==='A'?'selected':''}>กลุ่ม A — พุธที่ 1 & 3 ของเดือน</option>
+                <option value="B" ${t.PatrolGroup==='B'?'selected':''}>กลุ่ม B — พุธที่ 2 & 4 ของเดือน</option>
+            </select>
+        </div>
+        <div>
+            <label class="block text-sm font-semibold text-slate-700 mb-1.5">สีทีม</label>
+            <input type="color" name="Color" value="${t.Color||'#6366f1'}" class="h-9 w-full rounded-lg border border-slate-200 cursor-pointer">
+        </div>
+        <div id="pt-team-err" class="text-sm text-red-500 hidden"></div>
+        <div class="flex justify-end gap-3 pt-3 border-t border-slate-100">
+            <button type="button" onclick="window.closeModal&&window.closeModal()" class="btn btn-secondary px-5">ยกเลิก</button>
+            <button type="submit" class="btn btn-primary px-5">บันทึก</button>
+        </div>
+    </form>`, 'max-w-md');
+    setTimeout(() => {
+        document.getElementById('pt-team-form')?.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const fd = new FormData(e.target);
+            try {
+                await API.put(`/patrol/teams/${id}`, { Name: fd.get('Name'), PatrolGroup: fd.get('PatrolGroup'), Color: fd.get('Color') });
+                closeModal(); showToast('บันทึกสำเร็จ', 'success');
+                await _ptLoadTeams();
+            } catch (err) {
+                const el = document.getElementById('pt-team-err');
+                if (el) { el.textContent = err.message; el.classList.remove('hidden'); }
+            }
+        });
+    }, 50);
+};
+
+window._ptDeleteTeam = async function(id, name) {
+    if (!confirm(`ลบทีม "${name}" และสมาชิกทั้งหมด?`)) return;
+    try {
+        await API.delete(`/patrol/teams/${id}`);
+        showToast('ลบทีมสำเร็จ', 'success');
+        await _ptLoadTeams();
+    } catch (err) { showError(err.message); }
+};
+
+// ── Add Member modal ───────────────────────────────────────────────────────────
+window._ptAddMember = async function(teamId, teamName) {
+    // โหลดพนักงานสำหรับ dropdown
+    let empList = [];
+    try { const r = await API.get('/employees'); empList = r.data || r || []; } catch { empList = []; }
+
+    openModal(`เพิ่มสมาชิก — ${teamName}`, `
+    <form id="pt-member-form" class="space-y-4">
+        <div>
+            <label class="block text-sm font-semibold text-slate-700 mb-1.5">พนักงาน <span class="text-red-500">*</span></label>
+            <select name="EmployeeID" required class="form-input w-full">
+                <option value="">— เลือกพนักงาน —</option>
+                ${empList.map(e => `<option value="${e.EmployeeID}">${e.FirstName||''} ${e.LastName||''} (${e.Department||''})</option>`).join('')}
+            </select>
+        </div>
+        <div>
+            <label class="block text-sm font-semibold text-slate-700 mb-1.5">ประเภท <span class="text-red-500">*</span></label>
+            <select name="PatrolType" class="form-input w-full">
+                <option value="top">Top Management — เดิน 1 ครั้ง/เดือน</option>
+                <option value="management">Management — เดิน 2 ครั้ง/เดือน</option>
+            </select>
+            <p class="text-xs text-slate-400 mt-1">Top: ผจก.ทั่วไป / ผช.ผจก.ทั่วไป / ผอ. &nbsp;|&nbsp; Management: ผู้จัดการ / ผู้ชำนาญการพิเศษ</p>
+        </div>
+        <div id="pt-mem-err" class="text-sm text-red-500 hidden"></div>
+        <div class="flex justify-end gap-3 pt-3 border-t border-slate-100">
+            <button type="button" onclick="window.closeModal&&window.closeModal()" class="btn btn-secondary px-5">ยกเลิก</button>
+            <button type="submit" class="btn btn-primary px-5">เพิ่มสมาชิก</button>
+        </div>
+    </form>`, 'max-w-md');
+    setTimeout(() => {
+        document.getElementById('pt-member-form')?.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const fd = new FormData(e.target);
+            try {
+                await API.post(`/patrol/teams/${teamId}/members`, { EmployeeID: fd.get('EmployeeID'), PatrolType: fd.get('PatrolType') });
+                closeModal(); showToast('เพิ่มสมาชิกสำเร็จ', 'success');
+                _ptLoadMembers(teamId);
+                // refresh member count
+                await _ptLoadTeams();
+            } catch (err) {
+                const el = document.getElementById('pt-mem-err');
+                if (el) { el.textContent = err.message; el.classList.remove('hidden'); }
+            }
+        });
+    }, 50);
+};
+
+window._ptRemoveMember = async function(teamId, memberId) {
+    if (!confirm('ลบสมาชิกออกจากทีม?')) return;
+    try {
+        await API.delete(`/patrol/teams/${teamId}/members/${memberId}`);
+        showToast('ลบสมาชิกสำเร็จ', 'success');
+        _ptLoadMembers(teamId);
+        await _ptLoadTeams();
+    } catch (err) { showError(err.message); }
+};
+
+// ── Rotation Matrix ────────────────────────────────────────────────────────────
+// _rotationData[teamId][month] = areaId
+let _rotationData = {};
+
+window._ptLoadRotation = async function() {
+    const year = parseInt(document.getElementById('rotation-year')?.value || new Date().getFullYear());
+    const wrap = document.getElementById('pt-rotation-wrap');
+    if (!wrap) return;
+
+    wrap.innerHTML = `<div class="flex justify-center py-10"><div class="animate-spin rounded-full h-8 w-8 border-4 border-emerald-500 border-t-transparent"></div></div>`;
+
+    try {
+        // โหลด rotation ทุก 12 เดือน concurrently
+        const [tRes, aRes] = await Promise.all([
+            API.get('/patrol/teams'),
+            API.get('/patrol/areas'),
+        ]);
+        _ptTeams = tRes.data || [];
+        _ptAreas = aRes.data || [];
+
+        const monthResults = await Promise.all(
+            Array.from({length:12},(_,i) => i+1).map(m =>
+                API.get(`/patrol/rotation?year=${year}&month=${m}`).catch(() => ({ data: [] }))
+            )
+        );
+
+        // สร้าง lookup _rotationData[teamId][month] = areaId
+        _rotationData = {};
+        monthResults.forEach((res, idx) => {
+            const month = idx + 1;
+            (res.data || []).forEach(r => {
+                if (!_rotationData[r.TeamID]) _rotationData[r.TeamID] = {};
+                _rotationData[r.TeamID][month] = r.AreaID;
+            });
+        });
+
+        _ptRenderRotationMatrix(year);
+    } catch (err) {
+        wrap.innerHTML = `<div class="text-center py-10 text-red-500 text-sm">${err.message}</div>`;
+    }
+};
+
+function _ptRenderRotationMatrix(year) {
+    const wrap = document.getElementById('pt-rotation-wrap');
+    if (!wrap || _ptTeams.length === 0) {
+        if (wrap) wrap.innerHTML = `<div class="text-center py-10 text-slate-400 text-sm">ยังไม่มีทีม กรุณาสร้างทีมก่อน</div>`;
+        return;
+    }
+
+    const areaOptions = _ptAreas.map(a => `<option value="${a.id}">${a.Name}</option>`).join('');
+
+    wrap.innerHTML = `
+    <div class="overflow-x-auto">
+        <table class="w-full text-left border-collapse min-w-[900px]">
+            <thead>
+                <tr class="bg-slate-50 border-b-2 border-slate-200">
+                    <th class="px-4 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wide sticky left-0 bg-slate-50 z-10 whitespace-nowrap">ทีม</th>
+                    <th class="px-2 py-3 text-xs font-semibold text-slate-400 text-center">กลุ่ม</th>
+                    ${MONTHS_TH_SHORT.map((m,i) => `
+                    <th class="px-2 py-3 text-xs font-semibold text-slate-500 text-center whitespace-nowrap">
+                        ${m}<br><span class="text-[9px] text-slate-400 font-normal">${_getWednesdays(year, i+1)}</span>
+                    </th>`).join('')}
+                </tr>
+            </thead>
+            <tbody>
+                ${_ptTeams.map(t => `
+                <tr class="border-b border-slate-100 hover:bg-slate-50 transition-colors">
+                    <td class="px-4 py-2.5 sticky left-0 bg-white z-10">
+                        <div class="flex items-center gap-2 whitespace-nowrap">
+                            <span class="w-2.5 h-2.5 rounded-full flex-shrink-0" style="background:${t.Color}"></span>
+                            <span class="text-sm font-semibold text-slate-800">${t.Name}</span>
+                        </div>
+                    </td>
+                    <td class="px-2 py-2.5 text-center">
+                        <span class="text-[10px] font-bold px-2 py-0.5 rounded-full ${t.PatrolGroup==='A'?'bg-blue-100 text-blue-700':'bg-purple-100 text-purple-700'}">
+                            ${t.PatrolGroup}
+                        </span>
+                    </td>
+                    ${Array.from({length:12},(_,i)=>i+1).map(month => {
+                        const areaId = (_rotationData[t.id]||{})[month] || '';
+                        return `
+                        <td class="px-1.5 py-2">
+                            <select data-team="${t.id}" data-month="${month}"
+                                class="rotation-cell w-full text-xs border border-slate-200 rounded-lg px-1.5 py-1 outline-none focus:border-emerald-400 bg-white"
+                                style="min-width:90px">
+                                <option value="">—</option>
+                                ${_ptAreas.map(a => `<option value="${a.id}" ${a.id==areaId?'selected':''}>${a.Code||a.Name}</option>`).join('')}
+                            </select>
+                        </td>`;
+                    }).join('')}
+                </tr>`).join('')}
+            </tbody>
+        </table>
+    </div>
+    <div class="px-4 py-3 bg-slate-50 border-t border-slate-100 flex items-center gap-2 text-xs text-slate-400">
+        <svg class="w-3.5 h-3.5 text-slate-400 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+        เลือกพื้นที่สำหรับแต่ละทีมแต่ละเดือน แล้วกด "บันทึก Rotation" จากนั้นกด "สร้าง Sessions อัตโนมัติ" เลือกเดือนที่ต้องการ
+    </div>`;
+}
+
+// คืน string วันพุธของเดือน เช่น "4,18" หรือ "11,25"
+function _getWednesdays(year, month) {
+    const d = new Date(year, month - 1, 1);
+    while (d.getDay() !== 3) d.setDate(d.getDate() + 1);
+    const weeks = [];
+    while (d.getMonth() === month - 1) { weeks.push(d.getDate()); d.setDate(d.getDate() + 7); }
+    // A=พุธ1,3 B=พุธ2,4
+    return `A:${weeks[0]||''},${weeks[2]||''} B:${weeks[1]||''},${weeks[3]||''}`;
+}
+
+window._ptSaveRotation = async function() {
+    const year = parseInt(document.getElementById('rotation-year')?.value || new Date().getFullYear());
+    const cells = document.querySelectorAll('.rotation-cell');
+    const items = [];
+    cells.forEach(sel => {
+        if (!sel.value) return;
+        items.push({ TeamID: parseInt(sel.dataset.team), AreaID: parseInt(sel.value), Year: year, Month: parseInt(sel.dataset.month) });
+    });
+    if (items.length === 0) { showToast('ยังไม่ได้เลือกพื้นที่เลย', 'error'); return; }
+    try {
+        const res = await API.post('/patrol/rotation', items);
+        showToast(`บันทึก Rotation ${res.saved} รายการสำเร็จ`, 'success');
+    } catch (err) { showError(err.message); }
+};
+
+window._ptGenSessions = function() {
+    const year = parseInt(document.getElementById('rotation-year')?.value || new Date().getFullYear());
+    const monthOpts = MONTHS_TH_SHORT.map((m,i) => `<option value="${i+1}">${m} ${year}</option>`).join('');
+    openModal('สร้าง Sessions อัตโนมัติ', `
+    <div class="space-y-4">
+        <p class="text-sm text-slate-600">ระบบจะสร้าง Patrol Sessions จากตารางหมุนเวียนที่ตั้งไว้ โดยอิงวันพุธตามกลุ่ม A / B อัตโนมัติ</p>
+        <div>
+            <label class="block text-sm font-semibold text-slate-700 mb-1.5">เลือกเดือน</label>
+            <select id="gen-month" class="form-input w-full">${monthOpts}</select>
+        </div>
+        <div id="gen-result" class="hidden text-sm font-medium text-emerald-600 bg-emerald-50 rounded-lg px-3 py-2"></div>
+        <div class="flex justify-end gap-3 pt-3 border-t border-slate-100">
+            <button type="button" onclick="window.closeModal&&window.closeModal()" class="btn btn-secondary px-5">ยกเลิก</button>
+            <button id="gen-btn" onclick="window._ptDoGenerate(${year})" class="btn btn-primary px-5">สร้าง Sessions</button>
+        </div>
+    </div>`, 'max-w-sm');
+};
+
+window._ptDoGenerate = async function(year) {
+    const month = parseInt(document.getElementById('gen-month')?.value);
+    const btn   = document.getElementById('gen-btn');
+    const res   = document.getElementById('gen-result');
+    if (btn) { btn.disabled = true; btn.textContent = 'กำลังสร้าง...'; }
+    try {
+        const r = await API.post('/patrol/generate-sessions', { year, month });
+        if (res) { res.textContent = r.message || `สร้าง ${r.created} sessions สำเร็จ`; res.classList.remove('hidden'); }
+        showToast(r.message || 'สร้าง Sessions สำเร็จ', 'success');
+        loadSchedules(); // refresh calendar/list
+    } catch (err) {
+        showError(err.message);
+        if (btn) { btn.disabled = false; btn.textContent = 'สร้าง Sessions'; }
+    }
 };
 
 // =============================================================================
