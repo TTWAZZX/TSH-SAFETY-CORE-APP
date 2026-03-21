@@ -27,6 +27,7 @@ let _activeFilter   = 'all';
 let _monthlySummary = [];
 let _myPlan         = null;  // personal monthly plan (team, sessions, compliance, roster)
 let _mySelfPatrol   = null;  // self-patrol data for supervisor positions
+let _patrolAreas    = [];    // master areas list — synced from Patrol_Areas table
 let _overviewYear   = new Date().getFullYear();
 let _overviewData   = null;  // attendance overview cache
 
@@ -50,19 +51,21 @@ export async function loadPatrolPage() {
         const curMonth = now.getMonth() + 1;
         const curYear  = now.getFullYear();
 
-        const [scheduleRes, statsRes, issuesRes, summaryRes, planRes, selfPatrolRes] = await Promise.all([
+        const [scheduleRes, statsRes, issuesRes, summaryRes, planRes, selfPatrolRes, areasRes] = await Promise.all([
             API.get(`/patrol/my-schedule?employeeId=${currentUser.id}&month=${curMonth}&year=${curYear}`),
             API.get('/patrol/attendance-stats'),
             API.get('/patrol/issues'),
             API.get(`/patrol/monthly-summary?year=${curYear}&month=${curMonth}`).catch(() => ({ data: [] })),
             API.get(`/patrol/my-monthly-plan?year=${curYear}&month=${curMonth}`).catch(() => ({ data: null })),
             API.get(`/patrol/my-self-patrol?year=${curYear}&month=${curMonth}`).catch(() => ({ data: null })),
+            API.get('/master/areas').catch(() => ({ data: [] })),
         ]);
 
         _allIssues      = normalizeApiArray(issuesRes);
         _monthlySummary = summaryRes.data || [];
         _myPlan         = planRes.data || null;
         _mySelfPatrol   = selfPatrolRes.data || null;
+        _patrolAreas    = areasRes.data || [];
 
         renderDashboard(container, {
             schedule: normalizeApiArray(scheduleRes),
@@ -1140,7 +1143,10 @@ window.openIssueForm = function(mode, rawIssueData = null) {
                 <div>
                   <label class="block text-[10px] font-bold text-slate-400 uppercase mb-1">พื้นที่</label>
                   <select name="Area" class="form-select w-full rounded-lg text-xs" ${d}>
-                    ${['Line 1','Line 2','Warehouse','Office','Outdoor'].map(a => `<option value="${a}" ${issueData?.Area === a ? 'selected':''}>${a}</option>`).join('')}
+                    ${(_patrolAreas.length
+                        ? _patrolAreas
+                        : [{ Name:'โรงงาน 1',Code:'Fac1' },{ Name:'โรงงาน 2',Code:'Fac2' },{ Name:'รอบนอก+พื้นที่ส่วนกลาง',Code:'Outer' }]
+                      ).map(a => `<option value="${a.Name}" ${issueData?.Area === a.Name ? 'selected':''}>${a.Name}</option>`).join('')}
                   </select>
                 </div>
               </div>
@@ -1474,8 +1480,14 @@ function openSelfCheckinModal() {
             <input type="date" id="sc-date" class="form-input w-full rounded-lg text-sm" value="${today}" max="${today}" required>
           </div>
           <div>
-            <label class="block text-xs font-bold text-slate-500 uppercase mb-1.5">สถานที่ / พื้นที่</label>
-            <input type="text" id="sc-location" class="form-input w-full rounded-lg text-sm" placeholder="เช่น โรงงาน 1, อาคาร A..." required>
+            <label class="block text-xs font-bold text-slate-500 uppercase mb-1.5">พื้นที่ที่เดินตรวจ <span class="text-red-400">*</span></label>
+            <select id="sc-location" class="form-select w-full rounded-lg text-sm" required>
+              <option value="">— เลือกพื้นที่ —</option>
+              ${(_patrolAreas.length
+                  ? _patrolAreas
+                  : [{ Name:'โรงงาน 1' },{ Name:'โรงงาน 2' },{ Name:'รอบนอก+พื้นที่ส่วนกลาง' }]
+                ).map(a => `<option value="${a.Name}">${a.Name}</option>`).join('')}
+            </select>
           </div>
           <div>
             <label class="block text-xs font-bold text-slate-500 uppercase mb-1.5">หมายเหตุ (ถ้ามี)</label>

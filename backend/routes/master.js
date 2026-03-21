@@ -213,4 +213,46 @@ router.delete('/positions/:id', isAdmin, async (req, res) => {
     }
 });
 
+// ─── Areas (Patrol_Areas) ─────────────────────────────────────────────────────
+router.get('/areas', async (req, res) => {
+    try {
+        const [rows] = await pool.query('SELECT * FROM Patrol_Areas ORDER BY SortOrder, id');
+        res.json({ success: true, data: rows });
+    } catch (err) {
+        res.status(500).json({ success: false, message: err.message });
+    }
+});
+
+router.post('/areas', isAdmin, async (req, res) => {
+    const { Name, Code, SortOrder } = req.body;
+    if (!Name || !Code) return res.status(400).json({ success: false, message: 'กรุณาระบุชื่อและรหัสพื้นที่' });
+    try {
+        await pool.query('INSERT INTO Patrol_Areas (Name, Code, SortOrder) VALUES (?,?,?)', [Name, Code, SortOrder || 99]);
+        res.json({ success: true, message: 'เพิ่มพื้นที่สำเร็จ' });
+    } catch (err) {
+        if (err.code === 'ER_DUP_ENTRY') return res.status(400).json({ success: false, message: 'รหัสพื้นที่ซ้ำ' });
+        res.status(500).json({ success: false, message: err.message });
+    }
+});
+
+router.put('/areas/:id', isAdmin, async (req, res) => {
+    const { Name, Code, SortOrder } = req.body;
+    if (!Name || !Code) return res.status(400).json({ success: false, message: 'กรุณาระบุชื่อและรหัสพื้นที่' });
+    try {
+        await pool.query('UPDATE Patrol_Areas SET Name=?, Code=?, SortOrder=? WHERE id=?', [Name, Code, SortOrder ?? 99, req.params.id]);
+        res.json({ success: true, message: 'แก้ไขพื้นที่สำเร็จ' });
+    } catch (err) {
+        res.status(500).json({ success: false, message: err.message });
+    }
+});
+
+router.delete('/areas/:id', isAdmin, async (req, res) => {
+    try {
+        await pool.query('DELETE FROM Patrol_Areas WHERE id=?', [req.params.id]);
+        res.json({ success: true, message: 'ลบสำเร็จ' });
+    } catch (err) {
+        res.status(500).json({ success: false, message: err.message });
+    }
+});
+
 module.exports = router;

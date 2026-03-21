@@ -286,6 +286,38 @@ async function renderReference(container) {
           </div>
         </div>
 
+        <!-- ─── Section 3: พื้นที่โรงงาน (Patrol Areas) ─── -->
+        <div>
+          <p class="text-xs font-bold text-slate-400 uppercase tracking-widest mb-3">พื้นที่โรงงาน (Patrol Areas) — ซิงค์ทั้งระบบ</p>
+          <div class="bg-white rounded-xl border border-emerald-100 shadow-sm overflow-hidden">
+            <div class="p-4 bg-gradient-to-r from-emerald-50 to-teal-50 border-b border-emerald-100 flex items-center justify-between">
+              <div class="flex items-center gap-2.5">
+                <div class="p-1.5 bg-white rounded-lg border border-emerald-200 shadow-sm">
+                  <svg class="w-4 h-4 text-emerald-600" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 11a3 3 0 11-6 0 3 3 0 016 0z"/></svg>
+                </div>
+                <div>
+                  <h3 class="font-bold text-slate-800 text-sm">พื้นที่โรงงาน</h3>
+                  <p class="text-[10px] text-slate-500">ใช้ใน: Rotation · รายงานปัญหา · Self-Patrol</p>
+                </div>
+              </div>
+              <div class="flex items-center gap-2">
+                <span id="count-areas" class="text-[10px] font-bold bg-white px-2 py-0.5 rounded-full border border-emerald-200 text-emerald-700">0</span>
+                <button onclick="window.openAddAreaModal()"
+                  class="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold text-white shadow-sm transition-all hover:opacity-90"
+                  style="background:linear-gradient(135deg,#059669,#0d9488)">
+                  <svg class="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/></svg>
+                  เพิ่มพื้นที่
+                </button>
+              </div>
+            </div>
+            <div class="p-4">
+              <div id="areas-grid" class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-7 gap-2">
+                <div class="text-center text-xs text-slate-400 py-6 col-span-full">กำลังโหลด...</div>
+              </div>
+            </div>
+          </div>
+        </div>
+
     </div>`;
 
     window._orgFilter      = _orgApplyFilter;
@@ -341,6 +373,7 @@ async function renderReference(container) {
     loadMasterList('teams');
     loadMasterList('positions');
     loadMasterList('roles');
+    loadAreasList();
 }
 
 // ─── Fetch ─────────────────────────────────────────────────────────────────────
@@ -2531,6 +2564,111 @@ window.toggleSupervisorPatrol = async (id) => {
             showToast(res.data.IsSupervisorPatrol ? 'เปิด Self-Patrol สำหรับตำแหน่งนี้แล้ว' : 'ปิด Self-Patrol แล้ว', 'success');
             loadPositionsList();
         } else showError(res.message);
+    } catch (err) { showError(err.message); }
+};
+
+async function loadAreasList() {
+    const gridEl  = document.getElementById('areas-grid');
+    const countEl = document.getElementById('count-areas');
+    if (!gridEl) return;
+    try {
+        const res = await API.get('/master/areas');
+        if (!res.success) throw new Error(res.message);
+        const areas = res.data || [];
+        if (countEl) countEl.textContent = areas.length;
+        if (!areas.length) {
+            gridEl.innerHTML = `<div class="text-center text-xs text-slate-400 py-6 col-span-full">ยังไม่มีพื้นที่</div>`;
+            return;
+        }
+        gridEl.innerHTML = areas.map(a => `
+            <div class="group relative flex flex-col items-center gap-1.5 p-3 rounded-xl border border-slate-100 bg-slate-50 hover:border-emerald-200 hover:bg-emerald-50 transition-all cursor-default">
+                <div class="w-10 h-10 rounded-xl flex items-center justify-center bg-white border border-slate-100 shadow-sm">
+                    <svg class="w-5 h-5 text-emerald-500" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 11a3 3 0 11-6 0 3 3 0 016 0z"/></svg>
+                </div>
+                <p class="text-[10px] font-bold text-slate-700 text-center leading-tight">${a.Name}</p>
+                <span class="text-[9px] text-slate-400 font-mono">${a.Code}</span>
+                <div class="absolute top-1 right-1 flex gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
+                    <button onclick="window.editAreaModal(${a.id},'${(a.Name||'').replace(/'/g,"\\'")}','${a.Code}',${a.SortOrder||99})"
+                        class="p-1 rounded-md bg-white shadow-sm border border-slate-100 text-slate-400 hover:text-indigo-600 transition-colors">
+                        <svg class="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"/></svg>
+                    </button>
+                    <button onclick="window.deleteArea(${a.id},'${(a.Name||'').replace(/'/g,"\\'")}')"
+                        class="p-1 rounded-md bg-white shadow-sm border border-slate-100 text-slate-400 hover:text-red-500 transition-colors">
+                        <svg class="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg>
+                    </button>
+                </div>
+                <span class="absolute top-1 left-1 text-[8px] text-slate-300 font-mono">${a.SortOrder||'—'}</span>
+            </div>`).join('');
+    } catch {
+        if (gridEl) gridEl.innerHTML = `<div class="text-center text-red-400 text-xs py-4 col-span-full">โหลดไม่ได้</div>`;
+    }
+}
+
+function _areaFormHTML(data = {}) {
+    return `
+        <div class="space-y-4">
+          <div class="grid grid-cols-2 gap-3">
+            <div class="col-span-2">
+              <label class="block text-xs font-bold text-slate-500 uppercase mb-1.5">ชื่อพื้นที่ <span class="text-red-400">*</span></label>
+              <input type="text" id="area-name" class="form-input w-full rounded-lg text-sm" value="${data.Name||''}" placeholder="เช่น โรงงาน 1" required autofocus>
+            </div>
+            <div>
+              <label class="block text-xs font-bold text-slate-500 uppercase mb-1.5">รหัส (Code) <span class="text-red-400">*</span></label>
+              <input type="text" id="area-code" class="form-input w-full rounded-lg text-sm font-mono" value="${data.Code||''}" placeholder="เช่น Fac1">
+            </div>
+            <div>
+              <label class="block text-xs font-bold text-slate-500 uppercase mb-1.5">ลำดับ</label>
+              <input type="number" id="area-sort" class="form-input w-full rounded-lg text-sm" value="${data.SortOrder||99}" min="1" max="99">
+            </div>
+          </div>
+          <p class="text-[10px] text-slate-400">พื้นที่นี้จะปรากฏใน: ตาราง Rotation · ฟอร์มรายงานปัญหา · Self-Patrol check-in</p>
+          <div class="flex justify-end gap-2 pt-2 border-t border-slate-100">
+            <button type="button" onclick="window.closeModal&&window.closeModal()" class="px-4 py-2 rounded-lg text-sm bg-slate-100 text-slate-600 hover:bg-slate-200 transition-colors">ยกเลิก</button>
+            <button id="area-submit-btn" type="button" class="px-5 py-2 rounded-lg text-sm font-bold text-white transition-all hover:opacity-90" style="background:linear-gradient(135deg,#059669,#0d9488)">บันทึก</button>
+          </div>
+        </div>`;
+}
+
+window.openAddAreaModal = () => {
+    openModal('เพิ่มพื้นที่โรงงาน', _areaFormHTML(), 'max-w-sm');
+    setTimeout(() => {
+        document.getElementById('area-submit-btn')?.addEventListener('click', async () => {
+            const Name      = document.getElementById('area-name')?.value.trim();
+            const Code      = document.getElementById('area-code')?.value.trim();
+            const SortOrder = parseInt(document.getElementById('area-sort')?.value) || 99;
+            if (!Name || !Code) { showToast('กรุณาระบุชื่อและรหัสพื้นที่', 'error'); return; }
+            try {
+                const res = await API.post('/master/areas', { Name, Code, SortOrder });
+                if (res.success) { showToast('เพิ่มพื้นที่สำเร็จ', 'success'); closeModal(); loadAreasList(); }
+                else showError(res.message);
+            } catch (err) { showError(err.message); }
+        });
+    }, 50);
+};
+
+window.editAreaModal = (id, name, code, sort) => {
+    openModal('แก้ไขพื้นที่', _areaFormHTML({ Name: name, Code: code, SortOrder: sort }), 'max-w-sm');
+    setTimeout(() => {
+        document.getElementById('area-submit-btn')?.addEventListener('click', async () => {
+            const Name      = document.getElementById('area-name')?.value.trim();
+            const Code      = document.getElementById('area-code')?.value.trim();
+            const SortOrder = parseInt(document.getElementById('area-sort')?.value) || 99;
+            if (!Name || !Code) { showToast('กรุณาระบุชื่อและรหัสพื้นที่', 'error'); return; }
+            try {
+                const res = await API.put(`/master/areas/${id}`, { Name, Code, SortOrder });
+                if (res.success) { showToast('แก้ไขสำเร็จ', 'success'); closeModal(); loadAreasList(); }
+                else showError(res.message);
+            } catch (err) { showError(err.message); }
+        });
+    }, 50);
+};
+
+window.deleteArea = async (id, name) => {
+    if (!confirm(`ลบพื้นที่ "${name}"?\nข้อมูล Rotation ที่ผูกกับพื้นที่นี้อาจได้รับผลกระทบ`)) return;
+    try {
+        const res = await API.delete(`/master/areas/${id}`);
+        if (res.success) { showToast('ลบสำเร็จ', 'success'); loadAreasList(); }
+        else showError(res.message);
     } catch (err) { showError(err.message); }
 };
 
