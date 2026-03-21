@@ -13,7 +13,7 @@ const rateLimit  = require('express-rate-limit');
 const bcrypt     = require('bcryptjs');
 
 const { authenticateToken, isAdmin } = require('./middleware/auth');
-const { storage: cloudinaryStorage, fileFilter } = require('./cloudinary');
+const { storage: cloudinaryStorage, fileFilter, isLocal } = require('./cloudinary');
 const pool       = require('./db');
 
 const patrolRoutes        = require('./routes/patrol');
@@ -53,6 +53,11 @@ app.use(cors({
 // Tightened body size limit (was 50mb)
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ limit: '10mb', extended: true }));
+
+// Serve uploaded files as static in local dev mode
+if (isLocal) {
+    app.use('/uploads', express.static(require('path').join(__dirname, 'uploads')));
+}
 
 // --- Document upload via Cloudinary (sanitised filename, type-filtered) ---
 const upload = multer({
@@ -158,6 +163,77 @@ app.post('/api/session/verify', authenticateToken, (req, res) => {
     const { iat, exp, ...userData } = req.user;
     const newToken = jwt.sign(userData, process.env.JWT_SECRET, { expiresIn: '6h' });
     res.json({ success: true, user: userData, token: newToken });
+});
+
+// ─── Registration: Public master data for dropdowns ────────────────────────
+app.get('/api/register/options', async (req, res) => {
+    try {
+        const [depts]     = await pool.query('SELECT id, Name FROM Master_Departments ORDER BY Name');
+        const [positions] = await pool.query('SELECT id, Name FROM Master_Positions ORDER BY Name');
+        const [units]     = await pool.query(
+            'SELECT id, name, department_id FROM Master_SafetyUnits ORDER BY sort_order, name'
+        ).catch(() => [[]]);
+        res.json({ success: true, data: { departments: depts, positions, units } });
+    } catch (err) {
+        res.status(500).json({ success: false, message: 'ไม่สามารถโหลดข้อมูลได้' });
+    }
+});
+
+const registerLimiter = rateLimit({
+    windowMs: 60 * 60 * 1000, max: 5,
+    message: { success: false, message: 'ลองใหม่ภายหลัง (เกินขีดจำกัดการสมัคร)' },
+    standardHeaders: true, legacyHeaders: false,
+});
+
+app.post('/api/register', registerLimiter, async (req, res) => {
+    const { EmployeeID, EmployeeName, Department, Position, Unit, password } = req.body;
+    if (!EmployeeID || !EmployeeName || !Department || !Position || !password)
+        return res.status(400).json({ success: false, message: 'กรุณากรอกข้อมูลให้ครบถ้วน' });
+    if (password.length < 6)
+        return res.status(400).json({ success: false, message: 'รหัสผ่านต้องมีอย่างน้อย 6 ตัวอักษร' });
+    try {
+        const [existing] = await pool.query('SELECT EmployeeID FROM Employees WHERE EmployeeID = ?', [EmployeeID.trim()]);
+        if (existing.length > 0)
+            return res.status(400).json({ success: false, message: 'รหัสพนักงานนี้มีอยู่แล้วในระบบ' });
+        const hashed = await bcrypt.hash(password, 10);
+        await pool.query(
+            'INSERT INTO Employees (EmployeeID, EmployeeName, Department, Unit, Team, Position, Role, Password) VALUES (?,?,?,?,?,?,?,?)',
+            [EmployeeID.trim(), EmployeeName.trim(), Department, Unit || '', '', Position, 'User', hashed]
+        );
+        res.json({ success: true, message: 'สมัครสมาชิกสำเร็จ กรุณาเข้าสู่ระบบด้วยรหัสที่ตั้งไว้' });
+    } catch (err) {
+        console.error('Register Error:', err);
+        res.status(500).json({ success: false, message: 'เกิดข้อผิดพลาด กรุณาลองใหม่' });
+    }
+});
+
+// ─── Profile: Get & Update own profile ─────────────────────────────────────
+app.get('/api/profile', authenticateToken, async (req, res) => {
+    try {
+        const [rows] = await pool.query(
+            'SELECT EmployeeID, EmployeeName, Department, Unit, Team, Position, Role FROM Employees WHERE EmployeeID = ?',
+            [req.user.id]
+        );
+        if (!rows[0]) return res.status(404).json({ success: false, message: 'ไม่พบข้อมูลผู้ใช้' });
+        res.json({ success: true, data: rows[0] });
+    } catch (err) {
+        res.status(500).json({ success: false, message: err.message });
+    }
+});
+
+app.put('/api/profile', authenticateToken, async (req, res) => {
+    const { EmployeeName, Department, Unit, Position } = req.body;
+    if (!EmployeeName || !EmployeeName.trim())
+        return res.status(400).json({ success: false, message: 'กรุณาระบุชื่อ-นามสกุล' });
+    try {
+        await pool.query(
+            'UPDATE Employees SET EmployeeName=?, Department=?, Unit=?, Position=? WHERE EmployeeID=?',
+            [EmployeeName.trim(), Department || '', Unit || '', Position || '', req.user.id]
+        );
+        res.json({ success: true, message: 'อัปเดตโปรไฟล์สำเร็จ' });
+    } catch (err) {
+        res.status(500).json({ success: false, message: err.message });
+    }
 });
 
 // =================================================================

@@ -255,4 +255,22 @@ router.delete('/areas/:id', isAdmin, async (req, res) => {
     }
 });
 
+// ─── Safety Units (read-only for all authenticated users) ────────────────────
+// Units are managed by admin via /admin/org/units — this is the public read endpoint
+router.get('/safety-units', async (req, res) => {
+    try {
+        const [rows] = await pool.query(
+            `SELECT u.id, u.name, u.short_code, u.department_id, u.sort_order,
+                    d.Name AS DeptName
+             FROM Master_SafetyUnits u
+             LEFT JOIN Master_Departments d ON d.id = u.department_id
+             ORDER BY u.department_id, u.sort_order, u.name`
+        );
+        res.json({ success: true, data: rows });
+    } catch (err) {
+        // Table may not exist yet (auto-created by admin module on first load)
+        res.json({ success: true, data: [] });
+    }
+});
+
 module.exports = router;

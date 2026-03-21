@@ -207,7 +207,7 @@ router.post('/checkin', async (req, res) => {
 router.get('/issues', async (req, res) => {
     try {
         const [issues] = await db.query('SELECT * FROM Patrol_Issues ORDER BY IssueID DESC');
-        res.json({ success: true, issues });
+        res.json({ success: true, data: issues });
     } catch (err) {
         res.status(500).json({ success: false, message: 'ไม่สามารถดึงข้อมูลประเด็นได้' });
     }
@@ -227,10 +227,12 @@ router.post('/issue/save', upload.fields([
         if (data.ActionType === 'OPEN') {
             await db.query(
                 `INSERT INTO Patrol_Issues
-                 (DateFound, FoundByTeam, Area, ResponsibleDept, HazardType, MachineName, HazardDescription, BeforeImage, CurrentStatus)
-                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'Open')`,
-                [data.DateFound, data.FoundByTeam, data.Area, data.ResponsibleDept,
-                 data.HazardType, data.MachineName, data.HazardDescription, getUrl('BeforeImage')]
+                 (DateFound, FoundByTeam, Area, ResponsibleDept, ResponsibleUnit, HazardType, MachineName, HazardDescription, \`Rank\`, DueDate, BeforeImage, CurrentStatus)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'Open')`,
+                [data.DateFound, data.FoundByTeam, data.Area,
+                 data.ResponsibleDept || null, data.ResponsibleUnit || null,
+                 data.HazardType, data.MachineName, data.HazardDescription,
+                 data.Rank || null, data.DueDate || null, getUrl('BeforeImage')]
             );
         } else if (data.ActionType === 'TEMP') {
             await db.query(
@@ -246,6 +248,51 @@ router.post('/issue/save', upload.fields([
                  WHERE IssueID = ?`,
                 [data.ActionDescription, getUrl('AfterImage'), data.FinishDate, data.IssueID]
             );
+        } else if (data.ActionType === 'UPDATE') {
+            // Combined edit: saves temp + final + section 1 fields in one shot
+            // Status: Closed if ActionDescription filled, Temporary if only TempDescription, else Open
+            const hasFinal = !!(data.ActionDescription && data.ActionDescription.trim());
+            const hasTemp  = !!(data.TempDescription && data.TempDescription.trim());
+            const newStatus = hasFinal ? 'Closed' : hasTemp ? 'Temporary' : 'Open';
+            const newTempImage  = getUrl('TempImage');
+            const newAfterImage = getUrl('AfterImage');
+            await db.query(
+                `UPDATE Patrol_Issues SET
+                    Area              = COALESCE(?, Area),
+                    ResponsibleDept   = COALESCE(?, ResponsibleDept),
+                    ResponsibleUnit   = ?,
+                    HazardType        = COALESCE(?, HazardType),
+                    MachineName       = ?,
+                    HazardDescription = COALESCE(?, HazardDescription),
+                    \`Rank\`          = COALESCE(?, \`Rank\`),
+                    DueDate           = COALESCE(?, DueDate),
+                    TempDescription   = ?,
+                    TempImage         = COALESCE(?, TempImage),
+                    TempDate          = IF(? IS NOT NULL AND ? != '', NOW(), TempDate),
+                    ActionDescription = ?,
+                    AfterImage        = COALESCE(?, AfterImage),
+                    FinishDate        = ?,
+                    CurrentStatus     = ?
+                 WHERE IssueID = ?`,
+                [
+                    data.Area              || null,
+                    data.ResponsibleDept   || null,
+                    data.ResponsibleUnit   || null,
+                    data.HazardType        || null,
+                    data.MachineName       || null,
+                    data.HazardDescription || null,
+                    data.Rank              || null,
+                    data.DueDate           || null,
+                    data.TempDescription   || null,
+                    newTempImage, newTempImage,
+                    data.TempDescription   || null,
+                    data.ActionDescription || null,
+                    newAfterImage,
+                    data.FinishDate        || null,
+                    newStatus,
+                    data.IssueID
+                ]
+            );
         } else {
             return res.status(400).json({ success: false, message: 'ActionType ไม่ถูกต้อง' });
         }
@@ -254,6 +301,23 @@ router.post('/issue/save', upload.fields([
     } catch (err) {
         console.error(err);
         res.status(500).json({ success: false, message: 'ไม่สามารถบันทึกข้อมูลได้' });
+    }
+});
+
+// DELETE /api/patrol/issue/:id — Admin only
+router.delete('/issue/:id', async (req, res) => {
+    if (req.user.role !== 'Admin') {
+        return res.status(403).json({ success: false, message: 'เฉพาะ Admin เท่านั้น' });
+    }
+    try {
+        const [result] = await db.query('DELETE FROM Patrol_Issues WHERE IssueID = ?', [req.params.id]);
+        if (result.affectedRows === 0) {
+            return res.status(404).json({ success: false, message: 'ไม่พบรายการนี้' });
+        }
+        res.json({ success: true, message: 'ลบข้อมูลสำเร็จ' });
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ success: false, message: 'ไม่สามารถลบข้อมูลได้' });
     }
 });
 
@@ -864,7 +928,7 @@ router.get('/my-self-patrol', async (req, res) => {
     const { year, month } = req.query;
     const empId = req.user.id;
     try {
-        const [[emp]] = await pool.query(
+        const [[emp]] = await db.query(
             `SELECT mp.IsSupervisorPatrol, e.Position
              FROM Employees e
              LEFT JOIN Master_Positions mp ON mp.Name = e.Position
@@ -872,7 +936,7 @@ router.get('/my-self-patrol', async (req, res) => {
         if (!emp || !emp.IsSupervisorPatrol) {
             return res.json({ success: true, data: { isSupervisorPatrol: false, checkins: [] } });
         }
-        const [checkins] = await pool.query(
+        const [checkins] = await db.query(
             `SELECT * FROM Patrol_Self_Checkin WHERE EmployeeID = ? AND Year = ? AND Month = ? ORDER BY CheckinDate ASC`,
             [empId, year, month]);
         res.json({ success: true, data: { isSupervisorPatrol: true, position: emp.Position, checkins, target: 2 } });
@@ -889,14 +953,14 @@ router.post('/self-checkin', async (req, res) => {
     const year = d.getFullYear();
     const month = d.getMonth() + 1;
     try {
-        const [[emp]] = await pool.query(
+        const [[emp]] = await db.query(
             `SELECT mp.IsSupervisorPatrol FROM Employees e
              LEFT JOIN Master_Positions mp ON mp.Name = e.Position
              WHERE e.EmployeeID = ?`, [empId]);
         if (!emp?.IsSupervisorPatrol) {
             return res.status(403).json({ success: false, message: 'ตำแหน่งของคุณไม่ได้กำหนดให้เดิน Self-Patrol' });
         }
-        const [result] = await pool.query(
+        const [result] = await db.query(
             `INSERT INTO Patrol_Self_Checkin (EmployeeID, CheckinDate, Location, Notes, Year, Month) VALUES (?,?,?,?,?,?)`,
             [empId, CheckinDate, Location || null, Notes || null, year, month]);
         res.json({ success: true, message: 'บันทึกการเดินตรวจสำเร็จ', id: result.insertId });
@@ -908,12 +972,12 @@ router.post('/self-checkin', async (req, res) => {
 router.delete('/self-checkin/:id', async (req, res) => {
     const empId = req.user.id;
     try {
-        const [[row]] = await pool.query('SELECT EmployeeID FROM Patrol_Self_Checkin WHERE id = ?', [req.params.id]);
+        const [[row]] = await db.query('SELECT EmployeeID FROM Patrol_Self_Checkin WHERE id = ?', [req.params.id]);
         if (!row) return res.status(404).json({ success: false, message: 'ไม่พบข้อมูล' });
         if (row.EmployeeID !== empId && req.user.role !== 'Admin') {
             return res.status(403).json({ success: false, message: 'ไม่มีสิทธิ์ลบรายการนี้' });
         }
-        await pool.query('DELETE FROM Patrol_Self_Checkin WHERE id = ?', [req.params.id]);
+        await db.query('DELETE FROM Patrol_Self_Checkin WHERE id = ?', [req.params.id]);
         res.json({ success: true, message: 'ลบสำเร็จ' });
     } catch (err) {
         res.status(500).json({ success: false, message: err.message });
@@ -923,12 +987,12 @@ router.delete('/self-checkin/:id', async (req, res) => {
 router.get('/supervisor-overview', async (req, res) => {
     const { year, month } = req.query;
     try {
-        const [members] = await pool.query(
+        const [members] = await db.query(
             `SELECT e.EmployeeID, e.EmployeeName, e.Department, e.Position
              FROM Employees e
              JOIN Master_Positions mp ON mp.Name = e.Position AND mp.IsSupervisorPatrol = 1
              ORDER BY e.Department, e.EmployeeName`);
-        const [checkins] = await pool.query(
+        const [checkins] = await db.query(
             `SELECT * FROM Patrol_Self_Checkin WHERE Year = ? AND Month = ?`, [year, month]);
         const checkinMap = {};
         checkins.forEach(c => {
