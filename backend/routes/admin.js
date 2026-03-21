@@ -308,8 +308,8 @@ router.get('/audit-logs', async (req, res) => {
 router.get('/dashboard-stats', async (_req, res) => {
     try {
         const [[empRow]]       = await db.query('SELECT COUNT(*) AS total FROM Employees');
-        const [[schedRow]]     = await db.query("SELECT COUNT(*) AS total FROM Patrol_Schedule WHERE MONTH(ScheduledDate)=MONTH(NOW()) AND YEAR(ScheduledDate)=YEAR(NOW())");
-        const [[pendRow]]      = await db.query("SELECT COUNT(*) AS total FROM Patrol_Schedule WHERE Status='Pending' AND ScheduledDate >= CURDATE()");
+        const [[schedRow]]     = await db.query("SELECT COUNT(*) AS total FROM Patrol_Sessions WHERE MONTH(ScheduledDate)=MONTH(NOW()) AND YEAR(ScheduledDate)=YEAR(NOW())").catch(() => [[{ total: 0 }]]);
+        const [[pendRow]]      = await db.query("SELECT COUNT(*) AS total FROM Patrol_Sessions WHERE Status='Pending' AND ScheduledDate >= CURDATE()").catch(() => [[{ total: 0 }]]);
         const [[hiyariRow]]    = await db.query('SELECT COUNT(*) AS total FROM HiyariReports WHERE Status != "Closed"').catch(() => [[{ total: 0 }]]);
         const [[kyRow]]        = await db.query('SELECT COUNT(*) AS total FROM KY_Activities WHERE MONTH(ActivityDate)=MONTH(NOW()) AND YEAR(ActivityDate)=YEAR(NOW())').catch(() => [[{ total: 0 }]]);
         const [[fourmRow]]     = await db.query("SELECT COUNT(*) AS total FROM FourM_ChangeNotices WHERE Status='Open'").catch(() => [[{ total: 0 }]]);

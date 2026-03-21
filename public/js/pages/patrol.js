@@ -24,7 +24,10 @@ const SAFETY_IMAGES = [
 // ─── State ────────────────────────────────────────────────────────────────────
 let _allIssues      = [];
 let _activeFilter   = 'all';
-let _monthlySummary = [];  // sessions จาก /patrol/monthly-summary (มี AreaName, TeamColor, PatrolRound)
+let _monthlySummary = [];
+let _myPlan         = null;  // personal monthly plan (team, sessions, compliance, roster)
+let _overviewYear   = new Date().getFullYear();
+let _overviewData   = null;  // attendance overview cache
 
 // ─── Main Load ────────────────────────────────────────────────────────────────
 export async function loadPatrolPage() {
@@ -34,6 +37,7 @@ export async function loadPatrolPage() {
     window.openIssueForm = openIssueForm;
     window.handleCheckInSubmit = handleCheckInSubmit;
     window.openCarouselDetail = openCarouselDetail;
+    window.switchOverviewYear = switchOverviewYear;
 
     const container = document.getElementById('patrol-page');
     container.innerHTML = getSkeletonHTML();
@@ -43,15 +47,17 @@ export async function loadPatrolPage() {
         const curMonth = now.getMonth() + 1;
         const curYear  = now.getFullYear();
 
-        const [scheduleRes, statsRes, issuesRes, summaryRes] = await Promise.all([
+        const [scheduleRes, statsRes, issuesRes, summaryRes, planRes] = await Promise.all([
             API.get(`/patrol/my-schedule?employeeId=${currentUser.id}&month=${curMonth}&year=${curYear}`),
             API.get('/patrol/attendance-stats'),
             API.get('/patrol/issues'),
             API.get(`/patrol/monthly-summary?year=${curYear}&month=${curMonth}`).catch(() => ({ data: [] })),
+            API.get(`/patrol/my-monthly-plan?year=${curYear}&month=${curMonth}`).catch(() => ({ data: null })),
         ]);
 
         _allIssues      = normalizeApiArray(issuesRes);
         _monthlySummary = summaryRes.data || [];
+        _myPlan         = planRes.data || null;
 
         renderDashboard(container, {
             schedule: normalizeApiArray(scheduleRes),
@@ -100,9 +106,50 @@ function renderDashboard(container, data) {
     const rank = rankTiers.find(r => walks >= r.min && walks <= r.max) || rankTiers[0];
     const rankPct = rank.needed ? Math.min(Math.round((walks / rank.needed) * 100), 100) : 100;
 
+    // ── Per-tab hero stats ───────────────────────────────────────────────────
+    const _personalStats = [
+        { label: 'เดินตรวจแล้ว',    val: walks,                                                                        color: '#6ee7b7' },
+        { label: 'อัตราผ่านเกณฑ์',  val: `${myStats.Percent || 0}%`,                                                   color: '#6ee7b7' },
+        { label: 'ทีมของฉัน',        val: _myPlan ? _myPlan.team.name.replace(/^ทีม\s*/,'') : rank.title,              color: '#a5f3fc' },
+        { label: 'สถานะเดือนนี้',    val: _myPlan ? `${_myPlan.compliance.attended}/${_myPlan.compliance.required} รอบ` : '—',
+          color: _myPlan?.compliance?.done ? '#6ee7b7' : '#fcd34d' },
+    ];
+    const _issueStats = [
+        { label: 'รอแก้ไข',    val: openIssues,               color: openIssues > 0 ? '#fca5a5' : '#6ee7b7' },
+        { label: 'แก้ชั่วคราว', val: tempIssues,               color: tempIssues > 0 ? '#fed7aa' : '#6ee7b7' },
+        { label: 'เสร็จสิ้น',   val: closedIssues,             color: '#6ee7b7' },
+        { label: 'ทั้งหมด',     val: total,                    color: '#a5f3fc' },
+    ];
+
+    function renderStatsStrip(stats) {
+        const el = document.getElementById('hero-stats-strip');
+        if (!el) return;
+        el.innerHTML = stats.map(s => `
+        <div class="rounded-xl px-4 py-3 text-center transition-all duration-300" style="background:rgba(255,255,255,0.12);backdrop-filter:blur(6px)">
+          <p class="text-xl font-bold truncate" style="color:${s.color}">${s.val}</p>
+          <p class="text-[11px] mt-0.5 text-white/70">${s.label}</p>
+        </div>`).join('');
+    }
+
+    function getOverviewHeroStats() {
+        if (!_overviewData) return [
+            { label: 'ผู้เข้าร่วม',      val: '—', color: '#a5f3fc' },
+            { label: 'เซสชันทั้งหมด',    val: '—', color: '#a5f3fc' },
+            { label: 'เข้าร่วมจริง',     val: '—', color: '#6ee7b7' },
+            { label: 'อัตราเข้าร่วม',    val: '—', color: '#6ee7b7' },
+        ];
+        const s = _overviewData.summary;
+        return [
+            { label: 'ผู้เข้าร่วม',      val: _overviewData.members.length, color: '#a5f3fc' },
+            { label: 'เซสชันทั้งหมด',    val: s.totalSessions,              color: '#a5f3fc' },
+            { label: 'เข้าร่วมจริง',     val: s.totalAttended,              color: '#6ee7b7' },
+            { label: 'อัตราเข้าร่วม',    val: `${s.percent}%`,              color: s.percent >= 80 ? '#6ee7b7' : '#fcd34d' },
+        ];
+    }
+
     // Tabs state
     window.switchTab = function(tab) {
-        ['patrol','issues'].forEach(t => {
+        ['patrol','overview','issues'].forEach(t => {
             const btn = document.getElementById(`btn-tab-${t}`);
             const content = document.getElementById(`content-${t}`);
             const isActive = t === tab;
@@ -117,7 +164,18 @@ function renderDashboard(container, data) {
                 if (isActive) content.classList.add('animate-fade-in');
             }
         });
+        // Update hero stats per tab
+        if (tab === 'patrol')   renderStatsStrip(_personalStats);
+        else if (tab === 'overview') renderStatsStrip(getOverviewHeroStats());
+        else if (tab === 'issues')   renderStatsStrip(_issueStats);
+        // FAB: show only on issues tab
+        const fab = document.getElementById('issue-fab');
+        if (fab) fab.classList.toggle('hidden', tab !== 'issues');
+        // lazy-load overview data on first switch
+        if (tab === 'overview' && !_overviewData) loadOverview(_overviewYear);
     };
+    // expose for loadOverview to refresh hero stats when overview is active
+    window._refreshOverviewHero = () => renderStatsStrip(getOverviewHeroStats());
 
     container.innerHTML = `
     <div class="pb-20 animate-fade-in">
@@ -141,59 +199,84 @@ function renderDashboard(container, data) {
               <h1 class="text-2xl font-bold text-white">Safety Patrol System</h1>
               <p class="text-sm mt-1" style="color:rgba(167,243,208,0.8)">${dateStr} · ${currentUser.name}</p>
             </div>
-            <div class="flex gap-2 flex-shrink-0">
-              <button onclick="loadPatrolPage()" class="p-2.5 rounded-xl bg-white/15 border border-white/20 text-white hover:bg-white/25 transition-colors">
-                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg>
-              </button>
-              <button onclick="openIssueForm('OPEN')" class="flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-bold transition-all shadow-md hover:shadow-lg" style="background:rgba(255,255,255,0.95);color:#065f46">
-                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/></svg>
-                รายงานปัญหา
-              </button>
-            </div>
+            <button onclick="loadPatrolPage()" class="p-2.5 rounded-xl bg-white/15 border border-white/20 text-white hover:bg-white/25 transition-colors flex-shrink-0">
+              <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg>
+            </button>
           </div>
 
-          <!-- Stats strip -->
-          <div class="grid grid-cols-2 md:grid-cols-4 gap-3 mt-5">
-            ${[
-              { label: 'การเดินตรวจ', val: walks, sub: 'ครั้ง', color: '#6ee7b7' },
-              { label: 'อัตราผ่านเกณฑ์', val: `${myStats.Percent || 0}%`, sub: 'เป้าหมาย', color: '#6ee7b7' },
-              { label: 'ปัญหารอแก้', val: openIssues + tempIssues, sub: 'รายการ', color: openIssues > 0 ? '#fca5a5' : '#6ee7b7' },
-              { label: 'แก้ไขแล้ว', val: closedIssues, sub: 'รายการ', color: '#6ee7b7' },
-            ].map(s => `
-            <div class="rounded-xl px-4 py-3 text-center" style="background:rgba(255,255,255,0.12);backdrop-filter:blur(6px)">
-              <p class="text-xl font-bold" style="color:${s.color}">${s.val}</p>
-              <p class="text-[11px] mt-0.5 text-white/70">${s.label}</p>
-            </div>`).join('')}
-          </div>
+          <!-- Dynamic stats strip — updated by switchTab -->
+          <div id="hero-stats-strip" class="grid grid-cols-2 md:grid-cols-4 gap-3 mt-5"></div>
         </div>
       </div>
 
       <!-- ═══ TABS ═══ -->
-      <div class="bg-slate-100 p-1 rounded-xl flex gap-1 max-w-sm mb-6">
+      <div class="bg-slate-100 p-1 rounded-xl flex gap-1 mb-6">
         <button id="btn-tab-patrol" onclick="switchTab('patrol')"
           class="flex-1 py-2.5 text-sm font-bold text-white rounded-xl shadow-sm flex justify-center items-center gap-2 transition-all"
           style="background:linear-gradient(135deg,#059669,#0d9488)">
-          <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"/></svg>
-          การเดินตรวจ
+          <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z"/></svg>
+          ส่วนตัว
+        </button>
+        <button id="btn-tab-overview" onclick="switchTab('overview')"
+          class="flex-1 py-2.5 text-sm font-medium text-slate-500 hover:bg-slate-50 rounded-xl transition-all flex justify-center items-center gap-2">
+          <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"/></svg>
+          ทีม & ภาพรวม
         </button>
         <button id="btn-tab-issues" onclick="switchTab('issues')"
           class="flex-1 py-2.5 text-sm font-medium text-slate-500 hover:bg-slate-50 rounded-xl transition-all flex justify-center items-center gap-2">
           <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/></svg>
-          ปัญหา & สถิติ
+          ปัญหา
           ${openIssues > 0 ? `<span class="inline-flex items-center justify-center w-4 h-4 rounded-full text-[9px] font-bold text-white bg-red-500">${openIssues}</span>` : ''}
         </button>
       </div>
 
       <!-- ═══ PATROL TAB ═══ -->
-      <div id="content-patrol" class="grid grid-cols-1 xl:grid-cols-3 gap-5 animate-fade-in">
+      <div id="content-patrol" class="space-y-5 animate-fade-in">
+      <div class="grid grid-cols-1 xl:grid-cols-3 gap-5">
         <div class="xl:col-span-2 space-y-5">
 
           <!-- Check-in Card -->
           <div class="bg-white rounded-2xl overflow-hidden shadow-sm border border-slate-100" style="box-shadow:0 4px 24px rgba(5,150,105,0.07)">
             <div class="flex flex-col md:flex-row">
-              <div class="md:w-5/12 p-6 flex flex-col justify-between relative overflow-hidden" style="background:linear-gradient(135deg,#064e3b,#065f46)">
+              <div class="md:w-5/12 p-5 flex flex-col justify-between relative overflow-hidden" style="background:linear-gradient(135deg,#064e3b,#065f46)">
                 <div class="absolute -right-6 -top-6 w-28 h-28 rounded-full opacity-10" style="background:radial-gradient(circle,#fff,transparent 70%)"></div>
-                <div class="relative z-10">
+                <div class="relative z-10 flex-1">
+                  ${_myPlan ? `
+                  <!-- My Plan -->
+                  <div class="flex items-center gap-2 mb-3">
+                    <span class="w-2.5 h-2.5 rounded-full flex-shrink-0" style="background:${_myPlan.team.color}"></span>
+                    <span class="text-xs font-bold text-white/90">${_myPlan.team.name}</span>
+                    <span class="text-[10px] px-1.5 py-0.5 rounded-full font-bold ${_myPlan.team.group==='A'?'bg-blue-400/30 text-blue-200':'bg-purple-400/30 text-purple-200'}">กลุ่ม ${_myPlan.team.group}</span>
+                  </div>
+                  <div class="space-y-1.5 mb-4">
+                    ${_myPlan.sessions.length === 0
+                      ? `<p class="text-xs text-white/50 italic">ยังไม่มี Sessions เดือนนี้</p>`
+                      : _myPlan.sessions.map(s => {
+                          const d = new Date(s.PatrolDate);
+                          const isRequired = _myPlan.required.some(r => r.id === s.id);
+                          const isToday = d.toDateString() === new Date().toDateString();
+                          const area = s.AreaCode || s.AreaName || '—';
+                          return `<div class="flex items-center gap-2 rounded-lg px-2.5 py-1.5 ${isToday ? 'bg-white/20' : 'bg-white/8'}" style="${isToday?'background:rgba(255,255,255,0.18)':'background:rgba(255,255,255,0.07)'}">
+                            <div class="text-center flex-shrink-0 w-8">
+                              <div class="text-sm font-bold ${isToday?'text-emerald-300':'text-white'}">${d.getDate()}</div>
+                              <div class="text-[9px] text-white/50">${d.toLocaleString('th-TH',{month:'short'})}</div>
+                            </div>
+                            <div class="flex-1 min-w-0">
+                              <div class="flex items-center gap-1.5">
+                                <span class="text-[10px] font-bold text-white/80">${area}</span>
+                                <span class="text-[9px] px-1 py-0.5 rounded bg-white/15 text-white/70">รอบ ${s.PatrolRound}</span>
+                                ${!isRequired ? `<span class="text-[8px] text-white/40 italic">ไม่บังคับ</span>` : ''}
+                              </div>
+                            </div>
+                            ${isToday ? `<span class="text-[9px] font-bold text-emerald-300 flex-shrink-0">วันนี้</span>` : ''}
+                          </div>`;
+                        }).join('')}
+                  </div>
+                  <div class="text-[10px] text-white/50 mb-3">
+                    ${{'top':'Top Mgmt','committee':'คปอ.','management':'Management'}[_myPlan.patrolType]||''} ·
+                    เดิน ${_myPlan.compliance.attended}/${_myPlan.compliance.required} รอบ
+                  </div>
+                  ` : `
                   <div class="flex items-center gap-2 mb-3">
                     <span class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[10px] font-bold bg-white/20 text-white border border-white/30">
                       <span class="w-1.5 h-1.5 rounded-full bg-emerald-300 animate-pulse inline-block"></span>
@@ -201,9 +284,10 @@ function renderDashboard(container, data) {
                     </span>
                   </div>
                   <h3 class="text-lg font-bold text-white">บันทึกการเดินตรวจ</h3>
-                  <p class="text-xs mt-1" style="color:rgba(167,243,208,0.7)">Daily Check-in</p>
+                  <p class="text-xs mt-2 text-white/50">ยังไม่ได้รับมอบหมายทีม</p>
+                  `}
                 </div>
-                <button onclick="openCheckInModal()" class="relative z-10 mt-5 w-full py-3 rounded-xl font-bold text-sm shadow-md transition-all active:scale-[0.98] hover:shadow-lg" style="background:rgba(255,255,255,0.95);color:#065f46">
+                <button onclick="openCheckInModal()" class="relative z-10 mt-3 w-full py-2.5 rounded-xl font-bold text-sm shadow-md transition-all active:scale-[0.98] hover:shadow-lg" style="background:rgba(255,255,255,0.95);color:#065f46">
                   เช็คอินเดินตรวจ
                 </button>
               </div>
@@ -214,11 +298,11 @@ function renderDashboard(container, data) {
                 </div>
                 <div class="flex-1 overflow-y-auto custom-scrollbar divide-y divide-slate-50" style="max-height:200px">
                   ${data.schedule.length > 0 ? data.schedule.map(item => {
-                    const d     = new Date(item.ScheduledDate);
+                    const d     = new Date(item.PatrolDate || item.ScheduledDate);
                     const isTd  = d.toDateString() === today.toDateString();
                     // หา area info จาก monthly-summary (match วันที่ + TeamID หรือ TeamName)
                     const sumItem = _monthlySummary.find(s =>
-                        new Date(s.ScheduledDate).toDateString() === d.toDateString() &&
+                        new Date(s.ScheduledDate || s.PatrolDate).toDateString() === d.toDateString() &&
                         (s.TeamID === item.TeamID || s.TeamName === item.TeamName)
                     ) || item;
                     const areaLabel  = sumItem.AreaName || sumItem.AreaCode || 'Factory Area';
@@ -317,111 +401,283 @@ function renderDashboard(container, data) {
                 <p class="text-xl font-bold text-emerald-600">${myStats.Percent || 0}%</p>
               </div>
             </div>
-            ${rank.needed ? `<p class="text-[10px] text-slate-400 mt-2 text-center">อีก <strong class="text-slate-600">${Math.max(0, rank.needed - walks)}</strong> ครั้ง จะขึ้นเป็น ${rank.nextLabel}</p>` : `<p class="text-[10px] text-emerald-600 font-bold mt-2 text-center">🏆 ระดับสูงสุดแล้ว</p>`}
           </div>
 
-          <!-- Team Roster This Month -->
-          ${(() => {
-            // สร้าง unique team-area จาก monthly summary
-            const seen = new Map();
-            (data.summary || []).forEach(s => {
-                if (!seen.has(s.TeamID || s.TeamName)) {
-                    seen.set(s.TeamID || s.TeamName, {
-                        name:  s.TeamName,
-                        color: s.TeamColor || '#6366f1',
-                        area:  s.AreaName  || s.AreaCode || '—',
-                        dates: [],
-                    });
-                }
-                seen.get(s.TeamID || s.TeamName).dates.push(new Date(s.ScheduledDate).getDate());
-            });
-            const teams = [...seen.values()];
-            if (teams.length === 0) return '';
+          <!-- Team Roster Card -->
+          ${_myPlan?.roster?.length > 0 ? (() => {
+            const typeColor = { top:'rose', committee:'amber', management:'indigo' };
+            const typeLabel = { top:'Top', committee:'คปอ.', management:'Mgmt' };
+            const roster = _myPlan.roster;
             return `
           <div class="bg-white rounded-2xl shadow-sm border border-slate-100 p-5">
-            <h3 class="font-bold text-slate-700 text-sm flex items-center gap-2 mb-4">
-              <div class="w-7 h-7 rounded-lg flex items-center justify-center bg-indigo-50">
-                <svg class="w-4 h-4 text-indigo-500" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0z"/></svg>
-              </div>
-              ทีม Safety Patrol เดือนนี้
-            </h3>
-            <div class="space-y-2">
-              ${teams.map(t => `
-              <div class="flex items-center gap-2.5 p-2.5 rounded-xl bg-slate-50 border border-slate-100">
-                <span class="w-3 h-3 rounded-full flex-shrink-0" style="background:${t.color}"></span>
-                <div class="flex-1 min-w-0">
-                  <p class="text-xs font-bold text-slate-800">${t.name}</p>
-                  <p class="text-[10px] text-slate-500">${t.area}</p>
-                </div>
-                <div class="text-right flex-shrink-0">
-                  ${t.dates.sort((a,b)=>a-b).map(d =>
-                    `<span class="inline-block text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-white border border-slate-200 text-slate-600 mr-0.5">${d}</span>`
-                  ).join('')}
-                  <p class="text-[8px] text-slate-400 mt-0.5">วันพุธ</p>
-                </div>
-              </div>`).join('')}
+            <div class="flex items-center justify-between mb-3">
+              <h3 class="font-bold text-slate-700 text-sm flex items-center gap-2">
+                <span class="w-2.5 h-2.5 rounded-full flex-shrink-0" style="background:${_myPlan.team.color}"></span>
+                ทีมของฉันเดือนนี้
+              </h3>
+              <span class="text-[10px] text-slate-400 font-semibold">${roster.length} คน</span>
+            </div>
+            <div class="space-y-1">
+              ${roster.map(m => {
+                const tc = typeColor[m.PatrolType] || 'slate';
+                const tl = typeLabel[m.PatrolType] || m.PatrolType;
+                const isMe = m.EmployeeID === currentUser.id;
+                return `<div class="flex items-center gap-2.5 py-1.5 px-2 rounded-lg ${isMe?'bg-emerald-50 border border-emerald-100':'hover:bg-slate-50'} transition-colors">
+                  <div class="w-6 h-6 rounded-full flex items-center justify-center flex-shrink-0 text-[10px] font-bold ${isMe?'bg-emerald-500 text-white':'bg-slate-100 text-slate-600'}">
+                    ${(m.EmployeeName||'?').charAt(0)}
+                  </div>
+                  <span class="text-xs font-medium text-slate-700 flex-1 truncate ${isMe?'font-bold':''}">${m.EmployeeName}${isMe?' (ฉัน)':''}</span>
+                  <span class="text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-${tc}-100 text-${tc}-700 flex-shrink-0">${tl}</span>
+                </div>`;
+              }).join('')}
             </div>
           </div>`;
-          })()}
+          })() : ''}
 
-          <!-- Safety Carousel -->
-          <div id="promo-carousel" class="relative overflow-hidden rounded-2xl shadow-md h-80 bg-slate-900 group">
-            <div id="carousel-slides" class="relative w-full h-full">
-              ${SAFETY_IMAGES.map((img, idx) => `
-              <div class="carousel-item absolute inset-0 pointer-events-none transition-opacity duration-700 opacity-0 z-0" data-index="${idx}">
-                <img src="${img.src}" class="w-full h-full object-cover opacity-60 group-hover:scale-105 transition-transform duration-1000 ease-out">
-                <div class="absolute inset-0" style="background:linear-gradient(to top,rgba(6,30,20,0.95) 0%,rgba(6,30,20,0.3) 50%,transparent 100%)"></div>
-                <div class="absolute bottom-0 left-0 right-0 p-5">
-                  <div class="flex items-start justify-between">
-                    <div class="flex-1">
-                      <span class="inline-block px-2 py-0.5 rounded-full text-[9px] font-bold mb-2" style="background:rgba(16,185,129,0.3);color:#6ee7b7;border:1px solid rgba(16,185,129,0.4)">ความปลอดภัย</span>
-                      <h3 class="text-base font-bold text-white leading-tight">${img.title}</h3>
-                      <p class="text-[11px] mt-1 line-clamp-2" style="color:rgba(167,243,208,0.7)">${img.desc}</p>
-                    </div>
-                  </div>
-                  <button onclick="openCarouselDetail(${idx})" class="mt-3 text-[10px] font-semibold px-4 py-1.5 rounded-full border border-white/30 text-white hover:bg-white/20 transition-colors pointer-events-auto backdrop-blur-sm">
-                    ดูรายละเอียด →
-                  </button>
-                </div>
-              </div>`).join('')}
-            </div>
+          <div class="hidden"><!-- placeholder --></div>
+            ${rank.needed ? `<p class="text-[10px] text-slate-400 mt-2 text-center">อีก <strong class="text-slate-600">${Math.max(0, rank.needed - walks)}</strong> ครั้ง จะขึ้นเป็น ${rank.nextLabel}</p>` : `<p class="text-[10px] text-emerald-600 font-bold mt-2 text-center">ระดับสูงสุดแล้ว</p>`}
+          </div>
 
-            <!-- Dots + counter -->
-            <div class="absolute top-3 right-3 z-20 flex items-center gap-1.5 bg-black/30 backdrop-blur-sm px-2.5 py-1.5 rounded-full pointer-events-none">
-              <span id="carousel-counter" class="text-[10px] font-bold text-white">1/${SAFETY_IMAGES.length}</span>
+        </div><!-- /sidebar -->
+      </div><!-- /grid -->
+
+      <!-- Safety Tips Carousel — full width -->
+      <div id="promo-carousel" class="relative overflow-hidden rounded-2xl shadow-md bg-slate-900 group" style="height:260px">
+        <div id="carousel-slides" class="relative w-full h-full">
+          ${SAFETY_IMAGES.map((img, idx) => `
+          <div class="carousel-item absolute inset-0 pointer-events-none transition-opacity duration-700 opacity-0 z-0" data-index="${idx}">
+            <img src="${img.src}" class="w-full h-full object-cover opacity-50 group-hover:scale-105 transition-transform duration-1000 ease-out">
+            <div class="absolute inset-0" style="background:linear-gradient(to right,rgba(6,30,20,0.95) 0%,rgba(6,30,20,0.5) 50%,transparent 100%)"></div>
+            <div class="absolute inset-0 flex items-center p-8">
+              <div class="max-w-md">
+                <span class="inline-block px-2 py-0.5 rounded-full text-[9px] font-bold mb-3" style="background:rgba(16,185,129,0.3);color:#6ee7b7;border:1px solid rgba(16,185,129,0.4)">Safety Knowledge</span>
+                <h3 class="text-lg font-bold text-white leading-tight mb-1">${img.title}</h3>
+                <p class="text-[11px] line-clamp-2" style="color:rgba(167,243,208,0.7)">${img.desc}</p>
+                <button onclick="openCarouselDetail(${idx})" class="mt-4 text-[10px] font-semibold px-4 py-1.5 rounded-full border border-white/30 text-white hover:bg-white/20 transition-colors pointer-events-auto backdrop-blur-sm">
+                  ดูรายละเอียด →
+                </button>
+              </div>
             </div>
-            <div class="absolute bottom-3 left-0 right-0 flex justify-center gap-1.5 z-20 pointer-events-auto">
-              ${SAFETY_IMAGES.map((_, idx) => `<button class="carousel-dot h-1 w-1.5 bg-white/30 rounded-full transition-all duration-300 hover:bg-white/60" data-index="${idx}"></button>`).join('')}
-            </div>
+          </div>`).join('')}
+        </div>
+        <div class="absolute top-3 right-3 z-20 flex items-center gap-1.5 bg-black/30 backdrop-blur-sm px-2.5 py-1.5 rounded-full pointer-events-none">
+          <span id="carousel-counter" class="text-[10px] font-bold text-white">1/${SAFETY_IMAGES.length}</span>
+        </div>
+        <div class="absolute bottom-3 left-0 right-0 flex justify-center gap-1.5 z-20 pointer-events-auto">
+          ${SAFETY_IMAGES.map((_, idx) => `<button class="carousel-dot h-1 w-1.5 bg-white/30 rounded-full transition-all duration-300 hover:bg-white/60" data-index="${idx}"></button>`).join('')}
+        </div>
+      </div>
+      </div><!-- /content-patrol -->
+
+      <!-- ═══ OVERVIEW TAB ═══ -->
+      <div id="content-overview" class="hidden space-y-5">
+
+        <!-- Filter bar -->
+        <div class="bg-white rounded-xl border border-slate-100 shadow-sm p-4 flex flex-wrap items-center gap-3">
+          <div class="flex items-center gap-2">
+            <label class="text-xs font-bold text-slate-600">ปี</label>
+            <select id="overview-year-select" onchange="switchOverviewYear(this.value)"
+              class="text-sm font-bold rounded-xl border border-slate-200 px-3 py-1.5 focus:outline-none focus:border-emerald-400 text-slate-700">
+              ${[new Date().getFullYear(), new Date().getFullYear()-1, new Date().getFullYear()-2].map(y =>
+                `<option value="${y}" ${y === _overviewYear ? 'selected' : ''}>${y}</option>`
+              ).join('')}
+            </select>
+          </div>
+          <div class="flex items-center gap-2 ml-auto">
+            <select id="overview-type-filter" onchange="filterOverviewTable(this.value)"
+              class="text-xs font-semibold rounded-xl border border-slate-200 px-3 py-1.5 focus:outline-none focus:border-emerald-400 text-slate-600">
+              <option value="all">ทุกประเภท</option>
+              <option value="top">Top Management</option>
+              <option value="committee">คปอ.</option>
+              <option value="management">Management</option>
+            </select>
           </div>
         </div>
+
+        <!-- Main 2-col -->
+        <div class="grid grid-cols-1 xl:grid-cols-3 gap-5">
+
+          <!-- Attendance Table -->
+          <div class="xl:col-span-2 bg-white rounded-2xl shadow-sm border border-slate-100 overflow-hidden">
+            <div class="px-5 py-3.5 border-b border-slate-100 flex items-center justify-between bg-slate-50/50">
+              <h3 class="font-bold text-slate-700 text-sm flex items-center gap-2">
+                <svg class="w-4 h-4 text-emerald-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"/></svg>
+                สรุปการเข้าร่วมเดินตรวจ
+              </h3>
+              <span id="ov-table-subtitle" class="text-[10px] text-slate-400 font-semibold">ปี ${_overviewYear}</span>
+            </div>
+            <div class="overflow-x-auto">
+              <table class="w-full text-xs text-left">
+                <thead class="text-[10px] uppercase bg-slate-50 border-b border-slate-100">
+                  <tr>
+                    <th class="px-4 py-3 font-bold text-slate-400 w-8">#</th>
+                    <th class="px-4 py-3 font-bold text-slate-600">ชื่อ-สกุล</th>
+                    <th class="px-4 py-3 font-bold text-slate-400 text-center">ประเภท</th>
+                    <th class="px-4 py-3 font-bold text-slate-400 text-center">ปี</th>
+                    <th class="px-4 py-3 font-bold text-slate-400 text-center">ทั้งหมด</th>
+                    <th class="px-4 py-3 font-bold text-emerald-600 text-center">เข้าร่วม</th>
+                    <th class="px-4 py-3 font-bold text-slate-400 text-center">%</th>
+                  </tr>
+                </thead>
+                <tbody id="overview-table-body" class="divide-y divide-slate-50">
+                  <tr><td colspan="7" class="text-center py-12 text-slate-300 text-xs">
+                    <div class="inline-flex flex-col items-center gap-2">
+                      <div class="animate-spin rounded-full h-8 w-8 border-4 border-emerald-500 border-t-transparent"></div>
+                      <span>กำลังโหลด...</span>
+                    </div>
+                  </td></tr>
+                </tbody>
+              </table>
+            </div>
+            <!-- Evaluation Criteria -->
+            <div class="px-5 py-4 border-t border-slate-100 bg-slate-50/50">
+              <p class="text-[10px] font-bold text-slate-500 uppercase mb-2">Evaluation Criteria</p>
+              <div class="overflow-x-auto">
+                <table class="text-[10px] text-slate-600 w-full">
+                  <thead><tr class="border-b border-slate-200">
+                    <th class="pb-1.5 font-bold text-slate-400 text-left pr-4">Rating</th>
+                    ${[1,2,3,4,5].map(r=>`<th class="pb-1.5 font-bold text-center px-3">${r}</th>`).join('')}
+                    <th class="pb-1.5 font-bold text-slate-400 text-center px-3">Weight</th>
+                  </tr></thead>
+                  <tbody><tr>
+                    <td class="py-1.5 text-slate-400 pr-4">%</td>
+                    ${['≥ 60','≥ 65','≥ 70','≥ 75','≥ 80'].map(v=>`<td class="py-1.5 text-center px-3 font-semibold">${v}</td>`).join('')}
+                    <td class="py-1.5 text-center px-3 font-bold text-indigo-600">0.4</td>
+                  </tr></tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+
+          <!-- Right column -->
+          <div class="space-y-5">
+
+            <!-- Pie chart -->
+            <div class="bg-white rounded-2xl shadow-sm border border-slate-100 p-5">
+              <h3 class="font-bold text-slate-700 text-sm mb-4">Safety Patrol Pie Chart</h3>
+              <div class="relative h-52 flex items-center justify-center">
+                <canvas id="overviewPieChart"></canvas>
+                <div id="overview-pie-center" class="absolute inset-0 flex flex-col items-center justify-center pointer-events-none">
+                  <p class="text-3xl font-bold text-emerald-600" id="ov-pie-pct">—%</p>
+                  <p class="text-[10px] text-slate-400 mt-0.5">อัตราเข้าร่วม</p>
+                </div>
+              </div>
+            </div>
+
+            <!-- Stats summary card -->
+            <div class="rounded-2xl overflow-hidden shadow-sm" style="background:linear-gradient(135deg,#064e3b 0%,#065f46 60%,#0d9488 100%)">
+              <div class="p-5">
+                <div class="flex items-center gap-2 mb-3">
+                  <svg class="w-4 h-4 text-emerald-300" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z"/></svg>
+                  <span class="text-xs font-bold text-white/80 uppercase tracking-wide">Safety Patrol Record</span>
+                </div>
+                <p class="text-[10px] text-white/50 mb-4" id="ov-card-date">—</p>
+                <div class="grid grid-cols-2 gap-3">
+                  <div class="rounded-xl p-3 text-center" style="background:rgba(255,255,255,0.12)">
+                    <p class="text-2xl font-bold text-white" id="ov-card-total">—</p>
+                    <p class="text-[10px] text-white/60 mt-0.5">เซสชันทั้งหมด</p>
+                  </div>
+                  <div class="rounded-xl p-3 text-center" style="background:rgba(255,255,255,0.12)">
+                    <p class="text-2xl font-bold text-emerald-300" id="ov-card-attended">—</p>
+                    <p class="text-[10px] text-white/60 mt-0.5">เข้าร่วม</p>
+                  </div>
+                </div>
+                <div class="mt-3 rounded-xl p-3 text-center" style="background:rgba(255,255,255,0.08)">
+                  <p class="text-3xl font-bold text-white" id="ov-card-pct">—%</p>
+                  <p class="text-[10px] text-white/60 mt-0.5">อัตราการเข้าร่วม</p>
+                </div>
+              </div>
+            </div>
+
+          </div>
+        </div>
+
+        <!-- Team overview this month -->
+        ${(() => {
+          const seen = new Map();
+          (data.summary || []).forEach(s => {
+            if (!seen.has(s.TeamID || s.TeamName)) {
+              seen.set(s.TeamID || s.TeamName, { name: s.TeamName, color: s.TeamColor || '#6366f1', area: s.AreaName || s.AreaCode || '—', dates: [] });
+            }
+            seen.get(s.TeamID || s.TeamName).dates.push(new Date(s.ScheduledDate).getDate());
+          });
+          const teams = [...seen.values()];
+          if (teams.length === 0) return '';
+          return `
+        <div class="bg-white rounded-2xl shadow-sm border border-slate-100 p-5">
+          <h3 class="font-bold text-slate-700 text-sm flex items-center gap-2 mb-4">
+            <div class="w-7 h-7 rounded-lg flex items-center justify-center bg-indigo-50">
+              <svg class="w-4 h-4 text-indigo-500" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0z"/></svg>
+            </div>
+            ทีมทั้งหมดเดือนนี้ · ${today.toLocaleString('th-TH',{month:'long',year:'numeric'})}
+          </h3>
+          <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+            ${teams.map(t => `
+            <div class="flex items-center gap-3 p-3 rounded-xl bg-slate-50 border border-slate-100">
+              <span class="w-3 h-3 rounded-full flex-shrink-0" style="background:${t.color}"></span>
+              <div class="flex-1 min-w-0">
+                <p class="text-xs font-bold text-slate-800 truncate">${t.name}</p>
+                <p class="text-[10px] text-slate-500 truncate">${t.area}</p>
+              </div>
+              <div class="flex gap-0.5 flex-shrink-0">
+                ${t.dates.sort((a,b)=>a-b).map(d =>
+                  `<span class="text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-white border border-slate-200 text-slate-600">${d}</span>`
+                ).join('')}
+              </div>
+            </div>`).join('')}
+          </div>
+        </div>`;
+        })()}
+
+        <!-- Leaderboard -->
+        <div class="bg-white rounded-2xl shadow-sm border border-slate-100 p-5">
+          <h3 class="font-bold text-slate-700 text-sm flex items-center gap-2 mb-4">
+            <div class="w-7 h-7 rounded-lg flex items-center justify-center bg-emerald-50">
+              <svg class="w-4 h-4 text-emerald-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0"/></svg>
+            </div>
+            ผู้เข้าร่วมเดินตรวจ (Top 10)
+          </h3>
+          <div class="grid grid-cols-1 sm:grid-cols-2 gap-1">
+            ${normalizeApiArray(data.stats).slice(0,10).map((r, i) => `
+            <div class="flex items-center gap-2 p-2 hover:bg-slate-50 rounded-lg transition-colors">
+              <span class="w-5 h-5 rounded-full flex items-center justify-center text-[9px] font-bold flex-shrink-0 ${i < 3 ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-100 text-slate-500'}">${i+1}</span>
+              <div class="w-6 h-6 rounded-full bg-slate-100 text-[9px] flex items-center justify-center font-bold text-slate-600 flex-shrink-0">${r.Name?r.Name[0]:'?'}</div>
+              <span class="text-xs font-semibold text-slate-600 truncate flex-1">${r.Name}</span>
+              <div class="w-16 bg-slate-100 h-1.5 rounded-full overflow-hidden flex-shrink-0">
+                <div class="bg-emerald-500 h-full rounded-full" style="width:${Math.min(r.Percent||0,100)}%"></div>
+              </div>
+              <span class="text-[9px] text-slate-400 font-mono flex-shrink-0 w-6 text-right">${r.Total}</span>
+            </div>`).join('')}
+          </div>
+        </div>
+
       </div>
 
       <!-- ═══ ISSUES TAB ═══ -->
       <div id="content-issues" class="hidden space-y-5">
 
-        <!-- Stats row -->
-        <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
-          <div class="bg-white rounded-xl shadow-sm border border-slate-100 p-5 h-72 flex flex-col">
-            <h3 class="font-bold text-slate-700 text-sm mb-3 flex items-center gap-2">
-              <svg class="w-4 h-4 text-emerald-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0"/></svg>
-              ผู้ร่วมเดินตรวจ
-            </h3>
-            <div class="flex-1 overflow-y-auto custom-scrollbar space-y-1">
-              ${statsArray.slice(0,10).map((r, i) => `
-              <div class="flex items-center gap-2 p-2 hover:bg-slate-50 rounded-lg transition-colors">
-                <span class="w-5 h-5 rounded-full flex items-center justify-center text-[9px] font-bold flex-shrink-0 ${i < 3 ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-100 text-slate-500'}">${i+1}</span>
-                <div class="w-6 h-6 rounded-full bg-slate-100 text-[9px] flex items-center justify-center font-bold text-slate-600 flex-shrink-0">${r.Name?r.Name[0]:'?'}</div>
-                <span class="text-xs font-semibold text-slate-600 truncate flex-1">${r.Name}</span>
-                <div class="w-16 bg-slate-100 h-1.5 rounded-full overflow-hidden flex-shrink-0">
-                  <div class="bg-emerald-500 h-full rounded-full" style="width:${Math.min(r.Percent||0,100)}%"></div>
-                </div>
-                <span class="text-[9px] text-slate-400 font-mono flex-shrink-0 w-4 text-right">${r.Total}</span>
-              </div>`).join('')}
+        <!-- Quick stats strip -->
+        <div class="grid grid-cols-2 md:grid-cols-4 gap-3">
+          ${[
+            { label:'รอแก้ไข',     val: openIssues,               bg:'bg-red-50',     icon:'text-red-500',    num:'text-red-600',  border:'border-red-100' },
+            { label:'แก้ชั่วคราว', val: tempIssues,               bg:'bg-orange-50',  icon:'text-orange-400', num:'text-orange-600',border:'border-orange-100' },
+            { label:'เสร็จสิ้น',   val: closedIssues,             bg:'bg-emerald-50', icon:'text-emerald-500',num:'text-emerald-700',border:'border-emerald-100' },
+            { label:'ทั้งหมด',     val: total,                    bg:'bg-slate-50',   icon:'text-slate-400',  num:'text-slate-700', border:'border-slate-200' },
+          ].map(s => `
+          <div class="bg-white rounded-xl p-4 border ${s.border} shadow-sm flex items-center gap-3">
+            <div class="w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0 ${s.bg}">
+              <svg class="w-5 h-5 ${s.icon}" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/></svg>
             </div>
-          </div>
+            <div>
+              <p class="text-2xl font-bold ${s.num}">${s.val}</p>
+              <p class="text-xs text-slate-500">${s.label}</p>
+            </div>
+          </div>`).join('')}
+        </div>
 
-          <div class="bg-white rounded-xl shadow-sm border border-slate-100 p-5 h-72 flex flex-col">
+        <!-- Charts row -->
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div class="bg-white rounded-xl shadow-sm border border-slate-100 p-5 flex flex-col" style="min-height:240px">
             <h3 class="font-bold text-slate-700 text-sm mb-3">สถิติแยกพื้นที่</h3>
             <div class="flex-1 overflow-y-auto custom-scrollbar">
               <table class="w-full text-xs text-left">
@@ -437,7 +693,7 @@ function renderDashboard(container, data) {
             </div>
           </div>
 
-          <div class="bg-white rounded-xl shadow-sm border border-slate-100 p-5 h-72 flex flex-col">
+          <div class="bg-white rounded-xl shadow-sm border border-slate-100 p-5 flex flex-col" style="min-height:240px">
             <h3 class="font-bold text-slate-700 text-sm mb-3">วิเคราะห์ความเสี่ยง</h3>
             <div class="flex-1 relative flex items-center justify-center"><canvas id="rankChart"></canvas></div>
           </div>
@@ -451,11 +707,10 @@ function renderDashboard(container, data) {
                 <h3 class="font-bold text-slate-700 text-sm">ทะเบียนปัญหา</h3>
                 <span class="text-[10px] bg-slate-100 border border-slate-200 px-2 py-0.5 rounded text-slate-400 font-mono">ทั้งหมด ${total}</span>
               </div>
-              <div class="flex gap-2">
-                <span class="text-[10px] bg-red-50 text-red-600 border border-red-100 px-2 py-1 rounded-lg font-bold">รอแก้ ${openIssues}</span>
-                <span class="text-[10px] bg-orange-50 text-orange-600 border border-orange-100 px-2 py-1 rounded-lg font-bold">ชั่วคราว ${tempIssues}</span>
-                <span class="text-[10px] bg-emerald-50 text-emerald-700 border border-emerald-100 px-2 py-1 rounded-lg font-bold">เสร็จ ${closedIssues}</span>
-              </div>
+              <button onclick="openIssueForm('OPEN')" class="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold text-white transition-all" style="background:linear-gradient(135deg,#dc2626,#ef4444)">
+                <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/></svg>
+                รายงานปัญหาใหม่
+              </button>
             </div>
             <!-- Filter pills (functional) -->
             <div class="flex flex-wrap gap-2" id="issue-filter-bar">
@@ -496,13 +751,17 @@ function renderDashboard(container, data) {
 
     </div>
 
-    <!-- FAB -->
-    <button onclick="openIssueForm('OPEN')" title="รายงานปัญหาเร่งด่วน"
-      class="fixed bottom-8 right-8 w-14 h-14 rounded-full shadow-2xl flex items-center justify-center z-50 group border-4 border-white transition-transform hover:scale-110 active:scale-95"
+    <!-- FAB — shown only on issues tab -->
+    <button id="issue-fab" onclick="openIssueForm('OPEN')" title="รายงานปัญหาเร่งด่วน"
+      class="hidden fixed bottom-8 right-8 w-14 h-14 rounded-full shadow-2xl flex items-center justify-center z-50 group border-4 border-white transition-transform hover:scale-110 active:scale-95"
       style="background:linear-gradient(135deg,#dc2626,#ef4444)">
       <svg class="w-6 h-6 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/></svg>
       <span class="absolute right-16 bg-slate-900 text-white text-[10px] font-bold px-3 py-1.5 rounded-lg opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap pointer-events-none shadow-lg">รายงานเร่งด่วน</span>
     </button>`;
+
+    // Initialize hero stats and FAB for default tab (patrol)
+    renderStatsStrip(_personalStats);
+    document.getElementById('issue-fab')?.classList.add('hidden');
 
     // Filter event
     document.getElementById('issue-filter-bar')?.addEventListener('click', e => {
@@ -624,38 +883,71 @@ function getSkeletonHTML() {
     </div>`;
 }
 
-// ─── Check-in Modal ───────────────────────────────────────────────────────────
+// ─── Check-in Modal (Smart) ───────────────────────────────────────────────────
 function openCheckInModal() {
+    const today    = new Date();
+    const todaySess = _myPlan?.sessions?.find(s => {
+        const d = new Date(s.PatrolDate);
+        return d.toDateString() === today.toDateString();
+    }) || null;
+    const isPatrolDay = !!todaySess;
+    const isRequired  = todaySess ? (_myPlan?.required?.some(r => r.id === todaySess.id) ?? true) : false;
+    const areaLabel   = todaySess ? (todaySess.AreaCode || todaySess.AreaName || '') : '';
+    const compliance  = _myPlan?.compliance;
+
+    const planBanner = _myPlan ? `
+    <div class="rounded-xl overflow-hidden border border-slate-100">
+      <div class="px-4 py-2.5 flex items-center gap-3" style="background:linear-gradient(135deg,${_myPlan.team.color}22,transparent);border-bottom:1px solid #f1f5f9">
+        <span class="w-3 h-3 rounded-full flex-shrink-0" style="background:${_myPlan.team.color}"></span>
+        <div class="flex-1">
+          <p class="text-xs font-bold text-slate-800">${_myPlan.team.name}</p>
+          <p class="text-[10px] text-slate-400">${areaLabel || 'ไม่มี session วันนี้'} ${todaySess ? '· รอบ '+todaySess.PatrolRound : ''}</p>
+        </div>
+        ${isPatrolDay
+          ? `<span class="text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-700 animate-pulse">วันเดินตรวจ</span>`
+          : `<span class="text-[10px] font-bold px-2 py-0.5 rounded-full bg-slate-100 text-slate-500">ไม่ใช่วันเดิน</span>`}
+      </div>
+      ${compliance ? `
+      <div class="px-4 py-2 flex items-center justify-between bg-slate-50">
+        <span class="text-[10px] text-slate-500">ความครบถ้วนเดือนนี้</span>
+        <span class="text-[10px] font-bold ${compliance.done?'text-emerald-600':'text-amber-600'}">${compliance.attended}/${compliance.required} รอบ ${compliance.done?'✓':''}</span>
+      </div>` : ''}
+    </div>` : '';
+
     openModal('บันทึกการเดินตรวจ', `
-      <form id="checkin-form" onsubmit="handleCheckInSubmit(event)" class="space-y-5">
-        <div class="flex items-center gap-4 p-4 rounded-xl border border-slate-100 bg-slate-50">
-          <div class="w-12 h-12 rounded-xl flex items-center justify-center flex-shrink-0" style="background:linear-gradient(135deg,#ecfdf5,#d1fae5)">
-            <svg class="w-6 h-6 text-emerald-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z"/></svg>
+      <form id="checkin-form" onsubmit="handleCheckInSubmit(event)" class="space-y-4">
+        <!-- User info -->
+        <div class="flex items-center gap-3 p-3 rounded-xl border border-slate-100 bg-slate-50">
+          <div class="w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0 bg-emerald-100">
+            <span class="text-emerald-700 font-bold text-sm">${(currentUser.name||'?').charAt(0)}</span>
           </div>
           <div>
-            <p class="text-[10px] font-bold text-slate-400 uppercase tracking-widest">ผู้ปฏิบัติงาน</p>
-            <p class="font-bold text-slate-800">${currentUser.name}</p>
-            <p class="text-xs text-slate-400 mt-0.5">${currentUser.team || '—'}</p>
+            <p class="font-bold text-slate-800 text-sm">${currentUser.name}</p>
+            <p class="text-[10px] text-slate-400">${currentUser.department || ''}</p>
           </div>
         </div>
+
+        ${planBanner}
+
+        ${!isPatrolDay && _myPlan ? `
+        <div class="bg-amber-50 border border-amber-200 rounded-xl px-3 py-2.5 text-xs text-amber-700 flex items-start gap-2">
+          <svg class="w-4 h-4 flex-shrink-0 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+          <span>วันนี้ไม่ใช่วันเดินตรวจตามตาราง สามารถ Check-in ได้แต่จะนับเป็นการเดินนอกตาราง</span>
+        </div>` : ''}
 
         <div class="grid grid-cols-2 gap-3">
           <label class="cursor-pointer">
             <input type="radio" name="PatrolType" value="Normal" class="peer sr-only" checked>
-            <div class="p-4 rounded-xl border-2 border-slate-100 bg-white text-center hover:border-emerald-100 peer-checked:border-emerald-500 peer-checked:bg-emerald-50 transition-all">
-              <div class="w-10 h-10 mx-auto mb-2 rounded-xl bg-slate-100 peer-checked:bg-emerald-500 flex items-center justify-center transition-all" style="background:inherit">
-                <svg class="w-5 h-5 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"/></svg>
-              </div>
+            <div class="p-3.5 rounded-xl border-2 border-slate-100 bg-white text-center hover:border-emerald-100 peer-checked:border-emerald-500 peer-checked:bg-emerald-50 transition-all">
+              <svg class="w-5 h-5 mx-auto mb-1.5 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"/></svg>
               <p class="text-xs font-bold text-slate-700">เดินตรวจปกติ</p>
               <p class="text-[9px] text-slate-400">Routine Patrol</p>
             </div>
           </label>
           <label class="cursor-pointer">
             <input type="radio" name="PatrolType" value="Re-inspection" class="peer sr-only">
-            <div class="p-4 rounded-xl border-2 border-slate-100 bg-white text-center hover:border-amber-100 peer-checked:border-amber-500 peer-checked:bg-amber-50 transition-all">
-              <div class="w-10 h-10 mx-auto mb-2 rounded-xl bg-slate-100 flex items-center justify-center">
-                <svg class="w-5 h-5 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/></svg>
-              </div>
+            <div class="p-3.5 rounded-xl border-2 border-slate-100 bg-white text-center hover:border-amber-100 peer-checked:border-amber-500 peer-checked:bg-amber-50 transition-all">
+              <svg class="w-5 h-5 mx-auto mb-1.5 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/></svg>
               <p class="text-xs font-bold text-slate-700">ตรวจซ้ำ / ติดตาม</p>
               <p class="text-[9px] text-slate-400">Re-inspection</p>
             </div>
@@ -891,6 +1183,140 @@ window.openCarouselDetail = function(index) {
       </div>`, 'max-w-lg');
 };
 
+// ─── Overview Tab ─────────────────────────────────────────────────────────────
+async function loadOverview(year) {
+    _overviewYear = year;
+    const tbody   = document.getElementById('overview-table-body');
+    if (tbody) tbody.innerHTML = `<tr><td colspan="7" class="text-center py-10 text-slate-300 text-xs">
+      <div class="inline-flex flex-col items-center gap-2">
+        <div class="animate-spin rounded-full h-8 w-8 border-4 border-emerald-500 border-t-transparent"></div>
+        <span>กำลังโหลด...</span>
+      </div>
+    </td></tr>`;
+
+    try {
+        const res = await API.get(`/patrol/attendance-overview?year=${year}`);
+        _overviewData = res?.data || null;
+        if (!_overviewData) throw new Error('ไม่มีข้อมูล');
+
+        const s = _overviewData.summary;
+        // Stats cards
+        const setEl = (id, val) => { const el = document.getElementById(id); if (el) el.textContent = val; };
+        setEl('ov-stat-members', _overviewData.members.length);
+        setEl('ov-stat-total', s.totalSessions);
+        setEl('ov-stat-attended', s.totalAttended);
+        setEl('ov-stat-pct', `${s.percent}%`);
+        setEl('ov-table-subtitle', `ปี ${year}`);
+        // Summary card
+        setEl('ov-card-total', s.totalSessions);
+        setEl('ov-card-attended', s.totalAttended);
+        setEl('ov-card-pct', `${s.percent}%`);
+        setEl('ov-pie-pct', `${s.percent}%`);
+        if (s.latestDate) {
+            const d = new Date(s.latestDate);
+            setEl('ov-card-date', d.toLocaleDateString('th-TH', { day: 'numeric', month: 'long', year: 'numeric' }));
+        }
+
+        // Refresh hero stats if overview tab is active
+        window._refreshOverviewHero?.();
+        // Table
+        const typeFilter = document.getElementById('overview-type-filter')?.value || 'all';
+        renderOverviewTable(_overviewData.members, typeFilter);
+
+        // Pie chart
+        renderOverviewChart(s.percent);
+
+    } catch (err) {
+        if (tbody) tbody.innerHTML = `<tr><td colspan="7" class="text-center py-10 text-xs text-slate-400">ไม่สามารถโหลดข้อมูลได้: ${err.message}</td></tr>`;
+    }
+}
+
+function renderOverviewTable(members, typeFilter = 'all') {
+    const tbody = document.getElementById('overview-table-body');
+    if (!tbody) return;
+    const filtered = typeFilter === 'all' ? members : members.filter(m => m.PatrolType === typeFilter);
+
+    const PT_LABEL = { top: 'Top Mgmt', committee: 'คปอ.', management: 'Management' };
+    const PT_COLOR = { top: 'rose', committee: 'amber', management: 'indigo' };
+    const ratingOf = pct => {
+        if (pct >= 80) return { r: 5, cls: 'bg-emerald-100 text-emerald-700' };
+        if (pct >= 75) return { r: 4, cls: 'bg-teal-100 text-teal-700' };
+        if (pct >= 70) return { r: 3, cls: 'bg-blue-100 text-blue-700' };
+        if (pct >= 65) return { r: 2, cls: 'bg-amber-100 text-amber-700' };
+        if (pct >= 60) return { r: 1, cls: 'bg-orange-100 text-orange-700' };
+        return { r: 0, cls: 'bg-red-100 text-red-700' };
+    };
+
+    if (!filtered.length) {
+        tbody.innerHTML = `<tr><td colspan="7" class="text-center py-10 text-xs text-slate-400">ไม่มีข้อมูล</td></tr>`;
+        return;
+    }
+
+    tbody.innerHTML = filtered.map((m, i) => {
+        const tc = PT_COLOR[m.PatrolType] || 'slate';
+        const tl = PT_LABEL[m.PatrolType] || m.PatrolType;
+        const { r, cls } = ratingOf(m.Percent);
+        const barW = Math.min(m.Percent, 100);
+        const isMe = m.EmployeeID === currentUser.id;
+        return `<tr class="hover:bg-slate-50 transition-colors ${isMe ? 'bg-emerald-50/40' : ''}">
+          <td class="px-4 py-3 text-slate-400 font-mono">${i+1}</td>
+          <td class="px-4 py-3">
+            <div class="flex items-center gap-2">
+              <div class="w-6 h-6 rounded-full flex items-center justify-center text-[9px] font-bold flex-shrink-0 ${isMe ? 'bg-emerald-500 text-white' : 'bg-slate-100 text-slate-500'}">
+                ${(m.Name||'?').charAt(0)}
+              </div>
+              <span class="font-semibold text-slate-800 ${isMe ? 'font-bold' : ''}">${m.Name}${isMe ? ' (ฉัน)' : ''}</span>
+            </div>
+          </td>
+          <td class="px-4 py-3 text-center">
+            <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[9px] font-bold bg-${tc}-100 text-${tc}-700">${tl}</span>
+          </td>
+          <td class="px-4 py-3 text-center text-slate-500 font-mono">${m.Year}</td>
+          <td class="px-4 py-3 text-center font-bold text-slate-700">${m.Total}</td>
+          <td class="px-4 py-3 text-center">
+            <span class="font-bold ${m.Attended >= m.Total && m.Total > 0 ? 'text-emerald-600' : 'text-slate-700'}">${m.Attended}</span>
+          </td>
+          <td class="px-4 py-3 text-center">
+            <div class="flex items-center gap-2 justify-end">
+              <div class="w-16 h-1.5 rounded-full overflow-hidden bg-slate-100 flex-shrink-0">
+                <div class="h-full rounded-full" style="width:${barW}%;background:${barW>=80?'#10b981':barW>=60?'#f59e0b':'#f43f5e'}"></div>
+              </div>
+              <span class="inline-flex items-center justify-center w-14 px-1.5 py-0.5 rounded-full text-[9px] font-bold ${cls}">${m.Percent}%${r>0?' ('+r+')':''}</span>
+            </div>
+          </td>
+        </tr>`;
+    }).join('');
+}
+
+function renderOverviewChart(percent) {
+    const ctx = document.getElementById('overviewPieChart');
+    if (!ctx) return;
+    const attended = percent;
+    const missed   = Math.max(0, 100 - percent);
+    if (window._overviewPieChart) window._overviewPieChart.destroy();
+    window._overviewPieChart = new Chart(ctx.getContext('2d'), {
+        type: 'doughnut',
+        data: {
+            labels: ['เข้าร่วม', 'ขาด'],
+            datasets: [{ data: [attended, missed || 0.1], backgroundColor: ['#10b981', '#f1f5f9'], borderWidth: 0, hoverOffset: 4 }],
+        },
+        options: {
+            responsive: true, maintainAspectRatio: false, cutout: '72%',
+            plugins: { legend: { position: 'bottom', labels: { boxWidth: 8, usePointStyle: true, font: { size: 10, family: 'Kanit' } } } },
+        },
+    });
+}
+
+function switchOverviewYear(year) {
+    _overviewYear = parseInt(year);
+    _overviewData = null;
+    loadOverview(_overviewYear);
+}
+
+window.filterOverviewTable = function(typeFilter) {
+    if (_overviewData) renderOverviewTable(_overviewData.members, typeFilter);
+};
+
 // ─── Charts ───────────────────────────────────────────────────────────────────
 async function loadDashboardCharts() {
     try {
@@ -913,7 +1339,7 @@ async function loadDashboardCharts() {
         const ctxRank = document.getElementById('rankChart');
         if (ctxRank && byRank.length > 0) {
             const rankMap = { A: 0, B: 0, C: 0 };
-            byRank.forEach(r => rankMap[r.Rank] = r.Count);
+            byRank.forEach(r => rankMap[r.HazardRank] = r.Count);
             if (window._rankChart) window._rankChart.destroy();
             window._rankChart = new Chart(ctxRank.getContext('2d'), {
                 type: 'doughnut',

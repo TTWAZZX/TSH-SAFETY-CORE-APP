@@ -18,6 +18,90 @@ const upload = multer({
 // PART 1: Schedule & Stats
 // ==========================================
 
+// GET /api/patrol/my-monthly-plan?year=Y&month=M — personal plan for logged-in user
+router.get('/my-monthly-plan', async (req, res) => {
+    const { year, month } = req.query;
+    const employeeId = req.user.id;
+    if (!year || !month) return res.status(400).json({ success: false, message: 'year และ month จำเป็น' });
+    try {
+        // 1. Base team membership
+        const [[base]] = await db.query(`
+            SELECT tm.TeamID, tm.PatrolType,
+                   t.Name AS TeamName, t.PatrolGroup, t.Color
+            FROM   Patrol_Team_Members tm
+            JOIN   Patrol_Teams t ON t.id = tm.TeamID
+            WHERE  tm.EmployeeID = ?
+            LIMIT  1
+        `, [employeeId]);
+
+        if (!base) return res.json({ success: true, data: null }); // ไม่ได้อยู่ในทีม
+
+        // 2. Effective team override this month
+        const [[override]] = await db.query(`
+            SELECT mr.TeamID, t.Name AS TeamName, t.PatrolGroup, t.Color
+            FROM   Patrol_Member_Rotation mr
+            JOIN   Patrol_Teams t ON t.id = mr.TeamID
+            WHERE  mr.EmployeeID = ? AND mr.Year = ? AND mr.Month = ?
+        `, [employeeId, year, month]);
+
+        const team = override
+            ? { id: override.TeamID, name: override.TeamName, group: override.PatrolGroup, color: override.Color }
+            : { id: base.TeamID,     name: base.TeamName,     group: base.PatrolGroup,     color: base.Color };
+
+        // 3. Sessions for effective team this month
+        const [sessions] = await db.query(`
+            SELECT s.id, s.PatrolDate, s.PatrolRound, s.Status,
+                   a.Name AS AreaName, a.Code AS AreaCode
+            FROM   Patrol_Sessions s
+            LEFT JOIN Patrol_Areas a ON a.id = s.AreaID
+            WHERE  s.TeamID = ? AND YEAR(s.PatrolDate) = ? AND MONTH(s.PatrolDate) = ?
+            ORDER BY s.PatrolDate
+        `, [team.id, year, month]);
+
+        // 4. Required sessions based on PatrolType
+        const required = base.PatrolType === 'management'
+            ? sessions
+            : sessions.filter(s => s.PatrolRound === 2);
+
+        // 5. User attendance this month
+        const [attendance] = await db.query(`
+            SELECT * FROM Patrol_Attendance
+            WHERE  UserID = ? AND YEAR(PatrolDate) = ? AND MONTH(PatrolDate) = ?
+        `, [employeeId, year, month]);
+
+        // 6. Team roster for effective team this month
+        const [roster] = await db.query(`
+            SELECT tm.EmployeeID, tm.PatrolType, e.EmployeeName,
+                   COALESCE(mr.TeamID, tm.TeamID) AS EffectiveTeamID
+            FROM   Patrol_Team_Members tm
+            JOIN   Employees e ON e.EmployeeID = tm.EmployeeID
+            LEFT JOIN Patrol_Member_Rotation mr
+                   ON mr.EmployeeID = tm.EmployeeID AND mr.Year = ? AND mr.Month = ?
+            WHERE  COALESCE(mr.TeamID, tm.TeamID) = ?
+            ORDER BY FIELD(tm.PatrolType,'top','committee','management'), e.EmployeeName
+        `, [year, month, team.id]);
+
+        res.json({
+            success: true,
+            data: {
+                patrolType: base.PatrolType,
+                team,
+                sessions,
+                required,
+                attended: attendance.length,
+                roster,
+                compliance: {
+                    required: required.length,
+                    attended: attendance.length,
+                    done: attendance.length >= required.length,
+                },
+            },
+        });
+    } catch (err) {
+        res.status(500).json({ success: false, message: err.message });
+    }
+});
+
 router.get('/my-schedule', async (req, res) => {
     try {
         const { month, year } = req.query;
@@ -54,26 +138,23 @@ router.get('/attendance-stats', async (req, res) => {
 
 // FIX: was returning hardcoded mock data — now queries real DB
 router.get('/dashboard-stats', async (req, res) => {
-    try {
-        const [bySection] = await db.query(`
-            SELECT
-                Area AS Section,
-                COUNT(CASE WHEN CurrentStatus = 'Closed' THEN 1 END) AS Achieved,
-                COUNT(CASE WHEN CurrentStatus != 'Closed' THEN 1 END) AS OnProcess
-            FROM Patrol_Issues
-            GROUP BY Area
-            ORDER BY Achieved DESC
-        `);
-        const [byRank] = await db.query(`
-            SELECT HazardType AS Rank, COUNT(*) AS Count
-            FROM Patrol_Issues
-            GROUP BY HazardType
-            ORDER BY Count DESC
-        `);
-        res.json({ bySection, byRank });
-    } catch (error) {
-        res.status(500).json({ success: false, message: 'ไม่สามารถดึงข้อมูล dashboard ได้' });
-    }
+    const [bySection] = await db.query(`
+        SELECT Area AS Section,
+               COUNT(CASE WHEN CurrentStatus = 'Closed' THEN 1 END) AS Achieved,
+               COUNT(CASE WHEN CurrentStatus != 'Closed' THEN 1 END) AS OnProcess
+        FROM Patrol_Issues
+        GROUP BY Area
+        ORDER BY Achieved DESC
+    `).catch(e => { console.error('dashboard-stats bySection:', e.message); return [[]]; });
+
+    const [byRank] = await db.query(`
+        SELECT HazardType AS HazardRank, COUNT(*) AS Count
+        FROM Patrol_Issues
+        GROUP BY HazardType
+        ORDER BY Count DESC
+    `).catch(e => { console.error('dashboard-stats byRank:', e.message); return [[]]; });
+
+    res.json({ bySection: bySection || [], byRank: byRank || [] });
 });
 
 // ==========================================
@@ -246,11 +327,11 @@ router.get('/teams/:id/members', async (req, res) => {
     try {
         const [rows] = await db.query(`
             SELECT m.id, m.TeamID, m.EmployeeID, m.PatrolType,
-                   e.FirstName, e.LastName, e.Department, e.Position
+                   e.EmployeeName, e.Department, e.Position
             FROM   Patrol_Team_Members m
             LEFT JOIN Employees e ON e.EmployeeID = m.EmployeeID
             WHERE  m.TeamID = ?
-            ORDER BY m.PatrolType DESC, e.FirstName
+            ORDER BY m.PatrolType DESC, e.EmployeeName
         `, [req.params.id]);
         res.json({ success: true, data: rows });
     } catch (err) {
@@ -300,7 +381,198 @@ router.get('/areas', async (req, res) => {
 });
 
 // ==========================================
-// PART 7: Rotation
+// PART 7: Member Rotation (monthly team assignment per member)
+// ==========================================
+// SQL to create table (run once in DBeaver):
+// CREATE TABLE IF NOT EXISTS Patrol_Member_Rotation (
+//     id INT AUTO_INCREMENT PRIMARY KEY,
+//     EmployeeID VARCHAR(50) NOT NULL,
+//     TeamID INT NOT NULL,
+//     Year INT NOT NULL,
+//     Month INT NOT NULL,
+//     UNIQUE KEY uk_emp_yr_mo (EmployeeID, Year, Month),
+//     INDEX idx_team_yr_mo (TeamID, Year, Month)
+// ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+// GET /api/patrol/member-rotation?year=Y — all monthly assignments for the year
+router.get('/member-rotation', async (req, res) => {
+    const { year } = req.query;
+    if (!year) return res.status(400).json({ success: false, message: 'year จำเป็น' });
+    try {
+        const [base] = await db.query(`
+            SELECT tm.id, tm.EmployeeID, tm.TeamID, tm.PatrolType,
+                   e.EmployeeName,
+                   t.Name AS TeamName, t.PatrolGroup, t.Color
+            FROM   Patrol_Team_Members tm
+            JOIN   Employees e ON e.EmployeeID = tm.EmployeeID
+            JOIN   Patrol_Teams t ON t.id = tm.TeamID
+            ORDER BY t.PatrolGroup, t.id, tm.PatrolType, e.EmployeeName
+        `);
+        const [monthly] = await db.query(`
+            SELECT mr.EmployeeID, mr.TeamID, mr.Month,
+                   t.Name AS TeamName, t.PatrolGroup, t.Color
+            FROM   Patrol_Member_Rotation mr
+            JOIN   Patrol_Teams t ON t.id = mr.TeamID
+            WHERE  mr.Year = ?
+            ORDER BY mr.Month
+        `, [year]);
+        res.json({ success: true, base, monthly });
+    } catch (err) {
+        res.status(500).json({ success: false, message: err.message });
+    }
+});
+
+// POST /api/patrol/member-rotation — bulk upsert monthly member→team assignments
+router.post('/member-rotation', async (req, res) => {
+    const items = req.body;
+    if (!Array.isArray(items) || items.length === 0)
+        return res.status(400).json({ success: false, message: 'ส่ง array' });
+    const conn = await db.getConnection();
+    try {
+        await conn.beginTransaction();
+        for (const { EmployeeID, TeamID, Year, Month } of items) {
+            await conn.query(`
+                INSERT INTO Patrol_Member_Rotation (EmployeeID, TeamID, Year, Month)
+                VALUES (?,?,?,?)
+                ON DUPLICATE KEY UPDATE TeamID=VALUES(TeamID)
+            `, [EmployeeID, TeamID, Year, Month]);
+        }
+        await conn.commit();
+        res.json({ success: true, saved: items.length });
+    } catch (err) {
+        await conn.rollback();
+        res.status(500).json({ success: false, message: err.message });
+    } finally { conn.release(); }
+});
+
+// GET /api/patrol/monthly-report?year=Y&month=M — monthly grid report (all teams + members)
+router.get('/monthly-report', async (req, res) => {
+    const { year, month } = req.query;
+    if (!year || !month) return res.status(400).json({ success: false, message: 'year และ month จำเป็น' });
+    try {
+        // Sessions for the month
+        const [sessions] = await db.query(`
+            SELECT s.id, s.TeamID, s.PatrolDate, s.PatrolRound,
+                   t.Name AS TeamName, t.PatrolGroup, t.Color,
+                   a.Name AS AreaName, a.Code AS AreaCode
+            FROM   Patrol_Sessions s
+            JOIN   Patrol_Teams t ON t.id = s.TeamID
+            LEFT JOIN Patrol_Areas a ON a.id = s.AreaID
+            WHERE  YEAR(s.PatrolDate) = ? AND MONTH(s.PatrolDate) = ?
+            ORDER BY s.TeamID, s.PatrolDate
+        `, [year, month]);
+
+        // Members with effective team (rotation override or base)
+        const [members] = await db.query(`
+            SELECT tm.EmployeeID, tm.PatrolType,
+                   e.EmployeeName,
+                   COALESCE(mr.TeamID, tm.TeamID) AS EffectiveTeamID
+            FROM   Patrol_Team_Members tm
+            JOIN   Employees e ON e.EmployeeID = tm.EmployeeID
+            LEFT JOIN Patrol_Member_Rotation mr
+                   ON mr.EmployeeID = tm.EmployeeID AND mr.Year = ? AND mr.Month = ?
+            ORDER BY COALESCE(mr.TeamID, tm.TeamID),
+                     FIELD(tm.PatrolType,'top','committee','management'),
+                     e.EmployeeName
+        `, [year, month]);
+
+        // Build team map from sessions
+        const teamMap = {};
+        sessions.forEach(s => {
+            if (!teamMap[s.TeamID]) {
+                teamMap[s.TeamID] = {
+                    TeamID: s.TeamID, TeamName: s.TeamName,
+                    PatrolGroup: s.PatrolGroup, Color: s.Color,
+                    sessions: [], members: [],
+                };
+            }
+            teamMap[s.TeamID].sessions.push(s);
+        });
+
+        // Assign members to effective team
+        members.forEach(m => {
+            if (teamMap[m.EffectiveTeamID]) {
+                teamMap[m.EffectiveTeamID].members.push(m);
+            }
+        });
+
+        const teams = Object.values(teamMap).sort((a, b) => a.TeamID - b.TeamID);
+        res.json({ success: true, data: teams, year: parseInt(year), month: parseInt(month) });
+    } catch (err) {
+        res.status(500).json({ success: false, message: err.message });
+    }
+});
+
+// GET /api/patrol/member-schedule?year=Y — full annual schedule per member
+router.get('/member-schedule', async (req, res) => {
+    const { year } = req.query;
+    if (!year) return res.status(400).json({ success: false, message: 'year จำเป็น' });
+    try {
+        // 1. Base team members
+        const [members] = await db.query(`
+            SELECT tm.EmployeeID, tm.TeamID AS BaseTeamID, tm.PatrolType,
+                   e.EmployeeName, e.Department,
+                   t.Name AS BaseTeamName, t.PatrolGroup
+            FROM   Patrol_Team_Members tm
+            JOIN   Employees e ON e.EmployeeID = tm.EmployeeID
+            JOIN   Patrol_Teams t ON t.id = tm.TeamID
+            ORDER BY t.PatrolGroup, tm.PatrolType, e.EmployeeName
+        `);
+
+        // 2. Monthly team overrides
+        const [rotations] = await db.query(
+            'SELECT EmployeeID, TeamID, Month FROM Patrol_Member_Rotation WHERE Year = ?', [year]
+        );
+        const rotMap = {};
+        rotations.forEach(r => {
+            if (!rotMap[r.EmployeeID]) rotMap[r.EmployeeID] = {};
+            rotMap[r.EmployeeID][r.Month] = r.TeamID;
+        });
+
+        // 3. All sessions for the year with team + area info
+        const [sessions] = await db.query(`
+            SELECT s.TeamID, s.PatrolDate, s.PatrolRound,
+                   t.Name AS TeamName, t.Color AS TeamColor,
+                   a.Name AS AreaName, a.Code AS AreaCode
+            FROM   Patrol_Sessions s
+            LEFT JOIN Patrol_Teams t ON t.id = s.TeamID
+            LEFT JOIN Patrol_Areas a ON a.id = s.AreaID
+            WHERE  YEAR(s.PatrolDate) = ?
+            ORDER BY s.PatrolDate
+        `, [year]);
+
+        // sessMap[teamId][month] = [ session, ... ]
+        const sessMap = {};
+        sessions.forEach(s => {
+            const month = new Date(s.PatrolDate).getMonth() + 1;
+            if (!sessMap[s.TeamID]) sessMap[s.TeamID] = {};
+            if (!sessMap[s.TeamID][month]) sessMap[s.TeamID][month] = [];
+            sessMap[s.TeamID][month].push(s);
+        });
+
+        // 4. Build per-member annual schedule
+        const data = members.map(m => {
+            const months = Array.from({ length: 12 }, (_, i) => {
+                const month  = i + 1;
+                const teamId = (rotMap[m.EmployeeID] || {})[month] || m.BaseTeamID;
+                const all    = (sessMap[teamId] || {})[month] || [];
+                // top & committee → round 2 only; management → all rounds
+                const filtered = m.PatrolType === 'management'
+                    ? all
+                    : all.filter(s => s.PatrolRound === 2);
+                return { month, teamId, sessions: filtered };
+            });
+            return { ...m, months };
+        });
+
+        res.json({ success: true, data, year: parseInt(year) });
+    } catch (err) {
+        res.status(500).json({ success: false, message: err.message });
+    }
+});
+
+// ==========================================
+// PART 8: Area Rotation
 // ==========================================
 
 // GET /api/patrol/rotation?year=&month= — rotation ของเดือน (all teams)
@@ -394,14 +666,14 @@ router.post('/generate-sessions', async (req, res) => {
 
                     // ตรวจว่ามี session นี้แล้วหรือยัง (ป้องกัน duplicate)
                     const [exist] = await conn.query(
-                        'SELECT id FROM Patrol_Sessions WHERE ScheduledDate=? AND TeamID=?',
+                        'SELECT id FROM Patrol_Sessions WHERE PatrolDate=? AND TeamID=?',
                         [dateStr, rot.TeamID]
                     );
                     if (exist.length > 0) continue;
 
                     await conn.query(`
                         INSERT INTO Patrol_Sessions
-                            (ScheduledDate, TeamName, TeamID, AreaID, PatrolRound, Status)
+                            (PatrolDate, TeamName, TeamID, AreaID, PatrolRound, Status)
                         VALUES (?,?,?,?,?,'Pending')
                     `, [dateStr, rot.TeamName, rot.TeamID, rot.AreaID, round]);
                     created++;
@@ -425,14 +697,48 @@ router.get('/monthly-summary', async (req, res) => {
     if (!year || !month) return res.status(400).json({ success: false, message: 'year และ month จำเป็น' });
     try {
         const [sessions] = await db.query(`
-            SELECT s.*, t.Color AS TeamColor, a.Name AS AreaName, a.Code AS AreaCode
+            SELECT s.*, s.PatrolDate AS ScheduledDate,
+                   t.Color AS TeamColor, a.Name AS AreaName, a.Code AS AreaCode
             FROM   Patrol_Sessions s
             LEFT JOIN Patrol_Teams t ON t.id = s.TeamID
             LEFT JOIN Patrol_Areas a ON a.id = s.AreaID
-            WHERE  YEAR(s.ScheduledDate) = ? AND MONTH(s.ScheduledDate) = ?
-            ORDER BY s.ScheduledDate, s.TeamID
+            WHERE  YEAR(s.PatrolDate) = ? AND MONTH(s.PatrolDate) = ?
+            ORDER BY s.PatrolDate, s.TeamID
         `, [year, month]);
         res.json({ success: true, data: sessions });
+    } catch (err) {
+        res.status(500).json({ success: false, message: err.message });
+    }
+});
+
+// PUT /api/patrol/sessions/:id — แก้ไขวันที่ / area / status
+router.put('/sessions/:id', async (req, res) => {
+    const { PatrolDate, AreaID, Status } = req.body;
+    if (!PatrolDate && !AreaID && !Status)
+        return res.status(400).json({ success: false, message: 'ไม่มีข้อมูลที่ต้องการแก้ไข' });
+    try {
+        const sets  = [];
+        const vals  = [];
+        if (PatrolDate) { sets.push('PatrolDate = ?'); vals.push(PatrolDate); }
+        if (AreaID)     { sets.push('AreaID = ?');     vals.push(AreaID); }
+        if (Status)     { sets.push('Status = ?');     vals.push(Status); }
+        vals.push(req.params.id);
+        const [result] = await db.query(
+            `UPDATE Patrol_Sessions SET ${sets.join(', ')} WHERE id = ?`, vals
+        );
+        if (result.affectedRows === 0) return res.status(404).json({ success: false, message: 'ไม่พบ session' });
+        res.json({ success: true, message: 'แก้ไข session เรียบร้อย' });
+    } catch (err) {
+        res.status(500).json({ success: false, message: err.message });
+    }
+});
+
+// DELETE /api/patrol/sessions/:id — ลบ session (Admin)
+router.delete('/sessions/:id', async (req, res) => {
+    try {
+        const [result] = await db.query('DELETE FROM Patrol_Sessions WHERE id = ?', [req.params.id]);
+        if (result.affectedRows === 0) return res.status(404).json({ success: false, message: 'ไม่พบ session' });
+        res.json({ success: true, message: 'ลบ session เรียบร้อย' });
     } catch (err) {
         res.status(500).json({ success: false, message: err.message });
     }
@@ -463,5 +769,93 @@ function getWednesdaysInMonth(year, month) {
     }
     return result; // [พุธ1, พุธ2, พุธ3, พุธ4]
 }
+
+// GET /api/patrol/attendance-overview?year=Y — ภาพรวมการเข้าร่วมรายบุคคลทั้งปี
+router.get('/attendance-overview', async (req, res) => {
+    const year = parseInt(req.query.year) || new Date().getFullYear();
+    try {
+        // 1. สมาชิกทุกคนพร้อม PatrolType และ TeamID หลัก
+        const [members] = await db.query(`
+            SELECT tm.EmployeeID, e.EmployeeName AS Name, tm.PatrolType, tm.TeamID
+            FROM Patrol_Team_Members tm
+            JOIN Employees e ON e.EmployeeID = tm.EmployeeID
+            ORDER BY FIELD(tm.PatrolType,'top','committee','management'), e.EmployeeName
+        `);
+
+        // 2. Sessions ทั้งปี
+        const [sessions] = await db.query(`
+            SELECT id, TeamID, PatrolRound
+            FROM Patrol_Sessions
+            WHERE YEAR(PatrolDate) = ?
+        `, [year]);
+
+        // 3. Monthly overrides (member rotation)
+        const [rotations] = await db.query(`
+            SELECT EmployeeID, TeamID, Month
+            FROM Patrol_Member_Rotation
+            WHERE Year = ?
+        `, [year]);
+        const rotMap = {};
+        rotations.forEach(r => {
+            if (!rotMap[r.EmployeeID]) rotMap[r.EmployeeID] = {};
+            rotMap[r.EmployeeID][r.Month] = r.TeamID;
+        });
+
+        // 4. Attendance counts ทั้งปี
+        const [attendance] = await db.query(`
+            SELECT UserID, COUNT(*) AS Attended
+            FROM Patrol_Attendance
+            WHERE YEAR(PatrolDate) = ?
+            GROUP BY UserID
+        `, [year]);
+        const attendMap = {};
+        attendance.forEach(a => { attendMap[a.UserID] = parseInt(a.Attended); });
+
+        // 5. Sessions จัดกลุ่มตาม TeamID × Month (สำหรับ rotation-aware count)
+        const [sessWithMonth] = await db.query(`
+            SELECT id, TeamID, PatrolRound, MONTH(PatrolDate) AS Month
+            FROM Patrol_Sessions
+            WHERE YEAR(PatrolDate) = ?
+        `, [year]);
+
+        // คำนวณ required sessions ต่อสมาชิก (คำนึง rotation)
+        const result = members.map(m => {
+            let required = 0;
+            for (let mo = 1; mo <= 12; mo++) {
+                const effectiveTeamId = (rotMap[m.EmployeeID]?.[mo]) || m.TeamID;
+                const monthSess = sessWithMonth.filter(s => s.TeamID === effectiveTeamId && s.Month === mo);
+                if (m.PatrolType === 'management') {
+                    required += monthSess.length;
+                } else {
+                    // top / committee — รอบ 2 เท่านั้น
+                    required += monthSess.filter(s => s.PatrolRound === 2).length;
+                }
+            }
+            const attended = attendMap[m.EmployeeID] || 0;
+            const percent  = required > 0 ? Math.round((attended / required) * 100) : 0;
+            return { EmployeeID: m.EmployeeID, Name: m.Name, PatrolType: m.PatrolType, Year: year, Total: required, Attended: attended, Percent: percent };
+        });
+
+        // Grand totals
+        const grandTotal    = result.reduce((s, r) => s + r.Total, 0);
+        const grandAttended = result.reduce((s, r) => s + r.Attended, 0);
+        const grandPercent  = grandTotal > 0 ? Math.round((grandAttended / grandTotal) * 100) : 0;
+
+        const [latest] = await db.query(
+            'SELECT MAX(PatrolDate) AS LatestDate FROM Patrol_Attendance WHERE YEAR(PatrolDate) = ?',
+            [year]
+        );
+
+        res.json({
+            success: true,
+            data: {
+                members: result,
+                summary: { totalSessions: grandTotal, totalAttended: grandAttended, percent: grandPercent, latestDate: latest[0]?.LatestDate || null, year },
+            },
+        });
+    } catch (err) {
+        res.status(500).json({ success: false, message: err.message });
+    }
+});
 
 module.exports = router;

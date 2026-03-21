@@ -4,6 +4,7 @@ import { API } from '../api.js';
 // ─── Global State ─────────────────────────────────────────────────────────────
 let _currentTab   = 'dashboard';
 let _calInst      = null;
+let _viewMode     = 'list';
 
 // Employee tab state
 let _empCache     = [];
@@ -20,8 +21,6 @@ let _auditPage    = 1;
 let _auditTotal   = 0;
 const AUDIT_LIMIT  = 50;
 
-// Scheduler temp state
-let _allEmpCache  = [];
 
 // Organization tab state
 let _orgDepts      = [];   // { id, Name, is_safety_core, unit_count }
@@ -109,8 +108,6 @@ export async function loadAdminPage() {
     window.deleteMasterData    = deleteMasterData;
     window.editMasterData      = editMasterData;
     window.deleteSchedule      = deleteSchedule;
-    window.filterEmployeesInTeam = filterEmployeesInTeam;
-    window.updateSelectedCount = updateSelectedCount;
     window.loadSchedules       = loadSchedules;
     window.toggleViewMode      = toggleViewMode;
 
@@ -1145,98 +1142,41 @@ async function renderScheduler(container) {
     const yearOpts  = [cy-1,cy,cy+1].map(y=>`<option value="${y}" ${y===cy?'selected':''}>${y}</option>`).join('');
 
     container.innerHTML = `
-    <div class="grid grid-cols-1 lg:grid-cols-12 gap-6 animate-fade-in">
-        <!-- Left panel -->
-        <div class="lg:col-span-4 space-y-4">
-            <!-- Single date form -->
-            <div class="bg-white rounded-xl p-5 shadow-sm border border-slate-200">
-                <h3 class="font-bold text-slate-800 mb-4 text-sm border-b pb-2 flex items-center gap-2">
-                    <svg class="w-4 h-4 text-indigo-500" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/></svg>
-                    สร้างตารางเวร (ทีละวัน)
-                </h3>
-                <form id="form-scheduler" onsubmit="return false;" class="space-y-4">
-                    <div>
-                        <label class="block text-xs font-bold text-slate-500 uppercase mb-1.5">วันที่</label>
-                        <input type="date" name="ScheduledDate" class="form-input w-full rounded-lg border-slate-300 text-sm" required>
-                    </div>
-                    <div>
-                        <label class="block text-xs font-bold text-slate-500 uppercase mb-1.5">เลือกทีม</label>
-                        <div id="team-allocator-container" class="space-y-2 max-h-72 overflow-y-auto pr-1 custom-scrollbar">
-                            <div class="text-xs text-slate-400 text-center py-4">กำลังโหลด...</div>
-                        </div>
-                    </div>
-                    <button id="btn-save-schedule" class="w-full bg-indigo-600 hover:bg-indigo-700 text-white py-2.5 rounded-xl font-bold text-sm shadow shadow-indigo-200 transition-all">
-                        บันทึกตารางเวร
-                    </button>
-                </form>
+    <div class="space-y-4 animate-fade-in">
+        <!-- Filter bar -->
+        <div class="flex flex-col sm:flex-row justify-between items-center gap-3 bg-white p-3 rounded-xl border border-slate-200 shadow-sm">
+            <div class="flex items-center gap-2">
+                <select id="filter-month" onchange="loadSchedules()" class="form-select text-sm border-slate-200 rounded-lg py-1.5 pl-3 pr-8 font-medium text-slate-700 bg-slate-50">${monthOpts}</select>
+                <select id="filter-year"  onchange="loadSchedules()" class="form-select text-sm border-slate-200 rounded-lg py-1.5 pl-3 pr-8 font-medium text-slate-700 bg-slate-50">${yearOpts}</select>
+                <button onclick="window.printScheduleReport()" class="p-2 text-slate-400 hover:text-slate-700 hover:bg-slate-100 rounded-lg transition-colors" title="พิมพ์รายงาน">
+                    <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 17h2a2 2 0 002-2v-4a2 2 0 00-2-2H5a2 2 0 00-2 2v4a2 2 0 002 2h2m2 4h6a2 2 0 002-2v-4a2 2 0 00-2-2H9a2 2 0 00-2 2v4a2 2 0 002 2zm8-12V5a2 2 0 00-2-2H9a2 2 0 00-2 2v4h10z"/></svg>
+                </button>
+                <button onclick="window._ptDownloadMonthlyPDF()" class="flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold rounded-lg text-white shadow-sm" style="background:linear-gradient(135deg,#166534,#15803d)" title="ดาวน์โหลด PDF ตารางรายเดือน">
+                    <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/></svg>
+                    PDF รายเดือน
+                </button>
             </div>
-
-            <!-- Bulk create form -->
-            <div class="bg-white rounded-xl p-5 shadow-sm border border-slate-200">
-                <h3 class="font-bold text-slate-800 mb-4 text-sm border-b pb-2 flex items-center gap-2">
-                    <svg class="w-4 h-4 text-emerald-500" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"/></svg>
-                    สร้างตารางเวร (หลายวัน)
-                </h3>
-                <div class="space-y-3 text-sm">
-                    <div class="grid grid-cols-2 gap-2">
-                        <div>
-                            <label class="block text-xs font-bold text-slate-500 uppercase mb-1">วันเริ่ม</label>
-                            <input type="date" id="bulk-start" class="form-input w-full rounded-lg border-slate-300 text-sm">
-                        </div>
-                        <div>
-                            <label class="block text-xs font-bold text-slate-500 uppercase mb-1">วันสิ้นสุด</label>
-                            <input type="date" id="bulk-end" class="form-input w-full rounded-lg border-slate-300 text-sm">
-                        </div>
-                    </div>
-                    <div>
-                        <label class="block text-xs font-bold text-slate-500 uppercase mb-1.5">วันในสัปดาห์</label>
-                        <div class="flex flex-wrap gap-1.5">
-                            ${['อา','จ','อ','พ','พฤ','ศ','ส'].map((d,i)=>`
-                            <label class="flex items-center gap-1 text-xs cursor-pointer">
-                                <input type="checkbox" class="bulk-dow w-3.5 h-3.5 text-emerald-600 rounded" value="${i}" ${i===1||i===3||i===5?'checked':''}>
-                                ${d}
-                            </label>`).join('')}
-                        </div>
-                    </div>
-                    <div>
-                        <label class="block text-xs font-bold text-slate-500 uppercase mb-1.5">ทีม (เลือกได้หลายทีม)</label>
-                        <div id="bulk-team-list" class="space-y-1 max-h-32 overflow-y-auto custom-scrollbar text-xs text-slate-400">กำลังโหลด...</div>
-                    </div>
-                    <div id="bulk-preview" class="hidden bg-slate-50 rounded-lg p-2 text-xs text-slate-600 border border-slate-200"></div>
-                    <button id="btn-bulk-preview" class="w-full bg-slate-100 hover:bg-slate-200 text-slate-700 py-2 rounded-lg font-medium text-xs transition-all">ดูตัวอย่าง</button>
-                    <button id="btn-bulk-save" class="w-full bg-emerald-600 hover:bg-emerald-700 text-white py-2.5 rounded-xl font-bold text-sm shadow shadow-emerald-200 transition-all hidden">
-                        สร้างตารางเวรทั้งหมด
-                    </button>
-                </div>
+            <div class="flex bg-slate-100 p-1 rounded-lg">
+                <button onclick="toggleViewMode('list')" id="btn-view-list" class="px-3 py-1.5 rounded-md text-xs font-bold flex items-center gap-1.5 transition-all bg-white shadow-sm text-slate-800">
+                    <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 10h16M4 14h16M4 18h16"/></svg> List
+                </button>
+                <button onclick="toggleViewMode('calendar')" id="btn-view-calendar" class="px-3 py-1.5 rounded-md text-xs font-bold flex items-center gap-1.5 transition-all text-slate-500 hover:text-slate-700">
+                    <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"/></svg> Calendar
+                </button>
             </div>
         </div>
-
-        <!-- Right panel -->
-        <div class="lg:col-span-8">
-            <div class="flex flex-col sm:flex-row justify-between items-center mb-4 gap-3 bg-white p-3 rounded-xl border border-slate-200 shadow-sm">
-                <div class="flex items-center gap-2">
-                    <select id="filter-month" onchange="loadSchedules()" class="form-select text-sm border-slate-200 rounded-lg py-1.5 pl-3 pr-8 font-medium text-slate-700 bg-slate-50">${monthOpts}</select>
-                    <select id="filter-year"  onchange="loadSchedules()" class="form-select text-sm border-slate-200 rounded-lg py-1.5 pl-3 pr-8 font-medium text-slate-700 bg-slate-50">${yearOpts}</select>
-                    <button onclick="window.printScheduleReport()" class="p-2 text-slate-400 hover:text-slate-700 hover:bg-slate-100 rounded-lg transition-colors" title="พิมพ์รายงาน">
-                        <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 17h2a2 2 0 002-2v-4a2 2 0 00-2-2H5a2 2 0 00-2 2v4a2 2 0 002 2h2m2 4h6a2 2 0 002-2v-4a2 2 0 00-2-2H9a2 2 0 00-2 2v4a2 2 0 002 2zm8-12V5a2 2 0 00-2-2H9a2 2 0 00-2 2v4h10z"/></svg>
-                    </button>
-                </div>
-                <div class="flex bg-slate-100 p-1 rounded-lg">
-                    <button onclick="toggleViewMode('list')" id="btn-view-list" class="px-3 py-1.5 rounded-md text-xs font-bold flex items-center gap-1.5 transition-all bg-white shadow-sm text-slate-800">
-                        <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 10h16M4 14h16M4 18h16"/></svg> List
-                    </button>
-                    <button onclick="toggleViewMode('calendar')" id="btn-view-calendar" class="px-3 py-1.5 rounded-md text-xs font-bold flex items-center gap-1.5 transition-all text-slate-500 hover:text-slate-700">
-                        <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"/></svg> Calendar
-                    </button>
-                </div>
+        <!-- Info note -->
+        <div class="bg-blue-50 border border-blue-200 rounded-xl px-4 py-2.5 text-xs text-blue-700 flex items-center gap-2">
+            <svg class="w-4 h-4 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+            Sessions สร้างอัตโนมัติจาก Rotation Matrix ด้านล่าง — กำหนด Rotation แล้วกดปุ่ม "สร้าง Sessions อัตโนมัติ"
+        </div>
+        <!-- List / Calendar -->
+        <div id="scheduler-content-wrapper">
+            <div id="list-view-container" class="space-y-3 animate-fade-in">
+                <div class="py-12 text-center text-slate-400 bg-slate-50 rounded-xl border border-dashed border-slate-300">กำลังโหลด...</div>
             </div>
-            <div id="scheduler-content-wrapper">
-                <div id="list-view-container" class="space-y-3 animate-fade-in">
-                    <div class="py-12 text-center text-slate-400 bg-slate-50 rounded-xl border border-dashed border-slate-300">กำลังโหลด...</div>
-                </div>
-                <div id="calendar-view-container" class="hidden bg-white p-4 rounded-xl border border-slate-200 shadow-sm">
-                    <div id="calendar"></div>
-                </div>
+            <div id="calendar-view-container" class="hidden bg-white p-4 rounded-xl border border-slate-200 shadow-sm">
+                <div id="calendar"></div>
             </div>
         </div>
     </div>
@@ -1246,7 +1186,7 @@ async function renderScheduler(container) {
         <div class="flex items-center justify-between">
             <p class="text-xs font-bold text-slate-400 uppercase tracking-widest flex items-center gap-2">
                 <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0z"/></svg>
-                จัดการทีม Top &amp; Management Safety Patrol
+                จัดการทีม Safety Patrol (Top / คปอ. / Management)
             </p>
             <button onclick="window._ptAddTeam()" class="flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-bold text-white shadow-sm" style="background:linear-gradient(135deg,#065f46,#0d9488)">
                 <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/></svg>
@@ -1275,6 +1215,10 @@ async function renderScheduler(container) {
                     <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg>
                     โหลด
                 </button>
+                <button onclick="window._ptAutoFill()" class="flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold rounded-lg bg-violet-600 hover:bg-violet-700 text-white transition-colors shadow-sm">
+                    <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg>
+                    Auto-fill ทั้งปี
+                </button>
                 <button onclick="window._ptSaveRotation()" class="flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white transition-colors shadow-sm">
                     <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg>
                     บันทึก Rotation
@@ -1292,14 +1236,70 @@ async function renderScheduler(container) {
                 </div>
             </div>
         </div>
+    </div>
+
+    <!-- ══ SECTION: Member Rotation Matrix ══════════════════════════════════ -->
+    <div class="mt-8 space-y-4 animate-fade-in">
+        <div class="flex flex-wrap items-center justify-between gap-3">
+            <p class="text-xs font-bold text-slate-400 uppercase tracking-widest flex items-center gap-2">
+                <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0z"/></svg>
+                ตารางสลับสมาชิกรายเดือน
+            </p>
+            <div class="flex items-center gap-2">
+                <button onclick="window._ptAutoFillMembers()" class="flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold rounded-lg bg-violet-600 hover:bg-violet-700 text-white transition-colors shadow-sm">
+                    <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg>
+                    Auto-fill สมาชิก
+                </button>
+                <button onclick="window._ptSaveMemberRotation()" class="flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white transition-colors shadow-sm">
+                    <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg>
+                    บันทึก
+                </button>
+            </div>
+        </div>
+        <div class="card overflow-x-auto">
+            <div id="pt-member-rotation-wrap">
+                <div class="flex justify-center py-10">
+                    <div class="animate-spin rounded-full h-8 w-8 border-4 border-emerald-500 border-t-transparent"></div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- ══ SECTION: Member Schedule Report ══════════════════════════════════ -->
+    <div class="mt-8 space-y-4 animate-fade-in">
+        <div class="flex flex-wrap items-center justify-between gap-3">
+            <div>
+                <p class="text-xs font-bold text-slate-400 uppercase tracking-widest flex items-center gap-2">
+                    <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/></svg>
+                    รายงานตารางเดินตรวจรายบุคคล
+                </p>
+                <p class="text-[10px] text-slate-400 mt-0.5 ml-6">แสดงวันที่เดินของแต่ละคนทั้งปี · ส่งออก PDF สำหรับใช้งานองค์กร</p>
+            </div>
+            <div class="flex items-center gap-2">
+                <button onclick="window._ptLoadMemberSchedule()" class="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-50 transition-colors">
+                    <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg>
+                    โหลดข้อมูล
+                </button>
+                <button onclick="window._ptDownloadSchedulePDF()" class="flex items-center gap-1.5 px-4 py-1.5 text-xs font-bold rounded-lg text-white shadow-sm transition-colors" style="background:linear-gradient(135deg,#0f172a,#1e40af)">
+                    <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/></svg>
+                    ดาวน์โหลด PDF
+                </button>
+            </div>
+        </div>
+        <div class="card overflow-hidden">
+            <div id="pt-schedule-report-wrap">
+                <div class="text-center py-12 text-slate-400 text-sm">
+                    <svg class="w-10 h-10 mx-auto mb-3 opacity-30" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/></svg>
+                    กด "โหลดข้อมูล" เพื่อดูรายงาน
+                </div>
+            </div>
+        </div>
     </div>`;
 
-    await Promise.all([loadTeamsAndEmployees(), loadSchedules()]);
-    setupSchedulerEvents();
-    setupBulkEvents();
+    await loadSchedules();
 
     // Load patrol team sections
-    await Promise.all([_ptLoadTeams(), _ptLoadRotation()]);
+    await Promise.all([_ptLoadTeams(), _ptLoadRotation(), _ptLoadMemberRotation()]);
 }
 
 window.toggleViewMode = (mode) => {
@@ -1322,80 +1322,26 @@ window.toggleViewMode = (mode) => {
     }
 };
 
-async function loadTeamsAndEmployees() {
-    const tc = document.getElementById('team-allocator-container');
-    const bl = document.getElementById('bulk-team-list');
-    try {
-        const [teamsRes, empsRes] = await Promise.all([API.get('/master/teams'), API.get('/employees')]);
-        _allEmpCache = empsRes?.data || [];
-        const teams  = teamsRes?.data || [];
-        if (!tc) return;
-        if (teams.length === 0) { tc.innerHTML = `<div class="text-xs text-slate-400 text-center py-4">ไม่มีทีม</div>`; return; }
-        tc.innerHTML = teams.map(team => {
-            const safe = team.Name.replace(/\s+/g, '-').replace(/[^a-zA-Z0-9-]/g,'_');
-            return `
-            <div class="border border-slate-200 rounded-lg overflow-hidden bg-slate-50 team-card" data-team-name="${team.Name}" data-team-id="${safe}">
-                <div class="p-2.5 bg-white flex items-center justify-between cursor-pointer" onclick="document.getElementById('body-${safe}').classList.toggle('hidden');">
-                    <div class="flex items-center gap-2">
-                        <input type="checkbox" class="team-checkbox w-4 h-4 text-indigo-600 rounded" value="${team.Name}" onclick="event.stopPropagation()">
-                        <span class="font-semibold text-slate-700 text-xs">${team.Name}</span>
-                        <span id="count-badge-${safe}" class="text-[10px] bg-indigo-100 text-indigo-600 px-1.5 py-0.5 rounded-full hidden">0</span>
-                    </div>
-                    <svg class="w-3.5 h-3.5 text-slate-400" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/></svg>
-                </div>
-                <div id="body-${safe}" class="hidden border-t border-slate-100 bg-white p-2">
-                    <input type="text" placeholder="ค้นหา..." class="w-full text-xs border-slate-200 rounded mb-1.5 px-2 py-1" onkeyup="filterEmployeesInTeam(this,'${safe}')">
-                    <div class="max-h-32 overflow-y-auto space-y-0.5 custom-scrollbar member-list-${safe}">
-                        ${_allEmpCache.map(emp => `
-                        <label class="flex items-center gap-2 p-1 hover:bg-slate-50 rounded cursor-pointer">
-                            <input type="checkbox" name="members-${safe}" value="${emp.EmployeeID}" class="w-3 h-3 text-indigo-500 rounded" onchange="updateSelectedCount('${safe}')">
-                            <span class="text-[11px] truncate">${emp.EmployeeName}</span>
-                        </label>`).join('')}
-                    </div>
-                </div>
-            </div>`;
-        }).join('');
-        // populate bulk team list
-        if (bl) bl.innerHTML = teams.map(t => `
-            <label class="flex items-center gap-2 p-1 hover:bg-slate-50 rounded cursor-pointer text-xs text-slate-700">
-                <input type="checkbox" class="bulk-team-cb w-3.5 h-3.5 text-emerald-600 rounded" value="${t.Name}" checked>
-                ${t.Name}
-            </label>`).join('');
-    } catch { if (tc) tc.innerHTML = `<div class="text-xs text-red-400 text-center py-2">โหลดทีมไม่ได้</div>`; }
-}
-
-window.updateSelectedCount = (safe) => {
-    const cnt = document.querySelectorAll(`input[name="members-${safe}"]:checked`).length;
-    const badge = document.getElementById(`count-badge-${safe}`);
-    const cb    = document.querySelector(`.team-card[data-team-id="${safe}"] .team-checkbox`);
-    if (badge) { badge.textContent = cnt; cnt > 0 ? badge.classList.remove('hidden') : badge.classList.add('hidden'); }
-    if (cb && cnt > 0) cb.checked = true;
-};
-window.filterEmployeesInTeam = (input, safe) => {
-    const q = input.value.toLowerCase();
-    document.querySelectorAll(`.member-list-${safe} label`).forEach(l => {
-        l.style.display = l.textContent.toLowerCase().includes(q) ? 'flex' : 'none';
-    });
-};
 
 async function loadSchedules() {
     const lc    = document.getElementById('list-view-container');
     const month = document.getElementById('filter-month')?.value;
     const year  = document.getElementById('filter-year')?.value;
     try {
-        const res  = await API.get(`/admin/schedules?month=${month}&year=${year}`);
+        const res  = await API.get(`/patrol/monthly-summary?month=${month}&year=${year}`);
         const data = res?.data || [];
         if (!lc) return;
         if (data.length === 0) {
-            lc.innerHTML = `<div class="text-center py-16 text-slate-400 border border-dashed rounded-xl bg-slate-50 text-sm">ไม่มีกำหนดการในเดือนนี้</div>`;
+            lc.innerHTML = `<div class="text-center py-16 text-slate-400 border border-dashed rounded-xl bg-slate-50 text-sm">ไม่มีกำหนดการในเดือนนี้ — กำหนด Rotation แล้วกดสร้าง Sessions</div>`;
         } else {
             const grouped = data.reduce((acc, cur) => {
                 const d = (cur.ScheduledDate||'').split('T')[0];
                 if (!acc[d]) acc[d] = [];
                 acc[d].push(cur); return acc;
             }, {});
-            const statusColor = { Pending:'bg-amber-100 text-amber-700', Completed:'bg-emerald-100 text-emerald-700', Missed:'bg-red-100 text-red-600' };
-            lc.innerHTML = Object.entries(grouped).sort((a,b)=>new Date(b[0])-new Date(a[0])).map(([date,items])=>{
+            const statusBg  = { Pending:'bg-amber-100 text-amber-700', Completed:'bg-emerald-100 text-emerald-700', Missed:'bg-red-100 text-red-600' };
+            const roundLabel = { 1: 'รอบ 1', 2: 'รอบ 2' };
+            lc.innerHTML = Object.entries(grouped).sort((a,b)=>new Date(a[0])-new Date(b[0])).map(([date,items])=>{
                 const dObj = new Date(date);
                 return `
                 <div class="bg-white p-4 rounded-xl border border-slate-200 shadow-sm">
@@ -1411,16 +1357,26 @@ async function loadSchedules() {
                     </div>
                     <div class="space-y-1.5">
                         ${items.map(item => {
-                            const sc = statusColor[item.Status] || 'bg-slate-100 text-slate-500';
+                            const sc    = statusBg[item.Status] || 'bg-slate-100 text-slate-500';
+                            const color = item.TeamColor || '#6366f1';
+                            const round = roundLabel[item.PatrolRound] || '';
                             return `
-                            <div class="bg-slate-50 p-2 rounded-lg border border-slate-100 flex justify-between items-center">
+                            <div class="bg-slate-50 p-2.5 rounded-lg border border-slate-100 flex justify-between items-center gap-2">
                                 <div class="flex items-center gap-2 flex-1 min-w-0">
-                                    <span class="text-[10px] font-bold px-2 py-0.5 rounded-full ${sc} shrink-0">${item.Status||'Pending'}</span>
-                                    <span class="font-semibold text-xs text-slate-700 truncate">${item.TeamName}</span>
+                                    <span class="w-2.5 h-2.5 rounded-full flex-shrink-0" style="background:${color}"></span>
+                                    <span class="font-semibold text-xs text-slate-700 truncate">${item.TeamName||'-'}</span>
+                                    ${item.AreaName ? `<span class="text-[10px] text-slate-400 truncate hidden sm:inline">${item.AreaName}</span>` : ''}
                                 </div>
-                                <button onclick="deleteSchedule(${item.ScheduleID})" class="text-slate-300 hover:text-red-500 p-1 transition-colors shrink-0">
-                                    <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg>
-                                </button>
+                                <div class="flex items-center gap-1.5 flex-shrink-0">
+                                    ${round ? `<span class="text-[10px] font-bold px-1.5 py-0.5 rounded bg-slate-200 text-slate-600">${round}</span>` : ''}
+                                    <span class="text-[10px] font-bold px-2 py-0.5 rounded-full ${sc}">${item.Status||'Pending'}</span>
+                                    <button onclick="window.editSchedule(${item.id},'${(item.ScheduledDate||'').split('T')[0]}','${item.TeamName||''}','${item.AreaName||''}',${item.PatrolRound||1})" class="text-slate-300 hover:text-blue-500 p-1 transition-colors" title="แก้ไขวันที่">
+                                        <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"/></svg>
+                                    </button>
+                                    <button onclick="deleteSchedule(${item.id})" class="text-slate-300 hover:text-red-500 p-1 transition-colors" title="ลบ">
+                                        <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg>
+                                    </button>
+                                </div>
                             </div>`;
                         }).join('')}
                     </div>
@@ -1434,14 +1390,17 @@ async function loadSchedules() {
 function initCalendar(eventsData) {
     const el = document.getElementById('calendar');
     if (!el || !window.FullCalendar) return;
-    const colorMap = { Pending:'#f59e0b', Completed:'#10b981', Missed:'#ef4444' };
-    const events = eventsData.map(item => ({
-        title: item.TeamName,
-        start: (item.ScheduledDate||'').split('T')[0],
-        backgroundColor: colorMap[item.Status] || '#6366f1',
-        borderColor:     colorMap[item.Status] || '#4f46e5',
-        extendedProps: { status: item.Status, id: item.ScheduleID },
-    }));
+    const statusColor = { Pending:'#f59e0b', Completed:'#10b981', Missed:'#ef4444' };
+    const events = eventsData.map(item => {
+        const bg = item.TeamColor || statusColor[item.Status] || '#6366f1';
+        return {
+            title: item.TeamName + (item.AreaName ? ` · ${item.AreaName}` : ''),
+            start: (item.ScheduledDate||'').split('T')[0],
+            backgroundColor: bg,
+            borderColor:     bg,
+            extendedProps: { status: item.Status, id: item.id },
+        };
+    });
     if (_calInst) { _calInst.destroy(); _calInst = null; }
     _calInst = new FullCalendar.Calendar(el, {
         initialView: 'dayGridMonth',
@@ -1456,87 +1415,50 @@ function initCalendar(eventsData) {
     _calInst.render();
 }
 
-function setupSchedulerEvents() {
-    const btn  = document.getElementById('btn-save-schedule');
-    const form = document.getElementById('form-scheduler');
-    if (!btn || !form) return;
-    const nb = btn.cloneNode(true);
-    btn.parentNode.replaceChild(nb, btn);
-    nb.onclick = async () => {
-        const date = form.querySelector('input[name="ScheduledDate"]')?.value;
-        if (!date) { showToast('กรุณาเลือกวันที่', 'error'); return; }
-        const teams = [];
-        document.querySelectorAll('.team-card').forEach(card => {
-            const cb = card.querySelector('.team-checkbox');
-            if (cb?.checked) teams.push(cb.value);
-        });
-        if (teams.length === 0) { showToast('กรุณาเลือกทีมอย่างน้อย 1 ทีม', 'error'); return; }
-        const orig = nb.innerHTML;
-        nb.disabled = true; nb.textContent = 'กำลังบันทึก...';
-        try {
-            await API.post('/admin/schedule/create', { ScheduledDate: date, Teams: teams });
-            showToast('สร้างตารางเวรสำเร็จ', 'success');
-            form.querySelector('input[name="ScheduledDate"]').value = '';
-            document.querySelectorAll('.team-checkbox').forEach(c => c.checked = false);
-            document.querySelectorAll('[id^="count-badge-"]').forEach(e => e.classList.add('hidden'));
-            loadSchedules();
-        } catch (err) { showError(err.message); }
-        finally { nb.disabled = false; nb.innerHTML = orig; }
-    };
-}
-
-function setupBulkEvents() {
-    let _bulkDates = [];
-    document.getElementById('btn-bulk-preview')?.addEventListener('click', () => {
-        const start  = document.getElementById('bulk-start')?.value;
-        const end    = document.getElementById('bulk-end')?.value;
-        const dows   = [...document.querySelectorAll('.bulk-dow:checked')].map(c => +c.value);
-        const teams  = [...document.querySelectorAll('.bulk-team-cb:checked')].map(c => c.value);
-        if (!start || !end) { showToast('กรุณาเลือกช่วงวันที่', 'error'); return; }
-        if (dows.length === 0) { showToast('กรุณาเลือกวันในสัปดาห์', 'error'); return; }
-        if (teams.length === 0) { showToast('กรุณาเลือกทีม', 'error'); return; }
-        _bulkDates = [];
-        const cur = new Date(start);
-        const fin = new Date(end);
-        while (cur <= fin) {
-            if (dows.includes(cur.getDay())) _bulkDates.push(cur.toISOString().split('T')[0]);
-            cur.setDate(cur.getDate() + 1);
-        }
-        const preview = document.getElementById('bulk-preview');
-        const saveBtn = document.getElementById('btn-bulk-save');
-        if (_bulkDates.length === 0) {
-            preview.textContent = 'ไม่มีวันตรงกับเงื่อนไข';
-        } else {
-            preview.innerHTML = `<strong>${_bulkDates.length} วัน × ${teams.length} ทีม = ${_bulkDates.length * teams.length} รายการ</strong><br>${_bulkDates.slice(0,5).join(', ')}${_bulkDates.length>5?` ... +${_bulkDates.length-5} วัน`:''}`;
-            saveBtn?.classList.remove('hidden');
-        }
-        preview.classList.remove('hidden');
-        // store for save btn
-        saveBtn._dates = _bulkDates;
-        saveBtn._teams = teams;
-    });
-
-    document.getElementById('btn-bulk-save')?.addEventListener('click', async function() {
-        if (!this._dates?.length) return;
-        const orig = this.innerHTML;
-        this.disabled = true; this.textContent = 'กำลังสร้าง...';
-        try {
-            const res = await API.post('/admin/schedule/bulk-create', { dates: this._dates, Teams: this._teams });
-            showToast(res.message || 'สร้างตารางเวรสำเร็จ', 'success');
-            this.classList.add('hidden');
-            document.getElementById('bulk-preview')?.classList.add('hidden');
-            loadSchedules();
-        } catch (err) { showError(err.message); }
-        finally { this.disabled = false; this.innerHTML = orig; }
-    });
-}
 
 window.deleteSchedule = async (id) => {
-    if (!confirm('ลบรายการนี้?')) return;
+    if (!confirm('ลบ session นี้?')) return;
     try {
-        const res = await API.delete(`/admin/schedule/${id}`);
+        const res = await API.delete(`/patrol/sessions/${id}`);
         if (res.success) { showToast('ลบเรียบร้อย', 'success'); loadSchedules(); }
         else showError(res.message);
+    } catch (err) { showError(err.message); }
+};
+
+window.editSchedule = function(id, currentDate, teamName, areaName, round) {
+    const statusOpts = ['Pending','Completed','Missed'].map(s =>
+        `<option value="${s}">${s}</option>`
+    ).join('');
+    openModal('แก้ไข Session', `
+    <div class="space-y-4">
+        <div class="bg-slate-50 rounded-xl px-4 py-3 text-sm text-slate-600 space-y-0.5">
+            <p class="font-semibold text-slate-800">${teamName}</p>
+            <p class="text-xs text-slate-400">${areaName ? 'พื้นที่: '+areaName+' · ' : ''}รอบ ${round}</p>
+        </div>
+        <div>
+            <label class="block text-sm font-semibold text-slate-700 mb-1.5">วันที่เดิน <span class="text-red-500">*</span></label>
+            <input type="date" id="edit-session-date" value="${currentDate}" class="form-input w-full">
+        </div>
+        <div>
+            <label class="block text-sm font-semibold text-slate-700 mb-1.5">สถานะ</label>
+            <select id="edit-session-status" class="form-input w-full">${statusOpts}</select>
+        </div>
+        <div class="flex justify-end gap-3 pt-3 border-t border-slate-100">
+            <button type="button" onclick="window.closeModal&&window.closeModal()" class="btn btn-secondary px-5">ยกเลิก</button>
+            <button type="button" onclick="window._doEditSchedule(${id})" class="btn btn-primary px-5">บันทึก</button>
+        </div>
+    </div>`, 'max-w-sm');
+};
+
+window._doEditSchedule = async function(id) {
+    const dateVal   = document.getElementById('edit-session-date')?.value;
+    const statusVal = document.getElementById('edit-session-status')?.value;
+    if (!dateVal) { showToast('กรุณาเลือกวันที่', 'error'); return; }
+    try {
+        await API.put(`/patrol/sessions/${id}`, { PatrolDate: dateVal, Status: statusVal });
+        closeModal();
+        showToast('แก้ไขเรียบร้อย', 'success');
+        loadSchedules();
     } catch (err) { showError(err.message); }
 };
 
@@ -1552,7 +1474,11 @@ window.printScheduleReport = () => {
 // =============================================================================
 
 const PT_GROUP_LABEL = { A: 'พุธที่ 1 & 3', B: 'พุธที่ 2 & 4' };
-const PT_TYPE_LABEL  = { top: 'Top Management (1 ครั้ง/เดือน)', management: 'Management (2 ครั้ง/เดือน)' };
+const PT_TYPE_LABEL  = {
+    top:        'Top Management (1 ครั้ง/เดือน — รอบ 2)',
+    management: 'Management (2 ครั้ง/เดือน — รอบ 1 & 2)',
+    committee:  'คปอ. (1 ครั้ง/เดือน — รอบ 2)',
+};
 const MONTHS_TH_SHORT = ['ม.ค.','ก.พ.','มี.ค.','เม.ย.','พ.ค.','มิ.ย.','ก.ค.','ส.ค.','ก.ย.','ต.ค.','พ.ย.','ธ.ค.'];
 
 let _ptTeams = [];
@@ -1600,10 +1526,11 @@ function _ptRenderTeams() {
             </div>
             <div class="flex items-center gap-1">
                 <span class="text-[10px] font-bold bg-slate-100 text-slate-500 px-2 py-0.5 rounded-full">${t.MemberCount} คน</span>
+                <span id="pt-badge-${t.id}" class="text-[9px] px-1.5 py-0.5 rounded-full font-bold hidden"></span>
                 <button onclick="window._ptEditTeam(${t.id})" class="p-1.5 text-slate-300 hover:text-blue-500 hover:bg-blue-50 rounded-lg transition-colors">
                     <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"/></svg>
                 </button>
-                <button onclick="window._ptDeleteTeam(${t.id},'${t.Name.replace(/'/g,"\\'")}\")" class="p-1.5 text-slate-300 hover:text-red-500 hover:bg-red-50 rounded-lg transition-colors">
+                <button onclick="window._ptDeleteTeam(${t.id},'${t.Name.replace(/'/g,"\\'")}')\" class="p-1.5 text-slate-300 hover:text-red-500 hover:bg-red-50 rounded-lg transition-colors">
                     <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg>
                 </button>
             </div>
@@ -1614,7 +1541,7 @@ function _ptRenderTeams() {
         </div>
         <!-- Add member button -->
         <div class="px-3 pb-3">
-            <button onclick="window._ptAddMember(${t.id},'${t.Name.replace(/'/g,"\\'")}\")"
+            <button onclick="window._ptAddMember(${t.id},'${t.Name.replace(/'/g,"\\'")}')\"
                 class="w-full py-1.5 text-xs font-semibold rounded-lg border border-dashed border-slate-300 text-slate-400 hover:border-emerald-400 hover:text-emerald-600 hover:bg-emerald-50 transition-colors">
                 + เพิ่มสมาชิก
             </button>
@@ -1635,8 +1562,27 @@ async function _ptLoadMembers(teamId) {
             el.innerHTML = `<p class="text-center text-xs text-slate-300 py-3">ยังไม่มีสมาชิก</p>`;
             return;
         }
-        const top  = members.filter(m => m.PatrolType === 'top');
-        const mgmt = members.filter(m => m.PatrolType === 'management');
+        const top   = members.filter(m => m.PatrolType === 'top');
+        const mgmt  = members.filter(m => m.PatrolType === 'management');
+        const comm  = members.filter(m => m.PatrolType === 'committee');
+
+        // Validation badge in team card header
+        const badge = document.getElementById(`pt-badge-${teamId}`);
+        if (badge) {
+            const missing = [];
+            if (top.length === 0)  missing.push('ขาด Top');
+            if (comm.length === 0) missing.push('ขาด คปอ.');
+            if (missing.length > 0) {
+                badge.textContent = missing.join(' · ');
+                badge.className = 'text-[9px] px-1.5 py-0.5 rounded-full font-bold bg-amber-100 text-amber-700';
+                badge.classList.remove('hidden');
+            } else {
+                badge.textContent = '✓ ครบ';
+                badge.className = 'text-[9px] px-1.5 py-0.5 rounded-full font-bold bg-emerald-100 text-emerald-700';
+                badge.classList.remove('hidden');
+            }
+        }
+
         const renderGroup = (list, label, color) => list.length === 0 ? '' : `
             <div class="px-2 pt-1.5">
                 <p class="text-[9px] font-bold uppercase text-${color}-500 mb-1">${label}</p>
@@ -1644,9 +1590,9 @@ async function _ptLoadMembers(teamId) {
                 <div class="flex items-center justify-between py-1 border-b border-slate-50 last:border-0">
                     <div class="flex items-center gap-1.5 min-w-0">
                         <div class="w-5 h-5 rounded-full flex items-center justify-center flex-shrink-0 bg-${color}-100 text-${color}-600 text-[9px] font-bold">
-                            ${(m.FirstName||'?').charAt(0)}
+                            ${(m.EmployeeName||'?').charAt(0)}
                         </div>
-                        <p class="text-xs text-slate-700 truncate">${m.FirstName||''} ${m.LastName||''}</p>
+                        <p class="text-xs text-slate-700 truncate">${m.EmployeeName||m.EmployeeID||'—'}</p>
                     </div>
                     <button onclick="window._ptRemoveMember(${teamId},${m.id})"
                         class="p-1 text-slate-200 hover:text-red-500 flex-shrink-0 transition-colors">
@@ -1654,7 +1600,9 @@ async function _ptLoadMembers(teamId) {
                     </button>
                 </div>`).join('')}
             </div>`;
-        el.innerHTML = renderGroup(top, 'Top Management', 'rose') + renderGroup(mgmt, 'Management', 'indigo');
+        el.innerHTML = renderGroup(top, 'Top Management · 1×/เดือน', 'rose')
+                     + renderGroup(comm, 'คปอ. · 1×/เดือน', 'amber')
+                     + renderGroup(mgmt, 'Management · 2×/เดือน', 'indigo');
     } catch { el.innerHTML = `<p class="text-center text-xs text-red-400 py-3">โหลดไม่ได้</p>`; }
 }
 
@@ -1762,16 +1710,21 @@ window._ptAddMember = async function(teamId, teamName) {
             <label class="block text-sm font-semibold text-slate-700 mb-1.5">พนักงาน <span class="text-red-500">*</span></label>
             <select name="EmployeeID" required class="form-input w-full">
                 <option value="">— เลือกพนักงาน —</option>
-                ${empList.map(e => `<option value="${e.EmployeeID}">${e.FirstName||''} ${e.LastName||''} (${e.Department||''})</option>`).join('')}
+                ${empList.map(e => `<option value="${e.EmployeeID}">${e.EmployeeName||e.EmployeeID} (${e.Department||''})</option>`).join('')}
             </select>
         </div>
         <div>
             <label class="block text-sm font-semibold text-slate-700 mb-1.5">ประเภท <span class="text-red-500">*</span></label>
             <select name="PatrolType" class="form-input w-full">
                 <option value="top">Top Management — เดิน 1 ครั้ง/เดือน</option>
+                <option value="committee">คปอ. — เดิน 1 ครั้ง/เดือน</option>
                 <option value="management">Management — เดิน 2 ครั้ง/เดือน</option>
             </select>
-            <p class="text-xs text-slate-400 mt-1">Top: ผจก.ทั่วไป / ผช.ผจก.ทั่วไป / ผอ. &nbsp;|&nbsp; Management: ผู้จัดการ / ผู้ชำนาญการพิเศษ</p>
+            <div class="text-xs text-slate-400 mt-1.5 space-y-0.5">
+                <p><span class="font-semibold text-rose-500">Top</span>: ผจก.ทั่วไป / ผช.ผจก.ทั่วไป / ผู้อำนวยการ</p>
+                <p><span class="font-semibold text-amber-500">คปอ.</span>: คณะกรรมการความปลอดภัย (มี 5 คน ไม่ต้องครบทุกทีม)</p>
+                <p><span class="font-semibold text-indigo-500">Management</span>: ผู้จัดการ / ผู้ชำนาญการพิเศษ</p>
+            </div>
         </div>
         <div id="pt-mem-err" class="text-sm text-red-500 hidden"></div>
         <div class="flex justify-end gap-3 pt-3 border-t border-slate-100">
@@ -1903,7 +1856,7 @@ function _ptRenderRotationMatrix(year) {
     </div>
     <div class="px-4 py-3 bg-slate-50 border-t border-slate-100 flex items-center gap-2 text-xs text-slate-400">
         <svg class="w-3.5 h-3.5 text-slate-400 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
-        เลือกพื้นที่สำหรับแต่ละทีมแต่ละเดือน แล้วกด "บันทึก Rotation" จากนั้นกด "สร้าง Sessions อัตโนมัติ" เลือกเดือนที่ต้องการ
+        แต่ละเดือน ทีมเดินพื้นที่เดิมทั้ง 2 ครั้ง (2 วันพุธ) · Top Mgmt &amp; คปอ. เดินรอบ 2 เท่านั้น · Management เดินทั้ง 2 รอบ · กด "Auto-fill ทั้งปี" เพื่อ fill อัตโนมัติ
     </div>`;
 }
 
@@ -1916,6 +1869,84 @@ function _getWednesdays(year, month) {
     // A=พุธ1,3 B=พุธ2,4
     return `A:${weeks[0]||''},${weeks[2]||''} B:${weeks[1]||''},${weeks[3]||''}`;
 }
+
+// ── Auto-fill Rotation Matrix ──────────────────────────────────────────────────
+// กด "Auto-fill ทั้งปี" → ระบบวนพื้นที่ +1 ทุกเดือนอัตโนมัติ
+// อัลกอริทึม:
+//   • ทีม T เริ่มต้นที่ areas[startIdx[T]] ในเดือน 1
+//   • เดือน M → area = areas[(startIdx[T] + M - 1) % areas.length]
+//   • ทีมแต่ละทีมเริ่มต้น offset กัน 1 area เพื่อไม่ให้ชนกัน
+//   • สมาชิกในทีมตามไปกับทีม (PatrolType top=รอบ1, management=ทั้ง2รอบ)
+
+window._ptAutoFill = function() {
+    if (_ptTeams.length === 0 || _ptAreas.length === 0) {
+        showToast('ต้องมีทีมและพื้นที่ก่อน', 'error');
+        return;
+    }
+
+    const areaIds = _ptAreas.map(a => a.id);
+
+    // Build team rows for starting area selection
+    const teamRows = _ptTeams.map((t, idx) => {
+        // Default: spread teams across areas offset by index
+        const defaultAreaId = areaIds[idx % areaIds.length];
+        return `
+        <div class="flex items-center gap-3 py-2 border-b border-slate-100 last:border-0">
+            <span class="w-2.5 h-2.5 rounded-full flex-shrink-0" style="background:${t.Color}"></span>
+            <span class="text-sm font-semibold text-slate-700 w-32 truncate">${t.Name}</span>
+            <span class="text-[10px] font-bold px-1.5 py-0.5 rounded-full ${t.PatrolGroup==='A'?'bg-blue-100 text-blue-700':'bg-purple-100 text-purple-700'}">${t.PatrolGroup}</span>
+            <select data-autofill-team="${t.id}" class="flex-1 text-xs border border-slate-200 rounded-lg px-2 py-1.5 outline-none focus:border-violet-400">
+                ${_ptAreas.map(a => `<option value="${a.id}" ${a.id==defaultAreaId?'selected':''}>${a.Code ? a.Code+' — ' : ''}${a.Name}</option>`).join('')}
+            </select>
+        </div>`;
+    }).join('');
+
+    openModal('Auto-fill ตารางหมุนเวียนทั้งปี', `
+    <div class="space-y-4">
+        <div class="bg-violet-50 border border-violet-200 rounded-xl px-4 py-3 text-xs text-violet-700 space-y-1">
+            <p class="font-bold">วิธีการหมุนเวียน</p>
+            <p>• กำหนดพื้นที่เริ่มต้น (เดือน ม.ค.) ให้แต่ละทีม</p>
+            <p>• ระบบเลื่อนพื้นที่ +1 ทุกเดือนอัตโนมัติ (หมุนวน 12 เดือน)</p>
+            <p>• 1 ทีม เดิน 2 ครั้ง/เดือน ในพื้นที่เดิมทั้งสองครั้ง</p>
+            <p class="pt-1 font-bold">ความถี่ตามตำแหน่ง</p>
+            <p>• <span class="font-semibold">Top Management &amp; คปอ.</span> → เดินครั้งเดียว (รอบ 2 เท่านั้น)</p>
+            <p>• <span class="font-semibold">Management</span> → เดินทั้ง 2 ครั้ง (รอบ 1 &amp; 2)</p>
+        </div>
+        <div>
+            <p class="text-sm font-semibold text-slate-700 mb-2">พื้นที่เริ่มต้น เดือน ม.ค.</p>
+            <div class="border border-slate-200 rounded-xl overflow-hidden">
+                ${teamRows}
+            </div>
+        </div>
+        <div class="flex justify-end gap-3 pt-2 border-t border-slate-100">
+            <button type="button" onclick="window.closeModal&&window.closeModal()" class="btn btn-secondary px-5">ยกเลิก</button>
+            <button type="button" onclick="window._ptDoAutoFill()" class="btn px-5 font-bold text-white" style="background:linear-gradient(135deg,#7c3aed,#6366f1)">
+                Auto-fill ทั้งปี
+            </button>
+        </div>
+    </div>`, 'max-w-lg');
+};
+
+window._ptDoAutoFill = function() {
+    const areaIds = _ptAreas.map(a => a.id);
+    if (areaIds.length === 0) return;
+
+    // Read starting area per team from modal
+    document.querySelectorAll('[data-autofill-team]').forEach(sel => {
+        const teamId   = parseInt(sel.dataset.autofillTeam);
+        const startId  = parseInt(sel.value);
+        const startIdx = areaIds.indexOf(startId);
+
+        for (let month = 1; month <= 12; month++) {
+            const areaId = areaIds[(startIdx + month - 1) % areaIds.length];
+            const cell = document.querySelector(`.rotation-cell[data-team="${teamId}"][data-month="${month}"]`);
+            if (cell) cell.value = areaId;
+        }
+    });
+
+    closeModal();
+    showToast('Auto-fill เรียบร้อย — ตรวจสอบแล้วกด "บันทึก Rotation"', 'success');
+};
 
 window._ptSaveRotation = async function() {
     const year = parseInt(document.getElementById('rotation-year')?.value || new Date().getFullYear());
@@ -1964,6 +1995,539 @@ window._ptDoGenerate = async function(year) {
         showError(err.message);
         if (btn) { btn.disabled = false; btn.textContent = 'สร้าง Sessions'; }
     }
+};
+
+// =============================================================================
+// MEMBER ROTATION MATRIX
+// =============================================================================
+
+// _memberBase[employeeID] = { EmployeeID, TeamID, PatrolType, EmployeeName, TeamName, PatrolGroup, Color }
+// _memberMonthly[employeeID][month] = TeamID
+let _memberBase    = [];
+let _memberMonthly = {};
+
+async function _ptLoadMemberRotation() {
+    const year = parseInt(document.getElementById('rotation-year')?.value || new Date().getFullYear());
+    const wrap = document.getElementById('pt-member-rotation-wrap');
+    if (!wrap) return;
+    wrap.innerHTML = `<div class="flex justify-center py-10"><div class="animate-spin rounded-full h-8 w-8 border-4 border-emerald-500 border-t-transparent"></div></div>`;
+    try {
+        const res = await API.get(`/patrol/member-rotation?year=${year}`);
+        _memberBase    = res.base    || [];
+        _memberMonthly = {};
+        (res.monthly || []).forEach(r => {
+            if (!_memberMonthly[r.EmployeeID]) _memberMonthly[r.EmployeeID] = {};
+            _memberMonthly[r.EmployeeID][r.Month] = r.TeamID;
+        });
+        _ptRenderMemberMatrix(year);
+    } catch (err) {
+        wrap.innerHTML = `<div class="text-center py-10 text-red-500 text-sm">${err.message}</div>`;
+    }
+}
+
+function _ptRenderMemberMatrix(year) {
+    const wrap = document.getElementById('pt-member-rotation-wrap');
+    if (!wrap) return;
+    if (_memberBase.length === 0) {
+        wrap.innerHTML = `<div class="text-center py-10 text-slate-400 text-sm">ยังไม่มีสมาชิก กรุณาเพิ่มสมาชิกในทีมก่อน</div>`;
+        return;
+    }
+
+    // Group members by PatrolGroup
+    const groupA = _memberBase.filter(m => m.PatrolGroup === 'A');
+    const groupB = _memberBase.filter(m => m.PatrolGroup === 'B');
+
+    // Build team options per group
+    const teamsA = _ptTeams.filter(t => t.PatrolGroup === 'A');
+    const teamsB = _ptTeams.filter(t => t.PatrolGroup === 'B');
+    const teamOptsA = teamsA.map(t => `<option value="${t.id}">${t.Name}</option>`).join('');
+    const teamOptsB = teamsB.map(t => `<option value="${t.id}">${t.Name}</option>`).join('');
+
+    const typeColor = { top: 'rose', committee: 'amber', management: 'indigo' };
+    const typeLabel = { top: 'Top', committee: 'คปอ.', management: 'Mgmt' };
+
+    const renderRows = (members, teamOpts) => members.map(m => {
+        const tColor = typeColor[m.PatrolType] || 'slate';
+        const tLabel = typeLabel[m.PatrolType] || m.PatrolType;
+        const monthCells = Array.from({length:12},(_,i) => i+1).map(month => {
+            const selected = (_memberMonthly[m.EmployeeID] || {})[month] || m.TeamID;
+            return `<td class="px-1 py-1.5">
+                <select data-member="${m.EmployeeID}" data-month="${month}"
+                    class="member-rot-cell w-full text-[10px] border border-slate-200 rounded-md px-1 py-0.5 outline-none focus:border-violet-400 bg-white"
+                    style="min-width:72px">
+                    ${teamOpts.replace(`value="${selected}"`, `value="${selected}" selected`)}
+                </select>
+            </td>`;
+        }).join('');
+        return `
+        <tr class="border-b border-slate-100 hover:bg-slate-50 transition-colors">
+            <td class="px-3 py-2 sticky left-0 bg-white z-10 whitespace-nowrap">
+                <div class="flex items-center gap-2">
+                    <span class="w-2 h-2 rounded-full flex-shrink-0" style="background:${m.Color}"></span>
+                    <span class="text-xs font-semibold text-slate-800">${m.EmployeeName||m.EmployeeID}</span>
+                </div>
+            </td>
+            <td class="px-2 py-2 text-center">
+                <span class="text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-${tColor}-100 text-${tColor}-700">${tLabel}</span>
+            </td>
+            <td class="px-2 py-2 text-center text-[10px] text-slate-400 whitespace-nowrap">${m.TeamName}</td>
+            ${monthCells}
+        </tr>`;
+    }).join('');
+
+    const headerCols = MONTHS_TH_SHORT.map(m => `<th class="px-1 py-3 text-[10px] font-semibold text-slate-500 text-center whitespace-nowrap">${m}</th>`).join('');
+
+    const section = (label, color, members, teamOpts) => members.length === 0 ? '' : `
+        <tr class="bg-${color}-50">
+            <td colspan="15" class="px-4 py-2 text-[10px] font-bold uppercase text-${color}-600 tracking-wider">กลุ่ม ${label}</td>
+        </tr>
+        ${renderRows(members, teamOpts)}`;
+
+    wrap.innerHTML = `
+    <div class="overflow-x-auto">
+        <table class="w-full text-left border-collapse" style="min-width:1100px">
+            <thead>
+                <tr class="bg-slate-50 border-b-2 border-slate-200">
+                    <th class="px-3 py-3 text-xs font-semibold text-slate-500 sticky left-0 bg-slate-50 z-10 whitespace-nowrap">สมาชิก</th>
+                    <th class="px-2 py-3 text-xs font-semibold text-slate-400 text-center">ประเภท</th>
+                    <th class="px-2 py-3 text-xs font-semibold text-slate-400 whitespace-nowrap">ทีมเดิม</th>
+                    ${headerCols}
+                </tr>
+            </thead>
+            <tbody>
+                ${section('A — พุธที่ 1 & 3', 'blue', groupA, teamOptsA)}
+                ${section('B — พุธที่ 2 & 4', 'purple', groupB, teamOptsB)}
+            </tbody>
+        </table>
+    </div>
+    <div class="px-4 py-3 bg-slate-50 border-t border-slate-100 flex items-center gap-2 text-xs text-slate-400">
+        <svg class="w-3.5 h-3.5 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+        กำหนดว่าแต่ละเดือนสมาชิกอยู่ทีมไหน · ค่า default = ทีมเดิม · กลุ่ม A สลับเฉพาะทีม A · กลุ่ม B สลับเฉพาะทีม B
+    </div>`;
+}
+
+window._ptSaveMemberRotation = async function() {
+    const year  = parseInt(document.getElementById('rotation-year')?.value || new Date().getFullYear());
+    const cells = document.querySelectorAll('.member-rot-cell');
+    const items = [];
+    cells.forEach(sel => {
+        if (!sel.value) return;
+        items.push({
+            EmployeeID: sel.dataset.member,
+            TeamID:     parseInt(sel.value),
+            Year:       year,
+            Month:      parseInt(sel.dataset.month),
+        });
+    });
+    if (items.length === 0) { showToast('ไม่มีข้อมูล', 'error'); return; }
+    try {
+        const res = await API.post('/patrol/member-rotation', items);
+        showToast(`บันทึกการสลับสมาชิก ${res.saved} รายการสำเร็จ`, 'success');
+    } catch (err) { showError(err.message); }
+};
+
+// Auto-fill: rotate members through teams in same PatrolGroup, +1 team per month
+window._ptAutoFillMembers = function() {
+    const teamsA = _ptTeams.filter(t => t.PatrolGroup === 'A');
+    const teamsB = _ptTeams.filter(t => t.PatrolGroup === 'B');
+
+    if (teamsA.length === 0 && teamsB.length === 0) {
+        showToast('ยังไม่มีทีม', 'error'); return;
+    }
+
+    _memberBase.forEach(m => {
+        const groupTeams = m.PatrolGroup === 'A' ? teamsA : teamsB;
+        if (groupTeams.length === 0) return;
+        const startIdx = groupTeams.findIndex(t => t.id === m.TeamID);
+        const base = startIdx >= 0 ? startIdx : 0;
+
+        for (let month = 1; month <= 12; month++) {
+            const teamId = groupTeams[(base + month - 1) % groupTeams.length].id;
+            const cell = document.querySelector(`.member-rot-cell[data-member="${m.EmployeeID}"][data-month="${month}"]`);
+            if (cell) cell.value = teamId;
+        }
+    });
+
+    showToast('Auto-fill สมาชิกเรียบร้อย — กด "บันทึก" เพื่อยืนยัน', 'success');
+};
+
+// =============================================================================
+// MONTHLY PATROL PDF (ตารางรายเดือน — grid 3×2 แบบ Safety Patrol Calendar)
+// =============================================================================
+
+window._ptDownloadMonthlyPDF = async function() {
+    const month = parseInt(document.getElementById('filter-month')?.value || new Date().getMonth()+1);
+    const year  = parseInt(document.getElementById('filter-year')?.value  || new Date().getFullYear());
+    const thYear = year + 543;
+    const monthNameTh = new Date(year, month-1, 1).toLocaleString('th-TH', { month: 'long' });
+    const monthNameEn = new Date(year, month-1, 1).toLocaleString('en-US', { month: 'long' });
+    const today = new Date().toLocaleDateString('th-TH', { dateStyle: 'long' });
+
+    try {
+        showToast('กำลังสร้าง PDF...', 'info');
+        const res = await API.get(`/patrol/monthly-report?year=${year}&month=${month}`);
+        const teams = res.data || [];
+        if (teams.length === 0) { showToast('ไม่มีข้อมูล Sessions ของเดือนนี้', 'error'); return; }
+
+        // Build one team card
+        const buildCard = (team) => {
+            const s1 = team.sessions.find(s => s.PatrolRound === 1);
+            const s2 = team.sessions.find(s => s.PatrolRound === 2);
+            const date1 = s1 ? new Date(s1.PatrolDate).getDate() : '—';
+            const date2 = s2 ? new Date(s2.PatrolDate).getDate() : '—';
+            const area  = (s1 || s2);
+            const areaCode = area ? (area.AreaCode || area.AreaName || '') : '';
+
+            const memberRows = team.members.map((m, idx) => {
+                // top/committee → only round 2; management → both rounds
+                const cell1 = m.PatrolType === 'management' ? `<td class="area-cell">${areaCode}</td>` : `<td class="area-cell" style="color:#cbd5e1">—</td>`;
+                const cell2 = `<td class="area-cell">${areaCode}</td>`;
+                const typeDot = m.PatrolType === 'top' ? '#f43f5e' : m.PatrolType === 'committee' ? '#f59e0b' : '#6366f1';
+                return `<tr>
+                    <td class="num-cell">${idx+1}</td>
+                    <td class="prefix-cell">คุณ</td>
+                    <td class="name-cell"><span class="type-dot" style="background:${typeDot}"></span>${m.EmployeeName||m.EmployeeID}</td>
+                    ${cell1}${cell2}
+                </tr>`;
+            }).join('');
+
+            // หัวหน้างานประจำพื้นที่ (section chief placeholder)
+            const chiefRow = `<tr class="chief-row">
+                <td class="num-cell">${team.members.length+1}</td>
+                <td colspan="2" class="name-cell" style="font-style:italic;color:#64748b">หัวหน้างานประจำพื้นที่${areaCode}</td>
+                <td class="area-cell" style="color:#64748b">${areaCode}</td>
+                <td class="area-cell" style="color:#64748b">${areaCode}</td>
+            </tr>`;
+
+            return `<div class="team-card">
+                <div class="team-header" style="background:${team.Color||'#065f46'}">
+                    <div class="team-name">${team.TeamName}</div>
+                    <div class="team-dates">
+                        <div class="date-group">
+                            <div class="date-label">วันพุธ</div>
+                            <div class="date-num">${date1}</div>
+                        </div>
+                        <div class="date-group">
+                            <div class="date-label">&nbsp;</div>
+                            <div class="date-num">${date2}</div>
+                        </div>
+                    </div>
+                </div>
+                <table class="member-table">
+                    <thead>
+                        <tr>
+                            <th class="num-cell">#</th>
+                            <th class="prefix-cell"></th>
+                            <th class="name-cell">ชื่อ-สกุล</th>
+                            <th class="area-cell">${date1}</th>
+                            <th class="area-cell">${date2}</th>
+                        </tr>
+                    </thead>
+                    <tbody>${memberRows}${chiefRow}</tbody>
+                </table>
+            </div>`;
+        };
+
+        // Pair teams into rows of 2
+        const rows = [];
+        for (let i = 0; i < teams.length; i += 2) {
+            const left  = buildCard(teams[i]);
+            const right = teams[i+1] ? buildCard(teams[i+1]) : '<div class="team-card" style="border:none"></div>';
+            rows.push(`<div class="team-row">${left}${right}</div>`);
+        }
+
+        const html = `<!DOCTYPE html><html lang="th"><head><meta charset="utf-8">
+        <title>Safety Patrol ${monthNameEn} ${year}</title>
+        <style>
+            @import url('https://fonts.googleapis.com/css2?family=Kanit:wght@300;400;600;700&display=swap');
+            *{margin:0;padding:0;box-sizing:border-box}
+            body{font-family:'Kanit',sans-serif;background:#fff;color:#1e293b}
+            .page{width:210mm;padding:0 0 12mm;min-height:297mm}
+
+            /* ── Hero ── */
+            .hero{background:linear-gradient(135deg,#14532d 0%,#166534 50%,#15803d 100%);padding:14px 20px 10px;position:relative;overflow:hidden}
+            .hero::before{content:'';position:absolute;top:-20px;right:-20px;width:120px;height:120px;border-radius:50%;background:rgba(255,255,255,0.06)}
+            .hero-top{display:flex;align-items:center;justify-content:space-between}
+            .hero-brand{color:rgba(255,255,255,0.7);font-size:8pt;letter-spacing:2px;font-weight:300;text-transform:uppercase}
+            .hero-docref{color:rgba(255,255,255,0.6);font-size:7.5pt;text-align:right;line-height:1.7}
+            .hero-title{text-align:center;margin:6px 0 4px}
+            .hero-title .big{font-size:26pt;font-weight:700;color:#fff;letter-spacing:3px;line-height:1}
+            .hero-title .sub{font-size:13pt;font-weight:300;color:rgba(255,255,255,0.85);letter-spacing:8px}
+            .hero-month{text-align:center;margin-top:6px}
+            .hero-month .month-th{font-size:18pt;font-weight:700;color:#fbbf24;letter-spacing:1px}
+            .hero-month .month-en{font-size:9pt;color:rgba(255,255,255,0.6);font-weight:300;margin-top:1px}
+            .hero-stripe{height:4px;background:linear-gradient(90deg,#fbbf24,#f59e0b,#fbbf24)}
+            .team-subtitle{background:#1e3a2f;color:#86efac;font-size:8pt;font-weight:600;letter-spacing:2px;text-align:center;padding:5px;text-transform:uppercase}
+
+            /* ── Grid ── */
+            .grid-wrap{padding:8px 10px}
+            .team-row{display:flex;gap:8px;margin-bottom:8px}
+            .team-card{flex:1;border:1.5px solid #d1d5db;border-radius:6px;overflow:hidden;min-width:0}
+            .team-header{display:flex;align-items:center;justify-content:space-between;padding:5px 10px;color:#fff}
+            .team-name{font-size:10pt;font-weight:700;letter-spacing:.5px}
+            .team-dates{display:flex;gap:12px}
+            .date-group{text-align:center}
+            .date-label{font-size:7pt;opacity:.8;font-weight:300}
+            .date-num{font-size:13pt;font-weight:700;line-height:1}
+            .member-table{width:100%;border-collapse:collapse;font-size:8.5pt}
+            .member-table thead tr{background:#f1f5f9}
+            .member-table th{padding:3px 5px;font-size:7.5pt;font-weight:600;color:#475569;border-bottom:1.5px solid #e2e8f0;text-align:left}
+            .member-table td{padding:3px 5px;border-bottom:1px solid #f1f5f9;vertical-align:middle}
+            .member-table tbody tr:last-child td{border-bottom:none}
+            .num-cell{width:18px;text-align:center;color:#94a3b8;font-size:7.5pt}
+            .prefix-cell{width:22px;color:#64748b;font-size:8pt}
+            .name-cell{min-width:90px}
+            .area-cell{width:38px;text-align:center;font-size:8pt;font-weight:600;color:#065f46}
+            .type-dot{display:inline-block;width:5px;height:5px;border-radius:50%;margin-right:4px;vertical-align:middle;flex-shrink:0}
+            .chief-row td{background:#f8fafc;font-size:7.5pt}
+
+            /* ── Footer ── */
+            .footer{text-align:center;font-size:7pt;color:#94a3b8;margin-top:10px;border-top:1px solid #e2e8f0;padding-top:6px;margin:0 10px}
+            .legend{display:flex;gap:16px;justify-content:center;padding:6px 10px 0;font-size:7.5pt;color:#64748b}
+            .leg-item{display:flex;align-items:center;gap:4px}
+
+            @media print{body{-webkit-print-color-adjust:exact;print-color-adjust:exact}}
+        </style></head><body>
+        <div class="page">
+            <div class="hero">
+                <div class="hero-top">
+                    <div class="hero-brand">TSH Safety Core</div>
+                    <div class="hero-docref">เลขที่: TSH-SP-${thYear}-${String(month).padStart(2,'0')}<br>วันที่ออก: ${today}</div>
+                </div>
+                <div class="hero-title">
+                    <div class="big">SAFETY PATROL</div>
+                    <div class="sub">C a l e n d a r</div>
+                </div>
+                <div class="hero-month">
+                    <div class="month-th">${monthNameTh} พ.ศ. ${thYear}</div>
+                    <div class="month-en">${monthNameEn} ${year}</div>
+                </div>
+            </div>
+            <div class="hero-stripe"></div>
+            <div class="team-subtitle">Top &amp; Management Safety Patrol Team</div>
+            <div class="grid-wrap">${rows.join('')}</div>
+            <div class="legend">
+                <div class="leg-item"><span class="type-dot" style="background:#f43f5e"></span>Top Management — เดิน 1 ครั้ง (รอบ 2)</div>
+                <div class="leg-item"><span class="type-dot" style="background:#f59e0b"></span>คปอ. — เดิน 1 ครั้ง (รอบ 2)</div>
+                <div class="leg-item"><span class="type-dot" style="background:#6366f1"></span>Management — เดิน 2 ครั้ง (รอบ 1 &amp; 2)</div>
+            </div>
+            <div class="footer">TSH Safety Core System · สร้างอัตโนมัติ ${today} · เอกสารนี้ใช้สำหรับการเดินตรวจความปลอดภัยอย่างเป็นทางการ</div>
+        </div>
+        </body></html>`;
+
+        const win = window.open('', '_blank', 'width=900,height=700');
+        if (!win) { showToast('กรุณาอนุญาต Popup', 'error'); return; }
+        win.document.write(html);
+        win.document.close();
+        win.onload = () => setTimeout(() => { win.focus(); win.print(); }, 800);
+    } catch (err) { showError(err.message); }
+};
+
+// =============================================================================
+// MEMBER SCHEDULE REPORT
+// =============================================================================
+
+let _scheduleData = [];
+
+window._ptLoadMemberSchedule = async function() {
+    const year = parseInt(document.getElementById('rotation-year')?.value || new Date().getFullYear());
+    const wrap = document.getElementById('pt-schedule-report-wrap');
+    if (!wrap) return;
+    wrap.innerHTML = `<div class="flex justify-center py-10"><div class="animate-spin rounded-full h-8 w-8 border-4 border-slate-800 border-t-transparent"></div></div>`;
+    try {
+        const res = await API.get(`/patrol/member-schedule?year=${year}`);
+        _scheduleData = res.data || [];
+        _ptRenderSchedulePreview(year);
+    } catch (err) {
+        wrap.innerHTML = `<div class="text-center py-10 text-red-500 text-sm">${err.message}</div>`;
+    }
+};
+
+function _ptRenderSchedulePreview(year) {
+    const wrap = document.getElementById('pt-schedule-report-wrap');
+    if (!wrap) return;
+    if (_scheduleData.length === 0) {
+        wrap.innerHTML = `<div class="text-center py-10 text-slate-400 text-sm">ยังไม่มีข้อมูล — กรุณากำหนด Rotation และสร้าง Sessions ก่อน</div>`;
+        return;
+    }
+    const typeColor = { top:'rose', committee:'amber', management:'indigo' };
+    const typeShort = { top:'Top', committee:'คปอ.', management:'Mgmt' };
+
+    const rows = _scheduleData.map(m => {
+        const tColor = typeColor[m.PatrolType] || 'slate';
+        const cells = m.months.map(md => {
+            if (md.sessions.length === 0) return `<td class="px-1 py-2 text-center text-[10px] text-slate-300">—</td>`;
+            const dates = md.sessions.map(s =>
+                new Date(s.PatrolDate).toLocaleDateString('th-TH', {day:'numeric', month:'short'})
+            ).join(', ');
+            const area = md.sessions[0]?.AreaCode || md.sessions[0]?.AreaName || '';
+            return `<td class="px-1 py-2 text-center">
+                <div class="text-[10px] font-semibold text-slate-700 leading-tight">${dates}</div>
+                ${area ? `<div class="text-[9px] text-slate-400 leading-tight">${area}</div>` : ''}
+            </td>`;
+        }).join('');
+        return `
+        <tr class="border-b border-slate-100 hover:bg-slate-50 transition-colors">
+            <td class="px-3 py-2.5 sticky left-0 bg-white z-10 whitespace-nowrap min-w-[140px]">
+                <p class="text-xs font-semibold text-slate-800">${m.EmployeeName||m.EmployeeID}</p>
+                <p class="text-[10px] text-slate-400">${m.Department||''}</p>
+            </td>
+            <td class="px-2 py-2.5 text-center whitespace-nowrap">
+                <span class="text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-${tColor}-100 text-${tColor}-700">${typeShort[m.PatrolType]||m.PatrolType}</span>
+            </td>
+            <td class="px-2 py-2.5 text-[10px] text-slate-500 whitespace-nowrap">${m.BaseTeamName}</td>
+            ${cells}
+        </tr>`;
+    }).join('');
+
+    const hcols = MONTHS_TH_SHORT.map(m => `<th class="px-1 py-3 text-[10px] font-semibold text-slate-500 text-center whitespace-nowrap">${m}</th>`).join('');
+    wrap.innerHTML = `
+    <div class="overflow-x-auto">
+        <table class="w-full border-collapse" style="min-width:1200px">
+            <thead>
+                <tr class="bg-slate-50 border-b-2 border-slate-200">
+                    <th class="px-3 py-3 text-xs font-semibold text-slate-500 text-left sticky left-0 bg-slate-50 z-10">ชื่อ-สกุล</th>
+                    <th class="px-2 py-3 text-[10px] font-semibold text-slate-400">ประเภท</th>
+                    <th class="px-2 py-3 text-[10px] font-semibold text-slate-400 whitespace-nowrap">ทีมเดิม</th>
+                    ${hcols}
+                </tr>
+            </thead>
+            <tbody>${rows}</tbody>
+        </table>
+    </div>
+    <div class="px-4 py-3 bg-slate-50 border-t border-slate-100 text-xs text-slate-400 flex items-center justify-between">
+        <span>แสดง ${_scheduleData.length} คน · ปี ${year} (พ.ศ. ${year+543})</span>
+        <span>Top Mgmt &amp; คปอ. = รอบ 2 เท่านั้น · Management = รอบ 1 &amp; 2</span>
+    </div>`;
+}
+
+window._ptDownloadSchedulePDF = function() {
+    if (_scheduleData.length === 0) { showToast('กรุณากด "โหลดข้อมูล" ก่อน', 'error'); return; }
+    const year   = parseInt(document.getElementById('rotation-year')?.value || new Date().getFullYear());
+    const thYear = year + 543;
+    const today  = new Date().toLocaleDateString('th-TH', { dateStyle: 'long' });
+
+    const typeLabel = { top: 'Top Management', committee: 'คณะกรรมการความปลอดภัย (คปอ.)', management: 'Management' };
+    const typeFreq  = { top: 'เดิน 1 ครั้ง/เดือน (รอบที่ 2)', committee: 'เดิน 1 ครั้ง/เดือน (รอบที่ 2)', management: 'เดิน 2 ครั้ง/เดือน (รอบที่ 1 & 2)' };
+
+    const pageHtml = _scheduleData.map((m, idx) => {
+        const tableRows = m.months.map(md => {
+            const mLabel = MONTHS_TH_SHORT[md.month - 1];
+            if (md.sessions.length === 0) {
+                return `<tr><td class="month-cell">${mLabel}</td><td colspan="3" style="color:#94a3b8;text-align:center;font-size:9pt">— ไม่มีกำหนดการ —</td><td style="color:#94a3b8;text-align:center">—</td></tr>`;
+            }
+            return md.sessions.map((s, si) => {
+                const d = new Date(s.PatrolDate).toLocaleDateString('th-TH', { day: 'numeric', month: 'long', year: 'numeric' });
+                return `<tr>
+                    ${si === 0 ? `<td class="month-cell" rowspan="${md.sessions.length}">${mLabel}</td>` : ''}
+                    <td>${d}</td>
+                    <td>${s.TeamName || '—'}</td>
+                    <td>${s.AreaName || (s.AreaCode ? s.AreaCode : '—')}</td>
+                    <td style="text-align:center">รอบ ${s.PatrolRound}</td>
+                </tr>`;
+            }).join('');
+        }).join('');
+
+        return `<div class="page" ${idx > 0 ? 'style="page-break-before:always"' : ''}>
+            <div class="doc-header">
+                <div class="header-left">
+                    <div class="company-name">TSH Safety Core</div>
+                    <div class="doc-title">ตารางเดินตรวจความปลอดภัย ประจำปี พ.ศ. ${thYear}</div>
+                    <div class="doc-sub">Safety Patrol Schedule · Year ${year}</div>
+                </div>
+                <div class="header-right">
+                    <div class="doc-no">เลขที่: TSH-PT-${thYear}-${String(idx+1).padStart(3,'0')}</div>
+                    <div class="doc-date">วันที่ออกเอกสาร: ${today}</div>
+                    <div class="doc-rev">ฉบับที่: 1</div>
+                </div>
+            </div>
+            <div class="divider"></div>
+            <table class="info-table">
+                <tr>
+                    <td><span class="info-label">ชื่อ-สกุล</span><span class="info-val">${m.EmployeeName||m.EmployeeID}</span></td>
+                    <td><span class="info-label">รหัสพนักงาน</span><span class="info-val">${m.EmployeeID}</span></td>
+                </tr>
+                <tr>
+                    <td><span class="info-label">แผนก/หน่วยงาน</span><span class="info-val">${m.Department||'—'}</span></td>
+                    <td><span class="info-label">ทีม Patrol</span><span class="info-val">${m.BaseTeamName} (กลุ่ม ${m.PatrolGroup})</span></td>
+                </tr>
+                <tr>
+                    <td colspan="2"><span class="info-label">ประเภท</span><span class="info-val">${typeLabel[m.PatrolType]||m.PatrolType} — ${typeFreq[m.PatrolType]||''}</span></td>
+                </tr>
+            </table>
+            <table class="sch-table">
+                <thead>
+                    <tr>
+                        <th style="width:52px">เดือน</th>
+                        <th style="width:140px">วันที่เดินตรวจ</th>
+                        <th>ทีม</th>
+                        <th>พื้นที่ตรวจ</th>
+                        <th style="width:52px">รอบ</th>
+                    </tr>
+                </thead>
+                <tbody>${tableRows}</tbody>
+            </table>
+            <div class="sig-section">
+                <div class="sig-box">
+                    <div class="sig-line"></div>
+                    <div class="sig-name">(${m.EmployeeName||'............................'})</div>
+                    <div class="sig-role">ผู้เดินตรวจ</div>
+                </div>
+                <div class="sig-box">
+                    <div class="sig-line"></div>
+                    <div class="sig-name">(............................)</div>
+                    <div class="sig-role">หัวหน้าทีม / ผู้ตรวจสอบ</div>
+                </div>
+                <div class="sig-box">
+                    <div class="sig-line"></div>
+                    <div class="sig-name">(............................)</div>
+                    <div class="sig-role">ผู้อนุมัติ</div>
+                </div>
+            </div>
+            <div class="footer">TSH Safety Core System · สร้างอัตโนมัติ ${today} · เอกสารฉบับนี้ใช้สำหรับการเดินตรวจความปลอดภัยอย่างเป็นทางการ</div>
+        </div>`;
+    }).join('');
+
+    const html = `<!DOCTYPE html><html lang="th"><head><meta charset="utf-8">
+    <title>ตารางเดินตรวจ ${thYear}</title>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Kanit:wght@300;400;600;700&display=swap');
+        *{margin:0;padding:0;box-sizing:border-box}
+        body{font-family:'Kanit',sans-serif;font-size:10pt;color:#1e293b;background:#fff}
+        .page{width:210mm;padding:16mm 18mm 14mm;min-height:297mm;position:relative}
+        .doc-header{display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:10px}
+        .company-name{font-size:10pt;font-weight:700;color:#065f46;letter-spacing:.5px;margin-bottom:3px}
+        .doc-title{font-size:15pt;font-weight:700;color:#0f172a;line-height:1.2}
+        .doc-sub{font-size:8.5pt;color:#64748b;margin-top:2px;font-weight:300}
+        .header-right{text-align:right;font-size:8.5pt;color:#475569;line-height:1.8}
+        .doc-no{font-weight:600;color:#0f172a}
+        .divider{height:3px;background:linear-gradient(90deg,#065f46,#0d9488,transparent);margin-bottom:12px;border-radius:2px}
+        .info-table{width:100%;border-collapse:collapse;margin-bottom:14px;background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;overflow:hidden}
+        .info-table td{padding:6px 14px;vertical-align:top;width:50%;font-size:9.5pt}
+        .info-table tr:not(:last-child) td{border-bottom:1px solid #e2e8f0}
+        .info-label{color:#64748b;font-size:8pt;display:block;margin-bottom:1px}
+        .info-val{font-weight:600;color:#0f172a}
+        .sch-table{width:100%;border-collapse:collapse;margin-bottom:22px}
+        .sch-table thead tr{background:#064e3b}
+        .sch-table th{color:#fff;padding:8px 10px;font-size:9pt;font-weight:600;text-align:left}
+        .sch-table td{padding:6.5px 10px;border-bottom:1px solid #e2e8f0;font-size:9.5pt;vertical-align:middle}
+        .sch-table tbody tr:nth-child(even){background:#f8fafc}
+        .month-cell{font-weight:600;color:#065f46;white-space:nowrap}
+        .sig-section{display:flex;gap:24px;margin-top:16px;page-break-inside:avoid}
+        .sig-box{flex:1;text-align:center;padding-top:8px}
+        .sig-line{border-bottom:1px solid #334155;margin:0 8px 6px;height:44px}
+        .sig-name{font-size:9pt;color:#334155}
+        .sig-role{font-size:8pt;color:#64748b;margin-top:3px;font-weight:600}
+        .footer{position:absolute;bottom:10mm;left:18mm;right:18mm;text-align:center;font-size:7pt;color:#94a3b8;border-top:1px solid #e2e8f0;padding-top:5px}
+        @media print{.page{page-break-after:always}body{-webkit-print-color-adjust:exact;print-color-adjust:exact}}
+    </style>
+    </head><body>${pageHtml}</body></html>`;
+
+    const win = window.open('', '_blank', 'width=960,height=800');
+    if (!win) { showToast('กรุณาอนุญาต Popup เพื่อดาวน์โหลด PDF', 'error'); return; }
+    win.document.write(html);
+    win.document.close();
+    win.onload = () => setTimeout(() => { win.focus(); win.print(); }, 800);
 };
 
 // =============================================================================
