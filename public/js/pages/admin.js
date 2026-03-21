@@ -36,9 +36,8 @@ const TABS = [
     { key: 'dashboard',    label: 'ภาพรวม',           icon: `<svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"/></svg>` },
     { key: 'scheduler',    label: 'กำหนดการตรวจ',      icon: `<svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"/></svg>` },
     { key: 'employees',    label: 'ข้อมูลพนักงาน',     icon: `<svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0z"/></svg>` },
-    { key: 'master',       label: 'Master Data',        icon: `<svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 10h16M4 14h16M4 18h16"/></svg>` },
-    { key: 'organization', label: 'โครงสร้างองค์กร',   icon: `<svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4"/></svg>`, badge: 'NEW' },
-    { key: 'permissions',  label: 'สิทธิ์การใช้งาน',   icon: `<svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z"/></svg>`, badge: 'NEW' },
+    { key: 'reference',    label: 'ข้อมูลอ้างอิง',     icon: `<svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4"/></svg>` },
+    { key: 'permissions',  label: 'สิทธิ์การใช้งาน',   icon: `<svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z"/></svg>` },
     { key: 'health',       label: 'System Health',     icon: `<svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4.318 6.318a4.5 4.5 0 000 6.364L12 20.364l7.682-7.682a4.5 4.5 0 00-6.364-6.364L12 7.636l-1.318-1.318a4.5 4.5 0 00-6.364 0z"/></svg>` },
     { key: 'audit',        label: 'Audit Log',         icon: `<svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"/></svg>` },
 ];
@@ -179,160 +178,120 @@ function switchTab(key) {
     if      (key === 'dashboard')    renderDashboard(area);
     else if (key === 'scheduler')    renderScheduler(area);
     else if (key === 'employees')    renderEmployeesTab(area);
-    else if (key === 'master')       renderMasterData(area);
-    else if (key === 'organization') renderOrganization(area);
+    else if (key === 'reference')    renderReference(area);
     else if (key === 'permissions')  renderPermissions(area);
     else if (key === 'health')       renderSystemHealth(area);
     else if (key === 'audit')        renderAuditLog(area);
 }
 
 // =============================================================================
-// TAB: ORGANIZATION
+// TAB: REFERENCE DATA (แผนก + Teams + Positions + Roles)
 // =============================================================================
-async function renderOrganization(container) {
-    // Reset pagination on fresh load
+async function renderReference(container) {
     _orgPage = 1;
 
-    // Skeleton layout — shows immediately while fetching
+    const refTypes = [
+        { key:'teams',     title:'Teams',        sub:'ทีมเดินตรวจ', color:'sky',    icon:`<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0z"/>` },
+        { key:'positions', title:'Positions',    sub:'ตำแหน่งงาน',  color:'violet', icon:`<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 13.255A23.931 23.931 0 0112 15c-3.183 0-6.22-.62-9-1.745M16 6V4a2 2 0 00-2-2h-4a2 2 0 00-2 2v2m4 6h.01M5 20h14a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"/>` },
+        { key:'roles',     title:'System Roles', sub:'บทบาทผู้ใช้',  color:'rose',   icon:`<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 7a2 2 0 012 2m4 0a6 6 0 01-7.743 5.743L11 17H9v2H7v2H4a1 1 0 01-1-1v-2.586a1 1 0 01.293-.707l5.964-5.964A6 6 0 1121 9z"/>` },
+    ];
+    const hdrCls = { sky:'from-sky-50 to-white', violet:'from-violet-50 to-white', rose:'from-rose-50 to-white' };
+
     container.innerHTML = `
-    <div class="animate-fade-in space-y-5">
+    <div class="animate-fade-in space-y-6">
 
-        <!-- Stats Cards -->
-        <div id="org-stats-row" class="grid grid-cols-2 md:grid-cols-4 gap-4">
-            ${[1,2,3,4].map(() => `
-            <div class="bg-white rounded-xl p-4 border border-slate-100 shadow-sm animate-pulse">
-                <div class="h-8 bg-slate-100 rounded-lg w-12 mb-2"></div>
-                <div class="h-3 bg-slate-100 rounded w-20"></div>
+        <!-- ─── Section 1: แผนก / หน่วยงาน ─── -->
+        <div>
+          <p class="text-xs font-bold text-slate-400 uppercase tracking-widest mb-3">แผนก / หน่วยงาน</p>
+
+          <!-- Stats skeleton -->
+          <div id="org-stats-row" class="grid grid-cols-2 md:grid-cols-4 gap-4 mb-4">
+              ${[1,2,3,4].map(() => `
+              <div class="bg-white rounded-xl p-4 border border-slate-100 shadow-sm animate-pulse">
+                  <div class="h-8 bg-slate-100 rounded-lg w-12 mb-2"></div>
+                  <div class="h-3 bg-slate-100 rounded w-20"></div>
+              </div>`).join('')}
+          </div>
+
+          <!-- Filter Bar -->
+          <div class="card p-4 flex flex-wrap gap-3 items-center mb-4">
+              <div class="relative flex-1 min-w-[200px]">
+                  <svg class="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-4.35-4.35M17 11A6 6 0 115 11a6 6 0 0112 0z"/>
+                  </svg>
+                  <input id="org-search" type="text" placeholder="ค้นหาชื่อแผนก..."
+                      value="${_orgSearch}"
+                      class="w-full pl-9 pr-3 py-2 text-sm border border-slate-200 rounded-lg outline-none focus:border-emerald-400 focus:ring-2 focus:ring-emerald-100"
+                      oninput="window._orgFilter()">
+              </div>
+              <div class="flex bg-slate-100 p-1 rounded-lg gap-0.5 flex-shrink-0">
+                  ${[{ v:'all', label:'ทั้งหมด' }, { v:'safety', label:'Safety Core' }, { v:'general', label:'หน่วยงานทั่วไป' }].map(o => `
+                  <button onclick="window._orgSetFilter('${o.v}')" id="org-type-${o.v}"
+                      class="px-3 py-1.5 rounded-md text-xs font-semibold transition-all ${_orgFilter === o.v ? 'bg-white shadow-sm text-slate-800' : 'text-slate-500 hover:text-slate-700'}">
+                      ${o.label}
+                  </button>`).join('')}
+              </div>
+              <span id="org-clear-wrap" class="${_orgSearch || _orgFilter !== 'all' ? '' : 'hidden'}">
+                  <button onclick="window._orgClearFilter()" class="text-xs text-slate-500 underline hover:text-slate-700">ล้างตัวกรอง</button>
+              </span>
+              <span id="org-count" class="text-xs text-slate-400 ml-auto"></span>
+              ${TSHSession.getUser()?.role === 'Admin' || TSHSession.getUser()?.Role === 'Admin' ? `
+              <button onclick="window._orgAddDept()"
+                  class="flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-bold text-white shadow-sm"
+                  style="background:linear-gradient(135deg,#065f46,#0d9488)">
+                  <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/></svg>
+                  เพิ่มแผนก
+              </button>` : ''}
+          </div>
+
+          <div class="card overflow-hidden">
+              <div id="org-table-wrap">
+                  <div class="flex items-center justify-center py-16 text-slate-400">
+                      <div class="inline-block animate-spin rounded-full h-8 w-8 border-4 border-emerald-500 border-t-transparent"></div>
+                  </div>
+              </div>
+          </div>
+          <div id="org-pagination" class="flex justify-center gap-1 mt-3"></div>
+        </div>
+
+        <!-- ─── Section 2: Teams / Positions / Roles ─── -->
+        <div>
+          <p class="text-xs font-bold text-slate-400 uppercase tracking-widest mb-3">ข้อมูลอ้างอิง (Teams · Positions · Roles)</p>
+          <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+            ${refTypes.map(rt => `
+            <div class="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden flex flex-col" style="max-height:420px">
+                <div class="p-4 bg-gradient-to-b ${hdrCls[rt.color]} to-white border-b flex justify-between items-center flex-shrink-0">
+                    <div class="flex items-center gap-2.5">
+                        <div class="p-1.5 bg-white rounded-lg border border-slate-200 shadow-sm">
+                            <svg class="w-4 h-4 text-slate-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">${rt.icon}</svg>
+                        </div>
+                        <div>
+                            <h3 class="font-bold text-slate-800 text-sm">${rt.title}</h3>
+                            <p class="text-[10px] text-slate-500">${rt.sub}</p>
+                        </div>
+                    </div>
+                    <span id="count-${rt.key}" class="text-[10px] font-bold bg-white px-2 py-0.5 rounded-full border border-slate-200 text-slate-500">0</span>
+                </div>
+                <div class="p-3 border-b border-slate-100 flex-shrink-0">
+                    <div class="flex gap-2">
+                        <input type="text" id="input-${rt.key}" class="form-input w-full pl-3 py-1.5 rounded-lg text-xs border-slate-300 focus:ring-1 focus:ring-slate-800"
+                            placeholder="เพิ่มรายการใหม่..." onkeypress="if(event.key==='Enter') addMasterData('${rt.key}')">
+                        <button onclick="addMasterData('${rt.key}')" class="px-3 bg-slate-800 hover:bg-slate-900 text-white rounded-lg text-xs font-bold transition-colors">+</button>
+                    </div>
+                </div>
+                <ul id="list-${rt.key}" class="flex-1 overflow-y-auto p-2 space-y-0.5 custom-scrollbar">
+                    <li class="text-center text-xs text-slate-400 py-8">กำลังโหลด...</li>
+                </ul>
             </div>`).join('')}
-        </div>
-
-        <!-- Filter Bar -->
-        <div class="card p-4 flex flex-wrap gap-3 items-center">
-            <!-- Search -->
-            <div class="relative flex-1 min-w-[200px]">
-                <svg class="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400"
-                     fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                          d="M21 21l-4.35-4.35M17 11A6 6 0 115 11a6 6 0 0112 0z"/>
-                </svg>
-                <input id="org-search" type="text" placeholder="ค้นหาชื่อแผนก..."
-                    value="${_orgSearch}"
-                    class="w-full pl-9 pr-3 py-2 text-sm border border-slate-200 rounded-lg outline-none focus:border-emerald-400 focus:ring-2 focus:ring-emerald-100"
-                    oninput="window._orgFilter()">
-            </div>
-            <!-- Type filter -->
-            <div class="flex bg-slate-100 p-1 rounded-lg gap-0.5 flex-shrink-0">
-                ${[
-                    { v: 'all',     label: 'ทั้งหมด'          },
-                    { v: 'safety',  label: 'Safety Core'      },
-                    { v: 'general', label: 'หน่วยงานทั่วไป'   },
-                ].map(o => `
-                <button onclick="window._orgSetFilter('${o.v}')"
-                    id="org-type-${o.v}"
-                    class="px-3 py-1.5 rounded-md text-xs font-semibold transition-all
-                        ${_orgFilter === o.v ? 'bg-white shadow-sm text-slate-800' : 'text-slate-500 hover:text-slate-700'}">
-                    ${o.label}
-                </button>`).join('')}
-            </div>
-            <!-- Clear -->
-            <span id="org-clear-wrap" class="${_orgSearch || _orgFilter !== 'all' ? '' : 'hidden'}">
-                <button onclick="window._orgClearFilter()"
-                    class="text-xs text-slate-500 underline hover:text-slate-700">ล้างตัวกรอง</button>
-            </span>
-            <!-- Count badge -->
-            <span id="org-count" class="text-xs text-slate-400 ml-auto"></span>
-            <!-- Add dept button (admin only) -->
-            ${TSHSession.getUser()?.role === 'Admin' || TSHSession.getUser()?.Role === 'Admin' ? `
-            <button onclick="window._orgAddDept()"
-                class="flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-bold text-white transition-all shadow-sm"
-                style="background:linear-gradient(135deg,#065f46,#0d9488)">
-                <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/>
-                </svg>
-                เพิ่มแผนก
-            </button>` : ''}
-        </div>
-
-        <!-- Table -->
-        <div class="card overflow-hidden">
-            <div id="org-table-wrap">
-                <div class="flex items-center justify-center py-16 text-slate-400">
-                    <div class="inline-block animate-spin rounded-full h-8 w-8 border-4 border-emerald-500 border-t-transparent"></div>
-                </div>
-            </div>
-        </div>
-
-        <!-- Pagination -->
-        <div id="org-pagination" class="flex justify-center gap-1"></div>
-
-        <!-- ─── Lookup Data: Teams & Positions ─── -->
-        <div class="pt-2">
-            <p class="text-xs font-bold text-slate-400 uppercase tracking-widest mb-3">ข้อมูลอ้างอิง (Teams &amp; Positions)</p>
-            <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-
-                <!-- Teams -->
-                <div class="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden flex flex-col" style="max-height:400px">
-                    <div class="p-4 bg-gradient-to-b from-sky-50 to-white border-b flex justify-between items-center flex-shrink-0">
-                        <div class="flex items-center gap-2.5">
-                            <div class="p-1.5 bg-white rounded-lg border border-slate-200 shadow-sm">
-                                <svg class="w-4 h-4 text-slate-600" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0z"/></svg>
-                            </div>
-                            <div>
-                                <h3 class="font-bold text-slate-800 text-sm">Teams</h3>
-                                <p class="text-[10px] text-slate-500">ทีม</p>
-                            </div>
-                        </div>
-                        <span id="count-teams" class="text-[10px] font-bold bg-white px-2 py-0.5 rounded-full border border-slate-200 text-slate-500">0</span>
-                    </div>
-                    <div class="p-3 border-b border-slate-100 flex-shrink-0">
-                        <div class="flex gap-2">
-                            <input type="text" id="input-teams" class="form-input w-full pl-3 py-1.5 rounded-lg text-xs border-slate-300 focus:ring-1 focus:ring-slate-800"
-                                placeholder="เพิ่มทีมใหม่..." onkeypress="if(event.key==='Enter') addMasterData('teams')">
-                            <button onclick="addMasterData('teams')" class="px-3 bg-slate-800 hover:bg-slate-900 text-white rounded-lg text-xs font-bold transition-colors">+</button>
-                        </div>
-                    </div>
-                    <ul id="list-teams" class="flex-1 overflow-y-auto p-2 space-y-0.5 custom-scrollbar">
-                        <li class="text-center text-xs text-slate-400 py-8">กำลังโหลด...</li>
-                    </ul>
-                </div>
-
-                <!-- Positions -->
-                <div class="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden flex flex-col" style="max-height:400px">
-                    <div class="p-4 bg-gradient-to-b from-violet-50 to-white border-b flex justify-between items-center flex-shrink-0">
-                        <div class="flex items-center gap-2.5">
-                            <div class="p-1.5 bg-white rounded-lg border border-slate-200 shadow-sm">
-                                <svg class="w-4 h-4 text-slate-600" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 13.255A23.931 23.931 0 0112 15c-3.183 0-6.22-.62-9-1.745M16 6V4a2 2 0 00-2-2h-4a2 2 0 00-2 2v2m4 6h.01M5 20h14a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"/></svg>
-                            </div>
-                            <div>
-                                <h3 class="font-bold text-slate-800 text-sm">Positions</h3>
-                                <p class="text-[10px] text-slate-500">ตำแหน่ง</p>
-                            </div>
-                        </div>
-                        <span id="count-positions" class="text-[10px] font-bold bg-white px-2 py-0.5 rounded-full border border-slate-200 text-slate-500">0</span>
-                    </div>
-                    <div class="p-3 border-b border-slate-100 flex-shrink-0">
-                        <div class="flex gap-2">
-                            <input type="text" id="input-positions" class="form-input w-full pl-3 py-1.5 rounded-lg text-xs border-slate-300 focus:ring-1 focus:ring-slate-800"
-                                placeholder="เพิ่มตำแหน่งใหม่..." onkeypress="if(event.key==='Enter') addMasterData('positions')">
-                            <button onclick="addMasterData('positions')" class="px-3 bg-slate-800 hover:bg-slate-900 text-white rounded-lg text-xs font-bold transition-colors">+</button>
-                        </div>
-                    </div>
-                    <ul id="list-positions" class="flex-1 overflow-y-auto p-2 space-y-0.5 custom-scrollbar">
-                        <li class="text-center text-xs text-slate-400 py-8">กำลังโหลด...</li>
-                    </ul>
-                </div>
-
-            </div>
+          </div>
         </div>
 
     </div>`;
 
-    // Expose filter handlers
     window._orgFilter      = _orgApplyFilter;
     window._orgSetFilter   = _orgSetTypeFilter;
     window._orgClearFilter = _orgClearFilter;
 
-    // Fetch data then render
     await _orgFetchAll();
 
     if (_orgFetchError) {
@@ -341,18 +300,16 @@ async function renderOrganization(container) {
         <div class="text-center py-16 text-slate-400">
             <div class="w-16 h-16 rounded-2xl bg-red-50 flex items-center justify-center mx-auto mb-4">
                 <svg class="w-8 h-8 text-red-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5"
-                          d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/>
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/>
                 </svg>
             </div>
             <p class="font-semibold text-slate-600">โหลดข้อมูลไม่สำเร็จ</p>
             <p class="text-sm mt-1">ไม่สามารถเชื่อมต่อกับ API ได้</p>
-            <button onclick="window._adminTab('organization')"
+            <button onclick="window._adminTab('reference')"
                 class="mt-4 inline-flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-bold text-white shadow-sm"
                 style="background:linear-gradient(135deg,#065f46,#0d9488)">
                 <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                          d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/>
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/>
                 </svg>
                 ลองใหม่
             </button>
@@ -383,6 +340,7 @@ async function renderOrganization(container) {
     _orgRenderTable();
     loadMasterList('teams');
     loadMasterList('positions');
+    loadMasterList('roles');
 }
 
 // ─── Fetch ─────────────────────────────────────────────────────────────────────
@@ -2531,56 +2489,6 @@ window._ptDownloadSchedulePDF = function() {
     win.document.close();
     win.onload = () => setTimeout(() => { win.focus(); win.print(); }, 800);
 };
-
-// =============================================================================
-// TAB: MASTER DATA
-// =============================================================================
-async function renderMasterData(container) {
-    const masterTypes = [
-        { key:'departments', title:'Departments', sub:'แผนก', color:'indigo' },
-        { key:'teams',       title:'Teams',       sub:'ทีม',  color:'sky'    },
-        { key:'positions',   title:'Positions',   sub:'ตำแหน่ง', color:'violet' },
-        { key:'roles',       title:'System Roles',sub:'สิทธิ์', color:'rose'  },
-    ];
-    const icons = {
-        departments: `<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4"/>`,
-        teams:       `<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0z"/>`,
-        positions:   `<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 13.255A23.931 23.931 0 0112 15c-3.183 0-6.22-.62-9-1.745M16 6V4a2 2 0 00-2-2h-4a2 2 0 00-2 2v2m4 6h.01M5 20h14a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"/>`,
-        roles:       `<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 7a2 2 0 012 2m4 0a6 6 0 01-7.743 5.743L11 17H9v2H7v2H4a1 1 0 01-1-1v-2.586a1 1 0 01.293-.707l5.964-5.964A6 6 0 1121 9z"/>`,
-    };
-    const hdr = { indigo:'from-indigo-50 to-white border-indigo-100', sky:'from-sky-50 to-white border-sky-100', violet:'from-violet-50 to-white border-violet-100', rose:'from-rose-50 to-white border-rose-100' };
-
-    container.innerHTML = `
-    <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 animate-fade-in">
-        ${masterTypes.map(mt => `
-        <div class="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden flex flex-col h-[520px]">
-            <div class="p-4 bg-gradient-to-b ${hdr[mt.color]} border-b flex justify-between items-center">
-                <div class="flex items-center gap-2.5">
-                    <div class="p-1.5 bg-white rounded-lg border border-slate-200 shadow-sm">
-                        <svg class="w-5 h-5 text-slate-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">${icons[mt.key]}</svg>
-                    </div>
-                    <div>
-                        <h3 class="font-bold text-slate-800 text-sm">${mt.title}</h3>
-                        <p class="text-[10px] text-slate-500">${mt.sub}</p>
-                    </div>
-                </div>
-                <span id="count-${mt.key}" class="text-[10px] font-bold bg-white px-2 py-0.5 rounded-full border border-slate-200 text-slate-500">0</span>
-            </div>
-            <div class="p-3 border-b border-slate-100">
-                <div class="flex gap-2">
-                    <input type="text" id="input-${mt.key}" class="form-input w-full pl-3 py-1.5 rounded-lg text-xs border-slate-300 focus:ring-1 focus:ring-slate-800"
-                        placeholder="เพิ่มรายการใหม่..." onkeypress="if(event.key==='Enter') addMasterData('${mt.key}')">
-                    <button onclick="addMasterData('${mt.key}')" class="px-3 bg-slate-800 hover:bg-slate-900 text-white rounded-lg text-xs font-bold transition-colors">+</button>
-                </div>
-            </div>
-            <ul id="list-${mt.key}" class="flex-1 overflow-y-auto p-2 space-y-0.5 custom-scrollbar">
-                <li class="text-center text-xs text-slate-400 py-10">กำลังโหลด...</li>
-            </ul>
-        </div>`).join('')}
-    </div>`;
-
-    masterTypes.forEach(mt => loadMasterList(mt.key));
-}
 
 async function loadPositionsList() {
     const listEl  = document.getElementById('list-positions');
