@@ -236,6 +236,73 @@ app.put('/api/profile', authenticateToken, async (req, res) => {
     }
 });
 
+// ─── เปลี่ยนรหัสพนักงาน (cascade update ทุกตารางที่อ้างอิง) ─────────────────
+app.put('/api/profile/employee-id', authenticateToken, async (req, res) => {
+    const { newEmployeeID } = req.body;
+    const oldID = req.user.id;
+    if (!newEmployeeID || !newEmployeeID.trim())
+        return res.status(400).json({ success: false, message: 'กรุณาระบุรหัสพนักงานใหม่' });
+    const newID = newEmployeeID.trim().toUpperCase();
+    if (newID === oldID)
+        return res.status(400).json({ success: false, message: 'รหัสพนักงานเหมือนเดิม ไม่มีการเปลี่ยนแปลง' });
+
+    const connection = await pool.getConnection();
+    try {
+        await connection.beginTransaction();
+
+        // ตรวจว่า newID ยังไม่มีในระบบ
+        const [[existing]] = await connection.query(
+            'SELECT EmployeeID FROM Employees WHERE EmployeeID = ?', [newID]
+        );
+        if (existing) {
+            await connection.rollback();
+            return res.status(400).json({ success: false, message: `รหัสพนักงาน "${newID}" มีอยู่แล้วในระบบ` });
+        }
+
+        // อัปเดต Employees (PK)
+        await connection.query('UPDATE Employees SET EmployeeID = ? WHERE EmployeeID = ?', [newID, oldID]);
+
+        // Cascade update ตารางที่อ้างอิง EmployeeID ของผู้ใช้
+        const cascades = [
+            'UPDATE Patrol_Attendance    SET UserID      = ? WHERE UserID      = ?',
+            'UPDATE Patrol_Self_Checkin  SET EmployeeID  = ? WHERE EmployeeID  = ?',
+            'UPDATE CCCF_Activity        SET EmployeeID  = ? WHERE EmployeeID  = ?',
+            'UPDATE KY_Activities        SET ReporterID  = ? WHERE ReporterID  = ?',
+            'UPDATE FourM_ChangeNotices  SET CreatedByID = ? WHERE CreatedByID = ?',
+            'UPDATE SC_PPEInspections    SET InspectorID = ? WHERE InspectorID = ?',
+            'UPDATE YokotenResponses     SET EmployeeID  = ? WHERE EmployeeID  = ?',
+            'UPDATE Policy_Acknowledgements SET UserID   = ? WHERE UserID      = ?',
+            'UPDATE Admin_AuditLogs      SET AdminID     = ? WHERE AdminID     = ?',
+        ];
+        for (const sql of cascades) {
+            await connection.query(sql, [newID, oldID]).catch(() => {}); // silent — ตารางอาจยังไม่มี
+        }
+
+        await connection.commit();
+
+        // ออก JWT ใหม่ด้วย EmployeeID ใหม่
+        const [[updated]] = await pool.query(
+            'SELECT EmployeeID, EmployeeName, Department, Role, Team FROM Employees WHERE EmployeeID = ?', [newID]
+        );
+        const userData = {
+            id:         updated.EmployeeID,
+            name:       updated.EmployeeName,
+            department: updated.Department,
+            role:       updated.Role,
+            team:       updated.Team || '',
+        };
+        const newToken = jwt.sign(userData, process.env.JWT_SECRET, { expiresIn: '6h' });
+
+        res.json({ success: true, message: 'เปลี่ยนรหัสพนักงานสำเร็จ', token: newToken, user: userData });
+    } catch (err) {
+        await connection.rollback();
+        console.error('Change EmployeeID Error:', err);
+        res.status(500).json({ success: false, message: 'เกิดข้อผิดพลาด กรุณาลองใหม่' });
+    } finally {
+        connection.release();
+    }
+});
+
 // =================================================================
 // SECTION 3: PAGE-SPECIFIC DATA ROUTES
 // =================================================================

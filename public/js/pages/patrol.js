@@ -211,13 +211,57 @@ function renderDashboard(container, data) {
         if (fab) fab.classList.toggle('hidden', tab !== 'issues');
         // lazy-load overview data on first switch
         if (tab === 'overview' && !_overviewData) {
-            const now = new Date();
+            window._svLoaded = false;
             loadOverview(_overviewYear);
-            loadSupervisorOverview(now.getFullYear(), now.getMonth() + 1);
+            // activate mgmt sub-tab by default
+            setTimeout(() => window._switchOvSub?.('mgmt'), 0);
         }
     };
     // expose for loadOverview to refresh hero stats when overview is active
     window._refreshOverviewHero = () => renderStatsStrip(getOverviewHeroStats());
+
+    // Sub-tab switcher for overview tab
+    window._switchOvSub = function(sub) {
+        const mgmtDiv  = document.getElementById('ov-sub-mgmt');
+        const svDiv    = document.getElementById('ov-sub-sv');
+        const btnMgmt  = document.getElementById('ov-sub-btn-mgmt');
+        const btnSv    = document.getElementById('ov-sub-btn-sv');
+        if (!mgmtDiv || !svDiv) return;
+
+        const isMgmt = sub === 'mgmt';
+        mgmtDiv.classList.toggle('hidden', !isMgmt);
+        svDiv.classList.toggle('hidden',   isMgmt);
+
+        // Style active/inactive buttons
+        if (btnMgmt) {
+            btnMgmt.removeAttribute('style');
+            if (isMgmt) { btnMgmt.style.background = 'linear-gradient(135deg,#059669,#0d9488)'; btnMgmt.className = 'flex-1 py-2.5 px-4 rounded-lg text-xs font-bold transition-all text-white'; }
+            else         { btnMgmt.className = 'flex-1 py-2.5 px-4 rounded-lg text-xs font-bold transition-all text-slate-500 hover:bg-slate-50'; }
+        }
+        if (btnSv) {
+            btnSv.removeAttribute('style');
+            if (!isMgmt) { btnSv.style.background = 'linear-gradient(135deg,#d97706,#f59e0b)'; btnSv.className = 'flex-1 py-2.5 px-4 rounded-lg text-xs font-bold transition-all text-white'; }
+            else          { btnSv.className = 'flex-1 py-2.5 px-4 rounded-lg text-xs font-bold transition-all text-slate-500 hover:bg-slate-50'; }
+        }
+
+        // Lazy-load supervisor data on first switch
+        if (!isMgmt && !window._svLoaded) {
+            const now = new Date();
+            const mo  = document.getElementById('sv-month-select')?.value || (now.getMonth() + 1);
+            const yr  = document.getElementById('sv-year-select')?.value  || now.getFullYear();
+            loadSupervisorOverview(parseInt(yr), parseInt(mo));
+            window._svLoaded = true;
+        }
+        // Re-render charts after making visible (canvas needs to be visible to render correctly)
+        if (isMgmt  && _overviewData) renderOverviewChart(_overviewData.summary.percent);
+    };
+
+    // Filter handler for Sec. & Supervisor sub-tab
+    window.switchSvFilter = function() {
+        const mo = document.getElementById('sv-month-select')?.value;
+        const yr = document.getElementById('sv-year-select')?.value;
+        if (mo && yr) { window._svLoaded = true; loadSupervisorOverview(parseInt(yr), parseInt(mo)); }
+    };
 
     container.innerHTML = `
     <div class="pb-20 animate-fade-in">
@@ -565,127 +609,7 @@ function renderDashboard(container, data) {
       <!-- ═══ OVERVIEW TAB ═══ -->
       <div id="content-overview" class="hidden space-y-5">
 
-        <!-- Filter bar -->
-        <div class="bg-white rounded-xl border border-slate-100 shadow-sm p-4 flex flex-wrap items-center gap-3">
-          <div class="flex items-center gap-2">
-            <label class="text-xs font-bold text-slate-600">ปี</label>
-            <select id="overview-year-select" onchange="switchOverviewYear(this.value)"
-              class="text-sm font-bold rounded-xl border border-slate-200 px-3 py-1.5 focus:outline-none focus:border-emerald-400 text-slate-700">
-              ${[new Date().getFullYear(), new Date().getFullYear()-1, new Date().getFullYear()-2].map(y =>
-                `<option value="${y}" ${y === _overviewYear ? 'selected' : ''}>${y}</option>`
-              ).join('')}
-            </select>
-          </div>
-          <div class="flex items-center gap-2 ml-auto">
-            <select id="overview-type-filter" onchange="filterOverviewTable(this.value)"
-              class="text-xs font-semibold rounded-xl border border-slate-200 px-3 py-1.5 focus:outline-none focus:border-emerald-400 text-slate-600">
-              <option value="all">ทุกประเภท</option>
-              <option value="top">Top Management</option>
-              <option value="committee">คปอ.</option>
-              <option value="management">Management</option>
-            </select>
-          </div>
-        </div>
-
-        <!-- Main 2-col -->
-        <div class="grid grid-cols-1 xl:grid-cols-3 gap-5">
-
-          <!-- Attendance Table -->
-          <div class="xl:col-span-2 bg-white rounded-2xl shadow-sm border border-slate-100 overflow-hidden">
-            <div class="px-5 py-3.5 border-b border-slate-100 flex items-center justify-between bg-slate-50/50">
-              <h3 class="font-bold text-slate-700 text-sm flex items-center gap-2">
-                <svg class="w-4 h-4 text-emerald-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"/></svg>
-                สรุปการเข้าร่วมเดินตรวจ
-              </h3>
-              <span id="ov-table-subtitle" class="text-[10px] text-slate-400 font-semibold">ปี ${_overviewYear}</span>
-            </div>
-            <div class="overflow-x-auto">
-              <table class="w-full text-xs text-left">
-                <thead class="text-[10px] uppercase bg-slate-50 border-b border-slate-100">
-                  <tr>
-                    <th class="px-4 py-3 font-bold text-slate-400 w-8">#</th>
-                    <th class="px-4 py-3 font-bold text-slate-600">ชื่อ-สกุล</th>
-                    <th class="px-4 py-3 font-bold text-slate-400 text-center">ประเภท</th>
-                    <th class="px-4 py-3 font-bold text-slate-400 text-center">ปี</th>
-                    <th class="px-4 py-3 font-bold text-slate-400 text-center">ทั้งหมด</th>
-                    <th class="px-4 py-3 font-bold text-emerald-600 text-center">เข้าร่วม</th>
-                    <th class="px-4 py-3 font-bold text-slate-400 text-center">%</th>
-                  </tr>
-                </thead>
-                <tbody id="overview-table-body" class="divide-y divide-slate-50">
-                  <tr><td colspan="7" class="text-center py-12 text-slate-300 text-xs">
-                    <div class="inline-flex flex-col items-center gap-2">
-                      <div class="animate-spin rounded-full h-8 w-8 border-4 border-emerald-500 border-t-transparent"></div>
-                      <span>กำลังโหลด...</span>
-                    </div>
-                  </td></tr>
-                </tbody>
-              </table>
-            </div>
-            <!-- Evaluation Criteria -->
-            <div class="px-5 py-4 border-t border-slate-100 bg-slate-50/50">
-              <p class="text-[10px] font-bold text-slate-500 uppercase mb-2">Evaluation Criteria</p>
-              <div class="overflow-x-auto">
-                <table class="text-[10px] text-slate-600 w-full">
-                  <thead><tr class="border-b border-slate-200">
-                    <th class="pb-1.5 font-bold text-slate-400 text-left pr-4">Rating</th>
-                    ${[1,2,3,4,5].map(r=>`<th class="pb-1.5 font-bold text-center px-3">${r}</th>`).join('')}
-                    <th class="pb-1.5 font-bold text-slate-400 text-center px-3">Weight</th>
-                  </tr></thead>
-                  <tbody><tr>
-                    <td class="py-1.5 text-slate-400 pr-4">%</td>
-                    ${['≥ 60','≥ 65','≥ 70','≥ 75','≥ 80'].map(v=>`<td class="py-1.5 text-center px-3 font-semibold">${v}</td>`).join('')}
-                    <td class="py-1.5 text-center px-3 font-bold text-indigo-600">0.4</td>
-                  </tr></tbody>
-                </table>
-              </div>
-            </div>
-          </div>
-
-          <!-- Right column -->
-          <div class="space-y-5">
-
-            <!-- Pie chart -->
-            <div class="bg-white rounded-2xl shadow-sm border border-slate-100 p-5">
-              <h3 class="font-bold text-slate-700 text-sm mb-4">Safety Patrol Pie Chart</h3>
-              <div class="relative h-52 flex items-center justify-center">
-                <canvas id="overviewPieChart"></canvas>
-                <div id="overview-pie-center" class="absolute inset-0 flex flex-col items-center justify-center pointer-events-none">
-                  <p class="text-3xl font-bold text-emerald-600" id="ov-pie-pct">—%</p>
-                  <p class="text-[10px] text-slate-400 mt-0.5">อัตราเข้าร่วม</p>
-                </div>
-              </div>
-            </div>
-
-            <!-- Stats summary card -->
-            <div class="rounded-2xl overflow-hidden shadow-sm" style="background:linear-gradient(135deg,#064e3b 0%,#065f46 60%,#0d9488 100%)">
-              <div class="p-5">
-                <div class="flex items-center gap-2 mb-3">
-                  <svg class="w-4 h-4 text-emerald-300" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z"/></svg>
-                  <span class="text-xs font-bold text-white/80 uppercase tracking-wide">Safety Patrol Record</span>
-                </div>
-                <p class="text-[10px] text-white/50 mb-4" id="ov-card-date">—</p>
-                <div class="grid grid-cols-2 gap-3">
-                  <div class="rounded-xl p-3 text-center" style="background:rgba(255,255,255,0.12)">
-                    <p class="text-2xl font-bold text-white" id="ov-card-total">—</p>
-                    <p class="text-[10px] text-white/60 mt-0.5">เซสชันทั้งหมด</p>
-                  </div>
-                  <div class="rounded-xl p-3 text-center" style="background:rgba(255,255,255,0.12)">
-                    <p class="text-2xl font-bold text-emerald-300" id="ov-card-attended">—</p>
-                    <p class="text-[10px] text-white/60 mt-0.5">เข้าร่วม</p>
-                  </div>
-                </div>
-                <div class="mt-3 rounded-xl p-3 text-center" style="background:rgba(255,255,255,0.08)">
-                  <p class="text-3xl font-bold text-white" id="ov-card-pct">—%</p>
-                  <p class="text-[10px] text-white/60 mt-0.5">อัตราการเข้าร่วม</p>
-                </div>
-              </div>
-            </div>
-
-          </div>
-        </div>
-
-        <!-- Team overview this month -->
+        <!-- Team overview this month (common) -->
         ${(() => {
           const seen = new Map();
           (data.summary || []).forEach(s => {
@@ -722,63 +646,234 @@ function renderDashboard(container, data) {
         </div>`;
         })()}
 
-        <!-- Leaderboard -->
-        <div class="bg-white rounded-2xl shadow-sm border border-slate-100 p-5">
-          <h3 class="font-bold text-slate-700 text-sm flex items-center gap-2 mb-4">
-            <div class="w-7 h-7 rounded-lg flex items-center justify-center bg-emerald-50">
-              <svg class="w-4 h-4 text-emerald-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0"/></svg>
-            </div>
-            ผู้เข้าร่วมเดินตรวจ (Top 10)
-          </h3>
-          <div class="grid grid-cols-1 sm:grid-cols-2 gap-1">
-            ${normalizeApiArray(data.stats).slice(0,10).map((r, i) => `
-            <div class="flex items-center gap-2 p-2 hover:bg-slate-50 rounded-lg transition-colors">
-              <span class="w-5 h-5 rounded-full flex items-center justify-center text-[9px] font-bold flex-shrink-0 ${i < 3 ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-100 text-slate-500'}">${i+1}</span>
-              <div class="w-6 h-6 rounded-full bg-slate-100 text-[9px] flex items-center justify-center font-bold text-slate-600 flex-shrink-0">${r.Name?r.Name[0]:'?'}</div>
-              <span class="text-xs font-semibold text-slate-600 truncate flex-1">${r.Name}</span>
-              <div class="w-16 bg-slate-100 h-1.5 rounded-full overflow-hidden flex-shrink-0">
-                <div class="bg-emerald-500 h-full rounded-full" style="width:${Math.min(r.Percent||0,100)}%"></div>
+        <!-- Sub-tab toggle -->
+        <div class="bg-white rounded-xl border border-slate-100 shadow-sm p-1.5 flex gap-1">
+          <button id="ov-sub-btn-mgmt" onclick="window._switchOvSub('mgmt')"
+                  class="flex-1 py-2.5 px-4 rounded-lg text-xs font-bold transition-all text-white"
+                  style="background:linear-gradient(135deg,#059669,#0d9488)">
+            Top &amp; Management
+          </button>
+          <button id="ov-sub-btn-sv" onclick="window._switchOvSub('sv')"
+                  class="flex-1 py-2.5 px-4 rounded-lg text-xs font-bold transition-all text-slate-500 hover:bg-slate-50">
+            Sec. &amp; Supervisor
+          </button>
+        </div>
+
+        <!-- ── Sub-tab 1: Top & Management ── -->
+        <div id="ov-sub-mgmt" class="space-y-5">
+          <!-- Filter bar -->
+          <div class="bg-white rounded-xl border border-slate-100 shadow-sm p-4 flex items-center gap-3">
+            <label class="text-xs font-bold text-slate-600">ปี</label>
+            <select id="overview-year-select" onchange="switchOverviewYear(this.value)"
+              class="text-sm font-bold rounded-xl border border-slate-200 px-3 py-1.5 focus:outline-none focus:border-emerald-400 text-slate-700">
+              ${[new Date().getFullYear(), new Date().getFullYear()-1, new Date().getFullYear()-2].map(y =>
+                `<option value="${y}" ${y === _overviewYear ? 'selected' : ''}>${y}</option>`
+              ).join('')}
+            </select>
+          </div>
+
+          <!-- 2-col grid -->
+          <div class="grid grid-cols-1 xl:grid-cols-3 gap-5">
+
+            <!-- Attendance Table xl:col-span-2 -->
+            <div class="xl:col-span-2 bg-white rounded-2xl shadow-sm border border-slate-100 overflow-hidden">
+              <div class="px-5 py-3.5 border-b border-slate-100 flex items-center justify-between bg-slate-50/50">
+                <h3 class="font-bold text-slate-700 text-sm flex items-center gap-2">
+                  <svg class="w-4 h-4 text-emerald-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"/></svg>
+                  Summary of Top &amp; Management Safety Patrol Attendance
+                </h3>
+                <span id="ov-table-subtitle" class="text-[10px] text-slate-400 font-semibold">ปี ${_overviewYear}</span>
               </div>
-              <span class="text-[9px] text-slate-400 font-mono flex-shrink-0 w-6 text-right">${r.Total}</span>
-            </div>`).join('')}
+              <div class="overflow-x-auto">
+                <table class="w-full text-xs text-left">
+                  <thead class="text-[10px] uppercase bg-slate-50 border-b border-slate-100">
+                    <tr>
+                      <th class="px-4 py-3 font-bold text-slate-400 w-8">#</th>
+                      <th class="px-4 py-3 font-bold text-slate-600">ชื่อ-สกุล</th>
+                      <th class="px-4 py-3 font-bold text-slate-400 text-center">ประเภท</th>
+                      <th class="px-4 py-3 font-bold text-slate-400 text-center">ปี</th>
+                      <th class="px-4 py-3 font-bold text-slate-400 text-center">ทั้งหมด</th>
+                      <th class="px-4 py-3 font-bold text-emerald-600 text-center">เข้าร่วม</th>
+                      <th class="px-4 py-3 font-bold text-slate-400 text-center">%</th>
+                    </tr>
+                  </thead>
+                  <tbody id="overview-table-body" class="divide-y divide-slate-50">
+                    <tr><td colspan="7" class="text-center py-12 text-slate-300 text-xs">
+                      <div class="inline-flex flex-col items-center gap-2">
+                        <div class="animate-spin rounded-full h-8 w-8 border-4 border-emerald-500 border-t-transparent"></div>
+                        <span>กำลังโหลด...</span>
+                      </div>
+                    </td></tr>
+                  </tbody>
+                </table>
+              </div>
+              <!-- Evaluation Criteria -->
+              <div class="px-5 py-4 border-t border-slate-100 bg-slate-50/50">
+                <p class="text-[10px] font-bold text-slate-500 uppercase mb-2">Evaluation Criteria</p>
+                <div class="overflow-x-auto">
+                  <table class="text-[10px] text-slate-600 w-full">
+                    <thead><tr class="border-b border-slate-200">
+                      <th class="pb-1.5 font-bold text-slate-400 text-left pr-4">Rating</th>
+                      ${[1,2,3,4,5].map(r=>`<th class="pb-1.5 font-bold text-center px-3">${r}</th>`).join('')}
+                      <th class="pb-1.5 font-bold text-slate-400 text-center px-3">Weight</th>
+                    </tr></thead>
+                    <tbody><tr>
+                      <td class="py-1.5 text-slate-400 pr-4">%</td>
+                      ${['≥ 60','≥ 65','≥ 70','≥ 75','≥ 80'].map(v=>`<td class="py-1.5 text-center px-3 font-semibold">${v}</td>`).join('')}
+                      <td class="py-1.5 text-center px-3 font-bold text-indigo-600">0.4</td>
+                    </tr></tbody>
+                  </table>
+                </div>
+              </div>
+            </div>
+
+            <!-- Right column -->
+            <div class="space-y-5">
+              <!-- Pie chart -->
+              <div class="bg-white rounded-2xl shadow-sm border border-slate-100 p-5">
+                <h3 class="font-bold text-slate-700 text-sm mb-4">Safety Patrol Pie Chart</h3>
+                <div class="relative h-52 flex items-center justify-center">
+                  <canvas id="ov-mgmt-pie"></canvas>
+                  <div class="absolute inset-0 flex flex-col items-center justify-center pointer-events-none">
+                    <p class="text-3xl font-bold text-emerald-600" id="ov-mgmt-pie-pct">—%</p>
+                    <p class="text-[10px] text-slate-400 mt-0.5">อัตราเข้าร่วม</p>
+                  </div>
+                </div>
+              </div>
+              <!-- Stats summary card -->
+              <div class="rounded-2xl overflow-hidden shadow-sm" style="background:linear-gradient(135deg,#064e3b 0%,#065f46 60%,#0d9488 100%)">
+                <div class="p-5">
+                  <div class="flex items-center gap-2 mb-3">
+                    <svg class="w-4 h-4 text-emerald-300" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z"/></svg>
+                    <span class="text-xs font-bold text-white/80 uppercase tracking-wide">Safety Patrol Record</span>
+                  </div>
+                  <p class="text-[10px] text-white/50 mb-4" id="ov-card-date">—</p>
+                  <div class="grid grid-cols-2 gap-3">
+                    <div class="rounded-xl p-3 text-center" style="background:rgba(255,255,255,0.12)">
+                      <p class="text-2xl font-bold text-white" id="ov-card-total">—</p>
+                      <p class="text-[10px] text-white/60 mt-0.5">เซสชันทั้งหมด</p>
+                    </div>
+                    <div class="rounded-xl p-3 text-center" style="background:rgba(255,255,255,0.12)">
+                      <p class="text-2xl font-bold text-emerald-300" id="ov-card-attended">—</p>
+                      <p class="text-[10px] text-white/60 mt-0.5">เข้าร่วม</p>
+                    </div>
+                  </div>
+                  <div class="mt-3 rounded-xl p-3 text-center" style="background:rgba(255,255,255,0.08)">
+                    <p class="text-3xl font-bold text-white" id="ov-card-pct">—%</p>
+                    <p class="text-[10px] text-white/60 mt-0.5">อัตราการเข้าร่วม</p>
+                  </div>
+                </div>
+              </div>
+            </div>
+
           </div>
         </div>
 
-        <!-- Supervisor Patrol Overview -->
-        <div class="bg-white rounded-2xl shadow-sm border border-amber-100 overflow-hidden">
-          <div class="px-5 py-3.5 border-b border-amber-100 flex items-center justify-between bg-amber-50/50">
-            <h3 class="font-bold text-slate-700 text-sm flex items-center gap-2">
-              <div class="w-7 h-7 rounded-lg flex items-center justify-center bg-amber-100">
-                <svg class="w-4 h-4 text-amber-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z"/></svg>
-              </div>
-              การเดินตรวจหัวหน้าส่วน/แผนก
-              <span class="text-[9px] font-normal text-slate-400">(เป้าหมาย 2 ครั้ง/เดือน)</span>
-            </h3>
-            <span class="text-[10px] text-slate-400" id="sv-overview-subtitle"></span>
+        <!-- ── Sub-tab 2: Sec. & Supervisor ── -->
+        <div id="ov-sub-sv" class="hidden space-y-5">
+
+          <!-- Filter bar: month + year -->
+          <div class="bg-white rounded-xl border border-slate-100 shadow-sm p-4 flex flex-wrap items-center gap-3">
+            <div class="flex items-center gap-2">
+              <label class="text-xs font-bold text-slate-600">เดือน</label>
+              <select id="sv-month-select" onchange="window.switchSvFilter()"
+                class="text-sm font-bold rounded-xl border border-slate-200 px-3 py-1.5 focus:outline-none focus:border-amber-400 text-slate-700">
+                ${['มกราคม','กุมภาพันธ์','มีนาคม','เมษายน','พฤษภาคม','มิถุนายน','กรกฎาคม','สิงหาคม','กันยายน','ตุลาคม','พฤศจิกายน','ธันวาคม'].map((m,i)=>
+                  `<option value="${i+1}" ${i+1===new Date().getMonth()+1?'selected':''}>${m}</option>`
+                ).join('')}
+              </select>
+            </div>
+            <div class="flex items-center gap-2">
+              <label class="text-xs font-bold text-slate-600">ปี</label>
+              <select id="sv-year-select" onchange="window.switchSvFilter()"
+                class="text-sm font-bold rounded-xl border border-slate-200 px-3 py-1.5 focus:outline-none focus:border-amber-400 text-slate-700">
+                ${[new Date().getFullYear(), new Date().getFullYear()-1, new Date().getFullYear()-2].map(y=>
+                  `<option value="${y}" ${y===new Date().getFullYear()?'selected':''}>${y}</option>`
+                ).join('')}
+              </select>
+            </div>
           </div>
-          <div class="overflow-x-auto">
-            <table class="w-full text-xs text-left">
-              <thead class="text-[10px] uppercase bg-slate-50 border-b border-slate-100">
-                <tr>
-                  <th class="px-4 py-3 font-bold text-slate-400 w-8">#</th>
-                  <th class="px-4 py-3 font-bold text-slate-600">ชื่อ-สกุล</th>
-                  <th class="px-4 py-3 font-bold text-slate-400">ตำแหน่ง</th>
-                  <th class="px-4 py-3 font-bold text-slate-400">แผนก</th>
-                  <th class="px-4 py-3 font-bold text-slate-400 text-center">เดินแล้ว</th>
-                  <th class="px-4 py-3 font-bold text-slate-400 text-center">เป้า</th>
-                  <th class="px-4 py-3 font-bold text-slate-400 text-center">%</th>
-                  <th class="px-4 py-3 font-bold text-slate-400 text-center">สถานะ</th>
-                </tr>
-              </thead>
-              <tbody id="sv-overview-body">
-                <tr><td colspan="8" class="text-center py-8 text-slate-300 text-xs">
-                  <div class="inline-flex flex-col items-center gap-2">
-                    <div class="animate-spin rounded-full h-6 w-6 border-3 border-amber-400 border-t-transparent"></div>
-                    <span>กำลังโหลด...</span>
+
+          <!-- 2-col grid -->
+          <div class="grid grid-cols-1 xl:grid-cols-3 gap-5">
+
+            <!-- Supervisor Table xl:col-span-2 -->
+            <div class="xl:col-span-2 bg-white rounded-2xl shadow-sm border border-amber-100 overflow-hidden">
+              <div class="px-5 py-3.5 border-b border-amber-100 flex items-center justify-between bg-amber-50/50">
+                <h3 class="font-bold text-slate-700 text-sm flex items-center gap-2">
+                  <div class="w-7 h-7 rounded-lg flex items-center justify-center bg-amber-100">
+                    <svg class="w-4 h-4 text-amber-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z"/></svg>
                   </div>
-                </td></tr>
-              </tbody>
-            </table>
+                  Summary of Sec. &amp; Supervisor Safety Patrol Attendance
+                  <span class="text-[9px] font-normal text-slate-400">(เป้าหมาย 2 ครั้ง/เดือน)</span>
+                </h3>
+                <span class="text-[10px] text-slate-400" id="sv-overview-subtitle"></span>
+              </div>
+              <div class="overflow-x-auto">
+                <table class="w-full text-xs text-left">
+                  <thead class="text-[10px] uppercase bg-slate-50 border-b border-slate-100">
+                    <tr>
+                      <th class="px-4 py-3 font-bold text-slate-400 w-8">#</th>
+                      <th class="px-4 py-3 font-bold text-slate-600">ชื่อ-สกุล</th>
+                      <th class="px-4 py-3 font-bold text-slate-400">ตำแหน่ง</th>
+                      <th class="px-4 py-3 font-bold text-slate-400">แผนก</th>
+                      <th class="px-4 py-3 font-bold text-slate-400 text-center">เดินแล้ว</th>
+                      <th class="px-4 py-3 font-bold text-slate-400 text-center">เป้า</th>
+                      <th class="px-4 py-3 font-bold text-slate-400 text-center">%</th>
+                      <th class="px-4 py-3 font-bold text-slate-400 text-center">สถานะ</th>
+                    </tr>
+                  </thead>
+                  <tbody id="sv-overview-body">
+                    <tr><td colspan="8" class="text-center py-8 text-slate-300 text-xs">
+                      <div class="inline-flex flex-col items-center gap-2">
+                        <div class="animate-spin rounded-full h-6 w-6 border-3 border-amber-400 border-t-transparent"></div>
+                        <span>กำลังโหลด...</span>
+                      </div>
+                    </td></tr>
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
+            <!-- Right column -->
+            <div class="space-y-5">
+              <!-- Pie chart -->
+              <div class="bg-white rounded-2xl shadow-sm border border-slate-100 p-5">
+                <h3 class="font-bold text-slate-700 text-sm mb-4">Safety Patrol Pie Chart</h3>
+                <div class="relative h-52 flex items-center justify-center">
+                  <canvas id="ov-sv-pie"></canvas>
+                  <div class="absolute inset-0 flex flex-col items-center justify-center pointer-events-none">
+                    <p class="text-3xl font-bold text-amber-600" id="ov-sv-pie-pct">—%</p>
+                    <p class="text-[10px] text-slate-400 mt-0.5">อัตราเข้าร่วม</p>
+                  </div>
+                </div>
+              </div>
+              <!-- Stats summary card -->
+              <div class="rounded-2xl overflow-hidden shadow-sm" style="background:linear-gradient(135deg,#78350f 0%,#92400e 55%,#b45309 100%)">
+                <div class="p-5">
+                  <div class="flex items-center gap-2 mb-3">
+                    <svg class="w-4 h-4 text-amber-300" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z"/></svg>
+                    <span class="text-xs font-bold text-white/80 uppercase tracking-wide">Safety Patrol Record</span>
+                  </div>
+                  <p class="text-[10px] text-white/50 mb-4" id="sv-card-subtitle">—</p>
+                  <div class="grid grid-cols-2 gap-3">
+                    <div class="rounded-xl p-3 text-center" style="background:rgba(255,255,255,0.12)">
+                      <p class="text-2xl font-bold text-white" id="sv-card-total">—</p>
+                      <p class="text-[10px] text-white/60 mt-0.5">ผู้ควบคุมทั้งหมด</p>
+                    </div>
+                    <div class="rounded-xl p-3 text-center" style="background:rgba(255,255,255,0.12)">
+                      <p class="text-2xl font-bold text-amber-300" id="sv-card-done">—</p>
+                      <p class="text-[10px] text-white/60 mt-0.5">ครบเป้าหมาย</p>
+                    </div>
+                  </div>
+                  <div class="mt-3 rounded-xl p-3 text-center" style="background:rgba(255,255,255,0.08)">
+                    <p class="text-3xl font-bold text-white" id="sv-card-pct">—%</p>
+                    <p class="text-[10px] text-white/60 mt-0.5">อัตราการเดินตรวจครบ</p>
+                  </div>
+                </div>
+              </div>
+            </div>
+
           </div>
         </div>
 
@@ -1754,7 +1849,7 @@ async function loadOverview(year) {
         setEl('ov-card-total', s.totalSessions);
         setEl('ov-card-attended', s.totalAttended);
         setEl('ov-card-pct', `${s.percent}%`);
-        setEl('ov-pie-pct', `${s.percent}%`);
+        setEl('ov-mgmt-pie-pct', `${s.percent}%`);
         if (s.latestDate) {
             const d = new Date(s.latestDate);
             setEl('ov-card-date', d.toLocaleDateString('th-TH', { day: 'numeric', month: 'long', year: 'numeric' }));
@@ -1832,7 +1927,7 @@ function renderOverviewTable(members, typeFilter = 'all') {
 }
 
 function renderOverviewChart(percent) {
-    const ctx = document.getElementById('overviewPieChart');
+    const ctx = document.getElementById('ov-mgmt-pie');
     if (!ctx) return;
     const attended = percent;
     const missed   = Math.max(0, 100 - percent);
@@ -1842,6 +1937,25 @@ function renderOverviewChart(percent) {
         data: {
             labels: ['เข้าร่วม', 'ขาด'],
             datasets: [{ data: [attended, missed || 0.1], backgroundColor: ['#10b981', '#f1f5f9'], borderWidth: 0, hoverOffset: 4 }],
+        },
+        options: {
+            responsive: true, maintainAspectRatio: false, cutout: '72%',
+            plugins: { legend: { position: 'bottom', labels: { boxWidth: 8, usePointStyle: true, font: { size: 10, family: 'Kanit' } } } },
+        },
+    });
+}
+
+function renderSvPieChart(percent) {
+    const ctx = document.getElementById('ov-sv-pie');
+    if (!ctx) return;
+    const done   = percent;
+    const missed = Math.max(0, 100 - percent);
+    if (window._svPieChart) window._svPieChart.destroy();
+    window._svPieChart = new Chart(ctx.getContext('2d'), {
+        type: 'doughnut',
+        data: {
+            labels: ['เดินตรวจแล้ว', 'ยังไม่เดิน'],
+            datasets: [{ data: [done, missed || 0.1], backgroundColor: ['#f59e0b', '#f1f5f9'], borderWidth: 0, hoverOffset: 4 }],
         },
         options: {
             responsive: true, maintainAspectRatio: false, cutout: '72%',
@@ -1868,14 +1982,28 @@ async function loadSupervisorOverview(year, month) {
     try {
         const res = await API.get(`/patrol/supervisor-overview?year=${year}&month=${month}`);
         const members = res.data || [];
-        if (subEl) {
-            const d = new Date(year, month - 1, 1);
-            subEl.textContent = d.toLocaleDateString('th-TH', { month: 'long', year: 'numeric' });
-        }
         if (!members.length) {
             tbody.innerHTML = `<tr><td colspan="8" class="text-center py-8 text-xs text-slate-400">ยังไม่มีข้อมูลหัวหน้าส่วน/แผนก<br><span class="text-[10px] text-slate-300">ตั้งค่า Self-Patrol ให้กับ Position ในหน้า Admin → Master Data → Positions</span></td></tr>`;
             return;
         }
+        // Compute aggregate stats for pie + record card
+        const totalMembers = members.length;
+        const doneCount    = members.filter(m => m.attended >= m.target).length;
+        const totalAtt     = members.reduce((s, m) => s + m.attended, 0);
+        const totalTgt     = members.reduce((s, m) => s + m.target,   0);
+        const svPct        = totalTgt > 0 ? Math.round(totalAtt / totalTgt * 100) : 0;
+
+        const setEl = (id, val) => { const el = document.getElementById(id); if (el) el.textContent = val; };
+        setEl('sv-card-total',  totalMembers);
+        setEl('sv-card-done',   doneCount);
+        setEl('sv-card-pct',    `${svPct}%`);
+        setEl('ov-sv-pie-pct',  `${svPct}%`);
+        if (subEl) {
+            const d2 = new Date(year, month - 1, 1);
+            setEl('sv-card-subtitle', d2.toLocaleDateString('th-TH', { month: 'long', year: 'numeric' }));
+        }
+        renderSvPieChart(svPct);
+
         tbody.innerHTML = members.map((m, i) => {
             const done = m.attended >= m.target;
             const half = m.attended > 0 && m.attended < m.target;

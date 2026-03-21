@@ -169,12 +169,12 @@ async function _loadAndRender() {
     try {
         const [profileRes, masterRes] = await Promise.all([
             apiFetch('/profile'),
-            _getMaster().catch(() => ({ departments: [], positions: [] })),
+            _getMaster().catch(() => ({ departments: [], positions: [], units: [] })),
         ]);
         const data = profileRes?.data;
         if (!data) throw new Error('ไม่สามารถโหลดข้อมูลโปรไฟล์ได้ กรุณาลองใหม่');
         _renderHeader(data);
-        _renderForm(data, masterRes || { departments: [], positions: [] });
+        _renderForm(data, masterRes || { departments: [], positions: [], units: [] });
     } catch (err) {
         if (wrap) wrap.innerHTML = `<p class="text-center text-red-500 py-8">${err.message || 'โหลดข้อมูลไม่ได้'}</p>`;
     }
@@ -269,9 +269,54 @@ function _renderForm(data, master) {
                 style="background:linear-gradient(135deg,#064e3b,#0d9488)">
             บันทึกข้อมูล
         </button>
-    </form>`;
+    </form>
+
+    <!-- เปลี่ยนรหัสพนักงาน (accordion) -->
+    <div class="mt-4 border border-slate-200 dark:border-slate-700 rounded-xl overflow-hidden">
+        <button id="pf-chid-toggle"
+                class="w-full flex items-center justify-between px-4 py-3 text-sm font-semibold text-slate-600 dark:text-slate-300 bg-slate-50 dark:bg-slate-800 hover:bg-slate-100 dark:hover:bg-slate-700 transition-colors"
+                onclick="document.getElementById('pf-chid-body').classList.toggle('hidden');this.querySelector('svg').classList.toggle('rotate-180')">
+            <span class="flex items-center gap-2">
+                <svg class="w-4 h-4 text-amber-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                          d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"/>
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/>
+                </svg>
+                เปลี่ยนรหัสพนักงาน
+            </span>
+            <svg class="w-4 h-4 transition-transform duration-200" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/>
+            </svg>
+        </button>
+        <div id="pf-chid-body" class="hidden p-4 space-y-3 bg-white dark:bg-slate-900">
+            <p class="text-xs text-amber-600 bg-amber-50 dark:bg-amber-900/30 rounded-lg px-3 py-2 font-medium">
+                การเปลี่ยนรหัสพนักงานจะอัปเดตข้อมูลทุกตาราง และต้อง login ใหม่ทันที
+            </p>
+            <div>
+                <label class="block text-xs font-semibold text-slate-500 uppercase tracking-wide mb-1.5">
+                    รหัสปัจจุบัน
+                </label>
+                <input value="${_esc(data.EmployeeID)}" readonly
+                       class="w-full px-3.5 py-2 rounded-xl border border-slate-200 bg-slate-50 text-sm text-slate-400 cursor-not-allowed">
+            </div>
+            <div>
+                <label class="block text-xs font-semibold text-slate-500 uppercase tracking-wide mb-1.5">
+                    รหัสใหม่ <span class="text-red-500">*</span>
+                </label>
+                <input id="pf-new-empid" type="text" placeholder="เช่น 012609, AP0001, SP0001"
+                       class="w-full px-3.5 py-2 rounded-xl border border-slate-200 dark:border-slate-600 dark:bg-slate-800 text-sm focus:outline-none focus:ring-2 focus:ring-amber-400 focus:border-transparent transition">
+            </div>
+            <div id="pf-chid-error" class="hidden text-xs text-red-600 font-medium bg-red-50 rounded-lg px-3 py-2"></div>
+            <button id="pf-chid-btn"
+                    class="w-full py-2.5 rounded-xl font-semibold text-sm text-white transition"
+                    style="background:linear-gradient(135deg,#d97706,#b45309)">
+                ยืนยันเปลี่ยนรหัสพนักงาน
+            </button>
+        </div>
+    </div>`;
 
     document.getElementById('profile-info-form')?.addEventListener('submit', _handleSaveProfile);
+    document.getElementById('pf-chid-btn')?.addEventListener('click', _handleChangeEmployeeID);
 
     // Cascading unit dropdown when dept changes
     document.getElementById('pf-dept')?.addEventListener('change', function() {
@@ -370,6 +415,41 @@ async function _handleChangePassword(e) {
     } finally {
         btn.disabled = false;
         btn.textContent = 'บันทึกรหัสผ่านใหม่';
+    }
+}
+
+async function _handleChangeEmployeeID() {
+    const errEl = document.getElementById('pf-chid-error');
+    const btn   = document.getElementById('pf-chid-btn');
+    const newID = document.getElementById('pf-new-empid')?.value?.trim().toUpperCase();
+
+    errEl.classList.add('hidden');
+
+    if (!newID) {
+        errEl.textContent = 'กรุณาระบุรหัสพนักงานใหม่';
+        errEl.classList.remove('hidden');
+        return;
+    }
+
+    btn.disabled = true;
+    btn.textContent = 'กำลังดำเนินการ...';
+    try {
+        const res = await apiFetch('/profile/employee-id', {
+            method: 'PUT',
+            body: JSON.stringify({ newEmployeeID: newID }),
+        });
+        // อัปเดต session ด้วย token + user ใหม่
+        if (res.token && res.user) {
+            localStorage.setItem('tsh_user', JSON.stringify(res.user));
+            localStorage.setItem('tsh_token', res.token);
+        }
+        showToast('เปลี่ยนรหัสพนักงานสำเร็จ กำลังรีโหลด...', 'success');
+        setTimeout(() => window.location.reload(), 1500);
+    } catch (err) {
+        errEl.textContent = err.message || 'เกิดข้อผิดพลาด';
+        errEl.classList.remove('hidden');
+        btn.disabled = false;
+        btn.textContent = 'ยืนยันเปลี่ยนรหัสพนักงาน';
     }
 }
 
