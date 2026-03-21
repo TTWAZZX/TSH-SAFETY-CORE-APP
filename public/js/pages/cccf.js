@@ -58,6 +58,8 @@ export async function loadCccfPage() {
         _assignments = Array.isArray(assignRes) ? assignRes : assignRes?.data ?? [];
 
         renderPage(container);
+        const savedCccfTab = window._getTab?.('cccf', 'worker');
+        if (savedCccfTab !== 'worker') window._cccfSwitchTab?.(savedCccfTab);
     } catch (err) {
         console.error(err);
         container.innerHTML = `<div class="p-6 text-center text-red-500 text-sm">${err.message}</div>`;
@@ -348,6 +350,7 @@ function renderPage(container) {
     // Tab switcher
     window._cccfSwitchTab = (tab) => {
         _activeTab = tab;
+        window._saveTab?.('cccf', tab);
         ['worker', 'permanent'].forEach(t => {
             const btn = document.getElementById(`btn-tab-${t}`);
             const content = document.getElementById(`content-${t}`);

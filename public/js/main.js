@@ -23,6 +23,20 @@ import { loadContractorPage } from './pages/contractor.js';
 import { loadHiyariPage } from './pages/hiyari.js';
 import { loadKyPage } from './pages/ky.js';
 import { loadFourmPage } from './pages/fourm.js';
+import { openProfileDrawer, closeProfileDrawer } from './pages/profile.js';
+
+window.openProfileDrawer  = openProfileDrawer;
+window.closeProfileDrawer = closeProfileDrawer;
+
+// ======================================================
+// Tab State Persistence (sessionStorage)
+// ======================================================
+window._saveTab = (page, tab) => {
+    try { sessionStorage.setItem(`tsh_tab_${page}`, tab); } catch {}
+};
+window._getTab = (page, defaultTab = '') => {
+    try { return sessionStorage.getItem(`tsh_tab_${page}`) || defaultTab; } catch { return defaultTab; }
+};
 
 // ======================================================
 // Global App State
@@ -73,32 +87,34 @@ function startApp(user) {
     app.classList.remove('hidden');
     app.style.display = 'flex';
 
-    // แสดง User Info + ปุ่มเปลี่ยนรหัสผ่าน
+    // แสดง User Info + ปุ่มเปิด Profile Drawer
     const userInfo = document.getElementById('user-info');
     if (userInfo) {
+        const initial = (user.name || '?').charAt(0).toUpperCase();
         userInfo.innerHTML = `
-            <div class="flex items-center gap-2">
-                <button id="change-password-btn" title="เปลี่ยนรหัสผ่าน"
-                    class="p-1.5 rounded-full text-slate-400 hover:text-emerald-500 hover:bg-emerald-50 dark:hover:bg-slate-700 transition-colors">
-                    <svg class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                            d="M15 7a2 2 0 012 2m4 0a6 6 0 01-7.743 5.743L11 17H9v2H7v2H4a1 1 0 01-1-1v-2.586a1 1 0 01.293-.707l5.964-5.964A6 6 0 1121 9z"/>
-                    </svg>
-                </button>
-                <div class="text-right leading-tight">
-                    <div class="font-semibold">
+            <button id="open-profile-btn" title="ดูโปรไฟล์"
+                class="flex items-center gap-2.5 px-2.5 py-1.5 rounded-xl
+                       hover:bg-emerald-50 dark:hover:bg-slate-700 transition-colors group">
+                <div class="w-8 h-8 rounded-xl flex items-center justify-center text-sm font-bold text-white flex-shrink-0"
+                     style="background:linear-gradient(135deg,#064e3b,#0d9488)">
+                    ${initial}
+                </div>
+                <div class="text-right leading-tight hidden sm:block">
+                    <div class="font-semibold text-sm text-slate-700 dark:text-slate-200 group-hover:text-emerald-700 dark:group-hover:text-emerald-400 transition-colors">
                         ${user.name}
                         ${AppState.isAdmin
                             ? '<span class="ml-1 text-xs bg-red-100 text-red-600 px-1 rounded">ADMIN</span>'
                             : ''}
                     </div>
-                    <div class="text-xs text-slate-500">ID: ${user.id}</div>
+                    <div class="text-xs text-slate-400">คลิกเพื่อดูโปรไฟล์</div>
                 </div>
-            </div>
+                <svg class="w-4 h-4 text-slate-400 hidden sm:block" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/>
+                </svg>
+            </button>
         `;
-        // attach listener ทันทีหลัง render
-        document.getElementById('change-password-btn')
-            ?.addEventListener('click', openChangePasswordModal);
+        document.getElementById('open-profile-btn')
+            ?.addEventListener('click', openProfileDrawer);
     }
 
     toggleAdminFeatures();
@@ -130,6 +146,29 @@ function toggleAdminFeatures() {
 // ======================================================
 // Routing (Hash-based)
 // ======================================================
+// ─── Page Title Map ────────────────────────────────────────────────────────────
+const PAGE_TITLES = {
+    'dashboard':     'ภาพรวม',
+    'search':        'ค้นหารายบุคคล',
+    'policy':        'นโยบายความปลอดภัย',
+    'committee':     'คณะกรรมการความปลอดภัย',
+    'kpi':           'KPI & Metrics',
+    'patrol':        'Safety Patrol',
+    'cccf':          'CCCF Activity',
+    'machine-safety':'Machine & Device Safety',
+    'ojt':           'Stop-Call-Wait (SCW)',
+    'training':      'Safety Training',
+    'accident':      'รายงานอุบัติเหตุ',
+    'safety-culture':'Safety Culture',
+    'contractor':    'Contractor Safety',
+    'hiyari':        'Hiyari (Near-Miss)',
+    'ky':            'KY Activity',
+    'yokoten':       'Yokoten',
+    'fourm':         '4M Change Management',
+    'admin':         'System Console',
+    'employee':      'ข้อมูลพนักงาน',
+};
+
 async function handleRouting() {
     if (!AppState.currentUser) {
         console.warn('⛔ Routing blocked: not authenticated');
@@ -138,6 +177,17 @@ async function handleRouting() {
 
     const hash = window.location.hash.replace('#', '') || 'dashboard';
     console.log('➡️ Navigate:', hash);
+
+    // อัปเดต page title ใน header
+    const titleEl = document.getElementById('page-title');
+    if (titleEl) titleEl.textContent = PAGE_TITLES[hash] || hash;
+
+    // อัปเดต active state ใน sidebar nav
+    document.querySelectorAll('.nav-link').forEach(el => {
+        const href = el.getAttribute('href')?.replace('#', '');
+        if (href === hash) el.classList.add('active');
+        else el.classList.remove('active');
+    });
 
     // ซ่อนทุกหน้า
     document.querySelectorAll('.page-content').forEach(p => {

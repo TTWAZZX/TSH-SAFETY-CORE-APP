@@ -90,6 +90,7 @@ export async function loadFourmPage() {
         setupEventListeners();
         _listenersReady = true;
     }
+    _activeTab = window._getTab?.('fourm', _activeTab) || _activeTab;
     switchTab(_activeTab);
     _loadHeroStats();
 }
@@ -155,6 +156,7 @@ function buildShell() {
 
 async function switchTab(tab) {
     _activeTab = tab;
+    window._saveTab?.('fourm', tab);
 
     const active   = 'fourm-tab flex items-center gap-1.5 px-4 py-3 text-xs font-bold whitespace-nowrap transition-all border-b-2 border-white text-white';
     const inactive = 'fourm-tab flex items-center gap-1.5 px-4 py-3 text-xs font-semibold whitespace-nowrap transition-all border-b-2 border-transparent text-white/70 hover:text-white hover:border-white/40';

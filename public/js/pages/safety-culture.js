@@ -81,7 +81,7 @@ export async function loadSafetyCulturePage() {
     const user = window.TSHSession?.getUser() || {};
     _isAdmin = user.role === 'Admin' || user.Role === 'Admin';
     _filterYear = new Date().getFullYear();
-    _activeTab  = 'principles';
+    _activeTab  = window._getTab?.('safety-culture', 'principles') || 'principles';
 
     container.innerHTML = buildShellHtml();
     attachGlobalHandlers();
@@ -136,6 +136,7 @@ function buildShellHtml() {
 function attachGlobalHandlers() {
     window._scSetTab = (tab) => {
         _activeTab = tab;
+        window._saveTab?.('safety-culture', tab);
         document.querySelectorAll('.sc-tab').forEach(btn => {
             const active = btn.id === `sct-${tab}`;
             btn.className = `sc-tab px-4 py-2.5 text-sm font-medium rounded-lg transition-colors whitespace-nowrap ${active ? 'bg-emerald-600 text-white shadow-sm' : 'text-slate-600 hover:bg-slate-100'}`;

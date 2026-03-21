@@ -51,6 +51,7 @@ export async function loadAccidentPage() {
 
     container.innerHTML = _spinnerHtml();
     await Promise.all([_fetchSummary(), _fetchAnalytics()]);
+    _activeTab = window._getTab?.('accident', _activeTab) || _activeTab;
     _renderPage(container);
 }
 
@@ -632,6 +633,7 @@ async function _loadAndRenderReports() {
 // ─── Tab & Filter Handlers ─────────────────────────────────────────────────────
 window._accSetTab = async function(tab) {
     _activeTab = tab;
+    window._saveTab?.('accident', tab);
 
     const active   = 'acc-tab-btn flex items-center gap-1.5 px-4 py-3 text-xs font-bold whitespace-nowrap transition-all border-b-2 border-white text-white';
     const inactive = 'acc-tab-btn flex items-center gap-1.5 px-4 py-3 text-xs font-semibold whitespace-nowrap transition-all border-b-2 border-transparent text-white/70 hover:text-white hover:border-white/40';

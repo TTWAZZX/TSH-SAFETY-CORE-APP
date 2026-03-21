@@ -111,6 +111,7 @@ export async function loadAdminPage() {
     window.loadSchedules       = loadSchedules;
     window.toggleViewMode      = toggleViewMode;
 
+    _currentTab = window._getTab?.('admin', _currentTab) || _currentTab;
     switchTab(_currentTab);
     _loadHeroStats();   // async — fills stats strip without blocking tab render
 }
@@ -154,6 +155,7 @@ async function _loadHeroStats() {
 
 function switchTab(key) {
     _currentTab = key;
+    window._saveTab?.('admin', key);
     // Underline-style tab classes — active: white underline + white text; inactive: ghost
     const active   = 'flex items-center gap-1.5 px-4 py-3 text-xs font-bold whitespace-nowrap transition-all border-b-2 border-white text-white';
     const inactive = 'flex items-center gap-1.5 px-4 py-3 text-xs font-semibold whitespace-nowrap transition-all border-b-2 border-transparent text-white/70 hover:text-white hover:border-white/40';

@@ -144,7 +144,7 @@ export async function loadYokotenPage() {
     _isAdmin = (user.role === 'Admin' || user.Role === 'Admin');
 
     window.closeModal  = UI.closeModal;
-    window._yokSetTab  = (tab) => { _activeTab = tab; renderTab(tab); };
+    window._yokSetTab  = (tab) => { _activeTab = tab; window._saveTab?.('yokoten', tab); renderTab(tab); };
 
     container.innerHTML = buildShell();
 
@@ -167,6 +167,7 @@ async function refreshData() {
         UI.hideLoading();
     }
     _renderHeroStats();
+    _activeTab = window._getTab?.('yokoten', _activeTab) || _activeTab;
     renderTab(_activeTab);
 }
 

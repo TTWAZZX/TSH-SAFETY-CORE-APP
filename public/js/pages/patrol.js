@@ -4,6 +4,16 @@ import { normalizeApiArray, normalizeApiObject } from '../utils/normalize.js';
 
 // ─── Auth ─────────────────────────────────────────────────────────────────────
 const currentUser = TSHSession.getUser() || { name: 'Staff', id: 'EMP001', department: '', team: 'Safety Team', role: 'User' };
+
+// ─── Backend URL helper (for local /uploads/ images) ─────────────────────────
+const _backendBase = (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1')
+    ? 'http://localhost:5000'
+    : '';
+function resolveFileUrl(url) {
+    if (!url) return null;
+    if (url.startsWith('/uploads/')) return _backendBase + url;
+    return url;
+}
 const isAdmin = !!(
     (currentUser.role && currentUser.role.toLowerCase() === 'admin') ||
     (currentUser.Role && currentUser.Role.toLowerCase() === 'admin')
@@ -24,10 +34,15 @@ const SAFETY_IMAGES = [
 // ─── State ────────────────────────────────────────────────────────────────────
 let _allIssues      = [];
 let _activeFilter   = 'all';
+let _searchQuery    = '';
+let _filterDept     = '';
+let _filterUnit     = '';
 let _monthlySummary = [];
 let _myPlan         = null;  // personal monthly plan (team, sessions, compliance, roster)
 let _mySelfPatrol   = null;  // self-patrol data for supervisor positions
 let _patrolAreas    = [];    // master areas list — synced from Patrol_Areas table
+let _masterDepts    = [];    // master departments for issue form responsible dept
+let _masterUnits    = [];    // safety units per department (Master_SafetyUnits)
 let _overviewYear   = new Date().getFullYear();
 let _overviewData   = null;  // attendance overview cache
 
@@ -42,6 +57,10 @@ export async function loadPatrolPage() {
     window.openSelfCheckinModal = openSelfCheckinModal;
     window.deleteSelfCheckin = deleteSelfCheckin;
     window.switchOverviewYear = switchOverviewYear;
+    window.exportIssuesToExcel = exportIssuesToExcel;
+    window._issueChangeDept = _issueChangeDept;
+    window.deleteIssue = deleteIssue;
+    window._issueFilterDept = _issueFilterDept;
 
     const container = document.getElementById('patrol-page');
     container.innerHTML = getSkeletonHTML();
@@ -51,7 +70,7 @@ export async function loadPatrolPage() {
         const curMonth = now.getMonth() + 1;
         const curYear  = now.getFullYear();
 
-        const [scheduleRes, statsRes, issuesRes, summaryRes, planRes, selfPatrolRes, areasRes] = await Promise.all([
+        const [scheduleRes, statsRes, issuesRes, summaryRes, planRes, selfPatrolRes, areasRes, deptsRes, unitsRes] = await Promise.all([
             API.get(`/patrol/my-schedule?employeeId=${currentUser.id}&month=${curMonth}&year=${curYear}`),
             API.get('/patrol/attendance-stats'),
             API.get('/patrol/issues'),
@@ -59,6 +78,8 @@ export async function loadPatrolPage() {
             API.get(`/patrol/my-monthly-plan?year=${curYear}&month=${curMonth}`).catch(() => ({ data: null })),
             API.get(`/patrol/my-self-patrol?year=${curYear}&month=${curMonth}`).catch(() => ({ data: null })),
             API.get('/master/areas').catch(() => ({ data: [] })),
+            API.get('/master/departments').catch(() => ({ data: [] })),
+            API.get('/master/safety-units').catch(() => ({ data: [] })),
         ]);
 
         _allIssues      = normalizeApiArray(issuesRes);
@@ -66,6 +87,8 @@ export async function loadPatrolPage() {
         _myPlan         = planRes.data || null;
         _mySelfPatrol   = selfPatrolRes.data || null;
         _patrolAreas    = areasRes.data || [];
+        _masterDepts    = deptsRes.data || [];
+        _masterUnits    = unitsRes.data || [];
 
         renderDashboard(container, {
             schedule: normalizeApiArray(scheduleRes),
@@ -76,6 +99,12 @@ export async function loadPatrolPage() {
 
         setTimeout(() => initPromoCarousel(), 100);
         loadDashboardCharts();
+
+        // Restore saved tab (patrol / overview / issues)
+        const _savedTab = window._getTab?.('patrol', 'patrol');
+        if (_savedTab && _savedTab !== 'patrol') {
+            setTimeout(() => window.switchTab?.(_savedTab), 0);
+        }
 
     } catch (err) {
         console.error(err);
@@ -157,6 +186,7 @@ function renderDashboard(container, data) {
 
     // Tabs state
     window.switchTab = function(tab) {
+        window._saveTab?.('patrol', tab);
         ['patrol','overview','issues'].forEach(t => {
             const btn = document.getElementById(`btn-tab-${t}`);
             const content = document.getElementById(`content-${t}`);
@@ -776,9 +806,9 @@ function renderDashboard(container, data) {
           </div>`).join('')}
         </div>
 
-        <!-- Charts row -->
+        <!-- Charts row 1 — Area + Dept stats -->
         <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-          <div class="bg-white rounded-xl shadow-sm border border-slate-100 p-5 flex flex-col" style="min-height:240px">
+          <div class="bg-white rounded-xl shadow-sm border border-slate-100 p-5 flex flex-col" style="min-height:220px">
             <h3 class="font-bold text-slate-700 text-sm mb-3">สถิติแยกพื้นที่</h3>
             <div class="flex-1 overflow-y-auto custom-scrollbar">
               <table class="w-full text-xs text-left">
@@ -794,9 +824,64 @@ function renderDashboard(container, data) {
             </div>
           </div>
 
-          <div class="bg-white rounded-xl shadow-sm border border-slate-100 p-5 flex flex-col" style="min-height:240px">
-            <h3 class="font-bold text-slate-700 text-sm mb-3">วิเคราะห์ความเสี่ยง</h3>
-            <div class="flex-1 relative flex items-center justify-center"><canvas id="rankChart"></canvas></div>
+          <div class="bg-white rounded-xl shadow-sm border border-slate-100 p-5 flex flex-col" style="min-height:220px">
+            <h3 class="font-bold text-slate-700 text-sm mb-3">สถิติแยกส่วนงานรับผิดชอบ</h3>
+            <div class="flex-1 overflow-y-auto custom-scrollbar">
+              <table class="w-full text-xs text-left">
+                <thead><tr class="border-b border-slate-100">
+                  <th class="pb-2 font-bold text-slate-400 text-[10px] uppercase">ส่วนงาน</th>
+                  <th class="pb-2 font-bold text-slate-500 text-[10px] uppercase text-center">พบ</th>
+                  <th class="pb-2 font-bold text-emerald-600 text-[10px] uppercase text-center">เสร็จ</th>
+                  <th class="pb-2 font-bold text-orange-500 text-[10px] uppercase text-center">รอ</th>
+                  <th class="pb-2 font-bold text-sky-600 text-[10px] uppercase text-center">%</th>
+                </tr></thead>
+                <tbody id="dashboard-dept-body">
+                  <tr><td colspan="5" class="text-center py-4 text-slate-300 text-xs">กำลังโหลด...</td></tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+
+        <!-- Charts row 2 — STOP×Rank table + Rank pie -->
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+
+          <!-- STOP × Rank matrix table -->
+          <div class="bg-white rounded-xl shadow-sm border border-slate-100 overflow-hidden">
+            <div class="px-5 py-3.5 border-b border-slate-100 flex items-center justify-between" style="background:linear-gradient(135deg,#064e3b08,#065f4608)">
+              <h3 class="font-bold text-slate-700 text-sm">ชนิดอันตราย (STOP) × ระดับความเร่งด่วน</h3>
+              <div class="flex items-center gap-3 text-[10px] font-bold">
+                <span class="text-red-500">Rank A</span>
+                <span class="text-orange-400">Rank B</span>
+                <span class="text-emerald-600">Rank C</span>
+              </div>
+            </div>
+            <div class="overflow-x-auto">
+              <table class="w-full text-xs text-left">
+                <thead>
+                  <tr class="border-b border-slate-100 bg-slate-50">
+                    <th class="px-4 py-2.5 font-bold text-slate-500 text-[10px] uppercase">ชนิดอันตราย</th>
+                    <th class="px-4 py-2.5 font-bold text-red-500 text-[10px] uppercase text-center">Rank A</th>
+                    <th class="px-4 py-2.5 font-bold text-orange-400 text-[10px] uppercase text-center">Rank B</th>
+                    <th class="px-4 py-2.5 font-bold text-emerald-600 text-[10px] uppercase text-center">Rank C</th>
+                    <th class="px-4 py-2.5 font-bold text-slate-500 text-[10px] uppercase text-center">รวม</th>
+                  </tr>
+                </thead>
+                <tbody id="stop-rank-tbody">
+                  <tr><td colspan="5" class="text-center py-6 text-slate-300 text-xs">กำลังโหลด...</td></tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          <!-- Rank pie chart -->
+          <div class="bg-white rounded-xl shadow-sm border border-slate-100 p-5 flex flex-col" style="min-height:280px">
+            <h3 class="font-bold text-slate-700 text-sm mb-1">ระดับความเร่งด่วน (Rank)</h3>
+            <p class="text-[10px] text-slate-400 mb-3">สัดส่วนปัญหาแยกตาม Rank</p>
+            <div class="flex-1 relative flex items-center justify-center" style="min-height:200px">
+              <canvas id="rankPieChart"></canvas>
+            </div>
+            <div id="rank-pie-legend" class="flex items-center justify-center gap-5 mt-3 text-[11px] font-semibold"></div>
           </div>
         </div>
 
@@ -806,21 +891,49 @@ function renderDashboard(container, data) {
             <div class="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-3 mb-3">
               <div class="flex items-center gap-2">
                 <h3 class="font-bold text-slate-700 text-sm">ทะเบียนปัญหา</h3>
-                <span class="text-[10px] bg-slate-100 border border-slate-200 px-2 py-0.5 rounded text-slate-400 font-mono">ทั้งหมด ${total}</span>
+                <span id="issue-count-badge" class="text-[10px] bg-slate-100 border border-slate-200 px-2 py-0.5 rounded text-slate-400 font-mono">ทั้งหมด ${total}</span>
               </div>
-              <button onclick="openIssueForm('OPEN')" class="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold text-white transition-all" style="background:linear-gradient(135deg,#dc2626,#ef4444)">
-                <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/></svg>
-                รายงานปัญหาใหม่
-              </button>
+              <div class="flex items-center gap-2">
+                <button onclick="exportIssuesToExcel()" class="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold border border-emerald-200 text-emerald-700 bg-emerald-50 hover:bg-emerald-100 transition-all">
+                  <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/></svg>
+                  Excel
+                </button>
+                <button onclick="openIssueForm('OPEN')" class="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold text-white transition-all" style="background:linear-gradient(135deg,#dc2626,#ef4444)">
+                  <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/></svg>
+                  รายงานปัญหาใหม่
+                </button>
+              </div>
+            </div>
+            <!-- Search + Dept/Unit filters row -->
+            <div class="flex flex-col sm:flex-row gap-2 mb-3">
+              <div class="relative flex-1">
+                <svg class="w-3.5 h-3.5 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/></svg>
+                <input id="issue-search-input" type="text" placeholder="ค้นหาพื้นที่ คำอธิบาย เครื่องจักร..." value="${_searchQuery}"
+                  class="w-full pl-8 pr-4 py-2 rounded-xl border border-slate-200 text-xs text-slate-700 focus:outline-none focus:border-emerald-400 focus:ring-2 focus:ring-emerald-100 bg-slate-50 transition-all">
+              </div>
+              <select id="issue-dept-filter" onchange="window._issueFilterDept(this.value)"
+                class="px-3 py-2 rounded-xl border border-slate-200 text-xs text-slate-600 bg-slate-50 focus:outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-100 transition-all min-w-[150px]">
+                <option value="">ทุกส่วนงาน</option>
+                ${_masterDepts.map(d => `<option value="${d.Name}" ${_filterDept === d.Name ? 'selected' : ''}>${d.Name}</option>`).join('')}
+              </select>
+              <select id="issue-unit-filter" onchange="_filterUnit=this.value;applyIssueFilter()"
+                class="px-3 py-2 rounded-xl border border-slate-200 text-xs text-slate-600 bg-slate-50 focus:outline-none focus:border-sky-400 focus:ring-2 focus:ring-sky-100 transition-all min-w-[130px] ${_filterDept ? '' : 'opacity-50'}">
+                <option value="">ทุก Unit</option>
+                ${(_filterDept ? _masterUnits.filter(u => {
+                    const dept = _masterDepts.find(d => d.Name === _filterDept);
+                    return dept && u.department_id === (dept.id || dept.ID);
+                  }) : []).map(u => `<option value="${u.name}" ${_filterUnit === u.name ? 'selected' : ''}>${u.name}</option>`).join('')}
+              </select>
             </div>
             <!-- Filter pills (functional) -->
             <div class="flex flex-wrap gap-2" id="issue-filter-bar">
               ${[
-                { key:'all',    label:'ทั้งหมด',     dot:'' },
-                { key:'open',   label:'รอแก้ไข',     dot:'bg-red-500' },
-                { key:'temp',   label:'แก้ชั่วคราว',  dot:'bg-orange-400' },
-                { key:'closed', label:'เสร็จสิ้น',    dot:'bg-emerald-500' },
-                { key:'high',   label:'ความเสี่ยงสูง', dot:'bg-rose-600' },
+                { key:'all',     label:'ทั้งหมด',      dot:'' },
+                { key:'open',    label:'รอแก้ไข',      dot:'bg-red-500' },
+                { key:'temp',    label:'แก้ชั่วคราว',   dot:'bg-orange-400' },
+                { key:'closed',  label:'เสร็จสิ้น',     dot:'bg-emerald-500' },
+                { key:'high',    label:'ความเสี่ยงสูง',  dot:'bg-rose-600' },
+                { key:'overdue', label:'เกินกำหนด',     dot:'bg-red-700' },
               ].map(f => `
               <button data-filter="${f.key}"
                 class="issue-filter-btn px-3 py-1.5 rounded-full text-[10px] font-bold transition-all flex items-center gap-1.5
@@ -839,6 +952,7 @@ function renderDashboard(container, data) {
                   <th class="px-5 py-3 font-bold">ภาพ</th>
                   <th class="px-5 py-3 font-bold">รายละเอียด / พื้นที่</th>
                   <th class="px-5 py-3 font-bold text-center">สถานะ</th>
+                  <th class="px-4 py-3 font-bold text-center">กำหนด</th>
                   <th class="px-5 py-3 font-bold text-right">จัดการ</th>
                 </tr>
               </thead>
@@ -864,37 +978,105 @@ function renderDashboard(container, data) {
     renderStatsStrip(_personalStats);
     document.getElementById('issue-fab')?.classList.add('hidden');
 
-    // Filter event
+    function applyIssueFilter() {
+        const filtered = getFilteredIssues(_allIssues, _activeFilter);
+        const tbody = document.getElementById('issue-table-body');
+        if (tbody) tbody.innerHTML = renderIssueRows(filtered);
+        const badge = document.getElementById('issue-count-badge');
+        if (badge) badge.textContent = `${filtered.length} / ${_allIssues.length}`;
+    }
+
+    // Status filter pills
     document.getElementById('issue-filter-bar')?.addEventListener('click', e => {
         const btn = e.target.closest('.issue-filter-btn');
         if (!btn) return;
         _activeFilter = btn.dataset.filter;
-        // update button styles
         document.querySelectorAll('.issue-filter-btn').forEach(b => {
             const isActive = b.dataset.filter === _activeFilter;
             b.className = `issue-filter-btn px-3 py-1.5 rounded-full text-[10px] font-bold transition-all flex items-center gap-1.5 ${isActive ? 'text-white shadow-sm' : 'bg-white border border-slate-200 text-slate-500 hover:border-emerald-300 hover:text-emerald-600'}`;
             b.style.background = isActive ? 'linear-gradient(135deg,#059669,#0d9488)' : '';
         });
-        // re-render rows
-        const filtered = getFilteredIssues(_allIssues, _activeFilter);
-        const tbody = document.getElementById('issue-table-body');
-        if (tbody) tbody.innerHTML = renderIssueRows(filtered);
+        applyIssueFilter();
+    });
+
+    // Text search
+    let _searchDebounce;
+    document.getElementById('issue-search-input')?.addEventListener('input', e => {
+        clearTimeout(_searchDebounce);
+        _searchDebounce = setTimeout(() => {
+            _searchQuery = e.target.value.trim();
+            applyIssueFilter();
+        }, 250);
     });
 }
 
-// ─── Filter Logic ─────────────────────────────────────────────────────────────
-function getFilteredIssues(issues, filter) {
-    switch (filter) {
-        case 'open':   return issues.filter(i => i.CurrentStatus === 'Open');
-        case 'temp':   return issues.filter(i => i.CurrentStatus === 'Temporary');
-        case 'closed': return issues.filter(i => i.CurrentStatus === 'Closed');
-        case 'high':   return issues.filter(i => i.Risk === 'High');
-        default:       return issues;
+// ─── Dept filter → rebuild unit dropdown ──────────────────────────────────────
+function _issueFilterDept(deptName) {
+    _filterDept = deptName;
+    _filterUnit = '';
+
+    // Rebuild unit dropdown
+    const unitSel = document.getElementById('issue-unit-filter');
+    if (unitSel) {
+        const dept = _masterDepts.find(d => d.Name === deptName);
+        const units = dept ? _masterUnits.filter(u => u.department_id === (dept.id || dept.ID)) : [];
+        unitSel.innerHTML = `<option value="">ทุก Unit</option>` +
+            units.map(u => `<option value="${u.name}">${u.name}</option>`).join('');
+        unitSel.className = unitSel.className.replace('opacity-50', '') + (units.length ? '' : ' opacity-50');
+        unitSel.onchange = () => { _filterUnit = unitSel.value; applyIssueFilter(); };
     }
+
+    // Trigger filter (applyIssueFilter is closure inside renderDashboard — call via DOM trick)
+    const tbody = document.getElementById('issue-table-body');
+    const badge  = document.getElementById('issue-count-badge');
+    if (!tbody) return;
+    const filtered = getFilteredIssues(_allIssues, _activeFilter);
+    tbody.innerHTML = renderIssueRows(filtered);
+    if (badge) badge.textContent = `${filtered.length} / ${_allIssues.length}`;
+}
+
+// ─── Filter Logic ─────────────────────────────────────────────────────────────
+function _normalizeDept(raw) {
+    // Support both plain string and legacy JSON array
+    try { return raw?.startsWith('[') ? JSON.parse(raw) : raw ? [raw] : []; }
+    catch { return raw ? [raw] : []; }
+}
+
+function getFilteredIssues(issues, filter) {
+    const today = new Date(); today.setHours(0,0,0,0);
+    let result;
+    switch (filter) {
+        case 'open':    result = issues.filter(i => i.CurrentStatus === 'Open'); break;
+        case 'temp':    result = issues.filter(i => i.CurrentStatus === 'Temporary'); break;
+        case 'closed':  result = issues.filter(i => i.CurrentStatus === 'Closed'); break;
+        case 'high':    result = issues.filter(i => i.Rank === 'A'); break;
+        case 'overdue': result = issues.filter(i => i.CurrentStatus !== 'Closed' && i.DueDate && new Date(i.DueDate) < today); break;
+        default:        result = issues;
+    }
+    // Dept filter
+    if (_filterDept) {
+        result = result.filter(i => _normalizeDept(i.ResponsibleDept).includes(_filterDept));
+    }
+    // Unit filter
+    if (_filterUnit) {
+        result = result.filter(i => (i.ResponsibleUnit || '') === _filterUnit);
+    }
+    // Text search
+    if (_searchQuery) {
+        const q = _searchQuery.toLowerCase();
+        result = result.filter(i =>
+            (i.HazardDescription||'').toLowerCase().includes(q) ||
+            (i.Area||'').toLowerCase().includes(q) ||
+            (i.MachineName||'').toLowerCase().includes(q) ||
+            (i.ResponsibleDept||'').toLowerCase().includes(q) ||
+            (i.ResponsibleUnit||'').toLowerCase().includes(q)
+        );
+    }
+    return result;
 }
 
 function renderIssueRows(issues) {
-    if (!issues.length) return `<tr><td colspan="5" class="text-center py-10 text-sm text-slate-400">ไม่พบรายการที่ตรงกัน</td></tr>`;
+    if (!issues.length) return `<tr><td colspan="6" class="text-center py-10 text-sm text-slate-400">ไม่พบรายการที่ตรงกัน</td></tr>`;
     return issues.map(rawItem => renderIssueRow(rawItem)).join('');
 }
 
@@ -920,10 +1102,30 @@ function generateMiniCalendarHTML(scheduleData) {
 }
 
 // ─── Issue Row ────────────────────────────────────────────────────────────────
+function getDueDateBadge(item) {
+    if (item.CurrentStatus === 'Closed') return '';
+    if (!item.DueDate) return '';
+    const today = new Date(); today.setHours(0,0,0,0);
+    const due = new Date(item.DueDate); due.setHours(0,0,0,0);
+    const diff = Math.round((due - today) / 86400000);
+    if (diff < 0) {
+        return `<span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[9px] font-bold bg-red-100 text-red-700 animate-pulse">เกิน ${Math.abs(diff)} วัน</span>`;
+    } else if (diff === 0) {
+        return `<span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[9px] font-bold bg-red-50 text-red-600">วันนี้!</span>`;
+    } else if (diff <= 3) {
+        return `<span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[9px] font-bold bg-orange-50 text-orange-600">เหลือ ${diff} วัน</span>`;
+    } else {
+        return `<span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[9px] font-medium bg-slate-50 text-slate-400">เหลือ ${diff} วัน</span>`;
+    }
+}
+
 function renderIssueRow(rawItem) {
     const item = normalizeApiObject(rawItem);
     const isClosed = item.CurrentStatus === 'Closed';
     const isTemp = item.CurrentStatus === 'Temporary';
+
+    const today = new Date(); today.setHours(0,0,0,0);
+    const isOverdue = !isClosed && item.DueDate && new Date(item.DueDate) < today;
 
     const statusMeta = isClosed
         ? { cls: 'bg-emerald-50 text-emerald-700 border-emerald-100', label: 'เสร็จสิ้น', border: '#10b981' }
@@ -931,26 +1133,42 @@ function renderIssueRow(rawItem) {
             ? { cls: 'bg-orange-50 text-orange-700 border-orange-100', label: 'แก้ชั่วคราว', border: '#f97316' }
             : { cls: 'bg-red-50 text-red-700 border-red-100', label: 'รอแก้ไข', border: '#ef4444' };
 
-    const riskBorder = item.Risk === 'High' ? '#f43f5e' : item.Risk === 'Medium' ? '#fb923c' : 'transparent';
-    const imgUrl = item.BeforeImage || 'https://placehold.co/40x40?text=IMG';
+    // Use Rank (A/B/C) for border — the form saves Rank, not Risk
+    const rankBorder = item.Rank === 'A' ? '#f43f5e' : item.Rank === 'B' ? '#fb923c' : item.Rank === 'C' ? '#10b981' : 'transparent';
+    const rowBg = isOverdue ? 'bg-red-50/30' : '';
+    const imgUrl = resolveFileUrl(item.BeforeImage) || 'https://placehold.co/40x40?text=IMG';
+
+    // Normalize ResponsibleDept (may be plain string or legacy JSON array)
+    const deptDisplay = (() => {
+        const raw = item.ResponsibleDept || '';
+        try { return raw.startsWith('[') ? JSON.parse(raw).join(', ') : raw; }
+        catch { return raw; }
+    })();
+    const rankLabel = { A: 'Rank A', B: 'Rank B', C: 'Rank C' }[item.Rank] || '';
 
     let actionBtns = '';
-    if (!isClosed) {
-        actionBtns = `<button onclick='event.stopPropagation();openIssueForm("TEMP",${JSON.stringify(item)})' class="p-1.5 rounded-lg bg-white border border-slate-200 text-slate-400 hover:text-orange-600 hover:border-orange-200 shadow-sm transition-all" title="อัปเดต">
+    if (!isClosed || isAdmin) {
+        actionBtns = `<button onclick='event.stopPropagation();openIssueForm("EDIT",${JSON.stringify(item)})' class="p-1.5 rounded-lg bg-white border border-slate-200 text-slate-400 hover:text-orange-600 hover:border-orange-200 shadow-sm transition-all" title="${isClosed ? 'แก้ไข (Admin)' : 'อัปเดต / ปิดงาน'}">
             <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z"/></svg>
-        </button>`;
-    }
-    if (isAdmin && !isClosed) {
-        actionBtns += `<button onclick='event.stopPropagation();openIssueForm("CLOSE",${JSON.stringify(item)})' class="p-1.5 rounded-lg bg-white border border-slate-200 text-slate-400 hover:text-emerald-600 hover:border-emerald-200 shadow-sm transition-all ml-1" title="ปิดงาน">
-            <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
         </button>`;
     }
     actionBtns += `<button onclick='event.stopPropagation();openIssueForm("VIEW",${JSON.stringify(item)})' class="p-1.5 rounded-lg bg-white border border-slate-200 text-slate-400 hover:text-emerald-600 hover:border-emerald-200 shadow-sm transition-all ml-1" title="ดูรายละเอียด">
         <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.235 3.932-5.732 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"/></svg>
     </button>`;
+    if (isAdmin) {
+        actionBtns += `<button onclick='event.stopPropagation();deleteIssue(${item.IssueID})' class="p-1.5 rounded-lg bg-white border border-slate-200 text-slate-400 hover:text-red-600 hover:border-red-200 shadow-sm transition-all ml-1" title="ลบ (Admin)">
+            <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg>
+        </button>`;
+    }
 
-    return `<tr class="hover:bg-slate-50/70 transition-colors group cursor-pointer border-l-4" style="border-left-color:${riskBorder}" onclick='openIssueForm("VIEW",${JSON.stringify(item)})'>
-        <td class="px-5 py-4 text-[10px] text-slate-400 font-mono align-middle">#${item.IssueID || '?'}</td>
+    const dueBadge = getDueDateBadge(item);
+    const dueDateStr = item.DueDate ? new Date(item.DueDate).toLocaleDateString('th-TH', { day:'numeric', month:'short' }) : '—';
+
+    return `<tr class="hover:bg-slate-50/70 transition-colors group cursor-pointer border-l-4 ${rowBg}" style="border-left-color:${isOverdue ? '#ef4444' : rankBorder}" onclick='openIssueForm("VIEW",${JSON.stringify(item)})'>
+        <td class="px-5 py-4 align-middle">
+            <div class="text-[10px] text-slate-400 font-mono">#${item.IssueID || '?'}</div>
+            ${rankLabel ? `<span class="text-[9px] font-bold px-1.5 py-0.5 rounded mt-1 inline-block ${item.Rank === 'A' ? 'bg-red-100 text-red-600' : item.Rank === 'B' ? 'bg-orange-100 text-orange-600' : 'bg-emerald-100 text-emerald-600'}">${rankLabel}</span>` : ''}
+        </td>
         <td class="px-5 py-3 align-middle">
             <div class="w-10 h-10 rounded-xl bg-slate-100 border border-slate-200 overflow-hidden shadow-sm transition-transform group-hover:scale-110">
                 <img src="${imgUrl}" class="w-full h-full object-cover" onerror="this.src='https://placehold.co/40x40?text=No+Img'">
@@ -958,13 +1176,21 @@ function renderIssueRow(rawItem) {
         </td>
         <td class="px-5 py-3 align-middle">
             <div class="font-bold text-slate-700 text-xs mb-0.5">${item.Area || 'ไม่ระบุพื้นที่'}</div>
-            <div class="text-[10px] text-slate-400 line-clamp-2 max-w-[220px]">${item.HazardDescription || '—'}</div>
+            <div class="text-[10px] text-slate-400 line-clamp-1 max-w-[200px]">${item.HazardDescription || '—'}</div>
+            ${deptDisplay || item.ResponsibleUnit ? `<div class="flex flex-wrap gap-1 mt-1">
+                ${deptDisplay ? `<span class="px-1.5 py-0.5 rounded bg-blue-50 text-blue-600 text-[9px] font-medium border border-blue-100">${deptDisplay}</span>` : ''}
+                ${item.ResponsibleUnit ? `<span class="px-1.5 py-0.5 rounded bg-sky-50 text-sky-500 text-[9px] border border-sky-100">${item.ResponsibleUnit}</span>` : ''}
+            </div>` : ''}
         </td>
         <td class="px-5 py-4 text-center align-middle">
             <span class="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[9px] font-bold border ${statusMeta.cls}">
                 <span class="w-1.5 h-1.5 rounded-full inline-block" style="background:${statusMeta.border}"></span>
                 ${statusMeta.label}
             </span>
+        </td>
+        <td class="px-4 py-4 text-center align-middle">
+            <div class="text-[10px] text-slate-500 mb-1">${dueDateStr}</div>
+            ${dueBadge}
         </td>
         <td class="px-5 py-4 text-right align-middle" onclick="event.stopPropagation()">
             <div class="flex items-center justify-end gap-0.5">${actionBtns}</div>
@@ -1074,164 +1300,377 @@ async function handleCheckInSubmit(e) {
 }
 
 // ─── Issue Form ───────────────────────────────────────────────────────────────
+// Auto-calculate DueDate from DateFound + Rank
+window._calcDueDate = function() {
+    const dateEl = document.getElementById('if-date-found');
+    const rankEl = document.getElementById('if-rank');
+    const dueEl  = document.getElementById('if-due-date');
+    if (!dateEl || !rankEl || !dueEl) return;
+    const date = dateEl.value;
+    const rank = rankEl.value;
+    if (!date || !rank) { dueEl.value = ''; return; }
+    const days = rank === 'A' ? 7 : rank === 'B' ? 14 : 30;
+    const d = new Date(date);
+    d.setDate(d.getDate() + days);
+    dueEl.value = d.toISOString().split('T')[0];
+};
+
 window.openIssueForm = function(mode, rawIssueData = null) {
     const issueData = normalizeApiObject(rawIssueData);
     const isView = mode === 'VIEW';
-    const isEdit = !isView;
+    const isEdit = mode === 'EDIT';
     const today = new Date().toISOString().split('T')[0];
-    const d = isEdit ? '' : 'disabled';
-    const r = isEdit ? '' : 'readonly';
+    // Section 1: readonly for regular users editing, but admin can edit everything
+    const s1r = (isView || (isEdit && !isAdmin)) ? 'readonly' : '';
+    const s1d = (isView || (isEdit && !isAdmin)) ? 'disabled' : '';
 
-    // Step indicator
+    // ── Step indicator ──────────────────────────────────────────────────────
     const steps = [
-        { key: 'OPEN',  label: 'รายงานปัญหา',    modes: ['OPEN'] },
-        { key: 'TEMP',  label: 'แก้ชั่วคราว',     modes: ['TEMP'] },
-        { key: 'CLOSE', label: 'ปิดงาน (Final)',  modes: ['CLOSE'] },
+        { label: 'รายงานปัญหา', icon: `<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/></svg>` },
+        { label: 'แก้ชั่วคราว',  icon: `<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"/></svg>` },
+        { label: 'ปิดงาน',       icon: `<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>` },
     ];
+    const stepIdx = mode === 'OPEN' ? 0 : mode === 'EDIT' ? 1 : (issueData?.CurrentStatus === 'Closed' ? 2 : issueData?.CurrentStatus === 'Temporary' ? 1 : 0);
     const stepHtml = steps.map((s, i) => {
-        const isActive = s.modes.includes(mode);
-        const isDone = (mode === 'TEMP' && i === 0) || (mode === 'CLOSE' && i <= 1) || (mode === 'VIEW' && issueData?.CurrentStatus === 'Closed');
-        return `<div class="flex items-center gap-1.5 ${i > 0 ? 'flex-1' : ''}">
-            ${i > 0 ? `<div class="flex-1 h-px ${isDone ? 'bg-emerald-400' : 'bg-slate-200'}"></div>` : ''}
-            <div class="flex flex-col items-center">
-                <div class="w-6 h-6 rounded-full flex items-center justify-center text-[9px] font-bold ${isActive ? 'text-white' : isDone ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-100 text-slate-400'}" style="${isActive ? 'background:linear-gradient(135deg,#059669,#0d9488)' : ''}">
-                    ${isDone && !isActive ? '✓' : i+1}
+        const done   = i < stepIdx;
+        const active = i === stepIdx;
+        return `
+        <div class="flex items-center ${i < steps.length - 1 ? 'flex-1' : ''}">
+            <div class="flex flex-col items-center gap-1">
+                <div class="w-9 h-9 rounded-full flex items-center justify-center transition-all
+                    ${active ? 'text-white shadow-lg shadow-emerald-200' : done ? 'bg-emerald-100 text-emerald-600' : 'bg-slate-100 text-slate-300'}"
+                    style="${active ? 'background:linear-gradient(135deg,#059669,#0d9488)' : ''}">
+                    ${done ? `<svg class="w-4 h-4 text-emerald-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"/></svg>` : s.icon}
                 </div>
-                <span class="text-[8px] mt-1 font-bold ${isActive ? 'text-emerald-600' : isDone ? 'text-emerald-500' : 'text-slate-400'} whitespace-nowrap">${s.label}</span>
+                <span class="text-[10px] font-semibold whitespace-nowrap ${active ? 'text-emerald-700' : done ? 'text-emerald-500' : 'text-slate-400'}">${s.label}</span>
             </div>
+            ${i < steps.length - 1 ? `<div class="flex-1 h-0.5 mx-2 mb-5 ${i < stepIdx ? 'bg-emerald-300' : 'bg-slate-200'}"></div>` : ''}
         </div>`;
     }).join('');
 
+    // ── Issue Detail Section (shown in all modes) ───────────────────────────
+    const beforeUrl = resolveFileUrl(issueData?.BeforeImage);
+    const afterUrl  = resolveFileUrl(issueData?.AfterImage);
+    const tempUrl   = resolveFileUrl(issueData?.TempImage);
+
+    // Responsible dept + unit helpers
+    const deptList = (_masterDepts.length ? _masterDepts : [{ Name:'Maintenance' },{ Name:'Safety' },{ Name:'Production' }]);
+    const selectedDeptName = issueData?.ResponsibleDept || '';
+    const selectedUnitName = issueData?.ResponsibleUnit || '';
+    // Pre-compute units for initial dept
+    const initialDeptObj = deptList.find(d => d.Name === selectedDeptName);
+    const initialUnits = initialDeptObj
+        ? _masterUnits.filter(u => u.department_id === (initialDeptObj.id || initialDeptObj.ID))
+        : [];
+
+    // Rank badge color
+    const rankColor = issueData?.Rank === 'A' ? '#dc2626' : issueData?.Rank === 'B' ? '#f97316' : '#059669';
+
     const html = `
-      <div class="space-y-5 text-sm">
-        <!-- Step indicator -->
-        <div class="flex items-start justify-between px-2">${stepHtml}</div>
+    <div class="text-sm">
 
-        <form id="issue-form" class="space-y-4">
-          <input type="hidden" name="ActionType" value="${mode}">
-          <input type="hidden" name="IssueID" value="${issueData?.IssueID || ''}">
+      <!-- ── Stepper ── -->
+      <div class="flex items-start px-1 mb-6">${stepHtml}</div>
 
-          <!-- Before/After images -->
-          ${(isView || mode === 'CLOSE') && issueData ? `
-          <div class="rounded-2xl overflow-hidden border border-slate-200 bg-slate-900">
-            <div class="grid grid-cols-2 divide-x divide-slate-700">
-              <div class="relative h-44 overflow-hidden">
-                <img src="${issueData.BeforeImage || 'https://placehold.co/400x176?text=No+Image'}" class="w-full h-full object-cover opacity-80 hover:opacity-100 transition-opacity">
-                <span class="absolute top-2 left-2 px-2 py-0.5 rounded text-[9px] font-bold bg-red-600/90 text-white">BEFORE</span>
+      <form id="issue-form" class="space-y-5">
+        <input type="hidden" name="ActionType" value="${mode === 'EDIT' ? 'UPDATE' : mode}">
+        <input type="hidden" name="IssueID"    value="${issueData?.IssueID || ''}">
+
+        <!-- ═══ SECTION 1: Issue Detail ═══ -->
+        <div class="border border-slate-200 rounded-2xl overflow-hidden">
+          <div class="flex items-center gap-3 px-5 py-3.5 bg-slate-50 border-b border-slate-200">
+            <div class="w-7 h-7 rounded-xl flex items-center justify-center text-white flex-shrink-0" style="background:linear-gradient(135deg,#475569,#334155)">
+              <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"/></svg>
+            </div>
+            <div>
+              <p class="font-bold text-slate-700 text-sm">รายละเอียดปัญหา</p>
+              <p class="text-[10px] text-slate-400 font-medium">Issue Detail</p>
+            </div>
+            ${issueData?.IssueID ? `<span class="ml-auto font-mono text-[10px] text-slate-400 bg-slate-100 px-2 py-0.5 rounded-lg">#${issueData.IssueID}</span>` : ''}
+          </div>
+          <div class="p-5 space-y-4">
+
+            <!-- วันที่พบ + พื้นที่ -->
+            <div class="grid grid-cols-2 gap-4">
+              <div class="space-y-1.5">
+                <label class="block text-xs font-semibold text-slate-500">วันที่พบปัญหา</label>
+                <input type="date" id="if-date-found" name="DateFound"
+                  class="w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm text-slate-700 focus:outline-none focus:ring-2 focus:ring-emerald-400 focus:border-transparent transition-all"
+                  value="${issueData?.DateFound ? issueData.DateFound.split('T')[0] : today}"
+                  oninput="window._calcDueDate()" ${s1r}>
               </div>
-              <div class="relative h-44 overflow-hidden flex items-center justify-center bg-slate-800">
-                ${issueData.AfterImage
-                    ? `<img src="${issueData.AfterImage}" class="w-full h-full object-cover opacity-80 hover:opacity-100 transition-opacity">`
-                    : `<div class="text-slate-500 text-xs flex flex-col items-center gap-1"><svg class="w-6 h-6 opacity-30" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"/></svg>รอภาพหลังซ่อม</div>`}
-                <span class="absolute top-2 left-2 px-2 py-0.5 rounded text-[9px] font-bold bg-emerald-600/90 text-white">AFTER</span>
+              <div class="space-y-1.5">
+                <label class="block text-xs font-semibold text-slate-500">พื้นที่ตรวจ</label>
+                <select name="Area" class="w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm text-slate-700 focus:outline-none focus:ring-2 focus:ring-emerald-400 transition-all" ${s1d}>
+                  ${(_patrolAreas.length ? _patrolAreas : [{ Name:'โรงงาน 1' },{ Name:'โรงงาน 2' },{ Name:'รอบนอก' }])
+                    .map(a => `<option value="${a.Name}" ${issueData?.Area === a.Name ? 'selected':''}>${a.Name}</option>`).join('')}
+                </select>
               </div>
             </div>
-          </div>` : ''}
 
-          <!-- Section 1: Issue Detail -->
-          <div class="rounded-xl border border-slate-200 overflow-hidden">
-            <div class="px-4 py-2.5 bg-slate-50 border-b border-slate-200 flex items-center gap-2">
-              <span class="w-5 h-5 rounded-full text-[9px] font-bold flex items-center justify-center text-white" style="background:linear-gradient(135deg,#059669,#0d9488)">1</span>
-              <span class="text-xs font-bold text-slate-700">รายละเอียดปัญหา (Issue Detail)</span>
+            <!-- ชื่อเครื่องจักร -->
+            <div class="space-y-1.5">
+              <label class="block text-xs font-semibold text-slate-500">ชื่อเครื่องมือ / เครื่องจักร</label>
+              <input type="text" name="MachineName"
+                class="w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm text-slate-700 placeholder-slate-300 focus:outline-none focus:ring-2 focus:ring-emerald-400 transition-all"
+                value="${issueData?.MachineName || ''}"
+                placeholder="ระบุชื่อเครื่องมือหรือเครื่องจักร (ถ้ามี)" ${s1r}>
             </div>
-            <div class="p-4 space-y-3">
-              <div class="grid grid-cols-2 gap-3">
-                <div>
-                  <label class="block text-[10px] font-bold text-slate-400 uppercase mb-1">วันที่พบ</label>
-                  <input type="date" name="DateFound" class="form-input w-full rounded-lg text-xs bg-slate-50" value="${issueData?.DateFound ? issueData.DateFound.split('T')[0] : today}" ${r}>
-                </div>
-                <div>
-                  <label class="block text-[10px] font-bold text-slate-400 uppercase mb-1">พื้นที่</label>
-                  <select name="Area" class="form-select w-full rounded-lg text-xs" ${d}>
-                    ${(_patrolAreas.length
-                        ? _patrolAreas
-                        : [{ Name:'โรงงาน 1',Code:'Fac1' },{ Name:'โรงงาน 2',Code:'Fac2' },{ Name:'รอบนอก+พื้นที่ส่วนกลาง',Code:'Outer' }]
-                      ).map(a => `<option value="${a.Name}" ${issueData?.Area === a.Name ? 'selected':''}>${a.Name}</option>`).join('')}
-                  </select>
-                </div>
+
+            <!-- ระบุอันตราย -->
+            <div class="space-y-1.5">
+              <label class="block text-xs font-semibold text-slate-500">รายละเอียดอันตราย / วิธีเกิด</label>
+              <textarea name="HazardDescription" rows="3"
+                class="w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm text-slate-700 placeholder-slate-300 focus:outline-none focus:ring-2 focus:ring-emerald-400 transition-all resize-none"
+                placeholder="อธิบายลักษณะปัญหา สาเหตุ และความเสี่ยง..." ${s1r}>${issueData?.HazardDescription || ''}</textarea>
+            </div>
+
+            <!-- ชนิดอันตราย + Rank -->
+            <div class="grid grid-cols-2 gap-4">
+              <div class="space-y-1.5">
+                <label class="block text-xs font-semibold text-slate-500">ชนิดอันตราย (STOP)</label>
+                <select name="HazardType" class="w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm text-slate-700 focus:outline-none focus:ring-2 focus:ring-emerald-400 transition-all" ${s1d}>
+                  <option value="">-- เลือกประเภท --</option>
+                  ${['STOP 1 อันตรายจากเครื่องจักร','STOP 2 อันตรายจากวัตถุหนักตกทับ','STOP 3 อันตรายจากยานพาหนะ','STOP 4 อันตรายจากการตกจากที่สูง','STOP 5 อันตรายจากกระแสไฟฟ้า','STOP 6 อันตรายอื่นๆ']
+                    .map(h => `<option value="${h}" ${issueData?.HazardType === h ? 'selected':''}>${h}</option>`).join('')}
+                </select>
               </div>
-              <div>
-                <label class="block text-[10px] font-bold text-slate-400 uppercase mb-1">รายละเอียด</label>
-                <textarea name="HazardDescription" rows="3" class="form-input w-full rounded-lg text-xs bg-slate-50 resize-none" ${r} placeholder="อธิบายลักษณะปัญหา...">${issueData?.HazardDescription || ''}</textarea>
+              <div class="space-y-1.5">
+                <label class="block text-xs font-semibold text-slate-500">
+                  ระดับความเร่งด่วน (Rank)
+                  ${(isView || isEdit) && issueData?.Rank ? `<span class="ml-1 px-1.5 py-0.5 rounded text-white text-[10px] font-bold" style="background:${rankColor}">${issueData.Rank}</span>` : ''}
+                </label>
+                <select id="if-rank" name="Rank" class="w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm text-slate-700 focus:outline-none focus:ring-2 focus:ring-emerald-400 transition-all" oninput="window._calcDueDate()" ${s1d}>
+                  <option value="">-- เลือก Rank --</option>
+                  <option value="A" ${issueData?.Rank === 'A' ? 'selected':''}>Rank A — แก้ไขภายใน 7 วัน (เร่งด่วนสูง)</option>
+                  <option value="B" ${issueData?.Rank === 'B' ? 'selected':''}>Rank B — แก้ไขภายใน 14 วัน (เร่งด่วนปานกลาง)</option>
+                  <option value="C" ${issueData?.Rank === 'C' ? 'selected':''}>Rank C — แก้ไขภายใน 30 วัน (ปกติ)</option>
+                </select>
               </div>
-              ${mode === 'OPEN' ? `
-              <div>
-                <label class="block text-[10px] font-bold text-slate-400 uppercase mb-1">ภาพก่อนซ่อม</label>
-                <input type="file" name="BeforeImage" accept="image/*" class="block w-full text-xs text-slate-500 file:mr-3 file:py-1.5 file:px-3 file:rounded-lg file:border-0 file:text-xs file:font-semibold file:bg-emerald-50 file:text-emerald-700 hover:file:bg-emerald-100">
-              </div>` : ''}
+            </div>
+
+            <!-- Due Date -->
+            <div class="space-y-1.5">
+              <label class="block text-xs font-semibold text-slate-500">
+                กำหนดเสร็จ
+                <span class="text-emerald-500 font-normal">(คำนวณอัตโนมัติ)</span>
+              </label>
+              <input type="date" id="if-due-date" name="DueDate"
+                class="w-full rounded-xl border border-slate-200 bg-emerald-50 px-3 py-2.5 text-sm text-slate-700 focus:outline-none focus:ring-2 focus:ring-emerald-400 transition-all"
+                value="${issueData?.DueDate ? issueData.DueDate.split('T')[0] : ''}" ${s1r}>
+            </div>
+
+            <!-- ส่วนงานรับผิดชอบ + Safety Unit -->
+            <div class="space-y-2">
+              <label class="block text-xs font-semibold text-slate-500">ส่วนงานรับผิดชอบ</label>
+              ${isView
+                ? `<div class="space-y-1.5">
+                    <div class="flex items-center gap-2 px-3 py-2.5 rounded-xl bg-blue-50 border border-blue-100">
+                      <svg class="w-3.5 h-3.5 text-blue-400 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-2 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4"/></svg>
+                      <span class="text-sm font-medium text-blue-700">${selectedDeptName || '—'}</span>
+                    </div>
+                    ${selectedUnitName ? `
+                    <div class="flex items-center gap-2 px-3 py-2 rounded-xl bg-sky-50 border border-sky-100">
+                      <svg class="w-3.5 h-3.5 text-sky-400 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0z"/></svg>
+                      <span class="text-xs font-medium text-sky-700">${selectedUnitName}</span>
+                      <span class="text-[10px] text-sky-400 ml-1">Safety Unit</span>
+                    </div>` : ''}
+                  </div>`
+                : `<div class="space-y-2">
+                    <select id="if-resp-dept" name="ResponsibleDept"
+                      class="w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm text-slate-700 focus:outline-none focus:ring-2 focus:ring-emerald-400 transition-all"
+                      onchange="window._issueChangeDept(this.value)" ${s1d}>
+                      <option value="">— เลือกส่วนงาน —</option>
+                      ${deptList.map(d => `<option value="${d.Name}" data-dept-id="${d.id||''}" ${selectedDeptName === d.Name ? 'selected' : ''}>${d.Name}</option>`).join('')}
+                    </select>
+                    <div id="if-unit-container">
+                      ${initialUnits.length ? `
+                      <select id="if-unit-select"
+                        class="w-full rounded-xl border border-sky-200 bg-sky-50 px-3 py-2.5 text-sm text-sky-700 focus:outline-none focus:ring-2 focus:ring-sky-300 transition-all"
+                        onchange="document.getElementById('if-resp-unit').value=this.value">
+                        <option value="">— เลือก Safety Unit (ถ้ามี) —</option>
+                        ${initialUnits.map(u => `<option value="${u.name}" ${selectedUnitName === u.name ? 'selected' : ''}>${u.name}${u.short_code ? ' · '+u.short_code : ''}</option>`).join('')}
+                      </select>` : ''}
+                    </div>
+                    <input type="hidden" id="if-resp-unit" name="ResponsibleUnit" value="${selectedUnitName}">
+                  </div>`
+              }
+            </div>
+
+            <!-- ภาพก่อนซ่อม (OPEN mode) -->
+            ${mode === 'OPEN' ? `
+            <div class="space-y-1.5">
+              <label class="block text-xs font-semibold text-slate-500">ภาพก่อนซ่อม <span class="text-slate-300 font-normal">(ไม่บังคับ)</span></label>
+              <label class="flex flex-col items-center justify-center gap-2 border-2 border-dashed border-slate-200 rounded-xl py-6 px-4 cursor-pointer hover:border-emerald-400 hover:bg-emerald-50/40 transition-all group">
+                <svg class="w-8 h-8 text-slate-300 group-hover:text-emerald-400 transition-colors" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"/></svg>
+                <span class="text-xs text-slate-400 group-hover:text-emerald-600 transition-colors">คลิกเพื่อเลือกรูปภาพ</span>
+                <input type="file" name="BeforeImage" accept="image/*" class="hidden" onchange="this.previousElementSibling.textContent = this.files[0]?.name || 'คลิกเพื่อเลือกรูปภาพ'">
+              </label>
+            </div>` : ''}
+
+            <!-- ภาพ Before (VIEW/EDIT) -->
+            ${(isView || isEdit) && beforeUrl ? `
+            <div class="space-y-1.5">
+              <label class="block text-xs font-semibold text-slate-500">ภาพก่อนซ่อม</label>
+              <div class="relative rounded-xl overflow-hidden h-40 bg-slate-900">
+                <img src="${beforeUrl}" class="w-full h-full object-cover" onerror="this.parentElement.innerHTML='<div class=\\'flex items-center justify-center h-full text-slate-500 text-xs\\'>ไม่พบภาพ</div>'">
+                <span class="absolute top-2 left-2 px-2 py-0.5 rounded-lg text-[10px] font-bold bg-red-600/90 text-white">BEFORE</span>
+              </div>
+            </div>` : ''}
+
+          </div>
+        </div>
+
+        <!-- ═══ SECTION 2: Temp Fix ═══ -->
+        ${(isEdit || (isView && issueData?.TempDescription)) ? `
+        <div class="border border-orange-200 rounded-2xl overflow-hidden">
+          <div class="flex items-center gap-3 px-5 py-3.5 bg-orange-50 border-b border-orange-200">
+            <div class="w-7 h-7 rounded-xl flex items-center justify-center text-white flex-shrink-0 bg-orange-500">
+              <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"/></svg>
+            </div>
+            <div>
+              <p class="font-bold text-orange-800 text-sm">การแก้ไขเบื้องต้น</p>
+              <p class="text-[10px] text-orange-500 font-medium">Temporary Fix</p>
             </div>
           </div>
-
-          <!-- Section 2: Temp Fix -->
-          ${mode === 'TEMP' || mode === 'CLOSE' || mode === 'VIEW' && issueData?.TempDescription ? `
-          <div class="rounded-xl border border-orange-200 overflow-hidden">
-            <div class="px-4 py-2.5 bg-orange-50 border-b border-orange-200 flex items-center gap-2">
-              <span class="w-5 h-5 rounded-full bg-orange-500 text-[9px] font-bold flex items-center justify-center text-white">2</span>
-              <span class="text-xs font-bold text-orange-800">การแก้ไขเบื้องต้น (Temporary Fix)</span>
+          <div class="p-5 space-y-4">
+            <div class="space-y-1.5">
+              <label class="block text-xs font-semibold text-orange-700">รายละเอียดการแก้ไขเบื้องต้น</label>
+              <textarea name="TempDescription" rows="4"
+                class="w-full rounded-xl border border-orange-200 bg-orange-50/40 px-3 py-2.5 text-sm text-slate-700 placeholder-slate-300 focus:outline-none focus:ring-2 focus:ring-orange-400 transition-all resize-none"
+                placeholder="อธิบายสิ่งที่ดำเนินการแก้ไขเบื้องต้นไปแล้ว..." ${isView ? 'readonly' : ''}>${issueData?.TempDescription || ''}</textarea>
             </div>
-            <div class="p-4 space-y-3">
-              <textarea name="TempDescription" rows="2" class="form-input w-full rounded-lg text-xs border-orange-200 resize-none" ${isView ? 'readonly' : ''} placeholder="อธิบายการแก้ไขเบื้องต้น...">${issueData?.TempDescription || ''}</textarea>
-              ${!isView ? `<input type="file" name="TempImage" accept="image/*" class="block w-full text-xs text-slate-500 file:mr-3 file:py-1.5 file:px-3 file:rounded-lg file:border-0 file:text-xs file:font-semibold file:bg-orange-50 file:text-orange-700 hover:file:bg-orange-100">` : ''}
-            </div>
-          </div>` : ''}
-
-          <!-- Section 3: Final Solution -->
-          ${mode === 'CLOSE' || mode === 'VIEW' && issueData?.ActionDescription ? `
-          <div class="rounded-xl border border-emerald-200 overflow-hidden">
-            <div class="px-4 py-2.5 bg-emerald-50 border-b border-emerald-200 flex items-center gap-2">
-              <span class="w-5 h-5 rounded-full bg-emerald-600 text-[9px] font-bold flex items-center justify-center text-white">3</span>
-              <span class="text-xs font-bold text-emerald-800">การแก้ไขถาวร (Final Solution)</span>
-            </div>
-            <div class="p-4 space-y-3">
-              <textarea name="ActionDescription" rows="2" class="form-input w-full rounded-lg text-xs border-emerald-200 resize-none" ${isView ? 'readonly' : ''} placeholder="อธิบายการแก้ไขถาวร...">${issueData?.ActionDescription || ''}</textarea>
-              <div class="grid grid-cols-2 gap-3">
-                <div>
-                  <label class="block text-[10px] font-bold text-emerald-700 uppercase mb-1">วันที่เสร็จ</label>
-                  <input type="date" name="FinishDate" class="form-input w-full text-xs rounded-lg border-emerald-200" value="${issueData?.FinishDate ? issueData.FinishDate.split('T')[0] : today}" ${isView ? 'readonly' : ''}>
-                </div>
+            ${isView && tempUrl ? `
+            <div class="space-y-1.5">
+              <label class="block text-xs font-semibold text-orange-700">ภาพประกอบ</label>
+              <div class="relative rounded-xl overflow-hidden h-36 bg-slate-900">
+                <img src="${tempUrl}" class="w-full h-full object-cover">
+                <span class="absolute top-2 left-2 px-2 py-0.5 rounded-lg text-[10px] font-bold bg-orange-500/90 text-white">TEMP FIX</span>
               </div>
-              ${!isView ? `<input type="file" name="AfterImage" accept="image/*" class="block w-full text-xs text-slate-500 file:mr-3 file:py-1.5 file:px-3 file:rounded-lg file:border-0 file:text-xs file:font-semibold file:bg-emerald-50 file:text-emerald-700 hover:file:bg-emerald-100">` : ''}
-            </div>
-          </div>` : ''}
-
-          <div class="flex justify-end gap-3 pt-2 border-t border-slate-100">
-            <button type="button" onclick="document.getElementById('modal-close-btn')?.click()" class="px-5 py-2.5 rounded-xl text-slate-600 hover:bg-slate-100 text-sm font-medium transition-colors">
-              ${isView ? 'ปิด' : 'ยกเลิก'}
-            </button>
-            ${!isView ? `<button type="submit" id="btn-issue-submit" class="px-6 py-2.5 rounded-xl text-sm font-bold text-white shadow-sm transition-all hover:shadow-md active:scale-[0.98]" style="background:linear-gradient(135deg,#059669,#0d9488)">บันทึกข้อมูล</button>` : ''}
+            </div>` : ''}
+            ${!isView ? `
+            <div class="space-y-1.5">
+              <label class="block text-xs font-semibold text-orange-700">ภาพประกอบการแก้ไข <span class="text-orange-300 font-normal">(ไม่บังคับ)</span></label>
+              <label class="flex flex-col items-center justify-center gap-2 border-2 border-dashed border-orange-200 rounded-xl py-5 px-4 cursor-pointer hover:border-orange-400 hover:bg-orange-50 transition-all group">
+                <svg class="w-7 h-7 text-orange-300 group-hover:text-orange-400 transition-colors" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"/></svg>
+                <span class="text-xs text-orange-400 group-hover:text-orange-600 transition-colors">คลิกเพื่อเลือกรูปภาพ</span>
+                <input type="file" name="TempImage" accept="image/*" class="hidden" onchange="this.previousElementSibling.textContent = this.files[0]?.name || 'คลิกเพื่อเลือกรูปภาพ'">
+              </label>
+            </div>` : ''}
           </div>
-        </form>
-      </div>`;
+        </div>` : ''}
 
-    const titleMap = { OPEN: 'รายงานปัญหาใหม่', TEMP: 'อัปเดตการแก้ไขเบื้องต้น', CLOSE: 'ปิดงาน — การแก้ไขถาวร', VIEW: 'รายละเอียดปัญหา' };
-    openModal(titleMap[mode], html, 'max-w-xl');
+        <!-- ═══ SECTION 3: Final Solution ═══ -->
+        ${(isEdit || (isView && issueData?.ActionDescription)) ? `
+        <div class="border border-emerald-200 rounded-2xl overflow-hidden">
+          <div class="flex items-center gap-3 px-5 py-3.5 bg-emerald-50 border-b border-emerald-200">
+            <div class="w-7 h-7 rounded-xl flex items-center justify-center text-white flex-shrink-0" style="background:linear-gradient(135deg,#059669,#0d9488)">
+              <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+            </div>
+            <div>
+              <p class="font-bold text-emerald-800 text-sm">การแก้ไขถาวร</p>
+              <p class="text-[10px] text-emerald-500 font-medium">Final Solution</p>
+            </div>
+          </div>
+          <div class="p-5 space-y-4">
+            <div class="space-y-1.5">
+              <label class="block text-xs font-semibold text-emerald-700">รายละเอียดการแก้ไขถาวร</label>
+              <textarea name="ActionDescription" rows="4"
+                class="w-full rounded-xl border border-emerald-200 bg-emerald-50/40 px-3 py-2.5 text-sm text-slate-700 placeholder-slate-300 focus:outline-none focus:ring-2 focus:ring-emerald-500 transition-all resize-none"
+                placeholder="อธิบายการแก้ไขถาวรและมาตรการป้องกันการเกิดซ้ำ..." ${isView ? 'readonly' : ''}>${issueData?.ActionDescription || ''}</textarea>
+            </div>
+            <div class="space-y-1.5">
+              <label class="block text-xs font-semibold text-emerald-700">วันที่แก้ไขเสร็จสิ้น</label>
+              <input type="date" name="FinishDate"
+                class="w-full rounded-xl border border-emerald-200 bg-emerald-50/40 px-3 py-2.5 text-sm text-slate-700 focus:outline-none focus:ring-2 focus:ring-emerald-500 transition-all"
+                value="${issueData?.FinishDate ? issueData.FinishDate.split('T')[0] : today}" ${isView ? 'readonly' : ''}>
+            </div>
+            ${isView && afterUrl ? `
+            <div class="space-y-1.5">
+              <label class="block text-xs font-semibold text-emerald-700">ภาพหลังแก้ไข</label>
+              <div class="relative rounded-xl overflow-hidden h-40 bg-slate-900">
+                <img src="${afterUrl}" class="w-full h-full object-cover">
+                <span class="absolute top-2 left-2 px-2 py-0.5 rounded-lg text-[10px] font-bold bg-emerald-600/90 text-white">AFTER</span>
+              </div>
+            </div>` : ''}
+            ${!isView ? `
+            <div class="space-y-1.5">
+              <label class="block text-xs font-semibold text-emerald-700">ภาพหลังแก้ไข <span class="text-emerald-300 font-normal">(ไม่บังคับ)</span></label>
+              <label class="flex flex-col items-center justify-center gap-2 border-2 border-dashed border-emerald-200 rounded-xl py-5 px-4 cursor-pointer hover:border-emerald-400 hover:bg-emerald-50 transition-all group">
+                <svg class="w-7 h-7 text-emerald-300 group-hover:text-emerald-500 transition-colors" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"/></svg>
+                <span class="text-xs text-emerald-400 group-hover:text-emerald-600 transition-colors">คลิกเพื่อเลือกรูปภาพ</span>
+                <input type="file" name="AfterImage" accept="image/*" class="hidden" onchange="this.previousElementSibling.textContent = this.files[0]?.name || 'คลิกเพื่อเลือกรูปภาพ'">
+              </label>
+            </div>` : ''}
+          </div>
+        </div>` : ''}
+
+        <!-- Action buttons -->
+        <div class="flex justify-end gap-3 pt-2">
+          <button type="button" onclick="window.closeModal&&window.closeModal()"
+            class="px-6 py-2.5 rounded-xl text-slate-600 bg-slate-100 hover:bg-slate-200 text-sm font-semibold transition-colors">
+            ${isView ? 'ปิด' : 'ยกเลิก'}
+          </button>
+          ${!isView ? `
+          <button type="submit" id="btn-issue-submit"
+            class="px-7 py-2.5 rounded-xl text-sm font-bold text-white shadow-sm transition-all hover:shadow-lg hover:scale-[1.02] active:scale-[0.98]"
+            style="background:linear-gradient(135deg,#059669,#0d9488)">
+            ${mode === 'EDIT' ? 'บันทึกข้อมูล' : 'รายงานปัญหา'}
+          </button>` : ''}
+        </div>
+      </form>
+    </div>`;
+
+    const titleMap = { OPEN: 'รายงานปัญหาใหม่', EDIT: 'อัปเดตการดำเนินการ', VIEW: 'รายละเอียดปัญหา' };
+    openModal(titleMap[mode], html, 'max-w-2xl');
 
     if (!isView) {
         const form = document.getElementById('issue-form');
-        if (form) {
-            form.addEventListener('submit', async (e) => {
-                e.preventDefault();
-                const btn = document.getElementById('btn-issue-submit');
-                if (btn) { btn.disabled = true; btn.innerHTML = '<span class="animate-spin inline-block w-4 h-4 border-2 border-white border-t-transparent rounded-full mr-1.5"></span>กำลังบันทึก...'; }
-                const formData = new FormData(form);
-                if (mode === 'OPEN') {
-                    if (!formData.get('FoundByTeam')) formData.append('FoundByTeam', currentUser.team || '');
-                    if (!formData.get('ResponsibleDept')) formData.append('ResponsibleDept', 'Maintenance');
-                    if (!formData.get('HazardType')) formData.append('HazardType', 'Unsafe Condition');
-                }
-                showLoading('กำลังบันทึก...');
-                try {
-                    const res = await API.post('/patrol/issue/save', formData);
-                    if (res?.success === false) throw new Error(res.message || 'บันทึกไม่สำเร็จ');
-                    showToast('บันทึกสำเร็จ', 'success');
-                    closeModal();
-                    loadPatrolPage();
-                } catch (err) { showError(err); }
-                finally { hideLoading(); if (btn) { btn.disabled = false; btn.textContent = 'บันทึกข้อมูล'; } }
-            });
-        }
+        if (!form) return;
+        form.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const btn = document.getElementById('btn-issue-submit');
+            if (btn) { btn.disabled = true; btn.innerHTML = '<span class="animate-spin inline-block w-4 h-4 border-2 border-white border-t-transparent rounded-full mr-1.5 align-middle"></span>กำลังบันทึก...'; }
+            const formData = new FormData(form);
+            if (mode === 'OPEN') {
+                if (!formData.get('FoundByTeam')) formData.append('FoundByTeam', currentUser.team || '');
+            }
+            showLoading('กำลังบันทึก...');
+            try {
+                const res = await API.post('/patrol/issue/save', formData);
+                if (res?.success === false) throw new Error(res.message || 'บันทึกไม่สำเร็จ');
+                showToast('บันทึกสำเร็จ', 'success');
+                closeModal();
+                loadPatrolPage();
+            } catch (err) { showError(err); }
+            finally { hideLoading(); if (btn) { btn.disabled = false; btn.textContent = mode === 'EDIT' ? 'บันทึกข้อมูล' : 'รายงานปัญหา'; } }
+        });
     }
 };
+
+// ─── Dept → Units dynamic selector ───────────────────────────────────────────
+function _issueChangeDept(deptName) {
+    const container = document.getElementById('if-unit-container');
+    const unitInput  = document.getElementById('if-resp-unit');
+    if (!container) return;
+    if (unitInput) unitInput.value = '';
+
+    if (!deptName) { container.innerHTML = ''; return; }
+
+    const dept  = _masterDepts.find(d => d.Name === deptName);
+    if (!dept)   { container.innerHTML = ''; return; }
+
+    const units = _masterUnits.filter(u => u.department_id === (dept.id || dept.ID));
+    if (!units.length) { container.innerHTML = ''; return; }
+
+    container.innerHTML = `
+        <select id="if-unit-select"
+          class="w-full rounded-xl border border-sky-200 bg-sky-50 px-3 py-2.5 text-sm text-sky-700 focus:outline-none focus:ring-2 focus:ring-sky-300 transition-all animate-fade-in"
+          onchange="document.getElementById('if-resp-unit').value=this.value">
+          <option value="">— เลือก Safety Unit (ถ้ามี) —</option>
+          ${units.map(u => `<option value="${u.name}">${u.name}${u.short_code ? ' · '+u.short_code : ''}</option>`).join('')}
+        </select>`;
+}
 
 // ─── Carousel ─────────────────────────────────────────────────────────────────
 function initPromoCarousel() {
@@ -1523,13 +1962,264 @@ async function deleteSelfCheckin(id) {
     } catch (err) { showError(err.message); }
 }
 
+// ─── Delete Issue (Admin only) ────────────────────────────────────────────────
+async function deleteIssue(issueId) {
+    if (!isAdmin) return;
+    const confirmed = await new Promise(resolve => {
+        openModal('ยืนยันการลบ', `
+            <div class="text-center py-4">
+              <div class="w-14 h-14 rounded-2xl bg-red-50 flex items-center justify-center mx-auto mb-4">
+                <svg class="w-7 h-7 text-red-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg>
+              </div>
+              <p class="text-slate-700 font-semibold mb-1">ลบปัญหา #${issueId}?</p>
+              <p class="text-sm text-slate-400 mb-6">ข้อมูลจะถูกลบถาวร ไม่สามารถกู้คืนได้</p>
+              <div class="flex gap-3 justify-center">
+                <button onclick="window._deleteResolve(false);window.closeModal&&window.closeModal()"
+                  class="px-5 py-2 rounded-xl text-sm bg-slate-100 text-slate-600 hover:bg-slate-200 transition-colors font-medium">ยกเลิก</button>
+                <button onclick="window._deleteResolve(true);window.closeModal&&window.closeModal()"
+                  class="px-5 py-2 rounded-xl text-sm font-bold text-white bg-red-500 hover:bg-red-600 transition-colors">ลบเลย</button>
+              </div>
+            </div>`, 'max-w-sm');
+        window._deleteResolve = resolve;
+    });
+    if (!confirmed) return;
+    try {
+        showLoading('กำลังลบ...');
+        const res = await API.delete(`/patrol/issue/${issueId}`);
+        if (res?.success === false) throw new Error(res.message || 'ลบไม่สำเร็จ');
+        showToast(`ลบปัญหา #${issueId} สำเร็จ`, 'success');
+        // Remove from local cache and re-render without full reload
+        _allIssues = _allIssues.filter(i => (i.IssueID || i.issueid) != issueId);
+        const filtered = getFilteredIssues(_allIssues, _activeFilter);
+        const tbody = document.getElementById('issue-table-body');
+        if (tbody) tbody.innerHTML = renderIssueRows(filtered);
+        const badge = document.getElementById('issue-count-badge');
+        if (badge) badge.textContent = `${filtered.length} / ${_allIssues.length}`;
+        renderDeptStats();
+        renderStopRankStats();
+        renderRankPieChart();
+    } catch (err) {
+        showError(err.message || 'ลบไม่สำเร็จ');
+    } finally {
+        hideLoading();
+    }
+}
+
+// ─── Export to Excel ──────────────────────────────────────────────────────────
+function exportIssuesToExcel() {
+    if (!window.XLSX) { showToast('ไม่พบ SheetJS library', 'error'); return; }
+    const filtered = getFilteredIssues(_allIssues, _activeFilter);
+    if (!filtered.length) { showToast('ไม่มีข้อมูลที่จะส่งออก', 'error'); return; }
+
+    const rows = filtered.map(raw => {
+        const i = normalizeApiObject(raw);
+        return {
+            'ID':               i.IssueID || '',
+            'วันที่พบ':          i.FoundDate ? new Date(i.FoundDate).toLocaleDateString('th-TH') : '',
+            'พื้นที่':           i.Area || '',
+            'ประเภทอันตราย':     i.HazardType || '',
+            'คำอธิบาย':          i.HazardDescription || '',
+            'Rank (A/B/C)':      i.Rank || '',
+            'วันกำหนด':          i.DueDate ? new Date(i.DueDate).toLocaleDateString('th-TH') : '',
+            'ส่วนงานรับผิดชอบ':  i.ResponsibleDept || '',
+            'Safety Unit':       i.ResponsibleUnit || '',
+            'การแก้ไขชั่วคราว':  i.TempDescription || '',
+            'การแก้ไขถาวร':      i.ActionDescription || '',
+            'วันปิดงาน':         i.FinishDate ? new Date(i.FinishDate).toLocaleDateString('th-TH') : '',
+            'สถานะ':             i.CurrentStatus === 'Closed' ? 'เสร็จสิ้น' : i.CurrentStatus === 'Temporary' ? 'แก้ชั่วคราว' : 'รอแก้ไข',
+            'ผู้รายงาน':         i.ReporterName || '',
+        };
+    });
+
+    const ws = XLSX.utils.json_to_sheet(rows);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, 'ทะเบียนปัญหา');
+    const fileName = `patrol_issues_${new Date().toISOString().slice(0,10)}.xlsx`;
+    XLSX.writeFile(wb, fileName);
+    showToast(`ส่งออกสำเร็จ ${filtered.length} รายการ`, 'success');
+}
+
 // ─── Charts ───────────────────────────────────────────────────────────────────
+function renderDeptStats() {
+    const tbody = document.getElementById('dashboard-dept-body');
+    if (!tbody) return;
+
+    // Use master departments — admin manages these in Master Data tab
+    const deptNames = _masterDepts.map(d => d.Name).filter(Boolean);
+    if (!deptNames.length) {
+        tbody.innerHTML = `<tr><td colspan="5" class="text-center py-6 text-xs text-slate-300">ยังไม่มีส่วนงานใน Master Data</td></tr>`;
+        return;
+    }
+
+    // Build count map
+    const deptMap = {};
+    for (const name of deptNames) deptMap[name] = { found:0, achieved:0, onProcess:0 };
+
+    _allIssues.forEach(issue => {
+        // ResponsibleDept may be plain string (new) or JSON array string (legacy)
+        const raw = issue.ResponsibleDept || '';
+        let depts = [];
+        try {
+            depts = raw.startsWith('[') ? JSON.parse(raw) : raw ? [raw] : [];
+        } catch { depts = raw ? [raw] : []; }
+        depts.forEach(d => {
+            if (deptMap[d] !== undefined) {
+                deptMap[d].found++;
+                if (issue.CurrentStatus === 'Closed') deptMap[d].achieved++;
+                else                                   deptMap[d].onProcess++;
+            }
+        });
+    });
+
+    // Only show depts that have issues, or all if none have any
+    const hasAny = deptNames.some(n => deptMap[n].found > 0);
+    const toShow = hasAny ? deptNames.filter(n => deptMap[n].found > 0) : deptNames;
+
+    const rows = toShow.map(dept => {
+        const r = deptMap[dept];
+        const pct = r.found > 0 ? Math.round((r.achieved / r.found) * 100) : null;
+        const pctColor = pct === null ? 'text-slate-300' : pct >= 80 ? 'text-emerald-600' : pct >= 50 ? 'text-orange-500' : 'text-red-500';
+        return `<tr class="border-b border-slate-50 hover:bg-slate-50 transition-colors">
+            <td class="px-3 py-2 text-[10px] font-medium text-slate-600 max-w-[110px] truncate" title="${dept}">${dept}</td>
+            <td class="px-2 py-2 text-center text-slate-500 font-bold text-xs">${r.found || '—'}</td>
+            <td class="px-2 py-2 text-center text-emerald-600 font-bold text-xs">${r.achieved || 0}</td>
+            <td class="px-2 py-2 text-center text-orange-500 font-bold text-xs">${r.onProcess || 0}</td>
+            <td class="px-2 py-2 text-center font-bold text-xs ${pctColor}">${pct !== null ? pct+'%' : '—'}</td>
+        </tr>`;
+    });
+    tbody.innerHTML = rows.join('');
+}
+
+const STOP_TYPES = [
+    { key: 'STOP 1', labelTh: 'STOP 1 เครื่องจักร',   labelEn: 'ST1 Caught by Machine' },
+    { key: 'STOP 2', labelTh: 'STOP 2 วัตถุหนักตกทับ', labelEn: 'ST2 Heavy Object' },
+    { key: 'STOP 3', labelTh: 'STOP 3 ยานพาหนะ',       labelEn: 'ST3 Vehicle' },
+    { key: 'STOP 4', labelTh: 'STOP 4 ตกจากที่สูง',    labelEn: 'ST4 Falls' },
+    { key: 'STOP 5', labelTh: 'STOP 5 กระแสไฟฟ้า',     labelEn: 'ST5 Electrocution' },
+    { key: 'STOP 6', labelTh: 'STOP 6 อื่นๆ',           labelEn: 'ST6 Other' },
+];
+
+function renderStopRankStats() {
+    const tbody = document.getElementById('stop-rank-tbody');
+    if (!tbody) return;
+
+    // Build matrix: STOP type × Rank (A/B/C)
+    const matrix = {};
+    STOP_TYPES.forEach(s => { matrix[s.key] = { A:0, B:0, C:0 }; });
+    // Issues without matching STOP go to STOP 6
+    matrix['__other'] = { A:0, B:0, C:0 };
+
+    _allIssues.forEach(issue => {
+        const item = normalizeApiObject(issue);
+        const type  = item.HazardType || '';
+        const rank  = item.Rank || '';
+        if (!rank || !['A','B','C'].includes(rank)) return;
+        const stop = STOP_TYPES.find(s => type.startsWith(s.key));
+        const key  = stop ? stop.key : 'STOP 6';
+        if (matrix[key]) matrix[key][rank]++;
+    });
+
+    let totalA = 0, totalB = 0, totalC = 0;
+    const rows = STOP_TYPES.map(s => {
+        const r = matrix[s.key];
+        totalA += r.A; totalB += r.B; totalC += r.C;
+        const rowTotal = r.A + r.B + r.C;
+        const rankA = r.A > 0 ? `<span class="font-bold text-red-500">${r.A}</span>` : `<span class="text-slate-300">0</span>`;
+        const rankB = r.B > 0 ? `<span class="font-bold text-orange-400">${r.B}</span>` : `<span class="text-slate-300">0</span>`;
+        const rankC = r.C > 0 ? `<span class="font-bold text-emerald-600">${r.C}</span>` : `<span class="text-slate-300">0</span>`;
+        return `<tr class="border-b border-slate-50 hover:bg-slate-50 transition-colors">
+            <td class="px-4 py-2.5 text-xs font-medium text-slate-700">${s.labelEn}</td>
+            <td class="px-4 py-2.5 text-center text-xs">${rankA}</td>
+            <td class="px-4 py-2.5 text-center text-xs">${rankB}</td>
+            <td class="px-4 py-2.5 text-center text-xs">${rankC}</td>
+            <td class="px-4 py-2.5 text-center text-xs font-bold ${rowTotal > 0 ? 'text-slate-600' : 'text-slate-300'}">${rowTotal || 0}</td>
+        </tr>`;
+    });
+
+    const grandTotal = totalA + totalB + totalC;
+    tbody.innerHTML = rows.join('') + `
+        <tr class="border-t-2 border-slate-200 bg-slate-50">
+            <td class="px-4 py-2.5 text-xs font-bold text-slate-700">Total</td>
+            <td class="px-4 py-2.5 text-center"><span class="font-bold text-red-500">${totalA}</span></td>
+            <td class="px-4 py-2.5 text-center"><span class="font-bold text-orange-400">${totalB}</span></td>
+            <td class="px-4 py-2.5 text-center"><span class="font-bold text-emerald-600">${totalC}</span></td>
+            <td class="px-4 py-2.5 text-center font-bold text-slate-700">${grandTotal}</td>
+        </tr>`;
+}
+
+function renderRankPieChart() {
+    // Compute Rank A/B/C totals from _allIssues
+    const rankMap = { A:0, B:0, C:0 };
+    _allIssues.forEach(issue => {
+        const item = normalizeApiObject(issue);
+        const r = item.Rank || '';
+        if (rankMap[r] !== undefined) rankMap[r]++;
+    });
+
+    const total = rankMap.A + rankMap.B + rankMap.C;
+    const ctx = document.getElementById('rankPieChart');
+    if (!ctx) return;
+
+    if (window._rankPieChart) window._rankPieChart.destroy();
+
+    if (total === 0) {
+        ctx.closest('.flex-1').innerHTML = '<p class="text-slate-300 text-xs">ยังไม่มีข้อมูล</p>';
+        return;
+    }
+
+    window._rankPieChart = new Chart(ctx.getContext('2d'), {
+        type: 'pie',
+        data: {
+            labels: [`Rank A (${rankMap.A})`, `Rank B (${rankMap.B})`, `Rank C (${rankMap.C})`],
+            datasets: [{
+                data: [rankMap.A, rankMap.B, rankMap.C],
+                backgroundColor: ['#f43f5e', '#fb923c', '#22c55e'],
+                borderWidth: 2,
+                borderColor: '#fff',
+                hoverOffset: 6,
+            }]
+        },
+        options: {
+            responsive: true, maintainAspectRatio: false,
+            plugins: {
+                legend: { display: false },
+                tooltip: {
+                    callbacks: {
+                        label: ctx => {
+                            const pct = total > 0 ? Math.round((ctx.parsed / total) * 100) : 0;
+                            return ` ${ctx.label}: ${ctx.parsed} (${pct}%)`;
+                        }
+                    }
+                },
+                datalabels: {
+                    color: '#fff',
+                    font: { size: 13, weight: 'bold', family: 'Kanit' },
+                    formatter: (val) => val > 0 ? val : '',
+                }
+            }
+        }
+    });
+
+    // Custom legend
+    const legend = document.getElementById('rank-pie-legend');
+    if (legend) {
+        const colors = ['#f43f5e', '#fb923c', '#22c55e'];
+        const labels = ['Rank A', 'Rank B', 'Rank C'];
+        const vals   = [rankMap.A, rankMap.B, rankMap.C];
+        legend.innerHTML = labels.map((l, i) => `
+            <span class="flex items-center gap-1.5">
+                <span class="w-2.5 h-2.5 rounded-full inline-block" style="background:${colors[i]}"></span>
+                <span style="color:${colors[i]}">${l}</span>
+                <span class="text-slate-400 font-normal">(${vals[i]})</span>
+            </span>`).join('');
+    }
+}
+
 async function loadDashboardCharts() {
     try {
         const res = await API.get('/patrol/dashboard-stats');
         const data = normalizeApiObject(res);
         const bySection = normalizeApiArray(data.bySection);
-        const byRank    = normalizeApiArray(data.byRank);
 
         const tbody = document.getElementById('dashboard-section-body');
         if (tbody) {
@@ -1542,23 +2232,9 @@ async function loadDashboardCharts() {
                 : `<tr><td colspan="3" class="text-center py-6 text-xs text-slate-300">ยังไม่มีข้อมูล</td></tr>`;
         }
 
-        const ctxRank = document.getElementById('rankChart');
-        if (ctxRank && byRank.length > 0) {
-            const rankMap = { A: 0, B: 0, C: 0 };
-            byRank.forEach(r => rankMap[r.HazardRank] = r.Count);
-            if (window._rankChart) window._rankChart.destroy();
-            window._rankChart = new Chart(ctxRank.getContext('2d'), {
-                type: 'doughnut',
-                data: {
-                    labels: ['A (สูง)', 'B (กลาง)', 'C (ต่ำ)'],
-                    datasets: [{ data: [rankMap.A, rankMap.B, rankMap.C], backgroundColor: ['#f43f5e', '#fb923c', '#10b981'], borderWidth: 0, hoverOffset: 4 }]
-                },
-                options: {
-                    responsive: true, maintainAspectRatio: false, cutout: '70%',
-                    plugins: { legend: { position: 'right', labels: { boxWidth: 8, usePointStyle: true, font: { size: 10, family: 'Kanit' } } } }
-                }
-            });
-        }
+        renderDeptStats();
+        renderStopRankStats();
+        renderRankPieChart();
         initPromoCarousel();
     } catch (e) { console.error('Chart error:', e); }
 }

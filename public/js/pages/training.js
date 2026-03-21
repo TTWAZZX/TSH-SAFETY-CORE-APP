@@ -23,6 +23,7 @@ export async function loadTrainingPage() {
 
     container.innerHTML = _spinnerHtml();
     await Promise.all([_fetchSummary(), _fetchCourses()]);
+    _activeTab = window._getTab?.('training', _activeTab) || _activeTab;
     _renderPage(container);
 }
 
@@ -503,6 +504,7 @@ async function _loadAndRenderRecords() {
 // ─── Tab & Filter Handlers ─────────────────────────────────────────────────────
 window._trSetTab = async function(tab) {
     _activeTab = tab;
+    window._saveTab?.('training', tab);
 
     const active   = 'tr-tab-btn flex items-center gap-1.5 px-4 py-3 text-xs font-bold whitespace-nowrap transition-all border-b-2 border-white text-white';
     const inactive = 'tr-tab-btn flex items-center gap-1.5 px-4 py-3 text-xs font-semibold whitespace-nowrap transition-all border-b-2 border-transparent text-white/70 hover:text-white hover:border-white/40';

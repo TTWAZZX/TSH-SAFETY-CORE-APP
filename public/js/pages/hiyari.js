@@ -76,6 +76,7 @@ export async function loadHiyariPage() {
         _departments = normalizeApiArray(res?.data ?? res).map(d => d.Name || d.name).filter(Boolean);
     } catch (_) { _departments = []; }
 
+    _activeTab = window._getTab?.('hiyari', _activeTab) || _activeTab;
     switchTab(_activeTab);
     _loadHeroStats();   // async — fills stats strip without blocking tab render
 }
@@ -154,6 +155,7 @@ function buildShell() {
 // ─────────────────────────────────────────────────────────────────────────────
 async function switchTab(tab) {
     _activeTab = tab;
+    window._saveTab?.('hiyari', tab);
 
     const active   = 'hiyari-tab flex items-center gap-1.5 px-4 py-3 text-xs font-bold whitespace-nowrap transition-all border-b-2 border-white text-white';
     const inactive = 'hiyari-tab flex items-center gap-1.5 px-4 py-3 text-xs font-semibold whitespace-nowrap transition-all border-b-2 border-transparent text-white/70 hover:text-white hover:border-white/40';
