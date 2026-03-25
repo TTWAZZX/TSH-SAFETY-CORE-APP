@@ -40,6 +40,7 @@ const TABS = [
     { key: 'permissions',  label: 'สิทธิ์การใช้งาน',   icon: `<svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z"/></svg>` },
     { key: 'health',       label: 'System Health',     icon: `<svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4.318 6.318a4.5 4.5 0 000 6.364L12 20.364l7.682-7.682a4.5 4.5 0 00-6.364-6.364L12 7.636l-1.318-1.318a4.5 4.5 0 00-6.364 0z"/></svg>` },
     { key: 'audit',        label: 'Audit Log',         icon: `<svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"/></svg>` },
+    { key: 'targets',      label: 'เป้าหมายกิจกรรม',   icon: `<svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"/></svg>` },
 ];
 
 // =============================================================================
@@ -184,6 +185,7 @@ function switchTab(key) {
     else if (key === 'permissions')  renderPermissions(area);
     else if (key === 'health')       renderSystemHealth(area);
     else if (key === 'audit')        renderAuditLog(area);
+    else if (key === 'targets')      renderActivityTargets(area);
 }
 
 // =============================================================================
@@ -3325,5 +3327,514 @@ async function loadAuditLog() {
         }
     } catch (err) {
         wrap.innerHTML = `<div class="py-12 text-center text-red-400 text-sm">โหลดไม่ได้: ${err.message}</div>`;
+    }
+}
+
+// =============================================================================
+// TAB: เป้าหมายกิจกรรม (Activity Targets)
+// =============================================================================
+let _atActivities   = [];   // static list from /api/activity-targets/activities
+let _atPositions    = [];   // master positions list
+let _atSubTab       = 'template'; // 'template' | 'person'
+let _atSelPosition  = '';
+let _atEmpSearch    = '';
+let _atEmpResults   = [];
+let _atSelEmp       = null; // { EmployeeID, Name, Position }
+let _atEmpTargets   = [];   // targets for selected employee
+
+async function renderActivityTargets(container) {
+    // fetch activities + positions in parallel
+    try {
+        const [actRes, posRes] = await Promise.all([
+            API.get('/activity-targets/activities'),
+            API.get('/master/positions'),
+        ]);
+        _atActivities = actRes.data || [];
+        _atPositions  = (posRes.data || []).map(p => p.Name || p.PositionName || p.name || p).filter(Boolean);
+    } catch (e) {
+        container.innerHTML = `<div class="py-16 text-center text-red-400 text-sm">โหลดข้อมูลไม่ได้: ${e.message}</div>`;
+        return;
+    }
+
+    _renderAtShell(container);
+    _atSwitchSubTab(_atSubTab);
+}
+
+function _renderAtShell(container) {
+    container.innerHTML = `
+    <div class="animate-fade-in space-y-5">
+
+        <!-- Header -->
+        <div class="flex items-center justify-between">
+            <div>
+                <h2 class="text-lg font-bold text-slate-800 flex items-center gap-2">
+                    <span class="w-8 h-8 rounded-xl flex items-center justify-center flex-shrink-0" style="background:linear-gradient(135deg,#6366f1,#0284c7);box-shadow:0 2px 10px rgba(99,102,241,0.3)">
+                        <svg class="w-4 h-4 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"/></svg>
+                    </span>
+                    เป้าหมายกิจกรรมความปลอดภัย
+                </h2>
+                <p class="text-sm text-slate-500 mt-0.5 ml-10">กำหนดเกณฑ์รายปีสำหรับแต่ละกิจกรรม — ตามตำแหน่ง หรือรายบุคคล</p>
+            </div>
+        </div>
+
+        <!-- Sub-tabs -->
+        <div class="flex bg-slate-100 p-1 rounded-xl gap-1 w-fit">
+            <button id="at-sub-template" onclick="window._atSwitchSubTab('template')"
+                class="px-4 py-2 text-xs font-semibold rounded-lg transition-all bg-white shadow-sm text-slate-800">
+                เทมเพลตตามตำแหน่ง
+            </button>
+            <button id="at-sub-person" onclick="window._atSwitchSubTab('person')"
+                class="px-4 py-2 text-xs font-semibold rounded-lg transition-all text-slate-500 hover:text-slate-700">
+                กำหนดรายบุคคล
+            </button>
+        </div>
+
+        <!-- Content area -->
+        <div id="at-content"></div>
+    </div>`;
+
+    window._atSwitchSubTab  = _atSwitchSubTab;
+    window._atSaveTemplate  = _atSaveTemplate;
+    window._atToggleTplNA   = _atToggleTplNA;
+    window._atBulkApply     = _atBulkApply;
+    window._atSearchEmp     = _atSearchEmp;
+    window._atSelectEmp     = _atSelectEmp;
+    window._atSaveOverride  = _atSaveOverride;
+    window._atClearOverride = _atClearOverride;
+    window._atToggleNA      = _atToggleNA;
+}
+
+function _atSwitchSubTab(key) {
+    _atSubTab = key;
+    const active   = 'px-4 py-2 text-xs font-semibold rounded-lg transition-all bg-white shadow-sm text-slate-800';
+    const inactive = 'px-4 py-2 text-xs font-semibold rounded-lg transition-all text-slate-500 hover:text-slate-700';
+    document.getElementById('at-sub-template')?.setAttribute('class', key === 'template' ? active : inactive);
+    document.getElementById('at-sub-person')?.setAttribute('class',   key === 'person'   ? active : inactive);
+    const area = document.getElementById('at-content');
+    if (!area) return;
+    if (key === 'template') _renderAtTemplate(area);
+    else                    _renderAtPerson(area);
+}
+
+// ── Sub-tab 1: Position Template ─────────────────────────────────────────────
+function _renderAtTemplate(area) {
+    const posOptions = _atPositions.map(p =>
+        `<option value="${p}" ${p === _atSelPosition ? 'selected' : ''}>${p}</option>`
+    ).join('');
+
+    area.innerHTML = `
+    <div class="space-y-5">
+        <!-- Position selector -->
+        <div class="card p-4 flex flex-wrap gap-3 items-center">
+            <label class="text-sm font-semibold text-slate-700">ตำแหน่ง:</label>
+            <select id="at-pos-sel" onchange="window._atLoadTemplate(this.value)"
+                class="flex-1 min-w-[220px] px-3 py-2 text-sm border border-slate-200 rounded-lg outline-none focus:border-indigo-400 focus:ring-2 focus:ring-indigo-100">
+                <option value="">-- เลือกตำแหน่ง --</option>
+                ${posOptions}
+            </select>
+            <div id="at-bulk-btn-area">
+                ${_atSelPosition ? `
+                <button onclick="window._atBulkApply('${_atSelPosition.replace(/'/g,"\\'")}', this)"
+                    class="flex items-center gap-1.5 px-4 py-2 text-xs font-bold rounded-lg text-white transition-all"
+                    style="background:linear-gradient(135deg,#6366f1,#0284c7)">
+                    <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12"/></svg>
+                    ใช้เทมเพลตกับทุกคนในตำแหน่งนี้
+                </button>` : ''}
+            </div>
+        </div>
+
+        <!-- Activity grid -->
+        <div id="at-tpl-grid">
+            <div class="text-center py-16 text-slate-400">
+                <div class="w-16 h-16 rounded-2xl bg-slate-100 flex items-center justify-center mx-auto mb-4">
+                    <svg class="w-8 h-8 opacity-40" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"/></svg>
+                </div>
+                <p class="font-medium">เลือกตำแหน่งเพื่อจัดการเทมเพลต</p>
+            </div>
+        </div>
+    </div>`;
+
+    window._atLoadTemplate = async (pos) => {
+        _atSelPosition = pos;
+        // update bulk-apply button visibility without re-rendering the whole shell
+        const btnArea = document.getElementById('at-bulk-btn-area');
+        if (btnArea) {
+            btnArea.innerHTML = pos ? `
+            <button onclick="window._atBulkApply('${pos.replace(/'/g,"\\'")}', this)"
+                class="flex items-center gap-1.5 px-4 py-2 text-xs font-bold rounded-lg text-white transition-all"
+                style="background:linear-gradient(135deg,#6366f1,#0284c7)">
+                <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12"/></svg>
+                ใช้เทมเพลตกับทุกคนในตำแหน่งนี้
+            </button>` : '';
+        }
+        const grid = document.getElementById('at-tpl-grid');
+        if (!grid) return;
+        if (!pos) {
+            grid.innerHTML = `
+            <div class="text-center py-16 text-slate-400">
+                <div class="w-16 h-16 rounded-2xl bg-slate-100 flex items-center justify-center mx-auto mb-4">
+                    <svg class="w-8 h-8 opacity-40" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"/></svg>
+                </div>
+                <p class="font-medium">เลือกตำแหน่งเพื่อจัดการเทมเพลต</p>
+            </div>`;
+            return;
+        }
+        grid.innerHTML = `<div class="flex justify-center py-10"><div class="animate-spin rounded-full h-9 w-9 border-4 border-indigo-500 border-t-transparent"></div></div>`;
+        try {
+            const res = await API.get(`/activity-targets/position-templates?position=${encodeURIComponent(pos)}`);
+            const rows = res.data || [];
+            const rowMap = {};
+            rows.forEach(r => { rowMap[r.ActivityKey] = r; });
+            grid.innerHTML = _atTemplateGridHtml(pos, rowMap);
+        } catch (e) {
+            grid.innerHTML = `<div class="py-8 text-center text-red-400 text-sm">โหลดไม่ได้: ${e.message}</div>`;
+        }
+    };
+
+    if (_atSelPosition) window._atLoadTemplate(_atSelPosition);
+}
+
+function _atTemplateGridHtml(pos, rowMap) {
+    const rows = _atActivities.map(a => {
+        const d    = rowMap[a.key] || {};
+        const isNA = d.IsNA === 1 || d.IsNA === true;
+        const dimCls = isNA ? 'opacity-40 pointer-events-none select-none' : '';
+        return `
+        <tr class="hover:bg-slate-50 transition-colors ${isNA ? 'bg-slate-50/60' : ''}">
+            <td class="px-4 py-3">
+                <p class="text-sm font-semibold ${isNA ? 'line-through text-slate-400' : 'text-slate-800'}">${a.label}</p>
+                <p class="text-xs text-slate-400 mt-0.5">${a.desc}</p>
+            </td>
+            <td class="px-4 py-3 text-center ${dimCls}">
+                <input id="tgt-${a.key}-target" type="number" min="0" value="${isNA ? '' : (d.YearlyTarget ?? '')}"
+                    placeholder="0" ${isNA ? 'disabled' : ''}
+                    class="w-20 px-2 py-1.5 text-sm text-center border border-slate-200 rounded-lg outline-none focus:border-indigo-400 focus:ring-2 focus:ring-indigo-100 disabled:bg-slate-100">
+            </td>
+            <td class="px-4 py-3 text-center ${dimCls}">
+                <div class="flex items-center gap-1 justify-center">
+                    <input id="tgt-${a.key}-pct" type="number" min="0" max="100" value="${isNA ? '' : (d.PassPct ?? 80)}"
+                        ${isNA ? 'disabled' : ''}
+                        class="w-16 px-2 py-1.5 text-sm text-center border border-slate-200 rounded-lg outline-none focus:border-indigo-400 focus:ring-2 focus:ring-indigo-100 disabled:bg-slate-100">
+                    <span class="text-xs text-slate-400">%</span>
+                </div>
+            </td>
+            <td class="px-4 py-3 text-center">
+                <div class="flex gap-1.5 justify-center">
+                    ${!isNA ? `
+                    <button onclick="window._atSaveTemplate('${pos.replace(/'/g,"\\'")}','${a.key}',this)"
+                        class="px-3 py-1.5 text-xs font-semibold rounded-lg border border-indigo-200 text-indigo-700 bg-indigo-50 hover:bg-indigo-100 transition-colors">
+                        บันทึก
+                    </button>` : ''}
+                    <button onclick="window._atToggleTplNA('${pos.replace(/'/g,"\\'")}','${a.key}',${isNA ? 0 : 1},this)"
+                        title="${isNA ? 'ยกเลิก N/A' : 'ตั้งเป็น N/A (ไม่เกี่ยวข้อง)'}"
+                        class="px-2.5 py-1.5 text-xs font-semibold rounded-lg border transition-colors ${isNA ? 'border-indigo-200 text-indigo-600 bg-indigo-50 hover:bg-indigo-100' : 'border-slate-200 text-slate-500 bg-slate-50 hover:bg-slate-100'}">
+                        ${isNA ? 'ยกเลิก N/A' : 'N/A'}
+                    </button>
+                </div>
+            </td>
+        </tr>`;
+    }).join('');
+
+    return `
+    <div class="card overflow-hidden">
+        <div class="px-4 py-3 border-b border-slate-100 flex items-center justify-between">
+            <p class="text-sm font-bold text-slate-700">เทมเพลตสำหรับตำแหน่ง: <span class="text-indigo-600">${pos}</span></p>
+            <p class="text-xs text-slate-400">วัดผลรายปี</p>
+        </div>
+        <table class="w-full text-left">
+            <thead class="bg-slate-50 border-b border-slate-100">
+                <tr>
+                    <th class="px-4 py-3 text-xs font-bold text-slate-500 uppercase tracking-wide">กิจกรรม</th>
+                    <th class="px-4 py-3 text-xs font-bold text-slate-500 uppercase tracking-wide text-center w-32">เป้าหมาย/ปี</th>
+                    <th class="px-4 py-3 text-xs font-bold text-slate-500 uppercase tracking-wide text-center w-32">เกณฑ์ผ่าน</th>
+                    <th class="px-4 py-3 text-xs font-bold text-slate-500 uppercase tracking-wide text-center w-24"></th>
+                </tr>
+            </thead>
+            <tbody class="divide-y divide-slate-50">${rows}</tbody>
+        </table>
+    </div>`;
+}
+
+async function _atSaveTemplate(pos, actKey, btn) {
+    const target = document.getElementById(`tgt-${actKey}-target`)?.value;
+    const pct    = document.getElementById(`tgt-${actKey}-pct`)?.value;
+    const orig   = btn.textContent;
+    btn.disabled = true; btn.textContent = 'กำลังบันทึก...';
+    try {
+        await API.put('/activity-targets/position-templates', { PositionName: pos, ActivityKey: actKey, YearlyTarget: Number(target)||0, PassPct: Number(pct)||80, IsNA: 0 });
+        btn.textContent = 'บันทึกแล้ว';
+        btn.className = btn.className.replace('border-indigo-200 text-indigo-700 bg-indigo-50 hover:bg-indigo-100','border-emerald-200 text-emerald-700 bg-emerald-50');
+        setTimeout(() => { btn.disabled = false; btn.textContent = orig; btn.className = btn.className.replace('border-emerald-200 text-emerald-700 bg-emerald-50','border-indigo-200 text-indigo-700 bg-indigo-50 hover:bg-indigo-100'); }, 2000);
+    } catch (e) {
+        btn.disabled = false; btn.textContent = orig;
+        alert('บันทึกไม่สำเร็จ: ' + e.message);
+    }
+}
+
+async function _atToggleTplNA(pos, actKey, setNA, btn) {
+    btn.disabled = true;
+    try {
+        await API.put('/activity-targets/position-templates', {
+            PositionName: pos, ActivityKey: actKey,
+            YearlyTarget: 0, PassPct: 0, IsNA: setNA ? 1 : 0,
+        });
+        // reload grid
+        const res = await API.get(`/activity-targets/position-templates?position=${encodeURIComponent(pos)}`);
+        const rowMap = {};
+        (res.data || []).forEach(r => { rowMap[r.ActivityKey] = r; });
+        const grid = document.getElementById('at-tpl-grid');
+        if (grid) grid.innerHTML = _atTemplateGridHtml(pos, rowMap);
+    } catch (e) {
+        btn.disabled = false;
+        alert('ไม่สำเร็จ: ' + e.message);
+    }
+}
+
+async function _atBulkApply(pos, btn) {
+    if (!confirm(`ใช้เทมเพลตนี้กับพนักงานทุกคนในตำแหน่ง "${pos}" ใช่หรือไม่?\n\nการดำเนินการนี้จะ override เป้าหมายรายบุคคลที่มีอยู่`)) return;
+    const orig = btn.innerHTML;
+    btn.disabled = true; btn.textContent = 'กำลังดำเนินการ...';
+    try {
+        const res = await API.post('/activity-targets/position-templates/bulk-apply', { PositionName: pos });
+        alert(res.message || 'สำเร็จ');
+    } catch (e) {
+        alert('ไม่สำเร็จ: ' + e.message);
+    } finally {
+        btn.disabled = false; btn.innerHTML = orig;
+    }
+}
+
+// ── Sub-tab 2: Per-person Override ───────────────────────────────────────────
+async function _renderAtPerson(area) {
+    area.innerHTML = `
+    <div class="space-y-5">
+        <!-- Employee search -->
+        <div class="card p-4 space-y-3">
+            <p class="text-sm font-semibold text-slate-700">ค้นหาพนักงาน</p>
+            <div class="flex gap-3">
+                <div class="relative flex-1">
+                    <svg class="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-4.35-4.35M17 11A6 6 0 115 11a6 6 0 0112 0z"/></svg>
+                    <input id="at-emp-search" type="text" placeholder="ชื่อ หรือ รหัสพนักงาน..."
+                        value="${_atEmpSearch}"
+                        class="w-full pl-9 pr-3 py-2 text-sm border border-slate-200 rounded-lg outline-none focus:border-indigo-400 focus:ring-2 focus:ring-indigo-100"
+                        oninput="window._atSearchEmp(this.value)">
+                </div>
+            </div>
+            <div id="at-emp-results">
+                <div class="text-xs text-slate-400 py-1">กำลังโหลดรายชื่อพนักงาน...</div>
+            </div>
+        </div>
+
+        <!-- Selected employee targets -->
+        <div id="at-person-grid"></div>
+    </div>`;
+
+    // pre-load employee cache then show initial list
+    if (!_empCache.length) {
+        try {
+            const r = await API.get('/employees');
+            _empCache = r?.data || [];
+        } catch (e) {
+            const el = document.getElementById('at-emp-results');
+            if (el) el.innerHTML = `<div class="text-xs text-red-400 py-1">โหลดรายชื่อไม่ได้: ${e.message}</div>`;
+        }
+    }
+    _atRenderEmpDropdown(_atEmpSearch);
+
+    if (_atSelEmp) _renderAtPersonGrid(document.getElementById('at-person-grid'));
+}
+
+function _atRenderEmpDropdown(q) {
+    const res_el = document.getElementById('at-emp-results');
+    if (!res_el) return;
+    const qLow = (q || '').toLowerCase().trim();
+    const list = qLow.length === 0
+        ? _empCache.slice(0, 15)
+        : _empCache.filter(e =>
+            (e.EmployeeName || '').toLowerCase().includes(qLow) ||
+            (e.EmployeeID   || '').toLowerCase().includes(qLow)
+          ).slice(0, 15);
+
+    if (!list.length) {
+        res_el.innerHTML = `<div class="text-xs text-slate-400 py-2">ไม่พบพนักงาน</div>`;
+        return;
+    }
+    const hint = _empCache.length > 15 && !qLow
+        ? `<div class="px-3 py-1.5 text-[10px] text-slate-400 bg-slate-50 border-t border-slate-100">แสดง 15 รายการแรก — พิมพ์เพื่อค้นหา</div>`
+        : '';
+    res_el.innerHTML = `
+    <div class="border border-slate-200 rounded-lg divide-y divide-slate-100 bg-white shadow-sm mt-1 overflow-hidden max-h-60 overflow-y-auto">
+        ${list.map(e => `
+        <button onclick="window._atSelectEmp('${e.EmployeeID}','${(e.EmployeeName||'').replace(/'/g,"\\'")}','${(e.Position||'').replace(/'/g,"\\'")}',this)"
+            class="w-full text-left px-4 py-2.5 hover:bg-indigo-50 transition-colors">
+            <span class="font-semibold text-sm text-slate-800">${e.EmployeeName || e.EmployeeID}</span>
+            <span class="text-xs text-slate-400 ml-2">${e.EmployeeID}</span>
+            ${e.Position ? `<span class="text-xs text-indigo-600 ml-2">· ${e.Position}</span>` : ''}
+        </button>`).join('')}
+        ${hint}
+    </div>`;
+}
+
+function _atSearchEmp(q) {
+    _atEmpSearch = q;
+    _atRenderEmpDropdown(q);
+}
+
+async function _atSelectEmp(empId, name, position) {
+    _atSelEmp = { EmployeeID: empId, Name: name, Position: position };
+    _atEmpSearch = '';
+    const searchEl = document.getElementById('at-emp-search');
+    if (searchEl) searchEl.value = '';
+    document.getElementById('at-emp-results').innerHTML = '';
+    const grid = document.getElementById('at-person-grid');
+    if (!grid) return;
+    grid.innerHTML = `<div class="flex justify-center py-10"><div class="animate-spin rounded-full h-9 w-9 border-4 border-indigo-500 border-t-transparent"></div></div>`;
+    try {
+        const res = await API.get(`/activity-targets/employee/${empId}`);
+        _atEmpTargets = res.data?.targets || [];
+        _renderAtPersonGrid(grid);
+    } catch (e) {
+        grid.innerHTML = `<div class="py-8 text-center text-red-400 text-sm">โหลดไม่ได้: ${e.message}</div>`;
+    }
+}
+
+function _renderAtPersonGrid(grid) {
+    if (!_atSelEmp) { grid.innerHTML = ''; return; }
+    const tgtMap = {};
+    _atEmpTargets.forEach(t => { tgtMap[t.activityKey] = t; });
+
+    const sourceLabel = s => {
+        if (s === 'override')  return `<span class="px-2 py-0.5 rounded-full text-[10px] font-bold bg-violet-100 text-violet-700">รายบุคคล</span>`;
+        if (s === 'template')  return `<span class="px-2 py-0.5 rounded-full text-[10px] font-bold bg-sky-100 text-sky-700">เทมเพลต</span>`;
+        return `<span class="px-2 py-0.5 rounded-full text-[10px] font-bold bg-slate-100 text-slate-500">ยังไม่กำหนด</span>`;
+    };
+
+    const rows = _atActivities.map(a => {
+        const d    = tgtMap[a.key] || {};
+        const isNA = d.isNA === 1 || d.isNA === true;
+        const dimCls = isNA ? 'opacity-40 pointer-events-none select-none' : '';
+        return `
+        <tr class="hover:bg-slate-50 transition-colors ${isNA ? 'bg-slate-50/60' : ''}">
+            <td class="px-4 py-3">
+                <p class="text-sm font-semibold text-slate-800 ${isNA ? 'line-through text-slate-400' : ''}">${a.label}</p>
+                <p class="text-xs text-slate-400 mt-0.5">${a.desc}</p>
+            </td>
+            <td class="px-4 py-3 text-center">
+                ${isNA
+                    ? `<span class="px-2 py-0.5 rounded-full text-[10px] font-bold bg-slate-200 text-slate-500">N/A</span>`
+                    : sourceLabel(d.source || 'none')}
+            </td>
+            <td class="px-4 py-3 text-center ${dimCls}">
+                <input id="per-${a.key}-target" type="number" min="0" value="${isNA ? '' : (d.yearlyTarget ?? '')}"
+                    placeholder="${d.source === 'template' && !isNA ? d.yearlyTarget ?? '—' : '0'}"
+                    ${isNA ? 'disabled' : ''}
+                    class="w-20 px-2 py-1.5 text-sm text-center border border-slate-200 rounded-lg outline-none focus:border-indigo-400 focus:ring-2 focus:ring-indigo-100 disabled:bg-slate-100">
+            </td>
+            <td class="px-4 py-3 text-center ${dimCls}">
+                <div class="flex items-center gap-1 justify-center">
+                    <input id="per-${a.key}-pct" type="number" min="0" max="100" value="${isNA ? '' : (d.passPct ?? 80)}"
+                        ${isNA ? 'disabled' : ''}
+                        class="w-16 px-2 py-1.5 text-sm text-center border border-slate-200 rounded-lg outline-none focus:border-indigo-400 focus:ring-2 focus:ring-indigo-100 disabled:bg-slate-100">
+                    <span class="text-xs text-slate-400">%</span>
+                </div>
+            </td>
+            <td class="px-4 py-3">
+                <div class="flex gap-1.5 justify-center flex-wrap">
+                    ${!isNA ? `
+                    <button onclick="window._atSaveOverride('${_atSelEmp.EmployeeID}','${a.key}',this)"
+                        class="px-3 py-1.5 text-xs font-semibold rounded-lg border border-indigo-200 text-indigo-700 bg-indigo-50 hover:bg-indigo-100 transition-colors">
+                        บันทึก
+                    </button>` : ''}
+                    <button onclick="window._atToggleNA('${_atSelEmp.EmployeeID}','${a.key}',${isNA ? 0 : 1},this)"
+                        title="${isNA ? 'ยกเลิก N/A — กลับมากำหนดค่า' : 'ตั้งเป็น N/A (ไม่เกี่ยวข้อง)'}"
+                        class="px-2.5 py-1.5 text-xs font-semibold rounded-lg border transition-colors ${isNA ? 'border-indigo-200 text-indigo-600 bg-indigo-50 hover:bg-indigo-100' : 'border-slate-200 text-slate-500 bg-slate-50 hover:bg-slate-100'}">
+                        ${isNA ? 'ยกเลิก N/A' : 'N/A'}
+                    </button>
+                    ${d.source === 'override' && !isNA ? `
+                    <button onclick="window._atClearOverride('${_atSelEmp.EmployeeID}','${a.key}',this)"
+                        title="ลบ override — คืนค่าเทมเพลตตำแหน่ง"
+                        class="px-2 py-1.5 text-xs font-semibold rounded-lg border border-red-200 text-red-600 bg-red-50 hover:bg-red-100 transition-colors">
+                        <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
+                    </button>` : ''}
+                </div>
+            </td>
+        </tr>`;
+    }).join('');
+
+    grid.innerHTML = `
+    <div class="card overflow-hidden">
+        <div class="px-4 py-3 border-b border-slate-100 flex items-center justify-between flex-wrap gap-2">
+            <div>
+                <p class="text-sm font-bold text-slate-700">${_atSelEmp.Name || _atSelEmp.EmployeeID}</p>
+                <p class="text-xs text-slate-400">${_atSelEmp.EmployeeID}${_atSelEmp.Position ? ' · ' + _atSelEmp.Position : ''}</p>
+            </div>
+            <p class="text-xs text-slate-400">วัดผลรายปี · override มีลำดับสูงกว่าเทมเพลต</p>
+        </div>
+        <table class="w-full text-left">
+            <thead class="bg-slate-50 border-b border-slate-100">
+                <tr>
+                    <th class="px-4 py-3 text-xs font-bold text-slate-500 uppercase tracking-wide">กิจกรรม</th>
+                    <th class="px-4 py-3 text-xs font-bold text-slate-500 uppercase tracking-wide text-center w-28">แหล่งที่มา</th>
+                    <th class="px-4 py-3 text-xs font-bold text-slate-500 uppercase tracking-wide text-center w-32">เป้าหมาย/ปี</th>
+                    <th class="px-4 py-3 text-xs font-bold text-slate-500 uppercase tracking-wide text-center w-32">เกณฑ์ผ่าน</th>
+                    <th class="px-4 py-3 text-xs font-bold text-slate-500 uppercase tracking-wide text-center w-32"></th>
+                </tr>
+            </thead>
+            <tbody class="divide-y divide-slate-50">${rows}</tbody>
+        </table>
+    </div>`;
+}
+
+async function _atSaveOverride(empId, actKey, btn) {
+    const target = document.getElementById(`per-${actKey}-target`)?.value;
+    const pct    = document.getElementById(`per-${actKey}-pct`)?.value;
+    if (target === '' || target === null) { alert('กรุณาระบุเป้าหมาย'); return; }
+    const orig = btn.textContent;
+    btn.disabled = true; btn.textContent = 'กำลังบันทึก...';
+    try {
+        await API.put(`/activity-targets/employee/${empId}`, { ActivityKey: actKey, YearlyTarget: Number(target), PassPct: Number(pct)||80 });
+        // refresh targets for this employee
+        const res = await API.get(`/activity-targets/employee/${empId}`);
+        _atEmpTargets = res.data?.targets || [];
+        const grid = document.getElementById('at-person-grid');
+        if (grid) _renderAtPersonGrid(grid);
+    } catch (e) {
+        btn.disabled = false; btn.textContent = orig;
+        alert('บันทึกไม่สำเร็จ: ' + e.message);
+    }
+}
+
+async function _atClearOverride(empId, actKey, btn) {
+    if (!confirm('ลบ override นี้และคืนค่าเทมเพลตตำแหน่ง?')) return;
+    btn.disabled = true;
+    try {
+        await API.put(`/activity-targets/employee/${empId}`, { ActivityKey: actKey, YearlyTarget: null });
+        const res = await API.get(`/activity-targets/employee/${empId}`);
+        _atEmpTargets = res.data?.targets || [];
+        const grid = document.getElementById('at-person-grid');
+        if (grid) _renderAtPersonGrid(grid);
+    } catch (e) {
+        btn.disabled = false;
+        alert('ไม่สำเร็จ: ' + e.message);
+    }
+}
+
+async function _atToggleNA(empId, actKey, setNA, btn) {
+    btn.disabled = true;
+    try {
+        if (setNA) {
+            // set N/A — store with IsNA=1, YearlyTarget=0
+            await API.put(`/activity-targets/employee/${empId}`, { ActivityKey: actKey, YearlyTarget: 0, PassPct: 0, IsNA: 1 });
+        } else {
+            // clear N/A — remove override entirely → revert to template
+            await API.put(`/activity-targets/employee/${empId}`, { ActivityKey: actKey, YearlyTarget: null });
+        }
+        const res = await API.get(`/activity-targets/employee/${empId}`);
+        _atEmpTargets = res.data?.targets || [];
+        const grid = document.getElementById('at-person-grid');
+        if (grid) _renderAtPersonGrid(grid);
+    } catch (e) {
+        btn.disabled = false;
+        alert('ไม่สำเร็จ: ' + e.message);
     }
 }

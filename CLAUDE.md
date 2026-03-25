@@ -34,7 +34,7 @@ TSH-SAFETY-CORE-APP/
 │       ├── utils/
 │       │   └── normalize.js
 │       └── pages/
-│           ├── admin.js        # System Console (7 tabs — see below)
+│           ├── admin.js        # System Console (8 tabs — see below)
 │           ├── cccf.js
 │           ├── committee.js
 │           ├── employee.js     # legacy — router redirects #employee → #admin/employees tab
@@ -74,7 +74,8 @@ TSH-SAFETY-CORE-APP/
         ├── contractor.js
         ├── hiyari.js
         ├── ky.js
-        └── fourm.js            # 4M Change routes
+        ├── fourm.js            # 4M Change routes
+        └── activity-targets.js # Activity Targets — position templates + per-person overrides
 ```
 
 ## Environment Variables
@@ -123,14 +124,19 @@ node server.js      # runs on PORT=5000
 | Prefix | Auth | Module |
 |--------|------|--------|
 | `/api/login` | none | Login |
+| `/api/register/options` | none | Public: departments + positions + safety units for register/profile forms |
+| `/api/register` | none | สมัครใหม่ (register) |
 | `/api/change-password` | User | เปลี่ยนรหัสผ่าน |
 | `/api/session/verify` | User | Refresh JWT |
 | `/api/patrol/*` | User | Patrol routes |
+| `/api/patrol/group-members` | User (write=Admin) | Patrol group membership CRUD (management/supervisor) |
+| `/api/patrol/member-records` | User | ดูรายการเดินตรวจรายบุคคล |
+| `/api/patrol/admin-record` | Admin | เพิ่ม/ลบรายการเดินตรวจแทนสมาชิก |
 | `/api/admin/*` | Admin | Admin routes (employees, schedules, audit, dashboard, health) |
 | `/api/cccf/*` | User | CCCF routes |
-| `/api/master/*` | User (write=Admin) | Master data (departments/teams/roles/positions/areas) |
+| `/api/master/*` | User (write=Admin) | Master data (departments/teams/roles/positions/areas/safety-units) |
 | `/api/profile` | User | ดูและแก้ไขโปรไฟล์ตัวเอง |
-| `/api/profile/employee-id` | User | เปลี่ยน EmployeeID ตัวเอง |
+| `/api/profile/employee-id` | User | เปลี่ยน EmployeeID ตัวเอง (cascade update + new JWT) |
 | `/api/machine-safety/*` | User | Machine & Device Safety |
 | `/api/ojt/*` | User | Stop-Call-Wait (OJT/SCW) |
 | `/api/yokoten/*` | User | Yokoten CRUD |
@@ -151,6 +157,11 @@ node server.js      # runs on PORT=5000
 | `/api/machine-safety/files/:fileId` | Admin | Delete a file record |
 | `/api/upload/document` | Admin | Cloudinary file upload (field name: `document`) |
 | `/api/admin/permissions/matrix` | Admin | GET/PUT permission matrix (role × permission) |
+| `/api/activity-targets/activities` | User | Static list of 9 activity definitions |
+| `/api/activity-targets/position-templates` | User (write=Admin) | GET/PUT position template targets (IsNA supported) |
+| `/api/activity-targets/position-templates/bulk-apply` | Admin | Apply position template to all employees in that position |
+| `/api/activity-targets/employee/:empId` | User (write=Admin) | GET/PUT per-person override targets (IsNA supported) |
+| `/api/activity-targets/me` | User | My merged targets + actual yearly counts for all 9 activities |
 
 ### Generic CRUD Tables
 ตารางเหล่านี้มี auto-generated CRUD endpoints (GET/POST/PUT/DELETE):
@@ -159,6 +170,15 @@ node server.js      # runs on PORT=5000
 `Machines`, `Documents`, `Document_Machine_Links`, `YokotenTopics`, `YokotenResponses`
 
 Primary key ของ generic CRUD คือ `id` — ยกเว้น `Employees` ที่ใช้ `EmployeeID`
+
+### Key Non-Generic Tables (managed by dedicated routes)
+| Table | Route | Notes |
+|-------|-------|-------|
+| `Patrol_MemberGroups` | `/api/patrol/group-members` | Admin-managed patrol group membership (management/supervisor) |
+| `Patrol_Self_Checkin` | `/api/patrol/self-checkin`, `/api/patrol/admin-record/supervisor/:id` | Supervisor self-patrol records |
+| `Master_SafetyUnits` | `/api/master/safety-units` | Safety units linked to departments (cascading select) |
+| `Activity_Position_Templates` | `/api/activity-targets/position-templates` | Yearly targets per position per activity (IsNA flag supported) |
+| `Employee_Activity_Targets` | `/api/activity-targets/employee/:empId` | Per-person override targets — override takes priority over template |
 
 ### File Upload
 - **ห้ามเขียนไฟล์ไปยัง local filesystem** — Vercel มี read-only filesystem
@@ -184,7 +204,7 @@ Primary key ของ generic CRUD คือ `id` — ยกเว้น `Employ
 
 | Module | Description |
 |--------|-------------|
-| **Patrol** | กำหนดการตรวจ, บันทึกการเข้าร่วม, รายงานปัญหา (รูปภาพ), Self-Patrol สำหรับหัวหน้า, Team Rotation, พื้นที่โรงงาน (Patrol_Areas) |
+| **Patrol** | กำหนดการตรวจ, บันทึกการเข้าร่วม, รายงานปัญหา (รูปภาพ), Self-Patrol สำหรับหัวหน้า, Team Rotation, พื้นที่โรงงาน (Patrol_Areas), Patrol Group Member Management (Top&Management / Sec.&Supervisor) |
 | **CCCF** | กิจกรรมและเป้าหมาย CCCF |
 | **KPI** | ประกาศ KPI, ข้อมูล KPI รายปี (ม.ค.–ธ.ค.) |
 | **Yokoten** | แบ่งปันบทเรียน/ความรู้ความปลอดภัย, บันทึกการรับทราบ |
@@ -199,9 +219,47 @@ Primary key ของ generic CRUD คือ `id` — ยกเว้น `Employ
 | **Hiyari** | รายงาน near-miss / ไฮยาริ |
 | **KY** | กิจกรรม KY (Kiken Yochi) |
 | **4M Change** | บริหารจัดการการเปลี่ยนแปลง Man/Machine/Material/Method |
-| **Admin (System Console)** | Dashboard, Scheduler, Employee CRUD, Master Data, System Health, Audit Log |
-| **Master** | Departments, Teams, Roles, Positions, Areas (Patrol_Areas) — admin-managed reference data |
-| **Profile** | Slide-over drawer: ดู/แก้ไขโปรไฟล์ตัวเอง, เปลี่ยนรหัสผ่าน, เปลี่ยน EmployeeID |
+| **Admin (System Console)** | Dashboard, Scheduler, Employee CRUD, Master Data, System Health, Audit Log, **เป้าหมายกิจกรรม** |
+| **Activity Targets** | กำหนดเป้าหมายรายปีสำหรับ 9 กิจกรรม — เทมเพลตตามตำแหน่ง + override รายบุคคล + N/A flag; ผล sync อัตโนมัติกับ `/api/activity-targets/me` |
+| **Master** | Departments, Teams, Roles, Positions, Areas (Patrol_Areas), Safety Units (Master_SafetyUnits) — admin-managed reference data |
+| **Profile** | Slide-over drawer: ดู/แก้ไขโปรไฟล์ตัวเอง, เปลี่ยนรหัสผ่าน, เปลี่ยน EmployeeID (cascade update 9 tables + re-issue JWT) |
+
+## Patrol Module — Overview Tab Structure
+
+`patrol.js` แท็บ "ทีมและภาพรวม" มี 2 sub-tabs:
+
+| Sub-tab | ID | Group | Attendance source | Yearly target |
+|---------|----|-------|-------------------|---------------|
+| Top & Management | `ov-sub-mgmt` | `management` | `Patrol_Attendance.UserID` | per position (12 or 24) |
+| Sec. & Supervisor | `ov-sub-sv` | `supervisor` | `Patrol_Self_Checkin.EmployeeID` | per position (24) |
+
+### Position → Yearly Target
+**Management group:**
+- ผู้จัดการทั่วไป, ผู้ช่วยผู้จัดการทั่วไป, ผู้อำนวยการ → **12 ครั้ง/ปี**
+- ผู้ชำนาญการพิเศษ, ผู้จัดการ → **24 ครั้ง/ปี**
+
+**Supervisor group:**
+- หัวหน้าแผนก, หัวหน้าส่วน → **24 ครั้ง/ปี**
+
+### Patrol_MemberGroups Table
+```sql
+CREATE TABLE IF NOT EXISTS Patrol_MemberGroups (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    EmployeeID VARCHAR(50) NOT NULL,
+    PatrolGroup VARCHAR(20) NOT NULL,  -- 'management' | 'supervisor'
+    YearlyTarget INT NOT NULL DEFAULT 12,
+    AddedAt DATETIME DEFAULT CURRENT_TIMESTAMP,
+    AddedByID VARCHAR(50),
+    UNIQUE KEY uq_emp_group (EmployeeID, PatrolGroup)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+```
+สร้างอัตโนมัติเมื่อ server start (`db.query(CREATE TABLE IF NOT EXISTS ...)` ใน `backend/routes/patrol.js`)
+
+### Admin Actions (per row in overview tables)
+- **ดูรายการ** → modal แสดงรายการเดินตรวจ + เพิ่ม/ลบรายการ (calls `GET /patrol/member-records`)
+- **แก้ไขเป้าหมาย** → modal แก้ `YearlyTarget` (calls `PUT /patrol/group-members/:id`)
+- **ลบสมาชิก** → confirm + calls `DELETE /patrol/group-members/:id`
+- **เพิ่มสมาชิก** button (ในหัว table) → modal ค้นหาพนักงาน + เลือกเพิ่ม (calls `POST /patrol/group-members`)
 
 ## Vercel Deployment
 
@@ -243,9 +301,9 @@ const { UserID, UserName } = req.body;
 
 `req.user` มี fields: `{ id, name, department, role, team }`
 
-## Admin Hub (System Console) — 7 Tabs
+## Admin Hub (System Console) — 8 Tabs
 
-`public/js/pages/admin.js` มี 7 tabs:
+`public/js/pages/admin.js` มี 8 tabs:
 
 | Tab | Key | Description |
 |-----|-----|-------------|
@@ -256,8 +314,9 @@ const { UserID, UserName } = req.body;
 | สิทธิ์การใช้งาน | `permissions` | Permission matrix per role — Admin/User/Viewer |
 | System Health | `health` | Module record counts, stale alert tables |
 | Audit Log | `audit` | Admin action log, filterable by action type |
+| เป้าหมายกิจกรรม | `targets` | Activity Targets — 2 sub-tabs: เทมเพลตตามตำแหน่ง + กำหนดรายบุคคล |
 
-State: `_currentTab`, `_calInst`, `_empCache`, `_deptCache`, `_teamCache`, `_empSearch`, `_empPage`, `_auditPage`
+State: `_currentTab`, `_calInst`, `_empCache`, `_deptCache`, `_teamCache`, `_empSearch`, `_empPage`, `_auditPage`, `_atActivities`, `_atPositions`, `_atSubTab`, `_atSelPosition`, `_atSelEmp`, `_atEmpTargets`
 
 Navigation: `#employee` hash redirects → `#admin` + auto-switches to employees tab via `window._adminTab?.('employees')`
 
@@ -433,3 +492,15 @@ closeModal();
 18. **Add machine → upload files** — ต้อง POST machine ก่อน → รับ `id` จาก response → แล้วค่อย upload files/links ทีละขั้น (multi-step creation)
 19. **KPI_DATA_FIELDS whitelist** — column จริงใน DB คือ `Metric`, `Department` (ไม่ใช่ `MetricName`, `Category`) — ตรวจ whitelist ใน `server.js` ก่อนแก้ field names
 20. **`machine-safety.js` enterprise fields** — `Status`, `RiskLevel`, `NextInspectionDate` ถูก auto-migrate ใน `ensureTables()` แล้ว ไม่ต้องรัน SQL แยก (แต่ถ้าสร้างตารางใหม่ให้รัน SQL ที่ให้ไว้ใน session)
+21. **EmployeeID format** — รองรับทั้งตัวเลข 6 หลัก (012609) และแบบ letter-prefix (AP0001, SP0001) — placeholder ทุกที่ต้องอ้างอิงทั้งสองรูปแบบ
+22. **EmployeeID cascade update** — `PUT /api/profile/employee-id` ใช้ `pool.getConnection()` + transaction เพื่อ update Employees PK + 9 related tables แล้ว re-issue JWT ใหม่ — frontend ต้อง reload หลังสำเร็จ
+23. **`isAdmin` ใน patrol routes** — `/api/patrol` mount ใช้ `authenticateToken` เท่านั้น ถ้าต้องการ admin-only endpoint ภายใน patrol.js ต้อง import `isAdmin` จาก `../middleware/auth` แล้วใส่เป็น per-route middleware (`router.post('/...', isAdmin, handler)`)
+24. **`Patrol_MemberGroups` auto-create** — สร้างด้วย `db.query(CREATE TABLE IF NOT EXISTS ...)` ใน patrol.js ตอน startup — ไม่ต้องรัน SQL แยก
+25. **Patrol overview sub-tabs** — `ov-sub-mgmt` (Top&Management) และ `ov-sub-sv` (Sec.&Supervisor) แยก canvas ID: `ov-mgmt-pie` / `ov-sv-pie` — supervisor tab ใช้ yearly filter เท่านั้น (ไม่มี month filter แล้ว)
+26. **Safety Units cascading** — `Master_SafetyUnits` มี `department_id` — ทั้ง registration form (`index.html`) และ profile drawer (`profile.js`) filter units ตาม department ที่เลือก ซ่อน unit select ถ้าไม่มี units ใน dept นั้น
+27. **`/api/register/options` เป็น public** — ไม่ต้อง auth แต่ `apiFetch` จะส่ง auth header ไปด้วยถ้า token มีอยู่ — ไม่เป็นปัญหา backend ไม่ enforce auth บน route นี้
+28. **`admin.js` ใช้ `API` object เท่านั้น** — import เป็น `import { API } from '../api.js'` ไม่ใช่ `apiFetch` โดยตรง — path ต้องไม่มี `/api/` นำหน้า (e.g. `API.get('/activity-targets/me')` ไม่ใช่ `API.get('/api/activity-targets/me')`)
+29. **Activity Targets — hybrid architecture** — override (`Employee_Activity_Targets`) มีลำดับสูงกว่า template (`Activity_Position_Templates`) เสมอ — `getMergedTargets()` ใน `activity-targets.js` handle การ merge; ทั้งสอง table auto-migrate `IsNA` column ผ่าน `ALTER TABLE ... ADD COLUMN` (try/catch)
+30. **Activity Targets — `IsNA` flag** — ถ้า `IsNA=1` → `YearlyTarget=0` และ activity ถูก filter ออกจาก `/me` response — ไม่แสดงใน compliance widget ของ user
+31. **Activity Targets — `patrol_issue` actual count** — `Patrol_Issues` ไม่มี `ReporterID` column → `actualCount` คืน `null` เสมอ — ยังไม่รองรับ per-person tracking
+32. **Activity Targets — compliance widget (pending)** — แต่ละ module page (patrol, cccf, training, yokoten, hiyari, ky, ojt) ยังไม่มี widget แสดง progress — ให้เพิ่มตอน restyle โดย call `GET /api/activity-targets/me` แล้วกรอง `activityKey` ที่ต้องการ

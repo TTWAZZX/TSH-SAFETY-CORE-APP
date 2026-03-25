@@ -45,6 +45,8 @@ let _masterDepts    = [];    // master departments for issue form responsible de
 let _masterUnits    = [];    // safety units per department (Master_SafetyUnits)
 let _deptStatSel    = null;  // admin-saved dept stat selection (from DB)
 let _unitStatSel    = null;  // admin-saved unit stat selection (from DB)
+let _myYearlyStats       = null;  // yearly patrol stats for personal dashboard (Phase 3)
+let _positionThresholds  = [];    // position pass thresholds (PatrolPassPct) for compliance indicators
 let _overviewYear   = new Date().getFullYear();
 let _overviewData   = null;  // attendance overview cache
 
@@ -59,6 +61,9 @@ export async function loadPatrolPage() {
     window.openSelfCheckinModal = openSelfCheckinModal;
     window.deleteSelfCheckin = deleteSelfCheckin;
     window.switchOverviewYear = switchOverviewYear;
+    window.openCalendarDay = openCalendarDay;
+    window.savePositionThreshold = savePositionThreshold;
+    window.openThresholdSettings = openThresholdSettings;
     window.exportIssuesToExcel = exportIssuesToExcel;
     window._issueChangeDept = _issueChangeDept;
     window.deleteIssue = deleteIssue;
@@ -72,7 +77,7 @@ export async function loadPatrolPage() {
         const curMonth = now.getMonth() + 1;
         const curYear  = now.getFullYear();
 
-        const [scheduleRes, statsRes, issuesRes, summaryRes, planRes, selfPatrolRes, areasRes, deptsRes, unitsRes, deptSelRes, unitSelRes] = await Promise.all([
+        const [scheduleRes, statsRes, issuesRes, summaryRes, planRes, selfPatrolRes, areasRes, deptsRes, unitsRes, deptSelRes, unitSelRes, yearlyRes, thresholdsRes] = await Promise.all([
             API.get(`/patrol/my-schedule?employeeId=${currentUser.id}&month=${curMonth}&year=${curYear}`),
             API.get('/patrol/attendance-stats'),
             API.get('/patrol/issues'),
@@ -84,6 +89,8 @@ export async function loadPatrolPage() {
             API.get('/master/safety-units').catch(() => ({ data: [] })),
             API.get('/settings/patrol_dept_stat_selection').catch(() => ({ value: null })),
             API.get('/settings/patrol_unit_stat_selection').catch(() => ({ value: null })),
+            API.get(`/patrol/my-yearly-stats?year=${curYear}`).catch(() => ({ data: null })),
+            API.get('/patrol/position-thresholds').catch(() => ({ data: [] })),
         ]);
 
         _allIssues      = normalizeApiArray(issuesRes);
@@ -93,6 +100,8 @@ export async function loadPatrolPage() {
         _patrolAreas    = areasRes.data || [];
         _masterDepts    = deptsRes.data || [];
         _masterUnits    = unitsRes.data || [];
+        _myYearlyStats       = yearlyRes.data     || null;
+        _positionThresholds  = thresholdsRes.data || [];
         try { _deptStatSel = deptSelRes.value ? JSON.parse(deptSelRes.value) : null; } catch { _deptStatSel = null; }
         try { _unitStatSel = unitSelRes.value ? JSON.parse(unitSelRes.value) : null; } catch { _unitStatSel = null; }
 
@@ -133,7 +142,16 @@ function renderDashboard(container, data) {
 
     const issuesArray = _allIssues;
     const statsArray  = normalizeApiArray(data.stats);
+    window._lastStatsData = data.stats; // cache for duplicate-checkin guard
     const myStats = statsArray.find(r => r.Name === currentUser.name) || { Total: 0, Percent: 0 };
+
+    // Smart CTA helpers
+    const todayCheckedIn = myStats.LastWalk
+        ? new Date(myStats.LastWalk).toDateString() === today.toDateString()
+        : false;
+    const todaySessForCTA = _myPlan?.sessions?.find(s => new Date(s.PatrolDate).toDateString() === today.toDateString()) || null;
+    const nextSess = _myPlan?.sessions?.find(s => new Date(s.PatrolDate) > today) || null;
+    const nextDaysLeft = nextSess ? Math.ceil((new Date(nextSess.PatrolDate) - today) / 86400000) : null;
     const openIssues   = issuesArray.filter(i => i.CurrentStatus === 'Open').length;
     const tempIssues   = issuesArray.filter(i => i.CurrentStatus === 'Temporary').length;
     const closedIssues = issuesArray.filter(i => i.CurrentStatus === 'Closed').length;
@@ -150,8 +168,10 @@ function renderDashboard(container, data) {
     const rankPct = rank.needed ? Math.min(Math.round((walks / rank.needed) * 100), 100) : 100;
 
     // ── Per-tab hero stats ───────────────────────────────────────────────────
+    const _yearlyCount  = _myYearlyStats?.yearlyCount  ?? walks;
+    const _yearlyTarget = _myYearlyStats?.yearlyTarget ?? null;
     const _personalStats = [
-        { label: 'เดินตรวจแล้ว',    val: walks,                                                                        color: '#6ee7b7' },
+        { label: 'รวมปีนี้',         val: _yearlyTarget ? `${_yearlyCount}/${_yearlyTarget}` : _yearlyCount,           color: '#6ee7b7' },
         { label: 'อัตราผ่านเกณฑ์',  val: `${myStats.Percent || 0}%`,                                                   color: '#6ee7b7' },
         { label: 'ทีมของฉัน',        val: _myPlan ? _myPlan.team.name.replace(/^ทีม\s*/,'') : rank.title,              color: '#a5f3fc' },
         { label: 'สถานะเดือนนี้',    val: _myPlan ? `${_myPlan.compliance.attended}/${_myPlan.compliance.required} รอบ` : '—',
@@ -289,9 +309,16 @@ function renderDashboard(container, data) {
               <h1 class="text-2xl font-bold text-white">Safety Patrol System</h1>
               <p class="text-sm mt-1" style="color:rgba(167,243,208,0.8)">${dateStr} · ${currentUser.name}</p>
             </div>
-            <button onclick="loadPatrolPage()" class="p-2.5 rounded-xl bg-white/15 border border-white/20 text-white hover:bg-white/25 transition-colors flex-shrink-0">
-              <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg>
-            </button>
+            <div class="flex items-center gap-2 flex-shrink-0">
+              ${isAdmin ? `
+              <button onclick="openThresholdSettings()" title="ตั้งค่าเกณฑ์ผ่านตามตำแหน่ง" class="p-2.5 rounded-xl bg-white/15 border border-white/20 text-white hover:bg-white/25 transition-colors flex items-center gap-1.5 text-xs font-semibold">
+                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"/><circle cx="12" cy="12" r="3"/></svg>
+                เกณฑ์ผ่าน
+              </button>` : ''}
+              <button onclick="loadPatrolPage()" class="p-2.5 rounded-xl bg-white/15 border border-white/20 text-white hover:bg-white/25 transition-colors flex-shrink-0">
+                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg>
+              </button>
+            </div>
           </div>
 
           <!-- Dynamic stats strip — updated by switchTab -->
@@ -377,9 +404,30 @@ function renderDashboard(container, data) {
                   <p class="text-xs mt-2 text-white/50">ยังไม่ได้รับมอบหมายทีม</p>
                   `}
                 </div>
-                <button onclick="openCheckInModal()" class="relative z-10 mt-3 w-full py-2.5 rounded-xl font-bold text-sm shadow-md transition-all active:scale-[0.98] hover:shadow-lg" style="background:rgba(255,255,255,0.95);color:#065f46">
-                  เช็คอินเดินตรวจ
-                </button>
+                ${todayCheckedIn
+                  ? `<div class="relative z-10 mt-3 w-full py-2.5 rounded-xl font-bold text-sm text-center flex items-center justify-center gap-2" style="background:rgba(255,255,255,0.15);color:rgba(255,255,255,0.6);border:1px solid rgba(255,255,255,0.2)">
+                      <svg class="w-4 h-4 text-emerald-300 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"/></svg>
+                      เช็คอินแล้ว · ${new Date(myStats.LastWalk).toLocaleTimeString('th-TH',{hour:'2-digit',minute:'2-digit'})} น.
+                    </div>
+                    <button onclick="openCheckInModal()" class="relative z-10 mt-2 w-full py-1.5 rounded-xl text-xs font-semibold transition-all active:scale-[0.98]" style="background:rgba(255,255,255,0.1);color:rgba(255,255,255,0.5)">
+                      บันทึกอีกครั้ง
+                    </button>`
+                  : todaySessForCTA
+                  ? `<button onclick="openCheckInModal()" class="relative z-10 mt-3 w-full py-2.5 rounded-xl font-bold text-sm shadow-md transition-all active:scale-[0.98] hover:shadow-lg flex items-center justify-center gap-2" style="background:rgba(255,255,255,0.95);color:#065f46">
+                      <span class="w-2 h-2 rounded-full bg-emerald-500 animate-pulse flex-shrink-0"></span>
+                      เช็คอินเดินตรวจ วันนี้
+                    </button>`
+                  : nextSess
+                  ? `<button onclick="openCheckInModal()" class="relative z-10 mt-3 w-full py-2.5 rounded-xl font-bold text-sm shadow-md transition-all active:scale-[0.98] hover:shadow-lg" style="background:rgba(255,255,255,0.95);color:#065f46">
+                      เช็คอินเดินตรวจ
+                    </button>
+                    <p class="relative z-10 mt-1.5 text-center text-[10px]" style="color:rgba(255,255,255,0.45)">
+                      ครั้งถัดไป ${new Date(nextSess.PatrolDate).toLocaleDateString('th-TH',{day:'numeric',month:'short'})} · อีก ${nextDaysLeft} วัน
+                    </p>`
+                  : `<button onclick="openCheckInModal()" class="relative z-10 mt-3 w-full py-2.5 rounded-xl font-bold text-sm shadow-md transition-all active:scale-[0.98] hover:shadow-lg" style="background:rgba(255,255,255,0.95);color:#065f46">
+                      เช็คอินเดินตรวจ
+                    </button>`
+                }
               </div>
               <div class="md:w-7/12 flex flex-col bg-white">
                 <div class="px-5 py-3 border-b border-slate-100 bg-slate-50/50 flex items-center justify-between">
@@ -436,10 +484,7 @@ function renderDashboard(container, data) {
                 </div>
                 ปฏิทินประจำเดือน
               </h3>
-              <div class="flex items-center gap-3 text-xs text-slate-400">
-                <span class="flex items-center gap-1"><span class="w-2.5 h-2.5 rounded-md bg-emerald-500 inline-block"></span>วันนี้</span>
-                <span class="flex items-center gap-1"><span class="w-2.5 h-2.5 rounded-md bg-emerald-100 border border-emerald-200 inline-block"></span>มีตาราง</span>
-              </div>
+              ${getCalendarLegendHTML()}
             </div>
             <div class="grid grid-cols-7 gap-1 text-center mb-2">
               ${['อา','จ','อ','พ','พฤ','ศ','ส'].map(d=>`<div class="text-[9px] font-bold text-slate-400">${d}</div>`).join('')}
@@ -449,21 +494,39 @@ function renderDashboard(container, data) {
 
           <!-- Self-Patrol Card (หัวหน้าส่วน/แผนก) — conditional -->
           ${_mySelfPatrol?.isSupervisorPatrol ? (() => {
-            const sp = _mySelfPatrol;
-            const attended = sp.checkins.length;
-            const target   = sp.target || 2;
-            const pct      = Math.min(Math.round((attended / target) * 100), 100);
-            const done     = attended >= target;
+            const sp        = _mySelfPatrol;
+            const attended  = sp.checkins.length;
+            const target    = sp.target || 2;
+            const pct       = Math.min(Math.round((attended / target) * 100), 100);
+            const done      = attended >= target;
+            const spYear         = _myYearlyStats?.selfPatrolYear;
+            const yearlySpTarget = 24;
+            const yearlySpCount  = spYear?.count ?? 0;
+            const yearlySpPct    = Math.min(Math.round((yearlySpCount / yearlySpTarget) * 100), 100);
+            const yearlySpDone   = yearlySpCount >= yearlySpTarget;
             return `
           <div class="bg-white rounded-2xl shadow-sm border border-amber-100 overflow-hidden" style="box-shadow:0 4px 24px rgba(245,158,11,0.08)">
-            <div class="px-5 py-3.5 border-b border-amber-100 flex items-center justify-between" style="background:linear-gradient(135deg,#fffbeb,#fef3c7)">
-              <h3 class="font-bold text-amber-800 text-sm flex items-center gap-2">
-                <div class="w-7 h-7 rounded-lg flex items-center justify-center bg-amber-100">
-                  <svg class="w-4 h-4 text-amber-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z"/></svg>
+            <div class="px-5 py-3.5 border-b border-amber-100" style="background:linear-gradient(135deg,#fffbeb,#fef3c7)">
+              <div class="flex items-center justify-between">
+                <h3 class="font-bold text-amber-800 text-sm flex items-center gap-2">
+                  <div class="w-7 h-7 rounded-lg flex items-center justify-center bg-amber-100">
+                    <svg class="w-4 h-4 text-amber-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z"/></svg>
+                  </div>
+                  Self-Patrol
+                </h3>
+                <span class="text-[10px] font-bold px-2.5 py-1 rounded-full ${done ? 'bg-emerald-100 text-emerald-700' : 'bg-amber-200 text-amber-800'}">${attended}/${target} เดือนนี้</span>
+              </div>
+              ${spYear !== undefined ? `
+              <div class="mt-3">
+                <div class="flex items-center justify-between mb-1">
+                  <span class="text-[10px] font-semibold text-amber-700/80">ความก้าวหน้ารายปี</span>
+                  <span class="text-[10px] font-bold ${yearlySpDone ? 'text-emerald-600' : 'text-amber-700'}">${yearlySpCount}/${yearlySpTarget} ครั้ง · ${yearlySpPct}%</span>
                 </div>
-                การเดินตรวจ (Self-Patrol)
-              </h3>
-              <span class="text-[10px] font-bold px-2.5 py-1 rounded-full ${done ? 'bg-emerald-100 text-emerald-700' : 'bg-amber-200 text-amber-800'}">${attended}/${target} ครั้ง · ${pct}%</span>
+                <div class="w-full bg-amber-100/60 rounded-full h-2 overflow-hidden">
+                  <div class="h-full rounded-full transition-all duration-700" style="width:${yearlySpPct}%;background:${yearlySpDone ? 'linear-gradient(90deg,#059669,#10b981)' : 'linear-gradient(90deg,#d97706,#f59e0b)'}"></div>
+                </div>
+                <p class="text-[9px] text-amber-600/60 mt-0.5">${yearlySpDone ? 'ครบเป้าหมายแล้ว' : 'เหลือ ' + (yearlySpTarget - yearlySpCount) + ' ครั้งจะครบเป้า'}</p>
+              </div>` : ''}
             </div>
             <div class="p-5">
               <div class="w-full bg-slate-100 rounded-full h-2 mb-4 overflow-hidden">
@@ -473,18 +536,21 @@ function renderDashboard(container, data) {
                 ? `<p class="text-xs text-slate-400 text-center py-3 italic">ยังไม่มีการบันทึกเดือนนี้</p>`
                 : sp.checkins.map(c => {
                     const d = new Date(c.CheckinDate);
-                    return `<div class="flex items-center gap-3 py-2 border-b border-slate-50 last:border-0">
-                      <div class="w-10 h-10 rounded-xl flex items-center justify-center bg-amber-50 flex-shrink-0">
+                    const notesPreview = c.Notes ? c.Notes.replace(/\[ตรวจแล้ว:[^\]]*\]\n?/, '').trim() : '';
+                    const checkedItems = c.Notes?.match(/\[ตรวจแล้ว: ([^\]]+)\]/)?.[1] || '';
+                    return `<div class="flex items-start gap-3 py-2 border-b border-slate-50 last:border-0">
+                      <div class="w-9 h-9 rounded-xl flex items-center justify-center bg-amber-50 flex-shrink-0">
                         <div class="text-center">
-                          <div class="text-sm font-bold text-amber-700">${d.getDate()}</div>
-                          <div class="text-[8px] text-amber-400">${d.toLocaleString('th-TH',{month:'short'})}</div>
+                          <div class="text-xs font-bold text-amber-700">${d.getDate()}</div>
+                          <div class="text-[7px] text-amber-400">${d.toLocaleString('th-TH',{month:'short'})}</div>
                         </div>
                       </div>
                       <div class="flex-1 min-w-0">
-                        <p class="text-xs font-semibold text-slate-700">${c.Location || 'ไม่ระบุสถานที่'}</p>
-                        ${c.Notes ? `<p class="text-[10px] text-slate-400 truncate">${c.Notes}</p>` : ''}
+                        <p class="text-xs font-semibold text-slate-700 truncate">${c.Location || 'ไม่ระบุสถานที่'}</p>
+                        ${checkedItems ? `<p class="text-[9px] text-slate-400 truncate">ตรวจ: ${checkedItems.replace(/ \/ /g,' · ')}</p>` : ''}
+                        ${notesPreview ? `<p class="text-[9px] text-slate-400 truncate italic">${notesPreview}</p>` : ''}
                       </div>
-                      <button onclick="deleteSelfCheckin(${c.id})" class="p-1 text-slate-300 hover:text-red-500 transition-colors flex-shrink-0">
+                      <button onclick="deleteSelfCheckin(${c.id})" class="p-1 text-slate-300 hover:text-red-500 transition-colors flex-shrink-0 mt-0.5">
                         <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
                       </button>
                     </div>`;
@@ -511,6 +577,31 @@ function renderDashboard(container, data) {
               </h3>
               <span class="text-[10px] font-bold px-2 py-1 rounded-full" style="background:${rank.bg};color:${rank.color}">${rank.title}</span>
             </div>
+
+            <!-- Yearly Progress (Phase 3) -->
+            ${_myYearlyStats ? (() => {
+              const yc  = _myYearlyStats.yearlyCount;
+              const yt  = _myYearlyStats.yearlyTarget;
+              const yPct = yt ? Math.min(Math.round((yc / yt) * 100), 100) : null;
+              const yDone = yt ? yc >= yt : false;
+              const tr = _myYearlyStats.teamRank;
+              return `
+              <div class="rounded-xl border border-emerald-100 p-3 mb-4" style="background:linear-gradient(135deg,#f0fdf4,#ecfdf5)">
+                <div class="flex items-center justify-between mb-1.5">
+                  <span class="text-[10px] font-bold text-emerald-700">ความก้าวหน้ารายปี</span>
+                  <div class="flex items-center gap-2">
+                    ${tr ? `<span class="text-[10px] font-bold text-slate-500">อันดับ #${tr.rank}/${tr.total} ในทีม</span>` : ''}
+                    <span class="text-[10px] font-bold ${yDone ? 'text-emerald-600' : 'text-amber-600'}">${yc}${yt ? `/${yt}` : ''} ครั้ง</span>
+                  </div>
+                </div>
+                ${yt ? `
+                <div class="w-full bg-white/70 rounded-full h-2.5 overflow-hidden border border-emerald-100">
+                  <div class="h-full rounded-full transition-all duration-700" style="width:${yPct}%;background:${yDone ? 'linear-gradient(90deg,#059669,#10b981)' : 'linear-gradient(90deg,#f59e0b,#fbbf24)'}"></div>
+                </div>
+                <p class="text-[9px] text-emerald-500/70 mt-1">${yDone ? 'ครบเป้าหมายแล้ว' : `เหลือ ${yt - yc} ครั้งจะครบเป้า`}</p>
+                ` : `<p class="text-[9px] text-slate-400 mt-0.5">ยังไม่มีเป้าหมายรายปี</p>`}
+              </div>`;
+            })() : ''}
 
             <!-- Tier Progress -->
             <div class="space-y-2 mb-4">
@@ -544,36 +635,174 @@ function renderDashboard(container, data) {
             </div>
           </div>
 
-          <!-- Team Roster Card -->
+          <!-- Recent Check-in Timeline (Phase 3) -->
+          ${_myYearlyStats?.recentCheckins?.length > 0 ? `
+          <div class="bg-white rounded-2xl shadow-sm border border-slate-100 p-5">
+            <h3 class="font-bold text-slate-700 text-sm flex items-center gap-2 mb-4">
+              <div class="w-7 h-7 rounded-lg flex items-center justify-center bg-indigo-50 flex-shrink-0">
+                <svg class="w-4 h-4 text-indigo-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+              </div>
+              ประวัติล่าสุด
+            </h3>
+            <div class="relative">
+              <div class="absolute left-[18px] top-0 bottom-0 w-px bg-slate-100"></div>
+              <div class="space-y-3">
+                ${_myYearlyStats.recentCheckins.map((c, i) => {
+                  const d = new Date(c.PatrolDate);
+                  const isFirst = i === 0;
+                  const typeLabel = c.PatrolType === 'Re-inspection' ? 'ตรวจซ้ำ' : 'ปกติ';
+                  const typeColor = c.PatrolType === 'Re-inspection' ? 'text-amber-600 bg-amber-50' : 'text-emerald-600 bg-emerald-50';
+                  const notesPreview = c.Notes ? c.Notes.replace(/\[ตรวจแล้ว:[^\]]*\]\n?/, '').trim() : '';
+                  const checkedItems = c.Notes?.match(/\[ตรวจแล้ว: ([^\]]+)\]/)?.[1] || '';
+                  return `<div class="flex items-start gap-3 pl-1">
+                    <div class="w-[18px] h-[18px] rounded-full flex items-center justify-center flex-shrink-0 mt-0.5 z-10 ${isFirst ? 'bg-emerald-500' : 'bg-slate-200'}">
+                      <div class="w-1.5 h-1.5 rounded-full ${isFirst ? 'bg-white' : 'bg-slate-400'}"></div>
+                    </div>
+                    <div class="flex-1 min-w-0 pb-2">
+                      <div class="flex items-center gap-2 flex-wrap">
+                        <span class="text-xs font-bold ${isFirst ? 'text-slate-800' : 'text-slate-600'}">${d.toLocaleDateString('th-TH',{day:'numeric',month:'short',year:'2-digit'})}</span>
+                        ${c.Area ? `<span class="text-[10px] font-semibold text-slate-500 bg-slate-50 px-1.5 py-0.5 rounded-full border border-slate-100">${c.Area}</span>` : ''}
+                        <span class="text-[10px] font-bold px-1.5 py-0.5 rounded-full ${typeColor}">${typeLabel}</span>
+                      </div>
+                      ${checkedItems ? `<p class="text-[9px] text-slate-400 mt-0.5 truncate">ตรวจ: ${checkedItems.replace(/ \/ /g,' · ')}</p>` : ''}
+                      ${notesPreview ? `<p class="text-[10px] text-slate-500 mt-0.5 truncate italic">${notesPreview}</p>` : ''}
+                    </div>
+                  </div>`;
+                }).join('')}
+              </div>
+            </div>
+          </div>` : ''}
+
+          <!-- Team Roster Card (Phase 4 — YTD stats + pass/fail) -->
           ${_myPlan?.roster?.length > 0 ? (() => {
             const typeColor = { top:'rose', committee:'amber', management:'indigo' };
             const typeLabel = { top:'Top', committee:'คปอ.', management:'Mgmt' };
-            const roster = _myPlan.roster;
+            const roster    = _myPlan.roster;
+            // Build member stats map: EmployeeID → { yearlyCount, position }
+            const memberMap = {};
+            (_myYearlyStats?.teamMemberStats || []).forEach(s => {
+                memberMap[s.EmployeeID] = { yearlyCount: s.yearlyCount, position: s.position };
+            });
+            // Build threshold map: position name → PatrolPassPct
+            const thresholdMap = {};
+            _positionThresholds.forEach(t => { thresholdMap[t.Name] = t.PatrolPassPct; });
+            const yearlyTarget = _myYearlyStats?.yearlyTarget || null;
+            const curYear = new Date().getFullYear();
+            const maxCount = Math.max(1, ...Object.values(memberMap).map(m => m.yearlyCount ?? 0));
             return `
-          <div class="bg-white rounded-2xl shadow-sm border border-slate-100 p-5">
-            <div class="flex items-center justify-between mb-3">
+          <div class="bg-white rounded-2xl shadow-sm border border-slate-100 overflow-hidden">
+            <div class="px-5 py-3 flex items-center justify-between border-b border-slate-50">
               <h3 class="font-bold text-slate-700 text-sm flex items-center gap-2">
                 <span class="w-2.5 h-2.5 rounded-full flex-shrink-0" style="background:${_myPlan.team.color}"></span>
-                ทีมของฉันเดือนนี้
+                ทีมของฉัน · สถานะ YTD ${curYear}
               </h3>
-              <span class="text-[10px] text-slate-400 font-semibold">${roster.length} คน</span>
+              <div class="flex items-center gap-2">
+                <span class="text-[10px] text-slate-400 font-semibold">${roster.length} คน</span>
+                ${isAdmin ? `<button onclick="openThresholdSettings()" title="ตั้งค่าเกณฑ์ผ่าน"
+                  class="p-1.5 rounded-lg bg-slate-50 hover:bg-emerald-50 text-slate-400 hover:text-emerald-600 transition-colors border border-slate-100">
+                  <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"/><circle cx="12" cy="12" r="3"/></svg>
+                </button>` : ''}
+              </div>
             </div>
-            <div class="space-y-1">
+            <div class="divide-y divide-slate-50">
               ${roster.map(m => {
-                const tc = typeColor[m.PatrolType] || 'slate';
-                const tl = typeLabel[m.PatrolType] || m.PatrolType;
-                const isMe = m.EmployeeID === currentUser.id;
-                return `<div class="flex items-center gap-2.5 py-1.5 px-2 rounded-lg ${isMe?'bg-emerald-50 border border-emerald-100':'hover:bg-slate-50'} transition-colors">
-                  <div class="w-6 h-6 rounded-full flex items-center justify-center flex-shrink-0 text-[10px] font-bold ${isMe?'bg-emerald-500 text-white':'bg-slate-100 text-slate-600'}">
-                    ${(m.EmployeeName||'?').charAt(0)}
+                const tc        = typeColor[m.PatrolType] || 'slate';
+                const tl        = typeLabel[m.PatrolType] || m.PatrolType;
+                const isMe      = m.EmployeeID === currentUser.id;
+                const mStats    = memberMap[m.EmployeeID] || null;
+                const ytdCount  = mStats?.yearlyCount ?? null;
+                const position  = mStats?.position || null;
+                const threshold = position ? (thresholdMap[position] ?? 80) : null;
+                const ytdPct    = yearlyTarget && ytdCount !== null
+                    ? Math.min(Math.round((ytdCount / yearlyTarget) * 100), 100) : null;
+                const barPct    = ytdCount !== null
+                    ? Math.min(Math.round((ytdCount / maxCount) * 100), 100) : 0;
+                const ytdDone   = yearlyTarget && ytdCount !== null && ytdCount >= yearlyTarget;
+                // Pass/fail
+                const passed    = threshold !== null && ytdPct !== null && ytdPct >= threshold;
+                const failing   = threshold !== null && ytdPct !== null && ytdPct < threshold;
+                return `<div class="px-4 py-2.5 ${isMe ? 'bg-emerald-50/60' : 'hover:bg-slate-50'} transition-colors">
+                  <div class="flex items-center gap-2.5 mb-1.5">
+                    <div class="w-6 h-6 rounded-full flex items-center justify-center flex-shrink-0 text-[10px] font-bold ${isMe?'bg-emerald-500 text-white':'bg-slate-100 text-slate-600'}">
+                      ${(m.EmployeeName||'?').charAt(0)}
+                    </div>
+                    <span class="text-xs font-medium text-slate-700 flex-1 truncate ${isMe?'font-bold':''}">${m.EmployeeName}${isMe?' (ฉัน)':''}</span>
+                    <span class="text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-${tc}-100 text-${tc}-700 flex-shrink-0">${tl}</span>
+                    ${ytdCount !== null ? `
+                    <span class="text-[10px] font-bold flex-shrink-0 ${ytdDone ? 'text-emerald-600' : 'text-slate-500'}">
+                      ${ytdCount}${yearlyTarget ? `/${yearlyTarget}` : ''} ครั้ง
+                    </span>` : ''}
                   </div>
-                  <span class="text-xs font-medium text-slate-700 flex-1 truncate ${isMe?'font-bold':''}">${m.EmployeeName}${isMe?' (ฉัน)':''}</span>
-                  <span class="text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-${tc}-100 text-${tc}-700 flex-shrink-0">${tl}</span>
+                  ${ytdCount !== null ? `
+                  <div class="ml-8">
+                    <div class="flex items-center gap-2 mb-1">
+                      <div class="flex-1 bg-slate-100 rounded-full h-1.5 overflow-hidden">
+                        <div class="h-full rounded-full transition-all duration-700" style="width:${barPct}%;background:${ytdDone ? 'linear-gradient(90deg,#059669,#10b981)' : isMe ? 'linear-gradient(90deg,#6366f1,#8b5cf6)' : '#94a3b8'}"></div>
+                      </div>
+                      ${passed ? `<span class="text-[9px] font-bold text-emerald-600 bg-emerald-50 px-1.5 py-0.5 rounded-full border border-emerald-100 flex-shrink-0">ผ่าน</span>`
+                        : failing ? `<span class="text-[9px] font-bold text-amber-600 bg-amber-50 px-1.5 py-0.5 rounded-full border border-amber-100 flex-shrink-0">ต่ำกว่าเกณฑ์ ${threshold}%</span>`
+                        : ''}
+                    </div>
+                    ${ytdPct !== null ? `<p class="text-[8px] text-slate-400">${ytdPct}% ของเป้าหมายรายปี</p>` : ''}
+                  </div>` : `<div class="ml-8"><div class="w-full bg-slate-100 rounded-full h-1.5"></div></div>`}
                 </div>`;
               }).join('')}
             </div>
           </div>`;
           })() : ''}
+
+          <!-- My Issues Mini-Panel -->
+          ${(() => {
+            const myTeam = currentUser.team || '';
+            const teamIssues = myTeam
+                ? issuesArray.filter(i => (i.FoundByTeam || '') === myTeam)
+                : issuesArray;
+            const myOpen   = teamIssues.filter(i => i.CurrentStatus === 'Open').length;
+            const myTemp   = teamIssues.filter(i => i.CurrentStatus === 'Temporary').length;
+            const myTotal  = teamIssues.length;
+            const recent   = teamIssues
+                .filter(i => i.CurrentStatus !== 'Closed')
+                .slice(0, 2);
+            if (!myTotal) return '';
+            return `
+          <div class="bg-white rounded-2xl shadow-sm border border-slate-100 p-5">
+            <div class="flex items-center justify-between mb-3">
+              <h3 class="font-bold text-slate-700 text-sm flex items-center gap-2">
+                <div class="w-7 h-7 rounded-lg flex items-center justify-center bg-red-50 flex-shrink-0">
+                  <svg class="w-4 h-4 text-red-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/></svg>
+                </div>
+                ปัญหาของทีมฉัน
+              </h3>
+              <button onclick="switchTab('issues')" class="text-[10px] font-semibold text-emerald-600 hover:underline">ดูทั้งหมด</button>
+            </div>
+            <div class="grid grid-cols-3 gap-2 mb-3">
+              <div class="rounded-xl p-2.5 text-center bg-red-50">
+                <p class="text-lg font-bold text-red-600">${myOpen}</p>
+                <p class="text-[9px] text-red-400 font-medium">รอแก้ไข</p>
+              </div>
+              <div class="rounded-xl p-2.5 text-center bg-amber-50">
+                <p class="text-lg font-bold text-amber-600">${myTemp}</p>
+                <p class="text-[9px] text-amber-400 font-medium">แก้ชั่วคราว</p>
+              </div>
+              <div class="rounded-xl p-2.5 text-center bg-slate-50">
+                <p class="text-lg font-bold text-slate-500">${myTotal}</p>
+                <p class="text-[9px] text-slate-400 font-medium">ทั้งหมด</p>
+              </div>
+            </div>
+            ${recent.length ? `<div class="space-y-1.5">
+              ${recent.map(i => {
+                const isOpen = i.CurrentStatus === 'Open';
+                return `<div class="flex items-start gap-2 p-2 rounded-lg hover:bg-slate-50 cursor-pointer transition-colors" onclick="switchTab('issues')">
+                  <span class="w-1.5 h-1.5 rounded-full mt-1.5 flex-shrink-0 ${isOpen ? 'bg-red-400' : 'bg-amber-400'}"></span>
+                  <div class="flex-1 min-w-0">
+                    <p class="text-[10px] font-semibold text-slate-700 truncate">${i.HazardDescription || i.MachineName || 'ไม่มีรายละเอียด'}</p>
+                    <p class="text-[9px] text-slate-400">${i.Area || '—'} · ${isOpen ? 'รอแก้ไข' : 'แก้ชั่วคราว'}</p>
+                  </div>
+                </div>`;
+              }).join('')}
+            </div>` : ''}
+          </div>`;
+          })()}
 
           <div class="hidden"><!-- placeholder --></div>
             ${rank.needed ? `<p class="text-[10px] text-slate-400 mt-2 text-center">อีก <strong class="text-slate-600">${Math.max(0, rank.needed - walks)}</strong> ครั้ง จะขึ้นเป็น ${rank.nextLabel}</p>` : `<p class="text-[10px] text-emerald-600 font-bold mt-2 text-center">ระดับสูงสุดแล้ว</p>`}
@@ -1237,21 +1466,179 @@ function renderIssueRows(issues) {
 function generateMiniCalendarHTML(scheduleData) {
     const today = new Date();
     const year = today.getFullYear(), month = today.getMonth();
-    const firstDay = new Date(year, month, 1).getDay();
+    const firstDay  = new Date(year, month, 1).getDay();
     const daysInMonth = new Date(year, month + 1, 0).getDate();
+
+    // Build a day → sessions map from _monthlySummary (has Status + team + area)
+    const dayMap = {};
+    const allSessions = Array.isArray(_monthlySummary) && _monthlySummary.length
+        ? _monthlySummary
+        : (Array.isArray(scheduleData) ? scheduleData : []);
+    allSessions.forEach(s => {
+        const d = s?.PatrolDate || s?.ScheduledDate;
+        if (!d) return;
+        const day = new Date(d).getDate();
+        if (!dayMap[day]) dayMap[day] = [];
+        dayMap[day].push(s);
+    });
 
     let html = '';
     for (let i = 0; i < firstDay; i++) html += `<div class="h-8"></div>`;
     for (let day = 1; day <= daysInMonth; day++) {
-        const isScheduled = Array.isArray(scheduleData) && scheduleData.some(s => s?.PatrolDate && new Date(s.PatrolDate).getDate() === day);
-        const isToday = day === today.getDate();
-        let cls = "h-8 flex items-center justify-center rounded-lg text-xs font-medium cursor-pointer transition-all hover:bg-slate-50";
-        if (isToday) cls += " text-white font-bold shadow-sm";
-        else if (isScheduled) cls += " bg-emerald-50 text-emerald-700 border border-emerald-100 font-bold";
-        else cls += " text-slate-500";
-        html += `<div class="${cls}" ${isToday ? 'style="background:linear-gradient(135deg,#059669,#0d9488)"' : ''}>${day}</div>`;
+        const isToday   = day === today.getDate();
+        const sessions  = dayMap[day] || [];
+        const hasSess   = sessions.length > 0;
+        const isPast    = new Date(year, month, day) < today && !isToday;
+        const hasCompleted = sessions.some(s => s.Status === 'Completed');
+        const hasMissed    = isPast && hasSess && !hasCompleted;
+
+        const dateStr = `${year}-${String(month+1).padStart(2,'0')}-${String(day).padStart(2,'0')}`;
+
+        let cls   = 'h-8 flex items-center justify-center rounded-lg text-xs font-medium transition-all relative';
+        let style = '';
+
+        if (isToday) {
+            cls   += ' text-white font-bold shadow-sm';
+            style  = 'background:linear-gradient(135deg,#059669,#0d9488)';
+        } else if (hasCompleted) {
+            cls   += ' bg-emerald-500 text-white font-bold shadow-sm cursor-pointer hover:bg-emerald-600';
+        } else if (hasMissed) {
+            cls   += ' bg-amber-50 text-amber-600 border border-amber-200 font-bold cursor-pointer hover:bg-amber-100';
+        } else if (hasSess) {
+            cls   += ' bg-emerald-50 text-emerald-700 border border-emerald-200 font-bold cursor-pointer hover:bg-emerald-100';
+        } else {
+            cls   += ' text-slate-400 hover:bg-slate-50 cursor-default';
+        }
+
+        const onclick = hasSess ? `onclick="openCalendarDay('${dateStr}')"` : '';
+        html += `<div class="${cls}" style="${style}" ${onclick} title="${hasSess ? sessions.length+' session(s)' : ''}">${day}</div>`;
     }
     return html;
+}
+
+// Also update the legend in the calendar card
+function getCalendarLegendHTML() {
+    return `
+      <div class="flex items-center gap-3 text-[10px] text-slate-400 flex-wrap">
+        <span class="flex items-center gap-1"><span class="w-3 h-3 rounded-md inline-block" style="background:linear-gradient(135deg,#059669,#0d9488)"></span>วันนี้</span>
+        <span class="flex items-center gap-1"><span class="w-3 h-3 rounded-md bg-emerald-500 inline-block"></span>เดินแล้ว</span>
+        <span class="flex items-center gap-1"><span class="w-3 h-3 rounded-md bg-emerald-50 border border-emerald-200 inline-block"></span>กำหนดเดิน</span>
+        <span class="flex items-center gap-1"><span class="w-3 h-3 rounded-md bg-amber-50 border border-amber-200 inline-block"></span>ยังไม่ได้เดิน</span>
+      </div>`;
+}
+
+// ─── Calendar Day Detail Modal ────────────────────────────────────────────────
+async function openCalendarDay(dateStr) {
+    const d = new Date(dateStr);
+    const label = d.toLocaleDateString('th-TH', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
+    openModal(label, `<div class="flex justify-center py-6"><div class="animate-spin rounded-full h-8 w-8 border-4 border-emerald-500 border-t-transparent"></div></div>`, 'max-w-md');
+    try {
+        const res = await API.get(`/patrol/day-detail?date=${dateStr}`);
+        if (!res.success) { showError(res.message); return; }
+        const { sessions, totalExpected, totalAttended, overallPct } = res.data;
+
+        const isPast = new Date(dateStr) < new Date(new Date().toDateString());
+        const overallColor = overallPct >= 80 ? '#059669' : overallPct >= 50 ? '#f59e0b' : '#ef4444';
+
+        const html = `
+        <div class="space-y-4">
+          <!-- Overall summary strip -->
+          ${totalExpected > 0 ? `
+          <div class="rounded-xl p-4" style="background:linear-gradient(135deg,#064e3b,#065f46)">
+            <div class="flex items-center justify-between mb-2">
+              <span class="text-xs font-bold text-white/80">ภาพรวมวันนี้</span>
+              <span class="text-sm font-bold text-white">${totalAttended}/${totalExpected} คน · ${overallPct}%</span>
+            </div>
+            <div class="w-full bg-white/20 rounded-full h-2.5 overflow-hidden">
+              <div class="h-full rounded-full transition-all duration-700" style="width:${overallPct}%;background:${overallColor}"></div>
+            </div>
+          </div>` : ''}
+
+          <!-- Per-session cards -->
+          ${sessions.length === 0
+            ? `<div class="text-center py-8 text-slate-400">
+                <svg class="w-10 h-10 mx-auto mb-2 opacity-30" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"/></svg>
+                <p class="text-sm font-medium">ไม่มีตารางการเดินตรวจ</p>
+               </div>`
+            : sessions.map(s => {
+                const attended = s.AttendedCount || 0;
+                const members  = s.MemberCount  || 0;
+                const pct      = members > 0 ? Math.round((attended / members) * 100) : 0;
+                const color    = pct >= 80 ? '#059669' : pct >= 50 ? '#f59e0b' : (isPast ? '#ef4444' : '#94a3b8');
+                const statusLabel = s.Status === 'Completed' ? 'เสร็จสิ้น'
+                    : isPast ? 'ยังไม่สมบูรณ์' : 'กำหนดการ';
+                const statusCls = s.Status === 'Completed'
+                    ? 'bg-emerald-100 text-emerald-700'
+                    : isPast ? 'bg-amber-100 text-amber-700' : 'bg-slate-100 text-slate-500';
+                return `
+                <div class="border border-slate-100 rounded-xl overflow-hidden">
+                  <div class="px-4 py-3 flex items-center gap-3" style="background:${s.TeamColor ? s.TeamColor+'18' : '#f8fafc'}">
+                    <span class="w-3 h-3 rounded-full flex-shrink-0" style="background:${s.TeamColor || '#94a3b8'}"></span>
+                    <div class="flex-1 min-w-0">
+                      <p class="text-sm font-bold text-slate-800 truncate">${s.TeamName || 'ไม่ระบุทีม'}</p>
+                      <p class="text-[10px] text-slate-400">${s.AreaName || s.AreaCode || 'ไม่ระบุพื้นที่'} · รอบ ${s.PatrolRound}</p>
+                    </div>
+                    <span class="text-[10px] font-bold px-2 py-0.5 rounded-full flex-shrink-0 ${statusCls}">${statusLabel}</span>
+                  </div>
+                  <div class="px-4 py-3">
+                    <div class="flex items-center justify-between mb-1.5">
+                      <span class="text-[10px] text-slate-500 font-medium">ผู้เข้าร่วม</span>
+                      <span class="text-xs font-bold" style="color:${color}">${attended}/${members} คน (${pct}%)</span>
+                    </div>
+                    <div class="w-full bg-slate-100 rounded-full h-2 overflow-hidden">
+                      <div class="h-full rounded-full transition-all duration-700" style="width:${pct}%;background:${color}"></div>
+                    </div>
+                  </div>
+                </div>`;
+              }).join('')}
+        </div>`;
+
+        // Re-render modal body (same title, new content)
+        openModal(label, html, 'max-w-md');
+    } catch (err) { showError(err.message); }
+}
+
+// ─── Admin: Position Pass Threshold Settings ──────────────────────────────────
+function openThresholdSettings() {
+    if (!isAdmin) return;
+    if (!_positionThresholds.length) {
+        showToast('ยังไม่มีข้อมูลตำแหน่ง', 'error');
+        return;
+    }
+    openModal('ตั้งค่าเกณฑ์ผ่านตามตำแหน่ง', `
+    <div class="space-y-3">
+      <p class="text-xs text-slate-500 bg-slate-50 rounded-lg px-3 py-2 border border-slate-100">
+        กำหนด % ขั้นต่ำที่แต่ละตำแหน่งต้องเดินตรวจผ่าน (คำนวณจากจำนวนครั้งที่เดิน ÷ เป้าหมายรายปี)
+      </p>
+      <div class="space-y-2 max-h-72 overflow-y-auto pr-1 custom-scrollbar">
+        ${_positionThresholds.map(p => `
+        <div class="flex items-center gap-3 px-3 py-2.5 rounded-xl border border-slate-100 bg-white hover:bg-slate-50 transition-colors">
+          <span class="text-sm text-slate-700 flex-1 truncate">${p.Name}</span>
+          <div class="flex items-center gap-2 flex-shrink-0">
+            <input type="number" id="thr-${p.id}" value="${p.PatrolPassPct}" min="0" max="100"
+              class="w-16 text-center rounded-lg border border-slate-200 text-sm px-2 py-1.5 focus:outline-none focus:ring-2 focus:ring-emerald-400 font-bold">
+            <span class="text-xs text-slate-400">%</span>
+            <button onclick="savePositionThreshold(${p.id})"
+              class="px-3 py-1.5 rounded-lg text-xs font-bold text-white transition-colors hover:opacity-90"
+              style="background:linear-gradient(135deg,#059669,#0d9488)">บันทึก</button>
+          </div>
+        </div>`).join('')}
+      </div>
+    </div>`, 'max-w-lg');
+}
+
+async function savePositionThreshold(positionId) {
+    const val = parseInt(document.getElementById(`thr-${positionId}`)?.value);
+    if (isNaN(val) || val < 0 || val > 100) { showToast('ค่าต้องอยู่ระหว่าง 0–100', 'error'); return; }
+    try {
+        const res = await API.put(`/patrol/position-thresholds/${positionId}`, { PatrolPassPct: val });
+        if (res.success) {
+            showToast('บันทึกสำเร็จ', 'success');
+            // update local cache
+            const idx = _positionThresholds.findIndex(p => p.id === positionId);
+            if (idx !== -1) _positionThresholds[idx].PatrolPassPct = val;
+        } else showError(res.message);
+    } catch (err) { showError(err.message); }
 }
 
 // ─── Issue Row ────────────────────────────────────────────────────────────────
@@ -1366,6 +1753,35 @@ function getSkeletonHTML() {
 // ─── Check-in Modal (Smart) ───────────────────────────────────────────────────
 function openCheckInModal() {
     const today    = new Date();
+
+    // ── ป้องกันเช็คอินซ้ำวันเดียวกัน ──────────────────────────────────────────
+    const statsArr  = normalizeApiArray(window._lastStatsData || []);
+    const myStat    = statsArr.find(r => r.Name === currentUser.name) || {};
+    const alreadyToday = myStat.LastWalk
+        ? new Date(myStat.LastWalk).toDateString() === today.toDateString()
+        : false;
+
+    if (alreadyToday && !window._skipDuplicateCheck) {
+        const timeStr = new Date(myStat.LastWalk).toLocaleTimeString('th-TH', { hour: '2-digit', minute: '2-digit' });
+        openModal('เช็คอินซ้ำ?', `
+          <div class="text-center py-2 space-y-4">
+            <div class="w-14 h-14 rounded-2xl flex items-center justify-center mx-auto" style="background:#ecfdf5">
+              <svg class="w-7 h-7 text-emerald-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"/></svg>
+            </div>
+            <div>
+              <p class="font-bold text-slate-700">คุณเช็คอินแล้ววันนี้</p>
+              <p class="text-sm text-slate-400 mt-1">เวลา ${timeStr} น.</p>
+            </div>
+            <p class="text-xs text-slate-400 bg-slate-50 rounded-xl px-4 py-2.5">ต้องการบันทึกการเดินตรวจเพิ่มอีกครั้งหรือไม่?</p>
+            <div class="flex gap-3 justify-center pt-1">
+              <button onclick="window.closeModal&&window.closeModal()" class="px-5 py-2 rounded-xl text-sm bg-slate-100 text-slate-600 hover:bg-slate-200 transition-colors font-medium">ปิด</button>
+              <button onclick="window.closeModal&&window.closeModal();window._forceCheckin()" class="px-5 py-2 rounded-xl text-sm font-bold text-white transition-colors" style="background:linear-gradient(135deg,#059669,#0d9488)">บันทึกอีกครั้ง</button>
+            </div>
+          </div>`, 'max-w-sm');
+        return;
+    }
+    // ──────────────────────────────────────────────────────────────────────────
+
     const todaySess = _myPlan?.sessions?.find(s => {
         const d = new Date(s.PatrolDate);
         return d.toDateString() === today.toDateString();
@@ -1434,6 +1850,24 @@ function openCheckInModal() {
           </label>
         </div>
 
+        <!-- Area confirmation (Phase 2.2) -->
+        <div>
+          <label class="block text-xs font-semibold text-slate-500 mb-1.5">พื้นที่ที่เดินตรวจ</label>
+          <select name="Area" class="w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm text-slate-700 focus:outline-none focus:ring-2 focus:ring-emerald-400 transition-all">
+            <option value="">— ไม่ระบุ —</option>
+            ${(_patrolAreas.length
+              ? _patrolAreas
+              : [{ Name:'โรงงาน 1' },{ Name:'โรงงาน 2' },{ Name:'รอบนอก' }]
+            ).map(a => `<option value="${a.Name}" ${a.Name === areaLabel ? 'selected' : ''}>${a.Name}</option>`).join('')}
+          </select>
+        </div>
+
+        <!-- Observation notes (Phase 2.1) -->
+        <div>
+          <label class="block text-xs font-semibold text-slate-500 mb-1.5">บันทึกการตรวจ <span class="text-slate-300">(ไม่บังคับ)</span></label>
+          <textarea name="Notes" rows="2" placeholder="เช่น สภาพพื้นที่โดยรวม, จุดที่ให้ความสนใจ..." class="w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm text-slate-700 focus:outline-none focus:ring-2 focus:ring-emerald-400 transition-all resize-none placeholder:text-slate-300"></textarea>
+        </div>
+
         <button type="submit" class="w-full py-3 rounded-xl font-bold text-sm text-white shadow-sm transition-all active:scale-[0.98]" style="background:linear-gradient(135deg,#059669,#0d9488)">
           ยืนยันเช็คอิน
         </button>
@@ -1442,15 +1876,87 @@ function openCheckInModal() {
 
 async function handleCheckInSubmit(e) {
     e.preventDefault();
-    const type = new FormData(e.target).get('PatrolType');
+    const fd    = new FormData(e.target);
+    const type  = fd.get('PatrolType');
+    const area  = fd.get('Area') || null;
+    const notes = fd.get('Notes')?.trim() || null;
     showLoading();
     try {
-        await API.post('/patrol/checkin', { UserID: currentUser.id, UserName: currentUser.name, TeamName: currentUser.team, PatrolType: type });
+        await API.post('/patrol/checkin', { UserID: currentUser.id, UserName: currentUser.name, TeamName: currentUser.team, PatrolType: type, Area: area, Notes: notes });
         closeModal();
-        showToast(`เช็คอินสำเร็จ — ${type}`, 'success');
-        loadPatrolPage();
+        showCheckinSuccessScreen(type);
     } catch (err) { showError(err); } finally { hideLoading(); }
 }
+
+// ─── Post Check-in Success Screen ─────────────────────────────────────────────
+function showCheckinSuccessScreen(patrolType) {
+    const now         = new Date();
+    const timeStr     = now.toLocaleTimeString('th-TH', { hour: '2-digit', minute: '2-digit' });
+    const compliance  = _myPlan?.compliance;
+    const todaySess   = _myPlan?.sessions?.find(s => new Date(s.PatrolDate).toDateString() === now.toDateString()) || null;
+    const areaName    = todaySess?.AreaName || todaySess?.AreaCode || null;
+    const newAttended = (compliance?.attended || 0) + 1;
+    const required    = compliance?.required || 0;
+    const nowDone     = newAttended >= required && required > 0;
+    const pct         = required > 0 ? Math.min(Math.round((newAttended / required) * 100), 100) : 0;
+    const typeLabel   = patrolType === 'Re-inspection' ? 'ตรวจซ้ำ/ติดตาม' : 'เดินตรวจปกติ';
+
+    openModal('เช็คอินสำเร็จ', `
+      <div class="space-y-4">
+        <!-- Success banner -->
+        <div class="rounded-2xl p-5 text-center" style="background:linear-gradient(135deg,#064e3b,#065f46)">
+          <div class="w-14 h-14 rounded-2xl flex items-center justify-center mx-auto mb-3" style="background:rgba(255,255,255,0.15)">
+            <svg class="w-7 h-7 text-emerald-300" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"/></svg>
+          </div>
+          <p class="font-bold text-white text-base">${currentUser.name}</p>
+          <p class="text-emerald-300/80 text-xs mt-0.5">${typeLabel} · ${timeStr} น.</p>
+          ${areaName ? `<span class="inline-block mt-2 text-[10px] font-semibold px-2.5 py-1 rounded-full" style="background:rgba(255,255,255,0.12);color:rgba(255,255,255,0.7)">${areaName}</span>` : ''}
+        </div>
+
+        <!-- Compliance status -->
+        ${compliance ? `
+        <div class="bg-slate-50 rounded-xl p-4 border border-slate-100">
+          <div class="flex items-center justify-between mb-2">
+            <span class="text-xs font-semibold text-slate-600">ความครบถ้วนเดือนนี้</span>
+            <span class="text-xs font-bold ${nowDone ? 'text-emerald-600' : 'text-amber-600'}">${newAttended}/${required} รอบ</span>
+          </div>
+          <div class="w-full bg-slate-200 rounded-full h-2 overflow-hidden">
+            <div class="h-full rounded-full transition-all duration-700" style="width:${pct}%;background:${nowDone ? 'linear-gradient(90deg,#059669,#10b981)' : 'linear-gradient(90deg,#f59e0b,#fbbf24)'}"></div>
+          </div>
+          ${nowDone ? `<p class="text-[10px] text-emerald-600 font-semibold mt-2 text-center">ครบเป้าหมายเดือนนี้แล้ว</p>` : ''}
+        </div>` : ''}
+
+        <!-- CTA -->
+        <div class="border border-amber-100 bg-amber-50/60 rounded-xl p-3.5 flex items-center justify-between gap-3">
+          <div>
+            <p class="text-xs font-bold text-slate-700">พบสิ่งผิดปกติระหว่างเดิน?</p>
+            <p class="text-[10px] text-slate-400 mt-0.5">บันทึกปัญหาได้ทันที${areaName ? ` (พื้นที่ ${areaName} จะถูกกรอกให้)` : ''}</p>
+          </div>
+          <button onclick="window.closeModal&&window.closeModal();window._openIssueFromCheckin(${JSON.stringify(areaName || '')})"
+            class="flex-shrink-0 px-3.5 py-2 rounded-xl text-xs font-bold text-white transition-all active:scale-[0.97]" style="background:linear-gradient(135deg,#dc2626,#ef4444)">
+            รายงานปัญหา
+          </button>
+        </div>
+
+        <button onclick="window.closeModal&&window.closeModal()" class="w-full py-2.5 rounded-xl text-sm bg-slate-100 text-slate-600 hover:bg-slate-200 transition-colors font-medium">
+          ปิด
+        </button>
+      </div>`, 'max-w-sm');
+
+    // Reload page data in background so the CTA button updates
+    setTimeout(() => loadPatrolPage(), 300);
+}
+
+window._openIssueFromCheckin = function(areaName) {
+    openIssueForm('OPEN', areaName ? { Area: areaName } : null);
+};
+
+// _forceCheckin — เปิดฟอร์มต่อเลยโดยข้ามการตรวจซ้ำ
+window._forceCheckin = function() {
+    window._skipDuplicateCheck = true;
+    openCheckInModal();
+    window._skipDuplicateCheck = false;
+};
 
 // ─── Issue Form ───────────────────────────────────────────────────────────────
 // Auto-calculate DueDate from DateFound + Rank
@@ -2360,42 +2866,90 @@ window._confirmDeleteRoster = async function(rosterId, group) {
 };
 
 // ─── Self-Patrol Modal / Delete ───────────────────────────────────────────────
+const _SC_CHECKLIST = [
+    { key: 'housekeeping',  label: 'ความสะอาด / 5S' },
+    { key: 'fire',          label: 'ป้องกันอัคคีภัย' },
+    { key: 'ppe',           label: 'การสวมใส่ PPE' },
+    { key: 'machine',       label: 'เครื่องจักร/อุปกรณ์' },
+    { key: 'walkway',       label: 'ทางเดิน/ทางออกฉุกเฉิน' },
+    { key: 'chemical',      label: 'สารเคมี/วัตถุอันตราย' },
+];
+
 function openSelfCheckinModal() {
     const today = new Date().toISOString().split('T')[0];
+    const areaList = _patrolAreas.length
+        ? _patrolAreas
+        : [{ Name:'โรงงาน 1' },{ Name:'โรงงาน 2' },{ Name:'รอบนอก+พื้นที่ส่วนกลาง' }];
+
     openModal('บันทึกการเดินตรวจ (Self-Patrol)', `
         <form id="self-checkin-form" class="space-y-4">
+          <!-- Date -->
           <div>
-            <label class="block text-xs font-bold text-slate-500 uppercase mb-1.5">วันที่เดินตรวจ</label>
-            <input type="date" id="sc-date" class="form-input w-full rounded-lg text-sm" value="${today}" max="${today}" required>
+            <label class="block text-xs font-semibold text-slate-500 mb-1.5">วันที่เดินตรวจ</label>
+            <input type="date" id="sc-date" class="w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm text-slate-700 focus:outline-none focus:ring-2 focus:ring-amber-400 transition-all" value="${today}" max="${today}" required>
           </div>
+
+          <!-- Multi-area checkboxes (Phase 2.3) -->
           <div>
-            <label class="block text-xs font-bold text-slate-500 uppercase mb-1.5">พื้นที่ที่เดินตรวจ <span class="text-red-400">*</span></label>
-            <select id="sc-location" class="form-select w-full rounded-lg text-sm" required>
-              <option value="">— เลือกพื้นที่ —</option>
-              ${(_patrolAreas.length
-                  ? _patrolAreas
-                  : [{ Name:'โรงงาน 1' },{ Name:'โรงงาน 2' },{ Name:'รอบนอก+พื้นที่ส่วนกลาง' }]
-                ).map(a => `<option value="${a.Name}">${a.Name}</option>`).join('')}
-            </select>
+            <label class="block text-xs font-semibold text-slate-500 mb-1.5">พื้นที่ที่เดินตรวจ <span class="text-red-400">*</span></label>
+            <div id="sc-area-grid" class="grid grid-cols-2 gap-2">
+              ${areaList.map(a => `
+                <label class="cursor-pointer flex items-center gap-2 p-2.5 rounded-xl border border-slate-100 bg-white hover:border-amber-300 hover:bg-amber-50 transition-all has-[:checked]:border-amber-400 has-[:checked]:bg-amber-50">
+                  <input type="checkbox" class="sc-area-cb w-4 h-4 rounded accent-amber-500 flex-shrink-0" value="${a.Name}">
+                  <span class="text-xs font-medium text-slate-700">${a.Name}</span>
+                </label>`).join('')}
+            </div>
+            <p id="sc-area-err" class="text-xs text-red-500 mt-1 hidden">กรุณาเลือกอย่างน้อย 1 พื้นที่</p>
           </div>
+
+          <!-- Observation checklist (Phase 2.4) -->
           <div>
-            <label class="block text-xs font-bold text-slate-500 uppercase mb-1.5">หมายเหตุ (ถ้ามี)</label>
-            <textarea id="sc-notes" rows="2" class="form-input w-full rounded-lg text-sm resize-none" placeholder="สิ่งที่พบ หรือรายละเอียดเพิ่มเติม..."></textarea>
+            <label class="block text-xs font-semibold text-slate-500 mb-1.5">รายการที่ตรวจ <span class="text-slate-300">(ทำเครื่องหมายที่ตรวจแล้ว)</span></label>
+            <div class="grid grid-cols-2 gap-2">
+              ${_SC_CHECKLIST.map(c => `
+                <label class="cursor-pointer flex items-center gap-2 p-2 rounded-lg border border-slate-100 hover:bg-slate-50 transition-all has-[:checked]:border-emerald-300 has-[:checked]:bg-emerald-50">
+                  <input type="checkbox" class="sc-checklist-cb w-3.5 h-3.5 rounded accent-emerald-500 flex-shrink-0" value="${c.label}">
+                  <span class="text-xs text-slate-600">${c.label}</span>
+                </label>`).join('')}
+            </div>
           </div>
+
+          <!-- Notes -->
+          <div>
+            <label class="block text-xs font-semibold text-slate-500 mb-1.5">บันทึกเพิ่มเติม <span class="text-slate-300">(ไม่บังคับ)</span></label>
+            <textarea id="sc-notes" rows="2" class="w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm text-slate-700 focus:outline-none focus:ring-2 focus:ring-amber-400 transition-all resize-none placeholder:text-slate-300" placeholder="สิ่งที่พบ หรือรายละเอียดเพิ่มเติม..."></textarea>
+          </div>
+
           <div class="flex justify-end gap-2 pt-2 border-t border-slate-100">
-            <button type="button" onclick="window.closeModal&&window.closeModal()" class="px-4 py-2 rounded-lg text-sm bg-slate-100 text-slate-600 hover:bg-slate-200 transition-colors">ยกเลิก</button>
-            <button type="submit" class="px-5 py-2 rounded-lg text-sm font-bold text-white" style="background:linear-gradient(135deg,#d97706,#f59e0b)">บันทึก</button>
+            <button type="button" onclick="window.closeModal&&window.closeModal()" class="px-4 py-2 rounded-xl text-sm bg-slate-100 text-slate-600 hover:bg-slate-200 transition-colors">ยกเลิก</button>
+            <button type="submit" class="px-5 py-2 rounded-xl text-sm font-bold text-white" style="background:linear-gradient(135deg,#d97706,#f59e0b)">บันทึก</button>
           </div>
         </form>`, 'max-w-sm');
+
     setTimeout(() => {
         document.getElementById('self-checkin-form')?.addEventListener('submit', async e => {
             e.preventDefault();
             const CheckinDate = document.getElementById('sc-date')?.value;
-            const Location    = document.getElementById('sc-location')?.value.trim();
-            const Notes       = document.getElementById('sc-notes')?.value.trim();
-            if (!CheckinDate || !Location) { showToast('กรุณาระบุวันที่และสถานที่', 'error'); return; }
+
+            // Collect multi-area selections
+            const checkedAreas = [...document.querySelectorAll('.sc-area-cb:checked')].map(cb => cb.value);
+            if (!CheckinDate || checkedAreas.length === 0) {
+                document.getElementById('sc-area-err')?.classList.remove('hidden');
+                if (!CheckinDate) showToast('กรุณาระบุวันที่', 'error');
+                return;
+            }
+            document.getElementById('sc-area-err')?.classList.add('hidden');
+            const Location = checkedAreas.join(', ');
+
+            // Collect checklist
+            const checkedItems = [...document.querySelectorAll('.sc-checklist-cb:checked')].map(cb => cb.value);
+            const manualNotes  = document.getElementById('sc-notes')?.value.trim() || '';
+            let Notes = '';
+            if (checkedItems.length > 0) Notes += `[ตรวจแล้ว: ${checkedItems.join(' / ')}]`;
+            if (manualNotes) Notes += (Notes ? '\n' : '') + manualNotes;
+
             try {
-                const res = await API.post('/patrol/self-checkin', { CheckinDate, Location, Notes });
+                const res = await API.post('/patrol/self-checkin', { CheckinDate, Location, Notes: Notes || null });
                 if (res.success) { showToast('บันทึกสำเร็จ', 'success'); closeModal(); loadPatrolPage(); }
                 else showError(res.message);
             } catch (err) { showError(err.message); }
