@@ -30,6 +30,7 @@ const contractorRoutes    = require('./routes/contractor');
 const hiyariRoutes        = require('./routes/hiyari');
 const kyRoutes            = require('./routes/ky');
 const fourmRoutes         = require('./routes/fourm');
+const settingsRoutes      = require('./routes/settings');
 
 // =================================================================
 // SECTION 1: SETUP
@@ -725,6 +726,7 @@ app.use('/api/contractor',    authenticateToken, contractorRoutes);
 app.use('/api/hiyari',        authenticateToken, hiyariRoutes);
 app.use('/api/ky',            authenticateToken, kyRoutes);
 app.use('/api/fourm',         authenticateToken, fourmRoutes);
+app.use('/api/settings',      authenticateToken, settingsRoutes);
 
 // =================================================================
 // SECTION 4B: GENERIC CRUD

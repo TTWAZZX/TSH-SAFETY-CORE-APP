@@ -43,6 +43,8 @@ let _mySelfPatrol   = null;  // self-patrol data for supervisor positions
 let _patrolAreas    = [];    // master areas list — synced from Patrol_Areas table
 let _masterDepts    = [];    // master departments for issue form responsible dept
 let _masterUnits    = [];    // safety units per department (Master_SafetyUnits)
+let _deptStatSel    = null;  // admin-saved dept stat selection (from DB)
+let _unitStatSel    = null;  // admin-saved unit stat selection (from DB)
 let _overviewYear   = new Date().getFullYear();
 let _overviewData   = null;  // attendance overview cache
 
@@ -70,7 +72,7 @@ export async function loadPatrolPage() {
         const curMonth = now.getMonth() + 1;
         const curYear  = now.getFullYear();
 
-        const [scheduleRes, statsRes, issuesRes, summaryRes, planRes, selfPatrolRes, areasRes, deptsRes, unitsRes] = await Promise.all([
+        const [scheduleRes, statsRes, issuesRes, summaryRes, planRes, selfPatrolRes, areasRes, deptsRes, unitsRes, deptSelRes, unitSelRes] = await Promise.all([
             API.get(`/patrol/my-schedule?employeeId=${currentUser.id}&month=${curMonth}&year=${curYear}`),
             API.get('/patrol/attendance-stats'),
             API.get('/patrol/issues'),
@@ -80,6 +82,8 @@ export async function loadPatrolPage() {
             API.get('/master/areas').catch(() => ({ data: [] })),
             API.get('/master/departments').catch(() => ({ data: [] })),
             API.get('/master/safety-units').catch(() => ({ data: [] })),
+            API.get('/settings/patrol_dept_stat_selection').catch(() => ({ value: null })),
+            API.get('/settings/patrol_unit_stat_selection').catch(() => ({ value: null })),
         ]);
 
         _allIssues      = normalizeApiArray(issuesRes);
@@ -89,6 +93,8 @@ export async function loadPatrolPage() {
         _patrolAreas    = areasRes.data || [];
         _masterDepts    = deptsRes.data || [];
         _masterUnits    = unitsRes.data || [];
+        try { _deptStatSel = deptSelRes.value ? JSON.parse(deptSelRes.value) : null; } catch { _deptStatSel = null; }
+        try { _unitStatSel = unitSelRes.value ? JSON.parse(unitSelRes.value) : null; } catch { _unitStatSel = null; }
 
         renderDashboard(container, {
             schedule: normalizeApiArray(scheduleRes),
@@ -247,20 +253,18 @@ function renderDashboard(container, data) {
         // Lazy-load supervisor data on first switch
         if (!isMgmt && !window._svLoaded) {
             const now = new Date();
-            const mo  = document.getElementById('sv-month-select')?.value || (now.getMonth() + 1);
-            const yr  = document.getElementById('sv-year-select')?.value  || now.getFullYear();
-            loadSupervisorOverview(parseInt(yr), parseInt(mo));
+            const yr  = document.getElementById('sv-year-select')?.value || now.getFullYear();
+            loadSupervisorOverview(parseInt(yr));
             window._svLoaded = true;
         }
         // Re-render charts after making visible (canvas needs to be visible to render correctly)
         if (isMgmt  && _overviewData) renderOverviewChart(_overviewData.summary.percent);
     };
 
-    // Filter handler for Sec. & Supervisor sub-tab
+    // Filter handler for Sec. & Supervisor sub-tab (annual view)
     window.switchSvFilter = function() {
-        const mo = document.getElementById('sv-month-select')?.value;
         const yr = document.getElementById('sv-year-select')?.value;
-        if (mo && yr) { window._svLoaded = true; loadSupervisorOverview(parseInt(yr), parseInt(mo)); }
+        if (yr) { window._svLoaded = true; loadSupervisorOverview(parseInt(yr)); }
     };
 
     container.innerHTML = `
@@ -662,7 +666,7 @@ function renderDashboard(container, data) {
         <!-- ── Sub-tab 1: Top & Management ── -->
         <div id="ov-sub-mgmt" class="space-y-5">
           <!-- Filter bar -->
-          <div class="bg-white rounded-xl border border-slate-100 shadow-sm p-4 flex items-center gap-3">
+          <div class="bg-white rounded-xl border border-slate-100 shadow-sm p-4 flex flex-wrap items-center gap-3">
             <label class="text-xs font-bold text-slate-600">ปี</label>
             <select id="overview-year-select" onchange="switchOverviewYear(this.value)"
               class="text-sm font-bold rounded-xl border border-slate-200 px-3 py-1.5 focus:outline-none focus:border-emerald-400 text-slate-700">
@@ -670,6 +674,12 @@ function renderDashboard(container, data) {
                 `<option value="${y}" ${y === _overviewYear ? 'selected' : ''}>${y}</option>`
               ).join('')}
             </select>
+            ${isAdmin ? `<button onclick="window.openRosterAddModal('top_management')"
+              class="ml-auto flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold text-white transition-all"
+              style="background:linear-gradient(135deg,#059669,#0d9488)">
+              <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M12 4v16m8-8H4"/></svg>
+              เพิ่มสมาชิก
+            </button>` : ''}
           </div>
 
           <!-- 2-col grid -->
@@ -690,11 +700,12 @@ function renderDashboard(container, data) {
                     <tr>
                       <th class="px-4 py-3 font-bold text-slate-400 w-8">#</th>
                       <th class="px-4 py-3 font-bold text-slate-600">ชื่อ-สกุล</th>
-                      <th class="px-4 py-3 font-bold text-slate-400 text-center">ประเภท</th>
-                      <th class="px-4 py-3 font-bold text-slate-400 text-center">ปี</th>
-                      <th class="px-4 py-3 font-bold text-slate-400 text-center">ทั้งหมด</th>
+                      <th class="px-4 py-3 font-bold text-slate-400">ตำแหน่ง</th>
+                      <th class="px-4 py-3 font-bold text-slate-400">แผนก</th>
+                      <th class="px-4 py-3 font-bold text-slate-400 text-center">เป้า/ปี</th>
                       <th class="px-4 py-3 font-bold text-emerald-600 text-center">เข้าร่วม</th>
                       <th class="px-4 py-3 font-bold text-slate-400 text-center">%</th>
+                      ${isAdmin ? `<th class="px-4 py-3 font-bold text-slate-400 text-center">จัดการ</th>` : ''}
                     </tr>
                   </thead>
                   <tbody id="overview-table-body" class="divide-y divide-slate-50">
@@ -772,26 +783,21 @@ function renderDashboard(container, data) {
         <!-- ── Sub-tab 2: Sec. & Supervisor ── -->
         <div id="ov-sub-sv" class="hidden space-y-5">
 
-          <!-- Filter bar: month + year -->
+          <!-- Filter bar: year only (annual view) -->
           <div class="bg-white rounded-xl border border-slate-100 shadow-sm p-4 flex flex-wrap items-center gap-3">
-            <div class="flex items-center gap-2">
-              <label class="text-xs font-bold text-slate-600">เดือน</label>
-              <select id="sv-month-select" onchange="window.switchSvFilter()"
-                class="text-sm font-bold rounded-xl border border-slate-200 px-3 py-1.5 focus:outline-none focus:border-amber-400 text-slate-700">
-                ${['มกราคม','กุมภาพันธ์','มีนาคม','เมษายน','พฤษภาคม','มิถุนายน','กรกฎาคม','สิงหาคม','กันยายน','ตุลาคม','พฤศจิกายน','ธันวาคม'].map((m,i)=>
-                  `<option value="${i+1}" ${i+1===new Date().getMonth()+1?'selected':''}>${m}</option>`
-                ).join('')}
-              </select>
-            </div>
-            <div class="flex items-center gap-2">
-              <label class="text-xs font-bold text-slate-600">ปี</label>
-              <select id="sv-year-select" onchange="window.switchSvFilter()"
-                class="text-sm font-bold rounded-xl border border-slate-200 px-3 py-1.5 focus:outline-none focus:border-amber-400 text-slate-700">
-                ${[new Date().getFullYear(), new Date().getFullYear()-1, new Date().getFullYear()-2].map(y=>
-                  `<option value="${y}" ${y===new Date().getFullYear()?'selected':''}>${y}</option>`
-                ).join('')}
-              </select>
-            </div>
+            <label class="text-xs font-bold text-slate-600">ปี</label>
+            <select id="sv-year-select" onchange="window.switchSvFilter()"
+              class="text-sm font-bold rounded-xl border border-slate-200 px-3 py-1.5 focus:outline-none focus:border-amber-400 text-slate-700">
+              ${[new Date().getFullYear(), new Date().getFullYear()-1, new Date().getFullYear()-2].map(y=>
+                `<option value="${y}" ${y===new Date().getFullYear()?'selected':''}>${y}</option>`
+              ).join('')}
+            </select>
+            ${isAdmin ? `<button onclick="window.openRosterAddModal('supervisor')"
+              class="ml-auto flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold text-white transition-all"
+              style="background:linear-gradient(135deg,#d97706,#f59e0b)">
+              <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M12 4v16m8-8H4"/></svg>
+              เพิ่มสมาชิก
+            </button>` : ''}
           </div>
 
           <!-- 2-col grid -->
@@ -805,7 +811,7 @@ function renderDashboard(container, data) {
                     <svg class="w-4 h-4 text-amber-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z"/></svg>
                   </div>
                   Summary of Sec. &amp; Supervisor Safety Patrol Attendance
-                  <span class="text-[9px] font-normal text-slate-400">(เป้าหมาย 2 ครั้ง/เดือน)</span>
+                  <span class="text-[9px] font-normal text-slate-400">(เป้าหมาย 24 ครั้ง/ปี)</span>
                 </h3>
                 <span class="text-[10px] text-slate-400" id="sv-overview-subtitle"></span>
               </div>
@@ -817,14 +823,15 @@ function renderDashboard(container, data) {
                       <th class="px-4 py-3 font-bold text-slate-600">ชื่อ-สกุล</th>
                       <th class="px-4 py-3 font-bold text-slate-400">ตำแหน่ง</th>
                       <th class="px-4 py-3 font-bold text-slate-400">แผนก</th>
-                      <th class="px-4 py-3 font-bold text-slate-400 text-center">เดินแล้ว</th>
-                      <th class="px-4 py-3 font-bold text-slate-400 text-center">เป้า</th>
+                      <th class="px-4 py-3 font-bold text-slate-400 text-center">เป้า/ปี</th>
+                      <th class="px-4 py-3 font-bold text-amber-600 text-center">เดินแล้ว</th>
                       <th class="px-4 py-3 font-bold text-slate-400 text-center">%</th>
                       <th class="px-4 py-3 font-bold text-slate-400 text-center">สถานะ</th>
+                      ${isAdmin ? `<th class="px-4 py-3 font-bold text-slate-400 text-center">จัดการ</th>` : ''}
                     </tr>
                   </thead>
                   <tbody id="sv-overview-body">
-                    <tr><td colspan="8" class="text-center py-8 text-slate-300 text-xs">
+                    <tr><td colspan="${isAdmin ? 9 : 8}" class="text-center py-8 text-slate-300 text-xs">
                       <div class="inline-flex flex-col items-center gap-2">
                         <div class="animate-spin rounded-full h-6 w-6 border-3 border-amber-400 border-t-transparent"></div>
                         <span>กำลังโหลด...</span>
@@ -920,7 +927,20 @@ function renderDashboard(container, data) {
           </div>
 
           <div class="bg-white rounded-xl shadow-sm border border-slate-100 p-5 flex flex-col" style="min-height:220px">
-            <h3 class="font-bold text-slate-700 text-sm mb-3">สถิติแยกส่วนงานรับผิดชอบ</h3>
+            <div class="flex items-center justify-between mb-1">
+              <h3 class="font-bold text-slate-700 text-sm">สถิติแยกส่วนงานรับผิดชอบ</h3>
+              <div class="flex items-center gap-1.5">
+                <span id="dept-stat-filter-badge" class="hidden items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-indigo-100 text-indigo-700 cursor-pointer hover:bg-indigo-200 transition-colors" onclick="window._issueFilterDept('');window._issueFilterUnit('');">
+                  <span id="dept-stat-filter-label"></span>
+                  <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M6 18L18 6M6 6l12 12"/></svg>
+                </span>
+                ${isAdmin ? `<button onclick="window.openDeptStatConfig()" title="ตั้งค่าส่วนงานที่แสดง"
+                  class="p-1.5 rounded-lg hover:bg-slate-100 text-slate-400 hover:text-slate-600 transition-colors">
+                  <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"/><circle cx="12" cy="12" r="3"/></svg>
+                </button>` : ''}
+              </div>
+            </div>
+            <p class="text-[10px] text-slate-400 mb-2.5">คลิกแถวเพื่อกรองทะเบียนปัญหา${isAdmin ? ' · กด <svg class="w-3 h-3 inline-block" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"/><circle cx="12" cy="12" r="3"/></svg> เพื่อเลือกส่วนงานที่แสดง' : ''}</p>
             <div class="flex-1 overflow-y-auto custom-scrollbar">
               <table class="w-full text-xs text-left">
                 <thead><tr class="border-b border-slate-100">
@@ -1110,6 +1130,10 @@ function _issueFilterDept(deptName) {
     _filterDept = deptName;
     _filterUnit = '';
 
+    // Sync the dropdown in ทะเบียนปัญหา filter bar
+    const deptSel = document.getElementById('issue-dept-filter');
+    if (deptSel) deptSel.value = deptName;
+
     // Rebuild unit dropdown
     const unitSel = document.getElementById('issue-unit-filter');
     if (unitSel) {
@@ -1121,14 +1145,48 @@ function _issueFilterDept(deptName) {
         unitSel.onchange = () => { _filterUnit = unitSel.value; applyIssueFilter(); };
     }
 
-    // Trigger filter (applyIssueFilter is closure inside renderDashboard — call via DOM trick)
+    // Refresh dept stats table (re-highlight active row + badge)
+    renderDeptStats();
+
+    // Filter issues table
     const tbody = document.getElementById('issue-table-body');
     const badge  = document.getElementById('issue-count-badge');
     if (!tbody) return;
     const filtered = getFilteredIssues(_allIssues, _activeFilter);
     tbody.innerHTML = renderIssueRows(filtered);
     if (badge) badge.textContent = `${filtered.length} / ${_allIssues.length}`;
+
+    // Scroll to ทะเบียนปัญหา section smoothly
+    if (deptName) {
+        document.getElementById('issue-table-body')?.closest('.bg-white')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }
 }
+
+// Click on unit row in stats table → filter issues by that unit
+window._issueFilterUnit = function(unitName) {
+    // Clear dept filter, set unit filter
+    _filterDept = '';
+    _filterUnit = unitName;
+
+    // Sync dropdowns
+    const deptSel = document.getElementById('issue-dept-filter');
+    if (deptSel) deptSel.value = '';
+    const unitSel = document.getElementById('issue-unit-filter');
+    if (unitSel) { unitSel.value = unitName; }
+
+    renderDeptStats();
+
+    const tbody = document.getElementById('issue-table-body');
+    const badge  = document.getElementById('issue-count-badge');
+    if (!tbody) return;
+    const filtered = getFilteredIssues(_allIssues, _activeFilter);
+    tbody.innerHTML = renderIssueRows(filtered);
+    if (badge) badge.textContent = `${filtered.length} / ${_allIssues.length}`;
+
+    if (unitName) {
+        document.getElementById('issue-table-body')?.closest('.bg-white')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }
+};
 
 // ─── Filter Logic ─────────────────────────────────────────────────────────────
 function _normalizeDept(raw) {
@@ -1858,8 +1916,7 @@ async function loadOverview(year) {
         // Refresh hero stats if overview tab is active
         window._refreshOverviewHero?.();
         // Table
-        const typeFilter = document.getElementById('overview-type-filter')?.value || 'all';
-        renderOverviewTable(_overviewData.members, typeFilter);
+        renderOverviewTable(_overviewData.members);
 
         // Pie chart
         renderOverviewChart(s.percent);
@@ -1869,13 +1926,9 @@ async function loadOverview(year) {
     }
 }
 
-function renderOverviewTable(members, typeFilter = 'all') {
+function renderOverviewTable(members) {
     const tbody = document.getElementById('overview-table-body');
     if (!tbody) return;
-    const filtered = typeFilter === 'all' ? members : members.filter(m => m.PatrolType === typeFilter);
-
-    const PT_LABEL = { top: 'Top Mgmt', committee: 'คปอ.', management: 'Management' };
-    const PT_COLOR = { top: 'rose', committee: 'amber', management: 'indigo' };
     const ratingOf = pct => {
         if (pct >= 80) return { r: 5, cls: 'bg-emerald-100 text-emerald-700' };
         if (pct >= 75) return { r: 4, cls: 'bg-teal-100 text-teal-700' };
@@ -1885,31 +1938,35 @@ function renderOverviewTable(members, typeFilter = 'all') {
         return { r: 0, cls: 'bg-red-100 text-red-700' };
     };
 
-    if (!filtered.length) {
-        tbody.innerHTML = `<tr><td colspan="7" class="text-center py-10 text-xs text-slate-400">ไม่มีข้อมูล</td></tr>`;
+    if (!members.length) {
+        tbody.innerHTML = `<tr><td colspan="${isAdmin ? 8 : 7}" class="text-center py-14 text-xs text-slate-400">
+          <div class="flex flex-col items-center gap-2">
+            <div class="w-12 h-12 rounded-2xl bg-slate-100 flex items-center justify-center">
+              <svg class="w-6 h-6 opacity-30" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0z"/></svg>
+            </div>
+            <p class="font-medium text-slate-400">ยังไม่มีสมาชิกในรายการ</p>
+            ${isAdmin ? '<p class="text-[10px] text-slate-300">กด "เพิ่มสมาชิก" เพื่อเพิ่มพนักงานเข้าตาราง</p>' : ''}
+          </div>
+        </td></tr>`;
         return;
     }
 
-    tbody.innerHTML = filtered.map((m, i) => {
-        const tc = PT_COLOR[m.PatrolType] || 'slate';
-        const tl = PT_LABEL[m.PatrolType] || m.PatrolType;
+    tbody.innerHTML = members.map((m, i) => {
         const { r, cls } = ratingOf(m.Percent);
         const barW = Math.min(m.Percent, 100);
         const isMe = m.EmployeeID === currentUser.id;
         return `<tr class="hover:bg-slate-50 transition-colors ${isMe ? 'bg-emerald-50/40' : ''}">
-          <td class="px-4 py-3 text-slate-400 font-mono">${i+1}</td>
+          <td class="px-4 py-3 text-slate-400 font-mono text-xs">${i+1}</td>
           <td class="px-4 py-3">
             <div class="flex items-center gap-2">
               <div class="w-6 h-6 rounded-full flex items-center justify-center text-[9px] font-bold flex-shrink-0 ${isMe ? 'bg-emerald-500 text-white' : 'bg-slate-100 text-slate-500'}">
                 ${(m.Name||'?').charAt(0)}
               </div>
-              <span class="font-semibold text-slate-800 ${isMe ? 'font-bold' : ''}">${m.Name}${isMe ? ' (ฉัน)' : ''}</span>
+              <span class="font-semibold text-slate-800 ${isMe ? 'font-bold' : ''}">${m.Name}${isMe ? ' <span class="text-[9px] text-emerald-500">(ฉัน)</span>' : ''}</span>
             </div>
           </td>
-          <td class="px-4 py-3 text-center">
-            <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[9px] font-bold bg-${tc}-100 text-${tc}-700">${tl}</span>
-          </td>
-          <td class="px-4 py-3 text-center text-slate-500 font-mono">${m.Year}</td>
+          <td class="px-4 py-3 text-xs text-slate-500 max-w-[120px] truncate" title="${m.Position||''}">${m.Position||'—'}</td>
+          <td class="px-4 py-3 text-xs text-slate-500 max-w-[100px] truncate" title="${m.Department||''}">${m.Department||'—'}</td>
           <td class="px-4 py-3 text-center font-bold text-slate-700">${m.Total}</td>
           <td class="px-4 py-3 text-center">
             <span class="font-bold ${m.Attended >= m.Total && m.Total > 0 ? 'text-emerald-600' : 'text-slate-700'}">${m.Attended}</span>
@@ -1922,6 +1979,18 @@ function renderOverviewTable(members, typeFilter = 'all') {
               <span class="inline-flex items-center justify-center w-14 px-1.5 py-0.5 rounded-full text-[9px] font-bold ${cls}">${m.Percent}%${r>0?' ('+r+')':''}</span>
             </div>
           </td>
+          ${isAdmin ? `<td class="px-4 py-3 text-center">
+            <div class="flex items-center justify-center gap-1">
+              <button onclick="window.editRosterTarget(${m.RosterID},'top_management',${m.Total},'${(m.Name||'').replace(/'/g,"\\'")}',true)"
+                class="p-1 rounded-lg hover:bg-slate-100 text-slate-400 hover:text-slate-600 transition-colors" title="แก้ไขเป้าหมาย">
+                <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"/></svg>
+              </button>
+              <button onclick="window.deleteRosterMember(${m.RosterID},'top_management','${(m.Name||'').replace(/'/g,"\\'")}',true)"
+                class="p-1 rounded-lg hover:bg-red-50 text-slate-400 hover:text-red-500 transition-colors" title="ลบออกจากรายการ">
+                <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg>
+              </button>
+            </div>
+          </td>` : ''}
         </tr>`;
     }).join('');
 }
@@ -1970,54 +2039,69 @@ function switchOverviewYear(year) {
     loadOverview(_overviewYear);
 }
 
-window.filterOverviewTable = function(typeFilter) {
-    if (_overviewData) renderOverviewTable(_overviewData.members, typeFilter);
+window.filterOverviewTable = function() {
+    if (_overviewData) renderOverviewTable(_overviewData.members);
 };
 
 // ─── Supervisor Overview ───────────────────────────────────────────────────────
-async function loadSupervisorOverview(year, month) {
-    const tbody  = document.getElementById('sv-overview-body');
-    const subEl  = document.getElementById('sv-overview-subtitle');
+async function loadSupervisorOverview(year) {
+    year = year || new Date().getFullYear();
+    const tbody = document.getElementById('sv-overview-body');
+    const subEl = document.getElementById('sv-overview-subtitle');
     if (!tbody) return;
+    tbody.innerHTML = `<tr><td colspan="${isAdmin ? 9 : 8}" class="text-center py-8 text-slate-300 text-xs">
+      <div class="inline-flex flex-col items-center gap-2">
+        <div class="animate-spin rounded-full h-6 w-6 border-3 border-amber-400 border-t-transparent"></div>
+        <span>กำลังโหลด...</span>
+      </div>
+    </td></tr>`;
     try {
-        const res = await API.get(`/patrol/supervisor-overview?year=${year}&month=${month}`);
+        const res = await API.get(`/patrol/supervisor-overview?year=${year}`);
         const members = res.data || [];
+
+        if (subEl) subEl.textContent = `ปี ${year}`;
+        const setEl = (id, val) => { const el = document.getElementById(id); if (el) el.textContent = val; };
+
         if (!members.length) {
-            tbody.innerHTML = `<tr><td colspan="8" class="text-center py-8 text-xs text-slate-400">ยังไม่มีข้อมูลหัวหน้าส่วน/แผนก<br><span class="text-[10px] text-slate-300">ตั้งค่า Self-Patrol ให้กับ Position ในหน้า Admin → Master Data → Positions</span></td></tr>`;
+            tbody.innerHTML = `<tr><td colspan="${isAdmin ? 9 : 8}" class="text-center py-12 text-xs text-slate-400">
+              <div class="flex flex-col items-center gap-2">
+                <div class="w-12 h-12 rounded-2xl bg-slate-100 flex items-center justify-center">
+                  <svg class="w-6 h-6 opacity-30" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0z"/></svg>
+                </div>
+                <p class="font-medium text-slate-400">ยังไม่มีสมาชิกในรายการ</p>
+                ${isAdmin ? '<p class="text-[10px] text-slate-300">กด "เพิ่มสมาชิก" เพื่อเพิ่มหัวหน้าส่วน/แผนกเข้าตาราง</p>' : ''}
+              </div>
+            </td></tr>`;
+            setEl('sv-card-total', '0'); setEl('sv-card-done', '0'); setEl('sv-card-pct', '0%'); setEl('ov-sv-pie-pct', '0%');
             return;
         }
-        // Compute aggregate stats for pie + record card
+
         const totalMembers = members.length;
         const doneCount    = members.filter(m => m.attended >= m.target).length;
         const totalAtt     = members.reduce((s, m) => s + m.attended, 0);
         const totalTgt     = members.reduce((s, m) => s + m.target,   0);
         const svPct        = totalTgt > 0 ? Math.round(totalAtt / totalTgt * 100) : 0;
 
-        const setEl = (id, val) => { const el = document.getElementById(id); if (el) el.textContent = val; };
-        setEl('sv-card-total',  totalMembers);
-        setEl('sv-card-done',   doneCount);
-        setEl('sv-card-pct',    `${svPct}%`);
-        setEl('ov-sv-pie-pct',  `${svPct}%`);
-        if (subEl) {
-            const d2 = new Date(year, month - 1, 1);
-            setEl('sv-card-subtitle', d2.toLocaleDateString('th-TH', { month: 'long', year: 'numeric' }));
-        }
+        setEl('sv-card-total',    totalMembers);
+        setEl('sv-card-done',     doneCount);
+        setEl('sv-card-pct',      `${svPct}%`);
+        setEl('ov-sv-pie-pct',    `${svPct}%`);
+        setEl('sv-card-subtitle', `ปี ${year}`);
         renderSvPieChart(svPct);
 
         tbody.innerHTML = members.map((m, i) => {
             const done = m.attended >= m.target;
             const half = m.attended > 0 && m.attended < m.target;
-            const statusCls = done  ? 'bg-emerald-100 text-emerald-700'
-                            : half ? 'bg-amber-100 text-amber-700'
-                            :        'bg-red-50 text-red-500';
+            const statusCls = done ? 'bg-emerald-100 text-emerald-700' : half ? 'bg-amber-100 text-amber-700' : 'bg-red-50 text-red-500';
             const statusLbl = done ? 'ครบแล้ว' : half ? 'บางส่วน' : 'ยังไม่เดิน';
-            return `<tr class="border-b border-slate-50 hover:bg-slate-50 transition-colors">
+            const isMe = m.EmployeeID === currentUser.id;
+            return `<tr class="border-b border-slate-50 hover:bg-slate-50 transition-colors ${isMe ? 'bg-amber-50/30' : ''}">
               <td class="px-4 py-3 text-slate-400 text-[10px] font-mono">${i+1}</td>
-              <td class="px-4 py-3 font-semibold text-slate-700">${m.EmployeeName}</td>
-              <td class="px-4 py-3 text-slate-500">${m.Position || '—'}</td>
-              <td class="px-4 py-3 text-slate-500">${m.Department || '—'}</td>
-              <td class="px-4 py-3 text-center font-bold ${done ? 'text-emerald-600' : 'text-amber-600'}">${m.attended}</td>
-              <td class="px-4 py-3 text-center text-slate-400">${m.target}</td>
+              <td class="px-4 py-3 font-semibold text-slate-700">${m.EmployeeName}${isMe ? ' <span class="text-[9px] text-amber-500">(ฉัน)</span>' : ''}</td>
+              <td class="px-4 py-3 text-xs text-slate-500 max-w-[120px] truncate" title="${m.Position||''}">${m.Position||'—'}</td>
+              <td class="px-4 py-3 text-xs text-slate-500 max-w-[100px] truncate" title="${m.Department||''}">${m.Department||'—'}</td>
+              <td class="px-4 py-3 text-center font-bold text-slate-600">${m.target}</td>
+              <td class="px-4 py-3 text-center font-bold ${done ? 'text-emerald-600' : half ? 'text-amber-600' : 'text-slate-400'}">${m.attended}</td>
               <td class="px-4 py-3 text-center">
                 <div class="w-full bg-slate-100 rounded-full h-1.5 overflow-hidden">
                   <div class="h-full rounded-full" style="width:${m.percent}%;background:${done?'#10b981':half?'#f59e0b':'#fca5a5'}"></div>
@@ -2030,12 +2114,250 @@ async function loadSupervisorOverview(year, month) {
                   ${statusLbl}
                 </span>
               </td>
+              ${isAdmin ? `<td class="px-4 py-3 text-center">
+                <div class="flex items-center justify-center gap-1">
+                  <button onclick="window.editRosterTarget(${m.RosterID},'supervisor',${m.target},'${(m.EmployeeName||'').replace(/'/g,"\\'")}',false)"
+                    class="p-1 rounded-lg hover:bg-slate-100 text-slate-400 hover:text-slate-600 transition-colors" title="แก้ไขเป้าหมาย">
+                    <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"/></svg>
+                  </button>
+                  <button onclick="window.deleteRosterMember(${m.RosterID},'supervisor','${(m.EmployeeName||'').replace(/'/g,"\\'")}',false)"
+                    class="p-1 rounded-lg hover:bg-red-50 text-slate-400 hover:text-red-500 transition-colors" title="ลบออกจากรายการ">
+                    <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg>
+                  </button>
+                </div>
+              </td>` : ''}
             </tr>`;
         }).join('');
     } catch {
-        tbody.innerHTML = `<tr><td colspan="8" class="text-center py-6 text-xs text-slate-400">โหลดไม่ได้</td></tr>`;
+        tbody.innerHTML = `<tr><td colspan="${isAdmin ? 9 : 8}" class="text-center py-6 text-xs text-slate-400">โหลดไม่ได้</td></tr>`;
     }
 }
+
+// ─── Patrol Roster Management (Admin) ─────────────────────────────────────────
+
+// Position → suggested default target
+function _rosterDefaultTarget(position, isMgmt) {
+    if (!isMgmt) return 24; // supervisor always 24/year
+    const pos = (position || '').toLowerCase();
+    if (pos.includes('ผู้จัดการทั่วไป') || pos.includes('ผู้ช่วยผู้จัดการทั่วไป') || pos.includes('ผู้อำนวยการ')) return 12;
+    return 24; // ผู้ชำนาญการพิเศษ, ผู้จัดการ
+}
+
+// Cache for employee master list
+let _empMasterCache = null;
+async function _getEmpMaster() {
+    if (_empMasterCache) return _empMasterCache;
+    try {
+        const res = await API.get('/employees');
+        _empMasterCache = (res.data || []).sort((a, b) => (a.EmployeeName||'').localeCompare(b.EmployeeName||'', 'th'));
+        return _empMasterCache;
+    } catch { return []; }
+}
+
+// Open modal to add employee to roster
+window.openRosterAddModal = async function(group) {
+    if (!isAdmin) return;
+    const isMgmt = group === 'top_management';
+    const groupLabel = isMgmt ? 'Top & Management' : 'Sec. & Supervisor';
+    const accentColor = isMgmt ? '#059669' : '#d97706';
+
+    openModal(`เพิ่มสมาชิก — ${groupLabel}`, `
+      <div class="space-y-4">
+        <div>
+          <label class="block text-xs font-bold text-slate-500 uppercase mb-1.5">ค้นหาพนักงาน</label>
+          <input type="text" id="roster-search-input" placeholder="พิมพ์ชื่อ, รหัส, ตำแหน่ง หรือแผนก..."
+            class="form-input w-full rounded-xl text-sm border border-slate-200 px-3 py-2 focus:outline-none focus:border-emerald-400"
+            oninput="window._filterRosterSearch()">
+        </div>
+        <div id="roster-emp-list" class="max-h-64 overflow-y-auto rounded-xl border border-slate-100 divide-y divide-slate-50 bg-slate-50">
+          <div class="text-center py-6 text-xs text-slate-400">
+            <div class="animate-spin rounded-full h-5 w-5 border-2 border-emerald-500 border-t-transparent mx-auto mb-2"></div>
+            กำลังโหลดรายชื่อพนักงาน...
+          </div>
+        </div>
+        <div id="roster-selected-emp" class="hidden rounded-xl border-2 border-emerald-300 bg-emerald-50 p-3">
+          <p class="text-xs font-bold text-emerald-700 mb-1">พนักงานที่เลือก</p>
+          <p id="roster-selected-name" class="text-sm font-bold text-slate-800"></p>
+          <p id="roster-selected-detail" class="text-xs text-slate-500 mt-0.5"></p>
+        </div>
+        <div>
+          <label class="block text-xs font-bold text-slate-500 uppercase mb-1.5">เป้าหมายการเดินตรวจ (ครั้ง/ปี)</label>
+          <input type="number" id="roster-target-input" min="1" max="365" value="${isMgmt ? 12 : 24}"
+            class="form-input w-full rounded-xl text-sm border border-slate-200 px-3 py-2 focus:outline-none focus:border-emerald-400">
+          <p class="text-[10px] text-slate-400 mt-1">
+            ${isMgmt ? 'ผู้จัดการทั่วไป/ผอ. = 12 ครั้ง • ผู้ชำนาญการพิเศษ/ผจก. = 24 ครั้ง' : 'หัวหน้าส่วน/แผนก = 24 ครั้ง (2 ครั้ง/เดือน)'}
+          </p>
+        </div>
+        <input type="hidden" id="roster-group-input" value="${group}">
+        <input type="hidden" id="roster-emp-id-input" value="">
+        <div class="flex gap-2 pt-2">
+          <button onclick="window.closeModal&&window.closeModal()"
+            class="flex-1 px-4 py-2.5 rounded-xl text-sm font-bold border border-slate-200 text-slate-600 hover:bg-slate-50 transition-colors">
+            ยกเลิก
+          </button>
+          <button onclick="window.confirmRosterAdd()"
+            class="flex-1 px-4 py-2.5 rounded-xl text-sm font-bold text-white transition-colors"
+            style="background:linear-gradient(135deg,${accentColor},${isMgmt?'#0d9488':'#f59e0b'})">
+            เพิ่มสมาชิก
+          </button>
+        </div>
+      </div>
+    `, 'max-w-md');
+
+    // Load employees
+    const emps = await _getEmpMaster();
+    window._rosterEmpList = emps;
+    window._rosterSelectedEmp = null;
+    window._filterRosterSearch();
+};
+
+window._filterRosterSearch = function() {
+    const q = (document.getElementById('roster-search-input')?.value || '').toLowerCase();
+    const emps = window._rosterEmpList || [];
+    const filtered = q ? emps.filter(e =>
+        (e.EmployeeName||'').toLowerCase().includes(q) ||
+        (e.EmployeeID||'').toLowerCase().includes(q) ||
+        (e.Position||'').toLowerCase().includes(q) ||
+        (e.Department||'').toLowerCase().includes(q)
+    ) : emps;
+
+    const listEl = document.getElementById('roster-emp-list');
+    if (!listEl) return;
+    if (!filtered.length) {
+        listEl.innerHTML = `<div class="text-center py-6 text-xs text-slate-400">ไม่พบพนักงาน</div>`;
+        return;
+    }
+    listEl.innerHTML = filtered.slice(0, 50).map(e => `
+      <button onclick="window._selectRosterEmp('${e.EmployeeID}','${(e.EmployeeName||'').replace(/'/g,"\\'")}','${(e.Position||'').replace(/'/g,"\\'")}','${(e.Department||'').replace(/'/g,"\\'")}')"
+        class="w-full text-left px-3 py-2.5 hover:bg-white transition-colors flex items-center gap-3 group">
+        <div class="w-7 h-7 rounded-full bg-slate-200 flex items-center justify-center text-[10px] font-bold text-slate-500 flex-shrink-0 group-hover:bg-emerald-100 group-hover:text-emerald-600">
+          ${(e.EmployeeName||'?').charAt(0)}
+        </div>
+        <div class="min-w-0">
+          <p class="text-xs font-semibold text-slate-700 truncate">${e.EmployeeName}</p>
+          <p class="text-[10px] text-slate-400 truncate">${e.Position||'—'} · ${e.Department||'—'} · ${e.EmployeeID}</p>
+        </div>
+      </button>
+    `).join('');
+};
+
+window._selectRosterEmp = function(id, name, position, dept) {
+    window._rosterSelectedEmp = { id, name, position, dept };
+    const empIdEl   = document.getElementById('roster-emp-id-input');
+    const nameEl    = document.getElementById('roster-selected-name');
+    const detailEl  = document.getElementById('roster-selected-detail');
+    const boxEl     = document.getElementById('roster-selected-emp');
+    if (empIdEl) empIdEl.value = id;
+    if (nameEl)  nameEl.textContent = name;
+    if (detailEl) detailEl.textContent = `${position||'—'} · ${dept||'—'} · ${id}`;
+    if (boxEl)   boxEl.classList.remove('hidden');
+
+    // Auto-suggest target based on position
+    const isMgmt = (document.getElementById('roster-group-input')?.value) === 'top_management';
+    const suggested = _rosterDefaultTarget(position, isMgmt);
+    const targetEl = document.getElementById('roster-target-input');
+    if (targetEl) targetEl.value = suggested;
+};
+
+window.confirmRosterAdd = async function() {
+    const empId  = document.getElementById('roster-emp-id-input')?.value;
+    const group  = document.getElementById('roster-group-input')?.value;
+    const target = parseInt(document.getElementById('roster-target-input')?.value || '12');
+    if (!empId) { showToast('กรุณาเลือกพนักงาน', 'warning'); return; }
+    if (!target || target < 1) { showToast('กรุณาระบุเป้าหมายที่ถูกต้อง', 'warning'); return; }
+    try {
+        await API.post('/patrol/roster', { EmployeeID: empId, RosterGroup: group, TargetPerYear: target });
+        showToast('เพิ่มสมาชิกสำเร็จ', 'success');
+        closeModal();
+        // Reload the appropriate table
+        if (group === 'top_management') {
+            _overviewData = null;
+            loadOverview(_overviewYear);
+        } else {
+            const yr = document.getElementById('sv-year-select')?.value || new Date().getFullYear();
+            loadSupervisorOverview(parseInt(yr));
+        }
+    } catch (err) {
+        showToast(err.message || 'เพิ่มไม่สำเร็จ', 'error');
+    }
+};
+
+window.editRosterTarget = function(rosterId, group, currentTarget, name, isMgmt) {
+    openModal(`แก้ไขเป้าหมาย — ${name}`, `
+      <div class="space-y-4">
+        <p class="text-xs text-slate-500">ปรับจำนวนครั้งการเดินตรวจต่อปีสำหรับ <strong class="text-slate-700">${name}</strong></p>
+        <div>
+          <label class="block text-xs font-bold text-slate-500 uppercase mb-1.5">เป้าหมาย (ครั้ง/ปี)</label>
+          <input type="number" id="edit-target-input" min="1" max="365" value="${currentTarget}"
+            class="form-input w-full rounded-xl text-sm border border-slate-200 px-3 py-2 focus:outline-none focus:border-emerald-400">
+          <p class="text-[10px] text-slate-400 mt-1">
+            ${isMgmt ? 'ผู้จัดการทั่วไป/ผอ. = 12 ครั้ง • ผู้ชำนาญการพิเศษ/ผจก. = 24 ครั้ง' : 'หัวหน้าส่วน/แผนก = 24 ครั้ง/ปี'}
+          </p>
+        </div>
+        <div class="flex gap-2 pt-2">
+          <button onclick="window.closeModal&&window.closeModal()"
+            class="flex-1 px-4 py-2.5 rounded-xl text-sm font-bold border border-slate-200 text-slate-600 hover:bg-slate-50 transition-colors">
+            ยกเลิก
+          </button>
+          <button onclick="window._confirmEditTarget(${rosterId},'${group}')"
+            class="flex-1 px-4 py-2.5 rounded-xl text-sm font-bold text-white"
+            style="background:linear-gradient(135deg,#059669,#0d9488)">
+            บันทึก
+          </button>
+        </div>
+      </div>
+    `, 'max-w-xs');
+};
+
+window._confirmEditTarget = async function(rosterId, group) {
+    const target = parseInt(document.getElementById('edit-target-input')?.value || '0');
+    if (!target || target < 1) { showToast('กรุณาระบุเป้าหมายที่ถูกต้อง', 'warning'); return; }
+    try {
+        await API.put(`/patrol/roster/${rosterId}`, { TargetPerYear: target });
+        showToast('อัปเดตเป้าหมายสำเร็จ', 'success');
+        closeModal();
+        if (group === 'top_management') { _overviewData = null; loadOverview(_overviewYear); }
+        else { const yr = document.getElementById('sv-year-select')?.value || new Date().getFullYear(); loadSupervisorOverview(parseInt(yr)); }
+    } catch (err) {
+        showToast(err.message || 'บันทึกไม่สำเร็จ', 'error');
+    }
+};
+
+window.deleteRosterMember = function(rosterId, group, name) {
+    openModal('ยืนยันการลบ', `
+      <div class="space-y-4">
+        <div class="flex items-center gap-3 p-3 rounded-xl bg-red-50 border border-red-100">
+          <svg class="w-8 h-8 text-red-400 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/></svg>
+          <div>
+            <p class="text-sm font-bold text-red-700">ลบ <span>${name}</span> ออกจากตาราง?</p>
+            <p class="text-xs text-red-500 mt-0.5">ข้อมูลการเดินตรวจที่บันทึกไว้จะยังคงอยู่ เพียงแต่ไม่แสดงในตารางภาพรวม</p>
+          </div>
+        </div>
+        <div class="flex gap-2">
+          <button onclick="window.closeModal&&window.closeModal()"
+            class="flex-1 px-4 py-2.5 rounded-xl text-sm font-bold border border-slate-200 text-slate-600 hover:bg-slate-50 transition-colors">
+            ยกเลิก
+          </button>
+          <button onclick="window._confirmDeleteRoster(${rosterId},'${group}')"
+            class="flex-1 px-4 py-2.5 rounded-xl text-sm font-bold text-white bg-red-500 hover:bg-red-600 transition-colors">
+            ลบออก
+          </button>
+        </div>
+      </div>
+    `, 'max-w-sm');
+};
+
+window._confirmDeleteRoster = async function(rosterId, group) {
+    try {
+        await API.delete(`/patrol/roster/${rosterId}`);
+        showToast('ลบสมาชิกออกจากรายการสำเร็จ', 'success');
+        closeModal();
+        if (group === 'top_management') { _overviewData = null; loadOverview(_overviewYear); }
+        else { const yr = document.getElementById('sv-year-select')?.value || new Date().getFullYear(); loadSupervisorOverview(parseInt(yr)); }
+    } catch (err) {
+        showToast(err.message || 'ลบไม่สำเร็จ', 'error');
+    }
+};
 
 // ─── Self-Patrol Modal / Delete ───────────────────────────────────────────────
 function openSelfCheckinModal() {
@@ -2172,24 +2494,30 @@ function renderDeptStats() {
     const tbody = document.getElementById('dashboard-dept-body');
     if (!tbody) return;
 
-    // Use master departments — admin manages these in Master Data tab
-    const deptNames = _masterDepts.map(d => d.Name).filter(Boolean);
-    if (!deptNames.length) {
+    const allDeptNames = _masterDepts.map(d => d.Name).filter(Boolean);
+    if (!allDeptNames.length) {
         tbody.innerHTML = `<tr><td colspan="5" class="text-center py-6 text-xs text-slate-300">ยังไม่มีส่วนงานใน Master Data</td></tr>`;
         return;
     }
+    const savedSel = _getDeptStatSelection();
+    const deptNames = savedSel ? allDeptNames.filter(n => savedSel.includes(n)) : allDeptNames;
 
-    // Build count map
+    const savedUnitSel = _getUnitStatSelection();
+    const allUnitNames = _masterUnits.map(u => u.name).filter(Boolean);
+    const selectedUnitNames = savedUnitSel ? allUnitNames.filter(n => savedUnitSel.includes(n)) : [];
+
+    // Build dept count map
     const deptMap = {};
     for (const name of deptNames) deptMap[name] = { found:0, achieved:0, onProcess:0 };
 
+    // Build unit count map
+    const unitMap = {};
+    for (const name of selectedUnitNames) unitMap[name] = { found:0, achieved:0, onProcess:0 };
+
     _allIssues.forEach(issue => {
-        // ResponsibleDept may be plain string (new) or JSON array string (legacy)
         const raw = issue.ResponsibleDept || '';
         let depts = [];
-        try {
-            depts = raw.startsWith('[') ? JSON.parse(raw) : raw ? [raw] : [];
-        } catch { depts = raw ? [raw] : []; }
+        try { depts = raw.startsWith('[') ? JSON.parse(raw) : raw ? [raw] : []; } catch { depts = raw ? [raw] : []; }
         depts.forEach(d => {
             if (deptMap[d] !== undefined) {
                 deptMap[d].found++;
@@ -2197,26 +2525,208 @@ function renderDeptStats() {
                 else                                   deptMap[d].onProcess++;
             }
         });
+        const u = issue.ResponsibleUnit || '';
+        if (unitMap[u] !== undefined) {
+            unitMap[u].found++;
+            if (issue.CurrentStatus === 'Closed') unitMap[u].achieved++;
+            else                                   unitMap[u].onProcess++;
+        }
     });
 
-    // Only show depts that have issues, or all if none have any
-    const hasAny = deptNames.some(n => deptMap[n].found > 0);
-    const toShow = hasAny ? deptNames.filter(n => deptMap[n].found > 0) : deptNames;
+    const rows = [];
+    const shownUnitNames = new Set();
 
-    const rows = toShow.map(dept => {
+    for (const dept of deptNames) {
         const r = deptMap[dept];
         const pct = r.found > 0 ? Math.round((r.achieved / r.found) * 100) : null;
         const pctColor = pct === null ? 'text-slate-300' : pct >= 80 ? 'text-emerald-600' : pct >= 50 ? 'text-orange-500' : 'text-red-500';
-        return `<tr class="border-b border-slate-50 hover:bg-slate-50 transition-colors">
-            <td class="px-3 py-2 text-[10px] font-medium text-slate-600 max-w-[110px] truncate" title="${dept}">${dept}</td>
-            <td class="px-2 py-2 text-center text-slate-500 font-bold text-xs">${r.found || '—'}</td>
-            <td class="px-2 py-2 text-center text-emerald-600 font-bold text-xs">${r.achieved || 0}</td>
-            <td class="px-2 py-2 text-center text-orange-500 font-bold text-xs">${r.onProcess || 0}</td>
+        const isActive = _filterDept === dept;
+        rows.push(`<tr class="border-b border-slate-50 cursor-pointer transition-colors ${isActive ? 'bg-indigo-50 border-indigo-100' : 'hover:bg-slate-50'}"
+            onclick="window._issueFilterDept('${dept.replace(/'/g,"\\'")}')">
+            <td class="px-3 py-2 text-[10px] font-medium max-w-[110px] truncate ${isActive ? 'text-indigo-700 font-bold' : 'text-slate-600'}" title="${dept}">
+              ${isActive ? `<span class="inline-block w-1.5 h-1.5 rounded-full bg-indigo-500 mr-1 align-middle"></span>` : ''}${dept}
+            </td>
+            <td class="px-2 py-2 text-center font-bold text-xs ${r.found === 0 ? 'text-slate-300' : isActive ? 'text-indigo-600' : 'text-slate-500'}">${r.found}</td>
+            <td class="px-2 py-2 text-center font-bold text-xs ${r.achieved === 0 ? 'text-slate-300' : 'text-emerald-600'}">${r.achieved}</td>
+            <td class="px-2 py-2 text-center font-bold text-xs ${r.onProcess === 0 ? 'text-slate-300' : 'text-orange-500'}">${r.onProcess}</td>
             <td class="px-2 py-2 text-center font-bold text-xs ${pctColor}">${pct !== null ? pct+'%' : '—'}</td>
-        </tr>`;
-    });
-    tbody.innerHTML = rows.join('');
+        </tr>`);
+
+        // Unit rows indented directly below their parent dept
+        if (selectedUnitNames.length) {
+            const deptObj = _masterDepts.find(d => d.Name === dept);
+            if (deptObj) {
+                const deptId = deptObj.id || deptObj.ID;
+                const deptUnits = _masterUnits.filter(u => u.department_id === deptId && selectedUnitNames.includes(u.name));
+                for (const unit of deptUnits) {
+                    shownUnitNames.add(unit.name);
+                    const ur = unitMap[unit.name];
+                    if (!ur) continue;
+                    const upct = ur.found > 0 ? Math.round((ur.achieved / ur.found) * 100) : null;
+                    const upctColor = upct === null ? 'text-slate-300' : upct >= 80 ? 'text-emerald-600' : upct >= 50 ? 'text-orange-500' : 'text-red-500';
+                    const uActive = _filterUnit === unit.name;
+                    rows.push(`<tr class="border-b border-sky-50/80 cursor-pointer transition-colors ${uActive ? 'bg-sky-50 border-sky-100' : 'hover:bg-sky-50/40'}"
+                        onclick="window._issueFilterUnit('${unit.name.replace(/'/g,"\\'")}')">
+                        <td class="py-1.5 text-[10px] font-medium max-w-[110px] truncate ${uActive ? 'text-sky-700 font-bold' : 'text-slate-500'}" title="${unit.name}">
+                          <span class="inline-block w-px h-4 bg-slate-200 ml-4 mr-2 align-middle"></span><span class="inline-block w-1.5 h-1.5 rounded-full bg-sky-300 mr-1 align-middle"></span>${uActive ? `<span class="inline-block w-1.5 h-1.5 rounded-full bg-sky-500 mr-1 align-middle"></span>` : ''}${unit.name}
+                        </td>
+                        <td class="px-2 py-1.5 text-center font-bold text-xs ${ur.found === 0 ? 'text-slate-300' : uActive ? 'text-sky-600' : 'text-slate-400'}">${ur.found}</td>
+                        <td class="px-2 py-1.5 text-center font-bold text-xs ${ur.achieved === 0 ? 'text-slate-300' : 'text-emerald-600'}">${ur.achieved}</td>
+                        <td class="px-2 py-1.5 text-center font-bold text-xs ${ur.onProcess === 0 ? 'text-slate-300' : 'text-orange-500'}">${ur.onProcess}</td>
+                        <td class="px-2 py-1.5 text-center font-bold text-xs ${upctColor}">${upct !== null ? upct+'%' : '—'}</td>
+                    </tr>`);
+                }
+            }
+        }
+    }
+
+    // Orphan units (selected but dept not in display list)
+    if (selectedUnitNames.length) {
+        const orphans = selectedUnitNames.filter(n => !shownUnitNames.has(n));
+        if (orphans.length) {
+            rows.push(`<tr class="bg-sky-50/60"><td colspan="5" class="px-3 py-1.5 text-[9px] font-bold text-sky-600 uppercase tracking-wide border-t border-sky-100">Safety Unit (อื่นๆ)</td></tr>`);
+            for (const unitName of orphans) {
+                const ur = unitMap[unitName];
+                if (!ur) continue;
+                const upct = ur.found > 0 ? Math.round((ur.achieved / ur.found) * 100) : null;
+                const upctColor = upct === null ? 'text-slate-300' : upct >= 80 ? 'text-emerald-600' : upct >= 50 ? 'text-orange-500' : 'text-red-500';
+                const uActive = _filterUnit === unitName;
+                rows.push(`<tr class="border-b border-sky-50 cursor-pointer transition-colors ${uActive ? 'bg-sky-50 border-sky-100' : 'hover:bg-sky-50/40'}"
+                    onclick="window._issueFilterUnit('${unitName.replace(/'/g,"\\'")}')">
+                    <td class="pl-5 pr-2 py-2 text-[10px] font-medium max-w-[110px] truncate ${uActive ? 'text-sky-700 font-bold' : 'text-slate-500'}" title="${unitName}">
+                      <span class="inline-block w-1 h-3 rounded-full bg-sky-300 mr-1.5 align-middle"></span>${uActive ? `<span class="inline-block w-1.5 h-1.5 rounded-full bg-sky-500 mr-1 align-middle"></span>` : ''}${unitName}
+                    </td>
+                    <td class="px-2 py-2 text-center font-bold text-xs ${ur.found === 0 ? 'text-slate-300' : uActive ? 'text-sky-600' : 'text-slate-500'}">${ur.found}</td>
+                    <td class="px-2 py-2 text-center font-bold text-xs ${ur.achieved === 0 ? 'text-slate-300' : 'text-emerald-600'}">${ur.achieved}</td>
+                    <td class="px-2 py-2 text-center font-bold text-xs ${ur.onProcess === 0 ? 'text-slate-300' : 'text-orange-500'}">${ur.onProcess}</td>
+                    <td class="px-2 py-2 text-center font-bold text-xs ${upctColor}">${upct !== null ? upct+'%' : '—'}</td>
+                </tr>`);
+            }
+        }
+    }
+
+    tbody.innerHTML = rows.length
+        ? rows.join('')
+        : `<tr><td colspan="5" class="text-center py-6 text-xs text-slate-300">ไม่มีข้อมูล — กด ⚙ เพื่อตั้งค่า</td></tr>`;
+
+    // Show/hide active filter badge above table
+    const badge = document.getElementById('dept-stat-filter-badge');
+    const labelEl = document.getElementById('dept-stat-filter-label');
+    if (badge && labelEl) {
+        const activeLabel = _filterDept || _filterUnit;
+        if (activeLabel) {
+            labelEl.textContent = activeLabel;
+            badge.classList.remove('hidden');
+            badge.classList.add('inline-flex');
+        } else {
+            badge.classList.add('hidden');
+            badge.classList.remove('inline-flex');
+        }
+    }
 }
+
+// ─── Dept Stat Config (Admin: choose which depts to show) ─────────────────────
+function _getDeptStatSelection() { return _deptStatSel; }
+function _getUnitStatSelection() { return _unitStatSel; }
+
+async function _saveDeptStatSelection(names) {
+    _deptStatSel = (names && names.length) ? names : null;
+    await API.put('/settings/patrol_dept_stat_selection', { value: _deptStatSel ? JSON.stringify(_deptStatSel) : null }).catch(() => {});
+}
+async function _saveUnitStatSelection(names) {
+    _unitStatSel = (names && names.length) ? names : null;
+    await API.put('/settings/patrol_unit_stat_selection', { value: _unitStatSel ? JSON.stringify(_unitStatSel) : null }).catch(() => {});
+}
+
+window.openDeptStatConfig = function() {
+    if (!isAdmin) return;
+    const allDepts = _masterDepts.filter(d => d.Name);
+    if (!allDepts.length) { showToast('ยังไม่มีส่วนงานใน Master Data', 'warning'); return; }
+    const savedDept = _getDeptStatSelection();
+    const savedUnit = _getUnitStatSelection();
+
+    // Build tree: each dept with its units nested below
+    const treeRows = allDepts.map(dept => {
+        const deptId = dept.id || dept.ID;
+        const deptChecked = !savedDept || savedDept.includes(dept.Name);
+        const deptUnits = _masterUnits.filter(u => u.name && u.department_id === deptId);
+        const unitRows = deptUnits.map(u => {
+            const uChecked = !!(savedUnit && savedUnit.includes(u.name));
+            return `<label class="flex items-center gap-2.5 pl-9 pr-4 py-1.5 cursor-pointer hover:bg-sky-50/70 transition-colors">
+              <span class="inline-block w-px h-3.5 bg-slate-200 flex-shrink-0"></span>
+              <input type="checkbox" class="unit-stat-chk w-3.5 h-3.5 rounded accent-sky-600 flex-shrink-0" value="${u.name.replace(/"/g,'&quot;')}" ${uChecked ? 'checked' : ''}>
+              <span class="text-xs text-slate-600 truncate">${u.name}</span>
+            </label>`;
+        }).join('');
+        return `<div class="border-b border-slate-50 last:border-0">
+          <label class="flex items-center gap-3 px-4 py-2.5 cursor-pointer hover:bg-slate-50 transition-colors">
+            <input type="checkbox" class="dept-stat-chk w-4 h-4 rounded accent-emerald-600 flex-shrink-0" value="${dept.Name.replace(/"/g,'&quot;')}" ${deptChecked ? 'checked' : ''}>
+            <span class="text-sm text-slate-700 font-semibold flex-1 truncate">${dept.Name}</span>
+            ${deptUnits.length ? `<span class="text-[9px] text-slate-400 flex-shrink-0">${deptUnits.length} unit</span>` : ''}
+          </label>
+          ${unitRows}
+        </div>`;
+    }).join('');
+
+    // Orphan units (no matching dept in master)
+    const orphanUnits = _masterUnits.filter(u => u.name && !allDepts.some(d => (d.id||d.ID) === u.department_id));
+    const orphanRows = orphanUnits.length ? `
+      <div class="border-t border-sky-100 mt-1 pt-1">
+        <p class="text-[9px] font-bold text-sky-500 uppercase px-4 py-1 tracking-wide">Safety Unit (ไม่มีส่วนงาน)</p>
+        ${orphanUnits.map(u => {
+            const uChecked = !!(savedUnit && savedUnit.includes(u.name));
+            return `<label class="flex items-center gap-3 px-4 py-2 cursor-pointer hover:bg-sky-50/60 transition-colors">
+              <input type="checkbox" class="unit-stat-chk w-3.5 h-3.5 rounded accent-sky-600" value="${u.name.replace(/"/g,'&quot;')}" ${uChecked ? 'checked' : ''}>
+              <span class="text-xs text-slate-600">${u.name}</span>
+            </label>`;
+        }).join('')}
+      </div>` : '';
+
+    openModal('ตั้งค่าที่แสดงในสถิติ', `
+      <div class="space-y-3">
+        <p class="text-xs text-slate-500">เลือกส่วนงาน/Safety Unit ที่แสดงในตาราง — Unit ที่เลือกจะเรียงแบบลำดับชั้นใต้ส่วนงานของตัวเอง</p>
+        <div class="flex items-center justify-between">
+          <button onclick="window._dscSelectAll('dept',true)" class="text-[10px] font-bold text-emerald-600 hover:text-emerald-700 underline underline-offset-2">เลือกส่วนงานทั้งหมด</button>
+          <button onclick="window._dscSelectAll('dept',false)" class="text-[10px] font-bold text-slate-400 hover:text-slate-600 underline underline-offset-2">ล้างส่วนงาน</button>
+        </div>
+        <div class="max-h-72 overflow-y-auto rounded-xl border border-slate-100 bg-white">
+          ${treeRows || '<p class="text-center py-6 text-xs text-slate-300">ยังไม่มีส่วนงาน</p>'}
+          ${orphanRows}
+        </div>
+        <div class="flex gap-2 pt-1">
+          <button onclick="window.closeModal&&window.closeModal()"
+            class="flex-1 px-4 py-2.5 rounded-xl text-sm font-bold border border-slate-200 text-slate-600 hover:bg-slate-50 transition-colors">ยกเลิก</button>
+          <button onclick="window._saveDeptStatConfig()"
+            class="flex-1 px-4 py-2.5 rounded-xl text-sm font-bold text-white"
+            style="background:linear-gradient(135deg,#059669,#0d9488)">บันทึก</button>
+        </div>
+      </div>
+    `, 'max-w-sm');
+};
+
+window._dscSelectAll = function(type, checked) {
+    document.querySelectorAll(type === 'dept' ? '.dept-stat-chk' : '.unit-stat-chk').forEach(el => { el.checked = checked; });
+};
+
+window._deptStatSelectAll = (c) => window._dscSelectAll('dept', c);
+
+window._saveDeptStatConfig = async function() {
+    const deptChecked = [...document.querySelectorAll('.dept-stat-chk:checked')].map(el => el.value);
+    const deptAll     = [...document.querySelectorAll('.dept-stat-chk')].map(el => el.value);
+    const unitChecked = [...document.querySelectorAll('.unit-stat-chk:checked')].map(el => el.value);
+    const unitAll     = [...document.querySelectorAll('.unit-stat-chk')].map(el => el.value);
+
+    closeModal();
+    showToast('กำลังบันทึก...', 'info');
+
+    await Promise.all([
+        _saveDeptStatSelection(deptChecked.length === deptAll.length ? null : deptChecked),
+        _saveUnitStatSelection(unitChecked.length === unitAll.length ? null : unitChecked),
+    ]);
+
+    renderDeptStats();
+    showToast('บันทึกการตั้งค่าสำเร็จ', 'success');
+};
 
 const STOP_TYPES = [
     { key: 'STOP 1', labelTh: 'STOP 1 เครื่องจักร',   labelEn: 'ST1 Caught by Machine' },

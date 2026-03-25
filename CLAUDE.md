@@ -34,7 +34,7 @@ TSH-SAFETY-CORE-APP/
 │       ├── utils/
 │       │   └── normalize.js
 │       └── pages/
-│           ├── admin.js        # System Console (6 tabs — see below)
+│           ├── admin.js        # System Console (7 tabs — see below)
 │           ├── cccf.js
 │           ├── committee.js
 │           ├── employee.js     # legacy — router redirects #employee → #admin/employees tab
@@ -43,6 +43,7 @@ TSH-SAFETY-CORE-APP/
 │           ├── ojt.js
 │           ├── patrol.js
 │           ├── policy.js
+│           ├── profile.js      # Profile slide-over drawer (enterprise)
 │           ├── yokoten.js
 │           ├── accident.js
 │           ├── safety-culture.js
@@ -127,7 +128,9 @@ node server.js      # runs on PORT=5000
 | `/api/patrol/*` | User | Patrol routes |
 | `/api/admin/*` | Admin | Admin routes (employees, schedules, audit, dashboard, health) |
 | `/api/cccf/*` | User | CCCF routes |
-| `/api/master/*` | User (write=Admin) | Master data (departments/teams/roles/positions) |
+| `/api/master/*` | User (write=Admin) | Master data (departments/teams/roles/positions/areas) |
+| `/api/profile` | User | ดูและแก้ไขโปรไฟล์ตัวเอง |
+| `/api/profile/employee-id` | User | เปลี่ยน EmployeeID ตัวเอง |
 | `/api/machine-safety/*` | User | Machine & Device Safety |
 | `/api/ojt/*` | User | Stop-Call-Wait (OJT/SCW) |
 | `/api/yokoten/*` | User | Yokoten CRUD |
@@ -147,10 +150,11 @@ node server.js      # runs on PORT=5000
 | `/api/machine-safety/:id/links` | Admin | Add URL link to machine (no file upload) |
 | `/api/machine-safety/files/:fileId` | Admin | Delete a file record |
 | `/api/upload/document` | Admin | Cloudinary file upload (field name: `document`) |
+| `/api/admin/permissions/matrix` | Admin | GET/PUT permission matrix (role × permission) |
 
 ### Generic CRUD Tables
 ตารางเหล่านี้มี auto-generated CRUD endpoints (GET/POST/PUT/DELETE):
-`Patrol_Sessions`, `Patrol_Attendance`, `Patrol_Issues`, `CCCF_Activity`, `CCCF_Targets`,
+`Patrol_Sessions`, `Patrol_Attendance`, `Patrol_Issues`, `Patrol_Areas`, `CCCF_Activity`, `CCCF_Targets`,
 `ManHours`, `AccidentReports`, `TrainingStatus`, `SCW_Documents`, `OJT_Department_Status`,
 `Machines`, `Documents`, `Document_Machine_Links`, `YokotenTopics`, `YokotenResponses`
 
@@ -180,7 +184,7 @@ Primary key ของ generic CRUD คือ `id` — ยกเว้น `Employ
 
 | Module | Description |
 |--------|-------------|
-| **Patrol** | กำหนดการตรวจ, บันทึกการเข้าร่วม, รายงานปัญหา (รูปภาพ) |
+| **Patrol** | กำหนดการตรวจ, บันทึกการเข้าร่วม, รายงานปัญหา (รูปภาพ), Self-Patrol สำหรับหัวหน้า, Team Rotation, พื้นที่โรงงาน (Patrol_Areas) |
 | **CCCF** | กิจกรรมและเป้าหมาย CCCF |
 | **KPI** | ประกาศ KPI, ข้อมูล KPI รายปี (ม.ค.–ธ.ค.) |
 | **Yokoten** | แบ่งปันบทเรียน/ความรู้ความปลอดภัย, บันทึกการรับทราบ |
@@ -196,7 +200,8 @@ Primary key ของ generic CRUD คือ `id` — ยกเว้น `Employ
 | **KY** | กิจกรรม KY (Kiken Yochi) |
 | **4M Change** | บริหารจัดการการเปลี่ยนแปลง Man/Machine/Material/Method |
 | **Admin (System Console)** | Dashboard, Scheduler, Employee CRUD, Master Data, System Health, Audit Log |
-| **Master** | Departments, Teams, Roles, Positions — admin-managed reference data |
+| **Master** | Departments, Teams, Roles, Positions, Areas (Patrol_Areas) — admin-managed reference data |
+| **Profile** | Slide-over drawer: ดู/แก้ไขโปรไฟล์ตัวเอง, เปลี่ยนรหัสผ่าน, เปลี่ยน EmployeeID |
 
 ## Vercel Deployment
 
@@ -238,22 +243,25 @@ const { UserID, UserName } = req.body;
 
 `req.user` มี fields: `{ id, name, department, role, team }`
 
-## Admin Hub (System Console) — 6 Tabs
+## Admin Hub (System Console) — 7 Tabs
 
-`public/js/pages/admin.js` มี 6 tabs:
+`public/js/pages/admin.js` มี 7 tabs:
 
 | Tab | Key | Description |
 |-----|-----|-------------|
-| Dashboard | `dashboard` | KPI stat cards, dept chart, recent audit feed |
+| ภาพรวม | `dashboard` | KPI stat cards, dept chart, recent audit feed |
 | กำหนดการตรวจ | `scheduler` | Patrol session scheduling (single + bulk by date range/weekday) |
 | ข้อมูลพนักงาน | `employees` | Employee CRUD + bulk Excel import + pagination 25/page |
-| Master Data | `master` | Departments, Teams, Positions, Roles — add/edit/delete |
+| ข้อมูลอ้างอิง | `reference` | Departments, Teams, Positions, Roles, Areas (Patrol_Areas) — add/edit/delete |
+| สิทธิ์การใช้งาน | `permissions` | Permission matrix per role — Admin/User/Viewer |
 | System Health | `health` | Module record counts, stale alert tables |
 | Audit Log | `audit` | Admin action log, filterable by action type |
 
 State: `_currentTab`, `_calInst`, `_empCache`, `_deptCache`, `_teamCache`, `_empSearch`, `_empPage`, `_auditPage`
 
 Navigation: `#employee` hash redirects → `#admin` + auto-switches to employees tab via `window._adminTab?.('employees')`
+
+**Permission Matrix** (`permissions` tab): เรียก `GET /api/admin/permissions/matrix` → ได้ `{ matrix, roles, permissions, roleLabels }` — ใช้ `PUT /api/admin/permissions/matrix` กับ `{ role, permission, granted }` เพื่อ toggle สิทธิ์แต่ละคู่
 
 ### Audit Log Table (SQL — run in DBeaver)
 ```sql
@@ -296,15 +304,17 @@ closeModal();
 
 > **ห้ามใช้ emoji ทุกชนิดใน UI** — ใช้ inline SVG แทนทั้งหมด
 
-ไฟล์อ้างอิง (ห้ามแก้ไข): `committee.js`, `policy.js`, `patrol.js`, `kpi.js`, `cccf.js`
+ไฟล์อ้างอิง (ห้ามแก้ไข): `committee.js`, `policy.js`, `patrol.js`, `kpi.js`, `cccf.js`, `profile.js`
 
 ### Restyle Status
 | File | Status |
 |------|--------|
 | `kpi.js` | done (enterprise) |
 | `machine-safety.js` | done (enterprise) |
+| `patrol.js` | done (enterprise) |
 | `ojt.js` | done |
 | `safety-culture.js` | done |
+| `profile.js` | done (enterprise — slide-over drawer) |
 | `hiyari.js` | pending |
 | `ky.js` | pending |
 | `fourm.js` | pending |

@@ -5,6 +5,7 @@ const router  = express.Router();
 const db      = require('../db');
 const multer  = require('multer');
 const { storage, fileFilter } = require('../cloudinary');
+const { isAdmin } = require('../middleware/auth');
 
 // FIX: was using diskStorage (breaks on Vercel read-only filesystem)
 // Now uses Cloudinary storage. Image URLs are stored in DB instead of local paths.
@@ -834,38 +835,18 @@ function getWednesdaysInMonth(year, month) {
     return result; // [พุธ1, พุธ2, พุธ3, พุธ4]
 }
 
-// GET /api/patrol/attendance-overview?year=Y — ภาพรวมการเข้าร่วมรายบุคคลทั้งปี
+// GET /api/patrol/attendance-overview?year=Y — ภาพรวมการเข้าร่วมรายบุคคลทั้งปี (Patrol_Roster based)
 router.get('/attendance-overview', async (req, res) => {
     const year = parseInt(req.query.year) || new Date().getFullYear();
     try {
-        // 1. สมาชิกทุกคนพร้อม PatrolType และ TeamID หลัก
         const [members] = await db.query(`
-            SELECT tm.EmployeeID, e.EmployeeName AS Name, tm.PatrolType, tm.TeamID
-            FROM Patrol_Team_Members tm
-            JOIN Employees e ON e.EmployeeID = tm.EmployeeID
-            ORDER BY FIELD(tm.PatrolType,'top','committee','management'), e.EmployeeName
+            SELECT pr.id AS RosterID, pr.EmployeeID, pr.TargetPerYear,
+                   e.EmployeeName AS Name, e.Position, e.Department
+            FROM Patrol_Roster pr
+            JOIN Employees e ON e.EmployeeID = pr.EmployeeID
+            WHERE pr.RosterGroup = 'top_management'
+            ORDER BY pr.SortOrder, e.EmployeeName
         `);
-
-        // 2. Sessions ทั้งปี
-        const [sessions] = await db.query(`
-            SELECT id, TeamID, PatrolRound
-            FROM Patrol_Sessions
-            WHERE YEAR(PatrolDate) = ?
-        `, [year]);
-
-        // 3. Monthly overrides (member rotation)
-        const [rotations] = await db.query(`
-            SELECT EmployeeID, TeamID, Month
-            FROM Patrol_Member_Rotation
-            WHERE Year = ?
-        `, [year]);
-        const rotMap = {};
-        rotations.forEach(r => {
-            if (!rotMap[r.EmployeeID]) rotMap[r.EmployeeID] = {};
-            rotMap[r.EmployeeID][r.Month] = r.TeamID;
-        });
-
-        // 4. Attendance counts ทั้งปี
         const [attendance] = await db.query(`
             SELECT UserID, COUNT(*) AS Attended
             FROM Patrol_Attendance
@@ -875,39 +856,19 @@ router.get('/attendance-overview', async (req, res) => {
         const attendMap = {};
         attendance.forEach(a => { attendMap[a.UserID] = parseInt(a.Attended); });
 
-        // 5. Sessions จัดกลุ่มตาม TeamID × Month (สำหรับ rotation-aware count)
-        const [sessWithMonth] = await db.query(`
-            SELECT id, TeamID, PatrolRound, MONTH(PatrolDate) AS Month
-            FROM Patrol_Sessions
-            WHERE YEAR(PatrolDate) = ?
-        `, [year]);
-
-        // คำนวณ required sessions ต่อสมาชิก (คำนึง rotation)
         const result = members.map(m => {
-            let required = 0;
-            for (let mo = 1; mo <= 12; mo++) {
-                const effectiveTeamId = (rotMap[m.EmployeeID]?.[mo]) || m.TeamID;
-                const monthSess = sessWithMonth.filter(s => s.TeamID === effectiveTeamId && s.Month === mo);
-                if (m.PatrolType === 'management') {
-                    required += monthSess.length;
-                } else {
-                    // top / committee — รอบ 2 เท่านั้น
-                    required += monthSess.filter(s => s.PatrolRound === 2).length;
-                }
-            }
             const attended = attendMap[m.EmployeeID] || 0;
-            const percent  = required > 0 ? Math.round((attended / required) * 100) : 0;
-            return { EmployeeID: m.EmployeeID, Name: m.Name, PatrolType: m.PatrolType, Year: year, Total: required, Attended: attended, Percent: percent };
+            const total    = m.TargetPerYear;
+            const percent  = total > 0 ? Math.round((attended / total) * 100) : 0;
+            return { RosterID: m.RosterID, EmployeeID: m.EmployeeID, Name: m.Name, Position: m.Position, Department: m.Department, TargetPerYear: total, Year: year, Total: total, Attended: attended, Percent: percent };
         });
 
-        // Grand totals
         const grandTotal    = result.reduce((s, r) => s + r.Total, 0);
         const grandAttended = result.reduce((s, r) => s + r.Attended, 0);
         const grandPercent  = grandTotal > 0 ? Math.round((grandAttended / grandTotal) * 100) : 0;
 
         const [latest] = await db.query(
-            'SELECT MAX(PatrolDate) AS LatestDate FROM Patrol_Attendance WHERE YEAR(PatrolDate) = ?',
-            [year]
+            'SELECT MAX(PatrolDate) AS LatestDate FROM Patrol_Attendance WHERE YEAR(PatrolDate) = ?', [year]
         );
 
         res.json({
@@ -985,28 +946,107 @@ router.delete('/self-checkin/:id', async (req, res) => {
 });
 
 router.get('/supervisor-overview', async (req, res) => {
-    const { year, month } = req.query;
+    const year = parseInt(req.query.year) || new Date().getFullYear();
     try {
-        const [members] = await db.query(
-            `SELECT e.EmployeeID, e.EmployeeName, e.Department, e.Position
-             FROM Employees e
-             JOIN Master_Positions mp ON mp.Name = e.Position AND mp.IsSupervisorPatrol = 1
-             ORDER BY e.Department, e.EmployeeName`);
+        const [members] = await db.query(`
+            SELECT pr.id AS RosterID, pr.EmployeeID, pr.TargetPerYear,
+                   e.EmployeeName, e.Department, e.Position
+            FROM Patrol_Roster pr
+            JOIN Employees e ON e.EmployeeID = pr.EmployeeID
+            WHERE pr.RosterGroup = 'supervisor'
+            ORDER BY pr.SortOrder, e.Department, e.EmployeeName
+        `);
         const [checkins] = await db.query(
-            `SELECT * FROM Patrol_Self_Checkin WHERE Year = ? AND Month = ?`, [year, month]);
+            `SELECT EmployeeID, COUNT(*) AS Attended FROM Patrol_Self_Checkin WHERE Year = ? GROUP BY EmployeeID`,
+            [year]
+        );
         const checkinMap = {};
-        checkins.forEach(c => {
-            if (!checkinMap[c.EmployeeID]) checkinMap[c.EmployeeID] = [];
-            checkinMap[c.EmployeeID].push(c);
-        });
+        checkins.forEach(c => { checkinMap[c.EmployeeID] = parseInt(c.Attended); });
+
         const data = members.map(m => ({
             ...m,
-            checkins: checkinMap[m.EmployeeID] || [],
-            attended: (checkinMap[m.EmployeeID] || []).length,
-            target: 2,
-            percent: Math.min(Math.round(((checkinMap[m.EmployeeID] || []).length / 2) * 100), 100),
+            attended: checkinMap[m.EmployeeID] || 0,
+            target:   m.TargetPerYear,
+            percent:  m.TargetPerYear > 0 ? Math.min(Math.round(((checkinMap[m.EmployeeID] || 0) / m.TargetPerYear) * 100), 100) : 0,
         }));
         res.json({ success: true, data });
+    } catch (err) {
+        res.status(500).json({ success: false, message: err.message });
+    }
+});
+
+// ==========================================
+// PART 8: Patrol Roster (Admin-managed roster for Top Management & Supervisor overview tables)
+// ==========================================
+// SQL to create table (run once in DBeaver):
+// CREATE TABLE IF NOT EXISTS Patrol_Roster (
+//   id INT AUTO_INCREMENT PRIMARY KEY,
+//   EmployeeID VARCHAR(50) NOT NULL,
+//   RosterGroup ENUM('top_management','supervisor') NOT NULL,
+//   TargetPerYear INT NOT NULL DEFAULT 12,
+//   SortOrder INT DEFAULT 99,
+//   CreatedAt DATETIME DEFAULT CURRENT_TIMESTAMP,
+//   UNIQUE KEY uq_emp_group (EmployeeID, RosterGroup)
+// ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+// GET /api/patrol/roster?group=top_management|supervisor
+router.get('/roster', async (req, res) => {
+    const { group } = req.query;
+    try {
+        const whereClause = group ? 'WHERE pr.RosterGroup = ?' : '';
+        const params      = group ? [group] : [];
+        const [rows] = await db.query(`
+            SELECT pr.id, pr.EmployeeID, pr.RosterGroup, pr.TargetPerYear, pr.SortOrder,
+                   e.EmployeeName, e.Position, e.Department
+            FROM Patrol_Roster pr
+            JOIN Employees e ON e.EmployeeID = pr.EmployeeID
+            ${whereClause}
+            ORDER BY pr.RosterGroup, pr.SortOrder, e.EmployeeName
+        `, params);
+        res.json({ success: true, data: rows });
+    } catch (err) {
+        res.status(500).json({ success: false, message: err.message });
+    }
+});
+
+// POST /api/patrol/roster — Admin only: add employee to roster
+router.post('/roster', isAdmin, async (req, res) => {
+    const { EmployeeID, RosterGroup, TargetPerYear, SortOrder } = req.body;
+    if (!EmployeeID || !RosterGroup) return res.status(400).json({ success: false, message: 'EmployeeID และ RosterGroup จำเป็น' });
+    if (!['top_management', 'supervisor'].includes(RosterGroup))
+        return res.status(400).json({ success: false, message: 'RosterGroup ไม่ถูกต้อง' });
+    try {
+        const [result] = await db.query(
+            `INSERT INTO Patrol_Roster (EmployeeID, RosterGroup, TargetPerYear, SortOrder) VALUES (?,?,?,?)`,
+            [EmployeeID, RosterGroup, TargetPerYear || 12, SortOrder || 99]
+        );
+        res.json({ success: true, id: result.insertId, message: 'เพิ่มสมาชิกสำเร็จ' });
+    } catch (err) {
+        if (err.code === 'ER_DUP_ENTRY') return res.status(409).json({ success: false, message: 'พนักงานนี้มีอยู่ในรายการแล้ว' });
+        res.status(500).json({ success: false, message: err.message });
+    }
+});
+
+// PUT /api/patrol/roster/:id — Admin only: edit TargetPerYear / SortOrder
+router.put('/roster/:id', isAdmin, async (req, res) => {
+    const { TargetPerYear, SortOrder } = req.body;
+    if (!TargetPerYear || TargetPerYear < 1) return res.status(400).json({ success: false, message: 'TargetPerYear ไม่ถูกต้อง' });
+    try {
+        await db.query(
+            `UPDATE Patrol_Roster SET TargetPerYear = ?, SortOrder = ? WHERE id = ?`,
+            [TargetPerYear, SortOrder ?? 99, req.params.id]
+        );
+        res.json({ success: true, message: 'อัปเดตสำเร็จ' });
+    } catch (err) {
+        res.status(500).json({ success: false, message: err.message });
+    }
+});
+
+// DELETE /api/patrol/roster/:id — Admin only: remove from roster
+router.delete('/roster/:id', isAdmin, async (req, res) => {
+    try {
+        await db.query('DELETE FROM Patrol_Roster WHERE id = ?', [req.params.id]);
+        res.json({ success: true, message: 'ลบออกจากรายการสำเร็จ' });
     } catch (err) {
         res.status(500).json({ success: false, message: err.message });
     }
