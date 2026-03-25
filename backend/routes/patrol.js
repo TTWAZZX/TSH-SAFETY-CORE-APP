@@ -7,6 +7,15 @@ const multer  = require('multer');
 const { storage, fileFilter } = require('../cloudinary');
 const { isAdmin } = require('../middleware/auth');
 
+// Auto-migrate: Patrol_Attendance columns + Master_Positions.PatrolPassPct
+(async () => {
+    for (const sql of [
+        'ALTER TABLE Patrol_Attendance ADD COLUMN Notes TEXT DEFAULT NULL',
+        'ALTER TABLE Patrol_Attendance ADD COLUMN Area VARCHAR(200) DEFAULT NULL',
+        'ALTER TABLE Master_Positions ADD COLUMN PatrolPassPct INT DEFAULT 80',
+    ]) { try { await db.query(sql); } catch (_) {} }
+})();
+
 // FIX: was using diskStorage (breaks on Vercel read-only filesystem)
 // Now uses Cloudinary storage. Image URLs are stored in DB instead of local paths.
 const upload = multer({
@@ -103,6 +112,155 @@ router.get('/my-monthly-plan', async (req, res) => {
     }
 });
 
+// GET /api/patrol/my-yearly-stats?year=Y — yearly patrol stats for logged-in user
+router.get('/my-yearly-stats', async (req, res) => {
+    const year       = parseInt(req.query.year) || new Date().getFullYear();
+    const employeeId = req.user.id;
+    try {
+        // 1. Yearly attendance count
+        const [[yearStats]] = await db.query(
+            `SELECT COUNT(*) AS yearlyCount FROM Patrol_Attendance
+             WHERE UserID = ? AND YEAR(PatrolDate) = ?`,
+            [employeeId, year]
+        );
+
+        // 2. Yearly target from Patrol_Roster (either group)
+        const [[rosterRow]] = await db.query(
+            `SELECT TargetPerYear, RosterGroup FROM Patrol_Roster WHERE EmployeeID = ? LIMIT 1`,
+            [employeeId]
+        );
+
+        // 3. Recent check-ins (last 6)
+        const [recentCheckins] = await db.query(
+            `SELECT PatrolDate, PatrolType, Area, Notes FROM Patrol_Attendance
+             WHERE UserID = ?
+             ORDER BY PatrolDate DESC, id DESC LIMIT 6`,
+            [employeeId]
+        );
+
+        // 4. Team rank this year (among team members by yearly attendance)
+        const [[teamBase]] = await db.query(
+            `SELECT tm.TeamID FROM Patrol_Team_Members tm WHERE tm.EmployeeID = ? LIMIT 1`,
+            [employeeId]
+        );
+
+        let teamRank = null;
+        let teamMemberStats = [];
+        if (teamBase) {
+            const [teamMembers] = await db.query(
+                `SELECT tm.EmployeeID, e.Position,
+                        (SELECT COUNT(*) FROM Patrol_Attendance pa
+                         WHERE pa.UserID = tm.EmployeeID AND YEAR(pa.PatrolDate) = ?) AS cnt
+                 FROM Patrol_Team_Members tm
+                 JOIN Employees e ON e.EmployeeID = tm.EmployeeID
+                 WHERE tm.TeamID = ?
+                 ORDER BY cnt DESC`,
+                [year, teamBase.TeamID]
+            );
+            const myIdx = teamMembers.findIndex(m => m.EmployeeID === employeeId);
+            if (myIdx !== -1) {
+                teamRank = { rank: myIdx + 1, total: teamMembers.length };
+            }
+            teamMemberStats = teamMembers.map(m => ({ EmployeeID: m.EmployeeID, position: m.Position, yearlyCount: m.cnt }));
+        }
+
+        // 5. Self-patrol yearly count (supervisor)
+        const [[spYear]] = await db.query(
+            `SELECT COUNT(*) AS spCount FROM Patrol_Self_Checkin WHERE EmployeeID = ? AND Year = ?`,
+            [employeeId, year]
+        );
+
+        // 6. Monthly required count this month (for per-member compliance context)
+        const curMonth = new Date().getMonth() + 1;
+        const [[monthlyRequired]] = await db.query(
+            `SELECT COUNT(*) AS cnt FROM Patrol_Sessions s
+             JOIN Patrol_Team_Members tm ON tm.TeamID = s.TeamID AND tm.EmployeeID = ?
+             WHERE YEAR(s.PatrolDate) = ? AND MONTH(s.PatrolDate) = ? AND s.PatrolRound = 2`,
+            [employeeId, year, curMonth]
+        );
+
+        res.json({
+            success: true,
+            data: {
+                year,
+                yearlyCount:  yearStats.yearlyCount,
+                yearlyTarget: rosterRow?.TargetPerYear || null,
+                recentCheckins,
+                teamRank,
+                teamMemberStats,
+                monthlyRequired: monthlyRequired?.cnt ?? null,
+                selfPatrolYear: { count: spYear.spCount },
+            },
+        });
+    } catch (err) {
+        res.status(500).json({ success: false, message: err.message });
+    }
+});
+
+// GET /api/patrol/position-thresholds — ดึงรายการตำแหน่งพร้อม PatrolPassPct
+router.get('/position-thresholds', async (req, res) => {
+    try {
+        const [rows] = await db.query(
+            'SELECT id, Name, COALESCE(PatrolPassPct, 80) AS PatrolPassPct FROM Master_Positions ORDER BY Name ASC'
+        );
+        res.json({ success: true, data: rows });
+    } catch (err) {
+        res.status(500).json({ success: false, message: err.message });
+    }
+});
+
+// PUT /api/patrol/position-thresholds/:positionId — อัปเดตเกณฑ์ผ่าน (Admin)
+router.put('/position-thresholds/:positionId', isAdmin, async (req, res) => {
+    const pct = parseInt(req.body.PatrolPassPct);
+    if (isNaN(pct) || pct < 0 || pct > 100) {
+        return res.status(400).json({ success: false, message: 'ค่าต้องอยู่ระหว่าง 0–100' });
+    }
+    try {
+        await db.query('UPDATE Master_Positions SET PatrolPassPct = ? WHERE id = ?', [pct, req.params.positionId]);
+        res.json({ success: true, message: 'บันทึกเกณฑ์สำเร็จ' });
+    } catch (err) {
+        res.status(500).json({ success: false, message: err.message });
+    }
+});
+
+// GET /api/patrol/day-detail?date=YYYY-MM-DD — รายละเอียดการเดินตรวจในวันที่ระบุ
+router.get('/day-detail', async (req, res) => {
+    const { date } = req.query;
+    if (!date) return res.status(400).json({ success: false, message: 'กรุณาระบุวันที่' });
+    try {
+        const [sessions] = await db.query(`
+            SELECT s.id, s.PatrolRound, s.Status,
+                   t.id AS TeamID, t.Name AS TeamName, t.Color AS TeamColor,
+                   a.Name AS AreaName, a.Code AS AreaCode,
+                   (SELECT COUNT(*) FROM Patrol_Team_Members WHERE TeamID = s.TeamID) AS MemberCount,
+                   (SELECT COUNT(DISTINCT pa.UserID)
+                    FROM Patrol_Attendance pa
+                    WHERE DATE(pa.PatrolDate) = ? AND pa.TeamName = t.Name) AS AttendedCount
+            FROM Patrol_Sessions s
+            LEFT JOIN Patrol_Teams t ON t.id = s.TeamID
+            LEFT JOIN Patrol_Areas a ON a.id = s.AreaID
+            WHERE DATE(s.PatrolDate) = ?
+            ORDER BY s.PatrolRound ASC, t.Name ASC
+        `, [date, date]);
+
+        const totalExpected = sessions.reduce((sum, s) => sum + (s.MemberCount || 0), 0);
+        const totalAttended = sessions.reduce((sum, s) => sum + (s.AttendedCount || 0), 0);
+
+        res.json({
+            success: true,
+            data: {
+                date,
+                sessions,
+                totalExpected,
+                totalAttended,
+                overallPct: totalExpected > 0 ? Math.round((totalAttended / totalExpected) * 100) : 0,
+            },
+        });
+    } catch (err) {
+        res.status(500).json({ success: false, message: err.message });
+    }
+});
+
 router.get('/my-schedule', async (req, res) => {
     try {
         const { month, year } = req.query;
@@ -123,6 +281,7 @@ router.get('/attendance-stats', async (req, res) => {
             SELECT
                 UserName AS Name,
                 COUNT(*) AS Total,
+                MAX(PatrolDate) AS LastWalk,
                 ROUND(COUNT(*) * 100.0 / NULLIF(
                     (SELECT COUNT(DISTINCT YEARWEEK(PatrolDate)) FROM Patrol_Attendance), 0
                 )) AS Percent
@@ -169,9 +328,11 @@ router.post('/checkin', async (req, res) => {
         const UserName = req.user.name;
         const TeamName = req.user.team || '';
         const currentWeek = getWeekNumber(new Date());
+        const Notes    = req.body.Notes?.trim() || null;
+        const Area     = req.body.Area?.trim()  || null;
         await db.query(
-            'INSERT INTO Patrol_Attendance (UserID, UserName, TeamName, WeekNumber) VALUES (?, ?, ?, ?)',
-            [UserID, UserName, TeamName, currentWeek]
+            'INSERT INTO Patrol_Attendance (UserID, UserName, TeamName, WeekNumber, Notes, Area) VALUES (?, ?, ?, ?, ?, ?)',
+            [UserID, UserName, TeamName, currentWeek, Notes, Area]
         );
 
         const [stats] = await db.query(
