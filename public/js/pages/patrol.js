@@ -3519,6 +3519,9 @@ async function exportIssuesToPDF() {
         return c;
     };
 
+    // A4 dimensions (mm) — declared here so toMM and section logic can use them
+    const pageW = 210, pageH = 297;
+
     // px→mm: at scale:2 canvas.width = 794*2 = 1588px → 210mm
     const toMM = (canvas) => canvas.height * pageW / canvas.width;
 
