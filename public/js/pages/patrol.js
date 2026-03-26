@@ -86,6 +86,8 @@ export async function loadPatrolPage() {
     window.openThresholdSettings = openThresholdSettings;
     window.exportIssuesToExcel = exportIssuesToExcel;
     window.exportIssuesToPDF   = exportIssuesToPDF;
+    window.openSpotlightPickerModal  = openSpotlightPickerModal;
+    window.openSpotlightRecordsModal = openSpotlightRecordsModal;
     window._issueChangeDept = _issueChangeDept;
     window.deleteIssue = deleteIssue;
     window._issueFilterDept = _issueFilterDept;
@@ -108,7 +110,7 @@ export async function loadPatrolPage() {
         const curMonth = now.getMonth() + 1;
         const curYear  = now.getFullYear();
 
-        const [scheduleRes, statsRes, issuesRes, summaryRes, planRes, selfPatrolRes, areasRes, deptsRes, unitsRes, deptSelRes, unitSelRes, areaSelRes, yearlyRes, thresholdsRes] = await Promise.all([
+        const [scheduleRes, statsRes, issuesRes, summaryRes, planRes, selfPatrolRes, areasRes, deptsRes, unitsRes, deptSelRes, unitSelRes, areaSelRes, yearlyRes, thresholdsRes, spotlightRes] = await Promise.all([
             API.get(`/patrol/my-schedule?employeeId=${currentUser.id}&month=${curMonth}&year=${curYear}`),
             API.get('/patrol/attendance-stats'),
             API.get('/patrol/issues'),
@@ -123,6 +125,7 @@ export async function loadPatrolPage() {
             API.get('/settings/patrol_area_stat_selection').catch(() => ({ value: null })),
             API.get(`/patrol/my-yearly-stats?year=${curYear}`).catch(() => ({ data: null })),
             API.get('/patrol/position-thresholds').catch(() => ({ data: [] })),
+            API.get('/settings/patrol_spotlight_mgmt_id').catch(() => ({ value: null })),
         ]);
 
         _allIssues      = normalizeApiArray(issuesRes);
@@ -137,6 +140,7 @@ export async function loadPatrolPage() {
         try { _deptStatSel = deptSelRes.value ? JSON.parse(deptSelRes.value) : null; } catch { _deptStatSel = null; }
         try { _unitStatSel = unitSelRes.value ? JSON.parse(unitSelRes.value) : null; } catch { _unitStatSel = null; }
         try { _areaStatSel = areaSelRes.value ? JSON.parse(areaSelRes.value) : null; } catch { _areaStatSel = null; }
+        _spotlightMgmtId = spotlightRes.value || null;
 
         renderDashboard(container, {
             schedule: normalizeApiArray(scheduleRes),
@@ -382,6 +386,39 @@ function renderDashboard(container, data) {
 
       <!-- ═══ PATROL TAB ═══ -->
       <div id="content-patrol" class="space-y-5 animate-fade-in">
+
+      <!-- Quick Actions (mobile only) -->
+      <div class="md:hidden grid grid-cols-4 gap-2">
+        <button onclick="openCheckInModal()"
+          class="flex flex-col items-center gap-1.5 py-3 px-1 rounded-xl text-center transition-all active:scale-95"
+          style="background:linear-gradient(135deg,#064e3b,#065f46)">
+          <svg class="w-5 h-5 text-emerald-300" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z"/></svg>
+          <span class="text-[10px] font-bold text-white leading-tight">เช็คอิน</span>
+        </button>
+        ${_mySelfPatrol?.isSupervisorPatrol ? `
+        <button onclick="openSelfCheckinModal()"
+          class="flex flex-col items-center gap-1.5 py-3 px-1 rounded-xl text-center transition-all active:scale-95"
+          style="background:linear-gradient(135deg,#78350f,#92400e)">
+          <svg class="w-5 h-5 text-amber-300" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 11a3 3 0 11-6 0 3 3 0 016 0z"/></svg>
+          <span class="text-[10px] font-bold text-white leading-tight">Self-Patrol</span>
+        </button>` : `
+        <button onclick="switchTab('overview')"
+          class="flex flex-col items-center gap-1.5 py-3 px-1 rounded-xl text-center bg-white border border-slate-100 transition-all active:scale-95">
+          <svg class="w-5 h-5 text-indigo-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0z"/></svg>
+          <span class="text-[10px] font-bold text-slate-500 leading-tight">ภาพรวม</span>
+        </button>`}
+        <button onclick="openIssueForm()"
+          class="flex flex-col items-center gap-1.5 py-3 px-1 rounded-xl text-center bg-white border border-slate-100 transition-all active:scale-95">
+          <svg class="w-5 h-5 text-red-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/></svg>
+          <span class="text-[10px] font-bold text-slate-500 leading-tight">รายงาน</span>
+        </button>
+        <button onclick="switchTab('issues')"
+          class="flex flex-col items-center gap-1.5 py-3 px-1 rounded-xl text-center bg-white border border-slate-100 transition-all active:scale-95">
+          <svg class="w-5 h-5 text-amber-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-3 7h3m-3 4h3m-6-4h.01M9 16h.01"/></svg>
+          <span class="text-[10px] font-bold text-slate-500 leading-tight">ปัญหา</span>
+        </button>
+      </div>
+
       <div class="grid grid-cols-1 xl:grid-cols-3 gap-5">
         <div class="xl:col-span-2 space-y-5">
 
@@ -525,6 +562,173 @@ function renderDashboard(container, data) {
             <div class="grid grid-cols-7 gap-1 text-center">${generateMiniCalendarHTML(data.schedule)}</div>
           </div>
 
+          <!-- C: Next Patrol Callout -->
+          ${nextSess ? (() => {
+            const nd = new Date(nextSess.PatrolDate);
+            const ndStr = nd.toLocaleDateString('th-TH', { weekday:'long', day:'numeric', month:'long' });
+            const area  = nextSess.AreaCode || nextSess.AreaName || 'Factory Area';
+            const urgentCls = nextDaysLeft <= 3 ? 'border-amber-200 bg-amber-50' : 'border-emerald-100 bg-emerald-50/40';
+            const urgentDot = nextDaysLeft <= 3 ? 'bg-amber-400 animate-pulse' : 'bg-emerald-400 animate-pulse';
+            const urgentText= nextDaysLeft <= 3 ? 'text-amber-700' : 'text-emerald-700';
+            return `
+          <div class="flex items-center gap-3 px-4 py-3 rounded-xl border ${urgentCls}">
+            <div class="w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0" style="background:linear-gradient(135deg,#059669,#0d9488)">
+              <svg class="w-5 h-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"/></svg>
+            </div>
+            <div class="flex-1 min-w-0">
+              <p class="text-xs font-bold text-slate-700">เดินตรวจครั้งถัดไป</p>
+              <p class="text-[11px] text-slate-500 truncate">${ndStr} · ${area} · รอบ ${nextSess.PatrolRound || '—'}</p>
+            </div>
+            <div class="text-right flex-shrink-0">
+              <p class="text-lg font-bold ${urgentText}">${nextDaysLeft}</p>
+              <p class="text-[10px] text-slate-400 -mt-0.5">วัน</p>
+            </div>
+            <span class="w-2 h-2 rounded-full flex-shrink-0 ${urgentDot}"></span>
+          </div>`;
+          })() : ''}
+
+          <!-- A: Month Dot Tracker -->
+          ${_myYearlyStats?.monthlyBreakdown ? (() => {
+            const curM = new Date().getMonth() + 1;
+            const curY = new Date().getFullYear();
+            const bd   = _myYearlyStats.monthlyBreakdown;
+            const monthNames = ['ม.ค','ก.พ','มี.ค','เม.ย','พ.ค','มิ.ย','ก.ค','ส.ค','ก.ย','ต.ค','พ.ย','ธ.ค'];
+            const maxDots = 4; // max dots to show per month
+            return `
+          <div class="bg-white rounded-xl border border-slate-100 shadow-sm p-4">
+            <div class="flex items-center justify-between mb-3">
+              <h3 class="text-xs font-bold text-slate-700 flex items-center gap-2">
+                <div class="w-5 h-5 rounded-lg flex items-center justify-center" style="background:#ecfdf5">
+                  <svg class="w-3.5 h-3.5 text-emerald-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"/></svg>
+                </div>
+                กิจกรรมตลอดปี ${_myYearlyStats.year || curY}
+              </h3>
+              <div class="flex items-center gap-3 text-[9px] text-slate-400">
+                <span class="flex items-center gap-1"><span class="w-2 h-2 rounded-full bg-emerald-400 inline-block"></span>เข้าร่วม</span>
+                <span class="flex items-center gap-1"><span class="w-2 h-2 rounded-full bg-slate-200 inline-block"></span>พลาด</span>
+              </div>
+            </div>
+            <div class="grid grid-cols-6 sm:grid-cols-12 gap-1.5">
+              ${bd.map(m => {
+                const isFuture = _myYearlyStats.year === curY && m.month > curM;
+                const isCurrent = _myYearlyStats.year === curY && m.month === curM;
+                const dotCount  = Math.min(m.attended, maxDots);
+                const missCount = isFuture ? 0 : Math.min(Math.max((m.scheduled || 0) - m.attended, 0), maxDots - dotCount);
+                const dots = Array(dotCount).fill('<span class="w-2 h-2 rounded-full bg-emerald-400 inline-block flex-shrink-0"></span>').join('')
+                           + Array(missCount).fill('<span class="w-2 h-2 rounded-full bg-slate-200 inline-block flex-shrink-0"></span>').join('');
+                const hasActivity = m.attended > 0 || (m.scheduled > 0 && !isFuture);
+                const cellBg = isCurrent ? 'ring-2 ring-emerald-400 ring-offset-1' : '';
+                return `<div class="flex flex-col items-center gap-1 p-1.5 rounded-lg ${isFuture ? 'opacity-35' : hasActivity ? 'bg-emerald-50/60' : 'bg-slate-50'} ${cellBg}" title="${monthNames[m.month-1]}: เข้าร่วม ${m.attended} ครั้ง${m.scheduled ? ' / กำหนด ' + m.scheduled + ' ครั้ง' : ''}">
+                  <span class="text-[9px] font-bold ${isCurrent ? 'text-emerald-600' : 'text-slate-400'}">${monthNames[m.month-1]}</span>
+                  <div class="flex flex-wrap gap-0.5 justify-center min-h-[12px]">
+                    ${dots || (isFuture ? '' : '<span class="w-2 h-2 rounded-full bg-slate-100 inline-block"></span>')}
+                  </div>
+                  <span class="text-[9px] font-bold ${m.attended > 0 ? 'text-emerald-600' : isFuture ? 'text-slate-300' : 'text-slate-300'}">${isFuture ? '' : m.attended || '0'}</span>
+                </div>`;
+              }).join('')}
+            </div>
+          </div>`;
+          })() : ''}
+
+          <!-- Monthly Session Tracker -->
+          ${(() => {
+            const sessions       = _myPlan?.sessions || [];
+            const required       = _myPlan?.required || [];
+            const reqIds         = new Set(required.map(r => r.id));
+            const attendedDates  = new Set(_myPlan?.attendanceDates || []);
+            const today          = new Date();
+            const todayStr       = today.toDateString();
+            const monthLabel     = today.toLocaleDateString('th-TH', { month: 'long', year: 'numeric' });
+            const attended       = _myPlan?.compliance?.attended ?? 0;
+            const total          = _myPlan?.compliance?.required ?? 0;
+            const pct            = total > 0 ? Math.min(Math.round((attended / total) * 100), 100) : 0;
+            const barColor       = pct >= 100 ? '#10b981' : pct >= 60 ? '#f59e0b' : '#f43f5e';
+            if (!sessions.length) return `
+          <div class="bg-white rounded-xl border border-slate-100 shadow-sm p-5">
+            <div class="flex items-center gap-2 mb-3">
+              <div class="w-6 h-6 rounded-lg flex items-center justify-center" style="background:#ecfdf5">
+                <svg class="w-3.5 h-3.5 text-emerald-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"/></svg>
+              </div>
+              <h3 class="text-xs font-bold text-slate-700">เซสชันเดือนนี้ · ${monthLabel}</h3>
+            </div>
+            <div class="text-center py-6 text-slate-300">
+              <svg class="w-8 h-8 mx-auto mb-2 opacity-40" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"/></svg>
+              <p class="text-xs font-medium text-slate-400">ยังไม่มีตารางงานเดือนนี้</p>
+            </div>
+          </div>`;
+            return `
+          <div class="bg-white rounded-xl border border-slate-100 shadow-sm overflow-hidden">
+            <!-- Header -->
+            <div class="px-4 py-3 border-b border-slate-50 flex items-center justify-between">
+              <h3 class="text-xs font-bold text-slate-700 flex items-center gap-2">
+                <div class="w-6 h-6 rounded-lg flex items-center justify-center flex-shrink-0" style="background:#ecfdf5">
+                  <svg class="w-3.5 h-3.5 text-emerald-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"/></svg>
+                </div>
+                เซสชันเดือนนี้ · ${monthLabel}
+              </h3>
+              <span class="text-[10px] font-bold px-2 py-0.5 rounded-full ${pct >= 100 ? 'bg-emerald-100 text-emerald-700' : pct >= 60 ? 'bg-amber-100 text-amber-700' : 'bg-red-100 text-red-600'}">${attended}/${total} รอบ</span>
+            </div>
+            <!-- Progress bar -->
+            <div class="px-4 pt-2.5 pb-1">
+              <div class="w-full h-1.5 rounded-full bg-slate-100 overflow-hidden">
+                <div class="h-full rounded-full transition-all duration-700" style="width:${pct}%;background:${barColor}"></div>
+              </div>
+            </div>
+            <!-- Session list -->
+            <div class="divide-y divide-slate-50 px-1 pb-1">
+              ${sessions.map(s => {
+                const d        = new Date(s.PatrolDate);
+                const dateKey  = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+                const dStr     = d.toLocaleDateString('th-TH', { weekday:'short', day:'numeric', month:'short' });
+                const isToday  = d.toDateString() === todayStr;
+                const isPast   = d < today && !isToday;
+                const isReq    = reqIds.has(s.id);
+                const area     = s.AreaCode || s.AreaName || 'Factory Area';
+                const didAttend = attendedDates.has(dateKey);
+
+                let iconHtml, badgeHtml, rowCls;
+                if (isToday) {
+                    iconHtml  = `<div class="w-7 h-7 rounded-lg flex items-center justify-center flex-shrink-0" style="background:linear-gradient(135deg,#059669,#0d9488)">
+                      <svg class="w-3.5 h-3.5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+                    </div>`;
+                    badgeHtml = didAttend
+                        ? `<span class="text-[9px] font-bold px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-700">เช็คอินแล้ว</span>`
+                        : `<span class="text-[9px] font-bold px-2 py-0.5 rounded-full bg-emerald-500 text-white animate-pulse">วันนี้</span>`;
+                    rowCls    = 'bg-emerald-50/50';
+                } else if (didAttend) {
+                    iconHtml  = `<div class="w-7 h-7 rounded-full flex items-center justify-center flex-shrink-0 bg-emerald-100">
+                      <svg class="w-3.5 h-3.5 text-emerald-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"/></svg>
+                    </div>`;
+                    badgeHtml = `<span class="text-[9px] font-bold px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-700">เข้าร่วมแล้ว</span>`;
+                    rowCls    = '';
+                } else if (isPast) {
+                    iconHtml  = `<div class="w-7 h-7 rounded-full flex items-center justify-center flex-shrink-0 bg-red-50">
+                      <svg class="w-3.5 h-3.5 text-red-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
+                    </div>`;
+                    badgeHtml = isReq
+                        ? `<span class="text-[9px] font-bold px-2 py-0.5 rounded-full bg-red-100 text-red-600">ขาด</span>`
+                        : `<span class="text-[9px] font-bold px-2 py-0.5 rounded-full bg-slate-100 text-slate-400">ไม่บังคับ</span>`;
+                    rowCls    = isReq ? 'opacity-80' : 'opacity-45';
+                } else {
+                    iconHtml  = `<div class="w-7 h-7 rounded-lg flex items-center justify-center flex-shrink-0 bg-slate-50 border border-dashed border-slate-200">
+                      <svg class="w-3.5 h-3.5 text-slate-300" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"/></svg>
+                    </div>`;
+                    badgeHtml = `<span class="text-[9px] text-slate-300 font-medium">กำลังมา</span>`;
+                    rowCls    = 'opacity-55';
+                }
+                return `<div class="flex items-center gap-3 px-3 py-2.5 rounded-lg transition-colors ${rowCls}">
+                  ${iconHtml}
+                  <div class="flex-1 min-w-0">
+                    <p class="text-xs font-semibold text-slate-700 truncate">${dStr}</p>
+                    <p class="text-[10px] text-slate-400 truncate">${area}${s.PatrolRound ? ' · รอบ ' + s.PatrolRound : ''}${!isReq ? ' · <span class="text-slate-300">ไม่บังคับ</span>' : ''}</p>
+                  </div>
+                  ${badgeHtml}
+                </div>`;
+              }).join('')}
+            </div>
+          </div>`;
+          })()}
+
           <!-- Self-Patrol Card (หัวหน้าส่วน/แผนก) — conditional -->
           ${_mySelfPatrol?.isSupervisorPatrol ? (() => {
             const sp        = _mySelfPatrol;
@@ -600,7 +804,7 @@ function renderDashboard(container, data) {
 
         <div class="xl:col-span-1 space-y-5">
 
-          <!-- Performance Card -->
+          <!-- Performance Card — Compliance Ring (B+D) -->
           <div class="bg-white rounded-2xl shadow-sm border border-slate-100 p-5 overflow-hidden relative">
             <div class="absolute -right-4 -bottom-4 w-24 h-24 rounded-full opacity-5" style="background:${rank.color}"></div>
             <div class="flex items-center justify-between mb-4">
@@ -611,54 +815,66 @@ function renderDashboard(container, data) {
               <span class="text-[10px] font-bold px-2 py-1 rounded-full" style="background:${rank.bg};color:${rank.color}">${rank.title}</span>
             </div>
 
-            <!-- Yearly Progress (Phase 3) -->
-            ${_myYearlyStats ? (() => {
-              const yc  = _myYearlyStats.yearlyCount;
-              const yt  = _myYearlyStats.yearlyTarget;
+            <!-- Compliance Ring + Team Avg (B+D) -->
+            ${(() => {
+              const yc   = _myYearlyStats?.yearlyCount ?? walks;
+              const yt   = _myYearlyStats?.yearlyTarget ?? null;
               const yPct = yt ? Math.min(Math.round((yc / yt) * 100), 100) : null;
               const yDone = yt ? yc >= yt : false;
-              const tr = _myYearlyStats.teamRank;
+              const tr   = _myYearlyStats?.teamRank;
+              const circ = 2 * Math.PI * 42;
+              const offset = yPct !== null ? circ * (1 - yPct / 100) : circ;
+              const ringColor = yDone ? '#10b981' : yPct !== null && yPct >= 75 ? '#10b981' : yPct !== null && yPct >= 50 ? '#f59e0b' : yPct !== null ? '#f43f5e' : '#e2e8f0';
+              let statusLabel, statusDotCls, statusTextCls;
+              if (yPct === null)      { statusLabel = 'ยังไม่มีเป้าหมาย'; statusDotCls = 'bg-slate-300'; statusTextCls = 'bg-slate-100 text-slate-500'; }
+              else if (yDone)         { statusLabel = 'ครบเป้าหมาย';       statusDotCls = 'bg-emerald-400 animate-pulse'; statusTextCls = 'bg-emerald-100 text-emerald-700'; }
+              else if (yPct >= 75)   { statusLabel = 'On Track';           statusDotCls = 'bg-emerald-400 animate-pulse'; statusTextCls = 'bg-emerald-100 text-emerald-700'; }
+              else if (yPct >= 50)   { statusLabel = 'At Risk';            statusDotCls = 'bg-amber-400'; statusTextCls = 'bg-amber-100 text-amber-700'; }
+              else                    { statusLabel = 'Behind';             statusDotCls = 'bg-red-400'; statusTextCls = 'bg-red-100 text-red-700'; }
+
+              // D: Team average
+              const teamStats = _myYearlyStats?.teamMemberStats || [];
+              let avgHtml = '';
+              if (teamStats.length > 1 && yt && yPct !== null) {
+                const sumCnt = teamStats.reduce((s, m) => s + (parseInt(m.yearlyCount) || 0), 0);
+                const avgPct = Math.round((sumCnt / teamStats.length / yt) * 100);
+                const diff   = yPct - avgPct;
+                const diffStr   = diff >= 0 ? `+${diff}%` : `${diff}%`;
+                const diffColor = diff >= 0 ? '#10b981' : '#f43f5e';
+                avgHtml = `<p class="text-[10px] text-slate-400 text-center mt-1.5">เฉลี่ยทีม ${avgPct}% · <span class="font-bold" style="color:${diffColor}">${diffStr}</span> จากค่าเฉลี่ย</p>`;
+              }
+              if (tr) {
+                avgHtml += `<p class="text-[10px] text-slate-400 text-center mt-0.5">อันดับ <span class="font-bold text-indigo-600">#${tr.rank}</span> จาก ${tr.total} คนในทีม</p>`;
+              }
+
               return `
-              <div class="rounded-xl border border-emerald-100 p-3 mb-4" style="background:linear-gradient(135deg,#f0fdf4,#ecfdf5)">
-                <div class="flex items-center justify-between mb-1.5">
-                  <span class="text-[10px] font-bold text-emerald-700">ความก้าวหน้ารายปี</span>
-                  <div class="flex items-center gap-2">
-                    ${tr ? `<span class="text-[10px] font-bold text-slate-500">อันดับ #${tr.rank}/${tr.total} ในทีม</span>` : ''}
-                    <span class="text-[10px] font-bold ${yDone ? 'text-emerald-600' : 'text-amber-600'}">${yc}${yt ? `/${yt}` : ''} ครั้ง</span>
+              <div class="flex flex-col items-center mb-4">
+                <!-- SVG Ring -->
+                <div class="relative w-32 h-32">
+                  <svg viewBox="0 0 100 100" class="w-full h-full -rotate-90">
+                    <circle cx="50" cy="50" r="42" fill="none" stroke="#f1f5f9" stroke-width="9"/>
+                    <circle cx="50" cy="50" r="42" fill="none" stroke="${ringColor}" stroke-width="9"
+                      stroke-dasharray="${circ.toFixed(1)}" stroke-dashoffset="${offset.toFixed(1)}"
+                      stroke-linecap="round" style="transition:stroke-dashoffset 0.8s ease"/>
+                  </svg>
+                  <div class="absolute inset-0 flex flex-col items-center justify-center">
+                    <p class="text-2xl font-bold" style="color:${ringColor}">${yPct !== null ? yPct + '%' : walks}</p>
+                    <p class="text-[9px] text-slate-400 mt-0.5">${yt ? yc + '/' + yt + ' ครั้ง' : yPct === null ? 'ครั้งรวม' : ''}</p>
                   </div>
                 </div>
-                ${yt ? `
-                <div class="w-full bg-white/70 rounded-full h-2.5 overflow-hidden border border-emerald-100">
-                  <div class="h-full rounded-full transition-all duration-700" style="width:${yPct}%;background:${yDone ? 'linear-gradient(90deg,#059669,#10b981)' : 'linear-gradient(90deg,#f59e0b,#fbbf24)'}"></div>
-                </div>
-                <p class="text-[9px] text-emerald-500/70 mt-1">${yDone ? 'ครบเป้าหมายแล้ว' : `เหลือ ${yt - yc} ครั้งจะครบเป้า`}</p>
-                ` : `<p class="text-[9px] text-slate-400 mt-0.5">ยังไม่มีเป้าหมายรายปี</p>`}
+                <!-- Status badge -->
+                <span class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold mt-2 ${statusTextCls}">
+                  <span class="w-1.5 h-1.5 rounded-full inline-block flex-shrink-0 ${statusDotCls}"></span>
+                  ${statusLabel}
+                </span>
+                ${avgHtml}
               </div>`;
-            })() : ''}
+            })()}
 
-            <!-- Tier Progress -->
-            <div class="space-y-2 mb-4">
-              ${rankTiers.map((tier) => {
-                const isCurrentTier = walks >= tier.min && walks <= tier.max;
-                const isDoneTier = walks > tier.max;
-                return `<div class="flex items-center gap-3">
-                  <div class="w-2 h-2 rounded-full flex-shrink-0 ${isDoneTier ? 'bg-emerald-500' : isCurrentTier ? 'bg-amber-400' : 'bg-slate-200'}"></div>
-                  <div class="flex-1">
-                    <div class="flex justify-between items-center mb-0.5">
-                      <span class="text-[10px] font-bold ${isCurrentTier ? 'text-slate-700' : 'text-slate-400'}">${tier.title}</span>
-                      <span class="text-[10px] text-slate-400">${tier.min}${tier.needed ? `–${tier.needed-1}` : '+'} ครั้ง</span>
-                    </div>
-                    <div class="w-full bg-slate-100 rounded-full h-1.5 overflow-hidden">
-                      <div class="h-full rounded-full transition-all duration-700" style="width:${isDoneTier ? 100 : isCurrentTier ? rankPct : 0}%;background:${isDoneTier ? '#10b981' : isCurrentTier ? rank.color : '#e2e8f0'}"></div>
-                    </div>
-                  </div>
-                </div>`;
-              }).join('')}
-            </div>
-
+            <!-- Footer stats -->
             <div class="bg-slate-50 rounded-xl p-3 border border-slate-100 flex items-center justify-between">
               <div>
-                <p class="text-[10px] text-slate-400 font-medium">การเดินตรวจทั้งหมด</p>
+                <p class="text-[10px] text-slate-400 font-medium">เดินตรวจรวม</p>
                 <p class="text-xl font-bold" style="color:${rank.color}">${walks} <span class="text-xs font-normal text-slate-400">ครั้ง</span></p>
               </div>
               <div class="text-right">
@@ -837,15 +1053,16 @@ function renderDashboard(container, data) {
           </div>`;
           })()}
 
-          <div class="hidden"><!-- placeholder --></div>
-            ${rank.needed ? `<p class="text-[10px] text-slate-400 mt-2 text-center">อีก <strong class="text-slate-600">${Math.max(0, rank.needed - walks)}</strong> ครั้ง จะขึ้นเป็น ${rank.nextLabel}</p>` : `<p class="text-[10px] text-emerald-600 font-bold mt-2 text-center">ระดับสูงสุดแล้ว</p>`}
-          </div>
-
         </div><!-- /sidebar -->
       </div><!-- /grid -->
 
       <!-- Safety Tips Carousel — full width -->
-      <div id="promo-carousel" class="relative overflow-hidden rounded-2xl shadow-md bg-slate-900 group" style="height:260px">
+      <div class="flex items-center gap-2 mt-1 mb-2">
+        <div class="flex-1 h-px bg-slate-100"></div>
+        <span class="text-[10px] font-bold text-slate-400 uppercase tracking-wider px-2">Safety Knowledge</span>
+        <div class="flex-1 h-px bg-slate-100"></div>
+      </div>
+      <div id="promo-carousel" class="relative overflow-hidden rounded-2xl shadow-md bg-slate-900 group" style="height:200px">
         <div id="carousel-slides" class="relative w-full h-full">
           ${SAFETY_IMAGES.map((img, idx) => `
           <div class="carousel-item absolute inset-0 pointer-events-none transition-opacity duration-700 opacity-0 z-0" data-index="${idx}">
@@ -943,6 +1160,9 @@ function renderDashboard(container, data) {
               เพิ่มสมาชิก
             </button>` : ''}
           </div>
+
+          <!-- Spotlight Card -->
+          <div id="spotlight-mgmt-wrap"></div>
 
           <!-- 2-col grid -->
           <div class="grid grid-cols-1 xl:grid-cols-3 gap-5">
@@ -2510,6 +2730,9 @@ async function loadOverview(year) {
         // Table
         renderOverviewTable(_overviewData.members);
 
+        // Spotlight card
+        renderSpotlightCard();
+
         // Pie chart
         renderOverviewChart(s.percent);
 
@@ -2634,6 +2857,214 @@ function switchOverviewYear(year) {
 window.filterOverviewTable = function() {
     if (_overviewData) renderOverviewTable(_overviewData.members);
 };
+
+// ─── Spotlight Card (Top & Management) ────────────────────────────────────────
+function renderSpotlightCard() {
+    const wrap = document.getElementById('spotlight-mgmt-wrap');
+    if (!wrap) return;
+
+    // ถ้ายังไม่เลือก spotlight
+    if (!_spotlightMgmtId) {
+        wrap.innerHTML = isAdmin
+            ? `<div class="flex items-center gap-3 p-4 rounded-xl border border-dashed border-slate-200 bg-slate-50 text-slate-400 text-xs">
+                <svg class="w-5 h-5 flex-shrink-0 opacity-50" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5.121 17.804A13.937 13.937 0 0112 16c2.5 0 4.847.655 6.879 1.804M15 10a3 3 0 11-6 0 3 3 0 016 0z"/></svg>
+                <span>ยังไม่ได้เลือกบุคคลสำหรับ Spotlight</span>
+                <button onclick="window.openSpotlightPickerModal()"
+                  class="ml-auto flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold text-white flex-shrink-0"
+                  style="background:linear-gradient(135deg,#059669,#0d9488)">
+                  <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/></svg>
+                  เลือกบุคคล
+                </button>
+              </div>`
+            : '';
+        return;
+    }
+
+    const members = _overviewData?.members || [];
+    const m = members.find(x => x.EmployeeID === _spotlightMgmtId);
+    if (!m) {
+        wrap.innerHTML = '';
+        return;
+    }
+
+    const pct    = m.Percent || 0;
+    const barPct = Math.min(pct, 100);
+    const barColor = pct >= 75 ? '#10b981' : pct >= 60 ? '#f59e0b' : '#f43f5e';
+    const initial  = (m.Name || '?').charAt(0);
+
+    let statusBadge = '';
+    if (pct >= 80)      statusBadge = `<span class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold bg-emerald-100 text-emerald-700"><span class="w-1.5 h-1.5 rounded-full bg-emerald-400 inline-block animate-pulse"></span>On Track</span>`;
+    else if (pct >= 60) statusBadge = `<span class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold bg-amber-100 text-amber-700"><span class="w-1.5 h-1.5 rounded-full bg-amber-400 inline-block"></span>At Risk</span>`;
+    else                statusBadge = `<span class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold bg-red-100 text-red-700"><span class="w-1.5 h-1.5 rounded-full bg-red-400 inline-block"></span>Behind</span>`;
+
+    const empIdSafe  = (m.EmployeeID || '').replace(/'/g, "\\'");
+    const nameSafe   = (m.Name       || '').replace(/'/g, "\\'");
+
+    wrap.innerHTML = `
+      <div class="bg-white rounded-2xl border border-slate-100 shadow-sm px-5 py-4">
+        <div class="flex items-start gap-4">
+          <!-- Avatar -->
+          <div class="w-12 h-12 rounded-xl flex items-center justify-center text-white font-bold text-lg flex-shrink-0"
+               style="background:linear-gradient(135deg,#059669,#0d9488)">${initial}</div>
+
+          <!-- Info -->
+          <div class="flex-1 min-w-0">
+            <div class="flex items-center gap-2 flex-wrap">
+              <span class="font-bold text-slate-800 text-sm">${m.Name}</span>
+              ${statusBadge}
+            </div>
+            <p class="text-xs text-slate-400 mt-0.5">${m.Position || '—'} · ${m.Department || '—'}</p>
+            <!-- Progress bar -->
+            <div class="mt-3 flex items-center gap-3">
+              <div class="flex-1 h-2 rounded-full bg-slate-100 overflow-hidden">
+                <div class="h-full rounded-full transition-all duration-500"
+                     style="width:${barPct}%;background:${barColor}"></div>
+              </div>
+              <span class="text-xs font-bold text-slate-600 flex-shrink-0">${m.Attended} / ${m.Total} ครั้ง</span>
+              <span class="text-xs font-bold flex-shrink-0" style="color:${barColor}">${pct}%</span>
+            </div>
+          </div>
+
+          <!-- Action buttons -->
+          <div class="flex items-center gap-2 flex-shrink-0 self-center">
+            ${isAdmin ? `
+            <button onclick="window.openSpotlightPickerModal()"
+              class="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold text-slate-600 bg-slate-100 hover:bg-slate-200 transition-colors" title="เปลี่ยนบุคคล">
+              <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065zM15 12a3 3 0 11-6 0 3 3 0 016 0z"/></svg>
+              เปลี่ยน
+            </button>` : ''}
+            <button onclick="window.openSpotlightRecordsModal('${empIdSafe}','${nameSafe}',${_overviewYear})"
+              class="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold text-white transition-colors"
+              style="background:linear-gradient(135deg,#059669,#0d9488)">
+              <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"/></svg>
+              ดูรายการ
+            </button>
+          </div>
+        </div>
+      </div>`;
+}
+
+async function openSpotlightPickerModal() {
+    const members = _overviewData?.members || [];
+    if (!members.length) { showToast('ยังไม่มีสมาชิกในรายการ Top & Management', 'warning'); return; }
+
+    const opts = members.map(m => `
+      <label class="flex items-center gap-3 p-3 rounded-xl border cursor-pointer transition-all hover:border-emerald-300 ${m.EmployeeID === _spotlightMgmtId ? 'border-emerald-400 bg-emerald-50' : 'border-slate-100'}">
+        <input type="radio" name="spotlight-pick" value="${m.EmployeeID}" class="accent-emerald-500" ${m.EmployeeID === _spotlightMgmtId ? 'checked' : ''}>
+        <div class="w-8 h-8 rounded-lg flex items-center justify-center text-white text-sm font-bold flex-shrink-0"
+             style="background:linear-gradient(135deg,#059669,#0d9488)">${(m.Name||'?').charAt(0)}</div>
+        <div class="flex-1 min-w-0">
+          <p class="font-semibold text-slate-800 text-sm truncate">${m.Name}</p>
+          <p class="text-xs text-slate-400 truncate">${m.Position||'—'} · ${m.Department||'—'}</p>
+        </div>
+        <span class="text-xs font-bold ${m.Percent>=75?'text-emerald-600':m.Percent>=60?'text-amber-500':'text-red-500'}">${m.Percent}%</span>
+      </label>`).join('');
+
+    openModal('เลือกบุคคลสำหรับ Spotlight', `
+      <div class="space-y-3">
+        <p class="text-xs text-slate-500">เลือก 1 คนจากสมาชิก Top & Management เพื่อแสดงสรุปด้านบน</p>
+        <div class="space-y-2 max-h-72 overflow-y-auto pr-1">${opts}</div>
+        <div class="flex gap-2 pt-2 border-t border-slate-100">
+          <button onclick="window.closeModal&&window.closeModal()"
+            class="flex-1 px-4 py-2.5 rounded-xl text-sm font-bold border border-slate-200 text-slate-600 hover:bg-slate-50 transition-colors">
+            ยกเลิก
+          </button>
+          <button onclick="window._confirmSpotlightPick()"
+            class="flex-1 px-4 py-2.5 rounded-xl text-sm font-bold text-white"
+            style="background:linear-gradient(135deg,#059669,#0d9488)">
+            บันทึก
+          </button>
+        </div>
+      </div>`, 'max-w-sm');
+}
+
+window._confirmSpotlightPick = async function() {
+    const picked = document.querySelector('input[name="spotlight-pick"]:checked')?.value;
+    if (!picked) { showToast('กรุณาเลือกบุคคล', 'warning'); return; }
+    try {
+        await API.put('/settings/patrol_spotlight_mgmt_id', { value: picked });
+        _spotlightMgmtId = picked;
+        closeModal();
+        renderSpotlightCard();
+        showToast('บันทึกการตั้งค่า Spotlight สำเร็จ', 'success');
+    } catch (err) {
+        showToast(err.message || 'บันทึกไม่สำเร็จ', 'error');
+    }
+};
+
+async function openSpotlightRecordsModal(employeeId, name, year) {
+    openModal(`รายการเดินตรวจ — ${name}`, `
+      <div class="flex flex-col items-center justify-center py-8 text-slate-400">
+        <div class="animate-spin rounded-full h-8 w-8 border-4 border-emerald-500 border-t-transparent mb-3"></div>
+        <span class="text-xs">กำลังโหลด...</span>
+      </div>`, 'max-w-lg');
+
+    try {
+        const res = await API.get(`/patrol/member-attendance?employeeId=${encodeURIComponent(employeeId)}&year=${year}`);
+        const records = res.data || [];
+
+        const listHtml = records.length
+            ? records.map((r, i) => {
+                const d = new Date(r.PatrolDate);
+                const dateStr = d.toLocaleDateString('th-TH', { day: 'numeric', month: 'long', year: 'numeric' });
+                return `<div class="flex items-center gap-3 py-2.5 ${i > 0 ? 'border-t border-slate-50' : ''}">
+                  <div class="w-7 h-7 rounded-lg flex items-center justify-center bg-emerald-50 flex-shrink-0 text-xs font-bold text-emerald-600">${i+1}</div>
+                  <div class="flex-1 min-w-0">
+                    <p class="text-sm font-semibold text-slate-800">${dateStr}</p>
+                    ${r.Area ? `<p class="text-xs text-slate-400 truncate">${r.Area}</p>` : ''}
+                    ${r.Notes ? `<p class="text-xs text-slate-400 truncate">${r.Notes}</p>` : ''}
+                  </div>
+                  <span class="text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-700 flex-shrink-0">เข้าร่วม</span>
+                </div>`;
+              }).join('')
+            : `<div class="text-center py-10 text-slate-400">
+                <div class="w-12 h-12 rounded-2xl bg-slate-100 flex items-center justify-center mx-auto mb-3">
+                  <svg class="w-6 h-6 opacity-30" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2"/></svg>
+                </div>
+                <p class="text-xs font-medium">ยังไม่มีรายการเดินตรวจในปี ${year}</p>
+              </div>`;
+
+        // Find member data for header
+        const members = _overviewData?.members || [];
+        const m = members.find(x => x.EmployeeID === employeeId);
+        const pct = m?.Percent || 0;
+        const barColor = pct >= 75 ? '#10b981' : pct >= 60 ? '#f59e0b' : '#f43f5e';
+
+        const headerHtml = m ? `
+          <div class="flex items-center gap-3 p-3 rounded-xl mb-4" style="background:linear-gradient(135deg,#f0fdf4,#ecfdf5)">
+            <div class="w-9 h-9 rounded-xl flex items-center justify-center text-white font-bold flex-shrink-0"
+                 style="background:linear-gradient(135deg,#059669,#0d9488)">${(m.Name||'?').charAt(0)}</div>
+            <div class="flex-1 min-w-0">
+              <p class="text-xs text-slate-500">${m.Position||'—'} · ${m.Department||'—'}</p>
+              <div class="flex items-center gap-2 mt-1">
+                <div class="flex-1 h-1.5 rounded-full bg-white/70 overflow-hidden">
+                  <div class="h-full rounded-full" style="width:${Math.min(pct,100)}%;background:${barColor}"></div>
+                </div>
+                <span class="text-xs font-bold" style="color:${barColor}">${m.Attended}/${m.Total} ครั้ง (${pct}%)</span>
+              </div>
+            </div>
+          </div>` : '';
+
+        const modalBody = document.getElementById('modal-body');
+        if (modalBody) {
+            modalBody.innerHTML = `
+              <div>
+                ${headerHtml}
+                <p class="text-xs font-bold text-slate-500 uppercase mb-2">รายการทั้งหมด ปี ${year} (${records.length} ครั้ง)</p>
+                <div class="max-h-72 overflow-y-auto pr-1">${listHtml}</div>
+                <div class="pt-3 border-t border-slate-100 mt-3">
+                  <button onclick="window.closeModal&&window.closeModal()"
+                    class="w-full px-4 py-2.5 rounded-xl text-sm font-bold bg-slate-100 hover:bg-slate-200 text-slate-600 transition-colors">
+                    ปิด
+                  </button>
+                </div>
+              </div>`;
+        }
+    } catch (err) {
+        showToast(err.message || 'โหลดข้อมูลไม่สำเร็จ', 'error');
+        closeModal();
+    }
+}
 
 // ─── Supervisor Overview ───────────────────────────────────────────────────────
 async function loadSupervisorOverview(year) {
