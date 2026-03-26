@@ -19,6 +19,21 @@ const isAdmin = !!(
     (currentUser.Role && currentUser.Role.toLowerCase() === 'admin')
 );
 
+// ─── CCCF Static Data (Rank & Stop Types) ────────────────────────────────────
+const CCCF_RANKS = [
+    { rank: 'A', label: 'Rank A', desc: 'เสียชีวิต, พิการ, สูญเสียอวัยวะ', detail: 'ระยะเวลา 7 วัน',   color: '#dc2626', bg: '#fef2f2', border: '#fecaca' },
+    { rank: 'B', label: 'Rank B', desc: 'บาดเจ็บหยุดงาน',                  detail: 'ระยะเวลา 15 วัน',  color: '#ea580c', bg: '#fff7ed', border: '#fed7aa' },
+    { rank: 'C', label: 'Rank C', desc: 'บาดเจ็บเล็กน้อย ไม่หยุดงาน',     detail: 'ระยะเวลา 30 วัน',  color: '#16a34a', bg: '#f0fdf4', border: '#bbf7d0' },
+];
+const CCCF_STOP_TYPES = [
+    { id: 1, code: 'Stop 1', label: 'อันตรายจากเครื่องจักร',         color: '#ef4444', bg: '#fef2f2', border: '#fecaca', icon: 'M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z M15 12a3 3 0 11-6 0 3 3 0 016 0z' },
+    { id: 2, code: 'Stop 2', label: 'อันตรายจากวัตถุหนักตกใส่',      color: '#f97316', bg: '#fff7ed', border: '#fed7aa', icon: 'M19 14l-7 7m0 0l-7-7m7 7V3' },
+    { id: 3, code: 'Stop 3', label: 'อันตรายจากยานพาหนะ',             color: '#eab308', bg: '#fefce8', border: '#fef08a', icon: 'M8 17h8m-4-4v4M12 3L4 9v12h16V9l-8-6z' },
+    { id: 4, code: 'Stop 4', label: 'อันตรายจากการตกจากที่สูง',       color: '#8b5cf6', bg: '#f5f3ff', border: '#ddd6fe', icon: 'M13 17h8m0 0V9m0 8l-8-8-4 4-6-6' },
+    { id: 5, code: 'Stop 5', label: 'อันตรายจากไฟฟ้า',                color: '#3b82f6', bg: '#eff6ff', border: '#bfdbfe', icon: 'M13 10V3L4 14h7v7l9-11h-7z' },
+    { id: 6, code: 'Stop 6', label: 'อันตรายอื่นๆ',                   color: '#6b7280', bg: '#f9fafb', border: '#e5e7eb', icon: 'M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z' },
+];
+
 // ─── Static Data ──────────────────────────────────────────────────────────────
 const SAFETY_IMAGES = [
     { id: 'A', src: 'https://lh3.googleusercontent.com/d/1TE2fjDinq-4lZ9HbKQI4mucsNbiwiDzO', title: 'A - Actuator (เครื่องจักร)', desc: 'ระวังอันตรายจากจุดหนีบ บด หรือส่วนหมุนของเครื่องจักร', tips: ['ตรวจสอบการ์ด (Guard) ครอบจุดหมุนเสมอ', 'ทำ LOTO (Lockout-Tagout) ก่อนซ่อมบำรุง', 'ห้ามสวมเครื่องประดับหรือเสื้อผ้าหลวม'] },
@@ -49,6 +64,10 @@ let _myYearlyStats       = null;  // yearly patrol stats for personal dashboard 
 let _positionThresholds  = [];    // position pass thresholds (PatrolPassPct) for compliance indicators
 let _overviewYear   = new Date().getFullYear();
 let _overviewData   = null;  // attendance overview cache
+let _filterRank     = '';    // active Rank filter on issues tab (A/B/C or '')
+let _filterStop     = 0;     // active Stop filter on issues tab (1-6 or 0)
+let _filterArea     = '';    // active Area filter on issues tab
+let _areaStatSel    = null;  // admin-saved area stat selection (from DB)
 
 // ─── Main Load ────────────────────────────────────────────────────────────────
 export async function loadPatrolPage() {
@@ -65,9 +84,20 @@ export async function loadPatrolPage() {
     window.savePositionThreshold = savePositionThreshold;
     window.openThresholdSettings = openThresholdSettings;
     window.exportIssuesToExcel = exportIssuesToExcel;
+    window.exportIssuesToPDF   = exportIssuesToPDF;
     window._issueChangeDept = _issueChangeDept;
     window.deleteIssue = deleteIssue;
     window._issueFilterDept = _issueFilterDept;
+    window._issueFilterRank    = (rank)   => { _filterRank = (_filterRank === rank) ? '' : rank; _filterStop = 0; _applyIssueTableFilter(); };
+    window._issueFilterStop    = (stopId) => { _filterStop = (_filterStop === stopId) ? 0 : stopId; _filterRank = ''; _applyIssueTableFilter(); };
+    window._issueClearRankStop = ()       => { _filterRank = ''; _filterStop = 0; _applyIssueTableFilter(); };
+    window._issueUnitFilter    = (v)      => { _filterUnit = v; _applyIssueTableFilter(); };
+    window._issueFilterArea    = (area)   => {
+        _filterArea = (_filterArea === area) ? '' : area;
+        _applyIssueTableFilter();
+        renderAreaStats();
+        if (_filterArea) document.getElementById('dashboard-section-body')?.closest('.bg-white')?.scrollIntoView({ behavior:'smooth', block:'nearest' });
+    };
 
     const container = document.getElementById('patrol-page');
     container.innerHTML = getSkeletonHTML();
@@ -77,7 +107,7 @@ export async function loadPatrolPage() {
         const curMonth = now.getMonth() + 1;
         const curYear  = now.getFullYear();
 
-        const [scheduleRes, statsRes, issuesRes, summaryRes, planRes, selfPatrolRes, areasRes, deptsRes, unitsRes, deptSelRes, unitSelRes, yearlyRes, thresholdsRes] = await Promise.all([
+        const [scheduleRes, statsRes, issuesRes, summaryRes, planRes, selfPatrolRes, areasRes, deptsRes, unitsRes, deptSelRes, unitSelRes, areaSelRes, yearlyRes, thresholdsRes] = await Promise.all([
             API.get(`/patrol/my-schedule?employeeId=${currentUser.id}&month=${curMonth}&year=${curYear}`),
             API.get('/patrol/attendance-stats'),
             API.get('/patrol/issues'),
@@ -89,6 +119,7 @@ export async function loadPatrolPage() {
             API.get('/master/safety-units').catch(() => ({ data: [] })),
             API.get('/settings/patrol_dept_stat_selection').catch(() => ({ value: null })),
             API.get('/settings/patrol_unit_stat_selection').catch(() => ({ value: null })),
+            API.get('/settings/patrol_area_stat_selection').catch(() => ({ value: null })),
             API.get(`/patrol/my-yearly-stats?year=${curYear}`).catch(() => ({ data: null })),
             API.get('/patrol/position-thresholds').catch(() => ({ data: [] })),
         ]);
@@ -104,6 +135,7 @@ export async function loadPatrolPage() {
         _positionThresholds  = thresholdsRes.data || [];
         try { _deptStatSel = deptSelRes.value ? JSON.parse(deptSelRes.value) : null; } catch { _deptStatSel = null; }
         try { _unitStatSel = unitSelRes.value ? JSON.parse(unitSelRes.value) : null; } catch { _unitStatSel = null; }
+        try { _areaStatSel = areaSelRes.value ? JSON.parse(areaSelRes.value) : null; } catch { _areaStatSel = null; }
 
         renderDashboard(container, {
             schedule: normalizeApiArray(scheduleRes),
@@ -231,7 +263,7 @@ function renderDashboard(container, data) {
         // Update hero stats per tab
         if (tab === 'patrol')   renderStatsStrip(_personalStats);
         else if (tab === 'overview') renderStatsStrip(getOverviewHeroStats());
-        else if (tab === 'issues')   renderStatsStrip(_issueStats);
+        else if (tab === 'issues') { renderStatsStrip(_issueStats); renderAreaStats(); renderRankStopSummary(); }
         // FAB: show only on issues tab
         const fab = document.getElementById('issue-fab');
         if (fab) fab.classList.toggle('hidden', tab !== 'issues');
@@ -1140,16 +1172,29 @@ function renderDashboard(container, data) {
         <!-- Charts row 1 — Area + Dept stats -->
         <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
           <div class="bg-white rounded-xl shadow-sm border border-slate-100 p-5 flex flex-col" style="min-height:220px">
-            <h3 class="font-bold text-slate-700 text-sm mb-3">สถิติแยกพื้นที่</h3>
+            <div class="flex items-center justify-between mb-1">
+              <h3 class="font-bold text-slate-700 text-sm">สถิติแยกพื้นที่</h3>
+              <div class="flex items-center gap-1.5">
+                <span id="area-stat-filter-badge" class="hidden items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 text-emerald-700 cursor-pointer hover:bg-emerald-200 transition-colors" onclick="window._issueFilterArea('');">
+                  <span id="area-stat-filter-label"></span>
+                  <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M6 18L18 6M6 6l12 12"/></svg>
+                </span>
+                ${isAdmin ? `<button onclick="window.openAreaStatConfig()" title="ตั้งค่าพื้นที่ที่แสดง" class="p-1.5 rounded-lg hover:bg-slate-100 text-slate-400 hover:text-slate-600 transition-colors">
+                  <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"/><circle cx="12" cy="12" r="3"/></svg>
+                </button>` : ''}
+              </div>
+            </div>
+            <p class="text-[10px] text-slate-400 mb-2.5">คลิกแถวเพื่อกรองทะเบียนปัญหา</p>
             <div class="flex-1 overflow-y-auto custom-scrollbar">
               <table class="w-full text-xs text-left">
                 <thead><tr class="border-b border-slate-100">
                   <th class="pb-2 font-bold text-slate-400 text-[10px] uppercase">พื้นที่</th>
+                  <th class="pb-2 font-bold text-slate-500 text-[10px] uppercase text-center">พบ</th>
                   <th class="pb-2 font-bold text-emerald-600 text-[10px] uppercase text-center">เสร็จ</th>
                   <th class="pb-2 font-bold text-orange-500 text-[10px] uppercase text-center">รอ</th>
                 </tr></thead>
                 <tbody id="dashboard-section-body">
-                  <tr><td colspan="3" class="text-center py-4 text-slate-300 text-xs">กำลังโหลด...</td></tr>
+                  <tr><td colspan="4" class="text-center py-4 text-slate-300 text-xs">กำลังโหลด...</td></tr>
                 </tbody>
               </table>
             </div>
@@ -1159,7 +1204,7 @@ function renderDashboard(container, data) {
             <div class="flex items-center justify-between mb-1">
               <h3 class="font-bold text-slate-700 text-sm">สถิติแยกส่วนงานรับผิดชอบ</h3>
               <div class="flex items-center gap-1.5">
-                <span id="dept-stat-filter-badge" class="hidden items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-indigo-100 text-indigo-700 cursor-pointer hover:bg-indigo-200 transition-colors" onclick="window._issueFilterDept('');window._issueFilterUnit('');">
+                <span id="dept-stat-filter-badge" class="hidden items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-indigo-100 text-indigo-700 cursor-pointer hover:bg-indigo-200 transition-colors" onclick="window._issueFilterDept('');window._issueUnitFilter('');window._issueClearRankStop();">
                   <span id="dept-stat-filter-label"></span>
                   <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M6 18L18 6M6 6l12 12"/></svg>
                 </span>
@@ -1187,47 +1232,36 @@ function renderDashboard(container, data) {
           </div>
         </div>
 
-        <!-- Charts row 2 — STOP×Rank table + Rank pie -->
-        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-
-          <!-- STOP × Rank matrix table -->
-          <div class="bg-white rounded-xl shadow-sm border border-slate-100 overflow-hidden">
-            <div class="px-5 py-3.5 border-b border-slate-100 flex items-center justify-between" style="background:linear-gradient(135deg,#064e3b08,#065f4608)">
-              <h3 class="font-bold text-slate-700 text-sm">ชนิดอันตราย (STOP) × ระดับความเร่งด่วน</h3>
-              <div class="flex items-center gap-3 text-[10px] font-bold">
-                <span class="text-red-500">Rank A</span>
-                <span class="text-orange-400">Rank B</span>
-                <span class="text-emerald-600">Rank C</span>
-              </div>
-            </div>
-            <div class="overflow-x-auto">
-              <table class="w-full text-xs text-left">
-                <thead>
-                  <tr class="border-b border-slate-100 bg-slate-50">
-                    <th class="px-4 py-2.5 font-bold text-slate-500 text-[10px] uppercase">ชนิดอันตราย</th>
-                    <th class="px-4 py-2.5 font-bold text-red-500 text-[10px] uppercase text-center">Rank A</th>
-                    <th class="px-4 py-2.5 font-bold text-orange-400 text-[10px] uppercase text-center">Rank B</th>
-                    <th class="px-4 py-2.5 font-bold text-emerald-600 text-[10px] uppercase text-center">Rank C</th>
-                    <th class="px-4 py-2.5 font-bold text-slate-500 text-[10px] uppercase text-center">รวม</th>
-                  </tr>
-                </thead>
-                <tbody id="stop-rank-tbody">
-                  <tr><td colspan="5" class="text-center py-6 text-slate-300 text-xs">กำลังโหลด...</td></tr>
-                </tbody>
-              </table>
+        <!-- Charts row 2 — STOP×Rank matrix (full width) -->
+        <div class="bg-white rounded-xl shadow-sm border border-slate-100 overflow-hidden">
+          <div class="px-5 py-3.5 border-b border-slate-100 flex items-center justify-between" style="background:linear-gradient(135deg,#064e3b08,#065f4608)">
+            <h3 class="font-bold text-slate-700 text-sm">ชนิดอันตราย (STOP) × ระดับความเร่งด่วน</h3>
+            <div class="flex items-center gap-3 text-[10px] font-bold">
+              <span class="flex items-center gap-1"><span class="w-2 h-2 rounded-full bg-red-500 inline-block"></span>Rank A</span>
+              <span class="flex items-center gap-1"><span class="w-2 h-2 rounded-full bg-orange-400 inline-block"></span>Rank B</span>
+              <span class="flex items-center gap-1"><span class="w-2 h-2 rounded-full bg-emerald-500 inline-block"></span>Rank C</span>
             </div>
           </div>
-
-          <!-- Rank pie chart -->
-          <div class="bg-white rounded-xl shadow-sm border border-slate-100 p-5 flex flex-col" style="min-height:280px">
-            <h3 class="font-bold text-slate-700 text-sm mb-1">ระดับความเร่งด่วน (Rank)</h3>
-            <p class="text-[10px] text-slate-400 mb-3">สัดส่วนปัญหาแยกตาม Rank</p>
-            <div class="flex-1 relative flex items-center justify-center" style="min-height:200px">
-              <canvas id="rankPieChart"></canvas>
-            </div>
-            <div id="rank-pie-legend" class="flex items-center justify-center gap-5 mt-3 text-[11px] font-semibold"></div>
+          <div class="overflow-x-auto">
+            <table class="w-full text-xs text-left">
+              <thead>
+                <tr class="border-b border-slate-100 bg-slate-50">
+                  <th class="px-4 py-2.5 font-bold text-slate-500 text-[10px] uppercase">ชนิดอันตราย</th>
+                  <th class="px-4 py-2.5 font-bold text-red-500 text-[10px] uppercase text-center">Rank A</th>
+                  <th class="px-4 py-2.5 font-bold text-orange-400 text-[10px] uppercase text-center">Rank B</th>
+                  <th class="px-4 py-2.5 font-bold text-emerald-600 text-[10px] uppercase text-center">Rank C</th>
+                  <th class="px-4 py-2.5 font-bold text-slate-500 text-[10px] uppercase text-center">รวม</th>
+                </tr>
+              </thead>
+              <tbody id="stop-rank-tbody">
+                <tr><td colspan="5" class="text-center py-6 text-slate-300 text-xs">กำลังโหลด...</td></tr>
+              </tbody>
+            </table>
           </div>
         </div>
+
+        <!-- Rank & Stop Summary (Patrol Issues) -->
+        <div id="patrol-rank-stop-summary"></div>
 
         <!-- Issue Register -->
         <div class="bg-white rounded-2xl shadow-sm border border-slate-100 overflow-hidden">
@@ -1238,6 +1272,10 @@ function renderDashboard(container, data) {
                 <span id="issue-count-badge" class="text-[10px] bg-slate-100 border border-slate-200 px-2 py-0.5 rounded text-slate-400 font-mono">ทั้งหมด ${total}</span>
               </div>
               <div class="flex items-center gap-2">
+                <button onclick="window.exportIssuesToPDF()" class="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold border border-red-200 text-red-700 bg-red-50 hover:bg-red-100 transition-all">
+                  <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 21h10a2 2 0 002-2V9.414a1 1 0 00-.293-.707l-5.414-5.414A1 1 0 0012.586 3H7a2 2 0 00-2 2v14a2 2 0 002 2z"/></svg>
+                  PDF
+                </button>
                 <button onclick="exportIssuesToExcel()" class="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold border border-emerald-200 text-emerald-700 bg-emerald-50 hover:bg-emerald-100 transition-all">
                   <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/></svg>
                   Excel
@@ -1260,7 +1298,7 @@ function renderDashboard(container, data) {
                 <option value="">ทุกส่วนงาน</option>
                 ${_masterDepts.map(d => `<option value="${d.Name}" ${_filterDept === d.Name ? 'selected' : ''}>${d.Name}</option>`).join('')}
               </select>
-              <select id="issue-unit-filter" onchange="_filterUnit=this.value;applyIssueFilter()"
+              <select id="issue-unit-filter" onchange="window._issueUnitFilter(this.value)"
                 class="px-3 py-2 rounded-xl border border-slate-200 text-xs text-slate-600 bg-slate-50 focus:outline-none focus:border-sky-400 focus:ring-2 focus:ring-sky-100 transition-all min-w-[130px] ${_filterDept ? '' : 'opacity-50'}">
                 <option value="">ทุก Unit</option>
                 ${(_filterDept ? _masterUnits.filter(u => {
@@ -1391,6 +1429,38 @@ function _issueFilterDept(deptName) {
     }
 }
 
+// ─── Rank / Stop filter (from summary cards) ──────────────────────────────────
+function _applyIssueTableFilter() {
+    const filtered = getFilteredIssues(_allIssues, _activeFilter);
+    const tbody = document.getElementById('issue-table-body');
+    const badge = document.getElementById('issue-count-badge');
+    if (tbody) tbody.innerHTML = renderIssueRows(filtered);
+    if (badge) badge.textContent = `${filtered.length} / ${_allIssues.length}`;
+    renderAreaStats();
+    renderDeptStats();
+    renderRankStopSummary();
+}
+
+window._issueFilterRank = function(rank) {
+    _filterRank = (_filterRank === rank) ? '' : rank;
+    _filterStop = 0;
+    _applyIssueTableFilter();
+    document.getElementById('patrol-rank-stop-summary')?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+};
+
+window._issueFilterStop = function(stopId) {
+    _filterStop = (_filterStop === stopId) ? 0 : stopId;
+    _filterRank = '';
+    _applyIssueTableFilter();
+    document.getElementById('patrol-rank-stop-summary')?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+};
+
+window._issueClearRankStop = function() {
+    _filterRank = '';
+    _filterStop = 0;
+    _applyIssueTableFilter();
+};
+
 // Click on unit row in stats table → filter issues by that unit
 window._issueFilterUnit = function(unitName) {
     // Clear dept filter, set unit filter
@@ -1442,6 +1512,21 @@ function getFilteredIssues(issues, filter) {
     // Unit filter
     if (_filterUnit) {
         result = result.filter(i => (i.ResponsibleUnit || '') === _filterUnit);
+    }
+    // Area filter (from area stats table)
+    if (_filterArea) {
+        result = result.filter(i => (i.Area || '') === _filterArea);
+    }
+    // Rank filter (from Rank/Stop summary cards)
+    if (_filterRank) {
+        result = result.filter(i => i.Rank === _filterRank);
+    }
+    // Stop filter (from Rank/Stop summary cards)
+    if (_filterStop) {
+        result = result.filter(i => {
+            const m = (i.HazardType || '').match(/STOP\s*(\d)/i);
+            return m && parseInt(m[1]) === _filterStop;
+        });
     }
     // Text search
     if (_searchQuery) {
@@ -3001,10 +3086,424 @@ async function deleteIssue(issueId) {
         if (badge) badge.textContent = `${filtered.length} / ${_allIssues.length}`;
         renderDeptStats();
         renderStopRankStats();
-        renderRankPieChart();
+        renderRankStopSummary();
     } catch (err) {
         showError(err.message || 'ลบไม่สำเร็จ');
     } finally {
+        hideLoading();
+    }
+}
+
+// ─── Export to PDF (A4 formal report) ────────────────────────────────────────
+async function exportIssuesToPDF() {
+    if (!window.jspdf || !window.html2canvas) { showToast('ไม่พบ jsPDF หรือ html2canvas', 'error'); return; }
+
+    const filtered = getFilteredIssues(_allIssues, _activeFilter);
+    const now      = new Date();
+    const pad      = n => String(n).padStart(2, '0');
+    const dateStr  = now.toLocaleDateString('th-TH', { day: 'numeric', month: 'long', year: 'numeric' });
+    const timeStr  = now.toLocaleTimeString('th-TH', { hour: '2-digit', minute: '2-digit' });
+    const docNo    = `SP-${now.getFullYear()}-${pad(now.getMonth()+1)}${pad(now.getDate())}-${pad(now.getHours())}${pad(now.getMinutes())}`;
+
+    // ── Step 1: Summary counts ──────────────────────────────────────────────
+    const counts = { open: 0, temp: 0, closed: 0 };
+    const byRank = { A: 0, B: 0, C: 0 };
+    const byStop = { 1:0, 2:0, 3:0, 4:0, 5:0, 6:0 };
+    const matrix = {}; // matrix[stopId][rank] = count
+    CCCF_STOP_TYPES.forEach(s => { matrix[s.id] = { A:0, B:0, C:0 }; });
+
+    filtered.forEach(i => {
+        if (i.CurrentStatus === 'Open')      counts.open++;
+        else if (i.CurrentStatus === 'Temporary') counts.temp++;
+        else if (i.CurrentStatus === 'Closed')    counts.closed++;
+        if (byRank[i.Rank] !== undefined) byRank[i.Rank]++;
+        const m = (i.HazardType || '').match(/STOP\s*(\d)/i);
+        if (m) {
+            const n = parseInt(m[1]);
+            if (byStop[n] !== undefined) byStop[n]++;
+            if (matrix[n] && i.Rank && matrix[n][i.Rank] !== undefined) matrix[n][i.Rank]++;
+        }
+    });
+
+    const closePct = filtered.length ? Math.round((counts.closed / filtered.length) * 100) : 0;
+
+    // ── Step 2: Date range ──────────────────────────────────────────────────
+    const dates = filtered.map(i => i.DateFound).filter(Boolean).map(d => new Date(d)).filter(d => !isNaN(d));
+    const minDate = dates.length ? new Date(Math.min(...dates)) : null;
+    const maxDate = dates.length ? new Date(Math.max(...dates)) : null;
+    const fmtDate = d => d ? d.toLocaleDateString('th-TH', { day: 'numeric', month: 'short', year: 'numeric' }) : '—';
+    const dateRange = minDate && maxDate
+        ? (minDate.toDateString() === maxDate.toDateString() ? fmtDate(minDate) : `${fmtDate(minDate)} – ${fmtDate(maxDate)}`)
+        : '—';
+
+    // ── Step 3: Filter label ────────────────────────────────────────────────
+    const fParts = [];
+    if (_activeFilter !== 'all') fParts.push({ open:'รอแก้ไข', temp:'แก้ชั่วคราว', closed:'เสร็จสิ้น', high:'Rank A', overdue:'เกินกำหนด' }[_activeFilter] || '');
+    if (_filterDept)  fParts.push(`ส่วนงาน: ${_filterDept}`);
+    if (_filterUnit)  fParts.push(`Unit: ${_filterUnit}`);
+    if (_filterArea)  fParts.push(`พื้นที่: ${_filterArea}`);
+    if (_filterRank)  fParts.push(`Rank ${_filterRank}`);
+    if (_filterStop)  fParts.push(`Stop ${_filterStop}`);
+    if (_searchQuery) fParts.push(`ค้นหา: "${_searchQuery}"`);
+    const filterLabel = fParts.length ? fParts.join(' · ') : 'แสดงทั้งหมด';
+
+    // ── Step 4: Helper fns ──────────────────────────────────────────────────
+    const sColor = s => s === 'Closed' ? '#059669' : s === 'Temporary' ? '#f97316' : '#dc2626';
+    const sLabel = s => s === 'Closed' ? 'เสร็จสิ้น' : s === 'Temporary' ? 'แก้ชั่วคราว' : 'รอแก้ไข';
+    const rColor = r => r === 'A' ? '#dc2626' : r === 'B' ? '#f97316' : '#059669';
+    const K      = `font-family:'Kanit',sans-serif;`;
+
+    // ── Step 5: Area breakdown ──────────────────────────────────────────────
+    const areaMap = {};
+    filtered.forEach(i => {
+        const a = i.Area || 'ไม่ระบุ';
+        if (!areaMap[a]) areaMap[a] = { found:0, closed:0 };
+        areaMap[a].found++;
+        if (i.CurrentStatus === 'Closed') areaMap[a].closed++;
+    });
+    const areaRows = Object.entries(areaMap).sort((a,b) => b[1].found - a[1].found).map(([name, r], idx) => {
+        const pct = r.found ? Math.round((r.closed/r.found)*100) : 0;
+        return `<tr style="background:${idx%2?'#f8fafc':'#fff'}; border-bottom:1px solid #f1f5f9;">
+          <td style="padding:5px 8px; font-size:10px; ${K} color:#1e293b;">${name}</td>
+          <td style="padding:5px 8px; text-align:center; font-size:10px; font-weight:700; ${K} color:#475569;">${r.found}</td>
+          <td style="padding:5px 8px; text-align:center; font-size:10px; font-weight:700; ${K} color:#059669;">${r.closed}</td>
+          <td style="padding:5px 8px; text-align:center; font-size:10px; font-weight:700; ${K} color:${r.found-r.closed>0?'#f97316':'#cbd5e1'};">${r.found-r.closed}</td>
+          <td style="padding:5px 8px; text-align:center; font-size:10px; font-weight:700; ${K} color:${pct>=80?'#059669':pct>=50?'#f97316':'#dc2626'};">${r.found?pct+'%':'—'}</td>
+        </tr>`;
+    }).join('');
+
+    // ── Step 6: Dept breakdown ──────────────────────────────────────────────
+    const deptMap = {};
+    filtered.forEach(i => {
+        const raw = i.ResponsibleDept || 'ไม่ระบุ';
+        let depts = [];
+        try { depts = raw.startsWith('[') ? JSON.parse(raw) : [raw]; } catch { depts = [raw]; }
+        depts.forEach(d => {
+            if (!deptMap[d]) deptMap[d] = { found:0, closed:0 };
+            deptMap[d].found++;
+            if (i.CurrentStatus === 'Closed') deptMap[d].closed++;
+        });
+    });
+    const deptRows = Object.entries(deptMap).sort((a,b) => b[1].found - a[1].found).map(([name, r], idx) => {
+        const pct = r.found ? Math.round((r.closed/r.found)*100) : 0;
+        return `<tr style="background:${idx%2?'#f8fafc':'#fff'}; border-bottom:1px solid #f1f5f9;">
+          <td style="padding:5px 8px; font-size:10px; ${K} color:#1e293b;">${name}</td>
+          <td style="padding:5px 8px; text-align:center; font-size:10px; font-weight:700; ${K} color:#475569;">${r.found}</td>
+          <td style="padding:5px 8px; text-align:center; font-size:10px; font-weight:700; ${K} color:#059669;">${r.closed}</td>
+          <td style="padding:5px 8px; text-align:center; font-size:10px; font-weight:700; ${K} color:${r.found-r.closed>0?'#f97316':'#cbd5e1'};">${r.found-r.closed}</td>
+          <td style="padding:5px 8px; text-align:center; font-size:10px; font-weight:700; ${K} color:${pct>=80?'#059669':pct>=50?'#f97316':'#dc2626'};">${r.found?pct+'%':'—'}</td>
+        </tr>`;
+    }).join('');
+
+    // ── Step 7: Issue table rows ────────────────────────────────────────────
+    const tableRows = filtered.map((i, idx) => {
+        const date = i.DateFound ? new Date(i.DateFound).toLocaleDateString('th-TH', { day:'numeric', month:'short', year:'2-digit' }) : '—';
+        const due  = i.DueDate   ? new Date(i.DueDate ).toLocaleDateString('th-TH', { day:'numeric', month:'short', year:'2-digit' }) : '—';
+        const isOverdue = i.CurrentStatus !== 'Closed' && i.DueDate && new Date(i.DueDate) < now;
+        const desc = (i.HazardDescription || '').slice(0, 80) + ((i.HazardDescription||'').length > 80 ? '…' : '');
+        const sc = sColor(i.CurrentStatus), rc = rColor(i.Rank);
+        return `<tr style="background:${idx%2?'#f8fafc':'#fff'}; border-bottom:1px solid #f1f5f9;">
+          <td style="padding:6px 8px; font-size:10px; color:#94a3b8; ${K} width:32px; text-align:center;">${i.IssueID||idx+1}</td>
+          <td style="padding:6px 8px; font-size:10px; color:#475569; ${K} width:70px; white-space:nowrap;">${date}</td>
+          <td style="padding:6px 8px; font-size:10px; color:#475569; ${K} width:78px;">${i.Area||'—'}</td>
+          <td style="padding:6px 8px; font-size:10px; color:#475569; ${K} width:88px;">${i.ResponsibleDept||'—'}</td>
+          <td style="padding:6px 8px; font-size:10.5px; color:#1e293b; ${K}">${desc||'—'}</td>
+          <td style="padding:6px 8px; text-align:center; width:40px;">
+            ${i.Rank?`<span style="background:${rc};color:#fff;font-size:10px;font-weight:700;padding:2px 6px;border-radius:6px;${K}">${i.Rank}</span>`:`<span style="color:#cbd5e1;font-size:10px;${K}">—</span>`}
+          </td>
+          <td style="padding:6px 8px; text-align:center; width:74px;">
+            <span style="background:${sc}18;color:${sc};font-size:10px;font-weight:700;padding:2px 8px;border-radius:99px;white-space:nowrap;${K}">${sLabel(i.CurrentStatus)}</span>
+          </td>
+          <td style="padding:6px 8px; font-size:10px; text-align:center; width:58px; color:${isOverdue?'#dc2626':'#475569'}; font-weight:${isOverdue?700:400}; ${K} white-space:nowrap;">${due}</td>
+        </tr>`;
+    }).join('');
+
+    // ── Step 8: Photo cards (issues with images) ────────────────────────────
+    const withPhotos = filtered.filter(i => i.BeforeImage || i.AfterImage || i.TempImage);
+    const photoCards = withPhotos.map((i, idx) => {
+        const rc = rColor(i.Rank); const sc = sColor(i.CurrentStatus);
+        const date = i.DateFound ? new Date(i.DateFound).toLocaleDateString('th-TH', {day:'numeric',month:'short',year:'numeric'}) : '—';
+        const beforeUrl = resolveFileUrl(i.BeforeImage);
+        const tempUrl   = resolveFileUrl(i.TempImage);
+        const afterUrl  = resolveFileUrl(i.AfterImage);
+        const imgSlot = (url, label, borderColor) => url
+            ? `<div style="flex:1; min-width:0;">
+                <div style="font-size:9px; font-weight:700; color:${borderColor}; ${K} margin-bottom:4px; text-transform:uppercase; letter-spacing:0.5px;">${label}</div>
+                <img src="${url}" crossorigin="anonymous" style="width:100%; height:140px; object-fit:cover; border-radius:8px; border:2px solid ${borderColor}30;" onerror="this.style.display='none'"/>
+               </div>`
+            : `<div style="flex:1; min-width:0;">
+                <div style="font-size:9px; font-weight:700; color:#cbd5e1; ${K} margin-bottom:4px;">${label}</div>
+                <div style="height:140px; background:#f8fafc; border-radius:8px; border:2px dashed #e2e8f0; display:flex; align-items:center; justify-content:center;">
+                  <span style="font-size:10px; color:#cbd5e1; ${K}">ไม่มีรูปภาพ</span>
+                </div>
+               </div>`;
+        return `
+        <div style="background:#fff; border:1.5px solid #e2e8f0; border-radius:12px; padding:16px; margin-bottom:14px; page-break-inside:avoid;">
+          <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:12px;">
+            <div style="display:flex; align-items:center; gap:10px;">
+              <span style="font-size:10px; color:#94a3b8; ${K} font-weight:600;">#${i.IssueID||idx+1}</span>
+              ${i.Rank?`<span style="background:${rc};color:#fff;font-size:10px;font-weight:800;padding:2px 10px;border-radius:8px;${K}">${i.Rank}</span>`:''}
+              <span style="background:${sc}18;color:${sc};font-size:10px;font-weight:700;padding:2px 10px;border-radius:99px;${K}">${sLabel(i.CurrentStatus)}</span>
+            </div>
+            <span style="font-size:10px; color:#94a3b8; ${K}">${date} · ${i.Area||''}</span>
+          </div>
+          <div style="font-size:11px; color:#1e293b; ${K} font-weight:600; margin-bottom:6px; line-height:1.5;">${i.HazardDescription||'—'}</div>
+          ${i.TempDescription?`<div style="font-size:10px; color:#f97316; ${K} margin-bottom:6px;">แก้ชั่วคราว: ${i.TempDescription}</div>`:''}
+          ${i.ActionDescription?`<div style="font-size:10px; color:#059669; ${K} margin-bottom:10px;">การแก้ไขถาวร: ${i.ActionDescription}</div>`:''}
+          <div style="display:flex; gap:10px;">
+            ${imgSlot(beforeUrl, 'ก่อนแก้ไข (Before)', '#dc2626')}
+            ${tempUrl ? imgSlot(tempUrl, 'แก้ชั่วคราว (Temp)', '#f97316') : ''}
+            ${imgSlot(afterUrl, 'หลังแก้ไข (After)', '#059669')}
+          </div>
+        </div>`;
+    }).join('');
+
+    // ── Step 9: Stop grid ───────────────────────────────────────────────────
+    const stopGrid = CCCF_STOP_TYPES.map(s => `
+        <div style="flex:1; min-width:110px; background:${s.bg}; border:1px solid ${s.border}; border-radius:8px; padding:8px 10px;">
+          <div style="font-size:9px; font-weight:700; color:${s.color}; ${K}">${s.code}</div>
+          <div style="font-size:20px; font-weight:900; color:${byStop[s.id]>0?s.color:'#cbd5e1'}; ${K} line-height:1.1;">${byStop[s.id]}</div>
+          <div style="font-size:8.5px; color:#64748b; ${K} margin-top:1px;">${s.label}</div>
+        </div>`).join('');
+
+    // ── Step 10: STOP × Rank matrix ─────────────────────────────────────────
+    const matrixRows = CCCF_STOP_TYPES.map((s, idx) => {
+        const r = matrix[s.id]; const total = r.A + r.B + r.C;
+        return `<tr style="background:${idx%2?'#f8fafc':'#fff'}; border-bottom:1px solid #f1f5f9;">
+          <td style="padding:5px 8px; font-size:10px; ${K} color:#475569;">${s.code} ${s.label}</td>
+          <td style="padding:5px 8px; text-align:center; font-size:10px; font-weight:700; ${K} color:${r.A>0?'#dc2626':'#cbd5e1'};">${r.A}</td>
+          <td style="padding:5px 8px; text-align:center; font-size:10px; font-weight:700; ${K} color:${r.B>0?'#f97316':'#cbd5e1'};">${r.B}</td>
+          <td style="padding:5px 8px; text-align:center; font-size:10px; font-weight:700; ${K} color:${r.C>0?'#059669':'#cbd5e1'};">${r.C}</td>
+          <td style="padding:5px 8px; text-align:center; font-size:10px; font-weight:700; ${K} color:${total>0?'#1e293b':'#cbd5e1'};">${total}</td>
+        </tr>`;
+    }).join('');
+    const mTotalA = CCCF_STOP_TYPES.reduce((s,t)=>s+matrix[t.id].A,0);
+    const mTotalB = CCCF_STOP_TYPES.reduce((s,t)=>s+matrix[t.id].B,0);
+    const mTotalC = CCCF_STOP_TYPES.reduce((s,t)=>s+matrix[t.id].C,0);
+
+    // ── Step 11: Section header helper ─────────────────────────────────────
+    const secHeader = (title) =>
+        `<div style="font-size:10px; font-weight:700; color:#94a3b8; letter-spacing:1px; text-transform:uppercase; margin-bottom:8px; padding-bottom:6px; border-bottom:1.5px solid #f1f5f9;">${title}</div>`;
+
+    const thStyle = `padding:8px; font-size:9px; font-weight:700; ${K} text-align:center; color:#fff;`;
+    const thL     = `padding:8px; font-size:9px; font-weight:700; ${K} text-align:left; color:#fff;`;
+
+    // ── Step 12: Assemble HTML ──────────────────────────────────────────────
+    const html = `
+    <div style="width:794px; background:#f8fafc; ${K} padding:32px 36px 48px;">
+
+      <!-- ══ Header ══ -->
+      <div style="background:linear-gradient(135deg,#064e3b 0%,#065f46 55%,#0d9488 100%); border-radius:14px; padding:24px 28px; margin-bottom:20px; position:relative; overflow:hidden;">
+        <div style="position:absolute;right:-20px;top:-20px;width:120px;height:120px;border-radius:50%;background:rgba(255,255,255,0.06);"></div>
+        <div style="display:flex; align-items:flex-start; justify-content:space-between; position:relative;">
+          <div>
+            <div style="font-size:10px; color:rgba(167,243,208,0.9); font-weight:600; letter-spacing:1.5px; margin-bottom:6px;">TSH SAFETY CORE ACTIVITY</div>
+            <div style="font-size:21px; font-weight:800; color:#fff; line-height:1.2;">รายงานสรุปประเด็นจากการเดินตรวจ</div>
+            <div style="font-size:10px; color:rgba(255,255,255,0.6); margin-top:3px;">Safety Patrol Issue Report</div>
+          </div>
+          <div style="text-align:right; color:rgba(255,255,255,0.75); font-size:10px; line-height:2;">
+            <div>เลขที่: <strong style="color:#fff; font-family:monospace;">${docNo}</strong></div>
+            <div>วันที่: <strong style="color:#fff;">${dateStr}</strong></div>
+            <div>เวลา: <strong style="color:#fff;">${timeStr} น.</strong></div>
+            <div>จัดทำโดย: <strong style="color:#fff;">${currentUser.name||'—'}</strong></div>
+          </div>
+        </div>
+        <div style="margin-top:14px; padding-top:12px; border-top:1px solid rgba(255,255,255,0.15); display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
+          <span style="font-size:10px; color:rgba(167,243,208,0.85); font-weight:600;">ขอบเขต:</span>
+          <span style="background:rgba(255,255,255,0.15); color:#fff; font-size:10px; font-weight:600; padding:2px 12px; border-radius:99px;">${filterLabel}</span>
+          <span style="background:rgba(255,255,255,0.15); color:#fff; font-size:10px; padding:2px 10px; border-radius:99px;">ช่วงวันที่: ${dateRange}</span>
+          <span style="margin-left:auto; background:rgba(255,255,255,0.2); color:#fff; font-size:10px; font-weight:800; padding:2px 14px; border-radius:99px;">${filtered.length} ประเด็น</span>
+        </div>
+      </div>
+
+      <!-- ══ Stats + Progress ══ -->
+      <div style="background:#fff; border-radius:12px; padding:16px 18px; margin-bottom:14px; border:1px solid #e2e8f0;">
+        ${secHeader('สรุปภาพรวม')}
+        <div style="display:flex; gap:10px; margin-bottom:14px;">
+          ${[
+            {label:'ทั้งหมด',     val:filtered.length, bg:'#f8fafc', border:'#e2e8f0', vc:'#1e293b'},
+            {label:'รอแก้ไข',    val:counts.open,     bg:'#fef2f2', border:'#fecaca', vc:'#dc2626'},
+            {label:'แก้ชั่วคราว',val:counts.temp,     bg:'#fff7ed', border:'#fed7aa', vc:'#f97316'},
+            {label:'เสร็จสิ้น',  val:counts.closed,   bg:'#f0fdf4', border:'#bbf7d0', vc:'#059669'},
+            {label:'Rank A',     val:byRank.A,        bg:'#fef2f2', border:'#fecaca', vc:'#dc2626'},
+            {label:'Rank B',     val:byRank.B,        bg:'#fff7ed', border:'#fed7aa', vc:'#f97316'},
+            {label:'Rank C',     val:byRank.C,        bg:'#f0fdf4', border:'#bbf7d0', vc:'#059669'},
+          ].map(s=>`<div style="flex:1; background:${s.bg}; border:1.5px solid ${s.border}; border-radius:10px; padding:10px 12px;">
+            <div style="font-size:24px; font-weight:900; color:${s.vc}; ${K} line-height:1;">${s.val}</div>
+            <div style="font-size:9.5px; color:#64748b; margin-top:2px; ${K} font-weight:${s.label.startsWith('Rank')?700:400}; color:${s.label.startsWith('Rank')?s.vc:'#64748b'};">${s.label}</div>
+          </div>`).join('')}
+        </div>
+        <!-- อัตราการแก้ไข -->
+        <div style="display:flex; align-items:center; gap:12px;">
+          <div style="font-size:10px; font-weight:700; color:#475569; ${K} white-space:nowrap;">อัตราการแก้ไขเสร็จสิ้น</div>
+          <div style="flex:1; height:10px; background:#f1f5f9; border-radius:99px; overflow:hidden;">
+            <div style="height:100%; width:${closePct}%; background:linear-gradient(90deg,#059669,#0d9488); border-radius:99px; transition:width 0.3s;"></div>
+          </div>
+          <div style="font-size:14px; font-weight:900; color:${closePct>=80?'#059669':closePct>=50?'#f97316':'#dc2626'}; ${K} white-space:nowrap;">${closePct}%</div>
+        </div>
+      </div>
+
+      <!-- ══ Stop 1-6 ══ -->
+      <div style="background:#fff; border-radius:12px; padding:16px 18px; margin-bottom:14px; border:1px solid #e2e8f0;">
+        ${secHeader('อันตราย 6 ประการ (Stop 1–6)')}
+        <div style="display:flex; gap:8px; flex-wrap:wrap;">${stopGrid}</div>
+      </div>
+
+      <!-- ══ STOP × Rank Matrix ══ -->
+      <div style="background:#fff; border-radius:12px; padding:16px 18px; margin-bottom:14px; border:1px solid #e2e8f0;">
+        ${secHeader('ชนิดอันตราย × ระดับความรุนแรง (STOP × Rank)')}
+        <table style="width:100%; border-collapse:collapse;">
+          <thead>
+            <tr style="background:linear-gradient(135deg,#064e3b,#065f46);">
+              <th style="${thL}">ชนิดอันตราย</th>
+              <th style="${thStyle} color:#fca5a5;">Rank A</th>
+              <th style="${thStyle} color:#fdba74;">Rank B</th>
+              <th style="${thStyle} color:#6ee7b7;">Rank C</th>
+              <th style="${thStyle}">รวม</th>
+            </tr>
+          </thead>
+          <tbody>${matrixRows}</tbody>
+          <tfoot>
+            <tr style="background:#f8fafc; border-top:2px solid #e2e8f0;">
+              <td style="padding:6px 8px; font-size:10px; font-weight:700; ${K} color:#1e293b;">รวมทั้งหมด</td>
+              <td style="padding:6px 8px; text-align:center; font-size:10px; font-weight:900; ${K} color:#dc2626;">${mTotalA}</td>
+              <td style="padding:6px 8px; text-align:center; font-size:10px; font-weight:900; ${K} color:#f97316;">${mTotalB}</td>
+              <td style="padding:6px 8px; text-align:center; font-size:10px; font-weight:900; ${K} color:#059669;">${mTotalC}</td>
+              <td style="padding:6px 8px; text-align:center; font-size:10px; font-weight:900; ${K} color:#1e293b;">${mTotalA+mTotalB+mTotalC}</td>
+            </tr>
+          </tfoot>
+        </table>
+      </div>
+
+      <!-- ══ Area + Dept Breakdown ══ -->
+      <div style="display:flex; gap:14px; margin-bottom:14px;">
+        <!-- Area -->
+        <div style="flex:1; background:#fff; border-radius:12px; padding:16px 18px; border:1px solid #e2e8f0; min-width:0;">
+          ${secHeader('สถิติแยกพื้นที่')}
+          <table style="width:100%; border-collapse:collapse;">
+            <thead><tr style="background:#f8fafc; border-bottom:1.5px solid #e2e8f0;">
+              <th style="padding:6px 8px; font-size:9px; font-weight:700; ${K} color:#94a3b8; text-align:left;">พื้นที่</th>
+              <th style="padding:6px 8px; font-size:9px; font-weight:700; ${K} color:#475569; text-align:center;">พบ</th>
+              <th style="padding:6px 8px; font-size:9px; font-weight:700; ${K} color:#059669; text-align:center;">เสร็จ</th>
+              <th style="padding:6px 8px; font-size:9px; font-weight:700; ${K} color:#f97316; text-align:center;">ค้าง</th>
+              <th style="padding:6px 8px; font-size:9px; font-weight:700; ${K} color:#94a3b8; text-align:center;">%</th>
+            </tr></thead>
+            <tbody>${areaRows||`<tr><td colspan="5" style="text-align:center;padding:12px;color:#cbd5e1;font-size:10px;${K}">ไม่มีข้อมูล</td></tr>`}</tbody>
+          </table>
+        </div>
+        <!-- Dept -->
+        <div style="flex:1; background:#fff; border-radius:12px; padding:16px 18px; border:1px solid #e2e8f0; min-width:0;">
+          ${secHeader('สถิติแยกส่วนงาน')}
+          <table style="width:100%; border-collapse:collapse;">
+            <thead><tr style="background:#f8fafc; border-bottom:1.5px solid #e2e8f0;">
+              <th style="padding:6px 8px; font-size:9px; font-weight:700; ${K} color:#94a3b8; text-align:left;">ส่วนงาน</th>
+              <th style="padding:6px 8px; font-size:9px; font-weight:700; ${K} color:#475569; text-align:center;">พบ</th>
+              <th style="padding:6px 8px; font-size:9px; font-weight:700; ${K} color:#059669; text-align:center;">เสร็จ</th>
+              <th style="padding:6px 8px; font-size:9px; font-weight:700; ${K} color:#f97316; text-align:center;">ค้าง</th>
+              <th style="padding:6px 8px; font-size:9px; font-weight:700; ${K} color:#94a3b8; text-align:center;">%</th>
+            </tr></thead>
+            <tbody>${deptRows||`<tr><td colspan="5" style="text-align:center;padding:12px;color:#cbd5e1;font-size:10px;${K}">ไม่มีข้อมูล</td></tr>`}</tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- ══ Issue Table ══ -->
+      <div style="background:#fff; border-radius:12px; padding:16px 18px; margin-bottom:14px; border:1px solid #e2e8f0;">
+        ${secHeader(`ทะเบียนประเด็น (${filtered.length} รายการ)`)}
+        <table style="width:100%; border-collapse:collapse;">
+          <thead>
+            <tr style="background:linear-gradient(135deg,#064e3b,#065f46); color:#fff;">
+              <th style="${thStyle} width:32px;">#</th>
+              <th style="${thL} width:70px;">วันที่พบ</th>
+              <th style="${thL} width:78px;">พื้นที่</th>
+              <th style="${thL} width:88px;">ส่วนงาน</th>
+              <th style="${thL}">รายละเอียดอันตราย</th>
+              <th style="${thStyle} width:40px;">Rank</th>
+              <th style="${thStyle} width:74px;">สถานะ</th>
+              <th style="${thStyle} width:58px;">กำหนด</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${filtered.length ? tableRows : `<tr><td colspan="8" style="text-align:center;padding:24px;color:#94a3b8;${K}font-size:11px;">ไม่มีข้อมูล</td></tr>`}
+          </tbody>
+        </table>
+      </div>
+
+      <!-- ══ Photo Cards ══ -->
+      ${withPhotos.length ? `
+      <div style="background:#fff; border-radius:12px; padding:16px 18px; margin-bottom:14px; border:1px solid #e2e8f0;">
+        ${secHeader(`ภาพประกอบ Before / After (${withPhotos.length} ประเด็น)`)}
+        ${photoCards}
+      </div>` : ''}
+
+      <!-- ══ Signature ══ -->
+      <div style="background:#fff; border-radius:12px; padding:20px 24px; border:1px solid #e2e8f0; margin-bottom:14px;">
+        <div style="font-size:10px; font-weight:700; color:#94a3b8; letter-spacing:1px; margin-bottom:16px; text-transform:uppercase;">รับรองและอนุมัติ</div>
+        <div style="display:flex; justify-content:space-between; gap:24px;">
+          ${['ผู้จัดทำรายงาน', 'หัวหน้าส่วนงาน', 'ผู้จัดการ'].map(role => `
+          <div style="flex:1; text-align:center;">
+            <div style="height:52px; border-bottom:1.5px solid #cbd5e1; margin-bottom:8px;"></div>
+            <div style="font-size:10px; color:#64748b; ${K}">(........................................)</div>
+            <div style="font-size:10.5px; font-weight:700; color:#374151; margin-top:4px; ${K}">${role}</div>
+            <div style="font-size:9.5px; color:#94a3b8; margin-top:3px; ${K}">วันที่ ......../......../.........</div>
+          </div>`).join('')}
+        </div>
+      </div>
+
+      <!-- ══ Footer ══ -->
+      <div style="text-align:center; font-size:9px; color:#94a3b8; ${K}">
+        เลขที่เอกสาร: ${docNo} · สร้างจากระบบ TSH Safety Core Activity · ${dateStr} ${timeStr} น.
+      </div>
+    </div>`;
+
+    // ── Step 13: Render & Save ──────────────────────────────────────────────
+    const el = document.createElement('div');
+    el.style.cssText = 'position:fixed;left:-9999px;top:0;z-index:-1;';
+    el.innerHTML = html;
+    document.body.appendChild(el);
+
+    try {
+        showLoading('กำลังสร้าง PDF...');
+        await document.fonts.ready;
+        await new Promise(r => setTimeout(r, 500));
+
+        const canvas = await html2canvas(el.firstElementChild, {
+            scale: 2, useCORS: true, logging: false,
+            backgroundColor: '#f8fafc', windowWidth: 794,
+            allowTaint: false,
+        });
+
+        const { jsPDF } = window.jspdf;
+        const pdf = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
+        const pageW = 210, pageH = 297;
+        const imgW  = pageW;
+        const imgH  = (canvas.height * pageW) / canvas.width;
+        const imgData = canvas.toDataURL('image/jpeg', 0.92);
+
+        let remaining = imgH, offset = 0;
+        pdf.addImage(imgData, 'JPEG', 0, offset, imgW, imgH);
+        remaining -= pageH;
+        while (remaining > 0) {
+            offset -= pageH; pdf.addPage();
+            pdf.addImage(imgData, 'JPEG', 0, offset, imgW, imgH);
+            remaining -= pageH;
+        }
+
+        const totalPages = pdf.getNumberOfPages();
+        for (let p = 1; p <= totalPages; p++) {
+            pdf.setPage(p);
+            pdf.setFontSize(8); pdf.setTextColor(148, 163, 184);
+            pdf.text(`หน้า ${p} / ${totalPages}`, pageW - 14, pageH - 5, { align: 'right' });
+            pdf.text(docNo, 14, pageH - 5);
+        }
+
+        pdf.save(`patrol_issues_${now.toISOString().slice(0,10)}.pdf`);
+        showToast(`ส่งออก PDF สำเร็จ (${filtered.length} ประเด็น)`, 'success');
+    } catch (err) {
+        console.error('PDF error:', err);
+        showToast('ส่งออก PDF ไม่สำเร็จ', 'error');
+    } finally {
+        document.body.removeChild(el);
         hideLoading();
     }
 }
@@ -3041,6 +3540,167 @@ function exportIssuesToExcel() {
     const fileName = `patrol_issues_${new Date().toISOString().slice(0,10)}.xlsx`;
     XLSX.writeFile(wb, fileName);
     showToast(`ส่งออกสำเร็จ ${filtered.length} รายการ`, 'success');
+}
+
+// ─── Patrol Rank & Stop Summary (Issues Tab) ─────────────────────────────────
+function renderRankStopSummary() {
+    const el = document.getElementById('patrol-rank-stop-summary');
+    if (!el) return;
+
+    // Count from context pool (dept/unit/status/search filtered) but NOT rank/stop
+    // so cards show counts matching the table context, and clicking further filters
+    const savedRank = _filterRank; const savedStop = _filterStop;
+    _filterRank = ''; _filterStop = 0;
+    const contextPool = getFilteredIssues(_allIssues, _activeFilter);
+    _filterRank = savedRank; _filterStop = savedStop;
+
+    // Count Rank from context pool (respects dept/unit/status/search filters)
+    const byRank = { A: 0, B: 0, C: 0 };
+    contextPool.forEach(i => { if (byRank[i.Rank] !== undefined) byRank[i.Rank]++; });
+
+    // Count StopType from context pool
+    const byStop = { 1:0, 2:0, 3:0, 4:0, 5:0, 6:0 };
+    contextPool.forEach(i => {
+        const m = (i.HazardType || '').match(/STOP\s*(\d)/i);
+        if (m) { const n = parseInt(m[1]); if (byStop[n] !== undefined) byStop[n]++; }
+    });
+
+    const total = contextPool.length;
+    const hasContextFilter = !!(_filterDept || _filterUnit || _activeFilter !== 'all' || _searchQuery);
+    const contextLabel = _filterDept || _filterUnit
+        ? `เฉพาะ: ${_filterDept || _filterUnit}`
+        : _activeFilter !== 'all'
+            ? ({ open:'รอแก้ไข', temp:'แก้ชั่วคราว', closed:'เสร็จสิ้น', high:'Rank A', overdue:'เกินกำหนด' }[_activeFilter] || '')
+            : '';
+
+    el.innerHTML = `
+    <div class="bg-white rounded-xl border border-slate-100 shadow-sm overflow-hidden">
+      <div class="flex items-center justify-between px-4 py-3 border-b border-slate-100 bg-slate-50/60">
+        <div class="flex items-center gap-2">
+          <div class="w-6 h-6 rounded-lg flex items-center justify-center" style="background:linear-gradient(135deg,#dc2626,#9f1239)">
+            <svg class="w-3.5 h-3.5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/></svg>
+          </div>
+          <span class="text-sm font-bold text-slate-700">สถิติปัญหาจากการตรวจ</span>
+          ${hasContextFilter && contextLabel ? `<span class="text-[10px] px-2 py-0.5 rounded-full bg-indigo-50 text-indigo-600 font-semibold border border-indigo-100">${contextLabel}</span>` : ''}
+        </div>
+        <div class="flex items-center gap-2">
+          ${(_filterRank || _filterStop) ? `<button onclick="window._issueClearRankStop()" class="text-[10px] font-semibold text-slate-400 hover:text-red-500 transition-colors flex items-center gap-1">
+            <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M6 18L18 6M6 6l12 12"/></svg>ล้างตัวกรอง</button>` : ''}
+          <span class="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-bold ${total === 0 ? 'bg-emerald-50 text-emerald-600' : 'bg-slate-100 text-slate-600'}">
+            ${total} ประเด็น
+          </span>
+        </div>
+      </div>
+      <div class="p-4 space-y-4">
+
+        <!-- Rank A/B/C -->
+        <div>
+          <p class="text-[10px] font-bold text-slate-400 uppercase tracking-wide mb-2">ระดับความรุนแรง (Rank) · คลิกเพื่อกรอง</p>
+          <div class="grid grid-cols-3 gap-2">
+            ${CCCF_RANKS.map(r => {
+              const cnt = byRank[r.rank] || 0;
+              const isActive = _filterRank === r.rank;
+              return `
+              <button onclick="window._issueFilterRank('${r.rank}')"
+                class="rounded-xl p-3 border-2 flex items-center gap-2.5 text-left w-full transition-all hover:shadow-md active:scale-[0.98] ${isActive ? 'ring-2 ring-offset-1' : 'opacity-80 hover:opacity-100'}"
+                style="background:${isActive ? r.bg : '#fafafa'};border-color:${isActive ? r.color : '#e2e8f0'};${isActive ? `ring-color:${r.color}` : ''}">
+                <div class="w-9 h-9 rounded-xl flex items-center justify-center text-sm font-black flex-shrink-0 text-white transition-all" style="background:${r.color};${isActive ? 'box-shadow:0 0 0 3px '+r.color+'40' : ''}">${r.rank}</div>
+                <div class="min-w-0">
+                  <p class="text-xl font-black leading-none" style="color:${isActive ? r.color : (cnt > 0 ? r.color : '#94a3b8')}">${cnt}</p>
+                  <p class="text-[10px] font-semibold mt-0.5 leading-snug truncate" style="color:${isActive ? r.color : '#64748b'}">${r.desc}</p>
+                  <p class="text-[9px] mt-0.5" style="color:${isActive ? r.color+'aa' : '#94a3b8'}">${r.detail}</p>
+                </div>
+              </button>`;
+            }).join('')}
+          </div>
+        </div>
+
+        <!-- Stop 1-6 -->
+        <div>
+          <p class="text-[10px] font-bold text-slate-400 uppercase tracking-wide mb-2">อันตราย 6 ประการ (Stop 1–6) · คลิกเพื่อกรอง</p>
+          <div class="grid grid-cols-2 md:grid-cols-3 gap-2">
+            ${CCCF_STOP_TYPES.map(s => {
+              const cnt = byStop[s.id] || 0;
+              const isActive = _filterStop === s.id;
+              return `
+              <button onclick="window._issueFilterStop(${s.id})"
+                class="rounded-xl p-3 border flex items-center gap-2.5 text-left w-full transition-all hover:shadow-md active:scale-[0.98] ${isActive ? 'ring-2 ring-offset-1' : 'opacity-80 hover:opacity-100'}"
+                style="background:${isActive ? s.bg : '#fafafa'};border-color:${isActive ? s.color : '#e2e8f0'}">
+                <div class="w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0 transition-all" style="background:${s.color}${isActive ? '33' : '18'}">
+                  <svg class="w-4 h-4" fill="none" stroke="${s.color}" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="${s.icon}"/></svg>
+                </div>
+                <div class="min-w-0 flex-1">
+                  <div class="flex items-center justify-between">
+                    <span class="text-[10px] font-bold" style="color:${s.color}">${s.code}</span>
+                    <span class="text-base font-black leading-none" style="color:${isActive || cnt > 0 ? s.color : '#94a3b8'}">${cnt}</span>
+                  </div>
+                  <p class="text-[9px] mt-0.5 leading-snug truncate" style="color:${isActive ? s.color : '#64748b'}">${s.label}</p>
+                </div>
+              </button>`;
+            }).join('')}
+          </div>
+        </div>
+
+      </div>
+    </div>`;
+}
+
+// ─── Area Stats (Issues Tab) ──────────────────────────────────────────────────
+function renderAreaStats() {
+    const tbody = document.getElementById('dashboard-section-body');
+    if (!tbody) return;
+
+    const allAreaNames = _patrolAreas.map(a => a.Name || a.AreaName).filter(Boolean);
+    if (!allAreaNames.length) {
+        tbody.innerHTML = `<tr><td colspan="4" class="text-center py-6 text-xs text-slate-300">ยังไม่มีพื้นที่ใน Master Data</td></tr>`;
+        return;
+    }
+
+    const toShow = _areaStatSel ? allAreaNames.filter(n => _areaStatSel.includes(n)) : allAreaNames;
+    if (!toShow.length) {
+        tbody.innerHTML = `<tr><td colspan="4" class="text-center py-6 text-xs text-slate-300">ไม่มีข้อมูล — กด ⚙ เพื่อตั้งค่า</td></tr>`;
+        _updateAreaBadge(); return;
+    }
+
+    // Count from _allIssues
+    const areaMap = {};
+    for (const name of toShow) areaMap[name] = { found:0, achieved:0, onProcess:0 };
+    _allIssues.forEach(issue => {
+        const a = issue.Area || '';
+        if (areaMap[a] !== undefined) {
+            areaMap[a].found++;
+            if (issue.CurrentStatus === 'Closed') areaMap[a].achieved++;
+            else areaMap[a].onProcess++;
+        }
+    });
+
+    tbody.innerHTML = toShow.map(area => {
+        const r = areaMap[area];
+        const isActive = _filterArea === area;
+        return `<tr class="border-b border-slate-50 cursor-pointer transition-colors ${isActive ? 'bg-emerald-50 border-emerald-100' : 'hover:bg-slate-50'}"
+            onclick="window._issueFilterArea('${area.replace(/'/g,"\\'")}')">
+          <td class="px-3 py-2 text-[10px] font-medium max-w-[110px] truncate ${isActive ? 'text-emerald-700 font-bold' : 'text-slate-600'}" title="${area}">
+            ${isActive ? `<span class="inline-block w-1.5 h-1.5 rounded-full bg-emerald-500 mr-1 align-middle"></span>` : ''}${area}
+          </td>
+          <td class="px-2 py-2 text-center font-bold text-xs ${r.found === 0 ? 'text-slate-300' : isActive ? 'text-emerald-600' : 'text-slate-500'}">${r.found}</td>
+          <td class="px-2 py-2 text-center font-bold text-xs ${r.achieved === 0 ? 'text-slate-300' : 'text-emerald-600'}">${r.achieved}</td>
+          <td class="px-2 py-2 text-center font-bold text-xs ${r.onProcess === 0 ? 'text-slate-300' : 'text-orange-500'}">${r.onProcess}</td>
+        </tr>`;
+    }).join('');
+
+    _updateAreaBadge();
+}
+
+function _updateAreaBadge() {
+    const badge = document.getElementById('area-stat-filter-badge');
+    const labelEl = document.getElementById('area-stat-filter-label');
+    if (!badge || !labelEl) return;
+    if (_filterArea) {
+        labelEl.textContent = _filterArea;
+        badge.classList.remove('hidden'); badge.classList.add('inline-flex');
+    } else {
+        badge.classList.add('hidden'); badge.classList.remove('inline-flex');
+    }
 }
 
 // ─── Charts ───────────────────────────────────────────────────────────────────
@@ -3167,7 +3827,9 @@ function renderDeptStats() {
     const badge = document.getElementById('dept-stat-filter-badge');
     const labelEl = document.getElementById('dept-stat-filter-label');
     if (badge && labelEl) {
-        const activeLabel = _filterDept || _filterUnit;
+        const rankLabel = _filterRank ? `Rank ${_filterRank}` : '';
+        const stopLabel = _filterStop ? `Stop ${_filterStop}` : '';
+        const activeLabel = _filterDept || _filterUnit || rankLabel || stopLabel;
         if (activeLabel) {
             labelEl.textContent = activeLabel;
             badge.classList.remove('hidden');
@@ -3191,6 +3853,55 @@ async function _saveUnitStatSelection(names) {
     _unitStatSel = (names && names.length) ? names : null;
     await API.put('/settings/patrol_unit_stat_selection', { value: _unitStatSel ? JSON.stringify(_unitStatSel) : null }).catch(() => {});
 }
+
+window.openAreaStatConfig = function() {
+    if (!isAdmin) return;
+    const allAreas = _patrolAreas.map(a => a.Name || a.AreaName).filter(Boolean);
+    if (!allAreas.length) { showToast('ยังไม่มีพื้นที่ใน Master Data', 'error'); return; }
+
+    const html = `
+    <div class="space-y-3 text-sm">
+      <p class="text-xs text-slate-500">เลือกพื้นที่ที่ต้องการแสดงในตารางสถิติ (ทุก user จะเห็นเหมือนกัน)</p>
+      <div class="flex items-center justify-between mb-1">
+        <span class="text-[10px] font-bold text-slate-400 uppercase">พื้นที่ทั้งหมด</span>
+        <div class="flex gap-2">
+          <button onclick="window._ascSelectAll(true)" class="text-[10px] text-emerald-600 font-semibold hover:underline">เลือกทั้งหมด</button>
+          <span class="text-slate-300">|</span>
+          <button onclick="window._ascSelectAll(false)" class="text-[10px] text-slate-400 font-semibold hover:underline">ล้าง</button>
+        </div>
+      </div>
+      <div class="grid grid-cols-2 gap-2 max-h-64 overflow-y-auto pr-1" id="area-stat-config-list">
+        ${allAreas.map(name => {
+            const checked = !_areaStatSel || _areaStatSel.includes(name);
+            return `<label class="flex items-center gap-2 p-2 rounded-lg border cursor-pointer hover:bg-emerald-50 transition-colors ${checked ? 'border-emerald-200 bg-emerald-50/50' : 'border-slate-200'}">
+              <input type="checkbox" value="${name}" ${checked ? 'checked' : ''} class="asc-cb accent-emerald-600 w-3.5 h-3.5 flex-shrink-0">
+              <span class="text-xs text-slate-700 truncate">${name}</span>
+            </label>`;
+        }).join('')}
+      </div>
+      <div class="flex gap-2 pt-2">
+        <button onclick="window.closeModal()" class="flex-1 py-2 rounded-xl border border-slate-200 text-sm font-semibold text-slate-500 hover:bg-slate-50 transition-colors">ยกเลิก</button>
+        <button onclick="window._saveAreaStatConfig()" class="flex-1 py-2 rounded-xl text-sm font-bold text-white transition-all" style="background:linear-gradient(135deg,#059669,#0d9488)">บันทึก</button>
+      </div>
+    </div>`;
+    openModal('ตั้งค่าพื้นที่ที่แสดง', html, 'max-w-md');
+};
+
+window._ascSelectAll = function(checked) {
+    document.querySelectorAll('.asc-cb').forEach(cb => { cb.checked = checked; });
+};
+
+window._saveAreaStatConfig = async function() {
+    const checked = [...document.querySelectorAll('.asc-cb:checked')].map(cb => cb.value);
+    try {
+        showToast('กำลังบันทึก...', 'info');
+        await API.put('/settings/patrol_area_stat_selection', { value: checked.length ? JSON.stringify(checked) : null });
+        _areaStatSel = checked.length ? checked : null;
+        closeModal();
+        renderAreaStats();
+        showToast('บันทึกการตั้งค่าสำเร็จ', 'success');
+    } catch { showToast('บันทึกไม่สำเร็จ', 'error'); }
+};
 
 window.openDeptStatConfig = function() {
     if (!isAdmin) return;
@@ -3339,94 +4050,12 @@ function renderStopRankStats() {
         </tr>`;
 }
 
-function renderRankPieChart() {
-    // Compute Rank A/B/C totals from _allIssues
-    const rankMap = { A:0, B:0, C:0 };
-    _allIssues.forEach(issue => {
-        const item = normalizeApiObject(issue);
-        const r = item.Rank || '';
-        if (rankMap[r] !== undefined) rankMap[r]++;
-    });
-
-    const total = rankMap.A + rankMap.B + rankMap.C;
-    const ctx = document.getElementById('rankPieChart');
-    if (!ctx) return;
-
-    if (window._rankPieChart) window._rankPieChart.destroy();
-
-    if (total === 0) {
-        ctx.closest('.flex-1').innerHTML = '<p class="text-slate-300 text-xs">ยังไม่มีข้อมูล</p>';
-        return;
-    }
-
-    window._rankPieChart = new Chart(ctx.getContext('2d'), {
-        type: 'pie',
-        data: {
-            labels: [`Rank A (${rankMap.A})`, `Rank B (${rankMap.B})`, `Rank C (${rankMap.C})`],
-            datasets: [{
-                data: [rankMap.A, rankMap.B, rankMap.C],
-                backgroundColor: ['#f43f5e', '#fb923c', '#22c55e'],
-                borderWidth: 2,
-                borderColor: '#fff',
-                hoverOffset: 6,
-            }]
-        },
-        options: {
-            responsive: true, maintainAspectRatio: false,
-            plugins: {
-                legend: { display: false },
-                tooltip: {
-                    callbacks: {
-                        label: ctx => {
-                            const pct = total > 0 ? Math.round((ctx.parsed / total) * 100) : 0;
-                            return ` ${ctx.label}: ${ctx.parsed} (${pct}%)`;
-                        }
-                    }
-                },
-                datalabels: {
-                    color: '#fff',
-                    font: { size: 13, weight: 'bold', family: 'Kanit' },
-                    formatter: (val) => val > 0 ? val : '',
-                }
-            }
-        }
-    });
-
-    // Custom legend
-    const legend = document.getElementById('rank-pie-legend');
-    if (legend) {
-        const colors = ['#f43f5e', '#fb923c', '#22c55e'];
-        const labels = ['Rank A', 'Rank B', 'Rank C'];
-        const vals   = [rankMap.A, rankMap.B, rankMap.C];
-        legend.innerHTML = labels.map((l, i) => `
-            <span class="flex items-center gap-1.5">
-                <span class="w-2.5 h-2.5 rounded-full inline-block" style="background:${colors[i]}"></span>
-                <span style="color:${colors[i]}">${l}</span>
-                <span class="text-slate-400 font-normal">(${vals[i]})</span>
-            </span>`).join('');
-    }
-}
 
 async function loadDashboardCharts() {
     try {
-        const res = await API.get('/patrol/dashboard-stats');
-        const data = normalizeApiObject(res);
-        const bySection = normalizeApiArray(data.bySection);
-
-        const tbody = document.getElementById('dashboard-section-body');
-        if (tbody) {
-            tbody.innerHTML = bySection.length > 0
-                ? bySection.map(row => `<tr class="border-b border-slate-50 hover:bg-slate-50 transition-colors">
-                    <td class="px-4 py-2.5 font-medium text-slate-700 text-xs">${row.Section || 'ทั่วไป'}</td>
-                    <td class="px-4 py-2.5 text-center text-emerald-600 font-bold text-xs">${row.Achieved || 0}</td>
-                    <td class="px-4 py-2.5 text-center text-orange-500 font-bold text-xs">${row.OnProcess || 0}</td>
-                  </tr>`).join('')
-                : `<tr><td colspan="3" class="text-center py-6 text-xs text-slate-300">ยังไม่มีข้อมูล</td></tr>`;
-        }
-
+        renderAreaStats();
         renderDeptStats();
         renderStopRankStats();
-        renderRankPieChart();
         initPromoCarousel();
     } catch (e) { console.error('Chart error:', e); }
 }
