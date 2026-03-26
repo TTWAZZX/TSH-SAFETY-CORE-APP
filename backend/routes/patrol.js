@@ -91,6 +91,12 @@ router.get('/my-monthly-plan', async (req, res) => {
             ORDER BY FIELD(tm.PatrolType,'top','committee','management'), e.EmployeeName
         `, [year, month, team.id]);
 
+        // Normalize attendance dates to YYYY-MM-DD for reliable matching
+        const attendanceDates = attendance.map(a => {
+            const d = new Date(a.PatrolDate);
+            return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+        });
+
         res.json({
             success: true,
             data: {
@@ -99,6 +105,7 @@ router.get('/my-monthly-plan', async (req, res) => {
                 sessions,
                 required,
                 attended: attendance.length,
+                attendanceDates,
                 roster,
                 compliance: {
                     required: required.length,
@@ -179,6 +186,39 @@ router.get('/my-yearly-stats', async (req, res) => {
             [employeeId, year, curMonth]
         );
 
+        // 7. Monthly attendance breakdown (for dot tracker)
+        const [monthlyAtt] = await db.query(
+            `SELECT MONTH(PatrolDate) AS month, COUNT(*) AS cnt
+             FROM Patrol_Attendance
+             WHERE UserID = ? AND YEAR(PatrolDate) = ?
+             GROUP BY MONTH(PatrolDate)`,
+            [employeeId, year]
+        );
+
+        // 8. Monthly scheduled sessions for user's team
+        let monthlySched = [];
+        if (teamBase) {
+            const [ms] = await db.query(
+                `SELECT MONTH(s.PatrolDate) AS month, COUNT(*) AS cnt
+                 FROM Patrol_Sessions s
+                 JOIN Patrol_Team_Members tm ON tm.TeamID = s.TeamID AND tm.EmployeeID = ?
+                 WHERE YEAR(s.PatrolDate) = ?
+                 GROUP BY MONTH(s.PatrolDate)`,
+                [employeeId, year]
+            );
+            monthlySched = ms;
+        }
+
+        const monthlyAttMap  = {};
+        const monthlySchedMap = {};
+        monthlyAtt.forEach(r => { monthlyAttMap[r.month] = parseInt(r.cnt); });
+        monthlySched.forEach(r => { monthlySchedMap[r.month] = parseInt(r.cnt); });
+        const monthlyBreakdown = Array.from({ length: 12 }, (_, i) => ({
+            month: i + 1,
+            attended:  monthlyAttMap[i + 1]  || 0,
+            scheduled: monthlySchedMap[i + 1] || 0,
+        }));
+
         res.json({
             success: true,
             data: {
@@ -190,6 +230,7 @@ router.get('/my-yearly-stats', async (req, res) => {
                 teamMemberStats,
                 monthlyRequired: monthlyRequired?.cnt ?? null,
                 selfPatrolYear: { count: spYear.spCount },
+                monthlyBreakdown,
             },
         });
     } catch (err) {
@@ -1039,6 +1080,24 @@ router.get('/attendance-overview', async (req, res) => {
                 summary: { totalSessions: grandTotal, totalAttended: grandAttended, percent: grandPercent, latestDate: latest[0]?.LatestDate || null, year },
             },
         });
+    } catch (err) {
+        res.status(500).json({ success: false, message: err.message });
+    }
+});
+
+// GET /api/patrol/member-attendance?employeeId=X&year=Y — รายการเดินตรวจรายบุคคล (สำหรับ spotlight modal)
+router.get('/member-attendance', async (req, res) => {
+    const { employeeId, year: yearStr } = req.query;
+    if (!employeeId) return res.status(400).json({ success: false, message: 'ต้องระบุ employeeId' });
+    const year = parseInt(yearStr) || new Date().getFullYear();
+    try {
+        const [rows] = await db.query(`
+            SELECT id, PatrolDate, PatrolType, Area, Notes
+            FROM Patrol_Attendance
+            WHERE UserID = ? AND YEAR(PatrolDate) = ?
+            ORDER BY PatrolDate DESC, id DESC
+        `, [employeeId, year]);
+        res.json({ success: true, data: rows });
     } catch (err) {
         res.status(500).json({ success: false, message: err.message });
     }
