@@ -3288,213 +3288,292 @@ async function exportIssuesToPDF() {
     const thStyle = `padding:8px; font-size:9px; font-weight:700; ${K} text-align:center; color:#fff;`;
     const thL     = `padding:8px; font-size:9px; font-weight:700; ${K} text-align:left; color:#fff;`;
 
-    // ── Step 12: Assemble HTML ──────────────────────────────────────────────
-    const html = `
-    <div style="width:794px; background:#f8fafc; ${K} padding:32px 36px 48px;">
+    // ── Step 12: Section helpers ────────────────────────────────────────────
+    // Each section is rendered to its own canvas → placed on PDF without arbitrary cuts
+    const S = `width:794px;background:#f8fafc;${K}padding:0 36px;box-sizing:border-box;`;
 
-      <!-- ══ Header ══ -->
-      <div style="background:linear-gradient(135deg,#064e3b 0%,#065f46 55%,#0d9488 100%); border-radius:14px; padding:24px 28px; margin-bottom:20px; position:relative; overflow:hidden;">
+    // Wrap a card HTML in the outer shell with optional vertical padding
+    const sec = (cardHtml, ptop = 0) =>
+        `<div style="${S}padding-top:${ptop}px;padding-bottom:14px;">${cardHtml}</div>`;
+
+    // Card wrapper
+    const card = (inner, extraStyle = '') =>
+        `<div style="background:#fff;border-radius:12px;padding:16px 18px;border:1px solid #e2e8f0;${extraStyle}">${inner}</div>`;
+
+    // ── Build section list ───────────────────────────────────────────────────
+    // Section 1: Header
+    const s1 = `<div style="width:794px;background:#f8fafc;${K}padding:32px 36px 14px;box-sizing:border-box;">
+      <div style="background:linear-gradient(135deg,#064e3b 0%,#065f46 55%,#0d9488 100%);border-radius:14px;padding:24px 28px;position:relative;overflow:hidden;">
         <div style="position:absolute;right:-20px;top:-20px;width:120px;height:120px;border-radius:50%;background:rgba(255,255,255,0.06);"></div>
-        <div style="display:flex; align-items:flex-start; justify-content:space-between; position:relative;">
+        <div style="display:flex;align-items:flex-start;justify-content:space-between;position:relative;">
           <div>
-            <div style="font-size:10px; color:rgba(167,243,208,0.9); font-weight:600; letter-spacing:1.5px; margin-bottom:6px;">TSH SAFETY CORE ACTIVITY</div>
-            <div style="font-size:21px; font-weight:800; color:#fff; line-height:1.2;">รายงานสรุปประเด็นจากการเดินตรวจ</div>
-            <div style="font-size:10px; color:rgba(255,255,255,0.6); margin-top:3px;">Safety Patrol Issue Report</div>
+            <div style="font-size:10px;color:rgba(167,243,208,0.9);font-weight:600;letter-spacing:1.5px;margin-bottom:6px;">TSH SAFETY CORE ACTIVITY</div>
+            <div style="font-size:21px;font-weight:800;color:#fff;line-height:1.2;">รายงานสรุปประเด็นจากการเดินตรวจ</div>
+            <div style="font-size:10px;color:rgba(255,255,255,0.6);margin-top:3px;">Safety Patrol Issue Report</div>
           </div>
-          <div style="text-align:right; color:rgba(255,255,255,0.75); font-size:10px; line-height:2;">
-            <div>เลขที่: <strong style="color:#fff; font-family:monospace;">${docNo}</strong></div>
+          <div style="text-align:right;color:rgba(255,255,255,0.75);font-size:10px;line-height:2;">
+            <div>เลขที่: <strong style="color:#fff;font-family:monospace;">${docNo}</strong></div>
             <div>วันที่: <strong style="color:#fff;">${dateStr}</strong></div>
             <div>เวลา: <strong style="color:#fff;">${timeStr} น.</strong></div>
             <div>จัดทำโดย: <strong style="color:#fff;">${currentUser.name||'—'}</strong></div>
           </div>
         </div>
-        <div style="margin-top:14px; padding-top:12px; border-top:1px solid rgba(255,255,255,0.15); display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
-          <span style="font-size:10px; color:rgba(167,243,208,0.85); font-weight:600;">ขอบเขต:</span>
-          <span style="background:rgba(255,255,255,0.15); color:#fff; font-size:10px; font-weight:600; padding:2px 12px; border-radius:99px;">${filterLabel}</span>
-          <span style="background:rgba(255,255,255,0.15); color:#fff; font-size:10px; padding:2px 10px; border-radius:99px;">ช่วงวันที่: ${dateRange}</span>
-          <span style="margin-left:auto; background:rgba(255,255,255,0.2); color:#fff; font-size:10px; font-weight:800; padding:2px 14px; border-radius:99px;">${filtered.length} ประเด็น</span>
+        <div style="margin-top:14px;padding-top:12px;border-top:1px solid rgba(255,255,255,0.15);display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
+          <span style="font-size:10px;color:rgba(167,243,208,0.85);font-weight:600;">ขอบเขต:</span>
+          <span style="background:rgba(255,255,255,0.15);color:#fff;font-size:10px;font-weight:600;padding:2px 12px;border-radius:99px;">${filterLabel}</span>
+          <span style="background:rgba(255,255,255,0.15);color:#fff;font-size:10px;padding:2px 10px;border-radius:99px;">ช่วงวันที่: ${dateRange}</span>
+          <span style="margin-left:auto;background:rgba(255,255,255,0.2);color:#fff;font-size:10px;font-weight:800;padding:2px 14px;border-radius:99px;">${filtered.length} ประเด็น</span>
         </div>
-      </div>
-
-      <!-- ══ Stats + Progress ══ -->
-      <div style="background:#fff; border-radius:12px; padding:16px 18px; margin-bottom:14px; border:1px solid #e2e8f0;">
-        ${secHeader('สรุปภาพรวม')}
-        <div style="display:flex; gap:10px; margin-bottom:14px;">
-          ${[
-            {label:'ทั้งหมด',     val:filtered.length, bg:'#f8fafc', border:'#e2e8f0', vc:'#1e293b'},
-            {label:'รอแก้ไข',    val:counts.open,     bg:'#fef2f2', border:'#fecaca', vc:'#dc2626'},
-            {label:'แก้ชั่วคราว',val:counts.temp,     bg:'#fff7ed', border:'#fed7aa', vc:'#f97316'},
-            {label:'เสร็จสิ้น',  val:counts.closed,   bg:'#f0fdf4', border:'#bbf7d0', vc:'#059669'},
-            {label:'Rank A',     val:byRank.A,        bg:'#fef2f2', border:'#fecaca', vc:'#dc2626'},
-            {label:'Rank B',     val:byRank.B,        bg:'#fff7ed', border:'#fed7aa', vc:'#f97316'},
-            {label:'Rank C',     val:byRank.C,        bg:'#f0fdf4', border:'#bbf7d0', vc:'#059669'},
-          ].map(s=>`<div style="flex:1; background:${s.bg}; border:1.5px solid ${s.border}; border-radius:10px; padding:10px 12px;">
-            <div style="font-size:24px; font-weight:900; color:${s.vc}; ${K} line-height:1;">${s.val}</div>
-            <div style="font-size:9.5px; color:#64748b; margin-top:2px; ${K} font-weight:${s.label.startsWith('Rank')?700:400}; color:${s.label.startsWith('Rank')?s.vc:'#64748b'};">${s.label}</div>
-          </div>`).join('')}
-        </div>
-        <!-- อัตราการแก้ไข -->
-        <div style="display:flex; align-items:center; gap:12px;">
-          <div style="font-size:10px; font-weight:700; color:#475569; ${K} white-space:nowrap;">อัตราการแก้ไขเสร็จสิ้น</div>
-          <div style="flex:1; height:10px; background:#f1f5f9; border-radius:99px; overflow:hidden;">
-            <div style="height:100%; width:${closePct}%; background:linear-gradient(90deg,#059669,#0d9488); border-radius:99px; transition:width 0.3s;"></div>
-          </div>
-          <div style="font-size:14px; font-weight:900; color:${closePct>=80?'#059669':closePct>=50?'#f97316':'#dc2626'}; ${K} white-space:nowrap;">${closePct}%</div>
-        </div>
-      </div>
-
-      <!-- ══ Stop 1-6 ══ -->
-      <div style="background:#fff; border-radius:12px; padding:16px 18px; margin-bottom:14px; border:1px solid #e2e8f0;">
-        ${secHeader('อันตราย 6 ประการ (Stop 1–6)')}
-        <div style="display:flex; gap:8px; flex-wrap:wrap;">${stopGrid}</div>
-      </div>
-
-      <!-- ══ STOP × Rank Matrix ══ -->
-      <div style="background:#fff; border-radius:12px; padding:16px 18px; margin-bottom:14px; border:1px solid #e2e8f0;">
-        ${secHeader('ชนิดอันตราย × ระดับความรุนแรง (STOP × Rank)')}
-        <table style="width:100%; border-collapse:collapse;">
-          <thead>
-            <tr style="background:linear-gradient(135deg,#064e3b,#065f46);">
-              <th style="${thL}">ชนิดอันตราย</th>
-              <th style="${thStyle} color:#fca5a5;">Rank A</th>
-              <th style="${thStyle} color:#fdba74;">Rank B</th>
-              <th style="${thStyle} color:#6ee7b7;">Rank C</th>
-              <th style="${thStyle}">รวม</th>
-            </tr>
-          </thead>
-          <tbody>${matrixRows}</tbody>
-          <tfoot>
-            <tr style="background:#f8fafc; border-top:2px solid #e2e8f0;">
-              <td style="padding:6px 8px; font-size:10px; font-weight:700; ${K} color:#1e293b;">รวมทั้งหมด</td>
-              <td style="padding:6px 8px; text-align:center; font-size:10px; font-weight:900; ${K} color:#dc2626;">${mTotalA}</td>
-              <td style="padding:6px 8px; text-align:center; font-size:10px; font-weight:900; ${K} color:#f97316;">${mTotalB}</td>
-              <td style="padding:6px 8px; text-align:center; font-size:10px; font-weight:900; ${K} color:#059669;">${mTotalC}</td>
-              <td style="padding:6px 8px; text-align:center; font-size:10px; font-weight:900; ${K} color:#1e293b;">${mTotalA+mTotalB+mTotalC}</td>
-            </tr>
-          </tfoot>
-        </table>
-      </div>
-
-      <!-- ══ Area + Dept Breakdown ══ -->
-      <div style="display:flex; gap:14px; margin-bottom:14px;">
-        <!-- Area -->
-        <div style="flex:1; background:#fff; border-radius:12px; padding:16px 18px; border:1px solid #e2e8f0; min-width:0;">
-          ${secHeader('สถิติแยกพื้นที่')}
-          <table style="width:100%; border-collapse:collapse;">
-            <thead><tr style="background:#f8fafc; border-bottom:1.5px solid #e2e8f0;">
-              <th style="padding:6px 8px; font-size:9px; font-weight:700; ${K} color:#94a3b8; text-align:left;">พื้นที่</th>
-              <th style="padding:6px 8px; font-size:9px; font-weight:700; ${K} color:#475569; text-align:center;">พบ</th>
-              <th style="padding:6px 8px; font-size:9px; font-weight:700; ${K} color:#059669; text-align:center;">เสร็จ</th>
-              <th style="padding:6px 8px; font-size:9px; font-weight:700; ${K} color:#f97316; text-align:center;">ค้าง</th>
-              <th style="padding:6px 8px; font-size:9px; font-weight:700; ${K} color:#94a3b8; text-align:center;">%</th>
-            </tr></thead>
-            <tbody>${areaRows||`<tr><td colspan="5" style="text-align:center;padding:12px;color:#cbd5e1;font-size:10px;${K}">ไม่มีข้อมูล</td></tr>`}</tbody>
-          </table>
-        </div>
-        <!-- Dept -->
-        <div style="flex:1; background:#fff; border-radius:12px; padding:16px 18px; border:1px solid #e2e8f0; min-width:0;">
-          ${secHeader('สถิติแยกส่วนงาน')}
-          <table style="width:100%; border-collapse:collapse;">
-            <thead><tr style="background:#f8fafc; border-bottom:1.5px solid #e2e8f0;">
-              <th style="padding:6px 8px; font-size:9px; font-weight:700; ${K} color:#94a3b8; text-align:left;">ส่วนงาน</th>
-              <th style="padding:6px 8px; font-size:9px; font-weight:700; ${K} color:#475569; text-align:center;">พบ</th>
-              <th style="padding:6px 8px; font-size:9px; font-weight:700; ${K} color:#059669; text-align:center;">เสร็จ</th>
-              <th style="padding:6px 8px; font-size:9px; font-weight:700; ${K} color:#f97316; text-align:center;">ค้าง</th>
-              <th style="padding:6px 8px; font-size:9px; font-weight:700; ${K} color:#94a3b8; text-align:center;">%</th>
-            </tr></thead>
-            <tbody>${deptRows||`<tr><td colspan="5" style="text-align:center;padding:12px;color:#cbd5e1;font-size:10px;${K}">ไม่มีข้อมูล</td></tr>`}</tbody>
-          </table>
-        </div>
-      </div>
-
-      <!-- ══ Issue Table ══ -->
-      <div style="background:#fff; border-radius:12px; padding:16px 18px; margin-bottom:14px; border:1px solid #e2e8f0;">
-        ${secHeader(`ทะเบียนประเด็น (${filtered.length} รายการ)`)}
-        <table style="width:100%; border-collapse:collapse;">
-          <thead>
-            <tr style="background:linear-gradient(135deg,#064e3b,#065f46); color:#fff;">
-              <th style="${thStyle} width:32px;">#</th>
-              <th style="${thL} width:70px;">วันที่พบ</th>
-              <th style="${thL} width:78px;">พื้นที่</th>
-              <th style="${thL} width:88px;">ส่วนงาน</th>
-              <th style="${thL}">รายละเอียดอันตราย</th>
-              <th style="${thStyle} width:40px;">Rank</th>
-              <th style="${thStyle} width:74px;">สถานะ</th>
-              <th style="${thStyle} width:58px;">กำหนด</th>
-            </tr>
-          </thead>
-          <tbody>
-            ${filtered.length ? tableRows : `<tr><td colspan="8" style="text-align:center;padding:24px;color:#94a3b8;${K}font-size:11px;">ไม่มีข้อมูล</td></tr>`}
-          </tbody>
-        </table>
-      </div>
-
-      <!-- ══ Photo Cards ══ -->
-      ${withPhotos.length ? `
-      <div style="background:#fff; border-radius:12px; padding:16px 18px; margin-bottom:14px; border:1px solid #e2e8f0;">
-        ${secHeader(`ภาพประกอบ Before / After (${withPhotos.length} ประเด็น)`)}
-        ${photoCards}
-      </div>` : ''}
-
-      <!-- ══ Signature ══ -->
-      <div style="background:#fff; border-radius:12px; padding:20px 24px; border:1px solid #e2e8f0; margin-bottom:14px;">
-        <div style="font-size:10px; font-weight:700; color:#94a3b8; letter-spacing:1px; margin-bottom:16px; text-transform:uppercase;">รับรองและอนุมัติ</div>
-        <div style="display:flex; justify-content:space-between; gap:24px;">
-          ${['ผู้จัดทำรายงาน', 'หัวหน้าส่วนงาน', 'ผู้จัดการ'].map(role => `
-          <div style="flex:1; text-align:center;">
-            <div style="height:52px; border-bottom:1.5px solid #cbd5e1; margin-bottom:8px;"></div>
-            <div style="font-size:10px; color:#64748b; ${K}">(........................................)</div>
-            <div style="font-size:10.5px; font-weight:700; color:#374151; margin-top:4px; ${K}">${role}</div>
-            <div style="font-size:9.5px; color:#94a3b8; margin-top:3px; ${K}">วันที่ ......../......../.........</div>
-          </div>`).join('')}
-        </div>
-      </div>
-
-      <!-- ══ Footer ══ -->
-      <div style="text-align:center; font-size:9px; color:#94a3b8; ${K}">
-        เลขที่เอกสาร: ${docNo} · สร้างจากระบบ TSH Safety Core Activity · ${dateStr} ${timeStr} น.
       </div>
     </div>`;
 
-    // ── Step 13: Render & Save ──────────────────────────────────────────────
-    const el = document.createElement('div');
-    el.style.cssText = 'position:fixed;left:-9999px;top:0;z-index:-1;';
-    el.innerHTML = html;
-    document.body.appendChild(el);
+    // Section 2: Summary + progress
+    const s2 = sec(card(`
+      ${secHeader('สรุปภาพรวม')}
+      <div style="display:flex;gap:10px;margin-bottom:14px;">
+        ${[
+          {label:'ทั้งหมด',val:filtered.length,bg:'#f8fafc',border:'#e2e8f0',vc:'#1e293b'},
+          {label:'รอแก้ไข',val:counts.open,bg:'#fef2f2',border:'#fecaca',vc:'#dc2626'},
+          {label:'แก้ชั่วคราว',val:counts.temp,bg:'#fff7ed',border:'#fed7aa',vc:'#f97316'},
+          {label:'เสร็จสิ้น',val:counts.closed,bg:'#f0fdf4',border:'#bbf7d0',vc:'#059669'},
+          {label:'Rank A',val:byRank.A,bg:'#fef2f2',border:'#fecaca',vc:'#dc2626'},
+          {label:'Rank B',val:byRank.B,bg:'#fff7ed',border:'#fed7aa',vc:'#f97316'},
+          {label:'Rank C',val:byRank.C,bg:'#f0fdf4',border:'#bbf7d0',vc:'#059669'},
+        ].map(s=>`<div style="flex:1;background:${s.bg};border:1.5px solid ${s.border};border-radius:10px;padding:10px 12px;">
+          <div style="font-size:24px;font-weight:900;color:${s.vc};${K}line-height:1;">${s.val}</div>
+          <div style="font-size:9.5px;margin-top:2px;${K}font-weight:${s.label.startsWith('Rank')?700:400};color:${s.label.startsWith('Rank')?s.vc:'#64748b'};">${s.label}</div>
+        </div>`).join('')}
+      </div>
+      <div style="display:flex;align-items:center;gap:12px;">
+        <div style="font-size:10px;font-weight:700;color:#475569;${K}white-space:nowrap;">อัตราการแก้ไขเสร็จสิ้น</div>
+        <div style="flex:1;height:10px;background:#f1f5f9;border-radius:99px;overflow:hidden;">
+          <div style="height:100%;width:${closePct}%;background:linear-gradient(90deg,#059669,#0d9488);border-radius:99px;"></div>
+        </div>
+        <div style="font-size:14px;font-weight:900;${K}white-space:nowrap;color:${closePct>=80?'#059669':closePct>=50?'#f97316':'#dc2626'};">${closePct}%</div>
+      </div>
+    `));
 
+    // Section 3: Stop 1-6
+    const s3 = sec(card(`
+      ${secHeader('อันตราย 6 ประการ (Stop 1–6)')}
+      <div style="display:flex;gap:8px;flex-wrap:wrap;">
+        ${CCCF_STOP_TYPES.map(s=>`
+          <div style="flex:1;min-width:110px;background:${s.bg};border:1px solid ${s.border};border-radius:8px;padding:8px 10px;">
+            <div style="font-size:9px;font-weight:700;color:${s.color};${K}">${s.code}</div>
+            <div style="font-size:20px;font-weight:900;${K}line-height:1.1;color:${byStop[s.id]>0?s.color:'#cbd5e1'};">${byStop[s.id]}</div>
+            <div style="font-size:8.5px;color:#64748b;${K}margin-top:1px;">${s.label}</div>
+          </div>`).join('')}
+      </div>
+    `));
+
+    // Section 4: STOP × Rank matrix
+    const s4 = sec(card(`
+      ${secHeader('ชนิดอันตราย × ระดับความรุนแรง (STOP × Rank)')}
+      <table style="width:100%;border-collapse:collapse;">
+        <thead>
+          <tr style="background:linear-gradient(135deg,#064e3b,#065f46);">
+            <th style="${thL}">ชนิดอันตราย</th>
+            <th style="${thStyle}color:#fca5a5;">Rank A</th>
+            <th style="${thStyle}color:#fdba74;">Rank B</th>
+            <th style="${thStyle}color:#6ee7b7;">Rank C</th>
+            <th style="${thStyle}">รวม</th>
+          </tr>
+        </thead>
+        <tbody>${CCCF_STOP_TYPES.map((s,idx)=>{
+          const r=matrix[s.id]; const total=r.A+r.B+r.C;
+          return `<tr style="background:${idx%2?'#f8fafc':'#fff'};border-bottom:1px solid #f1f5f9;">
+            <td style="padding:5px 8px;font-size:10px;${K}color:#475569;">${s.code} ${s.label}</td>
+            <td style="padding:5px 8px;text-align:center;font-size:10px;font-weight:700;${K}color:${r.A>0?'#dc2626':'#cbd5e1'};">${r.A}</td>
+            <td style="padding:5px 8px;text-align:center;font-size:10px;font-weight:700;${K}color:${r.B>0?'#f97316':'#cbd5e1'};">${r.B}</td>
+            <td style="padding:5px 8px;text-align:center;font-size:10px;font-weight:700;${K}color:${r.C>0?'#059669':'#cbd5e1'};">${r.C}</td>
+            <td style="padding:5px 8px;text-align:center;font-size:10px;font-weight:700;${K}color:${total>0?'#1e293b':'#cbd5e1'};">${total}</td>
+          </tr>`;
+        }).join('')}</tbody>
+        <tfoot>
+          <tr style="background:#f8fafc;border-top:2px solid #e2e8f0;">
+            <td style="padding:6px 8px;font-size:10px;font-weight:700;${K}color:#1e293b;">รวมทั้งหมด</td>
+            <td style="padding:6px 8px;text-align:center;font-size:10px;font-weight:900;${K}color:#dc2626;">${mTotalA}</td>
+            <td style="padding:6px 8px;text-align:center;font-size:10px;font-weight:900;${K}color:#f97316;">${mTotalB}</td>
+            <td style="padding:6px 8px;text-align:center;font-size:10px;font-weight:900;${K}color:#059669;">${mTotalC}</td>
+            <td style="padding:6px 8px;text-align:center;font-size:10px;font-weight:900;${K}color:#1e293b;">${mTotalA+mTotalB+mTotalC}</td>
+          </tr>
+        </tfoot>
+      </table>
+    `));
+
+    // Section 5: Area + Dept breakdown (side by side)
+    const mkBreakTable = (rows, emptyLabel) => `
+      <table style="width:100%;border-collapse:collapse;">
+        <thead><tr style="background:#f8fafc;border-bottom:1.5px solid #e2e8f0;">
+          <th style="padding:6px 8px;font-size:9px;font-weight:700;${K}color:#94a3b8;text-align:left;">${emptyLabel}</th>
+          <th style="padding:6px 8px;font-size:9px;font-weight:700;${K}color:#475569;text-align:center;">พบ</th>
+          <th style="padding:6px 8px;font-size:9px;font-weight:700;${K}color:#059669;text-align:center;">เสร็จ</th>
+          <th style="padding:6px 8px;font-size:9px;font-weight:700;${K}color:#f97316;text-align:center;">ค้าง</th>
+          <th style="padding:6px 8px;font-size:9px;font-weight:700;${K}color:#94a3b8;text-align:center;">%</th>
+        </tr></thead>
+        <tbody>${rows||`<tr><td colspan="5" style="text-align:center;padding:12px;color:#cbd5e1;font-size:10px;${K}">ไม่มีข้อมูล</td></tr>`}</tbody>
+      </table>`;
+
+    const s5 = sec(`<div style="display:flex;gap:14px;">
+      <div style="flex:1;min-width:0;background:#fff;border-radius:12px;padding:16px 18px;border:1px solid #e2e8f0;">
+        ${secHeader('สถิติแยกพื้นที่')}
+        ${mkBreakTable(areaRows,'พื้นที่')}
+      </div>
+      <div style="flex:1;min-width:0;background:#fff;border-radius:12px;padding:16px 18px;border:1px solid #e2e8f0;">
+        ${secHeader('สถิติแยกส่วนงาน')}
+        ${mkBreakTable(deptRows,'ส่วนงาน')}
+      </div>
+    </div>`);
+
+    // Section 6: Issue register table
+    const s6 = sec(card(`
+      ${secHeader(`ทะเบียนประเด็น (${filtered.length} รายการ)`)}
+      <table style="width:100%;border-collapse:collapse;">
+        <thead>
+          <tr style="background:linear-gradient(135deg,#064e3b,#065f46);color:#fff;">
+            <th style="${thStyle}width:32px;">#</th>
+            <th style="${thL}width:70px;">วันที่พบ</th>
+            <th style="${thL}width:78px;">พื้นที่</th>
+            <th style="${thL}width:88px;">ส่วนงาน</th>
+            <th style="${thL}">รายละเอียดอันตราย</th>
+            <th style="${thStyle}width:40px;">Rank</th>
+            <th style="${thStyle}width:74px;">สถานะ</th>
+            <th style="${thStyle}width:58px;">กำหนด</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${filtered.length ? tableRows : `<tr><td colspan="8" style="text-align:center;padding:24px;color:#94a3b8;${K}font-size:11px;">ไม่มีข้อมูล</td></tr>`}
+        </tbody>
+      </table>
+    `));
+
+    // Section 7: Photo cards — one canvas per card to avoid splits
+    const photoSections = withPhotos.map((i, idx) => {
+        const rc = rColor(i.Rank); const sc = sColor(i.CurrentStatus);
+        const date = i.DateFound ? new Date(i.DateFound).toLocaleDateString('th-TH',{day:'numeric',month:'short',year:'numeric'}) : '—';
+        const beforeUrl = resolveFileUrl(i.BeforeImage);
+        const tempUrl   = resolveFileUrl(i.TempImage);
+        const afterUrl  = resolveFileUrl(i.AfterImage);
+        const imgSlot = (url, label, borderColor) => url
+            ? `<div style="flex:1;min-width:0;">
+                <div style="font-size:9px;font-weight:700;color:${borderColor};${K}margin-bottom:4px;text-transform:uppercase;letter-spacing:0.5px;">${label}</div>
+                <img src="${url}" crossorigin="anonymous" style="width:100%;height:140px;object-fit:cover;border-radius:8px;border:2px solid ${borderColor}30;" onerror="this.style.display='none'"/>
+               </div>`
+            : `<div style="flex:1;min-width:0;">
+                <div style="font-size:9px;font-weight:700;color:#cbd5e1;${K}margin-bottom:4px;">${label}</div>
+                <div style="height:140px;background:#f8fafc;border-radius:8px;border:2px dashed #e2e8f0;display:flex;align-items:center;justify-content:center;">
+                  <span style="font-size:10px;color:#cbd5e1;${K}">ไม่มีรูปภาพ</span>
+                </div>
+               </div>`;
+        const isFirst = idx === 0;
+        return sec(card(`
+          ${isFirst ? secHeader(`ภาพประกอบ Before / After (${withPhotos.length} ประเด็น)`) : ''}
+          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;">
+            <div style="display:flex;align-items:center;gap:10px;">
+              <span style="font-size:10px;color:#94a3b8;${K}font-weight:600;">#${i.IssueID||idx+1}</span>
+              ${i.Rank?`<span style="background:${rc};color:#fff;font-size:10px;font-weight:800;padding:2px 10px;border-radius:8px;${K}">${i.Rank}</span>`:''}
+              <span style="background:${sc}18;color:${sc};font-size:10px;font-weight:700;padding:2px 10px;border-radius:99px;${K}">${sLabel(i.CurrentStatus)}</span>
+            </div>
+            <span style="font-size:10px;color:#94a3b8;${K}">${date} · ${i.Area||''}</span>
+          </div>
+          <div style="font-size:11px;color:#1e293b;${K}font-weight:600;margin-bottom:6px;line-height:1.5;">${i.HazardDescription||'—'}</div>
+          ${i.TempDescription?`<div style="font-size:10px;color:#f97316;${K}margin-bottom:6px;">แก้ชั่วคราว: ${i.TempDescription}</div>`:''}
+          ${i.ActionDescription?`<div style="font-size:10px;color:#059669;${K}margin-bottom:10px;">การแก้ไขถาวร: ${i.ActionDescription}</div>`:''}
+          <div style="display:flex;gap:10px;">
+            ${imgSlot(beforeUrl,'ก่อนแก้ไข (Before)','#dc2626')}
+            ${tempUrl?imgSlot(tempUrl,'แก้ชั่วคราว (Temp)','#f97316'):''}
+            ${imgSlot(afterUrl,'หลังแก้ไข (After)','#059669')}
+          </div>
+        `));
+    });
+
+    // Section 8: Signature
+    const s8 = sec(card(`
+      <div style="font-size:10px;font-weight:700;color:#94a3b8;letter-spacing:1px;margin-bottom:16px;text-transform:uppercase;">รับรองและอนุมัติ</div>
+      <div style="display:flex;justify-content:space-between;gap:24px;">
+        ${['ผู้จัดทำรายงาน','หัวหน้าส่วนงาน','ผู้จัดการ'].map(role=>`
+          <div style="flex:1;text-align:center;">
+            <div style="height:52px;border-bottom:1.5px solid #cbd5e1;margin-bottom:8px;"></div>
+            <div style="font-size:10px;color:#64748b;${K}">(........................................)</div>
+            <div style="font-size:10.5px;font-weight:700;color:#374151;margin-top:4px;${K}">${role}</div>
+            <div style="font-size:9.5px;color:#94a3b8;margin-top:3px;${K}">วันที่ ......../......../.........</div>
+          </div>`).join('')}
+      </div>
+    `));
+
+    // Assemble all sections
+    const allSections = [s1, s2, s3, s4, s5, s6, ...photoSections, s8];
+
+    // ── Step 13: Render each section to canvas, place on PDF ────────────────
+    const renderToCanvas = async (htmlStr) => {
+        const el = document.createElement('div');
+        el.style.cssText = 'position:fixed;left:-9999px;top:0;z-index:-1;width:794px;';
+        el.innerHTML = htmlStr;
+        document.body.appendChild(el);
+        await new Promise(r => setTimeout(r, 40));
+        const c = await html2canvas(el, {
+            scale: 2, useCORS: true, logging: false,
+            backgroundColor: '#f8fafc', windowWidth: 794, allowTaint: false,
+        });
+        document.body.removeChild(el);
+        return c;
+    };
+
+    // px→mm: at scale:2 canvas.width = 794*2 = 1588px → 210mm
+    const toMM = (canvas) => canvas.height * pageW / canvas.width;
+
+    const elOuter = document.createElement('div'); // keep reference for cleanup
+    document.body.appendChild(elOuter); // placeholder so finally can remove something
     try {
         showLoading('กำลังสร้าง PDF...');
         await document.fonts.ready;
-        await new Promise(r => setTimeout(r, 500));
-
-        const canvas = await html2canvas(el.firstElementChild, {
-            scale: 2, useCORS: true, logging: false,
-            backgroundColor: '#f8fafc', windowWidth: 794,
-            allowTaint: false,
-        });
+        await new Promise(r => setTimeout(r, 400));
 
         const { jsPDF } = window.jspdf;
-        const pdf = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
-        const pageW = 210, pageH = 297;
-        const imgW  = pageW;
-        const imgH  = (canvas.height * pageW) / canvas.width;
-        const imgData = canvas.toDataURL('image/jpeg', 0.92);
+        const pdf  = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
+        const marginT = 8, marginB = 12;
+        let   curY = marginT;
 
-        let remaining = imgH, offset = 0;
-        pdf.addImage(imgData, 'JPEG', 0, offset, imgW, imgH);
-        remaining -= pageH;
-        while (remaining > 0) {
-            offset -= pageH; pdf.addPage();
-            pdf.addImage(imgData, 'JPEG', 0, offset, imgW, imgH);
-            remaining -= pageH;
+        for (let si = 0; si < allSections.length; si++) {
+            const canvas = await renderToCanvas(allSections[si]);
+            const imgH   = toMM(canvas);
+            const imgData = canvas.toDataURL('image/jpeg', 0.92);
+
+            // Start a new page if section won't fit (and we're not at page start)
+            if (curY > marginT && curY + imgH > pageH - marginB) {
+                pdf.addPage();
+                curY = marginT;
+            }
+
+            // If single section is taller than a full page, slice it across pages
+            if (imgH > pageH - marginT - marginB) {
+                let yInImg = 0; // mm into the image we've placed so far
+                while (yInImg < imgH) {
+                    const sliceH = Math.min(pageH - curY - marginB, imgH - yInImg);
+                    // Render only the visible slice by offsetting the image upward
+                    pdf.addImage(imgData, 'JPEG', 0, curY - yInImg, pageW, imgH);
+                    yInImg += sliceH;
+                    curY   += sliceH;
+                    if (yInImg < imgH) { pdf.addPage(); curY = marginT; }
+                }
+            } else {
+                pdf.addImage(imgData, 'JPEG', 0, curY, pageW, imgH);
+                curY += imgH + 2;
+            }
         }
 
+        // Page numbers + doc number on every page
         const totalPages = pdf.getNumberOfPages();
         for (let p = 1; p <= totalPages; p++) {
             pdf.setPage(p);
             pdf.setFontSize(8); pdf.setTextColor(148, 163, 184);
             pdf.text(`หน้า ${p} / ${totalPages}`, pageW - 14, pageH - 5, { align: 'right' });
             pdf.text(docNo, 14, pageH - 5);
+            if (p < totalPages) {
+                // light separator line
+                pdf.setDrawColor(226, 232, 240);
+                pdf.line(14, pageH - 8, pageW - 14, pageH - 8);
+            }
         }
 
         pdf.save(`patrol_issues_${now.toISOString().slice(0,10)}.pdf`);
@@ -3503,7 +3582,7 @@ async function exportIssuesToPDF() {
         console.error('PDF error:', err);
         showToast('ส่งออก PDF ไม่สำเร็จ', 'error');
     } finally {
-        document.body.removeChild(el);
+        if (document.body.contains(elOuter)) document.body.removeChild(elOuter);
         hideLoading();
     }
 }
