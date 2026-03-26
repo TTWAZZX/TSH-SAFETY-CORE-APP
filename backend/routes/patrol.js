@@ -13,6 +13,8 @@ const { isAdmin } = require('../middleware/auth');
         'ALTER TABLE Patrol_Attendance ADD COLUMN Notes TEXT DEFAULT NULL',
         'ALTER TABLE Patrol_Attendance ADD COLUMN Area VARCHAR(200) DEFAULT NULL',
         'ALTER TABLE Master_Positions ADD COLUMN PatrolPassPct INT DEFAULT 80',
+        'ALTER TABLE Patrol_Attendance ADD COLUMN PatrolType VARCHAR(20) DEFAULT NULL',
+        'ALTER TABLE Patrol_Attendance ADD COLUMN RecordedBy VARCHAR(50) DEFAULT NULL',
     ]) { try { await db.query(sql); } catch (_) {} }
 })();
 
@@ -60,7 +62,7 @@ router.get('/my-monthly-plan', async (req, res) => {
 
         // 3. Sessions for effective team this month
         const [sessions] = await db.query(`
-            SELECT s.id, s.PatrolDate, s.PatrolRound, s.Status,
+            SELECT s.SessionID AS id, s.PatrolDate, s.PatrolRound, s.Status,
                    a.Name AS AreaName, a.Code AS AreaCode
             FROM   Patrol_Sessions s
             LEFT JOIN Patrol_Areas a ON a.id = s.AreaID
@@ -270,7 +272,7 @@ router.get('/day-detail', async (req, res) => {
     if (!date) return res.status(400).json({ success: false, message: 'กรุณาระบุวันที่' });
     try {
         const [sessions] = await db.query(`
-            SELECT s.id, s.PatrolRound, s.Status,
+            SELECT s.SessionID AS id, s.PatrolRound, s.Status,
                    t.id AS TeamID, t.Name AS TeamName, t.Color AS TeamColor,
                    a.Name AS AreaName, a.Code AS AreaCode,
                    (SELECT COUNT(*) FROM Patrol_Team_Members WHERE TeamID = s.TeamID) AS MemberCount,
@@ -368,13 +370,27 @@ router.post('/checkin', async (req, res) => {
         const UserID   = req.user.id;
         const UserName = req.user.name;
         const TeamName = req.user.team || '';
-        const currentWeek = getWeekNumber(new Date());
-        const Notes    = req.body.Notes?.trim() || null;
-        const Area     = req.body.Area?.trim()  || null;
-        await db.query(
-            'INSERT INTO Patrol_Attendance (UserID, UserName, TeamName, WeekNumber, Notes, Area) VALUES (?, ?, ?, ?, ?, ?)',
-            [UserID, UserName, TeamName, currentWeek, Notes, Area]
-        );
+        const Notes     = req.body.Notes?.trim() || null;
+        const Area      = req.body.Area?.trim()  || null;
+        const PatrolType = req.body.PatrolType || 'normal';
+        // PatrolDate: user may supply an explicit date for compensation patrol (same year only)
+        let patrolDate = null;
+        if (req.body.PatrolDate) {
+            const d = new Date(req.body.PatrolDate);
+            if (!isNaN(d.getTime())) patrolDate = d.toISOString().split('T')[0];
+        }
+        const currentWeek = getWeekNumber(patrolDate ? new Date(patrolDate) : new Date());
+        if (patrolDate) {
+            await db.query(
+                'INSERT INTO Patrol_Attendance (UserID, UserName, TeamName, WeekNumber, Notes, Area, PatrolType, PatrolDate) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+                [UserID, UserName, TeamName, currentWeek, Notes, Area, PatrolType, patrolDate]
+            );
+        } else {
+            await db.query(
+                'INSERT INTO Patrol_Attendance (UserID, UserName, TeamName, WeekNumber, Notes, Area, PatrolType) VALUES (?, ?, ?, ?, ?, ?, ?)',
+                [UserID, UserName, TeamName, currentWeek, Notes, Area, PatrolType]
+            );
+        }
 
         const [stats] = await db.query(
             'SELECT COUNT(*) AS TotalWalks, MAX(PatrolDate) AS LastWalk FROM Patrol_Attendance WHERE UserID = ?',
@@ -719,7 +735,7 @@ router.get('/monthly-report', async (req, res) => {
     try {
         // Sessions for the month
         const [sessions] = await db.query(`
-            SELECT s.id, s.TeamID, s.PatrolDate, s.PatrolRound,
+            SELECT s.SessionID AS id, s.TeamID, s.PatrolDate, s.PatrolRound,
                    t.Name AS TeamName, t.PatrolGroup, t.Color,
                    a.Name AS AreaName, a.Code AS AreaCode
             FROM   Patrol_Sessions s
@@ -991,7 +1007,7 @@ router.put('/sessions/:id', async (req, res) => {
         if (Status)     { sets.push('Status = ?');     vals.push(Status); }
         vals.push(req.params.id);
         const [result] = await db.query(
-            `UPDATE Patrol_Sessions SET ${sets.join(', ')} WHERE id = ?`, vals
+            `UPDATE Patrol_Sessions SET ${sets.join(', ')} WHERE SessionID = ?`, vals
         );
         if (result.affectedRows === 0) return res.status(404).json({ success: false, message: 'ไม่พบ session' });
         res.json({ success: true, message: 'แก้ไข session เรียบร้อย' });
@@ -1003,7 +1019,7 @@ router.put('/sessions/:id', async (req, res) => {
 // DELETE /api/patrol/sessions/:id — ลบ session (Admin)
 router.delete('/sessions/:id', async (req, res) => {
     try {
-        const [result] = await db.query('DELETE FROM Patrol_Sessions WHERE id = ?', [req.params.id]);
+        const [result] = await db.query('DELETE FROM Patrol_Sessions WHERE SessionID = ?', [req.params.id]);
         if (result.affectedRows === 0) return res.status(404).json({ success: false, message: 'ไม่พบ session' });
         res.json({ success: true, message: 'ลบ session เรียบร้อย' });
     } catch (err) {
@@ -1267,6 +1283,137 @@ router.delete('/roster/:id', isAdmin, async (req, res) => {
     try {
         await db.query('DELETE FROM Patrol_Roster WHERE id = ?', [req.params.id]);
         res.json({ success: true, message: 'ลบออกจากรายการสำเร็จ' });
+    } catch (err) {
+        res.status(500).json({ success: false, message: err.message });
+    }
+});
+
+// GET /api/patrol/my-missed-sessions?year=Y — sessions ที่ user ควรเดินแต่ยังไม่มีบันทึก (สำหรับ เดินซ่อม dropdown)
+router.get('/my-missed-sessions', async (req, res) => {
+    const employeeId = req.user.id;
+    const year = parseInt(req.query.year) || new Date().getFullYear();
+    try {
+        // 1. ตรวจสอบ PatrolType ของ user (management = all rounds, others = round 2 only)
+        const [[base]] = await db.query(
+            `SELECT tm.PatrolType, tm.TeamID FROM Patrol_Team_Members tm WHERE tm.EmployeeID = ? LIMIT 1`,
+            [employeeId]
+        );
+        if (!base) return res.json({ success: true, data: [] }); // ไม่ได้อยู่ในทีม
+
+        // 2. ดึง sessions ในทีมที่ผ่านมาแล้ว และ user ยังไม่มีบันทึก attendance ตรงวันนั้น
+        const roundFilter = base.PatrolType === 'management' ? '' : 'AND s.PatrolRound = 2';
+        const [rows] = await db.query(`
+            SELECT s.SessionID AS id, s.PatrolDate, s.PatrolRound,
+                   a.Name AS AreaName, a.Code AS AreaCode
+            FROM   Patrol_Sessions s
+            LEFT JOIN Patrol_Areas a ON a.id = s.AreaID
+            WHERE  s.TeamID = ?
+              AND  YEAR(s.PatrolDate) = ?
+              AND  s.PatrolDate < NOW()
+              ${roundFilter}
+              AND  NOT EXISTS (
+                  SELECT 1 FROM Patrol_Attendance pa
+                  WHERE pa.UserID = ? AND DATE(pa.PatrolDate) = DATE(s.PatrolDate)
+              )
+            ORDER BY s.PatrolDate DESC
+        `, [base.TeamID, year, employeeId]);
+        res.json({ success: true, data: rows });
+    } catch (err) {
+        res.status(500).json({ success: false, message: err.message });
+    }
+});
+
+// GET /api/patrol/supervisor-checkins?employeeId=X&year=Y — รายการ Self-Patrol รายบุคคล (admin/modal view)
+router.get('/supervisor-checkins', async (req, res) => {
+    const { employeeId, year: yearStr } = req.query;
+    if (!employeeId) return res.status(400).json({ success: false, message: 'ต้องระบุ employeeId' });
+    const year = parseInt(yearStr) || new Date().getFullYear();
+    try {
+        const [rows] = await db.query(
+            `SELECT id, CheckinDate, Location, Notes, Year, Month
+             FROM Patrol_Self_Checkin WHERE EmployeeID = ? AND Year = ?
+             ORDER BY CheckinDate DESC`,
+            [employeeId, year]
+        );
+        res.json({ success: true, data: rows });
+    } catch (err) {
+        res.status(500).json({ success: false, message: err.message });
+    }
+});
+
+// ==========================================
+// PART 9: Admin Record Management
+// ==========================================
+
+// POST /api/patrol/admin-record — Admin เพิ่มรายการเดินตรวจให้สมาชิกคนใดก็ได้ (Patrol_Attendance)
+router.post('/admin-record', isAdmin, async (req, res) => {
+    const { EmployeeID, PatrolDate, PatrolType, Area, Notes } = req.body;
+    if (!EmployeeID || !PatrolDate) return res.status(400).json({ success: false, message: 'ต้องระบุ EmployeeID และ PatrolDate' });
+    try {
+        const [[emp]] = await db.query(
+            `SELECT e.EmployeeName, t.Name AS TeamName
+             FROM Employees e
+             LEFT JOIN Patrol_Team_Members tm ON tm.EmployeeID = e.EmployeeID
+             LEFT JOIN Patrol_Teams t ON t.id = tm.TeamID
+             WHERE e.EmployeeID = ? LIMIT 1`,
+            [EmployeeID]
+        );
+        if (!emp) return res.status(404).json({ success: false, message: 'ไม่พบพนักงาน' });
+        const d = new Date(PatrolDate);
+        if (isNaN(d.getTime())) return res.status(400).json({ success: false, message: 'PatrolDate ไม่ถูกต้อง' });
+        const dateStr = d.toISOString().split('T')[0];
+        const week = getWeekNumber(d);
+        await db.query(
+            `INSERT INTO Patrol_Attendance (UserID, UserName, TeamName, WeekNumber, PatrolDate, PatrolType, Area, Notes, RecordedBy)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+            [EmployeeID, emp.EmployeeName, emp.TeamName || '', week,
+             dateStr, PatrolType || 'normal', Area || null, Notes || null, req.user.id]
+        );
+        res.json({ success: true, message: 'เพิ่มรายการสำเร็จ' });
+    } catch (err) {
+        res.status(500).json({ success: false, message: err.message });
+    }
+});
+
+// DELETE /api/patrol/admin-record/:id — Admin ลบรายการเดินตรวจ (Patrol_Attendance)
+router.delete('/admin-record/:id', isAdmin, async (req, res) => {
+    try {
+        const [[row]] = await db.query('SELECT id FROM Patrol_Attendance WHERE id = ?', [req.params.id]);
+        if (!row) return res.status(404).json({ success: false, message: 'ไม่พบรายการ' });
+        await db.query('DELETE FROM Patrol_Attendance WHERE id = ?', [req.params.id]);
+        res.json({ success: true, message: 'ลบรายการสำเร็จ' });
+    } catch (err) {
+        res.status(500).json({ success: false, message: err.message });
+    }
+});
+
+// POST /api/patrol/admin-record/supervisor — Admin เพิ่มรายการ Self-Patrol ให้หัวหน้า (Patrol_Self_Checkin)
+router.post('/admin-record/supervisor', isAdmin, async (req, res) => {
+    const { EmployeeID, CheckinDate, Location, Notes } = req.body;
+    if (!EmployeeID || !CheckinDate) return res.status(400).json({ success: false, message: 'ต้องระบุ EmployeeID และ CheckinDate' });
+    try {
+        const [[emp]] = await db.query('SELECT EmployeeName FROM Employees WHERE EmployeeID = ?', [EmployeeID]);
+        if (!emp) return res.status(404).json({ success: false, message: 'ไม่พบพนักงาน' });
+        const d = new Date(CheckinDate);
+        if (isNaN(d.getTime())) return res.status(400).json({ success: false, message: 'CheckinDate ไม่ถูกต้อง' });
+        await db.query(
+            `INSERT INTO Patrol_Self_Checkin (EmployeeID, CheckinDate, Location, Notes, Year, Month)
+             VALUES (?, ?, ?, ?, ?, ?)`,
+            [EmployeeID, CheckinDate, Location || null, Notes || null, d.getFullYear(), d.getMonth() + 1]
+        );
+        res.json({ success: true, message: 'เพิ่มรายการสำเร็จ' });
+    } catch (err) {
+        res.status(500).json({ success: false, message: err.message });
+    }
+});
+
+// DELETE /api/patrol/admin-record/supervisor/:id — Admin ลบรายการ Self-Patrol (Patrol_Self_Checkin)
+router.delete('/admin-record/supervisor/:id', isAdmin, async (req, res) => {
+    try {
+        const [[row]] = await db.query('SELECT id FROM Patrol_Self_Checkin WHERE id = ?', [req.params.id]);
+        if (!row) return res.status(404).json({ success: false, message: 'ไม่พบรายการ' });
+        await db.query('DELETE FROM Patrol_Self_Checkin WHERE id = ?', [req.params.id]);
+        res.json({ success: true, message: 'ลบรายการสำเร็จ' });
     } catch (err) {
         res.status(500).json({ success: false, message: err.message });
     }

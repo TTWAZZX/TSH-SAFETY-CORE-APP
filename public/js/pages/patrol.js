@@ -729,6 +729,81 @@ function renderDashboard(container, data) {
           </div>`;
           })()}
 
+          <!-- Team Roster Card — YTD stats + pass/fail -->
+          ${_myPlan?.roster?.length > 0 ? (() => {
+            const typeColor = { top:'rose', committee:'amber', management:'indigo' };
+            const typeLabel = { top:'Top', committee:'คปอ.', management:'Mgmt' };
+            const roster    = _myPlan.roster;
+            const memberMap = {};
+            (_myYearlyStats?.teamMemberStats || []).forEach(s => {
+                memberMap[s.EmployeeID] = { yearlyCount: s.yearlyCount, position: s.position };
+            });
+            const thresholdMap = {};
+            _positionThresholds.forEach(t => { thresholdMap[t.Name] = t.PatrolPassPct; });
+            const yearlyTarget = _myYearlyStats?.yearlyTarget || null;
+            const curYear = new Date().getFullYear();
+            const maxCount = Math.max(1, ...Object.values(memberMap).map(m => m.yearlyCount ?? 0));
+            return `
+          <div class="bg-white rounded-2xl shadow-sm border border-slate-100 overflow-hidden">
+            <div class="px-5 py-3 flex items-center justify-between border-b border-slate-50">
+              <h3 class="font-bold text-slate-700 text-sm flex items-center gap-2">
+                <span class="w-2.5 h-2.5 rounded-full flex-shrink-0" style="background:${_myPlan.team.color}"></span>
+                ทีมของฉัน · สถานะ YTD ${curYear}
+              </h3>
+              <div class="flex items-center gap-2">
+                <span class="text-[10px] text-slate-400 font-semibold">${roster.length} คน</span>
+                ${isAdmin ? `<button onclick="openThresholdSettings()" title="ตั้งค่าเกณฑ์ผ่าน"
+                  class="p-1.5 rounded-lg bg-slate-50 hover:bg-emerald-50 text-slate-400 hover:text-emerald-600 transition-colors border border-slate-100">
+                  <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"/><circle cx="12" cy="12" r="3"/></svg>
+                </button>` : ''}
+              </div>
+            </div>
+            <div class="divide-y divide-slate-50">
+              ${roster.map(m => {
+                const tc        = typeColor[m.PatrolType] || 'slate';
+                const tl        = typeLabel[m.PatrolType] || m.PatrolType;
+                const isMe      = m.EmployeeID === currentUser.id;
+                const mStats    = memberMap[m.EmployeeID] || null;
+                const ytdCount  = mStats?.yearlyCount ?? null;
+                const position  = mStats?.position || null;
+                const threshold = position ? (thresholdMap[position] ?? 80) : null;
+                const ytdPct    = yearlyTarget && ytdCount !== null
+                    ? Math.min(Math.round((ytdCount / yearlyTarget) * 100), 100) : null;
+                const barPct    = ytdCount !== null
+                    ? Math.min(Math.round((ytdCount / maxCount) * 100), 100) : 0;
+                const ytdDone   = yearlyTarget && ytdCount !== null && ytdCount >= yearlyTarget;
+                const passed    = threshold !== null && ytdPct !== null && ytdPct >= threshold;
+                const failing   = threshold !== null && ytdPct !== null && ytdPct < threshold;
+                return `<div class="px-4 py-2.5 ${isMe ? 'bg-emerald-50/60' : 'hover:bg-slate-50'} transition-colors">
+                  <div class="flex items-center gap-2.5 mb-1.5">
+                    <div class="w-6 h-6 rounded-full flex items-center justify-center flex-shrink-0 text-[10px] font-bold ${isMe?'bg-emerald-500 text-white':'bg-slate-100 text-slate-600'}">
+                      ${(m.EmployeeName||'?').charAt(0)}
+                    </div>
+                    <span class="text-xs font-medium text-slate-700 flex-1 truncate ${isMe?'font-bold':''}">${m.EmployeeName}${isMe?' (ฉัน)':''}</span>
+                    <span class="text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-${tc}-100 text-${tc}-700 flex-shrink-0">${tl}</span>
+                    ${ytdCount !== null ? `
+                    <span class="text-[10px] font-bold flex-shrink-0 ${ytdDone ? 'text-emerald-600' : 'text-slate-500'}">
+                      ${ytdCount}${yearlyTarget ? `/${yearlyTarget}` : ''} ครั้ง
+                    </span>` : ''}
+                  </div>
+                  ${ytdCount !== null ? `
+                  <div class="ml-8">
+                    <div class="flex items-center gap-2 mb-1">
+                      <div class="flex-1 bg-slate-100 rounded-full h-1.5 overflow-hidden">
+                        <div class="h-full rounded-full transition-all duration-700" style="width:${barPct}%;background:${ytdDone ? 'linear-gradient(90deg,#059669,#10b981)' : isMe ? 'linear-gradient(90deg,#6366f1,#8b5cf6)' : '#94a3b8'}"></div>
+                      </div>
+                      ${passed ? `<span class="text-[9px] font-bold text-emerald-600 bg-emerald-50 px-1.5 py-0.5 rounded-full border border-emerald-100 flex-shrink-0">ผ่าน</span>`
+                        : failing ? `<span class="text-[9px] font-bold text-amber-600 bg-amber-50 px-1.5 py-0.5 rounded-full border border-amber-100 flex-shrink-0">ต่ำกว่าเกณฑ์ ${threshold}%</span>`
+                        : ''}
+                    </div>
+                    ${ytdPct !== null ? `<p class="text-[8px] text-slate-400">${ytdPct}% ของเป้าหมายรายปี</p>` : ''}
+                  </div>` : `<div class="ml-8"><div class="w-full bg-slate-100 rounded-full h-1.5"></div></div>`}
+                </div>`;
+              }).join('')}
+            </div>
+          </div>`;
+          })() : ''}
+
           <!-- Self-Patrol Card (หัวหน้าส่วน/แผนก) — conditional -->
           ${_mySelfPatrol?.isSupervisorPatrol ? (() => {
             const sp        = _mySelfPatrol;
@@ -921,84 +996,6 @@ function renderDashboard(container, data) {
               </div>
             </div>
           </div>` : ''}
-
-          <!-- Team Roster Card (Phase 4 — YTD stats + pass/fail) -->
-          ${_myPlan?.roster?.length > 0 ? (() => {
-            const typeColor = { top:'rose', committee:'amber', management:'indigo' };
-            const typeLabel = { top:'Top', committee:'คปอ.', management:'Mgmt' };
-            const roster    = _myPlan.roster;
-            // Build member stats map: EmployeeID → { yearlyCount, position }
-            const memberMap = {};
-            (_myYearlyStats?.teamMemberStats || []).forEach(s => {
-                memberMap[s.EmployeeID] = { yearlyCount: s.yearlyCount, position: s.position };
-            });
-            // Build threshold map: position name → PatrolPassPct
-            const thresholdMap = {};
-            _positionThresholds.forEach(t => { thresholdMap[t.Name] = t.PatrolPassPct; });
-            const yearlyTarget = _myYearlyStats?.yearlyTarget || null;
-            const curYear = new Date().getFullYear();
-            const maxCount = Math.max(1, ...Object.values(memberMap).map(m => m.yearlyCount ?? 0));
-            return `
-          <div class="bg-white rounded-2xl shadow-sm border border-slate-100 overflow-hidden">
-            <div class="px-5 py-3 flex items-center justify-between border-b border-slate-50">
-              <h3 class="font-bold text-slate-700 text-sm flex items-center gap-2">
-                <span class="w-2.5 h-2.5 rounded-full flex-shrink-0" style="background:${_myPlan.team.color}"></span>
-                ทีมของฉัน · สถานะ YTD ${curYear}
-              </h3>
-              <div class="flex items-center gap-2">
-                <span class="text-[10px] text-slate-400 font-semibold">${roster.length} คน</span>
-                ${isAdmin ? `<button onclick="openThresholdSettings()" title="ตั้งค่าเกณฑ์ผ่าน"
-                  class="p-1.5 rounded-lg bg-slate-50 hover:bg-emerald-50 text-slate-400 hover:text-emerald-600 transition-colors border border-slate-100">
-                  <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"/><circle cx="12" cy="12" r="3"/></svg>
-                </button>` : ''}
-              </div>
-            </div>
-            <div class="divide-y divide-slate-50">
-              ${roster.map(m => {
-                const tc        = typeColor[m.PatrolType] || 'slate';
-                const tl        = typeLabel[m.PatrolType] || m.PatrolType;
-                const isMe      = m.EmployeeID === currentUser.id;
-                const mStats    = memberMap[m.EmployeeID] || null;
-                const ytdCount  = mStats?.yearlyCount ?? null;
-                const position  = mStats?.position || null;
-                const threshold = position ? (thresholdMap[position] ?? 80) : null;
-                const ytdPct    = yearlyTarget && ytdCount !== null
-                    ? Math.min(Math.round((ytdCount / yearlyTarget) * 100), 100) : null;
-                const barPct    = ytdCount !== null
-                    ? Math.min(Math.round((ytdCount / maxCount) * 100), 100) : 0;
-                const ytdDone   = yearlyTarget && ytdCount !== null && ytdCount >= yearlyTarget;
-                // Pass/fail
-                const passed    = threshold !== null && ytdPct !== null && ytdPct >= threshold;
-                const failing   = threshold !== null && ytdPct !== null && ytdPct < threshold;
-                return `<div class="px-4 py-2.5 ${isMe ? 'bg-emerald-50/60' : 'hover:bg-slate-50'} transition-colors">
-                  <div class="flex items-center gap-2.5 mb-1.5">
-                    <div class="w-6 h-6 rounded-full flex items-center justify-center flex-shrink-0 text-[10px] font-bold ${isMe?'bg-emerald-500 text-white':'bg-slate-100 text-slate-600'}">
-                      ${(m.EmployeeName||'?').charAt(0)}
-                    </div>
-                    <span class="text-xs font-medium text-slate-700 flex-1 truncate ${isMe?'font-bold':''}">${m.EmployeeName}${isMe?' (ฉัน)':''}</span>
-                    <span class="text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-${tc}-100 text-${tc}-700 flex-shrink-0">${tl}</span>
-                    ${ytdCount !== null ? `
-                    <span class="text-[10px] font-bold flex-shrink-0 ${ytdDone ? 'text-emerald-600' : 'text-slate-500'}">
-                      ${ytdCount}${yearlyTarget ? `/${yearlyTarget}` : ''} ครั้ง
-                    </span>` : ''}
-                  </div>
-                  ${ytdCount !== null ? `
-                  <div class="ml-8">
-                    <div class="flex items-center gap-2 mb-1">
-                      <div class="flex-1 bg-slate-100 rounded-full h-1.5 overflow-hidden">
-                        <div class="h-full rounded-full transition-all duration-700" style="width:${barPct}%;background:${ytdDone ? 'linear-gradient(90deg,#059669,#10b981)' : isMe ? 'linear-gradient(90deg,#6366f1,#8b5cf6)' : '#94a3b8'}"></div>
-                      </div>
-                      ${passed ? `<span class="text-[9px] font-bold text-emerald-600 bg-emerald-50 px-1.5 py-0.5 rounded-full border border-emerald-100 flex-shrink-0">ผ่าน</span>`
-                        : failing ? `<span class="text-[9px] font-bold text-amber-600 bg-amber-50 px-1.5 py-0.5 rounded-full border border-amber-100 flex-shrink-0">ต่ำกว่าเกณฑ์ ${threshold}%</span>`
-                        : ''}
-                    </div>
-                    ${ytdPct !== null ? `<p class="text-[8px] text-slate-400">${ytdPct}% ของเป้าหมายรายปี</p>` : ''}
-                  </div>` : `<div class="ml-8"><div class="w-full bg-slate-100 rounded-full h-1.5"></div></div>`}
-                </div>`;
-              }).join('')}
-            </div>
-          </div>`;
-          })() : ''}
 
           <!-- My Issues Mini-Panel -->
           ${(() => {
@@ -2137,23 +2134,47 @@ function openCheckInModal() {
           <span>วันนี้ไม่ใช่วันเดินตรวจตามตาราง สามารถ Check-in ได้แต่จะนับเป็นการเดินนอกตาราง</span>
         </div>` : ''}
 
-        <div class="grid grid-cols-2 gap-3">
+        <div class="grid grid-cols-3 gap-2">
           <label class="cursor-pointer">
-            <input type="radio" name="PatrolType" value="Normal" class="peer sr-only" checked>
-            <div class="p-3.5 rounded-xl border-2 border-slate-100 bg-white text-center hover:border-emerald-100 peer-checked:border-emerald-500 peer-checked:bg-emerald-50 transition-all">
-              <svg class="w-5 h-5 mx-auto mb-1.5 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"/></svg>
-              <p class="text-xs font-bold text-slate-700">เดินตรวจปกติ</p>
-              <p class="text-[9px] text-slate-400">Routine Patrol</p>
+            <input type="radio" name="PatrolType" value="normal" class="peer sr-only" checked onchange="window._onCheckinTypeChange(this.value)">
+            <div class="p-3 rounded-xl border-2 border-slate-100 bg-white text-center hover:border-emerald-100 peer-checked:border-emerald-500 peer-checked:bg-emerald-50 transition-all">
+              <svg class="w-5 h-5 mx-auto mb-1 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"/></svg>
+              <p class="text-[11px] font-bold text-slate-700">ปกติ</p>
+              <p class="text-[9px] text-slate-400">Routine</p>
             </div>
           </label>
           <label class="cursor-pointer">
-            <input type="radio" name="PatrolType" value="Re-inspection" class="peer sr-only">
-            <div class="p-3.5 rounded-xl border-2 border-slate-100 bg-white text-center hover:border-amber-100 peer-checked:border-amber-500 peer-checked:bg-amber-50 transition-all">
-              <svg class="w-5 h-5 mx-auto mb-1.5 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/></svg>
-              <p class="text-xs font-bold text-slate-700">ตรวจซ้ำ / ติดตาม</p>
-              <p class="text-[9px] text-slate-400">Re-inspection</p>
+            <input type="radio" name="PatrolType" value="Re-inspection" class="peer sr-only" onchange="window._onCheckinTypeChange(this.value)">
+            <div class="p-3 rounded-xl border-2 border-slate-100 bg-white text-center hover:border-amber-100 peer-checked:border-amber-500 peer-checked:bg-amber-50 transition-all">
+              <svg class="w-5 h-5 mx-auto mb-1 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/></svg>
+              <p class="text-[11px] font-bold text-slate-700">ตรวจซ้ำ</p>
+              <p class="text-[9px] text-slate-400">Re-inspect</p>
             </div>
           </label>
+          <label class="cursor-pointer">
+            <input type="radio" name="PatrolType" value="compensation" class="peer sr-only" onchange="window._onCheckinTypeChange(this.value)">
+            <div class="p-3 rounded-xl border-2 border-slate-100 bg-white text-center hover:border-violet-100 peer-checked:border-violet-500 peer-checked:bg-violet-50 transition-all">
+              <svg class="w-5 h-5 mx-auto mb-1 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+              <p class="text-[11px] font-bold text-slate-700">เดินซ่อม</p>
+              <p class="text-[9px] text-slate-400">Makeup</p>
+            </div>
+          </label>
+        </div>
+
+        <!-- Missed session picker: shown only when เดินซ่อม is selected -->
+        <div id="checkin-date-row" class="hidden">
+          <label class="block text-xs font-semibold text-slate-500 mb-1.5">
+            ชดเชยรอบไหน <span class="text-violet-500">*</span>
+          </label>
+          <div id="checkin-missed-wrap">
+            <div class="flex items-center gap-2 px-3 py-2.5 rounded-xl border border-slate-200 bg-slate-50 text-xs text-slate-400">
+              <div class="animate-spin rounded-full h-3.5 w-3.5 border-2 border-violet-400 border-t-transparent flex-shrink-0"></div>
+              กำลังโหลดรอบที่ขาด...
+            </div>
+          </div>
+          <select name="PatrolDate" id="checkin-missed-select" class="hidden w-full rounded-xl border border-violet-200 bg-white px-3 py-2.5 text-sm text-slate-700 focus:outline-none focus:ring-2 focus:ring-violet-400 transition-all">
+            <option value="">— เลือกรอบที่ต้องการชดเชย —</option>
+          </select>
         </div>
 
         <!-- Area confirmation (Phase 2.2) -->
@@ -2186,13 +2207,89 @@ async function handleCheckInSubmit(e) {
     const type  = fd.get('PatrolType');
     const area  = fd.get('Area') || null;
     const notes = fd.get('Notes')?.trim() || null;
+    const body  = { PatrolType: type, Area: area, Notes: notes };
+    if (type === 'compensation') {
+        const dateVal = fd.get('PatrolDate');
+        if (!dateVal) { showToast('กรุณาเลือกรอบที่ต้องการชดเชย', 'error'); return; }
+        body.PatrolDate = dateVal;
+    }
     showLoading();
     try {
-        await API.post('/patrol/checkin', { UserID: currentUser.id, UserName: currentUser.name, TeamName: currentUser.team, PatrolType: type, Area: area, Notes: notes });
+        await API.post('/patrol/checkin', body);
         closeModal();
         showCheckinSuccessScreen(type);
     } catch (err) { showError(err); } finally { hideLoading(); }
 }
+
+window._onCheckinTypeChange = async function(val) {
+    const row  = document.getElementById('checkin-date-row');
+    const wrap = document.getElementById('checkin-missed-wrap');
+    const sel  = document.getElementById('checkin-missed-select');
+    if (!row) return;
+
+    if (val !== 'compensation') {
+        row.classList.add('hidden');
+        if (sel) { sel.required = false; sel.value = ''; sel.classList.add('hidden'); }
+        if (wrap) wrap.classList.remove('hidden');
+        return;
+    }
+
+    // แสดง section + loading spinner
+    row.classList.remove('hidden');
+    if (wrap) wrap.classList.remove('hidden');
+    if (sel) { sel.classList.add('hidden'); sel.required = false; }
+
+    try {
+        const year = new Date().getFullYear();
+        const res  = await API.get(`/patrol/my-missed-sessions?year=${year}`);
+        const sessions = res.data || [];
+
+        if (!wrap || !sel) return;
+        wrap.classList.add('hidden');
+        sel.classList.remove('hidden');
+        sel.required = true;
+
+        if (!sessions.length) {
+            // ไม่มีรอบที่ขาด — แสดง info แทน select
+            sel.classList.add('hidden');
+            sel.required = false;
+            wrap.classList.remove('hidden');
+            wrap.innerHTML = `
+              <div class="flex items-center gap-2 px-3 py-2.5 rounded-xl border border-emerald-200 bg-emerald-50 text-xs text-emerald-600">
+                <svg class="w-4 h-4 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+                ไม่มีรอบที่ขาดในปีนี้ — เดินครบทุกรอบแล้ว
+              </div>`;
+            return;
+        }
+
+        // populate dropdown
+        const thMonth = ['ม.ค.','ก.พ.','มี.ค.','เม.ย.','พ.ค.','มิ.ย.','ก.ค.','ส.ค.','ก.ย.','ต.ค.','พ.ย.','ธ.ค.'];
+        const thDay   = ['อา.','จ.','อ.','พ.','พฤ.','ศ.','ส.'];
+        sel.innerHTML = `<option value="">— เลือกรอบที่ต้องการชดเชย —</option>` +
+            sessions.map(s => {
+                const d     = new Date(s.PatrolDate);
+                const dow   = thDay[d.getDay()];
+                const day   = d.getDate();
+                const mon   = thMonth[d.getMonth()];
+                const area  = s.AreaName || s.AreaCode || '';
+                const round = `รอบ ${s.PatrolRound}`;
+                const dateStr = d.toISOString().split('T')[0];
+                const label = `${dow}ที่ ${day} ${mon} · ${round}${area ? ' · ' + area : ''}`;
+                return `<option value="${dateStr}">${label}</option>`;
+            }).join('');
+
+    } catch {
+        if (wrap) {
+            wrap.classList.remove('hidden');
+            wrap.innerHTML = `
+              <div class="flex items-center gap-2 px-3 py-2.5 rounded-xl border border-red-200 bg-red-50 text-xs text-red-500">
+                <svg class="w-4 h-4 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+                โหลดข้อมูลไม่สำเร็จ กรุณาลองใหม่
+              </div>`;
+        }
+        if (sel) { sel.classList.add('hidden'); sel.required = false; }
+    }
+};
 
 // ─── Post Check-in Success Screen ─────────────────────────────────────────────
 function showCheckinSuccessScreen(patrolType) {
@@ -2205,7 +2302,7 @@ function showCheckinSuccessScreen(patrolType) {
     const required    = compliance?.required || 0;
     const nowDone     = newAttended >= required && required > 0;
     const pct         = required > 0 ? Math.min(Math.round((newAttended / required) * 100), 100) : 0;
-    const typeLabel   = patrolType === 'Re-inspection' ? 'ตรวจซ้ำ/ติดตาม' : 'เดินตรวจปกติ';
+    const typeLabel   = patrolType === 'Re-inspection' ? 'ตรวจซ้ำ/ติดตาม' : patrolType === 'compensation' ? 'เดินซ่อม (Makeup)' : 'เดินตรวจปกติ';
 
     openModal('เช็คอินสำเร็จ', `
       <div class="space-y-4">
@@ -2262,6 +2359,231 @@ window._forceCheckin = function() {
     window._skipDuplicateCheck = true;
     openCheckInModal();
     window._skipDuplicateCheck = false;
+};
+
+// ─── Admin Record Manager — Management (Patrol_Attendance) ────────────────────
+window.openAdminRecordModal = async function(employeeId, name, targetPerYear) {
+    const year = _overviewYear || new Date().getFullYear();
+    openModal(`รายการเดินตรวจ — ${name}`, `
+      <div class="space-y-4">
+        <div class="flex items-center justify-between">
+          <p class="text-xs text-slate-500">ปี ${year} · เป้าหมาย ${targetPerYear || '—'} ครั้ง/ปี</p>
+          <span id="arm-count" class="text-xs font-bold text-emerald-600">กำลังโหลด...</span>
+        </div>
+        <div id="arm-list" class="space-y-1.5 max-h-60 overflow-y-auto">
+          <div class="text-center py-6 text-slate-300 text-xs">
+            <div class="animate-spin rounded-full h-6 w-6 border-2 border-emerald-400 border-t-transparent mx-auto mb-2"></div>
+            กำลังโหลด...
+          </div>
+        </div>
+        <div class="border-t border-slate-100 pt-4">
+          <p class="text-xs font-bold text-slate-600 mb-2">เพิ่มรายการใหม่ (Admin)</p>
+          <div class="space-y-2">
+            <div class="grid grid-cols-2 gap-2">
+              <div>
+                <label class="text-[10px] text-slate-400 font-semibold">วันที่ *</label>
+                <input type="date" id="arm-date" max="${new Date().toISOString().split('T')[0]}"
+                  class="w-full mt-0.5 rounded-lg border border-slate-200 px-2.5 py-1.5 text-xs text-slate-700 focus:outline-none focus:ring-1 focus:ring-emerald-400">
+              </div>
+              <div>
+                <label class="text-[10px] text-slate-400 font-semibold">ประเภท</label>
+                <select id="arm-type" class="w-full mt-0.5 rounded-lg border border-slate-200 px-2.5 py-1.5 text-xs text-slate-700 focus:outline-none focus:ring-1 focus:ring-emerald-400">
+                  <option value="normal">ปกติ</option>
+                  <option value="compensation">เดินซ่อม</option>
+                  <option value="Re-inspection">ตรวจซ้ำ</option>
+                </select>
+              </div>
+            </div>
+            <div>
+              <label class="text-[10px] text-slate-400 font-semibold">พื้นที่</label>
+              <select id="arm-area" class="w-full mt-0.5 rounded-lg border border-slate-200 px-2.5 py-1.5 text-xs text-slate-700 focus:outline-none focus:ring-1 focus:ring-emerald-400">
+                <option value="">— ไม่ระบุ —</option>
+                ${(_patrolAreas||[]).map(a=>`<option value="${a.Name}">${a.Name}</option>`).join('')}
+              </select>
+            </div>
+            <div>
+              <label class="text-[10px] text-slate-400 font-semibold">หมายเหตุ</label>
+              <input type="text" id="arm-notes" placeholder="หมายเหตุ (ไม่บังคับ)"
+                class="w-full mt-0.5 rounded-lg border border-slate-200 px-2.5 py-1.5 text-xs text-slate-700 focus:outline-none focus:ring-1 focus:ring-emerald-400">
+            </div>
+            <button onclick="window._armAddRecord('${employeeId}','${(name||'').replace(/'/g,"\\'")}',${targetPerYear||12})"
+              class="w-full py-2 rounded-xl text-xs font-bold text-white transition-all active:scale-[0.97]"
+              style="background:linear-gradient(135deg,#059669,#0d9488)">
+              <svg class="w-3.5 h-3.5 inline mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M12 4v16m8-8H4"/></svg>
+              เพิ่มรายการ
+            </button>
+          </div>
+        </div>
+      </div>`, 'max-w-md');
+    await _armLoadRecords(employeeId, year);
+};
+
+async function _armLoadRecords(employeeId, year) {
+    try {
+        const res = await API.get(`/patrol/member-attendance?employeeId=${employeeId}&year=${year}`);
+        const rows = res.data || [];
+        const countEl = document.getElementById('arm-count');
+        const listEl  = document.getElementById('arm-list');
+        if (countEl) countEl.textContent = `${rows.length} รายการ`;
+        if (!listEl) return;
+        if (!rows.length) {
+            listEl.innerHTML = `<div class="text-center py-6 text-slate-300 text-xs">ยังไม่มีรายการเดินตรวจปีนี้</div>`;
+            return;
+        }
+        const thLbl = t => {
+            if (t === 'compensation') return '<span class="text-violet-600">เดินซ่อม</span>';
+            if (t === 'Re-inspection') return '<span class="text-amber-600">ตรวจซ้ำ</span>';
+            return '<span class="text-emerald-600">ปกติ</span>';
+        };
+        listEl.innerHTML = rows.map(r => {
+            const d = new Date(r.PatrolDate);
+            const dateStr = d.toLocaleDateString('th-TH', { day:'numeric', month:'short', year:'2-digit' });
+            return `<div class="flex items-center justify-between px-3 py-2 rounded-xl bg-slate-50 hover:bg-slate-100 transition-colors gap-2">
+              <div class="flex items-center gap-2 min-w-0">
+                <span class="text-xs text-slate-500 flex-shrink-0 font-mono">${dateStr}</span>
+                <span class="text-[10px]">${thLbl(r.PatrolType)}</span>
+                ${r.Area ? `<span class="text-[10px] text-slate-400 truncate">${r.Area}</span>` : ''}
+              </div>
+              <button onclick="window._armDeleteRecord(${r.id},'${employeeId}',${year})"
+                class="flex-shrink-0 p-1 rounded-lg hover:bg-red-50 text-slate-300 hover:text-red-400 transition-colors" title="ลบ">
+                <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg>
+              </button>
+            </div>`;
+        }).join('');
+    } catch (err) {
+        const listEl = document.getElementById('arm-list');
+        if (listEl) listEl.innerHTML = `<div class="text-center py-4 text-red-400 text-xs">โหลดข้อมูลไม่สำเร็จ</div>`;
+    }
+}
+
+window._armAddRecord = async function(employeeId, name, targetPerYear) {
+    const date  = document.getElementById('arm-date')?.value;
+    const type  = document.getElementById('arm-type')?.value || 'normal';
+    const area  = document.getElementById('arm-area')?.value || null;
+    const notes = document.getElementById('arm-notes')?.value?.trim() || null;
+    if (!date) { showToast('กรุณาเลือกวันที่', 'error'); return; }
+    try {
+        await API.post('/patrol/admin-record', { EmployeeID: employeeId, PatrolDate: date, PatrolType: type, Area: area, Notes: notes });
+        showToast('เพิ่มรายการสำเร็จ', 'success');
+        const year = _overviewYear || new Date().getFullYear();
+        await _armLoadRecords(employeeId, year);
+        _overviewData = null;
+        loadOverview(_overviewYear);
+    } catch (err) { showError(err); }
+};
+
+window._armDeleteRecord = async function(id, employeeId, year) {
+    if (!confirm('ยืนยันการลบรายการนี้?')) return;
+    try {
+        await API.delete(`/patrol/admin-record/${id}`);
+        showToast('ลบรายการสำเร็จ', 'success');
+        await _armLoadRecords(employeeId, year);
+        _overviewData = null;
+        loadOverview(_overviewYear);
+    } catch (err) { showError(err); }
+};
+
+// ─── Admin Record Manager — Supervisor (Patrol_Self_Checkin) ──────────────────
+window.openAdminRecordSvModal = async function(employeeId, name, targetPerYear) {
+    const year = parseInt(document.getElementById('sv-year-select')?.value) || new Date().getFullYear();
+    openModal(`รายการ Self-Patrol — ${name}`, `
+      <div class="space-y-4">
+        <div class="flex items-center justify-between">
+          <p class="text-xs text-slate-500">ปี ${year} · เป้าหมาย ${targetPerYear || '—'} ครั้ง/ปี</p>
+          <span id="arsv-count" class="text-xs font-bold text-amber-600">กำลังโหลด...</span>
+        </div>
+        <div id="arsv-list" class="space-y-1.5 max-h-60 overflow-y-auto">
+          <div class="text-center py-6 text-slate-300 text-xs">
+            <div class="animate-spin rounded-full h-6 w-6 border-2 border-amber-400 border-t-transparent mx-auto mb-2"></div>
+            กำลังโหลด...
+          </div>
+        </div>
+        <div class="border-t border-slate-100 pt-4">
+          <p class="text-xs font-bold text-slate-600 mb-2">เพิ่มรายการใหม่ (Admin)</p>
+          <div class="space-y-2">
+            <div class="grid grid-cols-2 gap-2">
+              <div>
+                <label class="text-[10px] text-slate-400 font-semibold">วันที่ *</label>
+                <input type="date" id="arsv-date" max="${new Date().toISOString().split('T')[0]}"
+                  class="w-full mt-0.5 rounded-lg border border-slate-200 px-2.5 py-1.5 text-xs text-slate-700 focus:outline-none focus:ring-1 focus:ring-amber-400">
+              </div>
+              <div>
+                <label class="text-[10px] text-slate-400 font-semibold">สถานที่</label>
+                <input type="text" id="arsv-loc" placeholder="เช่น โรงงาน 1"
+                  class="w-full mt-0.5 rounded-lg border border-slate-200 px-2.5 py-1.5 text-xs text-slate-700 focus:outline-none focus:ring-1 focus:ring-amber-400">
+              </div>
+            </div>
+            <div>
+              <label class="text-[10px] text-slate-400 font-semibold">หมายเหตุ</label>
+              <input type="text" id="arsv-notes" placeholder="หมายเหตุ (ไม่บังคับ)"
+                class="w-full mt-0.5 rounded-lg border border-slate-200 px-2.5 py-1.5 text-xs text-slate-700 focus:outline-none focus:ring-1 focus:ring-amber-400">
+            </div>
+            <button onclick="window._arsvAddRecord('${employeeId}','${(name||'').replace(/'/g,"\\'")}',${targetPerYear||24})"
+              class="w-full py-2 rounded-xl text-xs font-bold text-white transition-all active:scale-[0.97]"
+              style="background:linear-gradient(135deg,#d97706,#f59e0b)">
+              <svg class="w-3.5 h-3.5 inline mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M12 4v16m8-8H4"/></svg>
+              เพิ่มรายการ
+            </button>
+          </div>
+        </div>
+      </div>`, 'max-w-md');
+    await _arsvLoadRecords(employeeId, year);
+};
+
+async function _arsvLoadRecords(employeeId, year) {
+    try {
+        const res = await API.get(`/patrol/supervisor-checkins?employeeId=${employeeId}&year=${year}`);
+        const rows = res.data || [];
+        const countEl = document.getElementById('arsv-count');
+        const listEl  = document.getElementById('arsv-list');
+        if (countEl) countEl.textContent = `${rows.length} รายการ`;
+        if (!listEl) return;
+        if (!rows.length) {
+            listEl.innerHTML = `<div class="text-center py-6 text-slate-300 text-xs">ยังไม่มีรายการ Self-Patrol ปีนี้</div>`;
+            return;
+        }
+        listEl.innerHTML = rows.map(r => {
+            const d = new Date(r.CheckinDate);
+            const dateStr = d.toLocaleDateString('th-TH', { day:'numeric', month:'short', year:'2-digit' });
+            return `<div class="flex items-center justify-between px-3 py-2 rounded-xl bg-slate-50 hover:bg-slate-100 transition-colors gap-2">
+              <div class="flex items-center gap-2 min-w-0">
+                <span class="text-xs text-slate-500 flex-shrink-0 font-mono">${dateStr}</span>
+                ${r.Location ? `<span class="text-[10px] text-slate-400 truncate">${r.Location}</span>` : ''}
+              </div>
+              <button onclick="window._arsvDeleteRecord(${r.id},'${employeeId}',${year})"
+                class="flex-shrink-0 p-1 rounded-lg hover:bg-red-50 text-slate-300 hover:text-red-400 transition-colors" title="ลบ">
+                <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg>
+              </button>
+            </div>`;
+        }).join('');
+    } catch (err) {
+        const listEl = document.getElementById('arsv-list');
+        if (listEl) listEl.innerHTML = `<div class="text-center py-4 text-red-400 text-xs">โหลดข้อมูลไม่สำเร็จ</div>`;
+    }
+}
+
+window._arsvAddRecord = async function(employeeId, name, targetPerYear) {
+    const date  = document.getElementById('arsv-date')?.value;
+    const loc   = document.getElementById('arsv-loc')?.value?.trim() || null;
+    const notes = document.getElementById('arsv-notes')?.value?.trim() || null;
+    if (!date) { showToast('กรุณาเลือกวันที่', 'error'); return; }
+    try {
+        await API.post('/patrol/admin-record/supervisor', { EmployeeID: employeeId, CheckinDate: date, Location: loc, Notes: notes });
+        showToast('เพิ่มรายการสำเร็จ', 'success');
+        const year = parseInt(document.getElementById('sv-year-select')?.value) || new Date().getFullYear();
+        await _arsvLoadRecords(employeeId, year);
+        loadSupervisorOverview(year);
+    } catch (err) { showError(err); }
+};
+
+window._arsvDeleteRecord = async function(id, employeeId, year) {
+    if (!confirm('ยืนยันการลบรายการนี้?')) return;
+    try {
+        await API.delete(`/patrol/admin-record/supervisor/${id}`);
+        showToast('ลบรายการสำเร็จ', 'success');
+        await _arsvLoadRecords(employeeId, year);
+        loadSupervisorOverview(year);
+    } catch (err) { showError(err); }
 };
 
 // ─── Issue Form ───────────────────────────────────────────────────────────────
@@ -2796,6 +3118,10 @@ function renderOverviewTable(members) {
           </td>
           ${isAdmin ? `<td class="px-4 py-3 text-center">
             <div class="flex items-center justify-center gap-1">
+              <button onclick="window.openAdminRecordModal('${m.EmployeeID}','${(m.Name||'').replace(/'/g,"\\'")}',${m.Total})"
+                class="p-1 rounded-lg hover:bg-emerald-50 text-slate-400 hover:text-emerald-600 transition-colors" title="จัดการรายการ">
+                <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"/></svg>
+              </button>
               <button onclick="window.editRosterTarget(${m.RosterID},'top_management',${m.Total},'${(m.Name||'').replace(/'/g,"\\'")}',true)"
                 class="p-1 rounded-lg hover:bg-slate-100 text-slate-400 hover:text-slate-600 transition-colors" title="แก้ไขเป้าหมาย">
                 <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"/></svg>
@@ -3139,6 +3465,10 @@ async function loadSupervisorOverview(year) {
               </td>
               ${isAdmin ? `<td class="px-4 py-3 text-center">
                 <div class="flex items-center justify-center gap-1">
+                  <button onclick="window.openAdminRecordSvModal('${m.EmployeeID}','${(m.EmployeeName||'').replace(/'/g,"\\'")}',${m.target})"
+                    class="p-1 rounded-lg hover:bg-amber-50 text-slate-400 hover:text-amber-600 transition-colors" title="จัดการรายการ">
+                    <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"/></svg>
+                  </button>
                   <button onclick="window.editRosterTarget(${m.RosterID},'supervisor',${m.target},'${(m.EmployeeName||'').replace(/'/g,"\\'")}',false)"
                     class="p-1 rounded-lg hover:bg-slate-100 text-slate-400 hover:text-slate-600 transition-colors" title="แก้ไขเป้าหมาย">
                     <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"/></svg>
