@@ -68,6 +68,7 @@ let _filterRank     = '';    // active Rank filter on issues tab (A/B/C or '')
 let _filterStop     = 0;     // active Stop filter on issues tab (1-6 or 0)
 let _filterArea     = '';    // active Area filter on issues tab
 let _areaStatSel    = null;  // admin-saved area stat selection (from DB)
+let _spotlightMgmtId = null; // EmployeeID of spotlighted management member (from DB)
 
 // ─── Main Load ────────────────────────────────────────────────────────────────
 export async function loadPatrolPage() {

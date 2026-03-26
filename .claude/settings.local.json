@@ -6,7 +6,11 @@
       "Bash(cd \"C:\\\\xampp\\\\htdocs\\\\tsh-safety-core-app\\\\backend\" && node -e \"\n['./routes/accident','./routes/training'].forEach\\(m => {\n  try { require\\(m\\); console.log\\(m + ' — OK'\\); }\n  catch\\(e\\) { console.error\\(m + ' — ERROR: ' + e.message\\); }\n}\\);\n\")",
       "Bash(timeout /t 5 /nobreak >nul && type \"C:\\\\Users\\\\Admin\\\\AppData\\\\Local\\\\Temp\\\\claude\\\\C--xampp-htdocs-tsh-safety-core-app\\\\c3bc185f-4059-4e2c-8021-b8a6206104df\\\\tasks\\\\bc38bo1rh.output\")",
       "Bash(cd C:\\\\xampp\\\\htdocs\\\\tsh-safety-core-app\\\\backend && node -e \"require\\('./routes/yokoten'\\); console.log\\('OK'\\)\" 2>&1)",
-      "Bash(cd /c/xampp/htdocs/tsh-safety-core-app/backend && node -e \"require\\('./routes/yokoten'\\); console.log\\('OK'\\)\" 2>&1)"
+      "Bash(cd /c/xampp/htdocs/tsh-safety-core-app/backend && node -e \"require\\('./routes/yokoten'\\); console.log\\('OK'\\)\" 2>&1)",
+      "Bash(git add:*)",
+      "Bash(git commit:*)",
+      "Bash(git push:*)",
+      "Bash(node -e \":*)"
     ]
   }
 }
