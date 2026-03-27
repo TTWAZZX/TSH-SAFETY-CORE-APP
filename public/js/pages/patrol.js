@@ -86,6 +86,7 @@ export async function loadPatrolPage() {
     window.openThresholdSettings = openThresholdSettings;
     window.exportIssuesToExcel = exportIssuesToExcel;
     window.exportIssuesToPDF   = exportIssuesToPDF;
+    window.exportPatrolPDF     = window.exportPatrolPDF; // defined at module level
     window.openSpotlightPickerModal  = openSpotlightPickerModal;
     window.openSpotlightRecordsModal = openSpotlightRecordsModal;
     window._issueChangeDept = _issueChangeDept;
@@ -1140,40 +1141,54 @@ function renderDashboard(container, data) {
         </div>
 
         <!-- ── Sub-tab 1: Top & Management ── -->
-        <div id="ov-sub-mgmt" class="space-y-5">
-          <!-- Filter bar -->
-          <div class="bg-white rounded-xl border border-slate-100 shadow-sm p-4 flex flex-wrap items-center gap-3">
-            <label class="text-xs font-bold text-slate-600">ปี</label>
-            <select id="overview-year-select" onchange="switchOverviewYear(this.value)"
-              class="text-sm font-bold rounded-xl border border-slate-200 px-3 py-1.5 focus:outline-none focus:border-emerald-400 text-slate-700">
-              ${[new Date().getFullYear(), new Date().getFullYear()-1, new Date().getFullYear()-2].map(y =>
-                `<option value="${y}" ${y === _overviewYear ? 'selected' : ''}>${y}</option>`
-              ).join('')}
-            </select>
-            ${isAdmin ? `<button onclick="window.openRosterAddModal('top_management')"
-              class="ml-auto flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold text-white transition-all"
-              style="background:linear-gradient(135deg,#059669,#0d9488)">
-              <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M12 4v16m8-8H4"/></svg>
-              เพิ่มสมาชิก
-            </button>` : ''}
-          </div>
+        <div id="ov-sub-mgmt" class="space-y-4">
 
-          <!-- Spotlight Card -->
+          <!-- Spotlight Banner (full-width) -->
           <div id="spotlight-mgmt-wrap"></div>
 
-          <!-- 2-col grid -->
-          <div class="grid grid-cols-1 xl:grid-cols-3 gap-5">
+          <!-- Main grid: table (primary) + sidebar -->
+          <div class="grid grid-cols-1 lg:grid-cols-4 gap-4">
 
-            <!-- Attendance Table xl:col-span-2 -->
-            <div class="xl:col-span-2 bg-white rounded-2xl shadow-sm border border-slate-100 overflow-hidden">
-              <div class="px-5 py-3.5 border-b border-slate-100 flex items-center justify-between bg-slate-50/50">
-                <h3 class="font-bold text-slate-700 text-sm flex items-center gap-2">
-                  <svg class="w-4 h-4 text-emerald-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"/></svg>
-                  Summary of Top &amp; Management Safety Patrol Attendance
-                </h3>
-                <span id="ov-table-subtitle" class="text-[10px] text-slate-400 font-semibold">ปี ${_overviewYear}</span>
+            <!-- Table card — takes 3/4 -->
+            <div class="lg:col-span-3 bg-white rounded-2xl shadow-sm border border-slate-100 overflow-hidden flex flex-col">
+              <!-- Card header: title + year + add button -->
+              <div class="px-5 py-3.5 border-b border-slate-100 bg-slate-50/50 flex flex-wrap items-center gap-3">
+                <div class="flex items-center gap-2 flex-1 min-w-0">
+                  <svg class="w-4 h-4 text-emerald-500 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"/></svg>
+                  <h3 class="font-bold text-slate-700 text-sm truncate">Summary of Top &amp; Management Safety Patrol Attendance</h3>
+                </div>
+                <div class="flex items-center gap-2 flex-shrink-0">
+                  <select id="overview-year-select" onchange="switchOverviewYear(this.value)"
+                    class="text-xs font-bold rounded-xl border border-slate-200 px-2.5 py-1.5 focus:outline-none focus:border-emerald-400 text-slate-700">
+                    ${[new Date().getFullYear(), new Date().getFullYear()-1, new Date().getFullYear()-2].map(y =>
+                      `<option value="${y}" ${y === _overviewYear ? 'selected' : ''}>${y}</option>`
+                    ).join('')}
+                  </select>
+                  <span id="ov-table-subtitle" class="hidden"></span>
+                  <button onclick="window.exportPatrolPDF('top_management')"
+                    class="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold transition-all flex-shrink-0 border border-red-200 text-red-600 hover:bg-red-50">
+                    <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/></svg>
+                    PDF
+                  </button>
+                  ${isAdmin ? `<button onclick="window.openRosterAddModal('top_management')"
+                    class="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold text-white transition-all flex-shrink-0"
+                    style="background:linear-gradient(135deg,#059669,#0d9488)">
+                    <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M12 4v16m8-8H4"/></svg>
+                    เพิ่มสมาชิก
+                  </button>` : ''}
+                </div>
               </div>
-              <div class="overflow-x-auto">
+              <!-- Search bar -->
+              <div class="px-4 py-2.5 border-b border-slate-100">
+                <div class="relative">
+                  <svg class="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-slate-400 pointer-events-none" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0"/></svg>
+                  <input type="text" id="ov-search-input" placeholder="ค้นหาชื่อ, ตำแหน่ง, แผนก..."
+                    class="w-full text-xs rounded-xl border border-slate-200 pl-8 pr-3 py-1.5 focus:outline-none focus:border-emerald-400 bg-slate-50"
+                    oninput="window._ovMgmtSearchInput(this.value)">
+                </div>
+              </div>
+              <!-- Table -->
+              <div class="overflow-x-auto flex-1">
                 <table class="w-full text-xs text-left">
                   <thead class="text-[10px] uppercase bg-slate-50 border-b border-slate-100">
                     <tr>
@@ -1197,60 +1212,59 @@ function renderDashboard(container, data) {
                   </tbody>
                 </table>
               </div>
+              <!-- Pagination -->
+              <div id="ov-mgmt-pagination" class="px-4 py-2.5 border-t border-slate-100 flex items-center justify-between min-h-[40px]"></div>
               <!-- Evaluation Criteria -->
-              <div class="px-5 py-4 border-t border-slate-100 bg-slate-50/50">
+              <div class="px-5 py-3.5 border-t border-slate-100 bg-slate-50/50">
                 <p class="text-[10px] font-bold text-slate-500 uppercase mb-2">Evaluation Criteria</p>
-                <div class="overflow-x-auto">
-                  <table class="text-[10px] text-slate-600 w-full">
-                    <thead><tr class="border-b border-slate-200">
-                      <th class="pb-1.5 font-bold text-slate-400 text-left pr-4">Rating</th>
-                      ${[1,2,3,4,5].map(r=>`<th class="pb-1.5 font-bold text-center px-3">${r}</th>`).join('')}
-                      <th class="pb-1.5 font-bold text-slate-400 text-center px-3">Weight</th>
-                    </tr></thead>
-                    <tbody><tr>
-                      <td class="py-1.5 text-slate-400 pr-4">%</td>
-                      ${['≥ 60','≥ 65','≥ 70','≥ 75','≥ 80'].map(v=>`<td class="py-1.5 text-center px-3 font-semibold">${v}</td>`).join('')}
-                      <td class="py-1.5 text-center px-3 font-bold text-indigo-600">0.4</td>
-                    </tr></tbody>
-                  </table>
+                <div class="flex flex-wrap gap-2">
+                  ${[['≥80%','5','bg-emerald-100 text-emerald-700'],['≥75%','4','bg-teal-100 text-teal-700'],['≥70%','3','bg-blue-100 text-blue-700'],['≥65%','2','bg-amber-100 text-amber-700'],['≥60%','1','bg-orange-100 text-orange-700']].map(([pct,r,cls])=>`
+                  <span class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[10px] font-bold ${cls}">Rating ${r} · ${pct}</span>`).join('')}
+                  <span class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[10px] font-bold bg-indigo-100 text-indigo-700 ml-auto">Weight 0.4</span>
                 </div>
               </div>
             </div>
 
-            <!-- Right column -->
-            <div class="space-y-5">
-              <!-- Pie chart -->
-              <div class="bg-white rounded-2xl shadow-sm border border-slate-100 p-5">
-                <h3 class="font-bold text-slate-700 text-sm mb-4">Safety Patrol Pie Chart</h3>
-                <div class="relative h-52 flex items-center justify-center">
-                  <canvas id="ov-mgmt-pie"></canvas>
-                  <div class="absolute inset-0 flex flex-col items-center justify-center pointer-events-none">
-                    <p class="text-3xl font-bold text-emerald-600" id="ov-mgmt-pie-pct">—%</p>
-                    <p class="text-[10px] text-slate-400 mt-0.5">อัตราเข้าร่วม</p>
-                  </div>
+            <!-- Sidebar: 1/4 width -->
+            <div class="flex flex-col gap-3 h-full">
+              <!-- Card 1: เซสชันทั้งหมด -->
+              <div class="bg-white rounded-2xl shadow-sm border border-slate-100 px-4 py-4 flex items-center gap-3">
+                <div class="w-10 h-10 rounded-xl bg-slate-50 border border-slate-100 flex items-center justify-center flex-shrink-0">
+                  <svg class="w-5 h-5 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"/></svg>
+                </div>
+                <div>
+                  <p class="text-2xl font-bold text-slate-800 leading-none" id="ov-card-total">—</p>
+                  <p class="text-[11px] text-slate-400 mt-0.5">เซสชันทั้งหมด</p>
                 </div>
               </div>
-              <!-- Stats summary card -->
-              <div class="rounded-2xl overflow-hidden shadow-sm" style="background:linear-gradient(135deg,#064e3b 0%,#065f46 60%,#0d9488 100%)">
-                <div class="p-5">
-                  <div class="flex items-center gap-2 mb-3">
-                    <svg class="w-4 h-4 text-emerald-300" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z"/></svg>
-                    <span class="text-xs font-bold text-white/80 uppercase tracking-wide">Safety Patrol Record</span>
-                  </div>
-                  <p class="text-[10px] text-white/50 mb-4" id="ov-card-date">—</p>
-                  <div class="grid grid-cols-2 gap-3">
-                    <div class="rounded-xl p-3 text-center" style="background:rgba(255,255,255,0.12)">
-                      <p class="text-2xl font-bold text-white" id="ov-card-total">—</p>
-                      <p class="text-[10px] text-white/60 mt-0.5">เซสชันทั้งหมด</p>
-                    </div>
-                    <div class="rounded-xl p-3 text-center" style="background:rgba(255,255,255,0.12)">
-                      <p class="text-2xl font-bold text-emerald-300" id="ov-card-attended">—</p>
-                      <p class="text-[10px] text-white/60 mt-0.5">เข้าร่วม</p>
-                    </div>
-                  </div>
-                  <div class="mt-3 rounded-xl p-3 text-center" style="background:rgba(255,255,255,0.08)">
-                    <p class="text-3xl font-bold text-white" id="ov-card-pct">—%</p>
-                    <p class="text-[10px] text-white/60 mt-0.5">อัตราการเข้าร่วม</p>
+              <!-- Card 2: เข้าร่วมรวม -->
+              <div class="bg-white rounded-2xl shadow-sm border border-emerald-100 px-4 py-4 flex items-center gap-3">
+                <div class="w-10 h-10 rounded-xl bg-emerald-50 border border-emerald-100 flex items-center justify-center flex-shrink-0">
+                  <svg class="w-5 h-5 text-emerald-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0z"/></svg>
+                </div>
+                <div>
+                  <p class="text-2xl font-bold text-emerald-700 leading-none" id="ov-card-attended">—</p>
+                  <p class="text-[11px] text-emerald-500 mt-0.5">เข้าร่วมรวม</p>
+                </div>
+              </div>
+              <!-- Card 3: อัตราเข้าร่วม -->
+              <div class="rounded-2xl px-4 py-4 flex items-center gap-3" style="background:linear-gradient(135deg,#059669,#0d9488)">
+                <div class="w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0" style="background:rgba(255,255,255,0.15)">
+                  <svg class="w-5 h-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"/></svg>
+                </div>
+                <div>
+                  <p class="text-2xl font-bold text-white leading-none" id="ov-card-pct">—%</p>
+                  <p class="text-[11px] text-white/70 mt-0.5">อัตราเข้าร่วม</p>
+                  <p class="text-[10px] text-white/50 mt-0.5" id="ov-card-date"></p>
+                </div>
+              </div>
+              <!-- Pie chart — flex-1 fills remaining height -->
+              <div class="bg-white rounded-2xl shadow-sm border border-slate-100 p-4 flex flex-col flex-1 min-h-0">
+                <p class="text-[10px] font-bold text-slate-400 uppercase mb-3">สัดส่วน</p>
+                <div class="relative flex-1 min-h-0">
+                  <canvas id="ov-mgmt-pie"></canvas>
+                  <div class="absolute inset-0 flex flex-col items-center justify-center pointer-events-none">
+                    <p class="text-2xl font-bold text-emerald-600" id="ov-mgmt-pie-pct">—%</p>
                   </div>
                 </div>
               </div>
@@ -1260,41 +1274,53 @@ function renderDashboard(container, data) {
         </div>
 
         <!-- ── Sub-tab 2: Sec. & Supervisor ── -->
-        <div id="ov-sub-sv" class="hidden space-y-5">
+        <div id="ov-sub-sv" class="hidden space-y-4">
 
-          <!-- Filter bar: year only (annual view) -->
-          <div class="bg-white rounded-xl border border-slate-100 shadow-sm p-4 flex flex-wrap items-center gap-3">
-            <label class="text-xs font-bold text-slate-600">ปี</label>
-            <select id="sv-year-select" onchange="window.switchSvFilter()"
-              class="text-sm font-bold rounded-xl border border-slate-200 px-3 py-1.5 focus:outline-none focus:border-amber-400 text-slate-700">
-              ${[new Date().getFullYear(), new Date().getFullYear()-1, new Date().getFullYear()-2].map(y=>
-                `<option value="${y}" ${y===new Date().getFullYear()?'selected':''}>${y}</option>`
-              ).join('')}
-            </select>
-            ${isAdmin ? `<button onclick="window.openRosterAddModal('supervisor')"
-              class="ml-auto flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold text-white transition-all"
-              style="background:linear-gradient(135deg,#d97706,#f59e0b)">
-              <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M12 4v16m8-8H4"/></svg>
-              เพิ่มสมาชิก
-            </button>` : ''}
-          </div>
+          <!-- Main grid: table (primary) + sidebar -->
+          <div class="grid grid-cols-1 lg:grid-cols-4 gap-4">
 
-          <!-- 2-col grid -->
-          <div class="grid grid-cols-1 xl:grid-cols-3 gap-5">
-
-            <!-- Supervisor Table xl:col-span-2 -->
-            <div class="xl:col-span-2 bg-white rounded-2xl shadow-sm border border-amber-100 overflow-hidden">
-              <div class="px-5 py-3.5 border-b border-amber-100 flex items-center justify-between bg-amber-50/50">
-                <h3 class="font-bold text-slate-700 text-sm flex items-center gap-2">
-                  <div class="w-7 h-7 rounded-lg flex items-center justify-center bg-amber-100">
-                    <svg class="w-4 h-4 text-amber-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z"/></svg>
+            <!-- Table card — takes 3/4 -->
+            <div class="lg:col-span-3 bg-white rounded-2xl shadow-sm border border-amber-100 overflow-hidden flex flex-col">
+              <!-- Card header: title + year + add button -->
+              <div class="px-5 py-3.5 border-b border-amber-100 bg-amber-50/40 flex flex-wrap items-center gap-3">
+                <div class="flex items-center gap-2 flex-1 min-w-0">
+                  <div class="w-6 h-6 rounded-lg flex items-center justify-center bg-amber-100 flex-shrink-0">
+                    <svg class="w-3.5 h-3.5 text-amber-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z"/></svg>
                   </div>
-                  Summary of Sec. &amp; Supervisor Safety Patrol Attendance
-                  <span class="text-[9px] font-normal text-slate-400">(เป้าหมาย 24 ครั้ง/ปี)</span>
-                </h3>
-                <span class="text-[10px] text-slate-400" id="sv-overview-subtitle"></span>
+                  <h3 class="font-bold text-slate-700 text-sm truncate">Summary of Sec. &amp; Supervisor Safety Patrol Attendance</h3>
+                </div>
+                <div class="flex items-center gap-2 flex-shrink-0">
+                  <select id="sv-year-select" onchange="window.switchSvFilter()"
+                    class="text-xs font-bold rounded-xl border border-slate-200 px-2.5 py-1.5 focus:outline-none focus:border-amber-400 text-slate-700">
+                    ${[new Date().getFullYear(), new Date().getFullYear()-1, new Date().getFullYear()-2].map(y=>
+                      `<option value="${y}" ${y===new Date().getFullYear()?'selected':''}>${y}</option>`
+                    ).join('')}
+                  </select>
+                  <span class="hidden" id="sv-overview-subtitle"></span>
+                  <button onclick="window.exportPatrolPDF('supervisor')"
+                    class="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold transition-all flex-shrink-0 border border-red-200 text-red-600 hover:bg-red-50">
+                    <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/></svg>
+                    PDF
+                  </button>
+                  ${isAdmin ? `<button onclick="window.openRosterAddModal('supervisor')"
+                    class="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold text-white transition-all flex-shrink-0"
+                    style="background:linear-gradient(135deg,#d97706,#f59e0b)">
+                    <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M12 4v16m8-8H4"/></svg>
+                    เพิ่มสมาชิก
+                  </button>` : ''}
+                </div>
               </div>
-              <div class="overflow-x-auto">
+              <!-- Search bar -->
+              <div class="px-4 py-2.5 border-b border-amber-100">
+                <div class="relative">
+                  <svg class="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-slate-400 pointer-events-none" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0"/></svg>
+                  <input type="text" id="sv-search-input" placeholder="ค้นหาชื่อ, ตำแหน่ง, แผนก..."
+                    class="w-full text-xs rounded-xl border border-slate-200 pl-8 pr-3 py-1.5 focus:outline-none focus:border-amber-400 bg-amber-50/30"
+                    oninput="window._svSearchInput(this.value)">
+                </div>
+              </div>
+              <!-- Table -->
+              <div class="overflow-x-auto flex-1">
                 <table class="w-full text-xs text-left">
                   <thead class="text-[10px] uppercase bg-slate-50 border-b border-slate-100">
                     <tr>
@@ -1312,52 +1338,50 @@ function renderDashboard(container, data) {
                   <tbody id="sv-overview-body">
                     <tr><td colspan="${isAdmin ? 9 : 8}" class="text-center py-8 text-slate-300 text-xs">
                       <div class="inline-flex flex-col items-center gap-2">
-                        <div class="animate-spin rounded-full h-6 w-6 border-3 border-amber-400 border-t-transparent"></div>
+                        <div class="animate-spin rounded-full h-6 w-6 border-2 border-amber-400 border-t-transparent"></div>
                         <span>กำลังโหลด...</span>
                       </div>
                     </td></tr>
                   </tbody>
                 </table>
               </div>
+              <!-- Pagination -->
+              <div id="sv-pagination" class="px-4 py-2.5 border-t border-amber-100 flex items-center justify-between min-h-[40px]"></div>
             </div>
 
-            <!-- Right column -->
-            <div class="space-y-5">
+            <!-- Sidebar: 1/4 width -->
+            <div class="space-y-4">
+              <!-- Stat chips -->
+              <div class="bg-white rounded-2xl shadow-sm border border-slate-100 p-4 space-y-2">
+                <p class="text-[10px] font-bold text-slate-400 uppercase">ภาพรวม</p>
+                <div class="grid grid-cols-2 gap-2">
+                  <div class="rounded-xl bg-slate-50 border border-slate-100 p-2.5 text-center">
+                    <p class="text-lg font-bold text-slate-800" id="sv-card-total">—</p>
+                    <p class="text-[10px] text-slate-400 leading-tight">ผู้ควบคุม</p>
+                  </div>
+                  <div class="rounded-xl bg-amber-50 border border-amber-100 p-2.5 text-center">
+                    <p class="text-lg font-bold text-amber-700" id="sv-card-done">—</p>
+                    <p class="text-[10px] text-amber-500 leading-tight">ครบเป้า</p>
+                  </div>
+                </div>
+                <div class="rounded-xl p-2.5 text-center" style="background:linear-gradient(135deg,#d97706,#f59e0b)">
+                  <p class="text-2xl font-bold text-white" id="sv-card-pct">—%</p>
+                  <p class="text-[10px] text-white/70">อัตราครบเป้าหมาย</p>
+                </div>
+                <p class="text-[10px] text-slate-400 text-center" id="sv-card-subtitle"></p>
+              </div>
               <!-- Pie chart -->
-              <div class="bg-white rounded-2xl shadow-sm border border-slate-100 p-5">
-                <h3 class="font-bold text-slate-700 text-sm mb-4">Safety Patrol Pie Chart</h3>
-                <div class="relative h-52 flex items-center justify-center">
+              <div class="bg-white rounded-2xl shadow-sm border border-slate-100 p-4">
+                <p class="text-[10px] font-bold text-slate-400 uppercase mb-3">สัดส่วน</p>
+                <div class="relative h-40">
                   <canvas id="ov-sv-pie"></canvas>
                   <div class="absolute inset-0 flex flex-col items-center justify-center pointer-events-none">
-                    <p class="text-3xl font-bold text-amber-600" id="ov-sv-pie-pct">—%</p>
-                    <p class="text-[10px] text-slate-400 mt-0.5">อัตราเข้าร่วม</p>
+                    <p class="text-2xl font-bold text-amber-600" id="ov-sv-pie-pct">—%</p>
                   </div>
                 </div>
               </div>
-              <!-- Stats summary card -->
-              <div class="rounded-2xl overflow-hidden shadow-sm" style="background:linear-gradient(135deg,#78350f 0%,#92400e 55%,#b45309 100%)">
-                <div class="p-5">
-                  <div class="flex items-center gap-2 mb-3">
-                    <svg class="w-4 h-4 text-amber-300" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z"/></svg>
-                    <span class="text-xs font-bold text-white/80 uppercase tracking-wide">Safety Patrol Record</span>
-                  </div>
-                  <p class="text-[10px] text-white/50 mb-4" id="sv-card-subtitle">—</p>
-                  <div class="grid grid-cols-2 gap-3">
-                    <div class="rounded-xl p-3 text-center" style="background:rgba(255,255,255,0.12)">
-                      <p class="text-2xl font-bold text-white" id="sv-card-total">—</p>
-                      <p class="text-[10px] text-white/60 mt-0.5">ผู้ควบคุมทั้งหมด</p>
-                    </div>
-                    <div class="rounded-xl p-3 text-center" style="background:rgba(255,255,255,0.12)">
-                      <p class="text-2xl font-bold text-amber-300" id="sv-card-done">—</p>
-                      <p class="text-[10px] text-white/60 mt-0.5">ครบเป้าหมาย</p>
-                    </div>
-                  </div>
-                  <div class="mt-3 rounded-xl p-3 text-center" style="background:rgba(255,255,255,0.08)">
-                    <p class="text-3xl font-bold text-white" id="sv-card-pct">—%</p>
-                    <p class="text-[10px] text-white/60 mt-0.5">อัตราการเดินตรวจครบ</p>
-                  </div>
-                </div>
-              </div>
+              <!-- Status breakdown -->
+              <div id="sv-status-breakdown"></div>
             </div>
 
           </div>
@@ -3013,6 +3037,14 @@ window.openCarouselDetail = function(index) {
       </div>`, 'max-w-lg');
 };
 
+// ─── Overview Tab — pagination & search state ─────────────────────────────────
+const OV_PAGE_SIZE = 10;
+let _ovMgmtPage = 1;
+let _ovMgmtQ    = '';
+let _svPage      = 1;
+let _svQ         = '';
+let _svAllMembers = [];
+
 // ─── Overview Tab ─────────────────────────────────────────────────────────────
 async function loadOverview(year) {
     _overviewYear = year;
@@ -3049,7 +3081,10 @@ async function loadOverview(year) {
 
         // Refresh hero stats if overview tab is active
         window._refreshOverviewHero?.();
-        // Table
+        // Table — reset search/page on fresh load
+        _ovMgmtPage = 1; _ovMgmtQ = '';
+        const ovSearchEl = document.getElementById('ov-search-input');
+        if (ovSearchEl) ovSearchEl.value = '';
         renderOverviewTable(_overviewData.members);
 
         // Spotlight card
@@ -3064,8 +3099,27 @@ async function loadOverview(year) {
 }
 
 function renderOverviewTable(members) {
-    const tbody = document.getElementById('overview-table-body');
+    const tbody  = document.getElementById('overview-table-body');
+    const pagEl  = document.getElementById('ov-mgmt-pagination');
     if (!tbody) return;
+
+    // Sort: TargetPerYear ascending (12 before 24), then SortOrder
+    const sorted = [...members].sort((a, b) => (a.Total || 0) - (b.Total || 0));
+
+    // Apply search filter
+    const q = _ovMgmtQ.toLowerCase();
+    const filtered = q ? sorted.filter(m =>
+        (m.Name||'').toLowerCase().includes(q) ||
+        (m.Position||'').toLowerCase().includes(q) ||
+        (m.Department||'').toLowerCase().includes(q) ||
+        (m.EmployeeID||'').toLowerCase().includes(q)
+    ) : sorted;
+
+    const totalPages = Math.max(1, Math.ceil(filtered.length / OV_PAGE_SIZE));
+    if (_ovMgmtPage > totalPages) _ovMgmtPage = totalPages;
+    const start = (_ovMgmtPage - 1) * OV_PAGE_SIZE;
+    const page  = filtered.slice(start, start + OV_PAGE_SIZE);
+
     const ratingOf = pct => {
         if (pct >= 80) return { r: 5, cls: 'bg-emerald-100 text-emerald-700' };
         if (pct >= 75) return { r: 4, cls: 'bg-teal-100 text-teal-700' };
@@ -3075,25 +3129,27 @@ function renderOverviewTable(members) {
         return { r: 0, cls: 'bg-red-100 text-red-700' };
     };
 
-    if (!members.length) {
+    if (!filtered.length) {
         tbody.innerHTML = `<tr><td colspan="${isAdmin ? 8 : 7}" class="text-center py-14 text-xs text-slate-400">
           <div class="flex flex-col items-center gap-2">
             <div class="w-12 h-12 rounded-2xl bg-slate-100 flex items-center justify-center">
               <svg class="w-6 h-6 opacity-30" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0z"/></svg>
             </div>
-            <p class="font-medium text-slate-400">ยังไม่มีสมาชิกในรายการ</p>
-            ${isAdmin ? '<p class="text-[10px] text-slate-300">กด "เพิ่มสมาชิก" เพื่อเพิ่มพนักงานเข้าตาราง</p>' : ''}
+            <p class="font-medium text-slate-400">${_ovMgmtQ ? 'ไม่พบผลการค้นหา' : 'ยังไม่มีสมาชิกในรายการ'}</p>
+            ${!_ovMgmtQ && isAdmin ? '<p class="text-[10px] text-slate-300">กด "เพิ่มสมาชิก" เพื่อเพิ่มพนักงานเข้าตาราง</p>' : ''}
           </div>
         </td></tr>`;
+        if (pagEl) pagEl.innerHTML = '';
         return;
     }
 
-    tbody.innerHTML = members.map((m, i) => {
+    tbody.innerHTML = page.map((m, i) => {
         const { r, cls } = ratingOf(m.Percent);
         const barW = Math.min(m.Percent, 100);
         const isMe = m.EmployeeID === currentUser.id;
+        const rowNum = start + i + 1;
         return `<tr class="hover:bg-slate-50 transition-colors ${isMe ? 'bg-emerald-50/40' : ''}">
-          <td class="px-4 py-3 text-slate-400 font-mono text-xs">${i+1}</td>
+          <td class="px-4 py-3 text-slate-400 font-mono text-xs">${rowNum}</td>
           <td class="px-4 py-3">
             <div class="flex items-center gap-2">
               <div class="w-6 h-6 rounded-full flex items-center justify-center text-[9px] font-bold flex-shrink-0 ${isMe ? 'bg-emerald-500 text-white' : 'bg-slate-100 text-slate-500'}">
@@ -3134,7 +3190,36 @@ function renderOverviewTable(members) {
           </td>` : ''}
         </tr>`;
     }).join('');
+
+    // Render pagination controls
+    if (pagEl) {
+        pagEl.innerHTML = totalPages <= 1 ? '' : `
+          <span class="text-xs text-slate-500">${start+1}–${Math.min(start+OV_PAGE_SIZE,filtered.length)} จาก ${filtered.length} คน</span>
+          <div class="flex items-center gap-1">
+            <button onclick="window._ovMgmtGoPage(${_ovMgmtPage-1})"
+              class="px-2.5 py-1 rounded-lg text-xs font-bold border border-slate-200 text-slate-500 hover:bg-slate-50 disabled:opacity-30 transition-colors"
+              ${_ovMgmtPage <= 1 ? 'disabled' : ''}>
+              <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M15 19l-7-7 7-7"/></svg>
+            </button>
+            <span class="text-xs font-bold text-slate-600 px-1">${_ovMgmtPage} / ${totalPages}</span>
+            <button onclick="window._ovMgmtGoPage(${_ovMgmtPage+1})"
+              class="px-2.5 py-1 rounded-lg text-xs font-bold border border-slate-200 text-slate-500 hover:bg-slate-50 disabled:opacity-30 transition-colors"
+              ${_ovMgmtPage >= totalPages ? 'disabled' : ''}>
+              <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M9 5l7 7-7 7"/></svg>
+            </button>
+          </div>`;
+    }
 }
+
+window._ovMgmtGoPage = function(p) {
+    _ovMgmtPage = p;
+    if (_overviewData) renderOverviewTable(_overviewData.members);
+};
+window._ovMgmtSearchInput = function(q) {
+    _ovMgmtQ = q.trim();
+    _ovMgmtPage = 1;
+    if (_overviewData) renderOverviewTable(_overviewData.members);
+};
 
 function renderOverviewChart(percent) {
     const ctx = document.getElementById('ov-mgmt-pie');
@@ -3192,13 +3277,18 @@ function renderSpotlightCard() {
     // ถ้ายังไม่เลือก spotlight
     if (!_spotlightMgmtId) {
         wrap.innerHTML = isAdmin
-            ? `<div class="flex items-center gap-3 p-4 rounded-xl border border-dashed border-slate-200 bg-slate-50 text-slate-400 text-xs">
-                <svg class="w-5 h-5 flex-shrink-0 opacity-50" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5.121 17.804A13.937 13.937 0 0112 16c2.5 0 4.847.655 6.879 1.804M15 10a3 3 0 11-6 0 3 3 0 016 0z"/></svg>
-                <span>ยังไม่ได้เลือกบุคคลสำหรับ Spotlight</span>
+            ? `<div class="rounded-2xl border-2 border-dashed border-emerald-200 bg-white/60 px-6 py-5 flex items-center gap-4">
+                <div class="w-10 h-10 rounded-xl bg-emerald-50 flex items-center justify-center flex-shrink-0">
+                  <svg class="w-5 h-5 text-emerald-300" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11.049 2.927c.3-.921 1.603-.921 1.902 0l1.519 4.674a1 1 0 00.95.69h4.915c.969 0 1.371 1.24.588 1.81l-3.976 2.888a1 1 0 00-.363 1.118l1.518 4.674c.3.922-.755 1.688-1.538 1.118l-3.976-2.888a1 1 0 00-1.176 0l-3.976 2.888c-.783.57-1.838-.197-1.538-1.118l1.518-4.674a1 1 0 00-.363-1.118l-3.976-2.888c-.784-.57-.38-1.81.588-1.81h4.914a1 1 0 00.951-.69l1.519-4.674z"/></svg>
+                </div>
+                <div class="flex-1">
+                  <p class="text-sm font-bold text-slate-600">ยังไม่ได้เลือก Spotlight</p>
+                  <p class="text-xs text-slate-400 mt-0.5">เลือกสมาชิก Top & Management เพื่อแสดง progress โดดเด่นที่นี่</p>
+                </div>
                 <button onclick="window.openSpotlightPickerModal()"
-                  class="ml-auto flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold text-white flex-shrink-0"
+                  class="flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-bold text-white flex-shrink-0 transition-all"
                   style="background:linear-gradient(135deg,#059669,#0d9488)">
-                  <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/></svg>
+                  <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M12 4v16m8-8H4"/></svg>
                   เลือกบุคคล
                 </button>
               </div>`
@@ -3213,58 +3303,68 @@ function renderSpotlightCard() {
         return;
     }
 
-    const pct    = m.Percent || 0;
-    const barPct = Math.min(pct, 100);
-    const barColor = pct >= 75 ? '#10b981' : pct >= 60 ? '#f59e0b' : '#f43f5e';
-    const initial  = (m.Name || '?').charAt(0);
+    const pct       = m.Percent || 0;
+    const barPct    = Math.min(pct, 100);
+    const barColor  = pct >= 75 ? '#6ee7b7' : pct >= 60 ? '#fcd34d' : '#fca5a5';
+    const initial   = (m.Name || '?').charAt(0);
+    const statusCls = pct >= 80 ? 'bg-emerald-400/20 text-emerald-200' : pct >= 60 ? 'bg-amber-400/20 text-amber-200' : 'bg-red-400/20 text-red-200';
+    const statusLbl = pct >= 80 ? 'On Track' : pct >= 60 ? 'At Risk' : 'Behind';
+    const dotCls    = pct >= 80 ? 'bg-emerald-400 animate-pulse' : pct >= 60 ? 'bg-amber-400' : 'bg-red-400';
 
-    let statusBadge = '';
-    if (pct >= 80)      statusBadge = `<span class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold bg-emerald-100 text-emerald-700"><span class="w-1.5 h-1.5 rounded-full bg-emerald-400 inline-block animate-pulse"></span>On Track</span>`;
-    else if (pct >= 60) statusBadge = `<span class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold bg-amber-100 text-amber-700"><span class="w-1.5 h-1.5 rounded-full bg-amber-400 inline-block"></span>At Risk</span>`;
-    else                statusBadge = `<span class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold bg-red-100 text-red-700"><span class="w-1.5 h-1.5 rounded-full bg-red-400 inline-block"></span>Behind</span>`;
+    const empIdSafe = (m.EmployeeID || '').replace(/'/g, "\\'");
+    const nameSafe  = (m.Name       || '').replace(/'/g, "\\'");
 
-    const empIdSafe  = (m.EmployeeID || '').replace(/'/g, "\\'");
-    const nameSafe   = (m.Name       || '').replace(/'/g, "\\'");
-
+    // Full-width horizontal hero banner
     wrap.innerHTML = `
-      <div class="bg-white rounded-2xl border border-slate-100 shadow-sm px-5 py-4">
-        <div class="flex items-start gap-4">
-          <!-- Avatar -->
-          <div class="w-12 h-12 rounded-xl flex items-center justify-center text-white font-bold text-lg flex-shrink-0"
-               style="background:linear-gradient(135deg,#059669,#0d9488)">${initial}</div>
-
-          <!-- Info -->
-          <div class="flex-1 min-w-0">
-            <div class="flex items-center gap-2 flex-wrap">
-              <span class="font-bold text-slate-800 text-sm">${m.Name}</span>
-              ${statusBadge}
+      <div class="relative overflow-hidden rounded-2xl" style="background:linear-gradient(135deg,#064e3b 0%,#065f46 55%,#0d9488 100%)">
+        <!-- dot pattern -->
+        <div class="absolute inset-0 opacity-10 pointer-events-none">
+          <svg width="100%" height="100%"><defs><pattern id="sp-dots" width="20" height="20" patternUnits="userSpaceOnUse"><circle cx="10" cy="10" r="1.2" fill="white"/></pattern></defs><rect width="100%" height="100%" fill="url(#sp-dots)"/></svg>
+        </div>
+        <div class="relative z-10 px-5 py-4 flex flex-col sm:flex-row items-start sm:items-center gap-4">
+          <!-- Left: label + avatar + info -->
+          <div class="flex items-center gap-4 flex-1 min-w-0">
+            <div class="flex-shrink-0">
+              <p class="text-[9px] font-bold text-white/50 uppercase tracking-widest mb-1.5 flex items-center gap-1">
+                <svg class="w-3 h-3" fill="currentColor" viewBox="0 0 24 24"><path d="M11.049 2.927c.3-.921 1.603-.921 1.902 0l1.519 4.674a1 1 0 00.95.69h4.915c.969 0 1.371 1.24.588 1.81l-3.976 2.888a1 1 0 00-.363 1.118l1.518 4.674c.3.922-.755 1.688-1.538 1.118l-3.976-2.888a1 1 0 00-1.176 0l-3.976 2.888c-.783.57-1.838-.197-1.538-1.118l1.518-4.674a1 1 0 00-.363-1.118l-3.976-2.888c-.784-.57-.38-1.81.588-1.81h4.914a1 1 0 00.951-.69l1.519-4.674z"/></svg>
+                Spotlight ${_overviewYear}
+              </p>
+              <div class="w-12 h-12 rounded-xl flex items-center justify-center text-white font-bold text-xl"
+                   style="background:rgba(255,255,255,0.15);backdrop-filter:blur(4px);border:1px solid rgba(255,255,255,0.2)">${initial}</div>
             </div>
-            <p class="text-xs text-slate-400 mt-0.5">${m.Position || '—'} · ${m.Department || '—'}</p>
-            <!-- Progress bar -->
-            <div class="mt-3 flex items-center gap-3">
-              <div class="flex-1 h-2 rounded-full bg-slate-100 overflow-hidden">
-                <div class="h-full rounded-full transition-all duration-500"
-                     style="width:${barPct}%;background:${barColor}"></div>
-              </div>
-              <span class="text-xs font-bold text-slate-600 flex-shrink-0">${m.Attended} / ${m.Total} ครั้ง</span>
-              <span class="text-xs font-bold flex-shrink-0" style="color:${barColor}">${pct}%</span>
+            <div class="min-w-0">
+              <p class="text-lg font-bold text-white truncate">${m.Name}</p>
+              <p class="text-xs text-white/60 truncate mt-0.5">${m.Position || '—'} · ${m.Department || '—'}</p>
+              <span class="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[10px] font-semibold mt-1.5 ${statusCls}">
+                <span class="w-1.5 h-1.5 rounded-full inline-block ${dotCls}"></span>${statusLbl}
+              </span>
             </div>
           </div>
-
-          <!-- Action buttons -->
-          <div class="flex items-center gap-2 flex-shrink-0 self-center">
-            ${isAdmin ? `
-            <button onclick="window.openSpotlightPickerModal()"
-              class="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold text-slate-600 bg-slate-100 hover:bg-slate-200 transition-colors" title="เปลี่ยนบุคคล">
-              <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065zM15 12a3 3 0 11-6 0 3 3 0 016 0z"/></svg>
-              เปลี่ยน
-            </button>` : ''}
+          <!-- Center: progress -->
+          <div class="w-full sm:w-64 flex-shrink-0">
+            <div class="flex justify-between items-end mb-1.5">
+              <span class="text-xs text-white/60">${m.Attended} / ${m.Total} ครั้ง</span>
+              <span class="text-2xl font-bold text-white">${pct}%</span>
+            </div>
+            <div class="h-2.5 rounded-full overflow-hidden" style="background:rgba(255,255,255,0.15)">
+              <div class="h-full rounded-full transition-all duration-700" style="width:${barPct}%;background:${barColor}"></div>
+            </div>
+            <p class="text-[10px] text-white/40 mt-1">เป้าหมาย ${m.Total} ครั้ง / ปี</p>
+          </div>
+          <!-- Right: buttons -->
+          <div class="flex sm:flex-col gap-2 flex-shrink-0 w-full sm:w-auto">
             <button onclick="window.openSpotlightRecordsModal('${empIdSafe}','${nameSafe}',${_overviewYear})"
-              class="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold text-white transition-colors"
-              style="background:linear-gradient(135deg,#059669,#0d9488)">
+              class="flex-1 sm:flex-none flex items-center justify-center gap-1.5 px-4 py-2 rounded-xl text-xs font-bold transition-all"
+              style="background:rgba(255,255,255,0.15);color:white;border:1px solid rgba(255,255,255,0.25)">
               <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"/></svg>
               ดูรายการ
             </button>
+            ${isAdmin ? `<button onclick="window.openSpotlightPickerModal()"
+              class="flex-1 sm:flex-none flex items-center justify-center gap-1.5 px-4 py-2 rounded-xl text-xs font-bold transition-all"
+              style="background:rgba(255,255,255,0.08);color:rgba(255,255,255,0.6);border:1px solid rgba(255,255,255,0.12)">
+              <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7h12m0 0l-4-4m4 4l-4 4m0 6H4m0 0l4 4m-4-4l4-4"/></svg>
+              เปลี่ยน
+            </button>` : ''}
           </div>
         </div>
       </div>`;
@@ -3438,14 +3538,59 @@ async function loadSupervisorOverview(year) {
         setEl('sv-card-subtitle', `ปี ${year}`);
         renderSvPieChart(svPct);
 
-        tbody.innerHTML = members.map((m, i) => {
-            const done = m.attended >= m.target;
-            const half = m.attended > 0 && m.attended < m.target;
-            const statusCls = done ? 'bg-emerald-100 text-emerald-700' : half ? 'bg-amber-100 text-amber-700' : 'bg-red-50 text-red-500';
-            const statusLbl = done ? 'ครบแล้ว' : half ? 'บางส่วน' : 'ยังไม่เดิน';
-            const isMe = m.EmployeeID === currentUser.id;
-            return `<tr class="border-b border-slate-50 hover:bg-slate-50 transition-colors ${isMe ? 'bg-amber-50/30' : ''}">
-              <td class="px-4 py-3 text-slate-400 text-[10px] font-mono">${i+1}</td>
+        _svAllMembers = members;
+        _svPage = 1;
+        _svQ    = '';
+        const searchEl = document.getElementById('sv-search-input');
+        if (searchEl) searchEl.value = '';
+        renderSvTable();
+        renderSvStatusBreakdown(members);
+    } catch {
+        tbody.innerHTML = `<tr><td colspan="${isAdmin ? 9 : 8}" class="text-center py-6 text-xs text-slate-400">โหลดไม่ได้</td></tr>`;
+    }
+}
+
+function renderSvTable() {
+    const tbody = document.getElementById('sv-overview-body');
+    const pagEl = document.getElementById('sv-pagination');
+    if (!tbody) return;
+
+    const q = _svQ.toLowerCase();
+    const filtered = q ? _svAllMembers.filter(m =>
+        (m.EmployeeName||'').toLowerCase().includes(q) ||
+        (m.Position||'').toLowerCase().includes(q) ||
+        (m.Department||'').toLowerCase().includes(q) ||
+        (m.EmployeeID||'').toLowerCase().includes(q)
+    ) : _svAllMembers;
+
+    const totalPages = Math.max(1, Math.ceil(filtered.length / OV_PAGE_SIZE));
+    if (_svPage > totalPages) _svPage = totalPages;
+    const start = (_svPage - 1) * OV_PAGE_SIZE;
+    const page  = filtered.slice(start, start + OV_PAGE_SIZE);
+
+    if (!filtered.length) {
+        tbody.innerHTML = `<tr><td colspan="${isAdmin ? 9 : 8}" class="text-center py-12 text-xs text-slate-400">
+          <div class="flex flex-col items-center gap-2">
+            <div class="w-12 h-12 rounded-2xl bg-slate-100 flex items-center justify-center">
+              <svg class="w-6 h-6 opacity-30" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0z"/></svg>
+            </div>
+            <p class="font-medium text-slate-400">${_svQ ? 'ไม่พบผลการค้นหา' : 'ยังไม่มีสมาชิกในรายการ'}</p>
+            ${!_svQ && isAdmin ? '<p class="text-[10px] text-slate-300">กด "เพิ่มสมาชิก" เพื่อเพิ่มหัวหน้าส่วน/แผนกเข้าตาราง</p>' : ''}
+          </div>
+        </td></tr>`;
+        if (pagEl) pagEl.innerHTML = '';
+        return;
+    }
+
+    tbody.innerHTML = page.map((m, i) => {
+        const done = m.attended >= m.target;
+        const half = m.attended > 0 && m.attended < m.target;
+        const statusCls = done ? 'bg-emerald-100 text-emerald-700' : half ? 'bg-amber-100 text-amber-700' : 'bg-red-50 text-red-500';
+        const statusLbl = done ? 'ครบแล้ว' : half ? 'บางส่วน' : 'ยังไม่เดิน';
+        const isMe = m.EmployeeID === currentUser.id;
+        const rowNum = start + i + 1;
+        return `<tr class="border-b border-slate-50 hover:bg-slate-50 transition-colors ${isMe ? 'bg-amber-50/30' : ''}">
+              <td class="px-4 py-3 text-slate-400 text-[10px] font-mono">${rowNum}</td>
               <td class="px-4 py-3 font-semibold text-slate-700">${m.EmployeeName}${isMe ? ' <span class="text-[9px] text-amber-500">(ฉัน)</span>' : ''}</td>
               <td class="px-4 py-3 text-xs text-slate-500 max-w-[120px] truncate" title="${m.Position||''}">${m.Position||'—'}</td>
               <td class="px-4 py-3 text-xs text-slate-500 max-w-[100px] truncate" title="${m.Department||''}">${m.Department||'—'}</td>
@@ -3480,10 +3625,99 @@ async function loadSupervisorOverview(year) {
                 </div>
               </td>` : ''}
             </tr>`;
-        }).join('');
-    } catch {
-        tbody.innerHTML = `<tr><td colspan="${isAdmin ? 9 : 8}" class="text-center py-6 text-xs text-slate-400">โหลดไม่ได้</td></tr>`;
+    }).join('');
+
+    if (pagEl) {
+        pagEl.innerHTML = totalPages <= 1 ? '' : `
+          <span class="text-xs text-slate-500">${start+1}–${Math.min(start+OV_PAGE_SIZE,filtered.length)} จาก ${filtered.length} คน</span>
+          <div class="flex items-center gap-1">
+            <button onclick="window._svGoPage(${_svPage-1})"
+              class="px-2.5 py-1 rounded-lg text-xs font-bold border border-slate-200 text-slate-500 hover:bg-slate-50 disabled:opacity-30 transition-colors"
+              ${_svPage <= 1 ? 'disabled' : ''}>
+              <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M15 19l-7-7 7-7"/></svg>
+            </button>
+            <span class="text-xs font-bold text-slate-600 px-1">${_svPage} / ${totalPages}</span>
+            <button onclick="window._svGoPage(${_svPage+1})"
+              class="px-2.5 py-1 rounded-lg text-xs font-bold border border-slate-200 text-slate-500 hover:bg-slate-50 disabled:opacity-30 transition-colors"
+              ${_svPage >= totalPages ? 'disabled' : ''}>
+              <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M9 5l7 7-7 7"/></svg>
+            </button>
+          </div>`;
     }
+}
+
+window._svGoPage = function(p) {
+    _svPage = p;
+    renderSvTable();
+};
+window._svSearchInput = function(q) {
+    _svQ = q.trim();
+    _svPage = 1;
+    renderSvTable();
+};
+
+function renderSvStatusBreakdown(members) {
+    const el = document.getElementById('sv-status-breakdown');
+    if (!el) return;
+    if (!members || !members.length) { el.innerHTML = ''; return; }
+
+    const done = members.filter(m => m.attended >= m.target).length;
+    const half = members.filter(m => m.attended > 0 && m.attended < m.target).length;
+    const none = members.filter(m => m.attended === 0).length;
+
+    // Top performer (most attended, meeting or closest to target)
+    const top = [...members].sort((a, b) => b.percent - a.percent || b.attended - a.attended)[0];
+    const topBarColor = top.percent >= 75 ? '#10b981' : top.percent >= 60 ? '#f59e0b' : '#f43f5e';
+    const topInitial  = (top.EmployeeName || '?').charAt(0);
+
+    el.innerHTML = `
+      <div class="bg-white rounded-2xl shadow-sm border border-slate-100 p-4 space-y-3">
+        <p class="text-[10px] font-bold text-slate-400 uppercase">สถานะรวม</p>
+        <!-- Status bars -->
+        <div class="space-y-2">
+          <div class="flex items-center gap-2">
+            <span class="w-2 h-2 rounded-full bg-emerald-400 flex-shrink-0"></span>
+            <span class="text-xs text-slate-600 flex-1">ครบแล้ว</span>
+            <span class="text-xs font-bold text-emerald-700">${done} คน</span>
+          </div>
+          <div class="w-full h-1.5 bg-slate-100 rounded-full overflow-hidden">
+            <div class="h-full rounded-full bg-emerald-400" style="width:${members.length ? Math.round(done/members.length*100) : 0}%"></div>
+          </div>
+          <div class="flex items-center gap-2">
+            <span class="w-2 h-2 rounded-full bg-amber-400 flex-shrink-0"></span>
+            <span class="text-xs text-slate-600 flex-1">บางส่วน</span>
+            <span class="text-xs font-bold text-amber-600">${half} คน</span>
+          </div>
+          <div class="w-full h-1.5 bg-slate-100 rounded-full overflow-hidden">
+            <div class="h-full rounded-full bg-amber-400" style="width:${members.length ? Math.round(half/members.length*100) : 0}%"></div>
+          </div>
+          <div class="flex items-center gap-2">
+            <span class="w-2 h-2 rounded-full bg-red-300 flex-shrink-0"></span>
+            <span class="text-xs text-slate-600 flex-1">ยังไม่เดิน</span>
+            <span class="text-xs font-bold text-red-400">${none} คน</span>
+          </div>
+          <div class="w-full h-1.5 bg-slate-100 rounded-full overflow-hidden">
+            <div class="h-full rounded-full bg-red-300" style="width:${members.length ? Math.round(none/members.length*100) : 0}%"></div>
+          </div>
+        </div>
+        <!-- Top performer -->
+        <div class="pt-2 border-t border-slate-100">
+          <p class="text-[10px] font-bold text-slate-400 uppercase mb-2">อันดับ 1</p>
+          <div class="flex items-center gap-2.5">
+            <div class="w-8 h-8 rounded-lg flex items-center justify-center text-white text-xs font-bold flex-shrink-0"
+                 style="background:linear-gradient(135deg,#d97706,#f59e0b)">${topInitial}</div>
+            <div class="min-w-0 flex-1">
+              <p class="text-xs font-bold text-slate-700 truncate">${top.EmployeeName}</p>
+              <div class="flex items-center gap-1 mt-0.5">
+                <div class="flex-1 h-1.5 bg-slate-100 rounded-full overflow-hidden">
+                  <div class="h-full rounded-full" style="width:${Math.min(top.percent,100)}%;background:${topBarColor}"></div>
+                </div>
+                <span class="text-[10px] font-bold flex-shrink-0" style="color:${topBarColor}">${top.percent}%</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>`;
 }
 
 // ─── Patrol Roster Management (Admin) ─────────────────────────────────────────
@@ -3507,34 +3741,37 @@ async function _getEmpMaster() {
     } catch { return []; }
 }
 
-// Open modal to add employee to roster
+// Open modal to add employee to roster (multi-select)
 window.openRosterAddModal = async function(group) {
     if (!isAdmin) return;
     const isMgmt = group === 'top_management';
     const groupLabel = isMgmt ? 'Top & Management' : 'Sec. & Supervisor';
     const accentColor = isMgmt ? '#059669' : '#d97706';
+    const accentColor2 = isMgmt ? '#0d9488' : '#f59e0b';
 
     openModal(`เพิ่มสมาชิก — ${groupLabel}`, `
-      <div class="space-y-4">
+      <div class="space-y-3">
         <div>
           <label class="block text-xs font-bold text-slate-500 uppercase mb-1.5">ค้นหาพนักงาน</label>
           <input type="text" id="roster-search-input" placeholder="พิมพ์ชื่อ, รหัส, ตำแหน่ง หรือแผนก..."
             class="form-input w-full rounded-xl text-sm border border-slate-200 px-3 py-2 focus:outline-none focus:border-emerald-400"
             oninput="window._filterRosterSearch()">
         </div>
-        <div id="roster-emp-list" class="max-h-64 overflow-y-auto rounded-xl border border-slate-100 divide-y divide-slate-50 bg-slate-50">
+        <div id="roster-emp-list" class="max-h-52 overflow-y-auto rounded-xl border border-slate-100 divide-y divide-slate-50 bg-slate-50">
           <div class="text-center py-6 text-xs text-slate-400">
             <div class="animate-spin rounded-full h-5 w-5 border-2 border-emerald-500 border-t-transparent mx-auto mb-2"></div>
             กำลังโหลดรายชื่อพนักงาน...
           </div>
         </div>
-        <div id="roster-selected-emp" class="hidden rounded-xl border-2 border-emerald-300 bg-emerald-50 p-3">
-          <p class="text-xs font-bold text-emerald-700 mb-1">พนักงานที่เลือก</p>
-          <p id="roster-selected-name" class="text-sm font-bold text-slate-800"></p>
-          <p id="roster-selected-detail" class="text-xs text-slate-500 mt-0.5"></p>
+        <div id="roster-selected-chips" class="hidden">
+          <div class="flex items-center justify-between mb-1.5">
+            <span class="text-xs font-bold text-slate-500 uppercase">เลือกแล้ว</span>
+            <span id="roster-selected-count" class="text-xs font-bold px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-700">0 คน</span>
+          </div>
+          <div id="roster-chips-wrap" class="flex flex-wrap gap-1.5 max-h-24 overflow-y-auto"></div>
         </div>
         <div>
-          <label class="block text-xs font-bold text-slate-500 uppercase mb-1.5">เป้าหมายการเดินตรวจ (ครั้ง/ปี)</label>
+          <label class="block text-xs font-bold text-slate-500 uppercase mb-1.5">เป้าหมายการเดินตรวจ (ครั้ง/ปี) — ใช้กับทุกคนที่เลือก</label>
           <input type="number" id="roster-target-input" min="1" max="365" value="${isMgmt ? 12 : 24}"
             class="form-input w-full rounded-xl text-sm border border-slate-200 px-3 py-2 focus:outline-none focus:border-emerald-400">
           <p class="text-[10px] text-slate-400 mt-1">
@@ -3542,25 +3779,33 @@ window.openRosterAddModal = async function(group) {
           </p>
         </div>
         <input type="hidden" id="roster-group-input" value="${group}">
-        <input type="hidden" id="roster-emp-id-input" value="">
-        <div class="flex gap-2 pt-2">
+        <div class="flex gap-2 pt-1">
           <button onclick="window.closeModal&&window.closeModal()"
             class="flex-1 px-4 py-2.5 rounded-xl text-sm font-bold border border-slate-200 text-slate-600 hover:bg-slate-50 transition-colors">
             ยกเลิก
           </button>
-          <button onclick="window.confirmRosterAdd()"
+          <button id="roster-confirm-btn" onclick="window.confirmRosterAdd()"
             class="flex-1 px-4 py-2.5 rounded-xl text-sm font-bold text-white transition-colors"
-            style="background:linear-gradient(135deg,${accentColor},${isMgmt?'#0d9488':'#f59e0b'})">
+            style="background:linear-gradient(135deg,${accentColor},${accentColor2})">
             เพิ่มสมาชิก
           </button>
         </div>
       </div>
     `, 'max-w-md');
 
-    // Load employees
-    const emps = await _getEmpMaster();
-    window._rosterEmpList = emps;
-    window._rosterSelectedEmp = null;
+    // Load employees AND both rosters — filter out anyone already in either group
+    const otherGroup = group === 'top_management' ? 'supervisor' : 'top_management';
+    const [emps, rosterRes, otherRosterRes] = await Promise.all([
+        _getEmpMaster(),
+        API.get(`/patrol/roster?group=${group}`).catch(() => ({ data: [] })),
+        API.get(`/patrol/roster?group=${otherGroup}`).catch(() => ({ data: [] }))
+    ]);
+    const existingIds = new Set([
+        ...(rosterRes.data || []).map(m => m.EmployeeID),
+        ...(otherRosterRes.data || []).map(m => m.EmployeeID)
+    ]);
+    window._rosterEmpList = emps.filter(e => !existingIds.has(e.EmployeeID));
+    window._rosterSelectedSet = new Map(); // EmployeeID → employee object
     window._filterRosterSearch();
 };
 
@@ -3580,58 +3825,107 @@ window._filterRosterSearch = function() {
         listEl.innerHTML = `<div class="text-center py-6 text-xs text-slate-400">ไม่พบพนักงาน</div>`;
         return;
     }
-    listEl.innerHTML = filtered.slice(0, 50).map(e => `
-      <button onclick="window._selectRosterEmp('${e.EmployeeID}','${(e.EmployeeName||'').replace(/'/g,"\\'")}','${(e.Position||'').replace(/'/g,"\\'")}','${(e.Department||'').replace(/'/g,"\\'")}')"
-        class="w-full text-left px-3 py-2.5 hover:bg-white transition-colors flex items-center gap-3 group">
-        <div class="w-7 h-7 rounded-full bg-slate-200 flex items-center justify-center text-[10px] font-bold text-slate-500 flex-shrink-0 group-hover:bg-emerald-100 group-hover:text-emerald-600">
-          ${(e.EmployeeName||'?').charAt(0)}
-        </div>
-        <div class="min-w-0">
-          <p class="text-xs font-semibold text-slate-700 truncate">${e.EmployeeName}</p>
-          <p class="text-[10px] text-slate-400 truncate">${e.Position||'—'} · ${e.Department||'—'} · ${e.EmployeeID}</p>
-        </div>
-      </button>
-    `).join('');
+    const selected = window._rosterSelectedSet || new Map();
+    listEl.innerHTML = filtered.slice(0, 80).map(e => {
+        const isSelected = selected.has(e.EmployeeID);
+        return `
+        <button onclick="window._toggleRosterEmp('${e.EmployeeID}','${(e.EmployeeName||'').replace(/'/g,"\\'")}','${(e.Position||'').replace(/'/g,"\\'")}','${(e.Department||'').replace(/'/g,"\\'")}')"
+          id="roster-row-${e.EmployeeID}"
+          class="w-full text-left px-3 py-2.5 transition-colors flex items-center gap-3 group ${isSelected ? 'bg-emerald-50' : 'hover:bg-white'}">
+          <div class="w-5 h-5 rounded flex items-center justify-center flex-shrink-0 border-2 transition-colors ${isSelected ? 'bg-emerald-500 border-emerald-500' : 'border-slate-300 bg-white'}">
+            ${isSelected ? `<svg class="w-3 h-3 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="3" d="M5 13l4 4L19 7"/></svg>` : ''}
+          </div>
+          <div class="w-7 h-7 rounded-full flex items-center justify-center text-[10px] font-bold flex-shrink-0 ${isSelected ? 'bg-emerald-500 text-white' : 'bg-slate-200 text-slate-500'}">
+            ${(e.EmployeeName||'?').charAt(0)}
+          </div>
+          <div class="min-w-0 flex-1">
+            <p class="text-xs font-semibold ${isSelected ? 'text-emerald-700' : 'text-slate-700'} truncate">${e.EmployeeName}</p>
+            <p class="text-[10px] text-slate-400 truncate">${e.Position||'—'} · ${e.Department||'—'} · ${e.EmployeeID}</p>
+          </div>
+        </button>`;
+    }).join('');
 };
 
-window._selectRosterEmp = function(id, name, position, dept) {
-    window._rosterSelectedEmp = { id, name, position, dept };
-    const empIdEl   = document.getElementById('roster-emp-id-input');
-    const nameEl    = document.getElementById('roster-selected-name');
-    const detailEl  = document.getElementById('roster-selected-detail');
-    const boxEl     = document.getElementById('roster-selected-emp');
-    if (empIdEl) empIdEl.value = id;
-    if (nameEl)  nameEl.textContent = name;
-    if (detailEl) detailEl.textContent = `${position||'—'} · ${dept||'—'} · ${id}`;
-    if (boxEl)   boxEl.classList.remove('hidden');
+window._toggleRosterEmp = function(id, name, position, dept) {
+    const sel = window._rosterSelectedSet || new Map();
+    if (sel.has(id)) {
+        sel.delete(id);
+    } else {
+        sel.set(id, { id, name, position, dept });
+        // Auto-suggest target when first employee is selected
+        if (sel.size === 1) {
+            const isMgmt = (document.getElementById('roster-group-input')?.value) === 'top_management';
+            const suggested = _rosterDefaultTarget(position, isMgmt);
+            const targetEl = document.getElementById('roster-target-input');
+            if (targetEl) targetEl.value = suggested;
+        }
+    }
+    window._rosterSelectedSet = sel;
 
-    // Auto-suggest target based on position
-    const isMgmt = (document.getElementById('roster-group-input')?.value) === 'top_management';
-    const suggested = _rosterDefaultTarget(position, isMgmt);
-    const targetEl = document.getElementById('roster-target-input');
-    if (targetEl) targetEl.value = suggested;
+    // Update checkbox row in list (without full re-render)
+    const rowEl = document.getElementById(`roster-row-${id}`);
+    if (rowEl) {
+        const isNowSelected = sel.has(id);
+        rowEl.className = `w-full text-left px-3 py-2.5 transition-colors flex items-center gap-3 group ${isNowSelected ? 'bg-emerald-50' : 'hover:bg-white'}`;
+        const checkBox = rowEl.querySelector('div:first-child');
+        if (checkBox) {
+            checkBox.className = `w-5 h-5 rounded flex items-center justify-center flex-shrink-0 border-2 transition-colors ${isNowSelected ? 'bg-emerald-500 border-emerald-500' : 'border-slate-300 bg-white'}`;
+            checkBox.innerHTML = isNowSelected ? `<svg class="w-3 h-3 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="3" d="M5 13l4 4L19 7"/></svg>` : '';
+        }
+        const avatar = rowEl.querySelector('div:nth-child(2)');
+        if (avatar) avatar.className = `w-7 h-7 rounded-full flex items-center justify-center text-[10px] font-bold flex-shrink-0 ${isNowSelected ? 'bg-emerald-500 text-white' : 'bg-slate-200 text-slate-500'}`;
+        const nameEl = rowEl.querySelector('p:first-child');
+        if (nameEl) nameEl.className = `text-xs font-semibold ${isNowSelected ? 'text-emerald-700' : 'text-slate-700'} truncate`;
+    }
+
+    // Update chips area
+    const chipsWrap = document.getElementById('roster-chips-wrap');
+    const chipsBox  = document.getElementById('roster-selected-chips');
+    const countEl   = document.getElementById('roster-selected-count');
+    const btnEl     = document.getElementById('roster-confirm-btn');
+    if (chipsWrap) {
+        chipsWrap.innerHTML = [...sel.values()].map(e => `
+          <span class="inline-flex items-center gap-1 px-2 py-1 rounded-full text-[11px] font-semibold bg-emerald-100 text-emerald-800">
+            ${e.name}
+            <button type="button" onclick="window._toggleRosterEmp('${e.id}','${e.name.replace(/'/g,"\\'")}','${(e.position||'').replace(/'/g,"\\'")}','${(e.dept||'').replace(/'/g,"\\'")}')"
+              class="ml-0.5 hover:text-red-500 transition-colors">
+              <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M6 18L18 6M6 6l12 12"/></svg>
+            </button>
+          </span>`).join('');
+    }
+    if (chipsBox)  chipsBox.classList.toggle('hidden', sel.size === 0);
+    if (countEl)   countEl.textContent = `${sel.size} คน`;
+    if (btnEl)     btnEl.textContent = sel.size > 0 ? `เพิ่ม ${sel.size} คน` : 'เพิ่มสมาชิก';
 };
 
 window.confirmRosterAdd = async function() {
-    const empId  = document.getElementById('roster-emp-id-input')?.value;
+    const sel    = window._rosterSelectedSet || new Map();
     const group  = document.getElementById('roster-group-input')?.value;
     const target = parseInt(document.getElementById('roster-target-input')?.value || '12');
-    if (!empId) { showToast('กรุณาเลือกพนักงาน', 'warning'); return; }
+    if (sel.size === 0) { showToast('กรุณาเลือกพนักงานอย่างน้อย 1 คน', 'warning'); return; }
     if (!target || target < 1) { showToast('กรุณาระบุเป้าหมายที่ถูกต้อง', 'warning'); return; }
-    try {
-        await API.post('/patrol/roster', { EmployeeID: empId, RosterGroup: group, TargetPerYear: target });
-        showToast('เพิ่มสมาชิกสำเร็จ', 'success');
-        closeModal();
-        // Reload the appropriate table
-        if (group === 'top_management') {
-            _overviewData = null;
-            loadOverview(_overviewYear);
-        } else {
-            const yr = document.getElementById('sv-year-select')?.value || new Date().getFullYear();
-            loadSupervisorOverview(parseInt(yr));
-        }
-    } catch (err) {
-        showToast(err.message || 'เพิ่มไม่สำเร็จ', 'error');
+
+    const btn = document.getElementById('roster-confirm-btn');
+    if (btn) { btn.disabled = true; btn.textContent = 'กำลังเพิ่ม...'; }
+
+    let added = 0, failed = 0;
+    for (const emp of sel.values()) {
+        try {
+            await API.post('/patrol/roster', { EmployeeID: emp.id, RosterGroup: group, TargetPerYear: target });
+            added++;
+        } catch { failed++; }
+    }
+
+    closeModal();
+    if (added > 0) showToast(`เพิ่มสมาชิกสำเร็จ ${added} คน${failed > 0 ? ` (ล้มเหลว ${failed} คน)` : ''}`, failed > 0 ? 'warning' : 'success');
+    else showToast('เพิ่มไม่สำเร็จ', 'error');
+
+    if (group === 'top_management') {
+        _overviewData = null;
+        loadOverview(_overviewYear);
+    } else {
+        const yr = document.getElementById('sv-year-select')?.value || new Date().getFullYear();
+        loadSupervisorOverview(parseInt(yr));
     }
 };
 
@@ -4903,3 +5197,279 @@ async function loadDashboardCharts() {
         initPromoCarousel();
     } catch (e) { console.error('Chart error:', e); }
 }
+
+// ─── Patrol Attendance PDF Export ─────────────────────────────────────────────
+
+window.exportPatrolPDF = async function(group) {
+    if (!window.jspdf || !window.html2canvas) {
+        showToast('ไม่พบ jsPDF หรือ html2canvas', 'error'); return;
+    }
+    const isMgmt = group === 'top_management';
+    const rawMembers = isMgmt
+        ? ([...(_overviewData?.members || [])].sort((a,b)=>(a.Total||0)-(b.Total||0)))
+        : _svAllMembers;
+    if (!rawMembers || !rawMembers.length) {
+        showToast('ยังไม่มีข้อมูลสมาชิก', 'warning'); return;
+    }
+
+    const year = isMgmt
+        ? (_overviewYear || new Date().getFullYear())
+        : (parseInt(document.getElementById('sv-year-select')?.value) || new Date().getFullYear());
+    const summary = isMgmt ? (_overviewData?.summary || {}) : (() => {
+        const att = rawMembers.reduce((s,m)=>s+(m.attended||0),0);
+        return { totalSessions: rawMembers.reduce((s,m)=>s+(m.target||0),0), totalAttended: att, percent: rawMembers.length ? Math.round(att/rawMembers.length) : 0 };
+    })();
+
+    const now     = new Date();
+    const pad     = n => String(n).padStart(2,'0');
+    const dateStr = now.toLocaleDateString('th-TH',{day:'numeric',month:'long',year:'numeric'});
+    const docNo   = 'SP-'+(isMgmt?'MGT':'SUP')+'-'+year+'-'+pad(now.getMonth()+1)+pad(now.getDate());
+    const groupLabel = isMgmt ? 'Top & Management' : 'Sec. & Supervisor';
+    const K = "font-family:'Kanit',sans-serif;";
+
+    const nameKey   = isMgmt ? 'Name'       : 'EmployeeName';
+    const posKey    = isMgmt ? 'Position'   : 'position';
+    const deptKey   = isMgmt ? 'Department' : 'department';
+    const targetKey = isMgmt ? 'Total'      : 'target';
+    const attendKey = isMgmt ? 'Attended'   : 'attended';
+    const pctKey    = isMgmt ? 'Percent'    : 'percent';
+
+    const ratingOf = pct => {
+        if (pct>=80) return {r:5,bg:'#dcfce7',color:'#166534'};
+        if (pct>=75) return {r:4,bg:'#d1fae5',color:'#065f46'};
+        if (pct>=70) return {r:3,bg:'#dbeafe',color:'#1e40af'};
+        if (pct>=65) return {r:2,bg:'#fef9c3',color:'#854d0e'};
+        if (pct>=60) return {r:1,bg:'#ffedd5',color:'#9a3412'};
+        return {r:0,bg:'#fee2e2',color:'#991b1b'};
+    };
+    const pctColor  = pct => pct>=75?'#059669':pct>=60?'#f59e0b':'#ef4444';
+    const passCount = rawMembers.filter(m=>(m[pctKey]||0)>=75).length;
+    const spMember  = isMgmt && _spotlightMgmtId ? rawMembers.find(m=>m.EmployeeID===_spotlightMgmtId) : null;
+
+    // Row count per page (conservative — no overflow)
+    const ROWS_P1   = spMember ? 21 : 26;
+    const ROWS_FULL = 30;
+
+    // ── Shared HTML builders ──────────────────────────────────────────────────
+    const THEAD = '<thead><tr style="background:linear-gradient(135deg,#064e3b,#0d9488)">'
+        + '<th style="'+K+'padding:7px 8px;color:rgba(255,255,255,.9);font-size:9px;text-align:center;width:24px">#</th>'
+        + '<th style="'+K+'padding:7px 8px;color:rgba(255,255,255,.9);font-size:9px;text-align:left">ชื่อ-สกุล</th>'
+        + '<th style="'+K+'padding:7px 8px;color:rgba(255,255,255,.9);font-size:9px;text-align:left">ตำแหน่ง</th>'
+        + '<th style="'+K+'padding:7px 8px;color:rgba(255,255,255,.9);font-size:9px;text-align:left">แผนก/ส่วนงาน</th>'
+        + '<th style="'+K+'padding:7px 8px;color:rgba(255,255,255,.9);font-size:9px;text-align:center">เป้า/ปี</th>'
+        + '<th style="'+K+'padding:7px 8px;color:rgba(255,255,255,.9);font-size:9px;text-align:center">เข้าร่วม</th>'
+        + '<th style="'+K+'padding:7px 8px;color:rgba(255,255,255,.9);font-size:9px;text-align:left;min-width:90px">ความคืบหน้า</th>'
+        + '<th style="'+K+'padding:7px 8px;color:rgba(255,255,255,.9);font-size:9px;text-align:center">Rating</th>'
+        + '</tr></thead>';
+
+    const makeRow = (m, idx) => {
+        const pct=m[pctKey]||0, rt=ratingOf(pct), pc=pctColor(pct), bar=Math.min(pct,100);
+        return '<tr style="background:'+(idx%2===0?'#f0fdf4':'#fff')+';border-bottom:1px solid #e8f5ee">'
+            +'<td style="'+K+'padding:5px 8px;font-size:9.5px;color:#94a3b8;text-align:center">'+(idx+1)+'</td>'
+            +'<td style="'+K+'padding:5px 8px;font-size:9.5px;font-weight:600;color:#1e293b">'+(m[nameKey]||'—')+'</td>'
+            +'<td style="'+K+'padding:5px 8px;font-size:9px;color:#475569">'+(m[posKey]||'—')+'</td>'
+            +'<td style="'+K+'padding:5px 8px;font-size:9px;color:#64748b">'+(m[deptKey]||'—')+'</td>'
+            +'<td style="'+K+'padding:5px 8px;font-size:9.5px;font-weight:700;color:#475569;text-align:center">'+(m[targetKey]||0)+'</td>'
+            +'<td style="'+K+'padding:5px 8px;font-size:9.5px;font-weight:700;color:#059669;text-align:center">'+(m[attendKey]||0)+'</td>'
+            +'<td style="'+K+'padding:5px 10px"><div style="display:flex;align-items:center;gap:4px">'
+            +'<div style="flex:1;height:5px;background:#e2e8f0;border-radius:3px;overflow:hidden"><div style="height:100%;width:'+bar+'%;background:'+pc+';border-radius:3px"></div></div>'
+            +'<span style="'+K+'font-size:9px;font-weight:700;color:'+pc+';min-width:26px;text-align:right">'+pct+'%</span>'
+            +'</div></td>'
+            +'<td style="padding:5px 8px;text-align:center">'
+            +(rt.r>0?'<span style="'+K+'background:'+rt.bg+';color:'+rt.color+';font-size:8px;font-weight:700;padding:2px 7px;border-radius:20px">R'+rt.r+'</span>':'<span style="'+K+'color:#cbd5e1;font-size:9px">—</span>')
+            +'</td></tr>';
+    };
+
+    const HEADER_BLOCK = '<div style="background:linear-gradient(135deg,#064e3b 0%,#065f46 55%,#0d9488 100%);padding:22px 36px 18px;position:relative;overflow:hidden">'
+        +'<div style="position:absolute;top:-50px;right:-50px;width:180px;height:180px;border-radius:50%;background:rgba(255,255,255,.05)"></div>'
+        +'<div style="position:relative;z-index:1">'
+        +'<div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:14px">'
+        +'<div>'
+        +'<div style="display:inline-flex;align-items:center;gap:5px;background:rgba(255,255,255,.15);border-radius:20px;padding:3px 10px;margin-bottom:8px">'
+        +'<span style="width:5px;height:5px;background:#34d399;border-radius:50%;display:inline-block"></span>'
+        +'<span style="'+K+'color:rgba(255,255,255,.85);font-size:9px;font-weight:600;letter-spacing:1.2px">OFFICIAL REPORT</span>'
+        +'</div>'
+        +'<div style="'+K+'color:white;font-size:18px;font-weight:700;line-height:1.2;margin-bottom:3px">รายงานการเดินตรวจความปลอดภัย</div>'
+        +'<div style="'+K+'color:rgba(255,255,255,.65);font-size:11px">'+groupLabel+' Safety Patrol · ประจำปี '+year+'</div>'
+        +'</div>'
+        +'<div style="text-align:right">'
+        +'<div style="'+K+'color:rgba(255,255,255,.45);font-size:8.5px;margin-bottom:2px">เลขที่เอกสาร</div>'
+        +'<div style="'+K+'color:white;font-size:11px;font-weight:700">'+docNo+'</div>'
+        +'<div style="'+K+'color:rgba(255,255,255,.45);font-size:8.5px;margin-top:5px;margin-bottom:2px">วันที่สร้างรายงาน</div>'
+        +'<div style="'+K+'color:rgba(255,255,255,.65);font-size:10px">'+dateStr+'</div>'
+        +'</div></div>'
+        +'<div style="display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:8px">'
+        +'<div style="background:rgba(255,255,255,.12);border-radius:10px;padding:10px 12px;text-align:center"><div style="'+K+'color:white;font-size:20px;font-weight:700">'+(summary.totalSessions||'—')+'</div><div style="'+K+'color:rgba(255,255,255,.55);font-size:9px;margin-top:2px">เซสชันทั้งหมด</div></div>'
+        +'<div style="background:rgba(255,255,255,.12);border-radius:10px;padding:10px 12px;text-align:center"><div style="'+K+'color:white;font-size:20px;font-weight:700">'+(summary.totalAttended||'—')+'</div><div style="'+K+'color:rgba(255,255,255,.55);font-size:9px;margin-top:2px">เข้าร่วมรวม</div></div>'
+        +'<div style="background:rgba(255,255,255,.12);border-radius:10px;padding:10px 12px;text-align:center"><div style="'+K+'color:white;font-size:20px;font-weight:700">'+rawMembers.length+'</div><div style="'+K+'color:rgba(255,255,255,.55);font-size:9px;margin-top:2px">จำนวนสมาชิก</div></div>'
+        +'<div style="background:rgba(255,255,255,.18);border-radius:10px;padding:10px 12px;text-align:center;border:1px solid rgba(255,255,255,.2)"><div style="'+K+'color:#6ee7b7;font-size:20px;font-weight:700">'+(summary.percent||0)+'%</div><div style="'+K+'color:rgba(255,255,255,.55);font-size:9px;margin-top:2px">อัตราเข้าร่วม</div></div>'
+        +'</div></div></div>';
+
+    const SPOTLIGHT_BLOCK = spMember ? (() => {
+        const sp=spMember, spPct=sp[pctKey]||0, spBar=Math.min(spPct,100);
+        const spBg=spPct>=80?'#dcfce7':spPct>=60?'#fef9c3':'#fee2e2';
+        const spClr=spPct>=80?'#166534':spPct>=60?'#854d0e':'#991b1b';
+        const spLbl=spPct>=80?'On Track':spPct>=60?'At Risk':'Behind';
+        const spBarC=spPct>=75?'#059669':spPct>=60?'#f59e0b':'#ef4444';
+        return '<div style="'+K+'background:#f8fafc;padding:11px 36px;border-left:4px solid #059669">'
+            +'<div style="display:flex;align-items:center;gap:14px">'
+            +'<div style="width:36px;height:36px;border-radius:9px;background:linear-gradient(135deg,#059669,#0d9488);display:flex;align-items:center;justify-content:center;color:white;font-size:15px;font-weight:700;flex-shrink:0">'+(sp[nameKey]||'?').charAt(0)+'</div>'
+            +'<div style="flex:1;min-width:0">'
+            +'<div style="display:flex;align-items:center;gap:7px;margin-bottom:2px"><span style="'+K+'font-size:9px;font-weight:700;color:#059669;letter-spacing:1px">★ SPOTLIGHT</span><span style="'+K+'background:'+spBg+';color:'+spClr+';font-size:8.5px;font-weight:700;padding:2px 7px;border-radius:20px">'+spLbl+'</span></div>'
+            +'<div style="'+K+'font-size:13px;font-weight:700;color:#1e293b">'+(sp[nameKey]||'—')+'</div>'
+            +'<div style="'+K+'font-size:9.5px;color:#64748b">'+(sp[posKey]||'—')+' · '+(sp[deptKey]||'—')+'</div>'
+            +'</div>'
+            +'<div style="width:150px;flex-shrink:0">'
+            +'<div style="display:flex;justify-content:space-between;margin-bottom:4px"><span style="'+K+'font-size:9px;color:#94a3b8">'+(sp[attendKey]||0)+' / '+(sp[targetKey]||0)+' ครั้ง</span><span style="'+K+'font-size:11px;font-weight:700;color:'+spBarC+'">'+spPct+'%</span></div>'
+            +'<div style="height:5px;background:#e2e8f0;border-radius:3px;overflow:hidden"><div style="height:100%;width:'+spBar+'%;background:'+spBarC+';border-radius:3px"></div></div>'
+            +'</div></div></div>';
+    })() : '';
+
+    const TABLE_LABEL = '<div style="'+K+'padding:10px 36px 0;display:flex;align-items:center;gap:6px">'
+        +'<div style="width:3px;height:14px;background:#059669;border-radius:2px"></div>'
+        +'<span style="'+K+'font-size:10px;font-weight:700;color:#334155">รายชื่อสมาชิก ('+rawMembers.length+' คน)</span></div>';
+
+    const CONT_LABEL = '<div style="'+K+'padding:8px 36px 0;display:flex;justify-content:space-between;align-items:center">'
+        +'<span style="'+K+'font-size:9px;color:#94a3b8;font-style:italic">รายชื่อสมาชิก (ต่อ)</span>'
+        +'<span style="'+K+'font-size:9px;color:#94a3b8">'+groupLabel+' · ประจำปี '+year+'</span></div>';
+
+    const PAGE_S = K+'width:794px;height:1122px;overflow:hidden;background:white;box-sizing:border-box;display:flex;flex-direction:column';
+
+    const PAGE_FOOTER = '<div style="height:32px;background:linear-gradient(135deg,#064e3b,#0d9488);display:flex;align-items:center;justify-content:space-between;padding:0 36px;flex-shrink:0">'
+        +'<span style="'+K+'color:rgba(255,255,255,.65);font-size:8px">TSH Safety Core Activity System · รายงานสร้างโดยระบบอัตโนมัติ</span>'
+        +'<span style="'+K+'color:rgba(255,255,255,.65);font-size:8px">'+docNo+' · ประจำปี '+year+'</span>'
+        +'</div>';
+
+    // ── Build page HTML array ─────────────────────────────────────────────────
+    const pageHTMLs = [];
+    const chunks = [{ rows: rawMembers.slice(0, ROWS_P1), isFirst: true, startIdx: 0 }];
+    for (let i = ROWS_P1; i < rawMembers.length; i += ROWS_FULL) {
+        chunks.push({ rows: rawMembers.slice(i, i+ROWS_FULL), isFirst: false, startIdx: i });
+    }
+    chunks.forEach(chunk => {
+        const rowsHtml = chunk.rows.map((m,j) => makeRow(m, chunk.startIdx+j)).join('');
+        if (chunk.isFirst) {
+            pageHTMLs.push('<div style="'+PAGE_S+'">'
+                +'<div style="flex:1;min-height:0">'
+                +HEADER_BLOCK+SPOTLIGHT_BLOCK+TABLE_LABEL
+                +'<div style="padding:4px 36px 0"><table style="width:100%;border-collapse:collapse">'+THEAD+'<tbody>'+rowsHtml+'</tbody></table></div>'
+                +'</div>'
+                +PAGE_FOOTER
+                +'</div>');
+        } else {
+            pageHTMLs.push('<div style="'+PAGE_S+'">'
+                +'<div style="flex:1;min-height:0">'
+                +CONT_LABEL
+                +'<div style="padding:4px 36px 0"><table style="width:100%;border-collapse:collapse">'+THEAD+'<tbody>'+rowsHtml+'</tbody></table></div>'
+                +'</div>'
+                +PAGE_FOOTER
+                +'</div>');
+        }
+    });
+
+    // ── Summary page (always last) ────────────────────────────────────────────
+    const donePct = rawMembers.length ? Math.round(passCount/rawMembers.length*100) : 0;
+    const barW75  = Math.min(donePct,100);
+    const cRatings = [['5','≥80%','#dcfce7','#166534'],['4','≥75%','#d1fae5','#065f46'],['3','≥70%','#dbeafe','#1e40af'],['2','≥65%','#fef9c3','#854d0e'],['1','≥60%','#ffedd5','#9a3412'],['0','<60%','#fee2e2','#991b1b']];
+    pageHTMLs.push('<div style="'+K+'width:794px;height:1122px;background:white;box-sizing:border-box;display:flex;flex-direction:column;overflow:hidden">'
+        // ── Green header (same family as report header)
+        +'<div style="background:linear-gradient(135deg,#064e3b 0%,#065f46 55%,#0d9488 100%);padding:28px 60px 24px;position:relative;overflow:hidden;flex-shrink:0">'
+        +'<div style="position:absolute;top:-40px;right:-40px;width:160px;height:160px;border-radius:50%;background:rgba(255,255,255,.05)"></div>'
+        +'<div style="position:relative;z-index:1">'
+        +'<div style="display:inline-flex;align-items:center;gap:5px;background:rgba(255,255,255,.15);border-radius:20px;padding:3px 10px;margin-bottom:10px">'
+        +'<span style="width:5px;height:5px;background:#34d399;border-radius:50%;display:inline-block"></span>'
+        +'<span style="'+K+'color:rgba(255,255,255,.85);font-size:9px;font-weight:600;letter-spacing:1.2px">SUMMARY REPORT</span>'
+        +'</div>'
+        +'<div style="display:flex;justify-content:space-between;align-items:flex-end">'
+        +'<div>'
+        +'<div style="'+K+'color:white;font-size:22px;font-weight:700;line-height:1.2;margin-bottom:4px">สรุปผลการประเมิน</div>'
+        +'<div style="'+K+'color:rgba(255,255,255,.65);font-size:11px">'+groupLabel+' Safety Patrol · ประจำปี '+year+'</div>'
+        +'</div>'
+        +'<div style="text-align:right">'
+        +'<div style="'+K+'color:rgba(255,255,255,.45);font-size:8px;margin-bottom:2px">เลขที่เอกสาร</div>'
+        +'<div style="'+K+'color:white;font-size:11px;font-weight:700">'+docNo+'</div>'
+        +'<div style="'+K+'color:rgba(255,255,255,.45);font-size:8px;margin-top:5px;margin-bottom:2px">วันที่สร้างรายงาน</div>'
+        +'<div style="'+K+'color:rgba(255,255,255,.65);font-size:10px">'+dateStr+'</div>'
+        +'</div></div></div></div>'
+        // ── Main content — flex:1, evenly spaced sections
+        +'<div style="flex:1;padding:40px 60px;display:flex;flex-direction:column;justify-content:space-evenly;min-height:0">'
+        // Section A: Big pass number + progress bar
+        +'<div style="display:flex;align-items:flex-end;gap:28px">'
+        +'<div><div style="'+K+'font-size:76px;font-weight:700;color:#059669;line-height:1">'+passCount+'</div>'
+        +'<div style="'+K+'font-size:13px;color:#64748b;margin-top:8px">จาก '+rawMembers.length+' คน ผ่านเกณฑ์ (≥75%)</div></div>'
+        +'<div style="flex:1;padding-bottom:18px">'
+        +'<div style="display:flex;justify-content:space-between;margin-bottom:10px">'
+        +'<span style="'+K+'font-size:12px;color:#94a3b8">อัตราผ่านเกณฑ์</span>'
+        +'<span style="'+K+'font-size:16px;font-weight:700;color:#059669">'+donePct+'%</span></div>'
+        +'<div style="height:12px;background:#e2e8f0;border-radius:8px;overflow:hidden"><div style="height:100%;width:'+barW75+'%;background:linear-gradient(135deg,#059669,#0d9488);border-radius:8px"></div></div>'
+        +'</div></div>'
+        // Divider
+        +'<div style="height:1px;background:#e2e8f0"></div>'
+        // Section B: Criteria chips
+        +'<div>'
+        +'<div style="'+K+'font-size:10px;font-weight:700;color:#64748b;letter-spacing:1px;text-transform:uppercase;margin-bottom:16px">Evaluation Criteria · Weight 0.4</div>'
+        +'<div style="display:flex;gap:12px">'
+        +cRatings.map(([r,p,bg,c])=>'<div style="'+K+'background:'+bg+';border-radius:12px;padding:16px 0;text-align:center;flex:1"><div style="font-size:22px;font-weight:700;color:'+c+'">R'+r+'</div><div style="font-size:10px;color:'+c+';margin-top:4px">'+p+'</div></div>').join('')
+        +'</div></div>'
+        // Divider
+        +'<div style="height:1px;background:#e2e8f0"></div>'
+        // Section C: Stats grid
+        +'<div>'
+        +'<div style="'+K+'font-size:10px;font-weight:700;color:#64748b;letter-spacing:1px;text-transform:uppercase;margin-bottom:16px">สถิติรวม</div>'
+        +'<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:16px">'
+        +'<div style="background:#f8fafc;border-radius:14px;padding:20px;text-align:center;border:1px solid #e2e8f0"><div style="'+K+'font-size:30px;font-weight:700;color:#1e293b">'+(summary.totalSessions||'—')+'</div><div style="'+K+'font-size:10px;color:#94a3b8;margin-top:5px">เซสชันทั้งหมด</div></div>'
+        +'<div style="background:#f0fdf4;border-radius:14px;padding:20px;text-align:center;border:1px solid #d1fae5"><div style="'+K+'font-size:30px;font-weight:700;color:#059669">'+(summary.totalAttended||'—')+'</div><div style="'+K+'font-size:10px;color:#6ee7b7;margin-top:5px">เข้าร่วมรวม</div></div>'
+        +'<div style="background:linear-gradient(135deg,#064e3b,#0d9488);border-radius:14px;padding:20px;text-align:center"><div style="'+K+'font-size:30px;font-weight:700;color:#6ee7b7">'+(summary.percent||0)+'%</div><div style="'+K+'font-size:10px;color:rgba(255,255,255,.65);margin-top:5px">อัตราเข้าร่วม</div></div>'
+        +'</div></div>'
+        +'</div>'
+        // ── Footer
+        +'<div style="padding:14px 60px;border-top:1px solid #e2e8f0;display:flex;justify-content:space-between;align-items:center;flex-shrink:0">'
+        +'<span style="'+K+'font-size:8px;color:#94a3b8">TSH Safety Core Activity System · รายงานสร้างโดยระบบอัตโนมัติ</span>'
+        +'<span style="'+K+'font-size:8px;color:#94a3b8">'+dateStr+' · '+docNo+'</span>'
+        +'</div></div>');
+
+    // ── Render each page as fixed A4 HTML → PDF ───────────────────────────────
+    showLoading('กำลังสร้าง PDF...');
+    await document.fonts.ready;
+    await new Promise(r => setTimeout(r, 300));
+
+    try {
+        const { jsPDF } = window.jspdf;
+        const pdf = new jsPDF({ orientation:'portrait', unit:'mm', format:'a4' });
+
+        const renderPage = async html => {
+            const el = document.createElement('div');
+            el.style.cssText = 'position:fixed;left:-9999px;top:0;z-index:-1';
+            el.innerHTML = html;
+            document.body.appendChild(el);
+            const c = await window.html2canvas(el.firstElementChild, {
+                scale:2, useCORS:true, logging:false, backgroundColor:'#ffffff', windowWidth:794
+            });
+            document.body.removeChild(el);
+            return c;
+        };
+
+        for (let i = 0; i < pageHTMLs.length; i++) {
+            if (i > 0) pdf.addPage();
+            const canvas = await renderPage(pageHTMLs[i]);
+            pdf.addImage(canvas.toDataURL('image/jpeg', 0.93), 'JPEG', 0, 0, 210, 297);
+        }
+
+        const total = pdf.getNumberOfPages();
+        for (let p = 1; p <= total; p++) {
+            pdf.setPage(p);
+            pdf.setFontSize(7.5); pdf.setTextColor(148,163,184);
+            pdf.text('หน้า '+p+' / '+total, 200, 293, { align:'right' });
+            pdf.text(docNo, 10, 293);
+        }
+
+        pdf.save(docNo+'.pdf');
+        showToast('ดาวน์โหลด PDF สำเร็จ', 'success');
+    } catch (err) {
+        console.error('PDF export error:', err);
+        showToast('เกิดข้อผิดพลาดในการสร้าง PDF', 'error');
+    } finally {
+        hideLoading();
+    }
+};
+

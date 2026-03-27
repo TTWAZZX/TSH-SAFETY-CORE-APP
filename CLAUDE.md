@@ -129,7 +129,7 @@ node server.js      # runs on PORT=5000
 | `/api/change-password` | User | เปลี่ยนรหัสผ่าน |
 | `/api/session/verify` | User | Refresh JWT |
 | `/api/patrol/*` | User | Patrol routes |
-| `/api/patrol/group-members` | User (write=Admin) | Patrol group membership CRUD (management/supervisor) |
+| `/api/patrol/roster` | User (read) / Admin (write) | Patrol roster CRUD — Top&Management / Sec.&Supervisor |
 | `/api/patrol/member-records` | User | ดูรายการเดินตรวจรายบุคคล |
 | `/api/patrol/admin-record` | Admin | เพิ่ม/ลบรายการเดินตรวจแทนสมาชิก |
 | `/api/admin/*` | Admin | Admin routes (employees, schedules, audit, dashboard, health) |
@@ -174,7 +174,7 @@ Primary key ของ generic CRUD คือ `id` — ยกเว้น `Employ
 ### Key Non-Generic Tables (managed by dedicated routes)
 | Table | Route | Notes |
 |-------|-------|-------|
-| `Patrol_MemberGroups` | `/api/patrol/group-members` | Admin-managed patrol group membership (management/supervisor) |
+| `Patrol_Roster` | `/api/patrol/roster` | Admin-managed patrol roster (top_management / supervisor) — auto-created at startup |
 | `Patrol_Self_Checkin` | `/api/patrol/self-checkin`, `/api/patrol/admin-record/supervisor/:id` | Supervisor self-patrol records |
 | `Master_SafetyUnits` | `/api/master/safety-units` | Safety units linked to departments (cascading select) |
 | `Activity_Position_Templates` | `/api/activity-targets/position-templates` | Yearly targets per position per activity (IsNA flag supported) |
@@ -228,10 +228,10 @@ Primary key ของ generic CRUD คือ `id` — ยกเว้น `Employ
 
 `patrol.js` แท็บ "ทีมและภาพรวม" มี 2 sub-tabs:
 
-| Sub-tab | ID | Group | Attendance source | Yearly target |
-|---------|----|-------|-------------------|---------------|
-| Top & Management | `ov-sub-mgmt` | `management` | `Patrol_Attendance.UserID` | per position (12 or 24) |
-| Sec. & Supervisor | `ov-sub-sv` | `supervisor` | `Patrol_Self_Checkin.EmployeeID` | per position (24) |
+| Sub-tab | ID | RosterGroup | Attendance source | Yearly target |
+|---------|----|-------------|-------------------|---------------|
+| Top & Management | `ov-sub-mgmt` | `top_management` | `Patrol_Attendance.UserID` | per person (TargetPerYear in Patrol_Roster) |
+| Sec. & Supervisor | `ov-sub-sv` | `supervisor` | `Patrol_Self_Checkin.EmployeeID` | per person (TargetPerYear in Patrol_Roster) |
 
 ### Position → Yearly Target
 **Management group:**
@@ -241,25 +241,42 @@ Primary key ของ generic CRUD คือ `id` — ยกเว้น `Employ
 **Supervisor group:**
 - หัวหน้าแผนก, หัวหน้าส่วน → **24 ครั้ง/ปี**
 
-### Patrol_MemberGroups Table
+### Patrol_Roster Table
 ```sql
-CREATE TABLE IF NOT EXISTS Patrol_MemberGroups (
+CREATE TABLE IF NOT EXISTS Patrol_Roster (
     id INT AUTO_INCREMENT PRIMARY KEY,
     EmployeeID VARCHAR(50) NOT NULL,
-    PatrolGroup VARCHAR(20) NOT NULL,  -- 'management' | 'supervisor'
-    YearlyTarget INT NOT NULL DEFAULT 12,
-    AddedAt DATETIME DEFAULT CURRENT_TIMESTAMP,
-    AddedByID VARCHAR(50),
-    UNIQUE KEY uq_emp_group (EmployeeID, PatrolGroup)
+    RosterGroup VARCHAR(20) NOT NULL,  -- 'top_management' | 'supervisor'
+    TargetPerYear INT NOT NULL DEFAULT 12,
+    SortOrder INT DEFAULT 99,
+    CreatedAt DATETIME DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE KEY uq_emp_group (EmployeeID, RosterGroup)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 ```
-สร้างอัตโนมัติเมื่อ server start (`db.query(CREATE TABLE IF NOT EXISTS ...)` ใน `backend/routes/patrol.js`)
+สร้างอัตโนมัติเมื่อ server start (`CREATE TABLE IF NOT EXISTS` ใน startup IIFE ของ `backend/routes/patrol.js`)
+ใช้ `VARCHAR(20)` ไม่ใช่ `ENUM` สำหรับ `RosterGroup` — TiDB compatible
 
 ### Admin Actions (per row in overview tables)
 - **ดูรายการ** → modal แสดงรายการเดินตรวจ + เพิ่ม/ลบรายการ (calls `GET /patrol/member-records`)
-- **แก้ไขเป้าหมาย** → modal แก้ `YearlyTarget` (calls `PUT /patrol/group-members/:id`)
-- **ลบสมาชิก** → confirm + calls `DELETE /patrol/group-members/:id`
-- **เพิ่มสมาชิก** button (ในหัว table) → modal ค้นหาพนักงาน + เลือกเพิ่ม (calls `POST /patrol/group-members`)
+- **แก้ไขเป้าหมาย** → modal แก้ `TargetPerYear` (calls `PUT /patrol/roster/:id`)
+- **ลบสมาชิก** → confirm + calls `DELETE /patrol/roster/:id`
+- **เพิ่มสมาชิก** button (ในหัว table) → modal **multi-select** ค้นหาพนักงาน + เลือกหลายคนพร้อมกัน (calls `POST /patrol/roster` ทีละคน)
+  - ซ่อนพนักงานที่อยู่ใน roster **ทั้งสองกลุ่ม** ออกจากรายการค้นหา (fetch ทั้ง `top_management` + `supervisor` พร้อมกัน แล้ว union existingIds) — ป้องกัน admin สับสน
+  - กด row เพื่อ toggle (checkbox UI), selected chips แสดงด้านล่าง
+  - เป้าหมาย (TargetPerYear) ใส่ครั้งเดียว ใช้กับทุกคนที่เลือก
+
+### Patrol Overview UI Details (Top & Management tab)
+- **Spotlight card** — full-width banner วางอยู่เหนือ grid ตาราง (ไม่อยู่ใน sidebar) เพื่อความเด่นชัด
+- **Sidebar** — `flex flex-col h-full gap-3`: 3 stat cards แยกกัน (เซสชันทั้งหมด / เข้าร่วมรวม / อัตราเข้าร่วม) + pie chart ด้วย `flex-1` เต็มพื้นที่ที่เหลือ
+- **ตาราง Top & Management** — เรียงลำดับ `TargetPerYear` ascending (12 ก่อน แล้วค่อย 24)
+
+### PDF Export (`window.exportPatrolPDF(group)`)
+- ปุ่ม PDF อยู่ในหัว card ของทั้งสอง sub-tabs (`top_management` / `supervisor`)
+- ใช้ **fixed-page approach**: แต่ละหน้าเป็น HTML `794×1122px` (A4 at 96dpi) render ด้วย html2canvas → jsPDF `addImage(..., 0, 0, 210, 297)` → ขนาดพอดี A4 เสมอ
+- หน้าข้อมูล: `display:flex;flex-direction:column` — content ใน `flex:1`, footer bar สีเขียวพิน bottom (`flex-shrink:0`) ป้องกัน whitespace
+- หน้าสรุป (summary): green header block + content area `flex:1;justify-content:space-evenly` (3 sections) + footer — เนื้อหากระจายเต็มหน้า
+- `ROWS_P1 = spMember ? 21 : 26`, `ROWS_FULL = 30`
+- filename: `SP-MGT-YYYY-MMDD.pdf` / `SP-SUP-YYYY-MMDD.pdf`
 
 ## Vercel Deployment
 
@@ -362,6 +379,10 @@ closeModal();
 ## Frontend UI Design System
 
 > **ห้ามใช้ emoji ทุกชนิดใน UI** — ใช้ inline SVG แทนทั้งหมด
+
+### Global Theme
+- **Body background**: `#1e5c3e` (deep forest green) — ตัดกับ card สีขาวได้ชัดเจน ห้ามเปลี่ยนเป็นสีอ่อน
+- **Card**: `background:#ffffff; border:1px solid #d1f0e0; box-shadow: 0 4px 16px rgba(5,150,105,0.15), 0 1px 4px rgba(0,0,0,0.08)` — shadow เขียวอ่อน
 
 ไฟล์อ้างอิง (ห้ามแก้ไข): `committee.js`, `policy.js`, `patrol.js`, `kpi.js`, `cccf.js`, `profile.js`
 
@@ -495,7 +516,7 @@ closeModal();
 21. **EmployeeID format** — รองรับทั้งตัวเลข 6 หลัก (012609) และแบบ letter-prefix (AP0001, SP0001) — placeholder ทุกที่ต้องอ้างอิงทั้งสองรูปแบบ
 22. **EmployeeID cascade update** — `PUT /api/profile/employee-id` ใช้ `pool.getConnection()` + transaction เพื่อ update Employees PK + 9 related tables แล้ว re-issue JWT ใหม่ — frontend ต้อง reload หลังสำเร็จ
 23. **`isAdmin` ใน patrol routes** — `/api/patrol` mount ใช้ `authenticateToken` เท่านั้น ถ้าต้องการ admin-only endpoint ภายใน patrol.js ต้อง import `isAdmin` จาก `../middleware/auth` แล้วใส่เป็น per-route middleware (`router.post('/...', isAdmin, handler)`)
-24. **`Patrol_MemberGroups` auto-create** — สร้างด้วย `db.query(CREATE TABLE IF NOT EXISTS ...)` ใน patrol.js ตอน startup — ไม่ต้องรัน SQL แยก
+24. **`Patrol_Roster` auto-create** — สร้างด้วย `CREATE TABLE IF NOT EXISTS` ใน startup IIFE ของ `patrol.js` — ไม่ต้องรัน SQL แยก; ใช้ `VARCHAR(20)` ไม่ใช่ `ENUM` สำหรับ `RosterGroup` เพื่อ TiDB compatibility
 25. **Patrol overview sub-tabs** — `ov-sub-mgmt` (Top&Management) และ `ov-sub-sv` (Sec.&Supervisor) แยก canvas ID: `ov-mgmt-pie` / `ov-sv-pie` — supervisor tab ใช้ yearly filter เท่านั้น (ไม่มี month filter แล้ว)
 26. **Safety Units cascading** — `Master_SafetyUnits` มี `department_id` — ทั้ง registration form (`index.html`) และ profile drawer (`profile.js`) filter units ตาม department ที่เลือก ซ่อน unit select ถ้าไม่มี units ใน dept นั้น
 27. **`/api/register/options` เป็น public** — ไม่ต้อง auth แต่ `apiFetch` จะส่ง auth header ไปด้วยถ้า token มีอยู่ — ไม่เป็นปัญหา backend ไม่ enforce auth บน route นี้
@@ -504,3 +525,5 @@ closeModal();
 30. **Activity Targets — `IsNA` flag** — ถ้า `IsNA=1` → `YearlyTarget=0` และ activity ถูก filter ออกจาก `/me` response — ไม่แสดงใน compliance widget ของ user
 31. **Activity Targets — `patrol_issue` actual count** — `Patrol_Issues` ไม่มี `ReporterID` column → `actualCount` คืน `null` เสมอ — ยังไม่รองรับ per-person tracking
 32. **Activity Targets — compliance widget (pending)** — แต่ละ module page (patrol, cccf, training, yokoten, hiyari, ky, ojt) ยังไม่มี widget แสดง progress — ให้เพิ่มตอน restyle โดย call `GET /api/activity-targets/me` แล้วกรอง `activityKey` ที่ต้องการ
+33. **Patrol PDF fixed-page approach** — ห้ามใช้ section-by-section render แล้ว addPage ตาม content height (จะเกิด whitespace gap) — ต้องสร้าง HTML `794×1122px` ต่อหน้าเสมอ แล้ว render ทีละหน้า
+34. **Patrol roster add modal — filter both groups** — ตอน fetch รายชื่อพนักงานสำหรับ add modal ต้อง fetch ทั้ง `top_management` + `supervisor` roster พร้อมกัน แล้ว union เป็น `existingIds` เพื่อซ่อนคนที่อยู่ในกลุ่มใดกลุ่มหนึ่งแล้ว

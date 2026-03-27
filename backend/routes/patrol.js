@@ -1,9 +1,11 @@
 // backend/routes/patrol.js
 // Auth is applied at mount level: app.use('/api/patrol', authenticateToken, patrolRoutes)
-const express = require('express');
-const router  = express.Router();
-const db      = require('../db');
-const multer  = require('multer');
+const express      = require('express');
+const router       = express.Router();
+const db           = require('../db');
+const mysql        = require('mysql2'); // used for mysql.escape() in generate-sessions
+const { randomUUID } = require('crypto'); // UUID for Patrol_Sessions.SessionID (VARCHAR)
+const multer       = require('multer');
 const { storage, fileFilter } = require('../cloudinary');
 const { isAdmin } = require('../middleware/auth');
 
@@ -15,7 +17,44 @@ const { isAdmin } = require('../middleware/auth');
         'ALTER TABLE Master_Positions ADD COLUMN PatrolPassPct INT DEFAULT 80',
         'ALTER TABLE Patrol_Attendance ADD COLUMN PatrolType VARCHAR(20) DEFAULT NULL',
         'ALTER TABLE Patrol_Attendance ADD COLUMN RecordedBy VARCHAR(50) DEFAULT NULL',
+        // Ensure PatrolType in Team_Members is VARCHAR (not ENUM) to support 'committee'
+        'ALTER TABLE Patrol_Team_Members MODIFY COLUMN PatrolType VARCHAR(20) NOT NULL',
+        // Per-round area assignment (0=legacy both rounds, 1=round1, 2=round2)
+        'ALTER TABLE Patrol_Team_Rotation ADD COLUMN IF NOT EXISTS PatrolRound TINYINT NOT NULL DEFAULT 0',
+        // Allow AreaID=NULL so we can store "explicit no-patrol" sentinel (PatrolRound=0, AreaID=NULL)
+        'ALTER TABLE Patrol_Team_Rotation MODIFY COLUMN AreaID INT DEFAULT NULL',
     ]) { try { await db.query(sql); } catch (_) {} }
+
+    // Note: Patrol_Sessions.SessionID AUTO_INCREMENT cannot be migrated on TiDB clustered index tables.
+    // IDs are generated in application code using MAX(SessionID)+1 within transactions.
+
+    // Auto-create Patrol_Roster table (admin-managed roster for Top Management & Supervisor overview)
+    try {
+        await db.query(`
+            CREATE TABLE IF NOT EXISTS Patrol_Roster (
+                id INT AUTO_INCREMENT PRIMARY KEY,
+                EmployeeID VARCHAR(50) NOT NULL,
+                RosterGroup VARCHAR(20) NOT NULL,
+                TargetPerYear INT NOT NULL DEFAULT 12,
+                SortOrder INT DEFAULT 99,
+                CreatedAt DATETIME DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE KEY uq_emp_group (EmployeeID, RosterGroup)
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+        `);
+    } catch (_) {}
+
+    // Migrate unique key to include PatrolRound (drop old key, add new one)
+    try {
+        const [idxRows] = await db.query(`
+            SELECT DISTINCT INDEX_NAME FROM information_schema.STATISTICS
+            WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'Patrol_Team_Rotation'
+            AND NON_UNIQUE = 0 AND INDEX_NAME != 'PRIMARY' AND INDEX_NAME != 'uq_team_yr_mo_rnd'
+        `);
+        for (const { INDEX_NAME } of idxRows) {
+            try { await db.query(`ALTER TABLE Patrol_Team_Rotation DROP INDEX \`${INDEX_NAME}\``); } catch (_) {}
+        }
+        await db.query('ALTER TABLE Patrol_Team_Rotation ADD UNIQUE KEY uq_team_yr_mo_rnd (TeamID, Year, Month, PatrolRound)');
+    } catch (_) {}
 })();
 
 // FIX: was using diskStorage (breaks on Vercel read-only filesystem)
@@ -864,13 +903,15 @@ router.get('/rotation', async (req, res) => {
     if (!year || !month) return res.status(400).json({ success: false, message: 'year และ month จำเป็น' });
     try {
         const [rows] = await db.query(`
-            SELECT r.*, t.Name AS TeamName, t.PatrolGroup, t.Color,
+            SELECT r.TeamID, r.AreaID, r.Year, r.Month,
+                   COALESCE(r.PatrolRound, 0) AS PatrolRound,
+                   t.Name AS TeamName, t.PatrolGroup, t.Color,
                    a.Name AS AreaName, a.Code AS AreaCode
             FROM   Patrol_Team_Rotation r
             JOIN   Patrol_Teams t ON t.id = r.TeamID
-            JOIN   Patrol_Areas a ON a.id = r.AreaID
+            LEFT JOIN Patrol_Areas a ON a.id = r.AreaID
             WHERE  r.Year = ? AND r.Month = ?
-            ORDER BY t.id
+            ORDER BY t.id, r.PatrolRound
         `, [year, month]);
         res.json({ success: true, data: rows });
     } catch (err) {
@@ -878,23 +919,49 @@ router.get('/rotation', async (req, res) => {
     }
 });
 
-// POST /api/patrol/rotation — upsert rotation (array of {TeamID, AreaID, Year, Month})
-router.post('/rotation', async (req, res) => {
+// POST /api/patrol/rotation — upsert rotation per round
+// items: array of { TeamID, r1: areaId|null, r2: areaId|null, Year, Month }
+router.post('/rotation', isAdmin, async (req, res) => {
     const items = req.body;
     if (!Array.isArray(items) || items.length === 0)
         return res.status(400).json({ success: false, message: 'ส่ง array ของ rotation' });
     const conn = await db.getConnection();
     try {
         await conn.beginTransaction();
-        for (const { TeamID, AreaID, Year, Month } of items) {
-            await conn.query(`
-                INSERT INTO Patrol_Team_Rotation (TeamID, AreaID, Year, Month)
-                VALUES (?,?,?,?)
-                ON DUPLICATE KEY UPDATE AreaID=VALUES(AreaID)
-            `, [TeamID, AreaID, Year, Month]);
+        let saved = 0;
+        for (const { TeamID, r1, r2, Year, Month } of items) {
+            // Delete all existing round records for this team/month
+            await conn.query(
+                'DELETE FROM Patrol_Team_Rotation WHERE TeamID=? AND Year=? AND Month=?',
+                [TeamID, Year, Month]
+            );
+            if (!r1 && !r2) {
+                // Explicit "ไม่มีเดิน" sentinel — AreaID=NULL, PatrolRound=0
+                // This lets frontend distinguish "explicitly no patrol" from "never configured"
+                await conn.query(
+                    'INSERT INTO Patrol_Team_Rotation (TeamID, AreaID, Year, Month, PatrolRound) VALUES (?,NULL,?,?,0)',
+                    [TeamID, Year, Month]
+                );
+                saved++;
+            } else {
+                if (r1) {
+                    await conn.query(
+                        'INSERT INTO Patrol_Team_Rotation (TeamID, AreaID, Year, Month, PatrolRound) VALUES (?,?,?,?,1)',
+                        [TeamID, r1, Year, Month]
+                    );
+                    saved++;
+                }
+                if (r2) {
+                    await conn.query(
+                        'INSERT INTO Patrol_Team_Rotation (TeamID, AreaID, Year, Month, PatrolRound) VALUES (?,?,?,?,2)',
+                        [TeamID, r2, Year, Month]
+                    );
+                    saved++;
+                }
+            }
         }
         await conn.commit();
-        res.json({ success: true, saved: items.length });
+        res.json({ success: true, saved });
     } catch (err) {
         await conn.rollback();
         res.status(500).json({ success: false, message: err.message });
@@ -913,18 +980,21 @@ router.post('/generate-sessions', async (req, res) => {
 
     try {
         // 1. ดึง rotation + teams ของเดือนนี้
+        // LEFT JOIN Patrol_Areas เพราะ AreaID อาจเป็น NULL (sentinel "ไม่มีเดิน")
+        // กรอง sentinel (AreaID IS NULL) ออก — ไม่สร้าง session สำหรับทีมที่ไม่มีเดิน
         const [rotations] = await db.query(`
-            SELECT r.TeamID, r.AreaID,
+            SELECT r.TeamID, r.AreaID, r.PatrolRound,
                    t.Name AS TeamName, t.PatrolGroup, t.Color,
                    a.Name AS AreaName, a.Code AS AreaCode
             FROM   Patrol_Team_Rotation r
             JOIN   Patrol_Teams t ON t.id = r.TeamID
-            JOIN   Patrol_Areas a ON a.id = r.AreaID
+            LEFT JOIN Patrol_Areas a ON a.id = r.AreaID
             WHERE  r.Year = ? AND r.Month = ?
+              AND  r.AreaID IS NOT NULL
         `, [year, month]);
 
         if (rotations.length === 0)
-            return res.status(400).json({ success: false, message: 'ยังไม่มีตารางหมุนเวียนของเดือนนี้ กรุณาตั้งค่า Rotation ก่อน' });
+            return res.status(400).json({ success: false, message: 'ยังไม่มีตารางหมุนเวียนของเดือนนี้ หรือทุกทีมถูกตั้งเป็น "ไม่มีเดิน" กรุณาตั้งค่า Rotation ก่อน' });
 
         // 2. หาวันพุธทั้งหมดในเดือน (เรียงลำดับ)
         const wednesdays = getWednesdaysInMonth(parseInt(year), parseInt(month));
@@ -937,28 +1007,52 @@ router.post('/generate-sessions', async (req, res) => {
             B: [wednesdays[1], wednesdays[3]].filter(Boolean),
         };
 
+        // 3. Group rotation records by TeamID
+        //    สำหรับแต่ละทีม อาจมีหลาย records (round 1 ต่างพื้นที่จาก round 2)
+        //    PatrolRound=0 = legacy (ทั้งสองรอบใช้พื้นที่เดียวกัน)
+        //    PatrolRound=1 = สร้าง session เฉพาะรอบ 1
+        //    PatrolRound=2 = สร้าง session เฉพาะรอบ 2
+        const teamMap = {};
+        for (const rot of rotations) {
+            if (!teamMap[rot.TeamID]) {
+                teamMap[rot.TeamID] = {
+                    TeamID: rot.TeamID, TeamName: rot.TeamName,
+                    PatrolGroup: rot.PatrolGroup, Color: rot.Color,
+                    rounds: {} // round -> AreaID
+                };
+            }
+            const rnd = Number(rot.PatrolRound);
+            if (rnd === 0) {
+                // legacy: same area both rounds
+                teamMap[rot.TeamID].rounds[1] = rot.AreaID;
+                teamMap[rot.TeamID].rounds[2] = rot.AreaID;
+            } else {
+                teamMap[rot.TeamID].rounds[rnd] = rot.AreaID;
+            }
+        }
+
         const conn = await db.getConnection();
         let created = 0;
         try {
             await conn.beginTransaction();
-            for (const rot of rotations) {
-                const dates = groupDates[rot.PatrolGroup] || [];
-                for (let i = 0; i < dates.length; i++) {
-                    const dateStr = dates[i]; // 'YYYY-MM-DD'
-                    const round   = i + 1;    // 1 หรือ 2
 
-                    // ตรวจว่ามี session นี้แล้วหรือยัง (ป้องกัน duplicate)
-                    const [exist] = await conn.query(
-                        'SELECT id FROM Patrol_Sessions WHERE PatrolDate=? AND TeamID=?',
-                        [dateStr, rot.TeamID]
-                    );
-                    if (exist.length > 0) continue;
+            // SessionID is VARCHAR — generate UUID per row (matches existing table schema)
+            for (const team of Object.values(teamMap)) {
+                const dates = groupDates[team.PatrolGroup] || [];
+                for (const [roundStr, areaId] of Object.entries(team.rounds)) {
+                    const round   = parseInt(roundStr, 10);
+                    const dateStr = dates[round - 1];
+                    if (!dateStr || !areaId) continue;
 
-                    await conn.query(`
-                        INSERT INTO Patrol_Sessions
-                            (PatrolDate, TeamName, TeamID, AreaID, PatrolRound, Status)
-                        VALUES (?,?,?,?,?,'Pending')
-                    `, [dateStr, rot.TeamName, rot.TeamID, rot.AreaID, round]);
+                    // Duplicate check — all values escaped inline, no ? params
+                    const chkSql = `SELECT COUNT(*) AS cnt FROM Patrol_Sessions WHERE PatrolDate=${mysql.escape(dateStr)} AND TeamID=${mysql.escape(team.TeamID)} AND PatrolRound=${mysql.escape(round)}`;
+                    const [chkRows] = await conn.query(chkSql);
+                    if (Number(chkRows[0]?.cnt ?? 0) > 0) continue;
+
+                    // INSERT with UUID as SessionID — all values escaped inline
+                    const newId = randomUUID();
+                    const insSql = `INSERT INTO Patrol_Sessions (SessionID,PatrolDate,TeamName,TeamID,AreaID,PatrolRound,Status) VALUES (${mysql.escape(newId)},${mysql.escape(dateStr)},${mysql.escape(team.TeamName)},${mysql.escape(team.TeamID)},${mysql.escape(areaId)},${mysql.escape(round)},'Pending')`;
+                    await conn.query(insSql);
                     created++;
                 }
             }
@@ -966,6 +1060,7 @@ router.post('/generate-sessions', async (req, res) => {
             res.json({ success: true, created, message: `สร้าง ${created} sessions สำเร็จ` });
         } catch (err) {
             await conn.rollback();
+            console.error('[generate-sessions] ERROR:', err.message);
             throw err;
         } finally { conn.release(); }
 
@@ -980,7 +1075,7 @@ router.get('/monthly-summary', async (req, res) => {
     if (!year || !month) return res.status(400).json({ success: false, message: 'year และ month จำเป็น' });
     try {
         const [sessions] = await db.query(`
-            SELECT s.*, s.PatrolDate AS ScheduledDate,
+            SELECT s.*, s.SessionID AS id, s.PatrolDate AS ScheduledDate,
                    t.Color AS TeamColor, a.Name AS AreaName, a.Code AS AreaCode
             FROM   Patrol_Sessions s
             LEFT JOIN Patrol_Teams t ON t.id = s.TeamID
@@ -1011,6 +1106,19 @@ router.put('/sessions/:id', async (req, res) => {
         );
         if (result.affectedRows === 0) return res.status(404).json({ success: false, message: 'ไม่พบ session' });
         res.json({ success: true, message: 'แก้ไข session เรียบร้อย' });
+    } catch (err) {
+        res.status(500).json({ success: false, message: err.message });
+    }
+});
+
+// PATCH /api/patrol/sessions/:id/toggle-cancel — สลับ Pending ↔ Cancelled
+router.patch('/sessions/:id/toggle-cancel', isAdmin, async (req, res) => {
+    try {
+        const [[sess]] = await db.query('SELECT Status FROM Patrol_Sessions WHERE SessionID = ?', [req.params.id]);
+        if (!sess) return res.status(404).json({ success: false, message: 'ไม่พบ session' });
+        const newStatus = sess.Status === 'Cancelled' ? 'Pending' : 'Cancelled';
+        await db.query('UPDATE Patrol_Sessions SET Status = ? WHERE SessionID = ?', [newStatus, req.params.id]);
+        res.json({ success: true, status: newStatus });
     } catch (err) {
         res.status(500).json({ success: false, message: err.message });
     }

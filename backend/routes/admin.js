@@ -143,6 +143,26 @@ router.post('/employee/:id/reset-password', async (req, res) => {
     }
 });
 
+// GET /admin/employee/import-template-data — master lists for Excel template
+router.get('/employee/import-template-data', async (_req, res) => {
+    try {
+        const [[depts], [positions], [units]] = await Promise.all([
+            db.query('SELECT Name FROM Master_Departments ORDER BY Name ASC'),
+            db.query('SELECT Name FROM Master_Positions ORDER BY Name ASC'),
+            db.query('SELECT name FROM Master_SafetyUnits ORDER BY name ASC'),
+        ]);
+        res.json({
+            success: true,
+            departments: depts.map(r => r.Name),
+            positions:   positions.map(r => r.Name),
+            units:       units.map(r => r.name),
+            roles:       ALLOWED_ROLES,
+        });
+    } catch (err) {
+        res.status(500).json({ success: false, message: err.message });
+    }
+});
+
 // POST /admin/employee/import  — Excel bulk import
 router.post('/employee/import', upload.single('file'), async (req, res) => {
     if (!req.file) return res.status(400).json({ success: false, message: 'กรุณาเลือกไฟล์ Excel' });
@@ -155,44 +175,69 @@ router.post('/employee/import', upload.single('file'), async (req, res) => {
             return res.status(400).json({ success: false, message: 'ไฟล์ไม่มีข้อมูล' });
         }
 
+        // Fetch master sets for validation
+        const [[deptRows], [posRows]] = await Promise.all([
+            db.query('SELECT Name FROM Master_Departments'),
+            db.query('SELECT Name FROM Master_Positions'),
+        ]);
+        const deptSet = new Set(deptRows.map(r => r.Name));
+        const posSet  = new Set(posRows.map(r => r.Name));
+
         let successCount = 0;
         let errorCount   = 0;
+        const details    = [];   // per-row result for frontend
 
         for (const row of data) {
-            const id   = row['EmployeeID'] || row['ID']   || row['รหัสพนักงาน'];
-            const name = row['EmployeeName'] || row['Name'] || row['ชื่อ-นามสกุล'];
-            const dept = row['Department']   || row['Dept'] || row['แผนก']   || '';
-            const unit = row['Unit']         || row['หน่วย']                 || '';
-            const pos  = row['Position']     || row['ตำแหน่ง']               || '';
-            const team = row['Team']         || row['ทีม']                   || '';
-            // Whitelist role — reject unknown values, fallback to 'User'
-            const rawRole = row['Role'] || row['สิทธิ์'] || '';
+            const id   = String(row['EmployeeID'] || row['ID']   || row['รหัสพนักงาน'] || '').trim();
+            const name = String(row['EmployeeName'] || row['Name'] || row['ชื่อ-นามสกุล'] || '').trim();
+            const dept = String(row['Department']   || row['Dept'] || row['แผนก']   || '').trim();
+            const unit = String(row['Unit']         || row['หน่วย']                 || '').trim();
+            const pos  = String(row['Position']     || row['ตำแหน่ง']               || '').trim();
+            const rawRole = String(row['Role'] || row['สิทธิ์'] || '').trim();
             const role    = ALLOWED_ROLES.includes(rawRole) ? rawRole : 'User';
 
-            if (id && name) {
-                try {
-                    await db.query(
-                        `INSERT INTO Employees (EmployeeID, EmployeeName, Department, Unit, Team, Position, Role)
-                         VALUES (?, ?, ?, ?, ?, ?, ?)
-                         ON DUPLICATE KEY UPDATE
-                           EmployeeName = VALUES(EmployeeName),
-                           Department   = VALUES(Department),
-                           Unit         = VALUES(Unit),
-                           Team         = VALUES(Team),
-                           Position     = VALUES(Position),
-                           Role         = VALUES(Role)`,
-                        [id, name, dept, unit, team, pos, role]
-                    );
-                    successCount++;
-                } catch (e) {
-                    console.error(`Import error ID ${id}:`, e.message);
-                    errorCount++;
-                }
+            if (!id || !name) {
+                details.push({ id: id || '—', name: name || '—', status: 'skip', reason: 'ไม่มี EmployeeID หรือ EmployeeName' });
+                errorCount++;
+                continue;
+            }
+
+            // Validate against master (warn but still import)
+            const warnings = [];
+            if (dept && !deptSet.has(dept)) warnings.push(`Department "${dept}" ไม่ตรง master`);
+            if (pos  && !posSet.has(pos))   warnings.push(`Position "${pos}" ไม่ตรง master`);
+            if (rawRole && !ALLOWED_ROLES.includes(rawRole)) warnings.push(`Role "${rawRole}" ไม่ถูกต้อง → ใช้ User`);
+
+            try {
+                await db.query(
+                    `INSERT INTO Employees (EmployeeID, EmployeeName, Department, Unit, Position, Role)
+                     VALUES (?, ?, ?, ?, ?, ?)
+                     ON DUPLICATE KEY UPDATE
+                       EmployeeName = VALUES(EmployeeName),
+                       Department   = VALUES(Department),
+                       Unit         = VALUES(Unit),
+                       Position     = VALUES(Position),
+                       Role         = VALUES(Role)`,
+                    [id, name, dept, unit, pos, role]
+                );
+                successCount++;
+                details.push({ id, name, status: warnings.length ? 'warn' : 'ok', reason: warnings.join(' | ') });
+            } catch (e) {
+                console.error(`Import error ID ${id}:`, e.message);
+                errorCount++;
+                details.push({ id, name, status: 'error', reason: e.message });
             }
         }
 
         await auditLog(req, 'IMPORT_EMPLOYEES', 'Employee', null, `สำเร็จ ${successCount} / ล้มเหลว ${errorCount}`);
-        res.json({ success: true, message: `นำเข้าสำเร็จ ${successCount} รายการ (ล้มเหลว ${errorCount})` });
+        res.json({
+            success: true,
+            message: `นำเข้าสำเร็จ ${successCount} รายการ (ล้มเหลว ${errorCount})`,
+            successCount,
+            errorCount,
+            warnCount: details.filter(d => d.status === 'warn').length,
+            details,
+        });
     } catch (err) {
         res.status(500).json({ success: false, message: err.message });
     }

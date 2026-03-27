@@ -1,5 +1,30 @@
 import { showToast, showError, openModal, closeModal } from '../ui.js';
-import { API } from '../api.js';
+import { API, apiFetch } from '../api.js';
+
+// ─── Button loading helper (disable + spinner, returns original HTML) ──────────
+const _SPIN_HTML = `<svg class="w-3.5 h-3.5 animate-spin inline-block" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"/><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"/></svg>`;
+function _btnLoad(btn, label = '') {
+    if (!btn) return null;
+    const orig = btn.innerHTML;
+    btn.disabled = true;
+    btn.innerHTML = `${_SPIN_HTML}${label ? ' ' + label : ''}`;
+    return orig;
+}
+function _btnRestore(btn, orig) {
+    if (!btn || orig === null) return;
+    btn.disabled = false;
+    btn.innerHTML = orig;
+}
+// Skeleton rows for list/table areas
+function _skelRows(n = 4, cols = 4) {
+    return `<div class="animate-pulse space-y-2 p-4">${Array.from({length:n}, () =>
+        `<div class="flex gap-3 items-center">${Array.from({length:cols}, (_, i) =>
+            `<div class="h-3 rounded bg-slate-100 flex-${i===0?'none w-24':'1'}"></div>`).join('')}</div>`
+    ).join('')}</div>`;
+}
+function _skelSpinner() {
+    return `<div class="flex flex-col items-center justify-center py-12 text-slate-400"><div class="animate-spin rounded-full h-8 w-8 border-4 border-emerald-500 border-t-transparent mb-3"></div><p class="text-xs">กำลังโหลด...</p></div>`;
+}
 
 // ─── Global State ─────────────────────────────────────────────────────────────
 let _currentTab   = 'dashboard';
@@ -9,7 +34,6 @@ let _viewMode     = 'list';
 // Employee tab state
 let _empCache     = [];
 let _deptCache    = [];
-let _teamCache    = [];
 let _posCache     = [];
 let _unitCache    = [];
 let _empSearch    = '';
@@ -618,10 +642,11 @@ window._orgAddDept = function() {
                 Name:           fd.get('Name')?.toString().trim(),
                 is_safety_core: fd.get('is_safety_core') ? 1 : 0,
             };
-            const errEl = document.getElementById('org-dept-err');
+            const errEl  = document.getElementById('org-dept-err');
+            const subBtn = e.target.querySelector('[type=submit]');
+            const orig   = _btnLoad(subBtn, 'กำลังเพิ่ม...');
             try {
                 await API.post('/master/departments', { Name: body.Name });
-                // If safety core — update the flag immediately after creation
                 if (body.is_safety_core) {
                     const dRes = await API.get('/admin/org/departments');
                     const created = (dRes.data || []).find(d => d.Name === body.Name);
@@ -633,6 +658,7 @@ window._orgAddDept = function() {
                 _orgRenderStats();
                 _orgRenderTable();
             } catch (err) {
+                _btnRestore(subBtn, orig);
                 if (errEl) { errEl.textContent = err.message || 'เกิดข้อผิดพลาด'; errEl.classList.remove('hidden'); }
             }
         });
@@ -677,7 +703,9 @@ window._orgEditDept = function(id, name, isSafety) {
                 Name:           fd.get('Name')?.toString().trim(),
                 is_safety_core: fd.get('is_safety_core') ? 1 : 0,
             };
-            const errEl = document.getElementById('org-edit-dept-err');
+            const errEl  = document.getElementById('org-edit-dept-err');
+            const subBtn = e.target.querySelector('[type=submit]');
+            const orig   = _btnLoad(subBtn, 'กำลังบันทึก...');
             try {
                 await API.put(`/admin/org/departments/${id}`, body);
                 closeModal();
@@ -685,8 +713,9 @@ window._orgEditDept = function(id, name, isSafety) {
                 await _orgFetchAll();
                 _orgRenderStats();
                 _orgRenderTable();
-                _loadHeroStats();   // refresh hero strip ด้วย
+                _loadHeroStats();
             } catch (err) {
+                _btnRestore(subBtn, orig);
                 if (errEl) { errEl.textContent = err.message || 'เกิดข้อผิดพลาด'; errEl.classList.remove('hidden'); }
             }
         });
@@ -938,7 +967,7 @@ async function renderPermissions(container) {
 async function _permLoadMatrix() {
     const wrap = document.getElementById('perm-matrix-wrap');
     if (!wrap) return;
-
+    wrap.innerHTML = _skelRows(5, 4);
     try {
         const res  = await API.get('/admin/permissions/matrix');
         const { matrix, roles, permissions, roleLabels } = res.data;
@@ -1045,6 +1074,7 @@ window._permToggle = async function(role, permission, granted) {
 // TAB: DASHBOARD
 // =============================================================================
 async function renderDashboard(container) {
+    container.innerHTML = _skelSpinner();
     try {
         const res = await API.get('/admin/dashboard-stats');
         const d   = res.data || {};
@@ -1216,7 +1246,7 @@ async function renderScheduler(container) {
                     <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg>
                     Auto-fill ทั้งปี
                 </button>
-                <button onclick="window._ptSaveRotation()" class="flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white transition-colors shadow-sm">
+                <button id="pt-rot-save-btn" onclick="window._ptSaveRotation(this)" class="flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white transition-colors shadow-sm">
                     <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg>
                     บันทึก Rotation
                 </button>
@@ -1242,12 +1272,23 @@ async function renderScheduler(container) {
                 <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0z"/></svg>
                 ตารางสลับสมาชิกรายเดือน
             </p>
-            <div class="flex items-center gap-2">
-                <button onclick="window._ptAutoFillMembers()" class="flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold rounded-lg bg-violet-600 hover:bg-violet-700 text-white transition-colors shadow-sm">
+            <div class="flex flex-wrap items-center gap-2">
+                <!-- Search box -->
+                <div class="relative">
+                    <svg class="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-slate-400 pointer-events-none" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/></svg>
+                    <input id="pt-member-rot-search" type="text" placeholder="ค้นหาสมาชิก..."
+                        class="pl-8 pr-3 py-1.5 text-xs border border-slate-200 rounded-lg focus:outline-none focus:border-violet-400 w-44"
+                        oninput="window._ptFilterMemberMatrix(this.value)">
+                </div>
+                <button onclick="window._ptSwapTwoModal()" class="flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold rounded-lg bg-amber-500 hover:bg-amber-600 text-white transition-colors shadow-sm">
+                    <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 16V4m0 0L3 8m4-4l4 4m6 0v12m0 0l4-4m-4 4l-4-4"/></svg>
+                    สลับสองคน
+                </button>
+                <button onclick="window._ptAutoFillModal()" class="flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold rounded-lg bg-violet-600 hover:bg-violet-700 text-white transition-colors shadow-sm">
                     <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg>
                     Auto-fill สมาชิก
                 </button>
-                <button onclick="window._ptSaveMemberRotation()" class="flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white transition-colors shadow-sm">
+                <button id="pt-mem-rot-save-btn" onclick="window._ptSaveMemberRotation(this)" class="flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white transition-colors shadow-sm">
                     <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg>
                     บันทึก
                 </button>
@@ -1324,6 +1365,7 @@ async function loadSchedules() {
     const lc    = document.getElementById('list-view-container');
     const month = document.getElementById('filter-month')?.value;
     const year  = document.getElementById('filter-year')?.value;
+    if (lc) lc.innerHTML = _skelSpinner();
     try {
         const res  = await API.get(`/patrol/monthly-summary?month=${month}&year=${year}`);
         const data = res?.data || [];
@@ -1336,7 +1378,7 @@ async function loadSchedules() {
                 if (!acc[d]) acc[d] = [];
                 acc[d].push(cur); return acc;
             }, {});
-            const statusBg  = { Pending:'bg-amber-100 text-amber-700', Completed:'bg-emerald-100 text-emerald-700', Missed:'bg-red-100 text-red-600' };
+            const statusBg  = { Pending:'bg-amber-100 text-amber-700', Completed:'bg-emerald-100 text-emerald-700', Missed:'bg-red-100 text-red-600', Cancelled:'bg-slate-100 text-slate-400' };
             const roundLabel = { 1: 'รอบ 1', 2: 'รอบ 2' };
             lc.innerHTML = Object.entries(grouped).sort((a,b)=>new Date(a[0])-new Date(b[0])).map(([date,items])=>{
                 const dObj = new Date(date);
@@ -1354,23 +1396,31 @@ async function loadSchedules() {
                     </div>
                     <div class="space-y-1.5">
                         ${items.map(item => {
+                            const isCancelled = item.Status === 'Cancelled';
                             const sc    = statusBg[item.Status] || 'bg-slate-100 text-slate-500';
-                            const color = item.TeamColor || '#6366f1';
+                            const color = isCancelled ? '#94a3b8' : (item.TeamColor || '#6366f1');
                             const round = roundLabel[item.PatrolRound] || '';
                             return `
-                            <div class="bg-slate-50 p-2.5 rounded-lg border border-slate-100 flex justify-between items-center gap-2">
+                            <div class="p-2.5 rounded-lg border flex justify-between items-center gap-2 transition-all ${isCancelled ? 'bg-slate-50 border-slate-200 opacity-60' : 'bg-slate-50 border-slate-100'}">
                                 <div class="flex items-center gap-2 flex-1 min-w-0">
                                     <span class="w-2.5 h-2.5 rounded-full flex-shrink-0" style="background:${color}"></span>
-                                    <span class="font-semibold text-xs text-slate-700 truncate">${item.TeamName||'-'}</span>
-                                    ${item.AreaName ? `<span class="text-[10px] text-slate-400 truncate hidden sm:inline">${item.AreaName}</span>` : ''}
+                                    <span class="font-semibold text-xs truncate ${isCancelled ? 'line-through text-slate-400' : 'text-slate-700'}">${item.TeamName||'-'}</span>
+                                    ${item.AreaName && !isCancelled ? `<span class="text-[10px] text-slate-400 truncate hidden sm:inline">${item.AreaName}</span>` : ''}
+                                    ${isCancelled ? `<span class="text-[10px] text-slate-400 italic">ยกเลิกแล้ว</span>` : ''}
                                 </div>
                                 <div class="flex items-center gap-1.5 flex-shrink-0">
                                     ${round ? `<span class="text-[10px] font-bold px-1.5 py-0.5 rounded bg-slate-200 text-slate-600">${round}</span>` : ''}
-                                    <span class="text-[10px] font-bold px-2 py-0.5 rounded-full ${sc}">${item.Status||'Pending'}</span>
-                                    <button onclick="window.editSchedule(${item.id},'${(item.ScheduledDate||'').split('T')[0]}','${item.TeamName||''}','${item.AreaName||''}',${item.PatrolRound||1})" class="text-slate-300 hover:text-blue-500 p-1 transition-colors" title="แก้ไขวันที่">
+                                    <span class="text-[10px] font-bold px-2 py-0.5 rounded-full ${sc}">${isCancelled ? 'ยกเลิก' : (item.Status||'Pending')}</span>
+                                    <button onclick="window._ptToggleCancel('${item.id}',this)" class="${isCancelled ? 'text-emerald-400 hover:text-emerald-600' : 'text-slate-300 hover:text-orange-500'} p-1 transition-colors" title="${isCancelled ? 'เปิดใช้งานอีกครั้ง' : 'ยกเลิก session นี้'}">
+                                        ${isCancelled
+                                            ? `<svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>`
+                                            : `<svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M18.364 18.364A9 9 0 005.636 5.636m12.728 12.728A9 9 0 015.636 5.636m12.728 12.728L5.636 5.636"/></svg>`
+                                        }
+                                    </button>
+                                    <button onclick="window.editSchedule('${item.id}','${(item.ScheduledDate||'').split('T')[0]}','${item.TeamName||''}','${item.AreaName||''}',${item.PatrolRound||1})" class="text-slate-300 hover:text-blue-500 p-1 transition-colors" title="แก้ไขวันที่">
                                         <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"/></svg>
                                     </button>
-                                    <button onclick="deleteSchedule(${item.id})" class="text-slate-300 hover:text-red-500 p-1 transition-colors" title="ลบ">
+                                    <button onclick="deleteSchedule('${item.id}')" class="text-slate-300 hover:text-red-500 p-1 transition-colors" title="ลบ">
                                         <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg>
                                     </button>
                                 </div>
@@ -1442,21 +1492,25 @@ window.editSchedule = function(id, currentDate, teamName, areaName, round) {
         </div>
         <div class="flex justify-end gap-3 pt-3 border-t border-slate-100">
             <button type="button" onclick="window.closeModal&&window.closeModal()" class="btn btn-secondary px-5">ยกเลิก</button>
-            <button type="button" onclick="window._doEditSchedule(${id})" class="btn btn-primary px-5">บันทึก</button>
+            <button type="button" onclick="window._doEditSchedule(${id},this)" class="btn btn-primary px-5">บันทึก</button>
         </div>
     </div>`, 'max-w-sm');
 };
 
-window._doEditSchedule = async function(id) {
+window._doEditSchedule = async function(id, btn) {
     const dateVal   = document.getElementById('edit-session-date')?.value;
     const statusVal = document.getElementById('edit-session-status')?.value;
     if (!dateVal) { showToast('กรุณาเลือกวันที่', 'error'); return; }
+    const orig = _btnLoad(btn, 'กำลังบันทึก...');
     try {
         await API.put(`/patrol/sessions/${id}`, { PatrolDate: dateVal, Status: statusVal });
         closeModal();
         showToast('แก้ไขเรียบร้อย', 'success');
         loadSchedules();
-    } catch (err) { showError(err.message); }
+    } catch (err) {
+        _btnRestore(btn, orig);
+        showError(err.message);
+    }
 };
 
 window.printScheduleReport = () => {
@@ -1592,7 +1646,7 @@ async function _ptLoadMembers(teamId) {
                         <p class="text-xs text-slate-700 truncate">${m.EmployeeName||m.EmployeeID||'—'}</p>
                     </div>
                     <button onclick="window._ptRemoveMember(${teamId},${m.id})"
-                        class="p-1 text-slate-200 hover:text-red-500 flex-shrink-0 transition-colors">
+                        class="p-1 text-slate-400 hover:text-red-500 flex-shrink-0 transition-colors" title="ลบออกจากทีม">
                         <svg class="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
                     </button>
                 </div>`).join('')}
@@ -1697,52 +1751,136 @@ window._ptDeleteTeam = async function(id, name) {
 
 // ── Add Member modal ───────────────────────────────────────────────────────────
 window._ptAddMember = async function(teamId, teamName) {
-    // โหลดพนักงานสำหรับ dropdown
     let empList = [];
     try { const r = await API.get('/employees'); empList = r.data || r || []; } catch { empList = []; }
 
+    const selected = new Set(); // เก็บ EmployeeID ที่เลือกไว้ข้ามการค้นหา
+
+    const renderList = (filter = '') => {
+        const q = filter.toLowerCase();
+        const filtered = empList.filter(e =>
+            !q ||
+            (e.EmployeeName||'').toLowerCase().includes(q) ||
+            (e.EmployeeID||'').toLowerCase().includes(q) ||
+            (e.Department||'').toLowerCase().includes(q)
+        );
+        if (filtered.length === 0) return `<p class="text-center text-xs text-slate-400 py-6">ไม่พบพนักงาน</p>`;
+        return filtered.map(e => `
+            <label class="flex items-center gap-3 px-3 py-2.5 hover:bg-slate-50 cursor-pointer transition-colors">
+                <input type="checkbox" class="pt-mem-cb w-4 h-4 rounded accent-emerald-600 flex-shrink-0"
+                    value="${e.EmployeeID}" ${selected.has(e.EmployeeID) ? 'checked' : ''}>
+                <div class="min-w-0">
+                    <p class="text-sm font-semibold text-slate-800 truncate">${e.EmployeeName||e.EmployeeID}</p>
+                    <p class="text-[10px] text-slate-400 truncate">${e.EmployeeID}${e.Department ? ' · '+e.Department : ''}${e.Position ? ' · '+e.Position : ''}</p>
+                </div>
+            </label>`).join('');
+    };
+
     openModal(`เพิ่มสมาชิก — ${teamName}`, `
-    <form id="pt-member-form" class="space-y-4">
+    <div class="space-y-4">
         <div>
-            <label class="block text-sm font-semibold text-slate-700 mb-1.5">พนักงาน <span class="text-red-500">*</span></label>
-            <select name="EmployeeID" required class="form-input w-full">
-                <option value="">— เลือกพนักงาน —</option>
-                ${empList.map(e => `<option value="${e.EmployeeID}">${e.EmployeeName||e.EmployeeID} (${e.Department||''})</option>`).join('')}
-            </select>
-        </div>
-        <div>
-            <label class="block text-sm font-semibold text-slate-700 mb-1.5">ประเภท <span class="text-red-500">*</span></label>
-            <select name="PatrolType" class="form-input w-full">
+            <label class="block text-xs font-bold text-slate-500 uppercase mb-1.5">ประเภท <span class="text-red-500">*</span></label>
+            <select id="pt-mem-type" class="form-input w-full text-sm">
                 <option value="top">Top Management — เดิน 1 ครั้ง/เดือน</option>
                 <option value="committee">คปอ. — เดิน 1 ครั้ง/เดือน</option>
                 <option value="management">Management — เดิน 2 ครั้ง/เดือน</option>
             </select>
-            <div class="text-xs text-slate-400 mt-1.5 space-y-0.5">
-                <p><span class="font-semibold text-rose-500">Top</span>: ผจก.ทั่วไป / ผช.ผจก.ทั่วไป / ผู้อำนวยการ</p>
-                <p><span class="font-semibold text-amber-500">คปอ.</span>: คณะกรรมการความปลอดภัย (มี 5 คน ไม่ต้องครบทุกทีม)</p>
-                <p><span class="font-semibold text-indigo-500">Management</span>: ผู้จัดการ / ผู้ชำนาญการพิเศษ</p>
+            <div class="text-[10px] text-slate-400 mt-1.5 flex gap-3 flex-wrap">
+                <span><span class="font-bold text-rose-500">Top</span>: ผจก.ทั่วไป / ผช.ผจก. / ผู้อำนวยการ</span>
+                <span><span class="font-bold text-amber-500">คปอ.</span>: คณะกรรมการความปลอดภัย</span>
+                <span><span class="font-bold text-indigo-500">Management</span>: ผู้จัดการ / ผู้ชำนาญการพิเศษ</span>
+            </div>
+        </div>
+        <div>
+            <label class="block text-xs font-bold text-slate-500 uppercase mb-1.5">เลือกพนักงาน</label>
+            <div class="relative mb-2">
+                <svg class="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400 pointer-events-none" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/></svg>
+                <input id="pt-mem-search" type="text" placeholder="ค้นหาชื่อ รหัส หน่วยงาน..."
+                    class="form-input w-full pl-9 text-sm" autocomplete="off">
+            </div>
+            <div class="border border-slate-200 rounded-xl overflow-hidden">
+                <div class="flex items-center justify-between px-3 py-2 bg-slate-50 border-b border-slate-200">
+                    <label class="flex items-center gap-2 text-xs font-bold text-slate-600 cursor-pointer select-none">
+                        <input type="checkbox" id="pt-mem-selectall" class="w-4 h-4 rounded accent-emerald-600">
+                        เลือกทั้งหมดที่แสดง
+                    </label>
+                    <span id="pt-mem-count" class="text-xs font-semibold text-emerald-600">เลือก 0 คน</span>
+                </div>
+                <div id="pt-mem-list" class="overflow-y-auto max-h-52 divide-y divide-slate-50">
+                    ${renderList()}
+                </div>
             </div>
         </div>
         <div id="pt-mem-err" class="text-sm text-red-500 hidden"></div>
         <div class="flex justify-end gap-3 pt-3 border-t border-slate-100">
-            <button type="button" onclick="window.closeModal&&window.closeModal()" class="btn btn-secondary px-5">ยกเลิก</button>
-            <button type="submit" class="btn btn-primary px-5">เพิ่มสมาชิก</button>
+            <button type="button" onclick="window.closeModal&&window.closeModal()" class="px-5 py-2 rounded-xl text-sm bg-slate-100 text-slate-700 hover:bg-slate-200 transition-colors">ยกเลิก</button>
+            <button id="pt-mem-submit" class="px-5 py-2 rounded-xl text-sm font-bold text-white transition-colors" style="background:linear-gradient(135deg,#059669,#0d9488)">เพิ่มสมาชิก</button>
         </div>
-    </form>`, 'max-w-md');
+    </div>`, 'max-w-lg');
+
     setTimeout(() => {
-        document.getElementById('pt-member-form')?.addEventListener('submit', async (e) => {
-            e.preventDefault();
-            const fd = new FormData(e.target);
-            try {
-                await API.post(`/patrol/teams/${teamId}/members`, { EmployeeID: fd.get('EmployeeID'), PatrolType: fd.get('PatrolType') });
-                closeModal(); showToast('เพิ่มสมาชิกสำเร็จ', 'success');
-                _ptLoadMembers(teamId);
-                // refresh member count
-                await _ptLoadTeams();
-            } catch (err) {
-                const el = document.getElementById('pt-mem-err');
-                if (el) { el.textContent = err.message; el.classList.remove('hidden'); }
+        const searchEl   = document.getElementById('pt-mem-search');
+        const listEl     = document.getElementById('pt-mem-list');
+        const countEl    = document.getElementById('pt-mem-count');
+        const selectAll  = document.getElementById('pt-mem-selectall');
+        const submitBtn  = document.getElementById('pt-mem-submit');
+        const errEl      = document.getElementById('pt-mem-err');
+
+        const updateCount = () => {
+            if (countEl) countEl.textContent = `เลือก ${selected.size} คน`;
+            const cbs = listEl.querySelectorAll('.pt-mem-cb');
+            const checkedInView = listEl.querySelectorAll('.pt-mem-cb:checked').length;
+            selectAll.indeterminate = checkedInView > 0 && checkedInView < cbs.length;
+            selectAll.checked = cbs.length > 0 && checkedInView === cbs.length;
+        };
+
+        // sync checkbox change → selected Set
+        const bindListEvents = () => {
+            listEl.querySelectorAll('.pt-mem-cb').forEach(cb => {
+                cb.addEventListener('change', () => {
+                    cb.checked ? selected.add(cb.value) : selected.delete(cb.value);
+                    updateCount();
+                });
+            });
+        };
+        bindListEvents();
+
+        searchEl?.addEventListener('input', () => {
+            listEl.innerHTML = renderList(searchEl.value);
+            bindListEvents();
+            updateCount();
+        });
+
+        selectAll?.addEventListener('change', () => {
+            listEl.querySelectorAll('.pt-mem-cb').forEach(cb => {
+                cb.checked = selectAll.checked;
+                selectAll.checked ? selected.add(cb.value) : selected.delete(cb.value);
+            });
+            updateCount();
+        });
+
+        submitBtn?.addEventListener('click', async () => {
+            const checked = [...selected];
+            const patrolType = document.getElementById('pt-mem-type')?.value;
+            if (checked.length === 0) { if (errEl) { errEl.textContent = 'กรุณาเลือกพนักงานอย่างน้อย 1 คน'; errEl.classList.remove('hidden'); } return; }
+            submitBtn.disabled = true; submitBtn.textContent = 'กำลังเพิ่ม...';
+            let ok = 0; const failMsgs = [];
+            for (const empId of checked) {
+                try {
+                    await API.post(`/patrol/teams/${teamId}/members`, { EmployeeID: empId, PatrolType: patrolType });
+                    ok++;
+                } catch (e) { failMsgs.push(`${empId}: ${e?.message || 'ล้มเหลว'}`); }
             }
+            if (failMsgs.length > 0 && ok === 0) {
+                // all failed — stay in modal and show error
+                submitBtn.disabled = false; submitBtn.textContent = 'เพิ่มสมาชิก';
+                if (errEl) { errEl.textContent = failMsgs[0]; errEl.classList.remove('hidden'); }
+                return;
+            }
+            closeModal();
+            showToast(`เพิ่มสมาชิก ${ok} คนสำเร็จ${failMsgs.length ? ` (ล้มเหลว ${failMsgs.length})` : ''}`, failMsgs.length ? 'warning' : 'success');
+            _ptLoadMembers(teamId);
+            await _ptLoadTeams();
         });
     }, 50);
 };
@@ -1755,6 +1893,24 @@ window._ptRemoveMember = async function(teamId, memberId) {
         _ptLoadMembers(teamId);
         await _ptLoadTeams();
     } catch (err) { showError(err.message); }
+};
+
+// ── Toggle Cancel Session ──────────────────────────────────────────────────────
+window._ptToggleCancel = async function(sessionId, btn) {
+    if (!btn) return;
+    const isCancelled = btn.title === 'เปิดใช้งานอีกครั้ง';
+    const confirmMsg = isCancelled ? 'เปิดใช้งาน session นี้อีกครั้ง?' : 'ยกเลิก session นี้?';
+    if (!confirm(confirmMsg)) return;
+    const orig = _btnLoad(btn);
+    try {
+        const res = await apiFetch(`/patrol/sessions/${sessionId}/toggle-cancel`, { method: 'PATCH' });
+        const newStatus = res.status || (isCancelled ? 'Pending' : 'Cancelled');
+        showToast(newStatus === 'Cancelled' ? 'ยกเลิก session แล้ว' : 'เปิดใช้งาน session แล้ว', 'success');
+        await loadSchedules();
+    } catch (err) {
+        _btnRestore(btn, orig);
+        showError(err?.message || 'ไม่สามารถเปลี่ยนสถานะ session ได้');
+    }
 };
 
 // ── Rotation Matrix ────────────────────────────────────────────────────────────
@@ -1783,13 +1939,22 @@ window._ptLoadRotation = async function() {
             )
         );
 
-        // สร้าง lookup _rotationData[teamId][month] = areaId
+        // สร้าง lookup _rotationData[teamId][month] = { r1: areaId|null, r2: areaId|null }
         _rotationData = {};
         monthResults.forEach((res, idx) => {
             const month = idx + 1;
             (res.data || []).forEach(r => {
                 if (!_rotationData[r.TeamID]) _rotationData[r.TeamID] = {};
-                _rotationData[r.TeamID][month] = r.AreaID;
+                if (!_rotationData[r.TeamID][month]) _rotationData[r.TeamID][month] = { r1: null, r2: null };
+                const rnd = Number(r.PatrolRound);
+                if (rnd === 0) { // legacy: apply to both rounds
+                    _rotationData[r.TeamID][month].r1 = r.AreaID;
+                    _rotationData[r.TeamID][month].r2 = r.AreaID;
+                } else if (rnd === 1) {
+                    _rotationData[r.TeamID][month].r1 = r.AreaID;
+                } else if (rnd === 2) {
+                    _rotationData[r.TeamID][month].r2 = r.AreaID;
+                }
             });
         });
 
@@ -1807,6 +1972,12 @@ function _ptRenderRotationMatrix(year) {
     }
 
     const areaOptions = _ptAreas.map(a => `<option value="${a.id}">${a.Name}</option>`).join('');
+    window._styleRotCell = (sel) => {
+        const isNone = sel.value === '';
+        sel.style.background   = isNone ? '#fef2f2' : '';
+        sel.style.color        = isNone ? '#dc2626' : '';
+        sel.style.borderColor  = isNone ? '#fca5a5' : '';
+    };
 
     wrap.innerHTML = `
     <div class="overflow-x-auto">
@@ -1835,18 +2006,9 @@ function _ptRenderRotationMatrix(year) {
                             ${t.PatrolGroup}
                         </span>
                     </td>
-                    ${Array.from({length:12},(_,i)=>i+1).map(month => {
-                        const areaId = (_rotationData[t.id]||{})[month] || '';
-                        return `
-                        <td class="px-1.5 py-2">
-                            <select data-team="${t.id}" data-month="${month}"
-                                class="rotation-cell w-full text-xs border border-slate-200 rounded-lg px-1.5 py-1 outline-none focus:border-emerald-400 bg-white"
-                                style="min-width:90px">
-                                <option value="">—</option>
-                                ${_ptAreas.map(a => `<option value="${a.id}" ${a.id==areaId?'selected':''}>${a.Code||a.Name}</option>`).join('')}
-                            </select>
-                        </td>`;
-                    }).join('')}
+                    ${Array.from({length:12},(_,i)=>i+1).map(month =>
+                        `<td class="px-1 py-1.5">${_ptRotCellHtml(t.id, month, year)}</td>`
+                    ).join('')}
                 </tr>`).join('')}
             </tbody>
         </table>
@@ -1857,15 +2019,118 @@ function _ptRenderRotationMatrix(year) {
     </div>`;
 }
 
-// คืน string วันพุธของเดือน เช่น "4,18" หรือ "11,25"
+// คืน string วันพุธของเดือน เช่น "A:7,21 B:14,28"
 function _getWednesdays(year, month) {
     const d = new Date(year, month - 1, 1);
     while (d.getDay() !== 3) d.setDate(d.getDate() + 1);
     const weeks = [];
     while (d.getMonth() === month - 1) { weeks.push(d.getDate()); d.setDate(d.getDate() + 7); }
-    // A=พุธ1,3 B=พุธ2,4
     return `A:${weeks[0]||''},${weeks[2]||''} B:${weeks[1]||''},${weeks[3]||''}`;
 }
+
+// คืน array วันพุธจริง เช่น [7, 14, 21, 28]
+function _getWednesdayDates(year, month) {
+    const d = new Date(year, month - 1, 1);
+    while (d.getDay() !== 3) d.setDate(d.getDate() + 1);
+    const dates = [];
+    while (d.getMonth() === month - 1) { dates.push(d.getDate()); d.setDate(d.getDate() + 7); }
+    return dates;
+}
+
+// สร้าง HTML ปุ่ม cell สำหรับ rotation matrix
+function _ptRotCellHtml(teamId, month, year) {
+    const rd = (_rotationData[teamId]||{})[month]; // undefined | {r1,r2}
+    const getLabel = (areaId) => {
+        if (!areaId) return null;
+        const a = _ptAreas.find(x => x.id == areaId);
+        return a ? (a.Code || a.Name) : '?';
+    };
+
+    let inner = '', btnCls = '';
+    if (!rd) {
+        inner = `<span class="text-slate-300 text-[10px]">ยังไม่ตั้ง</span>`;
+        btnCls = 'border-dashed border-slate-200 bg-slate-50 hover:border-violet-300';
+    } else {
+        const l1 = getLabel(rd.r1), l2 = getLabel(rd.r2);
+        if (!l1 && !l2) {
+            inner = `<span class="text-red-500 text-[10px] font-semibold">ไม่มีเดิน</span>`;
+            btnCls = 'border-red-200 bg-red-50 hover:border-red-300';
+        } else if (l1 && l2 && rd.r1 == rd.r2) {
+            inner = `<span class="text-emerald-800 text-[10px] font-semibold">${l1}</span>`;
+            btnCls = 'border-emerald-200 bg-emerald-50 hover:border-violet-400';
+        } else {
+            const b1 = l1
+                ? `<span class="text-[9px] font-bold px-1 py-0.5 rounded bg-emerald-100 text-emerald-700">1:${l1}</span>`
+                : `<span class="text-[9px] font-bold px-1 py-0.5 rounded bg-red-100 text-red-500">1:✕</span>`;
+            const b2 = l2
+                ? `<span class="text-[9px] font-bold px-1 py-0.5 rounded bg-emerald-100 text-emerald-700">2:${l2}</span>`
+                : `<span class="text-[9px] font-bold px-1 py-0.5 rounded bg-red-100 text-red-500">2:✕</span>`;
+            inner = `<div class="flex flex-col gap-0.5">${b1}${b2}</div>`;
+            btnCls = 'border-violet-200 bg-violet-50 hover:border-violet-400';
+        }
+    }
+    return `<button onclick="window._ptOpenRoundModal(${teamId},${month},${year})"
+        class="rot-cell-btn w-full rounded-lg px-2 py-1.5 border text-left transition-colors ${btnCls}"
+        data-team="${teamId}" data-month="${month}" style="min-width:80px">${inner}</button>`;
+}
+
+// ── Per-round popup ────────────────────────────────────────────────────────────
+window._ptOpenRoundModal = function(teamId, month, year) {
+    const team = _ptTeams.find(t => t.id === teamId);
+    if (!team) return;
+
+    const monthName  = MONTHS_TH_SHORT[month - 1];
+    const isA        = team.PatrolGroup === 'A';
+    const weds       = _getWednesdayDates(year, month);  // [d1,d2,d3,d4]
+    const r1Date     = isA ? weds[0] : weds[1];
+    const r2Date     = isA ? weds[2] : weds[3];
+
+    const rd         = (_rotationData[teamId]||{})[month] || { r1: null, r2: null };
+
+    const areaOpts   = `<option value="">— ไม่มีเดิน —</option>` +
+        _ptAreas.map(a => `<option value="${a.id}">${a.Code ? a.Code + ' — ' : ''}${a.Name}</option>`).join('');
+
+    const sel = (val) => areaOpts.replace(`value="${val}"`, `value="${val}" selected`);
+
+    openModal(`${team.Name} — ${monthName}`, `
+    <div class="space-y-3">
+        <div class="flex items-center gap-2 text-xs">
+            <span class="px-2 py-0.5 rounded-full font-bold ${isA ? 'bg-blue-100 text-blue-700' : 'bg-purple-100 text-purple-700'}">${team.PatrolGroup}</span>
+            <span class="text-slate-400">เดินพุธ${isA ? 'ที่ 1 & 3' : 'ที่ 2 & 4'} ปี ${year}</span>
+        </div>
+        <div class="space-y-2.5">
+            <div class="p-3 rounded-xl border border-slate-200 bg-slate-50">
+                <label class="block text-xs font-bold text-slate-600 mb-1.5">
+                    รอบ 1 — พุธที่ ${r1Date} ${monthName}
+                </label>
+                <select id="rnd-r1" class="form-input w-full text-sm">${sel(rd.r1)}</select>
+            </div>
+            <div class="p-3 rounded-xl border border-slate-200 bg-slate-50">
+                <label class="block text-xs font-bold text-slate-600 mb-1.5">
+                    รอบ 2 — พุธที่ ${r2Date} ${monthName}
+                </label>
+                <select id="rnd-r2" class="form-input w-full text-sm">${sel(rd.r2)}</select>
+            </div>
+        </div>
+        <div class="flex justify-end gap-3 pt-3 border-t border-slate-100">
+            <button onclick="window.closeModal&&window.closeModal()" class="px-5 py-2 rounded-xl text-sm bg-slate-100 text-slate-700 hover:bg-slate-200 transition-colors">ยกเลิก</button>
+            <button id="rnd-save-btn" class="px-5 py-2 rounded-xl text-sm font-bold text-white" style="background:linear-gradient(135deg,#059669,#0d9488)">บันทึก</button>
+        </div>
+    </div>`, 'max-w-sm');
+
+    setTimeout(() => {
+        document.getElementById('rnd-save-btn')?.addEventListener('click', () => {
+            const v1 = document.getElementById('rnd-r1')?.value;
+            const v2 = document.getElementById('rnd-r2')?.value;
+            if (!_rotationData[teamId]) _rotationData[teamId] = {};
+            _rotationData[teamId][month] = { r1: v1 ? parseInt(v1) : null, r2: v2 ? parseInt(v2) : null };
+            // update button in-place (no full re-render)
+            const td = document.querySelector(`.rot-cell-btn[data-team="${teamId}"][data-month="${month}"]`)?.parentElement;
+            if (td) td.innerHTML = _ptRotCellHtml(teamId, month, year);
+            closeModal();
+        });
+    }, 50);
+};
 
 // ── Auto-fill Rotation Matrix ──────────────────────────────────────────────────
 // กด "Auto-fill ทั้งปี" → ระบบวนพื้นที่ +1 ทุกเดือนอัตโนมัติ
@@ -1898,19 +2163,28 @@ window._ptAutoFill = function() {
         </div>`;
     }).join('');
 
-    openModal('Auto-fill ตารางหมุนเวียนทั้งปี', `
+    const monthOpts = MONTHS_TH_SHORT.map((m, i) => `<option value="${i+1}">${m}</option>`).join('');
+
+    openModal('Auto-fill ตารางหมุนเวียนพื้นที่', `
     <div class="space-y-4">
         <div class="bg-violet-50 border border-violet-200 rounded-xl px-4 py-3 text-xs text-violet-700 space-y-1">
             <p class="font-bold">วิธีการหมุนเวียน</p>
-            <p>• กำหนดพื้นที่เริ่มต้น (เดือน ม.ค.) ให้แต่ละทีม</p>
-            <p>• ระบบเลื่อนพื้นที่ +1 ทุกเดือนอัตโนมัติ (หมุนวน 12 เดือน)</p>
-            <p>• 1 ทีม เดิน 2 ครั้ง/เดือน ในพื้นที่เดิมทั้งสองครั้ง</p>
-            <p class="pt-1 font-bold">ความถี่ตามตำแหน่ง</p>
-            <p>• <span class="font-semibold">Top Management &amp; คปอ.</span> → เดินครั้งเดียว (รอบ 2 เท่านั้น)</p>
-            <p>• <span class="font-semibold">Management</span> → เดินทั้ง 2 ครั้ง (รอบ 1 &amp; 2)</p>
+            <p>• กำหนดพื้นที่เริ่มต้นของแต่ละทีม แล้วระบบเลื่อน +1 พื้นที่ทุกเดือน</p>
+            <p>• เดือนนอกช่วงที่เลือกจะไม่ถูกเปลี่ยน</p>
+        </div>
+        <!-- Month range -->
+        <div class="grid grid-cols-2 gap-3">
+            <div>
+                <label class="block text-xs font-bold text-slate-500 uppercase mb-1.5">เดือนเริ่มต้น</label>
+                <select id="af-rot-from" class="form-input w-full text-sm">${monthOpts}</select>
+            </div>
+            <div>
+                <label class="block text-xs font-bold text-slate-500 uppercase mb-1.5">เดือนสิ้นสุด</label>
+                <select id="af-rot-to" class="form-input w-full text-sm">${monthOpts.replace('value="12"', 'value="12" selected')}</select>
+            </div>
         </div>
         <div>
-            <p class="text-sm font-semibold text-slate-700 mb-2">พื้นที่เริ่มต้น เดือน ม.ค.</p>
+            <p class="text-sm font-semibold text-slate-700 mb-2">พื้นที่เริ่มต้น (เดือนแรกที่เลือก)</p>
             <div class="border border-slate-200 rounded-xl overflow-hidden">
                 ${teamRows}
             </div>
@@ -1918,7 +2192,8 @@ window._ptAutoFill = function() {
         <div class="flex justify-end gap-3 pt-2 border-t border-slate-100">
             <button type="button" onclick="window.closeModal&&window.closeModal()" class="btn btn-secondary px-5">ยกเลิก</button>
             <button type="button" onclick="window._ptDoAutoFill()" class="btn px-5 font-bold text-white" style="background:linear-gradient(135deg,#7c3aed,#6366f1)">
-                Auto-fill ทั้งปี
+                <svg class="w-3.5 h-3.5 inline mr-1" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg>
+                Fill
             </button>
         </div>
     </div>`, 'max-w-lg');
@@ -1928,41 +2203,74 @@ window._ptDoAutoFill = function() {
     const areaIds = _ptAreas.map(a => a.id);
     if (areaIds.length === 0) return;
 
-    // Read starting area per team from modal
+    const fromMonth = parseInt(document.getElementById('af-rot-from')?.value || 1);
+    const toMonth   = parseInt(document.getElementById('af-rot-to')?.value   || 12);
+    if (fromMonth > toMonth) { showToast('เดือนเริ่มต้นต้องไม่เกินเดือนสิ้นสุด', 'warning'); return; }
+    const year = parseInt(document.getElementById('rotation-year')?.value || new Date().getFullYear());
+
     document.querySelectorAll('[data-autofill-team]').forEach(sel => {
         const teamId   = parseInt(sel.dataset.autofillTeam);
         const startId  = parseInt(sel.value);
         const startIdx = areaIds.indexOf(startId);
+        if (!_rotationData[teamId]) _rotationData[teamId] = {};
 
-        for (let month = 1; month <= 12; month++) {
-            const areaId = areaIds[(startIdx + month - 1) % areaIds.length];
-            const cell = document.querySelector(`.rotation-cell[data-team="${teamId}"][data-month="${month}"]`);
-            if (cell) cell.value = areaId;
+        for (let month = fromMonth; month <= toMonth; month++) {
+            const areaId = areaIds[(startIdx + (month - fromMonth)) % areaIds.length];
+            _rotationData[teamId][month] = { r1: areaId, r2: areaId };
         }
     });
 
     closeModal();
-    showToast('Auto-fill เรียบร้อย — ตรวจสอบแล้วกด "บันทึก Rotation"', 'success');
+    // Re-render only the buttons in the affected month columns
+    _ptTeams.forEach(t => {
+        for (let month = fromMonth; month <= toMonth; month++) {
+            const td = document.querySelector(`.rot-cell-btn[data-team="${t.id}"][data-month="${month}"]`)?.parentElement;
+            if (td) td.innerHTML = _ptRotCellHtml(t.id, month, year);
+        }
+    });
+
+    const rangeLabel = fromMonth === toMonth
+        ? MONTHS_TH_SHORT[fromMonth - 1]
+        : `${MONTHS_TH_SHORT[fromMonth - 1]} – ${MONTHS_TH_SHORT[toMonth - 1]}`;
+    showToast(`Auto-fill ${rangeLabel} เรียบร้อย — กด "บันทึก Rotation" เพื่อยืนยัน`, 'success');
 };
 
-window._ptSaveRotation = async function() {
+window._ptSaveRotation = async function(btn) {
     const year = parseInt(document.getElementById('rotation-year')?.value || new Date().getFullYear());
-    const cells = document.querySelectorAll('.rotation-cell');
+
+    // Only send cells that were explicitly set (exist in _rotationData)
+    // Skip undefined cells (never opened/touched) to avoid inserting sentinels for everything
     const items = [];
-    cells.forEach(sel => {
-        if (!sel.value) return;
-        items.push({ TeamID: parseInt(sel.dataset.team), AreaID: parseInt(sel.value), Year: year, Month: parseInt(sel.dataset.month) });
+    _ptTeams.forEach(t => {
+        for (let month = 1; month <= 12; month++) {
+            const rd = (_rotationData[t.id]||{})[month];
+            if (rd === undefined) return; // never touched — leave DB unchanged
+            items.push({ TeamID: t.id, r1: rd.r1 || null, r2: rd.r2 || null, Year: year, Month: month });
+        }
     });
-    if (items.length === 0) { showToast('ยังไม่ได้เลือกพื้นที่เลย', 'error'); return; }
+    if (!items.length) { showToast('ยังไม่มีข้อมูลที่แก้ไข', 'warning'); return; }
+
+    // Loading state
+    const saveBtn = btn || document.getElementById('pt-rot-save-btn');
+    const origHtml = saveBtn?.innerHTML;
+    if (saveBtn) {
+        saveBtn.disabled = true;
+        saveBtn.innerHTML = `<svg class="w-3.5 h-3.5 animate-spin" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"/><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"/></svg> กำลังบันทึก...`;
+    }
     try {
         const res = await API.post('/patrol/rotation', items);
-        showToast(`บันทึก Rotation ${res.saved} รายการสำเร็จ`, 'success');
-    } catch (err) { showError(err.message); }
+        showToast(`บันทึก Rotation สำเร็จ (${res.saved} รายการ)`, 'success');
+    } catch (err) {
+        showError(err.message);
+    } finally {
+        if (saveBtn) { saveBtn.disabled = false; saveBtn.innerHTML = origHtml; }
+    }
 };
 
 window._ptGenSessions = function() {
     const year = parseInt(document.getElementById('rotation-year')?.value || new Date().getFullYear());
-    const monthOpts = MONTHS_TH_SHORT.map((m,i) => `<option value="${i+1}">${m} ${year}</option>`).join('');
+    const curMonth = parseInt(document.getElementById('filter-month')?.value || new Date().getMonth() + 1);
+    const monthOpts = MONTHS_TH_SHORT.map((m,i) => `<option value="${i+1}" ${i+1===curMonth?'selected':''}>${m} ${year}</option>`).join('');
     openModal('สร้าง Sessions อัตโนมัติ', `
     <div class="space-y-4">
         <p class="text-sm text-slate-600">ระบบจะสร้าง Patrol Sessions จากตารางหมุนเวียนที่ตั้งไว้ โดยอิงวันพุธตามกลุ่ม A / B อัตโนมัติ</p>
@@ -1986,8 +2294,9 @@ window._ptDoGenerate = async function(year) {
     try {
         const r = await API.post('/patrol/generate-sessions', { year, month });
         if (res) { res.textContent = r.message || `สร้าง ${r.created} sessions สำเร็จ`; res.classList.remove('hidden'); }
+        if (btn) { btn.disabled = false; btn.textContent = 'สร้าง Sessions'; }
         showToast(r.message || 'สร้าง Sessions สำเร็จ', 'success');
-        loadSchedules(); // refresh calendar/list
+        loadSchedules(); // refresh calendar/list view
     } catch (err) {
         showError(err.message);
         if (btn) { btn.disabled = false; btn.textContent = 'สร้าง Sessions'; }
@@ -2002,6 +2311,7 @@ window._ptDoGenerate = async function(year) {
 // _memberMonthly[employeeID][month] = TeamID
 let _memberBase    = [];
 let _memberMonthly = {};
+let _lockedCells   = new Set(); // key = `${empId}_${month}`, persisted per year in localStorage
 
 async function _ptLoadMemberRotation() {
     const year = parseInt(document.getElementById('rotation-year')?.value || new Date().getFullYear());
@@ -2030,38 +2340,65 @@ function _ptRenderMemberMatrix(year) {
         return;
     }
 
-    // Group members by PatrolGroup
+    // Load lock state from localStorage
+    const _lockKey = `patrol_rot_locks_${year}`;
+    _lockedCells = new Set(JSON.parse(localStorage.getItem(_lockKey) || '[]'));
+
     const groupA = _memberBase.filter(m => m.PatrolGroup === 'A');
     const groupB = _memberBase.filter(m => m.PatrolGroup === 'B');
 
-    // Build team options per group
     const teamsA = _ptTeams.filter(t => t.PatrolGroup === 'A');
     const teamsB = _ptTeams.filter(t => t.PatrolGroup === 'B');
-    const teamOptsA = teamsA.map(t => `<option value="${t.id}">${t.Name}</option>`).join('');
-    const teamOptsB = teamsB.map(t => `<option value="${t.id}">${t.Name}</option>`).join('');
+
+    // Feature 1: unified optgroup — ทุกทีมให้เลือกได้
+    const teamOptsAll =
+        (teamsA.length ? `<optgroup label="กลุ่ม A — พุธ 1&3">${teamsA.map(t => `<option value="${t.id}" data-group="A">${t.Name}</option>`).join('')}</optgroup>` : '') +
+        (teamsB.length ? `<optgroup label="กลุ่ม B — พุธ 2&4">${teamsB.map(t => `<option value="${t.id}" data-group="B">${t.Name}</option>`).join('')}</optgroup>` : '');
 
     const typeColor = { top: 'rose', committee: 'amber', management: 'indigo' };
     const typeLabel = { top: 'Top', committee: 'คปอ.', management: 'Mgmt' };
+    const lockSvgOn  = `<svg class="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"/></svg>`;
+    const lockSvgOff = `<svg class="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 11V7a4 4 0 018 0m-4 8v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2z"/></svg>`;
 
-    const renderRows = (members, teamOpts) => members.map(m => {
+    const renderRows = (members) => members.map(m => {
         const tColor = typeColor[m.PatrolType] || 'slate';
         const tLabel = typeLabel[m.PatrolType] || m.PatrolType;
+        const empId  = m.EmployeeID;
+
         const monthCells = Array.from({length:12},(_,i) => i+1).map(month => {
-            const selected = (_memberMonthly[m.EmployeeID] || {})[month] || m.TeamID;
-            return `<td class="px-1 py-1.5">
-                <select data-member="${m.EmployeeID}" data-month="${month}"
-                    class="member-rot-cell w-full text-[10px] border border-slate-200 rounded-md px-1 py-0.5 outline-none focus:border-violet-400 bg-white"
-                    style="min-width:72px">
-                    ${teamOpts.replace(`value="${selected}"`, `value="${selected}" selected`)}
-                </select>
+            const selected   = (_memberMonthly[empId] || {})[month] || m.TeamID;
+            const isChanged  = selected !== m.TeamID;
+            const crossTeam  = _ptTeams.find(t => t.id === selected);
+            const isCross    = crossTeam && crossTeam.PatrolGroup !== m.PatrolGroup;
+            const isLocked   = _lockedCells.has(`${empId}_${month}`);
+
+            let selCls = 'border-slate-200';
+            if (isLocked)       selCls = 'border-amber-300 bg-amber-50';
+            else if (isCross)   selCls = 'border-amber-300 bg-amber-50 text-amber-700 font-semibold';
+            else if (isChanged) selCls = 'border-violet-300 bg-violet-50 text-violet-700 font-semibold';
+
+            return `<td class="px-0.5 py-1">
+                <div class="flex items-center gap-0.5">
+                    <select data-member="${empId}" data-month="${month}" data-default="${m.TeamID}" data-group="${m.PatrolGroup}"
+                        class="member-rot-cell flex-1 text-[10px] border rounded-md px-1 py-0.5 outline-none focus:border-violet-400 bg-white transition-colors ${selCls}"
+                        style="min-width:60px" onchange="window._ptMarkChanged(this)" ${isLocked ? 'disabled' : ''}>
+                        ${teamOptsAll.replace(`value="${selected}"`, `value="${selected}" selected`)}
+                    </select>
+                    <button onclick="window._ptToggleLock('${empId}',${month},${year})"
+                        class="flex-shrink-0 p-0.5 rounded transition-colors ${isLocked ? 'text-amber-500 hover:text-amber-600' : 'text-slate-200 hover:text-slate-400'}"
+                        title="${isLocked ? 'ปลดล็อค' : 'ล็อค (Auto-fill จะข้าม)'}">
+                        ${isLocked ? lockSvgOn : lockSvgOff}
+                    </button>
+                </div>
             </td>`;
         }).join('');
+
         return `
-        <tr class="border-b border-slate-100 hover:bg-slate-50 transition-colors">
+        <tr class="member-rot-row border-b border-slate-100 hover:bg-slate-50 transition-colors" data-name="${(m.EmployeeName||empId).toLowerCase()}">
             <td class="px-3 py-2 sticky left-0 bg-white z-10 whitespace-nowrap">
                 <div class="flex items-center gap-2">
                     <span class="w-2 h-2 rounded-full flex-shrink-0" style="background:${m.Color}"></span>
-                    <span class="text-xs font-semibold text-slate-800">${m.EmployeeName||m.EmployeeID}</span>
+                    <span class="text-xs font-semibold text-slate-800">${m.EmployeeName||empId}</span>
                 </div>
             </td>
             <td class="px-2 py-2 text-center">
@@ -2069,41 +2406,60 @@ function _ptRenderMemberMatrix(year) {
             </td>
             <td class="px-2 py-2 text-center text-[10px] text-slate-400 whitespace-nowrap">${m.TeamName}</td>
             ${monthCells}
+            <td class="px-1 py-2 whitespace-nowrap">
+                <div class="flex items-center gap-0.5">
+                    <button onclick="window._ptCopyRow('${empId}')" title="คัดลอก pattern ไปให้คนอื่น"
+                        class="p-1 rounded-lg text-slate-300 hover:text-blue-500 hover:bg-blue-50 transition-colors">
+                        <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"/></svg>
+                    </button>
+                    <button onclick="window._ptResetRow('${empId}')" title="รีเซ็ตกลับทีมเดิมทุกเดือน"
+                        class="p-1 rounded-lg text-slate-300 hover:text-violet-500 hover:bg-violet-50 transition-colors">
+                        <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 10h10a8 8 0 018 8v2M3 10l6 6m-6-6l6-6"/></svg>
+                    </button>
+                </div>
+            </td>
         </tr>`;
     }).join('');
 
-    const headerCols = MONTHS_TH_SHORT.map(m => `<th class="px-1 py-3 text-[10px] font-semibold text-slate-500 text-center whitespace-nowrap">${m}</th>`).join('');
+    const headerCols = MONTHS_TH_SHORT.map((m, i) => `
+        <th class="px-1 py-3 text-center whitespace-nowrap group cursor-pointer hover:bg-violet-50 transition-colors"
+            onclick="window._ptAssignColumn(${i+1})" title="Assign ทุกคนในเดือน ${m}">
+            <div class="text-[10px] font-semibold text-slate-500 group-hover:text-violet-600">${m}</div>
+            <div class="text-[9px] text-slate-300 group-hover:text-violet-400 mt-0.5">▼</div>
+        </th>`).join('');
 
-    const section = (label, color, members, teamOpts) => members.length === 0 ? '' : `
+    const section = (label, color, members) => members.length === 0 ? '' : `
         <tr class="bg-${color}-50">
-            <td colspan="15" class="px-4 py-2 text-[10px] font-bold uppercase text-${color}-600 tracking-wider">กลุ่ม ${label}</td>
+            <td colspan="16" class="px-4 py-2 text-[10px] font-bold uppercase text-${color}-600 tracking-wider">กลุ่ม ${label}</td>
         </tr>
-        ${renderRows(members, teamOpts)}`;
+        ${renderRows(members)}`;
 
     wrap.innerHTML = `
     <div class="overflow-x-auto">
-        <table class="w-full text-left border-collapse" style="min-width:1100px">
+        <table class="w-full text-left border-collapse" style="min-width:1150px">
             <thead>
                 <tr class="bg-slate-50 border-b-2 border-slate-200">
                     <th class="px-3 py-3 text-xs font-semibold text-slate-500 sticky left-0 bg-slate-50 z-10 whitespace-nowrap">สมาชิก</th>
                     <th class="px-2 py-3 text-xs font-semibold text-slate-400 text-center">ประเภท</th>
                     <th class="px-2 py-3 text-xs font-semibold text-slate-400 whitespace-nowrap">ทีมเดิม</th>
                     ${headerCols}
+                    <th class="px-1 py-3 text-[10px] text-slate-300 text-center whitespace-nowrap">คัดลอก/↺</th>
                 </tr>
             </thead>
             <tbody>
-                ${section('A — พุธที่ 1 & 3', 'blue', groupA, teamOptsA)}
-                ${section('B — พุธที่ 2 & 4', 'purple', groupB, teamOptsB)}
+                ${section('A — พุธที่ 1 & 3', 'blue', groupA)}
+                ${section('B — พุธที่ 2 & 4', 'purple', groupB)}
             </tbody>
         </table>
     </div>
-    <div class="px-4 py-3 bg-slate-50 border-t border-slate-100 flex items-center gap-2 text-xs text-slate-400">
-        <svg class="w-3.5 h-3.5 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
-        กำหนดว่าแต่ละเดือนสมาชิกอยู่ทีมไหน · ค่า default = ทีมเดิม · กลุ่ม A สลับเฉพาะทีม A · กลุ่ม B สลับเฉพาะทีม B
+    <div class="px-4 py-3 bg-slate-50 border-t border-slate-100 flex flex-wrap items-center gap-4 text-xs text-slate-400">
+        <span class="flex items-center gap-1.5"><span class="w-3 h-3 rounded border border-violet-300 bg-violet-50 inline-block"></span>เปลี่ยนจากทีมเดิม</span>
+        <span class="flex items-center gap-1.5"><span class="w-3 h-3 rounded border border-amber-300 bg-amber-50 inline-block"></span>ข้ามกลุ่ม (A↔B)</span>
+        <span class="flex items-center gap-1.5"><svg class="w-3 h-3 text-amber-500" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"/></svg>ล็อค (Auto-fill ข้าม)</span>
     </div>`;
 }
 
-window._ptSaveMemberRotation = async function() {
+window._ptSaveMemberRotation = async function(btn) {
     const year  = parseInt(document.getElementById('rotation-year')?.value || new Date().getFullYear());
     const cells = document.querySelectorAll('.member-rot-cell');
     const items = [];
@@ -2117,35 +2473,399 @@ window._ptSaveMemberRotation = async function() {
         });
     });
     if (items.length === 0) { showToast('ไม่มีข้อมูล', 'error'); return; }
+    const saveBtn = btn || document.getElementById('pt-mem-rot-save-btn');
+    const orig = _btnLoad(saveBtn, 'กำลังบันทึก...');
     try {
         const res = await API.post('/patrol/member-rotation', items);
         showToast(`บันทึกการสลับสมาชิก ${res.saved} รายการสำเร็จ`, 'success');
-    } catch (err) { showError(err.message); }
+    } catch (err) {
+        showError(err.message);
+    } finally {
+        _btnRestore(saveBtn, orig);
+    }
 };
 
-// Auto-fill: rotate members through teams in same PatrolGroup, +1 team per month
-window._ptAutoFillMembers = function() {
+// ── Mark changed cell (Feature 1+2: cross-group amber, changed violet) ────────
+window._ptMarkChanged = function(sel) {
+    const isChanged   = sel.value !== sel.dataset.default;
+    const memberGroup = sel.dataset.group;
+    const crossTeam   = _ptTeams.find(t => String(t.id) === sel.value);
+    const isCross     = crossTeam && memberGroup && crossTeam.PatrolGroup !== memberGroup;
+
+    sel.classList.remove(
+        'border-violet-300', 'bg-violet-50', 'text-violet-700',
+        'border-amber-300',  'bg-amber-50',  'text-amber-700',
+        'border-slate-200',  'font-semibold'
+    );
+    if (isCross) {
+        sel.classList.add('border-amber-300', 'bg-amber-50', 'text-amber-700', 'font-semibold');
+    } else if (isChanged) {
+        sel.classList.add('border-violet-300', 'bg-violet-50', 'text-violet-700', 'font-semibold');
+    } else {
+        sel.classList.add('border-slate-200');
+    }
+};
+
+// ── Search / filter rows ──────────────────────────────────────────────────────
+window._ptFilterMemberMatrix = function(q) {
+    const rows = document.querySelectorAll('.member-rot-row');
+    const lower = q.toLowerCase().trim();
+    rows.forEach(row => {
+        row.style.display = (!lower || row.dataset.name.includes(lower)) ? '' : 'none';
+    });
+};
+
+// ── Reset single row (skip locked cells) ─────────────────────────────────────
+window._ptResetRow = function(empId) {
+    const cells = document.querySelectorAll(`.member-rot-cell[data-member="${empId}"]`);
+    cells.forEach(sel => {
+        if (_lockedCells.has(`${empId}_${sel.dataset.month}`)) return;
+        sel.value = sel.dataset.default;
+        window._ptMarkChanged(sel);
+    });
+    showToast('รีเซ็ตเรียบร้อย — กด "บันทึก" เพื่อยืนยัน', 'success');
+};
+
+// ── Assign column — ทุกทีมเลือกได้ ไม่จำกัดกลุ่ม (Feature 1) ────────────────
+window._ptAssignColumn = function(month) {
+    if (!_ptTeams.length) { showToast('ยังไม่มีทีม', 'error'); return; }
+    const monthName = MONTHS_TH_SHORT[month - 1];
     const teamsA = _ptTeams.filter(t => t.PatrolGroup === 'A');
     const teamsB = _ptTeams.filter(t => t.PatrolGroup === 'B');
+    const teamOpts = `<option value="">— เลือกทีม —</option>` +
+        (teamsA.length ? `<optgroup label="กลุ่ม A">${teamsA.map(t => `<option value="${t.id}">${t.Name}</option>`).join('')}</optgroup>` : '') +
+        (teamsB.length ? `<optgroup label="กลุ่ม B">${teamsB.map(t => `<option value="${t.id}">${t.Name}</option>`).join('')}</optgroup>` : '');
 
-    if (teamsA.length === 0 && teamsB.length === 0) {
-        showToast('ยังไม่มีทีม', 'error'); return;
+    openModal(`Assign ทุกคน — ${monthName}`, `
+    <div class="space-y-4">
+        <p class="text-sm text-slate-500">Assign สมาชิกทุกคนที่มองเห็น (ไม่ล็อค) ในเดือน <strong>${monthName}</strong> ไปทีมเดียวกัน</p>
+        <div>
+            <label class="block text-xs font-bold text-slate-500 uppercase mb-1.5">ทีมปลายทาง</label>
+            <select id="col-assign-team" class="form-input w-full text-sm">${teamOpts}</select>
+        </div>
+        <div class="flex justify-end gap-3 pt-3 border-t border-slate-100">
+            <button onclick="window.closeModal&&window.closeModal()" class="px-5 py-2 rounded-xl text-sm bg-slate-100 text-slate-700 hover:bg-slate-200 transition-colors">ยกเลิก</button>
+            <button id="col-assign-ok" class="px-5 py-2 rounded-xl text-sm font-bold text-white transition-colors" style="background:linear-gradient(135deg,#7c3aed,#6d28d9)">Assign</button>
+        </div>
+    </div>`, 'max-w-sm');
+
+    setTimeout(() => {
+        document.getElementById('col-assign-ok')?.addEventListener('click', () => {
+            const teamId = document.getElementById('col-assign-team')?.value;
+            if (!teamId) { showToast('กรุณาเลือกทีม', 'warning'); return; }
+            const team = _ptTeams.find(t => String(t.id) === String(teamId));
+            let count = 0;
+            document.querySelectorAll('.member-rot-row:not([style*="display: none"])').forEach(row => {
+                const sel = row.querySelector(`.member-rot-cell[data-month="${month}"]`);
+                if (!sel || sel.disabled) return; // skip locked
+                sel.value = teamId;
+                window._ptMarkChanged(sel);
+                count++;
+            });
+            closeModal();
+            showToast(`Assign ${count} คน → ${team?.Name || teamId} เดือน ${monthName} — กด "บันทึก" เพื่อยืนยัน`, 'success');
+        });
+    }, 50);
+};
+
+// ── Feature 5: Toggle lock per cell ───────────────────────────────────────────
+window._ptToggleLock = function(empId, month, year) {
+    const cellKey = `${empId}_${month}`;
+    const lockKey = `patrol_rot_locks_${year}`;
+    if (_lockedCells.has(cellKey)) _lockedCells.delete(cellKey);
+    else _lockedCells.add(cellKey);
+    localStorage.setItem(lockKey, JSON.stringify([..._lockedCells]));
+
+    const isLocked = _lockedCells.has(cellKey);
+    const sel = document.querySelector(`.member-rot-cell[data-member="${empId}"][data-month="${month}"]`);
+    const btn = sel?.nextElementSibling; // lock button
+    if (sel) { sel.disabled = isLocked; }
+    if (btn) {
+        btn.title = isLocked ? 'ปลดล็อค' : 'ล็อค (Auto-fill จะข้าม)';
+        btn.className = `flex-shrink-0 p-0.5 rounded transition-colors ${isLocked ? 'text-amber-500 hover:text-amber-600' : 'text-slate-200 hover:text-slate-400'}`;
+        const lockSvgOn  = `<svg class="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"/></svg>`;
+        const lockSvgOff = `<svg class="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 11V7a4 4 0 018 0m-4 8v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2z"/></svg>`;
+        btn.innerHTML = isLocked ? lockSvgOn : lockSvgOff;
+    }
+    if (sel && isLocked) sel.classList.add('border-amber-300', 'bg-amber-50');
+};
+
+// ── Feature 3: Swap two members ───────────────────────────────────────────────
+window._ptSwapTwoModal = function() {
+    if (_memberBase.length < 2) { showToast('ต้องมีสมาชิกอย่างน้อย 2 คน', 'warning'); return; }
+    const memberOpts = _memberBase.map(m => `<option value="${m.EmployeeID}">${m.EmployeeName||m.EmployeeID} (${m.TeamName})</option>`).join('');
+    const monthOpts  = MONTHS_TH_SHORT.map((m, i) => `<option value="${i+1}">${m}</option>`).join('');
+
+    openModal('สลับ Rotation ของสองคน', `
+    <div class="space-y-4">
+        <div class="grid grid-cols-2 gap-3">
+            <div>
+                <label class="block text-xs font-bold text-slate-500 uppercase mb-1.5">คนที่ 1</label>
+                <select id="swap-e1" class="form-input w-full text-sm">${memberOpts}</select>
+            </div>
+            <div>
+                <label class="block text-xs font-bold text-slate-500 uppercase mb-1.5">คนที่ 2</label>
+                <select id="swap-e2" class="form-input w-full text-sm">${memberOpts}</select>
+            </div>
+        </div>
+        <div class="grid grid-cols-2 gap-3">
+            <div>
+                <label class="block text-xs font-bold text-slate-500 uppercase mb-1.5">เดือนเริ่มต้น</label>
+                <select id="swap-from" class="form-input w-full text-sm">${monthOpts}</select>
+            </div>
+            <div>
+                <label class="block text-xs font-bold text-slate-500 uppercase mb-1.5">เดือนสิ้นสุด</label>
+                <select id="swap-to" class="form-input w-full text-sm">${monthOpts.replace('value="12"', 'value="12" selected')}</select>
+            </div>
+        </div>
+        <p class="text-[11px] text-amber-600 bg-amber-50 border border-amber-100 rounded-lg px-3 py-2">เซลล์ที่ล็อคจะไม่ถูกสลับ</p>
+        <div class="flex justify-end gap-3 pt-3 border-t border-slate-100">
+            <button onclick="window.closeModal&&window.closeModal()" class="px-5 py-2 rounded-xl text-sm bg-slate-100 text-slate-700 hover:bg-slate-200 transition-colors">ยกเลิก</button>
+            <button id="swap-ok" class="px-5 py-2 rounded-xl text-sm font-bold text-white" style="background:linear-gradient(135deg,#f59e0b,#d97706)">สลับ</button>
+        </div>
+    </div>`, 'max-w-md');
+
+    setTimeout(() => {
+        document.getElementById('swap-ok')?.addEventListener('click', () => {
+            const e1   = document.getElementById('swap-e1')?.value;
+            const e2   = document.getElementById('swap-e2')?.value;
+            const from = parseInt(document.getElementById('swap-from')?.value || 1);
+            const to   = parseInt(document.getElementById('swap-to')?.value   || 12);
+            if (e1 === e2) { showToast('กรุณาเลือกสมาชิกคนละคน', 'warning'); return; }
+            if (from > to) { showToast('เดือนเริ่มต้นต้องไม่เกินเดือนสิ้นสุด', 'warning'); return; }
+
+            const m1 = _memberBase.find(m => m.EmployeeID === e1);
+            const m2 = _memberBase.find(m => m.EmployeeID === e2);
+            if (!_memberMonthly[e1]) _memberMonthly[e1] = {};
+            if (!_memberMonthly[e2]) _memberMonthly[e2] = {};
+            let swapped = 0;
+            for (let month = from; month <= to; month++) {
+                if (_lockedCells.has(`${e1}_${month}`) || _lockedCells.has(`${e2}_${month}`)) continue;
+                const v1 = (_memberMonthly[e1]||{})[month] || m1?.TeamID;
+                const v2 = (_memberMonthly[e2]||{})[month] || m2?.TeamID;
+                _memberMonthly[e1][month] = v2;
+                _memberMonthly[e2][month] = v1;
+                const s1 = document.querySelector(`.member-rot-cell[data-member="${e1}"][data-month="${month}"]`);
+                const s2 = document.querySelector(`.member-rot-cell[data-member="${e2}"][data-month="${month}"]`);
+                if (s1) { s1.value = v2; window._ptMarkChanged(s1); }
+                if (s2) { s2.value = v1; window._ptMarkChanged(s2); }
+                swapped++;
+            }
+            closeModal();
+            const rng = from === to ? MONTHS_TH_SHORT[from-1] : `${MONTHS_TH_SHORT[from-1]}–${MONTHS_TH_SHORT[to-1]}`;
+            showToast(`สลับ ${swapped} เดือน (${rng}) เรียบร้อย — กด "บันทึก" เพื่อยืนยัน`, 'success');
+        });
+    }, 50);
+};
+
+// ── Feature 4: Copy row pattern to another member ─────────────────────────────
+window._ptCopyRow = function(sourceId) {
+    const source  = _memberBase.find(m => m.EmployeeID === sourceId);
+    if (!source) return;
+    const targets = _memberBase.filter(m => m.EmployeeID !== sourceId);
+    if (!targets.length) { showToast('ไม่มีสมาชิกคนอื่น', 'warning'); return; }
+
+    const targetOpts = targets.map(m => `<option value="${m.EmployeeID}">${m.EmployeeName||m.EmployeeID} (${m.TeamName})</option>`).join('');
+    const monthOpts  = MONTHS_TH_SHORT.map((m, i) => `<option value="${i+1}">${m}</option>`).join('');
+
+    openModal(`คัดลอก Pattern จาก ${source.EmployeeName||sourceId}`, `
+    <div class="space-y-4">
+        <div>
+            <label class="block text-xs font-bold text-slate-500 uppercase mb-1.5">คัดลอกไปให้</label>
+            <select id="copy-target" class="form-input w-full text-sm">${targetOpts}</select>
+        </div>
+        <div class="grid grid-cols-2 gap-3">
+            <div>
+                <label class="block text-xs font-bold text-slate-500 uppercase mb-1.5">เดือนเริ่มต้น</label>
+                <select id="copy-from" class="form-input w-full text-sm">${monthOpts}</select>
+            </div>
+            <div>
+                <label class="block text-xs font-bold text-slate-500 uppercase mb-1.5">เดือนสิ้นสุด</label>
+                <select id="copy-to" class="form-input w-full text-sm">${monthOpts.replace('value="12"', 'value="12" selected')}</select>
+            </div>
+        </div>
+        <p class="text-[11px] text-blue-600 bg-blue-50 border border-blue-100 rounded-lg px-3 py-2">เซลล์ที่ล็อคในแถวปลายทางจะไม่ถูกเปลี่ยน</p>
+        <div class="flex justify-end gap-3 pt-3 border-t border-slate-100">
+            <button onclick="window.closeModal&&window.closeModal()" class="px-5 py-2 rounded-xl text-sm bg-slate-100 text-slate-700 hover:bg-slate-200 transition-colors">ยกเลิก</button>
+            <button id="copy-ok" class="px-5 py-2 rounded-xl text-sm font-bold text-white" style="background:linear-gradient(135deg,#3b82f6,#6366f1)">คัดลอก</button>
+        </div>
+    </div>`, 'max-w-sm');
+
+    setTimeout(() => {
+        document.getElementById('copy-ok')?.addEventListener('click', () => {
+            const targetId = document.getElementById('copy-target')?.value;
+            const from = parseInt(document.getElementById('copy-from')?.value || 1);
+            const to   = parseInt(document.getElementById('copy-to')?.value   || 12);
+            if (from > to) { showToast('เดือนเริ่มต้นต้องไม่เกินเดือนสิ้นสุด', 'warning'); return; }
+            if (!_memberMonthly[targetId]) _memberMonthly[targetId] = {};
+            let copied = 0;
+            for (let month = from; month <= to; month++) {
+                if (_lockedCells.has(`${targetId}_${month}`)) continue;
+                const srcVal = (_memberMonthly[sourceId]||{})[month] || source?.TeamID;
+                _memberMonthly[targetId][month] = srcVal;
+                const sel = document.querySelector(`.member-rot-cell[data-member="${targetId}"][data-month="${month}"]`);
+                if (sel) { sel.value = srcVal; window._ptMarkChanged(sel); }
+                copied++;
+            }
+            closeModal();
+            const rng = from === to ? MONTHS_TH_SHORT[from-1] : `${MONTHS_TH_SHORT[from-1]}–${MONTHS_TH_SHORT[to-1]}`;
+            showToast(`คัดลอก ${copied} เดือน (${rng}) เรียบร้อย — กด "บันทึก" เพื่อยืนยัน`, 'success');
+        });
+    }, 50);
+};
+
+// ── Auto-fill modal (month range + mode) ──────────────────────────────────────
+window._ptAutoFillModal = function() {
+    const teamsA = _ptTeams.filter(t => t.PatrolGroup === 'A');
+    const teamsB = _ptTeams.filter(t => t.PatrolGroup === 'B');
+    if (teamsA.length === 0 && teamsB.length === 0) { showToast('ยังไม่มีทีม', 'error'); return; }
+
+    // Interleave A,B teams for diverse mode: [A1,B1,A2,B2,A3,B3]
+    const teamsInterleaved = [];
+    const maxLen = Math.max(teamsA.length, teamsB.length);
+    for (let i = 0; i < maxLen; i++) {
+        if (teamsA[i]) teamsInterleaved.push(teamsA[i]);
+        if (teamsB[i]) teamsInterleaved.push(teamsB[i]);
     }
 
-    _memberBase.forEach(m => {
-        const groupTeams = m.PatrolGroup === 'A' ? teamsA : teamsB;
-        if (groupTeams.length === 0) return;
-        const startIdx = groupTeams.findIndex(t => t.id === m.TeamID);
-        const base = startIdx >= 0 ? startIdx : 0;
+    const monthOpts = MONTHS_TH_SHORT.map((m, i) => `<option value="${i+1}">${m}</option>`).join('');
+    const teamListA = teamsA.map(t => `<span class="inline-block px-1.5 py-0.5 rounded bg-blue-100 text-blue-700 text-[10px] font-bold">${t.Name}</span>`).join(' ');
+    const teamListB = teamsB.map(t => `<span class="inline-block px-1.5 py-0.5 rounded bg-purple-100 text-purple-700 text-[10px] font-bold">${t.Name}</span>`).join(' ');
 
-        for (let month = 1; month <= 12; month++) {
-            const teamId = groupTeams[(base + month - 1) % groupTeams.length].id;
-            const cell = document.querySelector(`.member-rot-cell[data-member="${m.EmployeeID}"][data-month="${month}"]`);
-            if (cell) cell.value = teamId;
-        }
-    });
+    openModal('Auto-fill สมาชิก', `
+    <div class="space-y-4">
 
-    showToast('Auto-fill สมาชิกเรียบร้อย — กด "บันทึก" เพื่อยืนยัน', 'success');
+        <!-- Mode selector -->
+        <div class="space-y-2">
+            <label class="block text-xs font-bold text-slate-500 uppercase">รูปแบบการสลับ</label>
+            <label class="flex items-start gap-2.5 p-3 rounded-xl border-2 border-violet-400 bg-violet-50 cursor-pointer transition-all">
+                <input type="radio" name="af-mode" value="diverse" checked class="mt-0.5 accent-violet-600">
+                <div>
+                    <p class="text-xs font-bold text-violet-800">ผสม A+B — หลากหลาย (แนะนำ)</p>
+                    <p class="text-[11px] text-violet-600 mt-0.5">แต่ละคนหมุนผ่านทุกทีม (A+B) — เจอผู้บริหารหลากหลาย ไม่ซ้ำหน้า</p>
+                </div>
+            </label>
+            <label class="flex items-start gap-2.5 p-3 rounded-xl border-2 border-slate-200 bg-white cursor-pointer transition-all">
+                <input type="radio" name="af-mode" value="samegroup" class="mt-0.5 accent-violet-600">
+                <div>
+                    <p class="text-xs font-bold text-slate-700">เฉพาะกลุ่มเดิม (A หรือ B)</p>
+                    <p class="text-[11px] text-slate-400 mt-0.5">หมุนเวียนภายในกลุ่ม A หรือ B ของตัวเองเท่านั้น</p>
+                </div>
+            </label>
+        </div>
+
+        <!-- Month range -->
+        <div class="grid grid-cols-2 gap-3">
+            <div>
+                <label class="block text-xs font-bold text-slate-500 uppercase mb-1.5">เดือนเริ่มต้น</label>
+                <select id="af-month-from" class="form-input w-full text-sm">${monthOpts}</select>
+            </div>
+            <div>
+                <label class="block text-xs font-bold text-slate-500 uppercase mb-1.5">เดือนสิ้นสุด</label>
+                <select id="af-month-to" class="form-input w-full text-sm">${monthOpts.replace('value="12"', 'value="12" selected')}</select>
+            </div>
+        </div>
+
+        <!-- Dynamic description -->
+        <div id="af-desc" class="p-3 rounded-xl bg-violet-50 border border-violet-100 text-[11px] text-violet-700 space-y-1">
+            <p class="font-semibold">วิธีการสลับ — ผสม A+B</p>
+            <p>• แต่ละคนได้รับทีมที่ต่างกัน ทั้ง A และ B หมุนเวียนทุกเดือน</p>
+            <p>• ลำดับทีม: ${teamsInterleaved.map(t=>`<span class="font-bold">${t.Name}</span>`).join(' → ')}</p>
+            <p>• Top Mgmt &amp; คปอ. เดินรอบ 2 เท่านั้น · Management เดินทั้ง 2 รอบ (ตามประเภท)</p>
+            <p>• เซลล์ที่ล็อคจะไม่ถูกเปลี่ยน</p>
+        </div>
+
+        <div class="flex justify-end gap-3 pt-3 border-t border-slate-100">
+            <button onclick="window.closeModal&&window.closeModal()" class="px-5 py-2 rounded-xl text-sm bg-slate-100 text-slate-700 hover:bg-slate-200 transition-colors">ยกเลิก</button>
+            <button id="af-run-btn" class="px-5 py-2 rounded-xl text-sm font-bold text-white transition-colors" style="background:linear-gradient(135deg,#7c3aed,#6d28d9)">
+                <svg class="w-3.5 h-3.5 inline mr-1" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg>
+                Fill
+            </button>
+        </div>
+    </div>`, 'max-w-md');
+
+    setTimeout(() => {
+        // Mode radio → update border + description
+        document.querySelectorAll('input[name="af-mode"]').forEach(radio => {
+            radio.addEventListener('change', () => {
+                document.querySelectorAll('label:has(input[name="af-mode"])').forEach(lbl => {
+                    const isActive = lbl.querySelector('input')?.checked;
+                    lbl.classList.toggle('border-violet-400', isActive);
+                    lbl.classList.toggle('bg-violet-50', isActive);
+                    lbl.classList.toggle('border-slate-200', !isActive);
+                    lbl.classList.toggle('bg-white', !isActive);
+                });
+                const mode = document.querySelector('input[name="af-mode"]:checked')?.value;
+                const descEl = document.getElementById('af-desc');
+                if (!descEl) return;
+                if (mode === 'diverse') {
+                    descEl.innerHTML = `
+                        <p class="font-semibold">วิธีการสลับ — ผสม A+B</p>
+                        <p>• แต่ละคนได้รับทีมที่ต่างกัน ทั้ง A และ B หมุนเวียนทุกเดือน</p>
+                        <p>• ลำดับทีม: ${teamsInterleaved.map(t=>`<span class="font-bold">${t.Name}</span>`).join(' → ')}</p>
+                        <p>• Top Mgmt &amp; คปอ. เดินรอบ 2 เท่านั้น · Management เดินทั้ง 2 รอบ</p>
+                        <p>• เซลล์ที่ล็อคจะไม่ถูกเปลี่ยน</p>`;
+                    descEl.className = 'p-3 rounded-xl bg-violet-50 border border-violet-100 text-[11px] text-violet-700 space-y-1';
+                } else {
+                    descEl.innerHTML = `
+                        <p class="font-semibold">วิธีการสลับ — เฉพาะกลุ่มเดิม</p>
+                        <p>• กลุ่ม A หมุนเฉพาะ: ${teamListA}</p>
+                        <p>• กลุ่ม B หมุนเฉพาะ: ${teamListB}</p>
+                        <p>• เดือนเริ่มต้น = ทีมปัจจุบันของแต่ละคน, เลื่อน +1 ทีม/เดือน</p>`;
+                    descEl.className = 'p-3 rounded-xl bg-slate-50 border border-slate-200 text-[11px] text-slate-600 space-y-1';
+                }
+            });
+        });
+
+        document.getElementById('af-run-btn')?.addEventListener('click', () => {
+            const fromMonth = parseInt(document.getElementById('af-month-from')?.value || 1);
+            const toMonth   = parseInt(document.getElementById('af-month-to')?.value   || 12);
+            const mode      = document.querySelector('input[name="af-mode"]:checked')?.value || 'diverse';
+            if (fromMonth > toMonth) { showToast('เดือนเริ่มต้นต้องไม่เกินเดือนสิ้นสุด', 'warning'); return; }
+
+            if (mode === 'diverse') {
+                // ── Mode: ผสม A+B — staggered offsets per member index ──────────
+                // All teams interleaved: [A1,B1,A2,B2,A3,B3]
+                // Member i → base = i % totalTeams
+                // Month offset → (base + monthOffset) % totalTeams
+                // Result: in any given month, each person is in a DIFFERENT team
+                const pool = teamsInterleaved;
+                if (!pool.length) return;
+                _memberBase.forEach((m, memberIdx) => {
+                    const base = memberIdx % pool.length;
+                    for (let month = fromMonth; month <= toMonth; month++) {
+                        if (_lockedCells.has(`${m.EmployeeID}_${month}`)) continue;
+                        const offset = month - fromMonth;
+                        const teamId = pool[(base + offset) % pool.length].id;
+                        const cell = document.querySelector(`.member-rot-cell[data-member="${m.EmployeeID}"][data-month="${month}"]`);
+                        if (cell) { cell.value = String(teamId); window._ptMarkChanged(cell); }
+                    }
+                });
+            } else {
+                // ── Mode: เฉพาะกลุ่มเดิม — original algorithm ────────────────
+                _memberBase.forEach(m => {
+                    const groupTeams = m.PatrolGroup === 'A' ? teamsA : teamsB;
+                    if (!groupTeams.length) return;
+                    const startIdx = groupTeams.findIndex(t => t.id === m.TeamID);
+                    const base = startIdx >= 0 ? startIdx : 0;
+                    for (let month = fromMonth; month <= toMonth; month++) {
+                        if (_lockedCells.has(`${m.EmployeeID}_${month}`)) continue;
+                        const offset = month - fromMonth;
+                        const teamId = groupTeams[(base + offset) % groupTeams.length].id;
+                        const cell = document.querySelector(`.member-rot-cell[data-member="${m.EmployeeID}"][data-month="${month}"]`);
+                        if (cell) { cell.value = String(teamId); window._ptMarkChanged(cell); }
+                    }
+                });
+            }
+
+            closeModal();
+            const rangeLabel = fromMonth === toMonth
+                ? MONTHS_TH_SHORT[fromMonth-1]
+                : `${MONTHS_TH_SHORT[fromMonth-1]} – ${MONTHS_TH_SHORT[toMonth-1]}`;
+            const modeLabel = mode === 'diverse' ? 'ผสม A+B' : 'เฉพาะกลุ่มเดิม';
+            showToast(`Auto-fill [${modeLabel}] ${rangeLabel} เรียบร้อย — กด "บันทึก" เพื่อยืนยัน`, 'success');
+        });
+    }, 50);
 };
 
 // =============================================================================
@@ -2680,6 +3400,7 @@ async function loadMasterList(type) {
     if (type === 'positions') return loadPositionsList();
     const listEl  = document.getElementById(`list-${type}`);
     const countEl = document.getElementById(`count-${type}`);
+    if (listEl) listEl.innerHTML = `<li class="text-center text-xs text-slate-300 py-4 animate-pulse">กำลังโหลด...</li>`;
     try {
         const res = await API.get(`/master/${type}`);
         if (!res.success) throw new Error(res.message);
@@ -2729,13 +3450,15 @@ window.editMasterData = (type, id, currentName) => {
     setTimeout(() => {
         document.getElementById('edit-master-form')?.addEventListener('submit', async (e) => {
             e.preventDefault();
-            const name = document.getElementById('edit-master-input')?.value.trim();
+            const name   = document.getElementById('edit-master-input')?.value.trim();
             if (!name) return;
+            const subBtn = e.target.querySelector('[type=submit]');
+            const orig   = _btnLoad(subBtn, 'กำลังบันทึก...');
             try {
                 const res = await API.put(`/master/${type}/${id}`, { Name: name });
                 if (res.success) { showToast('แก้ไขสำเร็จ', 'success'); closeModal(); loadMasterList(type); }
-                else showError(res.message);
-            } catch (err) { showError(err.message); }
+                else { _btnRestore(subBtn, orig); showError(res.message); }
+            } catch (err) { _btnRestore(subBtn, orig); showError(err.message); }
         });
     }, 50);
 };
@@ -2787,16 +3510,14 @@ async function renderEmployeesTab(container) {
 
     window._empSearch = (q) => { _empSearch = q.toLowerCase(); _empPage = 1; _renderEmpTable(); };
 
-    const [empsRes, deptsRes, teamsRes, posRes, unitsRes] = await Promise.all([
+    const [empsRes, deptsRes, posRes, unitsRes] = await Promise.all([
         API.get('/employees').catch(() => ({ data: [] })),
         API.get('/master/departments').catch(() => ({ data: [] })),
-        API.get('/master/teams').catch(() => ({ data: [] })),
         API.get('/master/positions').catch(() => ({ data: [] })),
         API.get('/admin/org/units').catch(() => ({ data: [] })),
     ]);
     _empCache  = empsRes?.data   || [];
     _deptCache = deptsRes?.data  || [];
-    _teamCache = teamsRes?.data  || [];
     _posCache  = posRes?.data    || [];
     _unitCache = unitsRes?.data  || [];
     _renderEmpTable();
@@ -2894,7 +3615,6 @@ window._exportEmpExcel = () => {
         'หน่วยงาน':    e.Department,
         'Unit':        e.Unit,
         'ตำแหน่ง':     e.Position,
-        'ทีม':         e.Team,
         'Role':        e.Role,
     }));
     const ws = XLSX.utils.json_to_sheet(data);
@@ -2924,7 +3644,6 @@ function _empFormFields(emp = {}) {
     const uOpts   = _buildUnitOpts(emp.Department || '', emp.Unit || '');
     const noUnits = !emp.Department;
     const pOpts   = _posCache.map(p=>`<option value="${p.Name}" ${p.Name===emp.Position?'selected':''}>${p.Name}</option>`).join('');
-    const tOpts   = _teamCache.map(t=>`<option value="${t.Name}" ${t.Name===emp.Team?'selected':''}>${t.Name}</option>`).join('');
     const rOpts   = ['User','Admin','Viewer'].map(r=>`<option value="${r}" ${r===(emp.Role||'User')?'selected':''}>${r}</option>`).join('');
     return `
     <div class="grid grid-cols-2 gap-3">
@@ -2957,10 +3676,6 @@ function _empFormFields(emp = {}) {
             <select name="Position" class="form-select w-full rounded-lg text-sm"><option value="">— เลือก —</option>${pOpts}</select>
         </div>
         <div>
-            <label class="block text-xs font-bold text-slate-500 uppercase mb-1">ทีม <span class="text-slate-300 normal-case font-normal">(สำหรับตรวจ)</span></label>
-            <select name="Team" class="form-select w-full rounded-lg text-sm"><option value="">— เลือก —</option>${tOpts}</select>
-        </div>
-        <div class="col-span-2">
             <label class="block text-xs font-bold text-slate-500 uppercase mb-1">Role (สิทธิ์)</label>
             <select name="Role" class="form-select w-full rounded-lg text-sm">${rOpts}</select>
         </div>
@@ -3093,8 +3808,12 @@ window._openImportModal = () => {
             <div class="bg-amber-50 border border-amber-200 rounded-xl p-3 text-xs text-amber-800">
                 <p class="font-bold mb-1">คอลัมน์ที่รองรับ:</p>
                 <code class="block bg-amber-100 px-2 py-1 rounded">EmployeeID, EmployeeName, Department, Unit, Position, Team, Role</code>
-                <p class="mt-1">ถ้า EmployeeID ซ้ำ จะอัปเดตข้อมูลเดิม (Upsert)</p>
+                <p class="mt-1.5">ถ้า EmployeeID ซ้ำ จะอัปเดตข้อมูลเดิม (Upsert) · ค่าใน Department / Position / Team ต้องตรงกับ master</p>
             </div>
+            <button onclick="window._downloadImportTemplate()" class="w-full flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl border-2 border-dashed border-emerald-300 text-emerald-700 text-xs font-bold hover:bg-emerald-50 transition-all">
+                <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/></svg>
+                Download Template (พร้อมค่าอ้างอิงจาก master)
+            </button>
             <div id="import-drop-zone" class="border-2 border-dashed border-slate-300 rounded-xl p-8 text-center cursor-pointer hover:border-emerald-400 hover:bg-emerald-50 transition-all">
                 <svg class="w-10 h-10 mx-auto text-slate-300 mb-2" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12"/></svg>
                 <p id="import-file-label" class="text-sm text-slate-500">คลิกเพื่อเลือกไฟล์ หรือลากมาวาง</p>
@@ -3106,7 +3825,7 @@ window._openImportModal = () => {
                 <button onclick="window.closeModal&&window.closeModal()" class="btn bg-slate-100 text-slate-700 px-4 py-2 rounded-lg text-sm">ปิด</button>
                 <button id="import-btn" onclick="window._doImport()" class="btn bg-emerald-600 text-white px-5 py-2 rounded-lg text-sm font-medium">นำเข้าข้อมูล</button>
             </div>
-        </div>`, 'max-w-md');
+        </div>`, 'max-w-lg');
     setTimeout(() => {
         const zone  = document.getElementById('import-drop-zone');
         const input = document.getElementById('import-file-input');
@@ -3127,7 +3846,7 @@ window._doImport = async () => {
     const resEl  = document.getElementById('import-result');
     const btn    = document.getElementById('import-btn');
     if (!input?.files[0]) { showToast('กรุณาเลือกไฟล์ก่อน', 'error'); return; }
-    if (!window.XLSX) { showError('ไม่พบ SheetJS library'); return; }
+    if (!window.XLSX) { showToast('ไม่พบ SheetJS library', 'error'); return; }
     btn.disabled = true; btn.textContent = 'กำลังนำเข้า...';
     try {
         const buf  = await input.files[0].arrayBuffer();
@@ -3137,11 +3856,55 @@ window._doImport = async () => {
 
         const fd = new FormData();
         fd.append('file', input.files[0]);
-        const res = await API.postForm('/admin/employee/import', fd);
-        resEl.className = 'text-sm text-emerald-700 bg-emerald-50 p-3 rounded-xl border border-emerald-200';
-        resEl.textContent = res.message || `นำเข้าสำเร็จ`;
+        const res = await API.post('/admin/employee/import', fd);
+
+        // ── Build result UI ──────────────────────────────────────────────
+        const ok   = res.successCount || 0;
+        const err  = res.errorCount   || 0;
+        const warn = res.warnCount    || 0;
+        const details = res.details   || [];
+
+        const statusBadge = (s) => {
+            if (s === 'ok')    return `<span class="px-1.5 py-0.5 rounded text-[10px] font-bold bg-emerald-100 text-emerald-700">สำเร็จ</span>`;
+            if (s === 'warn')  return `<span class="px-1.5 py-0.5 rounded text-[10px] font-bold bg-amber-100 text-amber-700">คำเตือน</span>`;
+            if (s === 'error') return `<span class="px-1.5 py-0.5 rounded text-[10px] font-bold bg-red-100 text-red-700">ล้มเหลว</span>`;
+            return `<span class="px-1.5 py-0.5 rounded text-[10px] font-bold bg-slate-100 text-slate-500">ข้าม</span>`;
+        };
+
+        const rows = details.map(d => `
+            <tr class="${d.status === 'error' ? 'bg-red-50' : d.status === 'warn' ? 'bg-amber-50' : ''}">
+                <td class="px-2 py-1.5 font-mono text-[10px] text-slate-500">${d.id}</td>
+                <td class="px-2 py-1.5 text-[10px] text-slate-700">${d.name}</td>
+                <td class="px-2 py-1.5">${statusBadge(d.status)}</td>
+                <td class="px-2 py-1.5 text-[10px] text-slate-500">${d.reason || ''}</td>
+            </tr>`).join('');
+
+        resEl.innerHTML = `
+            <div class="space-y-3">
+                <div class="flex items-center gap-2 flex-wrap">
+                    <span class="px-2.5 py-1 rounded-full text-xs font-bold bg-emerald-100 text-emerald-700">สำเร็จ ${ok}</span>
+                    ${warn ? `<span class="px-2.5 py-1 rounded-full text-xs font-bold bg-amber-100 text-amber-700">คำเตือน ${warn}</span>` : ''}
+                    ${err  ? `<span class="px-2.5 py-1 rounded-full text-xs font-bold bg-red-100 text-red-700">ล้มเหลว ${err}</span>` : ''}
+                </div>
+                ${details.length ? `
+                <div class="overflow-auto max-h-52 rounded-xl border border-slate-200">
+                    <table class="w-full text-left">
+                        <thead class="bg-slate-50 sticky top-0">
+                            <tr>
+                                <th class="px-2 py-1.5 text-[10px] font-bold text-slate-400 uppercase">ID</th>
+                                <th class="px-2 py-1.5 text-[10px] font-bold text-slate-400 uppercase">ชื่อ</th>
+                                <th class="px-2 py-1.5 text-[10px] font-bold text-slate-400 uppercase">สถานะ</th>
+                                <th class="px-2 py-1.5 text-[10px] font-bold text-slate-400 uppercase">หมายเหตุ</th>
+                            </tr>
+                        </thead>
+                        <tbody class="divide-y divide-slate-100">${rows}</tbody>
+                    </table>
+                </div>` : ''}
+            </div>`;
+        resEl.className = '';
         resEl.classList.remove('hidden');
-        showToast('Import สำเร็จ', 'success');
+
+        showToast(`Import สำเร็จ ${ok} รายการ${warn ? ` (คำเตือน ${warn})` : ''}`, err ? 'warning' : 'success');
         const empsRes = await API.get('/employees').catch(() => ({ data: [] }));
         _empCache = empsRes?.data || [];
         _renderEmpTable();
@@ -3152,10 +3915,54 @@ window._doImport = async () => {
     } finally { btn.disabled = false; btn.textContent = 'นำเข้าข้อมูล'; }
 };
 
+window._downloadImportTemplate = async () => {
+    if (!window.XLSX) { showToast('ไม่พบ SheetJS library', 'error'); return; }
+    try {
+        const tmpl = await API.get('/admin/employee/import-template-data');
+        const wb   = XLSX.utils.book_new();
+
+        // ── Sheet 1: Template ────────────────────────────────────────────
+        const headers = ['EmployeeID', 'EmployeeName', 'Department', 'Unit', 'Position', 'Role'];
+        const example = [
+            '012345',
+            'ชื่อ นามสกุล',
+            tmpl.departments[0] || '',
+            tmpl.units[0]       || '',
+            tmpl.positions[0]   || '',
+            'User',
+        ];
+        const ws1 = XLSX.utils.aoa_to_sheet([headers, example]);
+        ws1['!cols'] = [14, 24, 30, 30, 24, 10].map(w => ({ wch: w }));
+        XLSX.utils.book_append_sheet(wb, ws1, 'พนักงาน');
+
+        // ── Sheet 2: Reference ───────────────────────────────────────────
+        const refHeaders = ['Department', 'Position', 'Unit', 'Role'];
+        const maxLen = Math.max(
+            tmpl.departments.length, tmpl.positions.length,
+            tmpl.units.length, tmpl.roles.length
+        );
+        const refRows = Array.from({ length: maxLen }, (_, i) => [
+            tmpl.departments[i] || '',
+            tmpl.positions[i]   || '',
+            tmpl.units[i]       || '',
+            tmpl.roles[i]       || '',
+        ]);
+        const ws2 = XLSX.utils.aoa_to_sheet([refHeaders, ...refRows]);
+        ws2['!cols'] = [30, 24, 30, 10].map(w => ({ wch: w }));
+        XLSX.utils.book_append_sheet(wb, ws2, 'ค่าอ้างอิง');
+
+        XLSX.writeFile(wb, 'Employee_Import_Template.xlsx');
+        showToast('ดาวน์โหลด Template สำเร็จ', 'success');
+    } catch (err) {
+        showToast('ดาวน์โหลดไม่สำเร็จ: ' + (err?.message || err), 'error');
+    }
+};
+
 // =============================================================================
 // TAB: SYSTEM HEALTH
 // =============================================================================
 async function renderSystemHealth(container) {
+    container.innerHTML = _skelSpinner();
     try {
         const res = await API.get('/admin/system-health');
         const d   = res.data || {};
@@ -3270,6 +4077,7 @@ async function loadAuditLog() {
     const pagEl   = document.getElementById('audit-pagination');
     const action  = document.getElementById('audit-filter-action')?.value || '';
     if (!wrap) return;
+    wrap.innerHTML = _skelRows(6, 5);
     try {
         const res = await API.get(`/admin/audit-logs?page=${_auditPage}&limit=${AUDIT_LIMIT}&action=${action}`);
         _auditTotal = res.total || 0;
