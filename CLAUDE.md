@@ -75,6 +75,7 @@ TSH-SAFETY-CORE-APP/
         ├── hiyari.js
         ├── ky.js
         ├── fourm.js            # 4M Change routes
+        ├── settings.js         # App settings / config routes
         └── activity-targets.js # Activity Targets — position templates + per-person overrides
 ```
 
@@ -131,7 +132,9 @@ node server.js      # runs on PORT=5000
 | `/api/patrol/*` | User | Patrol routes |
 | `/api/patrol/roster` | User (read) / Admin (write) | Patrol roster CRUD — Top&Management / Sec.&Supervisor |
 | `/api/patrol/member-records` | User | ดูรายการเดินตรวจรายบุคคล |
-| `/api/patrol/admin-record` | Admin | เพิ่ม/ลบรายการเดินตรวจแทนสมาชิก |
+| `/api/patrol/my-missed-sessions` | User | รายการ sessions ที่ user ยังไม่ได้เดินตรวจ (สำหรับ makeup/compensation check-in) |
+| `/api/patrol/admin-record` | Admin | เพิ่ม/ลบรายการเดินตรวจ (Patrol_Attendance) แทนสมาชิก |
+| `/api/patrol/admin-record/supervisor/:id` | Admin | ลบรายการ Self-Patrol (Patrol_Self_Checkin) แทน supervisor |
 | `/api/admin/*` | Admin | Admin routes (employees, schedules, audit, dashboard, health) |
 | `/api/cccf/*` | User | CCCF routes |
 | `/api/master/*` | User (write=Admin) | Master data (departments/teams/roles/positions/areas/safety-units) |
@@ -204,7 +207,7 @@ Primary key ของ generic CRUD คือ `id` — ยกเว้น `Employ
 
 | Module | Description |
 |--------|-------------|
-| **Patrol** | กำหนดการตรวจ, บันทึกการเข้าร่วม, รายงานปัญหา (รูปภาพ), Self-Patrol สำหรับหัวหน้า, Team Rotation, พื้นที่โรงงาน (Patrol_Areas), Patrol Group Member Management (Top&Management / Sec.&Supervisor) |
+| **Patrol** | กำหนดการตรวจ, บันทึกการเข้าร่วม (ปกติ / ซ่อม / ตรวจซ้ำ), รายงานปัญหา (รูปภาพ), Self-Patrol สำหรับหัวหน้า, Team Rotation, พื้นที่โรงงาน (Patrol_Areas), Roster Management (Top&Management / Sec.&Supervisor), Admin Record Management (เพิ่ม/ลบรายการแทนสมาชิก) |
 | **CCCF** | กิจกรรมและเป้าหมาย CCCF |
 | **KPI** | ประกาศ KPI, ข้อมูล KPI รายปี (ม.ค.–ธ.ค.) |
 | **Yokoten** | แบ่งปันบทเรียน/ความรู้ความปลอดภัย, บันทึกการรับทราบ |
@@ -285,6 +288,14 @@ CREATE TABLE IF NOT EXISTS Patrol_Roster (
 - `public/**` → static files
 - `*.html` → static files
 - Route: `/api/*` → `backend/server.js`, อื่นๆ → `index.html`
+
+### Environment Variables บน Vercel (Critical)
+`backend/.env` ไม่อยู่ใน git → ต้องตั้งค่า env vars บน **Vercel Dashboard → Project → Settings → Environment Variables** ทุกครั้งที่สร้าง project ใหม่:
+`DB_HOST`, `DB_PORT`, `DB_USER`, `DB_PASS`, `DB_NAME`, `JWT_SECRET`, `CLOUDINARY_CLOUD_NAME`, `CLOUDINARY_API_KEY`, `CLOUDINARY_API_SECRET`, `ALLOWED_ORIGINS`
+
+สำหรับ `ALLOWED_ORIGINS` ต้องระบุ production URL เช่น `https://tsh-safety-core-app.vercel.app` — ถ้าไม่ตั้งค่า CORS middleware จะ reject request → Express ส่ง **500 HTML** กลับมา → frontend parse JSON ไม่ได้ → error "Unexpected token '<'"
+
+หลัง save env vars ต้อง **Redeploy** ใหม่จาก Deployments tab
 
 ## Frontend Auth Pattern (Critical)
 
@@ -527,3 +538,7 @@ closeModal();
 32. **Activity Targets — compliance widget (pending)** — แต่ละ module page (patrol, cccf, training, yokoten, hiyari, ky, ojt) ยังไม่มี widget แสดง progress — ให้เพิ่มตอน restyle โดย call `GET /api/activity-targets/me` แล้วกรอง `activityKey` ที่ต้องการ
 33. **Patrol PDF fixed-page approach** — ห้ามใช้ section-by-section render แล้ว addPage ตาม content height (จะเกิด whitespace gap) — ต้องสร้าง HTML `794×1122px` ต่อหน้าเสมอ แล้ว render ทีละหน้า
 34. **Patrol roster add modal — filter both groups** — ตอน fetch รายชื่อพนักงานสำหรับ add modal ต้อง fetch ทั้ง `top_management` + `supervisor` roster พร้อมกัน แล้ว union เป็น `existingIds` เพื่อซ่อนคนที่อยู่ในกลุ่มใดกลุ่มหนึ่งแล้ว
+35. **`Patrol_Sessions` PK คือ `SessionID` ไม่ใช่ `id`** — ทุก query ที่ SELECT จาก `Patrol_Sessions` ต้องใช้ `s.SessionID AS id` ไม่ใช่ `s.id` และ UPDATE/DELETE ต้องใช้ `WHERE SessionID = ?` — ถ้าใช้ `s.id` จะเกิด SQL error → 500 ทุกครั้ง; Columns จริง: `SessionID, PatrolDate, Year, Description, Area, CheckType, InspectorName, TeamName, Status, CreatedBy, TeamID, AreaID, PatrolRound`
+36. **Vercel 500 "Unexpected token '<'" คือ CORS/env var ไม่ครบ** — เมื่อ backend return HTML แทน JSON (Vercel error page) แสดงว่า serverless function crash ก่อน respond — สาเหตุที่พบบ่อย: (1) `ALLOWED_ORIGINS` ไม่ได้ set บน Vercel → CORS middleware throw Error → Express default error handler ส่ง HTML 500 (2) DB credentials หรือ JWT_SECRET ไม่ครบ → function crash ตอน startup; วิธีแก้: ตั้งค่า env vars ใน Vercel Dashboard แล้ว Redeploy
+37. **`Patrol_Attendance` columns เพิ่มเติม** — มี `PatrolType VARCHAR(20)` (ค่า: `'normal'`, `'compensation'`, `'Re-inspection'`) และ `RecordedBy VARCHAR(50)` — ถูก auto-migrate ด้วย `ALTER TABLE ... ADD COLUMN` ใน patrol.js startup; `compensation` = เดินซ่อม ใช้ `PatrolDate` จาก missed sessions dropdown (ดึงจาก `Patrol_Sessions` ที่ผ่านมา)
+38. **patrol.js ส่วนตัว layout** — `grid grid-cols-1 xl:grid-cols-3`: left column (xl:col-span-2) = check-in card, mini calendar, next patrol, year dots, monthly sessions, **Team Roster (ทีมของฉัน)**, Self-Patrol; right sidebar (xl:col-span-1) = performance ring, recent checkins, issues — Team Roster อยู่ใน left column เพื่อใช้พื้นที่กว้าง
