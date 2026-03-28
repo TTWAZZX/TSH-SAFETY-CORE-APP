@@ -6,6 +6,13 @@ const { storage: cloudinaryStorage, fileFilter } = require('../cloudinary');
 
 const upload = multer({ storage: cloudinaryStorage, fileFilter, limits: { fileSize: 10 * 1024 * 1024 } });
 
+// Auto-migrate: add SafetyUnit column if not present
+(async () => {
+    try {
+        await db.query(`ALTER TABLE CCCF_FormA_Worker ADD COLUMN SafetyUnit VARCHAR(100) NOT NULL DEFAULT '' AFTER Department`);
+    } catch (e) { /* column already exists or table not yet created — ignore */ }
+})();
+
 // ─────────────────────────────────────────────────────────────────────────────
 // LEGACY: CCCF Activity (gallery) — keep for backward compat
 // ─────────────────────────────────────────────────────────────────────────────
@@ -43,7 +50,6 @@ router.get('/form-a-worker', async (req, res) => {
         );
         res.json(rows);
     } catch (err) {
-        // table might not exist yet — return empty gracefully
         if (err.code === 'ER_NO_SUCH_TABLE') return res.json([]);
         res.status(500).json({ success: false, message: err.message });
     }
@@ -58,7 +64,7 @@ router.post('/form-a-worker', async (req, res) => {
         const Department   = req.user.department;
 
         const {
-            SubmitDate, JobArea, Equipment,
+            SubmitDate, JobArea, Equipment, SafetyUnit,
             HazardDescription, HowItHappened, BodyPart, Suggestion,
             StopType, Rank
         } = req.body;
@@ -69,12 +75,12 @@ router.post('/form-a-worker', async (req, res) => {
 
         await db.query(
             `INSERT INTO CCCF_FormA_Worker
-             (EmployeeName, EmployeeID, Department, SubmitDate, JobArea, Equipment,
-              HazardDescription, HowItHappened, BodyPart, Suggestion, StopType, Rank, CreatedBy)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+             (EmployeeName, EmployeeID, Department, SafetyUnit, SubmitDate, JobArea, Equipment,
+              HazardDescription, HowItHappened, BodyPart, Suggestion, StopType, \`Rank\`, CreatedBy)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
             [
-                EmployeeName, EmployeeID, Department, SubmitDate || new Date(),
-                JobArea || '', Equipment || '',
+                EmployeeName, EmployeeID, Department, SafetyUnit || '',
+                SubmitDate || new Date(), JobArea || '', Equipment || '',
                 HazardDescription, HowItHappened || '', BodyPart || '', Suggestion || '',
                 StopType, Rank, EmployeeName
             ]
@@ -88,10 +94,61 @@ router.post('/form-a-worker', async (req, res) => {
     }
 });
 
-// DELETE /cccf/form-a-worker/:id  (admin only — middleware applied at server mount)
+// PUT /cccf/form-a-worker/:id  (owner or admin)
+router.put('/form-a-worker/:id', async (req, res) => {
+    try {
+        const { id } = req.params;
+        const [existing] = await db.query('SELECT EmployeeID FROM CCCF_FormA_Worker WHERE id = ?', [id]);
+        if (!existing.length) return res.status(404).json({ success: false, message: 'ไม่พบรายการ' });
+
+        const isAdminUser = req.user.role === 'Admin';
+        if (!isAdminUser && existing[0].EmployeeID !== req.user.id) {
+            return res.status(403).json({ success: false, message: 'ไม่มีสิทธิ์แก้ไขรายการของผู้อื่น' });
+        }
+
+        const {
+            SubmitDate, JobArea, Equipment, SafetyUnit,
+            HazardDescription, HowItHappened, BodyPart, Suggestion,
+            StopType, Rank
+        } = req.body;
+
+        if (!HazardDescription || !StopType || !Rank) {
+            return res.status(400).json({ success: false, message: 'กรุณากรอกข้อมูลให้ครบถ้วน' });
+        }
+
+        await db.query(
+            `UPDATE CCCF_FormA_Worker SET
+             SafetyUnit=?, SubmitDate=?, JobArea=?, Equipment=?,
+             HazardDescription=?, HowItHappened=?, BodyPart=?, Suggestion=?,
+             StopType=?, \`Rank\`=?
+             WHERE id=?`,
+            [
+                SafetyUnit || '', SubmitDate || new Date(),
+                JobArea || '', Equipment || '',
+                HazardDescription, HowItHappened || '', BodyPart || '', Suggestion || '',
+                StopType, Rank, id
+            ]
+        );
+        res.json({ success: true, message: 'อัพเดตสำเร็จ' });
+    } catch (err) {
+        res.status(500).json({ success: false, message: err.message });
+    }
+});
+
+// DELETE /cccf/form-a-worker/:id  (owner or admin)
 router.delete('/form-a-worker/:id', async (req, res) => {
     try {
-        await db.query('DELETE FROM CCCF_FormA_Worker WHERE id = ?', [req.params.id]);
+        const { id } = req.params;
+        const isAdminUser = req.user.role === 'Admin';
+        if (!isAdminUser) {
+            // verify ownership
+            const [existing] = await db.query('SELECT EmployeeID FROM CCCF_FormA_Worker WHERE id = ?', [id]);
+            if (!existing.length) return res.status(404).json({ success: false, message: 'ไม่พบรายการ' });
+            if (existing[0].EmployeeID !== req.user.id) {
+                return res.status(403).json({ success: false, message: 'ไม่มีสิทธิ์ลบรายการของผู้อื่น' });
+            }
+        }
+        await db.query('DELETE FROM CCCF_FormA_Worker WHERE id = ?', [id]);
         res.json({ success: true });
     } catch (err) {
         res.status(500).json({ success: false, message: err.message });

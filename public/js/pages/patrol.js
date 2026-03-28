@@ -1413,7 +1413,8 @@ function renderDashboard(container, data) {
 
         <!-- Charts row 1 — Area + Dept stats -->
         <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-          <div class="bg-white rounded-xl shadow-sm border border-slate-100 p-5 flex flex-col" style="min-height:220px">
+          <div class="flex flex-col gap-4">
+          <div class="bg-white rounded-xl shadow-sm border border-slate-100 p-5 flex flex-col">
             <div class="flex items-center justify-between mb-1">
               <h3 class="font-bold text-slate-700 text-sm">สถิติแยกพื้นที่</h3>
               <div class="flex items-center gap-1.5">
@@ -1441,6 +1442,19 @@ function renderDashboard(container, data) {
               </table>
             </div>
           </div>
+
+          <!-- Rank A Spotlight card -->
+          <div class="bg-white rounded-xl shadow-sm border border-red-100 p-4 flex flex-col">
+            <div id="rank-a-spotlight">
+              <div class="flex items-center gap-2 mb-2">
+                <span class="w-2 h-2 rounded-full bg-red-500 flex-shrink-0"></span>
+                <h3 class="font-bold text-slate-700 text-sm flex-1">Rank A — จุดเฝ้าระวัง</h3>
+              </div>
+              <p class="text-xs text-center py-4 text-slate-300">กำลังโหลด...</p>
+            </div>
+          </div>
+
+          </div><!-- /left column wrapper -->
 
           <div class="bg-white rounded-xl shadow-sm border border-slate-100 p-5 flex flex-col" style="min-height:220px">
             <div class="flex items-center justify-between mb-1">
@@ -4209,46 +4223,80 @@ async function exportIssuesToPDF() {
     const rColor = r => r === 'A' ? '#dc2626' : r === 'B' ? '#f97316' : '#059669';
     const K      = `font-family:'Kanit',sans-serif;`;
 
-    // ── Step 5: Area breakdown ──────────────────────────────────────────────
+    // ── Step 5: Area breakdown (all master areas, including 0-count) ────────
     const areaMap = {};
+    // Pre-populate from master data so all areas always appear
+    _patrolAreas.forEach(a => { const n = a.Name || a.AreaName; if (n) areaMap[n] = { found:0, closed:0 }; });
     filtered.forEach(i => {
         const a = i.Area || 'ไม่ระบุ';
         if (!areaMap[a]) areaMap[a] = { found:0, closed:0 };
         areaMap[a].found++;
         if (i.CurrentStatus === 'Closed') areaMap[a].closed++;
     });
-    const areaRows = Object.entries(areaMap).sort((a,b) => b[1].found - a[1].found).map(([name, r], idx) => {
+    const areaRows = Object.entries(areaMap).sort((a,b) => b[1].found - a[1].found || a[0].localeCompare(b[0], 'th')).map(([name, r], idx) => {
         const pct = r.found ? Math.round((r.closed/r.found)*100) : 0;
         return `<tr style="background:${idx%2?'#f8fafc':'#fff'}; border-bottom:1px solid #f1f5f9;">
-          <td style="padding:5px 8px; font-size:10px; ${K} color:#1e293b;">${name}</td>
-          <td style="padding:5px 8px; text-align:center; font-size:10px; font-weight:700; ${K} color:#475569;">${r.found}</td>
-          <td style="padding:5px 8px; text-align:center; font-size:10px; font-weight:700; ${K} color:#059669;">${r.closed}</td>
+          <td style="padding:5px 8px; font-size:10px; ${K} color:${r.found?'#1e293b':'#94a3b8'};">${name}</td>
+          <td style="padding:5px 8px; text-align:center; font-size:10px; font-weight:700; ${K} color:${r.found?'#475569':'#cbd5e1'};">${r.found}</td>
+          <td style="padding:5px 8px; text-align:center; font-size:10px; font-weight:700; ${K} color:${r.closed?'#059669':'#cbd5e1'};">${r.closed}</td>
           <td style="padding:5px 8px; text-align:center; font-size:10px; font-weight:700; ${K} color:${r.found-r.closed>0?'#f97316':'#cbd5e1'};">${r.found-r.closed}</td>
-          <td style="padding:5px 8px; text-align:center; font-size:10px; font-weight:700; ${K} color:${pct>=80?'#059669':pct>=50?'#f97316':'#dc2626'};">${r.found?pct+'%':'—'}</td>
+          <td style="padding:5px 8px; text-align:center; font-size:10px; font-weight:700; ${K} color:${r.found?(pct>=80?'#059669':pct>=50?'#f97316':'#dc2626'):'#cbd5e1'};">${r.found?pct+'%':'—'}</td>
         </tr>`;
     }).join('');
 
-    // ── Step 6: Dept breakdown ──────────────────────────────────────────────
+    // ── Step 6: Dept breakdown — respect _deptStatSel / _unitStatSel (same as web UI) ──
+    const allDeptNames  = _masterDepts.map(d => d.Name).filter(Boolean);
+    const pdfDeptNames  = _deptStatSel ? allDeptNames.filter(n => _deptStatSel.includes(n)) : allDeptNames;
+    const allUnitNames  = _masterUnits.map(u => u.name).filter(Boolean);
+    const pdfUnitNames  = _unitStatSel ? allUnitNames.filter(n => _unitStatSel.includes(n)) : [];
+
     const deptMap = {};
+    for (const name of pdfDeptNames) deptMap[name] = { found:0, closed:0 };
+    const unitMap = {};
+    for (const name of pdfUnitNames) unitMap[name] = { found:0, closed:0 };
+
     filtered.forEach(i => {
-        const raw = i.ResponsibleDept || 'ไม่ระบุ';
-        let depts = [];
-        try { depts = raw.startsWith('[') ? JSON.parse(raw) : [raw]; } catch { depts = [raw]; }
-        depts.forEach(d => {
-            if (!deptMap[d]) deptMap[d] = { found:0, closed:0 };
-            deptMap[d].found++;
-            if (i.CurrentStatus === 'Closed') deptMap[d].closed++;
+        const raw = i.ResponsibleDept || '';
+        let ds = [];
+        try { ds = raw.startsWith('[') ? JSON.parse(raw) : raw ? [raw] : []; } catch { ds = raw ? [raw] : []; }
+        ds.forEach(d => {
+            if (deptMap[d] !== undefined) { deptMap[d].found++; if (i.CurrentStatus==='Closed') deptMap[d].closed++; }
         });
+        const u = i.ResponsibleUnit || '';
+        if (unitMap[u] !== undefined) { unitMap[u].found++; if (i.CurrentStatus==='Closed') unitMap[u].closed++; }
     });
-    const deptRows = Object.entries(deptMap).sort((a,b) => b[1].found - a[1].found).map(([name, r], idx) => {
+
+    const deptRows = pdfDeptNames.map((name, idx) => {
+        const r   = deptMap[name];
         const pct = r.found ? Math.round((r.closed/r.found)*100) : 0;
-        return `<tr style="background:${idx%2?'#f8fafc':'#fff'}; border-bottom:1px solid #f1f5f9;">
-          <td style="padding:5px 8px; font-size:10px; ${K} color:#1e293b;">${name}</td>
-          <td style="padding:5px 8px; text-align:center; font-size:10px; font-weight:700; ${K} color:#475569;">${r.found}</td>
-          <td style="padding:5px 8px; text-align:center; font-size:10px; font-weight:700; ${K} color:#059669;">${r.closed}</td>
-          <td style="padding:5px 8px; text-align:center; font-size:10px; font-weight:700; ${K} color:${r.found-r.closed>0?'#f97316':'#cbd5e1'};">${r.found-r.closed}</td>
-          <td style="padding:5px 8px; text-align:center; font-size:10px; font-weight:700; ${K} color:${pct>=80?'#059669':pct>=50?'#f97316':'#dc2626'};">${r.found?pct+'%':'—'}</td>
+        const dRow = `<tr style="background:${idx%2?'#f8fafc':'#fff'};border-bottom:1px solid #f1f5f9;">
+          <td style="padding:5px 8px;font-size:10px;${K}color:${r.found?'#1e293b':'#94a3b8'};">${name}</td>
+          <td style="padding:5px 8px;text-align:center;font-size:10px;font-weight:700;${K}color:${r.found?'#475569':'#cbd5e1'};">${r.found}</td>
+          <td style="padding:5px 8px;text-align:center;font-size:10px;font-weight:700;${K}color:${r.closed?'#059669':'#cbd5e1'};">${r.closed}</td>
+          <td style="padding:5px 8px;text-align:center;font-size:10px;font-weight:700;${K}color:${r.found-r.closed>0?'#f97316':'#cbd5e1'};">${r.found-r.closed}</td>
+          <td style="padding:5px 8px;text-align:center;font-size:10px;font-weight:700;${K}color:${r.found?(pct>=80?'#059669':pct>=50?'#f97316':'#dc2626'):'#cbd5e1'};">${r.found?pct+'%':'—'}</td>
         </tr>`;
+        let uRows = '';
+        if (pdfUnitNames.length) {
+            const dObj = _masterDepts.find(d => d.Name === name);
+            if (dObj) {
+                const dId = dObj.id || dObj.ID;
+                _masterUnits.filter(u => u.department_id === dId && pdfUnitNames.includes(u.name)).forEach(unit => {
+                    const ur   = unitMap[unit.name] || { found:0, closed:0 };
+                    const upct = ur.found ? Math.round((ur.closed/ur.found)*100) : 0;
+                    uRows += `<tr style="background:#f0f9ff;border-bottom:1px solid #e0f2fe;">
+                      <td style="padding:4px 8px 4px 20px;font-size:9.5px;${K}color:${ur.found?'#1e293b':'#94a3b8'};">
+                        <span style="display:inline-block;width:8px;height:1px;background:#cbd5e1;margin-right:4px;vertical-align:middle;"></span>${unit.name}
+                      </td>
+                      <td style="padding:4px 8px;text-align:center;font-size:9.5px;font-weight:700;${K}color:${ur.found?'#0369a1':'#cbd5e1'};">${ur.found}</td>
+                      <td style="padding:4px 8px;text-align:center;font-size:9.5px;font-weight:700;${K}color:${ur.closed?'#059669':'#cbd5e1'};">${ur.closed}</td>
+                      <td style="padding:4px 8px;text-align:center;font-size:9.5px;font-weight:700;${K}color:${ur.found-ur.closed>0?'#f97316':'#cbd5e1'};">${ur.found-ur.closed}</td>
+                      <td style="padding:4px 8px;text-align:center;font-size:9.5px;font-weight:700;${K}color:${ur.found?(upct>=80?'#059669':upct>=50?'#f97316':'#dc2626'):'#cbd5e1'};">${ur.found?upct+'%':'—'}</td>
+                    </tr>`;
+                });
+            }
+        }
+        return dRow + uRows;
     }).join('');
 
     // ── Step 7: Issue table rows ────────────────────────────────────────────
@@ -4457,191 +4505,364 @@ async function exportIssuesToPDF() {
       </table>
     `));
 
-    // Section 5: Area + Dept breakdown (side by side)
+    // ── Step 4b: Rank A spotlight data ──────────────────────────────────────
+    const rankAIssues  = filtered.filter(i => (i.Rank||'').toUpperCase() === 'A');
+    const rankATotal   = rankAIssues.length;
+
+    // Area breakdown (all master areas, Rank A count)
+    const raAreaMap = {};
+    _patrolAreas.forEach(a => { const n = a.Name||a.AreaName; if(n) raAreaMap[n] = 0; });
+    rankAIssues.forEach(i => { const a = i.Area||''; if(raAreaMap[a]!==undefined) raAreaMap[a]++; });
+    const raAreaSorted = Object.entries(raAreaMap).sort((a,b) => b[1]-a[1] || a[0].localeCompare(b[0],'th'));
+    const raAreaMax    = Math.max(1, ...raAreaSorted.map(r=>r[1]));
+    const raAreaRows   = raAreaSorted.map(([name, cnt], idx) => `
+        <tr style="background:${idx%2?'#fff5f5':'#fff'};border-bottom:1px solid #fee2e2;">
+          <td style="padding:4px 8px;font-size:10px;${K}color:${cnt?'#1e293b':'#94a3b8'};">${name}</td>
+          <td style="padding:4px 8px;text-align:center;font-size:10px;font-weight:700;${K}color:${cnt?'#dc2626':'#cbd5e1'};">${cnt}</td>
+          <td style="padding:4px 12px 4px 4px;vertical-align:middle;">
+            ${cnt ? `<div style="width:${Math.round((cnt/raAreaMax)*80)}px;height:6px;background:linear-gradient(90deg,#dc2626,#ef4444);border-radius:3px;"></div>` : `<span style="color:#cbd5e1;font-size:9px;${K}">—</span>`}
+          </td>
+        </tr>`).join('');
+
+    // STOP breakdown (all 6, Rank A count)
+    const raStopMap = {};
+    CCCF_STOP_TYPES.forEach(s => { raStopMap[s.id] = 0; });
+    rankAIssues.forEach(i => {
+        const m = (i.HazardType||'').match(/STOP\s*(\d)/i);
+        const n = m ? parseInt(m[1]) : 6;
+        if (raStopMap[n] !== undefined) raStopMap[n]++;
+    });
+    const raStopMax  = Math.max(1, ...CCCF_STOP_TYPES.map(s => raStopMap[s.id]));
+    const raStopRows = CCCF_STOP_TYPES.map((s, idx) => {
+        const cnt = raStopMap[s.id];
+        return `<tr style="background:${idx%2?'#fff5f5':'#fff'};border-bottom:1px solid #fee2e2;">
+          <td style="padding:4px 8px;font-size:10px;${K}color:${cnt?s.color:'#94a3b8'};">${s.code}</td>
+          <td style="padding:4px 8px;font-size:9.5px;${K}color:${cnt?'#374151':'#94a3b8'};max-width:130px;">${s.label}</td>
+          <td style="padding:4px 8px;text-align:center;font-size:10px;font-weight:700;${K}color:${cnt?'#dc2626':'#cbd5e1'};">${cnt}</td>
+          <td style="padding:4px 12px 4px 4px;vertical-align:middle;">
+            ${cnt ? `<div style="width:${Math.round((cnt/raStopMax)*80)}px;height:6px;background:linear-gradient(90deg,#dc2626,#ef4444);border-radius:3px;"></div>` : `<span style="color:#cbd5e1;font-size:9px;${K}">—</span>`}
+          </td>
+        </tr>`;
+    }).join('');
+
+    // ── Rank A card HTML (embedded in left column of s5, not a standalone section) ──
+    const rankACardHtml = `
+      <div style="background:#fff;border-radius:12px;padding:0;border:1.5px solid #fecaca;overflow:hidden;">
+        <div style="background:linear-gradient(135deg,#991b1b,#dc2626);padding:9px 14px;display:flex;align-items:center;justify-content:space-between;">
+          <div style="font-size:10px;font-weight:800;color:#fff;letter-spacing:0.3px;${K}">Rank A — จุดเฝ้าระวัง</div>
+          <div style="background:rgba(255,255,255,0.2);color:#fff;font-size:10px;font-weight:900;padding:1px 10px;border-radius:99px;${K}">${rankATotal} ประเด็น</div>
+        </div>
+        <div style="padding:10px 12px 12px;">
+          <div style="font-size:9px;font-weight:700;color:#94a3b8;letter-spacing:1px;text-transform:uppercase;margin-bottom:5px;padding-bottom:4px;border-bottom:1px solid #f1f5f9;${K}">แยกตามพื้นที่</div>
+          <table style="width:100%;border-collapse:collapse;margin-bottom:10px;">
+            <thead><tr style="border-bottom:1px solid #fecaca;">
+              <th style="padding:3px 6px;font-size:8.5px;font-weight:700;${K}color:#94a3b8;text-align:left;">พื้นที่</th>
+              <th style="padding:3px 6px;font-size:8.5px;font-weight:700;${K}color:#dc2626;text-align:center;width:40px;">จำนวน</th>
+              <th style="padding:3px 4px;width:60px;"></th>
+            </tr></thead>
+            <tbody>${raAreaRows||`<tr><td colspan="3" style="text-align:center;padding:8px;color:#cbd5e1;font-size:9px;${K}">ไม่มีข้อมูล</td></tr>`}</tbody>
+          </table>
+          <div style="font-size:9px;font-weight:700;color:#94a3b8;letter-spacing:1px;text-transform:uppercase;margin-bottom:5px;padding-bottom:4px;border-bottom:1px solid #f1f5f9;${K}">แยกตามชนิดอันตราย (STOP)</div>
+          <table style="width:100%;border-collapse:collapse;">
+            <thead><tr style="border-bottom:1px solid #fecaca;">
+              <th style="padding:3px 6px;font-size:8.5px;font-weight:700;${K}color:#94a3b8;text-align:left;width:44px;">STOP</th>
+              <th style="padding:3px 6px;font-size:8.5px;font-weight:700;${K}color:#94a3b8;text-align:left;">ชนิดอันตราย</th>
+              <th style="padding:3px 6px;font-size:8.5px;font-weight:700;${K}color:#dc2626;text-align:center;width:40px;">จำนวน</th>
+              <th style="padding:3px 4px;width:60px;"></th>
+            </tr></thead>
+            <tbody>${raStopRows}</tbody>
+          </table>
+        </div>
+      </div>`;
+
+    // ── FIXED-PAGE PDF ─────────────────────────────────────────────────────────
+    // Each page = 794×1122px HTML rendered to canvas → addImage(0,0,210,297)
+    // Professional A4 layout: no whitespace gaps, no mid-row cuts
+
     const mkBreakTable = (rows, emptyLabel) => `
       <table style="width:100%;border-collapse:collapse;">
         <thead><tr style="background:#f8fafc;border-bottom:1.5px solid #e2e8f0;">
-          <th style="padding:6px 8px;font-size:9px;font-weight:700;${K}color:#94a3b8;text-align:left;">${emptyLabel}</th>
-          <th style="padding:6px 8px;font-size:9px;font-weight:700;${K}color:#475569;text-align:center;">พบ</th>
-          <th style="padding:6px 8px;font-size:9px;font-weight:700;${K}color:#059669;text-align:center;">เสร็จ</th>
-          <th style="padding:6px 8px;font-size:9px;font-weight:700;${K}color:#f97316;text-align:center;">ค้าง</th>
-          <th style="padding:6px 8px;font-size:9px;font-weight:700;${K}color:#94a3b8;text-align:center;">%</th>
+          <th style="padding:5px 8px;font-size:9px;font-weight:700;${K}color:#94a3b8;text-align:left;">${emptyLabel}</th>
+          <th style="padding:5px 8px;font-size:9px;font-weight:700;${K}color:#475569;text-align:center;">พบ</th>
+          <th style="padding:5px 8px;font-size:9px;font-weight:700;${K}color:#059669;text-align:center;">เสร็จ</th>
+          <th style="padding:5px 8px;font-size:9px;font-weight:700;${K}color:#f97316;text-align:center;">ค้าง</th>
+          <th style="padding:5px 8px;font-size:9px;font-weight:700;${K}color:#94a3b8;text-align:center;">%</th>
         </tr></thead>
-        <tbody>${rows||`<tr><td colspan="5" style="text-align:center;padding:12px;color:#cbd5e1;font-size:10px;${K}">ไม่มีข้อมูล</td></tr>`}</tbody>
+        <tbody>${rows||`<tr><td colspan="5" style="text-align:center;padding:10px;color:#cbd5e1;font-size:10px;${K}">ไม่มีข้อมูล</td></tr>`}</tbody>
       </table>`;
 
-    const s5 = sec(`<div style="display:flex;gap:14px;">
-      <div style="flex:1;min-width:0;background:#fff;border-radius:12px;padding:16px 18px;border:1px solid #e2e8f0;">
-        ${secHeader('สถิติแยกพื้นที่')}
-        ${mkBreakTable(areaRows,'พื้นที่')}
-      </div>
-      <div style="flex:1;min-width:0;background:#fff;border-radius:12px;padding:16px 18px;border:1px solid #e2e8f0;">
-        ${secHeader('สถิติแยกส่วนงาน')}
-        ${mkBreakTable(deptRows,'ส่วนงาน')}
-      </div>
-    </div>`);
+    // ── Fixed-page builder ────────────────────────────────────────────────────
+    // wrapPage: 794×1122px container (A4@96dpi) + green footer bar
+    const FH = 30; // footer height px
+    const wrapPage = (body) =>
+        `<div style="width:794px;height:1122px;background:#f8fafc;${K}display:flex;flex-direction:column;box-sizing:border-box;overflow:hidden;">
+           <div style="flex:1;padding:26px 32px 14px;display:flex;flex-direction:column;gap:10px;justify-content:center;overflow:hidden;min-height:0;">${body}</div>
+           <div style="height:${FH}px;background:linear-gradient(90deg,#064e3b,#065f46);display:flex;align-items:center;padding:0 32px;flex-shrink:0;">
+             <span style="color:rgba(255,255,255,0.65);font-size:9px;${K}">${docNo} — TSH Safety Core Activity — Safety Patrol Issue Report</span>
+           </div>
+         </div>`;
 
-    // Section 6: Issue register table
-    const s6 = sec(card(`
-      ${secHeader(`ทะเบียนประเด็น (${filtered.length} รายการ)`)}
-      <table style="width:100%;border-collapse:collapse;">
-        <thead>
-          <tr style="background:linear-gradient(135deg,#064e3b,#065f46);color:#fff;">
-            <th style="${thStyle}width:32px;">#</th>
-            <th style="${thL}width:70px;">วันที่พบ</th>
-            <th style="${thL}width:78px;">พื้นที่</th>
-            <th style="${thL}width:88px;">ส่วนงาน</th>
-            <th style="${thL}">รายละเอียดอันตราย</th>
-            <th style="${thStyle}width:40px;">Rank</th>
-            <th style="${thStyle}width:74px;">สถานะ</th>
-            <th style="${thStyle}width:58px;">กำหนด</th>
-          </tr>
-        </thead>
-        <tbody>
-          ${filtered.length ? tableRows : `<tr><td colspan="8" style="text-align:center;padding:24px;color:#94a3b8;${K}font-size:11px;">ไม่มีข้อมูล</td></tr>`}
-        </tbody>
-      </table>
+    const sHdr = (t) => `<div style="font-size:9.5px;font-weight:700;color:#94a3b8;letter-spacing:1px;text-transform:uppercase;margin-bottom:7px;padding-bottom:5px;border-bottom:1.5px solid #f1f5f9;${K}">${t}</div>`;
+
+    const pageHTMLs = [];
+
+    // ── PAGE 1: Executive Summary + Stop Analysis ─────────────────────────────
+    pageHTMLs.push(wrapPage(`
+      <div style="background:linear-gradient(135deg,#064e3b 0%,#065f46 55%,#0d9488 100%);border-radius:14px;padding:20px 26px;position:relative;overflow:hidden;flex-shrink:0;">
+        <div style="position:absolute;inset:0;opacity:0.07;"><svg width="100%" height="100%"><defs><pattern id="pd" width="20" height="20" patternUnits="userSpaceOnUse"><circle cx="10" cy="10" r="1.2" fill="white"/></pattern></defs><rect width="100%" height="100%" fill="url(#pd)"/></svg></div>
+        <div style="position:relative;display:flex;justify-content:space-between;align-items:flex-start;">
+          <div>
+            <div style="font-size:9px;color:rgba(167,243,208,0.9);font-weight:600;letter-spacing:1.5px;margin-bottom:3px;${K}">TSH SAFETY CORE ACTIVITY</div>
+            <div style="font-size:20px;font-weight:800;color:#fff;line-height:1.2;${K}">รายงานสรุปประเด็นจากการเดินตรวจ</div>
+            <div style="font-size:10px;color:rgba(255,255,255,0.55);margin-top:2px;${K}">Safety Patrol Issue Report</div>
+          </div>
+          <div style="text-align:right;color:rgba(255,255,255,0.8);font-size:10px;line-height:2;${K}">
+            <div>เลขที่: <strong style="color:#fff;font-family:monospace;">${docNo}</strong></div>
+            <div>วันที่: <strong style="color:#fff;">${dateStr}</strong></div>
+            <div>เวลา: <strong style="color:#fff;">${timeStr} น.</strong></div>
+            <div>จัดทำโดย: <strong style="color:#fff;">${currentUser.name||'—'}</strong></div>
+          </div>
+        </div>
+        <div style="margin-top:10px;padding-top:8px;border-top:1px solid rgba(255,255,255,0.15);display:flex;gap:6px;align-items:center;flex-wrap:wrap;">
+          <span style="font-size:9px;color:rgba(167,243,208,0.85);font-weight:600;${K}">ขอบเขต:</span>
+          <span style="background:rgba(255,255,255,0.15);color:#fff;font-size:9px;font-weight:600;padding:2px 8px;border-radius:99px;${K}">${filterLabel}</span>
+          <span style="background:rgba(255,255,255,0.1);color:#fff;font-size:9px;padding:2px 8px;border-radius:99px;${K}">ช่วงวันที่: ${dateRange}</span>
+          <span style="margin-left:auto;background:rgba(255,255,255,0.2);color:#fff;font-size:10px;font-weight:800;padding:2px 10px;border-radius:99px;${K}">${filtered.length} ประเด็น</span>
+        </div>
+      </div>
+      <div style="display:flex;gap:8px;flex-shrink:0;">
+        ${[
+          {label:'ทั้งหมด',val:filtered.length,bg:'#f8fafc',border:'#e2e8f0',vc:'#1e293b'},
+          {label:'รอแก้ไข',val:counts.open,bg:'#fef2f2',border:'#fecaca',vc:'#dc2626'},
+          {label:'แก้ชั่วคราว',val:counts.temp,bg:'#fff7ed',border:'#fed7aa',vc:'#f97316'},
+          {label:'เสร็จสิ้น',val:counts.closed,bg:'#f0fdf4',border:'#bbf7d0',vc:'#059669'},
+          {label:'Rank A',val:byRank.A,bg:'#fef2f2',border:'#fecaca',vc:'#dc2626'},
+          {label:'Rank B',val:byRank.B,bg:'#fff7ed',border:'#fed7aa',vc:'#f97316'},
+          {label:'Rank C',val:byRank.C,bg:'#f0fdf4',border:'#bbf7d0',vc:'#059669'},
+        ].map(s=>`<div style="flex:1;background:${s.bg};border:1.5px solid ${s.border};border-radius:10px;padding:12px 8px;text-align:center;">
+          <div style="font-size:28px;font-weight:900;color:${s.vc};${K}line-height:1;">${s.val}</div>
+          <div style="font-size:9px;margin-top:3px;${K}font-weight:600;color:${s.vc};opacity:0.8;">${s.label}</div>
+        </div>`).join('')}
+      </div>
+      <div style="background:#fff;border-radius:10px;padding:10px 14px;border:1px solid #e2e8f0;flex-shrink:0;">
+        <div style="display:flex;align-items:center;gap:12px;">
+          <div style="font-size:10px;font-weight:700;color:#475569;${K}white-space:nowrap;">อัตราการแก้ไขเสร็จสิ้น</div>
+          <div style="flex:1;height:10px;background:#f1f5f9;border-radius:99px;overflow:hidden;">
+            <div style="height:100%;width:${closePct}%;background:linear-gradient(90deg,#059669,#0d9488);border-radius:99px;"></div>
+          </div>
+          <div style="font-size:18px;font-weight:900;${K}white-space:nowrap;color:${closePct>=80?'#059669':closePct>=50?'#f97316':'#dc2626'};">${closePct}%</div>
+        </div>
+      </div>
+      <div style="background:#fff;border-radius:12px;padding:12px 16px;border:1px solid #e2e8f0;flex-shrink:0;">
+        ${sHdr('อันตราย 6 ประการ (Stop 1–6)')}
+        <div style="display:flex;gap:8px;">
+          ${CCCF_STOP_TYPES.map(s=>`<div style="flex:1;background:${s.bg};border:1px solid ${s.border};border-radius:10px;padding:12px 8px;">
+            <div style="font-size:9px;font-weight:700;color:${s.color};${K}">${s.code}</div>
+            <div style="font-size:26px;font-weight:900;${K}line-height:1.1;color:${byStop[s.id]>0?s.color:'#cbd5e1'};">${byStop[s.id]}</div>
+            <div style="font-size:8px;color:#64748b;${K}margin-top:3px;line-height:1.3;">${s.label}</div>
+          </div>`).join('')}
+        </div>
+      </div>
+      <div style="background:#fff;border-radius:12px;padding:12px 16px;border:1px solid #e2e8f0;flex:1;display:flex;flex-direction:column;overflow:hidden;">
+        ${sHdr('ชนิดอันตราย × ระดับความรุนแรง (STOP × Rank)')}
+        <table style="width:100%;border-collapse:collapse;">
+          <thead><tr style="background:linear-gradient(135deg,#064e3b,#065f46);">
+            <th style="padding:9px 12px;font-size:10px;font-weight:700;${K}text-align:left;color:#fff;">ชนิดอันตราย</th>
+            <th style="padding:9px;font-size:10px;font-weight:700;${K}text-align:center;color:#fca5a5;width:80px;">Rank A</th>
+            <th style="padding:9px;font-size:10px;font-weight:700;${K}text-align:center;color:#fdba74;width:80px;">Rank B</th>
+            <th style="padding:9px;font-size:10px;font-weight:700;${K}text-align:center;color:#6ee7b7;width:80px;">Rank C</th>
+            <th style="padding:9px;font-size:10px;font-weight:700;${K}text-align:center;color:#fff;width:80px;">รวม</th>
+          </tr></thead>
+          <tbody>${CCCF_STOP_TYPES.map((s,idx)=>{
+            const r=matrix[s.id]; const tot=r.A+r.B+r.C;
+            return `<tr style="background:${idx%2?'#f8fafc':'#fff'};border-bottom:1px solid #f1f5f9;">
+              <td style="padding:10px 12px;font-size:10px;${K}color:#475569;">${s.code} — ${s.label}</td>
+              <td style="padding:10px;text-align:center;font-size:11px;font-weight:700;${K}color:${r.A>0?'#dc2626':'#cbd5e1'};">${r.A}</td>
+              <td style="padding:10px;text-align:center;font-size:11px;font-weight:700;${K}color:${r.B>0?'#f97316':'#cbd5e1'};">${r.B}</td>
+              <td style="padding:10px;text-align:center;font-size:11px;font-weight:700;${K}color:${r.C>0?'#059669':'#cbd5e1'};">${r.C}</td>
+              <td style="padding:10px;text-align:center;font-size:11px;font-weight:700;${K}color:${tot>0?'#1e293b':'#cbd5e1'};">${tot}</td>
+            </tr>`;
+          }).join('')}</tbody>
+          <tfoot><tr style="background:#f8fafc;border-top:2px solid #e2e8f0;">
+            <td style="padding:10px 12px;font-size:10px;font-weight:700;${K}color:#1e293b;">รวมทั้งหมด</td>
+            <td style="padding:10px;text-align:center;font-size:12px;font-weight:900;${K}color:#dc2626;">${mTotalA}</td>
+            <td style="padding:10px;text-align:center;font-size:12px;font-weight:900;${K}color:#f97316;">${mTotalB}</td>
+            <td style="padding:10px;text-align:center;font-size:12px;font-weight:900;${K}color:#059669;">${mTotalC}</td>
+            <td style="padding:10px;text-align:center;font-size:12px;font-weight:900;${K}color:#1e293b;">${mTotalA+mTotalB+mTotalC}</td>
+          </tr></tfoot>
+        </table>
+      </div>
     `));
 
-    // Section 7: Photo cards — one canvas per card to avoid splits
-    const photoSections = withPhotos.map((i, idx) => {
-        const rc = rColor(i.Rank); const sc = sColor(i.CurrentStatus);
-        const date = i.DateFound ? new Date(i.DateFound).toLocaleDateString('th-TH',{day:'numeric',month:'short',year:'numeric'}) : '—';
-        const beforeUrl = resolveFileUrl(i.BeforeImage);
-        const tempUrl   = resolveFileUrl(i.TempImage);
-        const afterUrl  = resolveFileUrl(i.AfterImage);
-        const imgSlot = (url, label, borderColor) => url
-            ? `<div style="flex:1;min-width:0;">
-                <div style="font-size:9px;font-weight:700;color:${borderColor};${K}margin-bottom:4px;text-transform:uppercase;letter-spacing:0.5px;">${label}</div>
-                <img src="${url}" crossorigin="anonymous" style="width:100%;height:140px;object-fit:cover;border-radius:8px;border:2px solid ${borderColor}30;" onerror="this.style.display='none'"/>
-               </div>`
-            : `<div style="flex:1;min-width:0;">
-                <div style="font-size:9px;font-weight:700;color:#cbd5e1;${K}margin-bottom:4px;">${label}</div>
-                <div style="height:140px;background:#f8fafc;border-radius:8px;border:2px dashed #e2e8f0;display:flex;align-items:center;justify-content:center;">
-                  <span style="font-size:10px;color:#cbd5e1;${K}">ไม่มีรูปภาพ</span>
-                </div>
-               </div>`;
-        const isFirst = idx === 0;
-        return sec(card(`
-          ${isFirst ? secHeader(`ภาพประกอบ Before / After (${withPhotos.length} ประเด็น)`) : ''}
-          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;">
-            <div style="display:flex;align-items:center;gap:10px;">
-              <span style="font-size:10px;color:#94a3b8;${K}font-weight:600;">#${i.IssueID||idx+1}</span>
-              ${i.Rank?`<span style="background:${rc};color:#fff;font-size:10px;font-weight:800;padding:2px 10px;border-radius:8px;${K}">${i.Rank}</span>`:''}
-              <span style="background:${sc}18;color:${sc};font-size:10px;font-weight:700;padding:2px 10px;border-radius:99px;${K}">${sLabel(i.CurrentStatus)}</span>
-            </div>
-            <span style="font-size:10px;color:#94a3b8;${K}">${date} · ${i.Area||''}</span>
+    // ── PAGE 2: Area + Dept + Rank A Breakdown ────────────────────────────────
+    pageHTMLs.push(wrapPage(`
+      <div style="flex-shrink:0;">
+        <div style="font-size:13px;font-weight:700;color:#1e293b;${K}">การวิเคราะห์แยกพื้นที่และส่วนงานรับผิดชอบ</div>
+        <div style="font-size:10px;color:#94a3b8;margin-top:1px;${K}">Area & Department Breakdown — Rank A Critical Watchpoint</div>
+      </div>
+      <div style="display:flex;gap:14px;">
+        <div style="flex:1;min-width:0;display:flex;flex-direction:column;gap:10px;">
+          <div style="background:#fff;border-radius:12px;padding:12px 16px;border:1px solid #e2e8f0;">
+            ${sHdr('สถิติแยกพื้นที่')}${mkBreakTable(areaRows,'พื้นที่')}
           </div>
-          <div style="font-size:11px;color:#1e293b;${K}font-weight:600;margin-bottom:6px;line-height:1.5;">${i.HazardDescription||'—'}</div>
-          ${i.TempDescription?`<div style="font-size:10px;color:#f97316;${K}margin-bottom:6px;">แก้ชั่วคราว: ${i.TempDescription}</div>`:''}
-          ${i.ActionDescription?`<div style="font-size:10px;color:#059669;${K}margin-bottom:10px;">การแก้ไขถาวร: ${i.ActionDescription}</div>`:''}
-          <div style="display:flex;gap:10px;">
-            ${imgSlot(beforeUrl,'ก่อนแก้ไข (Before)','#dc2626')}
-            ${tempUrl?imgSlot(tempUrl,'แก้ชั่วคราว (Temp)','#f97316'):''}
-            ${imgSlot(afterUrl,'หลังแก้ไข (After)','#059669')}
+          ${rankACardHtml}
+        </div>
+        <div style="flex:1;min-width:0;background:#fff;border-radius:12px;padding:12px 16px;border:1px solid #e2e8f0;">
+          ${sHdr('สถิติแยกส่วนงานรับผิดชอบ')}
+          ${mkBreakTable(deptRows,'ส่วนงาน')}
+        </div>
+      </div>
+    `));
+
+    // ── PAGES 3+: Issue Register (paginated 26 rows/page) ─────────────────────
+    const ROWS_PP = 26;
+    const issuePgCnt = Math.max(1, Math.ceil(filtered.length / ROWS_PP));
+    for (let pi = 0; pi < issuePgCnt; pi++) {
+        const slice = filtered.slice(pi * ROWS_PP, (pi + 1) * ROWS_PP);
+        const sliceRows = slice.map((i, li) => {
+            const gi = pi * ROWS_PP + li;
+            const date = i.DateFound ? new Date(i.DateFound).toLocaleDateString('th-TH',{day:'numeric',month:'short',year:'2-digit'}) : '—';
+            const due  = i.DueDate   ? new Date(i.DueDate ).toLocaleDateString('th-TH',{day:'numeric',month:'short',year:'2-digit'}) : '—';
+            const over = i.CurrentStatus!=='Closed' && i.DueDate && new Date(i.DueDate)<now;
+            const desc = (i.HazardDescription||'').slice(0,72) + ((i.HazardDescription||'').length>72?'…':'');
+            const sc = sColor(i.CurrentStatus), rc = rColor(i.Rank);
+            return `<tr style="background:${gi%2?'#f8fafc':'#fff'};border-bottom:1px solid #f1f5f9;">
+              <td style="padding:7px 8px;font-size:9.5px;color:#94a3b8;${K}width:30px;text-align:center;">${i.IssueID||gi+1}</td>
+              <td style="padding:7px 8px;font-size:9.5px;color:#475569;${K}width:66px;white-space:nowrap;">${date}</td>
+              <td style="padding:7px 8px;font-size:9.5px;color:#475569;${K}width:70px;">${i.Area||'—'}</td>
+              <td style="padding:7px 8px;font-size:9.5px;color:#475569;${K}width:80px;">${i.ResponsibleDept||'—'}</td>
+              <td style="padding:7px 8px;font-size:10px;color:#1e293b;${K}">${desc||'—'}</td>
+              <td style="padding:7px 8px;text-align:center;width:36px;">${i.Rank?`<span style="background:${rc};color:#fff;font-size:9.5px;font-weight:700;padding:1px 5px;border-radius:5px;${K}">${i.Rank}</span>`:`<span style="color:#cbd5e1;font-size:9px;${K}">—</span>`}</td>
+              <td style="padding:7px 8px;text-align:center;width:70px;"><span style="background:${sc}18;color:${sc};font-size:9.5px;font-weight:700;padding:1px 7px;border-radius:99px;white-space:nowrap;${K}">${sLabel(i.CurrentStatus)}</span></td>
+              <td style="padding:7px 8px;font-size:9.5px;text-align:center;width:54px;color:${over?'#dc2626':'#475569'};font-weight:${over?700:400};${K}white-space:nowrap;">${due}</td>
+            </tr>`;
+        }).join('');
+        const rangeLabel = issuePgCnt === 1 ? `${filtered.length} รายการ` : `รายการที่ ${pi*ROWS_PP+1}–${Math.min((pi+1)*ROWS_PP,filtered.length)} จาก ${filtered.length}`;
+        pageHTMLs.push(wrapPage(`
+          <div style="flex-shrink:0;">
+            <div style="font-size:13px;font-weight:700;color:#1e293b;${K}">ทะเบียนประเด็น</div>
+            <div style="font-size:10px;color:#94a3b8;margin-top:1px;${K}">Issue Register — ${rangeLabel}</div>
+          </div>
+          <div style="background:#fff;border-radius:12px;border:1px solid #e2e8f0;overflow:hidden;">
+            <table style="width:100%;border-collapse:collapse;">
+              <thead><tr style="background:linear-gradient(135deg,#064e3b,#065f46);color:#fff;">
+                <th style="padding:9px 8px;font-size:9.5px;font-weight:700;${K}text-align:center;width:30px;">#</th>
+                <th style="padding:9px 8px;font-size:9.5px;font-weight:700;${K}text-align:left;width:66px;">วันที่พบ</th>
+                <th style="padding:9px 8px;font-size:9.5px;font-weight:700;${K}text-align:left;width:70px;">พื้นที่</th>
+                <th style="padding:9px 8px;font-size:9.5px;font-weight:700;${K}text-align:left;width:80px;">ส่วนงาน</th>
+                <th style="padding:9px 8px;font-size:9.5px;font-weight:700;${K}text-align:left;">รายละเอียดอันตราย</th>
+                <th style="padding:9px 8px;font-size:9.5px;font-weight:700;${K}text-align:center;width:36px;">Rank</th>
+                <th style="padding:9px 8px;font-size:9.5px;font-weight:700;${K}text-align:center;width:70px;">สถานะ</th>
+                <th style="padding:9px 8px;font-size:9.5px;font-weight:700;${K}text-align:center;width:54px;">กำหนด</th>
+              </tr></thead>
+              <tbody>${slice.length ? sliceRows : `<tr><td colspan="8" style="text-align:center;padding:40px;color:#94a3b8;font-size:11px;${K}">ไม่มีข้อมูลประเด็น</td></tr>`}</tbody>
+            </table>
           </div>
         `));
-    });
+    }
 
-    // Section 8: Signature
-    const s8 = sec(card(`
-      <div style="font-size:10px;font-weight:700;color:#94a3b8;letter-spacing:1px;margin-bottom:16px;text-transform:uppercase;">รับรองและอนุมัติ</div>
-      <div style="display:flex;justify-content:space-between;gap:24px;">
-        ${['ผู้จัดทำรายงาน','หัวหน้าส่วนงาน','ผู้จัดการ'].map(role=>`
-          <div style="flex:1;text-align:center;">
-            <div style="height:52px;border-bottom:1.5px solid #cbd5e1;margin-bottom:8px;"></div>
-            <div style="font-size:10px;color:#64748b;${K}">(........................................)</div>
-            <div style="font-size:10.5px;font-weight:700;color:#374151;margin-top:4px;${K}">${role}</div>
-            <div style="font-size:9.5px;color:#94a3b8;margin-top:3px;${K}">วันที่ ......../......../.........</div>
-          </div>`).join('')}
+    // ── PHOTO PAGES (2 cards/page) ────────────────────────────────────────────
+    if (withPhotos.length > 0) {
+        const PHOTOS_PP = 2;
+        const photoPgCnt = Math.ceil(withPhotos.length / PHOTOS_PP);
+        for (let pi = 0; pi < photoPgCnt; pi++) {
+            const photoSlice = withPhotos.slice(pi * PHOTOS_PP, (pi + 1) * PHOTOS_PP);
+            const cardsHtml = photoSlice.map((i, li) => {
+                const gi = pi * PHOTOS_PP + li;
+                const rc = rColor(i.Rank), sc = sColor(i.CurrentStatus);
+                const date = i.DateFound ? new Date(i.DateFound).toLocaleDateString('th-TH',{day:'numeric',month:'short',year:'numeric'}) : '—';
+                const bUrl = resolveFileUrl(i.BeforeImage), tUrl = resolveFileUrl(i.TempImage), aUrl = resolveFileUrl(i.AfterImage);
+                const slot = (url, lbl, bc) => url
+                    ? `<div style="flex:1;min-width:0;"><div style="font-size:8.5px;font-weight:700;color:${bc};${K}margin-bottom:3px;text-transform:uppercase;">${lbl}</div><img src="${url}" crossorigin="anonymous" style="width:100%;height:155px;object-fit:cover;border-radius:8px;border:2px solid ${bc}30;" onerror="this.style.display='none'"/></div>`
+                    : `<div style="flex:1;min-width:0;"><div style="font-size:8.5px;font-weight:700;color:#cbd5e1;${K}margin-bottom:3px;">${lbl}</div><div style="height:155px;background:#f8fafc;border-radius:8px;border:2px dashed #e2e8f0;display:flex;align-items:center;justify-content:center;"><span style="font-size:10px;color:#cbd5e1;${K}">ไม่มีรูปภาพ</span></div></div>`;
+                return `<div style="background:#fff;border-radius:12px;padding:14px 16px;border:1.5px solid #e2e8f0;flex:1;">
+                  <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;">
+                    <div style="display:flex;align-items:center;gap:8px;">
+                      <span style="font-size:9.5px;color:#94a3b8;${K}font-weight:600;">#${i.IssueID||gi+1}</span>
+                      ${i.Rank?`<span style="background:${rc};color:#fff;font-size:10px;font-weight:800;padding:2px 8px;border-radius:6px;${K}">${i.Rank}</span>`:''}
+                      <span style="background:${sc}18;color:${sc};font-size:10px;font-weight:700;padding:2px 8px;border-radius:99px;${K}">${sLabel(i.CurrentStatus)}</span>
+                    </div>
+                    <span style="font-size:9.5px;color:#94a3b8;${K}">${date} · ${i.Area||''}</span>
+                  </div>
+                  <div style="font-size:11px;color:#1e293b;${K}font-weight:600;margin-bottom:4px;line-height:1.5;">${i.HazardDescription||'—'}</div>
+                  ${i.TempDescription?`<div style="font-size:10px;color:#f97316;${K}margin-bottom:3px;">แก้ชั่วคราว: ${i.TempDescription}</div>`:''}
+                  ${i.ActionDescription?`<div style="font-size:10px;color:#059669;${K}margin-bottom:8px;">การแก้ไขถาวร: ${i.ActionDescription}</div>`:''}
+                  <div style="display:flex;gap:10px;">${slot(bUrl,'ก่อนแก้ไข (Before)','#dc2626')}${tUrl?slot(tUrl,'แก้ชั่วคราว (Temp)','#f97316'):''}${slot(aUrl,'หลังแก้ไข (After)','#059669')}</div>
+                </div>`;
+            }).join('');
+            pageHTMLs.push(wrapPage(`
+              <div style="flex-shrink:0;">
+                <div style="font-size:13px;font-weight:700;color:#1e293b;${K}">ภาพประกอบ Before / After</div>
+                <div style="font-size:10px;color:#94a3b8;margin-top:1px;${K}">รายการที่ ${pi*PHOTOS_PP+1}–${Math.min((pi+1)*PHOTOS_PP,withPhotos.length)} จาก ${withPhotos.length} ประเด็น</div>
+              </div>
+              <div style="display:flex;flex-direction:column;gap:10px;flex:1;">${cardsHtml}</div>
+            `));
+        }
+    }
+
+    // ── SIGNATURE PAGE ────────────────────────────────────────────────────────
+    pageHTMLs.push(wrapPage(`
+      <div style="flex:1;display:flex;flex-direction:column;justify-content:space-between;">
+        <div>
+          <div style="font-size:13px;font-weight:700;color:#1e293b;${K}">รับรองและอนุมัติ</div>
+          <div style="font-size:10px;color:#94a3b8;${K}">Acknowledgement & Approval</div>
+        </div>
+        <div style="background:#fff;border-radius:14px;padding:52px 44px;border:1px solid #e2e8f0;">
+          <div style="display:flex;justify-content:space-around;gap:32px;">
+            ${['ผู้จัดทำรายงาน','หัวหน้าส่วนงาน','ผู้จัดการ'].map(role=>`
+              <div style="flex:1;text-align:center;">
+                <div style="height:72px;border-bottom:1.5px solid #cbd5e1;margin-bottom:12px;"></div>
+                <div style="font-size:10px;color:#64748b;${K}">(........................................)</div>
+                <div style="font-size:11px;font-weight:700;color:#374151;margin-top:6px;${K}">${role}</div>
+                <div style="font-size:10px;color:#94a3b8;margin-top:4px;${K}">วันที่ ......../......../.........</div>
+              </div>`).join('')}
+          </div>
+        </div>
+        <div style="text-align:center;"><div style="font-size:9px;color:#cbd5e1;${K}">${docNo} · ${dateStr} · ${timeStr} น.</div></div>
       </div>
     `));
 
-    // Assemble all sections
-    const allSections = [s1, s2, s3, s4, s5, s6, ...photoSections, s8];
+    // ── RENDER & SAVE ──────────────────────────────────────────────────────────
+    const totalPgs = pageHTMLs.length;
 
-    // ── Step 13: Render each section to canvas, place on PDF ────────────────
-    const renderToCanvas = async (htmlStr) => {
+    const renderPg = async (html) => {
         const el = document.createElement('div');
-        el.style.cssText = 'position:fixed;left:-9999px;top:0;z-index:-1;width:794px;';
-        el.innerHTML = htmlStr;
+        el.style.cssText = 'position:fixed;left:-9999px;top:0;z-index:-1;';
+        el.innerHTML = html;
         document.body.appendChild(el);
-        await new Promise(r => setTimeout(r, 40));
-        const c = await html2canvas(el, {
+        await new Promise(r => setTimeout(r, 60));
+        const c = await html2canvas(el.firstElementChild, {
             scale: 2, useCORS: true, logging: false,
-            backgroundColor: '#f8fafc', windowWidth: 794, allowTaint: false,
+            backgroundColor: '#f8fafc', windowWidth: 794, width: 794, height: 1122,
         });
         document.body.removeChild(el);
         return c;
     };
 
-    // A4 dimensions (mm) — declared here so toMM and section logic can use them
-    const pageW = 210, pageH = 297;
-
-    // px→mm: at scale:2 canvas.width = 794*2 = 1588px → 210mm
-    const toMM = (canvas) => canvas.height * pageW / canvas.width;
-
-    const elOuter = document.createElement('div'); // keep reference for cleanup
-    document.body.appendChild(elOuter); // placeholder so finally can remove something
     try {
-        showLoading('กำลังสร้าง PDF...');
+        showLoading(`กำลังสร้าง PDF... (${totalPgs} หน้า)`);
         await document.fonts.ready;
-        await new Promise(r => setTimeout(r, 400));
+        await new Promise(r => setTimeout(r, 500));
 
         const { jsPDF } = window.jspdf;
-        const pdf  = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
-        const marginT = 8, marginB = 12;
-        let   curY = marginT;
+        const pdf = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
 
-        for (let si = 0; si < allSections.length; si++) {
-            const canvas = await renderToCanvas(allSections[si]);
-            const imgH   = toMM(canvas);
-            const imgData = canvas.toDataURL('image/jpeg', 0.92);
-
-            // Start a new page if section won't fit (and we're not at page start)
-            if (curY > marginT && curY + imgH > pageH - marginB) {
-                pdf.addPage();
-                curY = marginT;
-            }
-
-            // If single section is taller than a full page, slice it across pages
-            if (imgH > pageH - marginT - marginB) {
-                let yInImg = 0; // mm into the image we've placed so far
-                while (yInImg < imgH) {
-                    const sliceH = Math.min(pageH - curY - marginB, imgH - yInImg);
-                    // Render only the visible slice by offsetting the image upward
-                    pdf.addImage(imgData, 'JPEG', 0, curY - yInImg, pageW, imgH);
-                    yInImg += sliceH;
-                    curY   += sliceH;
-                    if (yInImg < imgH) { pdf.addPage(); curY = marginT; }
-                }
-            } else {
-                pdf.addImage(imgData, 'JPEG', 0, curY, pageW, imgH);
-                curY += imgH + 2;
-            }
-        }
-
-        // Page numbers + doc number on every page
-        const totalPages = pdf.getNumberOfPages();
-        for (let p = 1; p <= totalPages; p++) {
-            pdf.setPage(p);
-            pdf.setFontSize(8); pdf.setTextColor(148, 163, 184);
-            pdf.text(`หน้า ${p} / ${totalPages}`, pageW - 14, pageH - 5, { align: 'right' });
-            pdf.text(docNo, 14, pageH - 5);
-            if (p < totalPages) {
-                // light separator line
-                pdf.setDrawColor(226, 232, 240);
-                pdf.line(14, pageH - 8, pageW - 14, pageH - 8);
-            }
+        for (let pi = 0; pi < pageHTMLs.length; pi++) {
+            if (pi > 0) pdf.addPage();
+            showLoading(`กำลังสร้าง PDF... หน้า ${pi+1} / ${totalPgs}`);
+            const c = await renderPg(pageHTMLs[pi]);
+            pdf.addImage(c.toDataURL('image/jpeg', 0.93), 'JPEG', 0, 0, 210, 297);
+            // Overlay page number in white on green footer area (bottom ~8mm)
+            pdf.setFontSize(8); pdf.setTextColor(255, 255, 255);
+            pdf.text(`หน้า ${pi+1} / ${totalPgs}`, 197, 294, { align: 'right' });
         }
 
         pdf.save(`patrol_issues_${now.toISOString().slice(0,10)}.pdf`);
-        showToast(`ส่งออก PDF สำเร็จ (${filtered.length} ประเด็น)`, 'success');
+        showToast(`ส่งออก PDF สำเร็จ (${filtered.length} ประเด็น, ${totalPgs} หน้า)`, 'success');
     } catch (err) {
         console.error('PDF error:', err);
         showToast('ส่งออก PDF ไม่สำเร็จ', 'error');
     } finally {
-        if (document.body.contains(elOuter)) document.body.removeChild(elOuter);
         hideLoading();
     }
 }
@@ -4827,6 +5048,75 @@ function renderAreaStats() {
     }).join('');
 
     _updateAreaBadge();
+    renderRankASpotlight();
+}
+
+function renderRankASpotlight() {
+    const el = document.getElementById('rank-a-spotlight');
+    if (!el) return;
+
+    const rankAIssues = _allIssues.filter(i => (i.Rank || '').toUpperCase() === 'A');
+    const total = rankAIssues.length;
+
+    // All areas (same list as area stats, respect _areaStatSel)
+    const allAreaNames = _patrolAreas.map(a => a.Name || a.AreaName).filter(Boolean);
+    const areaList = (_areaStatSel && _areaStatSel.length) ? allAreaNames.filter(n => _areaStatSel.includes(n)) : allAreaNames;
+
+    // Count Rank A per area
+    const areaMap = {};
+    for (const name of areaList) areaMap[name] = 0;
+    rankAIssues.forEach(i => { const a = i.Area || ''; if (areaMap[a] !== undefined) areaMap[a]++; });
+    const areaRows = areaList.map(name => [name, areaMap[name]]).sort((a, b) => b[1] - a[1]);
+    const maxArea = Math.max(1, ...areaRows.map(r => r[1]));
+
+    // Count Rank A per STOP (all 6 types always)
+    const stopMap = {};
+    STOP_TYPES.forEach(s => { stopMap[s.key] = 0; });
+    rankAIssues.forEach(i => {
+        const type = i.HazardType || '';
+        const stop = STOP_TYPES.find(s => type.startsWith(s.key));
+        const key = stop ? stop.key : 'STOP 6';
+        if (stopMap[key] !== undefined) stopMap[key]++;
+    });
+    const maxStop = Math.max(1, ...STOP_TYPES.map(s => stopMap[s.key]));
+
+    el.innerHTML = `
+    <div class="flex items-center gap-2 mb-3">
+      <span class="w-2 h-2 rounded-full ${total > 0 ? 'bg-red-500 animate-pulse' : 'bg-slate-300'} flex-shrink-0"></span>
+      <h3 class="font-bold text-slate-700 text-sm flex-1">Rank A — จุดเฝ้าระวัง</h3>
+      <span class="text-[10px] font-bold px-2 py-0.5 ${total > 0 ? 'bg-red-50 text-red-600 border border-red-100' : 'bg-slate-100 text-slate-400'} rounded-full">${total} รายการ</span>
+    </div>
+
+    <p class="text-[10px] font-bold text-slate-400 uppercase tracking-wide mb-2">แยกพื้นที่</p>
+    <div class="space-y-1.5 mb-4">
+      ${areaRows.length ? areaRows.map(([area, count]) => {
+        const pct = Math.round((count / maxArea) * 100);
+        const isActive = _filterArea === area;
+        return `<div class="flex items-center gap-2 cursor-pointer rounded-lg px-1 py-0.5 hover:bg-red-50/60 transition-colors ${isActive ? 'bg-red-50' : ''}"
+            onclick="window._issueFilterArea('${area.replace(/'/g, "\\'")}')">
+          <span class="text-[10px] font-medium w-24 truncate flex-shrink-0 ${isActive ? 'font-bold text-red-700' : count > 0 ? 'text-slate-700' : 'text-slate-400'}" title="${area}">${area}</span>
+          <div class="flex-1 bg-slate-100 rounded-full h-1.5 overflow-hidden">
+            <div class="h-full rounded-full transition-all duration-500" style="width:${pct}%;background:linear-gradient(90deg,#ef4444,#f97316)"></div>
+          </div>
+          <span class="text-[11px] font-bold flex-shrink-0 w-4 text-right ${count > 0 ? 'text-red-600' : 'text-slate-300'}">${count}</span>
+        </div>`;
+      }).join('') : '<p class="text-xs text-slate-300 text-center py-2">ยังไม่มีพื้นที่ใน Master Data</p>'}
+    </div>
+
+    <p class="text-[10px] font-bold text-slate-400 uppercase tracking-wide mb-2">แยก STOP</p>
+    <div class="space-y-1.5">
+      ${STOP_TYPES.map(s => {
+        const count = stopMap[s.key];
+        const pct = Math.round((count / maxStop) * 100);
+        return `<div class="flex items-center gap-2">
+          <span class="text-[9px] font-bold w-7 flex-shrink-0 ${count > 0 ? 'text-slate-600' : 'text-slate-300'}">${s.key.replace('STOP ', 'ST')}</span>
+          <div class="flex-1 bg-slate-100 rounded-full h-1.5 overflow-hidden">
+            <div class="h-full rounded-full transition-all duration-500" style="width:${pct}%;background:linear-gradient(90deg,#dc2626,#ef4444)"></div>
+          </div>
+          <span class="text-[11px] font-bold flex-shrink-0 w-4 text-right ${count > 0 ? 'text-red-600' : 'text-slate-300'}">${count}</span>
+        </div>`;
+      }).join('')}
+    </div>`;
 }
 
 function _updateAreaBadge() {
@@ -5124,7 +5414,7 @@ window._saveDeptStatConfig = async function() {
 
     await Promise.all([
         _saveDeptStatSelection(deptChecked.length === deptAll.length ? null : deptChecked),
-        _saveUnitStatSelection(unitChecked.length === unitAll.length ? null : unitChecked),
+        _saveUnitStatSelection(unitChecked.length === 0 ? null : unitChecked),
     ]);
 
     renderDeptStats();
