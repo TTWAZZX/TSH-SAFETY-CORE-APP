@@ -31,13 +31,20 @@ let _workerData    = [];
 let _permanentData = [];
 let _departments   = [];
 let _assignments   = [];
-let _activeTab     = 'worker';
-let _cccfDeptSel   = null;   // null = all depts, array = selected dept names
+let _safetyUnits   = [];   // { id, name, department_id, DeptName }
+let _unitTargets   = [];   // { unit_name, yearly_target } — target = จำนวนคน ไม่ใช่ครั้ง
+let _cccfUnitSel   = null;   // null = all units, array = selected unit names
 let _wFilterDept   = '';
+let _wFilterUnit   = '';
 let _wFilterRank   = '';
 let _wFilterStop   = 0;
 let _wSearch       = '';
+let _wPage         = 0;    // pagination current page (0-indexed)
+const W_PAGE_SIZE  = 20;
 let _pFilterDept   = '';
+let _unitYear      = new Date().getFullYear();  // year filter for unit summary
+let _myCardYear    = new Date().getFullYear();  // year filter for "ของฉัน" card
+let _unitChartInst = null;  // Chart.js instance (destroyed/recreated on update)
 
 // ─── Window-level helpers ─────────────────────────────────────────────────────
 window._cccfDeleteWorker = async (id) => {
@@ -88,16 +95,23 @@ window._cccfShowWorkerDetail = (id) => {
           ${row('พื้นที่ทำงาน / งาน', r.JobArea)}
           ${row('อุปกรณ์ / เครื่องจักร', r.Equipment)}
           ${row('รายละเอียดอันตราย', r.HazardDescription, true)}
+          ${row('Safety Unit', r.SafetyUnit)}
           ${row('วิธีที่อาจเกิดอันตราย', r.HowItHappened, true)}
           ${row('อวัยวะที่เสี่ยง', r.BodyPart)}
           ${row('ข้อเสนอแนะ', r.Suggestion, true)}
         </div>
-        ${isAdmin ? `<div class="flex justify-end pt-2 border-t border-slate-100">
-          <button onclick="closeModal();window._cccfDeleteWorker(${r.id})" class="flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-semibold text-red-600 hover:bg-red-50 border border-red-100 transition-colors">
-            <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg>
-            ลบรายการนี้
+        <div class="flex justify-end gap-2 pt-2 border-t border-slate-100">
+          <button onclick="closeModal();window._cccfEditWorker(${r.id})"
+            class="flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-semibold text-emerald-600 hover:bg-emerald-50 border border-emerald-100 transition-colors">
+            <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"/></svg>
+            แก้ไข
           </button>
-        </div>` : ''}
+          ${(isAdmin || r.EmployeeID === currentUser.id) ? `<button onclick="closeModal();window._cccfDeleteWorker(${r.id})"
+            class="flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-semibold text-red-600 hover:bg-red-50 border border-red-100 transition-colors">
+            <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg>
+            ลบ
+          </button>` : ''}
+        </div>
       </div>`, 'max-w-lg');
 };
 window._cccfShowPermanentDetail = (id) => {
@@ -134,37 +148,202 @@ window._cccfShowPermanentDetail = (id) => {
       </div>`, 'max-w-lg');
 };
 window._cccfOpenDeptFilter = () => {
-    const allNames = _departments.map(d => d.Name || d).filter(Boolean);
-    const sel = _cccfDeptSel || [];
-    openModal('เลือกส่วนงานที่แสดงในสรุป', `
+    // จัดกลุ่ม unit ตาม department
+    const deptMap = {};
+    _safetyUnits.forEach(u => {
+        const dName = u.DeptName || 'ไม่ระบุแผนก';
+        if (!deptMap[dName]) deptMap[dName] = [];
+        deptMap[dName].push(u.name);
+    });
+    const sel = _cccfUnitSel || [];
+    const grouped = Object.entries(deptMap).sort(([a],[b]) => a.localeCompare(b));
+
+    openModal('เลือก Unit ที่แสดงในสรุป', `
       <div class="space-y-3 px-1">
-        <p class="text-xs text-slate-500">Admin เลือกส่วนงานที่ต้องการแสดงในตารางสรุป (ไม่เลือก = แสดงทั้งหมดที่มีข้อมูล)</p>
+        <p class="text-xs text-slate-500">Admin เลือก Unit ที่ต้องการแสดงในตารางสรุป (ไม่เลือก = แสดงทั้งหมดที่มีข้อมูล)</p>
         <div class="flex gap-2 mb-2">
-          <button onclick="document.querySelectorAll('.cccf-dept-chk').forEach(c=>c.checked=true)" class="text-xs px-3 py-1.5 rounded-lg bg-emerald-50 text-emerald-700 font-semibold hover:bg-emerald-100 transition-colors">เลือกทั้งหมด</button>
-          <button onclick="document.querySelectorAll('.cccf-dept-chk').forEach(c=>c.checked=false)" class="text-xs px-3 py-1.5 rounded-lg bg-slate-100 text-slate-600 font-semibold hover:bg-slate-200 transition-colors">ล้างทั้งหมด</button>
+          <button onclick="document.querySelectorAll('.cccf-unit-chk').forEach(c=>c.checked=true)" class="text-xs px-3 py-1.5 rounded-lg bg-emerald-50 text-emerald-700 font-semibold hover:bg-emerald-100 transition-colors">เลือกทั้งหมด</button>
+          <button onclick="document.querySelectorAll('.cccf-unit-chk').forEach(c=>c.checked=false)" class="text-xs px-3 py-1.5 rounded-lg bg-slate-100 text-slate-600 font-semibold hover:bg-slate-200 transition-colors">ล้างทั้งหมด</button>
         </div>
-        <div class="max-h-64 overflow-y-auto space-y-1 pr-1">
-          ${allNames.map(n => `
-          <label class="flex items-center gap-3 px-3 py-2.5 rounded-xl border border-slate-100 hover:border-emerald-200 hover:bg-emerald-50/40 cursor-pointer transition-all">
-            <input type="checkbox" class="cccf-dept-chk w-4 h-4 rounded accent-emerald-600" value="${n}" ${sel.includes(n) ? 'checked' : ''}>
-            <span class="text-sm text-slate-700">${n}</span>
-          </label>`).join('')}
+        <div class="max-h-72 overflow-y-auto space-y-3 pr-1">
+          ${grouped.map(([dept, units]) => `
+          <div>
+            <p class="text-[10px] font-bold text-slate-400 uppercase px-1 mb-1">${dept}</p>
+            <div class="space-y-1">
+              ${units.map(uName => `
+              <label class="flex items-center gap-3 px-3 py-2.5 rounded-xl border border-slate-100 hover:border-emerald-200 hover:bg-emerald-50/40 cursor-pointer transition-all">
+                <input type="checkbox" class="cccf-unit-chk w-4 h-4 rounded accent-emerald-600" value="${uName}" ${sel.includes(uName) ? 'checked' : ''}>
+                <span class="text-sm text-slate-700">${uName}</span>
+              </label>`).join('')}
+            </div>
+          </div>`).join('')}
+          ${grouped.length === 0 ? '<p class="text-xs text-center text-slate-400 py-4">ยังไม่มีข้อมูล Safety Unit ในระบบ</p>' : ''}
         </div>
         <div class="flex justify-end gap-2 pt-2 border-t border-slate-100">
           <button onclick="closeModal()" class="px-4 py-2 rounded-xl text-slate-600 hover:bg-slate-100 text-sm font-medium transition-colors">ยกเลิก</button>
-          <button id="btn-save-dept-sel" class="px-5 py-2 rounded-xl text-sm font-bold text-white transition-all" style="background:linear-gradient(135deg,#059669,#0d9488)">บันทึก</button>
+          <button id="btn-save-unit-sel" class="px-5 py-2 rounded-xl text-sm font-bold text-white transition-all" style="background:linear-gradient(135deg,#059669,#0d9488)">บันทึก</button>
         </div>
       </div>`, 'max-w-sm');
 
-    document.getElementById('btn-save-dept-sel')?.addEventListener('click', async () => {
-        const checked = [...document.querySelectorAll('.cccf-dept-chk:checked')].map(c => c.value);
+    document.getElementById('btn-save-unit-sel')?.addEventListener('click', async () => {
+        const checked = [...document.querySelectorAll('.cccf-unit-chk:checked')].map(c => c.value);
         showLoading('กำลังบันทึก...');
         try {
-            await API.put('/settings/cccf_dept_sel', { value: checked.length ? JSON.stringify(checked) : null });
-            _cccfDeptSel = checked.length ? checked : null;
+            await API.put('/settings/cccf_unit_sel', { value: checked.length ? JSON.stringify(checked) : null });
+            _cccfUnitSel = checked.length ? checked : null;
             closeModal();
-            document.getElementById('cccf-dept-summary').innerHTML = renderDeptSummary();
+            const inner = document.getElementById('cccf-unit-summary-inner');
+            if (inner) { inner.innerHTML = renderUnitSummary(); setTimeout(() => initUnitChart(), 0); }
         } catch (err) { showError(err); } finally { hideLoading(); }
+    });
+};
+
+// ─── Edit Worker (own record) ─────────────────────────────────────────────────
+window._cccfEditWorker = (id) => {
+    const r = _workerData.find(x => x.id == id); if (!r) return;
+    const unitField = _safetyUnits.length
+        ? `<select name="SafetyUnit" class="form-input w-full rounded-xl text-sm" required>
+             <option value="">— เลือก Unit —</option>
+             ${_safetyUnits.map(u => `<option value="${u.name}" ${u.name === r.SafetyUnit ? 'selected' : ''}>${u.name}${u.DeptName ? ` (${u.DeptName})` : ''}</option>`).join('')}
+           </select>`
+        : `<input type="text" name="SafetyUnit" class="form-input w-full rounded-xl text-sm" required value="${r.SafetyUnit || ''}">`;
+
+    const dateVal = r.SubmitDate ? r.SubmitDate.split('T')[0] : '';
+    openModal('แก้ไข CCCF Form A — Worker', `
+      <form id="cccf-edit-worker-form" class="space-y-5 px-1" novalidate>
+
+        <!-- ข้อมูลพนักงาน -->
+        <div class="rounded-xl border border-slate-200 overflow-hidden">
+          <div class="px-4 py-2.5 bg-slate-50 border-b border-slate-200 flex items-center gap-2">
+            <span class="w-5 h-5 rounded-full text-[9px] font-bold text-white flex items-center justify-center" style="background:linear-gradient(135deg,#059669,#0d9488)">1</span>
+            <span class="text-xs font-bold text-slate-700">ข้อมูลพนักงาน</span>
+          </div>
+          <div class="p-4 grid grid-cols-2 gap-3">
+            <div>
+              <label class="block text-[10px] font-bold text-slate-400 uppercase mb-1">ชื่อพนักงาน</label>
+              <input type="text" class="form-input w-full rounded-xl text-sm bg-slate-50 text-slate-500 cursor-not-allowed" readonly value="${r.EmployeeName || ''}">
+            </div>
+            <div>
+              <label class="block text-[10px] font-bold text-slate-400 uppercase mb-1">วันที่ลงข้อมูล <span class="text-red-500">*</span></label>
+              <input type="date" name="SubmitDate" class="form-input w-full rounded-xl text-sm" required value="${dateVal}">
+            </div>
+            <div class="col-span-2">
+              <label class="block text-[10px] font-bold text-slate-400 uppercase mb-1">Safety Unit <span class="text-red-500">*</span></label>
+              ${unitField}
+            </div>
+          </div>
+        </div>
+
+        <!-- พื้นที่ทำงาน -->
+        <div class="rounded-xl border border-slate-200 overflow-hidden">
+          <div class="px-4 py-2.5 bg-slate-50 border-b border-slate-200 flex items-center gap-2">
+            <span class="w-5 h-5 rounded-full text-[9px] font-bold text-white flex items-center justify-center" style="background:linear-gradient(135deg,#059669,#0d9488)">2</span>
+            <span class="text-xs font-bold text-slate-700">พื้นที่ทำงาน / อุปกรณ์</span>
+          </div>
+          <div class="p-4 grid grid-cols-2 gap-3">
+            <div>
+              <label class="block text-[10px] font-bold text-slate-400 uppercase mb-1">พื้นที่ / ชื่องาน <span class="text-red-500">*</span></label>
+              <input type="text" name="JobArea" class="form-input w-full rounded-xl text-sm" required value="${r.JobArea || ''}">
+            </div>
+            <div>
+              <label class="block text-[10px] font-bold text-slate-400 uppercase mb-1">อุปกรณ์ / เครื่องจักร</label>
+              <input type="text" name="Equipment" class="form-input w-full rounded-xl text-sm" value="${r.Equipment || ''}">
+            </div>
+          </div>
+        </div>
+
+        <!-- รายละเอียดอันตราย -->
+        <div class="rounded-xl border border-slate-200 overflow-hidden">
+          <div class="px-4 py-2.5 bg-slate-50 border-b border-slate-200 flex items-center gap-2">
+            <span class="w-5 h-5 rounded-full text-[9px] font-bold text-white flex items-center justify-center" style="background:linear-gradient(135deg,#059669,#0d9488)">3</span>
+            <span class="text-xs font-bold text-slate-700">รายละเอียดอันตราย <span class="text-red-500">*</span></span>
+          </div>
+          <div class="p-4 space-y-3">
+            <div>
+              <label class="block text-[10px] font-bold text-slate-400 uppercase mb-1">อธิบายอันตรายที่พบ <span class="text-red-500">*</span></label>
+              <textarea name="HazardDescription" rows="2" class="form-input w-full rounded-xl text-sm resize-none" required>${r.HazardDescription || ''}</textarea>
+            </div>
+            <div class="grid grid-cols-2 gap-3">
+              <div>
+                <label class="block text-[10px] font-bold text-slate-400 uppercase mb-1">วิธีที่อาจเกิดอันตราย</label>
+                <textarea name="HowItHappened" rows="2" class="form-input w-full rounded-xl text-sm resize-none">${r.HowItHappened || ''}</textarea>
+              </div>
+              <div>
+                <label class="block text-[10px] font-bold text-slate-400 uppercase mb-1">อวัยวะที่เสี่ยง</label>
+                <input type="text" name="BodyPart" class="form-input w-full rounded-xl text-sm" value="${r.BodyPart || ''}">
+              </div>
+            </div>
+            <div>
+              <label class="block text-[10px] font-bold text-slate-400 uppercase mb-1">ข้อเสนอแนะการแก้ไข</label>
+              <textarea name="Suggestion" rows="2" class="form-input w-full rounded-xl text-sm resize-none">${r.Suggestion || ''}</textarea>
+            </div>
+          </div>
+        </div>
+
+        <!-- Stop Type -->
+        <div class="rounded-xl border border-slate-200 overflow-hidden">
+          <div class="px-4 py-2.5 bg-slate-50 border-b border-slate-200 flex items-center gap-2">
+            <span class="w-5 h-5 rounded-full text-[9px] font-bold text-white flex items-center justify-center" style="background:linear-gradient(135deg,#059669,#0d9488)">4</span>
+            <span class="text-xs font-bold text-slate-700">ประเภทอันตราย (Stop Type) <span class="text-red-500">*</span></span>
+          </div>
+          <div class="p-4 grid grid-cols-2 gap-2">
+            ${STOP_TYPES.map(s => `
+            <label class="cursor-pointer">
+              <input type="radio" name="StopType" value="${s.id}" class="peer sr-only" required ${r.StopType == s.id ? 'checked' : ''}>
+              <div class="flex items-center gap-2.5 p-3 rounded-xl border-2 border-slate-100 hover:border-slate-200 peer-checked:border-current transition-all">
+                <div class="w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0" style="background:${s.bg}">
+                  <svg class="w-4 h-4" style="color:${s.color}" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="${s.icon}"/></svg>
+                </div>
+                <div class="min-w-0">
+                  <p class="text-[10px] font-bold" style="color:${s.color}">${s.code}</p>
+                  <p class="text-[10px] text-slate-600 leading-snug">${s.label}</p>
+                </div>
+              </div>
+            </label>`).join('')}
+          </div>
+        </div>
+
+        <!-- Rank -->
+        <div class="rounded-xl border border-slate-200 overflow-hidden">
+          <div class="px-4 py-2.5 bg-slate-50 border-b border-slate-200 flex items-center gap-2">
+            <span class="w-5 h-5 rounded-full text-[9px] font-bold text-white flex items-center justify-center" style="background:linear-gradient(135deg,#059669,#0d9488)">5</span>
+            <span class="text-xs font-bold text-slate-700">ระดับความรุนแรง (Rank) <span class="text-red-500">*</span></span>
+          </div>
+          <div class="p-4 grid grid-cols-3 gap-2">
+            ${RANKS.map(rk => `
+            <label class="cursor-pointer">
+              <input type="radio" name="Rank" value="${rk.rank}" class="peer sr-only" required ${r.Rank === rk.rank ? 'checked' : ''}>
+              <div class="p-3 rounded-xl border-2 text-center border-slate-100 peer-checked:border-current hover:border-slate-200 transition-all">
+                <div class="w-8 h-8 rounded-lg mx-auto mb-2 flex items-center justify-center text-sm font-black text-white" style="background:${rk.color}">${rk.rank}</div>
+                <p class="text-[10px] font-bold" style="color:${rk.color}">${rk.label}</p>
+                <p class="text-[9px] text-slate-500 mt-0.5 leading-snug">${rk.desc}</p>
+              </div>
+            </label>`).join('')}
+          </div>
+        </div>
+
+        <div class="flex justify-end gap-3 pt-2 border-t border-slate-100">
+          <button type="button" onclick="closeModal()" class="px-5 py-2.5 rounded-xl text-slate-600 hover:bg-slate-100 text-sm font-medium transition-colors">ยกเลิก</button>
+          <button type="submit" id="btn-save-edit-worker" class="px-6 py-2.5 rounded-xl text-sm font-bold text-white shadow-sm hover:shadow-md transition-all" style="background:linear-gradient(135deg,#059669,#0d9488)">บันทึกการแก้ไข</button>
+        </div>
+      </form>`, 'max-w-2xl');
+
+    document.getElementById('cccf-edit-worker-form')?.addEventListener('submit', async e => {
+        e.preventDefault();
+        if (!e.target.StopType.value) { showToast('กรุณาเลือกประเภทอันตราย', 'error'); return; }
+        if (!e.target.Rank.value)     { showToast('กรุณาเลือกระดับความรุนแรง', 'error'); return; }
+        const btn = document.getElementById('btn-save-edit-worker');
+        btn.disabled = true;
+        btn.innerHTML = '<span class="animate-spin inline-block w-4 h-4 border-2 border-white border-t-transparent rounded-full mr-1.5"></span>กำลังบันทึก...';
+        showLoading('กำลังบันทึก...');
+        try {
+            const data = Object.fromEntries(new FormData(e.target).entries());
+            await API.put(`/cccf/form-a-worker/${id}`, data);
+            closeModal();
+            showToast('แก้ไขสำเร็จ', 'success');
+            loadCccfPage();
+        } catch (err) { showError(err); }
+        finally { hideLoading(); btn.disabled = false; btn.textContent = 'บันทึกการแก้ไข'; }
     });
 };
 
@@ -177,18 +356,22 @@ export async function loadCccfPage() {
             <span class="text-sm">กำลังโหลดข้อมูล CCCF...</span>
         </div>`;
     try {
-        const [workerRes, permanentRes, deptRes, assignRes, settingRes] = await Promise.all([
+        const [workerRes, permanentRes, deptRes, assignRes, unitsRes, unitTgtRes, settingRes] = await Promise.all([
             API.get('/cccf/form-a-worker').catch(() => []),
             API.get('/cccf/form-a-permanent').catch(() => []),
             API.get('/master/departments').catch(() => ({ data: [] })),
             API.get('/cccf/assignments').catch(() => []),
-            API.get('/settings/cccf_dept_sel').catch(() => ({ value: null })),
+            API.get('/master/safety-units').catch(() => ({ data: [] })),
+            API.get('/cccf/unit-targets').catch(() => []),
+            API.get('/settings/cccf_unit_sel').catch(() => ({ value: null })),
         ]);
         _workerData    = Array.isArray(workerRes)    ? workerRes    : workerRes?.data    ?? [];
         _permanentData = Array.isArray(permanentRes) ? permanentRes : permanentRes?.data ?? [];
         _departments   = Array.isArray(deptRes)      ? deptRes      : deptRes?.data      ?? [];
         _assignments   = Array.isArray(assignRes)    ? assignRes    : assignRes?.data    ?? [];
-        try { _cccfDeptSel = settingRes?.value ? JSON.parse(settingRes.value) : null; } catch { _cccfDeptSel = null; }
+        _safetyUnits   = Array.isArray(unitsRes)     ? unitsRes     : unitsRes?.data     ?? [];
+        _unitTargets   = Array.isArray(unitTgtRes)   ? unitTgtRes   : unitTgtRes?.data   ?? [];
+        try { _cccfUnitSel = settingRes?.value ? JSON.parse(settingRes.value) : null; } catch { _cccfUnitSel = null; }
 
         renderPage(container);
         const savedTab = window._getTab?.('cccf', 'worker');
@@ -203,6 +386,7 @@ export async function loadCccfPage() {
 function getFilteredWorker() {
     return _workerData.filter(r => {
         if (_wFilterDept && r.Department !== _wFilterDept) return false;
+        if (_wFilterUnit && (r.SafetyUnit || 'ไม่ระบุ') !== _wFilterUnit) return false;
         if (_wFilterRank && r.Rank !== _wFilterRank) return false;
         if (_wFilterStop && r.StopType != _wFilterStop) return false;
         if (_wSearch) {
@@ -215,6 +399,11 @@ function getFilteredWorker() {
     });
 }
 
+function getPagedWorker(filtered) {
+    const start = _wPage * W_PAGE_SIZE;
+    return filtered.slice(start, start + W_PAGE_SIZE);
+}
+
 function getFilteredPermanent() {
     return _permanentData.filter(r => {
         if (_pFilterDept && r.Department !== _pFilterDept) return false;
@@ -222,32 +411,380 @@ function getFilteredPermanent() {
     });
 }
 
-// ─── Sub-renders ──────────────────────────────────────────────────────────────
-function renderDeptSummary() {
-    const deptNames = _cccfDeptSel
-        ? _departments.map(d => d.Name||d).filter(n => _cccfDeptSel.includes(n))
-        : [...new Set(_workerData.map(r => r.Department || 'ไม่ระบุ'))].sort();
+// ─── My Card ─────────────────────────────────────────────────────────────────
+function renderMyCard() {
+    const myAll  = _workerData.filter(r => r.EmployeeID === currentUser.id);
+    const currentYr = new Date().getFullYear();
+    const myYear = myAll.filter(r => new Date(r.SubmitDate).getFullYear() === _myCardYear);
+    const target = 2;
+    const count  = myYear.length;
+    const pct    = Math.min(100, Math.round((count / target) * 100));
+    const done   = count >= target;
 
-    if (!deptNames.length) return `<div class="text-center py-8 text-slate-400 text-xs">ยังไม่มีข้อมูล</div>`;
+    const ringColor = done ? '#10b981' : count >= 1 ? '#f59e0b' : '#ef4444';
+    const circumference = (2 * Math.PI * 20).toFixed(1);
+    const dashOffset = ((1 - pct / 100) * 2 * Math.PI * 20).toFixed(1);
+    const yearOpts = [currentYr, currentYr-1, currentYr-2]
+        .map(y => `<option value="${y}" ${y === _myCardYear ? 'selected' : ''}>ปี ${y + 543}</option>`).join('');
 
-    const total = _workerData.length;
-    return deptNames.map(dept => {
-        const count = _workerData.filter(r => (r.Department||'ไม่ระบุ') === dept).length;
-        const pct   = total > 0 ? Math.round((count / total) * 100) : 0;
-        return `<div class="flex items-center gap-3 group cursor-pointer" onclick="window._wSetDept('${dept.replace(/'/g,"\\'")}')">
-          <div class="flex-1 min-w-0">
-            <div class="flex justify-between items-center mb-1">
-              <span class="text-xs font-semibold text-slate-700 truncate group-hover:text-emerald-700 transition-colors">${dept}</span>
-              <span class="text-[10px] font-bold text-slate-400 ml-2 flex-shrink-0">${count} <span class="font-normal">รายการ</span></span>
-            </div>
-            <div class="w-full bg-slate-100 rounded-full h-1.5 overflow-hidden">
-              <div class="h-full rounded-full transition-all duration-700" style="width:${pct}%;background:linear-gradient(90deg,#059669,#0d9488)"></div>
-            </div>
+    const rows = myYear.slice(0, 10).map(r => {
+        const rank = RANKS.find(x => x.rank === r.Rank) || RANKS[2];
+        const stop = STOP_TYPES.find(x => x.id == r.StopType) || STOP_TYPES[5];
+        const dateStr = r.SubmitDate ? new Date(r.SubmitDate).toLocaleDateString('th-TH', { day: 'numeric', month: 'short', year: '2-digit' }) : '—';
+        const desc = (r.HazardDescription || '').slice(0, 50) + ((r.HazardDescription || '').length > 50 ? '…' : '');
+        return `<div class="flex items-center gap-3 px-4 py-3 border-b border-slate-50 last:border-0 hover:bg-emerald-50/40 transition-colors group cursor-pointer"
+          onclick="window._cccfShowWorkerDetail(${r.id})">
+          <div class="flex flex-col gap-0.5 flex-shrink-0">
+            <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[9px] font-bold border" style="background:${stop.bg};color:${stop.color};border-color:${stop.border}">${stop.code}</span>
+            ${r.SafetyUnit ? `<span class="text-[9px] font-semibold text-emerald-600 truncate max-w-[70px]">${r.SafetyUnit}</span>` : ''}
           </div>
-          <span class="text-[10px] font-bold w-8 text-right flex-shrink-0 ${count > 0 ? 'text-emerald-600' : 'text-slate-300'}">${pct}%</span>
+          <p class="flex-1 text-xs text-slate-600 min-w-0 truncate">${desc || '—'}</p>
+          <span class="w-6 h-6 rounded-lg flex items-center justify-center text-[10px] font-black text-white flex-shrink-0" style="background:${rank.color}">${rank.rank}</span>
+          <span class="text-[10px] text-slate-400 flex-shrink-0 w-16 text-right">${dateStr}</span>
+          <div class="flex gap-1 flex-shrink-0 opacity-0 group-hover:opacity-100 transition-opacity">
+            <button onclick="event.stopPropagation();window._cccfEditWorker(${r.id})"
+              class="p-1.5 rounded-lg text-slate-400 hover:text-emerald-600 hover:bg-emerald-50 transition-colors" title="แก้ไข">
+              <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"/></svg>
+            </button>
+            <button onclick="event.stopPropagation();window._cccfDeleteWorker(${r.id})"
+              class="p-1.5 rounded-lg text-slate-400 hover:text-red-500 hover:bg-red-50 transition-colors" title="ลบ">
+              <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg>
+            </button>
+          </div>
         </div>`;
     }).join('');
+
+    return `
+    <div class="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden" style="box-shadow:0 4px 16px rgba(5,150,105,0.08)">
+      <div class="px-5 py-4 flex items-center justify-between border-b border-slate-100" style="background:linear-gradient(135deg,#f0fdf4,#ecfdf5)">
+        <div class="flex items-center gap-3">
+          <div class="w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0" style="background:linear-gradient(135deg,#059669,#0d9488);box-shadow:0 2px 10px rgba(5,150,105,0.3)">
+            <svg class="w-4 h-4 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z"/></svg>
+          </div>
+          <div>
+            <h3 class="text-sm font-bold text-slate-800">รายการของฉัน</h3>
+            <p class="text-[10px] text-slate-500 mt-0.5">ส่งได้ไม่จำกัด · เป้าหมายปีละ ${target} ครั้ง</p>
+          </div>
+        </div>
+        <div class="flex items-center gap-3">
+          <select onchange="window._myCardSetYear(+this.value)"
+            class="text-xs py-1.5 px-3 rounded-lg border border-slate-200 bg-white text-slate-600 focus:outline-none focus:border-emerald-400">
+            ${yearOpts}
+          </select>
+          <!-- Progress ring -->
+          <div class="flex items-center gap-2.5">
+            <div class="relative w-11 h-11 flex-shrink-0">
+              <svg class="w-11 h-11 -rotate-90" viewBox="0 0 48 48">
+                <circle cx="24" cy="24" r="20" fill="none" stroke="#f1f5f9" stroke-width="5"/>
+                <circle cx="24" cy="24" r="20" fill="none" stroke="${ringColor}" stroke-width="5"
+                  stroke-linecap="round"
+                  stroke-dasharray="${circumference}"
+                  stroke-dashoffset="${dashOffset}"
+                  style="transition:stroke-dashoffset 0.8s ease"/>
+              </svg>
+              <div class="absolute inset-0 flex items-center justify-center">
+                <span class="text-[10px] font-black" style="color:${ringColor}">${count}/${target}</span>
+              </div>
+            </div>
+            <div>
+              <p class="text-xs font-bold ${done ? 'text-emerald-600' : 'text-amber-600'}">${done ? 'ครบเป้าหมาย' : 'ยังไม่ครบ'}</p>
+              <p class="text-[10px] text-slate-400">ปี ${_myCardYear}</p>
+            </div>
+          </div>
+          <span class="text-[10px] font-bold px-2.5 py-1 rounded-full ${done ? 'bg-emerald-50 text-emerald-700' : 'bg-amber-50 text-amber-700'}">${myYear.length} รายการ</span>
+        </div>
+      </div>
+      ${myYear.length === 0
+        ? `<div class="text-center py-10 text-slate-400">
+             <div class="w-12 h-12 rounded-2xl bg-slate-100 flex items-center justify-center mx-auto mb-3">
+               <svg class="w-6 h-6 opacity-40" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"/></svg>
+             </div>
+             <p class="text-sm font-medium">ยังไม่มีรายการในปี ${_myCardYear + 543}</p>
+             <p class="text-xs mt-1">กดปุ่ม "ส่งแบบฟอร์ม CCCF" เพื่อเริ่มต้น</p>
+           </div>`
+        : `<div>${rows}</div>
+           ${myYear.length > 10 ? `<div class="px-4 py-2.5 text-center border-t border-slate-50">
+             <span class="text-[10px] text-slate-400">แสดง 10 รายการล่าสุด · ทั้งหมด ${myYear.length} รายการในปีนี้</span>
+           </div>` : ''}`}
+    </div>`;
 }
+
+// ─── Unit data helper ─────────────────────────────────────────────────────────
+function buildUnitData() {
+    const masterUnitNames = _safetyUnits.map(u => u.name);
+    const dataUnitNames   = [...new Set(_workerData.map(r => r.SafetyUnit).filter(Boolean))];
+    const allUnitNames    = [...new Set([...masterUnitNames, ...dataUnitNames])].sort();
+    const unitNames = _cccfUnitSel
+        ? allUnitNames.filter(n => _cccfUnitSel.includes(n))
+        : allUnitNames;
+
+    return unitNames.map(unit => {
+        const tgtRow   = _unitTargets.find(t => t.unit_name === unit);
+        const target   = tgtRow?.yearly_target ?? 0;
+        // Computed achieved = unique EmployeeIDs ที่ส่งในปีที่กรอง
+        const yearData = _workerData.filter(r =>
+            r.SafetyUnit === unit &&
+            new Date(r.SubmitDate).getFullYear() === _unitYear
+        );
+        const achievedComputed = new Set(yearData.map(r => r.EmployeeID)).size;
+        // Admin can override achieved manually (achieved_override in DB)
+        const achievedOverride = (tgtRow?.achieved_override != null) ? tgtRow.achieved_override : null;
+        const achieved  = achievedOverride !== null ? achievedOverride : achievedComputed;
+        const remaining = target > 0 ? Math.max(0, target - achieved) : 0;
+        const done      = target > 0 && achieved >= target;
+        return { unit, target, achieved, achievedComputed, achievedOverride, remaining, done };
+    });
+}
+
+// ─── Sub-renders ──────────────────────────────────────────────────────────────
+function renderUnitSummary() {
+    const units = buildUnitData();
+    if (!units.length) return `<p class="col-span-full text-center py-6 text-slate-400 text-sm">ยังไม่มีข้อมูล Unit ในระบบ</p>`;
+
+    const totalTarget   = units.reduce((s, u) => s + u.target, 0);
+    const totalAchieved = units.reduce((s, u) => s + u.achieved, 0);
+    const overallPct    = totalTarget > 0 ? Math.round((totalAchieved / totalTarget) * 100) : 0;
+    const currentYear   = new Date().getFullYear();
+    const yearOpts = [currentYear, currentYear-1, currentYear-2]
+        .map(y => `<option value="${y}" ${y === _unitYear ? 'selected' : ''}>ปี ${y + 543}</option>`).join('');
+
+    const editSvg = `<svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"/></svg>`;
+
+    const tableRows = units.map((u, i) => {
+        const bg       = u.done ? '#059669' : (u.achieved > 0 ? '#d97706' : '#dc2626');
+        const safeUnit = u.unit.replace(/'/g, "\\'");
+        const overrideBadge = (isAdmin && u.achievedOverride !== null)
+            ? `<span class="ml-1 text-[8px] font-bold opacity-70">(M)</span>` : '';
+        return `<tr class="text-white cursor-pointer hover:opacity-90 transition-opacity border-b border-white/20"
+          style="background:${bg}" onclick="window._wSetUnit('${safeUnit}')">
+          <td class="px-3 py-2 text-center text-xs font-semibold opacity-70 w-7 flex-shrink-0">${i + 1}.</td>
+          <td class="px-3 py-2 text-xs font-semibold" style="white-space:normal;word-break:break-word">${u.unit}</td>
+          <td class="px-3 py-2 text-center text-xs font-bold w-16">${u.target || '—'}</td>
+          <td class="px-3 py-2 text-center text-xs font-bold w-16">${u.achieved}${overrideBadge}</td>
+          ${isAdmin ? `<td class="px-1 py-2 text-center w-8">
+            <button onclick="event.stopPropagation();window._cccfSetUnitTarget('${safeUnit}',${u.target},${u.achievedOverride !== null ? u.achievedOverride : 'null'},${u.achievedComputed})"
+              class="p-1 rounded text-white/50 hover:text-white hover:bg-white/20 transition-colors">${editSvg}</button>
+          </td>` : ''}
+        </tr>`;
+    }).join('');
+
+    return `
+    <!-- Stats strip -->
+    <div class="flex flex-wrap items-center gap-3 mb-4">
+      <div class="flex gap-3">
+        ${[
+          { label: 'Target (คน)', val: totalTarget.toLocaleString(), color: '#1e293b' },
+          { label: 'Achieved (คน)', val: totalAchieved.toLocaleString(), color: '#059669' },
+          { label: 'Percent', val: overallPct + '%', color: overallPct >= 100 ? '#059669' : overallPct >= 50 ? '#d97706' : '#dc2626' },
+        ].map(s => `<div class="text-center px-4 py-2 bg-slate-50 rounded-xl border border-slate-200 min-w-[80px]">
+          <p class="text-lg font-black" style="color:${s.color}">${s.val}</p>
+          <p class="text-[10px] text-slate-500 font-semibold mt-0.5">${s.label}</p>
+        </div>`).join('')}
+      </div>
+      <div class="flex gap-2 ml-auto items-center">
+        <select id="unit-year-filter" onchange="window._unitSetYear(+this.value)"
+          class="text-xs py-1.5 px-3 rounded-lg border border-slate-200 bg-white text-slate-600 focus:outline-none focus:border-emerald-400">
+          ${yearOpts}
+        </select>
+        ${isAdmin ? `<button onclick="window._cccfOpenDeptFilter()"
+          class="flex items-center gap-1 text-[10px] font-semibold text-emerald-600 px-2.5 py-1.5 rounded-lg hover:bg-emerald-50 border border-emerald-100 transition-colors">
+          <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 4a1 1 0 011-1h16a1 1 0 011 1v2.586a1 1 0 01-.293.707l-6.414 6.414a1 1 0 00-.293.707V17l-4 4v-6.586a1 1 0 00-.293-.707L3.293 7.293A1 1 0 013 6.586V4z"/></svg>
+          เลือก Unit
+        </button>` : ''}
+      </div>
+    </div>
+
+    <!-- Combo layout: table (full height, no scroll) + chart -->
+    <div class="flex gap-0 border border-slate-200 rounded-xl overflow-hidden">
+
+      <!-- Table: no fixed height, all rows visible -->
+      <div class="flex-shrink-0 border-r border-slate-200" style="min-width:340px">
+        <table class="w-full">
+          <thead>
+            <tr class="bg-slate-100 border-b border-slate-200 sticky top-0">
+              <th class="px-3 py-2.5 text-center text-[10px] font-bold text-slate-500 w-7"> </th>
+              <th class="px-3 py-2.5 text-left text-[10px] font-bold text-slate-600">Section</th>
+              <th class="px-3 py-2.5 text-center text-[10px] font-bold text-slate-600 w-16">Target</th>
+              <th class="px-3 py-2.5 text-center text-[10px] font-bold text-slate-600 w-16">Done</th>
+              ${isAdmin ? `<th class="w-8"></th>` : ''}
+            </tr>
+          </thead>
+          <tbody>${tableRows}</tbody>
+        </table>
+      </div>
+
+      <!-- Chart: flex-fill to match table height -->
+      <div class="flex-1 bg-white flex flex-col min-w-0 p-4" style="min-width:240px">
+        <p class="text-xs font-bold text-slate-600 text-center mb-2">ความคืบหน้าราย Unit — ปี ${_unitYear + 543}</p>
+        <div class="flex items-center justify-center gap-4 text-[10px] text-slate-500 mb-3">
+          <span class="flex items-center gap-1"><span class="w-3 h-3 rounded inline-block" style="background:rgba(52,211,153,0.85)"></span>Achieved</span>
+          <span class="flex items-center gap-1"><span class="w-3 h-3 rounded inline-block" style="background:rgba(253,230,138,0.85)"></span>Onprocess</span>
+          <span class="flex items-center gap-1"><span class="inline-block w-6 border-t-2 border-dashed border-red-500"></span>Target</span>
+        </div>
+        <div class="relative flex-1" style="min-height:200px">
+          <canvas id="cccf-unit-chart"></canvas>
+        </div>
+      </div>
+    </div>`;
+}
+
+// ─── Chart.js Horizontal Combo Chart ─────────────────────────────────────────
+function initUnitChart() {
+    const ctx = document.getElementById('cccf-unit-chart');
+    if (!ctx || typeof Chart === 'undefined') return;
+    if (_unitChartInst) { _unitChartInst.destroy(); _unitChartInst = null; }
+
+    const units    = buildUnitData();
+    const labels   = units.map(u => u.unit);
+    const targets  = units.map(u => u.target);
+    const achieved = units.map(u => u.achieved);
+    const onproc   = units.map(u => u.remaining);
+
+    // Row height in the table ≈ 36px; chart bar band should match
+    const barThickness = 20;
+
+    _unitChartInst = new Chart(ctx, {
+        data: { labels, datasets: [
+            {
+                type: 'bar', label: 'Achieved', data: achieved,
+                backgroundColor: 'rgba(52,211,153,0.85)', borderColor: '#10b981',
+                borderWidth: 1, stack: 'total', order: 2,
+                barThickness,
+            },
+            {
+                type: 'bar', label: 'Onprocess', data: onproc,
+                backgroundColor: 'rgba(253,230,138,0.85)', borderColor: '#fbbf24',
+                borderWidth: 1, stack: 'total', order: 2,
+                barThickness,
+            },
+            {
+                type: 'line', label: 'Target', data: targets,
+                borderColor: '#ef4444', borderDash: [5, 4], borderWidth: 2,
+                pointBackgroundColor: '#ef4444', pointRadius: 4, pointHoverRadius: 6,
+                fill: false, tension: 0, order: 1,
+                // line dataset must share same indexAxis as bar
+            },
+        ]},
+        options: {
+            indexAxis: 'y',          // horizontal bars
+            responsive: true,
+            maintainAspectRatio: false,
+            interaction: { mode: 'index', intersect: false },
+            plugins: {
+                legend: { display: false },
+                tooltip: { callbacks: { label: c => `${c.dataset.label}: ${c.raw} คน` } },
+            },
+            scales: {
+                // x = value axis (horizontal)
+                x: {
+                    stacked: true, beginAtZero: true,
+                    ticks: { font: { size: 9 }, precision: 0 },
+                    grid: { color: 'rgba(0,0,0,0.05)' },
+                },
+                // y = category axis — show truncated unit names on each bar row
+                y: {
+                    stacked: true,
+                    ticks: {
+                        display: true,
+                        font: { size: 9 },
+                        color: '#475569',
+                        callback: function(val) {
+                            const name = this.getLabelForValue(val) || '';
+                            return name.length > 22 ? name.slice(0, 21) + '…' : name;
+                        },
+                    },
+                    grid: { display: false },
+                },
+            },
+            layout: { padding: { right: 8, left: 4 } },
+        },
+    });
+}
+
+window._unitSetYear = (year) => {
+    _unitYear = year;
+    const wrap = document.getElementById('cccf-unit-summary-inner');
+    if (wrap) { wrap.innerHTML = renderUnitSummary(); setTimeout(() => initUnitChart(), 0); }
+};
+
+window._myCardSetYear = (year) => {
+    _myCardYear = year;
+    const wrap = document.getElementById('cccf-my-card-wrap');
+    if (wrap) wrap.innerHTML = renderMyCard();
+};
+
+window._unitUpdateRemaining = () => {
+    const t    = parseInt(document.getElementById('unit-target-input')?.value) || 0;
+    const aRaw = document.getElementById('unit-achieved-input')?.value.trim();
+    const fallback = parseInt(document.getElementById('unit-achieved-input')?.dataset.computed) || 0;
+    const a   = aRaw === '' ? fallback : (parseInt(aRaw) || 0);
+    const rem = Math.max(0, t - a);
+    const el  = document.getElementById('unit-remaining-val');
+    if (el) { el.textContent = rem + ' คน'; el.style.color = rem > 0 ? '#dc2626' : '#059669'; }
+};
+
+window._cccfSetUnitTarget = (unit, currentTarget, achievedOverride, computedAchieved) => {
+    const overrideVal = (achievedOverride !== null && achievedOverride !== undefined) ? achievedOverride : '';
+    const initRemaining = Math.max(0, (currentTarget || 0) - (overrideVal !== '' ? (overrideVal || 0) : (computedAchieved || 0)));
+
+    openModal(`แก้ไขข้อมูล Unit: ${unit}`, `
+      <div class="space-y-4 px-1">
+        <p class="text-xs text-slate-500">กำหนดค่าสำหรับ Unit นี้ในปี <strong>${_unitYear + 543}</strong></p>
+
+        <div class="grid grid-cols-2 gap-3">
+          <div>
+            <label class="block text-[10px] font-bold text-slate-400 uppercase mb-1.5">เป้าหมาย (คน/ปี) <span class="text-red-500">*</span></label>
+            <input id="unit-target-input" type="number" min="0" max="9999" value="${currentTarget || 0}"
+              oninput="window._unitUpdateRemaining()"
+              class="form-input w-full rounded-xl text-sm text-center font-bold" style="color:#1e293b">
+          </div>
+          <div>
+            <label class="block text-[10px] font-bold text-slate-400 uppercase mb-1.5">
+              Achieved (Override)
+              <span class="font-normal normal-case text-slate-300 ml-1">ระบบ: ${computedAchieved} คน</span>
+            </label>
+            <input id="unit-achieved-input" type="number" min="0" max="9999"
+              value="${overrideVal}" placeholder="${computedAchieved}"
+              data-computed="${computedAchieved}"
+              oninput="window._unitUpdateRemaining()"
+              class="form-input w-full rounded-xl text-sm text-center font-bold" style="color:#059669">
+            <p class="text-[9px] text-slate-400 mt-1">เว้นว่าง = ใช้ค่าจากระบบ</p>
+          </div>
+        </div>
+
+        <div class="flex items-center gap-3 px-4 py-3 rounded-xl bg-slate-50 border border-slate-200">
+          <div class="flex-1">
+            <p class="text-[10px] font-bold text-slate-400 uppercase">ยังไม่ส่ง (Remaining)</p>
+            <p id="unit-remaining-val" class="text-xl font-black mt-0.5" style="color:${initRemaining > 0 ? '#dc2626' : '#059669'}">${initRemaining} คน</p>
+          </div>
+          <svg class="w-8 h-8 text-slate-200" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+        </div>
+
+        <div class="flex justify-end gap-2 pt-2 border-t border-slate-100">
+          <button onclick="closeModal()" class="px-4 py-2 rounded-xl text-slate-600 hover:bg-slate-100 text-sm font-medium transition-colors">ยกเลิก</button>
+          <button id="btn-save-unit-target" class="px-5 py-2 rounded-xl text-sm font-bold text-white" style="background:linear-gradient(135deg,#059669,#0d9488)">บันทึก</button>
+        </div>
+      </div>`, 'max-w-sm');
+
+    document.getElementById('btn-save-unit-target')?.addEventListener('click', async () => {
+        const targetVal  = parseInt(document.getElementById('unit-target-input')?.value) || 0;
+        const achRaw     = document.getElementById('unit-achieved-input')?.value.trim();
+        const achOverride = achRaw === '' ? null : (parseInt(achRaw) || 0);
+        showLoading('กำลังบันทึก...');
+        try {
+            await API.put(`/cccf/unit-targets/${encodeURIComponent(unit)}`, {
+                yearly_target: targetVal,
+                achieved_override: achOverride,
+            });
+            const res = await API.get('/cccf/unit-targets').catch(() => []);
+            _unitTargets = Array.isArray(res) ? res : res?.data ?? [];
+            closeModal();
+            showToast('บันทึกสำเร็จ', 'success');
+            const wrap = document.getElementById('cccf-unit-summary-inner');
+            if (wrap) { wrap.innerHTML = renderUnitSummary(); setTimeout(() => initUnitChart(), 0); }
+        } catch (err) { showError(err); } finally { hideLoading(); }
+    });
+};
 
 function renderWorkerRows(data) {
     const cols = isAdmin ? 6 : 5;
@@ -271,6 +808,7 @@ function renderWorkerRows(data) {
           </td>
           <td class="px-4 py-3">
             <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[9px] font-bold border" style="background:${stop.bg};color:${stop.color};border-color:${stop.border}">${stop.code}</span>
+            ${r.SafetyUnit ? `<p class="text-[10px] font-semibold text-emerald-600 mt-0.5">${r.SafetyUnit}</p>` : ''}
             <p class="text-[10px] text-slate-500 mt-0.5">${r.JobArea || '—'}</p>
           </td>
           <td class="px-4 py-3 max-w-[200px]">
@@ -468,6 +1006,9 @@ function renderPage(container) {
           </div>`).join('')}
         </div>
 
+        <!-- ═══ การ์ดของฉัน ═══ -->
+        <div id="cccf-my-card-wrap">${renderMyCard()}</div>
+
         <!-- Stop 1–6 -->
         <div class="bg-white rounded-2xl border border-slate-100 shadow-sm p-5" style="box-shadow:0 4px 16px rgba(5,150,105,0.08)">
           <h3 class="text-sm font-bold text-slate-700 mb-4">อันตราย 6 ประการ (Stop 1–6)</h3>
@@ -485,62 +1026,67 @@ function renderPage(container) {
           </div>
         </div>
 
-        <!-- 2-col: dept summary + table -->
-        <div class="grid grid-cols-1 lg:grid-cols-4 gap-5">
-
-          <!-- Dept summary -->
-          <div class="bg-white rounded-2xl border border-slate-100 shadow-sm p-5" style="box-shadow:0 4px 16px rgba(5,150,105,0.08)">
-            <div class="flex items-center justify-between mb-4">
-              <h3 class="text-sm font-bold text-slate-700">สรุปรายส่วนงาน</h3>
-              ${isAdmin ? `<button onclick="window._cccfOpenDeptFilter()" class="flex items-center gap-1 text-[10px] font-semibold text-emerald-600 hover:text-emerald-700 px-2 py-1 rounded-lg hover:bg-emerald-50 transition-colors border border-emerald-100">
-                <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 4a1 1 0 011-1h16a1 1 0 011 1v2.586a1 1 0 01-.293.707l-6.414 6.414a1 1 0 00-.293.707V17l-4 4v-6.586a1 1 0 00-.293-.707L3.293 7.293A1 1 0 013 6.586V4z"/></svg>
-                เลือก
-              </button>` : ''}
-            </div>
-            <div id="cccf-dept-summary" class="space-y-3">${renderDeptSummary()}</div>
+        <!-- Unit summary — full width -->
+        <div class="bg-white rounded-2xl border border-slate-100 shadow-sm p-5" style="box-shadow:0 4px 16px rgba(5,150,105,0.08)">
+          <div class="mb-4">
+            <h3 class="text-sm font-bold text-slate-700">สรุปราย Unit</h3>
+            <p class="text-[10px] text-slate-400 mt-0.5">คลิก Unit เพื่อกรองตาราง · ปีและ Unit เลือกได้ด้านล่าง</p>
           </div>
+          <div id="cccf-unit-summary">
+            <div id="cccf-unit-summary-inner">${renderUnitSummary()}</div>
+          </div>
+        </div>
 
-          <!-- Submission table -->
-          <div class="lg:col-span-3 bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden" style="box-shadow:0 4px 16px rgba(5,150,105,0.08)">
-            <!-- Filter bar -->
-            <div class="px-5 py-4 border-b border-slate-100 bg-slate-50/60">
-              <div class="flex flex-wrap gap-2 items-center">
-                <div class="relative flex-1 min-w-[140px]">
-                  <svg class="w-3.5 h-3.5 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/></svg>
-                  <input id="w-search" type="text" placeholder="ค้นหาชื่อ, อันตราย..." value="${_wSearch}"
-                    class="w-full pl-8 pr-3 py-2 text-xs rounded-xl border border-slate-200 bg-white focus:outline-none focus:border-emerald-400 focus:ring-1 focus:ring-emerald-200">
-                </div>
-                <select id="w-filter-dept" class="text-xs py-2 px-3 rounded-xl border border-slate-200 bg-white focus:outline-none focus:border-emerald-400 text-slate-600">
-                  ${deptOpts}
-                </select>
-                <select id="w-filter-rank" class="text-xs py-2 px-3 rounded-xl border border-slate-200 bg-white focus:outline-none focus:border-emerald-400 text-slate-600">
-                  <option value="">— ทุก Rank —</option>
-                  ${RANKS.map(r => `<option value="${r.rank}" ${_wFilterRank === r.rank ? 'selected' : ''}>${r.label}</option>`).join('')}
-                </select>
-                <select id="w-filter-stop" class="text-xs py-2 px-3 rounded-xl border border-slate-200 bg-white focus:outline-none focus:border-emerald-400 text-slate-600">
-                  <option value="0">— ทุก Stop —</option>
-                  ${STOP_TYPES.map(s => `<option value="${s.id}" ${_wFilterStop == s.id ? 'selected' : ''}>${s.code}</option>`).join('')}
-                </select>
-                ${(_wSearch || _wFilterDept || _wFilterRank || _wFilterStop)
-                  ? `<button id="w-clear-filter" class="text-xs px-3 py-2 rounded-xl text-slate-400 hover:text-red-500 hover:bg-red-50 border border-slate-200 transition-colors font-semibold">ล้าง</button>`
-                  : ''}
-                <span class="text-[10px] text-slate-400 ml-auto whitespace-nowrap" id="w-count-label"></span>
+        <!-- Submission table — full width -->
+        <div class="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden" style="box-shadow:0 4px 16px rgba(5,150,105,0.08)">
+          <!-- Filter bar -->
+          <div class="px-5 py-4 border-b border-slate-100 bg-slate-50/60">
+            <div class="flex flex-wrap gap-2 items-center">
+              <h3 class="text-sm font-bold text-slate-700 mr-1">รายการทั้งหมด</h3>
+              <div class="w-px h-4 bg-slate-200"></div>
+              <div class="relative flex-1 min-w-[140px]">
+                <svg class="w-3.5 h-3.5 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/></svg>
+                <input id="w-search" type="text" placeholder="ค้นหาชื่อ, อันตราย..." value="${_wSearch}"
+                  class="w-full pl-8 pr-3 py-2 text-xs rounded-xl border border-slate-200 bg-white focus:outline-none focus:border-emerald-400 focus:ring-1 focus:ring-emerald-200">
               </div>
+              <select id="w-filter-dept" class="text-xs py-2 px-3 rounded-xl border border-slate-200 bg-white focus:outline-none focus:border-emerald-400 text-slate-600">
+                ${deptOpts}
+              </select>
+              <select id="w-filter-rank" class="text-xs py-2 px-3 rounded-xl border border-slate-200 bg-white focus:outline-none focus:border-emerald-400 text-slate-600">
+                <option value="">— ทุก Rank —</option>
+                ${RANKS.map(r => `<option value="${r.rank}" ${_wFilterRank === r.rank ? 'selected' : ''}>${r.label}</option>`).join('')}
+              </select>
+              <select id="w-filter-stop" class="text-xs py-2 px-3 rounded-xl border border-slate-200 bg-white focus:outline-none focus:border-emerald-400 text-slate-600">
+                <option value="0">— ทุก Stop —</option>
+                ${STOP_TYPES.map(s => `<option value="${s.id}" ${_wFilterStop == s.id ? 'selected' : ''}>${s.code}</option>`).join('')}
+              </select>
+              ${(_wSearch || _wFilterDept || _wFilterUnit || _wFilterRank || _wFilterStop)
+                ? `<button id="w-clear-filter" class="text-xs px-3 py-2 rounded-xl text-slate-400 hover:text-red-500 hover:bg-red-50 border border-slate-200 transition-colors font-semibold">ล้างตัวกรอง</button>`
+                : ''}
+              <span class="text-[10px] text-slate-400 ml-auto whitespace-nowrap" id="w-count-label"></span>
             </div>
-            <div class="overflow-x-auto">
-              <table class="w-full">
-                <thead>
-                  <tr style="background:linear-gradient(135deg,#064e3b,#065f46)">
-                    <th class="px-4 py-3 text-left text-[10px] font-bold text-emerald-100 uppercase">ชื่อ / ส่วนงาน</th>
-                    <th class="px-4 py-3 text-left text-[10px] font-bold text-emerald-100 uppercase">Stop / พื้นที่</th>
-                    <th class="px-4 py-3 text-left text-[10px] font-bold text-emerald-100 uppercase">รายละเอียดอันตราย</th>
-                    <th class="px-4 py-3 text-center text-[10px] font-bold text-emerald-100 uppercase w-16">Rank</th>
-                    <th class="px-4 py-3 text-center text-[10px] font-bold text-emerald-100 uppercase w-20">วันที่</th>
-                    ${isAdmin ? `<th class="px-4 py-3 w-10"></th>` : ''}
-                  </tr>
-                </thead>
-                <tbody id="worker-table-body">${renderWorkerRows(getFilteredWorker())}</tbody>
-              </table>
+          </div>
+          <div class="overflow-x-auto">
+            <table class="w-full">
+              <thead>
+                <tr style="background:linear-gradient(135deg,#064e3b,#065f46)">
+                  <th class="px-4 py-3 text-left text-[10px] font-bold text-emerald-100 uppercase">ชื่อ / ส่วนงาน</th>
+                  <th class="px-4 py-3 text-left text-[10px] font-bold text-emerald-100 uppercase">Stop / Unit / พื้นที่</th>
+                  <th class="px-4 py-3 text-left text-[10px] font-bold text-emerald-100 uppercase">รายละเอียดอันตราย</th>
+                  <th class="px-4 py-3 text-center text-[10px] font-bold text-emerald-100 uppercase w-16">Rank</th>
+                  <th class="px-4 py-3 text-center text-[10px] font-bold text-emerald-100 uppercase w-20">วันที่</th>
+                  ${isAdmin ? `<th class="px-4 py-3 w-10"></th>` : ''}
+                </tr>
+              </thead>
+              <tbody id="worker-table-body">${renderWorkerRows(getPagedWorker(getFilteredWorker()))}</tbody>
+            </table>
+          </div>
+          <!-- Pagination -->
+          <div id="w-pagination" class="px-5 py-3 border-t border-slate-100 bg-slate-50/40 flex items-center justify-between">
+            <span class="text-[10px] text-slate-400" id="w-page-info"></span>
+            <div class="flex gap-2">
+              <button id="w-prev-page" class="px-3 py-1.5 rounded-lg text-xs font-semibold border border-slate-200 text-slate-500 hover:border-emerald-300 hover:text-emerald-600 disabled:opacity-30 disabled:cursor-not-allowed transition-colors">ก่อนหน้า</button>
+              <button id="w-next-page" class="px-3 py-1.5 rounded-lg text-xs font-semibold border border-slate-200 text-slate-500 hover:border-emerald-300 hover:text-emerald-600 disabled:opacity-30 disabled:cursor-not-allowed transition-colors">ถัดไป</button>
             </div>
           </div>
         </div>
@@ -640,17 +1186,35 @@ function renderPage(container) {
 
     </div>`;
 
-    // ── Update count labels
-    const updateWCount = () => {
-        const filtered = getFilteredWorker();
+    // ── Pagination helpers
+    const updatePagination = (filtered) => {
+        const total   = filtered.length;
+        const totalPg = Math.max(1, Math.ceil(total / W_PAGE_SIZE));
+        _wPage = Math.min(_wPage, totalPg - 1);
+        const start   = _wPage * W_PAGE_SIZE + 1;
+        const end     = Math.min(total, (_wPage + 1) * W_PAGE_SIZE);
+        const info    = document.getElementById('w-page-info');
+        const prev    = document.getElementById('w-prev-page');
+        const next    = document.getElementById('w-next-page');
+        if (info) info.textContent = total ? `แสดง ${start}–${end} จาก ${total} รายการ` : 'ไม่มีข้อมูล';
+        if (prev) { prev.disabled = _wPage === 0; }
+        if (next) { next.disabled = _wPage >= totalPg - 1; }
         const el = document.getElementById('w-count-label');
-        if (el) el.textContent = `${filtered.length} รายการ`;
+        if (el) el.textContent = `${total} รายการ`;
     };
-    updateWCount();
+
+    const applyWorkerRender = () => {
+        const filtered = getFilteredWorker();
+        document.getElementById('worker-table-body').innerHTML = renderWorkerRows(getPagedWorker(filtered));
+        updatePagination(filtered);
+    };
+    applyWorkerRender();
+
+    document.getElementById('w-prev-page')?.addEventListener('click', () => { _wPage--; applyWorkerRender(); });
+    document.getElementById('w-next-page')?.addEventListener('click', () => { _wPage++; applyWorkerRender(); });
 
     // ── Tab switcher
     window._cccfSwitchTab = (tab) => {
-        _activeTab = tab;
         window._saveTab?.('cccf', tab);
         ['worker', 'permanent'].forEach(t => {
             const btn = document.getElementById(`btn-tab-${t}`);
@@ -670,12 +1234,11 @@ function renderPage(container) {
         _wFilterDept  = document.getElementById('w-filter-dept')?.value || '';
         _wFilterRank  = document.getElementById('w-filter-rank')?.value || '';
         _wFilterStop  = parseInt(document.getElementById('w-filter-stop')?.value) || 0;
-        const filtered = getFilteredWorker();
-        document.getElementById('worker-table-body').innerHTML = renderWorkerRows(filtered);
-        const el = document.getElementById('w-count-label');
-        if (el) el.textContent = `${filtered.length} รายการ`;
+        // _wFilterUnit is set externally by _wSetUnit (unit summary click) — don't overwrite from DOM
+        _wPage = 0;  // reset to first page on filter change
+        applyWorkerRender();
         // show/hide clear button
-        const hasFil = _wSearch || _wFilterDept || _wFilterRank || _wFilterStop;
+        const hasFil = _wSearch || _wFilterDept || _wFilterUnit || _wFilterRank || _wFilterStop;
         const existing = document.getElementById('w-clear-filter');
         if (hasFil && !existing) {
             const span = document.getElementById('w-count-label');
@@ -683,9 +1246,9 @@ function renderPage(container) {
                 const btn = document.createElement('button');
                 btn.id = 'w-clear-filter';
                 btn.className = 'text-xs px-3 py-2 rounded-xl text-slate-400 hover:text-red-500 hover:bg-red-50 border border-slate-200 transition-colors font-semibold';
-                btn.textContent = 'ล้าง';
+                btn.textContent = 'ล้างตัวกรอง';
                 btn.onclick = () => {
-                    _wSearch = ''; _wFilterDept = ''; _wFilterRank = ''; _wFilterStop = 0;
+                    _wSearch = ''; _wFilterDept = ''; _wFilterUnit = ''; _wFilterRank = ''; _wFilterStop = 0;
                     loadCccfPage();
                 };
                 span.parentNode.insertBefore(btn, span);
@@ -698,7 +1261,7 @@ function renderPage(container) {
     document.getElementById('w-filter-rank')?.addEventListener('change', refreshWorker);
     document.getElementById('w-filter-stop')?.addEventListener('change', refreshWorker);
     document.getElementById('w-clear-filter')?.addEventListener('click', () => {
-        _wSearch = ''; _wFilterDept = ''; _wFilterRank = ''; _wFilterStop = 0;
+        _wSearch = ''; _wFilterDept = ''; _wFilterUnit = ''; _wFilterRank = ''; _wFilterStop = 0;
         loadCccfPage();
     });
 
@@ -722,10 +1285,8 @@ function renderPage(container) {
         if (sel) sel.value = _wFilterStop;
         refreshWorker();
     };
-    window._wSetDept = (dept) => {
-        _wFilterDept = (_wFilterDept === dept) ? '' : dept;
-        const sel = document.getElementById('w-filter-dept');
-        if (sel) sel.value = _wFilterDept;
+    window._wSetUnit = (unit) => {
+        _wFilterUnit = (_wFilterUnit === unit) ? '' : unit;
         refreshWorker();
         window._cccfSwitchTab('worker');
     };
@@ -734,6 +1295,9 @@ function renderPage(container) {
     document.getElementById('btn-open-worker-form')?.addEventListener('click', openWorkerForm);
     document.getElementById('btn-open-permanent-form')?.addEventListener('click', openPermanentForm);
     document.getElementById('btn-manage-assignments')?.addEventListener('click', openAssignmentManager);
+
+    // ── Init unit chart after DOM settles
+    setTimeout(() => initUnitChart(), 0);
 }
 
 // ─── Worker Form ──────────────────────────────────────────────────────────────
@@ -769,6 +1333,15 @@ function openWorkerForm() {
             <div>
               <label class="block text-[10px] font-bold text-slate-400 uppercase mb-1">วันที่ลงข้อมูล <span class="text-red-500">*</span></label>
               <input type="date" name="SubmitDate" class="form-input w-full rounded-xl text-sm" required value="${today}">
+            </div>
+            <div class="col-span-2">
+              <label class="block text-[10px] font-bold text-slate-400 uppercase mb-1">Safety Unit <span class="text-red-500">*</span></label>
+              ${_safetyUnits.length
+                ? `<select name="SafetyUnit" class="form-input w-full rounded-xl text-sm" required>
+                     <option value="">— เลือก Unit —</option>
+                     ${_safetyUnits.map(u => `<option value="${u.name}">${u.name}${u.DeptName ? ` (${u.DeptName})` : ''}</option>`).join('')}
+                   </select>`
+                : `<input type="text" name="SafetyUnit" class="form-input w-full rounded-xl text-sm" required placeholder="ระบุ Unit ของคุณ">`}
             </div>
           </div>
         </div>

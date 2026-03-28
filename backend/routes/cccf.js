@@ -6,11 +6,26 @@ const { storage: cloudinaryStorage, fileFilter } = require('../cloudinary');
 
 const upload = multer({ storage: cloudinaryStorage, fileFilter, limits: { fileSize: 10 * 1024 * 1024 } });
 
-// Auto-migrate: add SafetyUnit column if not present
+// Auto-migrate & auto-create tables
 (async () => {
     try {
         await db.query(`ALTER TABLE CCCF_FormA_Worker ADD COLUMN SafetyUnit VARCHAR(100) NOT NULL DEFAULT '' AFTER Department`);
-    } catch (e) { /* column already exists or table not yet created — ignore */ }
+    } catch (e) { /* column already exists or table not yet created */ }
+    try {
+        await db.query(`
+            CREATE TABLE IF NOT EXISTS CCCF_Unit_Targets (
+                id                INT AUTO_INCREMENT PRIMARY KEY,
+                unit_name         VARCHAR(200) NOT NULL,
+                yearly_target     INT NOT NULL DEFAULT 1,
+                achieved_override INT DEFAULT NULL,
+                UpdatedBy         VARCHAR(100),
+                UpdatedAt         DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+                UNIQUE KEY uq_unit (unit_name)
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`);
+    } catch (e) { console.error('[cccf] CCCF_Unit_Targets create:', e.message); }
+    try {
+        await db.query(`ALTER TABLE CCCF_Unit_Targets ADD COLUMN achieved_override INT DEFAULT NULL`);
+    } catch (e) { /* column already exists */ }
 })();
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -207,6 +222,44 @@ router.delete('/form-a-permanent/:id', async (req, res) => {
     try {
         await db.query('DELETE FROM CCCF_FormA_Permanent WHERE id = ?', [req.params.id]);
         res.json({ success: true });
+    } catch (err) {
+        res.status(500).json({ success: false, message: err.message });
+    }
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// UNIT TARGETS — Admin sets yearly target per Safety Unit
+// ─────────────────────────────────────────────────────────────────────────────
+
+// GET /cccf/unit-targets
+router.get('/unit-targets', async (req, res) => {
+    try {
+        const [rows] = await db.query('SELECT * FROM CCCF_Unit_Targets ORDER BY unit_name ASC');
+        res.json(rows);
+    } catch (err) {
+        if (err.code === 'ER_NO_SUCH_TABLE') return res.json([]);
+        res.status(500).json({ success: false, message: err.message });
+    }
+});
+
+// PUT /cccf/unit-targets/:unit  (admin only — checked in handler)
+router.put('/unit-targets/:unit', async (req, res) => {
+    if (req.user.role !== 'Admin') return res.status(403).json({ success: false, message: 'เฉพาะ Admin เท่านั้น' });
+    try {
+        const unitName       = decodeURIComponent(req.params.unit);
+        const target         = parseInt(req.body.yearly_target) || 0;
+        const achRaw         = req.body.achieved_override;
+        const achOverride    = (achRaw === null || achRaw === undefined || achRaw === '') ? null : parseInt(achRaw);
+        await db.query(
+            `INSERT INTO CCCF_Unit_Targets (unit_name, yearly_target, achieved_override, UpdatedBy)
+             VALUES (?, ?, ?, ?)
+             ON DUPLICATE KEY UPDATE
+               yearly_target=VALUES(yearly_target),
+               achieved_override=VALUES(achieved_override),
+               UpdatedBy=VALUES(UpdatedBy)`,
+            [unitName, target, achOverride, req.user.name]
+        );
+        res.json({ success: true, message: 'บันทึกสำเร็จ' });
     } catch (err) {
         res.status(500).json({ success: false, message: err.message });
     }
