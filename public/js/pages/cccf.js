@@ -46,6 +46,9 @@ let _pFilterDept   = '';
 let _pFilterRank   = '';
 let _pFilterStop   = 0;
 let _pFilterStatus = '';
+let _pSearch       = '';
+let _pPage         = 0;    // pagination current page (0-indexed)
+const P_PAGE_SIZE  = 20;
 let _unitYear      = new Date().getFullYear();  // year filter for unit summary
 let _myCardYear    = new Date().getFullYear();  // year filter for "ของฉัน" card
 let _unitChartInst = null;  // Chart.js instance (destroyed/recreated on update)
@@ -224,8 +227,8 @@ window._cccfShowPermanentDetail = (id) => {
           <div><p class="text-[10px] font-bold text-slate-400 uppercase mb-1">ชื่องาน / พื้นที่</p><p class="text-sm text-slate-700">${escapeHtml(r.JobArea || '—')}</p></div>
           <div><p class="text-[10px] font-bold text-slate-400 uppercase mb-1">วันที่ส่ง</p><p class="text-sm text-slate-700">${escapeHtml(dateStr)}</p></div>
           ${r.Summary ? `<div class="col-span-2"><p class="text-[10px] font-bold text-slate-400 uppercase mb-1">สรุปการดำเนินการ</p><p class="text-sm text-slate-700">${escapeHtml(r.Summary)}</p></div>` : ''}
-          <div><p class="text-[10px] font-bold text-slate-400 uppercase mb-1">Stop Type</p><p class="text-sm text-slate-700">${escapeHtml(stop?.code || 'โ€”')}</p></div>
-          <div><p class="text-[10px] font-bold text-slate-400 uppercase mb-1">Rank</p><p class="text-sm text-slate-700">${escapeHtml(rank?.label || 'โ€”')}</p></div>
+          <div><p class=”text-[10px] font-bold text-slate-400 uppercase mb-1”>Stop Type</p><p class=”text-sm text-slate-700”>${escapeHtml(stop?.code || '—')}</p></div>
+          <div><p class=”text-[10px] font-bold text-slate-400 uppercase mb-1”>Rank</p><p class=”text-sm text-slate-700”>${escapeHtml(rank?.label || '—')}</p></div>
         </div>
         ${safeFileUrl ? `<a href="${escapeAttr(safeFileUrl)}" target="_blank" rel="noopener noreferrer" class="flex items-center gap-2 px-4 py-3 rounded-xl bg-slate-50 border border-slate-200 hover:border-emerald-300 hover:bg-emerald-50 transition-colors">
           <svg class="w-4 h-4 text-emerald-600 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13"/></svg>
@@ -502,6 +505,11 @@ function getPagedWorker(filtered) {
     return filtered.slice(start, start + W_PAGE_SIZE);
 }
 
+function getPagedPermanent(filtered) {
+    const start = _pPage * P_PAGE_SIZE;
+    return filtered.slice(start, start + P_PAGE_SIZE);
+}
+
 function formatThaiDate(value, opts = { day: 'numeric', month: 'short', year: '2-digit' }) {
     if (!value) return '—';
     const d = value instanceof Date ? value : new Date(value);
@@ -617,6 +625,13 @@ function getFilteredPermanent() {
         if (_pFilterStatus && r.status.key !== _pFilterStatus) return false;
         if (_pFilterRank && r.Rank !== _pFilterRank) return false;
         if (_pFilterStop && +r.StopType !== +_pFilterStop) return false;
+        if (_pSearch) {
+            const q = _pSearch.toLowerCase();
+            if (!(r.displayName||'').toLowerCase().includes(q) &&
+                !(r.Department||'').toLowerCase().includes(q) &&
+                !(r.JobArea||'').toLowerCase().includes(q) &&
+                !(r.Summary||'').toLowerCase().includes(q)) return false;
+        }
         return true;
     });
 }
@@ -1615,7 +1630,7 @@ window.exportCccfWorkerPDF = async function() {
               <div>
                 <div style="${K}font-size:16px;font-weight:700;color:#064e3b">Detail Report</div>
                 <div style="${K}font-size:10px;font-weight:500;color:#334155;margin-top:3px">รายงานรายละเอียดรายการค้นหาอันตราย</div>
-                <div style="${K}font-size:8.8px;color:#64748b;margin-top:3px">Records ${start + 1}-${Math.min(start + rowsPerPage, filtered.length)} ตามเงื่อนไขที่เลือก</div>
+                <div style="${K}font-size:8.8px;color:#64748b;margin-top:3px">Records ${start + 1}–${Math.min(start + rowsPerPage, filtered.length)} ตามเงื่อนไขที่เลือก</div>
               </div>
               <div style="text-align:right">
                 <div style="${K}font-size:8px;color:#94a3b8">Report No.</div>
@@ -1680,6 +1695,294 @@ window.exportCccfWorkerPDF = async function() {
         showToast(`ดาวน์โหลด PDF สำเร็จ (${filtered.length} รายการ)`, 'success');
     } catch (err) {
         console.error('CCCF PDF export error:', err);
+        showToast('เกิดข้อผิดพลาดในการสร้าง PDF', 'error');
+    } finally {
+        hideLoading();
+    }
+};
+
+window.exportCccfPermanentPDF = async function() {
+    if (!window.jspdf || !window.html2canvas) {
+        showToast('ไม่พบ jsPDF หรือ html2canvas', 'error');
+        return;
+    }
+
+    const filtered = getFilteredPermanent();
+    if (!filtered.length) {
+        showToast('ไม่มีข้อมูลสำหรับส่งออก PDF', 'warning');
+        return;
+    }
+
+    const K = "font-family:'Kanit',sans-serif;";
+    const now = new Date();
+    const pad = n => String(n).padStart(2, '0');
+    const issueDate = formatThaiDate(now, { day: 'numeric', month: 'long', year: 'numeric' });
+    const docNo = `CCCF-PM-${now.getFullYear()}-${pad(now.getMonth() + 1)}${pad(now.getDate())}${pad(now.getHours())}${pad(now.getMinutes())}`;
+
+    // ── Stats from filtered tracking rows
+    const completeRows  = filtered.filter(r => r.status.key === 'complete');
+    const onprocessRows = filtered.filter(r => r.status.key === 'onprocess');
+    const mustSendRows  = filtered.filter(r => r.status.key === 'must_send');
+    const assignedRows  = filtered.filter(r => r.rowType === 'assigned');
+    const withFileRows  = filtered.filter(r => !!r.FileUrl);
+    const byRankPerm    = { A: 0, B: 0, C: 0 };
+    const byStopPerm    = STOP_TYPES.map(s => ({ ...s, count: 0 }));
+    filtered.forEach(r => {
+        if (r.Rank && byRankPerm[r.Rank] !== undefined) byRankPerm[r.Rank]++;
+        const stop = byStopPerm.find(s => +s.id === +r.StopType);
+        if (stop) stop.count++;
+    });
+    const submitPctCalc = assignedRows.length
+        ? Math.round((completeRows.filter(r => r.rowType === 'assigned').length / assignedRows.length) * 100)
+        : 0;
+    const deptProgress  = buildPermanentDepartmentProgress();
+    const criticalRows  = filtered
+        .filter(r => r.id && (r.Rank === 'A' || r.Rank === 'B'))
+        .sort((a, b) => {
+            const o = { A: 0, B: 1, C: 2 };
+            return (o[a.Rank] ?? 9) - (o[b.Rank] ?? 9) || new Date(b.SubmitDate || 0) - new Date(a.SubmitDate || 0);
+        })
+        .slice(0, 8);
+
+    const activeFilters = [
+        _pSearch      ? `ค้นหา: ${_pSearch}` : '',
+        _pFilterDept  ? `ส่วนงาน: ${_pFilterDept}` : '',
+        _pFilterStatus ? `สถานะ: ${{ complete: 'สำเร็จ', onprocess: 'กำลังดำเนินการ', must_send: 'ต้องส่ง' }[_pFilterStatus] || _pFilterStatus}` : '',
+        _pFilterRank  ? `Rank: ${_pFilterRank}` : '',
+        _pFilterStop  ? `Stop: ${STOP_TYPES.find(s => +s.id === +_pFilterStop)?.code || _pFilterStop}` : '',
+    ].filter(Boolean);
+    const filterText = activeFilters.length ? activeFilters.join(' | ') : 'ไม่มีตัวกรองเพิ่มเติม';
+
+    const PAGE_STYLE = K + 'width:794px;height:1122px;background:#ffffff;box-sizing:border-box;display:flex;flex-direction:column;overflow:hidden';
+    const buildFooter = (pageNo, totalPages) => `
+      <div style="height:46px;background:#f8fafc;border-top:1px solid #dbe7df;display:grid;grid-template-columns:1.2fr 1fr .55fr;align-items:center;padding:0 24px;gap:14px;flex-shrink:0">
+        <div style="min-width:0">
+          <div style="${K}font-size:8.6px;font-weight:700;color:#0f766e;line-height:1.2">TSH Safety Core Activity</div>
+          <div style="${K}font-size:7.6px;color:#64748b;line-height:1.2;margin-top:2px">CCCF Form A Permanent Report / รายงานดำเนินการแก้ไขถาวร</div>
+        </div>
+        <div style="text-align:center;min-width:0;border-left:1px solid #e2e8f0;border-right:1px solid #e2e8f0;padding:0 12px">
+          <div style="${K}font-size:7.4px;color:#94a3b8;line-height:1.2">Document No.</div>
+          <div style="${K}font-size:8.4px;font-weight:700;color:#334155;line-height:1.2;margin-top:2px">${escapeHtml(docNo)}</div>
+        </div>
+        <div style="text-align:right">
+          <div style="${K}font-size:7.4px;color:#94a3b8;line-height:1.2">Page</div>
+          <div style="${K}font-size:8.8px;font-weight:700;color:#334155;line-height:1.2;margin-top:2px">${pageNo} / ${totalPages}</div>
+        </div>
+      </div>`;
+
+    // ── Summary page
+    const summaryHtml = (() => {
+        const stopCards = byStopPerm.map(s =>
+            `<div style="background:${s.bg};border:1px solid ${s.border};border-radius:12px;padding:12px 10px;text-align:center">
+              <div style="${K}font-size:19px;font-weight:700;color:${s.color};line-height:1">${s.count}</div>
+              <div style="${K}font-size:8.5px;font-weight:700;color:${s.color};margin-top:4px">${escapeHtml(s.code)}</div>
+            </div>`
+        ).join('');
+
+        const deptTable = deptProgress.length
+            ? `<table style="width:100%;border-collapse:collapse">
+                <thead>
+                  <tr style="background:#f0fdf4">
+                    <th style="${K}padding:7px 8px;font-size:8.5px;color:#475569;text-align:left;border-bottom:1px solid #d1fae5">ส่วนงาน</th>
+                    <th style="${K}padding:7px 8px;font-size:8.5px;color:#475569;text-align:center;border-bottom:1px solid #d1fae5;width:46px">Total</th>
+                    <th style="${K}padding:7px 8px;font-size:8.5px;color:#475569;text-align:center;border-bottom:1px solid #d1fae5;width:52px">Complete</th>
+                    <th style="${K}padding:7px 8px;font-size:8.5px;color:#475569;text-align:center;border-bottom:1px solid #d1fae5;width:46px">%</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  ${deptProgress.slice(0, 10).map(row => `
+                    <tr>
+                      <td style="${K}padding:7px 8px;font-size:8.8px;color:#1e293b;border-bottom:1px solid #eef2f7">${escapeHtml(row.department)}</td>
+                      <td style="${K}padding:7px 8px;font-size:8.8px;color:#475569;text-align:center;border-bottom:1px solid #eef2f7">${row.total}</td>
+                      <td style="${K}padding:7px 8px;font-size:8.8px;color:#059669;text-align:center;border-bottom:1px solid #eef2f7">${row.complete}</td>
+                      <td style="${K}padding:7px 8px;font-size:8.8px;font-weight:700;text-align:center;border-bottom:1px solid #eef2f7;color:${row.progressPct >= 100 ? '#059669' : row.progressPct >= 50 ? '#d97706' : '#dc2626'}">${row.progressPct}%</td>
+                    </tr>
+                  `).join('')}
+                </tbody>
+              </table>`
+            : `<div style="${K}font-size:9px;color:#94a3b8">ยังไม่มีข้อมูล Department Progress</div>`;
+
+        const criticalTable = criticalRows.length
+            ? `<table style="width:100%;border-collapse:collapse">
+                <thead>
+                  <tr style="background:#fff7ed">
+                    <th style="${K}padding:7px 8px;font-size:8.5px;color:#7c2d12;text-align:left;border-bottom:1px solid #fed7aa">วันที่</th>
+                    <th style="${K}padding:7px 8px;font-size:8.5px;color:#7c2d12;text-align:left;border-bottom:1px solid #fed7aa">ผู้รับผิดชอบ / ส่วนงาน</th>
+                    <th style="${K}padding:7px 8px;font-size:8.5px;color:#7c2d12;text-align:left;border-bottom:1px solid #fed7aa">Job Area / Stop</th>
+                    <th style="${K}padding:7px 8px;font-size:8.5px;color:#7c2d12;text-align:center;border-bottom:1px solid #fed7aa;width:42px">Rank</th>
+                    <th style="${K}padding:7px 8px;font-size:8.5px;color:#7c2d12;text-align:center;border-bottom:1px solid #fed7aa;width:48px">File</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  ${criticalRows.map(r => {
+                      const stop = STOP_TYPES.find(s => +s.id === +r.StopType) || STOP_TYPES[5];
+                      return `<tr>
+                        <td style="${K}padding:7px 8px;font-size:8.7px;color:#475569;border-bottom:1px solid #ffedd5">${escapeHtml(formatThaiDate(r.SubmitDate))}</td>
+                        <td style="${K}padding:7px 8px;font-size:8.7px;color:#1e293b;border-bottom:1px solid #ffedd5">${escapeHtml(r.displayName || '—')}<div style="${K}font-size:8px;color:#94a3b8">${escapeHtml(r.Department || '—')}</div></td>
+                        <td style="${K}padding:7px 8px;font-size:8.7px;color:#475569;border-bottom:1px solid #ffedd5">${escapeHtml((r.JobArea || '—').slice(0, 55))}${(r.JobArea || '').length > 55 ? '…' : ''}<div style="${K}font-size:8px;color:#94a3b8">${escapeHtml(stop.code)}</div></td>
+                        <td style="${K}padding:7px 8px;font-size:8.7px;font-weight:700;text-align:center;border-bottom:1px solid #ffedd5;color:${r.Rank === 'A' ? '#dc2626' : '#ea580c'}">${escapeHtml(r.Rank)}</td>
+                        <td style="${K}padding:7px 8px;font-size:8.5px;text-align:center;border-bottom:1px solid #ffedd5;color:${r.FileUrl ? '#059669' : '#94a3b8'}">${r.FileUrl ? 'มีไฟล์' : '—'}</td>
+                      </tr>`;
+                  }).join('')}
+                </tbody>
+              </table>`
+            : `<div style="${K}font-size:9px;color:#94a3b8">ไม่มีรายการ Rank A/B ตามตัวกรองปัจจุบัน</div>`;
+
+        return `<div style="${PAGE_STYLE}">
+          <div style="background:linear-gradient(135deg,#064e3b 0%,#065f46 55%,#0d9488 100%);padding:24px 32px 18px;position:relative;overflow:hidden">
+            <div style="position:absolute;top:-46px;right:-46px;width:180px;height:180px;border-radius:50%;background:rgba(255,255,255,.05)"></div>
+            <div style="position:relative;z-index:1">
+              <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:18px">
+                <div>
+                  <div style="display:inline-flex;align-items:center;gap:6px;background:rgba(255,255,255,.14);border-radius:18px;padding:4px 10px;margin-bottom:8px">
+                    <span style="width:6px;height:6px;background:#6ee7b7;border-radius:50%;display:inline-block"></span>
+                    <span style="${K}font-size:8.5px;color:rgba(255,255,255,.9);font-weight:700;letter-spacing:1.1px">OFFICIAL MANAGEMENT REPORT</span>
+                  </div>
+                  <div style="${K}font-size:20px;font-weight:700;color:#ffffff;line-height:1.15">Executive Summary Report</div>
+                  <div style="${K}font-size:11px;font-weight:500;color:rgba(255,255,255,.9);margin-top:4px">รายงานสรุปผลการดำเนินการแก้ไขถาวร (CCCF Form A Permanent)</div>
+                  <div style="${K}font-size:9.6px;color:rgba(255,255,255,.72);margin-top:4px">For Management Review</div>
+                </div>
+                <div style="text-align:right">
+                  <div style="${K}font-size:8px;color:rgba(255,255,255,.52)">Report No.</div>
+                  <div style="${K}font-size:10.5px;font-weight:700;color:#ffffff">${escapeHtml(docNo)}</div>
+                  <div style="${K}font-size:8px;color:rgba(255,255,255,.52);margin-top:5px">Issue Date</div>
+                  <div style="${K}font-size:9.5px;color:rgba(255,255,255,.8)">${escapeHtml(issueDate)}</div>
+                </div>
+              </div>
+              <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-top:16px">
+                <div style="background:rgba(255,255,255,.12);border-radius:12px;padding:12px 10px;text-align:center"><div style="${K}font-size:22px;font-weight:700;color:#fff">${filtered.length}</div><div style="${K}font-size:8.5px;color:rgba(255,255,255,.72)">Total Tracked / รายการทั้งหมด</div></div>
+                <div style="background:rgba(255,255,255,.12);border-radius:12px;padding:12px 10px;text-align:center"><div style="${K}font-size:22px;font-weight:700;color:#6ee7b7">${completeRows.length}</div><div style="${K}font-size:8.5px;color:rgba(255,255,255,.72)">Complete / สำเร็จ</div></div>
+                <div style="background:rgba(255,255,255,.12);border-radius:12px;padding:12px 10px;text-align:center"><div style="${K}font-size:22px;font-weight:700;color:#fca5a5">${byRankPerm.A}</div><div style="${K}font-size:8.5px;color:rgba(255,255,255,.72)">Critical Cases / Rank A</div></div>
+                <div style="background:rgba(255,255,255,.12);border-radius:12px;padding:12px 10px;text-align:center"><div style="${K}font-size:22px;font-weight:700;color:#fde68a">${submitPctCalc}%</div><div style="${K}font-size:8.5px;color:rgba(255,255,255,.72)">Completion Rate / อัตราสำเร็จ</div></div>
+              </div>
+            </div>
+          </div>
+          <div style="flex:1;padding:18px 32px 20px;display:flex;flex-direction:column;gap:14px;min-height:0">
+            <div style="border:1px solid #dbe7df;border-radius:12px;padding:12px 14px;background:#f8fafc">
+              <div style="${K}font-size:9px;font-weight:700;color:#64748b;letter-spacing:1px;text-transform:uppercase;margin-bottom:5px">Report Scope / ขอบเขตรายงาน</div>
+              <div style="${K}font-size:9px;color:#475569;line-height:1.6">Filters Applied: ${escapeHtml(filterText)}</div>
+              <div style="${K}font-size:9px;color:#475569;line-height:1.6">ผู้จัดทำ: ${escapeHtml(currentUser.name || 'ไม่ระบุ')} · สำเร็จ ${completeRows.length} · กำลังดำเนินการ ${onprocessRows.length} · ต้องส่ง ${mustSendRows.length} · มีไฟล์แนบ ${withFileRows.length}</div>
+            </div>
+            <div style="display:grid;grid-template-columns:1.1fr .9fr;gap:14px">
+              <div style="border:1px solid #e2e8f0;border-radius:14px;padding:14px;background:#ffffff">
+                <div style="${K}font-size:10px;font-weight:700;color:#334155;margin-bottom:10px">Department Progress / ความสำเร็จรายส่วนงาน</div>
+                ${deptTable}
+              </div>
+              <div style="border:1px solid #e2e8f0;border-radius:14px;padding:14px;background:#ffffff">
+                <div style="${K}font-size:10px;font-weight:700;color:#334155;margin-bottom:10px">Stop Type Distribution / สัดส่วนประเภทอันตราย</div>
+                <div style="display:grid;grid-template-columns:repeat(2,1fr);gap:8px">${stopCards}</div>
+              </div>
+            </div>
+            <div style="border:1px solid #e2e8f0;border-radius:14px;padding:14px;background:#ffffff;flex:1;min-height:0">
+              <div style="${K}font-size:10px;font-weight:700;color:#334155;margin-bottom:10px">Priority Issues for Management Attention / Rank A &amp; B</div>
+              ${criticalTable}
+            </div>
+            <div style="display:flex;justify-content:space-between;gap:24px;padding-top:6px">
+              <div style="flex:1;border-top:1px solid #cbd5e1;padding-top:6px;text-align:center">
+                <div style="${K}font-size:8px;color:#94a3b8">Prepared By / ผู้จัดทำรายงาน</div>
+                <div style="${K}font-size:9px;color:#334155;font-weight:600;margin-top:2px">${escapeHtml(currentUser.name || '................................')}</div>
+              </div>
+              <div style="flex:1;border-top:1px solid #cbd5e1;padding-top:6px;text-align:center">
+                <div style="${K}font-size:8px;color:#94a3b8">Reviewed / Approved</div>
+                <div style="${K}font-size:9px;color:#334155;font-weight:600;margin-top:2px">................................</div>
+              </div>
+            </div>
+          </div>
+          __FOOTER_SUMMARY__
+        </div>`;
+    })();
+
+    // ── Detail pages
+    const rowsPerPage = 24;
+    const detailPages = [];
+    for (let start = 0; start < filtered.length; start += rowsPerPage) {
+        const rows = filtered.slice(start, start + rowsPerPage);
+        const rowsHtml = rows.map((r, idx) => {
+            const stop        = STOP_TYPES.find(s => +s.id === +r.StopType) || STOP_TYPES[5];
+            const rankColor   = r.Rank === 'A' ? '#dc2626' : r.Rank === 'B' ? '#ea580c' : r.Rank === 'C' ? '#059669' : '#94a3b8';
+            const statusLabel = r.status.key === 'complete' ? 'สำเร็จ' : r.status.key === 'onprocess' ? 'กำลังดำเนินการ' : 'ต้องส่ง';
+            const statusColor = r.status.key === 'complete' ? '#059669' : r.status.key === 'onprocess' ? '#d97706' : '#dc2626';
+            return `<tr style="background:${(start + idx) % 2 === 0 ? '#ffffff' : '#f8fafc'}">
+              <td style="${K}padding:6px 6px;font-size:8.3px;color:#94a3b8;text-align:center;border-bottom:1px solid #eef2f7">${start + idx + 1}</td>
+              <td style="${K}padding:6px 8px;font-size:8.3px;color:#475569;border-bottom:1px solid #eef2f7">${escapeHtml(formatThaiDate(r.SubmitDate))}</td>
+              <td style="${K}padding:6px 8px;font-size:8.4px;color:#1e293b;border-bottom:1px solid #eef2f7">${escapeHtml(r.displayName || '—')}<div style="${K}font-size:7.6px;color:#94a3b8">${escapeHtml(r.Department || '—')}</div></td>
+              <td style="${K}padding:6px 8px;font-size:8.2px;font-weight:700;color:${statusColor};border-bottom:1px solid #eef2f7">${statusLabel}</td>
+              <td style="${K}padding:6px 8px;font-size:8.2px;color:#475569;border-bottom:1px solid #eef2f7">${escapeHtml(stop.code)}<div style="${K}font-size:7.6px;font-weight:700;color:${rankColor}">${r.Rank ? `Rank ${escapeHtml(r.Rank)}` : '—'}</div></td>
+              <td style="${K}padding:6px 8px;font-size:8.2px;color:#475569;border-bottom:1px solid #eef2f7">${escapeHtml((r.JobArea || '—').slice(0, 60))}${(r.JobArea || '').length > 60 ? '…' : ''}${r.Summary ? `<div style="${K}font-size:7.6px;color:#94a3b8">${escapeHtml(r.Summary.slice(0, 60))}${r.Summary.length > 60 ? '…' : ''}</div>` : ''}</td>
+              <td style="${K}padding:6px 8px;font-size:8.2px;text-align:center;border-bottom:1px solid #eef2f7;color:${r.FileUrl ? '#059669' : '#94a3b8'}">${r.FileUrl ? 'มีไฟล์' : '—'}</td>
+            </tr>`;
+        }).join('');
+
+        detailPages.push(`<div style="${PAGE_STYLE}">
+          <div style="padding:22px 32px 12px;border-bottom:1px solid #dbe7df;background:#ffffff">
+            <div style="display:flex;justify-content:space-between;align-items:flex-end;gap:20px">
+              <div>
+                <div style="${K}font-size:16px;font-weight:700;color:#064e3b">Detail Report</div>
+                <div style="${K}font-size:10px;font-weight:500;color:#334155;margin-top:3px">รายงานรายละเอียดตารางติดตาม Form A Permanent</div>
+                <div style="${K}font-size:8.8px;color:#64748b;margin-top:3px">Records ${start + 1}–${Math.min(start + rowsPerPage, filtered.length)} ตามเงื่อนไขที่เลือก</div>
+              </div>
+              <div style="text-align:right">
+                <div style="${K}font-size:8px;color:#94a3b8">Report No.</div>
+                <div style="${K}font-size:9px;font-weight:700;color:#1e293b">${escapeHtml(docNo)}</div>
+              </div>
+            </div>
+          </div>
+          <div style="flex:1;padding:12px 24px 12px;min-height:0">
+            <table style="width:100%;border-collapse:collapse;table-layout:fixed">
+              <thead>
+                <tr style="background:linear-gradient(135deg,#064e3b,#0d9488)">
+                  <th style="${K}padding:7px 6px;font-size:8px;color:#fff;text-align:center;width:26px">#</th>
+                  <th style="${K}padding:7px 8px;font-size:8px;color:#fff;text-align:left;width:58px">Last Update</th>
+                  <th style="${K}padding:7px 8px;font-size:8px;color:#fff;text-align:left;width:130px">ผู้รับผิดชอบ / ส่วนงาน</th>
+                  <th style="${K}padding:7px 8px;font-size:8px;color:#fff;text-align:left;width:66px">Status</th>
+                  <th style="${K}padding:7px 8px;font-size:8px;color:#fff;text-align:left;width:66px">Stop / Rank</th>
+                  <th style="${K}padding:7px 8px;font-size:8px;color:#fff;text-align:left">Job Area / Summary</th>
+                  <th style="${K}padding:7px 8px;font-size:8px;color:#fff;text-align:center;width:44px">File</th>
+                </tr>
+              </thead>
+              <tbody>${rowsHtml}</tbody>
+            </table>
+          </div>
+          __FOOTER_DETAIL_${start}__
+        </div>`);
+    }
+
+    const totalPages = 1 + detailPages.length;
+    const pageHTMLs  = [
+        summaryHtml.replace('__FOOTER_SUMMARY__', buildFooter(1, totalPages)),
+        ...detailPages.map((html, idx) => html.replace(`__FOOTER_DETAIL_${idx * rowsPerPage}__`, buildFooter(idx + 2, totalPages))),
+    ];
+
+    showLoading('กำลังสร้าง PDF...');
+    await document.fonts.ready;
+    await new Promise(r => setTimeout(r, 250));
+
+    try {
+        const { jsPDF } = window.jspdf;
+        const pdf = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
+
+        for (let i = 0; i < pageHTMLs.length; i++) {
+            showLoading(`กำลังสร้าง PDF... หน้า ${i + 1} / ${pageHTMLs.length}`);
+            const el = document.createElement('div');
+            el.style.cssText = 'position:fixed;left:-9999px;top:0;z-index:-1';
+            el.innerHTML = pageHTMLs[i];
+            document.body.appendChild(el);
+            const canvas = await window.html2canvas(el.firstElementChild, {
+                scale: 2,
+                useCORS: true,
+                logging: false,
+                backgroundColor: '#ffffff',
+                windowWidth: 794,
+            });
+            document.body.removeChild(el);
+            if (i > 0) pdf.addPage();
+            pdf.addImage(canvas.toDataURL('image/jpeg', 0.92), 'JPEG', 0, 0, 210, 297);
+        }
+
+        pdf.save(`${docNo}.pdf`);
+        showToast(`ดาวน์โหลด PDF สำเร็จ (${filtered.length} รายการ)`, 'success');
+    } catch (err) {
+        console.error('CCCF Permanent PDF export error:', err);
         showToast('เกิดข้อผิดพลาดในการสร้าง PDF', 'error');
     } finally {
         hideLoading();
@@ -1907,6 +2210,11 @@ function renderPage(container) {
               <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z M15 12a3 3 0 11-6 0 3 3 0 016 0z"/></svg>
               จัดการการมอบหมาย
             </button>` : ''}
+            <button onclick="window.exportCccfPermanentPDF&&window.exportCccfPermanentPDF()"
+              class="flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-bold border border-emerald-200 text-emerald-700 bg-white hover:bg-emerald-50 transition-all">
+              <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/></svg>
+              Export PDF
+            </button>
             <button id="btn-open-permanent-form"
               class="flex items-center gap-2 px-5 py-2.5 rounded-xl text-sm font-bold text-white shadow-sm hover:shadow-md transition-all"
               style="background:linear-gradient(135deg,#059669,#0d9488)">
@@ -1956,6 +2264,11 @@ function renderPage(container) {
         <div class="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden" style="box-shadow:0 4px 16px rgba(5,150,105,0.08)">
           <div class="px-5 py-4 border-b border-slate-100 bg-slate-50/60 flex flex-wrap gap-2 items-center">
             <h3 class="text-sm font-bold text-slate-700 mr-2">ตารางติดตาม Form A Permanent</h3>
+            <div class="relative flex-1 min-w-[140px]">
+              <svg class="w-3.5 h-3.5 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/></svg>
+              <input id="p-search" type="text" placeholder="ค้นหาชื่อ, ส่วนงาน, งาน..." value="${_pSearch}"
+                class="w-full pl-8 pr-3 py-2 text-xs rounded-xl border border-slate-200 bg-white focus:outline-none focus:border-emerald-400 focus:ring-1 focus:ring-emerald-200">
+            </div>
             <select id="p-filter-dept" class="text-xs py-2 px-3 rounded-xl border border-slate-200 bg-white focus:outline-none focus:border-emerald-400 text-slate-600">
               ${permDeptOpts}
             </select>
@@ -1989,8 +2302,16 @@ function renderPage(container) {
                   ${isAdmin ? `<th class="px-4 py-3 w-10"></th>` : ''}
                 </tr>
               </thead>
-              <tbody id="permanent-table-body">${renderPermanentRows(getFilteredPermanent())}</tbody>
+              <tbody id="permanent-table-body">${renderPermanentRows(getPagedPermanent(getFilteredPermanent()))}</tbody>
             </table>
+          </div>
+          <!-- Permanent Pagination -->
+          <div id="p-pagination" class="px-5 py-3 border-t border-slate-100 bg-slate-50/40 flex items-center justify-between">
+            <span class="text-[10px] text-slate-400" id="p-page-info"></span>
+            <div class="flex gap-2">
+              <button id="p-prev-page" class="px-3 py-1.5 rounded-lg text-xs font-semibold border border-slate-200 text-slate-500 hover:border-emerald-300 hover:text-emerald-600 disabled:opacity-30 disabled:cursor-not-allowed transition-colors">ก่อนหน้า</button>
+              <button id="p-next-page" class="px-3 py-1.5 rounded-lg text-xs font-semibold border border-slate-200 text-slate-500 hover:border-emerald-300 hover:text-emerald-600 disabled:opacity-30 disabled:cursor-not-allowed transition-colors">ถัดไป</button>
+            </div>
           </div>
         </div>
       </div>
@@ -2020,19 +2341,6 @@ function renderPage(container) {
         updatePagination(filtered);
     };
     applyWorkerRender();
-
-    const permanentHeadRow = document.getElementById('permanent-table-body')?.closest('table')?.querySelector('thead tr');
-    if (permanentHeadRow) {
-        permanentHeadRow.innerHTML = `
-          <th class="px-4 py-3 text-left text-[10px] font-bold text-emerald-100 uppercase">ผู้รับผิดชอบ / Department</th>
-          <th class="px-4 py-3 text-center text-[10px] font-bold text-emerald-100 uppercase w-28">Status</th>
-          <th class="px-4 py-3 text-left text-[10px] font-bold text-emerald-100 uppercase">Job Area / Summary</th>
-          <th class="px-4 py-3 text-center text-[10px] font-bold text-emerald-100 uppercase w-28">Stop / Rank</th>
-          <th class="px-4 py-3 text-center text-[10px] font-bold text-emerald-100 uppercase w-20">File</th>
-          <th class="px-4 py-3 text-center text-[10px] font-bold text-emerald-100 uppercase w-24">Last Update</th>
-          ${isAdmin ? '<th class="px-4 py-3 w-10"></th>' : ''}
-        `;
-    }
 
     document.getElementById('w-prev-page')?.addEventListener('click', () => { _wPage--; applyWorkerRender(); });
     document.getElementById('w-next-page')?.addEventListener('click', () => { _wPage++; applyWorkerRender(); });
@@ -2092,36 +2400,63 @@ function renderPage(container) {
     // set filter dropdowns to current state
     const wd = document.getElementById('w-filter-dept');
     if (wd && _wFilterDept) wd.value = _wFilterDept;
+    const pd = document.getElementById('p-filter-dept');
+    if (pd && _pFilterDept) pd.value = _pFilterDept;
+
+    // ── Permanent pagination helper
+    const updatePPagination = (filtered) => {
+        const total   = filtered.length;
+        const totalPg = Math.max(1, Math.ceil(total / P_PAGE_SIZE));
+        _pPage = Math.min(_pPage, totalPg - 1);
+        const start   = _pPage * P_PAGE_SIZE + 1;
+        const end     = Math.min(total, (_pPage + 1) * P_PAGE_SIZE);
+        const info    = document.getElementById('p-page-info');
+        const prev    = document.getElementById('p-prev-page');
+        const next    = document.getElementById('p-next-page');
+        if (info) info.textContent = total ? `แสดง ${start}–${end} จาก ${total} รายการ` : 'ไม่มีข้อมูล';
+        if (prev) { prev.disabled = _pPage === 0; }
+        if (next) { next.disabled = _pPage >= totalPg - 1; }
+        const el = document.getElementById('p-count-label');
+        if (el) el.textContent = `${total} รายการ`;
+    };
 
     // ── Permanent filter
+    const applyPermanentRender = () => {
+        const filtered = getFilteredPermanent();
+        document.getElementById('permanent-table-body').innerHTML = renderPermanentRows(getPagedPermanent(filtered));
+        updatePPagination(filtered);
+    };
+    applyPermanentRender();
+
     const refreshPermanent = () => {
+        _pSearch = document.getElementById('p-search')?.value || '';
         _pFilterDept = document.getElementById('p-filter-dept')?.value || '';
         _pFilterStatus = document.getElementById('p-filter-status')?.value || '';
         _pFilterRank = document.getElementById('p-filter-rank')?.value || '';
         _pFilterStop = parseInt(document.getElementById('p-filter-stop')?.value, 10) || 0;
-        const filtered = getFilteredPermanent();
-        document.getElementById('permanent-table-body').innerHTML = renderPermanentRows(filtered);
-        const el = document.getElementById('p-count-label');
-        if (el) el.textContent = `${filtered.length} รายการ`;
+        _pPage = 0;  // reset to first page on filter change
+        applyPermanentRender();
     };
+    document.getElementById('p-search')?.addEventListener('input', refreshPermanent);
     document.getElementById('p-filter-dept')?.addEventListener('change', refreshPermanent);
     document.getElementById('p-filter-status')?.addEventListener('change', refreshPermanent);
     document.getElementById('p-filter-rank')?.addEventListener('change', refreshPermanent);
     document.getElementById('p-filter-stop')?.addEventListener('change', refreshPermanent);
+    document.getElementById('p-prev-page')?.addEventListener('click', () => { _pPage--; applyPermanentRender(); });
+    document.getElementById('p-next-page')?.addEventListener('click', () => { _pPage++; applyPermanentRender(); });
     document.getElementById('p-clear-filter')?.addEventListener('click', () => {
-        _pFilterDept = '';
-        _pFilterStatus = '';
-        _pFilterRank = '';
-        _pFilterStop = 0;
-        const deptEl = document.getElementById('p-filter-dept');
+        _pSearch = ''; _pFilterDept = ''; _pFilterStatus = ''; _pFilterRank = ''; _pFilterStop = 0; _pPage = 0;
+        const searchEl = document.getElementById('p-search');
+        const deptEl   = document.getElementById('p-filter-dept');
         const statusEl = document.getElementById('p-filter-status');
-        const rankEl = document.getElementById('p-filter-rank');
-        const stopEl = document.getElementById('p-filter-stop');
-        if (deptEl) deptEl.value = '';
+        const rankEl   = document.getElementById('p-filter-rank');
+        const stopEl   = document.getElementById('p-filter-stop');
+        if (searchEl) searchEl.value = '';
+        if (deptEl)   deptEl.value = '';
         if (statusEl) statusEl.value = '';
-        if (rankEl) rankEl.value = '';
-        if (stopEl) stopEl.value = '0';
-        refreshPermanent();
+        if (rankEl)   rankEl.value = '';
+        if (stopEl)   stopEl.value = '0';
+        applyPermanentRender();
     });
 
     // ── Stop cards click to filter

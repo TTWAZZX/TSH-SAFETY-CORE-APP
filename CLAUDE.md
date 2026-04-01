@@ -158,6 +158,9 @@ node server.js      # runs on PORT=5000
 | `/api/machine-safety/:id/files` | Admin | Upload file to machine (multer field: `file`) |
 | `/api/machine-safety/:id/links` | Admin | Add URL link to machine (no file upload) |
 | `/api/machine-safety/files/:fileId` | Admin | Delete a file record |
+| `/api/machine-safety/:id/compliance` | User (write=Admin) | GET/PUT compliance checklist items (5.1–5.8) — batch upsert |
+| `/api/machine-safety/:id/issues` | User (write=Admin) | GET/POST issues for one machine |
+| `/api/machine-safety/issues/:issueId` | Admin | PUT (resolve/reopen) / DELETE issue — must be declared BEFORE `/:id` |
 | `/api/upload/document` | Admin | Cloudinary file upload (field name: `document`) |
 | `/api/admin/permissions/matrix` | Admin | GET/PUT permission matrix (role × permission) |
 | `/api/activity-targets/activities` | User | Static list of 9 activity definitions |
@@ -213,7 +216,7 @@ Primary key ของ generic CRUD คือ `id` — ยกเว้น `Employ
 | **Yokoten** | แบ่งปันบทเรียน/ความรู้ความปลอดภัย, บันทึกการรับทราบ |
 | **Policy** | นโยบายความปลอดภัย, รับทราบนโยบาย |
 | **Committee** | คณะกรรมการความปลอดภัย, SubCommittee (JSON array), ผังองค์กร |
-| **Machine Safety** | ข้อมูลเครื่องจักร/อุปกรณ์ความปลอดภัย, เอกสารเชื่อมโยงกับเครื่องจักร |
+| **Machine Safety** | ข้อมูลเครื่องจักร/อุปกรณ์ความปลอดภัย, Safety Device Std., Layout & Checkpoint, Compliance Checklist (5.1–5.8), Issue Tracker, Audit Readiness |
 | **OJT / SCW** | Stop-Call-Wait, OJT Department Status, เอกสาร SCW |
 | **Accident** | รายงานอุบัติเหตุ/อุบัติการณ์ |
 | **Safety Culture** | กิจกรรมวัฒนธรรมความปลอดภัย |
@@ -226,6 +229,75 @@ Primary key ของ generic CRUD คือ `id` — ยกเว้น `Employ
 | **Activity Targets** | กำหนดเป้าหมายรายปีสำหรับ 9 กิจกรรม — เทมเพลตตามตำแหน่ง + override รายบุคคล + N/A flag; ผล sync อัตโนมัติกับ `/api/activity-targets/me` |
 | **Master** | Departments, Teams, Roles, Positions, Areas (Patrol_Areas), Safety Units (Master_SafetyUnits) — admin-managed reference data |
 | **Profile** | Slide-over drawer: ดู/แก้ไขโปรไฟล์ตัวเอง, เปลี่ยนรหัสผ่าน, เปลี่ยน EmployeeID (cascade update 9 tables + re-issue JWT) |
+
+## Machine Safety Module — Architecture
+
+### Tables
+| Table | Purpose |
+|-------|---------|
+| `Machine_Safety` | เครื่องจักรหลัก — `Status`, `RiskLevel`, `NextInspectionDate`, `HasRiskAssessment` ถูก auto-migrate ใน `ensureTables()` |
+| `Machine_Safety_Files` | ไฟล์แนบต่อเครื่อง — `FileCategory` แบ่งเป็น `'SafetyDeviceStandard'` และ `'LayoutCheckpoint'` |
+| `Machine_Safety_Compliance` | Compliance checklist 5.1–5.8 ต่อเครื่อง — `UNIQUE KEY (MachineID, ItemCode)`, `Status ENUM('pass','fail','na')` |
+| `Machine_Safety_Issues` | ปัญหาที่พบต่อเครื่อง — `Status ENUM('open','resolved')`, `Severity ENUM('low','medium','high','critical')` |
+
+### GET /machine-safety — Derived Counts
+Query หลักใช้ correlated subqueries ส่งคืน computed columns พิเศษ:
+- `SafetyDeviceCount` — จำนวนไฟล์ `FileCategory='SafetyDeviceStandard'`
+- `LayoutCheckpointCount` — จำนวนไฟล์ `FileCategory='LayoutCheckpoint'`
+- `CompliancePassCount` — รายการ Compliance ที่ `Status='pass'`
+- `ComplianceCheckedCount` — รายการ Compliance ที่ `Status != 'na'`
+- `OpenIssueCount` — จำนวนปัญหา `Status='open'`
+
+### Compliance Checklist (5.1–5.8)
+`COMPLIANCE_ITEMS` ใน `machine-safety.js` กำหนด 8 ข้อ:
+`5.1` Nip/Shear Point Guard, `5.2` Rotating Part Guard, `5.3` Emergency Stop, `5.4` Warning Signs & Signals, `5.5` LOTO Procedure, `5.6` Electrical Safety/Grounding, `5.7` Ergonomic Safety, `5.8` Inspection & Maintenance Log
+
+- `PUT /machine-safety/:id/compliance` รับ `{ items: [{ ItemCode, Status }] }` — batch upsert ด้วย `ON DUPLICATE KEY UPDATE`
+- ใช้ `UNIQUE KEY (MachineID, ItemCode)` — ไม่ต้องลบแล้ว insert ใหม่
+
+### Audit Readiness (`_auditStatus(m)`)
+คำนวณ per-machine: `{ status: 'pass'|'warn'|'fail', hints: [{type, msg}] }`
+
+| เงื่อนไข | ประเภท |
+|----------|--------|
+| `SafetyDeviceCount == 0` | fail |
+| `LayoutCheckpointCount == 0` | fail |
+| `NextInspectionDate` เกินวันนี้ | fail |
+| Compliance มีรายการ fail | fail |
+| `HasRiskAssessment == 0` | warn |
+| `OpenIssueCount > 0` | warn |
+
+- `auditMap = { pass, warn, fail }` — aggregate ทุกเครื่องใน `_renderPage()`
+- `auditPct = auditMap.pass / total * 100` — แสดงใน donut chart ใน summary card
+- `topHints` — aggregate hint messages by frequency → แสดง top 4 ปัญหาที่พบบ่อย
+
+### Audit Summary Card + Filter
+- Summary card แสดง donut chart + chip count (pass/warn/fail)
+- Chips เป็น `<button>` → `window._msdSetAuditFilter(val)` — toggle filter (คลิกซ้ำเพื่อ clear)
+- Filter dropdown `#msd-audit` ใน filter bar sync กับ `_filterAudit` state
+- `_msdSetAuditFilter()` sync dropdown และ re-render table
+
+### Filter State (`_getFiltered()`)
+| Variable | DOM ID | ค่าที่รองรับ |
+|----------|--------|-------------|
+| `_search` | `msd-search` | free text |
+| `_filterDept` | `msd-dept` | department name |
+| `_filterStatus` | `msd-status` | `full` / `partial` / `none` (doc status) |
+| `_filterMStatus` | `msd-mstatus` | `active` / `restricted` / `locked` / `maintenance` / `inactive` |
+| `_filterRisk` | `msd-risk` | `critical` / `high` / `medium` / `low` |
+| `_filterAudit` | `msd-audit` | `pass` / `warn` / `fail` |
+
+### Table Row Highlighting
+- `fail` rows: `background:rgba(254,242,242,0.55)` (red tint)
+- `warn` rows: `background:rgba(255,251,235,0.45)` (amber tint)
+- Applied via inline `style` — ไม่ใช้ arbitrary Tailwind values (CDN ไม่ compile)
+- Audit badge ต่อ row แสดง pass/warn/fail พร้อม `title` tooltip บอก hints
+
+### Status & Risk Constants
+`STATUS_META` และ `RISK_META` ใน `machine-safety.js` — map value → `{ label, bg, text, dot }` สำหรับ Tailwind badge classes
+
+### Express Route Ordering (Issues)
+`PUT /issues/:issueId` และ `DELETE /issues/:issueId` ต้องประกาศ **ก่อน** `PUT /:id` และ `DELETE /:id` เสมอ — ไม่งั้น Express จะ match `'issues'` เป็น `:id`
 
 ## CCCF Module — Architecture
 
@@ -593,7 +665,7 @@ closeModal();
 17. **Machine Safety file upload field** — `POST /api/machine-safety/:id/files` ใช้ multer field ชื่อ `file` (ไม่ใช่ `document`) ต่างจาก generic upload endpoint
 18. **Add machine → upload files** — ต้อง POST machine ก่อน → รับ `id` จาก response → แล้วค่อย upload files/links ทีละขั้น (multi-step creation)
 19. **KPI_DATA_FIELDS whitelist** — column จริงใน DB คือ `Metric`, `Department` (ไม่ใช่ `MetricName`, `Category`) — ตรวจ whitelist ใน `server.js` ก่อนแก้ field names
-20. **`machine-safety.js` enterprise fields** — `Status`, `RiskLevel`, `NextInspectionDate` ถูก auto-migrate ใน `ensureTables()` แล้ว ไม่ต้องรัน SQL แยก (แต่ถ้าสร้างตารางใหม่ให้รัน SQL ที่ให้ไว้ใน session)
+20. **`machine-safety.js` enterprise fields** — `Status`, `RiskLevel`, `NextInspectionDate` ถูก auto-migrate ใน `ensureTables()` แล้ว รวมถึงตาราง `Machine_Safety_Compliance` และ `Machine_Safety_Issues` — ไม่ต้องรัน SQL แยก; `ensureTables()` ทำงานครั้งแรกที่ request มาถึง route
 21. **EmployeeID format** — รองรับทั้งตัวเลข 6 หลัก (012609) และแบบ letter-prefix (AP0001, SP0001) — placeholder ทุกที่ต้องอ้างอิงทั้งสองรูปแบบ
 22. **EmployeeID cascade update** — `PUT /api/profile/employee-id` ใช้ `pool.getConnection()` + transaction เพื่อ update Employees PK + 9 related tables แล้ว re-issue JWT ใหม่ — frontend ต้อง reload หลังสำเร็จ
 23. **`isAdmin` ใน patrol routes** — `/api/patrol` mount ใช้ `authenticateToken` เท่านั้น ถ้าต้องการ admin-only endpoint ภายใน patrol.js ต้อง import `isAdmin` จาก `../middleware/auth` แล้วใส่เป็น per-route middleware (`router.post('/...', isAdmin, handler)`)
@@ -617,3 +689,6 @@ closeModal();
 41. **CCCF Unit Summary DOM IDs** — outer wrapper: `id="cccf-unit-summary"`, inner re-renderable: `id="cccf-unit-summary-inner"` — ทุก function ที่ update summary ต้อง target `cccf-unit-summary-inner` และ call `setTimeout(() => initUnitChart(), 0)` หลัง `innerHTML =`
 42. **CCCF "รายการของฉัน" wrapper** — `id="cccf-my-card-wrap"` ใน `renderPage()` — `window._myCardSetYear()` re-renders แค่ card นี้โดยไม่ reload ทั้งหน้า
 43. **CCCF Chart horizontal bar** — ใช้ `indexAxis: 'y'` ใน Chart.js options — Y-axis labels truncate ที่ 22 chars ด้วย `callback: function(val) { const name = this.getLabelForValue(val); return name.length > 22 ? name.slice(0,21)+'…' : name }` — ห้ามใช้ vertical bar เพราะ X-axis labels ถูกตัดเมื่อมี unit มาก
+44. **Machine Safety issues route ordering** — `PUT /issues/:issueId` และ `DELETE /issues/:issueId` ต้องประกาศ **ก่อน** `PUT /:id` และ `DELETE /:id` ในไฟล์ `machine-safety.js` — ถ้าประกาศหลัง Express จะ match `'issues'` เป็น `:id` ทำให้ไม่ทำงาน (Express v5 ใช้ path-to-regexp เหมือนกัน)
+45. **Machine Safety row highlighting — inline style** — ใช้ inline `style="background:rgba(...)"` บน `<tr>` ไม่ใช่ Tailwind arbitrary value เช่น `bg-red-50/55` เพราะ CDN Tailwind ไม่ compile arbitrary opacity values ที่ไม่ได้ใช้ใน source
+46. **`_msdSetAuditFilter()` toggles** — ถ้า user คลิก badge เดิมซ้ำ จะ clear filter (toggle off) และ sync dropdown `#msd-audit` ด้วย — ต้องทำทั้งสองทาง (badge คลิก ↔ dropdown เปลี่ยน) ให้ state `_filterAudit` เป็น source of truth
