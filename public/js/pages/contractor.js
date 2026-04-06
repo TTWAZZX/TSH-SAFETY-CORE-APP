@@ -176,8 +176,8 @@ function buildPageShell(isAdmin) {
                     <button data-cat="${cat}"
                             class="cat-tab px-3 py-1.5 rounded-lg text-xs font-semibold transition-all border
                                    ${cat === _activeCategory
-                                     ? 'bg-sky-600 text-white border-sky-600 shadow-sm'
-                                     : 'bg-white text-slate-600 border-slate-200 hover:border-sky-300 hover:text-sky-600'}">
+                                     ? 'bg-amber-600 text-white border-amber-600 shadow-sm'
+                                     : 'bg-white text-slate-600 border-slate-200 hover:border-amber-300 hover:text-amber-600'}">
                         ${CATEGORY_LABELS[cat] || cat}
                     </button>`).join('')}
                 </div>
@@ -190,7 +190,7 @@ function buildPageShell(isAdmin) {
                     </svg>
                     <input id="doc-search" type="text" placeholder="ค้นหาเอกสาร..."
                            value="${_searchQuery}"
-                           class="form-input w-full pl-9 pr-3 py-2 text-sm rounded-lg border border-slate-200 focus:border-sky-400">
+                           class="form-input w-full pl-9 pr-3 py-2 text-sm rounded-lg border border-slate-200 focus:border-amber-400">
                 </div>
             </div>
 
@@ -198,7 +198,7 @@ function buildPageShell(isAdmin) {
             <div id="doc-grid" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
                 <div class="col-span-full flex items-center justify-center py-16 text-slate-400">
                     <div class="text-center">
-                        <div class="inline-block animate-spin rounded-full h-8 w-8 border-4 border-sky-400 border-t-transparent mb-3"></div>
+                        <div class="inline-block animate-spin rounded-full h-8 w-8 border-4 border-amber-400 border-t-transparent mb-3"></div>
                         <p class="text-sm">กำลังโหลดข้อมูล...</p>
                     </div>
                 </div>
@@ -292,7 +292,7 @@ function buildDocCard(doc, isAdmin) {
         <!-- Action bar -->
         <div class="border-t border-slate-100 flex">
             ${(isPdf || isImage) ? `
-            <button class="btn-preview-doc flex-1 flex items-center justify-center gap-1.5 py-2.5 text-xs font-semibold text-slate-500 hover:text-sky-600 hover:bg-sky-50 transition-colors"
+            <button class="btn-preview-doc flex-1 flex items-center justify-center gap-1.5 py-2.5 text-xs font-semibold text-slate-500 hover:text-amber-600 hover:bg-amber-50 transition-colors"
                     data-url="${doc.FileUrl}" data-title="${doc.Title}">
                 <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/>
@@ -442,8 +442,8 @@ function setupEventListeners() {
                 const active = btn.dataset.cat === _activeCategory;
                 btn.className = `cat-tab px-3 py-1.5 rounded-lg text-xs font-semibold transition-all border ${
                     active
-                        ? 'bg-sky-600 text-white border-sky-600 shadow-sm'
-                        : 'bg-white text-slate-600 border-slate-200 hover:border-sky-300 hover:text-sky-600'
+                        ? 'bg-amber-600 text-white border-amber-600 shadow-sm'
+                        : 'bg-white text-slate-600 border-slate-200 hover:border-amber-300 hover:text-amber-600'
                 }`;
             });
             await fetchDocuments();
@@ -507,7 +507,7 @@ function showUploadForm() {
                     ไฟล์เอกสาร <span class="text-red-500">*</span>
                 </label>
                 <div id="drop-zone"
-                     class="border-2 border-dashed border-slate-200 rounded-xl p-6 text-center cursor-pointer hover:border-sky-400 hover:bg-sky-50 transition-all">
+                     class="border-2 border-dashed border-slate-200 rounded-xl p-6 text-center cursor-pointer hover:border-amber-400 hover:bg-amber-50 transition-all">
                     <svg class="w-8 h-8 text-slate-300 mx-auto mb-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12"/>
                     </svg>
@@ -517,7 +517,7 @@ function showUploadForm() {
                            accept=".pdf,.doc,.docx,.xls,.xlsx,.jpg,.jpeg,.png,.webp">
                 </div>
                 <div id="file-preview" class="hidden mt-2 flex items-center gap-2 px-3 py-2 bg-slate-50 rounded-lg border border-slate-200">
-                    <svg class="w-4 h-4 text-sky-500 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <svg class="w-4 h-4 text-amber-500 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/>
                     </svg>
                     <span id="file-name" class="text-sm text-slate-700 truncate flex-1"></span>
@@ -531,7 +531,7 @@ function showUploadForm() {
 
             <div class="flex justify-end gap-3 pt-4 border-t border-slate-100">
                 <button type="button" class="btn btn-secondary px-4"
-                        onclick="document.getElementById('modal-close-btn').click()">ยกเลิก</button>
+                        onclick="window.closeModal&&window.closeModal()">ยกเลิก</button>
                 <button type="submit" id="submit-upload-btn" class="btn btn-primary px-5">อัปโหลด</button>
             </div>
         </form>`;
@@ -546,11 +546,11 @@ function showUploadForm() {
     const clearBtn = document.getElementById('btn-clear-file');
 
     dropZone.addEventListener('click', () => fileInput.click());
-    dropZone.addEventListener('dragover', e => { e.preventDefault(); dropZone.classList.add('border-sky-400', 'bg-sky-50'); });
-    dropZone.addEventListener('dragleave', () => dropZone.classList.remove('border-sky-400', 'bg-sky-50'));
+    dropZone.addEventListener('dragover', e => { e.preventDefault(); dropZone.classList.add('border-amber-400', 'bg-amber-50'); });
+    dropZone.addEventListener('dragleave', () => dropZone.classList.remove('border-amber-400', 'bg-amber-50'));
     dropZone.addEventListener('drop', e => {
         e.preventDefault();
-        dropZone.classList.remove('border-sky-400', 'bg-sky-50');
+        dropZone.classList.remove('border-amber-400', 'bg-amber-50');
         if (e.dataTransfer.files[0]) {
             fileInput.files = e.dataTransfer.files;
             showFilePreview(e.dataTransfer.files[0].name);

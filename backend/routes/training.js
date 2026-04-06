@@ -47,6 +47,36 @@ async function ensureTables() {
         )
     `);
 
+    await db.query(`
+        CREATE TABLE IF NOT EXISTS Training_Dept_Records (
+            id          INT AUTO_INCREMENT PRIMARY KEY,
+            Department  VARCHAR(100) NOT NULL,
+            Year        INT          NOT NULL,
+            CourseID    INT          DEFAULT NULL,
+            TotalEmp    INT          NOT NULL DEFAULT 0,
+            PassedCount INT          NOT NULL DEFAULT 0,
+            Notes       TEXT,
+            CreatedBy   VARCHAR(100),
+            CreatedAt   TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            UpdatedAt   TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+            KEY idx_dept   (Department),
+            KEY idx_year   (Year),
+            KEY idx_course (CourseID),
+            UNIQUE KEY uq_dept_year_course (Department, Year, CourseID)
+        )
+    `);
+
+    // Migrate existing tables: add CourseID column and swap unique key
+    try {
+        await db.query('ALTER TABLE Training_Dept_Records ADD COLUMN CourseID INT DEFAULT NULL AFTER Year');
+    } catch { /* column already exists */ }
+    try {
+        await db.query('ALTER TABLE Training_Dept_Records DROP KEY uq_dept_year');
+    } catch { /* key did not exist */ }
+    try {
+        await db.query('ALTER TABLE Training_Dept_Records ADD UNIQUE KEY uq_dept_year_course (Department, Year, CourseID)');
+    } catch { /* already exists */ }
+
     tablesReady = true;
 }
 
@@ -319,6 +349,179 @@ router.delete('/records/:id', isAdmin, async (req, res) => {
     try {
         await db.query('DELETE FROM Training_Records WHERE id=?', [req.params.id]);
         res.json({ success: true, message: 'ลบข้อมูลสำเร็จ' });
+    } catch (err) {
+        res.status(500).json({ success: false, message: err.message });
+    }
+});
+
+// ─── GET /api/training/dept-summary?year= ─────────────────────────────────────
+router.get('/dept-summary', async (req, res) => {
+    try {
+        await ensureTables();
+        const year = parseInt(req.query.year) || null;
+        const yf   = year ? 'AND Year = ?' : '';
+        const params = year ? [year] : [];
+
+        const [rows] = await db.query(
+            `SELECT Department,
+                    SUM(TotalEmp)    AS TotalEmp,
+                    SUM(PassedCount) AS PassedCount,
+                    COUNT(*)         AS RecordCount
+             FROM Training_Dept_Records
+             WHERE 1=1 ${yf}
+             GROUP BY Department
+             ORDER BY Department ASC`,
+            params
+        );
+
+        const totalEmp    = rows.reduce((s, r) => s + (parseInt(r.TotalEmp)    || 0), 0);
+        const totalPassed = rows.reduce((s, r) => s + (parseInt(r.PassedCount) || 0), 0);
+
+        res.json({
+            success: true,
+            data: {
+                byDept: rows,
+                overall: {
+                    deptCount:  rows.length,
+                    totalEmp,
+                    totalPassed,
+                    passRate:   totalEmp ? Math.round(totalPassed * 100 / totalEmp) : 0,
+                },
+            },
+        });
+    } catch (err) {
+        res.status(500).json({ success: false, message: err.message });
+    }
+});
+
+// ─── GET /api/training/dept-records ───────────────────────────────────────────
+router.get('/dept-records', async (req, res) => {
+    try {
+        await ensureTables();
+        const { year, department } = req.query;
+        let sql = `
+            SELECT r.*, c.CourseName, c.CourseCode
+            FROM Training_Dept_Records r
+            LEFT JOIN Training_Courses c ON c.id = r.CourseID
+            WHERE 1=1`;
+        const params = [];
+        if (year)       { sql += ' AND r.Year = ?';       params.push(year); }
+        if (department) { sql += ' AND r.Department = ?'; params.push(department); }
+        sql += ' ORDER BY r.Year DESC, r.Department ASC, c.CourseName ASC';
+        const [rows] = await db.query(sql, params);
+        res.json({ success: true, data: rows });
+    } catch (err) {
+        res.status(500).json({ success: false, message: err.message });
+    }
+});
+
+// ─── POST /api/training/dept-records (admin) ──────────────────────────────────
+router.post('/dept-records', isAdmin, async (req, res) => {
+    try {
+        await ensureTables();
+        const { Department, Year, CourseID, TotalEmp, PassedCount, Notes } = req.body;
+        if (!Department || !Year) {
+            return res.status(400).json({ success: false, message: 'กรุณากรอกข้อมูลให้ครบ (แผนก / ปี)' });
+        }
+        const totalEmp    = parseInt(TotalEmp)    || 0;
+        const passedCount = parseInt(PassedCount) || 0;
+        const courseId    = CourseID ? parseInt(CourseID) : null;
+        if (passedCount > totalEmp) {
+            return res.status(400).json({ success: false, message: 'จำนวนผ่านต้องไม่มากกว่าจำนวนพนักงาน' });
+        }
+        // Duplicate guard: same dept + year + course (NULL-safe)
+        const [dup] = await db.query(
+            `SELECT id FROM Training_Dept_Records
+             WHERE Department = ? AND Year = ?
+               AND (CourseID <=> ?)`,
+            [Department, parseInt(Year), courseId]
+        );
+        if (dup.length > 0) {
+            const courseLabel = courseId ? `หลักสูตรนี้` : `(ไม่ระบุหลักสูตร)`;
+            return res.status(400).json({
+                success: false,
+                message: `มีข้อมูลของแผนก "${Department}" ปี ${Year} ${courseLabel} อยู่แล้ว`,
+            });
+        }
+        await db.query(
+            `INSERT INTO Training_Dept_Records (Department, Year, CourseID, TotalEmp, PassedCount, Notes, CreatedBy)
+             VALUES (?, ?, ?, ?, ?, ?, ?)`,
+            [Department, parseInt(Year), courseId, totalEmp, passedCount, Notes || '', req.user.name]
+        );
+        res.json({ success: true, message: 'บันทึกข้อมูลสำเร็จ' });
+    } catch (err) {
+        res.status(500).json({ success: false, message: err.message });
+    }
+});
+
+// ─── PUT /api/training/dept-records/:id (admin) ───────────────────────────────
+router.put('/dept-records/:id', isAdmin, async (req, res) => {
+    try {
+        const { Department, Year, CourseID, TotalEmp, PassedCount, Notes } = req.body;
+        if (!Department || !Year) {
+            return res.status(400).json({ success: false, message: 'กรุณากรอกข้อมูลให้ครบ' });
+        }
+        const totalEmp    = parseInt(TotalEmp)    || 0;
+        const passedCount = parseInt(PassedCount) || 0;
+        const courseId    = CourseID ? parseInt(CourseID) : null;
+        if (passedCount > totalEmp) {
+            return res.status(400).json({ success: false, message: 'จำนวนผ่านต้องไม่มากกว่าจำนวนพนักงาน' });
+        }
+        // Duplicate guard — exclude current row (NULL-safe course comparison)
+        const [dup] = await db.query(
+            `SELECT id FROM Training_Dept_Records
+             WHERE Department = ? AND Year = ? AND (CourseID <=> ?) AND id <> ?`,
+            [Department, parseInt(Year), courseId, req.params.id]
+        );
+        if (dup.length > 0) {
+            const courseLabel = courseId ? `หลักสูตรนี้` : `(ไม่ระบุหลักสูตร)`;
+            return res.status(400).json({
+                success: false,
+                message: `มีข้อมูลของแผนก "${Department}" ปี ${Year} ${courseLabel} อยู่แล้ว`,
+            });
+        }
+        await db.query(
+            `UPDATE Training_Dept_Records
+             SET Department=?, Year=?, CourseID=?, TotalEmp=?, PassedCount=?, Notes=?
+             WHERE id=?`,
+            [Department, parseInt(Year), courseId, totalEmp, passedCount, Notes || '', req.params.id]
+        );
+        res.json({ success: true, message: 'อัปเดตข้อมูลสำเร็จ' });
+    } catch (err) {
+        res.status(500).json({ success: false, message: err.message });
+    }
+});
+
+// ─── DELETE /api/training/dept-records/:id (admin) ────────────────────────────
+router.delete('/dept-records/:id', isAdmin, async (req, res) => {
+    try {
+        await db.query('DELETE FROM Training_Dept_Records WHERE id=?', [req.params.id]);
+        res.json({ success: true, message: 'ลบข้อมูลสำเร็จ' });
+    } catch (err) {
+        res.status(500).json({ success: false, message: err.message });
+    }
+});
+
+// ─── GET /api/training/course-summary?year= ───────────────────────────────────
+router.get('/course-summary', async (req, res) => {
+    try {
+        await ensureTables();
+        const year = parseInt(req.query.year) || null;
+        const params = year ? [year] : [];
+        const [rows] = await db.query(`
+            SELECT r.CourseID,
+                   COALESCE(c.CourseName, '(ไม่ระบุหลักสูตร)') AS CourseName,
+                   c.CourseCode,
+                   COUNT(DISTINCT r.Department)                  AS deptCount,
+                   SUM(r.TotalEmp)                               AS totalEmp,
+                   SUM(r.PassedCount)                            AS passedCount
+            FROM Training_Dept_Records r
+            LEFT JOIN Training_Courses c ON c.id = r.CourseID
+            WHERE 1=1 ${year ? 'AND r.Year = ?' : ''}
+            GROUP BY r.CourseID, c.CourseName, c.CourseCode
+            ORDER BY SUM(r.TotalEmp) DESC
+        `, params);
+        res.json({ success: true, data: rows });
     } catch (err) {
         res.status(500).json({ success: false, message: err.message });
     }

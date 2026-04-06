@@ -220,7 +220,7 @@ Primary key ของ generic CRUD คือ `id` — ยกเว้น `Employ
 | **OJT / SCW** | มาตรฐาน Stop-Call-Wait (แก้ไขได้), จัดการเอกสาร SCW (อัปโหลด/ดู/ลบ), OJT Compliance รายแผนก (เป้าหมาย/ผู้เข้าร่วม/สถานะ, เลือกแผนกที่แสดง persisted, คำนวณ metric จากแผนกที่เลือกเท่านั้น, year filter) |
 | **Accident** | รายงานอุบัติเหตุ/อุบัติการณ์ |
 | **Safety Culture** | กิจกรรมวัฒนธรรมความปลอดภัย |
-| **Training** | สถานะการฝึกอบรม |
+| **Training** | บันทึกและติดตามผลการอบรมรายแผนก — `Training_Dept_Records` (Department+Year+CourseID+TotalEmp+PassedCount), Dashboard: KPI cards + compliance chart + course summary + dept summary + Dept×Course matrix, หลักสูตร CRUD (Admin only) |
 | **Contractor** | ความปลอดภัยผู้รับเหมา |
 | **Hiyari** | รายงาน near-miss / ไฮยาริ |
 | **KY** | กิจกรรม KY (Kiken Yochi) |
@@ -298,6 +298,41 @@ Query หลักใช้ correlated subqueries ส่งคืน computed co
 
 ### Express Route Ordering (Issues)
 `PUT /issues/:issueId` และ `DELETE /issues/:issueId` ต้องประกาศ **ก่อน** `PUT /:id` และ `DELETE /:id` เสมอ — ไม่งั้น Express จะ match `'issues'` เป็น `:id`
+
+## Training Module — Architecture
+
+### Tables
+| Table | Purpose |
+|-------|---------|
+| `Training_Courses` | หลักสูตร — `CourseCode`, `CourseName`, `DurationHours`, `PassScore`, `IsActive` |
+| `Training_Records` | (legacy — ไม่ได้ใช้ใน UI ปัจจุบัน) บันทึกรายบุคคล |
+| `Training_Dept_Records` | บันทึกรายแผนก — `Department`, `Year`, `CourseID` (nullable), `TotalEmp`, `PassedCount`, `Notes`; UNIQUE KEY `(Department, Year, CourseID)` |
+
+### Key API Endpoints
+| Endpoint | Description |
+|----------|-------------|
+| `GET /training/dept-summary?year=` | สรุปรายแผนก: `{ byDept, overall: { deptCount, totalEmp, totalPassed, passRate } }` |
+| `GET /training/course-summary?year=` | สรุปรายหลักสูตร: `[{ CourseID, CourseName, deptCount, totalEmp, passedCount }]` |
+| `GET /training/dept-records?year=&department=` | รายการดิบ JOIN Training_Courses |
+| `POST /training/dept-records` | เพิ่มบันทึก — duplicate guard ด้วย `CourseID <=>` (NULL-safe) |
+| `PUT /training/dept-records/:id` | แก้ไขบันทึก — duplicate guard ยกเว้น row ปัจจุบัน |
+| `GET /training/courses` | รายการหลักสูตรทั้งหมด |
+
+### Dashboard Structure
+1. KPI cards (4 ใบ): แผนกที่บันทึก / พนักงานเข้าอบรม / ผ่านการอบรม / Pass Rate
+2. Horizontal stacked bar chart — compliance รายแผนก (`indexAxis:'y'`)
+3. 2-col grid: **Course Summary table** (ซ้าย) + **Dept Summary table** (ขวา) — ทั้งสองแสดงเฉพาะ depts/courses ที่มีข้อมูลจริง
+4. **Dept × Course Matrix** (full-width) — แสดงเมื่อมี 2+ courses; rows=depts, cols=courses, cells=% badge, last col=overall; คำนวณ client-side จาก `dept-records` โดยตรง
+
+### Duplicate Guard (NULL-safe CourseID)
+MySQL UNIQUE index ถือ NULL เป็น distinct ทุกค่า — ต้องใช้ `CourseID <=> ?` ใน application-level check แทน `CourseID = ?`
+
+```js
+WHERE Department = ? AND Year = ? AND (CourseID <=> ?)
+```
+
+### Division-by-zero
+`pct = total > 0 ? Math.round(passed * 100 / total) : null` — null → แสดง "—" ใน UI
 
 ## CCCF Module — Architecture
 
@@ -553,8 +588,8 @@ closeModal();
 | `fourm.js` | done (enterprise) |
 | `yokoten.js` | done (enterprise) |
 | `accident.js` | pending |
-| `training.js` | pending |
-| `contractor.js` | pending |
+| `training.js` | done (enterprise) |
+| `contractor.js` | done (enterprise) |
 | `admin.js` | pending |
 
 ### Page Wrapper Pattern
@@ -692,3 +727,8 @@ closeModal();
 44. **Machine Safety issues route ordering** — `PUT /issues/:issueId` และ `DELETE /issues/:issueId` ต้องประกาศ **ก่อน** `PUT /:id` และ `DELETE /:id` ในไฟล์ `machine-safety.js` — ถ้าประกาศหลัง Express จะ match `'issues'` เป็น `:id` ทำให้ไม่ทำงาน (Express v5 ใช้ path-to-regexp เหมือนกัน)
 45. **Machine Safety row highlighting — inline style** — ใช้ inline `style="background:rgba(...)"` บน `<tr>` ไม่ใช่ Tailwind arbitrary value เช่น `bg-red-50/55` เพราะ CDN Tailwind ไม่ compile arbitrary opacity values ที่ไม่ได้ใช้ใน source
 46. **`_msdSetAuditFilter()` toggles** — ถ้า user คลิก badge เดิมซ้ำ จะ clear filter (toggle off) และ sync dropdown `#msd-audit` ด้วย — ต้องทำทั้งสองทาง (badge คลิก ↔ dropdown เปลี่ยน) ให้ state `_filterAudit` เป็น source of truth
+47. **Training module — department-based (ไม่ใช่ individual)** — `Training_Dept_Records` คือตารางหลักใน UI ปัจจุบัน; `Training_Records` (individual) ยังมีใน DB แต่ UI ไม่ใช้แล้ว — อย่าสับสนกัน; unique constraint คือ `(Department, Year, CourseID)` ไม่ใช่ `(Department, Year)` เพราะ 1 แผนก/ปี มีได้หลายหลักสูตร
+48. **Training `CourseID` NULL-safe duplicate check** — MySQL UNIQUE index ถือ NULL เป็น distinct ทุกค่า (ไม่ conflict) → ต้องใช้ `CourseID <=> ?` ใน app-level guard ด้วย ไม่ใช่ `CourseID = ?` (ซึ่งจะไม่ match NULL)
+49. **Training dashboard — Dept×Course Matrix** — คำนวณ client-side จาก `_deptRecords` (ดึงจาก `/training/dept-records?year=`); แสดงเฉพาะเมื่อมี 2+ courses; lookup key = `` `${dept}::${courseID ?? '__null__'}` ``
+50. **`API.patch()` ใน `api.js`** — method PATCH ถูกเพิ่มแล้วใน `api.js`; `admin.js` ใช้ `API.patch(...)` สำหรับ toggle-cancel sessions — ห้าม import `apiFetch` โดยตรงใน `admin.js`
+51. **contractor.js accent color = amber** — gradient `#d97706 → #b45309`, shadow `rgba(217,119,6,...)` — ห้ามใช้สี sky/blue ใน contractor module

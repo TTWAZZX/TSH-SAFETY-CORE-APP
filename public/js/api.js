@@ -70,5 +70,10 @@ export const API = {
     delete: (url) =>
         apiFetch(url, {
             method: 'DELETE'
+        }),
+    patch: (url, body) =>
+        apiFetch(url, {
+            method: 'PATCH',
+            body: body instanceof FormData ? body : (body !== undefined ? JSON.stringify(body) : undefined)
         })
 };
