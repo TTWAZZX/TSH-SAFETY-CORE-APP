@@ -217,7 +217,7 @@ Primary key ของ generic CRUD คือ `id` — ยกเว้น `Employ
 | **Policy** | นโยบายความปลอดภัย, รับทราบนโยบาย |
 | **Committee** | คณะกรรมการความปลอดภัย, SubCommittee (JSON array), ผังองค์กร |
 | **Machine Safety** | ข้อมูลเครื่องจักร/อุปกรณ์ความปลอดภัย, Safety Device Std., Layout & Checkpoint, Compliance Checklist (5.1–5.8), Issue Tracker, Audit Readiness |
-| **OJT / SCW** | Stop-Call-Wait, OJT Department Status, เอกสาร SCW |
+| **OJT / SCW** | มาตรฐาน Stop-Call-Wait (แก้ไขได้), จัดการเอกสาร SCW (อัปโหลด/ดู/ลบ), OJT Compliance รายแผนก (เป้าหมาย/ผู้เข้าร่วม/สถานะ, เลือกแผนกที่แสดง persisted, คำนวณ metric จากแผนกที่เลือกเท่านั้น, year filter) |
 | **Accident** | รายงานอุบัติเหตุ/อุบัติการณ์ |
 | **Safety Culture** | กิจกรรมวัฒนธรรมความปลอดภัย |
 | **Training** | สถานะการฝึกอบรม |
@@ -545,13 +545,13 @@ closeModal();
 | `kpi.js` | done (enterprise) |
 | `machine-safety.js` | done (enterprise) |
 | `patrol.js` | done (enterprise) |
-| `ojt.js` | done |
+| `ojt.js` | done (enterprise) |
 | `safety-culture.js` | done |
 | `profile.js` | done (enterprise — slide-over drawer) |
-| `hiyari.js` | pending |
-| `ky.js` | pending |
-| `fourm.js` | pending |
-| `yokoten.js` | pending |
+| `hiyari.js` | done (enterprise) |
+| `ky.js` | done (enterprise) |
+| `fourm.js` | done (enterprise) |
+| `yokoten.js` | done (enterprise) |
 | `accident.js` | pending |
 | `training.js` | pending |
 | `contractor.js` | pending |

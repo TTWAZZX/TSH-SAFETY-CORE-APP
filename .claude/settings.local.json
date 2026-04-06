@@ -10,7 +10,18 @@
       "Bash(git add:*)",
       "Bash(git commit:*)",
       "Bash(git push:*)",
-      "Bash(node -e \":*)"
+      "Bash(node -e \":*)",
+      "Bash(ls /tmp/patrol*)",
+      "Bash(\"c:/xampp/htdocs/tsh-safety-core-app/public/js/pages/patrol.js\")",
+      "Bash(node --check backend/routes/patrol.js)",
+      "Bash(node --check backend/server.js)",
+      "Bash(node -e \"const r = require\\('./backend/routes/machine-safety.js'\\); console.log\\('Backend OK'\\);\")",
+      "Bash(node -e \"require\\('./backend/routes/machine-safety.js'\\); console.log\\('OK'\\)\")",
+      "Bash(echo \"EXIT:$?\")",
+      "Bash(node --input-type=module --eval \"import './public/js/pages/machine-safety.js'\")",
+      "Bash(node --check c:/xampp/htdocs/tsh-safety-core-app/public/js/pages/machine-safety.js)",
+      "Bash(node --input-type=module)",
+      "Bash(node --check \"c:\\\\xampp\\\\htdocs\\\\tsh-safety-core-app\\\\public\\\\js\\\\pages\\\\ojt.js\")"
     ]
   }
 }

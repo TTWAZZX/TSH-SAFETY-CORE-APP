@@ -54,9 +54,12 @@ async function ensureTables() {
         )
     `);
 
-    // Migration: add AttendeeCount if existing table lacks it
+    // Migrations: add columns if existing table lacks them
     try {
         await db.query('ALTER TABLE OJT_Records ADD COLUMN AttendeeCount INT DEFAULT 0');
+    } catch (_) { /* already exists */ }
+    try {
+        await db.query('ALTER TABLE OJT_Records ADD COLUMN YearlyTarget INT DEFAULT NULL');
     } catch (_) { /* already exists */ }
 
     // Drop EmployeeID / EmployeeName columns if they exist (old schema)
@@ -176,7 +179,7 @@ router.get('/records', async (req, res) => {
 router.post('/records', isAdmin, async (req, res) => {
     try {
         await ensureTables();
-        const { Department, OJTDate, ReviewIntervalMonths, TrainerName, AttendeeCount, Notes } = req.body;
+        const { Department, OJTDate, ReviewIntervalMonths, TrainerName, AttendeeCount, Notes, YearlyTarget } = req.body;
 
         if (!Department || !OJTDate) {
             return res.status(400).json({ success: false, message: 'กรุณาเลือกแผนกและวันที่ OJT' });
@@ -187,20 +190,22 @@ router.post('/records', isAdmin, async (req, res) => {
         nextReview.setMonth(nextReview.getMonth() + interval);
         const nextReviewDate = nextReview.toISOString().split('T')[0];
 
+        const yearlyTarget = YearlyTarget !== undefined && YearlyTarget !== '' ? parseInt(YearlyTarget) || null : null;
+
         // UPSERT — one record per department
         await db.query(
             `INSERT INTO OJT_Records
-             (Department, OJTDate, NextReviewDate, ReviewIntervalMonths, TrainerName, AttendeeCount, Notes, CreatedBy)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+             (Department, OJTDate, NextReviewDate, ReviewIntervalMonths, TrainerName, AttendeeCount, Notes, YearlyTarget, CreatedBy)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
              ON DUPLICATE KEY UPDATE
              OJTDate=VALUES(OJTDate), NextReviewDate=VALUES(NextReviewDate),
              ReviewIntervalMonths=VALUES(ReviewIntervalMonths),
              TrainerName=VALUES(TrainerName), AttendeeCount=VALUES(AttendeeCount),
-             Notes=VALUES(Notes)`,
+             Notes=VALUES(Notes), YearlyTarget=VALUES(YearlyTarget)`,
             [
                 Department, OJTDate, nextReviewDate, interval,
                 TrainerName || '', parseInt(AttendeeCount) || 0,
-                Notes || '', req.user.name
+                Notes || '', yearlyTarget, req.user.name
             ]
         );
         // Save to history
@@ -240,7 +245,7 @@ router.get('/history/:department', async (req, res) => {
 router.get('/documents', async (req, res) => {
     try {
         await ensureTables();
-        const [rows] = await db.query('SELECT * FROM SCW_Documents ORDER BY UploadedAt DESC');
+        const [rows] = await db.query('SELECT * FROM SCW_Documents ORDER BY id DESC');
         res.json({ success: true, data: rows });
     } catch (err) {
         res.status(500).json({ success: false, message: err.message });
