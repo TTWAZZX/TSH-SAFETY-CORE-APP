@@ -144,6 +144,14 @@ node server.js      # runs on PORT=5000
 | `/api/ojt/*` | User | Stop-Call-Wait (OJT/SCW) |
 | `/api/yokoten/*` | User | Yokoten CRUD |
 | `/api/accident/*` | User | Accident Reports |
+| `/api/accident/reports` | User (write=Admin) | GET (list+filters) / POST (create+upload) |
+| `/api/accident/reports/:id` | User (write=Admin) | GET single / PUT (update+upload) / DELETE (cascade attachments) |
+| `/api/accident/summary?year=` | User | KPI + trend + byType + byDept aggregates |
+| `/api/accident/analytics?year=` | User | dept risk ranking + hotspot + root causes |
+| `/api/accident/performance?year=` | User | Safety Performance record + recordableCount |
+| `/api/accident/performance` | Admin | PUT upsert — TotalHours, TotalDays, LastAccidentDate, TargetHours, TargetDays, MonthlyStatus (JSON) |
+| `/api/accident/attachments/:id` | Admin | DELETE single attachment (Cloudinary + DB) |
+| `/api/accident/employees?q=` | User | Employee search for accident form |
 | `/api/safety-culture/*` | User | Safety Culture |
 | `/api/training/*` | User | Training Status |
 | `/api/contractor/*` | User | Contractor Safety |
@@ -218,7 +226,7 @@ Primary key ของ generic CRUD คือ `id` — ยกเว้น `Employ
 | **Committee** | คณะกรรมการความปลอดภัย, SubCommittee (JSON array), ผังองค์กร |
 | **Machine Safety** | ข้อมูลเครื่องจักร/อุปกรณ์ความปลอดภัย, Safety Device Std., Layout & Checkpoint, Compliance Checklist (5.1–5.8), Issue Tracker, Audit Readiness |
 | **OJT / SCW** | มาตรฐาน Stop-Call-Wait (แก้ไขได้), จัดการเอกสาร SCW (อัปโหลด/ดู/ลบ), OJT Compliance รายแผนก (เป้าหมาย/ผู้เข้าร่วม/สถานะ, เลือกแผนกที่แสดง persisted, คำนวณ metric จากแผนกที่เลือกเท่านั้น, year filter) |
-| **Accident** | รายงานอุบัติเหตุ/อุบัติการณ์ |
+| **Accident** | รายงานอุบัติเหตุ/อุบัติการณ์ — Dashboard (KPI cards + trend chart + dept breakdown), Analytics (dept risk ranking + hotspot + root cause), Records (full 6-section form + file attachments), Safety KPI Board (Zero Accident banner + Days/Hours without accident + target progress + monthly status grid) |
 | **Safety Culture** | กิจกรรมวัฒนธรรมความปลอดภัย |
 | **Training** | บันทึกและติดตามผลการอบรมรายแผนก — `Training_Dept_Records` (Department+Year+CourseID+TotalEmp+PassedCount), Dashboard: KPI cards + compliance chart + course summary + dept summary + Dept×Course matrix, หลักสูตร CRUD (Admin only) |
 | **Contractor** | ความปลอดภัยผู้รับเหมา |
@@ -298,6 +306,47 @@ Query หลักใช้ correlated subqueries ส่งคืน computed co
 
 ### Express Route Ordering (Issues)
 `PUT /issues/:issueId` และ `DELETE /issues/:issueId` ต้องประกาศ **ก่อน** `PUT /:id` และ `DELETE /:id` เสมอ — ไม่งั้น Express จะ match `'issues'` เป็น `:id`
+
+## Accident Module — Architecture
+
+### Tables
+| Table | Purpose |
+|-------|---------|
+| `Accident_Reports` | รายงานหลัก — 29 columns รวม `Location`, `Position`, `EmploymentType`, `InjuryType`, `BodyPart`, `MedicalTreatment`, `ImmediateCause`, `UnsafeAct`, `UnsafeCondition`, `PreventiveAction`, `ResponsiblePerson`, `DueDate` (auto-migrated ด้วย `ALTER TABLE ... ADD COLUMN` try/catch ใน `ensureTable()`) |
+| `Accident_Attachments` | ไฟล์แนบต่อรายงาน — `AccidentID` (FK), `FileName`, `FileURL`, `PublicID`, `FileType`, `FileSize`, `UploadedBy` |
+| `Accident_Performance` | Safety KPI Board ต่อปี — `Year` (UNIQUE), `TotalHours`, `TotalDays`, `LastAccidentDate`, `TargetHours`, `TargetDays`, `MonthlyStatus` (JSON), `UpdatedBy` |
+
+### Accident Report Form (6 Sections)
+| Section | Fields |
+|---------|--------|
+| ข้อมูลทั่วไป | AccidentDate, ReportDate, AccidentTime, Location, Area, ReportedBy |
+| ผู้ประสบเหตุ | EmployeeID (typeahead search), Position (auto-fill), EmploymentType |
+| รายละเอียดเหตุการณ์ | AccidentType, Severity, Description |
+| การบาดเจ็บ | InjuryType, BodyPart, LostDays, IsRecordable, MedicalTreatment |
+| วิเคราะห์สาเหตุ | ImmediateCause, UnsafeAct, UnsafeCondition, RootCause, RootCauseDetail |
+| มาตรการแก้ไข | CorrectiveAction, PreventiveAction, ResponsiblePerson, DueDate, Status + Attachments |
+
+- SubmitFormData ผ่าน `API.post/put(url, fd)` — multer `accFileFilter` รับเฉพาะ `image/*` + `application/pdf` สูงสุด 10 ไฟล์ / 20 MB ต่อไฟล์
+- `EmployeeID` ต้องมีอยู่ใน `Employees` — backend ดึง `Department` และ `Position` จาก master อัตโนมัติ
+- ไฟล์ staged ใน `_pendingFiles[]` ก่อน submit — validate type/size/duplicate client-side
+
+### File Upload Security
+- `accFileFilter` (local ใน `accident.js`) แทน global `fileFilter` — restrict เฉพาะ image/* + PDF
+- `parseId(val)` validate `:id` params ทุก route (400 ถ้าไม่ใช่ integer > 0)
+- `s(v)` trim whitespace จาก `req.body` string fields ทุกตัว
+- DELETE routes verify existence ก่อน destroy (404 ถ้าไม่พบ)
+
+### Safety Performance (KPI Board)
+- `GET /accident/performance?year=` คืน record + `recordableCount` จาก `Accident_Reports` (Zero Accident = recordableCount === 0)
+- `daysWithoutAccident`: ถ้ามี `LastAccidentDate` → คำนวณ `today - lastDate`; ถ้าไม่มี → ใช้ `TotalDays` (manual)
+- `MonthlyStatus` เป็น JSON object `{ "1": "green", "2": "red", ... }` — admin คลิก cell เพื่อ cycle: pending → green → red → pending (auto-save ทันที)
+- `PUT /accident/performance` ใช้ `ON DUPLICATE KEY UPDATE` — upsert ต่อ Year
+
+### Tabs & Cache Sync
+4 tabs: `dashboard`, `analytics`, `reports`, `performance`
+- `_summary`, `_analytics`, `_perfData` เป็น module-level cache
+- ล้าง cache ทั้ง 3 เมื่อ: (1) เปลี่ยนปี (2) บันทึกรายงาน (3) ลบรายงาน
+- เปลี่ยนปี (`acc-year-sel`) → reset caches ก่อน render เสมอ ป้องกัน race condition
 
 ## Training Module — Architecture
 
@@ -587,7 +636,7 @@ closeModal();
 | `ky.js` | done (enterprise) |
 | `fourm.js` | done (enterprise) |
 | `yokoten.js` | done (enterprise) |
-| `accident.js` | pending |
+| `accident.js` | done (enterprise) |
 | `training.js` | done (enterprise) |
 | `contractor.js` | done (enterprise) |
 | `admin.js` | pending |
