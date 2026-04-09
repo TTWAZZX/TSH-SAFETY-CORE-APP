@@ -142,7 +142,16 @@ node server.js      # runs on PORT=5000
 | `/api/profile/employee-id` | User | เปลี่ยน EmployeeID ตัวเอง (cascade update + new JWT) |
 | `/api/machine-safety/*` | User | Machine & Device Safety |
 | `/api/ojt/*` | User | Stop-Call-Wait (OJT/SCW) |
-| `/api/yokoten/*` | User | Yokoten CRUD |
+| `/api/yokoten/topics` | User (write=Admin) | GET topics (includes `deptResponse` for caller's dept) / POST create / PUT :id / DELETE :id |
+| `/api/yokoten/respond` | User | POST new dept response (FormData, field: `responseFiles`) |
+| `/api/yokoten/respond/:id` | User/Admin | PUT update response / POST approve / POST reject |
+| `/api/yokoten/respond/:id/approve` | Admin | อนุมัติ response (ApprovalStatus → approved) |
+| `/api/yokoten/respond/:id/reject` | Admin | ปฏิเสธ response (body: { comment }) |
+| `/api/yokoten/response-files/:fileId` | Admin | DELETE single file (Cloudinary + DB) |
+| `/api/yokoten/dept-history` | User | ประวัติ response ของแผนกตัวเอง (includes files) |
+| `/api/yokoten/dept-completion` | Admin | สรุปความคืบหน้ารายแผนก → `{ topics, deptSummary }` |
+| `/api/yokoten/all-responses` | Admin | รายการ response ทั้งหมด (filterable, includes files) |
+| `/api/yokoten/dashboard-config` | User (write=Admin) | GET/PUT `{ pinnedDepts, pinnedUnits }` JSON config |
 | `/api/accident/*` | User | Accident Reports |
 | `/api/accident/reports` | User (write=Admin) | GET (list+filters) / POST (create+upload) |
 | `/api/accident/reports/:id` | User (write=Admin) | GET single / PUT (update+upload) / DELETE (cascade attachments) |
@@ -181,7 +190,7 @@ node server.js      # runs on PORT=5000
 ตารางเหล่านี้มี auto-generated CRUD endpoints (GET/POST/PUT/DELETE):
 `Patrol_Sessions`, `Patrol_Attendance`, `Patrol_Issues`, `Patrol_Areas`, `CCCF_Activity`, `CCCF_Targets`,
 `ManHours`, `AccidentReports`, `TrainingStatus`, `SCW_Documents`, `OJT_Department_Status`,
-`Machines`, `Documents`, `Document_Machine_Links`, `YokotenTopics`, `YokotenResponses`
+`Machines`, `Documents`, `Document_Machine_Links`
 
 Primary key ของ generic CRUD คือ `id` — ยกเว้น `Employees` ที่ใช้ `EmployeeID`
 
@@ -193,6 +202,10 @@ Primary key ของ generic CRUD คือ `id` — ยกเว้น `Employ
 | `Master_SafetyUnits` | `/api/master/safety-units` | Safety units linked to departments (cascading select) |
 | `Activity_Position_Templates` | `/api/activity-targets/position-templates` | Yearly targets per position per activity (IsNA flag supported) |
 | `Employee_Activity_Targets` | `/api/activity-targets/employee/:empId` | Per-person override targets — override takes priority over template |
+| `YokotenTopics` | `/api/yokoten/topics` | Admin-managed topics (Phase 3) — TargetDepts + TargetUnits as JSON |
+| `YokotenResponses` | `/api/yokoten/respond` | One response per (YokotenID, Department) — UNIQUE KEY `uq_dept_topic` — approval workflow |
+| `Yokoten_Response_Files` | `/api/yokoten/respond`, `/api/yokoten/response-files/:fileId` | Per-response file attachments (Cloudinary) |
+| `Yokoten_Dashboard_Config` | `/api/yokoten/dashboard-config` | JSON config row: `pinnedDepts` + `pinnedUnits` arrays |
 
 ### File Upload
 - **ห้ามเขียนไฟล์ไปยัง local filesystem** — Vercel มี read-only filesystem
@@ -221,7 +234,7 @@ Primary key ของ generic CRUD คือ `id` — ยกเว้น `Employ
 | **Patrol** | กำหนดการตรวจ, บันทึกการเข้าร่วม (ปกติ / ซ่อม / ตรวจซ้ำ), รายงานปัญหา (รูปภาพ), Self-Patrol สำหรับหัวหน้า, Team Rotation, พื้นที่โรงงาน (Patrol_Areas), Roster Management (Top&Management / Sec.&Supervisor), Admin Record Management (เพิ่ม/ลบรายการแทนสมาชิก) |
 | **CCCF** | Form A Worker (ค้นหาอันตรายรายบุคคล), Form A Permanent (ตารางติดตาม `ต้องส่ง / On Process / Complete`, admin ส่งแทน/แก้ไข/ลบได้, progress รายส่วนงานจาก assignment), Unit Summary combo chart (horizontal bar + target line), Admin ตั้งเป้าหมาย/override achieved ต่อ Unit, กรองปีได้ทั้ง Unit summary และ "รายการของฉัน" |
 | **KPI** | ประกาศ KPI, ข้อมูล KPI รายปี (ม.ค.–ธ.ค.) |
-| **Yokoten** | แบ่งปันบทเรียน/ความรู้ความปลอดภัย, บันทึกการรับทราบ |
+| **Yokoten** | แบ่งปันบทเรียน/ความรู้ความปลอดภัย (Phase 3) — **หนึ่ง response ต่อแผนก**, Approval workflow (pending→approved/rejected), Corrective Action (IsRelated=No), ไฟล์แนบ (FormData, field: `responseFiles`, สูงสุด 10 ไฟล์/20 MB), Dashboard pinned depts config, Admin approve/reject/delete, Excel export |
 | **Policy** | นโยบายความปลอดภัย, รับทราบนโยบาย |
 | **Committee** | คณะกรรมการความปลอดภัย, SubCommittee (JSON array), ผังองค์กร |
 | **Machine Safety** | ข้อมูลเครื่องจักร/อุปกรณ์ความปลอดภัย, Safety Device Std., Layout & Checkpoint, Compliance Checklist (5.1–5.8), Issue Tracker, Audit Readiness |
@@ -382,6 +395,90 @@ WHERE Department = ? AND Year = ? AND (CourseID <=> ?)
 
 ### Division-by-zero
 `pct = total > 0 ? Math.round(passed * 100 / total) : null` — null → แสดง "—" ใน UI
+
+## Yokoten Module — Architecture (Phase 3)
+
+### Tables
+| Table | Purpose |
+|-------|---------|
+| `YokotenTopics` | หัวข้อ Yokoten — `TargetDepts` (JSON array), `TargetUnits` (JSON array), `RiskLevel`, `Category`, `Deadline`, `AttachmentUrl` — auto-created by `ensureTables()` |
+| `YokotenResponses` | Response หนึ่งรายการต่อ (YokotenID, Department) — UNIQUE KEY `uq_dept_topic` — `IsRelated`, `Comment`, `CorrectiveAction`, `ApprovalStatus` (NULL/pending/approved/rejected), `ApprovalComment`, `ApprovedBy` |
+| `Yokoten_Response_Files` | ไฟล์แนบต่อ response — `ResponseID` (FK), `FileName`, `FileURL`, `PublicID`, `FileType`, `FileSize`, `UploadedBy` |
+| `Yokoten_Dashboard_Config` | Config row เดียว — `pinnedDepts` (JSON), `pinnedUnits` (JSON) — upsert ด้วย `INSERT ... ON DUPLICATE KEY UPDATE` |
+
+### Key API Endpoints
+| Endpoint | Auth | Description |
+|----------|------|-------------|
+| `GET /yokoten/topics` | User | ดึงทุก topic (IsActive=1) พร้อม `deptResponse` ของ caller's dept + `totalDeptCount` |
+| `POST /yokoten/topics` | Admin | สร้าง topic ใหม่ (TargetDepts+TargetUnits เป็น JSON) |
+| `PUT /yokoten/topics/:id` | Admin | แก้ไข topic |
+| `DELETE /yokoten/topics/:id` | Admin | ลบ topic + cascade responses+files (Cloudinary) |
+| `POST /yokoten/respond` | User | ส่ง dept response (FormData, field: `responseFiles`) — IsRelated='No' → ApprovalStatus='pending' |
+| `PUT /yokoten/respond/:id` | User/Admin | แก้ไข response (FormData) — ต้องเป็น dept เดียวกันหรือ admin |
+| `DELETE /yokoten/respond/:id` | Admin | ลบ response + cascade files (Cloudinary) |
+| `POST /yokoten/respond/:id/approve` | Admin | อนุมัติ → ApprovalStatus='approved' |
+| `POST /yokoten/respond/:id/reject` | Admin | ปฏิเสธ → ApprovalStatus='rejected', body: `{ comment }` |
+| `DELETE /yokoten/response-files/:fileId` | Admin | ลบไฟล์เดี่ยว (Cloudinary + DB) |
+| `GET /yokoten/dept-history` | User | ประวัติ response ของแผนกตัวเอง พร้อมไฟล์ |
+| `GET /yokoten/dept-completion` | Admin | `{ topics, deptSummary }` — สรุปทุกแผนกจาก Master_Departments |
+| `GET /yokoten/all-responses` | Admin | response ทั้งหมด พร้อมไฟล์ (filterable) |
+| `GET /yokoten/dashboard-config` | User | `{ pinnedDepts: [], pinnedUnits: [] }` |
+| `PUT /yokoten/dashboard-config` | Admin | บันทึก config |
+
+### Response Model — Approval Workflow
+- `IsRelated = 'Yes'` → `ApprovalStatus = NULL` (auto-approved, ไม่ต้องรอ admin)
+- `IsRelated = 'No'` → `ApprovalStatus = 'pending'` → admin approve/reject
+- `CorrectiveAction` required เมื่อ `IsRelated = 'No'` (enforced client+server side)
+- Status ที่ frontend ใช้ filter: `'responded'` | `'pending'` | `'rejected'`
+
+### deptResponse shape (returned in GET /topics)
+```js
+{
+    ResponseID, YokotenID, Department, EmployeeID, EmployeeName,
+    IsRelated, Comment, CorrectiveAction,
+    ApprovalStatus,   // null | 'pending' | 'approved' | 'rejected'
+    ApprovalComment, ApprovedBy, ApprovedAt,
+    ResponseDate, UpdatedAt,
+    files: [{ FileID, FileName, FileURL, FileType, FileSize }]
+}
+```
+
+### deptSummary shape (returned in GET /dept-completion)
+```js
+{
+    department, totalTopics, respondedCount, pendingApproval, rejected,
+    completionPct, lastResponse,
+    topicBreakdown: [{
+        YokotenID, title, responded, isRelated, approvalStatus,
+        responseCount, fileCount, respondedBy, responseDate
+    }]
+}
+```
+
+### File Upload (Response Files)
+- Field name: `responseFiles` (multer `.array('responseFiles', 10)`)
+- ใช้ `responseFileFilter` (local ใน yokoten.js) — รับ image/*, PDF, Word, Excel, PowerPoint
+- ขนาดสูงสุด: 20 MB ต่อไฟล์, สูงสุด 10 ไฟล์ต่อ response
+- `API.post('/yokoten/respond', fd)` และ `API.put('/yokoten/respond/:id', fd)` — ส่ง FormData โดยตรง (`apiFetch` จะไม่ set Content-Type เมื่อ body เป็น FormData)
+
+### Frontend State Variables
+```js
+let _topics         = [];    // each topic has deptResponse: {..., files:[]} | null
+let _history        = [];    // dept's own responses
+let _masterDepts    = [];    // from GET /master/departments
+let _safetyUnits    = [];    // from GET /master/safety-units
+let _deptCompletion = null;  // { topics, deptSummary } — admin only
+let _dashConfig     = {};    // { pinnedDepts, pinnedUnits }
+let _allResponses   = [];    // admin only
+let _adminView      = 'topics'; // 'topics' | 'dept' | 'config'
+let _filterAck      = '';    // '' | 'responded' | 'pending' | 'rejected'
+```
+
+### Admin Tabs (renderAdmin)
+3 sub-tabs: `topics` (CRUD topics) | `dept` (dept completion + approve/reject) | `config` (dashboard pinned depts)
+
+### GROUP BY / only_full_group_by Pitfall
+ใช้ `SELECT r.* FROM YokotenResponses r WHERE r.Department = ?` แทน `SELECT r.*, GROUP_CONCAT(...) ... GROUP BY r.ResponseID` — TiDB ใช้ `sql_mode=only_full_group_by` โดยค่าเริ่มต้น; files ดึงแยกผ่าน `filesMap` อยู่แล้ว
 
 ## CCCF Module — Architecture
 
@@ -781,3 +878,7 @@ closeModal();
 49. **Training dashboard — Dept×Course Matrix** — คำนวณ client-side จาก `_deptRecords` (ดึงจาก `/training/dept-records?year=`); แสดงเฉพาะเมื่อมี 2+ courses; lookup key = `` `${dept}::${courseID ?? '__null__'}` ``
 50. **`API.patch()` ใน `api.js`** — method PATCH ถูกเพิ่มแล้วใน `api.js`; `admin.js` ใช้ `API.patch(...)` สำหรับ toggle-cancel sessions — ห้าม import `apiFetch` โดยตรงใน `admin.js`
 51. **contractor.js accent color = amber** — gradient `#d97706 → #b45309`, shadow `rgba(217,119,6,...)` — ห้ามใช้สี sky/blue ใน contractor module
+52. **Yokoten Phase 3 — one response per dept** — `YokotenResponses` มี UNIQUE KEY `uq_dept_topic (YokotenID, Department)` — ใช้ `deptResponse` (singular) ไม่ใช่ array; ห้ามใช้ `myResponse` หรือ `UserID` lookup อีกต่อไป
+53. **Yokoten `only_full_group_by` — ห้าม `SELECT r.* ... GROUP BY r.ResponseID`** — TiDB บังคับ `only_full_group_by`; ถ้าต้องการ files ให้ดึงแยกด้วย `SELECT * FROM Yokoten_Response_Files WHERE ResponseID IN (...)` แทนการ JOIN + GROUP_CONCAT
+54. **Yokoten response FormData** — `POST /yokoten/respond` และ `PUT /yokoten/respond/:id` รับ FormData (field: `responseFiles`) — ถ้าส่ง JSON จะไม่ได้รับไฟล์; `apiFetch` detect `body instanceof FormData` และข้าม `Content-Type` header อัตโนมัติ
+55. **Yokoten approval status** — `null` = Yes (auto-approved), `'pending'` = No รอ admin, `'approved'` = admin อนุมัติ, `'rejected'` = admin ปฏิเสธ; `CorrectiveAction` required เมื่อ `IsRelated='No'` (validation ทั้ง client+server)
