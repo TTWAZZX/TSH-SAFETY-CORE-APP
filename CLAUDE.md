@@ -235,7 +235,7 @@ Primary key ของ generic CRUD คือ `id` — ยกเว้น `Employ
 | **CCCF** | Form A Worker (ค้นหาอันตรายรายบุคคล), Form A Permanent (ตารางติดตาม `ต้องส่ง / On Process / Complete`, admin ส่งแทน/แก้ไข/ลบได้, progress รายส่วนงานจาก assignment), Unit Summary combo chart (horizontal bar + target line), Admin ตั้งเป้าหมาย/override achieved ต่อ Unit, กรองปีได้ทั้ง Unit summary และ "รายการของฉัน" |
 | **KPI** | ประกาศ KPI, ข้อมูล KPI รายปี (ม.ค.–ธ.ค.) |
 | **Yokoten** | แบ่งปันบทเรียน/ความรู้ความปลอดภัย (Phase 3) — **หนึ่ง response ต่อแผนก**, Approval workflow (pending→approved/rejected), Corrective Action (IsRelated=No), ไฟล์แนบ (FormData, field: `responseFiles`, สูงสุด 10 ไฟล์/20 MB), Dashboard pinned depts config, Admin approve/reject/delete, Excel export |
-| **Policy** | นโยบายความปลอดภัย, รับทราบนโยบาย |
+| **Policy** | นโยบายความปลอดภัย, รับทราบนโยบาย — Description field ใช้ Rich Text Editor (RTE) เดียวกับ Yokoten (`pol-*` prefix), HTML ถูก sanitize ก่อนบันทึก/แสดง, PDF export รองรับ rich formatting |
 | **Committee** | คณะกรรมการความปลอดภัย, SubCommittee (JSON array), ผังองค์กร |
 | **Machine Safety** | ข้อมูลเครื่องจักร/อุปกรณ์ความปลอดภัย, Safety Device Std., Layout & Checkpoint, Compliance Checklist (5.1–5.8), Issue Tracker, Audit Readiness |
 | **OJT / SCW** | มาตรฐาน Stop-Call-Wait (แก้ไขได้), จัดการเอกสาร SCW (อัปโหลด/ดู/ลบ), OJT Compliance รายแผนก (เป้าหมาย/ผู้เข้าร่วม/สถานะ, เลือกแผนกที่แสดง persisted, คำนวณ metric จากแผนกที่เลือกเท่านั้น, year filter) |
@@ -395,6 +395,47 @@ WHERE Department = ? AND Year = ? AND (CourseID <=> ?)
 
 ### Division-by-zero
 `pct = total > 0 ? Math.round(passed * 100 / total) : null` — null → แสดง "—" ใน UI
+
+## Policy Module — Architecture
+
+### Description Field — Rich Text Editor
+`policy.js` ใช้ RTE เดียวกับ Yokoten สำหรับ field `Description` — toolbar + `contenteditable` + input bar สำหรับ link/image
+
+#### IDs (prefixed `pol-`)
+| Element | ID |
+|---------|-----|
+| Toolbar | `pol-rte-toolbar` |
+| Link/image input bar | `pol-rte-input-bar` |
+| Input label | `pol-rte-input-label` |
+| URL input | `pol-rte-url-input` |
+| Insert button | `pol-rte-insert-btn` |
+| Cancel button | `pol-rte-cancel-bar` |
+| Editable area | `pol-desc` |
+
+#### Style injection
+`<style id="pol-rte-style">` — inject once ก่อน `openModal()` (guard: `if (!document.getElementById('pol-rte-style'))`)
+- placeholder CSS สำหรับ `#pol-desc`
+- `.pol-rte-content` class สำหรับ render HTML ใน view (list, heading, bold, italic, underline, link, image)
+- `.rte-btn.rte-active` — shared class กับ Yokoten
+
+#### Data flow
+- **Edit form**: `rteEl.innerHTML = _sanitizeHtml(policy.Description)` — populate existing HTML
+- **Submit**: `data.Description = _sanitizeHtml(rteEl.innerHTML).trim()` — อ่านจาก contenteditable โดยตรง (ไม่ผ่าน FormData)
+- **View**: render ด้วย `.pol-rte-content` class — ไม่ใช้ `whitespace-pre-wrap`
+- **PDF export**: `.desc-box` ไม่มี `white-space:pre-wrap` + มี styles สำหรับ `h3`, `ul/ol/li`, `b/em/u`, `a`, `img`
+
+#### Helper
+`_sanitizeHtml(html)` ใน `policy.js` — strip `<script>`, `<iframe>`, `on*=`, `javascript:` (เหมือน Yokoten)
+
+### RTE Reuse Pattern (ทุก module)
+เมื่อต้องการเพิ่ม RTE ให้กับ Description field ของ module อื่น:
+1. Replace `<textarea>` ด้วย toolbar + input bar + `contenteditable` — ใช้ prefix เฉพาะ module (เช่น `pol-`, `acc-`)
+2. Inject `<style id="xxx-rte-style">` once ก่อน `openModal()`
+3. Init RTE ใน `setTimeout(..., 0)` หลัง `openModal()`
+4. Submit อ่าน `_sanitizeHtml(rteEl.innerHTML)` แล้ว set ใน data object
+5. View ใช้ `.xxx-rte-content` class แทน `whitespace-pre-wrap`
+6. PDF: ลบ `white-space:pre-wrap` + เพิ่ม HTML element styles
+7. เพิ่ม `_sanitizeHtml()` helper ในไฟล์ module
 
 ## Yokoten Module — Architecture (Phase 3)
 
@@ -759,7 +800,8 @@ closeModal();
 - **Body background**: `#1e5c3e` (deep forest green) — ตัดกับ card สีขาวได้ชัดเจน ห้ามเปลี่ยนเป็นสีอ่อน
 - **Card**: `background:#ffffff; border:1px solid #d1f0e0; box-shadow: 0 4px 16px rgba(5,150,105,0.15), 0 1px 4px rgba(0,0,0,0.08)` — shadow เขียวอ่อน
 
-ไฟล์อ้างอิง (ห้ามแก้ไข): `committee.js`, `policy.js`, `patrol.js`, `kpi.js`, `cccf.js`, `profile.js`
+ไฟล์อ้างอิง (design system): `committee.js`, `patrol.js`, `kpi.js`, `cccf.js`, `profile.js`
+> หมายเหตุ: `policy.js` ถูกแก้ไขเพื่อเพิ่ม RTE Description — ดู **Policy Module — Architecture** สำหรับรายละเอียด
 
 ### Restyle Status
 | File | Status |
@@ -777,6 +819,7 @@ closeModal();
 | `accident.js` | done (enterprise) |
 | `training.js` | done (enterprise) |
 | `contractor.js` | done (enterprise) |
+| `policy.js` | done (enterprise + RTE Description) |
 | `admin.js` | pending |
 
 ### Page Wrapper Pattern

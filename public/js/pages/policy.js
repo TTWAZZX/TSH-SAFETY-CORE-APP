@@ -276,11 +276,12 @@ function renderCurrentPolicy(rawPolicy, isAdmin) {
 
     // Description (truncate if long)
     const desc = policy.Description || '';
-    const isLong = desc.length > 300;
+    const descPlainLen = desc.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim().length;
+    const isLong = descPlainLen > 300;
     const descHtml = desc ? `
         <div class="bg-slate-50 rounded-xl border border-slate-100 overflow-hidden">
-            <div id="desc-content" class="${isLong ? 'max-h-24 overflow-hidden' : ''} p-5 text-slate-700 text-sm leading-relaxed whitespace-pre-wrap transition-all duration-300">
-                ${desc}
+            <div id="desc-content" class="${isLong ? 'max-h-24 overflow-hidden' : ''} p-5 text-slate-700 text-sm leading-relaxed pol-rte-content transition-all duration-300">
+                ${_sanitizeHtml(desc)}
             </div>
             ${isLong ? `
             <div class="border-t border-slate-100 px-5 py-2.5 text-center">
@@ -727,11 +728,86 @@ function showPolicyForm(rawPolicy = null) {
                        placeholder="เช่น นโยบายความปลอดภัย ปี 2568">
             </div>
 
-            <!-- Description -->
+            <!-- Description (RTE) -->
             <div>
                 <label class="block text-sm font-semibold text-slate-700 mb-1.5">รายละเอียด</label>
-                <textarea name="Description" class="form-textarea w-full resize-none" rows="4"
-                          placeholder="รายละเอียดเพิ่มเติม สาระสำคัญของนโยบาย...">${policy?.Description || ''}</textarea>
+                <!-- Rich text toolbar -->
+                <div class="flex flex-wrap gap-0.5 p-1.5 rounded-t-lg border border-b-0 border-slate-200 bg-slate-50" id="pol-rte-toolbar">
+                    <button type="button" data-cmd="bold" title="หนา (Ctrl+B)"
+                        class="rte-btn w-7 h-7 rounded flex items-center justify-center text-slate-600 hover:bg-white hover:shadow-sm transition-all">
+                        <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="currentColor"><path d="M15.6 10.79c.97-.67 1.65-1.77 1.65-2.79 0-2.26-1.75-4-4-4H7v14h7.04c2.09 0 3.71-1.7 3.71-3.79 0-1.52-.86-2.82-2.15-3.42zM10 6.5h3c.83 0 1.5.67 1.5 1.5s-.67 1.5-1.5 1.5h-3v-3zm3.5 9H10v-3h3.5c.83 0 1.5.67 1.5 1.5s-.67 1.5-1.5 1.5z"/></svg>
+                    </button>
+                    <button type="button" data-cmd="italic" title="เอียง (Ctrl+I)"
+                        class="rte-btn w-7 h-7 rounded flex items-center justify-center text-slate-600 hover:bg-white hover:shadow-sm transition-all">
+                        <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="currentColor"><path d="M10 4v3h2.21l-3.42 8H6v3h8v-3h-2.21l3.42-8H18V4z"/></svg>
+                    </button>
+                    <button type="button" data-cmd="underline" title="ขีดเส้นใต้ (Ctrl+U)"
+                        class="rte-btn w-7 h-7 rounded flex items-center justify-center text-slate-600 hover:bg-white hover:shadow-sm transition-all">
+                        <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="currentColor"><path d="M12 17c3.31 0 6-2.69 6-6V3h-2.5v8c0 1.93-1.57 3.5-3.5 3.5S8.5 12.93 8.5 11V3H6v8c0 3.31 2.69 6 6 6zm-7 2v2h14v-2H5z"/></svg>
+                    </button>
+                    <div class="w-px h-6 bg-slate-200 mx-0.5 self-center"></div>
+                    <button type="button" data-cmd="insertUnorderedList" title="รายการแบบจุด"
+                        class="rte-btn w-7 h-7 rounded flex items-center justify-center text-slate-600 hover:bg-white hover:shadow-sm transition-all">
+                        <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="currentColor"><path d="M4 10.5c-.83 0-1.5.67-1.5 1.5s.67 1.5 1.5 1.5 1.5-.67 1.5-1.5-.67-1.5-1.5-1.5zm0-6c-.83 0-1.5.67-1.5 1.5S3.17 7.5 4 7.5 5.5 6.83 5.5 6 4.83 4.5 4 4.5zm0 12c-.83 0-1.5.68-1.5 1.5s.68 1.5 1.5 1.5 1.5-.68 1.5-1.5-.67-1.5-1.5-1.5zM7 19h14v-2H7v2zm0-6h14v-2H7v2zm0-8v2h14V5H7z"/></svg>
+                    </button>
+                    <button type="button" data-cmd="insertOrderedList" title="รายการแบบตัวเลข"
+                        class="rte-btn w-7 h-7 rounded flex items-center justify-center text-slate-600 hover:bg-white hover:shadow-sm transition-all">
+                        <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="currentColor"><path d="M2 17h2v.5H3v1h1v.5H2v1h3v-4H2v1zm1-9h1V4H2v1h1v3zm-1 3h1.8L2 13.1v.9h3v-1H3.2L5 10.9V10H2v1zm5-8v2h14V3H7zm0 18h14v-2H7v2zm0-7h14v-2H7v2z"/></svg>
+                    </button>
+                    <div class="w-px h-6 bg-slate-200 mx-0.5 self-center"></div>
+                    <button type="button" data-cmd="formatBlock" data-val="h3" title="หัวข้อ"
+                        class="rte-btn px-2 h-7 rounded flex items-center justify-center text-xs font-bold text-slate-600 hover:bg-white hover:shadow-sm transition-all">H</button>
+                    <button type="button" data-cmd="removeFormat" title="ล้างการจัดรูปแบบ"
+                        class="rte-btn w-7 h-7 rounded flex items-center justify-center text-slate-400 hover:bg-white hover:shadow-sm transition-all">
+                        <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="currentColor"><path d="M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z"/></svg>
+                    </button>
+                    <div class="w-px h-6 bg-slate-200 mx-0.5 self-center"></div>
+                    <button type="button" data-cmd="justifyLeft" title="ชิดซ้าย"
+                        class="rte-btn w-7 h-7 rounded flex items-center justify-center text-slate-600 hover:bg-white hover:shadow-sm transition-all">
+                        <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="currentColor"><path d="M15 15H3v2h12v-2zm0-8H3v2h12V7zM3 13h18v-2H3v2zm0 8h18v-2H3v2zM3 3v2h18V3H3z"/></svg>
+                    </button>
+                    <button type="button" data-cmd="justifyCenter" title="กึ่งกลาง"
+                        class="rte-btn w-7 h-7 rounded flex items-center justify-center text-slate-600 hover:bg-white hover:shadow-sm transition-all">
+                        <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="currentColor"><path d="M7 15v2h10v-2H7zm-4 6h18v-2H3v2zm0-8h18v-2H3v2zm4-6v2h10V7H7zM3 3v2h18V3H3z"/></svg>
+                    </button>
+                    <button type="button" data-cmd="justifyRight" title="ชิดขวา"
+                        class="rte-btn w-7 h-7 rounded flex items-center justify-center text-slate-600 hover:bg-white hover:shadow-sm transition-all">
+                        <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="currentColor"><path d="M3 21h18v-2H3v2zm6-4h12v-2H9v2zm-6-4h18v-2H3v2zm6-4h12V7H9v2zM3 3v2h18V3H3z"/></svg>
+                    </button>
+                    <button type="button" data-cmd="justifyFull" title="เต็มบรรทัด (Justify)"
+                        class="rte-btn w-7 h-7 rounded flex items-center justify-center text-slate-600 hover:bg-white hover:shadow-sm transition-all">
+                        <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="currentColor"><path d="M3 21h18v-2H3v2zm0-4h18v-2H3v2zm0-4h18v-2H3v2zm0-4h18V7H3v2zm0-6v2h18V3H3z"/></svg>
+                    </button>
+                    <div class="w-px h-6 bg-slate-200 mx-0.5 self-center"></div>
+                    <button type="button" data-rte-action="link" title="แทรกลิงก์"
+                        class="rte-btn w-7 h-7 rounded flex items-center justify-center text-slate-600 hover:bg-white hover:shadow-sm transition-all">
+                        <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="currentColor"><path d="M3.9 12c0-1.71 1.39-3.1 3.1-3.1h4V7H7c-2.76 0-5 2.24-5 5s2.24 5 5 5h4v-1.9H7c-1.71 0-3.1-1.39-3.1-3.1zM8 13h8v-2H8v2zm9-6h-4v1.9h4c1.71 0 3.1 1.39 3.1 3.1s-1.39 3.1-3.1 3.1h-4V17h4c2.76 0 5-2.24 5-5s-2.24-5-5-5z"/></svg>
+                    </button>
+                    <button type="button" data-cmd="unlink" title="ลบลิงก์"
+                        class="rte-btn w-7 h-7 rounded flex items-center justify-center text-slate-400 hover:bg-white hover:shadow-sm transition-all">
+                        <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="currentColor"><path d="M17 7h-4v2h4c1.65 0 3 1.35 3 3s-1.35 3-3 3h-4v2h4c2.76 0 5-2.24 5-5s-2.24-5-5-5zm-6 8H7c-1.65 0-3-1.35-3-3s1.35-3 3-3h4V7H7c-2.76 0-5 2.24-5 5s2.24 5 5 5h4v-2zm-3-4h8v2H8v-2zm8.71 7.29l1.41-1.41L20 20.88 21.46 22 22 21.46 8.29 7.75 6.88 9.17z"/></svg>
+                    </button>
+                    <button type="button" data-rte-action="image" title="แทรกรูปภาพ (URL)"
+                        class="rte-btn w-7 h-7 rounded flex items-center justify-center text-slate-600 hover:bg-white hover:shadow-sm transition-all">
+                        <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="currentColor"><path d="M21 19V5c0-1.1-.9-2-2-2H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2zM8.5 13.5l2.5 3.01L14.5 12l4.5 6H5l3.5-4.5z"/></svg>
+                    </button>
+                </div>
+                <!-- Link / Image URL input bar -->
+                <div id="pol-rte-input-bar" class="hidden items-center gap-2 border border-slate-200 border-t-0 bg-slate-50 px-2 py-1.5">
+                    <span id="pol-rte-input-label" class="text-xs text-slate-500 flex-shrink-0 w-16">URL ลิงก์:</span>
+                    <input id="pol-rte-url-input" type="text" placeholder="https://..."
+                           class="flex-1 text-xs border border-slate-200 rounded px-2 py-1 bg-white focus:outline-none focus:border-sky-400 focus:ring-1 focus:ring-sky-200">
+                    <button type="button" id="pol-rte-insert-btn"
+                            class="flex-shrink-0 text-xs px-3 py-1 rounded bg-sky-500 text-white hover:bg-sky-600 font-semibold transition-colors">แทรก</button>
+                    <button type="button" id="pol-rte-cancel-bar"
+                            class="flex-shrink-0 text-xs px-2 py-1 rounded text-slate-400 hover:bg-slate-200 transition-colors">ยกเลิก</button>
+                </div>
+                <!-- Editable area -->
+                <div id="pol-desc"
+                     contenteditable="true"
+                     class="form-textarea w-full rounded-t-none min-h-[120px] focus:outline-none pol-rte-content"
+                     style="min-height:120px;border-top:0"
+                     data-placeholder="รายละเอียดเพิ่มเติม สาระสำคัญของนโยบาย..."></div>
             </div>
 
             <!-- Category + IsCurrent -->
@@ -798,10 +874,149 @@ function showPolicyForm(rawPolicy = null) {
         </form>
     `;
 
+    // Inject RTE styles once
+    if (!document.getElementById('pol-rte-style')) {
+        const s = document.createElement('style');
+        s.id = 'pol-rte-style';
+        s.textContent = `
+            #pol-desc[contenteditable]:empty:not(:focus)::before,
+            #pol-desc.rte-empty:not(:focus)::before {
+                content: attr(data-placeholder);
+                color: #94a3b8;
+                pointer-events: none;
+            }
+            #pol-desc[contenteditable] { outline: none; }
+            #pol-desc h3 { font-size: 0.95em; font-weight: 700; margin: 0.3em 0; }
+            #pol-desc ul, #pol-desc ol { padding-left: 1.5em; margin: 0.3em 0; }
+            #pol-desc li { margin: 0.15em 0; }
+            #pol-desc a { color: #0ea5e9; text-decoration: underline; }
+            #pol-desc img { max-width: 100%; height: auto; border-radius: 6px; margin: 0.2em 0; display: block; }
+            .pol-rte-content h3 { font-size: 0.9em; font-weight: 700; margin: 0.25em 0; color: #1e293b; }
+            .pol-rte-content ul, .pol-rte-content ol { padding-left: 1.4em; margin: 0.2em 0; }
+            .pol-rte-content li { margin: 0.1em 0; }
+            .pol-rte-content b, .pol-rte-content strong { font-weight: 700; }
+            .pol-rte-content em { font-style: italic; }
+            .pol-rte-content u { text-decoration: underline; }
+            .pol-rte-content a { color: #0ea5e9; text-decoration: underline; }
+            .pol-rte-content img { max-width: 100%; height: auto; border-radius: 6px; margin: 0.3em 0; display: block; }
+            .rte-btn.rte-active { background: #e0f2fe; color: #0284c7; }
+        `;
+        document.head.appendChild(s);
+    }
+
     openModal(isEditing ? 'แก้ไขนโยบาย' : 'เพิ่มนโยบายใหม่', html, 'max-w-2xl');
 
     flatpickr('#EffectiveDate', { locale: 'th', dateFormat: 'Y-m-d', defaultDate: policy?.EffectiveDate?.split('T')[0] || 'today' });
     flatpickr('#ReviewDate',    { locale: 'th', dateFormat: 'Y-m-d' });
+
+    // ── Rich text editor init ─────────────────────────────────────────────
+    setTimeout(() => {
+        const rteEl = document.getElementById('pol-desc');
+        if (rteEl) {
+            rteEl.innerHTML = policy?.Description ? _sanitizeHtml(policy.Description) : '';
+
+            const updatePlaceholder = () => {
+                if (rteEl.innerText.trim() === '') {
+                    rteEl.classList.add('rte-empty');
+                } else {
+                    rteEl.classList.remove('rte-empty');
+                }
+            };
+            updatePlaceholder();
+            rteEl.addEventListener('input', updatePlaceholder);
+            rteEl.addEventListener('focus', updatePlaceholder);
+            rteEl.addEventListener('blur',  updatePlaceholder);
+
+            let _rteAction  = null;
+            let _savedRange = null;
+
+            const inputBar   = document.getElementById('pol-rte-input-bar');
+            const inputLabel = document.getElementById('pol-rte-input-label');
+            const urlInput   = document.getElementById('pol-rte-url-input');
+            const insertBtn  = document.getElementById('pol-rte-insert-btn');
+            const cancelBar  = document.getElementById('pol-rte-cancel-bar');
+
+            const _hideInputBar = () => {
+                inputBar?.classList.add('hidden');
+                inputBar?.classList.remove('flex');
+                _rteAction  = null;
+                _savedRange = null;
+            };
+
+            const _saveSelection = () => {
+                const sel = window.getSelection();
+                return sel?.rangeCount > 0 ? sel.getRangeAt(0).cloneRange() : null;
+            };
+
+            const _restoreSelection = (range) => {
+                if (!range) return;
+                const sel = window.getSelection();
+                sel?.removeAllRanges();
+                sel?.addRange(range);
+            };
+
+            const _updateAlignBtns = () => {
+                ['justifyLeft','justifyCenter','justifyRight','justifyFull'].forEach(cmd => {
+                    const btn = document.querySelector(`#pol-rte-toolbar [data-cmd="${cmd}"]`);
+                    if (btn) btn.classList.toggle('rte-active', document.queryCommandState(cmd));
+                });
+            };
+            rteEl.addEventListener('keyup',   _updateAlignBtns);
+            rteEl.addEventListener('mouseup', _updateAlignBtns);
+            rteEl.addEventListener('focus',   _updateAlignBtns);
+
+            document.getElementById('pol-rte-toolbar')?.addEventListener('mousedown', (ev) => {
+                const btn = ev.target.closest('.rte-btn');
+                if (!btn) return;
+                ev.preventDefault();
+
+                const action = btn.dataset.rteAction;
+                const cmd    = btn.dataset.cmd;
+                const val    = btn.dataset.val || null;
+
+                if (action === 'link' || action === 'image') {
+                    _savedRange = _saveSelection();
+                    _rteAction  = action;
+                    if (inputLabel) inputLabel.textContent = action === 'link' ? 'URL ลิงก์:' : 'URL รูปภาพ:';
+                    if (urlInput) urlInput.value = '';
+                    inputBar?.classList.remove('hidden');
+                    inputBar?.classList.add('flex');
+                    setTimeout(() => urlInput?.focus(), 0);
+                    return;
+                }
+
+                if (cmd) {
+                    document.execCommand(cmd, false, val);
+                    rteEl.focus();
+                    _updateAlignBtns();
+                }
+            });
+
+            insertBtn?.addEventListener('click', () => {
+                const url = urlInput?.value.trim();
+                if (!url) return;
+                _restoreSelection(_savedRange);
+                rteEl.focus();
+                if (_rteAction === 'link') {
+                    document.execCommand('createLink', false, url);
+                    rteEl.querySelectorAll('a[href]').forEach(a => {
+                        if (!a.target) { a.target = '_blank'; a.rel = 'noopener noreferrer'; }
+                    });
+                } else if (_rteAction === 'image') {
+                    document.execCommand('insertImage', false, url);
+                }
+                _hideInputBar();
+                updatePlaceholder();
+            });
+
+            cancelBar?.addEventListener('click', _hideInputBar);
+
+            urlInput?.addEventListener('keydown', (ev) => {
+                if (ev.key === 'Enter')  { ev.preventDefault(); insertBtn?.click(); }
+                if (ev.key === 'Escape') _hideInputBar();
+            });
+        }
+    }, 0);
 
     document.getElementById('policy-form').addEventListener('submit', async (e) => {
         e.preventDefault();
@@ -811,6 +1026,9 @@ function showPolicyForm(rawPolicy = null) {
         submitBtn.innerHTML = '<span class="animate-spin inline-block w-4 h-4 border-2 border-white border-t-transparent rounded-full mr-2"></span>กำลังบันทึก...';
 
         const formData = new FormData(formEl);
+        // Read Description from RTE contenteditable
+        const rteEl = document.getElementById('pol-desc');
+        const descHtml = rteEl ? _sanitizeHtml(rteEl.innerHTML).trim() : '';
         try {
             showLoading('กำลังบันทึก...');
             const file = formData.get('PolicyFile');
@@ -824,6 +1042,7 @@ function showPolicyForm(rawPolicy = null) {
             formData.delete('PolicyFile');
 
             const data = Object.fromEntries(formData.entries());
+            data.Description = descHtml;
             data.IsCurrent = formEl.querySelector('#IsCurrent').checked ? 1 : 0;
             if (!data.ReviewDate) delete data.ReviewDate;
             if (!data.Category)   delete data.Category;
@@ -1017,7 +1236,15 @@ function printPolicy(policy) {
             .badge { display:inline-block; padding:3px 10px; border-radius:999px; background:#dcfce7; color:#15803d; font-size:11px; font-weight:600; margin-bottom:8px; }
             h1 { font-size:22px; font-weight:700; color:#0f172a; margin:8px 0; }
             .meta { font-size:12px; color:#64748b; margin-bottom:24px; }
-            .desc-box { background:#f8fafc; border:1px solid #e2e8f0; border-radius:10px; padding:20px; line-height:1.8; white-space:pre-wrap; margin-bottom:24px; }
+            .desc-box { background:#f8fafc; border:1px solid #e2e8f0; border-radius:10px; padding:20px; line-height:1.8; margin-bottom:24px; }
+            .desc-box h3 { font-size:14px; font-weight:700; margin:0.3em 0; color:#0f172a; }
+            .desc-box ul, .desc-box ol { padding-left:1.5em; margin:0.4em 0; }
+            .desc-box li { margin:0.2em 0; }
+            .desc-box b, .desc-box strong { font-weight:700; }
+            .desc-box em { font-style:italic; }
+            .desc-box u { text-decoration:underline; }
+            .desc-box a { color:#0284c7; text-decoration:underline; }
+            .desc-box img { max-width:100%; height:auto; border-radius:6px; margin:0.3em 0; display:block; }
             .footer { margin-top:40px; padding-top:20px; border-top:1px solid #e2e8f0; font-size:11px; color:#94a3b8; display:flex; justify-content:space-between; }
             @media print { body { padding:20px; } }
         </style>
@@ -1060,4 +1287,13 @@ function formatDate(dateStr) {
 function formatDateTime(dateStr) {
     if (!dateStr) return '—';
     return new Date(dateStr).toLocaleString('th-TH', { year: 'numeric', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+}
+
+function _sanitizeHtml(html) {
+    if (!html) return '';
+    return html
+        .replace(/<script[\s\S]*?<\/script>/gi, '')
+        .replace(/<iframe[\s\S]*?>/gi, '')
+        .replace(/\bon\w+\s*=\s*["'][^"']*["']/gi, '')
+        .replace(/javascript:/gi, '');
 }
