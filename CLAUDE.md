@@ -477,6 +477,47 @@ let _filterAck      = '';    // '' | 'responded' | 'pending' | 'rejected'
 ### Admin Tabs (renderAdmin)
 3 sub-tabs: `topics` (CRUD topics) | `dept` (dept completion + approve/reject) | `config` (dashboard pinned depts)
 
+### Dept Filtering Utilities
+```js
+// กรอง deptSummary ให้เหลือเฉพาะแผนกที่อยู่ใน TargetDepts ของ topics อย่างน้อยหนึ่งหัวข้อ
+_filterToTargetedDepts(deptSummary, topicsArr)
+
+// กรอง deptSummary ให้เหลือเฉพาะแผนกใน TargetDepts ของ topic เดียว ([] = ทุกแผนก)
+_getTopicTargetedDepts(deptSummary, topic)
+```
+- ใช้ใน: `_buildExecSection`, `_initDeptChart`, `_buildAdminDept`, `_buildAdminTopics`, `exportYokotenPDF`
+- `TargetDepts = []` (ไม่ได้เลือก) หมายถึง "ทุกแผนก" — ต้องไม่ filter ออก
+
+### HTML Description Utilities
+```js
+_sanitizeHtml(html)  // ใช้ render HTML ใน modal (_buildTopicModal) + RTE init/submit
+_htmlToText(html)    // ใช้ truncate preview ใน cards, tables, PDF, data-attributes
+```
+- ห้ามสลับสองตัวนี้: `_sanitizeHtml` = ยังเป็น HTML, `_htmlToText` = แปลงเป็น plain text
+
+### Rich Text Editor (openTopicForm)
+Toolbar buttons ทั้งหมด:
+- **Bold / Italic / Underline** — `execCommand`
+- **Bullet list / Numbered list** — `execCommand`
+- **Heading (H3) / Clear format** — `execCommand`
+- **Align Left / Center / Right / Justify** — `execCommand('justifyLeft/Center/Right/Full')` + active state ด้วย `queryCommandState`
+- **Insert Link** — บันทึก selection range → แสดง `#yt-rte-input-bar` → `execCommand('createLink')` + เพิ่ม `target="_blank"`
+- **Remove Link** — `execCommand('unlink')`
+- **Insert Image (URL)** — บันทึก selection range → แสดง `#yt-rte-input-bar` → `execCommand('insertImage')`
+
+Pattern สำคัญ: link/image ต้องบันทึก selection ก่อนที่ focus จะออกจาก contenteditable แล้วค่อย restore เมื่อกด "แทรก"
+```js
+let _savedRange = _saveSelection();   // ก่อนแสดง input bar
+_restoreSelection(_savedRange);       // ก่อน execCommand
+```
+
+CSS classes: `.rte-active` = alignment button ที่ active อยู่ (bg-sky-100); `.yok-rte-content img` / `.yok-rte-content a` — ใน `#yok-rte-style`
+
+### History Tab — Admin Edit/Delete
+- **Edit** (`.yok-hist-edit-btn`): inject response เป็น `deptResponse` บน topic copy → `openModal(_buildTopicModal(tWithResp))`
+- **Delete** (`.yok-hist-del-btn`): confirm → `DELETE /yokoten/respond/:id` → `refreshData()`
+- Non-admin users เห็น Edit เฉพาะ response ที่ถูก `rejected`
+
 ### GROUP BY / only_full_group_by Pitfall
 ใช้ `SELECT r.* FROM YokotenResponses r WHERE r.Department = ?` แทน `SELECT r.*, GROUP_CONCAT(...) ... GROUP BY r.ResponseID` — TiDB ใช้ `sql_mode=only_full_group_by` โดยค่าเริ่มต้น; files ดึงแยกผ่าน `filesMap` อยู่แล้ว
 
@@ -882,3 +923,6 @@ closeModal();
 53. **Yokoten `only_full_group_by` — ห้าม `SELECT r.* ... GROUP BY r.ResponseID`** — TiDB บังคับ `only_full_group_by`; ถ้าต้องการ files ให้ดึงแยกด้วย `SELECT * FROM Yokoten_Response_Files WHERE ResponseID IN (...)` แทนการ JOIN + GROUP_CONCAT
 54. **Yokoten response FormData** — `POST /yokoten/respond` และ `PUT /yokoten/respond/:id` รับ FormData (field: `responseFiles`) — ถ้าส่ง JSON จะไม่ได้รับไฟล์; `apiFetch` detect `body instanceof FormData` และข้าม `Content-Type` header อัตโนมัติ
 55. **Yokoten approval status** — `null` = Yes (auto-approved), `'pending'` = No รอ admin, `'approved'` = admin อนุมัติ, `'rejected'` = admin ปฏิเสธ; `CorrectiveAction` required เมื่อ `IsRelated='No'` (validation ทั้ง client+server)
+56. **Yokoten dept filtering — TargetDepts=[] = ทุกแผนก** — `_filterToTargetedDepts()` ต้องคืน deptSummary ทั้งหมดเมื่อ topic ใดมี `TargetDepts=[]`; ห้าม filter ออกทุกแผนกในกรณีนี้; ใช้ฟังก์ชันนี้ทุกที่ที่แสดงผลรายแผนก (dashboard, chart, admin dept tab, PDF)
+57. **Yokoten RTE link/image — ต้องบันทึก selection ก่อนเปิด input bar** — `contenteditable` เสีย focus เมื่อ user คลิก input; ต้องเรียก `_saveSelection()` ใน mousedown handler (ก่อน `preventDefault`) แล้วค่อย `_restoreSelection()` ก่อน `execCommand`; ถ้าไม่ทำ link/image จะถูก insert ที่ตำแหน่งผิด
+58. **Yokoten RTE `execCommand`/`queryCommandState` deprecated hint** — IDE แสดง hint code 6387 สำหรับทั้งสองคำสั่ง; นี่คือ spec deprecation ไม่ใช่ browser removal — ยังทำงานได้ในทุก modern browser; ไม่มีทางเลือกอื่นใน vanilla JS; ไม่ต้องแก้ไข
