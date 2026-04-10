@@ -1,7 +1,7 @@
 import { API } from '../api.js';
 import {
   showLoading, hideLoading, showError, showToast,
-  openModal, closeModal, showConfirmationModal, showDocumentModal
+  openModal, closeModal, showConfirmationModal, showDocumentModal, escHtml
 } from '../ui.js';
 
 let allCommittees = [];
@@ -131,7 +131,7 @@ export async function loadCommitteePage() {
 
   } catch (err) {
     console.error(err);
-    container.innerHTML = `<div class="m-6 bg-red-50 text-red-600 p-4 rounded-xl text-center border border-red-100">${err.message}</div>`;
+    container.innerHTML = `<div class="m-6 bg-red-50 text-red-600 p-4 rounded-xl text-center border border-red-100">${escHtml(err.message)}</div>`;
   }
 }
 

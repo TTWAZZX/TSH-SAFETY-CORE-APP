@@ -1,4 +1,4 @@
-import { openModal, closeModal, showLoading, hideLoading, showToast, showError } from '../ui.js';
+import { openModal, closeModal, showLoading, hideLoading, showToast, showError, escHtml } from '../ui.js';
 import { API } from '../api.js';
 import { normalizeApiArray, normalizeApiObject } from '../utils/normalize.js';
 
@@ -3108,7 +3108,7 @@ async function loadOverview(year) {
         renderOverviewChart(s.percent);
 
     } catch (err) {
-        if (tbody) tbody.innerHTML = `<tr><td colspan="7" class="text-center py-10 text-xs text-slate-400">ไม่สามารถโหลดข้อมูลได้: ${err.message}</td></tr>`;
+        if (tbody) tbody.innerHTML = `<tr><td colspan="7" class="text-center py-10 text-xs text-slate-400">ไม่สามารถโหลดข้อมูลได้: ${escHtml(err.message)}</td></tr>`;
     }
 }
 

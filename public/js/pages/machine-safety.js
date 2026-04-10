@@ -1181,7 +1181,7 @@ window._msdOpenDetail = async function(machineId, machineName) {
         _attachUploadHandlers(machineId, machineName);
     } catch (err) {
         const body = document.getElementById('msd-detail-body');
-        if (body) body.innerHTML = `<p class="text-red-500 text-sm text-center py-8">${err.message}</p>`;
+        if (body) body.innerHTML = `<p class="text-red-500 text-sm text-center py-8">${UI.escHtml(err.message)}</p>`;
     }
 };
 

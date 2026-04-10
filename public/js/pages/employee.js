@@ -1,4 +1,4 @@
-import { showLoading, hideLoading, showToast, showError, openModal, closeModal } from '../ui.js';
+import { showLoading, hideLoading, showToast, showError, openModal, closeModal, escHtml } from '../ui.js';
 import { API } from '../api.js';
 
 let allEmployees = [];
@@ -106,7 +106,7 @@ async function fetchEmployees() {
         }
     } catch (err) {
         document.getElementById('emp-table-body').innerHTML = `
-            <tr><td colspan="5" class="px-6 py-12 text-center text-red-500">โหลดข้อมูลไม่สำเร็จ: ${err.message}</td></tr>`;
+            <tr><td colspan="5" class="px-6 py-12 text-center text-red-500">โหลดข้อมูลไม่สำเร็จ: ${escHtml(err.message)}</td></tr>`;
     }
 }
 
@@ -225,7 +225,7 @@ async function handleExcelUpload(e) {
         }
 
     } catch (err) {
-        showError(`นำเข้าไม่สำเร็จ: ${err.message}`);
+        showError(`นำเข้าไม่สำเร็จ: ${escHtml(err.message)}`);
     } finally {
         hideLoading();
     }

@@ -3,7 +3,7 @@
 import { API } from '../api.js';
 import {
     hideLoading, showError, showLoading,
-    openModal, closeModal, showToast, showConfirmationModal, showDocumentModal
+    openModal, closeModal, showToast, showConfirmationModal, showDocumentModal, escHtml
 } from '../ui.js';
 import { normalizeApiArray, normalizeApiObject } from '../utils/normalize.js';
 
@@ -729,7 +729,7 @@ async function fetchAndRenderHistory() {
             </tr>`;
         }).join('');
     } catch (err) {
-        if (tbody) tbody.innerHTML = `<tr><td colspan="7" class="text-center py-6 text-red-500 text-sm">${err.message}</td></tr>`;
+        if (tbody) tbody.innerHTML = `<tr><td colspan="7" class="text-center py-6 text-red-500 text-sm">${escHtml(err.message)}</td></tr>`;
     }
 }
 
@@ -823,7 +823,7 @@ async function fetchAndRenderManage(statusFilter) {
             </tr>`;
         }).join('');
     } catch (err) {
-        if (tbody) tbody.innerHTML = `<tr><td colspan="6" class="text-center py-6 text-red-500 text-sm">${err.message}</td></tr>`;
+        if (tbody) tbody.innerHTML = `<tr><td colspan="6" class="text-center py-6 text-red-500 text-sm">${escHtml(err.message)}</td></tr>`;
     }
 }
 

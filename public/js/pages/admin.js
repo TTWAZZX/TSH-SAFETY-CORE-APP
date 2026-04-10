@@ -1,4 +1,4 @@
-import { showToast, showError, openModal, closeModal } from '../ui.js';
+import { showToast, showError, openModal, closeModal, escHtml } from '../ui.js';
 import { API } from '../api.js';
 
 // ─── Button loading helper (disable + spinner, returns original HTML) ──────────
@@ -1151,7 +1151,7 @@ async function renderDashboard(container) {
             </div>
         </div>`;
     } catch (err) {
-        container.innerHTML = `<div class="text-center py-20 text-red-500 text-sm">โหลดข้อมูลไม่ได้: ${err.message}</div>`;
+        container.innerHTML = `<div class="text-center py-20 text-red-500 text-sm">โหลดข้อมูลไม่ได้: ${escHtml(err.message)}</div>`;
     }
 }
 
@@ -1960,7 +1960,7 @@ window._ptLoadRotation = async function() {
 
         _ptRenderRotationMatrix(year);
     } catch (err) {
-        wrap.innerHTML = `<div class="text-center py-10 text-red-500 text-sm">${err.message}</div>`;
+        wrap.innerHTML = `<div class="text-center py-10 text-red-500 text-sm">${escHtml(err.message)}</div>`;
     }
 };
 
@@ -2328,7 +2328,7 @@ async function _ptLoadMemberRotation() {
         });
         _ptRenderMemberMatrix(year);
     } catch (err) {
-        wrap.innerHTML = `<div class="text-center py-10 text-red-500 text-sm">${err.message}</div>`;
+        wrap.innerHTML = `<div class="text-center py-10 text-red-500 text-sm">${escHtml(err.message)}</div>`;
     }
 }
 
@@ -3056,7 +3056,7 @@ window._ptLoadMemberSchedule = async function() {
         _scheduleData = res.data || [];
         _ptRenderSchedulePreview(year);
     } catch (err) {
-        wrap.innerHTML = `<div class="text-center py-10 text-red-500 text-sm">${err.message}</div>`;
+        wrap.innerHTML = `<div class="text-center py-10 text-red-500 text-sm">${escHtml(err.message)}</div>`;
     }
 };
 
@@ -4036,7 +4036,7 @@ async function renderSystemHealth(container) {
             </div>
         </div>`;
     } catch (err) {
-        container.innerHTML = `<div class="text-center py-20 text-red-500 text-sm">โหลดข้อมูลไม่ได้: ${err.message}</div>`;
+        container.innerHTML = `<div class="text-center py-20 text-red-500 text-sm">โหลดข้อมูลไม่ได้: ${escHtml(err.message)}</div>`;
     }
 }
 
@@ -4134,7 +4134,7 @@ async function loadAuditLog() {
             </div>`;
         }
     } catch (err) {
-        wrap.innerHTML = `<div class="py-12 text-center text-red-400 text-sm">โหลดไม่ได้: ${err.message}</div>`;
+        wrap.innerHTML = `<div class="py-12 text-center text-red-400 text-sm">โหลดไม่ได้: ${escHtml(err.message)}</div>`;
     }
 }
 

@@ -462,6 +462,11 @@ export function showDocumentModal(originalUrl, title = 'เอกสาร') {
     document.addEventListener('mouseup', _onMouseUp);
 }
 
+/** Escape HTML entities — ใช้ก่อน inject ค่าจาก API/user เข้า innerHTML */
+export function escHtml(str) {
+    return String(str ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+
 export function handleApiError(error) {
     hideLoading();
     console.error('API Error:', error);

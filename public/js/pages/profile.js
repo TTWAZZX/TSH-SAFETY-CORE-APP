@@ -3,7 +3,7 @@
 // Profile Slide-over Drawer (Enterprise)
 // ======================================================
 import { apiFetch } from '../api.js';
-import { showToast } from '../ui.js';
+import { showToast, escHtml } from '../ui.js';
 
 let _masterCache = null;
 

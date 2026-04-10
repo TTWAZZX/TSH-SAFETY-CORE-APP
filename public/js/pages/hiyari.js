@@ -2,7 +2,7 @@
 import { API } from '../api.js';
 import {
     hideLoading, showError, showLoading,
-    openModal, closeModal, showToast, showConfirmationModal, showDocumentModal
+    openModal, closeModal, showToast, showConfirmationModal, showDocumentModal, escHtml
 } from '../ui.js';
 import { normalizeApiArray, normalizeApiObject } from '../utils/normalize.js';
 
@@ -646,7 +646,7 @@ async function fetchAndRenderTable() {
         renderTable();
     } catch (err) {
         console.error('History error:', err);
-        if (tbody) tbody.innerHTML = `<tr><td colspan="8" class="text-center py-6 text-red-500 text-sm">เกิดข้อผิดพลาด: ${err.message}</td></tr>`;
+        if (tbody) tbody.innerHTML = `<tr><td colspan="8" class="text-center py-6 text-red-500 text-sm">เกิดข้อผิดพลาด: ${escHtml(err.message)}</td></tr>`;
     }
 }
 

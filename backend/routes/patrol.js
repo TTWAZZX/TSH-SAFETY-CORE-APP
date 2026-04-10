@@ -411,13 +411,27 @@ router.post('/checkin', async (req, res) => {
         const TeamName = req.user.team || '';
         const Notes     = req.body.Notes?.trim() || null;
         const Area      = req.body.Area?.trim()  || null;
-        const PatrolType = req.body.PatrolType || 'normal';
+        const ALLOWED_PATROL_TYPES = ['normal', 'compensation', 'Re-inspection'];
+        const PatrolType = ALLOWED_PATROL_TYPES.includes(req.body.PatrolType) ? req.body.PatrolType : 'normal';
         // PatrolDate: user may supply an explicit date for compensation patrol (same year only)
         let patrolDate = null;
         if (req.body.PatrolDate) {
             const d = new Date(req.body.PatrolDate);
             if (!isNaN(d.getTime())) patrolDate = d.toISOString().split('T')[0];
         }
+        const effectiveDate = patrolDate || new Date().toISOString().split('T')[0];
+
+        // ป้องกัน check-in ซ้ำในวันเดียวกัน (ยกเว้น compensation ที่ใช้วันอื่น)
+        const [[dupCheck]] = await db.query(
+            `SELECT id FROM Patrol_Attendance
+             WHERE UserID = ? AND DATE(PatrolDate) = ? AND PatrolType = ?
+             LIMIT 1`,
+            [UserID, effectiveDate, PatrolType]
+        );
+        if (dupCheck) {
+            return res.status(409).json({ success: false, message: 'คุณได้เช็คอินประเภทนี้ในวันนี้แล้ว' });
+        }
+
         const currentWeek = getWeekNumber(patrolDate ? new Date(patrolDate) : new Date());
         if (patrolDate) {
             await db.query(
@@ -500,6 +514,9 @@ router.post('/issue/save', upload.fields([
                 [data.TempDescription, getUrl('TempImage'), data.IssueID]
             );
         } else if (data.ActionType === 'CLOSE') {
+            if (req.user.role !== 'Admin') {
+                return res.status(403).json({ success: false, message: 'เฉพาะ Admin เท่านั้นที่ปิดประเด็นได้' });
+            }
             await db.query(
                 `UPDATE Patrol_Issues
                  SET ActionDescription = ?, AfterImage = ?, FinishDate = ?, CurrentStatus = 'Closed'
@@ -507,6 +524,9 @@ router.post('/issue/save', upload.fields([
                 [data.ActionDescription, getUrl('AfterImage'), data.FinishDate, data.IssueID]
             );
         } else if (data.ActionType === 'UPDATE') {
+            if (req.user.role !== 'Admin') {
+                return res.status(403).json({ success: false, message: 'เฉพาะ Admin เท่านั้นที่แก้ไขประเด็นได้' });
+            }
             // Combined edit: saves temp + final + section 1 fields in one shot
             // Status: Closed if ActionDescription filled, Temporary if only TempDescription, else Open
             const hasFinal = !!(data.ActionDescription && data.ActionDescription.trim());
@@ -601,7 +621,7 @@ router.get('/teams', async (req, res) => {
 });
 
 // POST /api/patrol/teams — create team
-router.post('/teams', async (req, res) => {
+router.post('/teams', isAdmin, async (req, res) => {
     const { Name, PatrolGroup, Color } = req.body;
     if (!Name || !PatrolGroup) return res.status(400).json({ success: false, message: 'Name และ PatrolGroup จำเป็น' });
     try {
@@ -616,7 +636,7 @@ router.post('/teams', async (req, res) => {
 });
 
 // PUT /api/patrol/teams/:id — update team
-router.put('/teams/:id', async (req, res) => {
+router.put('/teams/:id', isAdmin, async (req, res) => {
     const { Name, PatrolGroup, Color } = req.body;
     try {
         await db.query(
@@ -630,7 +650,7 @@ router.put('/teams/:id', async (req, res) => {
 });
 
 // DELETE /api/patrol/teams/:id — delete team + members
-router.delete('/teams/:id', async (req, res) => {
+router.delete('/teams/:id', isAdmin, async (req, res) => {
     try {
         await db.query('DELETE FROM Patrol_Team_Members WHERE TeamID=?', [req.params.id]);
         await db.query('DELETE FROM Patrol_Teams WHERE id=?', [req.params.id]);
@@ -662,7 +682,7 @@ router.get('/teams/:id/members', async (req, res) => {
 });
 
 // POST /api/patrol/teams/:id/members — add member
-router.post('/teams/:id/members', async (req, res) => {
+router.post('/teams/:id/members', isAdmin, async (req, res) => {
     const { EmployeeID, PatrolType } = req.body;
     if (!EmployeeID || !PatrolType) return res.status(400).json({ success: false, message: 'EmployeeID และ PatrolType จำเป็น' });
     try {
@@ -678,7 +698,7 @@ router.post('/teams/:id/members', async (req, res) => {
 });
 
 // DELETE /api/patrol/teams/:teamId/members/:memberId — remove member
-router.delete('/teams/:teamId/members/:memberId', async (req, res) => {
+router.delete('/teams/:teamId/members/:memberId', isAdmin, async (req, res) => {
     try {
         await db.query('DELETE FROM Patrol_Team_Members WHERE id=? AND TeamID=?',
             [req.params.memberId, req.params.teamId]);
@@ -745,7 +765,7 @@ router.get('/member-rotation', async (req, res) => {
 });
 
 // POST /api/patrol/member-rotation — bulk upsert monthly member→team assignments
-router.post('/member-rotation', async (req, res) => {
+router.post('/member-rotation', isAdmin, async (req, res) => {
     const items = req.body;
     if (!Array.isArray(items) || items.length === 0)
         return res.status(400).json({ success: false, message: 'ส่ง array' });
@@ -974,7 +994,7 @@ router.post('/rotation', isAdmin, async (req, res) => {
 
 // POST /api/patrol/generate-sessions { year, month }
 // — สร้าง Patrol_Sessions จาก rotation ของเดือนนั้นอัตโนมัติ
-router.post('/generate-sessions', async (req, res) => {
+router.post('/generate-sessions', isAdmin, async (req, res) => {
     const { year, month } = req.body;
     if (!year || !month) return res.status(400).json({ success: false, message: 'year และ month จำเป็น' });
 
@@ -1090,7 +1110,7 @@ router.get('/monthly-summary', async (req, res) => {
 });
 
 // PUT /api/patrol/sessions/:id — แก้ไขวันที่ / area / status
-router.put('/sessions/:id', async (req, res) => {
+router.put('/sessions/:id', isAdmin, async (req, res) => {
     const { PatrolDate, AreaID, Status } = req.body;
     if (!PatrolDate && !AreaID && !Status)
         return res.status(400).json({ success: false, message: 'ไม่มีข้อมูลที่ต้องการแก้ไข' });
@@ -1125,7 +1145,7 @@ router.patch('/sessions/:id/toggle-cancel', isAdmin, async (req, res) => {
 });
 
 // DELETE /api/patrol/sessions/:id — ลบ session (Admin)
-router.delete('/sessions/:id', async (req, res) => {
+router.delete('/sessions/:id', isAdmin, async (req, res) => {
     try {
         const [result] = await db.query('DELETE FROM Patrol_Sessions WHERE SessionID = ?', [req.params.id]);
         if (result.affectedRows === 0) return res.status(404).json({ success: false, message: 'ไม่พบ session' });

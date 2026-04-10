@@ -1,5 +1,5 @@
 import { API } from '../api.js';
-import { hideLoading, showLoading, showError, showToast, openModal, closeModal, showConfirmationModal, showDocumentModal } from '../ui.js';
+import { hideLoading, showLoading, showError, showToast, openModal, closeModal, showConfirmationModal, showDocumentModal, escHtml } from '../ui.js';
 
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 
@@ -172,7 +172,7 @@ export async function loadKpiPage(year = null) {
 
     } catch (err) {
         console.error(err);
-        container.innerHTML = `<div class="m-6 p-5 bg-red-50 text-red-600 rounded-xl text-center text-sm">${err.message}</div>`;
+        container.innerHTML = `<div class="m-6 p-5 bg-red-50 text-red-600 rounded-xl text-center text-sm">${escHtml(err.message)}</div>`;
     }
 }
 
@@ -1004,7 +1004,7 @@ async function showAnnouncementManager() {
         }));
     } catch (err) {
         const el = document.getElementById('ann-list-content');
-        if (el) el.innerHTML = `<p class="text-red-500 text-sm p-4">${err.message}</p>`;
+        if (el) el.innerHTML = `<p class="text-red-500 text-sm p-4">${escHtml(err.message)}</p>`;
     }
 }
 

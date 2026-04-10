@@ -277,7 +277,10 @@ app.put('/api/profile/employee-id', authenticateToken, async (req, res) => {
             'UPDATE Admin_AuditLogs      SET AdminID     = ? WHERE AdminID     = ?',
         ];
         for (const sql of cascades) {
-            await connection.query(sql, [newID, oldID]).catch(() => {}); // silent — ตารางอาจยังไม่มี
+            await connection.query(sql, [newID, oldID]).catch((e) => {
+                // ตารางบางตัวอาจยังไม่ถูกสร้าง — log แต่ไม่ abort transaction
+                console.warn('[cascade EmployeeID] skip:', sql.split(' ')[1], e.message);
+            });
         }
 
         await connection.commit();

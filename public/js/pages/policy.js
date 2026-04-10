@@ -1,5 +1,5 @@
 import { API } from '../api.js';
-import { hideLoading, showError, showLoading, openModal, closeModal, showDocumentModal, showToast, showConfirmationModal } from '../ui.js';
+import { hideLoading, showError, showLoading, openModal, closeModal, showDocumentModal, showToast, showConfirmationModal, escHtml } from '../ui.js';
 import { normalizeApiArray, normalizeApiObject } from '../utils/normalize.js';
 
 // --- State ---
@@ -119,7 +119,7 @@ export async function loadPolicyPage() {
         console.error('Error loading policies:', err);
         document.getElementById('current-policy-container').innerHTML = `
             <div class="card p-8 text-center">
-                <p class="text-red-500 text-sm font-medium">เกิดข้อผิดพลาด: ${err.message}</p>
+                <p class="text-red-500 text-sm font-medium">เกิดข้อผิดพลาด: ${escHtml(err.message)}</p>
             </div>`;
     }
 }
