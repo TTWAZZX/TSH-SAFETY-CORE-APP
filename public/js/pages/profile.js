@@ -112,8 +112,16 @@ function _ensureDrawerDOM() {
                                 รหัสผ่านใหม่
                             </label>
                             <input id="ppw-new" type="password" required autocomplete="new-password"
-                                   placeholder="อย่างน้อย 6 ตัวอักษร"
-                                   class="w-full px-3.5 py-2.5 rounded-xl border border-slate-200 dark:border-slate-600 dark:bg-slate-800 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-transparent transition">
+                                   placeholder="อย่างน้อย 8 ตัวอักษร"
+                                   class="w-full px-3.5 py-2.5 rounded-xl border border-slate-200 dark:border-slate-600 dark:bg-slate-800 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-transparent transition"
+                                   oninput="_ppwStrength(this.value)">
+                            <!-- Strength meter -->
+                            <div id="ppw-strength" class="mt-1.5 hidden">
+                                <div class="h-1 w-full bg-slate-100 rounded-full overflow-hidden">
+                                    <div id="ppw-bar" class="h-full rounded-full transition-all duration-300" style="width:0%"></div>
+                                </div>
+                                <p id="ppw-label" class="text-xs mt-1 font-medium"></p>
+                            </div>
                         </div>
                         <div>
                             <label class="block text-xs font-semibold text-slate-500 uppercase tracking-wide mb-1.5">
@@ -374,6 +382,34 @@ async function _handleSaveProfile(e) {
     }
 }
 
+function _ppwStrength(pw) {
+    const wrap  = document.getElementById('ppw-strength');
+    const bar   = document.getElementById('ppw-bar');
+    const label = document.getElementById('ppw-label');
+    if (!wrap) return;
+    if (!pw) { wrap.classList.add('hidden'); return; }
+    wrap.classList.remove('hidden');
+    let score = 0;
+    if (pw.length >= 8)          score++;
+    if (/[a-z]/.test(pw))        score++;
+    if (/[A-Z]/.test(pw))        score++;
+    if (/[0-9]/.test(pw))        score++;
+    if (/[^a-zA-Z0-9]/.test(pw)) score++;
+    const levels = [
+        { width: '20%',  color: '#ef4444', text: 'อ่อนมาก',   textColor: '#ef4444' },
+        { width: '40%',  color: '#f97316', text: 'อ่อน',      textColor: '#f97316' },
+        { width: '60%',  color: '#eab308', text: 'ปานกลาง',   textColor: '#ca8a04' },
+        { width: '80%',  color: '#84cc16', text: 'ดี',         textColor: '#65a30d' },
+        { width: '100%', color: '#22c55e', text: 'แข็งแกร่ง', textColor: '#16a34a' },
+    ];
+    const lvl = levels[Math.min(score - 1, 4)] || levels[0];
+    bar.style.width      = lvl.width;
+    bar.style.background = lvl.color;
+    label.textContent    = lvl.text;
+    label.style.color    = lvl.textColor;
+}
+window._ppwStrength = _ppwStrength;
+
 async function _handleChangePassword(e) {
     e.preventDefault();
     const errEl  = document.getElementById('ppw-error');
@@ -389,8 +425,8 @@ async function _handleChangePassword(e) {
         errEl.classList.remove('hidden');
         return;
     }
-    if (newPw.length < 6) {
-        errEl.textContent = 'รหัสผ่านใหม่ต้องมีอย่างน้อย 6 ตัวอักษร';
+    if (newPw.length < 8) {
+        errEl.textContent = 'รหัสผ่านใหม่ต้องมีอย่างน้อย 8 ตัวอักษร';
         errEl.classList.remove('hidden');
         return;
     }
