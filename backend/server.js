@@ -99,10 +99,19 @@ app.post('/api/login', loginLimiter, async (req, res) => {
             // Proper bcrypt hashed password stored in DB
             passwordMatch = await bcrypt.compare(password, user.Password);
         } else {
-            // Legacy mode: no Password column — password equals EmployeeID
-            // TODO: Add hashed Password column to Employees table for proper security
-            console.warn(`[Security] User ${employeeId} using legacy password mode.`);
+            // Legacy mode: Password column is NULL — password equals EmployeeID
+            console.warn(`[Security] User ${employeeId} using legacy password mode — will auto-migrate on success.`);
             passwordMatch = (password === user.EmployeeID);
+            // Auto-migrate: store bcrypt hash on first successful legacy login
+            if (passwordMatch) {
+                bcrypt.hash(password, 10)
+                    .then(hashed => pool.query(
+                        'UPDATE Employees SET Password = ? WHERE EmployeeID = ?',
+                        [hashed, employeeId]
+                    ))
+                    .then(() => console.info(`[Security] Auto-migrated password hash for ${employeeId}.`))
+                    .catch(e => console.warn(`[Security] Auto-migrate failed for ${employeeId}:`, e.message));
+            }
         }
 
         if (!passwordMatch) {

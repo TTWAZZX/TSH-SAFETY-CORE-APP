@@ -5,6 +5,7 @@ import {
     openModal, closeModal, showToast, showConfirmationModal, showDocumentModal, escHtml
 } from '../ui.js';
 import { normalizeApiArray, normalizeApiObject } from '../utils/normalize.js';
+import { buildActivityCard } from '../utils/activity-widget.js';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Constants
@@ -215,6 +216,12 @@ async function _loadHeroStats() {
                 <p class="text-2xl font-bold" style="color:${s.color}">${s.value}</p>
                 <p class="text-[11px] mt-0.5" style="color:rgba(167,243,208,0.85)">${s.label}</p>
             </div>`).join('');
+
+        const atCard = await buildActivityCard('hiyari');
+        if (atCard) {
+            strip.insertAdjacentHTML('beforeend', atCard);
+            strip.className = 'grid grid-cols-3 md:grid-cols-5 gap-3 w-full md:w-auto flex-shrink-0';
+        }
     } catch {
         strip.innerHTML = '';
     }

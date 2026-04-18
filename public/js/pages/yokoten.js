@@ -6,6 +6,7 @@ import {
     openModal, closeModal, showToast, showConfirmationModal,
 } from '../ui.js';
 import { normalizeApiArray } from '../utils/normalize.js';
+import { buildActivityCard } from '../utils/activity-widget.js';
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 const CATEGORIES = ['ทั่วไป', 'อุปกรณ์', 'กระบวนการ', 'สิ่งแวดล้อม', 'พฤติกรรม'];
@@ -253,7 +254,7 @@ async function refreshData() {
 }
 
 // ─── HERO STATS STRIP ─────────────────────────────────────────────────────────
-function _renderHeroStats() {
+async function _renderHeroStats() {
     const strip = document.getElementById('yok-hero-stats');
     if (!strip) return;
     const total     = _topics.length;
@@ -274,6 +275,12 @@ function _renderHeroStats() {
             <p class="text-2xl font-bold" style="color:${s.color}">${s.value}</p>
             <p class="text-[11px] mt-0.5" style="color:rgba(167,243,208,0.85)">${s.label}</p>
         </div>`).join('');
+
+    const atCard = await buildActivityCard('yokoten');
+    if (atCard) {
+        strip.insertAdjacentHTML('beforeend', atCard);
+        strip.className = 'grid grid-cols-3 md:grid-cols-5 gap-3 w-full sm:w-auto';
+    }
 }
 
 // ─── TAB 1: DASHBOARD ────────────────────────────────────────────────────────

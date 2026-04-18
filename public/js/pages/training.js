@@ -2,6 +2,7 @@
 // Safety Training — department-based records (enterprise pattern)
 import { API } from '../api.js';
 import { openModal, closeModal, showToast, showConfirmationModal } from '../ui.js';
+import { buildActivityCard } from '../utils/activity-widget.js';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // State
@@ -196,6 +197,18 @@ async function _loadHeroStats() {
             if (vals[i] !== undefined) el.textContent = vals[i];
         });
     } catch { /* silent */ }
+
+    // Append personal activity target card (only once per page load)
+    const strip = document.getElementById('tr-stats-strip');
+    if (strip && !strip.querySelector('.at-card')) {
+        const atCard = await buildActivityCard('training');
+        if (atCard) {
+            // Wrap with marker class so we don't append twice on year-change
+            strip.insertAdjacentHTML('beforeend',
+                atCard.replace('<div class="rounded-xl', '<div class="at-card rounded-xl'));
+            strip.className = 'grid grid-cols-3 sm:grid-cols-5 gap-3 w-full sm:w-auto';
+        }
+    }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
