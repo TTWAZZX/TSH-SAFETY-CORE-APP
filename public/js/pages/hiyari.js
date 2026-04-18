@@ -592,14 +592,24 @@ async function renderHistory(container) {
                         ...RISK_LEVELS.map(r => ({ v:r, l: RISK_LABEL[r] || r }))
                     ], _filterRisk)}
                 </div>
-                <div class="relative w-full sm:w-64">
-                    <svg class="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400 pointer-events-none"
-                         fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/>
-                    </svg>
-                    <input id="history-search" type="text" placeholder="ค้นหา..."
-                           value="${_searchQ}"
-                           class="form-input w-full pl-9 text-sm py-2">
+                <div class="flex items-center gap-2 flex-wrap">
+                    <div class="relative w-full sm:w-64">
+                        <svg class="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400 pointer-events-none"
+                             fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/>
+                        </svg>
+                        <input id="history-search" type="text" placeholder="ค้นหา..."
+                               value="${_searchQ}"
+                               class="form-input w-full pl-9 text-sm py-2">
+                    </div>
+                    <button id="hiyari-export-btn"
+                        class="flex items-center gap-1.5 px-3 py-2 rounded-xl text-sm font-semibold border border-orange-200 text-orange-700 bg-white hover:bg-orange-50 transition-all flex-shrink-0">
+                        <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                  d="M12 10v6m0 0l-3-3m3 3l3-3M4 17v1a2 2 0 002 2h12a2 2 0 002-2v-1M7 7l4.586-4.586a2 2 0 012.828 0L19 7"/>
+                        </svg>
+                        Export Excel
+                    </button>
                 </div>
             </div>
             <!-- Table -->
@@ -853,6 +863,26 @@ async function showDetailModal(id) {
 
                 ${r.Status === 'Closed' && r.ClosedAt ? `
                 <p class="text-xs text-slate-400 text-right">ปิดโดย ${r.ClosedBy || '-'} เมื่อ ${new Date(r.ClosedAt).toLocaleDateString('th-TH', { year:'numeric', month:'short', day:'numeric' })}</p>` : ''}
+
+                <!-- Hiyari → Yokoten shortcut (High/Critical only) -->
+                ${['High','Critical'].includes(r.RiskLevel) ? `
+                <div class="border-t border-slate-100 pt-4 mt-2">
+                    <p class="text-xs text-slate-400 mb-2">เหตุการณ์ความเสี่ยงสูง — สามารถแปลงเป็นบทเรียน Yokoten ได้</p>
+                    <button id="btn-to-yokoten"
+                        data-id="${r.id}"
+                        data-title="${escHtml(r.PotentialConsequence || r.Description || 'Hiyari #' + r.id)}"
+                        data-desc="${escHtml(r.Description || '')}"
+                        data-dept="${escHtml(r.Department || '')}"
+                        data-risk="${escHtml(r.RiskLevel || '')}"
+                        class="flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-bold text-white transition-all"
+                        style="background:linear-gradient(135deg,#0ea5e9,#6366f1);box-shadow:0 2px 8px rgba(14,165,233,0.35)">
+                        <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                  d="M8.684 13.342C8.886 12.938 9 12.482 9 12c0-.482-.114-.938-.316-1.342m0 2.684a3 3 0 110-2.684m0 2.684l6.632 3.316m-6.632-6l6.632-3.316m0 0a3 3 0 105.367-2.684 3 3 0 00-5.367 2.684zm0 9.316a3 3 0 105.368 2.684 3 3 0 00-5.368-2.684z"/>
+                        </svg>
+                        แปลงเป็น Yokoten Topic
+                    </button>
+                </div>` : ''}
             </div>`;
 
         openModal(`รายงาน Hiyari-Hatto`, html, 'max-w-2xl');
@@ -1028,6 +1058,26 @@ function setupEventListeners() {
             showDocumentModal(previewBtn.dataset.url, previewBtn.dataset.title);
             return;
         }
+
+        // Export Excel
+        if (e.target.closest('#hiyari-export-btn')) { exportHiyariExcel(); return; }
+
+        // Convert Hiyari → Yokoten topic
+        const yokoBtn = e.target.closest('#btn-to-yokoten');
+        if (yokoBtn) {
+            try {
+                sessionStorage.setItem('hiyari_to_yokoten', JSON.stringify({
+                    sourceId:   yokoBtn.dataset.id,
+                    title:      yokoBtn.dataset.title,
+                    description: yokoBtn.dataset.desc,
+                    department: yokoBtn.dataset.dept,
+                    riskLevel:  yokoBtn.dataset.risk,
+                }));
+            } catch (_) {}
+            window.closeModal?.();
+            window.location.hash = 'yokoten';
+            return;
+        }
     });
 
     // Filter changes
@@ -1053,6 +1103,44 @@ function setupEventListeners() {
             await fetchAndRenderTable();
         }
     }, 350));
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// EXCEL EXPORT
+// ─────────────────────────────────────────────────────────────────────────────
+function exportHiyariExcel() {
+    if (!window.XLSX) { showToast('ไม่พบ SheetJS library — กรุณารีเฟรชหน้า', 'error'); return; }
+    if (!_reports.length) { showToast('ไม่มีข้อมูลสำหรับ Export', 'warning'); return; }
+
+    const rows = _reports.map(r => ({
+        'วันที่รายงาน':        r.ReportDate ? new Date(r.ReportDate).toLocaleDateString('th-TH') : '-',
+        'ผู้รายงาน':           r.ReporterName || '-',
+        'รหัสพนักงาน':         r.ReporterID   || '-',
+        'แผนก':               r.Department   || '-',
+        'สถานที่':             r.Location     || '-',
+        'รายละเอียดเหตุการณ์': r.Description  || '-',
+        'ผลที่อาจเกิดขึ้น':    r.PotentialConsequence || '-',
+        'ระดับความเสี่ยง':     RISK_LABEL[r.RiskLevel]  || r.RiskLevel  || '-',
+        'สถานะ':              STATUS_LABEL[r.Status]   || r.Status     || '-',
+        'การแก้ไขทันที':       r.ImmediateAction || '-',
+        'มาตรการป้องกัน':      r.CorrectiveAction || '-',
+        'ผู้รับผิดชอบ':        r.AssignedTo  || '-',
+        'วันที่ปิด':           r.ClosedDate ? new Date(r.ClosedDate).toLocaleDateString('th-TH') : '-',
+    }));
+
+    const ws = XLSX.utils.json_to_sheet(rows);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, 'Hiyari Reports');
+
+    // Auto column width
+    const colWidths = Object.keys(rows[0] || {}).map(k => ({
+        wch: Math.max(k.length * 2, 14)
+    }));
+    ws['!cols'] = colWidths;
+
+    const today = new Date().toISOString().split('T')[0];
+    XLSX.writeFile(wb, `Hiyari_${today}.xlsx`);
+    showToast('Export สำเร็จ', 'success');
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

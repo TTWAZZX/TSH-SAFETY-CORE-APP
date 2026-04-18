@@ -24,6 +24,7 @@ import { loadHiyariPage } from './pages/hiyari.js';
 import { loadKyPage } from './pages/ky.js';
 import { loadFourmPage } from './pages/fourm.js';
 import { openProfileDrawer, closeProfileDrawer } from './pages/profile.js';
+import { loadDashboardPage } from './pages/dashboard.js';
 
 window.openProfileDrawer  = openProfileDrawer;
 window.closeProfileDrawer = closeProfileDrawer;
@@ -265,6 +266,9 @@ async function handleRouting() {
         case 'fourm':
             await loadFourmPage();
             break;
+        case 'dashboard':
+            await loadDashboardPage();
+            break;
         default:
             loadPlaceholderPage(targetId, hash);
     }
@@ -316,8 +320,16 @@ function openChangePasswordModal() {
                     รหัสผ่านใหม่
                 </label>
                 <input id="cp-new" type="password" required autocomplete="new-password"
-                    placeholder="อย่างน้อย 6 ตัวอักษร"
-                    class="w-full px-3 py-2 form-input rounded-lg border dark:bg-slate-800 dark:border-slate-600">
+                    placeholder="อย่างน้อย 8 ตัวอักษร"
+                    class="w-full px-3 py-2 form-input rounded-lg border dark:bg-slate-800 dark:border-slate-600"
+                    oninput="_cpPwdStrength(this.value)">
+                <!-- Strength meter -->
+                <div id="cp-pwd-strength" class="mt-1.5 hidden">
+                    <div class="h-1 w-full bg-slate-100 rounded-full overflow-hidden">
+                        <div id="cp-pwd-bar" class="h-full rounded-full transition-all duration-300" style="width:0%"></div>
+                    </div>
+                    <p id="cp-pwd-label" class="text-xs mt-1 font-medium"></p>
+                </div>
             </div>
             <div>
                 <label class="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">
@@ -347,6 +359,34 @@ function openChangePasswordModal() {
     }, 50);
 }
 
+function _cpPwdStrength(pw) {
+    const wrap  = document.getElementById('cp-pwd-strength');
+    const bar   = document.getElementById('cp-pwd-bar');
+    const label = document.getElementById('cp-pwd-label');
+    if (!wrap) return;
+    if (!pw) { wrap.classList.add('hidden'); return; }
+    wrap.classList.remove('hidden');
+    let score = 0;
+    if (pw.length >= 8)          score++;
+    if (/[a-z]/.test(pw))        score++;
+    if (/[A-Z]/.test(pw))        score++;
+    if (/[0-9]/.test(pw))        score++;
+    if (/[^a-zA-Z0-9]/.test(pw)) score++;
+    const levels = [
+        { width: '20%',  color: '#ef4444', text: 'อ่อนมาก',   textColor: '#ef4444' },
+        { width: '40%',  color: '#f97316', text: 'อ่อน',      textColor: '#f97316' },
+        { width: '60%',  color: '#eab308', text: 'ปานกลาง',   textColor: '#ca8a04' },
+        { width: '80%',  color: '#84cc16', text: 'ดี',         textColor: '#65a30d' },
+        { width: '100%', color: '#22c55e', text: 'แข็งแกร่ง', textColor: '#16a34a' },
+    ];
+    const lvl = levels[Math.min(score - 1, 4)] || levels[0];
+    bar.style.width      = lvl.width;
+    bar.style.background = lvl.color;
+    label.textContent    = lvl.text;
+    label.style.color    = lvl.textColor;
+}
+window._cpPwdStrength = _cpPwdStrength;
+
 async function handleChangePassword(e) {
     e.preventDefault();
 
@@ -363,8 +403,8 @@ async function handleChangePassword(e) {
     };
     errorEl.classList.add('hidden');
 
-    if (newPassword.length < 6) {
-        return showError('รหัสผ่านใหม่ต้องมีอย่างน้อย 6 ตัวอักษร');
+    if (newPassword.length < 8) {
+        return showError('รหัสผ่านใหม่ต้องมีอย่างน้อย 8 ตัวอักษร');
     }
     if (newPassword !== confirmPassword) {
         return showError('รหัสผ่านใหม่ไม่ตรงกัน กรุณากรอกอีกครั้ง');

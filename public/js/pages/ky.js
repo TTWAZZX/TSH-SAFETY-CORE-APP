@@ -48,6 +48,7 @@ let _chartLine     = null;
 let _chartBar      = null;
 let _chartDoughnut = null;
 let _participants  = [];   // for form
+let _historyRecords = [];  // cached for Excel export
 
 // ─────────────────────────────────────────────────────────────────────────────
 // MAIN LOADER
@@ -658,13 +659,23 @@ async function renderHistory(container) {
                         ${STATUSES.map(s => `<option value="${s}" ${_filterStatus===s?'selected':''}>${STATUS_LABEL[s]||s}</option>`).join('')}
                     </select>
                 </div>
-                <div class="relative w-full sm:w-64">
-                    <svg class="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400 pointer-events-none"
-                         fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/>
-                    </svg>
-                    <input id="ky-history-search" type="text" placeholder="ค้นหา..."
-                           value="${_searchQ}" class="form-input w-full pl-9 text-sm py-2">
+                <div class="flex items-center gap-2 flex-wrap">
+                    <div class="relative w-full sm:w-64">
+                        <svg class="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400 pointer-events-none"
+                             fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/>
+                        </svg>
+                        <input id="ky-history-search" type="text" placeholder="ค้นหา..."
+                               value="${_searchQ}" class="form-input w-full pl-9 text-sm py-2">
+                    </div>
+                    <button id="ky-export-btn"
+                        class="flex items-center gap-1.5 px-3 py-2 rounded-xl text-sm font-semibold border border-indigo-200 text-indigo-700 bg-white hover:bg-indigo-50 transition-all flex-shrink-0">
+                        <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                  d="M12 10v6m0 0l-3-3m3 3l3-3M4 17v1a2 2 0 002 2h12a2 2 0 002-2v-1M7 7l4.586-4.586a2 2 0 012.828 0L19 7"/>
+                        </svg>
+                        Export Excel
+                    </button>
                 </div>
             </div>
 
@@ -702,6 +713,7 @@ async function fetchAndRenderHistory() {
         if (_searchQ.trim())         params.set('q', _searchQ.trim());
         const res     = await API.get(`/ky?${params}`);
         const records = normalizeApiArray(res?.data ?? res);
+        _historyRecords = records;
 
         if (!records.length) {
             tbody.innerHTML = `<tr><td colspan="7" class="text-center py-10 text-slate-400 text-sm">ไม่พบกิจกรรม KY</td></tr>`;
@@ -1087,6 +1099,9 @@ function setupEventListeners() {
         // Preview image
         const previewBtn = e.target.closest('.btn-ky-preview');
         if (previewBtn) { showDocumentModal(previewBtn.dataset.url, previewBtn.dataset.title); return; }
+
+        // Export Excel
+        if (e.target.closest('#ky-export-btn')) { exportKyExcel(); return; }
     });
 
     // Filter + search changes
@@ -1101,6 +1116,39 @@ function setupEventListeners() {
         if (!e.target.closest('#ky-page')) return;
         if (e.target.id === 'ky-history-search') { _searchQ = e.target.value; await fetchAndRenderHistory(); }
     }, 350));
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// EXCEL EXPORT
+// ─────────────────────────────────────────────────────────────────────────────
+function exportKyExcel() {
+    if (!window.XLSX) { showToast('ไม่พบ SheetJS library — กรุณารีเฟรชหน้า', 'error'); return; }
+    if (!_historyRecords.length) { showToast('ไม่มีข้อมูลสำหรับ Export', 'warning'); return; }
+
+    const rows = _historyRecords.map(r => ({
+        'วันที่กิจกรรม':       r.ActivityDate ? new Date(r.ActivityDate).toLocaleDateString('th-TH') : '-',
+        'แผนก':               r.Department   || '-',
+        'ทีม':                r.TeamName     || '-',
+        'ผู้รายงาน':           r.ReporterName || '-',
+        'KYT Keyword':        r.KYTKeyword   || '-',
+        'ประเภทอันตราย':       r.RiskCategory || '-',
+        'รายละเอียด':          r.Description  || '-',
+        'มาตรการป้องกัน':      r.Countermeasure || '-',
+        'ผู้เข้าร่วม':         r.ParticipantNames || '-',
+        'จำนวนผู้เข้าร่วม':    r.ParticipantCount ?? '-',
+        'สถานะ':              STATUS_LABEL[r.Status] || r.Status || '-',
+    }));
+
+    const ws = XLSX.utils.json_to_sheet(rows);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, 'KY Activities');
+
+    const colWidths = Object.keys(rows[0] || {}).map(k => ({ wch: Math.max(k.length * 2, 12) }));
+    ws['!cols'] = colWidths;
+
+    const today = new Date().toISOString().split('T')[0];
+    XLSX.writeFile(wb, `KY_Activities_${today}.xlsx`);
+    showToast('Export สำเร็จ', 'success');
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

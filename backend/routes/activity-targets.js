@@ -237,10 +237,11 @@ router.get('/me', async (req, res) => {
 
         // Actual counts in parallel (silent fail per table)
         const [
-            patrolCount, cccfWorkerCount, cccfPermCount, scwCount,
+            patrolCount, patrolIssueCount, cccfWorkerCount, cccfPermCount, scwCount,
             trainingCount, yokotenCount, hiyariCount, kyCount,
         ] = await Promise.all([
             safeCount('SELECT COUNT(*) AS cnt FROM Patrol_Attendance WHERE UserID = ? AND YEAR(PatrolDate) = ?', [empId, year]),
+            safeCount('SELECT COUNT(*) AS cnt FROM Patrol_Issues WHERE ReporterID = ? AND YEAR(DateFound) = ?', [empId, year]),
             safeCount('SELECT COUNT(*) AS cnt FROM CCCF_FormA_Worker WHERE EmployeeID = ? AND YEAR(SubmitDate) = ?', [empId, year]),
             safeCount('SELECT COUNT(*) AS cnt FROM CCCF_FormA_Permanent WHERE SubmitterName = ? AND YEAR(SubmitDate) = ?', [empName, year]),
             safeCount('SELECT COUNT(*) AS cnt FROM SCW_Documents WHERE UploadedBy = ? AND YEAR(UploadedAt) = ?', [empName, year]),
@@ -252,7 +253,7 @@ router.get('/me', async (req, res) => {
 
         const actualMap = {
             patrol:         patrolCount,
-            patrol_issue:   null,          // Patrol_Issues ไม่มี ReporterID — ยังไม่รองรับ
+            patrol_issue:   patrolIssueCount,
             cccf_worker:    cccfWorkerCount,
             cccf_permanent: cccfPermCount,
             scw:            scwCount,

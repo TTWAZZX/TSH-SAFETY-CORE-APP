@@ -66,6 +66,22 @@ export async function loadYokotenPage() {
 
     _activeTab = window._getTab?.('yokoten', _activeTab) || _activeTab;
     await refreshData();
+
+    // ── Hiyari → Yokoten pre-fill (admin only) ──────────────────────────────
+    if (_isAdmin) {
+        try {
+            const raw = sessionStorage.getItem('hiyari_to_yokoten');
+            if (raw) {
+                const prefill = JSON.parse(raw);
+                sessionStorage.removeItem('hiyari_to_yokoten');
+                // Switch to admin → topics sub-tab then open form pre-filled
+                _activeTab = 'admin';
+                _adminView = 'topics';
+                switchTab('admin');
+                setTimeout(() => openTopicForm(null, prefill), 150);
+            }
+        } catch (_) {}
+    }
 }
 
 // ─── TAB CONFIG ───────────────────────────────────────────────────────────────
@@ -1976,9 +1992,16 @@ function _showEmpBreakdown(employeeId) {
 }
 
 // ─── TOPIC FORM MODAL (Add / Edit) ───────────────────────────────────────────
-function openTopicForm(topic = null) {
+// prefill: { title, description, riskLevel, sourceHiyariId } — used when converting Hiyari → Yokoten
+function openTopicForm(topic = null, prefill = null) {
     const isEdit = !!topic;
-    const t = topic || {};
+    // Merge prefill values into t so the form HTML auto-populates
+    const t = topic ? { ...topic } : (prefill ? {
+        Title:            prefill.title        || '',
+        TopicDescription: prefill.description  || '',
+        RiskLevel:        prefill.riskLevel    || 'High',
+        Category:         'ทั่วไป',
+    } : {});
 
     const catOpts  = CATEGORIES.map(c => `<option value="${c}" ${(t.Category || 'ทั่วไป') === c ? 'selected' : ''}>${c}</option>`).join('');
     const riskOpts = RISK_LEVELS.map(r => `<option value="${r.value}" ${(t.RiskLevel || 'Low') === r.value ? 'selected' : ''}>${r.label}</option>`).join('');
@@ -1988,6 +2011,16 @@ function openTopicForm(topic = null) {
 
     const html = `
     <form id="yok-topic-form" class="space-y-4">
+        ${prefill?.sourceHiyariId ? `
+        <div class="flex items-start gap-2.5 p-3 rounded-xl border border-orange-200 bg-orange-50">
+            <svg class="w-4 h-4 text-orange-500 flex-shrink-0 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"/>
+            </svg>
+            <div>
+                <p class="text-xs font-semibold text-orange-700">สร้างจากรายงาน Hiyari #${_esc(String(prefill.sourceHiyariId))}</p>
+                <p class="text-xs text-orange-600 mt-0.5">ข้อมูลถูกเติมอัตโนมัติจากรายงาน — สามารถแก้ไขก่อนบันทึกได้</p>
+            </div>
+        </div>` : ''}
         <div>
             <label class="block text-sm font-semibold text-slate-700 mb-1.5">ชื่อหัวข้อ (ย่อ)</label>
             <input id="yt-title" type="text" value="${_esc(t.Title || '')}" maxlength="200"

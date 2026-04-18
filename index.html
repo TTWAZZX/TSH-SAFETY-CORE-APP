@@ -404,10 +404,18 @@
                             <!-- Password -->
                             <div>
                                 <label class="block text-xs font-bold mb-1.5 text-slate-600 tracking-wide uppercase">รหัสผ่าน <span class="text-red-500">*</span></label>
-                                <input id="reg-password" type="password" required placeholder="อย่างน้อย 6 ตัวอักษร" autocomplete="new-password"
+                                <input id="reg-password" type="password" required placeholder="อย่างน้อย 8 ตัวอักษร" autocomplete="new-password"
                                     class="w-full px-3.5 py-2.5 text-sm bg-slate-50 rounded-xl outline-none transition-all duration-200 border border-slate-200"
                                     onfocus="this.style.borderColor='#059669';this.style.boxShadow='0 0 0 3px rgba(5,150,105,0.12)';this.style.background='#fff'"
-                                    onblur="this.style.borderColor='';this.style.boxShadow='';this.style.background=''">
+                                    onblur="this.style.borderColor='';this.style.boxShadow='';this.style.background=''"
+                                    oninput="_regPwdStrength(this.value)">
+                                <!-- Password strength meter -->
+                                <div id="reg-pwd-strength" class="mt-1.5 hidden">
+                                    <div class="h-1 w-full bg-slate-100 rounded-full overflow-hidden">
+                                        <div id="reg-pwd-bar" class="h-full rounded-full transition-all duration-300" style="width:0%"></div>
+                                    </div>
+                                    <p id="reg-pwd-label" class="text-xs mt-1 font-medium"></p>
+                                </div>
                             </div>
                             <!-- Confirm password -->
                             <div>
@@ -702,6 +710,36 @@
         }
 
         /* =========================
+        Password Strength Meter (register)
+        ========================= */
+        function _regPwdStrength(pw) {
+            const wrap  = document.getElementById('reg-pwd-strength');
+            const bar   = document.getElementById('reg-pwd-bar');
+            const label = document.getElementById('reg-pwd-label');
+            if (!pw) { wrap.classList.add('hidden'); return; }
+            wrap.classList.remove('hidden');
+            let score = 0;
+            if (pw.length >= 8)          score++;
+            if (/[a-z]/.test(pw))        score++;
+            if (/[A-Z]/.test(pw))        score++;
+            if (/[0-9]/.test(pw))        score++;
+            if (/[^a-zA-Z0-9]/.test(pw)) score++;
+            const levels = [
+                { width: '20%', color: '#ef4444', text: 'อ่อนมาก',    textColor: '#ef4444' },
+                { width: '40%', color: '#f97316', text: 'อ่อน',       textColor: '#f97316' },
+                { width: '60%', color: '#eab308', text: 'ปานกลาง',    textColor: '#ca8a04' },
+                { width: '80%', color: '#84cc16', text: 'ดี',          textColor: '#65a30d' },
+                { width: '100%',color: '#22c55e', text: 'แข็งแกร่ง',  textColor: '#16a34a' },
+            ];
+            const lvl = levels[Math.min(score - 1, 4)] || levels[0];
+            bar.style.width = lvl.width;
+            bar.style.background = lvl.color;
+            label.textContent = lvl.text;
+            label.style.color  = lvl.textColor;
+        }
+        window._regPwdStrength = _regPwdStrength;
+
+        /* =========================
         5. Registration form submit
         ========================= */
         document.getElementById('register-form')?.addEventListener('submit', async (e) => {
@@ -728,8 +766,8 @@
                 errEl.textContent = 'กรุณากรอกข้อมูลที่จำเป็นให้ครบถ้วน';
                 errEl.classList.remove('hidden'); return;
             }
-            if (pw.length < 6) {
-                errEl.textContent = 'รหัสผ่านต้องมีอย่างน้อย 6 ตัวอักษร';
+            if (pw.length < 8) {
+                errEl.textContent = 'รหัสผ่านต้องมีอย่างน้อย 8 ตัวอักษร';
                 errEl.classList.remove('hidden'); return;
             }
             if (pw !== pw2) {

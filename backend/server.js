@@ -32,6 +32,7 @@ const kyRoutes            = require('./routes/ky');
 const fourmRoutes         = require('./routes/fourm');
 const settingsRoutes          = require('./routes/settings');
 const activityTargetsRoutes   = require('./routes/activity-targets');
+const dashboardRoutes         = require('./routes/dashboard');
 
 // =================================================================
 // SECTION 1: SETUP
@@ -61,6 +62,19 @@ if (isLocal) {
     app.use('/uploads', express.static(require('path').join(__dirname, 'uploads')));
 }
 
+// --- Request logger (lightweight, no external dep) ---
+app.use((req, res, next) => {
+    const start = Date.now();
+    res.on('finish', () => {
+        const ms  = Date.now() - start;
+        const lvl = res.statusCode >= 500 ? 'ERROR'
+                  : res.statusCode >= 400 ? 'WARN'
+                  : 'INFO';
+        console.log(`[${lvl}] ${req.method} ${req.path} ${res.statusCode} ${ms}ms`);
+    });
+    next();
+});
+
 // --- Document upload via Cloudinary (sanitised filename, type-filtered) ---
 const upload = multer({
     storage: cloudinaryStorage,
@@ -68,11 +82,31 @@ const upload = multer({
     limits: { fileSize: 20 * 1024 * 1024 }, // 20 MB
 });
 
+// =================================================================
+// ROLE NORMALIZATION
+// Ensures JWT role is always a known title-cased value regardless
+// of how it was stored in the DB (e.g. 'admin', 'ADMIN' → 'Admin')
+// =================================================================
+const ALLOWED_ROLES = ['Admin', 'User', 'Viewer'];
+function normalizeRole(rawRole) {
+    const r = String(rawRole || '').trim();
+    return ALLOWED_ROLES.find(ar => ar.toLowerCase() === r.toLowerCase()) || 'User';
+}
+
 // --- Login rate limiter: max 10 attempts per 15 min per IP ---
 const loginLimiter = rateLimit({
     windowMs: 15 * 60 * 1000,
     max: 10,
     message: { success: false, message: 'ลองใหม่อีกครั้งหลังจาก 15 นาที (Too many login attempts)' },
+    standardHeaders: true,
+    legacyHeaders: false,
+});
+
+// --- Change-password rate limiter: max 10 attempts per 15 min per IP ---
+const changePwdLimiter = rateLimit({
+    windowMs: 15 * 60 * 1000,
+    max: 10,
+    message: { success: false, message: 'ลองใหม่อีกครั้งหลังจาก 15 นาที (Too many password change attempts)' },
     standardHeaders: true,
     legacyHeaders: false,
 });
@@ -119,11 +153,11 @@ app.post('/api/login', loginLimiter, async (req, res) => {
         }
 
         const userData = {
-            id: user.EmployeeID,
-            name: user.EmployeeName,
+            id:         user.EmployeeID,
+            name:       user.EmployeeName,
             department: user.Department,
-            role: user.Role,
-            team: user.Team,
+            role:       normalizeRole(user.Role),
+            team:       user.Team || '',
         };
         const token = jwt.sign(userData, process.env.JWT_SECRET, { expiresIn: '6h' });
         res.json({ success: true, user: userData, token });
@@ -134,13 +168,13 @@ app.post('/api/login', loginLimiter, async (req, res) => {
 });
 
 // Change Password — ผู้ใช้เปลี่ยนรหัสผ่านของตัวเอง
-app.post('/api/change-password', authenticateToken, async (req, res) => {
+app.post('/api/change-password', changePwdLimiter, authenticateToken, async (req, res) => {
     const { currentPassword, newPassword } = req.body;
     if (!currentPassword || !newPassword) {
         return res.status(400).json({ success: false, message: 'กรุณากรอกรหัสผ่านปัจจุบันและรหัสผ่านใหม่' });
     }
-    if (newPassword.length < 6) {
-        return res.status(400).json({ success: false, message: 'รหัสผ่านใหม่ต้องมีอย่างน้อย 6 ตัวอักษร' });
+    if (newPassword.length < 8) {
+        return res.status(400).json({ success: false, message: 'รหัสผ่านใหม่ต้องมีอย่างน้อย 8 ตัวอักษร' });
     }
     try {
         const [rows] = await pool.query('SELECT EmployeeID, Password FROM Employees WHERE EmployeeID = ?', [req.user.id]);
@@ -200,8 +234,8 @@ app.post('/api/register', registerLimiter, async (req, res) => {
     const { EmployeeID, EmployeeName, Department, Position, Unit, password } = req.body;
     if (!EmployeeID || !EmployeeName || !Department || !Position || !password)
         return res.status(400).json({ success: false, message: 'กรุณากรอกข้อมูลให้ครบถ้วน' });
-    if (password.length < 6)
-        return res.status(400).json({ success: false, message: 'รหัสผ่านต้องมีอย่างน้อย 6 ตัวอักษร' });
+    if (password.length < 8)
+        return res.status(400).json({ success: false, message: 'รหัสผ่านต้องมีอย่างน้อย 8 ตัวอักษร' });
     try {
         const [existing] = await pool.query('SELECT EmployeeID FROM Employees WHERE EmployeeID = ?', [EmployeeID.trim()]);
         if (existing.length > 0)
@@ -424,10 +458,10 @@ app.post('/api/policies/:id/acknowledge', authenticateToken, async (req, res) =>
             'INSERT IGNORE INTO Policy_Acknowledgements (PolicyID, UserID, UserName, Department) VALUES (?, ?, ?, ?)',
             [id, UserID, UserName || null, Department || null]
         );
-        res.json({ status: 'success', message: 'รับทราบนโยบายเรียบร้อยแล้ว' });
+        res.json({ success: true, message: 'รับทราบนโยบายเรียบร้อยแล้ว' });
     } catch (error) {
         console.error('Error acknowledging policy:', error);
-        res.status(500).json({ status: 'error', message: 'เกิดข้อผิดพลาดในการบันทึกข้อมูล' });
+        res.status(500).json({ success: false, message: 'เกิดข้อผิดพลาดในการบันทึกข้อมูล' });
     }
 });
 
@@ -741,6 +775,7 @@ app.use('/api/ky',            authenticateToken, kyRoutes);
 app.use('/api/fourm',         authenticateToken, fourmRoutes);
 app.use('/api/settings',          authenticateToken, settingsRoutes);
 app.use('/api/activity-targets',  authenticateToken, activityTargetsRoutes);
+app.use('/api/dashboard',         authenticateToken, dashboardRoutes);
 
 // =================================================================
 // SECTION 4B: GENERIC CRUD
@@ -762,7 +797,7 @@ tablesForCrud.forEach(table => {
             const [rows] = await pool.query(`SELECT * FROM \`${table}\``);
             res.json(rows);
         } catch (error) {
-            res.status(500).json({ status: 'error', message: `Could not fetch data from ${table}` });
+            res.status(500).json({ success: false, message: `Could not fetch data from ${table}` });
         }
     });
 
@@ -771,10 +806,10 @@ tablesForCrud.forEach(table => {
             const columns = Object.keys(req.body);
             const values  = Object.values(req.body);
             await pool.query(`INSERT INTO \`${table}\` (\`${columns.join('`,`')}\`) VALUES (?)`, [values]);
-            res.status(201).json({ status: 'success', message: 'เพิ่มข้อมูลใหม่สำเร็จ' });
+            res.status(201).json({ success: true, message: 'เพิ่มข้อมูลใหม่สำเร็จ' });
         } catch (error) {
             console.error(`Error adding to ${table}:`, error);
-            res.status(500).json({ status: 'error', message: `Could not add data to ${table}` });
+            res.status(500).json({ success: false, message: `Could not add data to ${table}` });
         }
     });
 
@@ -785,12 +820,12 @@ tablesForCrud.forEach(table => {
             const values  = [...Object.values(req.body), id];
             const [result] = await pool.query(`UPDATE \`${table}\` SET ${columns} WHERE id = ?`, values);
             if (result.affectedRows === 0) {
-                return res.status(404).json({ status: 'error', message: 'Item not found for update' });
+                return res.status(404).json({ success: false, message: 'Item not found for update' });
             }
-            res.json({ status: 'success', message: 'อัปเดตข้อมูลสำเร็จ' });
+            res.json({ success: true, message: 'อัปเดตข้อมูลสำเร็จ' });
         } catch (error) {
             console.error(`Error updating ${table}:`, error);
-            res.status(500).json({ status: 'error', message: `Could not update data in ${table}` });
+            res.status(500).json({ success: false, message: `Could not update data in ${table}` });
         }
     });
 
@@ -799,12 +834,12 @@ tablesForCrud.forEach(table => {
             const { id } = req.params;
             const [result] = await pool.query(`DELETE FROM \`${table}\` WHERE id = ?`, [id]);
             if (result.affectedRows === 0) {
-                return res.status(404).json({ status: 'error', message: 'Item not found for deletion' });
+                return res.status(404).json({ success: false, message: 'Item not found for deletion' });
             }
-            res.json({ status: 'success', message: 'ลบข้อมูลสำเร็จ' });
+            res.json({ success: true, message: 'ลบข้อมูลสำเร็จ' });
         } catch (error) {
             console.error(`Error deleting from ${table}:`, error);
-            res.status(500).json({ status: 'error', message: `Could not delete data from ${table}` });
+            res.status(500).json({ success: false, message: `Could not delete data from ${table}` });
         }
     });
 });
@@ -912,7 +947,21 @@ app.post('/api/admin/employees/import', authenticateToken, isAdmin, async (req, 
 });
 
 // =================================================================
-// SECTION 5: START THE SERVER
+// SECTION 5: GLOBAL ERROR HANDLER
+// Catches unhandled errors thrown inside async route handlers
+// =================================================================
+// eslint-disable-next-line no-unused-vars
+app.use((err, req, res, next) => {
+    // CORS errors from the origin check
+    if (err.message === 'Not allowed by CORS') {
+        return res.status(403).json({ success: false, message: 'CORS: origin not allowed' });
+    }
+    console.error('[Unhandled Error]', req.method, req.path, err.message || err);
+    res.status(500).json({ success: false, message: 'เกิดข้อผิดพลาดภายในเซิร์ฟเวอร์' });
+});
+
+// =================================================================
+// SECTION 6: START THE SERVER
 // =================================================================
 const PORT = process.env.PORT || 5000;
 

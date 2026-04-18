@@ -17,6 +17,7 @@ const { isAdmin } = require('../middleware/auth');
         'ALTER TABLE Master_Positions ADD COLUMN PatrolPassPct INT DEFAULT 80',
         'ALTER TABLE Patrol_Attendance ADD COLUMN PatrolType VARCHAR(20) DEFAULT NULL',
         'ALTER TABLE Patrol_Attendance ADD COLUMN RecordedBy VARCHAR(50) DEFAULT NULL',
+        'ALTER TABLE Patrol_Issues ADD COLUMN ReporterID VARCHAR(50) DEFAULT NULL',
         // Ensure PatrolType in Team_Members is VARCHAR (not ENUM) to support 'committee'
         'ALTER TABLE Patrol_Team_Members MODIFY COLUMN PatrolType VARCHAR(20) NOT NULL',
         // Per-round area assignment (0=legacy both rounds, 1=round1, 2=round2)
@@ -499,12 +500,13 @@ router.post('/issue/save', upload.fields([
         if (data.ActionType === 'OPEN') {
             await db.query(
                 `INSERT INTO Patrol_Issues
-                 (DateFound, FoundByTeam, Area, ResponsibleDept, ResponsibleUnit, HazardType, MachineName, HazardDescription, \`Rank\`, DueDate, BeforeImage, CurrentStatus)
-                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'Open')`,
+                 (DateFound, FoundByTeam, Area, ResponsibleDept, ResponsibleUnit, HazardType, MachineName, HazardDescription, \`Rank\`, DueDate, BeforeImage, CurrentStatus, ReporterID)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'Open', ?)`,
                 [data.DateFound, data.FoundByTeam, data.Area,
                  data.ResponsibleDept || null, data.ResponsibleUnit || null,
                  data.HazardType, data.MachineName, data.HazardDescription,
-                 data.Rank || null, data.DueDate || null, getUrl('BeforeImage')]
+                 data.Rank || null, data.DueDate || null, getUrl('BeforeImage'),
+                 req.user.id]
             );
         } else if (data.ActionType === 'TEMP') {
             await db.query(
