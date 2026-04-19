@@ -125,6 +125,14 @@ router.put('/principles/:id', isAdmin, async (req, res) => {
     }
 });
 
+// Validate a score field: empty/null → null, out-of-range → throws
+function parseScore(val, key) {
+    if (val === '' || val == null) return null;
+    const n = parseFloat(val);
+    if (isNaN(n) || n < 1.0 || n > 5.0) throw new Error(`${key} ต้องอยู่ระหว่าง 1.0–5.0`);
+    return Math.round(n * 10) / 10;
+}
+
 // GET /api/safety-culture/assessments
 router.get('/assessments', async (req, res) => {
     try {
@@ -145,16 +153,24 @@ router.get('/assessments', async (req, res) => {
 router.post('/assessments', isAdmin, async (req, res) => {
     try {
         await ensureTables();
-        const { AssessmentYear, Area, T1_Score, T2_Score, T3_Score, T4_Score, T5_Score, T7_Score, Notes } = req.body;
+        const { AssessmentYear, Area, Notes } = req.body;
         if (!AssessmentYear) return res.status(400).json({ success: false, message: 'กรุณาระบุปีการประเมิน' });
+        let T1, T2, T3, T4, T5, T7;
+        try {
+            T1 = parseScore(req.body.T1_Score, 'T1');
+            T2 = parseScore(req.body.T2_Score, 'T2');
+            T3 = parseScore(req.body.T3_Score, 'T3');
+            T4 = parseScore(req.body.T4_Score, 'T4');
+            T5 = parseScore(req.body.T5_Score, 'T5');
+            T7 = parseScore(req.body.T7_Score, 'T7');
+        } catch (e) {
+            return res.status(400).json({ success: false, message: e.message });
+        }
         const id = uuidv4();
         await db.query(
             `INSERT INTO SC_Assessments (AssessmentID, AssessmentYear, Area, T1_Score, T2_Score, T3_Score, T4_Score, T5_Score, T7_Score, Notes, CreatedBy)
              VALUES (?,?,?,?,?,?,?,?,?,?,?)`,
-            [id, AssessmentYear, Area || 'ทั้งหมด',
-             T1_Score || null, T2_Score || null, T3_Score || null,
-             T4_Score || null, T5_Score || null, T7_Score || null,
-             Notes || null, req.user.name]
+            [id, AssessmentYear, Area || 'ทั้งหมด', T1, T2, T3, T4, T5, T7, Notes || null, req.user.name]
         );
         res.json({ success: true, message: 'บันทึกผลการประเมินสำเร็จ', id });
     } catch (err) {
@@ -165,13 +181,21 @@ router.post('/assessments', isAdmin, async (req, res) => {
 // PUT /api/safety-culture/assessments/:id (admin)
 router.put('/assessments/:id', isAdmin, async (req, res) => {
     try {
-        const { AssessmentYear, Area, T1_Score, T2_Score, T3_Score, T4_Score, T5_Score, T7_Score, Notes } = req.body;
+        const { AssessmentYear, Area, Notes } = req.body;
+        let T1, T2, T3, T4, T5, T7;
+        try {
+            T1 = parseScore(req.body.T1_Score, 'T1');
+            T2 = parseScore(req.body.T2_Score, 'T2');
+            T3 = parseScore(req.body.T3_Score, 'T3');
+            T4 = parseScore(req.body.T4_Score, 'T4');
+            T5 = parseScore(req.body.T5_Score, 'T5');
+            T7 = parseScore(req.body.T7_Score, 'T7');
+        } catch (e) {
+            return res.status(400).json({ success: false, message: e.message });
+        }
         await db.query(
             `UPDATE SC_Assessments SET AssessmentYear=?, Area=?, T1_Score=?, T2_Score=?, T3_Score=?, T4_Score=?, T5_Score=?, T7_Score=?, Notes=? WHERE AssessmentID=?`,
-            [AssessmentYear, Area || 'ทั้งหมด',
-             T1_Score || null, T2_Score || null, T3_Score || null,
-             T4_Score || null, T5_Score || null, T7_Score || null,
-             Notes || null, req.params.id]
+            [AssessmentYear, Area || 'ทั้งหมด', T1, T2, T3, T4, T5, T7, Notes || null, req.params.id]
         );
         res.json({ success: true, message: 'อัปเดตผลการประเมินสำเร็จ' });
     } catch (err) {
@@ -281,8 +305,15 @@ router.get('/dashboard', async (req, res) => {
 
         const [yearTrend] = await db.query(
             `SELECT AssessmentYear,
-                    AVG((COALESCE(T1_Score,0)+COALESCE(T2_Score,0)+COALESCE(T3_Score,0)+
-                         COALESCE(T4_Score,0)+COALESCE(T5_Score,0)+COALESCE(T7_Score,0))/6) AS avg_score,
+                    AVG(
+                        (COALESCE(T1_Score,0)+COALESCE(T2_Score,0)+COALESCE(T3_Score,0)+
+                         COALESCE(T4_Score,0)+COALESCE(T5_Score,0)+COALESCE(T7_Score,0)) /
+                        NULLIF(
+                            (T1_Score IS NOT NULL)+(T2_Score IS NOT NULL)+(T3_Score IS NOT NULL)+
+                            (T4_Score IS NOT NULL)+(T5_Score IS NOT NULL)+(T7_Score IS NOT NULL),
+                            0
+                        )
+                    ) AS avg_score,
                     COUNT(*) AS record_count
              FROM SC_Assessments
              GROUP BY AssessmentYear ORDER BY AssessmentYear ASC`
