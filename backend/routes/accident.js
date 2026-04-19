@@ -92,6 +92,7 @@ async function ensureTable() {
         "ALTER TABLE Accident_Reports ADD COLUMN PreventiveAction TEXT",
         "ALTER TABLE Accident_Reports ADD COLUMN ResponsiblePerson VARCHAR(100) DEFAULT NULL",
         "ALTER TABLE Accident_Reports ADD COLUMN DueDate          DATE         DEFAULT NULL",
+        "ALTER TABLE Accident_Reports ADD COLUMN IsDeleted        TINYINT(1)   DEFAULT 0",
     ];
     for (const sql of migrate) {
         try { await db.query(sql); } catch (_) { /* column already exists */ }
@@ -161,7 +162,7 @@ router.get('/reports', async (req, res) => {
                    (SELECT COUNT(*) FROM Accident_Attachments WHERE AccidentID = r.id) AS AttachmentCount
             FROM   Accident_Reports r
             LEFT JOIN Employees e ON e.EmployeeID = r.EmployeeID
-            WHERE  1=1
+            WHERE  (r.IsDeleted IS NULL OR r.IsDeleted = 0)
         `;
         const params = [];
         if (year)       { sql += ' AND YEAR(r.AccidentDate) = ?'; params.push(year); }
@@ -187,7 +188,7 @@ router.get('/reports/:id', async (req, res) => {
             `SELECT r.*, e.EmployeeName, e.Team
              FROM   Accident_Reports r
              LEFT JOIN Employees e ON e.EmployeeID = r.EmployeeID
-             WHERE  r.id = ?`,
+             WHERE  r.id = ? AND (r.IsDeleted IS NULL OR r.IsDeleted = 0)`,
             [id]
         );
         if (!report) return res.status(404).json({ success: false, message: 'ไม่พบรายงาน' });
@@ -216,12 +217,12 @@ router.get('/summary', async (req, res) => {
                 COALESCE(SUM(LostDays), 0)                   AS lostDays,
                 COALESCE(SUM(AccidentType = 'Near Miss'), 0) AS nearMiss,
                 COALESCE(SUM(AccidentType = 'Fatal'), 0)     AS fatal
-            FROM Accident_Reports WHERE 1=1 ${yf}
+            FROM Accident_Reports WHERE (IsDeleted IS NULL OR IsDeleted = 0) ${yf}
         `);
 
         const [lastRec] = await db.query(`
             SELECT AccidentDate FROM Accident_Reports
-            WHERE IsRecordable = 1
+            WHERE IsRecordable = 1 AND (IsDeleted IS NULL OR IsDeleted = 0)
             ORDER BY AccidentDate DESC LIMIT 1
         `);
         let daysSince = null;
@@ -232,18 +233,20 @@ router.get('/summary', async (req, res) => {
         const trendSql = year
             ? `SELECT MONTH(AccidentDate) AS mo, COUNT(*) AS total,
                       SUM(IsRecordable) AS recordable, SUM(LostDays) AS lostDays
-               FROM Accident_Reports WHERE YEAR(AccidentDate) = ${year}
+               FROM Accident_Reports
+               WHERE (IsDeleted IS NULL OR IsDeleted = 0) AND YEAR(AccidentDate) = ${year}
                GROUP BY MONTH(AccidentDate) ORDER BY mo`
             : `SELECT DATE_FORMAT(AccidentDate,'%Y-%m') AS period,
                       COUNT(*) AS total, SUM(IsRecordable) AS recordable, SUM(LostDays) AS lostDays
                FROM Accident_Reports
-               WHERE AccidentDate >= DATE_SUB(CURDATE(), INTERVAL 12 MONTH)
+               WHERE (IsDeleted IS NULL OR IsDeleted = 0)
+                 AND AccidentDate >= DATE_SUB(CURDATE(), INTERVAL 12 MONTH)
                GROUP BY period ORDER BY period`;
         const [trend] = await db.query(trendSql);
 
         const [byType] = await db.query(`
             SELECT AccidentType, COUNT(*) AS cnt
-            FROM Accident_Reports WHERE 1=1 ${yf}
+            FROM Accident_Reports WHERE (IsDeleted IS NULL OR IsDeleted = 0) ${yf}
             GROUP BY AccidentType ORDER BY cnt DESC
         `);
 
@@ -253,7 +256,8 @@ router.get('/summary', async (req, res) => {
                    COALESCE(SUM(IsRecordable), 0) AS recordable,
                    COALESCE(SUM(LostDays), 0)     AS lostDays
             FROM Accident_Reports
-            WHERE Department IS NOT NULL AND Department <> '' ${yf}
+            WHERE (IsDeleted IS NULL OR IsDeleted = 0)
+              AND Department IS NOT NULL AND Department <> '' ${yf}
             GROUP BY Department
             ORDER BY total DESC, recordable DESC
             LIMIT 10
@@ -281,7 +285,8 @@ router.get('/analytics', async (req, res) => {
                    SUM(AccidentType='Fatal')     AS fatal,
                    SUM(Severity='Critical')      AS critical
             FROM Accident_Reports
-            WHERE Department IS NOT NULL AND Department <> '' ${yf}
+            WHERE (IsDeleted IS NULL OR IsDeleted = 0)
+              AND Department IS NOT NULL AND Department <> '' ${yf}
             GROUP BY Department
             ORDER BY (SUM(IsRecordable)*3 + SUM(LostDays)*2 + COUNT(*)) DESC
             LIMIT 10
@@ -290,13 +295,13 @@ router.get('/analytics', async (req, res) => {
         const [hotspot] = await db.query(`
             SELECT COALESCE(Area,'(ไม่ระบุ)') AS area, COUNT(*) AS cnt,
                    SUM(IsRecordable) AS recordable, SUM(LostDays) AS lostDays
-            FROM Accident_Reports WHERE 1=1 ${yf}
+            FROM Accident_Reports WHERE (IsDeleted IS NULL OR IsDeleted = 0) ${yf}
             GROUP BY Area ORDER BY cnt DESC LIMIT 8
         `);
 
         const [rootCauses] = await db.query(`
             SELECT COALESCE(RootCause,'(ไม่ระบุ)') AS cause, COUNT(*) AS cnt
-            FROM Accident_Reports WHERE 1=1 ${yf}
+            FROM Accident_Reports WHERE (IsDeleted IS NULL OR IsDeleted = 0) ${yf}
             GROUP BY RootCause ORDER BY cnt DESC LIMIT 8
         `);
 
@@ -462,18 +467,12 @@ router.delete('/reports/:id', isAdmin, async (req, res) => {
     const id = parseId(req.params.id);
     if (!id) return res.status(400).json({ success: false, message: 'ID ไม่ถูกต้อง' });
     try {
-        const [[existing]] = await db.query('SELECT id FROM Accident_Reports WHERE id = ?', [id]);
+        const [[existing]] = await db.query(
+            'SELECT id FROM Accident_Reports WHERE id = ? AND (IsDeleted IS NULL OR IsDeleted = 0)', [id]
+        );
         if (!existing) return res.status(404).json({ success: false, message: 'ไม่พบรายงาน' });
 
-        // Delete associated attachments first (cloud + DB)
-        const [atts] = await db.query(
-            'SELECT * FROM Accident_Attachments WHERE AccidentID = ?', [id]
-        );
-        for (const att of atts) {
-            await _destroyFile(att);
-        }
-        await db.query('DELETE FROM Accident_Attachments WHERE AccidentID = ?', [id]);
-        await db.query('DELETE FROM Accident_Reports WHERE id = ?', [id]);
+        await db.query('UPDATE Accident_Reports SET IsDeleted = 1 WHERE id = ?', [id]);
         res.json({ success: true, message: 'ลบรายงานสำเร็จ' });
     } catch (err) {
         res.status(500).json({ success: false, message: err.message });
@@ -528,7 +527,8 @@ router.get('/performance', async (req, res) => {
         // Recordable count from Accident_Reports — used to compute Zero Accident status
         const [[kpi]] = await db.query(
             `SELECT COALESCE(SUM(IsRecordable), 0) AS recordable
-             FROM Accident_Reports WHERE YEAR(AccidentDate) = ?`,
+             FROM Accident_Reports
+             WHERE (IsDeleted IS NULL OR IsDeleted = 0) AND YEAR(AccidentDate) = ?`,
             [year]
         );
 

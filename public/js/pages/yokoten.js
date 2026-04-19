@@ -1707,51 +1707,63 @@ function _buildAdminDept() {
         </div>
 
         <!-- Responses needing approval -->
-        ${_allResponses.filter(r => r.ApprovalStatus === 'pending' || r.ApprovalStatus === 'rejected').length > 0 ? `
-        <div class="card overflow-hidden">
-            <div class="px-5 py-4 border-b border-slate-100 flex items-center gap-2">
+        ${(()=>{
+            const actionable = _allResponses.filter(r => r.ApprovalStatus === 'pending' || r.ApprovalStatus === 'rejected');
+            if (!actionable.length) return '';
+            const pendingCount = actionable.filter(r => r.ApprovalStatus === 'pending').length;
+            return `
+        <div class="card overflow-hidden" id="yok-approval-card">
+            <div class="px-5 py-4 border-b border-slate-100 flex items-center gap-2 flex-wrap">
                 <svg class="w-4 h-4 text-amber-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4M7.835 4.697a3.42 3.42 0 001.946-.806 3.42 3.42 0 014.438 0 3.42 3.42 0 001.946.806 3.42 3.42 0 013.138 3.138 3.42 3.42 0 00.806 1.946 3.42 3.42 0 010 4.438 3.42 3.42 0 00-.806 1.946 3.42 3.42 0 01-3.138 3.138 3.42 3.42 0 00-1.946.806 3.42 3.42 0 01-4.438 0 3.42 3.42 0 00-1.946-.806 3.42 3.42 0 01-3.138-3.138 3.42 3.42 0 00-.806-1.946 3.42 3.42 0 010-4.438 3.42 3.42 0 00.806-1.946 3.42 3.42 0 013.138-3.138z"/>
                 </svg>
-                <h3 class="text-sm font-bold text-slate-700">รายการรอการอนุมัติ / ถูกส่งกลับ</h3>
+                <h3 class="text-sm font-bold text-slate-700 flex-1">รายการรอการอนุมัติ / ถูกส่งกลับ</h3>
+                ${pendingCount > 0 ? `
+                <button id="yok-bulk-approve-btn"
+                        class="hidden px-3 py-1.5 rounded-lg text-xs font-semibold text-white bg-emerald-600 hover:bg-emerald-700 transition-colors">
+                    อนุมัติที่เลือก (<span id="yok-bulk-count">0</span>)
+                </button>
+                <label class="flex items-center gap-1.5 text-xs text-slate-500 cursor-pointer select-none">
+                    <input type="checkbox" id="yok-select-all-pending" class="rounded"> เลือกทั้งหมด
+                </label>` : ''}
             </div>
             <div class="divide-y divide-slate-100">
-                ${_allResponses
-                    .filter(r => r.ApprovalStatus === 'pending' || r.ApprovalStatus === 'rejected')
-                    .map(r => {
-                        const isPending  = r.ApprovalStatus === 'pending';
-                        const isRejected = r.ApprovalStatus === 'rejected';
-                        return `
-                        <div class="px-5 py-4">
-                            <div class="flex flex-wrap items-start gap-3 justify-between">
-                                <div class="flex-1 min-w-0">
-                                    <div class="flex flex-wrap items-center gap-2 mb-1">
-                                        <span class="font-semibold text-slate-700 text-sm">${_esc(r.Department)}</span>
-                                        <span class="text-slate-400">·</span>
-                                        <span class="text-sm text-slate-500">${_esc(r.Title || r.TopicTitle || r.YokotenID)}</span>
-                                        ${isPending
-                                            ? `<span class="px-2 py-0.5 rounded-full text-xs font-semibold bg-yellow-100 text-yellow-700">รออนุมัติ</span>`
-                                            : `<span class="px-2 py-0.5 rounded-full text-xs font-semibold bg-red-100 text-red-700">ถูกส่งกลับแก้ไข</span>`}
-                                    </div>
-                                    <p class="text-xs text-slate-500">ตอบโดย: ${_esc(r.EmployeeName || r.EmployeeID)} · ${_fmtDate(r.ResponseDate)}</p>
-                                    <p class="text-xs text-slate-600 mt-1">${r.IsRelated === 'No' ? 'ไม่เกี่ยวข้อง' : 'เกี่ยวข้อง'}</p>
-                                    ${r.CorrectiveAction ? `<p class="text-xs text-amber-700 mt-1 italic">"${_esc(r.CorrectiveAction)}"</p>` : ''}
-                                    ${isRejected && r.ApprovalComment ? `<p class="text-xs text-red-600 mt-1">เหตุผล: ${_esc(r.ApprovalComment)}</p>` : ''}
+                ${actionable.map(r => {
+                    const isPending  = r.ApprovalStatus === 'pending';
+                    const isRejected = r.ApprovalStatus === 'rejected';
+                    return `
+                    <div class="px-5 py-4">
+                        <div class="flex flex-wrap items-start gap-3 justify-between">
+                            ${isPending ? `<input type="checkbox" class="yok-bulk-cb mt-1 flex-shrink-0 rounded" data-rid="${r.ResponseID}">` : '<div class="w-4 flex-shrink-0"></div>'}
+                            <div class="flex-1 min-w-0">
+                                <div class="flex flex-wrap items-center gap-2 mb-1">
+                                    <span class="font-semibold text-slate-700 text-sm">${_esc(r.Department)}</span>
+                                    <span class="text-slate-400">·</span>
+                                    <span class="text-sm text-slate-500">${_esc(r.Title || r.TopicTitle || r.YokotenID)}</span>
+                                    ${isPending
+                                        ? `<span class="px-2 py-0.5 rounded-full text-xs font-semibold bg-yellow-100 text-yellow-700">รออนุมัติ</span>`
+                                        : `<span class="px-2 py-0.5 rounded-full text-xs font-semibold bg-red-100 text-red-700">ถูกส่งกลับแก้ไข</span>`}
                                 </div>
-                                <div class="flex items-center gap-2 flex-shrink-0">
-                                    ${isPending ? `
-                                    <button class="yok-approve-btn px-3 py-1.5 rounded-lg text-xs font-semibold text-white bg-emerald-600 hover:bg-emerald-700 transition-colors"
-                                            data-rid="${r.ResponseID}">อนุมัติ</button>
-                                    <button class="yok-reject-btn px-3 py-1.5 rounded-lg text-xs font-semibold text-white bg-red-500 hover:bg-red-600 transition-colors"
-                                            data-rid="${r.ResponseID}">ส่งกลับแก้ไข</button>` : ''}
-                                    <button class="yok-del-resp-btn px-2 py-1.5 rounded-lg text-xs font-semibold text-red-500 border border-red-200 hover:bg-red-50 transition-colors"
-                                            data-rid="${r.ResponseID}">ลบ</button>
-                                </div>
+                                <p class="text-xs text-slate-500">ตอบโดย: ${_esc(r.EmployeeName || r.EmployeeID)} · ${_fmtDate(r.ResponseDate)}</p>
+                                <p class="text-xs text-slate-600 mt-1">${r.IsRelated === 'No' ? 'ไม่เกี่ยวข้อง' : 'เกี่ยวข้อง'}</p>
+                                ${r.CorrectiveAction ? `<p class="text-xs text-amber-700 mt-1 italic">"${_esc(r.CorrectiveAction)}"</p>` : ''}
+                                ${isRejected && r.ApprovalComment ? `<p class="text-xs text-red-600 mt-1">เหตุผล: ${_esc(r.ApprovalComment)}</p>` : ''}
                             </div>
-                        </div>`;
-                    }).join('')}
+                            <div class="flex items-center gap-2 flex-shrink-0">
+                                ${isPending ? `
+                                <button class="yok-approve-btn px-3 py-1.5 rounded-lg text-xs font-semibold text-white bg-emerald-600 hover:bg-emerald-700 transition-colors"
+                                        data-rid="${r.ResponseID}">อนุมัติ</button>
+                                <button class="yok-reject-btn px-3 py-1.5 rounded-lg text-xs font-semibold text-white bg-red-500 hover:bg-red-600 transition-colors"
+                                        data-rid="${r.ResponseID}">ส่งกลับแก้ไข</button>` : ''}
+                                <button class="yok-del-resp-btn px-2 py-1.5 rounded-lg text-xs font-semibold text-red-500 border border-red-200 hover:bg-red-50 transition-colors"
+                                        data-rid="${r.ResponseID}">ลบ</button>
+                            </div>
+                        </div>
+                    </div>`;
+                }).join('')}
             </div>
-        </div>` : ''}
+        </div>`;
+        })()}
 
         <!-- Matrix -->
         ${topics.length > 0 ? `
@@ -2544,6 +2556,19 @@ function openRejectModal(responseId) {
     }, 50);
 }
 
+function _updateBulkBar() {
+    const checked = [...document.querySelectorAll('.yok-bulk-cb:checked')];
+    const btn     = document.getElementById('yok-bulk-approve-btn');
+    const counter = document.getElementById('yok-bulk-count');
+    if (!btn) return;
+    if (checked.length > 0) {
+        btn.classList.remove('hidden');
+        if (counter) counter.textContent = checked.length;
+    } else {
+        btn.classList.add('hidden');
+    }
+}
+
 // ─── EVENT LISTENERS ─────────────────────────────────────────────────────────
 function setupEventListeners() {
     document.addEventListener('click', async (e) => {
@@ -2664,6 +2689,22 @@ function setupEventListeners() {
             switchTab('admin');
             _adminView = 'config';
             renderAdmin(document.getElementById('yok-content'));
+            return;
+        }
+
+        // Bulk approve
+        if (e.target.closest('#yok-bulk-approve-btn')) {
+            const ids = [...document.querySelectorAll('.yok-bulk-cb:checked')].map(cb => cb.dataset.rid);
+            if (!ids.length) return;
+            const ok = await showConfirmationModal('อนุมัติแบบกลุ่ม', `ยืนยันการอนุมัติ ${ids.length} รายการที่เลือก?`);
+            if (!ok) return;
+            try {
+                showLoading('กำลังดำเนินการ...');
+                const r = await API.post('/yokoten/bulk-approve', { ids });
+                showToast(r?.message || 'อนุมัติสำเร็จ', 'success');
+                await refreshData();
+            } catch (err) { showToast(err?.message || 'เกิดข้อผิดพลาด', 'error'); }
+            finally { hideLoading(); }
             return;
         }
 
@@ -2800,6 +2841,20 @@ function setupEventListeners() {
             _empFilterDept = e.target.value;
             const admContent = document.getElementById('adm-view-content');
             if (admContent) admContent.innerHTML = _buildAdminEmp();
+            return;
+        }
+        // Bulk approve: select-all checkbox
+        if (e.target.id === 'yok-select-all-pending') {
+            document.querySelectorAll('.yok-bulk-cb').forEach(cb => { cb.checked = e.target.checked; });
+            _updateBulkBar();
+            return;
+        }
+        // Bulk approve: individual checkbox
+        if (e.target.classList.contains('yok-bulk-cb')) {
+            const all = document.querySelectorAll('.yok-bulk-cb');
+            const selectAll = document.getElementById('yok-select-all-pending');
+            if (selectAll) selectAll.checked = [...all].every(c => c.checked);
+            _updateBulkBar();
             return;
         }
         // Toggle corrective action required field in response form

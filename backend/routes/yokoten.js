@@ -131,6 +131,8 @@ async function ensureTables() {
         `ALTER TABLE YokotenResponses ADD COLUMN ApprovedBy VARCHAR(100) DEFAULT NULL AFTER ApprovalComment`,
         `ALTER TABLE YokotenResponses ADD COLUMN ApprovedAt DATETIME DEFAULT NULL AFTER ApprovedBy`,
         `ALTER TABLE YokotenResponses ADD COLUMN UpdatedAt TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP`,
+        // Soft delete support
+        `ALTER TABLE YokotenResponses ADD COLUMN IsDeleted TINYINT(1) DEFAULT 0`,
         // Add UNIQUE KEY (may fail if already exists — that's OK)
         `ALTER TABLE YokotenResponses ADD UNIQUE KEY uq_dept_topic (YokotenID, Department)`,
     ];
@@ -162,9 +164,10 @@ router.get('/topics', async (req, res) => {
             `SELECT * FROM YokotenTopics WHERE IsActive = 1 ORDER BY DateIssued DESC`
         );
 
-        // Dept response for caller's department
+        // Dept response for caller's department (exclude soft-deleted)
         const [deptResponses] = await db.query(
-            `SELECT r.* FROM YokotenResponses r WHERE r.Department = ?`,
+            `SELECT r.* FROM YokotenResponses r
+             WHERE r.Department = ? AND (r.IsDeleted IS NULL OR r.IsDeleted = 0)`,
             [userDept]
         );
         const deptMap = new Map(deptResponses.map(r => [r.YokotenID, r]));
@@ -183,9 +186,10 @@ router.get('/topics', async (req, res) => {
             });
         }
 
-        // Dept response counts per topic
+        // Dept response counts per topic (exclude soft-deleted)
         const [deptCounts] = await db.query(
-            `SELECT YokotenID, COUNT(*) AS cnt FROM YokotenResponses GROUP BY YokotenID`
+            `SELECT YokotenID, COUNT(*) AS cnt FROM YokotenResponses
+             WHERE (IsDeleted IS NULL OR IsDeleted = 0) GROUP BY YokotenID`
         );
         const deptCountMap = new Map(deptCounts.map(d => [d.YokotenID, d.cnt]));
 
@@ -220,12 +224,13 @@ router.get('/dept-completion', isAdmin, async (req, res) => {
 
         const [depts] = await db.query(`SELECT Name FROM Master_Departments ORDER BY Name ASC`);
 
-        // All responses + files for active topics
+        // All responses + files for active topics (exclude soft-deleted)
         const [responses] = await db.query(
             `SELECT r.*,
                     (SELECT COUNT(*) FROM Yokoten_Response_Files f WHERE f.ResponseID = r.ResponseID) AS fileCount
              FROM YokotenResponses r
-             WHERE r.YokotenID IN (SELECT YokotenID FROM YokotenTopics WHERE IsActive = 1)`
+             WHERE r.YokotenID IN (SELECT YokotenID FROM YokotenTopics WHERE IsActive = 1)
+               AND (r.IsDeleted IS NULL OR r.IsDeleted = 0)`
         );
 
         const lookup = new Map();
@@ -289,7 +294,7 @@ router.get('/all-responses', isAdmin, async (req, res) => {
             SELECT r.*, t.Title, t.RiskLevel, t.TopicDescription AS TopicTitle
             FROM YokotenResponses r
             LEFT JOIN YokotenTopics t ON t.YokotenID = r.YokotenID
-            WHERE 1=1
+            WHERE (r.IsDeleted IS NULL OR r.IsDeleted = 0)
         `;
         const params = [];
         if (topicId) { sql += ' AND r.YokotenID = ?'; params.push(topicId); }
@@ -332,7 +337,7 @@ router.get('/dept-history', async (req, res) => {
             SELECT r.*, t.Title, t.TopicDescription AS TopicTitle, t.RiskLevel, t.Category
             FROM YokotenResponses r
             LEFT JOIN YokotenTopics t ON t.YokotenID = r.YokotenID
-            WHERE r.Department = ?
+            WHERE r.Department = ? AND (r.IsDeleted IS NULL OR r.IsDeleted = 0)
         `;
         const params = [dept];
         if (topicId) { sql += ' AND r.YokotenID = ?'; params.push(topicId); }
@@ -380,11 +385,12 @@ router.get('/employee-completion', isAdmin, async (req, res) => {
         empSql += ` ORDER BY Department, Name`;
         const [employees] = await db.query(empSql, empParams);
 
-        // Dept responses (one per dept per topic)
+        // Dept responses (one per dept per topic, exclude soft-deleted)
         const [responses] = await db.query(
             `SELECT YokotenID, Department, EmployeeID, IsRelated, ApprovalStatus, ResponseDate
              FROM YokotenResponses
-             WHERE YokotenID IN (SELECT YokotenID FROM YokotenTopics WHERE IsActive = 1)`
+             WHERE YokotenID IN (SELECT YokotenID FROM YokotenTopics WHERE IsActive = 1)
+               AND (IsDeleted IS NULL OR IsDeleted = 0)`
         );
         const deptLookup = new Map();
         responses.forEach(r => { deptLookup.set(`${r.Department}::${r.YokotenID}`, r); });
@@ -585,19 +591,17 @@ router.put('/respond/:id', (req, res, next) => {
 // ─────────────────────────────────────────────────────────────────────────────
 router.delete('/respond/:id', isAdmin, async (req, res) => {
     try {
-        const [rows] = await db.query('SELECT * FROM YokotenResponses WHERE ResponseID = ?', [req.params.id]);
+        const [rows] = await db.query(
+            'SELECT * FROM YokotenResponses WHERE ResponseID = ? AND (IsDeleted IS NULL OR IsDeleted = 0)',
+            [req.params.id]
+        );
         if (!rows.length) return res.status(404).json({ success: false, message: 'ไม่พบการตอบกลับ' });
 
-        // Delete Cloudinary files
-        const [files] = await db.query('SELECT * FROM Yokoten_Response_Files WHERE ResponseID = ?', [req.params.id]);
-        for (const f of files) {
-            if (f.PublicID) {
-                try { await cloudinary.uploader.destroy(f.PublicID); } catch (_) {}
-            }
-        }
-
-        await db.query('DELETE FROM Yokoten_Response_Files WHERE ResponseID = ?', [req.params.id]);
-        await db.query('DELETE FROM YokotenResponses WHERE ResponseID = ?', [req.params.id]);
+        // Soft delete — keep Cloudinary files intact (can be recovered if needed)
+        await db.query(
+            'UPDATE YokotenResponses SET IsDeleted = 1 WHERE ResponseID = ?',
+            [req.params.id]
+        );
         res.json({ success: true, message: 'ลบการตอบกลับสำเร็จ' });
     } catch (err) {
         res.status(500).json({ success: false, message: err.message });
@@ -789,6 +793,33 @@ router.put('/topics/:id', isAdmin, async (req, res) => {
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────────────────────
+// POST /api/yokoten/bulk-approve (admin) — approve multiple pending responses
+// ─────────────────────────────────────────────────────────────────────────────
+router.post('/bulk-approve', isAdmin, async (req, res) => {
+    try {
+        const { ids } = req.body;
+        if (!Array.isArray(ids) || ids.length === 0)
+            return res.status(400).json({ success: false, message: 'กรุณาระบุรายการที่ต้องการอนุมัติ' });
+
+        const safeIds = ids.map(id => parseInt(id, 10)).filter(id => !isNaN(id) && id > 0);
+        if (safeIds.length === 0)
+            return res.status(400).json({ success: false, message: 'ID ไม่ถูกต้อง' });
+
+        const placeholders = safeIds.map(() => '?').join(',');
+        const [result] = await db.query(
+            `UPDATE YokotenResponses
+             SET ApprovalStatus='approved', ApprovedBy=?, ApprovedAt=NOW()
+             WHERE ResponseID IN (${placeholders}) AND ApprovalStatus='pending'
+               AND (IsDeleted IS NULL OR IsDeleted = 0)`,
+            [req.user.name, ...safeIds]
+        );
+        res.json({ success: true, message: `อนุมัติ ${result.affectedRows} รายการสำเร็จ` });
+    } catch (err) {
+        res.status(500).json({ success: false, message: err.message });
+    }
+});
+
 // DELETE /api/yokoten/topics/:id (admin)
 // ─────────────────────────────────────────────────────────────────────────────
 router.delete('/topics/:id', isAdmin, async (req, res) => {

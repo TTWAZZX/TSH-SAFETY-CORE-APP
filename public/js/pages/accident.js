@@ -841,6 +841,11 @@ function _buildReportsTable() {
                    ${attCount}
                </span>`
             : '';
+        const pdfBtn = `
+            <button onclick="window._accExportPDF(${r.id})" title="ส่งออก PDF"
+                class="p-1.5 text-slate-400 hover:text-sky-600 hover:bg-sky-50 rounded-lg transition-colors">
+                <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 21h10a2 2 0 002-2V9.414a1 1 0 00-.293-.707l-5.414-5.414A1 1 0 0012.586 3H7a2 2 0 00-2 2v14a2 2 0 002 2z"/></svg>
+            </button>`;
         const adminBtns = _isAdmin ? `
             <button onclick="window._accEditReport(${r.id})" title="แก้ไข"
                 class="p-1.5 text-slate-400 hover:text-emerald-600 hover:bg-emerald-50 rounded-lg transition-colors">
@@ -869,7 +874,11 @@ function _buildReportsTable() {
             <td class="px-4 py-3 text-xs text-slate-500 max-w-[140px] truncate" title="${_esc(r.RootCause||'')}">${r.RootCause || '—'}</td>
             <td class="px-4 py-3 text-center text-sm ${r.LostDays>0?'text-red-600 font-semibold':'text-slate-400'}">${r.LostDays || 0}</td>
             <td class="px-4 py-3">${statusBadge}</td>
-            ${_isAdmin ? `<td class="px-4 py-3"><div class="flex items-center gap-1">${adminBtns}</div></td>` : ''}
+            <td class="px-4 py-3">
+                <div class="flex items-center gap-1">
+                    ${pdfBtn}${adminBtns}
+                </div>
+            </td>
         </tr>`;
     }).join('');
 
@@ -887,7 +896,7 @@ function _buildReportsTable() {
                     <th class="px-4 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wide">สาเหตุ</th>
                     <th class="px-4 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wide text-center whitespace-nowrap">วันหยุด</th>
                     <th class="px-4 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wide">สถานะ</th>
-                    ${_isAdmin ? `<th class="px-4 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wide">จัดการ</th>` : ''}
+                    <th class="px-4 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wide">จัดการ</th>
                 </tr>
             </thead>
             <tbody>${rows}</tbody>
@@ -1562,6 +1571,131 @@ window._accDeleteReport = async id => {
         showToast(err.message || 'เกิดข้อผิดพลาด', 'error');
     }
 };
+
+window._accExportPDF = async id => {
+    try {
+        showLoading('กำลังสร้าง PDF...');
+        const res = await API.get(`/accident/reports/${id}`);
+        const r   = res?.data;
+        if (!r) { showToast('ไม่พบรายงาน', 'error'); return; }
+
+        const fmt = iso => iso ? new Date(iso).toLocaleDateString('th-TH', { day: '2-digit', month: 'short', year: 'numeric' }) : '—';
+        const v   = val => val != null && val !== '' ? _esc(String(val)) : '—';
+
+        const page = document.createElement('div');
+        page.style.cssText = 'position:fixed;left:-9999px;top:0;width:794px;min-height:1122px;background:#fff;font-family:Kanit,sans-serif;display:flex;flex-direction:column';
+        page.innerHTML = `
+        <div style="background:linear-gradient(135deg,#7f1d1d,#dc2626);padding:28px 36px;color:#fff;flex-shrink:0">
+            <div style="display:flex;align-items:center;justify-content:space-between">
+                <div>
+                    <p style="font-size:11px;opacity:.75;margin:0 0 4px">รายงานอุบัติเหตุ / Accident Report</p>
+                    <h1 style="font-size:22px;font-weight:700;margin:0">ACC-${String(r.id).padStart(4,'0')}</h1>
+                </div>
+                <div style="text-align:right;font-size:11px;opacity:.8">
+                    <p style="margin:0">วันที่พิมพ์: ${fmt(new Date().toISOString())}</p>
+                    <p style="margin:4px 0 0">สถานะ: ${v(r.Status)}</p>
+                </div>
+            </div>
+        </div>
+
+        <div style="flex:1;padding:28px 36px;display:flex;flex-direction:column;gap:18px">
+            <!-- Section 1: ข้อมูลทั่วไป -->
+            <div>
+                <p style="font-size:10px;font-weight:700;color:#dc2626;letter-spacing:.06em;margin:0 0 8px;text-transform:uppercase">ข้อมูลทั่วไป</p>
+                <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px">
+                    ${_pdfField('วันที่เกิดเหตุ', fmt(r.AccidentDate))}
+                    ${_pdfField('วันที่รายงาน', fmt(r.ReportDate))}
+                    ${_pdfField('เวลา', v(r.AccidentTime))}
+                    ${_pdfField('บริเวณ/สถานที่', v(r.Area || r.Location))}
+                    ${_pdfField('ผู้รายงาน', v(r.ReportedBy))}
+                    ${_pdfField('แผนก', v(r.Department))}
+                </div>
+            </div>
+            <!-- Section 2: ผู้ประสบเหตุ -->
+            <div>
+                <p style="font-size:10px;font-weight:700;color:#dc2626;letter-spacing:.06em;margin:0 0 8px;text-transform:uppercase">ผู้ประสบเหตุ</p>
+                <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px">
+                    ${_pdfField('รหัสพนักงาน', v(r.EmployeeID))}
+                    ${_pdfField('ชื่อ', v(r.EmployeeName))}
+                    ${_pdfField('ตำแหน่ง', v(r.Position))}
+                    ${_pdfField('ประเภทการจ้าง', v(r.EmploymentType))}
+                </div>
+            </div>
+            <!-- Section 3: รายละเอียด -->
+            <div>
+                <p style="font-size:10px;font-weight:700;color:#dc2626;letter-spacing:.06em;margin:0 0 8px;text-transform:uppercase">รายละเอียดเหตุการณ์</p>
+                <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+                    ${_pdfField('ประเภทอุบัติเหตุ', v(r.AccidentType))}
+                    ${_pdfField('ความรุนแรง', v(r.Severity))}
+                </div>
+                ${_pdfFieldFull('คำอธิบาย', v(r.Description))}
+            </div>
+            <!-- Section 4: การบาดเจ็บ -->
+            <div>
+                <p style="font-size:10px;font-weight:700;color:#dc2626;letter-spacing:.06em;margin:0 0 8px;text-transform:uppercase">การบาดเจ็บ</p>
+                <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px">
+                    ${_pdfField('ประเภทการบาดเจ็บ', v(r.InjuryType))}
+                    ${_pdfField('ส่วนของร่างกาย', v(r.BodyPart))}
+                    ${_pdfField('วันหยุดงาน', r.LostDays > 0 ? r.LostDays + ' วัน' : '0 วัน')}
+                    ${_pdfField('Recordable', r.IsRecordable ? 'ใช่' : 'ไม่ใช่')}
+                    ${_pdfField('การรักษา', v(r.MedicalTreatment))}
+                </div>
+            </div>
+            <!-- Section 5: สาเหตุ -->
+            <div>
+                <p style="font-size:10px;font-weight:700;color:#dc2626;letter-spacing:.06em;margin:0 0 8px;text-transform:uppercase">วิเคราะห์สาเหตุ</p>
+                ${_pdfFieldFull('สาเหตุทันที', v(r.ImmediateCause))}
+                ${_pdfFieldFull('พฤติกรรมไม่ปลอดภัย', v(r.UnsafeAct))}
+                ${_pdfFieldFull('สภาพไม่ปลอดภัย', v(r.UnsafeCondition))}
+                ${_pdfFieldFull('สาเหตุรากเหง้า', v(r.RootCause))}
+            </div>
+            <!-- Section 6: มาตรการ -->
+            <div>
+                <p style="font-size:10px;font-weight:700;color:#dc2626;letter-spacing:.06em;margin:0 0 8px;text-transform:uppercase">มาตรการแก้ไข</p>
+                ${_pdfFieldFull('มาตรการแก้ไข', v(r.CorrectiveAction))}
+                ${_pdfFieldFull('มาตรการป้องกัน', v(r.PreventiveAction))}
+                <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;margin-top:10px">
+                    ${_pdfField('ผู้รับผิดชอบ', v(r.ResponsiblePerson))}
+                    ${_pdfField('กำหนดเสร็จ', fmt(r.DueDate))}
+                    ${_pdfField('สถานะ', v(r.Status))}
+                </div>
+            </div>
+        </div>
+
+        <div style="background:#7f1d1d;padding:10px 36px;display:flex;justify-content:space-between;align-items:center;flex-shrink:0">
+            <p style="color:rgba(255,255,255,.7);font-size:9px;margin:0">TSH Safety Core Activity System</p>
+            <p style="color:rgba(255,255,255,.7);font-size:9px;margin:0">Accident Report ACC-${String(r.id).padStart(4,'0')}</p>
+        </div>`;
+
+        document.body.appendChild(page);
+        const canvas = await html2canvas(page, { scale: 1.5, useCORS: true, logging: false });
+        document.body.removeChild(page);
+
+        const imgData = canvas.toDataURL('image/jpeg', 0.92);
+        const pdf = new jspdf.jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
+        pdf.addImage(imgData, 'JPEG', 0, 0, 210, 297);
+        const fn = `ACC-${String(r.id).padStart(4,'0')}-${(r.AccidentDate||'').slice(0,10).replace(/-/g,'')}.pdf`;
+        pdf.save(fn);
+        showToast('ส่งออก PDF สำเร็จ', 'success');
+    } catch (err) {
+        showToast(err.message || 'เกิดข้อผิดพลาด', 'error');
+    } finally {
+        hideLoading();
+    }
+};
+
+function _pdfField(label, val) {
+    return `<div style="background:#fafafa;border:1px solid #e2e8f0;border-radius:6px;padding:7px 10px">
+        <p style="font-size:9px;color:#94a3b8;margin:0 0 2px">${label}</p>
+        <p style="font-size:11px;color:#1e293b;font-weight:600;margin:0">${val}</p>
+    </div>`;
+}
+function _pdfFieldFull(label, val) {
+    return `<div style="background:#fafafa;border:1px solid #e2e8f0;border-radius:6px;padding:7px 10px;margin-bottom:8px">
+        <p style="font-size:9px;color:#94a3b8;margin:0 0 2px">${label}</p>
+        <p style="font-size:11px;color:#1e293b;margin:0;white-space:pre-wrap;line-height:1.5">${val}</p>
+    </div>`;
+}
 
 window._accDeleteAttachment = async attId => {
     const ok = await showConfirmationModal('ลบไฟล์แนบ', 'ต้องการลบไฟล์นี้ใช่หรือไม่?');

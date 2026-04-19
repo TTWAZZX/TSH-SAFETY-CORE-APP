@@ -101,4 +101,62 @@ router.get('/overview', async (_req, res) => {
     }
 });
 
+// ─── GET /api/dashboard/alerts ───────────────────────────────────────────────
+// Returns overdue items across modules for the alert widget on the home page.
+router.get('/alerts', async (_req, res) => {
+    try {
+        const [
+            overdueAccident,
+            machineOverdue,
+            yokotenOverdue,
+            openPatrolIssues,
+        ] = await Promise.all([
+            // Accident corrective actions past due date, not yet closed
+            db.query(
+                `SELECT id, AccidentDate, AccidentType, Department, DueDate
+                 FROM Accident_Reports
+                 WHERE DueDate IS NOT NULL AND DueDate < CURDATE()
+                   AND Status != 'Closed' AND (IsDeleted IS NULL OR IsDeleted = 0)
+                 ORDER BY DueDate ASC LIMIT 10`
+            ).then(([r]) => r).catch(() => []),
+
+            // Machines with overdue inspection date
+            db.query(
+                `SELECT MachineID, MachineName, Department, NextInspectionDate
+                 FROM Machine_Safety
+                 WHERE NextInspectionDate IS NOT NULL AND NextInspectionDate < CURDATE()
+                   AND (Status IS NULL OR Status NOT IN ('inactive'))
+                 ORDER BY NextInspectionDate ASC LIMIT 10`
+            ).then(([r]) => r).catch(() => []),
+
+            // Yokoten topics past deadline still active
+            db.query(
+                `SELECT t.YokotenID, t.Title, t.Deadline,
+                        COUNT(r.ResponseID) AS respondedCount
+                 FROM YokotenTopics t
+                 LEFT JOIN YokotenResponses r
+                        ON r.YokotenID = t.YokotenID
+                           AND (r.IsDeleted IS NULL OR r.IsDeleted = 0)
+                 WHERE t.Deadline IS NOT NULL AND t.Deadline < CURDATE() AND t.IsActive = 1
+                 GROUP BY t.YokotenID, t.Title, t.Deadline
+                 ORDER BY t.Deadline ASC LIMIT 10`
+            ).then(([r]) => r).catch(() => []),
+
+            // Open patrol issues (all time)
+            db.query(
+                `SELECT id, DateFound, Area, HazardType, ResponsibleDept, \`Rank\`
+                 FROM Patrol_Issues WHERE CurrentStatus NOT IN ('Closed')
+                 ORDER BY DateFound ASC LIMIT 10`
+            ).then(([r]) => r).catch(() => []),
+        ]);
+
+        res.json({
+            success: true,
+            data: { overdueAccident, machineOverdue, yokotenOverdue, openPatrolIssues }
+        });
+    } catch (err) {
+        res.status(500).json({ success: false, message: err.message });
+    }
+});
+
 module.exports = router;
