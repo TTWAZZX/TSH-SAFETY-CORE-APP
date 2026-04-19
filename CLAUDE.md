@@ -113,13 +113,18 @@ node server.js      # runs on PORT=5000
 - Middleware `authenticateToken` → decode JWT → `req.user`
 - Middleware `isAdmin` → ตรวจ `req.user.role === 'Admin'` (ต้องใช้หลัง authenticateToken)
 - Login rate limit: 10 ครั้ง / 15 นาที / IP
+- Change-password rate limit: 10 ครั้ง / 15 นาที / IP (`changePwdLimiter` ใน `server.js`)
 - Token หมดอายุ 6 ชั่วโมง, refresh ได้ที่ `POST /api/session/verify`
+- **`normalizeRole(rawRole)`** ใน `server.js` — case-insensitive match กับ `ALLOWED_ROLES`; บังคับ role เป็น canonical casing ก่อน sign JWT; ป้องกัน `'admin'` / `'ADMIN'` bypass isAdmin check
+- **Password minimum 8 ตัวอักษร** — enforce ใน register, change-password, profile; มี strength indicator 5 ระดับ (อ่อนมาก/อ่อน/ปานกลาง/ดี/แข็งแกร่ง) ใน index.html, main.js, profile.js
+- **Request logger** — middleware `res.on('finish')` log format: `[INFO/WARN/ERROR] METHOD /path statusCode ms`
+- **Global error handler** — Express `(err, req, res, next)` ใน `server.js` ก่อน SECTION 6; CORS error → 403; อื่นๆ → 500 `{ success: false, message: 'เกิดข้อผิดพลาดภายในเซิร์ฟเวอร์' }`
 
 ### User Roles
 - `Admin` — จัดการข้อมูลทั้งหมด
 - `User` — ดูข้อมูล, บันทึกการรับทราบ
 - `Viewer` — (import only)
-- Role whitelist: `ALLOWED_ROLES = ['Admin', 'User', 'Viewer']` (enforced in admin.js backend)
+- Role whitelist: `ALLOWED_ROLES = ['Admin', 'User', 'Viewer']` (enforced in admin.js backend + `normalizeRole()` in server.js)
 
 ### API Routes
 | Prefix | Auth | Module |
@@ -152,9 +157,12 @@ node server.js      # runs on PORT=5000
 | `/api/yokoten/dept-completion` | Admin | สรุปความคืบหน้ารายแผนก → `{ topics, deptSummary }` |
 | `/api/yokoten/all-responses` | Admin | รายการ response ทั้งหมด (filterable, includes files) |
 | `/api/yokoten/dashboard-config` | User (write=Admin) | GET/PUT `{ pinnedDepts, pinnedUnits }` JSON config |
+| `/api/yokoten/bulk-approve` | Admin | POST `{ ids: [...] }` — bulk approve pending responses |
+| `/api/dashboard/overview` | User | Cross-module KPI overview |
+| `/api/dashboard/alerts` | User | Overdue items across modules (accident/machine/yokoten/patrol) |
 | `/api/accident/*` | User | Accident Reports |
 | `/api/accident/reports` | User (write=Admin) | GET (list+filters) / POST (create+upload) |
-| `/api/accident/reports/:id` | User (write=Admin) | GET single / PUT (update+upload) / DELETE (cascade attachments) |
+| `/api/accident/reports/:id` | User (write=Admin) | GET single / PUT (update+upload) / DELETE (soft-delete: IsDeleted=1) |
 | `/api/accident/summary?year=` | User | KPI + trend + byType + byDept aggregates |
 | `/api/accident/analytics?year=` | User | dept risk ranking + hotspot + root causes |
 | `/api/accident/performance?year=` | User | Safety Performance record + recordableCount |
@@ -234,16 +242,17 @@ Primary key ของ generic CRUD คือ `id` — ยกเว้น `Employ
 | **Patrol** | กำหนดการตรวจ, บันทึกการเข้าร่วม (ปกติ / ซ่อม / ตรวจซ้ำ), รายงานปัญหา (รูปภาพ), Self-Patrol สำหรับหัวหน้า, Team Rotation, พื้นที่โรงงาน (Patrol_Areas), Roster Management (Top&Management / Sec.&Supervisor), Admin Record Management (เพิ่ม/ลบรายการแทนสมาชิก) |
 | **CCCF** | Form A Worker (ค้นหาอันตรายรายบุคคล), Form A Permanent (ตารางติดตาม `ต้องส่ง / On Process / Complete`, admin ส่งแทน/แก้ไข/ลบได้, progress รายส่วนงานจาก assignment), Unit Summary combo chart (horizontal bar + target line), Admin ตั้งเป้าหมาย/override achieved ต่อ Unit, กรองปีได้ทั้ง Unit summary และ "รายการของฉัน" |
 | **KPI** | ประกาศ KPI, ข้อมูล KPI รายปี (ม.ค.–ธ.ค.) |
-| **Yokoten** | แบ่งปันบทเรียน/ความรู้ความปลอดภัย (Phase 3) — **หนึ่ง response ต่อแผนก**, Approval workflow (pending→approved/rejected), Corrective Action (IsRelated=No), ไฟล์แนบ (FormData, field: `responseFiles`, สูงสุด 10 ไฟล์/20 MB), Dashboard pinned depts config, Admin approve/reject/delete, Excel export |
+| **Yokoten** | แบ่งปันบทเรียน/ความรู้ความปลอดภัย (Phase 3) — **หนึ่ง response ต่อแผนก**, Approval workflow (pending→approved/rejected), Bulk approve (checkboxes + `POST /bulk-approve`), Corrective Action (IsRelated=No), ไฟล์แนบ (FormData, field: `responseFiles`, สูงสุด 10 ไฟล์/20 MB), Dashboard pinned depts config, Admin approve/reject/delete (soft delete), Excel export |
 | **Policy** | นโยบายความปลอดภัย, รับทราบนโยบาย — Description field ใช้ Rich Text Editor (RTE) เดียวกับ Yokoten (`pol-*` prefix), HTML ถูก sanitize ก่อนบันทึก/แสดง, PDF export รองรับ rich formatting |
 | **Committee** | คณะกรรมการความปลอดภัย, SubCommittee (JSON array), ผังองค์กร |
 | **Machine Safety** | ข้อมูลเครื่องจักร/อุปกรณ์ความปลอดภัย, Safety Device Std., Layout & Checkpoint, Compliance Checklist (5.1–5.8), Issue Tracker, Audit Readiness |
 | **OJT / SCW** | มาตรฐาน Stop-Call-Wait (แก้ไขได้), จัดการเอกสาร SCW (อัปโหลด/ดู/ลบ), OJT Compliance รายแผนก (เป้าหมาย/ผู้เข้าร่วม/สถานะ, เลือกแผนกที่แสดง persisted, คำนวณ metric จากแผนกที่เลือกเท่านั้น, year filter) |
-| **Accident** | รายงานอุบัติเหตุ/อุบัติการณ์ — Dashboard (KPI cards + trend chart + dept breakdown), Analytics (dept risk ranking + hotspot + root cause), Records (full 6-section form + file attachments), Safety KPI Board (Zero Accident banner + Days/Hours without accident + target progress + monthly status grid) |
+| **Accident** | รายงานอุบัติเหตุ/อุบัติการณ์ — Dashboard (KPI cards + trend chart + dept breakdown), Analytics (dept risk ranking + hotspot + root cause), Records (full 6-section form + file attachments + PDF export ต่อรายการ), Safety KPI Board (Zero Accident banner + Days/Hours without accident + target progress + monthly status grid), Soft delete (IsDeleted=1) |
 | **Safety Culture** | กิจกรรมวัฒนธรรมความปลอดภัย |
 | **Training** | บันทึกและติดตามผลการอบรมรายแผนก — `Training_Dept_Records` (Department+Year+CourseID+TotalEmp+PassedCount), Dashboard: KPI cards + compliance chart + course summary + dept summary + Dept×Course matrix, หลักสูตร CRUD (Admin only) |
 | **Contractor** | ความปลอดภัยผู้รับเหมา |
-| **Hiyari** | รายงาน near-miss / ไฮยาริ |
+| **Hiyari** | รายงาน near-miss / ไฮยาริ — มีปุ่ม "สร้าง Yokoten" ที่ write `hiyari_to_yokoten` ลง sessionStorage แล้ว navigate ไป `#yokoten` |
+| **Dashboard** | ภาพรวม KPI ทุก module + Alert Widget (รายการค้าง/เกินกำหนด) + เป้าหมายกิจกรรมส่วนตัว |
 | **KY** | กิจกรรม KY (Kiken Yochi) |
 | **4M Change** | บริหารจัดการการเปลี่ยนแปลง Man/Machine/Material/Method |
 | **Admin (System Console)** | Dashboard, Scheduler, Employee CRUD, Master Data, System Health, Audit Log, **เป้าหมายกิจกรรม** |
@@ -325,7 +334,7 @@ Query หลักใช้ correlated subqueries ส่งคืน computed co
 ### Tables
 | Table | Purpose |
 |-------|---------|
-| `Accident_Reports` | รายงานหลัก — 29 columns รวม `Location`, `Position`, `EmploymentType`, `InjuryType`, `BodyPart`, `MedicalTreatment`, `ImmediateCause`, `UnsafeAct`, `UnsafeCondition`, `PreventiveAction`, `ResponsiblePerson`, `DueDate` (auto-migrated ด้วย `ALTER TABLE ... ADD COLUMN` try/catch ใน `ensureTable()`) |
+| `Accident_Reports` | รายงานหลัก — 29+ columns รวม `Location`, `Position`, `EmploymentType`, `InjuryType`, `BodyPart`, `MedicalTreatment`, `ImmediateCause`, `UnsafeAct`, `UnsafeCondition`, `PreventiveAction`, `ResponsiblePerson`, `DueDate`, **`IsDeleted TINYINT(1) DEFAULT 0`** (auto-migrated ด้วย `ALTER TABLE ... ADD COLUMN` try/catch ใน `ensureTable()`) |
 | `Accident_Attachments` | ไฟล์แนบต่อรายงาน — `AccidentID` (FK), `FileName`, `FileURL`, `PublicID`, `FileType`, `FileSize`, `UploadedBy` |
 | `Accident_Performance` | Safety KPI Board ต่อปี — `Year` (UNIQUE), `TotalHours`, `TotalDays`, `LastAccidentDate`, `TargetHours`, `TargetDays`, `MonthlyStatus` (JSON), `UpdatedBy` |
 
@@ -443,7 +452,7 @@ WHERE Department = ? AND Year = ? AND (CourseID <=> ?)
 | Table | Purpose |
 |-------|---------|
 | `YokotenTopics` | หัวข้อ Yokoten — `TargetDepts` (JSON array), `TargetUnits` (JSON array), `RiskLevel`, `Category`, `Deadline`, `AttachmentUrl` — auto-created by `ensureTables()` |
-| `YokotenResponses` | Response หนึ่งรายการต่อ (YokotenID, Department) — UNIQUE KEY `uq_dept_topic` — `IsRelated`, `Comment`, `CorrectiveAction`, `ApprovalStatus` (NULL/pending/approved/rejected), `ApprovalComment`, `ApprovedBy` |
+| `YokotenResponses` | Response หนึ่งรายการต่อ (YokotenID, Department) — UNIQUE KEY `uq_dept_topic` — `IsRelated`, `Comment`, `CorrectiveAction`, `ApprovalStatus` (NULL/pending/approved/rejected), `ApprovalComment`, `ApprovedBy`, **`IsDeleted TINYINT(1) DEFAULT 0`** (soft delete — auto-migrated ใน `ensureTables()`) |
 | `Yokoten_Response_Files` | ไฟล์แนบต่อ response — `ResponseID` (FK), `FileName`, `FileURL`, `PublicID`, `FileType`, `FileSize`, `UploadedBy` |
 | `Yokoten_Dashboard_Config` | Config row เดียว — `pinnedDepts` (JSON), `pinnedUnits` (JSON) — upsert ด้วย `INSERT ... ON DUPLICATE KEY UPDATE` |
 
@@ -459,6 +468,8 @@ WHERE Department = ? AND Year = ? AND (CourseID <=> ?)
 | `DELETE /yokoten/respond/:id` | Admin | ลบ response + cascade files (Cloudinary) |
 | `POST /yokoten/respond/:id/approve` | Admin | อนุมัติ → ApprovalStatus='approved' |
 | `POST /yokoten/respond/:id/reject` | Admin | ปฏิเสธ → ApprovalStatus='rejected', body: `{ comment }` |
+| `POST /yokoten/bulk-approve` | Admin | Bulk approve `{ ids: [ResponseID, ...] }` → UPDATE IN (...) WHERE ApprovalStatus='pending' |
+| `DELETE /yokoten/respond/:id` | Admin | Soft delete → IsDeleted=1 (ไฟล์ Cloudinary ยังคงอยู่) |
 | `DELETE /yokoten/response-files/:fileId` | Admin | ลบไฟล์เดี่ยว (Cloudinary + DB) |
 | `GET /yokoten/dept-history` | User | ประวัติ response ของแผนกตัวเอง พร้อมไฟล์ |
 | `GET /yokoten/dept-completion` | Admin | `{ topics, deptSummary }` — สรุปทุกแผนกจาก Master_Departments |
@@ -976,3 +987,11 @@ closeModal();
 63. **cascade EmployeeID warning log** — `.catch()` ใน cascade loop ไม่ใช่ silent swallow อีกต่อไป — log `console.warn` แสดงชื่อตารางและ error message เพื่อให้ debug ได้
 64. **Activity Targets compliance widget** — `public/js/utils/activity-widget.js` export `buildActivityCard(activityKeys)` → returns async HTML card (glass style) สำหรับแปะต่อท้าย hero stats strip — import แล้วเรียกท้าย `_loadHeroStats()` / `_renderHeroStats()` โมดูลที่ใช้: hiyari (`'hiyari'`), ky (`'ky'`), yokoten (`'yokoten'`), training (`'training'`), ojt (`'scw'`); patrol+cccf ไม่ใช้เพราะแสดงข้อมูลเดียวกันอยู่แล้วในสตริป
 65. **Legacy password auto-migration** — เมื่อ `user.Password` เป็น NULL (legacy mode) และ login สำเร็จ, server.js จะ fire-and-forget `bcrypt.hash` → `UPDATE Employees SET Password=?` โดยอัตโนมัติ — ครั้งถัดไปที่ user login จะใช้ bcrypt เต็มรูปแบบ; migration ล้มเหลว = `console.warn` แต่ login ยังผ่าน
+66. **Password minimum 8 ตัว (ไม่ใช่ 6)** — validation enforce ทั้ง backend (`server.js` register + change-password) และ frontend (index.html, main.js, profile.js); strength indicator แสดง 5 ระดับตาม score: length≥8 + lowercase + uppercase + digit + symbol; อย่าตั้ง validation กลับไป 6 ตัว
+67. **`normalizeRole()` ใน server.js** — ต้องเรียกใน login handler ก่อน sign JWT ทุกครั้ง; ใช้ `ALLOWED_ROLES.find(ar => ar.toLowerCase() === r.toLowerCase())` — ถ้าไม่พบ fallback `'User'`; ป้องกันกรณี DB มี role เป็น `'admin'` lowercase แล้ว isAdmin check (`=== 'Admin'`) fail
+68. **Soft delete pattern — `IsDeleted TINYINT(1) DEFAULT 0`** — ทั้ง `Accident_Reports` และ `YokotenResponses` ใช้ soft delete; DELETE endpoint → `UPDATE ... SET IsDeleted=1`; ทุก GET/summary/analytics query ต้อง filter `WHERE (IsDeleted IS NULL OR IsDeleted = 0)`; ใช้ NULL-safe เพราะแถวเดิมก่อน migrate จะมีค่า NULL ไม่ใช่ 0
+69. **Accident soft delete — Attachments ยังคงอยู่** — การ soft delete `Accident_Reports` ไม่ลบ `Accident_Attachments` และไม่ลบไฟล์จาก Cloudinary; ถ้าต้องการลบไฟล์ให้ใช้ `DELETE /accident/attachments/:id` แยกต่างหาก
+70. **Yokoten bulk approve — safe integer validation** — `POST /yokoten/bulk-approve` รับ `{ ids: [...] }` แล้ว map `parseInt(id, 10)` filter `!isNaN && > 0` ก่อน build `IN (...)` placeholder ทุกครั้ง — ห้าม interpolate ids โดยตรงใน SQL string
+71. **Dashboard alerts — silent fail** — `GET /dashboard/alerts` ทุก sub-query ใช้ `.catch(() => [])` เพราะตารางบางอันอาจยังไม่มีใน DB; frontend `_loadAlerts()` ก็ `try/catch` silent — widget ไม่แสดงถ้าไม่มีรายการ (ไม่แสดง "0 alerts" section)
+72. **Hiyari → Yokoten cross-module flow** — `hiyari.js` เขียน `sessionStorage.setItem('hiyari_to_yokoten', JSON.stringify({ title, description, riskLevel, sourceHiyariId }))` แล้ว navigate `location.hash = '#yokoten'`; `yokoten.js` อ่านใน `loadYokotenPage()` หลัง `refreshData()`, `removeItem` ทันที, switch tab admin→topics, เรียก `openTopicForm(null, prefill)` ด้วย `setTimeout(..., 150)` เพื่อให้ DOM settle; ถ้าไม่ใช่ admin → ไม่ดำเนินการ (try/catch คลุม)
+73. **Accident PDF export — `window._accExportPDF(id)`** — สร้าง `div 794×1122px` position:fixed left:-9999px, render ด้วย html2canvas scale:1.5, จากนั้น jsPDF addImage A4; ใช้ helpers `_pdfField()` / `_pdfFieldFull()` ที่นิยาม local ในไฟล์; filename pattern: `ACC-XXXX-YYYYMMDD.pdf`; ต้องการ `html2canvas` + `jspdf` CDN (มีแล้วใน index.html)
