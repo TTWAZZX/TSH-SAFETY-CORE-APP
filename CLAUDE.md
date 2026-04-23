@@ -1076,6 +1076,115 @@ function renderPanel(id) {
 - DELETE endpoints → `UPDATE ... SET deleted_at = NOW()`
 - ทุก GET query ต้องมี `WHERE deleted_at IS NULL`
 
+## Contractor Module — Architecture
+
+### Tables
+| Table | Purpose |
+|-------|---------|
+| `Contractor_Documents` | เอกสารผู้รับเหมา — `id UUID PK`, `Title`, `Category`, `Description`, `FileUrl`, `PublicID`, `FileType`, `FileSize`, `UploadedBy`, `UploadedAt`, `UpdatedAt` |
+| `Contractor_Activity_Log` | บันทึกการกระทำ (upload/edit/delete) — `ActionType`, `DocID`, `DocTitle`, `Category`, `ActorName`, `CreatedAt` |
+
+ทั้งสองตารางสร้างด้วย `CREATE TABLE IF NOT EXISTS` + `ALTER TABLE … ADD COLUMN` (try/catch) ใน `ensureTables()` ของ `backend/routes/contractor.js`
+
+### Key API Endpoints
+| Endpoint | Auth | Description |
+|----------|------|-------------|
+| `GET /contractor/documents` | User | รายการเอกสารทั้งหมด — filter params: `category`, `q`, `dateFrom`, `dateTo` |
+| `GET /contractor/documents/stats` | User | สรุป: `{ total, byCategory: [{Category, cnt}], recentCount }` (30 วันล่าสุด) |
+| `GET /contractor/activity?limit=` | User | ประวัติกิจกรรมล่าสุด (สูงสุด 50 รายการ) |
+| `POST /contractor/documents` | Admin | อัปโหลดเอกสาร (multer + Cloudinary, field: `file`, สูงสุด 20 MB) |
+| `PUT /contractor/documents/:id` | Admin | แก้ไข metadata (Title, Category, Description) |
+| `DELETE /contractor/documents/:id` | Admin | ลบเอกสาร + Cloudinary cleanup (fire-and-forget) + log |
+
+### Frontend Architecture (`public/js/pages/contractor.js`)
+
+#### Service Layer
+```js
+const ContractorService = {
+    getDocs()           // GET /contractor/documents — all docs, no filter params
+    getStats()          // GET /contractor/documents/stats
+    getActivity(limit)  // GET /contractor/activity?limit=
+    upload(formData)    // POST /contractor/documents
+    update(id, data)    // PUT /contractor/documents/:id
+    remove(id)          // DELETE /contractor/documents/:id
+}
+```
+API calls อยู่ใน `ContractorService` เท่านั้น — ห้าม call `API.*` จาก UI functions โดยตรง
+
+#### Cache (TTL 5 นาที)
+```js
+const _cache = { get(key), set(key, val), del(...keys) }
+// CACHE_TTL = 5 * 60 * 1000
+// Keys: 'docs', 'stats', 'activity'
+// Invalidate ทั้ง 3 keys หลัง upload/edit/delete ทุกครั้ง
+```
+
+#### Centralized State
+```js
+const _state = {
+    docs: [],          // full list from API (client-side filter/sort/paginate)
+    stats: null,       // { total, byCategory, recentCount }
+    activity: [],      // Contractor_Activity_Log rows
+    isAdmin: false,    // from TSHSession.getUser().role === 'Admin'
+    activeTab: 'dashboard' | 'documents',
+    page: 1,
+    filter: { category, query, dateFrom, dateTo, sortBy }
+}
+```
+
+#### Data Loading (partial-failure tolerant)
+```js
+async function _loadAll(force = false)   // Promise.allSettled — continues even if 1 of 3 fetches fails
+async function _reload()                 // cache.del all 3 keys → _loadAll(true); returns !anyFailed
+```
+- `_loadAllInFlight` flag ป้องกัน concurrent calls (second call returns immediately)
+- Returns `true` = all OK, `false` = partial failure — caller shows appropriate toast
+
+#### Tabs
+| Tab | ID | Content |
+|-----|----|---------|
+| ภาพรวม | `dashboard` | Hero stats + category breakdown + external systems + recent uploads + activity log |
+| เอกสาร | `documents` | Filter bar + document grid (12/page) + pagination |
+
+### Filters & Pagination
+- **Client-side filtering** — `_state.docs` loaded once; `_getFilteredDocs()` pure function (no DOM side-effects)
+- Filter fields: `category` chip, `query` (title+description, debounce 300 ms), `dateFrom`, `dateTo`, `sortBy` (newest/oldest/A–Z)
+- `PAGE_SIZE = 12`, smart ellipsis pagination (max 7 visible page buttons)
+- `_state.page` clamped to `Math.max(1, Math.ceil(total / PAGE_SIZE))` on every grid render — ป้องกัน empty grid หลัง delete
+
+### Clickable KPI Cards
+Hero stats strip cards ที่มี `data-filter-cat` จะ navigate ไป documents tab และ set `_state.filter.category` อัตโนมัติ
+
+### Optimistic Delete
+1. `await ContractorService.remove(id)` — wait for API confirm
+2. `_state.docs.filter(...)` — remove locally
+3. `_cache.del(...)` — invalidate
+4. Background: `_loadStats(true)` + `_loadActivity(true)` — sync counts without full re-render
+
+### RBAC
+- `_state.isAdmin` read once ใน `loadContractorPage()` จาก `TSHSession.getUser()`
+- Upload button, edit/delete buttons ใน card: render เมื่อ `_state.isAdmin` เท่านั้น
+- Backend enforces `isAdmin` middleware บน POST/PUT/DELETE ทุก route
+
+### Production Hardening (fixes applied)
+| Risk | Fix |
+|------|-----|
+| Empty grid after delete on non-first page | Clamp `_state.page` ≤ `maxPage` ใน `_buildDocGridContent` |
+| Concurrent `_loadAll()` race condition | `_loadAllInFlight` boolean flag, wrapped in try/finally |
+| Success toast despite partial API failure | `_loadAll` returns `!anyFailed`; refresh handler shows warning toast on partial failure |
+| Drag-and-drop bypasses `accept` attribute | `ALLOWED_MIME_TYPES` Set checked in `_validateUploadForm` before upload starts |
+| Date filter off-by-one near midnight (UTC vs local) | `_toDateStr(val)` converts via `Date.getFullYear/Month/Date` (local time) for lexicographic string compare |
+| Double-click upload opens duplicate submit handlers | `data-opening` debounce flag (500 ms) on upload button |
+
+### Categories
+`ALLOWED_CATEGORIES` (backend) = `['Contractor Policy', 'Work Permit', 'Safety Procedure', 'Training', 'Forms', 'ทั่วไป']`
+`CAT_META` (frontend) — map category → `{ label, bg, text, dot }` Tailwind classes
+
+### External Systems (hardcoded in EXTERNAL_SYSTEMS const)
+- **Contractor Online** — `https://dev.tshpcl.com/contractor/login.php`
+- **Supplier E-Pass** — `https://dev.tshpcl.com/epass/login.php`
+แสดงใน dashboard tab ไม่มี separate tab (merged by design)
+
 ## Common Pitfalls
 
 1. **อย่าเขียนไฟล์ลง disk** — ใช้ Cloudinary เสมอ
