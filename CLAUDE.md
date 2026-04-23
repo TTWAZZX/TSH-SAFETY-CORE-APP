@@ -248,7 +248,7 @@ Primary key ของ generic CRUD คือ `id` — ยกเว้น `Employ
 | **Machine Safety** | ข้อมูลเครื่องจักร/อุปกรณ์ความปลอดภัย, Safety Device Std., Layout & Checkpoint, Compliance Checklist (5.1–5.8), Issue Tracker, Audit Readiness |
 | **OJT / SCW** | มาตรฐาน Stop-Call-Wait (แก้ไขได้), จัดการเอกสาร SCW (อัปโหลด/ดู/ลบ), OJT Compliance รายแผนก (เป้าหมาย/ผู้เข้าร่วม/สถานะ, เลือกแผนกที่แสดง persisted, คำนวณ metric จากแผนกที่เลือกเท่านั้น, year filter) |
 | **Accident** | รายงานอุบัติเหตุ/อุบัติการณ์ — Dashboard (KPI cards + trend chart + dept breakdown), Analytics (dept risk ranking + hotspot + root cause), Records (full 6-section form + file attachments + PDF export ต่อรายการ), Safety KPI Board (Zero Accident banner + Days/Hours without accident + target progress + monthly status grid), Soft delete (IsDeleted=1) |
-| **Safety Culture** | กิจกรรมวัฒนธรรมความปลอดภัย — 7 หัวข้อ (Principles), ผลการประเมิน (T1–T5, T7 คะแนน 1–5), PPE Inspection Checklist (6 รายการ), Dashboard (Radar/Bar/Line charts + dept breakdown), Culture Maturity Level (Reactive/Basic/Proactive/Generative), department filter (client-side, lazy-cached จาก `/master/departments`) |
+| **Safety Culture** | กิจกรรมวัฒนธรรมความปลอดภัย — 4 tabs: Principles / Dashboard / ผลการประเมิน / PPE Control; คะแนน T1–T5,T7 (0–100%); PPE Inspection + Violation tracking; Dashboard PDF (html2canvas, 3 หน้า, Thai font); Culture Maturity Level (Reactive/Basic/Proactive/Generative) |
 | **Training** | บันทึกและติดตามผลการอบรมรายแผนก — `Training_Dept_Records` (Department+Year+CourseID+TotalEmp+PassedCount), Dashboard: KPI cards + compliance chart + course summary + dept summary + Dept×Course matrix, หลักสูตร CRUD (Admin only) |
 | **Contractor** | ความปลอดภัยผู้รับเหมา |
 | **Hiyari** | รายงาน near-miss / ไฮยาริ — มีปุ่ม "สร้าง Yokoten" ที่ write `hiyari_to_yokoten` ลง sessionStorage แล้ว navigate ไป `#yokoten` |
@@ -919,6 +919,162 @@ closeModal();
   <p class="text-sm mt-1">DESCRIPTION</p>
 </div>
 ```
+
+## Safety Culture Module — Architecture
+
+### Tables
+| Table | Purpose |
+|-------|---------|
+| `SC_Principles` | 7 หลักการ (seed ใน `ensureTables()` ครั้งแรก) — `PrincipleID VARCHAR(36) PK`, `SortOrder`, `Title`, `Description`, `ImageUrl`, `AttachmentUrl`, `AttachmentName` |
+| `SC_Assessments` | ผลการประเมินวัฒนธรรม — `AssessmentID UUID PK`, `AssessmentYear`, `AssessmentDate DATE`, `WeekNo TINYINT`, `Area`, `T1_Score–T5_Score, T7_Score DECIMAL(5,2)` (0–100%), `Notes`, `CreatedBy` |
+| `SC_Assessment_Points` | บันทึกรายจุดตรวจ (TotalPeople/ComplyPeople/Pct) ต่อ AssessmentID+TopicKey |
+| `SC_PPEInspections` | บันทึกการตรวจ PPE — `InspectionID UUID PK`, `InspectionDate`, `Department`, `InspectorID/Name`, `InspectedEmployeeID/Name`, `WorkTypeID`, `IsPass TINYINT(1)`, `IsUnregistered`, `CompliancePct`, `deleted_at` (soft delete) |
+| `SC_PPE_Inspection_Details` | รายการ PPE ต่อ inspection — `DetailID UUID PK`, `InspectionID`, `ItemID`, `Status ENUM('compliant','non-compliant','na')` — UNIQUE FK → SC_PPEInspections |
+| `SC_PPE_Items` | รายการ PPE ที่ตรวจ (admin-configurable) — seed 6 รายการเริ่มต้น; `ItemID UUID PK`, `ItemName`, `SortOrder`, `IsActive` |
+| `SC_PPE_WorkTypes` | ประเภทงาน/พื้นที่ (admin-configurable) — กำหนด PPE set ที่ต้องการ |
+| `SC_PPE_WorkType_Items` | กำหนด ItemID ที่ต้องการต่อ WorkTypeID — `UNIQUE KEY uq_wt_item` |
+| `SC_PPE_Violations` | บันทึกการฝ่าฝืน PPE ต่อพนักงาน — `ViolationID UUID PK`, `EmployeeID`, `ViolationNo`, `WarningLevel ENUM('verbal','safety_notice','written_warning')`, `InspectionID`, `ViolationDate`, `deleted_at` |
+| `SC_PPE_AuditLog` | บันทึก mutation ของ PPE (Create/Update/Delete) — `Action`, `EntityType`, `EntityID`, `UserID`, `Detail TEXT` |
+
+### Score Scale Migration
+- เดิม: T1–T5, T7 บันทึก scale 1–5
+- ปัจจุบัน: scale 0–100% (`DECIMAL(5,2)`)
+- `ensureTables()` ทำ one-time `UPDATE SC_Assessments SET Tx_Score = Tx_Score * 20 WHERE Tx_Score <= 5` (safe re-run — condition guards แถวที่ migrate แล้ว)
+
+### Key API Endpoints
+| Endpoint | Auth | Description |
+|----------|------|-------------|
+| `GET /safety-culture/principles` | User | ดึง 7 หลักการ (seed ถ้าว่าง) |
+| `PUT /safety-culture/principles/:id` | Admin | แก้ไข principle (title, description, imageUrl, attachmentUrl) |
+| `GET /safety-culture/assessments?year=` | User | รายการประเมินรายปี + details |
+| `POST /safety-culture/assessments` | Admin | บันทึกประเมินใหม่ (body: AssessmentYear, AssessmentDate, WeekNo, Area, T1–T5+T7 scores 0–100, Notes) |
+| `PUT /safety-culture/assessments/:id` | Admin | แก้ไขประเมิน |
+| `DELETE /safety-culture/assessments/:id` | Admin | ลบประเมิน |
+| `GET /safety-culture/ppe-items` | User | รายการ PPE ทั้งหมด (IsActive=1) |
+| `POST /safety-culture/ppe-items` | Admin | เพิ่ม PPE item |
+| `PUT /safety-culture/ppe-items/:id` | Admin | แก้ไข PPE item |
+| `DELETE /safety-culture/ppe-items/:id` | Admin | ลบ PPE item (soft — IsActive=0) |
+| `GET /safety-culture/ppe-work-types` | User | รายการ work type + items ที่ผูกไว้ |
+| `POST /safety-culture/ppe-work-types` | Admin | เพิ่ม work type |
+| `PUT /safety-culture/ppe-work-types/:id` | Admin | แก้ไข work type + item mapping |
+| `DELETE /safety-culture/ppe-work-types/:id` | Admin | ลบ work type |
+| `GET /safety-culture/ppe-violations` | Admin | รายการ violations (filterable) |
+| `GET /safety-culture/ppe-violations/summary` | Admin | สรุป violations รายพนักงาน |
+| `POST /safety-culture/ppe-violations` | Admin | บันทึก violation ใหม่ (body: EmployeeID, ViolationDate, WarningLevel, Note) |
+| `DELETE /safety-culture/ppe-violations/:id` | Admin | soft delete violation (deleted_at) |
+| `GET /safety-culture/ppe-inspections?year=&month=&dept=` | User | รายการ inspection + details + violations |
+| `POST /safety-culture/ppe-inspections` | Admin | บันทึก inspection ใหม่ (JSON body: InspectionDate, WorkTypeID, InspectedEmployeeID/Name, IsUnregistered, items: [{ItemID, Status}], violations: [{...}]) — เขียน Details + Violations + AuditLog ใน transaction |
+| `PUT /safety-culture/ppe-inspections/:id` | Admin | แก้ไข inspection (rebuild Details) |
+| `DELETE /safety-culture/ppe-inspections/:id` | Admin | soft delete (`deleted_at = NOW()`) |
+| `GET /safety-culture/dashboard?year=` | User | KPI dashboard — `{ avgScores, ppeStats: { overall_pct, itemBreakdown }, yearTrend }` |
+
+### `GET /dashboard` — Response Shape
+```js
+{
+  avgScores: { avg_t1, avg_t2, avg_t3, avg_t4, avg_t5, avg_t7 },  // AVG per topic for year
+  ppeStats: {
+    overall_pct,   // AVG(CompliancePct) from SC_PPEInspections
+    itemBreakdown: [{ ItemID, ItemName, SortOrder, ok_count, total_count }]  // from Details JOIN Items
+  },
+  yearTrend: [{ AssessmentYear, avg_score, record_count }],  // NULL-aware avg across all years
+  year       // the requested year
+}
+```
+- `yearTrend.avg_score` ใช้ `NULLIF(sum_of_IS_NOT_NULL, 0)` เป็น divisor — หารเฉพาะคอลัมน์ที่มีค่า ป้องกัน COALESCE(col,0) ทำ avg ต่ำกว่าจริง (ดู pitfall #79)
+
+### Frontend Tabs (4 tabs)
+| Tab ID | Label | เนื้อหา |
+|--------|-------|---------|
+| `principles` | วัฒนธรรมความปลอดภัย | 7 card หลักการ + KPI strip (4 badges) + Recent Activity panel (assessment + PPE rows) |
+| `dashboard` | Dashboard | Hero stats strip (sync กับ month/year filter), Radar+Bar+Line charts, dept breakdown |
+| `assessment` | ผลการประเมิน | ตารางประเมิน + CRUD form (Admin), PDF export per record |
+| `ppe` | PPE Control | sub-tabs: dashboard / records / violations / work-types / items (Admin) |
+
+### State Variables
+```js
+let _assessments    = [];    // SC_Assessments rows (with details)
+let _ppeInspections = [];    // SC_PPEInspections rows (with details array)
+let _ppeItems       = [];    // SC_PPE_Items (active)
+let _ppeViolations  = [];    // SC_PPE_Violations rows
+let _ppeWorkTypes   = [];    // SC_PPE_WorkTypes (with items)
+let _scAreas        = [];    // distinct Area values from assessments
+let _dashData       = null;  // GET /dashboard response
+let _dashScores     = null;  // [T1,T2,T3,T4,T5,T6(PPE),T7] computed by buildDashboardHtml()
+let _dataLoaded     = false; // true after first _loadHeroStats() success — skeleton guard
+let _departments    = [];    // lazy-cached from GET /master/departments
+let _filterYear     = new Date().getFullYear();
+let _filterDashMonth = 0;   // 0=รายปี, 1-12=เดือน
+let _filterPPEDept  = '';
+let _ppeSub         = 'dashboard'; // PPE tab sub-panel
+let _ppeSearch      = '';
+let _ppeFilterWT    = '';
+let _ppeFilterStatus = '';
+```
+
+### Score Colors & Thresholds
+| Range | Color | Meaning |
+|-------|-------|---------|
+| `>= 90%` | `#059669` (green) | ผ่าน |
+| `>= 70%` | `#d97706` (amber) | ควรปรับปรุง |
+| `< 70%` | `#ef4444` (red) | ต้องแก้ไขด่วน |
+| `0 / null` | `#cbd5e1` (gray) | ไม่มีข้อมูล |
+
+`getMaturity(avg)`:
+- ≤ 40% → Reactive (red), ≤ 60% → Basic (amber), ≤ 80% → Proactive (blue), > 80% → Generative (emerald)
+
+### Dashboard Sync (`_updateHeroStats`)
+`window._scSetDashMonth(v)` → sets `_filterDashMonth` → calls `_updateHeroStats()` + `renderPanel('dashboard')`
+
+`_updateHeroStats()` recomputes 4 `[data-sc-stat]` badges from filtered data:
+- stat[0]: maturity label
+- stat[1]: avg score %
+- stat[2]: PPE compliance % (from filteredPPE pass rate; fallback to `_dashData.ppeStats.overall_pct` when mo=0)
+- stat[3]: PPE inspection count
+
+### `renderPanel()` Skeleton Guard
+```js
+function renderPanel(id) {
+    if (!_dataLoaded) { panel.innerHTML = _buildSkeleton(id); return; }
+    // ... render real content
+}
+```
+`_dataLoaded` set to `true` after first successful `_loadHeroStats()` — skeleton shown in all tabs before data arrives.
+
+### Dashboard PDF (`exportPDF`) — html2canvas Approach
+- **เหตุผล**: jsPDF built-in fonts (Helvetica/Times) ไม่มี Thai Unicode glyphs — ข้อความไทยแสดงเป็น `!#2!` / garbage
+- **แนวทาง**: render HTML ด้วย browser (Kanit font โหลดอยู่แล้วใน index.html) → capture ด้วย `html2canvas` → embed JPEG ใน jsPDF
+- **SVG chart helpers** (ไม่ต้องพึ่ง Chart.js instance): `_svgBar(scores, labels, w, h)`, `_svgRadar(scores, labels, size)`, `_svgLine(trend, w, h)`
+- **3 หน้า** (794×1122px ต่อหน้า, scale:2):
+  - หน้า 1: Cover header (gradient) + 8 KPI boxes (2 แถว) + score summary table + key insights
+  - หน้า 2: PPE per-item table + dept breakdown table + violations summary boxes + violations table
+  - หน้า 3: Bar SVG + Radar SVG + year trend table + line SVG + improvement suggestions + executive summary box
+- **Footer**: `รายงานวัฒนธรรมความปลอดภัย · Thai Summit Harness Co., Ltd. | หน้า X จาก 3 | สร้างเมื่อ DD MMM YY`
+- **ชื่อไฟล์**: `Safety_Culture_YYYY.pdf` หรือ `Safety_Culture_YYYY_MM.pdf` (ตาม year/month filter)
+- ห้ามใช้ `_pdfKpiBoxRow` / `_pdfDeptBars` / `_pdfSectionHeader` ใน dashboard PDF — ฟังก์ชันเหล่านี้ถูกลบแล้ว (ใช้ได้เฉพาะ Assessment PDF หากยังเหลืออยู่)
+
+### Assessment PDF (`window._scExportAssessmentPDF`)
+- ใช้ jsPDF text-based (ไม่มีปัญหา Thai เพราะ field ส่วนใหญ่เป็น label ภาษาอังกฤษ + ตัวเลข)
+- helpers: `_asmtPdfHeader`, `_asmtPdfScoreTable`, `_pdfMonthlySummary` — อยู่หลัง `// ── Assessment PDF helpers` (line ~3021+)
+- เรียกจาก assessment tab ไม่ใช่จาก `exportPDF()` ของ dashboard
+
+### PPE Inspection Form — Data Flow
+1. Admin เลือก WorkType → system โหลด items ที่ผูกไว้ (`SC_PPE_WorkType_Items`)
+2. Admin เลือก employee (search หรือ IsUnregistered=1 สำหรับบุคคลภายนอก)
+3. ต่อ item: เลือก `compliant` / `non-compliant` / `na`
+4. `IsPass` = `CompliantItems / TotalCheckedItems >= threshold` (คำนวณ backend)
+5. `CompliancePct` = `compliant / (compliant + non-compliant) * 100` (ไม่รวม na)
+6. POST body: `{ InspectionDate, WorkTypeID, InspectedEmployeeID, InspectedEmployeeName, IsUnregistered, Department, items: [{ItemID, Status}], violations: [{EmployeeID, WarningLevel, Note}] }`
+7. Backend เขียน `SC_PPEInspections` + `SC_PPE_Inspection_Details` + `SC_PPE_Violations` + `SC_PPE_AuditLog` ใน transaction
+
+### `SC_PPE_Inspection_Details.Status` Constraint
+- ค่าที่รับได้: `'compliant'`, `'non-compliant'`, `'na'` (lowercase เท่านั้น)
+- `ensureTables()` normalize legacy uppercase values ก่อน add CHECK constraint
+- `na` = ไม่นับใน compliance % — ใช้สำหรับ item ที่ไม่เกี่ยวข้องกับงานนั้น
+
+### Soft Delete Pattern (PPE)
+- `SC_PPEInspections.deleted_at` และ `SC_PPE_Violations.deleted_at`
+- DELETE endpoints → `UPDATE ... SET deleted_at = NOW()`
+- ทุก GET query ต้องมี `WHERE deleted_at IS NULL`
 
 ## Common Pitfalls
 
