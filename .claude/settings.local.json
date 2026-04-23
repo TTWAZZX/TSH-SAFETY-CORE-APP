@@ -21,7 +21,18 @@
       "Bash(node --input-type=module --eval \"import './public/js/pages/machine-safety.js'\")",
       "Bash(node --check c:/xampp/htdocs/tsh-safety-core-app/public/js/pages/machine-safety.js)",
       "Bash(node --input-type=module)",
-      "Bash(node --check \"c:\\\\xampp\\\\htdocs\\\\tsh-safety-core-app\\\\public\\\\js\\\\pages\\\\ojt.js\")"
+      "Bash(node --check \"c:\\\\xampp\\\\htdocs\\\\tsh-safety-core-app\\\\public\\\\js\\\\pages\\\\ojt.js\")",
+      "Bash(node --check routes/safety-culture.js)",
+      "Bash(node --check \"c:/xampp/htdocs/tsh-safety-core-app/backend/routes/safety-culture.js\")",
+      "Bash(node --check \"c:/xampp/htdocs/tsh-safety-core-app/public/js/pages/safety-culture.js\")",
+      "Bash(node -e ' *)",
+      "Bash(node --check \"c:\\\\xampp\\\\htdocs\\\\tsh-safety-core-app\\\\public\\\\js\\\\pages\\\\safety-culture.js\")",
+      "Bash(node --check \"c:\\\\xampp\\\\htdocs\\\\tsh-safety-core-app\\\\backend\\\\routes\\\\safety-culture.js\")",
+      "Bash(node -e \"const m = require\\('./backend/routes/contractor.js'\\); console.log\\('backend OK, routes:', Object.keys\\(m\\)\\)\")",
+      "Bash(node -e \"require\\('./backend/routes/contractor.js'\\); console.log\\('OK'\\)\")",
+      "Bash(node --check public/js/pages/contractor.js)",
+      "Bash(node --check \"c:/xampp/htdocs/tsh-safety-core-app/public/js/pages/contractor.js\")",
+      "Bash(node -e \"require\\('./routes/contractor.js'\\); console.log\\('backend OK'\\);\")"
     ]
   }
 }
