@@ -6,7 +6,7 @@ const express = require('express');
 const router  = express.Router();
 const db      = require('../db');
 const multer  = require('multer');
-const { v4: uuidv4 } = require('uuid');
+const { randomUUID } = require('crypto');
 const cloudinary = require('cloudinary').v2;
 const { isAdmin } = require('../middleware/auth');
 const { storage: cloudinaryStorage, fileFilter } = require('../cloudinary');
@@ -213,7 +213,7 @@ router.post('/documents', isAdmin, upload.single('file'), async (req, res) => {
         const category    = ALLOWED_CATEGORIES.includes(trim(req.body.Category)) ? trim(req.body.Category) : 'ทั่วไป';
         const description = trim(req.body.Description).slice(0, 500) || null;
         const ext         = (req.file.originalname || '').split('.').pop().toLowerCase();
-        const id          = uuidv4();
+        const id          = randomUUID();
         const actorName   = req.user.name || req.user.id;
 
         await db.query(

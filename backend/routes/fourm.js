@@ -7,7 +7,7 @@ const express = require('express');
 const router  = express.Router();
 const db      = require('../db');
 const multer  = require('multer');
-const { v4: uuidv4 } = require('uuid');
+const { randomUUID } = require('crypto');
 const { isAdmin } = require('../middleware/auth');
 const { storage: cloudinaryStorage, fileFilter } = require('../cloudinary');
 
@@ -16,6 +16,19 @@ const upload = multer({
     fileFilter,
     limits: { fileSize: 20 * 1024 * 1024 },
 });
+
+function _handleUpload(field) {
+    return (req, res, next) => {
+        upload.single(field)(req, res, (err) => {
+            if (!err) return next();
+            const msg = err?.message || 'อัปโหลดไฟล์ไม่สำเร็จ';
+            console.error('[fourm upload error]', msg);
+            res.status(400).json({ success: false, message: msg });
+        });
+    };
+}
+
+const OVERDUE_DAYS = 30;
 
 // ─────────────────────────────────────────────────────────────────────────────
 // ENSURE TABLES
@@ -127,9 +140,28 @@ router.get('/stats', async (req, res) => {
             GROUP BY Department
         `, [year]);
 
+        // Overdue count (Open/Pending, older than OVERDUE_DAYS)
+        const [[overdueRow]] = await db.query(`
+            SELECT COUNT(*) AS overdueCount FROM FourM_ChangeNotices
+            WHERE Status IN ('Open','Pending')
+              AND DATEDIFF(CURDATE(), RequestDate) > ?
+              AND YEAR(RequestDate) = ?
+        `, [OVERDUE_DAYS, year]);
+
+        // Dept × Type breakdown for matrix
+        const [byDeptType] = await db.query(`
+            SELECT COALESCE(NULLIF(TRIM(Department),''),'ไม่ระบุ') AS Department,
+                   ChangeType, COUNT(*) AS count
+            FROM FourM_ChangeNotices
+            WHERE YEAR(RequestDate) = ?
+            GROUP BY Department, ChangeType
+            ORDER BY Department, ChangeType
+        `, [year]);
+
         res.json({
             success: true,
-            data: { noticeKpi, byType, monthly, byDept, manSummary }
+            data: { noticeKpi, byType, monthly, byDept, manSummary,
+                    overdueCount: overdueRow.overdueCount || 0, byDeptType }
         });
     } catch (error) {
         console.error('4M stats error:', error);
@@ -175,7 +207,7 @@ router.post('/man-records', isAdmin, async (req, res) => {
         await db.query(
             `INSERT INTO FourM_ManRecords (id,Department,TotalAttendance,Pass,Fail,Status,ExamDate,Notes,CreatedBy)
              VALUES (?,?,?,?,?,?,?,?,?)`,
-            [uuidv4(), Department, total, pass, fail, safeStatus,
+            [randomUUID(), Department, total, pass, fail, safeStatus,
              ExamDate || null, (Notes||'').trim()||null, req.user.name]
         );
         res.status(201).json({ success: true, message: 'บันทึกผลสอบสำเร็จ' });
@@ -236,10 +268,14 @@ router.delete('/man-records/:id', isAdmin, async (req, res) => {
 router.get('/notices', async (req, res) => {
     try {
         await ensureTables();
-        const { status, type, dept, year, q } = req.query;
+        const { status, type, dept, year, q, overdue } = req.query;
         let sql = 'SELECT * FROM FourM_ChangeNotices WHERE 1=1';
         const params = [];
-        if (status && status !== 'all') { sql += ' AND Status = ?'; params.push(status); }
+        if (overdue === '1') {
+            sql += ` AND Status IN ('Open','Pending') AND DATEDIFF(CURDATE(), RequestDate) > ${OVERDUE_DAYS}`;
+        } else if (status && status !== 'all') {
+            sql += ' AND Status = ?'; params.push(status);
+        }
         if (type   && type   !== 'all') { sql += ' AND ChangeType = ?'; params.push(type); }
         if (dept   && dept   !== 'all') { sql += ' AND Department = ?'; params.push(dept); }
         if (year) { sql += ' AND YEAR(RequestDate) = ?'; params.push(parseInt(year)); }
@@ -273,7 +309,7 @@ router.get('/notices/:id', async (req, res) => {
 // ─────────────────────────────────────────────────────────────────────────────
 // CHANGE NOTICES — CREATE (Admin)
 // ─────────────────────────────────────────────────────────────────────────────
-router.post('/notices', isAdmin, upload.single('attachment'), async (req, res) => {
+router.post('/notices', isAdmin, _handleUpload('attachment'), async (req, res) => {
     try {
         await ensureTables();
         const { NoticeNo, RequestDate, Title, Description, ChangeType, ResponsiblePerson, Department } = req.body;
@@ -296,7 +332,7 @@ router.post('/notices', isAdmin, upload.single('attachment'), async (req, res) =
                  CreatedByID,CreatedBy)
              VALUES (?,?,?,?,?,?,?,?,?,?,?)`,
             [
-                uuidv4(), NoticeNo.trim(), RequestDate, Title.trim(),
+                randomUUID(), NoticeNo.trim(), RequestDate, Title.trim(),
                 (Description||'').trim()||null, ChangeType,
                 (ResponsiblePerson||'').trim()||null,
                 (Department||'').trim()||null,
@@ -314,7 +350,7 @@ router.post('/notices', isAdmin, upload.single('attachment'), async (req, res) =
 // ─────────────────────────────────────────────────────────────────────────────
 // CHANGE NOTICES — UPDATE (Admin)
 // ─────────────────────────────────────────────────────────────────────────────
-router.put('/notices/:id', isAdmin, upload.single('attachment'), async (req, res) => {
+router.put('/notices/:id', isAdmin, _handleUpload('attachment'), async (req, res) => {
     try {
         await ensureTables();
         const { id } = req.params;
@@ -347,7 +383,7 @@ router.put('/notices/:id', isAdmin, upload.single('attachment'), async (req, res
 // ─────────────────────────────────────────────────────────────────────────────
 // CHANGE NOTICES — CLOSE (creator OR admin)
 // ─────────────────────────────────────────────────────────────────────────────
-router.post('/notices/:id/close', upload.single('closingDoc'), async (req, res) => {
+router.post('/notices/:id/close', _handleUpload('closingDoc'), async (req, res) => {
     try {
         await ensureTables();
         const { id } = req.params;

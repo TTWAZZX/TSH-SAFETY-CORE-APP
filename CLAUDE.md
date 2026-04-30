@@ -1185,6 +1185,361 @@ Hero stats strip cards ที่มี `data-filter-cat` จะ navigate ไป 
 - **Supplier E-Pass** — `https://dev.tshpcl.com/epass/login.php`
 แสดงใน dashboard tab ไม่มี separate tab (merged by design)
 
+## Hiyari Module — Architecture
+
+### Tables
+| Table | Purpose |
+|-------|---------|
+| `HiyariReports` | รายงาน near-miss หลัก — `Rank VARCHAR(1)`, `StopType INT`, `RiskLevel` (derived from Rank via `RANK_TO_RISK` for backward-compat), `AttachmentUrl`, `AdditionalFileUrl`, `CorrectiveAction`, `AdminComment`, `ClosedAt`, `ClosedBy` |
+| `Hiyari_Dashboard_Config` | Key/value config — `pinnedDepts` (JSON array) บันทึกโดย admin เพื่อกำหนดแผนกที่แสดงใน dashboard |
+| `Hiyari_Assignments` | รายการมอบหมาย — `EmployeeID`, `AssigneeName`, `Department`, `DueDate`, `Note`; UNIQUE KEY `uq_emp (EmployeeID)` |
+
+ทุกตารางสร้างด้วย `CREATE TABLE IF NOT EXISTS` + `ALTER TABLE ... ADD COLUMN` (try/catch) ใน `ensureTables()` ของ `backend/routes/hiyari.js`
+
+### Constants (ทั้ง frontend + backend ต้องตรงกัน)
+```js
+// Frontend: public/js/pages/hiyari.js
+const STOP_TYPES = [
+    { id:1, code:'Stop 1', label:'อันตรายจากเครื่องจักร',        color:'#ef4444', bg:'#fef2f2', border:'#fecaca' },
+    { id:2, code:'Stop 2', label:'อันตรายจากวัตถุหนักตกใส่',    color:'#f97316', bg:'#fff7ed', border:'#fed7aa' },
+    { id:3, code:'Stop 3', label:'อันตรายจากยานพาหนะ',          color:'#eab308', bg:'#fefce8', border:'#fef08a' },
+    { id:4, code:'Stop 4', label:'อันตรายจากการตกจากที่สูง',    color:'#8b5cf6', bg:'#f5f3ff', border:'#ddd6fe' },
+    { id:5, code:'Stop 5', label:'อันตรายจากไฟฟ้า',             color:'#3b82f6', bg:'#eff6ff', border:'#bfdbfe' },
+    { id:6, code:'Stop 6', label:'อันตรายอื่นๆ',                color:'#64748b', bg:'#f8fafc', border:'#e2e8f0' },
+];
+const RANKS = [
+    { rank:'A', label:'Rank A', desc:'เสียชีวิต, พิการ, สูญเสียอวัยวะ', detail:'7 วัน',  color:'#dc2626', bg:'#fef2f2', border:'#fecaca' },
+    { rank:'B', label:'Rank B', desc:'บาดเจ็บหยุดงาน',                   detail:'15 วัน', color:'#ea580c', bg:'#fff7ed', border:'#fed7aa' },
+    { rank:'C', label:'Rank C', desc:'บาดเจ็บเล็กน้อย ไม่หยุดงาน',      detail:'30 วัน', color:'#16a34a', bg:'#f0fdf4', border:'#bbf7d0' },
+];
+// Backend: backend/routes/hiyari.js
+const RANK_TO_RISK = { A: 'Critical', B: 'High', C: 'Low' };
+```
+
+### Backend Route Ordering (Critical)
+ต้องประกาศ specific routes **ก่อน** `/:id` เสมอ — Express v5 จะ match literal strings เป็น `:id` ถ้าประกาศหลัง:
+1. `GET /stats`
+2. `GET /dashboard-config`, `PUT /dashboard-config` (isAdmin)
+3. `GET /assignments`, `POST /assignments` (isAdmin)
+4. `PUT /assignments/:id` (isAdmin) — ก่อน `PUT /:id`
+5. `DELETE /assignments/:id` (isAdmin) — ก่อน `DELETE /:id`
+6. `GET /:id`, `PUT /:id`, `DELETE /:id`
+
+### Key API Endpoints
+| Endpoint | Auth | Description |
+|----------|------|-------------|
+| `GET /hiyari/stats?year=` | User | KPI + monthly + stopDist + rankDist + deptRank (top 20) + consequence |
+| `GET /hiyari` | User | รายการรายงาน — filter params: `status`, `risk`, `dept`, `year`, `q` |
+| `GET /hiyari/:id` | User | รายงานเดี่ยว |
+| `POST /hiyari` | User | ส่งรายงาน (multipart: `attachment`) — backend validates `StopType` (1–6), `Rank` (A/B/C), derives `RiskLevel` |
+| `PUT /hiyari/:id` | Admin | อัปเดต `Status`, `CorrectiveAction`, `AdminComment` |
+| `POST /hiyari/:id/attachment` | Admin | อัปโหลดไฟล์เพิ่มเติม (admin file — `AdditionalFileUrl`) |
+| `DELETE /hiyari/:id` | Admin | ลบรายงาน |
+| `GET /hiyari/dashboard-config` | User | `{ pinnedDepts: [] }` |
+| `PUT /hiyari/dashboard-config` | Admin | บันทึก `{ pinnedDepts: [...] }` |
+| `GET /hiyari/assignments` | User | รายการมอบหมายทั้งหมด |
+| `POST /hiyari/assignments` | Admin | เพิ่ม assignment (duplicate guard via UNIQUE KEY) |
+| `PUT /hiyari/assignments/:id` | Admin | แก้ไข assignment |
+| `DELETE /hiyari/assignments/:id` | Admin | ลบ assignment |
+
+### Frontend Tab Structure
+4 tabs: `dashboard` | `submit` (รายงานใหม่) | `history` (ประวัติ) | `manage` (admin only)
+
+**Dashboard tab:**
+- Toolbar: year picker + Export PDF button (`#hiyari-pdf-btn`)
+- KPI cards (4): รายงานทั้งหมด / รอดำเนินการ / กำลังดำเนินการ / ปิดแล้ว
+- Stop chart: `renderStopChart(data.stopDist)` — Chart.js bar, colors from `STOP_TYPES`
+- Rank summary: `renderRankSummary(data.rankDist)` — horizontal progress bars
+- Monthly line chart + Consequence pie chart
+- Dept section: admin ตั้งค่าได้ (`#hiyari-dept-config-btn` → `openDashConfigModal()`); user เห็น pinned depts หรือ top 8
+
+**New Report tab (Submit):**
+- Stop Type card-radio: `grid grid-cols-2 sm:grid-cols-3 gap-2` — 6 cards จาก `STOP_TYPES`
+- Rank card-radio: `grid grid-cols-1 sm:grid-cols-3 gap-2` — 3 cards จาก `RANKS`
+- Date label: **"Created Date"** (ไม่ใช่ "วันที่เกิดเหตุ" หรือ "วันที่สร้าง")
+- Validation: require `StopType` + `Rank` ก่อน submit (JS check บน hidden radio — ไม่ใช้ `required` attribute)
+- File: `input[name="attachment"]` — CCCF file pattern (`file:bg-orange-50 file:text-orange-700`)
+
+**History tab:**
+- Columns: วันที่ / ผู้รายงาน / แผนก / **Stop Type** (badge inline style) / **Rank** (badge — fallback to RiskLevel for legacy) / สถานะ / actions
+- Filter: สถานะ + "Rank" dropdown (options: ทุก Rank / Rank A=Critical / Rank B=High / Rank C=Low → maps to backend `risk` param)
+- Stop badge: `style="background:${st.bg};color:${st.color};border:1px solid ${st.border}"` — ไม่ใช้ Tailwind arbitrary
+
+**Manage tab (admin):**
+- Section 1: Assignment manager (table + Add/Edit/Delete via `openAssignmentModal()`)
+- Section 2: Reports table — columns: วันที่ / ผู้รายงาน+แผนก / รายละเอียด+Stop badge / Rank / สถานะ / actions
+- `showManageModal(id)`: อัปเดต Status + CorrectiveAction + AdminComment + optional file replace
+
+### Backward Compatibility Rules
+- **Legacy records** (ก่อน Rank/StopType): มีเฉพาะ `RiskLevel` — แสดง `RISK_BADGE[r.RiskLevel]` fallback ในทุก tab
+- **New records**: มี `Rank` + `StopType` + `RiskLevel` (derived) — แสดง RANK_BADGE + Stop badge
+- History Rank filter maps to `risk=Critical/High/Low` — ทำงานกับทั้งเก่าและใหม่
+- Yokoten button ใน detail modal: `['A','B'].includes(r.Rank) || ['High','Critical'].includes(r.RiskLevel)`
+
+### Detail Modal (showDetailModal)
+- Header block: Status badge + Stop badge + Rank badge (fallback RiskLevel)
+- Info grid: Stop Type row (code + full label), Rank row (label + desc + days)
+- File section: แยก `AttachmentUrl` (reporter) + `AdditionalFileUrl` (admin)
+- Yokoten button: แสดงเมื่อ Rank A/B หรือ RiskLevel High/Critical
+
+### PDF Export (exportHiyariPDF)
+- html2canvas + jsPDF, scale:1.5, 2 หน้า A4 (794×1122px)
+- หน้า 1: gradient header + 4 KPI boxes + Stop distribution bars + Rank distribution bars
+- หน้า 2: Monthly trend table (12 cols) + Dept summary table + progress bars
+- Dept data: filter ตาม `_dashConfig.pinnedDepts` ถ้าตั้งค่าไว้, fallback top 8
+- Library check: `typeof html2canvas === 'undefined' || typeof jspdf === 'undefined'`
+- Footer pattern: "หน้า X จาก 2" บน orange bar
+
+### UI Rules (ต้องตรงกับ CCCF Form A Permanent)
+- Input class: `form-input w-full rounded-xl text-sm`
+- Select class: `form-select w-full rounded-xl text-sm`
+- Layout: `grid grid-cols-2 gap-3`, `space-y-4 px-1`
+- Card-radio: `peer hidden` + `peer-checked:ring-2 peer-checked:ring-orange-300`
+- Banner: `bg-orange-50 border border-orange-100 rounded-xl p-3 flex gap-2.5 text-sm text-orange-800`
+- Submit/Save buttons: `style="background:linear-gradient(135deg,#f97316,#ef4444)"`
+- Module accent color: **orange** (`#f97316 → #ef4444`) — ห้ามใช้สีอื่น
+- Stop/Rank badges: ใช้ inline `style=` ไม่ใช้ Tailwind arbitrary values (CDN ไม่ compile)
+
+### State Variables
+```js
+let _chartStop   = null;   // Chart.js instance for Stop bar chart
+let _chartRank   = null;   // (unused — rank uses HTML, not canvas)
+let _dashConfig  = { pinnedDepts: [] };  // loaded from GET /hiyari/dashboard-config
+let _assignments = [];     // loaded from GET /hiyari/assignments
+```
+
+### escHtml Requirement
+ทุก user-generated content ใน innerHTML ต้องผ่าน `escHtml()` — import จาก `../ui.js`
+
+## Hiyari Module — 2026 Final Architecture
+
+### Completed Scope (Final)
+
+- **Dashboard**: Executive Summary Strip, clickable KPI cards (filter History), overdue alert strip, monthly trend, consequence chart, STOP×Rank matrix, SLA Compliance Gauge, Top Overdue/Near Due list, Department Risk Ranking, Near-Miss Heatmap, pinned dept summary
+- **KPI basis**: assignment-driven — total/submitted/pending/in-progress/closed/closure rate calculated against assigned employees (not raw report count)
+- **SLA**: Rank A=7d, B=15d, C=30d — overdue rows: light red + "เกิน X วัน" badge; near-due: light amber + "เหลือ X วัน"
+- **Submit**: full-width 3-step wizard (Stop Type → Details → Recommendation+Attachment), image preview before upload
+- **History**: main admin control surface — view/filter/edit/delete/update status/export; clickable KPI cards auto-filter here; date range filter overrides year filter
+- **Manage**: assignment-focused (roster + progress + dept summary) + **แบบฟอร์มที่เกี่ยวข้อง** section (Module Forms admin)
+- **PDF**: 4-page executive pack (Executive Summary / Trend+STOP×Rank / Dept Risk / Action Follow-up)
+- **Backend UUID**: use `crypto.randomUUID()` — installed `uuid` package is ESM-only
+
+### Hiyari UX Rules
+
+- Tabs: Dashboard=insight, Submit=report creation, History=report control, Manage=assignment+forms
+- Hiyari accent color: orange (`#f97316 → #ef4444`)
+- Stop/Rank badges: inline `style=` — ไม่ใช้ Tailwind arbitrary values
+
+## KY Activity — 2026 Final Architecture
+
+### Completed Scope (Final)
+
+- **Dashboard**: executive alert strip, clickable KPI cards → filtered History, executive summary cards, Department Coverage progress (from `KY_Program_Config`), Recurring Hazard Pattern chart (top KYT Keywords), Dept×Month heatmap
+- **Submit**: full-width form (wider enterprise grid), hazard/countermeasure side-by-side, attachment+video preview+clear, employee typeahead search for participants, yearly target progress strip, **แบบฟอร์มที่ต้องกรอก** card above attachment area
+- **History**: main admin surface — year/dept/status/risk/date-range filters, KPI card clicks auto-filter; when `_filterHistDept='all'` and config exists, passes `depts=configDepts.join(',')` to backend; date range overrides year/month param
+- **Manage**: 2 sub-tabs: `coverage` (per-dept yearly target progress bars + action queue) and `config` (KY_Program_Config CRUD + **แบบฟอร์มที่เกี่ยวข้อง** section)
+- **PDF**: 4-page executive pack (Executive Summary / Trend+Risk / Dept Coverage with yearly targets / Action Follow-up)
+- **Backend**: `KY_Program_Config` table (per-dept yearly target + deadline + safety units + IsActive), `topKeywords` in `/stats`, `dateFrom`/`dateTo` params on `GET /ky`
+
+### KY Specific Patterns
+- `_kyProgConfig` — cached per year; cleared and re-fetched when year filter changes
+- `_filterHistYear` change handler calls full `renderHistory(container)` (not just `fetchAndRenderHistory`) to refresh banner + dept dropdown
+- `_manageSub` state: `'coverage'` | `'config'`
+- KY accent color: indigo (`#6366f1 → #8b5cf6`)
+
+### KY_Program_Config Table
+```sql
+CREATE TABLE IF NOT EXISTS KY_Program_Config (
+    id           INT AUTO_INCREMENT PRIMARY KEY,
+    Year         YEAR        NOT NULL,
+    Department   VARCHAR(100) NOT NULL,
+    SafetyUnits  TEXT,          -- JSON array of unit names
+    YearlyTarget INT NOT NULL DEFAULT 12,
+    DeadlineDay  TINYINT,       -- day-of-month (1–31)
+    DeadlineNote VARCHAR(200),
+    IsActive     TINYINT(1) NOT NULL DEFAULT 1,
+    CreatedAt    DATETIME   NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    UpdatedAt    DATETIME   NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    UNIQUE KEY uq_year_dept (Year, Department)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+```
+
+## 4M Change Management — 2026 Final Architecture
+
+### Completed Scope (Final)
+
+- **Dashboard**: Executive alert strip (overdue items), clickable KPI cards → filtered Notices, monthly line chart, Change Type pie chart, dept bar chart, Dept × Change Type matrix
+- **Change Notice tab**: Main admin/user surface — year/dept/status/overdue filters, overdue row highlighting (>30 days open/pending), Excel export (SheetJS), create/edit/close notice with file attachment
+- **Man Record tab**: Year filter, employee training/qualification records, create/edit/close flow
+- **Systems tab**: External system links + Module Forms (admin upload/manage; user view/download)
+- **Backend**: `OVERDUE_DAYS=30` constant, `overdueCount` + `byDeptType` in stats, `overdue=1` query param on GET /notices, `_handleUpload(field)` factory wrapping multer errors → JSON 400
+
+### Tabs (order)
+| Tab | ID | Description |
+|-----|----|-------------|
+| Dashboard | `dashboard` | KPI overview, alert strip, charts, dept matrix |
+| Change Notice | `notices` | Main record surface — filter/create/close/export |
+| Man Record | `man` | Employee qualification tracking |
+| ระบบภายนอก | `systems` | External links + Module Forms |
+
+### Tables (existing — managed by dedicated routes)
+| Table | Purpose |
+|-------|---------|
+| `FourM_ChangeNotices` | Change Notice records — `NoticeNo`, `Title`, `ChangeType` (Man/Machine/Material/Method), `Department`, `RequestDate`, `Status` (Open/Pending/Closed), `ResponsiblePerson`, `AttachmentUrl`, `ClosingDoc`, `ClosedDate`, `ClosingComment`, `CreatedBy` |
+| `FourM_ManRecords` | Man Record (employee training/qualification) — `RecordDate`, `EmployeeID`, `EmployeeName`, `Department`, `TestType`, `Score`, `Status` (Pass/Fail/Pending), `Remarks`, `ClosedDate`, `CreatedBy` |
+
+### Backend Constants
+```js
+const OVERDUE_DAYS = 30;  // Open/Pending notices older than this are "overdue"
+```
+
+### Stats Response Shape (`GET /fourm/stats?year=`)
+```js
+{
+  noticeKpi: { total, open, pending, closed },
+  byType:    [{ ChangeType, count }],               // for pie chart
+  monthly:   [{ month, count }],                    // for line chart
+  byDept:    [{ Department, count }],               // for bar chart
+  manSummary:{ total, pass, fail, pending },
+  overdueCount: <number>,                           // Open/Pending > OVERDUE_DAYS
+  byDeptType: [{ Department, ChangeType, count }]   // for Dept×Type matrix
+}
+```
+
+### Overdue Filter (`GET /fourm/notices?overdue=1`)
+- `overdue=1` overrides `status` filter: `AND Status IN ('Open','Pending') AND DATEDIFF(CURDATE(), RequestDate) > 30`
+- Frontend: row with `daysOld > OVERDUE_DAYS` → inline `style="background:rgba(254,242,242,0.7)"` + "ค้าง X วัน" badge
+- Status dropdown has special option `<option value="overdue">ค้างนาน (>30 วัน)</option>` that sets `_noticeFilter.overdue=true`
+
+### Dept × Change Type Matrix
+Client-side transform of `byDeptType` array into HTML table:
+- Rows = departments, Columns = Man/Machine/Material/Method
+- Each cell shows count badge with TYPE_META inline colors
+- Zero cells show `–`
+
+### Clickable KPI Cards
+```js
+// data attributes drive navigation
+data-filter-status="Open"      → _noticeFilter.status = 'Open', switchTab('notices')
+data-filter-status="Pending"   → _noticeFilter.status = 'Pending'
+data-filter-overdue="1"        → _noticeFilter.overdue = true, _noticeFilter.status = 'overdue'
+```
+
+### Alert Strip (`_buildAlertStrip`)
+- Shown at top of dashboard only when `overdue > 0` or `pending > 0`
+- Amber background: `background:linear-gradient(135deg,#fef3c7,#fde68a)`
+- Clickable links are `<button class="fourm-kpi-nav">` with `data-filter-*` attributes
+- If nothing to alert → returns empty string (no strip rendered)
+
+### Hero Gradient
+```css
+background: linear-gradient(135deg, #312e81 0%, #4338ca 55%, #0284c7 100%)
+```
+
+### TYPE_META Colors
+```js
+const TYPE_META = {
+    Man:      { bg:'#eff6ff', text:'#1d4ed8', dot:'#3b82f6' },  // blue
+    Machine:  { bg:'#fff7ed', text:'#c2410c', dot:'#f97316' },  // orange
+    Material: { bg:'#f0fdf4', text:'#15803d', dot:'#22c55e' },  // green
+    Method:   { bg:'#faf5ff', text:'#7e22ce', dot:'#a855f7' },  // purple
+};
+```
+
+### multer Error Handling
+`_handleUpload(field)` factory in `backend/routes/fourm.js` — same pattern as module-forms.js:
+- Wraps `upload.single(field)` in callback
+- multer errors → JSON `{ success:false, message }` 400 (not global 500)
+- Used on: `POST /notices`, `PUT /notices/:id`, `POST /notices/:id/close`
+
+### State Variables
+```js
+let _noticeFilter = { status:'all', type:'all', dept:'all', year: new Date().getFullYear(), q:'', overdue:false };
+let _manFilter    = { q:'', year: new Date().getFullYear() };
+let _departments  = [];    // lazy-loaded from /master/departments
+let _statsData    = null;  // last /fourm/stats response
+let _lastNotices  = [];    // last rendered notices list (used for Excel export)
+let _fourmForms   = [];    // Module_Forms for 'fourm' module
+```
+
+### Excel Export (`_exportNoticesToExcel`)
+- Uses global `XLSX` (SheetJS CDN in index.html)
+- Exports `_lastNotices` (currently filtered list)
+- Filename: `4M_Change_Notices_YYYY.xlsx`
+- Guard: `if (typeof XLSX === 'undefined')` → toast error
+
+### Module Forms (Systems Tab)
+- Loaded with `GET /module-forms?module=fourm` (active only for users, `&all=1` for admin)
+- Admin: manage table (toggle active/inactive, delete)
+- User: download cards (view + download buttons)
+- Upload via `POST /module-forms` with `FormData` field `formFile`
+- `ALLOWED_MODULES` in `module-forms.js` includes `'fourm'`
+
+### `_renderDashInner()` Separation
+- `renderDashboard(container)` creates the shell with year selector (once)
+- `_renderDashInner()` fetches + renders dashboard content only — called on year change
+- Prevents year selector from being re-created when changing year
+
+### UX Rules
+- 4M accent color: indigo→sky (`#6366f1 → #0284c7`)
+- Overdue rows: inline `style="background:rgba(254,242,242,0.7)"` on `<tr>` — not Tailwind arbitrary
+- TYPE_META badges: inline `style=` — not Tailwind arbitrary values
+- Alert strip clickable items are `<button class="fourm-kpi-nav">` — not `<a>` tags
+
+## Module Forms — Architecture
+
+แบบฟอร์มเทมเพลตที่ admin อัปโหลด (PDF/Word/Excel) ให้ user ดาวน์โหลด กรอก และนำมาแนบ
+
+### Table
+| Column | Type | Notes |
+|--------|------|-------|
+| `id` | INT AUTO_INCREMENT PK | |
+| `Module` | VARCHAR(50) | `'hiyari'` / `'ky'` / `'general'` |
+| `Title` | VARCHAR(200) | ชื่อแบบฟอร์ม |
+| `Description` | TEXT | |
+| `FileUrl` | TEXT NOT NULL | Cloudinary secure_url |
+| `PublicID` | VARCHAR(255) | Cloudinary public_id (สำหรับ delete) |
+| `FileType` | VARCHAR(100) | MIME type |
+| `FileSize` | INT | bytes |
+| `Version` | VARCHAR(30) | เช่น `v1.0` |
+| `IsActive` | TINYINT(1) DEFAULT 1 | 1=แสดง, 0=ซ่อน |
+| `SortOrder` | INT DEFAULT 99 | |
+| `UploadedBy` | VARCHAR(100) | name หรือ EmployeeID |
+| `UploadedAt` | DATETIME | |
+| `UpdatedAt` | DATETIME ON UPDATE CURRENT_TIMESTAMP | |
+
+สร้างอัตโนมัติด้วย `CREATE TABLE IF NOT EXISTS` ใน `ensureTable()` ของ `backend/routes/module-forms.js`
+
+### API Endpoints
+| Endpoint | Auth | Description |
+|----------|------|-------------|
+| `GET /module-forms?module=hiyari` | User | active forms เท่านั้น |
+| `GET /module-forms?module=hiyari&all=1` | Admin | ทุก form รวม inactive |
+| `POST /module-forms` | Admin | upload form (multer field: `formFile`, 20 MB) |
+| `PUT /module-forms/:id` | Admin | update metadata (title/desc/version/isActive/sortOrder) — ไม่รับไฟล์ใหม่ |
+| `DELETE /module-forms/:id` | Admin | ลบ + Cloudinary fire-and-forget delete |
+
+- Mount: `app.use('/api/module-forms', authenticateToken, moduleFormsRoutes)` ใน `server.js`
+- `ALLOWED_MODULES = ['hiyari', 'ky', 'general']`
+- multer ใช้ `_handleUpload` wrapper (ไม่ใช่ middleware ตรงๆ) เพื่อ catch multer errors → return JSON 400 แทน global 500
+
+### Frontend Pattern (Hiyari + KY)
+**Admin — Manage tab:**
+- `_loadHiyariForms(adminAll=true)` → `_renderHiyariFormsManage()` → renders table ใน `#hiyari-forms-tbody`
+- Toggle active/inactive ด้วย `PUT /module-forms/:id` (ส่ง full metadata + new isActive)
+- Delete ด้วย `DELETE /module-forms/:id` (confirm modal)
+- Upload modal: fields = title*, version, sortOrder, description, formFile* → FormData → `API.post('/module-forms', fd)`
+
+**User — Submit tab:**
+- `_loadHiyariForms(false)` → `_renderHiyariFormsUserCard(forms)` → inject ใน `#hiyari-forms-user-card`
+- แสดงเฉพาะ `IsActive=1` — card สี orange (Hiyari) / indigo (KY)
+- ปุ่ม "ดูไฟล์" (`target="_blank"`) + "ดาวน์โหลด" (`download` attribute)
+- Load ด้วย fire-and-forget `.then()` หลัง form render (ไม่บล็อก render)
+
+**KY specifics:**
+- Forms section อยู่ใน `config` sub-tab ของ Manage (ไม่ใช่ coverage)
+- `_renderKyFormsManageSection()` + `_renderKyFormsUserCard()` — ฟังก์ชันแยกเพื่อ KY accent color (indigo)
+
 ## Common Pitfalls
 
 1. **อย่าเขียนไฟล์ลง disk** — ใช้ Cloudinary เสมอ

@@ -8,7 +8,7 @@ const db       = require('../db');
 const { isAdmin } = require('../middleware/auth');
 const { cloudinary, storage, fileFilter } = require('../cloudinary');
 const multer   = require('multer');
-const { v4: uuidv4 } = require('uuid');
+const { randomUUID } = require('crypto');
 
 // ─── Multer for response files (multiple, up to 10, 20MB each) ───────────────
 const responseFileFilter = (req, file, cb) => {
@@ -470,7 +470,7 @@ router.post('/respond', (req, res, next) => {
             return res.status(400).json({ success: false, message: 'กรุณากรอกวิธีการแก้ไข/ป้องกัน เนื่องจากเลือก "ไม่เกี่ยวข้อง"' });
         }
 
-        const responseId   = uuidv4();
+        const responseId   = randomUUID();
         const approvalStatus = related === 'No' ? 'pending' : null;
 
         await db.query(
@@ -493,7 +493,7 @@ router.post('/respond', (req, res, next) => {
         const files = req.files || [];
         if (files.length > 0) {
             const fileRows = files.map(f => [
-                uuidv4(), responseId, yokotenId, user.department,
+                randomUUID(), responseId, yokotenId, user.department,
                 f.originalname, f.path, f.filename || null,
                 f.mimetype, f.size, user.name,
             ]);
@@ -568,7 +568,7 @@ router.put('/respond/:id', (req, res, next) => {
         const files = req.files || [];
         if (files.length > 0) {
             const fileRows = files.map(f => [
-                uuidv4(), id, resp.YokotenID, resp.Department,
+                randomUUID(), id, resp.YokotenID, resp.Department,
                 f.originalname, f.path, f.filename || null,
                 f.mimetype, f.size, user.name,
             ]);
@@ -727,7 +727,7 @@ router.post('/topics', isAdmin, async (req, res) => {
             return res.status(400).json({ success: false, message: 'กรุณากรอกรายละเอียดหัวข้อ' });
         }
 
-        const id = uuidv4();
+        const id = randomUUID();
         const targetDeptsJson = Array.isArray(TargetDepts) && TargetDepts.length > 0 ? JSON.stringify(TargetDepts) : null;
         const targetUnitsJson = Array.isArray(TargetUnits) && TargetUnits.length > 0 ? JSON.stringify(TargetUnits) : null;
 

@@ -6,7 +6,7 @@ const express = require('express');
 const router  = express.Router();
 const db      = require('../db');
 const { isAdmin } = require('../middleware/auth');
-const { v4: uuidv4 } = require('uuid');
+const { randomUUID } = require('crypto');
 
 const DEFAULT_PRINCIPLES = [
     { id: 'sc-p-01', sort: 1, title: 'เดินบน Walk Way ที่บริษัทจัดให้',
@@ -157,7 +157,7 @@ async function ensureTables() {
         for (let i = 0; i < defaultItems.length; i++) {
             await db.query(
                 `INSERT INTO SC_PPE_Items (ItemID, ItemName, SortOrder) VALUES (?,?,?)`,
-                [uuidv4(), defaultItems[i], i + 1]
+                [randomUUID(), defaultItems[i], i + 1]
             );
         }
     }
@@ -272,11 +272,11 @@ async function _ppeAudit(action, entityType, entityId, user, detail) {
     const sql  = `INSERT INTO SC_PPE_AuditLog (AuditID, Action, EntityType, EntityID, UserID, UserName, Detail) VALUES (?,?,?,?,?,?,?)`;
     const vals = (id) => [id, action, entityType, entityId, user?.id || '', user?.name || '', detail || null];
     try {
-        await db.query(sql, vals(uuidv4()));
+        await db.query(sql, vals(randomUUID()));
     } catch (e1) {
         // Retry once with a fresh UUID (handles transient connection drops)
         try {
-            await db.query(sql, vals(uuidv4()));
+            await db.query(sql, vals(randomUUID()));
         } catch (e2) {
             console.error('[PPE Audit] FAILED after retry — action:', action, 'entity:', entityType, entityId,
                 '\n  attempt1:', e1.message, '\n  attempt2:', e2.message);
@@ -404,7 +404,7 @@ router.post('/assessments', isAdmin, async (req, res) => {
         } catch (e) {
             return res.status(400).json({ success: false, message: e.message });
         }
-        const id         = uuidv4();
+        const id         = randomUUID();
         const weekNoRaw  = req.body.WeekNo != null ? parseInt(req.body.WeekNo, 10) : null;
         const weekNo     = weekNoRaw != null && !isNaN(weekNoRaw) ? Math.min(4, Math.max(1, weekNoRaw)) : null;
         const topicAreas = _parseTopicAreas(req.body.topicAreas);
@@ -425,7 +425,7 @@ router.post('/assessments', isAdmin, async (req, res) => {
                     const pct    = total > 0 ? Math.round((comply / total) * 10000) / 100 : null;
                     await db.query(
                         `INSERT INTO SC_Assessment_Points (PointID, AssessmentID, PointNo, TopicKey, TotalPeople, ComplyPeople, Pct) VALUES (?,?,?,?,?,?,?)`,
-                        [uuidv4(), id, pt.PointNo, pt.TopicKey, total, comply, pct]
+                        [randomUUID(), id, pt.PointNo, pt.TopicKey, total, comply, pct]
                     );
                 }
             } catch (e) { /* ignore malformed points */ }
@@ -480,7 +480,7 @@ router.put('/assessments/:id', isAdmin, async (req, res) => {
                     const pct    = total > 0 ? Math.round((comply / total) * 10000) / 100 : null;
                     await db.query(
                         `INSERT INTO SC_Assessment_Points (PointID, AssessmentID, PointNo, TopicKey, TotalPeople, ComplyPeople, Pct) VALUES (?,?,?,?,?,?,?)`,
-                        [uuidv4(), req.params.id, pt.PointNo, pt.TopicKey, total, comply, pct]
+                        [randomUUID(), req.params.id, pt.PointNo, pt.TopicKey, total, comply, pct]
                     );
                 }
             } catch (e) { /* ignore malformed points */ }
@@ -525,7 +525,7 @@ router.post('/ppe-items', isAdmin, async (req, res) => {
         if (!ItemName?.trim()) return res.status(400).json({ success: false, message: 'กรุณาระบุชื่อรายการ PPE' });
         const [maxSort] = await db.query('SELECT COALESCE(MAX(SortOrder),0)+1 AS next FROM SC_PPE_Items');
         const sort = SortOrder ? parseInt(SortOrder) : maxSort[0].next;
-        const id   = uuidv4();
+        const id   = randomUUID();
         await db.query('INSERT INTO SC_PPE_Items (ItemID, ItemName, SortOrder) VALUES (?,?,?)', [id, ItemName.trim(), sort]);
         res.json({ success: true, message: 'เพิ่มรายการ PPE สำเร็จ', id });
     } catch (err) {
@@ -593,7 +593,7 @@ router.post('/ppe-work-types', isAdmin, async (req, res) => {
         await ensureTables();
         const { Name, Description, SortOrder, itemIds } = req.body;
         if (!Name?.trim()) return res.status(400).json({ success: false, message: 'กรุณาระบุชื่อประเภทงาน' });
-        const id = uuidv4();
+        const id = randomUUID();
         await db.query('INSERT INTO SC_PPE_WorkTypes (WorkTypeID, Name, Description, SortOrder) VALUES (?,?,?,?)',
             [id, Name.trim().substring(0, 100), Description || null, parseInt(SortOrder) || 99]);
         const ids = Array.isArray(itemIds) ? itemIds.filter(Boolean) : [];
@@ -685,7 +685,7 @@ router.post('/ppe-violations', isAdmin, async (req, res) => {
         );
         const violationNo  = (cnt.c || 0) + 1;
         const warningLevel = violationNo >= 3 ? 'written_warning' : violationNo === 2 ? 'safety_notice' : 'verbal';
-        const id = uuidv4();
+        const id = randomUUID();
         await conn.query(
             `INSERT INTO SC_PPE_Violations
              (ViolationID, EmployeeID, EmployeeName, Department, InspectionID, ViolationNo, WarningLevel, InspectorID, InspectorName, Note, ViolationDate)
@@ -859,7 +859,7 @@ router.post('/ppe-inspections', isAdmin, async (req, res) => {
         }
 
         // ── Single atomic transaction: inspection + details + violation + audit ──
-        const id   = uuidv4();
+        const id   = randomUUID();
         const conn = await db.getConnection();
         let violationResult = null;
         try {
@@ -883,7 +883,7 @@ router.post('/ppe-inspections', isAdmin, async (req, res) => {
                 if (!d.ItemID) continue;
                 await conn.query(
                     'INSERT INTO SC_PPE_Inspection_Details (DetailID, InspectionID, ItemID, Status) VALUES (?,?,?,?)',
-                    [uuidv4(), id, d.ItemID, d.Status]
+                    [randomUUID(), id, d.ItemID, d.Status]
                 );
             }
 
@@ -896,7 +896,7 @@ router.post('/ppe-inspections', isAdmin, async (req, res) => {
                 );
                 const violationNo  = (cnt.c || 0) + 1;
                 const warningLevel = violationNo >= 3 ? 'written_warning' : violationNo === 2 ? 'safety_notice' : 'verbal';
-                const vid = uuidv4();
+                const vid = randomUUID();
                 await conn.query(
                     `INSERT INTO SC_PPE_Violations
                      (ViolationID, EmployeeID, EmployeeName, Department, InspectionID, ViolationNo, WarningLevel,
@@ -912,11 +912,11 @@ router.post('/ppe-inspections', isAdmin, async (req, res) => {
 
             // Audit rows inside transaction for strict consistency
             const auditSql = `INSERT INTO SC_PPE_AuditLog (AuditID,Action,EntityType,EntityID,UserID,UserName,Detail) VALUES (?,?,?,?,?,?,?)`;
-            await conn.query(auditSql, [uuidv4(), 'create', 'inspection', id,
+            await conn.query(auditSql, [randomUUID(), 'create', 'inspection', id,
                 req.user.id, req.user.name,
                 `Date:${InspectionDate} Dept:${Department} Pass:${isPass} Emp:${empName||rawEmpId||'—'}`]);
             if (violationResult) {
-                await conn.query(auditSql, [uuidv4(), 'create', 'violation', violationResult.id,
+                await conn.query(auditSql, [randomUUID(), 'create', 'violation', violationResult.id,
                     req.user.id, req.user.name,
                     `Auto from inspection:${id} Emp:${empName} No:${violationResult.violationNo} Level:${violationResult.warningLevel}`]);
             }

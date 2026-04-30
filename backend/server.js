@@ -7,7 +7,6 @@ require('dotenv').config({ path: __dirname + '/.env' });
 const express    = require('express');
 const cors       = require('cors');
 const jwt        = require('jsonwebtoken');
-const { v4: uuidv4 } = require('uuid');
 const multer     = require('multer');
 const rateLimit  = require('express-rate-limit');
 const bcrypt     = require('bcryptjs');
@@ -33,6 +32,7 @@ const fourmRoutes         = require('./routes/fourm');
 const settingsRoutes          = require('./routes/settings');
 const activityTargetsRoutes   = require('./routes/activity-targets');
 const dashboardRoutes         = require('./routes/dashboard');
+const moduleFormsRoutes       = require('./routes/module-forms');
 
 // =================================================================
 // SECTION 1: SETUP
@@ -776,6 +776,7 @@ app.use('/api/fourm',         authenticateToken, fourmRoutes);
 app.use('/api/settings',          authenticateToken, settingsRoutes);
 app.use('/api/activity-targets',  authenticateToken, activityTargetsRoutes);
 app.use('/api/dashboard',         authenticateToken, dashboardRoutes);
+app.use('/api/module-forms',      authenticateToken, moduleFormsRoutes);
 
 // =================================================================
 // SECTION 4B: GENERIC CRUD
