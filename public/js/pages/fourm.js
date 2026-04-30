@@ -71,6 +71,7 @@ let _chartMan       = null;
 let _departments    = [];
 let _statsData      = null;
 let _lastNotices    = [];
+let _lastManRows    = [];
 let _fourmForms     = [];
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -276,12 +277,77 @@ async function _renderDashInner() {
             </div>
 
             ${byDeptType.length ? _buildDeptMatrix(byDeptType) : ''}
+
+            ${_buildManSummary(data.manSummary || [])}
         `;
 
         renderLineChart(data.monthly || []);
         renderPieChart(data.byType   || []);
         renderBarChart(data.byDept   || []);
     } catch (err) { console.error('4M dashboard error:', err); }
+}
+
+function _buildManSummary(rows) {
+    if (!rows.length) return '';
+    const totalAtt  = rows.reduce((s, r) => s + (parseInt(r.totalAtt)||0), 0);
+    const totalPass = rows.reduce((s, r) => s + (parseInt(r.totalPass)||0), 0);
+    const passRate  = totalAtt > 0 ? Math.round(totalPass / totalAtt * 100) : 0;
+    const rateColor = passRate>=80 ? '#059669' : passRate>=60 ? '#d97706' : '#ef4444';
+    return `
+    <div class="card overflow-hidden">
+        <div class="px-5 py-3.5 border-b border-slate-100 flex items-center justify-between">
+            <div class="flex items-center gap-2">
+                <svg class="w-4 h-4 text-indigo-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0z"/>
+                </svg>
+                <h3 class="text-sm font-bold text-slate-700">สรุปผลสอบ Man Record</h3>
+            </div>
+            <div class="flex items-center gap-4 text-xs text-slate-500">
+                <span>${rows.length} แผนก · ผู้เข้าสอบ ${totalAtt} คน</span>
+                <span class="font-bold text-sm" style="color:${rateColor}">Pass Rate ${passRate}%</span>
+            </div>
+        </div>
+        <div class="overflow-x-auto">
+            <table class="w-full text-xs">
+                <thead>
+                    <tr class="bg-slate-50 text-left text-[11px] font-semibold text-slate-500 uppercase tracking-wider">
+                        <th class="px-4 py-2.5">แผนก</th>
+                        <th class="px-3 py-2.5 text-center">ผู้เข้าสอบ</th>
+                        <th class="px-3 py-2.5 text-center">ผ่าน</th>
+                        <th class="px-3 py-2.5 text-center">ไม่ผ่าน</th>
+                        <th class="px-3 py-2.5">Pass Rate</th>
+                        <th class="px-3 py-2.5">สอบล่าสุด</th>
+                    </tr>
+                </thead>
+                <tbody class="divide-y divide-slate-50">
+                    ${rows.map(r => {
+                        const att  = parseInt(r.totalAtt)||0;
+                        const pass = parseInt(r.totalPass)||0;
+                        const fail = parseInt(r.totalFail)||0;
+                        const pct  = att > 0 ? Math.round(pass/att*100) : 0;
+                        const col  = pct>=80 ? '#059669' : pct>=60 ? '#d97706' : '#ef4444';
+                        const last = r.lastExam ? new Date(r.lastExam).toLocaleDateString('th-TH',{day:'numeric',month:'short',year:'numeric'}) : '—';
+                        return `
+                        <tr class="hover:bg-slate-50 transition-colors">
+                            <td class="px-4 py-2.5 font-medium text-slate-700 max-w-[140px] truncate">${escHtml(r.Department)}</td>
+                            <td class="px-3 py-2.5 text-center text-slate-600">${att}</td>
+                            <td class="px-3 py-2.5 text-center font-semibold" style="color:#059669">${pass}</td>
+                            <td class="px-3 py-2.5 text-center font-semibold" style="color:#ef4444">${fail}</td>
+                            <td class="px-3 py-2.5">
+                                <div class="flex items-center gap-2">
+                                    <div class="w-20 h-1.5 rounded-full bg-slate-100 overflow-hidden">
+                                        <div class="h-full rounded-full" style="width:${pct}%;background:${col}"></div>
+                                    </div>
+                                    <span class="font-bold text-[11px]" style="color:${col}">${pct}%</span>
+                                </div>
+                            </td>
+                            <td class="px-3 py-2.5 text-slate-500 whitespace-nowrap">${last}</td>
+                        </tr>`;
+                    }).join('')}
+                </tbody>
+            </table>
+        </div>
+    </div>`;
 }
 
 function _buildAlertStrip(kpi, overdue) {
@@ -1026,9 +1092,14 @@ async function fetchAndRenderMan() {
         p.set('year', _manFilter.year);
         const res  = await API.get(`/fourm/man-records?${p}`);
         const rows = normalizeApiArray(res?.data ?? res);
+        _lastManRows = rows;
 
         if (!rows.length) {
             tbody.innerHTML = `<tr><td colspan="${_isAdmin?8:7}" class="text-center py-10 text-slate-400 text-sm">ยังไม่มีผลสอบในปี ${_manFilter.year}</td></tr>`;
+            const kpiStrip = document.getElementById('man-kpi-strip');
+            const chartCard = document.getElementById('man-chart-card');
+            if (kpiStrip) kpiStrip.innerHTML = '';
+            if (chartCard) chartCard.style.display = 'none';
             return;
         }
 
@@ -1140,14 +1211,27 @@ async function fetchAndRenderMan() {
 
 function showManForm(existing = null) {
     const r = normalizeApiObject(existing);
+    const initTotal = parseInt(r?.TotalAttendance) || 0;
+    const initPass  = parseInt(r?.Pass)  || 0;
+    const initFail  = parseInt(r?.Fail)  ?? (initTotal - initPass);
+
+    const deptField = _departments.length
+        ? `<select name="Department" class="form-input w-full" required>
+               <option value="">— เลือกแผนก —</option>
+               ${_departments.map(d => `<option value="${escHtml(d)}" ${(r?.Department||'').trim()===d?'selected':''}>${escHtml(d)}</option>`).join('')}
+               ${r?.Department && !_departments.includes((r.Department||'').trim())
+                   ? `<option value="${escHtml(r.Department)}" selected>${escHtml(r.Department)}</option>` : ''}
+           </select>`
+        : `<input type="text" name="Department" class="form-input w-full" required
+               value="${escHtml(r?.Department||'')}" placeholder="ชื่อแผนก">`;
+
     const html = `
         <form id="man-form" class="space-y-4">
+            <div>
+                <label class="block text-sm font-semibold text-slate-700 mb-1.5">แผนก <span class="text-red-500">*</span></label>
+                ${deptField}
+            </div>
             <div class="grid grid-cols-2 gap-4">
-                <div class="col-span-2">
-                    <label class="block text-sm font-semibold text-slate-700 mb-1.5">แผนก <span class="text-red-500">*</span></label>
-                    <input type="text" name="Department" class="form-input w-full" required
-                           value="${escHtml(r?.Department||'')}" placeholder="ชื่อแผนก">
-                </div>
                 <div>
                     <label class="block text-sm font-semibold text-slate-700 mb-1.5">วันที่สอบ</label>
                     <input type="date" name="ExamDate" class="form-input w-full"
@@ -1156,16 +1240,20 @@ function showManForm(existing = null) {
                 <div>
                     <label class="block text-sm font-semibold text-slate-700 mb-1.5">ผลสอบ</label>
                     <select name="Status" class="form-input w-full">
-                        ${MAN_STATUSES.map(s => `<option value="${s}" ${r?.Status===s?'selected':''}>${s}</option>`).join('')}
+                        ${MAN_STATUSES.map(s => `<option value="${s}" ${(r?.Status||'Pending')===s?'selected':''}>${s}</option>`).join('')}
                     </select>
                 </div>
                 <div>
                     <label class="block text-sm font-semibold text-slate-700 mb-1.5">ผู้เข้าสอบทั้งหมด</label>
-                    <input type="number" name="TotalAttendance" min="0" class="form-input w-full" value="${r?.TotalAttendance||0}">
+                    <input type="number" id="man-total" name="TotalAttendance" min="0" class="form-input w-full" value="${initTotal}">
                 </div>
                 <div>
                     <label class="block text-sm font-semibold text-slate-700 mb-1.5">ผ่าน</label>
-                    <input type="number" name="Pass" min="0" class="form-input w-full" value="${r?.Pass||0}">
+                    <input type="number" id="man-pass" name="Pass" min="0" class="form-input w-full" value="${initPass}">
+                </div>
+                <div>
+                    <label class="block text-sm font-semibold text-slate-700 mb-1.5">ไม่ผ่าน</label>
+                    <input type="number" id="man-fail" name="Fail" min="0" class="form-input w-full" value="${initFail >= 0 ? initFail : 0}">
                 </div>
             </div>
             <div>
@@ -1178,6 +1266,21 @@ function showManForm(existing = null) {
             </div>
         </form>`;
     openModal(existing ? 'แก้ไขผลสอบ' : 'บันทึกผลสอบ', html, 'max-w-lg');
+
+    // Auto-compute Fail = TotalAttendance - Pass when either field changes
+    setTimeout(() => {
+        const totalEl = document.getElementById('man-total');
+        const passEl  = document.getElementById('man-pass');
+        const failEl  = document.getElementById('man-fail');
+        const sync = () => {
+            const t = parseInt(totalEl?.value) || 0;
+            const p = parseInt(passEl?.value)  || 0;
+            const f = Math.max(0, t - p);
+            if (failEl) failEl.value = f;
+        };
+        totalEl?.addEventListener('input', sync);
+        passEl?.addEventListener('input', sync);
+    }, 0);
 
     document.getElementById('man-form')?.addEventListener('submit', async (e) => {
         e.preventDefault();
@@ -1821,14 +1924,8 @@ function setupEventListeners() {
         if (e.target.closest('#btn-add-man')) { showManForm(); return; }
         const manEdit = e.target.closest('.btn-man-edit');
         if (manEdit) {
-            showLoading('กำลังโหลด...');
-            try {
-                const res = await API.get(`/fourm/man-records?year=${_manFilter.year}`);
-                const all = normalizeApiArray(res?.data ?? res);
-                const rec = all.find(r => r.id === manEdit.dataset.id);
-                hideLoading();
-                if (rec) showManForm(rec);
-            } catch (err) { hideLoading(); showError(err); }
+            const rec = _lastManRows.find(r => String(r.id) === manEdit.dataset.id);
+            if (rec) showManForm(rec);
             return;
         }
         const manDel = e.target.closest('.btn-man-delete');
