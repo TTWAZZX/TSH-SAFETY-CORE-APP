@@ -67,6 +67,7 @@ let _listenersReady = false;
 let _chartLine      = null;
 let _chartPie       = null;
 let _chartBar       = null;
+let _chartMan       = null;
 let _departments    = [];
 let _statsData      = null;
 let _lastNotices    = [];
@@ -87,9 +88,9 @@ export async function loadFourmPage() {
 
     if (!_listenersReady) { setupEventListeners(); _listenersReady = true; }
     _activeTab = window._getTab?.('fourm', _activeTab) || _activeTab;
+    await _loadDepts();
     switchTab(_activeTab);
     _loadHeroStats();
-    _loadDepts();
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -213,7 +214,15 @@ async function _loadDepts() {
 async function renderDashboard(container) {
     container.innerHTML = `
         <div class="space-y-5">
-            <div class="flex justify-end">
+            <div class="flex items-center justify-end gap-2">
+                <button onclick="window._fourmExportDashPDF&&window._fourmExportDashPDF()"
+                        class="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-semibold text-white"
+                        style="background:linear-gradient(135deg,#6366f1,#0284c7);box-shadow:0 2px 8px rgba(99,102,241,0.25)">
+                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/>
+                    </svg>
+                    PDF
+                </button>
                 <select id="fourm-stats-year" class="form-input py-1.5 text-sm w-32">
                     ${[0,1,2].map(i => { const y = new Date().getFullYear()-i; return `<option value="${y}" ${y===_statsYear?'selected':''}>${y}</option>`; }).join('')}
                 </select>
@@ -552,6 +561,7 @@ async function fetchAndRenderNotices() {
                     <div class="flex items-center gap-1 justify-end">
                         <button class="btn-notice-view px-2 py-1 rounded-lg text-xs font-semibold text-slate-500 hover:text-indigo-600 hover:bg-indigo-50 transition-colors" data-id="${r.id}">ดู</button>
                         ${canClose ? `<button class="btn-notice-close px-2 py-1 rounded-lg text-xs font-semibold text-emerald-600 hover:bg-emerald-50 transition-colors" data-id="${r.id}" data-no="${escHtml(r.NoticeNo)}">ปิด</button>` : ''}
+                        ${_isAdmin && r.Status === 'Open' ? `<button class="btn-notice-pending px-2 py-1 rounded-lg text-xs font-semibold text-amber-600 hover:bg-amber-50 transition-colors" data-id="${r.id}" data-no="${escHtml(r.NoticeNo)}">Pending</button>` : ''}
                         ${_isAdmin ? `
                         <button class="btn-notice-edit px-2 py-1 rounded-lg text-xs font-semibold text-indigo-500 hover:bg-indigo-50 transition-colors" data-id="${r.id}">แก้ไข</button>
                         <button class="btn-notice-delete p-1.5 text-slate-300 hover:text-red-500 hover:bg-red-50 rounded-lg opacity-0 group-hover:opacity-100 transition-all" data-id="${r.id}" data-no="${escHtml(r.NoticeNo)}" title="ลบ">
@@ -628,7 +638,15 @@ function showNoticeForm(existing = null) {
                 </div>
                 <div>
                     <label class="block text-sm font-semibold text-slate-700 mb-1.5">แผนก</label>
-                    <input type="text" name="Department" class="form-input w-full" value="${escHtml(r?.Department||'')}" placeholder="แผนก">
+                    ${_departments.length
+                        ? `<select name="Department" class="form-input w-full">
+                               <option value="">— ไม่ระบุ —</option>
+                               ${_departments.map(d => `<option value="${escHtml(d)}" ${(r?.Department||'').trim()===d?'selected':''}>${escHtml(d)}</option>`).join('')}
+                               ${r?.Department && !_departments.includes((r.Department||'').trim())
+                                   ? `<option value="${escHtml(r.Department)}" selected>${escHtml(r.Department)}</option>` : ''}
+                           </select>`
+                        : `<input type="text" name="Department" class="form-input w-full" value="${escHtml(r?.Department||'')}" placeholder="แผนก">`
+                    }
                 </div>
             </div>
             <div>
@@ -675,9 +693,44 @@ async function showNoticeDetail(id) {
         hideLoading();
 
         const isImage = u => u && /\.(jpg|jpeg|png|webp|gif)(\?.*)?$/i.test(u);
-        const fmtDate = d => d ? new Date(d).toLocaleDateString('th-TH', { year:'numeric', month:'long', day:'numeric' }) : '-';
+        const fmtDate = d => d ? new Date(d).toLocaleDateString('th-TH', { year:'numeric', month:'long', day:'numeric' }) : null;
         const tm = TYPE_META[r.ChangeType] || { bg:'#f8fafc', text:'#64748b', dot:'#94a3b8' };
-        const sm = STATUS_META[r.Status]   || { bg:'#f1f5f9', text:'#64748b', label: r.Status };
+
+        // Timeline: Open → Pending → Closed
+        const TIMELINE_STEPS = [
+            { key:'Open',    label:'เปิด Notice',     date: fmtDate(r.RequestDate) },
+            { key:'Pending', label:'รอดำเนินการ',     date: null },
+            { key:'Closed',  label:'ปิด Notice',      date: fmtDate(r.ClosedDate) },
+        ];
+        const STATUS_ORDER = { Open:0, Pending:1, Closed:2 };
+        const currentIdx   = STATUS_ORDER[r.Status] ?? 0;
+
+        const timelineHtml = `
+        <div class="flex items-start gap-0 py-2">
+            ${TIMELINE_STEPS.map((step, i) => {
+                const isDone    = i < currentIdx;
+                const isCurrent = i === currentIdx;
+                const isLast    = i === TIMELINE_STEPS.length - 1;
+                const dotColor  = isDone ? '#059669' : isCurrent ? '#6366f1' : '#cbd5e1';
+                const lineColor = isDone ? '#059669' : '#e2e8f0';
+                const labelColor = isCurrent ? '#1e293b' : isDone ? '#059669' : '#94a3b8';
+                return `
+                <div class="flex flex-col items-center flex-1 relative">
+                    <div class="w-7 h-7 rounded-full flex items-center justify-center z-10 flex-shrink-0 border-2"
+                         style="background:${isDone||isCurrent ? dotColor+'22' : '#f8fafc'};border-color:${dotColor}">
+                        ${isDone
+                            ? `<svg class="w-3.5 h-3.5" fill="none" stroke="${dotColor}" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="3" d="M5 13l4 4L19 7"/></svg>`
+                            : isCurrent
+                                ? `<span class="w-2.5 h-2.5 rounded-full inline-block" style="background:${dotColor}"></span>`
+                                : `<span class="w-2 h-2 rounded-full inline-block bg-slate-200"></span>`
+                        }
+                    </div>
+                    ${!isLast ? `<div class="absolute top-3.5 left-1/2 w-full h-0.5" style="background:${lineColor}"></div>` : ''}
+                    <p class="text-[11px] font-semibold mt-1.5 text-center" style="color:${labelColor}">${step.label}</p>
+                    ${step.date ? `<p class="text-[10px] text-center mt-0.5" style="color:#94a3b8">${step.date}</p>` : ''}
+                </div>`;
+            }).join('')}
+        </div>`;
 
         const html = `
             <div class="space-y-4 text-sm">
@@ -687,16 +740,16 @@ async function showNoticeDetail(id) {
                         <span class="w-1.5 h-1.5 rounded-full inline-block" style="background:${TYPE_META[r.ChangeType]?.dot||tm.text}"></span>
                         ${escHtml(r.ChangeType)}
                     </span>
-                    <span class="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-semibold" style="background:${sm.bg};color:${sm.text}">
-                        <span class="w-1.5 h-1.5 rounded-full inline-block" style="background:${sm.text}"></span>
-                        ${sm.label}
-                    </span>
                 </div>
 
                 <h3 class="text-base font-bold text-slate-800">${escHtml(r.Title)}</h3>
 
+                <div class="px-4 py-3 rounded-xl border border-slate-100 bg-slate-50">
+                    ${timelineHtml}
+                </div>
+
                 <div class="grid grid-cols-2 gap-3 text-xs">
-                    ${infoBlock('วันที่ขอ', fmtDate(r.RequestDate))}
+                    ${infoBlock('วันที่ขอเปลี่ยน', fmtDate(r.RequestDate)||'-')}
                     ${infoBlock('ผู้รับผิดชอบ', escHtml(r.ResponsiblePerson||'-'))}
                     ${infoBlock('แผนก', escHtml(r.Department||'-'))}
                     ${infoBlock('สร้างโดย', escHtml(r.CreatedBy||'-'))}
@@ -712,20 +765,32 @@ async function showNoticeDetail(id) {
                 <div class="p-3 bg-emerald-50 rounded-xl border border-emerald-100">
                     <p class="text-xs text-emerald-600 font-semibold uppercase tracking-wider mb-1">ผลการดำเนินการ</p>
                     <p class="text-slate-700 leading-relaxed">${escHtml(r.ClosingComment)}</p>
-                    <p class="text-xs text-slate-400 mt-1.5">ปิดโดย ${escHtml(r.ClosedBy||'-')} · ${fmtDate(r.ClosedDate)}</p>
+                    <p class="text-xs text-slate-400 mt-1.5">ปิดโดย ${escHtml(r.ClosedBy||'-')} · ${fmtDate(r.ClosedDate)||'-'}</p>
                 </div>` : ''}
 
                 ${(r.AttachmentUrl||r.ClosingDocUrl) ? `
                 <div>
                     <p class="text-xs text-slate-400 font-semibold uppercase tracking-wider mb-2">ไฟล์แนบ</p>
                     <div class="flex flex-wrap gap-2">
-                        ${r.AttachmentUrl  ? buildFileChip(r.AttachmentUrl,  'ไฟล์แนบ (Notice)',    isImage(r.AttachmentUrl))  : ''}
-                        ${r.ClosingDocUrl  ? buildFileChip(r.ClosingDocUrl,  'เอกสารปิด Notice',    isImage(r.ClosingDocUrl))  : ''}
+                        ${r.AttachmentUrl ? buildFileChip(r.AttachmentUrl, 'ไฟล์แนบ (Notice)',  isImage(r.AttachmentUrl)) : ''}
+                        ${r.ClosingDocUrl ? buildFileChip(r.ClosingDocUrl, 'เอกสารปิด Notice', isImage(r.ClosingDocUrl)) : ''}
                     </div>
                 </div>` : ''}
             </div>`;
 
-        openModal('รายละเอียด Change Notice', html, 'max-w-xl');
+        const footer = `
+            <div class="flex justify-end pt-3 border-t border-slate-100">
+                <button onclick="window._fourmExportNoticePDF('${r.id}')"
+                        class="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-semibold text-white"
+                        style="background:linear-gradient(135deg,#6366f1,#0284c7);box-shadow:0 2px 8px rgba(99,102,241,0.3)">
+                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/>
+                    </svg>
+                    ดาวน์โหลด PDF
+                </button>
+            </div>`;
+
+        openModal('รายละเอียด Change Notice', html + footer, 'max-w-xl');
     } catch (err) { hideLoading(); showError(err); }
 }
 
@@ -780,6 +845,119 @@ function showCloseForm(id, noticeNo) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Phase 3: PDF ต่อ Notice
+// ─────────────────────────────────────────────────────────────────────────────
+window._fourmExportNoticePDF = async function(id) {
+    if (typeof html2canvas === 'undefined' || typeof jspdf === 'undefined') {
+        showToast('ไม่พบ library สำหรับ PDF', 'error'); return;
+    }
+    showToast('กำลังสร้าง PDF...', 'info');
+    try {
+        const res = await API.get(`/fourm/notices/${id}`);
+        const r   = normalizeApiObject(res?.data ?? res);
+
+        const fmtDate = d => d ? new Date(d).toLocaleDateString('th-TH', { day:'numeric', month:'long', year:'numeric' }) : '—';
+        const tm      = TYPE_META[r.ChangeType] || { bg:'#f8fafc', text:'#64748b' };
+        const STATUS_ORDER = { Open:0, Pending:1, Closed:2 };
+        const curIdx  = STATUS_ORDER[r.Status] ?? 0;
+        const STEPS   = [
+            { label:'เปิด Notice',   date: fmtDate(r.RequestDate) },
+            { label:'รอดำเนินการ',  date: '' },
+            { label:'ปิด Notice',    date: r.ClosedDate ? fmtDate(r.ClosedDate) : '' },
+        ];
+
+        const div = document.createElement('div');
+        div.style.cssText = 'position:fixed;left:-9999px;top:0;width:794px;background:#fff;font-family:Kanit,sans-serif';
+        div.innerHTML = `
+        <div style="width:794px;min-height:1122px;display:flex;flex-direction:column;background:#fff">
+            <!-- Header gradient -->
+            <div style="background:linear-gradient(135deg,#312e81,#4338ca 55%,#0284c7);padding:32px 40px 28px;position:relative;overflow:hidden">
+                <div style="position:absolute;inset:0;opacity:.08">
+                    <svg width="100%" height="100%"><defs><pattern id="pd" width="24" height="24" patternUnits="userSpaceOnUse"><circle cx="12" cy="12" r="1.3" fill="white"/></pattern></defs><rect width="100%" height="100%" fill="url(#pd)"/></svg>
+                </div>
+                <div style="position:relative;z-index:1">
+                    <div style="display:flex;align-items:center;gap:12px;margin-bottom:6px">
+                        <span style="font-family:monospace;font-size:13px;font-weight:700;background:rgba(255,255,255,0.18);color:#fff;padding:4px 12px;border-radius:20px">${escHtml(r.NoticeNo||'—')}</span>
+                        <span style="font-size:12px;font-weight:700;padding:4px 12px;border-radius:20px;background:${tm.bg};color:${tm.text}">${escHtml(r.ChangeType||'—')}</span>
+                        <span style="font-size:12px;font-weight:700;padding:4px 12px;border-radius:20px;background:rgba(255,255,255,0.18);color:#e0e7ff">${escHtml(r.Status||'—')}</span>
+                    </div>
+                    <h1 style="color:#fff;font-size:22px;font-weight:800;margin:0 0 4px;line-height:1.3">${escHtml(r.Title||'—')}</h1>
+                    <p style="color:rgba(199,210,254,0.85);font-size:12px;margin:0">4M Change Management · Thai Summit Harness Co., Ltd.</p>
+                </div>
+            </div>
+
+            <!-- Timeline -->
+            <div style="padding:20px 40px 16px;background:#f8fafc;border-bottom:1px solid #e2e8f0">
+                <div style="display:flex;align-items:flex-start;gap:0">
+                    ${STEPS.map((s, i) => {
+                        const done = i < curIdx, cur = i === curIdx, last = i === STEPS.length-1;
+                        const dot  = done ? '#059669' : cur ? '#6366f1' : '#cbd5e1';
+                        return `
+                        <div style="flex:1;display:flex;flex-direction:column;align-items:center;position:relative">
+                            <div style="width:28px;height:28px;border-radius:50%;border:2.5px solid ${dot};background:${done||cur ? dot+'22' : '#f8fafc'};display:flex;align-items:center;justify-content:center;z-index:1;flex-shrink:0">
+                                ${done
+                                    ? `<svg width="14" height="14" fill="none" stroke="${dot}" stroke-width="2.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7"/></svg>`
+                                    : `<span style="width:${cur?10:8}px;height:${cur?10:8}px;border-radius:50%;background:${dot};display:inline-block"></span>`
+                                }
+                            </div>
+                            ${!last ? `<div style="position:absolute;top:14px;left:50%;width:100%;height:2px;background:${done?'#059669':'#e2e8f0'}"></div>` : ''}
+                            <p style="font-size:11px;font-weight:600;margin:6px 0 2px;color:${cur?'#1e293b':done?'#059669':'#94a3b8'};text-align:center">${s.label}</p>
+                            ${s.date ? `<p style="font-size:10px;color:#94a3b8;text-align:center;margin:0">${s.date}</p>` : ''}
+                        </div>`;
+                    }).join('')}
+                </div>
+            </div>
+
+            <!-- Info grid -->
+            <div style="padding:24px 40px;display:grid;grid-template-columns:1fr 1fr;gap:16px;border-bottom:1px solid #f1f5f9">
+                ${[
+                    ['วันที่ขอเปลี่ยน', fmtDate(r.RequestDate)],
+                    ['ผู้รับผิดชอบ',    r.ResponsiblePerson||'—'],
+                    ['แผนก',            r.Department||'—'],
+                    ['สร้างโดย',        r.CreatedBy||'—'],
+                ].map(([l,v]) => `
+                    <div style="background:#f8fafc;padding:12px 16px;border-radius:10px;border:1px solid #f1f5f9">
+                        <p style="font-size:10px;font-weight:600;color:#94a3b8;text-transform:uppercase;letter-spacing:.06em;margin:0 0 4px">${l}</p>
+                        <p style="font-size:13px;font-weight:600;color:#334155;margin:0">${escHtml(v)}</p>
+                    </div>`).join('')}
+            </div>
+
+            ${r.Description ? `
+            <div style="padding:20px 40px 0;border-bottom:1px solid #f1f5f9">
+                <p style="font-size:10px;font-weight:700;color:#94a3b8;text-transform:uppercase;letter-spacing:.06em;margin:0 0 8px">รายละเอียด</p>
+                <p style="font-size:13px;color:#475569;line-height:1.7;margin:0 0 20px;white-space:pre-wrap">${escHtml(r.Description)}</p>
+            </div>` : ''}
+
+            ${r.ClosingComment ? `
+            <div style="margin:20px 40px 0;padding:16px;background:#f0fdf4;border-radius:12px;border:1px solid #bbf7d0">
+                <p style="font-size:10px;font-weight:700;color:#15803d;text-transform:uppercase;letter-spacing:.06em;margin:0 0 6px">ผลการดำเนินการ</p>
+                <p style="font-size:13px;color:#166534;line-height:1.6;margin:0 0 8px">${escHtml(r.ClosingComment)}</p>
+                <p style="font-size:11px;color:#4ade80;margin:0">ปิดโดย ${escHtml(r.ClosedBy||'—')} · ${fmtDate(r.ClosedDate)}</p>
+            </div>` : ''}
+
+            <!-- Footer -->
+            <div style="margin-top:auto;padding:16px 40px;background:linear-gradient(135deg,#312e81,#4338ca 55%,#0284c7);display:flex;justify-content:space-between;align-items:center">
+                <span style="color:rgba(199,210,254,0.8);font-size:11px">4M Change Management · Thai Summit Harness Co., Ltd.</span>
+                <span style="color:rgba(199,210,254,0.8);font-size:11px">สร้างเมื่อ ${new Date().toLocaleDateString('th-TH',{day:'numeric',month:'short',year:'numeric'})}</span>
+            </div>
+        </div>`;
+
+        document.body.appendChild(div);
+        try {
+            const canvas = await html2canvas(div.firstElementChild, { scale:1.5, useCORS:true, backgroundColor:'#fff', logging:false });
+            const { jsPDF } = jspdf;
+            const pdf = new jsPDF({ unit:'mm', format:'a4', orientation:'portrait' });
+            pdf.addImage(canvas.toDataURL('image/jpeg', 0.92), 'JPEG', 0, 0, 210, 297);
+            const safeNo = (r.NoticeNo||'notice').replace(/[^a-zA-Z0-9\-_]/g, '_');
+            pdf.save(`4M_${safeNo}.pdf`);
+            showToast('ดาวน์โหลด PDF สำเร็จ', 'success');
+        } finally {
+            document.body.removeChild(div);
+        }
+    } catch (err) { showError(err); }
+};
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Tab 3: Man Record
 // ─────────────────────────────────────────────────────────────────────────────
 async function renderMan(container) {
@@ -806,6 +984,13 @@ async function renderMan(container) {
                     </svg>
                     บันทึกผลสอบ
                 </button>` : ''}
+            </div>
+
+            <div id="man-kpi-strip" class="grid grid-cols-2 lg:grid-cols-4 gap-4"></div>
+
+            <div id="man-chart-card" class="card p-5" style="display:none">
+                <h3 class="text-sm font-bold text-slate-600 mb-4">Pass Rate รายแผนก</h3>
+                <div id="man-chart-inner"><canvas id="fourm-chart-man"></canvas></div>
             </div>
 
             <div class="card overflow-hidden">
@@ -884,6 +1069,70 @@ async function fetchAndRenderMan() {
                 </td>` : ''}
             </tr>`;
         }).join('');
+
+        // KPI summary strip
+        const totalAtt  = rows.reduce((s, r) => s + (parseInt(r.TotalAttendance)||0), 0);
+        const totalPass = rows.reduce((s, r) => s + (parseInt(r.Pass)||0), 0);
+        const passRate  = totalAtt > 0 ? Math.round(totalPass / totalAtt * 100) : 0;
+        const rateColor = passRate>=80 ? '#059669' : passRate>=60 ? '#d97706' : '#ef4444';
+        const kpiStrip = document.getElementById('man-kpi-strip');
+        if (kpiStrip) {
+            const KPI_CARDS = [
+                { label:'แผนกที่บันทึก',  value: rows.length, color:'#6366f1',
+                  icon:`<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-2 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4"/>` },
+                { label:'ผู้เข้าสอบรวม',  value: totalAtt,    color:'#0284c7',
+                  icon:`<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0z"/>` },
+                { label:'ผ่านทั้งหมด',    value: totalPass,   color:'#059669',
+                  icon:`<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/>` },
+                { label:'Pass Rate รวม',  value: `${passRate}%`, color: rateColor,
+                  icon:`<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"/>` },
+            ];
+            kpiStrip.innerHTML = KPI_CARDS.map(c => `
+                <div class="bg-white rounded-xl p-4 border border-slate-100 shadow-sm flex items-center gap-3">
+                    <div class="w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0" style="background:${c.color}18;color:${c.color}">
+                        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">${c.icon}</svg>
+                    </div>
+                    <div>
+                        <p class="text-2xl font-bold text-slate-800">${c.value}</p>
+                        <p class="text-xs text-slate-500">${c.label}</p>
+                    </div>
+                </div>`).join('');
+        }
+
+        // Horizontal bar chart (pass rate per dept)
+        const chartCard  = document.getElementById('man-chart-card');
+        const chartInner = document.getElementById('man-chart-inner');
+        if (chartCard && chartInner && rows.length > 0) {
+            chartCard.style.display = '';
+            if (_chartMan) { _chartMan.destroy(); _chartMan = null; }
+            const chartHeight = Math.max(180, rows.length * 34 + 40);
+            chartInner.style.height = `${chartHeight}px`;
+            const ctx = document.getElementById('fourm-chart-man');
+            if (ctx) {
+                const labels   = rows.map(r => r.Department || '—');
+                const rates    = rows.map(r => r.TotalAttendance > 0 ? Math.round((r.Pass / r.TotalAttendance) * 100) : 0);
+                const bgColors = rates.map(v => v>=80 ? 'rgba(5,150,105,0.65)' : v>=60 ? 'rgba(217,119,6,0.65)' : 'rgba(239,68,68,0.65)');
+                _chartMan = new Chart(ctx, {
+                    type: 'bar',
+                    data: { labels, datasets: [{ label:'Pass Rate (%)', data: rates, backgroundColor: bgColors, borderRadius: 6, borderWidth: 0 }] },
+                    options: {
+                        indexAxis: 'y',
+                        responsive: true,
+                        maintainAspectRatio: false,
+                        plugins: { legend: { display: false } },
+                        scales: {
+                            x: { min:0, max:100, ticks:{ callback: v => v+'%', font:{ family:'Kanit' } }, grid:{ color:'#f1f5f9' } },
+                            y: { ticks:{ font:{ family:'Kanit', size:11 }, callback: function(val) {
+                                const n = this.getLabelForValue(val);
+                                return n.length > 18 ? n.slice(0,17)+'…' : n;
+                            }}, grid:{ display:false } }
+                        }
+                    }
+                });
+            }
+        } else if (chartCard) {
+            chartCard.style.display = 'none';
+        }
     } catch (err) {
         if (tbody) tbody.innerHTML = `<tr><td colspan="${_isAdmin?8:7}" class="text-center py-6 text-red-500 text-sm">${escHtml(err.message)}</td></tr>`;
     }
@@ -1197,6 +1446,347 @@ function _openFourmFormUploadModal() {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Phase 4: Executive PDF Dashboard
+// ─────────────────────────────────────────────────────────────────────────────
+window._fourmExportDashPDF = async function() {
+    if (typeof html2canvas === 'undefined' || typeof jspdf === 'undefined') {
+        showToast('ไม่พบ library สำหรับ PDF', 'error'); return;
+    }
+    showToast('กำลังสร้าง PDF...', 'info');
+
+    try {
+        const [statsRes, noticesRes, manRes] = await Promise.all([
+            API.get(`/fourm/stats?year=${_statsYear}`),
+            API.get(`/fourm/notices?year=${_statsYear}`),
+            API.get(`/fourm/man-records?year=${_statsYear}`),
+        ]);
+        const data    = statsRes?.data || {};
+        const kpi     = data.noticeKpi || {};
+        const notices = normalizeApiArray(noticesRes?.data ?? noticesRes) || [];
+        const manRecs = normalizeApiArray(manRes?.data ?? manRes) || [];
+
+        const overdue = data.overdueCount || 0;
+        const total   = parseInt(kpi.total)   || 0;
+        const closed  = parseInt(kpi.closed)  || 0;
+        const closureRate = total > 0 ? Math.round(closed / total * 100) : 0;
+
+        const fmtShort = d => d ? new Date(d).toLocaleDateString('th-TH', { day:'numeric', month:'short', year:'2-digit' }) : '—';
+        const thaiYear = _statsYear + 543;
+
+        // ── SVG helpers ──────────────────────────────────────────────────────
+        function svgBar(monthly, w=540, h=140) {
+            const counts = Array(12).fill(0);
+            (monthly||[]).forEach(r => { counts[(r.month||1)-1] = r.count||0; });
+            const max = Math.max(...counts, 1);
+            const bw  = Math.floor(w / 12) - 6;
+            const colors = ['#6366f1'];
+            const bars = counts.map((v, i) => {
+                const bh = Math.round((v / max) * (h - 30));
+                const x  = i * (w/12) + 3;
+                const y  = h - 20 - bh;
+                return `<rect x="${x}" y="${y}" width="${bw}" height="${bh}" rx="4" fill="${colors[0]}99"/>
+                        <text x="${x+bw/2}" y="${h-6}" text-anchor="middle" font-size="9" fill="#94a3b8">${MONTHS_TH[i]}</text>
+                        ${v ? `<text x="${x+bw/2}" y="${y-4}" text-anchor="middle" font-size="9" font-weight="600" fill="#6366f1">${v}</text>` : ''}`;
+            }).join('');
+            return `<svg width="${w}" height="${h}" xmlns="http://www.w3.org/2000/svg">${bars}</svg>`;
+        }
+
+        function svgPie(byType, size=120) {
+            if (!byType?.length) return `<svg width="${size}" height="${size}"></svg>`;
+            const tot = byType.reduce((s, d) => s + (d.count||0), 0);
+            if (!tot) return `<svg width="${size}" height="${size}"></svg>`;
+            const cx = size/2, cy = size/2, r = size/2 - 8;
+            const PIE_COLORS = ['#6366f1','#f97316','#22c55e','#a855f7','#0ea5e9'];
+            let angle = -Math.PI/2;
+            const slices = byType.map((d, i) => {
+                const sweep = (d.count / tot) * 2 * Math.PI;
+                const x1 = cx + r * Math.cos(angle);
+                const y1 = cy + r * Math.sin(angle);
+                angle += sweep;
+                const x2 = cx + r * Math.cos(angle);
+                const y2 = cy + r * Math.sin(angle);
+                const large = sweep > Math.PI ? 1 : 0;
+                return `<path d="M${cx},${cy} L${x1},${y1} A${r},${r} 0 ${large},1 ${x2},${y2} Z" fill="${PIE_COLORS[i%5]}"/>`;
+            });
+            return `<svg width="${size}" height="${size}" xmlns="http://www.w3.org/2000/svg">
+                <circle cx="${cx}" cy="${cy}" r="${r}" fill="none"/>
+                ${slices.join('')}
+                <circle cx="${cx}" cy="${cy}" r="${r*0.45}" fill="white"/>
+            </svg>`;
+        }
+
+        // ── Page builder ──────────────────────────────────────────────────────
+        function header(title, sub='') {
+            return `<div style="background:linear-gradient(135deg,#312e81,#4338ca 55%,#0284c7);padding:20px 32px 18px;position:relative;overflow:hidden">
+                <div style="position:absolute;inset:0;opacity:.08"><svg width="100%" height="100%"><defs><pattern id="pd" width="24" height="24" patternUnits="userSpaceOnUse"><circle cx="12" cy="12" r="1.3" fill="white"/></pattern></defs><rect width="100%" height="100%" fill="url(#pd)"/></svg></div>
+                <div style="position:relative;z-index:1">
+                    <h1 style="color:#fff;font-size:18px;font-weight:800;margin:0 0 2px">${title}</h1>
+                    ${sub ? `<p style="color:rgba(199,210,254,0.8);font-size:11px;margin:0">${sub}</p>` : ''}
+                </div>
+            </div>`;
+        }
+        function footer(pg, total=4) {
+            return `<div style="margin-top:auto;padding:12px 32px;background:linear-gradient(135deg,#312e81,#4338ca 55%,#0284c7);display:flex;justify-content:space-between;align-items:center;flex-shrink:0">
+                <span style="color:rgba(199,210,254,0.8);font-size:10px">4M Change Management · Thai Summit Harness Co., Ltd.</span>
+                <span style="color:rgba(199,210,254,0.8);font-size:10px">หน้า ${pg} จาก ${total} · สร้างเมื่อ ${new Date().toLocaleDateString('th-TH',{day:'numeric',month:'short',year:'numeric'})}</span>
+            </div>`;
+        }
+        function kpiBox(label, value, color='#6366f1', sub='') {
+            return `<div style="background:#fff;border-radius:12px;padding:16px;border:1px solid #f1f5f9;box-shadow:0 1px 4px rgba(0,0,0,.06)">
+                <p style="font-size:26px;font-weight:800;color:${color};margin:0 0 2px">${value}</p>
+                <p style="font-size:11px;color:#64748b;margin:0">${label}</p>
+                ${sub ? `<p style="font-size:10px;color:${color};font-weight:600;margin:4px 0 0">${sub}</p>` : ''}
+            </div>`;
+        }
+        function sectionTitle(t) {
+            return `<p style="font-size:11px;font-weight:700;color:#6366f1;text-transform:uppercase;letter-spacing:.07em;margin:0 0 10px;padding-bottom:6px;border-bottom:2px solid #e0e7ff">${t}</p>`;
+        }
+
+        const PAGE = (content) => `<div style="width:794px;height:1122px;background:#fff;font-family:Kanit,sans-serif;display:flex;flex-direction:column;overflow:hidden">
+            ${content}
+            ${footer(_currentPdfPage++)}
+        </div>`;
+        let _currentPdfPage = 1;
+
+        // ── PAGE 1: KPI Overview ─────────────────────────────────────────────
+        const topNotices = notices.filter(n => n.Status !== 'Closed')
+            .sort((a,b) => new Date(a.RequestDate) - new Date(b.RequestDate))
+            .slice(0, 5);
+        const overdueLi = topNotices
+            .filter(n => Math.floor((new Date()-new Date(n.RequestDate))/86400000) > OVERDUE_DAYS)
+            .map(n => {
+                const d = Math.floor((new Date()-new Date(n.RequestDate))/86400000);
+                const tm = TYPE_META[n.ChangeType]||{bg:'#f8fafc',text:'#64748b'};
+                return `<tr>
+                    <td style="padding:6px 8px;font-size:12px;font-family:monospace;color:#6366f1">${escHtml(n.NoticeNo||'')}</td>
+                    <td style="padding:6px 8px;font-size:11px;color:#334155">${escHtml(n.Title||'')}</td>
+                    <td style="padding:6px 8px;text-align:center"><span style="font-size:10px;font-weight:700;padding:2px 8px;border-radius:20px;background:${tm.bg};color:${tm.text}">${escHtml(n.ChangeType)}</span></td>
+                    <td style="padding:6px 8px;text-align:center;font-size:11px;color:#ef4444;font-weight:700">${d} วัน</td>
+                    <td style="padding:6px 8px;font-size:11px;color:#64748b">${escHtml(n.Department||'—')}</td>
+                </tr>`;
+            });
+
+        const page1 = PAGE(`
+            ${header(`รายงาน 4M Change Management ปี ${thaiYear}`, `จัดทำ ${new Date().toLocaleDateString('th-TH',{day:'numeric',month:'long',year:'numeric'})}`)}
+            <div style="flex:1;padding:24px 32px;display:flex;flex-direction:column;gap:20px;overflow:hidden">
+                ${sectionTitle('สรุป Change Notice')}
+                <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:12px">
+                    ${kpiBox('ทั้งหมด',           total,       '#6366f1')}
+                    ${kpiBox('Open',               kpi.open||0, '#0284c7')}
+                    ${kpiBox('รอดำเนินการ',        kpi.pending||0, (kpi.pending||0)>0?'#d97706':'#64748b')}
+                    ${kpiBox('ปิดแล้ว',            closed,      '#059669', closureRate>0?`${closureRate}% closure rate`:'')}
+                </div>
+                ${overdue ? `
+                <div style="background:#fffbeb;border:1px solid #fde68a;border-radius:10px;padding:12px 16px">
+                    <p style="font-size:12px;font-weight:700;color:#92400e;margin:0 0 4px">⚠ แจ้งเตือน: มี ${overdue} รายการค้างนานเกิน ${OVERDUE_DAYS} วัน</p>
+                    <p style="font-size:11px;color:#a16207;margin:0">กรุณาตรวจสอบและดำเนินการโดยเร็ว</p>
+                </div>` : ''}
+                ${sectionTitle(`รายการที่ยังเปิดอยู่ / ค้างดำเนินการ (${topNotices.length} รายการ)`)}
+                ${topNotices.length ? `
+                <table style="width:100%;border-collapse:collapse;font-size:12px">
+                    <thead>
+                        <tr style="background:#f8fafc">
+                            <th style="padding:8px;text-align:left;font-size:10px;color:#64748b;font-weight:700;text-transform:uppercase;border-bottom:2px solid #e2e8f0">Notice No</th>
+                            <th style="padding:8px;text-align:left;font-size:10px;color:#64748b;font-weight:700;text-transform:uppercase;border-bottom:2px solid #e2e8f0">หัวข้อ</th>
+                            <th style="padding:8px;text-align:center;font-size:10px;color:#64748b;font-weight:700;text-transform:uppercase;border-bottom:2px solid #e2e8f0">Type</th>
+                            <th style="padding:8px;text-align:center;font-size:10px;color:#64748b;font-weight:700;text-transform:uppercase;border-bottom:2px solid #e2e8f0">อายุ</th>
+                            <th style="padding:8px;font-size:10px;color:#64748b;font-weight:700;text-transform:uppercase;border-bottom:2px solid #e2e8f0">แผนก</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        ${topNotices.map((n,i) => {
+                            const d = Math.floor((new Date()-new Date(n.RequestDate))/86400000);
+                            const over = d > OVERDUE_DAYS;
+                            const tm = TYPE_META[n.ChangeType]||{bg:'#f8fafc',text:'#64748b'};
+                            return `<tr style="border-bottom:1px solid #f1f5f9;${over?'background:rgba(254,242,242,0.5)':''}">
+                                <td style="padding:7px 8px;font-size:11px;font-family:monospace;color:#6366f1;font-weight:700">${escHtml(n.NoticeNo||'')}</td>
+                                <td style="padding:7px 8px;font-size:11px;color:#334155;max-width:220px">${escHtml((n.Title||'').substring(0,45))}</td>
+                                <td style="padding:7px 8px;text-align:center"><span style="font-size:10px;font-weight:700;padding:2px 8px;border-radius:20px;background:${tm.bg};color:${tm.text}">${escHtml(n.ChangeType)}</span></td>
+                                <td style="padding:7px 8px;text-align:center;font-size:11px;font-weight:700;color:${over?'#ef4444':'#334155'}">${d} วัน</td>
+                                <td style="padding:7px 8px;font-size:11px;color:#64748b">${escHtml(n.Department||'—')}</td>
+                            </tr>`;
+                        }).join('')}
+                    </tbody>
+                </table>` : `<p style="font-size:12px;color:#94a3b8;text-align:center;padding:16px">ไม่มีรายการที่ค้างดำเนินการ</p>`}
+            </div>`);
+
+        // ── PAGE 2: Trend + Type + Dept×Type ────────────────────────────────
+        const deptTypeData = data.byDeptType||[];
+        const depts = [...new Set(deptTypeData.map(r => r.Department))].slice(0, 8);
+        _currentPdfPage = 2;
+        const page2 = PAGE(`
+            ${header(`แนวโน้มและการกระจาย ปี ${thaiYear}`)}
+            <div style="flex:1;padding:22px 32px;display:flex;flex-direction:column;gap:18px;overflow:hidden">
+                <div style="display:grid;grid-template-columns:2fr 1fr;gap:16px;align-items:start">
+                    <div>
+                        ${sectionTitle('แนวโน้มรายเดือน (Change Notice)')}
+                        ${svgBar(data.monthly)}
+                    </div>
+                    <div>
+                        ${sectionTitle('สัดส่วน Change Type')}
+                        <div style="display:flex;flex-direction:column;align-items:center;gap:8px">
+                            ${svgPie(data.byType, 100)}
+                            <div style="display:flex;flex-wrap:wrap;gap:6px;justify-content:center">
+                                ${(data.byType||[]).map((d,i) => {
+                                    const PIE_COLORS=['#6366f1','#f97316','#22c55e','#a855f7'];
+                                    return `<span style="font-size:10px;display:flex;align-items:center;gap:3px">
+                                        <span style="width:8px;height:8px;border-radius:50%;background:${PIE_COLORS[i%4]};display:inline-block"></span>
+                                        ${escHtml(d.label)} (${d.count})
+                                    </span>`;
+                                }).join('')}
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                ${depts.length ? `
+                ${sectionTitle('แผนก × Change Type Matrix')}
+                <table style="width:100%;border-collapse:collapse;font-size:11px">
+                    <thead>
+                        <tr style="background:#f8fafc">
+                            <th style="padding:7px 8px;text-align:left;font-size:10px;color:#64748b;border-bottom:2px solid #e2e8f0">แผนก</th>
+                            ${CHANGE_TYPES.map(t => `<th style="padding:7px 8px;text-align:center;font-size:10px;font-weight:700;border-bottom:2px solid #e2e8f0;color:${TYPE_META[t].text}">${t}</th>`).join('')}
+                            <th style="padding:7px 8px;text-align:center;font-size:10px;color:#64748b;border-bottom:2px solid #e2e8f0">รวม</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        ${depts.map(dept => {
+                            const rows = deptTypeData.filter(r => r.Department === dept);
+                            const rowTotal = rows.reduce((s,r)=>s+(parseInt(r.count)||0),0);
+                            return `<tr style="border-bottom:1px solid #f1f5f9">
+                                <td style="padding:6px 8px;color:#334155;font-weight:600">${escHtml(dept)}</td>
+                                ${CHANGE_TYPES.map(t => {
+                                    const item = rows.find(r => r.ChangeType === t);
+                                    const cnt  = parseInt(item?.count)||0;
+                                    const tm   = TYPE_META[t];
+                                    return `<td style="padding:6px 8px;text-align:center">
+                                        ${cnt ? `<span style="font-size:10px;font-weight:700;padding:2px 8px;border-radius:20px;background:${tm.bg};color:${tm.text}">${cnt}</span>` : '<span style="color:#cbd5e1">—</span>'}
+                                    </td>`;
+                                }).join('')}
+                                <td style="padding:6px 8px;text-align:center;font-weight:700;color:#334155">${rowTotal}</td>
+                            </tr>`;
+                        }).join('')}
+                    </tbody>
+                </table>` : ''}
+            </div>`);
+
+        // ── PAGE 3: Notice List ──────────────────────────────────────────────
+        _currentPdfPage = 3;
+        const noticeList = [...notices].sort((a,b) => new Date(b.RequestDate)-new Date(a.RequestDate)).slice(0,22);
+        const page3 = PAGE(`
+            ${header(`รายการ Change Notice ปี ${thaiYear} (${notices.length} รายการ)`)}
+            <div style="flex:1;padding:20px 32px;overflow:hidden">
+                <table style="width:100%;border-collapse:collapse;font-size:11px">
+                    <thead>
+                        <tr style="background:#f8fafc">
+                            <th style="padding:7px 8px;text-align:left;font-size:10px;color:#64748b;font-weight:700;text-transform:uppercase;border-bottom:2px solid #e2e8f0">Notice No</th>
+                            <th style="padding:7px 8px;text-align:left;font-size:10px;color:#64748b;font-weight:700;text-transform:uppercase;border-bottom:2px solid #e2e8f0">วันที่</th>
+                            <th style="padding:7px 8px;text-align:left;font-size:10px;color:#64748b;font-weight:700;text-transform:uppercase;border-bottom:2px solid #e2e8f0">หัวข้อ</th>
+                            <th style="padding:7px 8px;text-align:center;font-size:10px;color:#64748b;font-weight:700;text-transform:uppercase;border-bottom:2px solid #e2e8f0">Type</th>
+                            <th style="padding:7px 8px;text-align:left;font-size:10px;color:#64748b;font-weight:700;text-transform:uppercase;border-bottom:2px solid #e2e8f0">แผนก</th>
+                            <th style="padding:7px 8px;text-align:center;font-size:10px;color:#64748b;font-weight:700;text-transform:uppercase;border-bottom:2px solid #e2e8f0">สถานะ</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        ${noticeList.map(n => {
+                            const tm = TYPE_META[n.ChangeType]||{bg:'#f8fafc',text:'#64748b'};
+                            const sm = STATUS_META[n.Status]  ||{bg:'#f1f5f9',text:'#64748b',label:n.Status};
+                            const daysOld = n.Status!=='Closed' ? Math.floor((new Date()-new Date(n.RequestDate))/86400000) : 0;
+                            const isOvd   = daysOld > OVERDUE_DAYS;
+                            return `<tr style="border-bottom:1px solid #f8fafc;${isOvd?'background:rgba(254,242,242,0.4)':''}">
+                                <td style="padding:5px 8px;font-size:10px;font-family:monospace;color:#6366f1;font-weight:700">${escHtml(n.NoticeNo||'')}</td>
+                                <td style="padding:5px 8px;font-size:10px;color:#64748b;white-space:nowrap">${fmtShort(n.RequestDate)}</td>
+                                <td style="padding:5px 8px;font-size:11px;color:#334155;max-width:200px">${escHtml((n.Title||'').substring(0,38))}</td>
+                                <td style="padding:5px 8px;text-align:center"><span style="font-size:9px;font-weight:700;padding:2px 6px;border-radius:20px;background:${tm.bg};color:${tm.text}">${escHtml(n.ChangeType)}</span></td>
+                                <td style="padding:5px 8px;font-size:10px;color:#64748b">${escHtml((n.Department||'—').substring(0,18))}</td>
+                                <td style="padding:5px 8px;text-align:center"><span style="font-size:9px;font-weight:700;padding:2px 6px;border-radius:20px;background:${sm.bg};color:${sm.text}">${sm.label}</span></td>
+                            </tr>`;
+                        }).join('')}
+                    </tbody>
+                </table>
+                ${notices.length > 22 ? `<p style="font-size:10px;color:#94a3b8;text-align:right;margin:8px 0 0">แสดง 22 จาก ${notices.length} รายการ — ดูทั้งหมดในระบบ</p>` : ''}
+            </div>`);
+
+        // ── PAGE 4: Man Record ───────────────────────────────────────────────
+        _currentPdfPage = 4;
+        const manTotal    = manRecs.reduce((s, r) => s + (r.TotalAttendance||0), 0);
+        const manPass     = manRecs.reduce((s, r) => s + (r.Pass||0), 0);
+        const manPassRate = manTotal > 0 ? Math.round(manPass/manTotal*100) : 0;
+        const page4 = PAGE(`
+            ${header(`ผลการทดสอบ Man Record ปี ${thaiYear}`)}
+            <div style="flex:1;padding:22px 32px;display:flex;flex-direction:column;gap:16px;overflow:hidden">
+                <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:12px">
+                    ${kpiBox('แผนกที่บันทึก', manRecs.length, '#6366f1')}
+                    ${kpiBox('ผู้เข้าสอบรวม', manTotal, '#0284c7')}
+                    ${kpiBox('Pass Rate รวม', `${manPassRate}%`, manPassRate>=80?'#059669':manPassRate>=60?'#d97706':'#ef4444')}
+                </div>
+                ${sectionTitle(`สรุปผลสอบรายแผนก (${manRecs.length} แผนก)`)}
+                ${manRecs.length ? `
+                <table style="width:100%;border-collapse:collapse;font-size:12px">
+                    <thead>
+                        <tr style="background:#f8fafc">
+                            <th style="padding:8px;text-align:left;font-size:10px;color:#64748b;font-weight:700;text-transform:uppercase;border-bottom:2px solid #e2e8f0">แผนก</th>
+                            <th style="padding:8px;text-align:center;font-size:10px;color:#64748b;font-weight:700;text-transform:uppercase;border-bottom:2px solid #e2e8f0">ผู้เข้าสอบ</th>
+                            <th style="padding:8px;text-align:center;font-size:10px;color:#64748b;font-weight:700;text-transform:uppercase;border-bottom:2px solid #e2e8f0">ผ่าน</th>
+                            <th style="padding:8px;text-align:center;font-size:10px;color:#64748b;font-weight:700;text-transform:uppercase;border-bottom:2px solid #e2e8f0">ไม่ผ่าน</th>
+                            <th style="padding:8px;text-align:left;font-size:10px;color:#64748b;font-weight:700;text-transform:uppercase;border-bottom:2px solid #e2e8f0">Pass Rate</th>
+                            <th style="padding:8px;text-align:center;font-size:10px;color:#64748b;font-weight:700;text-transform:uppercase;border-bottom:2px solid #e2e8f0">ผลสอบ</th>
+                            <th style="padding:8px;text-align:left;font-size:10px;color:#64748b;font-weight:700;text-transform:uppercase;border-bottom:2px solid #e2e8f0">วันที่สอบ</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        ${manRecs.map(r => {
+                            const rate = r.TotalAttendance > 0 ? Math.round((r.Pass/r.TotalAttendance)*100) : 0;
+                            const rateColor = rate>=80?'#059669':rate>=60?'#d97706':'#ef4444';
+                            const MAN_STATUS_COLORS = { Pass:'#059669', Fail:'#ef4444', Pending:'#d97706' };
+                            const barW = Math.round(rate * 0.7);
+                            return `<tr style="border-bottom:1px solid #f1f5f9">
+                                <td style="padding:7px 8px;color:#334155;font-weight:600">${escHtml(r.Department||'—')}</td>
+                                <td style="padding:7px 8px;text-align:center;color:#334155">${r.TotalAttendance||0}</td>
+                                <td style="padding:7px 8px;text-align:center;font-weight:700;color:#059669">${r.Pass||0}</td>
+                                <td style="padding:7px 8px;text-align:center;font-weight:700;color:#ef4444">${r.Fail||0}</td>
+                                <td style="padding:7px 8px">
+                                    <div style="display:flex;align-items:center;gap:6px">
+                                        <div style="flex:1;height:6px;border-radius:4px;background:#f1f5f9;overflow:hidden">
+                                            <div style="height:100%;border-radius:4px;background:${rateColor};width:${rate}%"></div>
+                                        </div>
+                                        <span style="font-size:11px;font-weight:700;color:${rateColor};width:36px">${rate}%</span>
+                                    </div>
+                                </td>
+                                <td style="padding:7px 8px;text-align:center">
+                                    <span style="font-size:10px;font-weight:700;padding:2px 8px;border-radius:20px;background:${MAN_STATUS_COLORS[r.Status]||'#64748b'}22;color:${MAN_STATUS_COLORS[r.Status]||'#64748b'}">${escHtml(r.Status||'—')}</span>
+                                </td>
+                                <td style="padding:7px 8px;font-size:10px;color:#64748b;white-space:nowrap">${fmtShort(r.ExamDate)}</td>
+                            </tr>`;
+                        }).join('')}
+                    </tbody>
+                </table>` : `<p style="font-size:12px;color:#94a3b8;text-align:center;padding:24px">ยังไม่มีข้อมูลผลสอบในปี ${thaiYear}</p>`}
+            </div>`);
+
+        // ── Render all pages ─────────────────────────────────────────────────
+        const { jsPDF } = jspdf;
+        const pdf = new jsPDF({ unit:'mm', format:'a4', orientation:'portrait' });
+        const pages = [page1, page2, page3, page4];
+
+        for (let i = 0; i < pages.length; i++) {
+            const div = document.createElement('div');
+            div.style.cssText = 'position:fixed;left:-9999px;top:0;font-family:Kanit,sans-serif';
+            div.innerHTML = pages[i];
+            document.body.appendChild(div);
+            try {
+                const canvas = await html2canvas(div.firstElementChild, { scale:1.5, useCORS:true, backgroundColor:'#fff', logging:false });
+                if (i > 0) pdf.addPage();
+                pdf.addImage(canvas.toDataURL('image/jpeg', 0.92), 'JPEG', 0, 0, 210, 297);
+            } finally {
+                document.body.removeChild(div);
+            }
+        }
+
+        pdf.save(`4M_Change_Management_${_statsYear}.pdf`);
+        showToast('ดาวน์โหลด PDF สำเร็จ (4 หน้า)', 'success');
+    } catch (err) { showError(err); }
+};
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Event Listeners
 // ─────────────────────────────────────────────────────────────────────────────
 function setupEventListeners() {
@@ -1264,6 +1854,20 @@ function setupEventListeners() {
         }
         const noticeClose = e.target.closest('.btn-notice-close');
         if (noticeClose) { showCloseForm(noticeClose.dataset.id, noticeClose.dataset.no); return; }
+        const noticePending = e.target.closest('.btn-notice-pending');
+        if (noticePending) {
+            const ok = await showConfirmationModal('เปลี่ยนสถานะ', `เปลี่ยน Notice "${noticePending.dataset.no}" เป็น Pending ใช่หรือไม่?`);
+            if (ok) {
+                showLoading('กำลังอัปเดต...');
+                try {
+                    await API.put(`/fourm/notices/${noticePending.dataset.id}`, { Status: 'Pending' });
+                    showToast('เปลี่ยนสถานะเป็น Pending สำเร็จ', 'success');
+                    await fetchAndRenderNotices();
+                } catch (err) { showError(err); }
+                finally { hideLoading(); }
+            }
+            return;
+        }
         const noticeDel = e.target.closest('.btn-notice-delete');
         if (noticeDel) {
             const ok = await showConfirmationModal('ยืนยันการลบ', `ลบ Change Notice "${noticeDel.dataset.no}" ใช่หรือไม่?`);
