@@ -68,6 +68,7 @@ let _chartLine      = null;
 let _chartPie       = null;
 let _chartBar       = null;
 let _chartMan       = null;
+let _chartManDonut  = null;
 let _departments    = [];
 let _statsData      = null;
 let _lastNotices    = [];
@@ -89,6 +90,7 @@ export async function loadFourmPage() {
 
     if (!_listenersReady) { setupEventListeners(); _listenersReady = true; }
     _activeTab = window._getTab?.('fourm', _activeTab) || _activeTab;
+    if (_activeTab === 'systems') _activeTab = 'dashboard';
     await _loadDepts();
     switchTab(_activeTab);
     _loadHeroStats();
@@ -102,7 +104,6 @@ function _getFourmTabs() {
         { id:'dashboard', label:'Dashboard',    icon:`<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"/>` },
         { id:'notices',   label:'Change Notice',icon:`<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4"/>` },
         { id:'man',       label:'Man Record',   icon:`<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0z"/>` },
-        { id:'systems',   label:'ระบบภายนอก',  icon:`<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"/>` },
     ];
 }
 
@@ -116,7 +117,7 @@ function buildShell() {
 
     return `
     <div class="space-y-6 animate-fade-in pb-10">
-        <div class="relative overflow-hidden rounded-2xl" style="background:linear-gradient(135deg,#312e81 0%,#4338ca 55%,#0284c7 100%)">
+        <div class="relative overflow-hidden rounded-2xl" style="background:linear-gradient(135deg,#064e3b 0%,#065f46 55%,#0d9488 100%)">
             <div class="absolute inset-0 opacity-10 pointer-events-none">
                 <svg width="100%" height="100%"><defs><pattern id="fourm-dots" width="24" height="24" patternUnits="userSpaceOnUse"><circle cx="12" cy="12" r="1.3" fill="white"/></pattern></defs><rect width="100%" height="100%" fill="url(#fourm-dots)"/></svg>
             </div>
@@ -134,7 +135,7 @@ function buildShell() {
                             </span>
                         </div>
                         <h1 class="text-xl md:text-2xl font-bold text-white leading-snug">บริหารการเปลี่ยนแปลง 4M</h1>
-                        <p class="text-sm mt-1" style="color:rgba(199,210,254,0.85)">Man · Machine · Material · Method · Thai Summit Harness Co., Ltd.</p>
+                        <p class="text-sm mt-1" style="color:rgba(167,243,208,0.85)">Man · Machine · Material · Method · Thai Summit Harness Co., Ltd.</p>
                     </div>
                     <div id="fourm-hero-stats" class="grid grid-cols-2 md:grid-cols-4 gap-3 w-full md:w-auto flex-shrink-0"></div>
                 </div>
@@ -163,7 +164,7 @@ async function switchTab(tab) {
         case 'dashboard': await renderDashboard(c); break;
         case 'notices':   await renderNotices(c);   break;
         case 'man':       await renderMan(c);        break;
-        case 'systems':   await renderSystems(c);    break;
+        default:          await renderDashboard(c); break;
     }
 }
 
@@ -242,15 +243,18 @@ async function _renderDashInner() {
     const inner = document.getElementById('fourm-dash-inner');
     if (!inner) return;
     try {
-        const res  = await API.get(`/fourm/stats?year=${_statsYear}`);
-        const data = res?.data || {};
+        const [statsRes, overdueRes] = await Promise.all([
+            API.get(`/fourm/stats?year=${_statsYear}`),
+            API.get(`/fourm/notices?overdue=1&year=${_statsYear}`).catch(() => ({ data: [] })),
+        ]);
+        const data = statsRes?.data || {};
         const kpi  = data.noticeKpi || {};
-        const overdue    = data.overdueCount || 0;
-        const byDeptType = data.byDeptType   || [];
+        const overdue      = data.overdueCount || 0;
+        const byDeptType   = data.byDeptType   || [];
+        const overdueList  = normalizeApiArray(overdueRes?.data ?? overdueRes) || [];
 
         const total   = parseInt(kpi.total)   || 0;
         const closed  = parseInt(kpi.closed)  || 0;
-        const pending = parseInt(kpi.pending) || 0;
         const closureRate = total > 0 ? Math.round(closed / total * 100) : 0;
 
         inner.innerHTML = `
@@ -259,6 +263,10 @@ async function _renderDashInner() {
             <div class="grid grid-cols-2 lg:grid-cols-4 gap-4">
                 ${_buildKpiCards(kpi, overdue, closureRate)}
             </div>
+
+            ${_buildQuickAccess()}
+
+            ${_buildSLAOverdueSection(kpi, closureRate, overdueList)}
 
             <div class="grid grid-cols-1 lg:grid-cols-3 gap-4">
                 <div class="lg:col-span-2 card p-5">
@@ -284,6 +292,35 @@ async function _renderDashInner() {
         renderLineChart(data.monthly || []);
         renderPieChart(data.byType   || []);
         renderBarChart(data.byDept   || []);
+
+        _loadFourmForms(_isAdmin).then(() => {
+            _renderFourmFormsDash();
+            document.getElementById('btn-add-fourm-form-dash')?.addEventListener('click', _openFourmFormUploadModal);
+            document.getElementById('fourm-forms-dash')?.addEventListener('click', async (e) => {
+                const toggleBtn = e.target.closest('.btn-fourm-form-toggle');
+                if (toggleBtn) {
+                    const { id, active, title, version, sortOrder, description } = toggleBtn.dataset;
+                    try {
+                        await API.put(`/module-forms/${id}`, { title, description, version, sortOrder: parseInt(sortOrder)||99, isActive: active === '1' ? 0 : 1 });
+                        showToast('อัปเดตสำเร็จ', 'success');
+                        await _loadFourmForms(true); _renderFourmFormsDash();
+                    } catch (err) { showError(err); }
+                    return;
+                }
+                const delBtn = e.target.closest('.btn-fourm-form-delete');
+                if (delBtn) {
+                    const ok = await showConfirmationModal('ยืนยันการลบ', `ลบแบบฟอร์ม "${delBtn.dataset.title}" ใช่หรือไม่?`);
+                    if (ok) {
+                        try {
+                            await API.delete(`/module-forms/${delBtn.dataset.id}`);
+                            showToast('ลบสำเร็จ', 'success');
+                            await _loadFourmForms(true); _renderFourmFormsDash();
+                        } catch (err) { showError(err); }
+                    }
+                }
+            });
+        });
+
     } catch (err) { console.error('4M dashboard error:', err); }
 }
 
@@ -438,6 +475,151 @@ function _buildDeptMatrix(byDeptType) {
     </div>`;
 }
 
+function _buildSLAOverdueSection(kpi, closureRate, overdueList) {
+    const closureColor = closureRate >= 80 ? '#059669' : closureRate >= 50 ? '#d97706' : '#ef4444';
+    const circ    = 2 * Math.PI * 34;
+    const dashFill = Math.round(circ * closureRate / 100);
+    const dashGap  = Math.round(circ - dashFill);
+    const overdueRows = overdueList.slice(0, 5).map(r => {
+        const daysOld  = Math.floor((Date.now() - new Date(r.RequestDate)) / 86400000);
+        const daysOver = Math.max(0, daysOld - OVERDUE_DAYS);
+        return `
+        <div class="px-4 py-3 flex items-start gap-3 border-b border-slate-50 last:border-b-0">
+            <span class="font-mono text-xs font-bold text-indigo-700 bg-indigo-50 px-2 py-0.5 rounded flex-shrink-0 mt-0.5">${escHtml(r.NoticeNo||'—')}</span>
+            <div class="min-w-0 flex-1">
+                <p class="text-sm font-medium text-slate-800 truncate">${escHtml(r.Title||'—')}</p>
+                <p class="text-xs text-slate-400 mt-0.5">${escHtml(r.ResponsiblePerson||'—')}${r.Department ? ` · ${escHtml(r.Department)}` : ''}</p>
+            </div>
+            <span class="text-[11px] font-bold text-red-600 bg-red-50 px-2 py-0.5 rounded whitespace-nowrap flex-shrink-0 mt-0.5">ค้าง ${daysOver} วัน</span>
+        </div>`;
+    }).join('');
+
+    const overdueCount = parseInt(kpi.overdueCount ?? overdueList.length) || overdueList.length;
+
+    return `
+    <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
+        <div class="card p-5">
+            <h3 class="text-sm font-bold text-slate-600 mb-4">ภาพรวมการดำเนินการ</h3>
+            <div class="flex items-center gap-6">
+                <div class="relative flex-shrink-0">
+                    <svg width="88" height="88" viewBox="0 0 80 80" style="transform:rotate(-90deg)">
+                        <circle cx="40" cy="40" r="34" fill="none" stroke="#e2e8f0" stroke-width="8"/>
+                        <circle cx="40" cy="40" r="34" fill="none" stroke="${closureColor}" stroke-width="8"
+                                stroke-dasharray="${dashFill} ${dashGap}" stroke-linecap="round"/>
+                    </svg>
+                    <div class="absolute inset-0 flex items-center justify-center">
+                        <span class="text-lg font-extrabold" style="color:${closureColor}">${closureRate}%</span>
+                    </div>
+                </div>
+                <div class="space-y-2.5 flex-1">
+                    <div class="flex justify-between items-center text-sm">
+                        <span class="text-slate-500">Closure Rate</span>
+                        <span class="font-bold" style="color:${closureColor}">${closureRate}%</span>
+                    </div>
+                    <div class="h-px bg-slate-100"></div>
+                    <div class="flex justify-between items-center text-sm">
+                        <span class="text-slate-500">ปิดแล้ว</span>
+                        <span class="font-bold text-emerald-600">${parseInt(kpi.closed)||0} รายการ</span>
+                    </div>
+                    <div class="flex justify-between items-center text-sm">
+                        <span class="text-slate-500">ค้างนาน (&gt;${OVERDUE_DAYS} วัน)</span>
+                        <span class="font-bold" style="color:${overdueList.length > 0 ? '#ef4444' : '#94a3b8'}">${overdueList.length} รายการ</span>
+                    </div>
+                    <div class="flex justify-between items-center text-sm">
+                        <span class="text-slate-500">รอดำเนินการ</span>
+                        <span class="font-bold" style="color:${(parseInt(kpi.pending)||0) > 0 ? '#d97706' : '#94a3b8'}">${parseInt(kpi.pending)||0} รายการ</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="card overflow-hidden">
+            <div class="px-5 py-3.5 border-b border-slate-100 flex items-center gap-2">
+                <svg class="w-4 h-4 text-red-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"/>
+                </svg>
+                <h3 class="text-sm font-bold text-slate-700">รายการค้างนาน</h3>
+                ${overdueList.length > 5
+                    ? `<span class="ml-auto text-xs text-slate-400">แสดง 5 จาก ${overdueList.length} รายการ</span>`
+                    : overdueList.length > 0
+                        ? `<span class="ml-auto text-xs font-semibold text-red-600">${overdueList.length} รายการ</span>`
+                        : ''}
+            </div>
+            ${overdueRows || `
+            <div class="flex flex-col items-center justify-center py-8 text-slate-400">
+                <svg class="w-8 h-8 mb-2 opacity-30" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/>
+                </svg>
+                <p class="text-sm font-medium">ไม่มีรายการค้างนาน</p>
+                <p class="text-xs mt-0.5">ทุกรายการอยู่ในระยะดำเนินการปกติ</p>
+            </div>`}
+        </div>
+    </div>`;
+}
+
+function _buildQuickAccess() {
+    return `
+    <div class="card overflow-hidden">
+        <div class="px-5 py-3.5 border-b border-slate-100 flex items-center gap-2">
+            <span class="w-7 h-7 rounded-lg flex items-center justify-center flex-shrink-0" style="background:linear-gradient(135deg,#6366f1,#0284c7)">
+                <svg class="w-4 h-4 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 10h16M4 14h16M4 18h16"/>
+                </svg>
+            </span>
+            <h3 class="text-sm font-bold text-slate-700">เครื่องมือ & แบบฟอร์ม</h3>
+        </div>
+        <div class="p-5">
+            <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                <div class="lg:col-span-2">
+                    <p class="text-[11px] font-semibold text-slate-400 uppercase tracking-wider mb-3">ระบบที่เกี่ยวข้อง</p>
+                    <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                        ${EXTERNAL_SYSTEMS.map(s => `
+                        <div class="flex flex-col items-center gap-3 p-4 rounded-xl border transition-all hover:shadow-md"
+                             style="background:${s.light};border-color:${s.color}30">
+                            <div class="w-12 h-12 rounded-2xl flex items-center justify-center flex-shrink-0"
+                                 style="background:linear-gradient(135deg,${s.color},${s.color}bb);box-shadow:0 4px 14px ${s.color}40">
+                                <svg class="w-6 h-6 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">${s.icon}</svg>
+                            </div>
+                            <div class="flex-1 text-center">
+                                <p class="font-bold text-slate-800 text-sm">${s.title}</p>
+                                <p class="text-xs text-slate-500 mt-1 leading-relaxed">${s.desc.substring(0, 55)}…</p>
+                            </div>
+                            <a href="${s.url}" target="_blank" rel="noopener noreferrer"
+                               class="w-full flex items-center justify-center gap-1.5 px-3 py-2 rounded-xl text-xs font-bold text-white"
+                               style="background:linear-gradient(135deg,${s.color},${s.color}cc);box-shadow:0 2px 8px ${s.color}35">
+                                <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"/>
+                                </svg>
+                                เปิดระบบ
+                            </a>
+                        </div>`).join('')}
+                    </div>
+                </div>
+                <div>
+                    <div class="flex items-center justify-between mb-3">
+                        <p class="text-[11px] font-semibold text-slate-400 uppercase tracking-wider">แบบฟอร์มที่เกี่ยวข้อง</p>
+                        ${_isAdmin ? `
+                        <button id="btn-add-fourm-form-dash"
+                                class="flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-semibold text-white"
+                                style="background:linear-gradient(135deg,#6366f1,#0284c7)">
+                            <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/>
+                            </svg>
+                            อัปโหลด
+                        </button>
+                        ` : ''}
+                    </div>
+                    <div id="fourm-forms-dash">
+                        <div class="flex justify-center py-6">
+                            <div class="animate-spin h-5 w-5 border-2 border-indigo-400 border-t-transparent rounded-full"></div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>`;
+}
+
 function renderLineChart(monthly) {
     const ctx = document.getElementById('fourm-chart-line');
     if (!ctx) return;
@@ -524,7 +706,6 @@ async function renderNotices(container) {
                             </svg>
                             Excel
                         </button>
-                        ${_isAdmin ? `
                         <button id="btn-add-notice"
                                 class="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-semibold text-white whitespace-nowrap"
                                 style="background:linear-gradient(135deg,#6366f1,#0284c7);box-shadow:0 2px 8px rgba(99,102,241,0.3)">
@@ -532,7 +713,7 @@ async function renderNotices(container) {
                                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/>
                             </svg>
                             เพิ่ม Notice
-                        </button>` : ''}
+                        </button>
                     </div>
                 </div>
             </div>
@@ -671,13 +852,14 @@ function _exportNoticesToExcel() {
 function showNoticeForm(existing = null) {
     const r     = normalizeApiObject(existing);
     const today = new Date().toISOString().split('T')[0];
+    const ownerName = r?.ResponsiblePerson || _currentUser.name || _currentUser.EmployeeName || _currentUser.id || '';
     const html  = `
         <form id="notice-form" class="space-y-4" enctype="multipart/form-data">
             <div class="grid grid-cols-2 gap-4">
                 <div>
-                    <label class="block text-sm font-semibold text-slate-700 mb-1.5">Notice No <span class="text-red-500">*</span></label>
-                    <input type="text" name="NoticeNo" class="form-input w-full" required
-                           value="${escHtml(r?.NoticeNo||'')}" placeholder="เช่น 4M-2025-001" ${existing?'readonly':''}>
+                    <label class="block text-sm font-semibold text-slate-700 mb-1.5">Notice No</label>
+                    <input type="text" class="form-input w-full bg-slate-50 text-slate-500" readonly ${existing ? '' : 'disabled'}
+                           value="${escHtml(r?.NoticeNo||'ระบบจะสร้างให้อัตโนมัติ')}" placeholder="Auto">
                 </div>
                 <div>
                     <label class="block text-sm font-semibold text-slate-700 mb-1.5">วันที่ขอเปลี่ยน <span class="text-red-500">*</span></label>
@@ -717,8 +899,8 @@ function showNoticeForm(existing = null) {
             </div>
             <div>
                 <label class="block text-sm font-semibold text-slate-700 mb-1.5">ผู้รับผิดชอบ</label>
-                <input type="text" name="ResponsiblePerson" class="form-input w-full"
-                       value="${escHtml(r?.ResponsiblePerson||'')}" placeholder="ชื่อผู้รับผิดชอบ">
+                <input type="text" class="form-input w-full bg-slate-50 text-slate-500" readonly disabled
+                       value="${escHtml(ownerName)}" placeholder="Owner">
             </div>
             <div>
                 <label class="block text-sm font-semibold text-slate-700 mb-1.5">ไฟล์แนบ</label>
@@ -937,7 +1119,7 @@ window._fourmExportNoticePDF = async function(id) {
         div.innerHTML = `
         <div style="width:794px;min-height:1122px;display:flex;flex-direction:column;background:#fff">
             <!-- Header gradient -->
-            <div style="background:linear-gradient(135deg,#312e81,#4338ca 55%,#0284c7);padding:32px 40px 28px;position:relative;overflow:hidden">
+            <div style="background:linear-gradient(135deg,#064e3b,#065f46 55%,#0d9488);padding:32px 40px 28px;position:relative;overflow:hidden">
                 <div style="position:absolute;inset:0;opacity:.08">
                     <svg width="100%" height="100%"><defs><pattern id="pd" width="24" height="24" patternUnits="userSpaceOnUse"><circle cx="12" cy="12" r="1.3" fill="white"/></pattern></defs><rect width="100%" height="100%" fill="url(#pd)"/></svg>
                 </div>
@@ -1002,7 +1184,7 @@ window._fourmExportNoticePDF = async function(id) {
             </div>` : ''}
 
             <!-- Footer -->
-            <div style="margin-top:auto;padding:16px 40px;background:linear-gradient(135deg,#312e81,#4338ca 55%,#0284c7);display:flex;justify-content:space-between;align-items:center">
+            <div style="margin-top:auto;padding:16px 40px;background:linear-gradient(135deg,#064e3b,#065f46 55%,#0d9488);display:flex;justify-content:space-between;align-items:center">
                 <span style="color:rgba(199,210,254,0.8);font-size:11px">4M Change Management · Thai Summit Harness Co., Ltd.</span>
                 <span style="color:rgba(199,210,254,0.8);font-size:11px">สร้างเมื่อ ${new Date().toLocaleDateString('th-TH',{day:'numeric',month:'short',year:'numeric'})}</span>
             </div>
@@ -1052,11 +1234,26 @@ async function renderMan(container) {
                 </button>` : ''}
             </div>
 
-            <div id="man-kpi-strip" class="grid grid-cols-2 lg:grid-cols-4 gap-4"></div>
+            <div id="man-kpi-strip" class="grid grid-cols-2 lg:grid-cols-4 gap-4">
+                ${Array(4).fill(0).map(() => `
+                <div class="bg-white rounded-xl p-4 border border-slate-100 shadow-sm flex items-center gap-3 animate-pulse">
+                    <div class="w-10 h-10 rounded-xl bg-slate-100 flex-shrink-0"></div>
+                    <div class="flex-1">
+                        <div class="h-7 bg-slate-100 rounded mb-2 w-14"></div>
+                        <div class="h-3 bg-slate-50 rounded w-20"></div>
+                    </div>
+                </div>`).join('')}
+            </div>
 
-            <div id="man-chart-card" class="card p-5" style="display:none">
-                <h3 class="text-sm font-bold text-slate-600 mb-4">Pass Rate รายแผนก</h3>
-                <div id="man-chart-inner"><canvas id="fourm-chart-man"></canvas></div>
+            <div id="man-chart-row" class="grid grid-cols-1 lg:grid-cols-3 gap-4" style="display:none">
+                <div class="card p-5">
+                    <h3 class="text-sm font-bold text-slate-600 mb-3">สัดส่วนผลสอบรวม</h3>
+                    <div style="height:210px;position:relative"><canvas id="fourm-chart-man-donut"></canvas></div>
+                </div>
+                <div class="card p-5 lg:col-span-2">
+                    <h3 class="text-sm font-bold text-slate-600 mb-3">Pass Rate รายแผนก</h3>
+                    <div id="man-chart-inner"><canvas id="fourm-chart-man"></canvas></div>
+                </div>
             </div>
 
             <div class="card overflow-hidden">
@@ -1097,9 +1294,9 @@ async function fetchAndRenderMan() {
         if (!rows.length) {
             tbody.innerHTML = `<tr><td colspan="${_isAdmin?8:7}" class="text-center py-10 text-slate-400 text-sm">ยังไม่มีผลสอบในปี ${_manFilter.year}</td></tr>`;
             const kpiStrip = document.getElementById('man-kpi-strip');
-            const chartCard = document.getElementById('man-chart-card');
+            const chartRow = document.getElementById('man-chart-row');
             if (kpiStrip) kpiStrip.innerHTML = '';
-            if (chartCard) chartCard.style.display = 'none';
+            if (chartRow)  chartRow.style.display = 'none';
             return;
         }
 
@@ -1170,14 +1367,47 @@ async function fetchAndRenderMan() {
                 </div>`).join('');
         }
 
-        // Horizontal bar chart (pass rate per dept)
-        const chartCard  = document.getElementById('man-chart-card');
+        // Charts row
+        const chartRow   = document.getElementById('man-chart-row');
         const chartInner = document.getElementById('man-chart-inner');
-        if (chartCard && chartInner && rows.length > 0) {
-            chartCard.style.display = '';
+        if (chartRow && rows.length > 0) {
+            chartRow.style.display = '';
+
+            // Aggregate totals for donut
+            const totalPassD = rows.reduce((s, r) => s + (parseInt(r.Pass)||0), 0);
+            const totalFailD = rows.reduce((s, r) => s + (parseInt(r.Fail)||0), 0);
+
+            // Donut — Pass / Fail distribution
+            if (_chartManDonut) { _chartManDonut.destroy(); _chartManDonut = null; }
+            const ctxDonut = document.getElementById('fourm-chart-man-donut');
+            if (ctxDonut && (totalPassD + totalFailD) > 0) {
+                _chartManDonut = new Chart(ctxDonut, {
+                    type: 'doughnut',
+                    data: {
+                        labels: ['ผ่าน', 'ไม่ผ่าน'],
+                        datasets: [{
+                            data: [totalPassD, totalFailD],
+                            backgroundColor: ['rgba(5,150,105,0.8)', 'rgba(239,68,68,0.75)'],
+                            borderColor:     ['#059669', '#ef4444'],
+                            borderWidth: 2,
+                        }]
+                    },
+                    options: {
+                        responsive: true,
+                        maintainAspectRatio: false,
+                        cutout: '62%',
+                        plugins: {
+                            legend: { position:'bottom', labels:{ font:{ family:'Kanit', size:11 }, padding:12, boxWidth:12 } },
+                            tooltip: { callbacks: { label: ctx => ` ${ctx.label}: ${ctx.parsed} คน` } }
+                        }
+                    }
+                });
+            }
+
+            // Horizontal bar — pass rate per dept
             if (_chartMan) { _chartMan.destroy(); _chartMan = null; }
             const chartHeight = Math.max(180, rows.length * 34 + 40);
-            chartInner.style.height = `${chartHeight}px`;
+            if (chartInner) chartInner.style.height = `${chartHeight}px`;
             const ctx = document.getElementById('fourm-chart-man');
             if (ctx) {
                 const labels   = rows.map(r => r.Department || '—');
@@ -1201,8 +1431,8 @@ async function fetchAndRenderMan() {
                     }
                 });
             }
-        } else if (chartCard) {
-            chartCard.style.display = 'none';
+        } else if (chartRow) {
+            chartRow.style.display = 'none';
         }
     } catch (err) {
         if (tbody) tbody.innerHTML = `<tr><td colspan="${_isAdmin?8:7}" class="text-center py-6 text-red-500 text-sm">${escHtml(err.message)}</td></tr>`;
@@ -1299,100 +1529,6 @@ function showManForm(existing = null) {
     });
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Tab 4: External Systems + Module Forms
-// ─────────────────────────────────────────────────────────────────────────────
-async function renderSystems(container) {
-    container.innerHTML = `
-        <div class="space-y-6">
-            <div>
-                <h3 class="text-sm font-bold text-slate-700 mb-3 flex items-center gap-2">
-                    <svg class="w-4 h-4 text-indigo-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"/>
-                    </svg>
-                    ระบบภายนอก
-                </h3>
-                <div class="grid grid-cols-1 sm:grid-cols-3 gap-4">
-                    ${EXTERNAL_SYSTEMS.map(s => `
-                    <div class="card overflow-hidden hover:shadow-lg transition-all group">
-                        <div class="h-1.5 w-full" style="background:linear-gradient(90deg,${s.color},${s.color}cc)"></div>
-                        <div class="p-5 flex flex-col gap-3">
-                            <div class="w-12 h-12 rounded-xl flex items-center justify-center flex-shrink-0 transition-transform group-hover:scale-105"
-                                 style="background:${s.light};color:${s.color}">
-                                <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">${s.icon}</svg>
-                            </div>
-                            <div>
-                                <h3 class="font-bold text-slate-800 leading-tight mb-1">${s.title}</h3>
-                                <p class="text-xs text-slate-500 leading-relaxed mb-4">${s.desc}</p>
-                                <a href="${s.url}" target="_blank" rel="noopener noreferrer"
-                                   class="inline-flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-semibold text-white"
-                                   style="background:linear-gradient(135deg,${s.color},${s.color}cc);box-shadow:0 2px 8px ${s.color}40">
-                                    <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"/>
-                                    </svg>
-                                    เปิดระบบ
-                                </a>
-                            </div>
-                        </div>
-                    </div>`).join('')}
-                </div>
-            </div>
-
-            <div>
-                <div class="flex items-center justify-between mb-3">
-                    <h3 class="text-sm font-bold text-slate-700 flex items-center gap-2">
-                        <svg class="w-4 h-4 text-indigo-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/>
-                        </svg>
-                        แบบฟอร์มที่เกี่ยวข้อง
-                    </h3>
-                    ${_isAdmin ? `
-                    <button id="btn-add-fourm-form"
-                            class="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold text-white"
-                            style="background:linear-gradient(135deg,#6366f1,#0284c7)">
-                        <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/>
-                        </svg>
-                        อัปโหลดแบบฟอร์ม
-                    </button>` : ''}
-                </div>
-                <div id="fourm-forms-section">
-                    <div class="card p-6 flex justify-center">
-                        <div class="animate-spin h-5 w-5 border-2 border-indigo-400 border-t-transparent rounded-full"></div>
-                    </div>
-                </div>
-            </div>
-        </div>`;
-
-    _loadFourmForms(_isAdmin).then(() => {
-        _renderFourmFormsSection();
-        document.getElementById('btn-add-fourm-form')?.addEventListener('click', _openFourmFormUploadModal);
-        document.getElementById('fourm-forms-section')?.addEventListener('click', async (e) => {
-            const toggleBtn = e.target.closest('.btn-fourm-form-toggle');
-            if (toggleBtn) {
-                const { id, active, title, version, sortOrder, description } = toggleBtn.dataset;
-                try {
-                    await API.put(`/module-forms/${id}`, { title, description, version, sortOrder: parseInt(sortOrder)||99, isActive: active === '1' ? 0 : 1 });
-                    showToast('อัปเดตสำเร็จ', 'success');
-                    await _loadFourmForms(true); _renderFourmFormsSection();
-                } catch (err) { showError(err); }
-                return;
-            }
-            const delBtn = e.target.closest('.btn-fourm-form-delete');
-            if (delBtn) {
-                const ok = await showConfirmationModal('ยืนยันการลบ', `ลบแบบฟอร์ม "${delBtn.dataset.title}" ใช่หรือไม่?`);
-                if (ok) {
-                    try {
-                        await API.delete(`/module-forms/${delBtn.dataset.id}`);
-                        showToast('ลบสำเร็จ', 'success');
-                        await _loadFourmForms(true); _renderFourmFormsSection();
-                    } catch (err) { showError(err); }
-                }
-                return;
-            }
-        });
-    });
-}
 
 async function _loadFourmForms(adminAll = false) {
     try {
@@ -1401,92 +1537,71 @@ async function _loadFourmForms(adminAll = false) {
     } catch { _fourmForms = []; }
 }
 
-function _renderFourmFormsSection() {
-    const el = document.getElementById('fourm-forms-section');
+function _renderFourmFormsDash() {
+    const el = document.getElementById('fourm-forms-dash');
     if (!el) return;
 
     if (_isAdmin) {
         if (!_fourmForms.length) {
-            el.innerHTML = `<div class="card p-6 text-center text-slate-400 text-sm">ยังไม่มีแบบฟอร์ม — คลิก "อัปโหลดแบบฟอร์ม" เพื่อเพิ่ม</div>`;
+            el.innerHTML = `<p class="text-xs text-slate-400 text-center py-4">ยังไม่มีแบบฟอร์ม — คลิก "อัปโหลด" เพื่อเพิ่ม</p>`;
             return;
         }
         el.innerHTML = `
-        <div class="card overflow-hidden">
-            <table class="w-full text-sm">
-                <thead>
-                    <tr class="bg-slate-50 text-xs font-semibold text-slate-500 uppercase tracking-wider">
-                        <th class="px-4 py-3 text-left">ชื่อแบบฟอร์ม</th>
-                        <th class="px-4 py-3 text-left">เวอร์ชัน</th>
-                        <th class="px-4 py-3 text-center">ลำดับ</th>
-                        <th class="px-4 py-3 text-center">สถานะ</th>
-                        <th class="px-4 py-3"></th>
-                    </tr>
-                </thead>
-                <tbody id="fourm-forms-tbody" class="divide-y divide-slate-100">
-                    ${_fourmForms.map(f => `
-                    <tr class="hover:bg-slate-50 group ${!f.IsActive ? 'opacity-50' : ''}">
-                        <td class="px-4 py-3">
-                            <a href="${f.FileUrl}" target="_blank" rel="noopener noreferrer"
-                               class="font-medium text-indigo-700 hover:underline">${escHtml(f.Title)}</a>
-                            ${f.Description ? `<p class="text-xs text-slate-400 mt-0.5 truncate max-w-xs">${escHtml(f.Description)}</p>` : ''}
-                        </td>
-                        <td class="px-4 py-3 text-slate-600 text-xs">${escHtml(f.Version||'-')}</td>
-                        <td class="px-4 py-3 text-center text-slate-600">${f.SortOrder}</td>
-                        <td class="px-4 py-3 text-center">
-                            <span class="px-2 py-0.5 rounded-full text-xs font-semibold ${f.IsActive ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-100 text-slate-500'}">
-                                ${f.IsActive ? 'แสดง' : 'ซ่อน'}
-                            </span>
-                        </td>
-                        <td class="px-4 py-3 text-right">
-                            <div class="flex items-center gap-1 justify-end opacity-0 group-hover:opacity-100 transition-opacity">
-                                <button class="btn-fourm-form-toggle px-2 py-1 rounded-lg text-xs font-semibold hover:bg-slate-100 transition-colors text-slate-500"
-                                        data-id="${f.id}" data-active="${f.IsActive}" data-title="${escHtml(f.Title)}"
-                                        data-version="${escHtml(f.Version||'')}" data-sort-order="${f.SortOrder}"
-                                        data-description="${escHtml(f.Description||'')}">
-                                    ${f.IsActive ? 'ซ่อน' : 'แสดง'}
-                                </button>
-                                <button class="btn-fourm-form-delete p-1.5 text-slate-300 hover:text-red-500 hover:bg-red-50 rounded-lg transition-colors"
-                                        data-id="${f.id}" data-title="${escHtml(f.Title)}" title="ลบ">
-                                    <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/>
-                                    </svg>
-                                </button>
-                            </div>
-                        </td>
-                    </tr>`).join('')}
-                </tbody>
-            </table>
+        <div class="divide-y divide-slate-100">
+            ${_fourmForms.map(f => {
+                const ext = (f.FileUrl||'').split('?')[0].split('.').pop().toUpperCase();
+                return `
+                <div class="flex items-center gap-2.5 py-2.5 hover:bg-slate-50 rounded-lg group ${!f.IsActive ? 'opacity-50' : ''}">
+                    <div class="w-7 h-7 rounded-lg flex items-center justify-center flex-shrink-0 text-[10px] font-bold"
+                         style="background:#eef2ff;color:#4338ca">${escHtml(ext||'FILE')}</div>
+                    <div class="flex-1 min-w-0">
+                        <a href="${f.FileUrl}" target="_blank" rel="noopener noreferrer"
+                           class="text-xs font-semibold text-slate-800 hover:text-indigo-600 leading-snug block truncate">${escHtml(f.Title)}</a>
+                        ${f.Version ? `<span class="text-[10px] text-slate-400">${escHtml(f.Version)}</span>` : ''}
+                    </div>
+                    <div class="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0">
+                        <button class="btn-fourm-form-toggle text-[10px] font-semibold px-2 py-0.5 rounded-md hover:bg-slate-100 text-slate-500"
+                                data-id="${f.id}" data-active="${f.IsActive}" data-title="${escHtml(f.Title)}"
+                                data-version="${escHtml(f.Version||'')}" data-sort-order="${f.SortOrder}"
+                                data-description="${escHtml(f.Description||'')}">
+                            ${f.IsActive ? 'ซ่อน' : 'แสดง'}
+                        </button>
+                        <button class="btn-fourm-form-delete p-1 text-slate-300 hover:text-red-500 hover:bg-red-50 rounded-lg transition-colors"
+                                data-id="${f.id}" data-title="${escHtml(f.Title)}" title="ลบ">
+                            <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/>
+                            </svg>
+                        </button>
+                    </div>
+                </div>`;
+            }).join('')}
         </div>`;
     } else {
         const active = _fourmForms.filter(f => f.IsActive);
         if (!active.length) {
-            el.innerHTML = `<div class="card p-6 text-center text-slate-400 text-sm">ยังไม่มีแบบฟอร์มที่พร้อมใช้งาน</div>`;
+            el.innerHTML = `<p class="text-xs text-slate-400 text-center py-4">ยังไม่มีแบบฟอร์มที่พร้อมใช้งาน</p>`;
             return;
         }
         el.innerHTML = `
-        <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+        <div class="divide-y divide-slate-100">
             ${active.map(f => {
-                const ext = (f.FileUrl || '').split('?')[0].split('.').pop().toUpperCase();
+                const ext = (f.FileUrl||'').split('?')[0].split('.').pop().toUpperCase();
                 return `
-                <div class="card p-4 flex flex-col gap-2.5 hover:shadow-md transition-shadow">
-                    <div class="flex items-start gap-3">
-                        <div class="w-9 h-9 rounded-lg flex items-center justify-center flex-shrink-0 text-xs font-bold" style="background:#eef2ff;color:#4338ca">${escHtml(ext||'FILE')}</div>
-                        <div class="min-w-0">
-                            <p class="font-semibold text-slate-800 text-sm leading-snug">${escHtml(f.Title)}</p>
-                            ${f.Version ? `<p class="text-xs text-slate-400">${escHtml(f.Version)}</p>` : ''}
-                        </div>
+                <div class="flex items-center gap-2.5 py-2.5 hover:bg-slate-50 rounded-lg">
+                    <div class="w-7 h-7 rounded-lg flex items-center justify-center flex-shrink-0 text-[10px] font-bold"
+                         style="background:#eef2ff;color:#4338ca">${escHtml(ext||'FILE')}</div>
+                    <div class="flex-1 min-w-0">
+                        <p class="text-xs font-semibold text-slate-800 leading-snug truncate">${escHtml(f.Title)}</p>
+                        ${f.Version ? `<span class="text-[10px] text-slate-400">${escHtml(f.Version)}</span>` : ''}
                     </div>
-                    ${f.Description ? `<p class="text-xs text-slate-500 leading-relaxed">${escHtml(f.Description)}</p>` : ''}
-                    <div class="flex gap-2 mt-auto pt-1">
+                    <div class="flex items-center gap-1 flex-shrink-0">
                         <a href="${f.FileUrl}" target="_blank" rel="noopener noreferrer"
-                           class="flex-1 flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold text-indigo-600 bg-indigo-50 hover:bg-indigo-100 transition-colors">
+                           class="p-1.5 text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-lg transition-colors" title="ดูไฟล์">
                             <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"/></svg>
-                            ดูไฟล์
                         </a>
                         <a href="${f.FileUrl}" download
-                           class="flex-1 flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold text-slate-600 bg-slate-100 hover:bg-slate-200 transition-colors">
+                           class="p-1.5 text-slate-400 hover:text-emerald-600 hover:bg-emerald-50 rounded-lg transition-colors" title="ดาวน์โหลด">
                             <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/></svg>
-                            ดาวน์โหลด
                         </a>
                     </div>
                 </div>`;
@@ -1542,7 +1657,7 @@ function _openFourmFormUploadModal() {
             await API.post('/module-forms', new FormData(e.target));
             closeModal();
             showToast('อัปโหลดแบบฟอร์มสำเร็จ', 'success');
-            await _loadFourmForms(true); _renderFourmFormsSection();
+            await _loadFourmForms(true); _renderFourmFormsDash();
         } catch (err) { showError(err); }
         finally { hideLoading(); btn.disabled = false; btn.textContent = 'อัปโหลด'; }
     });
@@ -1620,7 +1735,7 @@ window._fourmExportDashPDF = async function() {
 
         // ── Page builder ──────────────────────────────────────────────────────
         function header(title, sub='') {
-            return `<div style="background:linear-gradient(135deg,#312e81,#4338ca 55%,#0284c7);padding:20px 32px 18px;position:relative;overflow:hidden">
+            return `<div style="background:linear-gradient(135deg,#064e3b,#065f46 55%,#0d9488);padding:20px 32px 18px;position:relative;overflow:hidden">
                 <div style="position:absolute;inset:0;opacity:.08"><svg width="100%" height="100%"><defs><pattern id="pd" width="24" height="24" patternUnits="userSpaceOnUse"><circle cx="12" cy="12" r="1.3" fill="white"/></pattern></defs><rect width="100%" height="100%" fill="url(#pd)"/></svg></div>
                 <div style="position:relative;z-index:1">
                     <h1 style="color:#fff;font-size:18px;font-weight:800;margin:0 0 2px">${title}</h1>
@@ -1629,7 +1744,7 @@ window._fourmExportDashPDF = async function() {
             </div>`;
         }
         function footer(pg, total=4) {
-            return `<div style="margin-top:auto;padding:12px 32px;background:linear-gradient(135deg,#312e81,#4338ca 55%,#0284c7);display:flex;justify-content:space-between;align-items:center;flex-shrink:0">
+            return `<div style="margin-top:auto;padding:12px 32px;background:linear-gradient(135deg,#064e3b,#065f46 55%,#0d9488);display:flex;justify-content:space-between;align-items:center;flex-shrink:0">
                 <span style="color:rgba(199,210,254,0.8);font-size:10px">4M Change Management · Thai Summit Harness Co., Ltd.</span>
                 <span style="color:rgba(199,210,254,0.8);font-size:10px">หน้า ${pg} จาก ${total} · สร้างเมื่อ ${new Date().toLocaleDateString('th-TH',{day:'numeric',month:'short',year:'numeric'})}</span>
             </div>`;

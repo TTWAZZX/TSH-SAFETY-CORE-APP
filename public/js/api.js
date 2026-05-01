@@ -33,18 +33,22 @@ export async function apiFetch(endpoint, options = {}) {
             headers
         });
 
-        if (res.status === 401 || res.status === 403) {
-            console.warn('Session expired. Logging out...');
-            TSHSession.logout();
-            throw new Error('Session expired');
-        }
-
         const contentType = res.headers.get('content-type');
         if (!contentType || !contentType.includes('application/json')) {
+            if (res.status === 401) {
+                console.warn('Session expired. Logging out...');
+                TSHSession.logout();
+                throw new Error('Session expired');
+            }
             return res;
         }
 
         const data = await res.json();
+        if (res.status === 401 || (res.status === 403 && data?.message === 'Token is not valid')) {
+            console.warn('Session expired. Logging out...');
+            TSHSession.logout();
+            throw new Error('Session expired');
+        }
         if (!res.ok) throw data;
 
         return data;

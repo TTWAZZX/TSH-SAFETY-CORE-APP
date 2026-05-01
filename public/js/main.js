@@ -25,6 +25,7 @@ import { loadKyPage } from './pages/ky.js';
 import { loadFourmPage } from './pages/fourm.js';
 import { openProfileDrawer, closeProfileDrawer } from './pages/profile.js';
 import { loadDashboardPage } from './pages/dashboard.js';
+import { loadSearchPage } from './pages/search.js';
 
 window.openProfileDrawer  = openProfileDrawer;
 window.closeProfileDrawer = closeProfileDrawer;
@@ -268,6 +269,9 @@ async function handleRouting() {
             break;
         case 'dashboard':
             await loadDashboardPage();
+            break;
+        case 'search':
+            await loadSearchPage();
             break;
         default:
             loadPlaceholderPage(targetId, hash);

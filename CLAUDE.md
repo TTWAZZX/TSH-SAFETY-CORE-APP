@@ -252,13 +252,59 @@ Primary key ของ generic CRUD คือ `id` — ยกเว้น `Employ
 | **Training** | บันทึกและติดตามผลการอบรมรายแผนก — `Training_Dept_Records` (Department+Year+CourseID+TotalEmp+PassedCount), Dashboard: KPI cards + compliance chart + course summary + dept summary + Dept×Course matrix, หลักสูตร CRUD (Admin only) |
 | **Contractor** | ความปลอดภัยผู้รับเหมา |
 | **Hiyari** | รายงาน near-miss / ไฮยาริ — มีปุ่ม "สร้าง Yokoten" ที่ write `hiyari_to_yokoten` ลง sessionStorage แล้ว navigate ไป `#yokoten` |
-| **Dashboard** | ภาพรวม KPI ทุก module + Alert Widget (รายการค้าง/เกินกำหนด) + เป้าหมายกิจกรรมส่วนตัว |
+| **Dashboard** | ภาพรวม KPI ทุก module + Enterprise Safety Health Index + Department×Module Compliance Matrix + Alert Widget (overdue/due soon/pending) + เป้าหมายกิจกรรมส่วนตัว; user เห็นข้อมูล, admin คุม config |
+| **Search / Employee Safety 360** | `#search` ค้นหารายบุคคลจาก Employee Master, เปิด Safety Profile รายคนพร้อม KPI, Patrol records, Training, CCCF, Hiyari, KY, Yokoten, Accident, 4M, Policy/PPE signals และ timeline รวม; backend `/api/person-search`; admin บันทึก/ลบ Patrol record ได้โดยยิงเข้า Safety Patrol เดิม (`/api/patrol/admin-record`) ไม่สร้างตาราง Patrol ซ้ำ |
 | **KY** | กิจกรรม KY (Kiken Yochi) |
 | **4M Change** | บริหารจัดการการเปลี่ยนแปลง Man/Machine/Material/Method |
 | **Admin (System Console)** | Dashboard, Scheduler, Employee CRUD, Master Data, System Health, Audit Log, **เป้าหมายกิจกรรม** |
 | **Activity Targets** | กำหนดเป้าหมายรายปีสำหรับ 9 กิจกรรม — เทมเพลตตามตำแหน่ง + override รายบุคคล + N/A flag; ผล sync อัตโนมัติกับ `/api/activity-targets/me` |
 | **Master** | Departments, Teams, Roles, Positions, Areas (Patrol_Areas), Safety Units (Master_SafetyUnits) — admin-managed reference data |
 | **Profile** | Slide-over drawer: ดู/แก้ไขโปรไฟล์ตัวเอง, เปลี่ยนรหัสผ่าน, เปลี่ยน EmployeeID (cascade update 9 tables + re-issue JWT) |
+
+## Enterprise Dashboard — Architecture
+
+หน้า `#dashboard` เป็น cross-module command center ที่ authenticated users ทุกคนเห็นได้ แต่ control/config เป็นของ admin เท่านั้น
+
+### Access Model
+| Endpoint | Access | Purpose |
+|----------|--------|---------|
+| `GET /api/dashboard/overview` | User | KPI รวม, Enterprise Safety Health Index, Department×Module Compliance Matrix |
+| `GET /api/dashboard/alerts` | User | รายการ overdue/due soon/pending ข้าม module |
+| `GET /api/dashboard/config` | User | อ่าน dashboard config ที่ active |
+| `PUT /api/dashboard/config` | Admin | ตั้งค่า threshold, due-soon days, hidden modules, pinned departments |
+
+### API Permission Notes
+- Legacy generic CRUD endpoints in `backend/server.js` are read-only for authenticated users; `POST/PUT/DELETE` require `isAdmin` to prevent bypassing module-specific admin controls.
+- Frontend `apiFetch()` logs out only on `401` or invalid token; normal `403 Permission denied` is surfaced as an error instead of forcing logout.
+
+### Config Table
+| Table | Purpose |
+|-------|---------|
+| `Dashboard_Config` | `ConfigKey='enterprise'`, `ConfigValue` JSON: `{ healthGreen, healthAmber, alertDueSoonDays, hiddenModules, pinnedDepartments }`, `UpdatedBy`, `UpdatedAt` |
+
+### Enterprise Safety Health Index
+- คำนวณใน `backend/routes/dashboard.js` ด้วย `buildHealthIndex()`
+- Positive inputs: Patrol rate, CCCF permanent completion, Yokoten response %, Training pass rate
+- Penalties: recordable accidents, open Hiyari, open 4M notices, open Patrol issues
+- Status:
+  - `Good` เมื่อ score >= `healthGreen`
+  - `Watch` เมื่อ score >= `healthAmber`
+  - `Critical` ต่ำกว่า `healthAmber`
+- Frontend แสดงใน `public/js/pages/dashboard.js` ที่ `db-health-wrap`
+
+### Department×Module Compliance Matrix
+- คำนวณใน `buildComplianceMatrix(year, config)`
+- Rows = `config.pinnedDepartments` หรือ 12 แผนกแรกจาก `Master_Departments`
+- Columns = Patrol, Hiyari, KY, Yokoten, Training, 4M
+- Training ใช้ pass rate จริง, module อื่นเริ่มจาก presence/completion signal แบบ 0/100 เพื่อให้ matrix ทนกับ schema ต่าง module
+- Frontend แสดงใน `db-compliance-wrap`
+
+### Admin Controls
+- ปุ่ม `ตั้งค่า` แสดงเฉพาะ admin ใน Health Index card
+- Modal: Green threshold, Amber threshold, Due soon days, pinned departments, hidden modules
+- Save ผ่าน `PUT /dashboard/config`; user ทั่วไปไม่มีปุ่มและเรียก PUT ไม่ได้
+- Overview module cards ครบทุก module หลัก: Patrol, Hiyari, KY, CCCF, Yokoten, Training, Accident, 4M, KPI, Policy, Committee, Machine Safety, OJT/SCW, Contractor, Safety Culture
+- Admin เลือกได้ทั้ง module ที่แสดงบนหน้า Overview และแผนกที่แสดงใน Department x Module Compliance Matrix (`pinnedDepartments`)
 
 ## Machine Safety Module — Architecture
 
@@ -1368,24 +1414,22 @@ CREATE TABLE IF NOT EXISTS KY_Program_Config (
 
 ### Completed Scope (Final)
 
-- **Dashboard**: Executive alert strip (overdue items), clickable KPI cards → filtered Notices, monthly line chart, Change Type pie chart, dept bar chart, Dept × Change Type matrix
-- **Change Notice tab**: Main admin/user surface — year/dept/status/overdue filters, overdue row highlighting (>30 days open/pending), Excel export (SheetJS), create/edit/close notice with file attachment
-- **Man Record tab**: Year filter, employee training/qualification records, create/edit/close flow
-- **Systems tab**: External system links + Module Forms (admin upload/manage; user view/download)
-- **Backend**: `OVERDUE_DAYS=30` constant, `overdueCount` + `byDeptType` in stats, `overdue=1` query param on GET /notices, `_handleUpload(field)` factory wrapping multer errors → JSON 400
+- **Dashboard**: Executive alert strip (overdue items), clickable KPI cards → filtered Notices, monthly line chart, Change Type pie chart, dept bar chart, Dept × Change Type matrix, plus Quick Access for external systems and module forms.
+- **Change Notice tab**: Main admin/user surface — year/dept/status/overdue filters, overdue row highlighting (>30 days open/pending), Excel export (SheetJS), user create/close notice with file attachment, admin edit/delete/manage status for all notices.
+- **Man Record tab**: Year filter, employee training/qualification records, admin-only create/edit/delete flow.
+- **Backend**: `OVERDUE_DAYS=30` constant, auto-generated `NoticeNo`, login user as `ResponsiblePerson`, `overdueCount` + `byDeptType` in stats, `overdue=1` query param on GET /notices, `_handleUpload(field)` factory wrapping multer errors → JSON 400
 
 ### Tabs (order)
 | Tab | ID | Description |
 |-----|----|-------------|
 | Dashboard | `dashboard` | KPI overview, alert strip, charts, dept matrix |
-| Change Notice | `notices` | Main record surface — filter/create/close/export |
-| Man Record | `man` | Employee qualification tracking |
-| ระบบภายนอก | `systems` | External links + Module Forms |
+| Change Notice | `notices` | Main record surface — filter/create/close/export; users create and close own notices, admins can edit/delete/status-manage all notices |
+| Man Record | `man` | Employee qualification tracking; admin-only create/edit/delete |
 
 ### Tables (existing — managed by dedicated routes)
 | Table | Purpose |
 |-------|---------|
-| `FourM_ChangeNotices` | Change Notice records — `NoticeNo`, `Title`, `ChangeType` (Man/Machine/Material/Method), `Department`, `RequestDate`, `Status` (Open/Pending/Closed), `ResponsiblePerson`, `AttachmentUrl`, `ClosingDoc`, `ClosedDate`, `ClosingComment`, `CreatedBy` |
+| `FourM_ChangeNotices` | Change Notice records — `NoticeNo` (backend auto-generated as `4M-YYYY-###` from `RequestDate`), `Title`, `ChangeType` (Man/Machine/Material/Method), `Department`, `RequestDate`, `Status` (Open/Pending/Closed), `ResponsiblePerson` (login user on create), `AttachmentUrl`, `ClosingDoc`, `ClosedDate`, `ClosingComment`, `CreatedBy` |
 | `FourM_ManRecords` | Man Record (employee training/qualification) — `RecordDate`, `EmployeeID`, `EmployeeName`, `Department`, `TestType`, `Score`, `Status` (Pass/Fail/Pending), `Remarks`, `ClosedDate`, `CreatedBy` |
 
 ### Backend Constants
@@ -1433,8 +1477,16 @@ data-filter-overdue="1"        → _noticeFilter.overdue = true, _noticeFilter.s
 
 ### Hero Gradient
 ```css
-background: linear-gradient(135deg, #312e81 0%, #4338ca 55%, #0284c7 100%)
+background: linear-gradient(135deg, #064e3b 0%, #065f46 55%, #0d9488 100%)
 ```
+
+### Change Notice Create / Ownership Rules
+- `POST /fourm/notices` is available to authenticated users, not admin-only.
+- `NoticeNo` is generated in `backend/routes/fourm.js` with `generateNoticeNo(RequestDate)` as `4M-YYYY-###`; the frontend shows the field as readonly/auto and does not submit it.
+- `ResponsiblePerson` is set server-side from the login user (`req.user.name || req.user.EmployeeName || req.user.id`) on create; the frontend shows owner as readonly.
+- Users can close their own notices; admins can close any notice.
+- Admins can edit, delete, and set `Pending` for all Change Notices from the Change Notice tab.
+- Existing `PUT /fourm/notices/:id` remains admin-only and can update `ResponsiblePerson` for data correction/admin maintenance.
 
 ### TYPE_META Colors
 ```js
@@ -1460,6 +1512,7 @@ let _departments  = [];    // lazy-loaded from /master/departments
 let _statsData    = null;  // last /fourm/stats response
 let _lastNotices  = [];    // last rendered notices list (used for Excel export)
 let _fourmForms   = [];    // Module_Forms for 'fourm' module
+let _chartManDonut = null; // Man Record pass/fail donut chart
 ```
 
 ### Excel Export (`_exportNoticesToExcel`)
@@ -1468,10 +1521,11 @@ let _fourmForms   = [];    // Module_Forms for 'fourm' module
 - Filename: `4M_Change_Notices_YYYY.xlsx`
 - Guard: `if (typeof XLSX === 'undefined')` → toast error
 
-### Module Forms (Systems Tab)
+### Module Forms (Dashboard Quick Access)
 - Loaded with `GET /module-forms?module=fourm` (active only for users, `&all=1` for admin)
-- Admin: manage table (toggle active/inactive, delete)
-- User: download cards (view + download buttons)
+- Rendered inside Dashboard Quick Access (`fourm-forms-dash`), not a standalone Systems tab.
+- Admin: upload/manage from dashboard card (toggle active/inactive, delete)
+- User: view/download from dashboard card
 - Upload via `POST /module-forms` with `FormData` field `formFile`
 - `ALLOWED_MODULES` in `module-forms.js` includes `'fourm'`
 
@@ -1481,7 +1535,7 @@ let _fourmForms   = [];    // Module_Forms for 'fourm' module
 - Prevents year selector from being re-created when changing year
 
 ### UX Rules
-- 4M accent color: indigo→sky (`#6366f1 → #0284c7`)
+- 4M hero accent color: emerald/teal (`#064e3b → #065f46 → #0d9488`); primary action accents remain indigo→sky (`#6366f1 → #0284c7`)
 - Overdue rows: inline `style="background:rgba(254,242,242,0.7)"` on `<tr>` — not Tailwind arbitrary
 - TYPE_META badges: inline `style=` — not Tailwind arbitrary values
 - Alert strip clickable items are `<button class="fourm-kpi-nav">` — not `<a>` tags

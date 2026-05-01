@@ -33,6 +33,7 @@ const settingsRoutes          = require('./routes/settings');
 const activityTargetsRoutes   = require('./routes/activity-targets');
 const dashboardRoutes         = require('./routes/dashboard');
 const moduleFormsRoutes       = require('./routes/module-forms');
+const personSearchRoutes      = require('./routes/person-search');
 
 // =================================================================
 // SECTION 1: SETUP
@@ -777,6 +778,7 @@ app.use('/api/settings',          authenticateToken, settingsRoutes);
 app.use('/api/activity-targets',  authenticateToken, activityTargetsRoutes);
 app.use('/api/dashboard',         authenticateToken, dashboardRoutes);
 app.use('/api/module-forms',      authenticateToken, moduleFormsRoutes);
+app.use('/api/person-search',     authenticateToken, personSearchRoutes);
 
 // =================================================================
 // SECTION 4B: GENERIC CRUD
@@ -802,7 +804,7 @@ tablesForCrud.forEach(table => {
         }
     });
 
-    app.post(endpoint, authenticateToken, async (req, res) => {
+    app.post(endpoint, authenticateToken, isAdmin, async (req, res) => {
         try {
             const columns = Object.keys(req.body);
             const values  = Object.values(req.body);
@@ -814,7 +816,7 @@ tablesForCrud.forEach(table => {
         }
     });
 
-    app.put(`${endpoint}/:id`, authenticateToken, async (req, res) => {
+    app.put(`${endpoint}/:id`, authenticateToken, isAdmin, async (req, res) => {
         try {
             const { id } = req.params;
             const columns = Object.keys(req.body).map(k => `\`${k}\` = ?`).join(',');
@@ -830,7 +832,7 @@ tablesForCrud.forEach(table => {
         }
     });
 
-    app.delete(`${endpoint}/:id`, authenticateToken, async (req, res) => {
+    app.delete(`${endpoint}/:id`, authenticateToken, isAdmin, async (req, res) => {
         try {
             const { id } = req.params;
             const [result] = await pool.query(`DELETE FROM \`${table}\` WHERE id = ?`, [id]);

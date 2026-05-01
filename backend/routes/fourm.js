@@ -30,6 +30,24 @@ function _handleUpload(field) {
 
 const OVERDUE_DAYS = 30;
 
+function getActorName(req) {
+    return req.user?.name || req.user?.EmployeeName || req.user?.id || 'User';
+}
+
+async function generateNoticeNo(requestDate) {
+    const date = requestDate ? new Date(requestDate) : new Date();
+    const year = Number.isNaN(date.getTime()) ? new Date().getFullYear() : date.getFullYear();
+    const prefix = `4M-${year}-`;
+    const [rows] = await db.query(
+        `SELECT MAX(CAST(SUBSTRING(NoticeNo, ?) AS UNSIGNED)) AS lastSeq
+         FROM FourM_ChangeNotices
+         WHERE NoticeNo LIKE ?`,
+        [prefix.length + 1, `${prefix}%`]
+    );
+    const lastSeq = parseInt(rows[0]?.lastSeq, 10) || 0;
+    return `${prefix}${String(lastSeq + 1).padStart(3, '0')}`;
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // ENSURE TABLES
 // ─────────────────────────────────────────────────────────────────────────────
@@ -307,22 +325,21 @@ router.get('/notices/:id', async (req, res) => {
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
-// CHANGE NOTICES — CREATE (Admin)
+// CHANGE NOTICES — CREATE
 // ─────────────────────────────────────────────────────────────────────────────
-router.post('/notices', isAdmin, _handleUpload('attachment'), async (req, res) => {
+router.post('/notices', _handleUpload('attachment'), async (req, res) => {
     try {
         await ensureTables();
-        const { NoticeNo, RequestDate, Title, Description, ChangeType, ResponsiblePerson, Department } = req.body;
-        if (!NoticeNo || !Title || !RequestDate || !ChangeType) {
-            return res.status(400).json({ success: false, message: 'กรุณากรอก Notice No, วันที่, หัวข้อ และ Change Type' });
+        const { RequestDate, Title, Description, ChangeType, Department } = req.body;
+        if (!Title || !RequestDate || !ChangeType) {
+            return res.status(400).json({ success: false, message: 'กรุณากรอก วันที่, หัวข้อ และ Change Type' });
         }
         const VALID_TYPES = ['Man','Machine','Material','Method'];
         if (!VALID_TYPES.includes(ChangeType)) {
             return res.status(400).json({ success: false, message: 'Change Type ไม่ถูกต้อง' });
         }
-        // Check duplicate NoticeNo
-        const [exist] = await db.query('SELECT id FROM FourM_ChangeNotices WHERE NoticeNo = ?', [NoticeNo.trim()]);
-        if (exist.length) return res.status(409).json({ success: false, message: `Notice No "${NoticeNo}" มีอยู่แล้ว` });
+        const noticeNo = await generateNoticeNo(RequestDate);
+        const actorName = getActorName(req);
 
         const attachUrl = req.file ? req.file.path : null;
         await db.query(
@@ -332,15 +349,15 @@ router.post('/notices', isAdmin, _handleUpload('attachment'), async (req, res) =
                  CreatedByID,CreatedBy)
              VALUES (?,?,?,?,?,?,?,?,?,?,?)`,
             [
-                randomUUID(), NoticeNo.trim(), RequestDate, Title.trim(),
+                randomUUID(), noticeNo, RequestDate, Title.trim(),
                 (Description||'').trim()||null, ChangeType,
-                (ResponsiblePerson||'').trim()||null,
+                actorName,
                 (Department||'').trim()||null,
                 attachUrl,
-                req.user.id, req.user.name,
+                req.user.id, actorName,
             ]
         );
-        res.status(201).json({ success: true, message: 'สร้าง Change Notice สำเร็จ' });
+        res.status(201).json({ success: true, message: 'สร้าง Change Notice สำเร็จ', data: { NoticeNo: noticeNo } });
     } catch (error) {
         console.error('Notice create error:', error);
         res.status(500).json({ success: false, message: 'ไม่สามารถสร้าง Change Notice ได้' });
