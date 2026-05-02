@@ -204,6 +204,33 @@ function renderDashboard(container, data) {
     ];
     const rank = rankTiers.find(r => walks >= r.min && walks <= r.max) || rankTiers[0];
     const rankPct = rank.needed ? Math.min(Math.round((walks / rank.needed) * 100), 100) : 100;
+    const focusItems = [
+        {
+            label: todayCheckedIn ? 'Today checked in' : 'Today check-in',
+            value: todayCheckedIn ? 'Done' : (todaySessForCTA ? 'Due' : 'No session'),
+            tone: todayCheckedIn ? 'emerald' : (todaySessForCTA ? 'amber' : 'slate'),
+            action: todayCheckedIn ? 'switchTab("patrol")' : 'openCheckInModal()',
+        },
+        { label: 'Open issues', value: openIssues, tone: openIssues > 0 ? 'rose' : 'emerald', action: 'switchTab("issues")' },
+        { label: 'Temporary fixes', value: tempIssues, tone: tempIssues > 0 ? 'amber' : 'emerald', action: 'switchTab("issues")' },
+        { label: 'Next patrol', value: nextDaysLeft == null ? '-' : `${nextDaysLeft}d`, tone: nextDaysLeft != null && nextDaysLeft <= 3 ? 'sky' : 'slate', action: 'switchTab("patrol")' },
+    ];
+    const focusTone = {
+        emerald: 'border-emerald-200 bg-emerald-50 text-emerald-700',
+        amber: 'border-amber-200 bg-amber-50 text-amber-700',
+        rose: 'border-rose-200 bg-rose-50 text-rose-700',
+        sky: 'border-sky-200 bg-sky-50 text-sky-700',
+        slate: 'border-slate-200 bg-white text-slate-700',
+    };
+    const focusStrip = `
+      <div class="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-6">
+        ${focusItems.map(item => `
+          <button onclick="${item.action}" class="text-left rounded-xl border ${focusTone[item.tone]} px-4 py-3 hover:shadow-sm transition-all">
+            <div class="text-[11px] font-bold uppercase opacity-70">${item.label}</div>
+            <div class="text-xl font-black mt-1">${item.value}</div>
+          </button>
+        `).join('')}
+      </div>`;
 
     // ── Per-tab hero stats ───────────────────────────────────────────────────
     const _yearlyCount  = _myYearlyStats?.yearlyCount  ?? walks;
@@ -386,6 +413,8 @@ function renderDashboard(container, data) {
       </div>
 
       <!-- ═══ PATROL TAB ═══ -->
+      ${focusStrip}
+
       <div id="content-patrol" class="space-y-5 animate-fade-in">
 
       <!-- Quick Actions (mobile only) -->
@@ -2690,9 +2719,60 @@ window.openIssueForm = function(mode, rawIssueData = null) {
 
     // Rank badge color
     const rankColor = issueData?.Rank === 'A' ? '#dc2626' : issueData?.Rank === 'B' ? '#f97316' : '#059669';
+    const statusMeta = {
+        Open: { label: 'Open', cls: 'bg-rose-50 text-rose-700 border-rose-200' },
+        Temporary: { label: 'Temporary', cls: 'bg-amber-50 text-amber-700 border-amber-200' },
+        Closed: { label: 'Closed', cls: 'bg-emerald-50 text-emerald-700 border-emerald-200' },
+    };
+    const fmtIssueDate = (value) => value ? new Date(value).toLocaleDateString('th-TH', { year:'numeric', month:'short', day:'numeric' }) : '-';
+    const isIssueOverdue = isView && issueData?.CurrentStatus !== 'Closed' && issueData?.DueDate && new Date(issueData.DueDate) < new Date();
+    const viewSummaryHtml = isView ? `
+      <div class="mb-5 rounded-2xl border ${isIssueOverdue ? 'border-rose-200 bg-rose-50' : 'border-slate-200 bg-white'} overflow-hidden">
+        <div class="px-5 py-4 border-b ${isIssueOverdue ? 'border-rose-100' : 'border-slate-100'} flex flex-col md:flex-row md:items-center justify-between gap-3">
+          <div class="min-w-0">
+            <div class="flex flex-wrap items-center gap-2 mb-1">
+              <span class="font-mono text-[11px] font-bold px-2 py-0.5 rounded-lg bg-slate-100 text-slate-600">#${escHtml(issueData?.IssueID || '-')}</span>
+              <span class="text-[11px] font-bold px-2 py-0.5 rounded-full border ${statusMeta[issueData?.CurrentStatus]?.cls || 'bg-slate-50 text-slate-600 border-slate-200'}">${statusMeta[issueData?.CurrentStatus]?.label || escHtml(issueData?.CurrentStatus || '-')}</span>
+              ${issueData?.Rank ? `<span class="text-[11px] font-bold px-2 py-0.5 rounded-full text-white" style="background:${rankColor}">Rank ${escHtml(issueData.Rank)}</span>` : ''}
+              ${isIssueOverdue ? `<span class="text-[11px] font-bold px-2 py-0.5 rounded-full bg-rose-600 text-white">Overdue</span>` : ''}
+            </div>
+            <h3 class="text-sm font-bold text-slate-800 truncate">${escHtml(issueData?.MachineName || issueData?.Area || 'Safety Patrol Issue')}</h3>
+            <p class="text-xs text-slate-500 mt-0.5">${escHtml(issueData?.HazardType || '-')}</p>
+          </div>
+          <div class="grid grid-cols-3 gap-2 text-center w-full md:w-auto">
+            <div class="rounded-lg bg-slate-50 border border-slate-100 px-3 py-2">
+              <p class="text-[10px] font-bold uppercase text-slate-400">Found</p>
+              <p class="text-xs font-bold text-slate-700 whitespace-nowrap">${fmtIssueDate(issueData?.DateFound)}</p>
+            </div>
+            <div class="rounded-lg bg-slate-50 border border-slate-100 px-3 py-2">
+              <p class="text-[10px] font-bold uppercase text-slate-400">Due</p>
+              <p class="text-xs font-bold ${isIssueOverdue ? 'text-rose-700' : 'text-slate-700'} whitespace-nowrap">${fmtIssueDate(issueData?.DueDate)}</p>
+            </div>
+            <div class="rounded-lg bg-slate-50 border border-slate-100 px-3 py-2">
+              <p class="text-[10px] font-bold uppercase text-slate-400">Area</p>
+              <p class="text-xs font-bold text-slate-700 truncate max-w-[92px]">${escHtml(issueData?.Area || '-')}</p>
+            </div>
+          </div>
+        </div>
+        <div class="grid grid-cols-1 md:grid-cols-3 gap-0 text-xs">
+          <div class="px-5 py-3 border-b md:border-b-0 md:border-r ${isIssueOverdue ? 'border-rose-100' : 'border-slate-100'}">
+            <p class="text-[10px] font-bold uppercase text-slate-400">Responsible</p>
+            <p class="font-semibold text-slate-700 mt-1">${escHtml([issueData?.ResponsibleDept, issueData?.ResponsibleUnit].filter(Boolean).join(' / ') || '-')}</p>
+          </div>
+          <div class="px-5 py-3 border-b md:border-b-0 md:border-r ${isIssueOverdue ? 'border-rose-100' : 'border-slate-100'}">
+            <p class="text-[10px] font-bold uppercase text-slate-400">Found By</p>
+            <p class="font-semibold text-slate-700 mt-1">${escHtml(issueData?.FoundBy || issueData?.FoundByTeam || '-')}</p>
+          </div>
+          <div class="px-5 py-3">
+            <p class="text-[10px] font-bold uppercase text-slate-400">Finished</p>
+            <p class="font-semibold text-slate-700 mt-1">${fmtIssueDate(issueData?.FinishDate)}</p>
+          </div>
+        </div>
+      </div>` : '';
 
     const html = `
     <div class="text-sm">
+      ${viewSummaryHtml}
 
       <!-- ── Stepper ── -->
       <div class="flex items-start px-1 mb-6">${stepHtml}</div>
@@ -5762,4 +5842,3 @@ window.exportPatrolPDF = async function(group) {
         hideLoading();
     }
 };
-

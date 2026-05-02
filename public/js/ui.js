@@ -73,6 +73,30 @@ export function openModal(title, contentHtml, size = 'max-w-2xl') {
     }, 20);
 }
 
+export function openDetailModal({ title, subtitle = '', meta = [], body = '', footer = '', size = 'max-w-2xl' } = {}) {
+    const metaHtml = (meta || []).filter(Boolean).map(item => `
+        <span class="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[11px] font-bold border ${item.className || 'bg-slate-50 text-slate-600 border-slate-200'}">
+            ${item.dot ? `<span class="w-1.5 h-1.5 rounded-full" style="background:${item.dot}"></span>` : ''}
+            ${escHtml(item.label || item)}
+        </span>
+    `).join('');
+    const contentHtml = `
+        <div class="space-y-4">
+            <div class="pb-4 border-b border-slate-100">
+                <div class="flex flex-wrap items-start justify-between gap-3">
+                    <div class="min-w-0">
+                        <h3 class="text-base font-bold text-slate-800">${title || ''}</h3>
+                        ${subtitle ? `<p class="text-xs text-slate-500 mt-1">${escHtml(subtitle)}</p>` : ''}
+                    </div>
+                    ${metaHtml ? `<div class="flex flex-wrap gap-2">${metaHtml}</div>` : ''}
+                </div>
+            </div>
+            ${body || ''}
+            ${footer ? `<div class="pt-3 border-t border-slate-100">${footer}</div>` : ''}
+        </div>`;
+    openModal('รายละเอียด', contentHtml, size);
+}
+
 /**
  * ปิด Modal - ปรับปรุง Animation
  */

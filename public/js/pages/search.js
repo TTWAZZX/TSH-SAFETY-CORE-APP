@@ -25,6 +25,19 @@ const moduleMeta = {
     ppe: ['PPE', '#b45309'],
 };
 
+function emptyState({ title, text = '' }) {
+    return `
+    <div class="p-8 text-center text-slate-400">
+        <div class="w-12 h-12 rounded-xl bg-slate-50 border border-slate-100 flex items-center justify-center mx-auto mb-3">
+            <svg class="w-6 h-6 text-slate-300" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8" d="M9 17v-2a4 4 0 018 0v2m-9 4h10a2 2 0 002-2v-1a5 5 0 00-5-5h-2a5 5 0 00-5 5v1a2 2 0 002 2zm3-11a4 4 0 100-8 4 4 0 000 8z"/>
+            </svg>
+        </div>
+        <p class="text-sm font-bold text-slate-600">${escHtml(title)}</p>
+        ${text ? `<p class="text-xs text-slate-400 mt-1">${escHtml(text)}</p>` : ''}
+    </div>`;
+}
+
 export async function loadSearchPage() {
     const container = document.getElementById('search-page');
     if (!container) return;
@@ -152,10 +165,10 @@ async function runSearch(q = '') {
                 <span class="text-xs text-slate-400">${rows.length} คน</span>
             </div>
             <div class="divide-y divide-slate-100 max-h-[620px] overflow-y-auto">
-                ${rows.map(personRow).join('') || `<div class="p-5 text-sm text-slate-400">ไม่พบข้อมูล</div>`}
+                ${rows.map(personRow).join('') || emptyState({ title: 'ไม่พบพนักงาน', text: 'ลองเปลี่ยนคำค้นหา แผนก หรือปีที่ต้องการดูข้อมูล' })}
             </div>`;
     } catch (err) {
-        wrap.innerHTML = `<div class="p-5 text-sm text-red-500">ค้นหาไม่สำเร็จ</div>`;
+        wrap.innerHTML = emptyState({ title: 'ค้นหาไม่สำเร็จ', text: err.message || 'ระบบไม่สามารถโหลดรายชื่อพนักงานได้ในตอนนี้' });
         console.error(err);
     }
 }
@@ -186,7 +199,7 @@ async function loadProfile(employeeId) {
         _selectedProfile = res?.data || null;
         wrap.innerHTML = renderProfile(_selectedProfile);
     } catch (err) {
-        wrap.innerHTML = `<div class="bg-white rounded-xl border border-red-100 p-8 text-center text-red-500">โหลดโปรไฟล์ไม่สำเร็จ</div>`;
+        wrap.innerHTML = `<div class="bg-white rounded-xl border border-red-100 shadow-sm">${emptyState({ title: 'โหลดโปรไฟล์ไม่สำเร็จ', text: err.message || 'ลองเลือกพนักงานอีกครั้ง หรือ refresh หน้า' })}</div>`;
         console.error(err);
     }
 }
@@ -275,7 +288,10 @@ function moduleCard(key, value, sub) {
 }
 
 function renderPatrolRows(rows) {
-    if (!rows.length) return `<div class="p-5 text-sm text-slate-400">ยังไม่มีบันทึก Patrol ในปีนี้</div>`;
+    if (!rows.length) return emptyState({
+        title: 'ยังไม่มีบันทึก Patrol ในปีนี้',
+        text: _isAdmin ? 'แอดมินสามารถเพิ่มบันทึก Patrol ให้พนักงานคนนี้ได้จากปุ่มด้านบน' : 'ข้อมูลจะแสดงเมื่อมีการเดิน Patrol'
+    });
     return rows.map(r => `
     <div class="px-5 py-3 flex items-start justify-between gap-3">
         <div>
@@ -287,7 +303,7 @@ function renderPatrolRows(rows) {
 }
 
 function renderTimeline(items) {
-    if (!items.length) return `<div class="p-5 text-sm text-slate-400">ยังไม่มี activity timeline ในปีนี้</div>`;
+    if (!items.length) return emptyState({ title: 'ยังไม่มี activity timeline ในปีนี้', text: 'เมื่อมี Training, Patrol, 4M, Hiyari หรือกิจกรรมอื่น ระบบจะแสดงที่นี่' });
     return items.map(i => `
     <div class="px-5 py-3 flex gap-3">
         <div class="w-2 h-2 rounded-full mt-2 flex-shrink-0" style="background:${typeColor(i.type)}"></div>

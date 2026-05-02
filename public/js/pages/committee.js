@@ -169,6 +169,62 @@ function renderPage(container, { current, past }, isAdmin, totalCount) {
       daysChip = `<span class="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold bg-emerald-100 text-emerald-700"><span class="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse inline-block"></span>เหลือ ${daysLeft} วัน</span>`;
   }
 
+  const subList = current?.SubCommitteeData ?? [];
+  const termPct = current ? getTermProgressPct(current.TermStartDate, current.TermEndDate) : null;
+  const mainDocCount = (current?.MainOrgChartLink ? 1 : 0) + (current?.AppointmentDocLink ? 1 : 0);
+  const subDocCount = subList.filter(s => s?.activeLink).length;
+  const totalSubMembers = subList.reduce((sum, s) => sum + (parseInt(s?.memberCount, 10) || 0), 0);
+  const governanceReady = !!current && daysLeft !== null && daysLeft >= 0 && mainDocCount === 2 && subList.length > 0;
+  const termRisk = daysLeft === null ? 'unknown' : daysLeft < 0 ? 'expired' : daysLeft <= 60 ? 'near' : 'active';
+  const readinessMeta = governanceReady
+    ? { label: 'Governance Ready', value: 'Ready', bg: 'bg-emerald-50', border: 'border-emerald-100', text: 'text-emerald-700' }
+    : { label: current ? 'Action Required' : 'No Current Committee', value: current ? 'Review' : 'Setup', bg: 'bg-amber-50', border: 'border-amber-100', text: 'text-amber-700' };
+  const termMeta = termRisk === 'expired'
+    ? { label: 'Expired', bg: 'bg-red-50', border: 'border-red-100', text: 'text-red-700' }
+    : termRisk === 'near'
+      ? { label: 'Near Expiry', bg: 'bg-amber-50', border: 'border-amber-100', text: 'text-amber-700' }
+      : { label: termRisk === 'active' ? 'Active' : 'Unknown', bg: 'bg-white', border: 'border-slate-200', text: 'text-slate-700' };
+  const enterpriseStrip = `
+    <div class="grid grid-cols-2 lg:grid-cols-5 gap-3">
+      <button type="button" onclick="document.getElementById('current-committee-container')?.scrollIntoView({behavior:'smooth',block:'start'})"
+        class="text-left rounded-xl border ${readinessMeta.border} ${readinessMeta.bg} px-4 py-3 hover:shadow-sm transition-shadow">
+        <p class="text-[10px] font-bold uppercase ${readinessMeta.text}">Governance Status</p>
+        <p class="mt-1 text-sm font-black ${readinessMeta.text}">${readinessMeta.value}</p>
+        <p class="mt-1 text-[11px] text-slate-500">${readinessMeta.label}</p>
+      </button>
+      <button type="button" onclick="document.getElementById('current-committee-container')?.scrollIntoView({behavior:'smooth',block:'start'})"
+        class="text-left rounded-xl border ${termMeta.border} ${termMeta.bg} px-4 py-3 hover:shadow-sm transition-shadow">
+        <p class="text-[10px] font-bold uppercase ${termMeta.text}">Term Control</p>
+        <p class="mt-1 text-sm font-black ${termMeta.text}">${daysLeft === null ? '—' : daysLeft < 0 ? 'Expired' : `${daysLeft} days`}</p>
+        <p class="mt-1 text-[11px] text-slate-500">${termPct ?? '—'}% elapsed</p>
+      </button>
+      <button type="button" onclick="document.getElementById('current-committee-container')?.scrollIntoView({behavior:'smooth',block:'start'})"
+        class="text-left rounded-xl border ${mainDocCount < 2 ? 'border-amber-100 bg-amber-50' : 'border-emerald-100 bg-emerald-50'} px-4 py-3 hover:shadow-sm transition-shadow">
+        <p class="text-[10px] font-bold uppercase ${mainDocCount < 2 ? 'text-amber-600' : 'text-emerald-600'}">Core Documents</p>
+        <p class="mt-1 text-sm font-black ${mainDocCount < 2 ? 'text-amber-700' : 'text-emerald-700'}">${mainDocCount}/2</p>
+        <p class="mt-1 text-[11px] text-slate-500">Org chart + appointment</p>
+      </button>
+      <button type="button" onclick="document.getElementById('current-committee-container')?.scrollIntoView({behavior:'smooth',block:'start'})"
+        class="text-left rounded-xl border ${subList.length ? 'border-slate-200 bg-white' : 'border-amber-100 bg-amber-50'} px-4 py-3 hover:shadow-sm transition-shadow">
+        <p class="text-[10px] font-bold uppercase ${subList.length ? 'text-slate-500' : 'text-amber-600'}">Sub-Committees</p>
+        <p class="mt-1 text-sm font-black ${subList.length ? 'text-slate-700' : 'text-amber-700'}">${subList.length}</p>
+        <p class="mt-1 text-[11px] text-slate-500">${totalSubMembers} members · ${subDocCount} docs</p>
+      </button>
+      ${isAdmin ? `
+      <button type="button" id="btn-add-committee-shortcut"
+        class="text-left rounded-xl border border-slate-200 bg-white px-4 py-3 hover:shadow-sm transition-shadow">
+        <p class="text-[10px] font-bold uppercase text-slate-500">Admin Control</p>
+        <p class="mt-1 text-sm font-black text-slate-700">Manage</p>
+        <p class="mt-1 text-[11px] text-slate-500">Create or update term</p>
+      </button>` : `
+      <button type="button" onclick="document.getElementById('past-committee-container')?.scrollIntoView({behavior:'smooth',block:'start'})"
+        class="text-left rounded-xl border border-slate-200 bg-white px-4 py-3 hover:shadow-sm transition-shadow">
+        <p class="text-[10px] font-bold uppercase text-slate-500">History</p>
+        <p class="mt-1 text-sm font-black text-slate-700">${past.length}</p>
+        <p class="mt-1 text-[11px] text-slate-500">Past committees</p>
+      </button>`}
+    </div>`;
+
   container.innerHTML = `
   <div class="space-y-6 animate-fade-in pb-10">
 
@@ -213,6 +269,7 @@ function renderPage(container, { current, past }, isAdmin, totalCount) {
     </div>
 
     ${alertBanner}
+    ${enterpriseStrip}
 
     <!-- ── STATS BAR (4 cards) ── -->
     <div class="grid grid-cols-2 lg:grid-cols-4 gap-3">
@@ -1142,7 +1199,7 @@ function setupCommitteeEventListeners() {
     if (!e.target.closest('#committee-page')) return;
 
     /* add committee */
-    if (e.target.closest('#btn-add-committee')) { openCommitteeForm(); return; }
+    if (e.target.closest('#btn-add-committee') || e.target.closest('#btn-add-committee-shortcut')) { openCommitteeForm(); return; }
 
     /* export excel */
     if (e.target.closest('#btn-export-excel')) { exportCommitteeExcel(); return; }

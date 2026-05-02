@@ -3,7 +3,7 @@
 import { API } from '../api.js';
 import {
     hideLoading, showError, showLoading,
-    openModal, closeModal, showToast, showConfirmationModal, showDocumentModal, escHtml
+    openModal, openDetailModal, closeModal, showToast, showConfirmationModal, showDocumentModal, escHtml
 } from '../ui.js';
 import { normalizeApiArray, normalizeApiObject } from '../utils/normalize.js';
 import { buildActivityCard } from '../utils/activity-widget.js';
@@ -2058,13 +2058,32 @@ async function showDetailModal(id) {
         const isVideo = url => url && /\.(mp4|mov|webm|avi|mpeg)(\?.*)?$/i.test(url);
         const isImage = url => url && /\.(jpg|jpeg|png|webp|gif)(\?.*)?$/i.test(url);
         const date    = r.ActivityDate ? new Date(r.ActivityDate).toLocaleDateString('th-TH', { year:'numeric', month:'long', day:'numeric' }) : '-';
+        const participantLabels = participants.map(p => {
+            if (p && typeof p === 'object') return p.name || p.Name || p.EmployeeName || p.EmployeeID || JSON.stringify(p);
+            return String(p || '');
+        }).filter(Boolean);
+        const statusLabel = STATUS_LABEL[r.Status] || r.Status || '-';
+        const riskLabel = r.RiskCategory || 'General';
 
         const html = `
             <div class="space-y-4 text-sm">
-                <div class="flex flex-wrap gap-2">
-                    <span class="px-3 py-1 rounded-full text-xs font-semibold ${STATUS_BADGE[r.Status] || 'bg-slate-100 text-slate-500'}">${STATUS_LABEL[r.Status] || r.Status}</span>
-                    <span class="px-3 py-1 rounded-full text-xs font-semibold ${RISK_BADGE_COLOR[r.RiskCategory] || 'bg-slate-100 text-slate-500'}">${r.RiskCategory || 'ทั่วไป'}</span>
-                    ${r.KYTKeyword ? `<span class="px-3 py-1 rounded-full text-xs font-semibold bg-indigo-100 text-indigo-700"># ${r.KYTKeyword}</span>` : ''}
+                <div class="grid grid-cols-2 md:grid-cols-4 gap-2">
+                    <div class="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2">
+                        <p class="text-[10px] font-bold uppercase text-slate-400">Status</p>
+                        <p class="mt-1 text-sm font-bold text-slate-700">${escHtml(statusLabel)}</p>
+                    </div>
+                    <div class="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2">
+                        <p class="text-[10px] font-bold uppercase text-slate-400">Risk</p>
+                        <p class="mt-1 text-sm font-bold text-slate-700">${escHtml(riskLabel)}</p>
+                    </div>
+                    <div class="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2">
+                        <p class="text-[10px] font-bold uppercase text-slate-400">Date</p>
+                        <p class="mt-1 text-sm font-bold text-slate-700">${escHtml(date)}</p>
+                    </div>
+                    <div class="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2">
+                        <p class="text-[10px] font-bold uppercase text-slate-400">Members</p>
+                        <p class="mt-1 text-sm font-bold text-slate-700">${participantLabels.length || '-'}</p>
+                    </div>
                 </div>
 
                 <div class="grid grid-cols-2 gap-3">
@@ -2078,25 +2097,25 @@ async function showDetailModal(id) {
                 <div>
                     <p class="text-xs text-slate-400 font-semibold uppercase tracking-wider mb-2">ผู้เข้าร่วม (${participants.length} คน)</p>
                     <div class="flex flex-wrap gap-1.5">
-                        ${participants.map(p => `<span class="px-2.5 py-1 rounded-full bg-indigo-50 text-indigo-700 text-xs font-medium border border-indigo-100">${p}</span>`).join('')}
+                        ${participantLabels.map(p => `<span class="px-2.5 py-1 rounded-full bg-indigo-50 text-indigo-700 text-xs font-medium border border-indigo-100">${escHtml(p)}</span>`).join('')}
                     </div>
                 </div>` : ''}
 
                 <div class="p-3 bg-red-50 rounded-xl border border-red-100">
                     <p class="text-xs text-red-500 font-semibold uppercase tracking-wider mb-1">อันตรายที่คาดการณ์</p>
-                    <p class="text-slate-700 leading-relaxed">${r.HazardDescription || '-'}</p>
+                    <p class="text-slate-700 leading-relaxed">${escHtml(r.HazardDescription || '-')}</p>
                 </div>
 
                 ${r.Countermeasure ? `
                 <div class="p-3 bg-emerald-50 rounded-xl border border-emerald-100">
                     <p class="text-xs text-emerald-600 font-semibold uppercase tracking-wider mb-1">มาตรการตอบโต้</p>
-                    <p class="text-slate-700 leading-relaxed">${r.Countermeasure}</p>
+                    <p class="text-slate-700 leading-relaxed">${escHtml(r.Countermeasure)}</p>
                 </div>` : ''}
 
                 ${r.AdminComment ? `
                 <div class="p-3 bg-amber-50 rounded-xl border border-amber-100">
                     <p class="text-xs text-amber-600 font-semibold uppercase tracking-wider mb-1">ความคิดเห็น Admin</p>
-                    <p class="text-slate-700 leading-relaxed">${r.AdminComment}</p>
+                    <p class="text-slate-700 leading-relaxed">${escHtml(r.AdminComment)}</p>
                 </div>` : ''}
 
                 <!-- Media -->
@@ -2110,7 +2129,17 @@ async function showDetailModal(id) {
                 </div>` : ''}
             </div>`;
 
-        openModal('กิจกรรม KY', html, 'max-w-2xl');
+        openDetailModal({
+            title: escHtml(r.TeamName || 'KY Activity'),
+            subtitle: `${date} · ${r.Department || '-'} · ${r.ReporterName || '-'}`,
+            meta: [
+                { label: statusLabel, className: `${STATUS_BADGE[r.Status] || 'bg-slate-100 text-slate-500'} border-slate-200` },
+                { label: riskLabel, className: `${RISK_BADGE_COLOR[r.RiskCategory] || 'bg-slate-100 text-slate-500'} border-slate-200` },
+                r.KYTKeyword ? { label: `# ${r.KYTKeyword}`, className: 'bg-indigo-100 text-indigo-700 border-indigo-200' } : null,
+            ],
+            body: html,
+            size: 'max-w-2xl'
+        });
     } catch (err) {
         hideLoading();
         showError(err);
@@ -2119,8 +2148,8 @@ async function showDetailModal(id) {
 
 function infoField(label, value) {
     return `<div>
-        <p class="text-xs text-slate-400 font-medium mb-0.5">${label}</p>
-        <p class="text-slate-700 font-semibold">${value}</p>
+        <p class="text-xs text-slate-400 font-medium mb-0.5">${escHtml(label)}</p>
+        <p class="text-slate-700 font-semibold">${escHtml(value)}</p>
     </div>`;
 }
 

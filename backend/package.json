@@ -4,7 +4,10 @@
   "description": "",
   "main": "index.js",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "permission:audit": "node scripts/permission-audit.js",
+    "smoke:api": "node scripts/smoke-test.js",
+    "uat:preflight": "node scripts/uat-preflight.js",
+    "test": "npm run permission:audit && npm run smoke:api && npm run uat:preflight"
   },
   "keywords": [],
   "author": "",

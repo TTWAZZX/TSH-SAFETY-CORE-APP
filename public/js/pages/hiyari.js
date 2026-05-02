@@ -2,7 +2,7 @@
 import { API } from '../api.js';
 import {
     hideLoading, showError, showLoading,
-    openModal, closeModal, showToast, showConfirmationModal, showDocumentModal, escHtml
+    openModal, openDetailModal, closeModal, showToast, showConfirmationModal, showDocumentModal, escHtml
 } from '../ui.js';
 import { normalizeApiArray, normalizeApiObject } from '../utils/normalize.js';
 import { buildActivityCard } from '../utils/activity-widget.js';
@@ -3051,12 +3051,35 @@ async function showDetailModal(id) {
         const isImg = url => url && /\.(jpg|jpeg|png|webp|gif)(\?.*)?$/i.test(url);
         const stDet = STOP_TYPES.find(s => s.id === Number(r.StopType));
         const rankR = RANKS.find(x => x.rank === r.Rank);
+        const statusLabel = STATUS_LABEL[r.Status] || r.Status || '-';
+        const stopLabel = stDet?.code || '-';
+        const rankLabel = rankR?.label || RISK_LABEL[r.RiskLevel] || r.RiskLevel || '-';
+        const highRisk = ['A','B'].includes(r.Rank) || ['High','Critical'].includes(r.RiskLevel);
 
         const html = `
             <div class="space-y-4 px-1 text-sm">
 
+                <div class="grid grid-cols-2 md:grid-cols-4 gap-2">
+                    <div class="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2">
+                        <p class="text-[10px] font-bold uppercase text-slate-400">Status</p>
+                        <p class="mt-1 text-sm font-bold text-slate-700">${escHtml(statusLabel)}</p>
+                    </div>
+                    <div class="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2">
+                        <p class="text-[10px] font-bold uppercase text-slate-400">Stop Type</p>
+                        <p class="mt-1 text-sm font-bold text-slate-700">${escHtml(stopLabel)}</p>
+                    </div>
+                    <div class="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2">
+                        <p class="text-[10px] font-bold uppercase text-slate-400">Rank</p>
+                        <p class="mt-1 text-sm font-bold text-slate-700">${escHtml(rankLabel)}</p>
+                    </div>
+                    <div class="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2">
+                        <p class="text-[10px] font-bold uppercase text-slate-400">Date</p>
+                        <p class="mt-1 text-sm font-bold text-slate-700">${escHtml(date)}</p>
+                    </div>
+                </div>
+
                 <!-- Header block -->
-                <div class="flex items-center gap-3 p-4 rounded-xl bg-orange-50 border border-orange-100">
+                <div class="hidden">
                     <div class="w-12 h-12 rounded-xl bg-orange-100 flex items-center justify-center flex-shrink-0">
                         <svg class="w-6 h-6 text-orange-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
@@ -3120,7 +3143,7 @@ async function showDetailModal(id) {
                 <p class="text-xs text-slate-400 text-right">ปิดโดย ${escHtml(r.ClosedBy || '-')} เมื่อ ${new Date(r.ClosedAt).toLocaleDateString('th-TH', { year:'numeric', month:'short', day:'numeric' })}</p>` : ''}
 
                 <!-- Hiyari → Yokoten shortcut (Rank A/B or High/Critical RiskLevel) -->
-                ${(['A','B'].includes(r.Rank) || ['High','Critical'].includes(r.RiskLevel)) ? `
+                ${highRisk ? `
                 <div class="border-t border-slate-100 pt-4">
                     <p class="text-xs text-slate-400 mb-2">เหตุการณ์ความเสี่ยงสูง — สามารถแปลงเป็นบทเรียน Yokoten ได้</p>
                     <button id="btn-to-yokoten"
@@ -3140,7 +3163,18 @@ async function showDetailModal(id) {
                 </div>` : ''}
             </div>`;
 
-        openModal(`รายงาน Hiyari-Hatto`, html, 'max-w-2xl');
+        openDetailModal({
+            title: escHtml(r.Location || 'Hiyari-Hatto'),
+            subtitle: `${date} · ${r.Department || '-'} · ${r.ReporterName || '-'}`,
+            meta: [
+                { label: statusLabel, className: `${STATUS_BADGE[r.Status] || 'bg-slate-100 text-slate-500'} border-slate-200` },
+                stDet ? { label: stDet.code, className: 'bg-orange-50 text-orange-700 border-orange-200' } : null,
+                rankR ? { label: rankR.label, className: `${RANK_BADGE[rankR.rank] || 'bg-slate-100 text-slate-500'} border-slate-200` } : null,
+                highRisk ? { label: 'High attention', className: 'bg-rose-50 text-rose-700 border-rose-200' } : null,
+            ],
+            body: html,
+            size: 'max-w-2xl'
+        });
     } catch (err) {
         hideLoading();
         showError(err);
@@ -3149,8 +3183,8 @@ async function showDetailModal(id) {
 
 function field(label, value) {
     return `<div>
-        <p class="text-xs text-slate-400 font-medium mb-0.5">${label}</p>
-        <p class="text-slate-700 font-semibold">${value}</p>
+        <p class="text-xs text-slate-400 font-medium mb-0.5">${escHtml(label)}</p>
+        <p class="text-slate-700 font-semibold">${escHtml(value)}</p>
     </div>`;
 }
 

@@ -3,7 +3,7 @@
 import { API } from '../api.js';
 import {
     hideLoading, showError, showLoading,
-    openModal, closeModal, showToast, showConfirmationModal, showDocumentModal, escHtml
+    openModal, openDetailModal, closeModal, showToast, showConfirmationModal, showDocumentModal, escHtml
 } from '../ui.js';
 import { normalizeApiArray, normalizeApiObject } from '../utils/normalize.js';
 
@@ -676,6 +676,20 @@ async function renderNotices(container) {
 
     container.innerHTML = `
         <div class="space-y-4">
+            <div class="grid grid-cols-1 md:grid-cols-3 gap-3">
+                <button data-notice-focus="Open" class="text-left rounded-xl border border-sky-100 bg-sky-50 px-4 py-3 hover:shadow-sm transition-all">
+                    <p class="text-[11px] font-bold uppercase text-sky-600">Active Work</p>
+                    <p class="text-sm font-black text-sky-800 mt-1">Open Change Notice</p>
+                </button>
+                <button data-notice-focus="Pending" class="text-left rounded-xl border border-amber-100 bg-amber-50 px-4 py-3 hover:shadow-sm transition-all">
+                    <p class="text-[11px] font-bold uppercase text-amber-600">Review Queue</p>
+                    <p class="text-sm font-black text-amber-800 mt-1">Pending Follow-up</p>
+                </button>
+                <button data-notice-focus="overdue" class="text-left rounded-xl border border-rose-100 bg-rose-50 px-4 py-3 hover:shadow-sm transition-all">
+                    <p class="text-[11px] font-bold uppercase text-rose-600">Risk Watch</p>
+                    <p class="text-sm font-black text-rose-800 mt-1">Overdue Notice</p>
+                </button>
+            </div>
             <div class="card p-4">
                 <div class="flex flex-wrap gap-2.5 items-center">
                     <select id="notice-filter-year" class="form-input py-1.5 text-sm w-24">${yearOpts}</select>
@@ -982,16 +996,6 @@ async function showNoticeDetail(id) {
 
         const html = `
             <div class="space-y-4 text-sm">
-                <div class="flex flex-wrap gap-2">
-                    <span class="font-mono text-xs font-semibold bg-indigo-50 text-indigo-700 px-3 py-1 rounded-full">${escHtml(r.NoticeNo)}</span>
-                    <span class="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-semibold" style="background:${tm.bg};color:${tm.text}">
-                        <span class="w-1.5 h-1.5 rounded-full inline-block" style="background:${TYPE_META[r.ChangeType]?.dot||tm.text}"></span>
-                        ${escHtml(r.ChangeType)}
-                    </span>
-                </div>
-
-                <h3 class="text-base font-bold text-slate-800">${escHtml(r.Title)}</h3>
-
                 <div class="px-4 py-3 rounded-xl border border-slate-100 bg-slate-50">
                     ${timelineHtml}
                 </div>
@@ -1038,7 +1042,17 @@ async function showNoticeDetail(id) {
                 </button>
             </div>`;
 
-        openModal('รายละเอียด Change Notice', html + footer, 'max-w-xl');
+        openDetailModal({
+            title: escHtml(r.Title || 'Change Notice'),
+            subtitle: `${r.NoticeNo || '-'} / ${r.Department || '-'}`,
+            meta: [
+                { label: r.Status || '-', className: r.Status === 'Closed' ? 'bg-slate-50 text-slate-600 border-slate-200' : r.Status === 'Pending' ? 'bg-amber-50 text-amber-700 border-amber-200' : 'bg-sky-50 text-sky-700 border-sky-200' },
+                { label: r.ChangeType || '-', className: 'border-slate-200', dot: TYPE_META[r.ChangeType]?.dot || tm.text },
+            ],
+            body: html,
+            footer,
+            size: 'max-w-xl',
+        });
     } catch (err) { hideLoading(); showError(err); }
 }
 
@@ -2055,6 +2069,16 @@ function setupEventListeners() {
         }
 
         // Change Notice
+        const noticeFocus = e.target.closest('[data-notice-focus]');
+        if (noticeFocus) {
+            const value = noticeFocus.dataset.noticeFocus;
+            _noticeFilter.overdue = value === 'overdue';
+            _noticeFilter.status = value === 'overdue' ? 'overdue' : value;
+            const statusEl = document.getElementById('notice-filter-status');
+            if (statusEl) statusEl.value = _noticeFilter.status;
+            await fetchAndRenderNotices();
+            return;
+        }
         if (e.target.closest('#btn-add-notice')) { showNoticeForm(); return; }
         if (e.target.closest('.btn-notice-view'))  { await showNoticeDetail(e.target.closest('.btn-notice-view').dataset.id); return; }
         const noticeEdit = e.target.closest('.btn-notice-edit');

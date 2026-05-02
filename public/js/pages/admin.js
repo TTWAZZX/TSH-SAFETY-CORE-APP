@@ -1,4 +1,4 @@
-import { showToast, showError, openModal, closeModal, escHtml } from '../ui.js';
+import { showToast, showError, openModal, openDetailModal, closeModal, escHtml } from '../ui.js';
 import { API } from '../api.js';
 
 // ─── Button loading helper (disable + spinner, returns original HTML) ──────────
@@ -43,6 +43,7 @@ const EMP_PER_PAGE = 25;
 // Audit log state
 let _auditPage    = 1;
 let _auditTotal   = 0;
+let _auditRows    = [];
 const AUDIT_LIMIT  = 50;
 
 
@@ -54,6 +55,7 @@ let _orgFilter     = 'all'; // 'all' | 'safety' | 'general'
 let _orgPage       = 1;
 let _orgFetchError = false;
 const ORG_PER_PAGE = 15;
+let _masterQuality = { teams: [], positions: [], roles: [], areas: [] };
 
 // ─── Tab Config ───────────────────────────────────────────────────────────────
 const TABS = [
@@ -240,6 +242,13 @@ async function renderReference(container) {
                   <div class="h-3 bg-slate-100 rounded w-20"></div>
               </div>`).join('')}
           </div>
+          <div id="master-quality-row" class="grid grid-cols-2 lg:grid-cols-5 gap-3 mb-4">
+              ${[1,2,3,4,5].map(() => `
+              <div class="rounded-xl border border-slate-100 bg-white px-4 py-3 animate-pulse">
+                  <div class="h-3 bg-slate-100 rounded w-20 mb-2"></div>
+                  <div class="h-4 bg-slate-100 rounded w-14"></div>
+              </div>`).join('')}
+          </div>
 
           <!-- Filter Bar -->
           <div class="card p-4 flex flex-wrap gap-3 items-center mb-4">
@@ -397,6 +406,7 @@ async function renderReference(container) {
     }
 
     _orgRenderStats();
+    _renderMasterQuality();
     _orgRenderTable();
     loadMasterList('teams');
     loadMasterList('positions');
@@ -448,6 +458,66 @@ function _orgRenderStats() {
                 <p class="text-xs text-slate-500">${c.label}</p>
             </div>
         </div>`).join('');
+}
+
+function _countDuplicateNames(rows, key = 'Name') {
+    const seen = new Map();
+    (rows || []).forEach(r => {
+        const name = String(r?.[key] || '').trim().toLowerCase();
+        if (!name) return;
+        seen.set(name, (seen.get(name) || 0) + 1);
+    });
+    return Array.from(seen.values()).filter(n => n > 1).length;
+}
+
+function _renderMasterQuality() {
+    const el = document.getElementById('master-quality-row');
+    if (!el) return;
+    const safetyDepts = _orgDepts.filter(d => d.is_safety_core == 1);
+    const safetyNoUnit = safetyDepts.filter(d => !_orgUnits.some(u => u.department_id === d.id)).length;
+    const duplicateMaster =
+        _countDuplicateNames(_orgDepts) +
+        _countDuplicateNames(_masterQuality.teams) +
+        _countDuplicateNames(_masterQuality.positions) +
+        _countDuplicateNames(_masterQuality.roles) +
+        _countDuplicateNames(_masterQuality.areas);
+    const emptyRequired =
+        _orgDepts.filter(d => !(d.Name || '').trim()).length +
+        _orgUnits.filter(u => !(u.name || '').trim()).length;
+    const referenceLoaded = ['teams','positions','roles','areas'].filter(k => _masterQuality[k].length > 0).length;
+    const masterTotal = _orgDepts.length + _orgUnits.length + _masterQuality.teams.length + _masterQuality.positions.length + _masterQuality.roles.length + _masterQuality.areas.length;
+    const riskCount = safetyNoUnit + duplicateMaster + emptyRequired;
+    const readiness = riskCount === 0 && masterTotal > 0
+        ? { label: 'Ready', bg: 'bg-emerald-50', border: 'border-emerald-100', text: 'text-emerald-700' }
+        : { label: 'Review', bg: 'bg-amber-50', border: 'border-amber-100', text: 'text-amber-700' };
+    el.innerHTML = `
+    <button type="button" onclick="document.getElementById('org-table-wrap')?.scrollIntoView({behavior:'smooth',block:'start'})"
+        class="text-left rounded-xl border ${readiness.border} ${readiness.bg} px-4 py-3 hover:shadow-sm transition-shadow">
+        <p class="text-[10px] font-bold uppercase ${readiness.text}">Master Readiness</p>
+        <p class="mt-1 text-sm font-black ${readiness.text}">${readiness.label}</p>
+        <p class="mt-1 text-[11px] text-slate-500">${riskCount} issue signals</p>
+    </button>
+    <button type="button" onclick="window._orgSetFilter('safety')"
+        class="text-left rounded-xl border ${safetyNoUnit ? 'border-amber-100 bg-amber-50' : 'border-slate-200 bg-white'} px-4 py-3 hover:shadow-sm transition-shadow">
+        <p class="text-[10px] font-bold uppercase ${safetyNoUnit ? 'text-amber-600' : 'text-slate-500'}">Safety Core Units</p>
+        <p class="mt-1 text-sm font-black ${safetyNoUnit ? 'text-amber-700' : 'text-slate-700'}">${safetyDepts.length - safetyNoUnit}/${safetyDepts.length}</p>
+        <p class="mt-1 text-[11px] text-slate-500">${safetyNoUnit} dept without unit</p>
+    </button>
+    <div class="rounded-xl border ${duplicateMaster ? 'border-red-100 bg-red-50' : 'border-slate-200 bg-white'} px-4 py-3">
+        <p class="text-[10px] font-bold uppercase ${duplicateMaster ? 'text-red-600' : 'text-slate-500'}">Duplicate Names</p>
+        <p class="mt-1 text-sm font-black ${duplicateMaster ? 'text-red-700' : 'text-slate-700'}">${duplicateMaster}</p>
+        <p class="mt-1 text-[11px] text-slate-500">Across master lists</p>
+    </div>
+    <div class="rounded-xl border ${emptyRequired ? 'border-red-100 bg-red-50' : 'border-slate-200 bg-white'} px-4 py-3">
+        <p class="text-[10px] font-bold uppercase ${emptyRequired ? 'text-red-600' : 'text-slate-500'}">Blank Required</p>
+        <p class="mt-1 text-sm font-black ${emptyRequired ? 'text-red-700' : 'text-slate-700'}">${emptyRequired}</p>
+        <p class="mt-1 text-[11px] text-slate-500">Dept/unit names</p>
+    </div>
+    <div class="rounded-xl border border-slate-200 bg-white px-4 py-3">
+        <p class="text-[10px] font-bold uppercase text-slate-500">Reference Sets</p>
+        <p class="mt-1 text-sm font-black text-slate-700">${referenceLoaded}/4 loaded</p>
+        <p class="mt-1 text-[11px] text-slate-500">${masterTotal.toLocaleString()} total records</p>
+    </div>`;
 }
 
 // ─── Filter helpers ────────────────────────────────────────────────────────────
@@ -656,6 +726,7 @@ window._orgAddDept = function() {
                 showToast('เพิ่มแผนกสำเร็จ', 'success');
                 await _orgFetchAll();
                 _orgRenderStats();
+                _renderMasterQuality();
                 _orgRenderTable();
             } catch (err) {
                 _btnRestore(subBtn, orig);
@@ -712,6 +783,7 @@ window._orgEditDept = function(id, name, isSafety) {
                 showToast('บันทึกข้อมูลแผนกสำเร็จ', 'success');
                 await _orgFetchAll();
                 _orgRenderStats();
+                _renderMasterQuality();
                 _orgRenderTable();
                 _loadHeroStats();
             } catch (err) {
@@ -809,6 +881,7 @@ window._orgViewUnits = async function(deptId, deptName) {
                 await reloadUnits();
                 await _orgFetchAll();
                 _orgRenderStats();
+                _renderMasterQuality();
                 _orgRenderTable();
             } catch (ex) {
                 if (err) { err.textContent = ex.message || 'เกิดข้อผิดพลาด'; err.classList.remove('hidden'); }
@@ -867,6 +940,7 @@ window._orgDeleteUnit = async function(id, name, deptId, deptName) {
         await window._orgViewUnits(deptId, deptName);
         await _orgFetchAll();
         _orgRenderStats();
+        _renderMasterQuality();
         _orgRenderTable();
     } catch (err) {
         showError(err.message || 'เกิดข้อผิดพลาด');
@@ -1070,6 +1144,81 @@ window._permToggle = async function(role, permission, granted) {
     }
 };
 
+function _adminActionCenterHtml(d = {}) {
+    const severityClass = {
+        high: 'border-rose-200 bg-rose-50 text-rose-700',
+        medium: 'border-amber-200 bg-amber-50 text-amber-700',
+        low: 'border-sky-200 bg-sky-50 text-sky-700',
+        ok: 'border-emerald-200 bg-emerald-50 text-emerald-700',
+    };
+    const severityDot = {
+        high: 'bg-rose-500',
+        medium: 'bg-amber-500',
+        low: 'bg-sky-500',
+        ok: 'bg-emerald-500',
+    };
+    const actionItems = (d.actionRequired || []).filter(item => Number(item.count || 0) > 0);
+    const actionRows = actionItems.map(item => `
+        <button onclick="window._adminTab('${item.tab || 'health'}')"
+            class="w-full text-left border ${severityClass[item.severity] || severityClass.ok} rounded-lg px-3 py-3 hover:shadow-sm transition-all">
+            <div class="flex items-center justify-between gap-3">
+                <div class="flex items-center gap-2 min-w-0">
+                    <span class="w-2 h-2 rounded-full ${severityDot[item.severity] || severityDot.ok} flex-shrink-0"></span>
+                    <span class="text-xs font-bold truncate">${escHtml(item.label || '-')}</span>
+                </div>
+                <span class="text-sm font-black tabular-nums">${Number(item.count || 0)}</span>
+            </div>
+        </button>
+    `).join('');
+    const actionRequiredHtml = actionItems.length ? actionRows : `
+        <div class="border border-emerald-200 bg-emerald-50 rounded-xl px-4 py-6 text-center">
+            <div class="w-10 h-10 rounded-full bg-emerald-100 text-emerald-700 flex items-center justify-center mx-auto mb-2">
+                <svg class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg>
+            </div>
+            <p class="text-sm font-bold text-emerald-800">No urgent admin actions</p>
+        </div>`;
+    const ux = d.uxHealth || { score: 100, high: 0, medium: 0, low: 0 };
+    const score = Math.max(0, Math.min(100, Number(ux.score ?? 100)));
+    const scoreColor = score >= 85 ? 'text-emerald-700 bg-emerald-50 border-emerald-200' : score >= 65 ? 'text-amber-700 bg-amber-50 border-amber-200' : 'text-rose-700 bg-rose-50 border-rose-200';
+    const barColor = score >= 85 ? 'bg-emerald-500' : score >= 65 ? 'bg-amber-500' : 'bg-rose-500';
+
+    return `
+    <div class="grid grid-cols-1 lg:grid-cols-3 gap-4">
+        <div class="lg:col-span-2 bg-white rounded-xl border border-slate-200 shadow-sm p-5">
+            <div class="flex items-center justify-between gap-3 mb-4">
+                <div>
+                    <h3 class="font-bold text-slate-800 text-sm">Action Required</h3>
+                </div>
+                <button onclick="window._adminTab('health')" class="text-xs font-bold text-slate-500 hover:text-slate-800">System Health</button>
+            </div>
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-3">${actionRequiredHtml}</div>
+        </div>
+        <div class="bg-white rounded-xl border border-slate-200 shadow-sm p-5">
+            <div class="flex items-start justify-between gap-3">
+                <div>
+                    <h3 class="font-bold text-slate-800 text-sm">UX Health</h3>
+                </div>
+                <span class="px-3 py-1 rounded-full text-xs font-black border ${scoreColor}">${score}</span>
+            </div>
+            <div class="mt-5 space-y-3">
+                <div>
+                    <div class="flex justify-between text-[11px] font-bold text-slate-500 mb-1">
+                        <span>Readiness</span><span>${score}%</span>
+                    </div>
+                    <div class="h-2 rounded-full bg-slate-100 overflow-hidden">
+                        <div class="h-full rounded-full ${barColor}" style="width:${score}%"></div>
+                    </div>
+                </div>
+                <div class="grid grid-cols-3 gap-2 text-center">
+                    <div class="rounded-lg bg-rose-50 border border-rose-100 py-2"><div class="text-lg font-black text-rose-700">${ux.high || 0}</div><div class="text-[10px] text-rose-600">High</div></div>
+                    <div class="rounded-lg bg-amber-50 border border-amber-100 py-2"><div class="text-lg font-black text-amber-700">${ux.medium || 0}</div><div class="text-[10px] text-amber-600">Medium</div></div>
+                    <div class="rounded-lg bg-sky-50 border border-sky-100 py-2"><div class="text-lg font-black text-sky-700">${ux.low || 0}</div><div class="text-[10px] text-sky-600">Low</div></div>
+                </div>
+            </div>
+        </div>
+    </div>`;
+}
+
 // =============================================================================
 // TAB: DASHBOARD
 // =============================================================================
@@ -1124,6 +1273,7 @@ async function renderDashboard(container) {
 
         container.innerHTML = `
         <div class="animate-fade-in space-y-6">
+            ${_adminActionCenterHtml(d)}
             <div class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
                 ${cards.map(c => `
                 <div class="bg-white rounded-xl border ${colorMap[c.color].split(' ')[2]} shadow-sm p-4 flex flex-col gap-2">
@@ -3253,6 +3403,8 @@ async function loadPositionsList() {
     try {
         const res = await API.get('/master/positions');
         if (!res.success) throw new Error(res.message);
+        _masterQuality.positions = res.data || [];
+        _renderMasterQuality();
         if (countEl) countEl.textContent = res.data.length;
         if (!res.data.length) { listEl.innerHTML = `<li class="text-center text-xs text-slate-300 py-10">ยังไม่มีข้อมูล</li>`; return; }
         listEl.innerHTML = res.data.map((item, i) => `
@@ -3278,7 +3430,7 @@ async function loadPositionsList() {
                     </button>
                 </div>
             </li>`).join('');
-    } catch { listEl.innerHTML = `<li class="text-center text-red-400 text-xs py-4">โหลดไม่ได้</li>`; }
+    } catch { _masterQuality.positions = []; _renderMasterQuality(); listEl.innerHTML = `<li class="text-center text-red-400 text-xs py-4">โหลดไม่ได้</li>`; }
 }
 
 window.toggleSupervisorPatrol = async (id) => {
@@ -3299,6 +3451,8 @@ async function loadAreasList() {
         const res = await API.get('/master/areas');
         if (!res.success) throw new Error(res.message);
         const areas = res.data || [];
+        _masterQuality.areas = areas;
+        _renderMasterQuality();
         if (countEl) countEl.textContent = areas.length;
         if (!areas.length) {
             gridEl.innerHTML = `<div class="text-center text-xs text-slate-400 py-6 col-span-full">ยังไม่มีพื้นที่</div>`;
@@ -3324,6 +3478,8 @@ async function loadAreasList() {
                 <span class="absolute top-1 left-1 text-[8px] text-slate-300 font-mono">${a.SortOrder||'—'}</span>
             </div>`).join('');
     } catch {
+        _masterQuality.areas = [];
+        _renderMasterQuality();
         if (gridEl) gridEl.innerHTML = `<div class="text-center text-red-400 text-xs py-4 col-span-full">โหลดไม่ได้</div>`;
     }
 }
@@ -3404,6 +3560,8 @@ async function loadMasterList(type) {
     try {
         const res = await API.get(`/master/${type}`);
         if (!res.success) throw new Error(res.message);
+        _masterQuality[type] = res.data || [];
+        _renderMasterQuality();
         if (countEl) countEl.textContent = res.data.length;
         if (res.data.length === 0) { listEl.innerHTML = `<li class="text-center text-xs text-slate-300 py-10">ยังไม่มีข้อมูล</li>`; return; }
         listEl.innerHTML = res.data.map((item, i) => `
@@ -3421,7 +3579,7 @@ async function loadMasterList(type) {
                     </button>
                 </div>
             </li>`).join('');
-    } catch { listEl.innerHTML = `<li class="text-center text-red-400 text-xs py-4">โหลดไม่ได้</li>`; }
+    } catch { _masterQuality[type] = []; _renderMasterQuality(); listEl.innerHTML = `<li class="text-center text-red-400 text-xs py-4">โหลดไม่ได้</li>`; }
 }
 
 window.addMasterData = async (type) => {
@@ -3500,6 +3658,7 @@ async function renderEmployeesTab(container) {
                 </button>
             </div>
         </div>
+        <div id="emp-quality-strip" class="grid grid-cols-2 lg:grid-cols-5 gap-3"></div>
         <div class="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
             <div id="emp-table-wrap">
                 <div class="py-16 text-center text-slate-400 text-sm">กำลังโหลด...</div>
@@ -3526,6 +3685,7 @@ async function renderEmployeesTab(container) {
 function _renderEmpTable() {
     const wrap   = document.getElementById('emp-table-wrap');
     const pagEl  = document.getElementById('emp-pagination');
+    const qEl    = document.getElementById('emp-quality-strip');
     if (!wrap) return;
 
     const filtered = _empCache.filter(e =>
@@ -3535,6 +3695,48 @@ function _renderEmpTable() {
         (e.Department  ||'').toLowerCase().includes(_empSearch) ||
         (e.Position    ||'').toLowerCase().includes(_empSearch)
     );
+
+    if (qEl) {
+        const total = _empCache.length;
+        const missingDept = _empCache.filter(e => !(e.Department || '').trim()).length;
+        const missingPosition = _empCache.filter(e => !(e.Position || '').trim()).length;
+        const missingName = _empCache.filter(e => !(e.EmployeeName || '').trim()).length;
+        const missingCore = missingDept + missingPosition + missingName;
+        const adminCount = _empCache.filter(e => String(e.Role || '').toLowerCase() === 'admin').length;
+        const deptCount = new Set(_empCache.map(e => (e.Department || '').trim()).filter(Boolean)).size;
+        const unitAssigned = _empCache.filter(e => (e.Unit || '').trim()).length;
+        const unitPct = total ? Math.round(unitAssigned / total * 100) : 0;
+        qEl.innerHTML = `
+        <button type="button" onclick="document.getElementById('emp-search-input')?.focus()"
+            class="text-left rounded-xl border ${missingCore ? 'border-amber-100 bg-amber-50' : 'border-emerald-100 bg-emerald-50'} px-4 py-3 hover:shadow-sm transition-shadow">
+            <p class="text-[10px] font-bold uppercase ${missingCore ? 'text-amber-600' : 'text-emerald-600'}">Data Quality</p>
+            <p class="mt-1 text-sm font-black ${missingCore ? 'text-amber-700' : 'text-emerald-700'}">${missingCore ? 'Review' : 'Ready'}</p>
+            <p class="mt-1 text-[11px] text-slate-500">${missingCore} missing core fields</p>
+        </button>
+        <div class="rounded-xl border border-slate-200 bg-white px-4 py-3">
+            <p class="text-[10px] font-bold uppercase text-slate-500">Employees</p>
+            <p class="mt-1 text-sm font-black text-slate-700">${total.toLocaleString()}</p>
+            <p class="mt-1 text-[11px] text-slate-500">${filtered.length.toLocaleString()} in current view</p>
+        </div>
+        <button type="button" onclick="window._adminTab('reference')"
+            class="text-left rounded-xl border ${missingDept ? 'border-amber-100 bg-amber-50' : 'border-slate-200 bg-white'} px-4 py-3 hover:shadow-sm transition-shadow">
+            <p class="text-[10px] font-bold uppercase ${missingDept ? 'text-amber-600' : 'text-slate-500'}">Department Coverage</p>
+            <p class="mt-1 text-sm font-black ${missingDept ? 'text-amber-700' : 'text-slate-700'}">${deptCount}</p>
+            <p class="mt-1 text-[11px] text-slate-500">${missingDept} missing dept</p>
+        </button>
+        <button type="button" onclick="window._adminTab('reference')"
+            class="text-left rounded-xl border ${missingPosition ? 'border-amber-100 bg-amber-50' : 'border-slate-200 bg-white'} px-4 py-3 hover:shadow-sm transition-shadow">
+            <p class="text-[10px] font-bold uppercase ${missingPosition ? 'text-amber-600' : 'text-slate-500'}">Position Coverage</p>
+            <p class="mt-1 text-sm font-black ${missingPosition ? 'text-amber-700' : 'text-slate-700'}">${missingPosition} gap</p>
+            <p class="mt-1 text-[11px] text-slate-500">${unitPct}% unit assigned</p>
+        </button>
+        <button type="button" onclick="window._adminTab('permissions')"
+            class="text-left rounded-xl border ${adminCount > 1 ? 'border-red-100 bg-red-50' : 'border-slate-200 bg-white'} px-4 py-3 hover:shadow-sm transition-shadow">
+            <p class="text-[10px] font-bold uppercase ${adminCount > 1 ? 'text-red-600' : 'text-slate-500'}">Admin Accounts</p>
+            <p class="mt-1 text-sm font-black ${adminCount > 1 ? 'text-red-700' : 'text-slate-700'}">${adminCount}</p>
+            <p class="mt-1 text-[11px] text-slate-500">Review privilege scope</p>
+        </button>`;
+    }
 
     const totalPages = Math.max(1, Math.ceil(filtered.length / EMP_PER_PAGE));
     if (_empPage > totalPages) _empPage = totalPages;
@@ -3968,6 +4170,8 @@ async function renderSystemHealth(container) {
         const d   = res.data || {};
         const m   = d.modules || {};
         const al  = d.alerts  || {};
+        const readiness = d.readiness || {};
+        const audit = d.audit || {};
 
         const mkCard = (title, icon, items, color = 'slate') => {
             const colorClass = { indigo:'border-l-indigo-400', emerald:'border-l-emerald-400', amber:'border-l-amber-400', rose:'border-l-rose-400', sky:'border-l-sky-400', slate:'border-l-slate-300' };
@@ -3995,8 +4199,60 @@ async function renderSystemHealth(container) {
             ).join('')}</tbody></table>`;
         };
 
+        const readinessScore = Number(readiness.score ?? 0);
+        const readinessTone = readinessScore >= 90
+            ? 'border-emerald-200 bg-emerald-50 text-emerald-700'
+            : readinessScore >= 70
+                ? 'border-amber-200 bg-amber-50 text-amber-700'
+                : 'border-rose-200 bg-rose-50 text-rose-700';
+        const staleWork = (al.staleChangeNotices?.length || 0) + (al.staleHiyari?.length || 0);
+        const missingTables = readiness.missingTables || [];
+        const activeSignals = (readiness.signals || []).filter(s => s.count > 0);
+        const signalList = activeSignals.length
+            ? activeSignals.map(s => `
+                <div class="flex items-start justify-between gap-3 py-2 border-b border-slate-100 last:border-0">
+                    <div>
+                        <p class="text-xs font-bold text-slate-700">${escHtml(s.label || s.key || 'Signal')}</p>
+                        <p class="text-[11px] text-slate-400">${escHtml((s.detail || []).slice(0, 3).map(x => typeof x === 'string' ? x : (x.NoticeNo || x.Department || x.id || '')).filter(Boolean).join(', ') || 'Needs admin review')}</p>
+                    </div>
+                    <span class="text-[11px] font-bold px-2 py-0.5 rounded-full ${s.severity === 'high' ? 'bg-rose-100 text-rose-700' : 'bg-amber-100 text-amber-700'}">${s.count}</span>
+                </div>`).join('')
+            : `<div class="text-xs text-emerald-700 bg-emerald-50 border border-emerald-100 rounded-lg p-3">No major readiness signals detected.</div>`;
+
+        const healthMetric = (label, value, hint, tone = 'slate') => {
+            const toneMap = {
+                emerald: 'border-emerald-200 bg-emerald-50 text-emerald-700',
+                amber: 'border-amber-200 bg-amber-50 text-amber-700',
+                rose: 'border-rose-200 bg-rose-50 text-rose-700',
+                sky: 'border-sky-200 bg-sky-50 text-sky-700',
+                slate: 'border-slate-200 bg-white text-slate-700',
+            };
+            return `
+            <div class="rounded-xl border ${toneMap[tone] || toneMap.slate} p-4 shadow-sm">
+                <p class="text-[11px] font-bold uppercase opacity-70">${label}</p>
+                <p class="text-2xl font-black mt-1">${value ?? '-'}</p>
+                <p class="text-[11px] opacity-70 mt-1">${hint}</p>
+            </div>`;
+        };
+
         container.innerHTML = `
         <div class="animate-fade-in space-y-6">
+            <div class="grid grid-cols-1 xl:grid-cols-3 gap-4">
+                <div class="xl:col-span-2 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+                    ${healthMetric('Pre-production Readiness', `${readinessScore}%`, readiness.status || 'Unknown', readinessScore >= 90 ? 'emerald' : readinessScore >= 70 ? 'amber' : 'rose')}
+                    ${healthMetric('Failed API 24h', audit.failed24h ?? '-', 'From Admin AuditLogs', (audit.failed24h || 0) > 0 ? 'rose' : 'emerald')}
+                    ${healthMetric('Audit Activity 24h', audit.last24h ?? '-', 'Signed-in mutations', 'sky')}
+                    ${healthMetric('Stale Work', staleWork, '4M + Hiyari alerts', staleWork > 0 ? 'amber' : 'emerald')}
+                </div>
+                <div class="bg-white rounded-xl border border-slate-200 shadow-sm p-4">
+                    <div class="flex items-center justify-between gap-3 mb-2">
+                        <h3 class="font-bold text-slate-700 text-sm">Readiness Signals</h3>
+                        <span class="text-[11px] font-bold px-2 py-0.5 rounded-full border ${readinessTone}">${escHtml(readiness.status || 'Unknown')}</span>
+                    </div>
+                    ${signalList}
+                    ${missingTables.length ? `<p class="text-[11px] text-rose-500 mt-2">Missing tables: ${escHtml(missingTables.join(', '))}</p>` : ''}
+                </div>
+            </div>
             <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
                 ${mkCard('Employees', `<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0z"/>`,
                     [['พนักงานทั้งหมด', m.employees?.total], ['แผนก', m.employees?.depts], ['ทีม', m.employees?.teams]], 'indigo')}
@@ -4043,7 +4299,7 @@ async function renderSystemHealth(container) {
 // =============================================================================
 // TAB: AUDIT LOG
 // =============================================================================
-async function renderAuditLog(container) {
+async function renderAuditLogLegacy(container) {
     _auditPage = 1;
     container.innerHTML = `
     <div class="animate-fade-in space-y-4">
@@ -4072,7 +4328,7 @@ async function renderAuditLog(container) {
     loadAuditLog();
 }
 
-async function loadAuditLog() {
+async function loadAuditLogLegacy() {
     const wrap    = document.getElementById('audit-table-wrap');
     const pagEl   = document.getElementById('audit-pagination');
     const action  = document.getElementById('audit-filter-action')?.value || '';
@@ -4135,6 +4391,276 @@ async function loadAuditLog() {
         }
     } catch (err) {
         wrap.innerHTML = `<div class="py-12 text-center text-red-400 text-sm">โหลดไม่ได้: ${escHtml(err.message)}</div>`;
+    }
+}
+
+async function renderAuditLog(container) {
+    _auditPage = 1;
+    container.innerHTML = `
+    <div class="animate-fade-in space-y-4">
+        <div class="bg-white rounded-xl border border-slate-200 shadow-sm p-4">
+            <div class="grid grid-cols-1 md:grid-cols-6 gap-3 items-end">
+                <div class="md:col-span-2">
+                    <label class="block text-[11px] font-bold text-slate-500 uppercase mb-1">Search</label>
+                    <input id="audit-filter-q" oninput="window._auditDebouncedLoad&&window._auditDebouncedLoad()" class="form-input w-full text-sm border-slate-200 rounded-lg py-2 px-3" placeholder="user, action, target, path">
+                </div>
+                <div>
+                    <label class="block text-[11px] font-bold text-slate-500 uppercase mb-1">Module</label>
+                    <select id="audit-filter-module" onchange="window._loadAuditLog()" class="form-select w-full text-sm border-slate-200 rounded-lg py-2 pl-3 pr-8">
+                        <option value="">All Modules</option>
+                    </select>
+                </div>
+                <div>
+                    <label class="block text-[11px] font-bold text-slate-500 uppercase mb-1">Action</label>
+                    <select id="audit-filter-action" onchange="window._loadAuditLog()" class="form-select w-full text-sm border-slate-200 rounded-lg py-2 pl-3 pr-8">
+                        <option value="">All Actions</option>
+                    </select>
+                </div>
+                <div>
+                    <label class="block text-[11px] font-bold text-slate-500 uppercase mb-1">From</label>
+                    <input id="audit-date-from" type="date" onchange="window._loadAuditLog()" class="form-input w-full text-sm border-slate-200 rounded-lg py-2 px-3">
+                </div>
+                <div>
+                    <label class="block text-[11px] font-bold text-slate-500 uppercase mb-1">To</label>
+                    <div class="flex gap-2">
+                        <input id="audit-date-to" type="date" onchange="window._loadAuditLog()" class="form-input w-full text-sm border-slate-200 rounded-lg py-2 px-3">
+                        <button onclick="window._loadAuditLog()" class="btn bg-slate-100 hover:bg-slate-200 text-slate-700 px-3 py-2 rounded-lg font-medium flex items-center transition-colors" title="Refresh">
+                            <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg>
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+        <div id="audit-summary-strip" class="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-5 gap-3">
+            <div class="rounded-xl border border-slate-200 bg-white p-4 shadow-sm text-sm text-slate-400">Loading audit summary...</div>
+        </div>
+        <div class="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
+            <div id="audit-table-wrap"><div class="py-16 text-center text-slate-400 text-sm">Loading...</div></div>
+        </div>
+        <div id="audit-pagination" class="flex justify-between items-center"></div>
+    </div>`;
+
+    let auditTimer = null;
+    window._loadAuditLog = () => {
+        _auditPage = 1;
+        loadAuditLog();
+    };
+    window._auditDebouncedLoad = () => {
+        clearTimeout(auditTimer);
+        auditTimer = setTimeout(() => {
+            _auditPage = 1;
+            loadAuditLog();
+        }, 350);
+    };
+    window._auditChangePage = (p) => { _auditPage = p; loadAuditLog(); };
+    window._auditShowDetail = showAuditDetail;
+    loadAuditLog();
+}
+
+function updateAuditFacets(facets = {}) {
+    const updateSelect = (id, items = [], label) => {
+        const el = document.getElementById(id);
+        if (!el) return;
+        const current = el.value;
+        const unique = [...new Set(items.filter(Boolean))];
+        el.innerHTML = `<option value="">${label}</option>` + unique.map(item =>
+            `<option value="${escHtml(item)}" ${item === current ? 'selected' : ''}>${escHtml(item)}</option>`
+        ).join('');
+    };
+    updateSelect('audit-filter-module', facets.modules || [], 'All Modules');
+    updateSelect('audit-filter-action', facets.actions || [], 'All Actions');
+}
+
+function auditActionClass(action = '') {
+    if (action.startsWith('CREATE')) return 'bg-emerald-100 text-emerald-700';
+    if (action.startsWith('UPDATE')) return 'bg-indigo-100 text-indigo-700';
+    if (action.startsWith('DELETE')) return 'bg-red-100 text-red-600';
+    if (action.startsWith('FAILED')) return 'bg-rose-100 text-rose-700';
+    if (action.includes('PASSWORD')) return 'bg-amber-100 text-amber-700';
+    if (action.includes('IMPORT')) return 'bg-sky-100 text-sky-700';
+    return 'bg-slate-100 text-slate-600';
+}
+
+function auditInfoBlock(label, value) {
+    return `
+    <div class="rounded-lg border border-slate-100 bg-slate-50 px-3 py-2">
+        <p class="text-[10px] font-bold uppercase text-slate-400">${escHtml(label)}</p>
+        <p class="text-xs font-semibold text-slate-700 mt-1 break-words">${escHtml(value || '-')}</p>
+    </div>`;
+}
+
+function parseAuditMetadata(raw) {
+    if (!raw) return null;
+    if (typeof raw === 'object') return raw;
+    try { return JSON.parse(raw); } catch { return null; }
+}
+
+function showAuditDetail(id) {
+    const row = _auditRows.find(r => String(r.id) === String(id));
+    if (!row) return;
+    const metadata = parseAuditMetadata(row.Metadata);
+    const metadataHtml = metadata
+        ? `<pre class="text-[11px] leading-relaxed bg-slate-950 text-slate-100 rounded-lg p-3 overflow-auto max-h-64">${escHtml(JSON.stringify(metadata, null, 2))}</pre>`
+        : `<div class="text-xs text-slate-400 bg-slate-50 border border-slate-100 rounded-lg p-3">No metadata captured.</div>`;
+    const status = Number(row.StatusCode || 0);
+    const okStatus = !status || status < 400;
+    const body = `
+        <div class="space-y-4">
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
+                ${auditInfoBlock('User', [row.AdminName, row.AdminID].filter(Boolean).join(' / '))}
+                ${auditInfoBlock('Role / Department', [row.Role, row.Department].filter(Boolean).join(' / '))}
+                ${auditInfoBlock('Method / Path', [row.Method, row.Path].filter(Boolean).join(' '))}
+                ${auditInfoBlock('Target', `${row.TargetType || '-'}${row.TargetID ? ' #' + row.TargetID : ''}`)}
+                ${auditInfoBlock('IP Address', row.IPAddress)}
+                ${auditInfoBlock('User Agent', row.UserAgent)}
+            </div>
+            <div>
+                <p class="text-[11px] font-bold uppercase text-slate-400 mb-1">Detail</p>
+                <div class="text-sm text-slate-700 bg-white border border-slate-100 rounded-lg p-3">${escHtml(row.Detail || '-')}</div>
+            </div>
+            <div>
+                <p class="text-[11px] font-bold uppercase text-slate-400 mb-1">Metadata</p>
+                ${metadataHtml}
+            </div>
+        </div>`;
+
+    openDetailModal({
+        title: escHtml(row.Action || 'Audit Activity'),
+        subtitle: row.ActionTime ? new Date(row.ActionTime).toLocaleString('th-TH', { dateStyle: 'medium', timeStyle: 'medium' }) : '',
+        meta: [
+            { label: row.Module || 'system', className: 'bg-slate-50 text-slate-600 border-slate-200' },
+            { label: row.StatusCode || 'OK', className: okStatus ? 'bg-emerald-50 text-emerald-700 border-emerald-200' : 'bg-rose-50 text-rose-700 border-rose-200' },
+        ],
+        body,
+        size: 'max-w-3xl',
+    });
+}
+
+function renderAuditSummary(rows = [], total = 0) {
+    const el = document.getElementById('audit-summary-strip');
+    if (!el) return;
+    const failures = rows.filter(r => Number(r.StatusCode || 0) >= 400 || String(r.Action || '').startsWith('FAILED')).length;
+    const mutations = rows.filter(r => ['POST', 'PUT', 'PATCH', 'DELETE'].includes(String(r.Method || '').toUpperCase())).length;
+    const modules = new Set(rows.map(r => r.Module).filter(Boolean)).size;
+    const users = new Set(rows.map(r => r.AdminID || r.AdminName).filter(Boolean)).size;
+    const latest = rows[0]?.ActionTime
+        ? new Date(rows[0].ActionTime).toLocaleString('th-TH', { dateStyle: 'short', timeStyle: 'short' })
+        : '-';
+    const card = (label, value, hint, tone = 'slate') => {
+        const toneMap = {
+            emerald: 'border-emerald-200 bg-emerald-50 text-emerald-700',
+            amber: 'border-amber-200 bg-amber-50 text-amber-700',
+            rose: 'border-rose-200 bg-rose-50 text-rose-700',
+            sky: 'border-sky-200 bg-sky-50 text-sky-700',
+            slate: 'border-slate-200 bg-white text-slate-700',
+        };
+        return `
+        <div class="rounded-xl border ${toneMap[tone] || toneMap.slate} p-4 shadow-sm">
+            <p class="text-[11px] font-bold uppercase opacity-70">${label}</p>
+            <p class="text-2xl font-black mt-1">${value}</p>
+            <p class="text-[11px] opacity-70 mt-1">${hint}</p>
+        </div>`;
+    };
+    el.innerHTML = `
+        ${card('Matched Records', total, 'Current filters', 'slate')}
+        ${card('Failures Shown', failures, 'On this page', failures ? 'rose' : 'emerald')}
+        ${card('Modules Touched', modules, 'On this page', 'sky')}
+        ${card('Active Users', users, 'On this page', 'amber')}
+        ${card('Latest Activity', escHtml(latest), `${mutations} mutations shown`, 'slate')}
+    `;
+}
+
+async function loadAuditLog() {
+    const wrap = document.getElementById('audit-table-wrap');
+    const pagEl = document.getElementById('audit-pagination');
+    if (!wrap) return;
+
+    const params = new URLSearchParams({
+        page: String(_auditPage),
+        limit: String(AUDIT_LIMIT),
+    });
+    const filters = {
+        q: document.getElementById('audit-filter-q')?.value?.trim() || '',
+        module: document.getElementById('audit-filter-module')?.value || '',
+        action: document.getElementById('audit-filter-action')?.value || '',
+        dateFrom: document.getElementById('audit-date-from')?.value || '',
+        dateTo: document.getElementById('audit-date-to')?.value || '',
+    };
+    Object.entries(filters).forEach(([key, value]) => {
+        if (value) params.set(key, value);
+    });
+
+    wrap.innerHTML = _skelRows(6, 7);
+    try {
+        const res = await API.get(`/admin/audit-logs?${params.toString()}`);
+        _auditTotal = res.total || 0;
+        const rows = res.data || [];
+        _auditRows = rows;
+        const totalPages = Math.max(1, Math.ceil(_auditTotal / AUDIT_LIMIT));
+        updateAuditFacets(res.facets || {});
+        renderAuditSummary(rows, _auditTotal);
+
+        if (rows.length === 0) {
+            wrap.innerHTML = `<div class="py-16 text-center text-slate-400 text-sm">No audit activity found for these filters.</div>`;
+        } else {
+            wrap.innerHTML = `
+            <div class="overflow-x-auto">
+            <table class="w-full min-w-[980px] text-sm">
+                <thead>
+                    <tr class="bg-slate-50 border-b border-slate-200 text-left">
+                        <th class="px-4 py-3 text-[11px] font-bold text-slate-500 uppercase">Time</th>
+                        <th class="px-4 py-3 text-[11px] font-bold text-slate-500 uppercase">User</th>
+                        <th class="px-4 py-3 text-[11px] font-bold text-slate-500 uppercase">Module</th>
+                        <th class="px-4 py-3 text-[11px] font-bold text-slate-500 uppercase">Action</th>
+                        <th class="px-4 py-3 text-[11px] font-bold text-slate-500 uppercase">Target / Path</th>
+                        <th class="px-4 py-3 text-[11px] font-bold text-slate-500 uppercase">Status</th>
+                        <th class="px-4 py-3 text-[11px] font-bold text-slate-500 uppercase">Detail</th>
+                        <th class="px-4 py-3 text-[11px] font-bold text-slate-500 uppercase"></th>
+                    </tr>
+                </thead>
+                <tbody class="divide-y divide-slate-100">
+                    ${rows.map(r => `
+                    <tr class="hover:bg-slate-50 transition-colors">
+                        <td class="px-4 py-3 text-xs text-slate-500 whitespace-nowrap font-mono">
+                            ${new Date(r.ActionTime).toLocaleString('th-TH',{dateStyle:'short',timeStyle:'short'})}
+                        </td>
+                        <td class="px-4 py-3">
+                            <div class="text-xs text-slate-700 font-semibold">${escHtml(r.AdminName||r.AdminID||'-')}</div>
+                            <div class="text-[11px] text-slate-400">${escHtml([r.AdminID, r.Role, r.Department].filter(Boolean).join(' / ') || '-')}</div>
+                        </td>
+                        <td class="px-4 py-3 text-xs text-slate-600 font-mono">${escHtml(r.Module||'-')}</td>
+                        <td class="px-4 py-3">
+                            <span class="text-[10px] font-bold px-2 py-0.5 rounded-full ${auditActionClass(r.Action||'')}">${escHtml(r.Action||'-')}</span>
+                        </td>
+                        <td class="px-4 py-3 text-xs text-slate-500">
+                            <div class="font-mono">${escHtml(r.TargetType||'-')}${r.TargetID?` #${escHtml(r.TargetID)}`:''}</div>
+                            <div class="text-[11px] text-slate-400 truncate max-w-[220px]">${escHtml(r.Path||'')}</div>
+                        </td>
+                        <td class="px-4 py-3 text-xs font-mono ${Number(r.StatusCode) >= 400 ? 'text-rose-600' : 'text-emerald-600'}">${r.StatusCode||'-'}</td>
+                        <td class="px-4 py-3 text-xs text-slate-600 max-w-xs truncate" title="${escHtml(r.Detail||'')}">${escHtml(r.Detail||'-')}</td>
+                        <td class="px-4 py-3 text-right">
+                            <button onclick="window._auditShowDetail&&window._auditShowDetail('${escHtml(r.id)}')" class="px-2.5 py-1 rounded-lg text-xs font-bold text-slate-600 bg-slate-100 hover:bg-slate-200 transition-colors">Detail</button>
+                        </td>
+                    </tr>`).join('')}
+                </tbody>
+            </table>
+            </div>
+            <div class="px-4 py-2 border-t border-slate-100 text-xs text-slate-400">
+                Showing ${((_auditPage-1)*AUDIT_LIMIT)+1}-${Math.min(_auditPage*AUDIT_LIMIT,_auditTotal)} of ${_auditTotal} records
+            </div>`;
+        }
+
+        if (pagEl) {
+            pagEl.innerHTML = totalPages <= 1 ? '' : `
+            <div class="flex items-center gap-2 text-xs text-slate-600">
+                <button onclick="window._auditChangePage(${_auditPage-1})" ${_auditPage<=1?'disabled':''} class="px-3 py-1.5 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 disabled:opacity-40 disabled:cursor-not-allowed transition-colors">Previous</button>
+                <span class="px-3">Page <strong>${_auditPage}</strong> / ${totalPages}</span>
+                <button onclick="window._auditChangePage(${_auditPage+1})" ${_auditPage>=totalPages?'disabled':''} class="px-3 py-1.5 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 disabled:opacity-40 disabled:cursor-not-allowed transition-colors">Next</button>
+            </div>`;
+        }
+    } catch (err) {
+        renderAuditSummary([], 0);
+        wrap.innerHTML = `<div class="py-12 text-center text-red-400 text-sm">Load failed: ${escHtml(err.message)}</div>`;
     }
 }
 

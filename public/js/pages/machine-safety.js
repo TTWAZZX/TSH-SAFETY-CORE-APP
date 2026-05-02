@@ -40,6 +40,7 @@ let _filterStatus  = '';
 let _filterRisk    = '';
 let _filterMStatus = '';
 let _filterAudit   = '';
+let _filterInspection = '';
 let _isAdmin       = false;
 let _page          = 1;
 
@@ -114,6 +115,10 @@ function _renderPage(container) {
         const d = new Date(m.NextInspectionDate); const diff = Math.ceil((d - today) / 86400000);
         return diff >= 0 && diff <= 30;
     }).length;
+    const highRisk = _machines.filter(m => ['high', 'critical'].includes(m.RiskLevel || '')).length;
+    const restricted = _machines.filter(m => ['restricted', 'locked'].includes(m.Status || '')).length;
+    const riskReady = _machines.filter(m => m.HasRiskAssessment).length;
+    const openIssues = _machines.reduce((sum, m) => sum + (parseInt(m.OpenIssueCount) || 0), 0);
 
     // Audit readiness across all machines
     const auditMap  = _machines.reduce((acc, m) => { acc[_auditStatus(m).status]++; return acc; }, { pass: 0, warn: 0, fail: 0 });
@@ -306,6 +311,33 @@ function _renderPage(container) {
                 </span>
                 กดเพื่อดู/ดาวน์โหลด/ปริ้น
             </span>
+        </div>
+
+        <!-- Enterprise summary strip -->
+        <div class="grid grid-cols-2 lg:grid-cols-5 gap-3">
+            <button onclick="window._msdSetAuditFilter('fail')"
+                class="text-left rounded-xl border ${auditMap.fail ? 'border-red-100 bg-red-50' : 'border-slate-200 bg-white'} px-4 py-3 hover:shadow-sm transition-shadow">
+                <p class="text-[10px] font-bold uppercase ${auditMap.fail ? 'text-red-500' : 'text-slate-400'}">Audit Risk</p>
+                <p class="mt-1 text-sm font-black ${auditMap.fail ? 'text-red-700' : 'text-slate-700'}">${auditMap.fail} fail / ${auditMap.warn} warn</p>
+            </button>
+            <button onclick="window._msdSetRiskFilter('high-risk')"
+                class="text-left rounded-xl border ${highRisk ? 'border-orange-100 bg-orange-50' : 'border-slate-200 bg-white'} px-4 py-3 hover:shadow-sm transition-shadow">
+                <p class="text-[10px] font-bold uppercase ${highRisk ? 'text-orange-500' : 'text-slate-400'}">High Risk</p>
+                <p class="mt-1 text-sm font-black ${highRisk ? 'text-orange-700' : 'text-slate-700'}">${highRisk.toLocaleString()} machines</p>
+            </button>
+            <button onclick="window._msdSetInspectionFilter('due')"
+                class="text-left rounded-xl border ${overdue || dueSoon ? 'border-amber-100 bg-amber-50' : 'border-slate-200 bg-white'} px-4 py-3 hover:shadow-sm transition-shadow">
+                <p class="text-[10px] font-bold uppercase ${overdue ? 'text-red-500' : dueSoon ? 'text-amber-500' : 'text-slate-400'}">Inspection</p>
+                <p class="mt-1 text-sm font-black ${overdue ? 'text-red-700' : dueSoon ? 'text-amber-700' : 'text-slate-700'}">${overdue} overdue / ${dueSoon} due</p>
+            </button>
+            <div class="rounded-xl border border-emerald-100 bg-emerald-50 px-4 py-3">
+                <p class="text-[10px] font-bold uppercase text-emerald-500">Risk Assessment</p>
+                <p class="mt-1 text-sm font-black text-emerald-700">${total ? Math.round(riskReady * 100 / total) : 0}% ready</p>
+            </div>
+            <div class="rounded-xl border ${openIssues || restricted ? 'border-rose-100 bg-rose-50' : 'border-slate-200 bg-white'} px-4 py-3">
+                <p class="text-[10px] font-bold uppercase ${openIssues || restricted ? 'text-rose-500' : 'text-slate-400'}">Controls</p>
+                <p class="mt-1 text-sm font-black ${openIssues || restricted ? 'text-rose-700' : 'text-slate-700'}">${openIssues} issues / ${restricted} restricted</p>
+            </div>
         </div>
 
         <!-- Filter Bar -->
@@ -626,13 +658,21 @@ function _getFiltered() {
         }
         if (_filterDept    && m.Department !== _filterDept)              return false;
         if (_filterMStatus && (m.Status || 'active') !== _filterMStatus) return false;
-        if (_filterRisk    && (m.RiskLevel || 'low') !== _filterRisk)    return false;
+        if (_filterRisk === 'high-risk' && !['high', 'critical'].includes(m.RiskLevel || '')) return false;
+        if (_filterRisk && _filterRisk !== 'high-risk' && (m.RiskLevel || 'low') !== _filterRisk) return false;
         const hasSafety = m.SafetyDeviceCount > 0;
         const hasLayout = m.LayoutCheckpointCount > 0;
         if (_filterStatus === 'full'    && !(hasSafety && hasLayout)) return false;
         if (_filterStatus === 'partial' && hasSafety === hasLayout)   return false;
         if (_filterStatus === 'none'    && (hasSafety || hasLayout))  return false;
         if (_filterAudit && _auditStatus(m).status !== _filterAudit)  return false;
+        if (_filterInspection) {
+            const today = new Date(); today.setHours(0, 0, 0, 0);
+            const next = m.NextInspectionDate ? new Date(m.NextInspectionDate) : null;
+            const diff = next ? Math.ceil((next - today) / 86400000) : null;
+            if (_filterInspection === 'due' && !(next && diff >= 0 && diff <= 30)) return false;
+            if (_filterInspection === 'overdue' && !(next && diff < 0)) return false;
+        }
         return true;
     });
 }
@@ -659,6 +699,24 @@ window._msdSetAuditFilter = function(val) {
     _filterAudit = (_filterAudit === val) ? '' : val; // toggle off if same
     const sel = document.getElementById('msd-audit');
     if (sel) sel.value = _filterAudit;
+    _page = 1;
+    const wrap = document.getElementById('msd-table-wrap');
+    if (wrap) wrap.innerHTML = _renderTable();
+    _updateCount();
+};
+
+window._msdSetRiskFilter = function(val) {
+    _filterRisk = (_filterRisk === val) ? '' : val;
+    const sel = document.getElementById('msd-risk');
+    if (sel) sel.value = ['low', 'medium', 'high', 'critical'].includes(_filterRisk) ? _filterRisk : '';
+    _page = 1;
+    const wrap = document.getElementById('msd-table-wrap');
+    if (wrap) wrap.innerHTML = _renderTable();
+    _updateCount();
+};
+
+window._msdSetInspectionFilter = function(val) {
+    _filterInspection = (_filterInspection === val) ? '' : val;
     _page = 1;
     const wrap = document.getElementById('msd-table-wrap');
     if (wrap) wrap.innerHTML = _renderTable();

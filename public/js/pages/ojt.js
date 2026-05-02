@@ -907,7 +907,31 @@ async function openHistoryModal(department) {
             return;
         }
 
+        const latest = history[0] || null;
+        const statusKey = _calcStatus(latest?.NextReviewDate);
+        const statusMeta = STATUS_META[statusKey] || STATUS_META['no-data'];
+        const totalAttendees = history.reduce((sum, h) => sum + (parseInt(h.AttendeeCount) || 0), 0);
+        const latestInterval = latest?.ReviewIntervalMonths || '-';
+
         bodyEl.innerHTML = `
+            <div class="grid grid-cols-2 md:grid-cols-4 gap-2 mb-4">
+                <div class="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2">
+                    <p class="text-[10px] font-bold uppercase text-slate-400">Status</p>
+                    <p class="mt-1 text-sm font-bold ${statusMeta.text}">${_esc(statusMeta.label)}</p>
+                </div>
+                <div class="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2">
+                    <p class="text-[10px] font-bold uppercase text-slate-400">Latest OJT</p>
+                    <p class="mt-1 text-sm font-bold text-slate-700">${_fmtDate(latest?.OJTDate)}</p>
+                </div>
+                <div class="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2">
+                    <p class="text-[10px] font-bold uppercase text-slate-400">Next Review</p>
+                    <p class="mt-1 text-sm font-bold ${statusKey === 'overdue' ? 'text-red-600' : statusKey === 'due-soon' ? 'text-amber-600' : 'text-slate-700'}">${_fmtDate(latest?.NextReviewDate)}</p>
+                </div>
+                <div class="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2">
+                    <p class="text-[10px] font-bold uppercase text-slate-400">Attendees</p>
+                    <p class="mt-1 text-sm font-bold text-slate-700">${totalAttendees.toLocaleString()} / ${latestInterval} mo</p>
+                </div>
+            </div>
             <div class="overflow-x-auto">
                 <table class="w-full text-sm">
                     <thead class="bg-slate-50 border-b border-slate-100">

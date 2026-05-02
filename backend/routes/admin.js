@@ -6,6 +6,7 @@ const multer   = require('multer');
 const xlsx     = require('xlsx');
 const bcrypt   = require('bcryptjs');
 const db       = require('../db');
+const { ensureAuditTable } = require('../utils/audit');
 
 const upload = multer({ storage: multer.memoryStorage() });
 
@@ -15,19 +16,31 @@ const ALLOWED_ROLES = ['Admin', 'User', 'Viewer'];
 // ─── Audit Log Helper ─────────────────────────────────────────────────────────
 async function auditLog(req, action, targetType, targetId, detail) {
     try {
+        await ensureAuditTable();
         await db.query(
-            `INSERT INTO Admin_AuditLogs (AdminID, AdminName, Action, TargetType, TargetID, Detail, IPAddress)
-             VALUES (?, ?, ?, ?, ?, ?, ?)`,
+            `INSERT INTO Admin_AuditLogs
+             (AdminID, AdminName, Role, Department, Module, Action, Method, Path, StatusCode,
+              TargetType, TargetID, Detail, Metadata, IPAddress, UserAgent)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
             [
                 req.user?.id   || 'system',
                 req.user?.name || 'System',
+                req.user?.role || req.user?.Role || null,
+                req.user?.department || req.user?.Department || null,
+                'admin',
                 action,
+                req.method || null,
+                String(req.originalUrl || req.path || '').slice(0, 255),
+                200,
                 targetType,
                 String(targetId || ''),
                 detail || null,
+                JSON.stringify({ params: req.params || {}, query: req.query || {} }),
                 req.ip || null,
+                String(req.headers?.['user-agent'] || '').slice(0, 255) || null,
             ]
         );
+        req.auditLogged = true;
     } catch (_) {
         // ถ้า log ไม่ได้ (table ยังไม่มี) ก็ข้ามไปได้ — ไม่ควร block main flow
     }
@@ -318,19 +331,35 @@ router.delete('/schedule/:id', async (req, res) => {
 // AUDIT LOGS
 // =============================================================================
 
-// GET /admin/audit-logs?page=1&limit=50&action=&adminId=
+// GET /admin/audit-logs?page=1&limit=50&action=&adminId=&module=&q=&dateFrom=&dateTo=
 router.get('/audit-logs', async (req, res) => {
     const page   = Math.max(1, parseInt(req.query.page)  || 1);
     const limit  = Math.min(100, parseInt(req.query.limit) || 50);
     const offset = (page - 1) * limit;
     const action  = req.query.action   || '';
     const adminId = req.query.adminId  || '';
+    const module  = req.query.module   || '';
+    const q        = String(req.query.q || '').trim();
+    const dateFrom = req.query.dateFrom || '';
+    const dateTo   = req.query.dateTo   || '';
 
     try {
+        await ensureAuditTable();
         let where = 'WHERE 1=1';
         const params = [];
         if (action)  { where += ' AND Action = ?';   params.push(action); }
         if (adminId) { where += ' AND AdminID = ?';  params.push(adminId); }
+        if (module)  { where += ' AND Module = ?';   params.push(module); }
+        if (q) {
+            where += ` AND (
+                AdminName LIKE ? OR AdminID LIKE ? OR Action LIKE ? OR TargetType LIKE ?
+                OR TargetID LIKE ? OR Detail LIKE ? OR Path LIKE ?
+            )`;
+            const like = `%${q}%`;
+            params.push(like, like, like, like, like, like, like);
+        }
+        if (dateFrom) { where += ' AND ActionTime >= ?'; params.push(dateFrom); }
+        if (dateTo)   { where += ' AND ActionTime < DATE_ADD(?, INTERVAL 1 DAY)'; params.push(dateTo); }
 
         const [[{ total }]] = await db.query(
             `SELECT COUNT(*) AS total FROM Admin_AuditLogs ${where}`, params
@@ -339,7 +368,27 @@ router.get('/audit-logs', async (req, res) => {
             `SELECT * FROM Admin_AuditLogs ${where} ORDER BY ActionTime DESC LIMIT ? OFFSET ?`,
             [...params, limit, offset]
         );
-        res.json({ success: true, data: rows, total, page, limit });
+        const [modules] = await db.query(
+            `SELECT DISTINCT Module FROM Admin_AuditLogs
+             WHERE Module IS NOT NULL AND Module <> ''
+             ORDER BY Module`
+        );
+        const [actions] = await db.query(
+            `SELECT DISTINCT Action FROM Admin_AuditLogs
+             WHERE Action IS NOT NULL AND Action <> ''
+             ORDER BY Action`
+        );
+        res.json({
+            success: true,
+            data: rows,
+            total,
+            page,
+            limit,
+            facets: {
+                modules: modules.map(r => r.Module),
+                actions: actions.map(r => r.Action),
+            },
+        });
     } catch (err) {
         res.status(500).json({ success: false, message: err.message });
     }
@@ -352,6 +401,24 @@ router.get('/audit-logs', async (req, res) => {
 // GET /admin/dashboard-stats
 router.get('/dashboard-stats', async (_req, res) => {
     try {
+        await ensureAuditTable().catch(() => {});
+        const safeScalar = async (sql, fallback = 0) => {
+            try {
+                const [[row]] = await db.query(sql);
+                return row?.total ?? row?.cnt ?? fallback;
+            } catch {
+                return fallback;
+            }
+        };
+        const safeRows = async (sql) => {
+            try {
+                const [rows] = await db.query(sql);
+                return rows;
+            } catch {
+                return [];
+            }
+        };
+
         const [[empRow]]       = await db.query('SELECT COUNT(*) AS total FROM Employees');
         const [[schedRow]]     = await db.query("SELECT COUNT(*) AS total FROM Patrol_Sessions WHERE MONTH(ScheduledDate)=MONTH(NOW()) AND YEAR(ScheduledDate)=YEAR(NOW())").catch(() => [[{ total: 0 }]]);
         const [[pendRow]]      = await db.query("SELECT COUNT(*) AS total FROM Patrol_Sessions WHERE Status='Pending' AND ScheduledDate >= CURDATE()").catch(() => [[{ total: 0 }]]);
@@ -359,6 +426,7 @@ router.get('/dashboard-stats', async (_req, res) => {
         const [[kyRow]]        = await db.query('SELECT COUNT(*) AS total FROM KY_Activities WHERE MONTH(ActivityDate)=MONTH(NOW()) AND YEAR(ActivityDate)=YEAR(NOW())').catch(() => [[{ total: 0 }]]);
         const [[fourmRow]]     = await db.query("SELECT COUNT(*) AS total FROM FourM_ChangeNotices WHERE Status='Open'").catch(() => [[{ total: 0 }]]);
         const [[auditRow]]     = await db.query("SELECT COUNT(*) AS total FROM Admin_AuditLogs WHERE DATE(ActionTime)=CURDATE()").catch(() => [[{ total: 0 }]]);
+        const [[failedAuditRow]] = await db.query("SELECT COUNT(*) AS total FROM Admin_AuditLogs WHERE ActionTime >= DATE_SUB(NOW(), INTERVAL 7 DAY) AND (Action LIKE 'FAILED_%' OR StatusCode >= 400)").catch(() => [[{ total: 0 }]]);
 
         // dept breakdown
         const [deptRows] = await db.query(
@@ -369,6 +437,101 @@ router.get('/dashboard-stats', async (_req, res) => {
         const [recentAudit] = await db.query(
             'SELECT * FROM Admin_AuditLogs ORDER BY ActionTime DESC LIMIT 5'
         ).catch(() => [[]]);
+
+        const [
+            staleChangeNotices,
+            staleHiyari,
+            overduePatrolIssues,
+            overdueTrainingRecords,
+            pendingYokoten,
+            incompleteProfiles,
+            missingActivityTargets,
+        ] = await Promise.all([
+            safeRows("SELECT id, NoticeNo, Department, ChangeDate FROM FourM_ChangeNotices WHERE Status='Open' AND DATEDIFF(NOW(), ChangeDate) > 30 ORDER BY ChangeDate ASC LIMIT 5"),
+            safeRows("SELECT id, Department, ReportDate FROM HiyariReports WHERE Status != 'Closed' AND DATEDIFF(NOW(), ReportDate) > 14 ORDER BY ReportDate ASC LIMIT 5"),
+            safeRows("SELECT id, Area, IssueDetail, CreatedAt FROM Patrol_Issues WHERE (Status IS NULL OR Status NOT IN ('Closed','Completed')) AND DATEDIFF(NOW(), CreatedAt) > 14 ORDER BY CreatedAt ASC LIMIT 5"),
+            safeScalar("SELECT COUNT(*) AS total FROM Training_Records WHERE ExpiryDate IS NOT NULL AND ExpiryDate < CURDATE()"),
+            safeScalar("SELECT COUNT(*) AS total FROM YokotenResponses WHERE Status IN ('Pending','Submitted','Waiting')"),
+            safeScalar("SELECT COUNT(*) AS total FROM Employees WHERE COALESCE(Department,'')='' OR COALESCE(Position,'')=''"),
+            safeScalar("SELECT COUNT(*) AS total FROM Employees e LEFT JOIN Activity_Position_Templates t ON t.Position = e.Position WHERE COALESCE(e.Position,'') <> '' AND t.id IS NULL"),
+        ]);
+
+        const actionRequired = [
+            {
+                key: 'patrol_issues',
+                label: 'Patrol issues overdue',
+                count: overduePatrolIssues.length,
+                severity: overduePatrolIssues.length ? 'high' : 'ok',
+                tab: 'health',
+                items: overduePatrolIssues,
+            },
+            {
+                key: 'change_notices',
+                label: '4M Change Notice older than 30 days',
+                count: staleChangeNotices.length,
+                severity: staleChangeNotices.length ? 'high' : 'ok',
+                tab: 'health',
+                items: staleChangeNotices,
+            },
+            {
+                key: 'hiyari',
+                label: 'Hiyari open longer than 14 days',
+                count: staleHiyari.length,
+                severity: staleHiyari.length ? 'medium' : 'ok',
+                tab: 'health',
+                items: staleHiyari,
+            },
+            {
+                key: 'training',
+                label: 'Training records expired',
+                count: overdueTrainingRecords,
+                severity: overdueTrainingRecords ? 'medium' : 'ok',
+                tab: 'health',
+                items: [],
+            },
+            {
+                key: 'yokoten',
+                label: 'Yokoten responses pending review',
+                count: pendingYokoten,
+                severity: pendingYokoten ? 'medium' : 'ok',
+                tab: 'health',
+                items: [],
+            },
+            {
+                key: 'profiles',
+                label: 'Employee profiles missing department/position',
+                count: incompleteProfiles,
+                severity: incompleteProfiles ? 'medium' : 'ok',
+                tab: 'employees',
+                items: [],
+            },
+            {
+                key: 'targets',
+                label: 'Positions without activity target template',
+                count: missingActivityTargets,
+                severity: missingActivityTargets ? 'low' : 'ok',
+                tab: 'targets',
+                items: [],
+            },
+            {
+                key: 'audit_failures',
+                label: 'Failed API actions in last 7 days',
+                count: failedAuditRow.total,
+                severity: failedAuditRow.total ? 'high' : 'ok',
+                tab: 'audit',
+                items: [],
+            },
+        ];
+
+        const uxHealth = {
+            score: Math.max(0, 100 - actionRequired.reduce((sum, item) => {
+                const weight = item.severity === 'high' ? 8 : item.severity === 'medium' ? 5 : item.severity === 'low' ? 2 : 0;
+                return sum + Math.min(item.count, 10) * weight;
+            }, 0)),
+            high: actionRequired.filter(i => i.severity === 'high' && i.count > 0).length,
+            medium: actionRequired.filter(i => i.severity === 'medium' && i.count > 0).length,
+            low: actionRequired.filter(i => i.severity === 'low' && i.count > 0).length,
+        };
 
         res.json({
             success: true,
@@ -382,6 +545,8 @@ router.get('/dashboard-stats', async (_req, res) => {
                 auditToday:        auditRow.total,
                 deptBreakdown:     deptRows,
                 recentAudit,
+                actionRequired,
+                uxHealth,
             }
         });
     } catch (err) {
@@ -401,6 +566,7 @@ router.get('/system-health', async (_req, res) => {
     };
 
     try {
+        await ensureAuditTable().catch(() => {});
         const [
             empTotal, deptTotal, teamTotal,
             patrolSessions, patrolIssues,
@@ -411,6 +577,9 @@ router.get('/system-health', async (_req, res) => {
             contractorDocs,
             ojtDocs,
             yokotenTopics,
+            auditTotal,
+            audit24h,
+            failedApi24h,
         ] = await Promise.all([
             safeCount('SELECT COUNT(*) AS total FROM Employees'),
             safeCount('SELECT COUNT(*) AS total FROM Master_Departments'),
@@ -426,6 +595,9 @@ router.get('/system-health', async (_req, res) => {
             safeCount('SELECT COUNT(*) AS total FROM Contractor_Documents'),
             safeCount('SELECT COUNT(*) AS total FROM SCW_Documents'),
             safeCount('SELECT COUNT(*) AS total FROM YokotenTopics'),
+            safeCount('SELECT COUNT(*) AS total FROM Admin_AuditLogs'),
+            safeCount('SELECT COUNT(*) AS total FROM Admin_AuditLogs WHERE ActionTime >= DATE_SUB(NOW(), INTERVAL 1 DAY)'),
+            safeCount("SELECT COUNT(*) AS total FROM Admin_AuditLogs WHERE ActionTime >= DATE_SUB(NOW(), INTERVAL 1 DAY) AND (StatusCode >= 400 OR Action LIKE 'FAILED%')"),
         ]);
 
         // Change notices ค้างนาน (> 30 วัน)
@@ -437,6 +609,67 @@ router.get('/system-health', async (_req, res) => {
         const [staleHiyari] = await db.query(
             "SELECT id, Department, ReportDate FROM HiyariReports WHERE Status != 'Closed' AND DATEDIFF(NOW(), ReportDate) > 14 ORDER BY ReportDate ASC LIMIT 10"
         ).catch(() => [[]]);
+
+        const moduleCounts = {
+            Employees: empTotal,
+            Master_Departments: deptTotal,
+            Master_Teams: teamTotal,
+            Patrol_Sessions: patrolSessions,
+            Patrol_Issues: patrolIssues,
+            HiyariReports: hiyariTotal,
+            KY_Activities: kyTotal,
+            FourM_ChangeNotices: fourmTotal,
+            FourM_ManRecords: manRecords,
+            Contractor_Documents: contractorDocs,
+            SCW_Documents: ojtDocs,
+            YokotenTopics: yokotenTopics,
+            Admin_AuditLogs: auditTotal,
+        };
+        const missingTables = Object.entries(moduleCounts)
+            .filter(([, value]) => value === null)
+            .map(([key]) => key);
+        const signals = [
+            {
+                key: 'missing_tables',
+                label: 'Missing or unreadable module tables',
+                count: missingTables.length,
+                severity: missingTables.length ? 'high' : 'ok',
+                detail: missingTables,
+            },
+            {
+                key: 'failed_api_24h',
+                label: 'Failed API actions in last 24h',
+                count: failedApi24h || 0,
+                severity: failedApi24h ? 'high' : 'ok',
+                detail: [],
+            },
+            {
+                key: 'stale_change',
+                label: '4M Change Notice older than 30 days',
+                count: staleNotices.length,
+                severity: staleNotices.length ? 'medium' : 'ok',
+                detail: staleNotices,
+            },
+            {
+                key: 'stale_hiyari',
+                label: 'Hiyari open longer than 14 days',
+                count: staleHiyari.length,
+                severity: staleHiyari.length ? 'medium' : 'ok',
+                detail: staleHiyari,
+            },
+            {
+                key: 'employee_master',
+                label: 'Employee and department master data',
+                count: (!empTotal || !deptTotal) ? 1 : 0,
+                severity: (!empTotal || !deptTotal) ? 'medium' : 'ok',
+                detail: [],
+            },
+        ];
+        const score = Math.max(0, 100 - signals.reduce((sum, signal) => {
+            if (!signal.count) return sum;
+            const weight = signal.severity === 'high' ? 20 : signal.severity === 'medium' ? 10 : 5;
+            return sum + Math.min(signal.count, 5) * weight;
+        }, 0));
 
         res.json({
             success: true,
@@ -454,7 +687,18 @@ router.get('/system-health', async (_req, res) => {
                 alerts: {
                     staleChangeNotices: staleNotices,
                     staleHiyari,
-                }
+                },
+                audit: {
+                    total: auditTotal,
+                    last24h: audit24h,
+                    failed24h: failedApi24h,
+                },
+                readiness: {
+                    score,
+                    status: score >= 90 ? 'Ready' : score >= 70 ? 'Monitor' : 'Action Needed',
+                    signals,
+                    missingTables,
+                },
             }
         });
     } catch (err) {

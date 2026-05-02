@@ -1453,6 +1453,44 @@ function buildDashboardHtml() {
         </div>
     </div>` : '';
 
+    const lowTopicCount = computedAvgs.filter(v => v != null && v < 70).length + (ppePct != null && ppePct < 90 ? 1 : 0);
+    const ppeFailCount = filteredPPE.filter(r => !(r.IsPass===1||r.IsPass==='1')).length;
+    const readinessStatus = overallAvg == null
+        ? { label: 'No Data', value: '—', border: 'border-slate-200', bg: 'bg-white', text: 'text-slate-600' }
+        : overallAvg >= 90 && (ppePct == null || ppePct >= 90) && violInPeriod.length === 0
+            ? { label: 'Enterprise Ready', value: 'Stable', border: 'border-emerald-100', bg: 'bg-emerald-50', text: 'text-emerald-700' }
+            : overallAvg >= 70
+                ? { label: 'Monitor', value: 'Watch', border: 'border-amber-100', bg: 'bg-amber-50', text: 'text-amber-700' }
+                : { label: 'Action Needed', value: 'Risk', border: 'border-red-100', bg: 'bg-red-50', text: 'text-red-700' };
+    const enterpriseStrip = `
+    <div class="grid grid-cols-2 lg:grid-cols-5 gap-3">
+        <button onclick="window._scSetTab('dashboard')" class="text-left rounded-xl border ${readinessStatus.border} ${readinessStatus.bg} px-4 py-3 hover:shadow-sm transition-shadow">
+            <p class="text-[10px] font-bold uppercase ${readinessStatus.text}">Culture Readiness</p>
+            <p class="mt-1 text-sm font-black ${readinessStatus.text}">${readinessStatus.value}</p>
+            <p class="mt-1 text-[11px] text-slate-500">${readinessStatus.label}</p>
+        </button>
+        <button onclick="window._scSetTab('assessment')" class="text-left rounded-xl border ${lowTopicCount ? 'border-amber-100 bg-amber-50' : 'border-emerald-100 bg-emerald-50'} px-4 py-3 hover:shadow-sm transition-shadow">
+            <p class="text-[10px] font-bold uppercase ${lowTopicCount ? 'text-amber-600' : 'text-emerald-600'}">Weak Topics</p>
+            <p class="mt-1 text-sm font-black ${lowTopicCount ? 'text-amber-700' : 'text-emerald-700'}">${lowTopicCount}</p>
+            <p class="mt-1 text-[11px] text-slate-500">Below target</p>
+        </button>
+        <button onclick="window._scSetTab('ppe')" class="text-left rounded-xl border ${ppePct != null && ppePct < 90 ? 'border-amber-100 bg-amber-50' : 'border-slate-200 bg-white'} px-4 py-3 hover:shadow-sm transition-shadow">
+            <p class="text-[10px] font-bold uppercase ${ppePct != null && ppePct < 90 ? 'text-amber-600' : 'text-slate-500'}">PPE Compliance</p>
+            <p class="mt-1 text-sm font-black ${ppePct != null && ppePct < 90 ? 'text-amber-700' : 'text-slate-700'}">${ppePct != null ? Math.round(ppePct) + '%' : '—'}</p>
+            <p class="mt-1 text-[11px] text-slate-500">${ppeFailCount} fail records</p>
+        </button>
+        <button onclick="window._scSetTab('ppe');setTimeout(()=>window._scSetPPESub('violations'),80)" class="text-left rounded-xl border ${violInPeriod.length ? 'border-red-100 bg-red-50' : 'border-slate-200 bg-white'} px-4 py-3 hover:shadow-sm transition-shadow">
+            <p class="text-[10px] font-bold uppercase ${violInPeriod.length ? 'text-red-600' : 'text-slate-500'}">PPE Violations</p>
+            <p class="mt-1 text-sm font-black ${violInPeriod.length ? 'text-red-700' : 'text-slate-700'}">${violInPeriod.length}</p>
+            <p class="mt-1 text-[11px] text-slate-500">${periodLabel}</p>
+        </button>
+        <button onclick="window._scExportPDF()" class="text-left rounded-xl border border-slate-200 bg-white px-4 py-3 hover:shadow-sm transition-shadow">
+            <p class="text-[10px] font-bold uppercase text-slate-500">Executive Pack</p>
+            <p class="mt-1 text-sm font-black text-slate-700">PDF</p>
+            <p class="mt-1 text-[11px] text-slate-500">Dashboard report</p>
+        </button>
+    </div>`;
+
     // ── Dept PPE breakdown (sorted by total inspections)
     const deptMap = {};
     filteredPPE.forEach(r => {
@@ -1483,6 +1521,7 @@ function buildDashboardHtml() {
     return `
     <div class="space-y-5">
         ${monthFilterBar}
+        ${enterpriseStrip}
         ${quickCards}
         ${mat ? `
         <div class="card p-5 border-l-4 ${mat.border}">

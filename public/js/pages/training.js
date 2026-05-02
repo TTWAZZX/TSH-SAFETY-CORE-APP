@@ -652,6 +652,8 @@ async function _renderRecordsPanel() {
             </div>
         </div>
 
+        <div id="tr-rec-summary">${_buildRecordsSummary()}</div>
+
         <!-- Records Table -->
         <div id="tr-dept-wrap" class="bg-white rounded-xl border border-slate-100 shadow-sm overflow-hidden"
              style="box-shadow:0 4px 16px rgba(5,150,105,0.1),0 1px 4px rgba(0,0,0,0.06)">
@@ -663,6 +665,8 @@ async function _renderRecordsPanel() {
     document.getElementById('tr-rec-year')?.addEventListener('change', async e => {
         _recYear = parseInt(e.target.value) || null;
         await _fetchDeptRecords(_recYear);
+        const summary = document.getElementById('tr-rec-summary');
+        if (summary) summary.innerHTML = _buildRecordsSummary();
         const wrap = document.getElementById('tr-dept-wrap');
         if (wrap) wrap.innerHTML = _buildRecordsTable();
         _updateRecCount();
@@ -677,6 +681,47 @@ async function _renderRecordsPanel() {
 function _updateRecCount() {
     const el = document.getElementById('tr-rec-count');
     if (el) el.textContent = `${_deptRecords.length} รายการ`;
+}
+
+function _buildRecordsSummary() {
+    const records = _deptRecords || [];
+    const totalEmployees = records.reduce((sum, r) => sum + (parseInt(r.TotalEmp) || 0), 0);
+    const totalPassed = records.reduce((sum, r) => sum + (parseInt(r.PassedCount) || 0), 0);
+    const avgCompliance = totalEmployees > 0 ? Math.round(totalPassed * 100 / totalEmployees) : null;
+    const lowCompliance = records.filter(r => {
+        const total = parseInt(r.TotalEmp) || 0;
+        const passed = parseInt(r.PassedCount) || 0;
+        return total > 0 && Math.round(passed * 100 / total) < 80;
+    }).length;
+    const noData = records.filter(r => !(parseInt(r.TotalEmp) > 0)).length;
+    const avgClass = avgCompliance === null ? 'text-slate-600 bg-slate-50 border-slate-200'
+        : avgCompliance >= 80 ? 'text-emerald-700 bg-emerald-50 border-emerald-100'
+        : avgCompliance >= 60 ? 'text-amber-700 bg-amber-50 border-amber-100'
+        : 'text-red-700 bg-red-50 border-red-100';
+
+    return `
+    <div class="grid grid-cols-2 lg:grid-cols-5 gap-3">
+        <div class="rounded-xl border border-slate-200 bg-white px-4 py-3">
+            <p class="text-[10px] font-bold uppercase text-slate-400">Records</p>
+            <p class="mt-1 text-sm font-black text-slate-700">${records.length.toLocaleString()}</p>
+        </div>
+        <div class="rounded-xl border border-slate-200 bg-white px-4 py-3">
+            <p class="text-[10px] font-bold uppercase text-slate-400">Employees</p>
+            <p class="mt-1 text-sm font-black text-slate-700">${totalEmployees.toLocaleString()}</p>
+        </div>
+        <div class="rounded-xl border border-emerald-100 bg-emerald-50 px-4 py-3">
+            <p class="text-[10px] font-bold uppercase text-emerald-500">Passed</p>
+            <p class="mt-1 text-sm font-black text-emerald-700">${totalPassed.toLocaleString()}</p>
+        </div>
+        <div class="rounded-xl border ${avgClass} px-4 py-3">
+            <p class="text-[10px] font-bold uppercase opacity-70">Avg Compliance</p>
+            <p class="mt-1 text-sm font-black">${avgCompliance === null ? '-' : avgCompliance + '%'}</p>
+        </div>
+        <div class="rounded-xl border ${lowCompliance ? 'border-red-100 bg-red-50' : 'border-slate-200 bg-white'} px-4 py-3">
+            <p class="text-[10px] font-bold uppercase ${lowCompliance ? 'text-red-500' : 'text-slate-400'}">Needs Follow-up</p>
+            <p class="mt-1 text-sm font-black ${lowCompliance ? 'text-red-700' : 'text-slate-700'}">${lowCompliance} low / ${noData} no data</p>
+        </div>
+    </div>`;
 }
 
 function _buildRecordsTable() {

@@ -3,7 +3,7 @@
 import { API } from '../api.js';
 import {
     hideLoading, showLoading,
-    openModal, closeModal, showToast, showConfirmationModal,
+    openModal, openDetailModal, closeModal, showToast, showConfirmationModal,
 } from '../ui.js';
 import { normalizeApiArray } from '../utils/normalize.js';
 import { buildActivityCard } from '../utils/activity-widget.js';
@@ -1188,6 +1188,56 @@ function _buildTopicModal(t) {
     </div>`;
 }
 
+function _openTopicDetailModal(t) {
+    const dr = t.deptResponse;
+    const targetDepts = Array.isArray(t.TargetDepts) ? t.TargetDepts : [];
+    const targetUnits = Array.isArray(t.TargetUnits) ? t.TargetUnits : [];
+    const responseLabel = dr
+        ? (dr.ApprovalStatus === 'approved' ? 'Approved'
+          : dr.ApprovalStatus === 'rejected' ? 'Rejected'
+          : dr.ApprovalStatus === 'pending' ? 'Pending approval'
+          : 'Responded')
+        : _isOverdue(t.Deadline) ? 'Overdue' : 'Waiting response';
+    const responseClass = dr
+        ? (dr.ApprovalStatus === 'approved' ? 'bg-emerald-100 text-emerald-700 border-emerald-200'
+          : dr.ApprovalStatus === 'rejected' ? 'bg-red-100 text-red-700 border-red-200'
+          : 'bg-amber-100 text-amber-700 border-amber-200')
+        : _isOverdue(t.Deadline) ? 'bg-red-100 text-red-700 border-red-200' : 'bg-sky-100 text-sky-700 border-sky-200';
+    const body = `
+        <div class="space-y-4">
+            <div class="grid grid-cols-2 md:grid-cols-4 gap-2">
+                <div class="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2">
+                    <p class="text-[10px] font-bold uppercase text-slate-400">Risk</p>
+                    <p class="mt-1 text-sm font-bold text-slate-700">${_esc(RISK_LABEL[t.RiskLevel] || t.RiskLevel || '-')}</p>
+                </div>
+                <div class="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2">
+                    <p class="text-[10px] font-bold uppercase text-slate-400">Response</p>
+                    <p class="mt-1 text-sm font-bold text-slate-700">${_esc(responseLabel)}</p>
+                </div>
+                <div class="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2">
+                    <p class="text-[10px] font-bold uppercase text-slate-400">Targets</p>
+                    <p class="mt-1 text-sm font-bold text-slate-700">${targetDepts.length || targetUnits.length || '-'}</p>
+                </div>
+                <div class="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2">
+                    <p class="text-[10px] font-bold uppercase text-slate-400">Deadline</p>
+                    <p class="mt-1 text-sm font-bold text-slate-700">${_esc(_fmtDateOnly(t.Deadline))}</p>
+                </div>
+            </div>
+            ${_buildTopicModal(t)}
+        </div>`;
+    openDetailModal({
+        title: _esc(t.Title || 'Yokoten Topic'),
+        subtitle: `${_fmtDateOnly(t.DateIssued)} · ${t.Category || '-'} · ${t.CreatedBy || '-'}`,
+        meta: [
+            { label: RISK_LABEL[t.RiskLevel] || t.RiskLevel || '-', className: `${RISK_BADGE[t.RiskLevel] || 'bg-slate-100 text-slate-500'} border-slate-200` },
+            { label: responseLabel, className: responseClass },
+            _isOverdue(t.Deadline) && !dr ? { label: 'Needs action', className: 'bg-rose-50 text-rose-700 border-rose-200' } : null,
+        ],
+        body,
+        size: 'max-w-2xl'
+    });
+}
+
 function _buildResponseDisplay(t, dr) {
     const approval = dr.ApprovalStatus;
     const approvalHtml = approval === 'approved'
@@ -1955,9 +2005,35 @@ function _showEmpBreakdown(employeeId) {
     const breakdown = emp.breakdown || [];
     const pct = emp.completionPct;
     const barColor = pct === 100 ? '#059669' : pct >= 50 ? '#f59e0b' : '#ef4444';
+    const pendingCount = breakdown.filter(b => !b.deptResponded).length;
+    const rejectedCount = breakdown.filter(b => b.approvalStatus === 'rejected').length;
+    const pendingApprovalCount = breakdown.filter(b => b.approvalStatus === 'pending').length;
+    const completionLabel = pct === 100 ? 'Complete' : pct >= 50 ? 'In progress' : 'Needs follow-up';
+    const completionClass = pct === 100
+        ? 'bg-emerald-100 text-emerald-700 border-emerald-200'
+        : pct >= 50 ? 'bg-amber-100 text-amber-700 border-amber-200'
+        : 'bg-red-100 text-red-700 border-red-200';
 
     const html = `
     <div class="space-y-3">
+        <div class="grid grid-cols-2 md:grid-cols-4 gap-2">
+            <div class="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2">
+                <p class="text-[10px] font-bold uppercase text-slate-400">Completion</p>
+                <p class="mt-1 text-sm font-bold text-slate-700">${pct}%</p>
+            </div>
+            <div class="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2">
+                <p class="text-[10px] font-bold uppercase text-slate-400">Responded</p>
+                <p class="mt-1 text-sm font-bold text-slate-700">${emp.respondedCount}/${emp.totalTopics}</p>
+            </div>
+            <div class="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2">
+                <p class="text-[10px] font-bold uppercase text-slate-400">Waiting</p>
+                <p class="mt-1 text-sm font-bold text-slate-700">${pendingCount}</p>
+            </div>
+            <div class="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2">
+                <p class="text-[10px] font-bold uppercase text-slate-400">Review</p>
+                <p class="mt-1 text-sm font-bold text-slate-700">${pendingApprovalCount + rejectedCount}</p>
+            </div>
+        </div>
         <div class="flex items-center gap-3 p-3 bg-slate-50 rounded-xl">
             <div class="w-10 h-10 rounded-xl bg-indigo-50 flex items-center justify-center flex-shrink-0">
                 <svg class="w-5 h-5 text-indigo-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -2000,7 +2076,17 @@ function _showEmpBreakdown(employeeId) {
         </div>
     </div>`;
 
-    openModal(`รายละเอียด — ${_esc(emp.name)}`, html, 'max-w-lg');
+    openDetailModal({
+        title: _esc(emp.name || employeeId),
+        subtitle: `${emp.department || '-'} · ${emp.position || '-'}`,
+        meta: [
+            { label: completionLabel, className: completionClass },
+            pendingCount ? { label: `${pendingCount} waiting`, className: 'bg-red-50 text-red-700 border-red-200' } : null,
+            rejectedCount ? { label: `${rejectedCount} rejected`, className: 'bg-rose-50 text-rose-700 border-rose-200' } : null,
+        ],
+        body: html,
+        size: 'max-w-lg'
+    });
 }
 
 // ─── TOPIC FORM MODAL (Add / Edit) ───────────────────────────────────────────
@@ -2620,9 +2706,7 @@ function setupEventListeners() {
             const yid = viewTopicBtn.dataset.yid;
             const t = _topics.find(x => x.YokotenID === yid);
             if (!t) return;
-            const desc = t.TopicDescription || '';
-            const title = t.Title || (desc.length > 60 ? desc.slice(0, 60) + '…' : desc);
-            openModal(title, _buildTopicModal(t), 'max-w-2xl');
+            _openTopicDetailModal(t);
             return;
         }
 
@@ -2783,8 +2867,7 @@ function setupEventListeners() {
             if (!t) return;
             // Temporarily inject the response as deptResponse on the topic for the form
             const tWithResp = { ...t, deptResponse: resp || t.deptResponse };
-            const title = t.Title || (_htmlToText(t.TopicDescription).slice(0, 60));
-            openModal(title, _buildTopicModal(tWithResp), 'max-w-2xl');
+            _openTopicDetailModal(tWithResp);
             return;
         }
 

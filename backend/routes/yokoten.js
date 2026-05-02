@@ -379,10 +379,10 @@ router.get('/employee-completion', isAdmin, async (req, res) => {
              FROM YokotenTopics WHERE IsActive = 1 ORDER BY DateIssued DESC`
         );
 
-        let empSql = `SELECT EmployeeID, Name, Department, Position FROM Employees`;
+        let empSql = `SELECT EmployeeID, EmployeeName, Department, Position FROM Employees`;
         const empParams = [];
         if (department) { empSql += ` WHERE Department = ?`; empParams.push(department); }
-        empSql += ` ORDER BY Department, Name`;
+        empSql += ` ORDER BY Department, EmployeeName`;
         const [employees] = await db.query(empSql, empParams);
 
         // Dept responses (one per dept per topic, exclude soft-deleted)
@@ -413,7 +413,7 @@ router.get('/employee-completion', isAdmin, async (req, res) => {
             });
             return {
                 employeeId:    emp.EmployeeID,
-                name:          emp.Name,
+                name:          emp.EmployeeName,
                 department:    emp.Department,
                 position:      emp.Position,
                 respondedCount,

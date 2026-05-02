@@ -305,9 +305,45 @@ function _renderDashboard() {
     const recentDocs = [..._state.docs]
         .sort((a, b) => new Date(b.UploadedAt) - new Date(a.UploadedAt))
         .slice(0, 6);
+    const keyCategories = ['Contractor Policy', 'Work Permit', 'Safety Procedure', 'Training'];
+    const missingKey = keyCategories.filter(cat => !_state.docs.some(d => d.Category === cat));
+    const recent30 = _state.docs.filter(d => {
+        if (!d.UploadedAt) return false;
+        const diff = (new Date() - new Date(d.UploadedAt)) / 86400000;
+        return diff >= 0 && diff <= 30;
+    }).length;
+    const totalSize = _state.docs.reduce((sum, d) => sum + (parseInt(d.FileSize) || 0), 0);
+    const coveragePct = keyCategories.length ? Math.round((keyCategories.length - missingKey.length) * 100 / keyCategories.length) : 0;
 
     panel.innerHTML = `
     <div class="space-y-6">
+
+        <div class="grid grid-cols-2 lg:grid-cols-5 gap-3">
+            <button data-tab-link="documents"
+                class="text-left rounded-xl border ${missingKey.length ? 'border-amber-100 bg-amber-50' : 'border-emerald-100 bg-emerald-50'} px-4 py-3 hover:shadow-sm transition-shadow">
+                <p class="text-[10px] font-bold uppercase ${missingKey.length ? 'text-amber-500' : 'text-emerald-500'}">Core Coverage</p>
+                <p class="mt-1 text-sm font-black ${missingKey.length ? 'text-amber-700' : 'text-emerald-700'}">${coveragePct}% ready</p>
+            </button>
+            <button data-tab-link="documents"
+                class="text-left rounded-xl border border-slate-200 bg-white px-4 py-3 hover:shadow-sm transition-shadow">
+                <p class="text-[10px] font-bold uppercase text-slate-400">Documents</p>
+                <p class="mt-1 text-sm font-black text-slate-700">${total.toLocaleString()}</p>
+            </button>
+            <button data-tab-link="documents"
+                class="text-left rounded-xl border ${recent30 ? 'border-emerald-100 bg-emerald-50' : 'border-slate-200 bg-white'} px-4 py-3 hover:shadow-sm transition-shadow">
+                <p class="text-[10px] font-bold uppercase ${recent30 ? 'text-emerald-500' : 'text-slate-400'}">Recent Uploads</p>
+                <p class="mt-1 text-sm font-black ${recent30 ? 'text-emerald-700' : 'text-slate-700'}">${recent30} in 30 days</p>
+            </button>
+            <button data-tab-link="documents"
+                class="text-left rounded-xl border ${missingKey.length ? 'border-red-100 bg-red-50' : 'border-slate-200 bg-white'} px-4 py-3 hover:shadow-sm transition-shadow">
+                <p class="text-[10px] font-bold uppercase ${missingKey.length ? 'text-red-500' : 'text-slate-400'}">Missing Core</p>
+                <p class="mt-1 text-sm font-black ${missingKey.length ? 'text-red-700' : 'text-slate-700'}">${missingKey.length} category</p>
+            </button>
+            <div class="rounded-xl border border-slate-200 bg-white px-4 py-3">
+                <p class="text-[10px] font-bold uppercase text-slate-400">Repository Size</p>
+                <p class="mt-1 text-sm font-black text-slate-700">${_formatSize(totalSize)}</p>
+            </div>
+        </div>
 
         <!-- Top row: breakdown + systems -->
         <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">

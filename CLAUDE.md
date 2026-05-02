@@ -802,8 +802,8 @@ const { UserID, UserName } = req.body;
 | ข้อมูลพนักงาน | `employees` | Employee CRUD + bulk Excel import + pagination 25/page |
 | ข้อมูลอ้างอิง | `reference` | Departments, Teams, Positions, Roles, Areas (Patrol_Areas) — add/edit/delete |
 | สิทธิ์การใช้งาน | `permissions` | Permission matrix per role — Admin/User/Viewer |
-| System Health | `health` | Module record counts, stale alert tables |
-| Audit Log | `audit` | Admin action log, filterable by action type |
+| System Health | `health` | Module record counts, stale alert tables, readiness score, failed API 24h, audit activity 24h |
+| Audit Log | `audit` | Admin-only audit trail for API mutations, summary strip, filterable by module/action/date/search |
 | เป้าหมายกิจกรรม | `targets` | Activity Targets — 2 sub-tabs: เทมเพลตตามตำแหน่ง + กำหนดรายบุคคล |
 
 State: `_currentTab`, `_calInst`, `_empCache`, `_deptCache`, `_teamCache`, `_empSearch`, `_empPage`, `_auditPage`, `_atActivities`, `_atPositions`, `_atSubTab`, `_atSelPosition`, `_atSelEmp`, `_atEmpTargets`
@@ -812,20 +812,105 @@ Navigation: `#employee` hash redirects → `#admin` + auto-switches to employees
 
 **Permission Matrix** (`permissions` tab): เรียก `GET /api/admin/permissions/matrix` → ได้ `{ matrix, roles, permissions, roleLabels }` — ใช้ `PUT /api/admin/permissions/matrix` กับ `{ role, permission, granted }` เพื่อ toggle สิทธิ์แต่ละคู่
 
-### Audit Log Table (SQL — run in DBeaver)
+### Admin Dashboard UX
+
+`GET /api/admin/dashboard-stats` now returns:
+
+- `actionRequired` — cross-module admin work queue for stale Patrol issues, 4M Change Notices, Hiyari reports, expired training, pending Yokoten, incomplete employee profiles, missing activity target templates, and failed API actions.
+- `uxHealth` — readiness score derived from open high/medium/low admin risks.
+
+`public/js/pages/admin.js` renders these above the KPI cards as the first Phase 1 UX improvement: the Admin Dashboard now acts as a command center before showing passive stats.
+
+### Phase 1 UX Foundation Progress
+
+- `public/js/pages/admin.js` — Admin Dashboard has Action Required + UX Health above passive KPIs.
+- `public/js/pages/patrol.js` — Safety Patrol has a work focus strip for today check-in, open issues, temporary fixes, and next patrol.
+- `public/js/pages/patrol.js` — Safety Patrol Issue `VIEW` mode now shows a read-first summary block for status, rank, overdue state, dates, owner, reporter, and finish date before the detailed form sections.
+- `public/js/pages/fourm.js` — Change Notice tab has focus shortcuts for Open, Pending, and Overdue notices.
+- `public/js/pages/search.js` — Employee Safety 360 has standardized empty/error states for search results, profile load, Patrol records, and activity timeline.
+- `public/js/ui.js` — added `openDetailModal()` as an additive helper for standardized detail modals without changing existing `openModal()` behavior.
+- `public/js/pages/fourm.js` — Change Notice detail now uses `openDetailModal()` as the first low-risk standardized detail modal.
+- `public/js/pages/admin.js` — Audit Log table has a read-only Detail action using `openDetailModal()` to inspect path, target, status, IP/user-agent, and safe metadata.
+
+### Phase 2 Form UX Standardization Progress
+
+- `public/js/pages/ky.js` — KY detail view now uses the shared `openDetailModal()` wrapper and adds a read-first summary grid for status, risk, date, and participant count before the detailed fields.
+- `public/js/pages/ky.js` — KY detail text fields and participant chips are escaped before rendering to reduce display/XSS risk from user-entered content.
+- `public/js/pages/hiyari.js` — Hiyari detail view now uses the shared `openDetailModal()` wrapper and adds a read-first summary grid for status, Stop Type, Rank, and report date while keeping attachments and the Yokoten conversion shortcut intact.
+- `public/js/pages/yokoten.js` — Yokoten topic detail and employee breakdown now use `openDetailModal()` with read-first summary grids for risk/response/deadline and completion/waiting/review counts.
+- `public/js/pages/accident.js` — Accident reports table now has a read-only Detail action for all viewers; the detail modal uses `openDetailModal()` with incident type, severity, lost days, due date, root cause, action owner, and attachments while preserving admin-only edit/delete controls.
+- `public/js/pages/accident.js` — Safety KPI Board now includes an executive summary strip for board status, days/hours target progress, safe months, accident months, and pending monthly status before the large KPI cards.
+- `public/js/pages/ojt.js` — OJT department history now shows a read-first summary grid for current review status, latest OJT date, next review date, total attendees, and review interval before the history table.
+- `public/js/pages/training.js` — Training department records now show a read-first summary strip for record count, total employees, passed count, average compliance, low-compliance departments, and no-data records before the records table.
+- `public/js/pages/machine-safety.js` — Machine Safety now includes an enterprise summary strip for audit risk, high/critical risk machines, inspection due/overdue, risk assessment readiness, open issues, and restricted controls with quick filters.
+- `public/js/pages/contractor.js` — Contractor dashboard now includes an enterprise summary strip for core document coverage, total documents, recent uploads, missing required categories, and repository size with document-tab shortcuts.
+- `public/js/pages/safety-culture.js` — Safety Culture dashboard now includes an enterprise summary strip for culture readiness, weak topics, PPE compliance, PPE violations, and executive PDF shortcut.
+- `public/js/pages/committee.js` — Committee page now includes an enterprise governance summary strip for current committee readiness, term control, core documents, sub-committee coverage, and admin manage shortcut.
+- `public/js/pages/admin.js` — Employee master tab now includes an enterprise data-quality strip for missing core fields, department/position coverage, unit assignment, admin account count, and shortcuts to reference/permission controls.
+- `public/js/pages/admin.js` — Reference / Master Data tab now includes a master-quality strip for master readiness, Safety Core unit coverage, duplicate master names, blank required names, loaded reference sets, and total master records.
+
+- `public/js/pages/admin.js` — System Health now includes an enterprise readiness strip for pre-production readiness, failed API 24h, audit activity 24h, stale work, and missing/unreadable tables.
+- `backend/routes/admin.js` — `GET /api/admin/system-health` now returns `readiness` and `audit` objects derived from module table availability, stale work queues, and Admin Audit Log activity.
+- `public/js/pages/admin.js` — Audit Log now includes a summary strip for matched records, failures on current page, modules touched, active users, latest activity, and mutation count before the detailed table.
+
+### Admin Audit Log
+
+Audit logging is centralized in `backend/utils/audit.js`.
+
+- `authenticateToken` attaches `attachAuditLogger(req, res)` so signed-in `POST`, `PUT`, `PATCH`, and `DELETE` API calls are logged automatically after the response finishes.
+- Admin Console curated actions still call `auditLog()` in `backend/routes/admin.js`; those rows use clear action names such as `CREATE_EMPLOYEE`, `RESET_PASSWORD`, and set `req.auditLogged = true` to avoid duplicates.
+- `Admin_AuditLogs` is auto-created and auto-migrated by `ensureAuditTable()`; no manual SQL is required for normal deployment.
+- `GET /api/admin/audit-logs` supports `page`, `limit`, `action`, `module`, `adminId`, `q`, `dateFrom`, `dateTo` and returns `facets` for filter dropdowns.
+
+### Pre-production Permission Regression
+
+Run the static permission audit before production handoff:
+
+```bash
+cd backend
+npm run permission:audit
+npm run smoke:api
+npm run uat:preflight
+```
+
+The audit scans `backend/server.js` and `backend/routes/*.js` for every `POST`, `PUT`, `PATCH`, and `DELETE` route. Expected categories:
+
+- `ADMIN` — protected by route-level `isAdmin` or mounted under `/api/admin` with `isAdmin`.
+- `INLINE_GUARD` — intentionally mixed workflow with owner/admin checks inside the handler, such as CCCF worker edit/delete, 4M notice close, Patrol issue save/delete, Self Patrol delete, and Yokoten response update.
+- `USER_WORKFLOW` — intentionally allowed user actions such as login/register/change password/profile update, policy acknowledgement, CCCF submit, Hiyari submit, KY submit, 4M notice create, Patrol check-in, and Yokoten respond.
+- `UNREVIEWED` — must be fixed or explicitly reviewed before release. The script exits non-zero if any appear.
+
+Current verified result: `ADMIN=156`, `INLINE_GUARD=8`, `USER_WORKFLOW=15`, `UNREVIEWED=0`.
+
+`npm run smoke:api` starts the Express app on a temporary local port and checks that public boot data loads, `/api/admin/*` rejects missing/User tokens, Admin token can read admin dashboard/audit log, normal User token can read policy page data, and User token cannot write master data.
+
+`npm run uat:preflight` is the Phase 5 handoff check. It starts the Express app on a temporary local port and checks the main read surfaces across Dashboard, Master, Patrol, 4M, Hiyari, KY, CCCF, Machine Safety, OJT, Training, Accident, Yokoten, Safety Culture, Contractor, Activity Targets, Module Forms, Person Search, and Admin Console. It also confirms User tokens are blocked from Admin Console, Yokoten all-responses, and Safety Culture PPE violation admin views.
+
+Current Phase 5 verified result: `83/83` UAT preflight checks passed. During Phase 5, `/api/yokoten/employee-completion` was fixed to use `Employees.EmployeeName` instead of the non-existent `Employees.Name` column.
+
+Current table shape:
 ```sql
 CREATE TABLE IF NOT EXISTS Admin_AuditLogs (
-    id         INT AUTO_INCREMENT PRIMARY KEY,
-    ActionTime DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    AdminID    VARCHAR(50)  NOT NULL,
-    AdminName  VARCHAR(100),
-    Action     VARCHAR(50)  NOT NULL,
-    TargetType VARCHAR(50),
-    TargetID   VARCHAR(100),
-    Detail     TEXT,
-    IPAddress  VARCHAR(50),
+    id          INT AUTO_INCREMENT PRIMARY KEY,
+    ActionTime  DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    AdminID     VARCHAR(50)  NOT NULL,
+    AdminName   VARCHAR(100),
+    Role        VARCHAR(50),
+    Department  VARCHAR(100),
+    Module      VARCHAR(80),
+    Action      VARCHAR(80)  NOT NULL,
+    Method      VARCHAR(10),
+    Path        VARCHAR(255),
+    StatusCode  INT,
+    TargetType  VARCHAR(80),
+    TargetID    VARCHAR(100),
+    Detail      TEXT,
+    Metadata    TEXT,
+    IPAddress   VARCHAR(80),
+    UserAgent   VARCHAR(255),
     INDEX idx_action (Action),
     INDEX idx_admin (AdminID),
+    INDEX idx_module (Module),
     INDEX idx_actiontime (ActionTime)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 ```
@@ -864,10 +949,11 @@ closeModal();
 | File | Status |
 |------|--------|
 | `kpi.js` | done (enterprise) |
+| `committee.js` | done (enterprise) |
 | `machine-safety.js` | done (enterprise) |
 | `patrol.js` | done (enterprise) |
 | `ojt.js` | done (enterprise) |
-| `safety-culture.js` | done |
+| `safety-culture.js` | done (enterprise) |
 | `profile.js` | done (enterprise — slide-over drawer) |
 | `hiyari.js` | done (enterprise) |
 | `ky.js` | done (enterprise) |
@@ -1609,7 +1695,7 @@ let _chartManDonut = null; // Man Record pass/fail donut chart
 11. **`backend/uploads/`** — มีบน local เท่านั้น ไม่มีบน Vercel (Vercel read-only filesystem) — ไฟล์จริงต้องอยู่บน Cloudinary
 12. **`window.closeModal` pattern** — `closeModal` จาก `ui.js` ไม่ถูก expose บน window โดยอัตโนมัติ ต้อง set `window.closeModal = closeModal` ใน page module ก่อนเปิด modal ที่มี inline onclick
 13. **Upload field name** — `POST /api/upload/document` ใช้ field ชื่อ `document` (ไม่ใช่ `file`) — multer config กำหนดไว้ใน `cloudinary.js`
-14. **`Admin_AuditLogs` table** — ต้องสร้างด้วย SQL ก่อน (ดูด้านบน) — auditLog helper ใน admin.js จะ silent-fail ถ้าตารางยังไม่มี
+14. **`Admin_AuditLogs` table** — auto-created/auto-migrated by `backend/utils/audit.js`; no manual DBeaver SQL step is required for normal startup
 15. **`safeCount()` in system health** — ตาราง module ใหม่อาจยังไม่มีใน DB ทำให้ health check return `null` แทน error
 16. **Express route ordering** — `PUT /api/kpidata/bulk` ต้องประกาศ **ก่อน** `PUT /api/kpidata/:id` ไม่งั้น `/bulk` จะถูก match เป็น `:id`
 17. **Machine Safety file upload field** — `POST /api/machine-safety/:id/files` ใช้ multer field ชื่อ `file` (ไม่ใช่ `document`) ต่างจาก generic upload endpoint

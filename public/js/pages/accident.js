@@ -1,7 +1,7 @@
 // public/js/pages/accident.js
 // Accident Report — enterprise pattern (buildShell + switchTab)
 import { API } from '../api.js';
-import { openModal, closeModal, showToast, showConfirmationModal } from '../ui.js';
+import { openModal, openDetailModal, closeModal, showToast, showConfirmationModal } from '../ui.js';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Constants
@@ -842,6 +842,13 @@ function _buildReportsTable() {
                </span>`
             : '';
         const pdfBtn = `
+            <button onclick="window._accViewReport(${r.id})" title="ดูรายละเอียด"
+                class="p-1.5 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors">
+                <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/>
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"/>
+                </svg>
+            </button>
             <button onclick="window._accExportPDF(${r.id})" title="ส่งออก PDF"
                 class="p-1.5 text-slate-400 hover:text-sky-600 hover:bg-sky-50 rounded-lg transition-colors">
                 <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 21h10a2 2 0 002-2V9.414a1 1 0 00-.293-.707l-5.414-5.414A1 1 0 0012.586 3H7a2 2 0 00-2 2v14a2 2 0 002 2z"/></svg>
@@ -1342,6 +1349,16 @@ async function _renderPerformancePanel() {
                 : (p.MonthlyStatus || {});
         } catch { return {}; }
     })();
+    const monthValues = MONTHS_EN.map((_, i) => monthlyStatus[String(i + 1)] || 'pending');
+    const safeMonths = monthValues.filter(v => v === 'green').length;
+    const accidentMonths = monthValues.filter(v => v === 'red').length;
+    const pendingMonths = 12 - safeMonths - accidentMonths;
+    const perfStatus = isZero && daysPct >= 100 && hoursPct >= 100 ? 'Target achieved'
+        : isZero ? 'On track'
+        : 'Action required';
+    const perfStatusClass = isZero && daysPct >= 100 && hoursPct >= 100 ? 'text-emerald-700 bg-emerald-50 border-emerald-100'
+        : isZero ? 'text-sky-700 bg-sky-50 border-sky-100'
+        : 'text-red-700 bg-red-50 border-red-100';
 
     const bannerGrad = isZero
         ? 'linear-gradient(135deg,#064e3b 0%,#059669 55%,#0d9488 100%)'
@@ -1377,6 +1394,29 @@ async function _renderPerformancePanel() {
         </div>
 
         <!-- ── KPI Big Numbers ──────────────────────────────────────────────── -->
+        <div class="grid grid-cols-2 lg:grid-cols-5 gap-3">
+            <div class="rounded-xl border ${perfStatusClass} px-4 py-3">
+                <p class="text-[10px] font-bold uppercase opacity-70">Board Status</p>
+                <p class="mt-1 text-sm font-black">${perfStatus}</p>
+            </div>
+            <div class="rounded-xl border border-slate-200 bg-white px-4 py-3">
+                <p class="text-[10px] font-bold uppercase text-slate-400">Days Progress</p>
+                <p class="mt-1 text-sm font-black text-slate-700">${daysPct}% <span class="text-xs font-semibold text-slate-400">of target</span></p>
+            </div>
+            <div class="rounded-xl border border-slate-200 bg-white px-4 py-3">
+                <p class="text-[10px] font-bold uppercase text-slate-400">Hours Progress</p>
+                <p class="mt-1 text-sm font-black text-slate-700">${hoursPct}% <span class="text-xs font-semibold text-slate-400">of target</span></p>
+            </div>
+            <div class="rounded-xl border border-emerald-100 bg-emerald-50 px-4 py-3">
+                <p class="text-[10px] font-bold uppercase text-emerald-500">Safe Months</p>
+                <p class="mt-1 text-sm font-black text-emerald-700">${safeMonths}/12</p>
+            </div>
+            <div class="rounded-xl border ${accidentMonths ? 'border-red-100 bg-red-50' : 'border-slate-200 bg-white'} px-4 py-3">
+                <p class="text-[10px] font-bold uppercase ${accidentMonths ? 'text-red-500' : 'text-slate-400'}">Review Months</p>
+                <p class="mt-1 text-sm font-black ${accidentMonths ? 'text-red-700' : 'text-slate-700'}">${accidentMonths} accident / ${pendingMonths} pending</p>
+            </div>
+        </div>
+
         <div class="grid grid-cols-1 sm:grid-cols-3 gap-4">
 
             <!-- Days without accident -->
@@ -1543,6 +1583,104 @@ async function _renderPerformancePanel() {
 // ─────────────────────────────────────────────────────────────────────────────
 // WINDOW GLOBALS
 // ─────────────────────────────────────────────────────────────────────────────
+function _htmlEsc(value) {
+    return String(value ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+}
+
+function _accInfoField(label, value) {
+    return `<div>
+        <p class="text-[10px] font-bold uppercase text-slate-400">${_htmlEsc(label)}</p>
+        <p class="mt-1 text-sm font-semibold text-slate-700">${_htmlEsc(value || '-')}</p>
+    </div>`;
+}
+
+function _renderAccidentDetail(r) {
+    const fmtDate = value => value ? new Date(value).toLocaleDateString('th-TH', { day:'2-digit', month:'short', year:'numeric' }) : '-';
+    const typeColor = TYPE_COLOR[r.AccidentType] || { bg: 'bg-slate-100', text: 'text-slate-600' };
+    const sevColor = SEV_COLOR[r.Severity] || { bg: 'bg-slate-100', text: 'text-slate-600' };
+    const statusClass = r.Status === 'Closed' ? 'bg-slate-100 text-slate-600 border-slate-200' : 'bg-amber-100 text-amber-700 border-amber-200';
+    const attachments = Array.isArray(r.attachments) ? r.attachments : [];
+    const due = r.DueDate ? new Date(r.DueDate) : null;
+    const overdue = r.Status !== 'Closed' && due && due < new Date();
+    const body = `
+        <div class="space-y-4">
+            <div class="grid grid-cols-2 md:grid-cols-4 gap-2">
+                <div class="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2">
+                    <p class="text-[10px] font-bold uppercase text-slate-400">Type</p>
+                    <p class="mt-1 text-sm font-bold text-slate-700">${_htmlEsc(r.AccidentType || '-')}</p>
+                </div>
+                <div class="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2">
+                    <p class="text-[10px] font-bold uppercase text-slate-400">Severity</p>
+                    <p class="mt-1 text-sm font-bold text-slate-700">${_htmlEsc(r.Severity || '-')}</p>
+                </div>
+                <div class="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2">
+                    <p class="text-[10px] font-bold uppercase text-slate-400">Lost Days</p>
+                    <p class="mt-1 text-sm font-bold ${Number(r.LostDays) > 0 ? 'text-red-600' : 'text-slate-700'}">${Number(r.LostDays) || 0}</p>
+                </div>
+                <div class="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2">
+                    <p class="text-[10px] font-bold uppercase text-slate-400">Due</p>
+                    <p class="mt-1 text-sm font-bold ${overdue ? 'text-red-600' : 'text-slate-700'}">${_htmlEsc(fmtDate(r.DueDate))}</p>
+                </div>
+            </div>
+
+            <div class="grid grid-cols-2 gap-3">
+                ${_accInfoField('Accident Date', `${fmtDate(r.AccidentDate)} ${r.AccidentTime || ''}`.trim())}
+                ${_accInfoField('Report Date', fmtDate(r.ReportDate))}
+                ${_accInfoField('Employee', `${r.EmployeeID || '-'} ${r.EmployeeName ? '- ' + r.EmployeeName : ''}`)}
+                ${_accInfoField('Department', r.Department)}
+                ${_accInfoField('Area', r.Area)}
+                ${_accInfoField('Reporter', r.ReporterName)}
+            </div>
+
+            ${r.Description ? `<div class="rounded-xl border border-red-100 bg-red-50 p-3">
+                <p class="text-xs font-bold uppercase text-red-500 mb-1">Incident Description</p>
+                <p class="text-sm leading-relaxed text-slate-700">${_htmlEsc(r.Description)}</p>
+            </div>` : ''}
+            ${r.RootCause || r.RootCauseDetail ? `<div class="rounded-xl border border-amber-100 bg-amber-50 p-3">
+                <p class="text-xs font-bold uppercase text-amber-600 mb-1">Root Cause</p>
+                <p class="text-sm leading-relaxed text-slate-700">${_htmlEsc(r.RootCause || '-')}</p>
+                ${r.RootCauseDetail ? `<p class="mt-1 text-sm leading-relaxed text-slate-600">${_htmlEsc(r.RootCauseDetail)}</p>` : ''}
+            </div>` : ''}
+            ${r.CorrectiveAction || r.PreventiveAction ? `<div class="rounded-xl border border-emerald-100 bg-emerald-50 p-3">
+                <p class="text-xs font-bold uppercase text-emerald-600 mb-1">Action Plan</p>
+                ${r.CorrectiveAction ? `<p class="text-sm leading-relaxed text-slate-700"><span class="font-semibold">Corrective:</span> ${_htmlEsc(r.CorrectiveAction)}</p>` : ''}
+                ${r.PreventiveAction ? `<p class="mt-1 text-sm leading-relaxed text-slate-700"><span class="font-semibold">Preventive:</span> ${_htmlEsc(r.PreventiveAction)}</p>` : ''}
+                ${r.ResponsiblePerson ? `<p class="mt-2 text-xs font-semibold text-emerald-700">Owner: ${_htmlEsc(r.ResponsiblePerson)}</p>` : ''}
+            </div>` : ''}
+            ${attachments.length ? `<div>
+                <p class="text-xs font-bold uppercase text-slate-400 mb-2">Attachments (${attachments.length})</p>
+                <div class="flex flex-wrap gap-2">
+                    ${attachments.map(a => `<a href="${_htmlEsc(a.FileURL)}" target="_blank" rel="noopener"
+                        class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-slate-100 text-slate-700 hover:bg-slate-200">
+                        <span class="max-w-[180px] truncate">${_htmlEsc(a.FileName || 'Attachment')}</span>
+                    </a>`).join('')}
+                </div>
+            </div>` : ''}
+        </div>`;
+
+    openDetailModal({
+        title: `ACC-${String(r.id || '').padStart(4, '0')}`,
+        subtitle: `${fmtDate(r.AccidentDate)} · ${r.Department || '-'} · ${r.EmployeeName || r.EmployeeID || '-'}`,
+        meta: [
+            { label: r.Status || '-', className: statusClass },
+            { label: r.AccidentType || '-', className: `${typeColor.bg} ${typeColor.text} border-slate-200` },
+            { label: r.Severity || '-', className: `${sevColor.bg} ${sevColor.text} border-slate-200` },
+            overdue ? { label: 'Overdue', className: 'bg-red-100 text-red-700 border-red-200' } : null,
+        ],
+        body,
+        size: 'max-w-3xl'
+    });
+}
+
+window._accViewReport = async id => {
+    try {
+        const res = await API.get(`/accident/reports/${id}`);
+        if (res?.data) _renderAccidentDetail(res.data);
+    } catch {
+        showToast('ไม่สามารถโหลดรายละเอียดอุบัติเหตุได้', 'error');
+    }
+};
+
 window._accEditReport = async id => {
     try {
         const res = await API.get(`/accident/reports/${id}`);
