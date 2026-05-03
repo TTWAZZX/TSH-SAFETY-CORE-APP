@@ -625,7 +625,7 @@ function renderDashboard(container, data) {
             const monthNames = ['ม.ค','ก.พ','มี.ค','เม.ย','พ.ค','มิ.ย','ก.ค','ส.ค','ก.ย','ต.ค','พ.ย','ธ.ค'];
             const maxDots = 4; // max dots to show per month
             return `
-          <div class="bg-white rounded-xl border border-slate-100 shadow-sm p-4">
+          <div class="ds-filter-bar">
             <div class="flex items-center justify-between mb-3">
               <h3 class="text-xs font-bold text-slate-700 flex items-center gap-2">
                 <div class="w-5 h-5 rounded-lg flex items-center justify-center" style="background:#ecfdf5">
@@ -674,7 +674,7 @@ function renderDashboard(container, data) {
             const pct            = total > 0 ? Math.min(Math.round((attended / total) * 100), 100) : 0;
             const barColor       = pct >= 100 ? '#10b981' : pct >= 60 ? '#f59e0b' : '#f43f5e';
             if (!sessions.length) return `
-          <div class="bg-white rounded-xl border border-slate-100 shadow-sm p-5">
+          <div class="ds-section p-5">
             <div class="flex items-center gap-2 mb-3">
               <div class="w-6 h-6 rounded-lg flex items-center justify-center" style="background:#ecfdf5">
                 <svg class="w-3.5 h-3.5 text-emerald-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"/></svg>
@@ -687,7 +687,7 @@ function renderDashboard(container, data) {
             </div>
           </div>`;
             return `
-          <div class="bg-white rounded-xl border border-slate-100 shadow-sm overflow-hidden">
+          <div class="ds-table-wrap">
             <!-- Header -->
             <div class="px-4 py-3 border-b border-slate-50 flex items-center justify-between">
               <h3 class="text-xs font-bold text-slate-700 flex items-center gap-2">
@@ -1549,7 +1549,7 @@ function renderDashboard(container, data) {
         <div id="patrol-rank-stop-summary"></div>
 
         <!-- Issue Register -->
-        <div class="bg-white rounded-2xl shadow-sm border border-slate-100 overflow-hidden">
+        <div class="ds-table-wrap">
           <div class="px-6 py-4 border-b border-slate-100">
             <div class="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-3 mb-3">
               <div class="flex items-center gap-2">
@@ -1612,7 +1612,7 @@ function renderDashboard(container, data) {
             </div>
           </div>
           <div class="overflow-x-auto">
-            <table class="w-full text-sm text-left">
+            <table class="ds-table text-sm text-left">
               <thead class="text-[10px] text-slate-400 uppercase bg-slate-50 border-b border-slate-100">
                 <tr>
                   <th class="px-5 py-3 font-bold">ID</th>
@@ -1710,7 +1710,7 @@ function _issueFilterDept(deptName) {
 
     // Scroll to ทะเบียนปัญหา section smoothly
     if (deptName) {
-        document.getElementById('issue-table-body')?.closest('.bg-white')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        document.getElementById('issue-table-body')?.closest('.ds-table-wrap, .bg-white')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
     }
 }
 
@@ -1768,7 +1768,7 @@ window._issueFilterUnit = function(unitName) {
     if (badge) badge.textContent = `${filtered.length} / ${_allIssues.length}`;
 
     if (unitName) {
-        document.getElementById('issue-table-body')?.closest('.bg-white')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        document.getElementById('issue-table-body')?.closest('.ds-table-wrap, .bg-white')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
     }
 };
 

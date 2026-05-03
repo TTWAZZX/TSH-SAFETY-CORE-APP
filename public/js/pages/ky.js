@@ -3,7 +3,8 @@
 import { API } from '../api.js';
 import {
     hideLoading, showError, showLoading,
-    openModal, openDetailModal, closeModal, showToast, showConfirmationModal, showDocumentModal, escHtml
+    openModal, openDetailModal, closeModal, showToast, showConfirmationModal, showDocumentModal, escHtml,
+    statusBadge as dsStatusBadge
 } from '../ui.js';
 import { normalizeApiArray, normalizeApiObject } from '../utils/normalize.js';
 import { buildActivityCard } from '../utils/activity-widget.js';
@@ -294,7 +295,7 @@ async function renderDashboard(container) {
             <!-- KPI -->
             <div id="ky-kpi-row" class="grid grid-cols-2 xl:grid-cols-5 gap-4">
                 ${Array(4).fill(0).map(() =>
-                    `<div class="card p-4 animate-pulse"><div class="h-8 bg-slate-100 rounded mb-2"></div><div class="h-4 bg-slate-50 rounded w-2/3"></div></div>`
+                    `<div class="ds-metric-card p-4 animate-pulse"><div class="h-8 bg-slate-100 rounded mb-2"></div><div class="h-4 bg-slate-50 rounded w-2/3"></div></div>`
                 ).join('')}
             </div>
 
@@ -303,7 +304,7 @@ async function renderDashboard(container) {
             <div id="ky-prog-progress"></div>
 
             <!-- Completion bar -->
-            <div class="card p-5">
+            <div class="ds-section p-5">
                 <div class="flex items-center justify-between mb-3">
                     <h3 class="text-sm font-bold text-slate-600">Department Submission Tracker (เดือนนี้)</h3>
                     <span id="ky-completion-badge" class="text-xs font-bold px-2.5 py-1 rounded-full bg-indigo-100 text-indigo-700">--</span>
@@ -313,17 +314,17 @@ async function renderDashboard(container) {
 
             <!-- Charts -->
             <div class="grid grid-cols-1 lg:grid-cols-3 gap-4">
-                <div class="lg:col-span-2 card p-5">
+                <div class="lg:col-span-2 ds-section p-5">
                     <h3 class="text-sm font-bold text-slate-600 mb-4">แนวโน้มกิจกรรม KY รายเดือน</h3>
                     <div class="relative" style="height:220px"><canvas id="ky-chart-line"></canvas></div>
                 </div>
-                <div class="card p-5">
+                <div class="ds-section p-5">
                     <h3 class="text-sm font-bold text-slate-600 mb-4">ประเภทความเสี่ยง</h3>
                     <div class="relative" style="height:220px"><canvas id="ky-chart-doughnut"></canvas></div>
                 </div>
             </div>
 
-            <div class="card p-5">
+            <div class="ds-section p-5">
                 <h3 class="text-sm font-bold text-slate-600 mb-4">กิจกรรม KY แยกตามแผนก</h3>
                 <div class="relative" style="height:200px"><canvas id="ky-chart-bar"></canvas></div>
             </div>
@@ -364,7 +365,7 @@ function renderKPI(kpi) {
     const row = document.getElementById('ky-kpi-row');
     if (!row) return;
     row.innerHTML = cards.map(c => `
-        <button type="button" class="card p-5 flex items-center gap-4 text-left hover:-translate-y-0.5 hover:shadow-lg transition-all"
+        <button type="button" class="ds-metric-card p-5 flex items-center gap-4 text-left hover:-translate-y-0.5 hover:shadow-lg transition-all"
                 data-ky-kpi-filter="${c.filter}" title="คลิกเพื่อดูรายการในแท็บประวัติ">
             <div class="w-11 h-11 rounded-xl flex items-center justify-center flex-shrink-0"
                  style="background:${c.color}18; color:${c.color}">
@@ -432,22 +433,22 @@ function renderExecutiveSummary(data) {
 
     el.innerHTML = `
         <div class="grid grid-cols-1 lg:grid-cols-4 gap-4">
-            <div class="card p-5 border-l-4 border-l-indigo-500">
+            <div class="ds-metric-card p-5 border-l-4 border-l-indigo-500">
                 <p class="text-xs font-bold text-slate-400 uppercase tracking-wide">This Month</p>
                 <p class="text-2xl font-bold text-slate-800 mt-1">${currentMonthCount}</p>
                 <p class="text-xs text-slate-500 mt-1">กิจกรรม KY ที่ส่งในเดือนปัจจุบัน</p>
             </div>
-            <div class="card p-5 border-l-4 border-l-emerald-500">
+            <div class="ds-metric-card p-5 border-l-4 border-l-emerald-500">
                 <p class="text-xs font-bold text-slate-400 uppercase tracking-wide">Department Coverage</p>
                 <p class="text-2xl font-bold text-slate-800 mt-1">${kpi.deptSubmitted || 0}/${kpi.totalDepts || 0}</p>
                 <p class="text-xs text-slate-500 mt-1">ยังเหลือ ${coverageGap} แผนกที่ต้องติดตาม</p>
             </div>
-            <div class="card p-5 border-l-4 border-l-orange-500">
+            <div class="ds-metric-card p-5 border-l-4 border-l-orange-500">
                 <p class="text-xs font-bold text-slate-400 uppercase tracking-wide">Top Risk Theme</p>
                 <p class="text-lg font-bold text-slate-800 mt-1 truncate">${escHtml(topRisk)}</p>
                 <p class="text-xs text-slate-500 mt-1">ประเภทความเสี่ยงที่พบมากที่สุด</p>
             </div>
-            <div class="card p-5 border-l-4 border-l-sky-500">
+            <div class="ds-metric-card p-5 border-l-4 border-l-sky-500">
                 <p class="text-xs font-bold text-slate-400 uppercase tracking-wide">Most Active Dept.</p>
                 <p class="text-lg font-bold text-slate-800 mt-1 truncate">${escHtml(topDept)}</p>
                 <p class="text-xs text-slate-500 mt-1">แผนกที่ส่งกิจกรรมสูงสุดในปีที่เลือก</p>
@@ -464,7 +465,7 @@ function renderHazardPattern(keywords) {
     const riskColors = ['#ef4444','#f97316','#eab308','#8b5cf6','#0284c7','#10b981','#64748b'];
 
     el.innerHTML = `
-        <div class="card p-5">
+        <div class="ds-section p-5">
             <div class="flex items-center justify-between gap-3 mb-4">
                 <div>
                     <h3 class="text-sm font-bold text-slate-700">KYT Keyword ที่พบซ้ำบ่อย</h3>
@@ -510,7 +511,7 @@ function renderProgramProgress(progData, usingConfig) {
     const txtColor = (pct) => pct >= 80 ? '#065f46' : pct >= 40 ? '#92400e' : '#991b1b';
 
     el.innerHTML = `
-        <div class="card p-5">
+        <div class="ds-section p-5">
             <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-5">
                 <div>
                     <h3 class="text-sm font-bold text-slate-700">ความคืบหน้ากิจกรรม KY รายส่วนงาน</h3>
@@ -572,7 +573,7 @@ function renderDepartmentHeatmap(deptMonthly, byDept) {
     };
 
     el.innerHTML = `
-        <div class="card p-5">
+        <div class="ds-section p-5">
             <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-2 mb-4">
                 <div>
                     <h3 class="text-sm font-bold text-slate-700">KY Department Heatmap</h3>
@@ -745,7 +746,7 @@ async function renderSubmitForm(container) {
 
     container.innerHTML = `
         <div class="w-full max-w-none">
-            <div class="card overflow-hidden">
+            <div class="ds-section overflow-hidden">
                 <div class="h-1.5 w-full" style="background:linear-gradient(90deg,#6366f1,#8b5cf6)"></div>
                 <div class="p-6 space-y-5">
 
@@ -1154,7 +1155,7 @@ async function renderHistory(container) {
                 </svg>
                 <span>แสดงเฉพาะ <strong>${configDepts.length} ส่วนงาน</strong> ที่อยู่ในโปรแกรม KY ปี ${_filterHistYear} — ตั้งค่าได้ในแท็บ "จัดการ"</span>
             </div>` : ''}
-            <div class="card p-4 flex flex-wrap gap-3 items-center justify-between">
+            <div class="ds-filter-bar flex flex-wrap gap-3 items-center justify-between">
                 <div class="flex flex-wrap gap-2">
                     <select id="ky-hist-year" class="form-input py-1.5 text-sm">
                         ${[0,1,2].map(i => { const y = new Date().getFullYear()-i; return `<option value="${y}" ${y===_filterHistYear?'selected':''}>${y}</option>`; }).join('')}
@@ -1196,9 +1197,9 @@ async function renderHistory(container) {
                 </div>
             </div>
 
-            <div class="card overflow-hidden">
+            <div class="ds-table-wrap">
                 <div class="overflow-x-auto">
-                    <table class="w-full text-sm">
+                    <table class="ds-table text-sm">
                         <thead>
                             <tr class="bg-slate-50 text-left text-xs font-semibold text-slate-500 uppercase tracking-wider">
                                 <th class="px-4 py-3">วันที่</th>
@@ -1260,15 +1261,11 @@ async function fetchAndRenderHistory() {
                 </td>
                 <td class="px-4 py-3 text-slate-700 max-w-[150px] truncate text-xs">${r.KYTKeyword || '-'}</td>
                 <td class="px-4 py-3">
-                    <span class="px-2 py-0.5 rounded-full text-xs font-semibold ${RISK_BADGE_COLOR[r.RiskCategory] || 'bg-slate-100 text-slate-500'}">
-                        ${r.RiskCategory || '-'}
-                    </span>
+                    ${dsStatusBadge(r.RiskCategory || '-')}
                 </td>
                 <td class="px-4 py-3 text-slate-600 whitespace-nowrap text-xs">${r.ReporterName || '-'}</td>
                 <td class="px-4 py-3">
-                    <span class="px-2 py-0.5 rounded-full text-xs font-semibold ${STATUS_BADGE[r.Status] || 'bg-slate-100 text-slate-500'}">
-                        ${STATUS_LABEL[r.Status] || r.Status}
-                    </span>
+                    ${dsStatusBadge(r.Status || '-', { label: STATUS_LABEL[r.Status] || r.Status || '-' })}
                 </td>
                 <td class="px-4 py-3 text-right">
                     <div class="flex items-center justify-end gap-1">
@@ -1492,7 +1489,7 @@ async function renderManage(container) {
     container.innerHTML = `
         <div class="space-y-4">
             <!-- Sub-tab bar -->
-            <div class="card p-3 flex flex-wrap items-center justify-between gap-3">
+            <div class="ds-filter-bar flex flex-wrap items-center justify-between gap-3">
                 <div class="flex gap-2">
                     <button id="ky-msub-coverage" class="${_manageSub==='coverage' ? subActive : subInactive}"
                             style="${_manageSub==='coverage' ? 'background:linear-gradient(135deg,#6366f1,#8b5cf6)' : ''}"
@@ -1527,7 +1524,7 @@ async function renderManage(container) {
             </div>
 
             <div id="ky-manage-panel">
-                <div class="card p-5 animate-pulse"><div class="h-5 bg-slate-100 rounded w-48 mb-4"></div><div class="h-24 bg-slate-50 rounded-xl"></div></div>
+                <div class="ds-section p-5 animate-pulse"><div class="h-5 bg-slate-100 rounded w-48 mb-4"></div><div class="h-24 bg-slate-50 rounded-xl"></div></div>
             </div>
         </div>`;
 
@@ -1592,7 +1589,7 @@ function renderManageConfig(wrap) {
 
     wrap.innerHTML = `
         <div class="space-y-4">
-            <div class="card p-5">
+            <div class="ds-table-wrap p-5">
                 <div class="flex items-center justify-between mb-4">
                     <div>
                         <h3 class="text-sm font-bold text-slate-700">โปรแกรม KY ปี ${_filterMgmtYear}</h3>
@@ -1602,7 +1599,7 @@ function renderManageConfig(wrap) {
                 </div>
                 ${configs.length ? `
                 <div class="overflow-x-auto">
-                    <table class="w-full text-sm">
+                    <table class="ds-table text-sm">
                         <thead>
                             <tr class="bg-slate-50 text-xs font-semibold text-slate-500 uppercase tracking-wider">
                                 <th class="px-3 py-2.5 text-left">แผนก</th>
@@ -1665,7 +1662,7 @@ function renderManageConfig(wrap) {
             </div>
 
             <!-- Info card -->
-            <div class="card p-4 border-l-4 border-l-indigo-400 flex items-start gap-3">
+            <div class="ds-section p-4 border-l-4 border-l-indigo-400 flex items-start gap-3">
                 <svg class="w-5 h-5 text-indigo-400 flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/>
                 </svg>
@@ -1676,7 +1673,7 @@ function renderManageConfig(wrap) {
             </div>
 
             <!-- Forms management section -->
-            <div class="card p-5">
+            <div class="ds-table-wrap p-5">
                 <div class="flex items-center justify-between mb-4">
                     <div>
                         <h3 class="text-sm font-bold text-slate-700">แบบฟอร์มที่เกี่ยวข้อง</h3>
@@ -1693,7 +1690,7 @@ function renderManageConfig(wrap) {
                     </button>` : ''}
                 </div>
                 <div class="overflow-x-auto">
-                    <table class="w-full text-sm">
+                    <table class="ds-table text-sm">
                         <thead>
                             <tr class="bg-slate-50 text-left text-xs font-semibold text-slate-500 uppercase tracking-wider">
                                 <th class="px-4 py-3">ชื่อแบบฟอร์ม</th>
@@ -1880,7 +1877,7 @@ async function fetchAndRenderManage(statusFilter) {
 
         renderManageOverview(records);
     } catch (err) {
-        if (wrap) wrap.innerHTML = `<div class="card p-6 text-center text-red-500 text-sm">${escHtml(err.message)}</div>`;
+        if (wrap) wrap.innerHTML = `<div class="ds-empty-state p-6 text-center text-red-500 text-sm">${escHtml(err.message)}</div>`;
     }
 }
 
@@ -1937,7 +1934,7 @@ function renderManageOverview(records) {
         </div>
 
         <div class="grid grid-cols-1 xl:grid-cols-3 gap-4">
-            <div class="xl:col-span-2 card p-5">
+            <div class="xl:col-span-2 ds-section p-5">
                 <div class="flex items-center justify-between gap-3 mb-4">
                     <div>
                         <h3 class="text-sm font-bold text-slate-700">Department Coverage</h3>
@@ -1951,7 +1948,7 @@ function renderManageOverview(records) {
                 ${configDepts.length ? `<p class="text-[10px] text-slate-400 mt-3">แถบสีคือความคืบหน้าเทียบเป้าหมายรายปีจาก Program Config</p>` : ''}
             </div>
 
-            <div class="card p-5">
+            <div class="ds-section p-5">
                 <h3 class="text-sm font-bold text-slate-700 mb-1">Action Queue</h3>
                 <p class="text-xs text-slate-400 mb-4">รายการที่ต้องจัดการต่อจาก History</p>
                 <div class="space-y-2 max-h-[430px] overflow-y-auto pr-1">
@@ -1961,7 +1958,7 @@ function renderManageOverview(records) {
         </div>
 
         ${pendingDepts.length ? `
-        <div class="card p-5 border-l-4 border-l-amber-400">
+        <div class="ds-section p-5 border-l-4 border-l-amber-400">
             <h3 class="text-sm font-bold text-slate-700 mb-2">แผนกที่ยังไม่ส่งในช่วงที่เลือก</h3>
             <div class="flex flex-wrap gap-1.5">
                 ${pendingDepts.map(d => `<span class="px-2.5 py-1 rounded-lg bg-amber-50 text-amber-700 border border-amber-100 text-xs font-semibold">${escHtml(d)}</span>`).join('')}
@@ -1972,7 +1969,7 @@ function renderManageOverview(records) {
 
 function manageMetric(label, value, color, sub) {
     return `
-        <div class="card p-5 border-t-4" style="border-top-color:${color}">
+        <div class="ds-metric-card p-5 border-t-4" style="border-top-color:${color}">
             <p class="text-2xl font-bold" style="color:${color}">${value}</p>
             <p class="text-xs font-semibold text-slate-600 mt-1">${label}</p>
             <p class="text-[11px] text-slate-400 mt-0.5">${sub}</p>

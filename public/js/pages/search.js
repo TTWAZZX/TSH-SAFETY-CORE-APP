@@ -76,7 +76,7 @@ function shell() {
 
         <div class="grid grid-cols-1 xl:grid-cols-[360px_1fr] gap-5">
             <aside class="space-y-4">
-                <div class="bg-white rounded-xl border border-slate-100 shadow-sm p-4">
+                <div class="ds-filter-bar">
                     <label class="text-xs font-bold text-slate-400 uppercase tracking-wider">Search</label>
                     <div class="relative mt-2">
                         <input id="people-search-input" class="form-input w-full pl-10" placeholder="ชื่อ / รหัส / แผนก / ตำแหน่ง">
@@ -95,7 +95,7 @@ function shell() {
                     </div>
                 </div>
 
-                <div id="people-results" class="bg-white rounded-xl border border-slate-100 shadow-sm overflow-hidden"></div>
+                <div id="people-results" class="ds-table-wrap"></div>
             </aside>
 
             <main id="person-profile" class="min-h-[520px]"></main>
@@ -199,13 +199,13 @@ async function loadProfile(employeeId) {
         _selectedProfile = res?.data || null;
         wrap.innerHTML = renderProfile(_selectedProfile);
     } catch (err) {
-        wrap.innerHTML = `<div class="bg-white rounded-xl border border-red-100 shadow-sm">${emptyState({ title: 'โหลดโปรไฟล์ไม่สำเร็จ', text: err.message || 'ลองเลือกพนักงานอีกครั้ง หรือ refresh หน้า' })}</div>`;
+        wrap.innerHTML = `<div class="ds-section border-red-100">${emptyState({ title: 'โหลดโปรไฟล์ไม่สำเร็จ', text: err.message || 'ลองเลือกพนักงานอีกครั้ง หรือ refresh หน้า' })}</div>`;
         console.error(err);
     }
 }
 
 function profileLoading() {
-    return `<div class="bg-white rounded-xl border border-slate-100 p-8 text-center text-slate-400">
+    return `<div class="ds-section p-8 text-center text-slate-400">
         <div class="animate-spin rounded-full h-9 w-9 border-4 border-emerald-500 border-t-transparent mx-auto mb-3"></div>
         กำลังโหลด Safety 360...
     </div>`;
@@ -218,7 +218,7 @@ function renderProfile(data) {
     const scoreColor = score == null ? '#64748b' : score >= 80 ? '#059669' : score >= 60 ? '#d97706' : '#dc2626';
     return `
     <div class="space-y-5">
-        <section class="bg-white rounded-xl border border-slate-100 shadow-sm overflow-hidden">
+        <section class="ds-section overflow-hidden">
             <div class="p-5 border-b border-slate-100 flex flex-col lg:flex-row lg:items-center justify-between gap-4">
                 <div class="flex items-center gap-4">
                     <div class="w-16 h-16 rounded-2xl flex items-center justify-center text-2xl text-white font-extrabold"
@@ -256,14 +256,14 @@ function renderProfile(data) {
         </section>
 
         <section class="grid grid-cols-1 xl:grid-cols-2 gap-5">
-            <div class="bg-white rounded-xl border border-slate-100 shadow-sm overflow-hidden">
+            <div class="ds-section overflow-hidden">
                 <div class="px-5 py-4 border-b border-slate-100 flex items-center justify-between">
                     <h3 class="font-bold text-slate-800">ประวัติ Patrol</h3>
                     <span class="text-xs text-slate-400">${_year}</span>
                 </div>
                 <div class="divide-y divide-slate-100">${renderPatrolRows(data.patrolRecords || [])}</div>
             </div>
-            <div class="bg-white rounded-xl border border-slate-100 shadow-sm overflow-hidden">
+            <div class="ds-section overflow-hidden">
                 <div class="px-5 py-4 border-b border-slate-100"><h3 class="font-bold text-slate-800">Safety Timeline</h3></div>
                 <div class="divide-y divide-slate-100 max-h-[520px] overflow-y-auto">${renderTimeline(data.timeline || [])}</div>
             </div>
@@ -280,7 +280,7 @@ function kpiBox(value, label, color) {
 
 function moduleCard(key, value, sub) {
     const [label, color] = moduleMeta[key] || [key, '#64748b'];
-    return `<div class="bg-white rounded-xl border border-slate-100 shadow-sm p-4">
+    return `<div class="ds-metric-card p-4">
         <p class="text-[11px] font-bold text-slate-400 uppercase truncate">${escHtml(label)}</p>
         <p class="text-2xl font-extrabold mt-1" style="color:${color}">${escHtml(String(value ?? 0))}</p>
         <p class="text-xs text-slate-500 truncate">${escHtml(sub || '')}</p>

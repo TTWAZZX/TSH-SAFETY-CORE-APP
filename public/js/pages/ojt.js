@@ -4,6 +4,7 @@ import { API } from '../api.js';
 import {
     hideLoading, showError, showLoading,
     openModal, closeModal, showToast, showConfirmationModal,
+    statusBadge as dsStatusBadge,
 } from '../ui.js';
 import { normalizeApiArray } from '../utils/normalize.js';
 import { buildActivityCard } from '../utils/activity-widget.js';
@@ -254,7 +255,7 @@ function _buildStandardSection() {
         : '';
 
     return `
-    <div class="card overflow-hidden">
+    <div class="ds-section overflow-hidden">
         <div class="flex items-center justify-between px-5 py-4 border-b border-slate-100">
             <div class="flex items-center gap-3">
                 <div class="w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0"
@@ -324,7 +325,7 @@ function _buildDocumentsSection() {
            </div>`;
 
     return `
-    <div class="card overflow-hidden">
+    <div class="ds-section overflow-hidden">
         <div class="flex items-center justify-between px-5 py-4 border-b border-slate-100">
             <div class="flex items-center gap-3">
                 <div class="w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0"
@@ -353,7 +354,7 @@ function _buildComplianceSection() {
     const visibleCount = _records.filter(r => !_hiddenDepts.has(r.Department)).length;
     const hiddenCount  = _hiddenDepts.size;
     return `
-    <div class="card overflow-hidden">
+    <div class="ds-section overflow-hidden">
         <div class="flex items-center justify-between px-5 py-4 border-b border-slate-100">
             <div class="flex items-center gap-3">
                 <div class="w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0"
@@ -451,7 +452,7 @@ function _buildComplianceInner() {
                 <p class="font-medium text-sm">ไม่พบข้อมูล</p>
                </div>`
         : `<div class="overflow-x-auto">
-            <table class="w-full text-sm">
+            <table class="ds-table text-sm">
                 <thead class="bg-slate-50 border-b border-slate-100">
                     <tr>
                         <th class="text-left px-4 py-3 font-semibold text-slate-600 text-xs uppercase tracking-wide">แผนก</th>
@@ -486,12 +487,7 @@ function _buildComplianceInner() {
                             <td class="px-4 py-3 text-slate-600">${_esc(r.TrainerName || '—')}</td>
                             <td class="px-4 py-3 text-slate-600">${r.AttendeeCount > 0 ? r.AttendeeCount + ' คน' : '—'}</td>
                             <td class="px-4 py-3">${_buildTargetBadge(r)}</td>
-                            <td class="px-4 py-3">
-                                <span class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold ${meta.bg} ${meta.text}">
-                                    <span class="w-1.5 h-1.5 rounded-full ${meta.dot} inline-block"></span>
-                                    ${meta.label}
-                                </span>
-                            </td>
+                            <td class="px-4 py-3">${dsStatusBadge(status, { label: meta.label })}</td>
                             ${_isAdmin ? `
                             <td class="px-4 py-3 text-right">
                                 <div class="flex items-center justify-end gap-1.5">
@@ -527,7 +523,7 @@ function _buildComplianceInner() {
 
     return `
         ${_buildComplianceSummary()}
-        <div class="flex flex-wrap gap-3 items-center mb-4">
+        <div class="ds-filter-bar flex flex-wrap gap-3 items-center mb-4">
             <div class="relative flex-1 min-w-[180px]">
                 <svg class="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-4.35-4.35M17 11A6 6 0 115 11a6 6 0 0112 0z"/></svg>
                 <input id="ojt-search" type="text" placeholder="ค้นหาชื่อแผนก..." value="${_esc(_searchQ)}"
@@ -580,7 +576,7 @@ function setupEventListeners() {
             const val = statBtn.dataset.val;
             _filterStatus = _filterStatus === val ? '' : val;
             _rerenderCompliance();
-            document.getElementById('ojt-compliance-inner')?.closest('.card')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+            document.getElementById('ojt-compliance-inner')?.closest('.card, .ds-section')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
             return;
         }
 
@@ -933,7 +929,7 @@ async function openHistoryModal(department) {
                 </div>
             </div>
             <div class="overflow-x-auto">
-                <table class="w-full text-sm">
+                <table class="ds-table text-sm">
                     <thead class="bg-slate-50 border-b border-slate-100">
                         <tr>
                             <th class="text-left px-3 py-2 text-xs font-semibold text-slate-600">วันที่ OJT</th>

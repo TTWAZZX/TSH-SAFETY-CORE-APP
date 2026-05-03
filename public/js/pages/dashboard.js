@@ -125,7 +125,7 @@ function buildShell(user, year) {
                 เป้าหมายกิจกรรมส่วนตัว ${year}
             </h2>
             <div id="db-my-targets">
-                <div class="bg-white rounded-xl border border-slate-100 shadow-sm p-6">
+                <div class="ds-section p-6">
                     <div class="flex flex-col items-center py-6 text-slate-400">
                         <div class="animate-spin rounded-full h-8 w-8 border-4 border-emerald-500 border-t-transparent mb-3"></div>
                         <p class="text-sm">กำลังโหลด...</p>
@@ -287,7 +287,7 @@ function _renderHealthIndex(d) {
 
     wrap.innerHTML = `
     <div class="grid grid-cols-1 xl:grid-cols-3 gap-4">
-        <div class="bg-white rounded-xl border border-slate-100 shadow-sm p-5 xl:col-span-1">
+        <div class="ds-section p-5 xl:col-span-1">
             <div class="flex items-start justify-between gap-3 mb-4">
                 <div>
                     <p class="text-[11px] font-bold text-slate-400 uppercase tracking-wider">Enterprise Safety Health</p>
@@ -322,7 +322,7 @@ function _renderHealthIndex(d) {
                 </div>
             </div>
         </div>
-        <div class="bg-white rounded-xl border border-slate-100 shadow-sm p-5 xl:col-span-2">
+        <div class="ds-section p-5 xl:col-span-2">
             <p class="text-[11px] font-bold text-slate-400 uppercase tracking-wider mb-3">Executive Signal</p>
             <div class="grid grid-cols-2 lg:grid-cols-4 gap-3">
                 ${_signalCard('Training', d.training?.passRate != null ? d.training.passRate + '%' : '-', d.training?.passRate ?? 0)}
@@ -378,7 +378,7 @@ function _renderComplianceMatrix(d) {
     };
 
     wrap.innerHTML = `
-    <div class="bg-white rounded-xl border border-slate-100 shadow-sm overflow-hidden">
+    <div class="ds-table-wrap">
         <div class="px-5 py-4 border-b border-slate-100 flex flex-wrap items-center justify-between gap-3">
             <div>
                 <p class="text-[11px] font-bold text-slate-400 uppercase tracking-wider">Department × Module Compliance</p>
@@ -387,7 +387,7 @@ function _renderComplianceMatrix(d) {
             <p class="text-xs text-slate-400">${rows.length} แผนกที่แสดง</p>
         </div>
         <div class="overflow-x-auto">
-            <table class="w-full text-sm">
+            <table class="ds-table text-sm">
                 <thead>
                     <tr class="bg-slate-50 text-left text-xs font-bold text-slate-500 uppercase tracking-wider">
                         <th class="px-4 py-3">Department</th>

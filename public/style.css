@@ -114,6 +114,137 @@ body { font-family: 'Kanit', sans-serif; background-color: #1e5c3e; }
 .status-normal { background-color: #dcfce7; color: #166534; }
 .status-expiring { background-color: #fef9c3; color: #854d0e; }
 .status-expired { background-color: #fee2e2; color: #991b1b; }
+
+/* Enterprise design-system primitives. Additive classes for new/refactored modules. */
+.ds-surface {
+    background: #ffffff;
+    border: 1px solid #e2e8f0;
+    border-radius: 12px;
+    box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
+}
+.ds-section {
+    background: #ffffff;
+    border: 1px solid #e2e8f0;
+    border-radius: 12px;
+    box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
+    padding: 1rem;
+}
+.ds-filter-bar {
+    background: #ffffff;
+    border: 1px solid #e2e8f0;
+    border-radius: 12px;
+    box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
+    padding: 1rem;
+}
+.ds-metric-card {
+    background: #ffffff;
+    border: 1px solid #e2e8f0;
+    border-radius: 12px;
+    box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
+    padding: 1rem;
+}
+.ds-metric-card.is-good { background: #ecfdf5; border-color: #a7f3d0; color: #047857; }
+.ds-metric-card.is-warn { background: #fffbeb; border-color: #fde68a; color: #b45309; }
+.ds-metric-card.is-risk { background: #fff1f2; border-color: #fecdd3; color: #be123c; }
+.ds-metric-card.is-info { background: #f0f9ff; border-color: #bae6fd; color: #0369a1; }
+.ds-metric-label {
+    font-size: 0.6875rem;
+    line-height: 1rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    color: currentColor;
+    opacity: 0.72;
+}
+.ds-metric-value {
+    margin-top: 0.25rem;
+    font-size: 1.5rem;
+    line-height: 2rem;
+    font-weight: 900;
+    color: currentColor;
+}
+.ds-metric-hint {
+    margin-top: 0.25rem;
+    font-size: 0.6875rem;
+    line-height: 1rem;
+    color: currentColor;
+    opacity: 0.72;
+}
+.ds-table-wrap {
+    background: #ffffff;
+    border: 1px solid #e2e8f0;
+    border-radius: 12px;
+    box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
+    overflow: hidden;
+}
+.ds-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.875rem;
+}
+.ds-table thead tr {
+    background: #f8fafc;
+    border-bottom: 1px solid #e2e8f0;
+}
+.ds-table th {
+    padding: 0.75rem 1rem;
+    text-align: left;
+    font-size: 0.6875rem;
+    line-height: 1rem;
+    font-weight: 800;
+    text-transform: uppercase;
+    color: #64748b;
+}
+.ds-table td {
+    padding: 0.75rem 1rem;
+    border-bottom: 1px solid #f1f5f9;
+    color: #475569;
+    vertical-align: middle;
+}
+.ds-table tbody tr:hover { background: #f8fafc; }
+.ds-table tbody tr:last-child td { border-bottom: 0; }
+.ds-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.25rem;
+    border: 1px solid transparent;
+    border-radius: 9999px;
+    padding: 0.125rem 0.5rem;
+    font-size: 0.6875rem;
+    line-height: 1rem;
+    font-weight: 800;
+    white-space: nowrap;
+}
+.ds-badge.is-draft { background: #f8fafc; border-color: #e2e8f0; color: #475569; }
+.ds-badge.is-open { background: #eff6ff; border-color: #bfdbfe; color: #1d4ed8; }
+.ds-badge.is-progress { background: #f0f9ff; border-color: #bae6fd; color: #0369a1; }
+.ds-badge.is-pending { background: #fffbeb; border-color: #fde68a; color: #b45309; }
+.ds-badge.is-approved { background: #ecfdf5; border-color: #a7f3d0; color: #047857; }
+.ds-badge.is-closed { background: #f1f5f9; border-color: #cbd5e1; color: #475569; }
+.ds-badge.is-overdue, .ds-badge.is-failed { background: #fff1f2; border-color: #fecdd3; color: #be123c; }
+.ds-badge.is-info { background: #f0f9ff; border-color: #bae6fd; color: #0369a1; }
+.ds-empty-state {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 0.375rem;
+    min-height: 10rem;
+    padding: 2rem 1rem;
+    text-align: center;
+    color: #64748b;
+    background: #f8fafc;
+    border: 1px dashed #cbd5e1;
+    border-radius: 12px;
+}
+.ds-empty-state strong {
+    color: #334155;
+    font-size: 0.875rem;
+}
+.ds-empty-state span {
+    max-width: 28rem;
+    font-size: 0.75rem;
+    color: #64748b;
+}
 .progress-bar-bg { background-color: #e5e7eb; }
 .progress-bar-fg { background-color: #059669; transition: width 0.5s ease-in-out; }
 .progress-bar-fg.is-green { background-color: #22c55e; }

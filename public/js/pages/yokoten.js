@@ -336,7 +336,7 @@ function renderDashboard(container) {
         });
 
     const yearPickerHtml = allYears.length > 1 ? `
-        <div class="card p-3 flex items-center gap-3">
+        <div class="ds-filter-bar flex items-center gap-3">
             <svg class="w-4 h-4 text-slate-400 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"/>
             </svg>
@@ -368,7 +368,7 @@ function renderDashboard(container) {
         <!-- Progress + Charts -->
         <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
             <!-- Progress -->
-            <div class="card p-5 md:col-span-1 flex flex-col justify-center">
+            <div class="ds-section p-5 md:col-span-1 flex flex-col justify-center">
                 <div class="flex items-center justify-between mb-2">
                     <h3 class="text-sm font-bold text-slate-700 flex items-center gap-2">
                         <svg class="w-4 h-4 text-sky-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -403,7 +403,7 @@ function renderDashboard(container) {
             </div>
 
             <!-- Category donut chart -->
-            <div class="card p-5 md:col-span-2">
+            <div class="ds-section p-5 md:col-span-2">
                 <div class="flex items-center justify-between mb-4">
                     <h3 class="text-sm font-bold text-slate-700 flex items-center gap-2">
                         <svg class="w-4 h-4 text-indigo-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -445,7 +445,7 @@ function renderDashboard(container) {
 
         <!-- Pinned Departments -->
         ${pinnedDepts.length > 0 ? `
-        <div class="card overflow-hidden">
+        <div class="ds-table-wrap">
             <div class="px-5 py-4 border-b border-slate-100 flex items-center gap-2">
                 <svg class="w-4 h-4 text-sky-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 5a2 2 0 012-2h10a2 2 0 012 2v16l-7-3.5L5 21V5z"/>
@@ -483,7 +483,7 @@ function renderDashboard(container) {
 
         <!-- Urgent / action required -->
         ${urgentTopics.length > 0 ? `
-        <div class="card overflow-hidden">
+        <div class="ds-table-wrap">
             <div class="px-5 py-4 border-b border-slate-100 flex items-center justify-between">
                 <div class="flex items-center gap-2">
                     <svg class="w-4 h-4 text-red-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -639,7 +639,7 @@ function _buildExecSection() {
 
     <div class="grid grid-cols-1 lg:grid-cols-3 gap-4">
         <!-- Dept completion horizontal bar chart (2/3 width) -->
-        <div class="card p-5 lg:col-span-2">
+        <div class="ds-section p-5 lg:col-span-2">
             <div class="flex items-center justify-between mb-4">
                 <h3 class="text-sm font-bold text-slate-700 flex items-center gap-2">
                     <svg class="w-4 h-4 text-emerald-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -659,7 +659,7 @@ function _buildExecSection() {
         </div>
 
         <!-- Approval funnel (1/3 width) -->
-        <div class="card p-5 flex flex-col">
+        <div class="ds-section p-5 flex flex-col">
             <h3 class="text-sm font-bold text-slate-700 mb-4 flex items-center gap-2">
                 <svg class="w-4 h-4 text-sky-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4M7.835 4.697a3.42 3.42 0 001.946-.806 3.42 3.42 0 014.438 0 3.42 3.42 0 001.946.806 3.42 3.42 0 013.138 3.138 3.42 3.42 0 00.806 1.946 3.42 3.42 0 010 4.438 3.42 3.42 0 00-.806 1.946 3.42 3.42 0 01-3.138 3.138 3.42 3.42 0 00-1.946.806 3.42 3.42 0 01-4.438 0 3.42 3.42 0 00-1.946-.806 3.42 3.42 0 01-3.138-3.138 3.42 3.42 0 00-.806-1.946 3.42 3.42 0 010-4.438 3.42 3.42 0 00.806-1.946 3.42 3.42 0 013.138-3.138z"/>
@@ -689,7 +689,7 @@ function _buildExecSection() {
     <!-- Risk Compliance + Deadline Alerts row -->
     <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
         <!-- Risk-level compliance -->
-        <div class="card p-5">
+        <div class="ds-section p-5">
             <h3 class="text-sm font-bold text-slate-700 mb-4 flex items-center gap-2">
                 <svg class="w-4 h-4 text-orange-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/>
@@ -718,7 +718,7 @@ function _buildExecSection() {
         </div>
 
         <!-- Deadline alerts -->
-        <div class="card overflow-hidden">
+        <div class="ds-section overflow-hidden">
             <div class="px-5 py-4 border-b border-slate-100 flex items-center gap-2">
                 <svg class="w-4 h-4 ${alertTopics.length > 0 ? 'text-red-500' : 'text-slate-300'}" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"/>
@@ -761,7 +761,7 @@ function _buildExecSection() {
     </div>
 
     <!-- Completion chips summary -->
-    <div class="card p-4">
+    <div class="ds-section p-4">
         <div class="flex flex-wrap items-center gap-4">
             <div class="flex items-center gap-2.5">
                 <div class="w-9 h-9 rounded-xl flex items-center justify-center text-sm font-bold text-emerald-700" style="background:#f0fdf4">${fullD}</div>
@@ -921,7 +921,7 @@ function renderTopics(container) {
 
     // ── Year picker HTML ──────────────────────────────────────────────────
     const yearPickerHtml = allYears.length > 1 ? `
-    <div class="card p-3 flex flex-wrap items-center gap-3">
+    <div class="ds-filter-bar flex flex-wrap items-center gap-3">
         <svg class="w-4 h-4 text-slate-400 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"/>
         </svg>
@@ -979,7 +979,7 @@ function renderTopics(container) {
         </div>
 
         <!-- Filter bar -->
-        <div class="card p-4">
+        <div class="ds-filter-bar">
             <div class="flex flex-wrap gap-3 items-center">
                 <select id="yok-filter-risk" class="form-input py-1.5 text-sm">
                     <option value="">ทุกระดับความเสี่ยง</option>
@@ -1010,7 +1010,7 @@ function renderTopics(container) {
         <!-- Topic grid -->
         ${filtered.length
             ? `<div class="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-4" id="yok-topic-list">${filtered.map(t => _buildTopicSummaryCard(t)).join('')}</div>`
-            : `<div class="text-center py-16 text-slate-400">
+            : `<div class="ds-empty-state">
                    <div class="w-16 h-16 rounded-2xl bg-slate-100 flex items-center justify-center mx-auto mb-4">
                        <svg class="w-8 h-8 opacity-40" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.172 16.172a4 4 0 015.656 0M9 10h.01M15 10h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/>
@@ -1057,7 +1057,7 @@ function _buildTopicSummaryCard(t) {
     const btnLabel = responded ? 'ดูรายละเอียด' : 'ดู / ตอบกลับ';
 
     return `
-    <div class="card overflow-hidden flex flex-col">
+    <div class="ds-section overflow-hidden flex flex-col">
         <div class="h-1.5 w-full flex-shrink-0" style="background:${accentColor}"></div>
         <div class="p-4 flex flex-col flex-1 gap-0">
             <!-- Badges row -->
@@ -1388,7 +1388,7 @@ function renderHistory(container) {
     };
 
     container.innerHTML = `
-    <div class="card overflow-hidden">
+    <div class="ds-section overflow-hidden">
         <div class="px-5 py-4 border-b border-slate-100 flex flex-col sm:flex-row sm:items-center gap-3 justify-between">
             <div class="flex items-center gap-2">
                 <svg class="w-4 h-4 text-slate-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -1474,7 +1474,7 @@ function renderHistory(container) {
                 </div>`;
             }).join('')}
         </div>` : `
-        <div class="text-center py-16 text-slate-400">
+        <div class="ds-empty-state">
             <div class="w-16 h-16 rounded-2xl bg-slate-100 flex items-center justify-center mx-auto mb-4">
                 <svg class="w-8 h-8 opacity-40" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"/>
@@ -1491,7 +1491,7 @@ function renderAdmin(container) {
     container.innerHTML = `
     <div class="space-y-4">
         <!-- Sub-tab toggle -->
-        <div class="card p-3 flex flex-wrap gap-2">
+        <div class="ds-filter-bar flex flex-wrap gap-2">
             <button data-adm-view="topics"
                 class="adm-view-btn flex items-center gap-1.5 px-4 py-2 rounded-lg text-xs font-semibold transition-all ${_adminView === 'topics' ? 'bg-emerald-600 text-white shadow-sm' : 'text-slate-500 hover:bg-slate-100'}">
                 <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -1552,14 +1552,14 @@ function renderAdmin(container) {
 
 function _buildAdminTopics() {
     if (!_topics.length) {
-        return `<div class="card text-center py-16 text-slate-400">
+        return `<div class="ds-section text-center py-16 text-slate-400">
             <p class="font-medium">ยังไม่มีหัวข้อ Yokoten</p>
             <p class="text-sm mt-1">กดปุ่ม "เพิ่มหัวข้อใหม่" เพื่อเริ่มต้น</p>
         </div>`;
     }
 
     return `
-    <div class="card overflow-hidden">
+    <div class="ds-table-wrap">
         <div class="px-5 py-4 border-b border-slate-100 flex items-center justify-between">
             <div class="flex items-center gap-2">
                 <svg class="w-4 h-4 text-slate-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -1569,7 +1569,7 @@ function _buildAdminTopics() {
             </div>
         </div>
         <div class="overflow-x-auto">
-            <table class="w-full text-sm">
+            <table class="ds-table text-sm">
                 <thead>
                     <tr class="bg-slate-50 text-left text-xs font-semibold text-slate-500 uppercase tracking-wider">
                         <th class="px-4 py-3">หัวข้อ / รายละเอียด</th>
@@ -1694,13 +1694,13 @@ function _buildAdminDept() {
         </div>
 
         <!-- Dept summary table with approval actions -->
-        <div class="card overflow-hidden">
+        <div class="ds-section overflow-hidden">
             <div class="px-5 py-4 border-b border-slate-100 flex items-center justify-between">
                 <h3 class="text-sm font-bold text-slate-700">ภาพรวมรายส่วนงาน</h3>
                 <span class="text-xs text-slate-400">${totalDepts} ส่วนงาน · ${topics.length} หัวข้อ</span>
             </div>
             <div class="overflow-x-auto">
-                <table class="w-full text-sm">
+                <table class="ds-table text-sm">
                     <thead>
                         <tr class="bg-slate-50 text-xs font-semibold text-slate-500 uppercase tracking-wider text-left">
                             <th class="px-4 py-3">ส่วนงาน</th>
@@ -1762,7 +1762,7 @@ function _buildAdminDept() {
             if (!actionable.length) return '';
             const pendingCount = actionable.filter(r => r.ApprovalStatus === 'pending').length;
             return `
-        <div class="card overflow-hidden" id="yok-approval-card">
+        <div class="ds-section overflow-hidden" id="yok-approval-card">
             <div class="px-5 py-4 border-b border-slate-100 flex items-center gap-2 flex-wrap">
                 <svg class="w-4 h-4 text-amber-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4M7.835 4.697a3.42 3.42 0 001.946-.806 3.42 3.42 0 014.438 0 3.42 3.42 0 001.946.806 3.42 3.42 0 013.138 3.138 3.42 3.42 0 00.806 1.946 3.42 3.42 0 010 4.438 3.42 3.42 0 00-.806 1.946 3.42 3.42 0 01-3.138 3.138 3.42 3.42 0 00-1.946.806 3.42 3.42 0 01-4.438 0 3.42 3.42 0 00-1.946-.806 3.42 3.42 0 01-3.138-3.138 3.42 3.42 0 00-.806-1.946 3.42 3.42 0 010-4.438 3.42 3.42 0 00.806-1.946 3.42 3.42 0 013.138-3.138z"/>
@@ -1817,7 +1817,7 @@ function _buildAdminDept() {
 
         <!-- Matrix -->
         ${topics.length > 0 ? `
-        <div class="card overflow-hidden">
+        <div class="ds-table-wrap">
             <div class="px-5 py-4 border-b border-slate-100 flex items-center gap-2">
                 <svg class="w-4 h-4 text-sky-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 10h18M3 14h18M10 3v18M14 3v18"/>
@@ -1825,7 +1825,7 @@ function _buildAdminDept() {
                 <h3 class="text-sm font-bold text-slate-700">Matrix หัวข้อ × ส่วนงาน</h3>
             </div>
             <div class="overflow-x-auto">
-                <table class="w-full text-xs border-collapse">
+                <table class="ds-table text-xs border-collapse">
                     <thead>
                         <tr class="bg-slate-50">
                             <th class="px-3 py-2.5 text-left font-semibold text-slate-600 border-b border-r border-slate-100 sticky left-0 bg-slate-50 z-10 min-w-[140px]">ส่วนงาน</th>
@@ -1881,7 +1881,7 @@ function _buildAdminDept() {
 function _buildAdminConfig() {
     const pinnedDepts = Array.isArray(_dashConfig.pinnedDepts) ? _dashConfig.pinnedDepts : [];
     return `
-    <div class="card p-5">
+    <div class="ds-section p-5">
         <h3 class="text-sm font-bold text-slate-700 mb-4">เลือกส่วนงานที่แสดงใน Dashboard</h3>
         <div class="grid grid-cols-2 md:grid-cols-3 gap-2 mb-4 max-h-72 overflow-y-auto p-1">
             ${_masterDepts.map(d => `
@@ -1932,7 +1932,7 @@ function _buildAdminEmp() {
             ${_kpiCard(total0, 'แผนกยังไม่ตอบเลย', '#ef4444', `<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/>`, 'red')}
         </div>
 
-        <div class="card p-4 flex items-center gap-3">
+        <div class="ds-filter-bar flex items-center gap-3">
             <svg class="w-4 h-4 text-slate-400 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 4a1 1 0 011-1h16a1 1 0 011 1v2a1 1 0 01-.293.707L13 13.414V19a1 1 0 01-.553.894l-4 2A1 1 0 017 21v-7.586L3.293 6.707A1 1 0 013 6V4z"/>
             </svg>
@@ -1943,9 +1943,9 @@ function _buildAdminEmp() {
             <span class="text-xs text-slate-400 ml-auto">${filtered.length} คน · ${topics.length} หัวข้อ</span>
         </div>
 
-        <div class="card overflow-hidden">
+        <div class="ds-table-wrap">
             <div class="overflow-x-auto">
-                <table class="w-full text-sm">
+                <table class="ds-table text-sm">
                     <thead>
                         <tr class="bg-slate-50 text-xs font-semibold text-slate-500 uppercase tracking-wider text-left">
                             <th class="px-4 py-3">ชื่อ-สกุล</th>

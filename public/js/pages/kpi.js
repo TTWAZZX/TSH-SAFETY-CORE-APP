@@ -306,7 +306,7 @@ function renderKpiDashboard(container, announcement, kpiData, isAdmin) {
 
       <!-- ═══ COMPLIANCE BAR ═══ -->
       ${total > 0 ? `
-      <div class="bg-white rounded-xl border border-slate-100 shadow-sm p-4 mb-6 flex items-center gap-4">
+      <div class="ds-section p-4 mb-6 flex items-center gap-4">
         <div class="flex-shrink-0 text-center w-16">
           <div class="relative w-14 h-14 mx-auto">
             <svg class="w-14 h-14 -rotate-90" viewBox="0 0 56 56">
@@ -345,7 +345,7 @@ function renderKpiDashboard(container, announcement, kpiData, isAdmin) {
       ${kpiData.length > 0 ? (() => {
         const depts = getUniqueDepts(kpiData);
         return `
-      <div class="bg-white rounded-xl border border-slate-100 shadow-sm p-3 mb-5">
+      <div class="ds-filter-bar mb-5">
         <div class="flex flex-wrap gap-2 items-center">
           <div class="relative flex-1 min-w-[150px] max-w-xs">
             <svg class="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-slate-400 pointer-events-none" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/></svg>
@@ -609,9 +609,9 @@ function renderTableView(kpiData, isAdmin) {
     }).join('');
 
     return `
-    <div class="bg-white rounded-xl border border-slate-100 shadow-sm overflow-hidden">
+    <div class="ds-table-wrap">
       <div class="overflow-x-auto">
-        <table class="w-full text-sm">
+        <table class="ds-table text-sm">
           <thead>
             <tr class="bg-slate-50 border-b border-slate-200 text-xs font-bold text-slate-500 uppercase tracking-wide">
               <th class="text-left pl-4 pr-3 py-3 sticky left-0 bg-slate-50 z-10 border-r border-slate-200 min-w-[200px]">ตัวชี้วัด</th>
@@ -869,8 +869,8 @@ function showKpiDrilldown(kpiId) {
       </div>
 
       <!-- Monthly breakdown -->
-      <div class="rounded-xl border border-slate-100 overflow-hidden">
-        <table class="w-full text-sm">
+      <div class="ds-table-wrap">
+        <table class="ds-table text-sm">
           <thead class="bg-slate-50 border-b border-slate-200">
             <tr>
               <th class="text-left px-3 py-2 text-xs font-bold text-slate-500">เดือน</th>

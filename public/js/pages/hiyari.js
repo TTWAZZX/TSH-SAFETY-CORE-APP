@@ -2,7 +2,8 @@
 import { API } from '../api.js';
 import {
     hideLoading, showError, showLoading,
-    openModal, openDetailModal, closeModal, showToast, showConfirmationModal, showDocumentModal, escHtml
+    openModal, openDetailModal, closeModal, showToast, showConfirmationModal, showDocumentModal, escHtml,
+    statusBadge as dsStatusBadge
 } from '../ui.js';
 import { normalizeApiArray, normalizeApiObject } from '../utils/normalize.js';
 import { buildActivityCard } from '../utils/activity-widget.js';
@@ -424,7 +425,7 @@ async function renderDashboard(container) {
             </div>
             <!-- Executive summary -->
             <div id="hiyari-executive-summary">
-                <div class="card p-5 animate-pulse">
+                <div class="ds-section p-5 animate-pulse">
                     <div class="h-4 bg-slate-100 rounded w-40 mb-3"></div>
                     <div class="grid grid-cols-1 md:grid-cols-5 gap-3">
                         ${[1,2,3,4,5].map(() => `<div class="h-16 bg-slate-50 rounded-xl"></div>`).join('')}
@@ -436,21 +437,21 @@ async function renderDashboard(container) {
 
             <!-- KPI row -->
             <div id="kpi-row" class="grid grid-cols-2 lg:grid-cols-4 gap-4">
-                ${[1,2,3,4].map(() => `<div class="card p-4 animate-pulse"><div class="h-8 bg-slate-100 rounded mb-2"></div><div class="h-4 bg-slate-50 rounded w-2/3"></div></div>`).join('')}
+                ${[1,2,3,4].map(() => `<div class="ds-metric-card p-4 animate-pulse"><div class="h-8 bg-slate-100 rounded mb-2"></div><div class="h-4 bg-slate-50 rounded w-2/3"></div></div>`).join('')}
             </div>
             <!-- Stop + Rank row -->
             <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
-                <div class="card p-5">
+                <div class="ds-section p-5">
                     <h3 class="text-sm font-bold text-slate-600 mb-4">สรุปตาม Stop Type</h3>
                     <div class="relative" style="height:180px"><canvas id="chart-stop"></canvas></div>
                 </div>
-                <div class="card p-5">
+                <div class="ds-section p-5">
                     <h3 class="text-sm font-bold text-slate-600 mb-4">สรุปตาม Rank</h3>
                     <div id="rank-summary" class="space-y-3 mt-1"></div>
                 </div>
             </div>
             <!-- STOP x Rank matrix -->
-            <div class="card p-5">
+            <div class="ds-section">
                 <div class="flex flex-col md:flex-row md:items-center md:justify-between gap-2 mb-4">
                     <div>
                         <h3 class="text-sm font-bold text-slate-700">STOP × Rank Matrix</h3>
@@ -462,7 +463,7 @@ async function renderDashboard(container) {
             </div>
             <!-- SLA compliance -->
             <div class="grid grid-cols-1 xl:grid-cols-3 gap-4">
-                <div class="card p-5">
+                <div class="ds-section p-5">
                     <div class="flex items-center justify-between mb-4">
                         <div>
                             <h3 class="text-sm font-bold text-slate-700">SLA Compliance</h3>
@@ -471,7 +472,7 @@ async function renderDashboard(container) {
                     </div>
                     <div id="sla-compliance-gauge"></div>
                 </div>
-                <div class="xl:col-span-2 card p-5">
+                <div class="xl:col-span-2 ds-section p-5">
                     <div class="flex items-center justify-between mb-4">
                         <div>
                             <h3 class="text-sm font-bold text-slate-700">Top Overdue / Near Due</h3>
@@ -486,7 +487,7 @@ async function renderDashboard(container) {
                 </div>
             </div>
             <!-- Heatmap -->
-            <div class="card p-5">
+            <div class="ds-section p-5">
                 <div class="flex flex-col md:flex-row md:items-center md:justify-between gap-2 mb-4">
                     <div>
                         <h3 class="text-sm font-bold text-slate-700">Near-Miss Heatmap</h3>
@@ -504,18 +505,18 @@ async function renderDashboard(container) {
             </div>
             <!-- Charts row -->
             <div class="grid grid-cols-1 lg:grid-cols-3 gap-4">
-                <div class="lg:col-span-2 card p-5">
+                <div class="lg:col-span-2 ds-section p-5">
                     <h3 class="text-sm font-bold text-slate-600 mb-4">แนวโน้มรายงานรายเดือน</h3>
                     <div class="relative" style="height:220px"><canvas id="chart-line"></canvas></div>
                 </div>
-                <div class="card p-5">
+                <div class="ds-section p-5">
                     <h3 class="text-sm font-bold text-slate-600 mb-4">ผลที่อาจเกิดขึ้น</h3>
                     <div class="relative" style="height:220px"><canvas id="chart-pie"></canvas></div>
                 </div>
             </div>
             <!-- Dept summary -->
             <div class="grid grid-cols-1 xl:grid-cols-2 gap-4">
-                <div class="card p-5">
+                <div class="ds-section p-5">
                     <div class="flex items-center justify-between mb-4">
                         <h3 class="text-sm font-bold text-slate-600">สรุปรายแผนก</h3>
                         ${_isAdmin ? `<button id="hiyari-dept-config-btn"
@@ -530,7 +531,7 @@ async function renderDashboard(container) {
                     </div>
                     <div id="dept-rank" class="space-y-2"></div>
                 </div>
-                <div class="card p-5">
+                <div class="ds-section p-5">
                     <div class="flex items-center justify-between mb-4">
                         <div>
                             <h3 class="text-sm font-bold text-slate-700">Department Risk Ranking</h3>
@@ -612,7 +613,7 @@ function renderKPI(kpi) {
     const row = document.getElementById('kpi-row');
     if (!row) return;
     row.innerHTML = cards.map(c => `
-        <div class="card p-5 flex items-center gap-4 cursor-pointer hover:shadow-md hover:-translate-y-0.5 transition-all kpi-clickable"
+        <div class="ds-metric-card p-5 flex items-center gap-4 cursor-pointer hover:shadow-md hover:-translate-y-0.5 transition-all kpi-clickable"
              data-status="${c.status}" title="คลิกเพื่อกรองในประวัติ">
             <div class="w-11 h-11 rounded-xl flex items-center justify-center flex-shrink-0"
                  style="background:${c.color}18; color:${c.color}">
@@ -667,7 +668,7 @@ function renderExecutiveSummary(data, assignmentKpi) {
     ];
 
     el.innerHTML = `
-        <div class="card overflow-hidden border border-emerald-100">
+        <div class="ds-section overflow-hidden border border-emerald-100">
             <div class="flex flex-col xl:flex-row">
                 <div class="xl:w-72 p-5 border-b xl:border-b-0 xl:border-r border-slate-100 bg-slate-50/70">
                     <div class="flex items-center justify-between gap-3">
@@ -763,7 +764,7 @@ function renderStopRankMatrix(reports) {
 
     el.innerHTML = `
         <div class="overflow-x-auto">
-            <table class="w-full text-sm min-w-[720px]">
+            <table class="ds-table text-sm min-w-[720px]">
                 <thead>
                     <tr class="text-left text-xs font-bold text-slate-400 uppercase tracking-wide">
                         <th class="px-3 py-2">Stop Type</th>
@@ -1642,7 +1643,7 @@ function renderSubmitForm(container) {
     <div class="w-full space-y-4">
 
         <!-- ── Progress indicator ── -->
-        <div class="card p-5 md:p-6">
+        <div class="ds-section p-5 md:p-6">
             <div class="flex items-center gap-0">
                 ${stepDefs.map((s, idx) => `
                 <div class="flex items-center ${idx < 2 ? 'flex-1' : ''}">
@@ -1657,7 +1658,7 @@ function renderSubmitForm(container) {
         </div>
 
         <!-- ── Form shell (single <form> wraps all steps so FormData works) ── -->
-        <div class="card overflow-hidden w-full">
+        <div class="ds-section overflow-hidden w-full">
             <div class="h-1.5 w-full" style="background:linear-gradient(90deg,#f97316,#ef4444)"></div>
             <div class="p-5 md:p-8">
             <form id="hiyari-form">
@@ -1985,7 +1986,7 @@ async function renderHistory(container) {
     container.innerHTML = `
         <div class="space-y-4">
             <!-- Filter bar -->
-            <div class="card p-4 space-y-3">
+            <div class="ds-filter-bar space-y-3">
                 <div class="flex flex-wrap gap-2 items-center">
                     ${buildFilterSelect('filter-status', 'สถานะ', [
                         { v:'all', l:'ทุกสถานะ' },
@@ -2027,9 +2028,9 @@ async function renderHistory(container) {
                 </div>
             </div>
             <!-- Table -->
-            <div class="card overflow-hidden">
+            <div class="ds-table-wrap">
                 <div class="overflow-x-auto">
-                    <table class="w-full text-sm">
+                    <table class="ds-table text-sm">
                         <thead>
                             <tr class="bg-slate-50 text-left text-xs font-semibold text-slate-500 uppercase tracking-wider">
                                 <th class="px-4 py-3">วันที่</th>
@@ -2112,13 +2113,11 @@ function renderTable() {
                 ${rankR
                     ? `<span class="px-2 py-0.5 rounded-full text-xs font-semibold ${RANK_BADGE[rankR.rank]}">${rankR.label}</span>`
                     : (r.RiskLevel
-                        ? `<span class="px-2 py-0.5 rounded-full text-xs font-semibold ${RISK_BADGE[r.RiskLevel] || 'bg-slate-100 text-slate-500'}">${RISK_LABEL[r.RiskLevel] || r.RiskLevel}</span>`
+                        ? dsStatusBadge(r.RiskLevel || '-', { label: RISK_LABEL[r.RiskLevel] || r.RiskLevel || '-' })
                         : `<span class="text-xs text-slate-400">-</span>`)}
             </td>
             <td class="px-4 py-3">
-                <span class="px-2 py-0.5 rounded-full text-xs font-semibold ${STATUS_BADGE[r.Status] || 'bg-slate-100 text-slate-500'}">
-                    ${STATUS_LABEL[r.Status] || r.Status || '-'}
-                </span>
+                ${dsStatusBadge(r.Status || '-', { label: STATUS_LABEL[r.Status] || r.Status || '-' })}
                 ${_buildSLABadge(sla)}
             </td>
             <td class="px-4 py-3 text-right whitespace-nowrap">
@@ -2334,7 +2333,7 @@ async function renderManage(container) {
         <div class="space-y-5">
 
             <!-- ── Assignment section ── -->
-            <div class="card p-5">
+            <div class="ds-section p-5">
                 <div class="flex items-center justify-between mb-4">
                     <div>
                         <h3 class="text-sm font-bold text-slate-700">รายการมอบหมาย</h3>
@@ -2351,7 +2350,7 @@ async function renderManage(container) {
                 </div>
                 <div id="assignment-progress"></div>
                 <div class="overflow-x-auto">
-                    <table class="w-full text-sm">
+                    <table class="ds-table text-sm">
                         <thead>
                             <tr class="bg-slate-50 text-left text-xs font-semibold text-slate-500 uppercase tracking-wider">
                                 <th class="px-4 py-3">ชื่อ-นามสกุล</th>
@@ -2374,7 +2373,7 @@ async function renderManage(container) {
             </div>
 
             <!-- ── Forms management section ── -->
-            <div class="card p-5">
+            <div class="ds-section">
                 <div class="flex items-center justify-between mb-4">
                     <div>
                         <h3 class="text-sm font-bold text-slate-700">แบบฟอร์มที่เกี่ยวข้อง</h3>
@@ -2390,7 +2389,7 @@ async function renderManage(container) {
                     </button>
                 </div>
                 <div class="overflow-x-auto">
-                    <table class="w-full text-sm">
+                    <table class="ds-table text-sm">
                         <thead>
                             <tr class="bg-slate-50 text-left text-xs font-semibold text-slate-500 uppercase tracking-wider">
                                 <th class="px-4 py-3">ชื่อแบบฟอร์ม</th>

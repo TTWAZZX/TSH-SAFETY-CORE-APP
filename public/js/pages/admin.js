@@ -1,4 +1,4 @@
-import { showToast, showError, openModal, openDetailModal, closeModal, escHtml } from '../ui.js';
+import { showToast, showError, openModal, openDetailModal, closeModal, escHtml, metricCard, emptyState, statusBadge as dsStatusBadge } from '../ui.js';
 import { API } from '../api.js';
 
 // ─── Button loading helper (disable + spinner, returns original HTML) ──────────
@@ -251,7 +251,7 @@ async function renderReference(container) {
           </div>
 
           <!-- Filter Bar -->
-          <div class="card p-4 flex flex-wrap gap-3 items-center mb-4">
+          <div class="ds-filter-bar flex flex-wrap gap-3 items-center mb-4">
               <div class="relative flex-1 min-w-[200px]">
                   <svg class="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                       <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-4.35-4.35M17 11A6 6 0 115 11a6 6 0 0112 0z"/>
@@ -281,7 +281,7 @@ async function renderReference(container) {
               </button>` : ''}
           </div>
 
-          <div class="card overflow-hidden">
+          <div class="ds-table-wrap">
               <div id="org-table-wrap">
                   <div class="flex items-center justify-center py-16 text-slate-400">
                       <div class="inline-block animate-spin rounded-full h-8 w-8 border-4 border-emerald-500 border-t-transparent"></div>
@@ -449,7 +449,7 @@ function _orgRenderStats() {
     ];
 
     el.innerHTML = cards.map(c => `
-        <div class="bg-white rounded-xl p-4 border border-slate-100 shadow-sm flex items-center gap-3">
+        <div class="ds-metric-card flex items-center gap-3">
             <div class="w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0 ${c.bg}">
                 <svg class="w-5 h-5 ${c.txt}" fill="none" viewBox="0 0 24 24" stroke="currentColor">${c.icon}</svg>
             </div>
@@ -644,7 +644,7 @@ function _orgRenderTable() {
     }).join('');
 
     wrap.innerHTML = `
-    <table class="w-full text-left border-collapse">
+    <table class="ds-table text-left border-collapse">
         <thead>
             <tr class="bg-slate-50 border-b-2 border-slate-200">
                 <th class="px-4 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wide">ชื่อแผนก / Section</th>
@@ -1006,7 +1006,7 @@ async function renderPermissions(container) {
         </div>
 
         <!-- Matrix card -->
-        <div class="card overflow-hidden">
+        <div class="ds-table-wrap">
             <div id="perm-matrix-wrap" class="overflow-x-auto">
                 <div class="flex items-center justify-center py-16">
                     <div class="inline-block animate-spin rounded-full h-8 w-8 border-4 border-emerald-500 border-t-transparent"></div>
@@ -1474,7 +1474,7 @@ async function renderScheduler(container) {
                 </button>
             </div>
         </div>
-        <div class="card overflow-hidden">
+        <div class="ds-section overflow-hidden">
             <div id="pt-schedule-report-wrap">
                 <div class="text-center py-12 text-slate-400 text-sm">
                     <svg class="w-10 h-10 mx-auto mb-3 opacity-30" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/></svg>
@@ -3637,7 +3637,7 @@ async function renderEmployeesTab(container) {
     _empPage = 1; _empSearch = '';
     container.innerHTML = `
     <div class="animate-fade-in space-y-4">
-        <div class="bg-white rounded-xl border border-slate-200 shadow-sm p-4 flex flex-col sm:flex-row gap-3 items-start sm:items-center justify-between">
+        <div class="ds-filter-bar flex flex-col sm:flex-row gap-3 items-start sm:items-center justify-between">
             <div class="flex gap-2 flex-1 w-full sm:max-w-sm">
                 <input type="text" id="emp-search-input" placeholder="ค้นหาชื่อ / รหัส / หน่วยงาน..."
                     class="form-input w-full rounded-lg text-sm border-slate-200"
@@ -3659,7 +3659,7 @@ async function renderEmployeesTab(container) {
             </div>
         </div>
         <div id="emp-quality-strip" class="grid grid-cols-2 lg:grid-cols-5 gap-3"></div>
-        <div class="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
+        <div class="ds-table-wrap">
             <div id="emp-table-wrap">
                 <div class="py-16 text-center text-slate-400 text-sm">กำลังโหลด...</div>
             </div>
@@ -3708,30 +3708,26 @@ function _renderEmpTable() {
         const unitPct = total ? Math.round(unitAssigned / total * 100) : 0;
         qEl.innerHTML = `
         <button type="button" onclick="document.getElementById('emp-search-input')?.focus()"
-            class="text-left rounded-xl border ${missingCore ? 'border-amber-100 bg-amber-50' : 'border-emerald-100 bg-emerald-50'} px-4 py-3 hover:shadow-sm transition-shadow">
-            <p class="text-[10px] font-bold uppercase ${missingCore ? 'text-amber-600' : 'text-emerald-600'}">Data Quality</p>
-            <p class="mt-1 text-sm font-black ${missingCore ? 'text-amber-700' : 'text-emerald-700'}">${missingCore ? 'Review' : 'Ready'}</p>
-            <p class="mt-1 text-[11px] text-slate-500">${missingCore} missing core fields</p>
+            class="text-left ds-metric-card ${missingCore ? 'is-warn' : 'is-good'} hover:shadow-sm transition-shadow">
+            <p class="ds-metric-label">Data Quality</p>
+            <p class="ds-metric-value">${missingCore ? 'Review' : 'Ready'}</p>
+            <p class="ds-metric-hint">${missingCore} missing core fields</p>
         </button>
-        <div class="rounded-xl border border-slate-200 bg-white px-4 py-3">
-            <p class="text-[10px] font-bold uppercase text-slate-500">Employees</p>
-            <p class="mt-1 text-sm font-black text-slate-700">${total.toLocaleString()}</p>
-            <p class="mt-1 text-[11px] text-slate-500">${filtered.length.toLocaleString()} in current view</p>
-        </div>
+        ${metricCard('Employees', total.toLocaleString(), `${filtered.length.toLocaleString()} in current view`)}
         <button type="button" onclick="window._adminTab('reference')"
-            class="text-left rounded-xl border ${missingDept ? 'border-amber-100 bg-amber-50' : 'border-slate-200 bg-white'} px-4 py-3 hover:shadow-sm transition-shadow">
+            class="text-left ds-metric-card ${missingDept ? 'is-warn' : ''} hover:shadow-sm transition-shadow">
             <p class="text-[10px] font-bold uppercase ${missingDept ? 'text-amber-600' : 'text-slate-500'}">Department Coverage</p>
             <p class="mt-1 text-sm font-black ${missingDept ? 'text-amber-700' : 'text-slate-700'}">${deptCount}</p>
             <p class="mt-1 text-[11px] text-slate-500">${missingDept} missing dept</p>
         </button>
         <button type="button" onclick="window._adminTab('reference')"
-            class="text-left rounded-xl border ${missingPosition ? 'border-amber-100 bg-amber-50' : 'border-slate-200 bg-white'} px-4 py-3 hover:shadow-sm transition-shadow">
+            class="text-left ds-metric-card ${missingPosition ? 'is-warn' : ''} hover:shadow-sm transition-shadow">
             <p class="text-[10px] font-bold uppercase ${missingPosition ? 'text-amber-600' : 'text-slate-500'}">Position Coverage</p>
             <p class="mt-1 text-sm font-black ${missingPosition ? 'text-amber-700' : 'text-slate-700'}">${missingPosition} gap</p>
             <p class="mt-1 text-[11px] text-slate-500">${unitPct}% unit assigned</p>
         </button>
         <button type="button" onclick="window._adminTab('permissions')"
-            class="text-left rounded-xl border ${adminCount > 1 ? 'border-red-100 bg-red-50' : 'border-slate-200 bg-white'} px-4 py-3 hover:shadow-sm transition-shadow">
+            class="text-left ds-metric-card ${adminCount > 1 ? 'is-risk' : ''} hover:shadow-sm transition-shadow">
             <p class="text-[10px] font-bold uppercase ${adminCount > 1 ? 'text-red-600' : 'text-slate-500'}">Admin Accounts</p>
             <p class="mt-1 text-sm font-black ${adminCount > 1 ? 'text-red-700' : 'text-slate-700'}">${adminCount}</p>
             <p class="mt-1 text-[11px] text-slate-500">Review privilege scope</p>
@@ -3750,12 +3746,13 @@ function _renderEmpTable() {
     }
 
     const roleBadge = (role) => {
-        const map = { Admin:'bg-red-100 text-red-600', Viewer:'bg-sky-100 text-sky-600' };
-        return `<span class="text-[10px] font-bold px-2 py-0.5 rounded-full ${map[role]||'bg-slate-100 text-slate-500'}">${role||'User'}</span>`;
+        const label = role || 'User';
+        const className = label === 'Admin' ? 'is-failed' : label === 'Viewer' ? 'is-info' : '';
+        return dsStatusBadge(label, { className });
     };
 
     wrap.innerHTML = `
-    <table class="w-full text-sm">
+    <table class="ds-table text-sm">
         <thead>
             <tr class="bg-slate-50 border-b border-slate-200 text-left">
                 <th class="px-4 py-3 text-[11px] font-bold text-slate-500 uppercase">รหัส</th>
@@ -4183,7 +4180,7 @@ async function renderSystemHealth(container) {
                 </div>`;
             }).join('');
             return `
-            <div class="bg-white rounded-xl border border-slate-200 border-l-4 ${colorClass[color]||colorClass.slate} shadow-sm p-4">
+            <div class="ds-section border-l-4 ${colorClass[color]||colorClass.slate}">
                 <div class="flex items-center gap-2 mb-3">
                     <svg class="w-4 h-4 text-slate-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">${icon}</svg>
                     <h3 class="font-bold text-slate-700 text-sm">${title}</h3>
@@ -4219,32 +4216,16 @@ async function renderSystemHealth(container) {
                 </div>`).join('')
             : `<div class="text-xs text-emerald-700 bg-emerald-50 border border-emerald-100 rounded-lg p-3">No major readiness signals detected.</div>`;
 
-        const healthMetric = (label, value, hint, tone = 'slate') => {
-            const toneMap = {
-                emerald: 'border-emerald-200 bg-emerald-50 text-emerald-700',
-                amber: 'border-amber-200 bg-amber-50 text-amber-700',
-                rose: 'border-rose-200 bg-rose-50 text-rose-700',
-                sky: 'border-sky-200 bg-sky-50 text-sky-700',
-                slate: 'border-slate-200 bg-white text-slate-700',
-            };
-            return `
-            <div class="rounded-xl border ${toneMap[tone] || toneMap.slate} p-4 shadow-sm">
-                <p class="text-[11px] font-bold uppercase opacity-70">${label}</p>
-                <p class="text-2xl font-black mt-1">${value ?? '-'}</p>
-                <p class="text-[11px] opacity-70 mt-1">${hint}</p>
-            </div>`;
-        };
-
         container.innerHTML = `
         <div class="animate-fade-in space-y-6">
             <div class="grid grid-cols-1 xl:grid-cols-3 gap-4">
                 <div class="xl:col-span-2 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-                    ${healthMetric('Pre-production Readiness', `${readinessScore}%`, readiness.status || 'Unknown', readinessScore >= 90 ? 'emerald' : readinessScore >= 70 ? 'amber' : 'rose')}
-                    ${healthMetric('Failed API 24h', audit.failed24h ?? '-', 'From Admin AuditLogs', (audit.failed24h || 0) > 0 ? 'rose' : 'emerald')}
-                    ${healthMetric('Audit Activity 24h', audit.last24h ?? '-', 'Signed-in mutations', 'sky')}
-                    ${healthMetric('Stale Work', staleWork, '4M + Hiyari alerts', staleWork > 0 ? 'amber' : 'emerald')}
+                    ${metricCard('Pre-production Readiness', `${readinessScore}%`, readiness.status || 'Unknown', readinessScore >= 90 ? 'good' : readinessScore >= 70 ? 'warn' : 'risk')}
+                    ${metricCard('Failed API 24h', audit.failed24h ?? '-', 'From Admin AuditLogs', (audit.failed24h || 0) > 0 ? 'risk' : 'good')}
+                    ${metricCard('Audit Activity 24h', audit.last24h ?? '-', 'Signed-in mutations', 'info')}
+                    ${metricCard('Stale Work', staleWork, '4M + Hiyari alerts', staleWork > 0 ? 'warn' : 'good')}
                 </div>
-                <div class="bg-white rounded-xl border border-slate-200 shadow-sm p-4">
+                <div class="ds-section">
                     <div class="flex items-center justify-between gap-3 mb-2">
                         <h3 class="font-bold text-slate-700 text-sm">Readiness Signals</h3>
                         <span class="text-[11px] font-bold px-2 py-0.5 rounded-full border ${readinessTone}">${escHtml(readiness.status || 'Unknown')}</span>
@@ -4269,7 +4250,7 @@ async function renderSystemHealth(container) {
             </div>
 
             <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
-                <div class="bg-white rounded-xl border border-amber-200 shadow-sm p-5">
+                <div class="ds-section border-amber-200">
                     <h3 class="font-bold text-slate-700 text-sm mb-3 flex items-center gap-2">
                         <svg class="w-4 h-4 text-amber-500" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
                         Change Notice ค้างนาน (&gt;30 วัน)
@@ -4279,7 +4260,7 @@ async function renderSystemHealth(container) {
                         'ไม่มีรายการค้าง — '
                     )}
                 </div>
-                <div class="bg-white rounded-xl border border-rose-200 shadow-sm p-5">
+                <div class="ds-section border-rose-200">
                     <h3 class="font-bold text-slate-700 text-sm mb-3 flex items-center gap-2">
                         <svg class="w-4 h-4 text-rose-500" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/></svg>
                         Hiyari ค้างนาน (&gt;14 วัน)
@@ -4351,7 +4332,7 @@ async function loadAuditLogLegacy() {
             wrap.innerHTML = `<div class="py-16 text-center text-slate-400 text-sm">ยังไม่มีบันทึกกิจกรรม</div>`;
         } else {
             wrap.innerHTML = `
-            <table class="w-full text-sm">
+            <table class="ds-table text-sm">
                 <thead>
                     <tr class="bg-slate-50 border-b border-slate-200 text-left">
                         <th class="px-4 py-3 text-[11px] font-bold text-slate-500 uppercase">เวลา</th>
@@ -4398,7 +4379,7 @@ async function renderAuditLog(container) {
     _auditPage = 1;
     container.innerHTML = `
     <div class="animate-fade-in space-y-4">
-        <div class="bg-white rounded-xl border border-slate-200 shadow-sm p-4">
+        <div class="ds-filter-bar">
             <div class="grid grid-cols-1 md:grid-cols-6 gap-3 items-end">
                 <div class="md:col-span-2">
                     <label class="block text-[11px] font-bold text-slate-500 uppercase mb-1">Search</label>
@@ -4432,9 +4413,9 @@ async function renderAuditLog(container) {
             </div>
         </div>
         <div id="audit-summary-strip" class="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-5 gap-3">
-            <div class="rounded-xl border border-slate-200 bg-white p-4 shadow-sm text-sm text-slate-400">Loading audit summary...</div>
+            <div class="ds-metric-card text-sm text-slate-400">Loading audit summary...</div>
         </div>
-        <div class="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
+        <div class="ds-table-wrap">
             <div id="audit-table-wrap"><div class="py-16 text-center text-slate-400 text-sm">Loading...</div></div>
         </div>
         <div id="audit-pagination" class="flex justify-between items-center"></div>
@@ -4546,27 +4527,12 @@ function renderAuditSummary(rows = [], total = 0) {
     const latest = rows[0]?.ActionTime
         ? new Date(rows[0].ActionTime).toLocaleString('th-TH', { dateStyle: 'short', timeStyle: 'short' })
         : '-';
-    const card = (label, value, hint, tone = 'slate') => {
-        const toneMap = {
-            emerald: 'border-emerald-200 bg-emerald-50 text-emerald-700',
-            amber: 'border-amber-200 bg-amber-50 text-amber-700',
-            rose: 'border-rose-200 bg-rose-50 text-rose-700',
-            sky: 'border-sky-200 bg-sky-50 text-sky-700',
-            slate: 'border-slate-200 bg-white text-slate-700',
-        };
-        return `
-        <div class="rounded-xl border ${toneMap[tone] || toneMap.slate} p-4 shadow-sm">
-            <p class="text-[11px] font-bold uppercase opacity-70">${label}</p>
-            <p class="text-2xl font-black mt-1">${value}</p>
-            <p class="text-[11px] opacity-70 mt-1">${hint}</p>
-        </div>`;
-    };
     el.innerHTML = `
-        ${card('Matched Records', total, 'Current filters', 'slate')}
-        ${card('Failures Shown', failures, 'On this page', failures ? 'rose' : 'emerald')}
-        ${card('Modules Touched', modules, 'On this page', 'sky')}
-        ${card('Active Users', users, 'On this page', 'amber')}
-        ${card('Latest Activity', escHtml(latest), `${mutations} mutations shown`, 'slate')}
+        ${metricCard('Matched Records', total, 'Current filters')}
+        ${metricCard('Failures Shown', failures, 'On this page', failures ? 'risk' : 'good')}
+        ${metricCard('Modules Touched', modules, 'On this page', 'info')}
+        ${metricCard('Active Users', users, 'On this page', 'warn')}
+        ${metricCard('Latest Activity', latest, `${mutations} mutations shown`)}
     `;
 }
 
@@ -4601,11 +4567,11 @@ async function loadAuditLog() {
         renderAuditSummary(rows, _auditTotal);
 
         if (rows.length === 0) {
-            wrap.innerHTML = `<div class="py-16 text-center text-slate-400 text-sm">No audit activity found for these filters.</div>`;
+            wrap.innerHTML = emptyState('No audit activity found', 'Try changing the module, action, date, or search filters.');
         } else {
             wrap.innerHTML = `
             <div class="overflow-x-auto">
-            <table class="w-full min-w-[980px] text-sm">
+            <table class="ds-table min-w-[980px]">
                 <thead>
                     <tr class="bg-slate-50 border-b border-slate-200 text-left">
                         <th class="px-4 py-3 text-[11px] font-bold text-slate-500 uppercase">Time</th>
@@ -4630,13 +4596,13 @@ async function loadAuditLog() {
                         </td>
                         <td class="px-4 py-3 text-xs text-slate-600 font-mono">${escHtml(r.Module||'-')}</td>
                         <td class="px-4 py-3">
-                            <span class="text-[10px] font-bold px-2 py-0.5 rounded-full ${auditActionClass(r.Action||'')}">${escHtml(r.Action||'-')}</span>
+                            ${dsStatusBadge(r.Action || '-', { className: auditActionClass(r.Action || '') })}
                         </td>
                         <td class="px-4 py-3 text-xs text-slate-500">
                             <div class="font-mono">${escHtml(r.TargetType||'-')}${r.TargetID?` #${escHtml(r.TargetID)}`:''}</div>
                             <div class="text-[11px] text-slate-400 truncate max-w-[220px]">${escHtml(r.Path||'')}</div>
                         </td>
-                        <td class="px-4 py-3 text-xs font-mono ${Number(r.StatusCode) >= 400 ? 'text-rose-600' : 'text-emerald-600'}">${r.StatusCode||'-'}</td>
+                        <td class="px-4 py-3 text-xs font-mono">${dsStatusBadge(Number(r.StatusCode) >= 400 ? 'Failed' : 'Approved', { label: r.StatusCode || 'OK' })}</td>
                         <td class="px-4 py-3 text-xs text-slate-600 max-w-xs truncate" title="${escHtml(r.Detail||'')}">${escHtml(r.Detail||'-')}</td>
                         <td class="px-4 py-3 text-right">
                             <button onclick="window._auditShowDetail&&window._auditShowDetail('${escHtml(r.id)}')" class="px-2.5 py-1 rounded-lg text-xs font-bold text-slate-600 bg-slate-100 hover:bg-slate-200 transition-colors">Detail</button>
@@ -4759,7 +4725,7 @@ function _renderAtTemplate(area) {
     area.innerHTML = `
     <div class="space-y-5">
         <!-- Position selector -->
-        <div class="card p-4 flex flex-wrap gap-3 items-center">
+        <div class="ds-filter-bar flex flex-wrap gap-3 items-center">
             <label class="text-sm font-semibold text-slate-700">ตำแหน่ง:</label>
             <select id="at-pos-sel" onchange="window._atLoadTemplate(this.value)"
                 class="flex-1 min-w-[220px] px-3 py-2 text-sm border border-slate-200 rounded-lg outline-none focus:border-indigo-400 focus:ring-2 focus:ring-indigo-100">
@@ -4870,12 +4836,12 @@ function _atTemplateGridHtml(pos, rowMap) {
     }).join('');
 
     return `
-    <div class="card overflow-hidden">
+    <div class="ds-table-wrap">
         <div class="px-4 py-3 border-b border-slate-100 flex items-center justify-between">
             <p class="text-sm font-bold text-slate-700">เทมเพลตสำหรับตำแหน่ง: <span class="text-indigo-600">${pos}</span></p>
             <p class="text-xs text-slate-400">วัดผลรายปี</p>
         </div>
-        <table class="w-full text-left">
+        <table class="ds-table text-left">
             <thead class="bg-slate-50 border-b border-slate-100">
                 <tr>
                     <th class="px-4 py-3 text-xs font-bold text-slate-500 uppercase tracking-wide">กิจกรรม</th>
@@ -4943,7 +4909,7 @@ async function _renderAtPerson(area) {
     area.innerHTML = `
     <div class="space-y-5">
         <!-- Employee search -->
-        <div class="card p-4 space-y-3">
+        <div class="ds-filter-bar space-y-3">
             <p class="text-sm font-semibold text-slate-700">ค้นหาพนักงาน</p>
             <div class="flex gap-3">
                 <div class="relative flex-1">
@@ -5096,7 +5062,7 @@ function _renderAtPersonGrid(grid) {
     }).join('');
 
     grid.innerHTML = `
-    <div class="card overflow-hidden">
+    <div class="ds-table-wrap">
         <div class="px-4 py-3 border-b border-slate-100 flex items-center justify-between flex-wrap gap-2">
             <div>
                 <p class="text-sm font-bold text-slate-700">${_atSelEmp.Name || _atSelEmp.EmployeeID}</p>
@@ -5104,7 +5070,7 @@ function _renderAtPersonGrid(grid) {
             </div>
             <p class="text-xs text-slate-400">วัดผลรายปี · override มีลำดับสูงกว่าเทมเพลต</p>
         </div>
-        <table class="w-full text-left">
+        <table class="ds-table text-left">
             <thead class="bg-slate-50 border-b border-slate-100">
                 <tr>
                     <th class="px-4 py-3 text-xs font-bold text-slate-500 uppercase tracking-wide">กิจกรรม</th>

@@ -3,7 +3,8 @@
 import { API } from '../api.js';
 import {
     hideLoading, showError, showLoading,
-    openModal, openDetailModal, closeModal, showToast, showConfirmationModal, showDocumentModal, escHtml
+    openModal, openDetailModal, closeModal, showToast, showConfirmationModal, showDocumentModal, escHtml,
+    statusBadge as dsStatusBadge
 } from '../ui.js';
 import { normalizeApiArray, normalizeApiObject } from '../utils/normalize.js';
 
@@ -231,7 +232,7 @@ async function renderDashboard(container) {
             </div>
             <div id="fourm-dash-inner" class="space-y-5">
                 <div class="grid grid-cols-2 lg:grid-cols-4 gap-4">
-                    ${Array(4).fill(0).map(() => `<div class="card p-4 animate-pulse"><div class="h-8 bg-slate-100 rounded mb-2"></div><div class="h-4 bg-slate-50 rounded w-2/3"></div></div>`).join('')}
+                    ${Array(4).fill(0).map(() => `<div class="ds-metric-card p-4 animate-pulse"><div class="h-8 bg-slate-100 rounded mb-2"></div><div class="h-4 bg-slate-50 rounded w-2/3"></div></div>`).join('')}
                 </div>
             </div>
         </div>`;
@@ -269,17 +270,17 @@ async function _renderDashInner() {
             ${_buildSLAOverdueSection(kpi, closureRate, overdueList)}
 
             <div class="grid grid-cols-1 lg:grid-cols-3 gap-4">
-                <div class="lg:col-span-2 card p-5">
+                <div class="lg:col-span-2 ds-section p-5">
                     <h3 class="text-sm font-bold text-slate-600 mb-4">แนวโน้ม Change Notice รายเดือน</h3>
                     <div style="height:220px"><canvas id="fourm-chart-line"></canvas></div>
                 </div>
-                <div class="card p-5">
+                <div class="ds-section p-5">
                     <h3 class="text-sm font-bold text-slate-600 mb-4">สัดส่วน Change Type</h3>
                     <div style="height:220px"><canvas id="fourm-chart-pie"></canvas></div>
                 </div>
             </div>
 
-            <div class="card p-5">
+            <div class="ds-section p-5">
                 <h3 class="text-sm font-bold text-slate-600 mb-4">Change Notice แยกตามแผนก (Top 10)</h3>
                 <div style="height:220px"><canvas id="fourm-chart-bar"></canvas></div>
             </div>
@@ -331,7 +332,7 @@ function _buildManSummary(rows) {
     const passRate  = totalAtt > 0 ? Math.round(totalPass / totalAtt * 100) : 0;
     const rateColor = passRate>=80 ? '#059669' : passRate>=60 ? '#d97706' : '#ef4444';
     return `
-    <div class="card overflow-hidden">
+    <div class="ds-table-wrap">
         <div class="px-5 py-3.5 border-b border-slate-100 flex items-center justify-between">
             <div class="flex items-center gap-2">
                 <svg class="w-4 h-4 text-indigo-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -345,7 +346,7 @@ function _buildManSummary(rows) {
             </div>
         </div>
         <div class="overflow-x-auto">
-            <table class="w-full text-xs">
+            <table class="ds-table text-xs">
                 <thead>
                     <tr class="bg-slate-50 text-left text-[11px] font-semibold text-slate-500 uppercase tracking-wider">
                         <th class="px-4 py-2.5">แผนก</th>
@@ -418,7 +419,7 @@ function _buildKpiCards(kpi, overdue, closureRate) {
           filterStatus:'Closed', sub: closureRate > 0 ? `${closureRate}% closure rate` : '' },
     ];
     return cards.map(c => `
-        <button class="card p-5 flex items-center gap-4 text-left w-full hover:shadow-md transition-shadow group fourm-kpi-nav ${c.highlight ? 'ring-2 ring-amber-300' : ''}"
+        <button class="ds-metric-card flex items-center gap-4 text-left w-full hover:shadow-md transition-shadow group fourm-kpi-nav ${c.highlight ? 'ring-2 ring-amber-300 is-warn' : ''}"
                 data-filter-status="${c.filterStatus}">
             <div class="w-11 h-11 rounded-xl flex items-center justify-center flex-shrink-0 transition-transform group-hover:scale-105"
                  style="background:${c.color}18;color:${c.color}">
@@ -436,7 +437,7 @@ function _buildDeptMatrix(byDeptType) {
     const depts = [...new Set(byDeptType.map(r => r.Department))].slice(0, 10);
     if (!depts.length) return '';
     return `
-    <div class="card overflow-hidden">
+    <div class="ds-table-wrap">
         <div class="px-5 py-3.5 border-b border-slate-100 flex items-center gap-2">
             <svg class="w-4 h-4 text-indigo-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 10h18M3 14h18M10 3v18M14 3v18M3 3h18v18H3z"/>
@@ -444,7 +445,7 @@ function _buildDeptMatrix(byDeptType) {
             <h3 class="text-sm font-bold text-slate-700">แผนก × Change Type</h3>
         </div>
         <div class="overflow-x-auto">
-            <table class="w-full text-xs">
+            <table class="ds-table text-xs">
                 <thead>
                     <tr class="bg-slate-50">
                         <th class="px-4 py-2.5 text-left font-semibold text-slate-500 uppercase tracking-wider">แผนก</th>
@@ -498,7 +499,7 @@ function _buildSLAOverdueSection(kpi, closureRate, overdueList) {
 
     return `
     <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
-        <div class="card p-5">
+        <div class="ds-section">
             <h3 class="text-sm font-bold text-slate-600 mb-4">ภาพรวมการดำเนินการ</h3>
             <div class="flex items-center gap-6">
                 <div class="relative flex-shrink-0">
@@ -533,7 +534,7 @@ function _buildSLAOverdueSection(kpi, closureRate, overdueList) {
             </div>
         </div>
 
-        <div class="card overflow-hidden">
+        <div class="ds-section overflow-hidden">
             <div class="px-5 py-3.5 border-b border-slate-100 flex items-center gap-2">
                 <svg class="w-4 h-4 text-red-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"/>
@@ -559,7 +560,7 @@ function _buildSLAOverdueSection(kpi, closureRate, overdueList) {
 
 function _buildQuickAccess() {
     return `
-    <div class="card overflow-hidden">
+    <div class="ds-section overflow-hidden">
         <div class="px-5 py-3.5 border-b border-slate-100 flex items-center gap-2">
             <span class="w-7 h-7 rounded-lg flex items-center justify-center flex-shrink-0" style="background:linear-gradient(135deg,#6366f1,#0284c7)">
                 <svg class="w-4 h-4 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -677,20 +678,20 @@ async function renderNotices(container) {
     container.innerHTML = `
         <div class="space-y-4">
             <div class="grid grid-cols-1 md:grid-cols-3 gap-3">
-                <button data-notice-focus="Open" class="text-left rounded-xl border border-sky-100 bg-sky-50 px-4 py-3 hover:shadow-sm transition-all">
+                <button data-notice-focus="Open" class="text-left ds-metric-card is-info hover:shadow-sm transition-all">
                     <p class="text-[11px] font-bold uppercase text-sky-600">Active Work</p>
                     <p class="text-sm font-black text-sky-800 mt-1">Open Change Notice</p>
                 </button>
-                <button data-notice-focus="Pending" class="text-left rounded-xl border border-amber-100 bg-amber-50 px-4 py-3 hover:shadow-sm transition-all">
+                <button data-notice-focus="Pending" class="text-left ds-metric-card is-warn hover:shadow-sm transition-all">
                     <p class="text-[11px] font-bold uppercase text-amber-600">Review Queue</p>
                     <p class="text-sm font-black text-amber-800 mt-1">Pending Follow-up</p>
                 </button>
-                <button data-notice-focus="overdue" class="text-left rounded-xl border border-rose-100 bg-rose-50 px-4 py-3 hover:shadow-sm transition-all">
+                <button data-notice-focus="overdue" class="text-left ds-metric-card is-risk hover:shadow-sm transition-all">
                     <p class="text-[11px] font-bold uppercase text-rose-600">Risk Watch</p>
                     <p class="text-sm font-black text-rose-800 mt-1">Overdue Notice</p>
                 </button>
             </div>
-            <div class="card p-4">
+            <div class="ds-filter-bar">
                 <div class="flex flex-wrap gap-2.5 items-center">
                     <select id="notice-filter-year" class="form-input py-1.5 text-sm w-24">${yearOpts}</select>
                     <select id="notice-filter-status" class="form-input py-1.5 text-sm">
@@ -732,9 +733,9 @@ async function renderNotices(container) {
                 </div>
             </div>
 
-            <div class="card overflow-hidden">
+            <div class="ds-table-wrap">
                 <div class="overflow-x-auto">
-                    <table class="w-full text-sm">
+                    <table class="ds-table text-sm">
                         <thead>
                             <tr class="bg-slate-50 text-left text-xs font-semibold text-slate-500 uppercase tracking-wider">
                                 <th class="px-4 py-3">Notice No</th>
@@ -796,7 +797,7 @@ async function fetchAndRenderNotices() {
                 <td class="px-4 py-3">
                     <div class="flex items-center gap-1.5 flex-wrap">
                         <span class="font-mono text-xs font-semibold text-indigo-700 bg-indigo-50 px-2 py-0.5 rounded">${escHtml(r.NoticeNo||'-')}</span>
-                        ${isOverdue ? `<span class="text-[10px] font-bold text-red-600 bg-red-50 px-1.5 py-0.5 rounded">ค้าง ${daysOld - OVERDUE_DAYS} วัน</span>` : ''}
+                        ${isOverdue ? dsStatusBadge('Overdue', { label: `ค้าง ${daysOld - OVERDUE_DAYS} วัน` }) : ''}
                     </div>
                 </td>
                 <td class="px-4 py-3 text-slate-600 text-xs whitespace-nowrap">${reqDate}</td>
@@ -812,10 +813,7 @@ async function fetchAndRenderNotices() {
                 </td>
                 <td class="px-4 py-3 text-slate-600 text-xs whitespace-nowrap">${escHtml(r.ResponsiblePerson||'-')}</td>
                 <td class="px-4 py-3">
-                    <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-semibold" style="background:${sm.bg};color:${sm.text}">
-                        <span class="w-1.5 h-1.5 rounded-full inline-block" style="background:${sm.text}"></span>
-                        ${sm.label}
-                    </span>
+                    ${dsStatusBadge(r.Status || '-', { label: sm.label })}
                 </td>
                 <td class="px-4 py-3 text-slate-600 text-xs whitespace-nowrap">${closeDate}</td>
                 <td class="px-4 py-3 text-right">
@@ -1226,7 +1224,7 @@ async function renderMan(container) {
     const yearOpts = [0,1,2].map(i => { const y = new Date().getFullYear()-i; return `<option value="${y}" ${y===_manFilter.year?'selected':''}>${y}</option>`; }).join('');
     container.innerHTML = `
         <div class="space-y-4">
-            <div class="flex flex-wrap gap-3 items-center justify-between">
+            <div class="ds-filter-bar flex flex-wrap gap-3 items-center justify-between">
                 <div class="flex items-center gap-2">
                     <select id="man-filter-year" class="form-input py-1.5 text-sm w-24">${yearOpts}</select>
                     <div class="relative w-64">
@@ -1250,7 +1248,7 @@ async function renderMan(container) {
 
             <div id="man-kpi-strip" class="grid grid-cols-2 lg:grid-cols-4 gap-4">
                 ${Array(4).fill(0).map(() => `
-                <div class="bg-white rounded-xl p-4 border border-slate-100 shadow-sm flex items-center gap-3 animate-pulse">
+                <div class="ds-metric-card flex items-center gap-3 animate-pulse">
                     <div class="w-10 h-10 rounded-xl bg-slate-100 flex-shrink-0"></div>
                     <div class="flex-1">
                         <div class="h-7 bg-slate-100 rounded mb-2 w-14"></div>
@@ -1260,19 +1258,19 @@ async function renderMan(container) {
             </div>
 
             <div id="man-chart-row" class="grid grid-cols-1 lg:grid-cols-3 gap-4" style="display:none">
-                <div class="card p-5">
+                <div class="ds-section">
                     <h3 class="text-sm font-bold text-slate-600 mb-3">สัดส่วนผลสอบรวม</h3>
                     <div style="height:210px;position:relative"><canvas id="fourm-chart-man-donut"></canvas></div>
                 </div>
-                <div class="card p-5 lg:col-span-2">
+                <div class="ds-section lg:col-span-2">
                     <h3 class="text-sm font-bold text-slate-600 mb-3">Pass Rate รายแผนก</h3>
                     <div id="man-chart-inner"><canvas id="fourm-chart-man"></canvas></div>
                 </div>
             </div>
 
-            <div class="card overflow-hidden">
+            <div class="ds-table-wrap">
                 <div class="overflow-x-auto">
-                    <table class="w-full text-sm">
+                    <table class="ds-table text-sm">
                         <thead>
                             <tr class="bg-slate-50 text-left text-xs font-semibold text-slate-500 uppercase tracking-wider">
                                 <th class="px-4 py-3">แผนก</th>
@@ -1314,8 +1312,6 @@ async function fetchAndRenderMan() {
             return;
         }
 
-        const MAN_STATUS_BADGE = { Pass:'bg-emerald-100 text-emerald-700', Fail:'bg-red-100 text-red-700', Pending:'bg-amber-100 text-amber-700' };
-
         tbody.innerHTML = rows.map(r => {
             const rate = r.TotalAttendance > 0 ? Math.round((r.Pass / r.TotalAttendance) * 100) : 0;
             const date = r.ExamDate ? new Date(r.ExamDate).toLocaleDateString('th-TH', { day:'numeric', month:'short', year:'numeric' }) : '-';
@@ -1335,7 +1331,7 @@ async function fetchAndRenderMan() {
                     </div>
                 </td>
                 <td class="px-4 py-3">
-                    <span class="px-2 py-0.5 rounded-full text-xs font-semibold ${MAN_STATUS_BADGE[r.Status]||'bg-slate-100 text-slate-500'}">${r.Status||'-'}</span>
+                    ${dsStatusBadge(r.Status || '-')}
                 </td>
                 <td class="px-4 py-3 text-slate-600 text-xs whitespace-nowrap">${date}</td>
                 ${_isAdmin ? `
@@ -1370,7 +1366,7 @@ async function fetchAndRenderMan() {
                   icon:`<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"/>` },
             ];
             kpiStrip.innerHTML = KPI_CARDS.map(c => `
-                <div class="bg-white rounded-xl p-4 border border-slate-100 shadow-sm flex items-center gap-3">
+                <div class="ds-metric-card flex items-center gap-3">
                     <div class="w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0" style="background:${c.color}18;color:${c.color}">
                         <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">${c.icon}</svg>
                     </div>

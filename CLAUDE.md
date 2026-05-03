@@ -853,6 +853,55 @@ Navigation: `#employee` hash redirects → `#admin` + auto-switches to employees
 - `backend/routes/admin.js` — `GET /api/admin/system-health` now returns `readiness` and `audit` objects derived from module table availability, stale work queues, and Admin Audit Log activity.
 - `public/js/pages/admin.js` — Audit Log now includes a summary strip for matched records, failures on current page, modules touched, active users, latest activity, and mutation count before the detailed table.
 
+### Phase A UX Consistency Foundation
+
+Phase A starts the enterprise design-system layer without breaking existing module screens.
+
+- `public/style.css` now defines additive primitives: `ds-surface`, `ds-section`, `ds-filter-bar`, `ds-metric-card`, `ds-table-wrap`, `ds-table`, `ds-badge`, and `ds-empty-state`.
+- `public/js/ui.js` exports reusable helpers: `statusTone()`, `statusBadge()`, `metricCard()`, and `emptyState()`.
+- `public/js/pages/admin.js` uses the new primitives in Audit Log, Employee Master, Reference Master, and System Health as the reference implementation for filter bar, summary metrics, empty state, table, and status badges.
+- `public/js/pages/fourm.js` now uses shared wrappers for dashboard cards, Change Notice filters/table, Man Record filters/table, status badges, and section cards.
+- `public/js/pages/patrol.js` now uses shared table wrappers for the Safety Patrol issue register; filter scroll targets must support `.closest('.ds-table-wrap, .bg-white')` during the gradual migration.
+- `public/js/pages/hiyari.js`, `public/js/pages/ky.js`, and `public/js/pages/yokoten.js` started Phase A migration on high-traffic history/topic/admin tables and filters. Keep localized display labels separate from canonical status values when using `statusBadge(status, { label })`.
+- `public/js/pages/training.js`, `public/js/pages/ojt.js`, and `public/js/pages/search.js` now use shared filter, section, metric, table, and status primitives on key records/compliance/search/profile surfaces.
+- `public/js/pages/contractor.js`, `public/js/pages/accident.js`, `public/js/pages/machine-safety.js`, `public/js/pages/committee.js`, and `public/js/pages/safety-culture.js` started Phase A migration on key filter bars, summary metrics, report/list tables, and high-traffic section wrappers.
+- Second pass began on `public/js/pages/dashboard.js`, `public/js/pages/kpi.js`, `public/js/pages/patrol.js`, and deeper Accident analytics/dashboard surfaces to replace legacy wrappers with shared sections, filter bars, and tables.
+- Deep workflow pass continued on Hiyari submit wizard, KY manage/config/forms, Yokoten admin/employee completion surfaces, 4M dashboard chart/table sections, and Policy metric/current-policy surfaces.
+- Latest lower-traffic pass moved Safety Culture PPE history/work-type/violation surfaces, KPI data tables, and Hiyari/KY/Yokoten dashboard card shells onto the shared primitives.
+- Follow-up Phase A pass standardized Safety Culture skeleton/principle cards, KPI drilldown tables, and additional Hiyari/KY/Yokoten dashboard/executive-summary shells.
+- Final Phase A sweep completed the remaining high-signal legacy card/table shells across Contractor, Policy, Admin Activity Target, Hiyari/KY/Yokoten management surfaces, 4M skeletons, and Safety Culture dashboard/empty/filter states. Remaining custom admin matrix/rotation tables intentionally keep their specialized layout classes.
+- `statusBadge()` chooses tone from the canonical `status` argument, not the localized label. Current tone map includes `Reviewed`, `Temporary`, OJT terms `Valid/Due Soon/No Data`, and risk terms `Low/Medium/High/Critical`.
+- Existing `.btn`, `.form-input`, `.form-select`, `.status-badge`, and legacy Tailwind-heavy screens remain supported while modules are migrated gradually.
+
+Recommended migration order after Phase A:
+
+1. Start Phase B with visual QA on desktop/tablet/mobile for the highest-use workflows: Safety Patrol, 4M, Hiyari, KY, Yokoten, Safety Culture, Training/OJT, and Person Search.
+2. Then polish workflow-specific drawers/modals where screenshots show spacing or overflow issues.
+
+### Enterprise UX Roadmap Status
+
+Current roadmap after Phase A completion:
+
+1. Phase 1: UX Foundation / จุดโฟกัสงานสำคัญ
+   - Status: completed for Dashboard, Patrol, 4M, Person Search, shared detail modal, and Audit detail.
+   - Follow-up: visual QA only; avoid changing working business logic unless QA finds a real issue.
+
+2. Phase 2: Form UX Standardization / detail modal + summary ก่อนอ่านฟอร์ม
+   - Status: completed across the main modules: KY, Hiyari, Yokoten, Accident, OJT, Training, Machine Safety, Contractor, Safety Culture, Committee, and Admin master/reference.
+   - Follow-up: check long forms on tablet/mobile and polish spacing/overflow only where screenshots show problems.
+
+3. Phase 3: Enterprise Admin Command Center / Overview + System Health + Audit
+   - Status: completed for Admin dashboard action required, Overview controls, System Health readiness, Audit summary, and Audit Log.
+   - Follow-up: use real admin data during UAT to confirm stale work, failed API, and audit counts are useful.
+
+4. Phase 4: Permission / Audit / Pre-production Regression
+   - Status: completed for Admin Audit Log, permission audit script, API smoke test, and combined `npm test` checks.
+   - Follow-up: keep `npm test` as the required pre-commit/pre-deploy gate.
+
+5. Phase 5: Manual UAT / Production Handoff
+   - Status: remaining.
+   - Required before production deployment: open the browser with real Admin/User accounts, test every module, confirm admin-only buttons are hidden/blocked for User, create/edit/delete small sample records, confirm Audit Log captures the actions, then push/deploy handoff.
+
 ### Admin Audit Log
 
 Audit logging is centralized in `backend/utils/audit.js`.

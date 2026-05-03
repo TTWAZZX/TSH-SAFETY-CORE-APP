@@ -370,12 +370,12 @@ function _skRow(w='full', h=4) {
     return `<div class="bg-slate-200 rounded-lg animate-pulse" style="width:${w==='full'?'100%':w};height:${h * 4}px"></div>`;
 }
 function _skCard(rows = 2) {
-    return `<div class="card p-4 space-y-3">${Array.from({length: rows}, () => _skRow('full', 3)).join('')}</div>`;
+    return `<div class="ds-section p-4 space-y-3">${Array.from({length: rows}, () => _skRow('full', 3)).join('')}</div>`;
 }
 function _buildSkeleton(tabId) {
     const kpiRow = `
     <div class="grid grid-cols-2 lg:grid-cols-4 gap-4">
-        ${Array.from({length:4},()=>`<div class="card p-4 flex items-center gap-3 animate-pulse">
+        ${Array.from({length:4},()=>`<div class="ds-metric-card p-4 flex items-center gap-3 animate-pulse">
             <div class="w-10 h-10 rounded-xl bg-slate-200 flex-shrink-0"></div>
             <div class="flex-1 space-y-2"><div class="h-6 bg-slate-200 rounded w-16"></div><div class="h-3 bg-slate-100 rounded w-24"></div></div>
         </div>`).join('')}
@@ -383,25 +383,25 @@ function _buildSkeleton(tabId) {
 
     if (tabId === 'dashboard') return `
     <div class="space-y-5 animate-pulse">
-        <div class="card p-3"><div class="h-8 bg-slate-200 rounded w-48"></div></div>
+        <div class="ds-filter-bar"><div class="h-8 bg-slate-200 rounded w-48"></div></div>
         ${kpiRow}
         <div class="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-7 gap-3">
-            ${Array.from({length:7},()=>`<div class="card p-4 h-24 bg-slate-200 rounded-xl"></div>`).join('')}
+            ${Array.from({length:7},()=>`<div class="ds-metric-card p-4 h-24 bg-slate-200 rounded-xl"></div>`).join('')}
         </div>
         <div class="grid grid-cols-1 lg:grid-cols-2 gap-5">
-            <div class="card p-5 h-72"><div class="h-4 bg-slate-200 rounded w-40 mb-4"></div><div class="h-56 bg-slate-100 rounded-xl"></div></div>
-            <div class="card p-5 h-72"><div class="h-4 bg-slate-200 rounded w-40 mb-4"></div><div class="h-56 bg-slate-100 rounded-xl"></div></div>
+            <div class="ds-section p-5 h-72"><div class="h-4 bg-slate-200 rounded w-40 mb-4"></div><div class="h-56 bg-slate-100 rounded-xl"></div></div>
+            <div class="ds-section p-5 h-72"><div class="h-4 bg-slate-200 rounded w-40 mb-4"></div><div class="h-56 bg-slate-100 rounded-xl"></div></div>
         </div>
-        <div class="card p-5 h-52"><div class="h-4 bg-slate-200 rounded w-40 mb-4"></div><div class="h-36 bg-slate-100 rounded-xl"></div></div>
+        <div class="ds-section p-5 h-52"><div class="h-4 bg-slate-200 rounded w-40 mb-4"></div><div class="h-36 bg-slate-100 rounded-xl"></div></div>
     </div>`;
 
     if (tabId === 'assessment') return `
     <div class="space-y-4 animate-pulse">
-        <div class="card overflow-hidden">
+        <div class="ds-section overflow-hidden">
             <div class="px-5 py-4 border-b border-slate-100"><div class="h-5 bg-slate-200 rounded w-48"></div></div>
             <div class="p-4 space-y-3">${Array.from({length:4},()=>`<div class="h-10 bg-slate-100 rounded-lg"></div>`).join('')}</div>
         </div>
-        <div class="card overflow-hidden">
+        <div class="ds-section overflow-hidden">
             <div class="px-5 py-4 border-b border-slate-100"><div class="h-5 bg-slate-200 rounded w-40"></div></div>
             <div class="p-4 space-y-2">${Array.from({length:6},()=>`<div class="h-9 bg-slate-100 rounded-lg"></div>`).join('')}</div>
         </div>
@@ -412,10 +412,10 @@ function _buildSkeleton(tabId) {
         <div class="flex gap-2">${Array.from({length:3},()=>`<div class="h-9 w-24 bg-slate-200 rounded-lg"></div>`).join('')}</div>
         ${kpiRow}
         <div class="grid grid-cols-1 lg:grid-cols-2 gap-5">
-            <div class="card p-5 h-64"><div class="h-4 bg-slate-200 rounded w-32 mb-4"></div><div class="space-y-3">${Array.from({length:5},()=>`<div class="h-6 bg-slate-100 rounded"></div>`).join('')}</div></div>
-            <div class="card p-5 h-64"><div class="h-4 bg-slate-200 rounded w-32 mb-4"></div><div class="h-48 bg-slate-100 rounded-xl"></div></div>
+            <div class="ds-section p-5 h-64"><div class="h-4 bg-slate-200 rounded w-32 mb-4"></div><div class="space-y-3">${Array.from({length:5},()=>`<div class="h-6 bg-slate-100 rounded"></div>`).join('')}</div></div>
+            <div class="ds-section p-5 h-64"><div class="h-4 bg-slate-200 rounded w-32 mb-4"></div><div class="h-48 bg-slate-100 rounded-xl"></div></div>
         </div>
-        <div class="card overflow-hidden">
+        <div class="ds-section overflow-hidden">
             <div class="px-5 py-4 border-b border-slate-100"><div class="h-5 bg-slate-200 rounded w-40"></div></div>
             <div class="p-4 space-y-2">${Array.from({length:5},()=>`<div class="h-9 bg-slate-100 rounded-lg"></div>`).join('')}</div>
         </div>
@@ -425,13 +425,13 @@ function _buildSkeleton(tabId) {
     return `
     <div class="space-y-4 animate-pulse">
         <div class="grid grid-cols-2 lg:grid-cols-4 gap-4">
-            ${Array.from({length:4},()=>`<div class="card p-3 flex items-center gap-3">
+            ${Array.from({length:4},()=>`<div class="ds-metric-card p-3 flex items-center gap-3">
                 <div class="w-10 h-10 rounded-xl bg-slate-200 flex-shrink-0"></div>
                 <div class="flex-1 space-y-2"><div class="h-5 bg-slate-200 rounded w-16"></div><div class="h-3 bg-slate-100 rounded w-20"></div></div>
             </div>`).join('')}
         </div>
         <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
-            ${Array.from({length:8},()=>`<div class="card overflow-hidden h-72">
+            ${Array.from({length:8},()=>`<div class="ds-section overflow-hidden h-72">
                 <div class="w-full h-44 bg-slate-200"></div>
                 <div class="p-4 space-y-2"><div class="h-4 bg-slate-200 rounded w-3/4"></div><div class="h-3 bg-slate-100 rounded"></div><div class="h-3 bg-slate-100 rounded w-2/3"></div></div>
             </div>`).join('')}
@@ -469,7 +469,7 @@ function buildPrinciplesHtml() {
         const icon  = TOPIC_SVG[idx] || TOPIC_SVG[5];
         const isPPE = p.SortOrder === 6;
         return `
-        <div class="card overflow-hidden hover:shadow-md transition-shadow flex flex-col">
+        <div class="ds-section overflow-hidden hover:shadow-md transition-shadow flex flex-col">
             ${p.ImageUrl
                 ? `<img src="${escHtml(p.ImageUrl)}" alt="${escHtml(p.Title)}" class="w-full h-44 object-cover cursor-zoom-in hover:opacity-90 transition-opacity" onclick="window._scViewImage('${escHtml(p.ImageUrl)}','${escHtml(p.Title)}')">`
                 : `<div class="w-full h-44 flex items-center justify-center flex-shrink-0" style="background:linear-gradient(135deg,#f0fdf4,#ecfdf5)">${icon}</div>`
@@ -515,7 +515,7 @@ function buildPrinciplesHtml() {
     const matP = overallAvgP != null ? getMaturity(overallAvgP) : null;
     const kpiStrip = `
     <div class="grid grid-cols-2 sm:grid-cols-4 gap-4">
-        <div class="card p-4 flex items-center gap-3">
+        <div class="ds-metric-card p-4 flex items-center gap-3">
             <div class="w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0" style="background:linear-gradient(135deg,#059669,#0d9488)">
                 <svg class="w-5 h-5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"/></svg>
             </div>
@@ -524,7 +524,7 @@ function buildPrinciplesHtml() {
                 <p class="text-xs text-slate-500">คะแนนเฉลี่ยปี ${thisYear}</p>
             </div>
         </div>
-        <div class="card p-4 flex items-center gap-3">
+        <div class="ds-metric-card p-4 flex items-center gap-3">
             <div class="w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0 bg-blue-50">
                 <svg class="w-5 h-5 text-blue-500" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12.75L11.25 15 15 9.75m-3-7.036A11.959 11.959 0 013.598 6 11.99 11.99 0 003 9.749c0 5.592 3.824 10.29 9 11.623 5.176-1.332 9-6.03 9-11.622 0-1.31-.21-2.571-.598-3.751h-.152c-3.196 0-6.1-1.248-8.25-3.285z"/></svg>
             </div>
@@ -533,7 +533,7 @@ function buildPrinciplesHtml() {
                 <p class="text-xs text-slate-500">PPE ผ่านตรวจปี ${thisYear} (${ppeTotalP} ครั้ง)</p>
             </div>
         </div>
-        <div class="card p-4 flex items-center gap-3">
+        <div class="ds-metric-card p-4 flex items-center gap-3">
             <div class="w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0 ${violTotalP>0?'bg-red-50':'bg-emerald-50'}">
                 <svg class="w-5 h-5 ${violTotalP>0?'text-red-500':'text-emerald-500'}" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126zM12 15.75h.007v.008H12v-.008z"/></svg>
             </div>
@@ -542,7 +542,7 @@ function buildPrinciplesHtml() {
                 <p class="text-xs text-slate-500">การฝ่าฝืน PPE ปี ${thisYear}</p>
             </div>
         </div>
-        <div class="card p-4 flex items-center gap-3">
+        <div class="ds-metric-card p-4 flex items-center gap-3">
             <div class="w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0 bg-purple-50">
                 <svg class="w-5 h-5 text-purple-500" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3.75 3v11.25A2.25 2.25 0 006 16.5h2.25M3.75 3h-1.5m1.5 0h16.5m0 0h1.5m-1.5 0v11.25A2.25 2.25 0 0118 16.5h-2.25m-7.5 0h7.5m-7.5 0l-1 3m8.5-3l1 3m0 0l.5 1.5m-.5-1.5h-9.5m0 0l-.5 1.5"/></svg>
             </div>
@@ -564,7 +564,7 @@ function buildPrinciplesHtml() {
         .slice(0,3);
 
     const recentActivity = (recentAsmts.length || recentPPE.length) ? `
-    <div class="card p-5">
+    <div class="ds-section p-5">
         <h3 class="font-semibold text-slate-700 mb-4 text-sm flex items-center gap-2">
             <svg class="w-4 h-4 text-emerald-500" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6v6h4.5m4.5 0a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
             กิจกรรมล่าสุด
@@ -743,13 +743,13 @@ function buildMonthlyAssessmentSummary() {
     }).join('');
 
     return `
-    <div class="card overflow-hidden">
+    <div class="ds-section overflow-hidden">
         <div class="px-5 py-4 border-b border-slate-100 flex items-center justify-between">
             <h3 class="font-semibold text-slate-700">สรุปรายเดือน ปี ${_filterYear}</h3>
             <span class="text-xs text-slate-400">${months.length} เดือน · คะแนน 0–100%</span>
         </div>
         <div class="overflow-x-auto">
-            <table class="w-full text-sm">
+            <table class="ds-table text-sm">
                 <thead class="bg-slate-50">
                     <tr>
                         <th class="px-4 py-3 text-left text-xs font-semibold text-slate-500 uppercase" colspan="2">เดือน / หัวข้อ</th>
@@ -810,13 +810,13 @@ function buildAssessmentHtml() {
             </div>
             ${_isAdmin ? `<button onclick="window._scAddAssessment()" class="btn btn-primary px-5 flex items-center gap-2"><svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/></svg>บันทึกผลการประเมิน</button>` : ''}
         </div>
-        <div class="card overflow-hidden">
+        <div class="ds-section overflow-hidden">
             <div class="px-5 py-4 border-b border-slate-100 flex items-center justify-between">
                 <h3 class="font-semibold text-slate-700">ประวัติการประเมิน ปี ${_filterYear}</h3>
                 <span class="text-xs text-slate-400">${_assessments.length} รายการ</span>
             </div>
             <div class="overflow-x-auto">
-                <table class="w-full text-sm">
+                <table class="ds-table text-sm">
                     <thead class="bg-slate-50">
                         <tr>
                             <th class="px-4 py-3 text-left text-xs font-semibold text-slate-500 uppercase">วันที่</th>
@@ -840,7 +840,7 @@ function buildAssessmentHtml() {
             </div>
         </div>
         <p class="text-xs text-slate-400">* T6 (PPE Control) คำนวณจาก PPE Inspection Checklist แยกต่างหาก</p>
-        <div class="card p-4">
+        <div class="ds-section p-4">
             <h4 class="text-sm font-semibold text-slate-700 mb-3">Culture Maturity Level — คำอธิบายระดับ</h4>
             <div class="grid grid-cols-2 md:grid-cols-4 gap-3">
                 ${[
@@ -910,25 +910,25 @@ function buildPPEDashboard() {
 
     const kpiCards = `
     <div class="grid grid-cols-2 lg:grid-cols-4 gap-4">
-        <div class="card p-4 flex items-center gap-3">
+        <div class="ds-metric-card p-4 flex items-center gap-3">
             <div class="w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0 bg-emerald-50">
                 <svg class="w-5 h-5 text-emerald-500" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
             </div>
             <div><p class="text-2xl font-bold text-slate-800">${total}</p><p class="text-xs text-slate-500">ครั้งตรวจทั้งหมด</p></div>
         </div>
-        <div class="card p-4 flex items-center gap-3">
+        <div class="ds-metric-card p-4 flex items-center gap-3">
             <div class="w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0 bg-emerald-50">
                 <svg class="w-5 h-5 text-emerald-500" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg>
             </div>
             <div><p class="text-2xl font-bold text-emerald-600">${passCount}</p><p class="text-xs text-slate-500">ผ่าน (100% Compliant)</p></div>
         </div>
-        <div class="card p-4 flex items-center gap-3">
+        <div class="ds-metric-card p-4 flex items-center gap-3">
             <div class="w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0 bg-red-50">
                 <svg class="w-5 h-5 text-red-500" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
             </div>
             <div><p class="text-2xl font-bold text-red-600">${failCount}</p><p class="text-xs text-slate-500">ไม่ผ่าน (มีรายการบกพร่อง)</p></div>
         </div>
-        <div class="card p-4 flex items-center gap-3">
+        <div class="ds-metric-card p-4 flex items-center gap-3">
             <div class="w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0 ${violCount>0?'bg-orange-50':'bg-slate-50'}">
                 <svg class="w-5 h-5 ${violCount>0?'text-orange-500':'text-slate-400'}" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/></svg>
             </div>
@@ -937,7 +937,7 @@ function buildPPEDashboard() {
     </div>`;
 
     const passRateBar = passRate !== null ? `
-    <div class="card p-5 border-l-4 ${passRate>=90?'border-emerald-400':passRate>=70?'border-amber-400':'border-red-400'}">
+    <div class="ds-section p-5 border-l-4 ${passRate>=90?'border-emerald-400':passRate>=70?'border-amber-400':'border-red-400'}">
         <div class="flex items-center justify-between mb-2">
             <div>
                 <p class="text-sm text-slate-500 font-medium">Pass Rate (Strict 100%) — ปี ${_filterYear}</p>
@@ -984,7 +984,7 @@ function buildPPEDashboard() {
     });
     const highRisk2 = Object.values(empViolMap2).filter(e => e.count >= 2).sort((a,b) => b.count-a.count).slice(0,10);
     const highRiskTable2 = highRisk2.length ? `
-    <div class="card overflow-hidden">
+    <div class="ds-section overflow-hidden">
         <div class="px-5 py-4 border-b border-slate-100 flex items-center gap-3">
             <span class="w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0 bg-red-100">
                 <svg class="w-4 h-4 text-red-500" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/></svg>
@@ -992,7 +992,7 @@ function buildPPEDashboard() {
             <div><h3 class="font-semibold text-slate-700">พนักงานที่มีบันทึกฝ่าฝืนซ้ำ</h3><p class="text-xs text-slate-400">≥ 2 ครั้ง</p></div>
         </div>
         <div class="overflow-x-auto">
-            <table class="w-full text-sm">
+            <table class="ds-table text-sm">
                 <thead class="bg-slate-50"><tr>
                     <th class="px-4 py-3 text-left text-xs font-semibold text-slate-500 uppercase">พนักงาน</th>
                     <th class="px-4 py-3 text-left text-xs font-semibold text-slate-500 uppercase">แผนก</th>
@@ -1014,13 +1014,13 @@ function buildPPEDashboard() {
         ${kpiCards}
         ${passRateBar}
         ${depts2.length ? `
-        <div class="card overflow-hidden">
+        <div class="ds-section overflow-hidden">
             <div class="px-5 py-4 border-b border-slate-100 flex items-center justify-between">
                 <h3 class="font-semibold text-slate-700">Pass Rate รายแผนก — ปี ${_filterYear}</h3>
                 <span class="text-xs text-slate-400">${depts2.length} แผนก</span>
             </div>
             <div class="overflow-x-auto">
-                <table class="w-full text-sm">
+                <table class="ds-table text-sm">
                     <thead class="bg-slate-50"><tr>
                         <th class="px-4 py-3 text-left text-xs font-semibold text-slate-500 uppercase">แผนก</th>
                         <th class="px-4 py-3 text-center text-xs font-semibold text-slate-500 uppercase">ครั้ง</th>
@@ -1029,7 +1029,7 @@ function buildPPEDashboard() {
                     <tbody>${deptRows2}</tbody>
                 </table>
             </div>
-        </div>` : `<div class="card p-8 text-center text-slate-400 text-sm">ยังไม่มีข้อมูล PPE Inspection สำหรับปี ${_filterYear}</div>`}
+        </div>` : `<div class="ds-empty-state p-8 text-center text-slate-400 text-sm">ยังไม่มีข้อมูล PPE Inspection สำหรับปี ${_filterYear}</div>`}
         ${highRiskTable2}
     </div>`;
 }
@@ -1052,7 +1052,7 @@ function buildPPEHistory() {
 
     const wtOptions = _ppeWorkTypes.map(w => `<option value="${escHtml(w.WorkTypeID)}" ${_ppeFilterWT===w.WorkTypeID?'selected':''}>${escHtml(w.Name)}</option>`).join('');
     const filterBar = `
-    <div class="card p-4 flex flex-wrap items-center gap-3">
+    <div class="ds-filter-bar flex flex-wrap items-center gap-3">
         <input type="text" value="${escHtml(_ppeSearch)}" oninput="window._scSetPPESearch(this.value)"
             placeholder="ค้นหาพนักงาน / แผนก / ผู้ตรวจ..."
             class="form-input text-sm py-1.5 px-3 flex-1 min-w-48">
@@ -1094,13 +1094,13 @@ function buildPPEHistory() {
     return `
     <div class="space-y-4">
         ${filterBar}
-        <div class="card overflow-hidden">
+        <div class="ds-section overflow-hidden">
             <div class="px-5 py-4 border-b border-slate-100 flex items-center justify-between">
                 <h3 class="font-semibold text-slate-700">ประวัติการตรวจ PPE ปี ${_filterYear}</h3>
                 <span class="text-xs text-slate-400">${filtered.length} รายการ</span>
             </div>
             <div class="overflow-x-auto">
-                <table class="w-full text-sm">
+                <table class="ds-table text-sm">
                     <thead class="bg-slate-50"><tr>
                         <th class="px-4 py-3 text-left text-xs font-semibold text-slate-500 uppercase whitespace-nowrap">วันที่</th>
                         <th class="px-4 py-3 text-left text-xs font-semibold text-slate-500 uppercase">พนักงานที่ตรวจ</th>
@@ -1137,7 +1137,7 @@ function buildPPEWorkTypes() {
 
     return `
     <div class="space-y-4">
-        <div class="card overflow-hidden">
+        <div class="ds-section overflow-hidden">
             <div class="px-5 py-4 border-b border-slate-100 flex items-center justify-between">
                 <div>
                     <h3 class="font-semibold text-slate-700">เทมเพลต PPE ตามประเภทงาน</h3>
@@ -1150,7 +1150,7 @@ function buildPPEWorkTypes() {
             </div>
             <div>${wtRows||'<div class="px-5 py-8 text-center text-sm text-slate-400">ยังไม่มีเทมเพลต — กดเพิ่มประเภทงาน</div>'}</div>
         </div>
-        <div class="card overflow-hidden">
+        <div class="ds-section overflow-hidden">
             <div class="px-5 py-4 border-b border-slate-100 flex items-center justify-between">
                 <div>
                     <h3 class="font-semibold text-slate-700">จัดการรายการ PPE ทั้งหมด</h3>
@@ -1212,13 +1212,13 @@ function buildPPEViolations() {
 
     return `
     <div class="space-y-5">
-        <div class="card overflow-hidden">
+        <div class="ds-table-wrap">
             <div class="px-5 py-4 border-b border-slate-100">
                 <h3 class="font-semibold text-slate-700">สรุปรายพนักงาน</h3>
                 <p class="text-xs text-slate-400 mt-0.5">${empsV.length} คน — ปี ${_filterYear}</p>
             </div>
             <div class="overflow-x-auto">
-                <table class="w-full text-sm">
+                <table class="ds-table text-sm">
                     <thead class="bg-slate-50"><tr>
                         <th class="px-4 py-3 text-left text-xs font-semibold text-slate-500 uppercase">พนักงาน</th>
                         <th class="px-4 py-3 text-left text-xs font-semibold text-slate-500 uppercase">แผนก</th>
@@ -1230,13 +1230,13 @@ function buildPPEViolations() {
                 </table>
             </div>
         </div>
-        <div class="card overflow-hidden">
+        <div class="ds-table-wrap">
             <div class="px-5 py-4 border-b border-slate-100">
                 <h3 class="font-semibold text-slate-700">บันทึกทั้งหมด</h3>
                 <p class="text-xs text-slate-400 mt-0.5">${_ppeViolations.length} รายการ</p>
             </div>
             <div class="overflow-x-auto">
-                <table class="w-full text-sm">
+                <table class="ds-table text-sm">
                     <thead class="bg-slate-50"><tr>
                         <th class="px-4 py-3 text-left text-xs font-semibold text-slate-500 uppercase whitespace-nowrap">วันที่</th>
                         <th class="px-4 py-3 text-left text-xs font-semibold text-slate-500 uppercase">พนักงาน</th>
@@ -1322,7 +1322,7 @@ function buildDashboardHtml() {
     ].join('');
 
     const monthFilterBar = `
-    <div class="card p-3 flex flex-wrap items-center gap-3">
+    <div class="ds-filter-bar flex flex-wrap items-center gap-3">
         <div class="flex items-center gap-2">
             <svg class="w-4 h-4 text-emerald-500 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"/></svg>
             <span class="text-sm font-semibold text-slate-700">ดูข้อมูล:</span>
@@ -1363,7 +1363,7 @@ function buildDashboardHtml() {
     ].map(c => {
         const v   = c.val != null ? parseFloat(c.val) : null;
         const cls = scoreColor(v);
-        return `<div class="card p-4 text-center">
+        return `<div class="ds-metric-card p-4 text-center">
             <div class="flex justify-center mb-2">
                 <span class="w-8 h-8 rounded-xl flex items-center justify-center text-xs font-bold text-white" style="background:linear-gradient(135deg,#059669,#0d9488)">${c.code}</span>
             </div>
@@ -1395,7 +1395,7 @@ function buildDashboardHtml() {
     const worstTopic = topicAvgs.length ? topicAvgs.reduce((w,t) => t.avg < w.avg ? t : w) : null;
     const quickCards = `
     <div class="grid grid-cols-1 sm:grid-cols-3 gap-4">
-        <div class="card p-4 flex items-center gap-3">
+        <div class="ds-metric-card p-4 flex items-center gap-3">
             <div class="w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0 bg-blue-50">
                 <svg class="w-5 h-5 text-blue-500" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"/></svg>
             </div>
@@ -1404,7 +1404,7 @@ function buildDashboardHtml() {
                 <p class="text-xs text-slate-500">คะแนนเฉลี่ย ${periodLabel}</p>
             </div>
         </div>
-        <div class="card p-4 flex items-center gap-3">
+        <div class="ds-metric-card p-4 flex items-center gap-3">
             <div class="w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0 bg-emerald-50">
                 <svg class="w-5 h-5 text-emerald-500" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6"/></svg>
             </div>
@@ -1413,7 +1413,7 @@ function buildDashboardHtml() {
                 <p class="text-xs text-slate-500">หัวข้อคะแนนสูงสุด${bestTopic?' ('+bestTopic.avg+'%)':''}</p>
             </div>
         </div>
-        <div class="card p-4 flex items-center gap-3">
+        <div class="ds-metric-card p-4 flex items-center gap-3">
             <div class="w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0 ${worstTopic&&worstTopic.avg<70?'bg-red-50':'bg-amber-50'}">
                 <svg class="w-5 h-5 ${worstTopic&&worstTopic.avg<70?'text-red-500':'text-amber-500'}" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 17h8m0 0V9m0 8l-8-8-4 4-6-6"/></svg>
             </div>
@@ -1432,7 +1432,7 @@ function buildDashboardHtml() {
     const violNotice   = violInPeriod.filter(v => v.WarningLevel === 'safety_notice').length;
     const violWritten  = violInPeriod.filter(v => v.WarningLevel === 'written_warning').length;
     const violStrip = violInPeriod.length > 0 ? `
-    <div class="card p-4">
+    <div class="ds-section p-4">
         <div class="flex items-center justify-between mb-3">
             <h3 class="font-semibold text-slate-700 text-sm">PPE Violation Summary — ${periodLabel}</h3>
             <button onclick="window._scSetTab('ppe');setTimeout(()=>window._scSetPPESub('violations'),80)" class="text-xs text-emerald-600 hover:underline font-medium">ดูทั้งหมด →</button>
@@ -1502,7 +1502,7 @@ function buildDashboardHtml() {
         .map(([d, v]) => ({ dept: d, total: v.pass+v.fail, pass: v.pass, pct: Math.round(v.pass/(v.pass+v.fail)*100) }))
         .sort((a,b) => b.total - a.total).slice(0, 8);
     const deptBreakdown = deptRows.length > 1 ? `
-    <div class="card p-5">
+    <div class="ds-section p-5">
         <h3 class="font-semibold text-slate-700 mb-4 text-sm">PPE Compliance by Department — ${periodLabel}</h3>
         <div class="space-y-2.5">
         ${deptRows.map(r => {
@@ -1524,7 +1524,7 @@ function buildDashboardHtml() {
         ${enterpriseStrip}
         ${quickCards}
         ${mat ? `
-        <div class="card p-5 border-l-4 ${mat.border}">
+        <div class="ds-section p-5 border-l-4 ${mat.border}">
             <div class="flex items-center justify-between">
                 <div>
                     <p class="text-sm text-slate-500 font-medium">Culture Maturity Level — ${periodLabel}</p>
@@ -1539,7 +1539,7 @@ function buildDashboardHtml() {
                 </div>
             </div>
         </div>` : `
-        <div class="card p-10 text-center text-slate-400">
+        <div class="ds-empty-state p-10 text-center text-slate-400">
             <div class="w-16 h-16 rounded-2xl bg-slate-100 flex items-center justify-center mx-auto mb-4">
                 <svg class="w-8 h-8 opacity-40" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"/></svg>
             </div>
@@ -1551,23 +1551,23 @@ function buildDashboardHtml() {
         <div class="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-7 gap-3">${scoreCards}</div>
 
         <div class="grid grid-cols-1 lg:grid-cols-2 gap-5">
-            <div class="card p-5">
+            <div class="ds-section p-5">
                 <h3 class="font-semibold text-slate-700 mb-4">คะแนนเฉลี่ยแต่ละหัวข้อ — Radar Chart <span class="text-xs font-normal text-slate-400">${periodLabel}</span></h3>
                 <div class="relative" style="height:280px"><canvas id="sc-radar-chart"></canvas></div>
             </div>
-            <div class="card p-5">
+            <div class="ds-section p-5">
                 <h3 class="font-semibold text-slate-700 mb-4">คะแนนแต่ละหัวข้อ — Bar Chart <span class="text-xs font-normal text-slate-400">${periodLabel}</span></h3>
                 <div class="relative" style="height:280px"><canvas id="sc-bar-chart"></canvas></div>
             </div>
         </div>
 
         <div class="grid grid-cols-1 lg:grid-cols-2 gap-5">
-            <div class="card p-5">
+            <div class="ds-section p-5">
                 <h3 class="font-semibold text-slate-700 mb-4">แนวโน้มคะแนนเฉลี่ยรายปี — Trend <span class="text-xs font-normal text-slate-400">(แสดงเฉพาะรายปี)</span></h3>
                 <div class="relative" style="height:220px"><canvas id="sc-line-chart"></canvas></div>
             </div>
             ${ppeRows.length ? `
-            <div class="card p-5">
+            <div class="ds-section p-5">
                 <div class="flex items-center justify-between mb-4">
                     <h3 class="font-semibold text-slate-700">PPE Compliance per Item — ${periodLabel}</h3>
                     <span class="text-xs text-slate-400">${filteredPPE.length} ครั้งตรวจ</span>
@@ -2339,7 +2339,7 @@ function viewEmployeeViolations(empId) {
     <div class="space-y-3">
         <div class="text-sm text-slate-500">แผนก: <span class="font-medium text-slate-700">${escHtml(emp.Department||'—')}</span></div>
         <div class="overflow-x-auto">
-            <table class="w-full text-sm">
+            <table class="ds-table text-sm">
                 <thead class="bg-slate-50"><tr>
                     <th class="px-3 py-2 text-left text-xs font-semibold text-slate-500 uppercase">วันที่</th>
                     <th class="px-3 py-2 text-center text-xs font-semibold text-slate-500 uppercase">ครั้งที่</th>

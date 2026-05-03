@@ -75,7 +75,7 @@ export async function loadPolicyPage() {
 
             <!-- Current Policy -->
             <div id="current-policy-container">
-                <div class="card p-10 text-center">
+                <div class="ds-empty-state p-10 text-center">
                     <div class="animate-spin rounded-full h-10 w-10 border-4 border-emerald-500 border-t-transparent mx-auto mb-3"></div>
                     <p class="text-sm text-slate-400">กำลังโหลดข้อมูล...</p>
                 </div>
@@ -118,7 +118,7 @@ export async function loadPolicyPage() {
     } catch (err) {
         console.error('Error loading policies:', err);
         document.getElementById('current-policy-container').innerHTML = `
-            <div class="card p-8 text-center">
+            <div class="ds-empty-state p-8 text-center">
                 <p class="text-red-500 text-sm font-medium">เกิดข้อผิดพลาด: ${escHtml(err.message)}</p>
             </div>`;
     }
@@ -164,7 +164,7 @@ function renderStatsBar(policy, all) {
 
     bar.innerHTML = `
         <!-- Age -->
-        <div class="bg-white rounded-xl p-4 border border-slate-100 shadow-sm flex items-center gap-3">
+        <div class="ds-metric-card p-4 flex items-center gap-3">
             <div class="w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0 bg-emerald-50">
                 <svg class="w-5 h-5 text-emerald-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"/>
@@ -177,7 +177,7 @@ function renderStatsBar(policy, all) {
         </div>
 
         <!-- Ack progress -->
-        <div class="bg-white rounded-xl p-4 border border-slate-100 shadow-sm flex items-center gap-3">
+        <div class="ds-metric-card p-4 flex items-center gap-3">
             <div class="w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0 bg-${ackColor}-50">
                 <svg class="w-5 h-5 text-${ackColor}-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/>
@@ -193,7 +193,7 @@ function renderStatsBar(policy, all) {
         </div>
 
         <!-- Total versions -->
-        <div class="bg-white rounded-xl p-4 border border-slate-100 shadow-sm flex items-center gap-3">
+        <div class="ds-metric-card p-4 flex items-center gap-3">
             <div class="w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0 bg-blue-50">
                 <svg class="w-5 h-5 text-blue-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/>
@@ -206,7 +206,7 @@ function renderStatsBar(policy, all) {
         </div>
 
         <!-- Review date -->
-        <div class="bg-white rounded-xl p-4 border border-slate-100 shadow-sm flex items-center gap-3">
+        <div class="ds-metric-card p-4 flex items-center gap-3">
             <div class="w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0 bg-${reviewColor}-50">
                 <svg class="w-5 h-5 text-${reviewColor}-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"/>
@@ -229,7 +229,7 @@ function renderCurrentPolicy(rawPolicy, isAdmin) {
 
     if (!policy) {
         container.innerHTML = `
-            <div class="card p-14 text-center">
+            <div class="ds-section p-14 text-center">
                 <div class="w-16 h-16 rounded-2xl bg-slate-100 flex items-center justify-center mx-auto mb-4">
                     <svg class="w-8 h-8 text-slate-300" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/>
@@ -295,7 +295,7 @@ function renderCurrentPolicy(rawPolicy, isAdmin) {
         </div>` : '';
 
     container.innerHTML = `
-        <div class="card overflow-hidden">
+        <div class="ds-section overflow-hidden">
             <div class="h-1.5 w-full" style="background:linear-gradient(90deg,#059669,#0d9488,#0891b2)"></div>
 
             <div class="p-6 md:p-8 space-y-5">

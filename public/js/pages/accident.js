@@ -386,7 +386,7 @@ async function _renderDashboardPanel() {
         <div class="grid lg:grid-cols-3 gap-6">
 
             <!-- Trend Chart -->
-            <div class="lg:col-span-2 bg-white rounded-xl border border-slate-100 shadow-sm overflow-hidden"
+            <div class="lg:col-span-2 ds-section overflow-hidden"
                  style="box-shadow:0 4px 16px rgba(220,38,38,0.08),0 1px 4px rgba(0,0,0,0.06)">
                 <div class="h-1 w-full" style="background:linear-gradient(90deg,#dc2626,#f97316)"></div>
                 <div class="p-5">
@@ -404,7 +404,7 @@ async function _renderDashboardPanel() {
             </div>
 
             <!-- Type Breakdown -->
-            <div class="bg-white rounded-xl border border-slate-100 shadow-sm overflow-hidden"
+            <div class="ds-section overflow-hidden"
                  style="box-shadow:0 4px 16px rgba(220,38,38,0.08),0 1px 4px rgba(0,0,0,0.06)">
                 <div class="h-1 w-full" style="background:linear-gradient(90deg,#f97316,#eab308)"></div>
                 <div class="p-5">
@@ -445,7 +445,7 @@ async function _renderDashboardPanel() {
         </div>
 
         <!-- Department Breakdown Chart -->
-        <div class="bg-white rounded-xl border border-slate-100 shadow-sm overflow-hidden"
+        <div class="ds-section overflow-hidden"
              style="box-shadow:0 4px 16px rgba(220,38,38,0.08),0 1px 4px rgba(0,0,0,0.06)">
             <div class="h-1 w-full" style="background:linear-gradient(90deg,#dc2626,#9f1239)"></div>
             <div class="p-5">
@@ -605,7 +605,7 @@ async function _renderAnalyticsPanel() {
     <div class="space-y-6">
 
         <!-- Department Risk Ranking -->
-        <div class="bg-white rounded-xl border border-slate-100 shadow-sm overflow-hidden"
+        <div class="ds-section overflow-hidden"
              style="box-shadow:0 4px 16px rgba(220,38,38,0.08),0 1px 4px rgba(0,0,0,0.06)">
             <div class="h-1 w-full" style="background:linear-gradient(90deg,#dc2626,#7c3aed)"></div>
             <div class="p-5">
@@ -619,7 +619,7 @@ async function _renderAnalyticsPanel() {
                 ${deptRank.length === 0
                     ? `<div class="text-center py-10 text-slate-400 text-sm">ยังไม่มีข้อมูล</div>`
                     : `<div class="overflow-x-auto">
-                        <table class="w-full text-left border-collapse text-sm">
+                        <table class="ds-table text-left border-collapse text-sm">
                             <thead>
                                 <tr class="bg-slate-50 border-b-2 border-slate-200">
                                     <th class="px-3 py-2.5 text-xs font-semibold text-slate-500 uppercase tracking-wide w-8">#</th>
@@ -659,7 +659,7 @@ async function _renderAnalyticsPanel() {
         <div class="grid lg:grid-cols-2 gap-6">
 
             <!-- Accident Hotspot -->
-            <div class="bg-white rounded-xl border border-slate-100 shadow-sm overflow-hidden"
+            <div class="ds-section overflow-hidden"
                  style="box-shadow:0 4px 16px rgba(249,115,22,0.08),0 1px 4px rgba(0,0,0,0.06)">
                 <div class="h-1 w-full" style="background:linear-gradient(90deg,#f97316,#eab308)"></div>
                 <div class="p-5">
@@ -697,7 +697,7 @@ async function _renderAnalyticsPanel() {
             </div>
 
             <!-- Root Causes -->
-            <div class="bg-white rounded-xl border border-slate-100 shadow-sm overflow-hidden"
+            <div class="ds-section overflow-hidden"
                  style="box-shadow:0 4px 16px rgba(139,92,246,0.08),0 1px 4px rgba(0,0,0,0.06)">
                 <div class="h-1 w-full" style="background:linear-gradient(90deg,#8b5cf6,#6366f1)"></div>
                 <div class="p-5">
@@ -756,7 +756,7 @@ async function _renderReportsPanel() {
     panel.innerHTML = `
     <div class="space-y-4">
         <!-- Filter Bar -->
-        <div class="bg-white rounded-xl border border-slate-100 shadow-sm p-4">
+        <div class="ds-filter-bar">
             <div class="flex flex-wrap gap-3 items-center">
                 <select id="acc-f-year" class="form-input text-sm">
                     ${years.map(y => `<option value="${y}" ${_filter.year==y?'selected':''}>${y}</option>`).join('')}
@@ -779,7 +779,7 @@ async function _renderReportsPanel() {
         </div>
 
         <!-- Table -->
-        <div id="acc-reports-wrap" class="bg-white rounded-xl border border-slate-100 shadow-sm overflow-hidden">
+        <div id="acc-reports-wrap" class="ds-table-wrap">
             ${_buildReportsTable()}
         </div>
     </div>`;
@@ -891,7 +891,7 @@ function _buildReportsTable() {
 
     return `
     <div class="overflow-x-auto">
-        <table class="w-full text-left border-collapse">
+        <table class="ds-table text-left border-collapse">
             <thead>
                 <tr class="bg-slate-50 border-b-2 border-slate-200">
                     <th class="px-4 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wide whitespace-nowrap">วันที่เกิดเหตุ</th>

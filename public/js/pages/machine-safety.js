@@ -195,7 +195,7 @@ function _renderPage(container) {
 
         <!-- Compliance Bar -->
         ${total > 0 ? `
-        <div class="bg-white rounded-xl border border-slate-100 shadow-sm p-4 flex items-center gap-4">
+        <div class="ds-section p-4 flex items-center gap-4">
             <div class="flex-shrink-0">
                 <div class="relative w-14 h-14">
                     <svg class="w-14 h-14 -rotate-90" viewBox="0 0 56 56">
@@ -282,7 +282,7 @@ function _renderPage(container) {
             const depts = [...new Set(_machines.map(m => m.Department).filter(Boolean))].sort();
             if (depts.length === 0) return '';
             return `
-        <div class="bg-white rounded-xl border border-slate-100 shadow-sm p-5">
+        <div class="ds-section p-5">
             <div class="flex items-center justify-between mb-4">
                 <h3 class="text-sm font-bold text-slate-700 flex items-center gap-2">
                     <svg class="w-4 h-4 text-emerald-500" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"/></svg>
@@ -341,7 +341,7 @@ function _renderPage(container) {
         </div>
 
         <!-- Filter Bar -->
-        <div class="card p-4 flex flex-wrap gap-3 items-center">
+        <div class="ds-filter-bar flex flex-wrap gap-3 items-center">
             <div class="relative flex-1 min-w-[180px]">
                 <svg class="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-4.35-4.35M17 11A6 6 0 115 11a6 6 0 0112 0z"/></svg>
                 <input id="msd-search" type="text" placeholder="ค้นหาชื่อ / รหัสเครื่องจักร..."
@@ -390,7 +390,7 @@ function _renderPage(container) {
         </div>
 
         <!-- Table -->
-        <div class="card overflow-hidden">
+        <div class="ds-table-wrap">
             <div id="msd-table-wrap" class="overflow-x-auto">
                 ${_renderTable()}
             </div>
@@ -623,7 +623,7 @@ function _renderTable() {
         </div>
     </div>` : '';
 
-    return `<table class="w-full text-left border-collapse">
+    return `<table class="ds-table text-left border-collapse">
         <thead>
             <tr class="bg-slate-50 border-b-2 border-slate-200">
                 <th class="px-4 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wide whitespace-nowrap">รหัส</th>

@@ -335,7 +335,7 @@ async function _renderDashboardPanel() {
         </div>
 
         <!-- Department Compliance Chart -->
-        <div class="bg-white rounded-xl border border-slate-100 shadow-sm overflow-hidden" style="box-shadow:0 4px 16px rgba(5,150,105,0.1),0 1px 4px rgba(0,0,0,0.06)">
+        <div class="ds-section overflow-hidden">
             <div class="h-1 w-full" style="background:linear-gradient(90deg,#059669,#0d9488)"></div>
             <div class="p-5">
                 <div class="flex items-center gap-2 mb-4">
@@ -354,7 +354,7 @@ async function _renderDashboardPanel() {
         <div class="grid grid-cols-1 xl:grid-cols-2 gap-6">
 
             <!-- Course Summary -->
-            <div class="bg-white rounded-xl border border-slate-100 shadow-sm overflow-hidden" style="box-shadow:0 4px 16px rgba(5,150,105,0.1),0 1px 4px rgba(0,0,0,0.06)">
+            <div class="ds-section overflow-hidden">
                 <div class="h-1 w-full" style="background:linear-gradient(90deg,#059669,#0d9488)"></div>
                 <div class="p-5">
                     <div class="flex items-center gap-2 mb-4">
@@ -368,7 +368,7 @@ async function _renderDashboardPanel() {
             </div>
 
             <!-- Dept Summary -->
-            <div class="bg-white rounded-xl border border-slate-100 shadow-sm overflow-hidden" style="box-shadow:0 4px 16px rgba(5,150,105,0.1),0 1px 4px rgba(0,0,0,0.06)">
+            <div class="ds-section overflow-hidden">
                 <div class="h-1 w-full" style="background:linear-gradient(90deg,#059669,#0d9488)"></div>
                 <div class="p-5">
                     <div class="flex items-center gap-2 mb-4">
@@ -385,7 +385,7 @@ async function _renderDashboardPanel() {
 
         ${showMatrix ? `
         <!-- Dept × Course Matrix -->
-        <div class="bg-white rounded-xl border border-slate-100 shadow-sm overflow-hidden" style="box-shadow:0 4px 16px rgba(5,150,105,0.1),0 1px 4px rgba(0,0,0,0.06)">
+        <div class="ds-section overflow-hidden">
             <div class="h-1 w-full" style="background:linear-gradient(90deg,#059669,#0d9488)"></div>
             <div class="p-5">
                 <div class="flex items-center gap-2 mb-4">
@@ -435,7 +435,7 @@ function _buildDeptSummaryTable(byDept) {
 
     return `
     <div class="overflow-x-auto">
-        <table class="w-full text-left border-collapse text-sm">
+        <table class="ds-table text-left border-collapse text-sm">
             <thead>
                 <tr class="border-b border-slate-100">
                     <th class="pb-2 pr-3 text-xs font-semibold text-slate-500 uppercase tracking-wide">แผนก</th>
@@ -485,7 +485,7 @@ function _buildCourseSummaryTable(courses) {
 
     return `
     <div class="overflow-x-auto">
-        <table class="w-full text-left border-collapse text-sm">
+        <table class="ds-table text-left border-collapse text-sm">
             <thead>
                 <tr class="border-b border-slate-100">
                     <th class="pb-2 pr-3 text-xs font-semibold text-slate-500 uppercase tracking-wide">หลักสูตร</th>
@@ -557,7 +557,7 @@ function _buildDeptCourseMatrix(records, courses) {
 
     return `
     <div class="overflow-x-auto">
-        <table class="w-full text-left border-collapse text-sm">
+        <table class="ds-table text-left border-collapse text-sm">
             <thead>
                 <tr class="border-b border-slate-100">
                     <th class="pb-2 pr-3 text-xs font-semibold text-slate-500 uppercase tracking-wide">แผนก</th>
@@ -634,7 +634,7 @@ async function _renderRecordsPanel() {
     panel.innerHTML = `
     <div class="space-y-4">
         <!-- Filter Bar -->
-        <div class="bg-white rounded-xl border border-slate-100 shadow-sm p-4">
+        <div class="ds-filter-bar">
             <div class="flex flex-wrap gap-3 items-center">
                 <label class="text-xs font-semibold text-slate-500 whitespace-nowrap">ปีงบประมาณ</label>
                 <select id="tr-rec-year" class="form-input text-sm">
@@ -655,8 +655,7 @@ async function _renderRecordsPanel() {
         <div id="tr-rec-summary">${_buildRecordsSummary()}</div>
 
         <!-- Records Table -->
-        <div id="tr-dept-wrap" class="bg-white rounded-xl border border-slate-100 shadow-sm overflow-hidden"
-             style="box-shadow:0 4px 16px rgba(5,150,105,0.1),0 1px 4px rgba(0,0,0,0.06)">
+        <div id="tr-dept-wrap" class="ds-table-wrap">
             ${_buildRecordsTable()}
         </div>
     </div>`;
@@ -701,15 +700,15 @@ function _buildRecordsSummary() {
 
     return `
     <div class="grid grid-cols-2 lg:grid-cols-5 gap-3">
-        <div class="rounded-xl border border-slate-200 bg-white px-4 py-3">
+        <div class="ds-metric-card px-4 py-3">
             <p class="text-[10px] font-bold uppercase text-slate-400">Records</p>
             <p class="mt-1 text-sm font-black text-slate-700">${records.length.toLocaleString()}</p>
         </div>
-        <div class="rounded-xl border border-slate-200 bg-white px-4 py-3">
+        <div class="ds-metric-card px-4 py-3">
             <p class="text-[10px] font-bold uppercase text-slate-400">Employees</p>
             <p class="mt-1 text-sm font-black text-slate-700">${totalEmployees.toLocaleString()}</p>
         </div>
-        <div class="rounded-xl border border-emerald-100 bg-emerald-50 px-4 py-3">
+        <div class="ds-metric-card is-good px-4 py-3">
             <p class="text-[10px] font-bold uppercase text-emerald-500">Passed</p>
             <p class="mt-1 text-sm font-black text-emerald-700">${totalPassed.toLocaleString()}</p>
         </div>
@@ -795,7 +794,7 @@ function _buildRecordsTable() {
 
     return `
     <div class="overflow-x-auto">
-        <table class="w-full text-left border-collapse">
+        <table class="ds-table text-left border-collapse">
             <thead>
                 <tr class="bg-slate-50 border-b-2 border-slate-200">
                     <th class="px-4 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wide">แผนก</th>
@@ -972,7 +971,7 @@ async function _renderCoursesPanel() {
 function _buildCoursesPanel(courses) {
     return `
     <div class="space-y-4">
-        <div class="bg-white rounded-xl border border-slate-100 shadow-sm overflow-hidden" style="box-shadow:0 4px 16px rgba(5,150,105,0.1),0 1px 4px rgba(0,0,0,0.06)">
+        <div class="ds-table-wrap">
             <div class="h-1 w-full" style="background:linear-gradient(90deg,#059669,#0d9488)"></div>
             <div class="p-5">
                 <div class="flex items-center justify-between mb-5">
@@ -1001,7 +1000,7 @@ function _buildCoursesPanel(courses) {
                         <p class="text-sm mt-1">กดปุ่ม "เพิ่มหลักสูตร" เพื่อเริ่มต้น</p>
                     </div>`
                     : `<div class="overflow-x-auto">
-                        <table class="w-full text-left border-collapse">
+                        <table class="ds-table text-left border-collapse">
                             <thead>
                                 <tr class="bg-slate-50 border-b-2 border-slate-200">
                                     <th class="px-3 py-2.5 text-xs font-semibold text-slate-500 uppercase tracking-wide">รหัส</th>

@@ -273,7 +273,7 @@ function renderPage(container, { current, past }, isAdmin, totalCount) {
 
     <!-- ── STATS BAR (4 cards) ── -->
     <div class="grid grid-cols-2 lg:grid-cols-4 gap-3">
-      <div class="bg-white rounded-xl p-4 border border-slate-100 shadow-sm flex items-center gap-3">
+      <div class="ds-metric-card p-4 flex items-center gap-3">
         <div class="w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0" style="background:#ecfdf5">
           <svg class="w-5 h-5" style="color:#059669" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
@@ -287,7 +287,7 @@ function renderPage(container, { current, past }, isAdmin, totalCount) {
         </div>
       </div>
 
-      <div class="bg-white rounded-xl p-4 border border-slate-100 shadow-sm flex items-center gap-3">
+      <div class="ds-metric-card p-4 flex items-center gap-3">
         <div class="w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0" style="background:#f0fdfa">
           <svg class="w-5 h-5 text-teal-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
@@ -301,7 +301,7 @@ function renderPage(container, { current, past }, isAdmin, totalCount) {
         </div>
       </div>
 
-      <div class="bg-white rounded-xl p-4 border border-slate-100 shadow-sm flex items-center gap-3">
+      <div class="ds-metric-card p-4 flex items-center gap-3">
         <div class="w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0" style="background:#fefce8">
           <svg class="w-5 h-5 text-amber-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
@@ -314,7 +314,7 @@ function renderPage(container, { current, past }, isAdmin, totalCount) {
         </div>
       </div>
 
-      <div class="bg-white rounded-xl p-4 border border-slate-100 shadow-sm flex items-center gap-3">
+      <div class="ds-metric-card p-4 flex items-center gap-3">
         <div class="w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0" style="background:#eff6ff">
           <svg class="w-5 h-5 text-blue-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"

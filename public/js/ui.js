@@ -100,6 +100,75 @@ export function openDetailModal({ title, subtitle = '', meta = [], body = '', fo
 /**
  * ปิด Modal - ปรับปรุง Animation
  */
+const STATUS_TONE = {
+    draft: 'draft',
+    new: 'open',
+    open: 'open',
+    progress: 'progress',
+    'in progress': 'progress',
+    temporary: 'progress',
+    pending: 'pending',
+    review: 'pending',
+    reviewed: 'approved',
+    waiting: 'pending',
+    approved: 'approved',
+    pass: 'approved',
+    passed: 'approved',
+    valid: 'approved',
+    low: 'approved',
+    medium: 'pending',
+    'due-soon': 'pending',
+    high: 'overdue',
+    critical: 'failed',
+    'no-data': 'info',
+    closed: 'closed',
+    complete: 'closed',
+    completed: 'closed',
+    cancelled: 'closed',
+    overdue: 'overdue',
+    failed: 'failed',
+    fail: 'failed',
+    rejected: 'failed',
+    error: 'failed',
+};
+
+export function statusTone(status = '') {
+    const raw = String(status || '').trim().toLowerCase();
+    return STATUS_TONE[raw] || 'info';
+}
+
+export function statusBadge(status = '', { label, className = '' } = {}) {
+    const text = label || status || '-';
+    return `<span class="ds-badge is-${statusTone(status)} ${className}">${escHtml(text)}</span>`;
+}
+
+export function metricCard(label, value, hint = '', tone = 'slate') {
+    const toneClass = {
+        good: 'is-good',
+        warn: 'is-warn',
+        risk: 'is-risk',
+        info: 'is-info',
+        emerald: 'is-good',
+        amber: 'is-warn',
+        rose: 'is-risk',
+        sky: 'is-info',
+    }[tone] || '';
+    return `
+        <div class="ds-metric-card ${toneClass}">
+            <p class="ds-metric-label">${escHtml(label)}</p>
+            <p class="ds-metric-value">${escHtml(value ?? '-')}</p>
+            ${hint ? `<p class="ds-metric-hint">${escHtml(hint)}</p>` : ''}
+        </div>`;
+}
+
+export function emptyState(title = 'No data', message = '') {
+    return `
+        <div class="ds-empty-state">
+            <strong>${escHtml(title)}</strong>
+            ${message ? `<span>${escHtml(message)}</span>` : ''}
+        </div>`;
+}
+
 export function closeModal() {
     const wrapperEl = document.getElementById('modal-wrapper');
     const container = document.getElementById('modal-container');
