@@ -933,7 +933,7 @@ function openAccidentForm(r, existingAttachments = []) {
 
         <!-- ── Section 1: General Info ───────────────────────────────────── -->
         ${_sectionHeader('ข้อมูลทั่วไป')}
-        <div class="grid grid-cols-3 gap-3">
+        <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
             <div>
                 <label class="block text-sm font-semibold text-slate-700 mb-1.5">วันที่เกิดเหตุ <span class="text-red-500">*</span></label>
                 <input type="text" id="acc-accident-date" name="AccidentDate" required
@@ -1111,7 +1111,7 @@ function openAccidentForm(r, existingAttachments = []) {
                     placeholder="มาตรการเพื่อป้องกันการเกิดซ้ำ">${_esc(d(r?.PreventiveAction))}</textarea>
             </div>
         </div>
-        <div class="grid grid-cols-3 gap-3">
+        <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
             <div>
                 <label class="block text-sm font-semibold text-slate-700 mb-1.5">ผู้รับผิดชอบ</label>
                 <input name="ResponsiblePerson" value="${_esc(d(r?.ResponsiblePerson))}"

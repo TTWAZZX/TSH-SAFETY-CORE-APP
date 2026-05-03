@@ -2301,7 +2301,7 @@ function openCheckInModal() {
           <span>วันนี้ไม่ใช่วันเดินตรวจตามตาราง สามารถ Check-in ได้แต่จะนับเป็นการเดินนอกตาราง</span>
         </div>` : ''}
 
-        <div class="grid grid-cols-3 gap-2">
+        <div class="grid grid-cols-1 sm:grid-cols-3 gap-2">
           <label class="cursor-pointer">
             <input type="radio" name="PatrolType" value="normal" class="peer sr-only" checked onchange="window._onCheckinTypeChange(this.value)">
             <div class="p-3 rounded-xl border-2 border-slate-100 bg-white text-center hover:border-emerald-100 peer-checked:border-emerald-500 peer-checked:bg-emerald-50 transition-all">
@@ -5138,7 +5138,7 @@ function renderRankStopSummary() {
         <!-- Rank A/B/C -->
         <div>
           <p class="text-[10px] font-bold text-slate-400 uppercase tracking-wide mb-2">ระดับความรุนแรง (Rank) · คลิกเพื่อกรอง</p>
-          <div class="grid grid-cols-3 gap-2">
+          <div class="grid grid-cols-1 sm:grid-cols-3 gap-2">
             ${CCCF_RANKS.map(r => {
               const cnt = byRank[r.rank] || 0;
               const isActive = _filterRank === r.rank;

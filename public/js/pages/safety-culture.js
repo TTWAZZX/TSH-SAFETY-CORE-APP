@@ -1782,8 +1782,8 @@ async function openAssessmentForm(id) {
     openModal(a ? 'แก้ไขผลการประเมิน' : 'บันทึกผลการประเมิน', `
     <form id="sc-af" class="space-y-4">
         ${a ? `<input type="hidden" name="AssessmentID" value="${escHtml(a.AssessmentID)}">` : ''}
-        <div class="grid grid-cols-3 gap-3">
-            <div class="col-span-2"><label class="block text-sm font-semibold text-slate-700 mb-1.5">วันที่ประเมิน</label>
+        <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
+            <div class="sm:col-span-2"><label class="block text-sm font-semibold text-slate-700 mb-1.5">วันที่ประเมิน</label>
                 <input name="AssessmentDate" type="date" required value="${a?.AssessmentDate ? String(a.AssessmentDate).substring(0,10) : today}" class="form-input w-full"></div>
             <div><label class="block text-sm font-semibold text-slate-700 mb-1.5">สัปดาห์</label>
                 <select name="WeekNo" class="form-input w-full">

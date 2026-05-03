@@ -403,7 +403,7 @@ async function _loadHeroStats() {
         const atCard = await buildActivityCard('hiyari');
         if (atCard) {
             strip.insertAdjacentHTML('beforeend', atCard);
-            strip.className = 'grid grid-cols-3 md:grid-cols-5 gap-3 w-full md:w-auto flex-shrink-0';
+            strip.className = 'grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 gap-3 w-full md:w-auto flex-shrink-0';
         }
     } catch {
         strip.innerHTML = '';

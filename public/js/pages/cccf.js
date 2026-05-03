@@ -408,7 +408,7 @@ window._cccfEditWorker = (id) => {
             <span class="w-5 h-5 rounded-full text-[9px] font-bold text-white flex items-center justify-center" style="background:linear-gradient(135deg,#059669,#0d9488)">5</span>
             <span class="text-xs font-bold text-slate-700">ระดับความรุนแรง (Rank) <span class="text-red-500">*</span></span>
           </div>
-          <div class="p-4 grid grid-cols-3 gap-2">
+          <div class="p-4 grid grid-cols-1 sm:grid-cols-3 gap-2">
             ${RANKS.map(rk => `
             <label class="cursor-pointer">
               <input type="radio" name="Rank" value="${rk.rank}" class="peer sr-only" required ${r.Rank === rk.rank ? 'checked' : ''}>
@@ -2092,7 +2092,7 @@ function renderPage(container) {
         </div>
 
         <!-- Rank criteria -->
-        <div class="grid grid-cols-3 gap-3">
+        <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
           ${RANKS.map(r => `
           <div class="bg-white rounded-xl p-4 border flex items-start gap-3 shadow-sm" style="border-color:${r.border}">
             <div class="w-10 h-10 rounded-xl flex items-center justify-center text-sm font-black flex-shrink-0 text-white" style="background:${r.color}">${r.rank}</div>
@@ -2602,7 +2602,7 @@ function openWorkerForm() {
             <span class="w-5 h-5 rounded-full text-[9px] font-bold text-white flex items-center justify-center" style="background:linear-gradient(135deg,#059669,#0d9488)">5</span>
             <span class="text-xs font-bold text-slate-700">ระดับความรุนแรง (Rank) <span class="text-red-500">*</span></span>
           </div>
-          <div class="p-4 grid grid-cols-3 gap-2">
+          <div class="p-4 grid grid-cols-1 sm:grid-cols-3 gap-2">
             ${RANKS.map(r => `
             <label class="cursor-pointer">
               <input type="radio" name="Rank" value="${r.rank}" class="peer sr-only" required>

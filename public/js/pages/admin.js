@@ -111,7 +111,7 @@ export async function loadAdminPage() {
                         <p class="text-sm mt-1" style="color:rgba(167,243,208,0.85)">ศูนย์ควบคุมระบบ · องค์กร · สิทธิ์การใช้งาน</p>
                     </div>
                     <!-- Stats strip — filled by STEP 2 -->
-                    <div id="admin-hero-stats" class="grid grid-cols-3 md:grid-cols-3 gap-3 w-full md:w-auto"></div>
+                    <div id="admin-hero-stats" class="grid grid-cols-2 md:grid-cols-3 gap-3 w-full md:w-auto"></div>
                 </div>
 
                 <!-- Tab bar — sits at bottom of hero -->
