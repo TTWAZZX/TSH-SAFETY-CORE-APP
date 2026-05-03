@@ -1,0 +1,19 @@
+{
+  "name": "TSH Safety Core Activity",
+  "short_name": "TSH Safety",
+  "description": "Safety Core Activity system for Thai Summit Harness.",
+  "start_url": "/index.html",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#ffffff",
+  "theme_color": "#059669",
+  "icons": [
+    {
+      "src": "/public/icons/app-icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}

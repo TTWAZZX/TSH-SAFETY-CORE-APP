@@ -4,8 +4,16 @@
     <base target="_top">
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="theme-color" content="#059669">
+    <meta name="color-scheme" content="light">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="default">
+    <meta name="apple-mobile-web-app-title" content="TSH Safety Core">
+    <meta name="mobile-web-app-capable" content="yes">
     <title>TSH Safety Core Activity</title>
     <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Cdefs%3E%3ClinearGradient id='g' x1='0%25' y1='0%25' x2='100%25' y2='100%25'%3E%3Cstop offset='0%25' stop-color='%23059669'/%3E%3Cstop offset='100%25' stop-color='%230d9488'/%3E%3C/linearGradient%3E%3C/defs%3E%3Crect width='32' height='32' rx='8' fill='url(%23g)'/%3E%3Cpath d='M16 4L7 8v7c0 6.1 3.8 11.5 9 12.9 5.2-1.4 9-6.8 9-12.9V8L16 4z' fill='white' opacity='0.95'/%3E%3Cpath d='M13 16l2.5 2.5L19.5 13' stroke='%23059669' stroke-width='2' stroke-linecap='round' stroke-linejoin='round' fill='none'/%3E%3C/svg%3E">
+    <link rel="manifest" href="public/manifest.webmanifest">
+    <link rel="apple-touch-icon" href="public/icons/app-icon.svg">
     
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdn.sheetjs.com/xlsx-latest/package/dist/xlsx.full.min.js"></script>
@@ -23,7 +31,7 @@
     <script src="https://cdn.jsdelivr.net/npm/flatpickr"></script>
     <script src="https://npmcdn.com/flatpickr/dist/l10n/th.js"></script>
 
-    <link rel="stylesheet" href="public/style.css">
+    <link rel="stylesheet" href="public/style.css?v=20260503-mobile-login">
 
     <script>
         // Dark mode disabled — always light
@@ -215,10 +223,10 @@
         <!-- ══════════════════════════════════════════════
              RIGHT PANEL — Login Form
         ══════════════════════════════════════════════ -->
-        <div class="flex-1 flex flex-col bg-white overflow-y-auto">
+        <div id="login-panel" class="flex-1 flex flex-col bg-white overflow-y-auto">
 
             <!-- Top bar -->
-            <div class="flex items-center justify-between px-4 sm:px-8 py-5 border-b border-slate-100 flex-shrink-0">
+            <div id="login-topbar" class="flex items-center justify-between px-4 sm:px-8 py-5 border-b border-slate-100 flex-shrink-0">
                 <!-- Mobile logo (hidden on desktop) -->
                 <div class="flex items-center gap-2.5 md:opacity-0 md:pointer-events-none">
                     <svg width="32" height="32" viewBox="0 0 40 40" fill="none" xmlns="http://www.w3.org/2000/svg" class="flex-shrink-0">
@@ -236,14 +244,14 @@
             </div>
 
             <!-- Form area — vertically centered, scrollable -->
-            <div class="flex-1 overflow-y-auto flex items-center justify-center px-4 sm:px-8 py-8">
+            <div id="login-form-area" class="flex-1 overflow-y-auto flex items-center justify-center px-4 sm:px-8 py-8">
                 <div class="w-full max-w-sm">
 
                     <!-- ══════════ LOGIN VIEW ══════════ -->
                     <div id="login-view">
                         <!-- Header -->
                         <div class="mb-8">
-                            <div class="w-12 h-12 rounded-2xl flex items-center justify-center mb-5" style="background:linear-gradient(135deg,#059669,#0d9488);box-shadow:0 4px 16px rgba(5,150,105,0.3)">
+                            <div class="login-hero-icon w-12 h-12 rounded-2xl flex items-center justify-center mb-5" style="background:linear-gradient(135deg,#059669,#0d9488);box-shadow:0 4px 16px rgba(5,150,105,0.3)">
                                 <svg class="w-6 h-6 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"/>
                                 </svg>
@@ -263,7 +271,7 @@
                                             <path stroke-linecap="round" stroke-linejoin="round" d="M10 6H5a2 2 0 00-2 2v9a2 2 0 002 2h14a2 2 0 002-2V8a2 2 0 00-2-2h-5m-4 0V5a2 2 0 114 0v1m-4 0a2 2 0 104 0m-5 8a2 2 0 100-4 2 2 0 000 4zm0 0c1.306 0 2.417.835 2.83 2M9 14a3.001 3.001 0 00-2.83 2M15 11h3m-3 4h2"/>
                                         </svg>
                                     </span>
-                                    <input id="login-employee-id" name="employeeId" type="text" required autocomplete="username"
+                                    <input id="login-employee-id" name="employeeId" type="text" required autocomplete="username" inputmode="text" autocapitalize="none" autocorrect="off" spellcheck="false"
                                         placeholder="เช่น 012609, AP0001, SP0001"
                                         class="w-full pl-10 pr-4 py-3 text-sm text-slate-800 bg-slate-50 rounded-xl outline-none transition-all duration-200 border border-slate-200 font-medium"
                                         onfocus="this.style.borderColor='#059669';this.style.boxShadow='0 0 0 3px rgba(5,150,105,0.12)';this.style.background='#fff'"
@@ -279,7 +287,7 @@
                                             <path stroke-linecap="round" stroke-linejoin="round" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"/>
                                         </svg>
                                     </span>
-                                    <input id="login-password" name="password" type="password" required autocomplete="current-password"
+                                    <input id="login-password" name="password" type="password" required autocomplete="current-password" autocapitalize="none" autocorrect="off" spellcheck="false"
                                         placeholder="กรอกรหัสผ่าน"
                                         class="w-full pl-10 pr-11 py-3 text-sm text-slate-800 bg-slate-50 rounded-xl outline-none transition-all duration-200 border border-slate-200 font-medium"
                                         onfocus="this.style.borderColor='#059669';this.style.boxShadow='0 0 0 3px rgba(5,150,105,0.12)';this.style.background='#fff'"
@@ -317,7 +325,7 @@
                         </p>
 
                         <!-- Security indicators -->
-                        <div class="mt-6 pt-5 border-t border-slate-100">
+                        <div id="login-security-indicators" class="mt-6 pt-5 border-t border-slate-100">
                             <div class="grid grid-cols-3 gap-3">
                                 <div class="flex flex-col items-center gap-1.5 text-center">
                                     <div class="w-8 h-8 rounded-lg bg-slate-50 border border-slate-100 flex items-center justify-center">
@@ -345,7 +353,7 @@
                     <div id="register-view" class="hidden">
                         <!-- Header -->
                         <div class="mb-6">
-                            <div class="w-12 h-12 rounded-2xl flex items-center justify-center mb-5" style="background:linear-gradient(135deg,#059669,#0d9488);box-shadow:0 4px 16px rgba(5,150,105,0.3)">
+                            <div class="login-hero-icon w-12 h-12 rounded-2xl flex items-center justify-center mb-5" style="background:linear-gradient(135deg,#059669,#0d9488);box-shadow:0 4px 16px rgba(5,150,105,0.3)">
                                 <svg class="w-6 h-6 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M18 9v3m0 0v3m0-3h3m-3 0h-3m-2-5a4 4 0 11-8 0 4 4 0 018 0zM3 20a6 6 0 0112 0v1H3v-1z"/>
                                 </svg>
@@ -358,7 +366,7 @@
                             <!-- Employee ID -->
                             <div>
                                 <label class="block text-xs font-bold mb-1.5 text-slate-600 tracking-wide uppercase">รหัสพนักงาน <span class="text-red-500">*</span></label>
-                                <input id="reg-id" type="text" required placeholder="เช่น 012609, AP0001, SP0001"
+                                <input id="reg-id" type="text" required inputmode="text" autocapitalize="none" autocorrect="off" spellcheck="false" placeholder="เช่น 012609, AP0001, SP0001"
                                     class="w-full px-3.5 py-2.5 text-sm bg-slate-50 rounded-xl outline-none transition-all duration-200 border border-slate-200"
                                     onfocus="this.style.borderColor='#059669';this.style.boxShadow='0 0 0 3px rgba(5,150,105,0.12)';this.style.background='#fff'"
                                     onblur="this.style.borderColor='';this.style.boxShadow='';this.style.background=''">
@@ -404,7 +412,7 @@
                             <!-- Password -->
                             <div>
                                 <label class="block text-xs font-bold mb-1.5 text-slate-600 tracking-wide uppercase">รหัสผ่าน <span class="text-red-500">*</span></label>
-                                <input id="reg-password" type="password" required placeholder="อย่างน้อย 8 ตัวอักษร" autocomplete="new-password"
+                                <input id="reg-password" type="password" required placeholder="อย่างน้อย 8 ตัวอักษร" autocomplete="new-password" autocapitalize="none" autocorrect="off" spellcheck="false"
                                     class="w-full px-3.5 py-2.5 text-sm bg-slate-50 rounded-xl outline-none transition-all duration-200 border border-slate-200"
                                     onfocus="this.style.borderColor='#059669';this.style.boxShadow='0 0 0 3px rgba(5,150,105,0.12)';this.style.background='#fff'"
                                     onblur="this.style.borderColor='';this.style.boxShadow='';this.style.background=''"
@@ -420,7 +428,7 @@
                             <!-- Confirm password -->
                             <div>
                                 <label class="block text-xs font-bold mb-1.5 text-slate-600 tracking-wide uppercase">ยืนยันรหัสผ่าน <span class="text-red-500">*</span></label>
-                                <input id="reg-password2" type="password" required placeholder="กรอกรหัสผ่านอีกครั้ง" autocomplete="new-password"
+                                <input id="reg-password2" type="password" required placeholder="กรอกรหัสผ่านอีกครั้ง" autocomplete="new-password" autocapitalize="none" autocorrect="off" spellcheck="false"
                                     class="w-full px-3.5 py-2.5 text-sm bg-slate-50 rounded-xl outline-none transition-all duration-200 border border-slate-200"
                                     onfocus="this.style.borderColor='#059669';this.style.boxShadow='0 0 0 3px rgba(5,150,105,0.12)';this.style.background='#fff'"
                                     onblur="this.style.borderColor='';this.style.boxShadow='';this.style.background=''">
@@ -452,7 +460,7 @@
             </div>
 
             <!-- Bottom bar -->
-            <div class="px-8 py-4 border-t border-slate-100 flex items-center justify-between flex-shrink-0">
+            <div id="login-footer" class="px-8 py-4 border-t border-slate-100 flex items-center justify-between flex-shrink-0">
                 <p class="text-xs text-slate-400">© 2025 Thai Summit Harness Co., Ltd.</p>
                 <p class="text-xs text-slate-400">Safety Core Activity System</p>
             </div>
@@ -872,6 +880,13 @@
 
     <!-- main.js โหลดหลังสุด -->
     <script type="module" src="public/js/main.js"></script>
+    <script>
+        if ('serviceWorker' in navigator && (location.protocol === 'https:' || location.hostname === 'localhost' || location.hostname === '127.0.0.1')) {
+            window.addEventListener('load', () => {
+                navigator.serviceWorker.register('/sw.js').catch(() => {});
+            });
+        }
+    </script>
 
 </body>
 </html>

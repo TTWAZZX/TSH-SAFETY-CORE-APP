@@ -917,6 +917,18 @@ Current roadmap after Phase A completion:
 - **Phase E — native confirm() removal**: Replaced all 3 native `confirm()` in `patrol.js` (`_armDeleteRecord`, `_arsvDeleteRecord`, `deleteSelfCheckin`) with `await showConfirmationModal(title, message)` from `ui.js`.
 - **Patrol Admin Record — all employees**: Admin can now search and manage patrol records for any employee (not roster-only) via a search card in the Overview tab. Uses new `GET /patrol/employee-search` endpoint + existing `openAdminRecordModal`.
 
+### Mobile/PWA Foundation (completed)
+
+- **Bottom mobile tab bar**: `#bottom-tab-bar` defaults to `display:none` in `public/style.css` and is enabled only inside `@media (max-width: 767px)`. Desktop/tablet-wide browser layouts should use the sidebar/top shell only.
+- **Mobile app shell**: `#app-container` and `#login-overlay` use `100dvh` with `100vh` fallback, `min-width:0` guards, iOS momentum scrolling, and safe-area padding for the bottom tab bar.
+- **Login mobile layout**: `index.html` adds `#login-panel`, `#login-topbar`, `#login-form-area`, `#login-footer`, `.login-hero-icon`, and `#login-security-indicators` hooks. On mobile the login form starts at the top instead of vertical-center, preventing Safari address-bar/footer UI from clipping the login icon/header.
+- **Short-height phones**: At `max-width:767px` + `max-height:760px`, login security indicators are hidden and spacing is reduced. At `max-height:640px`, login footer is hidden so the form remains usable on very short browser viewports.
+- **iPhone input zoom guard**: Mobile `input`, `select`, and `textarea` are forced to `16px` font size to prevent Safari auto-zoom on focus. Login/register employee ID and password fields disable autocapitalize/autocorrect/spellcheck.
+- **PWA shell**: `index.html` includes theme-color, Apple mobile web app meta, `public/manifest.webmanifest`, `public/icons/app-icon.svg`, and service worker registration. `vercel.json` must keep both the static build and route for root `/sw.js`.
+- **Service worker policy**: `sw.js` is intentionally network-only. It exists for installability/open-as-app behavior and must not cache HTML/API responses because the app uses authenticated, frequently changing safety data.
+- **CSS cache busting**: `index.html` links `public/style.css?v=20260503-mobile-login`. Bump this query string after future mobile CSS changes to reduce stale CSS on phones.
+- **Completed login visual QA**: Playwright Chromium screenshots passed for the public login page at `320x667`, `375x812`, `390x844`, and `430x932`: no clipped login header/icon and no horizontal overflow. Full post-login module QA still requires an authenticated/API-backed environment.
+
 ### Admin Audit Log
 
 Audit logging is centralized in `backend/utils/audit.js`.
