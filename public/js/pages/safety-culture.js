@@ -1970,13 +1970,13 @@ async function openPPEForm() {
     <form id="sc-ppef" class="space-y-5">
         <div class="rounded-xl border border-slate-100 p-4 space-y-3 bg-slate-50/50">
             <p class="text-xs font-bold text-slate-500 uppercase tracking-wide">ข้อมูลพื้นฐาน</p>
-            <div class="grid grid-cols-2 gap-3">
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div><label class="block text-sm font-semibold text-slate-700 mb-1">วันที่ตรวจ</label>
                     <input name="InspectionDate" type="date" required value="${today}" class="form-input w-full"></div>
                 <div><label class="block text-sm font-semibold text-slate-700 mb-1">Area/พื้นที่</label>
                     <input name="Area" type="text" placeholder="เช่น Production Zone A" class="form-input w-full"></div>
             </div>
-            <div class="grid grid-cols-2 gap-3">
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div><label class="block text-sm font-semibold text-slate-700 mb-1">แผนก <span class="text-red-500">*</span></label>
                     ${_departments.length > 0
                         ? `<select name="Department" required class="form-input w-full"><option value="">— เลือกแผนก —</option>${deptOpts}</select>`
@@ -1993,7 +1993,7 @@ async function openPPEForm() {
 
         <div class="rounded-xl border border-slate-100 p-4 space-y-3 bg-slate-50/50">
             <p class="text-xs font-bold text-slate-500 uppercase tracking-wide">พนักงานที่ถูกตรวจ</p>
-            <div class="grid grid-cols-2 gap-3">
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div><label class="block text-sm font-semibold text-slate-700 mb-1">รหัส/ชื่อพนักงาน</label>
                     <div class="relative">
                         <input id="sc-ppef-emp-q" type="text" placeholder="พิมพ์เพื่อค้นหา..."
@@ -2011,7 +2011,7 @@ async function openPPEForm() {
 
         <div class="rounded-xl border border-slate-100 p-4 space-y-3 bg-slate-50/50">
             <p class="text-xs font-bold text-slate-500 uppercase tracking-wide">ผู้ตรวจ (เว้นว่าง = ใช้บัญชีปัจจุบัน)</p>
-            <div class="grid grid-cols-2 gap-3">
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div><label class="block text-sm font-semibold text-slate-700 mb-1">รหัส/ชื่อผู้ตรวจ</label>
                     <div class="relative">
                         <input id="sc-ppef-insp-q" type="text" placeholder="พิมพ์เพื่อค้นหา..."
@@ -2209,7 +2209,7 @@ function viewPPERecord(id) {
             <div class="text-sm text-slate-500">ผลการตรวจ</div>
             ${passBadge}
         </div>
-        <div class="grid grid-cols-2 gap-3 text-sm bg-slate-50 rounded-xl p-4">
+        <div class="grid grid-cols-1 sm:grid-cols-2 gap-3 text-sm bg-slate-50 rounded-xl p-4">
             <div><span class="text-slate-500">วันที่: </span><span class="font-medium">${fmtDate(r.InspectionDate)}</span></div>
             <div><span class="text-slate-500">ผู้ตรวจ: </span><span class="font-medium">${escHtml(r.InspectorName || '-')}</span></div>
             <div><span class="text-slate-500">พนักงานที่ตรวจ: </span><span class="font-medium">${escHtml(r.InspectedEmployeeName || '-')}</span></div>

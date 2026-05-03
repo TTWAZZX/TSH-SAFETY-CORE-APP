@@ -878,7 +878,7 @@ function showNoticeForm(existing = null) {
     const ownerName = r?.ResponsiblePerson || _currentUser.name || _currentUser.EmployeeName || _currentUser.id || '';
     const html  = `
         <form id="notice-form" class="space-y-4" enctype="multipart/form-data">
-            <div class="grid grid-cols-2 gap-4">
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div>
                     <label class="block text-sm font-semibold text-slate-700 mb-1.5">Notice No</label>
                     <input type="text" class="form-input w-full bg-slate-50 text-slate-500" readonly ${existing ? '' : 'disabled'}
@@ -900,7 +900,7 @@ function showNoticeForm(existing = null) {
                 <textarea name="Description" rows="3" class="form-input w-full resize-none"
                           placeholder="รายละเอียดการเปลี่ยนแปลง...">${escHtml(r?.Description||'')}</textarea>
             </div>
-            <div class="grid grid-cols-2 gap-4">
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div>
                     <label class="block text-sm font-semibold text-slate-700 mb-1.5">Change Type <span class="text-red-500">*</span></label>
                     <select name="ChangeType" class="form-input w-full" required>
@@ -1009,7 +1009,7 @@ async function showNoticeDetail(id) {
                     ${timelineHtml}
                 </div>
 
-                <div class="grid grid-cols-2 gap-3 text-xs">
+                <div class="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
                     ${infoBlock('วันที่ขอเปลี่ยน', fmtDate(r.RequestDate)||'-')}
                     ${infoBlock('ผู้รับผิดชอบ', escHtml(r.ResponsiblePerson||'-'))}
                     ${infoBlock('แผนก', escHtml(r.Department||'-'))}
@@ -1482,7 +1482,7 @@ function showManForm(existing = null) {
                 <label class="block text-sm font-semibold text-slate-700 mb-1.5">แผนก <span class="text-red-500">*</span></label>
                 ${deptField}
             </div>
-            <div class="grid grid-cols-2 gap-4">
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div>
                     <label class="block text-sm font-semibold text-slate-700 mb-1.5">วันที่สอบ</label>
                     <input type="date" name="ExamDate" class="form-input w-full"
@@ -1639,7 +1639,7 @@ function _openFourmFormUploadModal() {
                 <label class="block text-sm font-semibold text-slate-700 mb-1.5">ชื่อแบบฟอร์ม <span class="text-red-500">*</span></label>
                 <input type="text" name="title" class="form-input w-full" required placeholder="เช่น แบบฟอร์ม Change Notice 4M">
             </div>
-            <div class="grid grid-cols-2 gap-3">
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div>
                     <label class="block text-sm font-semibold text-slate-700 mb-1.5">เวอร์ชัน</label>
                     <input type="text" name="version" class="form-input w-full" placeholder="เช่น v1.0">

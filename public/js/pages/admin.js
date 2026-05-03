@@ -2324,7 +2324,7 @@ window._ptAutoFill = function() {
             <p>• เดือนนอกช่วงที่เลือกจะไม่ถูกเปลี่ยน</p>
         </div>
         <!-- Month range -->
-        <div class="grid grid-cols-2 gap-3">
+        <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div>
                 <label class="block text-xs font-bold text-slate-500 uppercase mb-1.5">เดือนเริ่มต้น</label>
                 <select id="af-rot-from" class="form-input w-full text-sm">${monthOpts}</select>
@@ -2749,7 +2749,7 @@ window._ptSwapTwoModal = function() {
 
     openModal('สลับ Rotation ของสองคน', `
     <div class="space-y-4">
-        <div class="grid grid-cols-2 gap-3">
+        <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div>
                 <label class="block text-xs font-bold text-slate-500 uppercase mb-1.5">คนที่ 1</label>
                 <select id="swap-e1" class="form-input w-full text-sm">${memberOpts}</select>
@@ -2759,7 +2759,7 @@ window._ptSwapTwoModal = function() {
                 <select id="swap-e2" class="form-input w-full text-sm">${memberOpts}</select>
             </div>
         </div>
-        <div class="grid grid-cols-2 gap-3">
+        <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div>
                 <label class="block text-xs font-bold text-slate-500 uppercase mb-1.5">เดือนเริ่มต้น</label>
                 <select id="swap-from" class="form-input w-full text-sm">${monthOpts}</select>
@@ -2825,7 +2825,7 @@ window._ptCopyRow = function(sourceId) {
             <label class="block text-xs font-bold text-slate-500 uppercase mb-1.5">คัดลอกไปให้</label>
             <select id="copy-target" class="form-input w-full text-sm">${targetOpts}</select>
         </div>
-        <div class="grid grid-cols-2 gap-3">
+        <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div>
                 <label class="block text-xs font-bold text-slate-500 uppercase mb-1.5">เดือนเริ่มต้น</label>
                 <select id="copy-from" class="form-input w-full text-sm">${monthOpts}</select>
@@ -2906,7 +2906,7 @@ window._ptAutoFillModal = function() {
         </div>
 
         <!-- Month range -->
-        <div class="grid grid-cols-2 gap-3">
+        <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div>
                 <label class="block text-xs font-bold text-slate-500 uppercase mb-1.5">เดือนเริ่มต้น</label>
                 <select id="af-month-from" class="form-input w-full text-sm">${monthOpts}</select>
@@ -3488,7 +3488,7 @@ async function loadAreasList() {
 function _areaFormHTML(data = {}) {
     return `
         <div class="space-y-4">
-          <div class="grid grid-cols-2 gap-3">
+          <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div class="col-span-2">
               <label class="block text-xs font-bold text-slate-500 uppercase mb-1.5">ชื่อพื้นที่ <span class="text-red-400">*</span></label>
               <input type="text" id="area-name" class="form-input w-full rounded-lg text-sm" value="${data.Name||''}" placeholder="เช่น โรงงาน 1" required autofocus>
@@ -3846,7 +3846,7 @@ function _empFormFields(emp = {}) {
     const pOpts   = _posCache.map(p=>`<option value="${p.Name}" ${p.Name===emp.Position?'selected':''}>${p.Name}</option>`).join('');
     const rOpts   = ['User','Admin','Viewer'].map(r=>`<option value="${r}" ${r===(emp.Role||'User')?'selected':''}>${r}</option>`).join('');
     return `
-    <div class="grid grid-cols-2 gap-3">
+    <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
         <div>
             <label class="block text-xs font-bold text-slate-500 uppercase mb-1">รหัสพนักงาน <span class="text-red-500">*</span></label>
             <input type="text" name="EmployeeID" class="form-input w-full rounded-lg text-sm ${emp.EmployeeID?'bg-slate-50 cursor-not-allowed':''}"

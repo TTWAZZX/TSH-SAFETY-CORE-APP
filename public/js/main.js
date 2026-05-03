@@ -191,6 +191,22 @@ async function handleRouting() {
         else el.classList.remove('active');
     });
 
+    // ปิด sidebar บน mobile เมื่อ navigate
+    if (window.innerWidth < 768) {
+        document.getElementById('sidebar')?.classList.add('-translate-x-full');
+        document.getElementById('sidebar')?.classList.remove('translate-x-0');
+        document.getElementById('sidebar-backdrop')?.classList.remove('open');
+        document.getElementById('btab-more')?.classList.remove('btab-more-open');
+    }
+
+    // อัปเดต active state ใน bottom tab bar
+    const _btabMap = { dashboard:'dashboard', patrol:'patrol', cccf:'patrol', hiyari:'hiyari', fourm:'fourm' };
+    const _btabActive = _btabMap[hash] || null;
+    document.querySelectorAll('#bottom-tab-bar .btab[data-btab]').forEach(tab => {
+        if (tab.getAttribute('data-btab') === _btabActive) tab.classList.add('btab-active');
+        else tab.classList.remove('btab-active');
+    });
+
     // ซ่อนทุกหน้า
     document.querySelectorAll('.page-content').forEach(p => {
         p.classList.add('hidden');
@@ -288,6 +304,30 @@ function setupGlobalEventListeners() {
 
     // Hash change
     window.addEventListener('hashchange', handleRouting);
+
+    // Sidebar toggle (mobile)
+    (function() {
+        const sidebarEl  = document.getElementById('sidebar');
+        const backdropEl = document.getElementById('sidebar-backdrop');
+        const moreBtn    = document.getElementById('btab-more');
+
+        function _openSidebar() {
+            sidebarEl?.classList.remove('-translate-x-full');
+            sidebarEl?.classList.add('translate-x-0');
+            backdropEl?.classList.add('open');
+            moreBtn?.classList.add('btab-more-open');
+        }
+        function _closeSidebar() {
+            sidebarEl?.classList.add('-translate-x-full');
+            sidebarEl?.classList.remove('translate-x-0');
+            backdropEl?.classList.remove('open');
+            moreBtn?.classList.remove('btab-more-open');
+        }
+
+        document.getElementById('sidebar-toggle')?.addEventListener('click', _openSidebar);
+        backdropEl?.addEventListener('click', _closeSidebar);
+        moreBtn?.addEventListener('click', _openSidebar);
+    })();
 
     // Global click handler
     document.body.addEventListener('click', (e) => {

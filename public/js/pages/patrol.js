@@ -2898,7 +2898,7 @@ window.openIssueForm = function(mode, rawIssueData = null) {
           <div class="p-5 space-y-4">
 
             <!-- วันที่พบ + พื้นที่ -->
-            <div class="grid grid-cols-2 gap-4">
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div class="space-y-1.5">
                 <label class="block text-xs font-semibold text-slate-500">วันที่พบปัญหา</label>
                 <input type="date" id="if-date-found" name="DateFound"
@@ -2933,7 +2933,7 @@ window.openIssueForm = function(mode, rawIssueData = null) {
             </div>
 
             <!-- ชนิดอันตราย + Rank -->
-            <div class="grid grid-cols-2 gap-4">
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div class="space-y-1.5">
                 <label class="block text-xs font-semibold text-slate-500">ชนิดอันตราย (STOP)</label>
                 <select name="HazardType" class="w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm text-slate-700 focus:outline-none focus:ring-2 focus:ring-emerald-400 transition-all" ${s1d}>

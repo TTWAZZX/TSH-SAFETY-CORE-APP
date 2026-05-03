@@ -177,7 +177,7 @@ window._cccfShowWorkerDetail = (id) => {
           </div>
           <span class="w-10 h-10 rounded-xl flex items-center justify-center text-base font-black text-white flex-shrink-0" style="background:${rank.color}">${rank.rank}</span>
         </div>
-        <div class="grid grid-cols-2 gap-3">
+        <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
           ${row('ชื่อพนักงาน', r.EmployeeName)}
           ${row('รหัสพนักงาน', r.EmployeeID)}
           ${row('หน่วยงาน', r.Department)}
@@ -221,7 +221,7 @@ window._cccfShowPermanentDetail = (id) => {
             <p class="text-xs text-slate-500 mt-0.5">ส่งโดย ${escapeHtml(r.SubmitterName || '—')} · ${escapeHtml(dateStr)}</p>
           </div>
         </div>
-        <div class="grid grid-cols-2 gap-3">
+        <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
           <div><p class="text-[10px] font-bold text-slate-400 uppercase mb-1">ชื่อผู้ส่ง</p><p class="text-sm text-slate-700">${escapeHtml(r.SubmitterName || '—')}</p></div>
           <div><p class="text-[10px] font-bold text-slate-400 uppercase mb-1">หน่วยงาน</p><p class="text-sm text-slate-700">${escapeHtml(r.Department || '—')}</p></div>
           <div><p class="text-[10px] font-bold text-slate-400 uppercase mb-1">ชื่องาน / พื้นที่</p><p class="text-sm text-slate-700">${escapeHtml(r.JobArea || '—')}</p></div>
@@ -317,7 +317,7 @@ window._cccfEditWorker = (id) => {
             <span class="w-5 h-5 rounded-full text-[9px] font-bold text-white flex items-center justify-center" style="background:linear-gradient(135deg,#059669,#0d9488)">1</span>
             <span class="text-xs font-bold text-slate-700">ข้อมูลพนักงาน</span>
           </div>
-          <div class="p-4 grid grid-cols-2 gap-3">
+          <div class="p-4 grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div>
               <label class="block text-[10px] font-bold text-slate-400 uppercase mb-1">ชื่อพนักงาน</label>
               <input type="text" class="form-input w-full rounded-xl text-sm bg-slate-50 text-slate-500 cursor-not-allowed" readonly value="${escapeAttr(r.EmployeeName || '')}">
@@ -339,7 +339,7 @@ window._cccfEditWorker = (id) => {
             <span class="w-5 h-5 rounded-full text-[9px] font-bold text-white flex items-center justify-center" style="background:linear-gradient(135deg,#059669,#0d9488)">2</span>
             <span class="text-xs font-bold text-slate-700">พื้นที่ทำงาน / อุปกรณ์</span>
           </div>
-          <div class="p-4 grid grid-cols-2 gap-3">
+          <div class="p-4 grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div>
               <label class="block text-[10px] font-bold text-slate-400 uppercase mb-1">พื้นที่ / ชื่องาน <span class="text-red-500">*</span></label>
               <input type="text" name="JobArea" class="form-input w-full rounded-xl text-sm" required value="${escapeAttr(r.JobArea || '')}">
@@ -362,7 +362,7 @@ window._cccfEditWorker = (id) => {
               <label class="block text-[10px] font-bold text-slate-400 uppercase mb-1">อธิบายอันตรายที่พบ <span class="text-red-500">*</span></label>
               <textarea name="HazardDescription" rows="2" class="form-input w-full rounded-xl text-sm resize-none" required>${escapeHtml(r.HazardDescription || '')}</textarea>
             </div>
-            <div class="grid grid-cols-2 gap-3">
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <div>
                 <label class="block text-[10px] font-bold text-slate-400 uppercase mb-1">วิธีที่อาจเกิดอันตราย</label>
                 <textarea name="HowItHappened" rows="2" class="form-input w-full rounded-xl text-sm resize-none">${escapeHtml(r.HowItHappened || '')}</textarea>
@@ -956,7 +956,7 @@ window._cccfSetUnitTarget = (unit, currentTarget, achievedOverride, computedAchi
       <div class="space-y-4 px-1">
         <p class="text-xs text-slate-500">กำหนดค่าสำหรับ Unit นี้ในปี <strong>${_unitYear + 543}</strong></p>
 
-        <div class="grid grid-cols-2 gap-3">
+        <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
           <div>
             <label class="block text-[10px] font-bold text-slate-400 uppercase mb-1.5">เป้าหมาย (คน/ปี) <span class="text-red-500">*</span></label>
             <input id="unit-target-input" type="number" min="0" max="9999" value="${currentTarget || 0}"
@@ -2497,7 +2497,7 @@ function openWorkerForm() {
             <span class="w-5 h-5 rounded-full text-[9px] font-bold text-white flex items-center justify-center" style="background:linear-gradient(135deg,#059669,#0d9488)">1</span>
             <span class="text-xs font-bold text-slate-700">ข้อมูลพนักงาน</span>
           </div>
-          <div class="p-4 grid grid-cols-2 gap-3">
+          <div class="p-4 grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div>
               <label class="block text-[10px] font-bold text-slate-400 uppercase mb-1">ชื่อพนักงาน</label>
               <input type="text" name="EmployeeName" class="form-input w-full rounded-xl text-sm bg-slate-50 text-slate-500 cursor-not-allowed" readonly value="${escapeAttr(currentUser.name || '')}">
@@ -2533,7 +2533,7 @@ function openWorkerForm() {
             <span class="w-5 h-5 rounded-full text-[9px] font-bold text-white flex items-center justify-center" style="background:linear-gradient(135deg,#059669,#0d9488)">2</span>
             <span class="text-xs font-bold text-slate-700">พื้นที่ทำงาน / อุปกรณ์</span>
           </div>
-          <div class="p-4 grid grid-cols-2 gap-3">
+          <div class="p-4 grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div>
               <label class="block text-[10px] font-bold text-slate-400 uppercase mb-1">พื้นที่ / ชื่องาน <span class="text-red-500">*</span></label>
               <input type="text" name="JobArea" class="form-input w-full rounded-xl text-sm" required placeholder="เช่น Line 1, คลังสินค้า">
@@ -2556,7 +2556,7 @@ function openWorkerForm() {
               <label class="block text-[10px] font-bold text-slate-400 uppercase mb-1">อธิบายอันตรายที่พบ <span class="text-red-500">*</span></label>
               <textarea name="HazardDescription" rows="2" class="form-input w-full rounded-xl text-sm resize-none" required placeholder="อธิบายสภาพอันตรายที่พบ..."></textarea>
             </div>
-            <div class="grid grid-cols-2 gap-3">
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <div>
                 <label class="block text-[10px] font-bold text-slate-400 uppercase mb-1">วิธีที่อาจเกิดอันตราย</label>
                 <textarea name="HowItHappened" rows="2" class="form-input w-full rounded-xl text-sm resize-none" placeholder="อธิบายกลไกการบาดเจ็บ..."></textarea>
@@ -2667,7 +2667,7 @@ function openPermanentForm(record = null, forcedAssigneeId = '') {
             ? (isEdit ? 'แอดมินสามารถแก้ไขรายการ อัปไฟล์แทนผู้ใช้ และเปลี่ยนผู้รับผิดชอบได้จากฟอร์มนี้' : 'แอดมินสามารถสร้างหรืออัปไฟล์ Form A Permanent แทนผู้ใช้ได้จากฟอร์มนี้')
             : 'หัวหน้างานขึ้นไปส่งแบบฟอร์มที่ดำเนินการแก้ไขถาวรแล้ว พร้อมแนบไฟล์เอกสาร'}
         </div>
-        <div class="grid grid-cols-2 gap-3">
+        <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
           ${isAdmin ? `
             <div class="col-span-2">
               <label class="block text-[10px] font-bold text-slate-400 uppercase mb-1.5">ผู้รับผิดชอบ / ส่งแทน</label>

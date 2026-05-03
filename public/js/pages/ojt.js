@@ -795,7 +795,7 @@ function openRecordModal(department, record = null) {
     openModal(record?.id ? `อัปเดต OJT — ${department}` : `บันทึก OJT — ${department}`, `
         <form id="ojt-record-form" class="space-y-4">
             <input type="hidden" name="Department" value="${_esc(department)}">
-            <div class="grid grid-cols-2 gap-4">
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div>
                     <label class="block text-sm font-semibold text-slate-700 mb-1.5">วันที่ OJT <span class="text-red-500">*</span></label>
                     <input name="OJTDate" type="date" required value="${ojtDate}" class="form-input w-full">
@@ -809,7 +809,7 @@ function openRecordModal(department, record = null) {
                     </select>
                 </div>
             </div>
-            <div class="grid grid-cols-2 gap-4">
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div>
                     <label class="block text-sm font-semibold text-slate-700 mb-1.5">วิทยากร</label>
                     <input name="TrainerName" type="text" value="${_esc(record?.TrainerName || '')}" placeholder="ชื่อวิทยากร" class="form-input w-full">

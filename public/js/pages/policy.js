@@ -811,7 +811,7 @@ function showPolicyForm(rawPolicy = null) {
             </div>
 
             <!-- Category + IsCurrent -->
-            <div class="grid grid-cols-2 gap-4">
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div>
                     <label class="block text-sm font-semibold text-slate-700 mb-1.5">หมวดหมู่</label>
                     <select name="Category" class="form-input w-full">
@@ -832,7 +832,7 @@ function showPolicyForm(rawPolicy = null) {
             </div>
 
             <!-- Dates -->
-            <div class="grid grid-cols-2 gap-4">
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div>
                     <label class="block text-sm font-semibold text-slate-700 mb-1.5">
                         วันที่บังคับใช้ <span class="text-red-500">*</span>
@@ -906,8 +906,8 @@ function showPolicyForm(rawPolicy = null) {
 
     openModal(isEditing ? 'แก้ไขนโยบาย' : 'เพิ่มนโยบายใหม่', html, 'max-w-2xl');
 
-    flatpickr('#EffectiveDate', { locale: 'th', dateFormat: 'Y-m-d', defaultDate: policy?.EffectiveDate?.split('T')[0] || 'today' });
-    flatpickr('#ReviewDate',    { locale: 'th', dateFormat: 'Y-m-d' });
+    flatpickr('#EffectiveDate', { locale: 'th', dateFormat: 'Y-m-d', defaultDate: policy?.EffectiveDate?.split('T')[0] || 'today', mobileNative: true });
+    flatpickr('#ReviewDate',    { locale: 'th', dateFormat: 'Y-m-d', mobileNative: true });
 
     // ── Rich text editor init ─────────────────────────────────────────────
     setTimeout(() => {

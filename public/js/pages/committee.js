@@ -880,7 +880,7 @@ function openCommitteeForm(committee = null) {
     </div>
 
     <!-- วันวาระ -->
-    <div class="grid grid-cols-2 gap-4">
+    <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
       <div>
         <label class="block text-sm font-bold text-slate-700 mb-1.5">วันเริ่มวาระ</label>
         <input type="text" id="TermStartDate" name="TermStartDate"
@@ -985,8 +985,8 @@ function openCommitteeForm(committee = null) {
   </form>`;
 
   openModal(isEditing ? 'แก้ไขข้อมูลคณะกรรมการ' : 'เพิ่มคณะกรรมการใหม่', html, 'max-w-2xl');
-  flatpickr('#TermStartDate', { locale: 'th', dateFormat: 'Y-m-d' });
-  flatpickr('#TermEndDate',   { locale: 'th', dateFormat: 'Y-m-d' });
+  flatpickr('#TermStartDate', { locale: 'th', dateFormat: 'Y-m-d', mobileNative: true });
+  flatpickr('#TermEndDate',   { locale: 'th', dateFormat: 'Y-m-d', mobileNative: true });
   renderSubCommitteeList();
 
   /* tab toggle helper */

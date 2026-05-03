@@ -1376,7 +1376,7 @@ function _openKyFormUploadModal() {
                 <label class="block text-xs font-semibold text-slate-600 mb-1">ชื่อแบบฟอร์ม <span class="text-red-500">*</span></label>
                 <input type="text" id="kyff-title" class="form-input w-full rounded-xl text-sm" placeholder="เช่น แบบฟอร์มกิจกรรม KY" maxlength="200">
             </div>
-            <div class="grid grid-cols-2 gap-3">
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div>
                     <label class="block text-xs font-semibold text-slate-600 mb-1">เวอร์ชั่น</label>
                     <input type="text" id="kyff-version" class="form-input w-full rounded-xl text-sm" placeholder="เช่น v1.0" maxlength="30">
@@ -1757,7 +1757,7 @@ async function openAddConfigModal(existingCfg = null) {
                 </div>
             </div>`}
 
-            <div class="grid grid-cols-2 gap-4">
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div>
                     <label class="block text-sm font-semibold text-slate-700 mb-1.5">เป้าหมาย/ปี (ครั้ง)</label>
                     <input type="number" name="YearlyTarget" class="form-input w-full" min="1" max="52"
@@ -2083,7 +2083,7 @@ async function showDetailModal(id) {
                     </div>
                 </div>
 
-                <div class="grid grid-cols-2 gap-3">
+                <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
                     ${infoField('วันที่', date)}
                     ${infoField('แผนก', r.Department || '-')}
                     ${infoField('ชื่อทีม', r.TeamName || '-')}

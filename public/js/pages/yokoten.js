@@ -2205,7 +2205,7 @@ function openTopicForm(topic = null, prefill = null) {
                  style="min-height:96px;border-top:0"
                  data-placeholder="อธิบายบทเรียน / เหตุการณ์ / ความรู้ที่ต้องการแบ่งปัน"></div>
         </div>
-        <div class="grid grid-cols-2 gap-4">
+        <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div>
                 <label class="block text-sm font-semibold text-slate-700 mb-1.5">หมวดหมู่</label>
                 <select id="yt-cat" class="form-input w-full">${catOpts}</select>

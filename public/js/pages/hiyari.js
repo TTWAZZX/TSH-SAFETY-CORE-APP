@@ -2234,7 +2234,7 @@ function _openHiyariFormUploadModal() {
                 <label class="block text-xs font-semibold text-slate-600 mb-1">ชื่อแบบฟอร์ม <span class="text-red-500">*</span></label>
                 <input type="text" id="hff-title" class="form-input w-full rounded-xl text-sm" placeholder="เช่น แบบฟอร์มรายงาน Hiyari-Hatto" maxlength="200">
             </div>
-            <div class="grid grid-cols-2 gap-3">
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div>
                     <label class="block text-xs font-semibold text-slate-600 mb-1">เวอร์ชั่น</label>
                     <input type="text" id="hff-version" class="form-input w-full rounded-xl text-sm" placeholder="เช่น v1.0" maxlength="30">
@@ -2730,7 +2730,7 @@ function openAssignmentModal(assignment = null) {
 
         <!-- Common form fields + submit -->
         <form id="assignment-form" class="space-y-3 border-t border-slate-100 pt-3">
-            <div class="grid grid-cols-2 gap-3">
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div>
                     <label class="block text-[10px] font-bold text-slate-400 uppercase mb-1.5">วันกำหนดส่ง</label>
                     <input type="date" id="add-due-date" class="form-input w-full rounded-xl text-sm">
@@ -3113,7 +3113,7 @@ async function showDetailModal(id) {
                 </div>
 
                 <!-- Info grid -->
-                <div class="grid grid-cols-2 gap-3">
+                <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
                     <div><p class="text-[10px] font-bold text-slate-400 uppercase mb-1">แผนก</p><p class="text-sm text-slate-700">${escHtml(r.Department || '-')}</p></div>
                     <div><p class="text-[10px] font-bold text-slate-400 uppercase mb-1">ผลที่อาจเกิดขึ้น</p><p class="text-sm text-slate-700">${escHtml(r.PotentialConsequence || '-')}</p></div>
                     ${stDet ? `<div><p class="text-[10px] font-bold text-slate-400 uppercase mb-1">Stop Type</p><p class="text-sm font-semibold" style="color:${stDet.color}">${stDet.code} — ${stDet.label}</p></div>` : ''}
@@ -3247,7 +3247,7 @@ async function showManageModal(id) {
                 <form id="manage-form" class="space-y-4 px-1">
                     <input type="hidden" name="id" value="${r.id}">
 
-                    <div class="grid grid-cols-2 gap-3">
+                    <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
                         <div class="col-span-2">
                             <label class="block text-[10px] font-bold text-slate-400 uppercase mb-1.5">สถานะ</label>
                             <select name="Status" class="form-select w-full rounded-xl text-sm">

@@ -800,7 +800,7 @@ function _machineFormHtml(m = {}) {
 
     return `
     <form id="msd-form" class="space-y-4">
-        <div class="grid grid-cols-2 gap-4">
+        <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div>
                 <label class="block text-sm font-semibold text-slate-700 mb-1.5">รหัสเครื่องจักร <span class="text-red-500">*</span></label>
                 <input name="MachineCode" required value="${m.MachineCode || ''}" placeholder="เช่น MC-001"
@@ -812,7 +812,7 @@ function _machineFormHtml(m = {}) {
                     class="form-input w-full">
             </div>
         </div>
-        <div class="grid grid-cols-2 gap-4">
+        <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div>
                 <label class="block text-sm font-semibold text-slate-700 mb-1.5">แผนก</label>
                 <select name="Department"
@@ -828,7 +828,7 @@ function _machineFormHtml(m = {}) {
             </div>
         </div>
 
-        <div class="grid grid-cols-2 gap-4">
+        <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div>
                 <label class="block text-sm font-semibold text-slate-700 mb-1.5">สถานะเครื่องจักร</label>
                 <select name="Status" class="form-input w-full">
@@ -850,7 +850,7 @@ function _machineFormHtml(m = {}) {
             </div>
         </div>
 
-        <div class="grid grid-cols-2 gap-4">
+        <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div>
                 <label class="block text-sm font-semibold text-slate-700 mb-1.5">วันตรวจสอบครั้งถัดไป</label>
                 <input type="date" name="NextInspectionDate"

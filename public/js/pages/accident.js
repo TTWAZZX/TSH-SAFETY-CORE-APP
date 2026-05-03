@@ -949,7 +949,7 @@ function openAccidentForm(r, existingAttachments = []) {
                 <input type="time" name="AccidentTime" value="${d(r?.AccidentTime)}" class="form-input w-full">
             </div>
         </div>
-        <div class="grid grid-cols-2 gap-3">
+        <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div>
                 <label class="block text-sm font-semibold text-slate-700 mb-1.5">สถานที่เกิดเหตุ (Location)</label>
                 <input name="Location" value="${_esc(d(r?.Location))}"
@@ -988,7 +988,7 @@ function openAccidentForm(r, existingAttachments = []) {
                 ${r?.EmployeeName ? `<svg class="w-3.5 h-3.5 inline-block mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"/></svg>${_esc(r.EmployeeName)} · ${_esc(r.Department || '')}` : ''}
             </div>
         </div>
-        <div class="grid grid-cols-2 gap-3">
+        <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div>
                 <label class="block text-sm font-semibold text-slate-700 mb-1.5">ตำแหน่งงาน</label>
                 <input name="Position" value="${_esc(d(r?.Position))}"
@@ -1005,7 +1005,7 @@ function openAccidentForm(r, existingAttachments = []) {
 
         <!-- ── Section 3: Incident ───────────────────────────────────────── -->
         ${_sectionHeader('รายละเอียดเหตุการณ์')}
-        <div class="grid grid-cols-2 gap-3">
+        <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div>
                 <label class="block text-sm font-semibold text-slate-700 mb-1.5">ประเภทอุบัติเหตุ <span class="text-red-500">*</span></label>
                 <select name="AccidentType" required class="form-input w-full">
@@ -1028,7 +1028,7 @@ function openAccidentForm(r, existingAttachments = []) {
 
         <!-- ── Section 4: Injury ─────────────────────────────────────────── -->
         ${_sectionHeader('รายละเอียดการบาดเจ็บ')}
-        <div class="grid grid-cols-2 gap-3">
+        <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div>
                 <label class="block text-sm font-semibold text-slate-700 mb-1.5">ลักษณะการบาดเจ็บ</label>
                 <select name="InjuryType" class="form-input w-full">
@@ -1044,7 +1044,7 @@ function openAccidentForm(r, existingAttachments = []) {
                 </select>
             </div>
         </div>
-        <div class="grid grid-cols-2 gap-3">
+        <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div>
                 <label class="block text-sm font-semibold text-slate-700 mb-1.5">วันหยุดงาน (Lost Time Days)</label>
                 <input type="number" name="LostDays" min="0" value="${d(r?.LostDays) || 0}" class="form-input w-full">
@@ -1070,7 +1070,7 @@ function openAccidentForm(r, existingAttachments = []) {
             <input name="ImmediateCause" value="${_esc(d(r?.ImmediateCause))}"
                 placeholder="สาเหตุที่เกิดขึ้นทันที" class="form-input w-full">
         </div>
-        <div class="grid grid-cols-2 gap-3">
+        <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div>
                 <label class="block text-sm font-semibold text-slate-700 mb-1.5">กระทำที่ไม่ปลอดภัย (Unsafe Act)</label>
                 <input name="UnsafeAct" value="${_esc(d(r?.UnsafeAct))}"
@@ -1082,7 +1082,7 @@ function openAccidentForm(r, existingAttachments = []) {
                     placeholder="สภาพแวดล้อมที่เกี่ยวข้อง" class="form-input w-full">
             </div>
         </div>
-        <div class="grid grid-cols-2 gap-3">
+        <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div>
                 <label class="block text-sm font-semibold text-slate-700 mb-1.5">สาเหตุรากเหง้า (Root Cause)</label>
                 <select name="RootCause" class="form-input w-full">
@@ -1099,7 +1099,7 @@ function openAccidentForm(r, existingAttachments = []) {
 
         <!-- ── Section 6: Actions + Attachments ─────────────────────────── -->
         ${_sectionHeader('มาตรการแก้ไขและเอกสาร')}
-        <div class="grid grid-cols-2 gap-3">
+        <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div>
                 <label class="block text-sm font-semibold text-slate-700 mb-1.5">มาตรการแก้ไข (Corrective Action)</label>
                 <textarea name="CorrectiveAction" rows="2" class="form-textarea w-full resize-none"
@@ -1168,9 +1168,9 @@ function openAccidentForm(r, existingAttachments = []) {
 
     // Flatpickr
     if (typeof flatpickr !== 'undefined') {
-        flatpickr('#acc-accident-date', { locale: 'th', dateFormat: 'Y-m-d', defaultDate: d(r?.AccidentDate).split('T')[0] || 'today' });
-        flatpickr('#acc-report-date',   { locale: 'th', dateFormat: 'Y-m-d', defaultDate: d(r?.ReportDate).split('T')[0]   || 'today' });
-        flatpickr('#acc-due-date',      { locale: 'th', dateFormat: 'Y-m-d', defaultDate: d(r?.DueDate).split('T')[0]      || null    });
+        flatpickr('#acc-accident-date', { locale: 'th', dateFormat: 'Y-m-d', defaultDate: d(r?.AccidentDate).split('T')[0] || 'today', mobileNative: true });
+        flatpickr('#acc-report-date',   { locale: 'th', dateFormat: 'Y-m-d', defaultDate: d(r?.ReportDate).split('T')[0]   || 'today', mobileNative: true });
+        flatpickr('#acc-due-date',      { locale: 'th', dateFormat: 'Y-m-d', defaultDate: d(r?.DueDate).split('T')[0]      || null,    mobileNative: true });
     }
 
     // File input → validate + stage files
@@ -1623,7 +1623,7 @@ function _renderAccidentDetail(r) {
                 </div>
             </div>
 
-            <div class="grid grid-cols-2 gap-3">
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 ${_accInfoField('Accident Date', `${fmtDate(r.AccidentDate)} ${r.AccidentTime || ''}`.trim())}
                 ${_accInfoField('Report Date', fmtDate(r.ReportDate))}
                 ${_accInfoField('Employee', `${r.EmployeeID || '-'} ${r.EmployeeName ? '- ' + r.EmployeeName : ''}`)}
@@ -1860,7 +1860,7 @@ window._accEditPerformance = () => {
     const html = `
     <form id="perf-form" class="space-y-4">
         <input type="hidden" name="Year" value="${p.Year || new Date().getFullYear()}">
-        <div class="grid grid-cols-2 gap-3">
+        <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div>
                 <label class="block text-sm font-semibold text-slate-700 mb-1.5">ปี (Year)</label>
                 <input type="text" value="${p.Year || new Date().getFullYear()}"
@@ -1873,7 +1873,7 @@ window._accEditPerformance = () => {
                     placeholder="เว้นว่างถ้าไม่มีข้อมูล">
             </div>
         </div>
-        <div class="grid grid-cols-2 gap-3">
+        <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div>
                 <label class="block text-sm font-semibold text-slate-700 mb-1.5">
                     Man-Hours ปลอดอุบัติเหตุ
@@ -1891,7 +1891,7 @@ window._accEditPerformance = () => {
                     value="${p.TotalDays || 0}" class="form-input w-full">
             </div>
         </div>
-        <div class="grid grid-cols-2 gap-3">
+        <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div>
                 <label class="block text-sm font-semibold text-slate-700 mb-1.5">เป้าหมาย Man-Hours</label>
                 <input type="number" name="TargetHours" min="0"
@@ -1915,7 +1915,7 @@ window._accEditPerformance = () => {
     openModal('แก้ไข Safety Performance', html, 'max-w-lg');
 
     if (typeof flatpickr !== 'undefined') {
-        flatpickr('#perf-last-date', { locale: 'th', dateFormat: 'Y-m-d' });
+        flatpickr('#perf-last-date', { locale: 'th', dateFormat: 'Y-m-d', mobileNative: true });
     }
 
     document.getElementById('perf-form')?.addEventListener('submit', async e => {

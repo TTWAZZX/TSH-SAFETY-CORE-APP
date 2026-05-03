@@ -1040,7 +1040,7 @@ function showAnnouncementForm() {
         </div>
       </form>`, 'max-w-lg');
 
-    window.flatpickr?.('#ann-date', { locale: 'th', dateFormat: 'Y-m-d', defaultDate: 'today' });
+    window.flatpickr?.('#ann-date', { locale: 'th', dateFormat: 'Y-m-d', defaultDate: 'today', mobileNative: true });
     document.getElementById('ann-form').addEventListener('submit', handleAnnouncementSubmit);
 }
 
@@ -1095,7 +1095,7 @@ function showKpiForm(kpi = null, announcementId = null) {
         <input type="hidden" name="Year" value="${selYear}">
         <input type="hidden" name="AnnouncementID" value="${annId || ''}">
 
-        <div class="grid grid-cols-2 gap-4">
+        <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
           <div class="col-span-2">
             <label class="block text-sm font-bold text-slate-700 mb-1.5">ชื่อตัวชี้วัด <span class="text-red-500">*</span></label>
             <input type="text" name="Metric" class="form-input w-full rounded-xl font-medium" value="${kpi?.Metric || ''}" required placeholder="เช่น อัตราการเกิดอุบัติเหตุ">
