@@ -1142,7 +1142,7 @@ function showKpiForm(kpi = null, announcementId = null) {
             </label>
             <span class="text-xs text-slate-400">เว้นว่างได้ถ้าไม่มีข้อมูล</span>
           </div>
-          <div class="grid grid-cols-6 gap-2">${monthInputs}</div>
+          <div class="grid grid-cols-4 sm:grid-cols-6 gap-2">${monthInputs}</div>
         </div>
 
         <div class="flex justify-end gap-3 pt-2 border-t border-slate-100">

@@ -97,7 +97,7 @@ export async function loadAdminPage() {
             <!-- glow orb -->
             <div class="absolute -right-16 -top-16 w-72 h-72 rounded-full opacity-10 pointer-events-none" style="background:radial-gradient(circle,#fff,transparent 70%)"></div>
 
-            <div class="relative z-10 max-w-7xl mx-auto px-6 pt-6">
+            <div class="relative z-10 max-w-7xl mx-auto px-4 sm:px-6 pt-6">
                 <!-- Title row -->
                 <div class="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
                     <div>

@@ -107,6 +107,9 @@ body { font-family: 'Kanit', sans-serif; background-color: #1e5c3e; }
 ::-webkit-scrollbar { width: 6px; height: 6px; } ::-webkit-scrollbar-track { background: transparent; } ::-webkit-scrollbar-thumb { background: #a7f3d0; border-radius: 10px; }
 /* Sidebar scrollbar (on green bg) */
 #sidebar .custom-scrollbar::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.25); }
+/* Hide scrollbar (used on tab bars, horizontal-scroll rows) */
+.scrollbar-none { scrollbar-width: none; -ms-overflow-style: none; }
+.scrollbar-none::-webkit-scrollbar { display: none; }
 .tab-button { padding: 0.5rem 1rem; border: none; background: transparent; cursor: pointer; border-bottom: 2px solid transparent; font-weight: 500; color: #64748b; transition: all 0.15s; }
 .tab-button.active { color: #059669; border-bottom-color: #059669; }
 .tab-content { display: none; } .tab-content.active { display: block; }
@@ -533,7 +536,7 @@ body { font-family: 'Kanit', sans-serif; background-color: #1e5c3e; }
     }
 }
 
-/* Phase M3: touch-friendly minimum tap targets */
+/* Phase M3/M4: touch-friendly minimum tap targets + compact table on mobile */
 @media (max-width: 767px) {
     .form-input,
     .form-select,
@@ -543,4 +546,9 @@ body { font-family: 'Kanit', sans-serif; background-color: #1e5c3e; }
     button.btn {
         min-height: 44px;
     }
+    /* Tighter table cells on mobile — still readable, more rows visible */
+    .ds-table th { padding: 0.5rem 0.75rem; }
+    .ds-table td { padding: 0.5rem 0.75rem; font-size: 0.8125rem; }
+    /* Tighter hero section padding on mobile */
+    .space-y-6.animate-fade-in { padding-left: 0; padding-right: 0; }
 }
