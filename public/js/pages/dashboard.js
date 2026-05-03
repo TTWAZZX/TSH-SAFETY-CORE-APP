@@ -144,6 +144,15 @@ function setupDashboardEvents() {
     document.addEventListener('click', (e) => {
         if (!e.target.closest('#dashboard-page')) return;
         if (e.target.closest('#btn-dashboard-config')) openDashboardConfigModal();
+
+        // Dashboard drill-down: write filter state before module navigation
+        const card = e.target.closest('#db-module-cards a[data-filter]');
+        if (card) {
+            try {
+                const hash = card.getAttribute('href').replace('#', '');
+                sessionStorage.setItem(`pending_filter_${hash}`, card.dataset.filter);
+            } catch (_) {}
+        }
     });
 }
 
@@ -431,6 +440,7 @@ function _renderModuleCards(d) {
                 ? `<span class="text-amber-600 font-semibold">${d.patrol.openIssues} ประเด็นค้าง</span>`
                 : `<span class="text-emerald-600">ไม่มีประเด็นค้าง</span>`,
             pct: d.patrol?.rate,
+            filterState: d.patrol?.openIssues > 0 ? JSON.stringify({ tab: 'issues' }) : null,
         },
         {
             hash: 'hiyari',
@@ -444,6 +454,7 @@ function _renderModuleCards(d) {
                 ? `<span class="text-red-600 font-semibold">${d.hiyari.open} รอดำเนินการ</span>`
                 : `<span class="text-emerald-600">ดำเนินการครบแล้ว</span>`,
             alert: d.hiyari?.open > 0,
+            filterState: d.hiyari?.open > 0 ? JSON.stringify({ tab: 'history', status: 'pending' }) : null,
         },
         {
             hash: 'ky',
@@ -521,6 +532,7 @@ function _renderModuleCards(d) {
                 ? `<span class="text-emerald-600">ไม่มีรายการค้าง</span>`
                 : `<span class="text-amber-600 font-semibold">รอดำเนินการ ${d.fourm?.open} รายการ</span>`,
             alert: d.fourm?.open > 0,
+            filterState: d.fourm?.open > 0 ? JSON.stringify({ tab: 'notices', status: 'Open' }) : null,
         },
         {
             hash: 'kpi',
@@ -615,6 +627,7 @@ function _renderModuleCards(d) {
 
         return `
         <a href="#${m.hash}"
+           ${m.filterState ? `data-filter='${m.filterState}'` : ''}
            class="bg-white rounded-xl border ${m.alert ? 'border-red-200' : 'border-slate-100'}
                   shadow-sm p-5 hover:shadow-md transition-all group cursor-pointer
                   ${m.alert ? 'ring-1 ring-red-200' : ''}">

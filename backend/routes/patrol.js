@@ -1549,4 +1549,22 @@ router.delete('/admin-record/supervisor/:id', isAdmin, async (req, res) => {
     }
 });
 
+// GET /api/patrol/employee-search — Admin ค้นหาพนักงานทุกคน (ไม่จำกัดเฉพาะ roster)
+router.get('/employee-search', isAdmin, async (req, res) => {
+    try {
+        const q = (req.query.q || '').trim();
+        let sql = 'SELECT EmployeeID, EmployeeName, Department, Position FROM Employees WHERE 1=1';
+        const params = [];
+        if (q) {
+            sql += ' AND (EmployeeID LIKE ? OR EmployeeName LIKE ? OR Department LIKE ?)';
+            params.push(`%${q}%`, `%${q}%`, `%${q}%`);
+        }
+        sql += ' ORDER BY EmployeeName ASC LIMIT 30';
+        const [rows] = await db.query(sql, params);
+        res.json({ success: true, data: rows });
+    } catch (err) {
+        res.status(500).json({ success: false, message: err.message });
+    }
+});
+
 module.exports = router;

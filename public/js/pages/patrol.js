@@ -1,4 +1,4 @@
-import { openModal, closeModal, showLoading, hideLoading, showToast, showError, escHtml } from '../ui.js';
+import { openModal, closeModal, showLoading, hideLoading, showToast, showError, escHtml, showConfirmationModal } from '../ui.js';
 import { API } from '../api.js';
 import { normalizeApiArray, normalizeApiObject } from '../utils/normalize.js';
 
@@ -153,10 +153,25 @@ export async function loadPatrolPage() {
         setTimeout(() => initPromoCarousel(), 100);
         loadDashboardCharts();
 
+        // Apply incoming filter from dashboard drill-down (overrides saved tab)
+        let _dashFilterApplied = false;
+        try {
+            const _inFilter = JSON.parse(sessionStorage.getItem('pending_filter_patrol') || 'null');
+            if (_inFilter) {
+                sessionStorage.removeItem('pending_filter_patrol');
+                if (_inFilter.tab) {
+                    setTimeout(() => window.switchTab?.(_inFilter.tab), 0);
+                    _dashFilterApplied = true;
+                }
+            }
+        } catch (_) {}
+
         // Restore saved tab (patrol / overview / issues)
-        const _savedTab = window._getTab?.('patrol', 'patrol');
-        if (_savedTab && _savedTab !== 'patrol') {
-            setTimeout(() => window.switchTab?.(_savedTab), 0);
+        if (!_dashFilterApplied) {
+            const _savedTab = window._getTab?.('patrol', 'patrol');
+            if (_savedTab && _savedTab !== 'patrol') {
+                setTimeout(() => window.switchTab?.(_savedTab), 0);
+            }
         }
 
     } catch (err) {
@@ -1156,6 +1171,37 @@ function renderDashboard(container, data) {
         </div>`;
         })()}
 
+        ${isAdmin ? `
+        <!-- Admin: บันทึกการเดินตรวจให้พนักงานทุกคน -->
+        <div class="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden">
+          <div class="px-5 py-3.5 border-b border-slate-100 bg-slate-50/50 flex items-center gap-3">
+            <span class="w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0"
+                  style="background:linear-gradient(135deg,#059669,#0d9488)">
+              <svg class="w-4 h-4 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"/>
+              </svg>
+            </span>
+            <div>
+              <p class="text-sm font-bold text-slate-800">บันทึกการเดินตรวจ (Admin)</p>
+              <p class="text-xs text-slate-500">ค้นหาพนักงานเพื่อเพิ่ม/แก้ไข/ลบรายการเดินตรวจแทน</p>
+            </div>
+          </div>
+          <div class="p-4">
+            <div class="relative">
+              <div class="absolute inset-y-0 left-3 flex items-center pointer-events-none">
+                <svg class="w-4 h-4 text-slate-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                  <path stroke-linecap="round" stroke-linejoin="round" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/>
+                </svg>
+              </div>
+              <input id="patrol-emp-search-input" type="text" placeholder="พิมพ์ชื่อ, รหัสพนักงาน, หรือแผนก..."
+                     class="form-input w-full pl-9 pr-3 rounded-xl text-sm"
+                     autocomplete="off" />
+            </div>
+            <div id="patrol-emp-search-results" class="mt-2 hidden"></div>
+          </div>
+        </div>
+        ` : ''}
+
         <!-- Sub-tab toggle -->
         <div class="bg-white rounded-xl border border-slate-100 shadow-sm p-1.5 flex gap-1">
           <button id="ov-sub-btn-mgmt" onclick="window._switchOvSub('mgmt')"
@@ -1675,6 +1721,60 @@ function renderDashboard(container, data) {
             applyIssueFilter();
         }, 250);
     });
+
+    // Admin patrol employee search (บันทึกการเดินตรวจให้พนักงานทุกคน)
+    if (isAdmin) {
+        let _empSearchDebounce;
+        const empInput = document.getElementById('patrol-emp-search-input');
+        const empResults = document.getElementById('patrol-emp-search-results');
+        if (empInput && empResults) {
+            empInput.addEventListener('input', () => {
+                clearTimeout(_empSearchDebounce);
+                _empSearchDebounce = setTimeout(async () => {
+                    const q = empInput.value.trim();
+                    if (!q) { empResults.classList.add('hidden'); empResults.innerHTML = ''; return; }
+                    empResults.classList.remove('hidden');
+                    empResults.innerHTML = `<div class="text-xs text-slate-400 px-3 py-2">กำลังค้นหา...</div>`;
+                    try {
+                        const res = await API.get(`/patrol/employee-search?q=${encodeURIComponent(q)}`);
+                        const data = res?.data || [];
+                        if (!data.length) {
+                            empResults.innerHTML = `<div class="text-xs text-slate-400 px-3 py-2">ไม่พบพนักงาน</div>`;
+                            return;
+                        }
+                        empResults.innerHTML = `
+                          <div class="border border-slate-200 rounded-xl overflow-hidden bg-white shadow-lg">
+                            ${data.map(emp => `
+                              <button class="patrol-emp-result-row w-full text-left px-4 py-2.5 hover:bg-emerald-50 transition-colors border-b border-slate-50 last:border-0"
+                                      data-id="${escHtml(emp.EmployeeID)}"
+                                      data-name="${escHtml(emp.EmployeeName)}"
+                                      data-dept="${escHtml(emp.Department || '')}">
+                                <span class="font-bold text-sm text-slate-800">${escHtml(emp.EmployeeName)}</span>
+                                <span class="ml-2 text-xs text-slate-400">${escHtml(emp.EmployeeID)}</span>
+                                <span class="ml-2 text-xs text-slate-500">${escHtml(emp.Department || '')}</span>
+                              </button>`).join('')}
+                          </div>`;
+                    } catch (err) {
+                        empResults.innerHTML = `<div class="text-xs text-red-400 px-3 py-2">เกิดข้อผิดพลาด: ${escHtml(err.message)}</div>`;
+                    }
+                }, 300);
+            });
+            empResults.addEventListener('click', e => {
+                const row = e.target.closest('.patrol-emp-result-row');
+                if (!row) return;
+                empInput.value = '';
+                empResults.classList.add('hidden');
+                empResults.innerHTML = '';
+                window.openAdminRecordModal(row.dataset.id, row.dataset.name, 0);
+            });
+            // Close dropdown when clicking outside
+            document.addEventListener('click', e => {
+                if (!empInput.contains(e.target) && !empResults.contains(e.target)) {
+                    empResults.classList.add('hidden');
+                }
+            }, { once: false });
+        }
+    }
 }
 
 // ─── Dept filter → rebuild unit dropdown ──────────────────────────────────────
@@ -2540,7 +2640,8 @@ window._armAddRecord = async function(employeeId, name, targetPerYear) {
 };
 
 window._armDeleteRecord = async function(id, employeeId, year) {
-    if (!confirm('ยืนยันการลบรายการนี้?')) return;
+    const ok = await showConfirmationModal('ยืนยันการลบ', 'ต้องการลบรายการเดินตรวจนี้ใช่หรือไม่?');
+    if (!ok) return;
     try {
         await API.delete(`/patrol/admin-record/${id}`);
         showToast('ลบรายการสำเร็จ', 'success');
@@ -2644,7 +2745,8 @@ window._arsvAddRecord = async function(employeeId, name, targetPerYear) {
 };
 
 window._arsvDeleteRecord = async function(id, employeeId, year) {
-    if (!confirm('ยืนยันการลบรายการนี้?')) return;
+    const ok = await showConfirmationModal('ยืนยันการลบ', 'ต้องการลบรายการ Self-Patrol นี้ใช่หรือไม่?');
+    if (!ok) return;
     try {
         await API.delete(`/patrol/admin-record/supervisor/${id}`);
         showToast('ลบรายการสำเร็จ', 'success');
@@ -4193,7 +4295,8 @@ function openSelfCheckinModal() {
 }
 
 async function deleteSelfCheckin(id) {
-    if (!confirm('ลบรายการนี้?')) return;
+    const ok = await showConfirmationModal('ยืนยันการลบ', 'ต้องการลบบันทึก Self-Patrol นี้ใช่หรือไม่?');
+    if (!ok) return;
     try {
         const res = await API.delete(`/patrol/self-checkin/${id}`);
         if (res.success) { showToast('ลบสำเร็จ', 'success'); loadPatrolPage(); }

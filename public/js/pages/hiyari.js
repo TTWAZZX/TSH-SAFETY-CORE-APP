@@ -250,7 +250,17 @@ export async function loadHiyariPage() {
         _departments = normalizeApiArray(res?.data ?? res).map(d => d.Name || d.name).filter(Boolean);
     } catch (_) { _departments = []; }
 
-    _activeTab = window._getTab?.('hiyari', _activeTab) || _activeTab;
+    // Apply incoming filter from dashboard drill-down
+    try {
+        const _inFilter = JSON.parse(sessionStorage.getItem('pending_filter_hiyari') || 'null');
+        if (_inFilter) {
+            sessionStorage.removeItem('pending_filter_hiyari');
+            if (_inFilter.tab)    _activeTab    = _inFilter.tab;
+            if (_inFilter.status) _filterStatus = _inFilter.status;
+        }
+    } catch (_) {}
+
+    _activeTab = _activeTab || window._getTab?.('hiyari', 'dashboard') || 'dashboard';
     switchTab(_activeTab);
     _loadHeroStats();   // async — fills stats strip without blocking tab render
 }

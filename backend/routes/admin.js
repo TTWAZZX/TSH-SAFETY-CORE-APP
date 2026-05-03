@@ -342,6 +342,7 @@ router.get('/audit-logs', async (req, res) => {
     const q        = String(req.query.q || '').trim();
     const dateFrom = req.query.dateFrom || '';
     const dateTo   = req.query.dateTo   || '';
+    const failed   = req.query.failed  === '1';
 
     try {
         await ensureAuditTable();
@@ -350,6 +351,7 @@ router.get('/audit-logs', async (req, res) => {
         if (action)  { where += ' AND Action = ?';   params.push(action); }
         if (adminId) { where += ' AND AdminID = ?';  params.push(adminId); }
         if (module)  { where += ' AND Module = ?';   params.push(module); }
+        if (failed)  { where += ' AND (StatusCode >= 400 OR Action LIKE ?)'; params.push('FAILED%'); }
         if (q) {
             where += ` AND (
                 AdminName LIKE ? OR AdminID LIKE ? OR Action LIKE ? OR TargetType LIKE ?

@@ -93,6 +93,17 @@ export async function loadFourmPage() {
     _activeTab = window._getTab?.('fourm', _activeTab) || _activeTab;
     if (_activeTab === 'systems') _activeTab = 'dashboard';
     await _loadDepts();
+
+    // Apply incoming filter from dashboard drill-down
+    try {
+        const _inFilter = JSON.parse(sessionStorage.getItem('pending_filter_fourm') || 'null');
+        if (_inFilter) {
+            sessionStorage.removeItem('pending_filter_fourm');
+            if (_inFilter.tab) _activeTab = _inFilter.tab;
+            if (_inFilter.status === 'Open') { _noticeFilter.status = 'Open'; _noticeFilter.overdue = false; }
+        }
+    } catch (_) {}
+
     switchTab(_activeTab);
     _loadHeroStats();
 }

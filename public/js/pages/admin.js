@@ -41,10 +41,11 @@ let _empPage      = 1;
 const EMP_PER_PAGE = 25;
 
 // Audit log state
-let _auditPage    = 1;
-let _auditTotal   = 0;
-let _auditRows    = [];
-const AUDIT_LIMIT  = 50;
+let _auditPage         = 1;
+let _auditTotal        = 0;
+let _auditRows         = [];
+let _auditFilterFailed = false;
+const AUDIT_LIMIT      = 50;
 
 
 // Organization tab state
@@ -4375,8 +4376,43 @@ async function loadAuditLogLegacy() {
     }
 }
 
+async function exportAuditCSV() {
+    const params = new URLSearchParams({ page: '1', limit: '5000' });
+    const filters = {
+        q: document.getElementById('audit-filter-q')?.value?.trim() || '',
+        module: document.getElementById('audit-filter-module')?.value || '',
+        action: document.getElementById('audit-filter-action')?.value || '',
+        dateFrom: document.getElementById('audit-date-from')?.value || '',
+        dateTo: document.getElementById('audit-date-to')?.value || '',
+    };
+    Object.entries(filters).forEach(([key, value]) => { if (value) params.set(key, value); });
+    if (_auditFilterFailed) params.set('failed', '1');
+
+    try {
+        const res = await API.get(`/admin/audit-logs?${params.toString()}`);
+        const rows = res.data || [];
+        if (!rows.length) { showToast('ไม่มีข้อมูลให้ Export', 'error'); return; }
+
+        const cols = ['id','ActionTime','AdminID','AdminName','Role','Department','Module','Action','Method','Path','StatusCode','TargetType','TargetID','Detail','IPAddress'];
+        const escape = v => {
+            const s = String(v == null ? '' : v).replace(/"/g, '""');
+            return /[",\n\r]/.test(s) ? `"${s}"` : s;
+        };
+        const csv = [cols.join(','), ...rows.map(r => cols.map(c => escape(r[c])).join(','))].join('\r\n');
+        const blob = new Blob(['﻿' + csv], { type: 'text/csv;charset=utf-8;' });
+        const url  = URL.createObjectURL(blob);
+        const a    = Object.assign(document.createElement('a'), { href: url, download: `audit_log_${new Date().toISOString().slice(0,10)}.csv` });
+        document.body.appendChild(a); a.click();
+        setTimeout(() => { URL.revokeObjectURL(url); a.remove(); }, 500);
+        showToast(`Export สำเร็จ ${rows.length} รายการ`, 'success');
+    } catch (err) {
+        showToast('Export ไม่ได้: ' + err.message, 'error');
+    }
+}
+
 async function renderAuditLog(container) {
     _auditPage = 1;
+    _auditFilterFailed = false;
     container.innerHTML = `
     <div class="animate-fade-in space-y-4">
         <div class="ds-filter-bar">
@@ -4411,6 +4447,22 @@ async function renderAuditLog(container) {
                     </div>
                 </div>
             </div>
+            <div class="flex flex-wrap items-center gap-2 pt-3 border-t border-slate-100 mt-3">
+                <span class="text-[11px] font-bold text-slate-400 uppercase">Quick:</span>
+                <button id="audit-chip-failed" onclick="window._auditToggleFailed()"
+                    class="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold border transition-colors
+                           bg-white border-slate-200 text-slate-500 hover:border-rose-300 hover:text-rose-600">
+                    <svg class="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"/></svg>
+                    Failed Only
+                </button>
+                <button onclick="window._exportAuditCSV()"
+                    class="ml-auto inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold
+                           bg-slate-100 hover:bg-emerald-50 text-slate-600 hover:text-emerald-700 border border-slate-200
+                           hover:border-emerald-200 transition-colors">
+                    <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/></svg>
+                    Export CSV
+                </button>
+            </div>
         </div>
         <div id="audit-summary-strip" class="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-5 gap-3">
             <div class="ds-metric-card text-sm text-slate-400">Loading audit summary...</div>
@@ -4435,6 +4487,19 @@ async function renderAuditLog(container) {
     };
     window._auditChangePage = (p) => { _auditPage = p; loadAuditLog(); };
     window._auditShowDetail = showAuditDetail;
+    window._auditToggleFailed = () => {
+        _auditFilterFailed = !_auditFilterFailed;
+        const chip = document.getElementById('audit-chip-failed');
+        if (chip) {
+            chip.className = `inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold border transition-colors
+                ${_auditFilterFailed
+                    ? 'bg-rose-100 border-rose-300 text-rose-700'
+                    : 'bg-white border-slate-200 text-slate-500 hover:border-rose-300 hover:text-rose-600'}`;
+        }
+        _auditPage = 1;
+        loadAuditLog();
+    };
+    window._exportAuditCSV = exportAuditCSV;
     loadAuditLog();
 }
 
@@ -4555,6 +4620,7 @@ async function loadAuditLog() {
     Object.entries(filters).forEach(([key, value]) => {
         if (value) params.set(key, value);
     });
+    if (_auditFilterFailed) params.set('failed', '1');
 
     wrap.innerHTML = _skelRows(6, 7);
     try {

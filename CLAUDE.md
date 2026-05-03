@@ -140,6 +140,7 @@ node server.js      # runs on PORT=5000
 | `/api/patrol/my-missed-sessions` | User | รายการ sessions ที่ user ยังไม่ได้เดินตรวจ (สำหรับ makeup/compensation check-in) |
 | `/api/patrol/admin-record` | Admin | เพิ่ม/ลบรายการเดินตรวจ (Patrol_Attendance) แทนสมาชิก |
 | `/api/patrol/admin-record/supervisor/:id` | Admin | ลบรายการ Self-Patrol (Patrol_Self_Checkin) แทน supervisor |
+| `/api/patrol/employee-search?q=` | Admin | ค้นหาพนักงานทุกคน (ไม่จำกัดเฉพาะ roster) — ใช้สำหรับ admin บันทึกการเดินตรวจแทน |
 | `/api/admin/*` | Admin | Admin routes (employees, schedules, audit, dashboard, health) |
 | `/api/cccf/*` | User | CCCF routes |
 | `/api/master/*` | User (write=Admin) | Master data (departments/teams/roles/positions/areas/safety-units) |
@@ -730,6 +731,13 @@ CREATE TABLE IF NOT EXISTS Patrol_Roster (
   - กด row เพื่อ toggle (checkbox UI), selected chips แสดงด้านล่าง
   - เป้าหมาย (TargetPerYear) ใส่ครั้งเดียว ใช้กับทุกคนที่เลือก
 
+### Admin Record — บันทึกแทนพนักงานทุกคน (ไม่จำกัด roster)
+- Admin เห็น **search card "บันทึกการเดินตรวจ (Admin)"** เหนือ sub-tab toggle ใน Overview tab
+- พิมพ์ชื่อ / รหัสพนักงาน / แผนก → debounce 300ms → `GET /patrol/employee-search?q=` → dropdown สูงสุด 30 คน
+- คลิกพนักงานใน dropdown → เปิด `openAdminRecordModal(employeeId, name, 0)` ซึ่งแสดงรายการเดินตรวจปัจจุบัน + ฟอร์มเพิ่ม/ลบ
+- ใช้ร่วมกับ `GET /patrol/member-attendance?employeeId=X&year=Y` และ `POST/DELETE /patrol/admin-record` ที่มีอยู่แล้ว — ไม่มี table ใหม่
+- **`GET /api/patrol/employee-search`** (Admin-only) — query `Employees` table, params: `q` (free text), returns `{ EmployeeID, EmployeeName, Department, Position }[]` สูงสุด 30 รายการ
+
 ### Patrol Overview UI Details (Top & Management tab)
 - **Spotlight card** — full-width banner วางอยู่เหนือ grid ตาราง (ไม่อยู่ใน sidebar) เพื่อความเด่นชัด
 - **Sidebar** — `flex flex-col h-full gap-3`: 3 stat cards แยกกัน (เซสชันทั้งหมด / เข้าร่วมรวม / อัตราเข้าร่วม) + pie chart ด้วย `flex-1` เต็มพื้นที่ที่เหลือ
@@ -902,6 +910,13 @@ Current roadmap after Phase A completion:
    - Status: remaining.
    - Required before production deployment: open the browser with real Admin/User accounts, test every module, confirm admin-only buttons are hidden/blocked for User, create/edit/delete small sample records, confirm Audit Log captures the actions, then push/deploy handoff.
 
+### Post-Phase A Enhancements (completed)
+
+- **Phase B — Dashboard KPI drill-down**: Dashboard module cards for Patrol (open issues), Hiyari (pending), and 4M (open notices) write a `pending_filter_<module>` key to `sessionStorage` on click; target module reads and removes the key on load, then pre-selects the matching tab and filter state. No router changes required.
+- **Phase D — Audit Log**: Added "Failed Only" quick-filter chip (`#audit-chip-failed`) that appends `failed=1` to API calls (backend: `StatusCode >= 400 OR Action LIKE 'FAILED%'`). Added "Export CSV" button (`_exportAuditCSV`) — downloads all matching records (up to 5000 rows) as UTF-8 BOM CSV.
+- **Phase E — native confirm() removal**: Replaced all 3 native `confirm()` in `patrol.js` (`_armDeleteRecord`, `_arsvDeleteRecord`, `deleteSelfCheckin`) with `await showConfirmationModal(title, message)` from `ui.js`.
+- **Patrol Admin Record — all employees**: Admin can now search and manage patrol records for any employee (not roster-only) via a search card in the Overview tab. Uses new `GET /patrol/employee-search` endpoint + existing `openAdminRecordModal`.
+
 ### Admin Audit Log
 
 Audit logging is centralized in `backend/utils/audit.js`.
@@ -909,7 +924,8 @@ Audit logging is centralized in `backend/utils/audit.js`.
 - `authenticateToken` attaches `attachAuditLogger(req, res)` so signed-in `POST`, `PUT`, `PATCH`, and `DELETE` API calls are logged automatically after the response finishes.
 - Admin Console curated actions still call `auditLog()` in `backend/routes/admin.js`; those rows use clear action names such as `CREATE_EMPLOYEE`, `RESET_PASSWORD`, and set `req.auditLogged = true` to avoid duplicates.
 - `Admin_AuditLogs` is auto-created and auto-migrated by `ensureAuditTable()`; no manual SQL is required for normal deployment.
-- `GET /api/admin/audit-logs` supports `page`, `limit`, `action`, `module`, `adminId`, `q`, `dateFrom`, `dateTo` and returns `facets` for filter dropdowns.
+- `GET /api/admin/audit-logs` supports `page`, `limit`, `action`, `module`, `adminId`, `q`, `dateFrom`, `dateTo`, `failed` (`1` = failures only, StatusCode ≥ 400) and returns `facets` for filter dropdowns.
+- Audit Log UI has a **"Failed Only"** quick-filter chip and an **"Export CSV"** button (downloads current filter as `audit_log_YYYY-MM-DD.csv` with UTF-8 BOM for Thai text).
 
 ### Pre-production Permission Regression
 
