@@ -4,6 +4,15 @@
 // =================================================================
 require('dotenv').config({ path: __dirname + '/.env' });
 
+const requiredEnv = ['JWT_SECRET', 'DB_HOST', 'DB_USER', 'DB_PASS', 'DB_NAME'];
+if ((process.env.STORAGE_MODE || 'cloudinary') !== 'local') {
+    requiredEnv.push('CLOUDINARY_CLOUD_NAME', 'CLOUDINARY_API_KEY', 'CLOUDINARY_API_SECRET');
+}
+const missingEnv = requiredEnv.filter(key => !process.env[key]);
+if (missingEnv.length) {
+    throw new Error(`Missing required environment variable(s): ${missingEnv.join(', ')}`);
+}
+
 const express    = require('express');
 const cors       = require('cors');
 const jwt        = require('jsonwebtoken');

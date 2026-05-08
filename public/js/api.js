@@ -13,13 +13,17 @@ const API_BASE =
 
 export async function apiFetch(endpoint, options = {}) {
     const token = TSHSession.getToken();
+    const body = options.body;
 
     const headers = {
         ...(options.headers || {})
     };
 
     // ✅ ใส่ Content-Type เฉพาะตอนที่ body เป็น JSON
-    if (!(options.body instanceof FormData)) {
+    if (body instanceof FormData) {
+        delete headers['Content-Type'];
+        delete headers['content-type'];
+    } else if (!headers['Content-Type'] && !headers['content-type']) {
         headers['Content-Type'] = 'application/json';
     }
 
@@ -60,23 +64,27 @@ export async function apiFetch(endpoint, options = {}) {
 }
 
 export const API = {
-    get: (url) => apiFetch(url),
-    post: (url, body) =>
+    get: (url, options = {}) => apiFetch(url, options),
+    post: (url, body, options = {}) =>
         apiFetch(url, {
+            ...options,
             method: 'POST',
             body: body instanceof FormData ? body : JSON.stringify(body)
         }),
-    put: (url, body) =>
+    put: (url, body, options = {}) =>
         apiFetch(url, {
+            ...options,
             method: 'PUT',
             body: body instanceof FormData ? body : JSON.stringify(body)
         }),
-    delete: (url) =>
+    delete: (url, options = {}) =>
         apiFetch(url, {
+            ...options,
             method: 'DELETE'
         }),
-    patch: (url, body) =>
+    patch: (url, body, options = {}) =>
         apiFetch(url, {
+            ...options,
             method: 'PATCH',
             body: body instanceof FormData ? body : (body !== undefined ? JSON.stringify(body) : undefined)
         })

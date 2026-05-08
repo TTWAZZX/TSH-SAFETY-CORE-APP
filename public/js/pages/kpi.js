@@ -1057,8 +1057,8 @@ async function handleAnnouncementSubmit(e) {
         showLoading('กำลังบันทึก...');
         const file = fd.get('AnnouncementFile');
         if (file instanceof File && file.size > 0) {
-            const up = new FormData(); up.append('file', file);
-            const res = await API.post('/files/upload', up);
+            const up = new FormData(); up.append('document', file);
+            const res = await API.post('/upload/document', up);
             if (!res?.url) throw new Error('อัปโหลดไฟล์ไม่สำเร็จ');
             fd.set('DocumentLink', res.url);
         }
