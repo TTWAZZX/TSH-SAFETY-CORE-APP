@@ -7,11 +7,116 @@ const xlsx     = require('xlsx');
 const bcrypt   = require('bcryptjs');
 const db       = require('../db');
 const { ensureAuditTable } = require('../utils/audit');
+const { getCoverageMatrix } = require('./activity-targets');
+const {
+    validateCompanyEmail,
+    ensureEmployeeCompanyEmailColumn,
+} = require('../utils/company-email');
 
 const upload = multer({ storage: multer.memoryStorage() });
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 const ALLOWED_ROLES = ['Admin', 'User', 'Viewer'];
+const EMAIL_REQUIREMENT_SETTING_KEY = 'employee_email_required_positions';
+const DEFAULT_EMAIL_REQUIRED_POSITION_NAMES = [
+    'ประธานกิตติมศักดิ์',
+    'ผู้จัดการ',
+    'ผู้จัดการทั่วไป',
+    'ผู้ชำนาญการพิเศษ',
+    'ผู้ช่วยผู้จัดการทั่วไป',
+    'ผู้อำนวยการสายธุรกิจ Wiring Harness',
+    'รักษาการผู้จัดการ',
+    'หัวหน้าส่วน',
+    'หัวหน้าแผนก',
+];
+
+async function ensureAppSettingsTable() {
+    await db.query(`
+        CREATE TABLE IF NOT EXISTS App_Settings (
+            key_name  VARCHAR(100) PRIMARY KEY,
+            value     TEXT,
+            UpdatedAt DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+    `);
+}
+
+function parseEmailRequirementSetting(rawValue) {
+    if (!rawValue) return [];
+    try {
+        const parsed = JSON.parse(rawValue);
+        const ids = Array.isArray(parsed) ? parsed : parsed?.positionIds;
+        return Array.isArray(ids)
+            ? [...new Set(ids.map(id => Number(id)).filter(id => Number.isInteger(id) && id > 0))]
+            : [];
+    } catch (_) {
+        return [];
+    }
+}
+
+async function getEmailRequirementRule() {
+    await ensureAppSettingsTable();
+    const [positions] = await db.query('SELECT id, Name FROM Master_Positions ORDER BY Name ASC');
+    const [settings] = await db.query('SELECT value FROM App_Settings WHERE key_name = ? LIMIT 1', [EMAIL_REQUIREMENT_SETTING_KEY]);
+    const availableIds = new Set(positions.map(position => Number(position.id)));
+    const storedIds = parseEmailRequirementSetting(settings[0]?.value).filter(id => availableIds.has(id));
+    const seededIds = positions
+        .filter(position => DEFAULT_EMAIL_REQUIRED_POSITION_NAMES.includes(position.Name))
+        .map(position => Number(position.id));
+    return {
+        positions,
+        requiredPositionIds: settings.length ? storedIds : seededIds,
+        isUsingDefault: !settings.length,
+    };
+}
+
+async function getEmailReadinessData() {
+    await ensureEmployeeCompanyEmailColumn(db);
+    const rule = await getEmailRequirementRule();
+    const requiredIds = new Set(rule.requiredPositionIds.map(Number));
+    const requiredNames = new Set(
+        rule.positions
+            .filter(position => requiredIds.has(Number(position.id)))
+            .map(position => String(position.Name || '').trim())
+            .filter(Boolean)
+    );
+    const [employees] = await db.query(
+        `SELECT EmployeeID, EmployeeName, Department, Unit, Position, CompanyEmail
+         FROM Employees
+         ORDER BY Department, Position, EmployeeName`
+    );
+    const rows = employees.map(employee => {
+        const position = String(employee.Position || '').trim();
+        const companyEmail = String(employee.CompanyEmail || '').trim().toLowerCase();
+        const emailCheck = validateCompanyEmail(companyEmail);
+        const required = requiredNames.has(position);
+        let status = 'optional';
+        if (companyEmail && !emailCheck.ok) status = 'invalid_domain';
+        else if (required && !companyEmail) status = 'missing_required';
+        else if (companyEmail) status = 'ready';
+        return {
+            ...employee,
+            CompanyEmail: companyEmail || null,
+            IsEmailRequired: required,
+            EmailReadinessStatus: status,
+        };
+    });
+    const requiredRows = rows.filter(row => row.IsEmailRequired);
+    return {
+        summary: {
+            totalEmployees: rows.length,
+            requiredEmployees: requiredRows.length,
+            readyRequired: requiredRows.filter(row => row.EmailReadinessStatus === 'ready').length,
+            missingRequired: requiredRows.filter(row => row.EmailReadinessStatus === 'missing_required').length,
+            invalidDomain: rows.filter(row => row.EmailReadinessStatus === 'invalid_domain').length,
+        },
+        rule: {
+            requiredPositionIds: rule.requiredPositionIds,
+            requiredPositions: rule.positions.filter(position => requiredIds.has(Number(position.id))),
+            isUsingDefault: rule.isUsingDefault,
+        },
+        rows,
+    };
+}
 
 // ─── Audit Log Helper ─────────────────────────────────────────────────────────
 async function auditLog(req, action, targetType, targetId, detail) {
@@ -53,8 +158,9 @@ async function auditLog(req, action, targetType, targetId, detail) {
 // GET /admin/employees
 router.get('/employees', async (_req, res) => {
     try {
+        await ensureEmployeeCompanyEmailColumn(db);
         const [rows] = await db.query(
-            'SELECT EmployeeID, EmployeeName, Department, Unit, Team, Position, Role FROM Employees ORDER BY Department, EmployeeName'
+            'SELECT EmployeeID, EmployeeName, Department, Unit, Team, Position, CompanyEmail, Role FROM Employees ORDER BY Department, EmployeeName'
         );
         res.json({ success: true, data: rows });
     } catch (err) {
@@ -64,19 +170,22 @@ router.get('/employees', async (_req, res) => {
 
 // POST /admin/employee/create
 router.post('/employee/create', async (req, res) => {
-    const { EmployeeID, EmployeeName, Department, Unit, Team, Position, Role } = req.body;
+    const { EmployeeID, EmployeeName, Department, Unit, Team, Position, Role, CompanyEmail } = req.body;
     if (!EmployeeID || !EmployeeName) {
         return res.status(400).json({ success: false, message: 'กรุณาระบุรหัสและชื่อพนักงาน' });
     }
     const role = ALLOWED_ROLES.includes(Role) ? Role : 'User';
+    const emailCheck = validateCompanyEmail(CompanyEmail);
+    if (!emailCheck.ok) return res.status(400).json({ success: false, message: emailCheck.message });
     try {
+        await ensureEmployeeCompanyEmailColumn(db);
         const [existing] = await db.query('SELECT EmployeeID FROM Employees WHERE EmployeeID = ?', [EmployeeID]);
         if (existing.length > 0) {
             return res.status(400).json({ success: false, message: 'รหัสพนักงานนี้มีอยู่ในระบบแล้ว' });
         }
         await db.query(
-            'INSERT INTO Employees (EmployeeID, EmployeeName, Department, Unit, Team, Position, Role) VALUES (?, ?, ?, ?, ?, ?, ?)',
-            [EmployeeID, EmployeeName, Department || '', Unit || '', Team || '', Position || '', role]
+            'INSERT INTO Employees (EmployeeID, EmployeeName, Department, Unit, Team, Position, CompanyEmail, Role) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+            [EmployeeID, EmployeeName, Department || '', Unit || '', Team || '', Position || '', emailCheck.email, role]
         );
         await auditLog(req, 'CREATE_EMPLOYEE', 'Employee', EmployeeID, `ชื่อ: ${EmployeeName}, แผนก: ${Department}, หน่วย: ${Unit}, ตำแหน่ง: ${Position}, Role: ${role}`);
         res.json({ success: true, message: 'เพิ่มพนักงานเรียบร้อย' });
@@ -87,15 +196,18 @@ router.post('/employee/create', async (req, res) => {
 
 // PUT /admin/employee/:id  (เปลี่ยนจาก POST เพื่อ RESTful)
 router.put('/employee/:id', async (req, res) => {
-    const { EmployeeName, Department, Unit, Team, Position, Role } = req.body;
+    const { EmployeeName, Department, Unit, Team, Position, Role, CompanyEmail } = req.body;
     const role = ALLOWED_ROLES.includes(Role) ? Role : undefined;
     if (!EmployeeName) {
         return res.status(400).json({ success: false, message: 'กรุณาระบุชื่อพนักงาน' });
     }
+    const emailCheck = validateCompanyEmail(CompanyEmail);
+    if (!emailCheck.ok) return res.status(400).json({ success: false, message: emailCheck.message });
     try {
+        await ensureEmployeeCompanyEmailColumn(db);
         await db.query(
-            'UPDATE Employees SET EmployeeName = ?, Department = ?, Unit = ?, Team = ?, Position = ?, Role = ? WHERE EmployeeID = ?',
-            [EmployeeName, Department || '', Unit || '', Team || '', Position || '', role || 'User', req.params.id]
+            'UPDATE Employees SET EmployeeName = ?, Department = ?, Unit = ?, Team = ?, Position = ?, CompanyEmail = ?, Role = ? WHERE EmployeeID = ?',
+            [EmployeeName, Department || '', Unit || '', Team || '', Position || '', emailCheck.email, role || 'User', req.params.id]
         );
         await auditLog(req, 'UPDATE_EMPLOYEE', 'Employee', req.params.id, `ชื่อ: ${EmployeeName}, หน่วย: ${Unit}, ตำแหน่ง: ${Position}, Role: ${role}`);
         res.json({ success: true, message: 'อัปเดตข้อมูลเรียบร้อย' });
@@ -106,12 +218,15 @@ router.put('/employee/:id', async (req, res) => {
 
 // ── keep legacy POST route as alias so old frontend code still works ──────────
 router.post('/employee/update', async (req, res) => {
-    const { EmployeeID, EmployeeName, Department, Unit, Team, Position, Role } = req.body;
+    const { EmployeeID, EmployeeName, Department, Unit, Team, Position, Role, CompanyEmail } = req.body;
     const role = ALLOWED_ROLES.includes(Role) ? Role : 'User';
+    const emailCheck = validateCompanyEmail(CompanyEmail);
+    if (!emailCheck.ok) return res.status(400).json({ success: false, message: emailCheck.message });
     try {
+        await ensureEmployeeCompanyEmailColumn(db);
         await db.query(
-            'UPDATE Employees SET EmployeeName = ?, Department = ?, Unit = ?, Team = ?, Position = ?, Role = ? WHERE EmployeeID = ?',
-            [EmployeeName || '', Department || '', Unit || '', Team || '', Position || '', role, EmployeeID]
+            'UPDATE Employees SET EmployeeName = ?, Department = ?, Unit = ?, Team = ?, Position = ?, CompanyEmail = ?, Role = ? WHERE EmployeeID = ?',
+            [EmployeeName || '', Department || '', Unit || '', Team || '', Position || '', emailCheck.email, role, EmployeeID]
         );
         await auditLog(req, 'UPDATE_EMPLOYEE', 'Employee', EmployeeID, `Role: ${role}`);
         res.json({ success: true, message: 'อัปเดตข้อมูลเรียบร้อย' });
@@ -159,6 +274,7 @@ router.post('/employee/:id/reset-password', async (req, res) => {
 // GET /admin/employee/import-template-data — master lists for Excel template
 router.get('/employee/import-template-data', async (_req, res) => {
     try {
+        await ensureEmployeeCompanyEmailColumn(db);
         const [[depts], [positions], [units]] = await Promise.all([
             db.query('SELECT Name FROM Master_Departments ORDER BY Name ASC'),
             db.query('SELECT Name FROM Master_Positions ORDER BY Name ASC'),
@@ -180,6 +296,7 @@ router.get('/employee/import-template-data', async (_req, res) => {
 router.post('/employee/import', upload.single('file'), async (req, res) => {
     if (!req.file) return res.status(400).json({ success: false, message: 'กรุณาเลือกไฟล์ Excel' });
     try {
+        await ensureEmployeeCompanyEmailColumn(db);
         const workbook = xlsx.read(req.file.buffer, { type: 'buffer' });
         const sheet    = workbook.Sheets[workbook.SheetNames[0]];
         const data     = xlsx.utils.sheet_to_json(sheet);
@@ -207,6 +324,7 @@ router.post('/employee/import', upload.single('file'), async (req, res) => {
             const unit = String(row['Unit']         || row['หน่วย']                 || '').trim();
             const pos  = String(row['Position']     || row['ตำแหน่ง']               || '').trim();
             const rawRole = String(row['Role'] || row['สิทธิ์'] || '').trim();
+            const companyEmail = String(row['CompanyEmail'] || row['Company Email'] || row['Email'] || row['อีเมลบริษัท'] || '').trim();
             const role    = ALLOWED_ROLES.includes(rawRole) ? rawRole : 'User';
 
             if (!id || !name) {
@@ -221,17 +339,25 @@ router.post('/employee/import', upload.single('file'), async (req, res) => {
             if (pos  && !posSet.has(pos))   warnings.push(`Position "${pos}" ไม่ตรง master`);
             if (rawRole && !ALLOWED_ROLES.includes(rawRole)) warnings.push(`Role "${rawRole}" ไม่ถูกต้อง → ใช้ User`);
 
+            const emailCheck = validateCompanyEmail(companyEmail);
+            if (!emailCheck.ok) {
+                details.push({ id, name, status: 'skip', reason: emailCheck.message });
+                errorCount++;
+                continue;
+            }
+
             try {
                 await db.query(
-                    `INSERT INTO Employees (EmployeeID, EmployeeName, Department, Unit, Position, Role)
-                     VALUES (?, ?, ?, ?, ?, ?)
+                    `INSERT INTO Employees (EmployeeID, EmployeeName, Department, Unit, Position, CompanyEmail, Role)
+                     VALUES (?, ?, ?, ?, ?, ?, ?)
                      ON DUPLICATE KEY UPDATE
                        EmployeeName = VALUES(EmployeeName),
                        Department   = VALUES(Department),
                        Unit         = VALUES(Unit),
                        Position     = VALUES(Position),
+                       CompanyEmail = VALUES(CompanyEmail),
                        Role         = VALUES(Role)`,
-                    [id, name, dept, unit, pos, role]
+                    [id, name, dept, unit, pos, emailCheck.email, role]
                 );
                 successCount++;
                 details.push({ id, name, status: warnings.length ? 'warn' : 'ok', reason: warnings.join(' | ') });
@@ -251,6 +377,68 @@ router.post('/employee/import', upload.single('file'), async (req, res) => {
             warnCount: details.filter(d => d.status === 'warn').length,
             details,
         });
+    } catch (err) {
+        res.status(500).json({ success: false, message: err.message });
+    }
+});
+
+// GET /admin/email-requirement-rules
+router.get('/email-requirement-rules', async (_req, res) => {
+    try {
+        const rule = await getEmailRequirementRule();
+        res.json({
+            success: true,
+            data: {
+                ...rule,
+                defaultPositionNames: DEFAULT_EMAIL_REQUIRED_POSITION_NAMES,
+            },
+        });
+    } catch (err) {
+        res.status(500).json({ success: false, message: err.message });
+    }
+});
+
+// GET /admin/email-readiness
+router.get('/email-readiness', async (_req, res) => {
+    try {
+        const readiness = await getEmailReadinessData();
+        res.json({ success: true, data: readiness });
+    } catch (err) {
+        res.status(500).json({ success: false, message: err.message });
+    }
+});
+
+// PUT /admin/email-requirement-rules
+router.put('/email-requirement-rules', async (req, res) => {
+    const requestedIds = Array.isArray(req.body?.positionIds)
+        ? [...new Set(req.body.positionIds.map(id => Number(id)).filter(id => Number.isInteger(id) && id > 0))]
+        : [];
+    try {
+        await ensureAppSettingsTable();
+        const [positions] = await db.query('SELECT id FROM Master_Positions');
+        const availableIds = new Set(positions.map(position => Number(position.id)));
+        const invalidIds = requestedIds.filter(id => !availableIds.has(id));
+        if (invalidIds.length) {
+            return res.status(400).json({ success: false, message: 'Position rule contains unknown Master Position IDs.' });
+        }
+        await db.query(
+            `INSERT INTO App_Settings (key_name, value) VALUES (?, ?)
+             ON DUPLICATE KEY UPDATE value = VALUES(value), UpdatedAt = NOW()`,
+            [EMAIL_REQUIREMENT_SETTING_KEY, JSON.stringify({
+                positionIds: requestedIds,
+                updatedBy: req.user?.id || null,
+                updatedAt: new Date().toISOString(),
+            })]
+        );
+        await auditLog(
+            req,
+            'UPDATE_EMAIL_REQUIREMENT_RULE',
+            'App_Setting',
+            EMAIL_REQUIREMENT_SETTING_KEY,
+            `Required email positions: ${requestedIds.length}`
+        );
+        const rule = await getEmailRequirementRule();
+        res.json({ success: true, data: rule, message: 'Email requirement rule updated.' });
     } catch (err) {
         res.status(500).json({ success: false, message: err.message });
     }
@@ -455,7 +643,7 @@ router.get('/dashboard-stats', async (_req, res) => {
             safeScalar("SELECT COUNT(*) AS total FROM Training_Records WHERE ExpiryDate IS NOT NULL AND ExpiryDate < CURDATE()"),
             safeScalar("SELECT COUNT(*) AS total FROM YokotenResponses WHERE Status IN ('Pending','Submitted','Waiting')"),
             safeScalar("SELECT COUNT(*) AS total FROM Employees WHERE COALESCE(Department,'')='' OR COALESCE(Position,'')=''"),
-            safeScalar("SELECT COUNT(*) AS total FROM Employees e LEFT JOIN Activity_Position_Templates t ON t.Position = e.Position WHERE COALESCE(e.Position,'') <> '' AND t.id IS NULL"),
+            getCoverageMatrix().then(data => data.summary.missing).catch(() => 0),
         ]);
 
         const actionRequired = [
@@ -509,7 +697,7 @@ router.get('/dashboard-stats', async (_req, res) => {
             },
             {
                 key: 'targets',
-                label: 'Positions without activity target template',
+                label: 'Activity target slots without effective source',
                 count: missingActivityTargets,
                 severity: missingActivityTargets ? 'low' : 'ok',
                 tab: 'targets',

@@ -4,9 +4,9 @@ import { API } from '../api.js';
 import {
     hideLoading, showLoading,
     openModal, openDetailModal, closeModal, showToast, showConfirmationModal,
-} from '../ui.js';
+} from '../ui.js?v=20260602-mobile-nav-m53';
 import { normalizeApiArray } from '../utils/normalize.js';
-import { buildActivityCard } from '../utils/activity-widget.js';
+import { buildActivityCard } from '../utils/activity-widget.js?v=20260602-activity-targets-at10';
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 const CATEGORIES = ['ทั่วไป', 'อุปกรณ์', 'กระบวนการ', 'สิ่งแวดล้อม', 'พฤติกรรม'];
@@ -24,6 +24,19 @@ const RISK_BADGE = {
 };
 const RISK_LABEL = { Low: 'ต่ำ', Medium: 'ปานกลาง', High: 'สูง', Critical: 'วิกฤต' };
 const CAT_COLORS = ['#6366f1','#0ea5e9','#f59e0b','#10b981','#ef4444'];
+const YOK_MAX_FILES = 10;
+const YOK_MAX_FILE_SIZE = 20 * 1024 * 1024;
+const YOK_ALLOWED_MIMES = new Set([
+    'image/jpeg', 'image/png', 'image/gif', 'image/webp',
+    'application/pdf',
+    'application/msword',
+    'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+    'application/vnd.ms-excel',
+    'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    'application/vnd.ms-powerpoint',
+    'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+]);
+const YOK_ALLOWED_EXTS = new Set(['jpg', 'jpeg', 'png', 'gif', 'webp', 'pdf', 'doc', 'docx', 'xls', 'xlsx', 'ppt', 'pptx']);
 
 // ─── State ────────────────────────────────────────────────────────────────────
 let _isAdmin        = false;
@@ -41,12 +54,16 @@ let _dashYear       = new Date().getFullYear();
 let _filterRisk     = '';
 let _filterCat      = '';
 let _filterAck      = '';            // 'responded' | 'pending' | 'rejected'
+let _filterSla      = '';            // 'overdue' | 'due_soon' | 'no_deadline'
 let _histFilterId   = '';
 let _searchQ        = '';
 let _adminView      = 'topics';      // 'topics' | 'dept' | 'config'
 let _listenersReady = false;
 let _chartCat       = null;
 let _chartDept      = null;
+let _chartStatus    = null;
+let _chartTrend     = null;
+let _dashboardDrilldown = null;
 
 // ─── ENTRY POINT ──────────────────────────────────────────────────────────────
 export async function loadYokotenPage() {
@@ -65,6 +82,7 @@ export async function loadYokotenPage() {
     }
 
     _activeTab = window._getTab?.('yokoten', _activeTab) || _activeTab;
+    if (!_isAdmin && _activeTab === 'admin') _activeTab = 'topics';
     await refreshData();
 
     // ── Hiyari → Yokoten pre-fill (admin only) ──────────────────────────────
@@ -207,6 +225,7 @@ function buildShell() {
 
 // ─── TAB SWITCH ───────────────────────────────────────────────────────────────
 function switchTab(tab) {
+    if (tab === 'admin' && !_isAdmin) tab = 'topics';
     _activeTab = tab;
     window._saveTab?.('yokoten', tab);
 
@@ -237,6 +256,7 @@ function switchTab(tab) {
 // ─── DATA REFRESH ─────────────────────────────────────────────────────────────
 async function refreshData() {
     showLoading('กำลังโหลด Yokoten...');
+    let loaded = false;
     try {
         const base = await Promise.all([
             API.get('/yokoten/topics'),
@@ -260,11 +280,16 @@ async function refreshData() {
             _deptCompletion = raw?.deptSummary ? raw : null;
             _allResponses   = normalizeApiArray(ar?.data ?? ar);
         }
+        loaded = true;
     } catch (err) {
-        showToast('โหลดข้อมูลไม่สำเร็จ: ' + err.message, 'error');
+        const msg = err?.message || 'Unable to load Yokoten data';
+        showToast('Load failed / โหลดข้อมูลไม่สำเร็จ: ' + msg, 'error');
+        const content = document.getElementById('yok-content');
+        if (content) content.innerHTML = _errorState('Load failed / โหลดข้อมูลไม่สำเร็จ', msg);
     } finally {
         hideLoading();
     }
+    if (!loaded) return;
     _renderHeroStats();
     switchTab(_activeTab);
 }
@@ -526,7 +551,12 @@ function renderDashboard(container) {
         ${_isAdmin && _deptCompletion?.deptSummary?.length ? _buildExecSection() : ''}
     </div>`;
 
-    setTimeout(() => { _initCatChart(catCount); _initDeptChart(); }, 0);
+    setTimeout(() => {
+        _initCatChart(catCount);
+        _initDeptChart();
+        _initStatusChart();
+        _initTrendChart();
+    }, 0);
 }
 
 function _initCatChart(catCount) {
@@ -553,6 +583,8 @@ function _initCatChart(catCount) {
 function _destroyCharts() {
     if (_chartCat)  { _chartCat.destroy();  _chartCat  = null; }
     if (_chartDept) { _chartDept.destroy(); _chartDept = null; }
+    if (_chartStatus) { _chartStatus.destroy(); _chartStatus = null; }
+    if (_chartTrend) { _chartTrend.destroy(); _chartTrend = null; }
 }
 
 // ─── EXECUTIVE DASHBOARD HELPERS ─────────────────────────────────────────────
@@ -562,7 +594,7 @@ function _buildExecSection() {
     const deptSummary = _filterToTargetedDepts(rawDeptSummary, topics);
 
     const allResp      = _allResponses || [];
-    const autoApproved = allResp.filter(r => r.IsRelated === 'Yes' && !r.ApprovalStatus).length;
+    const autoApproved = allResp.filter(r => r.IsRelated === 'No' && !r.ApprovalStatus).length;
     const pendingAppr  = allResp.filter(r => r.ApprovalStatus === 'pending').length;
     const approved     = allResp.filter(r => r.ApprovalStatus === 'approved').length;
     const rejected     = allResp.filter(r => r.ApprovalStatus === 'rejected').length;
@@ -637,6 +669,14 @@ function _buildExecSection() {
         <div class="h-px flex-1 bg-slate-200"></div>
     </div>
 
+    ${_buildExecutiveBrief(deptSummary, topics, allResp, alertTopics)}
+
+    ${_buildYokotenActionCenter(deptSummary, topics, allResp, alertTopics)}
+
+    ${_buildExecutiveRiskWatch(deptSummary, topics, allResp)}
+
+    ${_buildExecutiveChartLayer()}
+
     <div class="grid grid-cols-1 lg:grid-cols-3 gap-4">
         <!-- Dept completion horizontal bar chart (2/3 width) -->
         <div class="ds-section p-5 lg:col-span-2">
@@ -668,7 +708,7 @@ function _buildExecSection() {
             </h3>
             <div class="space-y-3 flex-1">
                 ${_approvalFunnelBar(notResponded,  totalPossible, '#e2e8f0', '#94a3b8', 'ยังไม่ตอบ')}
-                ${_approvalFunnelBar(autoApproved,  totalPossible, '#dcfce7', '#059669', 'เกี่ยวข้อง (อัตโนมัติ)')}
+                ${_approvalFunnelBar(autoApproved,  totalPossible, '#dcfce7', '#059669', 'ไม่เกี่ยวข้อง (อัตโนมัติ)')}
                 ${_approvalFunnelBar(pendingAppr,   totalPossible, '#fef9c3', '#d97706', 'รออนุมัติ')}
                 ${_approvalFunnelBar(approved,      totalPossible, '#dbeafe', '#2563eb', 'อนุมัติแล้ว')}
                 ${_approvalFunnelBar(rejected,      totalPossible, '#fee2e2', '#dc2626', 'ถูกส่งกลับแก้ไข')}
@@ -792,11 +832,725 @@ function _buildExecSection() {
                     <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 21h10a2 2 0 002-2V9.414a1 1 0 00-.293-.707l-5.414-5.414A1 1 0 0012.586 3H7a2 2 0 00-2 2v14a2 2 0 002 2z"/>
                     </svg>
-                    Export PDF
+                    Export PDF / ส่งออก PDF
                 </button>
             </div>
         </div>
     </div>`;
+}
+
+function _getExecutiveBriefData(deptSummary, topics, allResp, alertTopics) {
+    const topicIds = new Set(topics.map(t => String(t.YokotenID)));
+    const activeResp = (allResp || []).filter(r => topicIds.has(String(r.YokotenID)));
+    const totalPossible = deptSummary.reduce((sum, dept) => sum + (dept.totalTopics || 0), 0);
+    const responded = Math.min(activeResp.length, totalPossible);
+    const coverage = totalPossible ? Math.round(responded * 100 / totalPossible) : 0;
+    const overdueGaps = alertTopics.filter(t => t.daysLeft < 0).length;
+
+    let highRiskTotal = 0;
+    let highRiskResponded = 0;
+    const highRiskTopicIds = new Set(topics.filter(t => ['Critical', 'High'].includes(t.RiskLevel)).map(t => String(t.YokotenID)));
+    deptSummary.forEach(dept => {
+        (dept.topicBreakdown || []).forEach(tb => {
+            if (!highRiskTopicIds.has(String(tb.YokotenID))) return;
+            highRiskTotal++;
+            if (tb.responded) highRiskResponded++;
+        });
+    });
+    const highRiskCoverage = highRiskTotal ? Math.round(highRiskResponded * 100 / highRiskTotal) : 100;
+
+    const now = Date.now();
+    const pendingAges = activeResp
+        .filter(r => r.ApprovalStatus === 'pending' && r.ResponseDate)
+        .map(r => Math.max(0, Math.floor((now - new Date(r.ResponseDate)) / 86400000)));
+    const oldestPending = pendingAges.length ? Math.max(...pendingAges) : 0;
+    const pendingCount = activeResp.filter(r => r.ApprovalStatus === 'pending').length;
+    const rejectedCount = activeResp.filter(r => r.ApprovalStatus === 'rejected').length;
+
+    const health = overdueGaps > 0 || highRiskCoverage < 75 || oldestPending >= 7
+        ? { label: 'Critical Attention', className: 'bg-red-50 text-red-700 border-red-100', color: '#dc2626' }
+        : coverage < 85 || pendingCount > 0 || rejectedCount > 0 || highRiskCoverage < 90
+            ? { label: 'Watch Closely', className: 'bg-amber-50 text-amber-700 border-amber-100', color: '#d97706' }
+            : { label: 'Stable', className: 'bg-emerald-50 text-emerald-700 border-emerald-100', color: '#059669' };
+
+    const focus = [];
+    if (overdueGaps > 0) focus.push(`${overdueGaps} overdue topic${overdueGaps === 1 ? '' : 's'} still need follow-up`);
+    if (highRiskCoverage < 100) focus.push(`High/Critical response coverage is ${highRiskCoverage}%`);
+    if (oldestPending > 0) focus.push(`Oldest pending approval is ${oldestPending} day${oldestPending === 1 ? '' : 's'}`);
+    if (rejectedCount > 0) focus.push(`${rejectedCount} rejected response${rejectedCount === 1 ? '' : 's'} need correction`);
+    const briefText = focus.length
+        ? focus.slice(0, 2).join('. ') + '.'
+        : 'Yokoten response and approval flow is currently stable for the selected year.';
+
+    return {
+        coverage,
+        highRiskCoverage,
+        overdueGaps,
+        oldestPending,
+        pendingCount,
+        rejectedCount,
+        health,
+        briefText,
+        totalPossible,
+        responded,
+        highRiskTotal,
+        highRiskResponded,
+    };
+}
+
+function _buildExecutiveBrief(deptSummary, topics, allResp, alertTopics) {
+    const {
+        coverage,
+        highRiskCoverage,
+        overdueGaps,
+        oldestPending,
+        health,
+        briefText,
+    } = _getExecutiveBriefData(deptSummary, topics, allResp, alertTopics);
+
+    return `
+    <div class="ds-section p-5">
+        <div class="flex flex-col xl:flex-row xl:items-center gap-5 justify-between">
+            <div class="min-w-0">
+                <div class="flex flex-wrap items-center gap-2 mb-2">
+                    <h3 class="text-sm font-black text-slate-800">Executive Brief / สรุปผู้บริหาร</h3>
+                    <span class="px-2.5 py-1 rounded-full text-[11px] font-bold border ${health.className}">${health.label}</span>
+                    <span class="text-[11px] text-slate-400">Year ${_dashYear}</span>
+                </div>
+                <p class="text-sm text-slate-600 leading-relaxed">${_esc(briefText)}</p>
+            </div>
+            <div class="grid grid-cols-2 sm:grid-cols-4 gap-2 w-full xl:w-auto xl:min-w-[520px]">
+                ${_briefMetric(coverage, 'Response coverage / อัตราตอบกลับ', '%', coverage >= 85 ? '#059669' : coverage >= 60 ? '#d97706' : '#dc2626')}
+                ${_briefMetric(highRiskCoverage, 'High-risk coverage / ความเสี่ยงสูง', '%', highRiskCoverage >= 90 ? '#059669' : highRiskCoverage >= 75 ? '#d97706' : '#dc2626')}
+                ${_briefMetric(overdueGaps, 'Overdue gaps / เกินกำหนด', '', overdueGaps ? '#dc2626' : '#059669')}
+                ${_briefMetric(oldestPending, 'Oldest pending / ค้างอนุมัติ', 'd', oldestPending >= 7 ? '#dc2626' : oldestPending >= 3 ? '#d97706' : '#059669')}
+            </div>
+        </div>
+        <div class="mt-4 pt-4 border-t border-slate-100 flex flex-wrap gap-2">
+            <button type="button" class="yok-brief-drill-btn px-3 py-2 rounded-lg text-xs font-bold bg-slate-100 text-slate-600 hover:bg-slate-200"
+                    data-drill-type="status" data-drill-key="not_responded" data-drill-label="ยังไม่ตอบ">
+                Review missing / ตรวจรายการยังไม่ตอบ
+            </button>
+            <button type="button" class="yok-brief-drill-btn px-3 py-2 rounded-lg text-xs font-bold bg-amber-50 text-amber-700 hover:bg-amber-100"
+                    data-drill-type="status" data-drill-key="pending" data-drill-label="รออนุมัติ">
+                Review pending / ตรวจรออนุมัติ
+            </button>
+            <button type="button" class="yok-brief-admin-dept-btn px-3 py-2 rounded-lg text-xs font-bold bg-sky-50 text-sky-700 hover:bg-sky-100">
+                Department view / ดูรายแผนก
+            </button>
+        </div>
+    </div>`;
+}
+
+function _briefMetric(value, label, suffix, color) {
+    return `
+    <div class="rounded-xl border border-slate-100 bg-slate-50 px-3 py-2">
+        <p class="text-xl font-black leading-none" style="color:${color}">${value}${suffix}</p>
+        <p class="text-[10px] font-semibold text-slate-500 mt-1">${label}</p>
+    </div>`;
+}
+
+function _buildYokotenActionCenter(deptSummary, topics, allResp, alertTopics) {
+    const topicMap = new Map(topics.map(t => [t.YokotenID, t]));
+    const pendingResponses = allResp
+        .filter(r => r.ApprovalStatus === 'pending')
+        .sort((a, b) => new Date(a.ResponseDate || 0) - new Date(b.ResponseDate || 0));
+    const rejectedResponses = allResp
+        .filter(r => r.ApprovalStatus === 'rejected')
+        .sort((a, b) => new Date(b.UpdatedAt || b.ResponseDate || 0) - new Date(a.UpdatedAt || a.ResponseDate || 0));
+
+    const missingItems = [];
+    deptSummary.forEach(dept => {
+        (dept.topicBreakdown || []).forEach(tb => {
+            if (tb.responded) return;
+            const topic = topicMap.get(tb.YokotenID);
+            if (!topic) return;
+            const daysLeft = topic.Deadline ? Math.ceil((new Date(topic.Deadline) - Date.now()) / 86400000) : 9999;
+            const riskScore = { Critical: 4, High: 3, Medium: 2, Low: 1 }[topic.RiskLevel] || 0;
+            missingItems.push({ topic, dept: dept.department, daysLeft, riskScore });
+        });
+    });
+    missingItems.sort((a, b) => {
+        const overdueA = a.daysLeft < 0 ? 1000 : 0;
+        const overdueB = b.daysLeft < 0 ? 1000 : 0;
+        return (overdueB + b.riskScore * 10 - b.daysLeft) - (overdueA + a.riskScore * 10 - a.daysLeft);
+    });
+
+    const overdueTopics = alertTopics.filter(t => t.daysLeft < 0).length;
+    const nearTopics = alertTopics.filter(t => t.daysLeft >= 0).length;
+    const totalActions = pendingResponses.length + rejectedResponses.length + missingItems.length;
+    const highestRiskMissing = missingItems.filter(i => ['Critical', 'High'].includes(i.topic.RiskLevel)).length;
+
+    const responseRow = (r, label, colorClass) => {
+        const topic = topicMap.get(r.YokotenID);
+        return `
+        <button type="button" class="w-full text-left px-4 py-3 hover:bg-slate-50 transition-colors yok-open-topic-btn"
+                data-yid="${_esc(r.YokotenID)}" data-rid="${_esc(r.ResponseID || '')}">
+            <div class="flex items-start gap-3">
+                <span class="mt-0.5 w-2 h-2 rounded-full flex-shrink-0 ${colorClass}"></span>
+                <div class="min-w-0 flex-1">
+                    <p class="text-xs font-bold text-slate-700 truncate">${_esc(topic?.Title || r.Title || r.TopicTitle || r.YokotenID)}</p>
+                    <p class="text-[11px] text-slate-400 mt-0.5">${_esc(r.Department || '-')} · ${label} · ${_fmtDate(r.ResponseDate)}</p>
+                </div>
+            </div>
+        </button>`;
+    };
+
+    const missingRow = item => {
+        const overdue = item.daysLeft < 0;
+        const tag = !item.topic.Deadline ? 'ไม่มีกำหนด'
+            : overdue ? `เกิน ${Math.abs(item.daysLeft)} วัน`
+            : item.daysLeft === 0 ? 'ครบกำหนดวันนี้'
+            : `อีก ${item.daysLeft} วัน`;
+        const tagClass = overdue ? 'bg-red-100 text-red-700' : item.daysLeft <= 3 ? 'bg-amber-100 text-amber-700' : 'bg-slate-100 text-slate-600';
+        return `
+        <button type="button" class="w-full text-left px-4 py-3 hover:bg-slate-50 transition-colors yok-open-topic-btn"
+                data-yid="${_esc(item.topic.YokotenID)}">
+            <div class="flex items-start gap-3">
+                <span class="mt-0.5 px-1.5 py-0.5 rounded text-[10px] font-bold ${RISK_BADGE[item.topic.RiskLevel] || 'bg-slate-100 text-slate-500'}">${RISK_LABEL[item.topic.RiskLevel] || item.topic.RiskLevel}</span>
+                <div class="min-w-0 flex-1">
+                    <p class="text-xs font-bold text-slate-700 truncate">${_esc(item.topic.Title || _htmlToText(item.topic.TopicDescription))}</p>
+                    <p class="text-[11px] text-slate-400 mt-0.5">${_esc(item.dept)} ยังไม่ตอบ</p>
+                </div>
+                <span class="text-[10px] font-semibold px-2 py-1 rounded-lg ${tagClass}">${tag}</span>
+            </div>
+        </button>`;
+    };
+
+    return `
+    <div class="ds-section overflow-hidden">
+        <div class="px-5 py-4 border-b border-slate-100 flex flex-col lg:flex-row lg:items-center gap-3 justify-between">
+            <div>
+                <h3 class="text-sm font-black text-slate-800">Enterprise Action Required / งานที่ต้องติดตาม</h3>
+                <p class="text-xs text-slate-400 mt-0.5">คิวงานที่ผู้ดูแลควรติดตามก่อนดูกราฟภาพรวม / Priority work queue before chart review</p>
+            </div>
+            <div class="grid grid-cols-2 sm:grid-cols-4 gap-2 w-full lg:w-auto">
+                ${_actionMetric(totalActions, 'Total actions / งานค้างรวม', '#334155', '#f8fafc')}
+                ${_actionMetric(pendingResponses.length, 'Pending / รออนุมัติ', '#d97706', '#fffbeb')}
+                ${_actionMetric(overdueTopics, 'Overdue topics / เกินกำหนด', '#dc2626', '#fef2f2')}
+                ${_actionMetric(highestRiskMissing, 'High/Critical gaps / ยังไม่ตอบ', '#ea580c', '#fff7ed')}
+            </div>
+        </div>
+        <div class="grid grid-cols-1 xl:grid-cols-3 divide-y xl:divide-y-0 xl:divide-x divide-slate-100">
+            <div>
+                <div class="px-4 py-3 bg-slate-50 border-b border-slate-100 flex items-center justify-between">
+                    <span class="text-xs font-bold text-slate-600">Pending / Rejected · รออนุมัติ / ส่งกลับแก้ไข</span>
+                    <span class="text-[11px] text-slate-400">${pendingResponses.length + rejectedResponses.length} รายการ</span>
+                </div>
+                <div class="divide-y divide-slate-100 max-h-72 overflow-y-auto">
+                    ${pendingResponses.slice(0, 4).map(r => responseRow(r, 'Pending / รออนุมัติ', 'bg-amber-500')).join('')}
+                    ${rejectedResponses.slice(0, 3).map(r => responseRow(r, 'Rejected / ส่งกลับแก้ไข', 'bg-red-500')).join('')}
+                    ${pendingResponses.length + rejectedResponses.length === 0 ? '<div class="px-4 py-8 text-center text-sm text-emerald-600 font-semibold">No decision queue / ไม่มีรายการรอการตัดสินใจ</div>' : ''}
+                </div>
+            </div>
+            <div>
+                <div class="px-4 py-3 bg-slate-50 border-b border-slate-100 flex items-center justify-between">
+                    <span class="text-xs font-bold text-slate-600">Missing Responses / แผนกที่ยังไม่ตอบ</span>
+                    <span class="text-[11px] text-slate-400">${missingItems.length} รายการ</span>
+                </div>
+                <div class="divide-y divide-slate-100 max-h-72 overflow-y-auto">
+                    ${missingItems.slice(0, 7).map(missingRow).join('') || '<div class="px-4 py-8 text-center text-sm text-emerald-600 font-semibold">All departments responded / ตอบครบทุกแผนกแล้ว</div>'}
+                </div>
+            </div>
+            <div>
+                <div class="px-4 py-3 bg-slate-50 border-b border-slate-100 flex items-center justify-between">
+                    <span class="text-xs font-bold text-slate-600">SLA / Deadline Watch · เฝ้าระวังกำหนด</span>
+                    <span class="text-[11px] text-slate-400">${nearTopics} ใกล้ครบกำหนด</span>
+                </div>
+                <div class="p-4 space-y-3">
+                    <div class="rounded-xl border border-red-100 bg-red-50 px-4 py-3 flex items-center justify-between">
+                        <span class="text-xs font-semibold text-red-700">Overdue topics / หัวข้อเกินกำหนด</span>
+                        <span class="text-xl font-black text-red-700">${overdueTopics}</span>
+                    </div>
+                    <div class="rounded-xl border border-amber-100 bg-amber-50 px-4 py-3 flex items-center justify-between">
+                        <span class="text-xs font-semibold text-amber-700">Due within 14 days / ใกล้ครบกำหนด</span>
+                        <span class="text-xl font-black text-amber-700">${nearTopics}</span>
+                    </div>
+                    <button type="button" class="w-full px-4 py-2 rounded-lg text-xs font-bold text-white bg-slate-800 hover:bg-slate-700" data-switch-tab="topics">
+                        Open topics / ไปยังรายการหัวข้อ
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>`;
+}
+
+function _actionMetric(value, label, color, bg) {
+    return `
+    <div class="rounded-xl px-3 py-2 border border-slate-100" style="background:${bg}">
+        <p class="text-lg font-black leading-none" style="color:${color}">${value}</p>
+        <p class="text-[10px] font-semibold text-slate-500 mt-1 whitespace-nowrap">${label}</p>
+    </div>`;
+}
+
+function _buildExecutiveRiskWatch(deptSummary, topics, allResp) {
+    const now = Date.now();
+    const topicMap = new Map(topics.map(t => [String(t.YokotenID), t]));
+    const activeResp = (allResp || []).filter(r => topicMap.has(String(r.YokotenID)));
+    const dayMs = 86400000;
+
+    const highRiskMissing = [];
+    deptSummary.forEach(dept => {
+        (dept.topicBreakdown || []).forEach(tb => {
+            if (tb.responded) return;
+            const topic = topicMap.get(String(tb.YokotenID));
+            if (!topic || !['Critical', 'High'].includes(topic.RiskLevel)) return;
+            const daysLeft = topic.Deadline ? Math.ceil((new Date(topic.Deadline) - now) / dayMs) : 999;
+            highRiskMissing.push({ topic, dept: dept.department, daysLeft });
+        });
+    });
+    highRiskMissing.sort((a, b) => {
+        const score = item => (item.daysLeft < 0 ? 1000 : 0) + ({ Critical: 20, High: 10 }[item.topic.RiskLevel] || 0) - item.daysLeft;
+        return score(b) - score(a);
+    });
+
+    const agingPending = activeResp
+        .filter(r => r.ApprovalStatus === 'pending')
+        .map(r => {
+            const ageDays = r.ResponseDate ? Math.max(0, Math.floor((now - new Date(r.ResponseDate)) / dayMs)) : 0;
+            const topic = topicMap.get(String(r.YokotenID));
+            return { ...r, ageDays, topic };
+        })
+        .sort((a, b) => b.ageDays - a.ageDays);
+
+    const bottlenecks = deptSummary
+        .filter(d => (d.totalTopics || 0) > 0)
+        .map(d => {
+            const missingHighRisk = (d.topicBreakdown || []).filter(tb => {
+                if (tb.responded) return false;
+                const topic = topicMap.get(String(tb.YokotenID));
+                return topic && ['Critical', 'High'].includes(topic.RiskLevel);
+            }).length;
+            const pending = d.pendingApproval || 0;
+            const rejected = d.rejected || 0;
+            const completion = d.completionPct || 0;
+            return {
+                ...d,
+                missingHighRisk,
+                score: (100 - completion) + pending * 8 + rejected * 12 + missingHighRisk * 15,
+            };
+        })
+        .filter(d => d.score > 0)
+        .sort((a, b) => b.score - a.score);
+
+    const deadlineText = daysLeft => {
+        if (daysLeft === 999) return 'No deadline';
+        if (daysLeft < 0) return `Overdue ${Math.abs(daysLeft)}d`;
+        if (daysLeft === 0) return 'Due today';
+        return `Due in ${daysLeft}d`;
+    };
+
+    const highRiskRows = highRiskMissing.slice(0, 6).map(item => `
+        <button type="button" class="w-full text-left px-4 py-3 hover:bg-slate-50 transition-colors yok-open-topic-btn"
+                data-yid="${_esc(item.topic.YokotenID)}">
+            <div class="flex items-start gap-3">
+                <span class="mt-0.5 px-1.5 py-0.5 rounded text-[10px] font-bold ${RISK_BADGE[item.topic.RiskLevel] || 'bg-slate-100 text-slate-500'}">${RISK_LABEL[item.topic.RiskLevel] || item.topic.RiskLevel}</span>
+                <div class="min-w-0 flex-1">
+                    <p class="text-xs font-bold text-slate-700 truncate">${_esc(item.topic.Title || _htmlToText(item.topic.TopicDescription))}</p>
+                    <p class="text-[11px] text-slate-400 mt-0.5">${_esc(item.dept)} · ${deadlineText(item.daysLeft)}</p>
+                </div>
+            </div>
+        </button>`).join('');
+
+    const agingRows = agingPending.slice(0, 6).map(r => `
+        <button type="button" class="w-full text-left px-4 py-3 hover:bg-slate-50 transition-colors yok-open-topic-btn"
+                data-yid="${_esc(r.YokotenID)}" data-rid="${_esc(r.ResponseID || '')}">
+            <div class="flex items-start gap-3">
+                <span class="mt-0.5 w-8 h-8 rounded-lg bg-amber-50 text-amber-700 flex items-center justify-center text-xs font-black">${r.ageDays}</span>
+                <div class="min-w-0 flex-1">
+                    <p class="text-xs font-bold text-slate-700 truncate">${_esc(r.topic?.Title || r.Title || r.TopicTitle || r.YokotenID)}</p>
+                    <p class="text-[11px] text-slate-400 mt-0.5">${_esc(r.Department || '-')} · pending approval days</p>
+                </div>
+            </div>
+        </button>`).join('');
+
+    const bottleneckRows = bottlenecks.slice(0, 6).map(d => {
+        const color = d.completionPct >= 80 ? '#059669' : d.completionPct >= 50 ? '#d97706' : '#dc2626';
+        return `
+        <button type="button" class="w-full text-left px-4 py-3 hover:bg-slate-50 transition-colors yok-admin-dept-watch-btn">
+            <div class="flex items-center gap-3">
+                <div class="w-10 h-10 rounded-xl bg-slate-50 flex items-center justify-center text-sm font-black" style="color:${color}">${d.completionPct || 0}%</div>
+                <div class="min-w-0 flex-1">
+                    <p class="text-xs font-bold text-slate-700 truncate">${_esc(d.department || '-')}</p>
+                    <p class="text-[11px] text-slate-400 mt-0.5">${d.respondedCount || 0}/${d.totalTopics || 0} responses · ${d.pendingApproval || 0} pending · ${d.rejected || 0} rejected</p>
+                </div>
+                ${d.missingHighRisk ? `<span class="text-[10px] font-bold px-2 py-1 rounded-lg bg-red-50 text-red-700">${d.missingHighRisk} high risk</span>` : ''}
+            </div>
+        </button>`;
+    }).join('');
+
+    return `
+    <div class="ds-section overflow-hidden">
+        <div class="px-5 py-4 border-b border-slate-100 flex flex-col lg:flex-row lg:items-center gap-3 justify-between">
+            <div>
+                <h3 class="text-sm font-black text-slate-800">Executive Risk & Aging Watch / ความเสี่ยงและงานค้าง</h3>
+                <p class="text-xs text-slate-400 mt-0.5">Decision view for high-risk response gaps, aging approvals, and department bottlenecks / มุมตัดสินใจสำหรับผู้บริหาร</p>
+            </div>
+            <div class="grid grid-cols-3 gap-2 w-full lg:w-auto">
+                ${_actionMetric(highRiskMissing.length, 'High/Critical gap / ช่องว่าง', '#dc2626', '#fef2f2')}
+                ${_actionMetric(agingPending.filter(r => r.ageDays >= 3).length, 'Pending 3d+ / ค้าง 3 วัน+', '#d97706', '#fffbeb')}
+                ${_actionMetric(bottlenecks.filter(d => (d.completionPct || 0) < 80).length, 'Dept <80% / แผนกต่ำกว่า 80%', '#334155', '#f8fafc')}
+            </div>
+        </div>
+        <div class="grid grid-cols-1 xl:grid-cols-3 divide-y xl:divide-y-0 xl:divide-x divide-slate-100">
+            <div>
+                <div class="px-4 py-3 bg-slate-50 border-b border-slate-100">
+                    <span class="text-xs font-bold text-slate-600">High/Critical Not Responded / ความเสี่ยงสูงยังไม่ตอบ</span>
+                </div>
+                <div class="divide-y divide-slate-100 max-h-72 overflow-y-auto">
+                    ${highRiskRows || '<div class="px-4 py-8 text-center text-sm text-emerald-600 font-semibold">No high-risk response gaps / ไม่มีช่องว่างความเสี่ยงสูง</div>'}
+                </div>
+            </div>
+            <div>
+                <div class="px-4 py-3 bg-slate-50 border-b border-slate-100">
+                    <span class="text-xs font-bold text-slate-600">Approval Aging / อายุงานรออนุมัติ</span>
+                </div>
+                <div class="divide-y divide-slate-100 max-h-72 overflow-y-auto">
+                    ${agingRows || '<div class="px-4 py-8 text-center text-sm text-emerald-600 font-semibold">No pending approvals / ไม่มีรายการรออนุมัติ</div>'}
+                </div>
+            </div>
+            <div>
+                <div class="px-4 py-3 bg-slate-50 border-b border-slate-100 flex items-center justify-between">
+                    <span class="text-xs font-bold text-slate-600">Department Bottlenecks / แผนกคอขวด</span>
+                    <span class="text-[11px] text-slate-400">click to manage / คลิกเพื่อจัดการ</span>
+                </div>
+                <div class="divide-y divide-slate-100 max-h-72 overflow-y-auto">
+                    ${bottleneckRows || '<div class="px-4 py-8 text-center text-sm text-emerald-600 font-semibold">No department bottlenecks / ไม่มีแผนกคอขวด</div>'}
+                </div>
+            </div>
+        </div>
+    </div>`;
+}
+
+function _buildExecutiveChartLayer() {
+    return `
+    <div class="grid grid-cols-1 xl:grid-cols-3 gap-4">
+        <div class="ds-section p-5">
+            <div class="flex items-center justify-between mb-4">
+                <h3 class="text-sm font-bold text-slate-700">Response Status Mix / สัดส่วนสถานะตอบกลับ</h3>
+                <span class="text-[11px] text-slate-400">All departments / สถานะรวมทุกแผนก</span>
+            </div>
+            <div class="flex items-center gap-5">
+                <div class="flex-shrink-0" style="width:150px;height:150px">
+                    <canvas id="yok-status-chart"></canvas>
+                </div>
+                <div id="yok-status-legend" class="flex-1 space-y-2"></div>
+            </div>
+        </div>
+        <div class="ds-section p-5 xl:col-span-2">
+            <div class="flex items-center justify-between mb-4">
+                <h3 class="text-sm font-bold text-slate-700">Monthly Yokoten Flow / แนวโน้มรายเดือน</h3>
+                <span class="text-[11px] text-slate-400">Issued topics vs responses / หัวข้อใหม่เทียบการตอบกลับ ปี ${_dashYear}</span>
+            </div>
+            <div style="height:220px">
+                <canvas id="yok-trend-chart"></canvas>
+            </div>
+        </div>
+    </div>
+    <div id="yok-dashboard-drilldown">
+        ${_buildDashboardDrilldownPanel()}
+    </div>`;
+}
+
+function _getDashboardTopicsForYear() {
+    return _topics.filter(t => !t.DateIssued || new Date(t.DateIssued).getFullYear() === _dashYear);
+}
+
+function _getActiveTopicIdsForYear() {
+    return new Set(_getDashboardTopicsForYear().map(t => t.YokotenID));
+}
+
+function _getStatusMixData() {
+    const topics = _deptCompletion?.topics || [];
+    const deptSummary = _filterToTargetedDepts(_deptCompletion?.deptSummary || [], topics);
+    const topicIds = _getActiveTopicIdsForYear();
+    const responses = (_allResponses || []).filter(r => !topicIds.size || topicIds.has(r.YokotenID));
+    const totalPossible = deptSummary.reduce((sum, dept) => {
+        const breakdown = Array.isArray(dept.topicBreakdown) ? dept.topicBreakdown : [];
+        return sum + breakdown.filter(tb => !topicIds.size || topicIds.has(tb.YokotenID)).length;
+    }, 0);
+    const autoApproved = responses.filter(r => r.IsRelated === 'No' && !r.ApprovalStatus).length;
+    const pending = responses.filter(r => r.ApprovalStatus === 'pending').length;
+    const approved = responses.filter(r => r.ApprovalStatus === 'approved').length;
+    const rejected = responses.filter(r => r.ApprovalStatus === 'rejected').length;
+    const notResponded = Math.max(0, totalPossible - responses.length);
+    return [
+        { key: 'not_responded', label: 'Not responded / ยังไม่ตอบ', value: notResponded, color: '#94a3b8' },
+        { key: 'auto_approved', label: 'Not related / ไม่เกี่ยวข้อง', value: autoApproved, color: '#059669' },
+        { key: 'pending', label: 'Pending / รออนุมัติ', value: pending, color: '#d97706' },
+        { key: 'approved', label: 'Approved / อนุมัติแล้ว', value: approved, color: '#2563eb' },
+        { key: 'rejected', label: 'Rejected / ส่งกลับแก้ไข', value: rejected, color: '#dc2626' },
+    ];
+}
+
+function _dashboardTopicMap() {
+    return new Map(_topics.map(t => [String(t.YokotenID), t]));
+}
+
+function _getStatusDrillRows(statusKey) {
+    const topicMap = _dashboardTopicMap();
+    const topicIds = _getActiveTopicIdsForYear();
+    if (statusKey === 'not_responded') {
+        const rows = [];
+        const topics = _deptCompletion?.topics || [];
+        const deptSummary = _filterToTargetedDepts(_deptCompletion?.deptSummary || [], topics);
+        deptSummary.forEach(dept => {
+            (dept.topicBreakdown || []).forEach(tb => {
+                if (tb.responded || (topicIds.size && !topicIds.has(tb.YokotenID))) return;
+                const topic = topicMap.get(String(tb.YokotenID));
+                if (!topic) return;
+                rows.push({
+                    kind: 'missing',
+                    yid: topic.YokotenID,
+                    title: topic.Title || _htmlToText(topic.TopicDescription),
+                    dept: dept.department,
+                    risk: topic.RiskLevel,
+                    date: topic.Deadline,
+                    meta: topic.Deadline ? `Deadline ${_fmtDateOnly(topic.Deadline)}` : 'No deadline',
+                });
+            });
+        });
+        return rows.sort((a, b) => _urgency(b.date) - _urgency(a.date));
+    }
+
+    return (_allResponses || [])
+        .filter(r => !topicIds.size || topicIds.has(r.YokotenID))
+        .filter(r => {
+            if (statusKey === 'auto_approved') return r.IsRelated === 'No' && !r.ApprovalStatus;
+            return r.ApprovalStatus === statusKey;
+        })
+        .map(r => {
+            const topic = topicMap.get(String(r.YokotenID));
+            return {
+                kind: 'response',
+                yid: r.YokotenID,
+                rid: r.ResponseID,
+                title: topic?.Title || r.Title || r.TopicTitle || r.YokotenID,
+                dept: r.Department,
+                risk: topic?.RiskLevel,
+                date: r.ResponseDate,
+                meta: `${r.EmployeeName || r.EmployeeID || '-'} · ${_fmtDate(r.ResponseDate)}`,
+            };
+        })
+        .sort((a, b) => new Date(b.date || 0) - new Date(a.date || 0));
+}
+
+function _getTrendDrillRows(kind, monthIndex) {
+    const topicMap = _dashboardTopicMap();
+    const topicIds = _getActiveTopicIdsForYear();
+    if (kind === 'issued') {
+        return _topics
+            .filter(t => {
+                if (!t.DateIssued) return false;
+                const d = new Date(t.DateIssued);
+                return d.getFullYear() === _dashYear && d.getMonth() === monthIndex;
+            })
+            .map(t => ({
+                kind: 'topic',
+                yid: t.YokotenID,
+                title: t.Title || _htmlToText(t.TopicDescription),
+                dept: Array.isArray(t.TargetDepts) && t.TargetDepts.length ? t.TargetDepts.join(', ') : 'All target departments',
+                risk: t.RiskLevel,
+                date: t.DateIssued,
+                meta: `Issued ${_fmtDateOnly(t.DateIssued)}`,
+            }))
+            .sort((a, b) => new Date(b.date || 0) - new Date(a.date || 0));
+    }
+    return (_allResponses || [])
+        .filter(r => {
+            if (!r.ResponseDate || (topicIds.size && !topicIds.has(r.YokotenID))) return false;
+            const d = new Date(r.ResponseDate);
+            return d.getFullYear() === _dashYear && d.getMonth() === monthIndex;
+        })
+        .map(r => {
+            const topic = topicMap.get(String(r.YokotenID));
+            return {
+                kind: 'response',
+                yid: r.YokotenID,
+                rid: r.ResponseID,
+                title: topic?.Title || r.Title || r.TopicTitle || r.YokotenID,
+                dept: r.Department,
+                risk: topic?.RiskLevel,
+                date: r.ResponseDate,
+                meta: `${r.EmployeeName || r.EmployeeID || '-'} · ${_fmtDate(r.ResponseDate)}`,
+            };
+        })
+        .sort((a, b) => new Date(b.date || 0) - new Date(a.date || 0));
+}
+
+function _buildDashboardDrilldownPanel() {
+    const drill = _dashboardDrilldown;
+    if (!drill) {
+        return `
+        <div class="ds-section px-5 py-4 border border-dashed border-slate-200 bg-slate-50/60">
+            <div class="flex flex-col sm:flex-row sm:items-center gap-2 justify-between">
+                <div>
+                    <h3 class="text-sm font-black text-slate-700">Dashboard Drilldown / รายการเจาะลึก</h3>
+                    <p class="text-xs text-slate-400 mt-0.5">Click chart or legend to inspect exact Yokoten items / คลิกกราฟหรือ legend เพื่อดูรายการจริง</p>
+                </div>
+                <span class="text-[11px] font-semibold text-slate-400">Insight layer / ชั้นข้อมูลเชิงลึก</span>
+            </div>
+        </div>`;
+    }
+
+    const rows = drill.type === 'status'
+        ? _getStatusDrillRows(drill.key)
+        : _getTrendDrillRows(drill.kind, drill.month);
+    const title = drill.type === 'status'
+        ? `Status Drilldown: ${drill.label}`
+        : `Monthly Drilldown: ${drill.label}`;
+
+    return `
+    <div class="ds-section overflow-hidden">
+        <div class="px-5 py-4 border-b border-slate-100 flex flex-col sm:flex-row sm:items-center gap-2 justify-between">
+            <div>
+                <h3 class="text-sm font-black text-slate-800">${_esc(title)}</h3>
+                <p class="text-xs text-slate-400 mt-0.5">${rows.length} item${rows.length === 1 ? '' : 's'} / รายการใน metric ที่เลือก</p>
+            </div>
+            <button type="button" class="yok-clear-drilldown px-3 py-1.5 rounded-lg text-xs font-bold text-slate-500 bg-slate-100 hover:bg-slate-200">
+                Clear / ล้าง
+            </button>
+        </div>
+        <div class="divide-y divide-slate-100 max-h-96 overflow-y-auto">
+            ${rows.length ? rows.slice(0, 30).map(_buildDashboardDrillRow).join('') : `
+            <div class="px-5 py-8 text-center text-sm font-semibold text-slate-400">No items found / ไม่พบรายการในเงื่อนไขนี้</div>`}
+        </div>
+    </div>`;
+}
+
+function _buildDashboardDrillRow(row) {
+    return `
+    <button type="button" class="w-full text-left px-5 py-3 hover:bg-slate-50 transition-colors yok-open-topic-btn"
+            data-yid="${_esc(row.yid || '')}" data-rid="${_esc(row.rid || '')}">
+        <div class="flex items-start gap-3">
+            <span class="mt-0.5 px-1.5 py-0.5 rounded text-[10px] font-bold ${RISK_BADGE[row.risk] || 'bg-slate-100 text-slate-500'}">${_esc(RISK_LABEL[row.risk] || row.risk || '-')}</span>
+            <div class="min-w-0 flex-1">
+                <p class="text-xs font-bold text-slate-700 truncate">${_esc(row.title || '-')}</p>
+                <p class="text-[11px] text-slate-400 mt-0.5">${_esc(row.dept || '-')} · ${_esc(row.meta || '')}</p>
+            </div>
+        </div>
+    </button>`;
+}
+
+function _setDashboardDrilldown(drill) {
+    _dashboardDrilldown = drill;
+    const panel = document.getElementById('yok-dashboard-drilldown');
+    if (panel) {
+        panel.innerHTML = _buildDashboardDrilldownPanel();
+        panel.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    }
+}
+
+function _initStatusChart() {
+    if (_chartStatus) { _chartStatus.destroy(); _chartStatus = null; }
+    const canvas = document.getElementById('yok-status-chart');
+    if (!canvas || typeof Chart === 'undefined') return;
+    const rows = _getStatusMixData();
+    const nonzero = rows.filter(r => r.value > 0);
+    const dataRows = nonzero.length ? nonzero : [{ label: 'ไม่มีข้อมูล', value: 1, color: '#e2e8f0' }];
+    const total = rows.reduce((sum, r) => sum + r.value, 0);
+    const legend = document.getElementById('yok-status-legend');
+    if (legend) {
+        legend.innerHTML = rows.map(r => {
+            const pct = total ? Math.round(r.value * 100 / total) : 0;
+            return `<button type="button" class="w-full flex items-center gap-2 text-xs rounded-lg px-2 py-1 hover:bg-slate-50 yok-status-drill-btn" data-status="${_esc(r.key)}" data-label="${_esc(r.label)}">
+                <span class="w-2.5 h-2.5 rounded-full" style="background:${r.color}"></span>
+                <span class="flex-1 text-slate-600">${r.label}</span>
+                <span class="font-bold text-slate-700">${r.value}</span>
+                <span class="text-slate-400 w-8 text-right">${pct}%</span>
+            </button>`;
+        }).join('');
+    }
+    _chartStatus = new Chart(canvas, {
+        type: 'doughnut',
+        data: {
+            labels: dataRows.map(r => r.label),
+            datasets: [{ data: dataRows.map(r => r.value), backgroundColor: dataRows.map(r => r.color), borderColor: '#fff', borderWidth: 2 }],
+        },
+        options: {
+            cutout: '70%',
+            plugins: {
+                legend: { display: false },
+                tooltip: { callbacks: { label: ctx => ` ${ctx.label}: ${ctx.raw} รายการ` } },
+            },
+            onClick: (evt, elements) => {
+                const el = elements?.[0];
+                if (!el) return;
+                const row = dataRows[el.index];
+                if (row?.key) _setDashboardDrilldown({ type: 'status', key: row.key, label: row.label });
+            },
+        },
+    });
+}
+
+function _initTrendChart() {
+    if (_chartTrend) { _chartTrend.destroy(); _chartTrend = null; }
+    const canvas = document.getElementById('yok-trend-chart');
+    if (!canvas || typeof Chart === 'undefined') return;
+    const monthLabels = ['ม.ค.','ก.พ.','มี.ค.','เม.ย.','พ.ค.','มิ.ย.','ก.ค.','ส.ค.','ก.ย.','ต.ค.','พ.ย.','ธ.ค.'];
+    const issued = Array(12).fill(0);
+    const responses = Array(12).fill(0);
+    const topicIds = _getActiveTopicIdsForYear();
+    _topics.forEach(t => {
+        if (!t.DateIssued) return;
+        const d = new Date(t.DateIssued);
+        if (d.getFullYear() === _dashYear) issued[d.getMonth()]++;
+    });
+    (_allResponses || []).forEach(r => {
+        if (!r.ResponseDate || (topicIds.size && !topicIds.has(r.YokotenID))) return;
+        const d = new Date(r.ResponseDate);
+        if (d.getFullYear() === _dashYear) responses[d.getMonth()]++;
+    });
+    _chartTrend = new Chart(canvas, {
+        type: 'line',
+        data: {
+            labels: monthLabels,
+            datasets: [
+                {
+                    label: 'หัวข้อใหม่',
+                    data: issued,
+                    borderColor: '#0ea5e9',
+                    backgroundColor: 'rgba(14,165,233,.10)',
+                    fill: true,
+                    tension: 0.35,
+                    pointRadius: 3,
+                },
+                {
+                    label: 'การตอบกลับ',
+                    data: responses,
+                    borderColor: '#059669',
+                    backgroundColor: 'rgba(5,150,105,.08)',
+                    fill: true,
+                    tension: 0.35,
+                    pointRadius: 3,
+                },
+            ],
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: {
+                legend: { position: 'bottom', labels: { boxWidth: 10, usePointStyle: true, font: { size: 11 } } },
+                tooltip: { mode: 'index', intersect: false },
+            },
+            onClick: (evt, elements) => {
+                const el = elements?.[0];
+                if (!el) return;
+                const kind = el.datasetIndex === 0 ? 'issued' : 'responses';
+                const seriesLabel = kind === 'issued' ? 'Issued topics' : 'Responses';
+                _setDashboardDrilldown({
+                    type: 'trend',
+                    kind,
+                    month: el.index,
+                    label: `${seriesLabel} · ${monthLabels[el.index]} ${_dashYear}`,
+                });
+            },
+            scales: {
+                x: { grid: { display: false }, ticks: { font: { size: 10 } } },
+                y: { beginAtZero: true, ticks: { precision: 0, font: { size: 10 } }, grid: { color: '#f1f5f9' } },
+            },
+        },
+    });
 }
 
 function _approvalFunnelBar(count, total, bg, color, label) {
@@ -892,6 +1646,9 @@ function renderTopics(container) {
     if (_filterAck === 'pending')   filtered = filtered.filter(t => !t.deptResponse);
     if (_filterAck === 'responded') filtered = filtered.filter(t => !!t.deptResponse);
     if (_filterAck === 'rejected')  filtered = filtered.filter(t => t.deptResponse?.ApprovalStatus === 'rejected');
+    if (_filterSla === 'overdue')     filtered = filtered.filter(t => !t.deptResponse && _isOverdue(t.Deadline));
+    if (_filterSla === 'due_soon')    filtered = filtered.filter(t => !t.deptResponse && _isNearDeadline(t.Deadline));
+    if (_filterSla === 'no_deadline') filtered = filtered.filter(t => !t.Deadline);
     if (_searchQ.trim()) {
         const q = _searchQ.trim().toLowerCase();
         filtered = filtered.filter(t =>
@@ -980,31 +1737,45 @@ function renderTopics(container) {
 
         <!-- Filter bar -->
         <div class="ds-filter-bar">
-            <div class="flex flex-wrap gap-3 items-center">
-                <select id="yok-filter-risk" class="form-input py-1.5 text-sm">
+            <div class="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-[170px_170px_170px_170px_minmax(220px,1fr)_auto] gap-2 items-center">
+                <select id="yok-filter-risk" class="form-input h-10 text-sm w-full">
                     <option value="">ทุกระดับความเสี่ยง</option>
                     ${RISK_LEVELS.map(r => `<option value="${r.value}" ${_filterRisk === r.value ? 'selected' : ''}>${r.label}</option>`).join('')}
                 </select>
-                <select id="yok-filter-cat" class="form-input py-1.5 text-sm">
+                <select id="yok-filter-cat" class="form-input h-10 text-sm w-full">
                     <option value="">ทุกหมวดหมู่</option>
                     ${CATEGORIES.map(c => `<option value="${c}" ${_filterCat === c ? 'selected' : ''}>${c}</option>`).join('')}
                 </select>
-                <select id="yok-filter-ack" class="form-input py-1.5 text-sm">
+                <select id="yok-filter-ack" class="form-input h-10 text-sm w-full">
                     <option value="">ทุกสถานะ</option>
                     <option value="pending"   ${_filterAck === 'pending'   ? 'selected' : ''}>รอตอบกลับ</option>
                     <option value="responded" ${_filterAck === 'responded' ? 'selected' : ''}>ตอบกลับแล้ว</option>
                     <option value="rejected"  ${_filterAck === 'rejected'  ? 'selected' : ''}>ถูกส่งกลับแก้ไข</option>
                 </select>
-                <div class="relative flex-1 min-w-[160px]">
+                <select id="yok-filter-sla" class="form-input h-10 text-sm w-full">
+                    <option value="">All SLA / ทุกกำหนดเวลา</option>
+                    <option value="overdue" ${_filterSla === 'overdue' ? 'selected' : ''}>Overdue / เกินกำหนด</option>
+                    <option value="due_soon" ${_filterSla === 'due_soon' ? 'selected' : ''}>Due soon / ใกล้ครบกำหนด</option>
+                    <option value="no_deadline" ${_filterSla === 'no_deadline' ? 'selected' : ''}>No deadline / ไม่มีกำหนด</option>
+                </select>
+                <div class="relative">
                     <svg class="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400 pointer-events-none"
                          fill="none" stroke="currentColor" viewBox="0 0 24 24">
                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/>
                     </svg>
-                    <input id="yok-search" type="text" placeholder="ค้นหาหัวข้อ..."
-                           value="${_esc(_searchQ)}" class="form-input w-full pl-9 text-sm py-1.5">
+                    <input id="yok-search" type="text" placeholder="Search topic... / ค้นหาหัวข้อ..."
+                           value="${_esc(_searchQ)}" class="form-input w-full h-10 pl-9 text-sm">
                 </div>
-                <span class="text-xs text-slate-400 ml-auto">${filtered.length} หัวข้อ</span>
+                <span class="h-10 px-3 rounded-lg bg-slate-50 border border-slate-200 text-xs font-semibold text-slate-500 inline-flex items-center justify-center whitespace-nowrap">
+                    ${filtered.length} หัวข้อ
+                </span>
             </div>
+            ${(_filterRisk || _filterCat || _filterAck || _filterSla || _searchQ.trim()) ? `
+            <div class="mt-2 flex justify-end">
+                <button id="yok-clear-filters" type="button" class="px-3 py-1.5 rounded-lg text-xs font-semibold text-slate-500 border border-slate-200 hover:bg-slate-50">
+                    Clear filters / ล้างตัวกรอง
+                </button>
+            </div>` : ''}
         </div>
 
         <!-- Topic grid -->
@@ -1016,7 +1787,8 @@ function renderTopics(container) {
                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.172 16.172a4 4 0 015.656 0M9 10h.01M15 10h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/>
                        </svg>
                    </div>
-                   <p class="font-medium">ไม่มีหัวข้อที่ตรงกับเงื่อนไข</p>
+                   <p class="font-medium">No matching topics / ไม่พบหัวข้อที่ตรงกับตัวกรอง</p>
+                   <p class="text-sm mt-1">Adjust filters or search terms to review another Yokoten scope.</p>
                </div>`}
     </div>`;
 }
@@ -1040,21 +1812,21 @@ function _buildTopicSummaryCard(t) {
         : 'linear-gradient(90deg,#0ea5e9,#6366f1)';
 
     const statusBadge = rejected
-        ? `<span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-semibold bg-red-100 text-red-700"><span class="w-1.5 h-1.5 rounded-full bg-red-500"></span>ส่งกลับแก้ไข</span>`
+        ? `<span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-semibold bg-red-100 text-red-700"><span class="w-1.5 h-1.5 rounded-full bg-red-500"></span>Rejected / ส่งกลับแก้ไข</span>`
         : pending
-        ? `<span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-semibold bg-yellow-100 text-yellow-700"><span class="w-1.5 h-1.5 rounded-full bg-yellow-500 animate-pulse"></span>รออนุมัติ</span>`
+        ? `<span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-semibold bg-yellow-100 text-yellow-700"><span class="w-1.5 h-1.5 rounded-full bg-yellow-500 animate-pulse"></span>Pending / รออนุมัติ</span>`
         : responded
-        ? `<span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-semibold bg-emerald-100 text-emerald-700"><span class="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span>ตอบแล้ว</span>`
+        ? `<span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-semibold bg-emerald-100 text-emerald-700"><span class="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span>Responded / ตอบแล้ว</span>`
         : urgency === 'overdue'
-        ? `<span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-semibold bg-red-100 text-red-600"><span class="w-1.5 h-1.5 rounded-full bg-red-400"></span>เกินกำหนด</span>`
-        : `<span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-semibold bg-amber-100 text-amber-700"><span class="w-1.5 h-1.5 rounded-full bg-amber-400"></span>รอตอบกลับ</span>`;
+        ? `<span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-semibold bg-red-100 text-red-600"><span class="w-1.5 h-1.5 rounded-full bg-red-400"></span>Overdue / เกินกำหนด</span>`
+        : `<span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-semibold bg-amber-100 text-amber-700"><span class="w-1.5 h-1.5 rounded-full bg-amber-400"></span>Waiting / รอตอบกลับ</span>`;
 
     const targetDeptCount = (Array.isArray(t.TargetDepts) && t.TargetDepts.length > 0)
         ? t.TargetDepts.length : _masterDepts.length;
     const respondedCount  = t.totalDeptCount || 0;
     const deptPct  = targetDeptCount > 0 ? Math.round(respondedCount * 100 / targetDeptCount) : 0;
     const barColor = deptPct === 100 ? '#059669' : deptPct >= 50 ? '#f59e0b' : '#94a3b8';
-    const btnLabel = responded ? 'ดูรายละเอียด' : 'ดู / ตอบกลับ';
+    const btnLabel = responded ? 'View detail / ดูรายละเอียด' : 'View / Respond · ดู / ตอบกลับ';
 
     return `
     <div class="ds-section overflow-hidden flex flex-col">
@@ -1129,44 +1901,48 @@ function _buildTopicModal(t) {
     <div data-yok-modal="1" class="space-y-4">
 
         <!-- Topic info panel -->
-        <div class="rounded-xl p-4 border border-slate-200" style="background:${accentBg}">
-            <div class="flex flex-wrap items-center gap-2 mb-2">
+        <div class="rounded-xl border border-slate-200 bg-white overflow-hidden">
+            <div class="px-4 py-3 border-b border-slate-200" style="background:${accentBg}">
+                <div class="flex flex-wrap items-center gap-2">
                 <span class="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-semibold ${RISK_BADGE[t.RiskLevel] || 'bg-slate-100 text-slate-500'}">
                     <span class="w-1.5 h-1.5 rounded-full" style="background:currentColor"></span>
                     ${RISK_LABEL[t.RiskLevel] || t.RiskLevel}
                 </span>
                 <span class="px-2 py-0.5 rounded-full text-xs bg-white border border-slate-200 text-slate-600">${_esc(t.Category || 'ทั่วไป')}</span>
                 ${_deadlineBadge(t.Deadline, !!dr)}
+                </div>
             </div>
 
-            ${t.Title ? `<h2 class="font-bold text-slate-800 text-base leading-snug mb-1">${_esc(t.Title)}</h2>` : ''}
-            <div class="text-sm text-slate-600 leading-relaxed yok-rte-content">${_sanitizeHtml(t.TopicDescription || '')}</div>
+            <div class="p-4 space-y-4">
+            ${t.Title ? `<h2 class="font-bold text-slate-900 text-lg leading-snug">${_esc(t.Title)}</h2>` : ''}
+            <div class="rounded-lg border border-slate-100 bg-slate-50 px-3 py-3 text-sm text-slate-700 leading-relaxed yok-rte-content">${_sanitizeHtml(t.TopicDescription || '')}</div>
 
             ${t.AttachmentUrl ? `
             <a href="${t.AttachmentUrl}" target="_blank" rel="noopener noreferrer"
-               class="inline-flex items-center gap-1.5 text-xs text-sky-600 hover:underline mt-2">
+               class="inline-flex items-center gap-1.5 text-xs font-semibold text-sky-700 hover:underline">
                 <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13"/>
                 </svg>
                 ${_esc(t.AttachmentName || 'ดูไฟล์แนบ')}
             </a>` : ''}
 
-            <div class="flex flex-wrap items-center gap-4 mt-3 pt-3 border-t border-slate-200 text-xs text-slate-400">
-                <span>ประกาศ: <span class="text-slate-600 font-medium">${_fmtDate(t.DateIssued)}</span></span>
-                <span>ตอบแล้ว: <span class="text-slate-600 font-medium">${t.totalDeptCount || 0} ส่วนงาน</span></span>
-                ${t.CreatedBy ? `<span>โดย: <span class="text-slate-600 font-medium">${_esc(t.CreatedBy)}</span></span>` : ''}
+            <div class="grid grid-cols-1 sm:grid-cols-3 gap-2 text-xs">
+                <div class="rounded-lg border border-slate-100 px-3 py-2"><p class="font-bold text-slate-400">วันที่ประกาศ</p><p class="mt-1 font-semibold text-slate-700">${_fmtDate(t.DateIssued)}</p></div>
+                <div class="rounded-lg border border-slate-100 px-3 py-2"><p class="font-bold text-slate-400">การตอบกลับ</p><p class="mt-1 font-semibold text-slate-700">${t.totalDeptCount || 0} ส่วนงาน</p></div>
+                <div class="rounded-lg border border-slate-100 px-3 py-2"><p class="font-bold text-slate-400">ผู้ประกาศ</p><p class="mt-1 font-semibold text-slate-700">${_esc(t.CreatedBy || '-')}</p></div>
             </div>
 
             ${targetDepts.length > 0 ? `
-            <div class="flex flex-wrap gap-1 mt-2">
+            <div class="flex flex-wrap gap-1">
                 <span class="text-[10px] text-slate-400 self-center mr-0.5">ส่วนงานที่กำหนด:</span>
                 ${targetDepts.map(d => `<span class="px-1.5 py-0.5 rounded text-[10px] font-medium bg-sky-50 text-sky-600 border border-sky-100">${_esc(d)}</span>`).join('')}
             </div>` : ''}
             ${targetUnits.length > 0 ? `
-            <div class="flex flex-wrap gap-1 mt-1">
+            <div class="flex flex-wrap gap-1">
                 <span class="text-[10px] text-slate-400 self-center mr-0.5">Unit:</span>
                 ${targetUnits.map(u => `<span class="px-1.5 py-0.5 rounded text-[10px] font-medium bg-violet-50 text-violet-600 border border-violet-100">${_esc(u)}</span>`).join('')}
             </div>` : ''}
+            </div>
         </div>
 
         <!-- Response area (identified by ID so edit can swap content) -->
@@ -1174,16 +1950,29 @@ function _buildTopicModal(t) {
             ${dr ? _buildResponseDisplay(t, dr) : _buildResponseForm(yid)}
         </div>
 
+        ${_isAdmin ? `
+        <div class="rounded-xl border border-sky-100 bg-sky-50/60 p-3 flex flex-col sm:flex-row sm:items-center gap-3 justify-between">
+            <div>
+                <p class="text-xs font-black text-sky-700">Admin Response Control / แอดมินตอบแทนแผนก</p>
+                <p class="text-xs text-slate-500 mt-0.5">Admin can respond on behalf of selected departments while preserving approval flow / ผู้ดูแลตอบแทนแผนกได้โดยยังคง flow approval เดิม</p>
+            </div>
+            <button type="button" class="yok-admin-respond-btn inline-flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg text-xs font-bold text-white bg-sky-600 hover:bg-sky-700"
+                    data-yid="${yid}">
+                Respond on behalf / ตอบแทนแผนก
+            </button>
+        </div>
+        <div id="yok-admin-resp-area-${yid}"></div>` : ''}
+
         <!-- Admin action row -->
         ${_isAdmin && dr ? `
         <div class="flex items-center gap-2 flex-wrap pt-1 border-t border-slate-100">
             ${pending ? `
             <button class="yok-approve-btn px-3 py-1.5 rounded-lg text-xs font-semibold text-white bg-emerald-600 hover:bg-emerald-700 transition-colors"
-                    data-rid="${dr.ResponseID}">อนุมัติ</button>
+                    data-rid="${dr.ResponseID}">Approve / อนุมัติ</button>
             <button class="yok-reject-btn px-3 py-1.5 rounded-lg text-xs font-semibold text-white bg-red-500 hover:bg-red-600 transition-colors"
-                    data-rid="${dr.ResponseID}">ส่งกลับแก้ไข</button>` : ''}
+                    data-rid="${dr.ResponseID}">Reject / ส่งกลับแก้ไข</button>` : ''}
             <button class="yok-del-resp-btn ml-auto px-3 py-1.5 rounded-lg text-xs font-semibold text-red-600 border border-red-200 hover:bg-red-50 transition-colors"
-                    data-rid="${dr.ResponseID}">ลบการตอบกลับ</button>
+                    data-rid="${dr.ResponseID}">Delete response / ลบการตอบกลับ</button>
         </div>` : ''}
     </div>`;
 }
@@ -1193,11 +1982,11 @@ function _openTopicDetailModal(t) {
     const targetDepts = Array.isArray(t.TargetDepts) ? t.TargetDepts : [];
     const targetUnits = Array.isArray(t.TargetUnits) ? t.TargetUnits : [];
     const responseLabel = dr
-        ? (dr.ApprovalStatus === 'approved' ? 'Approved'
-          : dr.ApprovalStatus === 'rejected' ? 'Rejected'
-          : dr.ApprovalStatus === 'pending' ? 'Pending approval'
-          : 'Responded')
-        : _isOverdue(t.Deadline) ? 'Overdue' : 'Waiting response';
+        ? (dr.ApprovalStatus === 'approved' ? 'Approved / อนุมัติแล้ว'
+          : dr.ApprovalStatus === 'rejected' ? 'Rejected / ส่งกลับแก้ไข'
+          : dr.ApprovalStatus === 'pending' ? 'Pending / รออนุมัติ'
+          : 'Responded / ตอบกลับแล้ว')
+        : _isOverdue(t.Deadline) ? 'Overdue / เกินกำหนด' : 'Waiting response / รอตอบกลับ';
     const responseClass = dr
         ? (dr.ApprovalStatus === 'approved' ? 'bg-emerald-100 text-emerald-700 border-emerald-200'
           : dr.ApprovalStatus === 'rejected' ? 'bg-red-100 text-red-700 border-red-200'
@@ -1207,34 +1996,34 @@ function _openTopicDetailModal(t) {
         <div class="space-y-4">
             <div class="grid grid-cols-2 md:grid-cols-4 gap-2">
                 <div class="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2">
-                    <p class="text-[10px] font-bold uppercase text-slate-400">Risk</p>
+                    <p class="text-[10px] font-bold uppercase text-slate-400">Risk Level / ระดับความเสี่ยง</p>
                     <p class="mt-1 text-sm font-bold text-slate-700">${_esc(RISK_LABEL[t.RiskLevel] || t.RiskLevel || '-')}</p>
                 </div>
                 <div class="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2">
-                    <p class="text-[10px] font-bold uppercase text-slate-400">Response</p>
+                    <p class="text-[10px] font-bold uppercase text-slate-400">Response Status / สถานะตอบกลับ</p>
                     <p class="mt-1 text-sm font-bold text-slate-700">${_esc(responseLabel)}</p>
                 </div>
                 <div class="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2">
-                    <p class="text-[10px] font-bold uppercase text-slate-400">Targets</p>
+                    <p class="text-[10px] font-bold uppercase text-slate-400">Target Scope / ส่วนงานเป้าหมาย</p>
                     <p class="mt-1 text-sm font-bold text-slate-700">${targetDepts.length || targetUnits.length || '-'}</p>
                 </div>
                 <div class="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2">
-                    <p class="text-[10px] font-bold uppercase text-slate-400">Deadline</p>
+                    <p class="text-[10px] font-bold uppercase text-slate-400">Deadline / กำหนดตอบ</p>
                     <p class="mt-1 text-sm font-bold text-slate-700">${_esc(_fmtDateOnly(t.Deadline))}</p>
                 </div>
             </div>
             ${_buildTopicModal(t)}
         </div>`;
     openDetailModal({
-        title: _esc(t.Title || 'Yokoten Topic'),
+        title: _esc(t.Title || 'Yokoten Detail / รายละเอียด Yokoten'),
         subtitle: `${_fmtDateOnly(t.DateIssued)} · ${t.Category || '-'} · ${t.CreatedBy || '-'}`,
         meta: [
             { label: RISK_LABEL[t.RiskLevel] || t.RiskLevel || '-', className: `${RISK_BADGE[t.RiskLevel] || 'bg-slate-100 text-slate-500'} border-slate-200` },
             { label: responseLabel, className: responseClass },
-            _isOverdue(t.Deadline) && !dr ? { label: 'Needs action', className: 'bg-rose-50 text-rose-700 border-rose-200' } : null,
+            _isOverdue(t.Deadline) && !dr ? { label: 'Needs action / ต้องดำเนินการ', className: 'bg-rose-50 text-rose-700 border-rose-200' } : null,
         ],
         body,
-        size: 'max-w-2xl'
+        size: 'max-w-4xl'
     });
 }
 
@@ -1323,13 +2112,64 @@ function _buildResponseDisplay(t, dr) {
     return html;
 }
 
-function _buildResponseForm(yokotenId, existingResp = null) {
+function _getDepartmentName(row) {
+    return (row?.Name || row?.name || row?.Department || row?.department || row || '').toString().trim();
+}
+
+function _getSafetyUnitName(row) {
+    return (row?.Name || row?.name || row?.UnitName || row?.unitName || row?.SafetyUnit || row?.safetyUnit || row || '').toString().trim();
+}
+
+function _getTargetDepartmentsForTopic(topic) {
+    const targetDepts = Array.isArray(topic?.TargetDepts) ? topic.TargetDepts.map(d => String(d || '').trim()).filter(Boolean) : [];
+    if (targetDepts.length > 0) return targetDepts;
+    return _masterDepts.map(_getDepartmentName).filter(Boolean);
+}
+
+function _buildAdminDeptOptions(topic) {
+    const responded = new Set(
+        _allResponses
+            .filter(r => r.YokotenID === topic?.YokotenID && r.Department)
+            .map(r => String(r.Department).trim())
+    );
+    return _getTargetDepartmentsForTopic(topic).map(dept => {
+        const done = responded.has(dept);
+        return `<option value="${_esc(dept)}" ${done ? 'disabled' : ''}>${_esc(dept)}${done ? ' (ตอบแล้ว)' : ''}</option>`;
+    }).join('');
+}
+
+function _buildResponseForm(yokotenId, existingResp = null, opts = {}) {
     const rid = existingResp?.ResponseID || '';
     const isEdit = !!rid;
+    const isAdminMode = !!opts.adminMode && _isAdmin && !isEdit;
     const curRelated = existingResp?.IsRelated || 'No';
+    const deptOptions = isAdminMode ? _buildAdminDeptOptions(opts.topic) : '';
+    const unitOptions = isAdminMode
+        ? _safetyUnits.map(u => {
+            const name = _getSafetyUnitName(u);
+            return name ? `<option value="${_esc(name)}">${_esc(name)}</option>` : '';
+        }).join('')
+        : '';
     return `
-    <form class="yok-resp-form space-y-3" data-id="${yokotenId}" data-rid="${rid}">
-        <p class="text-sm font-semibold text-slate-700">${isEdit ? 'แก้ไขการตอบกลับ' : 'ตอบกลับหัวข้อนี้'}</p>
+    <form class="yok-resp-form space-y-3 rounded-xl border ${isAdminMode ? 'border-sky-200 bg-white p-4' : 'border-transparent'}" data-id="${yokotenId}" data-rid="${rid}" data-admin-mode="${isAdminMode ? '1' : ''}" data-existing-files="${existingResp?.files?.length || 0}">
+        <p class="text-sm font-semibold text-slate-700">${isAdminMode ? 'Respond on behalf / บันทึกการตอบกลับแทนแผนก' : (isEdit ? 'Edit response / แก้ไขการตอบกลับ' : 'Respond to this topic / ตอบกลับหัวข้อนี้')}</p>
+        ${isAdminMode ? `
+        <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <label class="block">
+                <span class="block text-xs font-semibold text-slate-600 mb-1">Departments / แผนกที่ตอบแทน <span class="text-red-500">*</span></span>
+                <select name="departments" class="form-input w-full text-sm min-h-[116px]" multiple required>
+                    ${deptOptions || '<option value="" disabled>ไม่พบแผนกเป้าหมายที่ยังรอตอบ</option>'}
+                </select>
+                <span class="block text-[11px] text-slate-400 mt-1">Use Ctrl/Shift to select multiple departments / กด Ctrl/Shift เพื่อเลือกหลายแผนก</span>
+            </label>
+            <label class="block">
+                <span class="block text-xs font-semibold text-slate-600 mb-1">Safety Unit / หน่วยงาน</span>
+                <select name="safetyUnit" class="form-input w-full text-sm">
+                    <option value="">ไม่ระบุ</option>
+                    ${unitOptions}
+                </select>
+            </label>
+        </div>` : ''}
         <div class="flex gap-5">
             <label class="flex items-center gap-2 cursor-pointer text-sm">
                 <input type="radio" name="isRelated" value="Yes" class="accent-emerald-500"
@@ -1342,16 +2182,16 @@ function _buildResponseForm(yokotenId, existingResp = null) {
         </div>
         <textarea name="comment" rows="2" placeholder="ความคิดเห็น (ถ้ามี)"
                   class="form-textarea w-full resize-none text-sm">${_esc(existingResp?.Comment || '')}</textarea>
-        <div id="corrective-wrap-${yokotenId}" class="${curRelated !== 'Yes' ? '' : 'hidden'}">
+        <div data-corrective-wrap class="${curRelated === 'Yes' ? '' : 'hidden'}">
             <label class="block text-xs font-semibold text-slate-600 mb-1">
-                วิธีการแก้ไข/ป้องกัน <span class="text-red-500">*</span>
-                <span class="text-slate-400 font-normal">(จำเป็นสำหรับ "ไม่เกี่ยวข้อง")</span>
+                Corrective / Preventive Action · วิธีการแก้ไข/ป้องกัน <span class="text-red-500">*</span>
+                <span class="text-slate-400 font-normal">(required when "Related" / จำเป็นเมื่อเลือก "เกี่ยวข้อง")</span>
             </label>
             <textarea name="correctiveAction" rows="2" placeholder="ระบุมาตรการแก้ไขหรือป้องกัน..."
                       class="form-textarea w-full resize-none text-sm">${_esc(existingResp?.CorrectiveAction || '')}</textarea>
         </div>
         <div>
-            <label class="block text-xs font-semibold text-slate-600 mb-1">แนบไฟล์ (รูป/PDF/Word/Excel สูงสุด 10 ไฟล์)</label>
+            <label class="block text-xs font-semibold text-slate-600 mb-1">แนบไฟล์ (รูป/PDF/Word/Excel สูงสุด 10 ไฟล์) <span class="text-red-500">* เมื่อเกี่ยวข้อง</span></label>
             <input type="file" name="responseFiles" multiple accept="image/*,.pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx"
                    class="block w-full text-xs text-slate-500 file:mr-3 file:py-1.5 file:px-3 file:rounded-lg file:border-0 file:text-xs file:font-semibold file:bg-sky-50 file:text-sky-700 hover:file:bg-sky-100 cursor-pointer">
         </div>
@@ -1363,7 +2203,7 @@ function _buildResponseForm(yokotenId, existingResp = null) {
                 <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/>
                 </svg>
-                ${isEdit ? 'บันทึกการแก้ไข' : 'ยืนยันการตอบกลับ'}
+                ${isAdminMode ? 'Submit on behalf / บันทึกแทนแผนก' : (isEdit ? 'Save changes / บันทึกการแก้ไข' : 'Submit response / ยืนยันการตอบกลับ')}
             </button>
         </div>
     </form>`;
@@ -1488,6 +2328,11 @@ function renderHistory(container) {
 
 // ─── TAB 4: ADMIN ────────────────────────────────────────────────────────────
 function renderAdmin(container) {
+    if (!_isAdmin) {
+        _activeTab = 'topics';
+        renderTopics(container);
+        return;
+    }
     container.innerHTML = `
     <div class="space-y-4">
         <!-- Sub-tab toggle -->
@@ -2127,8 +2972,9 @@ function openTopicForm(topic = null, prefill = null) {
         </div>
         <div>
             <label class="block text-sm font-semibold text-slate-700 mb-1.5">รายละเอียด <span class="text-red-500">*</span></label>
+            <div class="rte-shell">
             <!-- Rich text toolbar -->
-            <div class="flex flex-wrap gap-0.5 p-1.5 rounded-t-lg border border-b-0 border-slate-200 bg-slate-50" id="yt-rte-toolbar">
+            <div class="rte-toolbar flex flex-wrap gap-0.5" id="yt-rte-toolbar">
                 <button type="button" data-cmd="bold"          title="หนา (Ctrl+B)"
                     class="rte-btn w-7 h-7 rounded flex items-center justify-center text-slate-600 hover:bg-white hover:shadow-sm transition-all">
                     <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="currentColor"><path d="M15.6 10.79c.97-.67 1.65-1.77 1.65-2.79 0-2.26-1.75-4-4-4H7v14h7.04c2.09 0 3.71-1.7 3.71-3.79 0-1.52-.86-2.82-2.15-3.42zM10 6.5h3c.83 0 1.5.67 1.5 1.5s-.67 1.5-1.5 1.5h-3v-3zm3.5 9H10v-3h3.5c.83 0 1.5.67 1.5 1.5s-.67 1.5-1.5 1.5z"/></svg>
@@ -2189,7 +3035,7 @@ function openTopicForm(topic = null, prefill = null) {
                 </button>
             </div>
             <!-- Link / Image URL input bar (shown when link/image button clicked) -->
-            <div id="yt-rte-input-bar" class="hidden items-center gap-2 border border-slate-200 border-t-0 bg-slate-50 px-2 py-1.5">
+            <div id="yt-rte-input-bar" class="rte-input-bar hidden items-center gap-2">
                 <span id="yt-rte-input-label" class="text-xs text-slate-500 flex-shrink-0 w-16">URL ลิงก์:</span>
                 <input id="yt-rte-url-input" type="text" placeholder="https://..."
                        class="flex-1 text-xs border border-slate-200 rounded px-2 py-1 bg-white focus:outline-none focus:border-sky-400 focus:ring-1 focus:ring-sky-200">
@@ -2201,9 +3047,10 @@ function openTopicForm(topic = null, prefill = null) {
             <!-- Editable area -->
             <div id="yt-desc"
                  contenteditable="true"
-                 class="form-textarea w-full rounded-t-none min-h-[96px] focus:outline-none"
-                 style="min-height:96px;border-top:0"
+                 class="rte-editor min-h-[96px]"
+                 style="min-height:96px"
                  data-placeholder="อธิบายบทเรียน / เหตุการณ์ / ความรู้ที่ต้องการแบ่งปัน"></div>
+            </div>
         </div>
         <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div>
@@ -2483,6 +3330,14 @@ function openTopicForm(topic = null, prefill = null) {
                 errEl.classList.remove('hidden');
                 return;
             }
+            const attachType = document.querySelector('input[name="attach-type"]:checked')?.value;
+            const topicFile = document.getElementById('yt-file')?.files?.[0];
+            const topicFileErr = attachType === 'file' && topicFile ? _validateYokotenFiles([topicFile], 1) : '';
+            if (topicFileErr) {
+                errEl.textContent = topicFileErr;
+                errEl.classList.remove('hidden');
+                return;
+            }
             errEl.classList.add('hidden');
             submit.disabled = true;
             submit.textContent = 'กำลังบันทึก...';
@@ -2490,7 +3345,6 @@ function openTopicForm(topic = null, prefill = null) {
             let attachUrl  = null;
             let attachName = null;
 
-            const attachType = document.querySelector('input[name="attach-type"]:checked')?.value;
             if (attachType === 'file') {
                 const file = document.getElementById('yt-file')?.files?.[0];
                 if (file) {
@@ -2500,7 +3354,7 @@ function openTopicForm(topic = null, prefill = null) {
                         const fd = new FormData();
                         fd.append('document', file);
                         const uploadRes = await API.post('/upload/document', fd);
-                        attachUrl  = uploadRes.url || uploadRes.secure_url || uploadRes.data?.url || null;
+                        attachUrl  = uploadRes.url || uploadRes.data?.url || null;
                         attachName = file.name;
                     } catch (uploadErr) {
                         errEl.textContent = 'อัปโหลดไฟล์ไม่สำเร็จ: ' + (uploadErr.message || 'เกิดข้อผิดพลาด');
@@ -2576,9 +3430,29 @@ async function _submitResp(form, btn) {
     const comment          = form.querySelector('[name="comment"]')?.value || '';
     const correctiveAction = form.querySelector('[name="correctiveAction"]')?.value || '';
     const files            = form.querySelector('[name="responseFiles"]')?.files;
+    const isAdminMode      = form.dataset.adminMode === '1';
+    const deptSelect       = form.querySelector('[name="departments"]');
+    const departments      = deptSelect ? Array.from(deptSelect.selectedOptions).map(opt => opt.value).filter(Boolean) : [];
+    const safetyUnit       = form.querySelector('[name="safetyUnit"]')?.value || '';
 
-    if (isRelated === 'No' && !correctiveAction.trim()) {
-        showToast('กรุณากรอกวิธีการแก้ไข/ป้องกัน', 'error');
+    if (isAdminMode && departments.length === 0) {
+        showToast('กรุณาเลือกอย่างน้อย 1 แผนกที่ต้องการตอบแทน', 'error');
+        return;
+    }
+
+    const existingFileCount = parseInt(form.dataset.existingFiles || '0', 10) || 0;
+    const newFileCount = files ? files.length : 0;
+    if (isRelated === 'Yes' && !correctiveAction.trim()) {
+        showToast('กรุณากรอก Corrective / Preventive Action เมื่อเลือก "เกี่ยวข้อง"', 'error');
+        return;
+    }
+    if (isRelated === 'Yes' && existingFileCount + newFileCount === 0) {
+        showToast('กรุณาแนบไฟล์หลักฐานอย่างน้อย 1 ไฟล์เมื่อเลือก "เกี่ยวข้อง"', 'error');
+        return;
+    }
+    const fileErr = _validateYokotenFiles(files);
+    if (fileErr) {
+        showToast(fileErr, 'error');
         return;
     }
 
@@ -2587,6 +3461,10 @@ async function _submitResp(form, btn) {
     fd.append('isRelated', isRelated);
     fd.append('comment', comment);
     fd.append('correctiveAction', correctiveAction);
+    if (isAdminMode) {
+        fd.append('departments', JSON.stringify(departments));
+        fd.append('safetyUnit', safetyUnit);
+    }
     if (files) {
         Array.from(files).forEach(f => fd.append('responseFiles', f));
     }
@@ -2601,12 +3479,12 @@ async function _submitResp(form, btn) {
             await API.post('/yokoten/respond', fd);
         }
         closeModal();
-        showToast(isEdit ? 'อัปเดตการตอบกลับสำเร็จ' : 'ตอบกลับสำเร็จ', 'success');
+        showToast(isAdminMode ? `บันทึกการตอบกลับแทน ${departments.length} แผนกสำเร็จ` : (isEdit ? 'อัปเดตการตอบกลับสำเร็จ' : 'ตอบกลับสำเร็จ'), 'success');
         await refreshData();
     } catch (err) {
         const msg = err?.message || 'เกิดข้อผิดพลาด';
         showToast(msg, 'error');
-        if (btn) { btn.disabled = false; btn.textContent = isEdit ? 'บันทึกการแก้ไข' : 'ยืนยันการตอบกลับ'; }
+        if (btn) { btn.disabled = false; btn.textContent = isAdminMode ? 'บันทึกแทนแผนก' : (isEdit ? 'บันทึกการแก้ไข' : 'ยืนยันการตอบกลับ'); }
     } finally {
         hideLoading();
     }
@@ -2657,6 +3535,7 @@ function _updateBulkBar() {
 
 // ─── EVENT LISTENERS ─────────────────────────────────────────────────────────
 function setupEventListeners() {
+    window._yokRefresh = () => refreshData();
     document.addEventListener('click', async (e) => {
         if (!e.target.closest('#yokoten-page') && !e.target.closest('[data-yok-modal]')) return;
 
@@ -2693,10 +3572,53 @@ function setupEventListeners() {
         const yearBtn = e.target.closest('.yok-year-btn');
         if (yearBtn) {
             _dashYear = parseInt(yearBtn.dataset.year, 10);
+            _dashboardDrilldown = null;
             _destroyCharts();
             const cont = document.getElementById('yok-content');
             if (_activeTab === 'dashboard') renderDashboard(cont);
             else if (_activeTab === 'topics') renderTopics(cont);
+            return;
+        }
+
+        const statusDrillBtn = e.target.closest('.yok-status-drill-btn');
+        if (statusDrillBtn) {
+            _setDashboardDrilldown({
+                type: 'status',
+                key: statusDrillBtn.dataset.status,
+                label: statusDrillBtn.dataset.label || statusDrillBtn.dataset.status,
+            });
+            return;
+        }
+
+        const clearDrillBtn = e.target.closest('.yok-clear-drilldown');
+        if (clearDrillBtn) {
+            _setDashboardDrilldown(null);
+            return;
+        }
+
+        const briefDrillBtn = e.target.closest('.yok-brief-drill-btn');
+        if (briefDrillBtn) {
+            _setDashboardDrilldown({
+                type: briefDrillBtn.dataset.drillType || 'status',
+                key: briefDrillBtn.dataset.drillKey,
+                label: briefDrillBtn.dataset.drillLabel || briefDrillBtn.dataset.drillKey,
+            });
+            return;
+        }
+
+        const briefDeptBtn = e.target.closest('.yok-brief-admin-dept-btn');
+        if (briefDeptBtn) {
+            _adminView = 'dept';
+            switchTab('admin');
+            renderAdmin(document.getElementById('yok-content'));
+            return;
+        }
+
+        const deptWatchBtn = e.target.closest('.yok-admin-dept-watch-btn');
+        if (deptWatchBtn) {
+            _adminView = 'dept';
+            switchTab('admin');
+            renderAdmin(document.getElementById('yok-content'));
             return;
         }
 
@@ -2710,6 +3632,31 @@ function setupEventListeners() {
             return;
         }
 
+        // Dashboard action-center drilldown
+        const openTopicBtn = e.target.closest('.yok-open-topic-btn');
+        if (openTopicBtn) {
+            const yid = openTopicBtn.dataset.yid;
+            const rid = openTopicBtn.dataset.rid;
+            const t = _topics.find(x => x.YokotenID === yid);
+            if (!t) return;
+            const resp = rid ? _allResponses.find(r => String(r.ResponseID) === String(rid)) : null;
+            _openTopicDetailModal(resp ? { ...t, deptResponse: resp } : t);
+            return;
+        }
+
+        // Admin response on behalf of a department
+        const adminRespondBtn = e.target.closest('.yok-admin-respond-btn');
+        if (adminRespondBtn) {
+            if (!_isAdmin) { showToast('Admin access required / ต้องใช้สิทธิ์ผู้ดูแลระบบ', 'error'); return; }
+            const yid = adminRespondBtn.dataset.yid;
+            const t = _topics.find(x => x.YokotenID === yid);
+            const area = document.getElementById(`yok-admin-resp-area-${yid}`);
+            if (!t || !area) return;
+            area.innerHTML = _buildResponseForm(yid, null, { adminMode: true, topic: t });
+            area.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+            return;
+        }
+
         // Switch-tab link
         const switchBtn = e.target.closest('[data-switch-tab]');
         if (switchBtn) { switchTab(switchBtn.dataset.switchTab); return; }
@@ -2717,6 +3664,7 @@ function setupEventListeners() {
         // Admin view toggle
         const admViewBtn = e.target.closest('.adm-view-btn');
         if (admViewBtn?.dataset.admView) {
+            if (!_isAdmin) { showToast('Admin access required / ต้องใช้สิทธิ์ผู้ดูแลระบบ', 'error'); return; }
             _adminView = admViewBtn.dataset.admView;
             renderAdmin(document.getElementById('yok-content'));
             // Lazy-load employee completion data on first visit
@@ -2764,6 +3712,16 @@ function setupEventListeners() {
 
         // Export PDF
         if (e.target.closest('#yok-export-btn-pdf') || e.target.closest('#yok-pdf-btn-dash')) { exportYokotenPDF(); return; }
+
+        if (e.target.closest('#yok-clear-filters')) {
+            _filterRisk = '';
+            _filterCat = '';
+            _filterAck = '';
+            _filterSla = '';
+            _searchQ = '';
+            renderTopics(document.getElementById('yok-content'));
+            return;
+        }
 
         // Export Excel
         if (e.target.closest('#yok-export-btn')) { _exportExcel(); return; }
@@ -2919,6 +3877,7 @@ function setupEventListeners() {
         if (e.target.id === 'yok-filter-risk') { _filterRisk = e.target.value; renderTopics(document.getElementById('yok-content')); return; }
         if (e.target.id === 'yok-filter-cat')  { _filterCat  = e.target.value; renderTopics(document.getElementById('yok-content')); return; }
         if (e.target.id === 'yok-filter-ack')  { _filterAck  = e.target.value; renderTopics(document.getElementById('yok-content')); return; }
+        if (e.target.id === 'yok-filter-sla')  { _filterSla  = e.target.value; renderTopics(document.getElementById('yok-content')); return; }
         if (e.target.id === 'yok-hist-filter') { _histFilterId = e.target.value; renderHistory(document.getElementById('yok-content')); return; }
         if (e.target.id === 'yok-emp-dept-filter') {
             _empFilterDept = e.target.value;
@@ -2942,10 +3901,13 @@ function setupEventListeners() {
         }
         // Toggle corrective action required field in response form
         if (e.target.name === 'isRelated') {
-            const yokoId = e.target.closest('form.yok-resp-form')?.dataset?.id;
-            if (!yokoId) return;
-            const wrap = document.getElementById(`corrective-wrap-${yokoId}`);
-            if (wrap) wrap.classList.toggle('hidden', e.target.value === 'Yes');
+            const form = e.target.closest('form.yok-resp-form');
+            const wrap = form?.querySelector('[data-corrective-wrap]');
+            if (wrap) wrap.classList.toggle('hidden', e.target.value !== 'Yes');
+            if (e.target.value !== 'Yes') {
+                const corrective = form?.querySelector('[name="correctiveAction"]');
+                if (corrective) corrective.value = '';
+            }
         }
     });
 
@@ -3056,6 +4018,9 @@ async function exportYokotenPDF() {
     const year    = now.getFullYear();
     const docNo   = 'YOK-' + year + '-' + pad(now.getMonth() + 1) + pad(now.getDate());
     const K       = "font-family:'Kanit',sans-serif;";
+    const currentUser = TSHSession.getUser() || {};
+    const generatedBy = currentUser.name || currentUser.Name || currentUser.EmployeeName || currentUser.EmployeeID || '-';
+    const scopeLabel  = 'Scope: Fiscal year ' + year + ' / Generated by ' + generatedBy;
 
     const totalDepts     = deptSummary.length;
     const totalTopics    = topics.length;
@@ -3065,17 +4030,305 @@ async function exportYokotenPDF() {
         ? Math.round(deptSummary.reduce((s, d) => s + d.completionPct, 0) / totalDepts) : 0;
     const sorted = [...deptSummary].sort((a, b) => b.completionPct - a.completionPct);
     const pctCol = pct => pct === 100 ? '#059669' : pct >= 50 ? '#f59e0b' : '#ef4444';
+    const activeResp = (_allResponses || []).filter(r => topics.some(t => String(t.YokotenID) === String(r.YokotenID)));
+    const pdfNow = Date.now();
+    const alertTopics = topics
+        .filter(t => {
+            if (!t.Deadline) return false;
+            const daysLeft = Math.ceil((new Date(t.Deadline) - pdfNow) / 86400000);
+            if (daysLeft > 14) return false;
+            const targeted = _getTopicTargetedDepts(deptSummary, t);
+            if (!targeted.length) return false;
+            const respondedDepts = targeted.filter(d =>
+                d.topicBreakdown.some(tb => tb.YokotenID === t.YokotenID && tb.responded)
+            ).length;
+            return respondedDepts < targeted.length;
+        })
+        .map(t => ({
+            ...t,
+            daysLeft: Math.ceil((new Date(t.Deadline) - pdfNow) / 86400000),
+        }));
+    const brief = _getExecutiveBriefData(deptSummary, topics, activeResp, alertTopics);
+    const highRiskMissing = [];
+    const topicMapForPdf = new Map(topics.map(t => [String(t.YokotenID), t]));
+    deptSummary.forEach(dept => {
+        (dept.topicBreakdown || []).forEach(tb => {
+            if (tb.responded) return;
+            const topic = topicMapForPdf.get(String(tb.YokotenID));
+            if (!topic || !['Critical', 'High'].includes(topic.RiskLevel)) return;
+            const daysLeft = topic.Deadline ? Math.ceil((new Date(topic.Deadline) - pdfNow) / 86400000) : 999;
+            highRiskMissing.push({ topic, dept: dept.department, daysLeft });
+        });
+    });
+    highRiskMissing.sort((a, b) => {
+        const score = item => (item.daysLeft < 0 ? 1000 : 0) + ({ Critical: 20, High: 10 }[item.topic.RiskLevel] || 0) - item.daysLeft;
+        return score(b) - score(a);
+    });
+    const agingPending = activeResp
+        .filter(r => r.ApprovalStatus === 'pending')
+        .map(r => ({
+            ...r,
+            ageDays: r.ResponseDate ? Math.max(0, Math.floor((pdfNow - new Date(r.ResponseDate)) / 86400000)) : 0,
+            topic: topicMapForPdf.get(String(r.YokotenID)),
+        }))
+        .sort((a, b) => b.ageDays - a.ageDays);
+
+    // Hiyari-aligned formal 2-page report path.
+    // Keep Yokoten-specific data, but follow the Hiyari PDF rhythm: summary, matrix/trend, risk register, follow-up.
+    {
+        const pages = [];
+        const safe = v => _esc(String(v ?? '-'));
+        const buildPage = innerHtml => {
+            const div = document.createElement('div');
+            div.style.cssText = [
+                'position:fixed',
+                'left:-9999px',
+                'top:0',
+                'width:794px',
+                'height:1122px',
+                'background:#ffffff',
+                'font-family:Kanit,Arial,sans-serif',
+                'font-size:11px',
+                'color:#1e293b',
+                'display:flex',
+                'flex-direction:column',
+                'box-sizing:border-box',
+                'overflow:hidden',
+            ].join(';');
+            div.innerHTML = innerHtml;
+            document.body.appendChild(div);
+            pages.push(div);
+            return div;
+        };
+        const bar = (pct, color, h = 7) =>
+            '<div style="height:' + h + 'px;background:#e2e8f0;border-radius:999px;overflow:hidden">'
+            + '<div style="height:100%;width:' + Math.max(0, Math.min(100, pct)) + '%;background:' + color + ';border-radius:999px"></div>'
+            + '</div>';
+        const sectionTitle = (title, sub = '') =>
+            '<div style="display:flex;align-items:flex-end;justify-content:space-between;border-bottom:1px solid #dbeafe;padding-bottom:7px;margin-bottom:10px">'
+            + '<div><h2 style="font-size:14px;font-weight:900;color:#065f46;margin:0">' + title + '</h2>'
+            + (sub ? '<p style="font-size:9.5px;color:#64748b;margin:2px 0 0">' + sub + '</p>' : '')
+            + '</div></div>';
+        const metricCard = (label, value, color, sub = '') =>
+            '<div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:10px;padding:11px;text-align:center;min-height:72px">'
+            + '<div style="font-size:24px;font-weight:900;color:' + color + ';line-height:1">' + safe(value) + '</div>'
+            + '<div style="font-size:9.5px;color:#475569;margin-top:6px;font-weight:800">' + label + '</div>'
+            + (sub ? '<div style="font-size:8.5px;color:#94a3b8;margin-top:2px">' + safe(sub) + '</div>' : '')
+            + '</div>';
+        const headerHtml = '<div style="background:#065f46;color:#fff;padding:18px 28px;flex-shrink:0">'
+            + '<div style="display:flex;justify-content:space-between;gap:16px;align-items:flex-start">'
+            + '<div>'
+            + '<p style="font-size:10px;opacity:.82;margin:0 0 3px">Thai Summit Harness Co., Ltd. · Safety Summary Report</p>'
+            + '<h1 style="font-size:21px;font-weight:900;margin:0">Yokoten (Lesson Learned) Report</h1>'
+            + '<p style="font-size:11px;opacity:.9;margin:5px 0 0">รายงานภาพรวมประจำปี ' + year + ' · สร้างรายงานเมื่อ ' + dateStr + '</p>'
+            + '</div>'
+            + '<div style="text-align:right;font-size:9.5px;line-height:1.55;opacity:.92">'
+            + '<div>Document No: ' + safe(docNo) + '</div>'
+            + '<div>Classification: Internal Use Only</div>'
+            + '<div>Generated by: ' + safe(generatedBy) + '</div>'
+            + '</div></div></div>';
+        const footerHtml = page =>
+            '<div style="margin-top:auto;padding:8px 28px;background:#f8fafc;border-top:1px solid #e2e8f0;color:#64748b;font-size:9px;display:flex;justify-content:space-between;flex-shrink:0">'
+            + '<span>Yokoten Summary Report · Thai Summit Harness Co., Ltd.</span>'
+            + '<span>Page ' + page + ' of 2</span>'
+            + '</div>';
+        const responseTotal = Math.max(1, totalDepts * Math.max(1, totalTopics));
+        const respondedTotal = deptSummary.reduce((s, d) => s + (d.respondedCount || 0), 0);
+        const responseCoverage = Math.round(respondedTotal * 100 / responseTotal);
+        const rejectedTotal = deptSummary.reduce((s, d) => s + (d.rejected || 0), 0);
+        const healthColor = brief.health?.color || (overallPct >= 85 ? '#059669' : overallPct >= 60 ? '#d97706' : '#dc2626');
+        const riskOrder = { Critical: 4, High: 3, Medium: 2, Low: 1 };
+        const topicRegister = topics.map(t => {
+            const targeted = _getTopicTargetedDepts(deptSummary, t);
+            const deptResp = targeted.filter(d => d.topicBreakdown.some(tb => String(tb.YokotenID) === String(t.YokotenID) && tb.responded)).length;
+            const pct = targeted.length ? Math.round(deptResp * 100 / targeted.length) : 0;
+            const title = t.Title || _htmlToText(t.TopicDescription) || '-';
+            return { topic: t, targeted, deptResp, pct, title };
+        }).sort((a, b) =>
+            (riskOrder[b.topic.RiskLevel] || 0) - (riskOrder[a.topic.RiskLevel] || 0)
+            || a.pct - b.pct
+            || String(a.title).localeCompare(String(b.title), 'th')
+        );
+        const riskColors = { Critical: '#dc2626', High: '#ea580c', Medium: '#d97706', Low: '#059669' };
+        const topicRows = topicRegister.slice(0, 8).map((item, idx) => {
+            const color = pctCol(item.pct);
+            const riskColor = riskColors[item.topic.RiskLevel] || '#64748b';
+            return '<tr style="background:' + (idx % 2 ? '#fff' : '#f8fafc') + '">'
+                + '<td style="padding:7px 8px;border-bottom:3px solid #fff"><b>' + safe(String(item.title).slice(0, 46)) + '</b><div style="font-size:8px;color:#64748b">' + safe(item.topic.Category || '-') + '</div></td>'
+                + '<td style="padding:7px;text-align:center;color:' + riskColor + ';font-weight:900;border-bottom:3px solid #fff">' + safe(item.topic.RiskLevel || '-') + '</td>'
+                + '<td style="padding:7px;text-align:center;color:#334155;font-weight:900;border-bottom:3px solid #fff">' + item.deptResp + '/' + item.targeted.length + '</td>'
+                + '<td style="padding:7px;border-bottom:3px solid #fff"><div style="display:flex;align-items:center;gap:6px">' + bar(item.pct, color, 6) + '<span style="font-size:9px;font-weight:900;color:' + color + ';width:28px;text-align:right">' + item.pct + '%</span></div></td>'
+                + '</tr>';
+        }).join('');
+        const deptRows = sorted.slice(-8).reverse().map((d, idx) => {
+            const color = pctCol(d.completionPct);
+            return '<tr style="background:' + (idx % 2 ? '#fff' : '#f8fafc') + '">'
+                + '<td style="padding:7px 8px;border-bottom:3px solid #fff"><b>' + safe(d.department || '-') + '</b><div style="font-size:8px;color:#64748b">Latest: ' + safe(d.lastResponse ? new Date(d.lastResponse).toLocaleDateString('th-TH', { day: 'numeric', month: 'short', year: 'numeric' }) : '-') + '</div></td>'
+                + '<td style="padding:7px;text-align:center;color:#059669;font-weight:900;border-bottom:3px solid #fff">' + (d.respondedCount || 0) + '</td>'
+                + '<td style="padding:7px;text-align:center;color:#334155;border-bottom:3px solid #fff">' + (d.totalTopics || 0) + '</td>'
+                + '<td style="padding:7px;text-align:center;color:' + (d.pendingApproval ? '#d97706' : '#cbd5e1') + ';font-weight:900;border-bottom:3px solid #fff">' + (d.pendingApproval || '-') + '</td>'
+                + '<td style="padding:7px;border-bottom:3px solid #fff"><div style="display:flex;align-items:center;gap:6px">' + bar(d.completionPct, color, 6) + '<span style="font-size:9px;font-weight:900;color:' + color + ';width:30px;text-align:right">' + d.completionPct + '%</span></div></td>'
+                + '</tr>';
+        }).join('');
+        const keyNotes = [
+            'Response coverage ' + respondedTotal + '/' + responseTotal + ' (' + responseCoverage + '%)',
+            'Department completion ' + fullDepts + '/' + totalDepts + ' departments · Overall ' + overallPct + '%',
+            'Pending approval ' + pendingApprTot + ' · Rejected ' + rejectedTotal,
+            highRiskMissing.length ? 'High/Critical gaps require follow-up: ' + highRiskMissing.length : 'No high-risk response gaps in current scope',
+        ];
+        const followDeadlineText = daysLeft => {
+            if (daysLeft === 999) return 'No deadline';
+            if (daysLeft < 0) return 'Overdue ' + Math.abs(daysLeft) + 'd';
+            if (daysLeft === 0) return 'Due today';
+            return 'Due in ' + daysLeft + 'd';
+        };
+        const p1 = buildPage(
+            headerHtml
+            + '<div style="padding:18px 28px 14px;flex:1">'
+            + sectionTitle('1. ภาพรวมรายงาน / Report Summary', 'สรุปความครอบคลุมการตอบกลับ การอนุมัติ และหัวข้อ Yokoten')
+            + '<div style="display:grid;grid-template-columns:repeat(6,1fr);gap:8px;margin-bottom:12px">'
+            + metricCard('หัวข้อทั้งหมด', totalTopics, '#0f766e', 'Topics')
+            + metricCard('ส่วนงาน', totalDepts, '#0284c7', 'Departments')
+            + metricCard('ตอบครบ', fullDepts, '#059669', 'Complete Dept')
+            + metricCard('ความคืบหน้า', overallPct + '%', pctCol(overallPct), 'Overall')
+            + metricCard('รออนุมัติ', pendingApprTot, pendingApprTot ? '#d97706' : '#64748b', 'Pending')
+            + metricCard('High Gaps', highRiskMissing.length, highRiskMissing.length ? '#dc2626' : '#059669', 'Critical/High')
+            + '</div>'
+            + '<div style="display:grid;grid-template-columns:1.1fr .9fr;gap:12px;margin-bottom:12px">'
+            + '<div style="border:1px solid #e2e8f0;border-radius:12px;padding:12px">'
+            + '<div style="font-size:12px;font-weight:900;color:#065f46;margin-bottom:8px">Key Notes / ประเด็นสำคัญ</div>'
+            + keyNotes.map(t => '<div style="font-size:10.2px;color:#334155;margin-bottom:6px;display:flex;gap:6px"><span style="color:#f97316;font-weight:900">•</span><span>' + safe(t) + '</span></div>').join('')
+            + '</div>'
+            + '<div style="border:1px solid #e2e8f0;border-radius:12px;padding:12px;text-align:center">'
+            + '<div style="font-size:12px;font-weight:900;color:#065f46;margin-bottom:7px">Report Health</div>'
+            + '<div style="font-size:36px;font-weight:900;line-height:1;color:' + healthColor + '">' + safe(brief.health?.label || 'Stable') + '</div>'
+            + '<div style="font-size:9.5px;color:#64748b;margin:10px 0 10px;line-height:1.5">' + safe(brief.briefText || '-') + '</div>'
+            + bar(overallPct, pctCol(overallPct), 8)
+            + '</div></div>'
+            + '<div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">'
+            + '<div style="border:1px solid #e2e8f0;border-radius:12px;padding:12px">'
+            + sectionTitle('2. Topic Coverage', 'หัวข้อที่ควรติดตามก่อน เรียงตามความเสี่ยงและ % ตอบกลับ')
+            + '<table style="width:100%;border-collapse:collapse;font-size:9.2px"><tr style="background:#065f46;color:#fff"><th style="padding:6px;text-align:left">Topic</th><th>Risk</th><th>Resp.</th><th style="text-align:left">Progress</th></tr>' + (topicRows || '<tr><td colspan="4" style="padding:16px;text-align:center;color:#94a3b8">No topic data</td></tr>') + '</table>'
+            + '</div>'
+            + '<div style="border:1px solid #e2e8f0;border-radius:12px;padding:12px">'
+            + sectionTitle('3. Department Focus', 'ส่วนงานที่ยังมีช่องว่างสูงสุด')
+            + '<table style="width:100%;border-collapse:collapse;font-size:9.2px"><tr style="background:#065f46;color:#fff"><th style="padding:6px;text-align:left">Department</th><th>Done</th><th>Total</th><th>Pending</th><th style="text-align:left">Progress</th></tr>' + (deptRows || '<tr><td colspan="5" style="padding:16px;text-align:center;color:#94a3b8">No department data</td></tr>') + '</table>'
+            + '</div></div>'
+            + '</div>'
+            + footerHtml(1)
+        );
+        const followItems = [
+            ...highRiskMissing.slice(0, 5).map(item => ({
+                type: 'Gap',
+                title: item.topic.Title || _htmlToText(item.topic.TopicDescription) || '-',
+                dept: item.dept || '-',
+                owner: '-',
+                status: item.topic.RiskLevel || '-',
+                age: followDeadlineText(item.daysLeft),
+                color: item.topic.RiskLevel === 'Critical' ? '#dc2626' : '#ea580c',
+            })),
+            ...agingPending.slice(0, 5).map(r => ({
+                type: 'Approval',
+                title: r.topic?.Title || r.Title || r.TopicTitle || r.YokotenID || '-',
+                dept: r.Department || '-',
+                owner: r.EmployeeName || r.EmployeeID || '-',
+                status: 'Pending',
+                age: r.ageDays + 'd',
+                color: r.ageDays >= 7 ? '#dc2626' : r.ageDays >= 3 ? '#d97706' : '#059669',
+            })),
+        ].slice(0, 9);
+        const followRows = followItems.length ? followItems.map((item, idx) =>
+            '<tr style="background:' + (idx % 2 ? '#fff' : '#f8fafc') + '">'
+            + '<td style="padding:7px;color:#64748b;border-bottom:3px solid #fff">' + safe(item.type) + '</td>'
+            + '<td style="padding:7px;border-bottom:3px solid #fff"><b>' + safe(String(item.title).slice(0, 56)) + '</b><div style="font-size:8px;color:#64748b">' + safe(item.dept) + '</div></td>'
+            + '<td style="padding:7px;color:#334155;border-bottom:3px solid #fff">' + safe(item.owner) + '</td>'
+            + '<td style="padding:7px;text-align:center;font-weight:900;color:' + item.color + ';border-bottom:3px solid #fff">' + safe(item.status) + '</td>'
+            + '<td style="padding:7px;text-align:right;font-weight:900;color:' + item.color + ';border-bottom:3px solid #fff">' + safe(item.age) + '</td>'
+            + '</tr>'
+        ).join('') : '<tr><td colspan="5" style="padding:20px;text-align:center;color:#94a3b8">ไม่มีรายการที่ต้องติดตามเร่งด่วน</td></tr>';
+        const riskMatrix = ['Critical', 'High', 'Medium', 'Low'].map(risk => {
+            const rows = topicRegister.filter(item => item.topic.RiskLevel === risk);
+            const avg = rows.length ? Math.round(rows.reduce((s, item) => s + item.pct, 0) / rows.length) : 0;
+            const color = riskColors[risk] || '#64748b';
+            return '<tr style="background:#f8fafc;border-bottom:3px solid #fff">'
+                + '<td style="padding:8px"><b style="color:' + color + '">' + risk + '</b></td>'
+                + '<td style="padding:8px;text-align:center;font-weight:900">' + rows.length + '</td>'
+                + '<td style="padding:8px;text-align:center;font-weight:900;color:' + pctCol(avg) + '">' + avg + '%</td>'
+                + '<td style="padding:8px">' + bar(avg, pctCol(avg), 6) + '</td>'
+                + '</tr>';
+        }).join('');
+        const approvalBox = label =>
+            '<div style="height:70px;border:1px solid #cbd5e1;border-radius:8px;background:#fff;padding:9px;text-align:center">'
+            + '<div style="height:28px;border-bottom:1px solid #94a3b8;margin:0 8px 6px"></div>'
+            + '<div style="font-size:8.5px;font-weight:900;color:#1e293b">' + label + '</div>'
+            + '<div style="font-size:7.5px;color:#94a3b8;margin-top:2px">Date: ____ / ____ / ____</div>'
+            + '</div>';
+        const p2 = buildPage(
+            headerHtml
+            + '<div style="padding:18px 28px 14px;flex:1">'
+            + sectionTitle('4. Risk Coverage Matrix', 'ภาพรวมจำนวนหัวข้อและอัตราตอบกลับตามระดับความเสี่ยง')
+            + '<div style="display:grid;grid-template-columns:.85fr 1.15fr;gap:12px;margin-bottom:12px">'
+            + '<div style="border:1px solid #e2e8f0;border-radius:12px;padding:12px">'
+            + '<table style="width:100%;border-collapse:collapse;font-size:9.6px"><tr style="background:#065f46;color:#fff"><th style="padding:7px;text-align:left">Risk</th><th>Topics</th><th>Avg</th><th style="text-align:left">Coverage</th></tr>' + riskMatrix + '</table>'
+            + '</div>'
+            + '<div style="border:1px solid #e2e8f0;border-radius:12px;padding:12px">'
+            + sectionTitle('5. Action Follow-up', 'รายการ Gap และ Approval Aging ที่ควรติดตาม')
+            + '<table style="width:100%;border-collapse:collapse;font-size:8.8px"><tr style="background:#065f46;color:#fff"><th style="padding:6px;text-align:left">Type</th><th style="text-align:left">Topic / Dept</th><th style="text-align:left">Owner</th><th>Status</th><th style="text-align:right">Age/SLA</th></tr>' + followRows + '</table>'
+            + '</div></div>'
+            + '<div style="display:grid;grid-template-columns:1.1fr .9fr;gap:12px;margin-bottom:12px">'
+            + '<div style="border:1px solid #d1fae5;background:#f0fdf4;border-radius:12px;padding:13px">'
+            + '<div style="font-size:12px;font-weight:900;color:#065f46;margin-bottom:6px">ข้อเสนอแนะสำหรับการติดตาม / Follow-up Notes</div>'
+            + '<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:10px;font-size:9.6px;color:#334155;line-height:1.55">'
+            + '<div><b style="color:#dc2626">1. High Risk</b><br>ติดตามหัวข้อ Critical/High ที่ยังไม่มี response ก่อนเป็นลำดับแรก</div>'
+            + '<div><b style="color:#d97706">2. Approval Aging</b><br>เร่ง review response ที่ pending นานเกิน 3-7 วัน</div>'
+            + '<div><b style="color:#0f766e">3. Sharing Loop</b><br>ใช้ผล response เพื่อสรุป lesson learned และ feedback กลับส่วนงาน</div>'
+            + '</div></div>'
+            + '<div style="border:1px solid #e2e8f0;border-radius:12px;padding:13px;background:#fff">'
+            + '<div style="font-size:12px;font-weight:900;color:#065f46;margin-bottom:8px">Certification Summary</div>'
+            + '<div style="font-size:9.8px;color:#475569;line-height:1.65">รายงานนี้สรุปผล Yokoten ตาม scope ปี ' + year + ' โดยคง targeted-department filtering, response status, approval aging และ risk level ของข้อมูลจริงในระบบ</div>'
+            + '</div></div>'
+            + '<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;margin-top:6px">'
+            + approvalBox('Prepared By') + approvalBox('Reviewed By') + approvalBox('Approved By')
+            + '</div>'
+            + '</div>'
+            + footerHtml(2)
+        );
+        showLoading('กำลังสร้าง PDF...');
+        await document.fonts.ready;
+        await new Promise(r => setTimeout(r, 200));
+        try {
+            const { jsPDF } = window.jspdf;
+            const pdf = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
+            for (const [i, el] of [p1, p2].entries()) {
+                const canvas = await window.html2canvas(el, {
+                    scale: 1.7,
+                    useCORS: true,
+                    logging: false,
+                    backgroundColor: '#ffffff',
+                    windowWidth: 794,
+                });
+                if (i > 0) pdf.addPage();
+                pdf.addImage(canvas.toDataURL('image/jpeg', 0.94), 'JPEG', 0, 0, 210, 297);
+            }
+            pdf.save('Yokoten-Report-' + year + '-' + pad(now.getMonth() + 1) + pad(now.getDate()) + '.pdf');
+            showToast('สร้าง PDF สำเร็จ (2 หน้า)', 'success');
+        } finally {
+            pages.forEach(el => el?.parentNode?.removeChild(el));
+            hideLoading();
+        }
+        return;
+    }
 
     // ── Shared page constants ─────────────────────────────────────────────────
-    const PAGE_S = K + 'width:794px;height:1122px;overflow:hidden;background:white;box-sizing:border-box;display:flex;flex-direction:column';
+    const PAGE_S = K + 'width:794px;height:1122px;overflow:hidden;background:white;box-sizing:border-box;display:flex;flex-direction:column;color:#1e293b;font-size:11px';
 
-    const PAGE_FOOTER = '<div style="height:32px;background:linear-gradient(135deg,#064e3b,#0d9488);display:flex;align-items:center;justify-content:space-between;padding:0 36px;flex-shrink:0">'
-        + '<span style="' + K + 'color:rgba(255,255,255,.65);font-size:8px">TSH Safety Core Activity System · รายงานสร้างโดยระบบอัตโนมัติ</span>'
-        + '<span style="' + K + 'color:rgba(255,255,255,.65);font-size:8px">' + docNo + ' · ประจำปี ' + year + '</span>'
+    const PAGE_FOOTER = '<div style="margin-top:auto;padding:8px 28px;background:#f8fafc;border-top:1px solid #e2e8f0;color:#64748b;display:flex;align-items:center;justify-content:space-between;flex-shrink:0">'
+        + '<span style="' + K + 'font-size:8.8px">Yokoten Report · Thai Summit Harness Co., Ltd.</span>'
+        + '<span style="' + K + 'font-size:8.8px">' + docNo + ' · ' + _esc(generatedBy) + '</span>'
         + '</div>';
 
-    const HEADER_BLOCK = '<div style="background:linear-gradient(135deg,#064e3b 0%,#065f46 55%,#0d9488 100%);padding:22px 36px 18px;position:relative;overflow:hidden;flex-shrink:0">'
-        + '<div style="position:absolute;top:-50px;right:-50px;width:180px;height:180px;border-radius:50%;background:rgba(255,255,255,.05)"></div>'
+    const HEADER_BLOCK = '<div style="background:#065f46;color:#fff;padding:18px 28px;position:relative;overflow:hidden;flex-shrink:0">'
+        + '<div style="display:none"></div>'
         + '<div style="position:relative;z-index:1">'
         + '<div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:14px">'
         + '<div>'
@@ -3089,9 +4342,12 @@ async function exportYokotenPDF() {
         + '<div style="text-align:right">'
         + '<div style="' + K + 'color:rgba(255,255,255,.45);font-size:8.5px;margin-bottom:2px">เลขที่เอกสาร</div>'
         + '<div style="' + K + 'color:white;font-size:11px;font-weight:700">' + docNo + '</div>'
+        + '<div style="' + K + 'color:rgba(255,255,255,.45);font-size:8.5px;margin-top:5px;margin-bottom:2px">Classification</div>'
+        + '<div style="' + K + 'color:#bbf7d0;font-size:9px;font-weight:700">Internal Use Only</div>'
         + '<div style="' + K + 'color:rgba(255,255,255,.45);font-size:8.5px;margin-top:5px;margin-bottom:2px">วันที่สร้างรายงาน</div>'
         + '<div style="' + K + 'color:rgba(255,255,255,.65);font-size:10px">' + dateStr + '</div>'
         + '</div></div>'
+        + '<div style="' + K + 'color:rgba(255,255,255,.68);font-size:9px;margin-bottom:10px">' + _esc(scopeLabel) + '</div>'
         + '<div style="display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:8px">'
         + '<div style="background:rgba(255,255,255,.12);border-radius:10px;padding:10px 12px;text-align:center"><div style="' + K + 'color:white;font-size:20px;font-weight:700">' + totalTopics + '</div><div style="' + K + 'color:rgba(255,255,255,.55);font-size:9px;margin-top:2px">หัวข้อ Yokoten</div></div>'
         + '<div style="background:rgba(255,255,255,.12);border-radius:10px;padding:10px 12px;text-align:center"><div style="' + K + 'color:white;font-size:20px;font-weight:700">' + totalDepts + '</div><div style="' + K + 'color:rgba(255,255,255,.55);font-size:9px;margin-top:2px">ส่วนงานทั้งหมด</div></div>'
@@ -3100,7 +4356,72 @@ async function exportYokotenPDF() {
         + '</div></div></div>';
 
     // ── Dept table helpers ────────────────────────────────────────────────────
-    const THEAD = '<thead><tr style="background:linear-gradient(135deg,#064e3b,#0d9488)">'
+    const healthColor = brief.health.color || '#059669';
+    const boardMetric = (value, label, suffix, color) =>
+        '<div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:12px;padding:14px 12px;text-align:center">'
+        + '<div style="' + K + 'font-size:24px;font-weight:800;color:' + color + ';line-height:1">' + value + suffix + '</div>'
+        + '<div style="' + K + 'font-size:8.5px;color:#64748b;margin-top:6px;font-weight:600">' + label + '</div>'
+        + '</div>';
+    const pdfDeadlineText = daysLeft => {
+        if (daysLeft === 999) return 'No deadline';
+        if (daysLeft < 0) return 'Overdue ' + Math.abs(daysLeft) + 'd';
+        if (daysLeft === 0) return 'Due today';
+        return 'Due in ' + daysLeft + 'd';
+    };
+    const highRiskRowsPdf = highRiskMissing.slice(0, 8).map(item => {
+        const title = (item.topic.Title || _htmlToText(item.topic.TopicDescription) || '-').slice(0, 42);
+        const riskColor = item.topic.RiskLevel === 'Critical' ? '#dc2626' : '#ea580c';
+        return '<tr style="border-bottom:1px solid #f1f5f9">'
+            + '<td style="' + K + 'padding:7px 8px;font-size:8.5px;color:#1e293b;font-weight:600">' + _esc(title) + '</td>'
+            + '<td style="' + K + 'padding:7px 8px;font-size:8.5px;color:#64748b">' + _esc(item.dept || '-') + '</td>'
+            + '<td style="' + K + 'padding:7px 8px;font-size:8px;text-align:center;color:' + riskColor + ';font-weight:800">' + (item.topic.RiskLevel || '-') + '</td>'
+            + '<td style="' + K + 'padding:7px 8px;font-size:8px;text-align:right;color:#64748b">' + pdfDeadlineText(item.daysLeft) + '</td>'
+            + '</tr>';
+    }).join('');
+    const pendingRowsPdf = agingPending.slice(0, 8).map(r => {
+        const title = (r.topic?.Title || r.Title || r.TopicTitle || r.YokotenID || '-').slice(0, 42);
+        return '<tr style="border-bottom:1px solid #f1f5f9">'
+            + '<td style="' + K + 'padding:7px 8px;font-size:8.5px;color:#1e293b;font-weight:600">' + _esc(title) + '</td>'
+            + '<td style="' + K + 'padding:7px 8px;font-size:8.5px;color:#64748b">' + _esc(r.Department || '-') + '</td>'
+            + '<td style="' + K + 'padding:7px 8px;font-size:8px;color:#64748b">' + _esc(r.EmployeeName || r.EmployeeID || '-') + '</td>'
+            + '<td style="' + K + 'padding:7px 8px;font-size:8px;text-align:right;color:' + (r.ageDays >= 7 ? '#dc2626' : r.ageDays >= 3 ? '#d97706' : '#059669') + ';font-weight:800">' + r.ageDays + 'd</td>'
+            + '</tr>';
+    }).join('');
+    const BOARD_PAGE = '<div style="' + PAGE_S + '">'
+        + '<div style="flex:1;min-height:0">'
+        + HEADER_BLOCK
+        + '<div style="padding:22px 36px 0">'
+        + '<div style="border:1px solid #e2e8f0;border-radius:14px;padding:16px 18px;background:#ffffff;margin-bottom:14px">'
+        + '<div style="display:flex;justify-content:space-between;align-items:flex-start;gap:16px">'
+        + '<div style="min-width:0"><div style="' + K + 'font-size:13px;font-weight:800;color:#0f172a;margin-bottom:5px">Executive Board Snapshot</div>'
+        + '<div style="' + K + 'font-size:10px;color:#475569;line-height:1.65">' + _esc(brief.briefText) + '</div></div>'
+        + '<div style="' + K + 'font-size:10px;font-weight:800;color:' + healthColor + ';border:1px solid ' + healthColor + '33;background:' + healthColor + '12;border-radius:999px;padding:7px 12px;white-space:nowrap">' + brief.health.label + '</div>'
+        + '</div></div>'
+        + '<div style="display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:9px;margin-bottom:16px">'
+        + boardMetric(brief.coverage, 'Response coverage', '%', brief.coverage >= 85 ? '#059669' : brief.coverage >= 60 ? '#d97706' : '#dc2626')
+        + boardMetric(brief.highRiskCoverage, 'High-risk coverage', '%', brief.highRiskCoverage >= 90 ? '#059669' : brief.highRiskCoverage >= 75 ? '#d97706' : '#dc2626')
+        + boardMetric(brief.overdueGaps, 'Overdue gaps', '', brief.overdueGaps ? '#dc2626' : '#059669')
+        + boardMetric(brief.oldestPending, 'Oldest pending', 'd', brief.oldestPending >= 7 ? '#dc2626' : brief.oldestPending >= 3 ? '#d97706' : '#059669')
+        + '</div>'
+        + '<div style="display:grid;grid-template-columns:1fr 1fr;gap:14px">'
+        + '<div><div style="' + K + 'font-size:9.5px;font-weight:800;color:#334155;margin-bottom:7px">High/Critical Gaps</div>'
+        + '<table style="width:100%;border-collapse:collapse"><thead><tr style="background:#f8fafc">'
+        + '<th style="' + K + 'padding:6px 8px;font-size:7.5px;color:#94a3b8;text-align:left">Topic</th>'
+        + '<th style="' + K + 'padding:6px 8px;font-size:7.5px;color:#94a3b8;text-align:left">Dept</th>'
+        + '<th style="' + K + 'padding:6px 8px;font-size:7.5px;color:#94a3b8;text-align:center">Risk</th>'
+        + '<th style="' + K + 'padding:6px 8px;font-size:7.5px;color:#94a3b8;text-align:right">SLA</th>'
+        + '</tr></thead><tbody>' + (highRiskRowsPdf || '<tr><td colspan="4" style="' + K + 'padding:22px;text-align:center;color:#059669;font-size:9px;font-weight:700">No high-risk response gaps.</td></tr>') + '</tbody></table></div>'
+        + '<div><div style="' + K + 'font-size:9.5px;font-weight:800;color:#334155;margin-bottom:7px">Approval Aging</div>'
+        + '<table style="width:100%;border-collapse:collapse"><thead><tr style="background:#f8fafc">'
+        + '<th style="' + K + 'padding:6px 8px;font-size:7.5px;color:#94a3b8;text-align:left">Topic</th>'
+        + '<th style="' + K + 'padding:6px 8px;font-size:7.5px;color:#94a3b8;text-align:left">Dept</th>'
+        + '<th style="' + K + 'padding:6px 8px;font-size:7.5px;color:#94a3b8;text-align:left">Responder</th>'
+        + '<th style="' + K + 'padding:6px 8px;font-size:7.5px;color:#94a3b8;text-align:right">Age</th>'
+        + '</tr></thead><tbody>' + (pendingRowsPdf || '<tr><td colspan="4" style="' + K + 'padding:22px;text-align:center;color:#059669;font-size:9px;font-weight:700">No pending approvals.</td></tr>') + '</tbody></table></div>'
+        + '</div>'
+        + '</div></div>' + PAGE_FOOTER + '</div>';
+
+    const THEAD = '<thead><tr style="background:#065f46">'
         + '<th style="' + K + 'padding:7px 8px;color:rgba(255,255,255,.9);font-size:9px;text-align:center;width:24px">#</th>'
         + '<th style="' + K + 'padding:7px 8px;color:rgba(255,255,255,.9);font-size:9px;text-align:left">ส่วนงาน</th>'
         + '<th style="' + K + 'padding:7px 8px;color:rgba(255,255,255,.9);font-size:9px;text-align:center">ตอบ</th>'
@@ -3141,7 +4462,7 @@ async function exportYokotenPDF() {
         + '<span style="' + K + 'font-size:9px;color:#94a3b8">' + docNo + '</span></div>';
 
     // ── Build data pages ──────────────────────────────────────────────────────
-    const pageHTMLs = [];
+    const pageHTMLs = [BOARD_PAGE];
     const ROWS_P1   = 22;
     const ROWS_FULL = 28;
     const chunks = [{ rows: sorted.slice(0, ROWS_P1), isFirst: true, startIdx: 0 }];
@@ -3167,18 +4488,8 @@ async function exportYokotenPDF() {
         }
     });
 
-    // ── Summary page ──────────────────────────────────────────────────────────
-    const barRowsHTML = sorted.map(d => {
-        const pc = pctCol(d.completionPct);
-        return '<div style="display:flex;align-items:center;gap:5px;margin-bottom:3.5px">'
-            + '<div style="width:115px;font-size:8px;color:#475569;text-align:right;flex-shrink:0;overflow:hidden;white-space:nowrap;text-overflow:ellipsis">' + d.department + '</div>'
-            + '<div style="flex:1;height:7px;background:#f1f5f9;border-radius:4px;overflow:hidden">'
-            + '<div style="height:100%;width:' + d.completionPct + '%;background:' + pc + ';border-radius:4px"></div></div>'
-            + '<span style="' + K + 'font-size:7.5px;font-weight:700;color:' + pc + ';width:24px;flex-shrink:0">' + d.completionPct + '%</span>'
-            + '</div>';
-    }).join('');
-
-    const topicRowsHTML = topics.map(t => {
+    // ── Topic register + approval page ───────────────────────────────────────
+    const topicRegisterRows = topics.map(t => {
         const targeted = _getTopicTargetedDepts(deptSummary, t);
         const deptResp = targeted.filter(d => d.topicBreakdown.some(tb => tb.YokotenID === t.YokotenID && tb.responded)).length;
         const tPct   = targeted.length > 0 ? Math.round(deptResp * 100 / targeted.length) : 0;
@@ -3186,61 +4497,75 @@ async function exportYokotenPDF() {
         const rColors = { Critical: '#ef4444', High: '#f97316', Medium: '#f59e0b', Low: '#10b981' };
         const rColor  = rColors[t.RiskLevel] || '#94a3b8';
         const titleRaw = t.Title || _htmlToText(t.TopicDescription) || '';
-        const title    = titleRaw.slice(0, 30) + (titleRaw.length > 30 ? '…' : '');
-        return '<tr style="border-bottom:1px solid #f1f5f9">'
-            + '<td style="' + K + 'padding:5px 8px;font-size:8.5px;color:#1e293b">' + title + '</td>'
-            + '<td style="padding:5px 6px;text-align:center"><span style="' + K + 'background:' + rColor + '20;color:' + rColor + ';font-size:7.5px;font-weight:700;padding:2px 6px;border-radius:10px">' + (t.RiskLevel || '—') + '</span></td>'
-            + '<td style="' + K + 'padding:5px 6px;font-size:8.5px;font-weight:700;color:' + tColor + ';text-align:center">' + tPct + '%</td>'
-            + '<td style="' + K + 'padding:5px 6px;font-size:8px;color:#94a3b8;text-align:center">' + deptResp + '/' + targeted.length + '</td>'
+        return { t, targeted, deptResp, tPct, tColor, rColor, titleRaw };
+    });
+    const topicThead = '<thead><tr style="background:#065f46">'
+        + '<th style="' + K + 'padding:7px 8px;color:#fff;font-size:8.5px;text-align:center;width:28px">#</th>'
+        + '<th style="' + K + 'padding:7px 8px;color:#fff;font-size:8.5px;text-align:left">Topic</th>'
+        + '<th style="' + K + 'padding:7px 8px;color:#fff;font-size:8.5px;text-align:center;width:74px">Risk</th>'
+        + '<th style="' + K + 'padding:7px 8px;color:#fff;font-size:8.5px;text-align:center;width:78px">Target</th>'
+        + '<th style="' + K + 'padding:7px 8px;color:#fff;font-size:8.5px;text-align:center;width:70px">Response</th>'
+        + '<th style="' + K + 'padding:7px 8px;color:#fff;font-size:8.5px;text-align:left;width:116px">Progress</th>'
+        + '</tr></thead>';
+    const topicRowHtml = (item, idx) => {
+        const title = item.titleRaw.slice(0, 58) + (item.titleRaw.length > 58 ? '...' : '');
+        const targetLabel = item.targeted.length === deptSummary.length ? 'All depts' : item.targeted.length + ' depts';
+        return '<tr style="background:' + (idx % 2 ? '#fff' : '#f8fafc') + ';border-bottom:1px solid #e2e8f0">'
+            + '<td style="' + K + 'padding:7px 8px;font-size:8.5px;color:#64748b;text-align:center">' + (idx + 1) + '</td>'
+            + '<td style="' + K + 'padding:7px 8px;font-size:8.8px;color:#1e293b;font-weight:700;line-height:1.35">' + _esc(title || '-') + '</td>'
+            + '<td style="padding:7px 8px;text-align:center"><span style="' + K + 'background:' + item.rColor + '1f;color:' + item.rColor + ';font-size:7.5px;font-weight:800;padding:2px 7px;border-radius:999px">' + _esc(item.t.RiskLevel || '-') + '</span></td>'
+            + '<td style="' + K + 'padding:7px 8px;font-size:8px;color:#64748b;text-align:center">' + _esc(targetLabel) + '</td>'
+            + '<td style="' + K + 'padding:7px 8px;font-size:8.5px;font-weight:800;color:' + item.tColor + ';text-align:center">' + item.deptResp + '/' + item.targeted.length + '</td>'
+            + '<td style="' + K + 'padding:7px 8px"><div style="display:flex;align-items:center;gap:5px"><div style="flex:1;height:6px;background:#e2e8f0;border-radius:4px;overflow:hidden"><div style="height:100%;width:' + item.tPct + '%;background:' + item.tColor + ';border-radius:4px"></div></div><span style="' + K + 'font-size:8px;font-weight:800;color:' + item.tColor + ';width:28px;text-align:right">' + item.tPct + '%</span></div></td>'
             + '</tr>';
-    }).join('');
+    };
+    const topicChunks = [];
+    for (let i = 0; i < topicRegisterRows.length; i += 22) {
+        topicChunks.push(topicRegisterRows.slice(i, i + 22));
+    }
+    topicChunks.forEach((chunk, chunkIdx) => {
+        pageHTMLs.push('<div style="' + PAGE_S + '">'
+            + '<div style="flex:1;min-height:0">'
+            + (chunkIdx === 0 ? HEADER_BLOCK : CONT_LABEL)
+            + '<div style="' + K + 'padding:10px 36px 0;display:flex;justify-content:space-between;align-items:center">'
+            + '<span style="' + K + 'font-size:10px;font-weight:800;color:#065f46;text-transform:uppercase;letter-spacing:.04em">Topic Register</span>'
+            + '<span style="' + K + 'font-size:9px;color:#64748b">Items ' + (chunkIdx * 22 + 1) + '-' + (chunkIdx * 22 + chunk.length) + ' / ' + topicRegisterRows.length + '</span>'
+            + '</div>'
+            + '<div style="padding:8px 36px 0"><table style="width:100%;border-collapse:collapse;border:1px solid #e2e8f0">'
+            + topicThead + '<tbody>' + chunk.map((item, j) => topicRowHtml(item, chunkIdx * 22 + j)).join('') + '</tbody></table></div>'
+            + '</div>' + PAGE_FOOTER + '</div>');
+    });
 
-    pageHTMLs.push('<div style="' + K + 'width:794px;height:1122px;background:white;box-sizing:border-box;display:flex;flex-direction:column;overflow:hidden">'
-        + '<div style="background:linear-gradient(135deg,#064e3b 0%,#065f46 55%,#0d9488 100%);padding:28px 60px 24px;position:relative;overflow:hidden;flex-shrink:0">'
-        + '<div style="position:absolute;top:-40px;right:-40px;width:160px;height:160px;border-radius:50%;background:rgba(255,255,255,.05)"></div>'
-        + '<div style="position:relative;z-index:1">'
-        + '<div style="display:inline-flex;align-items:center;gap:5px;background:rgba(255,255,255,.15);border-radius:20px;padding:3px 10px;margin-bottom:10px">'
-        + '<span style="width:5px;height:5px;background:#34d399;border-radius:50%;display:inline-block"></span>'
-        + '<span style="' + K + 'color:rgba(255,255,255,.85);font-size:9px;font-weight:600;letter-spacing:1.2px">SUMMARY REPORT</span>'
+    const approvalBox = label => '<div style="height:88px;border:1px solid #cbd5e1;border-radius:8px;background:#fff;padding:12px;text-align:center">'
+        + '<div style="height:34px;border-bottom:1px solid #94a3b8;margin:0 12px 8px"></div>'
+        + '<div style="' + K + 'font-size:9px;font-weight:800;color:#1e293b">' + label + '</div>'
+        + '<div style="' + K + 'font-size:8px;color:#94a3b8;margin-top:3px">Date: ____ / ____ / ____</div>'
+        + '</div>';
+    pageHTMLs.push('<div style="' + PAGE_S + '">'
+        + '<div style="flex:1;min-height:0">'
+        + HEADER_BLOCK
+        + '<div style="padding:24px 44px 0">'
+        + '<div style="' + K + 'font-size:13px;font-weight:900;color:#065f46;border-bottom:2px solid #d1fae5;padding-bottom:7px;margin-bottom:14px">Summary / Approval</div>'
+        + '<div style="border:1px solid #e2e8f0;border-radius:10px;padding:16px;background:#f8fafc;margin-bottom:16px">'
+        + '<div style="' + K + 'font-size:10px;font-weight:900;color:#334155;margin-bottom:7px">Certification Summary</div>'
+        + '<div style="' + K + 'font-size:10px;color:#475569;line-height:1.75">' + _esc(brief.briefText) + '</div>'
         + '</div>'
-        + '<div style="display:flex;justify-content:space-between;align-items:flex-end">'
-        + '<div><div style="' + K + 'color:white;font-size:22px;font-weight:700;line-height:1.2;margin-bottom:4px">สรุปผลรายงาน Yokoten</div>'
-        + '<div style="' + K + 'color:rgba(255,255,255,.65);font-size:11px">Thai Summit Harness Co., Ltd. · ' + dateStr + '</div></div>'
-        + '<div style="text-align:right"><div style="' + K + 'color:rgba(255,255,255,.45);font-size:8px;margin-bottom:2px">เลขที่เอกสาร</div>'
-        + '<div style="' + K + 'color:white;font-size:11px;font-weight:700">' + docNo + '</div></div>'
-        + '</div></div></div>'
-        // Content
-        + '<div style="flex:1;padding:30px 60px;display:flex;flex-direction:column;gap:20px;min-height:0;overflow:hidden">'
-        // KPI row
-        + '<div style="display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:10px;flex-shrink:0">'
-        + '<div style="background:#f0fdf4;border-radius:12px;padding:16px;text-align:center;border:1px solid #d1fae5"><div style="' + K + 'font-size:28px;font-weight:700;color:#059669">' + fullDepts + '</div><div style="' + K + 'font-size:8.5px;color:#6ee7b7;margin-top:3px">ตอบครบทุกหัวข้อ</div></div>'
-        + '<div style="background:#f8fafc;border-radius:12px;padding:16px;text-align:center;border:1px solid #e2e8f0"><div style="' + K + 'font-size:28px;font-weight:700;color:#475569">' + totalDepts + '</div><div style="' + K + 'font-size:8.5px;color:#94a3b8;margin-top:3px">ส่วนงานทั้งหมด</div></div>'
-        + '<div style="background:#fffbeb;border-radius:12px;padding:16px;text-align:center;border:1px solid #fef3c7"><div style="' + K + 'font-size:28px;font-weight:700;color:#d97706">' + pendingApprTot + '</div><div style="' + K + 'font-size:8.5px;color:#fbbf24;margin-top:3px">รออนุมัติ</div></div>'
-        + '<div style="background:linear-gradient(135deg,#064e3b,#0d9488);border-radius:12px;padding:16px;text-align:center"><div style="' + K + 'font-size:28px;font-weight:700;color:#6ee7b7">' + overallPct + '%</div><div style="' + K + 'font-size:8.5px;color:rgba(255,255,255,.65);margin-top:3px">ความคืบหน้ารวม</div></div>'
+        + '<table style="width:100%;border-collapse:collapse;border:1px solid #e2e8f0;margin-bottom:18px">'
+        + '<thead><tr style="background:#065f46;color:#fff">'
+        + '<th style="' + K + 'padding:8px;text-align:left;font-size:8.5px">Metric</th>'
+        + '<th style="' + K + 'padding:8px;text-align:center;font-size:8.5px">Result</th>'
+        + '<th style="' + K + 'padding:8px;text-align:left;font-size:8.5px">Note</th>'
+        + '</tr></thead>'
+        + '<tbody>'
+        + '<tr><td style="' + K + 'padding:8px;border-bottom:1px solid #e2e8f0;font-weight:700">Overall completion</td><td style="' + K + 'padding:8px;border-bottom:1px solid #e2e8f0;text-align:center;font-weight:900;color:' + pctCol(overallPct) + '">' + overallPct + '%</td><td style="' + K + 'padding:8px;border-bottom:1px solid #e2e8f0;color:#64748b">' + fullDepts + ' of ' + totalDepts + ' departments completed all topics</td></tr>'
+        + '<tr><td style="' + K + 'padding:8px;border-bottom:1px solid #e2e8f0;font-weight:700">Pending approval</td><td style="' + K + 'padding:8px;border-bottom:1px solid #e2e8f0;text-align:center;font-weight:900;color:' + (pendingApprTot ? '#d97706' : '#059669') + '">' + pendingApprTot + '</td><td style="' + K + 'padding:8px;border-bottom:1px solid #e2e8f0;color:#64748b">Responses waiting for review</td></tr>'
+        + '<tr><td style="' + K + 'padding:8px;font-weight:700">High/Critical gaps</td><td style="' + K + 'padding:8px;text-align:center;font-weight:900;color:' + (highRiskMissing.length ? '#dc2626' : '#059669') + '">' + highRiskMissing.length + '</td><td style="' + K + 'padding:8px;color:#64748b">Open high-priority response gaps</td></tr>'
+        + '</tbody></table>'
+        + '<div style="' + K + 'font-size:10px;font-weight:900;color:#334155;margin-bottom:10px">Approval Signatures</div>'
+        + '<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:14px">'
+        + approvalBox('Prepared By') + approvalBox('Reviewed By') + approvalBox('Approved By')
         + '</div>'
-        // 2-col: bar chart visual + topic table
-        + '<div style="display:grid;grid-template-columns:1fr 1fr;gap:20px;flex:1;min-height:0;overflow:hidden">'
-        // Left: CSS bar chart
-        + '<div style="overflow:hidden">'
-        + '<div style="' + K + 'font-size:9.5px;font-weight:700;color:#64748b;letter-spacing:0.8px;text-transform:uppercase;margin-bottom:10px">ความคืบหน้ารายส่วนงาน</div>'
-        + barRowsHTML
-        + '</div>'
-        // Right: topic summary
-        + '<div>'
-        + '<div style="' + K + 'font-size:9.5px;font-weight:700;color:#64748b;letter-spacing:0.8px;text-transform:uppercase;margin-bottom:10px">สรุปรายหัวข้อ</div>'
-        + '<table style="width:100%;border-collapse:collapse">'
-        + '<thead><tr style="background:#f8fafc"><th style="' + K + 'padding:5px 8px;font-size:7.5px;color:#94a3b8;text-align:left;font-weight:600">หัวข้อ</th><th style="' + K + 'padding:5px 6px;font-size:7.5px;color:#94a3b8;text-align:center;font-weight:600">ระดับ</th><th style="' + K + 'padding:5px 6px;font-size:7.5px;color:#94a3b8;text-align:center;font-weight:600">%</th><th style="' + K + 'padding:5px 6px;font-size:7.5px;color:#94a3b8;text-align:center;font-weight:600">ตอบ</th></tr></thead>'
-        + '<tbody>' + topicRowsHTML + '</tbody>'
-        + '</table>'
-        + '</div>'
-        + '</div>'
-        + '</div>'
-        // Footer
-        + '<div style="padding:12px 60px;border-top:1px solid #e2e8f0;display:flex;justify-content:space-between;align-items:center;flex-shrink:0">'
-        + '<span style="' + K + 'font-size:7.5px;color:#94a3b8">TSH Safety Core Activity System · รายงานสร้างโดยระบบอัตโนมัติ</span>'
-        + '<span style="' + K + 'font-size:7.5px;color:#94a3b8">' + dateStr + ' · ' + docNo + '</span>'
-        + '</div>'
-        + '</div>');
+        + '</div></div>' + PAGE_FOOTER + '</div>');
 
     // ── Render ────────────────────────────────────────────────────────────────
     showLoading('กำลังสร้าง PDF...');
@@ -3273,7 +4598,7 @@ async function exportYokotenPDF() {
         for (let p = 1; p <= total; p++) {
             pdf.setPage(p);
             pdf.setFontSize(7.5); pdf.setTextColor(148, 163, 184);
-            pdf.text('หน้า ' + p + ' / ' + total, 200, 293, { align: 'right' });
+            pdf.text('Page ' + p + ' / ' + total, 200, 293, { align: 'right' });
         }
 
         const fname = 'Yokoten-Report-' + year + '-' + pad(now.getMonth() + 1) + pad(now.getDate()) + '.pdf';
@@ -3326,6 +4651,19 @@ function _sanitizeHtml(html) {
         .replace(/<iframe[\s\S]*?>/gi, '')
         .replace(/\bon\w+\s*=\s*["'][^"']*["']/gi, '')
         .replace(/javascript:/gi, '');
+}
+
+function _validateYokotenFiles(files, maxFiles = YOK_MAX_FILES) {
+    const list = Array.from(files || []);
+    if (list.length > maxFiles) return `แนบไฟล์ได้สูงสุด ${maxFiles} ไฟล์ต่อรายการ`;
+    const invalid = list.find(f => {
+        const ext = String(f.name || '').split('.').pop().toLowerCase();
+        return !(YOK_ALLOWED_MIMES.has(f.type) || YOK_ALLOWED_EXTS.has(ext));
+    });
+    if (invalid) return `ประเภทไฟล์ไม่รองรับ: ${invalid.name}`;
+    const oversize = list.find(f => f.size > YOK_MAX_FILE_SIZE);
+    if (oversize) return `ไฟล์ ${oversize.name} มีขนาดเกิน 20 MB`;
+    return '';
 }
 
 /** Convert HTML to plain text (for card previews / truncation). */
@@ -3419,7 +4757,22 @@ function _fileIcon(mimeType) {
 function _spinner() {
     return `<div class="flex flex-col items-center justify-center py-20 text-slate-400">
         <div class="animate-spin rounded-full h-9 w-9 border-4 border-emerald-500 border-t-transparent mb-3"></div>
-        <p class="text-sm">กำลังโหลด...</p>
+        <p class="text-sm">Loading Yokoten... / กำลังโหลดข้อมูล</p>
+    </div>`;
+}
+
+function _errorState(title, message) {
+    return `<div class="ds-empty-state border border-red-100 bg-red-50/40">
+        <div class="w-16 h-16 rounded-2xl bg-red-100 text-red-500 flex items-center justify-center mx-auto mb-4">
+            <svg class="w-8 h-8" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01M5.07 19h13.86c1.54 0 2.5-1.67 1.73-3L13.73 4c-.77-1.33-2.69-1.33-3.46 0L3.34 16c-.77 1.33.19 3 1.73 3z"/>
+            </svg>
+        </div>
+        <p class="font-bold text-red-700">${_esc(title)}</p>
+        <p class="text-sm mt-1 text-red-600">${_esc(message || 'Please try again or contact administrator.')}</p>
+        <button type="button" class="mt-4 px-4 py-2 rounded-lg text-xs font-bold bg-white border border-red-200 text-red-700 hover:bg-red-50" onclick="window._yokRefresh?.()">
+            Retry / ลองใหม่
+        </button>
     </div>`;
 }
 

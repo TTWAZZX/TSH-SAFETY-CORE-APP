@@ -3,3 +3,10 @@ node_modules/
 .DS_Store
 dist/
 backend/uploads/
+uploads/
+backups/
+tmp/
+*.log
+api/config.local.php
+.vercel/
+backend-db-migration/*.sql

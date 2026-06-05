@@ -3,29 +3,31 @@
 // TSH Safety Core - Frontend Main Controller (FINAL)
 // ======================================================
 
-import * as UI from './ui.js';
+import * as UI from './ui.js?v=20260602-mobile-nav-m53';
 import { apiFetch } from './api.js';
 
 // --- Page Loaders ---
-import { loadPolicyPage } from './pages/policy.js';
-import { loadCommitteePage } from './pages/committee.js';
-import { loadPatrolPage } from './pages/patrol.js';
-import { loadCccfPage } from './pages/cccf.js';
-import { loadKpiPage } from './pages/kpi.js';
-import { loadYokotenPage } from './pages/yokoten.js';
-import { loadAdminPage } from './pages/admin.js';
-import { loadMachineSafetyPage } from './pages/machine-safety.js';
-import { loadOjtPage } from './pages/ojt.js';
-import { loadTrainingPage } from './pages/training.js';
-import { loadAccidentPage } from './pages/accident.js';
-import { loadSafetyCulturePage } from './pages/safety-culture.js';
-import { loadContractorPage } from './pages/contractor.js';
-import { loadHiyariPage } from './pages/hiyari.js';
-import { loadKyPage } from './pages/ky.js';
-import { loadFourmPage } from './pages/fourm.js';
-import { openProfileDrawer, closeProfileDrawer } from './pages/profile.js';
-import { loadDashboardPage } from './pages/dashboard.js';
-import { loadSearchPage } from './pages/search.js';
+import { loadPolicyPage } from './pages/policy.js?v=20260602-mobile-nav-m53';
+import { loadCommitteePage } from './pages/committee.js?v=20260602-committee-section-counts';
+import { loadPatrolPage } from './pages/patrol.js?v=20260605-patrol-supervisor-schedule';
+import { loadCccfPage } from './pages/cccf.js?v=20260602-mobile-nav-m53';
+import { loadKpiPage } from './pages/kpi.js?v=20260602-accident-monthly-evidence';
+import { loadYokotenPage } from './pages/yokoten.js?v=20260602-activity-targets-at10';
+import { loadAdminPage } from './pages/admin.js?v=20260604-admin-scheduler-datefix';
+import { loadMachineSafetyPage } from './pages/machine-safety.js?v=20260602-mobile-nav-m53';
+import { loadOjtPage } from './pages/ojt.js?v=20260602-activity-targets-at10';
+import { loadTrainingPage } from './pages/training.js?v=20260602-activity-targets-at10';
+import { loadAccidentPage } from './pages/accident.js?v=20260602-accident-monthly-evidence';
+import { loadSafetyCulturePage } from './pages/safety-culture.js?v=20260602-mobile-nav-m53';
+import { loadContractorPage } from './pages/contractor.js?v=20260602-mobile-nav-m53';
+import { loadHiyariPage } from './pages/hiyari.js?v=20260602-activity-targets-at10';
+import { loadKyPage } from './pages/ky.js?v=20260602-activity-targets-at10';
+import { loadFourmPage } from './pages/fourm.js?v=20260602-mobile-nav-m53';
+import { openProfileDrawer, closeProfileDrawer } from './pages/profile.js?v=20260604-pw1-min4';
+import { loadDashboardPage } from './pages/dashboard.js?v=20260604-activity-targets-at11';
+import { loadSearchPage } from './pages/search.js?v=20260604-activity-targets-at11';
+import { initLoginModuleGuides } from './login-guides.js';
+import { moduleTitleMap } from './module-meta.js';
 
 window.openProfileDrawer  = openProfileDrawer;
 window.closeProfileDrawer = closeProfileDrawer;
@@ -47,6 +49,90 @@ const AppState = {
     currentUser: null,
     isAdmin: false
 };
+let _safetyUnitGateActive = false;
+
+const DEFAULT_BRANDING = {
+    appName: 'TSH Safety Core',
+    tagline: 'Activity System',
+    loginHeroTitle: '',
+    loginHeroSubtitle: '',
+    logoUrl: ''
+};
+let _currentBranding = { ...DEFAULT_BRANDING };
+
+function _normalizeBranding(raw = {}) {
+    const appName = String(raw.appName || DEFAULT_BRANDING.appName).trim().slice(0, 80) || DEFAULT_BRANDING.appName;
+    const tagline = String(raw.tagline || DEFAULT_BRANDING.tagline).trim().slice(0, 80) || DEFAULT_BRANDING.tagline;
+    const loginHeroTitle = String(raw.loginHeroTitle || '').trim().slice(0, 140);
+    const loginHeroSubtitle = String(raw.loginHeroSubtitle || '').trim().slice(0, 180);
+    return {
+        appName,
+        tagline,
+        loginHeroTitle,
+        loginHeroSubtitle,
+        logoUrl: String(raw.logoUrl || '').trim().slice(0, 1024)
+    };
+}
+
+function applyAppBranding(branding = {}) {
+    _currentBranding = _normalizeBranding(branding);
+
+    document.querySelectorAll('[data-brand-logo]').forEach(el => {
+        if (!el.dataset.defaultLogo) el.dataset.defaultLogo = el.innerHTML;
+        el.classList.toggle('has-custom-logo', Boolean(_currentBranding.logoUrl));
+        const size = Math.max(24, Math.min(64, Number.parseInt(el.dataset.brandSize || '32', 10) || 32));
+        el.style.width = `${size}px`;
+        el.style.height = `${size}px`;
+        el.style.maxWidth = `${size}px`;
+        el.style.maxHeight = `${size}px`;
+        el.style.overflow = 'hidden';
+        if (!_currentBranding.logoUrl) {
+            el.innerHTML = el.dataset.defaultLogo;
+            return;
+        }
+        el.innerHTML = '';
+        const img = document.createElement('img');
+        img.src = _currentBranding.logoUrl;
+        img.alt = _currentBranding.appName;
+        img.loading = 'eager';
+        img.style.width = '100%';
+        img.style.height = '100%';
+        img.style.maxWidth = '100%';
+        img.style.maxHeight = '100%';
+        img.style.objectFit = 'contain';
+        img.style.display = 'block';
+        img.onerror = () => {
+            el.classList.remove('has-custom-logo');
+            el.innerHTML = el.dataset.defaultLogo || '';
+        };
+        el.appendChild(img);
+    });
+
+    document.querySelectorAll('[data-brand-name]').forEach(el => { el.textContent = _currentBranding.appName; });
+    document.querySelectorAll('[data-brand-tagline]').forEach(el => { el.textContent = _currentBranding.tagline; });
+    document.querySelectorAll('[data-brand-login-title]').forEach(el => {
+        el.textContent = _currentBranding.loginHeroTitle || _currentBranding.appName;
+    });
+    document.querySelectorAll('[data-brand-login-subtitle]').forEach(el => {
+        el.textContent = _currentBranding.loginHeroSubtitle || _currentBranding.tagline;
+    });
+    document.title = _currentBranding.appName;
+    document.querySelector('meta[name="apple-mobile-web-app-title"]')?.setAttribute('content', _currentBranding.appName);
+
+    const favicon = document.querySelector('link[rel="icon"]');
+    if (favicon && _currentBranding.logoUrl) favicon.href = _currentBranding.logoUrl;
+}
+
+async function loadAppBranding() {
+    try {
+        const res = await apiFetch('/public/branding');
+        applyAppBranding(res?.data || {});
+    } catch (err) {
+        applyAppBranding(DEFAULT_BRANDING);
+    }
+}
+
+window._refreshAppBranding = loadAppBranding;
 
 // ======================================================
 // App Bootstrap
@@ -54,7 +140,10 @@ const AppState = {
 document.addEventListener('DOMContentLoaded', async () => {
     console.log('🚀 Frontend Application Started');
 
+    await loadAppBranding();
+    initLoginModuleGuides();
     setupGlobalEventListeners();
+    setupMobileViewportBehavior();
 
     // 🔒 รอ session ให้จบก่อนทำอย่างอื่น
     await initializeSession();
@@ -74,12 +163,13 @@ async function initializeSession() {
     }
 
     const user = TSHSession.getUser();
-    startApp(user);
+    await startApp(user);
 }
 
-function startApp(user) {
+async function startApp(user) {
     AppState.currentUser = user;
     AppState.isAdmin = (user.role === 'Admin' || user.Role === 'Admin');
+    _safetyUnitGateActive = false;
 
     UI.hideLoading();
 
@@ -88,6 +178,7 @@ function startApp(user) {
     const app = document.getElementById('app-container');
     app.classList.remove('hidden');
     app.style.display = 'flex';
+    restoreSidebarState();
 
     // แสดง User Info + ปุ่มเปิด Profile Drawer
     const userInfo = document.getElementById('user-info');
@@ -122,6 +213,12 @@ function startApp(user) {
     toggleAdminFeatures();
 
     // เริ่ม routing หลัง login สำเร็จเท่านั้น
+    const gate = await getSafetyUnitGateRequirement();
+    if (gate.required) {
+        renderSafetyUnitGate(gate.profile, gate.units);
+        return;
+    }
+
     handleRouting();
 }
 
@@ -135,6 +232,22 @@ function handleLogout() {
     TSHSession.logout();
 }
 
+function restoreSidebarState() {
+    const app = document.getElementById('app-container');
+    if (!app) return;
+
+    if (window.innerWidth < 768) {
+        app.classList.remove('sidebar-collapsed');
+        return;
+    }
+
+    try {
+        app.classList.toggle('sidebar-collapsed', localStorage.getItem('tsh_sidebar_collapsed') === '1');
+    } catch {
+        app.classList.remove('sidebar-collapsed');
+    }
+}
+
 // ======================================================
 // Admin Feature Toggle
 // ======================================================
@@ -145,35 +258,157 @@ function toggleAdminFeatures() {
     });
 }
 
+async function getSafetyUnitGateRequirement() {
+    if (AppState.isAdmin) return { required: false };
+    try {
+        const [profileRes, optionsRes] = await Promise.all([
+            apiFetch('/profile'),
+            apiFetch('/register/options')
+        ]);
+        const profile = profileRes?.data || {};
+        const department = String(profile.Department || AppState.currentUser?.department || '').trim();
+        const currentUnit = String(profile.Unit || AppState.currentUser?.unit || '').trim();
+        if (!department || currentUnit) return { required: false };
+
+        const departments = optionsRes?.data?.departments || [];
+        const units = optionsRes?.data?.units || [];
+        const dept = departments.find(row => String(row.Name || '').trim() === department);
+        const deptUnits = dept
+            ? units.filter(unit => Number(unit.department_id) === Number(dept.id))
+            : [];
+        if (!deptUnits.length) return { required: false };
+        return { required: true, profile, units: deptUnits };
+    } catch (err) {
+        console.warn('Safety Unit gate check failed:', err?.message || err);
+        UI.showToast('ไม่สามารถตรวจสอบ Safety Unit ได้ กรุณาลองใหม่', 'error');
+        return { required: false };
+    }
+}
+
+function renderSafetyUnitGate(profile, units) {
+    _safetyUnitGateActive = true;
+    document.querySelectorAll('.page-content').forEach(p => {
+        p.classList.add('hidden');
+        p.style.display = 'none';
+    });
+    const titleEl = document.getElementById('page-title');
+    if (titleEl) titleEl.textContent = 'Safety Unit Required';
+    document.querySelectorAll('.nav-link').forEach(el => el.classList.remove('active'));
+
+    const main = document.getElementById('main-content');
+    if (!main) return;
+    let gate = document.getElementById('safety-unit-gate-page');
+    if (!gate) {
+        gate = document.createElement('div');
+        gate.id = 'safety-unit-gate-page';
+        main.appendChild(gate);
+    }
+    const options = units.map(unit => {
+        const name = unit.name || unit.Name || '';
+        return `<option value="${UI.escHtml(name)}">${UI.escHtml(name)}${unit.short_code ? ` · ${UI.escHtml(unit.short_code)}` : ''}</option>`;
+    }).join('');
+    gate.className = 'min-h-full flex items-center justify-center py-10';
+    gate.innerHTML = `
+        <section class="w-full max-w-xl rounded-2xl border border-emerald-100 bg-white shadow-sm overflow-hidden">
+            <div class="px-5 py-4 border-b border-slate-100 bg-emerald-50/70">
+                <p class="text-[10px] font-black uppercase tracking-widest text-emerald-700">First-use setup</p>
+                <h2 class="mt-1 text-lg font-black text-slate-800">เลือก Safety Unit ก่อนใช้งาน</h2>
+                <p class="mt-1 text-sm text-slate-500">แผนกของคุณมีการตั้งค่า Safety Unit ไว้ กรุณาเลือกหน่วยงานของคุณเพื่อเปิดใช้งานระบบต่อ</p>
+            </div>
+            <form id="safety-unit-gate-form" class="p-5 space-y-4">
+                <div class="grid grid-cols-1 sm:grid-cols-2 gap-3 text-sm">
+                    <div class="rounded-xl border border-slate-100 bg-slate-50 px-3 py-2">
+                        <p class="text-[10px] font-bold uppercase text-slate-400">Employee</p>
+                        <p class="mt-1 font-bold text-slate-700">${UI.escHtml(profile.EmployeeName || AppState.currentUser?.name || '-')}</p>
+                        <p class="text-xs text-slate-400">${UI.escHtml(profile.EmployeeID || AppState.currentUser?.id || '')}</p>
+                    </div>
+                    <div class="rounded-xl border border-slate-100 bg-slate-50 px-3 py-2">
+                        <p class="text-[10px] font-bold uppercase text-slate-400">Department</p>
+                        <p class="mt-1 font-bold text-slate-700">${UI.escHtml(profile.Department || AppState.currentUser?.department || '-')}</p>
+                    </div>
+                </div>
+                <label class="block">
+                    <span class="block text-xs font-bold text-slate-500 uppercase mb-1.5">Safety Unit <span class="text-red-500">*</span></span>
+                    <select id="safety-unit-gate-select" required class="form-input w-full rounded-xl border-slate-200 text-sm">
+                        <option value="">-- เลือก Safety Unit --</option>
+                        ${options}
+                    </select>
+                </label>
+                <div id="safety-unit-gate-error" class="hidden rounded-lg border border-red-100 bg-red-50 px-3 py-2 text-sm font-semibold text-red-600"></div>
+                <div class="flex flex-col sm:flex-row gap-2 sm:justify-between pt-2">
+                    <button type="button" id="safety-unit-gate-logout" class="px-4 py-2 rounded-xl border border-slate-200 bg-white text-sm font-bold text-slate-600 hover:bg-slate-50">ออกจากระบบ</button>
+                    <button type="submit" id="safety-unit-gate-save" class="px-5 py-2 rounded-xl bg-emerald-600 text-white text-sm font-bold hover:bg-emerald-700">บันทึกและเข้าใช้งาน</button>
+                </div>
+            </form>
+        </section>`;
+
+    document.getElementById('safety-unit-gate-logout')?.addEventListener('click', handleLogout);
+    document.getElementById('safety-unit-gate-form')?.addEventListener('submit', handleSafetyUnitGateSubmit);
+}
+
+async function handleSafetyUnitGateSubmit(event) {
+    event.preventDefault();
+    const select = document.getElementById('safety-unit-gate-select');
+    const errorEl = document.getElementById('safety-unit-gate-error');
+    const btn = document.getElementById('safety-unit-gate-save');
+    const unit = String(select?.value || '').trim();
+    if (!unit) {
+        if (errorEl) {
+            errorEl.textContent = 'กรุณาเลือก Safety Unit';
+            errorEl.classList.remove('hidden');
+        }
+        return;
+    }
+    if (errorEl) errorEl.classList.add('hidden');
+    if (btn) {
+        btn.disabled = true;
+        btn.textContent = 'กำลังบันทึก...';
+    }
+    try {
+        const res = await apiFetch('/profile/safety-unit', {
+            method: 'PUT',
+            body: JSON.stringify({ Unit: unit })
+        });
+        if (res?.user && res?.token) {
+            TSHSession.setSession(res.user, res.token);
+            AppState.currentUser = res.user;
+            AppState.isAdmin = (res.user.role === 'Admin' || res.user.Role === 'Admin');
+        }
+        _safetyUnitGateActive = false;
+        document.getElementById('safety-unit-gate-page')?.remove();
+        UI.showToast('บันทึก Safety Unit สำเร็จ', 'success');
+        await startApp(TSHSession.getUser());
+    } catch (err) {
+        if (errorEl) {
+            errorEl.textContent = err?.message || 'ไม่สามารถบันทึก Safety Unit ได้';
+            errorEl.classList.remove('hidden');
+        }
+        if (btn) {
+            btn.disabled = false;
+            btn.textContent = 'บันทึกและเข้าใช้งาน';
+        }
+    }
+}
+
 // ======================================================
 // Routing (Hash-based)
 // ======================================================
 // ─── Page Title Map ────────────────────────────────────────────────────────────
-const PAGE_TITLES = {
-    'dashboard':     'ภาพรวม',
-    'search':        'ค้นหารายบุคคล',
-    'policy':        'นโยบายความปลอดภัย',
-    'committee':     'คณะกรรมการความปลอดภัย',
-    'kpi':           'KPI & Metrics',
-    'patrol':        'Safety Patrol',
-    'cccf':          'CCCF Activity',
-    'machine-safety':'Machine & Device Safety',
-    'ojt':           'Stop-Call-Wait (SCW)',
-    'training':      'Safety Training',
-    'accident':      'รายงานอุบัติเหตุ',
-    'safety-culture':'Safety Culture',
-    'contractor':    'Contractor Safety',
-    'hiyari':        'Hiyari (Near-Miss)',
-    'ky':            'KY Activity',
-    'yokoten':       'Yokoten',
-    'fourm':         '4M Change Management',
-    'admin':         'System Console',
-    'employee':      'ข้อมูลพนักงาน',
-};
+const PAGE_TITLES = moduleTitleMap({
+    dashboard: 'ภาพรวม',
+    search: 'ค้นหารายบุคคล',
+    admin: 'System Console',
+    employee: 'ข้อมูลพนักงาน',
+});
 
 async function handleRouting() {
     if (!AppState.currentUser) {
         console.warn('⛔ Routing blocked: not authenticated');
+        return;
+    }
+
+    if (_safetyUnitGateActive) {
+        console.warn('Routing blocked: Safety Unit is required');
         return;
     }
 
@@ -197,6 +432,7 @@ async function handleRouting() {
         document.getElementById('sidebar')?.classList.remove('translate-x-0');
         document.getElementById('sidebar-backdrop')?.classList.remove('open');
         document.getElementById('btab-more')?.classList.remove('btab-more-open');
+        document.body.classList.remove('mobile-sidebar-open');
     }
 
     // อัปเดต active state ใน bottom tab bar
@@ -225,6 +461,7 @@ async function handleRouting() {
     target.classList.remove('hidden');
     target.style.display = 'block';
     window.scrollTo(0, 0);
+    document.getElementById('main-content')?.scrollTo({ top: 0, left: 0 });
 
     // Load page data
     switch (hash) {
@@ -305,28 +542,54 @@ function setupGlobalEventListeners() {
     // Hash change
     window.addEventListener('hashchange', handleRouting);
 
-    // Sidebar toggle (mobile)
+    // Sidebar toggle (mobile + desktop rail)
     (function() {
+        const appEl      = document.getElementById('app-container');
         const sidebarEl  = document.getElementById('sidebar');
         const backdropEl = document.getElementById('sidebar-backdrop');
         const moreBtn    = document.getElementById('btab-more');
+        const collapseBtn = document.getElementById('sidebar-collapse-btn');
 
         function _openSidebar() {
             sidebarEl?.classList.remove('-translate-x-full');
             sidebarEl?.classList.add('translate-x-0');
             backdropEl?.classList.add('open');
             moreBtn?.classList.add('btab-more-open');
+            document.body.classList.add('mobile-sidebar-open');
         }
         function _closeSidebar() {
             sidebarEl?.classList.add('-translate-x-full');
             sidebarEl?.classList.remove('translate-x-0');
             backdropEl?.classList.remove('open');
             moreBtn?.classList.remove('btab-more-open');
+            document.body.classList.remove('mobile-sidebar-open');
+        }
+        function _toggleDesktopSidebar() {
+            if (window.innerWidth < 768) {
+                _openSidebar();
+                return;
+            }
+            appEl?.classList.toggle('sidebar-collapsed');
+            try {
+                localStorage.setItem('tsh_sidebar_collapsed', appEl?.classList.contains('sidebar-collapsed') ? '1' : '0');
+            } catch {}
         }
 
         document.getElementById('sidebar-toggle')?.addEventListener('click', _openSidebar);
+        document.getElementById('desktop-sidebar-toggle')?.addEventListener('click', _toggleDesktopSidebar);
+        collapseBtn?.addEventListener('click', _toggleDesktopSidebar);
         backdropEl?.addEventListener('click', _closeSidebar);
         moreBtn?.addEventListener('click', _openSidebar);
+        sidebarEl?.addEventListener('click', (event) => {
+            if (window.innerWidth < 768 && event.target.closest('a.nav-link')) _closeSidebar();
+        });
+        document.addEventListener('keydown', (event) => {
+            if (event.key === 'Escape') _closeSidebar();
+        });
+        window.addEventListener('resize', () => {
+            restoreSidebarState();
+            if (window.innerWidth >= 768) _closeSidebar();
+        });
     })();
 
     // Global click handler
@@ -334,8 +597,14 @@ function setupGlobalEventListeners() {
         const el = e.target.closest('button, a');
         if (!el) return;
 
-        if (el.id === 'user-logout-btn') {
+        if (el.id === 'user-logout-btn' || el.id === 'mobile-header-logout-btn') {
             handleLogout();
+            return;
+        }
+
+        if (el.tagName === 'A' && shouldOpenDocumentViewer(e, el)) {
+            e.preventDefault();
+            UI.showDocumentModal(el.href, el.dataset.title || el.textContent.trim() || 'เอกสาร');
             return;
         }
 
@@ -343,6 +612,72 @@ function setupGlobalEventListeners() {
             UI.closeModal();
         }
     });
+}
+
+function setupMobileViewportBehavior() {
+    const viewport = window.visualViewport;
+    const root = document.documentElement;
+    const editableSelector = 'input:not([type="checkbox"]):not([type="radio"]):not([type="file"]), select, textarea, [contenteditable="true"]';
+    let focusTimer = null;
+    let settleTimer = null;
+
+    const isMobileLayout = () => window.innerWidth < 768;
+    const hasEditableFocus = () => document.activeElement?.matches?.(editableSelector);
+    const isStandalone = () => window.matchMedia?.('(display-mode: standalone)').matches || window.navigator.standalone === true;
+    const updateViewport = () => {
+        const height = viewport?.height || window.innerHeight;
+        const offsetTop = viewport?.offsetTop || 0;
+        const roundedHeight = Math.round(height);
+        const keyboardOpen = isMobileLayout() && hasEditableFocus();
+
+        root.style.setProperty('--app-visual-viewport-height', `${roundedHeight}px`);
+        root.style.setProperty('--app-visual-viewport-offset-top', `${Math.round(offsetTop)}px`);
+        document.body.classList.toggle('mobile-keyboard-open', keyboardOpen);
+        document.body.classList.toggle('mobile-pwa-standalone', isStandalone());
+    };
+    const settleViewport = () => {
+        clearTimeout(settleTimer);
+        updateViewport();
+        requestAnimationFrame(updateViewport);
+        settleTimer = setTimeout(updateViewport, 320);
+    };
+    const bringFocusedFieldIntoView = (target) => {
+        if (!isMobileLayout() || !target?.matches?.(editableSelector)) return;
+        clearTimeout(focusTimer);
+        focusTimer = setTimeout(() => {
+            updateViewport();
+            target.scrollIntoView({ block: 'center', inline: 'nearest', behavior: 'smooth' });
+        }, 180);
+    };
+
+    settleViewport();
+    viewport?.addEventListener('resize', () => updateViewport());
+    viewport?.addEventListener('scroll', () => updateViewport());
+    window.addEventListener('resize', () => settleViewport());
+    window.addEventListener('orientationchange', () => setTimeout(settleViewport, 350));
+    window.addEventListener('pageshow', settleViewport);
+    document.addEventListener('visibilitychange', () => {
+        if (document.visibilityState === 'visible') settleViewport();
+    });
+    document.addEventListener('focusin', (event) => bringFocusedFieldIntoView(event.target));
+    document.addEventListener('focusout', () => {
+        clearTimeout(focusTimer);
+        setTimeout(() => settleViewport(), 180);
+    });
+}
+
+function shouldOpenDocumentViewer(event, link) {
+    if (event.defaultPrevented || event.ctrlKey || event.metaKey || event.shiftKey || event.button === 1) return false;
+    if (link.closest('#__dv_overlay')) return false;
+    if (link.hasAttribute('download')) return false;
+    const rawHref = link.getAttribute('href') || '';
+    if (!rawHref || rawHref.startsWith('#') || /^(mailto|tel|javascript):/i.test(rawHref)) return false;
+
+    const fileExtPattern = /\.(pdf|png|jpe?g|gif|webp|avif|docx?|xlsx?|pptx?|mp4|webm|ogg|mov)(\?|#|$)/i;
+    const looksLikeUpload = /\/uploads\//i.test(rawHref) || /\/uploads\//i.test(link.href);
+    const looksLikeFile = fileExtPattern.test(rawHref) || fileExtPattern.test(link.href);
+
+    return looksLikeUpload || looksLikeFile;
 }
 
 // ======================================================
@@ -364,7 +699,7 @@ function openChangePasswordModal() {
                     รหัสผ่านใหม่
                 </label>
                 <input id="cp-new" type="password" required autocomplete="new-password"
-                    placeholder="อย่างน้อย 8 ตัวอักษร"
+                    placeholder="อย่างน้อย 4 ตัวอักษร"
                     class="w-full px-3 py-2 form-input rounded-lg border dark:bg-slate-800 dark:border-slate-600"
                     oninput="_cpPwdStrength(this.value)">
                 <!-- Strength meter -->
@@ -411,7 +746,7 @@ function _cpPwdStrength(pw) {
     if (!pw) { wrap.classList.add('hidden'); return; }
     wrap.classList.remove('hidden');
     let score = 0;
-    if (pw.length >= 8)          score++;
+    if (pw.length >= 4)          score++;
     if (/[a-z]/.test(pw))        score++;
     if (/[A-Z]/.test(pw))        score++;
     if (/[0-9]/.test(pw))        score++;
@@ -447,8 +782,8 @@ async function handleChangePassword(e) {
     };
     errorEl.classList.add('hidden');
 
-    if (newPassword.length < 8) {
-        return showError('รหัสผ่านใหม่ต้องมีอย่างน้อย 8 ตัวอักษร');
+    if (newPassword.length < 4) {
+        return showError('รหัสผ่านใหม่ต้องมีอย่างน้อย 4 ตัวอักษร');
     }
     if (newPassword !== confirmPassword) {
         return showError('รหัสผ่านใหม่ไม่ตรงกัน กรุณากรอกอีกครั้ง');
@@ -487,7 +822,7 @@ async function handleLogin(e) {
     }
 
     const user = TSHSession.getUser();
-    startApp(user);
+    await startApp(user);
 }
 
 // ======================================================

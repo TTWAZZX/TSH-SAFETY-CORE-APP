@@ -1,4 +1,4 @@
-import { showToast, showError, openModal, openDetailModal, closeModal, escHtml, metricCard, emptyState, statusBadge as dsStatusBadge } from '../ui.js';
+import { showToast, showError, openModal, openDetailModal, closeModal, escHtml, metricCard, emptyState, statusBadge as dsStatusBadge } from '../ui.js?v=20260602-mobile-nav-m53';
 import { API } from '../api.js';
 
 // ─── Button loading helper (disable + spinner, returns original HTML) ──────────
@@ -33,11 +33,19 @@ let _viewMode     = 'list';
 
 // Employee tab state
 let _empCache     = [];
+let _empEmailReadiness = { summary: {}, rows: [], rule: {} };
 let _deptCache    = [];
 let _posCache     = [];
 let _unitCache    = [];
 let _empSearch    = '';
+let _empDeptFilter = 'all';
+let _empUnitFilter = 'all';
+let _empSafetyUnitFilter = 'all';
 let _empPage      = 1;
+let _empEmailReviewSearch = '';
+let _empEmailReviewDept = 'all';
+let _empEmailReviewPosition = 'all';
+let _empEmailReviewStatus = 'all';
 const EMP_PER_PAGE = 25;
 
 // Audit log state
@@ -47,6 +55,15 @@ let _auditRows         = [];
 let _auditFilterFailed = false;
 const AUDIT_LIMIT      = 50;
 
+const DEFAULT_BRANDING = {
+    appName: 'TSH Safety Core',
+    tagline: 'Activity System',
+    loginHeroTitle: '',
+    loginHeroSubtitle: '',
+    logoUrl: ''
+};
+let _brandingState = { ...DEFAULT_BRANDING };
+let _brandingUpdatedAt = '';
 
 // Organization tab state
 let _orgDepts      = [];   // { id, Name, is_safety_core, unit_count }
@@ -57,6 +74,7 @@ let _orgPage       = 1;
 let _orgFetchError = false;
 const ORG_PER_PAGE = 15;
 let _masterQuality = { teams: [], positions: [], roles: [], areas: [] };
+let _emailRequirementRule = { positions: [], requiredPositionIds: [], isUsingDefault: false };
 
 // ─── Tab Config ───────────────────────────────────────────────────────────────
 const TABS = [
@@ -67,6 +85,7 @@ const TABS = [
     { key: 'permissions',  label: 'สิทธิ์การใช้งาน',   icon: `<svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z"/></svg>` },
     { key: 'health',       label: 'System Health',     icon: `<svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4.318 6.318a4.5 4.5 0 000 6.364L12 20.364l7.682-7.682a4.5 4.5 0 00-6.364-6.364L12 7.636l-1.318-1.318a4.5 4.5 0 00-6.364 0z"/></svg>` },
     { key: 'audit',        label: 'Audit Log',         icon: `<svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"/></svg>` },
+    { key: 'branding',     label: 'Branding',          icon: `<svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 21a4 4 0 01-4-4V5a2 2 0 012-2h4l2 2h8a2 2 0 012 2v4M7 21h10a4 4 0 004-4v-1M7 21a4 4 0 004-4v-1m4-4h10m-5-5v10"/></svg>` },
     { key: 'targets',      label: 'เป้าหมายกิจกรรม',   icon: `<svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"/></svg>` },
 ];
 
@@ -80,24 +99,21 @@ export async function loadAdminPage() {
     // Tab buttons — underline style ใช้ใน tab bar ใต้ hero
     const tabHtml = TABS.map(t => `
         <button id="tab-btn-${t.key}" onclick="window._adminTab('${t.key}')"
-            class="flex items-center gap-1.5 px-4 py-3 text-xs font-semibold whitespace-nowrap transition-all border-b-2 border-transparent text-white/70 hover:text-white hover:border-white/40">
+            class="admin-console-tab">
             ${t.icon}${t.label}
             ${t.badge ? `<span class="ml-0.5 px-1.5 py-0.5 rounded text-[9px] font-bold bg-emerald-400/80 text-white leading-none">${t.badge}</span>` : ''}
         </button>`).join('');
 
     container.innerHTML = `
-    <div class="animate-fade-in pb-10">
+    <div class="admin-console-shell animate-fade-in pb-10">
 
         <!-- ═══ HERO HEADER ═══ -->
-        <div class="relative overflow-hidden" style="background:linear-gradient(135deg,#064e3b 0%,#065f46 55%,#0d9488 100%)">
+        <div class="admin-console-hero relative overflow-hidden" style="background:linear-gradient(135deg,#064e3b 0%,#065f46 55%,#0d9488 100%)">
             <!-- dot pattern -->
             <div class="absolute inset-0 opacity-10 pointer-events-none">
                 <svg width="100%" height="100%"><defs><pattern id="adm-dots" width="24" height="24" patternUnits="userSpaceOnUse"><circle cx="12" cy="12" r="1.3" fill="white"/></pattern></defs><rect width="100%" height="100%" fill="url(#adm-dots)"/></svg>
             </div>
-            <!-- glow orb -->
-            <div class="absolute -right-16 -top-16 w-72 h-72 rounded-full opacity-10 pointer-events-none" style="background:radial-gradient(circle,#fff,transparent 70%)"></div>
-
-            <div class="relative z-10 max-w-7xl mx-auto px-4 sm:px-6 pt-6">
+            <div class="relative z-10 w-full px-4 sm:px-6 xl:px-8 pt-6">
                 <!-- Title row -->
                 <div class="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
                     <div>
@@ -115,14 +131,14 @@ export async function loadAdminPage() {
                 </div>
 
                 <!-- Tab bar — sits at bottom of hero -->
-                <div class="mt-5 flex overflow-x-auto gap-0 -mb-px scrollbar-none">
+                <div class="admin-console-tabs mt-5 overflow-x-auto scrollbar-none">
                     ${tabHtml}
                 </div>
             </div>
         </div>
 
         <!-- Content area -->
-        <div class="max-w-7xl mx-auto px-6 pt-6">
+        <div class="admin-console-content w-full px-4 sm:px-6 xl:px-8 pt-6">
             <div id="admin-content-area" class="relative min-h-[500px]"></div>
         </div>
 
@@ -185,8 +201,8 @@ function switchTab(key) {
     _currentTab = key;
     window._saveTab?.('admin', key);
     // Underline-style tab classes — active: white underline + white text; inactive: ghost
-    const active   = 'flex items-center gap-1.5 px-4 py-3 text-xs font-bold whitespace-nowrap transition-all border-b-2 border-white text-white';
-    const inactive = 'flex items-center gap-1.5 px-4 py-3 text-xs font-semibold whitespace-nowrap transition-all border-b-2 border-transparent text-white/70 hover:text-white hover:border-white/40';
+    const active   = 'admin-console-tab is-active';
+    const inactive = 'admin-console-tab';
     TABS.forEach(t => {
         const btn = document.getElementById(`tab-btn-${t.key}`);
         if (!btn) return;
@@ -212,6 +228,7 @@ function switchTab(key) {
     else if (key === 'permissions')  renderPermissions(area);
     else if (key === 'health')       renderSystemHealth(area);
     else if (key === 'audit')        renderAuditLog(area);
+    else if (key === 'branding')     renderBranding(area);
     else if (key === 'targets')      renderActivityTargets(area);
 }
 
@@ -229,21 +246,21 @@ async function renderReference(container) {
     const hdrCls = { sky:'from-sky-50 to-white', violet:'from-violet-50 to-white', rose:'from-rose-50 to-white' };
 
     container.innerHTML = `
-    <div class="animate-fade-in space-y-6">
+    <div class="animate-fade-in space-y-5">
 
         <!-- ─── Section 1: แผนก / หน่วยงาน ─── -->
         <div>
           <p class="text-xs font-bold text-slate-400 uppercase tracking-widest mb-3">แผนก / หน่วยงาน</p>
 
           <!-- Stats skeleton -->
-          <div id="org-stats-row" class="grid grid-cols-2 md:grid-cols-4 gap-4 mb-4">
+          <div id="org-stats-row" class="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-4">
               ${[1,2,3,4].map(() => `
               <div class="bg-white rounded-xl p-4 border border-slate-100 shadow-sm animate-pulse">
                   <div class="h-8 bg-slate-100 rounded-lg w-12 mb-2"></div>
                   <div class="h-3 bg-slate-100 rounded w-20"></div>
               </div>`).join('')}
           </div>
-          <div id="master-quality-row" class="grid grid-cols-2 lg:grid-cols-5 gap-3 mb-4">
+          <div id="master-quality-row" class="grid grid-cols-2 md:grid-cols-3 2xl:grid-cols-5 gap-3 mb-4">
               ${[1,2,3,4,5].map(() => `
               <div class="rounded-xl border border-slate-100 bg-white px-4 py-3 animate-pulse">
                   <div class="h-3 bg-slate-100 rounded w-20 mb-2"></div>
@@ -252,8 +269,8 @@ async function renderReference(container) {
           </div>
 
           <!-- Filter Bar -->
-          <div class="ds-filter-bar flex flex-wrap gap-3 items-center mb-4">
-              <div class="relative flex-1 min-w-[200px]">
+          <div class="ds-filter-bar flex flex-col xl:flex-row gap-3 items-stretch xl:items-center mb-4">
+              <div class="relative flex-1 min-w-[220px]">
                   <svg class="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                       <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-4.35-4.35M17 11A6 6 0 115 11a6 6 0 0112 0z"/>
                   </svg>
@@ -262,7 +279,7 @@ async function renderReference(container) {
                       class="w-full pl-9 pr-3 py-2 text-sm border border-slate-200 rounded-lg outline-none focus:border-emerald-400 focus:ring-2 focus:ring-emerald-100"
                       oninput="window._orgFilter()">
               </div>
-              <div class="flex bg-slate-100 p-1 rounded-lg gap-0.5 flex-shrink-0">
+              <div class="flex bg-slate-100 p-1 rounded-lg gap-0.5 flex-shrink-0 overflow-x-auto scrollbar-none">
                   ${[{ v:'all', label:'ทั้งหมด' }, { v:'safety', label:'Safety Core' }, { v:'general', label:'หน่วยงานทั่วไป' }].map(o => `
                   <button onclick="window._orgSetFilter('${o.v}')" id="org-type-${o.v}"
                       class="px-3 py-1.5 rounded-md text-xs font-semibold transition-all ${_orgFilter === o.v ? 'bg-white shadow-sm text-slate-800' : 'text-slate-500 hover:text-slate-700'}">
@@ -272,7 +289,7 @@ async function renderReference(container) {
               <span id="org-clear-wrap" class="${_orgSearch || _orgFilter !== 'all' ? '' : 'hidden'}">
                   <button onclick="window._orgClearFilter()" class="text-xs text-slate-500 underline hover:text-slate-700">ล้างตัวกรอง</button>
               </span>
-              <span id="org-count" class="text-xs text-slate-400 ml-auto"></span>
+              <span id="org-count" class="text-xs text-slate-400 xl:ml-auto self-center"></span>
               ${TSHSession.getUser()?.role === 'Admin' || TSHSession.getUser()?.Role === 'Admin' ? `
               <button onclick="window._orgAddDept()"
                   class="flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-bold text-white shadow-sm"
@@ -295,9 +312,9 @@ async function renderReference(container) {
         <!-- ─── Section 2: Teams / Positions / Roles ─── -->
         <div>
           <p class="text-xs font-bold text-slate-400 uppercase tracking-widest mb-3">ข้อมูลอ้างอิง (Teams · Positions · Roles)</p>
-          <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+          <div class="grid grid-cols-1 xl:grid-cols-3 gap-4">
             ${refTypes.map(rt => `
-            <div class="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden flex flex-col" style="max-height:420px">
+            <div class="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden flex flex-col" style="max-height:480px">
                 <div class="p-4 bg-gradient-to-b ${hdrCls[rt.color]} to-white border-b flex justify-between items-center flex-shrink-0">
                     <div class="flex items-center gap-2.5">
                         <div class="p-1.5 bg-white rounded-lg border border-slate-200 shadow-sm">
@@ -322,6 +339,23 @@ async function renderReference(container) {
                 </ul>
             </div>`).join('')}
           </div>
+        </div>
+
+        <!-- Email Requirement Rule -->
+        <div id="email-requirement-rules" class="bg-white rounded-xl border border-emerald-100 shadow-sm overflow-hidden">
+            <div class="p-4 border-b border-emerald-100 bg-gradient-to-r from-emerald-50 to-white">
+                <p class="text-[10px] font-bold uppercase tracking-widest text-emerald-600">Email Requirement Rules</p>
+                <div class="mt-1 flex flex-col lg:flex-row lg:items-end lg:justify-between gap-2">
+                    <div>
+                        <h3 class="font-bold text-slate-800 text-sm">ตำแหน่งที่ควรมี Company Email</h3>
+                        <p class="text-xs text-slate-500 mt-1">ใช้เป็นกติกากลางสำหรับ Email Readiness และการติดตามงานของ KY ในขั้นถัดไป โดยยังไม่บังคับตอนเพิ่มพนักงาน</p>
+                    </div>
+                    <span id="email-rule-count" class="text-[11px] font-bold text-emerald-700 bg-emerald-50 border border-emerald-200 px-2.5 py-1 rounded-full">กำลังโหลด...</span>
+                </div>
+            </div>
+            <div id="email-rule-body" class="p-4">
+                <div class="text-xs text-slate-400 animate-pulse">กำลังโหลดตำแหน่ง...</div>
+            </div>
         </div>
 
         <!-- ─── Section 3: พื้นที่โรงงาน (Patrol Areas) ─── -->
@@ -349,7 +383,7 @@ async function renderReference(container) {
               </div>
             </div>
             <div class="p-4">
-              <div id="areas-grid" class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-7 gap-2">
+              <div id="areas-grid" class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 xl:grid-cols-8 2xl:grid-cols-10 gap-2">
                 <div class="text-center text-xs text-slate-400 py-6 col-span-full">กำลังโหลด...</div>
               </div>
             </div>
@@ -412,6 +446,7 @@ async function renderReference(container) {
     loadMasterList('teams');
     loadMasterList('positions');
     loadMasterList('roles');
+    loadEmailRequirementRules();
     loadAreasList();
 }
 
@@ -645,7 +680,7 @@ function _orgRenderTable() {
     }).join('');
 
     wrap.innerHTML = `
-    <table class="ds-table text-left border-collapse">
+    <table class="ds-table min-w-[760px] text-left border-collapse">
         <thead>
             <tr class="bg-slate-50 border-b-2 border-slate-200">
                 <th class="px-4 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wide">ชื่อแผนก / Section</th>
@@ -1159,9 +1194,10 @@ function _adminActionCenterHtml(d = {}) {
         ok: 'bg-emerald-500',
     };
     const actionItems = (d.actionRequired || []).filter(item => Number(item.count || 0) > 0);
+    const totalActionCount = actionItems.reduce((sum, item) => sum + Number(item.count || 0), 0);
     const actionRows = actionItems.map(item => `
         <button onclick="window._adminTab('${item.tab || 'health'}')"
-            class="w-full text-left border ${severityClass[item.severity] || severityClass.ok} rounded-lg px-3 py-3 hover:shadow-sm transition-all">
+            class="w-full text-left border ${severityClass[item.severity] || severityClass.ok} rounded-xl px-3 py-3 hover:shadow-sm transition-all">
             <div class="flex items-center justify-between gap-3">
                 <div class="flex items-center gap-2 min-w-0">
                     <span class="w-2 h-2 rounded-full ${severityDot[item.severity] || severityDot.ok} flex-shrink-0"></span>
@@ -1182,22 +1218,34 @@ function _adminActionCenterHtml(d = {}) {
     const score = Math.max(0, Math.min(100, Number(ux.score ?? 100)));
     const scoreColor = score >= 85 ? 'text-emerald-700 bg-emerald-50 border-emerald-200' : score >= 65 ? 'text-amber-700 bg-amber-50 border-amber-200' : 'text-rose-700 bg-rose-50 border-rose-200';
     const barColor = score >= 85 ? 'bg-emerald-500' : score >= 65 ? 'bg-amber-500' : 'bg-rose-500';
+    const readinessLabel = score >= 85 ? 'Operational' : score >= 65 ? 'Watch' : 'Action Needed';
+    const shortcuts = [
+        { tab: 'employees', label: 'Employee Master', hint: `${Number(d.totalEmployees || 0).toLocaleString()} employees` },
+        { tab: 'health', label: 'System Health', hint: `${totalActionCount.toLocaleString()} action signals` },
+        { tab: 'audit', label: 'Audit Log', hint: `${Number(d.auditToday || 0).toLocaleString()} today` },
+        { tab: 'permissions', label: 'Permissions', hint: 'Role matrix' },
+    ];
 
     return `
-    <div class="grid grid-cols-1 lg:grid-cols-3 gap-4">
-        <div class="lg:col-span-2 bg-white rounded-xl border border-slate-200 shadow-sm p-5">
+    <div class="grid grid-cols-1 xl:grid-cols-12 gap-4">
+        <div class="xl:col-span-7 bg-white rounded-xl border border-slate-200 shadow-sm p-5">
             <div class="flex items-center justify-between gap-3 mb-4">
                 <div>
-                    <h3 class="font-bold text-slate-800 text-sm">Action Required</h3>
+                    <p class="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Admin Command Queue</p>
+                    <h3 class="font-bold text-slate-800 text-sm mt-1">Action Required</h3>
                 </div>
-                <button onclick="window._adminTab('health')" class="text-xs font-bold text-slate-500 hover:text-slate-800">System Health</button>
+                <div class="text-right">
+                    <p class="text-2xl font-black text-slate-800">${totalActionCount}</p>
+                    <button onclick="window._adminTab('health')" class="text-xs font-bold text-slate-500 hover:text-slate-800">System Health</button>
+                </div>
             </div>
             <div class="grid grid-cols-1 md:grid-cols-2 gap-3">${actionRequiredHtml}</div>
         </div>
-        <div class="bg-white rounded-xl border border-slate-200 shadow-sm p-5">
+        <div class="xl:col-span-3 bg-white rounded-xl border border-slate-200 shadow-sm p-5">
             <div class="flex items-start justify-between gap-3">
                 <div>
-                    <h3 class="font-bold text-slate-800 text-sm">UX Health</h3>
+                    <p class="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Readiness</p>
+                    <h3 class="font-bold text-slate-800 text-sm mt-1">${readinessLabel}</h3>
                 </div>
                 <span class="px-3 py-1 rounded-full text-xs font-black border ${scoreColor}">${score}</span>
             </div>
@@ -1217,7 +1265,314 @@ function _adminActionCenterHtml(d = {}) {
                 </div>
             </div>
         </div>
+        <div class="xl:col-span-2 bg-white rounded-xl border border-slate-200 shadow-sm p-5">
+            <p class="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-3">Quick Links</p>
+            <div class="space-y-2">
+                ${shortcuts.map(s => `
+                    <button type="button" onclick="window._adminTab('${s.tab}')"
+                        class="w-full text-left rounded-lg border border-slate-100 bg-slate-50/70 px-3 py-2.5 hover:bg-white hover:border-emerald-200 transition-colors">
+                        <p class="text-xs font-black text-slate-700">${s.label}</p>
+                        <p class="text-[11px] text-slate-400 mt-0.5">${s.hint}</p>
+                    </button>
+                `).join('')}
+            </div>
+        </div>
     </div>`;
+}
+
+function _adminHealthDrilldown(key) {
+    const target = {
+        failed_api_24h: 'audit',
+        employee_master: 'employees',
+        missing_tables: 'audit',
+    }[key];
+    if (key === 'failed_api_24h' || key === 'missing_tables') {
+        window._adminTab('audit');
+        setTimeout(() => window._auditApplyPreset?.('failed'), 120);
+        return;
+    }
+    if (key === 'stale_change') {
+        window.location.hash = '#fourm';
+        return;
+    }
+    if (key === 'stale_hiyari') {
+        window.location.hash = '#hiyari';
+        return;
+    }
+    window._adminTab(target || 'health');
+}
+
+function _normalizeBranding(raw = {}) {
+    const appName = String(raw.appName || DEFAULT_BRANDING.appName).trim().slice(0, 80) || DEFAULT_BRANDING.appName;
+    const tagline = String(raw.tagline || DEFAULT_BRANDING.tagline).trim().slice(0, 80) || DEFAULT_BRANDING.tagline;
+    const loginHeroTitle = String(raw.loginHeroTitle || '').trim().slice(0, 140);
+    const loginHeroSubtitle = String(raw.loginHeroSubtitle || '').trim().slice(0, 180);
+    return {
+        appName,
+        tagline,
+        loginHeroTitle,
+        loginHeroSubtitle,
+        logoUrl: String(raw.logoUrl || '').trim().slice(0, 1024)
+    };
+}
+
+function _brandingPreviewLogo(logoUrl = '') {
+    if (logoUrl) {
+        return `<img src="${escHtml(logoUrl)}" alt="Current logo" class="w-full h-full object-contain">`;
+    }
+    return `
+        <svg width="56" height="56" viewBox="0 0 40 40" fill="none" xmlns="http://www.w3.org/2000/svg">
+            <rect width="40" height="40" rx="10" fill="#059669" fill-opacity="0.1"/>
+            <path d="M20 10L12 14.5v7c0 6 4 11.5 8 13.5 4-2 8-7.5 8-13.5v-7z" fill="#059669"/>
+            <path d="M15.5 21.5l3 3 6-6" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+        </svg>`;
+}
+
+async function _loadBrandingSetting() {
+    const res = await API.get('/settings/app_branding');
+    let raw = res?.value;
+    if (typeof raw === 'string' && raw.trim()) {
+        try { raw = JSON.parse(raw); } catch (_) { raw = {}; }
+    }
+    _brandingState = _normalizeBranding(raw || {});
+    _brandingUpdatedAt = raw?.updatedAt || '';
+}
+
+async function renderBranding(container) {
+    container.innerHTML = _skelSpinner();
+    try {
+        await _loadBrandingSetting();
+    } catch (err) {
+        showError('โหลดค่าตั้งค่าแบรนด์ไม่สำเร็จ', err);
+        _brandingState = { ...DEFAULT_BRANDING };
+    }
+
+    container.innerHTML = `
+    <div class="animate-fade-in space-y-5">
+        <div class="flex flex-col lg:flex-row lg:items-end lg:justify-between gap-3">
+            <div>
+                <p class="text-xs font-bold text-slate-400 uppercase tracking-widest mb-1">System Branding</p>
+                <h2 class="text-xl font-black text-slate-800">ตั้งค่าแบรนด์ระบบ</h2>
+                <p class="text-sm text-slate-500 mt-1">กำหนดชื่อระบบและโลโก้ที่ใช้ร่วมกันบน Sidebar, Mobile header และหน้า Login</p>
+            </div>
+            <span class="text-xs font-semibold text-slate-500 bg-white border border-slate-200 rounded-full px-3 py-1.5">
+                ${_brandingUpdatedAt ? `Updated ${escHtml(_brandingUpdatedAt)}` : 'Using saved setting or default'}
+            </span>
+        </div>
+
+        <div class="grid grid-cols-1 xl:grid-cols-[360px,1fr] gap-5">
+            <div class="bg-white rounded-xl border border-slate-200 shadow-sm p-5">
+                <p class="text-xs font-bold text-slate-400 uppercase tracking-widest mb-4">Preview</p>
+                <div class="rounded-2xl p-5 text-white overflow-hidden" style="background:linear-gradient(160deg,#064e3b 0%,#065f46 55%,#0d9488 100%)">
+                    <div class="flex items-center gap-3">
+                        <div id="branding-preview-logo" class="w-14 h-14 rounded-xl bg-white/12 border border-white/15 p-1.5 flex items-center justify-center overflow-hidden">
+                            ${_brandingPreviewLogo(_brandingState.logoUrl)}
+                        </div>
+                        <div class="min-w-0">
+                            <p id="branding-preview-name" class="text-base font-black truncate">${escHtml(_brandingState.appName)}</p>
+                            <p id="branding-preview-tagline" class="text-xs text-emerald-100/80 truncate">${escHtml(_brandingState.tagline)}</p>
+                        </div>
+                    </div>
+                    <div class="mt-5 pt-4 border-t border-white/15">
+                        <p class="text-[11px] font-bold uppercase tracking-widest text-emerald-100/70 mb-2">Login Hero</p>
+                        <p id="branding-preview-login-title" class="text-lg font-black leading-tight">${escHtml(_brandingState.loginHeroTitle || _brandingState.appName)}</p>
+                        <p id="branding-preview-login-subtitle" class="text-xs text-emerald-100/80 mt-1 leading-relaxed">${escHtml(_brandingState.loginHeroSubtitle || _brandingState.tagline)}</p>
+                    </div>
+                </div>
+                <p class="text-xs text-slate-500 mt-3">ถ้าไม่มีโลโก้ที่อัปโหลด ระบบจะใช้โลโก้เดิมอัตโนมัติ</p>
+            </div>
+
+            <form id="branding-form" class="bg-white rounded-xl border border-slate-200 shadow-sm p-5 space-y-4">
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <label class="block">
+                        <span class="block text-xs font-bold text-slate-600 mt-1">Sidebar / Header Name</span>
+                        <input id="branding-app-name" value="${escHtml(_brandingState.appName)}" maxlength="80"
+                            class="mt-1 w-full px-3 py-2 rounded-lg border border-slate-200 text-sm focus:border-emerald-400 focus:ring-2 focus:ring-emerald-100 outline-none">
+                    </label>
+                    <label class="block">
+                        <span class="text-xs font-bold text-slate-600">Sidebar / Header Tagline</span>
+                        <input id="branding-tagline" value="${escHtml(_brandingState.tagline)}" maxlength="80"
+                            class="mt-1 w-full px-3 py-2 rounded-lg border border-slate-200 text-sm focus:border-emerald-400 focus:ring-2 focus:ring-emerald-100 outline-none">
+                    </label>
+                </div>
+                <div>
+                    <p class="text-xs font-black text-slate-500 uppercase tracking-widest mb-3">Desktop Login Hero</p>
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <label class="block">
+                            <span class="text-xs font-bold text-slate-600">Login Hero Title</span>
+                            <input id="branding-login-title" value="${escHtml(_brandingState.loginHeroTitle)}" maxlength="140" placeholder="${escHtml(_brandingState.appName)}"
+                                class="mt-1 w-full px-3 py-2 rounded-lg border border-slate-200 text-sm focus:border-emerald-400 focus:ring-2 focus:ring-emerald-100 outline-none">
+                        </label>
+                        <label class="block">
+                            <span class="text-xs font-bold text-slate-600">Login Hero Subtitle</span>
+                            <input id="branding-login-subtitle" value="${escHtml(_brandingState.loginHeroSubtitle)}" maxlength="180" placeholder="${escHtml(_brandingState.tagline)}"
+                                class="mt-1 w-full px-3 py-2 rounded-lg border border-slate-200 text-sm focus:border-emerald-400 focus:ring-2 focus:ring-emerald-100 outline-none">
+                        </label>
+                    </div>
+                    <p class="text-xs text-slate-500 mt-2">Leave Login Hero fields blank to reuse Sidebar / Header text.</p>
+                </div>
+
+                <div class="rounded-xl border border-dashed border-slate-300 bg-slate-50 p-4">
+                    <div class="flex flex-col md:flex-row md:items-center gap-3">
+                        <div class="flex-1">
+                            <p class="text-xs font-bold text-slate-600">อัปโหลดโลโก้ใหม่</p>
+                            <p class="text-xs text-slate-500 mt-1">รองรับ PNG, JPG, JPEG, WEBP ขนาดไม่เกิน 2 MB · แนะนำ 512 × 512 px</p>
+                            <p id="branding-logo-url" class="text-[11px] text-slate-400 mt-2 break-all">${escHtml(_brandingState.logoUrl || 'Default logo')}</p>
+                        </div>
+                        <input id="branding-logo-input" type="file" accept=".png,.jpg,.jpeg,.webp,image/png,image/jpeg,image/webp" class="hidden">
+                        <button type="button" onclick="document.getElementById('branding-logo-input')?.click()"
+                            class="px-4 py-2 rounded-lg bg-slate-800 hover:bg-slate-900 text-white text-xs font-bold">เลือกไฟล์</button>
+                    </div>
+                </div>
+
+                <div class="rounded-xl border border-emerald-100 bg-emerald-50/60 p-4">
+                    <div class="flex flex-col lg:flex-row gap-4">
+                        <div class="flex-1">
+                            <p class="text-xs font-black text-emerald-800 uppercase tracking-wide">Logo Guide / คำแนะนำโลโก้</p>
+                            <div class="mt-3 grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs text-slate-600">
+                                <div class="rounded-lg bg-white/80 border border-emerald-100 p-3">
+                                    <p class="font-bold text-slate-800">Recommended Size</p>
+                                    <p class="mt-1">512 × 512 px แบบสี่เหลี่ยมจัตุรัส</p>
+                                    <p class="text-slate-400 mt-1">Minimum 256 × 256 px</p>
+                                </div>
+                                <div class="rounded-lg bg-white/80 border border-emerald-100 p-3">
+                                    <p class="font-bold text-slate-800">Best Format</p>
+                                    <p class="mt-1">PNG หรือ WebP พื้นหลังโปร่งใส</p>
+                                    <p class="text-slate-400 mt-1">JPG ใช้ได้ถ้าพื้นหลังเข้ากับสีระบบ</p>
+                                </div>
+                                <div class="rounded-lg bg-white/80 border border-emerald-100 p-3">
+                                    <p class="font-bold text-slate-800">Safe Area</p>
+                                    <p class="mt-1">เว้นขอบ 15-20% รอบโลโก้</p>
+                                    <p class="text-slate-400 mt-1">ช่วยให้ไม่ชิดขอบเมื่อแสดงใน Sidebar/Login</p>
+                                </div>
+                                <div class="rounded-lg bg-white/80 border border-emerald-100 p-3">
+                                    <p class="font-bold text-slate-800">Used In</p>
+                                    <p class="mt-1">Sidebar 40px · Mobile 32px · Login 56px</p>
+                                    <p class="text-slate-400 mt-1">ควรเป็น icon ชัดเจน ไม่ใช่ banner ยาว</p>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="lg:w-80">
+                            <p class="text-xs font-black text-emerald-800 uppercase tracking-wide">Color Palette / โทนสีระบบ</p>
+                            <div class="mt-3 grid grid-cols-2 gap-2 text-[11px]">
+                                ${[
+                                    ['Primary', '#059669'],
+                                    ['Deep Green', '#064e3b'],
+                                    ['Teal', '#0d9488'],
+                                    ['Mint BG', '#ecfdf5'],
+                                    ['Text', '#0f172a'],
+                                    ['Warning', '#d97706']
+                                ].map(([name, hex]) => `
+                                    <div class="rounded-lg bg-white/80 border border-emerald-100 p-2 flex items-center gap-2">
+                                        <span class="w-5 h-5 rounded-md border border-slate-200 shadow-sm" style="background:${hex}"></span>
+                                        <span class="min-w-0">
+                                            <span class="block font-bold text-slate-700 truncate">${name}</span>
+                                            <span class="block text-slate-400">${hex}</span>
+                                        </span>
+                                    </div>
+                                `).join('')}
+                            </div>
+                            <p class="text-[11px] text-slate-500 mt-3">Tip: ใช้โลโก้สีขาว/เขียวเข้มบนพื้นโปร่งใสจะเข้ากับ Sidebar และ Login ได้ดีที่สุด</p>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="flex flex-col sm:flex-row sm:justify-between gap-2 pt-2">
+                    <button type="button" id="branding-reset-btn"
+                        class="px-4 py-2 rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-50 text-xs font-bold">รีเซ็ตกลับค่าเริ่มต้น</button>
+                    <button type="submit" id="branding-save-btn"
+                        class="px-5 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold shadow-sm">บันทึก Branding</button>
+                </div>
+            </form>
+        </div>
+    </div>`;
+
+    const appName = document.getElementById('branding-app-name');
+    const tagline = document.getElementById('branding-tagline');
+    const loginTitle = document.getElementById('branding-login-title');
+    const loginSubtitle = document.getElementById('branding-login-subtitle');
+    const fileInput = document.getElementById('branding-logo-input');
+    const updatePreview = () => {
+        _brandingState.appName = String(appName?.value || '').trim() || DEFAULT_BRANDING.appName;
+        _brandingState.tagline = String(tagline?.value || '').trim() || DEFAULT_BRANDING.tagline;
+        _brandingState.loginHeroTitle = String(loginTitle?.value || '').trim();
+        _brandingState.loginHeroSubtitle = String(loginSubtitle?.value || '').trim();
+        document.getElementById('branding-preview-name').textContent = _brandingState.appName;
+        document.getElementById('branding-preview-tagline').textContent = _brandingState.tagline;
+        const loginPreviewTitle = document.getElementById('branding-preview-login-title');
+        const loginPreviewSubtitle = document.getElementById('branding-preview-login-subtitle');
+        if (loginPreviewTitle) loginPreviewTitle.textContent = _brandingState.loginHeroTitle || _brandingState.appName;
+        if (loginPreviewSubtitle) loginPreviewSubtitle.textContent = _brandingState.loginHeroSubtitle || _brandingState.tagline;
+    };
+    appName?.addEventListener('input', updatePreview);
+    tagline?.addEventListener('input', updatePreview);
+    loginTitle?.addEventListener('input', updatePreview);
+    loginSubtitle?.addEventListener('input', updatePreview);
+
+    fileInput?.addEventListener('change', async () => {
+        const file = fileInput.files?.[0];
+        if (!file) return;
+        const allowed = ['image/png', 'image/jpeg', 'image/webp'];
+        if (!allowed.includes(file.type) || !/\.(png|jpe?g|webp)$/i.test(file.name)) {
+            showToast('รองรับเฉพาะไฟล์ PNG, JPG, JPEG หรือ WEBP', 'error');
+            fileInput.value = '';
+            return;
+        }
+        if (file.size > 2 * 1024 * 1024) {
+            showToast('โลโก้ต้องมีขนาดไม่เกิน 2 MB', 'error');
+            fileInput.value = '';
+            return;
+        }
+        const fd = new FormData();
+        fd.append('logo', file);
+        try {
+            const res = await API.post('/upload/branding-logo', fd);
+            _brandingState.logoUrl = res.url || res.data?.url || '';
+            document.getElementById('branding-preview-logo').innerHTML = _brandingPreviewLogo(_brandingState.logoUrl);
+            document.getElementById('branding-logo-url').textContent = _brandingState.logoUrl || 'Default logo';
+            showToast('อัปโหลดโลโก้แล้ว กดบันทึกเพื่อใช้งาน', 'success');
+        } catch (err) {
+            showError('อัปโหลดโลโก้ไม่สำเร็จ', err);
+        } finally {
+            fileInput.value = '';
+        }
+    });
+
+    document.getElementById('branding-form')?.addEventListener('submit', async (e) => {
+        e.preventDefault();
+        updatePreview();
+        const btn = document.getElementById('branding-save-btn');
+        const orig = _btnLoad(btn, 'Saving...');
+        try {
+            const payload = { ..._normalizeBranding(_brandingState), updatedAt: new Date().toISOString() };
+            await API.put('/settings/app_branding', { value: payload });
+            await window._refreshAppBranding?.();
+            _brandingState = _normalizeBranding(payload);
+            showToast('บันทึก Branding สำเร็จ', 'success');
+            renderBranding(container);
+        } catch (err) {
+            showError('บันทึก Branding ไม่สำเร็จ', err);
+        } finally {
+            _btnRestore(btn, orig);
+        }
+    });
+
+    document.getElementById('branding-reset-btn')?.addEventListener('click', async () => {
+        if (!confirm('รีเซ็ต Branding กลับค่าเริ่มต้น?')) return;
+        const btn = document.getElementById('branding-reset-btn');
+        const orig = _btnLoad(btn, 'Resetting...');
+        try {
+            await API.put('/settings/app_branding', { value: null });
+            _brandingState = { ...DEFAULT_BRANDING };
+            await window._refreshAppBranding?.();
+            showToast('รีเซ็ต Branding แล้ว', 'success');
+            renderBranding(container);
+        } catch (err) {
+            showError('รีเซ็ต Branding ไม่สำเร็จ', err);
+        } finally {
+            _btnRestore(btn, orig);
+        }
+    });
 }
 
 // =============================================================================
@@ -1273,9 +1628,21 @@ async function renderDashboard(container) {
             </div>`).join('') || '<div class="text-xs text-slate-400 py-4 text-center">ยังไม่มีกิจกรรม</div>';
 
         container.innerHTML = `
-        <div class="animate-fade-in space-y-6">
+        <div class="animate-fade-in space-y-5">
             ${_adminActionCenterHtml(d)}
-            <div class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
+            <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+                <div>
+                    <p class="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Operational Snapshot</p>
+                    <h2 class="text-base font-black text-slate-800 mt-1">System Console Dashboard</h2>
+                </div>
+                <div class="flex gap-2 overflow-x-auto scrollbar-none">
+                    <button type="button" onclick="window._adminTab('employees')" class="px-3 py-2 rounded-lg border border-slate-200 bg-white text-xs font-bold text-slate-600 hover:border-emerald-200 hover:text-emerald-700">Employee</button>
+                    <button type="button" onclick="window._adminTab('scheduler')" class="px-3 py-2 rounded-lg border border-slate-200 bg-white text-xs font-bold text-slate-600 hover:border-emerald-200 hover:text-emerald-700">Scheduler</button>
+                    <button type="button" onclick="window._adminTab('reference')" class="px-3 py-2 rounded-lg border border-slate-200 bg-white text-xs font-bold text-slate-600 hover:border-emerald-200 hover:text-emerald-700">Reference</button>
+                    <button type="button" onclick="window._adminTab('targets')" class="px-3 py-2 rounded-lg border border-slate-200 bg-white text-xs font-bold text-slate-600 hover:border-emerald-200 hover:text-emerald-700">Targets</button>
+                </div>
+            </div>
+            <div class="grid grid-cols-2 md:grid-cols-3 2xl:grid-cols-6 gap-4">
                 ${cards.map(c => `
                 <div class="bg-white rounded-xl border ${colorMap[c.color].split(' ')[2]} shadow-sm p-4 flex flex-col gap-2">
                     <div class="p-2 ${colorMap[c.color].split(' ').slice(0,2).join(' ')} rounded-lg w-fit border ${colorMap[c.color].split(' ')[2]}">
@@ -1286,12 +1653,12 @@ async function renderDashboard(container) {
                 </div>`).join('')}
             </div>
 
-            <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
-                <div class="bg-white rounded-xl border border-slate-200 shadow-sm p-5">
+            <div class="grid grid-cols-1 xl:grid-cols-5 gap-5">
+                <div class="xl:col-span-2 bg-white rounded-xl border border-slate-200 shadow-sm p-5">
                     <h3 class="font-bold text-slate-700 mb-4 text-sm">พนักงานแยกตามหน่วยงาน</h3>
                     <div class="space-y-2.5">${deptRows || '<div class="text-xs text-slate-400 py-4 text-center">ไม่มีข้อมูล</div>'}</div>
                 </div>
-                <div class="bg-white rounded-xl border border-slate-200 shadow-sm p-5">
+                <div class="xl:col-span-3 bg-white rounded-xl border border-slate-200 shadow-sm p-5">
                     <div class="flex justify-between items-center mb-4">
                         <h3 class="font-bold text-slate-700 text-sm">กิจกรรม Admin ล่าสุด</h3>
                         <span class="text-[10px] bg-slate-100 text-slate-500 px-2 py-0.5 rounded">${d.auditToday ?? 0} รายการวันนี้</span>
@@ -1525,7 +1892,7 @@ async function loadSchedules() {
             lc.innerHTML = `<div class="text-center py-16 text-slate-400 border border-dashed rounded-xl bg-slate-50 text-sm">ไม่มีกำหนดการในเดือนนี้ — กำหนด Rotation แล้วกดสร้าง Sessions</div>`;
         } else {
             const grouped = data.reduce((acc, cur) => {
-                const d = (cur.ScheduledDate||'').split('T')[0];
+                const d = _dateInputValue(cur.ScheduledDate || cur.PatrolDate);
                 if (!acc[d]) acc[d] = [];
                 acc[d].push(cur); return acc;
             }, {});
@@ -1551,12 +1918,21 @@ async function loadSchedules() {
                             const sc    = statusBg[item.Status] || 'bg-slate-100 text-slate-500';
                             const color = isCancelled ? '#94a3b8' : (item.TeamColor || '#6366f1');
                             const round = roundLabel[item.PatrolRound] || '';
+                            const scheduleDate = _dateInputValue(item.ScheduledDate || item.PatrolDate);
+                            const editArgs = [
+                                item.id,
+                                scheduleDate,
+                                item.TeamName || '',
+                                item.AreaName || '',
+                                item.PatrolRound || 1,
+                                item.Status || 'Pending',
+                            ].map(v => escHtml(JSON.stringify(v))).join(',');
                             return `
                             <div class="p-2.5 rounded-lg border flex justify-between items-center gap-2 transition-all ${isCancelled ? 'bg-slate-50 border-slate-200 opacity-60' : 'bg-slate-50 border-slate-100'}">
                                 <div class="flex items-center gap-2 flex-1 min-w-0">
                                     <span class="w-2.5 h-2.5 rounded-full flex-shrink-0" style="background:${color}"></span>
-                                    <span class="font-semibold text-xs truncate ${isCancelled ? 'line-through text-slate-400' : 'text-slate-700'}">${item.TeamName||'-'}</span>
-                                    ${item.AreaName && !isCancelled ? `<span class="text-[10px] text-slate-400 truncate hidden sm:inline">${item.AreaName}</span>` : ''}
+                                    <span class="font-semibold text-xs truncate ${isCancelled ? 'line-through text-slate-400' : 'text-slate-700'}">${escHtml(item.TeamName||'-')}</span>
+                                    ${item.AreaName && !isCancelled ? `<span class="text-[10px] text-slate-400 truncate hidden sm:inline">${escHtml(item.AreaName)}</span>` : ''}
                                     ${isCancelled ? `<span class="text-[10px] text-slate-400 italic">ยกเลิกแล้ว</span>` : ''}
                                 </div>
                                 <div class="flex items-center gap-1.5 flex-shrink-0">
@@ -1568,7 +1944,7 @@ async function loadSchedules() {
                                             : `<svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M18.364 18.364A9 9 0 005.636 5.636m12.728 12.728A9 9 0 015.636 5.636m12.728 12.728L5.636 5.636"/></svg>`
                                         }
                                     </button>
-                                    <button onclick="window.editSchedule('${item.id}','${(item.ScheduledDate||'').split('T')[0]}','${item.TeamName||''}','${item.AreaName||''}',${item.PatrolRound||1})" class="text-slate-300 hover:text-blue-500 p-1 transition-colors" title="แก้ไขวันที่">
+                                    <button onclick="window.editSchedule(${editArgs})" class="text-slate-300 hover:text-blue-500 p-1 transition-colors" title="แก้ไขวันที่">
                                         <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"/></svg>
                                     </button>
                                     <button onclick="deleteSchedule('${item.id}')" class="text-slate-300 hover:text-red-500 p-1 transition-colors" title="ลบ">
@@ -1593,7 +1969,7 @@ function initCalendar(eventsData) {
         const bg = item.TeamColor || statusColor[item.Status] || '#6366f1';
         return {
             title: item.TeamName + (item.AreaName ? ` · ${item.AreaName}` : ''),
-            start: (item.ScheduledDate||'').split('T')[0],
+            start: _dateInputValue(item.ScheduledDate || item.PatrolDate),
             backgroundColor: bg,
             borderColor:     bg,
             extendedProps: { status: item.Status, id: item.id },
@@ -1623,19 +1999,34 @@ window.deleteSchedule = async (id) => {
     } catch (err) { showError(err.message); }
 };
 
-window.editSchedule = function(id, currentDate, teamName, areaName, round) {
-    const statusOpts = ['Pending','Completed','Missed'].map(s =>
-        `<option value="${s}">${s}</option>`
+function _dateInputValue(value) {
+    if (!value) return '';
+    const raw = String(value).trim();
+    const isoMatch = raw.match(/^(\d{4}-\d{2}-\d{2})/);
+    if (isoMatch) return isoMatch[1];
+    const thMatch = raw.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+    if (thMatch) {
+        const [, day, month, year] = thMatch;
+        return `${year}-${month.padStart(2, '0')}-${day.padStart(2, '0')}`;
+    }
+    const parsed = new Date(raw);
+    return Number.isNaN(parsed.getTime()) ? '' : parsed.toISOString().slice(0, 10);
+}
+
+window.editSchedule = function(id, currentDate, teamName, areaName, round, currentStatus = 'Pending') {
+    const normalizedDate = _dateInputValue(currentDate);
+    const statusOpts = ['Pending','Completed','Missed','Cancelled'].map(s =>
+        `<option value="${s}" ${s === currentStatus ? 'selected' : ''}>${s}</option>`
     ).join('');
     openModal('แก้ไข Session', `
     <div class="space-y-4">
         <div class="bg-slate-50 rounded-xl px-4 py-3 text-sm text-slate-600 space-y-0.5">
-            <p class="font-semibold text-slate-800">${teamName}</p>
-            <p class="text-xs text-slate-400">${areaName ? 'พื้นที่: '+areaName+' · ' : ''}รอบ ${round}</p>
+            <p class="font-semibold text-slate-800">${escHtml(teamName)}</p>
+            <p class="text-xs text-slate-400">${areaName ? `พื้นที่: ${escHtml(areaName)} · ` : ''}รอบ ${escHtml(round)}</p>
         </div>
         <div>
             <label class="block text-sm font-semibold text-slate-700 mb-1.5">วันที่เดิน <span class="text-red-500">*</span></label>
-            <input type="date" id="edit-session-date" value="${currentDate}" class="form-input w-full">
+            <input type="date" id="edit-session-date" value="${normalizedDate}" class="form-input w-full">
         </div>
         <div>
             <label class="block text-sm font-semibold text-slate-700 mb-1.5">สถานะ</label>
@@ -1643,7 +2034,7 @@ window.editSchedule = function(id, currentDate, teamName, areaName, round) {
         </div>
         <div class="flex justify-end gap-3 pt-3 border-t border-slate-100">
             <button type="button" onclick="window.closeModal&&window.closeModal()" class="btn btn-secondary px-5">ยกเลิก</button>
-            <button type="button" onclick="window._doEditSchedule(${id},this)" class="btn btn-primary px-5">บันทึก</button>
+            <button type="button" onclick="window._doEditSchedule(${escHtml(JSON.stringify(id))},this)" class="btn btn-primary px-5">บันทึก</button>
         </div>
     </div>`, 'max-w-sm');
 };
@@ -3412,6 +3803,9 @@ async function loadPositionsList() {
             <li class="group flex items-center gap-2 p-2 hover:bg-slate-50 rounded-lg transition-colors border border-transparent hover:border-slate-100">
                 <span class="text-[10px] text-slate-400 w-4 font-mono shrink-0">${i+1}</span>
                 <span class="text-xs font-medium text-slate-700 flex-1 truncate">${item.Name}</span>
+                ${_emailRequirementRule.requiredPositionIds.includes(Number(item.id))
+                    ? `<span class="text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-emerald-100 text-emerald-700 flex-shrink-0 whitespace-nowrap">Email</span>`
+                    : ''}
                 ${item.IsSupervisorPatrol
                     ? `<span class="text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-amber-100 text-amber-700 flex-shrink-0 whitespace-nowrap">Self-Patrol</span>`
                     : ''}
@@ -3433,6 +3827,81 @@ async function loadPositionsList() {
             </li>`).join('');
     } catch { _masterQuality.positions = []; _renderMasterQuality(); listEl.innerHTML = `<li class="text-center text-red-400 text-xs py-4">โหลดไม่ได้</li>`; }
 }
+
+async function loadEmailRequirementRules() {
+    const body = document.getElementById('email-rule-body');
+    const count = document.getElementById('email-rule-count');
+    if (!body) return;
+    try {
+        const res = await API.get('/admin/email-requirement-rules');
+        if (!res.success) throw new Error(res.message);
+        _emailRequirementRule = {
+            positions: res.data?.positions || [],
+            requiredPositionIds: (res.data?.requiredPositionIds || []).map(Number),
+            isUsingDefault: !!res.data?.isUsingDefault,
+        };
+        renderEmailRequirementRules();
+        loadPositionsList();
+    } catch (err) {
+        if (count) count.textContent = 'โหลดไม่ได้';
+        body.innerHTML = `<div class="text-xs text-red-500">ไม่สามารถโหลด Email Requirement Rules ได้: ${escHtml(err?.message || err)}</div>`;
+    }
+}
+
+function renderEmailRequirementRules() {
+    const body = document.getElementById('email-rule-body');
+    const count = document.getElementById('email-rule-count');
+    if (!body) return;
+    const positions = _emailRequirementRule.positions || [];
+    const selected = new Set((_emailRequirementRule.requiredPositionIds || []).map(Number));
+    if (count) count.textContent = `${selected.size} ตำแหน่งที่ควรมีอีเมล`;
+    if (!positions.length) {
+        body.innerHTML = emptyState('ยังไม่มี Master Position', 'เพิ่มตำแหน่งในข้อมูลอ้างอิงก่อนตั้งค่า Email Requirement Rules');
+        return;
+    }
+    body.innerHTML = `
+        <div class="flex flex-col gap-4">
+            <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
+                <p class="text-xs text-slate-500">
+                    ${_emailRequirementRule.isUsingDefault
+                        ? 'กำลังใช้ตำแหน่งเริ่มต้นที่ระบบแนะนำ กดบันทึกเพื่อยืนยันหรือปรับรายการได้'
+                        : 'รายการนี้เป็น config กลางของระบบ Admin สามารถปรับตามโครงสร้างองค์กรได้'}
+                </p>
+                <button type="button" onclick="window._saveEmailRequirementRules()"
+                    class="px-4 py-2 rounded-lg text-xs font-bold text-white bg-emerald-600 hover:bg-emerald-700 transition-colors">
+                    บันทึกกติกา
+                </button>
+            </div>
+            <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
+                ${positions.map(position => `
+                    <label class="flex items-start gap-2 rounded-lg border ${selected.has(Number(position.id)) ? 'border-emerald-200 bg-emerald-50' : 'border-slate-200 bg-slate-50'} px-3 py-2 cursor-pointer hover:border-emerald-200 transition-colors">
+                        <input type="checkbox" class="email-rule-position mt-0.5 rounded border-slate-300 text-emerald-600 focus:ring-emerald-500"
+                            value="${position.id}" ${selected.has(Number(position.id)) ? 'checked' : ''}>
+                        <span class="text-xs font-medium text-slate-700 leading-snug">${escHtml(position.Name || '')}</span>
+                    </label>`).join('')}
+            </div>
+        </div>`;
+}
+
+window._saveEmailRequirementRules = async () => {
+    const positionIds = [...document.querySelectorAll('.email-rule-position:checked')]
+        .map(input => Number(input.value))
+        .filter(id => Number.isInteger(id) && id > 0);
+    try {
+        const res = await API.put('/admin/email-requirement-rules', { positionIds });
+        if (!res.success) throw new Error(res.message);
+        _emailRequirementRule = {
+            positions: res.data?.positions || _emailRequirementRule.positions,
+            requiredPositionIds: (res.data?.requiredPositionIds || positionIds).map(Number),
+            isUsingDefault: !!res.data?.isUsingDefault,
+        };
+        showToast('บันทึกกติกาตำแหน่งที่ควรมีอีเมลแล้ว', 'success');
+        renderEmailRequirementRules();
+        loadPositionsList();
+    } catch (err) {
+        showError(err?.message || 'บันทึก Email Requirement Rules ไม่สำเร็จ');
+    }
+};
 
 window.toggleSupervisorPatrol = async (id) => {
     try {
@@ -3634,105 +4103,413 @@ window.deleteMasterData = async (type, id, name) => {
 // =============================================================================
 // TAB: EMPLOYEES
 // =============================================================================
+const EMP_COMPANY_EMAIL_DOMAIN = '@thaisummit-harness.co.th';
+
+function _normalizeEmpCompanyEmail(value) {
+    return String(value || '').trim().toLowerCase();
+}
+
+function _validateEmpCompanyEmail(body) {
+    const email = _normalizeEmpCompanyEmail(body.CompanyEmail);
+    body.CompanyEmail = email;
+    if (!email) return true;
+    const ok = /^[^\s@]+@thaisummit-harness\.co\.th$/i.test(email);
+    if (!ok) showError(`Company Email ต้องลงท้ายด้วย ${EMP_COMPANY_EMAIL_DOMAIN}`);
+    return ok;
+}
+
 async function renderEmployeesTab(container) {
     _empPage = 1; _empSearch = '';
+    _empDeptFilter = 'all';
+    _empUnitFilter = 'all';
+    _empSafetyUnitFilter = 'all';
+    _empEmailReviewSearch = '';
+    _empEmailReviewDept = 'all';
+    _empEmailReviewPosition = 'all';
+    _empEmailReviewStatus = 'all';
     container.innerHTML = `
-    <div class="animate-fade-in space-y-4">
-        <div class="ds-filter-bar flex flex-col sm:flex-row gap-3 items-start sm:items-center justify-between">
-            <div class="flex gap-2 flex-1 w-full sm:max-w-sm">
-                <input type="text" id="emp-search-input" placeholder="ค้นหาชื่อ / รหัส / หน่วยงาน..."
-                    class="form-input w-full rounded-lg text-sm border-slate-200"
-                    oninput="window._empSearch(this.value)">
+    <div class="animate-fade-in space-y-5">
+        <div id="emp-email-readiness"></div>
+        <section class="rounded-xl border border-slate-200 bg-white overflow-hidden shadow-sm">
+            <div class="p-4 border-b border-slate-100">
+                <div class="flex flex-col gap-1 lg:flex-row lg:items-end lg:justify-between">
+                    <div>
+                        <p class="text-[10px] font-bold uppercase tracking-widest text-emerald-600">Employee Master</p>
+                        <h3 class="mt-1 text-sm font-bold text-slate-800">ข้อมูลพนักงานทั้งหมด</h3>
+                        <p class="mt-1 text-xs text-slate-500">ใช้เพิ่ม แก้ไข นำเข้า และส่งออกข้อมูลพนักงานหลักของระบบ</p>
+                    </div>
+                    <div id="emp-toolbar-summary" class="flex flex-wrap gap-2 text-[11px] text-slate-500"></div>
+                </div>
+                <div class="ds-filter-bar mt-4 flex flex-col xl:flex-row gap-3 items-stretch xl:items-center justify-between">
+                    <div class="grid grid-cols-1 md:grid-cols-[minmax(220px,1fr),200px,180px,210px,auto] gap-2 flex-1 w-full">
+                        <input type="text" id="emp-search-input" placeholder="ค้นหาชื่อ / รหัส / หน่วยงาน..."
+                            class="form-input w-full rounded-lg text-sm border-slate-200"
+                            oninput="window._empSearch(this.value)">
+                        <select id="emp-dept-filter" class="form-input w-full rounded-lg text-sm border-slate-200"
+                            onchange="window._empDepartmentFilter(this.value)">
+                            <option value="all">ทุกแผนก</option>
+                        </select>
+                        <select id="emp-unit-filter" class="form-input w-full rounded-lg text-sm border-slate-200"
+                            onchange="window._empUnitFilterChange(this.value)">
+                            <option value="all">ทุก Unit</option>
+                        </select>
+                        <select id="emp-safety-unit-filter" class="form-input w-full rounded-lg text-sm border-slate-200"
+                            onchange="window._empSafetyUnitFilterChange(this.value)">
+                            <option value="all">All Safety Unit Status</option>
+                            <option value="missing">Missing Safety Unit</option>
+                        </select>
+                        <button type="button" onclick="window._empClearFilters()"
+                            class="px-3 py-2 rounded-lg border border-slate-200 bg-white text-xs font-bold text-slate-600 hover:bg-slate-50">
+                            ล้างตัวกรอง
+                        </button>
+                    </div>
+                    <div class="flex gap-2 flex-wrap xl:justify-end">
+                        <button onclick="window._exportEmpExcel()" class="btn bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs px-3 py-2 rounded-lg font-medium flex items-center gap-1.5 transition-colors">
+                            <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/></svg>
+                            Export Excel
+                        </button>
+                        <button onclick="window._openImportModal()" class="btn bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs px-3 py-2 rounded-lg font-medium flex items-center gap-1.5 transition-colors">
+                            <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12"/></svg>
+                            Import Excel
+                        </button>
+                        <button onclick="window._openAddEmpModal()" class="btn bg-emerald-600 hover:bg-emerald-700 text-white text-xs px-4 py-2 rounded-lg font-medium flex items-center gap-1.5 transition-colors shadow-sm shadow-emerald-100">
+                            <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/></svg>
+                            เพิ่มพนักงาน
+                        </button>
+                    </div>
+                </div>
             </div>
-            <div class="flex gap-2 flex-wrap">
-                <button onclick="window._exportEmpExcel()" class="btn bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs px-3 py-2 rounded-lg font-medium flex items-center gap-1.5 transition-colors">
-                    <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/></svg>
-                    Export Excel
-                </button>
-                <button onclick="window._openImportModal()" class="btn bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs px-3 py-2 rounded-lg font-medium flex items-center gap-1.5 transition-colors">
-                    <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12"/></svg>
-                    Import Excel
-                </button>
-                <button onclick="window._openAddEmpModal()" class="btn bg-emerald-600 hover:bg-emerald-700 text-white text-xs px-4 py-2 rounded-lg font-medium flex items-center gap-1.5 transition-colors shadow-sm shadow-emerald-100">
-                    <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/></svg>
-                    เพิ่มพนักงาน
-                </button>
+            <div class="ds-table-wrap border-0 rounded-none">
+                <div id="emp-table-wrap">
+                    <div class="py-16 text-center text-slate-400 text-sm">กำลังโหลด...</div>
+                </div>
             </div>
-        </div>
-        <div id="emp-quality-strip" class="grid grid-cols-2 lg:grid-cols-5 gap-3"></div>
-        <div class="ds-table-wrap">
-            <div id="emp-table-wrap">
-                <div class="py-16 text-center text-slate-400 text-sm">กำลังโหลด...</div>
-            </div>
-        </div>
+        </section>
         <div id="emp-pagination" class="flex justify-between items-center"></div>
     </div>`;
 
     window._empSearch = (q) => { _empSearch = q.toLowerCase(); _empPage = 1; _renderEmpTable(); };
+    window._empDepartmentFilter = (dept) => {
+        _empDeptFilter = dept || 'all';
+        _empUnitFilter = 'all';
+        _empPage = 1;
+        _renderEmpFilterControls();
+        _renderEmpTable();
+    };
+    window._empUnitFilterChange = (unit) => {
+        _empUnitFilter = unit || 'all';
+        _empPage = 1;
+        _renderEmpTable();
+    };
+    window._empSafetyUnitFilterChange = (status) => {
+        _empSafetyUnitFilter = status || 'all';
+        _empPage = 1;
+        _renderEmpTable();
+    };
+    window._empClearFilters = () => {
+        _empSearch = '';
+        _empDeptFilter = 'all';
+        _empUnitFilter = 'all';
+        _empSafetyUnitFilter = 'all';
+        _empPage = 1;
+        const search = document.getElementById('emp-search-input');
+        if (search) search.value = '';
+        _renderEmpFilterControls();
+        _renderEmpTable();
+    };
 
-    const [empsRes, deptsRes, posRes, unitsRes] = await Promise.all([
+    const [empsRes, deptsRes, posRes, unitsRes, emailReadinessRes] = await Promise.all([
         API.get('/employees').catch(() => ({ data: [] })),
         API.get('/master/departments').catch(() => ({ data: [] })),
         API.get('/master/positions').catch(() => ({ data: [] })),
         API.get('/admin/org/units').catch(() => ({ data: [] })),
+        API.get('/admin/email-readiness').catch(() => ({ data: { summary: {}, rows: [], rule: {} } })),
     ]);
     _empCache  = empsRes?.data   || [];
     _deptCache = deptsRes?.data  || [];
     _posCache  = posRes?.data    || [];
     _unitCache = unitsRes?.data  || [];
+    _empEmailReadiness = emailReadinessRes?.data || { summary: {}, rows: [], rule: {} };
+    _syncEmpEmailReadinessRows();
+    _renderEmpFilterControls();
     _renderEmpTable();
+}
+
+function _syncEmpEmailReadinessRows() {
+    const readinessMap = new Map((_empEmailReadiness.rows || []).map(row => [String(row.EmployeeID), row]));
+    _empCache = _empCache.map(emp => {
+        const readiness = readinessMap.get(String(emp.EmployeeID));
+        return readiness ? { ...emp, ...readiness } : emp;
+    });
+}
+
+async function _reloadEmpEmailReadiness() {
+    const res = await API.get('/admin/email-readiness').catch(() => ({ data: { summary: {}, rows: [], rule: {} } }));
+    _empEmailReadiness = res?.data || { summary: {}, rows: [], rule: {} };
+    _syncEmpEmailReadinessRows();
+}
+
+function _empEmailStatusMeta(emp) {
+    const status = emp.EmailReadinessStatus || ((emp.CompanyEmail || '').trim() ? 'ready' : 'optional');
+    if (status === 'missing_required') return { label: 'Missing Required Email', className: 'is-pending' };
+    if (status === 'invalid_domain') return { label: 'Invalid Domain', className: 'is-failed' };
+    if (status === 'ready') return { label: emp.IsEmailRequired ? 'Ready' : 'Email Ready', className: 'is-approved' };
+    return { label: 'Optional', className: '' };
+}
+
+function _renderEmpEmailReadiness() {
+    const el = document.getElementById('emp-email-readiness');
+    if (!el) return;
+    const summary = _empEmailReadiness.summary || {};
+    const rows = _empEmailReadiness.rows || [];
+    const missing = rows.filter(row => row.EmailReadinessStatus === 'missing_required');
+    const invalid = rows.filter(row => row.EmailReadinessStatus === 'invalid_domain');
+    const attention = [...missing, ...invalid];
+    const departments = [...new Set(attention.map(row => (row.Department || '').trim()).filter(Boolean))]
+        .sort((a, b) => a.localeCompare(b));
+    const positions = [...new Set(attention.map(row => (row.Position || '').trim()).filter(Boolean))]
+        .sort((a, b) => a.localeCompare(b));
+    const reviewSearch = _empEmailReviewSearch.trim().toLowerCase();
+    const filteredAttention = attention.filter(row => {
+        const statusMatch = _empEmailReviewStatus === 'all' || row.EmailReadinessStatus === _empEmailReviewStatus;
+        const deptMatch = _empEmailReviewDept === 'all' || (row.Department || '') === _empEmailReviewDept;
+        const positionMatch = _empEmailReviewPosition === 'all' || (row.Position || '') === _empEmailReviewPosition;
+        const searchText = [
+            row.EmployeeID,
+            row.EmployeeName,
+            row.Department,
+            row.Unit,
+            row.Position,
+            row.CompanyEmail,
+        ].filter(Boolean).join(' ').toLowerCase();
+        return statusMatch && deptMatch && positionMatch && (!reviewSearch || searchText.includes(reviewSearch));
+    });
+    const requiredEmployees = Number(summary.requiredEmployees || 0);
+    const readyRequired = Number(summary.readyRequired || 0);
+    const readinessPct = requiredEmployees ? Math.round(readyRequired / requiredEmployees * 100) : 100;
+    const positionCount = (_empEmailReadiness.rule?.requiredPositions || []).length;
+    el.innerHTML = `
+        <section class="rounded-xl border border-emerald-100 bg-white overflow-hidden">
+            <div class="p-4 border-b border-slate-100 flex flex-col lg:flex-row lg:items-center lg:justify-between gap-3">
+                <div>
+                    <p class="text-[10px] font-bold uppercase tracking-widest text-emerald-600">Email Readiness</p>
+                    <h3 class="text-sm font-bold text-slate-800 mt-1">ความพร้อมอีเมลของตำแหน่งที่ต้องติดตาม</h3>
+                    <p class="text-xs text-slate-500 mt-1">อิงจาก Employee Master และ Email Requirement Rules ${positionCount ? `จำนวน ${positionCount} ตำแหน่ง` : ''}</p>
+                </div>
+                <button type="button" onclick="window._adminTab('reference')"
+                    class="px-3 py-2 rounded-lg border border-slate-200 text-xs font-bold text-slate-600 hover:bg-slate-50">
+                    จัดการกติกาตำแหน่ง
+                </button>
+            </div>
+            <div class="grid grid-cols-2 lg:grid-cols-4 gap-3 p-4 bg-slate-50/70">
+                ${metricCard('Readiness', `${readinessPct}%`, `${readyRequired}/${requiredEmployees || 0} พร้อมใช้งาน`)}
+                ${metricCard('Required Employees', requiredEmployees, 'พนักงานตามตำแหน่งที่เลือก')}
+                ${metricCard('Missing Email', Number(summary.missingRequired || 0), 'ตำแหน่งที่ควรมีแต่ยังว่าง')}
+                ${metricCard('Invalid Domain', Number(summary.invalidDomain || 0), 'ข้อมูลเดิมที่ต้องแก้')}
+            </div>
+            <div class="p-4">
+                ${attention.length ? `
+                    <div class="grid gap-2 lg:grid-cols-[minmax(220px,1fr)_minmax(180px,220px)_minmax(180px,220px)_minmax(170px,190px)_auto] mb-3">
+                        <input type="search" value="${escHtml(_empEmailReviewSearch)}"
+                            placeholder="ค้นหาชื่อ รหัส หน่วยงาน ตำแหน่ง..."
+                            oninput="window._empEmailReviewSearchChange(this.value)"
+                            class="form-input w-full rounded-lg text-xs border-slate-200">
+                        <select onchange="window._empEmailReviewDepartmentChange(this.value)"
+                            class="form-input w-full rounded-lg text-xs border-slate-200">
+                            <option value="all">ทุกหน่วยงาน</option>
+                            ${departments.map(dept => `<option value="${escHtml(dept)}" ${dept === _empEmailReviewDept ? 'selected' : ''}>${escHtml(dept)}</option>`).join('')}
+                        </select>
+                        <select onchange="window._empEmailReviewPositionChange(this.value)"
+                            class="form-input w-full rounded-lg text-xs border-slate-200">
+                            <option value="all">ทุกตำแหน่ง</option>
+                            ${positions.map(position => `<option value="${escHtml(position)}" ${position === _empEmailReviewPosition ? 'selected' : ''}>${escHtml(position)}</option>`).join('')}
+                        </select>
+                        <select onchange="window._empEmailReviewStatusChange(this.value)"
+                            class="form-input w-full rounded-lg text-xs border-slate-200">
+                            <option value="all" ${_empEmailReviewStatus === 'all' ? 'selected' : ''}>ทุกสถานะ</option>
+                            <option value="missing_required" ${_empEmailReviewStatus === 'missing_required' ? 'selected' : ''}>ยังไม่มีอีเมล</option>
+                            <option value="invalid_domain" ${_empEmailReviewStatus === 'invalid_domain' ? 'selected' : ''}>โดเมนไม่ถูกต้อง</option>
+                        </select>
+                        <button type="button" onclick="window._clearEmpEmailReviewFilters()"
+                            class="px-3 py-2 rounded-lg border border-slate-200 text-xs font-bold text-slate-600 hover:bg-slate-50">
+                            ล้างตัวกรอง
+                        </button>
+                    </div>
+                    <div class="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between mb-2 text-[11px] text-slate-500">
+                        <p>คิวติดตามอีเมลตำแหน่งที่กำหนด</p>
+                        <p>แสดง ${filteredAttention.length.toLocaleString()} จาก ${attention.length.toLocaleString()} รายการที่ต้องตรวจสอบ</p>
+                    </div>
+                    <div class="overflow-auto max-h-[32rem] rounded-lg border border-slate-200">
+                        <table class="w-full text-left text-xs">
+                            <thead class="bg-slate-50 text-slate-400 uppercase">
+                                <tr>
+                                    <th class="px-3 py-2 font-bold">พนักงาน</th>
+                                    <th class="px-3 py-2 font-bold">ตำแหน่ง</th>
+                                    <th class="px-3 py-2 font-bold">หน่วยงาน</th>
+                                    <th class="px-3 py-2 font-bold">สถานะ</th>
+                                    <th class="px-3 py-2 font-bold text-right">จัดการ</th>
+                                </tr>
+                            </thead>
+                            <tbody class="divide-y divide-slate-100">
+                                ${filteredAttention.map(row => `
+                                    <tr>
+                                        <td class="px-3 py-2">
+                                            <p class="font-semibold text-slate-700">${escHtml(row.EmployeeName || '—')}</p>
+                                            <p class="font-mono text-[10px] text-slate-400">${escHtml(row.EmployeeID || '')}</p>
+                                        </td>
+                                        <td class="px-3 py-2 text-slate-600">${escHtml(row.Position || '—')}</td>
+                                        <td class="px-3 py-2 text-slate-600">${escHtml(row.Department || '—')}</td>
+                                        <td class="px-3 py-2">${dsStatusBadge(_empEmailStatusMeta(row).label, { className: _empEmailStatusMeta(row).className })}</td>
+                                        <td class="px-3 py-2 text-right">
+                                            <button type="button" onclick="window._openEditEmpModal('${escHtml(String(row.EmployeeID || ''))}')"
+                                                class="px-2.5 py-1.5 rounded-md border border-slate-200 text-[11px] font-bold text-slate-600 hover:bg-slate-50">
+                                                แก้ไข
+                                            </button>
+                                        </td>
+                                    </tr>`).join('') || `
+                                    <tr>
+                                        <td colspan="5" class="px-3 py-8 text-center text-slate-400">
+                                            ไม่พบรายการตามตัวกรองที่เลือก
+                                        </td>
+                                    </tr>`}
+                            </tbody>
+                        </table>
+                    </div>
+                ` : `<div class="rounded-lg border border-emerald-100 bg-emerald-50 px-4 py-3 text-xs text-emerald-700">ตำแหน่งที่กำหนดไว้พร้อมใช้อีเมลแล้ว</div>`}
+            </div>
+        </section>`;
+}
+
+window._empEmailReviewSearchChange = (value) => {
+    _empEmailReviewSearch = value || '';
+    _renderEmpEmailReadiness();
+};
+window._empEmailReviewDepartmentChange = (value) => {
+    _empEmailReviewDept = value || 'all';
+    _renderEmpEmailReadiness();
+};
+window._empEmailReviewPositionChange = (value) => {
+    _empEmailReviewPosition = value || 'all';
+    _renderEmpEmailReadiness();
+};
+window._empEmailReviewStatusChange = (value) => {
+    _empEmailReviewStatus = value || 'all';
+    _renderEmpEmailReadiness();
+};
+window._clearEmpEmailReviewFilters = () => {
+    _empEmailReviewSearch = '';
+    _empEmailReviewDept = 'all';
+    _empEmailReviewPosition = 'all';
+    _empEmailReviewStatus = 'all';
+    _renderEmpEmailReadiness();
+};
+
+function _empUniqueValues(field, rows = _empCache) {
+    return [...new Set((rows || []).map(row => String(row[field] || '').trim()).filter(Boolean))]
+        .sort((a, b) => a.localeCompare(b, 'th'));
+}
+
+function _empDeptByName(deptName) {
+    const name = String(deptName || '').trim();
+    if (!name) return null;
+    return (_deptCache || []).find(dept => String(dept.Name || '').trim() === name) || null;
+}
+
+function _empUnitsForDept(deptName) {
+    const dept = _empDeptByName(deptName);
+    if (!dept) return [];
+    return (_unitCache || [])
+        .filter(unit => Number(unit.department_id) === Number(dept.id))
+        .filter(unit => String(unit.name || '').trim())
+        .sort((a, b) => String(a.name || '').localeCompare(String(b.name || ''), 'th'));
+}
+
+function _empMissingSafetyUnit(emp) {
+    return _empUnitsForDept(emp?.Department).length > 0 && !String(emp?.Unit || '').trim();
+}
+
+function _empUnitCellHtml(emp) {
+    if (!_empMissingSafetyUnit(emp)) {
+        return emp?.Unit ? escHtml(emp.Unit) : '&mdash;';
+    }
+    const empId = String(emp?.EmployeeID || '').replace(/'/g, "\\'");
+    const unitCount = _empUnitsForDept(emp?.Department).length;
+    return `
+        <div class="flex flex-col gap-1">
+            <span class="inline-flex w-fit items-center rounded-full border border-amber-200 bg-amber-50 px-2 py-0.5 text-[10px] font-bold text-amber-700">Missing Safety Unit</span>
+            <button type="button" onclick="window._openEditEmpModal('${empId}')"
+                class="w-fit rounded-lg border border-emerald-200 bg-emerald-50 px-2 py-1 text-[10px] font-bold text-emerald-700 hover:bg-emerald-100">
+                Set Unit
+            </button>
+            <span class="text-[10px] text-slate-400">${unitCount} option${unitCount === 1 ? '' : 's'} in department</span>
+        </div>`;
+}
+
+function _renderEmpFilterControls() {
+    const deptSel = document.getElementById('emp-dept-filter');
+    const unitSel = document.getElementById('emp-unit-filter');
+    const safetyUnitSel = document.getElementById('emp-safety-unit-filter');
+    if (deptSel) {
+        const depts = _empUniqueValues('Department');
+        deptSel.innerHTML = `<option value="all">ทุกแผนก</option>${depts.map(dept => `<option value="${escHtml(dept)}" ${_empDeptFilter === dept ? 'selected' : ''}>${escHtml(dept)}</option>`).join('')}`;
+        deptSel.value = _empDeptFilter;
+    }
+    if (unitSel) {
+        const scopedRows = _empDeptFilter === 'all'
+            ? _empCache
+            : _empCache.filter(row => String(row.Department || '').trim() === _empDeptFilter);
+        const units = _empUniqueValues('Unit', scopedRows);
+        unitSel.innerHTML = `<option value="all">ทุก Unit</option>${units.map(unit => `<option value="${escHtml(unit)}" ${_empUnitFilter === unit ? 'selected' : ''}>${escHtml(unit)}</option>`).join('')}`;
+        unitSel.value = units.includes(_empUnitFilter) ? _empUnitFilter : 'all';
+        _empUnitFilter = unitSel.value;
+        unitSel.disabled = !units.length;
+    }
+    if (safetyUnitSel) {
+        safetyUnitSel.value = _empSafetyUnitFilter;
+    }
+}
+
+function _empFilteredRows() {
+    return _empCache.filter(e => {
+        const textMatch = !_empSearch ||
+            (e.EmployeeName||'').toLowerCase().includes(_empSearch) ||
+            (e.EmployeeID  ||'').toLowerCase().includes(_empSearch) ||
+            (e.Department  ||'').toLowerCase().includes(_empSearch) ||
+            (e.Unit        ||'').toLowerCase().includes(_empSearch) ||
+            (e.CompanyEmail ||'').toLowerCase().includes(_empSearch) ||
+            (e.Position    ||'').toLowerCase().includes(_empSearch);
+        const deptMatch = _empDeptFilter === 'all' || String(e.Department || '').trim() === _empDeptFilter;
+        const unitMatch = _empUnitFilter === 'all' || String(e.Unit || '').trim() === _empUnitFilter;
+        const safetyUnitMatch = _empSafetyUnitFilter !== 'missing' || _empMissingSafetyUnit(e);
+        return textMatch && deptMatch && unitMatch && safetyUnitMatch;
+    });
 }
 
 function _renderEmpTable() {
     const wrap   = document.getElementById('emp-table-wrap');
     const pagEl  = document.getElementById('emp-pagination');
-    const qEl    = document.getElementById('emp-quality-strip');
     if (!wrap) return;
+    _renderEmpEmailReadiness();
 
-    const filtered = _empCache.filter(e =>
-        !_empSearch ||
-        (e.EmployeeName||'').toLowerCase().includes(_empSearch) ||
-        (e.EmployeeID  ||'').toLowerCase().includes(_empSearch) ||
-        (e.Department  ||'').toLowerCase().includes(_empSearch) ||
-        (e.Position    ||'').toLowerCase().includes(_empSearch)
-    );
-
-    if (qEl) {
-        const total = _empCache.length;
-        const missingDept = _empCache.filter(e => !(e.Department || '').trim()).length;
-        const missingPosition = _empCache.filter(e => !(e.Position || '').trim()).length;
-        const missingName = _empCache.filter(e => !(e.EmployeeName || '').trim()).length;
-        const missingCore = missingDept + missingPosition + missingName;
+    const filtered = _empFilteredRows();
+    const toolbarSummary = document.getElementById('emp-toolbar-summary');
+    if (toolbarSummary) {
         const adminCount = _empCache.filter(e => String(e.Role || '').toLowerCase() === 'admin').length;
-        const deptCount = new Set(_empCache.map(e => (e.Department || '').trim()).filter(Boolean)).size;
-        const unitAssigned = _empCache.filter(e => (e.Unit || '').trim()).length;
-        const unitPct = total ? Math.round(unitAssigned / total * 100) : 0;
-        qEl.innerHTML = `
-        <button type="button" onclick="document.getElementById('emp-search-input')?.focus()"
-            class="text-left ds-metric-card ${missingCore ? 'is-warn' : 'is-good'} hover:shadow-sm transition-shadow">
-            <p class="ds-metric-label">Data Quality</p>
-            <p class="ds-metric-value">${missingCore ? 'Review' : 'Ready'}</p>
-            <p class="ds-metric-hint">${missingCore} missing core fields</p>
-        </button>
-        ${metricCard('Employees', total.toLocaleString(), `${filtered.length.toLocaleString()} in current view`)}
-        <button type="button" onclick="window._adminTab('reference')"
-            class="text-left ds-metric-card ${missingDept ? 'is-warn' : ''} hover:shadow-sm transition-shadow">
-            <p class="text-[10px] font-bold uppercase ${missingDept ? 'text-amber-600' : 'text-slate-500'}">Department Coverage</p>
-            <p class="mt-1 text-sm font-black ${missingDept ? 'text-amber-700' : 'text-slate-700'}">${deptCount}</p>
-            <p class="mt-1 text-[11px] text-slate-500">${missingDept} missing dept</p>
-        </button>
-        <button type="button" onclick="window._adminTab('reference')"
-            class="text-left ds-metric-card ${missingPosition ? 'is-warn' : ''} hover:shadow-sm transition-shadow">
-            <p class="text-[10px] font-bold uppercase ${missingPosition ? 'text-amber-600' : 'text-slate-500'}">Position Coverage</p>
-            <p class="mt-1 text-sm font-black ${missingPosition ? 'text-amber-700' : 'text-slate-700'}">${missingPosition} gap</p>
-            <p class="mt-1 text-[11px] text-slate-500">${unitPct}% unit assigned</p>
-        </button>
-        <button type="button" onclick="window._adminTab('permissions')"
-            class="text-left ds-metric-card ${adminCount > 1 ? 'is-risk' : ''} hover:shadow-sm transition-shadow">
-            <p class="text-[10px] font-bold uppercase ${adminCount > 1 ? 'text-red-600' : 'text-slate-500'}">Admin Accounts</p>
-            <p class="mt-1 text-sm font-black ${adminCount > 1 ? 'text-red-700' : 'text-slate-700'}">${adminCount}</p>
-            <p class="mt-1 text-[11px] text-slate-500">Review privilege scope</p>
-        </button>`;
+        const missingCore = _empCache.filter(e => !(e.Department || '').trim() || !(e.Position || '').trim()).length;
+        const emailIssues = _empCache.filter(e => ['missing_required', 'invalid_domain'].includes(e.EmailReadinessStatus)).length;
+        const missingSafetyUnits = _empCache.filter(_empMissingSafetyUnit).length;
+        toolbarSummary.innerHTML = [
+            ['Employees', _empCache.length.toLocaleString()],
+            ['Filtered', filtered.length.toLocaleString()],
+            ['Missing SU', missingSafetyUnits.toLocaleString()],
+            ['Email review', emailIssues.toLocaleString()],
+            ['Admin', adminCount.toLocaleString()],
+            ['Profile gaps', missingCore.toLocaleString()],
+        ].map(([label, value]) => `
+            <span class="inline-flex items-center gap-1 rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1">
+                <strong class="text-slate-700">${value}</strong>${label}
+            </span>
+        `).join('');
     }
 
     const totalPages = Math.max(1, Math.ceil(filtered.length / EMP_PER_PAGE));
@@ -3753,13 +4530,16 @@ function _renderEmpTable() {
     };
 
     wrap.innerHTML = `
-    <table class="ds-table text-sm">
+    <table class="ds-table min-w-[1200px] text-sm">
         <thead>
             <tr class="bg-slate-50 border-b border-slate-200 text-left">
                 <th class="px-4 py-3 text-[11px] font-bold text-slate-500 uppercase">รหัส</th>
                 <th class="px-4 py-3 text-[11px] font-bold text-slate-500 uppercase">ชื่อ-นามสกุล</th>
                 <th class="px-4 py-3 text-[11px] font-bold text-slate-500 uppercase">หน่วยงาน</th>
                 <th class="px-4 py-3 text-[11px] font-bold text-slate-500 uppercase">ตำแหน่ง</th>
+                <th class="px-4 py-3 text-[11px] font-bold text-slate-500 uppercase">Unit</th>
+                <th class="px-4 py-3 text-[11px] font-bold text-slate-500 uppercase">Company Email</th>
+                <th class="px-4 py-3 text-[11px] font-bold text-slate-500 uppercase">Email Readiness</th>
                 <th class="px-4 py-3 text-[11px] font-bold text-slate-500 uppercase">Role</th>
                 <th class="px-4 py-3 text-[11px] font-bold text-slate-500 uppercase text-right">จัดการ</th>
             </tr>
@@ -3771,6 +4551,9 @@ function _renderEmpTable() {
                 <td class="px-4 py-3 font-semibold text-slate-800 text-sm">${emp.EmployeeName||'—'}</td>
                 <td class="px-4 py-3 text-slate-600 text-xs">${emp.Department||'—'}</td>
                 <td class="px-4 py-3 text-slate-600 text-xs">${emp.Position||'—'}</td>
+                <td class="px-4 py-3 text-slate-600 text-xs">${_empUnitCellHtml(emp)}</td>
+                <td class="px-4 py-3 text-slate-600 text-xs">${emp.CompanyEmail ? `<span class="font-mono">${emp.CompanyEmail}</span>` : '<span class="text-slate-300">Optional</span>'}</td>
+                <td class="px-4 py-3">${dsStatusBadge(_empEmailStatusMeta(emp).label, { className: _empEmailStatusMeta(emp).className })}</td>
                 <td class="px-4 py-3">${roleBadge(emp.Role)}</td>
                 <td class="px-4 py-3 text-right">
                     <div class="flex gap-1 justify-end opacity-0 group-hover:opacity-100 transition-opacity">
@@ -3809,12 +4592,15 @@ window._empChangePage = (p) => { _empPage = p; _renderEmpTable(); };
 
 window._exportEmpExcel = () => {
     if (!window.XLSX) { showError('ไม่พบ SheetJS library'); return; }
-    const data = _empCache.map(e => ({
+    const data = _empFilteredRows().map(e => ({
         'รหัสพนักงาน': e.EmployeeID,
         'ชื่อ-นามสกุล': e.EmployeeName,
         'หน่วยงาน':    e.Department,
         'Unit':        e.Unit,
+        'SafetyUnitStatus': _empMissingSafetyUnit(e) ? 'Missing Safety Unit' : (String(e.Unit || '').trim() ? 'Assigned' : 'Not Required'),
+        'SafetyUnitOptions': _empUnitsForDept(e.Department).map(unit => unit.name).join(' | '),
         'ตำแหน่ง':     e.Position,
+        'CompanyEmail': e.CompanyEmail || '',
         'Role':        e.Role,
     }));
     const ws = XLSX.utils.json_to_sheet(data);
@@ -3879,6 +4665,14 @@ function _empFormFields(emp = {}) {
             <label class="block text-xs font-bold text-slate-500 uppercase mb-1">Role (สิทธิ์)</label>
             <select name="Role" class="form-select w-full rounded-lg text-sm">${rOpts}</select>
         </div>
+        <div class="sm:col-span-2">
+            <label class="block text-xs font-bold text-slate-500 uppercase mb-1">Company Email</label>
+            <input type="email" name="CompanyEmail" class="form-input w-full rounded-lg text-sm"
+                value="${emp.CompanyEmail || ''}" placeholder="name@thaisummit-harness.co.th" autocomplete="email">
+            <p class="mt-1 text-[11px] text-slate-400">
+                เว้นว่างได้ หากกรอกต้องใช้อีเมลบริษัทที่ลงท้ายด้วย ${EMP_COMPANY_EMAIL_DOMAIN}
+            </p>
+        </div>
     </div>`;
 }
 
@@ -3895,12 +4689,14 @@ window._openAddEmpModal = () => {
         document.getElementById('emp-add-form')?.addEventListener('submit', async (e) => {
             e.preventDefault();
             const body = Object.fromEntries(new FormData(e.target).entries());
+            if (!_validateEmpCompanyEmail(body)) return;
             try {
                 await API.post('/admin/employee/create', body);
                 showToast('เพิ่มพนักงานสำเร็จ', 'success');
                 closeModal();
                 const res = await API.get('/employees').catch(() => ({ data: [] }));
                 _empCache = res?.data || [];
+                await _reloadEmpEmailReadiness();
                 _renderEmpTable();
             } catch (err) { showError(err?.message || 'ไม่สามารถเพิ่มพนักงานได้'); }
         });
@@ -3922,12 +4718,14 @@ window._openEditEmpModal = (empId) => {
         document.getElementById('emp-edit-form')?.addEventListener('submit', async (e) => {
             e.preventDefault();
             const body = Object.fromEntries(new FormData(e.target).entries());
+            if (!_validateEmpCompanyEmail(body)) return;
             try {
                 await API.put(`/admin/employee/${empId}`, body);
                 showToast('อัปเดตข้อมูลสำเร็จ', 'success');
                 closeModal();
                 const idx = _empCache.findIndex(e => e.EmployeeID === empId);
                 if (idx !== -1) _empCache[idx] = { ..._empCache[idx], ...body };
+                await _reloadEmpEmailReadiness();
                 _renderEmpTable();
             } catch (err) { showError(err?.message || 'ไม่สามารถอัปเดตข้อมูลได้'); }
         });
@@ -4007,7 +4805,8 @@ window._openImportModal = () => {
         <div class="space-y-4">
             <div class="bg-amber-50 border border-amber-200 rounded-xl p-3 text-xs text-amber-800">
                 <p class="font-bold mb-1">คอลัมน์ที่รองรับ:</p>
-                <code class="block bg-amber-100 px-2 py-1 rounded">EmployeeID, EmployeeName, Department, Unit, Position, Team, Role</code>
+                <code class="block bg-amber-100 px-2 py-1 rounded">EmployeeID, EmployeeName, Department, Unit, Position, Team, CompanyEmail, Role</code>
+                <p class="mt-1">CompanyEmail เว้นว่างได้ หากกรอกต้องใช้อีเมลบริษัทที่ลงท้ายด้วย ${EMP_COMPANY_EMAIL_DOMAIN}</p>
                 <p class="mt-1.5">ถ้า EmployeeID ซ้ำ จะอัปเดตข้อมูลเดิม (Upsert) · ค่าใน Department / Position / Team ต้องตรงกับ master</p>
             </div>
             <button onclick="window._downloadImportTemplate()" class="w-full flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl border-2 border-dashed border-emerald-300 text-emerald-700 text-xs font-bold hover:bg-emerald-50 transition-all">
@@ -4056,6 +4855,8 @@ window._doImport = async () => {
 
         const fd = new FormData();
         fd.append('file', input.files[0]);
+        fd.append('rows', JSON.stringify(data));
+        fd.append('rowsBase64', btoa(unescape(encodeURIComponent(JSON.stringify(data)))));
         const res = await API.post('/admin/employee/import', fd);
 
         // ── Build result UI ──────────────────────────────────────────────
@@ -4107,6 +4908,7 @@ window._doImport = async () => {
         showToast(`Import สำเร็จ ${ok} รายการ${warn ? ` (คำเตือน ${warn})` : ''}`, err ? 'warning' : 'success');
         const empsRes = await API.get('/employees').catch(() => ({ data: [] }));
         _empCache = empsRes?.data || [];
+        await _reloadEmpEmailReadiness();
         _renderEmpTable();
     } catch (err) {
         resEl.className = 'text-sm text-red-600 bg-red-50 p-3 rounded-xl border border-red-200';
@@ -4122,17 +4924,18 @@ window._downloadImportTemplate = async () => {
         const wb   = XLSX.utils.book_new();
 
         // ── Sheet 1: Template ────────────────────────────────────────────
-        const headers = ['EmployeeID', 'EmployeeName', 'Department', 'Unit', 'Position', 'Role'];
+        const headers = ['EmployeeID', 'EmployeeName', 'Department', 'Unit', 'Position', 'CompanyEmail', 'Role'];
         const example = [
             '012345',
             'ชื่อ นามสกุล',
             tmpl.departments[0] || '',
             tmpl.units[0]       || '',
             tmpl.positions[0]   || '',
+            'name@thaisummit-harness.co.th',
             'User',
         ];
         const ws1 = XLSX.utils.aoa_to_sheet([headers, example]);
-        ws1['!cols'] = [14, 24, 30, 30, 24, 10].map(w => ({ wch: w }));
+        ws1['!cols'] = [14, 24, 30, 30, 24, 34, 10].map(w => ({ wch: w }));
         XLSX.utils.book_append_sheet(wb, ws1, 'พนักงาน');
 
         // ── Sheet 2: Reference ───────────────────────────────────────────
@@ -4208,17 +5011,30 @@ async function renderSystemHealth(container) {
         const activeSignals = (readiness.signals || []).filter(s => s.count > 0);
         const signalList = activeSignals.length
             ? activeSignals.map(s => `
-                <div class="flex items-start justify-between gap-3 py-2 border-b border-slate-100 last:border-0">
+                <button type="button" onclick="window._adminHealthDrilldown&&window._adminHealthDrilldown('${escHtml(s.key || '')}')"
+                    class="w-full text-left flex items-start justify-between gap-3 py-2 border-b border-slate-100 last:border-0 hover:bg-slate-50 rounded-lg px-2 transition-colors">
                     <div>
                         <p class="text-xs font-bold text-slate-700">${escHtml(s.label || s.key || 'Signal')}</p>
                         <p class="text-[11px] text-slate-400">${escHtml((s.detail || []).slice(0, 3).map(x => typeof x === 'string' ? x : (x.NoticeNo || x.Department || x.id || '')).filter(Boolean).join(', ') || 'Needs admin review')}</p>
                     </div>
                     <span class="text-[11px] font-bold px-2 py-0.5 rounded-full ${s.severity === 'high' ? 'bg-rose-100 text-rose-700' : 'bg-amber-100 text-amber-700'}">${s.count}</span>
-                </div>`).join('')
+                </button>`).join('')
             : `<div class="text-xs text-emerald-700 bg-emerald-50 border border-emerald-100 rounded-lg p-3">No major readiness signals detected.</div>`;
 
         container.innerHTML = `
-        <div class="animate-fade-in space-y-6">
+        <div class="animate-fade-in space-y-5">
+            <div class="flex flex-col xl:flex-row xl:items-end xl:justify-between gap-3">
+                <div>
+                    <p class="text-[10px] font-bold text-slate-400 uppercase tracking-wider">System Assurance</p>
+                    <h2 class="text-base font-black text-slate-800 mt-1">System Health & Readiness</h2>
+                    <p class="text-xs text-slate-500 mt-1">Module table counts, stale work signals, audit activity, and readiness indicators for admin review.</p>
+                </div>
+                <div class="flex gap-2 overflow-x-auto scrollbar-none">
+                    <button type="button" onclick="window._adminTab('audit')" class="px-3 py-2 rounded-lg border border-slate-200 bg-white text-xs font-bold text-slate-600 hover:border-emerald-200 hover:text-emerald-700">Audit Log</button>
+                    <button type="button" onclick="window._adminTab('dashboard')" class="px-3 py-2 rounded-lg border border-slate-200 bg-white text-xs font-bold text-slate-600 hover:border-emerald-200 hover:text-emerald-700">Dashboard</button>
+                    <button type="button" onclick="window._adminTab('employees')" class="px-3 py-2 rounded-lg border border-slate-200 bg-white text-xs font-bold text-slate-600 hover:border-emerald-200 hover:text-emerald-700">Employee Master</button>
+                </div>
+            </div>
             <div class="grid grid-cols-1 xl:grid-cols-3 gap-4">
                 <div class="xl:col-span-2 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
                     ${metricCard('Pre-production Readiness', `${readinessScore}%`, readiness.status || 'Unknown', readinessScore >= 90 ? 'good' : readinessScore >= 70 ? 'warn' : 'risk')}
@@ -4273,6 +5089,7 @@ async function renderSystemHealth(container) {
                 </div>
             </div>
         </div>`;
+        window._adminHealthDrilldown = _adminHealthDrilldown;
     } catch (err) {
         container.innerHTML = `<div class="text-center py-20 text-red-500 text-sm">โหลดข้อมูลไม่ได้: ${escHtml(err.message)}</div>`;
     }
@@ -4414,30 +5231,44 @@ async function renderAuditLog(container) {
     _auditPage = 1;
     _auditFilterFailed = false;
     container.innerHTML = `
-    <div class="animate-fade-in space-y-4">
+    <div class="animate-fade-in space-y-5">
+        <div class="flex flex-col xl:flex-row xl:items-end xl:justify-between gap-3">
+            <div>
+                <p class="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Audit Trail</p>
+                <h2 class="text-base font-black text-slate-800 mt-1">Admin Audit Log</h2>
+                <p class="text-xs text-slate-500 mt-1">Trace admin mutations, failed actions, request path, target records, and safe metadata.</p>
+            </div>
+            <div class="flex gap-2 overflow-x-auto scrollbar-none">
+                <button type="button" onclick="window._auditToggleFailed()" class="px-3 py-2 rounded-lg border border-rose-200 bg-white text-xs font-bold text-rose-600 hover:bg-rose-50">Failed Only</button>
+                <button type="button" onclick="window._auditApplyPreset&&window._auditApplyPreset('today')" class="px-3 py-2 rounded-lg border border-slate-200 bg-white text-xs font-bold text-slate-600 hover:border-emerald-200 hover:text-emerald-700">Today</button>
+                <button type="button" onclick="window._auditApplyPreset&&window._auditApplyPreset('7d')" class="px-3 py-2 rounded-lg border border-slate-200 bg-white text-xs font-bold text-slate-600 hover:border-emerald-200 hover:text-emerald-700">7 Days</button>
+                <button type="button" onclick="window._exportAuditCSV()" class="px-3 py-2 rounded-lg border border-slate-200 bg-white text-xs font-bold text-slate-600 hover:border-emerald-200 hover:text-emerald-700">Export CSV</button>
+                <button type="button" onclick="window._adminTab('health')" class="px-3 py-2 rounded-lg border border-slate-200 bg-white text-xs font-bold text-slate-600 hover:border-emerald-200 hover:text-emerald-700">System Health</button>
+            </div>
+        </div>
         <div class="ds-filter-bar">
-            <div class="grid grid-cols-1 md:grid-cols-6 gap-3 items-end">
-                <div class="md:col-span-2">
+            <div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-8 gap-3 items-end">
+                <div class="md:col-span-2 xl:col-span-3">
                     <label class="block text-[11px] font-bold text-slate-500 uppercase mb-1">Search</label>
                     <input id="audit-filter-q" oninput="window._auditDebouncedLoad&&window._auditDebouncedLoad()" class="form-input w-full text-sm border-slate-200 rounded-lg py-2 px-3" placeholder="user, action, target, path">
                 </div>
-                <div>
+                <div class="xl:col-span-1">
                     <label class="block text-[11px] font-bold text-slate-500 uppercase mb-1">Module</label>
                     <select id="audit-filter-module" onchange="window._loadAuditLog()" class="form-select w-full text-sm border-slate-200 rounded-lg py-2 pl-3 pr-8">
                         <option value="">All Modules</option>
                     </select>
                 </div>
-                <div>
+                <div class="xl:col-span-1">
                     <label class="block text-[11px] font-bold text-slate-500 uppercase mb-1">Action</label>
                     <select id="audit-filter-action" onchange="window._loadAuditLog()" class="form-select w-full text-sm border-slate-200 rounded-lg py-2 pl-3 pr-8">
                         <option value="">All Actions</option>
                     </select>
                 </div>
-                <div>
+                <div class="xl:col-span-1">
                     <label class="block text-[11px] font-bold text-slate-500 uppercase mb-1">From</label>
                     <input id="audit-date-from" type="date" onchange="window._loadAuditLog()" class="form-input w-full text-sm border-slate-200 rounded-lg py-2 px-3">
                 </div>
-                <div>
+                <div class="xl:col-span-2">
                     <label class="block text-[11px] font-bold text-slate-500 uppercase mb-1">To</label>
                     <div class="flex gap-2">
                         <input id="audit-date-to" type="date" onchange="window._loadAuditLog()" class="form-input w-full text-sm border-slate-200 rounded-lg py-2 px-3">
@@ -4449,6 +5280,18 @@ async function renderAuditLog(container) {
             </div>
             <div class="flex flex-wrap items-center gap-2 pt-3 border-t border-slate-100 mt-3">
                 <span class="text-[11px] font-bold text-slate-400 uppercase">Quick:</span>
+                <button onclick="window._auditApplyPreset&&window._auditApplyPreset('today')"
+                    class="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold border transition-colors bg-white border-slate-200 text-slate-500 hover:border-emerald-300 hover:text-emerald-700">
+                    Today
+                </button>
+                <button onclick="window._auditApplyPreset&&window._auditApplyPreset('7d')"
+                    class="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold border transition-colors bg-white border-slate-200 text-slate-500 hover:border-emerald-300 hover:text-emerald-700">
+                    Last 7 days
+                </button>
+                <button onclick="window._auditApplyPreset&&window._auditApplyPreset('employee')"
+                    class="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold border transition-colors bg-white border-slate-200 text-slate-500 hover:border-indigo-300 hover:text-indigo-700">
+                    Employee changes
+                </button>
                 <button id="audit-chip-failed" onclick="window._auditToggleFailed()"
                     class="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold border transition-colors
                            bg-white border-slate-200 text-slate-500 hover:border-rose-300 hover:text-rose-600">
@@ -4464,7 +5307,7 @@ async function renderAuditLog(container) {
                 </button>
             </div>
         </div>
-        <div id="audit-summary-strip" class="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-5 gap-3">
+        <div id="audit-summary-strip" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-5 gap-3">
             <div class="ds-metric-card text-sm text-slate-400">Loading audit summary...</div>
         </div>
         <div class="ds-table-wrap">
@@ -4489,6 +5332,44 @@ async function renderAuditLog(container) {
     window._auditShowDetail = showAuditDetail;
     window._auditToggleFailed = () => {
         _auditFilterFailed = !_auditFilterFailed;
+        const chip = document.getElementById('audit-chip-failed');
+        if (chip) {
+            chip.className = `inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold border transition-colors
+                ${_auditFilterFailed
+                    ? 'bg-rose-100 border-rose-300 text-rose-700'
+                    : 'bg-white border-slate-200 text-slate-500 hover:border-rose-300 hover:text-rose-600'}`;
+        }
+        _auditPage = 1;
+        loadAuditLog();
+    };
+    window._auditApplyPreset = (preset) => {
+        const q = document.getElementById('audit-filter-q');
+        const module = document.getElementById('audit-filter-module');
+        const action = document.getElementById('audit-filter-action');
+        const from = document.getElementById('audit-date-from');
+        const to = document.getElementById('audit-date-to');
+        const isoDate = (date) => date.toISOString().slice(0, 10);
+        const today = new Date();
+        if (q) q.value = '';
+        if (module) module.value = '';
+        if (action) action.value = '';
+        if (from) from.value = '';
+        if (to) to.value = '';
+        _auditFilterFailed = false;
+
+        if (preset === 'today') {
+            if (from) from.value = isoDate(today);
+            if (to) to.value = isoDate(today);
+        } else if (preset === '7d') {
+            const sevenDaysAgo = new Date(today);
+            sevenDaysAgo.setDate(today.getDate() - 6);
+            if (from) from.value = isoDate(sevenDaysAgo);
+            if (to) to.value = isoDate(today);
+        } else if (preset === 'employee') {
+            if (q) q.value = 'EMPLOYEE';
+        } else if (preset === 'failed') {
+            _auditFilterFailed = true;
+        }
         const chip = document.getElementById('audit-chip-failed');
         if (chip) {
             chip.className = `inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold border transition-colors
@@ -4637,7 +5518,7 @@ async function loadAuditLog() {
         } else {
             wrap.innerHTML = `
             <div class="overflow-x-auto">
-            <table class="ds-table min-w-[980px]">
+            <table class="ds-table min-w-[1180px]">
                 <thead>
                     <tr class="bg-slate-50 border-b border-slate-200 text-left">
                         <th class="px-4 py-3 text-[11px] font-bold text-slate-500 uppercase">Time</th>
@@ -4666,7 +5547,7 @@ async function loadAuditLog() {
                         </td>
                         <td class="px-4 py-3 text-xs text-slate-500">
                             <div class="font-mono">${escHtml(r.TargetType||'-')}${r.TargetID?` #${escHtml(r.TargetID)}`:''}</div>
-                            <div class="text-[11px] text-slate-400 truncate max-w-[220px]">${escHtml(r.Path||'')}</div>
+                            <div class="text-[11px] text-slate-400 truncate max-w-[320px]">${escHtml(r.Path||'')}</div>
                         </td>
                         <td class="px-4 py-3 text-xs font-mono">${dsStatusBadge(Number(r.StatusCode) >= 400 ? 'Failed' : 'Approved', { label: r.StatusCode || 'OK' })}</td>
                         <td class="px-4 py-3 text-xs text-slate-600 max-w-xs truncate" title="${escHtml(r.Detail||'')}">${escHtml(r.Detail||'-')}</td>
@@ -4701,22 +5582,41 @@ async function loadAuditLog() {
 // =============================================================================
 let _atActivities   = [];   // static list from /api/activity-targets/activities
 let _atPositions    = [];   // master positions list
-let _atSubTab       = 'template'; // 'template' | 'person'
+let _atDepartments  = [];
+let _atDeptRows     = [];
+let _atUnits        = [];
+let _atSubTab       = 'matrix'; // 'matrix' | 'template' | 'scope' | 'person'
 let _atSelPosition  = '';
+let _atTemplateFocusActivity = '';
+let _atSelDept      = '';
+let _atSelUnit      = '';
 let _atEmpSearch    = '';
 let _atEmpResults   = [];
 let _atSelEmp       = null; // { EmployeeID, Name, Position }
 let _atEmpTargets   = [];   // targets for selected employee
+let _atAllTemplates = [];
+let _atCoverage     = null;
+let _atMatrixRows   = [];
+let _atMatrixSummary = {};
+let _atMatrixFilters = { department: '', unit: '', position: '', activity: '', source: '', issue: '', review: false };
 
 async function renderActivityTargets(container) {
     // fetch activities + positions in parallel
     try {
-        const [actRes, posRes] = await Promise.all([
+        const [actRes, posRes, tplRes, deptRes, unitRes] = await Promise.all([
             API.get('/activity-targets/activities'),
             API.get('/master/positions'),
+            API.get('/activity-targets/position-templates').catch(() => ({ data: [] })),
+            API.get('/admin/org/departments').catch(() => API.get('/master/departments')).catch(() => ({ data: [] })),
+            API.get('/admin/org/units').catch(() => ({ data: [] })),
         ]);
         _atActivities = actRes.data || [];
         _atPositions  = (posRes.data || []).map(p => p.Name || p.PositionName || p.name || p).filter(Boolean);
+        _atDeptRows = deptRes.data || [];
+        _atDepartments = _atDeptRows.map(d => d.Name || d.Department || d.name || d).filter(Boolean);
+        _atUnits = unitRes.data || [];
+        _atAllTemplates = tplRes.data || [];
+        _atCoverage = _atBuildCoverage(_atAllTemplates);
     } catch (e) {
         container.innerHTML = `<div class="py-16 text-center text-red-400 text-sm">โหลดข้อมูลไม่ได้: ${e.message}</div>`;
         return;
@@ -4743,11 +5643,22 @@ function _renderAtShell(container) {
             </div>
         </div>
 
+        ${_atGuideHtml()}
+        ${_atCoverageHtml(_atCoverage)}
+
         <!-- Sub-tabs -->
         <div class="flex bg-slate-100 p-1 rounded-xl gap-1 w-fit">
-            <button id="at-sub-template" onclick="window._atSwitchSubTab('template')"
+            <button id="at-sub-matrix" onclick="window._atSwitchSubTab('matrix')"
                 class="px-4 py-2 text-xs font-semibold rounded-lg transition-all bg-white shadow-sm text-slate-800">
+                Coverage Matrix
+            </button>
+            <button id="at-sub-template" onclick="window._atSwitchSubTab('template')"
+                class="px-4 py-2 text-xs font-semibold rounded-lg transition-all text-slate-500 hover:text-slate-700">
                 เทมเพลตตามตำแหน่ง
+            </button>
+            <button id="at-sub-scope" onclick="window._atSwitchSubTab('scope')"
+                class="px-4 py-2 text-xs font-semibold rounded-lg transition-all text-slate-500 hover:text-slate-700">
+                ตามแผนก/หน่วยงาน
             </button>
             <button id="at-sub-person" onclick="window._atSwitchSubTab('person')"
                 class="px-4 py-2 text-xs font-semibold rounded-lg transition-all text-slate-500 hover:text-slate-700">
@@ -4763,23 +5674,785 @@ function _renderAtShell(container) {
     window._atSaveTemplate  = _atSaveTemplate;
     window._atToggleTplNA   = _atToggleTplNA;
     window._atBulkApply     = _atBulkApply;
+    window._atLoadScope     = _atLoadScope;
+    window._atSaveScope     = _atSaveScope;
+    window._atClearScope    = _atClearScope;
+    window._atToggleScopeNA = _atToggleScopeNA;
     window._atSearchEmp     = _atSearchEmp;
     window._atSelectEmp     = _atSelectEmp;
     window._atSaveOverride  = _atSaveOverride;
     window._atClearOverride = _atClearOverride;
     window._atToggleNA      = _atToggleNA;
+    window._atMatrixFilter  = _atMatrixFilter;
+    window._atMatrixEdit    = _atMatrixEdit;
+    window._atMatrixQuick   = _atMatrixQuick;
+    window._atMatrixExport  = _atMatrixExport;
+    window._atGuideTemplate = _atGuideTemplate;
+}
+
+function _atBuildCoverage(rows = []) {
+    const activities = _atActivities || [];
+    const positions = _atPositions || [];
+    const totalSlots = positions.length * activities.length;
+    const byPosAct = {};
+    const byPosition = {};
+    const byActivity = {};
+    activities.forEach(a => { byActivity[a.key] = { ...a, configured: 0, na: 0, zero: 0, missing: positions.length }; });
+
+    (rows || []).forEach(r => {
+        const pos = String(r.PositionName || '').trim();
+        const key = String(r.ActivityKey || '').trim();
+        if (!pos || !key) return;
+        byPosAct[`${pos}::${key}`] = r;
+    });
+
+    positions.forEach(pos => {
+        let configured = 0;
+        let na = 0;
+        let zero = 0;
+        let missing = 0;
+        activities.forEach(a => {
+            const r = byPosAct[`${pos}::${a.key}`];
+            const isNA = r && (r.IsNA === 1 || r.IsNA === true || r.IsNA === '1');
+            const target = Number(r?.YearlyTarget || 0);
+            if (_atIsDynamic(a) && !isNA) {
+                configured += 1;
+                if (byActivity[a.key]) byActivity[a.key].configured += 1;
+                return;
+            }
+            if (!r) {
+                missing += 1;
+                return;
+            }
+            if (isNA) {
+                na += 1;
+                if (byActivity[a.key]) byActivity[a.key].na += 1;
+                return;
+            }
+            if (target > 0) {
+                configured += 1;
+                if (byActivity[a.key]) byActivity[a.key].configured += 1;
+            } else {
+                zero += 1;
+                if (byActivity[a.key]) byActivity[a.key].zero += 1;
+            }
+        });
+        byPosition[pos] = { position: pos, configured, na, zero, missing, total: activities.length };
+    });
+
+    Object.values(byActivity).forEach(a => {
+        a.missing = Math.max(0, positions.length - a.configured - a.na - a.zero);
+    });
+
+    const configuredSlots = Object.values(byPosition).reduce((sum, r) => sum + r.configured, 0);
+    const naSlots = Object.values(byPosition).reduce((sum, r) => sum + r.na, 0);
+    const zeroSlots = Object.values(byPosition).reduce((sum, r) => sum + r.zero, 0);
+    const missingSlots = Object.values(byPosition).reduce((sum, r) => sum + r.missing, 0);
+    const completePositions = Object.values(byPosition).filter(r => r.missing === 0 && r.zero === 0).length;
+    const coveragePct = totalSlots ? Math.round(((configuredSlots + naSlots) / totalSlots) * 100) : 0;
+    const reviewPositions = Object.values(byPosition)
+        .filter(r => r.missing > 0 || r.zero > 0)
+        .sort((a, b) => (b.missing + b.zero) - (a.missing + a.zero))
+        .slice(0, 6);
+
+    return {
+        totalSlots,
+        configuredSlots,
+        naSlots,
+        zeroSlots,
+        missingSlots,
+        coveragePct,
+        completePositions,
+        totalPositions: positions.length,
+        totalActivities: activities.length,
+        reviewPositions,
+        byActivity: Object.values(byActivity),
+    };
+}
+
+function _atGuideHtml() {
+    const examples = [
+        ['Fixed Count', 'นับจำนวนกิจกรรมเทียบเป้ารายปี', 'Safety Patrol, KY Activity'],
+        ['People Coverage', 'นับจำนวนผู้เกี่ยวข้องที่ดำเนินการครบ', 'CCCF, OJT, Training, Hiyari'],
+        ['Dynamic Ratio', 'ใช้ตัวหารจากข้อมูลจริงของระบบ', 'Patrol Issues, Yokoten Response'],
+        ['N/A', 'ไม่นับในเป้าหมายของ scope นี้', 'ใช้เมื่อกิจกรรมนั้นไม่เกี่ยวข้อง'],
+    ];
+    return `
+    <div class="grid grid-cols-1 xl:grid-cols-[1.25fr,0.75fr] gap-4">
+        <div class="rounded-2xl border border-indigo-100 bg-white shadow-sm overflow-hidden">
+            <div class="p-4 border-b border-indigo-50 bg-gradient-to-r from-indigo-50 to-white">
+                <p class="text-[10px] font-black uppercase tracking-widest text-indigo-500">How to Set Targets</p>
+                <h3 class="mt-1 text-sm font-black text-slate-800">วิธีตั้งเป้าหมายให้แอดมินเข้าใจตรงกัน</h3>
+                <p class="text-xs text-slate-500 mt-1">กิจกรรมแต่ละชนิดมีสูตรวัดผลต่างกัน ช่องเป้าหมาย/ปีใช้กับ Fixed Count และ People Coverage ส่วน Dynamic Ratio จะใช้ตัวหารจากข้อมูลจริงของระบบ</p>
+            </div>
+            <div class="p-4 grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-3">
+                ${examples.map(([label, meaning, use]) => `
+                <div class="rounded-xl border border-slate-100 bg-slate-50/70 p-3">
+                    <p class="text-sm font-black text-slate-800">${label}</p>
+                    <p class="text-xs text-slate-600 mt-1">${meaning}</p>
+                    <p class="text-[11px] text-slate-400 mt-2">${use}</p>
+                </div>`).join('')}
+            </div>
+        </div>
+        <div class="rounded-2xl border border-amber-100 bg-amber-50/60 p-4">
+            <p class="text-[10px] font-black uppercase tracking-widest text-amber-600">Important Note</p>
+            <h3 class="mt-1 text-sm font-black text-slate-800">ลำดับการใช้ค่าปัจจุบัน</h3>
+            <div class="mt-3 space-y-2 text-xs text-slate-600">
+                <p><span class="font-bold text-violet-700">1. Employee Override</span> ใช้ก่อนเสมอถ้ากำหนดรายบุคคลไว้</p>
+                <p><span class="font-bold text-emerald-700">2. Department/Unit Override</span> ใช้เมื่อแผนกหรือ unit มีเป้าหมายต่างจากตำแหน่งกลาง</p>
+                <p><span class="font-bold text-sky-700">3. Position Template</span> ใช้เป็นค่า default ของทุกคนในตำแหน่ง</p>
+                <p class="pt-2 border-t border-amber-100 text-amber-700">กิจกรรมแบบ event-based เช่น Issue/Hiyari ควรตั้งอย่างระวัง เพื่อไม่สร้างแรงจูงใจให้แจ้งเพื่อให้ครบจำนวน</p>
+                <p class="text-amber-700">Phase AT-6 แสดงชนิด KPI เพื่อเตรียมข้อมูล ส่วนสูตร Dynamic Ratio และ People Coverage แบบใหม่จะเชื่อมใน Phase ถัดไป</p>
+            </div>
+        </div>
+    </div>`;
+}
+
+function _atActivityMeta(a = {}) {
+    const meta = {
+        fixed_count:     { label:'Fixed Count',     cls:'bg-indigo-50 text-indigo-700 border-indigo-100' },
+        people_coverage: { label:'People Coverage', cls:'bg-emerald-50 text-emerald-700 border-emerald-100' },
+        dynamic_ratio:   { label:'Dynamic Ratio',   cls:'bg-amber-50 text-amber-700 border-amber-100' },
+    }[a.metricType] || { label:'Legacy Count', cls:'bg-slate-50 text-slate-600 border-slate-100' };
+    const unit = a.unitLabel ? ` · ${escHtml(a.unitLabel)}` : '';
+    return `<span class="inline-flex mt-1 px-2 py-0.5 rounded-full border text-[10px] font-bold ${meta.cls}">${meta.label}${unit}</span>`;
+}
+
+function _atIsDynamic(a = {}) {
+    return a.metricType === 'dynamic_ratio';
+}
+
+function _atStoredTarget(actKey, rawValue) {
+    const activity = _atActivities.find(a => a.key === actKey) || {};
+    if (_atIsDynamic(activity)) return 1;
+    if (rawValue === '' || rawValue === null || rawValue === undefined) return null;
+    const target = Number(rawValue);
+    return Number.isFinite(target) && target >= 0 ? target : null;
+}
+
+function _atTargetEditor(a, id, value, placeholder, isNA, accent = 'indigo') {
+    if (_atIsDynamic(a)) {
+        const formula = a.key === 'patrol_issue'
+            ? 'ปิดแล้ว / ประเด็นรับผิดชอบ'
+            : a.key === 'yokoten'
+                ? 'ตอบแล้ว / หัวข้อที่มอบหมาย'
+                : 'ผลสำเร็จ / รายการทั้งหมด';
+        return `<div class="inline-flex flex-col items-center gap-0.5">
+            <span class="px-2.5 py-1 rounded-lg border border-amber-100 bg-amber-50 text-[11px] font-bold text-amber-700">ระบบคำนวณ</span>
+            <span class="text-[10px] text-slate-400">${formula}</span>
+        </div>`;
+    }
+    const focus = accent === 'emerald'
+        ? 'focus:border-emerald-400 focus:ring-emerald-100'
+        : 'focus:border-indigo-400 focus:ring-indigo-100';
+    return `<div class="inline-flex items-center gap-1">
+        <input id="${id}" type="number" min="0" value="${isNA ? '' : (value ?? '')}"
+            placeholder="${placeholder}" ${isNA ? 'disabled' : ''}
+            class="w-24 px-2 py-1.5 text-sm text-center border border-slate-200 rounded-lg outline-none focus:ring-2 ${focus} disabled:bg-slate-100">
+        <span class="text-[11px] text-slate-400">${escHtml(a.unitLabel || '')}</span>
+    </div>`;
+}
+
+function _atCoverageHtml(c = {}) {
+    const pct = Number(c?.coveragePct || 0);
+    const statusCls = pct >= 90 ? 'text-emerald-700 bg-emerald-50 border-emerald-200'
+        : pct >= 60 ? 'text-amber-700 bg-amber-50 border-amber-200'
+        : 'text-rose-700 bg-rose-50 border-rose-200';
+    const reviewRows = (c?.reviewPositions || []).length
+        ? c.reviewPositions.map(r => `
+            <button type="button" onclick="window._atSwitchSubTab('template'); setTimeout(()=>window._atLoadTemplate&&window._atLoadTemplate('${String(r.position).replace(/'/g,"\\'")}'),0)"
+                class="w-full text-left rounded-lg border border-slate-100 bg-white px-3 py-2 hover:border-indigo-200 hover:bg-indigo-50/40 transition-colors">
+                <div class="flex items-center justify-between gap-2">
+                    <span class="text-xs font-bold text-slate-700 truncate">${escHtml(r.position)}</span>
+                    <span class="text-[11px] font-bold text-amber-700">${r.missing + r.zero} review</span>
+                </div>
+                <p class="text-[11px] text-slate-400 mt-1">missing ${r.missing} · zero target ${r.zero} · N/A ${r.na}</p>
+            </button>`).join('')
+        : `<div class="rounded-lg border border-emerald-100 bg-emerald-50 p-3 text-xs text-emerald-700">ทุกตำแหน่งมี template ครบ และไม่มี target เป็น 0 แล้ว</div>`;
+    const activityRows = (c?.byActivity || []).map(a => `
+        <div class="rounded-lg border border-slate-100 bg-white p-2">
+            <div class="flex items-center justify-between gap-2">
+                <span class="text-[11px] font-bold text-slate-700 truncate">${escHtml(a.label || a.key)}</span>
+                <span class="text-[10px] text-slate-400">${a.configured}/${c.totalPositions || 0}</span>
+            </div>
+            ${_atActivityMeta(a)}
+            <div class="mt-2 h-1.5 rounded-full bg-slate-100 overflow-hidden">
+                <div class="h-full bg-indigo-500" style="width:${c.totalPositions ? Math.round(((a.configured + a.na) / c.totalPositions) * 100) : 0}%"></div>
+            </div>
+            <p class="text-[10px] text-slate-400 mt-1">N/A ${a.na} · missing ${a.missing} · zero ${a.zero}</p>
+        </div>`).join('');
+    return `
+    <div id="at-coverage-panel" class="rounded-2xl border border-slate-200 bg-white shadow-sm overflow-hidden">
+        <div class="p-4 border-b border-slate-100 flex flex-col xl:flex-row xl:items-center xl:justify-between gap-3">
+            <div>
+                <p class="text-[10px] font-black uppercase tracking-widest text-slate-400">Coverage Summary</p>
+                <h3 class="mt-1 text-sm font-black text-slate-800">ภาพรวมความครอบคลุมของเป้าหมายตามตำแหน่ง</h3>
+                <p class="text-xs text-slate-500 mt-1">สรุปจาก Position Template ที่ใช้เป็นค่า default ให้ผู้ใช้งานทั้งระบบ ก่อนถูก override รายบุคคล</p>
+            </div>
+            <span class="w-fit px-3 py-1.5 rounded-full border text-xs font-black ${statusCls}">${pct}% covered</span>
+        </div>
+        <div class="p-4 grid grid-cols-2 md:grid-cols-3 xl:grid-cols-6 gap-3">
+            ${_atMetricCard('Positions', c.totalPositions || 0, 'ตำแหน่งทั้งหมด')}
+            ${_atMetricCard('Activities', c.totalActivities || 0, 'กิจกรรมที่นับเป้า')}
+            ${_atMetricCard('Configured', c.configuredSlots || 0, 'ตั้งเป้าแล้ว')}
+            ${_atMetricCard('N/A', c.naSlots || 0, 'ตั้งว่าไม่เกี่ยวข้อง')}
+            ${_atMetricCard('Missing', c.missingSlots || 0, 'ยังไม่กำหนด')}
+            ${_atMetricCard('Zero', c.zeroSlots || 0, 'ตั้งเป็น 0 ต้องทบทวน')}
+        </div>
+        <div class="grid grid-cols-1 xl:grid-cols-[360px,1fr] gap-4 px-4 pb-4">
+            <div>
+                <p class="text-[11px] font-black uppercase tracking-wider text-slate-400 mb-2">Positions Needing Review</p>
+                <div class="space-y-2">${reviewRows}</div>
+            </div>
+            <div>
+                <p class="text-[11px] font-black uppercase tracking-wider text-slate-400 mb-2">Activity Coverage</p>
+                <div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-2">${activityRows}</div>
+            </div>
+        </div>
+    </div>`;
+}
+
+function _atMetricCard(label, value, hint) {
+    return `
+    <div class="rounded-xl border border-slate-100 bg-slate-50/70 p-3">
+        <p class="text-[10px] font-black uppercase tracking-wider text-slate-400">${label}</p>
+        <p class="mt-1 text-xl font-black text-slate-800">${Number(value || 0).toLocaleString()}</p>
+        <p class="text-[11px] text-slate-400 mt-0.5">${hint}</p>
+    </div>`;
+}
+
+async function _atRefreshCoverage() {
+    try {
+        const res = await API.get('/activity-targets/position-templates');
+        _atAllTemplates = res.data || [];
+        _atCoverage = _atBuildCoverage(_atAllTemplates);
+        const panel = document.getElementById('at-coverage-panel');
+        if (panel) panel.outerHTML = _atCoverageHtml(_atCoverage);
+    } catch (_) { /* keep current coverage if refresh fails */ }
 }
 
 function _atSwitchSubTab(key) {
     _atSubTab = key;
     const active   = 'px-4 py-2 text-xs font-semibold rounded-lg transition-all bg-white shadow-sm text-slate-800';
     const inactive = 'px-4 py-2 text-xs font-semibold rounded-lg transition-all text-slate-500 hover:text-slate-700';
+    document.getElementById('at-sub-matrix')?.setAttribute('class', key === 'matrix' ? active : inactive);
     document.getElementById('at-sub-template')?.setAttribute('class', key === 'template' ? active : inactive);
+    document.getElementById('at-sub-scope')?.setAttribute('class', key === 'scope' ? active : inactive);
     document.getElementById('at-sub-person')?.setAttribute('class',   key === 'person'   ? active : inactive);
     const area = document.getElementById('at-content');
     if (!area) return;
-    if (key === 'template') _renderAtTemplate(area);
+    if (key === 'matrix') _renderAtMatrix(area);
+    else if (key === 'template') _renderAtTemplate(area);
+    else if (key === 'scope') _renderAtScope(area);
     else                    _renderAtPerson(area);
+}
+
+async function _renderAtMatrix(area) {
+    area.innerHTML = `<div class="flex justify-center py-12"><div class="animate-spin rounded-full h-9 w-9 border-4 border-indigo-500 border-t-transparent"></div></div>`;
+    try {
+        const res = await API.get('/activity-targets/coverage-matrix');
+        _atMatrixRows = res.data?.rows || [];
+        _atMatrixSummary = res.data?.summary || {};
+        _atRenderMatrixInner(area);
+    } catch (e) {
+        area.innerHTML = `<div class="py-10 text-center text-red-400 text-sm">โหลด Coverage Matrix ไม่ได้: ${escHtml(e.message)}</div>`;
+    }
+}
+
+function _atMatrixOptions(field, label) {
+    const values = [...new Set(_atMatrixRows.map(r => String(r[field] || '').trim()).filter(Boolean))].sort((a, b) => a.localeCompare(b, 'th'));
+    return `<option value="">${label}</option>${values.map(v => `<option value="${escHtml(v)}" ${_atMatrixFilters[field] === v ? 'selected' : ''}>${escHtml(v)}</option>`).join('')}`;
+}
+
+function _atMatrixSourceBadge(row) {
+    if (row.isNA) return `<span class="px-2 py-0.5 rounded-full text-[10px] font-bold bg-slate-200 text-slate-600">N/A</span>`;
+    if (row.source === 'system') return `<span class="px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-100 text-amber-700">System Ratio</span>`;
+    if (row.source === 'override') return `<span class="px-2 py-0.5 rounded-full text-[10px] font-bold bg-violet-100 text-violet-700">Employee Override</span>`;
+    if (row.source === 'scope') return `<span class="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 text-emerald-700">Department/Unit</span>`;
+    if (row.source === 'template') return `<span class="px-2 py-0.5 rounded-full text-[10px] font-bold bg-sky-100 text-sky-700">Position Template</span>`;
+    return `<span class="px-2 py-0.5 rounded-full text-[10px] font-bold bg-rose-100 text-rose-700">Missing</span>`;
+}
+
+function _atMatrixIssueMatches(row, issue) {
+    if (!issue) return true;
+    if (issue === 'missing') return row.source === 'missing';
+    if (issue === 'zero') return !!row.isZero;
+    if (issue === 'na') return !!row.isNA;
+    if (issue === 'review') return !!row.reviewNeeded;
+    return true;
+}
+
+function _atFilteredMatrixRows() {
+    const f = _atMatrixFilters;
+    return _atMatrixRows.filter(r =>
+        (!f.department || r.department === f.department) &&
+        (!f.unit || r.unit === f.unit) &&
+        (!f.position || r.position === f.position) &&
+        (!f.activity || r.activityKey === f.activity) &&
+        (!f.source || r.source === f.source) &&
+        _atMatrixIssueMatches(r, f.issue) &&
+        (!f.review || r.reviewNeeded)
+    );
+}
+
+function _atTopCounts(rows, key, limit = 5) {
+    const counts = {};
+    rows.forEach(row => {
+        const value = String(row[key] || '').trim() || '-';
+        counts[value] = (counts[value] || 0) + 1;
+    });
+    return Object.entries(counts)
+        .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0], 'th'))
+        .slice(0, limit);
+}
+
+function _atMissingTemplateSuggestions(rows, limit = 6) {
+    const groups = {};
+    rows.filter(row => row.source === 'missing' && row.position && row.activityKey).forEach(row => {
+        const id = `${row.position}::${row.activityKey}`;
+        if (!groups[id]) {
+            groups[id] = {
+                position: row.position,
+                activityKey: row.activityKey,
+                activityLabel: row.activityLabel || row.activityKey,
+                metricType: row.metricType || '',
+                unitLabel: row.unitLabel || '',
+                employees: new Set(),
+                departments: new Set(),
+            };
+        }
+        groups[id].employees.add(row.employeeId || '');
+        groups[id].departments.add(row.department || '');
+    });
+    return Object.values(groups)
+        .map(group => ({
+            ...group,
+            employeeCount: [...group.employees].filter(Boolean).length,
+            departmentCount: [...group.departments].filter(Boolean).length,
+        }))
+        .sort((a, b) => b.employeeCount - a.employeeCount || a.position.localeCompare(b.position, 'th') || a.activityLabel.localeCompare(b.activityLabel, 'th'))
+        .slice(0, limit);
+}
+
+function _atQualityPanelHtml(rows) {
+    const reviewRows = _atMatrixRows.filter(r => r.reviewNeeded);
+    const currentReviewRows = rows.filter(r => r.reviewNeeded);
+    const missingRows = rows.filter(r => r.source === 'missing');
+    const zeroRows = rows.filter(r => r.isZero);
+    const topDepartments = _atTopCounts(currentReviewRows, 'department', 5);
+    const topActivities = _atTopCounts(currentReviewRows, 'activityLabel', 5);
+    const suggestions = _atMissingTemplateSuggestions(rows, 6);
+    const line = ([label, count]) => `<div class="flex items-center justify-between gap-3 text-xs"><span class="truncate text-slate-600">${escHtml(label)}</span><span class="font-black text-slate-800">${Number(count || 0).toLocaleString()}</span></div>`;
+    const suggestionHtml = suggestions.length
+        ? suggestions.map(item => `
+            <button type="button" onclick="window._atGuideTemplate('${String(item.position).replace(/'/g,"\\'")}','${String(item.activityKey).replace(/'/g,"\\'")}')"
+                class="text-left rounded-xl border border-slate-100 bg-white p-3 hover:border-indigo-200 hover:bg-indigo-50/40 transition-colors">
+                <div class="flex items-start justify-between gap-3">
+                    <div class="min-w-0">
+                        <p class="text-xs font-black text-slate-800 truncate">${escHtml(item.position)}</p>
+                        <p class="text-[11px] text-slate-500 truncate">${escHtml(item.activityLabel)}${item.unitLabel ? ` · ${escHtml(item.unitLabel)}` : ''}</p>
+                    </div>
+                    <span class="text-[11px] font-black text-rose-600">${item.employeeCount.toLocaleString()}</span>
+                </div>
+                <p class="mt-2 text-[10px] text-slate-400">${item.departmentCount.toLocaleString()} department(s) impacted · open template</p>
+            </button>`).join('')
+        : '<p class="text-xs text-slate-400">No missing Position Template suggestions in current filters</p>';
+    return `
+    <div class="rounded-2xl border border-amber-100 bg-white shadow-sm overflow-hidden">
+        <div class="p-4 border-b border-amber-50 flex flex-col xl:flex-row xl:items-center xl:justify-between gap-3" style="background:linear-gradient(135deg,rgba(245,158,11,0.08),rgba(255,255,255,0.9))">
+            <div>
+                <p class="text-[10px] font-black uppercase tracking-widest text-amber-600">AT-12 Data Quality Queue</p>
+                <h3 class="mt-1 text-sm font-black text-slate-800">Coverage rows that need admin cleanup</h3>
+                <p class="text-xs text-slate-500 mt-1">Focus on Missing and Zero target rows first. N/A and System Ratio rows are valid when intentionally configured.</p>
+            </div>
+            <div class="flex flex-wrap gap-2">
+                <button type="button" onclick="window._atMatrixQuick('review')" class="px-3 py-2 rounded-lg bg-amber-600 text-white text-xs font-bold hover:bg-amber-700">Review queue</button>
+                <button type="button" onclick="window._atMatrixQuick('missing')" class="px-3 py-2 rounded-lg border border-rose-200 bg-white text-rose-700 text-xs font-bold hover:bg-rose-50">Missing</button>
+                <button type="button" onclick="window._atMatrixQuick('zero')" class="px-3 py-2 rounded-lg border border-orange-200 bg-white text-orange-700 text-xs font-bold hover:bg-orange-50">Zero</button>
+                <button type="button" onclick="window._atMatrixExport()" class="px-3 py-2 rounded-lg border border-emerald-200 bg-white text-emerald-700 text-xs font-bold hover:bg-emerald-50">Export current view</button>
+            </div>
+        </div>
+        <div class="p-4 grid grid-cols-2 md:grid-cols-4 gap-3">
+            ${_atMetricCard('All Review', reviewRows.length, 'missing + zero')}
+            ${_atMetricCard('Current Review', currentReviewRows.length, 'after filters')}
+            ${_atMetricCard('Missing', missingRows.length, 'no effective target')}
+            ${_atMetricCard('Zero', zeroRows.length, 'target = 0')}
+        </div>
+        <div class="grid grid-cols-1 xl:grid-cols-2 gap-4 px-4 pb-4">
+            <div class="rounded-xl border border-slate-100 bg-slate-50/60 p-3">
+                <p class="text-[11px] font-black uppercase tracking-wider text-slate-400 mb-2">Top Review Departments</p>
+                <div class="space-y-1.5">${topDepartments.length ? topDepartments.map(line).join('') : '<p class="text-xs text-slate-400">No review rows in current filters</p>'}</div>
+            </div>
+            <div class="rounded-xl border border-slate-100 bg-slate-50/60 p-3">
+                <p class="text-[11px] font-black uppercase tracking-wider text-slate-400 mb-2">Top Review Activities</p>
+                <div class="space-y-1.5">${topActivities.length ? topActivities.map(line).join('') : '<p class="text-xs text-slate-400">No review rows in current filters</p>'}</div>
+            </div>
+        </div>
+        <div class="px-4 pb-4">
+            <div class="rounded-xl border border-indigo-100 bg-indigo-50/40 p-3">
+                <div class="flex items-center justify-between gap-3 mb-3">
+                    <div>
+                        <p class="text-[11px] font-black uppercase tracking-wider text-indigo-500">Guided Cleanup Suggestions</p>
+                        <p class="text-xs text-slate-500 mt-0.5">Repeated missing Position Template pairs ranked by impacted employees</p>
+                    </div>
+                    <button type="button" onclick="window._atMatrixQuick('missing')" class="px-2.5 py-1.5 rounded-lg bg-white border border-indigo-100 text-[11px] font-bold text-indigo-700 hover:bg-indigo-50">Missing only</button>
+                </div>
+                <div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-2">${suggestionHtml}</div>
+            </div>
+        </div>
+    </div>`;
+}
+
+function _atRenderMatrixInner(area) {
+    const f = _atMatrixFilters;
+    const rows = _atFilteredMatrixRows();
+    const shown = rows.slice(0, 300);
+    area.innerHTML = `
+    <div class="space-y-4">
+        <div class="grid grid-cols-2 md:grid-cols-5 xl:grid-cols-9 gap-2">
+            ${_atMetricCard('Employees', _atMatrixSummary.employees, 'พนักงาน')}
+            ${_atMetricCard('Slots', _atMatrixSummary.slots, 'จุดตรวจทั้งหมด')}
+            ${_atMetricCard('Employee', _atMatrixSummary.override, 'รายบุคคล')}
+            ${_atMetricCard('Scope', _atMatrixSummary.scope, 'แผนก/Unit')}
+            ${_atMetricCard('Template', _atMatrixSummary.template, 'fallback')}
+            ${_atMetricCard('System', _atMatrixSummary.system, 'dynamic ratio')}
+            ${_atMetricCard('Missing', _atMatrixSummary.missing, 'ยังไม่กำหนด')}
+            ${_atMetricCard('N/A', _atMatrixSummary.na, 'ไม่เกี่ยวข้อง')}
+            ${_atMetricCard('Zero', _atMatrixSummary.zero, 'ต้องทบทวน')}
+        </div>
+        ${_atQualityPanelHtml(rows)}
+        <div class="ds-filter-bar grid grid-cols-1 md:grid-cols-3 xl:grid-cols-8 gap-2">
+            <select onchange="window._atMatrixFilter('department',this.value)" class="form-input text-xs">${_atMatrixOptions('department','ทุกแผนก')}</select>
+            <select onchange="window._atMatrixFilter('unit',this.value)" class="form-input text-xs">${_atMatrixOptions('unit','ทุก Unit')}</select>
+            <select onchange="window._atMatrixFilter('position',this.value)" class="form-input text-xs">${_atMatrixOptions('position','ทุกตำแหน่ง')}</select>
+            <select onchange="window._atMatrixFilter('activity',this.value)" class="form-input text-xs">
+                <option value="">ทุกกิจกรรม</option>${_atActivities.map(a => `<option value="${a.key}" ${f.activity === a.key ? 'selected' : ''}>${escHtml(a.label)}</option>`).join('')}
+            </select>
+            <select onchange="window._atMatrixFilter('source',this.value)" class="form-input text-xs">
+                <option value="">ทุก Source</option>${['override','scope','template','system','missing'].map(s => `<option value="${s}" ${f.source === s ? 'selected' : ''}>${s}</option>`).join('')}
+            </select>
+            <select onchange="window._atMatrixFilter('issue',this.value)" class="form-input text-xs">
+                <option value="">ทุก Issue</option>${['review','missing','zero','na'].map(s => `<option value="${s}" ${f.issue === s ? 'selected' : ''}>${s}</option>`).join('')}
+            </select>
+            <label class="flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-bold text-slate-600">
+                <input type="checkbox" ${f.review ? 'checked' : ''} onchange="window._atMatrixFilter('review',this.checked)"> Review needed
+            </label>
+            <div class="flex items-center justify-end text-xs text-slate-400">${rows.length.toLocaleString()} rows${rows.length > shown.length ? ' · showing 300' : ''}</div>
+        </div>
+        <div class="ds-table-wrap overflow-x-auto">
+            <table class="ds-table text-left">
+                <thead class="bg-slate-50 border-b border-slate-100"><tr>
+                    <th class="px-3 py-3 text-xs font-bold text-slate-500">Employee</th><th class="px-3 py-3 text-xs font-bold text-slate-500">Department / Unit</th>
+                    <th class="px-3 py-3 text-xs font-bold text-slate-500">Position</th><th class="px-3 py-3 text-xs font-bold text-slate-500">Activity</th>
+                    <th class="px-3 py-3 text-xs font-bold text-slate-500 text-center">Source</th><th class="px-3 py-3 text-xs font-bold text-slate-500 text-center">Target</th>
+                    <th class="px-3 py-3 text-xs font-bold text-slate-500 text-center"></th>
+                </tr></thead>
+                <tbody class="divide-y divide-slate-50">${shown.map((r, i) => `
+                    <tr class="${r.reviewNeeded ? 'bg-amber-50/50' : 'hover:bg-slate-50'}">
+                        <td class="px-3 py-2"><p class="text-xs font-bold text-slate-700">${escHtml(r.employeeName || r.employeeId)}</p><p class="text-[11px] text-slate-400">${escHtml(r.employeeId)}</p></td>
+                        <td class="px-3 py-2 text-xs text-slate-600">${escHtml(r.department || '-')}<p class="text-[11px] text-slate-400">${escHtml(r.unit || 'ทั้งแผนก')}</p></td>
+                        <td class="px-3 py-2 text-xs text-slate-600">${escHtml(r.position || '-')}</td>
+                        <td class="px-3 py-2 text-xs font-bold text-slate-700">${escHtml(r.activityLabel)}<div>${_atActivityMeta(r)}</div></td>
+                        <td class="px-3 py-2 text-center">${_atMatrixSourceBadge(r)}</td>
+                        <td class="px-3 py-2 text-center text-xs font-bold ${r.isZero ? 'text-rose-600' : 'text-slate-700'}">${r.isNA ? 'N/A' : r.metricType === 'dynamic_ratio' ? 'ระบบคำนวณ' : `${r.yearlyTarget ?? '-'} ${escHtml(r.unitLabel || '')}`}</td>
+                        <td class="px-3 py-2 text-center"><button onclick="window._atMatrixEdit(${_atMatrixRows.indexOf(r)})" class="px-2.5 py-1 rounded-lg border border-slate-200 text-xs font-bold text-slate-600 hover:border-indigo-200 hover:text-indigo-700">แก้ไข</button></td>
+                    </tr>`).join('') || `<tr><td colspan="7" class="px-4 py-12 text-center text-sm text-slate-400">ไม่พบรายการตามตัวกรอง</td></tr>`}</tbody>
+            </table>
+        </div>
+    </div>`;
+}
+
+function _atMatrixFilter(key, value) {
+    _atMatrixFilters[key] = value;
+    const area = document.getElementById('at-content');
+    if (area) _atRenderMatrixInner(area);
+}
+
+function _atMatrixQuick(issue) {
+    _atMatrixFilters.issue = issue === 'all' ? '' : issue;
+    _atMatrixFilters.review = issue === 'review';
+    if (issue === 'missing') _atMatrixFilters.source = 'missing';
+    else if (_atMatrixFilters.source === 'missing') _atMatrixFilters.source = '';
+    const area = document.getElementById('at-content');
+    if (area) _atRenderMatrixInner(area);
+}
+
+function _atMatrixExport() {
+    const rows = _atFilteredMatrixRows();
+    if (!rows.length) {
+        showToast('ไม่มีข้อมูลสำหรับ export', 'warning');
+        return;
+    }
+    const data = rows.map(r => ({
+        EmployeeID: r.employeeId || '',
+        EmployeeName: r.employeeName || '',
+        Department: r.department || '',
+        Unit: r.unit || '',
+        Position: r.position || '',
+        ActivityKey: r.activityKey || '',
+        Activity: r.activityLabel || '',
+        MetricType: r.metricType || '',
+        Source: r.source || '',
+        Issue: r.reviewNeeded ? (r.source === 'missing' ? 'Missing' : r.isZero ? 'Zero' : 'Review') : (r.isNA ? 'N/A' : ''),
+        YearlyTarget: r.isNA ? 'N/A' : r.metricType === 'dynamic_ratio' ? 'System Ratio' : (r.yearlyTarget ?? ''),
+        UnitLabel: r.unitLabel || '',
+        PassPct: r.passPct ?? '',
+    }));
+    const date = new Date().toISOString().slice(0, 10);
+    if (window.XLSX) {
+        const ws = XLSX.utils.json_to_sheet(data);
+        const wb = XLSX.utils.book_new();
+        XLSX.utils.book_append_sheet(wb, ws, 'Activity Target Quality');
+        XLSX.writeFile(wb, `Activity_Target_Quality_${date}.xlsx`);
+    } else {
+        const headers = Object.keys(data[0]);
+        const csv = [headers.join(','), ...data.map(row => headers.map(h => `"${String(row[h] ?? '').replace(/"/g, '""')}"`).join(','))].join('\r\n');
+        const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+        const url = URL.createObjectURL(blob);
+        const a = Object.assign(document.createElement('a'), { href: url, download: `Activity_Target_Quality_${date}.csv` });
+        document.body.appendChild(a);
+        a.click();
+        URL.revokeObjectURL(url);
+        a.remove();
+    }
+    showToast(`Exported ${rows.length.toLocaleString()} Activity Target rows`, 'success');
+}
+
+function _atGuideTemplate(position, activityKey = '') {
+    _atSelPosition = position || '';
+    _atTemplateFocusActivity = activityKey || '';
+    _atSwitchSubTab('template');
+}
+
+async function _atMatrixEdit(index) {
+    const row = _atMatrixRows[index];
+    if (!row) return;
+    if (row.source === 'override') {
+        _atSwitchSubTab('person');
+        await _atSelectEmp(row.employeeId, row.employeeName, row.position);
+        return;
+    }
+    if (row.source === 'scope') {
+        _atSelDept = row.scope?.department || row.department;
+        _atSelUnit = row.scope?.unit || '';
+        _atSwitchSubTab('scope');
+        return;
+    }
+    if (row.source === 'system') {
+        _atSelDept = row.department || '';
+        _atSelUnit = '';
+        _atSwitchSubTab('scope');
+        return;
+    }
+    _atSelPosition = row.position || '';
+    _atSwitchSubTab('template');
+}
+
+// ── Sub-tab 2: Department / Unit Override ───────────────────────────────────
+function _atDeptIdByName(name) {
+    const row = (_atDeptRows || []).find(d => (d.Name || d.Department || d.name || d) === name) || {};
+    return row.id || row.ID || row.department_id || null;
+}
+
+function _atUnitsForDeptName(name) {
+    const deptId = _atDeptIdByName(name);
+    if (!deptId) return [];
+    return (_atUnits || []).filter(u => Number(u.department_id) === Number(deptId));
+}
+
+function _renderAtScope(area) {
+    const deptOptions = _atDepartments.map(d =>
+        `<option value="${escHtml(d)}" ${d === _atSelDept ? 'selected' : ''}>${escHtml(d)}</option>`
+    ).join('');
+
+    area.innerHTML = `
+    <div class="space-y-5">
+        <div class="ds-filter-bar space-y-3">
+            <div>
+                <p class="text-sm font-bold text-slate-700">ตั้งเป้าหมายตามแผนก/หน่วยงาน</p>
+                <p class="text-xs text-slate-500 mt-1">ใช้เมื่อแผนกหรือ Safety Unit มี target ต่างจาก Position Template กลาง เช่น Production ต้องทำ KY มากกว่า Office</p>
+            </div>
+            <div class="grid grid-cols-1 md:grid-cols-[1fr,1fr,auto] gap-3 items-end">
+                <label class="block">
+                    <span class="text-xs font-bold text-slate-500 uppercase">Department</span>
+                    <select id="at-scope-dept" onchange="window._atScopeDeptChanged(this.value)"
+                        class="mt-1 w-full px-3 py-2 text-sm border border-slate-200 rounded-lg outline-none focus:border-emerald-400 focus:ring-2 focus:ring-emerald-100">
+                        <option value="">-- เลือกแผนก --</option>
+                        ${deptOptions}
+                    </select>
+                </label>
+                <label class="block">
+                    <span class="text-xs font-bold text-slate-500 uppercase">Unit Scope</span>
+                    <select id="at-scope-unit" onchange="window._atLoadScope(document.getElementById('at-scope-dept')?.value || '', this.value)"
+                        class="mt-1 w-full px-3 py-2 text-sm border border-slate-200 rounded-lg outline-none focus:border-emerald-400 focus:ring-2 focus:ring-emerald-100">
+                        ${_atScopeUnitOptions(_atSelDept, _atSelUnit)}
+                    </select>
+                </label>
+                <button type="button" onclick="window._atLoadScope(document.getElementById('at-scope-dept')?.value || '', document.getElementById('at-scope-unit')?.value || '')"
+                    class="px-4 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold">โหลดค่า</button>
+            </div>
+            <div class="rounded-xl border border-emerald-100 bg-emerald-50/70 p-3 text-xs text-emerald-800">
+                Priority: Employee Override > Department/Unit Override > Position Template. ถ้าเลือก Unit เป็น “ทั้งแผนก” ระบบจะใช้กับทุกคนในแผนกที่ไม่มี unit-specific override.
+            </div>
+        </div>
+        <div id="at-scope-grid">
+            <div class="text-center py-16 text-slate-400">
+                <p class="font-medium">เลือก Department และ Unit Scope เพื่อจัดการเป้าหมาย</p>
+            </div>
+        </div>
+    </div>`;
+
+    window._atScopeDeptChanged = (dept) => {
+        _atSelDept = dept;
+        _atSelUnit = '';
+        const unitSel = document.getElementById('at-scope-unit');
+        if (unitSel) unitSel.innerHTML = _atScopeUnitOptions(dept, '');
+        _atLoadScope(dept, '');
+    };
+
+    if (_atSelDept) _atLoadScope(_atSelDept, _atSelUnit);
+}
+
+function _atScopeUnitOptions(dept, selected) {
+    const units = _atUnitsForDeptName(dept);
+    return `
+        <option value="" ${selected === '' ? 'selected' : ''}>ทั้งแผนก / Department-wide</option>
+        ${units.map(u => {
+            const name = u.name || u.Name || '';
+            return `<option value="${escHtml(name)}" ${name === selected ? 'selected' : ''}>${escHtml(name)}</option>`;
+        }).join('')}`;
+}
+
+async function _atLoadScope(dept, unit = '') {
+    _atSelDept = String(dept || '').trim();
+    _atSelUnit = String(unit || '').trim();
+    const grid = document.getElementById('at-scope-grid');
+    if (!grid) return;
+    if (!_atSelDept) {
+        grid.innerHTML = `<div class="text-center py-16 text-slate-400"><p class="font-medium">เลือก Department เพื่อจัดการเป้าหมาย</p></div>`;
+        return;
+    }
+    grid.innerHTML = `<div class="flex justify-center py-10"><div class="animate-spin rounded-full h-9 w-9 border-4 border-emerald-500 border-t-transparent"></div></div>`;
+    try {
+        const qs = new URLSearchParams({ department: _atSelDept, unit: _atSelUnit });
+        const res = await API.get(`/activity-targets/scope-overrides?${qs.toString()}`);
+        const rowMap = {};
+        (res.data || []).forEach(r => { rowMap[r.ActivityKey] = r; });
+        grid.innerHTML = _atScopeGridHtml(_atSelDept, _atSelUnit, rowMap);
+    } catch (e) {
+        grid.innerHTML = `<div class="py-8 text-center text-red-400 text-sm">โหลดไม่ได้: ${e.message}</div>`;
+    }
+}
+
+function _atScopeGridHtml(dept, unit, rowMap) {
+    const scopeLabel = unit ? `${dept} · ${unit}` : `${dept} · ทั้งแผนก`;
+    const rows = _atActivities.map(a => {
+        const d = rowMap[a.key] || {};
+        const exists = Boolean(d.ActivityKey);
+        const isNA = d.IsNA === 1 || d.IsNA === true || d.IsNA === '1';
+        const dimCls = isNA ? 'opacity-40 pointer-events-none select-none' : '';
+        return `
+        <tr class="hover:bg-slate-50 transition-colors ${isNA ? 'bg-slate-50/60' : ''}">
+            <td class="px-4 py-3">
+                <p class="text-sm font-semibold ${isNA ? 'line-through text-slate-400' : 'text-slate-800'}">${a.label}</p>
+                <p class="text-xs text-slate-400 mt-0.5">${a.desc}</p>
+                ${_atActivityMeta(a)}
+            </td>
+            <td class="px-4 py-3 text-center">
+                ${exists ? `<span class="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 text-emerald-700">Scope</span>` : _atIsDynamic(a) ? `<span class="px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-100 text-amber-700">System Ratio</span>` : `<span class="px-2 py-0.5 rounded-full text-[10px] font-bold bg-slate-100 text-slate-500">ใช้ค่า Position</span>`}
+            </td>
+            <td class="px-4 py-3 text-center ${dimCls}">
+                ${_atTargetEditor(a, `scope-${a.key}-target`, d.YearlyTarget, 'ว่าง = ใช้ Position', isNA, 'emerald')}
+            </td>
+            <td class="px-4 py-3 text-center ${dimCls}">
+                <div class="flex items-center gap-1 justify-center">
+                    <input id="scope-${a.key}-pct" type="number" min="0" max="100" value="${isNA ? '' : (d.PassPct ?? 80)}"
+                        ${isNA ? 'disabled' : ''}
+                        class="w-16 px-2 py-1.5 text-sm text-center border border-slate-200 rounded-lg outline-none focus:border-emerald-400 focus:ring-2 focus:ring-emerald-100 disabled:bg-slate-100">
+                    <span class="text-xs text-slate-400">%</span>
+                </div>
+            </td>
+            <td class="px-4 py-3">
+                <div class="flex gap-1.5 justify-center flex-wrap">
+                    ${!isNA ? `
+                    <button onclick="window._atSaveScope('${dept.replace(/'/g,"\\'")}','${unit.replace(/'/g,"\\'")}','${a.key}',this)"
+                        class="px-3 py-1.5 text-xs font-semibold rounded-lg border border-emerald-200 text-emerald-700 bg-emerald-50 hover:bg-emerald-100 transition-colors">บันทึก</button>` : ''}
+                    <button onclick="window._atToggleScopeNA('${dept.replace(/'/g,"\\'")}','${unit.replace(/'/g,"\\'")}','${a.key}',${isNA ? 0 : 1},this)"
+                        class="px-2.5 py-1.5 text-xs font-semibold rounded-lg border transition-colors ${isNA ? 'border-emerald-200 text-emerald-600 bg-emerald-50 hover:bg-emerald-100' : 'border-slate-200 text-slate-500 bg-slate-50 hover:bg-slate-100'}">
+                        ${isNA ? 'ยกเลิก N/A' : 'N/A'}
+                    </button>
+                    ${exists ? `
+                    <button onclick="window._atClearScope('${dept.replace(/'/g,"\\'")}','${unit.replace(/'/g,"\\'")}','${a.key}',this)"
+                        title="ลบ scope override และกลับไปใช้ Position Template"
+                        class="px-2 py-1.5 text-xs font-semibold rounded-lg border border-red-200 text-red-600 bg-red-50 hover:bg-red-100 transition-colors">ลบ</button>` : ''}
+                </div>
+            </td>
+        </tr>`;
+    }).join('');
+    return `
+    <div class="ds-table-wrap">
+        <div class="px-4 py-3 border-b border-slate-100 flex items-center justify-between flex-wrap gap-2">
+            <div>
+                <p class="text-sm font-bold text-slate-700">Scope Override: <span class="text-emerald-700">${escHtml(scopeLabel)}</span></p>
+                <p class="text-xs text-slate-400 mt-0.5">ช่องที่ไม่บันทึก override จะ fallback ไปใช้ Position Template</p>
+            </div>
+        </div>
+        <table class="ds-table text-left">
+            <thead class="bg-slate-50 border-b border-slate-100">
+                <tr>
+                    <th class="px-4 py-3 text-xs font-bold text-slate-500 uppercase tracking-wide">กิจกรรม</th>
+                    <th class="px-4 py-3 text-xs font-bold text-slate-500 uppercase tracking-wide text-center w-28">Source</th>
+                    <th class="px-4 py-3 text-xs font-bold text-slate-500 uppercase tracking-wide text-center w-40">เป้าหมาย / ตัวหาร</th>
+                    <th class="px-4 py-3 text-xs font-bold text-slate-500 uppercase tracking-wide text-center w-32">เกณฑ์ผ่าน</th>
+                    <th class="px-4 py-3 text-xs font-bold text-slate-500 uppercase tracking-wide text-center w-36"></th>
+                </tr>
+            </thead>
+            <tbody class="divide-y divide-slate-50">${rows}</tbody>
+        </table>
+    </div>`;
+}
+
+async function _atSaveScope(dept, unit, actKey, btn) {
+    const target = document.getElementById(`scope-${actKey}-target`)?.value;
+    const pct = document.getElementById(`scope-${actKey}-pct`)?.value;
+    const storedTarget = _atStoredTarget(actKey, target);
+    if (storedTarget === null) { alert('กรุณาระบุเป้าหมาย หรือกดลบเพื่อ fallback ไปใช้ Position Template'); return; }
+    const orig = btn.textContent;
+    btn.disabled = true; btn.textContent = 'กำลังบันทึก...';
+    try {
+        await API.put('/activity-targets/scope-overrides', { Department: dept, Unit: unit, ActivityKey: actKey, YearlyTarget: storedTarget, PassPct: Number(pct) || 80, IsNA: 0 });
+        await _atLoadScope(dept, unit);
+    } catch (e) {
+        btn.disabled = false; btn.textContent = orig;
+        alert('บันทึกไม่สำเร็จ: ' + e.message);
+    }
+}
+
+async function _atToggleScopeNA(dept, unit, actKey, setNA, btn) {
+    btn.disabled = true;
+    try {
+        if (setNA) {
+            await API.put('/activity-targets/scope-overrides', { Department: dept, Unit: unit, ActivityKey: actKey, YearlyTarget: 0, PassPct: 0, IsNA: 1 });
+        } else {
+            await API.put('/activity-targets/scope-overrides', { Department: dept, Unit: unit, ActivityKey: actKey, YearlyTarget: null });
+        }
+        await _atLoadScope(dept, unit);
+    } catch (e) {
+        btn.disabled = false;
+        alert('ไม่สำเร็จ: ' + e.message);
+    }
+}
+
+async function _atClearScope(dept, unit, actKey, btn) {
+    if (!confirm('ลบ scope override นี้ และกลับไปใช้ Position Template?')) return;
+    btn.disabled = true;
+    try {
+        await API.put('/activity-targets/scope-overrides', { Department: dept, Unit: unit, ActivityKey: actKey, YearlyTarget: null });
+        await _atLoadScope(dept, unit);
+    } catch (e) {
+        btn.disabled = false;
+        alert('ไม่สำเร็จ: ' + e.message);
+    }
 }
 
 // ── Sub-tab 1: Position Template ─────────────────────────────────────────────
@@ -4822,6 +6495,8 @@ function _renderAtTemplate(area) {
 
     window._atLoadTemplate = async (pos) => {
         _atSelPosition = pos;
+        const sel = document.getElementById('at-pos-sel');
+        if (sel && sel.value !== pos) sel.value = pos;
         // update bulk-apply button visibility without re-rendering the whole shell
         const btnArea = document.getElementById('at-bulk-btn-area');
         if (btnArea) {
@@ -4852,6 +6527,11 @@ function _renderAtTemplate(area) {
             const rowMap = {};
             rows.forEach(r => { rowMap[r.ActivityKey] = r; });
             grid.innerHTML = _atTemplateGridHtml(pos, rowMap);
+            if (_atTemplateFocusActivity) {
+                setTimeout(() => {
+                    document.getElementById(`at-template-row-${_atTemplateFocusActivity}`)?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                }, 80);
+            }
         } catch (e) {
             grid.innerHTML = `<div class="py-8 text-center text-red-400 text-sm">โหลดไม่ได้: ${e.message}</div>`;
         }
@@ -4865,16 +6545,16 @@ function _atTemplateGridHtml(pos, rowMap) {
         const d    = rowMap[a.key] || {};
         const isNA = d.IsNA === 1 || d.IsNA === true;
         const dimCls = isNA ? 'opacity-40 pointer-events-none select-none' : '';
+        const focus = _atTemplateFocusActivity === a.key;
         return `
-        <tr class="hover:bg-slate-50 transition-colors ${isNA ? 'bg-slate-50/60' : ''}">
+        <tr id="at-template-row-${escHtml(a.key)}" class="hover:bg-slate-50 transition-colors ${isNA ? 'bg-slate-50/60' : ''} ${focus ? 'bg-indigo-50 ring-2 ring-indigo-200' : ''}">
             <td class="px-4 py-3">
-                <p class="text-sm font-semibold ${isNA ? 'line-through text-slate-400' : 'text-slate-800'}">${a.label}</p>
+                <p class="text-sm font-semibold ${isNA ? 'line-through text-slate-400' : 'text-slate-800'}">${a.label}${focus ? '<span class="ml-2 px-2 py-0.5 rounded-full bg-indigo-100 text-indigo-700 text-[10px] font-black">Suggested</span>' : ''}</p>
                 <p class="text-xs text-slate-400 mt-0.5">${a.desc}</p>
+                ${_atActivityMeta(a)}
             </td>
             <td class="px-4 py-3 text-center ${dimCls}">
-                <input id="tgt-${a.key}-target" type="number" min="0" value="${isNA ? '' : (d.YearlyTarget ?? '')}"
-                    placeholder="0" ${isNA ? 'disabled' : ''}
-                    class="w-20 px-2 py-1.5 text-sm text-center border border-slate-200 rounded-lg outline-none focus:border-indigo-400 focus:ring-2 focus:ring-indigo-100 disabled:bg-slate-100">
+                ${_atTargetEditor(a, `tgt-${a.key}-target`, d.YearlyTarget, '0', isNA)}
             </td>
             <td class="px-4 py-3 text-center ${dimCls}">
                 <div class="flex items-center gap-1 justify-center">
@@ -4911,7 +6591,7 @@ function _atTemplateGridHtml(pos, rowMap) {
             <thead class="bg-slate-50 border-b border-slate-100">
                 <tr>
                     <th class="px-4 py-3 text-xs font-bold text-slate-500 uppercase tracking-wide">กิจกรรม</th>
-                    <th class="px-4 py-3 text-xs font-bold text-slate-500 uppercase tracking-wide text-center w-32">เป้าหมาย/ปี</th>
+                    <th class="px-4 py-3 text-xs font-bold text-slate-500 uppercase tracking-wide text-center w-40">เป้าหมาย / ตัวหาร</th>
                     <th class="px-4 py-3 text-xs font-bold text-slate-500 uppercase tracking-wide text-center w-32">เกณฑ์ผ่าน</th>
                     <th class="px-4 py-3 text-xs font-bold text-slate-500 uppercase tracking-wide text-center w-24"></th>
                 </tr>
@@ -4924,10 +6604,13 @@ function _atTemplateGridHtml(pos, rowMap) {
 async function _atSaveTemplate(pos, actKey, btn) {
     const target = document.getElementById(`tgt-${actKey}-target`)?.value;
     const pct    = document.getElementById(`tgt-${actKey}-pct`)?.value;
+    const storedTarget = _atStoredTarget(actKey, target);
+    if (storedTarget === null) { alert('กรุณาระบุเป้าหมาย'); return; }
     const orig   = btn.textContent;
     btn.disabled = true; btn.textContent = 'กำลังบันทึก...';
     try {
-        await API.put('/activity-targets/position-templates', { PositionName: pos, ActivityKey: actKey, YearlyTarget: Number(target)||0, PassPct: Number(pct)||80, IsNA: 0 });
+        await API.put('/activity-targets/position-templates', { PositionName: pos, ActivityKey: actKey, YearlyTarget: storedTarget, PassPct: Number(pct)||80, IsNA: 0 });
+        _atRefreshCoverage();
         btn.textContent = 'บันทึกแล้ว';
         btn.className = btn.className.replace('border-indigo-200 text-indigo-700 bg-indigo-50 hover:bg-indigo-100','border-emerald-200 text-emerald-700 bg-emerald-50');
         setTimeout(() => { btn.disabled = false; btn.textContent = orig; btn.className = btn.className.replace('border-emerald-200 text-emerald-700 bg-emerald-50','border-indigo-200 text-indigo-700 bg-indigo-50 hover:bg-indigo-100'); }, 2000);
@@ -4950,6 +6633,7 @@ async function _atToggleTplNA(pos, actKey, setNA, btn) {
         (res.data || []).forEach(r => { rowMap[r.ActivityKey] = r; });
         const grid = document.getElementById('at-tpl-grid');
         if (grid) grid.innerHTML = _atTemplateGridHtml(pos, rowMap);
+        _atRefreshCoverage();
     } catch (e) {
         btn.disabled = false;
         alert('ไม่สำเร็จ: ' + e.message);
@@ -5058,6 +6742,8 @@ async function _atSelectEmp(empId, name, position) {
     try {
         const res = await API.get(`/activity-targets/employee/${empId}`);
         _atEmpTargets = res.data?.targets || [];
+        _atSelEmp.Department = res.data?.department || _atSelEmp.Department || '';
+        _atSelEmp.Unit = res.data?.unit || _atSelEmp.Unit || '';
         _renderAtPersonGrid(grid);
     } catch (e) {
         grid.innerHTML = `<div class="py-8 text-center text-red-400 text-sm">โหลดไม่ได้: ${e.message}</div>`;
@@ -5071,7 +6757,9 @@ function _renderAtPersonGrid(grid) {
 
     const sourceLabel = s => {
         if (s === 'override')  return `<span class="px-2 py-0.5 rounded-full text-[10px] font-bold bg-violet-100 text-violet-700">รายบุคคล</span>`;
+        if (s === 'scope')     return `<span class="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 text-emerald-700">แผนก/Unit</span>`;
         if (s === 'template')  return `<span class="px-2 py-0.5 rounded-full text-[10px] font-bold bg-sky-100 text-sky-700">เทมเพลต</span>`;
+        if (s === 'system')    return `<span class="px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-100 text-amber-700">ระบบคำนวณ</span>`;
         return `<span class="px-2 py-0.5 rounded-full text-[10px] font-bold bg-slate-100 text-slate-500">ยังไม่กำหนด</span>`;
     };
 
@@ -5084,6 +6772,7 @@ function _renderAtPersonGrid(grid) {
             <td class="px-4 py-3">
                 <p class="text-sm font-semibold text-slate-800 ${isNA ? 'line-through text-slate-400' : ''}">${a.label}</p>
                 <p class="text-xs text-slate-400 mt-0.5">${a.desc}</p>
+                ${_atActivityMeta(a)}
             </td>
             <td class="px-4 py-3 text-center">
                 ${isNA
@@ -5091,10 +6780,7 @@ function _renderAtPersonGrid(grid) {
                     : sourceLabel(d.source || 'none')}
             </td>
             <td class="px-4 py-3 text-center ${dimCls}">
-                <input id="per-${a.key}-target" type="number" min="0" value="${isNA ? '' : (d.yearlyTarget ?? '')}"
-                    placeholder="${d.source === 'template' && !isNA ? d.yearlyTarget ?? '—' : '0'}"
-                    ${isNA ? 'disabled' : ''}
-                    class="w-20 px-2 py-1.5 text-sm text-center border border-slate-200 rounded-lg outline-none focus:border-indigo-400 focus:ring-2 focus:ring-indigo-100 disabled:bg-slate-100">
+                ${_atTargetEditor(a, `per-${a.key}-target`, d.yearlyTarget, d.source === 'template' && !isNA ? d.yearlyTarget ?? '-' : '0', isNA)}
             </td>
             <td class="px-4 py-3 text-center ${dimCls}">
                 <div class="flex items-center gap-1 justify-center">
@@ -5132,16 +6818,16 @@ function _renderAtPersonGrid(grid) {
         <div class="px-4 py-3 border-b border-slate-100 flex items-center justify-between flex-wrap gap-2">
             <div>
                 <p class="text-sm font-bold text-slate-700">${_atSelEmp.Name || _atSelEmp.EmployeeID}</p>
-                <p class="text-xs text-slate-400">${_atSelEmp.EmployeeID}${_atSelEmp.Position ? ' · ' + _atSelEmp.Position : ''}</p>
+                <p class="text-xs text-slate-400">${_atSelEmp.EmployeeID}${_atSelEmp.Position ? ' · ' + _atSelEmp.Position : ''}${_atSelEmp.Department ? ' · ' + _atSelEmp.Department : ''}${_atSelEmp.Unit ? ' · ' + _atSelEmp.Unit : ''}</p>
             </div>
-            <p class="text-xs text-slate-400">วัดผลรายปี · override มีลำดับสูงกว่าเทมเพลต</p>
+            <p class="text-xs text-slate-400">วัดผลรายปี · รายบุคคล > แผนก/Unit > เทมเพลต</p>
         </div>
         <table class="ds-table text-left">
             <thead class="bg-slate-50 border-b border-slate-100">
                 <tr>
                     <th class="px-4 py-3 text-xs font-bold text-slate-500 uppercase tracking-wide">กิจกรรม</th>
                     <th class="px-4 py-3 text-xs font-bold text-slate-500 uppercase tracking-wide text-center w-28">แหล่งที่มา</th>
-                    <th class="px-4 py-3 text-xs font-bold text-slate-500 uppercase tracking-wide text-center w-32">เป้าหมาย/ปี</th>
+                    <th class="px-4 py-3 text-xs font-bold text-slate-500 uppercase tracking-wide text-center w-40">เป้าหมาย / ตัวหาร</th>
                     <th class="px-4 py-3 text-xs font-bold text-slate-500 uppercase tracking-wide text-center w-32">เกณฑ์ผ่าน</th>
                     <th class="px-4 py-3 text-xs font-bold text-slate-500 uppercase tracking-wide text-center w-32"></th>
                 </tr>
@@ -5154,11 +6840,12 @@ function _renderAtPersonGrid(grid) {
 async function _atSaveOverride(empId, actKey, btn) {
     const target = document.getElementById(`per-${actKey}-target`)?.value;
     const pct    = document.getElementById(`per-${actKey}-pct`)?.value;
-    if (target === '' || target === null) { alert('กรุณาระบุเป้าหมาย'); return; }
+    const storedTarget = _atStoredTarget(actKey, target);
+    if (storedTarget === null) { alert('กรุณาระบุเป้าหมาย'); return; }
     const orig = btn.textContent;
     btn.disabled = true; btn.textContent = 'กำลังบันทึก...';
     try {
-        await API.put(`/activity-targets/employee/${empId}`, { ActivityKey: actKey, YearlyTarget: Number(target), PassPct: Number(pct)||80 });
+        await API.put(`/activity-targets/employee/${empId}`, { ActivityKey: actKey, YearlyTarget: storedTarget, PassPct: Number(pct)||80 });
         // refresh targets for this employee
         const res = await API.get(`/activity-targets/employee/${empId}`);
         _atEmpTargets = res.data?.targets || [];

@@ -1,15 +1,23 @@
 // public/js/api.js
 // ===============================
-// Central API Wrapper (Vercel-ready)
+// Central API Wrapper
 // ===============================
 
-// FIX: was falling back to hardcoded localhost — breaks in production (Vercel)
-const API_BASE =
-    import.meta?.env?.VITE_API_BASE ||
-    window.API_BASE ||
-    ((window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1' || !window.location.hostname)
-        ? 'http://localhost:5000/api'
-        : '/api');
+function resolveApiBase() {
+    if (import.meta?.env?.VITE_API_BASE) return import.meta.env.VITE_API_BASE.replace(/\/+$/, '');
+    if (window.API_BASE) return String(window.API_BASE).replace(/\/+$/, '');
+
+    const h = window.location.hostname;
+    if (h === 'localhost' || h === '127.0.0.1' || !h) return 'http://localhost:5000/api';
+
+    const path = window.location.pathname || '/';
+    const marker = '/index.html';
+    const appPath = path.includes(marker) ? path.slice(0, path.indexOf(marker) + 1) : path;
+    return `${appPath.replace(/\/+$/, '')}/api`;
+}
+
+// Uses localhost for local testing and current app subfolder for hosted deployments.
+const API_BASE = resolveApiBase();
 
 export async function apiFetch(endpoint, options = {}) {
     const token = TSHSession.getToken();

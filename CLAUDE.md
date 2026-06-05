@@ -54,6 +54,8 @@ ALLOWED_ORIGINS=...        # comma-separated frontend origins
 
 Current production target is the company shared hosting/PHP API path backed by Company MySQL/MariaDB and local server storage. The detailed current handoff and all phase/deploy history live in `CHANGELOG.md`. Production operation steps live in `DEPLOYMENT.md`.
 
+Current local work: Safety Patrol Sec. & Supervisor schedule linkage is implemented locally and documented in `CHANGELOG.md`; it has not been deployed or pushed.
+
 ## Split Documentation
 
 - `AGENTS.md` - Codex/Claude operating rules, safety checks, tests, forbidden actions, encoding, DB migration, and upload rules.

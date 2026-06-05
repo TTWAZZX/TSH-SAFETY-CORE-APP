@@ -1,7 +1,8 @@
 // public/js/pages/dashboard.js
 // Cross-module KPI Dashboard — ภาพรวมทุก module (all authenticated users)
 import { API } from '../api.js';
-import { closeModal, escHtml, openModal, showError, showToast } from '../ui.js';
+import { closeModal, escHtml, openModal, showError, showToast } from '../ui.js?v=20260602-mobile-nav-m53';
+import { MODULE_ICONS, MODULE_META } from '../module-meta.js';
 
 let _dashboardConfig = null;
 let _currentUser = {};
@@ -9,22 +10,25 @@ let _isAdmin = false;
 let _dashboardEventsReady = false;
 
 const DASHBOARD_MODULES = [
-    { hash:'patrol', label:'Safety Patrol' },
-    { hash:'hiyari', label:'Hiyari Near-Miss' },
-    { hash:'ky', label:'KY Activity' },
-    { hash:'cccf', label:'CCCF Activity' },
-    { hash:'yokoten', label:'Yokoten' },
-    { hash:'training', label:'Safety Training' },
-    { hash:'accident', label:'Accident Report' },
-    { hash:'fourm', label:'4M Change' },
-    { hash:'kpi', label:'KPI' },
-    { hash:'policy', label:'Policy' },
-    { hash:'committee', label:'Committee' },
-    { hash:'machine-safety', label:'Machine Safety' },
-    { hash:'ojt', label:'OJT / SCW' },
-    { hash:'contractor', label:'Contractor' },
-    { hash:'safety-culture', label:'Safety Culture' },
-];
+    'patrol',
+    'hiyari',
+    'ky',
+    'cccf',
+    'yokoten',
+    'training',
+    'accident',
+    'fourm',
+    'kpi',
+    'policy',
+    'committee',
+    'machine-safety',
+    'ojt',
+    'contractor',
+    'safety-culture',
+].map(key => ({
+    hash: MODULE_META[key]?.route || key,
+    label: MODULE_META[key]?.quickLabel || MODULE_META[key]?.shortTitle || MODULE_META[key]?.title || key,
+}));
 
 // ─────────────────────────────────────────────────────────────────────────────
 // MAIN LOADER
@@ -88,8 +92,18 @@ function buildShell(user, year) {
             </div>
         </div>
 
-        <!-- ═══ MODULE KPI CARDS ═══ -->
+        <!-- ═══ EXECUTIVE COMMAND CENTER ═══ -->
         <div id="db-health-wrap"></div>
+
+        <!-- ═══ ACTION REQUIRED ═══ -->
+        <div id="db-alerts-wrap">
+            <div class="ds-section p-6">
+                <div class="flex items-center gap-3 text-slate-400">
+                    <div class="animate-spin rounded-full h-6 w-6 border-4 border-amber-400 border-t-transparent"></div>
+                    <p class="text-sm font-semibold">กำลังโหลดคิวงานเร่งด่วน...</p>
+                </div>
+            </div>
+        </div>
 
         <div id="db-compliance-wrap"></div>
 
@@ -102,15 +116,13 @@ function buildShell(user, year) {
                               d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"/>
                     </svg>
                 </span>
-                ภาพรวมระบบ ${year}
+                Module Health / ภาพรวมระบบ ${year}
             </h2>
             <div id="db-module-cards" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
                 ${_skeletonCards(DASHBOARD_MODULES.length)}
             </div>
         </div>
 
-        <!-- ═══ ALERTS ═══ -->
-        <div id="db-alerts-wrap"></div>
 
         <!-- ═══ MY ACTIVITY TARGETS ═══ -->
         <div>
@@ -146,7 +158,7 @@ function setupDashboardEvents() {
         if (e.target.closest('#btn-dashboard-config')) openDashboardConfigModal();
 
         // Dashboard drill-down: write filter state before module navigation
-        const card = e.target.closest('#db-module-cards a[data-filter]');
+        const card = e.target.closest('#db-module-cards a[data-filter], #db-alerts-wrap a[data-filter]');
         if (card) {
             try {
                 const hash = card.getAttribute('href').replace('#', '');
@@ -262,13 +274,13 @@ function _renderHeroStats(d) {
     if (!strip) return;
 
     const hiyariAlert = d.hiyari?.open > 0;
-    const accAlert    = d.accident?.recordable > 0;
+    const fourmActive = d.fourm?.active ?? ((d.fourm?.open || 0) + (d.fourm?.pending || 0));
 
     const stats = [
         { value: d.patrol?.attended   ?? '—', label: 'การเดินตรวจ',    color: '#6ee7b7' },
         { value: d.hiyari?.open       ?? '—', label: 'Hiyari ค้างอยู่', color: hiyariAlert ? '#fca5a5' : '#6ee7b7' },
-        { value: d.cccf?.workerYear   ?? '—', label: 'CCCF Worker',     color: '#6ee7b7' },
-        { value: d.training?.passRate != null ? d.training.passRate + '%' : '—', label: 'อบรมผ่านเกณฑ์', color: (d.training?.passRate ?? 0) >= 80 ? '#6ee7b7' : '#fde68a' },
+        { value: fourmActive,             label: '4M Active',       color: fourmActive > 0 ? '#fde68a' : '#6ee7b7' },
+        { value: d.training?.passRate != null ? d.training.passRate + '%' : '—', label: 'Training Pass', color: (d.training?.passRate ?? 0) >= 80 ? '#6ee7b7' : '#fde68a' },
     ];
 
     strip.innerHTML = stats.map(s => `
@@ -333,11 +345,12 @@ function _renderHealthIndex(d) {
         </div>
         <div class="ds-section p-5 xl:col-span-2">
             <p class="text-[11px] font-bold text-slate-400 uppercase tracking-wider mb-3">Executive Signal</p>
-            <div class="grid grid-cols-2 lg:grid-cols-4 gap-3">
+            <div class="grid grid-cols-2 lg:grid-cols-5 gap-3">
                 ${_signalCard('Training', d.training?.passRate != null ? d.training.passRate + '%' : '-', d.training?.passRate ?? 0)}
                 ${_signalCard('CCCF Permanent', d.cccf?.permPct != null ? d.cccf.permPct + '%' : '-', d.cccf?.permPct ?? 0)}
                 ${_signalCard('Yokoten Response', d.yokoten?.pct != null ? d.yokoten.pct + '%' : '-', d.yokoten?.pct ?? 0)}
-                ${_signalCard('Open Risk', `${(d.hiyari?.open || 0) + (d.fourm?.open || 0) + (d.patrol?.openIssues || 0)}`, 100 - Math.min(100, ((d.hiyari?.open || 0) + (d.fourm?.open || 0) + (d.patrol?.openIssues || 0)) * 5))}
+                ${_signalCard('4M Closure', d.fourm?.closureRate != null ? d.fourm.closureRate + '%' : '-', d.fourm?.closureRate ?? 0)}
+                ${_signalCard('Open Risk', `${(d.hiyari?.open || 0) + (d.fourm?.active || d.fourm?.open || 0) + (d.patrol?.openIssues || 0)}`, 100 - Math.min(100, ((d.hiyari?.open || 0) + (d.fourm?.active || d.fourm?.open || 0) + (d.patrol?.openIssues || 0)) * 5))}
             </div>
         </div>
     </div>`;
@@ -368,22 +381,36 @@ function _renderComplianceMatrix(d) {
     if (!wrap) return;
     const rows = d.complianceMatrix || [];
     if (!rows.length) {
-        wrap.innerHTML = '';
+        wrap.innerHTML = `
+        <div class="ds-section p-6 text-center border-dashed border-slate-200">
+            <p class="text-sm font-bold text-slate-600">ยังไม่มีข้อมูลภาพรวมรายแผนก / No department coverage data</p>
+            <p class="text-xs text-slate-400 mt-1">ระบบจะแสดงตารางเมื่อ API ส่งข้อมูล Department × Module Compliance กลับมา</p>
+        </div>`;
         return;
     }
     const cols = [
-        ['patrol', 'Patrol'],
+        ['activityTargets', 'Targets'],
+        ['cccfWorker', 'CCCF A'],
+        ['cccfPermanent', 'CCCF Perm.'],
+        ['patrolIssues', 'Patrol Issue'],
         ['hiyari', 'Hiyari'],
         ['ky', 'KY'],
         ['yokoten', 'Yokoten'],
         ['training', 'Training'],
         ['fourm', '4M'],
+        ['accident', 'Accident'],
+        ['machine', 'Machine'],
+        ['ojt', 'OJT'],
+        ['safetyCulture', 'Safety Culture'],
     ];
-    const cell = (v) => {
-        if (v === null || v === undefined) return `<span class="text-slate-300">-</span>`;
+    const cell = (v, title = '') => {
+        if (v === null || v === undefined) {
+            return `<span class="inline-flex justify-center min-w-10 px-2 py-1 rounded-lg text-xs font-bold bg-slate-100 text-slate-400"
+                          title="${escHtml(title || 'No target or source data for this department')}">N/A</span>`;
+        }
         const color = v >= 80 ? '#059669' : v >= 50 ? '#d97706' : '#dc2626';
         return `<span class="inline-flex justify-center min-w-10 px-2 py-1 rounded-lg text-xs font-bold"
-                      style="background:${color}12;color:${color}">${v}%</span>`;
+                      title="${escHtml(title)}" style="background:${color}12;color:${color}">${v}%</span>`;
     };
 
     wrap.innerHTML = `
@@ -392,8 +419,14 @@ function _renderComplianceMatrix(d) {
             <div>
                 <p class="text-[11px] font-bold text-slate-400 uppercase tracking-wider">Department × Module Compliance</p>
                 <h2 class="text-base font-bold text-slate-800 mt-1">ภาพรวมความครอบคลุมรายแผนก</h2>
+                <p class="text-xs text-slate-400 mt-1">เปรียบเทียบสถานะความครอบคลุมของแต่ละแผนกในทุกโมดูลหลัก / Compare department coverage across core safety modules.</p>
             </div>
-            <p class="text-xs text-slate-400">${rows.length} แผนกที่แสดง</p>
+            <div class="flex flex-wrap gap-2 text-[11px] font-bold">
+                <span class="px-2 py-1 rounded-lg bg-emerald-50 text-emerald-700">ผ่าน / On Track ≥80%</span>
+                <span class="px-2 py-1 rounded-lg bg-amber-50 text-amber-700">ต้องติดตาม / Watch 50-79%</span>
+                <span class="px-2 py-1 rounded-lg bg-slate-100 text-slate-500">ไม่มีข้อมูล / N/A</span>
+                <span class="px-2 py-1 rounded-lg bg-white text-slate-400 border border-slate-100">${rows.length} แผนก / departments</span>
+            </div>
         </div>
         <div class="overflow-x-auto">
             <table class="ds-table text-sm">
@@ -410,7 +443,11 @@ function _renderComplianceMatrix(d) {
                         return `
                         <tr class="hover:bg-slate-50">
                             <td class="px-4 py-3 font-semibold text-slate-700 whitespace-nowrap">${escHtml(r.department)}</td>
-                            ${cols.map(([key]) => `<td class="px-3 py-3 text-center">${cell(r[key])}</td>`).join('')}
+                            ${cols.map(([key]) => {
+                                const m = key === 'activityTargets' ? r.targetMeta : null;
+                                const title = m ? `Missing ${m.missing || 0} · Zero ${m.zero || 0} · N/A ${m.na || 0} · Scope ${m.scope || 0} · Employee ${m.override || 0}` : '';
+                                return `<td class="px-3 py-3 text-center">${cell(r[key], title)}</td>`;
+                            }).join('')}
                             <td class="px-4 py-3 text-center">
                                 <span class="inline-flex justify-center min-w-12 px-2.5 py-1 rounded-full text-xs font-extrabold text-white"
                                       style="background:${scoreColor}">${r.score}%</span>
@@ -519,6 +556,7 @@ function _renderModuleCards(d) {
                     ? `<span class="text-red-600 font-semibold">${d.accident.recordable} Recordable</span>`
                     : `<span class="text-slate-400">—</span>`,
             alert: d.accident?.recordable > 0,
+            filterState: d.accident?.recordable > 0 ? JSON.stringify({ tab: 'reports', quick: 'recordable' }) : null,
         },
         {
             hash: 'fourm',
@@ -526,13 +564,17 @@ function _renderModuleCards(d) {
             icon: `<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/>`,
             grad: 'linear-gradient(135deg,#6366f1,#0284c7)',
             shadow: 'rgba(99,102,241,0.3)',
-            primary: d.fourm?.open ?? '—',
-            primaryLabel: 'Change Notice ค้างอยู่',
-            secondary: d.fourm?.open === 0
+            primary: d.fourm?.active ?? ((d.fourm?.open || 0) + (d.fourm?.pending || 0)),
+            primaryLabel: 'Open + Pending Change Notice',
+            secondary: (d.fourm?.active || 0) === 0
                 ? `<span class="text-emerald-600">ไม่มีรายการค้าง</span>`
-                : `<span class="text-amber-600 font-semibold">รอดำเนินการ ${d.fourm?.open} รายการ</span>`,
-            alert: d.fourm?.open > 0,
-            filterState: d.fourm?.open > 0 ? JSON.stringify({ tab: 'notices', status: 'Open' }) : null,
+                : `<span class="text-amber-600 font-semibold">${d.fourm?.open || 0} Open / ${d.fourm?.pending || 0} Pending / ${d.fourm?.overdue || 0} Overdue</span>`,
+            footer: `<span>${d.fourm?.trainingRequired || 0} Training Required · ${d.fourm?.matrix?.employees || 0} Matrix employees</span>`,
+            alert: (d.fourm?.active || 0) > 0 || (d.fourm?.overdue || 0) > 0,
+            pct: d.fourm?.closureRate,
+            filterState: (d.fourm?.overdue || 0) > 0
+                ? JSON.stringify({ tab: 'notices', status: 'overdue' })
+                : (d.fourm?.active || 0) > 0 ? JSON.stringify({ tab: 'notices', status: 'all' }) : null,
         },
         {
             hash: 'kpi',
@@ -576,6 +618,9 @@ function _renderModuleCards(d) {
                 ? `<span class="text-red-600 font-semibold">${d.machineSafety?.openIssues ?? 0} issue ค้าง / ${d.machineSafety?.critical ?? 0} critical</span>`
                 : `<span class="text-emerald-600">ไม่พบ issue ค้าง</span>`,
             alert: (d.machineSafety?.openIssues > 0 || d.machineSafety?.critical > 0),
+            filterState: d.machineSafety?.critical > 0
+                ? JSON.stringify({ risk: 'high-risk' })
+                : d.machineSafety?.openIssues > 0 ? JSON.stringify({ audit: 'fail' }) : null,
         },
         {
             hash: 'ojt',
@@ -609,8 +654,16 @@ function _renderModuleCards(d) {
         },
     ];
 
+    const moduleMeta = modules.map(m => {
+        const meta = Object.values(MODULE_META).find(item => item.route === m.hash) || {};
+        return {
+            ...m,
+            label: meta.quickLabel || meta.shortTitle || meta.title || m.label,
+            icon: MODULE_ICONS[m.hash] ? `<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="${MODULE_ICONS[m.hash]}"/>` : m.icon,
+        };
+    });
     const hiddenModules = new Set(d.config?.hiddenModules || []);
-    const visibleModules = modules.filter(m => !hiddenModules.has(m.hash));
+    const visibleModules = moduleMeta.filter(m => !hiddenModules.has(m.hash));
 
     wrap.innerHTML = visibleModules.map(m => {
         const hasPct  = m.pct != null;
@@ -647,6 +700,7 @@ function _renderModuleCards(d) {
             <p class="text-3xl font-bold text-slate-800 leading-none">${m.primary}</p>
             <p class="text-xs text-slate-500 mt-1">${m.primaryLabel}</p>
             <div class="mt-2 text-xs">${m.secondary}</div>
+            ${m.footer ? `<div class="mt-2 text-[11px] font-semibold text-slate-400">${m.footer}</div>` : ''}
             ${pctBar}
         </a>`;
     }).join('');
@@ -681,9 +735,18 @@ async function _loadMyTargets() {
             return;
         }
 
-        const passed  = targets.filter(t => t.passed === true).length;
-        const total   = targets.length;
-        const overallPct = total ? Math.round(passed / total * 100) : 0;
+        const evaluable = targets.filter(t => !t.noData && t.passed !== null);
+        const passed  = evaluable.filter(t => t.passed === true).length;
+        const total   = evaluable.length;
+        const noData  = Math.max(0, targets.length - total);
+        const overallPct = total ? Math.round(passed / total * 100) : null;
+        const overallColor = overallPct === null
+            ? 'text-slate-500'
+            : overallPct >= 80
+                ? 'text-emerald-600'
+                : overallPct >= 50
+                    ? 'text-amber-500'
+                    : 'text-red-500';
 
         wrap.innerHTML = `
             <div class="bg-white rounded-xl border border-slate-100 shadow-sm overflow-hidden">
@@ -694,11 +757,11 @@ async function _loadMyTargets() {
                         <div class="text-2xl font-bold text-slate-800">${passed}<span class="text-base font-normal text-slate-400">/${total}</span></div>
                         <div>
                             <p class="text-xs font-semibold text-slate-600">กิจกรรมที่ผ่านเกณฑ์</p>
-                            <p class="text-[11px] text-slate-400">ปี ${year}</p>
+                            <p class="text-[11px] text-slate-400">ปี ${year}${noData ? ` · ${noData} no data` : ''}</p>
                         </div>
                     </div>
                     <div class="text-right">
-                        <p class="text-xl font-bold ${overallPct >= 80 ? 'text-emerald-600' : overallPct >= 50 ? 'text-amber-500' : 'text-red-500'}">${overallPct}%</p>
+                        <p class="text-xl font-bold ${overallColor}">${overallPct === null ? '-' : `${overallPct}%`}</p>
                         <p class="text-[11px] text-slate-400">ภาพรวม</p>
                     </div>
                 </div>
@@ -708,18 +771,32 @@ async function _loadMyTargets() {
                         const pct    = t.completionPct ?? 0;
                         const passed = t.passed === true;
                         const barBg  = passed ? '#10b981' : pct >= 50 ? '#f59e0b' : '#ef4444';
-                        const badge  = passed
+                        const badge  = t.noData
+                            ? `<span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-slate-100 text-slate-500">ไม่มีข้อมูล</span>`
+                            : passed
                             ? `<span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 text-emerald-700">
                                    <span class="w-1.5 h-1.5 rounded-full bg-emerald-400 inline-block animate-pulse"></span>ผ่าน
                                </span>`
                             : `<span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-slate-100 text-slate-500">
                                    <span class="w-1.5 h-1.5 rounded-full bg-slate-300 inline-block"></span>ยังไม่ผ่าน
                                </span>`;
+                        const source = t.source === 'scope'
+                            ? `<span class="text-[10px] font-bold text-emerald-600">Department/Unit Override</span>`
+                            : t.source === 'override'
+                                ? `<span class="text-[10px] font-bold text-violet-600">Employee Override</span>`
+                                : t.source === 'system'
+                                    ? `<span class="text-[10px] font-bold text-amber-600">System Ratio · Department KPI</span>`
+                                    : t.source === 'module'
+                                        ? `<span class="text-[10px] font-bold text-teal-600">Module Target</span>`
+                                        : `<span class="text-[10px] font-bold text-sky-600">Position Template</span>`;
+                        const calculationScope = t.calculationScope
+                            ? `<span class="ml-2 text-[10px] font-bold text-slate-500">${t.calculationScope.type === 'employee' ? 'Personal KPI' : t.calculationScope.type === 'department_unit' ? 'Scope KPI · Department/Unit' : 'Scope KPI · Department'}${t.targetSource === 'patrol_roster' ? ' · Patrol Roster' : t.targetSource === 'ky_program_config' ? ' · KY Program Config' : ''}</span>`
+                            : '';
                         return `
                         <div class="px-5 py-3 flex items-center gap-4">
                             <div class="flex-1 min-w-0">
                                 <div class="flex items-center justify-between mb-1 gap-2">
-                                    <p class="text-sm font-medium text-slate-700 truncate">${escHtml(t.label)}</p>
+                                    <div class="min-w-0"><p class="text-sm font-medium text-slate-700 truncate">${escHtml(t.label)}</p>${source}${calculationScope}</div>
                                     ${badge}
                                 </div>
                                 <div class="h-2 bg-slate-100 rounded-full overflow-hidden">
@@ -728,8 +805,8 @@ async function _loadMyTargets() {
                                 </div>
                             </div>
                             <div class="text-right flex-shrink-0 w-16">
-                                <p class="text-sm font-bold text-slate-700">${t.actualCount ?? 0}<span class="text-slate-400 font-normal">/${t.yearlyTarget}</span></p>
-                                <p class="text-[10px] text-slate-400">${pct}%</p>
+                                <p class="text-sm font-bold text-slate-700">${t.actualCount ?? 0}<span class="text-slate-400 font-normal">/${t.yearlyTarget ?? 0}</span></p>
+                                <p class="text-[10px] text-slate-400">${t.noData ? 'No data' : `${pct}%`}</p>
                             </div>
                         </div>`;
                     }).join('')}
@@ -756,8 +833,28 @@ async function _loadAlerts() {
 
         const total = (d.overdueAccident?.length || 0) + (d.dueSoonAccident?.length || 0)
                     + (d.machineOverdue?.length || 0) + (d.yokotenOverdue?.length || 0)
-                    + (d.openPatrolIssues?.length || 0) + (d.fourmOverdue?.length || 0);
-        if (!total) return; // no alerts — leave section empty
+                    + (d.openPatrolIssues?.length || 0) + (d.fourmOverdue?.length || 0)
+                    + (d.fourmTrainingRequired?.length || 0);
+        if (!total) {
+            wrap.innerHTML = `
+                <div class="ds-section px-5 py-4 border border-emerald-100 bg-emerald-50/40">
+                    <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+                        <div class="flex items-center gap-3">
+                            <span class="w-10 h-10 rounded-xl bg-white text-emerald-600 border border-emerald-100 flex items-center justify-center shadow-sm">
+                                <svg class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/>
+                                </svg>
+                            </span>
+                            <div>
+                                <p class="text-[11px] font-black uppercase tracking-wider text-emerald-600">Action Required</p>
+                                <h2 class="text-base font-black text-slate-800 mt-0.5">ไม่มีงานเร่งด่วนที่ต้องจัดการตอนนี้</h2>
+                            </div>
+                        </div>
+                        <p class="text-xs font-semibold text-emerald-700">Overdue / due soon / pending queue clear</p>
+                    </div>
+                </div>`;
+            return;
+        }
 
         wrap.innerHTML = _renderAlerts(d);
     } catch { /* silent — alerts non-critical */ }
@@ -771,6 +868,7 @@ function _renderAlerts(d) {
             key: 'overdueAccident',
             title: 'Corrective Action เกินกำหนด',
             hash: 'accident',
+            filterState: JSON.stringify({ tab: 'reports', quick: 'overdue' }),
             color: '#dc2626',
             bg: 'rgba(254,242,242,0.7)',
             border: '#fecaca',
@@ -786,6 +884,7 @@ function _renderAlerts(d) {
             key: 'dueSoonAccident',
             title: `Corrective Action ใกล้ครบกำหนด (${d.dueSoonDays || 7} วัน)`,
             hash: 'accident',
+            filterState: JSON.stringify({ tab: 'reports', quick: 'dueSoon' }),
             color: '#d97706',
             bg: 'rgba(255,251,235,0.7)',
             border: '#fde68a',
@@ -801,6 +900,7 @@ function _renderAlerts(d) {
             key: 'machineOverdue',
             title: 'เครื่องจักรเกินกำหนดตรวจ',
             hash: 'machine-safety',
+            filterState: JSON.stringify({ inspection: 'overdue' }),
             color: '#d97706',
             bg: 'rgba(255,251,235,0.7)',
             border: '#fde68a',
@@ -831,6 +931,7 @@ function _renderAlerts(d) {
             key: 'openPatrolIssues',
             title: 'ประเด็น Patrol ค้างอยู่',
             hash: 'patrol',
+            filterState: JSON.stringify({ tab: 'issues' }),
             color: '#059669',
             bg: 'rgba(240,253,244,0.7)',
             border: '#bbf7d0',
@@ -846,6 +947,7 @@ function _renderAlerts(d) {
             key: 'fourmOverdue',
             title: '4M Change Notice ค้างนาน',
             hash: 'fourm',
+            filterState: JSON.stringify({ tab: 'notices', status: 'overdue' }),
             color: '#6366f1',
             bg: 'rgba(238,242,255,0.7)',
             border: '#c7d2fe',
@@ -857,6 +959,22 @@ function _renderAlerts(d) {
                 dateLabel: 'เปิดเมื่อ',
             })),
         },
+        {
+            key: 'fourmTrainingRequired',
+            title: '4M ต้องจัด Training Matrix',
+            hash: 'fourm',
+            filterState: JSON.stringify({ tab: 'notices', status: 'all', trainingRequired: '1' }),
+            color: '#0284c7',
+            bg: 'rgba(240,249,255,0.75)',
+            border: '#bae6fd',
+            icon: `<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5S19.832 5.477 21 6.253v13C19.832 18.477 18.246 18 16.5 18s-3.332.477-4.5 1.253"/>`,
+            rows: (d.fourmTrainingRequired || []).map(r => ({
+                label: escHtml(r.NoticeNo || r.Title || '—'),
+                sub:   escHtml(r.Department || r.ResponsiblePerson || ''),
+                date:  fmt(r.RequestDate),
+                dateLabel: 'Notice',
+            })),
+        },
     ].filter(g => g.rows.length > 0);
 
     if (!groups.length) return '';
@@ -864,21 +982,25 @@ function _renderAlerts(d) {
     const totalCount = groups.reduce((s, g) => s + g.rows.length, 0);
 
     return `
-    <div>
-        <h2 class="text-base font-bold text-slate-700 mb-3 flex items-center gap-2">
-            <span class="w-7 h-7 rounded-lg flex items-center justify-center flex-shrink-0"
-                  style="background:linear-gradient(135deg,#dc2626,#f97316)">
-                <svg class="w-4 h-4 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                          d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/>
-                </svg>
-            </span>
-            รายการที่ต้องดำเนินการ
-            <span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-bold bg-red-100 text-red-700">${totalCount}</span>
-        </h2>
+    <div class="space-y-3">
+        <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
+            <h2 class="text-base font-bold text-slate-700 flex items-center gap-2">
+                <span class="w-7 h-7 rounded-lg flex items-center justify-center flex-shrink-0"
+                      style="background:linear-gradient(135deg,#dc2626,#f97316)">
+                    <svg class="w-4 h-4 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                              d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/>
+                    </svg>
+                </span>
+                Action Required / รายการที่ต้องดำเนินการ
+                <span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-bold bg-red-100 text-red-700">${totalCount}</span>
+            </h2>
+            <p class="text-xs font-semibold text-slate-400">เรียงจากงาน overdue, due soon และงานค้างข้ามโมดูล</p>
+        </div>
         <div class="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
             ${groups.map(g => `
             <a href="#${g.hash}"
+               ${g.filterState ? `data-filter='${g.filterState}'` : ''}
                class="bg-white rounded-xl border shadow-sm hover:shadow-md transition-all overflow-hidden"
                style="border-color:${g.border}">
                 <div class="flex items-center gap-2.5 px-4 py-3 border-b"

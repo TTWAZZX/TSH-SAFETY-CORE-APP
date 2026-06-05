@@ -1,4 +1,4 @@
-const SW_VERSION = '20260503-mobile-shell';
+const SW_VERSION = '20260602-mobile-nav-m53';
 
 self.addEventListener('install', (event) => {
   event.waitUntil(self.skipWaiting());

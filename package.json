@@ -3,17 +3,18 @@
   "version": "1.0.0",
   "private": true,
   "scripts": {
+    "backup": "powershell -ExecutionPolicy Bypass -File ./scripts/backup-safety-core.ps1",
     "test": "npm --prefix backend test",
     "permission:audit": "npm --prefix backend run permission:audit",
     "smoke:api": "npm --prefix backend run smoke:api",
+    "smoke:cccf": "npm --prefix backend run smoke:cccf",
+    "smoke:ky-email": "npm --prefix backend run smoke:ky-email",
     "smoke:remote": "npm --prefix backend run smoke:remote",
     "uat:preflight": "npm --prefix backend run uat:preflight"
   },
   "dependencies": {
-    "@vendia/serverless-express": "^4.10.2",
     "bcrypt": "^6.0.0",
     "bcryptjs": "^3.0.3",
-    "cloudinary": "^1.41.3",
     "cors": "^2.8.5",
     "dotenv": "^17.2.2",
     "express": "^5.1.0",
@@ -21,7 +22,6 @@
     "jsonwebtoken": "^9.0.2",
     "mime-types": "^3.0.2",
     "multer": "^2.1.1",
-    "multer-storage-cloudinary": "^4.0.0",
     "mysql2": "^3.14.5",
     "uuid": "^8.3.2",
     "xlsx": "^0.18.5"

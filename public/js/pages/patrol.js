@@ -1,4 +1,4 @@
-import { openModal, closeModal, showLoading, hideLoading, showToast, showError, escHtml, showConfirmationModal } from '../ui.js';
+import { openModal, closeModal, showLoading, hideLoading, showToast, showError, escHtml, showConfirmationModal } from '../ui.js?v=20260602-mobile-nav-m53';
 import { API } from '../api.js';
 import { normalizeApiArray, normalizeApiObject } from '../utils/normalize.js';
 
@@ -13,6 +13,27 @@ function resolveFileUrl(url) {
     if (!url) return null;
     if (url.startsWith('/uploads/')) return _backendBase + url;
     return url;
+}
+function getPatrolAreaName(area) {
+    return area?.Name || area?.AreaName || area?.name || '';
+}
+function patrolPdfTimestamp(date = new Date()) {
+    const pad = n => String(n).padStart(2, '0');
+    return [
+        date.getFullYear(),
+        pad(date.getMonth() + 1),
+        pad(date.getDate()),
+        pad(date.getHours()),
+        pad(date.getMinutes()),
+        pad(date.getSeconds()),
+    ].join('');
+}
+function patrolSafePdfFilename(name) {
+    return String(name || 'patrol-report')
+        .replace(/[\\/:*?"<>|]/g, '-')
+        .replace(/\s+/g, '-')
+        .replace(/-+/g, '-')
+        .replace(/^-|-$/g, '');
 }
 const isAdmin = !!(
     (currentUser.role && currentUser.role.toLowerCase() === 'admin') ||
@@ -54,6 +75,7 @@ let _filterDept     = '';
 let _filterUnit     = '';
 let _monthlySummary = [];
 let _myPlan         = null;  // personal monthly plan (team, sessions, compliance, roster)
+let _currentEmployeeProfile = null; // authoritative Employee Master profile for personal UI
 let _mySelfPatrol   = null;  // self-patrol data for supervisor positions
 let _patrolAreas    = [];    // master areas list — synced from Patrol_Areas table
 let _masterDepts    = [];    // master departments for issue form responsible dept
@@ -61,17 +83,180 @@ let _masterUnits    = [];    // safety units per department (Master_SafetyUnits)
 let _deptStatSel    = null;  // admin-saved dept stat selection (from DB)
 let _unitStatSel    = null;  // admin-saved unit stat selection (from DB)
 let _myYearlyStats       = null;  // yearly patrol stats for personal dashboard (Phase 3)
-let _positionThresholds  = [];    // position pass thresholds (PatrolPassPct) for compliance indicators
 let _overviewYear   = new Date().getFullYear();
 let _overviewData   = null;  // attendance overview cache
+let _arsvCurrentDetail = null; // Sec. & Supervisor admin schedule/detail cache
 let _filterRank     = '';    // active Rank filter on issues tab (A/B/C or '')
 let _filterStop     = 0;     // active Stop filter on issues tab (1-6 or 0)
 let _filterArea     = '';    // active Area filter on issues tab
 let _areaStatSel    = null;  // admin-saved area stat selection (from DB)
 let _spotlightMgmtId = null; // EmployeeID of spotlighted management member (from DB)
+const ISSUE_FILTER_STATE_KEY = 'patrol_issue_filter_state';
+const _patrolActionLocks = new Set();
+
+function patrolDateOnly(value) {
+    if (!value) return '';
+    if (value instanceof Date) {
+        return `${value.getFullYear()}-${String(value.getMonth() + 1).padStart(2, '0')}-${String(value.getDate()).padStart(2, '0')}`;
+    }
+    return String(value).slice(0, 10);
+}
+
+function patrolSessionId(item = {}) {
+    return String(item.id || item.SessionID || item.ScheduledSessionID || item.sessionId || '');
+}
+
+function patrolSessionRecords(item = {}) {
+    return Array.isArray(item.records) ? item.records : [];
+}
+
+function patrolSessionCompleted(item = {}) {
+    const status = String(item.completionStatus || item.status || item.Status || '').toLowerCase();
+    return item.isCompleted === true || status === 'completed' || patrolSessionRecords(item).length > 0;
+}
+
+function patrolSessionMakeup(item = {}) {
+    if (item.isMakeup === true) return true;
+    return patrolSessionRecords(item).some(r => r?.isMakeup === true);
+}
+
+function patrolSessionActualDate(item = {}) {
+    return item.actualDate || patrolSessionRecords(item)[0]?.actualDate || '';
+}
+
+function patrolTypeMeta(type) {
+    if (type === 'compensation') return { label: 'เดินซ่อม', en: 'Makeup', cls: 'text-violet-600 bg-violet-50' };
+    return { label: 'เดินปกติ', en: 'Routine', cls: 'text-emerald-600 bg-emerald-50' };
+}
+
+function patrolDisplayUser() {
+    const p = _currentEmployeeProfile || {};
+    const name = p.EmployeeName || p.name || currentUser.name || currentUser.EmployeeName || currentUser.id || '';
+    return {
+        id: p.EmployeeID || currentUser.id || currentUser.EmployeeID || '',
+        name,
+        initial: (name || '?').trim().charAt(0).toUpperCase(),
+        department: p.Department || currentUser.department || currentUser.Department || '',
+        position: p.Position || currentUser.position || currentUser.Position || '',
+        unit: p.Unit || currentUser.unit || currentUser.Unit || '',
+        team: p.TeamName || currentUser.team || currentUser.Team || '',
+        email: p.CompanyEmail || currentUser.CompanyEmail || '',
+    };
+}
+
+function saveIssueFilterState() {
+    try {
+        sessionStorage.setItem(ISSUE_FILTER_STATE_KEY, JSON.stringify({
+            activeFilter: _activeFilter,
+            searchQuery: _searchQuery,
+            filterDept: _filterDept,
+            filterUnit: _filterUnit,
+            filterRank: _filterRank,
+            filterStop: _filterStop,
+            filterArea: _filterArea,
+        }));
+    } catch (_) {}
+}
+
+function restoreIssueFilterState() {
+    try {
+        const state = JSON.parse(sessionStorage.getItem(ISSUE_FILTER_STATE_KEY) || 'null');
+        if (!state) return;
+        _activeFilter = state.activeFilter || 'all';
+        _searchQuery = state.searchQuery || '';
+        _filterDept = state.filterDept || '';
+        _filterUnit = state.filterUnit || '';
+        _filterRank = state.filterRank || '';
+        _filterStop = Number(state.filterStop) || 0;
+        _filterArea = state.filterArea || '';
+    } catch (_) {}
+}
+
+function getReadableError(err, fallback = 'ไม่สามารถดำเนินการได้ กรุณาลองใหม่อีกครั้ง') {
+    const raw = String(err?.message || err || '').trim();
+    if (!raw) return fallback;
+    if (/ER_|SQL|constraint|foreign key|duplicate|ECONN|Cannot|undefined|null/i.test(raw)) return fallback;
+    return raw;
+}
+
+async function runOnce(key, fn) {
+    if (_patrolActionLocks.has(key)) return null;
+    _patrolActionLocks.add(key);
+    try { return await fn(); }
+    finally { _patrolActionLocks.delete(key); }
+}
+
+window._previewIssueFile = function(input) {
+    const file = input?.files?.[0];
+    const label = input?.closest('label');
+    const textEl = input?.previousElementSibling;
+    if (textEl) textEl.textContent = file ? file.name : 'คลิกเพื่อเลือกรูปภาพ';
+    if (!label) return;
+    let preview = label.querySelector('.issue-file-preview');
+    if (!preview) {
+        preview = document.createElement('div');
+        preview.className = 'issue-file-preview mt-2 flex items-center gap-2 text-[11px] text-slate-500';
+        label.appendChild(preview);
+    }
+    if (!file) { preview.innerHTML = ''; return; }
+    const name = escHtml(file.name);
+    if (file.type && file.type.startsWith('image/')) {
+        const url = URL.createObjectURL(file);
+        preview.innerHTML = `<img src="${url}" class="w-12 h-12 rounded-lg object-cover border border-white shadow-sm" onload="URL.revokeObjectURL(this.src)"><span class="truncate max-w-[220px]">${name}</span>`;
+    } else {
+        preview.innerHTML = `<span class="truncate max-w-[260px]">${name}</span>`;
+    }
+};
+
+window._patrolCloseImageViewer = function() {
+    document.getElementById('patrol-image-viewer')?.remove();
+    if (window._patrolImageViewerEsc) document.removeEventListener('keydown', window._patrolImageViewerEsc);
+    window._patrolImageViewerEsc = null;
+};
+
+window._patrolOpenImageViewer = function(url, title = 'Issue image') {
+    if (!url) return;
+    window._patrolCloseImageViewer?.();
+    const safeUrl = escHtml(url);
+    const safeTitle = escHtml(title || 'Issue image');
+    const fileName = patrolSafePdfFilename(title || 'patrol-issue-image') + '.jpg';
+    const viewer = document.createElement('div');
+    viewer.id = 'patrol-image-viewer';
+    viewer.className = 'fixed inset-0 z-[10000] bg-slate-950/90 backdrop-blur-sm flex flex-col';
+    viewer.innerHTML = `
+      <div class="flex items-center justify-between gap-3 px-4 sm:px-6 py-3 border-b border-white/10">
+        <div class="min-w-0">
+          <div class="text-sm font-bold text-white truncate">${safeTitle}</div>
+          <div class="text-[11px] text-slate-400 truncate">${safeUrl}</div>
+        </div>
+        <div class="flex items-center gap-2 flex-shrink-0">
+          <a href="${safeUrl}" download="${escHtml(fileName)}" class="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg bg-white/10 hover:bg-white/15 text-white text-xs font-bold transition-colors">
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 3v12m0 0l-4-4m4 4l4-4M4 17v2a2 2 0 002 2h12a2 2 0 002-2v-2"/></svg>
+            Download
+          </a>
+          <a href="${safeUrl}" target="_blank" rel="noopener" class="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg bg-white/10 hover:bg-white/15 text-white text-xs font-bold transition-colors">
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14 3h7m0 0v7m0-7L10 14M5 5h5M5 5v14h14v-5"/></svg>
+            Open
+          </a>
+          <button type="button" onclick="window._patrolCloseImageViewer()" class="inline-flex items-center justify-center w-9 h-9 rounded-lg bg-white text-slate-700 hover:bg-slate-100 transition-colors" title="Close">
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
+          </button>
+        </div>
+      </div>
+      <button type="button" class="flex-1 min-h-0 p-3 sm:p-6 cursor-zoom-out" onclick="window._patrolCloseImageViewer()">
+        <img src="${safeUrl}" alt="${safeTitle}" class="w-full h-full object-contain" onclick="event.stopPropagation()">
+      </button>
+    `;
+    document.body.appendChild(viewer);
+    window._patrolImageViewerEsc = (event) => {
+        if (event.key === 'Escape') window._patrolCloseImageViewer();
+    };
+    document.addEventListener('keydown', window._patrolImageViewerEsc);
+};
 
 // ─── Main Load ────────────────────────────────────────────────────────────────
 export async function loadPatrolPage() {
+    restoreIssueFilterState();
     window.closeModal = closeModal;
     window.loadPatrolPage = loadPatrolPage;
     window.openCheckInModal = openCheckInModal;
@@ -82,8 +267,6 @@ export async function loadPatrolPage() {
     window.deleteSelfCheckin = deleteSelfCheckin;
     window.switchOverviewYear = switchOverviewYear;
     window.openCalendarDay = openCalendarDay;
-    window.savePositionThreshold = savePositionThreshold;
-    window.openThresholdSettings = openThresholdSettings;
     window.exportIssuesToExcel = exportIssuesToExcel;
     window.exportIssuesToPDF   = exportIssuesToPDF;
     window.exportPatrolPDF     = window.exportPatrolPDF; // defined at module level
@@ -92,12 +275,13 @@ export async function loadPatrolPage() {
     window._issueChangeDept = _issueChangeDept;
     window.deleteIssue = deleteIssue;
     window._issueFilterDept = _issueFilterDept;
-    window._issueFilterRank    = (rank)   => { _filterRank = (_filterRank === rank) ? '' : rank; _filterStop = 0; _applyIssueTableFilter(); };
-    window._issueFilterStop    = (stopId) => { _filterStop = (_filterStop === stopId) ? 0 : stopId; _filterRank = ''; _applyIssueTableFilter(); };
-    window._issueClearRankStop = ()       => { _filterRank = ''; _filterStop = 0; _applyIssueTableFilter(); };
-    window._issueUnitFilter    = (v)      => { _filterUnit = v; _applyIssueTableFilter(); };
+    window._issueFilterRank    = (rank)   => { _filterRank = (_filterRank === rank) ? '' : rank; _filterStop = 0; saveIssueFilterState(); _applyIssueTableFilter(); };
+    window._issueFilterStop    = (stopId) => { _filterStop = (_filterStop === stopId) ? 0 : stopId; _filterRank = ''; saveIssueFilterState(); _applyIssueTableFilter(); };
+    window._issueClearRankStop = ()       => { _filterRank = ''; _filterStop = 0; saveIssueFilterState(); _applyIssueTableFilter(); };
+    window._issueUnitFilter    = (v)      => { _filterUnit = v; saveIssueFilterState(); _applyIssueTableFilter(); };
     window._issueFilterArea    = (area)   => {
         _filterArea = (_filterArea === area) ? '' : area;
+        saveIssueFilterState();
         _applyIssueTableFilter();
         renderAreaStats();
         if (_filterArea) document.getElementById('dashboard-section-body')?.closest('.bg-white')?.scrollIntoView({ behavior:'smooth', block:'nearest' });
@@ -111,8 +295,9 @@ export async function loadPatrolPage() {
         const curMonth = now.getMonth() + 1;
         const curYear  = now.getFullYear();
 
-        const [scheduleRes, statsRes, issuesRes, summaryRes, planRes, selfPatrolRes, areasRes, deptsRes, unitsRes, deptSelRes, unitSelRes, areaSelRes, yearlyRes, thresholdsRes, spotlightRes] = await Promise.all([
-            API.get(`/patrol/my-schedule?employeeId=${currentUser.id}&month=${curMonth}&year=${curYear}`),
+        const [scheduleRes, profileRes, statsRes, issuesRes, summaryRes, planRes, selfPatrolRes, areasRes, deptsRes, unitsRes, deptSelRes, unitSelRes, areaSelRes, yearlyRes, spotlightRes] = await Promise.all([
+            API.get(`/patrol/my-schedule?month=${curMonth}&year=${curYear}`),
+            currentUser.id ? API.get(`/employees/${encodeURIComponent(currentUser.id)}`).catch(() => ({ data: null })) : Promise.resolve({ data: null }),
             API.get('/patrol/attendance-stats'),
             API.get('/patrol/issues'),
             API.get(`/patrol/monthly-summary?year=${curYear}&month=${curMonth}`).catch(() => ({ data: [] })),
@@ -125,10 +310,10 @@ export async function loadPatrolPage() {
             API.get('/settings/patrol_unit_stat_selection').catch(() => ({ value: null })),
             API.get('/settings/patrol_area_stat_selection').catch(() => ({ value: null })),
             API.get(`/patrol/my-yearly-stats?year=${curYear}`).catch(() => ({ data: null })),
-            API.get('/patrol/position-thresholds').catch(() => ({ data: [] })),
             API.get('/settings/patrol_spotlight_mgmt_id').catch(() => ({ value: null })),
         ]);
 
+        _currentEmployeeProfile = profileRes?.data || null;
         _allIssues      = normalizeApiArray(issuesRes);
         _monthlySummary = summaryRes.data || [];
         _myPlan         = planRes.data || null;
@@ -137,7 +322,6 @@ export async function loadPatrolPage() {
         _masterDepts    = deptsRes.data || [];
         _masterUnits    = unitsRes.data || [];
         _myYearlyStats       = yearlyRes.data     || null;
-        _positionThresholds  = thresholdsRes.data || [];
         try { _deptStatSel = deptSelRes.value ? JSON.parse(deptSelRes.value) : null; } catch { _deptStatSel = null; }
         try { _unitStatSel = unitSelRes.value ? JSON.parse(unitSelRes.value) : null; } catch { _unitStatSel = null; }
         try { _areaStatSel = areaSelRes.value ? JSON.parse(areaSelRes.value) : null; } catch { _areaStatSel = null; }
@@ -191,12 +375,13 @@ export async function loadPatrolPage() {
 // ─── Render Dashboard ─────────────────────────────────────────────────────────
 function renderDashboard(container, data) {
     const today = new Date();
+    const displayUser = patrolDisplayUser();
     const dateStr = today.toLocaleDateString('th-TH', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
 
     const issuesArray = _allIssues;
     const statsArray  = normalizeApiArray(data.stats);
     window._lastStatsData = data.stats; // cache for duplicate-checkin guard
-    const myStats = statsArray.find(r => r.Name === currentUser.name) || { Total: 0, Percent: 0 };
+    const myStats = statsArray.find(r => r.Name === displayUser.name || r.EmployeeID === displayUser.id || r.UserID === displayUser.id) || { Total: 0, Percent: 0 };
 
     // Smart CTA helpers
     const todayCheckedIn = myStats.LastWalk
@@ -219,34 +404,6 @@ function renderDashboard(container, data) {
     ];
     const rank = rankTiers.find(r => walks >= r.min && walks <= r.max) || rankTiers[0];
     const rankPct = rank.needed ? Math.min(Math.round((walks / rank.needed) * 100), 100) : 100;
-    const focusItems = [
-        {
-            label: todayCheckedIn ? 'Today checked in' : 'Today check-in',
-            value: todayCheckedIn ? 'Done' : (todaySessForCTA ? 'Due' : 'No session'),
-            tone: todayCheckedIn ? 'emerald' : (todaySessForCTA ? 'amber' : 'slate'),
-            action: todayCheckedIn ? 'switchTab("patrol")' : 'openCheckInModal()',
-        },
-        { label: 'Open issues', value: openIssues, tone: openIssues > 0 ? 'rose' : 'emerald', action: 'switchTab("issues")' },
-        { label: 'Temporary fixes', value: tempIssues, tone: tempIssues > 0 ? 'amber' : 'emerald', action: 'switchTab("issues")' },
-        { label: 'Next patrol', value: nextDaysLeft == null ? '-' : `${nextDaysLeft}d`, tone: nextDaysLeft != null && nextDaysLeft <= 3 ? 'sky' : 'slate', action: 'switchTab("patrol")' },
-    ];
-    const focusTone = {
-        emerald: 'border-emerald-200 bg-emerald-50 text-emerald-700',
-        amber: 'border-amber-200 bg-amber-50 text-amber-700',
-        rose: 'border-rose-200 bg-rose-50 text-rose-700',
-        sky: 'border-sky-200 bg-sky-50 text-sky-700',
-        slate: 'border-slate-200 bg-white text-slate-700',
-    };
-    const focusStrip = `
-      <div class="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-6">
-        ${focusItems.map(item => `
-          <button onclick="${item.action}" class="text-left rounded-xl border ${focusTone[item.tone]} px-4 py-3 hover:shadow-sm transition-all">
-            <div class="text-[11px] font-bold uppercase opacity-70">${item.label}</div>
-            <div class="text-xl font-black mt-1">${item.value}</div>
-          </button>
-        `).join('')}
-      </div>`;
-
     // ── Per-tab hero stats ───────────────────────────────────────────────────
     const _yearlyCount  = _myYearlyStats?.yearlyCount  ?? walks;
     const _yearlyTarget = _myYearlyStats?.yearlyTarget ?? null;
@@ -387,10 +544,10 @@ function renderDashboard(container, data) {
                 </span>
               </div>
               <h1 class="text-2xl font-bold text-white">Safety Patrol System</h1>
-              <p class="text-sm mt-1" style="color:rgba(167,243,208,0.8)">${dateStr} · ${currentUser.name}</p>
+              <p class="text-sm mt-1" style="color:rgba(167,243,208,0.8)">${dateStr} · ${displayUser.name}</p>
             </div>
             <div class="flex items-center gap-2 flex-shrink-0">
-              ${isAdmin ? `
+              ${false ? `
               <button onclick="openThresholdSettings()" title="ตั้งค่าเกณฑ์ผ่านตามตำแหน่ง" class="p-2.5 rounded-xl bg-white/15 border border-white/20 text-white hover:bg-white/25 transition-colors flex items-center gap-1.5 text-xs font-semibold">
                 <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"/><circle cx="12" cy="12" r="3"/></svg>
                 เกณฑ์ผ่าน
@@ -426,9 +583,6 @@ function renderDashboard(container, data) {
           ${openIssues > 0 ? `<span class="inline-flex items-center justify-center w-4 h-4 rounded-full text-[9px] font-bold text-white bg-red-500">${openIssues}</span>` : ''}
         </button>
       </div>
-
-      <!-- ═══ PATROL TAB ═══ -->
-      ${focusStrip}
 
       <div id="content-patrol" class="space-y-5 animate-fade-in">
 
@@ -485,7 +639,9 @@ function renderDashboard(container, data) {
                       ? `<p class="text-xs text-white/50 italic">ยังไม่มี Sessions เดือนนี้</p>`
                       : _myPlan.sessions.map(s => {
                           const d = new Date(s.PatrolDate);
-                          const isRequired = _myPlan.required.some(r => r.id === s.id);
+                          const isRequired = _myPlan.required.some(r => patrolSessionId(r) === patrolSessionId(s));
+                          const completed = patrolSessionCompleted(s);
+                          const makeup = patrolSessionMakeup(s);
                           const isToday = d.toDateString() === new Date().toDateString();
                           const area = s.AreaCode || s.AreaName || '—';
                           return `<div class="flex items-center gap-2 rounded-lg px-2.5 py-1.5 ${isToday ? 'bg-white/20' : 'bg-white/8'}" style="${isToday?'background:rgba(255,255,255,0.18)':'background:rgba(255,255,255,0.07)'}">
@@ -497,6 +653,7 @@ function renderDashboard(container, data) {
                               <div class="flex items-center gap-1.5">
                                 <span class="text-[10px] font-bold text-white/80">${area}</span>
                                 <span class="text-[9px] px-1 py-0.5 rounded bg-white/15 text-white/70">รอบ ${s.PatrolRound}</span>
+                                ${completed ? `<span class="text-[8px] text-emerald-200 font-bold">${makeup ? 'Makeup' : 'Done'}</span>` : ''}
                                 ${!isRequired ? `<span class="text-[8px] text-white/40 italic">ไม่บังคับ</span>` : ''}
                               </div>
                             </div>
@@ -553,6 +710,9 @@ function renderDashboard(container, data) {
                   ${data.schedule.length > 0 ? data.schedule.map(item => {
                     const d     = new Date(item.PatrolDate || item.ScheduledDate);
                     const isTd  = d.toDateString() === today.toDateString();
+                    const completed = patrolSessionCompleted(item);
+                    const actualDate = patrolSessionActualDate(item);
+                    const makeup = patrolSessionMakeup(item);
                     // หา area info จาก monthly-summary (match วันที่ + TeamID หรือ TeamName)
                     const sumItem = _monthlySummary.find(s =>
                         new Date(s.ScheduledDate || s.PatrolDate).toDateString() === d.toDateString() &&
@@ -561,9 +721,9 @@ function renderDashboard(container, data) {
                     const areaLabel  = sumItem.AreaName || sumItem.AreaCode || 'Factory Area';
                     const teamColor  = sumItem.TeamColor || '#6366f1';
                     const round      = sumItem.PatrolRound;
-                    const statusColor = { Pending:'bg-amber-100 text-amber-700', Completed:'bg-emerald-100 text-emerald-700', Missed:'bg-red-100 text-red-600' };
-                    const sc = statusColor[item.Status] || 'bg-slate-100 text-slate-400';
-                    return `<div class="flex items-center px-4 py-2.5 hover:bg-slate-50 transition-colors ${isTd ? 'bg-emerald-50/40' : ''}">
+                    const statusText = completed ? (makeup ? 'Makeup' : 'Completed') : (item.completionStatus === 'missing' ? 'Missing' : 'Pending');
+                    const sc = completed ? 'bg-emerald-100 text-emerald-700' : item.completionStatus === 'missing' ? 'bg-red-100 text-red-600' : 'bg-amber-100 text-amber-700';
+                    return `<div class="flex items-center px-4 py-3 hover:bg-slate-50 transition-colors ${isTd ? 'bg-emerald-50/40' : ''}">
                       <div class="w-10 text-center border-r border-slate-100 pr-3 mr-3 flex-shrink-0">
                         <div class="text-lg font-bold ${isTd ? 'text-emerald-600' : 'text-slate-700'}">${d.getDate()}</div>
                         <div class="text-[9px] font-bold text-slate-400 uppercase">${d.toLocaleString('en-US',{month:'short'})}</div>
@@ -573,11 +733,12 @@ function renderDashboard(container, data) {
                           <span class="w-2 h-2 rounded-full flex-shrink-0" style="background:${teamColor}"></span>
                           <p class="text-xs font-bold text-slate-800 truncate">${item.TeamName}</p>
                         </div>
-                        <div class="flex items-center gap-1.5">
+                        <div class="flex items-center gap-1.5 flex-wrap">
                           <span class="text-[9px] font-semibold text-slate-500">${areaLabel}</span>
                           ${round ? `<span class="text-[8px] font-bold px-1.5 py-0.5 rounded-full bg-indigo-50 text-indigo-600">รอบ ${round}</span>` : ''}
-                          <span class="text-[8px] font-bold px-1.5 py-0.5 rounded-full ${sc}">${item.Status||'Pending'}</span>
+                          <span class="text-[8px] font-bold px-1.5 py-0.5 rounded-full ${sc}">${statusText}</span>
                         </div>
+                        ${completed && actualDate && actualDate !== patrolDateOnly(item.PatrolDate || item.ScheduledDate) ? `<p class="text-[9px] text-violet-500 mt-1">Actual: ${escHtml(actualDate)}</p>` : ''}
                       </div>
                       ${isTd ? `<span class="flex-shrink-0 text-[9px] font-bold text-emerald-600 bg-emerald-50 px-2 py-0.5 rounded-full border border-emerald-100">วันนี้</span>` : ''}
                     </div>`;
@@ -679,7 +840,7 @@ function renderDashboard(container, data) {
           ${(() => {
             const sessions       = _myPlan?.sessions || [];
             const required       = _myPlan?.required || [];
-            const reqIds         = new Set(required.map(r => r.id));
+            const reqIds         = new Set(required.map(r => patrolSessionId(r)));
             const attendedDates  = new Set(_myPlan?.attendanceDates || []);
             const today          = new Date();
             const todayStr       = today.toDateString();
@@ -727,9 +888,11 @@ function renderDashboard(container, data) {
                 const dStr     = d.toLocaleDateString('th-TH', { weekday:'short', day:'numeric', month:'short' });
                 const isToday  = d.toDateString() === todayStr;
                 const isPast   = d < today && !isToday;
-                const isReq    = reqIds.has(s.id);
+                const isReq    = reqIds.has(patrolSessionId(s));
                 const area     = s.AreaCode || s.AreaName || 'Factory Area';
-                const didAttend = attendedDates.has(dateKey);
+                const didAttend = patrolSessionCompleted(s) || attendedDates.has(dateKey);
+                const actualDate = patrolSessionActualDate(s);
+                const isMakeup = patrolSessionMakeup(s);
 
                 let iconHtml, badgeHtml, rowCls;
                 if (isToday) {
@@ -766,6 +929,7 @@ function renderDashboard(container, data) {
                   <div class="flex-1 min-w-0">
                     <p class="text-xs font-semibold text-slate-700 truncate">${dStr}</p>
                     <p class="text-[10px] text-slate-400 truncate">${area}${s.PatrolRound ? ' · รอบ ' + s.PatrolRound : ''}${!isReq ? ' · <span class="text-slate-300">ไม่บังคับ</span>' : ''}</p>
+                    ${didAttend && isMakeup && actualDate ? `<p class="text-[9px] text-violet-500 mt-0.5">Actual: ${escHtml(actualDate)}</p>` : ''}
                   </div>
                   ${badgeHtml}
                 </div>`;
@@ -784,7 +948,6 @@ function renderDashboard(container, data) {
                 memberMap[s.EmployeeID] = { yearlyCount: s.yearlyCount, position: s.position };
             });
             const thresholdMap = {};
-            _positionThresholds.forEach(t => { thresholdMap[t.Name] = t.PatrolPassPct; });
             const yearlyTarget = _myYearlyStats?.yearlyTarget || null;
             const curYear = new Date().getFullYear();
             const maxCount = Math.max(1, ...Object.values(memberMap).map(m => m.yearlyCount ?? 0));
@@ -798,7 +961,7 @@ function renderDashboard(container, data) {
               <div class="flex items-center gap-2">
                 <span class="text-[10px] text-slate-400 font-semibold">${roster.length} คน</span>
                 ${isAdmin ? `<button onclick="openThresholdSettings()" title="ตั้งค่าเกณฑ์ผ่าน"
-                  class="p-1.5 rounded-lg bg-slate-50 hover:bg-emerald-50 text-slate-400 hover:text-emerald-600 transition-colors border border-slate-100">
+                  class="hidden p-1.5 rounded-lg bg-slate-50 hover:bg-emerald-50 text-slate-400 hover:text-emerald-600 transition-colors border border-slate-100">
                   <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"/><circle cx="12" cy="12" r="3"/></svg>
                 </button>` : ''}
               </div>
@@ -811,7 +974,7 @@ function renderDashboard(container, data) {
                 const mStats    = memberMap[m.EmployeeID] || null;
                 const ytdCount  = mStats?.yearlyCount ?? null;
                 const position  = mStats?.position || null;
-                const threshold = position ? (thresholdMap[position] ?? 80) : null;
+                const threshold = null;
                 const ytdPct    = yearlyTarget && ytdCount !== null
                     ? Math.min(Math.round((ytdCount / yearlyTarget) * 100), 100) : null;
                 const barPct    = ytdCount !== null
@@ -856,9 +1019,10 @@ function renderDashboard(container, data) {
             const target    = sp.target || 2;
             const pct       = Math.min(Math.round((attended / target) * 100), 100);
             const done      = attended >= target;
+            const openSchedule   = Array.isArray(sp.openSchedule) ? sp.openSchedule : [];
             const spYear         = _myYearlyStats?.selfPatrolYear;
-            const yearlySpTarget = 24;
-            const yearlySpCount  = spYear?.count ?? 0;
+            const yearlySpTarget = sp.yearlyTarget || spYear?.target || 24;
+            const yearlySpCount  = sp.yearlyCompleted ?? spYear?.count ?? 0;
             const yearlySpPct    = Math.min(Math.round((yearlySpCount / yearlySpTarget) * 100), 100);
             const yearlySpDone   = yearlySpCount >= yearlySpTarget;
             return `
@@ -886,6 +1050,17 @@ function renderDashboard(container, data) {
               </div>` : ''}
             </div>
             <div class="p-5">
+              ${openSchedule.length ? `
+              <div class="mb-4 rounded-xl border border-amber-100 bg-amber-50/60 px-3 py-2">
+                <p class="text-[10px] font-bold text-amber-700 mb-1">รอบที่เปิดให้เช็คอิน</p>
+                <div class="space-y-1">
+                  ${openSchedule.slice(0, 3).map(item => `
+                    <div class="flex items-center justify-between gap-2 text-[10px] text-amber-700">
+                      <span class="truncate">${escHtml(String(item.date || item.PatrolDate || '').slice(0, 10))}${item.areaName ? ' · ' + escHtml(item.areaName) : ''}${item.patrolRound ? ' · R' + item.patrolRound : ''}</span>
+                      <span class="font-bold">Open</span>
+                    </div>`).join('')}
+                </div>
+              </div>` : ''}
               <div class="w-full bg-slate-100 rounded-full h-2 mb-4 overflow-hidden">
                 <div class="h-full rounded-full transition-all duration-700" style="width:${pct}%;background:${done?'linear-gradient(90deg,#059669,#10b981)':'linear-gradient(90deg,#f59e0b,#fbbf24)'}"></div>
               </div>
@@ -1019,8 +1194,9 @@ function renderDashboard(container, data) {
                 ${_myYearlyStats.recentCheckins.map((c, i) => {
                   const d = new Date(c.PatrolDate);
                   const isFirst = i === 0;
-                  const typeLabel = c.PatrolType === 'Re-inspection' ? 'ตรวจซ้ำ' : 'ปกติ';
-                  const typeColor = c.PatrolType === 'Re-inspection' ? 'text-amber-600 bg-amber-50' : 'text-emerald-600 bg-emerald-50';
+                  const typeMeta = patrolTypeMeta(c.PatrolType);
+                  const typeLabel = typeMeta.label;
+                  const typeColor = typeMeta.cls;
                   const notesPreview = c.Notes ? c.Notes.replace(/\[ตรวจแล้ว:[^\]]*\]\n?/, '').trim() : '';
                   const checkedItems = c.Notes?.match(/\[ตรวจแล้ว: ([^\]]+)\]/)?.[1] || '';
                   return `<div class="flex items-start gap-3 pl-1">
@@ -1704,6 +1880,7 @@ function renderDashboard(container, data) {
         const btn = e.target.closest('.issue-filter-btn');
         if (!btn) return;
         _activeFilter = btn.dataset.filter;
+        saveIssueFilterState();
         document.querySelectorAll('.issue-filter-btn').forEach(b => {
             const isActive = b.dataset.filter === _activeFilter;
             b.className = `issue-filter-btn px-3 py-1.5 rounded-full text-[10px] font-bold transition-all flex items-center gap-1.5 ${isActive ? 'text-white shadow-sm' : 'bg-white border border-slate-200 text-slate-500 hover:border-emerald-300 hover:text-emerald-600'}`;
@@ -1718,6 +1895,7 @@ function renderDashboard(container, data) {
         clearTimeout(_searchDebounce);
         _searchDebounce = setTimeout(() => {
             _searchQuery = e.target.value.trim();
+            saveIssueFilterState();
             applyIssueFilter();
         }, 250);
     });
@@ -1781,6 +1959,7 @@ function renderDashboard(container, data) {
 function _issueFilterDept(deptName) {
     _filterDept = deptName;
     _filterUnit = '';
+    saveIssueFilterState();
 
     // Sync the dropdown in ทะเบียนปัญหา filter bar
     const deptSel = document.getElementById('issue-dept-filter');
@@ -1794,7 +1973,7 @@ function _issueFilterDept(deptName) {
         unitSel.innerHTML = `<option value="">ทุก Unit</option>` +
             units.map(u => `<option value="${u.name}">${u.name}</option>`).join('');
         unitSel.className = unitSel.className.replace('opacity-50', '') + (units.length ? '' : ' opacity-50');
-        unitSel.onchange = () => { _filterUnit = unitSel.value; applyIssueFilter(); };
+        unitSel.onchange = () => { _filterUnit = unitSel.value; saveIssueFilterState(); applyIssueFilter(); };
     }
 
     // Refresh dept stats table (re-highlight active row + badge)
@@ -1829,6 +2008,7 @@ function _applyIssueTableFilter() {
 window._issueFilterRank = function(rank) {
     _filterRank = (_filterRank === rank) ? '' : rank;
     _filterStop = 0;
+    saveIssueFilterState();
     _applyIssueTableFilter();
     document.getElementById('patrol-rank-stop-summary')?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
 };
@@ -1836,6 +2016,7 @@ window._issueFilterRank = function(rank) {
 window._issueFilterStop = function(stopId) {
     _filterStop = (_filterStop === stopId) ? 0 : stopId;
     _filterRank = '';
+    saveIssueFilterState();
     _applyIssueTableFilter();
     document.getElementById('patrol-rank-stop-summary')?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
 };
@@ -1843,6 +2024,7 @@ window._issueFilterStop = function(stopId) {
 window._issueClearRankStop = function() {
     _filterRank = '';
     _filterStop = 0;
+    saveIssueFilterState();
     _applyIssueTableFilter();
 };
 
@@ -1851,6 +2033,7 @@ window._issueFilterUnit = function(unitName) {
     // Clear dept filter, set unit filter
     _filterDept = '';
     _filterUnit = unitName;
+    saveIssueFilterState();
 
     // Sync dropdowns
     const deptSel = document.getElementById('issue-dept-filter');
@@ -1927,7 +2110,49 @@ function getFilteredIssues(issues, filter) {
     return result;
 }
 
+function validateIssueFormData(formData) {
+    const actionType = String(formData.get('ActionType') || '');
+    const required = (name, label) => {
+        const value = formData.get(name);
+        return String(value || '').trim() ? '' : label;
+    };
+    const errors = [];
+    if (actionType === 'UPDATE' && !isAdmin) {
+        if (!String(formData.get('IssueID') || '').trim()) {
+            errors.push('ไม่พบรหัสรายการปัญหา');
+        }
+        const hasFinal = String(formData.get('ActionDescription') || '').trim();
+        if (hasFinal && !String(formData.get('FinishDate') || '').trim()) {
+            errors.push('กรุณาระบุวันที่แก้ไขเสร็จสิ้น');
+        }
+        return errors;
+    }
+    if (!['OPEN', 'UPDATE'].includes(actionType)) return errors;
+    if (actionType === 'UPDATE' && !String(formData.get('IssueID') || '').trim()) {
+        errors.push('ไม่พบรหัสรายการปัญหา');
+    }
+    ['DateFound:กรุณาระบุวันที่พบปัญหา', 'Area:กรุณาเลือกพื้นที่ตรวจ', 'HazardType:กรุณาเลือกประเภทอันตราย', 'HazardDescription:กรุณาระบุรายละเอียดปัญหา', 'Rank:กรุณาเลือก Rank'].forEach(rule => {
+        const [name, label] = rule.split(':');
+        const err = required(name, label);
+        if (err) errors.push(err);
+    });
+    const hasFinal = String(formData.get('ActionDescription') || '').trim();
+    if (hasFinal && !String(formData.get('FinishDate') || '').trim()) {
+        errors.push('กรุณาระบุวันที่แก้ไขเสร็จสิ้น');
+    }
+    return errors;
+}
+
 function renderIssueRows(issues) {
+    if (!issues.length) return `<tr><td colspan="6" class="text-center py-12">
+        <div class="mx-auto max-w-sm">
+          <div class="w-12 h-12 mx-auto mb-3 rounded-2xl bg-slate-50 border border-slate-100 flex items-center justify-center text-slate-300">
+            <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/></svg>
+          </div>
+          <p class="text-sm font-semibold text-slate-500">ไม่พบรายการปัญหาตามเงื่อนไข</p>
+          <p class="text-xs text-slate-400 mt-1">ลองล้างตัวกรองหรือรายงานปัญหาใหม่หากพบจุดเสี่ยงระหว่าง Patrol</p>
+        </div>
+      </td></tr>`;
     if (!issues.length) return `<tr><td colspan="6" class="text-center py-10 text-sm text-slate-400">ไม่พบรายการที่ตรงกัน</td></tr>`;
     return issues.map(rawItem => renderIssueRow(rawItem)).join('');
 }
@@ -2223,10 +2448,11 @@ function getSkeletonHTML() {
 // ─── Check-in Modal (Smart) ───────────────────────────────────────────────────
 function openCheckInModal() {
     const today    = new Date();
+    const displayUser = patrolDisplayUser();
 
     // ── ป้องกันเช็คอินซ้ำวันเดียวกัน ──────────────────────────────────────────
     const statsArr  = normalizeApiArray(window._lastStatsData || []);
-    const myStat    = statsArr.find(r => r.Name === currentUser.name) || {};
+    const myStat    = statsArr.find(r => r.Name === displayUser.name || r.EmployeeID === displayUser.id || r.UserID === displayUser.id) || {};
     const alreadyToday = myStat.LastWalk
         ? new Date(myStat.LastWalk).toDateString() === today.toDateString()
         : false;
@@ -2260,6 +2486,7 @@ function openCheckInModal() {
     const isRequired  = todaySess ? (_myPlan?.required?.some(r => r.id === todaySess.id) ?? true) : false;
     const areaLabel   = todaySess ? (todaySess.AreaCode || todaySess.AreaName || '') : '';
     const compliance  = _myPlan?.compliance;
+    const todayLabel = today.toLocaleDateString('th-TH', { day: 'numeric', month: 'short', year: 'numeric' });
 
     const planBanner = _myPlan ? `
     <div class="rounded-xl overflow-hidden border border-slate-100">
@@ -2281,15 +2508,16 @@ function openCheckInModal() {
     </div>` : '';
 
     openModal('บันทึกการเดินตรวจ', `
-      <form id="checkin-form" onsubmit="handleCheckInSubmit(event)" class="space-y-4">
+      <form id="checkin-form" onsubmit="handleCheckInSubmit(event)" class="space-y-4 max-[420px]:space-y-3">
         <!-- User info -->
         <div class="flex items-center gap-3 p-3 rounded-xl border border-slate-100 bg-slate-50">
           <div class="w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0 bg-emerald-100">
-            <span class="text-emerald-700 font-bold text-sm">${(currentUser.name||'?').charAt(0)}</span>
+            <span class="text-emerald-700 font-bold text-sm">${escHtml(displayUser.initial)}</span>
           </div>
-          <div>
-            <p class="font-bold text-slate-800 text-sm">${currentUser.name}</p>
-            <p class="text-[10px] text-slate-400">${currentUser.department || ''}</p>
+          <div class="min-w-0 flex-1">
+            <p class="font-bold text-slate-800 text-sm truncate">${escHtml(displayUser.name || displayUser.id || '-')}</p>
+            <p class="text-[10px] text-slate-400 truncate">${escHtml([displayUser.position, displayUser.department].filter(Boolean).join(' · ') || '-')}</p>
+            <p class="text-[10px] text-slate-400 mt-0.5">Actual date: <span class="font-bold text-slate-600">${todayLabel}</span></p>
           </div>
         </div>
 
@@ -2301,21 +2529,13 @@ function openCheckInModal() {
           <span>วันนี้ไม่ใช่วันเดินตรวจตามตาราง สามารถ Check-in ได้แต่จะนับเป็นการเดินนอกตาราง</span>
         </div>` : ''}
 
-        <div class="grid grid-cols-1 sm:grid-cols-3 gap-2">
+        <div class="grid grid-cols-2 gap-2">
           <label class="cursor-pointer">
             <input type="radio" name="PatrolType" value="normal" class="peer sr-only" checked onchange="window._onCheckinTypeChange(this.value)">
             <div class="p-3 rounded-xl border-2 border-slate-100 bg-white text-center hover:border-emerald-100 peer-checked:border-emerald-500 peer-checked:bg-emerald-50 transition-all">
               <svg class="w-5 h-5 mx-auto mb-1 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"/></svg>
               <p class="text-[11px] font-bold text-slate-700">ปกติ</p>
               <p class="text-[9px] text-slate-400">Routine</p>
-            </div>
-          </label>
-          <label class="cursor-pointer">
-            <input type="radio" name="PatrolType" value="Re-inspection" class="peer sr-only" onchange="window._onCheckinTypeChange(this.value)">
-            <div class="p-3 rounded-xl border-2 border-slate-100 bg-white text-center hover:border-amber-100 peer-checked:border-amber-500 peer-checked:bg-amber-50 transition-all">
-              <svg class="w-5 h-5 mx-auto mb-1 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/></svg>
-              <p class="text-[11px] font-bold text-slate-700">ตรวจซ้ำ</p>
-              <p class="text-[9px] text-slate-400">Re-inspect</p>
             </div>
           </label>
           <label class="cursor-pointer">
@@ -2339,7 +2559,7 @@ function openCheckInModal() {
               กำลังโหลดรอบที่ขาด...
             </div>
           </div>
-          <select name="PatrolDate" id="checkin-missed-select" class="hidden w-full rounded-xl border border-violet-200 bg-white px-3 py-2.5 text-sm text-slate-700 focus:outline-none focus:ring-2 focus:ring-violet-400 transition-all">
+          <select name="ScheduledSessionID" id="checkin-missed-select" onchange="window._onCheckinSessionChange()" class="hidden w-full rounded-xl border border-violet-200 bg-white px-3 py-2.5 text-sm text-slate-700 focus:outline-none focus:ring-2 focus:ring-violet-400 transition-all">
             <option value="">— เลือกรอบที่ต้องการชดเชย —</option>
           </select>
         </div>
@@ -2347,12 +2567,15 @@ function openCheckInModal() {
         <!-- Area confirmation (Phase 2.2) -->
         <div>
           <label class="block text-xs font-semibold text-slate-500 mb-1.5">พื้นที่ที่เดินตรวจ</label>
-          <select name="Area" class="w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm text-slate-700 focus:outline-none focus:ring-2 focus:ring-emerald-400 transition-all">
+          <select name="Area" id="checkin-area-select" class="w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm text-slate-700 focus:outline-none focus:ring-2 focus:ring-emerald-400 transition-all">
             <option value="">— ไม่ระบุ —</option>
             ${(_patrolAreas.length
               ? _patrolAreas
               : [{ Name:'โรงงาน 1' },{ Name:'โรงงาน 2' },{ Name:'รอบนอก' }]
-            ).map(a => `<option value="${a.Name}" ${a.Name === areaLabel ? 'selected' : ''}>${a.Name}</option>`).join('')}
+            ).map(a => {
+                const name = getPatrolAreaName(a);
+                return name ? `<option value="${escHtml(name)}" ${name === areaLabel ? 'selected' : ''}>${escHtml(name)}</option>` : '';
+            }).join('')}
           </select>
         </div>
 
@@ -2365,7 +2588,7 @@ function openCheckInModal() {
         <button type="submit" class="w-full py-3 rounded-xl font-bold text-sm text-white shadow-sm transition-all active:scale-[0.98]" style="background:linear-gradient(135deg,#059669,#0d9488)">
           ยืนยันเช็คอิน
         </button>
-      </form>`, 'max-w-sm');
+      </form>`, 'max-w-md');
 }
 
 async function handleCheckInSubmit(e) {
@@ -2376,15 +2599,15 @@ async function handleCheckInSubmit(e) {
     const notes = fd.get('Notes')?.trim() || null;
     const body  = { PatrolType: type, Area: area, Notes: notes };
     if (type === 'compensation') {
-        const dateVal = fd.get('PatrolDate');
+        const dateVal = fd.get('ScheduledSessionID');
         if (!dateVal) { showToast('กรุณาเลือกรอบที่ต้องการชดเชย', 'error'); return; }
-        body.PatrolDate = dateVal;
+        body.ScheduledSessionID = dateVal;
     }
     showLoading();
     try {
-        await API.post('/patrol/checkin', body);
+        const res = await API.post('/patrol/checkin', body);
         closeModal();
-        showCheckinSuccessScreen(type);
+        showCheckinSuccessScreen(type, res?.data || {});
     } catch (err) { showError(err); } finally { hideLoading(); }
 }
 
@@ -2442,7 +2665,7 @@ window._onCheckinTypeChange = async function(val) {
                 const round = `รอบ ${s.PatrolRound}`;
                 const dateStr = d.toISOString().split('T')[0];
                 const label = `${dow}ที่ ${day} ${mon} · ${round}${area ? ' · ' + area : ''}`;
-                return `<option value="${dateStr}">${label}</option>`;
+                return `<option value="${escHtml(s.id || s.ScheduledSessionID || '')}" data-area="${escHtml(area)}">${label}</option>`;
             }).join('');
 
     } catch {
@@ -2459,17 +2682,29 @@ window._onCheckinTypeChange = async function(val) {
 };
 
 // ─── Post Check-in Success Screen ─────────────────────────────────────────────
-function showCheckinSuccessScreen(patrolType) {
+window._onCheckinSessionChange = function() {
+    const sel = document.getElementById('checkin-missed-select');
+    const areaSel = document.getElementById('checkin-area-select');
+    const area = sel?.selectedOptions?.[0]?.dataset?.area || '';
+    if (area && areaSel) areaSel.value = area;
+};
+
+function showCheckinSuccessScreen(patrolType, result = {}) {
     const now         = new Date();
     const timeStr     = now.toLocaleTimeString('th-TH', { hour: '2-digit', minute: '2-digit' });
     const compliance  = _myPlan?.compliance;
-    const todaySess   = _myPlan?.sessions?.find(s => new Date(s.PatrolDate).toDateString() === now.toDateString()) || null;
-    const areaName    = todaySess?.AreaName || todaySess?.AreaCode || null;
+    const checkin     = result.checkin || {};
+    const email       = result.email || {};
+    const displayUser = patrolDisplayUser();
+    const areaName    = checkin.area || null;
     const newAttended = (compliance?.attended || 0) + 1;
     const required    = compliance?.required || 0;
     const nowDone     = newAttended >= required && required > 0;
     const pct         = required > 0 ? Math.min(Math.round((newAttended / required) * 100), 100) : 0;
-    const typeLabel   = patrolType === 'Re-inspection' ? 'ตรวจซ้ำ/ติดตาม' : patrolType === 'compensation' ? 'เดินซ่อม (Makeup)' : 'เดินตรวจปกติ';
+    const typeMeta    = patrolTypeMeta(checkin.type || patrolType);
+    const actualDate  = checkin.actualDate || patrolDateOnly(now);
+    const scheduledDate = checkin.scheduledDate || actualDate;
+    const emailText   = email.sent ? 'ส่งอีเมลแล้ว' : email.queued ? 'บันทึกอีเมลเข้าคิวแล้ว' : 'ยังไม่มีอีเมลผู้ใช้';
 
     openModal('เช็คอินสำเร็จ', `
       <div class="space-y-4">
@@ -2478,9 +2713,24 @@ function showCheckinSuccessScreen(patrolType) {
           <div class="w-14 h-14 rounded-2xl flex items-center justify-center mx-auto mb-3" style="background:rgba(255,255,255,0.15)">
             <svg class="w-7 h-7 text-emerald-300" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"/></svg>
           </div>
-          <p class="font-bold text-white text-base">${currentUser.name}</p>
-          <p class="text-emerald-300/80 text-xs mt-0.5">${typeLabel} · ${timeStr} น.</p>
-          ${areaName ? `<span class="inline-block mt-2 text-[10px] font-semibold px-2.5 py-1 rounded-full" style="background:rgba(255,255,255,0.12);color:rgba(255,255,255,0.7)">${areaName}</span>` : ''}
+          <p class="font-bold text-white text-base">${escHtml(checkin.employeeName || displayUser.name || '-')}</p>
+          <p class="text-emerald-300/80 text-xs mt-0.5">${typeMeta.label} · ${typeMeta.en} · ${timeStr} น.</p>
+          ${areaName ? `<span class="inline-block mt-2 text-[10px] font-semibold px-2.5 py-1 rounded-full" style="background:rgba(255,255,255,0.12);color:rgba(255,255,255,0.7)">${escHtml(areaName)}</span>` : ''}
+        </div>
+
+        <div class="grid grid-cols-2 gap-2">
+          <div class="rounded-xl border border-slate-100 bg-slate-50 p-3">
+            <p class="text-[10px] font-bold text-slate-400 uppercase">Scheduled</p>
+            <p class="text-sm font-black text-slate-800 mt-1">${escHtml(scheduledDate)}</p>
+          </div>
+          <div class="rounded-xl border border-slate-100 bg-slate-50 p-3">
+            <p class="text-[10px] font-bold text-slate-400 uppercase">Actual</p>
+            <p class="text-sm font-black text-slate-800 mt-1">${escHtml(actualDate)}</p>
+          </div>
+          <div class="rounded-xl border border-slate-100 bg-slate-50 p-3 col-span-2">
+            <p class="text-[10px] font-bold text-slate-400 uppercase">Notification</p>
+            <p class="text-xs font-bold ${email.sent || email.queued ? 'text-emerald-700' : 'text-slate-500'} mt-1">${escHtml(emailText)}</p>
+          </div>
         </div>
 
         <!-- Compliance status -->
@@ -2500,7 +2750,7 @@ function showCheckinSuccessScreen(patrolType) {
         <div class="border border-amber-100 bg-amber-50/60 rounded-xl p-3.5 flex items-center justify-between gap-3">
           <div>
             <p class="text-xs font-bold text-slate-700">พบสิ่งผิดปกติระหว่างเดิน?</p>
-            <p class="text-[10px] text-slate-400 mt-0.5">บันทึกปัญหาได้ทันที${areaName ? ` (พื้นที่ ${areaName} จะถูกกรอกให้)` : ''}</p>
+            <p class="text-[10px] text-slate-400 mt-0.5">บันทึกปัญหาได้ทันที${areaName ? ` (พื้นที่ ${escHtml(areaName)} จะถูกกรอกให้)` : ''}</p>
           </div>
           <button onclick="window.closeModal&&window.closeModal();window._openIssueFromCheckin(${JSON.stringify(areaName || '')})"
             class="flex-shrink-0 px-3.5 py-2 rounded-xl text-xs font-bold text-white transition-all active:scale-[0.97]" style="background:linear-gradient(135deg,#dc2626,#ef4444)">
@@ -2511,7 +2761,7 @@ function showCheckinSuccessScreen(patrolType) {
         <button onclick="window.closeModal&&window.closeModal()" class="w-full py-2.5 rounded-xl text-sm bg-slate-100 text-slate-600 hover:bg-slate-200 transition-colors font-medium">
           ปิด
         </button>
-      </div>`, 'max-w-sm');
+      </div>`, 'max-w-md');
 
     // Reload page data in background so the CTA button updates
     setTimeout(() => loadPatrolPage(), 300);
@@ -2529,6 +2779,414 @@ window._forceCheckin = function() {
 };
 
 // ─── Admin Record Manager — Management (Patrol_Attendance) ────────────────────
+function _patrolAdminDateLabel(value) {
+    if (!value) return '-';
+    const d = new Date(value);
+    return isNaN(d) ? String(value).slice(0, 10) : d.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: '2-digit' });
+}
+
+function _patrolAdminModeLabel(mode) {
+    return mode === 'admin_recorded' ? 'Admin' : 'Self';
+}
+
+function _patrolAdminStatusClass(status) {
+    if (status === 'completed') return 'bg-emerald-50 text-emerald-700 border-emerald-100';
+    if (status === 'partial') return 'bg-amber-50 text-amber-700 border-amber-100';
+    if (status === 'missed') return 'bg-red-50 text-red-600 border-red-100';
+    return 'bg-slate-50 text-slate-500 border-slate-100';
+}
+
+function _patrolAdminSummaryCard(label, value, tone = 'slate') {
+    const tones = {
+        emerald: 'bg-emerald-50 text-emerald-700 border-emerald-100',
+        amber: 'bg-amber-50 text-amber-700 border-amber-100',
+        red: 'bg-red-50 text-red-600 border-red-100',
+        slate: 'bg-slate-50 text-slate-600 border-slate-100',
+    };
+    return `<div class="rounded-lg border ${tones[tone] || tones.slate} px-2.5 py-2">
+      <div class="text-[9px] font-bold uppercase opacity-70">${escHtml(label)}</div>
+      <div class="text-sm font-black mt-0.5">${escHtml(value)}</div>
+    </div>`;
+}
+
+let _armCurrentDetail = null;
+
+function _patrolJsArg(value) {
+    return "'" + String(value ?? '')
+        .replace(/\\/g, '\\\\')
+        .replace(/'/g, "\\'")
+        .replace(/"/g, '\\x22')
+        .replace(/&/g, '\\x26')
+        .replace(/</g, '\\x3C')
+        .replace(/\r/g, '\\r')
+        .replace(/\n/g, '\\n') + "'";
+}
+
+function _patrolSessionArea(session) {
+    return session?.areaName || session?.AreaName || session?.areaCode || session?.AreaCode || '';
+}
+
+function _patrolSessionDate(session) {
+    return String(session?.date || session?.PatrolDate || '').slice(0, 10);
+}
+
+function _patrolSessionId(session) {
+    return String(session?.sessionId || session?.id || session?.ScheduledSessionID || '');
+}
+
+function _patrolSessionLabel(session) {
+    const date = _patrolAdminDateLabel(_patrolSessionDate(session));
+    const round = session?.patrolRound || session?.PatrolRound || '';
+    const area = _patrolSessionArea(session) || '-';
+    return `${date}${round ? ' · R' + round : ''} · ${area}`;
+}
+
+function _patrolUncompletedSessionsForMonth(detail, dateValue) {
+    const ym = String(dateValue || '').slice(0, 7);
+    const schedule = Array.isArray(detail?.schedule) ? detail.schedule : [];
+    return schedule.filter(item => {
+        const date = _patrolSessionDate(item);
+        if (!date.startsWith(ym)) return false;
+        const records = Array.isArray(item.records) ? item.records : [];
+        return !records.length;
+    });
+}
+
+window._armRefreshSessionPicker = function() {
+    const date = document.getElementById('arm-date')?.value || '';
+    const sessionRow = document.getElementById('arm-session-row');
+    const sessionSelect = document.getElementById('arm-session');
+    const areaSelect = document.getElementById('arm-area');
+    const hint = document.getElementById('arm-session-hint');
+    if (!sessionRow || !sessionSelect || !date || !_armCurrentDetail) {
+        if (sessionRow) sessionRow.classList.add('hidden');
+        return;
+    }
+    const schedule = Array.isArray(_armCurrentDetail.schedule) ? _armCurrentDetail.schedule : [];
+    const sameDate = schedule.filter(item => _patrolSessionDate(item) === date);
+    const candidates = sameDate.length ? sameDate : _patrolUncompletedSessionsForMonth(_armCurrentDetail, date);
+    sessionSelect.innerHTML = `<option value="">No scheduled session selected</option>` + candidates.map(item => {
+        const area = _patrolSessionArea(item);
+        return `<option value="${escHtml(_patrolSessionId(item))}" data-area="${escHtml(area)}">${escHtml(_patrolSessionLabel(item))}</option>`;
+    }).join('');
+    if (candidates.length === 1) {
+        sessionSelect.value = _patrolSessionId(candidates[0]);
+        const area = _patrolSessionArea(candidates[0]);
+        if (area && areaSelect) areaSelect.value = area;
+    } else {
+        sessionSelect.value = '';
+    }
+    if (hint) {
+        hint.textContent = sameDate.length
+            ? 'Matched scheduled date. Area is filled from the calendar.'
+            : (candidates.length ? 'Select the scheduled round this walk compensates.' : 'No open scheduled round found in this month.');
+    }
+    sessionRow.classList.toggle('hidden', !candidates.length);
+};
+
+window._armOnSessionChange = function() {
+    const sessionSelect = document.getElementById('arm-session');
+    const areaSelect = document.getElementById('arm-area');
+    const area = sessionSelect?.selectedOptions?.[0]?.dataset?.area || '';
+    if (area && areaSelect) areaSelect.value = area;
+};
+
+function _patrolYearForDetail(group) {
+    if (group === 'supervisor') {
+        return parseInt(document.getElementById('sv-year-select')?.value) || new Date().getFullYear();
+    }
+    return _overviewYear || new Date().getFullYear();
+}
+
+function _patrolDetailHeader(name, employeeId, group, year, targetPerYear) {
+    const tone = group === 'supervisor' ? 'amber' : 'emerald';
+    const target = targetPerYear ? `${targetPerYear}/year` : '-';
+    return `<div class="rounded-xl border border-${tone}-100 bg-${tone}-50 px-4 py-3">
+      <div class="flex items-center justify-between gap-3">
+        <div class="min-w-0">
+          <p class="text-sm font-black text-slate-800 truncate">${escHtml(name || employeeId)}</p>
+          <p class="text-xs text-slate-500 mt-0.5">${escHtml(employeeId)} &middot; ${year} &middot; Target ${escHtml(target)}</p>
+        </div>
+        ${isAdmin ? `<button onclick="window._patrolOpenAdminFromDetail(${_patrolJsArg(employeeId)},${_patrolJsArg(name)},${_patrolJsArg(group)},${Number(targetPerYear || 0)})"
+          class="flex-shrink-0 px-3 py-2 rounded-lg text-xs font-bold text-white ${group === 'supervisor' ? 'bg-amber-500 hover:bg-amber-600' : 'bg-emerald-500 hover:bg-emerald-600'} transition-colors">
+          Manage
+        </button>` : ''}
+      </div>
+    </div>`;
+}
+
+function _patrolDetailSummaryGrid(detail, group) {
+    const summary = detail?.summary || {};
+    const progress = summary.progressToDatePct || 0;
+    const fullYear = summary.fullYearPct || 0;
+    const done = group === 'supervisor' ? (summary.completedToDateCapped || 0) : (summary.completedScheduled || 0);
+    const required = summary.requiredToDate || 0;
+    const missing = summary.missingToDate || 0;
+    return `<div class="grid grid-cols-2 sm:grid-cols-4 gap-2">
+      ${_patrolAdminSummaryCard('Progress To Date', `${progress}%`, progress >= 80 ? 'emerald' : (progress > 0 ? 'amber' : 'red'))}
+      ${_patrolAdminSummaryCard('Full Year', `${fullYear}%`, 'slate')}
+      ${_patrolAdminSummaryCard('Completed/Due', `${done}/${required}`, required > 0 && done >= required ? 'emerald' : 'slate')}
+      ${_patrolAdminSummaryCard('Missing Due', String(missing), missing > 0 ? 'red' : 'emerald')}
+    </div>`;
+}
+
+function _patrolTopDetailList(detail) {
+    const schedule = Array.isArray(detail?.schedule) ? detail.schedule : [];
+    const extraRecords = Array.isArray(detail?.extraRecords) ? detail.extraRecords : [];
+    const rows = schedule.map(item => {
+        const status = item.status || 'upcoming';
+        const recs = Array.isArray(item.records) ? item.records : [];
+        return `<div class="rounded-xl border ${_patrolAdminStatusClass(status)} px-3 py-2">
+          <div class="flex items-center justify-between gap-2">
+            <div class="min-w-0">
+              <p class="text-xs font-black">${_patrolAdminDateLabel(item.date)} &middot; ${escHtml(status)}</p>
+              <p class="text-[10px] opacity-75 truncate">${escHtml(item.teamName || '-')}${item.areaName ? ' &middot; ' + escHtml(item.areaName) : ''}${item.patrolRound ? ' &middot; R' + item.patrolRound : ''}</p>
+            </div>
+            <span class="text-[10px] font-bold">${recs.length ? 'Completed' : (status === 'missed' ? 'Missing' : 'Not due')}</span>
+          </div>
+          ${recs.map(r => `<div class="mt-1.5 rounded-lg bg-white/70 px-2 py-1 text-[10px] text-slate-500 truncate">
+            ${escHtml(_patrolAdminModeLabel(r.mode))}${r.Area ? ' &middot; ' + escHtml(r.Area) : ''}${r.Notes ? ' &middot; ' + escHtml(r.Notes) : ''}
+          </div>`).join('')}
+        </div>`;
+    });
+    extraRecords.forEach(r => rows.push(`<div class="rounded-xl border border-violet-100 bg-violet-50 px-3 py-2">
+      <p class="text-xs font-black text-violet-700">${_patrolAdminDateLabel(r.PatrolDate)} &middot; Extra</p>
+      <p class="text-[10px] text-violet-500 truncate">${escHtml(_patrolAdminModeLabel(r.mode))}${r.Area ? ' &middot; ' + escHtml(r.Area) : ''}${r.Notes ? ' &middot; ' + escHtml(r.Notes) : ''}</p>
+    </div>`));
+    return rows.length ? rows.join('') : `<div class="text-center py-8 text-xs text-slate-400">No schedule or record for this year.</div>`;
+}
+
+function _patrolSupervisorDetailList(detail) {
+    const periods = Array.isArray(detail?.periods) ? detail.periods : [];
+    if (!periods.length) return `<div class="text-center py-8 text-xs text-slate-400">No quota data for this year.</div>`;
+    return periods.map(p => {
+        const status = p.status || 'upcoming';
+        const recs = Array.isArray(p.records) ? p.records : [];
+        const items = Array.isArray(p.items) ? p.items : [];
+        return `<div class="rounded-xl border ${_patrolAdminStatusClass(status)} px-3 py-2">
+          <div class="flex items-center justify-between gap-2">
+            <p class="text-xs font-black">Month ${p.month} &middot; ${escHtml(status)}</p>
+            <span class="text-[10px] font-bold">${p.completed || 0}/${p.monthlyRequirement || p.required || 0}</span>
+          </div>
+          ${items.length ? `<div class="mt-2 space-y-1">
+            ${items.map(item => {
+              const itemRecs = patrolSessionRecords(item);
+              return `<div class="rounded-lg bg-white/70 px-2 py-1 text-[10px] text-slate-500">
+                <div class="flex items-center justify-between gap-2">
+                  <span class="truncate">${_patrolAdminDateLabel(item.date || item.PatrolDate)}${item.areaName ? ' &middot; ' + escHtml(item.areaName) : ''}${item.patrolRound ? ' &middot; R' + item.patrolRound : ''}</span>
+                  <span class="font-bold ${itemRecs.length ? 'text-emerald-600' : 'text-slate-400'}">${itemRecs.length ? 'Done' : 'Open'}</span>
+                </div>
+              </div>`;
+            }).join('')}
+          </div>` : ''}
+          ${recs.map(r => `<div class="mt-1.5 rounded-lg bg-white/70 px-2 py-1 text-[10px] text-slate-500 truncate">
+            ${_patrolAdminDateLabel(r.CheckinDate)} &middot; ${escHtml(_patrolAdminModeLabel(r.mode))}${r.ScheduledSessionID ? ' &middot; Scheduled' : ''}${r.Location ? ' &middot; ' + escHtml(r.Location) : ''}${r.Notes ? ' &middot; ' + escHtml(r.Notes) : ''}
+          </div>`).join('')}
+        </div>`;
+    }).join('');
+}
+
+window._patrolOpenAdminFromDetail = function(employeeId, name, group, targetPerYear) {
+    closeModal();
+    if (group === 'supervisor') {
+        window.openAdminRecordSvModal(employeeId, name, targetPerYear);
+        return;
+    }
+    window.openAdminRecordModal(employeeId, name, targetPerYear);
+};
+
+window.openPatrolAttendanceDetailModal = async function(employeeId, name, group, targetPerYear) {
+    const year = _patrolYearForDetail(group);
+    const groupLabel = group === 'supervisor' ? 'Sec. & Supervisor' : 'Top & Management';
+    openModal(`Attendance Detail - ${name || employeeId}`, `
+      <div class="space-y-3">
+        ${_patrolDetailHeader(name, employeeId, group, year, targetPerYear)}
+        <div class="flex flex-col items-center justify-center py-8 text-slate-400">
+          <div class="animate-spin rounded-full h-8 w-8 border-4 ${group === 'supervisor' ? 'border-amber-500' : 'border-emerald-500'} border-t-transparent mb-3"></div>
+          <span class="text-xs">Loading ${escHtml(groupLabel)} detail...</span>
+        </div>
+      </div>`, 'max-w-3xl');
+    try {
+        const res = await API.get(`/patrol/attendance-detail?employeeId=${encodeURIComponent(employeeId)}&group=${encodeURIComponent(group)}&year=${year}`);
+        const detail = res.data || {};
+        const list = group === 'supervisor' ? _patrolSupervisorDetailList(detail) : _patrolTopDetailList(detail);
+        const body = document.getElementById('modal-body');
+        if (!body) return;
+        body.innerHTML = `
+          <div class="space-y-3">
+            ${_patrolDetailHeader(name, employeeId, group, year, targetPerYear)}
+            ${_patrolDetailSummaryGrid(detail, group)}
+            <div class="rounded-xl border border-slate-100 bg-white">
+              <div class="px-3 py-2 border-b border-slate-100 flex items-center justify-between gap-2">
+                <p class="text-xs font-black text-slate-600">${escHtml(groupLabel)} detail</p>
+                <p class="text-[10px] text-slate-400">${detail.mode === 'monthly_quota' ? 'Monthly quota' : 'Scheduled calendar'}</p>
+              </div>
+              <div class="space-y-2 max-h-[420px] overflow-y-auto p-3">${list}</div>
+            </div>
+          </div>`;
+    } catch (err) {
+        const body = document.getElementById('modal-body');
+        if (body) body.innerHTML = `
+          <div class="space-y-3">
+            ${_patrolDetailHeader(name, employeeId, group, year, targetPerYear)}
+            <div class="rounded-xl border border-red-100 bg-red-50 px-4 py-6 text-center text-sm text-red-500">
+              ${escHtml(getReadableError(err, 'Unable to load attendance detail'))}
+            </div>
+          </div>`;
+    }
+};
+
+function _armRenderTopDetail(detail, employeeId, year) {
+    _armCurrentDetail = detail || null;
+    const summary = detail?.summary || {};
+    const schedule = Array.isArray(detail?.schedule) ? detail.schedule : [];
+    const records = Array.isArray(detail?.records) ? detail.records : [];
+    const extraRecords = Array.isArray(detail?.extraRecords) ? detail.extraRecords : [];
+    const detailEl = document.getElementById('arm-detail');
+    const listEl = document.getElementById('arm-list');
+    const countEl = document.getElementById('arm-count');
+    if (countEl) countEl.textContent = `${summary.completedScheduled || 0}/${summary.requiredToDate || 0} due`;
+    if (detailEl) {
+        detailEl.innerHTML = `
+          <div class="grid grid-cols-2 gap-2">
+            ${_patrolAdminSummaryCard('Progress To Date', `${summary.progressToDatePct || 0}%`, (summary.progressToDatePct || 0) >= 80 ? 'emerald' : 'amber')}
+            ${_patrolAdminSummaryCard('Full Year', `${summary.fullYearPct || 0}%`, 'slate')}
+            ${_patrolAdminSummaryCard('Required Due', String(summary.requiredToDate || 0), 'slate')}
+            ${_patrolAdminSummaryCard('Missing Due', String(summary.missingToDate || 0), (summary.missingToDate || 0) > 0 ? 'red' : 'emerald')}
+          </div>`;
+    }
+    if (!listEl) return;
+    const rows = [];
+    schedule.forEach(item => {
+        const status = item.status || 'upcoming';
+        const itemRecords = Array.isArray(item.records) ? item.records : [];
+        rows.push(`<div class="rounded-xl border ${_patrolAdminStatusClass(status)} px-3 py-2">
+          <div class="flex items-center justify-between gap-2">
+            <div class="min-w-0">
+              <div class="text-xs font-black">${_patrolAdminDateLabel(item.date)} · ${escHtml(status)}</div>
+              <div class="text-[10px] opacity-75 truncate">${escHtml(item.teamName || '')}${item.areaName ? ' · ' + escHtml(item.areaName) : ''}${item.patrolRound ? ' · R' + item.patrolRound : ''}</div>
+            </div>
+            <div class="text-[10px] font-bold">${itemRecords.length ? 'Done' : (status === 'missed' ? 'Missing' : 'Planned')}</div>
+          </div>
+          ${itemRecords.map(r => `<div class="mt-1.5 flex items-center justify-between gap-2 rounded-lg bg-white/70 px-2 py-1">
+            <span class="text-[10px] text-slate-500 truncate">${escHtml(_patrolAdminModeLabel(r.mode))}${r.Area ? ' · ' + escHtml(r.Area) : ''}${r.Notes ? ' · ' + escHtml(r.Notes) : ''}</span>
+            <button onclick="window._armDeleteRecord(${r.id},'${employeeId}',${year})" class="flex-shrink-0 text-[10px] font-bold text-red-500 hover:text-red-600">Delete</button>
+          </div>`).join('')}
+        </div>`);
+    });
+    extraRecords.forEach(r => rows.push(`<div class="rounded-xl border border-violet-100 bg-violet-50 px-3 py-2">
+      <div class="flex items-center justify-between gap-2">
+        <div class="min-w-0">
+          <div class="text-xs font-black text-violet-700">${_patrolAdminDateLabel(r.PatrolDate)} · Extra</div>
+          <div class="text-[10px] text-violet-500 truncate">${escHtml(_patrolAdminModeLabel(r.mode))}${r.Area ? ' · ' + escHtml(r.Area) : ''}${r.Notes ? ' · ' + escHtml(r.Notes) : ''}</div>
+        </div>
+        <button onclick="window._armDeleteRecord(${r.id},'${employeeId}',${year})" class="flex-shrink-0 text-[10px] font-bold text-red-500 hover:text-red-600">Delete</button>
+      </div>
+    </div>`));
+    if (!rows.length && !records.length) {
+        listEl.innerHTML = `<div class="text-center py-6 text-slate-300 text-xs">No schedule or record for this year.</div>`;
+        return;
+    }
+    listEl.innerHTML = rows.join('');
+}
+
+function _arsvRenderQuotaDetail(detail, employeeId, year) {
+    _arsvCurrentDetail = detail || null;
+    const summary = detail?.summary || {};
+    const periods = Array.isArray(detail?.periods) ? detail.periods : [];
+    const countEl = document.getElementById('arsv-count');
+    const detailEl = document.getElementById('arsv-detail');
+    const listEl = document.getElementById('arsv-list');
+    if (countEl) countEl.textContent = `${summary.completedToDateCapped || 0}/${summary.requiredToDate || 0} due`;
+    if (detailEl) {
+        detailEl.innerHTML = `
+          <div class="grid grid-cols-2 gap-2">
+            ${_patrolAdminSummaryCard('Progress To Date', `${summary.progressToDatePct || 0}%`, (summary.progressToDatePct || 0) >= 80 ? 'emerald' : 'amber')}
+            ${_patrolAdminSummaryCard('Full Year', `${summary.fullYearPct || 0}%`, 'slate')}
+            ${_patrolAdminSummaryCard('Year Target', String(summary.yearlyTarget || 0), 'slate')}
+            ${_patrolAdminSummaryCard('Missing Due', String(summary.missingToDate || 0), (summary.missingToDate || 0) > 0 ? 'red' : 'emerald')}
+          </div>`;
+    }
+    if (!listEl) return;
+    _arsvRenderSchedulePicker(detail);
+    if (!periods.length) {
+        listEl.innerHTML = `<div class="text-center py-6 text-slate-300 text-xs">No quota data for this year.</div>`;
+        return;
+    }
+    listEl.innerHTML = periods.map(p => {
+        const status = p.status || 'upcoming';
+        const recs = Array.isArray(p.records) ? p.records : [];
+        const items = Array.isArray(p.items) ? p.items : [];
+        return `<div class="rounded-xl border ${_patrolAdminStatusClass(status)} px-3 py-2">
+          <div class="flex items-center justify-between gap-2">
+            <div class="text-xs font-black">Month ${p.month} · ${escHtml(status)}</div>
+            <div class="text-[10px] font-bold">${p.completed || 0}/${p.monthlyRequirement || p.required || 0}</div>
+          </div>
+          ${items.length ? `<div class="mt-2 space-y-1">
+            ${items.map(item => {
+              const itemRecords = patrolSessionRecords(item);
+              return `<div class="rounded-lg bg-white/70 px-2 py-1 text-[10px] text-slate-500">
+                <div class="flex items-center justify-between gap-2">
+                  <span class="truncate">${_patrolAdminDateLabel(item.date || item.PatrolDate)}${item.areaName ? ' · ' + escHtml(item.areaName) : ''}${item.patrolRound ? ' · R' + item.patrolRound : ''}</span>
+                  <span class="font-bold ${itemRecords.length ? 'text-emerald-600' : 'text-slate-400'}">${itemRecords.length ? 'Done' : 'Open'}</span>
+                </div>
+              </div>`;
+            }).join('')}
+          </div>` : ''}
+          ${recs.map(r => `<div class="mt-1.5 flex items-center justify-between gap-2 rounded-lg bg-white/70 px-2 py-1">
+            <span class="text-[10px] text-slate-500 truncate">${_patrolAdminDateLabel(r.CheckinDate)} · ${escHtml(_patrolAdminModeLabel(r.mode))}${r.ScheduledSessionID ? ' · Scheduled' : ''}${r.Location ? ' · ' + escHtml(r.Location) : ''}${r.Notes ? ' · ' + escHtml(r.Notes) : ''}</span>
+            <button onclick="window._arsvDeleteRecord(${r.id},'${employeeId}',${year})" class="flex-shrink-0 text-[10px] font-bold text-red-500 hover:text-red-600">Delete</button>
+          </div>`).join('')}
+        </div>`;
+    }).join('');
+}
+
+function _arsvOpenScheduleItems(detail) {
+    const today = new Date().toISOString().split('T')[0];
+    const periods = Array.isArray(detail?.periods) ? detail.periods : [];
+    return periods.flatMap(p => Array.isArray(p.items) ? p.items : [])
+        .filter(item => !patrolSessionCompleted(item) && String(item.date || item.PatrolDate || '').slice(0, 10) <= today);
+}
+
+function _arsvRenderSchedulePicker(detail) {
+    const select = document.getElementById('arsv-session');
+    const dateInput = document.getElementById('arsv-date');
+    const locInput = document.getElementById('arsv-loc');
+    const hint = document.getElementById('arsv-session-hint');
+    if (!select || !dateInput) return;
+    const openItems = _arsvOpenScheduleItems(detail);
+    if (!openItems.length) {
+        select.innerHTML = '<option value="">ไม่มีรอบตามกำหนดการที่ยังเปิดอยู่</option>';
+        select.disabled = true;
+        dateInput.value = '';
+        if (hint) hint.textContent = 'รอบที่ครบแล้วจะไม่แสดงในรายการให้เลือก';
+        return;
+    }
+    select.disabled = false;
+    select.innerHTML = openItems.map((item, idx) => {
+        const id = patrolSessionId(item);
+        const date = String(item.date || item.PatrolDate || '').slice(0, 10);
+        const area = item.areaName || item.AreaName || item.areaCode || item.AreaCode || '';
+        const round = item.patrolRound || item.PatrolRound || '';
+        return `<option value="${escHtml(id)}" data-date="${escHtml(date)}" data-area="${escHtml(area)}" ${idx === 0 ? 'selected' : ''}>${escHtml(date)}${area ? ' · ' + escHtml(area) : ''}${round ? ' · R' + escHtml(round) : ''}</option>`;
+    }).join('');
+    window._arsvOnSessionChange();
+}
+
+window._arsvOnSessionChange = function() {
+    const select = document.getElementById('arsv-session');
+    const opt = select?.selectedOptions?.[0];
+    const dateInput = document.getElementById('arsv-date');
+    const locInput = document.getElementById('arsv-loc');
+    const hint = document.getElementById('arsv-session-hint');
+    if (!opt) return;
+    const date = opt.dataset.date || '';
+    const area = opt.dataset.area || '';
+    if (dateInput) dateInput.value = date;
+    if (locInput) locInput.value = area || locInput.value || '';
+    if (hint) hint.textContent = date ? `จะบันทึกตามกำหนดการวันที่ ${date}` : '';
+};
+
 window.openAdminRecordModal = async function(employeeId, name, targetPerYear) {
     const year = _overviewYear || new Date().getFullYear();
     openModal(`รายการเดินตรวจ — ${name}`, `
@@ -2536,6 +3194,12 @@ window.openAdminRecordModal = async function(employeeId, name, targetPerYear) {
         <div class="flex items-center justify-between">
           <p class="text-xs text-slate-500">ปี ${year} · เป้าหมาย ${targetPerYear || '—'} ครั้ง/ปี</p>
           <span id="arm-count" class="text-xs font-bold text-emerald-600">กำลังโหลด...</span>
+        </div>
+        <div id="arm-detail" class="space-y-2">
+          <div class="grid grid-cols-2 gap-2">
+            ${_patrolAdminSummaryCard('Progress To Date', '...', 'emerald')}
+            ${_patrolAdminSummaryCard('Full Year', '...', 'slate')}
+          </div>
         </div>
         <div id="arm-list" class="space-y-1.5 max-h-60 overflow-y-auto">
           <div class="text-center py-6 text-slate-300 text-xs">
@@ -2549,7 +3213,7 @@ window.openAdminRecordModal = async function(employeeId, name, targetPerYear) {
             <div class="grid grid-cols-2 gap-2">
               <div>
                 <label class="text-[10px] text-slate-400 font-semibold">วันที่ *</label>
-                <input type="date" id="arm-date" max="${new Date().toISOString().split('T')[0]}"
+                <input type="date" id="arm-date" max="${new Date().toISOString().split('T')[0]}" onchange="window._armRefreshSessionPicker()"
                   class="w-full mt-0.5 rounded-lg border border-slate-200 px-2.5 py-1.5 text-xs text-slate-700 focus:outline-none focus:ring-1 focus:ring-emerald-400">
               </div>
               <div>
@@ -2561,11 +3225,22 @@ window.openAdminRecordModal = async function(employeeId, name, targetPerYear) {
                 </select>
               </div>
             </div>
+            <div id="arm-session-row" class="hidden">
+              <label class="text-[10px] text-slate-400 font-semibold">Compensate scheduled round</label>
+              <select id="arm-session" onchange="window._armOnSessionChange()"
+                class="w-full mt-0.5 rounded-lg border border-violet-200 px-2.5 py-1.5 text-xs text-slate-700 focus:outline-none focus:ring-1 focus:ring-violet-400">
+                <option value="">No scheduled session selected</option>
+              </select>
+              <p id="arm-session-hint" class="mt-1 text-[10px] text-slate-400"></p>
+            </div>
             <div>
               <label class="text-[10px] text-slate-400 font-semibold">พื้นที่</label>
               <select id="arm-area" class="w-full mt-0.5 rounded-lg border border-slate-200 px-2.5 py-1.5 text-xs text-slate-700 focus:outline-none focus:ring-1 focus:ring-emerald-400">
                 <option value="">— ไม่ระบุ —</option>
-                ${(_patrolAreas||[]).map(a=>`<option value="${a.Name}">${a.Name}</option>`).join('')}
+                ${(_patrolAreas||[]).map(a => {
+                    const name = getPatrolAreaName(a);
+                    return name ? `<option value="${escHtml(name)}">${escHtml(name)}</option>` : '';
+                }).join('')}
               </select>
             </div>
             <div>
@@ -2587,6 +3262,9 @@ window.openAdminRecordModal = async function(employeeId, name, targetPerYear) {
 
 async function _armLoadRecords(employeeId, year) {
     try {
+        const detailRes = await API.get(`/patrol/attendance-detail?employeeId=${encodeURIComponent(employeeId)}&group=top_management&year=${year}`);
+        _armRenderTopDetail(detailRes.data || {}, employeeId, year);
+        return;
         const res = await API.get(`/patrol/member-attendance?employeeId=${employeeId}&year=${year}`);
         const rows = res.data || [];
         const countEl = document.getElementById('arm-count');
@@ -2624,31 +3302,40 @@ async function _armLoadRecords(employeeId, year) {
 }
 
 window._armAddRecord = async function(employeeId, name, targetPerYear) {
+    const actionKey = `arm-add-${employeeId}`;
+    if (_patrolActionLocks.has(actionKey)) return;
     const date  = document.getElementById('arm-date')?.value;
     const type  = document.getElementById('arm-type')?.value || 'normal';
     const area  = document.getElementById('arm-area')?.value || null;
     const notes = document.getElementById('arm-notes')?.value?.trim() || null;
+    const scheduledSessionId = document.getElementById('arm-session')?.value || null;
     if (!date) { showToast('กรุณาเลือกวันที่', 'error'); return; }
+    _patrolActionLocks.add(actionKey);
     try {
-        await API.post('/patrol/admin-record', { EmployeeID: employeeId, PatrolDate: date, PatrolType: type, Area: area, Notes: notes });
+        await API.post('/patrol/admin-record', { EmployeeID: employeeId, PatrolDate: date, PatrolType: type, Area: area, Notes: notes, ScheduledSessionID: scheduledSessionId });
         showToast('เพิ่มรายการสำเร็จ', 'success');
         const year = _overviewYear || new Date().getFullYear();
         await _armLoadRecords(employeeId, year);
         _overviewData = null;
         loadOverview(_overviewYear);
-    } catch (err) { showError(err); }
+    } catch (err) { showError(getReadableError(err, 'เพิ่มรายการเดินตรวจไม่สำเร็จ')); }
+    finally { _patrolActionLocks.delete(actionKey); }
 };
 
 window._armDeleteRecord = async function(id, employeeId, year) {
+    const actionKey = `arm-delete-${id}`;
+    if (_patrolActionLocks.has(actionKey)) return;
     const ok = await showConfirmationModal('ยืนยันการลบ', 'ต้องการลบรายการเดินตรวจนี้ใช่หรือไม่?');
     if (!ok) return;
+    _patrolActionLocks.add(actionKey);
     try {
         await API.delete(`/patrol/admin-record/${id}`);
         showToast('ลบรายการสำเร็จ', 'success');
         await _armLoadRecords(employeeId, year);
         _overviewData = null;
         loadOverview(_overviewYear);
-    } catch (err) { showError(err); }
+    } catch (err) { showError(getReadableError(err, 'ลบรายการเดินตรวจไม่สำเร็จ')); }
+    finally { _patrolActionLocks.delete(actionKey); }
 };
 
 // ─── Admin Record Manager — Supervisor (Patrol_Self_Checkin) ──────────────────
@@ -2660,6 +3347,12 @@ window.openAdminRecordSvModal = async function(employeeId, name, targetPerYear) 
           <p class="text-xs text-slate-500">ปี ${year} · เป้าหมาย ${targetPerYear || '—'} ครั้ง/ปี</p>
           <span id="arsv-count" class="text-xs font-bold text-amber-600">กำลังโหลด...</span>
         </div>
+        <div id="arsv-detail" class="space-y-2">
+          <div class="grid grid-cols-2 gap-2">
+            ${_patrolAdminSummaryCard('Progress To Date', '...', 'amber')}
+            ${_patrolAdminSummaryCard('Full Year', '...', 'slate')}
+          </div>
+        </div>
         <div id="arsv-list" class="space-y-1.5 max-h-60 overflow-y-auto">
           <div class="text-center py-6 text-slate-300 text-xs">
             <div class="animate-spin rounded-full h-6 w-6 border-2 border-amber-400 border-t-transparent mx-auto mb-2"></div>
@@ -2668,12 +3361,20 @@ window.openAdminRecordSvModal = async function(employeeId, name, targetPerYear) 
         </div>
         <div class="border-t border-slate-100 pt-4">
           <p class="text-xs font-bold text-slate-600 mb-2">เพิ่มรายการใหม่ (Admin)</p>
-          <div class="space-y-2">
+            <div class="space-y-2">
+            <div>
+              <label class="text-[10px] text-slate-400 font-semibold">รอบตามกำหนดการ *</label>
+              <select id="arsv-session" onchange="window._arsvOnSessionChange()"
+                class="w-full mt-0.5 rounded-lg border border-amber-200 px-2.5 py-1.5 text-xs text-slate-700 focus:outline-none focus:ring-1 focus:ring-amber-400">
+                <option value="">กำลังโหลดรอบตามกำหนดการ...</option>
+              </select>
+              <p id="arsv-session-hint" class="mt-1 text-[10px] text-slate-400">รอบที่เดินแล้วจะไม่แสดงให้เลือก</p>
+            </div>
             <div class="grid grid-cols-2 gap-2">
               <div>
                 <label class="text-[10px] text-slate-400 font-semibold">วันที่ *</label>
-                <input type="date" id="arsv-date" max="${new Date().toISOString().split('T')[0]}"
-                  class="w-full mt-0.5 rounded-lg border border-slate-200 px-2.5 py-1.5 text-xs text-slate-700 focus:outline-none focus:ring-1 focus:ring-amber-400">
+                <input type="date" id="arsv-date" max="${new Date().toISOString().split('T')[0]}" readonly
+                  class="w-full mt-0.5 rounded-lg border border-slate-200 bg-slate-50 px-2.5 py-1.5 text-xs text-slate-700 focus:outline-none focus:ring-1 focus:ring-amber-400">
               </div>
               <div>
                 <label class="text-[10px] text-slate-400 font-semibold">สถานที่</label>
@@ -2700,6 +3401,9 @@ window.openAdminRecordSvModal = async function(employeeId, name, targetPerYear) 
 
 async function _arsvLoadRecords(employeeId, year) {
     try {
+        const detailRes = await API.get(`/patrol/attendance-detail?employeeId=${encodeURIComponent(employeeId)}&group=supervisor&year=${year}`);
+        _arsvRenderQuotaDetail(detailRes.data || {}, employeeId, year);
+        return;
         const res = await API.get(`/patrol/supervisor-checkins?employeeId=${employeeId}&year=${year}`);
         const rows = res.data || [];
         const countEl = document.getElementById('arsv-count');
@@ -2731,28 +3435,38 @@ async function _arsvLoadRecords(employeeId, year) {
 }
 
 window._arsvAddRecord = async function(employeeId, name, targetPerYear) {
+    const actionKey = `arsv-add-${employeeId}`;
+    if (_patrolActionLocks.has(actionKey)) return;
     const date  = document.getElementById('arsv-date')?.value;
     const loc   = document.getElementById('arsv-loc')?.value?.trim() || null;
     const notes = document.getElementById('arsv-notes')?.value?.trim() || null;
+    const scheduledSessionId = document.getElementById('arsv-session')?.value || null;
     if (!date) { showToast('กรุณาเลือกวันที่', 'error'); return; }
+    if (!scheduledSessionId) { showToast('กรุณาเลือกรอบตามกำหนดการ', 'error'); return; }
+    _patrolActionLocks.add(actionKey);
     try {
-        await API.post('/patrol/admin-record/supervisor', { EmployeeID: employeeId, CheckinDate: date, Location: loc, Notes: notes });
+        await API.post('/patrol/admin-record/supervisor', { EmployeeID: employeeId, CheckinDate: date, Location: loc, Notes: notes, ScheduledSessionID: scheduledSessionId });
         showToast('เพิ่มรายการสำเร็จ', 'success');
         const year = parseInt(document.getElementById('sv-year-select')?.value) || new Date().getFullYear();
         await _arsvLoadRecords(employeeId, year);
         loadSupervisorOverview(year);
-    } catch (err) { showError(err); }
+    } catch (err) { showError(getReadableError(err, 'เพิ่มรายการ Self-Patrol ไม่สำเร็จ')); }
+    finally { _patrolActionLocks.delete(actionKey); }
 };
 
 window._arsvDeleteRecord = async function(id, employeeId, year) {
+    const actionKey = `arsv-delete-${id}`;
+    if (_patrolActionLocks.has(actionKey)) return;
     const ok = await showConfirmationModal('ยืนยันการลบ', 'ต้องการลบรายการ Self-Patrol นี้ใช่หรือไม่?');
     if (!ok) return;
+    _patrolActionLocks.add(actionKey);
     try {
         await API.delete(`/patrol/admin-record/supervisor/${id}`);
         showToast('ลบรายการสำเร็จ', 'success');
         await _arsvLoadRecords(employeeId, year);
         loadSupervisorOverview(year);
-    } catch (err) { showError(err); }
+    } catch (err) { showError(getReadableError(err, 'ลบรายการ Self-Patrol ไม่สำเร็จ')); }
+    finally { _patrolActionLocks.delete(actionKey); }
 };
 
 // ─── Issue Form ───────────────────────────────────────────────────────────────
@@ -2910,7 +3624,10 @@ window.openIssueForm = function(mode, rawIssueData = null) {
                 <label class="block text-xs font-semibold text-slate-500">พื้นที่ตรวจ</label>
                 <select name="Area" class="w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm text-slate-700 focus:outline-none focus:ring-2 focus:ring-emerald-400 transition-all" ${s1d}>
                   ${(_patrolAreas.length ? _patrolAreas : [{ Name:'โรงงาน 1' },{ Name:'โรงงาน 2' },{ Name:'รอบนอก' }])
-                    .map(a => `<option value="${a.Name}" ${issueData?.Area === a.Name ? 'selected':''}>${a.Name}</option>`).join('')}
+                    .map(a => {
+                        const name = getPatrolAreaName(a);
+                        return name ? `<option value="${escHtml(name)}" ${issueData?.Area === name ? 'selected':''}>${escHtml(name)}</option>` : '';
+                    }).join('')}
                 </select>
               </div>
             </div>
@@ -3011,7 +3728,7 @@ window.openIssueForm = function(mode, rawIssueData = null) {
               <label class="flex flex-col items-center justify-center gap-2 border-2 border-dashed border-slate-200 rounded-xl py-6 px-4 cursor-pointer hover:border-emerald-400 hover:bg-emerald-50/40 transition-all group">
                 <svg class="w-8 h-8 text-slate-300 group-hover:text-emerald-400 transition-colors" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"/></svg>
                 <span class="text-xs text-slate-400 group-hover:text-emerald-600 transition-colors">คลิกเพื่อเลือกรูปภาพ</span>
-                <input type="file" name="BeforeImage" accept="image/*" class="hidden" onchange="this.previousElementSibling.textContent = this.files[0]?.name || 'คลิกเพื่อเลือกรูปภาพ'">
+                <input type="file" name="BeforeImage" accept="image/*" class="hidden" onchange="window._previewIssueFile(this)">
               </label>
             </div>` : ''}
 
@@ -3019,10 +3736,16 @@ window.openIssueForm = function(mode, rawIssueData = null) {
             ${(isView || isEdit) && beforeUrl ? `
             <div class="space-y-1.5">
               <label class="block text-xs font-semibold text-slate-500">ภาพก่อนซ่อม</label>
-              <div class="relative rounded-xl overflow-hidden h-40 bg-slate-900">
+              <button type="button" onclick='window._patrolOpenImageViewer(${JSON.stringify(beforeUrl)}, "ภาพก่อนซ่อม")' class="relative rounded-xl overflow-hidden h-40 bg-slate-900 block w-full group focus:outline-none focus:ring-2 focus:ring-red-400">
                 <img src="${beforeUrl}" class="w-full h-full object-cover" onerror="this.parentElement.innerHTML='<div class=\\'flex items-center justify-center h-full text-slate-500 text-xs\\'>ไม่พบภาพ</div>'">
                 <span class="absolute top-2 left-2 px-2 py-0.5 rounded-lg text-[10px] font-bold bg-red-600/90 text-white">BEFORE</span>
-              </div>
+                <span class="absolute inset-0 bg-slate-950/0 group-hover:bg-slate-950/35 transition-colors flex items-center justify-center">
+                  <span class="opacity-0 group-hover:opacity-100 transition-opacity inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-white/95 text-slate-700 text-xs font-bold shadow">
+                    <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 10l4.553-4.553M19.553 5.447V10m0-4.553H15M9 14l-4.553 4.553M4.447 18.553V14m0 4.553H9"/></svg>
+                    ดูรูปเต็ม
+                  </span>
+                </span>
+              </button>
             </div>` : ''}
 
           </div>
@@ -3050,10 +3773,16 @@ window.openIssueForm = function(mode, rawIssueData = null) {
             ${isView && tempUrl ? `
             <div class="space-y-1.5">
               <label class="block text-xs font-semibold text-orange-700">ภาพประกอบ</label>
-              <div class="relative rounded-xl overflow-hidden h-36 bg-slate-900">
+              <button type="button" onclick='window._patrolOpenImageViewer(${JSON.stringify(tempUrl)}, "ภาพแก้ไขเบื้องต้น")' class="relative rounded-xl overflow-hidden h-36 bg-slate-900 block w-full group focus:outline-none focus:ring-2 focus:ring-orange-400">
                 <img src="${tempUrl}" class="w-full h-full object-cover">
                 <span class="absolute top-2 left-2 px-2 py-0.5 rounded-lg text-[10px] font-bold bg-orange-500/90 text-white">TEMP FIX</span>
-              </div>
+                <span class="absolute inset-0 bg-slate-950/0 group-hover:bg-slate-950/35 transition-colors flex items-center justify-center">
+                  <span class="opacity-0 group-hover:opacity-100 transition-opacity inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-white/95 text-slate-700 text-xs font-bold shadow">
+                    <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 10l4.553-4.553M19.553 5.447V10m0-4.553H15M9 14l-4.553 4.553M4.447 18.553V14m0 4.553H9"/></svg>
+                    ดูรูปเต็ม
+                  </span>
+                </span>
+              </button>
             </div>` : ''}
             ${!isView ? `
             <div class="space-y-1.5">
@@ -3061,7 +3790,7 @@ window.openIssueForm = function(mode, rawIssueData = null) {
               <label class="flex flex-col items-center justify-center gap-2 border-2 border-dashed border-orange-200 rounded-xl py-5 px-4 cursor-pointer hover:border-orange-400 hover:bg-orange-50 transition-all group">
                 <svg class="w-7 h-7 text-orange-300 group-hover:text-orange-400 transition-colors" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"/></svg>
                 <span class="text-xs text-orange-400 group-hover:text-orange-600 transition-colors">คลิกเพื่อเลือกรูปภาพ</span>
-                <input type="file" name="TempImage" accept="image/*" class="hidden" onchange="this.previousElementSibling.textContent = this.files[0]?.name || 'คลิกเพื่อเลือกรูปภาพ'">
+                <input type="file" name="TempImage" accept="image/*" class="hidden" onchange="window._previewIssueFile(this)">
               </label>
             </div>` : ''}
           </div>
@@ -3095,10 +3824,16 @@ window.openIssueForm = function(mode, rawIssueData = null) {
             ${isView && afterUrl ? `
             <div class="space-y-1.5">
               <label class="block text-xs font-semibold text-emerald-700">ภาพหลังแก้ไข</label>
-              <div class="relative rounded-xl overflow-hidden h-40 bg-slate-900">
+              <button type="button" onclick='window._patrolOpenImageViewer(${JSON.stringify(afterUrl)}, "ภาพหลังแก้ไข")' class="relative rounded-xl overflow-hidden h-40 bg-slate-900 block w-full group focus:outline-none focus:ring-2 focus:ring-emerald-400">
                 <img src="${afterUrl}" class="w-full h-full object-cover">
                 <span class="absolute top-2 left-2 px-2 py-0.5 rounded-lg text-[10px] font-bold bg-emerald-600/90 text-white">AFTER</span>
-              </div>
+                <span class="absolute inset-0 bg-slate-950/0 group-hover:bg-slate-950/35 transition-colors flex items-center justify-center">
+                  <span class="opacity-0 group-hover:opacity-100 transition-opacity inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-white/95 text-slate-700 text-xs font-bold shadow">
+                    <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 10l4.553-4.553M19.553 5.447V10m0-4.553H15M9 14l-4.553 4.553M4.447 18.553V14m0 4.553H9"/></svg>
+                    ดูรูปเต็ม
+                  </span>
+                </span>
+              </button>
             </div>` : ''}
             ${!isView ? `
             <div class="space-y-1.5">
@@ -3106,7 +3841,7 @@ window.openIssueForm = function(mode, rawIssueData = null) {
               <label class="flex flex-col items-center justify-center gap-2 border-2 border-dashed border-emerald-200 rounded-xl py-5 px-4 cursor-pointer hover:border-emerald-400 hover:bg-emerald-50 transition-all group">
                 <svg class="w-7 h-7 text-emerald-300 group-hover:text-emerald-500 transition-colors" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"/></svg>
                 <span class="text-xs text-emerald-400 group-hover:text-emerald-600 transition-colors">คลิกเพื่อเลือกรูปภาพ</span>
-                <input type="file" name="AfterImage" accept="image/*" class="hidden" onchange="this.previousElementSibling.textContent = this.files[0]?.name || 'คลิกเพื่อเลือกรูปภาพ'">
+                <input type="file" name="AfterImage" accept="image/*" class="hidden" onchange="window._previewIssueFile(this)">
               </label>
             </div>` : ''}
           </div>
@@ -3136,11 +3871,23 @@ window.openIssueForm = function(mode, rawIssueData = null) {
         if (!form) return;
         form.addEventListener('submit', async (e) => {
             e.preventDefault();
+            if (form.dataset.submitting === '1') return;
+            form.dataset.submitting = '1';
             const btn = document.getElementById('btn-issue-submit');
             if (btn) { btn.disabled = true; btn.innerHTML = '<span class="animate-spin inline-block w-4 h-4 border-2 border-white border-t-transparent rounded-full mr-1.5 align-middle"></span>กำลังบันทึก...'; }
             const formData = new FormData(form);
             if (mode === 'OPEN') {
                 if (!formData.get('FoundByTeam')) formData.append('FoundByTeam', currentUser.team || '');
+            }
+            const validationErrors = validateIssueFormData(formData);
+            if (validationErrors.length) {
+                showToast(validationErrors[0], 'error');
+                if (btn) {
+                    btn.disabled = false;
+                    btn.textContent = mode === 'EDIT' ? 'บันทึกข้อมูล' : 'รายงานปัญหา';
+                }
+                form.dataset.submitting = '0';
+                return;
             }
             showLoading('กำลังบันทึก...');
             try {
@@ -3148,9 +3895,10 @@ window.openIssueForm = function(mode, rawIssueData = null) {
                 if (res?.success === false) throw new Error(res.message || 'บันทึกไม่สำเร็จ');
                 showToast('บันทึกสำเร็จ', 'success');
                 closeModal();
+                window._saveTab?.('patrol', 'issues');
                 loadPatrolPage();
-            } catch (err) { showError(err); }
-            finally { hideLoading(); if (btn) { btn.disabled = false; btn.textContent = mode === 'EDIT' ? 'บันทึกข้อมูล' : 'รายงานปัญหา'; } }
+            } catch (err) { showError(getReadableError(err, 'บันทึกข้อมูล Patrol issue ไม่สำเร็จ')); }
+            finally { form.dataset.submitting = '0'; hideLoading(); if (btn) { btn.disabled = false; btn.textContent = mode === 'EDIT' ? 'บันทึกข้อมูล' : 'รายงานปัญหา'; } }
         });
     }
 };
@@ -3344,7 +4092,10 @@ function renderOverviewTable(members) {
         const barW = Math.min(m.Percent, 100);
         const isMe = m.EmployeeID === currentUser.id;
         const rowNum = start + i + 1;
-        return `<tr class="hover:bg-slate-50 transition-colors ${isMe ? 'bg-emerald-50/40' : ''}">
+        const yearlyTarget = Number(m.YearlyTarget || m.TargetPerYear || m.yearlyTarget || m.Total || 0);
+        return `<tr onclick="window.openPatrolAttendanceDetailModal(${_patrolJsArg(m.EmployeeID)},${_patrolJsArg(m.Name)},'top_management',${yearlyTarget})"
+          class="hover:bg-slate-50 transition-colors cursor-pointer ${isMe ? 'bg-emerald-50/40' : ''}"
+          title="Open attendance detail">
           <td class="px-4 py-3 text-slate-400 font-mono text-xs">${rowNum}</td>
           <td class="px-4 py-3">
             <div class="flex items-center gap-2">
@@ -3370,15 +4121,15 @@ function renderOverviewTable(members) {
           </td>
           ${isAdmin ? `<td class="px-4 py-3 text-center">
             <div class="flex items-center justify-center gap-1">
-              <button onclick="window.openAdminRecordModal('${m.EmployeeID}','${(m.Name||'').replace(/'/g,"\\'")}',${m.Total})"
+              <button onclick="event.stopPropagation();window.openAdminRecordModal(${_patrolJsArg(m.EmployeeID)},${_patrolJsArg(m.Name)},${yearlyTarget})"
                 class="p-1 rounded-lg hover:bg-emerald-50 text-slate-400 hover:text-emerald-600 transition-colors" title="จัดการรายการ">
                 <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"/></svg>
               </button>
-              <button onclick="window.editRosterTarget(${m.RosterID},'top_management',${m.Total},'${(m.Name||'').replace(/'/g,"\\'")}',true)"
+              <button onclick="event.stopPropagation();window.editRosterTarget(${m.RosterID},'top_management',${yearlyTarget},${_patrolJsArg(m.Name)},true)"
                 class="p-1 rounded-lg hover:bg-slate-100 text-slate-400 hover:text-slate-600 transition-colors" title="แก้ไขเป้าหมาย">
                 <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"/></svg>
               </button>
-              <button onclick="window.deleteRosterMember(${m.RosterID},'top_management','${(m.Name||'').replace(/'/g,"\\'")}',true)"
+              <button onclick="event.stopPropagation();window.deleteRosterMember(${m.RosterID},'top_management',${_patrolJsArg(m.Name)},true)"
                 class="p-1 rounded-lg hover:bg-red-50 text-slate-400 hover:text-red-500 transition-colors" title="ลบออกจากรายการ">
                 <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg>
               </button>
@@ -3785,12 +4536,15 @@ function renderSvTable() {
         const statusLbl = done ? 'ครบแล้ว' : half ? 'บางส่วน' : 'ยังไม่เดิน';
         const isMe = m.EmployeeID === currentUser.id;
         const rowNum = start + i + 1;
-        return `<tr class="border-b border-slate-50 hover:bg-slate-50 transition-colors ${isMe ? 'bg-amber-50/30' : ''}">
+        const yearlyTarget = Number(m.yearlyTarget || m.YearlyTarget || m.TargetPerYear || m.target || 0);
+        return `<tr onclick="window.openPatrolAttendanceDetailModal(${_patrolJsArg(m.EmployeeID)},${_patrolJsArg(m.EmployeeName)},'supervisor',${yearlyTarget})"
+              class="border-b border-slate-50 hover:bg-slate-50 transition-colors cursor-pointer ${isMe ? 'bg-amber-50/30' : ''}"
+              title="Open attendance detail">
               <td class="px-4 py-3 text-slate-400 text-[10px] font-mono">${rowNum}</td>
               <td class="px-4 py-3 font-semibold text-slate-700">${m.EmployeeName}${isMe ? ' <span class="text-[9px] text-amber-500">(ฉัน)</span>' : ''}</td>
               <td class="px-4 py-3 text-xs text-slate-500 max-w-[120px] truncate" title="${m.Position||''}">${m.Position||'—'}</td>
               <td class="px-4 py-3 text-xs text-slate-500 max-w-[100px] truncate" title="${m.Department||''}">${m.Department||'—'}</td>
-              <td class="px-4 py-3 text-center font-bold text-slate-600">${m.target}</td>
+              <td class="px-4 py-3 text-center font-bold text-slate-600">${yearlyTarget || m.target || 0}</td>
               <td class="px-4 py-3 text-center font-bold ${done ? 'text-emerald-600' : half ? 'text-amber-600' : 'text-slate-400'}">${m.attended}</td>
               <td class="px-4 py-3 text-center">
                 <div class="w-full bg-slate-100 rounded-full h-1.5 overflow-hidden">
@@ -3806,15 +4560,15 @@ function renderSvTable() {
               </td>
               ${isAdmin ? `<td class="px-4 py-3 text-center">
                 <div class="flex items-center justify-center gap-1">
-                  <button onclick="window.openAdminRecordSvModal('${m.EmployeeID}','${(m.EmployeeName||'').replace(/'/g,"\\'")}',${m.target})"
+                  <button onclick="event.stopPropagation();window.openAdminRecordSvModal(${_patrolJsArg(m.EmployeeID)},${_patrolJsArg(m.EmployeeName)},${yearlyTarget})"
                     class="p-1 rounded-lg hover:bg-amber-50 text-slate-400 hover:text-amber-600 transition-colors" title="จัดการรายการ">
                     <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"/></svg>
                   </button>
-                  <button onclick="window.editRosterTarget(${m.RosterID},'supervisor',${m.target},'${(m.EmployeeName||'').replace(/'/g,"\\'")}',false)"
+                  <button onclick="event.stopPropagation();window.editRosterTarget(${m.RosterID},'supervisor',${yearlyTarget},${_patrolJsArg(m.EmployeeName)},false)"
                     class="p-1 rounded-lg hover:bg-slate-100 text-slate-400 hover:text-slate-600 transition-colors" title="แก้ไขเป้าหมาย">
                     <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"/></svg>
                   </button>
-                  <button onclick="window.deleteRosterMember(${m.RosterID},'supervisor','${(m.EmployeeName||'').replace(/'/g,"\\'")}',false)"
+                  <button onclick="event.stopPropagation();window.deleteRosterMember(${m.RosterID},'supervisor',${_patrolJsArg(m.EmployeeName)},false)"
                     class="p-1 rounded-lg hover:bg-red-50 text-slate-400 hover:text-red-500 transition-colors" title="ลบออกจากรายการ">
                     <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg>
                   </button>
@@ -4212,18 +4966,53 @@ const _SC_CHECKLIST = [
     { key: 'chemical',      label: 'สารเคมี/วัตถุอันตราย' },
 ];
 
+window._scOnScheduleChange = function() {
+    const select = document.getElementById('sc-session');
+    const opt = select?.selectedOptions?.[0];
+    const dateInput = document.getElementById('sc-date');
+    if (dateInput && opt?.dataset?.date) dateInput.value = opt.dataset.date;
+    const area = opt?.dataset?.area || '';
+    if (area) {
+        document.querySelectorAll('.sc-area-cb').forEach(cb => {
+            cb.checked = cb.value === area;
+        });
+    }
+};
+
 function openSelfCheckinModal() {
     const today = new Date().toISOString().split('T')[0];
+    const openSchedule = Array.isArray(_mySelfPatrol?.openSchedule) ? _mySelfPatrol.openSchedule : [];
+    const hasOpenSchedule = openSchedule.length > 0;
+    const firstSchedule = openSchedule[0] || null;
+    const firstDate = firstSchedule ? String(firstSchedule.date || firstSchedule.PatrolDate || '').slice(0, 10) : today;
     const areaList = _patrolAreas.length
         ? _patrolAreas
         : [{ Name:'โรงงาน 1' },{ Name:'โรงงาน 2' },{ Name:'รอบนอก+พื้นที่ส่วนกลาง' }];
 
     openModal('บันทึกการเดินตรวจ (Self-Patrol)', `
         <form id="self-checkin-form" class="space-y-4">
+          <div>
+            <label class="block text-xs font-semibold text-slate-500 mb-1.5">รอบตามกำหนดการ</label>
+            ${hasOpenSchedule ? `
+            <select id="sc-session" onchange="window._scOnScheduleChange()"
+              class="w-full rounded-xl border border-amber-200 bg-white px-3 py-2.5 text-sm text-slate-700 focus:outline-none focus:ring-2 focus:ring-amber-400 transition-all">
+              ${openSchedule.map((item, idx) => {
+                const id = patrolSessionId(item);
+                const date = String(item.date || item.PatrolDate || '').slice(0, 10);
+                const area = item.areaName || item.AreaName || item.areaCode || item.AreaCode || '';
+                const round = item.patrolRound || item.PatrolRound || '';
+                return `<option value="${escHtml(id)}" data-date="${escHtml(date)}" data-area="${escHtml(area)}" ${idx === 0 ? 'selected' : ''}>${escHtml(date)}${area ? ' · ' + escHtml(area) : ''}${round ? ' · R' + escHtml(round) : ''}</option>`;
+              }).join('')}
+            </select>
+            <p class="mt-1 text-[10px] text-amber-600/70">รอบที่เดินแล้วจะไม่แสดงในรายการ</p>` : `
+            <div class="rounded-xl border border-slate-100 bg-slate-50 px-3 py-4 text-center text-xs text-slate-400">
+              ไม่มีรอบตามกำหนดการที่เปิดให้เช็คอิน
+            </div>`}
+          </div>
           <!-- Date -->
           <div>
             <label class="block text-xs font-semibold text-slate-500 mb-1.5">วันที่เดินตรวจ</label>
-            <input type="date" id="sc-date" class="w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm text-slate-700 focus:outline-none focus:ring-2 focus:ring-amber-400 transition-all" value="${today}" max="${today}" required>
+            <input type="date" id="sc-date" class="w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm text-slate-700 focus:outline-none focus:ring-2 focus:ring-amber-400 transition-all" value="${firstDate}" max="${today}" readonly required>
           </div>
 
           <!-- Multi-area checkboxes (Phase 2.3) -->
@@ -4232,8 +5021,8 @@ function openSelfCheckinModal() {
             <div id="sc-area-grid" class="grid grid-cols-2 gap-2">
               ${areaList.map(a => `
                 <label class="cursor-pointer flex items-center gap-2 p-2.5 rounded-xl border border-slate-100 bg-white hover:border-amber-300 hover:bg-amber-50 transition-all has-[:checked]:border-amber-400 has-[:checked]:bg-amber-50">
-                  <input type="checkbox" class="sc-area-cb w-4 h-4 rounded accent-amber-500 flex-shrink-0" value="${a.Name}">
-                  <span class="text-xs font-medium text-slate-700">${a.Name}</span>
+                  <input type="checkbox" class="sc-area-cb w-4 h-4 rounded accent-amber-500 flex-shrink-0" value="${escHtml(getPatrolAreaName(a))}">
+                  <span class="text-xs font-medium text-slate-700">${escHtml(getPatrolAreaName(a))}</span>
                 </label>`).join('')}
             </div>
             <p id="sc-area-err" class="text-xs text-red-500 mt-1 hidden">กรุณาเลือกอย่างน้อย 1 พื้นที่</p>
@@ -4259,14 +5048,22 @@ function openSelfCheckinModal() {
 
           <div class="flex justify-end gap-2 pt-2 border-t border-slate-100">
             <button type="button" onclick="window.closeModal&&window.closeModal()" class="px-4 py-2 rounded-xl text-sm bg-slate-100 text-slate-600 hover:bg-slate-200 transition-colors">ยกเลิก</button>
-            <button type="submit" class="px-5 py-2 rounded-xl text-sm font-bold text-white" style="background:linear-gradient(135deg,#d97706,#f59e0b)">บันทึก</button>
+            <button type="submit" ${hasOpenSchedule ? '' : 'disabled'} class="px-5 py-2 rounded-xl text-sm font-bold text-white disabled:opacity-40 disabled:cursor-not-allowed" style="background:linear-gradient(135deg,#d97706,#f59e0b)">บันทึก</button>
           </div>
         </form>`, 'max-w-sm');
 
     setTimeout(() => {
+        window._scOnScheduleChange?.();
         document.getElementById('self-checkin-form')?.addEventListener('submit', async e => {
             e.preventDefault();
+            const form = e.currentTarget;
+            if (form.dataset.submitting === '1') return;
             const CheckinDate = document.getElementById('sc-date')?.value;
+            const ScheduledSessionID = document.getElementById('sc-session')?.value || null;
+            if (!ScheduledSessionID) {
+                showToast('ไม่มีรอบตามกำหนดการที่เปิดให้เช็คอิน', 'warning');
+                return;
+            }
 
             // Collect multi-area selections
             const checkedAreas = [...document.querySelectorAll('.sc-area-cb:checked')].map(cb => cb.value);
@@ -4285,28 +5082,41 @@ function openSelfCheckinModal() {
             if (checkedItems.length > 0) Notes += `[ตรวจแล้ว: ${checkedItems.join(' / ')}]`;
             if (manualNotes) Notes += (Notes ? '\n' : '') + manualNotes;
 
+            form.dataset.submitting = '1';
+            const submitBtn = e.submitter || form.querySelector('button[type="submit"]');
+            if (submitBtn) submitBtn.disabled = true;
             try {
-                const res = await API.post('/patrol/self-checkin', { CheckinDate, Location, Notes: Notes || null });
+                const res = await API.post('/patrol/self-checkin', { CheckinDate, Location, Notes: Notes || null, ScheduledSessionID });
                 if (res.success) { showToast('บันทึกสำเร็จ', 'success'); closeModal(); loadPatrolPage(); }
                 else showError(res.message);
-            } catch (err) { showError(err.message); }
+            } catch (err) { showError(getReadableError(err, 'บันทึก Self-Patrol ไม่สำเร็จ')); }
+            finally {
+                form.dataset.submitting = '0';
+                if (submitBtn) submitBtn.disabled = false;
+            }
         });
     }, 50);
 }
 
 async function deleteSelfCheckin(id) {
+    const actionKey = `self-delete-${id}`;
+    if (_patrolActionLocks.has(actionKey)) return;
     const ok = await showConfirmationModal('ยืนยันการลบ', 'ต้องการลบบันทึก Self-Patrol นี้ใช่หรือไม่?');
     if (!ok) return;
+    _patrolActionLocks.add(actionKey);
     try {
         const res = await API.delete(`/patrol/self-checkin/${id}`);
         if (res.success) { showToast('ลบสำเร็จ', 'success'); loadPatrolPage(); }
         else showError(res.message);
-    } catch (err) { showError(err.message); }
+    } catch (err) { showError(getReadableError(err, 'ลบบันทึก Self-Patrol ไม่สำเร็จ')); }
+    finally { _patrolActionLocks.delete(actionKey); }
 }
 
 // ─── Delete Issue (Admin only) ────────────────────────────────────────────────
 async function deleteIssue(issueId) {
     if (!isAdmin) return;
+    const actionKey = `issue-delete-${issueId}`;
+    if (_patrolActionLocks.has(actionKey)) return;
     const confirmed = await new Promise(resolve => {
         openModal('ยืนยันการลบ', `
             <div class="text-center py-4">
@@ -4325,6 +5135,7 @@ async function deleteIssue(issueId) {
         window._deleteResolve = resolve;
     });
     if (!confirmed) return;
+    _patrolActionLocks.add(actionKey);
     try {
         showLoading('กำลังลบ...');
         const res = await API.delete(`/patrol/issue/${issueId}`);
@@ -4341,8 +5152,9 @@ async function deleteIssue(issueId) {
         renderStopRankStats();
         renderRankStopSummary();
     } catch (err) {
-        showError(err.message || 'ลบไม่สำเร็จ');
+        showError(getReadableError(err, 'ลบปัญหาไม่สำเร็จ'));
     } finally {
+        _patrolActionLocks.delete(actionKey);
         hideLoading();
     }
 }
@@ -4353,10 +5165,11 @@ async function exportIssuesToPDF() {
 
     const filtered = getFilteredIssues(_allIssues, _activeFilter);
     const now      = new Date();
-    const pad      = n => String(n).padStart(2, '0');
     const dateStr  = now.toLocaleDateString('th-TH', { day: 'numeric', month: 'long', year: 'numeric' });
     const timeStr  = now.toLocaleTimeString('th-TH', { hour: '2-digit', minute: '2-digit' });
-    const docNo    = `SP-${now.getFullYear()}-${pad(now.getMonth()+1)}${pad(now.getDate())}-${pad(now.getHours())}${pad(now.getMinutes())}`;
+    const stamp    = patrolPdfTimestamp(now);
+    const docNo    = `SP-ISS-${now.getFullYear()}-${stamp.slice(4,8)}-${stamp.slice(8)}`;
+    const pdfFileName = patrolSafePdfFilename(`patrol-issues-${docNo}`)+'.pdf';
 
     // ── Step 1: Summary counts ──────────────────────────────────────────────
     const counts = { open: 0, temp: 0, closed: 0 };
@@ -4405,6 +5218,267 @@ async function exportIssuesToPDF() {
     const sLabel = s => s === 'Closed' ? 'เสร็จสิ้น' : s === 'Temporary' ? 'แก้ชั่วคราว' : 'รอแก้ไข';
     const rColor = r => r === 'A' ? '#dc2626' : r === 'B' ? '#f97316' : '#059669';
     const K      = `font-family:'Kanit',sans-serif;`;
+
+    const useFormalIssuePdf = true;
+    if (useFormalIssuePdf) {
+        const fmtShort = value => {
+            const d = value ? new Date(value) : null;
+            return d && !isNaN(d) ? d.toLocaleDateString('th-TH', { day:'numeric', month:'short', year:'2-digit' }) : '-';
+        };
+        const plainDept = value => {
+            if (!value) return '-';
+            try {
+                const arr = String(value).trim().startsWith('[') ? JSON.parse(value) : null;
+                if (Array.isArray(arr)) return arr.filter(Boolean).join(', ') || '-';
+            } catch (_) {}
+            return String(value);
+        };
+        const stopLabelOf = issue => {
+            const m = String(issue.HazardType || '').match(/STOP\s*(\d)/i);
+            return m ? `Stop ${m[1]}` : '-';
+        };
+        const descShort = (value, len = 72) => {
+            const s = String(value || '').replace(/\s+/g, ' ').trim();
+            return escHtml(s.length > len ? s.slice(0, len) + '...' : (s || '-'));
+        };
+        const isOverdueIssue = issue => issue.CurrentStatus !== 'Closed' && issue.DueDate && new Date(issue.DueDate) < now;
+        const page = body => '<div style="'+K+'width:794px;height:1122px;background:#fff;box-sizing:border-box;display:flex;flex-direction:column;overflow:hidden;color:#1e293b;font-size:11px">'+body+'</div>';
+        const footer = label => '<div style="margin-top:auto;padding:8px 28px;background:#f8fafc;border-top:1px solid #e2e8f0;color:#64748b;display:flex;align-items:center;justify-content:space-between;flex-shrink:0">'
+            +'<span style="'+K+'font-size:8.8px">Safety Patrol Issue Report · Thai Summit Harness Co., Ltd.</span>'
+            +'<span style="'+K+'font-size:8.8px">'+label+'</span>'
+            +'</div>';
+        const header = subtitle => '<div style="background:#065f46;color:#fff;padding:18px 28px;flex-shrink:0">'
+            +'<div style="display:flex;justify-content:space-between;gap:16px;align-items:flex-start">'
+            +'<div><p style="'+K+'font-size:10px;opacity:.82;margin:0 0 3px">Thai Summit Harness Co., Ltd. · Safety Summary Report</p>'
+            +'<h1 style="'+K+'font-size:21px;font-weight:900;margin:0;line-height:1.18">Safety Patrol Issue Report</h1>'
+            +'<p style="'+K+'font-size:11px;opacity:.9;margin:5px 0 0">'+subtitle+'</p></div>'
+            +'<div style="'+K+'text-align:right;font-size:9.5px;line-height:1.55;opacity:.92"><div>Rank A SLA: 7 วัน</div><div>Rank B SLA: 14 วัน</div><div>Rank C SLA: 30 วัน</div><div style="margin-top:4px;font-size:8.5px;opacity:.75">'+docNo+'</div></div>'
+            +'</div></div>';
+        const kpi = (label, value, tone, sub = '') => '<div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:10px;padding:11px;text-align:center;min-height:72px">'
+            +'<div style="'+K+'font-size:24px;font-weight:900;color:'+tone+';line-height:1">'+value+'</div>'
+            +'<div style="'+K+'font-size:9.5px;color:#475569;margin-top:6px;font-weight:800">'+label+'</div>'
+            +(sub ? '<div style="'+K+'font-size:8.5px;color:#94a3b8;margin-top:2px">'+sub+'</div>' : '')
+            +'</div>';
+        const sectionTitle = (title, sub = '') => '<div style="display:flex;align-items:flex-end;justify-content:space-between;border-bottom:1px solid #dbeafe;padding-bottom:7px;margin-bottom:10px"><div><h2 style="'+K+'font-size:14px;font-weight:900;color:#065f46;margin:0">'+title+'</h2>'+(sub ? '<p style="'+K+'font-size:9.5px;color:#64748b;margin:2px 0 0">'+sub+'</p>' : '')+'</div></div>';
+        const bar = (pct, color, h = 7) => '<div style="height:'+h+'px;background:#e2e8f0;border-radius:999px;overflow:hidden"><div style="height:100%;width:'+Math.max(0, Math.min(100, pct))+'%;background:'+color+';border-radius:999px"></div></div>';
+        const statusBadge = status => '<span style="'+K+'display:inline-block;background:'+sColor(status)+'18;color:'+sColor(status)+';font-size:8px;font-weight:800;border-radius:999px;padding:2px 6px;white-space:nowrap">'+sLabel(status)+'</span>';
+        const rankBadge = rank => rank ? '<span style="'+K+'display:inline-block;background:'+rColor(rank)+';color:#fff;font-size:8px;font-weight:900;border-radius:5px;padding:2px 5px">'+rank+'</span>' : '<span style="'+K+'color:#cbd5e1;font-size:8px">-</span>';
+        const issueRow = (issue, idx) => {
+            const over = isOverdueIssue(issue);
+            return '<tr style="background:'+(idx % 2 ? '#fff' : '#f8fafc')+';border-bottom:1px solid #e5e7eb">'
+                +'<td style="'+K+'padding:6px 7px;font-size:8.6px;color:#64748b;text-align:center;width:28px">'+(idx + 1)+'</td>'
+                +'<td style="'+K+'padding:6px 7px;font-size:8.5px;color:#475569;width:58px;white-space:nowrap">'+fmtShort(issue.DateFound)+'</td>'
+                +'<td style="'+K+'padding:6px 7px;font-size:8.4px;color:#475569;width:58px">'+escHtml(issue.Area || '-')+'</td>'
+                +'<td style="'+K+'padding:6px 7px;font-size:8.3px;color:#475569;width:62px">'+escHtml(stopLabelOf(issue))+'</td>'
+                +'<td style="'+K+'padding:6px 7px;font-size:8.5px;color:#0f172a;line-height:1.25">'+descShort(issue.HazardDescription, 76)+'</td>'
+                +'<td style="'+K+'padding:6px 7px;font-size:8.2px;color:#475569;width:76px">'+escHtml(plainDept(issue.ResponsibleDept))+'</td>'
+                +'<td style="padding:6px 7px;text-align:center;width:34px">'+rankBadge(issue.Rank)+'</td>'
+                +'<td style="padding:6px 7px;text-align:center;width:66px">'+statusBadge(issue.CurrentStatus)+'</td>'
+                +'<td style="'+K+'padding:6px 7px;font-size:8.3px;text-align:center;width:50px;color:'+(over ? '#dc2626' : '#475569')+';font-weight:'+(over ? 800 : 500)+';white-space:nowrap">'+fmtShort(issue.DueDate)+'</td>'
+                +'</tr>';
+        };
+        const tableHead = '<thead><tr style="background:#065f46;color:white">'
+            +'<th style="'+K+'padding:8px 7px;font-size:8.2px;text-align:center;width:28px">No.</th>'
+            +'<th style="'+K+'padding:8px 7px;font-size:8.2px;text-align:left;width:58px">วันที่พบ</th>'
+            +'<th style="'+K+'padding:8px 7px;font-size:8.2px;text-align:left;width:58px">พื้นที่</th>'
+            +'<th style="'+K+'padding:8px 7px;font-size:8.2px;text-align:left;width:62px">Stop</th>'
+            +'<th style="'+K+'padding:8px 7px;font-size:8.2px;text-align:left">รายละเอียด</th>'
+            +'<th style="'+K+'padding:8px 7px;font-size:8.2px;text-align:left;width:76px">ผู้รับผิดชอบ</th>'
+            +'<th style="'+K+'padding:8px 7px;font-size:8.2px;text-align:center;width:34px">Rank</th>'
+            +'<th style="'+K+'padding:8px 7px;font-size:8.2px;text-align:center;width:66px">สถานะ</th>'
+            +'<th style="'+K+'padding:8px 7px;font-size:8.2px;text-align:center;width:50px">กำหนด</th>'
+            +'</tr></thead>';
+        const matrixTable = '<table style="width:100%;border-collapse:collapse;font-size:9.5px"><thead><tr style="background:#065f46;color:#fff">'
+            +'<th style="'+K+'padding:6px;text-align:left">Stop</th>'
+            +'<th style="'+K+'padding:6px;text-align:center">A</th>'
+            +'<th style="'+K+'padding:6px;text-align:center">B</th>'
+            +'<th style="'+K+'padding:6px;text-align:center">C</th>'
+            +'<th style="'+K+'padding:6px;text-align:center">Total</th></tr></thead><tbody>'
+            +CCCF_STOP_TYPES.map((s, idx) => {
+                const r = matrix[s.id] || { A:0, B:0, C:0 };
+                const total = r.A + r.B + r.C;
+                return '<tr style="background:#f8fafc">'
+                    +'<td style="'+K+'padding:7px 8px;border-bottom:3px solid #fff;color:#334155"><b style="color:'+s.color+'">'+s.code+'</b><div style="font-size:8px;color:#64748b">'+s.label+'</div></td>'
+                    +'<td style="'+K+'padding:7px;text-align:center;color:'+(r.A ? '#dc2626' : '#cbd5e1')+';font-weight:900;border-bottom:3px solid #fff">'+r.A+'</td>'
+                    +'<td style="'+K+'padding:7px;text-align:center;color:'+(r.B ? '#ea580c' : '#cbd5e1')+';font-weight:900;border-bottom:3px solid #fff">'+r.B+'</td>'
+                    +'<td style="'+K+'padding:7px;text-align:center;color:'+(r.C ? '#16a34a' : '#cbd5e1')+';font-weight:900;border-bottom:3px solid #fff">'+r.C+'</td>'
+                    +'<td style="'+K+'padding:7px;text-align:center;color:'+(total ? '#334155' : '#cbd5e1')+';font-weight:900;border-bottom:3px solid #fff">'+total+'</td>'
+                    +'</tr>';
+            }).join('')+'</tbody></table>';
+        const formalPages = [];
+        const priorityRows = 6;
+        const rowsPerPage = 26;
+        const priorityIssues = [...filtered]
+            .sort((a, b) => Number(isOverdueIssue(b)) - Number(isOverdueIssue(a)) || (a.Rank || 'Z').localeCompare(b.Rank || 'Z'))
+            .slice(0, priorityRows);
+        const noIssueRow = '<tr><td colspan="9" style="'+K+'padding:42px 12px;text-align:center;font-size:10px;color:#94a3b8">ไม่มีข้อมูลประเด็นตามตัวกรองปัจจุบัน</td></tr>';
+        const priorityEmpty = '<div style="'+K+'padding:38px 12px;text-align:center;font-size:10px;color:#94a3b8;background:#f8fafc;border-radius:10px">ไม่มีประเด็นสำคัญตามตัวกรองปัจจุบัน</div>';
+        const priorityRowsHtml = priorityIssues.length ? priorityIssues.map(issue => {
+            const sourceNo = filtered.indexOf(issue) + 1;
+            const over = isOverdueIssue(issue);
+            return '<div style="display:grid;grid-template-columns:34px 1fr 52px;gap:8px;align-items:center;padding:7px 0;border-bottom:1px solid #e2e8f0">'
+                +'<div style="'+K+'font-size:10px;font-weight:900;color:#94a3b8;text-align:center">#'+sourceNo+'</div>'
+                +'<div style="min-width:0"><div style="'+K+'font-size:9.4px;font-weight:900;color:#0f172a;line-height:1.25">'+descShort(issue.HazardDescription, 70)+'</div>'
+                +'<div style="'+K+'font-size:8px;color:#64748b;margin-top:2px">'+escHtml(issue.Area || '-')+' · '+escHtml(plainDept(issue.ResponsibleDept))+'</div></div>'
+                +'<div style="text-align:right">'+rankBadge(issue.Rank)+'<div style="'+K+'font-size:8px;font-weight:800;color:'+(over ? '#dc2626' : sColor(issue.CurrentStatus))+';margin-top:4px">'+(over ? 'Overdue' : sLabel(issue.CurrentStatus))+'</div></div>'
+                +'</div>';
+        }).join('') : priorityEmpty;
+        const rankRows = [
+            ['Rank A', byRank.A, '#dc2626'],
+            ['Rank B', byRank.B, '#ea580c'],
+            ['Rank C', byRank.C, '#16a34a'],
+        ].map(([label, count, color]) => {
+            const pct = filtered.length ? Math.round((count / filtered.length) * 100) : 0;
+            return '<div style="margin-bottom:9px"><div style="display:flex;justify-content:space-between;font-size:10px;margin-bottom:3px"><b style="'+K+'color:'+color+'">'+label+'</b><span style="'+K+'color:#334155">'+count+' ('+pct+'%)</span></div>'+bar(pct, color, 7)+'</div>';
+        }).join('');
+        const stopRows = CCCF_STOP_TYPES.map(s => {
+            const count = byStop[s.id] || 0;
+            const pct = filtered.length ? Math.round((count / filtered.length) * 100) : 0;
+            return '<div style="margin-bottom:6px"><div style="display:flex;justify-content:space-between;font-size:9.5px;margin-bottom:2px"><b style="'+K+'color:'+s.color+'">'+s.code+'</b><span style="'+K+'color:#334155">'+count+' ('+pct+'%)</span></div>'+bar(pct, s.color, 6)+'</div>';
+        }).join('');
+        const keyNotes = [
+            'Issue total '+filtered.length+' · Closed '+counts.closed+' · Open '+counts.open+' · Temporary '+counts.temp,
+            'Close rate '+closePct+'% · Rank A '+byRank.A+' · Overdue '+filtered.filter(isOverdueIssue).length,
+            'Scope: '+filterLabel,
+            'Period: '+dateRange+' · Generated '+dateStr+' '+timeStr,
+        ].map(t => '<div style="'+K+'font-size:10.2px;color:#334155;margin-bottom:6px;display:flex;gap:6px"><span style="color:#f97316;font-weight:900">•</span><span>'+escHtml(t)+'</span></div>').join('');
+        formalPages.push(page(
+            header('รายงานภาพรวมประเด็น Safety Patrol · สร้างรายงานเมื่อ '+dateStr)
+            +'<div style="padding:18px 28px 14px;flex:1;display:flex;flex-direction:column;gap:12px;min-height:0">'
+            +sectionTitle('1. ภาพรวมรายงาน / Report Summary', 'สรุปจำนวนประเด็น สถานะ และระดับความเร่งด่วนตาม Rank')
+            +'<div style="display:grid;grid-template-columns:repeat(6,1fr);gap:8px">'
+            +kpi('ทั้งหมด', filtered.length, '#0f766e', 'Total Issues')
+            +kpi('รอแก้ไข', counts.open, counts.open ? '#dc2626' : '#64748b', 'Open')
+            +kpi('แก้ชั่วคราว', counts.temp, counts.temp ? '#ea580c' : '#64748b', 'Temporary')
+            +kpi('เสร็จสิ้น', counts.closed, '#059669', 'Closed')
+            +kpi('Rank A', byRank.A, byRank.A ? '#dc2626' : '#64748b', 'Critical')
+            +kpi('ปิดงาน', closePct+'%', closePct >= 80 ? '#059669' : '#dc2626', 'Close Rate')
+            +'</div>'
+            +'<div style="display:grid;grid-template-columns:1.1fr .9fr;gap:12px">'
+            +'<div style="border:1px solid #e2e8f0;border-radius:12px;padding:12px"><div style="'+K+'font-size:12px;font-weight:900;color:#065f46;margin-bottom:8px">Key Notes / ประเด็นสำคัญ</div>'+keyNotes+'</div>'
+            +'<div style="border:1px solid #e2e8f0;border-radius:12px;padding:12px;text-align:center"><div style="'+K+'font-size:12px;font-weight:900;color:#065f46;margin-bottom:7px">Close Rate</div><div style="'+K+'font-size:48px;font-weight:900;line-height:1;color:'+(closePct >= 80 ? '#059669' : closePct >= 50 ? '#d97706' : '#dc2626')+'">'+closePct+'%</div><div style="'+K+'font-size:9.5px;color:#64748b;margin:8px 0 10px">Closed '+counts.closed+' · Active '+(counts.open + counts.temp)+' · Overdue '+filtered.filter(isOverdueIssue).length+'</div>'+bar(closePct, closePct >= 80 ? '#059669' : closePct >= 50 ? '#d97706' : '#dc2626', 8)+'</div>'
+            +'</div>'
+            +'<div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">'
+            +'<div style="border:1px solid #e2e8f0;border-radius:12px;padding:12px">'+sectionTitle('2. Rank Distribution', 'จำนวนประเด็นแยกตามความเร่งด่วน')+rankRows+'</div>'
+            +'<div style="border:1px solid #e2e8f0;border-radius:12px;padding:12px">'+sectionTitle('3. STOP Distribution', 'จำนวนประเด็นแยกตาม Stop Type')+stopRows+'</div>'
+            +'</div>'
+            +'<div style="display:grid;grid-template-columns:.92fr 1.08fr;gap:12px;min-height:0">'
+            +'<div style="border:1px solid #e2e8f0;border-radius:12px;padding:12px;min-height:0">'+sectionTitle('4. STOP x Rank Matrix', 'รูปแบบความเสี่ยงซ้ำตามประเภทอันตราย')+matrixTable+'</div>'
+            +'<div style="border:1px solid #e2e8f0;border-radius:12px;padding:12px;min-height:0;overflow:hidden">'+sectionTitle('5. Priority Follow-up Snapshot', 'รายการเร่งติดตามสูงสุด '+Math.min(priorityIssues.length, priorityRows)+' / '+filtered.length+' รายการ')+priorityRowsHtml+'<div style="'+K+'font-size:8.2px;color:#94a3b8;margin-top:8px">Full Issue Register เริ่มในหน้าถัดไปและแสดงเต็มความกว้างเพื่อรองรับข้อมูลจำนวนมาก</div></div>'
+            +'</div>'
+            +'</div>'
+            +footer('Page 1 · Summary')
+        ));
+        for (let start = 0; start < filtered.length; start += rowsPerPage) {
+            const slice = filtered.slice(start, start + rowsPerPage);
+            const rangeLabel = `${start + 1}-${Math.min(start + slice.length, filtered.length)} / ${filtered.length}`;
+            formalPages.push(page(
+                header('ทะเบียนประเด็นปัญหา | รายการที่ '+rangeLabel)
+                +'<div style="flex:1;padding:18px 28px 14px;display:flex;flex-direction:column;gap:10px;min-height:0">'
+                +sectionTitle('6. Full Issue Register / รายการประเด็นทั้งหมด', 'รายการที่ '+rangeLabel+' ตามตัวกรองปัจจุบัน')
+                +'<div style="background:#fff;border:1px solid #e2e8f0;border-bottom:2px solid #065f46;border-radius:12px;overflow:hidden">'
+                +'<table style="width:100%;border-collapse:collapse">'+tableHead+'<tbody>'+slice.map((i, idx) => issueRow(i, start + idx)).join('')+'</tbody></table>'
+                +'</div>'
+                +'<div style="'+K+'font-size:8.5px;color:#64748b">หมายเหตุ: กำหนดแก้ไขที่เป็นสีแดงคือรายการที่เกินกำหนดและยังไม่ปิดงาน</div>'
+                +'</div>'
+                +footer('Issue Register '+rangeLabel)
+            ));
+        }
+        const evidenceIssues = [...filtered]
+            .filter(i => i.BeforeImage || i.TempImage || i.AfterImage)
+            .sort((a, b) => Number(isOverdueIssue(b)) - Number(isOverdueIssue(a)) || (a.Rank || 'Z').localeCompare(b.Rank || 'Z'))
+            .slice(0, 8);
+        const photoSlot = (url, label, color) => url
+            ? '<div style="flex:1;min-width:0"><div style="'+K+'font-size:8.5px;font-weight:900;color:'+color+';margin-bottom:4px">'+label+'</div><img src="'+url+'" crossorigin="anonymous" style="width:100%;height:162px;object-fit:cover;border:1.5px solid '+color+'55;border-radius:8px"></div>'
+            : '<div style="flex:1;min-width:0"><div style="'+K+'font-size:8.5px;font-weight:900;color:#cbd5e1;margin-bottom:4px">'+label+'</div><div style="'+K+'height:162px;border:1.5px dashed #cbd5e1;border-radius:8px;background:#f8fafc;color:#cbd5e1;font-size:9px;display:flex;align-items:center;justify-content:center">ไม่มีรูป</div></div>';
+        for (let start = 0; start < evidenceIssues.length; start += 2) {
+            const slice = evidenceIssues.slice(start, start + 2);
+            formalPages.push(page(
+                header('ภาพประกอบการแก้ไข | รายการสำคัญ '+(start + 1)+'-'+Math.min(start + slice.length, evidenceIssues.length)+' / '+evidenceIssues.length)
+                +'<div style="flex:1;padding:18px 28px 14px;display:flex;flex-direction:column;gap:10px;min-height:0">'
+                +sectionTitle('7. Evidence / Before - Temporary - After', 'แสดงรูปประกอบรายการที่มีหลักฐานภาพ เพื่อใช้ติดตามการแก้ไข')
+                +slice.map(issue => '<div style="background:#fff;border:1px solid #e2e8f0;border-radius:12px;padding:13px 14px;flex:1;min-height:0;box-shadow:0 1px 0 rgba(15,23,42,.03)">'
+                    +'<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">'
+                    +'<div style="display:flex;align-items:center;gap:7px"><span style="'+K+'font-size:8.5px;color:#64748b">No. '+(filtered.indexOf(issue) + 1)+'</span>'+rankBadge(issue.Rank)+statusBadge(issue.CurrentStatus)+'</div>'
+                    +'<span style="'+K+'font-size:8.5px;color:#64748b">'+fmtShort(issue.DateFound)+' | '+escHtml(issue.Area || '-')+'</span>'
+                    +'</div>'
+                    +'<div style="'+K+'font-size:9.8px;font-weight:900;color:#0f172a;line-height:1.35;margin-bottom:7px">'+descShort(issue.HazardDescription, 140)+'</div>'
+                    +'<div style="display:flex;gap:10px">'
+                    +photoSlot(resolveFileUrl(issue.BeforeImage), 'Before', '#dc2626')
+                    +photoSlot(resolveFileUrl(issue.TempImage), 'Temporary', '#f97316')
+                    +photoSlot(resolveFileUrl(issue.AfterImage), 'After', '#059669')
+                    +'</div>'
+                    +'</div>').join('')
+                +'</div>'
+                +footer('Evidence '+(start + 1)+'-'+Math.min(start + slice.length, evidenceIssues.length))
+            ));
+        }
+        formalPages.push(page(
+            header('สรุปเพื่อรับรองและลงนาม')
+            +'<div style="flex:1;padding:18px 28px 18px;display:flex;flex-direction:column;gap:14px">'
+            +sectionTitle('8. Follow-up Notes / Approval', 'สรุปสถานะประเด็น Safety Patrol เพื่อรับรองและติดตามต่อ')
+            +'<div style="display:grid;grid-template-columns:repeat(4,1fr);gap:10px">'
+            +kpi('Open', counts.open, counts.open ? '#dc2626' : '#64748b', 'รอแก้ไข')
+            +kpi('Temporary', counts.temp, counts.temp ? '#ea580c' : '#64748b', 'แก้ชั่วคราว')
+            +kpi('Closed', counts.closed, '#059669', 'เสร็จสิ้น')
+            +kpi('Rank A', byRank.A, byRank.A ? '#dc2626' : '#64748b', 'เร่งด่วนสูง')
+            +'</div>'
+            +'<div style="background:#f0fdf4;border:1px solid #bbf7d0;border-radius:12px;padding:15px 16px">'
+            +'<div style="'+K+'font-size:12.5px;font-weight:900;color:#065f46;margin-bottom:8px">Approval Summary / สรุปเพื่อการรับรอง</div>'
+            +'<div style="'+K+'font-size:10.8px;line-height:1.85;color:#334155">รายงานนี้ครอบคลุมประเด็นปัญหา '+filtered.length+' รายการ แบ่งเป็นรอแก้ไข '+counts.open+' รายการ แก้ชั่วคราว '+counts.temp+' รายการ และเสร็จสิ้น '+counts.closed+' รายการ คิดเป็นอัตราปิดงาน '+closePct+'% โดยมี Rank A '+byRank.A+' รายการ สำหรับใช้ติดตามและรับรองผลการดำเนินการแก้ไขตามระบบ Safety Patrol</div>'
+            +'</div>'
+            +'<div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">'
+            +'<div style="border:1px solid #e2e8f0;border-radius:12px;padding:14px"><div style="'+K+'font-size:11.5px;font-weight:900;color:#065f46;margin-bottom:7px">Key Follow-up</div><div style="'+K+'font-size:10px;line-height:1.7;color:#475569">ติดตามรายการที่ยังไม่ปิดงานทั้งหมด '+(counts.open + counts.temp)+' รายการ โดยให้ความสำคัญกับ Rank A, รายการเกินกำหนด และพื้นที่ที่พบประเด็นซ้ำ</div></div>'
+            +'<div style="border:1px solid #e2e8f0;border-radius:12px;padding:14px"><div style="'+K+'font-size:11.5px;font-weight:900;color:#065f46;margin-bottom:7px">Report Scope</div><div style="'+K+'font-size:10px;line-height:1.7;color:#475569">ช่วงข้อมูล: '+escHtml(dateRange)+'<br>ตัวกรอง: '+escHtml(filterLabel)+'<br>เลขที่เอกสาร: '+docNo+'</div></div>'
+            +'</div>'
+            +'<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:14px;margin-top:4px">'
+            +['ผู้จัดทำรายงาน','ผู้ตรวจสอบ','ผู้อนุมัติ'].map(role => '<div style="background:#fff;border:1px solid #cbd5e1;border-radius:12px;padding:44px 14px 16px;text-align:center"><div style="border-bottom:1.2px solid #64748b;margin-bottom:12px;height:1px"></div><div style="'+K+'font-size:10px;color:#64748b">(........................................)</div><div style="'+K+'font-size:11px;font-weight:900;color:#334155;margin-top:8px">'+role+'</div><div style="'+K+'font-size:9px;color:#64748b;margin-top:8px">วันที่ ......../......../.........</div></div>').join('')
+            +'</div>'
+            +'<div style="margin-top:auto;background:#f8fafc;border:1px solid #e2e8f0;border-radius:10px;padding:10px 12px;color:#64748b;font-size:8.8px;line-height:1.6">เอกสารฉบับนี้สร้างจากระบบ TSH Safety Core Activity โดยอ้างอิงข้อมูลประเด็น Safety Patrol ตามตัวกรองในหน้าจอ ณ วันที่สร้างรายงาน เลขที่เอกสาร '+docNo+'</div>'
+            +'</div>'
+            +footer('Approval')
+        ));
+        const renderFormalPage = async html => {
+            const el = document.createElement('div');
+            el.style.cssText = 'position:fixed;left:-9999px;top:0;z-index:-1';
+            el.innerHTML = html;
+            document.body.appendChild(el);
+            await new Promise(r => setTimeout(r, 80));
+            const c = await html2canvas(el.firstElementChild, {
+                scale: 2, useCORS: true, logging: false, backgroundColor: '#ffffff', windowWidth: 794, width: 794, height: 1122,
+            });
+            document.body.removeChild(el);
+            return c;
+        };
+        try {
+            const totalPgs = formalPages.length;
+            showLoading(`กำลังสร้าง PDF... (${totalPgs} หน้า)`);
+            await document.fonts.ready;
+            await new Promise(r => setTimeout(r, 300));
+            const { jsPDF } = window.jspdf;
+            const pdf = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
+            for (let pi = 0; pi < formalPages.length; pi++) {
+                if (pi > 0) pdf.addPage();
+                showLoading(`กำลังสร้าง PDF... หน้า ${pi + 1} / ${totalPgs}`);
+                const canvas = await renderFormalPage(formalPages[pi]);
+                pdf.addImage(canvas.toDataURL('image/jpeg', 0.93), 'JPEG', 0, 0, 210, 297);
+            }
+            for (let p = 1; p <= totalPgs; p++) {
+                pdf.setPage(p);
+                pdf.setFontSize(7.5); pdf.setTextColor(148,163,184);
+                pdf.text('Page '+p+' / '+totalPgs, 200, 293, { align:'right' });
+                pdf.text(docNo, 10, 293);
+            }
+            pdf.save(pdfFileName);
+            showToast(`ส่งออก PDF สำเร็จ: ${pdfFileName} (${filtered.length} ประเด็น, ${totalPgs} หน้า)`, 'success');
+        } catch (err) {
+            console.error('PDF error:', err);
+            showToast('ส่งออก PDF ไม่สำเร็จ', 'error');
+        } finally {
+            hideLoading();
+        }
+        return;
+    }
 
     // ── Step 5: Area breakdown (all master areas, including 0-count) ────────
     const areaMap = {};
@@ -5037,11 +6111,11 @@ async function exportIssuesToPDF() {
             pdf.addImage(c.toDataURL('image/jpeg', 0.93), 'JPEG', 0, 0, 210, 297);
             // Overlay page number in white on green footer area (bottom ~8mm)
             pdf.setFontSize(8); pdf.setTextColor(255, 255, 255);
-            pdf.text(`หน้า ${pi+1} / ${totalPgs}`, 197, 294, { align: 'right' });
+            pdf.text(`Page ${pi+1} / ${totalPgs}`, 197, 294, { align: 'right' });
         }
 
-        pdf.save(`patrol_issues_${now.toISOString().slice(0,10)}.pdf`);
-        showToast(`ส่งออก PDF สำเร็จ (${filtered.length} ประเด็น, ${totalPgs} หน้า)`, 'success');
+        pdf.save(pdfFileName);
+        showToast(`ส่งออก PDF สำเร็จ: ${pdfFileName} (${filtered.length} ประเด็น, ${totalPgs} หน้า)`, 'success');
     } catch (err) {
         console.error('PDF error:', err);
         showToast('ส่งออก PDF ไม่สำเร็จ', 'error');
@@ -5694,9 +6768,10 @@ window.exportPatrolPDF = async function(group) {
     })();
 
     const now     = new Date();
-    const pad     = n => String(n).padStart(2,'0');
     const dateStr = now.toLocaleDateString('th-TH',{day:'numeric',month:'long',year:'numeric'});
-    const docNo   = 'SP-'+(isMgmt?'MGT':'SUP')+'-'+year+'-'+pad(now.getMonth()+1)+pad(now.getDate());
+    const stamp   = patrolPdfTimestamp(now);
+    const docNo   = 'SP-'+(isMgmt?'MGT':'SUP')+'-'+year+'-'+stamp.slice(4,8)+'-'+stamp.slice(8);
+    const fileName = patrolSafePdfFilename(docNo)+'.pdf';
     const groupLabel = isMgmt ? 'Top & Management' : 'Sec. & Supervisor';
     const K = "font-family:'Kanit',sans-serif;";
 
@@ -5719,37 +6794,42 @@ window.exportPatrolPDF = async function(group) {
     const passCount = rawMembers.filter(m=>(m[pctKey]||0)>=75).length;
     const spMember  = isMgmt && _spotlightMgmtId ? rawMembers.find(m=>m.EmployeeID===_spotlightMgmtId) : null;
 
-    // Row count per page (conservative — no overflow)
-    const ROWS_P1   = spMember ? 21 : 26;
-    const ROWS_FULL = 30;
+    const totalPdfPages = isMgmt ? 2 : 3;
+    const tablePageCount = totalPdfPages - 1;
+    const rowsPerTablePage = Math.max(1, Math.ceil(rawMembers.length / tablePageCount));
+    const rowPadY = rowsPerTablePage > 46 ? 2 : rowsPerTablePage > 36 ? 3 : 5;
+    const nameFont = rowsPerTablePage > 46 ? 8.1 : rowsPerTablePage > 36 ? 8.7 : 9.5;
+    const metaFont = rowsPerTablePage > 46 ? 7.6 : rowsPerTablePage > 36 ? 8.2 : 9;
+    const headPadY = rowsPerTablePage > 46 ? 5 : 7;
+    const progressHeight = rowsPerTablePage > 46 ? 4 : 5;
 
     // ── Shared HTML builders ──────────────────────────────────────────────────
     const THEAD = '<thead><tr style="background:linear-gradient(135deg,#064e3b,#0d9488)">'
-        + '<th style="'+K+'padding:7px 8px;color:rgba(255,255,255,.9);font-size:9px;text-align:center;width:24px">#</th>'
-        + '<th style="'+K+'padding:7px 8px;color:rgba(255,255,255,.9);font-size:9px;text-align:left">ชื่อ-สกุล</th>'
-        + '<th style="'+K+'padding:7px 8px;color:rgba(255,255,255,.9);font-size:9px;text-align:left">ตำแหน่ง</th>'
-        + '<th style="'+K+'padding:7px 8px;color:rgba(255,255,255,.9);font-size:9px;text-align:left">แผนก/ส่วนงาน</th>'
-        + '<th style="'+K+'padding:7px 8px;color:rgba(255,255,255,.9);font-size:9px;text-align:center">เป้า/ปี</th>'
-        + '<th style="'+K+'padding:7px 8px;color:rgba(255,255,255,.9);font-size:9px;text-align:center">เข้าร่วม</th>'
-        + '<th style="'+K+'padding:7px 8px;color:rgba(255,255,255,.9);font-size:9px;text-align:left;min-width:90px">ความคืบหน้า</th>'
-        + '<th style="'+K+'padding:7px 8px;color:rgba(255,255,255,.9);font-size:9px;text-align:center">Rating</th>'
+        + '<th style="'+K+'padding:'+headPadY+'px 7px;color:rgba(255,255,255,.9);font-size:8.5px;text-align:center;width:24px">#</th>'
+        + '<th style="'+K+'padding:'+headPadY+'px 7px;color:rgba(255,255,255,.9);font-size:8.5px;text-align:left">ชื่อ-สกุล</th>'
+        + '<th style="'+K+'padding:'+headPadY+'px 7px;color:rgba(255,255,255,.9);font-size:8.5px;text-align:left">ตำแหน่ง</th>'
+        + '<th style="'+K+'padding:'+headPadY+'px 7px;color:rgba(255,255,255,.9);font-size:8.5px;text-align:left">แผนก/ส่วนงาน</th>'
+        + '<th style="'+K+'padding:'+headPadY+'px 7px;color:rgba(255,255,255,.9);font-size:8.5px;text-align:center">เป้า/ปี</th>'
+        + '<th style="'+K+'padding:'+headPadY+'px 7px;color:rgba(255,255,255,.9);font-size:8.5px;text-align:center">เข้าร่วม</th>'
+        + '<th style="'+K+'padding:'+headPadY+'px 7px;color:rgba(255,255,255,.9);font-size:8.5px;text-align:left;min-width:90px">ความคืบหน้า</th>'
+        + '<th style="'+K+'padding:'+headPadY+'px 7px;color:rgba(255,255,255,.9);font-size:8.5px;text-align:center">Rating</th>'
         + '</tr></thead>';
 
     const makeRow = (m, idx) => {
         const pct=m[pctKey]||0, rt=ratingOf(pct), pc=pctColor(pct), bar=Math.min(pct,100);
         return '<tr style="background:'+(idx%2===0?'#f0fdf4':'#fff')+';border-bottom:1px solid #e8f5ee">'
-            +'<td style="'+K+'padding:5px 8px;font-size:9.5px;color:#94a3b8;text-align:center">'+(idx+1)+'</td>'
-            +'<td style="'+K+'padding:5px 8px;font-size:9.5px;font-weight:600;color:#1e293b">'+(m[nameKey]||'—')+'</td>'
-            +'<td style="'+K+'padding:5px 8px;font-size:9px;color:#475569">'+(m[posKey]||'—')+'</td>'
-            +'<td style="'+K+'padding:5px 8px;font-size:9px;color:#64748b">'+(m[deptKey]||'—')+'</td>'
-            +'<td style="'+K+'padding:5px 8px;font-size:9.5px;font-weight:700;color:#475569;text-align:center">'+(m[targetKey]||0)+'</td>'
-            +'<td style="'+K+'padding:5px 8px;font-size:9.5px;font-weight:700;color:#059669;text-align:center">'+(m[attendKey]||0)+'</td>'
-            +'<td style="'+K+'padding:5px 10px"><div style="display:flex;align-items:center;gap:4px">'
-            +'<div style="flex:1;height:5px;background:#e2e8f0;border-radius:3px;overflow:hidden"><div style="height:100%;width:'+bar+'%;background:'+pc+';border-radius:3px"></div></div>'
-            +'<span style="'+K+'font-size:9px;font-weight:700;color:'+pc+';min-width:26px;text-align:right">'+pct+'%</span>'
+            +'<td style="'+K+'padding:'+rowPadY+'px 7px;font-size:'+metaFont+'px;color:#94a3b8;text-align:center">'+(idx+1)+'</td>'
+            +'<td style="'+K+'padding:'+rowPadY+'px 7px;font-size:'+nameFont+'px;font-weight:600;color:#1e293b;line-height:1.15">'+(m[nameKey]||'—')+'</td>'
+            +'<td style="'+K+'padding:'+rowPadY+'px 7px;font-size:'+metaFont+'px;color:#475569;line-height:1.15">'+(m[posKey]||'—')+'</td>'
+            +'<td style="'+K+'padding:'+rowPadY+'px 7px;font-size:'+metaFont+'px;color:#64748b;line-height:1.15">'+(m[deptKey]||'—')+'</td>'
+            +'<td style="'+K+'padding:'+rowPadY+'px 7px;font-size:'+nameFont+'px;font-weight:700;color:#475569;text-align:center">'+(m[targetKey]||0)+'</td>'
+            +'<td style="'+K+'padding:'+rowPadY+'px 7px;font-size:'+nameFont+'px;font-weight:700;color:#059669;text-align:center">'+(m[attendKey]||0)+'</td>'
+            +'<td style="'+K+'padding:'+rowPadY+'px 9px"><div style="display:flex;align-items:center;gap:4px">'
+            +'<div style="flex:1;height:'+progressHeight+'px;background:#e2e8f0;border-radius:3px;overflow:hidden"><div style="height:100%;width:'+bar+'%;background:'+pc+';border-radius:3px"></div></div>'
+            +'<span style="'+K+'font-size:'+metaFont+'px;font-weight:700;color:'+pc+';min-width:25px;text-align:right">'+pct+'%</span>'
             +'</div></td>'
-            +'<td style="padding:5px 8px;text-align:center">'
-            +(rt.r>0?'<span style="'+K+'background:'+rt.bg+';color:'+rt.color+';font-size:8px;font-weight:700;padding:2px 7px;border-radius:20px">R'+rt.r+'</span>':'<span style="'+K+'color:#cbd5e1;font-size:9px">—</span>')
+            +'<td style="padding:'+rowPadY+'px 7px;text-align:center">'
+            +(rt.r>0?'<span style="'+K+'background:'+rt.bg+';color:'+rt.color+';font-size:7.5px;font-weight:700;padding:1px 6px;border-radius:20px">R'+rt.r+'</span>':'<span style="'+K+'color:#cbd5e1;font-size:'+metaFont+'px">—</span>')
             +'</td></tr>';
     };
 
@@ -5815,9 +6895,142 @@ window.exportPatrolPDF = async function(group) {
 
     // ── Build page HTML array ─────────────────────────────────────────────────
     const pageHTMLs = [];
-    const chunks = [{ rows: rawMembers.slice(0, ROWS_P1), isFirst: true, startIdx: 0 }];
-    for (let i = ROWS_P1; i < rawMembers.length; i += ROWS_FULL) {
-        chunks.push({ rows: rawMembers.slice(i, i+ROWS_FULL), isFirst: false, startIdx: i });
+    const useFormalAttendancePdf = true;
+    if (useFormalAttendancePdf) {
+        const mgmtDonePct = rawMembers.length ? Math.round(passCount / rawMembers.length * 100) : 0;
+        const mgmtFirstRows = isMgmt ? 18 : 20;
+        const mgmtRowsPerPage = isMgmt ? 24 : 20;
+        const statusOf = pct => pct >= 75
+            ? { text: 'ผ่านเกณฑ์', color: '#047857', bg: '#d1fae5' }
+            : pct >= 60
+                ? { text: 'ติดตาม', color: '#92400e', bg: '#fef3c7' }
+                : { text: 'ต้องเร่งดำเนินการ', color: '#991b1b', bg: '#fee2e2' };
+        const mgmtPage = body => '<div style="'+K+'width:794px;height:1122px;background:#fff;box-sizing:border-box;display:flex;flex-direction:column;overflow:hidden;color:#1e293b;font-size:11px">'+body+'</div>';
+        const mgmtFooter = label => '<div style="margin-top:auto;padding:8px 28px;background:#f8fafc;border-top:1px solid #e2e8f0;color:#64748b;display:flex;align-items:center;justify-content:space-between;flex-shrink:0">'
+            +'<span style="'+K+'font-size:8.8px">Safety Patrol Attendance Report · Thai Summit Harness Co., Ltd.</span>'
+            +'<span style="'+K+'font-size:8.8px">'+docNo+' · '+label+'</span>'
+            +'</div>';
+        const mgmtHeader = subtitle => '<div style="background:#065f46;color:#fff;padding:18px 28px;flex-shrink:0">'
+            +'<div style="display:flex;justify-content:space-between;gap:16px;align-items:flex-start">'
+            +'<div><p style="'+K+'font-size:10px;opacity:.82;margin:0 0 3px">Thai Summit Harness Co., Ltd. · Safety Summary Report</p>'
+            +'<h1 style="'+K+'font-size:21px;font-weight:900;margin:0;line-height:1.18">Safety Patrol Attendance Report</h1>'
+            +'<p style="'+K+'font-size:11px;opacity:.9;margin:5px 0 0">'+subtitle+'</p></div>'
+            +'<div style="'+K+'text-align:right;font-size:9.5px;line-height:1.55;opacity:.92"><div>'+groupLabel+'</div><div>Period: '+year+'</div><div>Generated: '+dateStr+'</div><div style="margin-top:4px;font-size:8.5px;opacity:.75">'+docNo+'</div></div>'
+            +'</div></div>';
+        const sectionTitle = (title, sub = '') => '<div style="display:flex;align-items:flex-end;justify-content:space-between;border-bottom:1px solid #dbeafe;padding-bottom:7px;margin-bottom:10px"><div><h2 style="'+K+'font-size:14px;font-weight:900;color:#065f46;margin:0">'+title+'</h2>'+(sub ? '<p style="'+K+'font-size:9.5px;color:#64748b;margin:2px 0 0">'+sub+'</p>' : '')+'</div></div>';
+        const bar = (pct, color, h = 7) => '<div style="height:'+h+'px;background:#e2e8f0;border-radius:999px;overflow:hidden"><div style="height:100%;width:'+Math.max(0, Math.min(100, pct))+'%;background:'+color+';border-radius:999px"></div></div>';
+        const kpiCard = (label, value, tone, sub = '') => '<div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:10px;padding:11px;text-align:center;min-height:72px">'
+            +'<div style="'+K+'font-size:24px;font-weight:900;color:'+tone+';line-height:1">'+value+'</div>'
+            +'<div style="'+K+'font-size:9.5px;color:#475569;margin-top:6px;font-weight:800">'+label+'</div>'
+            +(sub ? '<div style="'+K+'font-size:8.5px;color:#94a3b8;margin-top:2px">'+sub+'</div>' : '')
+            +'</div>';
+        const compactRow = (m, idx) => {
+            const pct = m[pctKey] || 0;
+            const rt = ratingOf(pct);
+            const st = statusOf(pct);
+            return '<tr style="background:'+(idx % 2 ? '#fff' : '#f8fafc')+';border-bottom:1px solid #e5e7eb">'
+                +'<td style="'+K+'padding:7px 8px;font-size:9px;color:#64748b;text-align:center">'+(idx+1)+'</td>'
+                +'<td style="'+K+'padding:7px 8px;font-size:9.3px;font-weight:700;color:#0f172a">'+escHtml(m[nameKey] || '-')
+                +'<div style="'+K+'font-size:8px;font-weight:500;color:#64748b;margin-top:1px">'+escHtml(m[posKey] || '-')+'</div></td>'
+                +'<td style="'+K+'padding:7px 8px;font-size:8.6px;color:#475569">'+escHtml(m[deptKey] || '-')+'</td>'
+                +'<td style="'+K+'padding:7px 8px;font-size:9px;font-weight:700;text-align:center;color:#334155">'+(m[targetKey] || 0)+'</td>'
+                +'<td style="'+K+'padding:7px 8px;font-size:9px;font-weight:700;text-align:center;color:#047857">'+(m[attendKey] || 0)+'</td>'
+                +'<td style="'+K+'padding:7px 8px;width:130px"><div style="display:flex;align-items:center;gap:5px"><div style="flex:1;height:5px;background:#e2e8f0;border-radius:999px;overflow:hidden"><div style="height:100%;width:'+Math.min(pct,100)+'%;background:'+pctColor(pct)+'"></div></div><span style="'+K+'font-size:8.5px;font-weight:800;color:'+pctColor(pct)+';width:30px;text-align:right">'+pct+'%</span></div></td>'
+                +'<td style="'+K+'padding:7px 8px;text-align:center"><span style="display:inline-block;min-width:28px;background:'+rt.bg+';color:'+rt.color+';border-radius:999px;padding:2px 6px;font-size:8px;font-weight:800">R'+rt.r+'</span></td>'
+                +'<td style="'+K+'padding:7px 8px;text-align:center"><span style="display:inline-block;background:'+st.bg+';color:'+st.color+';border-radius:999px;padding:2px 7px;font-size:8px;font-weight:800;white-space:nowrap">'+st.text+'</span></td>'
+                +'</tr>';
+        };
+        const mgmtTableHead = '<thead><tr style="background:#064e3b;color:white">'
+            +'<th style="'+K+'padding:8px;font-size:8.6px;text-align:center;width:30px">#</th>'
+            +'<th style="'+K+'padding:8px;font-size:8.6px;text-align:left">ชื่อ / ตำแหน่ง</th>'
+            +'<th style="'+K+'padding:8px;font-size:8.6px;text-align:left;width:130px">แผนก</th>'
+            +'<th style="'+K+'padding:8px;font-size:8.6px;text-align:center;width:52px">เป้า</th>'
+            +'<th style="'+K+'padding:8px;font-size:8.6px;text-align:center;width:60px">เข้าร่วม</th>'
+            +'<th style="'+K+'padding:8px;font-size:8.6px;text-align:left;width:140px">ความคืบหน้า</th>'
+            +'<th style="'+K+'padding:8px;font-size:8.6px;text-align:center;width:54px">Rating</th>'
+            +'<th style="'+K+'padding:8px;font-size:8.6px;text-align:center;width:88px">สถานะ</th>'
+            +'</tr></thead>';
+        const approvalSummaryBlock = compact => '<div style="background:#f0fdf4;border:1px solid #bbf7d0;border-radius:12px;padding:'+(compact ? '11px 13px' : '15px 16px')+'">'
+            +'<div style="'+K+'font-size:'+(compact ? '11px' : '12.5px')+';font-weight:900;color:#065f46;margin-bottom:'+(compact ? '5px' : '8px')+'">Approval Summary / สรุปเพื่อการรับรอง</div>'
+            +'<div style="'+K+'font-size:'+(compact ? '8.8px' : '11px')+';line-height:'+(compact ? '1.55' : '1.8')+';color:#334155">จำนวนสมาชิก '+groupLabel+' ทั้งหมด '+rawMembers.length+' คน มีเป้าหมายรวม '+(summary.totalSessions || 0)+' ครั้ง เข้าร่วมรวม '+(summary.totalAttended || 0)+' ครั้ง และมีผู้ผ่านเกณฑ์ '+passCount+' คน คิดเป็น '+mgmtDonePct+'% ของสมาชิกทั้งหมด รายละเอียดรายบุคคลปรากฏในหน้ารายชื่อก่อนหน้า</div>'
+            +'</div>';
+        const approvalSignBlock = compact => '<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:'+(compact ? '10px' : '16px')+';margin-top:'+(compact ? '10px' : '28px')+'">'
+            +['ผู้จัดทำรายงาน','ผู้ตรวจสอบ','ผู้อนุมัติ'].map(role => '<div style="background:#fff;border:1px solid #cbd5e1;border-radius:12px;padding:'+(compact ? '27px 10px 10px' : '44px 14px 16px')+';text-align:center"><div style="border-bottom:1.2px solid #64748b;margin-bottom:'+(compact ? '7px' : '12px')+';height:1px"></div><div style="'+K+'font-size:'+(compact ? '8.2px' : '10px')+';color:#64748b">(........................................)</div><div style="'+K+'font-size:'+(compact ? '9px' : '11px')+';font-weight:900;color:#334155;margin-top:'+(compact ? '5px' : '8px')+'">'+role+'</div><div style="'+K+'font-size:'+(compact ? '7.8px' : '9px')+';color:#64748b;margin-top:'+(compact ? '5px' : '8px')+'">วันที่ ......../......../.........</div></div>').join('')
+            +'</div>';
+        const approvalNoteBlock = '<div style="margin-top:auto;background:#f8fafc;border:1px solid #e2e8f0;border-radius:10px;padding:10px 12px;color:#64748b;font-size:8.8px;line-height:1.6">เอกสารฉบับนี้สร้างจากระบบ TSH Safety Core Activity โดยอ้างอิงข้อมูลการบันทึก Safety Patrol ในระบบ ณ วันที่สร้างรายงาน เลขที่เอกสาร '+docNo+'</div>';
+        let supervisorApprovalInlined = false;
+        pageHTMLs.push(mgmtPage(
+            mgmtHeader(groupLabel+' Safety Patrol · ประจำปี '+year)
+            +'<div style="flex:1;padding:18px 28px 14px;display:flex;flex-direction:column;gap:12px;min-height:0">'
+            +sectionTitle('1. Report Summary / ภาพรวมการเข้าร่วม', 'สรุปผล Safety Patrol ของกลุ่ม '+groupLabel+' ประจำปี '+year)
+            +'<div style="display:grid;grid-template-columns:repeat(5,1fr);gap:8px">'
+            +kpiCard('สมาชิก', rawMembers.length, '#0f766e', 'Members')
+            +kpiCard('เป้ารวม', summary.totalSessions || 0, '#2563eb', 'Target')
+            +kpiCard('เข้าร่วมรวม', summary.totalAttended || 0, '#059669', 'Attended')
+            +kpiCard('ผ่านเกณฑ์', passCount, '#10b981', 'Pass >= 75%')
+            +kpiCard('อัตราผ่าน', mgmtDonePct+'%', mgmtDonePct >= 75 ? '#059669' : '#dc2626', 'Pass Rate')
+            +'</div>'
+            +'<div style="display:grid;grid-template-columns:1.1fr .9fr;gap:12px">'
+            +'<div style="border:1px solid #e2e8f0;border-radius:12px;padding:12px"><div style="'+K+'font-size:12px;font-weight:900;color:#065f46;margin-bottom:8px">Key Notes / ประเด็นสำคัญ</div><div style="'+K+'font-size:10px;color:#334155;line-height:1.75">แสดงผลการเข้าร่วม Safety Patrol ของกลุ่ม '+groupLabel+' พร้อมเป้าหมายรายบุคคล จำนวนครั้งที่เข้าร่วม อัตราความคืบหน้า Rating และสถานะการผ่านเกณฑ์</div></div>'
+            +'<div style="border:1px solid #e2e8f0;border-radius:12px;padding:12px;text-align:center"><div style="'+K+'font-size:12px;font-weight:900;color:#065f46;margin-bottom:7px">Pass Rate</div><div style="'+K+'font-size:42px;font-weight:900;line-height:1;color:'+(mgmtDonePct >= 75 ? '#059669' : mgmtDonePct >= 50 ? '#d97706' : '#dc2626')+'">'+mgmtDonePct+'%</div><div style="'+K+'font-size:9.5px;color:#64748b;margin:8px 0 10px">Pass '+passCount+' / '+rawMembers.length+' members</div>'+bar(mgmtDonePct, mgmtDonePct >= 75 ? '#059669' : mgmtDonePct >= 50 ? '#d97706' : '#dc2626', 8)+'</div>'
+            +'</div>'
+            +sectionTitle('2. Member Attendance Register', 'รายการที่ 1-'+Math.min(mgmtFirstRows, rawMembers.length)+' / '+rawMembers.length)
+            +'<div style="background:#fff;border:1px solid #e2e8f0;border-bottom:2px solid #065f46;border-radius:12px;overflow:hidden;flex:1;min-height:0">'
+            +'<table style="width:100%;border-collapse:collapse">'+mgmtTableHead+'<tbody>'+rawMembers.slice(0, mgmtFirstRows).map((m, idx) => compactRow(m, idx)).join('')+'</tbody></table>'
+            +'</div>'
+            +'<div style="'+K+'font-size:8.5px;color:#64748b">หมายเหตุ: หน้านี้แสดงรายการที่ 1-'+Math.min(mgmtFirstRows, rawMembers.length)+' / '+rawMembers.length+' รายการ โดยหน้าถัดไปจะแสดงรายการต่อเนื่องตามลำดับ</div>'
+            +'</div>'
+            +mgmtFooter('Member Detail 1-'+Math.min(mgmtFirstRows, rawMembers.length)+' / '+rawMembers.length)
+        ));
+
+        for (let start = mgmtFirstRows; start < rawMembers.length; start += mgmtRowsPerPage) {
+            const slice = rawMembers.slice(start, start + mgmtRowsPerPage);
+            const rangeLabel = `${start + 1}-${Math.min(start + slice.length, rawMembers.length)} / ${rawMembers.length}`;
+            const inlineSupervisorApproval = !isMgmt && start + slice.length >= rawMembers.length && slice.length <= 8;
+            if (inlineSupervisorApproval) supervisorApprovalInlined = true;
+            pageHTMLs.push(mgmtPage(
+                mgmtHeader('รายละเอียดการเข้าร่วมรายบุคคล · รายการที่ '+rangeLabel)
+                +'<div style="flex:1;padding:18px 28px 14px;min-height:0">'
+                +sectionTitle('2. Member Attendance Register / รายการต่อเนื่อง', 'รายการที่ '+rangeLabel+' ตามลำดับรายชื่อ')
+                +'<div style="background:#fff;border:1px solid #e2e8f0;border-bottom:2px solid #065f46;border-radius:12px;overflow:hidden">'
+                +'<table style="width:100%;border-collapse:collapse">'+mgmtTableHead+'<tbody>'+slice.map((m, idx) => compactRow(m, start + idx)).join('')+'</tbody></table>'
+                +'</div>'
+                +'<div style="'+K+'font-size:8.5px;color:#64748b;margin-top:9px">หมายเหตุ: Rating คำนวณจากอัตราการเข้าร่วมเทียบกับเป้าหมายรายบุคคล เกณฑ์ผ่านขั้นต่ำ 75%</div>'
+                +(inlineSupervisorApproval ? '<div style="margin-top:12px">'+approvalSummaryBlock(true)+approvalSignBlock(true)+'</div>' : '')
+                +'</div>'
+                +mgmtFooter(inlineSupervisorApproval ? 'Member Detail & Approval '+rangeLabel : 'Member Detail '+rangeLabel)
+            ));
+        }
+
+        if (isMgmt || !supervisorApprovalInlined) pageHTMLs.push(mgmtPage(
+            mgmtHeader('รับรองผลและลงนาม · ประจำปี '+year)
+            +'<div style="flex:1;padding:18px 28px 18px;display:flex;flex-direction:column;gap:14px">'
+            +sectionTitle('3. Follow-up Notes / Approval', 'สรุปผลการเข้าร่วมเพื่อรับรองและติดตามต่อ')
+            +'<div style="display:grid;grid-template-columns:repeat(4,1fr);gap:10px">'
+            +kpiCard('Target', summary.totalSessions || 0, '#2563eb', 'เป้ารวม')
+            +kpiCard('Attended', summary.totalAttended || 0, '#059669', 'เข้าร่วมรวม')
+            +kpiCard('Passed', passCount, '#10b981', 'ผ่านเกณฑ์')
+            +kpiCard('Pass Rate', mgmtDonePct+'%', mgmtDonePct >= 75 ? '#059669' : '#dc2626', 'อัตราผ่าน')
+            +'</div>'
+            +approvalSummaryBlock(false)
+            +'<div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">'
+            +'<div style="border:1px solid #e2e8f0;border-radius:12px;padding:14px"><div style="'+K+'font-size:11.5px;font-weight:900;color:#065f46;margin-bottom:7px">Key Follow-up</div><div style="'+K+'font-size:10px;line-height:1.7;color:#475569">ติดตามสมาชิกที่ยังต่ำกว่าเกณฑ์ 75% และวางแผนเพิ่มรอบเข้าร่วม Safety Patrol ให้ครบตามเป้าหมายรายบุคคล</div></div>'
+            +'<div style="border:1px solid #e2e8f0;border-radius:12px;padding:14px"><div style="'+K+'font-size:11.5px;font-weight:900;color:#065f46;margin-bottom:7px">Report Scope</div><div style="'+K+'font-size:10px;line-height:1.7;color:#475569">กลุ่ม: '+groupLabel+'<br>ปี: '+year+'<br>เลขที่เอกสาร: '+docNo+'</div></div>'
+            +'</div>'
+            +approvalSignBlock(false)
+            +approvalNoteBlock
+            +'</div>'
+            +mgmtFooter('Approval')
+        ));
+    } else {
+    const chunks = [];
+    for (let i = 0; i < tablePageCount; i++) {
+        const startIdx = i * rowsPerTablePage;
+        chunks.push({
+            rows: rawMembers.slice(startIdx, startIdx + rowsPerTablePage),
+            isFirst: i === 0,
+            startIdx,
+        });
     }
     chunks.forEach(chunk => {
         const rowsHtml = chunk.rows.map((m,j) => makeRow(m, chunk.startIdx+j)).join('');
@@ -5900,6 +7113,7 @@ window.exportPatrolPDF = async function(group) {
         +'<span style="'+K+'font-size:8px;color:#94a3b8">TSH Safety Core Activity System · รายงานสร้างโดยระบบอัตโนมัติ</span>'
         +'<span style="'+K+'font-size:8px;color:#94a3b8">'+dateStr+' · '+docNo+'</span>'
         +'</div></div>');
+    }
 
     // ── Render each page as fixed A4 HTML → PDF ───────────────────────────────
     showLoading('กำลังสร้าง PDF...');
@@ -5932,12 +7146,12 @@ window.exportPatrolPDF = async function(group) {
         for (let p = 1; p <= total; p++) {
             pdf.setPage(p);
             pdf.setFontSize(7.5); pdf.setTextColor(148,163,184);
-            pdf.text('หน้า '+p+' / '+total, 200, 293, { align:'right' });
+            pdf.text('Page '+p+' / '+total, 200, 293, { align:'right' });
             pdf.text(docNo, 10, 293);
         }
 
-        pdf.save(docNo+'.pdf');
-        showToast('ดาวน์โหลด PDF สำเร็จ', 'success');
+        pdf.save(fileName);
+        showToast(`ดาวน์โหลด PDF สำเร็จ: ${fileName}`, 'success');
     } catch (err) {
         console.error('PDF export error:', err);
         showToast('เกิดข้อผิดพลาดในการสร้าง PDF', 'error');

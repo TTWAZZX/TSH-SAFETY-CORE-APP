@@ -6,10 +6,9 @@ const express = require('express');
 const router  = express.Router();
 const db      = require('../db');
 const { isAdmin }                        = require('../middleware/auth');
-const { storage, fileFilter, cloudinary, isLocal } = require('../cloudinary');
+const { storage, deleteLocalUpload, cleanOriginalFilename } = require('../storage');
+const { ensureAuditTable, logAudit } = require('../utils/audit');
 const multer  = require('multer');
-const path    = require('path');
-const fs      = require('fs');
 
 // Accident attachments: images + PDF only (tighter than global fileFilter)
 const accFileFilter = (_req, file, cb) => {
@@ -43,8 +42,200 @@ function parseId(val) {
 // Trim a string value from req.body (null-safe)
 const s = v => (v != null && typeof v === 'string') ? v.trim() : v;
 
+const MODULE = 'accident';
+const EXCLUDED_STATS_TYPES = ["Near Miss", "First Aid"];
+const INVESTIGATION_STATUSES = new Set(['Reported', 'Under Investigation', 'CAPA Assigned', 'Verified', 'Closed']);
+const POTENTIAL_SEVERITIES = new Set(['Low', 'Medium', 'High', 'Critical']);
+const STATS_ACCIDENT_CONDITION = `
+    AccidentType NOT IN ('Near Miss', 'First Aid')
+    AND (
+        AccidentType IN ('Medical Treatment', 'Lost Time', 'Fatal')
+        OR Severity = 'Critical'
+        OR IsRecordable = 1
+        OR LostDays > 0
+    )
+`;
+
+function userName(req) {
+    const u = req.user || {};
+    return u.name || u.EmployeeName || u.employeeName || u.id || u.EmployeeID || 'System';
+}
+
+function normalizeYear(value, fallback = null) {
+    if (value == null || value === '') return fallback;
+    const n = Number.parseInt(value, 10);
+    const current = new Date().getFullYear();
+    if (!Number.isInteger(n) || n < 2000 || n > current + 5) return fallback;
+    return n;
+}
+
+function daysInYear(year) {
+    const start = new Date(year, 0, 1);
+    const end = new Date(year + 1, 0, 1);
+    return Math.round((end - start) / 86400000);
+}
+
+function accidentFreeDaysForYear(year, lastAccidentDate = null) {
+    const now = new Date();
+    const currentYear = now.getFullYear();
+    if (year > currentYear) return 0;
+
+    const end = year < currentYear
+        ? new Date(year, 11, 31)
+        : new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    const start = lastAccidentDate
+        ? new Date(lastAccidentDate)
+        : new Date(year, 0, 1);
+    start.setHours(0, 0, 0, 0);
+    end.setHours(0, 0, 0, 0);
+
+    if (start > end) return 0;
+    return Math.min(daysInYear(year), Math.max(0, Math.floor((end - start) / 86400000) + 1));
+}
+
+function nonNegativeInt(value, fallback = 0, max = 999999999) {
+    if (value == null || value === '') return fallback;
+    const n = Number.parseInt(value, 10);
+    if (!Number.isInteger(n) || n < 0) return fallback;
+    return Math.min(n, max);
+}
+
+function nonNegativeNumber(value, fallback = 0, max = 999999999999) {
+    if (value == null || value === '') return fallback;
+    const n = Number(value);
+    if (!Number.isFinite(n) || n < 0) return fallback;
+    return Math.min(n, max);
+}
+
+function boolFlag(value) {
+    if (value === true || value === 1) return 1;
+    const v = String(value ?? '').trim().toLowerCase();
+    return ['1', 'true', 'yes', 'on'].includes(v) ? 1 : 0;
+}
+
+function parseJsonObject(value, fallback = {}) {
+    if (value == null || value === '') return fallback;
+    if (typeof value === 'object') return value && !Array.isArray(value) ? value : fallback;
+    try {
+        const parsed = JSON.parse(value);
+        return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : fallback;
+    } catch (_) {
+        return fallback;
+    }
+}
+
+function sanitizeMonthlyNumbers(value) {
+    const raw = parseJsonObject(value, {});
+    const clean = {};
+    for (let i = 1; i <= 12; i++) {
+        const key = String(i);
+        const n = nonNegativeNumber(raw[key], 0);
+        if (n > 0) clean[key] = Number(n.toFixed(2));
+    }
+    return clean;
+}
+
+function buildNearMissDetails(body) {
+    if (s(body.AccidentType) !== 'Near Miss') return null;
+    const fields = [
+        'NearMissNo', 'NearMissWorkType', 'NearMissPhone', 'NearMissShift',
+        'NearMissWorkingOn', 'NearMissEvent', 'NearMissImprovementPoint',
+        'NearMissLayoutNote', 'NearMissEventTitle',
+        'NearMissHazardFinding', 'NearMissRelatedPeople', 'NearMissCAPA',
+        'NearMissRootCause',
+    ];
+    const details = {};
+    for (const key of fields) {
+        const value = s(body[key]);
+        if (key === 'NearMissRelatedPeople' && value) {
+            try {
+                const parsed = JSON.parse(value);
+                if (Array.isArray(parsed) && parsed.length) {
+                    details[key] = parsed
+                        .filter(p => p && (p.EmployeeID || p.EmployeeName))
+                        .map(p => ({
+                            EmployeeID: s(p.EmployeeID) || '',
+                            EmployeeName: s(p.EmployeeName) || '',
+                            Position: s(p.Position) || '',
+                            Department: s(p.Department) || '',
+                        }));
+                    continue;
+                }
+            } catch (_) {
+                // Keep legacy free-text Near Miss records readable.
+            }
+        }
+        if (value) details[key] = value;
+    }
+    return Object.keys(details).length ? details : null;
+}
+
+function normalizeInvestigationStatus(value, status = '') {
+    const next = s(value) || (s(status) === 'Closed' ? 'Closed' : 'Reported');
+    return INVESTIGATION_STATUSES.has(next) ? next : 'Reported';
+}
+
+function normalizePotentialSeverity(value) {
+    const next = s(value);
+    return POTENTIAL_SEVERITIES.has(next) ? next : null;
+}
+
+function isDateValue(value) {
+    return !s(value) || /^\d{4}-\d{2}-\d{2}$/.test(String(value));
+}
+
+function cleanupUploadedFiles(files) {
+    if (!Array.isArray(files)) return;
+    for (const f of files) {
+        try {
+            deleteLocalUpload(f.publicUrl || f.path);
+        } catch (err) {
+            console.warn('[accident] upload cleanup failed:', err.message);
+        }
+    }
+}
+
+function failValidation(req, res, message, status = 400) {
+    cleanupUploadedFiles(req.files);
+    return res.status(status).json({ success: false, message });
+}
+
+function serverError(res, err, message = 'ไม่สามารถดำเนินการได้ กรุณาลองใหม่อีกครั้ง') {
+    console.error('[accident]', err);
+    return res.status(500).json({ success: false, message });
+}
+
+function uploadErrorMessage(err) {
+    if (err?.code === 'LIMIT_FILE_SIZE') return 'ไฟล์แนบมีขนาดเกิน 20 MB';
+    if (err?.code === 'LIMIT_UNEXPECTED_FILE') return 'จำนวนไฟล์แนบเกินที่ระบบกำหนด';
+    return err?.message || 'อัปโหลดไฟล์ไม่สำเร็จ';
+}
+
+function accidentBusinessRuleError(body) {
+    const type = s(body.AccidentType);
+    const isRecordable = boolFlag(body.IsRecordable) === 1;
+    const lostDays = nonNegativeInt(body.LostDays, 0, 36500);
+    const needsRootCause = isRecordable || ['Medical Treatment', 'Lost Time', 'Fatal'].includes(type);
+    const correctiveAction = type === 'Near Miss'
+        ? (s(body.NearMissCAPA) || s(body.CorrectiveAction))
+        : s(body.CorrectiveAction);
+
+    if (type === 'Near Miss' && !s(body.NearMissEvent)) return 'กรุณาระบุเหตุการณ์ Near Miss / Please describe the Near Miss event';
+    if (type === 'Near Miss' && !normalizePotentialSeverity(body.PotentialSeverity)) return 'กรุณาระบุระดับความรุนแรงที่อาจเกิดขึ้น / Please select potential severity';
+    if (type === 'Lost Time' && lostDays < 1) return 'Lost Time ต้องระบุจำนวนวันหยุดงานมากกว่า 0';
+    if (type === 'Medical Treatment' && !s(body.MedicalTreatment)) return 'Medical Treatment ต้องระบุรายละเอียดการรักษา';
+    if (type === 'Fatal' && !isRecordable) return 'Fatal ต้องกำหนดเป็น Recordable';
+    if (needsRootCause && !s(body.RootCause) && !s(body.RootCauseDetail)) return 'กรุณาระบุสาเหตุหรือรายละเอียดสาเหตุ';
+    if (needsRootCause && !correctiveAction) return 'กรุณาระบุมาตรการแก้ไข';
+    if (s(body.Status) === 'Closed' && !correctiveAction) return 'ปิดรายงานได้เมื่อมีมาตรการแก้ไข/CAPA แล้ว';
+    if (s(body.Status) === 'Closed' && !s(body.VerificationResult)) return 'ปิดรายงานได้เมื่อมีผลการตรวจยืนยัน CAPA / CAPA verification result is required before closing';
+    if (s(body.Status) === 'Closed' && !s(body.VerifiedBy)) return 'กรุณาระบุผู้ตรวจยืนยันก่อนปิดรายงาน / Verified by is required before closing';
+    return '';
+}
+
 // ─── ENSURE TABLES ────────────────────────────────────────────────────────────
 let tableReady = false;
+let attachmentNamesRepaired = false;
 async function ensureTable() {
     if (tableReady) return;
 
@@ -93,6 +284,12 @@ async function ensureTable() {
         "ALTER TABLE Accident_Reports ADD COLUMN ResponsiblePerson VARCHAR(100) DEFAULT NULL",
         "ALTER TABLE Accident_Reports ADD COLUMN DueDate          DATE         DEFAULT NULL",
         "ALTER TABLE Accident_Reports ADD COLUMN IsDeleted        TINYINT(1)   DEFAULT 0",
+        "ALTER TABLE Accident_Reports ADD COLUMN NearMissDetails  JSON         DEFAULT NULL",
+        "ALTER TABLE Accident_Reports ADD COLUMN InvestigationStatus VARCHAR(50) DEFAULT 'Reported'",
+        "ALTER TABLE Accident_Reports ADD COLUMN PotentialSeverity   VARCHAR(20) DEFAULT NULL",
+        "ALTER TABLE Accident_Reports ADD COLUMN VerificationResult  TEXT",
+        "ALTER TABLE Accident_Reports ADD COLUMN VerifiedBy          VARCHAR(100) DEFAULT NULL",
+        "ALTER TABLE Accident_Reports ADD COLUMN VerifiedAt          DATE DEFAULT NULL",
     ];
     for (const sql of migrate) {
         try { await db.query(sql); } catch (_) { /* column already exists */ }
@@ -109,11 +306,22 @@ async function ensureTable() {
             TargetHours      INT          DEFAULT 1000000,
             TargetDays       INT          DEFAULT 365,
             MonthlyStatus    JSON         DEFAULT NULL,
+            MonthlyManHours  JSON         DEFAULT NULL,
+            AnnualManHours   DECIMAL(15,2) DEFAULT 0,
+            CumulativeManHours DECIMAL(15,2) DEFAULT 0,
             UpdatedBy        VARCHAR(100) DEFAULT NULL,
             UpdatedAt        TIMESTAMP    DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
             UNIQUE KEY uq_year (Year)
         )
     `);
+    const performanceMigrate = [
+        "ALTER TABLE Accident_Performance ADD COLUMN MonthlyManHours JSON DEFAULT NULL",
+        "ALTER TABLE Accident_Performance ADD COLUMN AnnualManHours DECIMAL(15,2) DEFAULT 0",
+        "ALTER TABLE Accident_Performance ADD COLUMN CumulativeManHours DECIMAL(15,2) DEFAULT 0",
+    ];
+    for (const sql of performanceMigrate) {
+        try { await db.query(sql); } catch (_) { /* column already exists */ }
+    }
 
     // Attachments table
     await db.query(`
@@ -131,6 +339,23 @@ async function ensureTable() {
         )
     `);
 
+    if (!attachmentNamesRepaired) {
+        try {
+            const [atts] = await db.query(
+                'SELECT id, FileName FROM Accident_Attachments ORDER BY id DESC LIMIT 500'
+            );
+            for (const att of atts) {
+                const fixed = cleanOriginalFilename(att.FileName);
+                if (fixed && fixed !== att.FileName) {
+                    await db.query('UPDATE Accident_Attachments SET FileName = ? WHERE id = ?', [fixed, att.id]);
+                }
+            }
+        } catch (err) {
+            console.warn('[accident] attachment filename repair skipped:', err.message);
+        }
+        attachmentNamesRepaired = true;
+    }
+
     tableReady = true;
 }
 
@@ -139,13 +364,13 @@ async function ensureTable() {
 async function saveAttachments(files, accidentId, uploaderName) {
     if (!files || files.length === 0) return;
     for (const f of files) {
-        const fileUrl  = f.path;                      // Cloudinary URL or /uploads/...
-        const publicId = f.filename || null;          // Cloudinary public_id (incl. folder)
+        const fileUrl  = f.path;
+        const publicId = f.filename || null;
         await db.query(
             `INSERT INTO Accident_Attachments
              (AccidentID, FileName, FileURL, PublicID, FileType, FileSize, UploadedBy)
              VALUES (?,?,?,?,?,?,?)`,
-            [accidentId, f.originalname, fileUrl, publicId, f.mimetype, f.size || null, uploaderName]
+            [accidentId, f.originalName || f.originalname, fileUrl, publicId, f.mimetype, f.size || null, uploaderName]
         );
     }
 }
@@ -154,7 +379,8 @@ async function saveAttachments(files, accidentId, uploaderName) {
 router.get('/reports', async (req, res) => {
     try {
         await ensureTable();
-        const { year, department, type, status } = req.query;
+        const { department, type, status } = req.query;
+        const year = normalizeYear(req.query.year, null);
 
         let sql = `
             SELECT r.*,
@@ -165,6 +391,7 @@ router.get('/reports', async (req, res) => {
             WHERE  (r.IsDeleted IS NULL OR r.IsDeleted = 0)
         `;
         const params = [];
+        if (req.query.year && !year) return res.status(400).json({ success: false, message: 'ปีที่เลือกไม่ถูกต้อง' });
         if (year)       { sql += ' AND YEAR(r.AccidentDate) = ?'; params.push(year); }
         if (department) { sql += ' AND r.Department = ?';          params.push(department); }
         if (type)       { sql += ' AND r.AccidentType = ?';        params.push(type); }
@@ -174,7 +401,7 @@ router.get('/reports', async (req, res) => {
         const [rows] = await db.query(sql, params);
         res.json({ success: true, data: rows });
     } catch (err) {
-        res.status(500).json({ success: false, message: err.message });
+        serverError(res, err, 'ไม่สามารถโหลดรายการรายงานอุบัติเหตุได้');
     }
 });
 
@@ -199,7 +426,35 @@ router.get('/reports/:id', async (req, res) => {
         );
         res.json({ success: true, data: { ...report, attachments } });
     } catch (err) {
-        res.status(500).json({ success: false, message: err.message });
+        serverError(res, err, 'ไม่สามารถโหลดรายละเอียดรายงานอุบัติเหตุได้');
+    }
+});
+
+// GET /api/accident/reports/:id/audit (admin) — audit trail for a single report
+router.get('/reports/:id/audit', isAdmin, async (req, res) => {
+    const id = parseId(req.params.id);
+    if (!id) return res.status(400).json({ success: false, message: 'ID ไม่ถูกต้อง' });
+    try {
+        await ensureTable();
+        await ensureAuditTable();
+        const [[report]] = await db.query(
+            'SELECT id FROM Accident_Reports WHERE id = ? AND (IsDeleted IS NULL OR IsDeleted = 0)',
+            [id]
+        );
+        if (!report) return res.status(404).json({ success: false, message: 'ไม่พบรายงาน' });
+        const [rows] = await db.query(
+            `SELECT id, ActionTime, AdminID, AdminName, Action, Detail, Metadata
+             FROM Admin_AuditLogs
+             WHERE Module = ?
+               AND TargetType IN ('Accident_Reports', ?)
+               AND TargetID = ?
+             ORDER BY ActionTime DESC, id DESC
+             LIMIT 20`,
+            [MODULE, MODULE, String(id)]
+        );
+        res.json({ success: true, data: rows });
+    } catch (err) {
+        serverError(res, err, 'ไม่สามารถโหลดประวัติการแก้ไขรายงานได้');
     }
 });
 
@@ -207,65 +462,103 @@ router.get('/reports/:id', async (req, res) => {
 router.get('/summary', async (req, res) => {
     try {
         await ensureTable();
-        const year = parseInt(req.query.year) || null;
-        const yf   = year ? `AND YEAR(AccidentDate) = ${year}` : '';
+        const year = normalizeYear(req.query.year, null);
+        const yf   = year ? 'AND YEAR(AccidentDate) = ?' : '';
+        const yp   = year ? [year] : [];
 
         const [kpi] = await db.query(`
             SELECT
                 COUNT(*)                                     AS total,
-                COALESCE(SUM(IsRecordable), 0)               AS recordable,
-                COALESCE(SUM(LostDays), 0)                   AS lostDays,
+                COALESCE(SUM(${STATS_ACCIDENT_CONDITION}), 0) AS recordable,
+                COALESCE(SUM(CASE WHEN ${STATS_ACCIDENT_CONDITION} THEN LostDays ELSE 0 END), 0) AS lostDays,
                 COALESCE(SUM(AccidentType = 'Near Miss'), 0) AS nearMiss,
                 COALESCE(SUM(AccidentType = 'Fatal'), 0)     AS fatal
             FROM Accident_Reports WHERE (IsDeleted IS NULL OR IsDeleted = 0) ${yf}
-        `);
+        `, yp);
 
-        const [lastRec] = await db.query(`
+        const lastRecSql = year ? `
             SELECT AccidentDate FROM Accident_Reports
-            WHERE IsRecordable = 1 AND (IsDeleted IS NULL OR IsDeleted = 0)
+            WHERE (IsDeleted IS NULL OR IsDeleted = 0)
+              AND YEAR(AccidentDate) = ?
+              AND ${STATS_ACCIDENT_CONDITION}
             ORDER BY AccidentDate DESC LIMIT 1
-        `);
+        ` : `
+            SELECT AccidentDate FROM Accident_Reports
+            WHERE (IsDeleted IS NULL OR IsDeleted = 0)
+              AND ${STATS_ACCIDENT_CONDITION}
+            ORDER BY AccidentDate DESC LIMIT 1
+        `;
+        const [lastRec] = await db.query(lastRecSql, year ? [year] : []);
         let daysSince = null;
-        if (lastRec[0]) {
-            daysSince = Math.floor((Date.now() - new Date(lastRec[0].AccidentDate).getTime()) / 86400000);
+        if (year) {
+            daysSince = accidentFreeDaysForYear(year, lastRec[0]?.AccidentDate || null);
+        } else if (lastRec[0]) {
+            daysSince = Math.max(0, Math.floor((Date.now() - new Date(lastRec[0].AccidentDate).getTime()) / 86400000));
         }
 
         const trendSql = year
             ? `SELECT MONTH(AccidentDate) AS mo, COUNT(*) AS total,
-                      SUM(IsRecordable) AS recordable, SUM(LostDays) AS lostDays
+                      SUM(${STATS_ACCIDENT_CONDITION}) AS recordable,
+                      SUM(AccidentType = 'Near Miss') AS nearMiss,
+                      SUM(CASE WHEN ${STATS_ACCIDENT_CONDITION} THEN LostDays ELSE 0 END) AS lostDays
                FROM Accident_Reports
-               WHERE (IsDeleted IS NULL OR IsDeleted = 0) AND YEAR(AccidentDate) = ${year}
+               WHERE (IsDeleted IS NULL OR IsDeleted = 0) AND YEAR(AccidentDate) = ?
                GROUP BY MONTH(AccidentDate) ORDER BY mo`
             : `SELECT DATE_FORMAT(AccidentDate,'%Y-%m') AS period,
-                      COUNT(*) AS total, SUM(IsRecordable) AS recordable, SUM(LostDays) AS lostDays
+                      COUNT(*) AS total,
+                      SUM(${STATS_ACCIDENT_CONDITION}) AS recordable,
+                      SUM(AccidentType = 'Near Miss') AS nearMiss,
+                      SUM(CASE WHEN ${STATS_ACCIDENT_CONDITION} THEN LostDays ELSE 0 END) AS lostDays
                FROM Accident_Reports
                WHERE (IsDeleted IS NULL OR IsDeleted = 0)
                  AND AccidentDate >= DATE_SUB(CURDATE(), INTERVAL 12 MONTH)
                GROUP BY period ORDER BY period`;
-        const [trend] = await db.query(trendSql);
+        const [trend] = await db.query(trendSql, year ? [year] : []);
 
         const [byType] = await db.query(`
             SELECT AccidentType, COUNT(*) AS cnt
             FROM Accident_Reports WHERE (IsDeleted IS NULL OR IsDeleted = 0) ${yf}
             GROUP BY AccidentType ORDER BY cnt DESC
-        `);
+        `, yp);
 
         const [byDept] = await db.query(`
             SELECT Department,
                    COUNT(*)                       AS total,
-                   COALESCE(SUM(IsRecordable), 0) AS recordable,
-                   COALESCE(SUM(LostDays), 0)     AS lostDays
+                   COALESCE(SUM(${STATS_ACCIDENT_CONDITION}), 0) AS recordable,
+                   COALESCE(SUM(CASE WHEN ${STATS_ACCIDENT_CONDITION} THEN LostDays ELSE 0 END), 0) AS lostDays
             FROM Accident_Reports
             WHERE (IsDeleted IS NULL OR IsDeleted = 0)
               AND Department IS NOT NULL AND Department <> '' ${yf}
             GROUP BY Department
             ORDER BY total DESC, recordable DESC
             LIMIT 10
-        `);
+        `, yp);
 
-        res.json({ success: true, data: { kpi: kpi[0], daysSince, trend, byType, byDept } });
+        const [recentReports] = await db.query(`
+            SELECT id, AccidentDate, AccidentType, Department, Area, Status, DueDate,
+                   EmployeeID, ReportedBy, ResponsiblePerson, InvestigationStatus, CreatedAt
+            FROM Accident_Reports
+            WHERE (IsDeleted IS NULL OR IsDeleted = 0) ${yf}
+            ORDER BY CreatedAt DESC, id DESC
+            LIMIT 8
+        `, yp);
+
+        const [openActions] = await db.query(`
+            SELECT id, AccidentDate, AccidentType, Department, Area, Status, DueDate,
+                   ResponsiblePerson, InvestigationStatus, CreatedAt
+            FROM Accident_Reports
+            WHERE (IsDeleted IS NULL OR IsDeleted = 0)
+              AND COALESCE(Status,'Open') <> 'Closed' ${yf}
+            ORDER BY
+              CASE WHEN DueDate IS NULL THEN 1 ELSE 0 END,
+              DueDate ASC,
+              id DESC
+            LIMIT 8
+        `, yp);
+
+        res.json({ success: true, data: { kpi: kpi[0], daysSince, trend, byType, byDept, recentReports, openActions } });
     } catch (err) {
-        res.status(500).json({ success: false, message: err.message });
+        serverError(res, err, 'ไม่สามารถโหลดสรุปรายงานอุบัติเหตุได้');
     }
 });
 
@@ -273,14 +566,15 @@ router.get('/summary', async (req, res) => {
 router.get('/analytics', async (req, res) => {
     try {
         await ensureTable();
-        const year = parseInt(req.query.year) || null;
-        const yf   = year ? `AND YEAR(AccidentDate) = ${year}` : '';
+        const year = normalizeYear(req.query.year, null);
+        const yf   = year ? 'AND YEAR(AccidentDate) = ?' : '';
+        const yp   = year ? [year] : [];
 
         const [deptRank] = await db.query(`
             SELECT Department,
                    COUNT(*)                      AS total,
-                   SUM(IsRecordable)             AS recordable,
-                   SUM(LostDays)                 AS lostDays,
+                   SUM(${STATS_ACCIDENT_CONDITION}) AS recordable,
+                   SUM(CASE WHEN ${STATS_ACCIDENT_CONDITION} THEN LostDays ELSE 0 END) AS lostDays,
                    SUM(AccidentType='Near Miss') AS nearMiss,
                    SUM(AccidentType='Fatal')     AS fatal,
                    SUM(Severity='Critical')      AS critical
@@ -290,24 +584,56 @@ router.get('/analytics', async (req, res) => {
             GROUP BY Department
             ORDER BY (SUM(IsRecordable)*3 + SUM(LostDays)*2 + COUNT(*)) DESC
             LIMIT 10
-        `);
+        `, yp);
 
         const [hotspot] = await db.query(`
             SELECT COALESCE(Area,'(ไม่ระบุ)') AS area, COUNT(*) AS cnt,
-                   SUM(IsRecordable) AS recordable, SUM(LostDays) AS lostDays
+                   SUM(${STATS_ACCIDENT_CONDITION}) AS recordable,
+                   SUM(CASE WHEN ${STATS_ACCIDENT_CONDITION} THEN LostDays ELSE 0 END) AS lostDays
             FROM Accident_Reports WHERE (IsDeleted IS NULL OR IsDeleted = 0) ${yf}
             GROUP BY Area ORDER BY cnt DESC LIMIT 8
-        `);
+        `, yp);
 
         const [rootCauses] = await db.query(`
             SELECT COALESCE(RootCause,'(ไม่ระบุ)') AS cause, COUNT(*) AS cnt
             FROM Accident_Reports WHERE (IsDeleted IS NULL OR IsDeleted = 0) ${yf}
             GROUP BY RootCause ORDER BY cnt DESC LIMIT 8
-        `);
+        `, yp);
 
-        res.json({ success: true, data: { deptRank, hotspot, rootCauses } });
+        const [nearMissTrend] = await db.query(`
+            SELECT MONTH(AccidentDate) AS mo, COUNT(*) AS cnt
+            FROM Accident_Reports
+            WHERE (IsDeleted IS NULL OR IsDeleted = 0)
+              AND AccidentType = 'Near Miss' ${yf}
+            GROUP BY MONTH(AccidentDate)
+            ORDER BY mo
+        `, yp);
+
+        const [injuryTypeStats] = await db.query(`
+            SELECT COALESCE(NULLIF(InjuryType,''),'(ไม่ระบุ)') AS label, COUNT(*) AS cnt
+            FROM Accident_Reports
+            WHERE (IsDeleted IS NULL OR IsDeleted = 0)
+              AND ${STATS_ACCIDENT_CONDITION}
+              AND AccidentType <> 'Near Miss' ${yf}
+            GROUP BY COALESCE(NULLIF(InjuryType,''),'(ไม่ระบุ)')
+            ORDER BY cnt DESC
+            LIMIT 10
+        `, yp);
+
+        const [bodyPartStats] = await db.query(`
+            SELECT COALESCE(NULLIF(BodyPart,''),'(ไม่ระบุ)') AS label, COUNT(*) AS cnt
+            FROM Accident_Reports
+            WHERE (IsDeleted IS NULL OR IsDeleted = 0)
+              AND ${STATS_ACCIDENT_CONDITION}
+              AND AccidentType <> 'Near Miss' ${yf}
+            GROUP BY COALESCE(NULLIF(BodyPart,''),'(ไม่ระบุ)')
+            ORDER BY cnt DESC
+            LIMIT 10
+        `, yp);
+
+        res.json({ success: true, data: { deptRank, hotspot, rootCauses, nearMissTrend, injuryTypeStats, bodyPartStats } });
     } catch (err) {
-        res.status(500).json({ success: false, message: err.message });
+        serverError(res, err, 'ไม่สามารถโหลดข้อมูลวิเคราะห์อุบัติเหตุได้');
     }
 });
 
@@ -317,7 +643,7 @@ router.post('/reports', isAdmin, async (req, res) => {
         await ensureTable();
         await runUpload(req, res);
     } catch (err) {
-        return res.status(400).json({ success: false, message: err.message });
+        return res.status(400).json({ success: false, message: uploadErrorMessage(err) });
     }
     try {
         const {
@@ -327,14 +653,17 @@ router.post('/reports', isAdmin, async (req, res) => {
             CorrectiveAction, PreventiveAction, LostDays, IsRecordable, Status,
             ReportedBy, InjuryType, BodyPart, MedicalTreatment,
             Position, EmploymentType, ResponsiblePerson, DueDate,
+            InvestigationStatus, PotentialSeverity, VerificationResult, VerifiedBy, VerifiedAt,
         } = req.body;
 
         if (!s(ReportDate) || !s(AccidentDate) || !s(EmployeeID) || !s(AccidentType)) {
-            return res.status(400).json({
-                success: false,
-                message: 'กรุณากรอกข้อมูลให้ครบ (วันที่รายงาน / วันที่เกิดเหตุ / รหัสพนักงาน / ประเภท)',
-            });
+            return failValidation(req, res, 'กรุณากรอกข้อมูลให้ครบ (วันที่รายงาน / วันที่เกิดเหตุ / รหัสพนักงาน / ประเภท)');
         }
+        if (!isDateValue(ReportDate) || !isDateValue(AccidentDate) || !isDateValue(DueDate) || !isDateValue(VerifiedAt)) {
+            return failValidation(req, res, 'รูปแบบวันที่ไม่ถูกต้อง');
+        }
+        const ruleError = accidentBusinessRuleError(req.body);
+        if (ruleError) return failValidation(req, res, ruleError);
 
         const empId = s(EmployeeID);
         const [empRows] = await db.query(
@@ -342,14 +671,13 @@ router.post('/reports', isAdmin, async (req, res) => {
             [empId]
         );
         if (empRows.length === 0) {
-            return res.status(400).json({
-                success: false,
-                message: `ไม่พบรหัสพนักงาน "${empId}" ใน Employee Master Data`,
-            });
+            return failValidation(req, res, `ไม่พบรหัสพนักงาน "${empId}" ใน Employee Master Data`);
         }
 
         const department  = empRows[0].Department   || null;
         const empPosition = s(Position) || empRows[0].EmpPosition || null;
+        const nearMissDetails = buildNearMissDetails(req.body);
+        const nearMissJson = nearMissDetails ? JSON.stringify(nearMissDetails) : null;
 
         const [result] = await db.query(
             `INSERT INTO Accident_Reports
@@ -359,8 +687,9 @@ router.post('/reports', isAdmin, async (req, res) => {
               CorrectiveAction, PreventiveAction,
               LostDays, IsRecordable, Status, ReportedBy, CreatedBy,
               InjuryType, BodyPart, MedicalTreatment,
-              Position, EmploymentType, ResponsiblePerson, DueDate)
-             VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+              Position, EmploymentType, ResponsiblePerson, DueDate, NearMissDetails,
+              InvestigationStatus, PotentialSeverity, VerificationResult, VerifiedBy, VerifiedAt)
+             VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
             [
                 s(ReportDate), s(AccidentDate), s(AccidentTime) || null,
                 empId, department, s(Area) || null, s(Location) || null,
@@ -369,19 +698,33 @@ router.post('/reports', isAdmin, async (req, res) => {
                 s(RootCause) || null, s(RootCauseDetail) || '',
                 s(ImmediateCause) || null, s(UnsafeAct) || null, s(UnsafeCondition) || null,
                 s(CorrectiveAction) || '', s(PreventiveAction) || null,
-                parseInt(LostDays) || 0, IsRecordable ? 1 : 0,
+                nonNegativeInt(LostDays, 0, 36500), boolFlag(IsRecordable),
                 s(Status) || 'Open',
-                s(ReportedBy) || req.user.name, req.user.name,
+                s(ReportedBy) || userName(req), userName(req),
                 s(InjuryType) || null, s(BodyPart) || null, s(MedicalTreatment) || null,
                 empPosition, s(EmploymentType) || null,
-                s(ResponsiblePerson) || null, s(DueDate) || null,
+                s(ResponsiblePerson) || null, s(DueDate) || null, nearMissJson,
+                normalizeInvestigationStatus(InvestigationStatus, Status),
+                normalizePotentialSeverity(PotentialSeverity),
+                s(VerificationResult) || null,
+                s(VerifiedBy) || null,
+                s(VerifiedAt) || null,
             ]
         );
 
-        await saveAttachments(req.files, result.insertId, req.user.name);
+        await saveAttachments(req.files, result.insertId, userName(req));
+        await logAudit(req, {
+            module: MODULE,
+            action: s(AccidentType) === 'Near Miss' ? 'CREATE_NEAR_MISS_REPORT' : 'CREATE_ACCIDENT_REPORT',
+            targetType: 'Accident_Reports',
+            targetId: result.insertId,
+            detail: `Created accident report ACC-${String(result.insertId).padStart(4, '0')}`,
+            metadata: { EmployeeID: empId, AccidentDate: s(AccidentDate), AccidentType: s(AccidentType), files: (req.files || []).length },
+        });
         res.json({ success: true, message: 'บันทึกรายงานอุบัติเหตุสำเร็จ', id: result.insertId });
     } catch (err) {
-        res.status(500).json({ success: false, message: err.message });
+        cleanupUploadedFiles(req.files);
+        serverError(res, err, 'ไม่สามารถบันทึกรายงานอุบัติเหตุได้');
     }
 });
 
@@ -390,9 +733,10 @@ router.put('/reports/:id', isAdmin, async (req, res) => {
     const id = parseId(req.params.id);
     if (!id) return res.status(400).json({ success: false, message: 'ID ไม่ถูกต้อง' });
     try {
+        await ensureTable();
         await runUpload(req, res);
     } catch (err) {
-        return res.status(400).json({ success: false, message: err.message });
+        return res.status(400).json({ success: false, message: uploadErrorMessage(err) });
     }
     try {
         const {
@@ -402,11 +746,17 @@ router.put('/reports/:id', isAdmin, async (req, res) => {
             CorrectiveAction, PreventiveAction, LostDays, IsRecordable, Status,
             ReportedBy, InjuryType, BodyPart, MedicalTreatment,
             Position, EmploymentType, ResponsiblePerson, DueDate,
+            InvestigationStatus, PotentialSeverity, VerificationResult, VerifiedBy, VerifiedAt,
         } = req.body;
 
         if (!s(ReportDate) || !s(AccidentDate) || !s(EmployeeID) || !s(AccidentType)) {
-            return res.status(400).json({ success: false, message: 'กรุณากรอกข้อมูลให้ครบ' });
+            return failValidation(req, res, 'กรุณากรอกข้อมูลให้ครบ');
         }
+        if (!isDateValue(ReportDate) || !isDateValue(AccidentDate) || !isDateValue(DueDate) || !isDateValue(VerifiedAt)) {
+            return failValidation(req, res, 'รูปแบบวันที่ไม่ถูกต้อง');
+        }
+        const ruleError = accidentBusinessRuleError(req.body);
+        if (ruleError) return failValidation(req, res, ruleError);
 
         const empId = s(EmployeeID);
         const [empRows] = await db.query(
@@ -414,17 +764,16 @@ router.put('/reports/:id', isAdmin, async (req, res) => {
             [empId]
         );
         if (empRows.length === 0) {
-            return res.status(400).json({
-                success: false,
-                message: `ไม่พบรหัสพนักงาน "${empId}" ใน Employee Master Data`,
-            });
+            return failValidation(req, res, `ไม่พบรหัสพนักงาน "${empId}" ใน Employee Master Data`);
         }
 
         // Verify the report exists (ownership check)
-        const [[existing]] = await db.query('SELECT id FROM Accident_Reports WHERE id = ?', [id]);
-        if (!existing) return res.status(404).json({ success: false, message: 'ไม่พบรายงาน' });
+        const [[existing]] = await db.query('SELECT id FROM Accident_Reports WHERE id = ? AND (IsDeleted IS NULL OR IsDeleted = 0)', [id]);
+        if (!existing) return failValidation(req, res, 'ไม่พบรายงาน', 404);
 
         const department = empRows[0].Department || null;
+        const nearMissDetails = buildNearMissDetails(req.body);
+        const nearMissJson = nearMissDetails ? JSON.stringify(nearMissDetails) : null;
 
         await db.query(
             `UPDATE Accident_Reports SET
@@ -435,7 +784,9 @@ router.put('/reports/:id', isAdmin, async (req, res) => {
                 CorrectiveAction=?, PreventiveAction=?,
                 LostDays=?, IsRecordable=?, Status=?, ReportedBy=?,
                 InjuryType=?, BodyPart=?, MedicalTreatment=?,
-                Position=?, EmploymentType=?, ResponsiblePerson=?, DueDate=?
+                Position=?, EmploymentType=?, ResponsiblePerson=?, DueDate=?,
+                NearMissDetails=?,
+                InvestigationStatus=?, PotentialSeverity=?, VerificationResult=?, VerifiedBy=?, VerifiedAt=?
              WHERE id=?`,
             [
                 s(ReportDate), s(AccidentDate), s(AccidentTime) || null,
@@ -445,20 +796,35 @@ router.put('/reports/:id', isAdmin, async (req, res) => {
                 s(RootCause) || null, s(RootCauseDetail) || '',
                 s(ImmediateCause) || null, s(UnsafeAct) || null, s(UnsafeCondition) || null,
                 s(CorrectiveAction) || '', s(PreventiveAction) || null,
-                parseInt(LostDays) || 0, IsRecordable ? 1 : 0,
-                s(Status) || 'Open', s(ReportedBy) || req.user.name,
+                nonNegativeInt(LostDays, 0, 36500), boolFlag(IsRecordable),
+                s(Status) || 'Open', s(ReportedBy) || userName(req),
                 s(InjuryType) || null, s(BodyPart) || null, s(MedicalTreatment) || null,
                 s(Position) || null, s(EmploymentType) || null,
                 s(ResponsiblePerson) || null, s(DueDate) || null,
+                nearMissJson,
+                normalizeInvestigationStatus(InvestigationStatus, Status),
+                normalizePotentialSeverity(PotentialSeverity),
+                s(VerificationResult) || null,
+                s(VerifiedBy) || null,
+                s(VerifiedAt) || null,
                 id,
             ]
         );
 
         // Append any new files (does not remove existing ones)
-        await saveAttachments(req.files, id, req.user.name);
+        await saveAttachments(req.files, id, userName(req));
+        await logAudit(req, {
+            module: MODULE,
+            action: s(Status) === 'Closed' ? 'CLOSE_ACCIDENT_REPORT' : 'UPDATE_ACCIDENT_REPORT',
+            targetType: 'Accident_Reports',
+            targetId: id,
+            detail: `Updated accident report ACC-${String(id).padStart(4, '0')}`,
+            metadata: { EmployeeID: empId, AccidentDate: s(AccidentDate), AccidentType: s(AccidentType), files: (req.files || []).length },
+        });
         res.json({ success: true, message: 'อัปเดตรายงานอุบัติเหตุสำเร็จ' });
     } catch (err) {
-        res.status(500).json({ success: false, message: err.message });
+        cleanupUploadedFiles(req.files);
+        serverError(res, err, 'ไม่สามารถอัปเดตรายงานอุบัติเหตุได้');
     }
 });
 
@@ -467,15 +833,23 @@ router.delete('/reports/:id', isAdmin, async (req, res) => {
     const id = parseId(req.params.id);
     if (!id) return res.status(400).json({ success: false, message: 'ID ไม่ถูกต้อง' });
     try {
+        await ensureTable();
         const [[existing]] = await db.query(
             'SELECT id FROM Accident_Reports WHERE id = ? AND (IsDeleted IS NULL OR IsDeleted = 0)', [id]
         );
         if (!existing) return res.status(404).json({ success: false, message: 'ไม่พบรายงาน' });
 
         await db.query('UPDATE Accident_Reports SET IsDeleted = 1 WHERE id = ?', [id]);
+        await logAudit(req, {
+            module: MODULE,
+            action: 'DELETE_ACCIDENT_REPORT',
+            targetType: 'Accident_Reports',
+            targetId: id,
+            detail: `Soft deleted accident report ACC-${String(id).padStart(4, '0')}`,
+        });
         res.json({ success: true, message: 'ลบรายงานสำเร็จ' });
     } catch (err) {
-        res.status(500).json({ success: false, message: err.message });
+        serverError(res, err, 'ไม่สามารถลบรายงานอุบัติเหตุได้');
     }
 });
 
@@ -484,32 +858,35 @@ router.delete('/attachments/:id', isAdmin, async (req, res) => {
     const id = parseId(req.params.id);
     if (!id) return res.status(400).json({ success: false, message: 'ID ไม่ถูกต้อง' });
     try {
+        await ensureTable();
         const [[att]] = await db.query(
             'SELECT * FROM Accident_Attachments WHERE id = ?', [id]
         );
         if (!att) return res.status(404).json({ success: false, message: 'ไม่พบไฟล์' });
 
+        const [result] = await db.query('DELETE FROM Accident_Attachments WHERE id = ?', [id]);
+        if (!result.affectedRows) return res.status(404).json({ success: false, message: 'ไม่พบไฟล์' });
         await _destroyFile(att);
-        await db.query('DELETE FROM Accident_Attachments WHERE id = ?', [id]);
+        await logAudit(req, {
+            module: MODULE,
+            action: 'DELETE_ACCIDENT_ATTACHMENT',
+            targetType: 'Accident_Attachments',
+            targetId: id,
+            detail: `Deleted accident attachment ${att.FileName || id}`,
+            metadata: { AccidentID: att.AccidentID, FileName: att.FileName },
+        });
         res.json({ success: true, message: 'ลบไฟล์สำเร็จ' });
     } catch (err) {
-        res.status(500).json({ success: false, message: err.message });
+        serverError(res, err, 'ไม่สามารถลบไฟล์แนบได้');
     }
 });
 
-// Destroy a file from Cloudinary or local disk; errors are non-fatal
+// Destroy an uploaded local file; errors are non-fatal
 async function _destroyFile(att) {
     try {
-        if (att.FileURL && att.FileURL.startsWith('https://res.cloudinary.com')) {
-            // PublicID stored by multer-storage-cloudinary (includes folder)
-            const resType = att.FileType?.startsWith('image/') ? 'image' : 'raw';
-            if (att.PublicID) {
-                await cloudinary.uploader.destroy(att.PublicID, { resource_type: resType });
-            }
-        } else if (isLocal && att.FileURL) {
+        if (att.FileURL) {
             // Local: /uploads/filename → backend/uploads/filename
-            const absPath = path.join(__dirname, '..', 'uploads', path.basename(att.FileURL));
-            if (fs.existsSync(absPath)) fs.unlinkSync(absPath);
+            deleteLocalUpload(att.FileURL);
         }
     } catch (_) { /* non-fatal */ }
 }
@@ -518,17 +895,42 @@ async function _destroyFile(att) {
 router.get('/performance', async (req, res) => {
     try {
         await ensureTable();
-        const year = parseInt(req.query.year) || new Date().getFullYear();
+        const year = normalizeYear(req.query.year, new Date().getFullYear());
+        if (req.query.year && !year) return res.status(400).json({ success: false, message: 'ปีที่เลือกไม่ถูกต้อง' });
 
         const [[row]] = await db.query(
             'SELECT * FROM Accident_Performance WHERE Year = ?', [year]
         );
 
-        // Recordable count from Accident_Reports — used to compute Zero Accident status
+        // Safety board statistics intentionally exclude Near Miss and First Aid.
+        // Counted cases reset by selected calendar year through AccidentDate.
         const [[kpi]] = await db.query(
-            `SELECT COALESCE(SUM(IsRecordable), 0) AS recordable
+            `SELECT
+                COUNT(*) AS total,
+                COALESCE(SUM(${STATS_ACCIDENT_CONDITION}), 0) AS statsTotal,
+                COALESCE(SUM(CASE WHEN ${STATS_ACCIDENT_CONDITION} THEN LostDays ELSE 0 END), 0) AS lostDays,
+                COALESCE(SUM(AccidentType = 'First Aid'), 0) AS firstAid,
+                COALESCE(SUM(AccidentType = 'Medical Treatment'), 0) AS medicalTreatment,
+                COALESCE(SUM(AccidentType = 'Lost Time'), 0) AS lostTime,
+                COALESCE(SUM(AccidentType = 'Fatal'), 0) AS fatal,
+                COALESCE(SUM(AccidentType = 'Near Miss'), 0) AS nearMiss,
+                COALESCE(SUM((${STATS_ACCIDENT_CONDITION}) AND (AccidentType = 'Fatal' OR Severity = 'Critical')), 0) AS severe,
+                COALESCE(SUM((${STATS_ACCIDENT_CONDITION}) AND LostDays > 3), 0) AS lostOver3,
+                COALESCE(SUM((${STATS_ACCIDENT_CONDITION}) AND LostDays BETWEEN 1 AND 3), 0) AS lostUnderEqual3,
+                COALESCE(SUM((${STATS_ACCIDENT_CONDITION}) AND COALESCE(LostDays, 0) = 0
+                    AND AccidentType <> 'Fatal' AND Severity <> 'Critical'), 0) AS nonLostRecordable
              FROM Accident_Reports
              WHERE (IsDeleted IS NULL OR IsDeleted = 0) AND YEAR(AccidentDate) = ?`,
+            [year]
+        );
+        const [[lastStat]] = await db.query(
+            `SELECT AccidentDate
+             FROM Accident_Reports
+             WHERE (IsDeleted IS NULL OR IsDeleted = 0)
+               AND YEAR(AccidentDate) = ?
+               AND ${STATS_ACCIDENT_CONDITION}
+             ORDER BY AccidentDate DESC, id DESC
+             LIMIT 1`,
             [year]
         );
 
@@ -540,15 +942,52 @@ router.get('/performance', async (req, res) => {
             TargetHours:     1000000,
             TargetDays:      365,
             MonthlyStatus:   null,
+            MonthlyManHours:  null,
+            AnnualManHours:   0,
+            CumulativeManHours: 0,
             UpdatedBy:       null,
+        };
+
+        const monthlyManHours = sanitizeMonthlyNumbers(record.MonthlyManHours);
+        const monthlyTotal = Object.values(monthlyManHours).reduce((sum, n) => sum + (Number(n) || 0), 0);
+        const annualManHours = nonNegativeNumber(record.AnnualManHours, 0) || monthlyTotal || nonNegativeNumber(record.TotalHours, 0);
+        const cumulativeManHours = nonNegativeNumber(record.CumulativeManHours, 0) || annualManHours;
+        const statsCount = parseInt(kpi.statsTotal) || 0;
+        const lostTimeCount = parseInt(kpi.lostTime) || 0;
+        const statsLostDays = parseInt(kpi.lostDays) || 0;
+        const effectiveLastAccidentDate = lastStat?.AccidentDate || record.LastAccidentDate || null;
+        const rate = (count, base = 1000000) => annualManHours > 0
+            ? Number(((Number(count) || 0) * base / annualManHours).toFixed(3))
+            : 0;
+        const rates = {
+            monthlyManHours,
+            annualManHours: Number(annualManHours.toFixed(2)),
+            cumulativeManHours: Number(cumulativeManHours.toFixed(2)),
+            hoursPer100k: Number((annualManHours / 100000).toFixed(3)),
+            totalManHour: Number(annualManHours.toFixed(2)),
+            IFR: rate(statsCount, 1000000),
+            TCIR: rate(statsCount, 200000),
+            LTIFR: rate(lostTimeCount, 1000000),
+            ISR: rate(statsLostDays, 1000000),
+            TRIR: rate(statsCount, 200000),
+            lastStatAccidentDate: effectiveLastAccidentDate,
+            statCounts: {
+                total: statsCount,
+                severe: parseInt(kpi.severe) || 0,
+                lostOver3: parseInt(kpi.lostOver3) || 0,
+                lostUnderEqual3: parseInt(kpi.lostUnderEqual3) || 0,
+                nonLostRecordable: parseInt(kpi.nonLostRecordable) || 0,
+                excludedFirstAid: parseInt(kpi.firstAid) || 0,
+                excludedNearMiss: parseInt(kpi.nearMiss) || 0,
+            },
         };
 
         res.json({
             success: true,
-            data: { ...record, recordableCount: parseInt(kpi.recordable) || 0 },
+            data: { ...record, LastAccidentDate: effectiveLastAccidentDate, recordableCount: statsCount, rates },
         });
     } catch (err) {
-        res.status(500).json({ success: false, message: err.message });
+        serverError(res, err, 'ไม่สามารถโหลดข้อมูล Safety Performance ได้');
     }
 });
 
@@ -559,9 +998,12 @@ router.put('/performance', isAdmin, async (req, res) => {
         const {
             Year, TotalHours, TotalDays, LastAccidentDate,
             TargetHours, TargetDays, MonthlyStatus,
+            MonthlyManHours, AnnualManHours, CumulativeManHours,
         } = req.body;
 
-        const year = parseInt(Year) || new Date().getFullYear();
+        const year = normalizeYear(Year, null);
+        if (!year) return res.status(400).json({ success: false, message: 'ปีที่เลือกไม่ถูกต้อง' });
+        if (!isDateValue(LastAccidentDate)) return res.status(400).json({ success: false, message: 'วันที่เกิดอุบัติเหตุล่าสุดไม่ถูกต้อง' });
 
         // Accept MonthlyStatus as string (JSON) or object
         let monthlyJson = null;
@@ -569,13 +1011,22 @@ router.put('/performance', isAdmin, async (req, res) => {
             monthlyJson = typeof MonthlyStatus === 'string'
                 ? MonthlyStatus
                 : JSON.stringify(MonthlyStatus);
+            try { JSON.parse(monthlyJson); } catch (_) {
+                return res.status(400).json({ success: false, message: 'ข้อมูลสถานะรายเดือนไม่ถูกต้อง' });
+            }
         }
+        const monthlyManHours = sanitizeMonthlyNumbers(MonthlyManHours);
+        const monthlyManHoursJson = JSON.stringify(monthlyManHours);
+        const monthlyTotal = Object.values(monthlyManHours).reduce((sum, n) => sum + (Number(n) || 0), 0);
+        const annualHours = nonNegativeNumber(AnnualManHours, 0) || monthlyTotal || nonNegativeNumber(TotalHours, 0);
+        const cumulativeHours = nonNegativeNumber(CumulativeManHours, 0) || annualHours;
 
         await db.query(`
             INSERT INTO Accident_Performance
                 (Year, TotalHours, TotalDays, LastAccidentDate,
-                 TargetHours, TargetDays, MonthlyStatus, UpdatedBy)
-            VALUES (?,?,?,?,?,?,?,?)
+                 TargetHours, TargetDays, MonthlyStatus, MonthlyManHours,
+                 AnnualManHours, CumulativeManHours, UpdatedBy)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?)
             ON DUPLICATE KEY UPDATE
                 TotalHours       = VALUES(TotalHours),
                 TotalDays        = VALUES(TotalDays),
@@ -583,21 +1034,35 @@ router.put('/performance', isAdmin, async (req, res) => {
                 TargetHours      = VALUES(TargetHours),
                 TargetDays       = VALUES(TargetDays),
                 MonthlyStatus    = VALUES(MonthlyStatus),
+                MonthlyManHours  = VALUES(MonthlyManHours),
+                AnnualManHours   = VALUES(AnnualManHours),
+                CumulativeManHours = VALUES(CumulativeManHours),
                 UpdatedBy        = VALUES(UpdatedBy)
         `, [
             year,
-            parseInt(TotalHours)  || 0,
-            parseInt(TotalDays)   || 0,
+            nonNegativeInt(TotalHours, 0),
+            nonNegativeInt(TotalDays, 0),
             s(LastAccidentDate)   || null,
-            parseInt(TargetHours) || 1000000,
-            parseInt(TargetDays)  || 365,
+            nonNegativeInt(TargetHours, 1000000),
+            nonNegativeInt(TargetDays, 365),
             monthlyJson,
-            req.user.name,
+            monthlyManHoursJson,
+            annualHours,
+            cumulativeHours,
+            userName(req),
         ]);
 
+        await logAudit(req, {
+            module: MODULE,
+            action: 'UPDATE_ACCIDENT_PERFORMANCE',
+            targetType: 'Accident_Performance',
+            targetId: year,
+            detail: `Updated accident performance ${year}`,
+            metadata: { Year: year, TotalHours, TotalDays, TargetHours, TargetDays, AnnualManHours: annualHours, CumulativeManHours: cumulativeHours },
+        });
         res.json({ success: true, message: 'บันทึกข้อมูล Safety Performance สำเร็จ' });
     } catch (err) {
-        res.status(500).json({ success: false, message: err.message });
+        serverError(res, err, 'ไม่สามารถบันทึกข้อมูล Safety Performance ได้');
     }
 });
 
@@ -616,7 +1081,7 @@ router.get('/employees', async (req, res) => {
         const [rows] = await db.query(sql, params);
         res.json({ success: true, data: rows });
     } catch (err) {
-        res.status(500).json({ success: false, message: err.message });
+        serverError(res, err, 'ไม่สามารถค้นหาพนักงานได้');
     }
 });
 

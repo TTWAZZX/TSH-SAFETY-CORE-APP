@@ -15,7 +15,6 @@
 ```
 TSH-SAFETY-CORE-APP/
 ├── index.html                  # Single HTML entry point (SPA)
-├── vercel.json                 # legacy deployment config; company server is the current target
 ├── public/
 │   ├── style.css
 │   └── js/
@@ -922,6 +921,18 @@ CSS classes: `.rte-active` = alignment button ที่ active อยู่ (bg-
 | Top & Management | `ov-sub-mgmt` | `top_management` | `Patrol_Attendance.UserID` | per person (TargetPerYear in Patrol_Roster) |
 | Sec. & Supervisor | `ov-sub-sv` | `supervisor` | `Patrol_Self_Checkin.EmployeeID` | per person (TargetPerYear in Patrol_Roster) |
 
+### Sec. & Supervisor Scheduled Linkage
+
+Sec. & Supervisor no longer works as a raw monthly quota only. The detail API now builds a scheduled quota from real, non-cancelled `Patrol_Sessions` rows for the selected year, slices each month by the employee's yearly target, and attaches `Patrol_Self_Checkin` rows to those scheduled items.
+
+- `Patrol_Self_Checkin.ScheduledSessionID` links a supervisor self-check-in or Admin on-behalf record to the selected scheduled patrol item.
+- Historical records without `ScheduledSessionID` still count as fallback completions when their check-in date matches an open scheduled date.
+- Completed scheduled items are removed from the personal open-check-in list.
+- Personal Self-Patrol visibility accepts either `Master_Positions.IsSupervisorPatrol` or `Patrol_Roster.RosterGroup='supervisor'`, so rostered section/department heads can see their required work even when the position master flag is missing.
+- Admin Sec. & Supervisor on-behalf recording uses the same scheduled items and stores the selected `ScheduledSessionID`.
+- Monthly requirements come from the yearly target resolver (`Activity_Targets` / `Patrol_Roster.TargetPerYear` / fallback defaults), then are distributed across months with `patrolMonthlyRequiredFromYearlyTarget`.
+- PHP production compatibility and Node dev parity both auto-add the nullable `ScheduledSessionID` column and index for `patrol_self_checkin` / `Patrol_Self_Checkin`.
+
 ### Position → Yearly Target
 **Management group:**
 - ผู้จัดการทั่วไป, ผู้ช่วยผู้จัดการทั่วไป, ผู้อำนวยการ → **12 ครั้ง/ปี**
@@ -1260,7 +1271,7 @@ Current roadmap after Phase A completion:
 - **Login mobile layout**: `index.html` adds `#login-panel`, `#login-topbar`, `#login-form-area`, `#login-footer`, `.login-hero-icon`, and `#login-security-indicators` hooks. On mobile the login form starts at the top instead of vertical-center, preventing Safari address-bar/footer UI from clipping the login icon/header.
 - **Short-height phones**: At `max-width:767px` + `max-height:760px`, login security indicators are hidden and spacing is reduced. At `max-height:640px`, login footer is hidden so the form remains usable on very short browser viewports.
 - **iPhone input zoom guard**: Mobile `input`, `select`, and `textarea` are forced to `16px` font size to prevent Safari auto-zoom on focus. Login/register employee ID and password fields disable autocapitalize/autocorrect/spellcheck.
-- **PWA shell**: `index.html` includes theme-color, Apple mobile web app meta, `public/manifest.webmanifest`, `public/icons/app-icon.svg`, and service worker registration. `vercel.json` must keep both the static build and route for root `/sw.js`.
+- **PWA shell**: `index.html` includes theme-color, Apple mobile web app meta, `public/manifest.webmanifest`, `public/icons/app-icon.svg`, and service worker registration. Company-server routing must keep root `/sw.js` served from the web root.
 - **Service worker policy**: `sw.js` is intentionally network-only. It exists for installability/open-as-app behavior and must not cache HTML/API responses because the app uses authenticated, frequently changing safety data.
 - **CSS cache busting**: `index.html` links `public/style.css?v=20260503-mobile-login`. Bump this query string after future mobile CSS changes to reduce stale CSS on phones.
 - **Completed login visual QA**: Playwright Chromium screenshots passed for the public login page at `320x667`, `375x812`, `390x844`, and `430x932`: no clipped login header/icon and no horizontal overflow. Full post-login module QA still requires an authenticated/API-backed environment.

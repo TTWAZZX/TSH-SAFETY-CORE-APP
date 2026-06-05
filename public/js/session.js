@@ -3,10 +3,20 @@
 // STEP A - FINAL (Stable)
 // =================================================================
 
-// FIX: was hardcoded to localhost — breaks in production (Vercel)
-const API_BASE = (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1' || !window.location.hostname)
-    ? 'http://localhost:5000/api'
-    : '/api';
+function resolveApiBase() {
+    if (window.API_BASE) return String(window.API_BASE).replace(/\/+$/, '');
+
+    const h = window.location.hostname;
+    if (h === 'localhost' || h === '127.0.0.1' || !h) return 'http://localhost:5000/api';
+
+    const path = window.location.pathname || '/';
+    const marker = '/index.html';
+    const appPath = path.includes(marker) ? path.slice(0, path.indexOf(marker) + 1) : path;
+    return `${appPath.replace(/\/+$/, '')}/api`;
+}
+
+// Uses localhost for local testing and current app subfolder for hosted deployments.
+const API_BASE = resolveApiBase();
 
 /**
  * =========================
@@ -49,6 +59,10 @@ async function login(employeeId, password) {
             body: JSON.stringify({ employeeId, password })
         });
 
+        const contentType = res.headers.get('content-type') || '';
+        if (!contentType.includes('application/json')) {
+            throw new Error(`API endpoint not available (${res.status})`);
+        }
         const data = await res.json();
 
         if (!res.ok || !data.success) {
@@ -88,6 +102,10 @@ async function verifySession() {
         // ❗ ถ้า backend ตอบ non-200 → ถือว่า session พัง
         if (!res.ok) throw new Error('Invalid session');
 
+        const contentType = res.headers.get('content-type') || '';
+        if (!contentType.includes('application/json')) {
+            throw new Error(`API endpoint not available (${res.status})`);
+        }
         const data = await res.json();
 
         if (!data.success || !data.user || !data.token) {
@@ -137,6 +155,7 @@ window.TSHSession = {
     logout,
     verifySession,
     requireAuth,
+    setSession: saveSession,
     getUser,
     getToken
 };

@@ -3,7 +3,7 @@
 // Profile Slide-over Drawer (Enterprise)
 // ======================================================
 import { apiFetch } from '../api.js';
-import { showToast, escHtml } from '../ui.js';
+import { showToast, escHtml } from '../ui.js?v=20260602-mobile-nav-m53';
 
 let _masterCache = null;
 
@@ -112,7 +112,7 @@ function _ensureDrawerDOM() {
                                 รหัสผ่านใหม่
                             </label>
                             <input id="ppw-new" type="password" required autocomplete="new-password"
-                                   placeholder="อย่างน้อย 8 ตัวอักษร"
+                                   placeholder="อย่างน้อย 4 ตัวอักษร"
                                    class="w-full px-3.5 py-2.5 rounded-xl border border-slate-200 dark:border-slate-600 dark:bg-slate-800 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-transparent transition"
                                    oninput="_ppwStrength(this.value)">
                             <!-- Strength meter -->
@@ -390,7 +390,7 @@ function _ppwStrength(pw) {
     if (!pw) { wrap.classList.add('hidden'); return; }
     wrap.classList.remove('hidden');
     let score = 0;
-    if (pw.length >= 8)          score++;
+    if (pw.length >= 4)          score++;
     if (/[a-z]/.test(pw))        score++;
     if (/[A-Z]/.test(pw))        score++;
     if (/[0-9]/.test(pw))        score++;
@@ -425,8 +425,8 @@ async function _handleChangePassword(e) {
         errEl.classList.remove('hidden');
         return;
     }
-    if (newPw.length < 8) {
-        errEl.textContent = 'รหัสผ่านใหม่ต้องมีอย่างน้อย 8 ตัวอักษร';
+    if (newPw.length < 4) {
+        errEl.textContent = 'รหัสผ่านใหม่ต้องมีอย่างน้อย 4 ตัวอักษร';
         errEl.classList.remove('hidden');
         return;
     }

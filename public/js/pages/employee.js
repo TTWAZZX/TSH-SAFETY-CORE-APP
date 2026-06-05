@@ -1,4 +1,4 @@
-import { showLoading, hideLoading, showToast, showError, openModal, closeModal, escHtml } from '../ui.js';
+import { showLoading, hideLoading, showToast, showError, openModal, closeModal, escHtml } from '../ui.js?v=20260602-mobile-nav-m53';
 import { API } from '../api.js';
 
 let allEmployees = [];

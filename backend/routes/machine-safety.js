@@ -6,10 +6,70 @@ const express = require('express');
 const router  = express.Router();
 const db      = require('../db');
 const multer  = require('multer');
-const { storage, fileFilter } = require('../cloudinary');
+const { storage, fileFilter, deleteLocalUpload } = require('../storage');
 const { isAdmin } = require('../middleware/auth');
+const { logAudit } = require('../utils/audit');
 
 const upload = multer({ storage, fileFilter, limits: { fileSize: 20 * 1024 * 1024 } });
+const MODULE = 'machine-safety';
+const VALID_FILE_CATEGORIES = ['SafetyDeviceStandard', 'LayoutCheckpoint'];
+const VALID_MACHINE_STATUS = ['active', 'maintenance', 'inactive', 'restricted', 'locked'];
+const VALID_RISK_LEVELS = ['low', 'medium', 'high', 'critical'];
+const VALID_ISSUE_SEVERITY = ['low', 'medium', 'high', 'critical'];
+
+function serverError(res, err, message = 'ไม่สามารถดำเนินการได้ กรุณาลองใหม่อีกครั้ง') {
+    console.error('[machine-safety]', err);
+    return res.status(500).json({ success: false, message });
+}
+
+function userName(req) {
+    return req.user?.name || req.user?.EmployeeName || req.user?.id || req.user?.EmployeeID || 'System';
+}
+
+function isPositiveId(value) {
+    return /^\d+$/.test(String(value || '')) && Number(value) > 0;
+}
+
+function cleanText(value, max = 255) {
+    return String(value || '').trim().slice(0, max);
+}
+
+function normalizeDate(value) {
+    if (!value) return null;
+    const raw = String(value).trim();
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(raw)) return null;
+    const date = new Date(`${raw}T00:00:00`);
+    if (Number.isNaN(date.getTime())) return null;
+    return raw;
+}
+
+function normalizeUrl(value) {
+    const raw = cleanText(value, 1024);
+    if (!raw) return '';
+    try {
+        const parsed = new URL(raw);
+        if (['http:', 'https:'].includes(parsed.protocol)) return raw;
+    } catch (_) {}
+    return '';
+}
+
+async function machineExists(id) {
+    if (!isPositiveId(id)) return false;
+    const [[row]] = await db.query('SELECT id FROM Machine_Safety WHERE id = ? LIMIT 1', [id]);
+    return !!row;
+}
+
+function tryDeleteLocalUpload(fileUrl) {
+    try {
+        return deleteLocalUpload(fileUrl);
+    } catch (err) {
+        console.warn('[machine-safety] local file cleanup failed:', err.message);
+        setTimeout(() => {
+            try { deleteLocalUpload(fileUrl); } catch (_) {}
+        }, 1500);
+        return false;
+    }
+}
 
 // ─────────────────────────────────────────────────────────────────────────────
 // CREATE / MIGRATE TABLES (called once on first request)
@@ -117,7 +177,7 @@ router.get('/', async (req, res) => {
         `);
         res.json({ success: true, data: machines });
     } catch (err) {
-        res.status(500).json({ success: false, message: err.message });
+        return serverError(res, err, 'ไม่สามารถโหลดข้อมูลเครื่องจักรได้');
     }
 });
 
@@ -135,7 +195,7 @@ router.get('/:id/files', async (req, res) => {
         );
         res.json({ success: true, data: files });
     } catch (err) {
-        res.status(500).json({ success: false, message: err.message });
+        return serverError(res, err, 'ไม่สามารถโหลดไฟล์แนบได้');
     }
 });
 
@@ -148,12 +208,16 @@ router.post('/', isAdmin, async (req, res) => {
         const { MachineCode, MachineName, Department, Area, HasRiskAssessment, Remark,
                 Status, RiskLevel, NextInspectionDate } = req.body;
 
-        if (!MachineCode || !MachineName) {
+        const code = cleanText(MachineCode, 50);
+        const name = cleanText(MachineName, 255);
+        if (!code || !name) {
             return res.status(400).json({ success: false, message: 'กรุณากรอกรหัสและชื่อเครื่องจักร' });
         }
 
-        const validStatus    = ['active','maintenance','inactive','restricted','locked'];
-        const validRiskLevel = ['low','medium','high','critical'];
+        const [[duplicate]] = await db.query('SELECT id FROM Machine_Safety WHERE MachineCode = ? LIMIT 1', [code]);
+        if (duplicate) {
+            return res.status(409).json({ success: false, message: 'รหัสเครื่องจักรนี้มีอยู่แล้ว' });
+        }
 
         const [result] = await db.query(
             `INSERT INTO Machine_Safety
@@ -161,17 +225,25 @@ router.post('/', isAdmin, async (req, res) => {
               Status, RiskLevel, NextInspectionDate, CreatedBy)
              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
             [
-                MachineCode, MachineName, Department || '', Area || '',
-                HasRiskAssessment ? 1 : 0, Remark || '',
-                validStatus.includes(Status) ? Status : 'active',
-                validRiskLevel.includes(RiskLevel) ? RiskLevel : 'low',
-                NextInspectionDate || null,
-                req.user.name
+                code, name, cleanText(Department, 100), cleanText(Area, 100),
+                HasRiskAssessment ? 1 : 0, cleanText(Remark, 5000),
+                VALID_MACHINE_STATUS.includes(Status) ? Status : 'active',
+                VALID_RISK_LEVELS.includes(RiskLevel) ? RiskLevel : 'low',
+                normalizeDate(NextInspectionDate),
+                userName(req)
             ]
         );
+        await logAudit(req, {
+            module: MODULE,
+            action: 'CREATE_MACHINE_SAFETY_MACHINE',
+            targetType: 'machine',
+            targetId: result.insertId,
+            detail: `Created machine ${code}`,
+            metadata: { MachineCode: code, MachineName: name }
+        });
         res.json({ success: true, message: 'เพิ่มข้อมูลเครื่องจักรสำเร็จ', id: result.insertId });
     } catch (err) {
-        res.status(500).json({ success: false, message: err.message });
+        return serverError(res, err, 'ไม่สามารถเพิ่มข้อมูลเครื่องจักรได้');
     }
 });
 
@@ -180,18 +252,30 @@ router.post('/', isAdmin, async (req, res) => {
 // ─────────────────────────────────────────────────────────────────────────────
 router.post('/:id/links', isAdmin, async (req, res) => {
     try {
+        await ensureTables();
+        if (!(await machineExists(req.params.id))) {
+            return res.status(404).json({ success: false, message: 'ไม่พบข้อมูลเครื่องจักร' });
+        }
         const { FileCategory, FileLabel, FileUrl } = req.body;
-        if (!FileUrl) return res.status(400).json({ success: false, message: 'กรุณาระบุ URL' });
-        const validCategories = ['SafetyDeviceStandard', 'LayoutCheckpoint'];
-        const category = validCategories.includes(FileCategory) ? FileCategory : 'SafetyDeviceStandard';
-        await db.query(
+        const url = normalizeUrl(FileUrl);
+        if (!url) return res.status(400).json({ success: false, message: 'กรุณาระบุ URL ที่ถูกต้อง' });
+        const category = VALID_FILE_CATEGORIES.includes(FileCategory) ? FileCategory : 'SafetyDeviceStandard';
+        const [result] = await db.query(
             `INSERT INTO Machine_Safety_Files (MachineID, FileCategory, FileLabel, FileUrl, UploadedBy)
              VALUES (?, ?, ?, ?, ?)`,
-            [req.params.id, category, FileLabel || FileUrl, FileUrl, req.user.name]
+            [req.params.id, category, cleanText(FileLabel, 255) || url, url, userName(req)]
         );
+        await logAudit(req, {
+            module: MODULE,
+            action: 'ADD_MACHINE_SAFETY_LINK',
+            targetType: 'machine_file',
+            targetId: result.insertId,
+            detail: `Added ${category} link`,
+            metadata: { MachineID: req.params.id, FileCategory: category }
+        });
         res.json({ success: true, message: 'เพิ่ม URL สำเร็จ' });
     } catch (err) {
-        res.status(500).json({ success: false, message: err.message });
+        return serverError(res, err, 'ไม่สามารถเพิ่มลิงก์ไฟล์ได้');
     }
 });
 
@@ -201,34 +285,55 @@ router.post('/:id/links', isAdmin, async (req, res) => {
 router.put('/:id', isAdmin, async (req, res) => {
     try {
         await ensureTables();
+        if (!(await machineExists(req.params.id))) {
+            return res.status(404).json({ success: false, message: 'ไม่พบข้อมูลเครื่องจักร' });
+        }
         const { MachineCode, MachineName, Department, Area, HasRiskAssessment, Remark,
                 Status, RiskLevel, NextInspectionDate } = req.body;
 
-        if (!MachineCode || !MachineName) {
+        const code = cleanText(MachineCode, 50);
+        const name = cleanText(MachineName, 255);
+        if (!code || !name) {
             return res.status(400).json({ success: false, message: 'กรุณากรอกรหัสและชื่อเครื่องจักร' });
         }
 
-        const validStatus    = ['active','maintenance','inactive','restricted','locked'];
-        const validRiskLevel = ['low','medium','high','critical'];
+        const [[duplicate]] = await db.query(
+            'SELECT id FROM Machine_Safety WHERE MachineCode = ? AND id <> ? LIMIT 1',
+            [code, req.params.id]
+        );
+        if (duplicate) {
+            return res.status(409).json({ success: false, message: 'รหัสเครื่องจักรนี้มีอยู่แล้ว' });
+        }
 
-        await db.query(
+        const [result] = await db.query(
             `UPDATE Machine_Safety SET
              MachineCode=?, MachineName=?, Department=?, Area=?,
              HasRiskAssessment=?, Remark=?,
              Status=?, RiskLevel=?, NextInspectionDate=?, UpdatedBy=?
              WHERE id=?`,
             [
-                MachineCode, MachineName, Department || '', Area || '',
-                HasRiskAssessment ? 1 : 0, Remark || '',
-                validStatus.includes(Status) ? Status : 'active',
-                validRiskLevel.includes(RiskLevel) ? RiskLevel : 'low',
-                NextInspectionDate || null,
-                req.user.name, req.params.id
+                code, name, cleanText(Department, 100), cleanText(Area, 100),
+                HasRiskAssessment ? 1 : 0, cleanText(Remark, 5000),
+                VALID_MACHINE_STATUS.includes(Status) ? Status : 'active',
+                VALID_RISK_LEVELS.includes(RiskLevel) ? RiskLevel : 'low',
+                normalizeDate(NextInspectionDate),
+                userName(req), req.params.id
             ]
         );
+        if (!result.affectedRows) {
+            return res.status(404).json({ success: false, message: 'ไม่พบข้อมูลเครื่องจักร' });
+        }
+        await logAudit(req, {
+            module: MODULE,
+            action: 'UPDATE_MACHINE_SAFETY_MACHINE',
+            targetType: 'machine',
+            targetId: req.params.id,
+            detail: `Updated machine ${code}`,
+            metadata: { MachineCode: code, MachineName: name }
+        });
         res.json({ success: true, message: 'อัปเดตข้อมูลเครื่องจักรสำเร็จ' });
     } catch (err) {
-        res.status(500).json({ success: false, message: err.message });
+        return serverError(res, err, 'ไม่สามารถอัปเดตข้อมูลเครื่องจักรได้');
     }
 });
 
@@ -238,13 +343,30 @@ router.put('/:id', isAdmin, async (req, res) => {
 router.delete('/:id', isAdmin, async (req, res) => {
     try {
         await ensureTables();
+        const [[machine]] = await db.query('SELECT id, MachineCode, MachineName FROM Machine_Safety WHERE id = ? LIMIT 1', [req.params.id]);
+        if (!machine) {
+            return res.status(404).json({ success: false, message: 'ไม่พบข้อมูลเครื่องจักร' });
+        }
+        const [files] = await db.query('SELECT FileUrl FROM Machine_Safety_Files WHERE MachineID = ?', [req.params.id]);
         await db.query('DELETE FROM Machine_Safety_Compliance WHERE MachineID = ?', [req.params.id]);
         await db.query('DELETE FROM Machine_Safety_Issues WHERE MachineID = ?', [req.params.id]);
         await db.query('DELETE FROM Machine_Safety_Files WHERE MachineID = ?', [req.params.id]);
-        await db.query('DELETE FROM Machine_Safety WHERE id = ?', [req.params.id]);
+        const [result] = await db.query('DELETE FROM Machine_Safety WHERE id = ?', [req.params.id]);
+        if (!result.affectedRows) {
+            return res.status(404).json({ success: false, message: 'ไม่พบข้อมูลเครื่องจักร' });
+        }
+        files.forEach(file => tryDeleteLocalUpload(file.FileUrl));
+        await logAudit(req, {
+            module: MODULE,
+            action: 'DELETE_MACHINE_SAFETY_MACHINE',
+            targetType: 'machine',
+            targetId: req.params.id,
+            detail: `Deleted machine ${machine.MachineCode}`,
+            metadata: { MachineCode: machine.MachineCode, MachineName: machine.MachineName, deletedFiles: files.length }
+        });
         res.json({ success: true, message: 'ลบข้อมูลเครื่องจักรสำเร็จ' });
     } catch (err) {
-        res.status(500).json({ success: false, message: err.message });
+        return serverError(res, err, 'ไม่สามารถลบข้อมูลเครื่องจักรได้');
     }
 });
 
@@ -255,24 +377,36 @@ router.delete('/:id', isAdmin, async (req, res) => {
 router.post('/:id/files', isAdmin, upload.single('file'), async (req, res) => {
     try {
         await ensureTables();
+        if (!(await machineExists(req.params.id))) {
+            if (req.file?.path) tryDeleteLocalUpload(req.file.path);
+            return res.status(404).json({ success: false, message: 'ไม่พบข้อมูลเครื่องจักร' });
+        }
         if (!req.file) {
             return res.status(400).json({ success: false, message: 'กรุณาเลือกไฟล์' });
         }
 
-        const fileUrl = req.file.path || req.file.secure_url;
+        const fileUrl = req.file.path;
         const { FileLabel, FileCategory } = req.body;
 
-        const validCategories = ['SafetyDeviceStandard', 'LayoutCheckpoint'];
-        const category = validCategories.includes(FileCategory) ? FileCategory : 'SafetyDeviceStandard';
+        const category = VALID_FILE_CATEGORIES.includes(FileCategory) ? FileCategory : 'SafetyDeviceStandard';
 
-        await db.query(
+        const [result] = await db.query(
             `INSERT INTO Machine_Safety_Files (MachineID, FileCategory, FileLabel, FileUrl, UploadedBy)
              VALUES (?, ?, ?, ?, ?)`,
-            [req.params.id, category, FileLabel || req.file.originalname, fileUrl, req.user.name]
+            [req.params.id, category, cleanText(FileLabel, 255) || req.file.originalName || req.file.originalname, fileUrl, userName(req)]
         );
+        await logAudit(req, {
+            module: MODULE,
+            action: 'UPLOAD_MACHINE_SAFETY_FILE',
+            targetType: 'machine_file',
+            targetId: result.insertId,
+            detail: `Uploaded ${category} file`,
+            metadata: { MachineID: req.params.id, FileCategory: category, filename: req.file.originalName || req.file.originalname }
+        });
         res.json({ success: true, message: 'อัปโหลดไฟล์สำเร็จ' });
     } catch (err) {
-        res.status(500).json({ success: false, message: err.message });
+        if (req.file?.path) tryDeleteLocalUpload(req.file.path);
+        return serverError(res, err, 'ไม่สามารถอัปโหลดไฟล์ได้');
     }
 });
 
@@ -281,10 +415,26 @@ router.post('/:id/files', isAdmin, upload.single('file'), async (req, res) => {
 // ─────────────────────────────────────────────────────────────────────────────
 router.delete('/files/:fileId', isAdmin, async (req, res) => {
     try {
-        await db.query('DELETE FROM Machine_Safety_Files WHERE id = ?', [req.params.fileId]);
+        await ensureTables();
+        const [[file]] = await db.query('SELECT FileUrl FROM Machine_Safety_Files WHERE id = ?', [req.params.fileId]);
+        if (!file) {
+            return res.status(404).json({ success: false, message: 'ไม่พบไฟล์แนบ' });
+        }
+        const [result] = await db.query('DELETE FROM Machine_Safety_Files WHERE id = ?', [req.params.fileId]);
+        if (!result.affectedRows) {
+            return res.status(404).json({ success: false, message: 'ไม่พบไฟล์แนบ' });
+        }
+        tryDeleteLocalUpload(file?.FileUrl);
+        await logAudit(req, {
+            module: MODULE,
+            action: 'DELETE_MACHINE_SAFETY_FILE',
+            targetType: 'machine_file',
+            targetId: req.params.fileId,
+            detail: 'Deleted machine safety file'
+        });
         res.json({ success: true, message: 'ลบไฟล์สำเร็จ' });
     } catch (err) {
-        res.status(500).json({ success: false, message: err.message });
+        return serverError(res, err, 'ไม่สามารถลบไฟล์ได้');
     }
 });
 
@@ -305,7 +455,7 @@ router.get('/:id/compliance', async (req, res) => {
         const data = COMPLIANCE_CODES.map(code => map[code] || { ItemCode: code, Status: 'na', UpdatedAt: null, UpdatedBy: null });
         res.json({ success: true, data });
     } catch (err) {
-        res.status(500).json({ success: false, message: err.message });
+        return serverError(res, err, 'ไม่สามารถโหลดข้อมูล Compliance ได้');
     }
 });
 
@@ -316,7 +466,13 @@ router.get('/:id/compliance', async (req, res) => {
 router.put('/:id/compliance', isAdmin, async (req, res) => {
     try {
         await ensureTables();
-        const items       = req.body.items || [];
+        if (!(await machineExists(req.params.id))) {
+            return res.status(404).json({ success: false, message: 'ไม่พบข้อมูลเครื่องจักร' });
+        }
+        const items = req.body.items;
+        if (!Array.isArray(items)) {
+            return res.status(400).json({ success: false, message: 'รูปแบบข้อมูล Compliance ไม่ถูกต้อง' });
+        }
         const validStatus = ['pass', 'fail', 'na'];
         for (const item of items) {
             if (!COMPLIANCE_CODES.includes(item.ItemCode)) continue;
@@ -325,12 +481,20 @@ router.put('/:id/compliance', isAdmin, async (req, res) => {
                 `INSERT INTO Machine_Safety_Compliance (MachineID, ItemCode, Status, UpdatedBy)
                  VALUES (?, ?, ?, ?)
                  ON DUPLICATE KEY UPDATE Status=VALUES(Status), UpdatedBy=VALUES(UpdatedBy)`,
-                [req.params.id, item.ItemCode, status, req.user.name]
+                [req.params.id, item.ItemCode, status, userName(req)]
             );
         }
+        await logAudit(req, {
+            module: MODULE,
+            action: 'UPDATE_MACHINE_SAFETY_COMPLIANCE',
+            targetType: 'machine',
+            targetId: req.params.id,
+            detail: 'Updated machine safety compliance',
+            metadata: { itemCount: items.length }
+        });
         res.json({ success: true, message: 'บันทึก Compliance สำเร็จ' });
     } catch (err) {
-        res.status(500).json({ success: false, message: err.message });
+        return serverError(res, err, 'ไม่สามารถบันทึก Compliance ได้');
     }
 });
 
@@ -346,7 +510,7 @@ router.get('/:id/issues', async (req, res) => {
         );
         res.json({ success: true, data: rows });
     } catch (err) {
-        res.status(500).json({ success: false, message: err.message });
+        return serverError(res, err, 'ไม่สามารถโหลดปัญหาของเครื่องจักรได้');
     }
 });
 
@@ -356,17 +520,28 @@ router.get('/:id/issues', async (req, res) => {
 router.post('/:id/issues', isAdmin, async (req, res) => {
     try {
         await ensureTables();
+        if (!(await machineExists(req.params.id))) {
+            return res.status(404).json({ success: false, message: 'ไม่พบข้อมูลเครื่องจักร' });
+        }
         const { Description, Severity } = req.body;
-        if (!Description) return res.status(400).json({ success: false, message: 'กรุณาระบุรายละเอียดปัญหา' });
-        const validSeverity = ['low', 'medium', 'high', 'critical'];
+        const description = cleanText(Description, 5000);
+        if (!description) return res.status(400).json({ success: false, message: 'กรุณาระบุรายละเอียดปัญหา' });
         const [result] = await db.query(
             `INSERT INTO Machine_Safety_Issues (MachineID, Description, Severity, CreatedBy)
              VALUES (?, ?, ?, ?)`,
-            [req.params.id, Description, validSeverity.includes(Severity) ? Severity : 'medium', req.user.name]
+            [req.params.id, description, VALID_ISSUE_SEVERITY.includes(Severity) ? Severity : 'medium', userName(req)]
         );
+        await logAudit(req, {
+            module: MODULE,
+            action: 'CREATE_MACHINE_SAFETY_ISSUE',
+            targetType: 'machine_issue',
+            targetId: result.insertId,
+            detail: 'Created machine safety issue',
+            metadata: { MachineID: req.params.id, Severity }
+        });
         res.json({ success: true, message: 'เพิ่มปัญหาสำเร็จ', id: result.insertId });
     } catch (err) {
-        res.status(500).json({ success: false, message: err.message });
+        return serverError(res, err, 'ไม่สามารถเพิ่มปัญหาได้');
     }
 });
 
@@ -376,19 +551,31 @@ router.post('/:id/issues', isAdmin, async (req, res) => {
 // ─────────────────────────────────────────────────────────────────────────────
 router.put('/issues/:issueId', isAdmin, async (req, res) => {
     try {
+        await ensureTables();
         const { Status, Resolution } = req.body;
         const validStatus = ['open', 'resolved'];
         const status      = validStatus.includes(Status) ? Status : 'open';
         const resolvedAt  = status === 'resolved' ? new Date() : null;
-        const resolvedBy  = status === 'resolved' ? req.user.name : null;
-        await db.query(
+        const resolvedBy  = status === 'resolved' ? userName(req) : null;
+        const [result] = await db.query(
             `UPDATE Machine_Safety_Issues
              SET Status=?, Resolution=?, ResolvedAt=?, ResolvedBy=? WHERE id=?`,
-            [status, Resolution || null, resolvedAt, resolvedBy, req.params.issueId]
+            [status, cleanText(Resolution, 5000) || null, resolvedAt, resolvedBy, req.params.issueId]
         );
+        if (!result.affectedRows) {
+            return res.status(404).json({ success: false, message: 'ไม่พบรายการปัญหา' });
+        }
+        await logAudit(req, {
+            module: MODULE,
+            action: 'UPDATE_MACHINE_SAFETY_ISSUE',
+            targetType: 'machine_issue',
+            targetId: req.params.issueId,
+            detail: `Updated issue status to ${status}`,
+            metadata: { Status: status }
+        });
         res.json({ success: true, message: 'อัปเดตปัญหาสำเร็จ' });
     } catch (err) {
-        res.status(500).json({ success: false, message: err.message });
+        return serverError(res, err, 'ไม่สามารถอัปเดตปัญหาได้');
     }
 });
 
@@ -397,10 +584,21 @@ router.put('/issues/:issueId', isAdmin, async (req, res) => {
 // ─────────────────────────────────────────────────────────────────────────────
 router.delete('/issues/:issueId', isAdmin, async (req, res) => {
     try {
-        await db.query('DELETE FROM Machine_Safety_Issues WHERE id = ?', [req.params.issueId]);
+        await ensureTables();
+        const [result] = await db.query('DELETE FROM Machine_Safety_Issues WHERE id = ?', [req.params.issueId]);
+        if (!result.affectedRows) {
+            return res.status(404).json({ success: false, message: 'ไม่พบรายการปัญหา' });
+        }
+        await logAudit(req, {
+            module: MODULE,
+            action: 'DELETE_MACHINE_SAFETY_ISSUE',
+            targetType: 'machine_issue',
+            targetId: req.params.issueId,
+            detail: 'Deleted machine safety issue'
+        });
         res.json({ success: true, message: 'ลบปัญหาสำเร็จ' });
     } catch (err) {
-        res.status(500).json({ success: false, message: err.message });
+        return serverError(res, err, 'ไม่สามารถลบปัญหาได้');
     }
 });
 

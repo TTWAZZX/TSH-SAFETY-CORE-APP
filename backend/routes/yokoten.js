@@ -6,7 +6,7 @@ const express  = require('express');
 const router   = express.Router();
 const db       = require('../db');
 const { isAdmin } = require('../middleware/auth');
-const { cloudinary, storage, fileFilter } = require('../cloudinary');
+const { storage, deleteLocalUpload, cleanOriginalFilename } = require('../storage');
 const multer   = require('multer');
 const { randomUUID } = require('crypto');
 
@@ -149,6 +149,61 @@ function parseJson(val) {
     try { return JSON.parse(val); } catch { return []; }
 }
 function s(v) { return typeof v === 'string' ? v.trim() : v; }
+function displayUploadName(file) {
+    return file.originalName || cleanOriginalFilename(file.originalname);
+}
+function uploadErrorMessage(err) {
+    if (err?.code === 'LIMIT_FILE_SIZE') return 'ไฟล์มีขนาดเกิน 20 MB ต่อไฟล์';
+    if (err?.code === 'LIMIT_FILE_COUNT') return 'แนบไฟล์ได้สูงสุด 10 ไฟล์ต่อรายการ';
+    if (err?.message && /unsupported|type|mimetype/i.test(err.message)) {
+        return 'ประเภทไฟล์ไม่รองรับ กรุณาแนบเฉพาะรูปภาพ PDF Word Excel หรือ PowerPoint';
+    }
+    return err?.message || 'ไม่สามารถอัปโหลดไฟล์ได้ กรุณาลองใหม่อีกครั้ง';
+}
+function parseDepartmentList(rawDepartments, rawDepartment) {
+    if (Array.isArray(rawDepartments)) return rawDepartments.map(s).filter(Boolean);
+    if (typeof rawDepartments === 'string' && rawDepartments.trim()) {
+        try {
+            const parsed = JSON.parse(rawDepartments);
+            if (Array.isArray(parsed)) return parsed.map(s).filter(Boolean);
+        } catch (_) {
+            return rawDepartments.split(',').map(s).filter(Boolean);
+        }
+    }
+    return s(rawDepartment) ? [s(rawDepartment)] : [];
+}
+async function cleanupUploadedFiles(files = []) {
+    for (const file of (files || [])) {
+        try { deleteLocalUpload(file.path); } catch (_) { /* best-effort cleanup */ }
+    }
+}
+async function hasOtherFileReferences(fileRow) {
+    if (!fileRow?.FileURL && !fileRow?.PublicID) return false;
+    const conditions = [];
+    const params = [];
+    if (fileRow.PublicID) {
+        conditions.push('PublicID = ?');
+        params.push(fileRow.PublicID);
+    }
+    if (fileRow.FileURL) {
+        conditions.push('FileURL = ?');
+        params.push(fileRow.FileURL);
+    }
+    if (!conditions.length) return false;
+    const [[row]] = await db.query(
+        `SELECT COUNT(*) AS cnt
+         FROM Yokoten_Response_Files
+         WHERE FileID <> ? AND (${conditions.join(' OR ')})`,
+        [fileRow.FileID, ...params]
+    );
+    return Number(row?.cnt || 0) > 0;
+}
+async function deletePhysicalFileIfUnreferenced(fileRow) {
+    const stillUsed = await hasOtherFileReferences(fileRow);
+    if (!stillUsed) {
+        try { deleteLocalUpload(fileRow.FileURL); } catch (_) { /* DB delete should continue */ }
+    }
+}
 
 // ─────────────────────────────────────────────────────────────────────────────
 // GET /api/yokoten/topics
@@ -434,14 +489,26 @@ router.get('/employee-completion', isAdmin, async (req, res) => {
 // ─────────────────────────────────────────────────────────────────────────────
 router.post('/respond', (req, res, next) => {
     uploadResponseFiles(req, res, (err) => {
-        if (err) return res.status(400).json({ success: false, message: err.message });
+        if (err) return res.status(400).json({ success: false, message: uploadErrorMessage(err) });
         next();
     });
 }, async (req, res) => {
     try {
         await ensureTables();
         const user = req.user;
-        const { yokotenId, isRelated, comment, correctiveAction } = req.body;
+        const { yokotenId, isRelated, comment, correctiveAction, department, departments, safetyUnit } = req.body;
+        const isAdminUser = user.role === 'Admin';
+        const targetDepartments = isAdminUser
+            ? parseDepartmentList(departments, department)
+            : [user.department].filter(Boolean);
+        if (!targetDepartments.length) {
+            return res.status(400).json({ success: false, message: 'กรุณาระบุแผนกที่ต้องการตอบกลับ' });
+        }
+        const targetUnit = isAdminUser && s(safetyUnit) ? s(safetyUnit) : (user.team || null);
+        const isBehalf = isAdminUser && targetDepartments.some(dept => dept !== user.department);
+        const responderName = isBehalf
+            ? `${user.name} (Admin)`
+            : user.name;
 
         // Validate topic exists
         const [topicRows] = await db.query(
@@ -451,52 +518,67 @@ router.post('/respond', (req, res, next) => {
             return res.status(404).json({ success: false, message: 'ไม่พบหัวข้อ Yokoten' });
         }
 
-        // Check if dept already responded
+        // Check if any selected dept already responded
+        const placeholders = targetDepartments.map(() => '?').join(',');
         const [existing] = await db.query(
-            'SELECT * FROM YokotenResponses WHERE YokotenID = ? AND Department = ?',
-            [yokotenId, user.department]
+            `SELECT * FROM YokotenResponses
+             WHERE YokotenID = ? AND Department IN (${placeholders})
+               AND (IsDeleted IS NULL OR IsDeleted = 0)`,
+            [yokotenId, ...targetDepartments]
         );
         if (existing.length > 0) {
+            const existingDepts = existing.map(r => r.Department).filter(Boolean).join(', ');
             return res.status(409).json({
                 success: false,
-                message: `ส่วนงานของคุณตอบกลับแล้วโดย ${existing[0].EmployeeName || existing[0].EmployeeID}`,
+                message: `ส่วนงานที่เลือกมีการตอบกลับแล้ว: ${existingDepts}`,
                 existingResponse: existing[0],
             });
         }
 
-        // Validate corrective action for IsRelated = 'No'
         const related = s(isRelated) || 'No';
-        if (related === 'No' && !s(correctiveAction)) {
-            return res.status(400).json({ success: false, message: 'กรุณากรอกวิธีการแก้ไข/ป้องกัน เนื่องจากเลือก "ไม่เกี่ยวข้อง"' });
+        const files = req.files || [];
+        if (related === 'Yes' && !s(correctiveAction)) {
+            await cleanupUploadedFiles(files);
+            return res.status(400).json({ success: false, message: 'กรุณากรอกวิธีการแก้ไข/ป้องกัน เนื่องจากเลือก "เกี่ยวข้อง"' });
+        }
+        if (related === 'Yes' && files.length === 0) {
+            return res.status(400).json({ success: false, message: 'กรุณาแนบไฟล์หลักฐานอย่างน้อย 1 ไฟล์ เนื่องจากเลือก "เกี่ยวข้อง"' });
         }
 
-        const responseId   = randomUUID();
-        const approvalStatus = related === 'No' ? 'pending' : null;
+        const approvalStatus = related === 'Yes' ? 'pending' : null;
+        const actionValue = related === 'Yes' ? (s(correctiveAction) || null) : null;
+        const responseRows = targetDepartments.map(dept => [
+            randomUUID(), yokotenId,
+            dept, targetUnit,
+            user.id, responderName,
+            related,
+            s(comment) || null,
+            actionValue,
+            approvalStatus,
+        ]);
 
         await db.query(
             `INSERT INTO YokotenResponses
              (ResponseID, YokotenID, Department, SafetyUnit, EmployeeID, EmployeeName,
               IsRelated, Comment, CorrectiveAction, ApprovalStatus, ResponseDate)
-             VALUES (?,?,?,?,?,?,?,?,?,?,NOW())`,
-            [
-                responseId, yokotenId,
-                user.department, user.team || null,
-                user.id, user.name,
-                related,
-                s(comment) || null,
-                s(correctiveAction) || null,
-                approvalStatus,
-            ]
+             VALUES ?`,
+            [responseRows.map(row => [...row, new Date()])]
         );
 
-        // Upload files
-        const files = req.files || [];
+        // Attach the same uploaded files to each created response record.
         if (files.length > 0) {
-            const fileRows = files.map(f => [
-                randomUUID(), responseId, yokotenId, user.department,
-                f.originalname, f.path, f.filename || null,
-                f.mimetype, f.size, user.name,
-            ]);
+            const fileRows = [];
+            responseRows.forEach(row => {
+                const responseId = row[0];
+                const dept = row[2];
+                files.forEach(f => {
+                    fileRows.push([
+                        randomUUID(), responseId, yokotenId, dept,
+                        displayUploadName(f), f.path, f.filename || null,
+                        f.mimetype, f.size, responderName,
+                    ]);
+                });
+            });
             await db.query(
                 `INSERT INTO Yokoten_Response_Files
                  (FileID, ResponseID, YokotenID, Department, FileName, FileURL, PublicID, FileType, FileSize, UploadedBy)
@@ -505,7 +587,14 @@ router.post('/respond', (req, res, next) => {
             );
         }
 
-        res.json({ success: true, message: 'บันทึกการตอบกลับสำเร็จ', responseId });
+        res.json({
+            success: true,
+            message: targetDepartments.length > 1
+                ? `บันทึกการตอบกลับ ${targetDepartments.length} แผนกสำเร็จ`
+                : 'บันทึกการตอบกลับสำเร็จ',
+            responseIds: responseRows.map(row => row[0]),
+            responseId: responseRows[0]?.[0],
+        });
     } catch (err) {
         res.status(500).json({ success: false, message: err.message });
     }
@@ -516,7 +605,7 @@ router.post('/respond', (req, res, next) => {
 // ─────────────────────────────────────────────────────────────────────────────
 router.put('/respond/:id', (req, res, next) => {
     uploadResponseFiles(req, res, (err) => {
-        if (err) return res.status(400).json({ success: false, message: err.message });
+        if (err) return res.status(400).json({ success: false, message: uploadErrorMessage(err) });
         next();
     });
 }, async (req, res) => {
@@ -526,26 +615,46 @@ router.put('/respond/:id', (req, res, next) => {
         const { id } = req.params;
         const { isRelated, comment, correctiveAction } = req.body;
 
-        const [rows] = await db.query('SELECT * FROM YokotenResponses WHERE ResponseID = ?', [id]);
+        const [rows] = await db.query(
+            'SELECT * FROM YokotenResponses WHERE ResponseID = ? AND (IsDeleted IS NULL OR IsDeleted = 0)',
+            [id]
+        );
         if (!rows.length) return res.status(404).json({ success: false, message: 'ไม่พบการตอบกลับ' });
 
         const resp = rows[0];
         // Permission: admin OR same department (for rejected responses)
         const isAdminUser = user.role === 'Admin';
         const isSameDept  = resp.Department === user.department;
+        if (!isAdminUser && isSameDept && resp.ApprovalStatus !== 'rejected') {
+            return res.status(403).json({
+                success: false,
+                message: 'แก้ไขได้เฉพาะรายการที่ผู้ดูแลส่งกลับให้แก้ไขเท่านั้น',
+            });
+        }
         if (!isAdminUser && !isSameDept) {
             return res.status(403).json({ success: false, message: 'ไม่มีสิทธิ์แก้ไขการตอบกลับนี้' });
         }
 
+        const files = req.files || [];
         const related = s(isRelated) || resp.IsRelated;
-        if (related === 'No' && !s(correctiveAction)) {
-            return res.status(400).json({ success: false, message: 'กรุณากรอกวิธีการแก้ไข/ป้องกัน' });
+        const [fileCountRows] = await db.query(
+            'SELECT COUNT(*) AS cnt FROM Yokoten_Response_Files WHERE ResponseID = ?',
+            [id]
+        );
+        const existingFileCount = Number(fileCountRows?.[0]?.cnt || 0);
+        if (related === 'Yes' && !s(correctiveAction)) {
+            await cleanupUploadedFiles(files);
+            return res.status(400).json({ success: false, message: 'กรุณากรอกวิธีการแก้ไข/ป้องกัน เนื่องจากเลือก "เกี่ยวข้อง"' });
+        }
+        if (related === 'Yes' && existingFileCount + files.length === 0) {
+            return res.status(400).json({ success: false, message: 'กรุณาแนบไฟล์หลักฐานอย่างน้อย 1 ไฟล์ เนื่องจากเลือก "เกี่ยวข้อง"' });
         }
 
-        // If dept is re-submitting after rejection → reset to pending
-        const approvalStatus = related === 'No'
+        // If dept is re-submitting after rejection → reset to pending when the item is related and needs action review.
+        const approvalStatus = related === 'Yes'
             ? (isAdminUser ? (resp.ApprovalStatus || 'pending') : 'pending')
             : null;
+        const actionValue = related === 'Yes' ? (s(correctiveAction) || null) : null;
 
         await db.query(
             `UPDATE YokotenResponses
@@ -555,7 +664,7 @@ router.put('/respond/:id', (req, res, next) => {
             [
                 related,
                 s(comment) ?? resp.Comment,
-                s(correctiveAction) || null,
+                actionValue,
                 approvalStatus,
                 isAdminUser ? resp.ApprovalComment : null,
                 isAdminUser ? resp.ApprovedBy : null,
@@ -565,11 +674,10 @@ router.put('/respond/:id', (req, res, next) => {
         );
 
         // Append new files
-        const files = req.files || [];
         if (files.length > 0) {
             const fileRows = files.map(f => [
                 randomUUID(), id, resp.YokotenID, resp.Department,
-                f.originalname, f.path, f.filename || null,
+                displayUploadName(f), f.path, f.filename || null,
                 f.mimetype, f.size, user.name,
             ]);
             await db.query(
@@ -597,7 +705,7 @@ router.delete('/respond/:id', isAdmin, async (req, res) => {
         );
         if (!rows.length) return res.status(404).json({ success: false, message: 'ไม่พบการตอบกลับ' });
 
-        // Soft delete — keep Cloudinary files intact (can be recovered if needed)
+        // Soft delete keeps uploaded files intact (can be recovered if needed)
         await db.query(
             'UPDATE YokotenResponses SET IsDeleted = 1 WHERE ResponseID = ?',
             [req.params.id]
@@ -661,9 +769,7 @@ router.delete('/response-files/:fileId', isAdmin, async (req, res) => {
         const [rows] = await db.query('SELECT * FROM Yokoten_Response_Files WHERE FileID = ?', [req.params.fileId]);
         if (!rows.length) return res.status(404).json({ success: false, message: 'ไม่พบไฟล์' });
 
-        if (rows[0].PublicID) {
-            try { await cloudinary.uploader.destroy(rows[0].PublicID); } catch (_) {}
-        }
+        await deletePhysicalFileIfUnreferenced(rows[0]);
         await db.query('DELETE FROM Yokoten_Response_Files WHERE FileID = ?', [req.params.fileId]);
         res.json({ success: true, message: 'ลบไฟล์สำเร็จ' });
     } catch (err) {

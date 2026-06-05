@@ -5,9 +5,9 @@ import {
     hideLoading, showError, showLoading,
     openModal, closeModal, showToast, showConfirmationModal,
     statusBadge as dsStatusBadge,
-} from '../ui.js';
+} from '../ui.js?v=20260602-mobile-nav-m53';
 import { normalizeApiArray } from '../utils/normalize.js';
-import { buildActivityCard } from '../utils/activity-widget.js';
+import { buildActivityCard } from '../utils/activity-widget.js?v=20260602-activity-targets-at10';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Constants
@@ -76,7 +76,7 @@ export async function loadOjtPage() {
     if (!container) return;
 
     const user = TSHSession.getUser() || {};
-    _isAdmin = user.role === 'Admin' || user.Role === 'Admin';
+    _isAdmin = String(user.role || user.Role || '').toLowerCase() === 'admin';
     window.closeModal = closeModal;
     _loadHiddenDepts();
 
@@ -157,7 +157,7 @@ async function refreshData() {
             .filter(Boolean)
             .sort((a, b) => a.localeCompare(b, 'th'));
     } catch (err) {
-        showToast('โหลดข้อมูลไม่สำเร็จ: ' + err.message, 'error');
+        showToast('โหลดข้อมูลไม่สำเร็จ: ' + _errText(err), 'error');
     } finally {
         hideLoading();
     }
@@ -718,6 +718,7 @@ function openUploadDocModal() {
                 <label class="block text-sm font-semibold text-slate-700 mb-1.5">ไฟล์ <span class="text-red-500">*</span></label>
                 <input name="file" type="file" required accept=".pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.jpg,.jpeg,.png"
                     class="block w-full text-sm text-slate-600 file:mr-3 file:py-2 file:px-4 file:rounded-lg file:border-0 file:text-xs file:font-semibold file:bg-red-50 file:text-red-700 hover:file:bg-red-100">
+                <div id="scw-doc-file-name" class="text-xs text-emerald-700 font-semibold mt-2 hidden"></div>
                 <p class="text-xs text-slate-400 mt-1">PDF, Word, Excel, PowerPoint, รูปภาพ (สูงสุด 20 MB)</p>
             </div>
             <div id="scw-doc-progress" class="hidden">
@@ -734,11 +735,26 @@ function openUploadDocModal() {
         </form>`);
 
     setTimeout(() => {
+        const fileInput = document.querySelector('#scw-doc-form [name=file]');
+        const fileNameEl = document.getElementById('scw-doc-file-name');
+        fileInput?.addEventListener('change', () => {
+            const file = fileInput.files?.[0];
+            if (!file || !fileNameEl) return;
+            fileNameEl.textContent = `${file.name} (${Math.round(file.size / 1024).toLocaleString('th-TH')} KB)`;
+            fileNameEl.classList.remove('hidden');
+        });
+
         document.getElementById('scw-doc-form')?.addEventListener('submit', async e => {
             e.preventDefault();
             const form  = e.target;
             const title = form.querySelector('[name=Title]').value.trim();
             const file  = form.querySelector('[name=file]').files?.[0];
+            if (!title) {
+                const errEl = document.getElementById('scw-doc-error');
+                errEl.textContent = 'กรุณาระบุชื่อเอกสาร';
+                errEl.classList.remove('hidden');
+                return;
+            }
             if (!file) return;
 
             const errEl  = document.getElementById('scw-doc-error');
@@ -752,15 +768,24 @@ function openUploadDocModal() {
                 const fd = new FormData();
                 fd.append('document', file);
                 const uploadData = await API.post('/upload/document', fd);
-                if (!uploadData.url && !uploadData.secure_url) throw new Error(uploadData.message || 'อัปโหลดไฟล์ไม่สำเร็จ');
+                if (!uploadData.url) throw new Error(uploadData.message || 'อัปโหลดไฟล์ไม่สำเร็จ');
 
                 const ext = file.name.split('.').pop()?.toLowerCase() || '';
-                await API.post('/ojt/documents', {
-                    Title:      title,
-                    FileURL:    uploadData.secure_url || uploadData.url,
-                    FileType:   ext,
-                    FileSizeKB: Math.round(file.size / 1024),
-                });
+                try {
+                    await API.post('/ojt/documents', {
+                        Title:      title,
+                        FileURL:    uploadData.url,
+                        FileType:   ext,
+                        FileSizeKB: Math.round(file.size / 1024),
+                    });
+                } catch (metadataErr) {
+                    try {
+                        await API.delete('/upload/document', {
+                            body: JSON.stringify({ url: uploadData.url })
+                        });
+                    } catch (_) {}
+                    throw metadataErr;
+                }
 
                 closeModal();
                 showToast('อัปโหลดเอกสาร SCW สำเร็จ', 'success');
@@ -768,7 +793,7 @@ function openUploadDocModal() {
             } catch (err) {
                 prog.classList.add('hidden');
                 submit.disabled = false;
-                errEl.textContent = err.message || 'เกิดข้อผิดพลาด';
+                errEl.textContent = _errText(err);
                 errEl.classList.remove('hidden');
             }
         });
@@ -842,20 +867,38 @@ function openRecordModal(department, record = null) {
             e.preventDefault();
             const f    = e.target;
             const targetVal = f.querySelector('[name=YearlyTarget]').value.trim();
+            const ojtDate = f.querySelector('[name=OJTDate]').value;
+            const attendeeRaw = f.querySelector('[name=AttendeeCount]').value;
             const body = {
                 Department:           f.querySelector('[name=Department]').value,
-                OJTDate:              f.querySelector('[name=OJTDate]').value,
+                OJTDate:              ojtDate,
                 ReviewIntervalMonths: parseInt(f.querySelector('[name=ReviewIntervalMonths]').value) || 12,
                 TrainerName:          f.querySelector('[name=TrainerName]').value.trim(),
-                AttendeeCount:        parseInt(f.querySelector('[name=AttendeeCount]').value) || 0,
+                AttendeeCount:        attendeeRaw === '' ? 0 : Number(attendeeRaw),
                 Notes:                f.querySelector('[name=Notes]').value.trim(),
-                YearlyTarget:         targetVal !== '' ? parseInt(targetVal) || null : null,
+                YearlyTarget:         targetVal !== '' ? Number(targetVal) : null,
             };
 
             const btn   = f.querySelector('[type=submit]');
             const errEl = document.getElementById('ojt-record-error');
-            btn.disabled = true; btn.textContent = 'กำลังบันทึก...';
+            const showInlineError = msg => {
+                errEl.textContent = msg;
+                errEl.classList.remove('hidden');
+            };
             errEl.classList.add('hidden');
+            if (!body.Department || !/^\d{4}-\d{2}-\d{2}$/.test(ojtDate)) {
+                showInlineError('กรุณาเลือกแผนกและวันที่ OJT ให้ถูกต้อง');
+                return;
+            }
+            if (!Number.isInteger(body.AttendeeCount) || body.AttendeeCount < 0) {
+                showInlineError('จำนวนผู้เข้าร่วมต้องเป็นตัวเลข 0 ขึ้นไป');
+                return;
+            }
+            if (targetVal !== '' && (!Number.isInteger(body.YearlyTarget) || body.YearlyTarget < 0)) {
+                showInlineError('เป้าหมายรายปีต้องเป็นตัวเลข 0 ขึ้นไป');
+                return;
+            }
+            btn.disabled = true; btn.textContent = 'กำลังบันทึก...';
             showLoading('กำลังบันทึก...');
             try {
                 await API.post('/ojt/records', body);
@@ -865,7 +908,7 @@ function openRecordModal(department, record = null) {
             } catch (err) {
                 showError(err);
                 btn.disabled = false; btn.textContent = record?.id ? 'อัปเดต' : 'บันทึก';
-                errEl.textContent = err.message || 'เกิดข้อผิดพลาด';
+                errEl.textContent = _errText(err);
                 errEl.classList.remove('hidden');
             } finally { hideLoading(); }
         });
@@ -1083,6 +1126,15 @@ function _getScwItems() {
 
 function _esc(s) {
     return String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+}
+
+function _errText(err, fallback = 'เกิดข้อผิดพลาด กรุณาลองใหม่อีกครั้ง') {
+    const msg = String(err?.message || err?.response?.message || '').trim();
+    if (!msg) return fallback;
+    if (/sql|database|constraint|foreign key|duplicate|syntax|undefined|null|internal server/i.test(msg)) {
+        return fallback;
+    }
+    return msg;
 }
 
 function _fmtDate(d) {

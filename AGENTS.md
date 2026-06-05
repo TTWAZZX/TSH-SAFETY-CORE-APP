@@ -9,6 +9,75 @@
 - Leave unrelated dirty worktree changes alone.
 - Do not push to GitHub unless explicitly asked in the current task.
 
+## Session Startup
+
+For every new task:
+
+Always read:
+
+1. `AGENTS.md`
+2. `CLAUDE.md`
+
+Read additional documents only when relevant:
+
+### Architecture / System Design
+
+If the task affects:
+
+- APIs
+- Database
+- Backend
+- Frontend structure
+- Authentication
+- Uploads
+
+Read:
+
+- `ARCHITECTURE.md`
+
+### Deployment / Production
+
+If the task affects:
+
+- Production deployment
+- FTP upload
+- Shared hosting
+- Backups
+- Smoke tests
+- Rollback procedures
+
+Read:
+
+- `DEPLOYMENT.md`
+
+### Historical Behavior
+
+If the task may affect:
+
+- Existing behavior
+- Compatibility
+- Previous deployments
+- Completed phases
+
+Read:
+
+- `CHANGELOG.md`
+
+### Planning / Future Work
+
+If the task involves:
+
+- New features
+- Technical debt
+- Refactoring
+- Project planning
+
+Read:
+
+- `ROADMAP.md`
+
+Do not assume project behavior without reading the relevant documentation first.
+
 ## Before Coding Checklist
 
 - Confirm whether the task is documentation-only or application behavior work.
@@ -43,6 +112,17 @@
 - Run the relevant authenticated smoke test for any API behavior change.
 - Run `npm --prefix backend test` when backend/API permission behavior changes or when the change touches shared routes. If it fails due to known permission-audit debt, report that explicitly.
 - Documentation-only changes require `git diff --check` and a mojibake scan of changed Markdown files.
+
+## Documentation Maintenance
+
+- After completing any task, determine whether documentation is affected.
+- If architecture changed, update `ARCHITECTURE.md`.
+- If deployment procedure changed, update `DEPLOYMENT.md`.
+- If project history changed, update `CHANGELOG.md`.
+- If roadmap changed, update `ROADMAP.md`.
+- If current handoff information changed, update `CLAUDE.md`.
+- Report all documentation updates in the final summary.
+- Documentation must stay synchronized with code changes.
 
 ## Thai Encoding / Mojibake Rules
 

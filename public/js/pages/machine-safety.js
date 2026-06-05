@@ -1,6 +1,6 @@
 // public/js/pages/machine-safety.js
 import { API, apiFetch } from '../api.js';
-import * as UI from '../ui.js';
+import * as UI from '../ui.js?v=20260602-mobile-nav-m53';
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 const RISK_META = {
@@ -43,6 +43,11 @@ let _filterAudit   = '';
 let _filterInspection = '';
 let _isAdmin       = false;
 let _page          = 1;
+let _loadError     = '';
+
+function _errText(err, fallback = 'เกิดข้อผิดพลาด กรุณาลองใหม่อีกครั้ง') {
+    return err?.message || err?.error || fallback;
+}
 
 // ─── Entry Point ──────────────────────────────────────────────────────────────
 export async function loadMachineSafetyPage() {
@@ -50,7 +55,7 @@ export async function loadMachineSafetyPage() {
     if (!container) return;
 
     const user = TSHSession.getUser();
-    _isAdmin = user?.role === 'Admin' || user?.Role === 'Admin';
+    _isAdmin = String(user?.role || user?.Role || '').toLowerCase() === 'admin';
 
     container.innerHTML = `
         <div class="flex flex-col items-center justify-center h-64 text-slate-400">
@@ -59,6 +64,18 @@ export async function loadMachineSafetyPage() {
         </div>`;
 
     await Promise.all([_fetchMachines(), _fetchDepts()]);
+    try {
+        const _inFilter = JSON.parse(sessionStorage.getItem('pending_filter_machine-safety') || 'null');
+        if (_inFilter) {
+            sessionStorage.removeItem('pending_filter_machine-safety');
+            if (_inFilter.dept) _filterDept = _inFilter.dept;
+            if (_inFilter.status) _filterMStatus = _inFilter.status;
+            if (_inFilter.risk) _filterRisk = _inFilter.risk;
+            if (_inFilter.audit) _filterAudit = _inFilter.audit;
+            if (_inFilter.inspection) _filterInspection = _inFilter.inspection;
+            _page = 1;
+        }
+    } catch (_) {}
     _renderPage(container);
 }
 
@@ -67,7 +84,11 @@ async function _fetchMachines() {
     try {
         const res = await API.get('/machine-safety');
         _machines = res.data || [];
-    } catch { _machines = []; }
+        _loadError = '';
+    } catch (err) {
+        _machines = [];
+        _loadError = _errText(err, 'ไม่สามารถโหลดข้อมูลเครื่องจักรได้');
+    }
 }
 
 async function _fetchDepts() {
@@ -103,6 +124,19 @@ function _auditStatus(m) {
 
 // ─── Render Page ──────────────────────────────────────────────────────────────
 function _renderPage(container) {
+    if (_loadError) {
+        container.innerHTML = `
+        <div class="ds-section p-8 text-center">
+            <div class="w-12 h-12 mx-auto rounded-2xl bg-red-50 text-red-500 flex items-center justify-center mb-3">
+                <svg class="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v4m0 4h.01M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"/></svg>
+            </div>
+            <p class="text-sm font-bold text-slate-700">โหลดข้อมูล Machine & Device Safety ไม่สำเร็จ</p>
+            <p class="text-xs text-slate-400 mt-1">${UI.escHtml(_loadError)}</p>
+            <button onclick="window._msdReload()" class="btn btn-primary mt-4 px-4">ลองโหลดใหม่</button>
+        </div>`;
+        return;
+    }
+
     const today     = new Date(); today.setHours(0,0,0,0);
     const total     = _machines.length;
     const compliant = _machines.filter(m => m.SafetyDeviceCount > 0 && m.LayoutCheckpointCount > 0).length;
@@ -313,33 +347,6 @@ function _renderPage(container) {
             </span>
         </div>
 
-        <!-- Enterprise summary strip -->
-        <div class="grid grid-cols-2 lg:grid-cols-5 gap-3">
-            <button onclick="window._msdSetAuditFilter('fail')"
-                class="text-left rounded-xl border ${auditMap.fail ? 'border-red-100 bg-red-50' : 'border-slate-200 bg-white'} px-4 py-3 hover:shadow-sm transition-shadow">
-                <p class="text-[10px] font-bold uppercase ${auditMap.fail ? 'text-red-500' : 'text-slate-400'}">Audit Risk</p>
-                <p class="mt-1 text-sm font-black ${auditMap.fail ? 'text-red-700' : 'text-slate-700'}">${auditMap.fail} fail / ${auditMap.warn} warn</p>
-            </button>
-            <button onclick="window._msdSetRiskFilter('high-risk')"
-                class="text-left rounded-xl border ${highRisk ? 'border-orange-100 bg-orange-50' : 'border-slate-200 bg-white'} px-4 py-3 hover:shadow-sm transition-shadow">
-                <p class="text-[10px] font-bold uppercase ${highRisk ? 'text-orange-500' : 'text-slate-400'}">High Risk</p>
-                <p class="mt-1 text-sm font-black ${highRisk ? 'text-orange-700' : 'text-slate-700'}">${highRisk.toLocaleString()} machines</p>
-            </button>
-            <button onclick="window._msdSetInspectionFilter('due')"
-                class="text-left rounded-xl border ${overdue || dueSoon ? 'border-amber-100 bg-amber-50' : 'border-slate-200 bg-white'} px-4 py-3 hover:shadow-sm transition-shadow">
-                <p class="text-[10px] font-bold uppercase ${overdue ? 'text-red-500' : dueSoon ? 'text-amber-500' : 'text-slate-400'}">Inspection</p>
-                <p class="mt-1 text-sm font-black ${overdue ? 'text-red-700' : dueSoon ? 'text-amber-700' : 'text-slate-700'}">${overdue} overdue / ${dueSoon} due</p>
-            </button>
-            <div class="rounded-xl border border-emerald-100 bg-emerald-50 px-4 py-3">
-                <p class="text-[10px] font-bold uppercase text-emerald-500">Risk Assessment</p>
-                <p class="mt-1 text-sm font-black text-emerald-700">${total ? Math.round(riskReady * 100 / total) : 0}% ready</p>
-            </div>
-            <div class="rounded-xl border ${openIssues || restricted ? 'border-rose-100 bg-rose-50' : 'border-slate-200 bg-white'} px-4 py-3">
-                <p class="text-[10px] font-bold uppercase ${openIssues || restricted ? 'text-rose-500' : 'text-slate-400'}">Controls</p>
-                <p class="mt-1 text-sm font-black ${openIssues || restricted ? 'text-rose-700' : 'text-slate-700'}">${openIssues} issues / ${restricted} restricted</p>
-            </div>
-        </div>
-
         <!-- Filter Bar -->
         <div class="ds-filter-bar flex flex-wrap gap-3 items-center">
             <div class="relative flex-1 min-w-[180px]">
@@ -386,6 +393,12 @@ function _renderPage(container) {
                 <option value="warn" ${_filterAudit==='warn'?'selected':''}>เตือน</option>
                 <option value="fail" ${_filterAudit==='fail'?'selected':''}>ไม่ผ่าน</option>
             </select>
+            <select id="msd-inspection" class="text-sm border border-slate-200 rounded-lg px-3 py-2 outline-none focus:border-emerald-400"
+                onchange="window._msdFilter()">
+                <option value="">Inspection: ทั้งหมด</option>
+                <option value="due" ${_filterInspection==='due'?'selected':''}>Due Soon</option>
+                <option value="overdue" ${_filterInspection==='overdue'?'selected':''}>Overdue</option>
+            </select>
             <span id="msd-count" class="text-xs text-slate-400 ml-auto"></span>
         </div>
 
@@ -401,6 +414,18 @@ function _renderPage(container) {
     _updateCount();
     requestAnimationFrame(_drawDeptChart);
 }
+
+window._msdReload = async function() {
+    const container = document.getElementById('machine-safety-page');
+    if (!container) return;
+    container.innerHTML = `
+        <div class="flex flex-col items-center justify-center h-64 text-slate-400">
+            <div class="inline-block animate-spin rounded-full h-10 w-10 border-4 border-emerald-500 border-t-transparent mb-3"></div>
+            <p class="text-sm">กำลังโหลดข้อมูล...</p>
+        </div>`;
+    await Promise.all([_fetchMachines(), _fetchDepts()]);
+    _renderPage(container);
+};
 
 // ─── Dept Chart ───────────────────────────────────────────────────────────────
 let _deptChartInst = null;
@@ -689,6 +714,7 @@ window._msdFilter = function() {
     _filterMStatus = document.getElementById('msd-mstatus')?.value  || '';
     _filterRisk    = document.getElementById('msd-risk')?.value     || '';
     _filterAudit   = document.getElementById('msd-audit')?.value    || '';
+    _filterInspection = document.getElementById('msd-inspection')?.value || _filterInspection || '';
     _page = 1; // reset to first page on filter change
     const wrap = document.getElementById('msd-table-wrap');
     if (wrap) wrap.innerHTML = _renderTable();
@@ -956,7 +982,7 @@ window._msdOpenAdd = function() {
                 await _fetchMachines();
                 _renderPage(document.getElementById('machine-safety-page'));
             } catch (err) {
-                _showFormErr(err.message);
+                _showFormErr(_errText(err));
                 submitBtn.disabled = false;
                 submitBtn.textContent = 'บันทึก';
             }
@@ -971,6 +997,12 @@ window._msdOpenEdit = function(id) {
     setTimeout(() => {
         document.getElementById('msd-form')?.addEventListener('submit', async (e) => {
             e.preventDefault();
+            const submitBtn = e.target.querySelector('button[type=submit]');
+            if (submitBtn?.disabled) return;
+            if (submitBtn) {
+                submitBtn.disabled = true;
+                submitBtn.textContent = 'กำลังบันทึก...';
+            }
             try {
                 await apiFetch(`/machine-safety/${id}`, { method: 'PUT', body: JSON.stringify(_formBody(e.target)) });
                 UI.closeModal();
@@ -978,7 +1010,11 @@ window._msdOpenEdit = function(id) {
                 await _fetchMachines();
                 _renderPage(document.getElementById('machine-safety-page'));
             } catch (err) {
-                _showFormErr(err.message);
+                _showFormErr(_errText(err));
+                if (submitBtn) {
+                    submitBtn.disabled = false;
+                    submitBtn.textContent = 'บันทึก';
+                }
             }
         });
     }, 50);
@@ -999,7 +1035,7 @@ window._msdDelete = async function(id, name) {
         await _fetchMachines();
         _renderPage(document.getElementById('machine-safety-page'));
     } catch (err) {
-        UI.showToast(err.message || 'เกิดข้อผิดพลาด', 'error');
+        UI.showToast(_errText(err), 'error');
     }
 };
 
@@ -1013,8 +1049,17 @@ window._msdOpenFiles = async function(machineId, machineName, defaultTab = 'Safe
             </div>
         </div>`);
 
-    const filesRes = await API.get(`/machine-safety/${machineId}/files`);
-    const files    = filesRes.data || [];
+    let files = [];
+    try {
+        const filesRes = await API.get(`/machine-safety/${machineId}/files`);
+        files = filesRes.data || [];
+    } catch (err) {
+        const body = document.getElementById('msd-files-body');
+        if (body) {
+            body.innerHTML = `<p class="text-red-500 text-sm text-center py-8">${UI.escHtml(_errText(err, 'ไม่สามารถโหลดไฟล์แนบได้'))}</p>`;
+        }
+        return;
+    }
 
     const safetyFiles  = files.filter(f => f.FileCategory === 'SafetyDeviceStandard');
     const layoutFiles  = files.filter(f => f.FileCategory === 'LayoutCheckpoint');
@@ -1145,7 +1190,7 @@ function _attachUploadHandlers(machineId, machineName) {
                 window._msdOpenFiles(machineId, machineName, cat);
             } catch (err) {
                 const errEl = form.querySelector(`.upload-error-${cat}`);
-                if (errEl) { errEl.textContent = err.message || 'เกิดข้อผิดพลาด'; errEl.classList.remove('hidden'); }
+                if (errEl) { errEl.textContent = _errText(err); errEl.classList.remove('hidden'); }
                 btn.disabled = false; btn.textContent = 'อัปโหลด';
             }
         });
@@ -1161,7 +1206,7 @@ window._msdDeleteFile = async function(fileId, machineId, machineName, category)
         await _fetchMachines();
         window._msdOpenFiles(machineId, machineName, category);
     } catch (err) {
-        UI.showToast(err.message || 'เกิดข้อผิดพลาด', 'error');
+        UI.showToast(_errText(err), 'error');
     }
 };
 
@@ -1239,7 +1284,7 @@ window._msdOpenDetail = async function(machineId, machineName) {
         _attachUploadHandlers(machineId, machineName);
     } catch (err) {
         const body = document.getElementById('msd-detail-body');
-        if (body) body.innerHTML = `<p class="text-red-500 text-sm text-center py-8">${UI.escHtml(err.message)}</p>`;
+        if (body) body.innerHTML = `<p class="text-red-500 text-sm text-center py-8">${UI.escHtml(_errText(err, 'ไม่สามารถโหลดรายละเอียดได้'))}</p>`;
     }
 };
 
@@ -1317,7 +1362,7 @@ function _attachComplianceSave(machineId) {
             const wrap = document.getElementById('msd-table-wrap');
             if (wrap) wrap.innerHTML = _renderTable();
         } catch (err) {
-            UI.showToast(err.message || 'เกิดข้อผิดพลาด', 'error');
+            UI.showToast(_errText(err), 'error');
         } finally {
             btn.disabled = false; btn.textContent = 'บันทึก Compliance';
         }
@@ -1402,7 +1447,7 @@ function _attachIssueAddHandler(machineId, machineName) {
             await _fetchMachines();
             window._msdOpenDetail(machineId, machineName);
         } catch (err) {
-            if (errEl) { errEl.textContent = err.message || 'เกิดข้อผิดพลาด'; errEl.classList.remove('hidden'); }
+            if (errEl) { errEl.textContent = _errText(err); errEl.classList.remove('hidden'); }
             btn.disabled = false;
         }
     });
@@ -1419,7 +1464,7 @@ window._msdResolveIssue = async function(issueId, machineId, machineName) {
         await _fetchMachines();
         window._msdOpenDetail(machineId, machineName);
     } catch (err) {
-        UI.showToast(err.message || 'เกิดข้อผิดพลาด', 'error');
+        UI.showToast(_errText(err), 'error');
     }
 };
 
@@ -1432,7 +1477,7 @@ window._msdDeleteIssue = async function(issueId, machineId, machineName) {
         await _fetchMachines();
         window._msdOpenDetail(machineId, machineName);
     } catch (err) {
-        UI.showToast(err.message || 'เกิดข้อผิดพลาด', 'error');
+        UI.showToast(_errText(err), 'error');
     }
 };
 

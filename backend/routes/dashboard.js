@@ -5,6 +5,7 @@ const express = require('express');
 const router  = express.Router();
 const db      = require('../db');
 const { isAdmin } = require('../middleware/auth');
+const { getCoverageMatrix } = require('./activity-targets');
 
 const safe = async (sql, params = []) => {
     try { const [[r]] = await db.query(sql, params); return r?.cnt ?? r?.val ?? 0; }
@@ -115,12 +116,40 @@ async function buildComplianceMatrix(year, config) {
     if (!deptNames.length) return [];
     const params = [year];
 
-    const [trainingRows, kyRows, hiyariRows, fourmRows, yokotenRows, patrolRows] = await Promise.all([
+    const [
+        employeeRows,
+        trainingRows,
+        kyConfigRows,
+        kyRows,
+        hiyariRows,
+        fourmRows,
+        yokotenTopicRows,
+        yokotenResponseRows,
+        patrolIssueRows,
+        cccfWorkerRows,
+        cccfAssignmentRows,
+        cccfPermanentRows,
+        accidentRows,
+        machineRows,
+        ojtRows,
+        safetyCultureRows,
+    ] = await Promise.all([
+        safeRows(`
+            SELECT Department, COUNT(DISTINCT EmployeeID) AS total
+            FROM Employees
+            WHERE Department IS NOT NULL AND Department <> ''
+            GROUP BY Department
+        `),
         safeRows(`
             SELECT Department, SUM(PassedCount) AS passed, SUM(TotalEmp) AS total
             FROM Training_Dept_Records
             WHERE Year=?
             GROUP BY Department
+        `, params),
+        safeRows(`
+            SELECT Department, SafetyUnits, YearlyTarget
+            FROM KY_Program_Config
+            WHERE Year = ? AND IsActive = 1
         `, params),
         safeRows(`
             SELECT Department, COUNT(*) AS cnt
@@ -129,27 +158,101 @@ async function buildComplianceMatrix(year, config) {
             GROUP BY Department
         `, params),
         safeRows(`
-            SELECT Department, COUNT(*) AS cnt
+            SELECT Department,
+                   COUNT(*) AS total,
+                   COALESCE(SUM(Status IN ('Closed','closed')), 0) AS closed
             FROM HiyariReports
             WHERE YEAR(ReportDate)=?
             GROUP BY Department
         `, params),
         safeRows(`
-            SELECT Department, COUNT(*) AS cnt
+            SELECT Department,
+                   COUNT(*) AS total,
+                   COALESCE(SUM(Status = 'Closed'), 0) AS closed
             FROM FourM_ChangeNotices
             WHERE YEAR(RequestDate)=?
             GROUP BY Department
         `, params),
         safeRows(`
-            SELECT Department, COUNT(*) AS cnt
+            SELECT YokotenID, TargetDepts
+            FROM YokotenTopics
+            WHERE IsActive = 1
+        `),
+        safeRows(`
+            SELECT YokotenID, Department, COUNT(*) AS cnt
             FROM YokotenResponses
-            WHERE YEAR(ResponseDate)=?
+            WHERE YEAR(ResponseDate)=? AND (IsDeleted IS NULL OR IsDeleted = 0)
+            GROUP BY YokotenID, Department
+        `, params),
+        safeRows(`
+            SELECT ResponsibleDept AS Department,
+                   COUNT(*) AS total,
+                   COALESCE(SUM(CurrentStatus = 'Closed'), 0) AS closed
+            FROM Patrol_Issues
+            WHERE YEAR(DateFound)=?
+            GROUP BY ResponsibleDept
+        `, params),
+        safeRows(`
+            SELECT Department, COUNT(DISTINCT NULLIF(EmployeeID, '')) AS submitted
+            FROM CCCF_FormA_Worker
+            WHERE YEAR(SubmitDate)=?
             GROUP BY Department
         `, params),
         safeRows(`
-            SELECT Department, COUNT(*) AS cnt
-            FROM Patrol_Attendance
-            WHERE YEAR(PatrolDate)=?
+            SELECT COALESCE(e.Department, a.Department) AS Department,
+                   COUNT(DISTINCT COALESCE(NULLIF(a.EmployeeID, ''), a.id)) AS assigned
+            FROM CCCF_Assignments a
+            LEFT JOIN Employees e ON e.EmployeeID = a.EmployeeID
+            GROUP BY COALESCE(e.Department, a.Department)
+        `),
+        safeRows(`
+            SELECT Department,
+                   COUNT(DISTINCT COALESCE(NULLIF(AssigneeID, ''), id)) AS completed
+            FROM CCCF_FormA_Permanent
+            WHERE YEAR(SubmitDate)=?
+            GROUP BY Department
+        `, params),
+        safeRows(`
+            SELECT Department,
+                   COUNT(*) AS total,
+                   COALESCE(SUM(Status IN ('Closed','closed')), 0) AS closed
+            FROM Accident_Reports
+            WHERE YEAR(AccidentDate)=? AND (IsDeleted IS NULL OR IsDeleted = 0)
+            GROUP BY Department
+        `, params),
+        safeRows(`
+            SELECT m.Department,
+                   COUNT(DISTINCT m.id) AS machines,
+                   COALESCE(SUM(c.passItems), 0) AS passItems,
+                   COALESCE(SUM(c.checkedItems), 0) AS checkedItems,
+                   COALESCE(SUM(i.issueTotal), 0) AS issueTotal,
+                   COALESCE(SUM(i.issueClosed), 0) AS issueClosed
+            FROM Machine_Safety m
+            LEFT JOIN (
+                SELECT MachineID,
+                       SUM(Status = 'pass') AS passItems,
+                       SUM(Status <> 'na') AS checkedItems
+                FROM Machine_Safety_Compliance
+                GROUP BY MachineID
+            ) c ON c.MachineID = m.id
+            LEFT JOIN (
+                SELECT MachineID,
+                       COUNT(*) AS issueTotal,
+                       SUM(Status = 'resolved') AS issueClosed
+                FROM Machine_Safety_Issues
+                GROUP BY MachineID
+            ) i ON i.MachineID = m.id
+            WHERE m.Status IS NULL OR m.Status <> 'inactive'
+            GROUP BY m.Department
+        `),
+        safeRows(`
+            SELECT Department, OJTDate, NextReviewDate, AttendeeCount, YearlyTarget
+            FROM OJT_Records
+        `),
+        safeRows(`
+            SELECT Department, AVG(CompliancePct) AS pct
+            FROM SC_PPEInspections
+            WHERE YEAR(InspectionDate)=? AND (deleted_at IS NULL)
             GROUP BY Department
         `, params),
     ]);
@@ -159,25 +262,116 @@ async function buildComplianceMatrix(year, config) {
         for (const r of rows) m.set(String(r.Department || '').trim(), valueFn(r));
         return m;
     };
+    const parseJsonArray = (value) => {
+        if (!value) return [];
+        try {
+            const parsed = JSON.parse(value);
+            return Array.isArray(parsed) ? parsed.map(v => String(v || '').trim()).filter(Boolean) : [];
+        } catch (_) {
+            return String(value).split(',').map(v => v.trim()).filter(Boolean);
+        }
+    };
+    const employeeCount = byDept(employeeRows, r => parseInt(r.total, 10) || 0);
     const training = byDept(trainingRows, r => pct(r.passed, r.total));
-    const ky = byDept(kyRows, r => (parseInt(r.cnt, 10) || 0) > 0 ? 100 : 0);
-    const hiyari = byDept(hiyariRows, r => (parseInt(r.cnt, 10) || 0) > 0 ? 100 : 0);
-    const fourm = byDept(fourmRows, r => (parseInt(r.cnt, 10) || 0) > 0 ? 100 : 0);
-    const yokoten = byDept(yokotenRows, r => (parseInt(r.cnt, 10) || 0) > 0 ? 100 : 0);
-    const patrol = byDept(patrolRows, r => (parseInt(r.cnt, 10) || 0) > 0 ? 100 : 0);
+    const kyActual = byDept(kyRows, r => parseInt(r.cnt, 10) || 0);
+    const kyTargets = new Map();
+    for (const r of kyConfigRows) {
+        const dept = String(r.Department || '').trim();
+        if (!dept) continue;
+        const units = parseJsonArray(r.SafetyUnits);
+        const unitCount = Math.max(1, units.length);
+        const yearlyTarget = parseInt(r.YearlyTarget, 10) || 12;
+        kyTargets.set(dept, unitCount * yearlyTarget);
+    }
+    const hiyari = byDept(hiyariRows, r => {
+        const total = parseInt(r.total, 10) || 0;
+        return total ? pct(r.closed, total) : 100;
+    });
+    const fourm = byDept(fourmRows, r => pct(r.closed, r.total));
+    const yokotenTargets = new Map();
+    for (const topic of yokotenTopicRows) {
+        const targets = parseJsonArray(topic.TargetDepts);
+        const scoped = targets.length ? targets.filter(d => deptNames.includes(d)) : deptNames;
+        for (const dept of scoped) yokotenTargets.set(dept, (yokotenTargets.get(dept) || 0) + 1);
+    }
+    const yokotenDone = new Map();
+    for (const row of yokotenResponseRows) {
+        const dept = String(row.Department || '').trim();
+        if (!dept) continue;
+        yokotenDone.set(dept, (yokotenDone.get(dept) || 0) + (parseInt(row.cnt, 10) || 0));
+    }
+    const patrolIssues = byDept(patrolIssueRows, r => {
+        const total = parseInt(r.total, 10) || 0;
+        return total ? pct(r.closed, total) : 100;
+    });
+    const cccfWorker = byDept(cccfWorkerRows, r => parseInt(r.submitted, 10) || 0);
+    const cccfAssigned = byDept(cccfAssignmentRows, r => parseInt(r.assigned, 10) || 0);
+    const cccfPermanent = byDept(cccfPermanentRows, r => parseInt(r.completed, 10) || 0);
+    const accident = byDept(accidentRows, r => {
+        const total = parseInt(r.total, 10) || 0;
+        return total ? pct(r.closed, total) : 100;
+    });
+    const machine = byDept(machineRows, r => {
+        const machines = parseInt(r.machines, 10) || 0;
+        if (!machines) return null;
+        const checkedItems = parseInt(r.checkedItems, 10) || 0;
+        const compliancePct = checkedItems ? pct(r.passItems, checkedItems) : 0;
+        const issueTotal = parseInt(r.issueTotal, 10) || 0;
+        const issuePct = issueTotal ? pct(r.issueClosed, issueTotal) : 100;
+        return Math.round((compliancePct + issuePct) / 2);
+    });
+    const ojt = byDept(ojtRows, r => {
+        if (!r.OJTDate) return 0;
+        const target = parseInt(r.YearlyTarget, 10) || 0;
+        const attendees = parseInt(r.AttendeeCount, 10) || 0;
+        const coverage = target > 0 ? pct(attendees, target) : 100;
+        const nextReview = r.NextReviewDate ? new Date(r.NextReviewDate) : null;
+        const overdue = nextReview && !Number.isNaN(nextReview.getTime()) && nextReview < new Date();
+        return overdue ? Math.min(coverage, 50) : coverage;
+    });
+    const safetyCulture = byDept(safetyCultureRows, r => {
+        const v = parseFloat(r.pct);
+        return Number.isFinite(v) ? Math.max(0, Math.min(100, Math.round(v))) : null;
+    });
+    const targetMatrix = await getCoverageMatrix().catch(() => ({ rows: [] }));
+    const targetByDept = new Map();
+    for (const row of targetMatrix.rows) {
+        const dept = String(row.department || '').trim();
+        if (!dept) continue;
+        if (!targetByDept.has(dept)) targetByDept.set(dept, { slots: 0, covered: 0, missing: 0, zero: 0, na: 0, scope: 0, override: 0, template: 0 });
+        const meta = targetByDept.get(dept);
+        meta.slots += 1;
+        if (row.isNA) meta.na += 1;
+        else if (row.source === 'missing') meta.missing += 1;
+        else if (row.isZero) meta.zero += 1;
+        else meta.covered += 1;
+        if (Object.prototype.hasOwnProperty.call(meta, row.source)) meta[row.source] += 1;
+    }
 
     return deptNames.map(dept => {
+        const empTotal = employeeCount.get(dept) || 0;
+        const kyTarget = kyTargets.get(dept) || 12;
+        const yokotenTarget = yokotenTargets.get(dept) || 0;
+        const cccfAssignedTotal = cccfAssigned.get(dept) || 0;
+        const targetMeta = targetByDept.get(dept) || { slots: 0, covered: 0, missing: 0, zero: 0, na: 0, scope: 0, override: 0, template: 0 };
         const cells = {
-            patrol: patrol.get(dept) ?? 0,
-            hiyari: hiyari.get(dept) ?? 0,
-            ky: ky.get(dept) ?? 0,
-            yokoten: yokoten.get(dept) ?? 0,
+            activityTargets: targetMeta.slots ? pct(targetMeta.covered + targetMeta.na, targetMeta.slots) : null,
+            cccfWorker: empTotal ? pct(cccfWorker.get(dept) || 0, empTotal) : null,
+            cccfPermanent: cccfAssignedTotal ? pct(cccfPermanent.get(dept) || 0, cccfAssignedTotal) : null,
+            patrolIssues: patrolIssues.get(dept) ?? 100,
+            hiyari: hiyari.get(dept) ?? 100,
+            ky: pct(kyActual.get(dept) || 0, kyTarget),
+            yokoten: yokotenTarget ? pct(yokotenDone.get(dept) || 0, yokotenTarget) : null,
             training: training.get(dept),
-            fourm: fourm.get(dept) ?? 0,
+            fourm: fourm.get(dept),
+            accident: accident.get(dept) ?? 100,
+            machine: machine.get(dept),
+            ojt: ojt.get(dept) ?? 0,
+            safetyCulture: safetyCulture.get(dept),
         };
         const values = Object.values(cells).filter(v => v !== null && v !== undefined);
         const score = values.length ? Math.round(values.reduce((s, v) => s + v, 0) / values.length) : 0;
-        return { department: dept, score, ...cells };
+        return { department: dept, score, targetMeta, ...cells };
     }).sort((a, b) => a.score - b.score || a.department.localeCompare(b.department, 'th'));
 }
 
@@ -226,7 +420,8 @@ router.get('/overview', async (_req, res) => {
             // Safety Culture
             scYear,
             // 4M Change
-            fourmOpen,
+            fourmTotal, fourmOpen, fourmPending, fourmClosed, fourmOverdue, fourmTrainingRequired,
+            fourmMatrixCurriculums, fourmMatrixCourses, fourmMatrixEmployees, fourmMatrixTransferred,
             // Enterprise modules not previously shown as cards
             kpiMetrics, kpiAnnouncements,
             policyTotal, policyAcked,
@@ -269,7 +464,27 @@ router.get('/overview', async (_req, res) => {
             safe(`SELECT COUNT(*) AS cnt FROM SC_Assessments WHERE AssessmentYear=?`, [year]),
 
             // 4M Change
-            safe(`SELECT COUNT(*) AS cnt FROM FourM_ChangeNotices WHERE Status='Open'`),
+            safe(`SELECT COUNT(*) AS cnt FROM FourM_ChangeNotices WHERE YEAR(RequestDate)=?`, [year]),
+            safe(`SELECT COUNT(*) AS cnt FROM FourM_ChangeNotices WHERE Status='Open' AND YEAR(RequestDate)=?`, [year]),
+            safe(`SELECT COUNT(*) AS cnt FROM FourM_ChangeNotices WHERE Status='Pending' AND YEAR(RequestDate)=?`, [year]),
+            safe(`SELECT COUNT(*) AS cnt FROM FourM_ChangeNotices WHERE Status='Closed' AND YEAR(RequestDate)=?`, [year]),
+            safe(`SELECT COUNT(*) AS cnt FROM FourM_ChangeNotices
+                  WHERE Status IN ('Open','Pending') AND DATEDIFF(CURDATE(), RequestDate) > 30 AND YEAR(RequestDate)=?`, [year]),
+            safe(`SELECT COUNT(*) AS cnt FROM FourM_ChangeNotices
+                  WHERE TrainingRequired = 1 AND YEAR(RequestDate)=?`, [year]),
+            safe(`SELECT COUNT(*) AS cnt FROM FourM_Curriculums WHERE IsActive = 1 AND Year = ?`, [year]),
+            safe(`SELECT COUNT(*) AS cnt
+                  FROM FourM_Courses co
+                  JOIN FourM_Curriculums cur ON cur.id = co.CurriculumID
+                  WHERE co.IsActive = 1 AND cur.IsActive = 1 AND cur.Year = ?`, [year]),
+            safe(`SELECT COUNT(DISTINCT ce.EmployeeID) AS cnt
+                  FROM FourM_CurriculumEmployees ce
+                  JOIN FourM_Curriculums cur ON cur.id = ce.CurriculumID
+                  WHERE ce.Status = 'Assigned' AND cur.IsActive = 1 AND cur.Year = ?`, [year]),
+            safe(`SELECT COUNT(*) AS cnt
+                  FROM FourM_CurriculumEmployees ce
+                  JOIN FourM_Curriculums cur ON cur.id = ce.CurriculumID
+                  WHERE ce.Status = 'Transferred' AND cur.Year = ?`, [year]),
 
             // KPI
             safe(`SELECT COUNT(*) AS cnt FROM KPIData WHERE Year=?`, [year]),
@@ -307,9 +522,13 @@ router.get('/overview', async (_req, res) => {
             ? Math.min(Math.round((yokotenResponded / yokotenTopics) * 100), 100) : null;
         const trainingPassRate = trTotalEmp
             ? Math.min(Math.round((trTotalPassed / trTotalEmp) * 100), 100) : null;
+        const fourmActive = (parseInt(fourmOpen, 10) || 0) + (parseInt(fourmPending, 10) || 0);
+        const fourmClosureRate = fourmTotal
+            ? Math.min(Math.round((fourmClosed / fourmTotal) * 100), 100)
+            : null;
         const healthIndex = buildHealthIndex({
             patrolRate, cccfPermPct, yokotenPct, trainingPassRate,
-            accRecordable, hiyariOpen, fourmOpen, patrolOpenIssues,
+            accRecordable, hiyariOpen, fourmOpen: fourmActive, patrolOpenIssues,
         }, config);
         const complianceMatrix = await buildComplianceMatrix(year, config);
 
@@ -328,7 +547,22 @@ router.get('/overview', async (_req, res) => {
                 ky:           { year: kyYear },
                 accident:     { year: accYear, recordable: accRecordable },
                 safetyCulture:{ year: scYear },
-                fourm:        { open: fourmOpen },
+                fourm:        {
+                    total: fourmTotal,
+                    open: fourmOpen,
+                    pending: fourmPending,
+                    closed: fourmClosed,
+                    active: fourmActive,
+                    overdue: fourmOverdue,
+                    trainingRequired: fourmTrainingRequired,
+                    closureRate: fourmClosureRate,
+                    matrix: {
+                        curriculums: fourmMatrixCurriculums,
+                        courses: fourmMatrixCourses,
+                        employees: fourmMatrixEmployees,
+                        transferred: fourmMatrixTransferred,
+                    },
+                },
                 kpi:          { metrics: kpiMetrics, announcements: kpiAnnouncements },
                 policy:       { total: policyTotal, acknowledged: policyAcked },
                 committee:    { total: committeeTotal },
@@ -355,6 +589,7 @@ router.get('/alerts', async (_req, res) => {
             yokotenOverdue,
             openPatrolIssues,
             fourmOverdue,
+            fourmTrainingRequired,
         ] = await Promise.all([
             // Accident corrective actions past due date, not yet closed
             db.query(
@@ -413,11 +648,19 @@ router.get('/alerts', async (_req, res) => {
                  WHERE Status IN ('Open','Pending') AND DATEDIFF(CURDATE(), RequestDate) > 30
                  ORDER BY RequestDate ASC LIMIT 10`
             ).then(([r]) => r).catch(() => []),
+
+            // 4M notices that require training follow-up
+            db.query(
+                `SELECT id, NoticeNo, Title, ResponsiblePerson, Department, RequestDate, Status
+                 FROM FourM_ChangeNotices
+                 WHERE TrainingRequired = 1 AND Status IN ('Open','Pending')
+                 ORDER BY RequestDate ASC LIMIT 10`
+            ).then(([r]) => r).catch(() => []),
         ]);
 
         res.json({
             success: true,
-            data: { overdueAccident, dueSoonAccident, machineOverdue, yokotenOverdue, openPatrolIssues, fourmOverdue, dueSoonDays }
+            data: { overdueAccident, dueSoonAccident, machineOverdue, yokotenOverdue, openPatrolIssues, fourmOverdue, fourmTrainingRequired, dueSoonDays }
         });
     } catch (err) {
         res.status(500).json({ success: false, message: err.message });

@@ -1,0 +1,24 @@
+RewriteEngine On
+RewriteBase /safety/tsh-safety-core/
+Options -Indexes
+
+# Preserve Bearer tokens when PHP runs behind Apache/FastCGI.
+RewriteCond %{HTTP:Authorization} .
+RewriteRule .* - [E=HTTP_AUTHORIZATION:%{HTTP:Authorization}]
+
+# Shared-hosting compatibility layer: keep the existing /api/... contract,
+# but route requests through PHP because Node.js cannot run on production.
+RewriteRule ^api/index\.php$ - [L]
+RewriteRule ^api/?$ api/index.php [QSA,L]
+RewriteRule ^api/(.*)$ api/index.php?route=$1 [QSA,L]
+
+# Never serve PHP API configuration files directly.
+<FilesMatch "^config(\..+)?\.php$">
+    Require all denied
+</FilesMatch>
+
+# Do not expose local secrets, temporary controls, backups, logs, or source maps
+# from shared hosting document root.
+<FilesMatch "(^\.|\.env$|composer\.(json|lock)$|package(-lock)?\.json$|vercel\.json$|.*\.(bak|backup|old|orig|sql|sqlite|db|log|map|ps1|sh)$|^phase[0-9]+_.*\.php$)">
+    Require all denied
+</FilesMatch>

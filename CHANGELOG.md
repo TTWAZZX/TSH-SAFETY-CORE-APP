@@ -6,6 +6,16 @@ This file preserves historical production handoff, smoke test, backup, deploymen
 
 Use this section when switching accounts or resuming work. The current production target is the company server with Company MySQL/MariaDB and local server storage in `backend/uploads/`. Do not push to GitHub unless the user explicitly asks in the current chat.
 
+## Patrol Supervisor Schedule Linkage Local Handoff (2026-06-05)
+
+Implemented locally for Safety Patrol Sec. & Supervisor schedule linkage. Changed files: `api/handlers/patrol.php`, `backend/routes/patrol.js`, `public/js/pages/patrol.js`, `public/js/main.js`, `index.html`, `ARCHITECTURE.md`, `CHANGELOG.md`, and `CLAUDE.md`.
+
+Behavior: Admin Sec. & Supervisor on-behalf recording now selects from real scheduled patrol items built from `Patrol_Sessions`; selected records are stored on `Patrol_Self_Checkin.ScheduledSessionID`. Personal Self-Patrol check-in also shows open scheduled items, requires the user to select one, and removes completed scheduled items from the open list. Supervisor/section-head visibility now accepts either `Master_Positions.IsSupervisorPatrol` or `Patrol_Roster.RosterGroup='supervisor'`, so rostered supervisors see their required work even if the position master flag is missing. Monthly requirements are still derived from the current target resolver and yearly target distribution, preserving Admin-set targets.
+
+Schema/runtime notes: PHP production compatibility and Node dev parity auto-add nullable `ScheduledSessionID` plus an index to `patrol_self_checkin` / `Patrol_Self_Checkin`. Legacy supervisor records without `ScheduledSessionID` still count as fallback completions when their check-in date matches an open scheduled date.
+
+Local verification completed: `node --check backend\routes\patrol.js`, `node --check public\js\pages\patrol.js`, `node --check public\js\main.js`, and `C:\xampp\php\php.exe -l api\handlers\patrol.php` passed. `git diff --check` and mojibake scan were run after the documentation update. Full `npm --prefix backend test` did not complete because the local API smoke could not connect to MySQL (`ECONNREFUSED`) after permission audit passed. No production deploy or GitHub push was performed for this local handoff.
+
 ## Safety Unit Gate Local Handoff (2026-06-04)
 
 Phase SU-1 + ENC-1 was completed read-only against production before code changes. Production `/api/register/options` and `/api/employees` returned `application/json; charset=utf-8`; master Safety Unit data looked clean; `Employee.Unit` was empty for all production employees checked. The visible `Unit` column mojibake was traced to frontend fallback rendering, not DB Safety Unit data.

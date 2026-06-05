@@ -3,7 +3,7 @@
 <head>
     <base target="_top">
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
     <meta name="theme-color" content="#059669">
     <meta name="color-scheme" content="light">
     <meta name="apple-mobile-web-app-capable" content="yes">
@@ -12,8 +12,8 @@
     <meta name="mobile-web-app-capable" content="yes">
     <title>TSH Safety Core Activity</title>
     <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Cdefs%3E%3ClinearGradient id='g' x1='0%25' y1='0%25' x2='100%25' y2='100%25'%3E%3Cstop offset='0%25' stop-color='%23059669'/%3E%3Cstop offset='100%25' stop-color='%230d9488'/%3E%3C/linearGradient%3E%3C/defs%3E%3Crect width='32' height='32' rx='8' fill='url(%23g)'/%3E%3Cpath d='M16 4L7 8v7c0 6.1 3.8 11.5 9 12.9 5.2-1.4 9-6.8 9-12.9V8L16 4z' fill='white' opacity='0.95'/%3E%3Cpath d='M13 16l2.5 2.5L19.5 13' stroke='%23059669' stroke-width='2' stroke-linecap='round' stroke-linejoin='round' fill='none'/%3E%3C/svg%3E">
-    <link rel="manifest" href="public/manifest.webmanifest">
-    <link rel="apple-touch-icon" href="public/icons/app-icon.svg">
+    <link rel="manifest" href="./public/manifest.webmanifest">
+    <link rel="apple-touch-icon" href="./public/icons/app-icon.svg">
     
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdn.sheetjs.com/xlsx-latest/package/dist/xlsx.full.min.js"></script>
@@ -31,7 +31,7 @@
     <script src="https://cdn.jsdelivr.net/npm/flatpickr"></script>
     <script src="https://npmcdn.com/flatpickr/dist/l10n/th.js"></script>
 
-    <link rel="stylesheet" href="public/style.css?v=20260503-mobile-login">
+    <link rel="stylesheet" href="public/style.css?v=20260602-mobile-nav-m53">
 
     <script>
         // Dark mode disabled — always light
@@ -61,11 +61,13 @@
             <!-- Top: Logo + title -->
             <div class="relative z-10 p-10 pb-0">
                 <div class="flex items-center gap-3 mb-10">
-                    <svg width="40" height="40" viewBox="0 0 40 40" fill="none" xmlns="http://www.w3.org/2000/svg" class="flex-shrink-0">
-                        <rect width="40" height="40" rx="10" fill="rgba(255,255,255,0.12)"/>
-                        <path d="M20 10L12 14.5v7c0 6 4 11.5 8 13.5 4-2 8-7.5 8-13.5v-7z" fill="white" opacity="0.95"/>
-                        <path d="M15.5 21.5l3 3 6-6" stroke="#064e3b" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
-                    </svg>
+                    <div data-brand-logo="login-desktop" data-brand-size="40" class="brand-logo brand-logo-md flex-shrink-0">
+                        <svg width="40" height="40" viewBox="0 0 40 40" fill="none" xmlns="http://www.w3.org/2000/svg" class="flex-shrink-0">
+                            <rect width="40" height="40" rx="10" fill="rgba(255,255,255,0.12)"/>
+                            <path d="M20 10L12 14.5v7c0 6 4 11.5 8 13.5 4-2 8-7.5 8-13.5v-7z" fill="white" opacity="0.95"/>
+                            <path d="M15.5 21.5l3 3 6-6" stroke="#064e3b" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                        </svg>
+                    </div>
                     <div>
                         <p class="text-white text-sm font-bold leading-tight">Thai Summit Harness</p>
                         <p class="text-xs" style="color:rgba(167,243,208,0.7)">Co., Ltd.</p>
@@ -77,8 +79,8 @@
                         <span class="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse inline-block"></span>
                         Enterprise Safety Management v2.0
                     </div>
-                    <h1 class="text-3xl font-bold text-white leading-tight mb-3">TSH Safety<br>Core Activity</h1>
-                    <p class="text-sm leading-relaxed" style="color:rgba(167,243,208,0.8)">ระบบบริหารจัดการกิจกรรมความปลอดภัย<br>ครบวงจรสำหรับองค์กร</p>
+                    <h1 data-brand-login-title class="text-3xl font-bold text-white leading-tight mb-3">TSH Safety Core</h1>
+                    <p data-brand-login-subtitle class="text-sm leading-relaxed" style="color:rgba(167,243,208,0.8)">Activity System</p>
                 </div>
 
                 <!-- Divider -->
@@ -163,7 +165,7 @@
                             <span class="w-6 h-6 rounded-md flex items-center justify-center flex-shrink-0" style="background:rgba(52,211,153,0.2)">
                                 <svg class="w-3 h-3 text-emerald-300" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0z"/></svg>
                             </span>
-                            <span class="text-xs text-white font-medium">Contractor Safety</span>
+                            <span class="text-xs text-white font-medium">Contractor / Supplier</span>
                         </div>
 
                         <div class="flex items-center gap-2 rounded-lg px-2.5 py-2" style="background:rgba(255,255,255,0.08)">
@@ -208,8 +210,8 @@
                         <p class="text-xs" style="color:rgba(110,231,183,0.7)">โมดูล</p>
                     </div>
                     <div class="text-center" style="border-left:1px solid rgba(255,255,255,0.12);border-right:1px solid rgba(255,255,255,0.12)">
-                        <p class="text-2xl font-bold text-white">JWT</p>
-                        <p class="text-xs" style="color:rgba(110,231,183,0.7)">Secure Auth</p>
+                        <p class="text-2xl font-bold text-white">Guide</p>
+                        <p class="text-xs" style="color:rgba(110,231,183,0.7)">User Help</p>
                     </div>
                     <div class="text-center">
                         <p class="text-2xl font-bold text-white">24/7</p>
@@ -229,12 +231,14 @@
             <div id="login-topbar" class="flex items-center justify-between px-4 sm:px-8 py-5 border-b border-slate-100 flex-shrink-0">
                 <!-- Mobile logo (hidden on desktop) -->
                 <div class="flex items-center gap-2.5 md:opacity-0 md:pointer-events-none">
+                    <div data-brand-logo="login-mobile" class="brand-logo brand-logo-sm flex-shrink-0">
                     <svg width="32" height="32" viewBox="0 0 40 40" fill="none" xmlns="http://www.w3.org/2000/svg" class="flex-shrink-0">
                         <rect width="40" height="40" rx="10" fill="#059669" fill-opacity="0.1"/>
                         <path d="M20 10L12 14.5v7c0 6 4 11.5 8 13.5 4-2 8-7.5 8-13.5v-7z" fill="#059669"/>
                         <path d="M15.5 21.5l3 3 6-6" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
                     </svg>
-                    <span class="text-sm font-bold text-slate-700">TSH Safety Core</span>
+                    </div>
+                    <span data-brand-name class="text-sm font-bold text-slate-700">TSH Safety Core</span>
                 </div>
                 <!-- System status badge -->
                 <div class="flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-semibold bg-emerald-50 text-emerald-700 border border-emerald-100 ml-auto">
@@ -302,6 +306,15 @@
                                             <path stroke-linecap="round" stroke-linejoin="round" d="M13.875 18.825A10.05 10.05 0 0112 19c-4.478 0-8.268-2.943-9.543-7a9.97 9.97 0 011.563-3.029m5.858.908a3 3 0 114.243 4.243M9.878 9.878l4.242 4.242M9.88 9.88l-3.29-3.29m7.532 7.532l3.29 3.29M3 3l3.59 3.59m0 0A9.953 9.953 0 0112 5c4.478 0 8.268 2.943 9.543 7a10.025 10.025 0 01-4.132 5.411m0 0L21 21"/>
                                         </svg>
                                     </button>
+                                </div>
+                            </div>
+                            <div id="first-login-hint" class="flex items-start gap-2.5 rounded-lg border border-emerald-100 bg-emerald-50 px-3 py-2.5 text-emerald-800">
+                                <svg class="w-4 h-4 flex-shrink-0 mt-0.5 text-emerald-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                                    <path stroke-linecap="round" stroke-linejoin="round" d="M12 11c0-1.105.895-2 2-2s2 .895 2 2-.895 2-2 2m-2-2c0 1.105-.895 2-2 2s-2-.895-2-2 .895-2 2-2m2 2V7m0 4v6m-6 3h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"/>
+                                </svg>
+                                <div class="min-w-0">
+                                    <p class="text-xs font-bold">เข้าสู่ระบบครั้งแรก</p>
+                                    <p class="text-xs leading-relaxed text-emerald-700">ใช้รหัสพนักงานเป็นรหัสผ่านเริ่มต้น เช่น 012609</p>
                                 </div>
                             </div>
                             <!-- Error -->
@@ -412,7 +425,7 @@
                             <!-- Password -->
                             <div>
                                 <label class="block text-xs font-bold mb-1.5 text-slate-600 tracking-wide uppercase">รหัสผ่าน <span class="text-red-500">*</span></label>
-                                <input id="reg-password" type="password" required placeholder="อย่างน้อย 8 ตัวอักษร" autocomplete="new-password" autocapitalize="none" autocorrect="off" spellcheck="false"
+                                <input id="reg-password" type="password" required placeholder="อย่างน้อย 4 ตัวอักษร" autocomplete="new-password" autocapitalize="none" autocorrect="off" spellcheck="false"
                                     class="w-full px-3.5 py-2.5 text-sm bg-slate-50 rounded-xl outline-none transition-all duration-200 border border-slate-200"
                                     onfocus="this.style.borderColor='#059669';this.style.boxShadow='0 0 0 3px rgba(5,150,105,0.12)';this.style.background='#fff'"
                                     onblur="this.style.borderColor='';this.style.boxShadow='';this.style.background=''"
@@ -462,7 +475,7 @@
             <!-- Bottom bar -->
             <div id="login-footer" class="px-8 py-4 border-t border-slate-100 flex items-center justify-between flex-shrink-0">
                 <p class="text-xs text-slate-400">© 2025 Thai Summit Harness Co., Ltd.</p>
-                <p class="text-xs text-slate-400">Safety Core Activity System</p>
+                <p data-brand-tagline class="text-xs text-slate-400">Activity System</p>
             </div>
         </div>
     </div>
@@ -480,15 +493,20 @@
 
             <!-- Logo -->
             <div class="relative z-10 px-4 pb-4 border-b flex items-center gap-2.5" style="border-color:rgba(255,255,255,0.15)">
+                <div data-brand-logo="sidebar" class="brand-logo brand-logo-sm flex-shrink-0">
                 <svg width="32" height="32" viewBox="0 0 40 40" fill="none" xmlns="http://www.w3.org/2000/svg" class="flex-shrink-0">
                     <rect width="40" height="40" rx="10" fill="rgba(255,255,255,0.12)"/>
                     <path d="M20 10L12 14.5v7c0 6 4 11.5 8 13.5 4-2 8-7.5 8-13.5v-7z" fill="white" opacity="0.95"/>
                     <path d="M15.5 21.5l3 3 6-6" stroke="#064e3b" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
                 </svg>
-                <div class="min-w-0">
-                    <h2 class="text-sm font-bold leading-tight text-white truncate">TSH Safety Core</h2>
-                    <span class="text-xs" style="color:rgba(167,243,208,0.75)">Activity System</span>
                 </div>
+                <div class="min-w-0">
+                    <h2 data-brand-name class="text-sm font-bold leading-tight text-white truncate">TSH Safety Core</h2>
+                    <span data-brand-tagline class="text-xs" style="color:rgba(167,243,208,0.75)">Activity System</span>
+                </div>
+                <button id="sidebar-collapse-btn" type="button" class="ml-auto hidden md:flex w-8 h-8 items-center justify-center rounded-lg transition-colors" style="background:rgba(255,255,255,0.1);color:rgba(255,255,255,0.85)" title="ย่อ/ขยายเมนู">
+                    <svg class="w-4 h-4 transition-transform" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"/></svg>
+                </button>
             </div>
 
             <!-- Nav -->
@@ -548,7 +566,7 @@
                             <span>Safety Culture</span></a></li>
                         <li><a href="#contractor" data-action="navigate" class="nav-link flex items-center gap-2.5 px-3 py-2 text-sm font-medium rounded-lg transition-colors" style="color:rgba(209,250,229,0.9)">
                             <svg class="w-4 h-4 flex-shrink-0 opacity-75" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4"/></svg>
-                            <span>Contractor Control</span></a></li>
+                            <span>Contractor / Supplier</span></a></li>
                         <li><a href="#hiyari" data-action="navigate" class="nav-link flex items-center gap-2.5 px-3 py-2 text-sm font-medium rounded-lg transition-colors" style="color:rgba(209,250,229,0.9)">
                             <svg class="w-4 h-4 flex-shrink-0 opacity-75" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/></svg>
                             <span>Hiyari-Hatto</span></a></li>
@@ -577,7 +595,7 @@
 
             <!-- Logout -->
             <div class="relative z-10 px-4 pt-4 border-t" style="border-color:rgba(255,255,255,0.15)">
-                <button id="user-logout-btn" class="w-full py-2 rounded-lg text-sm font-medium text-white transition-all" style="background:rgba(255,255,255,0.12); border:1px solid rgba(255,255,255,0.15);" onmouseover="this.style.background='rgba(255,255,255,0.2)'" onmouseout="this.style.background='rgba(255,255,255,0.12)'">ออกจากระบบ</button>
+                <button id="user-logout-btn" title="ออกจากระบบ" class="w-full py-2 rounded-lg text-sm font-medium text-white transition-all" style="background:rgba(255,255,255,0.12); border:1px solid rgba(255,255,255,0.15);" onmouseover="this.style.background='rgba(255,255,255,0.2)'" onmouseout="this.style.background='rgba(255,255,255,0.12)'">ออกจากระบบ</button>
             </div>
         </aside>
 
@@ -588,9 +606,13 @@
             <header class="flex-shrink-0 flex justify-between items-center px-5 py-3.5 bg-white border-b border-slate-200 z-20" style="box-shadow: 0 1px 8px rgba(0,0,0,0.06);">
                 <div class="flex items-center">
                     <button id="sidebar-toggle" class="md:hidden text-slate-500 focus:outline-none mr-3"><svg class="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h16"></path></svg></button>
+                    <button id="desktop-sidebar-toggle" class="hidden md:inline-flex text-slate-500 hover:text-emerald-700 focus:outline-none mr-3 w-9 h-9 items-center justify-center rounded-lg hover:bg-emerald-50" title="ย่อ/ขยายเมนู">
+                        <svg class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h10M4 18h16"></path></svg>
+                    </button>
                     <h1 id="page-title" class="text-lg font-bold text-slate-800 truncate">ภาพรวม</h1>
                 </div>
                 <div class="flex items-center space-x-3">
+                    <button id="mobile-header-logout-btn" class="md:hidden inline-flex items-center justify-center px-3 py-2 rounded-lg text-xs font-bold text-red-600 bg-red-50 border border-red-100">ออก</button>
                     <div id="user-info" class="text-sm text-right font-medium text-slate-700"></div>
                 </div>
             </header>
@@ -681,7 +703,7 @@
     </div>
 
     <!-- โหลด session.js ก่อนเสมอ -->
-    <script src="public/js/session.js"></script>
+    <script src="public/js/session.js?v=20260529-api-base"></script>
 
     <script>
     document.addEventListener('DOMContentLoaded', () => {
@@ -728,9 +750,13 @@
         3. API base URL helper (ต้องตรงกับ api.js)
         ========================= */
         function _getApiBase() {
+            if (window.API_BASE) return String(window.API_BASE).replace(/\/+$/, '');
             const h = window.location.hostname;
             if (h === 'localhost' || h === '127.0.0.1' || !h) return 'http://localhost:5000/api';
-            return '/api';
+            const path = window.location.pathname || '/';
+            const marker = '/index.html';
+            const appPath = path.includes(marker) ? path.slice(0, path.indexOf(marker) + 1) : path;
+            return `${appPath.replace(/\/+$/, '')}/api`;
         }
 
         /* =========================
@@ -741,6 +767,8 @@
         async function _loadRegisterOptions() {
             try {
                 const res  = await fetch(`${_getApiBase()}/register/options`);
+                const contentType = res.headers.get('content-type') || '';
+                if (!contentType.includes('application/json')) throw new Error(`API endpoint not available (${res.status})`);
                 const json = await res.json();
                 if (!json.success) return;
 
@@ -794,7 +822,7 @@
             if (!pw) { wrap.classList.add('hidden'); return; }
             wrap.classList.remove('hidden');
             let score = 0;
-            if (pw.length >= 8)          score++;
+            if (pw.length >= 4)          score++;
             if (/[a-z]/.test(pw))        score++;
             if (/[A-Z]/.test(pw))        score++;
             if (/[0-9]/.test(pw))        score++;
@@ -841,8 +869,8 @@
                 errEl.textContent = 'กรุณากรอกข้อมูลที่จำเป็นให้ครบถ้วน';
                 errEl.classList.remove('hidden'); return;
             }
-            if (pw.length < 8) {
-                errEl.textContent = 'รหัสผ่านต้องมีอย่างน้อย 8 ตัวอักษร';
+            if (pw.length < 4) {
+                errEl.textContent = 'รหัสผ่านต้องมีอย่างน้อย 4 ตัวอักษร';
                 errEl.classList.remove('hidden'); return;
             }
             if (pw !== pw2) {
@@ -858,6 +886,8 @@
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ EmployeeID: id, EmployeeName: name, Department: dept, Position: pos, Unit: unit, password: pw }),
                 });
+                const contentType = res.headers.get('content-type') || '';
+                if (!contentType.includes('application/json')) throw new Error(`API endpoint not available (${res.status})`);
                 const json = await res.json();
                 if (!json.success) throw new Error(json.message);
 
@@ -879,11 +909,11 @@
     </script>
 
     <!-- main.js โหลดหลังสุด -->
-    <script type="module" src="public/js/main.js"></script>
+    <script type="module" src="public/js/main.js?v=20260605-patrol-supervisor-schedule"></script>
     <script>
         if ('serviceWorker' in navigator && (location.protocol === 'https:' || location.hostname === 'localhost' || location.hostname === '127.0.0.1')) {
             window.addEventListener('load', () => {
-                navigator.serviceWorker.register('/sw.js').catch(() => {});
+                navigator.serviceWorker.register('./sw.js?v=20260602-mobile-nav-m53').catch(() => {});
             });
         }
     </script>

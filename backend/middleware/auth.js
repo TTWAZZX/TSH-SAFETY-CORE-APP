@@ -25,7 +25,7 @@ const authenticateToken = (req, res, next) => {
  */
 const isAdmin = (req, res, next) => {
     const role = req.user?.role || req.user?.Role;
-    if (role === 'Admin') {
+    if (String(role || '').toLowerCase() === 'admin') {
         return next();
     }
     res.status(403).json({ success: false, message: 'Permission denied. Admin access required.' });

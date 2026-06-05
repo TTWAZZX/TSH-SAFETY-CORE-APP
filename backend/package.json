@@ -7,6 +7,8 @@
     "permission:audit": "node scripts/permission-audit.js",
     "smoke:api": "node scripts/smoke-test.js",
     "smoke:remote": "node scripts/remote-smoke.js",
+    "smoke:cccf": "node scripts/cccf-permanent-workflow-smoke.js",
+    "smoke:ky-email": "node scripts/ky-email-flow-smoke.js",
     "uat:preflight": "node scripts/uat-preflight.js",
     "test": "npm run permission:audit && npm run smoke:api && npm run uat:preflight"
   },
@@ -16,14 +18,12 @@
   "dependencies": {
     "bcrypt": "^6.0.0",
     "bcryptjs": "^3.0.3",
-    "cloudinary": "^1.41.3",
     "cors": "^2.8.5",
     "dotenv": "^17.2.2",
     "express": "^5.1.0",
     "express-rate-limit": "^8.3.1",
     "jsonwebtoken": "^9.0.2",
     "multer": "^2.1.1",
-    "multer-storage-cloudinary": "^4.0.0",
     "mysql2": "^3.14.5",
     "uuid": "^8.3.2",
     "xlsx": "^0.18.5"

@@ -2,23 +2,307 @@ import { API } from '../api.js';
 import {
   showLoading, hideLoading, showError, showToast,
   openModal, closeModal, showConfirmationModal, showDocumentModal, escHtml
-} from '../ui.js';
+} from '../ui.js?v=20260602-mobile-nav-m53';
 
 let allCommittees = [];
 let committeeEventListenersInitialized = false;
 let tempSubCommittees = [];
+let committeeMasterDepartments = [];
+let committeeMasterSafetyUnits = [];
+let committeeMasterPositions = [];
+let committeeMasterLoaded = false;
 
 const getCommitteeId = (c) => c?.id ?? c?.CommitteeID;
 const normalizeId   = (v) => String(v ?? '');
 
 /* ─── helpers ─── */
+function getFirstValue(obj, keys) {
+  for (const key of keys) {
+    const value = obj?.[key];
+    if (value !== undefined && value !== null && String(value).trim() !== '') return value;
+  }
+  return '';
+}
+
+function getDocumentUrlFromSub(sub) {
+  return sub?.documentUrl || sub?.activeLink || '';
+}
+
+function getSubCommitteeLabel(sub) {
+  const department = sub?.department || '';
+  const unit = sub?.unit || '';
+  return unit ? `${department} / ${unit}` : department;
+}
+
+function getSubCommitteeDepartmentLabel(sub) {
+  return String(sub?.department || '').trim() || 'ไม่ระบุแผนก / Section';
+}
+
+function getSubCommitteeUnitLabel(sub) {
+  return String(sub?.unit || '').trim() || getSubCommitteeDepartmentLabel(sub);
+}
+
+function sortSubCommittees(subList = []) {
+  return [...subList].sort((a, b) => {
+    const deptCompare = getSubCommitteeDepartmentLabel(a).localeCompare(getSubCommitteeDepartmentLabel(b), 'th', { numeric: true });
+    if (deptCompare !== 0) return deptCompare;
+    return getSubCommitteeUnitLabel(a).localeCompare(getSubCommitteeUnitLabel(b), 'th', { numeric: true });
+  });
+}
+
+function getSubCommitteeSectionCount(subList = []) {
+  return new Set(subList.map(getSubCommitteeDepartmentLabel)).size;
+}
+
+function getSubCommitteeTotalMembers(sub) {
+  const fromPositions = (sub?.positions || []).reduce((sum, item) => sum + (parseInt(item?.count, 10) || 0), 0);
+  if ((sub?.positions || []).length) return fromPositions;
+  return parseInt(sub?.memberCount, 10) || 0;
+}
+
+function getPositionBreakdownText(sub) {
+  const positions = sub?.positions || [];
+  if (!positions.length) return '';
+  return positions
+    .map(item => `${item.positionName || 'ไม่ระบุตำแหน่ง'} ${parseInt(item.count, 10) || 0} คน`)
+    .join(', ');
+}
+
+function addCommitteeCount(map, key, count) {
+  const name = String(key || '').trim() || 'ไม่ระบุ';
+  const n = parseInt(count, 10) || 0;
+  if (!n) return;
+  map.set(name, (map.get(name) || 0) + n);
+}
+
+function getSubCommitteeMemberSummary(subList = []) {
+  const byPosition = new Map();
+  const byDepartment = new Map();
+  let total = 0;
+
+  subList.forEach(sub => {
+    const subTotal = getSubCommitteeTotalMembers(sub);
+    total += subTotal;
+    addCommitteeCount(byDepartment, getSubCommitteeDepartmentLabel(sub), subTotal);
+
+    const positions = sub?.positions || [];
+    if (positions.length) {
+      positions.forEach(item => addCommitteeCount(byPosition, item.positionName, item.count));
+    } else if (subTotal) {
+      addCommitteeCount(byPosition, 'ไม่ระบุตำแหน่ง', subTotal);
+    }
+  });
+
+  const sortRows = map => Array.from(map.entries())
+    .map(([name, count]) => ({ name, count }))
+    .sort((a, b) => b.count - a.count || a.name.localeCompare(b.name, 'th'));
+
+  return {
+    total,
+    byPosition: sortRows(byPosition),
+    byDepartment: sortRows(byDepartment)
+  };
+}
+
+function renderSubCommitteeMemberSummary(subList = []) {
+  const summary = getSubCommitteeMemberSummary(subList);
+  const renderRows = (rows, emptyText) => rows.length
+    ? rows.map(row => `
+        <div class="flex items-center justify-between gap-3 py-1.5 border-b border-slate-100 last:border-b-0">
+          <span class="text-xs text-slate-600 truncate" title="${escHtml(row.name)}">${escHtml(row.name)}</span>
+          <span class="text-xs font-black text-emerald-700 bg-emerald-50 border border-emerald-100 rounded-full px-2 py-0.5 whitespace-nowrap">${row.count} คน</span>
+        </div>
+      `).join('')
+    : `<div class="text-xs text-slate-400 py-2">${emptyText}</div>`;
+
+  return `
+    <div class="mb-4 grid grid-cols-1 lg:grid-cols-[220px,1fr,1fr] gap-3">
+      <div class="rounded-xl border border-emerald-100 bg-emerald-50/70 p-4">
+        <p class="text-xs font-bold text-emerald-700 uppercase tracking-wide">จำนวนสมาชิก</p>
+        <p class="mt-2 text-3xl font-black text-slate-800">${summary.total}</p>
+        <p class="text-xs text-slate-500 mt-1">รวมสมาชิกในคณะทำงานย่อย</p>
+      </div>
+      <div class="rounded-xl border border-slate-200 bg-white p-4">
+        <div class="flex items-center justify-between gap-2 mb-2">
+          <p class="text-xs font-black text-slate-500 uppercase tracking-wide">แยกตามตำแหน่ง</p>
+          <span class="text-[11px] text-slate-400">${summary.byPosition.length} รายการ</span>
+        </div>
+        <div class="max-h-40 overflow-y-auto pr-1 custom-scrollbar">
+          ${renderRows(summary.byPosition, 'ยังไม่มีข้อมูลจำนวนตามตำแหน่ง')}
+        </div>
+      </div>
+      <div class="rounded-xl border border-slate-200 bg-white p-4">
+        <div class="flex items-center justify-between gap-2 mb-2">
+          <p class="text-xs font-black text-slate-500 uppercase tracking-wide">แยกตามแผนก / Section</p>
+          <span class="text-[11px] text-slate-400">${summary.byDepartment.length} รายการ</span>
+        </div>
+        <div class="max-h-40 overflow-y-auto pr-1 custom-scrollbar">
+          ${renderRows(summary.byDepartment, 'ยังไม่มีข้อมูลจำนวนตามแผนก / Section')}
+        </div>
+      </div>
+    </div>`;
+}
+
+function getSubCommitteeGroups(subList = []) {
+  const groups = new Map();
+  sortSubCommittees(subList).forEach(sub => {
+    const department = getSubCommitteeDepartmentLabel(sub);
+    if (!groups.has(department)) groups.set(department, []);
+    groups.get(department).push(sub);
+  });
+  return Array.from(groups.entries()).map(([department, items]) => ({
+    department,
+    items,
+    memberTotal: items.reduce((sum, sub) => sum + getSubCommitteeTotalMembers(sub), 0)
+  }));
+}
+
+function renderSubCommitteeGroups(subList = []) {
+  const groups = getSubCommitteeGroups(subList);
+  if (!groups.length) {
+    return `<div class="text-center py-10 text-slate-400 text-sm bg-slate-50 rounded-xl border border-dashed border-slate-200">
+      ยังไม่มีข้อมูลคณะทำงานย่อย
+    </div>`;
+  }
+
+  return `
+    <div class="space-y-4">
+      ${groups.map((group, groupIndex) => `
+        <section class="rounded-2xl border border-slate-200 bg-slate-50/70 overflow-hidden">
+          <div class="flex flex-col md:flex-row md:items-center md:justify-between gap-2 px-4 py-3 border-b border-slate-200 bg-white">
+            <div class="min-w-0">
+              <p class="text-[11px] font-black text-emerald-700 uppercase tracking-widest">แผนก / Section</p>
+              <h5 class="text-sm font-black text-slate-800 truncate" title="${escHtml(group.department)}">${escHtml(group.department)}</h5>
+            </div>
+            <div class="flex items-center gap-2 text-xs">
+              <span class="font-bold text-emerald-700 bg-emerald-50 border border-emerald-100 rounded-full px-2.5 py-1">${group.memberTotal} คน</span>
+            </div>
+          </div>
+          <div class="p-3 grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
+            ${group.items.map((sc, i) => subCard(sc, groupIndex + i)).join('')}
+          </div>
+        </section>
+      `).join('')}
+    </div>`;
+}
+
+function getFilenameFromUrl(url) {
+  if (!url) return '';
+  try {
+    const parsed = new URL(url, window.location.origin);
+    const fromQuery = parsed.searchParams.get('filename');
+    if (fromQuery) return decodeURIComponent(fromQuery);
+    return decodeURIComponent(parsed.pathname.split('/').filter(Boolean).pop() || '');
+  } catch {
+    const basename = String(url).split('?')[0].split('/').filter(Boolean).pop() || '';
+    try { return decodeURIComponent(basename); } catch { return basename; }
+  }
+}
+
+function normalizeSubCommittee(sub) {
+  if (typeof sub === 'string') {
+    return {
+      departmentId: '',
+      department: sub,
+      unitId: '',
+      unit: '',
+      chairperson: '',
+      memberCount: '',
+      documentUrl: '',
+      documentName: '',
+      activeLink: ''
+    };
+  }
+  if (!sub || typeof sub !== 'object') return null;
+  const documentUrl = getFirstValue(sub, ['documentUrl', 'activeLink', 'DocumentUrl', 'DocumentURL']);
+  const department = getFirstValue(sub, ['department', 'Department', 'name', 'Name']);
+  const unit = getFirstValue(sub, ['unit', 'Unit', 'unitName', 'UnitName', 'safetyUnit']);
+  const positions = normalizePositionBreakdown(sub);
+  const memberCount = positions.reduce((sum, item) => sum + (parseInt(item.count, 10) || 0), 0)
+    || parseInt(getFirstValue(sub, ['memberCount', 'MemberCount']), 10)
+    || '';
+  return {
+    ...sub,
+    departmentId: String(getFirstValue(sub, ['departmentId', 'DepartmentID', 'department_id']) || ''),
+    department: String(department || ''),
+    unitId: String(getFirstValue(sub, ['unitId', 'UnitID', 'unit_id']) || ''),
+    unit: String(unit || ''),
+    chairperson: String(getFirstValue(sub, ['chairperson', 'Chairperson']) || ''),
+    memberCount: memberCount ? String(memberCount) : '',
+    positions,
+    documentUrl: documentUrl || '',
+    documentName: getFirstValue(sub, ['documentName', 'DocumentName']) || getFilenameFromUrl(documentUrl),
+    activeLink: documentUrl || ''
+  };
+}
+
+function normalizePositionBreakdown(sub) {
+  const rawPositions = Array.isArray(sub?.positions) ? sub.positions : [];
+  const normalized = rawPositions
+    .map(item => ({
+      positionId: String(getFirstValue(item, ['positionId', 'PositionID', 'id']) || ''),
+      positionName: String(getFirstValue(item, ['positionName', 'PositionName', 'name', 'Name']) || ''),
+      count: String(parseInt(getFirstValue(item, ['count', 'Count', 'memberCount', 'MemberCount']), 10) || '')
+    }))
+    .filter(item => item.positionName || item.count);
+
+  if (normalized.length > 0) return normalized;
+
+  const legacyCount = parseInt(getFirstValue(sub, ['memberCount', 'MemberCount']), 10) || 0;
+  if (!legacyCount) return [];
+  return [{
+    positionId: '',
+    positionName: getFirstValue(sub, ['chairperson', 'Chairperson']) ? `ประธาน: ${getFirstValue(sub, ['chairperson', 'Chairperson'])}` : 'ไม่ระบุตำแหน่ง',
+    count: String(legacyCount)
+  }];
+}
+
 function parseSubData(maybeJson) {
   if (!maybeJson) return [];
-  if (Array.isArray(maybeJson)) return maybeJson;
+  if (Array.isArray(maybeJson)) return maybeJson.map(normalizeSubCommittee).filter(Boolean);
   if (typeof maybeJson === 'string') {
-    try { return JSON.parse(maybeJson); } catch { return []; }
+    try {
+      const parsed = JSON.parse(maybeJson);
+      return Array.isArray(parsed) ? parsed.map(normalizeSubCommittee).filter(Boolean) : [];
+    } catch { return []; }
   }
   return [];
+}
+
+function normalizeMasterDepartment(row) {
+  return {
+    id: String(getFirstValue(row, ['id', 'DepartmentID', 'department_id']) || ''),
+    name: String(getFirstValue(row, ['Name', 'name', 'Department', 'DeptName']) || '')
+  };
+}
+
+function normalizeMasterSafetyUnit(row) {
+  return {
+    id: String(getFirstValue(row, ['id', 'UnitID', 'unit_id']) || ''),
+    name: String(getFirstValue(row, ['name', 'Name', 'UnitName', 'unit_name']) || ''),
+    departmentId: String(getFirstValue(row, ['department_id', 'DepartmentID', 'departmentId']) || ''),
+    departmentName: String(getFirstValue(row, ['DeptName', 'DepartmentName', 'Department', 'department']) || '')
+  };
+}
+
+function normalizeMasterPosition(row) {
+  return {
+    id: String(getFirstValue(row, ['id', 'PositionID', 'position_id']) || ''),
+    name: String(getFirstValue(row, ['Name', 'name', 'Position', 'PositionName']) || '')
+  };
+}
+
+async function loadCommitteeMasterData() {
+  if (committeeMasterLoaded) return;
+  const [deptRes, unitRes, positionRes] = await Promise.all([
+    API.get('/master/departments'),
+    API.get('/master/safety-units'),
+    API.get('/master/positions')
+  ]);
+  committeeMasterDepartments = (deptRes?.data || deptRes || []).map(normalizeMasterDepartment).filter(d => d.name);
+  committeeMasterSafetyUnits = (unitRes?.data || unitRes || []).map(normalizeMasterSafetyUnit).filter(u => u.name);
+  committeeMasterPositions = (positionRes?.data || positionRes || []).map(normalizeMasterPosition).filter(p => p.name);
+  committeeMasterLoaded = true;
 }
 
 function normalizeCommittee(raw) {
@@ -139,7 +423,7 @@ export async function loadCommitteePage() {
    PAGE RENDER
 ═══════════════════════════════════════════════ */
 function renderPage(container, { current, past }, isAdmin, totalCount) {
-  const subNow       = current?.SubCommitteeData?.length ?? 0;
+  const subNow       = getSubCommitteeSectionCount(current?.SubCommitteeData ?? []);
   const daysLeft     = getDaysRemaining(current?.TermEndDate);
   const monthsNow    = getMonthsElapsed(current?.TermStartDate);
 
@@ -169,61 +453,11 @@ function renderPage(container, { current, past }, isAdmin, totalCount) {
       daysChip = `<span class="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold bg-emerald-100 text-emerald-700"><span class="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse inline-block"></span>เหลือ ${daysLeft} วัน</span>`;
   }
 
-  const subList = current?.SubCommitteeData ?? [];
+  const subList = sortSubCommittees(current?.SubCommitteeData ?? []);
   const termPct = current ? getTermProgressPct(current.TermStartDate, current.TermEndDate) : null;
   const mainDocCount = (current?.MainOrgChartLink ? 1 : 0) + (current?.AppointmentDocLink ? 1 : 0);
-  const subDocCount = subList.filter(s => s?.activeLink).length;
-  const totalSubMembers = subList.reduce((sum, s) => sum + (parseInt(s?.memberCount, 10) || 0), 0);
-  const governanceReady = !!current && daysLeft !== null && daysLeft >= 0 && mainDocCount === 2 && subList.length > 0;
-  const termRisk = daysLeft === null ? 'unknown' : daysLeft < 0 ? 'expired' : daysLeft <= 60 ? 'near' : 'active';
-  const readinessMeta = governanceReady
-    ? { label: 'Governance Ready', value: 'Ready', bg: 'bg-emerald-50', border: 'border-emerald-100', text: 'text-emerald-700' }
-    : { label: current ? 'Action Required' : 'No Current Committee', value: current ? 'Review' : 'Setup', bg: 'bg-amber-50', border: 'border-amber-100', text: 'text-amber-700' };
-  const termMeta = termRisk === 'expired'
-    ? { label: 'Expired', bg: 'bg-red-50', border: 'border-red-100', text: 'text-red-700' }
-    : termRisk === 'near'
-      ? { label: 'Near Expiry', bg: 'bg-amber-50', border: 'border-amber-100', text: 'text-amber-700' }
-      : { label: termRisk === 'active' ? 'Active' : 'Unknown', bg: 'bg-white', border: 'border-slate-200', text: 'text-slate-700' };
-  const enterpriseStrip = `
-    <div class="grid grid-cols-2 lg:grid-cols-5 gap-3">
-      <button type="button" onclick="document.getElementById('current-committee-container')?.scrollIntoView({behavior:'smooth',block:'start'})"
-        class="text-left rounded-xl border ${readinessMeta.border} ${readinessMeta.bg} px-4 py-3 hover:shadow-sm transition-shadow">
-        <p class="text-[10px] font-bold uppercase ${readinessMeta.text}">Governance Status</p>
-        <p class="mt-1 text-sm font-black ${readinessMeta.text}">${readinessMeta.value}</p>
-        <p class="mt-1 text-[11px] text-slate-500">${readinessMeta.label}</p>
-      </button>
-      <button type="button" onclick="document.getElementById('current-committee-container')?.scrollIntoView({behavior:'smooth',block:'start'})"
-        class="text-left rounded-xl border ${termMeta.border} ${termMeta.bg} px-4 py-3 hover:shadow-sm transition-shadow">
-        <p class="text-[10px] font-bold uppercase ${termMeta.text}">Term Control</p>
-        <p class="mt-1 text-sm font-black ${termMeta.text}">${daysLeft === null ? '—' : daysLeft < 0 ? 'Expired' : `${daysLeft} days`}</p>
-        <p class="mt-1 text-[11px] text-slate-500">${termPct ?? '—'}% elapsed</p>
-      </button>
-      <button type="button" onclick="document.getElementById('current-committee-container')?.scrollIntoView({behavior:'smooth',block:'start'})"
-        class="text-left rounded-xl border ${mainDocCount < 2 ? 'border-amber-100 bg-amber-50' : 'border-emerald-100 bg-emerald-50'} px-4 py-3 hover:shadow-sm transition-shadow">
-        <p class="text-[10px] font-bold uppercase ${mainDocCount < 2 ? 'text-amber-600' : 'text-emerald-600'}">Core Documents</p>
-        <p class="mt-1 text-sm font-black ${mainDocCount < 2 ? 'text-amber-700' : 'text-emerald-700'}">${mainDocCount}/2</p>
-        <p class="mt-1 text-[11px] text-slate-500">Org chart + appointment</p>
-      </button>
-      <button type="button" onclick="document.getElementById('current-committee-container')?.scrollIntoView({behavior:'smooth',block:'start'})"
-        class="text-left rounded-xl border ${subList.length ? 'border-slate-200 bg-white' : 'border-amber-100 bg-amber-50'} px-4 py-3 hover:shadow-sm transition-shadow">
-        <p class="text-[10px] font-bold uppercase ${subList.length ? 'text-slate-500' : 'text-amber-600'}">Sub-Committees</p>
-        <p class="mt-1 text-sm font-black ${subList.length ? 'text-slate-700' : 'text-amber-700'}">${subList.length}</p>
-        <p class="mt-1 text-[11px] text-slate-500">${totalSubMembers} members · ${subDocCount} docs</p>
-      </button>
-      ${isAdmin ? `
-      <button type="button" id="btn-add-committee-shortcut"
-        class="text-left rounded-xl border border-slate-200 bg-white px-4 py-3 hover:shadow-sm transition-shadow">
-        <p class="text-[10px] font-bold uppercase text-slate-500">Admin Control</p>
-        <p class="mt-1 text-sm font-black text-slate-700">Manage</p>
-        <p class="mt-1 text-[11px] text-slate-500">Create or update term</p>
-      </button>` : `
-      <button type="button" onclick="document.getElementById('past-committee-container')?.scrollIntoView({behavior:'smooth',block:'start'})"
-        class="text-left rounded-xl border border-slate-200 bg-white px-4 py-3 hover:shadow-sm transition-shadow">
-        <p class="text-[10px] font-bold uppercase text-slate-500">History</p>
-        <p class="mt-1 text-sm font-black text-slate-700">${past.length}</p>
-        <p class="mt-1 text-[11px] text-slate-500">Past committees</p>
-      </button>`}
-    </div>`;
+  const subDocCount = subList.filter(s => getDocumentUrlFromSub(s)).length;
+  const totalSubMembers = subList.reduce((sum, s) => sum + getSubCommitteeTotalMembers(s), 0);
 
   container.innerHTML = `
   <div class="space-y-6 animate-fade-in pb-10">
@@ -269,7 +503,6 @@ function renderPage(container, { current, past }, isAdmin, totalCount) {
     </div>
 
     ${alertBanner}
-    ${enterpriseStrip}
 
     <!-- ── STATS BAR (4 cards) ── -->
     <div class="grid grid-cols-2 lg:grid-cols-4 gap-3">
@@ -390,12 +623,13 @@ function renderPage(container, { current, past }, isAdmin, totalCount) {
    CURRENT COMMITTEE — HERO CARD
 ═══════════════════════════════════════════════ */
 function createCurrentHeroCard(committee, isAdmin) {
-  const subList    = committee.SubCommitteeData ?? [];
+  const subList    = sortSubCommittees(committee.SubCommitteeData ?? []);
+  const sectionCount = getSubCommitteeSectionCount(subList);
   const daysLeft   = getDaysRemaining(committee.TermEndDate);
   const pct        = getTermProgressPct(committee.TermStartDate, committee.TermEndDate);
   const totalMonths = getTermTotalMonths(committee.TermStartDate, committee.TermEndDate);
   const elapsedMonths = getMonthsElapsed(committee.TermStartDate);
-  const withDoc    = subList.filter(s => s.activeLink).length;
+  const withDoc    = subList.filter(s => getDocumentUrlFromSub(s)).length;
 
   const dayColor = daysLeft === null ? '#a7f3d0' : daysLeft < 0 ? '#fca5a5' : daysLeft <= 90 ? '#fcd34d' : '#6ee7b7';
   const dayLabel = daysLeft === null ? '—' : daysLeft < 0 ? 'หมดแล้ว' : String(daysLeft);
@@ -475,7 +709,7 @@ function createCurrentHeroCard(committee, isAdmin) {
       <div class="relative z-10 grid grid-cols-3 gap-3 mt-5">
         <div class="rounded-xl px-3 py-2.5 text-center"
              style="background:rgba(255,255,255,0.12);backdrop-filter:blur(6px)">
-          <p class="text-xl font-bold text-white">${subList.length}</p>
+          <p class="text-xl font-bold text-white">${sectionCount}</p>
           <p class="text-xs mt-0.5" style="color:rgba(167,243,208,0.8)">คณะทำงานย่อย</p>
         </div>
         <div class="rounded-xl px-3 py-2.5 text-center"
@@ -547,14 +781,9 @@ function createCurrentHeroCard(committee, isAdmin) {
           <span class="h-px flex-1 bg-slate-200"></span>
         </div>
 
-        ${subList.length > 0
-          ? `<div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-               ${subList.map((sc, i) => subCard(sc, i)).join('')}
-             </div>`
-          : `<div class="text-center py-10 text-slate-400 text-sm bg-slate-50 rounded-xl border border-dashed border-slate-200">
-               ยังไม่มีข้อมูลคณะทำงานย่อย
-             </div>`
-        }
+        ${renderSubCommitteeMemberSummary(subList)}
+
+        ${renderSubCommitteeGroups(subList)}
       </div>
     </div>
   </div>`;
@@ -564,25 +793,38 @@ function createCurrentHeroCard(committee, isAdmin) {
    SUB-COMMITTEE CARD
 ═══════════════════════════════════════════════ */
 function subCard(sc, i) {
-  const c    = avatarColor(i);
+  const c = avatarColor(i);
+  const label = getSubCommitteeUnitLabel(sc);
+  const departmentLabel = getSubCommitteeDepartmentLabel(sc);
+  const docUrl = getDocumentUrlFromSub(sc);
+  const docName = sc.documentName || getFilenameFromUrl(docUrl);
   const init = getDeptInitials(sc.department);
+  const positions = sc.positions || [];
+  const totalMembers = getSubCommitteeTotalMembers(sc);
+  const positionText = positions
+    .slice(0, 4)
+    .map(item => `${item.positionName || 'ไม่ระบุตำแหน่ง'} ${item.count || 0}`)
+    .join(' · ');
   return `
   <div class="group bg-white rounded-xl p-4 border border-slate-100
               hover:border-emerald-200 hover:shadow-md transition-all duration-200">
     <div class="flex items-start gap-3">
       <div class="flex-shrink-0 w-10 h-10 rounded-xl flex items-center justify-center text-sm font-bold"
-           style="background:${c.bg};color:${c.fg}">${init}</div>
+           style="background:${c.bg};color:${c.fg}">${escHtml(init)}</div>
       <div class="flex-1 min-w-0">
-        <p class="font-semibold text-slate-700 text-sm leading-snug truncate" title="${sc.department}">${sc.department}</p>
-        ${sc.chairperson ? `
-        <p class="text-xs text-slate-500 mt-1 flex items-center gap-1">
+        <p class="font-semibold text-slate-700 text-sm leading-snug truncate" title="${escHtml(label)}">${escHtml(label)}</p>
+        <p class="text-[11px] text-slate-400 mt-0.5 truncate" title="${escHtml(departmentLabel)}">Section: ${escHtml(departmentLabel)}</p>
+        ${positions.length ? `
+        <p class="text-xs text-slate-500 mt-1 flex items-start gap-1">
           <svg class="w-3 h-3 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-              d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z"/>
+              d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857
+                 M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857
+                 m0 0a5.002 5.002 0 019.288 0"/>
           </svg>
-          <span>ประธาน: <span class="font-medium text-slate-600">${sc.chairperson}</span></span>
+          <span class="line-clamp-2">${escHtml(positionText)}${positions.length > 4 ? ' ...' : ''}</span>
         </p>` : ''}
-        ${sc.memberCount ? `
+        ${totalMembers ? `
         <p class="text-xs text-slate-400 mt-0.5 flex items-center gap-1">
           <svg class="w-3 h-3 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
@@ -590,16 +832,16 @@ function subCard(sc, i) {
                  M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857
                  m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0z"/>
           </svg>
-          <span>${sc.memberCount} คน</span>
+          <span>รวม ${escHtml(totalMembers)} คน</span>
         </p>` : ''}
-        ${sc.activeLink
-          ? `<a href="${sc.activeLink}" data-action="view-doc" data-title="ผัง: ${sc.department}"
+        ${docUrl
+          ? `<a href="${escHtml(docUrl)}" data-action="view-doc" data-title="${escHtml(docName || label)}"
                 class="mt-1.5 inline-flex items-center gap-1 text-xs font-medium text-emerald-600 hover:underline">
                <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
                    d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293
                       l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/>
-               </svg>ดูเอกสาร
+               </svg>${escHtml(docName || 'ดูเอกสาร')}
              </a>
              <div class="flex items-center gap-1 mt-1">
                <span class="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse inline-block"></span>
@@ -614,15 +856,12 @@ function subCard(sc, i) {
     </div>
   </div>`;
 }
-
-/* ═══════════════════════════════════════════════
-   PAST COMMITTEE — TIMELINE ITEM
-═══════════════════════════════════════════════ */
 function createTimelineItem(committee, index, isAdmin) {
   const buddYear = committee.TermStartDate
     ? new Date(committee.TermStartDate).getFullYear() + 543
     : '—';
-  const subList  = committee.SubCommitteeData ?? [];
+  const subList  = sortSubCommittees(committee.SubCommitteeData ?? []);
+  const sectionCount = getSubCommitteeSectionCount(subList);
   const bodyId   = `tl-body-${index}`;
 
   return `
@@ -644,7 +883,7 @@ function createTimelineItem(committee, index, isAdmin) {
           <p class="font-semibold text-slate-700 text-sm truncate" data-title>${committee.CommitteeTitle}</p>
           <p class="text-xs text-slate-400 mt-0.5">
             ${fmtDate(committee.TermStartDate, true)} — ${fmtDate(committee.TermEndDate, true)}
-            · <span class="font-medium">${subList.length}</span> คณะทำงานย่อย
+            · <span class="font-medium">${sectionCount}</span> คณะทำงานย่อย
           </p>
         </div>
 
@@ -743,7 +982,7 @@ function exportCommitteeExcel() {
     'วันเริ่มวาระ': c.TermStartDate ? fmtDate(c.TermStartDate) : '',
     'วันสิ้นสุดวาระ': c.TermEndDate ? fmtDate(c.TermEndDate) : '',
     'ชุดปัจจุบัน': Number(c.IsCurrent) === 1 ? 'ใช่' : 'ไม่',
-    'จำนวนคณะทำงานย่อย': (c.SubCommitteeData ?? []).length,
+    'จำนวนคณะทำงานย่อย': getSubCommitteeSectionCount(c.SubCommitteeData ?? []),
     'ลิงก์ผังองค์กร': c.MainOrgChartLink || '',
     'ลิงก์คำสั่งแต่งตั้ง': c.AppointmentDocLink || '',
   }));
@@ -752,15 +991,17 @@ function exportCommitteeExcel() {
   /* Sheet 2: sub-committees */
   const subRows = [];
   allCommittees.forEach(c => {
-    (c.SubCommitteeData ?? []).forEach(sc => {
+    sortSubCommittees(c.SubCommitteeData ?? []).forEach(sc => {
       subRows.push({
         'คณะกรรมการหลัก': c.CommitteeTitle || '',
         'วาระ (พ.ศ.)': c.TermStartDate ? new Date(c.TermStartDate).getFullYear() + 543 : '',
         'ชุดปัจจุบัน': Number(c.IsCurrent) === 1 ? 'ใช่' : 'ไม่',
-        'คณะทำงานย่อย': sc.department || '',
-        'ประธาน': sc.chairperson || '',
-        'จำนวนสมาชิก': sc.memberCount || '',
-        'ลิงก์เอกสาร': sc.activeLink || '',
+        'แผนก / Section': getSubCommitteeDepartmentLabel(sc),
+        'Safety Unit': getSubCommitteeUnitLabel(sc),
+        'คณะทำงานย่อย': getSubCommitteeLabel(sc) || '',
+        'ตำแหน่งในผัง': getPositionBreakdownText(sc),
+        'จำนวนสมาชิก': getSubCommitteeTotalMembers(sc) || '',
+        'ลิงก์เอกสาร': getDocumentUrlFromSub(sc) || '',
       });
     });
   });
@@ -777,17 +1018,18 @@ function exportCommitteeExcel() {
    PRINT STRUCTURE
 ═══════════════════════════════════════════════ */
 function printCommitteeStructure(committee) {
-  const subList = committee.SubCommitteeData ?? [];
+  const subList = sortSubCommittees(committee.SubCommitteeData ?? []);
+  const sectionCount = getSubCommitteeSectionCount(subList);
   const win = window.open('', '_blank', 'width=800,height=700');
   if (!win) { showToast('กรุณาอนุญาต popup สำหรับการพิมพ์', 'error'); return; }
 
   const subHtml = subList.length > 0
     ? subList.map((sc, i) => `
         <tr style="background:${i % 2 === 0 ? '#f8fafc' : '#ffffff'}">
-          <td style="padding:8px 12px;border:1px solid #e2e8f0">${sc.department || ''}</td>
-          <td style="padding:8px 12px;border:1px solid #e2e8f0">${sc.chairperson || '—'}</td>
-          <td style="padding:8px 12px;border:1px solid #e2e8f0;text-align:center">${sc.memberCount || '—'}</td>
-          <td style="padding:8px 12px;border:1px solid #e2e8f0">${sc.activeLink ? 'มีเอกสาร' : '—'}</td>
+          <td style="padding:8px 12px;border:1px solid #e2e8f0">${getSubCommitteeLabel(sc) || ''}</td>
+          <td style="padding:8px 12px;border:1px solid #e2e8f0">${getPositionBreakdownText(sc) || '—'}</td>
+          <td style="padding:8px 12px;border:1px solid #e2e8f0;text-align:center">${getSubCommitteeTotalMembers(sc) || '—'}</td>
+          <td style="padding:8px 12px;border:1px solid #e2e8f0">${getDocumentUrlFromSub(sc) ? 'มีเอกสาร' : '—'}</td>
         </tr>`).join('')
     : '<tr><td colspan="4" style="padding:12px;text-align:center;color:#94a3b8">ไม่มีคณะทำงานย่อย</td></tr>';
 
@@ -812,12 +1054,12 @@ function printCommitteeStructure(committee) {
   </head><body>
     <h1>${committee.CommitteeTitle || ''}</h1>
     <p class="meta">วาระ: ${fmtDate(committee.TermStartDate)} — ${fmtDate(committee.TermEndDate)} &nbsp;|&nbsp; พิมพ์เมื่อ: ${new Date().toLocaleDateString('th-TH', { year:'numeric',month:'long',day:'numeric' })}</p>
-    <div class="section-title">คณะทำงานย่อย (${subList.length} หน่วยงาน)</div>
+    <div class="section-title">คณะทำงานย่อย (${sectionCount} แผนก / Section)</div>
     <table>
       <tr>
         <th>หน่วยงาน / คณะทำงาน</th>
-        <th>ประธาน</th>
-        <th style="text-align:center">จำนวนสมาชิก</th>
+        <th>ตำแหน่งในผัง</th>
+        <th style="text-align:center">รวมสมาชิก</th>
         <th>เอกสาร</th>
       </tr>
       ${subHtml}
@@ -831,15 +1073,16 @@ function printCommitteeStructure(committee) {
    COPY TO CLIPBOARD
 ═══════════════════════════════════════════════ */
 function copyCommitteeText(committee) {
-  const subList = committee.SubCommitteeData ?? [];
+  const subList = sortSubCommittees(committee.SubCommitteeData ?? []);
+  const sectionCount = getSubCommitteeSectionCount(subList);
   let text = `${committee.CommitteeTitle}\n`;
   text += `วาระ: ${fmtDate(committee.TermStartDate)} — ${fmtDate(committee.TermEndDate)}\n`;
   if (subList.length > 0) {
-    text += `\nคณะทำงานย่อย (${subList.length} หน่วยงาน):\n`;
+    text += `\nคณะทำงานย่อย (${sectionCount} แผนก / Section):\n`;
     subList.forEach((sc, i) => {
-      text += `  ${i + 1}. ${sc.department}`;
-      if (sc.chairperson) text += ` (ประธาน: ${sc.chairperson})`;
-      if (sc.memberCount) text += ` — ${sc.memberCount} คน`;
+      text += `  ${i + 1}. ${getSubCommitteeLabel(sc)}`;
+      if (getPositionBreakdownText(sc)) text += ` (${getPositionBreakdownText(sc)})`;
+      if (getSubCommitteeTotalMembers(sc)) text += ` — รวม ${getSubCommitteeTotalMembers(sc)} คน`;
       text += '\n';
     });
   }
@@ -852,9 +1095,23 @@ function copyCommitteeText(committee) {
 /* ═══════════════════════════════════════════════
    FORM  (เพิ่ม / แก้ไข)
 ═══════════════════════════════════════════════ */
-function openCommitteeForm(committee = null) {
+async function openCommitteeForm(committee = null) {
   const isEditing = !!committee;
   tempSubCommittees = committee ? parseSubData(committee.SubCommitteeData) : [];
+
+  try {
+    await loadCommitteeMasterData();
+  } catch (err) {
+    showError(err);
+    return;
+  }
+
+  const departmentOptions = committeeMasterDepartments
+    .map(d => `<option value="${escHtml(d.id)}" data-name="${escHtml(d.name)}">${escHtml(d.name)}</option>`)
+    .join('');
+  const positionOptions = committeeMasterPositions
+    .map(p => `<option value="${escHtml(p.name)}" data-id="${escHtml(p.id)}"></option>`)
+    .join('');
 
   const html = `
   <form id="committee-form" class="space-y-5 px-1" novalidate>
@@ -960,15 +1217,25 @@ function openCommitteeForm(committee = null) {
         </span>
       </div>
 
-      <div class="flex gap-2 mb-3">
-        <input type="text" id="new-sub-name" class="form-input flex-1 rounded-xl text-sm"
-               placeholder="ชื่อหน่วยงาน / แผนก...">
+      <div class="grid grid-cols-1 sm:grid-cols-2 gap-2 mb-3">
+        <select id="new-sub-department" class="form-input rounded-xl text-sm">
+          <option value="">เลือกส่วนงาน / แผนก...</option>
+          ${departmentOptions}
+        </select>
+        <select id="new-sub-unit" class="form-input rounded-xl text-sm" disabled>
+          <option value="">เลือกยูนิต...</option>
+        </select>
+        <input type="file" id="new-sub-document" accept=".pdf"
+               class="sm:col-span-2 block w-full text-xs text-slate-500
+                      file:mr-3 file:py-2 file:px-4 file:rounded-lg file:border-0
+                      file:text-xs file:font-semibold file:bg-emerald-50 file:text-emerald-700
+                      hover:file:bg-emerald-100 transition-all">
         <button type="button" id="btn-add-sub"
-                class="flex-shrink-0 px-4 py-2 rounded-xl text-sm font-semibold text-white transition-colors"
-                style="background:#059669">+ เพิ่ม</button>
+                class="sm:col-span-2 px-4 py-2 rounded-xl text-sm font-semibold text-white transition-colors"
+                style="background:#059669">+ เพิ่มคณะทำงานย่อย</button>
       </div>
-
-      <div id="sub-committee-list" class="space-y-2 max-h-64 overflow-y-auto pr-1"></div>
+      <datalist id="committee-position-options">${positionOptions}</datalist>
+      <div id="sub-committee-list" class="space-y-2 max-h-[52vh] overflow-y-auto pr-1 custom-scrollbar"></div>
     </div>
 
     <div class="flex justify-end gap-3 pt-4 border-t border-slate-100">
@@ -984,7 +1251,7 @@ function openCommitteeForm(committee = null) {
     </div>
   </form>`;
 
-  openModal(isEditing ? 'แก้ไขข้อมูลคณะกรรมการ' : 'เพิ่มคณะกรรมการใหม่', html, 'max-w-2xl');
+  openModal(isEditing ? 'แก้ไขข้อมูลคณะกรรมการ' : 'เพิ่มคณะกรรมการใหม่', html, 'max-w-6xl');
   flatpickr('#TermStartDate', { locale: 'th', dateFormat: 'Y-m-d', mobileNative: true });
   flatpickr('#TermEndDate',   { locale: 'th', dateFormat: 'Y-m-d', mobileNative: true });
   renderSubCommitteeList();
@@ -1014,18 +1281,67 @@ function openCommitteeForm(committee = null) {
   setupDocTab('apt-tab-url', 'apt-tab-file', 'apt-panel-url', 'apt-panel-file', 'apt-link-input');
 
   /* inline add sub */
-  const addBtn    = document.getElementById('btn-add-sub');
-  const nameInput = document.getElementById('new-sub-name');
-  addBtn.addEventListener('click', () => {
-    const name = nameInput.value.trim();
-    if (!name) { nameInput.focus(); return; }
-    tempSubCommittees.push({ department: name, activeLink: '', chairperson: '', memberCount: '' });
-    nameInput.value = '';
-    nameInput.focus();
-    renderSubCommitteeList();
-  });
-  nameInput.addEventListener('keydown', (e) => {
-    if (e.key === 'Enter') { e.preventDefault(); addBtn.click(); }
+  const addBtn = document.getElementById('btn-add-sub');
+  const deptSelect = document.getElementById('new-sub-department');
+  const unitSelect = document.getElementById('new-sub-unit');
+  const docInput = document.getElementById('new-sub-document');
+
+  function refreshUnitOptions() {
+    const deptId = deptSelect.value;
+    const deptName = deptSelect.selectedOptions[0]?.dataset?.name || '';
+    const units = committeeMasterSafetyUnits.filter(u =>
+      !deptId || u.departmentId === deptId || u.departmentName === deptName
+    );
+    unitSelect.innerHTML = `<option value="">เลือกยูนิต...</option>` + units
+      .map(u => `<option value="${escHtml(u.id)}" data-name="${escHtml(u.name)}">${escHtml(u.name)}</option>`)
+      .join('');
+    unitSelect.disabled = !deptId || units.length === 0;
+  }
+
+  deptSelect.addEventListener('change', refreshUnitOptions);
+  refreshUnitOptions();
+
+  addBtn.addEventListener('click', async () => {
+    const deptId = deptSelect.value;
+    const department = deptSelect.selectedOptions[0]?.dataset?.name || '';
+    const unitId = unitSelect.value;
+    const unit = unitSelect.selectedOptions[0]?.dataset?.name || '';
+    const file = docInput.files?.[0];
+
+    if (!deptId) { deptSelect.focus(); showToast('กรุณาเลือกส่วนงาน / แผนก', 'warning'); return; }
+    if (!file) { docInput.focus(); showToast('กรุณาอัปโหลดไฟล์ PDF ของคณะทำงานย่อย', 'warning'); return; }
+    if (!/\.pdf$/i.test(file.name)) { showToast('ไฟล์คณะทำงานย่อยต้องเป็น PDF', 'error'); return; }
+
+    try {
+      addBtn.disabled = true;
+      addBtn.textContent = 'กำลังอัปโหลด...';
+      const up = new FormData();
+      up.append('document', file);
+      const upRes = await API.post('/upload/document', up, { headers: { 'Content-Type': 'multipart/form-data' } });
+      if (!upRes?.url) throw new Error('อัปโหลดไฟล์คณะทำงานย่อยไม่สำเร็จ');
+
+      tempSubCommittees.push({
+        departmentId: deptId,
+        department,
+        unitId,
+        unit,
+        chairperson: '',
+        memberCount: '',
+        positions: [],
+        documentUrl: upRes.url,
+        documentName: upRes.originalName || file.name,
+        activeLink: upRes.url
+      });
+      deptSelect.value = '';
+      docInput.value = '';
+      refreshUnitOptions();
+      renderSubCommitteeList();
+    } catch (err) {
+      showError(err);
+    } finally {
+      addBtn.disabled = false;
+      addBtn.textContent = '+ เพิ่มคณะทำงานย่อย';
+    }
   });
 
   /* submit */
@@ -1061,7 +1377,13 @@ function openCommitteeForm(committee = null) {
 
       const data = Object.fromEntries(formData.entries());
       data.IsCurrent        = formEl.querySelector('#IsCurrent').checked ? 1 : 0;
-      data.SubCommitteeData = JSON.stringify(tempSubCommittees);
+      data.SubCommitteeData = JSON.stringify(sortSubCommittees(tempSubCommittees).map(sub => {
+        const normalized = normalizeSubCommittee(sub);
+        normalized.activeLink = normalized.documentUrl;
+        normalized.memberCount = String(getSubCommitteeTotalMembers(normalized) || '');
+        normalized.chairperson = '';
+        return normalized;
+      }));
 
       if (data.id) {
         await API.put(`/committees/${data.id}`, data);
@@ -1084,101 +1406,150 @@ function openCommitteeForm(committee = null) {
 /* ── sub-committee list renderer ── */
 function renderSubCommitteeList() {
   const listEl = document.getElementById('sub-committee-list');
-  const badge  = document.getElementById('sub-count-badge');
+  const badge = document.getElementById('sub-count-badge');
   if (!listEl) return;
+  tempSubCommittees = sortSubCommittees(tempSubCommittees);
   if (badge) badge.textContent = `${tempSubCommittees.length} รายการ`;
 
   if (tempSubCommittees.length === 0) {
     listEl.innerHTML = `
       <div class="text-center text-sm text-slate-400 py-5 bg-slate-50 rounded-xl border border-dashed border-slate-200">
-        ยังไม่มีรายการ — เพิ่มชื่อหน่วยงานด้านบน
+        ยังไม่มีรายการ - เลือกส่วนงาน/ยูนิตและอัปโหลด PDF ด้านบน
       </div>`;
     return;
   }
 
   listEl.innerHTML = tempSubCommittees.map((sub, i) => {
-    const c    = avatarColor(i);
+    const c = avatarColor(i);
+    const label = getSubCommitteeUnitLabel(sub);
+    const departmentLabel = getSubCommitteeDepartmentLabel(sub);
+    const docUrl = getDocumentUrlFromSub(sub);
+    const docName = sub.documentName || getFilenameFromUrl(docUrl) || 'เอกสารคณะทำงานย่อย.pdf';
+    const positions = sub.positions || [];
+    const totalMembers = getSubCommitteeTotalMembers(sub);
     const init = getDeptInitials(sub.department);
-    const isFirst = i === 0;
-    const isLast  = i === tempSubCommittees.length - 1;
     return `
     <div class="bg-white border border-slate-200 rounded-xl p-3 shadow-sm" data-sub-idx="${i}">
       <div class="flex items-center gap-2 mb-2">
-        <div class="flex flex-col gap-0.5 flex-shrink-0">
-          <button type="button" data-action="sub-up" data-idx="${i}"
-                  class="p-0.5 rounded text-slate-300 hover:text-emerald-600 hover:bg-emerald-50 transition-colors
-                         ${isFirst ? 'invisible' : ''}">
-            <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 15l7-7 7 7"/>
-            </svg>
-          </button>
-          <button type="button" data-action="sub-down" data-idx="${i}"
-                  class="p-0.5 rounded text-slate-300 hover:text-emerald-600 hover:bg-emerald-50 transition-colors
-                         ${isLast ? 'invisible' : ''}">
-            <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M19 9l-7 7-7-7"/>
-            </svg>
-          </button>
+        <div class="flex-shrink-0 w-6 h-6 rounded-lg bg-slate-100 text-slate-400 text-[11px] font-bold flex items-center justify-center">
+          ${i + 1}
         </div>
         <div class="w-8 h-8 rounded-lg flex items-center justify-center text-xs font-bold flex-shrink-0"
-             style="background:${c.bg};color:${c.fg}">${init}</div>
-        <span class="text-sm font-semibold text-slate-700 flex-1 min-w-0 truncate" title="${sub.department}">${sub.department}</span>
+             style="background:${c.bg};color:${c.fg}">${escHtml(init)}</div>
+        <div class="flex-1 min-w-0">
+          <span class="text-sm font-semibold text-slate-700 block truncate" title="${escHtml(label)}">${escHtml(label)}</span>
+          <span class="text-xs text-slate-400 block truncate" title="${escHtml(departmentLabel)}">Section: ${escHtml(departmentLabel)}</span>
+          ${sub.unit ? `<span class="text-xs text-slate-400">เชื่อมโยงจาก Master Safety Unit</span>` : `<span class="text-xs text-slate-400">ใช้ชื่อแผนก / Section</span>`}
+        </div>
         <button type="button" data-action="sub-remove" data-idx="${i}"
                 class="flex-shrink-0 p-1.5 text-slate-300 hover:text-red-500 hover:bg-red-50 rounded-lg transition-colors">
-          <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
-          </svg>
+          <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
         </button>
       </div>
-      <div class="grid grid-cols-3 gap-2 ml-10">
-        <input type="text" placeholder="ประธาน..."
-               class="sub-chairperson-input col-span-1 text-xs border border-slate-200 rounded-lg px-2 py-1.5 bg-slate-50
-                      focus:outline-none focus:border-emerald-400 transition-colors"
-               data-idx="${i}" value="${sub.chairperson || ''}">
-        <input type="number" placeholder="จำนวน คน" min="0"
-               class="sub-membercount-input col-span-1 text-xs border border-slate-200 rounded-lg px-2 py-1.5 bg-slate-50
-                      focus:outline-none focus:border-emerald-400 transition-colors"
-               data-idx="${i}" value="${sub.memberCount || ''}">
-        <input type="text" placeholder="ลิงก์เอกสาร..."
-               class="sub-link-input col-span-1 text-xs border border-slate-200 rounded-lg px-2 py-1.5 bg-slate-50
-                      focus:outline-none focus:border-emerald-400 transition-colors"
-               data-idx="${i}" value="${sub.activeLink || ''}">
+      <div class="ml-10 rounded-lg border border-slate-100 bg-slate-50 p-2 space-y-2">
+        <div class="flex items-center justify-between gap-2">
+          <span class="text-xs font-semibold text-slate-600">ตำแหน่งในแผนผัง</span>
+          <span class="text-xs font-bold text-emerald-700">รวม ${escHtml(totalMembers)} คน</span>
+        </div>
+        <div class="space-y-1.5">
+          ${positions.length ? positions.map((position, posIdx) => `
+            <div class="grid grid-cols-[1fr_72px_28px] gap-1.5 items-center" data-position-idx="${posIdx}">
+              <input type="text" list="committee-position-options" placeholder="เช่น MGR, Supervisor, Leader"
+                     class="sub-position-name-input text-xs border border-slate-200 rounded-lg px-2 py-1.5 bg-white focus:outline-none focus:border-emerald-400 transition-colors"
+                     data-idx="${i}" data-pos-idx="${posIdx}" value="${escHtml(position.positionName || '')}">
+              <input type="number" placeholder="คน" min="0"
+                     class="sub-position-count-input text-xs border border-slate-200 rounded-lg px-2 py-1.5 bg-white focus:outline-none focus:border-emerald-400 transition-colors"
+                     data-idx="${i}" data-pos-idx="${posIdx}" value="${escHtml(position.count || '')}">
+              <button type="button" data-action="sub-position-remove" data-idx="${i}" data-pos-idx="${posIdx}"
+                      class="p-1.5 text-slate-300 hover:text-red-500 hover:bg-red-50 rounded-lg transition-colors" title="ลบตำแหน่ง">
+                <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
+              </button>
+            </div>`).join('') : `
+            <div class="text-xs text-slate-400 border border-dashed border-slate-200 rounded-lg px-2 py-2 bg-white">
+              ยังไม่มีตำแหน่ง - กดเพิ่มตำแหน่งด้านล่าง
+            </div>`}
+        </div>
+        <button type="button" data-action="sub-position-add" data-idx="${i}"
+                class="w-full text-xs font-semibold text-emerald-700 hover:text-emerald-800 bg-white border border-emerald-100 hover:border-emerald-200 rounded-lg py-1.5 transition-colors">
+          + เพิ่มตำแหน่ง
+        </button>
       </div>
-      <p class="text-xs text-slate-400 mt-1 ml-10">ประธาน / จำนวนสมาชิก / ลิงก์เอกสาร</p>
+      <div class="ml-10 mt-2 rounded-lg border border-slate-100 bg-slate-50 px-3 py-2">
+        <div class="flex items-center gap-2 min-w-0">
+          <svg class="w-4 h-4 text-emerald-600 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414A1 1 0 0119 9.414V19a2 2 0 01-2 2z"/></svg>
+          <a href="${escHtml(docUrl)}" data-action="view-doc" data-title="${escHtml(docName)}"
+             class="text-xs font-semibold text-emerald-700 truncate hover:underline flex-1 min-w-0">${escHtml(docName)}</a>
+          <label class="text-xs font-semibold text-slate-500 hover:text-emerald-700 cursor-pointer whitespace-nowrap">
+            เปลี่ยน PDF
+            <input type="file" accept=".pdf" class="hidden sub-doc-file-input" data-idx="${i}">
+          </label>
+        </div>
+      </div>
     </div>`;
   }).join('');
 
   listEl.onclick = (e) => {
     const btn = e.target.closest('[data-action]');
-    if (!btn) return;
+    if (!btn || btn.dataset.action === 'view-doc') return;
     const action = btn.dataset.action;
     const idx = parseInt(btn.dataset.idx, 10);
     if (action === 'sub-remove') {
       tempSubCommittees.splice(idx, 1);
       renderSubCommitteeList();
-    } else if (action === 'sub-up' && idx > 0) {
-      [tempSubCommittees[idx - 1], tempSubCommittees[idx]] = [tempSubCommittees[idx], tempSubCommittees[idx - 1]];
+    } else if (action === 'sub-position-add') {
+      tempSubCommittees[idx].positions = tempSubCommittees[idx].positions || [];
+      tempSubCommittees[idx].positions.push({ positionId: '', positionName: '', count: '' });
       renderSubCommitteeList();
-    } else if (action === 'sub-down' && idx < tempSubCommittees.length - 1) {
-      [tempSubCommittees[idx], tempSubCommittees[idx + 1]] = [tempSubCommittees[idx + 1], tempSubCommittees[idx]];
-      renderSubCommitteeList();
+    } else if (action === 'sub-position-remove') {
+      const posIdx = parseInt(btn.dataset.posIdx, 10);
+      if (!Number.isNaN(posIdx) && tempSubCommittees[idx]?.positions) {
+        tempSubCommittees[idx].positions.splice(posIdx, 1);
+        tempSubCommittees[idx].memberCount = String(getSubCommitteeTotalMembers(tempSubCommittees[idx]) || '');
+        renderSubCommitteeList();
+      }
     }
   };
-  listEl.onchange = (e) => {
+
+  listEl.onchange = async (e) => {
     const idx = parseInt(e.target.dataset.idx, 10);
     if (isNaN(idx)) return;
-    if (e.target.classList.contains('sub-link-input'))
-      tempSubCommittees[idx].activeLink = e.target.value.trim();
-    else if (e.target.classList.contains('sub-chairperson-input'))
-      tempSubCommittees[idx].chairperson = e.target.value.trim();
-    else if (e.target.classList.contains('sub-membercount-input'))
-      tempSubCommittees[idx].memberCount = e.target.value.trim();
+    if (e.target.classList.contains('sub-position-name-input')) {
+      const posIdx = parseInt(e.target.dataset.posIdx, 10);
+      if (!tempSubCommittees[idx].positions) tempSubCommittees[idx].positions = [];
+      if (!tempSubCommittees[idx].positions[posIdx]) tempSubCommittees[idx].positions[posIdx] = { positionId: '', positionName: '', count: '' };
+      const positionName = e.target.value.trim();
+      const matched = committeeMasterPositions.find(p => p.name.toLowerCase() === positionName.toLowerCase());
+      tempSubCommittees[idx].positions[posIdx].positionName = positionName;
+      tempSubCommittees[idx].positions[posIdx].positionId = matched?.id || '';
+    } else if (e.target.classList.contains('sub-position-count-input')) {
+      const posIdx = parseInt(e.target.dataset.posIdx, 10);
+      if (!tempSubCommittees[idx].positions) tempSubCommittees[idx].positions = [];
+      if (!tempSubCommittees[idx].positions[posIdx]) tempSubCommittees[idx].positions[posIdx] = { positionId: '', positionName: '', count: '' };
+      tempSubCommittees[idx].positions[posIdx].count = e.target.value.trim();
+      tempSubCommittees[idx].memberCount = String(getSubCommitteeTotalMembers(tempSubCommittees[idx]) || '');
+      renderSubCommitteeList();
+    } else if (e.target.classList.contains('sub-doc-file-input')) {
+      const file = e.target.files?.[0];
+      if (!file) return;
+      if (!/\.pdf$/i.test(file.name)) { showToast('ไฟล์คณะทำงานย่อยต้องเป็น PDF', 'error'); e.target.value = ''; return; }
+      try {
+        showLoading('กำลังอัปโหลด PDF...');
+        const up = new FormData();
+        up.append('document', file);
+        const upRes = await API.post('/upload/document', up, { headers: { 'Content-Type': 'multipart/form-data' } });
+        if (!upRes?.url) throw new Error('อัปโหลดไฟล์คณะทำงานย่อยไม่สำเร็จ');
+        tempSubCommittees[idx].documentUrl = upRes.url;
+        tempSubCommittees[idx].documentName = upRes.originalName || file.name;
+        tempSubCommittees[idx].activeLink = upRes.url;
+        renderSubCommitteeList();
+      } catch (err) {
+        showError(err);
+      } finally {
+        hideLoading();
+      }
+    }
   };
 }
-
-/* ═══════════════════════════════════════════════
-   EVENT LISTENERS (delegated, once)
-═══════════════════════════════════════════════ */
 function setupCommitteeEventListeners() {
   /* timeline expand/collapse */
   document.addEventListener('click', (e) => {
@@ -1199,7 +1570,7 @@ function setupCommitteeEventListeners() {
     if (!e.target.closest('#committee-page')) return;
 
     /* add committee */
-    if (e.target.closest('#btn-add-committee') || e.target.closest('#btn-add-committee-shortcut')) { openCommitteeForm(); return; }
+    if (e.target.closest('#btn-add-committee')) { openCommitteeForm(); return; }
 
     /* export excel */
     if (e.target.closest('#btn-export-excel')) { exportCommitteeExcel(); return; }

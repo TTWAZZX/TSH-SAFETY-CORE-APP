@@ -1,8 +1,8 @@
 // public/js/pages/training.js
 // Safety Training — department-based records (enterprise pattern)
 import { API } from '../api.js';
-import { openModal, closeModal, showToast, showConfirmationModal } from '../ui.js';
-import { buildActivityCard } from '../utils/activity-widget.js';
+import { openModal, closeModal, showToast, showConfirmationModal } from '../ui.js?v=20260602-mobile-nav-m53';
+import { buildActivityCard } from '../utils/activity-widget.js?v=20260602-activity-targets-at10';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // State
@@ -24,7 +24,7 @@ export async function loadTrainingPage() {
     if (!container) return;
 
     const user = TSHSession.getUser() || {};
-    _isAdmin = user.role === 'Admin' || user.Role === 'Admin';
+    _isAdmin = String(user.role || user.Role || '').toLowerCase() === 'admin';
 
     window.closeModal = closeModal;
 
@@ -252,16 +252,19 @@ async function _renderDashboardPanel() {
 
     let summary = null;
     let courses  = [];
+    let courseCatalog = [];
     let allRecs  = [];
     try {
-        const [sumRes, courseRes, recRes] = await Promise.all([
+        const [sumRes, courseRes, recRes, catalogRes] = await Promise.all([
             API.get(`/training/dept-summary?year=${_statsYear}`),
             API.get(`/training/course-summary?year=${_statsYear}`),
             API.get(`/training/dept-records?year=${_statsYear}`),
+            API.get('/training/courses'),
         ]);
-        summary  = sumRes.data    || null;
-        courses  = courseRes.data || [];
-        allRecs  = recRes.data    || [];
+        summary       = sumRes.data       || null;
+        courses       = courseRes.data    || [];
+        allRecs       = recRes.data       || [];
+        courseCatalog = catalogRes.data   || [];
     } catch { /* silent */ }
 
     const o        = summary?.overall || {};
@@ -271,66 +274,81 @@ async function _renderDashboardPanel() {
     const passed   = parseInt(o.totalPassed) || 0;
     const failed   = totalEmp - passed;
     const passRate = parseInt(o.passRate)    || 0;
+    const lowDeptCount = byDept.filter(d => {
+        const total = parseInt(d.TotalEmp) || 0;
+        const deptPassed = parseInt(d.PassedCount) || 0;
+        return total > 0 && Math.round(deptPassed * 100 / total) < 80;
+    }).length;
+    const noDataCount = allRecs.filter(r => !(parseInt(r.TotalEmp) > 0)).length;
+    const activeCourseCount = courseCatalog.filter(c => c.IsActive).length || courseCatalog.length;
+    const usedCourseCount = new Set(allRecs.map(r => r.CourseID || '__null__')).size;
+    const followUpRows = byDept
+        .map(d => {
+            const total = parseInt(d.TotalEmp) || 0;
+            const deptPassed = parseInt(d.PassedCount) || 0;
+            return { dept: d.Department, pct: total ? Math.round(deptPassed * 100 / total) : null };
+        })
+        .filter(d => d.pct !== null)
+        .sort((a, b) => a.pct - b.pct);
+    const topFollowUp = followUpRows[0] || null;
 
     const showMatrix = courses.length >= 2;
 
     panel.innerHTML = `
     <div class="space-y-6">
 
-        <!-- KPI Cards -->
+        <!-- Action Insights -->
         <div class="grid grid-cols-2 lg:grid-cols-4 gap-4">
-            <div class="bg-white rounded-xl p-5 border border-slate-100 shadow-sm">
+            <div class="bg-white rounded-xl p-5 border ${lowDeptCount ? 'border-red-100' : 'border-emerald-100'} shadow-sm">
                 <div class="flex items-center gap-3 mb-3">
-                    <div class="w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0 bg-emerald-50">
-                        <svg class="w-4 h-4 text-emerald-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4"/>
+                    <div class="w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0 ${lowDeptCount ? 'bg-red-50' : 'bg-emerald-50'}">
+                        <svg class="w-4 h-4 ${lowDeptCount ? 'text-red-500' : 'text-emerald-600'}" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v4m0 4h.01M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"/>
                         </svg>
                     </div>
-                    <p class="text-xs text-slate-500 font-medium">แผนกที่บันทึก</p>
+                    <p class="text-xs ${lowDeptCount ? 'text-red-600' : 'text-emerald-700'} font-bold">ต่ำกว่าเกณฑ์</p>
                 </div>
-                <p class="text-3xl font-bold text-slate-800">${deptCnt}</p>
-                <p class="text-xs text-slate-400 mt-1">แผนก · ปี ${_statsYear}</p>
+                <p class="text-3xl font-bold ${lowDeptCount ? 'text-red-600' : 'text-emerald-700'}">${lowDeptCount}</p>
+                <p class="text-xs text-slate-400 mt-1">แผนกต่ำกว่า 80%</p>
             </div>
 
-            <div class="bg-white rounded-xl p-5 border border-slate-100 shadow-sm">
+            <div class="bg-white rounded-xl p-5 border ${noDataCount ? 'border-amber-100' : 'border-slate-100'} shadow-sm">
                 <div class="flex items-center gap-3 mb-3">
-                    <div class="w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0 bg-emerald-50">
-                        <svg class="w-4 h-4 text-emerald-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0z"/>
+                    <div class="w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0 ${noDataCount ? 'bg-amber-50' : 'bg-slate-50'}">
+                        <svg class="w-4 h-4 ${noDataCount ? 'text-amber-600' : 'text-slate-500'}" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 17v-2a4 4 0 014-4h4m0 0l-3-3m3 3l-3 3M7 7h.01M7 11h.01M7 15h.01"/>
                         </svg>
                     </div>
-                    <p class="text-xs text-slate-500 font-medium">พนักงานเข้าอบรม</p>
+                    <p class="text-xs ${noDataCount ? 'text-amber-700' : 'text-slate-500'} font-bold">ยังไม่มีข้อมูล</p>
                 </div>
-                <p class="text-3xl font-bold text-slate-800">${totalEmp.toLocaleString()}</p>
-                <p class="text-xs text-slate-400 mt-1">คน</p>
+                <p class="text-3xl font-bold ${noDataCount ? 'text-amber-700' : 'text-slate-700'}">${noDataCount}</p>
+                <p class="text-xs text-slate-400 mt-1">รายการที่ Total = 0</p>
             </div>
 
-            <div class="bg-white rounded-xl p-5 border border-emerald-200 shadow-sm">
+            <div class="bg-white rounded-xl p-5 border border-sky-100 shadow-sm">
                 <div class="flex items-center gap-3 mb-3">
-                    <div class="w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0 bg-emerald-50">
-                        <svg class="w-4 h-4 text-emerald-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/>
+                    <div class="w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0 bg-sky-50">
+                        <svg class="w-4 h-4 text-sky-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10"/>
                         </svg>
                     </div>
-                    <p class="text-xs text-emerald-600 font-medium">ผ่านการอบรม</p>
+                    <p class="text-xs text-sky-700 font-bold">Course Coverage</p>
                 </div>
-                <p class="text-3xl font-bold text-emerald-600">${passed.toLocaleString()}</p>
-                <p class="text-xs text-slate-400 mt-1">ไม่ผ่าน ${failed.toLocaleString()} คน</p>
+                <p class="text-3xl font-bold text-sky-700">${usedCourseCount}/${activeCourseCount || 0}</p>
+                <p class="text-xs text-slate-400 mt-1">หลักสูตรที่มีบันทึก / Active</p>
             </div>
 
-            <div class="bg-white rounded-xl p-5 border border-emerald-200 shadow-sm">
+            <div class="bg-white rounded-xl p-5 border ${topFollowUp && topFollowUp.pct < 80 ? 'border-red-100' : 'border-emerald-100'} shadow-sm">
                 <div class="flex items-center gap-3 mb-3">
-                    <div class="w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0 bg-emerald-50">
-                        <svg class="w-4 h-4 text-emerald-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6"/>
+                    <div class="w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0 ${topFollowUp && topFollowUp.pct < 80 ? 'bg-red-50' : 'bg-emerald-50'}">
+                        <svg class="w-4 h-4 ${topFollowUp && topFollowUp.pct < 80 ? 'text-red-500' : 'text-emerald-600'}" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/>
                         </svg>
                     </div>
-                    <p class="text-xs text-emerald-600 font-medium">Pass Rate</p>
+                    <p class="text-xs ${topFollowUp && topFollowUp.pct < 80 ? 'text-red-600' : 'text-emerald-700'} font-bold">ติดตามก่อน</p>
                 </div>
-                <p class="text-3xl font-bold text-emerald-700">${passRate}%</p>
-                <div class="mt-2 w-full bg-slate-100 rounded-full h-1.5">
-                    <div class="h-1.5 rounded-full transition-all" style="width:${passRate}%;background:linear-gradient(90deg,#059669,#0d9488)"></div>
-                </div>
+                <p class="text-2xl font-bold ${topFollowUp && topFollowUp.pct < 80 ? 'text-red-600' : 'text-emerald-700'}">${topFollowUp ? topFollowUp.pct + '%' : '-'}</p>
+                <p class="text-xs text-slate-400 mt-1 truncate" title="${_esc(topFollowUp?.dept || '')}">${topFollowUp?.dept || 'ยังไม่มีข้อมูลให้ติดตาม'}</p>
             </div>
         </div>
 
@@ -652,8 +670,6 @@ async function _renderRecordsPanel() {
             </div>
         </div>
 
-        <div id="tr-rec-summary">${_buildRecordsSummary()}</div>
-
         <!-- Records Table -->
         <div id="tr-dept-wrap" class="ds-table-wrap">
             ${_buildRecordsTable()}
@@ -664,8 +680,6 @@ async function _renderRecordsPanel() {
     document.getElementById('tr-rec-year')?.addEventListener('change', async e => {
         _recYear = parseInt(e.target.value) || null;
         await _fetchDeptRecords(_recYear);
-        const summary = document.getElementById('tr-rec-summary');
-        if (summary) summary.innerHTML = _buildRecordsSummary();
         const wrap = document.getElementById('tr-dept-wrap');
         if (wrap) wrap.innerHTML = _buildRecordsTable();
         _updateRecCount();
@@ -679,48 +693,22 @@ async function _renderRecordsPanel() {
 
 function _updateRecCount() {
     const el = document.getElementById('tr-rec-count');
-    if (el) el.textContent = `${_deptRecords.length} รายการ`;
-}
-
-function _buildRecordsSummary() {
     const records = _deptRecords || [];
-    const totalEmployees = records.reduce((sum, r) => sum + (parseInt(r.TotalEmp) || 0), 0);
-    const totalPassed = records.reduce((sum, r) => sum + (parseInt(r.PassedCount) || 0), 0);
-    const avgCompliance = totalEmployees > 0 ? Math.round(totalPassed * 100 / totalEmployees) : null;
     const lowCompliance = records.filter(r => {
         const total = parseInt(r.TotalEmp) || 0;
         const passed = parseInt(r.PassedCount) || 0;
         return total > 0 && Math.round(passed * 100 / total) < 80;
     }).length;
     const noData = records.filter(r => !(parseInt(r.TotalEmp) > 0)).length;
-    const avgClass = avgCompliance === null ? 'text-slate-600 bg-slate-50 border-slate-200'
-        : avgCompliance >= 80 ? 'text-emerald-700 bg-emerald-50 border-emerald-100'
-        : avgCompliance >= 60 ? 'text-amber-700 bg-amber-50 border-amber-100'
-        : 'text-red-700 bg-red-50 border-red-100';
-
-    return `
-    <div class="grid grid-cols-2 lg:grid-cols-5 gap-3">
-        <div class="ds-metric-card px-4 py-3">
-            <p class="text-[10px] font-bold uppercase text-slate-400">Records</p>
-            <p class="mt-1 text-sm font-black text-slate-700">${records.length.toLocaleString()}</p>
-        </div>
-        <div class="ds-metric-card px-4 py-3">
-            <p class="text-[10px] font-bold uppercase text-slate-400">Employees</p>
-            <p class="mt-1 text-sm font-black text-slate-700">${totalEmployees.toLocaleString()}</p>
-        </div>
-        <div class="ds-metric-card is-good px-4 py-3">
-            <p class="text-[10px] font-bold uppercase text-emerald-500">Passed</p>
-            <p class="mt-1 text-sm font-black text-emerald-700">${totalPassed.toLocaleString()}</p>
-        </div>
-        <div class="rounded-xl border ${avgClass} px-4 py-3">
-            <p class="text-[10px] font-bold uppercase opacity-70">Avg Compliance</p>
-            <p class="mt-1 text-sm font-black">${avgCompliance === null ? '-' : avgCompliance + '%'}</p>
-        </div>
-        <div class="rounded-xl border ${lowCompliance ? 'border-red-100 bg-red-50' : 'border-slate-200 bg-white'} px-4 py-3">
-            <p class="text-[10px] font-bold uppercase ${lowCompliance ? 'text-red-500' : 'text-slate-400'}">Needs Follow-up</p>
-            <p class="mt-1 text-sm font-black ${lowCompliance ? 'text-red-700' : 'text-slate-700'}">${lowCompliance} low / ${noData} no data</p>
-        </div>
-    </div>`;
+    if (el) {
+        const lowBadge = lowCompliance
+            ? `<span class="text-red-500 font-semibold">${lowCompliance} ต่ำกว่าเกณฑ์</span>`
+            : `<span class="text-emerald-600 font-semibold">ไม่มีต่ำกว่าเกณฑ์</span>`;
+        const noDataBadge = noData
+            ? `<span class="text-amber-600 font-semibold">${noData} ไม่มีข้อมูล</span>`
+            : `<span class="text-slate-400">0 ไม่มีข้อมูล</span>`;
+        el.innerHTML = `${records.length} รายการ · ${lowBadge} · ${noDataBadge}`;
+    }
 }
 
 function _buildRecordsTable() {
@@ -930,6 +918,26 @@ async function openDeptRecordForm(r) {
         const data = Object.fromEntries(fd.entries());
         const btn  = document.getElementById('tr-dept-rec-submit');
         const errEl = document.getElementById('tr-dept-rec-err');
+        const totalEmp = data.TotalEmp === '' ? 0 : Number(data.TotalEmp);
+        const passedCount = data.PassedCount === '' ? 0 : Number(data.PassedCount);
+        const showErr = msg => {
+            if (errEl) { errEl.textContent = msg; errEl.classList.remove('hidden'); }
+        };
+        if (errEl) errEl.classList.add('hidden');
+        if (!data.Department || !data.Year) {
+            showErr('กรุณาเลือกแผนกและปี');
+            return;
+        }
+        if (!Number.isInteger(totalEmp) || totalEmp < 0 || !Number.isInteger(passedCount) || passedCount < 0) {
+            showErr('จำนวนพนักงานและจำนวนที่ผ่านต้องเป็นตัวเลข 0 ขึ้นไป');
+            return;
+        }
+        if (passedCount > totalEmp) {
+            showErr('จำนวนผ่านต้องไม่มากกว่าจำนวนพนักงาน');
+            return;
+        }
+        data.TotalEmp = totalEmp;
+        data.PassedCount = passedCount;
         btn.disabled = true;
         btn.innerHTML = '<span class="animate-spin inline-block w-4 h-4 border-2 border-white border-t-transparent rounded-full mr-1"></span>กำลังบันทึก...';
 
@@ -950,7 +958,7 @@ async function openDeptRecordForm(r) {
             _loadHeroStats();
             if (_activeTab === 'dashboard') _renderDashboardPanel();
         } catch (err) {
-            if (errEl) { errEl.textContent = err.message || 'เกิดข้อผิดพลาด'; errEl.classList.remove('hidden'); }
+            showErr(_errText(err));
             btn.disabled = false;
             btn.textContent = 'บันทึกข้อมูล';
         }
@@ -1116,6 +1124,27 @@ async function openCourseForm(id) {
         const data = Object.fromEntries(fd.entries());
         if (isEdit) data.IsActive = fd.get('IsActive') === 'on' ? 1 : 0;
         const btn  = document.getElementById('tr-course-submit');
+        const errEl = document.getElementById('tr-course-err');
+        const duration = data.DurationHours === '' ? 0 : Number(data.DurationHours);
+        const passScore = data.PassScore === '' ? 70 : Number(data.PassScore);
+        const showErr = msg => {
+            if (errEl) { errEl.textContent = msg; errEl.classList.remove('hidden'); }
+        };
+        if (errEl) errEl.classList.add('hidden');
+        if (!String(data.CourseName || '').trim()) {
+            showErr('กรุณากรอกชื่อหลักสูตร');
+            return;
+        }
+        if (!Number.isFinite(duration) || duration < 0) {
+            showErr('ระยะเวลาต้องเป็นตัวเลข 0 ขึ้นไป');
+            return;
+        }
+        if (!Number.isFinite(passScore) || passScore < 0 || passScore > 100) {
+            showErr('เกณฑ์ผ่านต้องอยู่ระหว่าง 0-100');
+            return;
+        }
+        data.DurationHours = duration;
+        data.PassScore = passScore;
         btn.disabled = true;
         btn.innerHTML = '<span class="animate-spin inline-block w-4 h-4 border-2 border-white border-t-transparent rounded-full mr-1"></span>กำลังบันทึก...';
 
@@ -1129,8 +1158,7 @@ async function openCourseForm(id) {
             showToast(isEdit ? 'อัปเดตหลักสูตรสำเร็จ' : 'เพิ่มหลักสูตรสำเร็จ', 'success');
             _renderCoursesPanel();
         } catch (err) {
-            const el = document.getElementById('tr-course-err');
-            if (el) { el.textContent = err.message || 'เกิดข้อผิดพลาด'; el.classList.remove('hidden'); }
+            showErr(_errText(err));
             btn.disabled = false;
             btn.textContent = 'บันทึก';
         }
@@ -1157,7 +1185,7 @@ window._trDeleteDeptRecord = async (id, dept) => {
         _updateRecCount();
         _loadHeroStats();
     } catch (err) {
-        showToast(err.message || 'เกิดข้อผิดพลาด', 'error');
+        showToast(_errText(err), 'error');
     }
 };
 
@@ -1171,7 +1199,7 @@ window._trDeleteCourse = async (id, name) => {
         showToast('ลบหลักสูตรสำเร็จ', 'success');
         _renderCoursesPanel();
     } catch (err) {
-        showToast(err.message || 'เกิดข้อผิดพลาด', 'error');
+        showToast(_errText(err), 'error');
     }
 };
 
@@ -1199,4 +1227,13 @@ function _esc(str) {
         .replace(/\\/g, '\\\\')
         .replace(/'/g, "\\'")
         .replace(/"/g, '&quot;');
+}
+
+function _errText(err, fallback = 'เกิดข้อผิดพลาด กรุณาลองใหม่อีกครั้ง') {
+    const msg = String(err?.message || err?.response?.message || '').trim();
+    if (!msg) return fallback;
+    if (/sql|database|constraint|foreign key|duplicate|syntax|undefined|null|internal server/i.test(msg)) {
+        return fallback;
+    }
+    return msg;
 }
