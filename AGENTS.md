@@ -78,6 +78,115 @@ Read:
 
 Do not assume project behavior without reading the relevant documentation first.
 
+## Context Efficiency
+
+Read only the documentation required for the current task.
+
+Always read:
+
+- `AGENTS.md`
+- `CLAUDE.md`
+
+Read additional documents only when necessary:
+
+- `ARCHITECTURE.md` -> when the task affects APIs, database, backend, frontend structure, authentication, uploads, or system design.
+- `DEPLOYMENT.md` -> when the task affects deployment, production, backups, smoke tests, FTP uploads, rollback procedures, or hosting configuration.
+- `CHANGELOG.md` -> when the task affects existing behavior, backward compatibility, historical implementations, previous deployments, or legacy functionality.
+- `ROADMAP.md` -> when the task involves planning, technical debt, future development, refactoring strategy, or project direction.
+
+Guidelines:
+
+- Do not load large documentation files unless they are relevant to the task.
+- Minimize context usage whenever possible.
+- Prefer targeted document loading instead of reading all project documents.
+- Preserve context budget for code analysis and implementation work.
+- If uncertain, explain which documents need to be read and why.
+
+## Analysis Reuse
+
+When a plan has already been approved, do not repeat project discovery, architecture discovery, changelog review, or requirement analysis. Reuse previous approved findings whenever possible and proceed directly to implementation.
+
+If the current session already contains:
+
+- approved requirements
+- approved implementation plan
+- approved risk assessment
+- approved affected files list
+
+then:
+
+- avoid re-reading large documentation files unnecessarily
+- avoid repeating the same analysis
+- avoid generating duplicate gap analysis reports
+- focus on implementation and verification
+
+Only perform additional discovery if:
+
+- requirements have changed
+- new risks are discovered
+- implementation reveals missing information
+- the user explicitly requests a new analysis
+
+The goal is to minimize context usage, reduce token consumption, reduce repeated project discovery, and preserve implementation capacity for large tasks. Prefer continuing from approved findings rather than restarting analysis.
+
+### Session Continuity Integration
+
+When generating a Handoff Report, include:
+
+- approved findings
+- approved implementation plan
+- approved risks
+- approved scope
+
+so that future sessions can continue implementation without repeating discovery work.
+
+## Session Continuity
+
+If context usage exceeds 80% or quota appears close to exhaustion, stop implementation and generate continuity notes before the session ends.
+
+Generate:
+
+- Handoff Report
+- Remaining Tasks
+- Risks
+- Testing Status
+- Ready-to-use continuation prompt
+
+Prefer generating a handoff before context becomes critically low. Do not wait until the session is completely exhausted. Preserve implementation details needed for continuity and minimize repeated project discovery work in future sessions.
+
+### Handoff Report Requirements
+
+The handoff report must include:
+
+1. Project / Feature being worked on
+2. Current objective
+3. Completed work
+4. Remaining work
+5. Files modified
+6. Files still requiring changes
+7. Related APIs
+8. Related database logic
+9. Risks and known issues
+10. Verification and testing status
+11. Recommended next steps
+
+### Continuation Prompt Requirements
+
+Generate a copy-paste ready prompt for a new Codex session.
+
+The continuation prompt must include:
+
+- Current project context
+- Current feature context
+- Completed implementation
+- Remaining implementation
+- Relevant files
+- Risks
+- Testing status
+- Exact next task
+
+The goal is that a new Codex session can continue work immediately without re-discovering project context.
+
 ## Before Coding Checklist
 
 - Confirm whether the task is documentation-only or application behavior work.

@@ -309,7 +309,30 @@ export function showConfirmationModal(title, message) {
  * แสดงเอกสารใน Modal
  */
 export function showDocumentModal(originalUrl, title = 'เอกสาร') {
-    const url = (originalUrl || '').trim();
+    const normalizeLegacyUploadUrl = (rawUrl) => {
+        const raw = (rawUrl || '').trim();
+        try {
+            const parsed = new URL(raw, window.location.href);
+            const host = parsed.hostname.toLowerCase();
+            const currentHost = window.location.hostname.toLowerCase();
+            const targetIsLocal = host === 'localhost' || host === '127.0.0.1' || host === '::1';
+            const currentIsLocal = currentHost === 'localhost' || currentHost === '127.0.0.1' || currentHost === '::1';
+            const uploadIndex = parsed.pathname.indexOf('/uploads/');
+            if (targetIsLocal && !currentIsLocal && uploadIndex >= 0) {
+                const appPath = window.location.pathname || '/';
+                const marker = '/index.html';
+                const basePath = appPath.includes(marker)
+                    ? appPath.slice(0, appPath.indexOf(marker))
+                    : appPath.replace(/\/[^/]*$/, '');
+                const base = basePath.replace(/\/+$/, '');
+                return `${window.location.origin}${base}${parsed.pathname.slice(uploadIndex)}${parsed.search}${parsed.hash}`;
+            }
+        } catch {
+            return raw;
+        }
+        return raw;
+    };
+    const url = normalizeLegacyUploadUrl(originalUrl);
     const escapeAttr = (value) => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
     const safeUrl = escapeAttr(url);
     const getUrlFilename = () => {

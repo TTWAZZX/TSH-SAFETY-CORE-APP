@@ -65,6 +65,14 @@ function patrol_is_admin(array $user): bool
     return strcasecmp((string) ($user['role'] ?? $user['Role'] ?? ''), 'Admin') === 0;
 }
 
+function patrol_can_view_roster_attendance_detail(string $employeeId, string $group): bool
+{
+    if (!in_array($group, ['top_management', 'supervisor'], true)) {
+        return false;
+    }
+    return (bool) db_row('SELECT id FROM patrol_roster WHERE EmployeeID=? AND RosterGroup=? LIMIT 1', [$employeeId, $group]);
+}
+
 function patrol_is_list_array(array $items): bool
 {
     $expected = 0;
@@ -328,6 +336,17 @@ function patrol_monthly_required_from_yearly_target(int $yearlyTarget, int $mont
     return max(0, $current - $previous);
 }
 
+function patrol_current_monthly_requirement(int $year, int $yearlyTarget): int
+{
+    $month = max(1, min(12, patrol_due_month($year) ?: 1));
+    return patrol_monthly_required_from_yearly_target($yearlyTarget, $month);
+}
+
+function patrol_supervisor_requirement_from_schedule_count(int $count): int
+{
+    return $count > 0 ? (int) ceil($count / 2) : 0;
+}
+
 function patrol_top_sessions(string $employeeId, int $year): array
 {
     $base = db_row('SELECT TeamID,PatrolType FROM patrol_team_members WHERE EmployeeID=? LIMIT 1', [$employeeId]);
@@ -428,15 +447,13 @@ function patrol_user_month_schedule(string $employeeId, int $year, int $month): 
     return ['items' => $items, 'required' => count($items), 'completed' => $completed, 'attendance' => $attendance];
 }
 
-function patrol_supervisor_schedule_slots(int $year, int $yearlyTarget): array
+function patrol_supervisor_schedule_slots(int $year): array
 {
     $rows = db_rows("SELECT s.SessionID AS id,s.TeamID,s.PatrolDate,s.PatrolRound,s.Status,t.Name AS TeamName,t.Color AS TeamColor,a.Name AS AreaName,a.Code AS AreaCode FROM patrol_sessions s LEFT JOIN patrol_teams t ON t.id=s.TeamID LEFT JOIN patrol_areas a ON a.id=s.AreaID WHERE YEAR(s.PatrolDate)=? AND (s.Status IS NULL OR s.Status<>'Cancelled') ORDER BY s.PatrolDate,s.PatrolRound,s.TeamID", [$year]);
-    $byMonth = [];
-    for ($m = 1; $m <= 12; $m++) $byMonth[$m] = [];
     $seen = [];
+    $slots = [];
     foreach ($rows as $row) {
         $date = substr((string) $row['PatrolDate'], 0, 10);
-        $month = (int) substr($date, 5, 2);
         $round = (int) ($row['PatrolRound'] ?? 0);
         $key = $date . ':' . $round;
         if (isset($seen[$key])) continue;
@@ -447,13 +464,7 @@ function patrol_supervisor_schedule_slots(int $year, int $yearlyTarget): array
         $row['ScheduledDate'] = $date;
         $row['date'] = $date;
         $row['PatrolRound'] = $round;
-        $byMonth[$month][] = $row;
-    }
-    $target = $yearlyTarget > 0 ? $yearlyTarget : patrol_supervisor_monthly_requirement() * 12;
-    $slots = [];
-    for ($m = 1; $m <= 12; $m++) {
-        $required = patrol_monthly_required_from_yearly_target($target, $m);
-        $slots = array_merge($slots, array_slice($byMonth[$m], 0, $required));
+        $slots[] = $row;
     }
     return $slots;
 }
@@ -636,7 +647,8 @@ function patrol_resolve_scheduled_session(string $employeeId, string $date, ?str
     }
     if ($session) {
         $exists = db_row('SELECT id FROM patrol_attendance WHERE UserID=? AND ScheduledSessionID=? LIMIT 1', [$employeeId, $session['id']]);
-        if ($exists) {
+        $existsDate = db_row('SELECT id FROM patrol_attendance WHERE UserID=? AND DATE(PatrolDate)=? AND (ScheduledSessionID IS NULL OR ScheduledSessionID="") LIMIT 1', [$employeeId, substr((string) $session['PatrolDate'], 0, 10)]);
+        if ($exists || $existsDate) {
             json_response(['success' => false, 'message' => 'Selected schedule is already completed.'], 409);
         }
     }
@@ -764,13 +776,21 @@ function patrol_attendance_detail_supervisor(string $employeeId, int $year): arr
         $records[$idx] = $r;
         $byMonth[$m][] = $r;
     }
-    $schedule = patrol_attach_supervisor_records_to_schedule($records, patrol_supervisor_schedule_slots($year, $yearlyTarget));
+    $schedule = patrol_attach_supervisor_records_to_schedule($records, patrol_supervisor_schedule_slots($year));
     $scheduleByMonth = [];
     foreach ($schedule as $item) {
         $m = (int) substr((string) ($item['date'] ?? $item['PatrolDate']), 5, 2);
         if (!isset($scheduleByMonth[$m])) $scheduleByMonth[$m] = [];
         $scheduleByMonth[$m][] = $item;
     }
+    $scheduledRequirementByMonth = [];
+    $scheduledYearlyTarget = 0;
+    for ($m = 1; $m <= 12; $m++) {
+        $monthRequirement = patrol_supervisor_requirement_from_schedule_count(count($scheduleByMonth[$m] ?? []));
+        $scheduledRequirementByMonth[$m] = $monthRequirement;
+        $scheduledYearlyTarget += $monthRequirement;
+    }
+    $effectiveYearlyTarget = $scheduledYearlyTarget > 0 ? $scheduledYearlyTarget : $yearlyTarget;
     $periods = [];
     $requiredToDate = 0;
     $completedToDate = 0;
@@ -778,7 +798,7 @@ function patrol_attendance_detail_supervisor(string $employeeId, int $year): arr
         $monthRecords = $byMonth[$m] ?? [];
         $completed = count($monthRecords);
         $isDue = $m <= $dueMonth;
-        $monthRequirement = patrol_monthly_required_from_yearly_target($yearlyTarget, $m);
+        $monthRequirement = $scheduledRequirementByMonth[$m] ?? 0;
         $required = $isDue ? $monthRequirement : 0;
         if ($isDue) {
             $requiredToDate += $monthRequirement;
@@ -796,8 +816,9 @@ function patrol_attendance_detail_supervisor(string $employeeId, int $year): arr
             'items' => $scheduleByMonth[$m] ?? [],
         ];
     }
+    $currentMonth = max(1, min(12, patrol_due_month($year) ?: 1));
     $openSchedule = array_values(array_filter($schedule, static function ($item) {
-        return empty($item['isCompleted']) && substr((string) ($item['date'] ?? $item['PatrolDate']), 0, 10) <= date('Y-m-d');
+        return empty($item['isCompleted']);
     }));
     $completed = count($records);
     return [
@@ -805,20 +826,21 @@ function patrol_attendance_detail_supervisor(string $employeeId, int $year): arr
         'group' => 'supervisor',
         'year' => $year,
         'employee' => $employee,
-        'roster' => ['RosterID' => (int) $roster['RosterID'], 'TargetPerYear' => $yearlyTarget],
-        'monthlyRequirement' => patrol_supervisor_monthly_requirement(),
+        'roster' => ['RosterID' => (int) $roster['RosterID'], 'TargetPerYear' => $effectiveYearlyTarget, 'ConfiguredTargetPerYear' => $yearlyTarget],
+        'monthlyRequirement' => (int) ($scheduledRequirementByMonth[$currentMonth] ?? 0),
         'targetSource' => $targetSource,
         'summary' => [
             'completed' => $completed,
             'completedToDateCapped' => $completedToDate,
             'requiredToDate' => $requiredToDate,
-            'yearlyTarget' => $yearlyTarget,
+            'yearlyTarget' => $effectiveYearlyTarget,
+            'configuredYearlyTarget' => $yearlyTarget,
             'targetSource' => $targetSource,
             'scheduledTotal' => count($schedule),
             'missingToDate' => max(0, $requiredToDate - $completedToDate),
             'upcomingMonths' => max(0, 12 - $dueMonth),
             'progressToDatePct' => patrol_pct($completedToDate, $requiredToDate),
-            'fullYearPct' => patrol_pct($completed, $yearlyTarget),
+            'fullYearPct' => patrol_pct($completed, $effectiveYearlyTarget),
         ],
         'periods' => $periods,
         'schedule' => $schedule,
@@ -895,10 +917,10 @@ function handle_patrol_routes(string $method, string $path): bool
         $employeeId = trim((string) ($_GET['employeeId'] ?? $uid));
         $group = trim((string) ($_GET['group'] ?? 'top_management'));
         if ($employeeId === '') json_response(['success' => false, 'message' => 'employeeId is required.'], 400);
-        if (!patrol_is_admin($user) && $employeeId !== $uid) json_response(['success' => false, 'message' => 'Permission denied.'], 403);
+        if (!in_array($group, ['top_management', 'supervisor'], true)) json_response(['success' => false, 'message' => 'group is invalid.'], 400);
+        if (!patrol_is_admin($user) && $employeeId !== $uid && !patrol_can_view_roster_attendance_detail($employeeId, $group)) json_response(['success' => false, 'message' => 'Permission denied.'], 403);
         if ($group === 'supervisor') json_response(['success' => true, 'data' => patrol_attendance_detail_supervisor($employeeId, $year)]);
         if ($group === 'top_management') json_response(['success' => true, 'data' => patrol_attendance_detail_top($employeeId, $year)]);
-        json_response(['success' => false, 'message' => 'group is invalid.'], 400);
     }
 
     if ($method === 'GET' && $path === '/patrol/my-schedule') { [$year, $month] = patrol_validate_ym($_GET['year'] ?? null, $_GET['month'] ?? null); json_response(patrol_user_month_schedule($uid, $year, $month)['items']); }
@@ -1128,7 +1150,7 @@ function handle_patrol_routes(string $method, string $path): bool
         ]]]);
     }
     if ($method === 'GET' && $path === '/patrol/member-attendance') { if (empty($_GET['employeeId'])) json_response(['success' => false, 'message' => 'employeeId is required.'], 400); json_response(['success' => true, 'data' => db_rows('SELECT id,PatrolDate,PatrolType,Area,Notes,ScheduledSessionID FROM patrol_attendance WHERE UserID=? AND YEAR(PatrolDate)=? ORDER BY PatrolDate DESC,id DESC', [$_GET['employeeId'], patrol_query_year()])]); }
-    if ($method === 'GET' && $path === '/patrol/my-self-patrol') { $year = patrol_query_year(); $month = patrol_query_month(); $emp = db_row('SELECT mp.IsSupervisorPatrol,e.Position FROM employees e LEFT JOIN master_positions mp ON mp.Name=e.Position WHERE e.EmployeeID=?', [$uid]); $roster = db_row("SELECT id FROM patrol_roster WHERE EmployeeID=? AND RosterGroup='supervisor' LIMIT 1", [$uid]); if ((!$emp || empty($emp['IsSupervisorPatrol'])) && !$roster) json_response(['success' => true, 'data' => ['isSupervisorPatrol' => false, 'checkins' => []]]); $detail = patrol_attendance_detail_supervisor($uid, $year); $period = []; foreach ($detail['periods'] ?? [] as $p) { if ((int) ($p['month'] ?? 0) === $month) { $period = $p; break; } } $items = $period['items'] ?? []; $open = array_values(array_filter($items, static function ($item) { return empty($item['isCompleted']) && substr((string) ($item['date'] ?? $item['PatrolDate']), 0, 10) <= date('Y-m-d'); })); json_response(['success' => true, 'data' => ['isSupervisorPatrol' => true, 'position' => $emp['Position'] ?? ($detail['employee']['Position'] ?? ''), 'checkins' => $period['records'] ?? [], 'target' => (int) ($period['monthlyRequirement'] ?? ($period['required'] ?? 0)), 'yearlyTarget' => (int) ($detail['summary']['yearlyTarget'] ?? 0), 'yearlyCompleted' => (int) ($detail['summary']['completed'] ?? 0), 'targetSource' => $detail['targetSource'] ?? ($detail['summary']['targetSource'] ?? 'patrol_roster'), 'schedule' => $items, 'openSchedule' => $open]]); }
+    if ($method === 'GET' && $path === '/patrol/my-self-patrol') { $year = patrol_query_year(); $month = patrol_query_month(); $emp = db_row('SELECT mp.IsSupervisorPatrol,e.Position FROM employees e LEFT JOIN master_positions mp ON mp.Name=e.Position WHERE e.EmployeeID=?', [$uid]); $roster = db_row("SELECT id FROM patrol_roster WHERE EmployeeID=? AND RosterGroup='supervisor' LIMIT 1", [$uid]); if (!$roster) json_response(['success' => true, 'data' => ['isSupervisorPatrol' => false, 'checkins' => []]]); $detail = patrol_attendance_detail_supervisor($uid, $year); $period = []; foreach ($detail['periods'] ?? [] as $p) { if ((int) ($p['month'] ?? 0) === $month) { $period = $p; break; } } $items = $period['items'] ?? []; $open = array_values(array_filter($items, static function ($item) { return empty($item['isCompleted']); })); json_response(['success' => true, 'data' => ['isSupervisorPatrol' => true, 'position' => $emp['Position'] ?? ($detail['employee']['Position'] ?? ''), 'checkins' => $period['records'] ?? [], 'target' => (int) ($period['monthlyRequirement'] ?? ($period['required'] ?? 0)), 'yearlyTarget' => (int) ($detail['summary']['yearlyTarget'] ?? 0), 'yearlyCompleted' => (int) ($detail['summary']['completed'] ?? 0), 'targetSource' => $detail['targetSource'] ?? ($detail['summary']['targetSource'] ?? 'patrol_roster'), 'schedule' => $items, 'openSchedule' => $open]]); }
     if ($method === 'POST' && $path === '/patrol/self-checkin') { $b = json_body(); $date = patrol_valid_date($b['CheckinDate'] ?? null); if (!$date) json_response(['success' => false, 'message' => 'CheckinDate is required.'], 400); $emp = db_row('SELECT mp.IsSupervisorPatrol FROM employees e LEFT JOIN master_positions mp ON mp.Name=e.Position WHERE e.EmployeeID=?', [$uid]); if (!$emp || empty($emp['IsSupervisorPatrol'])) { $roster = db_row("SELECT id FROM patrol_roster WHERE EmployeeID=? AND RosterGroup='supervisor' LIMIT 1", [$uid]); if (!$roster) json_response(['success' => false, 'message' => 'Position is not allowed for Self-Patrol.'], 403); } $resolved = patrol_resolve_supervisor_scheduled_session($uid, $date, $b['ScheduledSessionID'] ?? null); $effectiveDate = $resolved['date']; $session = $resolved['session'] ?? null; db_execute('INSERT INTO patrol_self_checkin(EmployeeID,CheckinDate,Location,Notes,Year,Month,RecordedBy,ScheduledSessionID) VALUES(?,?,?,?,?,?,?,?)', [$uid, $effectiveDate, $b['Location'] ?? null, $b['Notes'] ?? null, (int) substr($effectiveDate, 0, 4), (int) substr($effectiveDate, 5, 2), $uid, $session['id'] ?? null]); json_response(['success' => true, 'id' => (int) db()->lastInsertId()]); }
     $p = route_params($path, '/patrol/self-checkin/:id'); if ($p !== null && $method === 'DELETE') { $row = db_row('SELECT EmployeeID FROM patrol_self_checkin WHERE id=?', [$p['id']]); if (!$row) json_response(['success' => false, 'message' => 'Not found.'], 404); if ((string) $row['EmployeeID'] !== $uid && !patrol_is_admin($user)) json_response(['success' => false, 'message' => 'Permission denied.'], 403); db_execute('DELETE FROM patrol_self_checkin WHERE id=?', [$p['id']]); json_response(['success' => true]); }
     if ($method === 'GET' && $path === '/patrol/supervisor-overview') {
@@ -1154,7 +1176,7 @@ function handle_patrol_routes(string $method, string $path): bool
             $m['completedToDateCapped'] = $completedToDate;
             $m['missingToDate'] = (int) ($summary['missingToDate'] ?? 0);
             $m['upcomingMonths'] = (int) ($summary['upcomingMonths'] ?? 0);
-            $m['monthlyRequirement'] = (int) ($detail['monthlyRequirement'] ?? patrol_supervisor_monthly_requirement());
+            $m['monthlyRequirement'] = (int) ($detail['monthlyRequirement'] ?? patrol_current_monthly_requirement($year, $yearlyTarget));
         }
         unset($m);
         json_response(['success' => true, 'data' => $members]);
@@ -1177,9 +1199,9 @@ function handle_patrol_routes(string $method, string $path): bool
         json_response(['success' => true, 'data' => $out]);
     }
     if ($method === 'GET' && $path === '/patrol/supervisor-checkins') { if (empty($_GET['employeeId'])) json_response(['success' => false, 'message' => 'employeeId is required.'], 400); json_response(['success' => true, 'data' => db_rows('SELECT id,CheckinDate,Location,Notes,Year,Month,RecordedBy FROM patrol_self_checkin WHERE EmployeeID=? AND Year=? ORDER BY CheckinDate DESC', [$_GET['employeeId'], patrol_query_year()])]); }
-    if ($method === 'POST' && $path === '/patrol/admin-record') { require_admin(); $b = json_body(); $date = patrol_valid_date($b['PatrolDate'] ?? null); if (empty($b['EmployeeID']) || !$date) json_response(['success' => false, 'message' => 'EmployeeID and PatrolDate are required.'], 400); $emp = db_row('SELECT e.EmployeeName,t.Name AS TeamName FROM employees e LEFT JOIN patrol_team_members tm ON tm.EmployeeID=e.EmployeeID LEFT JOIN patrol_teams t ON t.id=tm.TeamID WHERE e.EmployeeID=? LIMIT 1', [$b['EmployeeID']]); if (!$emp) json_response(['success' => false, 'message' => 'Employee not found.'], 404); $resolved = patrol_resolve_scheduled_session((string) $b['EmployeeID'], $date, $b['ScheduledSessionID'] ?? null); $session = $resolved['session'] ?? null; $area = trim((string) ($b['Area'] ?? '')) ?: null; if (!$area && $session) $area = $session['AreaName'] ?: ($session['AreaCode'] ?? null); db_execute('INSERT INTO patrol_attendance(UserID,UserName,TeamName,WeekNumber,PatrolDate,Year,PatrolType,Area,Notes,RecordedBy,ScheduledSessionID) VALUES(?,?,?,?,?,?,?,?,?,?,?)', [$b['EmployeeID'], $emp['EmployeeName'], $emp['TeamName'] ?? '', patrol_week($date), $date, (int) substr($date, 0, 4), patrol_allowed_type($b['PatrolType'] ?? null), $area, $b['Notes'] ?? null, $uid, $session['id'] ?? null]); json_response(['success' => true, 'id' => (int) db()->lastInsertId()]); }
+    if ($method === 'POST' && $path === '/patrol/admin-record') { require_admin(); $b = json_body(); $date = patrol_valid_date($b['PatrolDate'] ?? null); if (empty($b['EmployeeID']) || !$date) json_response(['success' => false, 'message' => 'EmployeeID and PatrolDate are required.'], 400); if (trim((string) ($b['ScheduledSessionID'] ?? '')) === '') json_response(['success' => false, 'message' => 'ScheduledSessionID is required for admin on-behalf patrol records.'], 400); $emp = db_row('SELECT e.EmployeeName,t.Name AS TeamName FROM employees e LEFT JOIN patrol_team_members tm ON tm.EmployeeID=e.EmployeeID LEFT JOIN patrol_teams t ON t.id=tm.TeamID WHERE e.EmployeeID=? LIMIT 1', [$b['EmployeeID']]); if (!$emp) json_response(['success' => false, 'message' => 'Employee not found.'], 404); $resolved = patrol_resolve_scheduled_session((string) $b['EmployeeID'], $date, $b['ScheduledSessionID'] ?? null); $session = $resolved['session'] ?? null; $area = trim((string) ($b['Area'] ?? '')) ?: null; if (!$area && $session) $area = $session['AreaName'] ?: ($session['AreaCode'] ?? null); db_execute('INSERT INTO patrol_attendance(UserID,UserName,TeamName,WeekNumber,PatrolDate,Year,PatrolType,Area,Notes,RecordedBy,ScheduledSessionID) VALUES(?,?,?,?,?,?,?,?,?,?,?)', [$b['EmployeeID'], $emp['EmployeeName'], $emp['TeamName'] ?? '', patrol_week($date), $date, (int) substr($date, 0, 4), patrol_allowed_type($b['PatrolType'] ?? null), $area, $b['Notes'] ?? null, $uid, $session['id'] ?? null]); json_response(['success' => true, 'id' => (int) db()->lastInsertId()]); }
     $p = route_params($path, '/patrol/admin-record/:id'); if ($p !== null && $method === 'DELETE') { require_admin(); db_execute('DELETE FROM patrol_attendance WHERE id=?', [$p['id']]); json_response(['success' => true]); }
-    if ($method === 'POST' && $path === '/patrol/admin-record/supervisor') { require_admin(); $b = json_body(); $date = patrol_valid_date($b['CheckinDate'] ?? null); if (empty($b['EmployeeID']) || !$date) json_response(['success' => false, 'message' => 'EmployeeID and CheckinDate are required.'], 400); $resolved = patrol_resolve_supervisor_scheduled_session((string) $b['EmployeeID'], $date, $b['ScheduledSessionID'] ?? null); $effectiveDate = $resolved['date']; $session = $resolved['session'] ?? null; $location = $b['Location'] ?? null; if (!$location && $session) $location = $session['AreaName'] ?? ($session['AreaCode'] ?? null); db_execute('INSERT INTO patrol_self_checkin(EmployeeID,CheckinDate,Location,Notes,Year,Month,RecordedBy,ScheduledSessionID) VALUES(?,?,?,?,?,?,?,?)', [$b['EmployeeID'], $effectiveDate, $location, $b['Notes'] ?? null, (int) substr($effectiveDate, 0, 4), (int) substr($effectiveDate, 5, 2), $uid, $session['id'] ?? null]); json_response(['success' => true, 'id' => (int) db()->lastInsertId()]); }
+    if ($method === 'POST' && $path === '/patrol/admin-record/supervisor') { require_admin(); $b = json_body(); $date = patrol_valid_date($b['CheckinDate'] ?? null); if (empty($b['EmployeeID']) || !$date) json_response(['success' => false, 'message' => 'EmployeeID and CheckinDate are required.'], 400); if (trim((string) ($b['ScheduledSessionID'] ?? '')) === '') json_response(['success' => false, 'message' => 'ScheduledSessionID is required for admin on-behalf self-patrol records.'], 400); $resolved = patrol_resolve_supervisor_scheduled_session((string) $b['EmployeeID'], $date, $b['ScheduledSessionID'] ?? null); $effectiveDate = $resolved['date']; $session = $resolved['session'] ?? null; $location = $b['Location'] ?? null; if (!$location && $session) $location = $session['AreaName'] ?? ($session['AreaCode'] ?? null); db_execute('INSERT INTO patrol_self_checkin(EmployeeID,CheckinDate,Location,Notes,Year,Month,RecordedBy,ScheduledSessionID) VALUES(?,?,?,?,?,?,?,?)', [$b['EmployeeID'], $effectiveDate, $location, $b['Notes'] ?? null, (int) substr($effectiveDate, 0, 4), (int) substr($effectiveDate, 5, 2), $uid, $session['id'] ?? null]); json_response(['success' => true, 'id' => (int) db()->lastInsertId()]); }
     $p = route_params($path, '/patrol/admin-record/supervisor/:id'); if ($p !== null && $method === 'DELETE') { require_admin(); db_execute('DELETE FROM patrol_self_checkin WHERE id=?', [$p['id']]); json_response(['success' => true]); }
     if ($method === 'GET' && $path === '/patrol/employee-search') { require_admin(); $q = '%' . trim((string) ($_GET['q'] ?? '')) . '%'; json_response(['success' => true, 'data' => db_rows('SELECT EmployeeID,EmployeeName,Department,Position FROM employees WHERE EmployeeID LIKE ? OR EmployeeName LIKE ? OR Department LIKE ? ORDER BY EmployeeName LIMIT 30', [$q, $q, $q])]); }
 

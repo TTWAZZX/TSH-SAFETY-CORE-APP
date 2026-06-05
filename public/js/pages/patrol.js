@@ -3,7 +3,8 @@ import { API } from '../api.js';
 import { normalizeApiArray, normalizeApiObject } from '../utils/normalize.js';
 
 // ─── Auth ─────────────────────────────────────────────────────────────────────
-const currentUser = TSHSession.getUser() || { name: 'Staff', id: 'EMP001', department: '', team: 'Safety Team', role: 'User' };
+const PATROL_FALLBACK_USER = { name: 'Staff', id: '', department: '', team: 'Safety Team', role: 'User' };
+let currentUser = TSHSession.getUser() || PATROL_FALLBACK_USER;
 
 // ─── Backend URL helper (for local /uploads/ images) ─────────────────────────
 const _backendBase = (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1')
@@ -12,6 +13,25 @@ const _backendBase = (window.location.hostname === 'localhost' || window.locatio
 function resolveFileUrl(url) {
     if (!url) return null;
     if (url.startsWith('/uploads/')) return _backendBase + url;
+    try {
+        const parsed = new URL(url, window.location.href);
+        const host = parsed.hostname.toLowerCase();
+        const currentHost = window.location.hostname.toLowerCase();
+        const targetIsLocal = host === 'localhost' || host === '127.0.0.1' || host === '::1';
+        const currentIsLocal = currentHost === 'localhost' || currentHost === '127.0.0.1' || currentHost === '::1';
+        const uploadIndex = parsed.pathname.indexOf('/uploads/');
+        if (targetIsLocal && !currentIsLocal && uploadIndex >= 0) {
+            const appPath = window.location.pathname || '/';
+            const marker = '/index.html';
+            const basePath = appPath.includes(marker)
+                ? appPath.slice(0, appPath.indexOf(marker))
+                : appPath.replace(/\/[^/]*$/, '');
+            const base = basePath.replace(/\/+$/, '');
+            return `${window.location.origin}${base}${parsed.pathname.slice(uploadIndex)}${parsed.search}${parsed.hash}`;
+        }
+    } catch {
+        return url;
+    }
     return url;
 }
 function getPatrolAreaName(area) {
@@ -35,10 +55,17 @@ function patrolSafePdfFilename(name) {
         .replace(/-+/g, '-')
         .replace(/^-|-$/g, '');
 }
-const isAdmin = !!(
-    (currentUser.role && currentUser.role.toLowerCase() === 'admin') ||
-    (currentUser.Role && currentUser.Role.toLowerCase() === 'admin')
-);
+let isAdmin = false;
+
+function syncPatrolSessionUser() {
+    currentUser = TSHSession.getUser() || PATROL_FALLBACK_USER;
+    isAdmin = !!(
+        (currentUser.role && currentUser.role.toLowerCase() === 'admin') ||
+        (currentUser.Role && currentUser.Role.toLowerCase() === 'admin')
+    );
+}
+
+syncPatrolSessionUser();
 
 // ─── CCCF Static Data (Rank & Stop Types) ────────────────────────────────────
 const CCCF_RANKS = [
@@ -256,6 +283,7 @@ window._patrolOpenImageViewer = function(url, title = 'Issue image') {
 
 // ─── Main Load ────────────────────────────────────────────────────────────────
 export async function loadPatrolPage() {
+    syncPatrolSessionUser();
     restoreIssueFilterState();
     window.closeModal = closeModal;
     window.loadPatrolPage = loadPatrolPage;
@@ -1016,15 +1044,15 @@ function renderDashboard(container, data) {
           ${_mySelfPatrol?.isSupervisorPatrol ? (() => {
             const sp        = _mySelfPatrol;
             const attended  = sp.checkins.length;
-            const target    = sp.target || 2;
-            const pct       = Math.min(Math.round((attended / target) * 100), 100);
-            const done      = attended >= target;
+            const target    = Number(sp.target || 0);
+            const pct       = target > 0 ? Math.min(Math.round((attended / target) * 100), 100) : 0;
+            const done      = target > 0 && attended >= target;
             const openSchedule   = Array.isArray(sp.openSchedule) ? sp.openSchedule : [];
             const spYear         = _myYearlyStats?.selfPatrolYear;
-            const yearlySpTarget = sp.yearlyTarget || spYear?.target || 24;
+            const yearlySpTarget = Number(sp.yearlyTarget || spYear?.target || 0);
             const yearlySpCount  = sp.yearlyCompleted ?? spYear?.count ?? 0;
-            const yearlySpPct    = Math.min(Math.round((yearlySpCount / yearlySpTarget) * 100), 100);
-            const yearlySpDone   = yearlySpCount >= yearlySpTarget;
+            const yearlySpPct    = yearlySpTarget > 0 ? Math.min(Math.round((yearlySpCount / yearlySpTarget) * 100), 100) : 0;
+            const yearlySpDone   = yearlySpTarget > 0 && yearlySpCount >= yearlySpTarget;
             return `
           <div class="bg-white rounded-2xl shadow-sm border border-amber-100 overflow-hidden" style="box-shadow:0 4px 24px rgba(245,158,11,0.08)">
             <div class="px-5 py-3.5 border-b border-amber-100" style="background:linear-gradient(135deg,#fffbeb,#fef3c7)">
@@ -2852,42 +2880,53 @@ function _patrolUncompletedSessionsForMonth(detail, dateValue) {
     });
 }
 
+function _armOpenScheduleItems(detail) {
+    const today = new Date().toISOString().split('T')[0];
+    const schedule = Array.isArray(detail?.schedule) ? detail.schedule : [];
+    return schedule.filter(item => {
+        const date = _patrolSessionDate(item);
+        const records = Array.isArray(item.records) ? item.records : [];
+        return date && date <= today && !records.length;
+    });
+}
+
 window._armRefreshSessionPicker = function() {
-    const date = document.getElementById('arm-date')?.value || '';
     const sessionRow = document.getElementById('arm-session-row');
     const sessionSelect = document.getElementById('arm-session');
+    const dateInput = document.getElementById('arm-date');
     const areaSelect = document.getElementById('arm-area');
     const hint = document.getElementById('arm-session-hint');
-    if (!sessionRow || !sessionSelect || !date || !_armCurrentDetail) {
-        if (sessionRow) sessionRow.classList.add('hidden');
+    if (!sessionRow || !sessionSelect || !_armCurrentDetail) {
         return;
     }
-    const schedule = Array.isArray(_armCurrentDetail.schedule) ? _armCurrentDetail.schedule : [];
-    const sameDate = schedule.filter(item => _patrolSessionDate(item) === date);
-    const candidates = sameDate.length ? sameDate : _patrolUncompletedSessionsForMonth(_armCurrentDetail, date);
-    sessionSelect.innerHTML = `<option value="">No scheduled session selected</option>` + candidates.map(item => {
+    const candidates = _armOpenScheduleItems(_armCurrentDetail);
+    if (!candidates.length) {
+        sessionSelect.innerHTML = '<option value="">No open scheduled round</option>';
+        sessionSelect.disabled = true;
+        if (dateInput) dateInput.value = '';
+        if (hint) hint.textContent = 'Completed scheduled rounds are hidden from this list.';
+        sessionRow.classList.remove('hidden');
+        return;
+    }
+    sessionSelect.disabled = false;
+    sessionSelect.innerHTML = candidates.map((item, idx) => {
         const area = _patrolSessionArea(item);
-        return `<option value="${escHtml(_patrolSessionId(item))}" data-area="${escHtml(area)}">${escHtml(_patrolSessionLabel(item))}</option>`;
+        const date = _patrolSessionDate(item);
+        return `<option value="${escHtml(_patrolSessionId(item))}" data-date="${escHtml(date)}" data-area="${escHtml(area)}" ${idx === 0 ? 'selected' : ''}>${escHtml(_patrolSessionLabel(item))}</option>`;
     }).join('');
-    if (candidates.length === 1) {
-        sessionSelect.value = _patrolSessionId(candidates[0]);
-        const area = _patrolSessionArea(candidates[0]);
-        if (area && areaSelect) areaSelect.value = area;
-    } else {
-        sessionSelect.value = '';
-    }
-    if (hint) {
-        hint.textContent = sameDate.length
-            ? 'Matched scheduled date. Area is filled from the calendar.'
-            : (candidates.length ? 'Select the scheduled round this walk compensates.' : 'No open scheduled round found in this month.');
-    }
-    sessionRow.classList.toggle('hidden', !candidates.length);
+    window._armOnSessionChange();
+    if (hint) hint.textContent = 'Select an open calendar schedule. Completed schedules are hidden.';
+    sessionRow.classList.remove('hidden');
 };
 
 window._armOnSessionChange = function() {
     const sessionSelect = document.getElementById('arm-session');
+    const dateInput = document.getElementById('arm-date');
     const areaSelect = document.getElementById('arm-area');
-    const area = sessionSelect?.selectedOptions?.[0]?.dataset?.area || '';
+    const opt = sessionSelect?.selectedOptions?.[0];
+    const area = opt?.dataset?.area || '';
+    const date = opt?.dataset?.date || '';
+    if (dateInput) dateInput.value = date;
     if (area && areaSelect) areaSelect.value = area;
 };
 
@@ -3046,6 +3085,7 @@ function _armRenderTopDetail(detail, employeeId, year) {
     const listEl = document.getElementById('arm-list');
     const countEl = document.getElementById('arm-count');
     if (countEl) countEl.textContent = `${summary.completedScheduled || 0}/${summary.requiredToDate || 0} due`;
+    window._armRefreshSessionPicker();
     if (detailEl) {
         detailEl.innerHTML = `
           <div class="grid grid-cols-2 gap-2">
@@ -3142,10 +3182,9 @@ function _arsvRenderQuotaDetail(detail, employeeId, year) {
 }
 
 function _arsvOpenScheduleItems(detail) {
-    const today = new Date().toISOString().split('T')[0];
     const periods = Array.isArray(detail?.periods) ? detail.periods : [];
     return periods.flatMap(p => Array.isArray(p.items) ? p.items : [])
-        .filter(item => !patrolSessionCompleted(item) && String(item.date || item.PatrolDate || '').slice(0, 10) <= today);
+        .filter(item => !patrolSessionCompleted(item));
 }
 
 function _arsvRenderSchedulePicker(detail) {
@@ -3213,8 +3252,8 @@ window.openAdminRecordModal = async function(employeeId, name, targetPerYear) {
             <div class="grid grid-cols-2 gap-2">
               <div>
                 <label class="text-[10px] text-slate-400 font-semibold">วันที่ *</label>
-                <input type="date" id="arm-date" max="${new Date().toISOString().split('T')[0]}" onchange="window._armRefreshSessionPicker()"
-                  class="w-full mt-0.5 rounded-lg border border-slate-200 px-2.5 py-1.5 text-xs text-slate-700 focus:outline-none focus:ring-1 focus:ring-emerald-400">
+                <input type="date" id="arm-date" max="${new Date().toISOString().split('T')[0]}" readonly
+                  class="w-full mt-0.5 rounded-lg border border-slate-200 bg-slate-50 px-2.5 py-1.5 text-xs text-slate-700 focus:outline-none focus:ring-1 focus:ring-emerald-400">
               </div>
               <div>
                 <label class="text-[10px] text-slate-400 font-semibold">ประเภท</label>
@@ -3225,11 +3264,11 @@ window.openAdminRecordModal = async function(employeeId, name, targetPerYear) {
                 </select>
               </div>
             </div>
-            <div id="arm-session-row" class="hidden">
-              <label class="text-[10px] text-slate-400 font-semibold">Compensate scheduled round</label>
+            <div id="arm-session-row">
+              <label class="text-[10px] text-slate-400 font-semibold">Scheduled round *</label>
               <select id="arm-session" onchange="window._armOnSessionChange()"
                 class="w-full mt-0.5 rounded-lg border border-violet-200 px-2.5 py-1.5 text-xs text-slate-700 focus:outline-none focus:ring-1 focus:ring-violet-400">
-                <option value="">No scheduled session selected</option>
+                <option value="">Loading scheduled rounds...</option>
               </select>
               <p id="arm-session-hint" class="mt-1 text-[10px] text-slate-400"></p>
             </div>
@@ -3310,6 +3349,7 @@ window._armAddRecord = async function(employeeId, name, targetPerYear) {
     const notes = document.getElementById('arm-notes')?.value?.trim() || null;
     const scheduledSessionId = document.getElementById('arm-session')?.value || null;
     if (!date) { showToast('กรุณาเลือกวันที่', 'error'); return; }
+    if (!scheduledSessionId) { showToast('กรุณาเลือกรอบตามกำหนดการ', 'error'); return; }
     _patrolActionLocks.add(actionKey);
     try {
         await API.post('/patrol/admin-record', { EmployeeID: employeeId, PatrolDate: date, PatrolType: type, Area: area, Notes: notes, ScheduledSessionID: scheduledSessionId });
@@ -5012,7 +5052,7 @@ function openSelfCheckinModal() {
           <!-- Date -->
           <div>
             <label class="block text-xs font-semibold text-slate-500 mb-1.5">วันที่เดินตรวจ</label>
-            <input type="date" id="sc-date" class="w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm text-slate-700 focus:outline-none focus:ring-2 focus:ring-amber-400 transition-all" value="${firstDate}" max="${today}" readonly required>
+            <input type="date" id="sc-date" class="w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm text-slate-700 focus:outline-none focus:ring-2 focus:ring-amber-400 transition-all" value="${firstDate}" readonly required>
           </div>
 
           <!-- Multi-area checkboxes (Phase 2.3) -->

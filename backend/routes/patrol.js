@@ -105,6 +105,15 @@ function isAdminUser(req) {
     return String(req.user?.role || req.user?.Role || '').toLowerCase() === 'admin';
 }
 
+async function canViewRosterAttendanceDetail(employeeId, group) {
+    if (!['top_management', 'supervisor'].includes(group)) return false;
+    const [[row]] = await db.query(
+        'SELECT id FROM Patrol_Roster WHERE EmployeeID=? AND RosterGroup=? LIMIT 1',
+        [employeeId, group]
+    );
+    return !!row;
+}
+
 function cleanupUploadedIssueFiles(files = {}) {
     Object.values(files).flat().forEach(file => deleteLocalUpload(file?.path));
 }
@@ -1575,6 +1584,16 @@ function patrolMonthlyRequiredFromYearlyTarget(yearlyTarget, month) {
     return Math.max(0, Math.ceil(target * m / 12) - Math.ceil(target * (m - 1) / 12));
 }
 
+function patrolCurrentMonthlyRequirement(year, yearlyTarget) {
+    const month = Math.min(12, Math.max(1, patrolDueMonth(year) || 1));
+    return patrolMonthlyRequiredFromYearlyTarget(yearlyTarget, month);
+}
+
+function patrolSupervisorRequirementFromScheduleCount(count) {
+    const total = Number(count || 0);
+    return total > 0 ? Math.ceil(total / 2) : 0;
+}
+
 async function topManagementSessionsForEmployee(employeeId, year) {
     const [[base]] = await db.query(
         'SELECT TeamID,PatrolType FROM Patrol_Team_Members WHERE EmployeeID=? LIMIT 1',
@@ -1663,7 +1682,7 @@ async function buildPersonalMonthlySchedule(employeeId, year, month) {
     return { items, required: items.length, completed, attendance };
 }
 
-async function supervisorScheduleSlotsForYear(year, yearlyTarget) {
+async function supervisorScheduleSlotsForYear(year) {
     const [rows] = await db.query(
         `SELECT s.SessionID AS id,s.TeamID,s.PatrolDate,s.PatrolRound,s.Status,
                 t.Name AS TeamName,t.Color AS TeamColor,a.Name AS AreaName,a.Code AS AreaCode
@@ -1675,16 +1694,15 @@ async function supervisorScheduleSlotsForYear(year, yearlyTarget) {
          ORDER BY s.PatrolDate,s.PatrolRound,s.TeamID`,
         [year]
     );
-    const byMonth = Array.from({ length: 13 }, () => []);
+    const slots = [];
     const seen = new Set();
     rows.forEach(row => {
         const scheduledDate = dateOnly(row.PatrolDate);
-        const month = Number(scheduledDate.slice(5, 7));
         const round = Number(row.PatrolRound || 0);
         const key = `${scheduledDate}:${round}`;
         if (seen.has(key)) return;
         seen.add(key);
-        byMonth[month].push({
+        slots.push({
             ...row,
             id: row.id,
             SessionID: row.id,
@@ -1695,12 +1713,6 @@ async function supervisorScheduleSlotsForYear(year, yearlyTarget) {
             PatrolRound: round,
         });
     });
-    const target = Number(yearlyTarget || patrolSupervisorMonthlyRequirement() * 12);
-    const slots = [];
-    for (let month = 1; month <= 12; month++) {
-        const required = patrolMonthlyRequiredFromYearlyTarget(target, month);
-        slots.push(...byMonth[month].slice(0, required));
-    }
     return slots;
 }
 
@@ -1880,7 +1892,14 @@ async function resolveTopScheduledSession(employeeId, date, requestedSessionId) 
             'SELECT id FROM Patrol_Attendance WHERE UserID=? AND ScheduledSessionID=? LIMIT 1',
             [employeeId, session.id]
         );
-        if (existing) {
+        const [[existingDate]] = await db.query(
+            `SELECT id FROM Patrol_Attendance
+             WHERE UserID=? AND DATE(PatrolDate)=?
+               AND (ScheduledSessionID IS NULL OR ScheduledSessionID='')
+             LIMIT 1`,
+            [employeeId, dateOnly(session.PatrolDate)]
+        );
+        if (existing || existingDate) {
             const err = new Error('Selected schedule is already completed.');
             err.statusCode = 409;
             throw err;
@@ -2042,13 +2061,21 @@ async function buildSupervisorAttendanceDetail(employeeId, year) {
         if (!byMonth[m]) byMonth[m] = [];
         byMonth[m].push(r);
     });
-    const schedule = attachSupervisorRecordsToSchedule(records, await supervisorScheduleSlotsForYear(year, yearlyTarget));
+    const schedule = attachSupervisorRecordsToSchedule(records, await supervisorScheduleSlotsForYear(year));
     const scheduleByMonth = {};
     schedule.forEach(item => {
         const month = Number(dateOnly(item.date || item.PatrolDate).slice(5, 7));
         if (!scheduleByMonth[month]) scheduleByMonth[month] = [];
         scheduleByMonth[month].push(item);
     });
+    const scheduledRequirementByMonth = {};
+    let scheduledYearlyTarget = 0;
+    for (let month = 1; month <= 12; month++) {
+        const monthRequirement = patrolSupervisorRequirementFromScheduleCount((scheduleByMonth[month] || []).length);
+        scheduledRequirementByMonth[month] = monthRequirement;
+        scheduledYearlyTarget += monthRequirement;
+    }
+    const effectiveYearlyTarget = scheduledYearlyTarget || yearlyTarget;
     let requiredToDate = 0;
     let completedToDate = 0;
     const periods = Array.from({ length: 12 }, (_, idx) => {
@@ -2056,7 +2083,7 @@ async function buildSupervisorAttendanceDetail(employeeId, year) {
         const monthRecords = byMonth[month] || [];
         const completed = monthRecords.length;
         const isDue = month <= dueMonth;
-        const monthRequirement = patrolMonthlyRequiredFromYearlyTarget(yearlyTarget, month);
+        const monthRequirement = scheduledRequirementByMonth[month] || 0;
         const required = isDue ? monthRequirement : 0;
         if (isDue) {
             requiredToDate += monthRequirement;
@@ -2074,27 +2101,28 @@ async function buildSupervisorAttendanceDetail(employeeId, year) {
             items: scheduleByMonth[month] || [],
         };
     });
-    const today = dateOnly(new Date());
-    const openSchedule = schedule.filter(item => !item.isCompleted && dateOnly(item.date || item.PatrolDate) <= today);
+    const currentMonth = Math.min(12, Math.max(1, patrolDueMonth(year) || 1));
+    const openSchedule = schedule.filter(item => !item.isCompleted);
     return {
         mode: 'scheduled_quota',
         group: 'supervisor',
         year,
         employee,
-        roster: { RosterID: Number(roster.RosterID), TargetPerYear: yearlyTarget },
-        monthlyRequirement: patrolSupervisorMonthlyRequirement(),
+        roster: { RosterID: Number(roster.RosterID), TargetPerYear: effectiveYearlyTarget, ConfiguredTargetPerYear: yearlyTarget },
+        monthlyRequirement: scheduledRequirementByMonth[currentMonth] || 0,
         targetSource,
         summary: {
             completed: records.length,
             completedToDateCapped: completedToDate,
             requiredToDate,
-            yearlyTarget,
+            yearlyTarget: effectiveYearlyTarget,
+            configuredYearlyTarget: yearlyTarget,
             targetSource,
             scheduledTotal: schedule.length,
             missingToDate: Math.max(0, requiredToDate - completedToDate),
             upcomingMonths: Math.max(0, 12 - dueMonth),
             progressToDatePct: patrolPct(completedToDate, requiredToDate),
-            fullYearPct: patrolPct(records.length, yearlyTarget),
+            fullYearPct: patrolPct(records.length, effectiveYearlyTarget),
         },
         periods,
         schedule,
@@ -2108,17 +2136,19 @@ router.get('/attendance-detail', async (req, res) => {
     const employeeId = String(req.query.employeeId || req.user.id || '').trim();
     const group = String(req.query.group || 'top_management').trim();
     if (!employeeId) return res.status(400).json({ success: false, message: 'employeeId is required.' });
-    if (!isAdminUser(req) && employeeId !== req.user.id) {
-        return res.status(403).json({ success: false, message: 'Permission denied.' });
-    }
     try {
+        if (!['top_management', 'supervisor'].includes(group)) {
+            return res.status(400).json({ success: false, message: 'group is invalid.' });
+        }
+        if (!isAdminUser(req) && employeeId !== req.user.id && !(await canViewRosterAttendanceDetail(employeeId, group))) {
+            return res.status(403).json({ success: false, message: 'Permission denied.' });
+        }
         if (group === 'supervisor') {
             return res.json({ success: true, data: await buildSupervisorAttendanceDetail(employeeId, year) });
         }
         if (group === 'top_management') {
             return res.json({ success: true, data: await buildTopManagementAttendanceDetail(employeeId, year) });
         }
-        return res.status(400).json({ success: false, message: 'group is invalid.' });
     } catch (err) {
         if (err.statusCode) return res.status(err.statusCode).json({ success: false, message: err.message });
         sendPatrolError(res, err);
@@ -2250,7 +2280,7 @@ router.get('/my-self-patrol', async (req, res) => {
             "SELECT id FROM Patrol_Roster WHERE EmployeeID=? AND RosterGroup='supervisor' LIMIT 1",
             [empId]
         );
-        if ((!emp || !emp.IsSupervisorPatrol) && !roster) {
+        if (!roster) {
             return res.json({ success: true, data: { isSupervisorPatrol: false, checkins: [] } });
         }
         const detail = await buildSupervisorAttendanceDetail(empId, parseInt(year) || new Date().getFullYear());
@@ -2266,7 +2296,7 @@ router.get('/my-self-patrol', async (req, res) => {
                 yearlyCompleted: Number(detail.summary?.completed || 0),
                 targetSource: detail.targetSource || detail.summary?.targetSource || 'patrol_roster',
                 schedule: period.items || [],
-                openSchedule: (period.items || []).filter(item => !item.isCompleted && dateOnly(item.date || item.PatrolDate) <= dateOnly(new Date())),
+                openSchedule: (period.items || []).filter(item => !item.isCompleted),
             },
         });
     } catch (err) {
@@ -2353,7 +2383,7 @@ router.get('/supervisor-overview', async (req, res) => {
                 completedToDateCapped: completedToDate,
                 missingToDate: Number(summary.missingToDate || 0),
                 upcomingMonths: Number(summary.upcomingMonths || 0),
-                monthlyRequirement: Number(detail.monthlyRequirement || patrolSupervisorMonthlyRequirement()),
+                monthlyRequirement: Number(detail.monthlyRequirement || patrolCurrentMonthlyRequirement(year, yearlyTarget)),
             });
         }
         res.json({ success: true, data });
@@ -2507,6 +2537,9 @@ router.get('/supervisor-checkins', async (req, res) => {
 router.post('/admin-record', isAdmin, async (req, res) => {
     const { EmployeeID, PatrolDate, PatrolType, Area, Notes, ScheduledSessionID } = req.body;
     if (!EmployeeID || !PatrolDate) return res.status(400).json({ success: false, message: 'ต้องระบุ EmployeeID และ PatrolDate' });
+    if (!String(ScheduledSessionID || '').trim()) {
+        return res.status(400).json({ success: false, message: 'ScheduledSessionID is required for admin on-behalf patrol records.' });
+    }
     try {
         const [[emp]] = await db.query(
             `SELECT e.EmployeeName, t.Name AS TeamName
@@ -2567,6 +2600,9 @@ router.delete('/admin-record/:id', isAdmin, async (req, res) => {
 router.post('/admin-record/supervisor', isAdmin, async (req, res) => {
     const { EmployeeID, CheckinDate, Location, Notes, ScheduledSessionID } = req.body;
     if (!EmployeeID || !CheckinDate) return res.status(400).json({ success: false, message: 'ต้องระบุ EmployeeID และ CheckinDate' });
+    if (!String(ScheduledSessionID || '').trim()) {
+        return res.status(400).json({ success: false, message: 'ScheduledSessionID is required for admin on-behalf self-patrol records.' });
+    }
     try {
         const [[emp]] = await db.query('SELECT EmployeeName FROM Employees WHERE EmployeeID = ?', [EmployeeID]);
         if (!emp) return res.status(404).json({ success: false, message: 'ไม่พบพนักงาน' });

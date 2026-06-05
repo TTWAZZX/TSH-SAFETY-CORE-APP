@@ -3,13 +3,13 @@
 // TSH Safety Core - Frontend Main Controller (FINAL)
 // ======================================================
 
-import * as UI from './ui.js?v=20260602-mobile-nav-m53';
+import * as UI from './ui.js?v=20260605-patrol-upload-hotfix';
 import { apiFetch } from './api.js';
 
 // --- Page Loaders ---
 import { loadPolicyPage } from './pages/policy.js?v=20260602-mobile-nav-m53';
 import { loadCommitteePage } from './pages/committee.js?v=20260602-committee-section-counts';
-import { loadPatrolPage } from './pages/patrol.js?v=20260605-patrol-supervisor-schedule';
+import { loadPatrolPage } from './pages/patrol.js?v=20260605-patrol-schedule-refresh-fix';
 import { loadCccfPage } from './pages/cccf.js?v=20260602-mobile-nav-m53';
 import { loadKpiPage } from './pages/kpi.js?v=20260602-accident-monthly-evidence';
 import { loadYokotenPage } from './pages/yokoten.js?v=20260602-activity-targets-at10';

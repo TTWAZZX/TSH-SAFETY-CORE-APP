@@ -6,6 +6,42 @@ This file preserves historical production handoff, smoke test, backup, deploymen
 
 Use this section when switching accounts or resuming work. The current production target is the company server with Company MySQL/MariaDB and local server storage in `backend/uploads/`. Do not push to GitHub unless the user explicitly asks in the current chat.
 
+## Patrol Schedule Refresh / Supervisor Quota Fix Local (2026-06-05)
+
+Implemented locally for Safety Patrol first-load session state and Sec. & Supervisor scheduled quota behavior. Runtime changes: `public/js/pages/patrol.js`, `public/js/main.js`, `index.html`, `api/handlers/patrol.php`, and `backend/routes/patrol.js`.
+
+Behavior: Patrol now re-syncs `TSHSession.getUser()` whenever `loadPatrolPage()` runs, so Admin controls and personal profile data are not stuck on the module-import fallback user (`EMP001`) until refresh. Sec. & Supervisor detail now loads all non-cancelled `Patrol_Sessions` rows for the selected year instead of slicing each month down to the old target distribution. Monthly minimum is calculated from the actual scheduled count for that month as `ceil(scheduled sessions / 2)`, so 4 sessions require 2 records and 2 sessions require 1 record. Admin on-behalf and personal Self-Patrol check-in pickers show all uncompleted scheduled rows for the relevant scope, including future scheduled dates.
+
+No MySQL schema/data migration and no upload-storage change are required. Local verification passed: PHP lint for `api/handlers/patrol.php`, Node syntax checks for `backend/routes/patrol.js`, `public/js/pages/patrol.js`, and `public/js/main.js`, `git diff --check`, diff-scoped mojibake marker scan, and `npm --prefix backend test` with UAT preflight `93/93`.
+
+Production deployment is still pending for this local fix. A temporary FTP deploy helper was prepared, but the FTP run was blocked by sandbox/network approval usage before a successful production backup or upload occurred. No production files were changed by this attempt.
+
+## Patrol Permission Detail Hotfix Deployed (2026-06-05)
+
+Implemented and deployed a follow-up for Safety Patrol Team & Overview -> Sec. & Supervisor user accounts. Root cause: `GET /api/patrol/attendance-detail` allowed non-Admin users to read only their own EmployeeID, while the Sec. & Supervisor overview table intentionally lets regular users open read-only roster-member detail rows. PHP production and Node dev now allow read-only attendance detail when the requested employee belongs to the requested `Patrol_Roster` group; non-roster requests still return `403 Permission denied.`. `GET /api/patrol/my-self-patrol` now returns `{ isSupervisorPatrol:false, checkins:[] }` for non-supervisor roster users instead of surfacing a 404 from the supervisor detail builder.
+
+Changed runtime files: `api/handlers/patrol.php` and `backend/routes/patrol.js`. The final deployed bundle also re-uploaded the existing hotfix runtime files `index.html`, `public/js/main.js`, `public/js/pages/patrol.js`, and `public/js/ui.js` so production static hashes match the current local bundle. No MySQL schema/data migration and no upload-storage change were required.
+
+Local verification passed: `C:\xampp\php\php.exe -l api\handlers\patrol.php`, `node --check backend/routes/patrol.js`, `git diff --check -- api/handlers/patrol.php backend/routes/patrol.js`, mojibake scan for replacement/Latin-1 markers on changed runtime files, and `npm --prefix backend test` with UAT preflight `93/93`.
+
+Production deploy completed on 2026-06-05. Production code backup was created first at `backups/production/patrol-permission-detail-hotfix-code-20260605-140212/`. Uploaded and FTP SHA-256 verified: `index.html`, `public/js/main.js`, `public/js/pages/patrol.js`, `public/js/ui.js`, `api/handlers/patrol.php`, and `backend/routes/patrol.js`; verify downloads are stored in `backups/production/patrol-permission-detail-hotfix-upload-verify-20260605-140212/`. Static HTTPS hash smoke matched local files for `index.html`, `public/js/main.js`, `public/js/pages/patrol.js`, and `public/js/ui.js`; unauthenticated `GET /api/patrol/attendance-detail?...` returned `401`.
+
+Authenticated read-only production smoke used temporary helper `codx_patrol_permission_smoke.php`, then deleted it and verified HTTP `404`. Smoke result: regular user `009812` reading Sec. & Supervisor roster peer `001320` returned HTTP `200`; non-roster detail request returned HTTP `403`; non-roster `GET /api/patrol/my-self-patrol` returned HTTP `200` with `isSupervisorPatrol:false`. No permanent production rows were created.
+
+## Patrol Schedule Source / Upload URL Hotfix Deployed (2026-06-05)
+
+Implemented and deployed a focused Safety Patrol follow-up for schedule source-of-truth behavior plus legacy upload URL normalization. Changed runtime files: `api/handlers/patrol.php`, `backend/routes/patrol.js`, `public/js/pages/patrol.js`, `public/js/ui.js`, `public/js/main.js`, and `index.html`. Local-only agent documentation `AGENTS.md` was also updated with Session Continuity rules but was not uploaded to production because it is not runtime code.
+
+Behavior: Admin on-behalf Top/Management and Sec.&Supervisor records now require a real `ScheduledSessionID`; completed scheduled rounds are hidden from the admin picker; Top duplicate guard also treats legacy same-date records without `ScheduledSessionID` as completed. Supervisor monthly requirement now derives from the Activity Target / yearly target distribution instead of relying on a hardcoded `2` fallback. Self-Patrol display no longer falls back to `2/24` when target data is absent. The shared document viewer and Patrol image resolver normalize legacy `localhost` or `127.0.0.1` upload URLs to the current production `/uploads/...` path to avoid browser `ERR_CONNECTION_REFUSED`.
+
+Local verification before deploy passed: `node --check backend/routes/patrol.js`, `node --check public/js/pages/patrol.js`, `node --check public/js/main.js`, `C:\xampp\php\php.exe -l api\handlers\patrol.php`, `git diff --check -- AGENTS.md api/handlers/patrol.php backend/routes/patrol.js index.html public/js/main.js public/js/pages/patrol.js public/js/ui.js`, mojibake scan of changed files, and `npm --prefix backend test` with UAT preflight `93/93`.
+
+Production deploy completed on 2026-06-05. Production code backup was created first at `backups/production/patrol-schedule-upload-hotfix-code-20260605-131214/` for `index.html`, `public/js/main.js`, `api/handlers/patrol.php`, `public/js/pages/patrol.js`, `public/js/ui.js`, and `backend/routes/patrol.js`. Uploaded and FTP SHA-256 verified the same six files; verify downloads and HTTP smoke files are stored in `backups/production/patrol-schedule-upload-hotfix-upload-verify-20260605-131214/`.
+
+Production schema snapshots before and after upload verified `patrol_attendance.ScheduledSessionID`, `patrol_self_checkin.ScheduledSessionID`, `idx_patrol_attendance_session`, and `idx_patrol_self_checkin_session` already exist. No new MySQL schema migration or data migration was required for this hotfix. Counts during snapshots: `patrol_attendance=225`, `patrol_self_checkin=2`.
+
+Production smoke passed: static HTTPS hashes matched local files for `index.html`, `public/js/main.js`, `public/js/pages/patrol.js`, and `public/js/ui.js`; `index.html` references `public/js/main.js?v=20260605-patrol-upload-hotfix`; `main.js` imports `ui.js?v=20260605-patrol-upload-hotfix` and `patrol.js?v=20260605-patrol-upload-hotfix`; production Patrol/UI files contain the schedule picker and legacy upload normalization markers. Production API dispatch returned `401 No token provided` for unauthenticated Patrol overview. Authenticated validation smoke through a temporary guarded helper returned HTTP 400 for both `POST /api/patrol/admin-record` and `POST /api/patrol/admin-record/supervisor` when `ScheduledSessionID` was missing, without creating DB rows. The temporary helper `codx_patrol_deploy_schema_1312.php` was deleted from production and verified by HTTP `404` plus absent FTP listing.
+
 ## Patrol Supervisor Schedule Linkage Deployed (2026-06-05)
 
 Implemented locally for Safety Patrol Sec. & Supervisor schedule linkage. Changed files: `api/handlers/patrol.php`, `backend/routes/patrol.js`, `public/js/pages/patrol.js`, `public/js/main.js`, `index.html`, `ARCHITECTURE.md`, `CHANGELOG.md`, and `CLAUDE.md`.

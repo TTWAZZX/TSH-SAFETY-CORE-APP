@@ -923,14 +923,14 @@ CSS classes: `.rte-active` = alignment button ที่ active อยู่ (bg-
 
 ### Sec. & Supervisor Scheduled Linkage
 
-Sec. & Supervisor no longer works as a raw monthly quota only. The detail API now builds a scheduled quota from real, non-cancelled `Patrol_Sessions` rows for the selected year, slices each month by the employee's yearly target, and attaches `Patrol_Self_Checkin` rows to those scheduled items.
+Sec. & Supervisor no longer works as a raw monthly quota only. The detail API now builds a scheduled quota from all real, non-cancelled `Patrol_Sessions` rows for the selected year and attaches `Patrol_Self_Checkin` rows to those scheduled items.
 
 - `Patrol_Self_Checkin.ScheduledSessionID` links a supervisor self-check-in or Admin on-behalf record to the selected scheduled patrol item.
 - Historical records without `ScheduledSessionID` still count as fallback completions when their check-in date matches an open scheduled date.
-- Completed scheduled items are removed from the personal open-check-in list.
+- Completed scheduled items are removed from the personal open-check-in list; uncompleted scheduled items remain selectable, including future patrol dates.
 - Personal Self-Patrol visibility accepts either `Master_Positions.IsSupervisorPatrol` or `Patrol_Roster.RosterGroup='supervisor'`, so rostered section/department heads can see their required work even when the position master flag is missing.
 - Admin Sec. & Supervisor on-behalf recording uses the same scheduled items and stores the selected `ScheduledSessionID`.
-- Monthly requirements come from the yearly target resolver (`Activity_Targets` / `Patrol_Roster.TargetPerYear` / fallback defaults), then are distributed across months with `patrolMonthlyRequiredFromYearlyTarget`.
+- Monthly requirements are derived from the actual scheduled count in each month as `ceil(month scheduled sessions / 2)`. For example, 4 scheduled sessions require 2 records; 2 scheduled sessions require 1 record. The detail response keeps the configured yearly target as `configuredYearlyTarget` while `yearlyTarget` reflects the schedule-derived required total when schedule data exists.
 - PHP production compatibility and Node dev parity both auto-add the nullable `ScheduledSessionID` column and index for `patrol_self_checkin` / `Patrol_Self_Checkin`.
 
 ### Position → Yearly Target

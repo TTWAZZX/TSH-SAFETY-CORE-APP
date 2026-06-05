@@ -54,7 +54,7 @@ ALLOWED_ORIGINS=...        # comma-separated frontend origins
 
 Current production target is the company shared hosting/PHP API path backed by Company MySQL/MariaDB and local server storage. The detailed current handoff and all phase/deploy history live in `CHANGELOG.md`. Production operation steps live in `DEPLOYMENT.md`.
 
-Current production status: Safety Patrol Sec. & Supervisor schedule linkage is implemented, pushed, and deployed to production. Production backup, upload verification, schema check, and smoke details are documented in `CHANGELOG.md`.
+Current production status: Safety Patrol schedule source-of-truth, legacy upload URL normalization, and Sec. & Supervisor user detail permission hotfixes are implemented and deployed to production. A follow-up Patrol first-load/session refresh and Sec. & Supervisor schedule-count quota fix is implemented and verified locally, but production deployment is pending because the FTP deploy attempt was blocked before backup/upload. Backup, upload verification, schema check, cache-bust smoke, authenticated validation smoke, permission smoke, and cleanup details are documented in `CHANGELOG.md`.
 
 ## Split Documentation
 
