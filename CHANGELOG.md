@@ -6,7 +6,7 @@ This file preserves historical production handoff, smoke test, backup, deploymen
 
 Use this section when switching accounts or resuming work. The current production target is the company server with Company MySQL/MariaDB and local server storage in `backend/uploads/`. Do not push to GitHub unless the user explicitly asks in the current chat.
 
-## Patrol Supervisor Schedule Linkage Local Handoff (2026-06-05)
+## Patrol Supervisor Schedule Linkage Deployed (2026-06-05)
 
 Implemented locally for Safety Patrol Sec. & Supervisor schedule linkage. Changed files: `api/handlers/patrol.php`, `backend/routes/patrol.js`, `public/js/pages/patrol.js`, `public/js/main.js`, `index.html`, `ARCHITECTURE.md`, `CHANGELOG.md`, and `CLAUDE.md`.
 
@@ -14,7 +14,13 @@ Behavior: Admin Sec. & Supervisor on-behalf recording now selects from real sche
 
 Schema/runtime notes: PHP production compatibility and Node dev parity auto-add nullable `ScheduledSessionID` plus an index to `patrol_self_checkin` / `Patrol_Self_Checkin`. Legacy supervisor records without `ScheduledSessionID` still count as fallback completions when their check-in date matches an open scheduled date.
 
-Local verification completed: `node --check backend\routes\patrol.js`, `node --check public\js\pages\patrol.js`, `node --check public\js\main.js`, and `C:\xampp\php\php.exe -l api\handlers\patrol.php` passed. `git diff --check` and mojibake scan were run after the documentation update. Full `npm --prefix backend test` did not complete because the local API smoke could not connect to MySQL (`ECONNREFUSED`) after permission audit passed. No production deploy or GitHub push was performed for this local handoff.
+Local verification completed after repairing local XAMPP MySQL: `node --check backend\routes\patrol.js`, `node --check public\js\pages\patrol.js`, `node --check public\js\main.js`, and `C:\xampp\php\php.exe -l api\handlers\patrol.php` passed. Full `npm --prefix backend test` passed, existing `node backend\scripts\patrol7e-smoke.js` passed, and a focused authenticated supervisor schedule smoke passed for self-checkin selected schedule, duplicate scheduled item HTTP 409, completed schedule hidden from open list, admin on-behalf selected schedule, and cleanup remaining count 0.
+
+Production deploy completed on 2026-06-05 for Safety Patrol supervisor schedule linkage. Production backup was created first at `backups/production/patrol-supervisor-schedule-code-20260605-091527/` with `api/handlers/patrol.php`, `public/js/pages/patrol.js`, `public/js/main.js`, `index.html`, and `backend/routes/patrol.js`. A pre-deploy read-only Patrol schema/count snapshot was captured at `backups/production/patrol-supervisor-schedule-db-snapshot-20260605-091931/`; before migration, `patrol_self_checkin` had no `ScheduledSessionID` column and row count was 0. Uploaded and FTP SHA-256 verified: `api/handlers/patrol.php`, `public/js/pages/patrol.js`, `public/js/main.js`, `index.html`, and `backend/routes/patrol.js`; verify downloads are in `backups/production/patrol-supervisor-schedule-upload-verify-20260605-091527/`.
+
+Production static smoke stored in `backups/production/patrol-supervisor-schedule-static-smoke-20260605-092142/` verified that production `index.html` references `public/js/main.js?v=20260605-patrol-supervisor-schedule`, production `main.js` imports `patrol.js?v=20260605-patrol-supervisor-schedule`, and production `patrol.js` contains supervisor scheduled-linkage markers including `ScheduledSessionID`, `openSchedule`, and `admin-record/supervisor`. Production authenticated write smoke stored in `backups/production/patrol-supervisor-schedule-smoke-20260605-092101/` passed with marker `CODX_PATROL_SUP_SCHED_PROD_092101`: supervisor self-checkin selected scheduled slot `2` for employee `009812` on `2026-01-28`, duplicate scheduled supervisor item returned HTTP 409, completed supervisor schedule disappeared from the open list, Admin on-behalf supervisor recording linked the same scheduled slot, and cleanup left `Patrol_Self_Checkin` temporary rows remaining count 0. Temporary smoke helpers were deleted from production and verified by HTTP 404.
+
+Post-deploy schema check stored in `backups/production/patrol-supervisor-schedule-postschema-20260605-092142/` verified `patrol_self_checkin.ScheduledSessionID` exists, `idx_patrol_self_checkin_session` exists, and remaining temporary smoke rows are 0. Production DB schema migration applied by `ensure_patrol_schema()` during smoke: nullable `patrol_self_checkin.ScheduledSessionID` plus index. No upload/storage path changed.
 
 ## Safety Unit Gate Local Handoff (2026-06-04)
 
