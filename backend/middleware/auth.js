@@ -2,6 +2,15 @@
 // Shared authentication middleware used across all routes
 const jwt = require('jsonwebtoken');
 const { attachAuditLogger } = require('../utils/audit');
+const { createOnboardingEnforcement } = require('./onboarding');
+
+let enforceOnboarding = null;
+function enforceCurrentOnboarding(req, res, next) {
+    if (!enforceOnboarding) {
+        enforceOnboarding = createOnboardingEnforcement({ queryable: require('../db') });
+    }
+    return enforceOnboarding(req, res, next);
+}
 
 /**
  * Verify JWT from Authorization header (Bearer <token>)
@@ -16,7 +25,7 @@ const authenticateToken = (req, res, next) => {
         if (err) return res.status(403).json({ success: false, message: 'Token is not valid' });
         req.user = user;
         attachAuditLogger(req, res);
-        next();
+        return enforceCurrentOnboarding(req, res, next);
     });
 };
 
@@ -25,7 +34,7 @@ const authenticateToken = (req, res, next) => {
  */
 const isAdmin = (req, res, next) => {
     const role = req.user?.role || req.user?.Role;
-    if (role === 'Admin') {
+    if (String(role || '').toLowerCase() === 'admin') {
         return next();
     }
     res.status(403).json({ success: false, message: 'Permission denied. Admin access required.' });

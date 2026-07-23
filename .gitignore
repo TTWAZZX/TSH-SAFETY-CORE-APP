@@ -3,3 +3,8 @@ node_modules/
 .DS_Store
 dist/
 backend/uploads/
+uploads/
+backups/
+api/config.local.php
+backend/*.log
+backend-start*.log

@@ -29,6 +29,36 @@ export function hideLoading() {
  * @param {string} contentHtml - โค้ด HTML ที่จะแสดงใน Modal
  * @param {string} size - ขนาดของ Modal (e.g., 'max-w-4xl')
  */
+let _modalRestoreFocus = null;
+let _modalCloseTimer = null;
+let _modalOpenVersion = 0;
+let _modalOverlayActive = false;
+let _documentViewerOverlayActive = false;
+
+function _hasVisibleModal() {
+    const wrapperEl = document.getElementById('modal-wrapper');
+    return _modalOverlayActive && !!wrapperEl && !wrapperEl.classList.contains('hidden');
+}
+
+function _hasDocumentViewer() {
+    return _documentViewerOverlayActive && !!document.getElementById('__dv_overlay');
+}
+
+function _hasEditableFocus() {
+    const selector = 'input:not([type="checkbox"]):not([type="radio"]):not([type="file"]), select, textarea, [contenteditable="true"]';
+    return !!document.activeElement?.matches?.(selector);
+}
+
+function _syncMobileOverlayState() {
+    const hasModal = _hasVisibleModal();
+    const hasDocumentViewer = _hasDocumentViewer();
+    document.body.classList.toggle('mobile-modal-open', hasModal);
+    document.body.classList.toggle('mobile-document-viewer-open', hasDocumentViewer);
+    document.body.dataset.mobileOverlayActive = hasModal || hasDocumentViewer ? '1' : '0';
+    if (!_hasEditableFocus()) document.body.classList.remove('mobile-keyboard-open');
+    window.dispatchEvent(new CustomEvent('tsh:mobile-overlay-state'));
+}
+
 export function openModal(title, contentHtml, size = 'max-w-2xl') {
     const container = document.getElementById('modal-container');
     const titleEl = document.getElementById('modal-title');
@@ -36,6 +66,10 @@ export function openModal(title, contentHtml, size = 'max-w-2xl') {
     const wrapperEl = document.getElementById('modal-wrapper');
 
     if (!container || !wrapperEl) return;
+    clearTimeout(_modalCloseTimer);
+    _modalCloseTimer = null;
+    _modalOpenVersion += 1;
+    _modalRestoreFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
 
     // 1. จัดการ Padding ของ Body
     if (container.classList.contains('no-padding')) {
@@ -54,7 +88,7 @@ export function openModal(title, contentHtml, size = 'max-w-2xl') {
     }
     
     // ตั้งค่า Class พื้นฐาน (เริ่มด้วย scale-95 เพื่อรอ Animation)
-    container.className = `relative w-full ${size} max-h-[90vh] flex flex-col card transform scale-95 transition-transform duration-300`;
+    container.className = `relative p-0 w-full ${size} max-h-[90vh] flex flex-col card transform scale-95 transition-transform duration-300 shadow-2xl rounded-xl overflow-hidden`;
     
     // 3. ใส่เนื้อหา
     if (titleEl) titleEl.innerHTML = title;
@@ -64,6 +98,8 @@ export function openModal(title, contentHtml, size = 'max-w-2xl') {
     // เริ่มต้น: เอา hidden ออก แต่ยังโปร่งใสอยู่ (opacity-0)
     wrapperEl.classList.remove('hidden');
     wrapperEl.classList.add('opacity-0'); 
+    _modalOverlayActive = true;
+    _syncMobileOverlayState();
 
     // รอเสี้ยววินาทีเพื่อให้ Browser render class opacity-0 ก่อน แล้วค่อยเปลี่ยนเป็น opacity-100
     setTimeout(() => {
@@ -174,8 +210,12 @@ export function closeModal() {
     const container = document.getElementById('modal-container');
 
     if (!wrapperEl) return;
+    const closeVersion = _modalOpenVersion;
+    clearTimeout(_modalCloseTimer);
 
     // 1. เริ่ม Animation ปิด (Fade Out & Scale Down)
+    _modalOverlayActive = false;
+    _syncMobileOverlayState();
     wrapperEl.classList.add('opacity-0');
     if (container) {
         container.classList.remove('scale-100');
@@ -183,14 +223,20 @@ export function closeModal() {
     }
 
     // 2. รอให้ Animation จบ (300ms) แล้วค่อยซ่อนจริง
-    setTimeout(() => {
+    _modalCloseTimer = setTimeout(() => {
+        if (closeVersion !== _modalOpenVersion) return;
         wrapperEl.classList.add('hidden');
+        _syncMobileOverlayState();
         
         // ล้างเนื้อหาเพื่อประหยัด Memory และป้องกันข้อมูลเก่าค้าง
         const titleEl = document.getElementById('modal-title');
         const bodyEl = document.getElementById('modal-body');
         if (titleEl) titleEl.innerHTML = '';
         if (bodyEl) bodyEl.innerHTML = '';
+        if (_modalRestoreFocus?.isConnected) _modalRestoreFocus.focus({ preventScroll: true });
+        _modalRestoreFocus = null;
+        _syncMobileOverlayState();
+        _modalCloseTimer = null;
     }, 300);
 }
 
@@ -298,21 +344,100 @@ export function showConfirmationModal(title, message) {
 // ENTERPRISE DOCUMENT VIEWER — standalone overlay (not using openModal)
 // ─────────────────────────────────────────────────────────────────────────────
 
+export function normalizeDocumentUrl(rawUrl) {
+    const raw = String(rawUrl || '').trim();
+    if (!raw) return '';
+    const appBasePath = () => {
+        const appPath = window.location.pathname || '/';
+        const marker = '/index.html';
+        let basePath = appPath;
+        if (appPath.includes(marker)) {
+            basePath = appPath.slice(0, appPath.indexOf(marker));
+        } else if (/\/[^/]+\.[^/]+$/.test(appPath)) {
+            basePath = appPath.replace(/\/[^/]*$/, '');
+        }
+        return basePath.replace(/\/+$/, '');
+    };
+    try {
+        const parsed = new URL(raw, window.location.href);
+        const host = parsed.hostname.toLowerCase();
+        const currentHost = window.location.hostname.toLowerCase();
+        const targetIsLocal = host === 'localhost' || host === '127.0.0.1' || host === '::1';
+        const currentIsLocal = currentHost === 'localhost' || currentHost === '127.0.0.1' || currentHost === '::1';
+        const uploadIndex = parsed.pathname.indexOf('/uploads/');
+        if (uploadIndex < 0) return raw;
+
+        const uploadPath = parsed.pathname.slice(uploadIndex);
+        if (currentIsLocal) return raw;
+
+        if (parsed.origin === window.location.origin && parsed.pathname.startsWith('/uploads/')) {
+            const base = appBasePath();
+            return `${window.location.origin}${base}${uploadPath}${parsed.search}${parsed.hash}`;
+        }
+
+        if (targetIsLocal) {
+            const base = appBasePath();
+            return `${window.location.origin}${base}${uploadPath}${parsed.search}${parsed.hash}`;
+        }
+    } catch {
+        return raw;
+    }
+    return raw;
+}
+
 /**
  * แสดงเอกสารใน Modal
  */
 export function showDocumentModal(originalUrl, title = 'เอกสาร') {
-    const url = (originalUrl || '').trim();
+    const url = normalizeDocumentUrl(originalUrl);
+    const escapeAttr = (value) => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+    const safeUrl = escapeAttr(url);
+    const getUrlFilename = () => {
+        try {
+            const parsed = new URL(url, window.location.href);
+            return parsed.searchParams.get('filename') || decodeURIComponent(parsed.pathname.split('/').pop() || '');
+        } catch {
+            return decodeURIComponent(url.split('/').pop().split('?')[0] || '');
+        }
+    };
+    const isPrivateNetworkUrl = (() => {
+        try {
+            const parsed = new URL(url, window.location.href);
+            const host = parsed.hostname.toLowerCase();
+            return (
+                parsed.protocol === 'file:' ||
+                host === window.location.hostname.toLowerCase() ||
+                host === 'localhost' ||
+                host === '127.0.0.1' ||
+                host === '::1' ||
+                /^10\./.test(host) ||
+                /^192\.168\./.test(host) ||
+                /^172\.(1[6-9]|2\d|3[0-1])\./.test(host)
+            );
+        } catch {
+            return true;
+        }
+    })();
+
+    const cleanPath = (() => {
+        try {
+            return decodeURIComponent(new URL(url, window.location.href).pathname);
+        } catch {
+            return decodeURIComponent(url.split('?')[0].split('#')[0] || '');
+        }
+    })();
+    const isUploadWithoutExtension = /\/uploads\/[^/.?#]+$/i.test(cleanPath);
 
     // ─── File type detection ───
-    const isImage  = /\.(jpeg|jpg|gif|png|webp|avif)$/i.test(url) ||
-                     url.includes('googleusercontent.com') ||
-                     (url.includes('cloudinary.com') && /\/image\//.test(url) && !/\.pdf/i.test(url));
-    const isPdf    = /\.pdf$/i.test(url) || (url.includes('cloudinary.com') && /\.pdf/i.test(url));
-    const isWord   = /\.docx?$/i.test(url);
-    const isExcel  = /\.xlsx?$/i.test(url);
-    const isPpt    = /\.pptx?$/i.test(url);
+    const isImage  = /\.(jpeg|jpg|gif|png|webp|avif)$/i.test(cleanPath) ||
+                     url.includes('googleusercontent.com');
+    const isPdf    = /\.pdf$/i.test(cleanPath) || isUploadWithoutExtension;
+    const isWord   = /\.docx?$/i.test(cleanPath);
+    const isExcel  = /\.xlsx?$/i.test(cleanPath);
+    const isPpt    = /\.pptx?$/i.test(cleanPath);
+    const isVideo  = /\.(mp4|webm|ogg|mov)$/i.test(cleanPath);
     const isOffice = isWord || isExcel || isPpt;
+    const canUseGoogleViewer = isOffice && !isPrivateNetworkUrl;
 
     // ─── Per-type config ───
     const TYPE_CFG = {
@@ -321,19 +446,23 @@ export function showDocumentModal(originalUrl, title = 'เอกสาร') {
         excel: { label: 'Excel',      color: '#16a34a', bg: '#f0fdf4', iconPath: 'M3 10h18M3 14h18M10 3v18M14 3v18M5 3h14a2 2 0 012 2v14a2 2 0 01-2 2H5a2 2 0 01-2-2V5a2 2 0 012-2z' },
         ppt:   { label: 'PowerPoint', color: '#ea580c', bg: '#fff7ed', iconPath: 'M7 21h10a2 2 0 002-2V9.414a1 1 0 00-.293-.707l-5.414-5.414A1 1 0 0012.586 3H7a2 2 0 00-2 2v14a2 2 0 002 2z' },
         image: { label: 'รูปภาพ',      color: '#7c3aed', bg: '#faf5ff', iconPath: 'M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z' },
+        video: { label: 'วิดีโอ',       color: '#0891b2', bg: '#ecfeff', iconPath: 'M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z' },
         other: { label: 'เอกสาร',      color: '#475569', bg: '#f8fafc', iconPath: 'M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z' },
     };
-    const typeKey = isPdf ? 'pdf' : isWord ? 'word' : isExcel ? 'excel' : isPpt ? 'ppt' : isImage ? 'image' : 'other';
+    const typeKey = isPdf ? 'pdf' : isWord ? 'word' : isExcel ? 'excel' : isPpt ? 'ppt' : isImage ? 'image' : isVideo ? 'video' : 'other';
     const cfg     = TYPE_CFG[typeKey];
-    const filename = decodeURIComponent(url.split('/').pop().split('?')[0]) || title || 'เอกสาร';
+    const filename = getUrlFilename() || title || 'เอกสาร';
+    const displayTitle = title === 'เอกสาร' ? filename : title;
 
     // ─── Viewer source ───
     let viewerSrc = url;
-    if (isPdf)         viewerSrc = `https://drive.google.com/viewerng/viewer?embedded=true&url=${encodeURIComponent(url)}`;
-    else if (isOffice) viewerSrc = `https://docs.google.com/gview?url=${encodeURIComponent(url)}&embedded=true`;
+    if (canUseGoogleViewer) viewerSrc = `https://docs.google.com/gview?url=${encodeURIComponent(url)}&embedded=true`;
+    const safeViewerSrc = escapeAttr(viewerSrc);
 
     // ─── Remove any existing viewer ───
+    _documentViewerOverlayActive = false;
     document.getElementById('__dv_overlay')?.remove();
+    _syncMobileOverlayState();
 
     // ─── Shared inline-style helpers (safe outside Tailwind CDN scope) ───
     const S = {
@@ -362,20 +491,46 @@ export function showDocumentModal(originalUrl, title = 'เอกสาร') {
             </button>
         </div>` : '';
 
+    const fallbackContent = `
+        <div style="width:100%;height:100%;display:flex;align-items:center;justify-content:center;padding:24px;background:#0f172a">
+            <div style="max-width:520px;text-align:center;background:#ffffff;border-radius:12px;padding:28px;box-shadow:0 20px 60px rgba(0,0,0,0.25);font-family:Kanit,sans-serif">
+                <div style="${S.filebox};margin:0 auto 16px auto;width:56px;height:56px">
+                    <svg width="28" height="28" fill="none" stroke="${cfg.color}" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="${cfg.iconPath}"/></svg>
+                </div>
+                <h3 style="font-size:18px;font-weight:700;color:#0f172a;margin-bottom:8px">ไม่สามารถแสดงตัวอย่างไฟล์นี้ในระบบได้</h3>
+                <p style="font-size:13px;color:#64748b;line-height:1.7;margin-bottom:18px">ไฟล์ Office หรือไฟล์บางชนิดบน server ภายในบริษัทอาจเปิด preview ใน browser ไม่ได้ ให้เปิดในแท็บใหม่หรือดาวน์โหลดแทน</p>
+                <div style="display:flex;justify-content:center;gap:8px;flex-wrap:wrap">
+                    <a href="${safeUrl}" target="_blank" rel="noopener" style="${S.btnBase}background:#f1f5f9;color:#475569">เปิดในแท็บใหม่</a>
+                    <a href="${safeUrl}" download="${escapeAttr(filename)}" style="${S.btnBase}background:#ecfdf5;color:#059669">ดาวน์โหลด</a>
+                </div>
+            </div>
+        </div>`;
+
+    const localExcelPreview = isExcel && !canUseGoogleViewer;
     const viewerContent = isImage
         ? `<div id="__dv_wrap" style="width:100%;height:100%;display:flex;align-items:center;justify-content:center;overflow:hidden;user-select:none">
-               <img id="__dv_img" src="${url}" alt="${title}" draggable="false"
+               <img id="__dv_img" src="${safeUrl}" alt="${escapeAttr(displayTitle)}" draggable="false"
                     style="max-width:100%;max-height:100%;object-fit:contain;transform-origin:center center;transform:scale(1) translate(0px,0px);will-change:transform;user-select:none;pointer-events:none"
                     onload="document.getElementById('__dv_loader').style.display='none'"
-                    onerror="document.getElementById('__dv_loader').innerHTML='<p style=\\'color:#f87171;font-size:14px;font-family:Kanit,sans-serif\\'>โหลดรูปภาพไม่ได้</p><a href=\\'${url}\\' target=\\'_blank\\' style=\\'color:#34d399;font-size:13px;margin-top:8px;display:block\\'>เปิดในแท็บใหม่</a>'">
+                    onerror="document.getElementById('__dv_loader').innerHTML='<p style=\\'color:#f87171;font-size:14px;font-family:Kanit,sans-serif\\'>โหลดรูปภาพไม่ได้</p><a href=\\'${safeUrl}\\' target=\\'_blank\\' style=\\'color:#34d399;font-size:13px;margin-top:8px;display:block\\'>เปิดในแท็บใหม่</a>'">
            </div>`
-        : `<iframe src="${viewerSrc}" style="width:100%;height:100%;border:0;background:#f8fafc"
+        : isVideo
+        ? `<video src="${safeUrl}" controls style="width:100%;height:100%;background:#020617;object-fit:contain" onloadeddata="document.getElementById('__dv_loader').style.display='none'" onerror="document.getElementById('__dv_loader').innerHTML='<p style=\\'color:#f87171;font-size:14px;font-family:Kanit,sans-serif\\'>โหลดวิดีโอไม่ได้</p><a href=\\'${safeUrl}\\' target=\\'_blank\\' style=\\'color:#34d399;font-size:13px;margin-top:8px;display:block\\'>เปิดในแท็บใหม่</a>'"></video>`
+        : (isPdf || canUseGoogleViewer)
+        ? `<iframe src="${safeViewerSrc}" style="width:100%;height:100%;border:0;background:#f8fafc"
                    onload="document.getElementById('__dv_loader').style.display='none'"
-                   onerror="document.getElementById('__dv_loader').innerHTML='<p style=\\'color:#f87171;font-size:14px;font-family:Kanit,sans-serif\\'>โหลดเอกสารไม่ได้</p><a href=\\'${url}\\' target=\\'_blank\\' style=\\'color:#34d399;font-size:13px;margin-top:8px;display:block\\'>เปิดในแท็บใหม่แทน</a>'">
-           </iframe>`;
+                   onerror="document.getElementById('__dv_loader').innerHTML='<p style=\\'color:#f87171;font-size:14px;font-family:Kanit,sans-serif\\'>โหลดเอกสารไม่ได้</p><a href=\\'${safeUrl}\\' target=\\'_blank\\' style=\\'color:#34d399;font-size:13px;margin-top:8px;display:block\\'>เปิดในแท็บใหม่แทน</a>'">
+           </iframe>`
+        : localExcelPreview
+        ? `<div id="__dv_excel_preview" style="width:100%;height:100%;overflow:auto;background:#f8fafc;padding:18px;font-family:Kanit,sans-serif"></div>`
+        : fallbackContent;
+
+    const showInlineLoader = isImage || isVideo || isPdf || canUseGoogleViewer || localExcelPreview;
+    const loaderStyle = showInlineLoader ? S.loader : `${S.loader};display:none`;
 
     const overlay = document.createElement('div');
     overlay.id = '__dv_overlay';
+    overlay.className = 'document-viewer-overlay';
     overlay.style.cssText = S.overlay;
     overlay.innerHTML = `
         <style>@keyframes __dv_spin{to{transform:rotate(360deg)}}</style>
@@ -392,7 +547,7 @@ export function showDocumentModal(originalUrl, title = 'เอกสาร') {
                     </svg>
                 </div>
                 <div style="min-width:0">
-                    <p style="font-size:14px;font-weight:700;color:#1e293b;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:min(420px,45vw);font-family:Kanit,sans-serif">${title || filename}</p>
+                    <p style="font-size:14px;font-weight:700;color:#1e293b;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:min(420px,45vw);font-family:Kanit,sans-serif">${escapeAttr(displayTitle || filename)}</p>
                     <p style="font-size:11px;color:#94a3b8;margin-top:1px;font-family:Kanit,sans-serif">
                         <span style="display:inline-flex;align-items:center;gap:4px;padding:1px 7px;border-radius:999px;font-weight:700;font-size:10px;background:${cfg.bg};color:${cfg.color}">${cfg.label}</span>
                         &nbsp;${filename}
@@ -406,7 +561,7 @@ export function showDocumentModal(originalUrl, title = 'เอกสาร') {
                 ${zoomControls}
 
                 <!-- Open in new tab -->
-                <a href="${url}" target="_blank" rel="noopener"
+                <a href="${safeUrl}" target="_blank" rel="noopener"
                    style="${S.btnBase}background:#f1f5f9;color:#475569"
                    onmouseover="this.style.background='#e2e8f0'" onmouseout="this.style.background='#f1f5f9'">
                     <svg width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
@@ -439,7 +594,7 @@ export function showDocumentModal(originalUrl, title = 'เอกสาร') {
 
         <!-- Viewer -->
         <div style="${S.content}">
-            <div id="__dv_loader" style="${S.loader}">
+            <div id="__dv_loader" style="${loaderStyle}">
                 <div style="${S.spinner}"></div>
                 <p style="color:#94a3b8;font-size:14px;font-family:Kanit,sans-serif">กำลังโหลด ${cfg.label}...</p>
                 <p style="color:#475569;font-size:12px;font-family:Kanit,sans-serif">อาจใช้เวลาสักครู่</p>
@@ -449,16 +604,27 @@ export function showDocumentModal(originalUrl, title = 'เอกสาร') {
     `;
 
     document.body.appendChild(overlay);
+    _documentViewerOverlayActive = true;
+    _syncMobileOverlayState();
     requestAnimationFrame(() => { overlay.style.opacity = '1'; });
 
     // ─── Close logic ───
+    let _onMouseMove = null;
+    let _onMouseUp = null;
+    let viewerClosing = false;
+
     const closeViewer = () => {
+        if (viewerClosing) return;
+        viewerClosing = true;
+        _documentViewerOverlayActive = false;
+        _syncMobileOverlayState();
         overlay.style.opacity = '0';
         setTimeout(() => {
             overlay.remove();
+            _syncMobileOverlayState();
             document.removeEventListener('keydown', _keyHandler);
-            document.removeEventListener('mousemove', _onMouseMove);
-            document.removeEventListener('mouseup', _onMouseUp);
+            if (_onMouseMove) document.removeEventListener('mousemove', _onMouseMove);
+            if (_onMouseUp) document.removeEventListener('mouseup', _onMouseUp);
         }, 200);
     };
     const _keyHandler = (e) => { if (e.key === 'Escape') closeViewer(); };
@@ -484,6 +650,60 @@ export function showDocumentModal(originalUrl, title = 'เอกสาร') {
     });
 
     // ─── Image zoom & pan ───
+    const renderExcelPreview = async () => {
+        if (!localExcelPreview) return;
+        const host = document.getElementById('__dv_excel_preview');
+        const loader = document.getElementById('__dv_loader');
+        if (!host) return;
+        try {
+            if (!window.XLSX) throw new Error('SheetJS library is not loaded');
+            const res = await fetch(url);
+            if (!res.ok) throw new Error(`HTTP ${res.status}`);
+            const buffer = await res.arrayBuffer();
+            const workbook = window.XLSX.read(buffer, { type: 'array', cellDates: true });
+            const sheetName = workbook.SheetNames[0];
+            if (!sheetName) throw new Error('No worksheet found');
+            const rows = window.XLSX.utils.sheet_to_json(workbook.Sheets[sheetName], {
+                header: 1,
+                raw: false,
+                defval: '',
+                blankrows: false,
+            }).slice(0, 80);
+            const maxCols = Math.min(16, rows.reduce((max, row) => Math.max(max, row.length), 0));
+            const tableRows = rows.map((row, rowIndex) => `
+                <tr>
+                    ${Array.from({ length: maxCols }).map((_, colIndex) => {
+                        const value = row[colIndex] ?? '';
+                        const tag = rowIndex === 0 ? 'th' : 'td';
+                        const headStyle = rowIndex === 0 ? 'font-weight:800;background:#ecfdf5;color:#065f46;position:sticky;top:0;z-index:1;' : '';
+                        return `<${tag} style="border:1px solid #e2e8f0;padding:8px 10px;min-width:120px;max-width:260px;white-space:pre-wrap;vertical-align:top;${headStyle}">${escHtml(String(value)) || '&nbsp;'}</${tag}>`;
+                    }).join('')}
+                </tr>
+            `).join('');
+            host.innerHTML = `
+                <div style="background:#ffffff;border:1px solid #e2e8f0;border-radius:14px;box-shadow:0 12px 30px rgba(15,23,42,0.08);overflow:hidden">
+                    <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;padding:12px 14px;border-bottom:1px solid #e2e8f0;background:#ffffff">
+                        <div style="min-width:0">
+                            <p style="font-size:14px;font-weight:800;color:#0f172a;margin:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${escHtml(sheetName)}</p>
+                            <p style="font-size:11px;color:#64748b;margin:2px 0 0">Preview ${rows.length} rows - ${maxCols} columns</p>
+                        </div>
+                        <span style="font-size:11px;font-weight:800;color:#047857;background:#d1fae5;border-radius:999px;padding:4px 9px">Excel Preview</span>
+                    </div>
+                    <div style="overflow:auto;max-height:calc(100vh - 150px)">
+                        <table style="border-collapse:collapse;width:max-content;min-width:100%;font-size:12px;color:#334155">
+                            <tbody>${tableRows || `<tr><td style="padding:20px;color:#64748b">No data</td></tr>`}</tbody>
+                        </table>
+                    </div>
+                </div>`;
+            if (loader) loader.style.display = 'none';
+        } catch (err) {
+            if (loader) loader.style.display = 'none';
+            host.innerHTML = fallbackContent;
+            console.warn('[document-preview] Excel preview failed:', err.message);
+        }
+    };
+    renderExcelPreview();
+
     if (!isImage) return;
 
     let _scale = 1, _tx = 0, _ty = 0;
@@ -523,13 +743,13 @@ export function showDocumentModal(originalUrl, title = 'เอกสาร') {
         wrap.style.cursor = 'grabbing';
     });
 
-    const _onMouseMove = (e) => {
+    _onMouseMove = (e) => {
         if (!_drag) return;
         _tx = _stx + (e.clientX - _sx) / _scale;
         _ty = _sty + (e.clientY - _sy) / _scale;
         applyTransform();
     };
-    const _onMouseUp = () => {
+    _onMouseUp = () => {
         if (!_drag) return;
         _drag = false;
         wrap.style.cursor = _scale > 1 ? 'grab' : 'default';

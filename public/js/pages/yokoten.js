@@ -1,12 +1,13 @@
+import { delegatedActionOptions, guardActionHandler, guardSubmitHandler } from '../utils/async-ui.js?v=20260715-phase32d-remaining-async-ux';
 // public/js/pages/yokoten.js
 // Yokoten — Lesson Learned Sharing (Enterprise v2)
 import { API } from '../api.js';
 import {
     hideLoading, showLoading,
     openModal, openDetailModal, closeModal, showToast, showConfirmationModal,
-} from '../ui.js';
+} from '../ui.js?v=20260602-mobile-nav-m53';
 import { normalizeApiArray } from '../utils/normalize.js';
-import { buildActivityCard } from '../utils/activity-widget.js';
+import { buildActivityCard } from '../utils/activity-widget.js?v=20260615-yokoten-topic-form-scope';
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 const CATEGORIES = ['ทั่วไป', 'อุปกรณ์', 'กระบวนการ', 'สิ่งแวดล้อม', 'พฤติกรรม'];
@@ -24,6 +25,19 @@ const RISK_BADGE = {
 };
 const RISK_LABEL = { Low: 'ต่ำ', Medium: 'ปานกลาง', High: 'สูง', Critical: 'วิกฤต' };
 const CAT_COLORS = ['#6366f1','#0ea5e9','#f59e0b','#10b981','#ef4444'];
+const YOK_MAX_FILES = 10;
+const YOK_MAX_FILE_SIZE = 20 * 1024 * 1024;
+const YOK_ALLOWED_MIMES = new Set([
+    'image/jpeg', 'image/png', 'image/gif', 'image/webp',
+    'application/pdf',
+    'application/msword',
+    'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+    'application/vnd.ms-excel',
+    'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    'application/vnd.ms-powerpoint',
+    'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+]);
+const YOK_ALLOWED_EXTS = new Set(['jpg', 'jpeg', 'png', 'gif', 'webp', 'pdf', 'doc', 'docx', 'xls', 'xlsx', 'ppt', 'pptx']);
 
 // ─── State ────────────────────────────────────────────────────────────────────
 let _isAdmin        = false;
@@ -36,17 +50,32 @@ let _deptCompletion = null;          // GET /yokoten/dept-completion (admin)
 let _dashConfig     = {};            // GET /yokoten/dashboard-config
 let _allResponses   = [];            // GET /yokoten/all-responses (admin)
 let _empCompletion  = null;          // GET /yokoten/employee-completion (admin, lazy)
+let _emailOutbox    = null;          // GET /yokoten/email-outbox (admin, lazy)
+let _sharedResponses = new Map();    // topicId -> approved related responses safe for all users
+let _companyOverview = null;         // GET /yokoten/company-overview (user-safe aggregate)
+let _companyOverviewYear = null;
+let _emailStatusFilter = '';
 let _empFilterDept  = '';
 let _dashYear       = new Date().getFullYear();
 let _filterRisk     = '';
 let _filterCat      = '';
 let _filterAck      = '';            // 'responded' | 'pending' | 'rejected'
+let _filterSla      = '';            // 'overdue' | 'due_soon' | 'no_deadline'
 let _histFilterId   = '';
 let _searchQ        = '';
-let _adminView      = 'topics';      // 'topics' | 'dept' | 'config'
+let _topicView      = localStorage.getItem('yok_topic_view') || 'card'; // 'card' | 'list'
+let _topicSort      = localStorage.getItem('yok_topic_sort') || 'latest'; // 'latest' | 'oldest' | 'urgent' | 'deadline'
+let _adminView      = 'topics';      // 'topics' | 'work' | 'dept' | 'emp' | 'email' | 'config'
 let _listenersReady = false;
 let _chartCat       = null;
 let _chartDept      = null;
+let _chartStatus    = null;
+let _chartTrend     = null;
+let _chartCompanyDept = null;
+let _chartCompanyRisk = null;
+let _dashboardDrilldown = null;
+let _yokCardSaveMenu = null;
+let _yokCardSaveHold = null;
 
 // ─── ENTRY POINT ──────────────────────────────────────────────────────────────
 export async function loadYokotenPage() {
@@ -65,6 +94,7 @@ export async function loadYokotenPage() {
     }
 
     _activeTab = window._getTab?.('yokoten', _activeTab) || _activeTab;
+    if (!_isAdmin && _activeTab === 'admin') _activeTab = 'topics';
     await refreshData();
 
     // ── Hiyari → Yokoten pre-fill (admin only) ──────────────────────────────
@@ -207,6 +237,7 @@ function buildShell() {
 
 // ─── TAB SWITCH ───────────────────────────────────────────────────────────────
 function switchTab(tab) {
+    if (tab === 'admin' && !_isAdmin) tab = 'topics';
     _activeTab = tab;
     window._saveTab?.('yokoten', tab);
 
@@ -237,6 +268,7 @@ function switchTab(tab) {
 // ─── DATA REFRESH ─────────────────────────────────────────────────────────────
 async function refreshData() {
     showLoading('กำลังโหลด Yokoten...');
+    let loaded = false;
     try {
         const base = await Promise.all([
             API.get('/yokoten/topics'),
@@ -245,11 +277,14 @@ async function refreshData() {
             API.get('/master/safety-units'),
             API.get('/yokoten/dashboard-config'),
         ]);
-        _topics      = normalizeApiArray(base[0]?.data ?? base[0]);
-        _history     = normalizeApiArray(base[1]?.data ?? base[1]);
+        _topics      = _normalizeTopics(normalizeApiArray(base[0]?.data ?? base[0]));
+        _history     = _normalizeResponseRows(base[1]?.data ?? base[1]);
         _masterDepts = normalizeApiArray(base[2]?.data ?? base[2]);
         _safetyUnits = normalizeApiArray(base[3]?.data ?? base[3]);
-        _dashConfig  = base[4]?.data ?? {};
+        _dashConfig  = _normalizeDashConfig(base[4]?.data ?? {});
+        _sharedResponses = new Map();
+        _companyOverview = null;
+        _companyOverviewYear = null;
 
         if (_isAdmin) {
             const [dc, ar] = await Promise.all([
@@ -257,19 +292,115 @@ async function refreshData() {
                 API.get('/yokoten/all-responses'),
             ]);
             const raw = dc?.data ?? dc;
-            _deptCompletion = raw?.deptSummary ? raw : null;
-            _allResponses   = normalizeApiArray(ar?.data ?? ar);
+            _deptCompletion = raw?.deptSummary ? _normalizeDeptCompletion(raw) : null;
+            _allResponses = _normalizeResponseRows(ar?.data ?? ar);
+        } else {
+            _deptCompletion = null;
+            _allResponses = [];
         }
+        loaded = true;
     } catch (err) {
-        showToast('โหลดข้อมูลไม่สำเร็จ: ' + err.message, 'error');
+        const msg = err?.message || 'Unable to load Yokoten data';
+        showToast('Load failed / โหลดข้อมูลไม่สำเร็จ: ' + msg, 'error');
+        const content = document.getElementById('yok-content');
+        if (content) content.innerHTML = _errorState('Load failed / โหลดข้อมูลไม่สำเร็จ', msg);
     } finally {
         hideLoading();
     }
+    if (!loaded) return;
     _renderHeroStats();
     switchTab(_activeTab);
 }
 
 // ─── HERO STATS STRIP ─────────────────────────────────────────────────────────
+function _normalizeTopics(rows) {
+    return (rows || []).map(t => {
+        const targetDepts = Array.isArray(t.TargetDepts) ? t.TargetDepts
+            : Array.isArray(t.targetDepts) ? t.targetDepts
+            : _parseTargetDepts(t.TargetDepts);
+        const targetUnits = Array.isArray(t.TargetUnits) ? t.TargetUnits
+            : Array.isArray(t.targetUnits) ? t.targetUnits
+            : _parseTargetDepts(t.TargetUnits);
+        return {
+            ...t,
+            TargetDepts: targetDepts,
+            TargetUnits: targetUnits,
+            deptResponse: t.deptResponse || t.myResponse || null,
+            totalDeptCount: t.totalDeptCount ?? t.responseCount ?? null,
+            sharedResponseCount: Number(t.sharedResponseCount ?? t.SharedResponseCount ?? 0),
+        };
+    }).map(t => ({
+        ...t,
+        TopicCode: _topicDisplayCode(t),
+    })).sort((a, b) => _topicOrderValue(b) - _topicOrderValue(a));
+}
+
+function _getResponseId(row) {
+    return String(row?.ResponseID ?? row?.responseId ?? row?.id ?? '').trim();
+}
+
+function _normalizeResponseRows(rows) {
+    return normalizeApiArray(rows).map(r => {
+        const responseId = _getResponseId(r);
+        return responseId ? { ...r, ResponseID: responseId, responseId } : r;
+    });
+}
+
+function _normalizeDeptCompletion(raw) {
+    return {
+        ...raw,
+        topics: _normalizeTopics(raw?.topics || []),
+        deptSummary: normalizeApiArray(raw?.deptSummary || []),
+    };
+}
+
+function _normalizeDashConfig(raw) {
+    const masterDeptNames = new Set(_masterDepts.map(_getDepartmentName).filter(Boolean));
+    const masterUnitNames = new Set(_safetyUnits.map(_getSafetyUnitName).filter(Boolean));
+    const pinnedDepts = (Array.isArray(raw?.pinnedDepts) ? raw.pinnedDepts : [])
+        .map(v => String(v || '').trim())
+        .filter(v => v && (!masterDeptNames.size || masterDeptNames.has(v)));
+    const pinnedUnits = (Array.isArray(raw?.pinnedUnits) ? raw.pinnedUnits : [])
+        .map(v => String(v || '').trim())
+        .filter(v => v && (!masterUnitNames.size || masterUnitNames.has(v)));
+    return { ...raw, pinnedDepts, pinnedUnits };
+}
+
+function _normalizeEmpCompletion(raw) {
+    const source = raw || {};
+    const topics = _normalizeTopics(Array.isArray(source.topics) ? source.topics : []);
+    const employeeRows = Array.isArray(source.employees) ? source.employees
+        : Array.isArray(source.data) ? source.data
+        : Array.isArray(source) ? source
+        : [];
+
+    const employees = employeeRows.map(emp => {
+        const totalTopics = Number(emp.totalTopics ?? emp.targetCount ?? topics.length ?? 0);
+        const respondedCount = Number(emp.respondedCount ?? emp.completedCount ?? 0);
+        const completionPct = Number(emp.completionPct ?? (totalTopics ? Math.round(respondedCount * 100 / totalTopics) : 0));
+        const breakdown = Array.isArray(emp.breakdown) ? emp.breakdown : topics.map(t => ({
+            YokotenID: t.YokotenID,
+            title: t.Title || t.title || t.TopicDescription || '',
+            deptResponded: false,
+            isDeptResponder: false,
+            approvalStatus: null,
+        }));
+        return {
+            ...emp,
+            employeeId: String(emp.employeeId ?? emp.EmployeeID ?? ''),
+            name: emp.name ?? emp.EmployeeName ?? emp.FullName ?? '-',
+            department: emp.department ?? emp.Department ?? '',
+            position: emp.position ?? emp.Position ?? '',
+            respondedCount,
+            totalTopics,
+            completionPct,
+            breakdown,
+        };
+    });
+
+    return { topics, employees };
+}
+
 async function _renderHeroStats() {
     const strip = document.getElementById('yok-hero-stats');
     if (!strip) return;
@@ -292,15 +423,38 @@ async function _renderHeroStats() {
             <p class="text-[11px] mt-0.5" style="color:rgba(167,243,208,0.85)">${s.label}</p>
         </div>`).join('');
 
-    const atCard = await buildActivityCard('yokoten');
-    if (atCard) {
-        strip.insertAdjacentHTML('beforeend', atCard);
+    const atCard = await buildActivityCard('yokoten', { noDataMode: 'empty' });
+    const fallbackCard = !atCard && total > 0 ? _buildYokotenHeroKpiCard(responded, total) : '';
+    if (atCard || fallbackCard) {
+        strip.insertAdjacentHTML('beforeend', atCard || fallbackCard);
         strip.className = 'grid grid-cols-3 md:grid-cols-5 gap-3 w-full sm:w-auto';
     }
 }
 
 // ─── TAB 1: DASHBOARD ────────────────────────────────────────────────────────
-function renderDashboard(container) {
+function _buildYokotenHeroKpiCard(actual, target) {
+    const safeTarget = Math.max(0, Number(target || 0));
+    if (!safeTarget) return '';
+    const safeActual = Math.max(0, Number(actual || 0));
+    const pct = Math.min(100, Math.round(safeActual * 100 / safeTarget));
+    const barColor = pct >= 100 ? '#6ee7b7' : pct >= 50 ? '#fbbf24' : '#fca5a5';
+    const textColor = pct >= 100 ? '#6ee7b7' : pct >= 50 ? '#fde68a' : '#fca5a5';
+    return `
+        <div class="rounded-xl px-4 py-3 text-center"
+             style="background:rgba(255,255,255,0.12);backdrop-filter:blur(6px);min-width:80px">
+            <p class="text-xl font-bold leading-tight" style="color:${textColor}">
+                ${safeActual}<span class="text-sm font-normal" style="opacity:0.7">/${safeTarget}</span>
+            </p>
+            <p class="text-[11px] mt-0.5" style="color:rgba(167,243,208,0.85)">KPI &#3619;&#3632;&#3604;&#3633;&#3610;&#3649;&#3612;&#3609;&#3585;</p>
+            <div class="mt-1.5 h-1.5 rounded-full overflow-hidden"
+                 style="background:rgba(255,255,255,0.2)">
+                <div class="h-full rounded-full"
+                     style="width:${pct}%;background:${barColor}"></div>
+            </div>
+        </div>`;
+}
+
+function renderDashboardLegacy(container) {
     // Year filter — derive available years from topic DateIssued, fallback to current year
     const allYears = [...new Set(_topics.map(t => t.DateIssued ? new Date(t.DateIssued).getFullYear() : null).filter(Boolean))].sort((a, b) => b - a);
     if (allYears.length && !allYears.includes(_dashYear)) _dashYear = allYears[0];
@@ -358,17 +512,19 @@ function renderDashboard(container) {
         ${yearPickerHtml}
 
         <!-- KPI Cards -->
-        <div class="grid grid-cols-2 lg:grid-cols-4 gap-4">
+        <div class="grid grid-cols-2 lg:grid-cols-4 gap-4" data-yok-card-image="yokoten-dashboard-kpis">
             ${_kpiCard(total,     'หัวข้อทั้งหมด',   '#0ea5e9', `<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.347.347A3.001 3.001 0 0112 21a3.001 3.001 0 01-2.789-4.1l-.347-.347z"/>`, 'sky')}
             ${_kpiCard(responded, 'ส่วนงานตอบแล้ว',  '#059669', `<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/>`,  'emerald')}
             ${_kpiCard(pending,   'รอตอบกลับ',       '#f59e0b', `<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"/>`,  'amber')}
             ${_kpiCard(rejected + overdue, 'เร่งด่วน/แก้ไข', '#ef4444', `<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/>`, 'red')}
         </div>
 
+        ${_buildDashboardScopeSummary(topics)}
+
         <!-- Progress + Charts -->
         <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
             <!-- Progress -->
-            <div class="ds-section p-5 md:col-span-1 flex flex-col justify-center">
+            <div class="ds-section p-5 md:col-span-1 flex flex-col justify-center" data-yok-card-image="yokoten-dashboard-progress">
                 <div class="flex items-center justify-between mb-2">
                     <h3 class="text-sm font-bold text-slate-700 flex items-center gap-2">
                         <svg class="w-4 h-4 text-sky-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -403,7 +559,7 @@ function renderDashboard(container) {
             </div>
 
             <!-- Category donut chart -->
-            <div class="ds-section p-5 md:col-span-2">
+            <div class="ds-section p-5 md:col-span-2" data-yok-card-image="yokoten-category-chart">
                 <div class="flex items-center justify-between mb-4">
                     <h3 class="text-sm font-bold text-slate-700 flex items-center gap-2">
                         <svg class="w-4 h-4 text-indigo-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -443,47 +599,11 @@ function renderDashboard(container) {
             </div>
         </div>
 
-        <!-- Pinned Departments -->
-        ${pinnedDepts.length > 0 ? `
-        <div class="ds-table-wrap">
-            <div class="px-5 py-4 border-b border-slate-100 flex items-center gap-2">
-                <svg class="w-4 h-4 text-sky-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 5a2 2 0 012-2h10a2 2 0 012 2v16l-7-3.5L5 21V5z"/>
-                </svg>
-                <h3 class="text-sm font-bold text-slate-700">ส่วนงานที่ติดตาม</h3>
-                <span class="text-xs text-slate-400">(${pinnedDepts.length} ส่วนงาน)</span>
-            </div>
-            <div class="p-4 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-                ${pinnedDepts.map(dept => {
-                    const deptData = _deptCompletion?.deptSummary?.find(d => d.department === dept);
-                    const pctD = deptData?.completionPct ?? null;
-                    const respondedD = deptData?.respondedCount ?? 0;
-                    const totalD = deptData?.totalTopics ?? total;
-                    const pendingApprD = deptData?.pendingApproval ?? 0;
-                    const rejectedD = deptData?.rejected ?? 0;
-                    const color = pctD === 100 ? '#059669' : pctD >= 60 ? '#0ea5e9' : pctD >= 30 ? '#f59e0b' : '#ef4444';
-                    return `
-                    <div class="rounded-xl p-4 border border-slate-200 bg-white shadow-sm">
-                        <div class="flex items-center justify-between mb-2">
-                            <p class="text-sm font-semibold text-slate-700 truncate">${_esc(dept)}</p>
-                            <span class="text-lg font-black flex-shrink-0 ml-2" style="color:${color}">${pctD !== null ? pctD + '%' : '-'}</span>
-                        </div>
-                        ${pctD !== null ? `
-                        <div class="h-2 rounded-full bg-slate-100 overflow-hidden mb-2">
-                            <div class="h-full rounded-full" style="width:${pctD}%;background:${color}"></div>
-                        </div>` : ''}
-                        <p class="text-xs text-slate-500">${respondedD}/${totalD} หัวข้อ
-                            ${pendingApprD > 0 ? `· <span class="text-yellow-600">${pendingApprD} รออนุมัติ</span>` : ''}
-                            ${rejectedD > 0 ? `· <span class="text-red-600">${rejectedD} ส่งกลับแก้ไข</span>` : ''}
-                        </p>
-                    </div>`;
-                }).join('')}
-            </div>
-        </div>` : ''}
+        ${_buildPinnedDeptDashboard(pinnedDepts, total)}
 
         <!-- Urgent / action required -->
         ${urgentTopics.length > 0 ? `
-        <div class="ds-table-wrap">
+        <div class="ds-table-wrap" data-yok-card-image="yokoten-urgent-topics">
             <div class="px-5 py-4 border-b border-slate-100 flex items-center justify-between">
                 <div class="flex items-center gap-2">
                     <svg class="w-4 h-4 text-red-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -523,10 +643,15 @@ function renderDashboard(container) {
             <p class="font-semibold text-emerald-700">ตอบกลับครบทุกหัวข้อแล้ว!</p>
         </div>` : ''}
 
-        ${_isAdmin && _deptCompletion?.deptSummary?.length ? _buildExecSection() : ''}
+        ${_isAdmin && _deptCompletion?.deptSummary?.length ? _buildUnifiedAdminDashboardSummary() : ''}
     </div>`;
 
-    setTimeout(() => { _initCatChart(catCount); _initDeptChart(); }, 0);
+    setTimeout(() => {
+        _initCatChart(catCount);
+        _initDeptChart();
+        _initStatusChart();
+        _initTrendChart();
+    }, 0);
 }
 
 function _initCatChart(catCount) {
@@ -550,19 +675,1015 @@ function _initCatChart(catCount) {
     });
 }
 
+function renderDashboard(container) {
+        if (_isAdmin) {
+            renderAdminDashboard(container);
+        } else {
+            renderUserDashboard(container);
+        }
+}
+
+function renderAdminDashboard(container) {
+    const allYears = [...new Set(_topics.map(t => t.DateIssued ? new Date(t.DateIssued).getFullYear() : null).filter(Boolean))].sort((a, b) => b - a);
+    if (allYears.length && !allYears.includes(_dashYear)) _dashYear = allYears[0];
+    const topics = allYears.length
+        ? _topics.filter(t => !t.DateIssued || new Date(t.DateIssued).getFullYear() === _dashYear)
+        : _topics;
+    const metrics = _getDashboardOperationMetrics(topics);
+    const pinnedDepts = Array.isArray(_dashConfig.pinnedDepts) ? _dashConfig.pinnedDepts : [];
+
+    const yearPickerHtml = allYears.length > 1 ? `
+        <div class="ds-filter-bar flex items-center gap-3">
+            <svg class="w-4 h-4 text-slate-400 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"/>
+            </svg>
+            <span class="text-xs font-semibold text-slate-500">ปีงบประมาณ</span>
+            <div class="flex gap-1.5 flex-wrap">
+                ${allYears.map(y => `
+                <button class="yok-year-btn px-3 py-1 rounded-lg text-xs font-semibold transition-all ${y === _dashYear ? 'text-white shadow-sm' : 'text-slate-500 hover:bg-slate-100 bg-slate-50'}"
+                        data-year="${y}"
+                        ${y === _dashYear ? 'style="background:linear-gradient(135deg,#0ea5e9,#6366f1)"' : ''}>
+                    ${y}
+                </button>`).join('')}
+            </div>
+            <span class="ml-auto text-xs text-slate-400">${topics.length} หัวข้อในปี ${_dashYear}</span>
+        </div>` : '';
+
+    container.innerHTML = `
+    <div class="space-y-5">
+        ${yearPickerHtml}
+        ${_buildDashboardActionRequired(topics, metrics)}
+        ${_buildDashboardAnalytics(topics, metrics)}
+        ${_buildPinnedDeptDashboard(pinnedDepts, metrics.totalPossible || topics.length)}
+        ${_buildDashboardTopicHealth(topics)}
+    </div>`;
+
+    setTimeout(() => {
+        _initDeptChart();
+    }, 0);
+}
+
+function renderUserDashboard(container) {
+    _destroyCharts();
+    const user = TSHSession.getUser() || {};
+    const userDept = user.department || user.Department || '-';
+    const allYears = [...new Set(_topics.map(t => t.DateIssued ? new Date(t.DateIssued).getFullYear() : null).filter(Boolean))].sort((a, b) => b - a);
+    if (allYears.length && !allYears.includes(_dashYear)) _dashYear = allYears[0];
+    const topics = allYears.length
+        ? _topics.filter(t => !t.DateIssued || new Date(t.DateIssued).getFullYear() === _dashYear)
+        : _topics;
+    const total = topics.length;
+    const responded = topics.filter(t => t.deptResponse).length;
+    const missing = Math.max(0, total - responded);
+    const pendingApproval = topics.filter(t => t.deptResponse?.ApprovalStatus === 'pending').length;
+    const rejected = topics.filter(t => t.deptResponse?.ApprovalStatus === 'rejected').length;
+    const approved = topics.filter(t => t.deptResponse?.ApprovalStatus === 'approved').length;
+    const notRelated = topics.filter(t => t.deptResponse?.IsRelated === 'No' && !t.deptResponse?.ApprovalStatus).length;
+    const dueSoon = topics.filter(t => !t.deptResponse && _isNearOrOver(t.Deadline)).length;
+    const pct = total ? Math.round(responded * 100 / total) : 0;
+    const pctColor = pct === 100 ? '#059669' : pct >= 60 ? '#0ea5e9' : pct >= 30 ? '#d97706' : '#dc2626';
+    const needAction = topics
+        .filter(t => !t.deptResponse || t.deptResponse?.ApprovalStatus === 'rejected')
+        .map(t => ({
+            topic: t,
+            type: t.deptResponse?.ApprovalStatus === 'rejected' ? 'rejected' : 'missing',
+            urgency: t.deptResponse?.ApprovalStatus === 'rejected' ? 100 : _urgency(t.Deadline),
+        }))
+        .sort((a, b) => b.urgency - a.urgency);
+    const myHistory = (_history || []).filter(r => !r.Department || r.Department === userDept);
+
+    const yearPickerHtml = allYears.length > 1 ? `
+        <div class="ds-filter-bar flex items-center gap-3">
+            <svg class="w-4 h-4 text-slate-400 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"/>
+            </svg>
+            <span class="text-xs font-semibold text-slate-500">ปีงบประมาณ</span>
+            <div class="flex gap-1.5 flex-wrap">
+                ${allYears.map(y => `
+                <button class="yok-year-btn px-3 py-1 rounded-lg text-xs font-semibold transition-all ${y === _dashYear ? 'text-white shadow-sm' : 'text-slate-500 hover:bg-slate-100 bg-slate-50'}"
+                        data-year="${y}"
+                        ${y === _dashYear ? 'style="background:linear-gradient(135deg,#0ea5e9,#6366f1)"' : ''}>
+                    ${y}
+                </button>`).join('')}
+            </div>
+            <span class="ml-auto text-xs text-slate-400">${total} หัวข้อของแผนกคุณ</span>
+        </div>` : '';
+
+    container.innerHTML = `
+    <div class="space-y-5">
+        ${yearPickerHtml}
+        <div class="ds-section overflow-hidden" data-yok-card-image="yokoten-my-department">
+            <div class="px-5 py-4 border-b border-slate-100 flex flex-col lg:flex-row lg:items-center gap-3 justify-between">
+                <div>
+                    <p class="text-xs font-bold uppercase text-slate-400">My Department Yokoten</p>
+                    <h3 class="text-lg font-black text-slate-800 mt-0.5">${_esc(userDept)}</h3>
+                </div>
+                <div class="min-w-[240px]">
+                    <div class="flex items-center justify-between mb-1">
+                        <span class="text-xs font-bold text-slate-500">My completion</span>
+                        <span class="text-sm font-black" style="color:${pctColor}">${pct}%</span>
+                    </div>
+                    <div class="h-2.5 rounded-full bg-slate-100 overflow-hidden">
+                        <div class="h-full rounded-full" style="width:${pct}%;background:${pctColor}"></div>
+                    </div>
+                </div>
+            </div>
+            <div class="p-5 grid grid-cols-2 lg:grid-cols-5 gap-3">
+                ${_dashboardActionCard({
+                    label: 'Assigned',
+                    value: total,
+                    note: 'หัวข้อที่เกี่ยวกับแผนกคุณ',
+                    color: '#2563eb',
+                    bg: '#eff6ff',
+                    icon: '<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 5h14v14H5zM8 9h8M8 13h5"/>',
+                })}
+                ${_dashboardActionCard({
+                    label: 'Missing',
+                    value: missing,
+                    note: 'ยังไม่ได้ตอบกลับ',
+                    color: '#475569',
+                    bg: '#f1f5f9',
+                    icon: '<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7h8M8 11h8m-8 4h5M5 5h14v14H5z"/>',
+                })}
+                ${_dashboardActionCard({
+                    label: 'Pending',
+                    value: pendingApproval,
+                    note: 'รอแอดมินอนุมัติ',
+                    color: '#d97706',
+                    bg: '#fffbeb',
+                    icon: '<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"/>',
+                })}
+                ${_dashboardActionCard({
+                    label: 'Returned',
+                    value: rejected,
+                    note: 'ต้องแก้ไขและส่งใหม่',
+                    color: '#dc2626',
+                    bg: '#fef2f2',
+                    icon: '<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01M5 19h14L12 5 5 19z"/>',
+                })}
+                ${_dashboardActionCard({
+                    label: 'Closed',
+                    value: approved + notRelated,
+                    note: 'อนุมัติแล้วหรือไม่เกี่ยวข้อง',
+                    color: '#059669',
+                    bg: '#ecfdf5',
+                    icon: '<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/>',
+                })}
+            </div>
+        </div>
+
+        <div id="yok-company-overview-wrap">
+            ${_buildCompanyOverviewLoading()}
+        </div>
+
+        <div class="grid grid-cols-1 xl:grid-cols-3 gap-4">
+            <div class="ds-section overflow-hidden xl:col-span-2" data-yok-card-image="yokoten-my-action">
+                <div class="px-5 py-4 border-b border-slate-100 flex flex-wrap items-center gap-2 justify-between">
+                    <div>
+                        <h3 class="text-sm font-black text-slate-800">Need My Action</h3>
+                        <p class="text-xs text-slate-400 mt-0.5">เฉพาะหัวข้อที่แผนกคุณต้องตอบหรือแก้ไข</p>
+                    </div>
+                    <button class="text-xs font-bold text-sky-600 hover:underline" data-switch-tab="topics">เปิดรายการหัวข้อ</button>
+                </div>
+                <div class="divide-y divide-slate-100">
+                    ${needAction.length ? needAction.slice(0, 8).map(({ topic, type }) => _buildUserActionTopicRow(topic, type)).join('') : `
+                    <div class="px-5 py-10 text-center">
+                        <div class="w-14 h-14 rounded-2xl bg-emerald-50 text-emerald-600 flex items-center justify-center mx-auto mb-3">
+                            <svg class="w-7 h-7" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"/>
+                            </svg>
+                        </div>
+                        <p class="text-sm font-bold text-emerald-700">ไม่มีงาน Yokoten ที่ต้องดำเนินการตอนนี้</p>
+                    </div>`}
+                </div>
+            </div>
+            <div class="ds-section p-5" data-yok-card-image="yokoten-my-status-mix">
+                <h3 class="text-sm font-black text-slate-800 mb-4">My Status Mix</h3>
+                <div class="space-y-3">
+                    ${_approvalFunnelBar(missing, Math.max(1, total), '#f1f5f9', '#64748b', 'Missing / ยังไม่ตอบ')}
+                    ${_approvalFunnelBar(notRelated, Math.max(1, total), '#f1f5f9', '#059669', 'Not related / ไม่เกี่ยวข้อง')}
+                    ${_approvalFunnelBar(pendingApproval, Math.max(1, total), '#f1f5f9', '#d97706', 'Pending / รออนุมัติ')}
+                    ${_approvalFunnelBar(approved, Math.max(1, total), '#f1f5f9', '#2563eb', 'Approved / อนุมัติแล้ว')}
+                    ${_approvalFunnelBar(rejected, Math.max(1, total), '#f1f5f9', '#dc2626', 'Returned / ส่งกลับ')}
+                </div>
+                ${dueSoon ? `<div class="mt-4 rounded-xl bg-rose-50 border border-rose-100 px-3 py-2 text-xs font-bold text-rose-700">${dueSoon} หัวข้อใกล้ครบกำหนดหรือเลยกำหนด</div>` : ''}
+            </div>
+        </div>
+
+        ${_buildUserTopicOverview(topics)}
+        ${_buildUserHistoryPreview(myHistory)}
+    </div>`;
+
+    setTimeout(() => _ensureCompanyOverview(_dashYear), 0);
+}
+
+function _buildCompanyOverviewLoading() {
+    return `
+    <div class="ds-section p-5" data-yok-card-image="yokoten-company-overview">
+        <div class="flex items-center gap-2 text-sm text-slate-500">
+            <span class="inline-block h-2 w-2 rounded-full bg-sky-400 animate-pulse"></span>
+            Loading company Yokoten overview...
+        </div>
+    </div>`;
+}
+
+async function _ensureCompanyOverview(year) {
+    const wrap = document.getElementById('yok-company-overview-wrap');
+    if (!wrap) return;
+    if (_companyOverview && _companyOverviewYear === year) {
+        wrap.innerHTML = _buildCompanyOverview(_companyOverview);
+        setTimeout(_initCompanyOverviewCharts, 0);
+        return;
+    }
+    try {
+        const res = await API.get(`/yokoten/company-overview?year=${encodeURIComponent(year)}`);
+        _companyOverview = _normalizeCompanyOverview(res?.data ?? res);
+        _companyOverviewYear = year;
+        wrap.innerHTML = _buildCompanyOverview(_companyOverview);
+        setTimeout(_initCompanyOverviewCharts, 0);
+    } catch (err) {
+        wrap.innerHTML = `
+        <div class="ds-section p-5 border border-red-100 bg-red-50">
+            <p class="text-sm font-bold text-red-700">โหลดภาพรวม Yokoten ไม่สำเร็จ</p>
+            <p class="text-xs text-red-600 mt-1">${_esc(err?.message || 'เกิดข้อผิดพลาด')}</p>
+        </div>`;
+    }
+}
+
+function _normalizeCompanyOverview(raw) {
+    const data = raw || {};
+    return {
+        year: Number(data.year || _dashYear),
+        scope: {
+            departments: normalizeApiArray(data.scope?.departments || []),
+            safetyUnits: normalizeApiArray(data.scope?.safetyUnits || []),
+            configuredDepartments: normalizeApiArray(data.scope?.configuredDepartments || []),
+            configuredSafetyUnits: normalizeApiArray(data.scope?.configuredSafetyUnits || []),
+            usingAllDepartments: !!data.scope?.usingAllDepartments,
+        },
+        overall: {
+            totalAssigned: Number(data.overall?.totalAssigned || 0),
+            responded: Number(data.overall?.responded || 0),
+            completionPct: Number(data.overall?.completionPct || 0),
+            sharedLearningCount: Number(data.overall?.sharedLearningCount || 0),
+        },
+        departments: normalizeApiArray(data.departments || []).map(d => ({
+            department: String(d.department || d.Department || '').trim(),
+            totalTopics: Number(d.totalTopics || d.targetCount || 0),
+            respondedCount: Number(d.respondedCount || d.completedCount || 0),
+            completionPct: Number(d.completionPct || 0),
+        })).filter(d => d.department),
+        topics: normalizeApiArray(data.topics || []).map(t => ({
+            yokotenId: String(t.yokotenId || t.YokotenID || ''),
+            title: String(t.title || t.Title || t.TopicDescription || '').trim(),
+            targetDeptCount: Number(t.targetDeptCount || 0),
+            respondedDeptCount: Number(t.respondedDeptCount || 0),
+            completionPct: Number(t.completionPct || 0),
+            sharedResponseCount: Number(t.sharedResponseCount || 0),
+            riskLevel: String(t.riskLevel || t.RiskLevel || 'Low'),
+            category: String(t.category || t.Category || 'General'),
+        })),
+        riskDistribution: normalizeApiArray(data.riskDistribution || []).map(r => ({
+            riskLevel: String(r.riskLevel || r.RiskLevel || 'Low'),
+            count: Number(r.count || 0),
+        })),
+        categoryDistribution: normalizeApiArray(data.categoryDistribution || []),
+    };
+}
+
+function _buildCompanyOverview(data) {
+    const overall = data.overall || {};
+    const scope = data.scope || {};
+    const scopeDeptCount = normalizeApiArray(scope.departments).length;
+    const unitCount = normalizeApiArray(scope.safetyUnits).length;
+    const topTopics = [...normalizeApiArray(data.topics)]
+        .sort((a, b) => a.completionPct - b.completionPct || b.targetDeptCount - a.targetDeptCount)
+        .slice(0, 6);
+    const pct = Math.max(0, Math.min(100, Number(overall.completionPct || 0)));
+    const color = pct === 100 ? '#059669' : pct >= 70 ? '#0ea5e9' : pct >= 40 ? '#d97706' : '#dc2626';
+    const scopeLabel = scope.usingAllDepartments
+        ? `All master departments (${scopeDeptCount})`
+        : `Admin tracked departments (${scopeDeptCount})`;
+    return `
+    <div class="ds-section overflow-hidden" data-yok-card-image="yokoten-company-overview">
+        <div class="px-5 py-4 border-b border-slate-100 flex flex-col lg:flex-row lg:items-center gap-3 justify-between">
+            <div>
+                <p class="text-xs font-bold uppercase text-slate-400">Company Progress</p>
+                <h3 class="text-base font-black text-slate-800 mt-0.5">Yokoten Overview</h3>
+                <p class="text-xs text-slate-400 mt-1">${_esc(scopeLabel)}${unitCount ? ` · ${unitCount} Safety Units` : ''}</p>
+            </div>
+            <div class="flex items-center gap-3">
+                <div class="relative h-16 w-16 rounded-full flex items-center justify-center"
+                     style="background:conic-gradient(${color} ${pct * 3.6}deg,#e2e8f0 0deg)">
+                    <div class="absolute inset-1.5 rounded-full bg-white"></div>
+                    <span class="relative text-sm font-black" style="color:${color}">${pct}%</span>
+                </div>
+                <div>
+                    <p class="text-xs text-slate-400">Overall completion</p>
+                    <p class="text-lg font-black text-slate-800">${overall.responded || 0}/${overall.totalAssigned || 0}</p>
+                    <p class="text-[11px] text-teal-700 font-bold">${overall.sharedLearningCount || 0} shared learning</p>
+                </div>
+            </div>
+        </div>
+        <div class="p-5 grid grid-cols-1 xl:grid-cols-3 gap-4">
+            <div class="xl:col-span-2 rounded-xl border border-slate-100 bg-white p-4">
+                <div class="flex items-center justify-between mb-3">
+                    <h4 class="text-xs font-black text-slate-700 uppercase">Department Progress</h4>
+                    <span class="text-[11px] text-slate-400">${scopeDeptCount} departments</span>
+                </div>
+                <div class="h-[260px]"><canvas id="yok-company-dept-chart"></canvas></div>
+            </div>
+            <div class="rounded-xl border border-slate-100 bg-white p-4">
+                <div class="flex items-center justify-between mb-3">
+                    <h4 class="text-xs font-black text-slate-700 uppercase">Risk Distribution</h4>
+                    <span class="text-[11px] text-slate-400">${data.year || _dashYear}</span>
+                </div>
+                <div class="h-[220px]"><canvas id="yok-company-risk-chart"></canvas></div>
+            </div>
+            <div class="xl:col-span-3 rounded-xl border border-slate-100 bg-white overflow-hidden">
+                <div class="px-4 py-3 border-b border-slate-100 flex items-center justify-between">
+                    <h4 class="text-xs font-black text-slate-700 uppercase">Topic Coverage</h4>
+                    <span class="text-[11px] text-slate-400">Lowest completion first</span>
+                </div>
+                <div class="divide-y divide-slate-100">
+                    ${topTopics.length ? topTopics.map(_buildCompanyTopicCoverageRow).join('') : `
+                    <div class="px-4 py-8 text-center text-sm text-slate-400">No Yokoten topics in this configured scope.</div>`}
+                </div>
+            </div>
+        </div>
+    </div>`;
+}
+
+function _buildCompanyTopicCoverageRow(topic) {
+    const pct = Math.max(0, Math.min(100, Number(topic.completionPct || 0)));
+    const color = pct === 100 ? '#059669' : pct >= 70 ? '#0ea5e9' : pct >= 40 ? '#d97706' : '#dc2626';
+    return `
+    <div class="w-full px-4 py-3 text-left">
+        <div class="flex flex-col md:flex-row md:items-center gap-2">
+            <div class="min-w-0 flex-1">
+                <div class="flex flex-wrap items-center gap-2">
+                    <span class="font-bold text-sm text-slate-800 truncate">${_esc(topic.title || '-')}</span>
+                    <span class="px-2 py-0.5 rounded-full text-[11px] font-bold ${RISK_BADGE[topic.riskLevel] || 'bg-slate-100 text-slate-600'}">${_esc(RISK_LABEL[topic.riskLevel] || topic.riskLevel)}</span>
+                    ${topic.sharedResponseCount ? `<span class="px-2 py-0.5 rounded-full text-[11px] font-bold bg-teal-50 text-teal-700 border border-teal-100">Shared ${topic.sharedResponseCount}</span>` : ''}
+                </div>
+                <div class="mt-2 h-2 rounded-full bg-slate-100 overflow-hidden">
+                    <div class="h-full rounded-full" style="width:${pct}%;background:${color}"></div>
+                </div>
+            </div>
+            <div class="md:w-24 text-right">
+                <p class="text-sm font-black" style="color:${color}">${pct}%</p>
+                <p class="text-[11px] text-slate-400">${topic.respondedDeptCount}/${topic.targetDeptCount}</p>
+            </div>
+        </div>
+    </div>`;
+}
+
+function _initCompanyOverviewCharts() {
+    _initCompanyDeptChart();
+    _initCompanyRiskChart();
+}
+
+function _initCompanyDeptChart() {
+    if (_chartCompanyDept) { _chartCompanyDept.destroy(); _chartCompanyDept = null; }
+    const canvas = document.getElementById('yok-company-dept-chart');
+    if (!canvas || typeof Chart === 'undefined' || !_companyOverview) return;
+    const rows = [...(_companyOverview.departments || [])].sort((a, b) => a.completionPct - b.completionPct);
+    _chartCompanyDept = new Chart(canvas, {
+        type: 'bar',
+        data: {
+            labels: rows.map(r => r.department),
+            datasets: [{
+                data: rows.map(r => r.completionPct),
+                backgroundColor: rows.map(r => r.completionPct === 100 ? '#059669' : r.completionPct >= 70 ? '#0ea5e9' : r.completionPct >= 40 ? '#d97706' : '#dc2626'),
+                borderRadius: 4,
+                borderSkipped: false,
+            }],
+        },
+        options: {
+            indexAxis: 'y',
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: {
+                legend: { display: false },
+                tooltip: {
+                    callbacks: {
+                        label: ctx => {
+                            const row = rows[ctx.dataIndex];
+                            return ` ${row.respondedCount}/${row.totalTopics} topics (${row.completionPct}%)`;
+                        },
+                    },
+                },
+            },
+            scales: {
+                x: { beginAtZero: true, max: 100, ticks: { callback: v => v + '%' }, grid: { color: '#f1f5f9' } },
+                y: { grid: { display: false }, ticks: { font: { size: 10 } } },
+            },
+        },
+    });
+}
+
+function _initCompanyRiskChart() {
+    if (_chartCompanyRisk) { _chartCompanyRisk.destroy(); _chartCompanyRisk = null; }
+    const canvas = document.getElementById('yok-company-risk-chart');
+    if (!canvas || typeof Chart === 'undefined' || !_companyOverview) return;
+    const rows = (_companyOverview.riskDistribution || []).filter(r => r.count > 0);
+    const dataRows = rows.length ? rows : [{ riskLevel: 'No data', count: 1 }];
+    const colorMap = { Low: '#059669', Medium: '#d97706', High: '#f97316', Critical: '#dc2626', 'No data': '#e2e8f0' };
+    _chartCompanyRisk = new Chart(canvas, {
+        type: 'doughnut',
+        data: {
+            labels: dataRows.map(r => RISK_LABEL[r.riskLevel] || r.riskLevel),
+            datasets: [{
+                data: dataRows.map(r => r.count),
+                backgroundColor: dataRows.map(r => colorMap[r.riskLevel] || '#64748b'),
+                borderColor: '#fff',
+                borderWidth: 2,
+            }],
+        },
+        options: {
+            cutout: '68%',
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: {
+                legend: { position: 'bottom', labels: { boxWidth: 10, usePointStyle: true, font: { size: 11 } } },
+            },
+        },
+    });
+}
+
+function _getDashboardOperationMetrics(topics) {
+    const statusRows = _isAdmin && _deptCompletion?.deptSummary?.length ? _getStatusMixData() : [];
+    if (statusRows.length) {
+        const value = key => statusRows.find(r => r.key === key)?.value || 0;
+        const totalPossible = statusRows.reduce((sum, row) => sum + row.value, 0);
+        const responded = totalPossible - value('not_responded');
+        const pct = totalPossible ? Math.round(responded * 100 / totalPossible) : 0;
+        return {
+            totalTopics: topics.length,
+            totalPossible,
+            responded,
+            pct,
+            notResponded: value('not_responded'),
+            notRelated: value('auto_approved'),
+            pendingApproval: value('pending'),
+            approved: value('approved'),
+            rejected: value('rejected'),
+            dueSoon: _getDashboardMissingRows(topics).filter(row => row.urgency > 0).length,
+            statusRows,
+        };
+    }
+
+    const totalTopics = topics.length;
+    const responded = topics.filter(t => t.deptResponse).length;
+    const rejected = topics.filter(t => t.deptResponse?.ApprovalStatus === 'rejected').length;
+    const pendingApproval = topics.filter(t => t.deptResponse?.ApprovalStatus === 'pending').length;
+    const notResponded = Math.max(0, totalTopics - responded);
+    const approved = topics.filter(t => t.deptResponse?.ApprovalStatus === 'approved').length;
+    const notRelated = topics.filter(t => t.deptResponse?.IsRelated === 'No' && !t.deptResponse?.ApprovalStatus).length;
+    const dueSoon = topics.filter(t => !t.deptResponse && _isNearOrOver(t.Deadline)).length;
+    const pct = totalTopics ? Math.round(responded * 100 / totalTopics) : 0;
+    return {
+        totalTopics,
+        totalPossible: totalTopics,
+        responded,
+        pct,
+        notResponded,
+        notRelated,
+        pendingApproval,
+        approved,
+        rejected,
+        dueSoon,
+        statusRows: [
+            { key: 'not_responded', label: 'Not responded / ยังไม่ตอบ', value: notResponded, color: '#64748b' },
+            { key: 'auto_approved', label: 'Not related / ไม่เกี่ยวข้อง', value: notRelated, color: '#059669' },
+            { key: 'pending', label: 'Pending / รออนุมัติ', value: pendingApproval, color: '#d97706' },
+            { key: 'approved', label: 'Approved / อนุมัติแล้ว', value: approved, color: '#2563eb' },
+            { key: 'rejected', label: 'Rejected / ส่งกลับแก้ไข', value: rejected, color: '#dc2626' },
+        ],
+    };
+}
+
+function _dashboardActionCard({ label, value, note, color, bg, icon, action }) {
+    return `
+    <div class="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+        <div class="flex items-start gap-3">
+            <div class="w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0" style="background:${bg};color:${color}">
+                <svg class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">${icon}</svg>
+            </div>
+            <div class="min-w-0 flex-1">
+                <p class="text-xs font-bold uppercase text-slate-400">${_esc(label)}</p>
+                <div class="mt-1 flex items-end gap-2">
+                    <span class="text-2xl font-black text-slate-800">${value}</span>
+                    ${action || ''}
+                </div>
+                <p class="text-xs text-slate-500 mt-1 leading-snug">${_esc(note || '')}</p>
+            </div>
+        </div>
+    </div>`;
+}
+
+function _buildDashboardActionRequired(topics, metrics) {
+    const completionColor = metrics.pct === 100 ? '#059669' : metrics.pct >= 60 ? '#0ea5e9' : metrics.pct >= 30 ? '#d97706' : '#dc2626';
+    const missingRows = _getDashboardMissingRows(topics);
+    const topRows = [
+        ...(_allResponses || [])
+            .filter(r => r.ApprovalStatus === 'pending' || r.ApprovalStatus === 'rejected')
+            .map(r => ({
+                type: r.ApprovalStatus,
+                title: r.Title || r.TopicTitle || r.YokotenID,
+                dept: r.Department,
+                date: r.ResponseDate,
+                yid: r.YokotenID,
+                rid: r.ResponseID,
+                urgency: r.ApprovalStatus === 'rejected' ? 100 : 80,
+            })),
+        ...missingRows,
+    ].sort((a, b) => (b.urgency || 0) - (a.urgency || 0)).slice(0, 6);
+
+    return `
+    <div class="ds-section overflow-hidden" data-yok-card-image="yokoten-action-required">
+        <div class="px-5 py-4 border-b border-slate-100 flex flex-col lg:flex-row lg:items-center gap-3 justify-between">
+            <div>
+                <h3 class="text-sm font-black text-slate-800">Action Required</h3>
+                <p class="text-xs text-slate-400 mt-0.5">งานที่ต้องตามก่อน เพื่อให้ Yokoten เดินครบ flow</p>
+            </div>
+            <div class="min-w-[220px]">
+                <div class="flex items-center justify-between mb-1">
+                    <span class="text-xs font-bold text-slate-500">Overall completion</span>
+                    <span class="text-sm font-black" style="color:${completionColor}">${metrics.pct}%</span>
+                </div>
+                <div class="h-2.5 rounded-full bg-slate-100 overflow-hidden">
+                    <div class="h-full rounded-full" style="width:${metrics.pct}%;background:${completionColor}"></div>
+                </div>
+            </div>
+        </div>
+        <div class="p-5 grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-3">
+            ${_dashboardActionCard({
+                label: 'Pending approvals',
+                value: metrics.pendingApproval,
+                note: 'เกี่ยวข้องและรอแอดมินตรวจ',
+                color: '#d97706',
+                bg: '#fffbeb',
+                icon: '<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"/>',
+                action: metrics.pendingApproval ? '<button class="ml-auto text-xs font-bold text-amber-700 hover:underline" data-switch-tab="admin">Review</button>' : '',
+            })}
+            ${_dashboardActionCard({
+                label: 'Returned',
+                value: metrics.rejected,
+                note: 'ถูกส่งกลับแก้ไข ต้องติดตามปิดงาน',
+                color: '#dc2626',
+                bg: '#fef2f2',
+                icon: '<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01M5 19h14L12 5 5 19z"/>',
+            })}
+            ${_dashboardActionCard({
+                label: 'Missing responses',
+                value: metrics.notResponded,
+                note: 'ส่วนงาน/หัวข้อที่ยังไม่ตอบกลับ',
+                color: '#475569',
+                bg: '#f1f5f9',
+                icon: '<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7h8M8 11h8m-8 4h5M5 5h14v14H5z"/>',
+            })}
+            ${_dashboardActionCard({
+                label: 'Due soon / overdue',
+                value: metrics.dueSoon,
+                note: 'หัวข้อยังไม่ตอบและใกล้ครบกำหนด',
+                color: '#be123c',
+                bg: '#fff1f2',
+                icon: '<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6v6l4 2M21 12A9 9 0 113 12a9 9 0 0118 0z"/>',
+            })}
+        </div>
+        <div class="border-t border-slate-100 divide-y divide-slate-100">
+            ${topRows.length ? topRows.map(_buildDashboardActionRow).join('') : `
+            <div class="px-5 py-8 text-center text-sm font-semibold text-emerald-600">No urgent Yokoten action right now.</div>`}
+        </div>
+    </div>`;
+}
+
+function _buildDashboardActionRow(row) {
+    const tone = row.type === 'rejected'
+        ? { label: 'Returned', cls: 'bg-red-100 text-red-700' }
+        : row.type === 'pending'
+        ? { label: 'Pending', cls: 'bg-amber-100 text-amber-700' }
+        : { label: 'Missing', cls: 'bg-slate-100 text-slate-600' };
+    return `
+    <button type="button" class="w-full px-5 py-3 text-left hover:bg-slate-50 transition-colors yok-open-topic-btn"
+            data-yid="${_esc(row.yid || '')}" data-rid="${_esc(row.rid || '')}">
+        <div class="flex flex-wrap items-center gap-2">
+            <span class="px-2 py-0.5 rounded-full text-[11px] font-bold ${tone.cls}">${tone.label}</span>
+            <span class="text-sm font-bold text-slate-800 truncate max-w-xl">${_esc(row.title || '-')}</span>
+            <span class="text-xs text-slate-400">${_esc(row.dept || '-')}</span>
+            <span class="ml-auto text-xs text-slate-400">${row.date ? _fmtDateOnly(row.date) : ''}</span>
+        </div>
+    </button>`;
+}
+
+function _buildUserActionTopicRow(topic, type) {
+    const isRejected = type === 'rejected';
+    const tone = isRejected
+        ? { label: 'Returned', cls: 'bg-red-100 text-red-700' }
+        : { label: 'Missing', cls: 'bg-slate-100 text-slate-600' };
+    return `
+    <button type="button" class="w-full px-5 py-4 text-left hover:bg-slate-50 transition-colors yok-open-topic-btn"
+            data-yid="${_esc(topic.YokotenID || '')}">
+        <div class="flex flex-wrap items-start gap-3 justify-between">
+            <div class="min-w-0 flex-1">
+                <div class="flex flex-wrap items-center gap-2 mb-1">
+                    <span class="px-2 py-0.5 rounded-full text-[11px] font-bold ${tone.cls}">${tone.label}</span>
+                    <span class="px-1.5 py-0.5 rounded text-[11px] font-bold ${RISK_BADGE[topic.RiskLevel] || 'bg-slate-100 text-slate-500'}">${_esc(RISK_LABEL[topic.RiskLevel] || topic.RiskLevel || '-')}</span>
+                    ${_deadlineBadge(topic.Deadline, !!topic.deptResponse)}
+                </div>
+                <p class="text-sm font-black text-slate-800 truncate">${_esc(topic.Title || _htmlToText(topic.TopicDescription) || '-')}</p>
+                ${isRejected && topic.deptResponse?.ApprovalComment ? `<p class="text-xs text-red-600 mt-1">${_esc(topic.deptResponse.ApprovalComment)}</p>` : ''}
+            </div>
+            <span class="text-xs font-bold text-sky-600">${isRejected ? 'แก้ไขคำตอบ' : 'ตอบกลับ'}</span>
+        </div>
+    </button>`;
+}
+
+function _getDashboardMissingRows(topics) {
+    if (_isAdmin && _deptCompletion?.deptSummary?.length) {
+        const topicMap = new Map((topics || []).map(t => [String(t.YokotenID), t]));
+        const activeIds = new Set((topics || []).map(t => String(t.YokotenID)));
+        const deptSummary = _filterToTargetedDepts(_deptCompletion.deptSummary || [], _deptCompletion.topics || []);
+        const rows = [];
+        deptSummary.forEach(dept => {
+            (dept.topicBreakdown || []).forEach(tb => {
+                if (tb.responded || !activeIds.has(String(tb.YokotenID))) return;
+                const topic = topicMap.get(String(tb.YokotenID));
+                if (!topic) return;
+                rows.push({
+                    type: 'missing',
+                    title: topic.Title || _htmlToText(topic.TopicDescription),
+                    dept: dept.department,
+                    date: topic.Deadline,
+                    yid: topic.YokotenID,
+                    urgency: _urgency(topic.Deadline),
+                });
+            });
+        });
+        return rows;
+    }
+    return (topics || [])
+        .filter(t => !t.deptResponse)
+        .map(t => ({
+            type: 'missing',
+            title: t.Title || _htmlToText(t.TopicDescription),
+            dept: TSHSession.getUser()?.department || '',
+            date: t.Deadline,
+            yid: t.YokotenID,
+            urgency: _urgency(t.Deadline),
+        }));
+}
+
+function _buildUserTopicOverview(topics) {
+    const rows = [...(topics || [])].sort((a, b) => {
+        const score = t => t.deptResponse?.ApprovalStatus === 'rejected' ? 100
+            : !t.deptResponse ? 50 + _urgency(t.Deadline)
+            : t.deptResponse?.ApprovalStatus === 'pending' ? 30
+            : 0;
+        return score(b) - score(a);
+    });
+    return `
+    <div class="ds-section overflow-hidden" data-yok-card-image="yokoten-my-topic-overview">
+        <div class="px-5 py-4 border-b border-slate-100 flex flex-wrap items-center gap-2 justify-between">
+            <div>
+                <h3 class="text-sm font-black text-slate-800">My Yokoten Topics</h3>
+                <p class="text-xs text-slate-400 mt-0.5">รายการหัวข้อที่เกี่ยวกับแผนกคุณเท่านั้น</p>
+            </div>
+            <button class="text-xs font-bold text-sky-600 hover:underline" data-switch-tab="topics">ดูทั้งหมด</button>
+        </div>
+        <div class="divide-y divide-slate-100">
+            ${rows.length ? rows.slice(0, 8).map(_buildUserTopicOverviewRow).join('') : `
+            <div class="px-5 py-8 text-center text-sm text-slate-400">ไม่มีหัวข้อ Yokoten สำหรับแผนกคุณ</div>`}
+        </div>
+    </div>`;
+}
+
+function _buildUserTopicOverviewRow(topic) {
+    const resp = topic.deptResponse;
+    const status = !resp ? { label: 'ยังไม่ตอบ', cls: 'bg-slate-100 text-slate-600', color: '#64748b', pct: 0 }
+        : resp.ApprovalStatus === 'rejected' ? { label: 'ส่งกลับแก้ไข', cls: 'bg-red-100 text-red-700', color: '#dc2626', pct: 60 }
+        : resp.ApprovalStatus === 'pending' ? { label: 'รออนุมัติ', cls: 'bg-amber-100 text-amber-700', color: '#d97706', pct: 75 }
+        : resp.ApprovalStatus === 'approved' ? { label: 'อนุมัติแล้ว', cls: 'bg-blue-100 text-blue-700', color: '#2563eb', pct: 100 }
+        : { label: resp.IsRelated === 'No' ? 'ไม่เกี่ยวข้อง' : 'บันทึกแล้ว', cls: 'bg-emerald-100 text-emerald-700', color: '#059669', pct: 100 };
+    const units = _parseTargetDepts(topic.TargetUnits);
+    return `
+    <button type="button" class="w-full text-left px-5 py-4 hover:bg-slate-50 transition-colors yok-open-topic-btn"
+            data-yid="${_esc(topic.YokotenID || '')}">
+        <div class="grid grid-cols-1 lg:grid-cols-[minmax(0,1fr)_200px] gap-3 lg:items-center">
+            <div class="min-w-0">
+                <div class="flex flex-wrap items-center gap-2 mb-1">
+                    <span class="text-sm font-black text-slate-800 truncate">${_esc(topic.Title || _htmlToText(topic.TopicDescription) || '-')}</span>
+                    <span class="px-1.5 py-0.5 rounded text-[11px] font-bold ${RISK_BADGE[topic.RiskLevel] || 'bg-slate-100 text-slate-500'}">${_esc(RISK_LABEL[topic.RiskLevel] || topic.RiskLevel || '-')}</span>
+                    <span class="px-2 py-0.5 rounded-full text-[11px] font-bold ${status.cls}">${status.label}</span>
+                </div>
+                <div class="flex flex-wrap items-center gap-1.5">
+                    ${_deadlineBadge(topic.Deadline, !!resp)}
+                    ${(units.length ? units.slice(0, 4) : ['Department scope']).map(unit => `<span class="px-2 py-0.5 rounded-md bg-slate-50 border border-slate-100 text-[11px] font-semibold text-slate-500">${_esc(unit)}</span>`).join('')}
+                    ${units.length > 4 ? `<span class="px-2 py-0.5 rounded-md bg-slate-100 text-[11px] font-bold text-slate-500">+${units.length - 4}</span>` : ''}
+                </div>
+            </div>
+            <div>
+                <div class="flex items-center justify-between gap-3 mb-1">
+                    <span class="text-xs font-semibold text-slate-500">My response</span>
+                    <span class="text-xs font-black" style="color:${status.color}">${status.pct}%</span>
+                </div>
+                <div class="h-2.5 rounded-full bg-slate-100 overflow-hidden">
+                    <div class="h-full rounded-full" style="width:${status.pct}%;background:${status.color}"></div>
+                </div>
+            </div>
+        </div>
+    </button>`;
+}
+
+function _buildUserHistoryPreview(rows) {
+    const sorted = [...(rows || [])].sort((a, b) => new Date(b.ResponseDate || 0) - new Date(a.ResponseDate || 0)).slice(0, 6);
+    return `
+    <div class="ds-section overflow-hidden" data-yok-card-image="yokoten-my-history-preview">
+        <div class="px-5 py-4 border-b border-slate-100 flex flex-wrap items-center gap-2 justify-between">
+            <div>
+                <h3 class="text-sm font-black text-slate-800">My Department History</h3>
+                <p class="text-xs text-slate-400 mt-0.5">ประวัติการตอบของแผนกคุณเท่านั้น</p>
+            </div>
+            <button class="text-xs font-bold text-sky-600 hover:underline" data-switch-tab="history">เปิดประวัติ</button>
+        </div>
+        <div class="divide-y divide-slate-100">
+            ${sorted.length ? sorted.map(row => {
+                const status = row.ApprovalStatus === 'rejected' ? '<span class="px-2 py-0.5 rounded-full bg-red-100 text-red-700 text-[11px] font-bold">ส่งกลับแก้ไข</span>'
+                    : row.ApprovalStatus === 'pending' ? '<span class="px-2 py-0.5 rounded-full bg-amber-100 text-amber-700 text-[11px] font-bold">รออนุมัติ</span>'
+                    : row.ApprovalStatus === 'approved' ? '<span class="px-2 py-0.5 rounded-full bg-blue-100 text-blue-700 text-[11px] font-bold">อนุมัติแล้ว</span>'
+                    : '<span class="px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-700 text-[11px] font-bold">บันทึกแล้ว</span>';
+                return `
+                <button type="button" class="w-full text-left px-5 py-3 hover:bg-slate-50 transition-colors yok-open-topic-btn"
+                        data-yid="${_esc(row.YokotenID || '')}" data-rid="${_esc(row.ResponseID || '')}">
+                    <div class="flex flex-wrap items-center gap-2">
+                        <span class="text-sm font-bold text-slate-800 truncate max-w-xl">${_esc(row.Title || row.TopicTitle || row.YokotenID || '-')}</span>
+                        ${status}
+                        <span class="text-xs text-slate-400 ml-auto">${_fmtDate(row.ResponseDate)}</span>
+                    </div>
+                </button>`;
+            }).join('') : `
+            <div class="px-5 py-8 text-center text-sm text-slate-400">ยังไม่มีประวัติการตอบกลับของแผนกคุณ</div>`}
+        </div>
+    </div>`;
+}
+
+function _buildDashboardAnalytics(topics, metrics) {
+    const statusRows = metrics.statusRows || [];
+    const totalStatus = Math.max(1, statusRows.reduce((sum, row) => sum + row.value, 0));
+    const riskRows = _dashboardRiskRows(topics);
+    const categoryRows = _dashboardCategoryRows(topics);
+    const hasDeptChart = _isAdmin && _deptCompletion?.deptSummary?.length;
+    return `
+    <div class="grid grid-cols-1 xl:grid-cols-3 gap-4">
+        <div class="ds-section p-5 ${hasDeptChart ? 'xl:col-span-2' : 'xl:col-span-1'}" data-yok-card-image="yokoten-department-ranking">
+            <div class="flex flex-wrap items-center gap-2 justify-between mb-4">
+                <div>
+                    <h3 class="text-sm font-black text-slate-800">Department Progress Ranking</h3>
+                    <p class="text-xs text-slate-400 mt-0.5">เรียงจากส่วนงานที่ต้องติดตามก่อน</p>
+                </div>
+                ${_isAdmin ? `<button id="yok-config-dash-btn" class="text-xs font-bold text-sky-600 hover:underline">ตั้งค่า Dashboard</button>` : ''}
+            </div>
+            ${hasDeptChart ? `<div style="height:320px"><canvas id="yok-dept-chart"></canvas></div>` : _buildCompactProgressList(topics)}
+        </div>
+        <div class="space-y-4">
+            <div class="ds-section p-5" data-yok-card-image="yokoten-approval-funnel">
+                <h3 class="text-sm font-black text-slate-800 mb-4">Approval Funnel</h3>
+                <div class="space-y-3">
+                    ${statusRows.map(row => _approvalFunnelBar(row.value, totalStatus, '#f1f5f9', row.color, row.label)).join('')}
+                </div>
+            </div>
+            <div class="ds-section p-5" data-yok-card-image="yokoten-risk-category-strip">
+                <h3 class="text-sm font-black text-slate-800 mb-4">Topic Mix</h3>
+                <div class="space-y-3">
+                    ${riskRows.map(row => _miniMixBar(row.label, row.value, topics.length, row.color)).join('')}
+                    <div class="pt-2 border-t border-slate-100 space-y-2">
+                        ${categoryRows.slice(0, 4).map(row => _miniMixBar(row.label, row.value, topics.length, row.color)).join('')}
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>`;
+}
+
+function _buildCompactProgressList(topics) {
+    const rows = (topics || []).map(t => ({
+        title: t.Title || _htmlToText(t.TopicDescription),
+        pct: t.deptResponse ? 100 : 0,
+        status: t.deptResponse?.ApprovalStatus || (t.deptResponse ? 'recorded' : 'missing'),
+    })).slice(0, 8);
+    return `
+    <div class="space-y-3">
+        ${rows.length ? rows.map(row => {
+            const color = row.status === 'rejected' ? '#dc2626' : row.status === 'pending' ? '#d97706' : row.pct === 100 ? '#059669' : '#94a3b8';
+            return `<div>
+                <div class="flex items-center justify-between gap-3 mb-1">
+                    <span class="text-xs font-bold text-slate-700 truncate">${_esc(row.title)}</span>
+                    <span class="text-xs font-black" style="color:${color}">${row.pct}%</span>
+                </div>
+                <div class="h-2 rounded-full bg-slate-100 overflow-hidden"><div class="h-full rounded-full" style="width:${row.pct}%;background:${color}"></div></div>
+            </div>`;
+        }).join('') : '<p class="text-sm text-slate-400">No topics available.</p>'}
+    </div>`;
+}
+
+function _dashboardRiskRows(topics) {
+    const colors = { Critical: '#dc2626', High: '#ea580c', Medium: '#d97706', Low: '#059669' };
+    return ['Critical', 'High', 'Medium', 'Low'].map(key => ({
+        label: RISK_LABEL[key] || key,
+        value: (topics || []).filter(t => t.RiskLevel === key).length,
+        color: colors[key],
+    })).filter(row => row.value > 0);
+}
+
+function _dashboardCategoryRows(topics) {
+    const counts = new Map();
+    (topics || []).forEach(t => {
+        const key = t.Category || 'ทั่วไป';
+        counts.set(key, (counts.get(key) || 0) + 1);
+    });
+    return [...counts.entries()]
+        .map(([label, value], i) => ({ label, value, color: CAT_COLORS[i % CAT_COLORS.length] || '#64748b' }))
+        .sort((a, b) => b.value - a.value);
+}
+
+function _miniMixBar(label, value, total, color) {
+    const pct = total ? Math.round(value * 100 / total) : 0;
+    return `
+    <div>
+        <div class="flex items-center justify-between gap-3 mb-1">
+            <span class="text-xs font-semibold text-slate-600 truncate">${_esc(label)}</span>
+            <span class="text-xs font-black text-slate-700">${value}</span>
+        </div>
+        <div class="h-1.5 rounded-full bg-slate-100 overflow-hidden">
+            <div class="h-full rounded-full" style="width:${pct}%;background:${color}"></div>
+        </div>
+    </div>`;
+}
+
+function _buildDashboardTopicHealth(topics) {
+    const rows = (topics || []).map(topic => {
+        const coverage = _getTopicCoverage(topic);
+        const dueScore = !coverage.pct && topic.Deadline ? _urgency(topic.Deadline) : 0;
+        const riskScore = { Critical: 4, High: 3, Medium: 2, Low: 1 }[topic.RiskLevel] || 0;
+        return { topic, coverage, score: dueScore * 10 + riskScore };
+    }).sort((a, b) => b.score - a.score || a.coverage.pct - b.coverage.pct);
+    return `
+    <div class="ds-section overflow-hidden" data-yok-card-image="yokoten-topic-health">
+        <div class="px-5 py-4 border-b border-slate-100 flex flex-wrap items-center gap-2 justify-between">
+            <div>
+                <h3 class="text-sm font-black text-slate-800">Topic Health</h3>
+                <p class="text-xs text-slate-400 mt-0.5">สถานะรายหัวข้อพร้อม scope และความเสี่ยง</p>
+            </div>
+            <button class="text-xs font-bold text-sky-600 hover:underline" data-switch-tab="topics">ดูหัวข้อทั้งหมด</button>
+        </div>
+        <div class="divide-y divide-slate-100">
+            ${rows.length ? rows.slice(0, 8).map(({ topic, coverage }) => _buildTopicHealthRow(topic, coverage)).join('') : `
+            <div class="px-5 py-8 text-center text-sm text-slate-400">No Yokoten topic in this year.</div>`}
+        </div>
+    </div>`;
+}
+
+function _getTopicCoverage(topic) {
+    if (_isAdmin && _deptCompletion?.deptSummary?.length) {
+        const deptSummary = _filterToTargetedDepts(_deptCompletion.deptSummary || [], _deptCompletion.topics || []);
+        const targeted = _getTopicTargetedDepts(deptSummary, topic);
+        const responded = targeted.filter(dept =>
+            (dept.topicBreakdown || []).some(tb => String(tb.YokotenID) === String(topic.YokotenID) && tb.responded)
+        ).length;
+        const total = targeted.length;
+        return { responded, total, pct: total ? Math.round(responded * 100 / total) : 0 };
+    }
+    const responded = topic.deptResponse ? 1 : 0;
+    return { responded, total: 1, pct: responded ? 100 : 0 };
+}
+
+function _buildTopicHealthRow(topic, coverage) {
+    const color = coverage.pct === 100 ? '#059669' : coverage.pct >= 60 ? '#0ea5e9' : coverage.pct >= 30 ? '#d97706' : '#dc2626';
+    const units = _parseTargetDepts(topic.TargetUnits);
+    return `
+    <button type="button" class="w-full text-left px-5 py-4 hover:bg-slate-50 transition-colors yok-open-topic-btn"
+            data-yid="${_esc(topic.YokotenID || '')}">
+        <div class="grid grid-cols-1 lg:grid-cols-[minmax(0,1fr)_220px] gap-3 lg:items-center">
+            <div class="min-w-0">
+                <div class="flex flex-wrap items-center gap-2 mb-1">
+                    <span class="text-sm font-black text-slate-800 truncate">${_esc(topic.Title || _htmlToText(topic.TopicDescription) || '-')}</span>
+                    <span class="px-1.5 py-0.5 rounded text-[11px] font-bold ${RISK_BADGE[topic.RiskLevel] || 'bg-slate-100 text-slate-500'}">${_esc(RISK_LABEL[topic.RiskLevel] || topic.RiskLevel || '-')}</span>
+                    ${_deadlineBadge(topic.Deadline, false)}
+                </div>
+                <div class="flex flex-wrap gap-1.5">
+                    ${(units.length ? units.slice(0, 5) : ['Department scope']).map(unit => `<span class="px-2 py-0.5 rounded-md bg-slate-50 border border-slate-100 text-[11px] font-semibold text-slate-500">${_esc(unit)}</span>`).join('')}
+                    ${units.length > 5 ? `<span class="px-2 py-0.5 rounded-md bg-slate-100 text-[11px] font-bold text-slate-500">+${units.length - 5}</span>` : ''}
+                </div>
+            </div>
+            <div>
+                <div class="flex items-center justify-between gap-3 mb-1">
+                    <span class="text-xs font-semibold text-slate-500">${coverage.responded}/${coverage.total} responses</span>
+                    <span class="text-xs font-black" style="color:${color}">${coverage.pct}%</span>
+                </div>
+                <div class="h-2.5 rounded-full bg-slate-100 overflow-hidden">
+                    <div class="h-full rounded-full" style="width:${coverage.pct}%;background:${color}"></div>
+                </div>
+            </div>
+        </div>
+    </button>`;
+}
+
+function _buildDashboardScopeSummary(topics) {
+    const scopedDepts = new Set();
+    let hasAllDeptTopic = false;
+    const scopedUnits = new Set();
+    (topics || []).forEach(t => {
+        const depts = _parseTargetDepts(t.TargetDepts);
+        if (depts.length === 0) hasAllDeptTopic = true;
+        depts.forEach(dept => scopedDepts.add(dept));
+        _parseTargetDepts(t.TargetUnits).forEach(unit => scopedUnits.add(unit));
+    });
+    const deptLabel = hasAllDeptTopic
+        ? `ทุกแผนก (${_masterDepts.length || '-'})`
+        : `${scopedDepts.size} แผนก`;
+    const unitList = [...scopedUnits].sort();
+    return `
+    <div class="ds-section p-4" data-yok-card-image="yokoten-scope-summary">
+        <div class="flex flex-wrap items-center gap-3 justify-between">
+            <div class="min-w-0">
+                <p class="text-xs font-bold uppercase text-slate-400">Yokoten Scope</p>
+                <p class="text-sm font-bold text-slate-700 mt-0.5">แผนกเป้าหมาย: ${_esc(deptLabel)} · Safety Unit: ${unitList.length || '-'}</p>
+            </div>
+            <div class="flex flex-wrap gap-1.5 justify-end max-w-3xl">
+                ${unitList.length
+                    ? unitList.slice(0, 10).map(unit => `<span class="px-2 py-1 rounded-md bg-violet-50 text-violet-700 border border-violet-100 text-xs font-semibold">${_esc(unit)}</span>`).join('')
+                    : '<span class="px-2 py-1 rounded-md bg-red-50 text-red-700 border border-red-100 text-xs font-semibold">ยังไม่ได้เลือก Safety Unit</span>'}
+                ${unitList.length > 10 ? `<span class="px-2 py-1 rounded-md bg-slate-100 text-slate-500 text-xs font-semibold">+${unitList.length - 10}</span>` : ''}
+            </div>
+        </div>
+    </div>`;
+}
+
 function _destroyCharts() {
     if (_chartCat)  { _chartCat.destroy();  _chartCat  = null; }
     if (_chartDept) { _chartDept.destroy(); _chartDept = null; }
+    if (_chartStatus) { _chartStatus.destroy(); _chartStatus = null; }
+    if (_chartTrend) { _chartTrend.destroy(); _chartTrend = null; }
+    if (_chartCompanyDept) { _chartCompanyDept.destroy(); _chartCompanyDept = null; }
+    if (_chartCompanyRisk) { _chartCompanyRisk.destroy(); _chartCompanyRisk = null; }
 }
 
 // ─── EXECUTIVE DASHBOARD HELPERS ─────────────────────────────────────────────
+function _buildUnifiedAdminDashboardSummary() {
+    const topics = _deptCompletion?.topics || [];
+    const deptSummary = _filterToTargetedDepts(_deptCompletion?.deptSummary || [], topics);
+    const allResp = _allResponses || [];
+    const now = Date.now();
+    const alertTopics = topics
+        .filter(t => {
+            if (!t.Deadline) return false;
+            const daysLeft = Math.ceil((new Date(t.Deadline) - now) / 86400000);
+            if (daysLeft > 14) return false;
+            const targeted = _getTopicTargetedDepts(deptSummary, t);
+            const respondedCount = targeted.filter(d =>
+                d.topicBreakdown.some(tb => tb.YokotenID === t.YokotenID && tb.responded)
+            ).length;
+            return targeted.length && respondedCount < targeted.length;
+        })
+        .map(t => {
+            const targeted = _getTopicTargetedDepts(deptSummary, t);
+            const respondedDepts = targeted.filter(d =>
+                d.topicBreakdown.some(tb => tb.YokotenID === t.YokotenID && tb.responded)
+            ).length;
+            return {
+                ...t,
+                daysLeft: Math.ceil((new Date(t.Deadline) - now) / 86400000),
+                respondedDepts,
+                targetDepts: targeted.length,
+            };
+        })
+        .sort((a, b) => a.daysLeft - b.daysLeft);
+    const chartH = Math.max(220, Math.min(deptSummary.length * 24, 420));
+    return `
+    <div class="space-y-4">
+        ${_buildExecutiveBrief(deptSummary, topics, allResp, alertTopics)}
+        ${_buildYokotenActionCenter(deptSummary, topics, allResp, alertTopics)}
+        ${_buildExecutiveChartLayer()}
+        <div class="ds-section p-5" data-yok-card-image="yokoten-department-progress">
+            <div class="flex items-center justify-between mb-4">
+                <h3 class="text-sm font-bold text-slate-700">Department Progress / ความคืบหน้ารายแผนก</h3>
+                <span class="text-[11px] text-slate-400">Targeted departments only</span>
+            </div>
+            <div style="height:${chartH}px">
+                <canvas id="yok-dept-chart"></canvas>
+            </div>
+        </div>
+    </div>`;
+}
+
 function _buildExecSection() {
     const { deptSummary: rawDeptSummary, topics } = _deptCompletion;
     // Only show depts that are actually targeted by at least one topic (master-data driven)
     const deptSummary = _filterToTargetedDepts(rawDeptSummary, topics);
 
     const allResp      = _allResponses || [];
-    const autoApproved = allResp.filter(r => r.IsRelated === 'Yes' && !r.ApprovalStatus).length;
+    const autoApproved = allResp.filter(r => r.IsRelated === 'No' && !r.ApprovalStatus).length;
     const pendingAppr  = allResp.filter(r => r.ApprovalStatus === 'pending').length;
     const approved     = allResp.filter(r => r.ApprovalStatus === 'approved').length;
     const rejected     = allResp.filter(r => r.ApprovalStatus === 'rejected').length;
@@ -637,6 +1758,14 @@ function _buildExecSection() {
         <div class="h-px flex-1 bg-slate-200"></div>
     </div>
 
+    ${_buildExecutiveBrief(deptSummary, topics, allResp, alertTopics)}
+
+    ${_buildYokotenActionCenter(deptSummary, topics, allResp, alertTopics)}
+
+    ${_buildExecutiveRiskWatch(deptSummary, topics, allResp)}
+
+    ${_buildExecutiveChartLayer()}
+
     <div class="grid grid-cols-1 lg:grid-cols-3 gap-4">
         <!-- Dept completion horizontal bar chart (2/3 width) -->
         <div class="ds-section p-5 lg:col-span-2">
@@ -668,7 +1797,7 @@ function _buildExecSection() {
             </h3>
             <div class="space-y-3 flex-1">
                 ${_approvalFunnelBar(notResponded,  totalPossible, '#e2e8f0', '#94a3b8', 'ยังไม่ตอบ')}
-                ${_approvalFunnelBar(autoApproved,  totalPossible, '#dcfce7', '#059669', 'เกี่ยวข้อง (อัตโนมัติ)')}
+                ${_approvalFunnelBar(autoApproved,  totalPossible, '#dcfce7', '#059669', 'ไม่เกี่ยวข้อง (อัตโนมัติ)')}
                 ${_approvalFunnelBar(pendingAppr,   totalPossible, '#fef9c3', '#d97706', 'รออนุมัติ')}
                 ${_approvalFunnelBar(approved,      totalPossible, '#dbeafe', '#2563eb', 'อนุมัติแล้ว')}
                 ${_approvalFunnelBar(rejected,      totalPossible, '#fee2e2', '#dc2626', 'ถูกส่งกลับแก้ไข')}
@@ -792,11 +1921,725 @@ function _buildExecSection() {
                     <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 21h10a2 2 0 002-2V9.414a1 1 0 00-.293-.707l-5.414-5.414A1 1 0 0012.586 3H7a2 2 0 00-2 2v14a2 2 0 002 2z"/>
                     </svg>
-                    Export PDF
+                    Export PDF / ส่งออก PDF
                 </button>
             </div>
         </div>
     </div>`;
+}
+
+function _getExecutiveBriefData(deptSummary, topics, allResp, alertTopics) {
+    const topicIds = new Set(topics.map(t => String(t.YokotenID)));
+    const activeResp = (allResp || []).filter(r => topicIds.has(String(r.YokotenID)));
+    const totalPossible = deptSummary.reduce((sum, dept) => sum + (dept.totalTopics || 0), 0);
+    const responded = Math.min(activeResp.length, totalPossible);
+    const coverage = totalPossible ? Math.round(responded * 100 / totalPossible) : 0;
+    const overdueGaps = alertTopics.filter(t => t.daysLeft < 0).length;
+
+    let highRiskTotal = 0;
+    let highRiskResponded = 0;
+    const highRiskTopicIds = new Set(topics.filter(t => ['Critical', 'High'].includes(t.RiskLevel)).map(t => String(t.YokotenID)));
+    deptSummary.forEach(dept => {
+        (dept.topicBreakdown || []).forEach(tb => {
+            if (!highRiskTopicIds.has(String(tb.YokotenID))) return;
+            highRiskTotal++;
+            if (tb.responded) highRiskResponded++;
+        });
+    });
+    const highRiskCoverage = highRiskTotal ? Math.round(highRiskResponded * 100 / highRiskTotal) : 100;
+
+    const now = Date.now();
+    const pendingAges = activeResp
+        .filter(r => r.ApprovalStatus === 'pending' && r.ResponseDate)
+        .map(r => Math.max(0, Math.floor((now - new Date(r.ResponseDate)) / 86400000)));
+    const oldestPending = pendingAges.length ? Math.max(...pendingAges) : 0;
+    const pendingCount = activeResp.filter(r => r.ApprovalStatus === 'pending').length;
+    const rejectedCount = activeResp.filter(r => r.ApprovalStatus === 'rejected').length;
+
+    const health = overdueGaps > 0 || highRiskCoverage < 75 || oldestPending >= 7
+        ? { label: 'Critical Attention', className: 'bg-red-50 text-red-700 border-red-100', color: '#dc2626' }
+        : coverage < 85 || pendingCount > 0 || rejectedCount > 0 || highRiskCoverage < 90
+            ? { label: 'Watch Closely', className: 'bg-amber-50 text-amber-700 border-amber-100', color: '#d97706' }
+            : { label: 'Stable', className: 'bg-emerald-50 text-emerald-700 border-emerald-100', color: '#059669' };
+
+    const focus = [];
+    if (overdueGaps > 0) focus.push(`${overdueGaps} overdue topic${overdueGaps === 1 ? '' : 's'} still need follow-up`);
+    if (highRiskCoverage < 100) focus.push(`High/Critical response coverage is ${highRiskCoverage}%`);
+    if (oldestPending > 0) focus.push(`Oldest pending approval is ${oldestPending} day${oldestPending === 1 ? '' : 's'}`);
+    if (rejectedCount > 0) focus.push(`${rejectedCount} rejected response${rejectedCount === 1 ? '' : 's'} need correction`);
+    const briefText = focus.length
+        ? focus.slice(0, 2).join('. ') + '.'
+        : 'Yokoten response and approval flow is currently stable for the selected year.';
+
+    return {
+        coverage,
+        highRiskCoverage,
+        overdueGaps,
+        oldestPending,
+        pendingCount,
+        rejectedCount,
+        health,
+        briefText,
+        totalPossible,
+        responded,
+        highRiskTotal,
+        highRiskResponded,
+    };
+}
+
+function _buildExecutiveBrief(deptSummary, topics, allResp, alertTopics) {
+    const {
+        coverage,
+        highRiskCoverage,
+        overdueGaps,
+        oldestPending,
+        health,
+        briefText,
+    } = _getExecutiveBriefData(deptSummary, topics, allResp, alertTopics);
+
+    return `
+    <div class="ds-section p-5" data-yok-card-image="yokoten-snapshot">
+        <div class="flex flex-col xl:flex-row xl:items-center gap-5 justify-between">
+            <div class="min-w-0">
+                <div class="flex flex-wrap items-center gap-2 mb-2">
+                    <h3 class="text-sm font-black text-slate-800">Yokoten Snapshot / ภาพรวมสำคัญ</h3>
+                    <span class="px-2.5 py-1 rounded-full text-[11px] font-bold border ${health.className}">${health.label}</span>
+                    <span class="text-[11px] text-slate-400">Year ${_dashYear}</span>
+                </div>
+                <p class="text-sm text-slate-600 leading-relaxed">${_esc(briefText)}</p>
+            </div>
+            <div class="grid grid-cols-2 sm:grid-cols-4 gap-2 w-full xl:w-auto xl:min-w-[520px]">
+                ${_briefMetric(coverage, 'Response coverage / อัตราตอบกลับ', '%', coverage >= 85 ? '#059669' : coverage >= 60 ? '#d97706' : '#dc2626')}
+                ${_briefMetric(highRiskCoverage, 'High-risk coverage / ความเสี่ยงสูง', '%', highRiskCoverage >= 90 ? '#059669' : highRiskCoverage >= 75 ? '#d97706' : '#dc2626')}
+                ${_briefMetric(overdueGaps, 'Overdue gaps / เกินกำหนด', '', overdueGaps ? '#dc2626' : '#059669')}
+                ${_briefMetric(oldestPending, 'Oldest pending / ค้างอนุมัติ', 'd', oldestPending >= 7 ? '#dc2626' : oldestPending >= 3 ? '#d97706' : '#059669')}
+            </div>
+        </div>
+        <div class="mt-4 pt-4 border-t border-slate-100 flex flex-wrap gap-2">
+            <button type="button" class="yok-brief-drill-btn px-3 py-2 rounded-lg text-xs font-bold bg-slate-100 text-slate-600 hover:bg-slate-200"
+                    data-drill-type="status" data-drill-key="not_responded" data-drill-label="ยังไม่ตอบ">
+                Review missing / ตรวจรายการยังไม่ตอบ
+            </button>
+            <button type="button" class="yok-brief-drill-btn px-3 py-2 rounded-lg text-xs font-bold bg-amber-50 text-amber-700 hover:bg-amber-100"
+                    data-drill-type="status" data-drill-key="pending" data-drill-label="รออนุมัติ">
+                Review pending / ตรวจรออนุมัติ
+            </button>
+            <button type="button" class="yok-brief-admin-dept-btn px-3 py-2 rounded-lg text-xs font-bold bg-sky-50 text-sky-700 hover:bg-sky-100">
+                Department view / ดูรายแผนก
+            </button>
+        </div>
+    </div>`;
+}
+
+function _briefMetric(value, label, suffix, color) {
+    return `
+    <div class="rounded-xl border border-slate-100 bg-slate-50 px-3 py-2">
+        <p class="text-xl font-black leading-none" style="color:${color}">${value}${suffix}</p>
+        <p class="text-[10px] font-semibold text-slate-500 mt-1">${label}</p>
+    </div>`;
+}
+
+function _buildYokotenActionCenter(deptSummary, topics, allResp, alertTopics) {
+    const topicMap = new Map(topics.map(t => [t.YokotenID, t]));
+    const pendingResponses = allResp
+        .filter(r => r.ApprovalStatus === 'pending')
+        .sort((a, b) => new Date(a.ResponseDate || 0) - new Date(b.ResponseDate || 0));
+    const rejectedResponses = allResp
+        .filter(r => r.ApprovalStatus === 'rejected')
+        .sort((a, b) => new Date(b.UpdatedAt || b.ResponseDate || 0) - new Date(a.UpdatedAt || a.ResponseDate || 0));
+
+    const missingItems = [];
+    deptSummary.forEach(dept => {
+        (dept.topicBreakdown || []).forEach(tb => {
+            if (tb.responded) return;
+            const topic = topicMap.get(tb.YokotenID);
+            if (!topic) return;
+            const daysLeft = topic.Deadline ? Math.ceil((new Date(topic.Deadline) - Date.now()) / 86400000) : 9999;
+            const riskScore = { Critical: 4, High: 3, Medium: 2, Low: 1 }[topic.RiskLevel] || 0;
+            missingItems.push({ topic, dept: dept.department, daysLeft, riskScore });
+        });
+    });
+    missingItems.sort((a, b) => {
+        const overdueA = a.daysLeft < 0 ? 1000 : 0;
+        const overdueB = b.daysLeft < 0 ? 1000 : 0;
+        return (overdueB + b.riskScore * 10 - b.daysLeft) - (overdueA + a.riskScore * 10 - a.daysLeft);
+    });
+
+    const overdueTopics = alertTopics.filter(t => t.daysLeft < 0).length;
+    const nearTopics = alertTopics.filter(t => t.daysLeft >= 0).length;
+    const totalActions = pendingResponses.length + rejectedResponses.length + missingItems.length;
+    const highestRiskMissing = missingItems.filter(i => ['Critical', 'High'].includes(i.topic.RiskLevel)).length;
+
+    const responseRow = (r, label, colorClass) => {
+        const topic = topicMap.get(r.YokotenID);
+        return `
+        <button type="button" class="w-full text-left px-4 py-3 hover:bg-slate-50 transition-colors yok-open-topic-btn"
+                data-yid="${_esc(r.YokotenID)}" data-rid="${_esc(r.ResponseID || '')}">
+            <div class="flex items-start gap-3">
+                <span class="mt-0.5 w-2 h-2 rounded-full flex-shrink-0 ${colorClass}"></span>
+                <div class="min-w-0 flex-1">
+                    <p class="text-xs font-bold text-slate-700 truncate">${_esc(topic?.Title || r.Title || r.TopicTitle || r.YokotenID)}</p>
+                    <p class="text-[11px] text-slate-400 mt-0.5">${_esc(r.Department || '-')} · ${label} · ${_fmtDate(r.ResponseDate)}</p>
+                </div>
+            </div>
+        </button>`;
+    };
+
+    const missingRow = item => {
+        const overdue = item.daysLeft < 0;
+        const tag = !item.topic.Deadline ? 'ไม่มีกำหนด'
+            : overdue ? `เกิน ${Math.abs(item.daysLeft)} วัน`
+            : item.daysLeft === 0 ? 'ครบกำหนดวันนี้'
+            : `อีก ${item.daysLeft} วัน`;
+        const tagClass = overdue ? 'bg-red-100 text-red-700' : item.daysLeft <= 3 ? 'bg-amber-100 text-amber-700' : 'bg-slate-100 text-slate-600';
+        return `
+        <button type="button" class="w-full text-left px-4 py-3 hover:bg-slate-50 transition-colors yok-open-topic-btn"
+                data-yid="${_esc(item.topic.YokotenID)}">
+            <div class="flex items-start gap-3">
+                <span class="mt-0.5 px-1.5 py-0.5 rounded text-[10px] font-bold ${RISK_BADGE[item.topic.RiskLevel] || 'bg-slate-100 text-slate-500'}">${RISK_LABEL[item.topic.RiskLevel] || item.topic.RiskLevel}</span>
+                <div class="min-w-0 flex-1">
+                    <p class="text-xs font-bold text-slate-700 truncate">${_esc(item.topic.Title || _htmlToText(item.topic.TopicDescription))}</p>
+                    <p class="text-[11px] text-slate-400 mt-0.5">${_esc(item.dept)} ยังไม่ตอบ</p>
+                </div>
+                <span class="text-[10px] font-semibold px-2 py-1 rounded-lg ${tagClass}">${tag}</span>
+            </div>
+        </button>`;
+    };
+
+    return `
+    <div class="ds-section overflow-hidden" data-yok-card-image="yokoten-action-center">
+        <div class="px-5 py-4 border-b border-slate-100 flex flex-col lg:flex-row lg:items-center gap-3 justify-between">
+            <div>
+                <h3 class="text-sm font-black text-slate-800">Enterprise Action Required / งานที่ต้องติดตาม</h3>
+                <p class="text-xs text-slate-400 mt-0.5">คิวงานที่ผู้ดูแลควรติดตามก่อนดูกราฟภาพรวม / Priority work queue before chart review</p>
+            </div>
+            <div class="grid grid-cols-2 sm:grid-cols-4 gap-2 w-full lg:w-auto">
+                ${_actionMetric(totalActions, 'Total actions / งานค้างรวม', '#334155', '#f8fafc')}
+                ${_actionMetric(pendingResponses.length, 'Pending / รออนุมัติ', '#d97706', '#fffbeb')}
+                ${_actionMetric(overdueTopics, 'Overdue topics / เกินกำหนด', '#dc2626', '#fef2f2')}
+                ${_actionMetric(highestRiskMissing, 'High/Critical gaps / ยังไม่ตอบ', '#ea580c', '#fff7ed')}
+            </div>
+        </div>
+        <div class="grid grid-cols-1 xl:grid-cols-3 divide-y xl:divide-y-0 xl:divide-x divide-slate-100">
+            <div>
+                <div class="px-4 py-3 bg-slate-50 border-b border-slate-100 flex items-center justify-between">
+                    <span class="text-xs font-bold text-slate-600">Pending / Rejected · รออนุมัติ / ส่งกลับแก้ไข</span>
+                    <span class="text-[11px] text-slate-400">${pendingResponses.length + rejectedResponses.length} รายการ</span>
+                </div>
+                <div class="divide-y divide-slate-100 max-h-72 overflow-y-auto">
+                    ${pendingResponses.slice(0, 4).map(r => responseRow(r, 'Pending / รออนุมัติ', 'bg-amber-500')).join('')}
+                    ${rejectedResponses.slice(0, 3).map(r => responseRow(r, 'Rejected / ส่งกลับแก้ไข', 'bg-red-500')).join('')}
+                    ${pendingResponses.length + rejectedResponses.length === 0 ? '<div class="px-4 py-8 text-center text-sm text-emerald-600 font-semibold">No decision queue / ไม่มีรายการรอการตัดสินใจ</div>' : ''}
+                </div>
+            </div>
+            <div>
+                <div class="px-4 py-3 bg-slate-50 border-b border-slate-100 flex items-center justify-between">
+                    <span class="text-xs font-bold text-slate-600">Missing Responses / แผนกที่ยังไม่ตอบ</span>
+                    <span class="text-[11px] text-slate-400">${missingItems.length} รายการ</span>
+                </div>
+                <div class="divide-y divide-slate-100 max-h-72 overflow-y-auto">
+                    ${missingItems.slice(0, 7).map(missingRow).join('') || '<div class="px-4 py-8 text-center text-sm text-emerald-600 font-semibold">All departments responded / ตอบครบทุกแผนกแล้ว</div>'}
+                </div>
+            </div>
+            <div>
+                <div class="px-4 py-3 bg-slate-50 border-b border-slate-100 flex items-center justify-between">
+                    <span class="text-xs font-bold text-slate-600">SLA / Deadline Watch · เฝ้าระวังกำหนด</span>
+                    <span class="text-[11px] text-slate-400">${nearTopics} ใกล้ครบกำหนด</span>
+                </div>
+                <div class="p-4 space-y-3">
+                    <div class="rounded-xl border border-red-100 bg-red-50 px-4 py-3 flex items-center justify-between">
+                        <span class="text-xs font-semibold text-red-700">Overdue topics / หัวข้อเกินกำหนด</span>
+                        <span class="text-xl font-black text-red-700">${overdueTopics}</span>
+                    </div>
+                    <div class="rounded-xl border border-amber-100 bg-amber-50 px-4 py-3 flex items-center justify-between">
+                        <span class="text-xs font-semibold text-amber-700">Due within 14 days / ใกล้ครบกำหนด</span>
+                        <span class="text-xl font-black text-amber-700">${nearTopics}</span>
+                    </div>
+                    <button type="button" class="w-full px-4 py-2 rounded-lg text-xs font-bold text-white bg-slate-800 hover:bg-slate-700" data-switch-tab="topics">
+                        Open topics / ไปยังรายการหัวข้อ
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>`;
+}
+
+function _actionMetric(value, label, color, bg) {
+    return `
+    <div class="rounded-xl px-3 py-2 border border-slate-100" style="background:${bg}">
+        <p class="text-lg font-black leading-none" style="color:${color}">${value}</p>
+        <p class="text-[10px] font-semibold text-slate-500 mt-1 whitespace-nowrap">${label}</p>
+    </div>`;
+}
+
+function _buildExecutiveRiskWatch(deptSummary, topics, allResp) {
+    const now = Date.now();
+    const topicMap = new Map(topics.map(t => [String(t.YokotenID), t]));
+    const activeResp = (allResp || []).filter(r => topicMap.has(String(r.YokotenID)));
+    const dayMs = 86400000;
+
+    const highRiskMissing = [];
+    deptSummary.forEach(dept => {
+        (dept.topicBreakdown || []).forEach(tb => {
+            if (tb.responded) return;
+            const topic = topicMap.get(String(tb.YokotenID));
+            if (!topic || !['Critical', 'High'].includes(topic.RiskLevel)) return;
+            const daysLeft = topic.Deadline ? Math.ceil((new Date(topic.Deadline) - now) / dayMs) : 999;
+            highRiskMissing.push({ topic, dept: dept.department, daysLeft });
+        });
+    });
+    highRiskMissing.sort((a, b) => {
+        const score = item => (item.daysLeft < 0 ? 1000 : 0) + ({ Critical: 20, High: 10 }[item.topic.RiskLevel] || 0) - item.daysLeft;
+        return score(b) - score(a);
+    });
+
+    const agingPending = activeResp
+        .filter(r => r.ApprovalStatus === 'pending')
+        .map(r => {
+            const ageDays = r.ResponseDate ? Math.max(0, Math.floor((now - new Date(r.ResponseDate)) / dayMs)) : 0;
+            const topic = topicMap.get(String(r.YokotenID));
+            return { ...r, ageDays, topic };
+        })
+        .sort((a, b) => b.ageDays - a.ageDays);
+
+    const bottlenecks = deptSummary
+        .filter(d => (d.totalTopics || 0) > 0)
+        .map(d => {
+            const missingHighRisk = (d.topicBreakdown || []).filter(tb => {
+                if (tb.responded) return false;
+                const topic = topicMap.get(String(tb.YokotenID));
+                return topic && ['Critical', 'High'].includes(topic.RiskLevel);
+            }).length;
+            const pending = d.pendingApproval || 0;
+            const rejected = d.rejected || 0;
+            const completion = d.completionPct || 0;
+            return {
+                ...d,
+                missingHighRisk,
+                score: (100 - completion) + pending * 8 + rejected * 12 + missingHighRisk * 15,
+            };
+        })
+        .filter(d => d.score > 0)
+        .sort((a, b) => b.score - a.score);
+
+    const deadlineText = daysLeft => {
+        if (daysLeft === 999) return 'No deadline';
+        if (daysLeft < 0) return `Overdue ${Math.abs(daysLeft)}d`;
+        if (daysLeft === 0) return 'Due today';
+        return `Due in ${daysLeft}d`;
+    };
+
+    const highRiskRows = highRiskMissing.slice(0, 6).map(item => `
+        <button type="button" class="w-full text-left px-4 py-3 hover:bg-slate-50 transition-colors yok-open-topic-btn"
+                data-yid="${_esc(item.topic.YokotenID)}">
+            <div class="flex items-start gap-3">
+                <span class="mt-0.5 px-1.5 py-0.5 rounded text-[10px] font-bold ${RISK_BADGE[item.topic.RiskLevel] || 'bg-slate-100 text-slate-500'}">${RISK_LABEL[item.topic.RiskLevel] || item.topic.RiskLevel}</span>
+                <div class="min-w-0 flex-1">
+                    <p class="text-xs font-bold text-slate-700 truncate">${_esc(item.topic.Title || _htmlToText(item.topic.TopicDescription))}</p>
+                    <p class="text-[11px] text-slate-400 mt-0.5">${_esc(item.dept)} · ${deadlineText(item.daysLeft)}</p>
+                </div>
+            </div>
+        </button>`).join('');
+
+    const agingRows = agingPending.slice(0, 6).map(r => `
+        <button type="button" class="w-full text-left px-4 py-3 hover:bg-slate-50 transition-colors yok-open-topic-btn"
+                data-yid="${_esc(r.YokotenID)}" data-rid="${_esc(r.ResponseID || '')}">
+            <div class="flex items-start gap-3">
+                <span class="mt-0.5 w-8 h-8 rounded-lg bg-amber-50 text-amber-700 flex items-center justify-center text-xs font-black">${r.ageDays}</span>
+                <div class="min-w-0 flex-1">
+                    <p class="text-xs font-bold text-slate-700 truncate">${_esc(r.topic?.Title || r.Title || r.TopicTitle || r.YokotenID)}</p>
+                    <p class="text-[11px] text-slate-400 mt-0.5">${_esc(r.Department || '-')} · pending approval days</p>
+                </div>
+            </div>
+        </button>`).join('');
+
+    const bottleneckRows = bottlenecks.slice(0, 6).map(d => {
+        const color = d.completionPct >= 80 ? '#059669' : d.completionPct >= 50 ? '#d97706' : '#dc2626';
+        return `
+        <button type="button" class="w-full text-left px-4 py-3 hover:bg-slate-50 transition-colors yok-admin-dept-watch-btn">
+            <div class="flex items-center gap-3">
+                <div class="w-10 h-10 rounded-xl bg-slate-50 flex items-center justify-center text-sm font-black" style="color:${color}">${d.completionPct || 0}%</div>
+                <div class="min-w-0 flex-1">
+                    <p class="text-xs font-bold text-slate-700 truncate">${_esc(d.department || '-')}</p>
+                    <p class="text-[11px] text-slate-400 mt-0.5">${d.respondedCount || 0}/${d.totalTopics || 0} responses · ${d.pendingApproval || 0} pending · ${d.rejected || 0} rejected</p>
+                </div>
+                ${d.missingHighRisk ? `<span class="text-[10px] font-bold px-2 py-1 rounded-lg bg-red-50 text-red-700">${d.missingHighRisk} high risk</span>` : ''}
+            </div>
+        </button>`;
+    }).join('');
+
+    return `
+    <div class="ds-section overflow-hidden" data-yok-card-image="yokoten-risk-aging-watch">
+        <div class="px-5 py-4 border-b border-slate-100 flex flex-col lg:flex-row lg:items-center gap-3 justify-between">
+            <div>
+                <h3 class="text-sm font-black text-slate-800">Executive Risk & Aging Watch / ความเสี่ยงและงานค้าง</h3>
+                <p class="text-xs text-slate-400 mt-0.5">Decision view for high-risk response gaps, aging approvals, and department bottlenecks / มุมตัดสินใจสำหรับผู้บริหาร</p>
+            </div>
+            <div class="grid grid-cols-3 gap-2 w-full lg:w-auto">
+                ${_actionMetric(highRiskMissing.length, 'High/Critical gap / ช่องว่าง', '#dc2626', '#fef2f2')}
+                ${_actionMetric(agingPending.filter(r => r.ageDays >= 3).length, 'Pending 3d+ / ค้าง 3 วัน+', '#d97706', '#fffbeb')}
+                ${_actionMetric(bottlenecks.filter(d => (d.completionPct || 0) < 80).length, 'Dept <80% / แผนกต่ำกว่า 80%', '#334155', '#f8fafc')}
+            </div>
+        </div>
+        <div class="grid grid-cols-1 xl:grid-cols-3 divide-y xl:divide-y-0 xl:divide-x divide-slate-100">
+            <div>
+                <div class="px-4 py-3 bg-slate-50 border-b border-slate-100">
+                    <span class="text-xs font-bold text-slate-600">High/Critical Not Responded / ความเสี่ยงสูงยังไม่ตอบ</span>
+                </div>
+                <div class="divide-y divide-slate-100 max-h-72 overflow-y-auto">
+                    ${highRiskRows || '<div class="px-4 py-8 text-center text-sm text-emerald-600 font-semibold">No high-risk response gaps / ไม่มีช่องว่างความเสี่ยงสูง</div>'}
+                </div>
+            </div>
+            <div>
+                <div class="px-4 py-3 bg-slate-50 border-b border-slate-100">
+                    <span class="text-xs font-bold text-slate-600">Approval Aging / อายุงานรออนุมัติ</span>
+                </div>
+                <div class="divide-y divide-slate-100 max-h-72 overflow-y-auto">
+                    ${agingRows || '<div class="px-4 py-8 text-center text-sm text-emerald-600 font-semibold">No pending approvals / ไม่มีรายการรออนุมัติ</div>'}
+                </div>
+            </div>
+            <div>
+                <div class="px-4 py-3 bg-slate-50 border-b border-slate-100 flex items-center justify-between">
+                    <span class="text-xs font-bold text-slate-600">Department Bottlenecks / แผนกคอขวด</span>
+                    <span class="text-[11px] text-slate-400">click to manage / คลิกเพื่อจัดการ</span>
+                </div>
+                <div class="divide-y divide-slate-100 max-h-72 overflow-y-auto">
+                    ${bottleneckRows || '<div class="px-4 py-8 text-center text-sm text-emerald-600 font-semibold">No department bottlenecks / ไม่มีแผนกคอขวด</div>'}
+                </div>
+            </div>
+        </div>
+    </div>`;
+}
+
+function _buildExecutiveChartLayer() {
+    return `
+    <div class="grid grid-cols-1 xl:grid-cols-3 gap-4">
+        <div class="ds-section p-5" data-yok-card-image="yokoten-status-mix">
+            <div class="flex items-center justify-between mb-4">
+                <h3 class="text-sm font-bold text-slate-700">Response Status Mix / สัดส่วนสถานะตอบกลับ</h3>
+                <span class="text-[11px] text-slate-400">All departments / สถานะรวมทุกแผนก</span>
+            </div>
+            <div class="flex items-center gap-5">
+                <div class="flex-shrink-0" style="width:150px;height:150px">
+                    <canvas id="yok-status-chart"></canvas>
+                </div>
+                <div id="yok-status-legend" class="flex-1 space-y-2"></div>
+            </div>
+        </div>
+        <div class="ds-section p-5 xl:col-span-2" data-yok-card-image="yokoten-monthly-flow">
+            <div class="flex items-center justify-between mb-4">
+                <h3 class="text-sm font-bold text-slate-700">Monthly Yokoten Flow / แนวโน้มรายเดือน</h3>
+                <span class="text-[11px] text-slate-400">Issued topics vs responses / หัวข้อใหม่เทียบการตอบกลับ ปี ${_dashYear}</span>
+            </div>
+            <div style="height:220px">
+                <canvas id="yok-trend-chart"></canvas>
+            </div>
+        </div>
+    </div>
+    <div id="yok-dashboard-drilldown">
+        ${_buildDashboardDrilldownPanel()}
+    </div>`;
+}
+
+function _getDashboardTopicsForYear() {
+    return _topics.filter(t => !t.DateIssued || new Date(t.DateIssued).getFullYear() === _dashYear);
+}
+
+function _getActiveTopicIdsForYear() {
+    return new Set(_getDashboardTopicsForYear().map(t => t.YokotenID));
+}
+
+function _getStatusMixData() {
+    const topics = _deptCompletion?.topics || [];
+    const deptSummary = _filterToTargetedDepts(_deptCompletion?.deptSummary || [], topics);
+    const topicIds = _getActiveTopicIdsForYear();
+    const responses = (_allResponses || []).filter(r => !topicIds.size || topicIds.has(r.YokotenID));
+    const totalPossible = deptSummary.reduce((sum, dept) => {
+        const breakdown = Array.isArray(dept.topicBreakdown) ? dept.topicBreakdown : [];
+        return sum + breakdown.filter(tb => !topicIds.size || topicIds.has(tb.YokotenID)).length;
+    }, 0);
+    const autoApproved = responses.filter(r => r.IsRelated === 'No' && !r.ApprovalStatus).length;
+    const pending = responses.filter(r => r.ApprovalStatus === 'pending').length;
+    const approved = responses.filter(r => r.ApprovalStatus === 'approved').length;
+    const rejected = responses.filter(r => r.ApprovalStatus === 'rejected').length;
+    const notResponded = Math.max(0, totalPossible - responses.length);
+    return [
+        { key: 'not_responded', label: 'Not responded / ยังไม่ตอบ', value: notResponded, color: '#94a3b8' },
+        { key: 'auto_approved', label: 'Not related / ไม่เกี่ยวข้อง', value: autoApproved, color: '#059669' },
+        { key: 'pending', label: 'Pending / รออนุมัติ', value: pending, color: '#d97706' },
+        { key: 'approved', label: 'Approved / อนุมัติแล้ว', value: approved, color: '#2563eb' },
+        { key: 'rejected', label: 'Rejected / ส่งกลับแก้ไข', value: rejected, color: '#dc2626' },
+    ];
+}
+
+function _dashboardTopicMap() {
+    return new Map(_topics.map(t => [String(t.YokotenID), t]));
+}
+
+function _getStatusDrillRows(statusKey) {
+    const topicMap = _dashboardTopicMap();
+    const topicIds = _getActiveTopicIdsForYear();
+    if (statusKey === 'not_responded') {
+        const rows = [];
+        const topics = _deptCompletion?.topics || [];
+        const deptSummary = _filterToTargetedDepts(_deptCompletion?.deptSummary || [], topics);
+        deptSummary.forEach(dept => {
+            (dept.topicBreakdown || []).forEach(tb => {
+                if (tb.responded || (topicIds.size && !topicIds.has(tb.YokotenID))) return;
+                const topic = topicMap.get(String(tb.YokotenID));
+                if (!topic) return;
+                rows.push({
+                    kind: 'missing',
+                    yid: topic.YokotenID,
+                    title: topic.Title || _htmlToText(topic.TopicDescription),
+                    dept: dept.department,
+                    risk: topic.RiskLevel,
+                    date: topic.Deadline,
+                    meta: topic.Deadline ? `Deadline ${_fmtDateOnly(topic.Deadline)}` : 'No deadline',
+                });
+            });
+        });
+        return rows.sort((a, b) => _urgency(b.date) - _urgency(a.date));
+    }
+
+    return (_allResponses || [])
+        .filter(r => !topicIds.size || topicIds.has(r.YokotenID))
+        .filter(r => {
+            if (statusKey === 'auto_approved') return r.IsRelated === 'No' && !r.ApprovalStatus;
+            return r.ApprovalStatus === statusKey;
+        })
+        .map(r => {
+            const topic = topicMap.get(String(r.YokotenID));
+            return {
+                kind: 'response',
+                yid: r.YokotenID,
+                rid: r.ResponseID,
+                title: topic?.Title || r.Title || r.TopicTitle || r.YokotenID,
+                dept: r.Department,
+                risk: topic?.RiskLevel,
+                date: r.ResponseDate,
+                meta: `${r.EmployeeName || r.EmployeeID || '-'} · ${_fmtDate(r.ResponseDate)}`,
+            };
+        })
+        .sort((a, b) => new Date(b.date || 0) - new Date(a.date || 0));
+}
+
+function _getTrendDrillRows(kind, monthIndex) {
+    const topicMap = _dashboardTopicMap();
+    const topicIds = _getActiveTopicIdsForYear();
+    if (kind === 'issued') {
+        return _topics
+            .filter(t => {
+                if (!t.DateIssued) return false;
+                const d = new Date(t.DateIssued);
+                return d.getFullYear() === _dashYear && d.getMonth() === monthIndex;
+            })
+            .map(t => ({
+                kind: 'topic',
+                yid: t.YokotenID,
+                title: t.Title || _htmlToText(t.TopicDescription),
+                dept: Array.isArray(t.TargetDepts) && t.TargetDepts.length ? t.TargetDepts.join(', ') : 'All target departments',
+                risk: t.RiskLevel,
+                date: t.DateIssued,
+                meta: `Issued ${_fmtDateOnly(t.DateIssued)}`,
+            }))
+            .sort((a, b) => new Date(b.date || 0) - new Date(a.date || 0));
+    }
+    return (_allResponses || [])
+        .filter(r => {
+            if (!r.ResponseDate || (topicIds.size && !topicIds.has(r.YokotenID))) return false;
+            const d = new Date(r.ResponseDate);
+            return d.getFullYear() === _dashYear && d.getMonth() === monthIndex;
+        })
+        .map(r => {
+            const topic = topicMap.get(String(r.YokotenID));
+            return {
+                kind: 'response',
+                yid: r.YokotenID,
+                rid: r.ResponseID,
+                title: topic?.Title || r.Title || r.TopicTitle || r.YokotenID,
+                dept: r.Department,
+                risk: topic?.RiskLevel,
+                date: r.ResponseDate,
+                meta: `${r.EmployeeName || r.EmployeeID || '-'} · ${_fmtDate(r.ResponseDate)}`,
+            };
+        })
+        .sort((a, b) => new Date(b.date || 0) - new Date(a.date || 0));
+}
+
+function _buildDashboardDrilldownPanel() {
+    const drill = _dashboardDrilldown;
+    if (!drill) {
+        return `
+        <div class="ds-section px-5 py-4 border border-dashed border-slate-200 bg-slate-50/60">
+            <div class="flex flex-col sm:flex-row sm:items-center gap-2 justify-between">
+                <div>
+                    <h3 class="text-sm font-black text-slate-700">Dashboard Drilldown / รายการเจาะลึก</h3>
+                    <p class="text-xs text-slate-400 mt-0.5">Click chart or legend to inspect exact Yokoten items / คลิกกราฟหรือ legend เพื่อดูรายการจริง</p>
+                </div>
+                <span class="text-[11px] font-semibold text-slate-400">Insight layer / ชั้นข้อมูลเชิงลึก</span>
+            </div>
+        </div>`;
+    }
+
+    const rows = drill.type === 'status'
+        ? _getStatusDrillRows(drill.key)
+        : _getTrendDrillRows(drill.kind, drill.month);
+    const title = drill.type === 'status'
+        ? `Status Drilldown: ${drill.label}`
+        : `Monthly Drilldown: ${drill.label}`;
+
+    return `
+    <div class="ds-section overflow-hidden">
+        <div class="px-5 py-4 border-b border-slate-100 flex flex-col sm:flex-row sm:items-center gap-2 justify-between">
+            <div>
+                <h3 class="text-sm font-black text-slate-800">${_esc(title)}</h3>
+                <p class="text-xs text-slate-400 mt-0.5">${rows.length} item${rows.length === 1 ? '' : 's'} / รายการใน metric ที่เลือก</p>
+            </div>
+            <button type="button" class="yok-clear-drilldown px-3 py-1.5 rounded-lg text-xs font-bold text-slate-500 bg-slate-100 hover:bg-slate-200">
+                Clear / ล้าง
+            </button>
+        </div>
+        <div class="divide-y divide-slate-100 max-h-96 overflow-y-auto">
+            ${rows.length ? rows.slice(0, 30).map(_buildDashboardDrillRow).join('') : `
+            <div class="px-5 py-8 text-center text-sm font-semibold text-slate-400">No items found / ไม่พบรายการในเงื่อนไขนี้</div>`}
+        </div>
+    </div>`;
+}
+
+function _buildDashboardDrillRow(row) {
+    return `
+    <button type="button" class="w-full text-left px-5 py-3 hover:bg-slate-50 transition-colors yok-open-topic-btn"
+            data-yid="${_esc(row.yid || '')}" data-rid="${_esc(row.rid || '')}">
+        <div class="flex items-start gap-3">
+            <span class="mt-0.5 px-1.5 py-0.5 rounded text-[10px] font-bold ${RISK_BADGE[row.risk] || 'bg-slate-100 text-slate-500'}">${_esc(RISK_LABEL[row.risk] || row.risk || '-')}</span>
+            <div class="min-w-0 flex-1">
+                <p class="text-xs font-bold text-slate-700 truncate">${_esc(row.title || '-')}</p>
+                <p class="text-[11px] text-slate-400 mt-0.5">${_esc(row.dept || '-')} · ${_esc(row.meta || '')}</p>
+            </div>
+        </div>
+    </button>`;
+}
+
+function _setDashboardDrilldown(drill) {
+    _dashboardDrilldown = drill;
+    const panel = document.getElementById('yok-dashboard-drilldown');
+    if (panel) {
+        panel.innerHTML = _buildDashboardDrilldownPanel();
+        panel.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    }
+}
+
+function _initStatusChart() {
+    if (_chartStatus) { _chartStatus.destroy(); _chartStatus = null; }
+    const canvas = document.getElementById('yok-status-chart');
+    if (!canvas || typeof Chart === 'undefined') return;
+    const rows = _getStatusMixData();
+    const nonzero = rows.filter(r => r.value > 0);
+    const dataRows = nonzero.length ? nonzero : [{ label: 'ไม่มีข้อมูล', value: 1, color: '#e2e8f0' }];
+    const total = rows.reduce((sum, r) => sum + r.value, 0);
+    const legend = document.getElementById('yok-status-legend');
+    if (legend) {
+        legend.innerHTML = rows.map(r => {
+            const pct = total ? Math.round(r.value * 100 / total) : 0;
+            return `<button type="button" class="w-full flex items-center gap-2 text-xs rounded-lg px-2 py-1 hover:bg-slate-50 yok-status-drill-btn" data-status="${_esc(r.key)}" data-label="${_esc(r.label)}">
+                <span class="w-2.5 h-2.5 rounded-full" style="background:${r.color}"></span>
+                <span class="flex-1 text-slate-600">${r.label}</span>
+                <span class="font-bold text-slate-700">${r.value}</span>
+                <span class="text-slate-400 w-8 text-right">${pct}%</span>
+            </button>`;
+        }).join('');
+    }
+    _chartStatus = new Chart(canvas, {
+        type: 'doughnut',
+        data: {
+            labels: dataRows.map(r => r.label),
+            datasets: [{ data: dataRows.map(r => r.value), backgroundColor: dataRows.map(r => r.color), borderColor: '#fff', borderWidth: 2 }],
+        },
+        options: {
+            cutout: '70%',
+            plugins: {
+                legend: { display: false },
+                tooltip: { callbacks: { label: ctx => ` ${ctx.label}: ${ctx.raw} รายการ` } },
+            },
+            onClick: (evt, elements) => {
+                const el = elements?.[0];
+                if (!el) return;
+                const row = dataRows[el.index];
+                if (row?.key) _setDashboardDrilldown({ type: 'status', key: row.key, label: row.label });
+            },
+        },
+    });
+}
+
+function _initTrendChart() {
+    if (_chartTrend) { _chartTrend.destroy(); _chartTrend = null; }
+    const canvas = document.getElementById('yok-trend-chart');
+    if (!canvas || typeof Chart === 'undefined') return;
+    const monthLabels = ['ม.ค.','ก.พ.','มี.ค.','เม.ย.','พ.ค.','มิ.ย.','ก.ค.','ส.ค.','ก.ย.','ต.ค.','พ.ย.','ธ.ค.'];
+    const issued = Array(12).fill(0);
+    const responses = Array(12).fill(0);
+    const topicIds = _getActiveTopicIdsForYear();
+    _topics.forEach(t => {
+        if (!t.DateIssued) return;
+        const d = new Date(t.DateIssued);
+        if (d.getFullYear() === _dashYear) issued[d.getMonth()]++;
+    });
+    (_allResponses || []).forEach(r => {
+        if (!r.ResponseDate || (topicIds.size && !topicIds.has(r.YokotenID))) return;
+        const d = new Date(r.ResponseDate);
+        if (d.getFullYear() === _dashYear) responses[d.getMonth()]++;
+    });
+    _chartTrend = new Chart(canvas, {
+        type: 'line',
+        data: {
+            labels: monthLabels,
+            datasets: [
+                {
+                    label: 'หัวข้อใหม่',
+                    data: issued,
+                    borderColor: '#0ea5e9',
+                    backgroundColor: 'rgba(14,165,233,.10)',
+                    fill: true,
+                    tension: 0.35,
+                    pointRadius: 3,
+                },
+                {
+                    label: 'การตอบกลับ',
+                    data: responses,
+                    borderColor: '#059669',
+                    backgroundColor: 'rgba(5,150,105,.08)',
+                    fill: true,
+                    tension: 0.35,
+                    pointRadius: 3,
+                },
+            ],
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: {
+                legend: { position: 'bottom', labels: { boxWidth: 10, usePointStyle: true, font: { size: 11 } } },
+                tooltip: { mode: 'index', intersect: false },
+            },
+            onClick: (evt, elements) => {
+                const el = elements?.[0];
+                if (!el) return;
+                const kind = el.datasetIndex === 0 ? 'issued' : 'responses';
+                const seriesLabel = kind === 'issued' ? 'Issued topics' : 'Responses';
+                _setDashboardDrilldown({
+                    type: 'trend',
+                    kind,
+                    month: el.index,
+                    label: `${seriesLabel} · ${monthLabels[el.index]} ${_dashYear}`,
+                });
+            },
+            scales: {
+                x: { grid: { display: false }, ticks: { font: { size: 10 } } },
+                y: { beginAtZero: true, ticks: { precision: 0, font: { size: 10 } }, grid: { color: '#f1f5f9' } },
+            },
+        },
+    });
 }
 
 function _approvalFunnelBar(count, total, bg, color, label) {
@@ -892,6 +2735,9 @@ function renderTopics(container) {
     if (_filterAck === 'pending')   filtered = filtered.filter(t => !t.deptResponse);
     if (_filterAck === 'responded') filtered = filtered.filter(t => !!t.deptResponse);
     if (_filterAck === 'rejected')  filtered = filtered.filter(t => t.deptResponse?.ApprovalStatus === 'rejected');
+    if (_filterSla === 'overdue')     filtered = filtered.filter(t => !t.deptResponse && _isOverdue(t.Deadline));
+    if (_filterSla === 'due_soon')    filtered = filtered.filter(t => !t.deptResponse && _isNearDeadline(t.Deadline));
+    if (_filterSla === 'no_deadline') filtered = filtered.filter(t => !t.Deadline);
     if (_searchQ.trim()) {
         const q = _searchQ.trim().toLowerCase();
         filtered = filtered.filter(t =>
@@ -900,15 +2746,7 @@ function renderTopics(container) {
         );
     }
 
-    // Sort: rejected → overdue → near → pending → responded
-    filtered.sort((a, b) => {
-        const score = topic => {
-            if (topic.deptResponse?.ApprovalStatus === 'rejected') return 10;
-            if (!topic.deptResponse) return _urgency(topic.Deadline);
-            return -1;
-        };
-        return score(b) - score(a);
-    });
+    _sortTopics(filtered, _topicSort);
 
     // ── Mini KPI strip (from year-filtered base, before other filters) ──────
     const yTotal     = yearBase.length;
@@ -980,48 +2818,227 @@ function renderTopics(container) {
 
         <!-- Filter bar -->
         <div class="ds-filter-bar">
-            <div class="flex flex-wrap gap-3 items-center">
-                <select id="yok-filter-risk" class="form-input py-1.5 text-sm">
+            <div class="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-[170px_170px_170px_170px_minmax(220px,1fr)_auto] gap-2 items-center">
+                <select id="yok-filter-risk" class="form-input h-10 text-sm w-full">
                     <option value="">ทุกระดับความเสี่ยง</option>
                     ${RISK_LEVELS.map(r => `<option value="${r.value}" ${_filterRisk === r.value ? 'selected' : ''}>${r.label}</option>`).join('')}
                 </select>
-                <select id="yok-filter-cat" class="form-input py-1.5 text-sm">
+                <select id="yok-filter-cat" class="form-input h-10 text-sm w-full">
                     <option value="">ทุกหมวดหมู่</option>
                     ${CATEGORIES.map(c => `<option value="${c}" ${_filterCat === c ? 'selected' : ''}>${c}</option>`).join('')}
                 </select>
-                <select id="yok-filter-ack" class="form-input py-1.5 text-sm">
+                <select id="yok-filter-ack" class="form-input h-10 text-sm w-full">
                     <option value="">ทุกสถานะ</option>
                     <option value="pending"   ${_filterAck === 'pending'   ? 'selected' : ''}>รอตอบกลับ</option>
                     <option value="responded" ${_filterAck === 'responded' ? 'selected' : ''}>ตอบกลับแล้ว</option>
                     <option value="rejected"  ${_filterAck === 'rejected'  ? 'selected' : ''}>ถูกส่งกลับแก้ไข</option>
                 </select>
-                <div class="relative flex-1 min-w-[160px]">
+                <select id="yok-filter-sla" class="form-input h-10 text-sm w-full">
+                    <option value="">All SLA / ทุกกำหนดเวลา</option>
+                    <option value="overdue" ${_filterSla === 'overdue' ? 'selected' : ''}>Overdue / เกินกำหนด</option>
+                    <option value="due_soon" ${_filterSla === 'due_soon' ? 'selected' : ''}>Due soon / ใกล้ครบกำหนด</option>
+                    <option value="no_deadline" ${_filterSla === 'no_deadline' ? 'selected' : ''}>No deadline / ไม่มีกำหนด</option>
+                </select>
+                <div class="relative">
                     <svg class="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400 pointer-events-none"
                          fill="none" stroke="currentColor" viewBox="0 0 24 24">
                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/>
                     </svg>
-                    <input id="yok-search" type="text" placeholder="ค้นหาหัวข้อ..."
-                           value="${_esc(_searchQ)}" class="form-input w-full pl-9 text-sm py-1.5">
+                    <input id="yok-search" type="text" placeholder="Search topic... / ค้นหาหัวข้อ..."
+                           value="${_esc(_searchQ)}" class="form-input w-full h-10 pl-9 text-sm">
                 </div>
-                <span class="text-xs text-slate-400 ml-auto">${filtered.length} หัวข้อ</span>
+                <span class="h-10 px-3 rounded-lg bg-slate-50 border border-slate-200 text-xs font-semibold text-slate-500 inline-flex items-center justify-center whitespace-nowrap">
+                    ${filtered.length} หัวข้อ
+                </span>
             </div>
+            <div class="mt-3 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
+                <div class="flex flex-wrap items-center gap-2">
+                    <span class="text-xs font-bold text-slate-400 uppercase tracking-wide">Sort</span>
+                    <select id="yok-topic-sort" class="form-input h-9 text-xs w-full sm:w-44">
+                        <option value="latest" ${_topicSort === 'latest' ? 'selected' : ''}>Newest first</option>
+                        <option value="oldest" ${_topicSort === 'oldest' ? 'selected' : ''}>Oldest first</option>
+                        <option value="urgent" ${_topicSort === 'urgent' ? 'selected' : ''}>Urgent first</option>
+                        <option value="deadline" ${_topicSort === 'deadline' ? 'selected' : ''}>Deadline first</option>
+                    </select>
+                    <span class="text-xs text-slate-400">Default follows Yokoten ID / created order.</span>
+                </div>
+                <div class="inline-flex rounded-xl border border-slate-200 bg-white p-1 shadow-sm w-fit">
+                    <button type="button" class="yok-topic-view-btn px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${_topicView === 'card' ? 'text-white shadow-sm' : 'text-slate-500 hover:bg-slate-50'}"
+                            data-view="card" ${_topicView === 'card' ? 'style="background:linear-gradient(135deg,#0ea5e9,#6366f1)"' : ''}>
+                        Card
+                    </button>
+                    <button type="button" class="yok-topic-view-btn px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${_topicView === 'list' ? 'text-white shadow-sm' : 'text-slate-500 hover:bg-slate-50'}"
+                            data-view="list" ${_topicView === 'list' ? 'style="background:linear-gradient(135deg,#0ea5e9,#6366f1)"' : ''}>
+                        List
+                    </button>
+                </div>
+            </div>
+            ${(_filterRisk || _filterCat || _filterAck || _filterSla || _searchQ.trim()) ? `
+            <div class="mt-2 flex justify-end">
+                <button id="yok-clear-filters" type="button" class="px-3 py-1.5 rounded-lg text-xs font-semibold text-slate-500 border border-slate-200 hover:bg-slate-50">
+                    Clear filters / ล้างตัวกรอง
+                </button>
+            </div>` : ''}
         </div>
 
-        <!-- Topic grid -->
+        <!-- Topic list -->
         ${filtered.length
-            ? `<div class="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-4" id="yok-topic-list">${filtered.map(t => _buildTopicSummaryCard(t)).join('')}</div>`
+            ? (_topicView === 'list'
+                ? `<div class="ds-section overflow-hidden" id="yok-topic-list">${filtered.map((t, idx) => _buildTopicListRow(t, idx)).join('')}</div>`
+                : `<div class="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-4" id="yok-topic-list">${filtered.map((t, idx) => _buildTopicSummaryCard(t, idx)).join('')}</div>`)
             : `<div class="ds-empty-state">
                    <div class="w-16 h-16 rounded-2xl bg-slate-100 flex items-center justify-center mx-auto mb-4">
                        <svg class="w-8 h-8 opacity-40" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.172 16.172a4 4 0 015.656 0M9 10h.01M15 10h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/>
                        </svg>
                    </div>
-                   <p class="font-medium">ไม่มีหัวข้อที่ตรงกับเงื่อนไข</p>
+                   <p class="font-medium">No matching topics / ไม่พบหัวข้อที่ตรงกับตัวกรอง</p>
+                   <p class="text-sm mt-1">Adjust filters or search terms to review another Yokoten scope.</p>
                </div>`}
     </div>`;
 }
 
 // ─── TOPIC SUMMARY CARD (grid view) ──────────────────────────────────────────
+function _sortTopics(rows, mode = 'latest') {
+    const topicScore = topic => {
+        if (topic.deptResponse?.ApprovalStatus === 'rejected') return 1000;
+        if (!topic.deptResponse) return _urgency(topic.Deadline);
+        return -1;
+    };
+    const deadlineTs = topic => {
+        if (!topic.Deadline) return Number.MAX_SAFE_INTEGER;
+        const ts = new Date(topic.Deadline).getTime();
+        return Number.isFinite(ts) ? ts : Number.MAX_SAFE_INTEGER;
+    };
+    rows.sort((a, b) => {
+        if (mode === 'urgent') {
+            const urgentDiff = topicScore(b) - topicScore(a);
+            if (urgentDiff) return urgentDiff;
+            return _topicOrderValue(b) - _topicOrderValue(a);
+        }
+        if (mode === 'deadline') {
+            const deadlineDiff = deadlineTs(a) - deadlineTs(b);
+            if (deadlineDiff) return deadlineDiff;
+            return _topicOrderValue(b) - _topicOrderValue(a);
+        }
+        const orderDiff = _topicOrderValue(b) - _topicOrderValue(a);
+        return mode === 'oldest' ? -orderDiff : orderDiff;
+    });
+    return rows;
+}
+
+function _topicOrderValue(topic) {
+    const code = _topicDisplayCode(topic);
+    const seq = _topicSequenceNumber(code);
+    if (seq !== null) return seq;
+    const candidates = [topic?.DateIssued, topic?.CreatedAt, topic?.UpdatedAt];
+    for (const value of candidates) {
+        const ts = value ? new Date(value).getTime() : NaN;
+        if (Number.isFinite(ts)) return ts;
+    }
+    return 0;
+}
+
+function _topicDisplayCode(topic) {
+    const explicit = String(topic?.TopicCode || topic?.topicCode || topic?.DocumentNo || topic?.documentNo || '').trim();
+    if (explicit && !_looksLikeUuid(explicit)) return explicit;
+    const haystack = [
+        topic?.Title,
+        topic?.title,
+        topic?.TopicTitle,
+        topic?.TopicDescription,
+        topic?.Description,
+        topic?.topicDescription,
+    ].map(v => _htmlToText(String(v || ''))).join(' ');
+    const tsg = haystack.match(/\bTSG\d{6,}\b/i);
+    if (tsg) return tsg[0].toUpperCase();
+    const doc = haystack.match(/\b[A-Z]{2,6}[-_/]?\d{4,}\b/i);
+    if (doc && !_looksLikeUuid(doc[0])) return doc[0].toUpperCase();
+    return '';
+}
+
+function _topicSequenceNumber(code) {
+    const text = String(code || '').trim();
+    const tsg = text.match(/\bTSG\d*(\d{3})\b/i);
+    if (tsg) return Number(tsg[1]);
+    const trailing = text.match(/(\d{3})$/);
+    if (trailing) return Number(trailing[1]);
+    const any = text.match(/(\d+)(?!.*\d)/);
+    return any ? Number(any[1]) : null;
+}
+
+function _looksLikeUuid(value) {
+    return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(String(value || '').trim());
+}
+
+function _topicSequenceLabel(topic, index) {
+    const code = _topicDisplayCode(topic);
+    if (code) return code;
+    return `#${String((index || 0) + 1).padStart(2, '0')}`;
+}
+
+function _topicStatusMeta(t) {
+    const dr = t.deptResponse;
+    const approval = dr?.ApprovalStatus || null;
+    if (approval === 'rejected') return { label: 'Rejected', className: 'bg-red-100 text-red-700 border-red-200' };
+    if (approval === 'pending') return { label: 'Pending approval', className: 'bg-yellow-100 text-yellow-700 border-yellow-200' };
+    if (dr) return { label: 'Responded', className: 'bg-emerald-100 text-emerald-700 border-emerald-200' };
+    if (_isOverdue(t.Deadline)) return { label: 'Overdue', className: 'bg-red-100 text-red-700 border-red-200' };
+    if (_isNearDeadline(t.Deadline)) return { label: 'Due soon', className: 'bg-amber-100 text-amber-700 border-amber-200' };
+    return { label: 'Waiting', className: 'bg-sky-100 text-sky-700 border-sky-200' };
+}
+
+function _buildTopicListRow(t, index) {
+    const targetDeptCount = _isAdmin
+        ? ((Array.isArray(t.TargetDepts) && t.TargetDepts.length > 0) ? t.TargetDepts.length : _masterDepts.length)
+        : 1;
+    const respondedCount = _isAdmin ? (t.totalDeptCount || 0) : (t.deptResponse ? 1 : 0);
+    const pct = targetDeptCount > 0 ? Math.round(respondedCount * 100 / targetDeptCount) : 0;
+    const status = _topicStatusMeta(t);
+    const sharedCount = Number(t.sharedResponseCount || 0);
+    const title = t.Title || _htmlToText(t.TopicDescription);
+    const desc = _htmlToText(t.TopicDescription || '');
+    return `
+    <div class="px-4 py-3 border-b border-slate-100 last:border-b-0 hover:bg-slate-50/80 transition-colors">
+        <div class="grid grid-cols-1 xl:grid-cols-[120px_minmax(0,1fr)_160px_150px_150px] gap-3 xl:items-center">
+            <div class="flex items-center gap-2">
+                <span class="inline-flex h-9 min-w-9 items-center justify-center rounded-xl bg-slate-100 px-2 text-xs font-black text-slate-600">${_esc(_topicSequenceLabel(t, index))}</span>
+                <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-semibold ${RISK_BADGE[t.RiskLevel] || 'bg-slate-100 text-slate-500'}">
+                    ${RISK_LABEL[t.RiskLevel] || t.RiskLevel || '-'}
+                </span>
+            </div>
+            <div class="min-w-0">
+                <div class="flex flex-wrap items-center gap-2">
+                    <p class="text-sm font-black text-slate-800 truncate">${_esc(title || '-')}</p>
+                    <span class="px-2 py-0.5 rounded-full text-[11px] bg-slate-100 text-slate-600">${_esc(t.Category || 'General')}</span>
+                    ${sharedCount > 0 ? `<span class="px-2 py-0.5 rounded-full text-[11px] font-semibold bg-teal-50 text-teal-700 border border-teal-100">Shared ${sharedCount}</span>` : ''}
+                </div>
+                ${desc ? `<p class="text-xs text-slate-400 truncate mt-1">${_esc(desc)}</p>` : ''}
+            </div>
+            <div>
+                <span class="inline-flex items-center rounded-full border px-2.5 py-1 text-xs font-bold ${status.className}">${status.label}</span>
+                <p class="text-[11px] text-slate-400 mt-1">${_fmtDateOnly(t.DateIssued)} &middot; ${t.Deadline ? _fmtDateOnly(t.Deadline) : 'No deadline'}</p>
+            </div>
+            <div>
+                <div class="flex items-center justify-between text-xs font-semibold text-slate-500">
+                    <span>${respondedCount}/${targetDeptCount}</span>
+                    <span>${pct}%</span>
+                </div>
+                <div class="mt-1.5 h-1.5 rounded-full overflow-hidden" style="background:#f1f5f9">
+                    <div class="h-full rounded-full" style="width:${pct}%;background:${pct === 100 ? '#059669' : pct >= 50 ? '#f59e0b' : '#94a3b8'}"></div>
+                </div>
+            </div>
+            <div class="flex xl:justify-end">
+                <button class="yok-view-topic-btn inline-flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg text-xs font-bold text-white hover:opacity-90 transition-all"
+                        style="background:linear-gradient(135deg,#0ea5e9,#6366f1)"
+                        data-yid="${_esc(t.YokotenID || '')}">
+                    Open
+                </button>
+            </div>
+        </div>
+    </div>`;
+}
+
 function _buildTopicSummaryCard(t) {
     const dr        = t.deptResponse;
     const responded = !!dr;
@@ -1040,24 +3057,26 @@ function _buildTopicSummaryCard(t) {
         : 'linear-gradient(90deg,#0ea5e9,#6366f1)';
 
     const statusBadge = rejected
-        ? `<span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-semibold bg-red-100 text-red-700"><span class="w-1.5 h-1.5 rounded-full bg-red-500"></span>ส่งกลับแก้ไข</span>`
+        ? `<span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-semibold bg-red-100 text-red-700"><span class="w-1.5 h-1.5 rounded-full bg-red-500"></span>Rejected / ส่งกลับแก้ไข</span>`
         : pending
-        ? `<span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-semibold bg-yellow-100 text-yellow-700"><span class="w-1.5 h-1.5 rounded-full bg-yellow-500 animate-pulse"></span>รออนุมัติ</span>`
+        ? `<span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-semibold bg-yellow-100 text-yellow-700"><span class="w-1.5 h-1.5 rounded-full bg-yellow-500 animate-pulse"></span>Pending / รออนุมัติ</span>`
         : responded
-        ? `<span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-semibold bg-emerald-100 text-emerald-700"><span class="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span>ตอบแล้ว</span>`
+        ? `<span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-semibold bg-emerald-100 text-emerald-700"><span class="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span>Responded / ตอบแล้ว</span>`
         : urgency === 'overdue'
-        ? `<span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-semibold bg-red-100 text-red-600"><span class="w-1.5 h-1.5 rounded-full bg-red-400"></span>เกินกำหนด</span>`
-        : `<span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-semibold bg-amber-100 text-amber-700"><span class="w-1.5 h-1.5 rounded-full bg-amber-400"></span>รอตอบกลับ</span>`;
+        ? `<span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-semibold bg-red-100 text-red-600"><span class="w-1.5 h-1.5 rounded-full bg-red-400"></span>Overdue / เกินกำหนด</span>`
+        : `<span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-semibold bg-amber-100 text-amber-700"><span class="w-1.5 h-1.5 rounded-full bg-amber-400"></span>Waiting / รอตอบกลับ</span>`;
 
-    const targetDeptCount = (Array.isArray(t.TargetDepts) && t.TargetDepts.length > 0)
-        ? t.TargetDepts.length : _masterDepts.length;
-    const respondedCount  = t.totalDeptCount || 0;
+    const targetDeptCount = _isAdmin
+        ? ((Array.isArray(t.TargetDepts) && t.TargetDepts.length > 0) ? t.TargetDepts.length : _masterDepts.length)
+        : 1;
+    const respondedCount  = _isAdmin ? (t.totalDeptCount || 0) : (responded ? 1 : 0);
+    const sharedCount = Number(t.sharedResponseCount || 0);
     const deptPct  = targetDeptCount > 0 ? Math.round(respondedCount * 100 / targetDeptCount) : 0;
     const barColor = deptPct === 100 ? '#059669' : deptPct >= 50 ? '#f59e0b' : '#94a3b8';
-    const btnLabel = responded ? 'ดูรายละเอียด' : 'ดู / ตอบกลับ';
+    const btnLabel = responded ? 'View detail / ดูรายละเอียด' : 'View / Respond · ดู / ตอบกลับ';
 
     return `
-    <div class="ds-section overflow-hidden flex flex-col">
+    <div class="ds-section overflow-hidden flex flex-col" data-yok-card-image="yokoten-topic-${_esc(t.YokotenID || 'card')}">
         <div class="h-1.5 w-full flex-shrink-0" style="background:${accentColor}"></div>
         <div class="p-4 flex flex-col flex-1 gap-0">
             <!-- Badges row -->
@@ -1067,6 +3086,7 @@ function _buildTopicSummaryCard(t) {
                     ${RISK_LABEL[t.RiskLevel] || t.RiskLevel}
                 </span>
                 <span class="px-2 py-0.5 rounded-full text-xs bg-slate-100 text-slate-600">${_esc(t.Category || 'ทั่วไป')}</span>
+                ${sharedCount > 0 ? `<span class="px-2 py-0.5 rounded-full text-xs font-semibold bg-teal-50 text-teal-700 border border-teal-100">Shared ${sharedCount}</span>` : ''}
                 <span class="flex-1"></span>
                 ${_deadlineBadge(t.Deadline, responded)}
             </div>
@@ -1085,7 +3105,7 @@ function _buildTopicSummaryCard(t) {
             <!-- Dept progress -->
             <div class="mb-4">
                 <div class="flex items-center justify-between text-xs mb-1">
-                    <span class="text-slate-400">ส่วนงานตอบ</span>
+                    <span class="text-slate-400">${_isAdmin ? 'ส่วนงานตอบ' : 'สถานะแผนกคุณ'}</span>
                     <span class="font-semibold text-slate-600">${respondedCount} / ${targetDeptCount}</span>
                 </div>
                 <div class="h-1.5 rounded-full overflow-hidden" style="background:#f1f5f9">
@@ -1115,8 +3135,9 @@ function _buildTopicModal(t) {
     const dr          = t.deptResponse;
     const approval    = dr?.ApprovalStatus || null;
     const pending     = approval === 'pending';
-    const targetDepts = Array.isArray(t.TargetDepts) ? t.TargetDepts : [];
-    const targetUnits = Array.isArray(t.TargetUnits) ? t.TargetUnits : [];
+    const targetDepts = _isAdmin && Array.isArray(t.TargetDepts) ? t.TargetDepts : [];
+    const targetUnits = _isAdmin && Array.isArray(t.TargetUnits) ? t.TargetUnits : [];
+    const attachments = _parseTopicAttachments(t);
     const yid         = t.YokotenID;
     const urgency     = !dr && _isOverdue(t.Deadline) ? 'overdue'
                       : !dr && _isNearDeadline(t.Deadline) ? 'near' : '';
@@ -1129,75 +3150,99 @@ function _buildTopicModal(t) {
     <div data-yok-modal="1" class="space-y-4">
 
         <!-- Topic info panel -->
-        <div class="rounded-xl p-4 border border-slate-200" style="background:${accentBg}">
-            <div class="flex flex-wrap items-center gap-2 mb-2">
+        <div class="rounded-xl border border-slate-200 bg-white overflow-hidden">
+            <div class="px-4 py-3 border-b border-slate-200" style="background:${accentBg}">
+                <div class="flex flex-wrap items-center gap-2">
                 <span class="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-semibold ${RISK_BADGE[t.RiskLevel] || 'bg-slate-100 text-slate-500'}">
                     <span class="w-1.5 h-1.5 rounded-full" style="background:currentColor"></span>
                     ${RISK_LABEL[t.RiskLevel] || t.RiskLevel}
                 </span>
                 <span class="px-2 py-0.5 rounded-full text-xs bg-white border border-slate-200 text-slate-600">${_esc(t.Category || 'ทั่วไป')}</span>
                 ${_deadlineBadge(t.Deadline, !!dr)}
+                </div>
             </div>
 
-            ${t.Title ? `<h2 class="font-bold text-slate-800 text-base leading-snug mb-1">${_esc(t.Title)}</h2>` : ''}
-            <div class="text-sm text-slate-600 leading-relaxed yok-rte-content">${_sanitizeHtml(t.TopicDescription || '')}</div>
+            <div class="p-4 space-y-4">
+            ${t.Title ? `<h2 class="font-bold text-slate-900 text-lg leading-snug">${_esc(t.Title)}</h2>` : ''}
+            <div class="rounded-lg border border-slate-100 bg-slate-50 px-3 py-3 text-sm text-slate-700 leading-relaxed yok-rte-content">${_sanitizeHtml(t.TopicDescription || '')}</div>
 
-            ${t.AttachmentUrl ? `
-            <a href="${t.AttachmentUrl}" target="_blank" rel="noopener noreferrer"
-               class="inline-flex items-center gap-1.5 text-xs text-sky-600 hover:underline mt-2">
-                <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13"/>
-                </svg>
-                ${_esc(t.AttachmentName || 'ดูไฟล์แนบ')}
-            </a>` : ''}
+            ${attachments.length ? `
+            <div class="flex flex-wrap gap-2">
+                ${attachments.map(a => `
+                <a href="${_esc(a.url)}" target="_blank" rel="noopener noreferrer"
+                   class="inline-flex items-center gap-1.5 max-w-full text-xs font-semibold text-sky-700 hover:underline rounded-lg border border-sky-100 bg-sky-50 px-2 py-1">
+                    <svg class="w-3.5 h-3.5 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13"/>
+                    </svg>
+                    <span class="truncate">${_esc(a.name || a.url)}</span>
+                </a>`).join('')}
+            </div>` : ''}
 
-            <div class="flex flex-wrap items-center gap-4 mt-3 pt-3 border-t border-slate-200 text-xs text-slate-400">
-                <span>ประกาศ: <span class="text-slate-600 font-medium">${_fmtDate(t.DateIssued)}</span></span>
-                <span>ตอบแล้ว: <span class="text-slate-600 font-medium">${t.totalDeptCount || 0} ส่วนงาน</span></span>
-                ${t.CreatedBy ? `<span>โดย: <span class="text-slate-600 font-medium">${_esc(t.CreatedBy)}</span></span>` : ''}
+            <div class="grid grid-cols-1 sm:grid-cols-3 gap-2 text-xs">
+                <div class="rounded-lg border border-slate-100 px-3 py-2"><p class="font-bold text-slate-400">วันที่ประกาศ</p><p class="mt-1 font-semibold text-slate-700">${_fmtDate(t.DateIssued)}</p></div>
+                <div class="rounded-lg border border-slate-100 px-3 py-2"><p class="font-bold text-slate-400">การตอบกลับ</p><p class="mt-1 font-semibold text-slate-700">${dr ? 'แผนกคุณตอบแล้ว' : 'รอแผนกคุณตอบ'}</p></div>
+                <div class="rounded-lg border border-slate-100 px-3 py-2"><p class="font-bold text-slate-400">ผู้ประกาศ</p><p class="mt-1 font-semibold text-slate-700">${_esc(t.CreatedBy || '-')}</p></div>
             </div>
 
             ${targetDepts.length > 0 ? `
-            <div class="flex flex-wrap gap-1 mt-2">
+            <div class="flex flex-wrap gap-1">
                 <span class="text-[10px] text-slate-400 self-center mr-0.5">ส่วนงานที่กำหนด:</span>
                 ${targetDepts.map(d => `<span class="px-1.5 py-0.5 rounded text-[10px] font-medium bg-sky-50 text-sky-600 border border-sky-100">${_esc(d)}</span>`).join('')}
             </div>` : ''}
             ${targetUnits.length > 0 ? `
-            <div class="flex flex-wrap gap-1 mt-1">
+            <div class="flex flex-wrap gap-1">
                 <span class="text-[10px] text-slate-400 self-center mr-0.5">Unit:</span>
                 ${targetUnits.map(u => `<span class="px-1.5 py-0.5 rounded text-[10px] font-medium bg-violet-50 text-violet-600 border border-violet-100">${_esc(u)}</span>`).join('')}
             </div>` : ''}
+            </div>
         </div>
 
         <!-- Response area (identified by ID so edit can swap content) -->
         <div id="yok-resp-area-${yid}">
-            ${dr ? _buildResponseDisplay(t, dr) : _buildResponseForm(yid)}
+            ${dr ? _buildResponseDisplay(t, dr) : _buildResponseForm(yid, null, { topic: t })}
         </div>
+
+        <div id="yok-shared-learning-${_esc(yid)}">
+            ${_buildSharedLearningSkeleton(t)}
+        </div>
+
+        ${_isAdmin ? `
+        <div class="rounded-xl border border-sky-100 bg-sky-50/60 p-3 flex flex-col sm:flex-row sm:items-center gap-3 justify-between">
+            <div>
+                <p class="text-xs font-black text-sky-700">Admin Response Control / แอดมินตอบแทนแผนก</p>
+                <p class="text-xs text-slate-500 mt-0.5">Admin can respond on behalf of selected departments while preserving approval flow / ผู้ดูแลตอบแทนแผนกได้โดยยังคง flow approval เดิม</p>
+            </div>
+            <button type="button" class="yok-admin-respond-btn inline-flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg text-xs font-bold text-white bg-sky-600 hover:bg-sky-700"
+                    data-yid="${yid}">
+                Respond on behalf / ตอบแทนแผนก
+            </button>
+        </div>
+        <div id="yok-admin-resp-area-${yid}"></div>` : ''}
 
         <!-- Admin action row -->
         ${_isAdmin && dr ? `
         <div class="flex items-center gap-2 flex-wrap pt-1 border-t border-slate-100">
             ${pending ? `
             <button class="yok-approve-btn px-3 py-1.5 rounded-lg text-xs font-semibold text-white bg-emerald-600 hover:bg-emerald-700 transition-colors"
-                    data-rid="${dr.ResponseID}">อนุมัติ</button>
+                    data-rid="${dr.ResponseID}">Approve / อนุมัติ</button>
             <button class="yok-reject-btn px-3 py-1.5 rounded-lg text-xs font-semibold text-white bg-red-500 hover:bg-red-600 transition-colors"
-                    data-rid="${dr.ResponseID}">ส่งกลับแก้ไข</button>` : ''}
+                    data-rid="${dr.ResponseID}">Reject / ส่งกลับแก้ไข</button>` : ''}
             <button class="yok-del-resp-btn ml-auto px-3 py-1.5 rounded-lg text-xs font-semibold text-red-600 border border-red-200 hover:bg-red-50 transition-colors"
-                    data-rid="${dr.ResponseID}">ลบการตอบกลับ</button>
+                    data-rid="${dr.ResponseID}">Delete response / ลบการตอบกลับ</button>
         </div>` : ''}
     </div>`;
 }
 
 function _openTopicDetailModal(t) {
     const dr = t.deptResponse;
-    const targetDepts = Array.isArray(t.TargetDepts) ? t.TargetDepts : [];
-    const targetUnits = Array.isArray(t.TargetUnits) ? t.TargetUnits : [];
+    const targetDepts = _isAdmin && Array.isArray(t.TargetDepts) ? t.TargetDepts : [];
+    const targetUnits = _isAdmin && Array.isArray(t.TargetUnits) ? t.TargetUnits : [];
     const responseLabel = dr
-        ? (dr.ApprovalStatus === 'approved' ? 'Approved'
-          : dr.ApprovalStatus === 'rejected' ? 'Rejected'
-          : dr.ApprovalStatus === 'pending' ? 'Pending approval'
-          : 'Responded')
-        : _isOverdue(t.Deadline) ? 'Overdue' : 'Waiting response';
+        ? (dr.ApprovalStatus === 'approved' ? 'Approved / อนุมัติแล้ว'
+          : dr.ApprovalStatus === 'rejected' ? 'Rejected / ส่งกลับแก้ไข'
+          : dr.ApprovalStatus === 'pending' ? 'Pending / รออนุมัติ'
+          : 'Responded / ตอบกลับแล้ว')
+        : _isOverdue(t.Deadline) ? 'Overdue / เกินกำหนด' : 'Waiting response / รอตอบกลับ';
     const responseClass = dr
         ? (dr.ApprovalStatus === 'approved' ? 'bg-emerald-100 text-emerald-700 border-emerald-200'
           : dr.ApprovalStatus === 'rejected' ? 'bg-red-100 text-red-700 border-red-200'
@@ -1207,34 +3252,296 @@ function _openTopicDetailModal(t) {
         <div class="space-y-4">
             <div class="grid grid-cols-2 md:grid-cols-4 gap-2">
                 <div class="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2">
-                    <p class="text-[10px] font-bold uppercase text-slate-400">Risk</p>
+                    <p class="text-[10px] font-bold uppercase text-slate-400">Risk Level / ระดับความเสี่ยง</p>
                     <p class="mt-1 text-sm font-bold text-slate-700">${_esc(RISK_LABEL[t.RiskLevel] || t.RiskLevel || '-')}</p>
                 </div>
                 <div class="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2">
-                    <p class="text-[10px] font-bold uppercase text-slate-400">Response</p>
+                    <p class="text-[10px] font-bold uppercase text-slate-400">Response Status / สถานะตอบกลับ</p>
                     <p class="mt-1 text-sm font-bold text-slate-700">${_esc(responseLabel)}</p>
                 </div>
                 <div class="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2">
-                    <p class="text-[10px] font-bold uppercase text-slate-400">Targets</p>
+                    <p class="text-[10px] font-bold uppercase text-slate-400">Target Scope / ส่วนงานเป้าหมาย</p>
                     <p class="mt-1 text-sm font-bold text-slate-700">${targetDepts.length || targetUnits.length || '-'}</p>
                 </div>
                 <div class="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2">
-                    <p class="text-[10px] font-bold uppercase text-slate-400">Deadline</p>
+                    <p class="text-[10px] font-bold uppercase text-slate-400">Deadline / กำหนดตอบ</p>
                     <p class="mt-1 text-sm font-bold text-slate-700">${_esc(_fmtDateOnly(t.Deadline))}</p>
                 </div>
             </div>
             ${_buildTopicModal(t)}
         </div>`;
     openDetailModal({
-        title: _esc(t.Title || 'Yokoten Topic'),
+        title: _esc(t.Title || 'Yokoten Detail / รายละเอียด Yokoten'),
         subtitle: `${_fmtDateOnly(t.DateIssued)} · ${t.Category || '-'} · ${t.CreatedBy || '-'}`,
         meta: [
             { label: RISK_LABEL[t.RiskLevel] || t.RiskLevel || '-', className: `${RISK_BADGE[t.RiskLevel] || 'bg-slate-100 text-slate-500'} border-slate-200` },
             { label: responseLabel, className: responseClass },
-            _isOverdue(t.Deadline) && !dr ? { label: 'Needs action', className: 'bg-rose-50 text-rose-700 border-rose-200' } : null,
+            _isOverdue(t.Deadline) && !dr ? { label: 'Needs action / ต้องดำเนินการ', className: 'bg-rose-50 text-rose-700 border-rose-200' } : null,
         ],
         body,
-        size: 'max-w-2xl'
+        size: 'max-w-4xl'
+    });
+    setTimeout(() => _ensureSharedLearning(t.YokotenID), 0);
+}
+
+function _buildSharedLearningSkeleton(topic) {
+    const count = Number(topic?.sharedResponseCount || 0);
+    return `
+    <div class="rounded-xl border border-teal-100 bg-teal-50/50 overflow-hidden" data-yok-shared-learning>
+        <div class="px-4 py-3 border-b border-teal-100 flex flex-wrap items-center gap-2 justify-between">
+            <div>
+                <p class="text-xs font-black text-teal-800">Shared Learning / บทเรียนที่แชร์ทั้งองค์กร</p>
+                <p class="text-[11px] text-slate-500 mt-0.5">แสดงเฉพาะ response ที่เกี่ยวข้องและอนุมัติแล้ว</p>
+            </div>
+            <span class="px-2 py-1 rounded-full bg-white border border-teal-100 text-[11px] font-bold text-teal-700">${count} shared</span>
+        </div>
+        <div class="p-4 text-sm text-slate-500">
+            <div class="flex items-center gap-2">
+                <span class="inline-block h-2 w-2 rounded-full bg-teal-400 animate-pulse"></span>
+                Loading shared learning...
+            </div>
+        </div>
+    </div>`;
+}
+
+async function _ensureSharedLearning(topicId) {
+    if (!topicId) return;
+    const target = document.getElementById(`yok-shared-learning-${topicId}`);
+    if (!target) return;
+
+    if (_sharedResponses.has(String(topicId))) {
+        target.innerHTML = _buildSharedLearningSection(_sharedResponses.get(String(topicId)));
+        return;
+    }
+
+    try {
+        const res = await API.get(`/yokoten/topics/${encodeURIComponent(topicId)}/shared-responses`);
+        const rows = normalizeApiArray(res?.data ?? res).map(_normalizeSharedResponse);
+        _sharedResponses.set(String(topicId), rows);
+        const topic = _topics.find(t => String(t.YokotenID) === String(topicId));
+        if (topic) topic.sharedResponseCount = rows.length;
+        if (target) target.innerHTML = _buildSharedLearningSection(rows);
+    } catch (err) {
+        if (target) {
+            target.innerHTML = `
+            <div class="rounded-xl border border-red-100 bg-red-50 p-4">
+                <p class="text-xs font-black text-red-700">Shared Learning โหลดไม่สำเร็จ</p>
+                <p class="text-xs text-red-600 mt-1">${_esc(err?.message || 'เกิดข้อผิดพลาด')}</p>
+            </div>`;
+        }
+    }
+}
+
+function _normalizeSharedResponse(row) {
+    return {
+        responseId: row.responseId ?? row.ResponseID ?? '',
+        yokotenId: row.yokotenId ?? row.YokotenID ?? '',
+        department: row.department ?? row.Department ?? '',
+        safetyUnit: row.safetyUnit ?? row.SafetyUnit ?? row.EffectiveSafetyUnit ?? '',
+        isRelated: row.isRelated ?? row.IsRelated ?? '',
+        comment: row.comment ?? row.Comment ?? '',
+        correctiveAction: row.correctiveAction ?? row.CorrectiveAction ?? '',
+        responseDate: row.responseDate ?? row.ResponseDate ?? '',
+        files: normalizeApiArray(row.files ?? row.Files ?? []),
+    };
+}
+
+function _buildSharedLearningSection(rows) {
+    const list = normalizeApiArray(rows);
+    return `
+    <div class="rounded-xl border border-teal-100 bg-teal-50/50 overflow-hidden" data-yok-shared-learning>
+        <div class="px-4 py-3 border-b border-teal-100 flex flex-wrap items-center gap-2 justify-between">
+            <div>
+                <p class="text-xs font-black text-teal-800">Shared Learning / บทเรียนที่แชร์ทั้งองค์กร</p>
+                <p class="text-[11px] text-slate-500 mt-0.5">เฉพาะ response ที่เกี่ยวข้องและอนุมัติแล้ว ไม่มีข้อมูล workflow ภายใน</p>
+            </div>
+            <span class="px-2 py-1 rounded-full bg-white border border-teal-100 text-[11px] font-bold text-teal-700">${list.length} shared</span>
+        </div>
+        ${list.length ? `
+        <div class="divide-y divide-teal-100 bg-white">
+            ${list.map(_buildSharedLearningRow).join('')}
+        </div>` : `
+        <div class="p-5 bg-white text-center">
+            <div class="w-12 h-12 rounded-2xl bg-slate-50 text-slate-300 flex items-center justify-center mx-auto mb-3">
+                <svg class="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 10h.01M12 10h.01M16 10h.01M9 16h6M7 4h10a2 2 0 012 2v12a2 2 0 01-2 2H7a2 2 0 01-2-2V6a2 2 0 012-2z"/>
+                </svg>
+            </div>
+            <p class="text-sm font-bold text-slate-600">ยังไม่มีบทเรียนที่อนุมัติให้แชร์สำหรับหัวข้อนี้</p>
+            <p class="text-xs text-slate-400 mt-1">เมื่อแผนกที่เกี่ยวข้องตอบกลับและได้รับอนุมัติแล้ว จะแสดงที่นี่</p>
+        </div>`}
+    </div>`;
+}
+
+function _buildSharedLearningRow(row) {
+    const files = normalizeApiArray(row.files);
+    return `
+    <div class="p-4 space-y-3">
+        <div class="flex flex-col sm:flex-row sm:items-start gap-2 justify-between">
+            <div>
+                <div class="flex flex-wrap items-center gap-2">
+                    <span class="text-sm font-black text-slate-800">${_esc(row.department || '-')}</span>
+                    ${row.safetyUnit ? `<span class="px-2 py-0.5 rounded-full text-[11px] font-bold bg-violet-50 text-violet-700 border border-violet-100">${_esc(row.safetyUnit)}</span>` : ''}
+                    <span class="px-2 py-0.5 rounded-full text-[11px] font-bold bg-emerald-50 text-emerald-700 border border-emerald-100">Approved learning</span>
+                </div>
+                <p class="text-[11px] text-slate-400 mt-1">${_esc(_fmtDateOnly(row.responseDate))}</p>
+            </div>
+        </div>
+        ${row.comment ? `
+        <div class="rounded-lg bg-slate-50 border border-slate-100 px-3 py-2">
+            <p class="text-[11px] font-bold text-slate-400 mb-1">Comment / Lesson</p>
+            <p class="text-sm text-slate-700 leading-relaxed">${_esc(row.comment)}</p>
+        </div>` : ''}
+        ${row.correctiveAction ? `
+        <div class="rounded-lg bg-amber-50 border border-amber-100 px-3 py-2">
+            <p class="text-[11px] font-bold text-amber-700 mb-1">Corrective Action / วิธีป้องกัน</p>
+            <p class="text-sm text-amber-900 leading-relaxed">${_esc(row.correctiveAction)}</p>
+        </div>` : ''}
+        ${files.length ? `
+        <div>
+            <p class="text-[11px] font-bold text-slate-400 mb-1.5">Evidence / ไฟล์หลักฐาน (${files.length})</p>
+            <div class="flex flex-wrap gap-2">
+                ${files.map(f => `
+                <a href="${_esc(f.FileURL || f.fileUrl || '#')}" target="_blank" rel="noopener noreferrer"
+                   class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-slate-100 text-slate-700 hover:bg-slate-200 transition-colors">
+                    ${_fileIcon(f.FileType || f.fileType)}
+                    <span class="max-w-[160px] truncate">${_esc(f.FileName || f.fileName || 'Evidence')}</span>
+                </a>`).join('')}
+            </div>
+        </div>` : ''}
+    </div>`;
+}
+
+function _openYokotenAuditPack(topicId) {
+    const topic = _topics.find(t => String(t.YokotenID) === String(topicId))
+        || (_deptCompletion?.topics || []).find(t => String(t.YokotenID) === String(topicId));
+    if (!topic) {
+        showToast('Topic not found', 'error');
+        return;
+    }
+
+    const deptSummary = _filterToTargetedDepts(_deptCompletion?.deptSummary || [], _deptCompletion?.topics || _topics);
+    const targeted = _getTopicTargetedDepts(deptSummary, topic);
+    const responses = (_allResponses || [])
+        .filter(r => String(r.YokotenID) === String(topic.YokotenID))
+        .sort((a, b) => String(a.Department || '').localeCompare(String(b.Department || '')));
+    const responseByDept = new Map(responses.map(r => [String(r.Department), r]));
+    const missing = targeted.filter(d => !responseByDept.has(String(d.department)));
+    const pending = responses.filter(r => r.ApprovalStatus === 'pending').length;
+    const approved = responses.filter(r => r.ApprovalStatus === 'approved').length;
+    const rejected = responses.filter(r => r.ApprovalStatus === 'rejected').length;
+    const autoClosed = responses.filter(r => r.IsRelated === 'No' && !r.ApprovalStatus).length;
+    const attachments = _parseTopicAttachments(topic);
+    const completionPct = targeted.length ? Math.round(responses.length * 100 / targeted.length) : 0;
+    const statusColor = completionPct === 100 && pending === 0 && rejected === 0 ? '#059669'
+        : rejected > 0 || missing.length > 0 ? '#dc2626'
+        : '#d97706';
+
+    const metric = (label, value, color = '#334155', sub = '') => `
+        <div class="rounded-lg border border-slate-200 bg-white px-3 py-2">
+            <p class="text-[10px] font-bold uppercase text-slate-400">${label}</p>
+            <p class="mt-1 text-lg font-black" style="color:${color}">${value}</p>
+            ${sub ? `<p class="text-[11px] text-slate-400">${sub}</p>` : ''}
+        </div>`;
+
+    const responseStatus = r => {
+        if (r.ApprovalStatus === 'approved') return `<span class="px-2 py-0.5 rounded-full text-[11px] font-bold bg-emerald-100 text-emerald-700">Approved</span>`;
+        if (r.ApprovalStatus === 'pending') return `<span class="px-2 py-0.5 rounded-full text-[11px] font-bold bg-amber-100 text-amber-700">Pending</span>`;
+        if (r.ApprovalStatus === 'rejected') return `<span class="px-2 py-0.5 rounded-full text-[11px] font-bold bg-red-100 text-red-700">Rejected</span>`;
+        if (r.IsRelated === 'No') return `<span class="px-2 py-0.5 rounded-full text-[11px] font-bold bg-slate-100 text-slate-600">Not related</span>`;
+        return `<span class="px-2 py-0.5 rounded-full text-[11px] font-bold bg-sky-100 text-sky-700">Responded</span>`;
+    };
+
+    const responseRows = responses.map(r => `
+        <tr class="border-b border-slate-100 align-top">
+            <td class="px-3 py-2 font-bold text-slate-700">${_esc(r.Department || '-')}</td>
+            <td class="px-3 py-2 text-slate-600">
+                <div class="font-semibold">${_esc(r.EmployeeName || r.EmployeeID || '-')}</div>
+                <div class="text-[11px] text-slate-400">${_esc(_fmtDate(r.ResponseDate))}</div>
+            </td>
+            <td class="px-3 py-2">${responseStatus(r)}</td>
+            <td class="px-3 py-2 text-slate-600 max-w-[260px]">
+                ${r.CorrectiveAction ? `<div class="text-[11px] text-amber-700">${_esc(r.CorrectiveAction)}</div>` : `<span class="text-slate-300">-</span>`}
+                ${r.ApprovalComment ? `<div class="text-[11px] text-red-600 mt-1">${_esc(r.ApprovalComment)}</div>` : ''}
+            </td>
+            <td class="px-3 py-2 text-center text-slate-600">${Array.isArray(r.files) ? r.files.length : 0}</td>
+            <td class="px-3 py-2 text-right">
+                <button type="button" class="yok-work-open-btn px-2.5 py-1 rounded-lg text-[11px] font-bold text-sky-700 bg-sky-50 hover:bg-sky-100"
+                        data-yid="${_esc(r.YokotenID)}" data-rid="${_esc(r.ResponseID)}">Open</button>
+            </td>
+        </tr>`).join('');
+
+    const body = `
+    <div class="space-y-4" data-yok-modal="audit-pack">
+        <div class="grid grid-cols-2 md:grid-cols-5 gap-2">
+            ${metric('Targeted', targeted.length, '#334155', 'departments')}
+            ${metric('Responded', responses.length, statusColor, `${completionPct}% coverage`)}
+            ${metric('Missing', missing.length, missing.length ? '#dc2626' : '#059669')}
+            ${metric('Pending', pending, pending ? '#d97706' : '#059669')}
+            ${metric('Rejected', rejected, rejected ? '#dc2626' : '#059669')}
+        </div>
+
+        <div class="rounded-xl border border-slate-200 bg-slate-50 p-4">
+            <div class="flex flex-wrap items-center gap-2 mb-2">
+                <span class="px-2 py-0.5 rounded-full text-xs font-bold ${RISK_BADGE[topic.RiskLevel] || 'bg-slate-100 text-slate-600'}">${_esc(RISK_LABEL[topic.RiskLevel] || topic.RiskLevel || '-')}</span>
+                <span class="text-xs text-slate-400">${_esc(topic.Category || '-')} · Deadline ${_esc(_fmtDateOnly(topic.Deadline))}</span>
+            </div>
+            <div class="prose prose-sm max-w-none yok-rendered-html text-slate-700">${_sanitizeHtml(topic.TopicDescription || '')}</div>
+        </div>
+
+        ${attachments.length ? `
+        <div class="rounded-xl border border-slate-200 bg-white p-4">
+            <h4 class="text-xs font-black text-slate-600 uppercase mb-2">Topic Attachments</h4>
+            <div class="flex flex-wrap gap-2">
+                ${attachments.map((file, idx) => `
+                <a href="${_esc(file.url || file.FileURL || '#')}" target="_blank" rel="noopener noreferrer"
+                   class="px-3 py-1.5 rounded-lg border border-slate-200 text-xs font-bold text-slate-600 hover:bg-slate-50">
+                    ${_esc(file.name || file.FileName || `Attachment ${idx + 1}`)}
+                </a>`).join('')}
+            </div>
+        </div>` : ''}
+
+        ${missing.length ? `
+        <div class="rounded-xl border border-red-100 bg-red-50 p-4">
+            <h4 class="text-xs font-black text-red-700 uppercase mb-2">Missing Departments</h4>
+            <div class="flex flex-wrap gap-1.5">
+                ${missing.map(d => `<span class="px-2 py-1 rounded-md bg-white border border-red-100 text-xs font-bold text-red-600">${_esc(d.department)}</span>`).join('')}
+            </div>
+        </div>` : ''}
+
+        <div class="rounded-xl border border-slate-200 bg-white overflow-hidden">
+            <div class="px-4 py-3 border-b border-slate-100 flex items-center justify-between">
+                <h4 class="text-xs font-black text-slate-600 uppercase">Response Evidence</h4>
+                <span class="text-xs text-slate-400">${approved} approved · ${autoClosed} not related</span>
+            </div>
+            <div class="overflow-x-auto">
+                <table class="w-full text-xs">
+                    <thead class="bg-slate-50 text-slate-500">
+                        <tr>
+                            <th class="px-3 py-2 text-left">Dept</th>
+                            <th class="px-3 py-2 text-left">Responder</th>
+                            <th class="px-3 py-2 text-left">Status</th>
+                            <th class="px-3 py-2 text-left">Action / Comment</th>
+                            <th class="px-3 py-2 text-center">Files</th>
+                            <th class="px-3 py-2"></th>
+                        </tr>
+                    </thead>
+                    <tbody>${responseRows || `<tr><td colspan="6" class="px-3 py-8 text-center text-slate-400">No responses yet.</td></tr>`}</tbody>
+                </table>
+            </div>
+        </div>
+    </div>`;
+
+    openDetailModal({
+        title: `Audit Pack: ${_esc(_topicTitle(topic))}`,
+        subtitle: `YokotenID ${_esc(topic.YokotenID)} · Generated from current system data`,
+        meta: [
+            { label: `${completionPct}% coverage`, className: 'bg-sky-50 text-sky-700 border-sky-200' },
+            missing.length ? { label: `${missing.length} missing`, className: 'bg-red-50 text-red-700 border-red-200' } : null,
+            pending ? { label: `${pending} pending`, className: 'bg-amber-50 text-amber-700 border-amber-200' } : null,
+        ],
+        body,
+        size: 'max-w-6xl'
     });
 }
 
@@ -1323,13 +3630,102 @@ function _buildResponseDisplay(t, dr) {
     return html;
 }
 
-function _buildResponseForm(yokotenId, existingResp = null) {
+function _getDepartmentName(row) {
+    return (row?.Name || row?.name || row?.Department || row?.department || row || '').toString().trim();
+}
+
+function _getSafetyUnitName(row) {
+    return (row?.Name || row?.name || row?.UnitName || row?.unitName || row?.SafetyUnit || row?.safetyUnit || row || '').toString().trim();
+}
+
+function _parseSafetyUnitList(raw) {
+    if (!raw) return [];
+    if (Array.isArray(raw)) return raw.map(v => String(v || '').trim()).filter(Boolean);
+    const text = String(raw || '').trim();
+    if (!text) return [];
+    try {
+        const parsed = JSON.parse(text);
+        if (Array.isArray(parsed)) return parsed.map(v => String(v || '').trim()).filter(Boolean);
+    } catch (_) {}
+    return text.split(/[,\n;|]+/).map(v => v.trim()).filter(Boolean);
+}
+
+function _getResponseUnits(row) {
+    return _parseSafetyUnitList(
+        row?.safetyUnits || row?.SafetyUnits || row?.EffectiveSafetyUnit ||
+        row?.effectiveSafetyUnit || row?.safetyUnit || row?.SafetyUnit
+    );
+}
+
+function _getTargetDepartmentsForTopic(topic) {
+    const targetDepts = Array.isArray(topic?.TargetDepts) ? topic.TargetDepts.map(d => String(d || '').trim()).filter(Boolean) : [];
+    if (targetDepts.length > 0) return targetDepts;
+    return _masterDepts.map(_getDepartmentName).filter(Boolean);
+}
+
+function _buildAdminDeptOptions(topic) {
+    const responded = new Set(
+        _allResponses
+            .filter(r => r.YokotenID === topic?.YokotenID && r.Department)
+            .map(r => String(r.Department).trim())
+    );
+    return _getTargetDepartmentsForTopic(topic).map(dept => {
+        const done = responded.has(dept);
+        return `<option value="${_esc(dept)}" ${done ? 'disabled' : ''}>${_esc(dept)}${done ? ' (ตอบแล้ว)' : ''}</option>`;
+    }).join('');
+}
+
+function _buildResponseForm(yokotenId, existingResp = null, opts = {}) {
     const rid = existingResp?.ResponseID || '';
     const isEdit = !!rid;
+    const isAdminMode = !!opts.adminMode && _isAdmin && !isEdit;
+    const currentUser = TSHSession.getUser() || {};
     const curRelated = existingResp?.IsRelated || 'No';
+    const deptOptions = isAdminMode ? _buildAdminDeptOptions(opts.topic) : '';
+    const topicUnits = _parseTargetDepts(opts.topic?.TargetUnits);
+    const responseUnits = topicUnits.length
+        ? _safetyUnits.filter(u => topicUnits.includes(_getSafetyUnitName(u)))
+        : [];
+    const existingUnits = _getResponseUnits(existingResp);
+    const userUnits = _parseSafetyUnitList(currentUser.unit || currentUser.Unit || currentUser.team || currentUser.Team);
+    const preselectedUnits = existingUnits.length ? existingUnits : userUnits.filter(unit => !topicUnits.length || topicUnits.includes(unit));
+    const unitOptions = (isAdminMode || (!isEdit && topicUnits.length))
+        ? responseUnits.map(u => {
+            const name = _getSafetyUnitName(u);
+            return name ? `<option value="${_esc(name)}" ${preselectedUnits.includes(name) ? 'selected' : ''}>${_esc(name)}</option>` : '';
+        }).join('')
+        : '';
     return `
-    <form class="yok-resp-form space-y-3" data-id="${yokotenId}" data-rid="${rid}">
-        <p class="text-sm font-semibold text-slate-700">${isEdit ? 'แก้ไขการตอบกลับ' : 'ตอบกลับหัวข้อนี้'}</p>
+    <form class="yok-resp-form space-y-3 rounded-xl border ${isAdminMode ? 'border-sky-200 bg-white p-4' : 'border-transparent'}" data-id="${yokotenId}" data-rid="${rid}" data-admin-mode="${isAdminMode ? '1' : ''}" data-existing-files="${existingResp?.files?.length || 0}">
+        <p class="text-sm font-semibold text-slate-700">${isAdminMode ? 'Respond on behalf / บันทึกการตอบกลับแทนแผนก' : (isEdit ? 'Edit response / แก้ไขการตอบกลับ' : 'Respond to this topic / ตอบกลับหัวข้อนี้')}</p>
+        ${isAdminMode ? `
+        <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <label class="block">
+                <span class="block text-xs font-semibold text-slate-600 mb-1">Departments / แผนกที่ตอบแทน <span class="text-red-500">*</span></span>
+                <select name="departments" class="form-input w-full text-sm min-h-[220px]" size="10" multiple required>
+                    ${deptOptions || '<option value="" disabled>ไม่พบแผนกเป้าหมายที่ยังรอตอบ</option>'}
+                </select>
+                <span class="block text-[11px] text-slate-400 mt-1">Use Ctrl/Shift to select multiple departments / กด Ctrl/Shift เพื่อเลือกหลายแผนก</span>
+            </label>
+            <label class="block">
+                <span class="block text-xs font-semibold text-slate-600 mb-1">Safety Unit / หน่วยงาน</span>
+                <select name="safetyUnits" class="form-input w-full text-sm min-h-[220px]" size="10" multiple ${responseUnits.length ? 'required' : ''}>
+                    <option value="">เลือก Safety Unit</option>
+                    ${unitOptions}
+                    ${!responseUnits.length ? '<option value="" disabled>No scoped Safety Unit for this topic</option>' : ''}
+                </select>
+                <span class="block text-[11px] text-slate-400 mt-1">${responseUnits.length ? 'Use Ctrl/Shift to select multiple Safety Units' : 'Optional: this topic has no Safety Unit scope'}</span>
+            </label>
+        </div>` : ''}
+        ${!isAdminMode && !isEdit && topicUnits.length ? `
+        <label class="block">
+            <span class="block text-xs font-semibold text-slate-600 mb-1">Safety Unit / หน่วยงาน <span class="text-red-500">*</span></span>
+            <select name="safetyUnit" class="form-input w-full text-sm" required>
+                <option value="">เลือก Safety Unit</option>
+                ${unitOptions || topicUnits.map(unit => `<option value="${_esc(unit)}" ${preselectedUnits.includes(unit) ? 'selected' : ''}>${_esc(unit)}</option>`).join('')}
+            </select>
+            <span class="block text-[11px] text-slate-400 mt-1">เลือก Safety Unit ที่ตรงกับ scope ของหัวข้อนี้</span>
+        </label>` : ''}
         <div class="flex gap-5">
             <label class="flex items-center gap-2 cursor-pointer text-sm">
                 <input type="radio" name="isRelated" value="Yes" class="accent-emerald-500"
@@ -1342,16 +3738,16 @@ function _buildResponseForm(yokotenId, existingResp = null) {
         </div>
         <textarea name="comment" rows="2" placeholder="ความคิดเห็น (ถ้ามี)"
                   class="form-textarea w-full resize-none text-sm">${_esc(existingResp?.Comment || '')}</textarea>
-        <div id="corrective-wrap-${yokotenId}" class="${curRelated !== 'Yes' ? '' : 'hidden'}">
+        <div data-corrective-wrap class="${curRelated === 'Yes' ? '' : 'hidden'}">
             <label class="block text-xs font-semibold text-slate-600 mb-1">
-                วิธีการแก้ไข/ป้องกัน <span class="text-red-500">*</span>
-                <span class="text-slate-400 font-normal">(จำเป็นสำหรับ "ไม่เกี่ยวข้อง")</span>
+                Corrective / Preventive Action · วิธีการแก้ไข/ป้องกัน <span class="text-red-500">*</span>
+                <span class="text-slate-400 font-normal">(required when "Related" / จำเป็นเมื่อเลือก "เกี่ยวข้อง")</span>
             </label>
             <textarea name="correctiveAction" rows="2" placeholder="ระบุมาตรการแก้ไขหรือป้องกัน..."
                       class="form-textarea w-full resize-none text-sm">${_esc(existingResp?.CorrectiveAction || '')}</textarea>
         </div>
         <div>
-            <label class="block text-xs font-semibold text-slate-600 mb-1">แนบไฟล์ (รูป/PDF/Word/Excel สูงสุด 10 ไฟล์)</label>
+            <label class="block text-xs font-semibold text-slate-600 mb-1">แนบไฟล์ (รูป/PDF/Word/Excel สูงสุด 10 ไฟล์) <span class="text-red-500">* เมื่อเกี่ยวข้อง</span></label>
             <input type="file" name="responseFiles" multiple accept="image/*,.pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx"
                    class="block w-full text-xs text-slate-500 file:mr-3 file:py-1.5 file:px-3 file:rounded-lg file:border-0 file:text-xs file:font-semibold file:bg-sky-50 file:text-sky-700 hover:file:bg-sky-100 cursor-pointer">
         </div>
@@ -1363,7 +3759,7 @@ function _buildResponseForm(yokotenId, existingResp = null) {
                 <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/>
                 </svg>
-                ${isEdit ? 'บันทึกการแก้ไข' : 'ยืนยันการตอบกลับ'}
+                ${isAdminMode ? 'Submit on behalf / บันทึกแทนแผนก' : (isEdit ? 'Save changes / บันทึกการแก้ไข' : 'Submit response / ยืนยันการตอบกลับ')}
             </button>
         </div>
     </form>`;
@@ -1388,7 +3784,7 @@ function renderHistory(container) {
     };
 
     container.innerHTML = `
-    <div class="ds-section overflow-hidden">
+    <div class="ds-section overflow-hidden" data-yok-card-image="yokoten-history">
         <div class="px-5 py-4 border-b border-slate-100 flex flex-col sm:flex-row sm:items-center gap-3 justify-between">
             <div class="flex items-center gap-2">
                 <svg class="w-4 h-4 text-slate-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -1413,7 +3809,8 @@ function renderHistory(container) {
             ${rows.map(r => {
                 const files = r.files || [];
                 const canEdit   = _isAdmin || r.ApprovalStatus === 'rejected';
-                const canDelete = _isAdmin;
+                const responseId = _getResponseId(r);
+                const canDelete = _isAdmin && !!responseId;
                 return `
                 <div class="px-5 py-4 hover:bg-slate-50 transition-colors">
                     <div class="flex flex-wrap items-start gap-3 justify-between">
@@ -1456,7 +3853,7 @@ function renderHistory(container) {
                         <div class="flex items-center gap-1.5 flex-shrink-0">
                             ${canEdit ? `
                             <button class="yok-hist-edit-btn flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-semibold text-sky-600 border border-sky-200 hover:bg-sky-50 transition-colors"
-                                    data-rid="${r.ResponseID}" data-yid="${r.YokotenID}">
+                                    data-rid="${_esc(responseId)}" data-yid="${_esc(r.YokotenID || '')}">
                                 <svg class="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"/>
                                 </svg>
@@ -1464,7 +3861,7 @@ function renderHistory(container) {
                             </button>` : ''}
                             ${canDelete ? `
                             <button class="yok-hist-del-btn p-1.5 rounded-lg text-slate-300 hover:text-red-500 hover:bg-red-50 transition-colors"
-                                    data-rid="${r.ResponseID}" title="ลบการตอบกลับ">
+                                    data-rid="${_esc(responseId)}" title="ลบการตอบกลับ">
                                 <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/>
                                 </svg>
@@ -1488,6 +3885,11 @@ function renderHistory(container) {
 
 // ─── TAB 4: ADMIN ────────────────────────────────────────────────────────────
 function renderAdmin(container) {
+    if (!_isAdmin) {
+        _activeTab = 'topics';
+        renderTopics(container);
+        return;
+    }
     container.innerHTML = `
     <div class="space-y-4">
         <!-- Sub-tab toggle -->
@@ -1506,12 +3908,26 @@ function renderAdmin(container) {
                 </svg>
                 ภาพรวม + อนุมัติ
             </button>
+            <button data-adm-view="work"
+                class="adm-view-btn flex items-center gap-1.5 px-4 py-2 rounded-lg text-xs font-semibold transition-all ${_adminView === 'work' ? 'bg-emerald-600 text-white shadow-sm' : 'text-slate-500 hover:bg-slate-100'}">
+                <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5h6m-7 4h8m-8 4h5m-8 8h14a2 2 0 002-2V7.5a2 2 0 00-.586-1.414l-3.5-3.5A2 2 0 0015.5 2H5a2 2 0 00-2 2v15a2 2 0 002 2z"/>
+                </svg>
+                Work Queue
+            </button>
             <button data-adm-view="emp"
                 class="adm-view-btn flex items-center gap-1.5 px-4 py-2 rounded-lg text-xs font-semibold transition-all ${_adminView === 'emp' ? 'bg-emerald-600 text-white shadow-sm' : 'text-slate-500 hover:bg-slate-100'}">
                 <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z"/>
                 </svg>
                 รายบุคคล
+            </button>
+            <button data-adm-view="email"
+                class="adm-view-btn flex items-center gap-1.5 px-4 py-2 rounded-lg text-xs font-semibold transition-all ${_adminView === 'email' ? 'bg-emerald-600 text-white shadow-sm' : 'text-slate-500 hover:bg-slate-100'}">
+                <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8m-18 8h18a2 2 0 002-2V8a2 2 0 00-2-2H3a2 2 0 00-2 2v6a2 2 0 002 2z"/>
+                </svg>
+                Email Outbox
             </button>
             <button data-adm-view="config"
                 class="adm-view-btn flex items-center gap-1.5 px-4 py-2 rounded-lg text-xs font-semibold transition-all ${_adminView === 'config' ? 'bg-emerald-600 text-white shadow-sm' : 'text-slate-500 hover:bg-slate-100'}">
@@ -1543,8 +3959,10 @@ function renderAdmin(container) {
 
         <div id="adm-view-content">
             ${_adminView === 'topics' ? _buildAdminTopics()
+            : _adminView === 'work'  ? _buildAdminWorkQueue()
             : _adminView === 'dept'  ? _buildAdminDept()
             : _adminView === 'emp'   ? _buildAdminEmp()
+            : _adminView === 'email' ? _buildAdminEmailOutbox()
             : _buildAdminConfig()}
         </div>
     </div>`;
@@ -1559,7 +3977,7 @@ function _buildAdminTopics() {
     }
 
     return `
-    <div class="ds-table-wrap">
+    <div class="ds-table-wrap" data-yok-card-image="yokoten-admin-topics">
         <div class="px-5 py-4 border-b border-slate-100 flex items-center justify-between">
             <div class="flex items-center gap-2">
                 <svg class="w-4 h-4 text-slate-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -1600,7 +4018,7 @@ function _buildAdminTopics() {
                         <tr class="hover:bg-slate-50 transition-colors ${!t.IsActive ? 'opacity-50' : ''}">
                             <td class="px-4 py-3 max-w-[220px]">
                                 <p class="font-medium text-slate-800 truncate">${_esc(t.Title || '—')}</p>
-                                <p class="text-xs text-slate-400 truncate mt-0.5">${_esc(_htmlToText(t.TopicDescription))}</p>
+                                <p class="text-xs text-slate-400 truncate mt-0.5">${_esc(_topicSequenceLabel(t, 0))} &middot; ${_esc(_htmlToText(t.TopicDescription))}</p>
                             </td>
                             <td class="px-4 py-3">
                                 <span class="px-2 py-0.5 rounded-full text-xs font-semibold ${RISK_BADGE[t.RiskLevel] || 'bg-slate-100 text-slate-500'}">
@@ -1656,6 +4074,261 @@ function _buildAdminTopics() {
     </div>`;
 }
 
+function _topicTitle(topic) {
+    return topic?.Title || topic?.title || _htmlToText(topic?.TopicDescription || topic?.Description || '') || topic?.YokotenID || '-';
+}
+
+function _getResponseTopic(response) {
+    return _topics.find(t => String(t.YokotenID) === String(response?.YokotenID))
+        || (_deptCompletion?.topics || []).find(t => String(t.YokotenID) === String(response?.YokotenID))
+        || null;
+}
+
+function _getAdminWorkItems() {
+    const topicMap = new Map((_deptCompletion?.topics || _topics || []).map(t => [String(t.YokotenID), t]));
+    const items = [];
+    const now = Date.now();
+
+    (_allResponses || []).forEach(r => {
+        const topic = topicMap.get(String(r.YokotenID)) || _getResponseTopic(r);
+        if (r.ApprovalStatus === 'pending') {
+            const age = r.ResponseDate ? Math.max(0, Math.floor((now - new Date(r.ResponseDate)) / 86400000)) : 0;
+            items.push({ type: 'pending', priority: 90 + age, topic, response: r, dept: r.Department, ageDays: age });
+        } else if (r.ApprovalStatus === 'rejected') {
+            const age = r.ApprovedAt ? Math.max(0, Math.floor((now - new Date(r.ApprovedAt)) / 86400000)) : 0;
+            items.push({ type: 'rejected', priority: 80 + age, topic, response: r, dept: r.Department, ageDays: age });
+        }
+    });
+
+    const deptSummary = _filterToTargetedDepts(_deptCompletion?.deptSummary || [], _deptCompletion?.topics || []);
+    (topicMap.size ? [...topicMap.values()] : []).forEach(topic => {
+        const targeted = _getTopicTargetedDepts(deptSummary, topic);
+        targeted.forEach(dept => {
+            const tb = (dept.topicBreakdown || []).find(row => String(row.YokotenID) === String(topic.YokotenID));
+            if (tb?.responded) return;
+            const daysLeft = topic.Deadline ? Math.ceil((new Date(topic.Deadline) - now) / 86400000) : null;
+            let type = null;
+            let priority = 0;
+            if (daysLeft !== null && daysLeft < 0) {
+                type = 'overdue';
+                priority = 70 + Math.abs(daysLeft);
+            } else if (daysLeft !== null && daysLeft <= 7) {
+                type = 'due_soon';
+                priority = 60 + (7 - daysLeft);
+            } else if (['Critical', 'High'].includes(topic.RiskLevel)) {
+                type = 'high_gap';
+                priority = topic.RiskLevel === 'Critical' ? 55 : 50;
+            }
+            if (type) items.push({ type, priority, topic, dept: dept.department, daysLeft });
+        });
+    });
+
+    return items.sort((a, b) => b.priority - a.priority);
+}
+
+function _workItemBadge(type) {
+    const map = {
+        pending:  ['Pending approval', 'bg-amber-100 text-amber-700 border-amber-200'],
+        rejected: ['Rejected', 'bg-red-100 text-red-700 border-red-200'],
+        overdue:  ['Overdue', 'bg-rose-100 text-rose-700 border-rose-200'],
+        due_soon: ['Due soon', 'bg-yellow-100 text-yellow-700 border-yellow-200'],
+        high_gap: ['High-risk gap', 'bg-orange-100 text-orange-700 border-orange-200'],
+    };
+    const [label, cls] = map[type] || ['Action', 'bg-slate-100 text-slate-600 border-slate-200'];
+    return `<span class="px-2 py-0.5 rounded-full text-[11px] font-bold border ${cls}">${label}</span>`;
+}
+
+function _buildAdminWorkQueue() {
+    if (!_deptCompletion) {
+        return `<div class="ds-section text-center py-16 text-slate-400">
+            <p class="font-medium">Work queue is waiting for department completion data.</p>
+        </div>`;
+    }
+
+    const items = _getAdminWorkItems();
+    const pending = items.filter(i => i.type === 'pending').length;
+    const rejected = items.filter(i => i.type === 'rejected').length;
+    const overdue = items.filter(i => i.type === 'overdue').length;
+    const dueSoon = items.filter(i => i.type === 'due_soon').length;
+    const highGap = items.filter(i => i.type === 'high_gap').length;
+
+    const rowHtml = items.slice(0, 80).map(item => {
+        const topic = item.topic || {};
+        const response = item.response || null;
+        const title = _topicTitle(topic);
+        const deadlineText = item.daysLeft === null || item.daysLeft === undefined
+            ? 'No deadline'
+            : item.daysLeft < 0 ? `${Math.abs(item.daysLeft)} days overdue`
+            : item.daysLeft === 0 ? 'Due today'
+            : `${item.daysLeft} days left`;
+        const responseMeta = response
+            ? `${_esc(response.EmployeeName || response.EmployeeID || '-')} · ${_esc(_fmtDate(response.ResponseDate))}`
+            : `Missing response · ${_esc(deadlineText)}`;
+        return `
+        <div class="px-5 py-4 hover:bg-slate-50 transition-colors">
+            <div class="flex flex-wrap items-start gap-3 justify-between">
+                <div class="min-w-0 flex-1">
+                    <div class="flex flex-wrap items-center gap-2 mb-1">
+                        ${_workItemBadge(item.type)}
+                        <span class="text-xs font-bold text-slate-500">${_esc(item.dept || '-')}</span>
+                        <span class="text-xs text-slate-300">/</span>
+                        <span class="text-xs font-bold ${topic.RiskLevel === 'Critical' ? 'text-red-600' : topic.RiskLevel === 'High' ? 'text-orange-600' : 'text-slate-500'}">${_esc(RISK_LABEL[topic.RiskLevel] || topic.RiskLevel || '-')}</span>
+                    </div>
+                    <p class="text-sm font-bold text-slate-800 truncate">${_esc(title)}</p>
+                    <p class="text-xs text-slate-500 mt-1">${responseMeta}</p>
+                    ${response?.ApprovalComment ? `<p class="text-xs text-red-600 mt-1">Comment: ${_esc(response.ApprovalComment)}</p>` : ''}
+                </div>
+                <div class="flex flex-wrap gap-2 justify-end">
+                    <button type="button" class="yok-audit-pack-btn px-3 py-1.5 rounded-lg text-xs font-bold border border-slate-200 text-slate-600 hover:bg-slate-100"
+                            data-yid="${_esc(topic.YokotenID || response?.YokotenID || '')}">
+                        Audit Pack
+                    </button>
+                    ${response ? `
+                    <button type="button" class="yok-work-open-btn px-3 py-1.5 rounded-lg text-xs font-bold text-sky-700 bg-sky-50 hover:bg-sky-100"
+                            data-yid="${_esc(response.YokotenID)}" data-rid="${_esc(response.ResponseID)}">
+                        Open
+                    </button>` : ''}
+                    ${response?.ApprovalStatus === 'pending' ? `
+                    <button type="button" class="yok-approve-btn px-3 py-1.5 rounded-lg text-xs font-bold text-white bg-emerald-600 hover:bg-emerald-700"
+                            data-rid="${_esc(response.ResponseID)}">
+                        Approve
+                    </button>
+                    <button type="button" class="yok-reject-btn px-3 py-1.5 rounded-lg text-xs font-bold text-white bg-red-500 hover:bg-red-600"
+                            data-rid="${_esc(response.ResponseID)}">
+                        Reject
+                    </button>` : ''}
+                </div>
+            </div>
+        </div>`;
+    }).join('');
+
+    return `
+    <div class="space-y-4">
+        <div class="grid grid-cols-2 md:grid-cols-5 gap-3" data-yok-card-image="yokoten-admin-work-kpis">
+            ${_kpiCard(pending, 'Pending approval', '#f59e0b', `<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3"/>`, 'amber')}
+            ${_kpiCard(rejected, 'Rejected', '#ef4444', `<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01"/>`, 'red')}
+            ${_kpiCard(overdue, 'Overdue', '#dc2626', `<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6v6l4 2"/>`, 'red')}
+            ${_kpiCard(dueSoon, 'Due soon', '#eab308', `<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7V3m8 4V3M5 11h14"/>`, 'amber')}
+            ${_kpiCard(highGap, 'High-risk gap', '#f97316', `<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"/>`, 'orange')}
+        </div>
+        <div class="ds-section overflow-hidden" data-yok-card-image="yokoten-admin-work-queue">
+            <div class="px-5 py-4 border-b border-slate-100 flex flex-wrap items-center gap-2 justify-between">
+                <div>
+                    <h3 class="text-sm font-bold text-slate-700">Yokoten Work Queue</h3>
+                    <p class="text-xs text-slate-400 mt-0.5">Prioritized from existing responses, deadlines, risk levels, and targeted departments.</p>
+                </div>
+                <span class="text-xs font-bold text-slate-500">${items.length} action items</span>
+            </div>
+            <div class="divide-y divide-slate-100">
+                ${rowHtml || `<div class="px-5 py-12 text-center text-sm text-emerald-600 font-bold">No active Yokoten action items.</div>`}
+            </div>
+        </div>
+    </div>`;
+}
+
+async function _loadYokotenEmailOutbox() {
+    const query = new URLSearchParams();
+    if (_emailStatusFilter) query.set('status', _emailStatusFilter);
+    query.set('limit', '100');
+    const res = await API.get(`/yokoten/email-outbox?${query.toString()}`);
+    _emailOutbox = {
+        rows: normalizeApiArray(res?.data ?? res),
+        smtpConfigured: !!res?.smtpConfigured,
+    };
+    const admContent = document.getElementById('adm-view-content');
+    if (admContent && _adminView === 'email') admContent.innerHTML = _buildAdminEmailOutbox();
+}
+
+function _emailStatusBadge(status) {
+    const value = String(status || 'Queued');
+    const cls = value === 'Sent'
+        ? 'bg-emerald-100 text-emerald-700'
+        : value === 'Failed'
+            ? 'bg-red-100 text-red-700'
+            : 'bg-amber-100 text-amber-700';
+    return `<span class="px-2 py-0.5 rounded-full text-xs font-bold ${cls}">${_esc(value)}</span>`;
+}
+
+function _buildAdminEmailOutbox() {
+    if (!_emailOutbox) {
+        return `<div class="ds-section px-5 py-12 text-center text-sm text-slate-400">Loading email outbox...</div>`;
+    }
+    const rows = _emailOutbox.rows || [];
+    const sent = rows.filter(r => r.Status === 'Sent').length;
+    const failed = rows.filter(r => r.Status === 'Failed').length;
+    const queued = rows.filter(r => r.Status !== 'Sent' && r.Status !== 'Failed').length;
+    const rowHtml = rows.map(r => `
+        <tr class="hover:bg-slate-50 align-top">
+            <td class="px-4 py-3 whitespace-nowrap">
+                <div class="font-bold text-slate-700">${_esc(r.EventType || '-')}</div>
+                <div class="text-xs text-slate-400">#${_esc(r.id || r.ID || '')}</div>
+            </td>
+            <td class="px-4 py-3 min-w-[220px]">
+                <div class="text-xs font-semibold text-slate-700 break-all">${_esc(r.Recipients || '-')}</div>
+                <div class="text-xs text-slate-400 mt-1">${_esc(r.Subject || '-')}</div>
+            </td>
+            <td class="px-4 py-3 whitespace-nowrap">${_emailStatusBadge(r.Status)}</td>
+            <td class="px-4 py-3 text-xs text-slate-500 whitespace-nowrap">
+                <div>Created: ${_esc(_fmtDate(r.CreatedAt))}</div>
+                <div>Sent: ${_esc(_fmtDate(r.SentAt))}</div>
+            </td>
+            <td class="px-4 py-3 min-w-[180px]">
+                ${r.Error ? `<div class="text-xs text-red-600 break-words">${_esc(r.Error)}</div>` : '<span class="text-xs text-slate-300">-</span>'}
+            </td>
+            <td class="px-4 py-3 text-right whitespace-nowrap">
+                ${r.Status === 'Sent' ? '<span class="text-xs text-slate-300">Sent</span>' : `
+                <button type="button" class="yok-email-retry-btn px-3 py-1.5 rounded-lg text-xs font-bold text-white bg-emerald-600 hover:bg-emerald-700"
+                        data-id="${_esc(r.id || r.ID || '')}">
+                    Retry
+                </button>`}
+            </td>
+        </tr>`).join('');
+    return `
+    <div class="space-y-4">
+        <div class="grid grid-cols-2 md:grid-cols-4 gap-3" data-yok-card-image="yokoten-email-outbox-kpis">
+            ${_kpiCard(rows.length, 'Outbox items', '#6366f1', `<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8"/>`, 'indigo')}
+            ${_kpiCard(sent, 'Sent', '#059669', `<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/>`, 'emerald')}
+            ${_kpiCard(queued, 'Queued', '#f59e0b', `<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3"/>`, 'amber')}
+            ${_kpiCard(failed, 'Failed', '#ef4444', `<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01"/>`, 'red')}
+        </div>
+        <div class="ds-section overflow-hidden" data-yok-card-image="yokoten-email-outbox">
+            <div class="px-5 py-4 border-b border-slate-100 flex flex-wrap items-center gap-3 justify-between">
+                <div>
+                    <h3 class="text-sm font-bold text-slate-700">Yokoten Email Outbox</h3>
+                    <p class="text-xs text-slate-400 mt-0.5">${_emailOutbox.smtpConfigured ? 'SMTP is configured.' : 'SMTP is not configured; email stays queued until mail settings are ready.'}</p>
+                </div>
+                <div class="flex flex-wrap items-center gap-2">
+                    <select id="yok-email-status-filter" class="px-3 py-2 rounded-lg border border-slate-200 text-xs font-semibold bg-white text-slate-600">
+                        <option value="" ${_emailStatusFilter === '' ? 'selected' : ''}>All</option>
+                        <option value="Queued" ${_emailStatusFilter === 'Queued' ? 'selected' : ''}>Queued</option>
+                        <option value="Failed" ${_emailStatusFilter === 'Failed' ? 'selected' : ''}>Failed</option>
+                        <option value="Sent" ${_emailStatusFilter === 'Sent' ? 'selected' : ''}>Sent</option>
+                    </select>
+                    <button id="yok-email-refresh" type="button" class="px-3 py-2 rounded-lg text-xs font-bold border border-slate-200 text-slate-600 hover:bg-slate-50">Refresh</button>
+                    <button id="yok-email-retry-queued" type="button" class="px-3 py-2 rounded-lg text-xs font-bold text-white bg-emerald-600 hover:bg-emerald-700">Retry Queued</button>
+                </div>
+            </div>
+            <div class="overflow-x-auto">
+                <table class="ds-table text-sm">
+                    <thead>
+                        <tr class="bg-slate-50 text-xs font-semibold text-slate-500 uppercase tracking-wider text-left">
+                            <th class="px-4 py-3">Event</th>
+                            <th class="px-4 py-3">Recipient / Subject</th>
+                            <th class="px-4 py-3">Status</th>
+                            <th class="px-4 py-3">Dates</th>
+                            <th class="px-4 py-3">Error</th>
+                            <th class="px-4 py-3 text-right">Action</th>
+                        </tr>
+                    </thead>
+                    <tbody class="divide-y divide-slate-100">
+                        ${rowHtml || `<tr><td colspan="6" class="px-4 py-12 text-center text-sm text-slate-400">No Yokoten email outbox items.</td></tr>`}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>`;
+}
+
 function _buildAdminDept() {
     if (!_deptCompletion) {
         return `<div class="card text-center py-16 text-slate-400">
@@ -1686,7 +4359,7 @@ function _buildAdminDept() {
 
     return `
     <div class="space-y-4">
-        <div class="grid grid-cols-2 md:grid-cols-4 gap-3">
+        <div class="grid grid-cols-2 md:grid-cols-4 gap-3" data-yok-card-image="yokoten-admin-dept-kpis">
             ${_kpiCard(totalDepts,    'แผนกทั้งหมด',    '#6366f1', `<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0z"/>`, 'indigo')}
             ${_kpiCard(fullDepts,     'ตอบครบทุกหัวข้อ', '#059669', `<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/>`, 'emerald')}
             ${_kpiCard(pendingApprTotal, 'รออนุมัติ',   '#f59e0b', `<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4M7.835 4.697a3.42 3.42 0 001.946-.806 3.42 3.42 0 014.438 0 3.42 3.42 0 001.946.806 3.42 3.42 0 013.138 3.138 3.42 3.42 0 00.806 1.946 3.42 3.42 0 010 4.438 3.42 3.42 0 00-.806 1.946 3.42 3.42 0 01-3.138 3.138 3.42 3.42 0 00-1.946.806 3.42 3.42 0 01-4.438 0 3.42 3.42 0 00-1.946-.806 3.42 3.42 0 01-3.138-3.138 3.42 3.42 0 00-.806-1.946 3.42 3.42 0 010-4.438 3.42 3.42 0 00.806-1.946 3.42 3.42 0 013.138-3.138z"/>`, 'amber')}
@@ -1694,7 +4367,7 @@ function _buildAdminDept() {
         </div>
 
         <!-- Dept summary table with approval actions -->
-        <div class="ds-section overflow-hidden">
+        <div class="ds-section overflow-hidden" data-yok-card-image="yokoten-admin-dept-ranking">
             <div class="px-5 py-4 border-b border-slate-100 flex items-center justify-between">
                 <h3 class="text-sm font-bold text-slate-700">ภาพรวมรายส่วนงาน</h3>
                 <span class="text-xs text-slate-400">${totalDepts} ส่วนงาน · ${topics.length} หัวข้อ</span>
@@ -1762,7 +4435,7 @@ function _buildAdminDept() {
             if (!actionable.length) return '';
             const pendingCount = actionable.filter(r => r.ApprovalStatus === 'pending').length;
             return `
-        <div class="ds-section overflow-hidden" id="yok-approval-card">
+        <div class="ds-section overflow-hidden" id="yok-approval-card" data-yok-card-image="yokoten-admin-approval-queue">
             <div class="px-5 py-4 border-b border-slate-100 flex items-center gap-2 flex-wrap">
                 <svg class="w-4 h-4 text-amber-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4M7.835 4.697a3.42 3.42 0 001.946-.806 3.42 3.42 0 014.438 0 3.42 3.42 0 001.946.806 3.42 3.42 0 013.138 3.138 3.42 3.42 0 00.806 1.946 3.42 3.42 0 010 4.438 3.42 3.42 0 00-.806 1.946 3.42 3.42 0 01-3.138 3.138 3.42 3.42 0 00-1.946.806 3.42 3.42 0 01-4.438 0 3.42 3.42 0 00-1.946-.806 3.42 3.42 0 01-3.138-3.138 3.42 3.42 0 00-.806-1.946 3.42 3.42 0 010-4.438 3.42 3.42 0 00.806-1.946 3.42 3.42 0 013.138-3.138z"/>
@@ -1817,7 +4490,7 @@ function _buildAdminDept() {
 
         <!-- Matrix -->
         ${topics.length > 0 ? `
-        <div class="ds-table-wrap">
+        <div class="ds-table-wrap" data-yok-card-image="yokoten-admin-dept-matrix">
             <div class="px-5 py-4 border-b border-slate-100 flex items-center gap-2">
                 <svg class="w-4 h-4 text-sky-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 10h18M3 14h18M10 3v18M14 3v18"/>
@@ -1878,20 +4551,178 @@ function _buildAdminDept() {
     </div>`;
 }
 
+function _getPinnedDeptUnits(dept, pinnedUnits) {
+    if (!Array.isArray(pinnedUnits) || pinnedUnits.length === 0) return [];
+    const units = new Map();
+    const selectedUnits = new Set(pinnedUnits || []);
+    const deptData = _deptCompletion?.deptSummary?.find(d => d.department === dept);
+    (_deptCompletion?.topics || _topics || []).forEach(topic => {
+        const targetDepts = _parseTargetDepts(topic.TargetDepts);
+        if (targetDepts.length > 0 && !targetDepts.includes(dept)) return;
+        const topicUnits = _parseTargetDepts(topic.TargetUnits);
+        if (!topicUnits.length) return;
+        const resp = _allResponses.find(r => r.YokotenID === topic.YokotenID && r.Department === dept) ||
+            deptData?.topicBreakdown?.find(tb => tb.YokotenID === topic.YokotenID);
+        const responseUnits = new Set(_getResponseUnits(resp));
+        topicUnits.forEach(unit => {
+            if (!selectedUnits.has(unit)) return;
+            const unitDept = _getSafetyUnitDeptName(unit);
+            if (unitDept && unitDept !== dept) return;
+            if (!units.has(unit)) units.set(unit, { name: unit, total: 0, responded: 0 });
+            const row = units.get(unit);
+            row.total += 1;
+            if (responseUnits.has(unit)) row.responded += 1;
+        });
+    });
+    return [...units.values()].map(row => ({
+        ...row,
+        pct: row.total ? Math.round(row.responded * 100 / row.total) : 0,
+    })).sort((a, b) => a.name.localeCompare(b.name));
+}
+
+function _getSafetyUnitDeptName(unitName) {
+    const name = String(unitName || '').trim();
+    if (!name) return '';
+    const unit = _safetyUnits.find(u => _getSafetyUnitName(u) === name);
+    if (!unit) return '';
+    if (unit.DeptName || unit.deptName || unit.departmentName) {
+        return String(unit.DeptName || unit.deptName || unit.departmentName || '').trim();
+    }
+    const deptId = unit.department_id ?? unit.DepartmentID ?? unit.departmentId;
+    const dept = _masterDepts.find(d => String(d.id ?? d.ID) === String(deptId));
+    return String(dept?.Name || dept?.name || '').trim();
+}
+
+function _buildPinnedDeptDashboard(pinnedDepts, fallbackTotal) {
+    if (!pinnedDepts.length) return '';
+    const pinnedUnits = Array.isArray(_dashConfig.pinnedUnits) ? _dashConfig.pinnedUnits : [];
+    const rows = pinnedDepts.map(dept => {
+        const deptData = _deptCompletion?.deptSummary?.find(d => d.department === dept);
+        const pct = deptData?.completionPct ?? null;
+        return {
+            dept,
+            pct,
+            responded: deptData?.respondedCount ?? 0,
+            total: deptData?.totalTopics ?? fallbackTotal,
+            pending: deptData?.pendingApproval ?? 0,
+            rejected: deptData?.rejected ?? 0,
+            units: _getPinnedDeptUnits(dept, pinnedUnits),
+        };
+    }).sort((a, b) => (a.pct ?? -1) - (b.pct ?? -1));
+    const maxTopics = Math.max(1, ...rows.map(r => r.total || 0));
+    const displayedUnits = [...new Set(rows.flatMap(row => row.units.map(unit => unit.name)))]
+        .sort((a, b) => a.localeCompare(b));
+    const displayedUnitLabel = displayedUnits.length ? `${displayedUnits.length} Safety Unit` : 'Department scope only';
+
+    return `
+    <div class="ds-section overflow-hidden" data-yok-card-image="yokoten-pinned-departments">
+        <div class="px-5 py-4 border-b border-slate-100 flex flex-wrap items-center gap-2 justify-between">
+            <div class="flex items-center gap-2 min-w-0">
+                <svg class="w-4 h-4 text-sky-500 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 5a2 2 0 012-2h10a2 2 0 012 2v16l-7-3.5L5 21V5z"/>
+                </svg>
+                <div class="min-w-0">
+                    <h3 class="text-sm font-bold text-slate-700">ส่วนงานที่ติดตาม</h3>
+                    <p class="text-xs text-slate-400">${pinnedDepts.length} ส่วนงาน · ${displayedUnitLabel}</p>
+                </div>
+            </div>
+            ${displayedUnits.length ? `
+            <div class="flex flex-wrap gap-1 justify-end max-w-2xl">
+                ${displayedUnits.slice(0, 8).map(unit => `<span class="px-2 py-1 rounded-md bg-violet-50 text-violet-700 border border-violet-100 text-[11px] font-bold">${_esc(unit)}</span>`).join('')}
+                ${displayedUnits.length > 8 ? `<span class="px-2 py-1 rounded-md bg-slate-100 text-slate-500 text-[11px] font-bold">+${displayedUnits.length - 8}</span>` : ''}
+            </div>` : ''}
+        </div>
+        <div class="p-5 space-y-3">
+            ${rows.map(row => {
+                const pct = row.pct ?? 0;
+                const statusColor = row.pct === null ? '#94a3b8'
+                    : pct === 100 ? '#059669'
+                    : pct >= 60 ? '#0ea5e9'
+                    : pct >= 30 ? '#f59e0b'
+                    : '#ef4444';
+                const volumeWidth = Math.max(8, Math.round((row.total || 0) * 100 / maxTopics));
+                return `
+                <div class="rounded-xl border border-slate-200 bg-white p-3 shadow-sm">
+                    <div class="flex flex-wrap items-start gap-3 justify-between mb-2">
+                        <div class="min-w-0">
+                            <p class="text-sm font-black text-slate-700 truncate">${_esc(row.dept)}</p>
+                            <p class="text-xs text-slate-500 mt-0.5">
+                                ${row.responded}/${row.total} หัวข้อ
+                                ${row.pending > 0 ? ` · <span class="text-yellow-600 font-semibold">${row.pending} รออนุมัติ</span>` : ''}
+                                ${row.rejected > 0 ? ` · <span class="text-red-600 font-semibold">${row.rejected} ส่งกลับแก้ไข</span>` : ''}
+                            </p>
+                        </div>
+                        <span class="text-lg font-black" style="color:${statusColor}">${row.pct !== null ? row.pct + '%' : '-'}</span>
+                    </div>
+                    <div class="grid grid-cols-[minmax(0,1fr)_76px] gap-3 items-center">
+                        <div class="space-y-1.5">
+                            <div class="h-2.5 rounded-full bg-slate-100 overflow-hidden">
+                                <div class="h-full rounded-full" style="width:${pct}%;background:${statusColor}"></div>
+                            </div>
+                            <div class="h-1.5 rounded-full bg-slate-100 overflow-hidden">
+                                <div class="h-full rounded-full bg-slate-300" style="width:${volumeWidth}%"></div>
+                            </div>
+                        </div>
+                        <div class="text-right text-[10px] font-bold uppercase text-slate-400 leading-tight">
+                            Progress<br>Volume
+                        </div>
+                    </div>
+                    <div class="mt-3 flex flex-wrap gap-1.5">
+                        ${row.units.length ? row.units.slice(0, 6).map(unit => `<span class="px-2 py-0.5 rounded-md ${unit.pct === 100 ? 'bg-emerald-50 text-emerald-700 border-emerald-100' : 'bg-violet-50 text-violet-700 border-violet-100'} border text-[11px] font-semibold">${_esc(unit.name)} ${unit.responded}/${unit.total}</span>`).join('') : '<span class="px-2 py-0.5 rounded-md bg-slate-50 text-slate-400 border border-slate-100 text-[11px] font-semibold">Department scope only</span>'}
+                        ${row.units.length > 6 ? `<span class="px-2 py-0.5 rounded-md bg-slate-100 text-slate-500 text-[11px] font-semibold">+${row.units.length - 6}</span>` : ''}
+                    </div>
+                </div>`;
+            }).join('')}
+        </div>
+    </div>`;
+}
+
 function _buildAdminConfig() {
     const pinnedDepts = Array.isArray(_dashConfig.pinnedDepts) ? _dashConfig.pinnedDepts : [];
+    const pinnedUnits = Array.isArray(_dashConfig.pinnedUnits) ? _dashConfig.pinnedUnits : [];
     return `
-    <div class="ds-section p-5">
-        <h3 class="text-sm font-bold text-slate-700 mb-4">เลือกส่วนงานที่แสดงใน Dashboard</h3>
-        <div class="grid grid-cols-2 md:grid-cols-3 gap-2 mb-4 max-h-72 overflow-y-auto p-1">
-            ${_masterDepts.map(d => `
-            <label class="flex items-center gap-2 cursor-pointer p-2 rounded-lg border border-slate-200 hover:bg-slate-50 transition-colors text-sm">
-                <input type="checkbox" name="pin-dept" value="${_esc(d.Name)}"
-                       ${pinnedDepts.includes(d.Name) ? 'checked' : ''} class="accent-emerald-500 w-4 h-4">
-                <span class="text-slate-700 text-xs">${_esc(d.Name)}</span>
-            </label>`).join('')}
+    <div class="ds-section p-5" data-yok-card-image="yokoten-dashboard-config">
+        <div class="mb-4">
+            <h3 class="text-sm font-bold text-slate-700">ตั้งค่า Dashboard</h3>
+            <p class="text-xs text-slate-400 mt-1">เลือกส่วนงานและ Safety Unit ที่ต้องการติดตามบน Dashboard</p>
         </div>
-        <div class="flex justify-end">
+        <div class="grid grid-cols-1 xl:grid-cols-2 gap-4">
+            <div class="rounded-xl border border-slate-200 p-4">
+                <div class="flex items-center justify-between gap-3 mb-3">
+                    <h4 class="text-xs font-black uppercase text-slate-500">ส่วนงานที่แสดง</h4>
+                    <span class="text-[11px] text-slate-400">${pinnedDepts.length}/${_masterDepts.length}</span>
+                </div>
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-2 max-h-72 overflow-y-auto p-1">
+                    ${_masterDepts.map(d => `
+                    <label class="flex items-center gap-2 cursor-pointer p-2 rounded-lg border border-slate-200 hover:bg-slate-50 transition-colors text-sm">
+                        <input type="checkbox" name="pin-dept" value="${_esc(d.Name)}"
+                               ${pinnedDepts.includes(d.Name) ? 'checked' : ''} class="accent-emerald-500 w-4 h-4">
+                        <span class="text-slate-700 text-xs">${_esc(d.Name)}</span>
+                    </label>`).join('')}
+                </div>
+            </div>
+            <div class="rounded-xl border border-slate-200 p-4">
+                <div class="flex items-center justify-between gap-3 mb-3">
+                    <h4 class="text-xs font-black uppercase text-slate-500">Safety Unit ที่แสดง</h4>
+                    <span class="text-[11px] text-slate-400">${pinnedUnits.length}/${_safetyUnits.length}</span>
+                </div>
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-2 max-h-72 overflow-y-auto p-1">
+                    ${_safetyUnits.length ? _safetyUnits.map(u => {
+                        const name = _getSafetyUnitName(u);
+                        return `
+                        <label class="flex items-center gap-2 cursor-pointer p-2 rounded-lg border border-slate-200 hover:bg-slate-50 transition-colors text-sm">
+                            <input type="checkbox" name="pin-unit" value="${_esc(name)}"
+                                   ${pinnedUnits.includes(name) ? 'checked' : ''} class="accent-violet-500 w-4 h-4">
+                            <span class="text-slate-700 text-xs">${_esc(name)}</span>
+                        </label>`;
+                    }).join('') : `
+                    <div class="col-span-full rounded-lg bg-slate-50 px-3 py-6 text-center text-xs text-slate-400">
+                        ยังไม่มี Safety Unit ใน Master Data
+                    </div>`}
+                </div>
+            </div>
+        </div>
+        <div class="flex justify-end mt-4">
             <button id="yok-save-config-btn"
                 class="flex items-center gap-2 px-5 py-2.5 rounded-xl text-sm font-semibold text-white"
                 style="background:linear-gradient(135deg,#0ea5e9,#6366f1)">
@@ -1913,20 +4744,25 @@ function _buildAdminEmp() {
         </div>`;
     }
 
-    const { topics, employees } = _empCompletion;
-    let filtered = [...employees];
+    const normalized = _normalizeEmpCompletion(_empCompletion);
+    const { topics, employees } = normalized;
+    const scopedEmployees = employees.filter(emp => topics.some(topic => {
+        const targets = _parseTargetDepts(topic.TargetDepts);
+        return targets.length === 0 || targets.includes(emp.department);
+    }));
+    let filtered = [...scopedEmployees];
     if (_empFilterDept) filtered = filtered.filter(e => e.department === _empFilterDept);
     filtered.sort((a, b) => a.completionPct - b.completionPct);
 
-    const allDepts = [...new Set(employees.map(e => e.department))].sort();
-    const total100  = employees.filter(e => e.completionPct === 100).length;
-    const total0    = employees.filter(e => e.completionPct === 0).length;
-    const responders = employees.filter(e => e.breakdown.some(b => b.isDeptResponder)).length;
+    const allDepts = [...new Set(scopedEmployees.map(e => e.department))].sort();
+    const total100  = scopedEmployees.filter(e => e.completionPct === 100).length;
+    const total0    = scopedEmployees.filter(e => e.completionPct === 0).length;
+    const responders = scopedEmployees.filter(e => e.breakdown.some(b => b.isDeptResponder)).length;
 
     return `
     <div class="space-y-4">
-        <div class="grid grid-cols-2 md:grid-cols-4 gap-3">
-            ${_kpiCard(employees.length, 'พนักงานทั้งหมด', '#6366f1', `<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0z"/>`, 'indigo')}
+        <div class="grid grid-cols-2 md:grid-cols-4 gap-3" data-yok-card-image="yokoten-admin-employee-kpis">
+            ${_kpiCard(scopedEmployees.length, 'พนักงานใน Scope', '#6366f1', `<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0z"/>`, 'indigo')}
             ${_kpiCard(total100, 'แผนกตอบครบทุกหัวข้อ', '#059669', `<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/>`, 'emerald')}
             ${_kpiCard(responders, 'เป็นผู้ส่งตอบกลับ', '#0ea5e9', `<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"/>`, 'sky')}
             ${_kpiCard(total0, 'แผนกยังไม่ตอบเลย', '#ef4444', `<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/>`, 'red')}
@@ -1943,7 +4779,7 @@ function _buildAdminEmp() {
             <span class="text-xs text-slate-400 ml-auto">${filtered.length} คน · ${topics.length} หัวข้อ</span>
         </div>
 
-        <div class="ds-table-wrap">
+        <div class="ds-table-wrap" data-yok-card-image="yokoten-admin-employee-completion">
             <div class="overflow-x-auto">
                 <table class="ds-table text-sm">
                     <thead>
@@ -2000,7 +4836,7 @@ function _buildAdminEmp() {
 }
 
 function _showEmpBreakdown(employeeId) {
-    const emp = _empCompletion?.employees?.find(e => e.employeeId === employeeId);
+    const emp = _normalizeEmpCompletion(_empCompletion).employees.find(e => e.employeeId === employeeId);
     if (!emp) return;
     const breakdown = emp.breakdown || [];
     const pct = emp.completionPct;
@@ -2104,8 +4940,11 @@ function openTopicForm(topic = null, prefill = null) {
     const catOpts  = CATEGORIES.map(c => `<option value="${c}" ${(t.Category || 'ทั่วไป') === c ? 'selected' : ''}>${c}</option>`).join('');
     const riskOpts = RISK_LEVELS.map(r => `<option value="${r.value}" ${(t.RiskLevel || 'Low') === r.value ? 'selected' : ''}>${r.label}</option>`).join('');
 
+    const existingAttachments = _parseTopicAttachments(t);
     const existingAttachUrl  = t.AttachmentUrl  || '';
     const existingAttachName = t.AttachmentName || '';
+    const existingUrlInput = existingAttachments.length <= 1 ? (existingAttachments[0]?.url || existingAttachUrl || '') : '';
+    const existingNameInput = existingAttachments.length <= 1 ? (existingAttachments[0]?.name || existingAttachName || '') : '';
 
     const html = `
     <form id="yok-topic-form" class="space-y-4">
@@ -2127,8 +4966,9 @@ function openTopicForm(topic = null, prefill = null) {
         </div>
         <div>
             <label class="block text-sm font-semibold text-slate-700 mb-1.5">รายละเอียด <span class="text-red-500">*</span></label>
+            <div class="rte-shell">
             <!-- Rich text toolbar -->
-            <div class="flex flex-wrap gap-0.5 p-1.5 rounded-t-lg border border-b-0 border-slate-200 bg-slate-50" id="yt-rte-toolbar">
+            <div class="rte-toolbar flex flex-wrap gap-0.5" id="yt-rte-toolbar">
                 <button type="button" data-cmd="bold"          title="หนา (Ctrl+B)"
                     class="rte-btn w-7 h-7 rounded flex items-center justify-center text-slate-600 hover:bg-white hover:shadow-sm transition-all">
                     <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="currentColor"><path d="M15.6 10.79c.97-.67 1.65-1.77 1.65-2.79 0-2.26-1.75-4-4-4H7v14h7.04c2.09 0 3.71-1.7 3.71-3.79 0-1.52-.86-2.82-2.15-3.42zM10 6.5h3c.83 0 1.5.67 1.5 1.5s-.67 1.5-1.5 1.5h-3v-3zm3.5 9H10v-3h3.5c.83 0 1.5.67 1.5 1.5s-.67 1.5-1.5 1.5z"/></svg>
@@ -2189,7 +5029,7 @@ function openTopicForm(topic = null, prefill = null) {
                 </button>
             </div>
             <!-- Link / Image URL input bar (shown when link/image button clicked) -->
-            <div id="yt-rte-input-bar" class="hidden items-center gap-2 border border-slate-200 border-t-0 bg-slate-50 px-2 py-1.5">
+            <div id="yt-rte-input-bar" class="rte-input-bar hidden items-center gap-2">
                 <span id="yt-rte-input-label" class="text-xs text-slate-500 flex-shrink-0 w-16">URL ลิงก์:</span>
                 <input id="yt-rte-url-input" type="text" placeholder="https://..."
                        class="flex-1 text-xs border border-slate-200 rounded px-2 py-1 bg-white focus:outline-none focus:border-sky-400 focus:ring-1 focus:ring-sky-200">
@@ -2201,9 +5041,10 @@ function openTopicForm(topic = null, prefill = null) {
             <!-- Editable area -->
             <div id="yt-desc"
                  contenteditable="true"
-                 class="form-textarea w-full rounded-t-none min-h-[96px] focus:outline-none"
-                 style="min-height:96px;border-top:0"
+                 class="rte-editor min-h-[96px]"
+                 style="min-height:96px"
                  data-placeholder="อธิบายบทเรียน / เหตุการณ์ / ความรู้ที่ต้องการแบ่งปัน"></div>
+            </div>
         </div>
         <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div>
@@ -2227,15 +5068,16 @@ function openTopicForm(topic = null, prefill = null) {
                 <span class="text-xs font-normal text-slate-400 ml-1">(ว่าง = ทุกแผนก)</span>
             </label>
             ${_masterDepts.length > 0 ? `
-            <div class="grid grid-cols-2 gap-1.5 p-3 bg-slate-50 rounded-xl border border-slate-200 max-h-36 overflow-y-auto">
+            <div class="grid grid-cols-2 gap-1.5 p-3 bg-slate-50 rounded-xl border border-slate-200 max-h-72 overflow-y-auto">
                 ${_masterDepts.map(d => {
+                    const deptName = _getDepartmentName(d);
                     const existing = _parseTargetDepts(t.TargetDepts);
-                    const checked  = existing.length === 0 || existing.includes(d.Name);
+                    const checked  = existing.length === 0 || existing.includes(deptName);
                     return `
                     <label class="flex items-center gap-2 cursor-pointer text-sm p-1.5 rounded-lg hover:bg-white transition-colors">
-                        <input type="checkbox" name="target-dept" value="${_esc(d.Name)}"
+                        <input type="checkbox" name="target-dept" value="${_esc(deptName)}"
                                ${checked ? 'checked' : ''} class="accent-emerald-500 w-3.5 h-3.5">
-                        <span class="text-slate-700 text-xs">${_esc(d.Name)}</span>
+                        <span class="text-slate-700 text-xs">${_esc(deptName)}</span>
                     </label>`;
                 }).join('')}
             </div>
@@ -2252,17 +5094,18 @@ function openTopicForm(topic = null, prefill = null) {
         <div>
             <label class="block text-sm font-semibold text-slate-700 mb-1.5">
                 Safety Unit ที่เกี่ยวข้อง
-                <span class="text-xs font-normal text-slate-400 ml-1">(ไม่เลือก = ทุก Unit)</span>
+                <span class="text-red-500">*</span>
             </label>
-            <div class="grid grid-cols-2 gap-1.5 p-3 bg-slate-50 rounded-xl border border-slate-200 max-h-28 overflow-y-auto">
+            <div class="grid grid-cols-2 gap-1.5 p-3 bg-slate-50 rounded-xl border border-slate-200 max-h-64 overflow-y-auto">
                 ${_safetyUnits.map(u => {
-                    const existingUnits = Array.isArray(t.TargetUnits) ? t.TargetUnits : [];
-                    const checked = existingUnits.includes(u.name || u.Name);
+                    const unitName = _getSafetyUnitName(u);
+                    const existingUnits = _parseTargetDepts(t.TargetUnits);
+                    const checked = existingUnits.includes(unitName);
                     return `
                     <label class="flex items-center gap-2 cursor-pointer text-sm p-1.5 rounded-lg hover:bg-white transition-colors">
-                        <input type="checkbox" name="target-unit" value="${_esc(u.name || u.Name)}"
+                        <input type="checkbox" name="target-unit" value="${_esc(unitName)}"
                                ${checked ? 'checked' : ''} class="accent-violet-500 w-3.5 h-3.5">
-                        <span class="text-slate-700 text-xs">${_esc(u.name || u.Name)}</span>
+                        <span class="text-slate-700 text-xs">${_esc(unitName)}</span>
                     </label>`;
                 }).join('')}
             </div>
@@ -2281,14 +5124,14 @@ function openTopicForm(topic = null, prefill = null) {
             </div>
 
             <div id="yt-url-wrap">
-                <input id="yt-attach" type="url" value="${_esc(existingAttachUrl)}"
-                       placeholder="https://..." class="form-input w-full mb-2">
-                <input id="yt-attachname" type="text" value="${_esc(existingAttachName)}"
+                <input id="yt-attach" type="text" value="${_esc(existingUrlInput)}"
+                       placeholder="https://... หรือ /uploads/..." class="form-input w-full mb-2">
+                <input id="yt-attachname" type="text" value="${_esc(existingNameInput)}"
                        placeholder="ชื่อไฟล์ เช่น: รายงานการสอบสวน.pdf" class="form-input w-full">
             </div>
             <div id="yt-file-wrap" class="hidden">
                 <div class="border-2 border-dashed border-slate-200 rounded-xl p-4 text-center">
-                    <input id="yt-file" type="file"
+                    <input id="yt-file" type="file" multiple
                            accept="image/*,application/pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx"
                            class="hidden">
                     <label for="yt-file" class="cursor-pointer">
@@ -2302,7 +5145,7 @@ function openTopicForm(topic = null, prefill = null) {
                     </label>
                     <div id="yt-file-name" class="mt-2 text-xs text-sky-600 font-medium hidden"></div>
                 </div>
-                ${existingAttachUrl ? `<p class="text-xs text-slate-400 mt-2">ไฟล์ปัจจุบัน: <a href="${existingAttachUrl}" target="_blank" class="text-sky-600 hover:underline">${_esc(existingAttachName || existingAttachUrl)}</a></p>` : ''}
+                ${existingAttachments.length ? `<div class="text-xs text-slate-400 mt-2 space-y-1">ไฟล์ปัจจุบัน: ${existingAttachments.map(a => `<a href="${_esc(a.url)}" target="_blank" class="block text-sky-600 hover:underline truncate">${_esc(a.name || a.url)}</a>`).join('')}</div>` : ''}
             </div>
             <div id="yt-upload-progress" class="hidden mt-2">
                 <div class="flex items-center gap-2 text-xs text-slate-500">
@@ -2325,7 +5168,7 @@ function openTopicForm(topic = null, prefill = null) {
         </div>
     </form>`;
 
-    openModal(isEdit ? 'แก้ไขหัวข้อ Yokoten' : 'เพิ่มหัวข้อ Yokoten', html, 'max-w-lg');
+    openModal(isEdit ? 'แก้ไขหัวข้อ Yokoten' : 'เพิ่มหัวข้อ Yokoten', html, 'max-w-5xl');
 
     setTimeout(() => {
         // ── Rich text editor init ─────────────────────────────────────────────
@@ -2461,16 +5304,16 @@ function openTopicForm(topic = null, prefill = null) {
 
         // File input change → show filename
         document.getElementById('yt-file')?.addEventListener('change', (e) => {
-            const file = e.target.files?.[0];
+            const files = Array.from(e.target.files || []);
             const nameEl = document.getElementById('yt-file-name');
-            if (file && nameEl) {
-                nameEl.textContent = file.name + ' (' + (file.size / 1024 / 1024).toFixed(2) + ' MB)';
+            if (files.length && nameEl) {
+                nameEl.textContent = files.map(file => file.name + ' (' + (file.size / 1024 / 1024).toFixed(2) + ' MB)').join(', ');
                 nameEl.classList.remove('hidden');
             }
         });
 
         // Form submit
-        document.getElementById('yok-topic-form')?.addEventListener('submit', async (e) => {
+        document.getElementById('yok-topic-form')?.addEventListener('submit', guardSubmitHandler(async (e) => {
             e.preventDefault();
             const errEl  = document.getElementById('yt-error');
             const submit = document.getElementById('yt-submit');
@@ -2483,6 +5326,14 @@ function openTopicForm(topic = null, prefill = null) {
                 errEl.classList.remove('hidden');
                 return;
             }
+            const attachType = document.querySelector('input[name="attach-type"]:checked')?.value;
+            const topicFiles = document.getElementById('yt-file')?.files;
+            const topicFileErr = attachType === 'file' && topicFiles?.length ? _validateYokotenFiles(topicFiles) : '';
+            if (topicFileErr) {
+                errEl.textContent = topicFileErr;
+                errEl.classList.remove('hidden');
+                return;
+            }
             errEl.classList.add('hidden');
             submit.disabled = true;
             submit.textContent = 'กำลังบันทึก...';
@@ -2490,18 +5341,27 @@ function openTopicForm(topic = null, prefill = null) {
             let attachUrl  = null;
             let attachName = null;
 
-            const attachType = document.querySelector('input[name="attach-type"]:checked')?.value;
             if (attachType === 'file') {
-                const file = document.getElementById('yt-file')?.files?.[0];
-                if (file) {
+                const files = Array.from(document.getElementById('yt-file')?.files || []);
+                if (files.length) {
                     const progress = document.getElementById('yt-upload-progress');
                     progress?.classList.remove('hidden');
                     try {
-                        const fd = new FormData();
-                        fd.append('document', file);
-                        const uploadRes = await API.post('/upload/document', fd);
-                        attachUrl  = uploadRes.url || uploadRes.secure_url || uploadRes.data?.url || null;
-                        attachName = file.name;
+                        const uploaded = [];
+                        for (const file of files) {
+                            const fd = new FormData();
+                            fd.append('document', file);
+                            const uploadRes = await API.post('/upload/document', fd);
+                            uploaded.push({ url: uploadRes.url || uploadRes.data?.url || null, name: file.name });
+                        }
+                        const validUploads = uploaded.filter(item => item.url);
+                        if (validUploads.length > 1) {
+                            attachUrl = JSON.stringify(validUploads);
+                            attachName = validUploads.map(item => item.name).join(', ');
+                        } else {
+                            attachUrl = validUploads[0]?.url || null;
+                            attachName = validUploads[0]?.name || null;
+                        }
                     } catch (uploadErr) {
                         errEl.textContent = 'อัปโหลดไฟล์ไม่สำเร็จ: ' + (uploadErr.message || 'เกิดข้อผิดพลาด');
                         errEl.classList.remove('hidden');
@@ -2519,12 +5379,24 @@ function openTopicForm(topic = null, prefill = null) {
             } else {
                 attachUrl  = document.getElementById('yt-attach')?.value.trim() || null;
                 attachName = document.getElementById('yt-attachname')?.value.trim() || null;
+                if (!attachUrl && existingAttachUrl) {
+                    attachUrl = existingAttachUrl;
+                    attachName = existingAttachName;
+                }
             }
 
             // collect checked departments (null = all)
             const checkedDepts = [...document.querySelectorAll('input[name="target-dept"]:checked')]
                 .map(cb => cb.value);
             const allDeptsSelected = checkedDepts.length === _masterDepts.length || checkedDepts.length === 0;
+            const checkedUnits = [...document.querySelectorAll('input[name="target-unit"]:checked')].map(cb => cb.value);
+            if (false && _safetyUnits.length > 0 && checkedUnits.length === 0) {
+                errEl.textContent = 'กรุณาเลือก Safety Unit ที่เกี่ยวข้องอย่างน้อย 1 รายการ';
+                errEl.classList.remove('hidden');
+                submit.disabled = false;
+                submit.textContent = isEdit ? 'บันทึกการแก้ไข' : 'เพิ่มหัวข้อ';
+                return;
+            }
 
             const payload = {
                 Title:            document.getElementById('yt-title').value.trim() || null,
@@ -2535,10 +5407,7 @@ function openTopicForm(topic = null, prefill = null) {
                 AttachmentUrl:    attachUrl,
                 AttachmentName:   attachName,
                 TargetDepts:      allDeptsSelected ? null : checkedDepts,
-                TargetUnits:      (() => {
-                    const checked = [...document.querySelectorAll('input[name="target-unit"]:checked')].map(cb => cb.value);
-                    return checked.length > 0 ? checked : null;
-                })(),
+                TargetUnits:      checkedUnits.length > 0 ? checkedUnits : null,
             };
             if (isEdit) {
                 payload.IsActive = document.getElementById('yt-active').checked ? 1 : 0;
@@ -2562,7 +5431,7 @@ function openTopicForm(topic = null, prefill = null) {
             } finally {
                 hideLoading();
             }
-        });
+        }));
     }, 50);
 }
 
@@ -2576,9 +5445,41 @@ async function _submitResp(form, btn) {
     const comment          = form.querySelector('[name="comment"]')?.value || '';
     const correctiveAction = form.querySelector('[name="correctiveAction"]')?.value || '';
     const files            = form.querySelector('[name="responseFiles"]')?.files;
+    const isAdminMode      = form.dataset.adminMode === '1';
+    const deptSelect       = form.querySelector('[name="departments"]');
+    const departments      = deptSelect ? Array.from(deptSelect.selectedOptions).map(opt => opt.value).filter(Boolean) : [];
+    const unitSelect       = form.querySelector('[name="safetyUnits"]');
+    const safetyUnits      = unitSelect ? Array.from(unitSelect.selectedOptions).map(opt => opt.value).filter(Boolean) : [];
+    const userUnitSelect   = form.querySelector('[name="safetyUnit"]');
+    const selectedUserUnit = userUnitSelect ? userUnitSelect.value.trim() : '';
 
-    if (isRelated === 'No' && !correctiveAction.trim()) {
-        showToast('กรุณากรอกวิธีการแก้ไข/ป้องกัน', 'error');
+    if (isAdminMode && departments.length === 0) {
+        showToast('กรุณาเลือกอย่างน้อย 1 แผนกที่ต้องการตอบแทน', 'error');
+        return;
+    }
+
+    if (isAdminMode && unitSelect && Array.from(unitSelect.options).some(opt => opt.value && !opt.disabled) && safetyUnits.length === 0) {
+        showToast('Please select at least one scoped Safety Unit for this topic.', 'error');
+        return;
+    }
+    if (!isAdminMode && userUnitSelect && !selectedUserUnit) {
+        showToast('Please select Safety Unit for this scoped topic.', 'error');
+        return;
+    }
+
+    const existingFileCount = parseInt(form.dataset.existingFiles || '0', 10) || 0;
+    const newFileCount = files ? files.length : 0;
+    if (isRelated === 'Yes' && !correctiveAction.trim()) {
+        showToast('กรุณากรอก Corrective / Preventive Action เมื่อเลือก "เกี่ยวข้อง"', 'error');
+        return;
+    }
+    if (isRelated === 'Yes' && existingFileCount + newFileCount === 0) {
+        showToast('กรุณาแนบไฟล์หลักฐานอย่างน้อย 1 ไฟล์เมื่อเลือก "เกี่ยวข้อง"', 'error');
+        return;
+    }
+    const fileErr = _validateYokotenFiles(files);
+    if (fileErr) {
+        showToast(fileErr, 'error');
         return;
     }
 
@@ -2587,6 +5488,13 @@ async function _submitResp(form, btn) {
     fd.append('isRelated', isRelated);
     fd.append('comment', comment);
     fd.append('correctiveAction', correctiveAction);
+    if (isAdminMode) {
+        fd.append('departments', JSON.stringify(departments));
+        fd.append('safetyUnits', JSON.stringify(safetyUnits));
+        fd.append('safetyUnit', safetyUnits.join(', '));
+    } else if (selectedUserUnit) {
+        fd.append('safetyUnit', selectedUserUnit);
+    }
     if (files) {
         Array.from(files).forEach(f => fd.append('responseFiles', f));
     }
@@ -2601,12 +5509,12 @@ async function _submitResp(form, btn) {
             await API.post('/yokoten/respond', fd);
         }
         closeModal();
-        showToast(isEdit ? 'อัปเดตการตอบกลับสำเร็จ' : 'ตอบกลับสำเร็จ', 'success');
+        showToast(isAdminMode ? `บันทึกการตอบกลับแทน ${departments.length} แผนกสำเร็จ` : (isEdit ? 'อัปเดตการตอบกลับสำเร็จ' : 'ตอบกลับสำเร็จ'), 'success');
         await refreshData();
     } catch (err) {
         const msg = err?.message || 'เกิดข้อผิดพลาด';
         showToast(msg, 'error');
-        if (btn) { btn.disabled = false; btn.textContent = isEdit ? 'บันทึกการแก้ไข' : 'ยืนยันการตอบกลับ'; }
+        if (btn) { btn.disabled = false; btn.textContent = isAdminMode ? 'บันทึกแทนแผนก' : (isEdit ? 'บันทึกการแก้ไข' : 'ยืนยันการตอบกลับ'); }
     } finally {
         hideLoading();
     }
@@ -2627,7 +5535,7 @@ function openRejectModal(responseId) {
     </div>`, 'max-w-md');
 
     setTimeout(() => {
-        document.getElementById('reject-confirm-btn')?.addEventListener('click', async () => {
+        document.getElementById('reject-confirm-btn')?.addEventListener('click', guardActionHandler(async () => {
             const comment = document.getElementById('reject-comment')?.value.trim();
             if (!comment) { showToast('กรุณาระบุเหตุผล', 'error'); return; }
             try {
@@ -2638,7 +5546,7 @@ function openRejectModal(responseId) {
                 await refreshData();
             } catch (err) { showToast(err?.message || 'เกิดข้อผิดพลาด', 'error'); }
             finally { hideLoading(); }
-        });
+        }));
     }, 50);
 }
 
@@ -2657,7 +5565,17 @@ function _updateBulkBar() {
 
 // ─── EVENT LISTENERS ─────────────────────────────────────────────────────────
 function setupEventListeners() {
-    document.addEventListener('click', async (e) => {
+    window._yokRefresh = () => refreshData();
+    document.addEventListener('click', guardActionHandler(async (e) => {
+        const saveCardBtn = e.target.closest('[data-yok-card-save-action]');
+        if (saveCardBtn) {
+            const card = _yokCardSaveMenu?.card;
+            _yokHideCardImageMenu();
+            if (card) _yokDownloadCardImage(card);
+            return;
+        }
+        if (!e.target.closest('#yok-card-save-menu')) _yokHideCardImageMenu();
+
         if (!e.target.closest('#yokoten-page') && !e.target.closest('[data-yok-modal]')) return;
 
         // Tab switch
@@ -2693,10 +5611,61 @@ function setupEventListeners() {
         const yearBtn = e.target.closest('.yok-year-btn');
         if (yearBtn) {
             _dashYear = parseInt(yearBtn.dataset.year, 10);
+            _dashboardDrilldown = null;
             _destroyCharts();
             const cont = document.getElementById('yok-content');
             if (_activeTab === 'dashboard') renderDashboard(cont);
             else if (_activeTab === 'topics') renderTopics(cont);
+            return;
+        }
+
+        const topicViewBtn = e.target.closest('.yok-topic-view-btn');
+        if (topicViewBtn?.dataset.view) {
+            _topicView = topicViewBtn.dataset.view === 'list' ? 'list' : 'card';
+            localStorage.setItem('yok_topic_view', _topicView);
+            renderTopics(document.getElementById('yok-content'));
+            return;
+        }
+
+        const statusDrillBtn = e.target.closest('.yok-status-drill-btn');
+        if (statusDrillBtn) {
+            _setDashboardDrilldown({
+                type: 'status',
+                key: statusDrillBtn.dataset.status,
+                label: statusDrillBtn.dataset.label || statusDrillBtn.dataset.status,
+            });
+            return;
+        }
+
+        const clearDrillBtn = e.target.closest('.yok-clear-drilldown');
+        if (clearDrillBtn) {
+            _setDashboardDrilldown(null);
+            return;
+        }
+
+        const briefDrillBtn = e.target.closest('.yok-brief-drill-btn');
+        if (briefDrillBtn) {
+            _setDashboardDrilldown({
+                type: briefDrillBtn.dataset.drillType || 'status',
+                key: briefDrillBtn.dataset.drillKey,
+                label: briefDrillBtn.dataset.drillLabel || briefDrillBtn.dataset.drillKey,
+            });
+            return;
+        }
+
+        const briefDeptBtn = e.target.closest('.yok-brief-admin-dept-btn');
+        if (briefDeptBtn) {
+            _adminView = 'dept';
+            switchTab('admin');
+            renderAdmin(document.getElementById('yok-content'));
+            return;
+        }
+
+        const deptWatchBtn = e.target.closest('.yok-admin-dept-watch-btn');
+        if (deptWatchBtn) {
+            _adminView = 'dept';
+            switchTab('admin');
+            renderAdmin(document.getElementById('yok-content'));
             return;
         }
 
@@ -2710,6 +5679,50 @@ function setupEventListeners() {
             return;
         }
 
+        // Dashboard action-center drilldown
+        const openTopicBtn = e.target.closest('.yok-open-topic-btn');
+        if (openTopicBtn) {
+            const yid = openTopicBtn.dataset.yid;
+            const rid = openTopicBtn.dataset.rid;
+            const t = _topics.find(x => x.YokotenID === yid);
+            if (!t) return;
+            const resp = rid
+                ? (_allResponses.find(r => String(r.ResponseID) === String(rid))
+                    || _history.find(r => String(r.ResponseID) === String(rid)))
+                : null;
+            _openTopicDetailModal(resp ? { ...t, deptResponse: resp } : t);
+            return;
+        }
+
+        const auditPackBtn = e.target.closest('.yok-audit-pack-btn');
+        if (auditPackBtn) {
+            _openYokotenAuditPack(auditPackBtn.dataset.yid);
+            return;
+        }
+
+        const workOpenBtn = e.target.closest('.yok-work-open-btn');
+        if (workOpenBtn) {
+            const yid = workOpenBtn.dataset.yid;
+            const rid = workOpenBtn.dataset.rid;
+            const topic = _topics.find(x => String(x.YokotenID) === String(yid));
+            const response = _allResponses.find(r => String(r.ResponseID) === String(rid));
+            if (topic) _openTopicDetailModal(response ? { ...topic, deptResponse: response } : topic);
+            return;
+        }
+
+        // Admin response on behalf of a department
+        const adminRespondBtn = e.target.closest('.yok-admin-respond-btn');
+        if (adminRespondBtn) {
+            if (!_isAdmin) { showToast('Admin access required / ต้องใช้สิทธิ์ผู้ดูแลระบบ', 'error'); return; }
+            const yid = adminRespondBtn.dataset.yid;
+            const t = _topics.find(x => x.YokotenID === yid);
+            const area = document.getElementById(`yok-admin-resp-area-${yid}`);
+            if (!t || !area) return;
+            area.innerHTML = _buildResponseForm(yid, null, { adminMode: true, topic: t });
+            area.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+            return;
+        }
+
         // Switch-tab link
         const switchBtn = e.target.closest('[data-switch-tab]');
         if (switchBtn) { switchTab(switchBtn.dataset.switchTab); return; }
@@ -2717,6 +5730,7 @@ function setupEventListeners() {
         // Admin view toggle
         const admViewBtn = e.target.closest('.adm-view-btn');
         if (admViewBtn?.dataset.admView) {
+            if (!_isAdmin) { showToast('Admin access required / ต้องใช้สิทธิ์ผู้ดูแลระบบ', 'error'); return; }
             _adminView = admViewBtn.dataset.admView;
             renderAdmin(document.getElementById('yok-content'));
             // Lazy-load employee completion data on first visit
@@ -2724,13 +5738,57 @@ function setupEventListeners() {
                 (async () => {
                     try {
                         const res = await API.get('/yokoten/employee-completion');
-                        _empCompletion = res?.data ?? res;
+                        _empCompletion = _normalizeEmpCompletion(res?.data ?? res);
                         const admContent = document.getElementById('adm-view-content');
                         if (admContent && _adminView === 'emp') admContent.innerHTML = _buildAdminEmp();
                     } catch (err) {
                         showToast('โหลดข้อมูลพนักงานไม่สำเร็จ: ' + err.message, 'error');
                     }
                 })();
+            }
+            if (_adminView === 'email' && !_emailOutbox) {
+                _loadYokotenEmailOutbox().catch(err => {
+                    showToast('Load email outbox failed: ' + err.message, 'error');
+                });
+            }
+            return;
+        }
+
+        if (e.target.closest('#yok-email-refresh')) {
+            try {
+                await _loadYokotenEmailOutbox();
+                showToast('Email outbox refreshed', 'success');
+            } catch (err) {
+                showToast(err?.message || 'Refresh failed', 'error');
+            }
+            return;
+        }
+
+        if (e.target.closest('#yok-email-retry-queued')) {
+            try {
+                showLoading('Retrying queued emails...');
+                const res = await API.post('/yokoten/email-outbox/retry-queued', { limit: 20 });
+                showToast(res?.message || 'Retry completed', 'success');
+                await _loadYokotenEmailOutbox();
+            } catch (err) {
+                showToast(err?.message || 'Retry failed', 'error');
+            } finally {
+                hideLoading();
+            }
+            return;
+        }
+
+        const emailRetryBtn = e.target.closest('.yok-email-retry-btn');
+        if (emailRetryBtn) {
+            try {
+                showLoading('Retrying email...');
+                const res = await API.post(`/yokoten/email-outbox/${emailRetryBtn.dataset.id}/retry`, {});
+                showToast(res?.message || 'Email retry completed', 'success');
+                await _loadYokotenEmailOutbox();
+            } catch (err) {
+                showToast(err?.message || 'Retry failed', 'error');
+            } finally {
+                hideLoading();
             }
             return;
         }
@@ -2755,7 +5813,7 @@ function setupEventListeners() {
                 if (inModal && yid) {
                     const t = _topics.find(x => x.YokotenID === yid);
                     const respArea = document.getElementById(`yok-resp-area-${yid}`);
-                    if (t && respArea) respArea.innerHTML = t.deptResponse ? _buildResponseDisplay(t, t.deptResponse) : _buildResponseForm(yid);
+                    if (t && respArea) respArea.innerHTML = t.deptResponse ? _buildResponseDisplay(t, t.deptResponse) : _buildResponseForm(yid, null, { topic: t });
                 }
             } catch (err) { showToast(err?.message || 'เกิดข้อผิดพลาด', 'error'); }
             finally { hideLoading(); }
@@ -2764,6 +5822,16 @@ function setupEventListeners() {
 
         // Export PDF
         if (e.target.closest('#yok-export-btn-pdf') || e.target.closest('#yok-pdf-btn-dash')) { exportYokotenPDF(); return; }
+
+        if (e.target.closest('#yok-clear-filters')) {
+            _filterRisk = '';
+            _filterCat = '';
+            _filterAck = '';
+            _filterSla = '';
+            _searchQ = '';
+            renderTopics(document.getElementById('yok-content'));
+            return;
+        }
 
         // Export Excel
         if (e.target.closest('#yok-export-btn')) { _exportExcel(); return; }
@@ -2837,7 +5905,7 @@ function setupEventListeners() {
             const dr  = t?.deptResponse;
             if (!t || !dr) return;
             const respArea = document.getElementById(`yok-resp-area-${yid}`);
-            if (respArea) respArea.innerHTML = _buildResponseForm(yid, dr);
+            if (respArea) respArea.innerHTML = _buildResponseForm(yid, dr, { topic: t });
             return;
         }
 
@@ -2862,7 +5930,7 @@ function setupEventListeners() {
             const yid = histEditBtn.dataset.yid;
             const rid = histEditBtn.dataset.rid;
             // Find topic to get the YokotenID; find response from _history or _allResponses
-            const resp = (_allResponses.length ? _allResponses : _history).find(r => r.ResponseID === rid || String(r.ResponseID) === rid);
+            const resp = (_allResponses.length ? _allResponses : _history).find(r => _getResponseId(r) === rid);
             const t = _topics.find(x => x.YokotenID === yid);
             if (!t) return;
             // Temporarily inject the response as deptResponse on the topic for the form
@@ -2875,6 +5943,10 @@ function setupEventListeners() {
         const histDelBtn = e.target.closest('.yok-hist-del-btn');
         if (histDelBtn) {
             const rid = histDelBtn.dataset.rid;
+            if (!rid) {
+                showToast('Missing response id. Please refresh and try again.', 'error');
+                return;
+            }
             const ok = await showConfirmationModal('ลบการตอบกลับ', 'ต้องการลบการตอบกลับนี้? ไฟล์แนบทั้งหมดจะถูกลบด้วย');
             if (!ok) return;
             try {
@@ -2890,19 +5962,21 @@ function setupEventListeners() {
         // Save dashboard config
         if (e.target.closest('#yok-save-config-btn')) {
             const checked = [...document.querySelectorAll('input[name="pin-dept"]:checked')].map(cb => cb.value);
+            const checkedUnits = [...document.querySelectorAll('input[name="pin-unit"]:checked')].map(cb => cb.value);
             try {
                 showLoading('กำลังบันทึก...');
-                await API.put('/yokoten/dashboard-config', { pinnedDepts: checked });
+                await API.put('/yokoten/dashboard-config', { pinnedDepts: checked, pinnedUnits: checkedUnits });
                 _dashConfig.pinnedDepts = checked;
+                _dashConfig.pinnedUnits = checkedUnits;
                 showToast('บันทึกการตั้งค่าสำเร็จ', 'success');
             } catch (err) { showToast(err?.message || 'เกิดข้อผิดพลาด', 'error'); }
             finally { hideLoading(); }
             return;
         }
-    });
+    }, delegatedActionOptions('yokoten')));
 
     // Form submit delegation
-    document.addEventListener('submit', async (e) => {
+    document.addEventListener('submit', guardSubmitHandler(async (e) => {
         if (!e.target.closest('#yokoten-page') && !e.target.closest('[data-yok-modal]')) return;
         // Response form (inline in topics tab OR inside modal)
         if (e.target.classList.contains('yok-resp-form')) {
@@ -2911,7 +5985,7 @@ function setupEventListeners() {
             await _submitResp(e.target, btn);
             return;
         }
-    });
+    }, { render: false, target: event => event?.target?.matches?.('form.yok-resp-form') ? event.target : null, actionKey: (_event, form) => `yokoten:response-submit:${form.dataset.topicId || form.id || 'record'}` }));
 
     // Filter changes
     document.addEventListener('change', (e) => {
@@ -2919,11 +5993,25 @@ function setupEventListeners() {
         if (e.target.id === 'yok-filter-risk') { _filterRisk = e.target.value; renderTopics(document.getElementById('yok-content')); return; }
         if (e.target.id === 'yok-filter-cat')  { _filterCat  = e.target.value; renderTopics(document.getElementById('yok-content')); return; }
         if (e.target.id === 'yok-filter-ack')  { _filterAck  = e.target.value; renderTopics(document.getElementById('yok-content')); return; }
+        if (e.target.id === 'yok-filter-sla')  { _filterSla  = e.target.value; renderTopics(document.getElementById('yok-content')); return; }
+        if (e.target.id === 'yok-topic-sort') {
+            _topicSort = ['latest', 'oldest', 'urgent', 'deadline'].includes(e.target.value) ? e.target.value : 'latest';
+            localStorage.setItem('yok_topic_sort', _topicSort);
+            renderTopics(document.getElementById('yok-content'));
+            return;
+        }
         if (e.target.id === 'yok-hist-filter') { _histFilterId = e.target.value; renderHistory(document.getElementById('yok-content')); return; }
         if (e.target.id === 'yok-emp-dept-filter') {
             _empFilterDept = e.target.value;
             const admContent = document.getElementById('adm-view-content');
             if (admContent) admContent.innerHTML = _buildAdminEmp();
+            return;
+        }
+        if (e.target.id === 'yok-email-status-filter') {
+            _emailStatusFilter = e.target.value;
+            _loadYokotenEmailOutbox().catch(err => {
+                showToast(err?.message || 'Load email outbox failed', 'error');
+            });
             return;
         }
         // Bulk approve: select-all checkbox
@@ -2942,10 +6030,13 @@ function setupEventListeners() {
         }
         // Toggle corrective action required field in response form
         if (e.target.name === 'isRelated') {
-            const yokoId = e.target.closest('form.yok-resp-form')?.dataset?.id;
-            if (!yokoId) return;
-            const wrap = document.getElementById(`corrective-wrap-${yokoId}`);
-            if (wrap) wrap.classList.toggle('hidden', e.target.value === 'Yes');
+            const form = e.target.closest('form.yok-resp-form');
+            const wrap = form?.querySelector('[data-corrective-wrap]');
+            if (wrap) wrap.classList.toggle('hidden', e.target.value !== 'Yes');
+            if (e.target.value !== 'Yes') {
+                const corrective = form?.querySelector('[name="correctiveAction"]');
+                if (corrective) corrective.value = '';
+            }
         }
     });
 
@@ -2957,11 +6048,121 @@ function setupEventListeners() {
             renderTopics(document.getElementById('yok-content'));
         }
     }, 300));
+
+    document.addEventListener('contextmenu', _yokShowCardContextMenu);
+    document.addEventListener('pointerdown', _yokStartCardImageHold);
+    document.addEventListener('pointermove', _yokMoveCardImageHold);
+    document.addEventListener('pointerup', _yokCancelCardImageHold);
+    document.addEventListener('pointercancel', _yokCancelCardImageHold);
 }
 
 
 
 // ─── EXPORT EXCEL ─────────────────────────────────────────────────────────────
+function _yokShowCardContextMenu(event) {
+    const card = event.target?.closest?.('[data-yok-card-image]');
+    if (!card || !document.getElementById('yokoten-page')?.contains(card)) return;
+    if (event.target.closest('button,a,input,select,textarea,label,[contenteditable="true"]')) return;
+    event.preventDefault();
+    _yokShowCardImageMenu(card, event.clientX, event.clientY);
+}
+
+function _yokStartCardImageHold(event) {
+    if (event.button !== undefined && event.button !== 0) return;
+    const card = event.target?.closest?.('[data-yok-card-image]');
+    if (!card || !document.getElementById('yokoten-page')?.contains(card)) return;
+    if (event.target.closest('button,a,input,select,textarea,label,[contenteditable="true"]')) return;
+    _yokCancelCardImageHold();
+    _yokCardSaveHold = {
+        card,
+        pointerId: event.pointerId,
+        x: event.clientX,
+        y: event.clientY,
+        timer: setTimeout(() => {
+            if (!_yokCardSaveHold || _yokCardSaveHold.card !== card) return;
+            _yokShowCardImageMenu(card, _yokCardSaveHold.x, _yokCardSaveHold.y);
+        }, 800),
+    };
+}
+
+function _yokMoveCardImageHold(event) {
+    if (!_yokCardSaveHold || event.pointerId !== _yokCardSaveHold.pointerId) return;
+    if (Math.abs(event.clientX - _yokCardSaveHold.x) > 10 || Math.abs(event.clientY - _yokCardSaveHold.y) > 10) {
+        _yokCancelCardImageHold();
+    }
+}
+
+function _yokCancelCardImageHold() {
+    if (_yokCardSaveHold?.timer) clearTimeout(_yokCardSaveHold.timer);
+    _yokCardSaveHold = null;
+}
+
+function _yokShowCardImageMenu(card, clientX, clientY) {
+    _yokHideCardImageMenu();
+    const menu = document.createElement('div');
+    menu.id = 'yok-card-save-menu';
+    menu.className = 'fixed z-[9999] rounded-xl border border-slate-200 bg-white p-1.5 shadow-xl';
+    menu.style.minWidth = '170px';
+    menu.innerHTML = `
+        <button type="button" data-yok-card-save-action
+            class="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-xs font-black text-slate-700 hover:bg-sky-50 hover:text-sky-700">
+            <svg class="h-4 w-4 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 10v6m0 0l-3-3m3 3l3-3m4 7H5a2 2 0 01-2-2V7a2 2 0 012-2h4l2 2h8a2 2 0 012 2v9a2 2 0 01-2 2z"/>
+            </svg>
+            &#3610;&#3633;&#3609;&#3607;&#3638;&#3585;&#3648;&#3611;&#3655;&#3609;&#3619;&#3641;&#3611;&#3616;&#3634;&#3614;
+        </button>`;
+    document.body.appendChild(menu);
+    const rect = menu.getBoundingClientRect();
+    const left = Math.min(Math.max(8, clientX), window.innerWidth - rect.width - 8);
+    const top = Math.min(Math.max(8, clientY), window.innerHeight - rect.height - 8);
+    menu.style.left = `${left}px`;
+    menu.style.top = `${top}px`;
+    _yokCardSaveMenu = { card, menu };
+}
+
+function _yokHideCardImageMenu() {
+    _yokCardSaveMenu?.menu?.remove?.();
+    _yokCardSaveMenu = null;
+}
+
+async function _yokDownloadCardImage(card) {
+    if (typeof html2canvas === 'undefined') {
+        showToast('Image export library is not ready.', 'error');
+        return;
+    }
+    const name = _yokSafeFilePart(card.dataset.yokCardImage || 'yokoten-card');
+    try {
+        showLoading('Saving card image...');
+        const canvas = await html2canvas(card, {
+            backgroundColor: '#ffffff',
+            scale: Math.min(2, window.devicePixelRatio || 1.5),
+            useCORS: true,
+            onclone: doc => {
+                doc.querySelectorAll('[data-yok-card-ignore]').forEach(el => { el.style.display = 'none'; });
+            },
+        });
+        const link = document.createElement('a');
+        link.href = canvas.toDataURL('image/png');
+        link.download = `${name}-${_dashYear}.png`;
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+        showToast('Card image saved.', 'success');
+    } catch (err) {
+        showToast(err?.message || 'Card image export failed.', 'error');
+    } finally {
+        hideLoading();
+    }
+}
+
+function _yokSafeFilePart(value) {
+    return String(value || 'yokoten-card')
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, '-')
+        .replace(/^-+|-+$/g, '')
+        .slice(0, 60) || 'yokoten-card';
+}
+
 function _exportExcel() {
     if (!_deptCompletion) {
         showToast('ไม่มีข้อมูลสำหรับ Export', 'error');
@@ -3056,6 +6257,9 @@ async function exportYokotenPDF() {
     const year    = now.getFullYear();
     const docNo   = 'YOK-' + year + '-' + pad(now.getMonth() + 1) + pad(now.getDate());
     const K       = "font-family:'Kanit',sans-serif;";
+    const currentUser = TSHSession.getUser() || {};
+    const generatedBy = currentUser.name || currentUser.Name || currentUser.EmployeeName || currentUser.EmployeeID || '-';
+    const scopeLabel  = 'Scope: Fiscal year ' + year + ' / Generated by ' + generatedBy;
 
     const totalDepts     = deptSummary.length;
     const totalTopics    = topics.length;
@@ -3065,17 +6269,305 @@ async function exportYokotenPDF() {
         ? Math.round(deptSummary.reduce((s, d) => s + d.completionPct, 0) / totalDepts) : 0;
     const sorted = [...deptSummary].sort((a, b) => b.completionPct - a.completionPct);
     const pctCol = pct => pct === 100 ? '#059669' : pct >= 50 ? '#f59e0b' : '#ef4444';
+    const activeResp = (_allResponses || []).filter(r => topics.some(t => String(t.YokotenID) === String(r.YokotenID)));
+    const pdfNow = Date.now();
+    const alertTopics = topics
+        .filter(t => {
+            if (!t.Deadline) return false;
+            const daysLeft = Math.ceil((new Date(t.Deadline) - pdfNow) / 86400000);
+            if (daysLeft > 14) return false;
+            const targeted = _getTopicTargetedDepts(deptSummary, t);
+            if (!targeted.length) return false;
+            const respondedDepts = targeted.filter(d =>
+                d.topicBreakdown.some(tb => tb.YokotenID === t.YokotenID && tb.responded)
+            ).length;
+            return respondedDepts < targeted.length;
+        })
+        .map(t => ({
+            ...t,
+            daysLeft: Math.ceil((new Date(t.Deadline) - pdfNow) / 86400000),
+        }));
+    const brief = _getExecutiveBriefData(deptSummary, topics, activeResp, alertTopics);
+    const highRiskMissing = [];
+    const topicMapForPdf = new Map(topics.map(t => [String(t.YokotenID), t]));
+    deptSummary.forEach(dept => {
+        (dept.topicBreakdown || []).forEach(tb => {
+            if (tb.responded) return;
+            const topic = topicMapForPdf.get(String(tb.YokotenID));
+            if (!topic || !['Critical', 'High'].includes(topic.RiskLevel)) return;
+            const daysLeft = topic.Deadline ? Math.ceil((new Date(topic.Deadline) - pdfNow) / 86400000) : 999;
+            highRiskMissing.push({ topic, dept: dept.department, daysLeft });
+        });
+    });
+    highRiskMissing.sort((a, b) => {
+        const score = item => (item.daysLeft < 0 ? 1000 : 0) + ({ Critical: 20, High: 10 }[item.topic.RiskLevel] || 0) - item.daysLeft;
+        return score(b) - score(a);
+    });
+    const agingPending = activeResp
+        .filter(r => r.ApprovalStatus === 'pending')
+        .map(r => ({
+            ...r,
+            ageDays: r.ResponseDate ? Math.max(0, Math.floor((pdfNow - new Date(r.ResponseDate)) / 86400000)) : 0,
+            topic: topicMapForPdf.get(String(r.YokotenID)),
+        }))
+        .sort((a, b) => b.ageDays - a.ageDays);
+
+    // Hiyari-aligned formal 2-page report path.
+    // Keep Yokoten-specific data, but follow the Hiyari PDF rhythm: summary, matrix/trend, risk register, follow-up.
+    {
+        const pages = [];
+        const safe = v => _esc(String(v ?? '-'));
+        const buildPage = innerHtml => {
+            const div = document.createElement('div');
+            div.style.cssText = [
+                'position:fixed',
+                'left:-9999px',
+                'top:0',
+                'width:794px',
+                'height:1122px',
+                'background:#ffffff',
+                'font-family:Kanit,Arial,sans-serif',
+                'font-size:11px',
+                'color:#1e293b',
+                'display:flex',
+                'flex-direction:column',
+                'box-sizing:border-box',
+                'overflow:hidden',
+            ].join(';');
+            div.innerHTML = innerHtml;
+            document.body.appendChild(div);
+            pages.push(div);
+            return div;
+        };
+        const bar = (pct, color, h = 7) =>
+            '<div style="height:' + h + 'px;background:#e2e8f0;border-radius:999px;overflow:hidden">'
+            + '<div style="height:100%;width:' + Math.max(0, Math.min(100, pct)) + '%;background:' + color + ';border-radius:999px"></div>'
+            + '</div>';
+        const sectionTitle = (title, sub = '') =>
+            '<div style="display:flex;align-items:flex-end;justify-content:space-between;border-bottom:1px solid #dbeafe;padding-bottom:7px;margin-bottom:10px">'
+            + '<div><h2 style="font-size:14px;font-weight:900;color:#065f46;margin:0">' + title + '</h2>'
+            + (sub ? '<p style="font-size:9.5px;color:#64748b;margin:2px 0 0">' + sub + '</p>' : '')
+            + '</div></div>';
+        const metricCard = (label, value, color, sub = '') =>
+            '<div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:10px;padding:11px;text-align:center;min-height:72px">'
+            + '<div style="font-size:24px;font-weight:900;color:' + color + ';line-height:1">' + safe(value) + '</div>'
+            + '<div style="font-size:9.5px;color:#475569;margin-top:6px;font-weight:800">' + label + '</div>'
+            + (sub ? '<div style="font-size:8.5px;color:#94a3b8;margin-top:2px">' + safe(sub) + '</div>' : '')
+            + '</div>';
+        const headerHtml = '<div style="background:#065f46;color:#fff;padding:18px 28px;flex-shrink:0">'
+            + '<div style="display:flex;justify-content:space-between;gap:16px;align-items:flex-start">'
+            + '<div>'
+            + '<p style="font-size:10px;opacity:.82;margin:0 0 3px">Thai Summit Harness Co., Ltd. · Safety Summary Report</p>'
+            + '<h1 style="font-size:21px;font-weight:900;margin:0">Yokoten (Lesson Learned) Report</h1>'
+            + '<p style="font-size:11px;opacity:.9;margin:5px 0 0">รายงานภาพรวมประจำปี ' + year + ' · สร้างรายงานเมื่อ ' + dateStr + '</p>'
+            + '</div>'
+            + '<div style="text-align:right;font-size:9.5px;line-height:1.55;opacity:.92">'
+            + '<div>Document No: ' + safe(docNo) + '</div>'
+            + '<div>Classification: Internal Use Only</div>'
+            + '<div>Generated by: ' + safe(generatedBy) + '</div>'
+            + '</div></div></div>';
+        const footerHtml = page =>
+            '<div style="margin-top:auto;padding:8px 28px;background:#f8fafc;border-top:1px solid #e2e8f0;color:#64748b;font-size:9px;display:flex;justify-content:space-between;flex-shrink:0">'
+            + '<span>Yokoten Summary Report · Thai Summit Harness Co., Ltd.</span>'
+            + '<span>Page ' + page + ' of 2</span>'
+            + '</div>';
+        const responseTotal = Math.max(1, totalDepts * Math.max(1, totalTopics));
+        const respondedTotal = deptSummary.reduce((s, d) => s + (d.respondedCount || 0), 0);
+        const responseCoverage = Math.round(respondedTotal * 100 / responseTotal);
+        const rejectedTotal = deptSummary.reduce((s, d) => s + (d.rejected || 0), 0);
+        const healthColor = brief.health?.color || (overallPct >= 85 ? '#059669' : overallPct >= 60 ? '#d97706' : '#dc2626');
+        const riskOrder = { Critical: 4, High: 3, Medium: 2, Low: 1 };
+        const topicRegister = topics.map(t => {
+            const targeted = _getTopicTargetedDepts(deptSummary, t);
+            const deptResp = targeted.filter(d => d.topicBreakdown.some(tb => String(tb.YokotenID) === String(t.YokotenID) && tb.responded)).length;
+            const pct = targeted.length ? Math.round(deptResp * 100 / targeted.length) : 0;
+            const title = t.Title || _htmlToText(t.TopicDescription) || '-';
+            return { topic: t, targeted, deptResp, pct, title };
+        }).sort((a, b) =>
+            (riskOrder[b.topic.RiskLevel] || 0) - (riskOrder[a.topic.RiskLevel] || 0)
+            || a.pct - b.pct
+            || String(a.title).localeCompare(String(b.title), 'th')
+        );
+        const riskColors = { Critical: '#dc2626', High: '#ea580c', Medium: '#d97706', Low: '#059669' };
+        const topicRows = topicRegister.slice(0, 8).map((item, idx) => {
+            const color = pctCol(item.pct);
+            const riskColor = riskColors[item.topic.RiskLevel] || '#64748b';
+            return '<tr style="background:' + (idx % 2 ? '#fff' : '#f8fafc') + '">'
+                + '<td style="padding:7px 8px;border-bottom:3px solid #fff"><b>' + safe(String(item.title).slice(0, 46)) + '</b><div style="font-size:8px;color:#64748b">' + safe(item.topic.Category || '-') + '</div></td>'
+                + '<td style="padding:7px;text-align:center;color:' + riskColor + ';font-weight:900;border-bottom:3px solid #fff">' + safe(item.topic.RiskLevel || '-') + '</td>'
+                + '<td style="padding:7px;text-align:center;color:#334155;font-weight:900;border-bottom:3px solid #fff">' + item.deptResp + '/' + item.targeted.length + '</td>'
+                + '<td style="padding:7px;border-bottom:3px solid #fff"><div style="display:flex;align-items:center;gap:6px">' + bar(item.pct, color, 6) + '<span style="font-size:9px;font-weight:900;color:' + color + ';width:28px;text-align:right">' + item.pct + '%</span></div></td>'
+                + '</tr>';
+        }).join('');
+        const deptRows = sorted.slice(-8).reverse().map((d, idx) => {
+            const color = pctCol(d.completionPct);
+            return '<tr style="background:' + (idx % 2 ? '#fff' : '#f8fafc') + '">'
+                + '<td style="padding:7px 8px;border-bottom:3px solid #fff"><b>' + safe(d.department || '-') + '</b><div style="font-size:8px;color:#64748b">Latest: ' + safe(d.lastResponse ? new Date(d.lastResponse).toLocaleDateString('th-TH', { day: 'numeric', month: 'short', year: 'numeric' }) : '-') + '</div></td>'
+                + '<td style="padding:7px;text-align:center;color:#059669;font-weight:900;border-bottom:3px solid #fff">' + (d.respondedCount || 0) + '</td>'
+                + '<td style="padding:7px;text-align:center;color:#334155;border-bottom:3px solid #fff">' + (d.totalTopics || 0) + '</td>'
+                + '<td style="padding:7px;text-align:center;color:' + (d.pendingApproval ? '#d97706' : '#cbd5e1') + ';font-weight:900;border-bottom:3px solid #fff">' + (d.pendingApproval || '-') + '</td>'
+                + '<td style="padding:7px;border-bottom:3px solid #fff"><div style="display:flex;align-items:center;gap:6px">' + bar(d.completionPct, color, 6) + '<span style="font-size:9px;font-weight:900;color:' + color + ';width:30px;text-align:right">' + d.completionPct + '%</span></div></td>'
+                + '</tr>';
+        }).join('');
+        const keyNotes = [
+            'Response coverage ' + respondedTotal + '/' + responseTotal + ' (' + responseCoverage + '%)',
+            'Department completion ' + fullDepts + '/' + totalDepts + ' departments · Overall ' + overallPct + '%',
+            'Pending approval ' + pendingApprTot + ' · Rejected ' + rejectedTotal,
+            highRiskMissing.length ? 'High/Critical gaps require follow-up: ' + highRiskMissing.length : 'No high-risk response gaps in current scope',
+        ];
+        const followDeadlineText = daysLeft => {
+            if (daysLeft === 999) return 'No deadline';
+            if (daysLeft < 0) return 'Overdue ' + Math.abs(daysLeft) + 'd';
+            if (daysLeft === 0) return 'Due today';
+            return 'Due in ' + daysLeft + 'd';
+        };
+        const p1 = buildPage(
+            headerHtml
+            + '<div style="padding:18px 28px 14px;flex:1">'
+            + sectionTitle('1. ภาพรวมรายงาน / Report Summary', 'สรุปความครอบคลุมการตอบกลับ การอนุมัติ และหัวข้อ Yokoten')
+            + '<div style="display:grid;grid-template-columns:repeat(6,1fr);gap:8px;margin-bottom:12px">'
+            + metricCard('หัวข้อทั้งหมด', totalTopics, '#0f766e', 'Topics')
+            + metricCard('ส่วนงาน', totalDepts, '#0284c7', 'Departments')
+            + metricCard('ตอบครบ', fullDepts, '#059669', 'Complete Dept')
+            + metricCard('ความคืบหน้า', overallPct + '%', pctCol(overallPct), 'Overall')
+            + metricCard('รออนุมัติ', pendingApprTot, pendingApprTot ? '#d97706' : '#64748b', 'Pending')
+            + metricCard('High Gaps', highRiskMissing.length, highRiskMissing.length ? '#dc2626' : '#059669', 'Critical/High')
+            + '</div>'
+            + '<div style="display:grid;grid-template-columns:1.1fr .9fr;gap:12px;margin-bottom:12px">'
+            + '<div style="border:1px solid #e2e8f0;border-radius:12px;padding:12px">'
+            + '<div style="font-size:12px;font-weight:900;color:#065f46;margin-bottom:8px">Key Notes / ประเด็นสำคัญ</div>'
+            + keyNotes.map(t => '<div style="font-size:10.2px;color:#334155;margin-bottom:6px;display:flex;gap:6px"><span style="color:#f97316;font-weight:900">•</span><span>' + safe(t) + '</span></div>').join('')
+            + '</div>'
+            + '<div style="border:1px solid #e2e8f0;border-radius:12px;padding:12px;text-align:center">'
+            + '<div style="font-size:12px;font-weight:900;color:#065f46;margin-bottom:7px">Report Health</div>'
+            + '<div style="font-size:36px;font-weight:900;line-height:1;color:' + healthColor + '">' + safe(brief.health?.label || 'Stable') + '</div>'
+            + '<div style="font-size:9.5px;color:#64748b;margin:10px 0 10px;line-height:1.5">' + safe(brief.briefText || '-') + '</div>'
+            + bar(overallPct, pctCol(overallPct), 8)
+            + '</div></div>'
+            + '<div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">'
+            + '<div style="border:1px solid #e2e8f0;border-radius:12px;padding:12px">'
+            + sectionTitle('2. Topic Coverage', 'หัวข้อที่ควรติดตามก่อน เรียงตามความเสี่ยงและ % ตอบกลับ')
+            + '<table style="width:100%;border-collapse:collapse;font-size:9.2px"><tr style="background:#065f46;color:#fff"><th style="padding:6px;text-align:left">Topic</th><th>Risk</th><th>Resp.</th><th style="text-align:left">Progress</th></tr>' + (topicRows || '<tr><td colspan="4" style="padding:16px;text-align:center;color:#94a3b8">No topic data</td></tr>') + '</table>'
+            + '</div>'
+            + '<div style="border:1px solid #e2e8f0;border-radius:12px;padding:12px">'
+            + sectionTitle('3. Department Focus', 'ส่วนงานที่ยังมีช่องว่างสูงสุด')
+            + '<table style="width:100%;border-collapse:collapse;font-size:9.2px"><tr style="background:#065f46;color:#fff"><th style="padding:6px;text-align:left">Department</th><th>Done</th><th>Total</th><th>Pending</th><th style="text-align:left">Progress</th></tr>' + (deptRows || '<tr><td colspan="5" style="padding:16px;text-align:center;color:#94a3b8">No department data</td></tr>') + '</table>'
+            + '</div></div>'
+            + '</div>'
+            + footerHtml(1)
+        );
+        const followItems = [
+            ...highRiskMissing.slice(0, 5).map(item => ({
+                type: 'Gap',
+                title: item.topic.Title || _htmlToText(item.topic.TopicDescription) || '-',
+                dept: item.dept || '-',
+                owner: '-',
+                status: item.topic.RiskLevel || '-',
+                age: followDeadlineText(item.daysLeft),
+                color: item.topic.RiskLevel === 'Critical' ? '#dc2626' : '#ea580c',
+            })),
+            ...agingPending.slice(0, 5).map(r => ({
+                type: 'Approval',
+                title: r.topic?.Title || r.Title || r.TopicTitle || r.YokotenID || '-',
+                dept: r.Department || '-',
+                owner: r.EmployeeName || r.EmployeeID || '-',
+                status: 'Pending',
+                age: r.ageDays + 'd',
+                color: r.ageDays >= 7 ? '#dc2626' : r.ageDays >= 3 ? '#d97706' : '#059669',
+            })),
+        ].slice(0, 9);
+        const followRows = followItems.length ? followItems.map((item, idx) =>
+            '<tr style="background:' + (idx % 2 ? '#fff' : '#f8fafc') + '">'
+            + '<td style="padding:7px;color:#64748b;border-bottom:3px solid #fff">' + safe(item.type) + '</td>'
+            + '<td style="padding:7px;border-bottom:3px solid #fff"><b>' + safe(String(item.title).slice(0, 56)) + '</b><div style="font-size:8px;color:#64748b">' + safe(item.dept) + '</div></td>'
+            + '<td style="padding:7px;color:#334155;border-bottom:3px solid #fff">' + safe(item.owner) + '</td>'
+            + '<td style="padding:7px;text-align:center;font-weight:900;color:' + item.color + ';border-bottom:3px solid #fff">' + safe(item.status) + '</td>'
+            + '<td style="padding:7px;text-align:right;font-weight:900;color:' + item.color + ';border-bottom:3px solid #fff">' + safe(item.age) + '</td>'
+            + '</tr>'
+        ).join('') : '<tr><td colspan="5" style="padding:20px;text-align:center;color:#94a3b8">ไม่มีรายการที่ต้องติดตามเร่งด่วน</td></tr>';
+        const riskMatrix = ['Critical', 'High', 'Medium', 'Low'].map(risk => {
+            const rows = topicRegister.filter(item => item.topic.RiskLevel === risk);
+            const avg = rows.length ? Math.round(rows.reduce((s, item) => s + item.pct, 0) / rows.length) : 0;
+            const color = riskColors[risk] || '#64748b';
+            return '<tr style="background:#f8fafc;border-bottom:3px solid #fff">'
+                + '<td style="padding:8px"><b style="color:' + color + '">' + risk + '</b></td>'
+                + '<td style="padding:8px;text-align:center;font-weight:900">' + rows.length + '</td>'
+                + '<td style="padding:8px;text-align:center;font-weight:900;color:' + pctCol(avg) + '">' + avg + '%</td>'
+                + '<td style="padding:8px">' + bar(avg, pctCol(avg), 6) + '</td>'
+                + '</tr>';
+        }).join('');
+        const approvalBox = label =>
+            '<div style="height:70px;border:1px solid #cbd5e1;border-radius:8px;background:#fff;padding:9px;text-align:center">'
+            + '<div style="height:28px;border-bottom:1px solid #94a3b8;margin:0 8px 6px"></div>'
+            + '<div style="font-size:8.5px;font-weight:900;color:#1e293b">' + label + '</div>'
+            + '<div style="font-size:7.5px;color:#94a3b8;margin-top:2px">Date: ____ / ____ / ____</div>'
+            + '</div>';
+        const p2 = buildPage(
+            headerHtml
+            + '<div style="padding:18px 28px 14px;flex:1">'
+            + sectionTitle('4. Risk Coverage Matrix', 'ภาพรวมจำนวนหัวข้อและอัตราตอบกลับตามระดับความเสี่ยง')
+            + '<div style="display:grid;grid-template-columns:.85fr 1.15fr;gap:12px;margin-bottom:12px">'
+            + '<div style="border:1px solid #e2e8f0;border-radius:12px;padding:12px">'
+            + '<table style="width:100%;border-collapse:collapse;font-size:9.6px"><tr style="background:#065f46;color:#fff"><th style="padding:7px;text-align:left">Risk</th><th>Topics</th><th>Avg</th><th style="text-align:left">Coverage</th></tr>' + riskMatrix + '</table>'
+            + '</div>'
+            + '<div style="border:1px solid #e2e8f0;border-radius:12px;padding:12px">'
+            + sectionTitle('5. Action Follow-up', 'รายการ Gap และ Approval Aging ที่ควรติดตาม')
+            + '<table style="width:100%;border-collapse:collapse;font-size:8.8px"><tr style="background:#065f46;color:#fff"><th style="padding:6px;text-align:left">Type</th><th style="text-align:left">Topic / Dept</th><th style="text-align:left">Owner</th><th>Status</th><th style="text-align:right">Age/SLA</th></tr>' + followRows + '</table>'
+            + '</div></div>'
+            + '<div style="display:grid;grid-template-columns:1.1fr .9fr;gap:12px;margin-bottom:12px">'
+            + '<div style="border:1px solid #d1fae5;background:#f0fdf4;border-radius:12px;padding:13px">'
+            + '<div style="font-size:12px;font-weight:900;color:#065f46;margin-bottom:6px">ข้อเสนอแนะสำหรับการติดตาม / Follow-up Notes</div>'
+            + '<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:10px;font-size:9.6px;color:#334155;line-height:1.55">'
+            + '<div><b style="color:#dc2626">1. High Risk</b><br>ติดตามหัวข้อ Critical/High ที่ยังไม่มี response ก่อนเป็นลำดับแรก</div>'
+            + '<div><b style="color:#d97706">2. Approval Aging</b><br>เร่ง review response ที่ pending นานเกิน 3-7 วัน</div>'
+            + '<div><b style="color:#0f766e">3. Sharing Loop</b><br>ใช้ผล response เพื่อสรุป lesson learned และ feedback กลับส่วนงาน</div>'
+            + '</div></div>'
+            + '<div style="border:1px solid #e2e8f0;border-radius:12px;padding:13px;background:#fff">'
+            + '<div style="font-size:12px;font-weight:900;color:#065f46;margin-bottom:8px">Certification Summary</div>'
+            + '<div style="font-size:9.8px;color:#475569;line-height:1.65">รายงานนี้สรุปผล Yokoten ตาม scope ปี ' + year + ' โดยคง targeted-department filtering, response status, approval aging และ risk level ของข้อมูลจริงในระบบ</div>'
+            + '</div></div>'
+            + '<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;margin-top:6px">'
+            + approvalBox('Prepared By') + approvalBox('Reviewed By') + approvalBox('Approved By')
+            + '</div>'
+            + '</div>'
+            + footerHtml(2)
+        );
+        showLoading('กำลังสร้าง PDF...');
+        await document.fonts.ready;
+        await new Promise(r => setTimeout(r, 200));
+        try {
+            const { jsPDF } = window.jspdf;
+            const pdf = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
+            for (const [i, el] of [p1, p2].entries()) {
+                const canvas = await window.html2canvas(el, {
+                    scale: 1.7,
+                    useCORS: true,
+                    logging: false,
+                    backgroundColor: '#ffffff',
+                    windowWidth: 794,
+                });
+                if (i > 0) pdf.addPage();
+                pdf.addImage(canvas.toDataURL('image/jpeg', 0.94), 'JPEG', 0, 0, 210, 297);
+            }
+            pdf.save('Yokoten-Report-' + year + '-' + pad(now.getMonth() + 1) + pad(now.getDate()) + '.pdf');
+            showToast('สร้าง PDF สำเร็จ (2 หน้า)', 'success');
+        } finally {
+            pages.forEach(el => el?.parentNode?.removeChild(el));
+            hideLoading();
+        }
+        return;
+    }
 
     // ── Shared page constants ─────────────────────────────────────────────────
-    const PAGE_S = K + 'width:794px;height:1122px;overflow:hidden;background:white;box-sizing:border-box;display:flex;flex-direction:column';
+    const PAGE_S = K + 'width:794px;height:1122px;overflow:hidden;background:white;box-sizing:border-box;display:flex;flex-direction:column;color:#1e293b;font-size:11px';
 
-    const PAGE_FOOTER = '<div style="height:32px;background:linear-gradient(135deg,#064e3b,#0d9488);display:flex;align-items:center;justify-content:space-between;padding:0 36px;flex-shrink:0">'
-        + '<span style="' + K + 'color:rgba(255,255,255,.65);font-size:8px">TSH Safety Core Activity System · รายงานสร้างโดยระบบอัตโนมัติ</span>'
-        + '<span style="' + K + 'color:rgba(255,255,255,.65);font-size:8px">' + docNo + ' · ประจำปี ' + year + '</span>'
+    const PAGE_FOOTER = '<div style="margin-top:auto;padding:8px 28px;background:#f8fafc;border-top:1px solid #e2e8f0;color:#64748b;display:flex;align-items:center;justify-content:space-between;flex-shrink:0">'
+        + '<span style="' + K + 'font-size:8.8px">Yokoten Report · Thai Summit Harness Co., Ltd.</span>'
+        + '<span style="' + K + 'font-size:8.8px">' + docNo + ' · ' + _esc(generatedBy) + '</span>'
         + '</div>';
 
-    const HEADER_BLOCK = '<div style="background:linear-gradient(135deg,#064e3b 0%,#065f46 55%,#0d9488 100%);padding:22px 36px 18px;position:relative;overflow:hidden;flex-shrink:0">'
-        + '<div style="position:absolute;top:-50px;right:-50px;width:180px;height:180px;border-radius:50%;background:rgba(255,255,255,.05)"></div>'
+    const HEADER_BLOCK = '<div style="background:#065f46;color:#fff;padding:18px 28px;position:relative;overflow:hidden;flex-shrink:0">'
+        + '<div style="display:none"></div>'
         + '<div style="position:relative;z-index:1">'
         + '<div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:14px">'
         + '<div>'
@@ -3089,9 +6581,12 @@ async function exportYokotenPDF() {
         + '<div style="text-align:right">'
         + '<div style="' + K + 'color:rgba(255,255,255,.45);font-size:8.5px;margin-bottom:2px">เลขที่เอกสาร</div>'
         + '<div style="' + K + 'color:white;font-size:11px;font-weight:700">' + docNo + '</div>'
+        + '<div style="' + K + 'color:rgba(255,255,255,.45);font-size:8.5px;margin-top:5px;margin-bottom:2px">Classification</div>'
+        + '<div style="' + K + 'color:#bbf7d0;font-size:9px;font-weight:700">Internal Use Only</div>'
         + '<div style="' + K + 'color:rgba(255,255,255,.45);font-size:8.5px;margin-top:5px;margin-bottom:2px">วันที่สร้างรายงาน</div>'
         + '<div style="' + K + 'color:rgba(255,255,255,.65);font-size:10px">' + dateStr + '</div>'
         + '</div></div>'
+        + '<div style="' + K + 'color:rgba(255,255,255,.68);font-size:9px;margin-bottom:10px">' + _esc(scopeLabel) + '</div>'
         + '<div style="display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:8px">'
         + '<div style="background:rgba(255,255,255,.12);border-radius:10px;padding:10px 12px;text-align:center"><div style="' + K + 'color:white;font-size:20px;font-weight:700">' + totalTopics + '</div><div style="' + K + 'color:rgba(255,255,255,.55);font-size:9px;margin-top:2px">หัวข้อ Yokoten</div></div>'
         + '<div style="background:rgba(255,255,255,.12);border-radius:10px;padding:10px 12px;text-align:center"><div style="' + K + 'color:white;font-size:20px;font-weight:700">' + totalDepts + '</div><div style="' + K + 'color:rgba(255,255,255,.55);font-size:9px;margin-top:2px">ส่วนงานทั้งหมด</div></div>'
@@ -3100,7 +6595,72 @@ async function exportYokotenPDF() {
         + '</div></div></div>';
 
     // ── Dept table helpers ────────────────────────────────────────────────────
-    const THEAD = '<thead><tr style="background:linear-gradient(135deg,#064e3b,#0d9488)">'
+    const healthColor = brief.health.color || '#059669';
+    const boardMetric = (value, label, suffix, color) =>
+        '<div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:12px;padding:14px 12px;text-align:center">'
+        + '<div style="' + K + 'font-size:24px;font-weight:800;color:' + color + ';line-height:1">' + value + suffix + '</div>'
+        + '<div style="' + K + 'font-size:8.5px;color:#64748b;margin-top:6px;font-weight:600">' + label + '</div>'
+        + '</div>';
+    const pdfDeadlineText = daysLeft => {
+        if (daysLeft === 999) return 'No deadline';
+        if (daysLeft < 0) return 'Overdue ' + Math.abs(daysLeft) + 'd';
+        if (daysLeft === 0) return 'Due today';
+        return 'Due in ' + daysLeft + 'd';
+    };
+    const highRiskRowsPdf = highRiskMissing.slice(0, 8).map(item => {
+        const title = (item.topic.Title || _htmlToText(item.topic.TopicDescription) || '-').slice(0, 42);
+        const riskColor = item.topic.RiskLevel === 'Critical' ? '#dc2626' : '#ea580c';
+        return '<tr style="border-bottom:1px solid #f1f5f9">'
+            + '<td style="' + K + 'padding:7px 8px;font-size:8.5px;color:#1e293b;font-weight:600">' + _esc(title) + '</td>'
+            + '<td style="' + K + 'padding:7px 8px;font-size:8.5px;color:#64748b">' + _esc(item.dept || '-') + '</td>'
+            + '<td style="' + K + 'padding:7px 8px;font-size:8px;text-align:center;color:' + riskColor + ';font-weight:800">' + (item.topic.RiskLevel || '-') + '</td>'
+            + '<td style="' + K + 'padding:7px 8px;font-size:8px;text-align:right;color:#64748b">' + pdfDeadlineText(item.daysLeft) + '</td>'
+            + '</tr>';
+    }).join('');
+    const pendingRowsPdf = agingPending.slice(0, 8).map(r => {
+        const title = (r.topic?.Title || r.Title || r.TopicTitle || r.YokotenID || '-').slice(0, 42);
+        return '<tr style="border-bottom:1px solid #f1f5f9">'
+            + '<td style="' + K + 'padding:7px 8px;font-size:8.5px;color:#1e293b;font-weight:600">' + _esc(title) + '</td>'
+            + '<td style="' + K + 'padding:7px 8px;font-size:8.5px;color:#64748b">' + _esc(r.Department || '-') + '</td>'
+            + '<td style="' + K + 'padding:7px 8px;font-size:8px;color:#64748b">' + _esc(r.EmployeeName || r.EmployeeID || '-') + '</td>'
+            + '<td style="' + K + 'padding:7px 8px;font-size:8px;text-align:right;color:' + (r.ageDays >= 7 ? '#dc2626' : r.ageDays >= 3 ? '#d97706' : '#059669') + ';font-weight:800">' + r.ageDays + 'd</td>'
+            + '</tr>';
+    }).join('');
+    const BOARD_PAGE = '<div style="' + PAGE_S + '">'
+        + '<div style="flex:1;min-height:0">'
+        + HEADER_BLOCK
+        + '<div style="padding:22px 36px 0">'
+        + '<div style="border:1px solid #e2e8f0;border-radius:14px;padding:16px 18px;background:#ffffff;margin-bottom:14px">'
+        + '<div style="display:flex;justify-content:space-between;align-items:flex-start;gap:16px">'
+        + '<div style="min-width:0"><div style="' + K + 'font-size:13px;font-weight:800;color:#0f172a;margin-bottom:5px">Executive Board Snapshot</div>'
+        + '<div style="' + K + 'font-size:10px;color:#475569;line-height:1.65">' + _esc(brief.briefText) + '</div></div>'
+        + '<div style="' + K + 'font-size:10px;font-weight:800;color:' + healthColor + ';border:1px solid ' + healthColor + '33;background:' + healthColor + '12;border-radius:999px;padding:7px 12px;white-space:nowrap">' + brief.health.label + '</div>'
+        + '</div></div>'
+        + '<div style="display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:9px;margin-bottom:16px">'
+        + boardMetric(brief.coverage, 'Response coverage', '%', brief.coverage >= 85 ? '#059669' : brief.coverage >= 60 ? '#d97706' : '#dc2626')
+        + boardMetric(brief.highRiskCoverage, 'High-risk coverage', '%', brief.highRiskCoverage >= 90 ? '#059669' : brief.highRiskCoverage >= 75 ? '#d97706' : '#dc2626')
+        + boardMetric(brief.overdueGaps, 'Overdue gaps', '', brief.overdueGaps ? '#dc2626' : '#059669')
+        + boardMetric(brief.oldestPending, 'Oldest pending', 'd', brief.oldestPending >= 7 ? '#dc2626' : brief.oldestPending >= 3 ? '#d97706' : '#059669')
+        + '</div>'
+        + '<div style="display:grid;grid-template-columns:1fr 1fr;gap:14px">'
+        + '<div><div style="' + K + 'font-size:9.5px;font-weight:800;color:#334155;margin-bottom:7px">High/Critical Gaps</div>'
+        + '<table style="width:100%;border-collapse:collapse"><thead><tr style="background:#f8fafc">'
+        + '<th style="' + K + 'padding:6px 8px;font-size:7.5px;color:#94a3b8;text-align:left">Topic</th>'
+        + '<th style="' + K + 'padding:6px 8px;font-size:7.5px;color:#94a3b8;text-align:left">Dept</th>'
+        + '<th style="' + K + 'padding:6px 8px;font-size:7.5px;color:#94a3b8;text-align:center">Risk</th>'
+        + '<th style="' + K + 'padding:6px 8px;font-size:7.5px;color:#94a3b8;text-align:right">SLA</th>'
+        + '</tr></thead><tbody>' + (highRiskRowsPdf || '<tr><td colspan="4" style="' + K + 'padding:22px;text-align:center;color:#059669;font-size:9px;font-weight:700">No high-risk response gaps.</td></tr>') + '</tbody></table></div>'
+        + '<div><div style="' + K + 'font-size:9.5px;font-weight:800;color:#334155;margin-bottom:7px">Approval Aging</div>'
+        + '<table style="width:100%;border-collapse:collapse"><thead><tr style="background:#f8fafc">'
+        + '<th style="' + K + 'padding:6px 8px;font-size:7.5px;color:#94a3b8;text-align:left">Topic</th>'
+        + '<th style="' + K + 'padding:6px 8px;font-size:7.5px;color:#94a3b8;text-align:left">Dept</th>'
+        + '<th style="' + K + 'padding:6px 8px;font-size:7.5px;color:#94a3b8;text-align:left">Responder</th>'
+        + '<th style="' + K + 'padding:6px 8px;font-size:7.5px;color:#94a3b8;text-align:right">Age</th>'
+        + '</tr></thead><tbody>' + (pendingRowsPdf || '<tr><td colspan="4" style="' + K + 'padding:22px;text-align:center;color:#059669;font-size:9px;font-weight:700">No pending approvals.</td></tr>') + '</tbody></table></div>'
+        + '</div>'
+        + '</div></div>' + PAGE_FOOTER + '</div>';
+
+    const THEAD = '<thead><tr style="background:#065f46">'
         + '<th style="' + K + 'padding:7px 8px;color:rgba(255,255,255,.9);font-size:9px;text-align:center;width:24px">#</th>'
         + '<th style="' + K + 'padding:7px 8px;color:rgba(255,255,255,.9);font-size:9px;text-align:left">ส่วนงาน</th>'
         + '<th style="' + K + 'padding:7px 8px;color:rgba(255,255,255,.9);font-size:9px;text-align:center">ตอบ</th>'
@@ -3141,7 +6701,7 @@ async function exportYokotenPDF() {
         + '<span style="' + K + 'font-size:9px;color:#94a3b8">' + docNo + '</span></div>';
 
     // ── Build data pages ──────────────────────────────────────────────────────
-    const pageHTMLs = [];
+    const pageHTMLs = [BOARD_PAGE];
     const ROWS_P1   = 22;
     const ROWS_FULL = 28;
     const chunks = [{ rows: sorted.slice(0, ROWS_P1), isFirst: true, startIdx: 0 }];
@@ -3167,18 +6727,8 @@ async function exportYokotenPDF() {
         }
     });
 
-    // ── Summary page ──────────────────────────────────────────────────────────
-    const barRowsHTML = sorted.map(d => {
-        const pc = pctCol(d.completionPct);
-        return '<div style="display:flex;align-items:center;gap:5px;margin-bottom:3.5px">'
-            + '<div style="width:115px;font-size:8px;color:#475569;text-align:right;flex-shrink:0;overflow:hidden;white-space:nowrap;text-overflow:ellipsis">' + d.department + '</div>'
-            + '<div style="flex:1;height:7px;background:#f1f5f9;border-radius:4px;overflow:hidden">'
-            + '<div style="height:100%;width:' + d.completionPct + '%;background:' + pc + ';border-radius:4px"></div></div>'
-            + '<span style="' + K + 'font-size:7.5px;font-weight:700;color:' + pc + ';width:24px;flex-shrink:0">' + d.completionPct + '%</span>'
-            + '</div>';
-    }).join('');
-
-    const topicRowsHTML = topics.map(t => {
+    // ── Topic register + approval page ───────────────────────────────────────
+    const topicRegisterRows = topics.map(t => {
         const targeted = _getTopicTargetedDepts(deptSummary, t);
         const deptResp = targeted.filter(d => d.topicBreakdown.some(tb => tb.YokotenID === t.YokotenID && tb.responded)).length;
         const tPct   = targeted.length > 0 ? Math.round(deptResp * 100 / targeted.length) : 0;
@@ -3186,61 +6736,75 @@ async function exportYokotenPDF() {
         const rColors = { Critical: '#ef4444', High: '#f97316', Medium: '#f59e0b', Low: '#10b981' };
         const rColor  = rColors[t.RiskLevel] || '#94a3b8';
         const titleRaw = t.Title || _htmlToText(t.TopicDescription) || '';
-        const title    = titleRaw.slice(0, 30) + (titleRaw.length > 30 ? '…' : '');
-        return '<tr style="border-bottom:1px solid #f1f5f9">'
-            + '<td style="' + K + 'padding:5px 8px;font-size:8.5px;color:#1e293b">' + title + '</td>'
-            + '<td style="padding:5px 6px;text-align:center"><span style="' + K + 'background:' + rColor + '20;color:' + rColor + ';font-size:7.5px;font-weight:700;padding:2px 6px;border-radius:10px">' + (t.RiskLevel || '—') + '</span></td>'
-            + '<td style="' + K + 'padding:5px 6px;font-size:8.5px;font-weight:700;color:' + tColor + ';text-align:center">' + tPct + '%</td>'
-            + '<td style="' + K + 'padding:5px 6px;font-size:8px;color:#94a3b8;text-align:center">' + deptResp + '/' + targeted.length + '</td>'
+        return { t, targeted, deptResp, tPct, tColor, rColor, titleRaw };
+    });
+    const topicThead = '<thead><tr style="background:#065f46">'
+        + '<th style="' + K + 'padding:7px 8px;color:#fff;font-size:8.5px;text-align:center;width:28px">#</th>'
+        + '<th style="' + K + 'padding:7px 8px;color:#fff;font-size:8.5px;text-align:left">Topic</th>'
+        + '<th style="' + K + 'padding:7px 8px;color:#fff;font-size:8.5px;text-align:center;width:74px">Risk</th>'
+        + '<th style="' + K + 'padding:7px 8px;color:#fff;font-size:8.5px;text-align:center;width:78px">Target</th>'
+        + '<th style="' + K + 'padding:7px 8px;color:#fff;font-size:8.5px;text-align:center;width:70px">Response</th>'
+        + '<th style="' + K + 'padding:7px 8px;color:#fff;font-size:8.5px;text-align:left;width:116px">Progress</th>'
+        + '</tr></thead>';
+    const topicRowHtml = (item, idx) => {
+        const title = item.titleRaw.slice(0, 58) + (item.titleRaw.length > 58 ? '...' : '');
+        const targetLabel = item.targeted.length === deptSummary.length ? 'All depts' : item.targeted.length + ' depts';
+        return '<tr style="background:' + (idx % 2 ? '#fff' : '#f8fafc') + ';border-bottom:1px solid #e2e8f0">'
+            + '<td style="' + K + 'padding:7px 8px;font-size:8.5px;color:#64748b;text-align:center">' + (idx + 1) + '</td>'
+            + '<td style="' + K + 'padding:7px 8px;font-size:8.8px;color:#1e293b;font-weight:700;line-height:1.35">' + _esc(title || '-') + '</td>'
+            + '<td style="padding:7px 8px;text-align:center"><span style="' + K + 'background:' + item.rColor + '1f;color:' + item.rColor + ';font-size:7.5px;font-weight:800;padding:2px 7px;border-radius:999px">' + _esc(item.t.RiskLevel || '-') + '</span></td>'
+            + '<td style="' + K + 'padding:7px 8px;font-size:8px;color:#64748b;text-align:center">' + _esc(targetLabel) + '</td>'
+            + '<td style="' + K + 'padding:7px 8px;font-size:8.5px;font-weight:800;color:' + item.tColor + ';text-align:center">' + item.deptResp + '/' + item.targeted.length + '</td>'
+            + '<td style="' + K + 'padding:7px 8px"><div style="display:flex;align-items:center;gap:5px"><div style="flex:1;height:6px;background:#e2e8f0;border-radius:4px;overflow:hidden"><div style="height:100%;width:' + item.tPct + '%;background:' + item.tColor + ';border-radius:4px"></div></div><span style="' + K + 'font-size:8px;font-weight:800;color:' + item.tColor + ';width:28px;text-align:right">' + item.tPct + '%</span></div></td>'
             + '</tr>';
-    }).join('');
+    };
+    const topicChunks = [];
+    for (let i = 0; i < topicRegisterRows.length; i += 22) {
+        topicChunks.push(topicRegisterRows.slice(i, i + 22));
+    }
+    topicChunks.forEach((chunk, chunkIdx) => {
+        pageHTMLs.push('<div style="' + PAGE_S + '">'
+            + '<div style="flex:1;min-height:0">'
+            + (chunkIdx === 0 ? HEADER_BLOCK : CONT_LABEL)
+            + '<div style="' + K + 'padding:10px 36px 0;display:flex;justify-content:space-between;align-items:center">'
+            + '<span style="' + K + 'font-size:10px;font-weight:800;color:#065f46;text-transform:uppercase;letter-spacing:.04em">Topic Register</span>'
+            + '<span style="' + K + 'font-size:9px;color:#64748b">Items ' + (chunkIdx * 22 + 1) + '-' + (chunkIdx * 22 + chunk.length) + ' / ' + topicRegisterRows.length + '</span>'
+            + '</div>'
+            + '<div style="padding:8px 36px 0"><table style="width:100%;border-collapse:collapse;border:1px solid #e2e8f0">'
+            + topicThead + '<tbody>' + chunk.map((item, j) => topicRowHtml(item, chunkIdx * 22 + j)).join('') + '</tbody></table></div>'
+            + '</div>' + PAGE_FOOTER + '</div>');
+    });
 
-    pageHTMLs.push('<div style="' + K + 'width:794px;height:1122px;background:white;box-sizing:border-box;display:flex;flex-direction:column;overflow:hidden">'
-        + '<div style="background:linear-gradient(135deg,#064e3b 0%,#065f46 55%,#0d9488 100%);padding:28px 60px 24px;position:relative;overflow:hidden;flex-shrink:0">'
-        + '<div style="position:absolute;top:-40px;right:-40px;width:160px;height:160px;border-radius:50%;background:rgba(255,255,255,.05)"></div>'
-        + '<div style="position:relative;z-index:1">'
-        + '<div style="display:inline-flex;align-items:center;gap:5px;background:rgba(255,255,255,.15);border-radius:20px;padding:3px 10px;margin-bottom:10px">'
-        + '<span style="width:5px;height:5px;background:#34d399;border-radius:50%;display:inline-block"></span>'
-        + '<span style="' + K + 'color:rgba(255,255,255,.85);font-size:9px;font-weight:600;letter-spacing:1.2px">SUMMARY REPORT</span>'
+    const approvalBox = label => '<div style="height:88px;border:1px solid #cbd5e1;border-radius:8px;background:#fff;padding:12px;text-align:center">'
+        + '<div style="height:34px;border-bottom:1px solid #94a3b8;margin:0 12px 8px"></div>'
+        + '<div style="' + K + 'font-size:9px;font-weight:800;color:#1e293b">' + label + '</div>'
+        + '<div style="' + K + 'font-size:8px;color:#94a3b8;margin-top:3px">Date: ____ / ____ / ____</div>'
+        + '</div>';
+    pageHTMLs.push('<div style="' + PAGE_S + '">'
+        + '<div style="flex:1;min-height:0">'
+        + HEADER_BLOCK
+        + '<div style="padding:24px 44px 0">'
+        + '<div style="' + K + 'font-size:13px;font-weight:900;color:#065f46;border-bottom:2px solid #d1fae5;padding-bottom:7px;margin-bottom:14px">Summary / Approval</div>'
+        + '<div style="border:1px solid #e2e8f0;border-radius:10px;padding:16px;background:#f8fafc;margin-bottom:16px">'
+        + '<div style="' + K + 'font-size:10px;font-weight:900;color:#334155;margin-bottom:7px">Certification Summary</div>'
+        + '<div style="' + K + 'font-size:10px;color:#475569;line-height:1.75">' + _esc(brief.briefText) + '</div>'
         + '</div>'
-        + '<div style="display:flex;justify-content:space-between;align-items:flex-end">'
-        + '<div><div style="' + K + 'color:white;font-size:22px;font-weight:700;line-height:1.2;margin-bottom:4px">สรุปผลรายงาน Yokoten</div>'
-        + '<div style="' + K + 'color:rgba(255,255,255,.65);font-size:11px">Thai Summit Harness Co., Ltd. · ' + dateStr + '</div></div>'
-        + '<div style="text-align:right"><div style="' + K + 'color:rgba(255,255,255,.45);font-size:8px;margin-bottom:2px">เลขที่เอกสาร</div>'
-        + '<div style="' + K + 'color:white;font-size:11px;font-weight:700">' + docNo + '</div></div>'
-        + '</div></div></div>'
-        // Content
-        + '<div style="flex:1;padding:30px 60px;display:flex;flex-direction:column;gap:20px;min-height:0;overflow:hidden">'
-        // KPI row
-        + '<div style="display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:10px;flex-shrink:0">'
-        + '<div style="background:#f0fdf4;border-radius:12px;padding:16px;text-align:center;border:1px solid #d1fae5"><div style="' + K + 'font-size:28px;font-weight:700;color:#059669">' + fullDepts + '</div><div style="' + K + 'font-size:8.5px;color:#6ee7b7;margin-top:3px">ตอบครบทุกหัวข้อ</div></div>'
-        + '<div style="background:#f8fafc;border-radius:12px;padding:16px;text-align:center;border:1px solid #e2e8f0"><div style="' + K + 'font-size:28px;font-weight:700;color:#475569">' + totalDepts + '</div><div style="' + K + 'font-size:8.5px;color:#94a3b8;margin-top:3px">ส่วนงานทั้งหมด</div></div>'
-        + '<div style="background:#fffbeb;border-radius:12px;padding:16px;text-align:center;border:1px solid #fef3c7"><div style="' + K + 'font-size:28px;font-weight:700;color:#d97706">' + pendingApprTot + '</div><div style="' + K + 'font-size:8.5px;color:#fbbf24;margin-top:3px">รออนุมัติ</div></div>'
-        + '<div style="background:linear-gradient(135deg,#064e3b,#0d9488);border-radius:12px;padding:16px;text-align:center"><div style="' + K + 'font-size:28px;font-weight:700;color:#6ee7b7">' + overallPct + '%</div><div style="' + K + 'font-size:8.5px;color:rgba(255,255,255,.65);margin-top:3px">ความคืบหน้ารวม</div></div>'
+        + '<table style="width:100%;border-collapse:collapse;border:1px solid #e2e8f0;margin-bottom:18px">'
+        + '<thead><tr style="background:#065f46;color:#fff">'
+        + '<th style="' + K + 'padding:8px;text-align:left;font-size:8.5px">Metric</th>'
+        + '<th style="' + K + 'padding:8px;text-align:center;font-size:8.5px">Result</th>'
+        + '<th style="' + K + 'padding:8px;text-align:left;font-size:8.5px">Note</th>'
+        + '</tr></thead>'
+        + '<tbody>'
+        + '<tr><td style="' + K + 'padding:8px;border-bottom:1px solid #e2e8f0;font-weight:700">Overall completion</td><td style="' + K + 'padding:8px;border-bottom:1px solid #e2e8f0;text-align:center;font-weight:900;color:' + pctCol(overallPct) + '">' + overallPct + '%</td><td style="' + K + 'padding:8px;border-bottom:1px solid #e2e8f0;color:#64748b">' + fullDepts + ' of ' + totalDepts + ' departments completed all topics</td></tr>'
+        + '<tr><td style="' + K + 'padding:8px;border-bottom:1px solid #e2e8f0;font-weight:700">Pending approval</td><td style="' + K + 'padding:8px;border-bottom:1px solid #e2e8f0;text-align:center;font-weight:900;color:' + (pendingApprTot ? '#d97706' : '#059669') + '">' + pendingApprTot + '</td><td style="' + K + 'padding:8px;border-bottom:1px solid #e2e8f0;color:#64748b">Responses waiting for review</td></tr>'
+        + '<tr><td style="' + K + 'padding:8px;font-weight:700">High/Critical gaps</td><td style="' + K + 'padding:8px;text-align:center;font-weight:900;color:' + (highRiskMissing.length ? '#dc2626' : '#059669') + '">' + highRiskMissing.length + '</td><td style="' + K + 'padding:8px;color:#64748b">Open high-priority response gaps</td></tr>'
+        + '</tbody></table>'
+        + '<div style="' + K + 'font-size:10px;font-weight:900;color:#334155;margin-bottom:10px">Approval Signatures</div>'
+        + '<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:14px">'
+        + approvalBox('Prepared By') + approvalBox('Reviewed By') + approvalBox('Approved By')
         + '</div>'
-        // 2-col: bar chart visual + topic table
-        + '<div style="display:grid;grid-template-columns:1fr 1fr;gap:20px;flex:1;min-height:0;overflow:hidden">'
-        // Left: CSS bar chart
-        + '<div style="overflow:hidden">'
-        + '<div style="' + K + 'font-size:9.5px;font-weight:700;color:#64748b;letter-spacing:0.8px;text-transform:uppercase;margin-bottom:10px">ความคืบหน้ารายส่วนงาน</div>'
-        + barRowsHTML
-        + '</div>'
-        // Right: topic summary
-        + '<div>'
-        + '<div style="' + K + 'font-size:9.5px;font-weight:700;color:#64748b;letter-spacing:0.8px;text-transform:uppercase;margin-bottom:10px">สรุปรายหัวข้อ</div>'
-        + '<table style="width:100%;border-collapse:collapse">'
-        + '<thead><tr style="background:#f8fafc"><th style="' + K + 'padding:5px 8px;font-size:7.5px;color:#94a3b8;text-align:left;font-weight:600">หัวข้อ</th><th style="' + K + 'padding:5px 6px;font-size:7.5px;color:#94a3b8;text-align:center;font-weight:600">ระดับ</th><th style="' + K + 'padding:5px 6px;font-size:7.5px;color:#94a3b8;text-align:center;font-weight:600">%</th><th style="' + K + 'padding:5px 6px;font-size:7.5px;color:#94a3b8;text-align:center;font-weight:600">ตอบ</th></tr></thead>'
-        + '<tbody>' + topicRowsHTML + '</tbody>'
-        + '</table>'
-        + '</div>'
-        + '</div>'
-        + '</div>'
-        // Footer
-        + '<div style="padding:12px 60px;border-top:1px solid #e2e8f0;display:flex;justify-content:space-between;align-items:center;flex-shrink:0">'
-        + '<span style="' + K + 'font-size:7.5px;color:#94a3b8">TSH Safety Core Activity System · รายงานสร้างโดยระบบอัตโนมัติ</span>'
-        + '<span style="' + K + 'font-size:7.5px;color:#94a3b8">' + dateStr + ' · ' + docNo + '</span>'
-        + '</div>'
-        + '</div>');
+        + '</div></div>' + PAGE_FOOTER + '</div>');
 
     // ── Render ────────────────────────────────────────────────────────────────
     showLoading('กำลังสร้าง PDF...');
@@ -3273,7 +6837,7 @@ async function exportYokotenPDF() {
         for (let p = 1; p <= total; p++) {
             pdf.setPage(p);
             pdf.setFontSize(7.5); pdf.setTextColor(148, 163, 184);
-            pdf.text('หน้า ' + p + ' / ' + total, 200, 293, { align: 'right' });
+            pdf.text('Page ' + p + ' / ' + total, 200, 293, { align: 'right' });
         }
 
         const fname = 'Yokoten-Report-' + year + '-' + pad(now.getMonth() + 1) + pad(now.getDate()) + '.pdf';
@@ -3328,6 +6892,19 @@ function _sanitizeHtml(html) {
         .replace(/javascript:/gi, '');
 }
 
+function _validateYokotenFiles(files, maxFiles = YOK_MAX_FILES) {
+    const list = Array.from(files || []);
+    if (list.length > maxFiles) return `แนบไฟล์ได้สูงสุด ${maxFiles} ไฟล์ต่อรายการ`;
+    const invalid = list.find(f => {
+        const ext = String(f.name || '').split('.').pop().toLowerCase();
+        return !(YOK_ALLOWED_MIMES.has(f.type) || YOK_ALLOWED_EXTS.has(ext));
+    });
+    if (invalid) return `ประเภทไฟล์ไม่รองรับ: ${invalid.name}`;
+    const oversize = list.find(f => f.size > YOK_MAX_FILE_SIZE);
+    if (oversize) return `ไฟล์ ${oversize.name} มีขนาดเกิน 20 MB`;
+    return '';
+}
+
 /** Convert HTML to plain text (for card previews / truncation). */
 function _htmlToText(html) {
     if (!html) return '';
@@ -3351,7 +6928,32 @@ function _kpiCard(value, label, _color, iconPath, colorName) {
 
 function _parseTargetDepts(raw) {
     if (!raw) return [];
+    if (Array.isArray(raw)) return raw.map(v => String(v || '').trim()).filter(Boolean);
     try { return JSON.parse(raw); } catch { return []; }
+}
+
+function _parseTopicAttachments(topic) {
+    const raw = topic?.AttachmentUrl;
+    const fallbackName = topic?.AttachmentName || '';
+    if (!raw) return [];
+    if (Array.isArray(raw)) {
+        return raw.map(item => ({
+            url: String(item?.url || item?.FileURL || item || '').trim(),
+            name: String(item?.name || item?.FileName || fallbackName || '').trim(),
+        })).filter(item => item.url);
+    }
+    const text = String(raw || '').trim();
+    if (!text) return [];
+    try {
+        const parsed = JSON.parse(text);
+        if (Array.isArray(parsed)) {
+            return parsed.map(item => ({
+                url: String(item?.url || item?.FileURL || item || '').trim(),
+                name: String(item?.name || item?.FileName || fallbackName || '').trim(),
+            })).filter(item => item.url);
+        }
+    } catch (_) {}
+    return [{ url: text, name: fallbackName || text }];
 }
 
 function _urgency(deadline) {
@@ -3419,7 +7021,22 @@ function _fileIcon(mimeType) {
 function _spinner() {
     return `<div class="flex flex-col items-center justify-center py-20 text-slate-400">
         <div class="animate-spin rounded-full h-9 w-9 border-4 border-emerald-500 border-t-transparent mb-3"></div>
-        <p class="text-sm">กำลังโหลด...</p>
+        <p class="text-sm">Loading Yokoten... / กำลังโหลดข้อมูล</p>
+    </div>`;
+}
+
+function _errorState(title, message) {
+    return `<div class="ds-empty-state border border-red-100 bg-red-50/40">
+        <div class="w-16 h-16 rounded-2xl bg-red-100 text-red-500 flex items-center justify-center mx-auto mb-4">
+            <svg class="w-8 h-8" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01M5.07 19h13.86c1.54 0 2.5-1.67 1.73-3L13.73 4c-.77-1.33-2.69-1.33-3.46 0L3.34 16c-.77 1.33.19 3 1.73 3z"/>
+            </svg>
+        </div>
+        <p class="font-bold text-red-700">${_esc(title)}</p>
+        <p class="text-sm mt-1 text-red-600">${_esc(message || 'Please try again or contact administrator.')}</p>
+        <button type="button" class="mt-4 px-4 py-2 rounded-lg text-xs font-bold bg-white border border-red-200 text-red-700 hover:bg-red-50" onclick="window._yokRefresh?.()">
+            Retry / ลองใหม่
+        </button>
     </div>`;
 }
 

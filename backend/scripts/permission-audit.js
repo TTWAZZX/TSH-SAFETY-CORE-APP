@@ -15,10 +15,14 @@ const MUTATION = new Set(['post', 'put', 'patch', 'delete']);
 const USER_WORKFLOW_ALLOWLIST = new Set([
     'POST /api/login',
     'POST /api/register',
+    // Public registration-status lookup requires EmployeeID + ReferenceCode and is rate limited.
+    'POST /api/register/status',
     'POST /api/change-password',
     'POST /api/session/verify',
     'PUT /api/profile',
     'PUT /api/profile/employee-id',
+    // First-use Safety Unit gate validates the authenticated user's department scope in route.
+    'PUT /api/profile/safety-unit',
     'POST /api/policies/:id/acknowledge',
 
     // CCCF: user-owned forms; update/delete enforce owner-or-admin in route.
@@ -37,11 +41,45 @@ const USER_WORKFLOW_ALLOWLIST = new Set([
 
     // Reporting/activity submissions that normal users can create.
     'POST /api/hiyari',
+    // Direct signed PDF route checks AllowDirectSignedPdf on the selected assignment.
+    'POST /api/hiyari/direct-signed',
+    // Signed file route checks reporter, submitter, or admin ownership in route.
+    'POST /api/hiyari/:id/signed-file',
+    // Rejected-report resubmission checks report owner/submission scope or Admin in route.
+    'POST /api/hiyari/:id/replacement-excel',
     'POST /api/ky',
+    // KY video reactions are an authenticated user engagement workflow.
+    'POST /api/ky/:id/reaction',
+    'DELETE /api/ky/:id/reaction',
+    // Follow-up video upload checks activity owner/participant scope or Admin in route.
+    'POST /api/ky/:id/video',
     'POST /api/fourm/notices',
+    // 4M Action Plan create checks Notice creator or Admin ownership in route.
+    'POST /api/fourm/notices/:id/tasks',
     'POST /api/fourm/notices/:id/close',
+    // 4M Training Matrix checks Admin or same-department ownership in route.
+    'POST /api/fourm/training-curriculums',
+    'PUT /api/fourm/training-curriculums/:id',
+    'DELETE /api/fourm/training-curriculums/:id',
+    'POST /api/fourm/training-curriculums/:id/courses',
+    'PUT /api/fourm/training-courses/:id',
+    'DELETE /api/fourm/training-courses/:id',
+    'POST /api/fourm/training-courses/:id/assignments',
+    'PUT /api/fourm/training-assignments/:id',
+    'POST /api/fourm/training-assignments/:id/transfer',
+    'DELETE /api/fourm/training-assignments/:id',
+    // 4M curriculum-level employee scope checks Admin or same-department ownership in route.
+    'POST /api/fourm/training-curriculums/:id/assignments',
+    'DELETE /api/fourm/training-curriculum-assignments/:id',
+    'POST /api/fourm/training-curriculum-assignments/:id/transfer',
     'POST /api/yokoten/respond',
     'PUT /api/yokoten/respond/:id',
+
+    // Johnny AI: authenticated, user-scoped workflows. Conversations are resolved by UserID.
+    'POST /api/johnny/workflow-actions',
+    'DELETE /api/johnny/conversations/:id',
+    'POST /api/johnny/analyze-image',
+    'POST /api/johnny/chat',
 ]);
 
 function read(file) {
@@ -118,7 +156,7 @@ function parseRouterRoutes(fileName, text, mount) {
             key: `${method} ${route}`,
             admin: line.includes('isAdmin'),
             mountedAdmin: !!mount?.adminMounted,
-            inlineGuard: /req\.user\??\.(role|Role).*Admin|req\.user\??\.(role|Role)[\s\S]{0,80}Admin|isAdminUser/.test(snippet),
+            inlineGuard: /req\.user\??\.(role|Role).*Admin|req\.user\??\.(role|Role)[\s\S]{0,80}Admin|isAdminUser|requirePermission\s*\(\s*req\s*,\s*res\s*,|canReviewPatrolLeave\s*\(\s*req\s*\)/.test(snippet),
         });
     });
     return rows;

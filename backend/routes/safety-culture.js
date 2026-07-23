@@ -6,7 +6,7 @@ const express = require('express');
 const router  = express.Router();
 const db      = require('../db');
 const { isAdmin } = require('../middleware/auth');
-const { randomUUID } = require('crypto');
+const { randomUUID, createHash } = require('crypto');
 
 const DEFAULT_PRINCIPLES = [
     { id: 'sc-p-01', sort: 1, title: 'เดินบน Walk Way ที่บริษัทจัดให้',
@@ -23,9 +23,28 @@ const DEFAULT_PRINCIPLES = [
       description: 'พนักงานต้องสวมใส่อุปกรณ์ป้องกันภัยส่วนบุคคล (PPE) ตามที่กำหนดในแต่ละพื้นที่การทำงาน ใช้ PPE Inspection Checklist Form แยก' },
     { id: 'sc-p-07', sort: 7, title: 'แยกขยะถูกต้องตามมาตรฐานของบริษัท',
       description: 'พนักงานต้องแยกขยะตามประเภทที่บริษัทกำหนด เพื่อรักษาความสะอาดและลดผลกระทบต่อสิ่งแวดล้อมขององค์กร' },
+    { id: 'sc-p-08', sort: 8, title: 'ภาพรวม 7 วัฒนธรรมความปลอดภัยและสิ่งแวดล้อม',
+      description: 'สื่อสรุปรวม 7 วัฒนธรรมความปลอดภัยและสิ่งแวดล้อม ใช้สำหรับประชาสัมพันธ์ ทบทวน และสื่อสารภาพรวมให้พนักงานเข้าใจในทิศทางเดียวกัน' },
 ];
 
 let tableReady = false;
+
+function parseIdList(raw) {
+    if (Array.isArray(raw)) return [...new Set(raw.map(v => String(v || '').trim()).filter(Boolean))];
+    if (typeof raw === 'string') {
+        try {
+            const parsed = JSON.parse(raw);
+            return Array.isArray(parsed) ? [...new Set(parsed.map(v => String(v || '').trim()).filter(Boolean))] : [];
+        } catch {
+            return raw.split(',').map(s => s.trim()).filter(Boolean);
+        }
+    }
+    return [];
+}
+
+function violationLockName(employeeId) {
+    return `sc_ppe_v_${createHash('sha256').update(String(employeeId || '')).digest('hex').slice(0, 32)}`;
+}
 
 async function ensureTables() {
     if (tableReady) return;
@@ -39,9 +58,11 @@ async function ensureTables() {
             ImageUrl       TEXT,
             AttachmentUrl  TEXT,
             AttachmentName VARCHAR(255),
+            IsFeatured     TINYINT(1)   NOT NULL DEFAULT 0,
             UpdatedAt      TIMESTAMP    DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
         )
     `);
+    await db.query(`ALTER TABLE SC_Principles ADD COLUMN IsFeatured TINYINT(1) NOT NULL DEFAULT 0 AFTER AttachmentName`).catch(() => {});
 
     const [existing] = await db.query('SELECT COUNT(*) AS cnt FROM SC_Principles');
     if (existing[0].cnt === 0) {
@@ -51,6 +72,16 @@ async function ensureTables() {
                 [p.id, p.sort, p.title, p.description]
             );
         }
+    }
+    for (const p of DEFAULT_PRINCIPLES) {
+        await db.query(
+            `INSERT IGNORE INTO SC_Principles (PrincipleID, SortOrder, Title, Description) VALUES (?,?,?,?)`,
+            [p.id, p.sort, p.title, p.description]
+        );
+    }
+    const [featuredRows] = await db.query('SELECT PrincipleID FROM SC_Principles WHERE IsFeatured = 1 ORDER BY SortOrder, PrincipleID');
+    if (featuredRows.length > 1) {
+        await db.query('UPDATE SC_Principles SET IsFeatured = 0 WHERE IsFeatured = 1 AND PrincipleID <> ?', [featuredRows[0].PrincipleID]);
     }
 
     await db.query(`
@@ -130,23 +161,47 @@ async function ensureTables() {
             AssessmentID VARCHAR(36)  NOT NULL,
             PointNo      TINYINT      NOT NULL,
             TopicKey     VARCHAR(10)  NOT NULL,
+            LocationID   VARCHAR(36)  DEFAULT NULL,
+            LocationName VARCHAR(200) DEFAULT NULL,
             TotalPeople  INT          NOT NULL DEFAULT 0,
             ComplyPeople INT          NOT NULL DEFAULT 0,
             Pct          DECIMAL(5,2) DEFAULT NULL,
             KEY idx_asmpt (AssessmentID),
-            KEY idx_topic (TopicKey)
+            KEY idx_topic (TopicKey),
+            KEY idx_location (LocationID)
         )
     `).catch(() => {});
+    await db.query(`ALTER TABLE SC_Assessment_Points ADD COLUMN LocationID VARCHAR(36) DEFAULT NULL AFTER TopicKey`).catch(() => {});
+    await db.query(`ALTER TABLE SC_Assessment_Points ADD COLUMN LocationName VARCHAR(200) DEFAULT NULL AFTER LocationID`).catch(() => {});
+    await db.query(`ALTER TABLE SC_Assessment_Points ADD INDEX idx_location (LocationID)`).catch(() => {});
+
+    await db.query(`
+        CREATE TABLE IF NOT EXISTS SC_Assessment_Locations (
+            LocationID    VARCHAR(36)  PRIMARY KEY,
+            LocationName  VARCHAR(200) NOT NULL,
+            LocationGroup VARCHAR(50)  NOT NULL DEFAULT 'walkway',
+            AppliesTo     VARCHAR(50)  NOT NULL DEFAULT 'T1-T5',
+            SortOrder     INT          NOT NULL DEFAULT 99,
+            IsActive      TINYINT(1)   NOT NULL DEFAULT 1,
+            CreatedAt     DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            UpdatedAt     DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+            KEY idx_active_group (IsActive, LocationGroup, SortOrder)
+        )
+    `);
 
     await db.query(`
         CREATE TABLE IF NOT EXISTS SC_PPE_Items (
             ItemID    VARCHAR(36)  PRIMARY KEY,
             ItemName  VARCHAR(100) NOT NULL,
+            Description TEXT,
+            ImageUrl  TEXT,
             SortOrder INT          NOT NULL DEFAULT 99,
             IsActive  TINYINT(1)   NOT NULL DEFAULT 1,
             CreatedAt DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP
         )
     `);
+    await db.query(`ALTER TABLE SC_PPE_Items ADD COLUMN Description TEXT DEFAULT NULL AFTER ItemName`).catch(() => {});
+    await db.query(`ALTER TABLE SC_PPE_Items ADD COLUMN ImageUrl TEXT DEFAULT NULL AFTER Description`).catch(() => {});
 
     const [itemCount] = await db.query('SELECT COUNT(*) AS cnt FROM SC_PPE_Items');
     if (itemCount[0].cnt === 0) {
@@ -240,10 +295,10 @@ async function ensureTables() {
     await db.query(`UPDATE SC_PPE_Inspection_Details SET Status='non-compliant' WHERE Status='Non-Compliant'`).catch(() => {});
     await db.query(`UPDATE SC_PPE_Inspection_Details SET Status='na'            WHERE Status='' OR Status IS NULL`).catch(() => {});
 
-    // CHECK constraint — enforced on TiDB ≥ 7.5; parsed but not enforced on older versions (still documents intent)
+    // CHECK constraint documents intent; enforcement depends on the MySQL/MariaDB version.
     await db.query(`ALTER TABLE SC_PPE_Inspection_Details ADD CONSTRAINT chk_ppe_status CHECK (Status IN ('compliant','non-compliant','na'))`).catch(() => {});
 
-    // FK: Details → Inspections (TiDB Cloud supports FK since 6.6; safe to attempt)
+    // FK: Details -> Inspections; safe to attempt on MySQL-compatible engines.
     await db.query(`ALTER TABLE SC_PPE_Inspection_Details ADD CONSTRAINT fk_ppeid FOREIGN KEY (InspectionID) REFERENCES SC_PPEInspections(InspectionID)`).catch(() => {});
     // FK: Violations → Inspections (nullable — only for linked violations)
     await db.query(`ALTER TABLE SC_PPE_Violations ADD CONSTRAINT fk_viol_insp FOREIGN KEY (InspectionID) REFERENCES SC_PPEInspections(InspectionID)`).catch(() => {});
@@ -295,29 +350,151 @@ function normalizeItemStatus(raw) {
     throw new Error(`ค่าสถานะ PPE ไม่ถูกต้อง: "${raw}"`);
 }
 
+function sendSafetyCultureError(res, err, fallback = 'เกิดข้อผิดพลาดในโมดูล Safety Culture กรุณาลองใหม่อีกครั้ง') {
+    console.error('[Safety Culture]', err);
+    res.status(500).json({ success: false, message: fallback });
+}
+
+function parseAssessmentPoints(rawPoints) {
+    if (!rawPoints) return [];
+    const pts = typeof rawPoints === 'string' ? JSON.parse(rawPoints) : rawPoints;
+    if (!Array.isArray(pts)) return [];
+    return pts.map(pt => {
+        const topicKey = String(pt.TopicKey || '').trim();
+        const pointNo = parseInt(pt.PointNo, 10);
+        const locationId = String(pt.LocationID || '').trim().substring(0, 36) || null;
+        const locationName = String(pt.LocationName || '').trim().substring(0, 200) || null;
+        const total = Math.max(0, parseInt(pt.TotalPeople, 10) || 0);
+        const comply = Math.max(0, parseInt(pt.ComplyPeople, 10) || 0);
+        if (!TOPIC_KEYS.includes(topicKey) || ![1, 2, 3].includes(pointNo)) return null;
+        if (comply > total) {
+            throw new Error(`จำนวนคนที่ปฏิบัติตามต้องไม่มากกว่าจำนวนทั้งหมด (${topicKey} จุดที่ ${pointNo})`);
+        }
+        const pct = total > 0 ? Math.round((comply / total) * 10000) / 100 : null;
+        return { TopicKey: topicKey, PointNo: pointNo, LocationID: locationId, LocationName: locationName, TotalPeople: total, ComplyPeople: comply, Pct: pct };
+    }).filter(Boolean);
+}
+
+function normalizeAssessmentLocation(body = {}) {
+    const name = String(body.LocationName || body.Name || '').trim();
+    if (!name) throw new Error('กรุณาระบุชื่อจุดตรวจ');
+    const group = String(body.LocationGroup || 'walkway').trim().substring(0, 50) || 'walkway';
+    const appliesTo = String(body.AppliesTo || (group === 'waste' ? 'T7' : 'T1-T5')).trim().substring(0, 50);
+    const sort = parseInt(body.SortOrder, 10);
+    const isActive = body.IsActive === false || body.IsActive === 0 || body.IsActive === '0' ? 0 : 1;
+    return {
+        LocationName: name.substring(0, 200),
+        LocationGroup: group,
+        AppliesTo: appliesTo || 'T1-T5',
+        SortOrder: Number.isFinite(sort) ? sort : 99,
+        IsActive: isActive,
+    };
+}
+
+// GET /api/safety-culture/assessment-locations
+router.get('/assessment-locations', async (req, res) => {
+    try {
+        const includeAll = String(req.query.all || '') === '1'
+            && String(req.user?.role || req.user?.Role || '').toLowerCase() === 'admin';
+        const [rows] = await db.query(
+            `SELECT * FROM SC_Assessment_Locations
+             ${includeAll ? '' : 'WHERE IsActive = 1'}
+             ORDER BY SortOrder, LocationGroup, LocationName`
+        );
+        res.json({ success: true, data: rows });
+    } catch (err) { sendSafetyCultureError(res, err, 'ไม่สามารถโหลดจุดตรวจ Safety Culture ได้'); }
+});
+
+// POST /api/safety-culture/assessment-locations (admin)
+router.post('/assessment-locations', isAdmin, async (req, res) => {
+    try {
+        await ensureTables();
+        const loc = normalizeAssessmentLocation(req.body);
+        const id = randomUUID();
+        await db.query(
+            `INSERT INTO SC_Assessment_Locations
+             (LocationID, LocationName, LocationGroup, AppliesTo, SortOrder, IsActive)
+             VALUES (?,?,?,?,?,?)`,
+            [id, loc.LocationName, loc.LocationGroup, loc.AppliesTo, loc.SortOrder, loc.IsActive]
+        );
+        res.json({ success: true, message: 'เพิ่มจุดตรวจสำเร็จ', id });
+    } catch (err) {
+        const status = err.message === 'กรุณาระบุชื่อจุดตรวจ' ? 400 : 500;
+        res.status(status).json({ success: false, message: status === 400 ? err.message : 'ไม่สามารถเพิ่มจุดตรวจ Safety Culture ได้' });
+    }
+});
+
+// PUT /api/safety-culture/assessment-locations/:id (admin)
+router.put('/assessment-locations/:id', isAdmin, async (req, res) => {
+    try {
+        await ensureTables();
+        const loc = normalizeAssessmentLocation(req.body);
+        const [result] = await db.query(
+            `UPDATE SC_Assessment_Locations
+             SET LocationName=?, LocationGroup=?, AppliesTo=?, SortOrder=?, IsActive=?
+             WHERE LocationID=?`,
+            [loc.LocationName, loc.LocationGroup, loc.AppliesTo, loc.SortOrder, loc.IsActive, req.params.id]
+        );
+        if (result.affectedRows === 0) return res.status(404).json({ success: false, message: 'ไม่พบจุดตรวจที่ต้องการแก้ไข' });
+        res.json({ success: true, message: 'อัปเดตจุดตรวจสำเร็จ' });
+    } catch (err) {
+        const status = err.message === 'กรุณาระบุชื่อจุดตรวจ' ? 400 : 500;
+        res.status(status).json({ success: false, message: status === 400 ? err.message : 'ไม่สามารถอัปเดตจุดตรวจ Safety Culture ได้' });
+    }
+});
+
+// DELETE /api/safety-culture/assessment-locations/:id (admin, soft inactive)
+router.delete('/assessment-locations/:id', isAdmin, async (req, res) => {
+    try {
+        await ensureTables();
+        const [result] = await db.query(
+            'UPDATE SC_Assessment_Locations SET IsActive = 0 WHERE LocationID = ?',
+            [req.params.id]
+        );
+        if (result.affectedRows === 0) return res.status(404).json({ success: false, message: 'ไม่พบจุดตรวจที่ต้องการปิดใช้งาน' });
+        res.json({ success: true, message: 'ปิดใช้งานจุดตรวจสำเร็จ' });
+    } catch (err) { sendSafetyCultureError(res, err, 'ไม่สามารถปิดใช้งานจุดตรวจ Safety Culture ได้'); }
+});
+
 // GET /api/safety-culture/principles
 router.get('/principles', async (req, res) => {
     try {
-        await ensureTables();
         const [rows] = await db.query('SELECT * FROM SC_Principles ORDER BY SortOrder');
         res.json({ success: true, data: rows });
-    } catch (err) {
-        res.status(500).json({ success: false, message: err.message });
-    }
+    } catch (err) { sendSafetyCultureError(res, err, 'ไม่สามารถโหลดข้อมูลหลักการ Safety Culture ได้'); }
 });
 
 // PUT /api/safety-culture/principles/:id (admin)
 router.put('/principles/:id', isAdmin, async (req, res) => {
+    let conn;
     try {
-        const { Title, Description, ImageUrl, AttachmentUrl, AttachmentName } = req.body;
+        await ensureTables();
+        const { Title, Description, ImageUrl, AttachmentUrl, AttachmentName, IsFeatured } = req.body;
         if (!Title) return res.status(400).json({ success: false, message: 'กรุณาระบุชื่อหัวข้อ' });
-        await db.query(
-            `UPDATE SC_Principles SET Title=?, Description=?, ImageUrl=?, AttachmentUrl=?, AttachmentName=? WHERE PrincipleID=?`,
-            [Title, Description || null, ImageUrl || null, AttachmentUrl || null, AttachmentName || null, req.params.id]
+        const featured = IsFeatured === true || IsFeatured === 1 || IsFeatured === '1' || IsFeatured === 'true' || IsFeatured === 'on';
+        conn = await db.getConnection();
+        await conn.beginTransaction();
+        await conn.query('SELECT PrincipleID FROM SC_Principles FOR UPDATE');
+        if (featured) {
+            await conn.query('UPDATE SC_Principles SET IsFeatured = 0');
+        }
+        const [result] = await conn.query(
+            `UPDATE SC_Principles SET Title=?, Description=?, ImageUrl=?, AttachmentUrl=?, AttachmentName=?, IsFeatured=? WHERE PrincipleID=?`,
+            [Title, Description || null, ImageUrl || null, AttachmentUrl || null, AttachmentName || null, featured ? 1 : 0, req.params.id]
         );
+        if (result.affectedRows === 0) {
+            await conn.rollback();
+            return res.status(404).json({ success: false, message: 'ไม่พบการ์ด Safety Culture ที่ต้องการแก้ไข' });
+        }
+        await conn.commit();
         res.json({ success: true, message: 'อัปเดตหลักการสำเร็จ' });
     } catch (err) {
-        res.status(500).json({ success: false, message: err.message });
+        if (conn) {
+            try { await conn.rollback(); } catch (_) {}
+        }
+        sendSafetyCultureError(res, err, 'ไม่สามารถบันทึกหลักการ Safety Culture ได้');
+    } finally {
+        if (conn) conn.release();
     }
 });
 
@@ -350,7 +527,6 @@ function parseScore(val, key) {
 // GET /api/safety-culture/assessments
 router.get('/assessments', async (req, res) => {
     try {
-        await ensureTables();
         const { year } = req.query;
         let sql = 'SELECT * FROM SC_Assessments';
         const params = [];
@@ -375,13 +551,12 @@ router.get('/assessments', async (req, res) => {
             });
         }
         res.json({ success: true, data: rows });
-    } catch (err) {
-        res.status(500).json({ success: false, message: err.message });
-    }
+    } catch (err) { sendSafetyCultureError(res, err, 'ไม่สามารถโหลดผลการประเมิน Safety Culture ได้'); }
 });
 
 // POST /api/safety-culture/assessments (admin)
 router.post('/assessments', isAdmin, async (req, res) => {
+    let conn;
     try {
         await ensureTables();
         const { AssessmentDate, Area, Notes } = req.body;
@@ -408,39 +583,40 @@ router.post('/assessments', isAdmin, async (req, res) => {
         const weekNoRaw  = req.body.WeekNo != null ? parseInt(req.body.WeekNo, 10) : null;
         const weekNo     = weekNoRaw != null && !isNaN(weekNoRaw) ? Math.min(4, Math.max(1, weekNoRaw)) : null;
         const topicAreas = _parseTopicAreas(req.body.topicAreas);
-        await db.query(
+        let parsedPoints = [];
+        try {
+            parsedPoints = parseAssessmentPoints(req.body.points);
+        } catch (e) {
+            return res.status(400).json({ success: false, message: e.message || 'ข้อมูลจุดประเมินไม่ถูกต้อง' });
+        }
+        conn = await db.getConnection();
+        await conn.beginTransaction();
+        await conn.query(
             `INSERT INTO SC_Assessments (AssessmentID, AssessmentYear, AssessmentDate, WeekNo, Area, T1_Score, T2_Score, T3_Score, T4_Score, T5_Score, T7_Score, Notes, CreatedBy, TopicAreas)
              VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
             [id, AssessmentYear, AssessmentDate || null, weekNo, Area || 'ทั้งหมด', T1, T2, T3, T4, T5, T7, Notes || null, req.user.name, topicAreas]
         );
         // Save observation points
-        const rawPoints = req.body.points;
-        if (rawPoints) {
-            try {
-                const pts = typeof rawPoints === 'string' ? JSON.parse(rawPoints) : rawPoints;
-                for (const pt of (Array.isArray(pts) ? pts : [])) {
-                    if (!pt.TopicKey || !pt.PointNo) continue;
-                    const total  = Math.max(0, parseInt(pt.TotalPeople)  || 0);
-                    const comply = Math.max(0, parseInt(pt.ComplyPeople) || 0);
-                    const pct    = total > 0 ? Math.round((comply / total) * 10000) / 100 : null;
-                    await db.query(
-                        `INSERT INTO SC_Assessment_Points (PointID, AssessmentID, PointNo, TopicKey, TotalPeople, ComplyPeople, Pct) VALUES (?,?,?,?,?,?,?)`,
-                        [randomUUID(), id, pt.PointNo, pt.TopicKey, total, comply, pct]
-                    );
-                }
-            } catch (e) { /* ignore malformed points */ }
+        for (const pt of parsedPoints) {
+            await conn.query(
+                `INSERT INTO SC_Assessment_Points
+                 (PointID, AssessmentID, PointNo, TopicKey, LocationID, LocationName, TotalPeople, ComplyPeople, Pct)
+                 VALUES (?,?,?,?,?,?,?,?,?)`,
+                [randomUUID(), id, pt.PointNo, pt.TopicKey, pt.LocationID, pt.LocationName, pt.TotalPeople, pt.ComplyPeople, pt.Pct]
+            );
         }
-        res.json({ success: true, message: 'บันทึกผลการประเมินสำเร็จ', id });
+        await conn.commit();
+        res.status(201).json({ success: true, message: 'บันทึกผลการประเมินสำเร็จ', id });
     } catch (err) {
-        res.status(500).json({ success: false, message: err.message });
-    }
+        if (conn) { try { await conn.rollback(); } catch (_) {} }
+        sendSafetyCultureError(res, err, 'ไม่สามารถบันทึกผลการประเมิน Safety Culture ได้');
+    } finally { if (conn) conn.release(); }
 });
 
 // PUT /api/safety-culture/assessments/:id (admin)
 router.put('/assessments/:id', isAdmin, async (req, res) => {
+    let conn;
     try {
-        const [chk] = await db.query('SELECT AssessmentID FROM SC_Assessments WHERE AssessmentID=?', [req.params.id]);
-        if (!chk.length) return res.status(404).json({ success: false, message: 'ไม่พบบันทึกการประเมิน' });
         const { AssessmentDate, Area, Notes } = req.body;
         const rawYear = req.body.AssessmentYear;
         let AssessmentYear;
@@ -463,89 +639,101 @@ router.put('/assessments/:id', isAdmin, async (req, res) => {
         const weekNoRaw  = req.body.WeekNo != null ? parseInt(req.body.WeekNo, 10) : null;
         const weekNo     = weekNoRaw != null && !isNaN(weekNoRaw) ? Math.min(4, Math.max(1, weekNoRaw)) : null;
         const topicAreas = _parseTopicAreas(req.body.topicAreas);
-        await db.query(
+        let parsedPoints = [];
+        try {
+            parsedPoints = parseAssessmentPoints(req.body.points);
+        } catch (e) {
+            return res.status(400).json({ success: false, message: e.message || 'ข้อมูลจุดประเมินไม่ถูกต้อง' });
+        }
+        conn = await db.getConnection();
+        await conn.beginTransaction();
+        const [chk] = await conn.query('SELECT AssessmentID FROM SC_Assessments WHERE AssessmentID=? FOR UPDATE', [req.params.id]);
+        if (!chk.length) {
+            await conn.rollback();
+            return res.status(404).json({ success: false, message: 'ไม่พบบันทึกการประเมิน' });
+        }
+        await conn.query(
             `UPDATE SC_Assessments SET AssessmentYear=?, AssessmentDate=?, WeekNo=?, Area=?, T1_Score=?, T2_Score=?, T3_Score=?, T4_Score=?, T5_Score=?, T7_Score=?, Notes=?, TopicAreas=? WHERE AssessmentID=?`,
             [AssessmentYear || null, AssessmentDate || null, weekNo, Area || 'ทั้งหมด', T1, T2, T3, T4, T5, T7, Notes || null, topicAreas, req.params.id]
         );
         // Replace observation points
-        await db.query('DELETE FROM SC_Assessment_Points WHERE AssessmentID = ?', [req.params.id]);
-        const rawPoints = req.body.points;
-        if (rawPoints) {
-            try {
-                const pts = typeof rawPoints === 'string' ? JSON.parse(rawPoints) : rawPoints;
-                for (const pt of (Array.isArray(pts) ? pts : [])) {
-                    if (!pt.TopicKey || !pt.PointNo) continue;
-                    const total  = Math.max(0, parseInt(pt.TotalPeople)  || 0);
-                    const comply = Math.max(0, parseInt(pt.ComplyPeople) || 0);
-                    const pct    = total > 0 ? Math.round((comply / total) * 10000) / 100 : null;
-                    await db.query(
-                        `INSERT INTO SC_Assessment_Points (PointID, AssessmentID, PointNo, TopicKey, TotalPeople, ComplyPeople, Pct) VALUES (?,?,?,?,?,?,?)`,
-                        [randomUUID(), req.params.id, pt.PointNo, pt.TopicKey, total, comply, pct]
-                    );
-                }
-            } catch (e) { /* ignore malformed points */ }
+        await conn.query('DELETE FROM SC_Assessment_Points WHERE AssessmentID = ?', [req.params.id]);
+        for (const pt of parsedPoints) {
+            await conn.query(
+                `INSERT INTO SC_Assessment_Points
+                 (PointID, AssessmentID, PointNo, TopicKey, LocationID, LocationName, TotalPeople, ComplyPeople, Pct)
+                 VALUES (?,?,?,?,?,?,?,?,?)`,
+                [randomUUID(), req.params.id, pt.PointNo, pt.TopicKey, pt.LocationID, pt.LocationName, pt.TotalPeople, pt.ComplyPeople, pt.Pct]
+            );
         }
+        await conn.commit();
         res.json({ success: true, message: 'อัปเดตผลการประเมินสำเร็จ' });
     } catch (err) {
-        res.status(500).json({ success: false, message: err.message });
-    }
+        if (conn) { try { await conn.rollback(); } catch (_) {} }
+        sendSafetyCultureError(res, err, 'ไม่สามารถอัปเดตผลการประเมิน Safety Culture ได้');
+    } finally { if (conn) conn.release(); }
 });
 
 // DELETE /api/safety-culture/assessments/:id (admin)
 router.delete('/assessments/:id', isAdmin, async (req, res) => {
+    let conn;
     try {
-        const [chk] = await db.query('SELECT AssessmentID FROM SC_Assessments WHERE AssessmentID=?', [req.params.id]);
-        if (!chk.length) return res.status(404).json({ success: false, message: 'ไม่พบบันทึกการประเมิน' });
-        await db.query('DELETE FROM SC_Assessment_Points WHERE AssessmentID = ?', [req.params.id]);
-        await db.query('DELETE FROM SC_Assessments WHERE AssessmentID = ?', [req.params.id]);
+        conn = await db.getConnection();
+        await conn.beginTransaction();
+        const [chk] = await conn.query('SELECT AssessmentID FROM SC_Assessments WHERE AssessmentID=? FOR UPDATE', [req.params.id]);
+        if (!chk.length) {
+            await conn.rollback();
+            return res.status(404).json({ success: false, message: 'ไม่พบบันทึกการประเมิน' });
+        }
+        await conn.query('DELETE FROM SC_Assessment_Points WHERE AssessmentID = ?', [req.params.id]);
+        await conn.query('DELETE FROM SC_Assessments WHERE AssessmentID = ?', [req.params.id]);
+        await conn.commit();
         res.json({ success: true, message: 'ลบผลการประเมินสำเร็จ' });
     } catch (err) {
-        res.status(500).json({ success: false, message: err.message });
-    }
+        if (conn) { try { await conn.rollback(); } catch (_) {} }
+        sendSafetyCultureError(res, err, 'ไม่สามารถลบผลการประเมิน Safety Culture ได้');
+    } finally { if (conn) conn.release(); }
 });
 
 // GET /api/safety-culture/ppe-items
 router.get('/ppe-items', async (req, res) => {
     try {
-        await ensureTables();
         const [rows] = await db.query(
             'SELECT * FROM SC_PPE_Items WHERE IsActive = 1 ORDER BY SortOrder, CreatedAt'
         );
         res.json({ success: true, data: rows });
-    } catch (err) {
-        res.status(500).json({ success: false, message: err.message });
-    }
+    } catch (err) { sendSafetyCultureError(res, err, 'ไม่สามารถโหลดรายการ PPE ได้'); }
 });
 
 // POST /api/safety-culture/ppe-items (admin)
 router.post('/ppe-items', isAdmin, async (req, res) => {
     try {
         await ensureTables();
-        const { ItemName, SortOrder } = req.body;
+        const { ItemName, Description, ImageUrl, SortOrder } = req.body;
         if (!ItemName?.trim()) return res.status(400).json({ success: false, message: 'กรุณาระบุชื่อรายการ PPE' });
         const [maxSort] = await db.query('SELECT COALESCE(MAX(SortOrder),0)+1 AS next FROM SC_PPE_Items');
         const sort = SortOrder ? parseInt(SortOrder) : maxSort[0].next;
         const id   = randomUUID();
-        await db.query('INSERT INTO SC_PPE_Items (ItemID, ItemName, SortOrder) VALUES (?,?,?)', [id, ItemName.trim(), sort]);
+        await db.query(
+            'INSERT INTO SC_PPE_Items (ItemID, ItemName, Description, ImageUrl, SortOrder) VALUES (?,?,?,?,?)',
+            [id, ItemName.trim(), Description || null, ImageUrl || null, sort]
+        );
         res.json({ success: true, message: 'เพิ่มรายการ PPE สำเร็จ', id });
-    } catch (err) {
-        res.status(500).json({ success: false, message: err.message });
-    }
+    } catch (err) { sendSafetyCultureError(res, err, 'ไม่สามารถเพิ่มรายการ PPE ได้'); }
 });
 
 // PUT /api/safety-culture/ppe-items/:id (admin)
 router.put('/ppe-items/:id', isAdmin, async (req, res) => {
     try {
-        const { ItemName, SortOrder } = req.body;
+        await ensureTables();
+        const { ItemName, Description, ImageUrl, SortOrder } = req.body;
         if (!ItemName?.trim()) return res.status(400).json({ success: false, message: 'กรุณาระบุชื่อรายการ PPE' });
         await db.query(
-            'UPDATE SC_PPE_Items SET ItemName=?, SortOrder=? WHERE ItemID=?',
-            [ItemName.trim(), SortOrder ? parseInt(SortOrder) : 99, req.params.id]
+            'UPDATE SC_PPE_Items SET ItemName=?, Description=?, ImageUrl=?, SortOrder=? WHERE ItemID=?',
+            [ItemName.trim(), Description || null, ImageUrl || null, SortOrder ? parseInt(SortOrder) : 99, req.params.id]
         );
         res.json({ success: true, message: 'แก้ไขรายการ PPE สำเร็จ' });
-    } catch (err) {
-        res.status(500).json({ success: false, message: err.message });
-    }
+    } catch (err) { sendSafetyCultureError(res, err, 'ไม่สามารถแก้ไขรายการ PPE ได้'); }
 });
 
 // DELETE /api/safety-culture/ppe-items/:id (admin)
@@ -559,9 +747,7 @@ router.delete('/ppe-items/:id', isAdmin, async (req, res) => {
             await db.query('DELETE FROM SC_PPE_Items WHERE ItemID=?', [req.params.id]);
         }
         res.json({ success: true, message: 'ลบรายการ PPE สำเร็จ' });
-    } catch (err) {
-        res.status(500).json({ success: false, message: err.message });
-    }
+    } catch (err) { sendSafetyCultureError(res, err, 'ไม่สามารถลบรายการ PPE ได้'); }
 });
 
 // ── PPE Work Types ──────────────────────────────────────────────────────────
@@ -569,12 +755,11 @@ router.delete('/ppe-items/:id', isAdmin, async (req, res) => {
 // GET /api/safety-culture/ppe-work-types
 router.get('/ppe-work-types', async (req, res) => {
     try {
-        await ensureTables();
         const [wts] = await db.query('SELECT * FROM SC_PPE_WorkTypes WHERE IsActive=1 ORDER BY SortOrder, Name');
         if (wts.length) {
             const ph = wts.map(() => '?').join(',');
             const [items] = await db.query(
-                `SELECT wi.WorkTypeID, wi.ItemID, pi.ItemName, pi.SortOrder
+                `SELECT wi.WorkTypeID, wi.ItemID, pi.ItemName, pi.Description, pi.ImageUrl, pi.SortOrder
                  FROM SC_PPE_WorkType_Items wi JOIN SC_PPE_Items pi ON wi.ItemID = pi.ItemID
                  WHERE wi.WorkTypeID IN (${ph}) ORDER BY pi.SortOrder`,
                 wts.map(w => w.WorkTypeID)
@@ -584,48 +769,69 @@ router.get('/ppe-work-types', async (req, res) => {
             wts.forEach(w => { w.items = itemMap[w.WorkTypeID] || []; });
         }
         res.json({ success: true, data: wts });
-    } catch (err) { res.status(500).json({ success: false, message: err.message }); }
+    } catch (err) { sendSafetyCultureError(res, err, 'ไม่สามารถโหลดเทมเพลต PPE ได้'); }
 });
 
 // POST /api/safety-culture/ppe-work-types (admin)
 router.post('/ppe-work-types', isAdmin, async (req, res) => {
+    let conn;
     try {
         await ensureTables();
-        const { Name, Description, SortOrder, itemIds } = req.body;
+        const { Name, Description, SortOrder } = req.body;
         if (!Name?.trim()) return res.status(400).json({ success: false, message: 'กรุณาระบุชื่อประเภทงาน' });
+        const ids = parseIdList(req.body.itemIds ?? req.body.ItemIDs);
+        if (!ids.length) return res.status(400).json({ success: false, message: 'กรุณาเลือก PPE ที่ต้องใช้ในเทมเพลตอย่างน้อย 1 รายการ' });
         const id = randomUUID();
-        await db.query('INSERT INTO SC_PPE_WorkTypes (WorkTypeID, Name, Description, SortOrder) VALUES (?,?,?,?)',
+        conn = await db.getConnection();
+        await conn.beginTransaction();
+        await conn.query('INSERT INTO SC_PPE_WorkTypes (WorkTypeID, Name, Description, SortOrder) VALUES (?,?,?,?)',
             [id, Name.trim().substring(0, 100), Description || null, parseInt(SortOrder) || 99]);
-        const ids = Array.isArray(itemIds) ? itemIds.filter(Boolean) : [];
         for (const itemId of ids) {
-            await db.query('INSERT IGNORE INTO SC_PPE_WorkType_Items (WorkTypeID, ItemID) VALUES (?,?)', [id, itemId]);
+            await conn.query('INSERT IGNORE INTO SC_PPE_WorkType_Items (WorkTypeID, ItemID) VALUES (?,?)', [id, itemId]);
         }
-        res.json({ success: true, id });
-    } catch (err) { res.status(500).json({ success: false, message: err.message }); }
+        await conn.commit();
+        res.status(201).json({ success: true, id });
+    } catch (err) {
+        if (conn) { try { await conn.rollback(); } catch (_) {} }
+        sendSafetyCultureError(res, err, 'ไม่สามารถเพิ่มเทมเพลต PPE ได้');
+    } finally { if (conn) conn.release(); }
 });
 
 // PUT /api/safety-culture/ppe-work-types/:id (admin)
 router.put('/ppe-work-types/:id', isAdmin, async (req, res) => {
+    let conn;
     try {
-        const { Name, Description, SortOrder, itemIds } = req.body;
+        const { Name, Description, SortOrder } = req.body;
         if (!Name?.trim()) return res.status(400).json({ success: false, message: 'กรุณาระบุชื่อประเภทงาน' });
-        await db.query('UPDATE SC_PPE_WorkTypes SET Name=?, Description=?, SortOrder=? WHERE WorkTypeID=?',
+        const ids = parseIdList(req.body.itemIds ?? req.body.ItemIDs);
+        if (!ids.length) return res.status(400).json({ success: false, message: 'กรุณาเลือก PPE ที่ต้องใช้ในเทมเพลตอย่างน้อย 1 รายการ' });
+        conn = await db.getConnection();
+        await conn.beginTransaction();
+        const [result] = await conn.query('UPDATE SC_PPE_WorkTypes SET Name=?, Description=?, SortOrder=? WHERE WorkTypeID=? AND IsActive=1',
             [Name.trim().substring(0, 100), Description || null, parseInt(SortOrder) || 99, req.params.id]);
-        await db.query('DELETE FROM SC_PPE_WorkType_Items WHERE WorkTypeID=?', [req.params.id]);
-        const ids = Array.isArray(itemIds) ? itemIds.filter(Boolean) : [];
-        for (const itemId of ids) {
-            await db.query('INSERT IGNORE INTO SC_PPE_WorkType_Items (WorkTypeID, ItemID) VALUES (?,?)', [req.params.id, itemId]);
+        if (!result.affectedRows) {
+            await conn.rollback();
+            return res.status(404).json({ success: false, message: 'ไม่พบเทมเพลต PPE' });
         }
+        await conn.query('DELETE FROM SC_PPE_WorkType_Items WHERE WorkTypeID=?', [req.params.id]);
+        for (const itemId of ids) {
+            await conn.query('INSERT IGNORE INTO SC_PPE_WorkType_Items (WorkTypeID, ItemID) VALUES (?,?)', [req.params.id, itemId]);
+        }
+        await conn.commit();
         res.json({ success: true });
-    } catch (err) { res.status(500).json({ success: false, message: err.message }); }
+    } catch (err) {
+        if (conn) { try { await conn.rollback(); } catch (_) {} }
+        sendSafetyCultureError(res, err, 'ไม่สามารถแก้ไขเทมเพลต PPE ได้');
+    } finally { if (conn) conn.release(); }
 });
 
 // DELETE /api/safety-culture/ppe-work-types/:id (admin)
 router.delete('/ppe-work-types/:id', isAdmin, async (req, res) => {
     try {
-        await db.query('UPDATE SC_PPE_WorkTypes SET IsActive=0 WHERE WorkTypeID=?', [req.params.id]);
+        const [result] = await db.query('UPDATE SC_PPE_WorkTypes SET IsActive=0 WHERE WorkTypeID=? AND IsActive=1', [req.params.id]);
+        if (!result.affectedRows) return res.status(404).json({ success: false, message: 'ไม่พบเทมเพลต PPE' });
         res.json({ success: true });
-    } catch (err) { res.status(500).json({ success: false, message: err.message }); }
+    } catch (err) { sendSafetyCultureError(res, err, 'ไม่สามารถปิดใช้งานเทมเพลต PPE ได้'); }
 });
 
 // ── PPE Violations ──────────────────────────────────────────────────────────
@@ -633,7 +839,6 @@ router.delete('/ppe-work-types/:id', isAdmin, async (req, res) => {
 // GET /api/safety-culture/ppe-violations/summary — must be before /:id
 router.get('/ppe-violations/summary', isAdmin, async (req, res) => {
     try {
-        await ensureTables();
         const { year } = req.query;
         let sql = `SELECT EmployeeID, EmployeeName, Department,
                    COUNT(*) AS total, MAX(ViolationNo) AS highestNo,
@@ -645,13 +850,12 @@ router.get('/ppe-violations/summary', isAdmin, async (req, res) => {
         sql += ' GROUP BY EmployeeID, EmployeeName, Department ORDER BY total DESC, lastDate DESC';
         const [rows] = await db.query(sql, params);
         res.json({ success: true, data: rows });
-    } catch (err) { res.status(500).json({ success: false, message: err.message }); }
+    } catch (err) { sendSafetyCultureError(res, err, 'ไม่สามารถโหลดสรุปการฝ่าฝืน PPE ได้'); }
 });
 
 // GET /api/safety-culture/ppe-violations
 router.get('/ppe-violations', isAdmin, async (req, res) => {
     try {
-        await ensureTables();
         const { year, employeeId, department } = req.query;
         let sql = 'SELECT * FROM SC_PPE_Violations WHERE (deleted_at IS NULL)';
         const params = [];
@@ -661,7 +865,7 @@ router.get('/ppe-violations', isAdmin, async (req, res) => {
         sql += ' ORDER BY ViolationDate DESC, CreatedAt DESC';
         const [rows] = await db.query(sql, params);
         res.json({ success: true, data: rows });
-    } catch (err) { res.status(500).json({ success: false, message: err.message }); }
+    } catch (err) { sendSafetyCultureError(res, err, 'ไม่สามารถโหลดประวัติการฝ่าฝืน PPE ได้'); }
 });
 
 // POST /api/safety-culture/ppe-violations (admin — atomic violation count)
@@ -676,8 +880,11 @@ router.post('/ppe-violations', isAdmin, async (req, res) => {
     // Stable lookup key: registered = EmployeeID, unregistered = name-based prefix
     const stableKey = cleanEmpId || `__unreg__:${cleanEmpName.toLowerCase()}`;
     const conn = await db.getConnection();
+    const lockName = violationLockName(stableKey);
     try {
         await ensureTables();
+        const [[lock]] = await conn.query('SELECT GET_LOCK(?, 5) AS acquired', [lockName]);
+        if (Number(lock.acquired) !== 1) return res.status(409).json({ success: false, message: 'กำลังบันทึกประวัติ PPE ของพนักงานรายนี้ กรุณาลองใหม่' });
         await conn.beginTransaction();
         const [[cnt]] = await conn.query(
             'SELECT COUNT(*) AS c FROM SC_PPE_Violations WHERE (deleted_at IS NULL) AND EmployeeID=? FOR UPDATE',
@@ -696,11 +903,12 @@ router.post('/ppe-violations', isAdmin, async (req, res) => {
         await conn.commit();
         await _ppeAudit('create', 'violation', id, req.user,
             `Emp:${cleanEmpName||cleanEmpId} No:${violationNo} Level:${warningLevel}`);
-        res.json({ success: true, id, violationNo, warningLevel });
+        res.status(201).json({ success: true, id, violationNo, warningLevel });
     } catch (err) {
         await conn.rollback();
-        res.status(500).json({ success: false, message: err.message });
+        sendSafetyCultureError(res, err, 'ไม่สามารถบันทึกการฝ่าฝืน PPE ได้');
     } finally {
+        try { await conn.query('SELECT RELEASE_LOCK(?)', [lockName]); } catch (_) {}
         conn.release();
     }
 });
@@ -716,7 +924,7 @@ router.delete('/ppe-violations/:id', isAdmin, async (req, res) => {
         await _ppeAudit('delete', 'violation', req.params.id, req.user,
             `Emp:${rows[0].EmployeeName||'—'} No:${rows[0].ViolationNo}`);
         res.json({ success: true });
-    } catch (err) { res.status(500).json({ success: false, message: err.message }); }
+    } catch (err) { sendSafetyCultureError(res, err, 'ไม่สามารถลบบันทึกการฝ่าฝืน PPE ได้'); }
 });
 
 // ── PPE Inspections ─────────────────────────────────────────────────────────
@@ -724,7 +932,6 @@ router.delete('/ppe-violations/:id', isAdmin, async (req, res) => {
 // GET /api/safety-culture/ppe-inspections
 router.get('/ppe-inspections', async (req, res) => {
     try {
-        await ensureTables();
         const { year, department } = req.query;
         let sql = 'SELECT * FROM SC_PPEInspections WHERE (deleted_at IS NULL)';
         const params = [];
@@ -766,9 +973,7 @@ router.get('/ppe-inspections', async (req, res) => {
             });
         }
         res.json({ success: true, data: rows });
-    } catch (err) {
-        res.status(500).json({ success: false, message: err.message });
-    }
+    } catch (err) { sendSafetyCultureError(res, err, 'ไม่สามารถโหลดประวัติ PPE Inspection ได้'); }
 });
 
 // POST /api/safety-culture/ppe-inspections (admin only)
@@ -816,7 +1021,10 @@ router.post('/ppe-inspections', isAdmin, async (req, res) => {
         if (!deptRows.length)
             return res.status(400).json({ success: false, message: `ไม่พบแผนก "${Department}" ในระบบ` });
 
-        // Validate work type exists and has PPE items assigned
+        // Validate work type exists and has PPE items assigned. Inspections should follow an admin template.
+        if (!WorkTypeID) {
+            return res.status(400).json({ success: false, message: 'กรุณาเลือกเทมเพลต PPE ตามประเภทงานก่อนเริ่มตรวจ' });
+        }
         if (WorkTypeID) {
             const [wtRows] = await db.query(
                 'SELECT WorkTypeID FROM SC_PPE_WorkTypes WHERE WorkTypeID=? AND IsActive=1 LIMIT 1', [WorkTypeID]
@@ -824,10 +1032,14 @@ router.post('/ppe-inspections', isAdmin, async (req, res) => {
             if (!wtRows.length)
                 return res.status(400).json({ success: false, message: 'ไม่พบประเภทงานที่เลือกในระบบ' });
             const [wtItems] = await db.query(
-                'SELECT COUNT(*) AS cnt FROM SC_PPE_WorkType_Items WHERE WorkTypeID=?', [WorkTypeID]
+                'SELECT ItemID FROM SC_PPE_WorkType_Items WHERE WorkTypeID=?', [WorkTypeID]
             );
-            if ((wtItems[0].cnt || 0) === 0)
+            if (!wtItems.length)
                 return res.status(400).json({ success: false, message: 'ประเภทงานที่เลือกยังไม่มีรายการ PPE กำหนดไว้' });
+            const allowedItemIds = new Set(wtItems.map(i => String(i.ItemID)));
+            const invalidItem = normalizedItems.find(i => i.ItemID && !allowedItemIds.has(String(i.ItemID)));
+            if (invalidItem)
+                return res.status(400).json({ success: false, message: 'รายการ PPE ไม่ตรงกับเทมเพลตที่เลือก กรุณาโหลดฟอร์มใหม่แล้วลองอีกครั้ง' });
         }
 
         const totalItems     = counted.length;
@@ -851,7 +1063,7 @@ router.post('/ppe-inspections', isAdmin, async (req, res) => {
         let workTypeSnapshot = null;
         if (WorkTypeID) {
             const [snapItems] = await db.query(
-                `SELECT pi.ItemID, pi.ItemName, pi.SortOrder
+                `SELECT pi.ItemID, pi.ItemName, pi.Description, pi.ImageUrl, pi.SortOrder
                  FROM SC_PPE_WorkType_Items wi JOIN SC_PPE_Items pi ON wi.ItemID = pi.ItemID
                  WHERE wi.WorkTypeID = ? ORDER BY pi.SortOrder`, [WorkTypeID]
             );
@@ -862,7 +1074,17 @@ router.post('/ppe-inspections', isAdmin, async (req, res) => {
         const id   = randomUUID();
         const conn = await db.getConnection();
         let violationResult = null;
+        let lockName = null;
         try {
+            if (!isPass && empName) {
+                lockName = violationLockName(finalEmpId);
+                const [[lock]] = await conn.query('SELECT GET_LOCK(?, 5) AS acquired', [lockName]);
+                if (Number(lock.acquired) !== 1) {
+                    const busy = new Error('PPE violation sequence is busy');
+                    busy.statusCode = 409;
+                    throw busy;
+                }
+            }
             await conn.beginTransaction();
 
             await conn.query(
@@ -926,13 +1148,12 @@ router.post('/ppe-inspections', isAdmin, async (req, res) => {
             await conn.rollback();
             throw txErr;
         } finally {
+            if (lockName) { try { await conn.query('SELECT RELEASE_LOCK(?)', [lockName]); } catch (_) {} }
             conn.release();
         }
 
         res.json({ success: true, message: 'บันทึกผลการตรวจ PPE สำเร็จ', id, isPass, violationResult });
-    } catch (err) {
-        res.status(500).json({ success: false, message: err.message });
-    }
+    } catch (err) { sendSafetyCultureError(res, err, 'ไม่สามารถบันทึกผล PPE Inspection ได้'); }
 });
 
 // PUT /api/safety-culture/ppe-inspections/:id (admin — update notes/status only)
@@ -949,9 +1170,7 @@ router.put('/ppe-inspections/:id', isAdmin, async (req, res) => {
             [Notes != null ? String(Notes).substring(0, 1000) : null, id]);
         await _ppeAudit('update', 'inspection', id, req.user, `Notes updated`);
         res.json({ success: true, message: 'อัปเดตสำเร็จ' });
-    } catch (err) {
-        res.status(500).json({ success: false, message: err.message });
-    }
+    } catch (err) { sendSafetyCultureError(res, err, 'ไม่สามารถแก้ไขผล PPE Inspection ได้'); }
 });
 
 // DELETE /api/safety-culture/ppe-inspections/:id (admin — soft delete)
@@ -964,15 +1183,12 @@ router.delete('/ppe-inspections/:id', isAdmin, async (req, res) => {
         await db.query('UPDATE SC_PPEInspections SET deleted_at=NOW() WHERE InspectionID=?', [req.params.id]);
         await _ppeAudit('delete', 'inspection', req.params.id, req.user, null);
         res.json({ success: true, message: 'ลบผลการตรวจ PPE สำเร็จ' });
-    } catch (err) {
-        res.status(500).json({ success: false, message: err.message });
-    }
+    } catch (err) { sendSafetyCultureError(res, err, 'ไม่สามารถลบผล PPE Inspection ได้'); }
 });
 
 // GET /api/safety-culture/dashboard
 router.get('/dashboard', async (req, res) => {
     try {
-        await ensureTables();
         const year = parseInt(req.query.year) || new Date().getFullYear();
 
         const [avgScores] = await db.query(
@@ -1019,9 +1235,7 @@ router.get('/dashboard', async (req, res) => {
 
         res.json({ success: true, data: { avgScores: avgScores[0], ppeStats: ppeStats[0], yearTrend, year } });
         // ppeStats shape: { overall_pct, itemBreakdown: [{ ItemID, ItemName, SortOrder, ok_count, total_count }] }
-    } catch (err) {
-        res.status(500).json({ success: false, message: err.message });
-    }
+    } catch (err) { sendSafetyCultureError(res, err, 'ไม่สามารถโหลด Dashboard Safety Culture ได้'); }
 });
 
 module.exports = router;

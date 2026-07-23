@@ -1,13 +1,14 @@
+import { delegatedActionOptions, guardActionHandler, guardSubmitHandler } from '../utils/async-ui.js?v=20260715-phase32d-remaining-async-ux';
 // public/js/pages/ky.js
 // KY Ability (Kiken Yochi - Hazard Prediction)
 import { API } from '../api.js';
 import {
     hideLoading, showError, showLoading,
     openModal, openDetailModal, closeModal, showToast, showConfirmationModal, showDocumentModal, escHtml,
-    statusBadge as dsStatusBadge
-} from '../ui.js';
+    statusBadge as dsStatusBadge, normalizeDocumentUrl
+} from '../ui.js?v=20260602-mobile-nav-m53';
 import { normalizeApiArray, normalizeApiObject } from '../utils/normalize.js';
-import { buildActivityCard } from '../utils/activity-widget.js';
+import { buildActivityCard } from '../utils/activity-widget.js?v=20260602-activity-targets-at10';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Constants
@@ -44,6 +45,284 @@ const RISK_CARDS = [
 
 const CHART_COLORS = ['#6366f1','#f97316','#10b981','#0284c7','#a855f7','#f59e0b','#ef4444','#14b8a6'];
 const MONTHS_TH    = ['ม.ค.','ก.พ.','มี.ค.','เม.ย.','พ.ค.','มิ.ย.','ก.ค.','ส.ค.','ก.ย.','ต.ค.','พ.ย.','ธ.ค.'];
+const KY_ATTACHMENT_LIMIT = 20 * 1024 * 1024;
+const KY_VIDEO_LIMIT = 200 * 1024 * 1024;
+const KY_VIDEO_SHOWCASE_LIMIT = 6;
+const KY_COMPANY_EMAIL_DOMAIN = '@thaisummit-harness.co.th';
+const JOHNNY_IMAGE_RISK_DRAFT_KEY = 'johnny_image_risk_draft';
+
+function kyMediaUrl(url) {
+    return normalizeDocumentUrl(url || '');
+}
+
+function kyHasEvidenceFile(row) {
+    return kyHasText(row?.AttachmentUrl);
+}
+
+function kyHasEvidenceVideo(row) {
+    return kyHasText(row?.VideoUrl);
+}
+
+function kyEvidenceStatus(row) {
+    const hasFile = kyHasEvidenceFile(row);
+    const hasVideo = kyHasEvidenceVideo(row);
+    if (hasFile && hasVideo) {
+        return {
+            id: 'complete',
+            label: 'File + video complete',
+            shortLabel: 'Complete',
+            className: 'bg-emerald-50 text-emerald-700 border-emerald-100',
+        };
+    }
+    if (hasFile && !hasVideo) {
+        return {
+            id: 'waiting_video',
+            label: 'Waiting for video',
+            shortLabel: 'Need video',
+            className: 'bg-purple-50 text-purple-700 border-purple-100',
+        };
+    }
+    return {
+        id: 'missing_file',
+        label: 'Missing required file',
+        shortLabel: 'Missing file',
+        className: 'bg-red-50 text-red-700 border-red-100',
+    };
+}
+
+function renderKyEvidenceBadge(row, compact = false) {
+    const status = kyEvidenceStatus(row);
+    return `<span class="inline-flex items-center rounded-full border px-2 py-0.5 text-[10px] font-bold ${status.className}">
+        ${escHtml(compact ? status.shortLabel : status.label)}
+    </span>`;
+}
+
+function summarizeKyEvidence(records) {
+    const summary = {
+        total: records.length,
+        complete: 0,
+        waitingVideo: 0,
+        noVideo: 0,
+        missingFile: 0,
+        completionPct: 0,
+        waitingVideoItems: [],
+        missingFileItems: [],
+    };
+    records.forEach(row => {
+        const status = kyEvidenceStatus(row).id;
+        if (!kyHasEvidenceVideo(row)) summary.noVideo += 1;
+        if (status === 'complete') summary.complete += 1;
+        else if (status === 'waiting_video') {
+            summary.waitingVideo += 1;
+            summary.waitingVideoItems.push(row);
+        } else {
+            summary.missingFile += 1;
+            summary.missingFileItems.push(row);
+        }
+    });
+    summary.completionPct = summary.total ? Math.round((summary.complete / summary.total) * 100) : 0;
+    return summary;
+}
+
+function filterKyEvidenceRecords(records, filter) {
+    if (!filter || filter === 'all') return records;
+    if (filter === 'no_video') return records.filter(row => !kyHasEvidenceVideo(row));
+    return records.filter(row => kyEvidenceStatus(row).id === filter);
+}
+
+function kyHasText(value) {
+    return String(value || '').trim().length > 0;
+}
+
+function findKyCachedRecord(id) {
+    const target = String(id || '');
+    const pools = [
+        _historyRecords,
+        _kyEvidenceRecords,
+        _kyVideoShowcase,
+        _kyVideoLibrary.items,
+    ];
+    for (const pool of pools) {
+        const found = (pool || []).find(row => String(row?.id) === target);
+        if (found) return found;
+    }
+    return null;
+}
+
+async function runKyButtonAction(button, busyLabel, action) {
+    if (!button || button.disabled) return;
+    const previousHtml = button.innerHTML;
+    button.disabled = true;
+    button.classList.add('opacity-60', 'cursor-wait');
+    if (busyLabel) button.textContent = busyLabel;
+    try {
+        await action();
+    } finally {
+        button.disabled = false;
+        button.classList.remove('opacity-60', 'cursor-wait');
+        button.innerHTML = previousHtml;
+    }
+}
+
+function kyFormValidationState(form = document.getElementById('ky-form')) {
+    if (!form) return { ready: false, missing: ['Form'] };
+    const missing = [];
+    const value = name => form.querySelector(`[name="${name}"]`)?.value || '';
+    const dept = document.getElementById('ky-main-dept')?.value || value('Department');
+    const safetyUnitSelect = document.getElementById('ky-safety-unit-select');
+    const attachment = document.getElementById('ky-attachment')?.files?.[0];
+    if (_isAdmin && !kyHasText(document.getElementById('ky-reporter-id')?.value)) missing.push('Reporter');
+    if (!kyHasText(dept)) missing.push('Department');
+    if (safetyUnitSelect && !kyHasText(safetyUnitSelect.value)) missing.push('Safety Unit');
+    if (!kyHasText(value('ActivityDate'))) missing.push('Activity date');
+    if (!kyHasText(value('TeamName'))) missing.push('Team name');
+    if (!kyHasText(value('KYTKeyword'))) missing.push('KYT keyword');
+    if (!form.querySelector('[name="RiskCategory"]:checked')) missing.push('Risk category');
+    if (!_participants.length) missing.push('Participants');
+    if (!kyHasText(value('HazardDescription'))) missing.push('Hazard detail');
+    if (!kyHasText(value('Countermeasure'))) missing.push('Countermeasure');
+    if (!attachment) missing.push('Attachment file');
+    return { ready: missing.length === 0, missing };
+}
+
+function updateKySubmitReadiness() {
+    const box = document.getElementById('ky-submit-readiness');
+    const btn = document.getElementById('ky-submit-btn');
+    const state = kyFormValidationState();
+    if (btn) {
+        btn.disabled = !state.ready;
+        btn.classList.toggle('opacity-60', !state.ready);
+        btn.classList.toggle('cursor-not-allowed', !state.ready);
+        btn.title = state.ready ? '' : `Missing: ${state.missing.join(', ')}`;
+    }
+    if (!box) return state;
+    const items = [
+        ['Reporter', !_isAdmin || kyHasText(document.getElementById('ky-reporter-id')?.value)],
+        ['Department', !state.missing.includes('Department')],
+        ['Safety Unit', !state.missing.includes('Safety Unit')],
+        ['Activity date', !state.missing.includes('Activity date')],
+        ['Team name', !state.missing.includes('Team name')],
+        ['KYT keyword', !state.missing.includes('KYT keyword')],
+        ['Risk category', !state.missing.includes('Risk category')],
+        ['Participants', !state.missing.includes('Participants')],
+        ['Hazard detail', !state.missing.includes('Hazard detail')],
+        ['Countermeasure', !state.missing.includes('Countermeasure')],
+        ['Attachment file', !state.missing.includes('Attachment file')],
+        ['Video evidence', true, 'optional'],
+    ];
+    box.innerHTML = `
+        <div class="flex flex-col gap-3">
+            <div class="flex items-center justify-between gap-3">
+                <div>
+                    <p class="text-xs font-bold text-slate-500 uppercase">Submit readiness</p>
+                    <p class="text-sm font-bold ${state.ready ? 'text-emerald-700' : 'text-amber-700'}">
+                        ${state.ready ? 'Ready to submit' : `${state.missing.length} required item(s) missing`}
+                    </p>
+                </div>
+                <span class="px-3 py-1 rounded-full text-xs font-bold ${state.ready ? 'bg-emerald-50 text-emerald-700 border border-emerald-100' : 'bg-amber-50 text-amber-700 border border-amber-100'}">
+                    ${state.ready ? 'Complete' : 'Incomplete'}
+                </span>
+            </div>
+            <div class="grid grid-cols-2 md:grid-cols-4 gap-2">
+                ${items.map(([label, ok, note]) => `
+                    <div class="rounded-lg border px-2.5 py-2 text-xs font-semibold ${ok ? 'border-emerald-100 bg-emerald-50 text-emerald-700' : 'border-amber-100 bg-amber-50 text-amber-700'}">
+                        <span class="mr-1">${ok ? '✓' : '!'}</span>${label}${note ? `<span class="block text-[10px] font-normal text-slate-400">${note}</span>` : ''}
+                    </div>`).join('')}
+            </div>
+        </div>`;
+    return state;
+}
+function kyEmailSourceLabel(source) {
+    if (source === 'selected') return 'Employee Master ของผู้รายงาน';
+    if (source === 'current') return 'Employee Master ของบัญชีปัจจุบัน';
+    return 'Company Email';
+}
+
+function updateKyReporterEmailStatus(email, source = 'current') {
+    const input = document.getElementById('ky-reporter-email');
+    const note = document.getElementById('ky-reporter-email-note');
+    const badge = document.getElementById('ky-reporter-email-badge');
+    const editBtn = document.getElementById('ky-reporter-email-edit');
+    if (!input) return;
+
+    const value = String(email || '').trim();
+    const hasEmail = Boolean(value);
+    input.value = value;
+    input.readOnly = hasEmail;
+    input.classList.toggle('bg-slate-50', hasEmail);
+    input.classList.toggle('cursor-not-allowed', hasEmail);
+    input.dataset.masterEmail = value;
+
+    if (badge) {
+        badge.className = hasEmail
+            ? 'px-2.5 py-1 rounded-full text-xs font-bold bg-emerald-100 text-emerald-700 border border-emerald-200'
+            : 'px-2.5 py-1 rounded-full text-xs font-bold bg-amber-100 text-amber-700 border border-amber-200';
+        badge.textContent = hasEmail ? 'ดึงจาก Employee Master' : 'ยังไม่มี CompanyEmail';
+    }
+    if (editBtn) {
+        editBtn.classList.toggle('hidden', !hasEmail);
+    }
+    if (note) {
+        note.textContent = hasEmail
+            ? `ระบบดึงจาก ${kyEmailSourceLabel(source)} แล้ว และจะบันทึกอีเมลนี้ไว้กับรายการ KY ณ วันที่ส่ง`
+            : `ยังไม่พบ CompanyEmail ใน Employee Master กรอกอีเมลบริษัทได้หากต้องการรับแจ้งเตือน ต้องลงท้ายด้วย ${KY_COMPANY_EMAIL_DOMAIN}`;
+    }
+    renderKySubmitSummary();
+}
+
+function unlockKyReporterEmail() {
+    const input = document.getElementById('ky-reporter-email');
+    const note = document.getElementById('ky-reporter-email-note');
+    const badge = document.getElementById('ky-reporter-email-badge');
+    const editBtn = document.getElementById('ky-reporter-email-edit');
+    if (!input) return;
+    input.readOnly = false;
+    input.classList.remove('bg-slate-50', 'cursor-not-allowed');
+    input.focus();
+    if (badge) {
+        badge.className = 'px-2.5 py-1 rounded-full text-xs font-bold bg-sky-100 text-sky-700 border border-sky-200';
+        badge.textContent = 'แก้ไขเอง';
+    }
+    if (editBtn) editBtn.classList.add('hidden');
+    if (note) note.textContent = `แก้ไขได้เฉพาะกรณีอีเมลใน Master ยังไม่ตรง ต้องลงท้ายด้วย ${KY_COMPANY_EMAIL_DOMAIN}`;
+}
+
+function renderKySubmitSummary() {
+    const box = document.getElementById('ky-submit-summary');
+    if (!box) return;
+
+    const user = TSHSession.getUser() || {};
+    const reporterName = _submitReporter?.EmployeeName || user.name || '-';
+    const dept = document.getElementById('ky-main-dept')?.value || _submitReporter?.Department || user.department || '-';
+    const safetyUnit = document.getElementById('ky-safety-unit-select')?.value || '-';
+    const activityDate = document.querySelector('#ky-form [name="ActivityDate"]')?.value || '-';
+    const email = document.getElementById('ky-reporter-email')?.value || '-';
+    const risk = document.querySelector('#ky-form [name="RiskCategory"]:checked')?.value || '-';
+
+    box.innerHTML = `
+        <div class="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-3">
+            <div>
+                <p class="text-xs font-bold text-slate-500 uppercase">ตรวจสอบก่อนส่ง / Review before submit</p>
+                <h3 class="text-sm font-bold text-slate-800 mt-1">รายการนี้จะถูกบันทึกเป็น KY ของ ${escHtml(reporterName)}</h3>
+            </div>
+            <div class="text-xs font-semibold text-slate-500">ระบบจะส่งอีเมลแจ้งสถานะไปที่ <span class="text-slate-800">${escHtml(email)}</span></div>
+        </div>
+        <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-2 mt-3 text-xs">
+            <div class="rounded-lg bg-white border border-slate-200 px-3 py-2"><span class="block text-slate-400">วันที่</span><b class="text-slate-800">${escHtml(activityDate)}</b></div>
+            <div class="rounded-lg bg-white border border-slate-200 px-3 py-2"><span class="block text-slate-400">แผนก</span><b class="text-slate-800">${escHtml(dept)}</b></div>
+            <div class="rounded-lg bg-white border border-slate-200 px-3 py-2"><span class="block text-slate-400">Safety Unit</span><b class="text-slate-800">${escHtml(safetyUnit)}</b></div>
+            <div class="rounded-lg bg-white border border-slate-200 px-3 py-2"><span class="block text-slate-400">ความเสี่ยง</span><b class="text-slate-800">${escHtml(risk)}</b></div>
+            <div class="rounded-lg bg-white border border-slate-200 px-3 py-2"><span class="block text-slate-400">ผู้เข้าร่วม</span><b class="text-slate-800">${_participants.length || 0} คน</b></div>
+        </div>`;
+    updateKySubmitReadiness();
+}
+
+const KY_VIDEO_REACTIONS = [
+    { id: 'useful',    emoji: '👍', label: 'Useful',        tone: '#2563eb' },
+    { id: 'practice',  emoji: '✅', label: 'Good Practice', tone: '#059669' },
+    { id: 'awareness', emoji: '💡', label: 'Awareness',     tone: '#7c3aed' },
+    { id: 'attention', emoji: '⚠️', label: 'Attention',     tone: '#dc2626' },
+];
 
 // ─────────────────────────────────────────────────────────────────────────────
 // State
@@ -63,6 +342,11 @@ let _historyRecords = [];  // cached for Excel export
 let _filterHistYear = new Date().getFullYear();
 let _filterHistDept = 'all';
 let _filterHistRisk = 'all';
+let _filterHistSource = 'all';
+let _filterHistEvidence = 'all';
+let _kyEvidenceChartFilter = 'all';
+let _kyEvidenceSelectedKey = '';
+let _kyEvidenceOverviewRows = [];
 let _filterMgmtYear = new Date().getFullYear();
 let _filterMgmtDept = 'all';
 let _filterMgmtRisk = 'all';
@@ -71,12 +355,35 @@ let _filterDateTo   = '';
 let _departments    = [];
 let _lastStatsData   = null;
 let _kyProgConfig   = [];                          // KY_Program_Config for current year
-let _manageSub      = 'coverage';                  // 'coverage' | 'config'
+let _manageSub      = 'coverage';                  // 'coverage' | 'config' | 'forms'
 let _configYear     = new Date().getFullYear();
 let _safetyUnits    = [];                          // Master_SafetyUnits
 let _empSearchTimer = null;
 let _empSearchResults = [];
+let _reporterSearchTimer = null;
+let _reporterSearchResults = [];
+let _submitReporter = null;
+let _submitEmailProfile = null;
 let _kyForms         = [];
+let _kyVideoShowcase = [];
+let _kyVideoLibrary = {
+    items: [],
+    pagination: { page: 1, pageSize: 6, total: 0, pages: 0 },
+    summary: { totalVideos: 0, totalReactions: 0, pinnedVideos: 0, hiddenVideos: 0, departments: [] },
+    filters: {
+        year: new Date().getFullYear(),
+        department: 'all',
+        safetyUnit: 'all',
+        riskCategory: 'all',
+        status: 'all',
+        pinned: 'all',
+        show: 'all',
+        q: '',
+    },
+};
+let _kyEvidenceRecords = [];
+let _kyCardSaveMenu = null;
+let _kyCardSaveHold = null;
 
 // ─────────────────────────────────────────────────────────────────────────────
 // MAIN LOADER
@@ -97,9 +404,65 @@ export async function loadKyPage() {
         _listenersReady = true;
     }
 
-    _activeTab = window._getTab?.('ky', _activeTab) || _activeTab;
+    const johnnyDraft = _peekJohnnyImageRiskDraft('ky');
+    _activeTab = johnnyDraft ? 'submit' : (window._getTab?.('ky', _activeTab) || _activeTab);
     switchTab(_activeTab);
     _loadHeroStats();
+}
+
+function _peekJohnnyImageRiskDraft(target) {
+    try {
+        const draft = JSON.parse(sessionStorage.getItem(JOHNNY_IMAGE_RISK_DRAFT_KEY) || 'null');
+        return draft?.source === 'johnny_ai_image_analysis' && draft?.target === target ? draft : null;
+    } catch {
+        return null;
+    }
+}
+
+function _consumeJohnnyImageRiskDraft(target) {
+    const draft = _peekJohnnyImageRiskDraft(target);
+    if (draft) sessionStorage.removeItem(JOHNNY_IMAGE_RISK_DRAFT_KEY);
+    return draft;
+}
+
+function _johnnyDraftKyRiskCategoryIndex(answer = '') {
+    const text = String(answer || '').toLowerCase();
+    const pairs = [
+        [/electric|ไฟฟ|สายไฟ|ปลั๊ก|ช็อต|shock/, 5],
+        [/chemical|สารเคมี|sds|รั่วไหล|spill/, 4],
+        [/machine|เครื่องจักร|หนีบ|ตัด|หมุน|guard|loto/, 2],
+        [/unsafe act|พฤติกรรม|ไม่สวม|ไม่ใส่|ฝ่าฝืน/, 3],
+        [/แสง|เสียง|ฝุ่น|ร้อน|อากาศ|environment/, 1],
+    ];
+    const found = pairs.find(([pattern]) => pattern.test(text));
+    return found ? found[1] : 0;
+}
+
+function _applyJohnnyImageRiskDraftToKy() {
+    const draft = _consumeJohnnyImageRiskDraft('ky');
+    if (!draft) return;
+
+    const form = document.getElementById('ky-form');
+    if (!form) return;
+
+    const answer = String(draft.answer || '').trim();
+    const categoryIndex = _johnnyDraftKyRiskCategoryIndex(answer);
+    const keyword = form.querySelector('[name="KYTKeyword"]');
+    const hazard = form.querySelector('[name="HazardDescription"]');
+    const countermeasure = form.querySelector('[name="Countermeasure"]');
+    const riskInput = form.querySelectorAll('input[name="RiskCategory"]')[categoryIndex];
+
+    if (riskInput) riskInput.checked = true;
+    if (keyword && !keyword.value) keyword.value = 'Johnny AI image risk';
+    if (hazard && !hazard.value) hazard.value = `Draft from Johnny AI image risk analysis\n\n${answer}`;
+    if (countermeasure && !countermeasure.value) {
+        countermeasure.value = 'Review the actual work area, confirm the hazards with the team, and define immediate controls plus permanent preventive actions before submitting.';
+    }
+
+    renderKySubmitSummary();
+    form.dispatchEvent(new Event('input', { bubbles: true }));
+    form.dispatchEvent(new Event('change', { bubbles: true }));
+    showToast('เติม draft จาก Johnny AI แล้ว กรุณาตรวจสอบก่อนส่ง', 'success');
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -129,7 +492,7 @@ function buildShell() {
     <div class="space-y-6 animate-fade-in pb-10">
 
         <!-- ═══ HERO HEADER ═══ -->
-        <div class="relative overflow-hidden rounded-2xl" style="background:linear-gradient(135deg,#064e3b 0%,#065f46 55%,#0d9488 100%)">
+        <div class="relative overflow-hidden rounded-2xl" data-ky-card-image="ky-hero" style="background:linear-gradient(135deg,#064e3b 0%,#065f46 55%,#0d9488 100%)">
             <div class="absolute inset-0 opacity-10 pointer-events-none">
                 <svg width="100%" height="100%"><defs><pattern id="ky-dots" width="24" height="24" patternUnits="userSpaceOnUse"><circle cx="12" cy="12" r="1.3" fill="white"/></pattern></defs><rect width="100%" height="100%" fill="url(#ky-dots)"/></svg>
             </div>
@@ -194,7 +557,10 @@ async function switchTab(tab) {
 
     switch (tab) {
         case 'dashboard': await renderDashboard(content); break;
-        case 'submit':    await renderSubmitForm(content); break;
+        case 'submit':
+            await renderSubmitForm(content);
+            setTimeout(_applyJohnnyImageRiskDraftToKy, 0);
+            break;
         case 'history':   await renderHistory(content);   break;
         case 'manage':    await renderManage(content);    break;
     }
@@ -224,6 +590,81 @@ async function _fetchProgramConfig(year) {
         const res = await API.get(`/ky/program-config?year=${year}`);
         _kyProgConfig = normalizeApiArray(res?.data ?? res);
     } catch { _kyProgConfig = []; }
+}
+
+function parseKySafetyUnits(value) {
+    if (!value) return [];
+    if (Array.isArray(value)) return value.map(v => String(v || '').trim()).filter(Boolean);
+    try {
+        const parsed = JSON.parse(value);
+        if (Array.isArray(parsed)) return parsed.map(v => String(v || '').trim()).filter(Boolean);
+    } catch (_) {}
+    return String(value).split(',').map(v => v.trim()).filter(Boolean);
+}
+
+function formatKyDateTime(value) {
+    if (!value) return '-';
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) return String(value);
+    return date.toLocaleString('th-TH', { dateStyle: 'short', timeStyle: 'short' });
+}
+
+function getKyConfigForDept(department, year = _statsYear) {
+    const dept = String(department || '').trim();
+    return _kyProgConfig.find(c => String(c.Department || '').trim() === dept && (!year || Number(c.Year || year) === Number(year))) || null;
+}
+
+function getKySafetyUnitsForDept(department, year = _statsYear) {
+    const cfg = getKyConfigForDept(department, year);
+    return parseKySafetyUnits(cfg?.SafetyUnits);
+}
+
+function getKyDepartmentOptions(year = _statsYear) {
+    const configured = _kyProgConfig
+        .filter(c => !year || Number(c.Year || year) === Number(year))
+        .filter(c => c.IsActive === undefined || Number(c.IsActive) === 1)
+        .map(c => String(c.Department || '').trim())
+        .filter(Boolean);
+    const source = configured.length ? configured : _departments;
+    return [...new Set(source.map(d => String(d || '').trim()).filter(Boolean))].sort((a, b) => a.localeCompare(b));
+}
+
+function buildKyDepartmentOptions(selected = '', year = _statsYear) {
+    const list = getKyDepartmentOptions(year);
+    const value = String(selected || '').trim();
+    if (value && !list.includes(value)) list.unshift(value);
+    return list.map(dept => `<option value="${escHtml(dept)}" ${dept === value ? 'selected' : ''}>${escHtml(dept)}</option>`).join('');
+}
+
+function buildKyHeroTargetCard(kpi) {
+    const target = Number(kpi?.targetTotal || 0);
+    const actual = Number(kpi?.targetSubmitted ?? kpi?.total ?? 0);
+    if (!target) return '';
+    const rawPct = Math.round(actual * 100 / target);
+    const pct = Math.min(100, rawPct);
+    const now = new Date();
+    const currentYear = now.getFullYear();
+    const yearStart = new Date(currentYear, 0, 1);
+    const yearEnd = new Date(currentYear + 1, 0, 1);
+    const elapsedPct = Math.max(0, Math.min(100, Math.round(((now - yearStart) / (yearEnd - yearStart)) * 100)));
+    const paceGap = rawPct - elapsedPct;
+    const paceLabel = rawPct >= 100 ? 'ครบเป้าปี' : paceGap >= 0 ? 'ตามแผนปี' : paceGap >= -10 ? 'ใกล้แผนปี' : 'ต่ำกว่าแผนปี';
+    const barColor = rawPct >= 100 ? '#6ee7b7' : paceGap >= 0 ? '#6ee7b7' : paceGap >= -10 ? '#fde68a' : '#fca5a5';
+    const textColor = rawPct >= 100 ? '#6ee7b7' : paceGap >= 0 ? '#6ee7b7' : paceGap >= -10 ? '#fde68a' : '#fca5a5';
+    return `
+        <div class="rounded-xl px-4 py-3 text-center"
+             style="background:rgba(255,255,255,0.12);backdrop-filter:blur(6px);min-width:116px">
+            <p class="text-2xl font-black leading-tight" style="color:${textColor}">
+                ${rawPct}<span class="text-sm font-bold" style="opacity:0.8">%</span>
+            </p>
+            <p class="text-[11px] mt-0.5 font-bold" style="color:rgba(167,243,208,0.9)">KPI รวมแผนก</p>
+            <p class="text-[10px] leading-tight" style="color:rgba(209,250,229,0.72)">${actual}/${target} · ${paceLabel}</p>
+            <div class="mt-1.5 h-1.5 rounded-full overflow-hidden"
+                 style="background:rgba(255,255,255,0.2)">
+                <div class="h-full rounded-full"
+                     style="width:${pct}%;background:${barColor}"></div>
+            </div>
+        </div>`;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -257,7 +698,9 @@ async function _loadHeroStats() {
                 <p class="text-[11px] mt-0.5" style="color:rgba(167,243,208,0.85)">${s.label}</p>
             </div>`).join('');
 
-        const atCard = await buildActivityCard('ky');
+        const atCard = _isAdmin
+            ? buildKyHeroTargetCard(kpi)
+            : await buildActivityCard('ky', { noDataMode: 'empty' });
         if (atCard) {
             strip.insertAdjacentHTML('beforeend', atCard);
             strip.className = 'grid grid-cols-3 md:grid-cols-5 gap-3 w-full md:w-auto flex-shrink-0';
@@ -273,24 +716,33 @@ async function _loadHeroStats() {
 async function renderDashboard(container) {
     container.innerHTML = `
         <div class="space-y-5">
-            <div class="flex items-center justify-end gap-3">
-                <button id="ky-pdf-btn"
-                    class="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-sm font-semibold border border-indigo-200 text-indigo-700 bg-white hover:bg-indigo-50 transition-all">
-                    <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                              d="M12 10v6m0 0l-3-3m3 3l3-3M4 17v1a2 2 0 002 2h12a2 2 0 002-2v-1M7 7l4.586-4.586a2 2 0 012.828 0L19 7"/>
-                    </svg>
-                    Export PDF
-                </button>
-                <select id="ky-stats-year" class="form-input py-1.5 text-sm w-32">
-                    ${[0,1,2].map(i => {
-                        const y = new Date().getFullYear() - i;
-                        return `<option value="${y}" ${y === _statsYear ? 'selected':''}>${y}</option>`;
-                    }).join('')}
-                </select>
+            <div class="ds-section p-5" data-ky-card-image="ky-dashboard-summary">
+                <div class="flex flex-col lg:flex-row lg:items-center justify-between gap-4 pb-4 border-b border-slate-100">
+                    <div>
+                        <p class="text-xs font-bold text-emerald-700 uppercase">KY Dashboard</p>
+                        <h2 class="text-lg font-bold text-slate-800 mt-1">ภาพรวมกิจกรรม KY / Hazard Prediction Activity</h2>
+                        <p class="text-sm text-slate-500 mt-1">ติดตามการส่งรายแผนก สถานะตรวจสอบ และหัวข้อความเสี่ยงในปีที่เลือก</p>
+                    </div>
+                    <div class="flex flex-wrap items-center gap-2" data-ky-card-ignore>
+                        <label class="sr-only" for="ky-stats-year">ปีข้อมูล KY</label>
+                        <select id="ky-stats-year" class="form-input py-2 text-sm w-32">
+                            ${[0,1,2].map(i => {
+                                const y = new Date().getFullYear() - i;
+                                return `<option value="${y}" ${y === _statsYear ? 'selected':''}>${y}</option>`;
+                            }).join('')}
+                        </select>
+                        <button id="ky-pdf-btn"
+                            class="flex items-center gap-1.5 px-3 py-2 rounded-xl text-sm font-semibold border border-indigo-200 text-indigo-700 bg-white hover:bg-indigo-50 transition-all">
+                            <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                      d="M12 10v6m0 0l-3-3m3 3l3-3M4 17v1a2 2 0 002 2h12a2 2 0 002-2v-1M7 7l4.586-4.586a2 2 0 012.828 0L19 7"/>
+                            </svg>
+                            Export PDF
+                        </button>
+                    </div>
+                </div>
+                <div id="ky-executive-alert" class="pt-4"></div>
             </div>
-
-            <div id="ky-executive-alert"></div>
 
             <!-- KPI -->
             <div id="ky-kpi-row" class="grid grid-cols-2 xl:grid-cols-5 gap-4">
@@ -299,37 +751,37 @@ async function renderDashboard(container) {
                 ).join('')}
             </div>
 
-            <div id="ky-executive-summary"></div>
+            <div class="grid grid-cols-1 xl:grid-cols-3 gap-4">
+                <div id="ky-executive-summary" class="xl:col-span-2"></div>
+                <div id="ky-monthly-tracker-panel"></div>
+            </div>
+
+            <div id="ky-evidence-completion-panel"></div>
 
             <div id="ky-prog-progress"></div>
 
-            <!-- Completion bar -->
-            <div class="ds-section p-5">
-                <div class="flex items-center justify-between mb-3">
-                    <h3 class="text-sm font-bold text-slate-600">Department Submission Tracker (เดือนนี้)</h3>
-                    <span id="ky-completion-badge" class="text-xs font-bold px-2.5 py-1 rounded-full bg-indigo-100 text-indigo-700">--</span>
-                </div>
-                <div id="ky-pending-list" class="text-xs text-slate-400">กำลังโหลด...</div>
-            </div>
+            <div id="ky-video-showcase"></div>
 
             <!-- Charts -->
             <div class="grid grid-cols-1 lg:grid-cols-3 gap-4">
-                <div class="lg:col-span-2 ds-section p-5">
+                <div class="lg:col-span-2 ds-section p-5" data-ky-card-image="ky-monthly-trend">
                     <h3 class="text-sm font-bold text-slate-600 mb-4">แนวโน้มกิจกรรม KY รายเดือน</h3>
                     <div class="relative" style="height:220px"><canvas id="ky-chart-line"></canvas></div>
                 </div>
-                <div class="ds-section p-5">
+                <div class="ds-section p-5" data-ky-card-image="ky-risk-category">
                     <h3 class="text-sm font-bold text-slate-600 mb-4">ประเภทความเสี่ยง</h3>
                     <div class="relative" style="height:220px"><canvas id="ky-chart-doughnut"></canvas></div>
                 </div>
             </div>
 
-            <div class="ds-section p-5">
-                <h3 class="text-sm font-bold text-slate-600 mb-4">กิจกรรม KY แยกตามแผนก</h3>
-                <div class="relative" style="height:200px"><canvas id="ky-chart-bar"></canvas></div>
+            <div class="grid grid-cols-1 xl:grid-cols-2 gap-4">
+                <div class="ds-section p-5" data-ky-card-image="ky-department-activity">
+                    <h3 class="text-sm font-bold text-slate-600 mb-1">กิจกรรม KY แยกตามแผนก</h3>
+                    <p class="text-xs text-slate-400 mb-4">เทียบจำนวนกิจกรรมของแผนกในปีที่เลือก</p>
+                    <div class="relative" style="height:240px"><canvas id="ky-chart-bar"></canvas></div>
+                </div>
+                <div id="ky-hazard-pattern"></div>
             </div>
-
-            <div id="ky-hazard-pattern"></div>
 
             <div id="ky-heatmap-panel"></div>
         </div>`;
@@ -341,6 +793,7 @@ async function renderDashboard(container) {
         renderExecutiveAlert(data.kpi || {}, data.pendingDepts || []);
         renderKPI(data.kpi || {});
         renderExecutiveSummary(data);
+        renderKyEvidenceFollowupPanel(null);
         renderProgramProgress(data.programProgress || [], data.usingConfig);
         renderCompletionTracker(data.kpi || {}, data.pendingDepts || []);
         renderLineChart(data.monthly || []);
@@ -348,6 +801,8 @@ async function renderDashboard(container) {
         renderBarChart(data.byDept || []);
         renderHazardPattern(data.topKeywords || []);
         renderDepartmentHeatmap(data.deptMonthly || [], data.byDept || []);
+        await loadAndRenderKyEvidenceCompletion();
+        await renderVideoShowcase();
     } catch (err) {
         console.error('KY stats error:', err);
     }
@@ -366,6 +821,7 @@ function renderKPI(kpi) {
     if (!row) return;
     row.innerHTML = cards.map(c => `
         <button type="button" class="ds-metric-card p-5 flex items-center gap-4 text-left hover:-translate-y-0.5 hover:shadow-lg transition-all"
+                data-ky-card-image="ky-kpi-${_kySafeFilePart(c.filter)}"
                 data-ky-kpi-filter="${c.filter}" title="คลิกเพื่อดูรายการในแท็บประวัติ">
             <div class="w-11 h-11 rounded-xl flex items-center justify-center flex-shrink-0"
                  style="background:${c.color}18; color:${c.color}">
@@ -432,26 +888,618 @@ function renderExecutiveSummary(data) {
     const coverageGap = Math.max(0, (kpi.totalDepts || 0) - (kpi.deptSubmitted || 0));
 
     el.innerHTML = `
-        <div class="grid grid-cols-1 lg:grid-cols-4 gap-4">
-            <div class="ds-metric-card p-5 border-l-4 border-l-indigo-500">
-                <p class="text-xs font-bold text-slate-400 uppercase tracking-wide">This Month</p>
-                <p class="text-2xl font-bold text-slate-800 mt-1">${currentMonthCount}</p>
-                <p class="text-xs text-slate-500 mt-1">กิจกรรม KY ที่ส่งในเดือนปัจจุบัน</p>
+        <div class="ds-section p-5 h-full" data-ky-card-image="ky-executive-summary">
+            <div class="flex flex-col lg:flex-row lg:items-start justify-between gap-4 mb-5">
+                <div>
+                    <p class="text-xs font-bold text-indigo-600 uppercase">Annual Overview</p>
+                    <h3 class="text-base font-bold text-slate-800 mt-1">สรุปภาพรวม KY ปี ${_statsYear}</h3>
+                    <p class="text-sm text-slate-500 mt-1">ใช้ดูความครอบคลุมการส่งรายแผนก และหัวข้อความเสี่ยงที่ควรนำไปติดตามต่อ</p>
+                </div>
+                <span class="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-bold ${coverageGap ? 'bg-amber-50 text-amber-700 border border-amber-100' : 'bg-emerald-50 text-emerald-700 border border-emerald-100'}">
+                    ${coverageGap ? `ต้องติดตาม ${coverageGap} แผนก` : 'ครอบคลุมครบตามข้อมูลปีนี้'}
+                </span>
             </div>
-            <div class="ds-metric-card p-5 border-l-4 border-l-emerald-500">
-                <p class="text-xs font-bold text-slate-400 uppercase tracking-wide">Department Coverage</p>
-                <p class="text-2xl font-bold text-slate-800 mt-1">${kpi.deptSubmitted || 0}/${kpi.totalDepts || 0}</p>
-                <p class="text-xs text-slate-500 mt-1">ยังเหลือ ${coverageGap} แผนกที่ต้องติดตาม</p>
+            <div class="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-3">
+                <div class="rounded-xl border border-slate-100 bg-slate-50 p-4">
+                    <p class="text-xs font-bold text-slate-400">เดือน ${MONTHS_TH[currentMonth - 1]} ${_statsYear}</p>
+                    <p class="text-2xl font-bold text-slate-800 mt-1">${currentMonthCount}</p>
+                    <p class="text-xs text-slate-500 mt-1">กิจกรรมที่ส่งเข้าระบบ</p>
+                </div>
+                <div class="rounded-xl border border-emerald-100 bg-emerald-50/60 p-4">
+                    <p class="text-xs font-bold text-emerald-700">Coverage</p>
+                    <p class="text-2xl font-bold text-slate-800 mt-1">${kpi.deptSubmitted || 0}/${kpi.totalDepts || 0}</p>
+                    <p class="text-xs text-slate-500 mt-1">แผนกที่มีรายการในปีนี้</p>
+                </div>
+                <div class="rounded-xl border border-orange-100 bg-orange-50/60 p-4 min-w-0">
+                    <p class="text-xs font-bold text-orange-700">ความเสี่ยงเด่น</p>
+                    <p class="text-base font-bold text-slate-800 mt-2 truncate" title="${escHtml(topRisk)}">${escHtml(topRisk)}</p>
+                    <p class="text-xs text-slate-500 mt-1">ประเภทที่พบมากที่สุด</p>
+                </div>
+                <div class="rounded-xl border border-sky-100 bg-sky-50/60 p-4 min-w-0">
+                    <p class="text-xs font-bold text-sky-700">แผนกที่ส่งสูงสุด</p>
+                    <p class="text-base font-bold text-slate-800 mt-2 truncate" title="${escHtml(topDept)}">${escHtml(topDept)}</p>
+                    <p class="text-xs text-slate-500 mt-1">จากรายการปีที่เลือก</p>
+                </div>
             </div>
-            <div class="ds-metric-card p-5 border-l-4 border-l-orange-500">
-                <p class="text-xs font-bold text-slate-400 uppercase tracking-wide">Top Risk Theme</p>
-                <p class="text-lg font-bold text-slate-800 mt-1 truncate">${escHtml(topRisk)}</p>
-                <p class="text-xs text-slate-500 mt-1">ประเภทความเสี่ยงที่พบมากที่สุด</p>
+        </div>`;
+}
+
+async function loadAndRenderKyEvidenceCompletion() {
+    const el = document.getElementById('ky-evidence-completion-panel');
+    if (!el) return;
+    try {
+        const params = new URLSearchParams({ year: String(_statsYear) });
+        const overviewRes = await API.get(`/ky/evidence-overview?${params.toString()}`);
+        const overview = normalizeApiObject(overviewRes?.data ?? overviewRes);
+        const rows = normalizeApiArray(overview.rows || []);
+        const records = rows.flatMap(row => normalizeApiArray(row.records || []).map(record => ({
+            ...record,
+            id: record.id,
+            ActivityDate: record.activityDate,
+            ReporterID: record.reporterId,
+            ReporterName: record.reporterName,
+            SubmittedByID: record.submittedById,
+            SubmittedByName: record.submittedByName,
+            Department: record.department,
+            SafetyUnit: record.safetyUnit,
+            TeamName: record.teamName,
+            KYTKeyword: record.kytKeyword,
+            RiskCategory: record.riskCategory,
+            HazardDescription: record.hazard,
+            Status: record.status,
+            AttachmentUrl: record.hasFile ? 'configured-evidence-file' : '',
+            VideoUrl: record.hasVideo ? 'configured-evidence-video' : '',
+            canUploadVideo: Boolean(record.canUploadVideo),
+        })));
+        _kyEvidenceOverviewRows = rows;
+        _kyEvidenceRecords = records;
+        renderKyEvidenceFollowupPanel(records);
+    } catch (err) {
+        console.error('KY evidence completion error:', err);
+        _kyEvidenceOverviewRows = [];
+        _kyEvidenceRecords = [];
+        el.innerHTML = `
+            <div class="ds-section p-5 border border-red-100 bg-red-50/40">
+                <div class="text-sm font-bold text-red-700">Evidence completion unavailable</div>
+                <div class="text-xs text-red-500 mt-1">${escHtml(err.message || 'Unable to load KY evidence status')}</div>
+            </div>`;
+    }
+}
+
+function renderKyEvidenceCompletionPanel(records) {
+    const el = document.getElementById('ky-evidence-completion-panel');
+    if (!el) return;
+    if (!Array.isArray(records)) {
+        el.innerHTML = `
+            <div class="ds-section p-5" data-ky-card-image="ky-evidence-completion">
+                <div class="flex flex-col lg:flex-row lg:items-center justify-between gap-3">
+                    <div>
+                        <p class="text-xs font-bold text-indigo-600 uppercase">Safety Unit Evidence</p>
+                        <h3 class="text-sm font-bold text-slate-700 mt-1">Loading file / video progress</h3>
+                    </div>
+                    <div class="h-9 w-48 rounded-xl bg-slate-100 animate-pulse"></div>
+                </div>
+            </div>`;
+        return;
+    }
+    if (!records.length) {
+        _kyEvidenceRecords = [];
+        el.innerHTML = `
+            <div class="ds-section p-5" data-ky-card-image="ky-evidence-completion">
+                <div class="flex flex-col lg:flex-row lg:items-center justify-between gap-3">
+                    <div>
+                        <p class="text-xs font-bold text-indigo-600 uppercase">Safety Unit Evidence</p>
+                        <h3 class="text-sm font-bold text-slate-700 mt-1">KY file / video progress</h3>
+                        <p class="text-sm text-slate-500 mt-1">No KY activity found for ${_statsYear}.</p>
+                    </div>
+                    <span class="px-3 py-1 rounded-full bg-slate-50 border border-slate-100 text-xs font-bold text-slate-500">No records</span>
+                </div>
+            </div>`;
+        return;
+    }
+
+    _kyEvidenceRecords = records;
+    const summary = summarizeKyEvidence(records);
+    const unitRows = buildKyEvidenceUnitRows(records);
+    const waitingUnits = unitRows
+        .filter(row => row.waitingVideo || row.missingFile)
+        .sort((a, b) => (b.waitingVideo + b.missingFile) - (a.waitingVideo + a.missingFile) || a.department.localeCompare(b.department))
+        .slice(0, 6);
+    const topRows = unitRows
+        .slice()
+        .sort((a, b) => a.videoPct - b.videoPct || b.waitingVideo - a.waitingVideo || a.department.localeCompare(b.department))
+        .slice(0, 12);
+    const metric = (value, label, tone, filter) => `
+        <button type="button" data-ky-evidence-filter="${escHtml(filter)}"
+                class="rounded-xl border px-4 py-3 text-left transition-all hover:-translate-y-0.5 hover:shadow-sm ${tone}">
+            <div class="text-2xl font-bold">${escHtml(String(value))}</div>
+            <div class="text-xs font-semibold mt-0.5">${escHtml(label)}</div>
+        </button>`;
+
+    el.innerHTML = `
+        <div class="ds-section p-5" data-ky-card-image="ky-evidence-completion">
+            <div class="flex flex-col lg:flex-row lg:items-start justify-between gap-4 mb-5">
+                <div>
+                    <p class="text-xs font-bold text-indigo-600 uppercase">Safety Unit Evidence</p>
+                    <h3 class="text-base font-bold text-slate-800 mt-1">KY progress + file / video completion</h3>
+                    <p class="text-sm text-slate-500 mt-1">One view for yearly KY progress and evidence readiness by Safety Unit.</p>
+                </div>
+                <div class="flex flex-wrap gap-2" data-ky-card-ignore>
+                    <button type="button" data-ky-evidence-filter="all" class="px-3 py-2 rounded-xl border border-slate-200 bg-white text-xs font-bold text-slate-600 hover:bg-slate-50">All</button>
+                    <button type="button" data-ky-evidence-filter="complete" class="px-3 py-2 rounded-xl border border-emerald-200 bg-emerald-50 text-xs font-bold text-emerald-700">Complete</button>
+                    <button type="button" data-ky-evidence-filter="waiting_video" class="px-3 py-2 rounded-xl border border-purple-200 bg-purple-50 text-xs font-bold text-purple-700">Need video</button>
+                    <button type="button" data-ky-evidence-filter="missing_file" class="px-3 py-2 rounded-xl border border-red-200 bg-red-50 text-xs font-bold text-red-700">Missing file</button>
+                </div>
             </div>
-            <div class="ds-metric-card p-5 border-l-4 border-l-sky-500">
-                <p class="text-xs font-bold text-slate-400 uppercase tracking-wide">Most Active Dept.</p>
-                <p class="text-lg font-bold text-slate-800 mt-1 truncate">${escHtml(topDept)}</p>
-                <p class="text-xs text-slate-500 mt-1">แผนกที่ส่งกิจกรรมสูงสุดในปีที่เลือก</p>
+            <div class="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-5">
+                ${metric(summary.complete, 'File + video complete', 'border-emerald-100 bg-emerald-50 text-emerald-700', 'complete')}
+                ${metric(summary.waitingVideo, 'Waiting for video', 'border-purple-100 bg-purple-50 text-purple-700', 'waiting_video')}
+                ${metric(summary.missingFile, 'Missing file', 'border-red-100 bg-red-50 text-red-700', 'missing_file')}
+                ${metric(`${summary.complete}/${summary.total} = ${summary.completionPct}%`, 'Video completion rate', 'border-indigo-100 bg-indigo-50 text-indigo-700', 'no_video')}
+            </div>
+            <div class="grid grid-cols-1 2xl:grid-cols-[minmax(0,1.45fr)_minmax(320px,0.55fr)] gap-4">
+                <div class="rounded-2xl border border-slate-100 bg-slate-50/60 p-4">
+                    <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-2 mb-4">
+                        <div>
+                            <h4 class="text-sm font-bold text-slate-700">Safety Unit evidence progress</h4>
+                            <p class="text-xs text-slate-400 mt-0.5">Stacked bars show complete, waiting video, and missing file counts per unit.</p>
+                        </div>
+                        <div class="flex flex-wrap gap-2 text-[10px] font-bold">
+                            <span class="inline-flex items-center gap-1 text-emerald-700"><span class="h-2 w-2 rounded-full bg-emerald-500"></span>Complete</span>
+                            <span class="inline-flex items-center gap-1 text-purple-700"><span class="h-2 w-2 rounded-full bg-purple-500"></span>Need video</span>
+                            <span class="inline-flex items-center gap-1 text-red-700"><span class="h-2 w-2 rounded-full bg-red-500"></span>Missing file</span>
+                        </div>
+                    </div>
+                    <div class="space-y-3 max-h-[560px] overflow-y-auto pr-1">
+                        ${topRows.map(renderKyEvidenceUnitRow).join('')}
+                    </div>
+                </div>
+                <div class="rounded-2xl border border-purple-100 bg-purple-50/50 p-4">
+                    <div class="flex items-center justify-between gap-2 mb-4">
+                        <div>
+                            <h4 class="text-sm font-bold text-slate-700">Units needing video</h4>
+                            <p class="text-xs text-slate-500 mt-0.5">Top follow-up targets.</p>
+                        </div>
+                        <span class="px-2 py-0.5 rounded-full bg-white border border-purple-100 text-[11px] font-bold text-purple-700">${waitingUnits.length}</span>
+                    </div>
+                    <div class="space-y-2">
+                        ${waitingUnits.length ? waitingUnits.map(row => `
+                            <button type="button" data-ky-evidence-filter="waiting_video"
+                                class="w-full rounded-xl border border-white bg-white px-3 py-2 text-left hover:border-purple-200 hover:bg-purple-50 transition-colors">
+                                <div class="flex items-center justify-between gap-2">
+                                    <div class="min-w-0">
+                                        <p class="text-xs font-bold text-slate-700 truncate">${escHtml(row.department)}</p>
+                                        <p class="text-[11px] text-slate-400 truncate">${escHtml(row.unitLabel)}</p>
+                                    </div>
+                                    <span class="text-xs font-black text-purple-700">${row.waitingVideo}</span>
+                                </div>
+                            </button>`).join('') : `
+                            <div class="rounded-xl border border-emerald-100 bg-white px-3 py-4 text-sm font-bold text-emerald-700">
+                                All submitted records have video evidence.
+                            </div>`}
+                    </div>
+                    ${summary.missingFile ? `
+                    <div class="mt-4 rounded-xl border border-red-100 bg-white px-3 py-3 text-xs text-red-700">
+                        <span class="font-bold">${summary.missingFile} record(s)</span> still miss the required attachment file.
+                    </div>` : ''}
+                </div>
+            </div>
+        </div>`;
+}
+
+function buildKyEvidenceUnitRows(records) {
+    const rows = new Map();
+    const progress = normalizeApiArray(_lastStatsData?.programProgress || []);
+    const keyOf = (dept, unit) => `${dept || '-'}::${unit || '-'}`;
+    const ensure = (dept, unit, extra = {}) => {
+        const key = keyOf(dept, unit);
+        if (!rows.has(key)) {
+            rows.set(key, {
+                department: dept || '-',
+                unitLabel: unit || 'Department total',
+                submitted: 0,
+                target: extra.target || 0,
+                progressSubmitted: extra.submitted || 0,
+                complete: 0,
+                waitingVideo: 0,
+                missingFile: 0,
+                noVideo: 0,
+                videoPct: 0,
+            });
+        }
+        const row = rows.get(key);
+        if (extra.target) row.target = extra.target;
+        if (extra.submitted) row.progressSubmitted = extra.submitted;
+        return row;
+    };
+
+    progress.forEach(dept => {
+        const units = normalizeApiArray(dept.safetyUnitProgress || []);
+        if (units.length) {
+            units.forEach(unit => ensure(dept.department, unit.name, {
+                target: Number(unit.target || dept.unitTarget || 0),
+                submitted: Number(unit.submitted || 0),
+            }));
+        } else {
+            ensure(dept.department, '', {
+                target: Number(dept.target || 0),
+                submitted: Number(dept.submitted || 0),
+            });
+        }
+    });
+
+    records.forEach(record => {
+        const row = ensure(record.Department || '-', record.SafetyUnit || '');
+        row.submitted += 1;
+        const status = kyEvidenceStatus(record).id;
+        if (status === 'complete') row.complete += 1;
+        else if (status === 'waiting_video') row.waitingVideo += 1;
+        else row.missingFile += 1;
+        if (!kyHasEvidenceVideo(record)) row.noVideo += 1;
+    });
+
+    return Array.from(rows.values())
+        .map(row => ({
+            ...row,
+            target: row.target || row.submitted || row.progressSubmitted || 0,
+            videoPct: row.submitted ? Math.round((row.complete / row.submitted) * 100) : 0,
+            progressPct: row.target ? Math.min(100, Math.round(((row.progressSubmitted || row.submitted) / row.target) * 100)) : (row.submitted ? 100 : 0),
+        }))
+        .sort((a, b) => a.videoPct - b.videoPct || b.waitingVideo - a.waitingVideo || a.department.localeCompare(b.department));
+}
+
+function renderKyEvidenceUnitRow(row) {
+    const total = Math.max(row.submitted, 1);
+    const completePct = row.complete / total * 100;
+    const waitingPct = row.waitingVideo / total * 100;
+    const missingPct = row.missingFile / total * 100;
+    const tone = row.videoPct >= 80 ? 'text-emerald-700 bg-emerald-50 border-emerald-100'
+        : row.videoPct >= 40 ? 'text-purple-700 bg-purple-50 border-purple-100'
+        : 'text-red-700 bg-red-50 border-red-100';
+    return `
+        <div class="rounded-xl border border-white bg-white px-3 py-3">
+            <div class="grid grid-cols-1 xl:grid-cols-[minmax(180px,0.75fr)_minmax(260px,1fr)_minmax(140px,0.45fr)] gap-3 xl:items-center">
+                <div class="min-w-0">
+                    <p class="text-sm font-bold text-slate-700 truncate" title="${escHtml(row.department)}">${escHtml(row.department)}</p>
+                    <p class="text-[11px] text-slate-400 truncate" title="${escHtml(row.unitLabel)}">${escHtml(row.unitLabel)}</p>
+                </div>
+                <div>
+                    <div class="flex justify-between gap-2 text-[10px] text-slate-400 mb-1">
+                        <span>Evidence completion</span>
+                        <span>${row.complete}/${row.submitted || 0} videos · ${row.videoPct}%</span>
+                    </div>
+                    <div class="flex h-3 overflow-hidden rounded-full bg-slate-100">
+                        <div class="h-full bg-emerald-500" style="width:${completePct}%"></div>
+                        <div class="h-full bg-purple-500" style="width:${waitingPct}%"></div>
+                        <div class="h-full bg-red-500" style="width:${missingPct}%"></div>
+                    </div>
+                    <div class="mt-2">
+                        <div class="flex justify-between gap-2 text-[10px] text-slate-400 mb-1">
+                            <span>KY yearly progress</span>
+                            <span>${row.progressSubmitted || row.submitted || 0}/${row.target || 0} · ${row.progressPct}%</span>
+                        </div>
+                        <div class="h-1.5 rounded-full bg-slate-100 overflow-hidden">
+                            <div class="h-full rounded-full bg-indigo-500" style="width:${row.progressPct}%"></div>
+                        </div>
+                    </div>
+                </div>
+                <div class="flex flex-wrap xl:justify-end gap-1.5">
+                    <span class="rounded-full border px-2 py-0.5 text-[10px] font-bold ${tone}">${row.videoPct}% video</span>
+                    ${row.waitingVideo ? `<button type="button" data-ky-evidence-filter="waiting_video" class="rounded-full border border-purple-100 bg-purple-50 px-2 py-0.5 text-[10px] font-bold text-purple-700">${row.waitingVideo} need video</button>` : ''}
+                    ${row.missingFile ? `<button type="button" data-ky-evidence-filter="missing_file" class="rounded-full border border-red-100 bg-red-50 px-2 py-0.5 text-[10px] font-bold text-red-700">${row.missingFile} missing file</button>` : ''}
+                </div>
+            </div>
+        </div>`;
+}
+
+function buildConfiguredKyEvidenceRows(records) {
+    if (_kyEvidenceOverviewRows.length) {
+        return _kyEvidenceOverviewRows.map(row => ({
+            key: row.key || `${String(row.department || '').trim()}::${String(row.safetyUnit || '').trim()}`,
+            department: String(row.department || '').trim(),
+            safetyUnit: String(row.safetyUnit || '').trim(),
+            unitLabel: String(row.safetyUnit || '').trim() || String(row.department || '').trim(),
+            isDepartmentScope: !String(row.safetyUnit || '').trim(),
+            target: Number(row.yearlyTarget || 0),
+            progressSubmitted: Number(row.submitted || 0),
+            submitted: Number(row.submitted || 0),
+            complete: Number(row.complete || 0),
+            waitingVideo: Number(row.waitingVideo || 0),
+            missingFile: Number(row.missingFile || 0),
+            progressPct: Number(row.progressPct || 0),
+            records: normalizeApiArray(row.records || []),
+        }));
+    }
+    const rows = new Map();
+    const keyOf = (department, unit) => `${String(department || '').trim()}::${String(unit || '').trim()}`;
+    normalizeApiArray(_lastStatsData?.programProgress || []).forEach(department => {
+        normalizeApiArray(department.safetyUnitProgress || []).forEach(unit => {
+            const departmentName = String(department.department || '').trim();
+            const unitName = String(unit.name || '').trim();
+            if (!departmentName || !unitName) return;
+            const key = keyOf(departmentName, unitName);
+            rows.set(key, {
+                key,
+                department: departmentName,
+                safetyUnit: unitName,
+                unitLabel: unitName,
+                isDepartmentScope: false,
+                target: Number(unit.target || department.unitTarget || 0),
+                progressSubmitted: Number(unit.submitted || 0),
+                submitted: 0,
+                complete: 0,
+                waitingVideo: 0,
+                missingFile: 0,
+            });
+        });
+    });
+    records.forEach(record => {
+        const row = rows.get(keyOf(record.Department, record.SafetyUnit));
+        if (!row) return;
+        row.submitted += 1;
+        const status = kyEvidenceStatus(record).id;
+        if (status === 'complete') row.complete += 1;
+        else if (status === 'waiting_video') row.waitingVideo += 1;
+        else row.missingFile += 1;
+    });
+    return Array.from(rows.values()).map(row => ({
+        ...row,
+        target: row.target || row.progressSubmitted || row.submitted || 0,
+        progressPct: row.target ? Math.min(100, Math.round((row.progressSubmitted / row.target) * 100)) : 0,
+    })).sort((a, b) =>
+        (b.missingFile + b.waitingVideo) - (a.missingFile + a.waitingVideo)
+        || a.progressPct - b.progressPct
+        || a.department.localeCompare(b.department)
+        || a.unitLabel.localeCompare(b.unitLabel));
+}
+
+function getKyEvidenceDisplay(row) {
+    const department = String(row.department || '').trim() || '-';
+    const safetyUnit = String(row.safetyUnit || '').trim();
+    const departmentScope = row.isDepartmentScope || !safetyUnit;
+    return {
+        primary: departmentScope ? department : (safetyUnit || row.unitLabel || '-'),
+        secondary: departmentScope ? '' : department,
+        scopeLabel: departmentScope ? 'Department scope' : 'Safety Unit',
+        departmentScope,
+    };
+}
+
+function renderConfiguredKyEvidenceBar(row, selected = false) {
+    const total = Math.max(row.submitted, 1);
+    const completePct = row.complete / total * 100;
+    const waitingPct = row.waitingVideo / total * 100;
+    const missingPct = row.missingFile / total * 100;
+    const display = getKyEvidenceDisplay(row);
+    return `
+        <button type="button" data-ky-evidence-unit="${escHtml(row.key)}"
+            data-ky-evidence-submitted="${Number(row.submitted || 0)}"
+            data-ky-evidence-department-scope="${display.departmentScope ? '1' : '0'}"
+            class="w-full px-3.5 py-2.5 text-left transition-colors ${selected ? 'bg-indigo-50/80' : 'hover:bg-emerald-50/50 odd:bg-white even:bg-slate-50/70'}">
+            <div class="grid grid-cols-1 lg:grid-cols-[minmax(220px,0.34fr)_minmax(420px,1fr)_minmax(72px,0.08fr)] gap-3 lg:items-center">
+                <div class="min-w-0">
+                    <p class="${display.departmentScope ? 'text-sm font-black text-slate-800' : 'text-[13px] font-extrabold text-slate-800'} leading-tight break-words">${escHtml(display.primary)}</p>
+                    ${display.secondary ? `<p class="text-[10px] font-semibold uppercase tracking-normal text-slate-400 mt-0.5 leading-tight break-words">${escHtml(display.secondary)}</p>` : ''}
+                </div>
+                <div class="min-w-0">
+                    <div class="flex flex-wrap justify-between gap-2 text-[10px] mb-1">
+                        <span class="text-slate-500">ครบ ${row.complete} · รอวิดีโอ ${row.waitingVideo} · ขาดไฟล์ ${row.missingFile}</span>
+                        <span class="font-bold text-slate-700">ผลงาน ${row.progressSubmitted}/${row.target}</span>
+                    </div>
+                    <div class="flex h-4 overflow-hidden rounded bg-slate-100" role="img"
+                        aria-label="${escHtml(row.unitLabel)}: complete ${row.complete}, waiting video ${row.waitingVideo}, missing file ${row.missingFile}">
+                        <span class="h-full bg-emerald-500" style="width:${completePct}%"></span>
+                        <span class="h-full bg-violet-500" style="width:${waitingPct}%"></span>
+                        <span class="h-full bg-rose-500" style="width:${missingPct}%"></span>
+                    </div>
+                </div>
+                <div class="flex items-center justify-between lg:justify-end gap-2">
+                    <span class="text-sm font-black text-slate-700">${row.progressPct}%</span>
+                    <i class="fas fa-chevron-${selected ? 'up' : 'down'} text-[10px] text-slate-400"></i>
+                </div>
+            </div>
+        </button>`;
+}
+
+function canUploadKyFollowupVideo(record) {
+    if (record && Object.prototype.hasOwnProperty.call(record, 'canUploadVideo')) return Boolean(record.canUploadVideo);
+    if (_isAdmin) return true;
+    const user = TSHSession.getUser() || {};
+    const userId = String(user.id || user.employeeId || user.EmployeeID || '');
+    return Boolean(userId) && [record.ReporterID, record.SubmittedByID].some(id => String(id || '') === userId);
+}
+
+function openKyFollowupVideoModal(record) {
+    openModal('แนบวิดีโอ KY เพิ่มเติม', `
+        <form id="ky-followup-video-form" class="space-y-4">
+            <div>
+                <p class="text-sm font-bold text-slate-800">${escHtml(record.TeamName || record.KYTKeyword || 'KY Activity')}</p>
+                <p class="text-xs text-slate-500 mt-1">${escHtml(record.Department || '-')} · ${escHtml(record.SafetyUnit || '-')}</p>
+            </div>
+            <div class="rounded-lg border border-violet-100 bg-violet-50 px-3 py-3 text-xs text-violet-800">
+                เพิ่มเฉพาะวิดีโอหลักฐาน ข้อมูลกิจกรรมและสถานะเดิมจะไม่ถูกแก้ไข
+            </div>
+            <div>
+                <label class="block text-sm font-semibold text-slate-700 mb-1.5" for="ky-followup-video-file">ไฟล์วิดีโอ</label>
+                <input id="ky-followup-video-file" name="video" type="file" accept="video/*" required class="form-input w-full">
+                <p class="text-xs text-slate-400 mt-1">รองรับ MP4, MOV, WebM, AVI, MKV และ MPEG · สูงสุด 200 MB</p>
+            </div>
+            <div class="flex justify-end gap-2">
+                <button type="button" id="ky-followup-video-cancel" class="px-3 py-2 rounded-lg border border-slate-200 text-sm font-bold text-slate-600">ยกเลิก</button>
+                <button type="submit" id="ky-followup-video-save" class="px-3 py-2 rounded-lg bg-violet-600 text-sm font-bold text-white">อัปโหลดวิดีโอ</button>
+            </div>
+        </form>`);
+    document.getElementById('ky-followup-video-cancel')?.addEventListener('click', closeModal);
+    document.getElementById('ky-followup-video-file')?.addEventListener('change', event => validateKySelectedFile(event.target, 'video'));
+    document.getElementById('ky-followup-video-form')?.addEventListener('submit', guardSubmitHandler(async event => {
+        event.preventDefault();
+        const save = document.getElementById('ky-followup-video-save');
+        if (save) save.disabled = true;
+        try {
+            showLoading('กำลังอัปโหลดวิดีโอ...');
+            await API.post(`/ky/${record.id}/video`, new FormData(event.target));
+            closeModal();
+            showToast('แนบวิดีโอ KY สำเร็จ', 'success');
+            await loadAndRenderKyEvidenceCompletion();
+            await renderVideoShowcase();
+        } catch (error) {
+            showError(error);
+        } finally {
+            hideLoading();
+            if (save) save.disabled = false;
+        }
+    }));
+}
+
+function renderConfiguredKyEvidenceDrilldown(row, records) {
+    const matching = records.filter(record =>
+        String(record.Department || '').trim() === row.department
+        && String(record.SafetyUnit || '').trim() === String(row.safetyUnit || '').trim())
+        .filter(record => _kyEvidenceChartFilter === 'all' || kyEvidenceStatus(record).id === _kyEvidenceChartFilter)
+        .sort((a, b) => String(b.ActivityDate || '').localeCompare(String(a.ActivityDate || '')));
+    return `
+        <div class="border-t-2 border-indigo-100 bg-indigo-50/40 px-1 py-4" data-ky-evidence-drilldown>
+            <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-2 mb-3">
+                <div>
+                    <p class="text-sm font-bold text-slate-800">${escHtml(row.unitLabel)}</p>
+                    <p class="text-xs text-slate-500">${escHtml(row.department)} · ${matching.length} รายการตามตัวกรอง</p>
+                </div>
+                <button type="button" data-ky-evidence-unit="${escHtml(row.key)}" class="self-start p-2 text-slate-500 hover:text-slate-800" title="ปิดรายการ"><i class="fas fa-times"></i></button>
+            </div>
+            <div class="divide-y divide-indigo-100 max-h-72 overflow-y-auto">
+                ${matching.length ? matching.map(record => {
+                    const status = kyEvidenceStatus(record);
+                    return `
+                        <div class="grid grid-cols-1 md:grid-cols-[minmax(0,1fr)_auto] gap-3 py-3">
+                            <div class="min-w-0">
+                                <div class="flex flex-wrap items-center gap-2">
+                                    <span class="text-xs font-bold text-slate-700">${formatKyDateTime(record.ActivityDate)}</span>
+                                    ${renderKyEvidenceBadge(record, true)}
+                                </div>
+                                <p class="text-sm font-semibold text-slate-800 mt-1 break-words">${escHtml(record.TeamName || record.KYTKeyword || '-')}</p>
+                                <p class="text-xs text-slate-500 mt-0.5 break-words">${escHtml(record.HazardDescription || '-')}</p>
+                            </div>
+                            <div class="flex items-center gap-2">
+                                <button type="button" class="btn-ky-view px-3 py-2 rounded-lg border border-slate-200 bg-white text-xs font-bold text-slate-700" data-id="${escHtml(record.id || '')}">View</button>
+                                ${status.id === 'waiting_video' && canUploadKyFollowupVideo(record) ? `<button type="button" class="btn-ky-video-followup px-3 py-2 rounded-lg text-xs font-bold text-white" style="background:#7c3aed" data-id="${escHtml(record.id || '')}">เพิ่มวิดีโอ</button>` : ''}
+                                ${_isAdmin && status.id === 'missing_file' ? `<button type="button" class="btn-ky-manage px-3 py-2 rounded-lg text-xs font-bold text-white" style="background:#4f46e5" data-id="${escHtml(record.id || '')}">แนบไฟล์</button>` : ''}
+                            </div>
+                        </div>`;
+                }).join('') : `<p class="py-6 text-center text-sm text-slate-500">ไม่มีรายการในสถานะนี้</p>`}
+            </div>
+        </div>`;
+}
+
+function openConfiguredKyEvidencePopup(row, records) {
+    const matching = records.filter(record =>
+        String(record.Department || '').trim() === row.department
+        && (row.isDepartmentScope
+            ? String(record.SafetyUnit || '').trim() === ''
+            : String(record.SafetyUnit || '').trim() === String(row.safetyUnit || row.unitLabel || '').trim()))
+        .filter(record => _kyEvidenceChartFilter === 'all' || kyEvidenceStatus(record).id === _kyEvidenceChartFilter)
+        .sort((a, b) => String(b.ActivityDate || '').localeCompare(String(a.ActivityDate || '')));
+    const display = getKyEvidenceDisplay(row);
+    const title = display.secondary ? `${display.primary} - ${display.secondary}` : display.primary;
+    const body = `
+        <div id="ky-evidence-popup" class="space-y-4">
+            <div class="rounded-xl border border-slate-100 bg-slate-50 px-4 py-3">
+                <p class="text-sm font-bold text-slate-800 break-words">${escHtml(display.primary)}</p>
+                <p class="text-xs text-slate-500 mt-1 break-words">${display.secondary ? `${escHtml(display.secondary)} / ` : ''}${escHtml(display.scopeLabel)} / ${matching.length} item(s)</p>
+                <div class="mt-3 grid grid-cols-2 sm:grid-cols-4 gap-2 text-center">
+                    <div class="rounded-lg bg-white border border-slate-100 px-2 py-2"><div class="text-lg font-black text-slate-800">${row.submitted || 0}</div><div class="text-[10px] font-bold text-slate-400">Submitted</div></div>
+                    <div class="rounded-lg bg-emerald-50 border border-emerald-100 px-2 py-2"><div class="text-lg font-black text-emerald-700">${row.complete || 0}</div><div class="text-[10px] font-bold text-emerald-700">Complete</div></div>
+                    <div class="rounded-lg bg-violet-50 border border-violet-100 px-2 py-2"><div class="text-lg font-black text-violet-700">${row.waitingVideo || 0}</div><div class="text-[10px] font-bold text-violet-700">Need video</div></div>
+                    <div class="rounded-lg bg-rose-50 border border-rose-100 px-2 py-2"><div class="text-lg font-black text-rose-700">${row.missingFile || 0}</div><div class="text-[10px] font-bold text-rose-700">Missing file</div></div>
+                </div>
+            </div>
+            <div class="divide-y divide-slate-100 max-h-[62vh] overflow-y-auto pr-1">
+                ${matching.length ? matching.map(record => {
+                    const status = kyEvidenceStatus(record);
+                    return `
+                        <div class="grid grid-cols-1 md:grid-cols-[minmax(0,1fr)_auto] gap-3 py-3">
+                            <div class="min-w-0">
+                                <div class="flex flex-wrap items-center gap-2">
+                                    <span class="text-xs font-bold text-slate-700">${formatKyDateTime(record.ActivityDate)}</span>
+                                    ${renderKyEvidenceBadge(record, true)}
+                                </div>
+                                <p class="text-sm font-semibold text-slate-800 mt-1 break-words">${escHtml(record.TeamName || record.KYTKeyword || '-')}</p>
+                                <p class="text-xs text-slate-500 mt-0.5 break-words">${escHtml(record.HazardDescription || '-')}</p>
+                            </div>
+                            <div class="flex flex-wrap md:flex-nowrap items-center gap-2">
+                                <button type="button" class="btn-ky-view px-3 py-2 rounded-lg border border-slate-200 bg-white text-xs font-bold text-slate-700" data-id="${escHtml(record.id || '')}">View</button>
+                                ${status.id === 'waiting_video' && canUploadKyFollowupVideo(record) ? `<button type="button" class="btn-ky-video-followup px-3 py-2 rounded-lg text-xs font-bold text-white" style="background:#7c3aed" data-id="${escHtml(record.id || '')}">เพิ่มวิดีโอ</button>` : ''}
+                                ${_isAdmin && status.id === 'missing_file' ? `<button type="button" class="btn-ky-manage px-3 py-2 rounded-lg text-xs font-bold text-white" style="background:#4f46e5" data-id="${escHtml(record.id || '')}">แนบไฟล์</button>` : ''}
+                            </div>
+                        </div>`;
+                }).join('') : `<p class="py-8 text-center text-sm text-slate-500">No KY records match this filter.</p>`}
+            </div>
+        </div>`;
+    openModal(title, body, 'max-w-4xl');
+}
+
+function renderKyEvidenceFollowupPanel(records) {
+    const el = document.getElementById('ky-evidence-completion-panel');
+    if (!el) return;
+    if (!Array.isArray(records)) {
+        el.innerHTML = `<div class="ds-section p-5" data-ky-card-image="ky-evidence-completion"><div class="h-24 rounded bg-slate-100 animate-pulse"></div></div>`;
+        return;
+    }
+    _kyEvidenceRecords = records;
+    const rows = buildConfiguredKyEvidenceRows(records);
+    const visibleRows = rows.filter(row => {
+        if (_kyEvidenceChartFilter === 'complete') return row.complete > 0;
+        if (_kyEvidenceChartFilter === 'waiting_video') return row.waitingVideo > 0;
+        if (_kyEvidenceChartFilter === 'missing_file') return row.missingFile > 0;
+        return true;
+    });
+    if (_kyEvidenceSelectedKey && !rows.some(row => row.key === _kyEvidenceSelectedKey)) _kyEvidenceSelectedKey = '';
+    const groupedRows = visibleRows.reduce((groups, row) => {
+        const dept = row.department || '-';
+        if (!groups.has(dept)) groups.set(dept, []);
+        groups.get(dept).push(row);
+        return groups;
+    }, new Map());
+    const groupedHtml = Array.from(groupedRows.entries()).map(([department, deptRows]) => {
+        const singleDepartmentScope = deptRows.length === 1 && getKyEvidenceDisplay(deptRows[0]).departmentScope;
+        return `
+        <div class="py-2.5 border-t border-slate-200 first:border-t-0" data-ky-evidence-department="${escHtml(department)}" data-ky-evidence-single-department-scope="${singleDepartmentScope ? '1' : '0'}">
+            ${singleDepartmentScope ? '' : `
+            <div class="flex w-full flex-wrap items-center justify-between gap-2 mb-1.5 rounded-md border border-emerald-100 bg-emerald-50/80 px-3 py-2" data-ky-evidence-dept-header>
+                <h4 class="text-sm font-black text-emerald-950 break-words">${escHtml(department)}</h4>
+                <span class="rounded-full bg-white/80 px-2 py-0.5 text-[10px] font-black text-emerald-700">${deptRows.length} scope(s)</span>
+            </div>`}
+            <div class="w-full divide-y divide-slate-100 border border-slate-200 rounded-md overflow-hidden bg-slate-50/40">
+                ${deptRows.map(row => renderConfiguredKyEvidenceBar(row, false)).join('')}
+            </div>
+        </div>`;
+    }).join('');
+    const filterButton = (id, label, activeClass) => `
+        <button type="button" data-ky-evidence-chart-filter="${id}"
+            class="px-3 py-2 rounded-lg border text-xs font-bold transition-colors ${_kyEvidenceChartFilter === id ? activeClass : 'border-slate-200 bg-white text-slate-600 hover:bg-slate-50'}">${label}</button>`;
+    el.innerHTML = `
+        <div class="ds-section p-5" data-ky-card-image="ky-evidence-completion" data-ky-evidence-overview>
+            <div class="flex flex-col lg:flex-row lg:items-end justify-between gap-4 mb-5">
+                <div>
+                    <p class="text-xs font-bold text-indigo-600 uppercase">Safety Unit Evidence</p>
+                    <h3 class="text-base font-bold text-slate-800 mt-1">KY file / video follow-up</h3>
+                    <p class="text-sm text-slate-500 mt-1">ข้อมูลจริงตาม Safety Unit ที่เปิดใช้งานใน Program Config ปี ${_statsYear}</p>
+                </div>
+                <div class="flex flex-wrap gap-2" data-ky-card-ignore>
+                    ${filterButton('all', 'ทั้งหมด', 'border-slate-700 bg-slate-800 text-white')}
+                    ${filterButton('complete', 'หลักฐานครบ', 'border-emerald-600 bg-emerald-600 text-white')}
+                    ${filterButton('waiting_video', 'รอวิดีโอ', 'border-violet-600 bg-violet-600 text-white')}
+                    ${filterButton('missing_file', 'ขาดไฟล์', 'border-rose-600 bg-rose-600 text-white')}
+                </div>
+            </div>
+            <div class="flex flex-wrap items-center gap-x-4 gap-y-2 border-y border-slate-100 py-3 text-[11px] font-bold">
+                <span class="inline-flex items-center gap-1.5 text-emerald-700"><span class="h-2.5 w-2.5 rounded-sm bg-emerald-500"></span>หลักฐานครบ</span>
+                <span class="inline-flex items-center gap-1.5 text-violet-700"><span class="h-2.5 w-2.5 rounded-sm bg-violet-500"></span>รอวิดีโอ</span>
+                <span class="inline-flex items-center gap-1.5 text-rose-700"><span class="h-2.5 w-2.5 rounded-sm bg-rose-500"></span>ขาดไฟล์</span>
+                <span class="sm:ml-auto text-slate-400">คลิกแท่งเพื่อดูรายการ</span>
+            </div>
+            <div data-ky-evidence-bars>
+                ${visibleRows.length ? groupedHtml : `
+                    <div class="py-10 text-center"><p class="text-sm font-bold text-slate-600">ไม่พบ Safety Unit ตามตัวกรองนี้</p><p class="text-xs text-slate-400 mt-1">แสดงเฉพาะหน่วยที่ Active และตั้งค่าไว้ใน Program Config</p></div>`}
             </div>
         </div>`;
 }
@@ -459,13 +1507,25 @@ function renderExecutiveSummary(data) {
 function renderHazardPattern(keywords) {
     const el = document.getElementById('ky-hazard-pattern');
     if (!el) return;
-    if (!keywords.length) { el.innerHTML = ''; return; }
+    if (!keywords.length) {
+        el.innerHTML = `
+            <div class="ds-section p-5 h-full" data-ky-card-image="ky-hazard-pattern">
+                <h3 class="text-sm font-bold text-slate-700">KYT Keyword ที่พบซ้ำบ่อย</h3>
+                <div class="min-h-[240px] flex items-center justify-center text-center">
+                    <div>
+                        <p class="text-sm font-semibold text-slate-500">ยังไม่มี Keyword สำหรับวิเคราะห์</p>
+                        <p class="text-xs text-slate-400 mt-1">เมื่อมีการส่ง KYT Keyword ระบบจะแสดงหัวข้อที่พบซ้ำในส่วนนี้</p>
+                    </div>
+                </div>
+            </div>`;
+        return;
+    }
 
     const maxCount = Math.max(...keywords.map(k => k.count || 0), 1);
     const riskColors = ['#ef4444','#f97316','#eab308','#8b5cf6','#0284c7','#10b981','#64748b'];
 
     el.innerHTML = `
-        <div class="ds-section p-5">
+        <div class="ds-section p-5 h-full" data-ky-card-image="ky-hazard-pattern">
             <div class="flex items-center justify-between gap-3 mb-4">
                 <div>
                     <h3 class="text-sm font-bold text-slate-700">KYT Keyword ที่พบซ้ำบ่อย</h3>
@@ -511,11 +1571,11 @@ function renderProgramProgress(progData, usingConfig) {
     const txtColor = (pct) => pct >= 80 ? '#065f46' : pct >= 40 ? '#92400e' : '#991b1b';
 
     el.innerHTML = `
-        <div class="ds-section p-5">
+        <div class="ds-section p-5" data-ky-card-image="ky-program-progress">
             <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-5">
                 <div>
-                    <h3 class="text-sm font-bold text-slate-700">ความคืบหน้ากิจกรรม KY รายส่วนงาน</h3>
-                    <p class="text-xs text-slate-400 mt-0.5">เป้าหมายรายปีตาม Program Config — เรียงจากแผนกที่ตามหลังก่อน</p>
+                    <h3 class="text-sm font-bold text-slate-700">ความคืบหน้า KY ตาม Safety Unit</h3>
+                    <p class="text-xs text-slate-400 mt-0.5">เป้าหมาย = จำนวน Safety Unit × เป้าต่อ Unit จาก Program Config — เรียงจากจุดที่ตามหลังก่อน</p>
                 </div>
                 <div class="flex items-center gap-2 flex-shrink-0">
                     <span class="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-bold bg-emerald-100 text-emerald-700">
@@ -529,24 +1589,54 @@ function renderProgramProgress(progData, usingConfig) {
                     </span>
                 </div>
             </div>
-            <div class="space-y-2.5">
+            <div class="space-y-3">
                 ${sorted.map(d => {
                     const clampedPct = Math.max(0, Math.min(100, d.pct));
                     const remaining  = Math.max(0, d.target - d.submitted);
+                    const unitTarget = d.unitTarget || 12;
+                    const unitCount = d.unitCount || (d.safetyUnits?.length || 1);
+                    const hasMultipleScopes = Array.isArray(d.safetyUnitProgress) && d.safetyUnitProgress.length > 1;
+                    const unitRows = Array.isArray(d.safetyUnitProgress) && d.safetyUnitProgress.length
+                        ? `<div class="${hasMultipleScopes ? 'mt-2 divide-y divide-slate-100 border border-slate-200 rounded-md overflow-hidden bg-slate-50/40' : 'mt-2 grid grid-cols-1 gap-2'}">
+                            ${d.safetyUnitProgress.map((u, unitIndex) => {
+                                const uPct = Math.max(0, Math.min(100, u.pct || 0));
+                                return `
+                                <div class="${hasMultipleScopes ? `px-3 py-2 transition-colors hover:bg-emerald-50/50 ${unitIndex % 2 ? 'bg-slate-50/70' : 'bg-white'}` : 'rounded-md border border-slate-200 bg-slate-50/70 px-3 py-2 transition-colors hover:bg-emerald-50/50'}">
+                                    <div class="flex items-center justify-between gap-2 text-[11px]">
+                                        <span class="font-extrabold text-slate-700 truncate" title="${escHtml(u.name)}">${escHtml(u.name)}</span>
+                                        <span class="font-bold" style="color:${txtColor(uPct)}">${u.submitted || 0}/${u.target || unitTarget}</span>
+                                    </div>
+                                    <div class="h-1.5 rounded-full bg-white overflow-hidden mt-1.5">
+                                        <div class="h-full rounded-full" style="width:${uPct}%;background:${barColor(uPct)}"></div>
+                                    </div>
+                                </div>`;
+                            }).join('')}
+                        </div>` : '';
                     return `
-                    <div class="flex items-center gap-3">
-                        <div class="w-36 sm:w-48 text-xs font-semibold text-slate-700 truncate flex-shrink-0" title="${escHtml(d.department)}">${escHtml(d.department)}</div>
-                        <div class="flex-1 h-5 rounded-full overflow-hidden bg-slate-100 relative">
-                            <div class="h-full rounded-full transition-all"
-                                 style="width:${clampedPct}%;background:${barColor(d.pct)}"></div>
-                            ${d.pct === 0 ? `<span class="absolute inset-0 flex items-center justify-center text-[10px] text-slate-400 font-semibold">ยังไม่ส่ง</span>` : ''}
+                    <div class="rounded-xl border border-slate-200 bg-slate-50/40 px-3 py-3">
+                        ${hasMultipleScopes ? `
+                        <div class="mb-2 flex w-full flex-wrap items-center justify-between gap-2 rounded-md border border-emerald-100 bg-emerald-50/80 px-3 py-2" data-ky-progress-dept-header>
+                            <h4 class="text-sm font-black text-emerald-950 break-words">${escHtml(d.department)}</h4>
+                            <span class="rounded-full bg-white/80 px-2 py-0.5 text-[10px] font-black text-emerald-700">${unitCount} scope(s)</span>
+                        </div>` : ''}
+                        <div class="flex flex-col lg:flex-row lg:items-center gap-3">
+                            <div class="lg:w-56 min-w-0">
+                                ${hasMultipleScopes ? '' : `<p class="text-sm font-black text-slate-800 truncate" title="${escHtml(d.department)}">${escHtml(d.department)}</p>`}
+                                <p class="text-[10px] text-slate-400 mt-0.5">${unitCount} Safety Unit · ${unitTarget} ครั้ง/Unit/ปี</p>
+                            </div>
+                            <div class="flex-1 h-5 rounded-full overflow-hidden bg-slate-100 relative">
+                                <div class="h-full rounded-full transition-all"
+                                     style="width:${clampedPct}%;background:${barColor(d.pct)}"></div>
+                                ${d.pct === 0 ? `<span class="absolute inset-0 flex items-center justify-center text-[10px] text-slate-400 font-semibold">ยังไม่ส่ง</span>` : ''}
+                            </div>
+                            <div class="flex items-center gap-2 flex-shrink-0">
+                                <span class="text-xs font-bold text-slate-700 w-16 text-right">${d.submitted}/${d.target}</span>
+                                <span class="text-[10px] font-bold px-2 py-0.5 rounded-full w-14 text-center"
+                                      style="background:${bgColor(d.pct)};color:${txtColor(d.pct)}">${clampedPct}%</span>
+                                ${remaining > 0 ? `<span class="text-[10px] text-slate-400 hidden sm:block">เหลือ ${remaining}</span>` : `<span class="text-[10px] text-emerald-600 font-bold hidden sm:block">ครบแล้ว</span>`}
+                            </div>
                         </div>
-                        <div class="flex items-center gap-2 flex-shrink-0">
-                            <span class="text-xs font-bold text-slate-700 w-12 text-right">${d.submitted}/${d.target}</span>
-                            <span class="text-[10px] font-bold px-2 py-0.5 rounded-full w-14 text-center"
-                                  style="background:${bgColor(d.pct)};color:${txtColor(d.pct)}">${clampedPct}%</span>
-                            ${remaining > 0 ? `<span class="text-[10px] text-slate-400 hidden sm:block">เหลือ ${remaining}</span>` : `<span class="text-[10px] text-emerald-600 font-bold hidden sm:block">ครบแล้ว</span>`}
-                        </div>
+                        ${unitRows}
                     </div>`;
                 }).join('')}
             </div>
@@ -573,7 +1663,7 @@ function renderDepartmentHeatmap(deptMonthly, byDept) {
     };
 
     el.innerHTML = `
-        <div class="ds-section p-5">
+        <div class="ds-section p-5" data-ky-card-image="ky-department-heatmap">
             <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-2 mb-4">
                 <div>
                     <h3 class="text-sm font-bold text-slate-700">KY Department Heatmap</h3>
@@ -605,32 +1695,511 @@ function renderDepartmentHeatmap(deptMonthly, byDept) {
 }
 
 function renderCompletionTracker(kpi, pendingDepts) {
-    const badge = document.getElementById('ky-completion-badge');
-    const list  = document.getElementById('ky-pending-list');
-    if (!list) return;
+    const panel = document.getElementById('ky-monthly-tracker-panel');
+    if (!panel) return;
 
-    const rate = kpi.completionRate || 0;
-    if (badge) badge.textContent = `${rate}% Completion`;
-
+    const totalDepts = kpi.totalDepts || 0;
+    const isCurrentStatsYear = _statsYear === new Date().getFullYear();
+    const coveredDepts = isCurrentStatsYear
+        ? Math.max(0, totalDepts - pendingDepts.length)
+        : (kpi.deptSubmitted || 0);
+    const rate = totalDepts > 0
+        ? Math.round((coveredDepts / totalDepts) * 100)
+        : 0;
     const barColor = rate >= 80 ? '#10b981' : rate >= 50 ? '#f59e0b' : '#ef4444';
 
-    list.innerHTML = `
-        <div class="mb-4">
-            <div class="flex justify-between text-xs text-slate-500 mb-1.5">
-                <span>${kpi.deptSubmitted || 0} / ${kpi.totalDepts || 0} แผนก</span>
-                <span style="color:${barColor}">${rate}%</span>
+    panel.innerHTML = `
+        <div class="ds-section p-5 h-full" data-ky-card-image="ky-completion-tracker">
+            <div class="flex items-start justify-between gap-3 mb-4">
+                <div>
+                    <p class="text-xs font-bold text-emerald-700 uppercase">Monthly Tracker</p>
+                    <h3 class="text-sm font-bold text-slate-700 mt-1">${isCurrentStatsYear ? 'การส่งรายแผนกเดือนนี้' : `Coverage รายแผนกปี ${_statsYear}`}</h3>
+                </div>
+                <span class="text-xs font-bold px-2.5 py-1 rounded-full bg-indigo-50 text-indigo-700 border border-indigo-100">${rate}%</span>
             </div>
-            <div class="h-2.5 rounded-full bg-slate-100 overflow-hidden">
-                <div class="h-full rounded-full transition-all" style="width:${rate}%; background:linear-gradient(90deg,${barColor},${barColor}cc)"></div>
+            <div class="mb-4">
+                <div class="flex justify-between text-xs text-slate-500 mb-1.5">
+                    <span>${coveredDepts} / ${totalDepts} แผนก</span>
+                    <span style="color:${barColor}">Coverage</span>
+                </div>
+                <div class="h-2.5 rounded-full bg-slate-100 overflow-hidden">
+                    <div class="h-full rounded-full transition-all" style="width:${rate}%; background:linear-gradient(90deg,${barColor},${barColor}cc)"></div>
+                </div>
             </div>
-        </div>
-        ${pendingDepts.length ? `
-        <div>
-            <p class="text-xs font-semibold text-slate-500 mb-2">แผนกที่ยังไม่ส่ง (เดือนนี้)</p>
-            <div class="flex flex-wrap gap-1.5">
-                ${pendingDepts.map(d => `<span class="px-2.5 py-1 rounded-lg bg-red-50 text-red-600 text-xs font-medium border border-red-100">${d}</span>`).join('')}
+            ${isCurrentStatsYear && pendingDepts.length ? `
+            <div>
+                <p class="text-xs font-semibold text-slate-500 mb-2">แผนกที่ยังไม่ส่ง</p>
+                <div class="flex flex-wrap gap-1.5 max-h-32 overflow-y-auto pr-1">
+                    ${pendingDepts.map(d => `<span class="px-2.5 py-1 rounded-lg bg-red-50 text-red-600 text-xs font-medium border border-red-100">${escHtml(d)}</span>`).join('')}
+                </div>
+            </div>` : isCurrentStatsYear ? `<p class="text-sm text-emerald-600 font-semibold flex items-center gap-1"><svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"/></svg>ทุกแผนกส่งแล้วเดือนนี้</p>` : `<p class="text-sm text-slate-500">แสดงความครอบคลุมของปีที่เลือกจากรายการ KY ที่บันทึกไว้</p>`}
+        </div>`;
+}
+
+const KY_REACTION_COUNT_FIELDS = {
+    useful: 'UsefulCount',
+    practice: 'PracticeCount',
+    awareness: 'AwarenessCount',
+    attention: 'AttentionCount',
+};
+
+function kyVideoReactionCount(row, reaction) {
+    const field = KY_REACTION_COUNT_FIELDS[reaction];
+    return Math.max(0, Number(row?.[field] || 0));
+}
+
+function kyVideoReactionTotal(row) {
+    const explicit = Number(row?.ReactionTotal ?? row?.ReactionCount);
+    if (!Number.isNaN(explicit) && explicit > 0) return explicit;
+    return KY_VIDEO_REACTIONS.reduce((sum, r) => sum + kyVideoReactionCount(row, r.id), 0);
+}
+
+function normalizeKyVideoReactionCounts(row) {
+    const next = { ...row };
+    KY_VIDEO_REACTIONS.forEach(r => {
+        const field = KY_REACTION_COUNT_FIELDS[r.id];
+        next[field] = Math.max(0, Number(next[field] || 0));
+    });
+    const total = kyVideoReactionTotal(next);
+    next.ReactionTotal = total;
+    next.ReactionCount = total;
+    return next;
+}
+
+function applyKyVideoReactionState(id, reaction, removed) {
+    const updateRows = rows => rows.map(row => {
+        if (String(row.id) !== String(id)) return row;
+        const next = normalizeKyVideoReactionCounts(row);
+        const previous = next.MyReaction || '';
+        if (previous && previous !== reaction) {
+            const previousField = KY_REACTION_COUNT_FIELDS[previous];
+            if (previousField) next[previousField] = Math.max(0, Number(next[previousField] || 0) - 1);
+        }
+        if (removed) {
+            const field = KY_REACTION_COUNT_FIELDS[reaction];
+            if (field) next[field] = Math.max(0, Number(next[field] || 0) - 1);
+            next.MyReaction = null;
+        } else {
+            const field = KY_REACTION_COUNT_FIELDS[reaction];
+            if (field && previous !== reaction) next[field] = Number(next[field] || 0) + 1;
+            next.MyReaction = reaction;
+        }
+        next.ReactionTotal = KY_VIDEO_REACTIONS.reduce((sum, r) => sum + kyVideoReactionCount(next, r.id), 0);
+        next.ReactionCount = next.ReactionTotal;
+        return next;
+    });
+    _kyVideoShowcase = updateRows(_kyVideoShowcase);
+    _kyVideoLibrary.items = updateRows(_kyVideoLibrary.items || []);
+}
+
+function renderVideoShowcaseFromCache() {
+    const el = document.getElementById('ky-video-showcase');
+    if (!el || !_kyVideoShowcase.length) return;
+    const totalReactions = _kyVideoShowcase.reduce((sum, v) => sum + kyVideoReactionTotal(v), 0);
+    const totalBadge = Array.from(el.querySelectorAll('span')).find(span => /reactions$/i.test(span.textContent.trim()));
+    if (totalBadge) totalBadge.textContent = `${totalReactions} reactions`;
+    const buttons = Array.from(el.querySelectorAll('.ky-video-reaction'));
+    _kyVideoShowcase.forEach(row => {
+        KY_VIDEO_REACTIONS.forEach(reaction => {
+            const btn = buttons.find(candidate =>
+                String(candidate.dataset.id) === String(row.id) && candidate.dataset.reaction === reaction.id
+            );
+            const countEl = btn?.querySelector('.shrink-0');
+            if (countEl) countEl.textContent = String(kyVideoReactionCount(row, reaction.id));
+            if (btn) {
+                const active = row.MyReaction === reaction.id;
+                btn.classList.toggle('bg-indigo-50', active);
+                btn.classList.toggle('border-indigo-200', active);
+                btn.classList.toggle('text-indigo-700', active);
+                btn.classList.toggle('bg-slate-50', !active);
+                btn.classList.toggle('border-slate-200', !active);
+                btn.classList.toggle('text-slate-600', !active);
+            }
+        });
+    });
+}
+
+function renderKyVideoCardsFromCache(scope = document) {
+    const rows = [...(_kyVideoShowcase || []), ...(_kyVideoLibrary.items || [])];
+    const seen = new Set();
+    rows.forEach(row => {
+        if (!row?.id || seen.has(String(row.id))) return;
+        seen.add(String(row.id));
+        const cards = Array.from(scope.querySelectorAll?.('[data-ky-video-card-id]') || [])
+            .filter(card => String(card.dataset.kyVideoCardId) === String(row.id));
+        cards.forEach(card => {
+            KY_VIDEO_REACTIONS.forEach(reaction => {
+                const btn = card.querySelector(`.ky-video-reaction[data-reaction="${reaction.id}"]`);
+                const countEl = btn?.querySelector('.shrink-0');
+                if (countEl) countEl.textContent = String(kyVideoReactionCount(row, reaction.id));
+                if (btn) {
+                    const active = row.MyReaction === reaction.id;
+                    btn.classList.toggle('bg-indigo-50', active);
+                    btn.classList.toggle('border-indigo-200', active);
+                    btn.classList.toggle('text-indigo-700', active);
+                    btn.classList.toggle('bg-slate-50', !active);
+                    btn.classList.toggle('border-slate-200', !active);
+                    btn.classList.toggle('text-slate-600', !active);
+                }
+            });
+        });
+    });
+}
+
+async function renderVideoShowcase() {
+    const el = document.getElementById('ky-video-showcase');
+    if (!el) return;
+
+    el.innerHTML = `
+        <div class="ds-section p-5" data-ky-card-image="ky-video-showcase">
+            <div class="animate-pulse h-40 rounded-xl bg-slate-50"></div>
+        </div>`;
+
+    try {
+        const res = await API.get(`/ky/video-showcase?year=${_statsYear}&limit=${KY_VIDEO_SHOWCASE_LIMIT}`);
+        _kyVideoShowcase = normalizeApiArray(res?.data ?? res).map(normalizeKyVideoReactionCounts);
+    } catch (err) {
+        console.error('KY video showcase error:', err);
+        _kyVideoShowcase = [];
+    }
+
+    if (!_kyVideoShowcase.length) {
+        el.innerHTML = `
+            <div class="ds-section p-5" data-ky-card-image="ky-video-showcase">
+                <div class="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
+                    <div>
+                        <p class="text-xs font-bold text-indigo-600 uppercase">KYT Video Showcase</p>
+                        <h3 class="text-base font-bold text-slate-800 mt-1">คลังวิดีโอ KYT สำหรับแลกเปลี่ยนเรียนรู้</h3>
+                        <p class="text-sm text-slate-500 mt-1">เมื่อผู้ใช้ส่งกิจกรรม KY พร้อมวิดีโอ ระบบจะแสดงคลิปเด่นและเปิดให้กด Reaction ในส่วนนี้</p>
+                    </div>
+                    <span class="px-3 py-1.5 rounded-full bg-slate-50 border border-slate-200 text-xs font-bold text-slate-500">ยังไม่มีวิดีโอ</span>
+                </div>
+            </div>`;
+        return;
+    }
+
+    const totalVideos = _kyVideoShowcase.length;
+    const totalReactions = _kyVideoShowcase.reduce((sum, v) => sum + kyVideoReactionTotal(v), 0);
+
+    el.innerHTML = `
+        <div class="ds-section p-5" data-ky-card-image="ky-video-showcase">
+            <div class="flex flex-col lg:flex-row lg:items-start justify-between gap-4 mb-5">
+                <div>
+                    <p class="text-xs font-bold text-indigo-600 uppercase">KYT Video Showcase</p>
+                    <h3 class="text-base font-bold text-slate-800 mt-1">คลิป KYT ที่ใช้เรียนรู้ร่วมกัน · ปี ${_statsYear}</h3>
+                    <p class="text-sm text-slate-500 mt-1">ผู้ใช้สามารถกด Reaction เพื่อสะท้อนว่าเคสใดควรนำไปสื่อสารหรือใช้เป็นตัวอย่างต่อ</p>
+                </div>
+                <div class="flex flex-wrap gap-2 text-xs">
+                    <span class="px-3 py-1.5 rounded-full bg-indigo-50 border border-indigo-100 text-indigo-700 font-bold">${totalVideos} videos</span>
+                    <span class="px-3 py-1.5 rounded-full bg-emerald-50 border border-emerald-100 text-emerald-700 font-bold">${totalReactions} reactions</span>
+                    <button type="button" id="ky-video-view-all-btn" class="px-3 py-1.5 rounded-full bg-slate-900 text-white font-bold hover:bg-indigo-700 transition-colors">ดูทั้งหมด</button>
+                </div>
             </div>
-        </div>` : `<p class="text-sm text-emerald-600 font-semibold flex items-center gap-1"><svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"/></svg>ทุกแผนกส่งแล้วเดือนนี้</p>`}`;
+            <div class="grid grid-cols-1 xl:grid-cols-3 gap-4">
+                ${_kyVideoShowcase.map(v => buildKyVideoCard(v)).join('')}
+            </div>
+        </div>`;
+}
+
+function buildKyVideoCard(v) {
+    const date = v.ActivityDate ? new Date(v.ActivityDate).toLocaleDateString('th-TH', { day:'numeric', month:'short', year:'numeric' }) : '-';
+    const videoUrl = kyMediaUrl(v.VideoUrl);
+    const counts = {
+        useful: kyVideoReactionCount(v, 'useful'),
+        practice: kyVideoReactionCount(v, 'practice'),
+        awareness: kyVideoReactionCount(v, 'awareness'),
+        attention: kyVideoReactionCount(v, 'attention'),
+    };
+    const myReaction = v.MyReaction || '';
+    const isPinned = String(v.IsVideoPinned) === '1' || v.IsVideoPinned === true;
+    const isHidden = String(v.ShowVideoOnDashboard) === '0' || v.ShowVideoOnDashboard === false;
+    return `
+        <div class="rounded-2xl border border-slate-200 bg-white overflow-hidden shadow-sm" data-ky-video-card-id="${escHtml(v.id)}">
+            <div class="relative bg-slate-900">
+                ${buildKyVideoLazyShell(videoUrl, v)}
+                ${isPinned ? `<span class="absolute left-3 top-3 px-2.5 py-1 rounded-full bg-white/90 text-indigo-700 text-[10px] font-bold shadow">Pinned</span>` : ''}
+                ${isHidden ? `<span class="absolute right-3 top-3 px-2.5 py-1 rounded-full bg-red-50/95 text-red-700 text-[10px] font-bold shadow">Hidden</span>` : ''}
+            </div>
+            <div class="p-4">
+                <div class="flex items-start justify-between gap-3">
+                    <div class="min-w-0">
+                        <p class="text-sm font-bold text-slate-800 truncate">${escHtml(v.TeamName || v.KYTKeyword || 'KYT Video')}</p>
+                        <p class="text-xs text-slate-400 mt-0.5">${date} · ${escHtml(v.Department || '-')} ${v.SafetyUnit ? `· ${escHtml(v.SafetyUnit)}` : ''}</p>
+                    </div>
+                    <span class="px-2 py-1 rounded-full text-[10px] font-bold ${RISK_BADGE_COLOR[v.RiskCategory] || 'bg-slate-100 text-slate-600'}">${escHtml(v.RiskCategory || 'ทั่วไป')}</span>
+                </div>
+                <p class="text-xs text-slate-500 mt-3 line-clamp-2">${escHtml(v.HazardDescription || v.KYTKeyword || '-')}</p>
+                <div class="grid grid-cols-2 gap-2 mt-4">
+                    ${KY_VIDEO_REACTIONS.map(r => `
+                        <button type="button"
+                                class="ky-video-reaction flex items-center justify-between gap-2 px-2.5 py-2 rounded-xl border text-xs font-bold transition-colors ${myReaction === r.id ? 'bg-indigo-50 border-indigo-200 text-indigo-700' : 'bg-slate-50 border-slate-200 text-slate-600 hover:border-indigo-200 hover:bg-indigo-50'}"
+                                data-id="${escHtml(v.id)}" data-reaction="${r.id}">
+                            <span class="flex items-center gap-1.5 min-w-0">
+                                <span class="text-base leading-none" aria-hidden="true">${r.emoji}</span>
+                                <span class="truncate">${r.label}</span>
+                            </span>
+                            <span class="shrink-0" style="color:${r.tone}">${counts[r.id] || 0}</span>
+                        </button>`).join('')}
+                </div>
+                <div class="flex items-center justify-between gap-2 mt-4 pt-3 border-t border-slate-100">
+                    <button type="button" class="btn-ky-view text-xs font-bold text-indigo-600 hover:text-indigo-800" data-id="${escHtml(v.id)}">ดูรายละเอียด</button>
+                    ${_isAdmin ? `
+                    <div class="flex items-center gap-1">
+                        <button type="button" class="ky-video-pin px-2 py-1 rounded-lg border border-slate-200 text-[10px] font-bold text-slate-500 hover:text-indigo-700 hover:border-indigo-200"
+                                data-id="${escHtml(v.id)}" data-pinned="${isPinned ? '0' : '1'}">${isPinned ? 'Unpin' : 'Pin'}</button>
+                        <button type="button" class="ky-video-visibility ky-video-hide px-2 py-1 rounded-lg border border-slate-200 text-[10px] font-bold ${isHidden ? 'text-emerald-600 hover:text-emerald-700 hover:border-emerald-200' : 'text-slate-500 hover:text-red-700 hover:border-red-200'}"
+                                data-id="${escHtml(v.id)}" data-show="${isHidden ? '1' : '0'}">${isHidden ? 'Show' : 'Hide'}</button>
+                    </div>` : ''}
+                </div>
+            </div>
+        </div>`;
+}
+
+function buildKyVideoLazyShell(videoUrl, row = {}) {
+    if (!videoUrl) {
+        return `<div class="w-full h-48 bg-slate-900 flex items-center justify-center text-xs font-bold text-slate-300">Video unavailable</div>`;
+    }
+    const title = row.TeamName || row.KYTKeyword || 'KYT Video';
+    return `
+        <div data-ky-video-shell>
+            <button type="button" class="ky-video-load group flex h-48 w-full flex-col items-center justify-center gap-3 bg-slate-900 text-white transition-colors hover:bg-slate-800"
+                    data-video-url="${escHtml(videoUrl)}" data-video-title="${escHtml(title)}">
+                <span class="flex h-12 w-12 items-center justify-center rounded-full bg-white/15 text-lg font-black group-hover:bg-white/25">▶</span>
+                <span class="max-w-[80%] truncate text-xs font-bold">${escHtml(title)}</span>
+                <span class="rounded-full bg-white/10 px-2.5 py-1 text-[10px] font-semibold text-slate-200">Click to load video</span>
+            </button>
+        </div>`;
+}
+
+function activateKyVideo(button) {
+    const url = button?.dataset?.videoUrl || '';
+    const title = button?.dataset?.videoTitle || 'KYT Video';
+    const shell = button?.closest?.('[data-ky-video-shell]') || button?.parentElement;
+    if (!url || !shell) return;
+    shell.innerHTML = `
+        <video src="${escHtml(url)}" class="w-full h-48 object-cover bg-black" controls preload="none" playsinline></video>
+        <div class="hidden px-3 py-2 text-xs font-bold text-red-700 bg-red-50 border-t border-red-100" data-ky-video-error>
+            Video file is unavailable. Please attach the video again.
+        </div>`;
+    const video = shell.querySelector('video');
+    const error = shell.querySelector('[data-ky-video-error]');
+    video?.addEventListener('error', () => {
+        if (error) error.classList.remove('hidden');
+    }, { once: true });
+    try {
+        video?.load();
+        video?.play?.().catch(() => {});
+    } catch {
+        if (error) error.classList.remove('hidden');
+    }
+    video?.setAttribute('aria-label', title);
+}
+
+function kyVideoLibraryFilterValue(key) {
+    return _kyVideoLibrary.filters?.[key] ?? (key === 'year' ? _statsYear : 'all');
+}
+
+function buildKyVideoLibraryQuery(overrides = {}) {
+    const next = {
+        ..._kyVideoLibrary.filters,
+        ...overrides,
+    };
+    next.year = parseInt(next.year) || _statsYear || new Date().getFullYear();
+    next.page = Math.max(parseInt(overrides.page ?? _kyVideoLibrary.pagination?.page ?? 1) || 1, 1);
+    next.pageSize = Math.min(Math.max(parseInt(overrides.pageSize ?? _kyVideoLibrary.pagination?.pageSize ?? 6) || 6, 1), 50);
+    const params = new URLSearchParams();
+    ['year', 'page', 'pageSize', 'department', 'safetyUnit', 'riskCategory', 'status', 'pinned', 'show', 'q'].forEach(key => {
+        const value = next[key];
+        if (value !== undefined && value !== null && value !== '') params.set(key, value);
+    });
+    return { params, next };
+}
+
+async function fetchKyVideoLibrary(overrides = {}) {
+    const { params, next } = buildKyVideoLibraryQuery(overrides);
+    const res = await API.get(`/ky/videos?${params.toString()}`);
+    const payload = normalizeApiObject(res?.data ?? res);
+    _kyVideoLibrary = {
+        items: normalizeApiArray(payload.items || []).map(normalizeKyVideoReactionCounts),
+        pagination: {
+            page: Number(payload.pagination?.page || next.page || 1),
+            pageSize: Number(payload.pagination?.pageSize || next.pageSize || 6),
+            total: Number(payload.pagination?.total || 0),
+            pages: Number(payload.pagination?.pages || 0),
+        },
+        summary: {
+            totalVideos: Number(payload.summary?.totalVideos || 0),
+            totalReactions: Number(payload.summary?.totalReactions || 0),
+            pinnedVideos: Number(payload.summary?.pinnedVideos || 0),
+            hiddenVideos: Number(payload.summary?.hiddenVideos || 0),
+            departments: normalizeApiArray(payload.summary?.departments || []),
+        },
+        filters: {
+            year: Number(payload.filters?.year || next.year || _statsYear),
+            department: payload.filters?.department ?? next.department ?? 'all',
+            safetyUnit: payload.filters?.safetyUnit ?? next.safetyUnit ?? 'all',
+            riskCategory: payload.filters?.riskCategory ?? next.riskCategory ?? 'all',
+            status: payload.filters?.status ?? next.status ?? 'all',
+            pinned: payload.filters?.pinned ?? next.pinned ?? 'all',
+            show: payload.filters?.show ?? next.show ?? 'all',
+            q: payload.filters?.q ?? next.q ?? '',
+        },
+    };
+}
+
+function openKyVideoLibrary(initialFilters = {}) {
+    _kyVideoLibrary.filters = {
+        year: _statsYear,
+        department: 'all',
+        safetyUnit: 'all',
+        riskCategory: 'all',
+        status: 'all',
+        pinned: 'all',
+        show: 'all',
+        q: '',
+        ...initialFilters,
+    };
+    _kyVideoLibrary.pagination = {
+        page: Math.max(parseInt(initialFilters.page) || 1, 1),
+        pageSize: Math.min(Math.max(parseInt(initialFilters.pageSize) || 6, 1), 50),
+        total: 0,
+        pages: 0
+    };
+    openModal(
+        'คลังวิดีโอ KYT ทั้งหมด',
+        `<div id="ky-video-library-modal" class="space-y-4">
+            <div class="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+                <div class="flex flex-col lg:flex-row lg:items-end gap-3">
+                    <div class="flex-1">
+                        <label class="block text-xs font-bold text-slate-500 mb-1">ค้นหา</label>
+                        <input id="ky-video-lib-q" type="search" class="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm" placeholder="ค้นหาชื่อส่วนงาน / แผนก / Keyword / อันตราย">
+                    </div>
+                    <div>
+                        <label class="block text-xs font-bold text-slate-500 mb-1">ปี</label>
+                        <input id="ky-video-lib-year" type="number" min="2020" max="2100" class="w-24 rounded-xl border border-slate-200 px-3 py-2 text-sm" value="${escHtml(_statsYear)}">
+                    </div>
+                    <div>
+                        <label class="block text-xs font-bold text-slate-500 mb-1">ความเสี่ยง</label>
+                        <select id="ky-video-lib-risk" class="rounded-xl border border-slate-200 px-3 py-2 text-sm">
+                            <option value="all">ทุกประเภท</option>
+                            ${RISK_CATEGORIES.map(r => `<option value="${escHtml(r)}">${escHtml(r)}</option>`).join('')}
+                        </select>
+                    </div>
+                    <div>
+                        <label class="block text-xs font-bold text-slate-500 mb-1">สถานะ</label>
+                        <select id="ky-video-lib-status" class="rounded-xl border border-slate-200 px-3 py-2 text-sm">
+                            <option value="all">ทุกสถานะ</option>
+                            ${STATUSES.map(s => `<option value="${escHtml(s)}">${escHtml(STATUS_LABEL[s] || s)}</option>`).join('')}
+                        </select>
+                    </div>
+                    <button type="button" id="ky-video-lib-refresh" class="px-4 py-2 rounded-xl bg-indigo-600 text-white text-sm font-bold hover:bg-indigo-700">ค้นหา</button>
+                </div>
+                <div class="grid grid-cols-1 md:grid-cols-4 gap-3 mt-3">
+                    <select id="ky-video-lib-dept" class="rounded-xl border border-slate-200 px-3 py-2 text-sm">
+                        <option value="all">ทุกแผนก</option>
+                    </select>
+                    <select id="ky-video-lib-pinned" class="rounded-xl border border-slate-200 px-3 py-2 text-sm">
+                        <option value="all">Pinned / ไม่ pinned</option>
+                        <option value="1">Pinned เท่านั้น</option>
+                        <option value="0">ไม่ pinned</option>
+                    </select>
+                    <select id="ky-video-lib-show" class="rounded-xl border border-slate-200 px-3 py-2 text-sm">
+                        <option value="all">แสดง/ซ่อนทั้งหมด</option>
+                        <option value="1">แสดงบน Dashboard</option>
+                        <option value="0">ซ่อนจาก Dashboard</option>
+                    </select>
+                    <select id="ky-video-lib-page-size" class="rounded-xl border border-slate-200 px-3 py-2 text-sm">
+                        <option value="6">6 / หน้า</option>
+                        <option value="12" selected>12 / หน้า</option>
+                        <option value="24">24 / หน้า</option>
+                        <option value="50">50 / หน้า</option>
+                    </select>
+                </div>
+            </div>
+            <div id="ky-video-library-body"></div>
+        </div>`,
+        'max-w-7xl'
+    );
+    renderKyVideoLibrary({ ...initialFilters, page: _kyVideoLibrary.pagination.page });
+}
+
+async function renderKyVideoLibrary(overrides = {}) {
+    const modal = document.getElementById('ky-video-library-modal');
+    const body = document.getElementById('ky-video-library-body');
+    if (!modal || !body) return;
+    body.innerHTML = `<div class="rounded-2xl border border-slate-200 bg-white p-6"><div class="animate-pulse h-44 bg-slate-50 rounded-xl"></div></div>`;
+    try {
+        await fetchKyVideoLibrary(overrides);
+        syncKyVideoLibraryControls();
+        const p = _kyVideoLibrary.pagination;
+        const s = _kyVideoLibrary.summary;
+        body.innerHTML = `
+            <div class="flex flex-col lg:flex-row lg:items-center justify-between gap-3 mb-4">
+                <div class="flex flex-wrap gap-2 text-xs font-bold">
+                    <span class="px-3 py-1.5 rounded-full bg-indigo-50 text-indigo-700 border border-indigo-100">${s.totalVideos} videos</span>
+                    <span class="px-3 py-1.5 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-100">${s.totalReactions} reactions</span>
+                    <span class="px-3 py-1.5 rounded-full bg-violet-50 text-violet-700 border border-violet-100">${s.pinnedVideos} pinned</span>
+                    ${_isAdmin ? `<span class="px-3 py-1.5 rounded-full bg-red-50 text-red-700 border border-red-100">${s.hiddenVideos} hidden</span>` : ''}
+                </div>
+                <p class="text-xs text-slate-500">หน้า ${p.pages ? p.page : 0} / ${p.pages || 0} · ทั้งหมด ${p.total} รายการ</p>
+            </div>
+            ${_kyVideoLibrary.items.length ? `
+                <div class="grid grid-cols-1 lg:grid-cols-2 2xl:grid-cols-3 gap-4">
+                    ${_kyVideoLibrary.items.map(v => buildKyVideoCard(v)).join('')}
+                </div>
+                <div class="flex items-center justify-between gap-3 mt-5">
+                    <button type="button" class="ky-video-lib-page px-4 py-2 rounded-xl border border-slate-200 text-sm font-bold text-slate-600 disabled:opacity-40" data-page="${p.page - 1}" ${p.page <= 1 ? 'disabled' : ''}>ก่อนหน้า</button>
+                    <div class="text-xs text-slate-500">แสดง ${_kyVideoLibrary.items.length} จาก ${p.total}</div>
+                    <button type="button" class="ky-video-lib-page px-4 py-2 rounded-xl border border-slate-200 text-sm font-bold text-slate-600 disabled:opacity-40" data-page="${p.page + 1}" ${p.page >= p.pages ? 'disabled' : ''}>ถัดไป</button>
+                </div>` : `
+                <div class="rounded-2xl border border-dashed border-slate-300 bg-white p-8 text-center">
+                    <p class="text-base font-bold text-slate-700">ไม่พบวิดีโอตามเงื่อนไข</p>
+                    <p class="text-sm text-slate-500 mt-1">ลองเปลี่ยนคำค้นหา ปี หรือ filter อีกครั้ง</p>
+                </div>`}
+        `;
+    } catch (err) {
+        console.error('KY video library error:', err);
+        body.innerHTML = `<div class="rounded-2xl border border-red-100 bg-red-50 p-5 text-red-700 text-sm font-semibold">
+            ไม่สามารถโหลดคลังวิดีโอ KY ได้
+            <div class="mt-2 text-xs font-normal text-red-600">${escHtml(err?.message || 'Please try again.')}</div>
+        </div>`;
+    }
+}
+
+function syncKyVideoLibraryControls() {
+    const f = _kyVideoLibrary.filters || {};
+    const set = (id, value) => {
+        const el = document.getElementById(id);
+        if (el) el.value = value ?? '';
+    };
+    set('ky-video-lib-q', f.q || '');
+    set('ky-video-lib-year', f.year || _statsYear);
+    set('ky-video-lib-risk', f.riskCategory || 'all');
+    set('ky-video-lib-status', f.status || 'all');
+    set('ky-video-lib-pinned', f.pinned ?? 'all');
+    set('ky-video-lib-show', f.show ?? 'all');
+    set('ky-video-lib-page-size', _kyVideoLibrary.pagination?.pageSize || 6);
+    const dept = document.getElementById('ky-video-lib-dept');
+    if (dept) {
+        const current = f.department || 'all';
+        const departments = (_kyVideoLibrary.summary?.departments || []).map(d => d.Department).filter(Boolean);
+        const options = ['all', ...new Set([...departments, current].filter(Boolean))];
+        dept.innerHTML = options.map(d => `<option value="${escHtml(d)}">${d === 'all' ? 'ทุกแผนก' : escHtml(d)}</option>`).join('');
+        dept.value = current;
+    }
+}
+
+function collectKyVideoLibraryFilters() {
+    return {
+        year: parseInt(document.getElementById('ky-video-lib-year')?.value) || _statsYear,
+        department: document.getElementById('ky-video-lib-dept')?.value || 'all',
+        riskCategory: document.getElementById('ky-video-lib-risk')?.value || 'all',
+        status: document.getElementById('ky-video-lib-status')?.value || 'all',
+        pinned: document.getElementById('ky-video-lib-pinned')?.value ?? 'all',
+        show: document.getElementById('ky-video-lib-show')?.value ?? 'all',
+        pageSize: parseInt(document.getElementById('ky-video-lib-page-size')?.value) || 6,
+        q: document.getElementById('ky-video-lib-q')?.value?.trim() || '',
+    };
 }
 
 function renderLineChart(monthly) {
@@ -727,15 +2296,25 @@ async function renderSubmitForm(container) {
     const curMonth = new Date().getMonth() + 1;
     const curYear  = new Date().getFullYear();
     _participants = [];
+    _submitReporter = null;
+    const [, , emailProfileRes] = await Promise.all([
+        _fetchDepartments(),
+        _fetchProgramConfig(curYear),
+        API.get('/ky/email-profile').catch(() => ({ data: null })),
+    ]);
+    _submitEmailProfile = emailProfileRes?.data || null;
+    const defaultDepartment = String(user.department || '').trim();
+    const departmentOptions = buildKyDepartmentOptions(defaultDepartment, curYear);
 
     // Check this month + yearly progress
     let alreadySubmitted = false;
     let yearlyDone = 0;
     let yearlyTarget = 12;
-    if (user.department) {
+    const initialSafetyUnits = getKySafetyUnitsForDept(defaultDepartment, curYear);
+    if (defaultDepartment) {
         try {
-            const chk = await API.get(`/ky/check?dept=${encodeURIComponent(user.department)}&month=${curMonth}&year=${curYear}`);
-            alreadySubmitted = chk?.submittedThisMonth || false;
+            const chk = await API.get(`/ky/check?dept=${encodeURIComponent(defaultDepartment)}&month=${curMonth}&year=${curYear}`);
+            alreadySubmitted = initialSafetyUnits.length ? false : (chk?.submittedThisMonth || false);
             yearlyDone   = chk?.yearlyDone   ?? chk?.count ?? 0;
             yearlyTarget = chk?.yearlyTarget ?? chk?.target ?? 12;
         } catch (_) {}
@@ -743,6 +2322,7 @@ async function renderSubmitForm(container) {
 
     const yearlyPct   = yearlyTarget > 0 ? Math.min(100, Math.round(yearlyDone / yearlyTarget * 100)) : 0;
     const yearlyColor = yearlyPct >= 100 ? '#10b981' : yearlyPct >= 50 ? '#f59e0b' : '#ef4444';
+    const formLocked  = alreadySubmitted && !_isAdmin;
 
     container.innerHTML = `
         <div class="w-full max-w-none">
@@ -756,13 +2336,13 @@ async function renderSubmitForm(container) {
                         <div class="flex-1">
                             <div class="flex items-center justify-between text-xs font-semibold text-slate-600 mb-1.5">
                                 <span>ความคืบหน้า KY ปี ${curYear}</span>
-                                <span style="color:${yearlyColor}">${yearlyDone} / ${yearlyTarget} ครั้ง</span>
+                                <span id="ky-submit-progress-count" style="color:${yearlyColor}">${yearlyDone} / ${yearlyTarget} ครั้ง</span>
                             </div>
                             <div class="h-2.5 rounded-full bg-slate-200 overflow-hidden">
-                                <div class="h-full rounded-full transition-all" style="width:${yearlyPct}%;background:${yearlyColor}"></div>
+                                <div id="ky-submit-progress-bar" class="h-full rounded-full transition-all" style="width:${yearlyPct}%;background:${yearlyColor}"></div>
                             </div>
                         </div>
-                        <span class="text-2xl font-bold flex-shrink-0" style="color:${yearlyColor}">${yearlyPct}%</span>
+                        <span id="ky-submit-progress-pct" class="text-2xl font-bold flex-shrink-0" style="color:${yearlyColor}">${yearlyPct}%</span>
                     </div>
 
                     ${alreadySubmitted ? `
@@ -779,12 +2359,32 @@ async function renderSubmitForm(container) {
                         <svg class="w-4 h-4 flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/>
                         </svg>
-                        <span>ส่งกิจกรรม KY ประจำเดือน — 1 แผนก / 1 เรื่อง / 1 เดือน (เป้าหมาย ${yearlyTarget} ครั้ง/ปี)</span>
+                        <span>ส่งกิจกรรม KY ประจำเดือน — ${initialSafetyUnits.length ? '1 Safety Unit / 1 เรื่อง / 1 เดือน' : '1 แผนก / 1 เรื่อง / 1 เดือน'} (เป้าหมาย ${yearlyTarget} ครั้ง/ปี)</span>
                     </div>`}
 
-                    <form id="ky-form" class="space-y-6" ${alreadySubmitted ? 'style="opacity:0.6; pointer-events:none;"' : ''}>
+                    <form id="ky-form" class="space-y-6" ${formLocked ? 'style="opacity:0.6; pointer-events:none;"' : ''}>
 
                         <!-- Reporter info -->
+                        ${_isAdmin ? `
+                        <div class="rounded-xl border border-indigo-100 bg-indigo-50/60 p-4 space-y-3">
+                            <div>
+                                <p class="text-xs font-bold text-indigo-700 uppercase">Admin Submit On Behalf</p>
+                                <h3 class="text-sm font-bold text-slate-800 mt-1">ส่งกิจกรรมแทนพนักงาน / Submit for Employee</h3>
+                                <p class="text-xs text-slate-500 mt-1">เลือกพนักงานจากมาสเตอร์เพื่อใช้ชื่อและแผนกของคนนั้นเป็นผู้รายงานกิจกรรม KY</p>
+                            </div>
+                            <div class="relative">
+                                <label class="block text-sm font-semibold text-slate-700 mb-1.5" for="ky-reporter-search">ค้นหาพนักงานผู้รายงาน</label>
+                                <input type="text" id="ky-reporter-search" class="form-input w-full"
+                                       placeholder="ค้นหาชื่อหรือรหัสพนักงาน..." autocomplete="off">
+                                <div id="ky-reporter-dropdown"
+                                     class="hidden absolute z-40 left-0 right-0 mt-1 bg-white rounded-xl shadow-lg border border-slate-200 max-h-60 overflow-y-auto"></div>
+                                <input type="hidden" name="ReporterEmployeeID" id="ky-reporter-id">
+                            </div>
+                            <div id="ky-submit-reporter-card" class="rounded-xl border border-white bg-white px-4 py-3 text-sm text-slate-600">
+                                ยังไม่ได้เลือกพนักงาน ระบบจะบันทึกด้วยบัญชี Admin ปัจจุบัน
+                            </div>
+                            <div id="ky-submit-progress-note" class="text-xs text-slate-500"></div>
+                        </div>` : `
                         <div class="grid grid-cols-1 lg:grid-cols-4 gap-4">
                             <div class="lg:col-span-2">
                                 <label class="block text-sm font-semibold text-slate-700 mb-1.5">หัวทีม / ผู้ส่งกิจกรรม</label>
@@ -793,11 +2393,44 @@ async function renderSubmitForm(container) {
                                     <span class="px-2.5 py-1 rounded-full text-xs font-bold bg-indigo-100 text-indigo-700 flex-shrink-0">หัวทีม</span>
                                 </div>
                             </div>
-                            <div class="lg:col-span-2">
-                                <label class="block text-sm font-semibold text-slate-700 mb-1.5">แผนก</label>
-                                <input type="text" class="form-input w-full bg-slate-50" value="${escHtml(user.department || '')}" readonly>
+                        </div>`}
+
+                        <div class="rounded-xl border border-emerald-100 bg-emerald-50/50 p-4">
+                            <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 mb-2">
+                                <label class="block text-sm font-bold text-slate-800" for="ky-reporter-email">Company Email สำหรับแจ้งสถานะ KY</label>
+                                <span id="ky-reporter-email-badge" class="px-2.5 py-1 rounded-full text-xs font-bold bg-slate-100 text-slate-600 border border-slate-200">ตรวจสอบอีเมล</span>
+                            </div>
+                            <div class="flex flex-col sm:flex-row gap-2">
+                                <input type="email" name="ReporterEmail" id="ky-reporter-email" class="form-input w-full"
+                                       value="${escHtml(_submitEmailProfile?.CompanyEmail || '')}"
+                                       placeholder="name@thaisummit-harness.co.th" autocomplete="email">
+                                <button type="button" id="ky-reporter-email-edit"
+                                        class="hidden px-3 py-2 rounded-lg border border-slate-200 bg-white text-xs font-bold text-slate-600 hover:border-sky-300 hover:text-sky-700">
+                                    แก้ไข
+                                </button>
+                            </div>
+                            <p id="ky-reporter-email-note" class="text-xs text-slate-500 mt-1">
+                                ${_submitEmailProfile?.CompanyEmail
+                                    ? 'ดึงจาก Employee Master แล้ว ระบบจะเก็บอีเมลนี้ไว้กับรายการ KY ณ วันที่ส่ง'
+                                    : `ยังไม่พบอีเมลใน Employee Master กรอกอีเมลบริษัทได้หากต้องการรับแจ้งเตือน ต้องลงท้ายด้วย ${KY_COMPANY_EMAIL_DOMAIN}`}
+                            </p>
+                        </div>
+
+                        <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                            <div>
+                                <label class="block text-sm font-semibold text-slate-700 mb-1.5" for="ky-main-dept">Main Department / แผนกหลัก <span class="text-red-500">*</span></label>
+                                <select id="ky-main-dept" name="Department" class="form-input w-full" required>
+                                    <option value="">-- Select Department --</option>
+                                    ${departmentOptions}
+                                </select>
+                                <p class="text-xs text-slate-400 mt-1">Department controls the Safety Unit list and yearly KY target scope.</p>
+                            </div>
+                            <div id="ky-dept-scope-note" class="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-xs text-slate-500 flex items-center">
+                                เลือกแผนกหลักก่อน ระบบจะแสดง Safety Unit ตาม Program Config ของปีที่เลือก
                             </div>
                         </div>
+
+                        <div id="ky-safety-unit-wrap"></div>
 
                         <div class="grid grid-cols-1 sm:grid-cols-3 gap-4">
                             <div>
@@ -805,12 +2438,12 @@ async function renderSubmitForm(container) {
                                 <input type="date" name="ActivityDate" class="form-input w-full" value="${today}" max="${today}" required>
                             </div>
                             <div>
-                                <label class="block text-sm font-semibold text-slate-700 mb-1.5">ชื่อทีม</label>
-                                <input type="text" name="TeamName" class="form-input w-full" placeholder="เช่น ทีม A / Line 1">
+                                <label class="block text-sm font-semibold text-slate-700 mb-1.5">ชื่อทีม <span class="text-red-500">*</span></label>
+                                <input type="text" name="TeamName" class="form-input w-full" placeholder="เช่น ทีม A / Line 1" required>
                             </div>
                             <div>
-                                <label class="block text-sm font-semibold text-slate-700 mb-1.5">KYT Keyword</label>
-                                <input type="text" name="KYTKeyword" class="form-input w-full" placeholder="เช่น ลื่นหกล้ม / หนีบมือ">
+                                <label class="block text-sm font-semibold text-slate-700 mb-1.5">KYT Keyword <span class="text-red-500">*</span></label>
+                                <input type="text" name="KYTKeyword" class="form-input w-full" placeholder="เช่น ลื่นหกล้ม / หนีบมือ" required>
                             </div>
                         </div>
 
@@ -835,7 +2468,7 @@ async function renderSubmitForm(container) {
 
                         <!-- Participants (employee typeahead) -->
                         <div>
-                            <label class="block text-sm font-semibold text-slate-700 mb-1.5">ผู้เข้าร่วม
+                            <label class="block text-sm font-semibold text-slate-700 mb-1.5">ผู้เข้าร่วม <span class="text-red-500">*</span>
                                 <span class="text-xs font-normal text-slate-400 ml-1">— ค้นหาพนักงานจากมาสเตอร์หรือพิมพ์ชื่อด้วยตัวเอง</span>
                             </label>
                             <div class="relative mb-2">
@@ -872,9 +2505,9 @@ async function renderSubmitForm(container) {
                             </div>
 
                             <div>
-                                <label class="block text-sm font-semibold text-slate-700 mb-1.5">มาตรการตอบโต้ (Countermeasure)</label>
+                                <label class="block text-sm font-semibold text-slate-700 mb-1.5">มาตรการตอบโต้ (Countermeasure) <span class="text-red-500">*</span></label>
                                 <textarea name="Countermeasure" rows="6"
-                                          class="form-input w-full resize-none"
+                                          class="form-input w-full resize-none" required
                                           placeholder="วิธีป้องกันหรือลดความเสี่ยงที่กำหนด..."></textarea>
                             </div>
                         </div>
@@ -885,12 +2518,12 @@ async function renderSubmitForm(container) {
                         <!-- Attachment + Video -->
                         <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
                             <div>
-                                <label class="block text-sm font-semibold text-slate-700 mb-1.5">ไฟล์แนบ (ภาพ / เอกสาร)</label>
+                                <label class="block text-sm font-semibold text-slate-700 mb-1.5">ไฟล์แนบ (ภาพ / เอกสาร) <span class="text-red-500">*</span></label>
                                 <label class="flex flex-col items-center justify-center border-2 border-dashed border-slate-200 rounded-xl p-4 cursor-pointer hover:border-indigo-400 hover:bg-indigo-50 transition-all group">
                                     <svg class="w-6 h-6 text-slate-300 group-hover:text-indigo-400 transition-colors mb-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"/>
                                     </svg>
-                                    <span class="text-xs text-slate-500">ภาพ / PDF / Office</span>
+                                    <span class="text-xs text-slate-500">ภาพ / PDF / Office ไม่เกิน 20 MB</span>
                                     <input type="file" name="attachment" id="ky-attachment" class="hidden"
                                            accept=".jpg,.jpeg,.png,.webp,.pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx">
                                 </label>
@@ -898,7 +2531,7 @@ async function renderSubmitForm(container) {
                                 <div id="ky-attachment-preview" class="hidden mt-3 rounded-xl border border-indigo-100 bg-indigo-50/50 p-3"></div>
                             </div>
                             <div>
-                                <label class="block text-sm font-semibold text-slate-700 mb-1.5">วิดีโอหลักฐาน</label>
+                                <label class="block text-sm font-semibold text-slate-700 mb-1.5">วิดีโอหลักฐาน <span class="text-xs font-normal text-slate-400">(แนบย้อนหลังได้)</span></label>
                                 <label class="flex flex-col items-center justify-center border-2 border-dashed border-slate-200 rounded-xl p-4 cursor-pointer hover:border-purple-400 hover:bg-purple-50 transition-all group">
                                     <svg class="w-6 h-6 text-slate-300 group-hover:text-purple-400 transition-colors mb-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 10l4.553-2.069A1 1 0 0121 8.82v6.361a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z"/>
@@ -911,6 +2544,9 @@ async function renderSubmitForm(container) {
                                 <div id="ky-video-preview" class="hidden mt-3 rounded-xl border border-purple-100 bg-purple-50/50 p-3"></div>
                             </div>
                         </div>
+
+                        <div id="ky-submit-summary" class="rounded-xl border border-slate-200 bg-slate-50 p-4"></div>
+                        <div id="ky-submit-readiness" class="rounded-xl border border-slate-200 bg-white p-4"></div>
 
                         <div class="flex justify-end pt-2">
                             <button type="submit" id="ky-submit-btn"
@@ -930,6 +2566,7 @@ async function renderSubmitForm(container) {
         </div>`;
 
     setupFormListeners();
+    renderKySafetyUnitSelect(document.getElementById('ky-main-dept')?.value || defaultDepartment);
 
     // Load and inject active forms card
     _loadKyForms(false).then(forms => {
@@ -939,6 +2576,12 @@ async function renderSubmitForm(container) {
 }
 
 function setupFormListeners() {
+    updateKyReporterEmailStatus(_submitEmailProfile?.CompanyEmail || '', 'current');
+    renderKySubmitSummary();
+    document.getElementById('ky-reporter-email-edit')?.addEventListener('click', unlockKyReporterEmail);
+    document.getElementById('ky-form')?.addEventListener('input', renderKySubmitSummary);
+    document.getElementById('ky-form')?.addEventListener('change', renderKySubmitSummary);
+
     // Attachment preview
     document.getElementById('ky-attachment')?.addEventListener('change', (e) => {
         renderKyFilePreview(e.target, 'ky-attachment-name', 'ky-attachment-preview', 'attachment');
@@ -954,6 +2597,21 @@ function setupFormListeners() {
     document.getElementById('ky-video-preview')?.addEventListener('click', (e) => {
         if (!e.target.closest('[data-clear-ky-file]')) return;
         clearKyFile('ky-video', 'ky-video-name', 'ky-video-preview');
+    });
+
+    setupKyReporterSearch();
+
+    document.getElementById('ky-main-dept')?.addEventListener('change', () => {
+        const dept = document.getElementById('ky-main-dept')?.value || '';
+        renderKySafetyUnitSelect(dept);
+        if (dept) refreshKySubmitProgress(dept);
+        renderKySubmitSummary();
+    });
+
+    document.getElementById('ky-safety-unit-select')?.addEventListener('change', () => {
+        const dept = document.getElementById('ky-main-dept')?.value || _submitReporter?.Department || (TSHSession.getUser() || {}).department || '';
+        refreshKySubmitProgress(dept);
+        renderKySubmitSummary();
     });
 
     // Employee typeahead search
@@ -1017,8 +2675,13 @@ function setupFormListeners() {
     });
 
     // Form submit
-    document.getElementById('ky-form')?.addEventListener('submit', async (e) => {
+    document.getElementById('ky-form')?.addEventListener('submit', guardSubmitHandler(async (e) => {
         e.preventDefault();
+        const readiness = updateKySubmitReadiness();
+        if (!readiness.ready) {
+            showToast(`กรอกข้อมูลยังไม่ครบ: ${readiness.missing.join(', ')}`, 'warning');
+            return;
+        }
         const btn = document.getElementById('ky-submit-btn');
         btn.disabled = true;
         btn.innerHTML = `<span class="animate-spin inline-block w-4 h-4 border-2 border-white border-t-transparent rounded-full mr-2"></span> กำลังส่ง...`;
@@ -1026,15 +2689,37 @@ function setupFormListeners() {
         try {
             showLoading('กำลังส่งกิจกรรม KY...');
             const fd = new FormData(e.target);
+            const reporterEmail = String(fd.get('ReporterEmail') || '').trim().toLowerCase();
+            if (reporterEmail && !/^[^\s@]+@thaisummit-harness\.co\.th$/i.test(reporterEmail)) {
+                showToast(`Company Email ต้องลงท้ายด้วย ${KY_COMPANY_EMAIL_DOMAIN}`, 'warning');
+                return;
+            }
+            fd.set('ReporterEmail', reporterEmail);
+            const dept = String(fd.get('Department') || document.getElementById('ky-main-dept')?.value || _submitReporter?.Department || (TSHSession.getUser() || {}).department || '').trim();
+            if (!dept) {
+                showToast('กรุณาเลือกแผนกหลักก่อนส่งกิจกรรม KY', 'warning');
+                return;
+            }
+            const units = getKySafetyUnitsForDept(dept, new Date(fd.get('ActivityDate') || new Date()).getFullYear());
+            const selectedUnit = String(fd.get('SafetyUnit') || '').trim();
+            if (units.length && !selectedUnit) {
+                showToast('กรุณาเลือก Safety Unit ก่อนส่งกิจกรรม KY', 'warning');
+                return;
+            }
+            fd.set('Department', dept);
             fd.set('Participants', JSON.stringify(_participants.map(p => p.name)));
             await API.post('/ky', fd);
             showToast('ส่งกิจกรรม KY สำเร็จ', 'success');
             _participants = [];
             e.target.reset();
+            updateKyReporterEmailStatus(_submitEmailProfile?.CompanyEmail || '', 'current');
             document.getElementById('ky-attachment-name').textContent = '';
             document.getElementById('ky-video-name').textContent = '';
             clearKyFile('ky-attachment', 'ky-attachment-name', 'ky-attachment-preview');
             clearKyFile('ky-video', 'ky-video-name', 'ky-video-preview');
+            _submitReporter = null;
+            renderKySubmitReporter();
+            renderKySubmitSummary();
             updateParticipantTags();
             await _loadHeroStats();
         } catch (err) {
@@ -1044,7 +2729,205 @@ function setupFormListeners() {
             btn.disabled = false;
             btn.innerHTML = `<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8"/></svg> ส่งกิจกรรม KY`;
         }
+    }));
+}
+
+function setupKyReporterSearch() {
+    const reporterSearch = document.getElementById('ky-reporter-search');
+    const reporterDrop   = document.getElementById('ky-reporter-dropdown');
+    if (!reporterSearch || !reporterDrop) return;
+
+    reporterSearch.addEventListener('input', () => {
+        clearTimeout(_reporterSearchTimer);
+        const q = reporterSearch.value.trim();
+        if (!q) {
+            reporterDrop.classList.add('hidden');
+            return;
+        }
+
+        _reporterSearchTimer = setTimeout(async () => {
+            try {
+                const res = await API.get(`/ky/employees?q=${encodeURIComponent(q)}`);
+                _reporterSearchResults = normalizeApiArray(res?.data ?? res);
+                reporterDrop.innerHTML = _reporterSearchResults.length
+                    ? _reporterSearchResults.map((emp, i) => `
+                        <button type="button" data-reporter-idx="${i}"
+                                class="w-full text-left px-4 py-2.5 text-sm hover:bg-indigo-50 transition-colors border-b border-slate-50 last:border-0">
+                            <span class="font-semibold text-slate-700">${escHtml(emp.EmployeeName || '')}</span>
+                            <span class="text-xs text-slate-400 ml-2">${escHtml(emp.EmployeeID || '')}</span>
+                            <span class="text-xs text-slate-400 ml-1">· ${escHtml(emp.Department || '-')}</span>
+                        </button>`).join('')
+                    : `<div class="px-4 py-3 text-xs text-slate-400">ไม่พบพนักงานจากมาสเตอร์</div>`;
+                reporterDrop.classList.remove('hidden');
+            } catch {
+                reporterDrop.classList.add('hidden');
+            }
+        }, 300);
     });
+
+    reporterDrop.addEventListener('click', (e) => {
+        const btn = e.target.closest('[data-reporter-idx]');
+        if (!btn) return;
+        const reporter = _reporterSearchResults[parseInt(btn.dataset.reporterIdx)];
+        if (!reporter) return;
+        _submitReporter = reporter;
+        reporterSearch.value = `${reporter.EmployeeName || ''} (${reporter.EmployeeID || ''})`;
+        reporterDrop.classList.add('hidden');
+        renderKySubmitReporter();
+    });
+
+    reporterSearch.addEventListener('keydown', (e) => {
+        if (e.key !== 'Escape') return;
+        reporterDrop.classList.add('hidden');
+    });
+
+    document.getElementById('ky-form')?.querySelector('[name="ActivityDate"]')?.addEventListener('change', async () => {
+        const activityDate = document.getElementById('ky-form')?.querySelector('[name="ActivityDate"]')?.value;
+        const year = activityDate ? new Date(activityDate).getFullYear() : new Date().getFullYear();
+        await _fetchProgramConfig(year);
+        const deptSelect = document.getElementById('ky-main-dept');
+        const previousDept = deptSelect?.value || _submitReporter?.Department || (TSHSession.getUser() || {}).department || '';
+        if (deptSelect) {
+            deptSelect.innerHTML = `<option value="">-- Select Department --</option>${buildKyDepartmentOptions(previousDept, year)}`;
+            deptSelect.value = previousDept;
+        }
+        const dept = deptSelect?.value || previousDept;
+        renderKySafetyUnitSelect(dept);
+        if (dept) refreshKySubmitProgress(dept);
+    });
+}
+
+function renderKySafetyUnitSelect(department) {
+    const wrap = document.getElementById('ky-safety-unit-wrap');
+    if (!wrap) return;
+    const activityDate = document.getElementById('ky-form')?.querySelector('[name="ActivityDate"]')?.value;
+    const year = activityDate ? new Date(activityDate).getFullYear() : new Date().getFullYear();
+    const units = getKySafetyUnitsForDept(department, year);
+
+    if (!department) {
+        wrap.innerHTML = `
+            <div class="rounded-xl border border-slate-200 bg-slate-50 p-4 text-sm text-slate-500">
+                เลือกพนักงานผู้รายงานก่อน ระบบจะแสดง Safety Unit ตาม Program Config ของแผนกนั้น
+            </div>`;
+        return;
+    }
+
+    if (!units.length) {
+        wrap.innerHTML = `
+            <div class="rounded-xl border border-slate-200 bg-slate-50 p-4 text-sm text-slate-500">
+                แผนก ${escHtml(department)} ยังไม่ได้ผูก Safety Unit ใน Program Config — ระบบจะนับเป้าหมายระดับแผนก
+            </div>`;
+        return;
+    }
+
+    wrap.innerHTML = `
+        <div class="rounded-xl border border-indigo-100 bg-indigo-50/50 p-4">
+            <div class="flex flex-col lg:flex-row lg:items-center justify-between gap-3">
+                <div>
+                    <label class="block text-sm font-bold text-slate-800 mb-1" for="ky-safety-unit-select">Safety Unit <span class="text-red-500">*</span></label>
+                    <p class="text-xs text-slate-500">เลือกหน่วยงานย่อยที่ทำกิจกรรม KY — 1 Safety Unit ต้องทำตามเป้าหมายรายปีที่ Admin ตั้งไว้</p>
+                </div>
+                <span class="px-3 py-1.5 rounded-full bg-white border border-indigo-100 text-xs font-bold text-indigo-700">${units.length} Safety Units</span>
+            </div>
+            <select id="ky-safety-unit-select" name="SafetyUnit" class="form-input w-full mt-3" required>
+                <option value="">— เลือก Safety Unit —</option>
+                ${units.map(unit => `<option value="${escHtml(unit)}">${escHtml(unit)}</option>`).join('')}
+            </select>
+        </div>`;
+
+    document.getElementById('ky-safety-unit-select')?.addEventListener('change', () => {
+        refreshKySubmitProgress(department);
+        renderKySubmitSummary();
+    });
+    renderKySubmitSummary();
+}
+
+function renderKySubmitReporter() {
+    const idInput = document.getElementById('ky-reporter-id');
+    const card = document.getElementById('ky-submit-reporter-card');
+    const search = document.getElementById('ky-reporter-search');
+    if (!idInput || !card) return;
+
+    if (!_submitReporter) {
+        idInput.value = '';
+        if (search) search.value = '';
+        card.innerHTML = 'ยังไม่ได้เลือกพนักงาน ระบบจะบันทึกด้วยบัญชี Admin ปัจจุบัน';
+        const note = document.getElementById('ky-submit-progress-note');
+        if (note) note.textContent = '';
+        const currentUser = TSHSession.getUser() || {};
+        const deptSelect = document.getElementById('ky-main-dept');
+        const dept = deptSelect?.value || currentUser.department || '';
+        if (deptSelect && !deptSelect.value && currentUser.department) deptSelect.value = currentUser.department;
+        updateKyReporterEmailStatus(_submitEmailProfile?.CompanyEmail || '', 'current');
+        renderKySafetyUnitSelect(dept);
+        if (dept) refreshKySubmitProgress(dept);
+        renderKySubmitSummary();
+        return;
+    }
+
+    idInput.value = _submitReporter.EmployeeID || '';
+    updateKyReporterEmailStatus(_submitReporter.CompanyEmail || '', 'selected');
+    card.innerHTML = `
+        <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
+            <div>
+                <p class="font-bold text-slate-800">${escHtml(_submitReporter.EmployeeName || '-')}</p>
+                <p class="text-xs text-slate-500">${escHtml(_submitReporter.EmployeeID || '-')} · ${escHtml(_submitReporter.Department || '-')} ${_submitReporter.Position ? `· ${escHtml(_submitReporter.Position)}` : ''}</p>
+            </div>
+            <button type="button" id="ky-clear-reporter"
+                    class="px-2.5 py-1 rounded-lg border border-slate-200 text-xs font-semibold text-slate-600 hover:border-red-200 hover:text-red-600">
+                ล้างการเลือก
+            </button>
+        </div>`;
+    document.getElementById('ky-clear-reporter')?.addEventListener('click', () => {
+        _submitReporter = null;
+        renderKySubmitReporter();
+    });
+    const deptSelect = document.getElementById('ky-main-dept');
+    const reporterDept = _submitReporter.Department || '';
+    if (deptSelect && reporterDept) deptSelect.value = reporterDept;
+    const dept = deptSelect?.value || reporterDept;
+    renderKySafetyUnitSelect(dept);
+    if (dept) refreshKySubmitProgress(dept);
+    renderKySubmitSummary();
+}
+
+async function refreshKySubmitProgress(department) {
+    const activityDate = document.getElementById('ky-form')?.querySelector('[name="ActivityDate"]')?.value;
+    const year = activityDate ? new Date(activityDate).getFullYear() : new Date().getFullYear();
+    if (!department || !year) return;
+    const selectedUnit = document.getElementById('ky-safety-unit-select')?.value || '';
+
+    try {
+        const unitParam = selectedUnit ? `&safetyUnit=${encodeURIComponent(selectedUnit)}` : '';
+        const chk = await API.get(`/ky/check?dept=${encodeURIComponent(department)}&year=${year}${unitParam}`);
+        const done = chk?.yearlyDone ?? chk?.count ?? 0;
+        const target = chk?.yearlyTarget ?? chk?.target ?? 12;
+        const pct = target > 0 ? Math.min(100, Math.round((done / target) * 100)) : 0;
+        const color = pct >= 100 ? '#10b981' : pct >= 50 ? '#f59e0b' : '#ef4444';
+        const countEl = document.getElementById('ky-submit-progress-count');
+        const barEl = document.getElementById('ky-submit-progress-bar');
+        const pctEl = document.getElementById('ky-submit-progress-pct');
+        const noteEl = document.getElementById('ky-submit-progress-note');
+        if (countEl) {
+            countEl.textContent = `${done} / ${target} ครั้ง`;
+            countEl.style.color = color;
+        }
+        if (barEl) {
+            barEl.style.width = `${pct}%`;
+            barEl.style.background = color;
+        }
+        if (pctEl) {
+            pctEl.textContent = `${pct}%`;
+            pctEl.style.color = color;
+        }
+        if (noteEl) {
+            const scope = selectedUnit ? `Safety Unit ${selectedUnit}` : `แผนก ${department}`;
+            noteEl.textContent = chk?.submittedThisMonth
+                ? `${scope} มีรายการ KY ของเดือนปัจจุบันแล้ว ระบบจะตรวจซ้ำตามวันที่กิจกรรมอีกครั้งตอนบันทึก`
+                : `ความคืบหน้าปี ${year} ของ${scope}`;
+            noteEl.className = `text-xs ${chk?.submittedThisMonth ? 'text-amber-700' : 'text-slate-500'}`;
+        }
+    } catch (_) {}
 }
 
 function _addParticipant(name, empId) {
@@ -1052,13 +2935,16 @@ function _addParticipant(name, empId) {
     if (_participants.some(p => p.name === name)) return;
     _participants.push({ name, empId: empId || null });
     updateParticipantTags();
+    renderKySubmitSummary();
 }
 
 function renderKyFilePreview(input, nameId, previewId, type) {
     const file = input.files?.[0];
     const nameEl = document.getElementById(nameId);
     const previewEl = document.getElementById(previewId);
+    if (file && !validateKySelectedFile(input, type)) return;
     if (nameEl) nameEl.textContent = file?.name || '';
+    updateKySubmitReadiness();
     if (!previewEl) return;
 
     if (!file) {
@@ -1091,6 +2977,23 @@ function renderKyFilePreview(input, nameId, previewId, type) {
         </div>`;
 }
 
+function validateKySelectedFile(input, type) {
+    const file = input?.files?.[0];
+    if (!file) return true;
+
+    const maxSize = type === 'video' ? KY_VIDEO_LIMIT : KY_ATTACHMENT_LIMIT;
+    if (file.size <= maxSize) return true;
+
+    input.value = '';
+    showToast(
+        type === 'video'
+            ? 'วิดีโอหลักฐานมีขนาดเกิน 200 MB'
+            : 'ไฟล์แนบภาพหรือเอกสารมีขนาดเกิน 20 MB',
+        'warning'
+    );
+    return false;
+}
+
 function clearKyFile(inputId, nameId, previewId) {
     const input = document.getElementById(inputId);
     const nameEl = document.getElementById(nameId);
@@ -1101,6 +3004,7 @@ function clearKyFile(inputId, nameId, previewId) {
         previewEl.classList.add('hidden');
         previewEl.innerHTML = '';
     }
+    updateKySubmitReadiness();
 }
 
 function formatFileSize(bytes) {
@@ -1118,6 +3022,7 @@ function updateParticipantTags() {
     if (!_participants.length) {
         container.innerHTML = `<span class="text-xs text-slate-400 italic" id="ky-no-participants">ยังไม่มีผู้เข้าร่วม</span>`;
         if (hidden) hidden.value = '[]';
+        renderKySubmitSummary();
         return;
     }
 
@@ -1133,6 +3038,7 @@ function updateParticipantTags() {
                     class="ky-remove-participant ${isLeader ? 'text-indigo-200 hover:text-white' : 'text-indigo-400 hover:text-indigo-700'} leading-none font-bold ml-0.5">×</button>
         </span>`;
     }).join('');
+    renderKySubmitSummary();
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1155,39 +3061,52 @@ async function renderHistory(container) {
                 </svg>
                 <span>แสดงเฉพาะ <strong>${configDepts.length} ส่วนงาน</strong> ที่อยู่ในโปรแกรม KY ปี ${_filterHistYear} — ตั้งค่าได้ในแท็บ "จัดการ"</span>
             </div>` : ''}
-            <div class="ds-filter-bar flex flex-wrap gap-3 items-center justify-between">
-                <div class="flex flex-wrap gap-2">
-                    <select id="ky-hist-year" class="form-input py-1.5 text-sm">
-                        ${[0,1,2].map(i => { const y = new Date().getFullYear()-i; return `<option value="${y}" ${y===_filterHistYear?'selected':''}>${y}</option>`; }).join('')}
-                    </select>
-                    <input id="ky-hist-date-from" type="date" class="form-input py-1.5 text-sm"
-                           value="${_filterDateFrom}" title="วันที่เริ่มต้น">
-                    <input id="ky-hist-date-to"   type="date" class="form-input py-1.5 text-sm"
-                           value="${_filterDateTo}"   title="วันที่สิ้นสุด">
-                    <select id="ky-hist-dept" class="form-input py-1.5 text-sm">
-                        <option value="all" ${_filterHistDept==='all'?'selected':''}>ทุกแผนก${usingConfigScope ? ` (${configDepts.length} ส่วนงาน)` : ''}</option>
-                        ${histDeptList.map(d => `<option value="${escHtml(d)}" ${_filterHistDept===d?'selected':''}>${escHtml(d)}</option>`).join('')}
-                    </select>
-                    <select id="ky-filter-status" class="form-input py-1.5 text-sm">
-                        <option value="all" ${_filterStatus==='all'?'selected':''}>ทุกสถานะ</option>
-                        ${STATUSES.map(s => `<option value="${s}" ${_filterStatus===s?'selected':''}>${STATUS_LABEL[s]||s}</option>`).join('')}
-                    </select>
-                    <select id="ky-hist-risk" class="form-input py-1.5 text-sm">
-                        <option value="all" ${_filterHistRisk==='all'?'selected':''}>ทุกประเภทความเสี่ยง</option>
-                        ${RISK_CATEGORIES.map(c => `<option value="${escHtml(c)}" ${_filterHistRisk===c?'selected':''}>${escHtml(c)}</option>`).join('')}
-                    </select>
-                </div>
-                <div class="flex items-center gap-2 flex-wrap">
-                    <div class="relative w-full sm:w-64">
+            <div class="ds-filter-bar p-4">
+                <div class="flex flex-col xl:flex-row xl:items-end justify-between gap-3">
+                    <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-8 gap-2 flex-1">
+                        <select id="ky-hist-year" class="form-input py-2 text-sm min-w-0">
+                            ${[0,1,2].map(i => { const y = new Date().getFullYear()-i; return `<option value="${y}" ${y===_filterHistYear?'selected':''}>ปี ${y}</option>`; }).join('')}
+                        </select>
+                        <input id="ky-hist-date-from" type="date" class="form-input py-2 text-sm min-w-0"
+                               value="${_filterDateFrom}" title="วันที่เริ่มต้น">
+                        <input id="ky-hist-date-to"   type="date" class="form-input py-2 text-sm min-w-0"
+                               value="${_filterDateTo}"   title="วันที่สิ้นสุด">
+                        <select id="ky-hist-dept" class="form-input py-2 text-sm min-w-0">
+                            <option value="all" ${_filterHistDept==='all'?'selected':''}>ทุกแผนก${usingConfigScope ? ` (${configDepts.length})` : ''}</option>
+                            ${histDeptList.map(d => `<option value="${escHtml(d)}" ${_filterHistDept===d?'selected':''}>${escHtml(d)}</option>`).join('')}
+                        </select>
+                        <select id="ky-filter-status" class="form-input py-2 text-sm min-w-0">
+                            <option value="all" ${_filterStatus==='all'?'selected':''}>ทุกสถานะ</option>
+                            ${STATUSES.map(s => `<option value="${s}" ${_filterStatus===s?'selected':''}>${STATUS_LABEL[s]||s}</option>`).join('')}
+                        </select>
+                        <select id="ky-hist-risk" class="form-input py-2 text-sm min-w-0">
+                            <option value="all" ${_filterHistRisk==='all'?'selected':''}>ทุกประเภทความเสี่ยง</option>
+                            ${RISK_CATEGORIES.map(c => `<option value="${escHtml(c)}" ${_filterHistRisk===c?'selected':''}>${escHtml(c)}</option>`).join('')}
+                        </select>
+                        <select id="ky-hist-source" class="form-input py-2 text-sm min-w-0">
+                            <option value="all" ${_filterHistSource==='all'?'selected':''}>ทุกการบันทึก</option>
+                            <option value="self" ${_filterHistSource==='self'?'selected':''}>ส่งตามบัญชีผู้รายงาน</option>
+                            <option value="admin" ${_filterHistSource==='admin'?'selected':''}>Admin ส่งแทน</option>
+                        </select>
+                        <select id="ky-hist-evidence" class="form-input py-2 text-sm min-w-0">
+                            <option value="all" ${_filterHistEvidence==='all'?'selected':''}>All evidence</option>
+                            <option value="complete" ${_filterHistEvidence==='complete'?'selected':''}>File + video complete</option>
+                            <option value="waiting_video" ${_filterHistEvidence==='waiting_video'?'selected':''}>Waiting for video</option>
+                            <option value="no_video" ${_filterHistEvidence==='no_video'?'selected':''}>No video</option>
+                            <option value="missing_file" ${_filterHistEvidence==='missing_file'?'selected':''}>Missing file</option>
+                        </select>
+                    </div>
+                    <div class="flex items-center gap-2 flex-wrap xl:flex-nowrap xl:w-[420px]">
+                        <div class="relative flex-1 min-w-[220px]">
                         <svg class="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400 pointer-events-none"
                              fill="none" stroke="currentColor" viewBox="0 0 24 24">
                             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/>
                         </svg>
-                        <input id="ky-history-search" type="text" placeholder="ค้นหา..."
+                        <input id="ky-history-search" type="text" placeholder="ค้นหารายงาน..."
                                value="${_searchQ}" class="form-input w-full pl-9 text-sm py-2">
                     </div>
                     <button id="ky-export-btn"
-                        class="flex items-center gap-1.5 px-3 py-2 rounded-xl text-sm font-semibold border border-indigo-200 text-indigo-700 bg-white hover:bg-indigo-50 transition-all flex-shrink-0">
+                        class="flex items-center justify-center gap-1.5 px-3 py-2 rounded-xl text-sm font-semibold border border-indigo-200 text-indigo-700 bg-white hover:bg-indigo-50 transition-all flex-shrink-0">
                         <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
                                   d="M12 10v6m0 0l-3-3m3 3l3-3M4 17v1a2 2 0 002 2h12a2 2 0 002-2v-1M7 7l4.586-4.586a2 2 0 012.828 0L19 7"/>
@@ -1206,13 +3125,14 @@ async function renderHistory(container) {
                                 <th class="px-4 py-3">แผนก / ทีม</th>
                                 <th class="px-4 py-3">KYT Keyword</th>
                                 <th class="px-4 py-3">ประเภท</th>
-                                <th class="px-4 py-3">ผู้รายงาน</th>
+                                <th class="px-4 py-3">ผู้รายงาน / การบันทึก</th>
                                 <th class="px-4 py-3">สถานะ</th>
+                                <th class="px-4 py-3">Evidence</th>
                                 <th class="px-4 py-3 text-right">Action</th>
                             </tr>
                         </thead>
                         <tbody id="ky-history-tbody" class="divide-y divide-slate-100">
-                            ${loadingRow(7)}
+                            ${loadingRow(8)}
                         </tbody>
                     </table>
                 </div>
@@ -1240,13 +3160,14 @@ async function fetchAndRenderHistory() {
             if (configDepts.length) params.set('depts', configDepts.join(','));
         }
         if (_filterHistRisk !== 'all') params.set('risk', _filterHistRisk);
+        if (_filterHistSource !== 'all') params.set('source', _filterHistSource);
         if (_searchQ.trim())           params.set('q', _searchQ.trim());
         const res     = await API.get(`/ky?${params}`);
-        const records = normalizeApiArray(res?.data ?? res);
+        const records = filterKyEvidenceRecords(normalizeApiArray(res?.data ?? res), _filterHistEvidence);
         _historyRecords = records;
 
         if (!records.length) {
-            tbody.innerHTML = `<tr><td colspan="7" class="text-center py-10 text-slate-400 text-sm">ไม่พบกิจกรรม KY</td></tr>`;
+            tbody.innerHTML = `<tr><td colspan="8" class="text-center py-10 text-slate-400 text-sm">ไม่พบกิจกรรม KY</td></tr>`;
             return;
         }
 
@@ -1257,15 +3178,22 @@ async function fetchAndRenderHistory() {
                 <td class="px-4 py-3 text-slate-600 whitespace-nowrap text-xs">${date}</td>
                 <td class="px-4 py-3">
                     <div class="font-medium text-slate-800">${r.Department || '-'}</div>
-                    ${r.TeamName ? `<div class="text-xs text-slate-400">${r.TeamName}</div>` : ''}
+                    ${r.SafetyUnit ? `<div class="mt-1 inline-flex rounded-full border border-indigo-100 bg-indigo-50 px-2 py-0.5 text-[10px] font-bold text-indigo-700">${escHtml(r.SafetyUnit)}</div>` : ''}
+                    ${r.TeamName ? `<div class="text-xs text-slate-400 mt-1">${r.TeamName}</div>` : ''}
                 </td>
                 <td class="px-4 py-3 text-slate-700 max-w-[150px] truncate text-xs">${r.KYTKeyword || '-'}</td>
                 <td class="px-4 py-3">
                     ${dsStatusBadge(r.RiskCategory || '-')}
                 </td>
-                <td class="px-4 py-3 text-slate-600 whitespace-nowrap text-xs">${r.ReporterName || '-'}</td>
+                <td class="px-4 py-3 min-w-[180px]">
+                    <div class="text-xs font-semibold text-slate-700">${escHtml(r.ReporterName || '-')}</div>
+                    ${renderKySubmitSource(r)}
+                </td>
                 <td class="px-4 py-3">
                     ${dsStatusBadge(r.Status || '-', { label: STATUS_LABEL[r.Status] || r.Status || '-' })}
+                </td>
+                <td class="px-4 py-3">
+                    ${renderKyEvidenceBadge(r)}
                 </td>
                 <td class="px-4 py-3 text-right">
                     <div class="flex items-center justify-end gap-1">
@@ -1286,8 +3214,24 @@ async function fetchAndRenderHistory() {
             </tr>`;
         }).join('');
     } catch (err) {
-        if (tbody) tbody.innerHTML = `<tr><td colspan="7" class="text-center py-6 text-red-500 text-sm">${escHtml(err.message)}</td></tr>`;
+        if (tbody) tbody.innerHTML = `<tr><td colspan="8" class="text-center py-6 text-red-500 text-sm">${escHtml(err.message)}</td></tr>`;
     }
+}
+
+function isKySubmittedOnBehalf(record) {
+    return Boolean(record?.SubmittedByID && record?.ReporterID && record.SubmittedByID !== record.ReporterID);
+}
+
+function renderKySubmitSource(record) {
+    if (!isKySubmittedOnBehalf(record)) {
+        return `<div class="mt-1 inline-flex items-center rounded-full border border-slate-100 bg-slate-50 px-2 py-0.5 text-[10px] font-bold text-slate-500">ส่งตามบัญชีผู้รายงาน</div>`;
+    }
+
+    return `
+        <div class="mt-1 flex flex-col gap-0.5">
+            <span class="inline-flex w-fit items-center rounded-full border border-indigo-100 bg-indigo-50 px-2 py-0.5 text-[10px] font-bold text-indigo-700">Admin ส่งแทน</span>
+            <span class="text-[10px] text-slate-400">บันทึกโดย ${escHtml(record.SubmittedByName || record.SubmittedByID || '-')}</span>
+        </div>`;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1410,7 +3354,7 @@ function _openKyFormUploadModal() {
         </div>
     </div>`;
     openModal('เพิ่มแบบฟอร์ม KY', html, 'max-w-lg');
-    document.getElementById('kyff-submit-btn')?.addEventListener('click', async () => {
+    document.getElementById('kyff-submit-btn')?.addEventListener('click', guardActionHandler(async () => {
         const title = document.getElementById('kyff-title')?.value.trim();
         const fileEl = document.getElementById('kyff-file');
         if (!title) { showToast('กรุณาระบุชื่อแบบฟอร์ม', 'error'); return; }
@@ -1434,7 +3378,7 @@ function _openKyFormUploadModal() {
             showToast(err.message || 'เกิดข้อผิดพลาด', 'error');
             if (btn) { btn.disabled = false; btn.innerHTML = '<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12"/></svg>อัปโหลดแบบฟอร์ม'; }
         }
-    });
+    }));
 }
 
 function _renderKyFormsUserCard(forms) {
@@ -1485,20 +3429,38 @@ async function renderManage(container) {
 
     const subActive   = 'px-4 py-2 text-xs font-bold rounded-lg text-white transition-all';
     const subInactive = 'px-4 py-2 text-xs font-semibold rounded-lg text-slate-500 bg-white border border-slate-200 hover:bg-slate-50 transition-all';
+    if (!['coverage', 'config', 'forms'].includes(_manageSub)) _manageSub = 'coverage';
 
     container.innerHTML = `
         <div class="space-y-4">
+        <div class="ds-section p-5" data-ky-card-image="ky-admin-workspace">
+                <div class="flex flex-col xl:flex-row xl:items-center justify-between gap-4">
+                    <div>
+                        <p class="text-xs font-bold text-indigo-700 uppercase">KY Admin Workspace</p>
+                        <h2 class="text-lg font-bold text-slate-800 mt-1">จัดการโปรแกรม KY / KY Program Control</h2>
+                        <p class="text-sm text-slate-500 mt-1">ติดตามการส่งรายส่วนงาน ตรวจรายการค้าง และกำหนดเป้าหมายหรือแบบฟอร์มสำหรับปีที่เลือก</p>
+                    </div>
+                    <div class="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-xs text-slate-500 min-w-full xl:min-w-[360px] xl:max-w-[420px]">
+                        <p class="font-bold text-slate-700">Admin focus</p>
+                        <p class="mt-1">Coverage & Follow-up รวมภาพรวมการส่ง, คิวตรวจ, และรายการรอปิดงานไว้ในหน้าเดียว</p>
+                    </div>
+                </div>
+            </div>
+
             <!-- Sub-tab bar -->
             <div class="ds-filter-bar flex flex-wrap items-center justify-between gap-3">
-                <div class="flex gap-2">
+                <div class="flex flex-wrap gap-2">
                     <button id="ky-msub-coverage" class="${_manageSub==='coverage' ? subActive : subInactive}"
                             style="${_manageSub==='coverage' ? 'background:linear-gradient(135deg,#6366f1,#8b5cf6)' : ''}"
-                            data-msub="coverage">ภาพรวม Coverage</button>
+                            data-msub="coverage">Coverage & Follow-up</button>
                     <button id="ky-msub-config" class="${_manageSub==='config' ? subActive : subInactive}"
                             style="${_manageSub==='config' ? 'background:linear-gradient(135deg,#6366f1,#8b5cf6)' : ''}"
                             data-msub="config">ตั้งค่าโปรแกรม KY</button>
+                    <button id="ky-msub-forms" class="${_manageSub==='forms' ? subActive : subInactive}"
+                            style="${_manageSub==='forms' ? 'background:linear-gradient(135deg,#6366f1,#8b5cf6)' : ''}"
+                            data-msub="forms">แบบฟอร์ม</button>
                 </div>
-                <div class="flex gap-2 items-center">
+                <div class="flex flex-wrap gap-2 items-center">
                     <select id="ky-mgmt-year" class="form-input py-1.5 text-sm">
                         ${[0,1,2].map(i => { const y = new Date().getFullYear()-i; return `<option value="${y}" ${y===_filterMgmtYear?'selected':''}>${y}</option>`; }).join('')}
                     </select>
@@ -1536,49 +3498,52 @@ async function _renderManagePanel() {
     if (!panel) return;
     if (_manageSub === 'config') {
         renderManageConfig(panel);
-        // Load forms after DOM is ready
-        _loadKyForms(_isAdmin).then(() => {
-            _renderKyFormsManageSection();
-            // Wire up forms buttons (only on config sub-tab)
-            document.getElementById('btn-add-ky-form')?.addEventListener('click', _openKyFormUploadModal);
-            document.getElementById('ky-forms-tbody')?.addEventListener('click', async e => {
-                const toggleBtn = e.target.closest('.ky-form-toggle');
-                const deleteBtn = e.target.closest('.ky-form-delete');
-                if (toggleBtn) {
-                    const id = toggleBtn.dataset.id;
-                    const isActive = toggleBtn.dataset.active === '1' || toggleBtn.dataset.active === 'true' || toggleBtn.dataset.active === 1;
-                    const form = _kyForms.find(f => String(f.id) === String(id));
-                    if (!form) return;
-                    try {
-                        await API.put(`/module-forms/${id}`, {
-                            title: form.Title,
-                            description: form.Description,
-                            version: form.Version,
-                            sortOrder: form.SortOrder,
-                            isActive: isActive ? 0 : 1,
-                        });
-                        showToast(isActive ? 'ปิดใช้งานแล้ว' : 'เปิดใช้งานแล้ว', 'success');
-                        await _loadKyForms(_isAdmin);
-                        _renderKyFormsManageSection();
-                    } catch (err) { showToast(err.message || 'เกิดข้อผิดพลาด', 'error'); }
-                }
-                if (deleteBtn) {
-                    const id = deleteBtn.dataset.id;
-                    const title = deleteBtn.dataset.title;
-                    showConfirmationModal(`ลบแบบฟอร์ม "${title}" ใช่หรือไม่?`, async () => {
-                        try {
-                            await API.delete(`/module-forms/${id}`);
-                            showToast('ลบแบบฟอร์มสำเร็จ', 'success');
-                            await _loadKyForms(_isAdmin);
-                            _renderKyFormsManageSection();
-                        } catch (err) { showToast(err.message || 'เกิดข้อผิดพลาด', 'error'); }
-                    });
-                }
-            });
-        });
+    } else if (_manageSub === 'forms') {
+        renderManageForms(panel);
+        await _loadKyForms(_isAdmin);
+        _renderKyFormsManageSection();
+        wireKyFormsManageEvents();
     } else {
         await fetchAndRenderManage('all');
     }
+}
+
+function wireKyFormsManageEvents() {
+    document.getElementById('btn-add-ky-form')?.addEventListener('click', _openKyFormUploadModal);
+    document.getElementById('ky-forms-tbody')?.addEventListener('click', guardActionHandler(async e => {
+        const toggleBtn = e.target.closest('.ky-form-toggle');
+        const deleteBtn = e.target.closest('.ky-form-delete');
+        if (toggleBtn) {
+            const id = toggleBtn.dataset.id;
+            const isActive = toggleBtn.dataset.active === '1' || toggleBtn.dataset.active === 'true' || toggleBtn.dataset.active === 1;
+            const form = _kyForms.find(f => String(f.id) === String(id));
+            if (!form) return;
+            try {
+                await API.put(`/module-forms/${id}`, {
+                    title: form.Title,
+                    description: form.Description,
+                    version: form.Version,
+                    sortOrder: form.SortOrder,
+                    isActive: isActive ? 0 : 1,
+                });
+                showToast(isActive ? 'ปิดใช้งานแล้ว' : 'เปิดใช้งานแล้ว', 'success');
+                await _loadKyForms(_isAdmin);
+                _renderKyFormsManageSection();
+            } catch (err) { showToast(err.message || 'เกิดข้อผิดพลาด', 'error'); }
+        }
+        if (deleteBtn) {
+            const id = deleteBtn.dataset.id;
+            const title = deleteBtn.dataset.title;
+            showConfirmationModal(`ลบแบบฟอร์ม "${title}" ใช่หรือไม่?`, async () => {
+                try {
+                    await API.delete(`/module-forms/${id}`);
+                    showToast('ลบแบบฟอร์มสำเร็จ', 'success');
+                    await _loadKyForms(_isAdmin);
+                    _renderKyFormsManageSection();
+                } catch (err) { showToast(err.message || 'เกิดข้อผิดพลาด', 'error'); }
+            });
+        }
+    }, { render: false, target: event => event?.target?.closest?.('.ky-form-toggle, .ky-form-delete') || null, actionKey: (_event, button) => `ky:forms:${button.classList.contains('ky-form-delete') ? 'delete' : 'toggle'}:${button.dataset.id}` }));
 }
 
 function renderManageConfig(wrap) {
@@ -1586,9 +3551,21 @@ function renderManageConfig(wrap) {
     if (!wrap) return;
 
     const configs = _kyProgConfig;
+    const activeConfigs = configs.filter(cfg => cfg.IsActive);
+    const targetTotal = activeConfigs.reduce((sum, cfg) => sum + Number(cfg.YearlyTarget || 12), 0);
+    const unitLinked = activeConfigs.filter(cfg => {
+        try { return JSON.parse(cfg.SafetyUnits || '[]').length > 0; } catch { return false; }
+    }).length;
 
     wrap.innerHTML = `
         <div class="space-y-4">
+            <div class="grid grid-cols-2 xl:grid-cols-4 gap-3">
+                ${manageMetric('ส่วนงานทั้งหมด', configs.length, '#6366f1', `ปี ${_filterMgmtYear}`)}
+                ${manageMetric('เปิดใช้งาน', activeConfigs.length, '#10b981', `${configs.length - activeConfigs.length} ปิดใช้งาน`)}
+                ${manageMetric('เป้าหมายรวม', targetTotal, '#0284c7', 'ครั้งต่อปีจากรายการ Active')}
+                ${manageMetric('ผูก Safety Unit', unitLinked, '#f59e0b', `จาก ${activeConfigs.length || 0} ส่วนงาน Active`)}
+            </div>
+
             <div class="ds-table-wrap p-5">
                 <div class="flex items-center justify-between mb-4">
                     <div>
@@ -1672,12 +3649,25 @@ function renderManageConfig(wrap) {
                 </div>
             </div>
 
-            <!-- Forms management section -->
+        </div>`;
+}
+
+function renderManageForms(wrap) {
+    if (!wrap) wrap = document.getElementById('ky-manage-panel');
+    if (!wrap) return;
+
+    wrap.innerHTML = `
+        <div class="space-y-4">
+            <div class="ds-section p-4 border-l-4 border-l-indigo-400">
+                <p class="text-xs font-bold text-indigo-700 uppercase">Forms Library</p>
+                <h3 class="text-sm font-bold text-slate-800 mt-1">แบบฟอร์มที่เกี่ยวข้องกับ KY</h3>
+                <p class="text-xs text-slate-500 mt-1">จัดการไฟล์ที่ผู้ใช้ต้องดาวน์โหลดหรือใช้ประกอบการส่งกิจกรรม KY โดยแยกออกจาก Program Config เพื่อให้ Admin หาเอกสารได้เร็วขึ้น</p>
+            </div>
             <div class="ds-table-wrap p-5">
                 <div class="flex items-center justify-between mb-4">
                     <div>
-                        <h3 class="text-sm font-bold text-slate-700">แบบฟอร์มที่เกี่ยวข้อง</h3>
-                        <p class="text-xs text-slate-400 mt-0.5">จัดการแบบฟอร์มที่ผู้ใช้ต้องดาวน์โหลดและกรอก</p>
+                        <h3 class="text-sm font-bold text-slate-700">รายการแบบฟอร์ม</h3>
+                        <p class="text-xs text-slate-400 mt-0.5">เปิด/ปิดใช้งานหรือลบเอกสารที่ไม่ต้องใช้แล้ว</p>
                     </div>
                     ${_isAdmin ? `
                     <button id="btn-add-ky-form"
@@ -1811,7 +3801,7 @@ async function openAddConfigModal(existingCfg = null) {
 
     openModal(isEdit ? `แก้ไขโปรแกรม KY — ${existingCfg.Department}` : `เพิ่มส่วนงานในโปรแกรม KY ปี ${_filterMgmtYear}`, html, 'max-w-xl');
 
-    document.getElementById('ky-cfg-form')?.addEventListener('submit', async (e) => {
+    document.getElementById('ky-cfg-form')?.addEventListener('submit', guardSubmitHandler(async (e) => {
         e.preventDefault();
         const fd = new FormData(e.target);
 
@@ -1860,7 +3850,7 @@ async function openAddConfigModal(existingCfg = null) {
         } finally {
             hideLoading();
         }
-    });
+    }));
 }
 
 async function fetchAndRenderManage(statusFilter) {
@@ -1872,16 +3862,30 @@ async function fetchAndRenderManage(statusFilter) {
         if (_filterMgmtYear)           params.set('year', _filterMgmtYear);
         if (_filterMgmtDept !== 'all') params.set('dept', _filterMgmtDept);
         if (_filterMgmtRisk !== 'all') params.set('risk', _filterMgmtRisk);
-        const res     = await API.get(`/ky?${params}`);
-        const records = normalizeApiArray(res?.data ?? res);
+        const [recordsRes, reminderRes, outboxRes, fileHealthRes] = await Promise.all([
+            API.get(`/ky?${params}`),
+            _isAdmin
+                ? API.get(`/ky/reminder-queue?year=${_filterMgmtYear}`).catch(() => ({ data: null }))
+                : Promise.resolve({ data: null }),
+            _isAdmin
+                ? API.get('/ky/email-outbox?limit=30').catch(() => ({ data: [] }))
+                : Promise.resolve({ data: [] }),
+            _isAdmin
+                ? API.get(`/ky/file-health?year=${_filterMgmtYear}`).catch(err => ({ data: null, error: err?.message || 'Unable to load KY media health' }))
+                : Promise.resolve({ data: null }),
+        ]);
+        const records = normalizeApiArray(recordsRes?.data ?? recordsRes);
+        const reminderData = normalizeApiObject(reminderRes?.data ?? reminderRes);
+        const outboxData = normalizeApiObject(outboxRes);
+        const fileHealthData = normalizeApiObject(fileHealthRes?.data ?? fileHealthRes);
 
-        renderManageOverview(records);
+        renderManageOverview(records, reminderData, outboxData, fileHealthData);
     } catch (err) {
         if (wrap) wrap.innerHTML = `<div class="ds-empty-state p-6 text-center text-red-500 text-sm">${escHtml(err.message)}</div>`;
     }
 }
 
-function renderManageOverview(records) {
+function renderManageOverview(records, reminderData = null, outboxData = null, fileHealthData = null) {
     const wrap = document.getElementById('ky-manage-panel');
     if (!wrap) return;
 
@@ -1901,8 +3905,23 @@ function renderManageOverview(records) {
 
     // Build yearly target progress per dept (from config + records for selected year)
     const yearlyProgMap = {};
-    activeConfig.forEach(cfg => { yearlyProgMap[cfg.Department] = { target: cfg.YearlyTarget || 12, submitted: 0 }; });
-    records.forEach(r => { if (yearlyProgMap[r.Department]) yearlyProgMap[r.Department].submitted++; });
+    activeConfig.forEach(cfg => {
+        const units = parseKySafetyUnits(cfg.SafetyUnits);
+        const unitTarget = Number(cfg.YearlyTarget || 12);
+        yearlyProgMap[cfg.Department] = {
+            target: (units.length || 1) * unitTarget,
+            submitted: 0,
+            units,
+            unitTarget,
+            unitSubmitted: {},
+        };
+    });
+    records.forEach(r => {
+        if (!yearlyProgMap[r.Department]) return;
+        yearlyProgMap[r.Department].submitted++;
+        const unit = String(r.SafetyUnit || '').trim();
+        if (unit) yearlyProgMap[r.Department].unitSubmitted[unit] = (yearlyProgMap[r.Department].unitSubmitted[unit] || 0) + 1;
+    });
 
     const byDept = scopedDepts.map(dept => {
         const deptRecords = records.filter(r => r.Department === dept);
@@ -1915,6 +3934,9 @@ function renderManageOverview(records) {
             closed: deptRecords.filter(r => r.Status === 'Closed').length,
             yearlySubmitted: prog?.submitted ?? deptRecords.length,
             yearlyTarget:    prog?.target    ?? null,
+            unitTarget:      prog?.unitTarget ?? null,
+            safetyUnits:     prog?.units || [],
+            unitSubmitted:   prog?.unitSubmitted || {},
         };
     }).sort((a, b) => {
         // Sort: most behind on yearly target first, then by open count
@@ -1923,53 +3945,283 @@ function renderManageOverview(records) {
         return aPct - bPct || b.open - a.open || a.dept.localeCompare(b.dept);
     });
     const actionQueue = [...open, ...reviewed].slice(0, 8);
+    const onBehalfCount = records.filter(isKySubmittedOnBehalf).length;
+    const scopeLabel = configDepts.length
+        ? `${scopedDepts.length} ส่วนงานใน Program Config`
+        : `${scopedDepts.length} แผนกจาก Master`;
+    const pendingPreview = pendingDepts.slice(0, 6);
+    const pendingMore = Math.max(0, pendingDepts.length - pendingPreview.length);
+    const actionPanel = `
+        <div class="ds-section p-5 h-full" data-ky-card-image="ky-manage-follow-up">
+            <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-4">
+                <div>
+                    <h3 class="text-sm font-bold text-slate-700">Follow-up Queue</h3>
+                    <p class="text-xs text-slate-400 mt-0.5">รายการ Open และ Reviewed ที่ต้องตรวจหรือปิดงานต่อ</p>
+                </div>
+                <span class="text-xs font-bold text-amber-700 bg-amber-50 border border-amber-100 px-2.5 py-1 rounded-full">${actionQueue.length} รายการ</span>
+            </div>
+            <div class="space-y-2 max-h-[520px] overflow-y-auto pr-1">
+                ${actionQueue.length ? actionQueue.map(r => manageActionItem(r)).join('') : `<div class="rounded-xl bg-emerald-50 border border-emerald-100 p-5 text-sm font-semibold text-emerald-700">ไม่มีรายการค้างจัดการ</div>`}
+            </div>
+        </div>`;
+
+    const reminderPanel = _isAdmin ? renderKyReminderQueuePanel(reminderData) : '';
+    const emailPanel = _isAdmin ? renderKyEmailOutboxPanel(outboxData) : '';
+    const fileHealthPanel = _isAdmin ? renderKyFileHealthPanel(fileHealthData) : '';
 
     wrap.innerHTML = `
-        <div class="grid grid-cols-2 xl:grid-cols-5 gap-4">
-            ${manageMetric('ทั้งหมด', total, '#6366f1', 'รายการในปี/ตัวกรองนี้')}
-            ${manageMetric('รอตรวจสอบ', open.length, '#0284c7', 'ต้อง review')}
-            ${manageMetric('ตรวจสอบแล้ว', reviewed.length, '#f59e0b', 'รอปิดหรือ follow-up')}
-            ${manageMetric('ปิดแล้ว', closed.length, '#10b981', `${closeRate}% close rate`)}
-            ${manageMetric('Coverage', `${submittedDepts.size}/${scopedDepts.length || 0}`, '#0f766e', `${completion}% department coverage`)}
-        </div>
-
-        <div class="grid grid-cols-1 xl:grid-cols-3 gap-4">
-            <div class="xl:col-span-2 ds-section p-5">
-                <div class="flex items-center justify-between gap-3 mb-4">
+        <div class="space-y-5">
+            <div class="ds-section p-5 border-l-4 border-l-indigo-400">
+                <div class="flex flex-col lg:flex-row lg:items-start justify-between gap-4">
                     <div>
-                        <h3 class="text-sm font-bold text-slate-700">Department Coverage</h3>
-                        <p class="text-xs text-slate-400 mt-0.5">แผนกที่ส่งแล้วและสถานะ review ของแต่ละแผนก</p>
+                        <p class="text-xs font-bold text-indigo-700 uppercase">Coverage & Follow-up</p>
+                        <h3 class="text-base font-bold text-slate-800 mt-1">ติดตามการส่ง KY และคิวตรวจงาน · ปี ${_filterMgmtYear}</h3>
+                        <p class="text-xs text-slate-500 mt-1">${scopeLabel}${_filterMgmtRisk !== 'all' ? ` · กรองประเภทความเสี่ยง: ${escHtml(_filterMgmtRisk)}` : ''}</p>
                     </div>
-                    <span class="text-xs font-bold text-emerald-700 bg-emerald-50 border border-emerald-100 px-2.5 py-1 rounded-full">${completion}%</span>
+                    <div class="flex flex-col sm:flex-row gap-2">
+                        <span class="px-3 py-2 rounded-xl bg-slate-50 border border-slate-200 text-xs font-semibold text-slate-600">${onBehalfCount} รายการ Admin ส่งแทน</span>
+                        <button type="button" data-ky-open-history
+                                class="px-3 py-2 rounded-xl border border-indigo-200 bg-white text-xs font-bold text-indigo-700 hover:bg-indigo-50 transition-colors">
+                            เปิดประวัติ KY
+                        </button>
+                    </div>
                 </div>
-                <div class="space-y-2 max-h-[430px] overflow-y-auto pr-1">
-                    ${byDept.length ? byDept.map(d => deptProgressRow(d)).join('') : `<div class="text-center py-8 text-sm text-slate-400">ยังไม่มีข้อมูลแผนก</div>`}
-                </div>
-                ${configDepts.length ? `<p class="text-[10px] text-slate-400 mt-3">แถบสีคือความคืบหน้าเทียบเป้าหมายรายปีจาก Program Config</p>` : ''}
             </div>
 
-            <div class="ds-section p-5">
-                <h3 class="text-sm font-bold text-slate-700 mb-1">Action Queue</h3>
-                <p class="text-xs text-slate-400 mb-4">รายการที่ต้องจัดการต่อจาก History</p>
-                <div class="space-y-2 max-h-[430px] overflow-y-auto pr-1">
-                    ${actionQueue.length ? actionQueue.map(r => manageActionItem(r)).join('') : `<div class="rounded-xl bg-emerald-50 border border-emerald-100 p-4 text-sm font-semibold text-emerald-700">ไม่มีรายการค้างจัดการ</div>`}
+            <div class="grid grid-cols-2 xl:grid-cols-5 gap-4">
+                ${manageMetric('ทั้งหมด', total, '#6366f1', 'รายการในปี/ตัวกรองนี้')}
+                ${manageMetric('รอตรวจสอบ', open.length, '#0284c7', 'ต้อง review')}
+                ${manageMetric('ตรวจสอบแล้ว', reviewed.length, '#f59e0b', 'รอปิดหรือ follow-up')}
+                ${manageMetric('ปิดแล้ว', closed.length, '#10b981', `${closeRate}% close rate`)}
+                ${manageMetric('Coverage', `${submittedDepts.size}/${scopedDepts.length || 0}`, '#0f766e', `${completion}% department coverage`)}
+            </div>
+
+            ${reminderPanel}
+            ${fileHealthPanel}
+            ${emailPanel}
+
+            <div class="grid grid-cols-1 2xl:grid-cols-[minmax(0,1.45fr)_minmax(360px,0.55fr)] gap-5">
+                <div class="ds-section p-5" data-ky-card-image="ky-manage-safety-unit-coverage">
+                    <div class="flex flex-col md:flex-row md:items-start justify-between gap-3 mb-5">
+                        <div>
+                            <h3 class="text-sm font-bold text-slate-700">Safety Unit Coverage</h3>
+                            <p class="text-xs text-slate-400 mt-0.5">สถานะการส่งและการปิดงานเทียบเป้าหมายรายปี โดยนับจาก Safety Unit ที่ Admin ตั้งค่า</p>
+                        </div>
+                        <div class="flex flex-wrap items-center gap-1.5 text-xs">
+                            <span class="font-bold text-emerald-700 bg-emerald-50 border border-emerald-100 px-2.5 py-1 rounded-full">${completion}% coverage</span>
+                            ${pendingDepts.length ? `<span class="font-bold text-amber-700 bg-amber-50 border border-amber-100 px-2.5 py-1 rounded-full">${pendingDepts.length} pending</span>` : ''}
+                        </div>
+                    </div>
+                    ${pendingDepts.length ? `
+                    <div class="mb-5 rounded-xl border border-amber-100 bg-amber-50/70 px-3 py-2.5">
+                        <div class="flex flex-col lg:flex-row lg:items-center gap-2">
+                            <p class="text-xs font-bold text-amber-700 shrink-0">ยังไม่ส่งในช่วงที่เลือก</p>
+                            <div class="flex flex-wrap gap-1.5">
+                                ${pendingPreview.map(d => `<span class="px-2 py-0.5 rounded-md bg-white text-amber-700 border border-amber-100 text-[11px] font-semibold">${escHtml(d)}</span>`).join('')}
+                                ${pendingMore ? `<span class="px-2 py-0.5 rounded-md bg-white text-amber-700 border border-amber-100 text-[11px] font-semibold">+${pendingMore} แผนก</span>` : ''}
+                            </div>
+                        </div>
+                    </div>` : ''}
+                    <div class="space-y-3 max-h-[560px] overflow-y-auto pr-1">
+                        ${byDept.length ? byDept.map(d => deptProgressRow(d)).join('') : `<div class="text-center py-8 text-sm text-slate-400">ยังไม่มีข้อมูลแผนก</div>`}
+                    </div>
+                    ${configDepts.length ? `<p class="text-[10px] text-slate-400 mt-4">Progress bar = รายการที่ส่งจริง / (จำนวน Safety Unit × เป้าต่อ Unit จาก Program Config)</p>` : ''}
                 </div>
+                ${actionPanel}
             </div>
         </div>
-
-        ${pendingDepts.length ? `
-        <div class="ds-section p-5 border-l-4 border-l-amber-400">
-            <h3 class="text-sm font-bold text-slate-700 mb-2">แผนกที่ยังไม่ส่งในช่วงที่เลือก</h3>
-            <div class="flex flex-wrap gap-1.5">
-                ${pendingDepts.map(d => `<span class="px-2.5 py-1 rounded-lg bg-amber-50 text-amber-700 border border-amber-100 text-xs font-semibold">${escHtml(d)}</span>`).join('')}
-            </div>
-        </div>` : ''}
     `;
+}
+
+function renderKyReminderQueuePanel(data) {
+    if (!data?.rows) {
+        return `
+            <div class="ds-section p-5 border-l-4 border-l-slate-300">
+                <p class="text-sm font-bold text-slate-700">KY Reminder Queue</p>
+                <p class="text-xs text-slate-400 mt-1">ยังไม่สามารถโหลดคิวแจ้งเตือนหน่วยงานที่ยังไม่ส่งได้</p>
+            </div>`;
+    }
+    const rows = normalizeApiArray(data.rows);
+    const readyRows = rows.filter(row => row.readiness === 'ready');
+    const blockedRows = rows.filter(row => row.readiness !== 'ready');
+    const monthLabel = `${String(data.month || new Date().getMonth() + 1).padStart(2, '0')}/${data.year || _filterMgmtYear}`;
+    const smtpLabel = data.smtpConfigured
+        ? 'SMTP พร้อมส่งทันที'
+        : 'SMTP ยังไม่ตั้งค่า ระบบจะเก็บอีเมลไว้ในคิว';
+
+    return `
+        <div class="ds-section p-5 border-l-4 border-l-emerald-400">
+            <div class="flex flex-col xl:flex-row xl:items-start justify-between gap-4">
+                <div>
+                    <p class="text-xs font-bold text-emerald-700 uppercase">KY Reminder / Follow-up Email</p>
+                    <h3 class="text-sm font-bold text-slate-800 mt-1">แจ้งเตือนส่วนงานที่ยังไม่ส่ง KY รอบ ${escHtml(monthLabel)}</h3>
+                    <p class="text-xs text-slate-500 mt-1">ดึงผู้รับผิดชอบจาก Employee Master ตาม Email Requirement Rules และเลือกอีเมลจากตำแหน่งในแผนกหรือ Safety Unit ที่เกี่ยวข้อง</p>
+                </div>
+                <div class="flex flex-col sm:flex-row gap-2">
+                    <span class="px-3 py-2 rounded-xl bg-slate-50 border border-slate-200 text-xs font-semibold text-slate-600">${escHtml(smtpLabel)}</span>
+                    <button type="button" data-ky-reminder-send-ready ${readyRows.length ? '' : 'disabled'}
+                        class="px-3 py-2 rounded-xl text-xs font-bold text-white disabled:opacity-40 disabled:cursor-not-allowed"
+                        style="background:linear-gradient(135deg,#059669,#0f766e)">
+                        ส่ง Reminder ที่พร้อม ${readyRows.length}
+                    </button>
+                </div>
+            </div>
+            <div class="grid grid-cols-2 lg:grid-cols-4 gap-3 mt-4">
+                ${manageMetric('คิวติดตาม', data.summary?.total || rows.length, '#6366f1', `รอบ ${monthLabel}`)}
+                ${manageMetric('พร้อมส่ง', data.summary?.ready || readyRows.length, '#059669', `${data.summary?.recipients || 0} ผู้รับอีเมล`)}
+                ${manageMetric('ยังติดข้อมูล', data.summary?.blocked || blockedRows.length, '#f97316', 'แก้ Master หรือ Email Rule')}
+                ${manageMetric('ตำแหน่งใน Rule', data.requiredPositions?.length || 0, '#0284c7', 'ใช้หา Responsible Person')}
+            </div>
+            <div class="grid grid-cols-1 2xl:grid-cols-2 gap-4 mt-4">
+                <div class="rounded-2xl border border-emerald-100 bg-emerald-50/40 p-4">
+                    <div class="flex items-center justify-between gap-2 mb-3">
+                        <p class="text-xs font-bold text-emerald-700">พร้อมส่ง Reminder</p>
+                        <span class="px-2 py-0.5 rounded-full bg-white border border-emerald-100 text-[11px] font-bold text-emerald-700">${readyRows.length}</span>
+                    </div>
+                    <div class="space-y-2 max-h-72 overflow-y-auto pr-1">
+                        ${readyRows.length ? readyRows.map(row => `
+                            <div class="rounded-xl border border-white bg-white p-3">
+                                <div class="flex flex-col sm:flex-row sm:items-start justify-between gap-2">
+                                    <div>
+                                        <p class="text-sm font-bold text-slate-800">${escHtml(row.department || '-')}</p>
+                                        <p class="text-xs text-slate-500 mt-0.5">${row.safetyUnit ? `Safety Unit: ${escHtml(row.safetyUnit)}` : 'นับระดับแผนก'} · ${row.candidateScope === 'unit' ? 'ผู้รับจาก Unit' : 'ผู้รับจากแผนก'}</p>
+                                        <p class="text-[11px] text-slate-400 mt-1">${row.recipients.map(person => `${person.EmployeeName || person.EmployeeID} <${person.CompanyEmail}>`).map(escHtml).join(', ')}</p>
+                                    </div>
+                                    <button type="button" data-ky-reminder-send-key="${escHtml(row.key)}"
+                                        class="px-2.5 py-1.5 rounded-lg border border-emerald-200 text-xs font-bold text-emerald-700 hover:bg-emerald-50">
+                                        ส่งรายการนี้
+                                    </button>
+                                </div>
+                            </div>`).join('') : `<div class="rounded-xl bg-white p-4 text-xs text-slate-500">ยังไม่มีรายการที่พร้อมส่งในรอบนี้</div>`}
+                    </div>
+                </div>
+                <div class="rounded-2xl border border-amber-100 bg-amber-50/40 p-4">
+                    <div class="flex items-center justify-between gap-2 mb-3">
+                        <p class="text-xs font-bold text-amber-700">ต้องแก้ข้อมูลก่อนส่ง</p>
+                        <span class="px-2 py-0.5 rounded-full bg-white border border-amber-100 text-[11px] font-bold text-amber-700">${blockedRows.length}</span>
+                    </div>
+                    <div class="space-y-2 max-h-72 overflow-y-auto pr-1">
+                        ${blockedRows.length ? blockedRows.map(row => `
+                            <div class="rounded-xl border border-white bg-white p-3">
+                                <p class="text-sm font-bold text-slate-800">${escHtml(row.department || '-')}</p>
+                                <p class="text-xs text-slate-500 mt-0.5">${row.safetyUnit ? `Safety Unit: ${escHtml(row.safetyUnit)}` : 'นับระดับแผนก'}</p>
+                                <p class="text-xs font-semibold text-amber-700 mt-1">${escHtml(row.reason || 'ยังไม่พร้อมส่ง')}</p>
+                                ${row.reviewCandidates?.length ? `<p class="text-[11px] text-slate-400 mt-1">ตรวจ Employee Master: ${row.reviewCandidates.map(person => person.EmployeeName || person.EmployeeID).map(escHtml).join(', ')}</p>` : ''}
+                            </div>`).join('') : `<div class="rounded-xl bg-white p-4 text-xs font-semibold text-emerald-700">ไม่มีรายการติดข้อมูล</div>`}
+                    </div>
+                </div>
+            </div>
+        </div>`;
+}
+
+function renderKyEmailOutboxPanel(data) {
+    const rows = normalizeApiArray(data?.data ?? data);
+    const smtpLabel = data?.smtpConfigured
+        ? 'SMTP พร้อมส่ง'
+        : 'SMTP ยังไม่ตั้งค่า ระบบจะเก็บคิวไว้';
+    const queued = rows.filter(row => row.Status === 'Queued').length;
+    const failed = rows.filter(row => row.Status === 'Failed').length;
+    const sent = rows.filter(row => row.Status === 'Sent').length;
+    const retryable = queued + failed;
+    const statusClass = (status) => {
+        if (status === 'Sent') return 'bg-emerald-50 text-emerald-700 border-emerald-100';
+        if (status === 'Failed') return 'bg-rose-50 text-rose-700 border-rose-100';
+        return 'bg-amber-50 text-amber-700 border-amber-100';
+    };
+
+    return `
+        <div class="ds-section p-5 border-l-4 border-l-violet-400">
+            <div class="flex flex-col xl:flex-row xl:items-start justify-between gap-4">
+                <div>
+                    <p class="text-xs font-bold text-violet-700 uppercase">KY Email Outbox / Retry</p>
+                    <h3 class="text-sm font-bold text-slate-800 mt-1">คิวอีเมลของการส่งกิจกรรม KY และ Reminder</h3>
+                    <p class="text-xs text-slate-500 mt-1">${escHtml(smtpLabel)} · เก็บประวัติ Submitted, AdminSubmitted, Reviewed, Closed และ Missing Reminder</p>
+                </div>
+                <button type="button" data-ky-email-retry-all ${retryable ? '' : 'disabled'}
+                    class="px-3 py-2 rounded-xl text-xs font-bold text-white disabled:opacity-40 disabled:cursor-not-allowed"
+                    style="background:linear-gradient(135deg,#7c3aed,#2563eb)">
+                    Retry คิวค้าง ${retryable}
+                </button>
+            </div>
+            <div class="grid grid-cols-3 gap-3 mt-4">
+                ${manageMetric('Queued', queued, '#d97706', 'รอส่ง')}
+                ${manageMetric('Failed', failed, '#e11d48', 'ต้อง Retry')}
+                ${manageMetric('Sent', sent, '#059669', 'ส่งแล้ว')}
+            </div>
+            <div class="mt-4 overflow-x-auto rounded-xl border border-slate-100">
+                <table class="w-full text-sm">
+                    <thead class="bg-slate-50 text-left text-xs font-bold text-slate-500 uppercase">
+                        <tr>
+                            <th class="px-3 py-2">Event</th>
+                            <th class="px-3 py-2">Recipient</th>
+                            <th class="px-3 py-2">Status</th>
+                            <th class="px-3 py-2">Created</th>
+                            <th class="px-3 py-2"></th>
+                        </tr>
+                    </thead>
+                    <tbody class="divide-y divide-slate-100 bg-white">
+                        ${rows.length ? rows.slice(0, 12).map(row => `
+                            <tr>
+                                <td class="px-3 py-2">
+                                    <p class="font-bold text-slate-700">${escHtml(row.EventType || '-')}</p>
+                                    <p class="text-[11px] text-slate-400 max-w-xs truncate" title="${escHtml(row.Subject || '')}">${escHtml(row.Subject || '-')}</p>
+                                </td>
+                                <td class="px-3 py-2 text-xs text-slate-600">${escHtml(row.Recipient || '-')}</td>
+                                <td class="px-3 py-2">
+                                    <span class="inline-flex px-2 py-0.5 rounded-full border text-[11px] font-bold ${statusClass(row.Status)}">${escHtml(row.Status || 'Queued')}</span>
+                                    ${row.Error ? `<p class="text-[10px] text-rose-500 mt-1 max-w-xs truncate" title="${escHtml(row.Error)}">${escHtml(row.Error)}</p>` : ''}
+                                </td>
+                                <td class="px-3 py-2 text-xs text-slate-400">${escHtml(formatKyDateTime(row.CreatedAt))}</td>
+                                <td class="px-3 py-2 text-right">
+                                    ${row.Status !== 'Sent' ? `
+                                        <button type="button" data-ky-email-retry-id="${row.id}"
+                                            class="px-2.5 py-1.5 rounded-lg border border-violet-200 text-xs font-bold text-violet-700 hover:bg-violet-50">
+                                            Retry
+                                        </button>` : ''}
+                                </td>
+                            </tr>`).join('') : `
+                            <tr><td colspan="5" class="px-3 py-6 text-center text-xs text-slate-400">ยังไม่มีคิวอีเมล KY</td></tr>`}
+                    </tbody>
+                </table>
+            </div>
+        </div>`;
+}
+
+async function sendKyMissingSubmissionReminders(keys = null) {
+    try {
+        showLoading('กำลังส่ง Reminder KY...');
+        const res = await API.post('/ky/reminders/send', {
+            year: _filterMgmtYear,
+            keys: Array.isArray(keys) ? keys : undefined,
+        });
+        const summary = res?.data?.summary || {};
+        showToast(res?.message || `ส่ง Reminder KY แล้ว ${summary.recipients || 0} อีเมล`, 'success');
+        await fetchAndRenderManage('all');
+    } catch (err) {
+        showError(err);
+    } finally {
+        hideLoading();
+    }
+}
+
+async function retryKyEmailOutbox(id = null) {
+    try {
+        showLoading(id ? 'กำลัง Retry อีเมล KY...' : 'กำลัง Retry คิวอีเมล KY...');
+        const res = id
+            ? await API.post(`/ky/email-outbox/${id}/retry`)
+            : await API.post('/ky/email-outbox/retry-queued');
+        showToast(res?.message || 'Retry อีเมล KY สำเร็จ', 'success');
+        await fetchAndRenderManage('all');
+    } catch (err) {
+        showError(err);
+    } finally {
+        hideLoading();
+    }
 }
 
 function manageMetric(label, value, color, sub) {
     return `
-        <div class="ds-metric-card p-5 border-t-4" style="border-top-color:${color}">
+        <div class="ds-metric-card p-5 border-t-4 rounded-2xl" style="border-top-color:${color}">
             <p class="text-2xl font-bold" style="color:${color}">${value}</p>
             <p class="text-xs font-semibold text-slate-600 mt-1">${label}</p>
             <p class="text-[11px] text-slate-400 mt-0.5">${sub}</p>
@@ -1983,40 +4235,137 @@ function deptProgressRow(d) {
         ? Math.min(100, Math.round(d.yearlySubmitted / d.yearlyTarget * 100)) : 0;
     const yBarColor   = yearlyPct >= 80 ? '#059669' : yearlyPct >= 40 ? '#d97706' : '#ef4444';
     const submitted   = d.total > 0;
+    const unitRows = d.safetyUnits?.length ? `
+        <div class="mt-3 grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-2">
+            ${d.safetyUnits.map(unit => {
+                const submittedCount = Number(d.unitSubmitted?.[unit] || 0);
+                const target = Number(d.unitTarget || 12);
+                const pct = target > 0 ? Math.min(100, Math.round(submittedCount / target * 100)) : 0;
+                const color = pct >= 80 ? '#059669' : pct >= 40 ? '#d97706' : '#ef4444';
+                return `
+                <div class="rounded-lg border border-slate-100 bg-white/80 px-2.5 py-2">
+                    <div class="flex justify-between gap-2 text-[11px]">
+                        <span class="font-bold text-slate-600 truncate" title="${escHtml(unit)}">${escHtml(unit)}</span>
+                        <span class="font-bold" style="color:${color}">${submittedCount}/${target}</span>
+                    </div>
+                    <div class="h-1.5 rounded-full bg-slate-100 overflow-hidden mt-1.5">
+                        <div class="h-full rounded-full" style="width:${pct}%;background:${color}"></div>
+                    </div>
+                </div>`;
+            }).join('')}
+        </div>` : '';
 
     return `
-        <div class="rounded-xl border ${submitted ? 'border-slate-100 bg-white' : 'border-amber-100 bg-amber-50'} p-3">
-            <div class="flex items-center justify-between gap-3 mb-2">
-                <div class="min-w-0 flex-1">
+        <div class="rounded-xl border ${submitted ? 'border-slate-100 bg-white' : 'border-amber-100 bg-amber-50/70'} px-3 py-2.5">
+            <div class="grid grid-cols-1 xl:grid-cols-[minmax(220px,0.8fr)_minmax(260px,1fr)_minmax(180px,0.7fr)] gap-3 xl:items-center">
+                <div class="min-w-0">
                     <p class="text-sm font-bold text-slate-700 truncate">${escHtml(d.dept)}</p>
-                    <p class="text-[11px] text-slate-400 mt-0.5">${submitted ? `${d.total} รายการ · Open ${d.open} · Reviewed ${d.reviewed} · Closed ${d.closed}` : 'ยังไม่ส่ง KY ในช่วงที่เลือก'}</p>
+                    <p class="text-[11px] text-slate-400 mt-0.5">${submitted ? `${d.total} รายการ · Open ${d.open} · Reviewed ${d.reviewed} · Closed ${d.closed}` : 'ยังไม่ส่ง KY ในช่วงที่เลือก'}${d.safetyUnits?.length ? ` · ${d.safetyUnits.length} Safety Units` : ''}</p>
                 </div>
-                ${hasYearly ? `
-                <div class="text-right flex-shrink-0">
-                    <span class="text-xs font-bold px-2 py-1 rounded-full"
-                          style="background:${yearlyPct>=80?'#ecfdf5':yearlyPct>=40?'#fffbeb':'#fef2f2'};color:${yearlyPct>=80?'#065f46':yearlyPct>=40?'#92400e':'#991b1b'}">
-                        ${d.yearlySubmitted}/${d.yearlyTarget} รายปี
-                    </span>
-                </div>` : `
-                <span class="text-xs font-bold ${submitted ? 'text-emerald-700 bg-emerald-50 border-emerald-100' : 'text-amber-700 bg-white border-amber-200'} border px-2 py-1 rounded-full">${submitted ? `${closePct}% ปิดแล้ว` : 'Pending'}</span>`}
-            </div>
-            ${hasYearly ? `
-            <div class="mb-1.5">
-                <div class="flex justify-between text-[10px] text-slate-400 mb-0.5">
-                    <span>เป้าหมายรายปี</span><span>${yearlyPct}%</span>
+                <div>
+                    <div class="flex justify-between text-[10px] text-slate-400 mb-0.5">
+                        <span>${hasYearly ? 'เป้าหมายรายปี' : 'รายการที่ส่ง'}</span>
+                        <span>${hasYearly ? `${d.yearlySubmitted}/${d.yearlyTarget} · ${yearlyPct}%` : `${d.total} รายการ`}</span>
+                    </div>
+                    <div class="h-2 rounded-full bg-slate-100 overflow-hidden">
+                        <div class="h-full rounded-full transition-all" style="width:${hasYearly ? yearlyPct : (submitted ? 100 : 0)}%;background:${hasYearly ? yBarColor : '#059669'}"></div>
+                    </div>
                 </div>
-                <div class="h-2 rounded-full bg-slate-100 overflow-hidden">
-                    <div class="h-full rounded-full transition-all" style="width:${yearlyPct}%;background:${yBarColor}"></div>
-                </div>
-            </div>` : ''}
-            <div>
-                <div class="flex justify-between text-[10px] text-slate-400 mb-0.5">
-                    <span>อัตราปิด (ของที่ส่งแล้ว)</span><span>${closePct}%</span>
-                </div>
-                <div class="h-1.5 rounded-full bg-slate-100 overflow-hidden">
-                    <div class="h-full rounded-full" style="width:${closePct}%;background:linear-gradient(90deg,#6366f1,#10b981)"></div>
+                <div>
+                    <div class="flex justify-between text-[10px] text-slate-400 mb-0.5">
+                        <span>อัตราปิด</span><span>${closePct}%</span>
+                    </div>
+                    <div class="h-2 rounded-full bg-slate-100 overflow-hidden">
+                        <div class="h-full rounded-full" style="width:${closePct}%;background:linear-gradient(90deg,#6366f1,#10b981)"></div>
+                    </div>
                 </div>
             </div>
+            ${unitRows}
+        </div>`;
+}
+
+function renderKyFileHealthPanel(data) {
+    if (!data?.summary) {
+        return `
+            <div class="ds-section p-5 border-l-4 border-l-slate-300" data-ky-media-file-health>
+                <p class="text-sm font-bold text-slate-700">KY Media File Health</p>
+                <p class="text-xs text-slate-400 mt-1">Read-only media health report is not available right now.</p>
+            </div>`;
+    }
+    const s = data.summary || {};
+    const issues = [
+        ...normalizeApiArray(data.missingFiles || []),
+        ...normalizeApiArray(data.legacyLocalhostFiles || []),
+    ];
+    const uniqueIssues = [];
+    const seen = new Set();
+    issues.forEach(item => {
+        const key = `${item.activityId || ''}:${item.field || ''}:${item.url || ''}`;
+        if (seen.has(key)) return;
+        seen.add(key);
+        uniqueIssues.push(item);
+    });
+    const statusTone = status => {
+        if (status === 'ok') return 'bg-emerald-50 text-emerald-700 border-emerald-100';
+        if (status === 'missing') return 'bg-red-50 text-red-700 border-red-100';
+        if (status === 'legacy-localhost') return 'bg-amber-50 text-amber-700 border-amber-100';
+        if (status === 'external') return 'bg-sky-50 text-sky-700 border-sky-100';
+        return 'bg-slate-50 text-slate-600 border-slate-100';
+    };
+    return `
+        <div class="ds-section p-5 border-l-4 border-l-rose-400" data-ky-media-file-health>
+            <div class="flex flex-col xl:flex-row xl:items-start justify-between gap-4">
+                <div>
+                    <p class="text-xs font-bold text-rose-700 uppercase">KY Media File Health</p>
+                    <h3 class="text-sm font-bold text-slate-800 mt-1">Read-only attachment / video integrity report</h3>
+                    <p class="text-xs text-slate-500 mt-1">Checks existing AttachmentUrl and VideoUrl references for ${escHtml(String(data.year || _filterMgmtYear))}. No database rows or files are changed.</p>
+                </div>
+                <span class="px-3 py-2 rounded-xl bg-white border border-rose-100 text-xs font-bold text-rose-700">${uniqueIssues.length} issue reference(s)</span>
+            </div>
+            <div class="grid grid-cols-2 lg:grid-cols-5 gap-3 mt-4">
+                ${manageMetric('OK', s.ok || 0, '#059669', 'file exists')}
+                ${manageMetric('Missing', s.missing || 0, '#dc2626', 'file not found')}
+                ${manageMetric('Legacy local', s.legacyLocalhost || 0, '#d97706', 'localhost URL')}
+                ${manageMetric('External', s.external || 0, '#0284c7', 'outside uploads')}
+                ${manageMetric('Empty', s.empty || 0, '#64748b', 'no URL')}
+            </div>
+            <div class="mt-4 overflow-x-auto rounded-xl border border-slate-100">
+                <table class="w-full text-sm">
+                    <thead class="bg-slate-50 text-left text-xs font-bold text-slate-500 uppercase">
+                        <tr>
+                            <th class="px-3 py-2">Record</th>
+                            <th class="px-3 py-2">Field</th>
+                            <th class="px-3 py-2">Status</th>
+                            <th class="px-3 py-2">Stored file</th>
+                            <th class="px-3 py-2 text-right">Action</th>
+                        </tr>
+                    </thead>
+                    <tbody class="divide-y divide-slate-100 bg-white">
+                        ${uniqueIssues.length ? uniqueIssues.slice(0, 12).map(item => `
+                            <tr>
+                                <td class="px-3 py-2 min-w-[220px]">
+                                    <p class="font-bold text-slate-700">${escHtml(item.department || '-')} ${item.safetyUnit ? `· ${escHtml(item.safetyUnit)}` : ''}</p>
+                                    <p class="text-[11px] text-slate-400 truncate max-w-xs" title="${escHtml(item.teamName || item.kytKeyword || '')}">${escHtml(item.teamName || item.kytKeyword || item.activityId || '-')}</p>
+                                </td>
+                                <td class="px-3 py-2 text-xs font-bold text-slate-600">${escHtml(item.label || item.field || '-')}</td>
+                                <td class="px-3 py-2">
+                                    <span class="inline-flex rounded-full border px-2 py-0.5 text-[11px] font-bold ${statusTone(item.status)}">${escHtml(item.status || '-')}</span>
+                                    ${item.scope === 'legacy-localhost' ? `<p class="mt-1 text-[10px] font-semibold text-amber-600">legacy localhost URL</p>` : ''}
+                                </td>
+                                <td class="px-3 py-2 text-xs text-slate-500 max-w-[260px]">
+                                    <p class="truncate" title="${escHtml(item.storedName || '')}">${escHtml(item.storedName || '-')}</p>
+                                    ${item.originalName ? `<p class="text-[10px] text-slate-400 truncate" title="${escHtml(item.originalName)}">${escHtml(item.originalName)}</p>` : ''}
+                                </td>
+                                <td class="px-3 py-2 text-right">
+                                    <button type="button" class="btn-ky-manage px-3 py-1 rounded-lg text-xs font-bold text-purple-700 hover:bg-purple-50"
+                                            data-id="${escHtml(item.activityId || '')}">Attach / repair</button>
+                                </td>
+                            </tr>`).join('') : `
+                            <tr><td colspan="5" class="px-3 py-6 text-center text-xs font-bold text-emerald-700">No missing or legacy KY media references found for this year.</td></tr>`}
+                    </tbody>
+                </table>
+            </div>
+            <p class="mt-3 text-[11px] text-slate-400">${escHtml(data.note || 'Read-only report. No automatic cleanup is performed.')}</p>
         </div>`;
 }
 
@@ -2026,8 +4375,9 @@ function manageActionItem(r) {
         <div class="rounded-xl border border-slate-100 bg-white p-3">
             <div class="flex items-start justify-between gap-2">
                 <div class="min-w-0">
-                    <p class="text-sm font-bold text-slate-700 truncate">${escHtml(r.Department || '-')} ${r.TeamName ? `· ${escHtml(r.TeamName)}` : ''}</p>
+                    <p class="text-sm font-bold text-slate-700 truncate">${escHtml(r.Department || '-')} ${r.SafetyUnit ? `· ${escHtml(r.SafetyUnit)}` : ''} ${r.TeamName ? `· ${escHtml(r.TeamName)}` : ''}</p>
                     <p class="text-[11px] text-slate-400 mt-0.5">${date} · ${escHtml(r.ReporterName || '-')}</p>
+                    ${isKySubmittedOnBehalf(r) ? `<p class="text-[10px] font-bold text-indigo-600 mt-1">Admin ส่งแทน · ${escHtml(r.SubmittedByName || r.SubmittedByID || '-')}</p>` : ''}
                     <p class="text-xs text-slate-500 mt-1 line-clamp-2">${escHtml(r.HazardDescription || r.KYTKeyword || '-')}</p>
                 </div>
                 <span class="px-2 py-0.5 rounded-full text-[10px] font-bold ${STATUS_BADGE[r.Status] || 'bg-slate-100 text-slate-500'}">${STATUS_LABEL[r.Status] || r.Status}</span>
@@ -2042,6 +4392,7 @@ function manageActionItem(r) {
 // DETAIL MODAL
 // ─────────────────────────────────────────────────────────────────────────────
 async function showDetailModal(id) {
+    const cached = findKyCachedRecord(id);
     try {
         showLoading('กำลังโหลด...');
         const res = await API.get(`/ky/${id}`);
@@ -2064,7 +4415,7 @@ async function showDetailModal(id) {
 
         const html = `
             <div class="space-y-4 text-sm">
-                <div class="grid grid-cols-2 md:grid-cols-4 gap-2">
+                <div class="grid grid-cols-2 md:grid-cols-5 gap-2">
                     <div class="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2">
                         <p class="text-[10px] font-bold uppercase text-slate-400">Status</p>
                         <p class="mt-1 text-sm font-bold text-slate-700">${escHtml(statusLabel)}</p>
@@ -2081,13 +4432,20 @@ async function showDetailModal(id) {
                         <p class="text-[10px] font-bold uppercase text-slate-400">Members</p>
                         <p class="mt-1 text-sm font-bold text-slate-700">${participantLabels.length || '-'}</p>
                     </div>
+                    <div class="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2">
+                        <p class="text-[10px] font-bold uppercase text-slate-400">Evidence</p>
+                        <div class="mt-1">${renderKyEvidenceBadge(r, true)}</div>
+                    </div>
                 </div>
 
                 <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
                     ${infoField('วันที่', date)}
                     ${infoField('แผนก', r.Department || '-')}
+                    ${infoField('Safety Unit', r.SafetyUnit || '-')}
                     ${infoField('ชื่อทีม', r.TeamName || '-')}
                     ${infoField('ผู้รายงาน', r.ReporterName || '-')}
+                    ${r.ReporterEmail ? infoField('อีเมลแจ้งสถานะ', r.ReporterEmail) : ''}
+                    ${r.SubmittedByName && r.SubmittedByID !== r.ReporterID ? infoField('ผู้บันทึกแทน', r.SubmittedByName) : ''}
                 </div>
 
                 ${participants.length ? `
@@ -2139,8 +4497,68 @@ async function showDetailModal(id) {
         });
     } catch (err) {
         hideLoading();
+        if (cached) {
+            showKyCachedDetailModal(cached, err);
+            return;
+        }
         showError(err);
     }
+}
+
+function showKyCachedDetailModal(row, err) {
+    const date = row.ActivityDate ? new Date(row.ActivityDate).toLocaleDateString('th-TH', { year:'numeric', month:'long', day:'numeric' }) : '-';
+    const statusLabel = STATUS_LABEL[row.Status] || row.Status || '-';
+    const riskLabel = row.RiskCategory || 'General';
+    const html = `
+        <div class="space-y-4 text-sm">
+            <div class="rounded-xl border border-amber-100 bg-amber-50 px-4 py-3 text-amber-800">
+                <div class="font-bold">Loaded from the current list</div>
+                <div class="mt-1 text-xs">Full detail API is temporarily unavailable: ${escHtml(err?.message || 'Failed to fetch')}</div>
+            </div>
+            <div class="grid grid-cols-2 md:grid-cols-4 gap-2">
+                <div class="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2">
+                    <p class="text-[10px] font-bold uppercase text-slate-400">Status</p>
+                    <p class="mt-1 text-sm font-bold text-slate-700">${escHtml(statusLabel)}</p>
+                </div>
+                <div class="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2">
+                    <p class="text-[10px] font-bold uppercase text-slate-400">Date</p>
+                    <p class="mt-1 text-sm font-bold text-slate-700">${escHtml(date)}</p>
+                </div>
+                <div class="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2">
+                    <p class="text-[10px] font-bold uppercase text-slate-400">Department</p>
+                    <p class="mt-1 text-sm font-bold text-slate-700">${escHtml(row.Department || '-')}</p>
+                </div>
+                <div class="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2">
+                    <p class="text-[10px] font-bold uppercase text-slate-400">Evidence</p>
+                    <div class="mt-1">${renderKyEvidenceBadge(row, true)}</div>
+                </div>
+            </div>
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                ${infoField('Safety Unit', row.SafetyUnit || '-')}
+                ${infoField('Team', row.TeamName || '-')}
+                ${infoField('KYT Keyword', row.KYTKeyword || '-')}
+                ${infoField('Reporter', row.ReporterName || '-')}
+            </div>
+            <div class="p-3 bg-red-50 rounded-xl border border-red-100">
+                <p class="text-xs text-red-500 font-semibold uppercase tracking-wider mb-1">Hazard</p>
+                <p class="text-slate-700 leading-relaxed">${escHtml(row.HazardDescription || '-')}</p>
+            </div>
+            ${row.Countermeasure ? `
+            <div class="p-3 bg-emerald-50 rounded-xl border border-emerald-100">
+                <p class="text-xs text-emerald-600 font-semibold uppercase tracking-wider mb-1">Countermeasure</p>
+                <p class="text-slate-700 leading-relaxed">${escHtml(row.Countermeasure)}</p>
+            </div>` : ''}
+        </div>`;
+    openDetailModal({
+        title: escHtml(row.TeamName || row.KYTKeyword || 'KY Activity'),
+        subtitle: `${date} · ${row.Department || '-'} · ${row.ReporterName || '-'}`,
+        meta: [
+            { label: 'Cached detail', className: 'bg-amber-100 text-amber-700 border-amber-200' },
+            { label: riskLabel, className: `${RISK_BADGE_COLOR[row.RiskCategory] || 'bg-slate-100 text-slate-500'} border-slate-200` },
+        ],
+        body: html,
+        size: 'max-w-2xl'
+    });
 }
 
 function infoField(label, value) {
@@ -2151,16 +4569,18 @@ function infoField(label, value) {
 }
 
 function buildMediaThumb(url, label, isImage) {
+    const safeUrl = kyMediaUrl(url);
+    if (!safeUrl) return '';
     if (isImage) {
         return `<button class="btn-ky-preview group relative overflow-hidden rounded-xl border-2 border-slate-200 hover:border-indigo-400 transition-all w-24 h-24"
-                         data-url="${url}" data-title="${label}">
-            <img src="${url}" alt="${label}" class="w-full h-full object-cover">
+                         data-url="${escHtml(safeUrl)}" data-title="${escHtml(label)}">
+            <img src="${escHtml(safeUrl)}" alt="${escHtml(label)}" class="w-full h-full object-cover">
             <div class="absolute inset-0 bg-black bg-opacity-0 group-hover:bg-opacity-20 transition-all flex items-end">
                 <span class="w-full text-center text-white text-xs py-1 bg-black bg-opacity-40 opacity-0 group-hover:opacity-100 transition-all">${label}</span>
             </div>
         </button>`;
     }
-    return `<a href="${url}" target="_blank" rel="noopener noreferrer"
+    return `<a href="${escHtml(safeUrl)}" target="_blank" rel="noopener noreferrer"
                class="inline-flex items-center gap-2 px-3 py-2 rounded-lg border border-slate-200 hover:border-indigo-400 hover:bg-indigo-50 transition-all text-sm text-slate-600">
         <svg class="w-4 h-4 text-indigo-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 21h10a2 2 0 002-2V9.414a1 1 0 00-.293-.707l-5.414-5.414A1 1 0 0012.586 3H7a2 2 0 00-2 2v14a2 2 0 002 2z"/>
@@ -2170,8 +4590,10 @@ function buildMediaThumb(url, label, isImage) {
 }
 
 function buildVideoThumb(url) {
-    return `<div class="rounded-xl overflow-hidden border-2 border-slate-200 w-full max-w-xs">
-        <video src="${url}" controls class="w-full max-h-40 bg-black" preload="metadata"></video>
+    const safeUrl = kyMediaUrl(url);
+    if (!safeUrl) return '';
+    return `<div class="rounded-xl overflow-hidden border-2 border-slate-200 w-full max-w-xs" data-ky-video-shell>
+        ${buildKyVideoLazyShell(safeUrl, { TeamName: 'Evidence video' })}
         <div class="px-2 py-1 text-xs text-slate-500 bg-slate-50">วิดีโอหลักฐาน</div>
     </div>`;
 }
@@ -2190,6 +4612,17 @@ async function showManageModal(id) {
         if (r.Participants) {
             try { participants = JSON.parse(r.Participants); } catch { participants = []; }
         }
+        const manageYear = r.ActivityDate ? new Date(r.ActivityDate).getFullYear() : new Date().getFullYear();
+        const activityDateValue = r.ActivityDate ? new Date(r.ActivityDate).toISOString().split('T')[0] : new Date().toISOString().split('T')[0];
+        await Promise.all([_fetchDepartments(), _fetchProgramConfig(manageYear)]);
+        const manageDeptOptions = buildKyDepartmentOptions(r.Department || '', manageYear);
+        const manageUnitOptions = (department, selectedUnit, year) => {
+            const units = getKySafetyUnitsForDept(department, year);
+            const selected = String(selectedUnit || '').trim();
+            if (selected && !units.includes(selected)) units.unshift(selected);
+            if (!units.length) return `<option value="">No Safety Unit configured</option>`;
+            return `<option value="">-- Select Safety Unit --</option>` + units.map(unit => `<option value="${escHtml(unit)}" ${unit === selected ? 'selected' : ''}>${escHtml(unit)}</option>`).join('');
+        };
 
         const html = `
             <div class="space-y-4 text-sm">
@@ -2208,6 +4641,28 @@ async function showManageModal(id) {
                     <input type="hidden" name="id" value="${r.id}">
 
                     <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                        <div>
+                            <label class="block text-sm font-semibold text-slate-700 mb-1.5">Activity Date / วันที่กิจกรรม</label>
+                            <input type="date" name="ActivityDate" id="ky-manage-date" class="form-input w-full" value="${activityDateValue}">
+                        </div>
+                        <div>
+                            <label class="block text-sm font-semibold text-slate-700 mb-1.5">Main Department / แผนกหลัก</label>
+                            <select name="Department" id="ky-manage-dept" class="form-input w-full" required>
+                                <option value="">-- Select Department --</option>
+                                ${manageDeptOptions}
+                            </select>
+                        </div>
+                        <div>
+                            <label class="block text-sm font-semibold text-slate-700 mb-1.5">Safety Unit</label>
+                            <select name="SafetyUnit" id="ky-manage-safety-unit" class="form-input w-full">
+                                ${manageUnitOptions(r.Department || '', r.SafetyUnit || '', manageYear)}
+                            </select>
+                            <p class="text-xs text-slate-400 mt-1">Required when the selected department has units in Program Config.</p>
+                        </div>
+                        <div>
+                            <label class="block text-sm font-semibold text-slate-700 mb-1.5">Participants / ผู้เข้าร่วม</label>
+                            <input type="text" name="Participants" class="form-input w-full" value="${escHtml(participants.join(', '))}" placeholder="Name 1, Name 2">
+                        </div>
                         <div>
                             <label class="block text-sm font-semibold text-slate-700 mb-1.5">สถานะ</label>
                             <select name="Status" class="form-input w-full">
@@ -2249,14 +4704,14 @@ async function showManageModal(id) {
                     <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
                         <div>
                             <label class="block text-sm font-semibold text-slate-700 mb-1.5">อัปโหลดไฟล์แนบใหม่</label>
-                            ${r.AttachmentUrl ? `<a href="${escHtml(r.AttachmentUrl)}" target="_blank" rel="noopener noreferrer" class="inline-flex items-center gap-1 text-xs font-semibold text-indigo-600 hover:text-indigo-800 mb-2">ดูไฟล์ปัจจุบัน</a>` : ''}
+                            ${r.AttachmentUrl ? `<a href="${escHtml(kyMediaUrl(r.AttachmentUrl))}" target="_blank" rel="noopener noreferrer" class="inline-flex items-center gap-1 text-xs font-semibold text-indigo-600 hover:text-indigo-800 mb-2">ดูไฟล์ปัจจุบัน</a>` : ''}
                             <input type="file" name="attachment" id="ky-manage-attachment"
                                    accept=".jpg,.jpeg,.png,.webp,.pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx"
                                    class="block w-full text-xs text-slate-500 file:mr-3 file:py-2 file:px-3 file:rounded-lg file:border-0 file:text-xs file:font-semibold file:bg-indigo-50 file:text-indigo-700 hover:file:bg-indigo-100">
                         </div>
                         <div>
                             <label class="block text-sm font-semibold text-slate-700 mb-1.5">อัปโหลดวิดีโอใหม่</label>
-                            ${r.VideoUrl ? `<a href="${escHtml(r.VideoUrl)}" target="_blank" rel="noopener noreferrer" class="inline-flex items-center gap-1 text-xs font-semibold text-purple-600 hover:text-purple-800 mb-2">ดูวิดีโอปัจจุบัน</a>` : ''}
+                            ${r.VideoUrl ? `<a href="${escHtml(kyMediaUrl(r.VideoUrl))}" target="_blank" rel="noopener noreferrer" class="inline-flex items-center gap-1 text-xs font-semibold text-purple-600 hover:text-purple-800 mb-2">ดูวิดีโอปัจจุบัน</a>` : ''}
                             <input type="file" name="video" id="ky-manage-video"
                                    accept="video/mp4,video/quicktime,video/avi,video/webm,video/x-msvideo,video/mpeg"
                                    class="block w-full text-xs text-slate-500 file:mr-3 file:py-2 file:px-3 file:rounded-lg file:border-0 file:text-xs file:font-semibold file:bg-purple-50 file:text-purple-700 hover:file:bg-purple-100">
@@ -2271,9 +4726,27 @@ async function showManageModal(id) {
                 </form>
             </div>`;
 
-        openModal('จัดการกิจกรรม KY', html, 'max-w-xl');
+        openModal('จัดการกิจกรรม KY', html, 'max-w-3xl');
 
-        document.getElementById('ky-manage-form')?.addEventListener('submit', async (e) => {
+        document.getElementById('ky-manage-attachment')?.addEventListener('change', (e) => {
+            validateKySelectedFile(e.target, 'attachment');
+        });
+        document.getElementById('ky-manage-video')?.addEventListener('change', (e) => {
+            validateKySelectedFile(e.target, 'video');
+        });
+
+        const refreshManageSafetyUnit = async () => {
+            const dateValue = document.getElementById('ky-manage-date')?.value;
+            const year = dateValue ? new Date(dateValue).getFullYear() : manageYear;
+            await _fetchProgramConfig(year);
+            const dept = document.getElementById('ky-manage-dept')?.value || '';
+            const unitEl = document.getElementById('ky-manage-safety-unit');
+            if (unitEl) unitEl.innerHTML = manageUnitOptions(dept, unitEl.value || r.SafetyUnit || '', year);
+        };
+        document.getElementById('ky-manage-date')?.addEventListener('change', refreshManageSafetyUnit);
+        document.getElementById('ky-manage-dept')?.addEventListener('change', refreshManageSafetyUnit);
+
+        document.getElementById('ky-manage-form')?.addEventListener('submit', guardSubmitHandler(async (e) => {
             e.preventDefault();
             const saveBtn = document.getElementById('ky-manage-save');
             saveBtn.disabled = true;
@@ -2296,7 +4769,7 @@ async function showManageModal(id) {
                 saveBtn.disabled = false;
                 saveBtn.textContent = 'บันทึก';
             }
-        });
+        }));
     } catch (err) {
         hideLoading();
         showError(err);
@@ -2307,8 +4780,21 @@ async function showManageModal(id) {
 // EVENT LISTENERS
 // ─────────────────────────────────────────────────────────────────────────────
 function setupEventListeners() {
-    document.addEventListener('click', async (e) => {
-        if (!e.target.closest('#ky-page')) return;
+    document.addEventListener('click', guardActionHandler(async (e) => {
+        if (e.target.closest('[data-ky-card-save-action]')) {
+            const card = _kyCardSaveMenu?.card;
+            _kyHideCardImageMenu();
+            if (card) _kyDownloadCardImage(card);
+            return;
+        }
+        if (!e.target.closest('#ky-card-save-menu')) _kyHideCardImageMenu();
+        if (!e.target.closest('#ky-page') && !e.target.closest('#ky-video-library-modal') && !e.target.closest('#ky-evidence-popup')) return;
+
+        const videoLoadBtn = e.target.closest('.ky-video-load');
+        if (videoLoadBtn) {
+            activateKyVideo(videoLoadBtn);
+            return;
+        }
 
         // Tab
         const tabBtn = e.target.closest('.ky-tab');
@@ -2333,14 +4819,27 @@ function setupEventListeners() {
         }
 
         // View detail
-        if (e.target.closest('.btn-ky-view')) {
-            await showDetailModal(e.target.closest('.btn-ky-view').dataset.id);
+        const viewBtn = e.target.closest('.btn-ky-view');
+        if (viewBtn) {
+            await runKyButtonAction(viewBtn, 'Loading...', async () => {
+                await showDetailModal(viewBtn.dataset.id);
+            });
+            return;
+        }
+
+        const followupVideoBtn = e.target.closest('.btn-ky-video-followup');
+        if (followupVideoBtn) {
+            const record = _kyEvidenceRecords.find(item => String(item.id) === String(followupVideoBtn.dataset.id));
+            if (record) openKyFollowupVideoModal(record);
             return;
         }
 
         // Manage
-        if (e.target.closest('.btn-ky-manage')) {
-            await showManageModal(e.target.closest('.btn-ky-manage').dataset.id);
+        const manageBtn = e.target.closest('.btn-ky-manage');
+        if (manageBtn) {
+            await runKyButtonAction(manageBtn, 'Loading...', async () => {
+                await showManageModal(manageBtn.dataset.id);
+            });
             return;
         }
 
@@ -2403,6 +4902,113 @@ function setupEventListeners() {
         // Export Excel
         if (e.target.closest('#ky-export-btn')) { exportKyExcel(); return; }
 
+        if (e.target.closest('#ky-video-view-all-btn')) {
+            openKyVideoLibrary();
+            return;
+        }
+
+        const evidenceChartFilterBtn = e.target.closest('[data-ky-evidence-chart-filter]');
+        if (evidenceChartFilterBtn) {
+            _kyEvidenceChartFilter = evidenceChartFilterBtn.dataset.kyEvidenceChartFilter || 'all';
+            _kyEvidenceSelectedKey = '';
+            renderKyEvidenceFollowupPanel(_kyEvidenceRecords);
+            return;
+        }
+
+        const evidenceUnitBtn = e.target.closest('[data-ky-evidence-unit]');
+        if (evidenceUnitBtn) {
+            const key = evidenceUnitBtn.dataset.kyEvidenceUnit || '';
+            const row = buildConfiguredKyEvidenceRows(_kyEvidenceRecords).find(item => item.key === key);
+            if (row) openConfiguredKyEvidencePopup(row, _kyEvidenceRecords);
+            return;
+        }
+
+        const evidenceFilterBtn = e.target.closest('[data-ky-evidence-filter]');
+        if (evidenceFilterBtn) {
+            _filterHistEvidence = evidenceFilterBtn.dataset.kyEvidenceFilter || 'all';
+            _activeTab = 'history';
+            window._saveTab?.('ky', 'history');
+            await switchTab('history');
+            return;
+        }
+
+        if (e.target.closest('#ky-video-lib-refresh')) {
+            await renderKyVideoLibrary({ ...collectKyVideoLibraryFilters(), page: 1 });
+            return;
+        }
+
+        const videoLibPageBtn = e.target.closest('.ky-video-lib-page');
+        if (videoLibPageBtn) {
+            await renderKyVideoLibrary({ ...collectKyVideoLibraryFilters(), page: parseInt(videoLibPageBtn.dataset.page) || 1 });
+            return;
+        }
+
+        const reactionBtn = e.target.closest('.ky-video-reaction');
+        if (reactionBtn) {
+            const id = reactionBtn.dataset.id;
+            const reaction = reactionBtn.dataset.reaction;
+            const current = [...(_kyVideoShowcase || []), ...(_kyVideoLibrary.items || [])]
+                .find(v => String(v.id) === String(id))?.MyReaction;
+            try {
+                if (current === reaction) {
+                    await API.delete(`/ky/${id}/reaction`);
+                    applyKyVideoReactionState(id, reaction, true);
+                    renderVideoShowcaseFromCache();
+                    renderKyVideoCardsFromCache(document);
+                    showToast('ลบ Reaction แล้ว', 'success');
+                } else {
+                    await API.post(`/ky/${id}/reaction`, { reaction });
+                    applyKyVideoReactionState(id, reaction, false);
+                    renderVideoShowcaseFromCache();
+                    renderKyVideoCardsFromCache(document);
+                    showToast('บันทึก Reaction แล้ว', 'success');
+                }
+                await renderVideoShowcase();
+                if (document.getElementById('ky-video-library-modal')) {
+                    await renderKyVideoLibrary({ ...collectKyVideoLibraryFilters(), page: _kyVideoLibrary.pagination?.page || 1 });
+                }
+            } catch (err) {
+                showError(err);
+            }
+            return;
+        }
+
+        const pinBtn = e.target.closest('.ky-video-pin');
+        if (pinBtn) {
+            try {
+                const nextPinned = pinBtn.dataset.pinned === '1';
+                await API.put(`/ky/${pinBtn.dataset.id}/video-dashboard`, nextPinned ? { pinned: true, show: true } : { pinned: false });
+                showToast('อัปเดตวิดีโอเด่นแล้ว', 'success');
+                await renderVideoShowcase();
+                if (document.getElementById('ky-video-library-modal')) {
+                    await renderKyVideoLibrary({ ...collectKyVideoLibraryFilters(), page: _kyVideoLibrary.pagination?.page || 1 });
+                }
+            } catch (err) { showError(err); }
+            return;
+        }
+
+        const visibilityBtn = e.target.closest('.ky-video-visibility, .ky-video-hide');
+        if (visibilityBtn) {
+            const nextShow = visibilityBtn.dataset.show === '1';
+            const libraryWasOpen = Boolean(visibilityBtn.closest('#ky-video-library-modal'));
+            const libraryFilters = libraryWasOpen ? collectKyVideoLibraryFilters() : null;
+            const libraryPage = _kyVideoLibrary.pagination?.page || 1;
+            const confirmed = nextShow || await showConfirmationModal('ซ่อนวิดีโอจาก Dashboard', 'ต้องการซ่อนวิดีโอนี้จาก KY Dashboard ใช่หรือไม่?');
+            if (confirmed) {
+                try {
+                    await API.put(`/ky/${visibilityBtn.dataset.id}/video-dashboard`, nextShow ? { show: true } : { show: false, pinned: false });
+                    showToast(nextShow ? 'แสดงวิดีโอแล้ว' : 'ซ่อนวิดีโอแล้ว', 'success');
+                    await renderVideoShowcase();
+                    if (libraryWasOpen) {
+                        openKyVideoLibrary({ ...libraryFilters, page: libraryPage });
+                    } else if (document.getElementById('ky-video-library-modal')) {
+                        await renderKyVideoLibrary({ ...collectKyVideoLibraryFilters(), page: _kyVideoLibrary.pagination?.page || 1 });
+                    }
+                } catch (err) { showError(err); }
+            }
+            return;
+        }
+
         const kpiFilterBtn = e.target.closest('[data-ky-kpi-filter]');
         if (kpiFilterBtn) {
             _filterStatus = kpiFilterBtn.dataset.kyKpiFilter || 'all';
@@ -2410,11 +5016,42 @@ function setupEventListeners() {
             await switchTab('history');
             return;
         }
-    });
+
+        if (e.target.closest('[data-ky-open-history]')) {
+            _filterHistYear = _filterMgmtYear;
+            _filterHistDept = _filterMgmtDept;
+            _filterHistRisk = _filterMgmtRisk;
+            await switchTab('history');
+            return;
+        }
+
+        if (e.target.closest('[data-ky-reminder-send-ready]')) {
+            await sendKyMissingSubmissionReminders();
+            return;
+        }
+
+        const reminderBtn = e.target.closest('[data-ky-reminder-send-key]');
+        if (reminderBtn) {
+            await sendKyMissingSubmissionReminders([reminderBtn.dataset.kyReminderSendKey]);
+            return;
+        }
+
+        const retryAllBtn = e.target.closest('[data-ky-email-retry-all]');
+        if (retryAllBtn) {
+            await retryKyEmailOutbox();
+            return;
+        }
+
+        const retryEmailBtn = e.target.closest('[data-ky-email-retry-id]');
+        if (retryEmailBtn) {
+            await retryKyEmailOutbox(retryEmailBtn.dataset.kyEmailRetryId);
+            return;
+        }
+    }, delegatedActionOptions('ky')));
 
     // Filter + search changes
     document.addEventListener('change', async (e) => {
-        if (!e.target.closest('#ky-page')) return;
+        if (!e.target.closest('#ky-page') && !e.target.closest('#ky-video-library-modal')) return;
         if (e.target.id === 'ky-filter-status') { _filterStatus = e.target.value; await fetchAndRenderHistory(); return; }
         if (e.target.id === 'ky-hist-date-from') { _filterDateFrom = e.target.value; await fetchAndRenderHistory(); return; }
         if (e.target.id === 'ky-hist-date-to')   { _filterDateTo   = e.target.value; await fetchAndRenderHistory(); return; }
@@ -2427,6 +5064,8 @@ function setupEventListeners() {
         }
         if (e.target.id === 'ky-hist-dept')     { _filterHistDept = e.target.value; await fetchAndRenderHistory(); return; }
         if (e.target.id === 'ky-hist-risk')     { _filterHistRisk = e.target.value; await fetchAndRenderHistory(); return; }
+        if (e.target.id === 'ky-hist-source')   { _filterHistSource = e.target.value; await fetchAndRenderHistory(); return; }
+        if (e.target.id === 'ky-hist-evidence') { _filterHistEvidence = e.target.value; await fetchAndRenderHistory(); return; }
         if (e.target.id === 'ky-mgmt-year')     {
             _filterMgmtYear = parseInt(e.target.value);
             _kyProgConfig = [];
@@ -2437,12 +5076,141 @@ function setupEventListeners() {
         if (e.target.id === 'ky-mgmt-dept')     { _filterMgmtDept = e.target.value; await fetchAndRenderManage('all'); return; }
         if (e.target.id === 'ky-mgmt-risk')     { _filterMgmtRisk = e.target.value; await fetchAndRenderManage('all'); return; }
         if (e.target.id === 'ky-stats-year')    { _statsYear = parseInt(e.target.value); const c = document.getElementById('ky-tab-content'); if (c) await renderDashboard(c); return; }
+        if (e.target.closest('#ky-video-library-modal') && [
+            'ky-video-lib-year',
+            'ky-video-lib-risk',
+            'ky-video-lib-status',
+            'ky-video-lib-dept',
+            'ky-video-lib-pinned',
+            'ky-video-lib-show',
+            'ky-video-lib-page-size',
+        ].includes(e.target.id)) {
+            await renderKyVideoLibrary({ ...collectKyVideoLibraryFilters(), page: 1 });
+            return;
+        }
     });
 
     document.addEventListener('input', debounce(async (e) => {
         if (!e.target.closest('#ky-page')) return;
         if (e.target.id === 'ky-history-search') { _searchQ = e.target.value; await fetchAndRenderHistory(); }
     }, 350));
+
+    document.addEventListener('input', debounce(async (e) => {
+        if (!e.target.closest('#ky-video-library-modal')) return;
+        if (e.target.id === 'ky-video-lib-q') {
+            await renderKyVideoLibrary({ ...collectKyVideoLibraryFilters(), page: 1 });
+        }
+    }, 450));
+
+    document.addEventListener('contextmenu', _kyShowCardContextMenu);
+    document.addEventListener('pointerdown', _kyStartCardImageHold);
+    document.addEventListener('pointermove', _kyMoveCardImageHold);
+    document.addEventListener('pointerup', _kyCancelCardImageHold);
+    document.addEventListener('pointercancel', _kyCancelCardImageHold);
+}
+
+function _kyShowCardContextMenu(event) {
+    const card = event.target?.closest?.('[data-ky-card-image]');
+    if (!card || !document.getElementById('ky-page')?.contains(card)) return;
+    if (event.target.closest('button,a,input,select,textarea,label,video,[contenteditable="true"]')) return;
+    event.preventDefault();
+    _kyShowCardImageMenu(card, event.clientX, event.clientY);
+}
+
+function _kyStartCardImageHold(event) {
+    if (event.button !== undefined && event.button !== 0) return;
+    const card = event.target?.closest?.('[data-ky-card-image]');
+    if (!card || !document.getElementById('ky-page')?.contains(card)) return;
+    if (event.target.closest('button,a,input,select,textarea,label,video,[contenteditable="true"]')) return;
+    _kyCancelCardImageHold();
+    _kyCardSaveHold = {
+        card,
+        pointerId: event.pointerId,
+        x: event.clientX,
+        y: event.clientY,
+        timer: setTimeout(() => {
+            if (!_kyCardSaveHold || _kyCardSaveHold.card !== card) return;
+            _kyShowCardImageMenu(card, _kyCardSaveHold.x, _kyCardSaveHold.y);
+        }, 800),
+    };
+}
+
+function _kyMoveCardImageHold(event) {
+    if (!_kyCardSaveHold || event.pointerId !== _kyCardSaveHold.pointerId) return;
+    if (Math.abs(event.clientX - _kyCardSaveHold.x) > 10 || Math.abs(event.clientY - _kyCardSaveHold.y) > 10) {
+        _kyCancelCardImageHold();
+    }
+}
+
+function _kyCancelCardImageHold() {
+    if (_kyCardSaveHold?.timer) clearTimeout(_kyCardSaveHold.timer);
+    _kyCardSaveHold = null;
+}
+
+function _kyShowCardImageMenu(card, clientX, clientY) {
+    _kyHideCardImageMenu();
+    const menu = document.createElement('div');
+    menu.id = 'ky-card-save-menu';
+    menu.className = 'fixed z-[9999] rounded-xl border border-slate-200 bg-white p-1.5 shadow-xl';
+    menu.style.minWidth = '170px';
+    menu.innerHTML = `
+        <button type="button" data-ky-card-save-action
+            class="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-xs font-black text-slate-700 hover:bg-emerald-50 hover:text-emerald-700">
+            <svg class="h-4 w-4 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 10v6m0 0l-3-3m3 3l3-3m4 7H5a2 2 0 01-2-2V7a2 2 0 012-2h4l2 2h8a2 2 0 012 2v9a2 2 0 01-2 2z"/>
+            </svg>
+            บันทึกเป็นรูปภาพ
+        </button>`;
+    document.body.appendChild(menu);
+    const rect = menu.getBoundingClientRect();
+    const left = Math.min(Math.max(8, clientX), window.innerWidth - rect.width - 8);
+    const top = Math.min(Math.max(8, clientY), window.innerHeight - rect.height - 8);
+    menu.style.left = `${left}px`;
+    menu.style.top = `${top}px`;
+    _kyCardSaveMenu = { card, menu };
+}
+
+function _kyHideCardImageMenu() {
+    _kyCardSaveMenu?.menu?.remove?.();
+    _kyCardSaveMenu = null;
+}
+
+async function _kyDownloadCardImage(card) {
+    if (typeof html2canvas === 'undefined') {
+        showToast('ไม่พบ library สำหรับบันทึกรูปภาพ', 'error');
+        return;
+    }
+    const name = _kySafeFilePart(card.dataset.kyCardImage || 'ky-card');
+    try {
+        showLoading('Saving card image...');
+        const canvas = await html2canvas(card, {
+            backgroundColor: '#ffffff',
+            scale: Math.min(2, window.devicePixelRatio || 1.5),
+            useCORS: true,
+            onclone: doc => {
+                doc.querySelectorAll('[data-ky-card-ignore]').forEach(el => { el.style.display = 'none'; });
+            },
+        });
+        const link = document.createElement('a');
+        link.href = canvas.toDataURL('image/png');
+        link.download = `${name}-${_statsYear}.png`;
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+        showToast('บันทึกรูปภาพการ์ดแล้ว', 'success');
+    } catch (err) {
+        showToast(err?.message || 'บันทึกรูปภาพการ์ดไม่สำเร็จ', 'error');
+    } finally {
+        hideLoading();
+    }
+}
+
+function _kySafeFilePart(value) {
+    return String(value || 'ky-card')
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, '-')
+        .replace(/^-+|-+$/g, '')
+        .slice(0, 60) || 'ky-card';
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -2458,8 +5226,11 @@ function exportKyExcel() {
         return {
             'วันที่กิจกรรม':       r.ActivityDate ? new Date(r.ActivityDate).toLocaleDateString('th-TH') : '-',
             'แผนก':               r.Department       || '-',
+            'Safety Unit':        r.SafetyUnit       || '-',
             'ทีม':                r.TeamName         || '-',
             'ผู้รายงาน':           r.ReporterName     || '-',
+            'รูปแบบการบันทึก':     isKySubmittedOnBehalf(r) ? 'Admin ส่งแทน' : 'ส่งตามบัญชีผู้รายงาน',
+            'ผู้บันทึกจริง':        r.SubmittedByName  || r.ReporterName || '-',
             'KYT Keyword':        r.KYTKeyword       || '-',
             'ประเภทอันตราย':       r.RiskCategory     || '-',
             'รายละเอียดอันตราย':   r.HazardDescription || '-',
@@ -2492,12 +5263,14 @@ async function exportKyPDF() {
     }
     showLoading('กำลังสร้าง PDF...');
     try {
-        // Fetch stats + open/reviewed action items in parallel
-        const [statsRes, actionRes] = await Promise.all([
+        // Fetch KY-specific stats and follow-up items for the formal PDF pack.
+        const [statsRes, actionRes, reviewedRes, evidenceRes, fileHealthRes] = await Promise.all([
             API.get(`/ky/stats?year=${_statsYear}`),
             API.get(`/ky?year=${_statsYear}&status=Open`).catch(() => ({ data: [] })),
+            API.get(`/ky?year=${_statsYear}&status=Reviewed`).catch(() => ({ data: [] })),
+            API.get(`/ky/evidence-overview?year=${_statsYear}`).catch(() => ({ data: null })),
+            API.get(`/ky/file-health?year=${_statsYear}`).catch(() => ({ data: null })),
         ]);
-        const reviewedRes = await API.get(`/ky?year=${_statsYear}&status=Reviewed`).catch(() => ({ data: [] }));
 
         const data     = statsRes?.data || {};
         const kpi      = data.kpi  || {};
@@ -2507,7 +5280,12 @@ async function exportKyPDF() {
         const today      = new Date().toLocaleDateString('th-TH', { year: 'numeric', month: 'long', day: 'numeric' });
         const openItems  = normalizeApiArray(actionRes?.data ?? actionRes);
         const reviewItems = normalizeApiArray(reviewedRes?.data ?? reviewedRes);
-        const actionItems = [...openItems, ...reviewItems];
+        const actionItems = [...openItems, ...reviewItems].sort((a, b) => {
+            const rank = row => !kyHasEvidenceFile(row) ? 0 : (!kyHasEvidenceVideo(row) ? 1 : 2);
+            return rank(a) - rank(b) || String(b.ActivityDate || '').localeCompare(String(a.ActivityDate || ''));
+        });
+        const evidenceData = evidenceRes?.data || null;
+        const fileHealthData = fileHealthRes?.data || null;
 
         const { jsPDF } = jspdf;
         const pdf       = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
@@ -2522,33 +5300,293 @@ async function exportKyPDF() {
             return canvas;
         };
 
-        // Page 1 — Executive Summary + Monthly Trend
-        const canvas1 = await render(_buildKyPdfPage1(kpi, counts, maxCount, _statsYear, today));
+        // Page 1 — Executive Summary + Trend + Risk
+        const canvas1 = await render(_buildKyExecutivePdfPage1(data, kpi, counts, maxCount, _statsYear, today));
         pdf.addImage(canvas1.toDataURL('image/jpeg', 0.92), 'JPEG', 0, 0, 210, 297);
 
-        // Page 2 — Department Ranking + Risk Category
+        // Page 2 — Coverage + Actions + Approval
         pdf.addPage();
-        const canvas2 = await render(_buildKyPdfPage2(data.byDept || [], data.riskCat || [], data.pendingDepts || [], _statsYear, today));
+        const canvas2 = await render(_buildKyExecutivePdfPage2(data, actionItems, evidenceData, fileHealthData, _statsYear, today));
         pdf.addImage(canvas2.toDataURL('image/jpeg', 0.92), 'JPEG', 0, 0, 210, 297);
 
-        // Page 3 — Yearly Target Coverage per Department (only when program config active)
-        pdf.addPage();
-        const canvas3 = await render(_buildKyPdfPage3(data.programProgress || [], data.usingConfig, _statsYear, today));
-        pdf.addImage(canvas3.toDataURL('image/jpeg', 0.92), 'JPEG', 0, 0, 210, 297);
-
-        // Page 4 — Action Follow-up (Open + Reviewed items)
-        pdf.addPage();
-        const canvas4 = await render(_buildKyPdfPage4(actionItems, kpi, _statsYear, today));
-        pdf.addImage(canvas4.toDataURL('image/jpeg', 0.92), 'JPEG', 0, 0, 210, 297);
-
         pdf.save(`KY_Activity_${_statsYear}.pdf`);
-        showToast('สร้าง PDF สำเร็จ (4 หน้า)', 'success');
+        showToast('สร้าง PDF สำเร็จ (2 หน้า)', 'success');
     } catch (err) {
         console.error('KY PDF error:', err);
         showToast('ไม่สามารถสร้าง PDF ได้', 'error');
     } finally {
         hideLoading();
     }
+}
+
+function _buildKyExecutivePdfPage1(data, kpi, counts, maxCount, year, today) {
+    const byDept = data.byDept || [];
+    const riskCat = data.riskCat || [];
+    const topKeywords = data.topKeywords || [];
+    const closureRate = kpi.total > 0 ? Math.round(((kpi.closed || 0) / kpi.total) * 100) : 0;
+    const targetTotal = Number(kpi.targetTotal || 0);
+    const targetSubmitted = Number(kpi.targetSubmitted || 0);
+    const targetRate = targetTotal ? Math.round((targetSubmitted / targetTotal) * 100) : (Number(kpi.completionRate) || 0);
+    const pendingCount = Number(kpi.open || 0) + Number(kpi.reviewed || 0);
+    const healthLabel = targetRate >= 85 && pendingCount === 0 ? 'Stable' : targetRate >= 60 ? 'Watch' : 'Action';
+    const healthColor = healthLabel === 'Stable' ? '#059669' : healthLabel === 'Watch' ? '#d97706' : '#dc2626';
+    const K = "font-family:'Kanit',sans-serif;";
+    const sectionTitle = (title, sub = '') => `<div style="display:flex;align-items:flex-end;justify-content:space-between;border-bottom:1px solid #dbeafe;padding-bottom:7px;margin-bottom:10px"><div><h2 style="${K}font-size:14px;font-weight:900;color:#065f46;margin:0">${title}</h2>${sub ? `<p style="${K}font-size:9.5px;color:#64748b;margin:2px 0 0">${sub}</p>` : ''}</div></div>`;
+    const reportHeader = `<div style="background:#065f46;color:#fff;padding:18px 28px;flex-shrink:0"><div style="display:flex;justify-content:space-between;gap:16px;align-items:flex-start"><div><p style="${K}font-size:10px;opacity:.82;margin:0 0 3px">Thai Summit Harness Co., Ltd. · Safety Summary Report</p><h1 style="${K}font-size:21px;font-weight:900;margin:0;line-height:1.18">KY Activity Report</h1><p style="${K}font-size:11px;opacity:.9;margin:5px 0 0">Hazard Prediction Activity · ประจำปี ${year}</p></div><div style="${K}text-align:right;font-size:9.5px;line-height:1.55;opacity:.92"><div>Generated: ${today}</div><div>Period: ${year}</div><div style="margin-top:4px;font-size:8.5px;opacity:.75">KY-${year}</div></div></div></div>`;
+    const reportFooter = `<div style="margin-top:auto;padding:8px 28px;background:#f8fafc;border-top:1px solid #e2e8f0;color:#64748b;display:flex;align-items:center;justify-content:space-between;flex-shrink:0"><span style="${K}font-size:8.8px">KY Activity Report · Thai Summit Harness Co., Ltd.</span><span style="${K}font-size:8.8px">Page 1 / 2 · Summary</span></div>`;
+    const kpiBoxes = [
+        { label: 'KY Activities', value: kpi.total || 0, color: '#0f766e' },
+        { label: 'Coverage', value: `${kpi.deptSubmitted || 0}/${kpi.totalDepts || 0}`, color: '#2563eb' },
+        { label: 'Target', value: targetTotal ? `${targetSubmitted}/${targetTotal}` : '-', color: '#0f766e' },
+        { label: 'Target Rate', value: `${targetRate}%`, color: targetRate >= 80 ? '#059669' : targetRate >= 50 ? '#d97706' : '#dc2626' },
+        { label: 'Pending Dept.', value: kpi.pendingDepts || 0, color: (kpi.pendingDepts || 0) ? '#f97316' : '#64748b' },
+        { label: 'Close Rate', value: `${closureRate}%`, color: '#0f766e' },
+    ];
+    const keyNotes = [
+        `Program target ${targetSubmitted}/${targetTotal || '-'} (${targetRate}%)`,
+        `Department coverage ${kpi.deptSubmitted || 0}/${kpi.totalDepts || 0} · Safety Units ${kpi.safetyUnitsTotal || '-'}`,
+        `Open ${kpi.open || 0} · Reviewed ${kpi.reviewed || 0} · Closed ${kpi.closed || 0}`,
+        byDept[0] ? `Top department: ${byDept[0].Department || '-'} (${byDept[0].count || 0})` : 'No department activity in current scope',
+    ];
+    const monthBars = MONTHS_TH.map((label, i) => {
+        const count = counts[i];
+        const pct = Math.round(count / maxCount * 100);
+        return `
+        <div style="display:flex;align-items:center;gap:7px;margin-bottom:4px;">
+            <span style="width:30px;font-size:10px;color:#64748b;text-align:right;">${label}</span>
+            <div style="flex:1;height:11px;background:#f1f5f9;border-radius:4px;overflow:hidden;">
+                ${count ? `<div style="height:100%;width:${pct}%;background:#0f766e;border-radius:4px;"></div>` : ''}
+            </div>
+            <span style="width:20px;font-size:10px;color:#334155;text-align:right;font-weight:700;">${count}</span>
+        </div>`;
+    }).join('');
+    const riskRows = riskCat.slice(0, 6).map((r, i) => `
+        <div style="display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid #f1f5f9;padding:6px 0;">
+            <span style="font-size:11px;color:#334155;font-weight:700;">${i + 1}. ${escHtml(r.label || '-')}</span>
+            <span style="font-size:11px;color:#0f766e;font-weight:800;">${r.count || 0}</span>
+        </div>`).join('');
+    const deptRows = byDept.slice(0, 6).map((d, i) => `
+        <div style="display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid #f1f5f9;padding:6px 0;">
+            <span style="font-size:11px;color:#334155;font-weight:700;">${i + 1}. ${escHtml(d.Department || '-')}</span>
+            <span style="font-size:11px;color:#059669;font-weight:800;">${d.count || 0}</span>
+        </div>`).join('');
+    const keywordRows = topKeywords.slice(0, 5).map((k, i) => `
+        <span style="display:inline-block;margin:0 5px 6px 0;border:1px solid #bbf7d0;background:#f0fdf4;color:#065f46;border-radius:999px;padding:4px 8px;font-size:10px;font-weight:700;">${i + 1}. ${escHtml(k.keyword || '-')} (${k.count || 0})</span>
+    `).join('');
+
+    return `
+    <div style="width:794px;height:1122px;display:flex;flex-direction:column;background:#fff;font-family:Kanit,sans-serif;color:#1e293b;">
+        ${reportHeader}
+        <div style="display:none">
+            <div style="color:rgba(224,231,255,0.9);font-size:11px;font-weight:800;letter-spacing:0.08em;">KY EXECUTIVE PACK · HAZARD PREDICTION</div>
+            <div style="color:#fff;font-size:26px;font-weight:800;line-height:1.2;margin-top:6px;">รายงานภาพรวมกิจกรรม KY ปี ${year}</div>
+            <div style="color:rgba(224,231,255,0.85);font-size:12px;margin-top:6px;">Thai Summit Harness Co., Ltd. · สร้างเมื่อ ${today}</div>
+        </div>
+        <div style="flex:1;padding:18px 28px 14px;display:flex;flex-direction:column;gap:10px;min-height:0">
+        ${sectionTitle('1. Report Summary / ภาพรวมรายงาน', 'สรุปกิจกรรม KY สถานะการส่ง และแนวโน้มรายเดือน')}
+        <div style="display:grid;grid-template-columns:repeat(6,1fr);gap:8px;">
+            ${kpiBoxes.map(b => `
+            <div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:10px;padding:9px;text-align:center;min-height:66px">
+                <div style="font-size:21px;font-weight:900;color:${b.color};line-height:1">${b.value}</div>
+                <div style="font-size:8.7px;color:#475569;margin-top:6px;font-weight:800;">${b.label}</div>
+            </div>`).join('')}
+        </div>
+        <div style="display:grid;grid-template-columns:1.15fr .85fr;gap:12px;">
+            <div style="border:1px solid #e2e8f0;border-radius:12px;padding:12px;">
+                <div style="font-size:12px;font-weight:900;color:#065f46;margin-bottom:8px">Key Notes / ประเด็นสำคัญ</div>
+                ${keyNotes.map(t => `<div style="font-size:10.1px;color:#334155;margin-bottom:5px;display:flex;gap:6px"><span style="color:#f97316;font-weight:900">•</span><span>${escHtml(t)}</span></div>`).join('')}
+            </div>
+            <div style="border:1px solid #e2e8f0;border-radius:12px;padding:12px;text-align:center;">
+                <div style="font-size:12px;font-weight:900;color:#065f46;margin-bottom:6px">Report Health</div>
+                <div style="font-size:36px;font-weight:900;line-height:1;color:${healthColor}">${healthLabel}</div>
+                <div style="font-size:9px;color:#64748b;margin:8px 0 9px">Target ${targetRate}% · Pending items ${pendingCount}</div>
+                <div style="height:8px;background:#e2e8f0;border-radius:999px;overflow:hidden"><div style="height:100%;width:${Math.max(0, Math.min(100, targetRate))}%;background:${healthColor};border-radius:999px"></div></div>
+            </div>
+        </div>
+        <div style="display:grid;grid-template-columns:1.05fr .95fr;gap:12px;min-height:0;">
+            <div style="border:1px solid #e2e8f0;border-radius:12px;padding:12px;">
+                ${sectionTitle('2. Monthly KY Trend', 'จำนวนกิจกรรมแยกรายเดือน')}
+                ${monthBars}
+            </div>
+            <div style="display:flex;flex-direction:column;gap:10px;">
+                <div style="border:1px solid #e2e8f0;border-radius:12px;padding:12px;">
+                    ${sectionTitle('3. Top Risk Categories', 'ประเด็นเสี่ยงที่พบบ่อย')}
+                    ${riskRows || '<div style="font-size:11px;color:#94a3b8;">ไม่มีข้อมูล</div>'}
+                </div>
+                <div style="border:1px solid #e2e8f0;border-radius:12px;padding:12px;">
+                    ${sectionTitle('4. Top Departments', 'ส่วนงานที่มีกิจกรรมสูงสุด')}
+                    ${deptRows || '<div style="font-size:11px;color:#94a3b8;">ไม่มีข้อมูล</div>'}
+                </div>
+            </div>
+        </div>
+        <div>
+            <div style="border:1px solid #e2e8f0;border-radius:12px;background:#ffffff;padding:14px;">
+                ${sectionTitle('5. Recurring KYT Keywords', 'Key Learning Themes')}
+                ${keywordRows || '<span style="font-size:11px;color:#94a3b8;">ยังไม่มี Keyword สำหรับวิเคราะห์</span>'}
+            </div>
+        </div>
+        </div>
+        <div style="display:none">
+            <span style="color:rgba(224,231,255,0.9);font-size:10px;">KY Executive Pack · Summary</span>
+            <span style="color:rgba(224,231,255,0.9);font-size:10px;">หน้า 1 จาก 2</span>
+        </div>
+        ${reportFooter}
+    </div>`;
+}
+
+function _buildKyExecutivePdfPage2(data, actionItems, evidenceData, fileHealthData, year, today) {
+    const progress = (data.programProgress || []).slice().sort((a, b) => a.pct - b.pct || a.department.localeCompare(b.department));
+    const pendingDepts = data.pendingDepts || [];
+    const pendingUnits = data.pendingUnits || [];
+    const kpi = data.kpi || {};
+    const evidenceRows = normalizeApiArray(evidenceData?.rows || []);
+    const evidenceSummary = evidenceRows.reduce((sum, row) => {
+        sum.scopes += 1;
+        sum.submitted += Number(row.submitted || 0);
+        sum.complete += Number(row.complete || 0);
+        sum.waitingVideo += Number(row.waitingVideo || 0);
+        sum.missingFile += Number(row.missingFile || 0);
+        if (!String(row.safetyUnit || '').trim()) sum.departmentScopes += 1;
+        return sum;
+    }, { scopes: 0, submitted: 0, complete: 0, waitingVideo: 0, missingFile: 0, departmentScopes: 0 });
+    const fileHealthSummary = fileHealthData?.summary || null;
+    const evidenceBox = (label, value, color, note = '') => `
+        <div style="border:1px solid #e2e8f0;border-radius:9px;background:#fff;padding:8px;text-align:center;">
+            <div style="font-size:17px;font-weight:900;color:${color};line-height:1">${value}</div>
+            <div style="font-size:7.6px;color:#475569;font-weight:900;margin-top:4px">${label}</div>
+            ${note ? `<div style="font-size:6.8px;color:#94a3b8;margin-top:2px">${note}</div>` : ''}
+        </div>`;
+    const K = "font-family:'Kanit',sans-serif;";
+    const sectionTitle = (title, sub = '') => `<div style="display:flex;align-items:flex-end;justify-content:space-between;border-bottom:1px solid #dbeafe;padding-bottom:7px;margin-bottom:10px"><div><h2 style="${K}font-size:14px;font-weight:900;color:#065f46;margin:0">${title}</h2>${sub ? `<p style="${K}font-size:9.5px;color:#64748b;margin:2px 0 0">${sub}</p>` : ''}</div></div>`;
+    const reportHeader = `<div style="background:#065f46;color:#fff;padding:18px 28px;flex-shrink:0"><div style="display:flex;justify-content:space-between;gap:16px;align-items:flex-start"><div><p style="${K}font-size:10px;opacity:.82;margin:0 0 3px">Thai Summit Harness Co., Ltd. · Safety Summary Report</p><h1 style="${K}font-size:21px;font-weight:900;margin:0;line-height:1.18">KY Activity Follow-up</h1><p style="${K}font-size:11px;opacity:.9;margin:5px 0 0">Coverage, Follow-up & Approval · ประจำปี ${year}</p></div><div style="${K}text-align:right;font-size:9.5px;line-height:1.55;opacity:.92"><div>Generated: ${today}</div><div>Period: ${year}</div><div style="margin-top:4px;font-size:8.5px;opacity:.75">KY-${year}</div></div></div></div>`;
+    const reportFooter = `<div style="margin-top:auto;padding:8px 28px;background:#f8fafc;border-top:1px solid #e2e8f0;color:#64748b;display:flex;align-items:center;justify-content:space-between;flex-shrink:0"><span style="${K}font-size:8.8px">KY Activity Report · Thai Summit Harness Co., Ltd.</span><span style="${K}font-size:8.8px">Page 2 / 2 · Follow-up</span></div>`;
+    const actionRows = actionItems.slice(0, 7).map((r, i) => {
+        const date = r.ActivityDate ? new Date(r.ActivityDate).toLocaleDateString('th-TH', { day: 'numeric', month: 'short' }) : '-';
+        const hazard = (r.HazardDescription || r.KYTKeyword || '-').slice(0, 58);
+        const evidence = kyEvidenceStatus(r);
+        const evidenceColor = evidence.id === 'missing_file' ? '#dc2626' : evidence.id === 'waiting_video' ? '#7c3aed' : '#059669';
+        return `
+        <tr style="border-bottom:1px solid #f1f5f9;">
+            <td style="padding:6px 7px;font-size:10px;color:#64748b;">${i + 1}</td>
+            <td style="padding:6px 7px;font-size:10px;color:#334155;font-weight:700;">${date}</td>
+            <td style="padding:6px 7px;font-size:10px;color:#334155;">${escHtml(r.Department || '-')}</td>
+            <td style="padding:6px 7px;font-size:10px;color:#334155;">${escHtml(hazard)} <span style="color:${evidenceColor};font-weight:900;">· ${escHtml(evidence.shortLabel)}</span></td>
+            <td style="padding:6px 7px;font-size:10px;color:${r.Status === 'Open' ? '#0284c7' : '#d97706'};font-weight:800;">${STATUS_LABEL[r.Status] || r.Status}</td>
+        </tr>`;
+    }).join('');
+    const progressRows = progress.slice(0, 10).map(d => {
+        const pct = Math.max(0, Math.min(100, d.pct || 0));
+        const color = pct >= 80 ? '#059669' : pct >= 40 ? '#d97706' : '#ef4444';
+        return `
+        <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px;min-height:22px;">
+            <span style="width:190px;font-size:8.8px;line-height:1.18;color:#334155;font-weight:700;white-space:normal;overflow:visible;word-break:break-word;">${escHtml(d.department || '-')}</span>
+            <div style="flex:1;height:10px;background:#f1f5f9;border-radius:4px;overflow:hidden;"><div style="height:100%;width:${pct}%;background:${color};"></div></div>
+            <span style="width:48px;text-align:right;font-size:10px;color:#334155;font-weight:800;">${d.submitted || 0}/${d.target || 0}</span>
+        </div>`;
+    }).join('');
+    const unitProgress = progress.flatMap(d => {
+        const units = Array.isArray(d.safetyUnitProgress) ? d.safetyUnitProgress : [];
+        return units.map(u => ({
+            department: d.department || '-',
+            name: u.name || '-',
+            submitted: Number(u.submitted || 0),
+            target: Number(u.target || d.unitTarget || 12),
+            pct: Math.max(0, Math.min(100, Number(u.pct || 0))),
+        }));
+    }).sort((a, b) => a.pct - b.pct || a.department.localeCompare(b.department) || a.name.localeCompare(b.name));
+    const unitProgressRows = unitProgress.slice(0, 6).map(u => {
+        const color = u.pct >= 80 ? '#059669' : u.pct >= 40 ? '#d97706' : '#ef4444';
+        return `
+        <div style="display:flex;align-items:center;gap:7px;margin-bottom:5px;min-height:20px;">
+            <span style="width:112px;font-size:8.2px;line-height:1.15;color:#334155;font-weight:800;word-break:break-word;">${escHtml(u.name)}</span>
+            <span style="width:78px;font-size:7.5px;line-height:1.15;color:#64748b;word-break:break-word;">${escHtml(u.department)}</span>
+            <div style="flex:1;height:8px;background:#f1f5f9;border-radius:4px;overflow:hidden;"><div style="height:100%;width:${u.pct}%;background:${color};"></div></div>
+            <span style="width:38px;text-align:right;font-size:8.5px;color:${color};font-weight:900;">${u.submitted}/${u.target}</span>
+        </div>`;
+    }).join('');
+    const pendingUnitChips = pendingUnits.length
+        ? pendingUnits.slice(0, 8).map(u => `<span style="display:inline-block;margin:0 4px 5px 0;background:#fff;border:1px solid #fde68a;border-radius:999px;padding:3px 7px;font-size:8px;color:#92400e;font-weight:800;">${escHtml(u.safetyUnit || '-')}</span>`).join('')
+        : '';
+    const statusItems = [
+        { label: 'Open / รอตรวจสอบ', value: kpi.open || 0, color: '#0284c7' },
+        { label: 'Reviewed / ตรวจสอบแล้ว', value: kpi.reviewed || 0, color: '#d97706' },
+        { label: 'Closed / ปิดแล้ว', value: kpi.closed || 0, color: '#059669' },
+    ];
+    const approvalBox = label => `
+        <div style="height:70px;border:1px solid #cbd5e1;border-radius:8px;background:#fff;padding:9px;text-align:center">
+            <div style="height:28px;border-bottom:1px solid #94a3b8;margin:0 8px 6px"></div>
+            <div style="font-size:8.5px;font-weight:900;color:#1e293b">${label}</div>
+            <div style="font-size:7.5px;color:#94a3b8;margin-top:2px">Date: ____ / ____ / ____</div>
+        </div>`;
+
+    return `
+    <div style="width:794px;height:1122px;display:flex;flex-direction:column;background:#fff;font-family:Kanit,sans-serif;color:#1e293b;">
+        ${reportHeader}
+        <div style="display:none">
+            <div style="font-size:15px;font-weight:800;color:#065f46;">Coverage, Follow-up & Approval · ปี ${year}</div>
+            <div style="font-size:10px;color:#64748b;margin-top:2px;">สร้างเมื่อ ${today}</div>
+        </div>
+        <div style="flex:1;padding:18px 28px 14px;display:flex;flex-direction:column;gap:12px;min-height:0">
+        <div style="display:grid;grid-template-columns:.95fr 1.05fr;gap:12px;">
+            <div style="border:1px solid #e2e8f0;border-radius:12px;padding:14px;">
+                ${sectionTitle('6. Department Target Coverage', 'ความคืบหน้าตามเป้าหมายรายส่วนงาน')}
+                ${progressRows || '<div style="font-size:11px;color:#94a3b8;">ไม่มี Program Config</div>'}
+            </div>
+            <div style="border:1px solid #fde68a;border-radius:12px;padding:14px;background:#fffbeb;">
+                ${sectionTitle('7. Safety Unit Follow-up', 'ความคืบหน้าและ Unit ที่ยังต้องติดตาม')}
+                ${unitProgressRows || '<div style="font-size:11px;color:#94a3b8;">ยังไม่มี Safety Unit ใน Program Config</div>'}
+                <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:6px;margin-top:7px;margin-bottom:8px;">
+                    ${evidenceBox('Configured scopes', evidenceSummary.scopes || kpi.safetyUnitsTotal || '-', '#0f766e', `${evidenceSummary.departmentScopes || 0} dept scope`)}
+                    ${evidenceBox('File+Video complete', evidenceSummary.complete || 0, '#059669')}
+                    ${evidenceBox('Waiting video', evidenceSummary.waitingVideo || 0, '#7c3aed', 'owner/submitter/participant/admin')}
+                    ${evidenceBox('Missing file', evidenceSummary.missingFile || 0, '#dc2626')}
+                </div>
+                <div style="font-size:7.8px;color:#92400e;font-weight:800;margin:-2px 0 7px;">Source of truth: KY Program Config ${year}. Blank SafetyUnit rows are department scope; configured SafetyUnit rows are unit scope.</div>
+                <div style="border-top:1px solid #fde68a;margin-top:7px;padding-top:7px">
+                    <div style="font-size:8.5px;font-weight:900;color:#92400e;margin-bottom:5px">Pending this period: ${pendingUnits.length || pendingDepts.length || 0}</div>
+                    ${pendingUnitChips || (pendingDepts.length ? pendingDepts.slice(0, 6).map(d => `<span style="display:inline-block;margin:0 4px 5px 0;background:#fff;border:1px solid #fde68a;border-radius:999px;padding:3px 7px;font-size:8px;color:#92400e;font-weight:800;">${escHtml(d)}</span>`).join('') : '<div style="font-size:9px;color:#059669;font-weight:800;">ทุก Safety Unit / แผนก ส่งครบในช่วงที่เลือก</div>')}
+                </div>
+            </div>
+        </div>
+        <div>
+            <div style="border:1px solid #e2e8f0;border-radius:12px;padding:14px;">
+                ${sectionTitle('8. Action Follow-up Queue', 'รายการที่ยังต้องติดตาม')}
+                <table style="width:100%;border-collapse:collapse;">
+                    <thead><tr style="background:#065f46;">
+                        <th style="padding:6px 7px;font-size:9px;color:#fff;text-align:left;">#</th>
+                        <th style="padding:6px 7px;font-size:9px;color:#fff;text-align:left;">Date</th>
+                        <th style="padding:6px 7px;font-size:9px;color:#fff;text-align:left;">Dept</th>
+                        <th style="padding:6px 7px;font-size:9px;color:#fff;text-align:left;">Issue</th>
+                        <th style="padding:6px 7px;font-size:9px;color:#fff;text-align:left;">Status</th>
+                    </tr></thead>
+                    <tbody>${actionRows || '<tr><td colspan="5" style="padding:14px;text-align:center;color:#059669;font-size:11px;font-weight:800;">ไม่มีรายการค้างติดตาม</td></tr>'}</tbody>
+                </table>
+            </div>
+        </div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
+            <div style="border:1px solid #e2e8f0;border-radius:12px;padding:14px;background:#ffffff;">
+                ${sectionTitle('9. Status Control Summary', 'สถานะรายการ KY ที่ต้องควบคุมในรอบรายงาน')}
+                <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px;">
+                    ${statusItems.map(s => `<div style="border:1px solid #e2e8f0;border-radius:10px;padding:10px;text-align:center;background:#f8fafc"><div style="font-size:22px;font-weight:900;color:${s.color};line-height:1">${s.value}</div><div style="font-size:8.5px;color:#475569;font-weight:800;margin-top:5px">${s.label}</div></div>`).join('')}
+                </div>
+                <div style="margin-top:9px;border:1px solid #dbeafe;border-radius:9px;background:#eff6ff;padding:7px 8px;font-size:8.2px;color:#1e40af;font-weight:800;line-height:1.45;">
+                    Data freshness: generated ${escHtml(today)} · Source: KY Program Config + KY Activities${fileHealthSummary ? ` · Media health: missing=${fileHealthSummary.missing || 0}, legacyLocalhost=${fileHealthSummary.legacyLocalhost || 0}` : ''}
+                </div>
+                <div style="font-size:9.5px;color:#475569;line-height:1.55;margin-top:10px;">รายงานนี้สรุปข้อมูล KY ตามปีที่เลือก โดยใช้ข้อมูลจริงจากการส่งกิจกรรม, สถานะการตรวจสอบ, แผนก/Safety Unit, ประเภทความเสี่ยง และคิวติดตามในระบบ</div>
+            </div>
+            <div style="border:1px solid #d1fae5;background:#f0fdf4;border-radius:12px;padding:14px;">
+                ${sectionTitle('10. Certification / Approval', 'สรุปเพื่อรับรองและลงนาม')}
+                <div style="font-size:9.5px;color:#334155;line-height:1.55;margin-bottom:10px;">ตรวจทานความครบถ้วนของข้อมูล KY, รายการค้างตรวจ, และแผนกที่ยังไม่ครบเป้าหมาย ก่อนใช้รายงานนี้สำหรับประชุมติดตามความปลอดภัย</div>
+                <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">${approvalBox('Prepared By')}${approvalBox('Approved By')}</div>
+            </div>
+        </div>
+        </div>
+        <div style="display:none">
+            <span style="color:rgba(224,231,255,0.9);font-size:10px;">KY Executive Pack · Follow-up</span>
+            <span style="color:rgba(224,231,255,0.9);font-size:10px;">หน้า 2 จาก 2</span>
+        </div>
+        ${reportFooter}
+    </div>`;
 }
 
 function _buildKyPdfPage1(kpi, counts, maxCount, year, today) {

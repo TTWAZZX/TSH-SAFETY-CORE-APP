@@ -45,22 +45,47 @@ export function clearActivityCache() {
  * @param {string|string[]} activityKeys  e.g. 'hiyari' or ['cccf_worker','cccf_permanent']
  * @returns {Promise<string>}  HTML card string, or '' if no target is configured for this user.
  */
-export async function buildActivityCard(activityKeys) {
+export async function buildActivityCard(activityKeys, options = {}) {
     const keys = Array.isArray(activityKeys) ? activityKeys : [activityKeys];
+    const noDataMode = options?.noDataMode || 'card';
 
     const data = await _fetchMe();
     if (!data?.targets?.length) return '';
 
     const items = data.targets.filter(t => keys.includes(t.activityKey));
     if (!items.length) return '';
+    const evaluable = items.filter(t => !t.noData);
+    if (!evaluable.length) {
+        if (noDataMode === 'empty') return '';
+        const scope = items.find(t => t.calculationScope)?.calculationScope;
+        const noDataLabel = scope?.type === 'employee'
+            ? 'เป้าหมายส่วนตัว'
+            : scope?.type === 'department_unit'
+                ? 'KPI ระดับแผนก/หน่วย'
+                : 'KPI ระดับแผนก';
+        return `
+        <div class="rounded-xl px-4 py-3 text-center"
+             style="background:rgba(255,255,255,0.12);backdrop-filter:blur(6px);min-width:96px">
+            <p class="text-sm font-bold leading-tight" style="color:#cbd5e1">ไม่มีข้อมูล</p>
+            <p class="text-[11px] mt-0.5" style="color:rgba(167,243,208,0.85)">${noDataLabel}</p>
+        </div>`;
+    }
 
-    const target = items.reduce((s, t) => s + (t.yearlyTarget ?? 0), 0);
-    const actual = items.reduce((s, t) => s + (t.actualCount  ?? 0), 0);
+    const target = evaluable.reduce((s, t) => s + (t.yearlyTarget ?? 0), 0);
+    const actual = evaluable.reduce((s, t) => s + (t.actualCount  ?? 0), 0);
     if (target === 0) return '';
 
     const pct       = Math.min(Math.round((actual / target) * 100), 100);
     const barColor  = pct >= 100 ? '#6ee7b7' : pct >= 50 ? '#fbbf24' : '#fca5a5';
     const textColor = pct >= 100 ? '#6ee7b7' : pct >= 50 ? '#fde68a' : '#fca5a5';
+    const scoped = evaluable.find(t => t.calculationScope);
+    const targetLabel = scoped
+        ? scoped.calculationScope.type === 'employee'
+            ? 'เป้าหมายส่วนตัว'
+            : scoped.calculationScope.type === 'department_unit'
+                ? 'KPI ระดับแผนก/หน่วย'
+                : 'KPI ระดับแผนก'
+        : 'เป้าหมายส่วนตัว';
 
     return `
         <div class="rounded-xl px-4 py-3 text-center"
@@ -68,7 +93,7 @@ export async function buildActivityCard(activityKeys) {
             <p class="text-xl font-bold leading-tight" style="color:${textColor}">
                 ${actual}<span class="text-sm font-normal" style="opacity:0.7">/${target}</span>
             </p>
-            <p class="text-[11px] mt-0.5" style="color:rgba(167,243,208,0.85)">เป้าหมายส่วนตัว</p>
+            <p class="text-[11px] mt-0.5" style="color:rgba(167,243,208,0.85)">${targetLabel}</p>
             <div class="mt-1.5 h-1.5 rounded-full overflow-hidden"
                  style="background:rgba(255,255,255,0.2)">
                 <div class="h-full rounded-full"

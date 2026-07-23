@@ -1,10 +1,11 @@
+import { delegatedActionOptions, guardActionHandler, guardSubmitHandler } from '../utils/async-ui.js?v=20260715-phase32d-remaining-async-ux';
 // public/js/pages/contractor.js
 import { API } from '../api.js';
 import {
     openModal, closeModal, showToast,
     showConfirmationModal, showDocumentModal,
     showLoading, hideLoading,
-} from '../ui.js';
+} from '../ui.js?v=20260602-mobile-nav-m53';
 import { normalizeApiArray, normalizeApiObject } from '../utils/normalize.js';
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -33,6 +34,10 @@ const EXTERNAL_SYSTEMS = [
 
 const CATEGORIES = ['Contractor Policy', 'Work Permit', 'Safety Procedure', 'Training', 'Forms', 'ทั่วไป'];
 
+const REQUIRED_CATEGORIES = ['Contractor Policy', 'Work Permit', 'Safety Procedure', 'Training', 'Forms'];
+const PARTY_TYPES = ['Contractor', 'Supplier'];
+const INCIDENT_TYPES = ['Accident', 'Near Miss', 'First Aid', 'Property Damage'];
+
 const CAT_META = {
     all:                  { label: 'ทั้งหมด',           bg: 'bg-slate-100',   text: 'text-slate-600',   dot: '#64748b' },
     'Contractor Policy':  { label: 'Contractor Policy', bg: 'bg-blue-100',    text: 'text-blue-700',    dot: '#0284c7' },
@@ -44,14 +49,20 @@ const CAT_META = {
 };
 
 const ACTIVITY_META = {
-    upload: { label: 'อัปโหลด', icon: `<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12"/>`,  color: '#059669', bg: '#f0fdf4' },
-    edit:   { label: 'แก้ไข',   icon: `<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"/>`, color: '#0284c7', bg: '#eff6ff' },
-    delete: { label: 'ลบ',      icon: `<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/>`,  color: '#dc2626', bg: '#fef2f2' },
+    upload: { label: 'Uploaded', icon: `<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12"/>`,  color: '#059669', bg: '#f0fdf4' },
+    edit:   { label: 'Updated',  icon: `<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"/>`, color: '#0284c7', bg: '#eff6ff' },
+    delete: { label: 'Removed',  icon: `<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/>`,  color: '#dc2626', bg: '#fef2f2' },
+    accident_create: { label: 'Accident Added', icon: `<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01M5.07 19h13.86c1.54 0 2.5-1.667 1.73-3L13.73 4c-.77-1.333-2.69-1.333-3.46 0L3.34 16c-.77 1.333.19 3 1.73 3z"/>`, color: '#dc2626', bg: '#fef2f2' },
+    accident_edit: { label: 'Accident Updated', icon: `<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"/>`, color: '#0284c7', bg: '#eff6ff' },
+    accident_delete: { label: 'Accident Removed', icon: `<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/>`, color: '#b91c1c', bg: '#fef2f2' },
+    accident_file_add: { label: 'Evidence Added', icon: `<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.586-6.586a4 4 0 00-5.657-5.657L5.757 10.757a6 6 0 108.486 8.486L21 12.486"/>`, color: '#059669', bg: '#f0fdf4' },
+    accident_file_delete: { label: 'Evidence Removed', icon: `<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>`, color: '#dc2626', bg: '#fef2f2' },
 };
 
 const TABS = [
     { id: 'dashboard', label: 'ภาพรวม',  icon: `<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"/>` },
     { id: 'documents', label: 'เอกสาร',   icon: `<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/>` },
+    { id: 'accidents', label: 'Accident Records', icon: `<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01M5.07 19h13.86c1.54 0 2.5-1.667 1.73-3L13.73 4c-.77-1.333-2.69-1.333-3.46 0L3.34 16c-.77 1.333.19 3 1.73 3z"/>` },
 ];
 
 const PAGE_SIZE   = 12;
@@ -73,6 +84,10 @@ const ContractorService = {
         const res = await API.get(`/contractor/activity?limit=${limit}`);
         return normalizeApiArray(res?.data ?? res);
     },
+    async getCompanies() {
+        const res = await API.get('/contractor/companies');
+        return normalizeApiArray(res?.data ?? res);
+    },
     async upload(formData) {
         return API.post('/contractor/documents', formData);
     },
@@ -81,6 +96,29 @@ const ContractorService = {
     },
     async remove(id) {
         return API.delete(`/contractor/documents/${id}`);
+    },
+    async getAccidents(year = new Date().getFullYear()) {
+        const res = await API.get(`/contractor/accidents?year=${year}`);
+        return normalizeApiArray(res?.data ?? res);
+    },
+    async getAccidentStats(year = new Date().getFullYear()) {
+        const res = await API.get(`/contractor/accidents/stats?year=${year}`);
+        return normalizeApiObject(res?.data ?? res);
+    },
+    async createAccident(formData) {
+        return API.post('/contractor/accidents', formData);
+    },
+    async updateAccident(id, data) {
+        return API.put(`/contractor/accidents/${id}`, data);
+    },
+    async removeAccident(id) {
+        return API.delete(`/contractor/accidents/${id}`);
+    },
+    async addAccidentFiles(id, formData) {
+        return API.post(`/contractor/accidents/${id}/files`, formData);
+    },
+    async deleteAccidentFile(fileId) {
+        return API.delete(`/contractor/accident-files/${fileId}`);
     },
 };
 
@@ -109,17 +147,28 @@ const _state = {
     docs:      [],     // full list from API
     stats:     null,   // { total, byCategory, recentCount }
     activity:  [],     // Contractor_Activity_Log rows
+    companies: [],
+    accidents: [],
+    accidentStats: null,
     isAdmin:   false,
     activeTab: 'dashboard',
     page:      1,
+    docView:   'grid',
+    accidentYear: new Date().getFullYear(),
     loading:   false,
     error:     null,
     filter: {
         category: 'all',
+        partyType: 'all',
         query:    '',
         dateFrom: '',
         dateTo:   '',
         sortBy:   'newest',
+    },
+    accidentFilter: {
+        type: 'all',
+        partyType: 'all',
+        query: '',
     },
 };
 
@@ -163,27 +212,25 @@ function _buildShell() {
     <div class="space-y-6 animate-fade-in pb-10">
 
         <!-- ═══ HERO ═══ -->
-        <div class="relative overflow-hidden rounded-2xl"
-             style="background:linear-gradient(135deg,#064e3b 0%,#065f46 55%,#0d9488 100%)">
+        <div class="relative overflow-hidden rounded-xl border border-emerald-900/10"
+             style="background:linear-gradient(135deg,#064e3b 0%,#075746 62%,#0f766e 100%)">
             <div class="absolute inset-0 opacity-10 pointer-events-none">
                 <svg width="100%" height="100%"><defs><pattern id="con-dots" width="24" height="24" patternUnits="userSpaceOnUse"><circle cx="12" cy="12" r="1.3" fill="white"/></pattern></defs><rect width="100%" height="100%" fill="url(#con-dots)"/></svg>
             </div>
-            <div class="absolute -right-10 -top-10 w-52 h-52 rounded-full opacity-10 pointer-events-none"
-                 style="background:radial-gradient(circle,#fff,transparent 70%)"></div>
-
-            <div class="relative z-10 p-6">
-                <div class="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 mb-5">
+            <div class="relative z-10 p-5">
+                <div class="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 mb-4">
                     <div>
                         <div class="flex items-center gap-2 mb-2">
                             <span class="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold bg-white/20 text-white border border-white/30">
                                 <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-2 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4"/>
                                 </svg>
-                                Contractor Control
+                                Contractor / Supplier
                             </span>
                         </div>
-                        <h1 class="text-xl md:text-2xl font-bold text-white leading-snug">ระบบและเอกสารสำหรับผู้รับเหมา</h1>
-                        <p class="text-sm mt-1" style="color:rgba(167,243,208,0.85)">Contractor Safety Management · Thai Summit Harness Co., Ltd.</p>
+                        <h1 class="text-xl md:text-2xl font-bold text-white leading-snug">Contractor & Supplier E-Pass Online</h1>
+                        <p class="text-sm mt-1" style="color:rgba(167,243,208,0.85)">Document repository, E-Pass access, and zero external accident statistics</p>
+                        <p class="text-xs mt-1 text-white/55">Thai Summit Harness Co., Ltd.</p>
                     </div>
                     <div class="flex items-center gap-2 flex-shrink-0">
                         <button id="btn-refresh"
@@ -212,7 +259,7 @@ function _buildShell() {
                 </div>
 
                 <!-- Stats strip -->
-                <div id="con-hero-stats" class="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-5">
+                <div id="con-hero-stats" class="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-4">
                     ${_buildStatsSkeleton(4)}
                 </div>
 
@@ -226,6 +273,7 @@ function _buildShell() {
         <!-- ═══ TAB PANELS ═══ -->
         <div id="con-panel-dashboard" class="hidden"></div>
         <div id="con-panel-documents" class="hidden"></div>
+        <div id="con-panel-accidents" class="hidden"></div>
 
     </div>`;
 }
@@ -251,6 +299,7 @@ function _activateTab(id, render = true) {
     if (!render) return;
     if (id === 'dashboard') _renderDashboard();
     if (id === 'documents') _renderDocuments();
+    if (id === 'accidents') _renderAccidents();
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -264,28 +313,30 @@ function _renderHeroStats() {
     const total      = s?.total        ?? _state.docs.length;
     const recent     = s?.recentCount  ?? 0;
     const catCounts  = s?.byCategory   ?? [];
-    const policies   = catCounts.find(r => r.Category === 'Contractor Policy')?.cnt  ?? 0;
-    const permits    = catCounts.find(r => r.Category === 'Work Permit')?.cnt         ?? 0;
+    const partyCounts = s?.byParty ?? [];
+    const contractorDocs = partyCounts.find(r => r.PartyType === 'Contractor')?.cnt ?? _state.docs.filter(d => (d.PartyType || 'Contractor') === 'Contractor').length;
+    const supplierDocs = partyCounts.find(r => r.PartyType === 'Supplier')?.cnt ?? _state.docs.filter(d => d.PartyType === 'Supplier').length;
 
     const items = [
         { value: total,    label: 'เอกสารทั้งหมด',    icon: `<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/>` },
-        { value: policies, label: 'Contractor Policy', icon: `<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"/>`, cat: 'Contractor Policy' },
-        { value: permits,  label: 'Work Permit',       icon: `<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/>`, cat: 'Work Permit' },
+        { value: contractorDocs, label: 'Contractor Documents', icon: `<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5"/>`, party: 'Contractor' },
+        { value: supplierDocs,  label: 'Supplier Documents',       icon: `<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 6H5a2 2 0 00-2 2v9a2 2 0 002 2h14a2 2 0 002-2V8a2 2 0 00-2-2h-5m-4 0V5a2 2 0 114 0v1"/>`, party: 'Supplier' },
         { value: recent,   label: '30 วันล่าสุด',      icon: `<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"/>` },
     ];
 
     wrap.innerHTML = items.map(item => {
-        const clickable = item.cat ? `data-filter-cat="${item.cat}" style="cursor:pointer"` : '';
-        const hover     = item.cat ? `onmouseover="this.style.background='rgba(255,255,255,0.2)'" onmouseout="this.style.background='rgba(255,255,255,0.12)'"` : '';
+        const clickable = item.cat ? `data-filter-cat="${item.cat}"` : item.party ? `data-filter-party="${item.party}"` : '';
+        const cursor = item.cat || item.party ? 'cursor:pointer;' : '';
+        const hover     = item.cat || item.party ? `onmouseover="this.style.background='rgba(255,255,255,0.2)'" onmouseout="this.style.background='rgba(255,255,255,0.12)'"` : '';
         return `
         <div class="con-stat-card rounded-xl px-4 py-3 text-center transition-all" ${clickable} ${hover}
-             style="background:rgba(255,255,255,0.12);backdrop-filter:blur(6px)">
+             style="${cursor}background:rgba(255,255,255,0.12);backdrop-filter:blur(6px)">
             <div class="flex items-center justify-center mb-0.5" style="color:rgba(167,243,208,0.85)">
                 <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">${item.icon}</svg>
             </div>
             <p class="text-2xl font-bold text-white leading-none">${item.value}</p>
             <p class="text-[11px] mt-0.5" style="color:rgba(167,243,208,0.85)">${item.label}</p>
-            ${item.cat ? `<p class="text-[10px] mt-1 text-white/50">คลิกเพื่อกรอง</p>` : ''}
+            ${item.cat || item.party ? `<p class="text-[10px] mt-1 text-white/50">คลิกเพื่อกรอง</p>` : ''}
         </div>`;
     }).join('');
 }
@@ -297,7 +348,7 @@ function _renderDashboard() {
     const panel = document.getElementById('con-panel-dashboard');
     if (!panel) return;
 
-    const total     = _state.docs.length;
+    const total = _state.docs.length;
     const catCounts = CATEGORIES
         .map(cat => ({ cat, count: (_state.stats?.byCategory ?? []).find(r => r.Category === cat)?.cnt ?? _state.docs.filter(d => d.Category === cat).length }))
         .filter(x => x.count > 0);
@@ -305,43 +356,61 @@ function _renderDashboard() {
     const recentDocs = [..._state.docs]
         .sort((a, b) => new Date(b.UploadedAt) - new Date(a.UploadedAt))
         .slice(0, 6);
-    const keyCategories = ['Contractor Policy', 'Work Permit', 'Safety Procedure', 'Training'];
-    const missingKey = keyCategories.filter(cat => !_state.docs.some(d => d.Category === cat));
-    const recent30 = _state.docs.filter(d => {
-        if (!d.UploadedAt) return false;
-        const diff = (new Date() - new Date(d.UploadedAt)) / 86400000;
-        return diff >= 0 && diff <= 30;
-    }).length;
-    const totalSize = _state.docs.reduce((sum, d) => sum + (parseInt(d.FileSize) || 0), 0);
-    const coveragePct = keyCategories.length ? Math.round((keyCategories.length - missingKey.length) * 100 / keyCategories.length) : 0;
+    const requiredStatuses = _getRequiredCategoryStatus();
+    const availableRequired = requiredStatuses.filter(item => item.count > 0).length;
+    const accidentSummary = _getAccidentSummary();
 
     panel.innerHTML = `
     <div class="space-y-6">
 
-        <div class="grid grid-cols-2 lg:grid-cols-5 gap-3">
-            <button data-tab-link="documents"
-                class="text-left rounded-xl border ${missingKey.length ? 'border-amber-100 bg-amber-50' : 'border-emerald-100 bg-emerald-50'} px-4 py-3 hover:shadow-sm transition-shadow">
-                <p class="text-[10px] font-bold uppercase ${missingKey.length ? 'text-amber-500' : 'text-emerald-500'}">Core Coverage</p>
-                <p class="mt-1 text-sm font-black ${missingKey.length ? 'text-amber-700' : 'text-emerald-700'}">${coveragePct}% ready</p>
-            </button>
-            <button data-tab-link="documents"
-                class="text-left rounded-xl border border-slate-200 bg-white px-4 py-3 hover:shadow-sm transition-shadow">
-                <p class="text-[10px] font-bold uppercase text-slate-400">Documents</p>
-                <p class="mt-1 text-sm font-black text-slate-700">${total.toLocaleString()}</p>
-            </button>
-            <button data-tab-link="documents"
-                class="text-left rounded-xl border ${recent30 ? 'border-emerald-100 bg-emerald-50' : 'border-slate-200 bg-white'} px-4 py-3 hover:shadow-sm transition-shadow">
-                <p class="text-[10px] font-bold uppercase ${recent30 ? 'text-emerald-500' : 'text-slate-400'}">Recent Uploads</p>
-                <p class="mt-1 text-sm font-black ${recent30 ? 'text-emerald-700' : 'text-slate-700'}">${recent30} in 30 days</p>
-            </button>
-            <button data-tab-link="documents"
-                class="text-left rounded-xl border ${missingKey.length ? 'border-red-100 bg-red-50' : 'border-slate-200 bg-white'} px-4 py-3 hover:shadow-sm transition-shadow">
-                <p class="text-[10px] font-bold uppercase ${missingKey.length ? 'text-red-500' : 'text-slate-400'}">Missing Core</p>
-                <p class="mt-1 text-sm font-black ${missingKey.length ? 'text-red-700' : 'text-slate-700'}">${missingKey.length} category</p>
-            </button>
-            <div class="rounded-xl border border-slate-200 bg-white px-4 py-3">
-                <p class="text-[10px] font-bold uppercase text-slate-400">Repository Size</p>
-                <p class="mt-1 text-sm font-black text-slate-700">${_formatSize(totalSize)}</p>
+        <div class="ds-section overflow-hidden border ${accidentSummary.accidentsYtd === 0 ? 'border-emerald-200' : 'border-red-200'}">
+            <div class="grid grid-cols-1 xl:grid-cols-5">
+                <div class="xl:col-span-2 p-5 ${accidentSummary.accidentsYtd === 0 ? 'bg-emerald-50/70' : 'bg-red-50/70'} border-b xl:border-b-0 xl:border-r border-slate-100">
+                    <div class="flex items-start justify-between gap-4">
+                        <div>
+                            <p class="text-xs font-bold uppercase ${accidentSummary.accidentsYtd === 0 ? 'text-emerald-600' : 'text-red-600'}">เป้าหมายอุบัติเหตุภายนอกเป็นศูนย์</p>
+                            <h3 class="text-lg font-black text-slate-800 mt-1">Zero External Accident Target</h3>
+                        </div>
+                        <div class="flex items-center gap-2">
+                            <select id="dashboard-accident-year" class="px-2 py-1.5 rounded-lg border border-slate-200 bg-white text-xs font-semibold text-slate-600">
+                                ${_yearOptions(_state.accidentYear)}
+                            </select>
+                            <span class="px-3 py-1.5 rounded-lg text-xs font-bold whitespace-nowrap ${accidentSummary.accidentsYtd === 0 ? 'bg-emerald-100 text-emerald-700' : 'bg-red-100 text-red-700'}">
+                                ${accidentSummary.accidentsYtd === 0 ? 'On Track / อยู่ในเป้าหมาย' : 'Attention / ต้องติดตาม'}
+                            </span>
+                        </div>
+                    </div>
+                    <div class="mt-5 flex items-end gap-4">
+                        <p class="text-5xl font-black leading-none ${accidentSummary.accidentsYtd === 0 ? 'text-emerald-700' : 'text-red-700'}">${accidentSummary.accidentsYtd}</p>
+                        <div class="pb-1">
+                            <p class="text-sm font-bold text-slate-800">Accident YTD ${accidentSummary.year}</p>
+                            <p class="text-xs text-slate-500">อุบัติเหตุสะสมประจำปี</p>
+                        </div>
+                    </div>
+                    <div class="mt-5 rounded-lg bg-white/75 border border-white px-3 py-2">
+                        <p class="text-[11px] font-bold uppercase text-slate-400">Days Since Last Accident / จำนวนวันนับจากอุบัติเหตุล่าสุด</p>
+                        <p class="text-base font-black text-slate-800 mt-1">${accidentSummary.daysSinceLastAccidentText}</p>
+                    </div>
+                    <button data-tab-link="accidents" class="mt-4 inline-flex items-center justify-center gap-2 px-3 py-2 rounded-lg text-xs font-semibold border border-slate-200 bg-white text-slate-600 hover:border-emerald-300 hover:text-emerald-700">
+                        View Accident Records / ดูรายการเหตุการณ์
+                    </button>
+                </div>
+                <div class="xl:col-span-3 p-5">
+                    <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-2 2xl:grid-cols-4 gap-3">
+                        ${[
+                            ['Accident', 'อุบัติเหตุ', accidentSummary.accidentsYtd, 'text-red-700', 'bg-red-50'],
+                            ['Near Miss', 'เกือบเกิดอุบัติเหตุ', accidentSummary.nearMissYtd, 'text-amber-700', 'bg-amber-50'],
+                            ['First Aid', 'ปฐมพยาบาล', accidentSummary.firstAidYtd, 'text-blue-700', 'bg-blue-50'],
+                            ['Property Damage', 'ทรัพย์สินเสียหาย', accidentSummary.propertyDamageYtd, 'text-purple-700', 'bg-purple-50'],
+                        ].map(([en, th, value, color, bg]) => `
+                        <button data-tab-link="accidents" class="text-left rounded-lg border border-slate-200 ${bg} p-4 hover:shadow-sm transition-shadow min-h-28">
+                            <p class="text-[11px] font-bold uppercase text-slate-500">${en}</p>
+                            <p class="text-xs text-slate-500 mt-0.5">${th}</p>
+                            <p class="mt-3 text-3xl font-black ${color}">${value}</p>
+                            <p class="text-[11px] text-slate-400 mt-1">YTD ${accidentSummary.year}</p>
+                        </button>`).join('')}
+                    </div>
+                </div>
             </div>
         </div>
 
@@ -353,7 +422,7 @@ function _renderDashboard() {
                 <div class="flex items-center justify-between mb-4">
                     <h3 class="text-sm font-bold text-slate-700 flex items-center gap-2">
                         <svg class="w-4 h-4 text-emerald-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 7h.01M7 3h5c.512 0 1.024.195 1.414.586l7 7a2 2 0 010 2.828l-7 7a2 2 0 01-2.828 0l-7-7A1.994 1.994 0 013 12V7a4 4 0 014-4z"/></svg>
-                        เอกสารตามหมวดหมู่
+                        Document Category Coverage
                     </h3>
                     <span class="text-xs text-slate-400">${total} รายการ</span>
                 </div>
@@ -384,12 +453,30 @@ function _renderDashboard() {
             <div class="ds-section p-5 flex flex-col gap-3">
                 <h3 class="text-sm font-bold text-slate-700 flex items-center gap-2 flex-shrink-0">
                     <svg class="w-4 h-4 text-emerald-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"/></svg>
-                    ระบบภายนอก
+                    Linked Systems
                 </h3>
                 ${EXTERNAL_SYSTEMS.map(_buildSystemRow).join('')}
                 <p class="text-xs text-slate-400 pt-2 border-t border-slate-100 leading-relaxed">
-                    ระบบภายนอกจะเปิดในหน้าต่างใหม่ หากเข้าไม่ได้ โปรดติดต่อผู้ดูแลระบบ
+                    External systems open in a new window. Access is managed by the responsible system owner.
                 </p>
+            </div>
+        </div>
+
+        <div class="ds-section overflow-hidden">
+            <div class="px-5 py-4 border-b border-slate-100 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
+                <div>
+                    <h3 class="text-sm font-bold text-slate-700 flex items-center gap-2">
+                        <svg class="w-4 h-4 text-emerald-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z"/></svg>
+                        Required Document Status
+                    </h3>
+                    <p class="text-xs text-slate-400 mt-1">Contractor core document categories for compliance control</p>
+                </div>
+                <div class="text-xs font-semibold px-3 py-1.5 rounded-lg ${availableRequired === REQUIRED_CATEGORIES.length ? 'bg-emerald-50 text-emerald-700' : 'bg-amber-50 text-amber-700'}">
+                    ${availableRequired}/${REQUIRED_CATEGORIES.length} categories available
+                </div>
+            </div>
+            <div class="grid grid-cols-1 md:grid-cols-5 divide-y md:divide-y-0 md:divide-x divide-slate-100">
+                ${requiredStatuses.map(_buildRequiredStatusCell).join('')}
             </div>
         </div>
 
@@ -401,12 +488,12 @@ function _renderDashboard() {
                 <div class="px-5 py-4 border-b border-slate-100 flex items-center justify-between">
                     <h3 class="text-sm font-bold text-slate-700 flex items-center gap-2">
                         <svg class="w-4 h-4 text-emerald-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
-                        อัปโหลดล่าสุด
+                        Recent Document Updates
                     </h3>
                     ${total > 0 ? `
                     <button data-tab-link="documents"
                             class="text-xs font-semibold text-emerald-600 hover:text-emerald-700 transition-colors">
-                        ดูทั้งหมด →
+                        View all →
                     </button>` : ''}
                 </div>
                 ${recentDocs.length === 0
@@ -420,7 +507,7 @@ function _renderDashboard() {
                 <div class="px-5 py-4 border-b border-slate-100">
                     <h3 class="text-sm font-bold text-slate-700 flex items-center gap-2">
                         <svg class="w-4 h-4 text-emerald-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-3 7h3m-3 4h3m-6-4h.01M9 16h.01"/></svg>
-                        กิจกรรมล่าสุด
+                        Audit Trail
                     </h3>
                 </div>
                 <div id="con-activity-log" class="divide-y divide-slate-50 max-h-72 overflow-y-auto">
@@ -434,7 +521,7 @@ function _renderDashboard() {
 
 function _buildActivityList() {
     if (!_state.activity.length) {
-        return `<div class="p-8 text-center text-slate-400 text-sm">ยังไม่มีกิจกรรม</div>`;
+        return `<div class="p-8 text-center text-slate-400 text-sm">No audit activity recorded</div>`;
     }
     return _state.activity.map(row => {
         const m    = ACTIVITY_META[row.ActionType] || ACTIVITY_META.upload;
@@ -451,6 +538,7 @@ function _buildActivityList() {
             <div class="flex-1 min-w-0">
                 <p class="text-xs font-semibold text-slate-700 leading-snug truncate">${_esc(row.DocTitle || '—')}</p>
                 <div class="flex items-center gap-1.5 mt-0.5 flex-wrap">
+                    <span class="text-[10px] font-bold uppercase" style="color:${m.color}">${m.label}</span>
                     <span class="text-[10px] font-semibold px-1.5 py-0.5 rounded-full ${catM.bg} ${catM.text}">${catM.label}</span>
                     <span class="text-[10px] text-slate-400">${_esc(row.ActorName || '')}</span>
                 </div>
@@ -458,6 +546,61 @@ function _buildActivityList() {
             <span class="text-[10px] text-slate-400 flex-shrink-0 mt-1">${ts}</span>
         </div>`;
     }).join('');
+}
+
+function _getRequiredCategoryStatus() {
+    return REQUIRED_CATEGORIES.map(cat => {
+        const meta = CAT_META[cat] || CAT_META.ทั่วไป;
+        const count = (_state.stats?.byCategory ?? []).find(r => r.Category === cat)?.cnt
+            ?? _state.docs.filter(d => d.Category === cat).length;
+        return { cat, meta, count };
+    });
+}
+
+function _buildRequiredStatusCell(item) {
+    const available = item.count > 0;
+    return `
+    <button data-cat-row="${item.cat}"
+            class="text-left p-4 hover:bg-slate-50 transition-colors">
+        <div class="flex items-start justify-between gap-3">
+            <div class="min-w-0">
+                <p class="text-xs font-bold text-slate-700 truncate">${item.meta.label}</p>
+                <p class="text-[11px] text-slate-400 mt-1">${item.count} document${item.count === 1 ? '' : 's'}</p>
+            </div>
+            <span class="inline-flex items-center justify-center w-7 h-7 rounded-lg flex-shrink-0 ${available ? 'bg-emerald-50 text-emerald-600' : 'bg-amber-50 text-amber-600'}">
+                ${available
+                    ? `<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg>`
+                    : `<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01M5.07 19h13.86c1.54 0 2.5-1.667 1.73-3L13.73 4c-.77-1.333-2.69-1.333-3.46 0L3.34 16c-.77 1.333.19 3 1.73 3z"/></svg>`
+                }
+            </span>
+        </div>
+        <div class="mt-3 flex items-center justify-between gap-2">
+            <span class="text-[10px] font-bold uppercase ${available ? 'text-emerald-600' : 'text-amber-600'}">
+                ${available ? 'Available' : 'Missing'}
+            </span>
+            <span class="w-10 h-1 rounded-full" style="background:${available ? item.meta.dot : '#f59e0b'}"></span>
+        </div>
+    </button>`;
+}
+
+function _getAccidentSummary() {
+    const year = _state.accidentStats?.year || new Date().getFullYear();
+    const byType = _state.accidentStats?.byType || [];
+    const count = type => byType.find(row => row.IncidentType === type)?.cnt || 0;
+    const lastDate = _state.accidentStats?.lastAccident?.IncidentDate;
+    let daysSinceLastAccidentText = 'No accident recorded';
+    if (lastDate) {
+        const diff = Math.floor((new Date() - new Date(lastDate)) / 86400000);
+        daysSinceLastAccidentText = `${Math.max(diff, 0).toLocaleString()} days`;
+    }
+    return {
+        year,
+        accidentsYtd: count('Accident'),
+        nearMissYtd: count('Near Miss'),
+        firstAidYtd: count('First Aid'),
+        propertyDamageYtd: count('Property Damage'),
+        daysSinceLastAccidentText,
+    };
 }
 
 function _buildSystemRow(sys) {
@@ -512,6 +655,9 @@ function _renderDocuments() {
 }
 
 function _buildDocumentsPanel() {
+    const visibleCount = _getFilteredDocs().length;
+    const gridActive = _state.docView === 'grid';
+
     return `
     <div class="space-y-4">
 
@@ -546,6 +692,11 @@ function _buildDocumentsPanel() {
                            class="w-full pl-9 pr-3 py-2 text-sm rounded-lg border border-slate-200 focus:outline-none focus:border-emerald-400 focus:ring-2 focus:ring-emerald-100">
                 </div>
                 <div class="flex items-center gap-2 flex-shrink-0 w-full sm:w-auto">
+                    <select id="doc-party"
+                            class="flex-shrink-0 py-2 px-3 text-sm rounded-lg border border-slate-200 focus:outline-none focus:border-emerald-400 bg-white text-slate-600">
+                        <option value="all" ${_state.filter.partyType === 'all' ? 'selected' : ''}>All parties</option>
+                        ${PARTY_TYPES.map(type => `<option value="${type}" ${_state.filter.partyType === type ? 'selected' : ''}>${type}</option>`).join('')}
+                    </select>
                     <input id="doc-date-from" type="date" value="${_esc(_state.filter.dateFrom)}"
                            class="flex-1 sm:w-36 px-3 py-2 text-sm rounded-lg border border-slate-200 focus:outline-none focus:border-emerald-400 text-slate-600"
                            placeholder="วันเริ่มต้น">
@@ -565,11 +716,33 @@ function _buildDocumentsPanel() {
                 </div>
             </div>
 
-            <p id="doc-count" class="text-xs text-slate-400"></p>
+            <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
+                <p id="doc-count" class="text-xs text-slate-400">แสดง ${visibleCount} จาก ${_state.docs.length} รายการ</p>
+                <div class="flex items-center gap-2 self-start sm:self-auto">
+                    <button id="btn-export-docs" class="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-semibold border border-slate-200 bg-white text-slate-600 hover:border-emerald-300 hover:text-emerald-700">
+                        <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414A1 1 0 0119 9.414V19a2 2 0 01-2 2z"/></svg>
+                        Export
+                    </button>
+                    <div class="inline-flex rounded-lg border border-slate-200 bg-white p-1">
+                        <button data-doc-view="grid"
+                                class="doc-view-btn inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-semibold transition-colors ${gridActive ? 'bg-emerald-600 text-white shadow-sm' : 'text-slate-500 hover:text-emerald-700'}"
+                                title="Grid view">
+                            <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4h7v7H4V4zm9 0h7v7h-7V4zM4 13h7v7H4v-7zm9 0h7v7h-7v-7z"/></svg>
+                            Grid
+                        </button>
+                        <button data-doc-view="list"
+                                class="doc-view-btn inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-semibold transition-colors ${!gridActive ? 'bg-emerald-600 text-white shadow-sm' : 'text-slate-500 hover:text-emerald-700'}"
+                                title="List view">
+                            <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h16"/></svg>
+                            List
+                        </button>
+                    </div>
+                </div>
+            </div>
         </div>
 
-        <!-- Grid -->
-        <div id="doc-grid" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+        <!-- Document list -->
+        <div id="doc-grid" class="${_docContainerClass()}">
             ${_buildDocGridContent()}
         </div>
 
@@ -583,11 +756,14 @@ function _buildDocumentsPanel() {
 // Filtering + sorting (pure, no DOM side-effects)
 // ─────────────────────────────────────────────────────────────────────────────
 function _getFilteredDocs() {
-    const { category, query, dateFrom, dateTo, sortBy } = _state.filter;
+    const { category, partyType, query, dateFrom, dateTo, sortBy } = _state.filter;
     let docs = [..._state.docs];
 
     if (category !== 'all') {
         docs = docs.filter(d => d.Category === category);
+    }
+    if (partyType !== 'all') {
+        docs = docs.filter(d => (d.PartyType || 'Contractor') === partyType);
     }
 
     const q = query.trim().toLowerCase();
@@ -626,7 +802,7 @@ function _buildDocGridContent() {
     if (countEl) countEl.textContent = `แสดง ${total} จาก ${_state.docs.length} รายการ`;
 
     if (total === 0) {
-        return `<div class="col-span-full">${_buildEmptyState('slate', 'ไม่พบเอกสาร',
+        return `<div class="${_state.docView === 'grid' ? 'col-span-full' : ''}">${_buildEmptyState('slate', 'ไม่พบเอกสาร',
             _state.filter.query || _state.filter.category !== 'all' || _state.filter.dateFrom || _state.filter.dateTo
                 ? 'ลองปรับตัวกรองหรือลบเงื่อนไขบางส่วน'
                 : _state.isAdmin ? 'กดปุ่ม "อัปโหลดเอกสาร" ด้านบนเพื่อเริ่มต้น' : 'ยังไม่มีเอกสารในหมวดหมู่นี้'
@@ -642,7 +818,15 @@ function _buildDocGridContent() {
     // Render pagination after grid
     setTimeout(() => _renderPagination(total), 0);
 
-    return pageDocs.map(_buildDocCard).join('');
+    return _state.docView === 'list'
+        ? _buildDocListTable(pageDocs)
+        : pageDocs.map(_buildDocCard).join('');
+}
+
+function _docContainerClass() {
+    return _state.docView === 'list'
+        ? 'ds-section overflow-hidden'
+        : 'grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4';
 }
 
 function _renderPagination(total) {
@@ -700,7 +884,10 @@ function _refreshDocGrid() {
     _state.page = 1; // reset to first page on any filter change
     if (_state.activeTab !== 'documents') return;
     const grid = document.getElementById('doc-grid');
-    if (grid) grid.innerHTML = _buildDocGridContent();
+    if (grid) {
+        grid.className = _docContainerClass();
+        grid.innerHTML = _buildDocGridContent();
+    }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -717,26 +904,29 @@ function _buildDocCard(doc) {
     const safeUrl   = _esc(doc.FileUrl);
 
     return `
-    <div class="ds-section overflow-hidden hover:shadow-md transition-all group flex flex-col" data-doc-id="${doc.id}">
-        <div class="h-1 w-full" style="background:${meta.dot}"></div>
-        <div class="p-5 flex-1 flex flex-col gap-3">
+    <div class="ds-section overflow-hidden hover:shadow-md transition-all group flex flex-col border-slate-200" data-doc-id="${doc.id}">
+        <div class="p-4 flex-1 flex flex-col gap-3">
             <div class="flex items-start gap-3">
-                <div class="w-10 h-10 rounded-lg flex items-center justify-center flex-shrink-0 transition-transform group-hover:scale-105"
+                <div class="w-11 h-11 rounded-lg flex items-center justify-center flex-shrink-0 border"
                      style="background:${_fileIconBg(ext)};color:${_fileIconColor(ext)}">
                     ${_fileIcon(ext)}
                 </div>
                 <div class="flex-1 min-w-0">
-                    <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-semibold mb-1 ${meta.bg} ${meta.text}">
-                        <span class="w-1.5 h-1.5 rounded-full inline-block" style="background:${meta.dot}"></span>
-                        ${meta.label}
-                    </span>
-                    <h4 class="font-semibold text-slate-800 text-sm leading-snug line-clamp-2">${safeTitle}</h4>
+                    <div class="flex items-center gap-2 mb-1">
+                        <span class="text-[10px] font-bold uppercase tracking-wide text-slate-400">${ext || 'file'}</span>
+                        <span class="w-1 h-1 rounded-full bg-slate-300"></span>
+                        <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-semibold ${meta.bg} ${meta.text}">
+                            ${meta.label}
+                        </span>
+                        <span class="inline-flex px-2 py-0.5 rounded-md text-[10px] font-bold bg-slate-100 text-slate-600">${_esc(doc.PartyType || 'Contractor')}</span>
+                    </div>
+                    <h4 class="font-bold text-slate-800 text-sm leading-snug line-clamp-2">${safeTitle}</h4>
                     ${doc.Description ? `<p class="text-xs text-slate-400 mt-1 line-clamp-2">${_esc(doc.Description)}</p>` : ''}
                 </div>
                 ${_state.isAdmin ? `
                 <div class="flex flex-col gap-1 flex-shrink-0 opacity-0 group-hover:opacity-100 transition-opacity">
                     <button class="btn-edit-doc p-1.5 text-slate-300 hover:text-emerald-600 hover:bg-emerald-50 rounded-lg transition-colors"
-                            data-id="${doc.id}" data-title="${safeTitle}"
+                            data-id="${doc.id}" data-title="${safeTitle}" data-party="${_esc(doc.PartyType || 'Contractor')}"
                             data-cat="${_esc(doc.Category || '')}" data-desc="${_esc(doc.Description || '')}"
                             title="แก้ไข">
                         <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"/></svg>
@@ -747,16 +937,18 @@ function _buildDocCard(doc) {
                     </button>
                 </div>` : ''}
             </div>
-            <div class="text-xs text-slate-400 flex flex-wrap items-center gap-x-3 gap-y-1 mt-auto">
-                <span class="flex items-center gap-1">
+            <div class="mt-auto rounded-lg bg-slate-50 border border-slate-100 px-3 py-2 text-xs text-slate-500 grid grid-cols-1 gap-1">
+                <span class="flex items-center gap-1.5 min-w-0">
                     <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"/></svg>
-                    ${uploadDate}
+                    <span class="text-slate-400">Uploaded</span>
+                    <span class="font-semibold text-slate-600">${uploadDate}</span>
                 </span>
-                <span class="flex items-center gap-1">
+                <span class="flex items-center gap-1.5 min-w-0">
                     <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z"/></svg>
-                    ${_esc(doc.UploadedBy || '-')}
+                    <span class="text-slate-400">Owner</span>
+                    <span class="font-semibold text-slate-600 truncate">${_esc(doc.UploadedBy || '-')}</span>
                 </span>
-                ${doc.FileSize ? `<span>${_formatSize(doc.FileSize)}</span>` : ''}
+                ${doc.FileSize ? `<span class="text-slate-400">${_formatSize(doc.FileSize)}</span>` : ''}
             </div>
         </div>
         <div class="border-t border-slate-100 flex">
@@ -776,6 +968,394 @@ function _buildDocCard(doc) {
     </div>`;
 }
 
+function _buildDocListTable(docs) {
+    return `
+    <div class="overflow-x-auto">
+        <table class="min-w-full text-sm">
+            <thead class="bg-slate-50 border-b border-slate-100">
+                <tr class="text-left text-[11px] font-bold uppercase text-slate-400">
+                    <th class="px-4 py-3 w-[42%]">Document</th>
+                    <th class="px-4 py-3">Category</th>
+                    <th class="px-4 py-3">Party</th>
+                    <th class="px-4 py-3">Uploaded</th>
+                    <th class="px-4 py-3">Owner</th>
+                    <th class="px-4 py-3 text-right">Actions</th>
+                </tr>
+            </thead>
+            <tbody class="divide-y divide-slate-100 bg-white">
+                ${docs.map(_buildDocListRow).join('')}
+            </tbody>
+        </table>
+    </div>`;
+}
+
+function _buildDocListRow(doc) {
+    const meta = CAT_META[doc.Category] || CAT_META.ทั่วไป;
+    const ext = (doc.FileType || 'pdf').toLowerCase();
+    const canPreview = ext === 'pdf' || ['jpg','jpeg','png','gif','webp'].includes(ext);
+    const uploadDate = doc.UploadedAt
+        ? new Date(doc.UploadedAt).toLocaleDateString('th-TH', { year: 'numeric', month: 'short', day: 'numeric' })
+        : '-';
+    const safeTitle = _esc(doc.Title);
+    const safeUrl = _esc(doc.FileUrl);
+
+    return `
+    <tr class="hover:bg-slate-50 transition-colors">
+        <td class="px-4 py-3 align-top">
+            <div class="flex items-start gap-3 min-w-0">
+                <div class="w-9 h-9 rounded-lg flex items-center justify-center flex-shrink-0 border"
+                     style="background:${_fileIconBg(ext)};color:${_fileIconColor(ext)}">
+                    ${_fileIcon(ext, 'w-4 h-4')}
+                </div>
+                <div class="min-w-0">
+                    <div class="flex items-center gap-2 mb-1">
+                        <span class="text-[10px] font-bold uppercase text-slate-400">${ext || 'file'}</span>
+                        ${doc.FileSize ? `<span class="text-[10px] text-slate-400">${_formatSize(doc.FileSize)}</span>` : ''}
+                    </div>
+                    <p class="font-bold text-slate-800 leading-snug break-words">${safeTitle}</p>
+                    ${doc.Description ? `<p class="text-xs text-slate-400 mt-1 line-clamp-1">${_esc(doc.Description)}</p>` : ''}
+                </div>
+            </div>
+        </td>
+        <td class="px-4 py-3 align-top">
+            <span class="inline-flex items-center px-2 py-1 rounded-md text-[11px] font-semibold ${meta.bg} ${meta.text}">${meta.label}</span>
+        </td>
+        <td class="px-4 py-3 align-top">
+            <span class="inline-flex px-2 py-1 rounded-md text-[11px] font-bold bg-slate-100 text-slate-600">${_esc(doc.PartyType || 'Contractor')}</span>
+        </td>
+        <td class="px-4 py-3 align-top text-slate-500 whitespace-nowrap">${uploadDate}</td>
+        <td class="px-4 py-3 align-top text-slate-600 min-w-36">${_esc(doc.UploadedBy || '-')}</td>
+        <td class="px-4 py-3 align-top">
+            <div class="flex items-center justify-end gap-1">
+                ${canPreview ? `
+                <button class="btn-preview-doc p-2 rounded-lg text-slate-400 hover:text-emerald-600 hover:bg-emerald-50"
+                        data-url="${safeUrl}" data-title="${safeTitle}" title="ดูเอกสาร">
+                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"/></svg>
+                </button>` : ''}
+                <a href="${safeUrl}" download target="_blank" rel="noopener noreferrer"
+                   class="p-2 rounded-lg text-slate-400 hover:text-emerald-600 hover:bg-emerald-50" title="ดาวน์โหลด">
+                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/></svg>
+                </a>
+                ${_state.isAdmin ? `
+                <button class="btn-edit-doc p-2 rounded-lg text-slate-400 hover:text-emerald-600 hover:bg-emerald-50"
+                        data-id="${doc.id}" data-title="${safeTitle}" data-party="${_esc(doc.PartyType || 'Contractor')}"
+                        data-cat="${_esc(doc.Category || '')}" data-desc="${_esc(doc.Description || '')}" title="แก้ไข">
+                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"/></svg>
+                </button>
+                <button class="btn-delete-doc p-2 rounded-lg text-slate-400 hover:text-red-500 hover:bg-red-50"
+                        data-id="${doc.id}" data-title="${safeTitle}" title="ลบ">
+                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg>
+                </button>` : ''}
+            </div>
+        </td>
+    </tr>`;
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// ACCIDENT RECORDS TAB
+// ═══════════════════════════════════════════════════════════════════════════════
+function _renderAccidents() {
+    const panel = document.getElementById('con-panel-accidents');
+    if (!panel) return;
+    const records = _getFilteredAccidents();
+
+    panel.innerHTML = `
+    <div class="space-y-4">
+        <div class="ds-section p-5 flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
+            <div>
+                <p class="text-xs font-bold uppercase text-emerald-600">Zero External Contractor Accident</p>
+                <h3 class="text-lg font-bold text-slate-800 mt-1">Accident Records</h3>
+                <p class="text-sm text-slate-500 mt-1">เก็บสถิติอุบัติเหตุและเหตุการณ์ของ Contractor / Supplier แบบเรียบง่าย</p>
+            </div>
+            <div class="flex flex-wrap items-center gap-2">
+                <select id="accident-year" class="px-3 py-2 rounded-lg border border-slate-200 bg-white text-sm font-semibold text-slate-600">
+                    ${_yearOptions(_state.accidentYear)}
+                </select>
+                <button id="btn-export-accidents" class="inline-flex items-center justify-center gap-2 px-3 py-2 rounded-lg text-sm font-semibold border border-slate-200 bg-white text-slate-600 hover:border-emerald-300 hover:text-emerald-700">
+                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414A1 1 0 0119 9.414V19a2 2 0 01-2 2z"/></svg>
+                    Export
+                </button>
+                ${_state.isAdmin ? `
+                <button id="btn-add-accident" class="inline-flex items-center justify-center gap-2 px-4 py-2 rounded-lg text-sm font-semibold text-white bg-emerald-600 hover:bg-emerald-700 transition-colors">
+                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/></svg>
+                    บันทึกเหตุการณ์
+                </button>` : ''}
+            </div>
+        </div>
+
+        <div class="ds-filter-bar flex flex-col lg:flex-row gap-2">
+            <input id="accident-search" type="text" value="${_esc(_state.accidentFilter.query)}"
+                   placeholder="ค้นหาบริษัท / ผู้เกี่ยวข้อง / พื้นที่..."
+                   class="flex-1 px-3 py-2 rounded-lg border border-slate-200 text-sm focus:outline-none focus:border-emerald-400">
+            <select id="accident-party" class="px-3 py-2 rounded-lg border border-slate-200 text-sm bg-white">
+                <option value="all" ${_state.accidentFilter.partyType === 'all' ? 'selected' : ''}>All parties</option>
+                ${PARTY_TYPES.map(type => `<option value="${type}" ${_state.accidentFilter.partyType === type ? 'selected' : ''}>${type}</option>`).join('')}
+            </select>
+            <select id="accident-type" class="px-3 py-2 rounded-lg border border-slate-200 text-sm bg-white">
+                <option value="all" ${_state.accidentFilter.type === 'all' ? 'selected' : ''}>All types</option>
+                ${INCIDENT_TYPES.map(type => `<option value="${type}" ${_state.accidentFilter.type === type ? 'selected' : ''}>${type}</option>`).join('')}
+            </select>
+        </div>
+
+        <div class="ds-section overflow-hidden">
+            ${records.length
+                ? `<div class="divide-y divide-slate-100">${records.map(_buildAccidentRow).join('')}</div>`
+                : `<div class="p-10 text-center text-sm text-slate-400">ยังไม่มี Accident Record ตามเงื่อนไขนี้</div>`
+            }
+        </div>
+    </div>`;
+}
+
+function _getFilteredAccidents() {
+    const q = _state.accidentFilter.query.trim().toLowerCase();
+    return [..._state.accidents].filter(record => {
+        if (_state.accidentFilter.type !== 'all' && record.IncidentType !== _state.accidentFilter.type) return false;
+        if (_state.accidentFilter.partyType !== 'all' && record.PartyType !== _state.accidentFilter.partyType) return false;
+        if (!q) return true;
+        return [record.CompanyName, record.InvolvedPerson, record.Area, record.Description]
+            .some(value => String(value || '').toLowerCase().includes(q));
+    }).sort((a, b) => new Date(b.IncidentDate) - new Date(a.IncidentDate));
+}
+
+function _buildAccidentRow(record) {
+    const date = record.IncidentDate ? new Date(record.IncidentDate).toLocaleDateString('th-TH', { year: 'numeric', month: 'short', day: 'numeric' }) : '-';
+    const typeClass = _incidentTypeClass(record.IncidentType);
+    const fileCount = (record.Files || []).length;
+    return `
+    <div class="p-4 flex flex-col lg:flex-row lg:items-center gap-4 hover:bg-slate-50 transition-colors">
+        <div class="w-28 flex-shrink-0">
+            <p class="text-xs text-slate-400">Incident Date</p>
+            <p class="text-sm font-bold text-slate-700">${date}</p>
+        </div>
+        <div class="flex-1 min-w-0">
+            <div class="flex items-center gap-2 flex-wrap">
+                <span class="px-2 py-1 rounded-md text-xs font-bold ${typeClass}">${_esc(record.IncidentType)}</span>
+                <span class="px-2 py-1 rounded-md text-xs font-bold bg-slate-100 text-slate-600">${_esc(record.PartyType || 'Contractor')}</span>
+                ${fileCount ? `<span class="px-2 py-1 rounded-md text-xs font-semibold bg-blue-50 text-blue-700">${fileCount} files</span>` : ''}
+            </div>
+            <p class="mt-2 text-sm font-bold text-slate-800 truncate">${_esc(record.CompanyName)}</p>
+            <p class="text-xs text-slate-500 truncate">${_esc(record.Area || '-')} · ${_esc(record.InvolvedPerson || '-')}</p>
+            ${record.Description ? `<p class="text-xs text-slate-400 mt-1 line-clamp-1">${_esc(record.Description)}</p>` : ''}
+        </div>
+        <div class="flex items-center gap-2 flex-shrink-0">
+            <button class="btn-accident-detail px-3 py-2 rounded-lg text-xs font-semibold border border-slate-200 text-slate-600 hover:border-emerald-300 hover:text-emerald-700" data-id="${record.id}">Detail</button>
+            ${_state.isAdmin ? `
+            <button class="btn-edit-accident p-2 rounded-lg text-slate-400 hover:text-emerald-600 hover:bg-emerald-50" data-id="${record.id}" title="แก้ไข">
+                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"/></svg>
+            </button>
+            <button class="btn-delete-accident p-2 rounded-lg text-slate-400 hover:text-red-500 hover:bg-red-50" data-id="${record.id}" title="ลบ">
+                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg>
+            </button>` : ''}
+        </div>
+    </div>`;
+}
+
+function _incidentTypeClass(type) {
+    if (type === 'Accident') return 'bg-red-50 text-red-700';
+    if (type === 'Near Miss') return 'bg-amber-50 text-amber-700';
+    if (type === 'First Aid') return 'bg-blue-50 text-blue-700';
+    return 'bg-purple-50 text-purple-700';
+}
+
+function _showAccidentDetail(record) {
+    const files = record.Files || [];
+    const html = `
+    <div class="space-y-4">
+        <div class="grid grid-cols-2 gap-3">
+            ${_detailItem('วันที่เกิดเหตุ', record.IncidentDate ? new Date(record.IncidentDate).toLocaleDateString('th-TH') : '-')}
+            ${_detailItem('ประเภท', record.IncidentType)}
+            ${_detailItem('ประเภทบริษัท', record.PartyType || 'Contractor')}
+            ${_detailItem('บริษัท', record.CompanyName)}
+            ${_detailItem('ผู้บาดเจ็บ/ผู้เกี่ยวข้อง', record.InvolvedPerson || '-')}
+            ${_detailItem('พื้นที่เกิดเหตุ', record.Area || '-')}
+        </div>
+        <div>
+            <p class="text-xs font-bold uppercase text-slate-400 mb-1">รายละเอียดเหตุการณ์</p>
+            <div class="rounded-lg border border-slate-200 bg-slate-50 p-3 text-sm text-slate-700 whitespace-pre-wrap">${_esc(record.Description || '-')}</div>
+        </div>
+        <div>
+            <div class="flex items-center justify-between gap-2 mb-2">
+                <p class="text-xs font-bold uppercase text-slate-400">Attachments / Evidence</p>
+                <span class="text-xs text-slate-400">${files.length} file(s)</span>
+            </div>
+            ${files.length
+                ? `<div class="grid grid-cols-1 sm:grid-cols-2 gap-2">${files.map(file => `
+                    <div class="flex items-center gap-2 rounded-lg border border-slate-200 p-2 text-sm text-slate-600">
+                        <a href="${_esc(file.FileUrl)}" target="_blank" rel="noopener noreferrer"
+                           class="flex items-center gap-2 min-w-0 flex-1 hover:text-emerald-700">
+                            <svg class="w-4 h-4 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.586-6.586a4 4 0 00-5.657-5.657L5.757 10.757a6 6 0 108.486 8.486L21 12.486"/></svg>
+                            <span class="truncate">${_esc(file.FileName || file.FileUrl)}</span>
+                        </a>
+                        ${_state.isAdmin ? `
+                        <button type="button" class="btn-delete-accident-file p-1.5 rounded-md text-slate-400 hover:bg-red-50 hover:text-red-600" data-record-id="${record.id}" data-file-id="${file.id}" title="Delete file">
+                            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
+                        </button>` : ''}
+                    </div>`).join('')}</div>`
+                : `<div class="text-sm text-slate-400">ไม่มีไฟล์แนบ</div>`
+            }
+            ${_state.isAdmin ? `
+            <form id="accident-file-form" class="mt-3 rounded-lg border border-dashed border-slate-200 p-3">
+                <label class="block text-xs font-bold uppercase text-slate-400 mb-2">Add more files / เพิ่มไฟล์แนบ</label>
+                <div class="flex flex-col sm:flex-row gap-2">
+                    <input id="accident-file-input" name="files" type="file" multiple
+                           accept=".pdf,.doc,.docx,.xls,.xlsx,.jpg,.jpeg,.png,.webp"
+                           class="flex-1 px-3 py-2 rounded-lg border border-slate-200 text-sm bg-white">
+                    <button id="btn-add-accident-files" type="submit" class="px-4 py-2 rounded-lg text-sm font-semibold text-white bg-emerald-600 hover:bg-emerald-700">Upload</button>
+                </div>
+            </form>` : ''}
+        </div>
+    </div>`;
+    openModal('Accident Record Detail', html, 'max-w-2xl');
+    _bindAccidentFileForm(record.id);
+}
+
+function _bindAccidentFileForm(recordId) {
+    const form = document.getElementById('accident-file-form');
+    if (!form) return;
+    form.addEventListener('submit', guardSubmitHandler(async e => {
+        e.preventDefault();
+        const input = document.getElementById('accident-file-input');
+        if (!input?.files?.length) {
+            showToast('กรุณาเลือกไฟล์แนบ', 'warning');
+            return;
+        }
+        await _withSpinner('btn-add-accident-files', 'Uploading...', async () => {
+            await ContractorService.addAccidentFiles(recordId, new FormData(form));
+            showToast('เพิ่มไฟล์แนบสำเร็จ', 'success');
+            await _refreshAccidentData();
+            const latest = _state.accidents.find(item => String(item.id) === String(recordId));
+            if (latest) _showAccidentDetail(latest);
+        });
+    }));
+}
+
+function _showAccidentForm(record = null) {
+    const isEdit = !!record;
+    const html = `
+    <form id="contractor-accident-form" class="space-y-4" novalidate>
+        ${_formField('af-date', 'IncidentDate', 'date', 'วันที่เกิดเหตุ', true, '', 50, _toInputDate(record?.IncidentDate))}
+        <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            ${_formSelect('af-type', 'IncidentType', 'ประเภทเหตุการณ์', INCIDENT_TYPES, record?.IncidentType || 'Accident')}
+            ${_formSelect('af-party', 'PartyType', 'ประเภทบริษัท', PARTY_TYPES, record?.PartyType || 'Contractor')}
+        </div>
+        <div>
+            <label class="block text-sm font-semibold text-slate-700 mb-1.5">
+                บริษัทผู้รับเหมา/ซัพพลายเออร์ <span class="text-red-500">*</span>
+            </label>
+            <input type="text" id="af-company" name="CompanyName" value="${_esc(record?.CompanyName || '')}" placeholder="เลือกจาก master หรือพิมพ์ชื่อใหม่" maxlength="255" list="contractor-company-options"
+                   class="w-full px-3 py-2 rounded-lg border border-slate-200 text-sm focus:outline-none focus:border-emerald-400 focus:ring-2 focus:ring-emerald-100">
+            <datalist id="contractor-company-options">
+                ${_companyOptions(record?.PartyType || 'Contractor')}
+            </datalist>
+            <p id="af-company-err" class="text-xs text-red-500 mt-1 hidden"></p>
+            <p class="text-xs text-slate-400 mt-1">ถ้าไม่พบชื่อใน master สามารถพิมพ์ชื่อใหม่ได้ ระบบจะเพิ่มเข้า master อัตโนมัติ</p>
+        </div>
+        ${_formField('af-person', 'InvolvedPerson', 'text', 'ผู้บาดเจ็บ/ผู้เกี่ยวข้อง', false, 'ชื่อ หรือรายละเอียดผู้เกี่ยวข้อง', 255, _esc(record?.InvolvedPerson || ''))}
+        ${_formField('af-area', 'Area', 'text', 'พื้นที่เกิดเหตุ', false, 'เช่น Production Zone A', 255, _esc(record?.Area || ''))}
+        ${_formTextarea('af-desc', 'Description', 'รายละเอียดเหตุการณ์', 'อธิบายเหตุการณ์โดยสรุป...', _esc(record?.Description || ''))}
+        ${!isEdit ? `
+        <div>
+            <label class="block text-sm font-semibold text-slate-700 mb-1.5">เอกสาร/รูปภาพประกอบ</label>
+            <input id="af-files" name="files" type="file" multiple
+                   accept=".pdf,.doc,.docx,.xls,.xlsx,.jpg,.jpeg,.png,.webp"
+                   class="w-full px-3 py-2 rounded-lg border border-slate-200 text-sm bg-white">
+            <p class="text-xs text-slate-400 mt-1">เลือกได้หลายไฟล์ ขนาดสูงสุดตามระบบอัปโหลด</p>
+        </div>` : `<p class="text-xs text-amber-600 bg-amber-50 border border-amber-100 rounded-lg p-2">การแก้ไขรอบนี้ปรับข้อมูลหลักเท่านั้น ไฟล์แนบเดิมยังคงอยู่</p>`}
+        ${_formFooter('submit-accident-btn', isEdit ? 'บันทึก' : 'บันทึกเหตุการณ์')}
+    </form>`;
+
+    openModal(isEdit ? 'แก้ไข Accident Record' : 'บันทึก Accident Record', html, 'max-w-lg');
+    document.getElementById('contractor-accident-form').addEventListener('submit', guardSubmitHandler(async e => {
+        e.preventDefault();
+        const dateEl = document.getElementById('af-date');
+        const companyEl = document.getElementById('af-company');
+        if (!dateEl.value || !companyEl.value.trim()) {
+            showToast('กรุณากรอกวันที่เกิดเหตุและชื่อบริษัท', 'warning');
+            return;
+        }
+        await _withSpinner('submit-accident-btn', 'กำลังบันทึก...', async () => {
+            if (isEdit) {
+                await ContractorService.updateAccident(record.id, {
+                    IncidentDate: dateEl.value,
+                    IncidentType: document.getElementById('af-type').value,
+                    PartyType: document.getElementById('af-party').value,
+                    CompanyName: companyEl.value.trim(),
+                    InvolvedPerson: document.getElementById('af-person').value.trim(),
+                    Area: document.getElementById('af-area').value.trim(),
+                    Description: document.getElementById('af-desc').value.trim(),
+                });
+            } else {
+                await ContractorService.createAccident(new FormData(e.target));
+            }
+            closeModal();
+            showToast('บันทึก Accident Record สำเร็จ', 'success');
+            await _reload();
+        });
+    }));
+}
+
+async function _deleteAccident(id) {
+    showLoading('กำลังลบรายการ...');
+    try {
+        await ContractorService.removeAccident(id);
+        showToast('ลบรายการสำเร็จ', 'success');
+        await _reload();
+    } catch (err) {
+        showToast(err?.message || 'ลบรายการไม่สำเร็จ', 'error');
+    } finally {
+        hideLoading();
+    }
+}
+
+async function _deleteAccidentFile(fileId, recordId) {
+    showLoading('กำลังลบไฟล์แนบ...');
+    try {
+        await ContractorService.deleteAccidentFile(fileId);
+        showToast('ลบไฟล์แนบสำเร็จ', 'success');
+        await _refreshAccidentData();
+        const latest = _state.accidents.find(item => String(item.id) === String(recordId));
+        if (latest) _showAccidentDetail(latest);
+    } catch (err) {
+        showToast(err?.message || 'ลบไฟล์แนบไม่สำเร็จ', 'error');
+    } finally {
+        hideLoading();
+    }
+}
+
+async function _refreshAccidentData() {
+    _cache.del(`accidents:${_state.accidentYear}`, `accidentStats:${_state.accidentYear}`, 'activity');
+    await Promise.allSettled([
+        _loadAccidents(true),
+        _loadAccidentStats(true),
+        _loadActivity(true),
+    ]);
+    _renderHeroStats();
+    if (_state.activeTab === 'dashboard') _renderDashboard();
+    if (_state.activeTab === 'accidents') _renderAccidents();
+}
+
+async function _setAccidentYear(year) {
+    const parsed = parseInt(year, 10);
+    if (!parsed || parsed === _state.accidentYear) return;
+    _state.accidentYear = parsed;
+    await _refreshAccidentData();
+}
+
+function _detailItem(label, value) {
+    return `
+    <div class="rounded-lg border border-slate-200 bg-white p-3">
+        <p class="text-[10px] font-bold uppercase text-slate-400">${label}</p>
+        <p class="text-sm font-semibold text-slate-700 mt-1 break-words">${_esc(value || '-')}</p>
+    </div>`;
+}
+
+function _toInputDate(value) {
+    if (!value) return '';
+    const d = new Date(value);
+    if (Number.isNaN(d.getTime())) return String(value).slice(0, 10);
+    return d.toISOString().slice(0, 10);
+}
+
 // ═══════════════════════════════════════════════════════════════════════════════
 // DATA LOADING
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -791,6 +1371,9 @@ async function _loadAll(force = false) {
             _loadDocs(force),
             _loadStats(force),
             _loadActivity(force),
+            _loadCompanies(force),
+            _loadAccidents(force),
+            _loadAccidentStats(force),
         ]);
 
         anyFailed = results.some(r => r.status === 'rejected');
@@ -840,8 +1423,40 @@ async function _loadActivity(force = false) {
     _cache.set('activity', activity);
 }
 
+async function _loadCompanies(force = false) {
+    if (!force) {
+        const cached = _cache.get('companies');
+        if (cached) { _state.companies = cached; return; }
+    }
+    const companies = await ContractorService.getCompanies();
+    _state.companies = companies;
+    _cache.set('companies', companies);
+}
+
+async function _loadAccidents(force = false) {
+    const key = `accidents:${_state.accidentYear}`;
+    if (!force) {
+        const cached = _cache.get(key);
+        if (cached) { _state.accidents = cached; return; }
+    }
+    const accidents = await ContractorService.getAccidents(_state.accidentYear);
+    _state.accidents = accidents;
+    _cache.set(key, accidents);
+}
+
+async function _loadAccidentStats(force = false) {
+    const key = `accidentStats:${_state.accidentYear}`;
+    if (!force) {
+        const cached = _cache.get(key);
+        if (cached) { _state.accidentStats = cached; return; }
+    }
+    const stats = await ContractorService.getAccidentStats(_state.accidentYear);
+    _state.accidentStats = stats;
+    _cache.set(key, stats);
+}
+
 async function _reload() {
-    _cache.del('docs', 'stats', 'activity');
+    _cache.del('docs', 'stats', 'activity', 'companies', `accidents:${_state.accidentYear}`, `accidentStats:${_state.accidentYear}`);
     return _loadAll(true);
 }
 
@@ -849,7 +1464,7 @@ async function _reload() {
 // EVENT LISTENERS  — single delegated listener
 // ═══════════════════════════════════════════════════════════════════════════════
 function _setupEventListeners() {
-    document.addEventListener('click', async e => {
+    document.addEventListener('click', guardActionHandler(async e => {
         if (!e.target.closest('#contractor-page')) return;
 
         // Tab switch
@@ -882,10 +1497,28 @@ function _setupEventListeners() {
             return;
         }
 
+        if (e.target.closest('#btn-export-docs')) {
+            _exportDocuments();
+            return;
+        }
+
+        if (e.target.closest('#btn-export-accidents')) {
+            _exportAccidents();
+            return;
+        }
+
         // Clickable KPI card → filter by category
         const statCard = e.target.closest('.con-stat-card[data-filter-cat]');
         if (statCard) {
             _state.filter.category = statCard.dataset.filterCat;
+            _state.page = 1;
+            _activateTab('documents');
+            return;
+        }
+
+        const partyCard = e.target.closest('.con-stat-card[data-filter-party]');
+        if (partyCard) {
+            _state.filter.partyType = partyCard.dataset.filterParty;
             _state.page = 1;
             _activateTab('documents');
             return;
@@ -915,9 +1548,17 @@ function _setupEventListeners() {
             return;
         }
 
+        const viewBtn = e.target.closest('.doc-view-btn');
+        if (viewBtn?.dataset.docView) {
+            _state.docView = viewBtn.dataset.docView === 'list' ? 'list' : 'grid';
+            _state.page = 1;
+            _renderDocuments();
+            return;
+        }
+
         // Clear filters
         if (e.target.closest('#btn-clear-filter')) {
-            _state.filter = { category: 'all', query: '', dateFrom: '', dateTo: '', sortBy: 'newest' };
+            _state.filter = { category: 'all', partyType: 'all', query: '', dateFrom: '', dateTo: '', sortBy: 'newest' };
             _state.page   = 1;
             _renderDocuments();
             return;
@@ -928,7 +1569,7 @@ function _setupEventListeners() {
         if (pageBtn?.dataset.page) {
             _state.page = parseInt(pageBtn.dataset.page);
             const grid  = document.getElementById('doc-grid');
-            if (grid) { grid.innerHTML = _buildDocGridContent(); grid.scrollIntoView({ behavior: 'smooth', block: 'start' }); }
+            if (grid) { grid.className = _docContainerClass(); grid.innerHTML = _buildDocGridContent(); grid.scrollIntoView({ behavior: 'smooth', block: 'start' }); }
             return;
         }
 
@@ -939,7 +1580,7 @@ function _setupEventListeners() {
         // Edit
         const editBtn = e.target.closest('.btn-edit-doc');
         if (editBtn) {
-            _showEditForm({ id: editBtn.dataset.id, Title: editBtn.dataset.title, Category: editBtn.dataset.cat, Description: editBtn.dataset.desc });
+            _showEditForm({ id: editBtn.dataset.id, Title: editBtn.dataset.title, PartyType: editBtn.dataset.party, Category: editBtn.dataset.cat, Description: editBtn.dataset.desc });
             return;
         }
 
@@ -950,7 +1591,40 @@ function _setupEventListeners() {
             if (ok) await _deleteDocument(deleteBtn.dataset.id);
             return;
         }
-    });
+
+        if (e.target.closest('#btn-add-accident')) {
+            _showAccidentForm();
+            return;
+        }
+
+        const accidentDetailBtn = e.target.closest('.btn-accident-detail');
+        if (accidentDetailBtn) {
+            const record = _state.accidents.find(item => String(item.id) === String(accidentDetailBtn.dataset.id));
+            if (record) _showAccidentDetail(record);
+            return;
+        }
+
+        const accidentEditBtn = e.target.closest('.btn-edit-accident');
+        if (accidentEditBtn) {
+            const record = _state.accidents.find(item => String(item.id) === String(accidentEditBtn.dataset.id));
+            if (record) _showAccidentForm(record);
+            return;
+        }
+
+        const accidentDeleteBtn = e.target.closest('.btn-delete-accident');
+        if (accidentDeleteBtn) {
+            const ok = await showConfirmationModal('ยืนยันการลบ', 'ต้องการลบรายการ Accident Record นี้ใช่หรือไม่?');
+            if (ok) await _deleteAccident(accidentDeleteBtn.dataset.id);
+            return;
+        }
+
+        const accidentFileDeleteBtn = e.target.closest('.btn-delete-accident-file');
+        if (accidentFileDeleteBtn) {
+            const ok = await showConfirmationModal('ยืนยันการลบไฟล์', 'ต้องการลบไฟล์แนบนี้ใช่หรือไม่?');
+            if (ok) await _deleteAccidentFile(accidentFileDeleteBtn.dataset.fileId, accidentFileDeleteBtn.dataset.recordId);
+            return;
+        }
+    }, delegatedActionOptions('contractor')));
 
     // Search debounce
     document.addEventListener('input', _debounce(e => {
@@ -963,9 +1637,21 @@ function _setupEventListeners() {
     // Sort + date change
     document.addEventListener('change', e => {
         if (e.target.matches('#doc-sort'))      { _state.filter.sortBy  = e.target.value; _refreshDocGrid(); }
+        if (e.target.matches('#doc-party'))     { _state.filter.partyType = e.target.value; _refreshDocGrid(); }
         if (e.target.matches('#doc-date-from')) { _state.filter.dateFrom = e.target.value; _refreshDocGrid(); }
         if (e.target.matches('#doc-date-to'))   { _state.filter.dateTo   = e.target.value; _refreshDocGrid(); }
+        if (e.target.matches('#accident-type')) { _state.accidentFilter.type = e.target.value; _renderAccidents(); }
+        if (e.target.matches('#accident-party')) { _state.accidentFilter.partyType = e.target.value; _renderAccidents(); }
+        if (e.target.matches('#accident-year') || e.target.matches('#dashboard-accident-year')) { _setAccidentYear(e.target.value); }
+        if (e.target.matches('#af-party')) { _refreshCompanyOptions(e.target.value); }
     });
+
+    document.addEventListener('input', _debounce(e => {
+        if (e.target.matches('#accident-search')) {
+            _state.accidentFilter.query = e.target.value;
+            _renderAccidents();
+        }
+    }, 300));
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -975,6 +1661,7 @@ function _showUploadForm() {
     const html = `
         <form id="contractor-upload-form" class="space-y-4" novalidate>
             ${_formField('uf-title', 'Title', 'text', 'ชื่อเอกสาร', true, 'เช่น ระเบียบปฏิบัติสำหรับผู้รับเหมา 2568', 255)}
+            ${_formSelect('uf-party', 'PartyType', 'ประเภทเอกสาร / Party', PARTY_TYPES, 'Contractor')}
             ${_formSelect('uf-cat', 'Category', 'หมวดหมู่', CATEGORIES)}
             ${_formTextarea('uf-desc', 'Description', 'คำอธิบาย (ไม่บังคับ)', 'รายละเอียดเพิ่มเติม...')}
             <div>
@@ -1001,10 +1688,10 @@ function _showUploadForm() {
             ${_formFooter('submit-upload-btn', 'อัปโหลด')}
         </form>`;
 
-    openModal('อัปโหลดเอกสาร Contractor', html, 'max-w-lg');
+    openModal('อัปโหลดเอกสาร Contractor / Supplier', html, 'max-w-lg');
     _initDropZone();
 
-    document.getElementById('contractor-upload-form').addEventListener('submit', async e => {
+    document.getElementById('contractor-upload-form').addEventListener('submit', guardSubmitHandler(async e => {
         e.preventDefault();
         if (!_validateUploadForm()) return;
         await _withSpinner('submit-upload-btn', 'กำลังอัปโหลด...', async () => {
@@ -1013,7 +1700,7 @@ function _showUploadForm() {
             showToast('อัปโหลดเอกสารสำเร็จ', 'success');
             await _reload();
         });
-    });
+    }));
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -1023,6 +1710,7 @@ function _showEditForm(doc) {
     const html = `
         <form id="contractor-edit-form" class="space-y-4" novalidate>
             ${_formField('ef-title', 'Title', 'text', 'ชื่อเอกสาร', true, '', 255, _esc(doc.Title))}
+            ${_formSelect('ef-party', 'PartyType', 'ประเภทเอกสาร / Party', PARTY_TYPES, doc.PartyType || 'Contractor')}
             ${_formSelect('ef-cat', 'Category', 'หมวดหมู่', CATEGORIES, doc.Category)}
             ${_formTextarea('ef-desc', 'Description', 'คำอธิบาย', '', _esc(doc.Description || ''))}
             ${_formFooter('submit-edit-btn', 'บันทึก')}
@@ -1030,7 +1718,7 @@ function _showEditForm(doc) {
 
     openModal('แก้ไขเอกสาร', html, 'max-w-md');
 
-    document.getElementById('contractor-edit-form').addEventListener('submit', async e => {
+    document.getElementById('contractor-edit-form').addEventListener('submit', guardSubmitHandler(async e => {
         e.preventDefault();
         const titleEl  = document.getElementById('ef-title');
         const titleErr = document.getElementById('ef-title-err');
@@ -1043,6 +1731,7 @@ function _showEditForm(doc) {
         await _withSpinner('submit-edit-btn', 'บันทึก...', async () => {
             await ContractorService.update(doc.id, {
                 Title:       titleEl.value.trim(),
+                PartyType:   document.getElementById('ef-party').value,
                 Category:    document.getElementById('ef-cat').value,
                 Description: document.getElementById('ef-desc').value.trim(),
             });
@@ -1050,7 +1739,7 @@ function _showEditForm(doc) {
             showToast('บันทึกข้อมูลสำเร็จ', 'success');
             await _reload();
         });
-    });
+    }));
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -1265,6 +1954,85 @@ function _toDateStr(val) {
     const d = new Date(val);
     return isNaN(d) ? String(val).slice(0, 10)
         : `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
+
+function _yearOptions(selected) {
+    const current = new Date().getFullYear();
+    const years = new Set([current, current - 1, current - 2, selected]);
+    return [...years]
+        .filter(Boolean)
+        .sort((a, b) => b - a)
+        .map(year => `<option value="${year}" ${Number(year) === Number(selected) ? 'selected' : ''}>${year}</option>`)
+        .join('');
+}
+
+function _companyOptions(partyType = 'Contractor') {
+    return _state.companies
+        .filter(company => !partyType || company.PartyType === partyType)
+        .map(company => `<option value="${_esc(company.CompanyName)}">${_esc(company.PartyType || '')}</option>`)
+        .join('');
+}
+
+function _refreshCompanyOptions(partyType) {
+    const list = document.getElementById('contractor-company-options');
+    if (list) list.innerHTML = _companyOptions(partyType);
+}
+
+function _exportDocuments() {
+    const rows = _getFilteredDocs().map(doc => ({
+        Title: doc.Title,
+        PartyType: doc.PartyType || 'Contractor',
+        Category: doc.Category,
+        Description: doc.Description || '',
+        FileType: doc.FileType || '',
+        FileSize: doc.FileSize || '',
+        UploadedBy: doc.UploadedBy || '',
+        UploadedAt: _toDateStr(doc.UploadedAt),
+        FileUrl: doc.FileUrl || '',
+    }));
+    _downloadCsv(`contractor-supplier-documents-${_toDateStr(new Date())}.csv`, rows);
+}
+
+function _exportAccidents() {
+    const rows = _getFilteredAccidents().map(record => ({
+        IncidentDate: _toDateStr(record.IncidentDate),
+        IncidentType: record.IncidentType,
+        PartyType: record.PartyType || 'Contractor',
+        CompanyName: record.CompanyName,
+        InvolvedPerson: record.InvolvedPerson || '',
+        Area: record.Area || '',
+        Description: record.Description || '',
+        AttachmentCount: (record.Files || []).length,
+        CreatedBy: record.CreatedBy || '',
+        CreatedAt: _toDateStr(record.CreatedAt),
+    }));
+    _downloadCsv(`contractor-supplier-accidents-${_state.accidentYear}.csv`, rows);
+}
+
+function _downloadCsv(filename, rows) {
+    if (!rows.length) {
+        showToast('ไม่มีข้อมูลสำหรับ Export', 'warning');
+        return;
+    }
+    const headers = Object.keys(rows[0]);
+    const csv = [
+        headers.join(','),
+        ...rows.map(row => headers.map(header => _csvCell(row[header])).join(',')),
+    ].join('\r\n');
+    const blob = new Blob([`\uFEFF${csv}`], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+}
+
+function _csvCell(value) {
+    const text = String(value ?? '').replace(/"/g, '""');
+    return /[",\r\n]/.test(text) ? `"${text}"` : text;
 }
 
 function _debounce(fn, ms) {

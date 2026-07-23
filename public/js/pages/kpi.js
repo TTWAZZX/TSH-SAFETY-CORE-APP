@@ -1,11 +1,13 @@
+import { delegatedActionOptions, guardActionHandler } from '../utils/async-ui.js?v=20260715-phase32d-remaining-async-ux';
 import { API } from '../api.js';
-import { hideLoading, showLoading, showError, showToast, openModal, closeModal, showConfirmationModal, showDocumentModal, escHtml } from '../ui.js';
+import { hideLoading, showLoading, showError, showToast, openModal, closeModal, showConfirmationModal, showDocumentModal, escHtml } from '../ui.js?v=20260602-mobile-nav-m53';
 
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 
 let chartInstances = {};
 let allKpiDataForYear = [];
 let currentAnnouncementId = null;
+let currentKpiAnnouncement = null;
 let kpiEventListenersAttached = false;
 let _availableYears = [];
 let _selectedYear = null;
@@ -14,8 +16,14 @@ let _filterDept = 'all';
 let _filterStatus = 'all';
 let _filterSearch = '';
 let _tableChanges = {}; // { id: { Jan: 5, ... } }
+let kpiMasterOrgOptions = [];
+let kpiMasterLoaded = false;
+let _accidentMonthlyReports = [];
 
 // ─── helpers ────────────────────────────────────────────────────────────────
+const getAnnouncementId = (ann) => ann?.id ?? ann?.AnnouncementID ?? '';
+const kpiAnnouncementItemUrl = (id) => `/kpiannouncements/item?id=${encodeURIComponent(id)}`;
+
 function getIsAdmin() {
     const cu = TSHSession.getUser();
     if (!cu) return false;
@@ -85,6 +93,200 @@ function calcForecast(kpi) {
     return Math.round(sum * 10) / 10;
 }
 
+async function handleExportPdf() {
+    if (!window.html2canvas || !window.jspdf) { showToast('ไลบรารี PDF ยังโหลดไม่เสร็จ', 'error'); return; }
+    showLoading('กำลังสร้าง PDF...');
+    let holder;
+    try {
+        const rows = getFilteredData();
+        const total = rows.length;
+        const onTrack = rows.filter(k => calcKpiStatus(k) === 'ok').length;
+        const offTrack = rows.filter(k => calcKpiStatus(k) === 'over').length;
+        const noData = rows.filter(k => calcKpiStatus(k) === 'nodata').length;
+        const measured = Math.max(1, total - noData);
+        const compliance = total > 0 ? Math.round((onTrack / measured) * 100) : 0;
+        const composite = calcCompositeScore(rows);
+        const generatedAt = new Date().toLocaleDateString('th-TH', { dateStyle: 'medium' });
+        const scopeText = [
+            `FY ${_selectedYear}`,
+            _filterDept !== 'all' ? _filterDept : 'All departments',
+            _filterStatus !== 'all' ? _filterStatus : 'All status',
+        ].join(' / ');
+        const reportHealth = compliance >= 85 ? 'Stable' : compliance >= 70 ? 'Watch' : 'Action';
+        const healthColor = reportHealth === 'Stable' ? '#059669' : reportHealth === 'Watch' ? '#d97706' : '#dc2626';
+        const denseRegister = total > 18;
+        const statusMeta = {
+            ok: { label: 'On Track', color: '#059669', bg: '#d1fae5' },
+            over: { label: 'Off Track', color: '#dc2626', bg: '#fee2e2' },
+            nodata: { label: 'No Data', color: '#64748b', bg: '#f1f5f9' },
+        };
+        const deptSummary = Array.from(rows.reduce((map, k) => {
+            const dept = k.Department || 'General';
+            const item = map.get(dept) || { dept, total: 0, ok: 0, over: 0, nodata: 0 };
+            const status = calcKpiStatus(k);
+            item.total += 1;
+            if (status === 'ok') item.ok += 1;
+            else if (status === 'over') item.over += 1;
+            else item.nodata += 1;
+            map.set(dept, item);
+            return map;
+        }, new Map()).values()).map(d => {
+            const measuredDept = Math.max(1, d.total - d.nodata);
+            return { ...d, compliance: Math.round((d.ok / measuredDept) * 100) };
+        }).sort((a, b) => b.over - a.over || a.compliance - b.compliance || b.total - a.total);
+        const priorityRows = rows
+            .filter(k => calcKpiStatus(k) === 'over')
+            .sort((a, b) => (parseFloat(b.Weight) || 1) - (parseFloat(a.Weight) || 1))
+            .slice(0, 4);
+
+        const fmt = v => Number.isFinite(Number(v)) ? Number(v).toLocaleString(undefined, { maximumFractionDigits: 1 }).replace(/\.0$/, '') : '-';
+        const bar = (pct, color = '#059669', h = 6) => `<div style="height:${h}px;background:#e2e8f0;border-radius:999px;overflow:hidden"><div style="height:100%;width:${Math.max(0, Math.min(100, pct))}%;background:${color};border-radius:999px"></div></div>`;
+        const card = (label, value, color = '#065f46') => `
+            <div style="border:1px solid #e2e8f0;border-radius:9px;background:#fff;padding:8px;text-align:center;min-height:60px;overflow:hidden">
+                <div style="font-size:20px;font-weight:900;color:${color};line-height:1.08;">${escHtml(String(value))}</div>
+                <div style="font-size:8.2px;color:#475569;font-weight:900;margin-top:4px;line-height:1.12;">${label}</div>
+            </div>`;
+        const sectionTitle = (title, sub = '') => `
+            <div style="display:flex;align-items:flex-end;justify-content:space-between;border-bottom:1px solid #dbeafe;padding-bottom:5px;margin-bottom:7px">
+                <div><h2 style="font-size:11.6px;font-weight:900;color:#065f46;margin:0">${title}</h2>${sub ? `<p style="font-size:7.8px;color:#64748b;margin:1px 0 0">${sub}</p>` : ''}</div>
+            </div>`;
+        const header = `
+            <div style="background:#065f46;color:#fff;padding:13px 24px;display:flex;justify-content:space-between;gap:18px;flex-shrink:0">
+                <div style="min-width:0;max-width:560px">
+                    <div style="font-size:9px;font-weight:900;letter-spacing:.08em;text-transform:uppercase;color:#a7f3d0;">Official Safety KPI Report</div>
+                    <div style="font-size:17px;font-weight:900;margin-top:4px;line-height:1.12;word-break:break-word;">${escHtml(currentKpiAnnouncement?.AnnouncementTitle || `KPI Overview ${_selectedYear}`)}</div>
+                    <div style="font-size:9.2px;color:#d1fae5;margin-top:3px;line-height:1.2;word-break:break-word;">${escHtml(scopeText)}</div>
+                </div>
+                <div style="text-align:right;font-size:8.4px;color:#d1fae5;line-height:1.42;white-space:nowrap;">
+                    <div>Thai Summit Harness Co., Ltd.</div>
+                    <div>Generated ${generatedAt}</div>
+                    <div>Page 1 / 1</div>
+                    <div>Classification: Internal Use Only</div>
+                </div>
+            </div>`;
+        const footer = `
+            <div style="margin-top:auto;padding:7px 24px;background:#f8fafc;border-top:1px solid #e2e8f0;display:flex;justify-content:space-between;color:#64748b;font-size:8px;flex-shrink:0">
+                <span>Safety KPI Report - Thai Summit Harness Co., Ltd.</span>
+                <span>Page 1 / 1</span>
+            </div>`;
+        const deptPanel = deptSummary.slice(0, 4).map(d => `
+            <div style="margin-bottom:5px;break-inside:avoid">
+                <div style="display:flex;justify-content:space-between;gap:8px;font-size:8px;margin-bottom:2px">
+                    <b style="color:#334155;line-height:1.2;word-break:break-word">${escHtml(d.dept)}</b>
+                    <span style="font-weight:900;color:${d.over ? '#dc2626' : '#059669'}">${d.compliance}%</span>
+                </div>
+                ${bar(d.compliance, d.over ? '#d97706' : '#059669', 5)}
+                <div style="font-size:6.8px;color:#94a3b8;margin-top:2px">Total ${d.total} - On ${d.ok} - Off ${d.over} - No data ${d.nodata}</div>
+            </div>`).join('');
+        const priorityPanel = priorityRows.length ? priorityRows.map((k, idx) => {
+            const trend = getTrendInfo(k);
+            return `<div style="display:grid;grid-template-columns:16px minmax(0,1fr) 46px;gap:7px;padding:4px 0;border-bottom:1px solid #e2e8f0;font-size:7.6px">
+                <b style="color:#dc2626;text-align:center">${idx + 1}</b>
+                <div style="min-width:0"><b style="color:#334155;line-height:1.2;word-break:break-word">${escHtml(k.Metric || '-')}</b><div style="color:#64748b;margin-top:1px">${escHtml(k.Department || 'General')}</div></div>
+                <div style="text-align:right;color:#dc2626;font-weight:900">${trend ? `${trend.dir} ${trend.pct}%` : `YTD ${fmt(calcYtdSum(k))}`}</div>
+            </div>`;
+        }).join('') : `<div style="font-size:9px;color:#059669;text-align:center;padding:12px;font-weight:900">No off-track KPI in current scope</div>`;
+        const table = () => `
+            <table style="width:100%;border-collapse:collapse;font-size:${denseRegister ? '7.2px' : '7.8px'};border:1px solid #e2e8f0;">
+                <thead><tr style="background:#065f46;color:#fff;">
+                    <th style="padding:4px;text-align:center;width:27px;">No.</th>
+                    <th style="padding:4px;text-align:left;">Metric</th>
+                    <th style="padding:4px;text-align:left;width:100px;">Department</th>
+                    <th style="padding:4px;text-align:right;width:50px;">Target</th>
+                    <th style="padding:4px;text-align:right;width:50px;">YTD</th>
+                    <th style="padding:4px;text-align:right;width:40px;">W</th>
+                    <th style="padding:4px;text-align:center;width:68px;">Status</th>
+                </tr></thead>
+                <tbody>${rows.length ? rows.map((k, idx) => {
+                    const status = calcKpiStatus(k);
+                    const meta = statusMeta[status] || statusMeta.nodata;
+                    const ytd = calcYtdSum(k);
+                    return `<tr style="background:${idx % 2 ? '#fff' : '#f8fafc'};">
+                        <td style="padding:3px 4px;border-bottom:1px solid #e2e8f0;text-align:center;color:#64748b;">${idx + 1}</td>
+                        <td style="padding:3px 4px;border-bottom:1px solid #e2e8f0;color:#1e293b;font-weight:800;line-height:1.16;word-break:break-word">${escHtml(k.Metric || '-')}</td>
+                        <td style="padding:3px 4px;border-bottom:1px solid #e2e8f0;color:#475569;line-height:1.16;word-break:break-word">${escHtml(k.Department || '-')}</td>
+                        <td style="padding:3px 4px;border-bottom:1px solid #e2e8f0;text-align:right;color:#475569;">${escHtml(k.Target ?? '-')}</td>
+                        <td style="padding:3px 4px;border-bottom:1px solid #e2e8f0;text-align:right;font-weight:900;color:#1e293b;">${fmt(ytd)}</td>
+                        <td style="padding:3px 4px;border-bottom:1px solid #e2e8f0;text-align:right;color:#64748b;">${escHtml(k.Weight ?? 1)}</td>
+                        <td style="padding:3px 4px;border-bottom:1px solid #e2e8f0;text-align:center;">
+                            <span style="display:inline-block;border-radius:999px;padding:1px 5px;background:${meta.bg};color:${meta.color};font-size:6.8px;font-weight:900;white-space:nowrap;">${meta.label}</span>
+                        </td>
+                    </tr>`;
+                }).join('') : `<tr><td colspan="7" style="padding:28px;text-align:center;color:#94a3b8;">No KPI records in current scope</td></tr>`}</tbody>
+            </table>`;
+
+        const page = `
+            <div class="kpi-pdf-page" style="width:794px;height:1122px;background:#fff;font-family:Kanit,Arial,sans-serif;color:#1e293b;display:flex;flex-direction:column;overflow:hidden;">
+                ${header}
+                <div class="kpi-pdf-content" style="flex:1;padding:12px 18px 9px;overflow:hidden;min-height:0">
+                    <div class="kpi-pdf-content-inner" style="display:flex;flex-direction:column;gap:8px;transform-origin:top left;">
+                        ${sectionTitle('1. Report Summary / ภาพรวม KPI', 'สรุปสถานะ KPI ตาม scope และ filter ปัจจุบัน')}
+                        <div style="display:grid;grid-template-columns:repeat(6,1fr);gap:6px;">
+                            ${card('Total KPI', total, '#065f46')}
+                            ${card('On Track', onTrack, '#059669')}
+                            ${card('Off Track', offTrack, '#dc2626')}
+                            ${card('No Data', noData, '#64748b')}
+                            ${card('Compliance', `${compliance}%`, compliance >= 85 ? '#059669' : compliance >= 70 ? '#d97706' : '#dc2626')}
+                            ${card('Composite', composite == null ? '-' : `${composite}%`, composite == null ? '#64748b' : composite >= 80 ? '#059669' : '#d97706')}
+                        </div>
+                        <div style="display:grid;grid-template-columns:1.08fr .92fr;gap:8px">
+                            <div style="border:1px solid #e2e8f0;border-radius:10px;padding:9px;background:#f8fafc">
+                                <div style="font-size:10.6px;font-weight:900;color:#065f46;margin-bottom:5px">Report Health</div>
+                                <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:8px">
+                                    <div style="font-size:20px;font-weight:900;line-height:1.14;color:${healthColor}">${reportHealth}</div>
+                                    <div style="font-size:7.5px;color:#64748b;text-align:right;line-height:1.25">Measured ${measured}<br>Scope ${escHtml(scopeText)}</div>
+                                </div>
+                                ${bar(compliance, healthColor, 6)}
+                                <div style="font-size:7.8px;color:#475569;line-height:1.35;margin-top:6px">On-track ratio is ${compliance}% from measured KPI rows. Weighted composite score is ${composite == null ? '-' : composite + '%'}.</div>
+                            </div>
+                            <div style="border:1px solid #e2e8f0;border-radius:10px;padding:9px">${sectionTitle('2. Priority Off-track', 'KPI ที่ควรติดตามก่อน')}${priorityPanel}</div>
+                        </div>
+                        <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
+                            <div style="border:1px solid #e2e8f0;border-radius:10px;padding:9px">${sectionTitle('3. Department Focus', 'สถานะตามแผนก / หน่วยงาน')}${deptPanel || '<div style="font-size:10px;color:#94a3b8;text-align:center;padding:18px">No department data</div>'}</div>
+                            <div style="border:1px solid #e2e8f0;border-radius:10px;padding:9px;background:#f0fdf4">
+                                <div style="font-size:10.6px;font-weight:900;color:#065f46;margin-bottom:5px">4. Follow-up Notes</div>
+                                <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px;font-size:7.4px;color:#334155;line-height:1.3">
+                                    <div><b style="color:#dc2626">Off-track</b><br>Review owner, trend and action plan for red KPI rows.</div>
+                                    <div><b style="color:#d97706">No data</b><br>Complete monthly actual values before management review.</div>
+                                    <div><b style="color:#0f766e">Control</b><br>Keep evidence and month-to-month monitoring aligned with the KPI announcement.</div>
+                                </div>
+                            </div>
+                        </div>
+                        <div style="font-size:11.8px;font-weight:900;color:#065f46;border-bottom:2px solid #d1fae5;padding-bottom:5px;margin-top:1px;">
+                            5. KPI Register (${total ? `1-${total}` : '0'} / ${total})
+                        </div>
+                        ${table()}
+                    </div>
+                </div>
+                ${footer}
+            </div>`;
+
+        holder = document.createElement('div');
+        holder.style.cssText = 'position:fixed;left:-10000px;top:0;width:794px;background:#fff;z-index:-1;';
+        holder.innerHTML = page;
+        document.body.appendChild(holder);
+        holder.querySelectorAll('.kpi-pdf-content').forEach(content => {
+            const inner = content.querySelector('.kpi-pdf-content-inner');
+            if (!inner) return;
+            const scale = Math.min(1.3, Math.max(0.72, content.clientHeight / Math.max(1, inner.scrollHeight)));
+            inner.style.transform = `scale(${scale})`;
+            inner.style.width = `${100 / scale}%`;
+        });
+
+        const { jsPDF } = window.jspdf;
+        const pdf = new jsPDF('p', 'mm', 'a4');
+        const pageEl = holder.querySelector('.kpi-pdf-page');
+        const canvas = await window.html2canvas(pageEl, { scale: 1.5, backgroundColor: '#ffffff', useCORS: true, logging: false });
+        pdf.addImage(canvas.toDataURL('image/jpeg', 0.94), 'JPEG', 0, 0, 210, 297);
+        pdf.save(`KPI_Report_${_selectedYear}.pdf`);
+        showToast('ส่งออก PDF สำเร็จ', 'success');
+    } catch (err) { showError(err); }
+    finally {
+        if (holder?.parentNode) holder.parentNode.removeChild(holder);
+        hideLoading();
+    }
+}
+
 function calcCompositeScore(kpiData) {
     const relevant = kpiData.filter(k => calcKpiStatus(k) !== 'nodata');
     if (relevant.length === 0) return null;
@@ -93,28 +295,201 @@ function calcCompositeScore(kpiData) {
     return totalW > 0 ? Math.round((passW / totalW) * 100) : 0;
 }
 
-async function handleExportPdf() {
+async function handleExportPdfPaged() {
     if (!window.html2canvas || !window.jspdf) { showToast('ไลบรารี PDF ยังโหลดไม่เสร็จ', 'error'); return; }
     showLoading('กำลังสร้าง PDF...');
+    let holder;
     try {
-        const el = document.getElementById('kpi-page');
-        const canvas = await window.html2canvas(el, { scale: 1.5, backgroundColor: '#f8fafc', useCORS: true, logging: false });
-        const imgData = canvas.toDataURL('image/png');
+        const rows = getFilteredData();
+        const total = rows.length;
+        const onTrack = rows.filter(k => calcKpiStatus(k) === 'ok').length;
+        const offTrack = rows.filter(k => calcKpiStatus(k) === 'over').length;
+        const noData = rows.filter(k => calcKpiStatus(k) === 'nodata').length;
+        const measured = Math.max(1, total - noData);
+        const compliance = total > 0 ? Math.round((onTrack / measured) * 100) : 0;
+        const composite = calcCompositeScore(rows);
+        const generatedAt = new Date().toLocaleDateString('th-TH', { dateStyle: 'medium' });
+        const scopeText = [
+            `FY ${_selectedYear}`,
+            _filterDept !== 'all' ? _filterDept : 'All departments',
+            _filterStatus !== 'all' ? _filterStatus : 'All status',
+        ].join(' / ');
+        const reportHealth = compliance >= 85 ? 'Stable' : compliance >= 70 ? 'Watch' : 'Action';
+        const healthColor = reportHealth === 'Stable' ? '#059669' : reportHealth === 'Watch' ? '#d97706' : '#dc2626';
+
+        const statusMeta = {
+            ok: { label: 'On Track', color: '#059669', bg: '#d1fae5' },
+            over: { label: 'Off Track', color: '#dc2626', bg: '#fee2e2' },
+            nodata: { label: 'No Data', color: '#64748b', bg: '#f1f5f9' },
+        };
+        const deptSummary = Array.from(rows.reduce((map, k) => {
+            const dept = k.Department || 'General';
+            const item = map.get(dept) || { dept, total: 0, ok: 0, over: 0, nodata: 0 };
+            const status = calcKpiStatus(k);
+            item.total += 1;
+            if (status === 'ok') item.ok += 1;
+            else if (status === 'over') item.over += 1;
+            else item.nodata += 1;
+            map.set(dept, item);
+            return map;
+        }, new Map()).values()).map(d => {
+            const measuredDept = Math.max(1, d.total - d.nodata);
+            return { ...d, compliance: Math.round((d.ok / measuredDept) * 100) };
+        }).sort((a, b) => b.over - a.over || a.compliance - b.compliance || b.total - a.total);
+        const priorityRows = rows
+            .filter(k => calcKpiStatus(k) === 'over')
+            .sort((a, b) => (parseFloat(b.Weight) || 1) - (parseFloat(a.Weight) || 1))
+            .slice(0, 4);
+
+        const pageItems = [];
+        const firstRows = rows.slice(0, 4);
+        pageItems.push({ rows: firstRows, start: 0 });
+        for (let i = firstRows.length; i < rows.length; i += 16) pageItems.push({ rows: rows.slice(i, i + 16), start: i });
+        if (!pageItems.length) pageItems.push({ rows: [], start: 0 });
+        const totalPages = pageItems.length;
+
+        const fmt = v => Number.isFinite(Number(v)) ? Number(v).toLocaleString(undefined, { maximumFractionDigits: 1 }).replace(/\.0$/, '') : '-';
+        const bar = (pct, color = '#059669', h = 7) => `<div style="height:${h}px;background:#e2e8f0;border-radius:999px;overflow:hidden"><div style="height:100%;width:${Math.max(0, Math.min(100, pct))}%;background:${color};border-radius:999px"></div></div>`;
+        const card = (label, value, color = '#065f46', sub = '') => `
+            <div style="border:1px solid #e2e8f0;border-radius:10px;background:#fff;padding:9px;text-align:center;min-height:68px;overflow:hidden">
+                <div style="font-size:21px;font-weight:900;color:${color};line-height:1.12;">${escHtml(String(value))}</div>
+                <div style="font-size:8.4px;color:#475569;font-weight:900;margin-top:5px;line-height:1.15;">${label}</div>
+                ${sub ? `<div style="font-size:7.6px;color:#94a3b8;margin-top:2px">${escHtml(sub)}</div>` : ''}
+            </div>`;
+        const sectionTitle = (title, sub = '') => `
+            <div style="display:flex;align-items:flex-end;justify-content:space-between;border-bottom:1px solid #dbeafe;padding-bottom:7px;margin-bottom:10px">
+                <div><h2 style="font-size:14px;font-weight:900;color:#065f46;margin:0">${title}</h2>${sub ? `<p style="font-size:9.2px;color:#64748b;margin:2px 0 0">${sub}</p>` : ''}</div>
+            </div>`;
+        const header = (pageNo) => `
+            <div style="background:#065f46;color:#fff;padding:17px 28px;display:flex;justify-content:space-between;gap:20px;flex-shrink:0">
+                <div style="min-width:0;max-width:560px">
+                    <div style="font-size:10px;font-weight:900;letter-spacing:.08em;text-transform:uppercase;color:#a7f3d0;">Official Safety KPI Report</div>
+                    <div style="font-size:20px;font-weight:900;margin-top:5px;line-height:1.18;word-break:break-word;">${escHtml(currentKpiAnnouncement?.AnnouncementTitle || `KPI Overview ${_selectedYear}`)}</div>
+                    <div style="font-size:10.5px;color:#d1fae5;margin-top:4px;line-height:1.25;word-break:break-word;">${escHtml(scopeText)}</div>
+                </div>
+                <div style="text-align:right;font-size:9.2px;color:#d1fae5;line-height:1.55;white-space:nowrap;">
+                    <div>Thai Summit Harness Co., Ltd.</div>
+                    <div>Generated ${generatedAt}</div>
+                    <div>Page ${pageNo} / ${totalPages}</div>
+                    <div>Classification: Internal Use Only</div>
+                </div>
+            </div>`;
+        const footer = (pageNo) => `
+            <div style="margin-top:auto;padding:8px 28px;background:#f8fafc;border-top:1px solid #e2e8f0;display:flex;justify-content:space-between;color:#64748b;font-size:8.8px;flex-shrink:0">
+                <span>Safety KPI Report - Thai Summit Harness Co., Ltd.</span>
+                <span>Page ${pageNo} / ${totalPages}</span>
+            </div>`;
+        const deptPanel = deptSummary.slice(0, 4).map(d => `
+            <div style="margin-bottom:7px;break-inside:avoid">
+                <div style="display:flex;justify-content:space-between;gap:8px;font-size:8.8px;margin-bottom:3px">
+                    <b style="color:#334155;line-height:1.2;word-break:break-word">${escHtml(d.dept)}</b>
+                    <span style="font-weight:900;color:${d.over ? '#dc2626' : '#059669'}">${d.compliance}%</span>
+                </div>
+                ${bar(d.compliance, d.over ? '#d97706' : '#059669', 6)}
+                <div style="font-size:7.4px;color:#94a3b8;margin-top:2px">Total ${d.total} · On ${d.ok} · Off ${d.over} · No data ${d.nodata}</div>
+            </div>`).join('');
+        const priorityPanel = priorityRows.length ? priorityRows.map((k, idx) => {
+            const trend = getTrendInfo(k);
+            return `<div style="display:grid;grid-template-columns:18px minmax(0,1fr) 48px;gap:8px;padding:5px 0;border-bottom:1px solid #e2e8f0;font-size:8.2px">
+                <b style="color:#dc2626;text-align:center">${idx + 1}</b>
+                <div style="min-width:0"><b style="color:#334155;line-height:1.2;word-break:break-word">${escHtml(k.Metric || '-')}</b><div style="color:#64748b;margin-top:1px">${escHtml(k.Department || 'General')}</div></div>
+                <div style="text-align:right;color:#dc2626;font-weight:900">${trend ? `${trend.dir} ${trend.pct}%` : `YTD ${fmt(calcYtdSum(k))}`}</div>
+            </div>`;
+        }).join('') : `<div style="font-size:10px;color:#059669;text-align:center;padding:18px;font-weight:900">No off-track KPI in current scope</div>`;
+        const table = (chunk, startIndex) => `
+            <table style="width:100%;border-collapse:collapse;font-size:8.6px;border:1px solid #e2e8f0;">
+                <thead><tr style="background:#065f46;color:#fff;">
+                    <th style="padding:6px;text-align:center;width:30px;">No.</th>
+                    <th style="padding:6px;text-align:left;">Metric</th>
+                    <th style="padding:6px;text-align:left;width:112px;">Department</th>
+                    <th style="padding:6px;text-align:right;width:54px;">Target</th>
+                    <th style="padding:6px;text-align:right;width:54px;">YTD</th>
+                    <th style="padding:6px;text-align:right;width:46px;">Weight</th>
+                    <th style="padding:6px;text-align:center;width:74px;">Status</th>
+                </tr></thead>
+                <tbody>${chunk.length ? chunk.map((k, idx) => {
+                    const status = calcKpiStatus(k);
+                    const meta = statusMeta[status] || statusMeta.nodata;
+                    const ytd = calcYtdSum(k);
+                    return `<tr style="background:${idx % 2 ? '#fff' : '#f8fafc'};">
+                        <td style="padding:5px;border-bottom:1px solid #e2e8f0;text-align:center;color:#64748b;">${startIndex + idx + 1}</td>
+                        <td style="padding:5px;border-bottom:1px solid #e2e8f0;color:#1e293b;font-weight:800;line-height:1.22;word-break:break-word">${escHtml(k.Metric || '-')}</td>
+                        <td style="padding:5px;border-bottom:1px solid #e2e8f0;color:#475569;line-height:1.22;word-break:break-word">${escHtml(k.Department || '-')}</td>
+                        <td style="padding:5px;border-bottom:1px solid #e2e8f0;text-align:right;color:#475569;">${escHtml(k.Target ?? '-')}</td>
+                        <td style="padding:5px;border-bottom:1px solid #e2e8f0;text-align:right;font-weight:900;color:#1e293b;">${fmt(ytd)}</td>
+                        <td style="padding:5px;border-bottom:1px solid #e2e8f0;text-align:right;color:#64748b;">${escHtml(k.Weight ?? 1)}</td>
+                        <td style="padding:5px;border-bottom:1px solid #e2e8f0;text-align:center;">
+                            <span style="display:inline-block;border-radius:999px;padding:2px 7px;background:${meta.bg};color:${meta.color};font-size:8px;font-weight:900;">${meta.label}</span>
+                        </td>
+                    </tr>`;
+                }).join('') : `<tr><td colspan="7" style="padding:28px;text-align:center;color:#94a3b8;">No KPI records in current scope</td></tr>`}</tbody>
+            </table>`;
+
+        const pages = pageItems.map(({ rows: chunk, start }, pageIdx) => `
+            <div class="kpi-pdf-page" style="width:794px;height:1122px;background:#fff;font-family:Kanit,Arial,sans-serif;color:#1e293b;display:flex;flex-direction:column;overflow:hidden;">
+                ${header(pageIdx + 1)}
+                <div style="flex:1;padding:17px 28px 14px;overflow:hidden;display:flex;flex-direction:column;gap:10px;min-height:0">
+                    ${pageIdx === 0 ? `
+                    ${sectionTitle('1. Report Summary / ภาพรวม KPI', 'สรุปสถานะ KPI ตาม scope และ filter ปัจจุบัน')}
+                    <div style="display:grid;grid-template-columns:repeat(6,1fr);gap:8px;">
+                        ${card('Total KPI', total, '#065f46')}
+                        ${card('On Track', onTrack, '#059669')}
+                        ${card('Off Track', offTrack, '#dc2626')}
+                        ${card('No Data', noData, '#64748b')}
+                        ${card('Compliance', `${compliance}%`, compliance >= 85 ? '#059669' : compliance >= 70 ? '#d97706' : '#dc2626')}
+                        ${card('Composite', composite == null ? '-' : `${composite}%`, composite == null ? '#64748b' : composite >= 80 ? '#059669' : '#d97706')}
+                    </div>
+                    <div style="display:grid;grid-template-columns:1.05fr .95fr;gap:12px">
+                        <div style="border:1px solid #e2e8f0;border-radius:12px;padding:12px;background:#f8fafc">
+                            <div style="font-size:12px;font-weight:900;color:#065f46;margin-bottom:7px">Report Health</div>
+                            <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:8px">
+                                <div style="font-size:25px;font-weight:900;line-height:1.22;color:${healthColor}">${reportHealth}</div>
+                                <div style="font-size:8.4px;color:#64748b;text-align:right">Measured ${measured}<br>Scope ${escHtml(scopeText)}</div>
+                            </div>
+                            ${bar(compliance, healthColor, 7)}
+                            <div style="font-size:9px;color:#475569;line-height:1.5;margin-top:8px">On-track ratio is ${compliance}% from measured KPI rows. Weighted composite score is ${composite == null ? '-' : composite + '%'}.</div>
+                        </div>
+                        <div style="border:1px solid #e2e8f0;border-radius:12px;padding:12px">${sectionTitle('2. Priority Off-track', 'KPI ที่ควรติดตามก่อน')}${priorityPanel}</div>
+                    </div>
+                    <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+                        <div style="border:1px solid #e2e8f0;border-radius:12px;padding:12px">${sectionTitle('3. Department Focus', 'สถานะตามแผนก / หน่วยงาน')}${deptPanel || '<div style="font-size:10px;color:#94a3b8;text-align:center;padding:18px">No department data</div>'}</div>
+                        <div style="border:1px solid #e2e8f0;border-radius:12px;padding:12px;background:#f0fdf4">
+                            <div style="font-size:12px;font-weight:900;color:#065f46;margin-bottom:6px">4. Follow-up Notes</div>
+                            <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:10px;font-size:8.5px;color:#334155;line-height:1.38">
+                                <div><b style="color:#dc2626">Off-track</b><br>Review owner, trend and action plan for red KPI rows.</div>
+                                <div><b style="color:#d97706">No data</b><br>Complete monthly actual values before management review.</div>
+                                <div><b style="color:#0f766e">Control</b><br>Keep evidence and month-to-month monitoring aligned with the KPI announcement.</div>
+                            </div>
+                        </div>
+                    </div>` : ''}
+                    <div style="font-size:13px;font-weight:900;color:#065f46;border-bottom:2px solid #d1fae5;padding-bottom:6px;">
+                        ${pageIdx === 0 ? '5.' : ''} KPI Register (${chunk.length ? `${start + 1}-${start + chunk.length}` : '0'} / ${total})
+                    </div>
+                    ${table(chunk, start)}
+                </div>
+                ${footer(pageIdx + 1)}
+            </div>`);
+
+        holder = document.createElement('div');
+        holder.style.cssText = 'position:fixed;left:-10000px;top:0;width:794px;background:#fff;z-index:-1;';
+        holder.innerHTML = pages.join('');
+        document.body.appendChild(holder);
+
         const { jsPDF } = window.jspdf;
         const pdf = new jsPDF('p', 'mm', 'a4');
-        const pw = pdf.internal.pageSize.getWidth();
-        const ph = pdf.internal.pageSize.getHeight();
-        const imgH = (canvas.height * pw) / canvas.width;
-        let offset = 0;
-        while (offset < imgH) {
-            if (offset > 0) pdf.addPage();
-            pdf.addImage(imgData, 'PNG', 0, -offset, pw, imgH);
-            offset += ph;
+        const pageEls = Array.from(holder.querySelectorAll('.kpi-pdf-page'));
+        for (let i = 0; i < pageEls.length; i++) {
+            const canvas = await window.html2canvas(pageEls[i], { scale: 1.5, backgroundColor: '#ffffff', useCORS: true, logging: false });
+            if (i > 0) pdf.addPage();
+            pdf.addImage(canvas.toDataURL('image/jpeg', 0.94), 'JPEG', 0, 0, 210, 297);
         }
         pdf.save(`KPI_Report_${_selectedYear}.pdf`);
         showToast('ส่งออก PDF สำเร็จ', 'success');
     } catch (err) { showError(err); }
-    finally { hideLoading(); }
+    finally {
+        if (holder?.parentNode) holder.parentNode.removeChild(holder);
+        hideLoading();
+    }
 }
 
 function getFilteredData() {
@@ -131,6 +506,153 @@ function getFilteredData() {
 
 function getUniqueDepts(kpiData) {
     return [...new Set(kpiData.map(k => k.Department || '').filter(Boolean))].sort();
+}
+
+function normalizeKpiKeyPart(value) {
+    return String(value || '').trim().toLowerCase();
+}
+
+function getKpiDuplicateKey(data) {
+    return [
+        normalizeKpiKeyPart(data.Year ?? _selectedYear),
+        normalizeKpiKeyPart(data.AnnouncementID ?? currentAnnouncementId),
+        normalizeKpiKeyPart(data.Metric),
+        normalizeKpiKeyPart(data.Department),
+    ].join('|');
+}
+
+function parseOptionalNumber(value, label) {
+    if (value === null || value === undefined || String(value).trim() === '') return { value: null };
+    const num = Number(value);
+    if (!Number.isFinite(num)) return { error: `${label} ต้องเป็นตัวเลข` };
+    return { value: num };
+}
+
+function validateKpiPayload(data, { monthlyRequired = false } = {}) {
+    const errors = [];
+    if (!String(data.Metric || '').trim()) errors.push('กรุณากรอกชื่อตัวชี้วัด');
+    const target = parseOptionalNumber(data.Target, 'เป้าหมาย');
+    if (target.error) errors.push(target.error);
+    if (target.value === null) errors.push('กรุณากรอกเป้าหมาย');
+    const weight = parseOptionalNumber(data.Weight ?? 1, 'น้ำหนัก');
+    if (weight.error) errors.push(weight.error);
+    if (weight.value !== null && weight.value <= 0) errors.push('น้ำหนักต้องมากกว่า 0');
+    MONTHS.forEach(m => {
+        const monthValue = parseOptionalNumber(data[m], m);
+        if (monthValue.error) errors.push(monthValue.error);
+        if (monthlyRequired && monthValue.value === null) errors.push(`${m} ต้องเป็นตัวเลข`);
+    });
+    return errors;
+}
+
+function getAnnouncementLabel(kpi = {}) {
+    const annId = kpi.AnnouncementID || currentAnnouncementId || '';
+    const title = currentKpiAnnouncement?.AnnouncementTitle || '';
+    if (title && annId) return `${annId} · ${title}`;
+    return annId || title || 'ยังไม่ผูกประกาศ';
+}
+
+function hasActiveKpiFilters() {
+    return !!(_filterSearch || _filterDept !== 'all' || _filterStatus !== 'all');
+}
+
+function renderAccidentEvidenceStrip() {
+    const rows = Array.isArray(_accidentMonthlyReports) ? _accidentMonthlyReports : [];
+    const map = Object.fromEntries(rows.map(row => [String(row.MonthNo), row]));
+    const completed = MONTHS.filter((_m, i) => !!map[String(i + 1)]?.ReportFileUrl).length;
+    const waiting = MONTHS.filter((_m, i) => {
+        const row = map[String(i + 1)];
+        return row && (row.Status === 'green' || row.Status === 'red') && !row.ReportFileUrl;
+    }).length;
+    return `
+    <div class="mb-4 rounded-2xl border border-slate-200 bg-white shadow-sm overflow-hidden">
+      <div class="flex flex-col lg:flex-row lg:items-center justify-between gap-3 px-4 py-3 border-b border-slate-100 bg-slate-50/70">
+        <div>
+          <p class="text-xs font-black uppercase tracking-wide text-slate-400">Accident Report Monthly Evidence</p>
+          <h3 class="text-sm font-black text-slate-800">หลักฐานรายงานอุบัติเหตุประจำเดือน ปี ${_selectedYear}</h3>
+        </div>
+        <div class="flex flex-wrap items-center gap-2">
+          <span class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-emerald-50 text-xs font-bold text-emerald-700 border border-emerald-100">${completed}/12 มีไฟล์รายงาน</span>
+          ${waiting ? `<span class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-amber-50 text-xs font-bold text-amber-700 border border-amber-100">${waiting} เดือนรอไฟล์</span>` : ''}
+          <button type="button" onclick="sessionStorage.setItem('pending_filter_accident', JSON.stringify({tab:'dashboard', year:${_selectedYear}})); location.hash='#accident';"
+            class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-slate-900 text-white text-xs font-bold hover:bg-emerald-700 transition-colors">
+            เปิด Accident Board
+          </button>
+        </div>
+      </div>
+      <div class="grid grid-cols-6 sm:grid-cols-12 gap-1.5 p-3">
+        ${MONTHS.map((m, i) => {
+            const row = map[String(i + 1)];
+            const hasFile = !!row?.ReportFileUrl;
+            const waitingFile = row && (row.Status === 'green' || row.Status === 'red') && !hasFile;
+            const cls = hasFile ? 'bg-emerald-50 border-emerald-100 text-emerald-700'
+                : waitingFile ? 'bg-amber-50 border-amber-100 text-amber-700'
+                : 'bg-slate-50 border-slate-100 text-slate-400';
+            const label = hasFile ? 'OK' : waitingFile ? 'FILE' : '-';
+            return `<div class="rounded-lg border ${cls} px-2 py-1.5 text-center">
+              <p class="text-[10px] font-black">${m}</p>
+              <p class="text-[10px] font-bold">${label}</p>
+            </div>`;
+        }).join('')}
+      </div>
+    </div>`;
+}
+
+function syncKpiFilterButton() {
+    const clearBtn = document.getElementById('btn-clear-kpi-filters');
+    if (!clearBtn) return;
+    const active = hasActiveKpiFilters();
+    clearBtn.classList.toggle('hidden', !active);
+    clearBtn.classList.toggle('inline-flex', active);
+}
+
+function rerenderKpiDashboard(isAdmin) {
+    const container = document.getElementById('kpi-page');
+    if (container && currentKpiAnnouncement) {
+        renderKpiDashboard(container, currentKpiAnnouncement, allKpiDataForYear, isAdmin);
+    } else {
+        renderKpiContent(isAdmin);
+    }
+}
+
+function getFirstValue(obj, keys) {
+    for (const key of keys) {
+        const value = obj?.[key];
+        if (value !== undefined && value !== null && String(value).trim() !== '') return value;
+    }
+    return '';
+}
+
+async function loadKpiMasterData() {
+    if (kpiMasterLoaded) return;
+    const [deptRes, unitRes] = await Promise.all([
+        API.get('/master/departments'),
+        API.get('/master/safety-units')
+    ]);
+    const depts = (deptRes?.data || deptRes || [])
+        .map(d => ({
+            id: String(getFirstValue(d, ['id', 'DepartmentID', 'department_id']) || ''),
+            name: String(getFirstValue(d, ['Name', 'name', 'Department', 'DeptName']) || '')
+        }))
+        .filter(d => d.name);
+    const units = (unitRes?.data || unitRes || [])
+        .map(u => ({
+            id: String(getFirstValue(u, ['id', 'UnitID', 'unit_id']) || ''),
+            name: String(getFirstValue(u, ['name', 'Name', 'UnitName', 'unit_name']) || ''),
+            departmentId: String(getFirstValue(u, ['department_id', 'DepartmentID', 'departmentId']) || ''),
+            departmentName: String(getFirstValue(u, ['DeptName', 'DepartmentName', 'Department', 'department']) || '')
+        }))
+        .filter(u => u.name);
+
+    const options = new Map();
+    depts.forEach(d => options.set(d.name, { value: d.name, label: d.name, type: 'department' }));
+    units.forEach(u => {
+        const dept = depts.find(d => d.id === u.departmentId)?.name || u.departmentName;
+        const value = dept ? `${dept} / ${u.name}` : u.name;
+        options.set(value, { value, label: value, type: 'unit' });
+    });
+    kpiMasterOrgOptions = Array.from(options.values()).sort((a, b) => a.label.localeCompare(b.label, 'th'));
+    kpiMasterLoaded = true;
 }
 
 // ─── Main Loader ─────────────────────────────────────────────────────────────
@@ -155,19 +677,21 @@ export async function loadKpiPage(year = null) {
         _availableYears = Array.from(yearSet).sort((a, b) => b - a);
 
         _selectedYear = year ? parseInt(year) : (current ? new Date(current.EffectiveDate).getFullYear() : new Date().getFullYear());
-        [allKpiDataForYear, _prevYearData] = await Promise.all([
+        [allKpiDataForYear, _prevYearData, _accidentMonthlyReports] = await Promise.all([
             API.get(`/kpidata/${_selectedYear}`),
             API.get(`/kpidata/${_selectedYear - 1}`).catch(() => []),
+            API.get(`/accident/monthly-reports?year=${_selectedYear}`).then(res => res?.data || []).catch(() => []),
         ]);
 
         const annForYear = allAnn.find(a => new Date(a.EffectiveDate).getFullYear() == _selectedYear) || current;
         if (annForYear && new Date(annForYear.EffectiveDate).getFullYear() == _selectedYear) {
-            currentAnnouncementId = String(annForYear.id ?? annForYear.AnnouncementID ?? '');
+            currentAnnouncementId = String(getAnnouncementId(annForYear));
         } else {
             currentAnnouncementId = null;
         }
 
         const displayAnn = currentAnnouncementId ? annForYear : { AnnouncementTitle: `KPI Overview ${_selectedYear}`, id: null };
+        currentKpiAnnouncement = displayAnn;
         renderKpiDashboard(container, displayAnn, allKpiDataForYear, getIsAdmin());
 
     } catch (err) {
@@ -341,41 +865,64 @@ function renderKpiDashboard(container, announcement, kpiData, isAdmin) {
         </div>
       </div>` : ''}
 
+      ${renderAccidentEvidenceStrip()}
+
       <!-- ═══ FILTER BAR ═══ -->
       ${kpiData.length > 0 ? (() => {
         const depts = getUniqueDepts(kpiData);
+        const statusFilters = [
+          ['all', 'ทั้งหมด', total],
+          ['ok', 'ผ่านเกณฑ์', onTrack],
+          ['over', 'ไม่ผ่าน', offTrack],
+          ['nodata', 'ไม่มีข้อมูล', noData],
+        ];
+        const statusClass = {
+          all: 'bg-slate-800 text-white shadow-sm ring-1 ring-slate-800',
+          ok: 'bg-emerald-600 text-white shadow-sm ring-1 ring-emerald-600',
+          over: 'bg-red-600 text-white shadow-sm ring-1 ring-red-600',
+          nodata: 'bg-slate-500 text-white shadow-sm ring-1 ring-slate-500',
+        };
         return `
-      <div class="ds-filter-bar mb-5">
-        <div class="flex flex-wrap gap-2 items-center">
+      <div class="mb-5 rounded-xl border border-slate-200 bg-white px-3 py-3 shadow-sm">
+        <div class="flex flex-wrap gap-3 items-center">
           <div class="relative flex-1 min-w-[150px] max-w-xs">
             <svg class="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-slate-400 pointer-events-none" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/></svg>
             <input id="kpi-search" type="text" placeholder="ค้นหาตัวชี้วัด..." value="${_filterSearch}"
-              class="pl-8 pr-3 py-1.5 rounded-lg border border-slate-200 text-sm w-full focus:border-emerald-400 focus:ring-1 focus:ring-emerald-400 outline-none">
+              class="pl-8 pr-3 py-2 rounded-lg border border-slate-200 text-sm w-full focus:border-emerald-400 focus:ring-2 focus:ring-emerald-100 outline-none transition-colors">
           </div>
           ${depts.length > 1 ? `
-          <select id="kpi-filter-dept" class="rounded-lg border border-slate-200 text-sm py-1.5 px-2.5 focus:border-emerald-400 outline-none bg-white">
+          <select id="kpi-filter-dept" class="rounded-lg border border-slate-200 text-sm py-2 px-2.5 focus:border-emerald-400 focus:ring-2 focus:ring-emerald-100 outline-none bg-white transition-colors">
             <option value="all">ทุกแผนก</option>
             ${depts.map(d => `<option value="${d}" ${_filterDept === d ? 'selected' : ''}>${d}</option>`).join('')}
           </select>` : ''}
-          <div class="flex rounded-lg border border-slate-200 overflow-hidden text-xs font-semibold">
-            ${[['all','ทั้งหมด'],['ok','ผ่านเกณฑ์'],['over','ไม่ผ่าน'],['nodata','ไม่มีข้อมูล']].map(([v,l],i) => `
-            <button class="kpi-status-filter px-2.5 py-1.5 transition-colors ${i>0?'border-l border-slate-200':''} ${_filterStatus===v ? (v==='ok'?'bg-emerald-500 text-white':v==='over'?'bg-red-500 text-white':v==='nodata'?'bg-slate-500 text-white':'bg-slate-800 text-white') : 'bg-white text-slate-500 hover:bg-slate-50'}" data-status="${v}">${l}</button>`).join('')}
+          <div class="flex flex-wrap gap-1.5 rounded-xl bg-slate-100 p-1 text-xs font-bold" role="tablist" aria-label="กรองสถานะ KPI">
+            ${statusFilters.map(([v, l, count]) => `
+            <button type="button"
+              class="kpi-status-filter inline-flex items-center gap-1.5 rounded-lg px-3 py-2 transition-all active:scale-[0.98] focus:outline-none focus:ring-2 focus:ring-emerald-100 ${_filterStatus === v ? statusClass[v] : 'bg-white text-slate-500 hover:bg-emerald-50 hover:text-emerald-700 hover:shadow-sm'}"
+              data-status="${v}" aria-pressed="${_filterStatus === v}">
+              <span>${l}</span>
+              <span class="rounded-full px-1.5 py-0.5 text-[10px] ${_filterStatus === v ? 'bg-white/20 text-white' : 'bg-slate-100 text-slate-400'}">${count}</span>
+            </button>`).join('')}
           </div>
+          <button id="btn-clear-kpi-filters" type="button"
+            class="${hasActiveKpiFilters() ? 'inline-flex' : 'hidden'} items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-bold text-slate-500 transition-all hover:border-emerald-200 hover:bg-emerald-50 hover:text-emerald-700 active:scale-[0.98] focus:outline-none focus:ring-2 focus:ring-emerald-100">
+            <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
+            ล้างตัวกรอง
+          </button>
           <div class="flex-1"></div>
-          <div class="flex rounded-lg border border-slate-200 overflow-hidden">
-            <button id="btn-view-card" title="Card View"
-              class="p-1.5 transition-colors ${_viewMode==='card'?'bg-slate-800 text-white':'bg-white text-slate-400 hover:bg-slate-50'}">
+          <div class="flex rounded-xl bg-slate-100 p-1">
+            <button id="btn-view-card" title="Card View" aria-pressed="${_viewMode === 'card'}"
+              class="p-2 rounded-lg transition-all active:scale-[0.98] focus:outline-none focus:ring-2 focus:ring-emerald-100 ${_viewMode==='card'?'bg-slate-800 text-white shadow-sm':'bg-white text-slate-400 hover:text-emerald-700 hover:bg-emerald-50'}">
               <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2V6zM14 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2V6zM4 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2v-2zM14 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2v-2z"/></svg>
             </button>
-            <button id="btn-view-table" title="Table View"
-              class="p-1.5 border-l border-slate-200 transition-colors ${_viewMode==='table'?'bg-slate-800 text-white':'bg-white text-slate-400 hover:bg-slate-50'}">
+            <button id="btn-view-table" title="Table View" aria-pressed="${_viewMode === 'table'}"
+              class="p-2 rounded-lg transition-all active:scale-[0.98] focus:outline-none focus:ring-2 focus:ring-emerald-100 ${_viewMode==='table'?'bg-slate-800 text-white shadow-sm':'bg-white text-slate-400 hover:text-emerald-700 hover:bg-emerald-50'}">
               <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 10h18M3 14h18M10 3v18M3 6a3 3 0 013-3h12a3 3 0 013 3v12a3 3 0 01-3 3H6a3 3 0 01-3-3V6z"/></svg>
             </button>
           </div>
         </div>
       </div>`;
       })() : ''}
-
       <!-- ═══ CONTENT (card / table) ═══ -->
       <div id="kpi-content-area" class="pb-8"></div>
     </div>`;
@@ -388,11 +935,21 @@ function renderKpiDashboard(container, announcement, kpiData, isAdmin) {
     document.getElementById('btn-next-year')?.addEventListener('click', e => {
         const y = e.currentTarget.dataset.year; if (y) loadKpiPage(y);
     });
-    document.getElementById('btn-view-card')?.addEventListener('click', () => { _viewMode = 'card'; renderKpiContent(isAdmin); });
-    document.getElementById('btn-view-table')?.addEventListener('click', () => { _viewMode = 'table'; renderKpiContent(isAdmin); });
-    document.getElementById('kpi-search')?.addEventListener('input', e => { _filterSearch = e.target.value; renderKpiContent(isAdmin); });
-    document.getElementById('kpi-filter-dept')?.addEventListener('change', e => { _filterDept = e.target.value; renderKpiContent(isAdmin); });
-    document.querySelectorAll('.kpi-status-filter').forEach(btn => btn.addEventListener('click', () => { _filterStatus = btn.dataset.status; renderKpiContent(isAdmin); }));
+    document.getElementById('btn-view-card')?.addEventListener('click', () => { _viewMode = 'card'; rerenderKpiDashboard(isAdmin); });
+    document.getElementById('btn-view-table')?.addEventListener('click', () => { _viewMode = 'table'; rerenderKpiDashboard(isAdmin); });
+    document.getElementById('kpi-search')?.addEventListener('input', e => {
+        _filterSearch = e.target.value;
+        syncKpiFilterButton();
+        renderKpiContent(isAdmin);
+    });
+    document.getElementById('kpi-filter-dept')?.addEventListener('change', e => { _filterDept = e.target.value; rerenderKpiDashboard(isAdmin); });
+    document.getElementById('btn-clear-kpi-filters')?.addEventListener('click', () => {
+        _filterDept = 'all';
+        _filterStatus = 'all';
+        _filterSearch = '';
+        rerenderKpiDashboard(isAdmin);
+    });
+    document.querySelectorAll('.kpi-status-filter').forEach(btn => btn.addEventListener('click', () => { _filterStatus = btn.dataset.status; rerenderKpiDashboard(isAdmin); }));
 }
 
 function renderKpiContent(isAdmin) {
@@ -416,7 +973,7 @@ function renderKpiContent(isAdmin) {
         if (filtered.length > 0) requestAnimationFrame(() => filtered.forEach(drawKpiChart));
         document.getElementById('btn-clear-filters')?.addEventListener('click', () => {
             _filterDept = 'all'; _filterStatus = 'all'; _filterSearch = '';
-            loadKpiPage(_selectedYear);
+            rerenderKpiDashboard(isAdmin);
         });
     }
 }
@@ -426,8 +983,10 @@ function createKpiMetricCard(kpi, isAdmin) {
     const status = calcKpiStatus(kpi);
     const latest = getLatestMonthValue(kpi);
     const ytd = calcYtdSum(kpi);
-    const target = parseFloat(kpi.Target);
+    const parsedTarget = parseFloat(kpi.Target);
+    const target = Number.isFinite(parsedTarget) ? parsedTarget : 0;
     const ytdPct = target > 0 ? Math.min(Math.round((ytd / target) * 100), 200) : 0;
+    const announcementLabel = getAnnouncementLabel(kpi);
 
     const statusMeta = {
         ok:     { border: '#10b981', bg: '#ecfdf5', text: '#065f46', label: 'ผ่านเกณฑ์',     dot: '#10b981' },
@@ -460,8 +1019,12 @@ function createKpiMetricCard(kpi, isAdmin) {
                 <span class="w-1.5 h-1.5 rounded-full inline-block ${status === 'ok' ? '' : status === 'over' ? 'animate-pulse' : ''}" style="background:${statusMeta.dot}"></span>
                 ${statusMeta.label}
               </span>
+              <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-indigo-50 text-indigo-600" title="${escHtml(announcementLabel)}">
+                <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 7h10M7 11h10M7 15h6M5 3h14a2 2 0 012 2v14l-4-2-4 2-4-2-4 2V5a2 2 0 012-2z"/></svg>
+                ${escHtml(kpi.AnnouncementID || currentAnnouncementId || 'ประกาศ')}
+              </span>
             </div>
-            <h3 class="font-bold text-slate-800 leading-snug pr-16" title="${kpi.Metric}">${kpi.Metric}</h3>
+            <h3 class="font-bold text-slate-800 leading-snug pr-16" title="${escHtml(kpi.Metric || '')}">${escHtml(kpi.Metric || '')}</h3>
           </div>
         </div>
 
@@ -529,16 +1092,21 @@ function createKpiMetricCard(kpi, isAdmin) {
 }
 
 function renderEmptyState(announcement, year, isAdmin) {
-    const noAnn = !announcement.id;
+    const noAnn = !announcement?.id && !currentAnnouncementId;
+    const isFiltered = hasActiveKpiFilters();
     return `
     <div class="col-span-full py-20 text-center bg-slate-50 rounded-2xl border-2 border-dashed border-slate-200">
       <div class="w-16 h-16 rounded-2xl flex items-center justify-center mx-auto mb-4" style="background:linear-gradient(135deg,#ecfdf5,#d1fae5)">
         <svg class="w-8 h-8 text-emerald-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"/></svg>
       </div>
-      <h3 class="text-lg font-bold text-slate-700 mb-1">ยังไม่มีข้อมูล KPI</h3>
+      <h3 class="text-lg font-bold text-slate-700 mb-1">${isFiltered ? 'ไม่พบ KPI ตามตัวกรอง' : 'ยังไม่มีข้อมูล KPI'}</h3>
       ${noAnn
         ? `<p class="text-sm text-red-500 font-medium">ยังไม่มีประกาศสำหรับปี ${year} — กรุณาสร้างประกาศก่อน</p>`
-        : `<p class="text-sm text-slate-400">${isAdmin ? 'คลิก "เพิ่ม KPI" หรือ Import จาก Excel เพื่อเริ่มต้น' : 'ยังไม่มีข้อมูลตัวชี้วัดในปีนี้'}</p>`
+        : isFiltered
+          ? `<p class="text-sm text-slate-400">ลองล้างตัวกรองหรือค้นหาด้วยคำอื่น</p>
+             <button id="btn-clear-filters" class="mt-3 inline-flex items-center gap-1.5 rounded-lg border border-emerald-200 bg-white px-3 py-2 text-xs font-bold text-emerald-700 hover:bg-emerald-50">ล้างตัวกรอง</button>`
+          : `<p class="text-sm text-slate-400">${isAdmin ? 'คลิก "เพิ่ม KPI" เพื่อสร้างตัวชี้วัดใหม่ หรือ Import จาก Excel หากมีหลายรายการ' : 'ยังไม่มีข้อมูลตัวชี้วัดในปีนี้'}</p>
+             ${isAdmin ? '<p class="text-xs text-slate-400 mt-2">ต้องมีประกาศ KPI ของปีนี้ก่อน ระบบจึงจะผูกตัวชี้วัดเข้ากับประกาศได้ถูกต้อง</p>' : ''}`
       }
     </div>`;
 }
@@ -578,6 +1146,7 @@ function renderTableView(kpiData, isAdmin) {
               <div>
                 <p class="font-semibold text-slate-800 text-sm leading-snug">${kpi.Metric || '—'}</p>
                 <p class="text-[10px] text-slate-400">${kpi.Department || ''}</p>
+                <p class="text-[10px] text-indigo-500 font-semibold">${escHtml(kpi.AnnouncementID || currentAnnouncementId || 'ประกาศ KPI')}</p>
               </div>
             </div>
           </td>
@@ -647,7 +1216,13 @@ function attachTableListeners() {
         inp.addEventListener('change', e => {
             const id = e.target.dataset.kpiId;
             const month = e.target.dataset.month;
-            const val = e.target.value === '' ? null : parseFloat(e.target.value);
+            const parsed = parseOptionalNumber(e.target.value, month);
+            if (parsed.error) {
+                showToast(parsed.error, 'error');
+                e.target.value = '';
+                return;
+            }
+            const val = parsed.value;
             if (!_tableChanges[id]) _tableChanges[id] = {};
             _tableChanges[id][month] = val;
 
@@ -759,13 +1334,13 @@ function drawKpiChart(kpi) {
 
 // ─── Event Listeners ──────────────────────────────────────────────────────────
 function setupKpiEventListeners() {
-    document.addEventListener('click', async e => {
+    document.addEventListener('click', guardActionHandler(async e => {
         if (!e.target.closest('#kpi-page') && !e.target.closest('#modal-container')) return;
         const t = e.target;
 
         if (t.closest('#btn-add-kpi')) {
             if (!currentAnnouncementId) { showToast('กรุณาสร้างประกาศสำหรับปีนี้ก่อน', 'error'); return; }
-            showKpiForm(null, currentAnnouncementId); return;
+            await showKpiForm(null, currentAnnouncementId); return;
         }
         if (t.closest('#btn-manage-anns')) { showAnnouncementManager(); return; }
         if (t.closest('#btn-export-excel')) { handleExportExcel(); return; }
@@ -779,14 +1354,18 @@ function setupKpiEventListeners() {
         const editBtn = t.closest('.btn-edit-kpi');
         if (editBtn) {
             const kpi = allKpiDataForYear.find(k => String(k.id) === String(editBtn.dataset.id));
-            if (kpi) showKpiForm(kpi); return;
+            if (kpi) await showKpiForm(kpi); return;
         }
 
         const deleteBtn = t.closest('.btn-delete-kpi');
         if (deleteBtn) {
             const id = deleteBtn.dataset.id;
-            const name = allKpiDataForYear.find(k => String(k.id) === String(id))?.Metric || 'รายการนี้';
-            const ok = await showConfirmationModal('ยืนยันการลบ', `ลบตัวชี้วัด "${name}" ใช่หรือไม่?`);
+            const kpi = allKpiDataForYear.find(k => String(k.id) === String(id));
+            const name = kpi?.Metric || 'รายการนี้';
+            const ok = await showConfirmationModal(
+                'ยืนยันการลบ KPI',
+                `ต้องการลบตัวชี้วัด "${escHtml(name)}" ใช่หรือไม่?<br><br><span class="text-sm text-slate-500">ปี: ${escHtml(kpi?.Year || _selectedYear || '-')}<br>แผนก/หน่วยงาน: ${escHtml(kpi?.Department || '-')}<br>ประกาศ: ${escHtml(kpi?.AnnouncementID || currentAnnouncementId || '-')}</span><br><br><span class="text-sm text-red-600">การลบนี้จะลบค่ารายเดือนของ KPI นี้ด้วย</span>`
+            );
             if (ok) handleDeleteKpi(id); return;
         }
 
@@ -795,7 +1374,7 @@ function setupKpiEventListeners() {
 
         const drillBtn = t.closest('[data-action="open-drilldown"]');
         if (drillBtn) { showKpiDrilldown(drillBtn.dataset.kpiId); return; }
-    });
+    }, delegatedActionOptions('kpi')));
 
     document.addEventListener('change', async e => {
         if (e.target.id === 'kpi-file-import') {
@@ -931,21 +1510,62 @@ async function handleImportExcel(file) {
         const wb = XLSX.read(await file.arrayBuffer());
         const rows = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]]);
         if (!currentAnnouncementId) throw new Error('ไม่พบ Announcement ID');
+        const existingKeys = new Set(allKpiDataForYear.map(k => getKpiDuplicateKey(k)));
+        const seenKeys = new Set();
+        const skippedDuplicates = [];
+        const invalidRows = [];
         let count = 0;
-        for (const row of rows) {
-            await API.post('/kpidata', {
+
+        for (const [index, row] of rows.entries()) {
+            const payload = {
                 AnnouncementID: currentAnnouncementId, Year: _selectedYear,
                 Metric: row.Metric || 'New KPI', Department: row.Department || '',
                 Unit: row.Unit || '', Target: row.Target || 0,
+                Direction: row.Direction || 'lower_better',
+                Weight: row.Weight || 1,
                 Jan: row.Jan ?? null, Feb: row.Feb ?? null, Mar: row.Mar ?? null,
                 Apr: row.Apr ?? null, May: row.May ?? null, Jun: row.Jun ?? null,
                 Jul: row.Jul ?? null, Aug: row.Aug ?? null, Sep: row.Sep ?? null,
                 Oct: row.Oct ?? null, Nov: row.Nov ?? null, Dec: row.Dec ?? null,
-            });
-            count++;
+            };
+            const rowNo = index + 2;
+            const validationErrors = validateKpiPayload(payload);
+            if (validationErrors.length > 0) {
+                invalidRows.push({ rowNo, metric: payload.Metric, message: validationErrors[0] });
+                continue;
+            }
+            const duplicateKey = getKpiDuplicateKey(payload);
+            if (existingKeys.has(duplicateKey) || seenKeys.has(duplicateKey)) {
+                skippedDuplicates.push({ rowNo, metric: payload.Metric, department: payload.Department });
+                continue;
+            }
+
+            try {
+                await API.post('/kpidata', payload);
+                seenKeys.add(duplicateKey);
+                count++;
+            } catch (err) {
+                if (err?.status === 409 || /ซ้ำ|อยู่แล้ว|duplicate/i.test(err?.message || '')) {
+                    skippedDuplicates.push({ rowNo, metric: payload.Metric, department: payload.Department });
+                    continue;
+                }
+                throw err;
+            }
         }
-        showToast(`นำเข้าสำเร็จ ${count} รายการ`, 'success');
-        loadKpiPage(_selectedYear);
+        const parts = [`นำเข้าสำเร็จ ${count} รายการ`];
+        if (skippedDuplicates.length) parts.push(`ข้ามรายการซ้ำ ${skippedDuplicates.length}`);
+        if (invalidRows.length) parts.push(`ข้อมูลไม่ถูกต้อง ${invalidRows.length}`);
+        const type = invalidRows.length || skippedDuplicates.length ? 'warning' : 'success';
+        showToast(parts.join(' · '), type);
+        if (skippedDuplicates.length || invalidRows.length) {
+            const details = [
+                ...skippedDuplicates.slice(0, 8).map(r => `แถว ${r.rowNo}: KPI ซ้ำ (${r.metric}${r.department ? ` / ${r.department}` : ''})`),
+                ...invalidRows.slice(0, 8).map(r => `แถว ${r.rowNo}: ${r.message} (${r.metric || 'ไม่ระบุชื่อ'})`),
+            ];
+            console.warn('KPI import summary:', { imported: count, skippedDuplicates, invalidRows });
+            showToast(escHtml(details.join('\n')).replace(/\n/g, '<br>'), 'warning');
+        }
+        await loadKpiPage(_selectedYear);
     } catch (err) { showError(err); } finally { hideLoading(); }
 }
 
@@ -985,6 +1605,9 @@ async function showAnnouncementManager() {
                   </div>
                 </div>
                 <div class="flex gap-1.5 flex-shrink-0">
+                  <button class="btn-edit-ann p-1.5 rounded-lg border border-slate-200 text-slate-400 hover:text-emerald-600 hover:bg-emerald-50 hover:border-emerald-200 transition-colors" data-id="${ann.id}" title="แก้ไขประกาศ">
+                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"/></svg>
+                  </button>
                   ${!ann.IsCurrent ? `<button class="btn-set-curr-ann px-3 py-1.5 rounded-lg text-xs font-semibold border border-emerald-200 text-emerald-700 hover:bg-emerald-50 transition-colors" data-id="${ann.id}">Set Active</button>` : ''}
                   <button class="btn-del-ann p-1.5 rounded-lg border border-red-100 text-red-400 hover:text-red-600 hover:bg-red-50 transition-colors" data-id="${ann.id}">
                     <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg>
@@ -994,14 +1617,18 @@ async function showAnnouncementManager() {
             }
           </div>`;
 
-        el.querySelectorAll('.btn-del-ann').forEach(btn => btn.addEventListener('click', async () => {
+        el.querySelectorAll('.btn-del-ann').forEach(btn => btn.addEventListener('click', guardActionHandler(async () => {
             const ok = await showConfirmationModal('ยืนยันการลบ', 'ลบประกาศนี้ใช่หรือไม่?');
-            if (ok) { await API.delete(`/kpiannouncements/${btn.dataset.id}`); showAnnouncementManager(); loadKpiPage(); }
-        }));
-        el.querySelectorAll('.btn-set-curr-ann').forEach(btn => btn.addEventListener('click', async () => {
+            if (ok) { await API.delete(kpiAnnouncementItemUrl(btn.dataset.id)); showAnnouncementManager(); loadKpiPage(); }
+        })));
+        el.querySelectorAll('.btn-edit-ann').forEach(btn => btn.addEventListener('click', () => {
             const ann = announcements.find(a => String(a.id) === String(btn.dataset.id));
-            if (ann) { await API.put(`/kpiannouncements/${btn.dataset.id}`, { ...ann, IsCurrent: 1 }); showAnnouncementManager(); loadKpiPage(); }
+            if (ann) showAnnouncementForm(ann);
         }));
+        el.querySelectorAll('.btn-set-curr-ann').forEach(btn => btn.addEventListener('click', guardActionHandler(async () => {
+            const ann = announcements.find(a => String(a.id) === String(btn.dataset.id));
+            if (ann) { await API.put(kpiAnnouncementItemUrl(btn.dataset.id), { ...ann, IsCurrent: 1 }); showAnnouncementManager(); loadKpiPage(); }
+        })));
     } catch (err) {
         const el = document.getElementById('ann-list-content');
         if (el) el.innerHTML = `<p class="text-red-500 text-sm p-4">${escHtml(err.message)}</p>`;
@@ -1009,20 +1636,26 @@ async function showAnnouncementManager() {
 }
 
 // ─── Announcement Form ────────────────────────────────────────────────────────
-function showAnnouncementForm() {
-    openModal('สร้างประกาศใหม่', `
+function showAnnouncementForm(announcement = null) {
+    const isEdit = !!announcement;
+    const annId = getAnnouncementId(announcement);
+    openModal(isEdit ? 'แก้ไขประกาศ KPI' : 'สร้างประกาศใหม่', `
       <form id="ann-form" class="space-y-4 px-1">
+        <input type="hidden" name="id" value="${escHtml(annId)}">
         <div>
           <label class="block text-sm font-bold text-slate-700 mb-1.5">ชื่อประกาศ <span class="text-red-500">*</span></label>
-          <input type="text" name="AnnouncementTitle" class="form-input w-full rounded-xl" required placeholder="เช่น เป้าหมายความปลอดภัย 2568">
+          <input type="text" name="AnnouncementTitle" class="form-input w-full rounded-xl" required
+            value="${escHtml(announcement?.AnnouncementTitle || '')}" placeholder="เช่น เป้าหมายความปลอดภัย 2568">
         </div>
         <div>
           <label class="block text-sm font-bold text-slate-700 mb-1.5">วันที่มีผลบังคับใช้ <span class="text-red-500">*</span></label>
-          <input type="text" id="ann-date" name="EffectiveDate" class="form-input w-full rounded-xl" required placeholder="เลือกวันที่">
+          <input type="text" id="ann-date" name="EffectiveDate" class="form-input w-full rounded-xl" required
+            value="${escHtml(announcement?.EffectiveDate || '')}" placeholder="เลือกวันที่">
         </div>
         <div>
           <label class="block text-sm font-bold text-slate-700 mb-1.5">ลิงก์เอกสาร (ไม่บังคับ)</label>
-          <input type="text" name="DocumentLink" class="form-input w-full rounded-xl text-sm" placeholder="https://...">
+          <input type="text" name="DocumentLink" class="form-input w-full rounded-xl text-sm"
+            value="${escHtml(announcement?.DocumentLink || '')}" placeholder="https://...">
         </div>
         <div>
           <label class="block text-sm font-bold text-slate-700 mb-1.5">หรืออัปโหลดไฟล์ (PDF / DOCX)</label>
@@ -1031,16 +1664,16 @@ function showAnnouncementForm() {
           <p class="text-xs text-slate-400 mt-1">ถ้าเลือกไฟล์จะใช้แทนลิงก์</p>
         </div>
         <div class="flex items-center gap-2.5">
-          <input type="checkbox" id="is-curr-ann" name="IsCurrent" class="w-4 h-4 rounded text-emerald-600">
+          <input type="checkbox" id="is-curr-ann" name="IsCurrent" class="w-4 h-4 rounded text-emerald-600" ${announcement?.IsCurrent ? 'checked' : ''}>
           <label for="is-curr-ann" class="text-sm font-medium text-slate-700 cursor-pointer">ตั้งเป็นประกาศปัจจุบัน</label>
         </div>
         <div class="flex justify-end gap-3 pt-3 border-t border-slate-100">
           <button type="button" onclick="closeModal()" class="px-5 py-2.5 rounded-xl text-slate-600 hover:bg-slate-100 text-sm font-medium transition-colors">ยกเลิก</button>
-          <button type="submit" id="btn-submit-ann" class="px-6 py-2.5 rounded-xl text-sm font-bold text-white" style="background:linear-gradient(135deg,#059669,#0d9488)">สร้างประกาศ</button>
+          <button type="submit" id="btn-submit-ann" class="px-6 py-2.5 rounded-xl text-sm font-bold text-white" style="background:linear-gradient(135deg,#059669,#0d9488)">${isEdit ? 'บันทึกประกาศ' : 'สร้างประกาศ'}</button>
         </div>
       </form>`, 'max-w-lg');
 
-    window.flatpickr?.('#ann-date', { locale: 'th', dateFormat: 'Y-m-d', defaultDate: 'today', mobileNative: true });
+    window.flatpickr?.('#ann-date', { locale: 'th', dateFormat: 'Y-m-d', defaultDate: announcement?.EffectiveDate || 'today', mobileNative: true });
     document.getElementById('ann-form').addEventListener('submit', handleAnnouncementSubmit);
 }
 
@@ -1065,20 +1698,31 @@ async function handleAnnouncementSubmit(e) {
         fd.delete('AnnouncementFile');
         const data = Object.fromEntries(fd.entries());
         data.IsCurrent = form.querySelector('#is-curr-ann').checked ? 1 : 0;
-        await API.post('/kpiannouncements', data);
+        const id = data.id || '';
+        if (id) await API.put(kpiAnnouncementItemUrl(id), data);
+        else await API.post('/kpiannouncements', data);
         closeModal();
-        showToast('สร้างประกาศสำเร็จ', 'success');
+        showToast(id ? 'บันทึกประกาศสำเร็จ' : 'สร้างประกาศสำเร็จ', 'success');
         await showAnnouncementManager();
         await loadKpiPage();
     } catch (err) { showError(err); }
-    finally { hideLoading(); btn.disabled = false; btn.textContent = 'สร้างประกาศ'; }
+    finally { hideLoading(); btn.disabled = false; btn.textContent = form.elements.id?.value ? 'บันทึกประกาศ' : 'สร้างประกาศ'; }
 }
 
 // ─── KPI Form ─────────────────────────────────────────────────────────────────
-function showKpiForm(kpi = null, announcementId = null) {
+async function showKpiForm(kpi = null, announcementId = null) {
     const isEdit = !!kpi;
     const selYear = kpi?.Year ?? _selectedYear ?? new Date().getFullYear();
     const annId = kpi?.AnnouncementID ?? announcementId;
+    try {
+        await loadKpiMasterData();
+    } catch (err) {
+        showError(err);
+        return;
+    }
+    const orgOptions = kpiMasterOrgOptions
+        .map(item => `<option value="${escHtml(item.value)}" ${String(kpi?.Department || '') === item.value ? 'selected' : ''}>${escHtml(item.label)}</option>`)
+        .join('');
 
     const monthInputs = MONTHS.map(m => `
       <div class="flex flex-col items-center">
@@ -1102,25 +1746,38 @@ function showKpiForm(kpi = null, announcementId = null) {
           </div>
           <div>
             <label class="block text-sm font-bold text-slate-700 mb-1.5">แผนก / หน่วยงาน</label>
-            <input type="text" name="Department" class="form-input w-full rounded-xl" value="${kpi?.Department || ''}" placeholder="เช่น Safety">
+            <select name="Department" class="form-input w-full rounded-xl text-sm">
+              <option value="">เลือกจาก Master...</option>
+              ${orgOptions}
+              ${kpi?.Department && !kpiMasterOrgOptions.some(item => item.value === kpi.Department)
+                  ? `<option value="${escHtml(kpi.Department)}" selected>${escHtml(kpi.Department)} (เดิม)</option>`
+                  : ''}
+            </select>
           </div>
           <div>
             <label class="block text-sm font-bold text-slate-700 mb-1.5">หน่วย</label>
             <input type="text" name="Unit" class="form-input w-full rounded-xl" value="${kpi?.Unit || ''}" placeholder="เช่น ราย, ครั้ง">
           </div>
-            <div>
-            <label class="block text-sm font-bold text-slate-700 mb-1.5">ทิศทางตัวชี้วัด</label>
+          <div>
+            <label class="block text-sm font-bold text-slate-700 mb-1.5 flex items-center gap-1.5">
+              ทิศทางตัวชี้วัด
+              <span class="inline-flex h-4 w-4 items-center justify-center rounded-full bg-slate-100 text-[10px] text-slate-500" title="ใช้บอกระบบว่าค่าจริงแบบไหนถือว่าผ่านเกณฑ์">?</span>
+            </label>
             <select name="Direction" class="form-input w-full rounded-xl text-sm">
               <option value="lower_better" ${(kpi?.Direction || 'lower_better') === 'lower_better' ? 'selected' : ''}>น้อยกว่า = ดี (อุบัติเหตุ, ของเสีย)</option>
               <option value="higher_better" ${kpi?.Direction === 'higher_better' ? 'selected' : ''}>มากกว่า = ดี (ความสำเร็จ, อัตราผ่าน)</option>
             </select>
+            <p class="text-xs text-slate-400 mt-1">เลือกให้ตรงกับวิธีวัดผล เช่น อุบัติเหตุควรน้อยกว่าเป้าหมาย</p>
           </div>
           <div>
-            <label class="block text-sm font-bold text-slate-700 mb-1.5">น้ำหนัก (Weight)</label>
+            <label class="block text-sm font-bold text-slate-700 mb-1.5 flex items-center gap-1.5">
+              น้ำหนัก (Weight)
+              <span class="inline-flex h-4 w-4 items-center justify-center rounded-full bg-slate-100 text-[10px] text-slate-500" title="ใช้ถ่วงน้ำหนักใน Composite Score: KPI สำคัญมากให้ค่าสูงกว่า 1">?</span>
+            </label>
             <input type="number" step="0.1" min="0.1" name="Weight"
               class="form-input w-full rounded-xl text-sm"
               value="${kpi?.Weight ?? 1}" placeholder="1">
-            <p class="text-xs text-slate-400 mt-1">ใช้คำนวณ Composite Score</p>
+            <p class="text-xs text-slate-400 mt-1">ค่าเริ่มต้น 1; KPI สำคัญมากสามารถเพิ่มเป็น 1.5 หรือ 2 ได้</p>
           </div>
           <div class="col-span-2">
             <label class="block text-sm font-bold text-slate-700 mb-1.5">เป้าหมาย <span class="text-red-500">*</span></label>
@@ -1177,8 +1834,20 @@ async function handleKpiFormSubmit(e) {
     btn.innerHTML = '<span class="animate-spin inline-block w-4 h-4 border-2 border-white border-t-transparent rounded-full mr-1.5"></span>กำลังบันทึก...';
 
     const data = Object.fromEntries(new FormData(form).entries());
-    if (!data.AnnouncementID) { showToast('ไม่พบ Announcement ID', 'error'); btn.disabled = false; return; }
+    if (!data.AnnouncementID) {
+        showToast('ไม่พบ Announcement ID', 'error');
+        btn.disabled = false;
+        btn.textContent = 'บันทึก KPI';
+        return;
+    }
     MONTHS.forEach(m => { if (data[m] === '') data[m] = null; });
+    const validationErrors = validateKpiPayload(data);
+    if (validationErrors.length > 0) {
+        showToast(validationErrors[0], 'error');
+        btn.disabled = false;
+        btn.textContent = 'บันทึก KPI';
+        return;
+    }
 
     try {
         if (data.id) await API.put(`/kpidata/${data.id}`, data);

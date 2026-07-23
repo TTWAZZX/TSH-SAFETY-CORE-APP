@@ -1,5 +1,6 @@
+import { delegatedActionOptions, guardActionHandler, guardSubmitHandler } from '../utils/async-ui.js?v=20260715-phase32d-remaining-async-ux';
 import { API } from '../api.js';
-import { hideLoading, showError, showLoading, openModal, closeModal, showDocumentModal, showToast, showConfirmationModal, escHtml } from '../ui.js';
+import { hideLoading, showError, showLoading, openModal, closeModal, showDocumentModal, showToast, showConfirmationModal, escHtml } from '../ui.js?v=20260602-mobile-nav-m53';
 import { normalizeApiArray, normalizeApiObject } from '../utils/normalize.js';
 
 // --- State ---
@@ -249,6 +250,10 @@ function renderCurrentPolicy(rawPolicy, isAdmin) {
     const pct        = total > 0 ? Math.round(ackCount / total * 100) : 0;
     const ackBarColor = pct >= 80 ? '#10b981' : pct >= 50 ? '#f59e0b' : '#ef4444';
     const userAcked  = policy.userAcknowledged;
+    const policyId = escHtml(policy.id || policy.PolicyID || '');
+    const policyTitle = escHtml(policy.PolicyTitle || '-');
+    const policyCategory = escHtml(policy.Category || '');
+    const documentLink = escHtml(policy.DocumentLink || '');
 
     // Review alert
     let reviewAlert = '';
@@ -320,10 +325,10 @@ function renderCurrentPolicy(rawPolicy, isAdmin) {
                                 ${catCfg ? `
                                 <span class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold ${catCfg.bg} ${catCfg.text}">
                                     <span class="w-1.5 h-1.5 rounded-full ${catCfg.dot} inline-block"></span>
-                                    ${policy.Category}
+                                    ${policyCategory}
                                 </span>` : ''}
                             </div>
-                            <h2 class="text-xl font-bold text-slate-800 leading-snug">${policy.PolicyTitle}</h2>
+                            <h2 class="text-xl font-bold text-slate-800 leading-snug">${policyTitle}</h2>
                             <div class="flex items-center gap-1.5 text-xs text-slate-400">
                                 <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"/>
@@ -346,7 +351,7 @@ function renderCurrentPolicy(rawPolicy, isAdmin) {
                         </button>
                         ${isAdmin ? `
                         <button class="btn-edit-policy p-2 text-slate-400 hover:text-emerald-600 hover:bg-emerald-50 rounded-lg transition-colors"
-                                data-id="${policy.id || policy.PolicyID}" title="แก้ไข">
+                                data-id="${policyId}" title="แก้ไข">
                             <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z"/>
                             </svg>
@@ -369,7 +374,7 @@ function renderCurrentPolicy(rawPolicy, isAdmin) {
                         </svg>
                         เอกสารประกอบนโยบาย
                     </div>
-                    <a href="${policy.DocumentLink}" data-action="view-doc"
+                    <a href="${documentLink}" data-action="view-doc"
                        class="inline-flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-semibold text-white transition-all"
                        style="background:linear-gradient(135deg,#059669,#0d9488);box-shadow:0 2px 8px rgba(5,150,105,0.25)"
                        onmouseover="this.style.transform='translateY(-1px)';this.style.boxShadow='0 4px 12px rgba(5,150,105,0.4)'"
@@ -383,7 +388,7 @@ function renderCurrentPolicy(rawPolicy, isAdmin) {
 
                 <!-- Acknowledge Section -->
                 <div class="pt-4 border-t border-slate-100">
-                    ${isAdmin ? renderAckAdminSection(policy.id, ackCount, total, pct, ackBarColor) : renderAckUserSection(policy.id, userAcked)}
+                    ${isAdmin ? renderAckAdminSection(policyId, ackCount, total, pct, ackBarColor) : renderAckUserSection(policyId, userAcked)}
                 </div>
 
             </div>
@@ -404,6 +409,14 @@ function renderAckAdminSection(policyId, ackCount, total, pct, barColor) {
                     </p>
                 </div>
                 <div class="flex items-center gap-2">
+                    <button id="btn-ack-all" data-id="${policyId}"
+                            ${total > 0 && ackCount >= total ? 'disabled' : ''}
+                            class="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg bg-amber-50 text-amber-700 hover:bg-amber-100 transition-colors disabled:opacity-50 disabled:cursor-not-allowed">
+                        <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4M7 20a4 4 0 01-4-4V7a4 4 0 014-4h10a4 4 0 014 4v9a4 4 0 01-4 4H7z"/>
+                        </svg>
+                        รับทราบแทนทั้งหมด
+                    </button>
                     <button id="btn-view-ack" data-id="${policyId}"
                             class="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg bg-slate-100 text-slate-600 hover:bg-emerald-50 hover:text-emerald-700 transition-colors">
                         <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -504,6 +517,10 @@ function renderPastPolicies(rawPolicies, isAdmin, search = '') {
                     const catCfg  = p.Category ? (CAT[p.Category] || null) : null;
                     const ackPct  = p.totalEmployees > 0 ? Math.round((p.ackCount || 0) / p.totalEmployees * 100) : 0;
                     const ackColor = ackPct >= 80 ? 'emerald' : ackPct >= 50 ? 'amber' : 'slate';
+                    const pId = escHtml(p.id || p.PolicyID || '');
+                    const pTitle = escHtml(p.PolicyTitle || '-');
+                    const pCategory = escHtml(p.Category || '');
+                    const pDocumentLink = escHtml(p.DocumentLink || '');
                     return `
                     <div class="relative flex items-start gap-4 group">
                         <!-- Dot -->
@@ -525,9 +542,9 @@ function renderPastPolicies(rawPolicies, isAdmin, search = '') {
                                         <span class="inline-flex items-center px-1.5 py-0.5 rounded text-xs font-semibold bg-slate-100 text-slate-500">
                                             Rev.${p.version || '?'}
                                         </span>
-                                        ${catCfg ? `<span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-semibold ${catCfg.bg} ${catCfg.text}">${p.Category}</span>` : ''}
+                                        ${catCfg ? `<span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-semibold ${catCfg.bg} ${catCfg.text}">${pCategory}</span>` : ''}
                                     </div>
-                                    <h4 class="font-semibold text-slate-700 text-sm group-hover:text-emerald-700 transition-colors">${p.PolicyTitle || '-'}</h4>
+                                    <h4 class="font-semibold text-slate-700 text-sm group-hover:text-emerald-700 transition-colors">${pTitle}</h4>
                                     ${p.totalEmployees > 0 ? `
                                     <div class="flex items-center gap-2 mt-1.5">
                                         <div class="flex-1 h-1 bg-slate-100 rounded-full overflow-hidden max-w-[80px]">
@@ -540,7 +557,7 @@ function renderPastPolicies(rawPolicies, isAdmin, search = '') {
                                 <!-- Actions -->
                                 <div class="flex items-center gap-1 flex-shrink-0">
                                     ${p.DocumentLink ? `
-                                    <a href="${p.DocumentLink}" data-action="view-doc"
+                                    <a href="${pDocumentLink}" data-action="view-doc"
                                        class="p-1.5 text-slate-400 hover:text-emerald-600 hover:bg-emerald-50 rounded-lg transition-colors" title="ดูเอกสาร">
                                         <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 21h10a2 2 0 002-2V9.414a1 1 0 00-.293-.707l-5.414-5.414A1 1 0 0012.586 3H7a2 2 0 00-2 2v14a2 2 0 002 2z"/>
@@ -548,19 +565,19 @@ function renderPastPolicies(rawPolicies, isAdmin, search = '') {
                                     </a>` : ''}
                                     ${isAdmin ? `
                                     <button class="btn-restore-policy p-1.5 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
-                                            data-id="${p.id}" title="ตั้งเป็นฉบับปัจจุบัน">
+                                            data-id="${pId}" title="ตั้งเป็นฉบับปัจจุบัน">
                                         <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/>
                                         </svg>
                                     </button>
                                     <button class="btn-edit-policy p-1.5 text-slate-400 hover:text-emerald-600 hover:bg-emerald-50 rounded-lg transition-colors"
-                                            data-id="${p.id}" title="แก้ไข">
+                                            data-id="${pId}" title="แก้ไข">
                                         <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z"/>
                                         </svg>
                                     </button>
                                     <button class="btn-delete-policy p-1.5 text-slate-400 hover:text-red-500 hover:bg-red-50 rounded-lg transition-colors"
-                                            data-id="${p.id}" title="ลบ">
+                                            data-id="${pId}" title="ลบ">
                                         <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/>
                                         </svg>
@@ -582,7 +599,7 @@ function setupPolicyPageEventListeners() {
     const currentUser = TSHSession.getUser() || { role: 'User' };
     const isAdmin = currentUser.role?.toLowerCase() === 'admin';
 
-    document.addEventListener('click', async (event) => {
+    document.addEventListener('click', guardActionHandler(async (event) => {
         if (!event.target.closest('#policy-page')) return;
         const t = event.target;
 
@@ -664,6 +681,26 @@ function setupPolicyPageEventListeners() {
             return;
         }
 
+        // Acknowledge all employees (Admin)
+        if (t.closest('#btn-ack-all')) {
+            const btn = t.closest('#btn-ack-all');
+            const policyId = btn?.dataset.id;
+            const confirmed = await showConfirmationModal(
+                'ยืนยันรับทราบแทนทั้งหมด',
+                'ระบบจะบันทึกว่าพนักงานทุกคนในระบบรับทราบนโยบายฉบับนี้แล้ว โดยระบุว่า Admin เป็นผู้ดำเนินการแทน ต้องการดำเนินการต่อหรือไม่?'
+            );
+            if (confirmed) {
+                showLoading('กำลังบันทึกรับทราบแทนทั้งหมด...');
+                try {
+                    const result = await API.post(`/policies/${policyId}/acknowledge-all`, {});
+                    showToast(`บันทึกเพิ่ม ${result.added || 0} คน (มีอยู่แล้ว ${result.skipped || 0} คน)`, 'success');
+                    await loadPolicyPage();
+                } catch (err) { showError(err); }
+                finally { hideLoading(); }
+            }
+            return;
+        }
+
         // View acknowledgement list (Admin)
         if (t.closest('#btn-view-ack')) {
             const policyId = t.closest('#btn-view-ack').dataset.id;
@@ -685,7 +722,7 @@ function setupPolicyPageEventListeners() {
             showDocumentModal(viewDocBtn.href, 'เอกสารแนบนโยบาย');
             return;
         }
-    });
+    }, delegatedActionOptions('policy')));
 
     // Search timeline
     document.addEventListener('input', (event) => {
@@ -706,10 +743,15 @@ function showPolicyForm(rawPolicy = null) {
     const catOptions = categories.map(c =>
         `<option value="${c}" ${policy?.Category === c ? 'selected' : ''}>${c}</option>`
     ).join('');
+    const formId = escHtml(policy?.id || '');
+    const formTitle = escHtml(policy?.PolicyTitle || '');
+    const formEffectiveDate = escHtml(policy?.EffectiveDate ? policy.EffectiveDate.split('T')[0] : '');
+    const formReviewDate = escHtml(policy?.ReviewDate ? policy.ReviewDate.split('T')[0] : '');
+    const formDocumentLink = escHtml(policy?.DocumentLink || '');
 
     const html = `
         <form id="policy-form" class="space-y-4">
-            <input type="hidden" name="id" value="${policy?.id || ''}">
+            <input type="hidden" name="id" value="${formId}">
 
             <div class="bg-emerald-50 border border-emerald-100 rounded-xl p-3 flex gap-2 text-sm text-emerald-700">
                 <svg class="w-4 h-4 flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -724,15 +766,16 @@ function showPolicyForm(rawPolicy = null) {
                     หัวข้อนโยบาย <span class="text-red-500">*</span>
                 </label>
                 <input type="text" name="PolicyTitle" class="form-input w-full"
-                       value="${policy?.PolicyTitle || ''}" required
+                       value="${formTitle}" required
                        placeholder="เช่น นโยบายความปลอดภัย ปี 2568">
             </div>
 
             <!-- Description (RTE) -->
             <div>
                 <label class="block text-sm font-semibold text-slate-700 mb-1.5">รายละเอียด</label>
+                <div class="rte-shell">
                 <!-- Rich text toolbar -->
-                <div class="flex flex-wrap gap-0.5 p-1.5 rounded-t-lg border border-b-0 border-slate-200 bg-slate-50" id="pol-rte-toolbar">
+                <div class="rte-toolbar flex flex-wrap gap-0.5" id="pol-rte-toolbar">
                     <button type="button" data-cmd="bold" title="หนา (Ctrl+B)"
                         class="rte-btn w-7 h-7 rounded flex items-center justify-center text-slate-600 hover:bg-white hover:shadow-sm transition-all">
                         <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="currentColor"><path d="M15.6 10.79c.97-.67 1.65-1.77 1.65-2.79 0-2.26-1.75-4-4-4H7v14h7.04c2.09 0 3.71-1.7 3.71-3.79 0-1.52-.86-2.82-2.15-3.42zM10 6.5h3c.83 0 1.5.67 1.5 1.5s-.67 1.5-1.5 1.5h-3v-3zm3.5 9H10v-3h3.5c.83 0 1.5.67 1.5 1.5s-.67 1.5-1.5 1.5z"/></svg>
@@ -793,7 +836,7 @@ function showPolicyForm(rawPolicy = null) {
                     </button>
                 </div>
                 <!-- Link / Image URL input bar -->
-                <div id="pol-rte-input-bar" class="hidden items-center gap-2 border border-slate-200 border-t-0 bg-slate-50 px-2 py-1.5">
+                <div id="pol-rte-input-bar" class="rte-input-bar hidden items-center gap-2">
                     <span id="pol-rte-input-label" class="text-xs text-slate-500 flex-shrink-0 w-16">URL ลิงก์:</span>
                     <input id="pol-rte-url-input" type="text" placeholder="https://..."
                            class="flex-1 text-xs border border-slate-200 rounded px-2 py-1 bg-white focus:outline-none focus:border-sky-400 focus:ring-1 focus:ring-sky-200">
@@ -805,9 +848,10 @@ function showPolicyForm(rawPolicy = null) {
                 <!-- Editable area -->
                 <div id="pol-desc"
                      contenteditable="true"
-                     class="form-textarea w-full rounded-t-none min-h-[120px] focus:outline-none pol-rte-content"
-                     style="min-height:120px;border-top:0"
+                     class="rte-editor min-h-[120px] pol-rte-content"
+                     style="min-height:120px"
                      data-placeholder="รายละเอียดเพิ่มเติม สาระสำคัญของนโยบาย..."></div>
+                </div>
             </div>
 
             <!-- Category + IsCurrent -->
@@ -838,12 +882,12 @@ function showPolicyForm(rawPolicy = null) {
                         วันที่บังคับใช้ <span class="text-red-500">*</span>
                     </label>
                     <input type="text" id="EffectiveDate" name="EffectiveDate" class="form-input w-full bg-white"
-                           value="${policy?.EffectiveDate ? policy.EffectiveDate.split('T')[0] : ''}" required>
+                           value="${formEffectiveDate}" required>
                 </div>
                 <div>
                     <label class="block text-sm font-semibold text-slate-700 mb-1.5">วันครบ Review</label>
                     <input type="text" id="ReviewDate" name="ReviewDate" class="form-input w-full bg-white"
-                           value="${policy?.ReviewDate ? policy.ReviewDate.split('T')[0] : ''}"
+                           value="${formReviewDate}"
                            placeholder="ไม่บังคับ (default: 1 ปี)">
                 </div>
             </div>
@@ -852,7 +896,7 @@ function showPolicyForm(rawPolicy = null) {
             <div>
                 <label class="block text-sm font-semibold text-slate-700 mb-1.5">ลิงก์เอกสาร (URL)</label>
                 <input type="text" name="DocumentLink" class="form-input w-full"
-                       value="${policy?.DocumentLink || ''}" placeholder="https://...">
+                       value="${formDocumentLink}" placeholder="https://...">
             </div>
 
             <!-- File upload -->
@@ -1018,7 +1062,7 @@ function showPolicyForm(rawPolicy = null) {
         }
     }, 0);
 
-    document.getElementById('policy-form').addEventListener('submit', async (e) => {
+    document.getElementById('policy-form').addEventListener('submit', guardSubmitHandler(async (e) => {
         e.preventDefault();
         const formEl    = e.target;
         const submitBtn = formEl.querySelector('button[type="submit"]');
@@ -1036,8 +1080,8 @@ function showPolicyForm(rawPolicy = null) {
                 const uploadData = new FormData();
                 uploadData.append('document', file);
                 const uploadRes = await API.post('/upload/document', uploadData);
-                if (!uploadRes?.url && !uploadRes?.secure_url) throw new Error('อัปโหลดไฟล์ไม่สำเร็จ');
-                formData.set('DocumentLink', uploadRes.secure_url || uploadRes.url);
+                if (!uploadRes?.url) throw new Error('อัปโหลดไฟล์ไม่สำเร็จ');
+                formData.set('DocumentLink', uploadRes.url);
             }
             formData.delete('PolicyFile');
 
@@ -1063,7 +1107,7 @@ function showPolicyForm(rawPolicy = null) {
             submitBtn.disabled = false;
             submitBtn.textContent = 'บันทึกข้อมูล';
         }
-    });
+    }));
 }
 
 // ─────────────────────────────────────────────
@@ -1115,7 +1159,17 @@ async function showAckListModal(policyId) {
                 <div id="tab-acked" class="max-h-72 overflow-y-auto space-y-1.5">
                     ${acked.length === 0
                         ? `<p class="text-center text-slate-400 py-6 text-sm">ยังไม่มีผู้รับทราบ</p>`
-                        : acked.map(a => `
+                        : acked.map(a => {
+                            const ackName = escHtml(a.UserName || a.UserID || '-');
+                            const ackDepartment = escHtml(a.Department || '—');
+                            const ackSource = a.AckSource === 'admin_all' ? 'Admin รับทราบแทน' : 'รับทราบเอง';
+                            const ackSourceClass = a.AckSource === 'admin_all'
+                                ? 'bg-amber-100 text-amber-700'
+                                : 'bg-emerald-100 text-emerald-700';
+                            const ackAdmin = a.AcknowledgedByAdminName
+                                ? `โดย ${escHtml(a.AcknowledgedByAdminName)}`
+                                : '';
+                            return `
                         <div class="flex items-center justify-between px-3 py-2 rounded-lg bg-emerald-50 border border-emerald-100">
                             <div class="flex items-center gap-2.5">
                                 <div class="w-7 h-7 rounded-full bg-emerald-200 flex items-center justify-center">
@@ -1124,19 +1178,27 @@ async function showAckListModal(policyId) {
                                     </svg>
                                 </div>
                                 <div>
-                                    <p class="text-sm font-semibold text-slate-700">${a.UserName || a.UserID}</p>
-                                    <p class="text-xs text-slate-400">${a.Department || '—'}</p>
+                                    <p class="text-sm font-semibold text-slate-700">${ackName}</p>
+                                    <p class="text-xs text-slate-400">${ackDepartment}</p>
+                                    <div class="mt-1 flex items-center gap-1.5">
+                                        <span class="inline-flex px-1.5 py-0.5 rounded text-[10px] font-semibold ${ackSourceClass}">${ackSource}</span>
+                                        ${ackAdmin ? `<span class="text-[10px] text-slate-400">${ackAdmin}</span>` : ''}
+                                    </div>
                                 </div>
                             </div>
                             <span class="text-xs text-slate-400">${formatDateTime(a.AcknowledgedAt)}</span>
-                        </div>`).join('')}
+                        </div>`;
+                        }).join('')}
                 </div>
 
                 <!-- Tab: Not Acked -->
                 <div id="tab-notacked" class="hidden max-h-72 overflow-y-auto space-y-1.5">
                     ${notAcked.length === 0
                         ? `<p class="text-center text-slate-400 py-6 text-sm">ทุกคนรับทราบแล้ว</p>`
-                        : notAcked.map(e => `
+                        : notAcked.map(e => {
+                            const empName = escHtml(e.Name || e.EmployeeID || '-');
+                            const empDepartment = escHtml(e.Department || '—');
+                            return `
                         <div class="flex items-center gap-2.5 px-3 py-2 rounded-lg bg-red-50 border border-red-100">
                             <div class="w-7 h-7 rounded-full bg-red-100 flex items-center justify-center">
                                 <svg class="w-3.5 h-3.5 text-red-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -1144,10 +1206,11 @@ async function showAckListModal(policyId) {
                                 </svg>
                             </div>
                             <div>
-                                <p class="text-sm font-semibold text-slate-700">${e.Name || e.EmployeeID}</p>
-                                <p class="text-xs text-slate-400">${e.Department || '—'}</p>
+                                <p class="text-sm font-semibold text-slate-700">${empName}</p>
+                                <p class="text-xs text-slate-400">${empDepartment}</p>
                             </div>
-                        </div>`).join('')}
+                        </div>`;
+                        }).join('')}
                 </div>
 
                 <div class="flex justify-end pt-2 border-t border-slate-100">
@@ -1189,6 +1252,8 @@ async function exportAckExcel(policyId) {
             'ชื่อ':          a.UserName || '',
             'แผนก':         a.Department || '',
             'วันที่รับทราบ': a.AcknowledgedAt ? new Date(a.AcknowledgedAt).toLocaleString('th-TH') : '',
+            'ช่องทาง':       a.AckSource === 'admin_all' ? 'Admin รับทราบแทน' : 'รับทราบเอง',
+            'Admin ผู้ดำเนินการ': a.AcknowledgedByAdminName || '',
         }));
         const ws1 = XLSX.utils.json_to_sheet(ackedRows.length ? ackedRows : [{ 'ข้อมูล': 'ยังไม่มีผู้รับทราบ' }]);
         XLSX.utils.book_append_sheet(wb, ws1, 'รับทราบแล้ว');
@@ -1219,6 +1284,9 @@ function printPolicy(policy) {
     if (!policy) return;
     const p    = normalizeApiObject(policy);
     const year = p.EffectiveDate ? new Date(p.EffectiveDate).getFullYear() + 543 : '-';
+    const printTitle = escHtml(p.PolicyTitle || '');
+    const printCategory = escHtml(p.Category || '');
+    const printDescription = _sanitizeHtml(p.Description || '');
     const win  = window.open('', '_blank', 'width=800,height=600');
     win.document.open();
     win.document.write(`
@@ -1259,13 +1327,13 @@ function printPolicy(policy) {
                 <p class="company">Safety Policy Document</p>
             </div>
         </div>
-        <div class="badge">Rev.${p.version || allPolicies.length} · ฉบับปัจจุบัน${p.Category ? ` · ${p.Category}` : ''}</div>
-        <h1>${p.PolicyTitle || ''}</h1>
+        <div class="badge">Rev.${p.version || allPolicies.length} · ฉบับปัจจุบัน${p.Category ? ` · ${printCategory}` : ''}</div>
+        <h1>${printTitle}</h1>
         <p class="meta">
             วันที่บังคับใช้: ${formatDate(p.EffectiveDate)} (พ.ศ. ${year})
             ${p.ReviewDate ? ` &nbsp;|&nbsp; วัน Review: ${formatDate(p.ReviewDate)}` : ''}
         </p>
-        ${p.Description ? `<div class="desc-box">${p.Description}</div>` : ''}
+        ${printDescription ? `<div class="desc-box">${printDescription}</div>` : ''}
         <div class="footer">
             <span>พิมพ์เมื่อ: ${new Date().toLocaleString('th-TH')}</span>
             <span>เอกสารฉบับนี้ออกโดยระบบ TSH Safety Core</span>

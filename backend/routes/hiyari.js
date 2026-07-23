@@ -7,11 +7,17 @@ const router  = express.Router();
 const db      = require('../db');
 const multer  = require('multer');
 const { randomUUID } = require('crypto');
+const fs = require('fs');
+const path = require('path');
 const { isAdmin } = require('../middleware/auth');
-const { storage: cloudinaryStorage, fileFilter } = require('../cloudinary');
+const { storage: uploadStorage, fileFilter, deleteLocalUpload, uploadsDir } = require('../storage');
+const { ensureAuditTable, logAudit } = require('../utils/audit');
+const { sendMail, smtpConfigured } = require('../utils/email');
+const { ensureEmployeeCompanyEmailColumn } = require('../utils/company-email');
+const { buildHiyariEmail } = require('../utils/hiyari-email-template');
 
 const upload = multer({
-    storage: cloudinaryStorage,
+    storage: uploadStorage,
     fileFilter,
     limits: { fileSize: 20 * 1024 * 1024 },
 });
@@ -19,6 +25,20 @@ const upload = multer({
 const VALID_RISK   = ['Low', 'Medium', 'High', 'Critical'];
 const VALID_RANKS  = ['A', 'B', 'C'];
 const VALID_STATUS = ['Open', 'In Progress', 'Closed'];
+const VALID_REVIEW_STATUS = ['PendingReview', 'Approved', 'Rejected', 'Completed'];
+const VALID_STOP_TYPES = [1, 2, 3, 4, 5, 6];
+const EXCEL_MIME_TYPES = new Set([
+    'application/vnd.ms-excel',
+    'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+]);
+const SUPPORTING_FILE_MIME_TYPES = new Set([
+    'application/pdf',
+    'image/jpeg',
+    'image/png',
+    'image/webp',
+]);
+const COMPANY_EMAIL_DOMAIN = '@thaisummit-harness.co.th';
+const DEFAULT_HIYARI_ADMIN_EMAIL = 'sattaya_w@thaisummit-harness.co.th';
 const VALID_CONSQ  = [
     'บาดเจ็บเล็กน้อย','บาดเจ็บรุนแรง','เสียชีวิต',
     'ทรัพย์สินเสียหาย','ผลกระทบต่อสิ่งแวดล้อม',
@@ -26,6 +46,365 @@ const VALID_CONSQ  = [
 ];
 // Rank → canonical RiskLevel for backward-compat with history filter
 const RANK_TO_RISK = { A: 'Critical', B: 'High', C: 'Low' };
+const ACTIVE_REPORT = 'DeletedAt IS NULL';
+
+function userName(req) {
+    return req.user?.name || req.user?.EmployeeName || req.user?.id || req.user?.EmployeeID || 'System';
+}
+
+function userId(req) {
+    return req.user?.id || req.user?.EmployeeID || req.user?.employeeId || 'unknown';
+}
+
+function isRequestAdmin(req) {
+    return String(req.user?.role || req.user?.Role || '').toLowerCase() === 'admin';
+}
+
+function appendHiyariVisibility(sql, params, req, alias = '') {
+    if (isRequestAdmin(req)) return { sql, params };
+    const prefix = alias ? `${alias}.` : '';
+    const requester = String(userId(req));
+    sql += ` AND (${prefix}ReporterID = ? OR ${prefix}SubmittedByID = ? OR ${prefix}Status = 'Closed')`;
+    params.push(requester, requester);
+    return { sql, params };
+}
+
+function isHiyariOwner(req, report) {
+    const requester = String(userId(req));
+    return requester === String(report?.ReporterID || '')
+        || requester === String(report?.SubmittedByID || '');
+}
+
+function sanitizeHiyariReportForViewer(req, report) {
+    if (isRequestAdmin(req) || isHiyariOwner(req, report)) return report;
+    const safe = { ...report, IsLearningRecord: true, ReadOnly: true };
+    for (const field of [
+        'CompanyEmail', 'SubmittedByEmail', 'EmailRecipients', 'AttachmentUrl', 'AdditionalFileUrl',
+        'AdminComment', 'ReviewOverrideReason', 'ReviewOverrideBy', 'ReviewOverrideAt',
+        'ReviewedBy', 'ClosedBy', 'ReopenedBy', 'DeletedBy', 'ReopenReason',
+    ]) safe[field] = null;
+    safe.ReporterID = null;
+    safe.SubmittedByID = null;
+    safe.SubmittedByName = null;
+    safe.revisions = [];
+    return safe;
+}
+
+function getHiyariAdminEmail() {
+    return (process.env.HIYARI_ADMIN_EMAIL || process.env.ADMIN_EMAIL || DEFAULT_HIYARI_ADMIN_EMAIL).trim();
+}
+
+function normalizeCompanyEmail(email) {
+    return String(email || '').trim().toLowerCase();
+}
+
+function isValidCompanyEmail(email) {
+    const normalized = normalizeCompanyEmail(email);
+    return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(normalized) && normalized.endsWith(COMPANY_EMAIL_DOMAIN);
+}
+
+async function getEmployeeCompanyEmail(employeeId) {
+    const id = String(employeeId || '').trim();
+    if (!id) return null;
+    await ensureEmployeeCompanyEmailColumn(db);
+    const [rows] = await db.query(
+        `SELECT CompanyEmail FROM Employees
+         WHERE EmployeeID = ? AND CompanyEmail IS NOT NULL AND TRIM(CompanyEmail) <> ''
+         LIMIT 1`,
+        [id]
+    );
+    const email = normalizeCompanyEmail(rows[0]?.CompanyEmail);
+    return isValidCompanyEmail(email) ? email : null;
+}
+
+async function resolveReporterCompanyEmail(reporterId, submittedEmail) {
+    const masterEmail = await getEmployeeCompanyEmail(reporterId);
+    if (masterEmail) return masterEmail;
+    const fallbackEmail = normalizeCompanyEmail(submittedEmail);
+    return isValidCompanyEmail(fallbackEmail) ? fallbackEmail : null;
+}
+
+function isExcelUpload(file) {
+    return Boolean(file && (EXCEL_MIME_TYPES.has(file.mimetype) || /\.(xls|xlsx)$/i.test(file.originalname || '')));
+}
+
+function isPdfUpload(file) {
+    return Boolean(file && (file.mimetype === 'application/pdf' || /\.pdf$/i.test(file.originalname || '')));
+}
+
+function isSupportingUpload(file) {
+    return Boolean(file && (
+        SUPPORTING_FILE_MIME_TYPES.has(file.mimetype)
+        || /\.(pdf|jpe?g|png|webp)$/i.test(file.originalname || '')
+    ));
+}
+
+async function queueHiyariEmail({ to, subject, body, html, reportId, eventType }) {
+    const recipients = String(to || '').split(',').map(v => v.trim()).filter(Boolean);
+    if (!recipients.length) return { status: 'SkippedNoRecipient' };
+    const insertResult = await db.query(
+        `INSERT INTO Hiyari_EmailOutbox (ReportID, EventType, Recipients, Subject, Body, HtmlBody, Status)
+         VALUES (?, ?, ?, ?, ?, ?, 'Queued')`,
+        [reportId || null, eventType || 'General', recipients.join(','), subject, body, html || null]
+    ).catch(err => {
+        console.error('[hiyari/email] queue failed:', err.message);
+        return null;
+    });
+    const result = insertResult?.[0];
+    const outboxId = result?.insertId;
+    if (!outboxId) return { status: 'QueueFailed' };
+    if (!smtpConfigured()) {
+        console.log(`[hiyari/email queued] ${eventType || 'General'} -> ${recipients.join(', ')} | ${subject}`);
+        return { status: 'Queued', outboxId };
+    }
+    try {
+        await sendMail({ to: recipients.join(','), subject, text: body, html });
+        if (outboxId) {
+            await db.query(
+                `UPDATE Hiyari_EmailOutbox SET Status = 'Sent', SentAt = NOW(), Error = NULL, LastAttemptAt=NOW() WHERE id = ?`,
+                [outboxId]
+            );
+        }
+        console.log(`[hiyari/email sent] ${eventType || 'General'} -> ${recipients.join(', ')} | ${subject}`);
+        return { status: 'Sent', outboxId };
+    } catch (err) {
+        if (outboxId) {
+            await db.query(
+                `UPDATE Hiyari_EmailOutbox SET Status = 'Failed', Error = ?, LastAttemptAt=NOW(), LastFailureAt=NOW() WHERE id = ?`,
+                [err.message, outboxId]
+            ).catch(updateErr => console.error('[hiyari/email] status update failed:', updateErr.message));
+        }
+        console.error('[hiyari/email] send failed:', err.message);
+        return { status: 'Failed', outboxId, error: err.message };
+    }
+}
+
+function hiyariMailSubject(action, detail = '') {
+    return `[Hiyari-Hatto] ${action}${detail ? ` - ${detail}` : ''}`;
+}
+
+function hiyariCorporateMail({ subject, title, tone, greeting, intro, details, actions, note }) {
+    const rendered = buildHiyariEmail({
+        title,
+        tone,
+        greeting,
+        intro,
+        details,
+        actions,
+        note,
+        footerNote: 'อีเมลฉบับนี้เป็นการแจ้งเตือนอัตโนมัติจากระบบ TSH Safety Core Activity กรุณาอย่าตอบกลับอีเมลนี้',
+    });
+    return { subject, body: rendered.text, html: rendered.html };
+}
+
+function buildAdminNewReportEmail({ reportId, reporterName, reporterId, department, submitterName, date, companyEmail, location, rank, stopType }) {
+    return hiyariCorporateMail({
+        subject: hiyariMailSubject('มีรายงานใหม่รอตรวจสอบ Excel', reporterName),
+        title: 'มีรายงาน Hiyari-Hatto ใหม่ รอตรวจสอบ',
+        tone: 'pending',
+        greeting: 'เรียน ผู้ดูแลระบบความปลอดภัย',
+        intro: [
+            'ระบบได้รับรายงาน Hiyari-Hatto / Near-Miss ฉบับใหม่ และรอการตรวจสอบไฟล์ Excel',
+            'กรุณาตรวจสอบไฟล์ Excel ที่แนบมา ตรวจความครบถ้วนของข้อมูล และบันทึกผลการตรวจในระบบ',
+        ],
+        details: [
+            { label: 'เลขที่รายงาน', value: reportId, highlight: true },
+            { label: 'ผู้รายงาน', value: reporterName, highlight: true },
+            { label: 'รหัสพนักงาน', value: reporterId },
+            { label: 'แผนก', value: department },
+            { label: 'ผู้ส่งข้อมูล', value: submitterName },
+            { label: 'วันที่รายงาน', value: date },
+            { label: 'พื้นที่', value: location },
+            { label: 'ประเภทอันตราย', value: stopType ? `Stop ${stopType}` : '-' },
+            { label: 'ระดับความรุนแรง', value: rank, highlight: true },
+            { label: 'อีเมลแจ้งผล', value: companyEmail },
+        ],
+        actions: [
+            'เปิดเมนู Hiyari-Hatto > จัดการ > ตรวจรายงาน',
+            'เปิดไฟล์ Excel ที่แนบมาและตรวจสอบความครบถ้วนของข้อมูล',
+            'บันทึกผลเป็น ผ่านการตรวจสอบ หรือ ตีกลับเพื่อแก้ไข พร้อมหมายเหตุที่ชัดเจน',
+        ],
+        note: 'อีเมลนี้ถูกส่งถึง Safety Admin เนื่องจากมีรายงาน Near-Miss ใหม่เข้าสู่ขั้นตอนตรวจสอบ Excel',
+    });
+}
+
+function buildUserReviewEmail({ reporterName, reviewStatus, reviewComment }) {
+    const approved = reviewStatus === 'Approved';
+    return hiyariCorporateMail({
+        subject: approved
+            ? hiyariMailSubject('ผลการตรวจรายงานผ่านแล้ว กรุณาดำเนินการลงนาม')
+            : hiyariMailSubject('รายงานต้องแก้ไขก่อนดำเนินการต่อ'),
+        title: approved ? 'รายงาน Hiyari ผ่านการตรวจสอบแล้ว' : 'รายงาน Hiyari ต้องแก้ไขเพิ่มเติม',
+        tone: approved ? 'approved' : 'rejected',
+        greeting: `เรียน คุณ${reporterName || 'ผู้รายงาน'}`,
+        intro: approved
+            ? [
+                'รายงาน Hiyari-Hatto / Near-Miss ของท่านผ่านการตรวจสอบไฟล์ Excel แล้ว',
+                'กรุณาพิมพ์รายงาน ดำเนินการลงนามตามขั้นตอน และอัปโหลดไฟล์ PDF ที่ลงนามแล้วกลับเข้าสู่ระบบ',
+            ]
+            : [
+                'รายงาน Hiyari-Hatto / Near-Miss ของท่านยังไม่ผ่านการตรวจสอบไฟล์ Excel และต้องแก้ไขเพิ่มเติม',
+                'กรุณาตรวจสอบหมายเหตุจาก Safety Admin แก้ไขไฟล์ Excel ให้ถูกต้อง และประสานงานเพิ่มเติมหากจำเป็น',
+            ],
+        details: [
+            { label: 'ผลการตรวจ', value: approved ? 'ผ่านการตรวจสอบ' : 'ตีกลับเพื่อแก้ไข', highlight: true },
+            { label: 'หมายเหตุจากผู้ตรวจ', value: reviewComment || '-' },
+        ],
+        actions: approved
+            ? ['อัปโหลดไฟล์ PDF ที่ลงนามแล้วในเมนู Hiyari-Hatto หลังดำเนินการลงนามครบถ้วน']
+            : ['แก้ไขไฟล์ Excel ตามหมายเหตุจากผู้ตรวจ', 'ประสาน Safety Admin หากต้องการข้อมูลหรือคำชี้แจงเพิ่มเติม'],
+        note: approved
+            ? 'รายงานนี้เข้าสู่ขั้นตอนส่ง PDF ที่ลงนามแล้ว'
+            : 'รายงานนี้ยังอยู่ในขั้นตอนแก้ไขจนกว่าข้อมูลจะครบถ้วน',
+    });
+}
+
+async function resolveHiyariUserRecipients(report = {}) {
+    const ownerEmail = await resolveReporterCompanyEmail(report.ReporterID, report.CompanyEmail);
+    const submittedById = String(report.SubmittedByID || '').trim();
+    const reporterId = String(report.ReporterID || '').trim();
+    const submitterEmail = submittedById && submittedById !== reporterId
+        ? await getEmployeeCompanyEmail(submittedById)
+        : null;
+    const emails = [ownerEmail, submitterEmail]
+        .map(normalizeCompanyEmail)
+        .filter(isValidCompanyEmail)
+        .filter((email, index, list) => list.indexOf(email) === index);
+    return { emails, recipients: emails.join(','), ownerEmail, submitterEmail };
+}
+
+function buildUserSubmissionConfirmationEmail({ reportId, reporterName, submitterName, date, rank, direct = false }) {
+    return hiyariCorporateMail({
+        subject: direct
+            ? hiyariMailSubject('ระบบได้รับรายงานพร้อม Signed PDF แล้ว', reportId)
+            : hiyariMailSubject('ระบบได้รับรายงานแล้ว', reportId),
+        title: direct ? 'ส่งรายงาน Hiyari พร้อม Signed PDF สำเร็จ' : 'ส่งรายงาน Hiyari สำเร็จ',
+        tone: direct ? 'completed' : 'pending',
+        greeting: `เรียน คุณ${reporterName || 'ผู้รายงาน'}`,
+        intro: direct
+            ? ['ระบบได้รับรายงาน Hiyari-Hatto / Near-Miss พร้อม Signed PDF แล้ว และส่งต่อให้ Safety Admin ตรวจสอบเพื่อปิดงาน']
+            : ['ระบบได้รับรายงาน Hiyari-Hatto / Near-Miss แล้ว และส่งต่อให้ Safety Admin ตรวจสอบไฟล์ Excel'],
+        details: [
+            { label: 'เลขที่รายงาน', value: reportId, highlight: true },
+            { label: 'ผู้รายงาน', value: reporterName },
+            { label: 'ผู้ส่งข้อมูล', value: submitterName },
+            { label: 'วันที่รายงาน', value: date },
+            { label: 'ระดับความรุนแรง', value: rank, highlight: true },
+            { label: 'สถานะ', value: direct ? 'Signed PDF submitted / รอ Admin ปิดงาน' : 'Pending review / รอตรวจ Excel', highlight: true },
+        ],
+        actions: ['ติดตามสถานะล่าสุดได้จากเมนู Hiyari-Hatto ในระบบ Safety Core'],
+        note: 'อีเมลฉบับนี้เป็นหลักฐานยืนยันว่าระบบได้รับรายงานเรียบร้อยแล้ว',
+    });
+}
+
+function buildUserCompletedEmail({ reportId, reporterName }) {
+    return hiyariCorporateMail({
+        subject: hiyariMailSubject('ได้รับ Signed PDF และดำเนินขั้นตอนเอกสารครบแล้ว', reportId),
+        title: 'ระบบได้รับ Signed PDF เรียบร้อยแล้ว',
+        tone: 'completed',
+        greeting: `เรียน คุณ${reporterName || 'ผู้รายงาน'}`,
+        intro: [
+            'ระบบได้รับไฟล์ PDF ที่ลงนามแล้วสำหรับรายงาน Hiyari-Hatto / Near-Miss เรียบร้อยแล้ว',
+            'ไม่ต้องอัปโหลดไฟล์ซ้ำ กรุณารอติดตามการตรวจสอบและการปิดงานจาก Safety Admin',
+        ],
+        details: [
+            { label: 'เลขที่รายงาน', value: reportId, highlight: true },
+            { label: 'สถานะเอกสาร', value: 'Signed PDF received / Completed', highlight: true },
+        ],
+        actions: ['ติดตามสถานะปิดงานได้จากเมนู Hiyari-Hatto ในระบบ Safety Core'],
+        note: 'หากต้องแก้ไขเอกสาร โปรดติดต่อ Safety Admin ก่อนอัปโหลดฉบับใหม่',
+    });
+}
+
+function buildUserOverrideApprovalEmail({ reporterName, overrideReason, approvedBy }) {
+    return hiyariCorporateMail({
+        subject: hiyariMailSubject('Admin อนุญาตให้ส่ง PDF ที่ลงนามแล้ว'),
+        title: 'Admin อนุญาตให้ส่ง PDF ที่ลงนามแล้ว',
+        tone: 'approved',
+        greeting: `เรียน คุณ${reporterName || 'ผู้รายงาน'}`,
+        intro: [
+            'Safety Admin ได้อนุญาตให้รายงาน Hiyari-Hatto / Near-Miss ของท่านเข้าสู่ขั้นตอนส่ง PDF ที่ลงนามแล้ว โดยใช้สิทธิ์ Admin Override',
+            'กรุณาพิมพ์รายงาน ดำเนินการลงนามตามขั้นตอนภายใน และอัปโหลดไฟล์ PDF ที่ลงนามแล้วกลับเข้าสู่ระบบ',
+        ],
+        details: [
+            { label: 'ผู้อนุญาต', value: approvedBy, highlight: true },
+            { label: 'เหตุผล', value: overrideReason || '-' },
+        ],
+        actions: ['อัปโหลดไฟล์ PDF ที่ลงนามแล้วในเมนู Hiyari-Hatto หลังลงนามครบถ้วน'],
+        note: 'การอนุญาตกรณีพิเศษนี้ถูกบันทึกผู้อนุญาต เหตุผล และเวลาไว้เพื่อการตรวจสอบย้อนหลัง',
+    });
+}
+
+function buildAdminSignedFileEmail({ reportId, reporterName }) {
+    return hiyariCorporateMail({
+        subject: hiyariMailSubject('ผู้รายงานอัปโหลด PDF ที่ลงนามแล้ว', reporterName),
+        title: 'มีการอัปโหลด PDF ที่ลงนามแล้ว',
+        tone: 'completed',
+        greeting: 'เรียน ผู้ดูแลระบบความปลอดภัย',
+        intro: [
+            'ผู้รายงานได้อัปโหลดไฟล์ PDF ที่ลงนามแล้วสำหรับรายงาน Hiyari-Hatto / Near-Miss',
+            'กรุณาตรวจสอบเอกสารฉบับลงนาม และดำเนินการปิดงานเมื่อข้อมูลครบถ้วน',
+        ],
+        details: [
+            { label: 'เลขที่รายงาน', value: reportId, highlight: true },
+            { label: 'ผู้รายงาน', value: reporterName, highlight: true },
+        ],
+        actions: [
+            'เปิดรายละเอียดรายงานในเมนู Hiyari-Hatto',
+            'ตรวจสอบไฟล์ PDF ที่ลงนามแล้ว',
+            'บันทึก Corrective Action / Admin Comment และปิดรายงานเมื่อครบถ้วน',
+        ],
+        note: 'อีเมลนี้ถูกส่งถึง Safety Admin เมื่อผู้รายงานอัปโหลด PDF ที่ลงนามแล้วผ่าน workflow ปกติหรือ direct PDF',
+    });
+}
+
+function buildUserStatusEmail({ reporterName, status, correctiveAction, adminComment }) {
+    const closed = status === 'Closed';
+    return hiyariCorporateMail({
+        subject: closed
+            ? hiyariMailSubject('ปิดรายงานเรียบร้อยแล้ว')
+            : hiyariMailSubject('รายงานถูกเปิดกลับเพื่อดำเนินการต่อ'),
+        title: closed ? 'ปิดรายงาน Hiyari เรียบร้อยแล้ว' : 'รายงาน Hiyari ถูกเปิดกลับเพื่อดำเนินการต่อ',
+        tone: closed ? 'completed' : 'pending',
+        greeting: `เรียน คุณ${reporterName || 'ผู้รายงาน'}`,
+        intro: closed
+            ? [
+                'รายงาน Hiyari-Hatto / Near-Miss ของท่านได้รับการดำเนินการและปิดรายงานเรียบร้อยแล้ว',
+                'ไม่ต้องดำเนินการเพิ่มเติม เว้นแต่ Safety Admin ติดต่อขอข้อมูลเพิ่มเติม',
+            ]
+            : [
+                'รายงาน Hiyari-Hatto / Near-Miss ของท่านถูกเปิดกลับเพื่อดำเนินการเพิ่มเติม',
+                'กรุณาติดตามสถานะในระบบ หรือประสาน Safety Admin ตามหมายเหตุด้านล่าง',
+            ],
+        details: [
+            { label: 'สถานะปัจจุบัน', value: closed ? 'ปิดรายงานแล้ว' : `${status} / เปิดดำเนินการต่อ`, highlight: true },
+            { label: 'Corrective Action', value: correctiveAction || '-' },
+            { label: 'หมายเหตุจากผู้ดูแลระบบ', value: adminComment || '-' },
+        ],
+        actions: closed
+            ? []
+            : ['ตรวจสอบสถานะล่าสุดในเมนู Hiyari-Hatto', 'ประสาน Safety Admin หากต้องดำเนินการเพิ่มเติม'],
+        note: closed
+            ? 'รายงานนี้ดำเนินการครบตามขั้นตอน Hiyari close-out แล้ว'
+            : 'รายงานนี้ถูกเปิดกลับและอาจต้องติดตามเพิ่มเติม',
+    });
+}
+
+function isValidDateOnly(value) {
+    if (!value || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
+    const [year, month, day] = value.split('-').map(Number);
+    const d = new Date(year, month - 1, day);
+    if (Number.isNaN(d.getTime())) return false;
+    return d.getFullYear() === year && d.getMonth() === month - 1 && d.getDate() === day;
+}
+
+function todayDateOnly() {
+    const now = new Date();
+    const yyyy = now.getFullYear();
+    const mm = String(now.getMonth() + 1).padStart(2, '0');
+    const dd = String(now.getDate()).padStart(2, '0');
+    return `${yyyy}-${mm}-${dd}`;
+}
 
 // ─────────────────────────────────────────────────────────────────────────────
 // ENSURE TABLES
@@ -34,6 +413,8 @@ let tablesReady = false;
 async function ensureTables() {
     if (tablesReady) return;
 
+    await ensureEmployeeCompanyEmailColumn(db);
+
     await db.query(`
         CREATE TABLE IF NOT EXISTS HiyariReports (
             id                   VARCHAR(36)  NOT NULL PRIMARY KEY,
@@ -41,6 +422,10 @@ async function ensureTables() {
             ReporterID           VARCHAR(50)  NOT NULL,
             ReporterName         VARCHAR(100) NOT NULL,
             Department           VARCHAR(100) NOT NULL,
+            SubmittedByID        VARCHAR(50),
+            SubmittedByName      VARCHAR(100),
+            IsSubmittedOnBehalf  TINYINT(1)   NOT NULL DEFAULT 0,
+            CompanyEmail         VARCHAR(255),
             Location             VARCHAR(255),
             Description          TEXT         NOT NULL,
             PotentialConsequence VARCHAR(100),
@@ -50,11 +435,25 @@ async function ensureTables() {
             Suggestion           TEXT,
             AttachmentUrl        TEXT,
             Status               VARCHAR(20)  NOT NULL DEFAULT 'Open',
+            ReviewStatus         VARCHAR(30)  NOT NULL DEFAULT 'PendingReview',
+            ReviewComment        TEXT,
+            ReviewedAt           DATETIME,
+            ReviewedBy           VARCHAR(100),
+            ReviewOverrideReason TEXT,
+            ReviewOverrideBy     VARCHAR(100),
+            ReviewOverrideAt     DATETIME,
+            SignedFileUrl        TEXT,
+            SignedUploadedAt     DATETIME,
             CorrectiveAction     TEXT,
             AdminComment         TEXT,
             AdditionalFileUrl    TEXT,
             ClosedAt             DATETIME,
             ClosedBy             VARCHAR(100),
+            ReopenReason         TEXT,
+            ReopenedAt           DATETIME,
+            ReopenedBy           VARCHAR(100),
+            DeletedAt            DATETIME,
+            DeletedBy            VARCHAR(100),
             CreatedAt            DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
             UpdatedAt            TIMESTAMP    DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
             KEY idx_status (Status),
@@ -62,7 +461,10 @@ async function ensureTables() {
             KEY idx_date (ReportDate),
             KEY idx_risk (RiskLevel),
             KEY idx_rank (RiskRank),
-            KEY idx_stop (StopType)
+            KEY idx_stop (StopType),
+            KEY idx_review (ReviewStatus),
+            KEY idx_email (CompanyEmail),
+            KEY idx_deleted (DeletedAt)
         )
     `);
 
@@ -71,9 +473,30 @@ async function ensureTables() {
     await db.query('ALTER TABLE HiyariReports CHANGE COLUMN `Rank` `RiskRank` VARCHAR(1)').catch(() => {});
     await db.query('ALTER TABLE HiyariReports ADD COLUMN RiskRank VARCHAR(1)').catch(() => {});
     await db.query('ALTER TABLE HiyariReports ADD COLUMN StopType INT').catch(() => {});
+    await db.query('ALTER TABLE HiyariReports ADD COLUMN SubmittedByID VARCHAR(50)').catch(() => {});
+    await db.query('ALTER TABLE HiyariReports ADD COLUMN SubmittedByName VARCHAR(100)').catch(() => {});
+    await db.query('ALTER TABLE HiyariReports ADD COLUMN IsSubmittedOnBehalf TINYINT(1) NOT NULL DEFAULT 0').catch(() => {});
+    await db.query('ALTER TABLE HiyariReports ADD COLUMN CompanyEmail VARCHAR(255)').catch(() => {});
+    await db.query("ALTER TABLE HiyariReports ADD COLUMN ReviewStatus VARCHAR(30) NOT NULL DEFAULT 'PendingReview'").catch(() => {});
+    await db.query('ALTER TABLE HiyariReports ADD COLUMN ReviewComment TEXT').catch(() => {});
+    await db.query('ALTER TABLE HiyariReports ADD COLUMN ReviewedAt DATETIME').catch(() => {});
+    await db.query('ALTER TABLE HiyariReports ADD COLUMN ReviewedBy VARCHAR(100)').catch(() => {});
+    await db.query('ALTER TABLE HiyariReports ADD COLUMN ReviewOverrideReason TEXT').catch(() => {});
+    await db.query('ALTER TABLE HiyariReports ADD COLUMN ReviewOverrideBy VARCHAR(100)').catch(() => {});
+    await db.query('ALTER TABLE HiyariReports ADD COLUMN ReviewOverrideAt DATETIME').catch(() => {});
+    await db.query('ALTER TABLE HiyariReports ADD COLUMN SignedFileUrl TEXT').catch(() => {});
+    await db.query('ALTER TABLE HiyariReports ADD COLUMN SignedUploadedAt DATETIME').catch(() => {});
+    await db.query('ALTER TABLE HiyariReports ADD COLUMN ReopenReason TEXT').catch(() => {});
+    await db.query('ALTER TABLE HiyariReports ADD COLUMN ReopenedAt DATETIME').catch(() => {});
+    await db.query('ALTER TABLE HiyariReports ADD COLUMN ReopenedBy VARCHAR(100)').catch(() => {});
+    await db.query('ALTER TABLE HiyariReports ADD COLUMN DeletedAt DATETIME').catch(() => {});
+    await db.query('ALTER TABLE HiyariReports ADD COLUMN DeletedBy VARCHAR(100)').catch(() => {});
     // Re-create index on renamed column (drop is idempotent — catch if already gone)
     await db.query('ALTER TABLE HiyariReports DROP INDEX idx_rank').catch(() => {});
     await db.query('ALTER TABLE HiyariReports ADD INDEX idx_rank (RiskRank)').catch(() => {});
+    await db.query('ALTER TABLE HiyariReports ADD INDEX idx_review (ReviewStatus)').catch(() => {});
+    await db.query('ALTER TABLE HiyariReports ADD INDEX idx_email (CompanyEmail)').catch(() => {});
+    await db.query('ALTER TABLE HiyariReports ADD INDEX idx_deleted (DeletedAt)').catch(() => {});
 
     await db.query(`
         CREATE TABLE IF NOT EXISTS Hiyari_Dashboard_Config (
@@ -85,11 +508,29 @@ async function ensureTables() {
     `);
 
     await db.query(`
+        CREATE TABLE IF NOT EXISTS Hiyari_Report_Revisions (
+            id                    INT AUTO_INCREMENT PRIMARY KEY,
+            ReportID              VARCHAR(36) NOT NULL,
+            RevisionNo            INT NOT NULL,
+            PreviousAttachmentUrl TEXT,
+            ReplacementAttachmentUrl TEXT NOT NULL,
+            ReviewComment         TEXT,
+            UploadedByID          VARCHAR(50),
+            UploadedByName        VARCHAR(100),
+            UploadedAt            DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE KEY uq_report_revision (ReportID, RevisionNo),
+            KEY idx_report (ReportID),
+            KEY idx_uploaded_at (UploadedAt)
+        )
+    `);
+
+    await db.query(`
         CREATE TABLE IF NOT EXISTS Hiyari_Assignments (
             id           INT AUTO_INCREMENT PRIMARY KEY,
             EmployeeID   VARCHAR(50),
             AssigneeName VARCHAR(100) NOT NULL,
             Department   VARCHAR(100),
+            AllowDirectSignedPdf TINYINT(1) NOT NULL DEFAULT 0,
             Note         TEXT,
             DueDate      DATE,
             CreatedBy    VARCHAR(100),
@@ -98,14 +539,104 @@ async function ensureTables() {
             UNIQUE KEY uq_emp (EmployeeID)
         )
     `);
+    await db.query('ALTER TABLE Hiyari_Assignments ADD COLUMN AllowDirectSignedPdf TINYINT(1) NOT NULL DEFAULT 0').catch(() => {});
+
+    await db.query(`
+        CREATE TABLE IF NOT EXISTS Hiyari_EmailOutbox (
+            id          INT AUTO_INCREMENT PRIMARY KEY,
+            ReportID    VARCHAR(36),
+            EventType   VARCHAR(50),
+            Recipients  TEXT,
+            Subject     VARCHAR(255),
+            Body        TEXT,
+            HtmlBody    MEDIUMTEXT,
+            Status      VARCHAR(30) NOT NULL DEFAULT 'Queued',
+            Error       TEXT,
+            RetryCount  INT NOT NULL DEFAULT 0,
+            LastAttemptAt DATETIME,
+            LastFailureAt DATETIME,
+            CreatedAt   DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            SentAt      DATETIME,
+            KEY idx_report (ReportID),
+            KEY idx_status (Status)
+        )
+    `);
+    await db.query('ALTER TABLE Hiyari_EmailOutbox ADD COLUMN HtmlBody MEDIUMTEXT AFTER Body').catch(() => {});
+    await db.query('ALTER TABLE Hiyari_EmailOutbox ADD COLUMN RetryCount INT NOT NULL DEFAULT 0 AFTER Error').catch(() => {});
+    await db.query('ALTER TABLE Hiyari_EmailOutbox ADD COLUMN LastAttemptAt DATETIME AFTER RetryCount').catch(() => {});
+    await db.query('ALTER TABLE Hiyari_EmailOutbox ADD COLUMN LastFailureAt DATETIME AFTER LastAttemptAt').catch(() => {});
 
     tablesReady = true;
+}
+
+async function loadHiyariRevisions(reportId) {
+    const [rows] = await db.query(
+        `SELECT id, ReportID, RevisionNo, PreviousAttachmentUrl, ReplacementAttachmentUrl,
+                ReviewComment, UploadedByID, UploadedByName, UploadedAt
+         FROM Hiyari_Report_Revisions
+         WHERE ReportID = ?
+         ORDER BY RevisionNo DESC, UploadedAt DESC, id DESC`,
+        [reportId]
+    );
+    return rows;
+}
+
+async function nextHiyariRevisionNo(reportId, queryable = db) {
+    const [rows] = await queryable.query(
+        'SELECT COALESCE(MAX(RevisionNo), 0) + 1 AS nextNo FROM Hiyari_Report_Revisions WHERE ReportID = ?',
+        [reportId]
+    );
+    return Number(rows[0]?.nextNo || 1);
+}
+
+function canAccessReport(req, report) {
+    return isRequestAdmin(req) || isHiyariOwner(req, report);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
 // STATS — KPI + Charts
 // ─────────────────────────────────────────────────────────────────────────────
 router.get('/stats', async (req, res) => {
+    try {
+        await ensureTables();
+        const year = Number(req.query.year) || new Date().getFullYear();
+        const month = Math.min(12, Math.max(0, Number(req.query.month) || 0));
+        const department = String(req.query.department || '').trim();
+        const status = String(req.query.status || '').trim();
+        const rank = String(req.query.rank || '').trim().toUpperCase();
+        let where = 'DeletedAt IS NULL AND YEAR(ReportDate) = ?';
+        const params = [year];
+        if (month) { where += ' AND MONTH(ReportDate) = ?'; params.push(month); }
+        if (department && department !== 'all') { where += ' AND Department = ?'; params.push(department); }
+        if (status && status !== 'all') { where += ' AND Status = ?'; params.push(status); }
+        if (['A','B','C'].includes(rank)) { where += ' AND RiskRank = ?'; params.push(rank); }
+        if (!isRequestAdmin(req)) {
+            where += " AND (ReporterID = ? OR SubmittedByID = ? OR Status = 'Closed')";
+            const requester = String(userId(req));
+            params.push(requester, requester);
+        }
+        const [reports] = await db.query(`SELECT *, RiskRank AS \`Rank\` FROM HiyariReports WHERE ${where} ORDER BY ReportDate DESC`, params);
+        const [assignments] = await db.query('SELECT EmployeeID,Department FROM Hiyari_Assignments');
+        const days = value => Math.max(0, Math.floor((Date.now() - new Date(value).getTime()) / 86400000));
+        const slaDays = r => ({ A:7, B:15, C:30 }[r.Rank] || 30);
+        const active = reports.filter(r => r.Status !== 'Closed');
+        const enrich = r => { const ageDays=days(r.ReportDate), limit=slaDays(r), remaining=limit-ageDays; return {...r,ageDays,slaDays:limit,remainingDays:remaining,slaStatus:remaining<0?'overdue':remaining<=3?'near_due':'on_track'}; };
+        const actionList = active.map(enrich).filter(r => r.slaStatus !== 'on_track' || ['PendingReview','Rejected','Approved'].includes(r.ReviewStatus)).sort((a,b)=>a.remainingDays-b.remainingDays).slice(0,20);
+        const countBy = (key, value) => reports.filter(r => value === undefined ? r[key] != null : r[key] === value).length;
+        const group = (key, label=key) => Object.values(reports.reduce((m,r)=>{const v=(r[key]||'Unspecified');m[v] ||= {[label]:v,count:0};m[v].count++;return m;},{}));
+        const monthly = Array.from({length:12},(_,i)=>({month:i+1,count:reports.filter(r=>new Date(r.ReportDate).getMonth()===i).length})).filter(r=>r.count);
+        const stopRankMatrix=[]; for(let s=1;s<=6;s++) for(const rk of ['A','B','C']) stopRankMatrix.push({StopType:s,Rank:rk,count:reports.filter(r=>Number(r.StopType)===s&&r.Rank===rk).length});
+        const deptRisk = group('Department','Department').map(d=>{const rows=reports.filter(r=>(r.Department||'Unspecified')===d.Department);const overdue=rows.map(enrich).filter(r=>r.Status!=='Closed'&&r.slaStatus==='overdue').length;return {...d,rankA:rows.filter(r=>r.Rank==='A').length,rankB:rows.filter(r=>r.Rank==='B').length,rankC:rows.filter(r=>r.Rank==='C').length,overdue,score:rows.reduce((n,r)=>n+({A:5,B:3,C:1}[r.Rank]||1),0)+overdue*2};}).sort((a,b)=>b.score-a.score);
+        const submittedIds = new Set(reports.map(r=>String(r.ReporterID||'')));
+        const scopedAssignments = department&&department!=='all' ? assignments.filter(a=>a.Department===department) : assignments;
+        const assignmentCompletion={total:scopedAssignments.length,completed:scopedAssignments.filter(a=>submittedIds.has(String(a.EmployeeID||''))).length};
+        assignmentCompletion.pending=Math.max(0,assignmentCompletion.total-assignmentCompletion.completed); assignmentCompletion.rate=assignmentCompletion.total?Math.round(assignmentCompletion.completed*100/assignmentCompletion.total):0;
+        const kpi={total:reports.length,open:countBy('Status','Open'),inProgress:countBy('Status','In Progress'),closed:countBy('Status','Closed'),overdueCount:active.map(enrich).filter(r=>r.slaStatus==='overdue').length,nearDueCount:active.map(enrich).filter(r=>r.slaStatus==='near_due').length,pendingReview:countBy('ReviewStatus','PendingReview'),pendingSignedPdf:reports.filter(r=>r.ReviewStatus==='Approved'&&!r.SignedFileUrl).length,rejectedWaitingResubmit:countBy('ReviewStatus','Rejected')};
+        res.json({success:true,data:{phase:'dashboard_sla_intelligence',filters:{year,month,department:department||'all',status:status||'all',rank:rank||'all'},kpi,monthly,consequence:group('PotentialConsequence','label'),riskDist:group('RiskLevel','level'),stopDist:group('StopType','StopType'),rankDist:group('Rank','Rank'),deptRank:group('Department','Department').sort((a,b)=>b.count-a.count),areaRank:group('Location','Location').sort((a,b)=>b.count-a.count).slice(0,12),monthlyRank:reports.map(r=>({month:new Date(r.ReportDate).getMonth()+1,Rank:r.Rank})).reduce((a,r)=>{const x=a.find(v=>v.month===r.month&&v.Rank===r.Rank);x?x.count++:a.push({...r,count:1});return a;},[]),monthlyStatus:reports.map(r=>({month:new Date(r.ReportDate).getMonth()+1,Status:r.Status})).reduce((a,r)=>{const x=a.find(v=>v.month===r.month&&v.Status===r.Status);x?x.count++:a.push({...r,count:1});return a;},[]),stopRankMatrix,departmentRiskRanking:deptRisk,assignmentCompletion,actionList:actionList.map(r=>sanitizeHiyariReportForViewer(req,r)),reports:reports.map(r=>sanitizeHiyariReportForViewer(req,r))}});
+    } catch (err) { console.error('[hiyari/stats-v2]',err); res.status(500).json({success:false,message:err.message}); }
+});
+
+router.get('/stats-legacy', async (req, res) => {
     try { await ensureTables(); } catch (err) {
         console.error('[hiyari/stats] ensureTables failed:', err.message);
     }
@@ -131,7 +662,7 @@ router.get('/stats', async (req, res) => {
                     SUM(Status = 'Open')        AS open,
                     SUM(Status = 'In Progress') AS inProgress,
                     SUM(Status = 'Closed')      AS closed
-             FROM HiyariReports WHERE YEAR(ReportDate) = ?`,
+             FROM HiyariReports WHERE DeletedAt IS NULL AND YEAR(ReportDate) = ?`,
             [year]
         );
         totals = row;
@@ -139,16 +670,41 @@ router.get('/stats', async (req, res) => {
         console.error('[hiyari/stats] totals failed:', err.message);
     }
 
-    const monthly     = await safeQuery('monthly',     `SELECT MONTH(ReportDate) AS month, COUNT(*) AS count FROM HiyariReports WHERE YEAR(ReportDate) = ? GROUP BY MONTH(ReportDate) ORDER BY month`,                                    [year]);
-    const consequence = await safeQuery('consequence', `SELECT COALESCE(PotentialConsequence,'ไม่ระบุ') AS label, COUNT(*) AS count FROM HiyariReports WHERE YEAR(ReportDate) = ? GROUP BY PotentialConsequence ORDER BY count DESC`, [year]);
-    const riskDist    = await safeQuery('riskDist',    `SELECT COALESCE(RiskLevel,'Low') AS level, COUNT(*) AS count FROM HiyariReports WHERE YEAR(ReportDate) = ? GROUP BY RiskLevel ORDER BY FIELD(RiskLevel,'Critical','High','Medium','Low')`, [year]);
-    const stopDist    = await safeQuery('stopDist',    `SELECT StopType, COUNT(*) AS count FROM HiyariReports WHERE YEAR(ReportDate) = ? AND StopType IS NOT NULL GROUP BY StopType ORDER BY StopType`,                                   [year]);
-    const rankDist    = await safeQuery('rankDist',    `SELECT RiskRank AS \`Rank\`, COUNT(*) AS count FROM HiyariReports WHERE YEAR(ReportDate) = ? AND RiskRank IS NOT NULL GROUP BY RiskRank ORDER BY FIELD(RiskRank,'A','B','C')`,   [year]);
-    const deptRank    = await safeQuery('deptRank',    `SELECT Department, COUNT(*) AS count FROM HiyariReports WHERE YEAR(ReportDate) = ? GROUP BY Department ORDER BY count DESC LIMIT 20`,                                            [year]);
+    const monthly     = await safeQuery('monthly',     `SELECT MONTH(ReportDate) AS month, COUNT(*) AS count FROM HiyariReports WHERE DeletedAt IS NULL AND YEAR(ReportDate) = ? GROUP BY MONTH(ReportDate) ORDER BY month`,                                    [year]);
+    const consequence = await safeQuery('consequence', `SELECT COALESCE(PotentialConsequence,'ไม่ระบุ') AS label, COUNT(*) AS count FROM HiyariReports WHERE DeletedAt IS NULL AND YEAR(ReportDate) = ? GROUP BY PotentialConsequence ORDER BY count DESC`, [year]);
+    const riskDist    = await safeQuery('riskDist',    `SELECT COALESCE(RiskLevel,'Low') AS level, COUNT(*) AS count FROM HiyariReports WHERE DeletedAt IS NULL AND YEAR(ReportDate) = ? GROUP BY RiskLevel ORDER BY FIELD(RiskLevel,'Critical','High','Medium','Low')`, [year]);
+    const stopDist    = await safeQuery('stopDist',    `SELECT StopType, COUNT(*) AS count FROM HiyariReports WHERE DeletedAt IS NULL AND YEAR(ReportDate) = ? AND StopType IS NOT NULL GROUP BY StopType ORDER BY StopType`,                                   [year]);
+    const rankDist    = await safeQuery('rankDist',    `SELECT RiskRank AS \`Rank\`, COUNT(*) AS count FROM HiyariReports WHERE DeletedAt IS NULL AND YEAR(ReportDate) = ? AND RiskRank IS NOT NULL GROUP BY RiskRank ORDER BY FIELD(RiskRank,'A','B','C')`,   [year]);
+    const deptRank    = await safeQuery('deptRank',    `SELECT Department, COUNT(*) AS count FROM HiyariReports WHERE DeletedAt IS NULL AND YEAR(ReportDate) = ? GROUP BY Department ORDER BY count DESC LIMIT 20`,                                            [year]);
+    const areaRank    = await safeQuery('areaRank',
+        `SELECT COALESCE(NULLIF(TRIM(Location),''),'Unspecified') AS Location, COUNT(*) AS count
+         FROM HiyariReports
+         WHERE DeletedAt IS NULL AND YEAR(ReportDate) = ?
+         GROUP BY COALESCE(NULLIF(TRIM(Location),''),'Unspecified')
+         ORDER BY count DESC
+         LIMIT 12`,
+        [year]
+    );
+    const monthlyRank = await safeQuery('monthlyRank',
+        `SELECT MONTH(ReportDate) AS month, RiskRank AS \`Rank\`, COUNT(*) AS count
+         FROM HiyariReports
+         WHERE DeletedAt IS NULL AND YEAR(ReportDate) = ? AND RiskRank IS NOT NULL
+         GROUP BY MONTH(ReportDate), RiskRank
+         ORDER BY MONTH(ReportDate), FIELD(RiskRank,'A','B','C')`,
+        [year]
+    );
+    const monthlyStatus = await safeQuery('monthlyStatus',
+        `SELECT MONTH(ReportDate) AS month, Status, COUNT(*) AS count
+         FROM HiyariReports
+         WHERE DeletedAt IS NULL AND YEAR(ReportDate) = ?
+         GROUP BY MONTH(ReportDate), Status
+         ORDER BY MONTH(ReportDate), FIELD(Status,'Open','In Progress','Closed')`,
+        [year]
+    );
 
     const overdueRows = await safeQuery('overdueCount',
         `SELECT COUNT(*) AS cnt FROM HiyariReports
-         WHERE YEAR(ReportDate) = ? AND Status != 'Closed'
+         WHERE DeletedAt IS NULL AND YEAR(ReportDate) = ? AND Status != 'Closed'
            AND (
              (RiskRank = 'A' AND DATEDIFF(CURDATE(), ReportDate) > 7)
              OR (RiskRank = 'B' AND DATEDIFF(CURDATE(), ReportDate) > 15)
@@ -171,7 +727,7 @@ router.get('/stats', async (req, res) => {
                 closed:       totals.closed     || 0,
                 overdueCount,
             },
-            monthly, consequence, riskDist, stopDist, rankDist, deptRank,
+            monthly, consequence, riskDist, stopDist, rankDist, deptRank, areaRank, monthlyRank, monthlyStatus,
         }
     });
 });
@@ -227,7 +783,8 @@ router.get('/assignments', async (req, res) => {
             SELECT a.id, a.EmployeeID,
                 COALESCE(e.EmployeeName, a.AssigneeName) AS AssigneeName,
                 COALESCE(e.Department,  a.Department)   AS Department,
-                a.Note, a.DueDate, a.CreatedBy, a.CreatedAt
+                e.CompanyEmail,
+                a.AllowDirectSignedPdf, a.Note, a.DueDate, a.CreatedBy, a.CreatedAt
             FROM Hiyari_Assignments a
             LEFT JOIN Employees e ON e.EmployeeID = a.EmployeeID
             ORDER BY COALESCE(e.Department, a.Department), COALESCE(e.EmployeeName, a.AssigneeName)
@@ -242,23 +799,24 @@ router.get('/assignments', async (req, res) => {
 router.post('/assignments', isAdmin, async (req, res) => {
     try {
         await ensureTables();
-        const { EmployeeID, AssigneeName, Department, Note, DueDate } = req.body;
+        const { EmployeeID, AssigneeName, Department, Note, DueDate, AllowDirectSignedPdf } = req.body;
         if (!EmployeeID && (!AssigneeName || !Department)) {
             return res.status(400).json({ success: false, message: 'กรุณาระบุชื่อและหน่วยงาน' });
         }
         let name = (AssigneeName || '').trim() || null;
         let dept = (Department  || '').trim() || null;
         if (EmployeeID) {
-            const [emp] = await db.query('SELECT EmployeeName, Department FROM Employees WHERE EmployeeID = ? LIMIT 1', [EmployeeID]);
+            const [emp] = await db.query('SELECT EmployeeName, Department, CompanyEmail FROM Employees WHERE EmployeeID = ? LIMIT 1', [EmployeeID]);
             if (!emp.length) return res.status(404).json({ success: false, message: 'ไม่พบพนักงาน' });
+            if (!isValidCompanyEmail(emp[0].CompanyEmail)) return res.status(400).json({ success:false, message:'Employee Master must have a valid CompanyEmail before Hiyari assignment.' });
             name = emp[0].EmployeeName || name;
             dept = emp[0].Department   || dept;
             const [dup] = await db.query('SELECT id FROM Hiyari_Assignments WHERE EmployeeID = ? LIMIT 1', [EmployeeID]);
             if (dup.length) return res.status(400).json({ success: false, message: 'พนักงานคนนี้ถูกมอบหมายแล้ว' });
         }
         await db.query(
-            'INSERT INTO Hiyari_Assignments (EmployeeID, AssigneeName, Department, Note, DueDate, CreatedBy) VALUES (?,?,?,?,?,?)',
-            [EmployeeID || null, name, dept, (Note || '').trim() || null, DueDate || null, req.user.name]
+            'INSERT INTO Hiyari_Assignments (EmployeeID, AssigneeName, Department, AllowDirectSignedPdf, Note, DueDate, CreatedBy) VALUES (?,?,?,?,?,?,?)',
+            [EmployeeID || null, name, dept, AllowDirectSignedPdf ? 1 : 0, (Note || '').trim() || null, DueDate || null, req.user.name]
         );
         res.json({ success: true, message: 'เพิ่มรายการมอบหมายสำเร็จ' });
     } catch (err) {
@@ -270,7 +828,7 @@ router.put('/assignments/:id', isAdmin, async (req, res) => {
     try {
         await ensureTables();
         const { id } = req.params;
-        const { EmployeeID, AssigneeName, Department, Note, DueDate } = req.body;
+        const { EmployeeID, AssigneeName, Department, Note, DueDate, AllowDirectSignedPdf } = req.body;
         const [exist] = await db.query('SELECT id FROM Hiyari_Assignments WHERE id = ? LIMIT 1', [id]);
         if (!exist.length) return res.status(404).json({ success: false, message: 'ไม่พบรายการมอบหมาย' });
         if (!EmployeeID && (!AssigneeName || !Department)) {
@@ -280,16 +838,17 @@ router.put('/assignments/:id', isAdmin, async (req, res) => {
         let dept = (Department  || '').trim() || null;
         let empId = EmployeeID || null;
         if (empId) {
-            const [emp] = await db.query('SELECT EmployeeName, Department FROM Employees WHERE EmployeeID = ? LIMIT 1', [empId]);
+            const [emp] = await db.query('SELECT EmployeeName, Department, CompanyEmail FROM Employees WHERE EmployeeID = ? LIMIT 1', [empId]);
             if (!emp.length) return res.status(404).json({ success: false, message: 'ไม่พบพนักงาน' });
+            if (!isValidCompanyEmail(emp[0].CompanyEmail)) return res.status(400).json({ success:false, message:'Employee Master must have a valid CompanyEmail before Hiyari assignment.' });
             name = emp[0].EmployeeName || name;
             dept = emp[0].Department   || dept;
             const [dup] = await db.query('SELECT id FROM Hiyari_Assignments WHERE EmployeeID = ? AND id <> ? LIMIT 1', [empId, id]);
             if (dup.length) return res.status(400).json({ success: false, message: 'พนักงานคนนี้ถูกมอบหมายแล้ว' });
         }
         await db.query(
-            'UPDATE Hiyari_Assignments SET EmployeeID=?, AssigneeName=?, Department=?, Note=?, DueDate=?, CreatedBy=? WHERE id=?',
-            [empId, name, dept, (Note || '').trim() || null, DueDate || null, req.user.name, id]
+            'UPDATE Hiyari_Assignments SET EmployeeID=?, AssigneeName=?, Department=?, AllowDirectSignedPdf=?, Note=?, DueDate=?, CreatedBy=? WHERE id=?',
+            [empId, name, dept, AllowDirectSignedPdf ? 1 : 0, (Note || '').trim() || null, DueDate || null, req.user.name, id]
         );
         res.json({ success: true, message: 'อัปเดตรายการมอบหมายสำเร็จ' });
     } catch (err) {
@@ -310,24 +869,188 @@ router.delete('/assignments/:id', isAdmin, async (req, res) => {
 // ─────────────────────────────────────────────────────────────────────────────
 // LIST REPORTS
 // ─────────────────────────────────────────────────────────────────────────────
+router.get('/email-outbox', isAdmin, async (req, res) => {
+    try {
+        await ensureTables();
+        const limit = Math.min(Math.max(parseInt(req.query.limit || '50', 10) || 50, 1), 200);
+        const status = String(req.query.status || '').trim();
+        let params = [];
+        let sql = 'SELECT * FROM Hiyari_EmailOutbox';
+        if (status && status !== 'all') {
+            sql += ' WHERE Status = ?';
+            params.push(status);
+        }
+        sql += ' ORDER BY CreatedAt DESC LIMIT ?';
+        params.push(limit);
+        const [rows] = await db.query(sql, params);
+        const [[summary]] = await db.query(`SELECT COUNT(*) total,SUM(Status='Queued') pending,SUM(Status='Failed') failed,SUM(Status='Sent') sent,COALESCE(SUM(RetryCount),0) retryCount,MAX(LastFailureAt) lastFailureAt FROM Hiyari_EmailOutbox`);
+        const threshold = 5;
+        res.json({ success: true, data: rows, smtpConfigured: smtpConfigured(), summary: {...summary, threshold, warning: Number(summary.failed||0) >= threshold} });
+    } catch (error) {
+        console.error('[hiyari/email-outbox] query failed:', error.message);
+        res.status(500).json({ success: false, message: 'ไม่สามารถดึงข้อมูลคิวอีเมลได้' });
+    }
+});
+
+router.post('/email-outbox/:id/retry', isAdmin, async (req, res) => {
+    try {
+        await ensureTables();
+        if (!smtpConfigured()) {
+            return res.status(400).json({ success: false, message: 'ยังไม่ได้ตั้งค่า SMTP ในไฟล์ .env' });
+        }
+        const [rows] = await db.query('SELECT * FROM Hiyari_EmailOutbox WHERE id = ? LIMIT 1', [req.params.id]);
+        if (!rows.length) return res.status(404).json({ success: false, message: 'ไม่พบอีเมลในคิว' });
+        const item = rows[0];
+        await sendMail({ to: item.Recipients, subject: item.Subject, text: item.Body, html: item.HtmlBody });
+        await db.query(
+            `UPDATE Hiyari_EmailOutbox SET Status = 'Sent', SentAt = NOW(), Error = NULL, RetryCount=RetryCount+1, LastAttemptAt=NOW() WHERE id = ?`,
+            [item.id]
+        );
+        res.json({ success: true, message: 'ส่งอีเมลสำเร็จ' });
+    } catch (error) {
+        await db.query(
+            `UPDATE Hiyari_EmailOutbox SET Status = 'Failed', Error = ?, RetryCount=RetryCount+1, LastAttemptAt=NOW(), LastFailureAt=NOW() WHERE id = ?`,
+            [error.message, req.params.id]
+        ).catch(() => {});
+        console.error('[hiyari/email-outbox] retry failed:', error.message);
+        res.status(500).json({ success: false, message: 'ส่งอีเมลไม่สำเร็จ กรุณาตรวจสอบ SMTP' });
+    }
+});
+
+router.post('/email-outbox/retry-queued', isAdmin, async (req, res) => {
+    try {
+        await ensureTables();
+        if (!smtpConfigured()) {
+            return res.status(400).json({ success: false, message: 'ยังไม่ได้ตั้งค่า SMTP ในไฟล์ .env' });
+        }
+        const limit = Math.min(Math.max(parseInt(req.body?.limit || '20', 10) || 20, 1), 50);
+        const [rows] = await db.query(
+            `SELECT * FROM Hiyari_EmailOutbox
+             WHERE Status IN ('Queued', 'Failed')
+             ORDER BY CreatedAt ASC
+             LIMIT ?`,
+            [limit]
+        );
+
+        let sent = 0;
+        let failed = 0;
+        for (const item of rows) {
+            try {
+                await sendMail({ to: item.Recipients, subject: item.Subject, text: item.Body, html: item.HtmlBody });
+                await db.query(
+                    `UPDATE Hiyari_EmailOutbox SET Status = 'Sent', SentAt = NOW(), Error = NULL, RetryCount=RetryCount+1, LastAttemptAt=NOW() WHERE id = ?`,
+                    [item.id]
+                );
+                sent += 1;
+            } catch (error) {
+                await db.query(
+                    `UPDATE Hiyari_EmailOutbox SET Status = 'Failed', Error = ?, RetryCount=RetryCount+1, LastAttemptAt=NOW(), LastFailureAt=NOW() WHERE id = ?`,
+                    [error.message, item.id]
+                ).catch(() => {});
+                failed += 1;
+            }
+        }
+
+        res.json({ success: true, message: `Retry email queue completed: sent ${sent}, failed ${failed}`, sent, failed });
+    } catch (error) {
+        console.error('[hiyari/email-outbox] retry queued failed:', error.message);
+        res.status(500).json({ success: false, message: 'ไม่สามารถ retry อีเมลค้างคิวได้' });
+    }
+});
+
+router.post('/email-outbox/queue-overdue', isAdmin, async (req, res) => {
+    try {
+        await ensureTables();
+        const year = Number(req.body?.year) || new Date().getFullYear();
+        const [reports] = await db.query(
+            `SELECT id,ReporterID,SubmittedByID,ReporterName,Department,CompanyEmail,ReportDate,RiskRank,
+                    DATEDIFF(CURDATE(),ReportDate) AS AgeDays
+               FROM HiyariReports
+              WHERE DeletedAt IS NULL AND Status<>'Closed' AND YEAR(ReportDate)=?
+                AND DATEDIFF(CURDATE(),ReportDate)>CASE RiskRank WHEN 'A' THEN 7 WHEN 'B' THEN 15 ELSE 30 END`,
+            [year]
+        );
+        let queued=0, skipped=0;
+        for (const report of reports) {
+            const [[exists]] = await db.query(`SELECT id FROM Hiyari_EmailOutbox WHERE ReportID=? AND EventType='OverdueReminder' AND DATE(CreatedAt)=CURDATE() LIMIT 1`,[report.id]);
+            if (exists) { skipped++; continue; }
+            const userRecipients = await resolveHiyariUserRecipients(report);
+            const recipients=[getHiyariAdminEmail(),...userRecipients.emails].filter(Boolean).filter((v,i,a)=>a.indexOf(v)===i);
+            const limit=({A:7,B:15,C:30}[report.RiskRank]||30), overdue=Math.max(1,Number(report.AgeDays)-limit);
+            const subject=`[Hiyari-Hatto] Overdue ${overdue} day(s) - ${report.ReporterName||report.id}`;
+            const body=`Hiyari report ${report.id} is overdue by ${overdue} day(s).\nRank: ${report.RiskRank||'-'}\nDepartment: ${report.Department||'-'}\nPlease review and close the required action.`;
+            await queueHiyariEmail({
+                to: recipients.join(','),
+                reportId: report.id,
+                eventType: 'OverdueReminder',
+                subject,
+                body,
+                html: body.replace(/\n/g, '<br>'),
+            });
+            queued++;
+        }
+        res.json({success:true,year,eligible:reports.length,queued,skipped,deliveryAttempted:smtpConfigured()});
+    } catch(error){ console.error('[hiyari/overdue-reminder]',error); res.status(500).json({success:false,message:error.message}); }
+});
+
+router.get('/file-health', isAdmin, async (req, res) => {
+    try {
+        await ensureTables();
+        const [reports] = await db.query(`SELECT id,ReporterName,AttachmentUrl,AdditionalFileUrl,SignedFileUrl FROM HiyariReports WHERE DeletedAt IS NULL ORDER BY ReportDate DESC`);
+        const roots=[uploadsDir,path.resolve(__dirname,'..','..','uploads')];
+        const fields=[['AttachmentUrl','Excel'],['AdditionalFileUrl','Additional'],['SignedFileUrl','Signed PDF']];
+        const files=[];
+        for(const report of reports) for(const [field,label] of fields){
+            const url=report[field]; if(!url) continue;
+            let pathname=String(url), originalName=''; try{const parsed=new URL(url,'http://local');pathname=parsed.pathname;originalName=parsed.searchParams.get('filename')||'';}catch{}
+            const storedName=path.basename(decodeURIComponent(pathname));
+            const local=pathname.includes('/uploads/');
+            const diskPath=local?roots.map(root=>path.join(root,storedName)).find(candidate=>fs.existsSync(candidate)):null;
+            const stat=diskPath?fs.statSync(diskPath):null;
+            const ext=path.extname(storedName).slice(1).toLowerCase();
+            files.push({reportId:report.id,reporterName:report.ReporterName,field,label,url,originalName:originalName||storedName,storedName,extension:ext,size:stat?.size??null,modifiedAt:stat?.mtime??null,scope:local?'local':'external',status:local?(diskPath?'ok':'missing'):'external',previewType:['jpg','jpeg','png','webp'].includes(ext)?'image':ext==='pdf'?'pdf':['xls','xlsx'].includes(ext)?'excel':'file'});
+        }
+        const missing=files.filter(f=>f.status==='missing');
+        res.json({success:true,data:{phase:'hiyari_file_attachment_health',readOnly:true,summary:{reports:reports.length,references:files.length,ok:files.filter(f=>f.status==='ok').length,missing:missing.length,external:files.filter(f=>f.status==='external').length,orphanCandidates:0},files,missingFiles:missing,orphanCandidates:[],note:'Orphan candidates are reviewed by System Health; no files are deleted automatically.'}});
+    }catch(error){console.error('[hiyari/file-health]',error);res.status(500).json({success:false,message:error.message});}
+});
+
 router.get('/', async (req, res) => {
     try {
         await ensureTables();
-        const { status, dept, year, q, risk } = req.query;
-        let sql = 'SELECT *, RiskRank AS `Rank` FROM HiyariReports WHERE 1=1';
-        const params = [];
+        const { status, review, dept, year, q, risk, stopType, rank, month, area } = req.query;
+        let sql = 'SELECT *, RiskRank AS `Rank` FROM HiyariReports WHERE DeletedAt IS NULL';
+        let params = [];
         if (status && status !== 'all') { sql += ' AND Status = ?';     params.push(status); }
+        if (review && review !== 'all') { sql += ' AND ReviewStatus = ?'; params.push(review); }
         if (dept   && dept   !== 'all') { sql += ' AND Department = ?'; params.push(dept); }
         if (risk   && risk   !== 'all') { sql += ' AND RiskLevel = ?';  params.push(risk); }
+        if (rank   && rank   !== 'all') { sql += ' AND RiskRank = ?';   params.push(rank); }
+        if (stopType && stopType !== 'all') {
+            const stopId = parseInt(stopType);
+            if (!Number.isNaN(stopId)) { sql += ' AND StopType = ?'; params.push(stopId); }
+        }
+        if (month && month !== 'all') {
+            const monthNo = parseInt(month);
+            if (!Number.isNaN(monthNo) && monthNo >= 1 && monthNo <= 12) {
+                sql += ' AND MONTH(ReportDate) = ?';
+                params.push(monthNo);
+            }
+        }
+        if (area && area !== 'all') {
+            sql += " AND COALESCE(NULLIF(TRIM(Location),''),'Unspecified') = ?";
+            params.push(area);
+        }
         if (year)  { sql += ' AND YEAR(ReportDate) = ?'; params.push(parseInt(year)); }
         if (q && q.trim()) {
             sql += ' AND (ReporterName LIKE ? OR Description LIKE ? OR Location LIKE ?)';
             const like = `%${q.trim()}%`;
             params.push(like, like, like);
         }
+        ({ sql, params } = appendHiyariVisibility(sql, params, req));
         sql += ' ORDER BY CreatedAt DESC';
         const [rows] = await db.query(sql, params);
-        res.json({ success: true, data: rows });
+        res.json({ success: true, data: rows.map(row => sanitizeHiyariReportForViewer(req, row)) });
     } catch (error) {
         console.error('Hiyari list error:', error);
         res.status(500).json({ success: false, message: 'ไม่สามารถดึงข้อมูลรายงานได้' });
@@ -337,12 +1060,51 @@ router.get('/', async (req, res) => {
 // ─────────────────────────────────────────────────────────────────────────────
 // GET SINGLE REPORT
 // ─────────────────────────────────────────────────────────────────────────────
+router.get('/:id/timeline', async (req, res) => {
+    try {
+        await ensureTables();
+        await ensureAuditTable();
+        let existsSql = 'SELECT id, ReporterID, SubmittedByID, Status FROM HiyariReports WHERE id = ? AND DeletedAt IS NULL';
+        let existsParams = [req.params.id];
+        ({ sql: existsSql, params: existsParams } = appendHiyariVisibility(existsSql, existsParams, req));
+        const [exists] = await db.query(existsSql, existsParams);
+        if (!exists.length) return res.status(404).json({ success: false, message: 'Report not found' });
+        if (!isRequestAdmin(req) && !isHiyariOwner(req, exists[0])) {
+            return res.json({ success: true, data: [] });
+        }
+
+        const [rows] = await db.query(
+            `SELECT id, ActionTime, AdminID, AdminName, Action, Detail, Metadata
+             FROM Admin_AuditLogs
+             WHERE Module = 'hiyari' AND TargetType = 'HiyariReports' AND TargetID = ?
+             ORDER BY ActionTime DESC, id DESC
+             LIMIT 50`,
+            [req.params.id]
+        );
+        res.json({ success: true, data: rows });
+    } catch (error) {
+        console.error('Hiyari timeline error:', error);
+        res.status(500).json({ success: false, message: 'Cannot load timeline' });
+    }
+});
+
 router.get('/:id', async (req, res) => {
     try {
         await ensureTables();
-        const [rows] = await db.query('SELECT *, RiskRank AS `Rank` FROM HiyariReports WHERE id = ?', [req.params.id]);
+        let sql = 'SELECT *, RiskRank AS `Rank` FROM HiyariReports WHERE id = ? AND DeletedAt IS NULL';
+        let params = [req.params.id];
+        ({ sql, params } = appendHiyariVisibility(sql, params, req));
+        const [rows] = await db.query(sql, params);
         if (!rows.length) return res.status(404).json({ success: false, message: 'ไม่พบรายงาน' });
-        res.json({ success: true, data: rows[0] });
+        const report = rows[0];
+        if (!isRequestAdmin(req) && !isHiyariOwner(req, report)) {
+            return res.json({ success: true, data: sanitizeHiyariReportForViewer(req, report) });
+        }
+        const recipientInfo = await resolveHiyariUserRecipients(report);
+        report.EmailRecipients = recipientInfo.emails;
+        report.SubmittedByEmail = recipientInfo.submitterEmail;
+        report.revisions = await loadHiyariRevisions(req.params.id);
+        res.json({ success: true, data: report });
     } catch (error) {
         res.status(500).json({ success: false, message: 'ไม่สามารถดึงข้อมูลได้' });
     }
@@ -352,41 +1114,141 @@ router.get('/:id', async (req, res) => {
 // SUBMIT REPORT
 // ─────────────────────────────────────────────────────────────────────────────
 router.post('/', upload.single('attachment'), async (req, res) => {
+    let uploadedUrl = req.file ? req.file.path : null;
     try {
         await ensureTables();
-        const { Description, Location, PotentialConsequence, RiskLevel, Rank, StopType, Suggestion, ReportDate } = req.body;
+        const {
+            Description, Location, PotentialConsequence, RiskLevel, Rank, StopType, Suggestion,
+            ReportDate, CompanyEmail, OnBehalfEmployeeID,
+        } = req.body;
+        const reject = (status, message) => {
+            if (uploadedUrl) {
+                deleteLocalUpload(uploadedUrl);
+                uploadedUrl = null;
+            }
+            return res.status(status).json({ success: false, message });
+        };
 
         if (!Description || !Description.trim()) {
-            return res.status(400).json({ success: false, message: 'กรุณาระบุรายละเอียดเหตุการณ์' });
+            return reject(400, 'กรุณาระบุรายละเอียดเหตุการณ์');
+        }
+        if (!req.file || !isExcelUpload(req.file)) {
+            return reject(400, 'กรุณาแนบไฟล์ Excel .xls หรือ .xlsx สำหรับให้แอดมินตรวจสอบ');
+        }
+        let companyEmail = null;
+        const safeRank     = VALID_RANKS.includes(Rank) ? Rank : null;
+        if (!safeRank) {
+            return reject(400, 'Rank ไม่ถูกต้อง');
         }
 
-        const safeRank     = VALID_RANKS.includes(Rank) ? Rank : null;
-        const safeStopType = [1,2,3,4,5,6].includes(parseInt(StopType)) ? parseInt(StopType) : null;
+        const safeStopType = VALID_STOP_TYPES.includes(parseInt(StopType)) ? parseInt(StopType) : null;
+        if (!safeStopType) {
+            return reject(400, 'Stop Type ไม่ถูกต้อง');
+        }
         const safeConsq    = VALID_CONSQ.includes(PotentialConsequence) ? PotentialConsequence : null;
         // Derive RiskLevel from Rank for backward-compat; fall back to submitted RiskLevel
         const safeRisk     = safeRank ? RANK_TO_RISK[safeRank] : (VALID_RISK.includes(RiskLevel) ? RiskLevel : 'Low');
-        const fileUrl      = req.file ? req.file.path : null;
-        const date         = ReportDate || new Date().toISOString().split('T')[0];
-        const reporterId   = req.user?.id || req.user?.EmployeeID || 'unknown';
-        const reporterName = req.user?.name || req.user?.EmployeeName || reporterId;
-        const department   = req.user?.department || req.user?.Department || 'ไม่ระบุ';
+        const fileUrl      = uploadedUrl;
+        const date         = String(ReportDate || '').trim();
+        if (!isValidDateOnly(date) || date > todayDateOnly()) {
+            return reject(400, 'วันที่รายงานไม่ถูกต้อง');
+        }
+        const submitterId = userId(req);
+        const submitterName = userName(req);
+        let reporterId   = submitterId;
+        let reporterName = submitterName;
+        let department   = req.user?.department || req.user?.Department || 'ไม่ระบุ';
+        let isSubmittedOnBehalf = 0;
+
+        if (String(OnBehalfEmployeeID || '').trim()) {
+            const [assignees] = await db.query(
+                `SELECT a.EmployeeID,
+                        COALESCE(e.EmployeeName, a.AssigneeName) AS AssigneeName,
+                        COALESCE(e.Department, a.Department) AS Department
+                 FROM Hiyari_Assignments a
+                 LEFT JOIN Employees e ON e.EmployeeID = a.EmployeeID
+                 WHERE a.EmployeeID = ?
+                 LIMIT 1`,
+                [String(OnBehalfEmployeeID).trim()]
+            );
+            if (!assignees.length) {
+                return reject(400, 'เลือกส่งแทนได้เฉพาะพนักงานที่อยู่ในรายการมอบหมาย Hiyari');
+            }
+            reporterId = assignees[0].EmployeeID;
+            reporterName = assignees[0].AssigneeName || reporterId;
+            department = assignees[0].Department || department;
+            isSubmittedOnBehalf = reporterId !== submitterId ? 1 : 0;
+        }
+        companyEmail = await resolveReporterCompanyEmail(reporterId, CompanyEmail);
+        if (!companyEmail) {
+            return reject(400, `Employee Master has no CompanyEmail for this reporter. Add CompanyEmail or submit a valid ${COMPANY_EMAIL_DOMAIN} email.`);
+        }
+        const reportId = randomUUID();
 
         await db.query(
             `INSERT INTO HiyariReports
-                (id, ReportDate, ReporterID, ReporterName, Department, Location,
+                (id, ReportDate, ReporterID, ReporterName, Department,
+                 SubmittedByID, SubmittedByName, IsSubmittedOnBehalf, CompanyEmail, Location,
                  Description, PotentialConsequence, RiskLevel, RiskRank, StopType,
-                 Suggestion, AttachmentUrl, Status)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'Open')`,
+                 Suggestion, AttachmentUrl, Status, ReviewStatus)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'Open', 'PendingReview')`,
             [
-                randomUUID(), date,
+                reportId, date,
                 reporterId, reporterName, department,
+                submitterId, submitterName, isSubmittedOnBehalf, companyEmail,
                 (Location || '').trim() || null,
                 Description.trim(), safeConsq, safeRisk, safeRank, safeStopType,
                 (Suggestion || '').trim() || null, fileUrl,
             ]
         );
+        uploadedUrl = null;
+        await logAudit(req, {
+            action: 'HIYARI_SUBMIT',
+            module: 'hiyari',
+            targetType: 'HiyariReports',
+            targetId: reportId,
+            detail: isSubmittedOnBehalf
+                ? `Submitted Hiyari report on behalf of ${reporterId}`
+                : `Submitted Hiyari report ${reportId}`,
+            metadata: { reporterId, submitterId, isSubmittedOnBehalf: Boolean(isSubmittedOnBehalf), companyEmail },
+        });
+        const newReportMail = buildAdminNewReportEmail({
+            reportId,
+            reporterName,
+            reporterId,
+            department,
+            submitterName,
+            date,
+            companyEmail,
+            location: (Location || '').trim() || null,
+            rank: safeRank,
+            stopType: safeStopType,
+        });
+        await queueHiyariEmail({
+            to: getHiyariAdminEmail(),
+            reportId,
+            eventType: 'Submitted',
+            subject: newReportMail.subject,
+            body: newReportMail.body,
+            html: newReportMail.html,
+        });
+        const confirmationMail = buildUserSubmissionConfirmationEmail({
+            reportId, reporterName, submitterName, date, rank: safeRank, direct: false,
+        });
+        const userRecipients = await resolveHiyariUserRecipients({
+            ReporterID: reporterId, SubmittedByID: submitterId, CompanyEmail: companyEmail,
+        });
+        await queueHiyariEmail({
+            to: userRecipients.recipients,
+            reportId,
+            eventType: 'SubmissionConfirmed',
+            subject: confirmationMail.subject,
+            body: confirmationMail.body,
+            html: confirmationMail.html,
+        });
         res.status(201).json({ success: true, message: 'ส่งรายงาน Hiyari-Hatto สำเร็จ' });
     } catch (error) {
+        if (uploadedUrl) deleteLocalUpload(uploadedUrl);
         console.error('Hiyari submit error:', error);
         res.status(500).json({ success: false, message: 'ไม่สามารถส่งรายงานได้' });
     }
@@ -395,38 +1257,449 @@ router.post('/', upload.single('attachment'), async (req, res) => {
 // ─────────────────────────────────────────────────────────────────────────────
 // UPDATE REPORT — Status / Corrective Action / Comment (Admin)
 // ─────────────────────────────────────────────────────────────────────────────
+// Direct signed-PDF submit for assignees explicitly allowed by Admin.
+router.post('/direct-signed', upload.single('attachment'), async (req, res) => {
+    let uploadedUrl = req.file ? req.file.path : null;
+    try {
+        await ensureTables();
+        const {
+            Description, Location, PotentialConsequence, RiskLevel, Rank, StopType, Suggestion,
+            ReportDate, CompanyEmail, OnBehalfEmployeeID,
+        } = req.body;
+        const reject = (status, message) => {
+            if (uploadedUrl) {
+                deleteLocalUpload(uploadedUrl);
+                uploadedUrl = null;
+            }
+            return res.status(status).json({ success: false, message });
+        };
+
+        if (!Description || !Description.trim()) return reject(400, 'กรุณาระบุรายละเอียดเหตุการณ์');
+        if (!req.file || !isPdfUpload(req.file)) return reject(400, 'การส่ง PDF โดยตรงต้องแนบไฟล์ PDF ที่ลงนามแล้ว');
+        let companyEmail = null;
+
+        const safeRank = VALID_RANKS.includes(Rank) ? Rank : null;
+        if (!safeRank) return reject(400, 'Rank ไม่ถูกต้อง');
+        const safeStopType = VALID_STOP_TYPES.includes(parseInt(StopType)) ? parseInt(StopType) : null;
+        if (!safeStopType) return reject(400, 'Stop Type ไม่ถูกต้อง');
+        const safeConsq = VALID_CONSQ.includes(PotentialConsequence) ? PotentialConsequence : null;
+        const safeRisk = safeRank ? RANK_TO_RISK[safeRank] : (VALID_RISK.includes(RiskLevel) ? RiskLevel : 'Low');
+        const date = String(ReportDate || '').trim();
+        if (!isValidDateOnly(date) || date > todayDateOnly()) return reject(400, 'วันที่รายงานไม่ถูกต้อง');
+
+        const submitterId = String(userId(req));
+        const submitterName = userName(req);
+        const requestedOnBehalfId = String(OnBehalfEmployeeID || '').trim();
+        const requestedReporterId = requestedOnBehalfId || submitterId;
+        const [assignees] = await db.query(
+            `SELECT a.EmployeeID, a.AllowDirectSignedPdf,
+                    COALESCE(e.EmployeeName, a.AssigneeName) AS AssigneeName,
+                    COALESCE(e.Department, a.Department) AS Department
+             FROM Hiyari_Assignments a
+             LEFT JOIN Employees e ON e.EmployeeID = a.EmployeeID
+             WHERE a.EmployeeID = ?
+             LIMIT 1`,
+            [requestedReporterId]
+        );
+        const assignee = assignees[0];
+        if (requestedOnBehalfId && !assignee) {
+            return reject(400, 'เลือกส่งแทนได้เฉพาะพนักงานที่อยู่ในรายการมอบหมาย Hiyari');
+        }
+        if (!isRequestAdmin(req) && (!assignee || !assignee.AllowDirectSignedPdf)) {
+            return reject(403, 'บัญชีนี้ยังไม่ได้รับสิทธิ์ส่ง PDF ที่ลงนามแล้วโดยตรง');
+        }
+
+        const reporterId = assignee?.EmployeeID || requestedReporterId;
+        const reporterName = assignee?.AssigneeName || submitterName;
+        const department = assignee?.Department || req.user?.department || req.user?.Department || 'ไม่ระบุ';
+        const isSubmittedOnBehalf = reporterId !== submitterId ? 1 : 0;
+        companyEmail = await resolveReporterCompanyEmail(reporterId, CompanyEmail);
+        if (!companyEmail) {
+            return reject(400, `Employee Master has no CompanyEmail for this reporter. Add CompanyEmail or submit a valid ${COMPANY_EMAIL_DOMAIN} email.`);
+        }
+        const reportId = randomUUID();
+
+        await db.query(
+            `INSERT INTO HiyariReports
+                (id, ReportDate, ReporterID, ReporterName, Department,
+                 SubmittedByID, SubmittedByName, IsSubmittedOnBehalf, CompanyEmail, Location,
+                 Description, PotentialConsequence, RiskLevel, RiskRank, StopType,
+                 Suggestion, Status, ReviewStatus, ReviewComment, SignedFileUrl, SignedUploadedAt)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'Open', 'Completed', ?, ?, NOW())`,
+            [
+                reportId, date, reporterId, reporterName, department,
+                submitterId, submitterName, isSubmittedOnBehalf, companyEmail,
+                (Location || '').trim() || null,
+                Description.trim(), safeConsq, safeRisk, safeRank, safeStopType,
+                (Suggestion || '').trim() || null,
+                'ส่ง PDF ที่ลงนามแล้วโดยตรงตามสิทธิ์ Assignment',
+                uploadedUrl,
+            ]
+        );
+        const url = uploadedUrl;
+        uploadedUrl = null;
+        await logAudit(req, {
+            action: 'HIYARI_DIRECT_SIGNED_SUBMIT',
+            module: 'hiyari',
+            targetType: 'HiyariReports',
+            targetId: reportId,
+            detail: `Submitted direct signed PDF Hiyari report ${reportId}`,
+            metadata: { reporterId, submitterId, isSubmittedOnBehalf: Boolean(isSubmittedOnBehalf), fileUrl: url },
+        });
+        const signedFileMail = buildAdminSignedFileEmail({ reportId, reporterName });
+        await queueHiyariEmail({
+            to: getHiyariAdminEmail(),
+            reportId,
+            eventType: 'DirectSignedSubmitted',
+            subject: signedFileMail.subject,
+            body: signedFileMail.body,
+            html: signedFileMail.html,
+        });
+        const confirmationMail = buildUserSubmissionConfirmationEmail({
+            reportId, reporterName, submitterName, date, rank: safeRank, direct: true,
+        });
+        const userRecipients = await resolveHiyariUserRecipients({
+            ReporterID: reporterId, SubmittedByID: submitterId, CompanyEmail: companyEmail,
+        });
+        await queueHiyariEmail({
+            to: userRecipients.recipients,
+            reportId,
+            eventType: 'DirectSignedConfirmed',
+            subject: confirmationMail.subject,
+            body: confirmationMail.body,
+            html: confirmationMail.html,
+        });
+        res.status(201).json({ success: true, message: 'ส่ง PDF ที่ลงนามแล้วโดยตรงสำเร็จ', id: reportId, url });
+    } catch (error) {
+        if (uploadedUrl) deleteLocalUpload(uploadedUrl);
+        console.error('Hiyari direct signed submit error:', error);
+        res.status(500).json({ success: false, message: 'ไม่สามารถส่ง PDF ที่ลงนามแล้วโดยตรงได้' });
+    }
+});
+
+// Allow Admin to approve signed-PDF submission when the normal Excel review flow
+// cannot be completed, while keeping reason/audit/email traceability.
+router.post('/:id/approve-pdf-override', isAdmin, async (req, res) => {
+    try {
+        await ensureTables();
+        const { id } = req.params;
+        const reason = String(req.body?.reason || '').trim();
+        if (reason.length < 5) {
+            return res.status(400).json({ success: false, message: 'กรุณาระบุเหตุผลการอนุญาตอย่างน้อย 5 ตัวอักษร' });
+        }
+
+        const [rows] = await db.query(
+            `SELECT id, ReporterID, SubmittedByID, ReviewStatus, ReviewComment, CompanyEmail, ReporterName
+             FROM HiyariReports WHERE id = ? AND DeletedAt IS NULL LIMIT 1`,
+            [id]
+        );
+        if (!rows.length) return res.status(404).json({ success: false, message: 'ไม่พบรายงาน' });
+
+        if (['Approved', 'Completed'].includes(rows[0].ReviewStatus)) {
+            return res.status(400).json({ success: false, message: 'รายงานนี้สามารถส่ง PDF ที่ลงนามแล้วได้อยู่แล้ว' });
+        }
+
+        const admin = userName(req);
+        await db.query(
+            `UPDATE HiyariReports
+             SET ReviewStatus = 'Approved',
+                 ReviewComment = ?,
+                 ReviewedAt = NOW(),
+                 ReviewedBy = ?,
+                 ReviewOverrideReason = ?,
+                 ReviewOverrideBy = ?,
+                 ReviewOverrideAt = NOW()
+             WHERE id = ? AND DeletedAt IS NULL`,
+            [`Admin Override: ${reason}`, admin, reason, admin, id]
+        );
+
+        await logAudit(req, {
+            action: 'HIYARI_REVIEW_OVERRIDE',
+            module: 'hiyari',
+            targetType: 'HiyariReports',
+            targetId: id,
+            detail: `Admin override approved signed PDF submission for Hiyari report ${id}`,
+            metadata: {
+                previousReviewStatus: rows[0].ReviewStatus,
+                nextReviewStatus: 'Approved',
+                reason,
+            },
+        });
+
+        const userRecipients = await resolveHiyariUserRecipients(rows[0]);
+        if (userRecipients.recipients) {
+            const mail = buildUserOverrideApprovalEmail({
+                reporterName: rows[0].ReporterName || '-',
+                overrideReason: reason,
+                approvedBy: admin,
+            });
+            await queueHiyariEmail({
+                to: userRecipients.recipients,
+                reportId: id,
+                eventType: 'ReviewOverrideApproved',
+                subject: mail.subject,
+                body: mail.body,
+                html: mail.html,
+            });
+        }
+
+        res.json({ success: true, message: 'อนุญาตให้ส่ง PDF ที่ลงนามแล้วเรียบร้อยแล้ว' });
+    } catch (error) {
+        console.error('Hiyari override approval error:', error);
+        res.status(500).json({ success: false, message: 'ไม่สามารถอนุญาตขั้นตอนเอกสารได้' });
+    }
+});
+
+router.post('/:id/resend-status-email', isAdmin, async (req, res) => {
+    try {
+        await ensureTables();
+        const [rows] = await db.query(
+            'SELECT * FROM HiyariReports WHERE id = ? AND DeletedAt IS NULL LIMIT 1',
+            [req.params.id]
+        );
+        if (!rows.length) return res.status(404).json({ success: false, message: 'Hiyari report not found.' });
+        const report = rows[0];
+        const recipientInfo = await resolveHiyariUserRecipients(report);
+        if (!recipientInfo.recipients) {
+            return res.status(400).json({ success: false, message: 'Owner and substitute submitter have no valid CompanyEmail.' });
+        }
+
+        let mail;
+        let statusKey;
+        if (report.Status === 'Closed') {
+            statusKey = 'Closed';
+            mail = buildUserStatusEmail({
+                reporterName: report.ReporterName || '-',
+                status: 'Closed',
+                correctiveAction: report.CorrectiveAction || '',
+                adminComment: report.AdminComment || '',
+            });
+        } else if (report.ReviewStatus === 'Completed') {
+            statusKey = 'Completed';
+            mail = buildUserCompletedEmail({ reportId: report.id, reporterName: report.ReporterName || '-' });
+        } else if (['Approved', 'Rejected'].includes(report.ReviewStatus)) {
+            statusKey = report.ReviewStatus;
+            mail = buildUserReviewEmail({
+                reporterName: report.ReporterName || '-',
+                reviewStatus: report.ReviewStatus,
+                reviewComment: report.ReviewComment || '',
+            });
+        } else {
+            statusKey = 'PendingReview';
+            mail = buildUserSubmissionConfirmationEmail({
+                reportId: report.id,
+                reporterName: report.ReporterName || '-',
+                submitterName: report.SubmittedByName || report.ReporterName || '-',
+                date: report.ReportDate || '-',
+                rank: report.RiskRank || '-',
+                direct: false,
+            });
+        }
+
+        const delivery = await queueHiyariEmail({
+            to: recipientInfo.recipients,
+            reportId: report.id,
+            eventType: `ManualStatusResent:${statusKey}`,
+            subject: mail.subject,
+            body: mail.body,
+            html: mail.html,
+        });
+        await logAudit(req, {
+            action: 'HIYARI_STATUS_EMAIL_RESEND',
+            module: 'hiyari',
+            targetType: 'HiyariReports',
+            targetId: report.id,
+            detail: `Resent current Hiyari status email (${statusKey})`,
+            metadata: { statusKey, recipients: recipientInfo.emails },
+        });
+        res.json({
+            success: true,
+            statusKey,
+            recipients: recipientInfo.emails,
+            emailStatus: delivery?.status || 'Unknown',
+            emailError: delivery?.error || null,
+            deliveryAttempted: smtpConfigured(),
+        });
+    } catch (error) {
+        console.error('[hiyari/resend-status-email]', error);
+        res.status(500).json({ success: false, message: error.message });
+    }
+});
+
 router.put('/:id', isAdmin, async (req, res) => {
     try {
         await ensureTables();
         const { id } = req.params;
-        const { Status, CorrectiveAction, AdminComment } = req.body;
+        const {
+            Status, CorrectiveAction, AdminComment, ReviewStatus, ReviewComment, ReopenReason,
+            ReportDate, Department, Location, Description, PotentialConsequence, Suggestion, StopType,
+        } = req.body;
+        const requestedRank = req.body.RiskRank ?? req.body.Rank;
 
         if (Status && !VALID_STATUS.includes(Status)) {
             return res.status(400).json({ success: false, message: 'สถานะไม่ถูกต้อง' });
         }
+        if (ReviewStatus && !VALID_REVIEW_STATUS.includes(ReviewStatus)) {
+            return res.status(400).json({ success: false, message: 'สถานะตรวจเอกสารไม่ถูกต้อง' });
+        }
 
-        const [rows] = await db.query('SELECT id, Status FROM HiyariReports WHERE id = ?', [id]);
+        if (ReportDate !== undefined) {
+            const today = new Date().toISOString().slice(0, 10);
+            const parsedDate = new Date(`${ReportDate}T00:00:00Z`);
+            if (!/^\d{4}-\d{2}-\d{2}$/.test(String(ReportDate)) || Number.isNaN(parsedDate.getTime()) || parsedDate.toISOString().slice(0, 10) !== String(ReportDate) || String(ReportDate) > today) {
+                return res.status(400).json({ success: false, message: 'ReportDate must be a valid date that is not in the future.' });
+            }
+        }
+        if (Department !== undefined && !String(Department || '').trim()) {
+            return res.status(400).json({ success: false, message: 'Department is required.' });
+        }
+        if (Description !== undefined && !String(Description || '').trim()) {
+            return res.status(400).json({ success: false, message: 'Description is required.' });
+        }
+        if (requestedRank !== undefined && !VALID_RANKS.includes(String(requestedRank || '').toUpperCase())) {
+            return res.status(400).json({ success: false, message: 'Rank must be A, B, or C.' });
+        }
+        if (StopType !== undefined && !VALID_STOP_TYPES.includes(Number(StopType))) {
+            return res.status(400).json({ success: false, message: 'StopType must be between 1 and 6.' });
+        }
+
+        const [rows] = await db.query(
+            'SELECT * FROM HiyariReports WHERE id = ? AND DeletedAt IS NULL',
+            [id]
+        );
         if (!rows.length) return res.status(404).json({ success: false, message: 'ไม่พบรายงาน' });
 
-        const isClosing = Status === 'Closed' && rows[0].Status !== 'Closed';
+        const normalizedReviewStatus = rows[0].SignedFileUrl && ReviewStatus === 'Approved' ? 'Completed' : ReviewStatus;
+        const normalizedRank = requestedRank !== undefined ? String(requestedRank).toUpperCase() : null;
+        const nextStatus = Status || rows[0].Status;
+        const nextCorrective = CorrectiveAction !== undefined ? String(CorrectiveAction || '').trim() : String(rows[0].CorrectiveAction || '').trim();
+        if (nextStatus === 'Closed' && !nextCorrective) {
+            return res.status(400).json({ success: false, message: 'กรุณาระบุ Corrective Action ก่อนปิดรายงาน' });
+        }
+
+        const normalizedReviewComment = ReviewComment !== undefined ? String(ReviewComment || '').trim() : undefined;
+        if (normalizedReviewStatus === 'Rejected' && !normalizedReviewComment) {
+            return res.status(400).json({ success: false, message: 'กรุณาระบุเหตุผลเมื่อตีกลับรายงาน' });
+        }
+        const nextReviewComment = normalizedReviewStatus === 'Approved' && !normalizedReviewComment
+            ? 'ตรวจสอบไฟล์ Excel แล้ว ข้อมูลครบถ้วน อนุญาตให้ดำเนินการลงนามและส่ง PDF'
+            : normalizedReviewComment;
+
+        const isClosing = nextStatus === 'Closed' && rows[0].Status !== 'Closed';
+        const isReopening = rows[0].Status === 'Closed' && nextStatus !== 'Closed';
+        const normalizedReopenReason = ReopenReason !== undefined ? String(ReopenReason || '').trim() : '';
+        if (isReopening && !normalizedReopenReason) {
+            return res.status(400).json({ success: false, message: 'ReopenReason is required when reopening a Hiyari report.' });
+        }
         const closedAt  = isClosing ? new Date() : null;
-        const closedBy  = isClosing ? req.user.name : null;
+        const closedBy  = isClosing ? userName(req) : null;
+        const reopenedAt = isReopening ? new Date() : null;
+        const reopenedBy = isReopening ? userName(req) : null;
 
         await db.query(
             `UPDATE HiyariReports
-             SET Status           = COALESCE(?, Status),
+             SET ReportDate       = COALESCE(?, ReportDate),
+                 Department       = COALESCE(?, Department),
+                 Location         = COALESCE(?, Location),
+                 Description      = COALESCE(?, Description),
+                 PotentialConsequence = COALESCE(?, PotentialConsequence),
+                 Suggestion       = COALESCE(?, Suggestion),
+                 RiskRank         = COALESCE(?, RiskRank),
+                 RiskLevel        = COALESCE(?, RiskLevel),
+                 StopType         = COALESCE(?, StopType),
+                 Status           = COALESCE(?, Status),
                  CorrectiveAction = COALESCE(?, CorrectiveAction),
                  AdminComment     = COALESCE(?, AdminComment),
-                 ClosedAt         = CASE WHEN ? IS NOT NULL THEN ? ELSE ClosedAt END,
-                 ClosedBy         = CASE WHEN ? IS NOT NULL THEN ? ELSE ClosedBy END
-             WHERE id = ?`,
+                 ReviewStatus      = COALESCE(?, ReviewStatus),
+                 ReviewComment     = COALESCE(?, ReviewComment),
+                 ReviewedAt        = CASE WHEN ? IS NULL THEN ReviewedAt ELSE NOW() END,
+                 ReviewedBy        = CASE WHEN ? IS NULL THEN ReviewedBy ELSE ? END,
+                 ClosedAt         = CASE WHEN ? THEN ? WHEN ? THEN NULL ELSE ClosedAt END,
+                 ClosedBy         = CASE WHEN ? THEN ? WHEN ? THEN NULL ELSE ClosedBy END,
+                 ReopenReason     = CASE WHEN ? THEN ? ELSE ReopenReason END,
+                 ReopenedAt       = CASE WHEN ? THEN ? ELSE ReopenedAt END,
+                 ReopenedBy       = CASE WHEN ? THEN ? ELSE ReopenedBy END
+            WHERE id = ?`,
             [
+                ReportDate !== undefined ? String(ReportDate) : null,
+                Department !== undefined ? String(Department).trim() : null,
+                Location !== undefined ? String(Location || '').trim() : null,
+                Description !== undefined ? String(Description).trim() : null,
+                PotentialConsequence !== undefined ? String(PotentialConsequence || '').trim() : null,
+                Suggestion !== undefined ? String(Suggestion || '').trim() : null,
+                normalizedRank,
+                normalizedRank ? RANK_TO_RISK[normalizedRank] : null,
+                StopType !== undefined ? Number(StopType) : null,
                 Status || null,
                 CorrectiveAction !== undefined ? CorrectiveAction : null,
                 AdminComment     !== undefined ? AdminComment     : null,
-                closedAt, closedAt, closedBy, closedBy, id,
+                normalizedReviewStatus || null,
+                ReviewComment !== undefined || normalizedReviewStatus === 'Approved' ? nextReviewComment : null,
+                normalizedReviewStatus || null,
+                normalizedReviewStatus || null,
+                normalizedReviewStatus ? userName(req) : null,
+                isClosing, closedAt, isReopening,
+                isClosing, closedBy, isReopening,
+                isReopening, normalizedReopenReason || null,
+                isReopening, reopenedAt,
+                isReopening, reopenedBy,
+                id,
             ]
         );
+        await logAudit(req, {
+            action: isClosing ? 'HIYARI_CLOSE' : isReopening ? 'HIYARI_REOPEN' : 'HIYARI_UPDATE',
+            module: 'hiyari',
+            targetType: 'HiyariReports',
+            targetId: id,
+            detail: `Hiyari report ${id}: ${rows[0].Status} -> ${nextStatus}`,
+            metadata: {
+                previousStatus: rows[0].Status,
+                nextStatus,
+                previousReviewStatus: rows[0].ReviewStatus,
+                nextReviewStatus: normalizedReviewStatus || rows[0].ReviewStatus,
+                correctiveChanged: CorrectiveAction !== undefined,
+                commentChanged: AdminComment !== undefined,
+                reviewCommentChanged: ReviewComment !== undefined,
+                businessFieldsChanged: [ReportDate, Department, Location, Description, PotentialConsequence, Suggestion, requestedRank, StopType].some(value => value !== undefined),
+                previousRank: rows[0].RiskRank,
+                nextRank: normalizedRank || rows[0].RiskRank,
+                previousStopType: rows[0].StopType,
+                nextStopType: StopType !== undefined ? Number(StopType) : rows[0].StopType,
+                reopenReason: isReopening ? normalizedReopenReason : undefined,
+            },
+        });
+        const userRecipients = await resolveHiyariUserRecipients(rows[0]);
+        if (normalizedReviewStatus && normalizedReviewStatus !== rows[0].ReviewStatus && ['Approved', 'Rejected'].includes(normalizedReviewStatus)) {
+            const reviewMail = buildUserReviewEmail({
+                reporterName: rows[0].ReporterName || '-',
+                reviewStatus: normalizedReviewStatus,
+                reviewComment: String(nextReviewComment || '').trim(),
+            });
+            await queueHiyariEmail({
+                to: userRecipients.recipients,
+                reportId: id,
+                eventType: normalizedReviewStatus,
+                subject: reviewMail.subject,
+                body: reviewMail.body,
+                html: reviewMail.html,
+            });
+        }
+        if ((isClosing || isReopening) && userRecipients.recipients) {
+            const statusMail = buildUserStatusEmail({
+                reporterName: rows[0].ReporterName || '-',
+                status: nextStatus,
+                correctiveAction: nextCorrective,
+                adminComment: isReopening ? normalizedReopenReason : (AdminComment !== undefined ? AdminComment : ''),
+            });
+            await queueHiyariEmail({
+                to: userRecipients.recipients,
+                reportId: id,
+                eventType: isClosing ? 'Closed' : 'Reopened',
+                subject: statusMail.subject,
+                body: statusMail.body,
+                html: statusMail.html,
+            });
+        }
         res.json({ success: true, message: 'อัปเดตรายงานสำเร็จ' });
     } catch (error) {
         console.error('Hiyari update error:', error);
@@ -437,17 +1710,248 @@ router.put('/:id', isAdmin, async (req, res) => {
 // ─────────────────────────────────────────────────────────────────────────────
 // UPLOAD ADDITIONAL FILE (Admin)
 // ─────────────────────────────────────────────────────────────────────────────
+router.post('/:id/replacement-excel', upload.single('file'), async (req, res) => {
+    let uploadedUrl = req.file ? req.file.path : null;
+    let connection = null;
+    try {
+        await ensureTables();
+        if (!req.file) return res.status(400).json({ success: false, message: 'Please choose an Excel file.' });
+        if (!isExcelUpload(req.file)) {
+            deleteLocalUpload(uploadedUrl);
+            uploadedUrl = null;
+            return res.status(400).json({ success: false, message: 'Replacement file must be Excel .xls or .xlsx.' });
+        }
+
+        const [rows] = await db.query(
+            `SELECT id, ReporterID, ReporterName, SubmittedByID, SubmittedByName, Department, ReportDate,
+                    CompanyEmail, Location, RiskRank, StopType, AttachmentUrl, ReviewStatus, ReviewComment
+             FROM HiyariReports
+             WHERE id = ? AND DeletedAt IS NULL
+             LIMIT 1`,
+            [req.params.id]
+        );
+        if (!rows.length) {
+            deleteLocalUpload(uploadedUrl);
+            uploadedUrl = null;
+            return res.status(404).json({ success: false, message: 'Report not found' });
+        }
+
+        const report = rows[0];
+        if (!canAccessReport(req, report)) {
+            deleteLocalUpload(uploadedUrl);
+            uploadedUrl = null;
+            return res.status(403).json({ success: false, message: 'Permission denied.' });
+        }
+        const adminOverride = isRequestAdmin(req) && report.ReviewStatus !== 'Rejected';
+        if (report.ReviewStatus !== 'Rejected' && !adminOverride) {
+            deleteLocalUpload(uploadedUrl);
+            uploadedUrl = null;
+            return res.status(400).json({ success: false, message: 'Excel can be resubmitted only after the report is rejected.' });
+        }
+
+        connection = await db.getConnection();
+        await connection.beginTransaction();
+        const revisionNo = await nextHiyariRevisionNo(req.params.id, connection);
+        await connection.query(
+            `INSERT INTO Hiyari_Report_Revisions
+                (ReportID, RevisionNo, PreviousAttachmentUrl, ReplacementAttachmentUrl, ReviewComment, UploadedByID, UploadedByName)
+             VALUES (?, ?, ?, ?, ?, ?, ?)`,
+            [
+                req.params.id,
+                revisionNo,
+                report.AttachmentUrl || null,
+                uploadedUrl,
+                report.ReviewComment || null,
+                userId(req),
+                userName(req),
+            ]
+        );
+        await connection.query(
+            `UPDATE HiyariReports
+             SET AttachmentUrl = ?,
+                 ReviewStatus = 'PendingReview',
+                 ReviewComment = NULL,
+                 ReviewedAt = NULL,
+                 ReviewedBy = NULL
+             WHERE id = ? AND DeletedAt IS NULL`,
+            [uploadedUrl, req.params.id]
+        );
+
+        await connection.commit();
+        connection.release();
+        connection = null;
+        const url = uploadedUrl;
+        uploadedUrl = null;
+        await logAudit(req, {
+            action: adminOverride ? 'HIYARI_EXCEL_REPLACE_ADMIN' : 'HIYARI_EXCEL_RESUBMIT',
+            module: 'hiyari',
+            targetType: 'HiyariReports',
+            targetId: req.params.id,
+            detail: `Resubmitted Hiyari Excel revision ${revisionNo}`,
+            metadata: {
+                revisionNo,
+                previousReviewStatus: report.ReviewStatus,
+                nextReviewStatus: 'PendingReview',
+                previousAttachmentUrl: report.AttachmentUrl || null,
+                replacementAttachmentUrl: url,
+                adminOverride,
+            },
+        });
+        const subject = `Hiyari Excel resubmitted: ${report.ReporterName || req.params.id}`;
+        const body = [
+            'A Hiyari Excel file was resubmitted and is waiting for review.',
+            `Report ID: ${req.params.id}`,
+            `Reporter: ${report.ReporterName || '-'}`,
+            `Department: ${report.Department || '-'}`,
+            `Revision: ${revisionNo}`,
+            `Uploaded by: ${userName(req)}`,
+        ].join('\n');
+        await queueHiyariEmail({
+            to: getHiyariAdminEmail(),
+            reportId: req.params.id,
+            eventType: 'ExcelResubmitted',
+            subject,
+            body,
+            html: body.replace(/\n/g, '<br>'),
+        });
+        res.json({ success: true, message: 'Replacement Excel uploaded', url, revisionNo });
+    } catch (error) {
+        if (connection) {
+            await connection.rollback().catch(() => {});
+            connection.release();
+        }
+        if (uploadedUrl) deleteLocalUpload(uploadedUrl);
+        console.error('Hiyari replacement Excel error:', error);
+        res.status(500).json({ success: false, message: 'Cannot upload replacement Excel.' });
+    }
+});
+
 router.post('/:id/attachment', isAdmin, upload.single('file'), async (req, res) => {
+    let uploadedUrl = req.file ? req.file.path : null;
     try {
         await ensureTables();
         if (!req.file) return res.status(400).json({ success: false, message: 'กรุณาเลือกไฟล์' });
-        const [rows] = await db.query('SELECT id FROM HiyariReports WHERE id = ?', [req.params.id]);
-        if (!rows.length) return res.status(404).json({ success: false, message: 'ไม่พบรายงาน' });
-        await db.query('UPDATE HiyariReports SET AdditionalFileUrl = ? WHERE id = ?', [req.file.path, req.params.id]);
-        res.json({ success: true, message: 'อัปโหลดไฟล์สำเร็จ', url: req.file.path });
+        if (!isSupportingUpload(req.file)) {
+            deleteLocalUpload(uploadedUrl);
+            uploadedUrl = null;
+            return res.status(400).json({ success: false, message: 'Additional attachment must be PDF, JPG, PNG, or WEBP.' });
+        }
+        const [rows] = await db.query('SELECT id, AdditionalFileUrl FROM HiyariReports WHERE id = ? AND DeletedAt IS NULL', [req.params.id]);
+        if (!rows.length) {
+            deleteLocalUpload(uploadedUrl);
+            uploadedUrl = null;
+            return res.status(404).json({ success: false, message: 'Report not found' });
+        }
+        await db.query('UPDATE HiyariReports SET AdditionalFileUrl = ? WHERE id = ? AND DeletedAt IS NULL', [uploadedUrl, req.params.id]);
+        const url = uploadedUrl;
+        uploadedUrl = null;
+        deleteLocalUpload(rows[0].AdditionalFileUrl);
+        await logAudit(req, {
+            action: 'HIYARI_ATTACHMENT_UPDATE',
+            module: 'hiyari',
+            targetType: 'HiyariReports',
+            targetId: req.params.id,
+            detail: `Updated Hiyari additional attachment ${req.params.id}`,
+            metadata: { replacedExisting: Boolean(rows[0].AdditionalFileUrl), fileUrl: url },
+        });
+        res.json({ success: true, message: 'Upload completed', url });
     } catch (error) {
+        if (uploadedUrl) deleteLocalUpload(uploadedUrl);
         console.error('Hiyari attachment error:', error);
         res.status(500).json({ success: false, message: 'ไม่สามารถอัปโหลดไฟล์ได้' });
+    }
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// UPLOAD SIGNED FILE (Reporter, submitter, or admin)
+// ─────────────────────────────────────────────────────────────────────────────
+router.post('/:id/signed-file', upload.single('file'), async (req, res) => {
+    let uploadedUrl = req.file ? req.file.path : null;
+    try {
+        await ensureTables();
+        if (!req.file) return res.status(400).json({ success: false, message: 'กรุณาเลือกไฟล์ที่ลงนามแล้ว' });
+        if (!isPdfUpload(req.file)) {
+            deleteLocalUpload(uploadedUrl);
+            uploadedUrl = null;
+            return res.status(400).json({ success: false, message: 'ไฟล์ลงนามต้องเป็น PDF เท่านั้น' });
+        }
+        const [rows] = await db.query(
+            `SELECT id, ReporterID, SubmittedByID, ReporterName, CompanyEmail, ReviewStatus, SignedFileUrl
+             FROM HiyariReports WHERE id = ? AND DeletedAt IS NULL LIMIT 1`,
+            [req.params.id]
+        );
+        if (!rows.length) {
+            deleteLocalUpload(uploadedUrl);
+            uploadedUrl = null;
+            return res.status(404).json({ success: false, message: 'ไม่พบรายงาน' });
+        }
+        const report = rows[0];
+        const requester = String(userId(req));
+        const canUpload = isRequestAdmin(req)
+            || requester === String(report.ReporterID || '')
+            || requester === String(report.SubmittedByID || '');
+        if (!canUpload) {
+            deleteLocalUpload(uploadedUrl);
+            uploadedUrl = null;
+            return res.status(403).json({ success: false, message: 'ไม่มีสิทธิ์อัปโหลดไฟล์ลงนามของรายงานนี้' });
+        }
+        const canAttachSignedPdf = report.ReviewStatus === 'Approved'
+            || (report.ReviewStatus === 'Completed' && Boolean(report.SignedFileUrl));
+        if (!canAttachSignedPdf) {
+            deleteLocalUpload(uploadedUrl);
+            uploadedUrl = null;
+            return res.status(400).json({ success: false, message: 'อัปโหลดไฟล์ลงนามได้หลังรายงานผ่านการตรวจสอบแล้ว' });
+        }
+
+        await db.query(
+            `UPDATE HiyariReports
+             SET SignedFileUrl = ?, SignedUploadedAt = NOW(), ReviewStatus = 'Completed'
+             WHERE id = ? AND DeletedAt IS NULL`,
+            [uploadedUrl, req.params.id]
+        );
+        const url = uploadedUrl;
+        uploadedUrl = null;
+        deleteLocalUpload(report.SignedFileUrl);
+        await logAudit(req, {
+            action: 'HIYARI_SIGNED_FILE_UPLOAD',
+            module: 'hiyari',
+            targetType: 'HiyariReports',
+            targetId: req.params.id,
+            detail: `Uploaded signed Hiyari file ${req.params.id}`,
+            metadata: { replacedExisting: Boolean(report.SignedFileUrl), fileUrl: url },
+        });
+        const signedFileMail = buildAdminSignedFileEmail({
+            reportId: req.params.id,
+            reporterName: report.ReporterName || '-',
+        });
+        await queueHiyariEmail({
+            to: getHiyariAdminEmail(),
+            reportId: req.params.id,
+            eventType: 'SignedFileUploaded',
+            subject: signedFileMail.subject,
+            body: signedFileMail.body,
+            html: signedFileMail.html,
+        });
+        const userRecipients = await resolveHiyariUserRecipients(report);
+        if (userRecipients.recipients) {
+            const completedMail = buildUserCompletedEmail({
+                reportId: req.params.id,
+                reporterName: report.ReporterName || '-',
+            });
+            await queueHiyariEmail({
+                to: userRecipients.recipients,
+                reportId: req.params.id,
+                eventType: 'Completed',
+                subject: completedMail.subject,
+                body: completedMail.body,
+                html: completedMail.html,
+            });
+        }
+        res.json({ success: true, message: 'อัปโหลดไฟล์ลงนามสำเร็จ', url });
+    } catch (error) {
+        if (uploadedUrl) deleteLocalUpload(uploadedUrl);
+        console.error('Hiyari signed file error:', error);
+        res.status(500).json({ success: false, message: 'ไม่สามารถอัปโหลดไฟล์ลงนามได้' });
     }
 });
 
@@ -457,9 +1961,16 @@ router.post('/:id/attachment', isAdmin, upload.single('file'), async (req, res) 
 router.delete('/:id', isAdmin, async (req, res) => {
     try {
         await ensureTables();
-        const [rows] = await db.query('SELECT id FROM HiyariReports WHERE id = ?', [req.params.id]);
+        const [rows] = await db.query('SELECT id FROM HiyariReports WHERE id = ? AND DeletedAt IS NULL', [req.params.id]);
         if (!rows.length) return res.status(404).json({ success: false, message: 'ไม่พบรายงาน' });
-        await db.query('DELETE FROM HiyariReports WHERE id = ?', [req.params.id]);
+        await db.query('UPDATE HiyariReports SET DeletedAt = NOW(), DeletedBy = ? WHERE id = ? AND DeletedAt IS NULL', [userName(req), req.params.id]);
+        await logAudit(req, {
+            action: 'HIYARI_DELETE',
+            module: 'hiyari',
+            targetType: 'HiyariReports',
+            targetId: req.params.id,
+            detail: `Soft deleted Hiyari report ${req.params.id}`,
+        });
         res.json({ success: true, message: 'ลบรายงานสำเร็จ' });
     } catch (error) {
         console.error('Hiyari delete error:', error);

@@ -3,7 +3,7 @@
 // Profile Slide-over Drawer (Enterprise)
 // ======================================================
 import { apiFetch } from '../api.js';
-import { showToast, escHtml } from '../ui.js';
+import { showToast, escHtml } from '../ui.js?v=20260602-mobile-nav-m53';
 
 let _masterCache = null;
 
@@ -112,7 +112,7 @@ function _ensureDrawerDOM() {
                                 รหัสผ่านใหม่
                             </label>
                             <input id="ppw-new" type="password" required autocomplete="new-password"
-                                   placeholder="อย่างน้อย 8 ตัวอักษร"
+                                   placeholder="อย่างน้อย 4 ตัวอักษร"
                                    class="w-full px-3.5 py-2.5 rounded-xl border border-slate-200 dark:border-slate-600 dark:bg-slate-800 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-transparent transition"
                                    oninput="_ppwStrength(this.value)">
                             <!-- Strength meter -->
@@ -151,7 +151,7 @@ function _ensureDrawerDOM() {
     document.querySelectorAll('.profile-tab-btn').forEach(btn => {
         btn.addEventListener('click', () => _switchTab(btn.dataset.ptab));
     });
-    document.getElementById('profile-pw-form')?.addEventListener('submit', _handleChangePassword);
+    document.getElementById('profile-pw-form')?.addEventListener('submit', guardSubmitHandler(_handleChangePassword));
 }
 
 function _switchTab(tab) {
@@ -272,6 +272,10 @@ function _renderForm(data, master) {
                    class="w-full px-3.5 py-2.5 rounded-xl border border-slate-200 bg-slate-50 dark:bg-slate-800 dark:border-slate-600 text-sm text-slate-400 cursor-not-allowed">
         </div>
         <div id="pf-error" class="hidden text-sm text-red-600 font-medium bg-red-50 rounded-xl px-3 py-2"></div>
+        <button type="button" id="pf-recheck-btn"
+                class="hidden w-full rounded-xl border border-amber-300 bg-amber-50 px-3 py-2 text-sm font-bold text-amber-700">
+            ตรวจสอบสถานะอีกครั้ง
+        </button>
         <button type="submit"
                 class="w-full py-2.5 rounded-xl font-semibold text-sm text-white transition mt-2"
                 style="background:linear-gradient(135deg,#064e3b,#0d9488)">
@@ -323,7 +327,8 @@ function _renderForm(data, master) {
         </div>
     </div>`;
 
-    document.getElementById('profile-info-form')?.addEventListener('submit', _handleSaveProfile);
+    document.getElementById('profile-info-form')?.addEventListener('submit', guardSubmitHandler(_handleSaveProfile));
+    document.getElementById('pf-recheck-btn')?.addEventListener('click', _recoverProfileUpdate);
     document.getElementById('pf-chid-btn')?.addEventListener('click', _handleChangeEmployeeID);
 
     // Cascading unit dropdown when dept changes
@@ -350,7 +355,9 @@ async function _handleSaveProfile(e) {
     e.preventDefault();
     const errEl  = document.getElementById('pf-error');
     const btn    = e.target.querySelector('button[type=submit]');
+    const recheckBtn = document.getElementById('pf-recheck-btn');
     errEl.classList.add('hidden');
+    recheckBtn?.classList.add('hidden');
 
     const unitWrap = document.getElementById('pf-unit-wrap');
     const body = {
@@ -368,17 +375,98 @@ async function _handleSaveProfile(e) {
     btn.disabled = true;
     btn.textContent = 'กำลังบันทึก...';
     try {
-        await apiFetch('/profile', { method: 'PUT', body: JSON.stringify(body) });
+        const res = await apiFetch('/profile', { method: 'PUT', body: JSON.stringify(body) });
+        await _continueProfileResult(res);
         showToast('อัปเดตโปรไฟล์สำเร็จ', 'success');
-        // Refresh header name
-        const nameEl = document.getElementById('profile-header-name');
-        if (nameEl) nameEl.textContent = body.EmployeeName;
     } catch (err) {
-        errEl.textContent = err.message || 'เกิดข้อผิดพลาด';
-        errEl.classList.remove('hidden');
+        const ambiguousFailure = err instanceof TypeError
+            || err?.code === 'PROFILE_VALIDATION_UNAVAILABLE'
+            || err?.code === 'ONBOARDING_STATE_UNAVAILABLE';
+        if (ambiguousFailure) {
+            errEl.textContent = 'ผลการบันทึกยังไม่แน่นอน กำลังตรวจสอบสถานะล่าสุด';
+            errEl.classList.remove('hidden');
+            recheckBtn?.classList.remove('hidden');
+            await _recoverProfileUpdate();
+            return;
+        }
+        _showProfileError(err);
     } finally {
         btn.disabled = false;
         btn.textContent = 'บันทึกข้อมูล';
+    }
+}
+
+async function _continueProfileResult(result) {
+    const status = result?.status || result?.onboardingStatus;
+    if (!result?.user || !result?.token
+        || !['READY', 'SAFETY_UNIT_REQUIRED'].includes(status)
+        || !['ENTER_APP', 'SELECT_SAFETY_UNIT'].includes(result?.nextAction)) {
+        throw new TypeError('Profile update response was incomplete.');
+    }
+    if (typeof window.continueAfterProfileUpdate === 'function') {
+        await window.continueAfterProfileUpdate(result);
+        return;
+    }
+    TSHSession.setSession(result.user, result.token);
+    closeProfileDrawer();
+}
+
+function _showProfileError(error) {
+    const errEl = document.getElementById('pf-error');
+    const fieldByCode = {
+        INVALID_EMPLOYEE_NAME: 'pf-name',
+        INVALID_DEPARTMENT: 'pf-dept',
+        INVALID_SAFETY_UNIT: 'pf-unit',
+        INVALID_POSITION: 'pf-position',
+    };
+    if (errEl) {
+        errEl.textContent = error?.message || 'เกิดข้อผิดพลาด';
+        errEl.classList.remove('hidden');
+    }
+    const field = document.getElementById(fieldByCode[error?.code]);
+    field?.focus();
+    field?.setAttribute('aria-invalid', 'true');
+}
+
+async function _recoverProfileUpdate() {
+    const recheckBtn = document.getElementById('pf-recheck-btn');
+    const errEl = document.getElementById('pf-error');
+    if (recheckBtn) {
+        recheckBtn.disabled = true;
+        recheckBtn.textContent = 'กำลังตรวจสอบ...';
+        recheckBtn.classList.remove('hidden');
+    }
+    const verification = await TSHSession.refreshSession({ preserveOnFailure: true });
+    if (!verification) {
+        if (errEl) {
+            errEl.textContent = 'ยังตรวจสอบสถานะไม่ได้ เซสชันเดิมยังถูกเก็บไว้ กรุณาลองอีกครั้ง';
+            errEl.classList.remove('hidden');
+        }
+        if (recheckBtn) {
+            recheckBtn.disabled = false;
+            recheckBtn.textContent = 'ตรวจสอบสถานะอีกครั้ง';
+        }
+        return;
+    }
+
+    const status = verification.status || verification.onboardingStatus;
+    if (['READY', 'SAFETY_UNIT_REQUIRED'].includes(status)) {
+        await _continueProfileResult({
+            ...verification,
+            status,
+            onboardingStatus: status,
+            nextAction: status === 'SAFETY_UNIT_REQUIRED' ? 'SELECT_SAFETY_UNIT' : 'ENTER_APP',
+        });
+        showToast('ยืนยันการอัปเดตโปรไฟล์แล้ว', 'success');
+        return;
+    }
+    if (errEl) {
+        errEl.textContent = 'ไม่สามารถยืนยันสถานะโปรไฟล์ได้ กรุณาตรวจสอบอีกครั้ง';
+        errEl.classList.remove('hidden');
+    }
+    if (recheckBtn) {
+        recheckBtn.disabled = false;
+        recheckBtn.textContent = 'ตรวจสอบสถานะอีกครั้ง';
     }
 }
 
@@ -390,7 +478,7 @@ function _ppwStrength(pw) {
     if (!pw) { wrap.classList.add('hidden'); return; }
     wrap.classList.remove('hidden');
     let score = 0;
-    if (pw.length >= 8)          score++;
+    if (pw.length >= 4)          score++;
     if (/[a-z]/.test(pw))        score++;
     if (/[A-Z]/.test(pw))        score++;
     if (/[0-9]/.test(pw))        score++;
@@ -425,8 +513,8 @@ async function _handleChangePassword(e) {
         errEl.classList.remove('hidden');
         return;
     }
-    if (newPw.length < 8) {
-        errEl.textContent = 'รหัสผ่านใหม่ต้องมีอย่างน้อย 8 ตัวอักษร';
+    if (newPw.length < 4) {
+        errEl.textContent = 'รหัสผ่านใหม่ต้องมีอย่างน้อย 4 ตัวอักษร';
         errEl.classList.remove('hidden');
         return;
     }
@@ -501,3 +589,4 @@ async function _getMaster() {
 function _esc(str) {
     return String(str ?? '').replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
 }
+import { guardSubmitHandler } from '../utils/async-ui.js?v=20260715-phase32d-remaining-async-ux';

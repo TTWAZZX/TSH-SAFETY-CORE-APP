@@ -8,9 +8,9 @@ const router  = express.Router();
 const db      = require('../db');
 const multer  = require('multer');
 const { isAdmin } = require('../middleware/auth');
-const { cloudinary, storage: cloudinaryStorage } = require('../cloudinary');
+const { storage: uploadStorage, deleteLocalUpload } = require('../storage');
 
-const ALLOWED_MODULES = ['hiyari', 'ky', 'fourm', 'general'];
+const ALLOWED_MODULES = ['hiyari', 'ky', 'fourm', 'cccf', 'general'];
 
 const formFileFilter = (req, file, cb) => {
     const allowed = [
@@ -26,7 +26,7 @@ const formFileFilter = (req, file, cb) => {
 };
 
 const upload = multer({
-    storage: cloudinaryStorage,
+    storage: uploadStorage,
     fileFilter: formFileFilter,
     limits: { fileSize: 20 * 1024 * 1024 },
 });
@@ -120,8 +120,8 @@ router.post('/', isAdmin, _handleUpload, async (req, res) => {
             return res.status(400).json({ success: false, message: 'กรุณาแนบไฟล์แบบฟอร์ม' });
         }
 
-        const fileUrl  = req.file.path || req.file.secure_url || '';
-        const publicId = req.file.filename || req.file.public_id || null;
+        const fileUrl  = req.file.path || '';
+        const publicId = req.file.filename || null;
         if (!fileUrl) {
             return res.status(500).json({ success: false, message: 'อัปโหลดไฟล์ไม่สำเร็จ: ไม่ได้รับ URL จาก storage' });
         }
@@ -194,15 +194,10 @@ router.delete('/:id', isAdmin, async (req, res) => {
         const id = parseInt(req.params.id, 10);
         if (!id || id <= 0) return res.status(400).json({ success: false, message: 'ID ไม่ถูกต้อง' });
 
-        const [[row]] = await db.query('SELECT id, PublicID, Title FROM Module_Forms WHERE id = ?', [id]);
+        const [[row]] = await db.query('SELECT id, FileUrl, Title FROM Module_Forms WHERE id = ?', [id]);
         if (!row) return res.status(404).json({ success: false, message: 'ไม่พบแบบฟอร์ม' });
 
-        // Delete from Cloudinary (fire-and-forget)
-        if (row.PublicID) {
-            cloudinary.uploader.destroy(row.PublicID).catch(e =>
-                console.warn('Module_Forms Cloudinary delete warn:', e.message)
-            );
-        }
+        deleteLocalUpload(row.FileUrl);
 
         await db.query('DELETE FROM Module_Forms WHERE id = ?', [id]);
         res.json({ success: true, message: `ลบ "${row.Title}" สำเร็จ` });

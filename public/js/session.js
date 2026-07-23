@@ -3,10 +3,20 @@
 // STEP A - FINAL (Stable)
 // =================================================================
 
-// FIX: was hardcoded to localhost — breaks in production (Vercel)
-const API_BASE = (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1' || !window.location.hostname)
-    ? 'http://localhost:5000/api'
-    : '/api';
+function resolveApiBase() {
+    if (window.API_BASE) return String(window.API_BASE).replace(/\/+$/, '');
+
+    const h = window.location.hostname;
+    if (h === 'localhost' || h === '127.0.0.1' || !h) return 'http://localhost:5000/api';
+
+    const path = window.location.pathname || '/';
+    const marker = '/index.html';
+    const appPath = path.includes(marker) ? path.slice(0, path.indexOf(marker) + 1) : path;
+    return `${appPath.replace(/\/+$/, '')}/api`;
+}
+
+// Uses localhost for local testing and current app subfolder for hosted deployments.
+const API_BASE = resolveApiBase();
 
 /**
  * =========================
@@ -49,10 +59,14 @@ async function login(employeeId, password) {
             body: JSON.stringify({ employeeId, password })
         });
 
+        const contentType = res.headers.get('content-type') || '';
+        if (!contentType.includes('application/json')) {
+            throw new Error(`API endpoint not available (${res.status})`);
+        }
         const data = await res.json();
 
         if (!res.ok || !data.success) {
-            alert(data.message || 'เข้าสู่ระบบไม่สำเร็จ');
+            window.__tshLoginError = data.message || 'เข้าสู่ระบบไม่สำเร็จ';
             return false;
         }
 
@@ -61,7 +75,7 @@ async function login(employeeId, password) {
 
     } catch (err) {
         console.error('Login error:', err);
-        alert('ไม่สามารถเชื่อมต่อระบบได้');
+        window.__tshLoginError = 'ไม่สามารถเชื่อมต่อระบบได้';
         return false;
     }
 }
@@ -72,9 +86,10 @@ async function login(employeeId, password) {
  * ใช้ตอนเปิดเว็บทุกครั้ง
  * =========================
  */
-async function verifySession() {
+async function refreshSession(options = {}) {
+    const preserveOnFailure = options?.preserveOnFailure === true;
     const token = getToken();
-    if (!token) return false;
+    if (!token) return null;
 
     try {
         const res = await fetch(`${API_BASE}/session/verify`, {
@@ -85,9 +100,16 @@ async function verifySession() {
             }
         });
 
-        // ❗ ถ้า backend ตอบ non-200 → ถือว่า session พัง
-        if (!res.ok) throw new Error('Invalid session');
+        if (!res.ok) {
+            const error = new Error('Invalid session');
+            error.invalidSession = res.status === 401 || res.status === 403;
+            throw error;
+        }
 
+        const contentType = res.headers.get('content-type') || '';
+        if (!contentType.includes('application/json')) {
+            throw new Error(`API endpoint not available (${res.status})`);
+        }
         const data = await res.json();
 
         if (!data.success || !data.user || !data.token) {
@@ -96,13 +118,17 @@ async function verifySession() {
 
         // ✅ refresh user + token ทุกครั้ง
         saveSession(data.user, data.token);
-        return true;
+        return data;
 
     } catch (err) {
         console.warn('Session verify failed:', err.message);
-        clearSession();
-        return false;
+        if (!preserveOnFailure || err?.invalidSession) clearSession();
+        return null;
     }
+}
+
+async function verifySession(options = {}) {
+    return Boolean(await refreshSession(options));
 }
 
 /**
@@ -135,8 +161,10 @@ function logout(redirectTo = 'index.html') {
 window.TSHSession = {
     login,
     logout,
+    refreshSession,
     verifySession,
     requireAuth,
+    setSession: saveSession,
     getUser,
     getToken
 };

@@ -5,6 +5,7 @@
 const jwt = require('jsonwebtoken');
 const app = require('../server');
 const db = require('../db');
+const { loadReadyTestUsers } = require('./ready-test-users');
 
 const JWT_SECRET = process.env.JWT_SECRET;
 if (!JWT_SECRET) {
@@ -12,18 +13,8 @@ if (!JWT_SECRET) {
     process.exit(1);
 }
 
-function tokenFor(role) {
-    return jwt.sign(
-        {
-            id: `uat-${role.toLowerCase()}`,
-            name: `UAT ${role}`,
-            department: 'QA',
-            team: '',
-            role,
-        },
-        JWT_SECRET,
-        { expiresIn: '10m' }
-    );
+function tokenFor(payload) {
+    return jwt.sign(payload, JWT_SECRET, { expiresIn: '10m' });
 }
 
 async function request(base, testCase) {
@@ -110,6 +101,7 @@ function cases(adminToken, userToken) {
         ['Accident employees', '/accident/employees'],
         ['Yokoten topics', '/yokoten/topics'],
         ['Yokoten dept history', '/yokoten/dept-history'],
+        ['Yokoten department completion summary', '/yokoten/dept-completion'],
         ['Yokoten dashboard config', '/yokoten/dashboard-config'],
         ['Safety Culture principles', '/safety-culture/principles'],
         ['Safety Culture assessments', '/safety-culture/assessments'],
@@ -132,10 +124,13 @@ function cases(adminToken, userToken) {
         ['Admin system health', '/admin/system-health'],
         ['Admin audit logs', '/admin/audit-logs?limit=5'],
         ['Admin employees', '/admin/employees'],
+        ['Admin email requirement rules', '/admin/email-requirement-rules'],
+        ['Admin email readiness', '/admin/email-readiness'],
         ['Admin schedules', '/admin/schedules'],
         ['Admin permissions matrix', '/admin/permissions/matrix'],
         ['Admin org departments', '/admin/org/departments'],
         ['Admin org units', '/admin/org/units'],
+        ['KY missing submission reminder queue', '/ky/reminder-queue'],
         ['Yokoten dept completion', '/yokoten/dept-completion'],
         ['Yokoten all responses', '/yokoten/all-responses'],
         ['Yokoten employee completion', '/yokoten/employee-completion'],
@@ -147,7 +142,10 @@ function cases(adminToken, userToken) {
         ['User blocked from admin dashboard', '/admin/dashboard-stats'],
         ['User blocked from admin system health', '/admin/system-health'],
         ['User blocked from audit logs', '/admin/audit-logs?limit=5'],
+        ['User blocked from admin email readiness', '/admin/email-readiness'],
+        ['User blocked from KY reminder queue', '/ky/reminder-queue'],
         ['User blocked from Yokoten all responses', '/yokoten/all-responses'],
+        ['User blocked from Yokoten employee completion', '/yokoten/employee-completion'],
         ['User blocked from Safety Culture PPE violations', '/safety-culture/ppe-violations'],
     ].map(([name, path]) => ({ name, path, token: userToken, expect: 403 }));
 
@@ -166,14 +164,15 @@ async function main() {
     const base = `http://127.0.0.1:${port}/api`;
 
     try {
-        const tests = cases(tokenFor('Admin'), tokenFor('User'));
+        const readyUsers = await loadReadyTestUsers(db);
+        const tests = cases(tokenFor(readyUsers.admin), tokenFor(readyUsers.user));
         const results = [];
         for (const testCase of tests) {
             results.push(await request(base, testCase));
         }
 
         const failed = results.filter(r => !r.pass);
-        console.log('Phase 5 UAT preflight summary');
+        console.log('Local read-only UAT preflight summary');
         console.log(`Checked ${results.length} read/permission surfaces. Passed ${results.length - failed.length}. Failed ${failed.length}.`);
         for (const r of results) {
             const label = r.pass ? 'PASS' : 'FAIL';

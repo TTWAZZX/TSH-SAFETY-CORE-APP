@@ -1,3 +1,4 @@
+import { delegatedActionOptions, guardActionHandler, guardSubmitHandler } from '../utils/async-ui.js?v=20260715-phase32d-remaining-async-ux';
 // public/js/pages/ojt.js — SCW / OJT Module
 // OJT tracked per DEPARTMENT (one record per dept, upsert on update)
 import { API } from '../api.js';
@@ -5,9 +6,9 @@ import {
     hideLoading, showError, showLoading,
     openModal, closeModal, showToast, showConfirmationModal,
     statusBadge as dsStatusBadge,
-} from '../ui.js';
+} from '../ui.js?v=20260602-mobile-nav-m53';
 import { normalizeApiArray } from '../utils/normalize.js';
-import { buildActivityCard } from '../utils/activity-widget.js';
+import { buildActivityCard } from '../utils/activity-widget.js?v=20260602-activity-targets-at10';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Constants
@@ -43,6 +44,11 @@ const SCW_GRADIENTS = [
     'linear-gradient(135deg,#2563eb,#0284c7)',
 ];
 const SCW_COLORS = ['red', 'amber', 'blue'];
+const SCW_STEP_STYLES = [
+    { label: '01', key: 'STOP', text: '#b91c1c', border: '#fca5a5', bg: '#fef2f2', soft: '#fee2e2' },
+    { label: '02', key: 'CALL', text: '#b45309', border: '#fcd34d', bg: '#fffbeb', soft: '#fef3c7' },
+    { label: '03', key: 'WAIT', text: '#1d4ed8', border: '#93c5fd', bg: '#eff6ff', soft: '#dbeafe' },
+];
 const SCW_DEFAULTS = [
     { title: 'STOP — หยุด', text: 'หยุดการทำงานทันทีเมื่อพบสิ่งผิดปกติหรือไม่แน่ใจในความปลอดภัย อย่าฝืนทำงานต่อ' },
     { title: 'CALL — โทร',  text: 'แจ้งหัวหน้างานหรือผู้รับผิดชอบทันที อธิบายปัญหาที่พบให้ชัดเจน' },
@@ -67,6 +73,9 @@ let _filterYear     = '';
 let _searchQ        = '';
 let _hiddenDepts    = new Set();
 let _listenersReady = false;
+let _ojtCardSaveHold = null;
+let _ojtCardSaveMenu = null;
+let _refreshGeneration = 0;
 
 // ─────────────────────────────────────────────────────────────────────────────
 // ENTRY POINT
@@ -76,7 +85,7 @@ export async function loadOjtPage() {
     if (!container) return;
 
     const user = TSHSession.getUser() || {};
-    _isAdmin = user.role === 'Admin' || user.Role === 'Admin';
+    _isAdmin = String(user.role || user.Role || '').toLowerCase() === 'admin';
     window.closeModal = closeModal;
     _loadHiddenDepts();
 
@@ -98,7 +107,8 @@ function buildShell() {
     <div class="space-y-6 animate-fade-in pb-10">
 
         <!-- ═══ HERO HEADER ═══ -->
-        <div class="relative overflow-hidden rounded-2xl" style="background:linear-gradient(135deg,#064e3b 0%,#065f46 55%,#0d9488 100%)">
+        <div class="relative overflow-hidden rounded-2xl" data-ojt-card-image="scw-hero"
+             style="background:linear-gradient(135deg,#064e3b 0%,#065f46 55%,#0d9488 100%)">
             <div class="absolute inset-0 opacity-10 pointer-events-none">
                 <svg width="100%" height="100%"><defs><pattern id="ojt-dots" width="24" height="24" patternUnits="userSpaceOnUse"><circle cx="12" cy="12" r="1.3" fill="white"/></pattern></defs><rect width="100%" height="100%" fill="url(#ojt-dots)"/></svg>
             </div>
@@ -141,26 +151,34 @@ function buildShell() {
 // DATA REFRESH
 // ─────────────────────────────────────────────────────────────────────────────
 async function refreshData() {
+    const generation = ++_refreshGeneration;
     showLoading('กำลังโหลดข้อมูล OJT...');
     try {
-        const [recRes, stdRes, docRes, deptRes] = await Promise.all([
+        const [recRes, stdRes, docRes, deptRes, visRes] = await Promise.all([
             API.get('/ojt/records'),
             API.get('/ojt/standard'),
             API.get('/ojt/documents'),
             API.get('/master/departments'),
+            API.get('/ojt/dept-visibility').catch(() => null),
         ]);
+        if (generation !== _refreshGeneration) return;
         _records  = normalizeApiArray(recRes?.data ?? recRes);
         _standard = stdRes?.data ?? null;
-        _docs     = normalizeApiArray(docRes?.data ?? docRes);
+        _docs     = normalizeApiArray(docRes?.data ?? docRes)
+            .map(doc => ({ ...doc, FileURL: _safeDocumentUrl(doc.FileURL) }));
         _allDepts = normalizeApiArray(deptRes?.data ?? deptRes)
             .map(d => d.Name || d.name)
             .filter(Boolean)
             .sort((a, b) => a.localeCompare(b, 'th'));
+        _applyDeptVisibility(visRes?.data);
     } catch (err) {
-        showToast('โหลดข้อมูลไม่สำเร็จ: ' + err.message, 'error');
+        if (generation === _refreshGeneration) {
+            showToast('โหลดข้อมูลไม่สำเร็จ: ' + _errText(err), 'error');
+        }
     } finally {
-        hideLoading();
+        if (generation === _refreshGeneration) hideLoading();
     }
+    if (generation !== _refreshGeneration) return;
     _loadHeroStats();
     renderAll();
 }
@@ -239,23 +257,33 @@ function _rerenderCompliance() {
 // ─── Section: Standard ───────────────────────────────────────────────────────
 function _buildStandardSection() {
     const items = _getScwItems();
-    const cards = items.map((item, i) => `
-        <div class="rounded-xl p-5 border border-${SCW_COLORS[i]}-200 bg-${SCW_COLORS[i]}-50">
-            <div class="flex items-center gap-3 mb-3">
-                <div class="w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0" style="background:${SCW_GRADIENTS[i]}">
+    const cards = items.map((item, i) => {
+        const style = SCW_STEP_STYLES[i];
+        return `
+        <div class="rounded-lg p-4 border relative overflow-hidden" data-ojt-card-image="scw-standard-${style.key.toLowerCase()}"
+             style="background:${style.bg};border-color:${style.border}">
+            <div class="absolute right-3 top-3 text-3xl font-black select-none" style="color:${style.soft}">${style.label}</div>
+            <div class="flex items-start gap-3 relative">
+                <div class="w-10 h-10 rounded-lg flex items-center justify-center flex-shrink-0" style="background:${SCW_GRADIENTS[i]}">
                     ${SCW_ICONS[i]}
                 </div>
-                <h3 class="font-bold text-${SCW_COLORS[i]}-700">${_esc(item.title)}</h3>
+                <div class="min-w-0">
+                    <div class="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-black mb-2" style="background:#ffffff;color:${style.text};border:1px solid ${style.border}">
+                        ${style.key}
+                    </div>
+                    <h3 class="font-black text-sm" style="color:${style.text}">${_esc(item.title)}</h3>
+                    <p class="text-sm text-slate-700 leading-relaxed mt-2">${_esc(item.text)}</p>
+                </div>
             </div>
-            <p class="text-sm text-slate-700 leading-relaxed">${_esc(item.text)}</p>
-        </div>`).join('');
+        </div>`;
+    }).join('');
 
     const updatedAt = _standard?.UpdatedAt
         ? `<p class="text-xs text-slate-400 mt-1">อัปเดตโดย ${_esc(_standard.UpdatedBy || '—')} เมื่อ ${new Date(_standard.UpdatedAt).toLocaleDateString('th-TH')}</p>`
         : '';
 
     return `
-    <div class="ds-section overflow-hidden">
+    <div class="ds-section overflow-hidden" data-ojt-card-image="scw-standard">
         <div class="flex items-center justify-between px-5 py-4 border-b border-slate-100">
             <div class="flex items-center gap-3">
                 <div class="w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0"
@@ -268,19 +296,23 @@ function _buildStandardSection() {
                 </div>
             </div>
             ${_isAdmin ? `
-            <button class="btn-ojt-edit-std flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold border border-slate-200 text-slate-600 hover:bg-slate-50 transition-colors">
+            <button data-ojt-card-ignore class="btn-ojt-edit-std flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold border border-slate-200 text-slate-600 hover:bg-slate-50 transition-colors">
                 <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"/></svg>
                 แก้ไข
             </button>` : ''}
         </div>
         <div class="p-5">
-            <div class="grid md:grid-cols-3 gap-4">${cards}</div>
+            <div class="grid md:grid-cols-3 gap-3">${cards}</div>
         </div>
     </div>`;
 }
 
 // ─── Section: Documents ──────────────────────────────────────────────────────
 function _buildDocumentsSection() {
+    const latestDoc = _docs[0];
+    const latestDate = latestDoc?.UploadedAt
+        ? new Date(latestDoc.UploadedAt).toLocaleDateString('th-TH', { day:'2-digit', month:'short', year:'2-digit' })
+        : '';
     const bodyHtml = _docs.length === 0
         ? `<div class="text-center py-10 text-slate-400">
             <div class="w-14 h-14 rounded-2xl bg-slate-100 flex items-center justify-center mx-auto mb-3">
@@ -289,19 +321,25 @@ function _buildDocumentsSection() {
             <p class="font-medium text-sm">ยังไม่มีเอกสาร SCW</p>
             ${_isAdmin ? `<p class="text-xs mt-1">คลิก "อัปโหลด" เพื่อเพิ่มไฟล์</p>` : ''}
            </div>`
-        : `<div class="grid sm:grid-cols-2 lg:grid-cols-3 gap-3">
+        : `<div class="space-y-3">
+            <div class="flex flex-wrap items-center gap-2">
+                <span class="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-bold text-slate-700" style="background:#f8fafc;border:1px solid #cbd5e1">${_docs.length} ไฟล์</span>
+                ${latestDate ? `<span class="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-semibold text-emerald-700" style="background:#ecfdf5;border:1px solid #a7f3d0">ล่าสุด ${latestDate}</span>` : ''}
+            </div>
+            <div class="grid sm:grid-cols-2 lg:grid-cols-3 gap-3">
             ${_docs.map(doc => {
                 const ext  = (doc.FileType || doc.FileURL?.split('.').pop() || '').toLowerCase().replace(/\?.*/, '');
                 const meta = DOC_TYPE_META[ext] || { label: ext.toUpperCase() || 'ไฟล์', bg: 'bg-slate-100', text: 'text-slate-600' };
                 const kb   = doc.FileSizeKB ? (doc.FileSizeKB >= 1024 ? `${(doc.FileSizeKB/1024).toFixed(1)} MB` : `${doc.FileSizeKB} KB`) : '';
                 const dt   = doc.UploadedAt ? new Date(doc.UploadedAt).toLocaleDateString('th-TH', { day:'2-digit', month:'short', year:'2-digit' }) : '';
                 return `
-                <div class="flex items-start gap-3 p-3 rounded-xl border border-slate-100 hover:border-slate-200 hover:shadow-sm transition-all bg-white">
-                    <div class="w-9 h-9 rounded-lg flex items-center justify-center flex-shrink-0 bg-slate-100">
-                        <svg class="w-5 h-5 text-slate-500" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/></svg>
+                <div class="flex items-start gap-3 p-3 rounded-lg border transition-all bg-white hover:shadow-sm"
+                     data-ojt-card-image="scw-document-${doc.id || 'file'}" style="border-color:#cbd5e1">
+                    <div class="w-10 h-10 rounded-lg flex items-center justify-center flex-shrink-0" style="background:#f8fafc;border:1px solid #e2e8f0">
+                        <svg class="w-5 h-5 text-slate-600" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/></svg>
                     </div>
                     <div class="flex-1 min-w-0">
-                        <p class="text-sm font-semibold text-slate-800 truncate">${_esc(doc.Title)}</p>
+                        <p class="text-sm font-bold text-slate-800 leading-snug" style="display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden">${_esc(doc.Title)}</p>
                         <div class="flex items-center gap-2 mt-1 flex-wrap">
                             <span class="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-bold ${meta.bg} ${meta.text}">${meta.label}</span>
                             ${kb ? `<span class="text-[10px] text-slate-400">${kb}</span>` : ''}
@@ -310,22 +348,23 @@ function _buildDocumentsSection() {
                         <p class="text-[10px] text-slate-400 mt-0.5">โดย ${_esc(doc.UploadedBy || '—')}</p>
                     </div>
                     <div class="flex items-center gap-1 flex-shrink-0">
-                        <a href="${doc.FileURL}" target="_blank" rel="noopener"
-                            class="p-1.5 rounded-lg text-slate-400 hover:text-emerald-600 hover:bg-emerald-50 transition-colors" title="เปิดไฟล์">
+                        ${doc.FileURL ? `<a data-ojt-card-ignore href="${_esc(doc.FileURL)}" target="_blank" rel="noopener noreferrer"
+                            class="p-1.5 rounded-lg text-slate-500 hover:text-emerald-600 hover:bg-emerald-50 transition-colors" style="border:1px solid #e2e8f0" title="เปิดไฟล์">
                             <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"/></svg>
-                        </a>
+                        </a>` : ''}
                         ${_isAdmin ? `
-                        <button class="btn-ojt-delete-doc p-1.5 rounded-lg text-slate-400 hover:text-red-500 hover:bg-red-50 transition-colors"
+                        <button data-ojt-card-ignore class="btn-ojt-delete-doc p-1.5 rounded-lg text-slate-500 hover:text-red-500 hover:bg-red-50 transition-colors"
+                            style="border:1px solid #e2e8f0"
                             data-id="${doc.id}" data-title="${_esc(doc.Title)}" title="ลบเอกสาร">
                             <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg>
                         </button>` : ''}
                     </div>
                 </div>`;
             }).join('')}
-           </div>`;
+           </div></div>`;
 
     return `
-    <div class="ds-section overflow-hidden">
+    <div class="ds-section overflow-hidden" data-ojt-card-image="scw-documents">
         <div class="flex items-center justify-between px-5 py-4 border-b border-slate-100">
             <div class="flex items-center gap-3">
                 <div class="w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0"
@@ -338,7 +377,7 @@ function _buildDocumentsSection() {
                 </div>
             </div>
             ${_isAdmin ? `
-            <button class="btn-ojt-upload flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold transition-colors"
+            <button data-ojt-card-ignore class="btn-ojt-upload flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold transition-colors"
                 style="background:linear-gradient(135deg,#dc2626,#ea580c);color:#fff">
                 <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12"/></svg>
                 อัปโหลด
@@ -354,7 +393,7 @@ function _buildComplianceSection() {
     const visibleCount = _records.filter(r => !_hiddenDepts.has(r.Department)).length;
     const hiddenCount  = _hiddenDepts.size;
     return `
-    <div class="ds-section overflow-hidden">
+    <div class="ds-section overflow-hidden" data-ojt-card-image="scw-compliance">
         <div class="flex items-center justify-between px-5 py-4 border-b border-slate-100">
             <div class="flex items-center gap-3">
                 <div class="w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0"
@@ -367,7 +406,7 @@ function _buildComplianceSection() {
                 </div>
             </div>
             ${_isAdmin ? `
-            <button class="btn-ojt-manage-depts flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold border border-slate-200 text-slate-600 hover:bg-slate-50 transition-colors">
+            <button data-ojt-card-ignore class="btn-ojt-manage-depts flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold border border-slate-200 text-slate-600 hover:bg-slate-50 transition-colors">
                 <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4"/></svg>
                 จัดการแผนก${_hiddenDepts.size > 0 ? ` <span class="ml-1 px-1.5 py-0.5 rounded-full bg-amber-100 text-amber-700 text-[10px] font-bold">${_hiddenDepts.size} ซ่อน</span>` : ''}
             </button>` : ''}
@@ -394,33 +433,52 @@ function _buildComplianceSummary() {
     const metTarget  = withTarget.filter(r => parseInt(r.AttendeeCount) >= parseInt(r.YearlyTarget)).length;
     const targetPct  = withTarget.length > 0 ? Math.round(metTarget * 100 / withTarget.length) : null;
 
-    const compColor  = compPct >= 80 ? '#059669' : compPct >= 50 ? '#d97706' : '#dc2626';
     const tgtColor   = targetPct === null ? '#94a3b8' : targetPct >= 80 ? '#059669' : targetPct >= 50 ? '#d97706' : '#dc2626';
+    const compTone   = compPct >= 80 ? 'emerald' : compPct >= 50 ? 'amber' : 'red';
+    const compText   = overdue > 0
+        ? `ต้องติดตาม ${overdue} แผนก`
+        : dueSoon > 0
+            ? `ใกล้ครบกำหนด ${dueSoon} แผนก`
+            : 'ทุกแผนกอยู่ในเกณฑ์';
+    const ringColor  = compTone === 'emerald' ? '#10b981' : compTone === 'amber' ? '#f59e0b' : '#ef4444';
+    const ringTrack  = compTone === 'emerald' ? '#d1fae5' : compTone === 'amber' ? '#fef3c7' : '#fee2e2';
+    const ringBg     = compTone === 'emerald' ? '#ecfdf5' : compTone === 'amber' ? '#fffbeb' : '#fef2f2';
 
     return `
-    <div class="grid grid-cols-2 sm:grid-cols-5 gap-3 mb-4 p-4 rounded-xl border border-slate-100" style="background:#f8fafc">
-        <div class="text-center">
-            <p class="text-xl font-bold text-slate-800">${total}</p>
-            <p class="text-xs text-slate-500 mt-0.5">แผนกที่เลือก</p>
+    <div class="grid grid-cols-2 lg:grid-cols-6 gap-3 mb-4" data-ojt-card-image="scw-compliance-summary">
+        <div class="col-span-2 lg:col-span-2 rounded-lg p-4 flex items-center gap-4"
+            data-ojt-card-image="scw-compliance-score"
+            style="background:linear-gradient(135deg,#ffffff 0%,${ringBg} 100%);border:1px solid ${ringTrack};box-shadow:inset 0 0 0 1px rgba(255,255,255,0.75)">
+            <div class="relative w-20 h-20 rounded-full flex-shrink-0"
+                style="background:conic-gradient(${ringColor} ${compPct * 3.6}deg,${ringTrack} 0deg)">
+                <div class="absolute inset-2 rounded-full bg-white flex items-center justify-center">
+                    <span class="text-xl font-black" style="color:${ringColor}">${compPct}%</span>
+                </div>
+            </div>
+            <div class="min-w-0">
+                <p class="text-xs font-semibold uppercase text-slate-400">Compliance</p>
+                <p class="text-2xl font-black leading-tight" style="color:${ringColor}">${compPct}%</p>
+                <p class="text-xs font-medium text-slate-600 mt-1">${compText}</p>
+            </div>
         </div>
-        <div class="text-center">
-            <p class="text-xl font-bold" style="color:#059669">${valid}</p>
-            <p class="text-xs text-slate-500 mt-0.5">Valid</p>
+        <div class="rounded-lg p-3 text-center" data-ojt-card-image="scw-selected-departments" style="background:#f8fafc;border:1px solid #cbd5e1">
+            <p class="text-2xl font-black text-slate-800">${total}</p>
+            <p class="text-xs text-slate-500 mt-1">แผนกที่เลือก</p>
         </div>
-        <div class="text-center">
-            <p class="text-xl font-bold" style="color:${dueSoon > 0 ? '#d97706' : '#94a3b8'}">${dueSoon}</p>
-            <p class="text-xs text-slate-500 mt-0.5">Due Soon</p>
+        <div class="rounded-lg p-3 text-center" data-ojt-card-image="scw-valid-departments" style="background:#ecfdf5;border:1px solid #86efac">
+            <p class="text-2xl font-black" style="color:#059669">${valid}</p>
+            <p class="text-xs text-slate-600 mt-1">Valid</p>
         </div>
-        <div class="text-center">
-            <p class="text-xl font-bold" style="color:${overdue > 0 ? '#dc2626' : '#94a3b8'}">${overdue}</p>
-            <p class="text-xs text-slate-500 mt-0.5">Overdue</p>
+        <div class="rounded-lg p-3 text-center" data-ojt-card-image="scw-due-soon-departments" style="background:${dueSoon > 0 ? '#fffbeb' : '#f8fafc'};border:1px solid ${dueSoon > 0 ? '#fbbf24' : '#cbd5e1'}">
+            <p class="text-2xl font-black" style="color:${dueSoon > 0 ? '#d97706' : '#94a3b8'}">${dueSoon}</p>
+            <p class="text-xs text-slate-600 mt-1">Due Soon</p>
         </div>
-        <div class="text-center sm:border-l sm:border-slate-200 sm:pl-3">
-            <p class="text-xl font-bold" style="color:${compColor}">${compPct}%</p>
-            <p class="text-xs text-slate-500 mt-0.5">Compliance</p>
+        <div class="rounded-lg p-3 text-center" data-ojt-card-image="scw-overdue-departments" style="background:${overdue > 0 ? '#fef2f2' : '#f8fafc'};border:1px solid ${overdue > 0 ? '#fca5a5' : '#cbd5e1'}">
+            <p class="text-2xl font-black" style="color:${overdue > 0 ? '#dc2626' : '#94a3b8'}">${overdue}</p>
+            <p class="text-xs text-slate-600 mt-1">Overdue</p>
         </div>
         ${withTarget.length > 0 ? `
-        <div class="col-span-2 sm:col-span-5 border-t border-slate-100 pt-3 mt-1 flex items-center justify-between">
+        <div class="col-span-2 lg:col-span-6 rounded-lg px-4 py-3 flex items-center justify-between" style="background:#ffffff;border:1px solid #cbd5e1">
             <span class="text-xs text-slate-500">เป้าหมายผู้เข้าร่วม</span>
             <span class="text-xs font-semibold" style="color:${tgtColor}">${metTarget}/${withTarget.length} แผนกบรรลุเป้า${targetPct !== null ? ` (${targetPct}%)` : ''}</span>
         </div>` : ''}
@@ -443,7 +501,7 @@ function _buildComplianceInner() {
                 </div>
                 <p class="font-medium text-sm text-slate-600">ซ่อนแผนกทั้งหมดแล้ว</p>
                 <p class="text-xs mt-1">ไม่มีแผนกที่เลือกแสดง</p>
-                ${_isAdmin ? `<button class="btn-ojt-manage-depts mt-3 text-xs font-semibold text-emerald-600 hover:underline">จัดการแผนก</button>` : ''}
+                ${_isAdmin ? `<button data-ojt-card-ignore class="btn-ojt-manage-depts mt-3 text-xs font-semibold text-emerald-600 hover:underline">จัดการแผนก</button>` : ''}
                </div>`
             : `<div class="text-center py-12 text-slate-400">
                 <div class="w-14 h-14 rounded-2xl bg-slate-100 flex items-center justify-center mx-auto mb-3">
@@ -491,7 +549,7 @@ function _buildComplianceInner() {
                             ${_isAdmin ? `
                             <td class="px-4 py-3 text-right">
                                 <div class="flex items-center justify-end gap-1.5">
-                                    <button class="btn-ojt-edit-record flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-semibold rounded-lg border transition-colors
+                                    <button data-ojt-card-ignore class="btn-ojt-edit-record flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-semibold rounded-lg border transition-colors
                                         ${r.id ? 'border-blue-200 text-blue-600 hover:bg-blue-50' : 'border-emerald-300 text-emerald-600 hover:bg-emerald-50'}"
                                         data-dept="${_esc(r.Department)}">
                                         ${r.id
@@ -500,11 +558,11 @@ function _buildComplianceInner() {
                                         }
                                     </button>
                                     ${r.id ? `
-                                    <button class="btn-ojt-view-history p-1.5 rounded-lg text-slate-400 hover:text-slate-600 hover:bg-slate-100 transition-colors"
+                                    <button data-ojt-card-ignore class="btn-ojt-view-history p-1.5 rounded-lg text-slate-400 hover:text-slate-600 hover:bg-slate-100 transition-colors"
                                         data-dept="${_esc(r.Department)}" title="ดูประวัติ">
                                         <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
                                     </button>
-                                    <button class="btn-ojt-delete-record p-1.5 rounded-lg text-slate-400 hover:text-red-500 hover:bg-red-50 transition-colors"
+                                    <button data-ojt-card-ignore class="btn-ojt-delete-record p-1.5 rounded-lg text-slate-400 hover:text-red-500 hover:bg-red-50 transition-colors"
                                         data-id="${r.id}" data-dept="${_esc(r.Department)}" title="ลบ">
                                         <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg>
                                     </button>` : ''}
@@ -523,7 +581,7 @@ function _buildComplianceInner() {
 
     return `
         ${_buildComplianceSummary()}
-        <div class="ds-filter-bar flex flex-wrap gap-3 items-center mb-4">
+        <div class="ds-filter-bar flex flex-wrap gap-3 items-center mb-4" data-ojt-card-ignore>
             <div class="relative flex-1 min-w-[180px]">
                 <svg class="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-4.35-4.35M17 11A6 6 0 115 11a6 6 0 0112 0z"/></svg>
                 <input id="ojt-search" type="text" placeholder="ค้นหาชื่อแผนก..." value="${_esc(_searchQ)}"
@@ -567,7 +625,15 @@ function _getFiltered() {
 // EVENT DELEGATION
 // ─────────────────────────────────────────────────────────────────────────────
 function setupEventListeners() {
-    document.addEventListener('click', async (e) => {
+    document.addEventListener('click', guardActionHandler(async (e) => {
+        if (e.target.closest('[data-ojt-card-save-action]')) {
+            const card = _ojtCardSaveMenu?.card;
+            _ojtHideCardImageMenu();
+            if (card) _ojtDownloadCardImage(card);
+            return;
+        }
+
+        if (!e.target.closest('#ojt-card-save-menu')) _ojtHideCardImageMenu();
         if (!e.target.closest('#ojt-page')) return;
 
         // Hero stats filter chip — sets filter and scrolls compliance into view
@@ -624,7 +690,7 @@ function setupEventListeners() {
             _rerenderCompliance();
             return;
         }
-    });
+    }, delegatedActionOptions('ojt')));
 
     document.addEventListener('change', (e) => {
         if (!e.target.closest('#ojt-page')) return;
@@ -645,6 +711,116 @@ function setupEventListeners() {
             _rerenderCompliance();
         }
     }, 300));
+
+    document.addEventListener('contextmenu', _ojtShowCardContextMenu);
+    document.addEventListener('pointerdown', _ojtStartCardImageHold);
+    document.addEventListener('pointermove', _ojtMoveCardImageHold);
+    document.addEventListener('pointerup', _ojtCancelCardImageHold);
+    document.addEventListener('pointercancel', _ojtCancelCardImageHold);
+}
+
+function _ojtShowCardContextMenu(event) {
+    const card = event.target?.closest?.('[data-ojt-card-image]');
+    if (!card || !document.getElementById('ojt-page')?.contains(card)) return;
+    if (event.target.closest('button,a,input,select,textarea,label,[contenteditable="true"]')) return;
+    event.preventDefault();
+    _ojtShowCardImageMenu(card, event.clientX, event.clientY);
+}
+
+function _ojtStartCardImageHold(event) {
+    if (event.button !== undefined && event.button !== 0) return;
+    const card = event.target?.closest?.('[data-ojt-card-image]');
+    if (!card || !document.getElementById('ojt-page')?.contains(card)) return;
+    if (event.target.closest('button,a,input,select,textarea,label,[contenteditable="true"]')) return;
+    _ojtCancelCardImageHold();
+    _ojtCardSaveHold = {
+        card,
+        pointerId: event.pointerId,
+        x: event.clientX,
+        y: event.clientY,
+        timer: setTimeout(() => {
+            if (!_ojtCardSaveHold || _ojtCardSaveHold.card !== card) return;
+            _ojtShowCardImageMenu(card, _ojtCardSaveHold.x, _ojtCardSaveHold.y);
+        }, 800),
+    };
+}
+
+function _ojtMoveCardImageHold(event) {
+    if (!_ojtCardSaveHold || event.pointerId !== _ojtCardSaveHold.pointerId) return;
+    if (Math.abs(event.clientX - _ojtCardSaveHold.x) > 10 || Math.abs(event.clientY - _ojtCardSaveHold.y) > 10) {
+        _ojtCancelCardImageHold();
+    }
+}
+
+function _ojtCancelCardImageHold() {
+    if (_ojtCardSaveHold?.timer) clearTimeout(_ojtCardSaveHold.timer);
+    _ojtCardSaveHold = null;
+}
+
+function _ojtShowCardImageMenu(card, clientX, clientY) {
+    _ojtHideCardImageMenu();
+    const menu = document.createElement('div');
+    menu.id = 'ojt-card-save-menu';
+    menu.className = 'fixed z-[9999] rounded-lg border border-slate-200 bg-white p-1.5 shadow-xl';
+    menu.style.minWidth = '170px';
+    menu.innerHTML = `
+        <button type="button" data-ojt-card-save-action
+            class="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-xs font-black text-slate-700 hover:bg-emerald-50 hover:text-emerald-700">
+            <svg class="h-4 w-4 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 10v6m0 0l-3-3m3 3l3-3m4 7H5a2 2 0 01-2-2V7a2 2 0 012-2h4l2 2h8a2 2 0 012 2v9a2 2 0 01-2 2z"/>
+            </svg>
+            บันทึกเป็นรูปภาพ
+        </button>`;
+    document.body.appendChild(menu);
+    const rect = menu.getBoundingClientRect();
+    const left = Math.min(Math.max(8, clientX), window.innerWidth - rect.width - 8);
+    const top = Math.min(Math.max(8, clientY), window.innerHeight - rect.height - 8);
+    menu.style.left = `${left}px`;
+    menu.style.top = `${top}px`;
+    _ojtCardSaveMenu = { card, menu };
+}
+
+function _ojtHideCardImageMenu() {
+    _ojtCardSaveMenu?.menu?.remove?.();
+    _ojtCardSaveMenu = null;
+}
+
+async function _ojtDownloadCardImage(card) {
+    if (typeof html2canvas === 'undefined') {
+        showToast('ไม่พบ library สำหรับบันทึกรูปภาพ', 'error');
+        return;
+    }
+    const name = _ojtSafeFilePart(card.dataset.ojtCardImage || 'scw-card');
+    try {
+        showLoading('กำลังบันทึกรูปภาพ...');
+        const canvas = await html2canvas(card, {
+            backgroundColor: '#ffffff',
+            scale: Math.min(2, window.devicePixelRatio || 1.5),
+            useCORS: true,
+            onclone: doc => {
+                doc.querySelectorAll('[data-ojt-card-ignore]').forEach(el => { el.style.display = 'none'; });
+            },
+        });
+        const link = document.createElement('a');
+        link.href = canvas.toDataURL('image/png');
+        link.download = `${name}-${new Date().getFullYear()}.png`;
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+        showToast('บันทึกรูปภาพการ์ดแล้ว', 'success');
+    } catch (err) {
+        showToast(_errText(err) || 'บันทึกรูปภาพการ์ดไม่สำเร็จ', 'error');
+    } finally {
+        hideLoading();
+    }
+}
+
+function _ojtSafeFilePart(value) {
+    return String(value || 'scw-card')
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, '-')
+        .replace(/^-+|-+$/g, '')
+        .slice(0, 60) || 'scw-card';
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -684,7 +860,7 @@ function openStandardModal() {
         </form>`, 'max-w-xl');
 
     setTimeout(() => {
-        document.getElementById('scw-standard-form')?.addEventListener('submit', async e => {
+        document.getElementById('scw-standard-form')?.addEventListener('submit', guardSubmitHandler(async e => {
             e.preventDefault();
             const f    = e.target;
             const html = [0, 1, 2].map(i =>
@@ -703,7 +879,7 @@ function openStandardModal() {
                 showError(err);
                 btn.disabled = false; btn.textContent = 'บันทึก';
             } finally { hideLoading(); }
-        });
+        }));
     }, 50);
 }
 
@@ -718,6 +894,7 @@ function openUploadDocModal() {
                 <label class="block text-sm font-semibold text-slate-700 mb-1.5">ไฟล์ <span class="text-red-500">*</span></label>
                 <input name="file" type="file" required accept=".pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.jpg,.jpeg,.png"
                     class="block w-full text-sm text-slate-600 file:mr-3 file:py-2 file:px-4 file:rounded-lg file:border-0 file:text-xs file:font-semibold file:bg-red-50 file:text-red-700 hover:file:bg-red-100">
+                <div id="scw-doc-file-name" class="text-xs text-emerald-700 font-semibold mt-2 hidden"></div>
                 <p class="text-xs text-slate-400 mt-1">PDF, Word, Excel, PowerPoint, รูปภาพ (สูงสุด 20 MB)</p>
             </div>
             <div id="scw-doc-progress" class="hidden">
@@ -734,11 +911,26 @@ function openUploadDocModal() {
         </form>`);
 
     setTimeout(() => {
-        document.getElementById('scw-doc-form')?.addEventListener('submit', async e => {
+        const fileInput = document.querySelector('#scw-doc-form [name=file]');
+        const fileNameEl = document.getElementById('scw-doc-file-name');
+        fileInput?.addEventListener('change', () => {
+            const file = fileInput.files?.[0];
+            if (!file || !fileNameEl) return;
+            fileNameEl.textContent = `${file.name} (${Math.round(file.size / 1024).toLocaleString('th-TH')} KB)`;
+            fileNameEl.classList.remove('hidden');
+        });
+
+        document.getElementById('scw-doc-form')?.addEventListener('submit', guardSubmitHandler(async e => {
             e.preventDefault();
             const form  = e.target;
             const title = form.querySelector('[name=Title]').value.trim();
             const file  = form.querySelector('[name=file]').files?.[0];
+            if (!title) {
+                const errEl = document.getElementById('scw-doc-error');
+                errEl.textContent = 'กรุณาระบุชื่อเอกสาร';
+                errEl.classList.remove('hidden');
+                return;
+            }
             if (!file) return;
 
             const errEl  = document.getElementById('scw-doc-error');
@@ -752,15 +944,24 @@ function openUploadDocModal() {
                 const fd = new FormData();
                 fd.append('document', file);
                 const uploadData = await API.post('/upload/document', fd);
-                if (!uploadData.url && !uploadData.secure_url) throw new Error(uploadData.message || 'อัปโหลดไฟล์ไม่สำเร็จ');
+                if (!uploadData.url) throw new Error(uploadData.message || 'อัปโหลดไฟล์ไม่สำเร็จ');
 
                 const ext = file.name.split('.').pop()?.toLowerCase() || '';
-                await API.post('/ojt/documents', {
-                    Title:      title,
-                    FileURL:    uploadData.secure_url || uploadData.url,
-                    FileType:   ext,
-                    FileSizeKB: Math.round(file.size / 1024),
-                });
+                try {
+                    await API.post('/ojt/documents', {
+                        Title:      title,
+                        FileURL:    uploadData.url,
+                        FileType:   ext,
+                        FileSizeKB: Math.round(file.size / 1024),
+                    });
+                } catch (metadataErr) {
+                    try {
+                        await API.delete('/upload/document', {
+                            body: JSON.stringify({ url: uploadData.url })
+                        });
+                    } catch (_) {}
+                    throw metadataErr;
+                }
 
                 closeModal();
                 showToast('อัปโหลดเอกสาร SCW สำเร็จ', 'success');
@@ -768,10 +969,10 @@ function openUploadDocModal() {
             } catch (err) {
                 prog.classList.add('hidden');
                 submit.disabled = false;
-                errEl.textContent = err.message || 'เกิดข้อผิดพลาด';
+                errEl.textContent = _errText(err);
                 errEl.classList.remove('hidden');
             }
-        });
+        }));
     }, 50);
 }
 
@@ -838,24 +1039,42 @@ function openRecordModal(department, record = null) {
         </form>`, 'max-w-lg');
 
     setTimeout(() => {
-        document.getElementById('ojt-record-form')?.addEventListener('submit', async e => {
+        document.getElementById('ojt-record-form')?.addEventListener('submit', guardSubmitHandler(async e => {
             e.preventDefault();
             const f    = e.target;
             const targetVal = f.querySelector('[name=YearlyTarget]').value.trim();
+            const ojtDate = f.querySelector('[name=OJTDate]').value;
+            const attendeeRaw = f.querySelector('[name=AttendeeCount]').value;
             const body = {
                 Department:           f.querySelector('[name=Department]').value,
-                OJTDate:              f.querySelector('[name=OJTDate]').value,
+                OJTDate:              ojtDate,
                 ReviewIntervalMonths: parseInt(f.querySelector('[name=ReviewIntervalMonths]').value) || 12,
                 TrainerName:          f.querySelector('[name=TrainerName]').value.trim(),
-                AttendeeCount:        parseInt(f.querySelector('[name=AttendeeCount]').value) || 0,
+                AttendeeCount:        attendeeRaw === '' ? 0 : Number(attendeeRaw),
                 Notes:                f.querySelector('[name=Notes]').value.trim(),
-                YearlyTarget:         targetVal !== '' ? parseInt(targetVal) || null : null,
+                YearlyTarget:         targetVal !== '' ? Number(targetVal) : null,
             };
 
             const btn   = f.querySelector('[type=submit]');
             const errEl = document.getElementById('ojt-record-error');
-            btn.disabled = true; btn.textContent = 'กำลังบันทึก...';
+            const showInlineError = msg => {
+                errEl.textContent = msg;
+                errEl.classList.remove('hidden');
+            };
             errEl.classList.add('hidden');
+            if (!body.Department || !/^\d{4}-\d{2}-\d{2}$/.test(ojtDate)) {
+                showInlineError('กรุณาเลือกแผนกและวันที่ OJT ให้ถูกต้อง');
+                return;
+            }
+            if (!Number.isInteger(body.AttendeeCount) || body.AttendeeCount < 0) {
+                showInlineError('จำนวนผู้เข้าร่วมต้องเป็นตัวเลข 0 ขึ้นไป');
+                return;
+            }
+            if (targetVal !== '' && (!Number.isInteger(body.YearlyTarget) || body.YearlyTarget < 0)) {
+                showInlineError('เป้าหมายรายปีต้องเป็นตัวเลข 0 ขึ้นไป');
+                return;
+            }
+            btn.disabled = true; btn.textContent = 'กำลังบันทึก...';
             showLoading('กำลังบันทึก...');
             try {
                 await API.post('/ojt/records', body);
@@ -865,10 +1084,10 @@ function openRecordModal(department, record = null) {
             } catch (err) {
                 showError(err);
                 btn.disabled = false; btn.textContent = record?.id ? 'อัปเดต' : 'บันทึก';
-                errEl.textContent = err.message || 'เกิดข้อผิดพลาด';
+                errEl.textContent = _errText(err);
                 errEl.classList.remove('hidden');
             } finally { hideLoading(); }
-        });
+        }));
     }, 50);
 }
 
@@ -973,6 +1192,16 @@ function _saveHiddenDepts() {
     localStorage.setItem(HIDDEN_DEPTS_KEY, JSON.stringify([..._hiddenDepts]));
 }
 
+function _applyDeptVisibility(config) {
+    const hidden = Array.isArray(config?.hiddenDepartments)
+        ? config.hiddenDepartments.map(d => String(d || '').trim()).filter(Boolean)
+        : null;
+    if (hidden) {
+        _hiddenDepts = new Set(hidden);
+        _saveHiddenDepts();
+    }
+}
+
 function openDeptSelectorModal() {
     // Use master dept list; fallback to names from records if master fetch failed
     const allDepts = _allDepts.length > 0
@@ -1018,14 +1247,23 @@ function openDeptSelectorModal() {
         });
         document.querySelectorAll('.ojt-dept-cb').forEach(cb => cb.addEventListener('change', updateCount));
 
-        document.getElementById('ojt-dept-save')?.addEventListener('click', () => {
+        document.getElementById('ojt-dept-save')?.addEventListener('click', guardActionHandler(async () => {
             const checked = new Set([...document.querySelectorAll('.ojt-dept-cb:checked')].map(cb => cb.value));
             _hiddenDepts = new Set(allDepts.filter(d => !checked.has(d)));
-            _saveHiddenDepts();
-            closeModal();
-            renderAll();         // rebuilds all sections (updates header subtitle too)
-            _loadHeroStats();
-        });
+            const btn = document.getElementById('ojt-dept-save');
+            btn?.setAttribute('disabled', 'disabled');
+            try {
+                await API.put('/ojt/dept-visibility', { hiddenDepartments: [..._hiddenDepts] });
+                _saveHiddenDepts();
+                closeModal();
+                renderAll();         // rebuilds all sections (updates header subtitle too)
+                _loadHeroStats();    // keeps the top KPI cards linked to selected departments
+                showToast('บันทึกการแสดงแผนกสำเร็จ', 'success');
+            } catch (err) {
+                btn?.removeAttribute('disabled');
+                showToast('บันทึกการแสดงแผนกไม่สำเร็จ: ' + _errText(err), 'error');
+            }
+        }));
     }, 50);
 }
 
@@ -1069,10 +1307,9 @@ function _calcStatus(nextReviewDate) {
 
 function _getScwItems() {
     if (_standard?.Content?.trim()) {
-        const div = document.createElement('div');
-        div.innerHTML = _standard.Content;
+        const parsed = new DOMParser().parseFromString(String(_standard.Content), 'text/html');
         const result = [];
-        div.querySelectorAll('h3').forEach(h3 => {
+        parsed.querySelectorAll('h3').forEach(h3 => {
             const p = h3.nextElementSibling;
             result.push({ title: h3.textContent.trim(), text: p?.textContent?.trim() || '' });
         });
@@ -1083,6 +1320,28 @@ function _getScwItems() {
 
 function _esc(s) {
     return String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+}
+
+function _safeDocumentUrl(value) {
+    const raw = String(value ?? '').trim();
+    if (/^\/uploads\/[A-Za-z0-9._~!$&'()*+,;=:@%\/-]+(?:\?[A-Za-z0-9._~!$&'()*+,;=:@%/?-]*)?$/.test(raw)) {
+        return raw;
+    }
+    try {
+        const url = new URL(raw);
+        return url.protocol === 'https:' || url.protocol === 'http:' ? url.href : '';
+    } catch {
+        return '';
+    }
+}
+
+function _errText(err, fallback = 'เกิดข้อผิดพลาด กรุณาลองใหม่อีกครั้ง') {
+    const msg = String(err?.message || err?.response?.message || '').trim();
+    if (!msg) return fallback;
+    if (/sql|database|constraint|foreign key|duplicate|syntax|undefined|null|internal server/i.test(msg)) {
+        return fallback;
+    }
+    return msg;
 }
 
 function _fmtDate(d) {

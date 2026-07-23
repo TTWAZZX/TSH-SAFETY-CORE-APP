@@ -1,7 +1,8 @@
+import { guardSubmitHandler } from '../utils/async-ui.js?v=20260715-phase32d-remaining-async-ux';
 // public/js/pages/safety-culture.js
 
 import { API } from '../api.js';
-import { openModal, closeModal, showToast, escHtml } from '../ui.js';
+import { openModal, closeModal, showToast, showLoading, hideLoading, escHtml } from '../ui.js?v=20260602-mobile-nav-m53';
 
 // ── State ──────────────────────────────────────────────────────────────────
 let _isAdmin        = false;
@@ -10,6 +11,7 @@ let _principles     = [];
 let _assessments    = [];
 let _ppeInspections = [];
 let _ppeItems       = [];
+let _assessmentLocations = [];
 let _scAreas        = [];
 let _dashData       = null;
 let _filterYear     = new Date().getFullYear();
@@ -25,10 +27,21 @@ let _ppeSub         = 'dashboard';
 let _ppeSearch      = '';
 let _ppeFilterWT    = '';
 let _ppeFilterStatus = '';
+let _ppeFilterMonth = 0;
 let _ppeChartInst   = null;
+let _campaignTypeFilter = 'all';
+let _campaignStatusFilter = 'all';
+let _campaignSearch = '';
+let _campaignSearchTimer = null;
+let _asmtFilterMonth = 0;
+let _asmtFilterArea = '';
+let _asmtFilterWeek = 0;
 let _filterDashMonth = 0;   // 0 = รายปี, 1-12 = เดือน
 let _dashScores      = null; // [T1,T2,T3,T4,T5,T6(PPE),T7] ใช้โดย initCharts()
 let _dataLoaded      = false; // true after first successful _loadHeroStats()
+let _loadRequestId   = 0;
+let _scCardSaveHold  = null;
+let _scCardSaveMenu  = null;
 
 // ── Constants ──────────────────────────────────────────────────────────────
 const TOPIC_LABELS = [
@@ -74,6 +87,49 @@ function fmtDate(d) {
     return new Date(d).toLocaleDateString('th-TH', { dateStyle: 'medium' });
 }
 
+function getUploadDisplayName(url, fallback = '') {
+    try {
+        const u = new URL(url, window.location.origin);
+        const fromMeta = u.searchParams.get('filename');
+        if (fromMeta) return decodeURIComponent(fromMeta);
+        return fallback || decodeURIComponent(u.pathname.split('/').pop() || '');
+    } catch {
+        return fallback || '';
+    }
+}
+
+function safeResourceUrl(value) {
+    const raw = String(value || '').trim();
+    if (!raw) return '';
+    try {
+        const parsed = new URL(raw, window.location.origin);
+        if (!['http:', 'https:'].includes(parsed.protocol)) return '';
+        return raw;
+    } catch { return ''; }
+}
+
+function inlineArg(value) {
+    return escHtml(JSON.stringify(String(value ?? '')).replace(/</g, '\\u003c'));
+}
+
+async function uploadSafetyCultureFile(file, label = 'ไฟล์') {
+    if (!file) return null;
+    const fd = new FormData();
+    fd.append('document', file);
+    const res = await API.post('/upload/document', fd);
+    if (!res?.url) throw new Error(`ไม่สามารถอัปโหลด${label}ได้`);
+    return res;
+}
+
+async function cleanupUploadedUrl(url) {
+    if (!url) return;
+    try {
+        await API.delete('/upload/document', { body: JSON.stringify({ url }) });
+    } catch (_) {
+        // Best effort only. The save flow should show the original error.
+    }
+}
+
 function scoreColor(v) {
     if (v == null) return 'text-slate-300';
     const n = parseFloat(v);
@@ -86,7 +142,7 @@ function scoreColor(v) {
 // ── Tab Config ─────────────────────────────────────────────────────────────
 function _getTabs() {
     return [
-        { id: 'principles', label: 'วัฒนธรรมความปลอดภัย',
+        { id: 'principles', label: 'สื่อรณรงค์และกิจกรรม',
           icon: `<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12.75L11.25 15 15 9.75m-3-7.036A11.959 11.959 0 013.598 6 11.99 11.99 0 003 9.749c0 5.592 3.824 10.29 9 11.623 5.176-1.332 9-6.03 9-11.622 0-1.31-.21-2.571-.598-3.751h-.152c-3.196 0-6.1-1.248-8.25-3.285z"/>` },
         { id: 'dashboard',  label: 'Dashboard',
           icon: `<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"/>` },
@@ -106,6 +162,7 @@ export async function loadSafetyCulturePage() {
     _isAdmin    = user.role === 'Admin' || user.Role === 'Admin';
     _filterYear = new Date().getFullYear();
     _activeTab  = window._getTab?.('safety-culture', 'principles') || 'principles';
+    if (!_isAdmin && _ppeSub === 'violations') _ppeSub = 'dashboard';
 
     window.closeModal = closeModal;
 
@@ -147,7 +204,7 @@ function buildShell() {
     <div class="space-y-6 animate-fade-in pb-10">
 
         <!-- ═══ HERO HEADER ═══ -->
-        <div class="relative overflow-hidden rounded-2xl" style="background:linear-gradient(135deg,#064e3b 0%,#065f46 55%,#0d9488 100%)">
+        <div class="relative overflow-hidden rounded-2xl" data-sc-card-image="safety-culture-hero-summary" style="background:linear-gradient(135deg,#064e3b 0%,#065f46 55%,#0d9488 100%)">
             <div class="absolute inset-0 opacity-10 pointer-events-none">
                 <svg width="100%" height="100%"><defs><pattern id="sc-dots" width="24" height="24" patternUnits="userSpaceOnUse"><circle cx="12" cy="12" r="1.3" fill="white"/></pattern></defs><rect width="100%" height="100%" fill="url(#sc-dots)"/></svg>
             </div>
@@ -161,11 +218,11 @@ function buildShell() {
                                 <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12.75L11.25 15 15 9.75m-3-7.036A11.959 11.959 0 013.598 6 11.99 11.99 0 003 9.749c0 5.592 3.824 10.29 9 11.623 5.176-1.332 9-6.03 9-11.622 0-1.31-.21-2.571-.598-3.751h-.152c-3.196 0-6.1-1.248-8.25-3.285z"/>
                                 </svg>
-                                Safety Culture
+                                Safety Campaigns
                             </span>
                         </div>
-                        <h1 class="text-xl md:text-2xl font-bold text-white leading-snug">Safety &amp; Environment Culture</h1>
-                        <p class="text-sm mt-1" style="color:rgba(167,243,208,0.85)">วัฒนธรรมความปลอดภัยและสิ่งแวดล้อม · Thai Summit Harness Co., Ltd.</p>
+                        <h1 class="text-xl md:text-2xl font-bold text-white leading-snug">Safety Communication &amp; Culture Program</h1>
+                        <p class="text-sm mt-1" style="color:rgba(167,243,208,0.85)">ศูนย์รวมสื่อรณรงค์ กิจกรรม และการติดตามวัฒนธรรมความปลอดภัย · Thai Summit Harness Co., Ltd.</p>
                     </div>
                     <div class="flex flex-col sm:flex-row items-start sm:items-center gap-3 flex-shrink-0 w-full md:w-auto">
                         <div class="grid grid-cols-2 sm:grid-cols-4 gap-3 w-full sm:w-auto">
@@ -204,6 +261,15 @@ function setupEventListeners() {
     document.addEventListener('click', e => {
         const tabBtn = e.target.closest('.sc-tab');
         if (tabBtn?.dataset?.tab) { switchTab(tabBtn.dataset.tab); return; }
+
+        if (e.target.closest('[data-sc-card-save-action]')) {
+            const card = _scCardSaveMenu?.card;
+            _scHideCardImageMenu();
+            if (card) _scDownloadCardImage(card);
+            return;
+        }
+
+        if (!e.target.closest('#sc-card-save-menu')) _scHideCardImageMenu();
     });
 
     document.addEventListener('change', e => {
@@ -214,23 +280,54 @@ function setupEventListeners() {
         }
     });
 
+    document.addEventListener('contextmenu', _scShowCardContextMenu);
+    document.addEventListener('pointerdown', _scStartCardImageHold);
+    document.addEventListener('pointermove', _scMoveCardImageHold);
+    document.addEventListener('pointerup', _scCancelCardImageHold);
+    document.addEventListener('pointercancel', _scCancelCardImageHold);
+
     // Panel inline-onclick globals
     window._scSetDashMonth     = (v)   => { _filterDashMonth = parseInt(v)||0; _updateHeroStats(); renderPanel('dashboard'); };
     window._scSetDeptFilter    = (val) => { _filterPPEDept = val; renderPanel('ppe'); };
-    window._scSetPPESub        = (s)   => { _ppeSub = s; renderPanel('ppe'); };
+    window._scSetPPESub        = (s)   => {
+        if (!_isAdmin && (s === 'worktypes' || s === 'violations')) s = 'dashboard';
+        _ppeSub = s;
+        renderPanel('ppe');
+    };
     window._scSetPPESearch     = (v)   => { _ppeSearch = v; renderPanel('ppe'); };
     window._scSetPPEWT         = (v)   => { _ppeFilterWT = v; renderPanel('ppe'); };
     window._scSetPPEStatus     = (v)   => { _ppeFilterStatus = v; renderPanel('ppe'); };
+    window._scSetPPEMonth      = (v)   => { _ppeFilterMonth = parseInt(v, 10) || 0; renderPanel('ppe'); };
+    window._scSetPPEDept       = (v)   => { _filterPPEDept = (v || '').trim(); renderPanel('ppe'); };
+    window._scClearPPEFilters  = ()    => { _ppeSearch = ''; _ppeFilterWT = ''; _ppeFilterStatus = ''; _ppeFilterMonth = 0; _filterPPEDept = ''; renderPanel('ppe'); };
+    window._scPreviewPPEEvidence = (id) => previewPPEEvidence(id);
+    window._scSetAsmtMonth     = (v)   => { _asmtFilterMonth = parseInt(v, 10) || 0; renderPanel('assessment'); };
+    window._scSetAsmtArea      = (v)   => { _asmtFilterArea = (v || '').trim(); renderPanel('assessment'); };
+    window._scSetAsmtWeek      = (v)   => { _asmtFilterWeek = parseInt(v, 10) || 0; renderPanel('assessment'); };
+    window._scClearAsmtFilters = ()    => { _asmtFilterMonth = 0; _asmtFilterArea = ''; _asmtFilterWeek = 0; renderPanel('assessment'); };
     window._scSetTab           = (id) => switchTab(id);
     window._scEditPrinciple    = (id) => openPrincipleForm(id);
     window._scAddAssessment    = () => openAssessmentForm(null);
     window._scEditAssessment   = (id) => openAssessmentForm(id);
+    window._scViewAssessment   = (id) => viewAssessmentDetail(id);
     window._scDeleteAssessment = (id) => deleteAssessment(id);
+    window._scAddAssessmentLocation = () => openAssessmentLocationForm(null);
+    window._scEditAssessmentLocation = (id) => openAssessmentLocationForm(id);
+    window._scDeleteAssessmentLocation = (id) => deleteAssessmentLocation(id);
     window._scAddPPE           = () => openPPEForm();
     window._scViewPPE          = (id) => viewPPERecord(id);
     window._scDeletePPE        = (id) => deletePPE(id);
     window._scExportPDF             = () => exportPDF();
-    window._scExportAssessmentPDF   = (mode) => mode === 'monthly' ? openMonthPickerForPDF() : exportAssessmentYearlyPDF();
+    window._scExportAssessmentPDF   = (mode) => mode === 'monthly' ? openMonthPickerForAssessmentPDF() : exportAssessmentYearlyHtmlPDF();
+    window._scSetCampaignType       = (v) => { _campaignTypeFilter = v || 'all'; renderPanel('principles'); };
+    window._scSetCampaignStatus     = (v) => { _campaignStatusFilter = v || 'all'; renderPanel('principles'); };
+    window._scSetCampaignSearch     = (v) => {
+        _campaignSearch = v || '';
+        clearTimeout(_campaignSearchTimer);
+        _campaignSearchTimer = setTimeout(() => renderPanel('principles'), 250);
+    };
+    window._scClearCampaignFilters  = () => { _campaignTypeFilter = 'all'; _campaignStatusFilter = 'all'; _campaignSearch = ''; renderPanel('principles'); };
+    window._scPreviewCampaign       = (id) => previewCampaign(id);
     window._scAddPPEItem       = () => openPPEItemForm(null);
     window._scEditPPEItem      = (id) => openPPEItemForm(id);
     window._scDeletePPEItem    = (id) => deletePPEItem(id);
@@ -247,6 +344,112 @@ function setupEventListeners() {
 }
 
 // ── Switch Tab ─────────────────────────────────────────────────────────────
+function _scShowCardContextMenu(event) {
+    const card = event.target?.closest?.('[data-sc-card-image]');
+    if (!card || !document.getElementById('safety-culture-page')?.contains(card)) return;
+    if (event.target.closest('button,a,input,select,textarea,label,[contenteditable="true"]')) return;
+    event.preventDefault();
+    _scShowCardImageMenu(card, event.clientX, event.clientY);
+}
+
+function _scStartCardImageHold(event) {
+    if (event.button !== undefined && event.button !== 0) return;
+    const card = event.target?.closest?.('[data-sc-card-image]');
+    if (!card || !document.getElementById('safety-culture-page')?.contains(card)) return;
+    if (event.target.closest('button,a,input,select,textarea,label,[contenteditable="true"]')) return;
+    _scCancelCardImageHold();
+    _scCardSaveHold = {
+        card,
+        pointerId: event.pointerId,
+        x: event.clientX,
+        y: event.clientY,
+        fired: false,
+        timer: setTimeout(() => {
+            if (!_scCardSaveHold || _scCardSaveHold.card !== card) return;
+            _scCardSaveHold.fired = true;
+            _scShowCardImageMenu(card, _scCardSaveHold.x, _scCardSaveHold.y);
+        }, 800),
+    };
+}
+
+function _scMoveCardImageHold(event) {
+    if (!_scCardSaveHold || event.pointerId !== _scCardSaveHold.pointerId) return;
+    if (Math.abs(event.clientX - _scCardSaveHold.x) > 10 || Math.abs(event.clientY - _scCardSaveHold.y) > 10) {
+        _scCancelCardImageHold();
+    }
+}
+
+function _scCancelCardImageHold() {
+    if (_scCardSaveHold?.timer) clearTimeout(_scCardSaveHold.timer);
+    _scCardSaveHold = null;
+}
+
+function _scShowCardImageMenu(card, clientX, clientY) {
+    _scHideCardImageMenu();
+    const menu = document.createElement('div');
+    menu.id = 'sc-card-save-menu';
+    menu.className = 'fixed z-[9999] rounded-xl border border-slate-200 bg-white p-1.5 shadow-xl';
+    menu.style.minWidth = '170px';
+    menu.innerHTML = `
+        <button type="button" data-sc-card-save-action
+            class="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-xs font-black text-slate-700 hover:bg-emerald-50 hover:text-emerald-700">
+            <svg class="h-4 w-4 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 10v6m0 0l-3-3m3 3l3-3m4 7H5a2 2 0 01-2-2V7a2 2 0 012-2h4l2 2h8a2 2 0 012 2v9a2 2 0 01-2 2z"/>
+            </svg>
+            บันทึกเป็นรูปภาพ
+        </button>`;
+    document.body.appendChild(menu);
+    const rect = menu.getBoundingClientRect();
+    const left = Math.min(Math.max(8, clientX), window.innerWidth - rect.width - 8);
+    const top = Math.min(Math.max(8, clientY), window.innerHeight - rect.height - 8);
+    menu.style.left = `${left}px`;
+    menu.style.top = `${top}px`;
+    _scCardSaveMenu = { card, menu };
+}
+
+function _scHideCardImageMenu() {
+    _scCardSaveMenu?.menu?.remove?.();
+    _scCardSaveMenu = null;
+}
+
+async function _scDownloadCardImage(card) {
+    if (typeof html2canvas === 'undefined') {
+        showToast('ไม่พบ library สำหรับบันทึกรูปภาพ', 'error');
+        return;
+    }
+    const name = _scSafeFilePart(card.dataset.scCardImage || 'safety-culture-card');
+    try {
+        showLoading('Saving card image...');
+        const canvas = await html2canvas(card, {
+            backgroundColor: '#ffffff',
+            scale: Math.min(2, window.devicePixelRatio || 1.5),
+            useCORS: true,
+            onclone: doc => {
+                doc.querySelectorAll('[data-sc-card-ignore]').forEach(el => { el.style.display = 'none'; });
+            },
+        });
+        const link = document.createElement('a');
+        link.href = canvas.toDataURL('image/png');
+        link.download = `${name}-${_filterYear}.png`;
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+        showToast('บันทึกรูปภาพการ์ดแล้ว', 'success');
+    } catch (err) {
+        showToast(err?.message || 'บันทึกรูปภาพการ์ดไม่สำเร็จ', 'error');
+    } finally {
+        hideLoading();
+    }
+}
+
+function _scSafeFilePart(value) {
+    return String(value || 'safety-culture-card')
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, '-')
+        .replace(/^-+|-+$/g, '')
+        .slice(0, 60) || 'safety-culture-card';
+}
+
 function switchTab(id) {
     _activeTab = id;
     window._saveTab?.('safety-culture', id);
@@ -275,6 +478,7 @@ async function _fetchDepts() {
 }
 
 async function _loadHeroStats() {
+    const requestId = ++_loadRequestId;
     _dataLoaded = false;
     // show skeleton immediately in whichever panel is visible
     ['principles','dashboard','assessment','ppe'].forEach(id => {
@@ -289,21 +493,35 @@ async function _loadHeroStats() {
             API.get(`/safety-culture/dashboard?year=${_filterYear}`),
             API.get('/safety-culture/ppe-items').catch(() => ({ data: [] })),
             API.get('/safety-culture/ppe-work-types').catch(() => ({ data: [] })),
-            API.get(`/safety-culture/ppe-violations?year=${_filterYear}`).catch(() => ({ data: [] })),
+            _isAdmin
+                ? API.get('/safety-culture/assessment-locations?all=1').catch(() => ({ data: [] }))
+                : API.get('/safety-culture/assessment-locations').catch(() => ({ data: [] })),
+            _isAdmin
+                ? API.get(`/safety-culture/ppe-violations?year=${_filterYear}`).catch(() => ({ data: [] }))
+                : Promise.resolve({ data: [] }),
         ];
         if (_departments.length === 0) fetches.push(_fetchDepts());
-        const [pRes, aRes, ppeRes, dRes, itemsRes, wtRes, violRes] = await Promise.all(fetches);
-        _principles     = pRes.data      || [];
+        const [pRes, aRes, ppeRes, dRes, itemsRes, wtRes, locRes, violRes] = await Promise.all(fetches);
+        if (requestId !== _loadRequestId) return;
+        _principles     = (pRes.data || []).map(p => ({
+            ...p,
+            ImageUrl: safeResourceUrl(p.ImageUrl),
+            AttachmentUrl: safeResourceUrl(p.AttachmentUrl),
+        }));
         _assessments    = aRes.data      || [];
-        _ppeInspections = ppeRes.data    || [];
+        _ppeInspections = (ppeRes.data || []).map(r => ({ ...r, ImageUrl: safeResourceUrl(r.ImageUrl) }));
         _dashData       = dRes.data      || null;
-        _ppeItems       = itemsRes?.data || [];
-        _ppeWorkTypes   = wtRes?.data    || [];
+        _ppeItems       = (itemsRes?.data || []).map(i => ({ ...i, ImageUrl: safeResourceUrl(i.ImageUrl) }));
+        _ppeWorkTypes   = (wtRes?.data || []).map(w => ({
+            ...w,
+            items: (w.items || []).map(i => ({ ...i, ImageUrl: safeResourceUrl(i.ImageUrl) })),
+        }));
+        _assessmentLocations = locRes?.data || [];
         _ppeViolations  = violRes?.data  || [];
         _dataLoaded     = true;
 
         const avg      = _dashData?.avgScores;
-        const ppeStats = _dashData?.ppeStats;
+        const ppeStats = _getPPEStats();
 
         let overallAvg = null;
         if (avg) {
@@ -312,8 +530,8 @@ async function _loadHeroStats() {
             if (vals.length) overallAvg = (vals.reduce((a, b) => a + b, 0) / vals.length).toFixed(2);
         }
         const mat    = overallAvg ? getMaturity(overallAvg) : null;
-        const ppePct = ppeStats?.overall_pct != null
-            ? parseFloat(ppeStats.overall_pct).toFixed(1) + '%'
+        const ppePctVal = _ppeCompliancePct(_ppeInspections, ppeStats);
+        const ppePct = ppePctVal != null ? ppePctVal.toFixed(1) + '%'
             : '—';
 
         _setStatVal(0, mat ? mat.label : '—');
@@ -323,13 +541,46 @@ async function _loadHeroStats() {
 
         renderPanel(_activeTab);
     } catch (err) {
-        showToast('โหลดข้อมูลไม่สำเร็จ: ' + escHtml(err.message), 'error');
+        if (requestId !== _loadRequestId) return;
+        showToast('โหลดข้อมูลไม่สำเร็จ: ' + (err?.message || 'Unknown error'), 'error');
     }
 }
 
 function _setStatVal(idx, val) {
     const el = document.querySelector(`[data-sc-stat="${idx}"]`);
     if (el) el.textContent = val;
+}
+
+function _getPPEStats() {
+    const stats = _dashData?.ppeStats;
+    return Array.isArray(stats) ? (stats[0] || {}) : (stats || {});
+}
+
+function _ppeRecordCompliancePct(r) {
+    const direct = parseFloat(r?.CompliancePct);
+    if (Number.isFinite(direct)) return direct;
+
+    const total = parseFloat(r?.TotalItems);
+    const ok = parseFloat(r?.CompliantItems);
+    if (Number.isFinite(total) && total > 0 && Number.isFinite(ok)) return (ok / total) * 100;
+
+    const details = Array.isArray(r?.details) ? r.details : [];
+    const counted = details.filter(d => ['compliant', 'non-compliant'].includes(String(d.Status || '').toLowerCase()));
+    if (counted.length) {
+        const compliant = counted.filter(d => String(d.Status || '').toLowerCase() === 'compliant').length;
+        return (compliant / counted.length) * 100;
+    }
+
+    if (r?.IsPass != null) return _isPPEPass(r) ? 100 : 0;
+    return null;
+}
+
+function _ppeCompliancePct(records, stats = _getPPEStats()) {
+    const values = (records || []).map(_ppeRecordCompliancePct).filter(v => Number.isFinite(v));
+    if (values.length) return values.reduce((a, b) => a + b, 0) / values.length;
+
+    const aggregate = parseFloat(stats?.overall_pct);
+    return Number.isFinite(aggregate) ? aggregate : null;
 }
 
 // Recomputes hero stat strip to match active month/year filter
@@ -351,13 +602,8 @@ function _updateHeroStats() {
     const avg  = vals.length ? (vals.reduce((a,b)=>a+b,0)/vals.length).toFixed(2) : null;
     const mat  = avg ? getMaturity(avg) : null;
 
-    let ppePct = null;
-    if (filteredP.length > 0) {
-        const passC = filteredP.filter(r => r.IsPass===1||r.IsPass==='1').length;
-        ppePct = (passC / filteredP.length * 100).toFixed(1) + '%';
-    } else if (mo === 0 && _dashData?.ppeStats?.overall_pct != null) {
-        ppePct = parseFloat(_dashData.ppeStats.overall_pct).toFixed(1) + '%';
-    }
+    const ppePctVal = _ppeCompliancePct(filteredP, mo === 0 ? _getPPEStats() : {});
+    const ppePct = ppePctVal != null ? ppePctVal.toFixed(1) + '%' : null;
 
     _setStatVal(0, mat ? mat.label : '—');
     _setStatVal(1, avg != null ? avg + '%' : '—');
@@ -463,17 +709,60 @@ function renderPanel(id) {
 }
 
 // ── Tab: Principles ────────────────────────────────────────────────────────
+function campaignTypeOf(p = {}) {
+    const hay = `${p.Title || ''} ${p.Description || ''} ${p.AttachmentName || ''}`.toLowerCase();
+    if (hay.includes('activity') || hay.includes('กิจกรรม')) return 'activity';
+    if (p.AttachmentUrl && !p.ImageUrl) return 'document';
+    if (p.ImageUrl) return 'poster';
+    return 'campaign';
+}
+
+function campaignTypeLabel(type) {
+    return {
+        poster: 'Poster',
+        document: 'Document',
+        activity: 'Activity',
+        campaign: 'Campaign'
+    }[type] || 'Campaign';
+}
+
+function campaignStatusOf(p = {}) {
+    return (p.ImageUrl || p.AttachmentUrl) ? 'ready' : 'needs_asset';
+}
+
+function campaignStatusLabel(status) {
+    return status === 'ready' ? 'พร้อมใช้' : 'รออัปเดตสื่อ';
+}
+
 function buildPrinciplesHtml() {
-    const cards = _principles.map(p => {
+    const q = (_campaignSearch || '').trim().toLowerCase();
+    const filteredPrinciples = _principles.filter(p => {
+        const type = campaignTypeOf(p);
+        const status = campaignStatusOf(p);
+        const hay = `${p.Title || ''} ${p.Description || ''} ${p.AttachmentName || ''}`.toLowerCase();
+        return (_campaignTypeFilter === 'all' || _campaignTypeFilter === type)
+            && (_campaignStatusFilter === 'all' || _campaignStatusFilter === status)
+            && (!q || hay.includes(q));
+    });
+    const featured = _principles.find(p => p.IsFeatured === 1 || p.IsFeatured === '1' || p.IsFeatured === true);
+
+    const cards = filteredPrinciples.map(p => {
         const idx   = p.SortOrder - 1;
         const icon  = TOPIC_SVG[idx] || TOPIC_SVG[5];
         const isPPE = p.SortOrder === 6;
+        const type = campaignTypeOf(p);
+        const status = campaignStatusOf(p);
+        const isFeatured = p.IsFeatured === 1 || p.IsFeatured === '1' || p.IsFeatured === true;
         return `
-        <div class="ds-section overflow-hidden hover:shadow-md transition-shadow flex flex-col">
-            ${p.ImageUrl
-                ? `<img src="${escHtml(p.ImageUrl)}" alt="${escHtml(p.Title)}" class="w-full h-44 object-cover cursor-zoom-in hover:opacity-90 transition-opacity" onclick="window._scViewImage('${escHtml(p.ImageUrl)}','${escHtml(p.Title)}')">`
-                : `<div class="w-full h-44 flex items-center justify-center flex-shrink-0" style="background:linear-gradient(135deg,#f0fdf4,#ecfdf5)">${icon}</div>`
-            }
+        <div class="ds-section overflow-hidden hover:shadow-md transition-shadow flex flex-col" data-sc-card-image="safety-culture-principle-${escHtml(p.SortOrder || p.PrincipleID || 'card')}">
+            <button type="button" onclick="window._scPreviewCampaign('${escHtml(p.PrincipleID)}')" class="relative block text-left w-full group">
+                ${p.ImageUrl
+                    ? `<img src="${escHtml(safeResourceUrl(p.ImageUrl))}" alt="${escHtml(p.Title)}" class="w-full h-44 object-cover group-hover:opacity-90 transition-opacity">`
+                    : `<div class="w-full h-44 flex items-center justify-center flex-shrink-0" style="background:linear-gradient(135deg,#f0fdf4,#ecfdf5)">${icon}</div>`
+                }
+                <span class="absolute left-3 top-3 inline-flex items-center px-2.5 py-1 rounded-full bg-white/90 text-[10px] font-bold text-emerald-700 shadow-sm">${campaignTypeLabel(type)}</span>
+                ${isFeatured ? `<span class="absolute right-3 top-3 inline-flex items-center px-2.5 py-1 rounded-full bg-amber-50/95 text-[10px] font-bold text-amber-700 border border-amber-100 shadow-sm">Featured</span>` : ''}
+            </button>
             <div class="p-4 flex flex-col flex-1">
                 <div class="flex items-start gap-2 mb-2">
                     <span class="inline-flex items-center justify-center w-6 h-6 rounded-full text-xs font-bold text-white flex-shrink-0 mt-0.5" style="background:linear-gradient(135deg,#059669,#0d9488)">${p.SortOrder}</span>
@@ -481,6 +770,10 @@ function buildPrinciplesHtml() {
                     ${_isAdmin ? `<button onclick="window._scEditPrinciple('${escHtml(p.PrincipleID)}')" class="flex-shrink-0 p-1 rounded text-slate-400 hover:text-emerald-600 hover:bg-slate-100 transition-colors" title="แก้ไข"><svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"/></svg></button>` : ''}
                 </div>
                 <p class="text-xs text-slate-500 leading-relaxed flex-1">${escHtml(p.Description)}</p>
+                <div class="mt-3 flex items-center gap-2 flex-wrap">
+                    <span class="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold ${status === 'ready' ? 'bg-emerald-50 text-emerald-700 border border-emerald-100' : 'bg-amber-50 text-amber-700 border border-amber-100'}">${campaignStatusLabel(status)}</span>
+                    ${p.UpdatedAt ? `<span class="text-[10px] text-slate-400">Updated ${fmtDate(p.UpdatedAt)}</span>` : ''}
+                </div>
                 <div class="mt-3 flex flex-col gap-1.5">
                     ${p.AttachmentUrl ? `<a href="${escHtml(p.AttachmentUrl)}" target="_blank" rel="noopener" class="inline-flex items-center gap-1 text-xs text-emerald-600 hover:underline font-medium"><svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/></svg>${escHtml(p.AttachmentName || 'ดาวน์โหลดเอกสาร')}</a>` : ''}
                     ${isPPE ? `<button onclick="window._scSetTab('ppe')" class="text-left inline-flex items-center gap-1 text-xs text-blue-600 hover:underline font-medium"><svg class="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12.75L11.25 15 15 9.75m-3-7.036A11.959 11.959 0 013.598 6 11.99 11.99 0 003 9.749c0 5.592 3.824 10.29 9 11.623 5.176-1.332 9-6.03 9-11.622 0-1.31-.21-2.571-.598-3.751h-.152c-3.196 0-6.1-1.248-8.25-3.285z"/></svg>ดู PPE Inspection Checklist →</button>` : ''}
@@ -515,7 +808,7 @@ function buildPrinciplesHtml() {
     const matP = overallAvgP != null ? getMaturity(overallAvgP) : null;
     const kpiStrip = `
     <div class="grid grid-cols-2 sm:grid-cols-4 gap-4">
-        <div class="ds-metric-card p-4 flex items-center gap-3">
+        <div class="ds-metric-card p-4 flex items-center gap-3" data-sc-card-image="safety-culture-principles-average">
             <div class="w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0" style="background:linear-gradient(135deg,#059669,#0d9488)">
                 <svg class="w-5 h-5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"/></svg>
             </div>
@@ -524,7 +817,7 @@ function buildPrinciplesHtml() {
                 <p class="text-xs text-slate-500">คะแนนเฉลี่ยปี ${thisYear}</p>
             </div>
         </div>
-        <div class="ds-metric-card p-4 flex items-center gap-3">
+        <div class="ds-metric-card p-4 flex items-center gap-3" data-sc-card-image="safety-culture-principles-ppe">
             <div class="w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0 bg-blue-50">
                 <svg class="w-5 h-5 text-blue-500" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12.75L11.25 15 15 9.75m-3-7.036A11.959 11.959 0 013.598 6 11.99 11.99 0 003 9.749c0 5.592 3.824 10.29 9 11.623 5.176-1.332 9-6.03 9-11.622 0-1.31-.21-2.571-.598-3.751h-.152c-3.196 0-6.1-1.248-8.25-3.285z"/></svg>
             </div>
@@ -533,7 +826,7 @@ function buildPrinciplesHtml() {
                 <p class="text-xs text-slate-500">PPE ผ่านตรวจปี ${thisYear} (${ppeTotalP} ครั้ง)</p>
             </div>
         </div>
-        <div class="ds-metric-card p-4 flex items-center gap-3">
+        <div class="ds-metric-card p-4 flex items-center gap-3" data-sc-card-image="safety-culture-principles-violations">
             <div class="w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0 ${violTotalP>0?'bg-red-50':'bg-emerald-50'}">
                 <svg class="w-5 h-5 ${violTotalP>0?'text-red-500':'text-emerald-500'}" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126zM12 15.75h.007v.008H12v-.008z"/></svg>
             </div>
@@ -542,7 +835,7 @@ function buildPrinciplesHtml() {
                 <p class="text-xs text-slate-500">การฝ่าฝืน PPE ปี ${thisYear}</p>
             </div>
         </div>
-        <div class="ds-metric-card p-4 flex items-center gap-3">
+        <div class="ds-metric-card p-4 flex items-center gap-3" data-sc-card-image="safety-culture-principles-maturity">
             <div class="w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0 bg-purple-50">
                 <svg class="w-5 h-5 text-purple-500" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3.75 3v11.25A2.25 2.25 0 006 16.5h2.25M3.75 3h-1.5m1.5 0h16.5m0 0h1.5m-1.5 0v11.25A2.25 2.25 0 0118 16.5h-2.25m-7.5 0h7.5m-7.5 0l-1 3m8.5-3l1 3m0 0l.5 1.5m-.5-1.5h-9.5m0 0l-.5 1.5"/></svg>
             </div>
@@ -564,7 +857,7 @@ function buildPrinciplesHtml() {
         .slice(0,3);
 
     const recentActivity = (recentAsmts.length || recentPPE.length) ? `
-    <div class="ds-section p-5">
+    <div class="ds-section p-5" data-sc-card-image="safety-culture-recent-activity">
         <h3 class="font-semibold text-slate-700 mb-4 text-sm flex items-center gap-2">
             <svg class="w-4 h-4 text-emerald-500" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6v6h4.5m4.5 0a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
             กิจกรรมล่าสุด
@@ -642,8 +935,71 @@ function buildPrinciplesHtml() {
     return `
     <div class="space-y-5">
         ${kpiStrip}
-        <div>
-            <p class="text-sm text-slate-500 mb-4">วัฒนธรรมความปลอดภัย ${_principles.length} หัวข้อ</p>
+        ${featured ? `<div class="ds-section overflow-hidden" data-sc-card-image="safety-culture-featured-campaign">
+            <div class="grid grid-cols-1 lg:grid-cols-5">
+                <button type="button" onclick="window._scPreviewCampaign('${escHtml(featured.PrincipleID)}')" class="lg:col-span-2 min-h-[220px] bg-emerald-50 flex items-center justify-center overflow-hidden">
+                    ${featured.ImageUrl
+                        ? `<img src="${escHtml(safeResourceUrl(featured.ImageUrl))}" alt="${escHtml(featured.Title)}" class="w-full h-full min-h-[220px] object-cover hover:scale-[1.02] transition-transform">`
+                        : `<div class="w-full min-h-[220px] flex items-center justify-center" style="background:linear-gradient(135deg,#ecfdf5,#d1fae5)">${TOPIC_SVG[(featured.SortOrder || 1) - 1] || TOPIC_SVG[5]}</div>`}
+                </button>
+                <div class="lg:col-span-3 p-6 flex flex-col justify-center">
+                    <div class="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-emerald-50 border border-emerald-100 text-emerald-700 text-xs font-bold w-fit mb-3">
+                        Featured Campaign
+                    </div>
+                    <h2 class="text-2xl font-black text-slate-800 leading-tight">${escHtml(featured.Title)}</h2>
+                    <p class="mt-3 text-sm text-slate-500 leading-relaxed">${escHtml(featured.Description || '')}</p>
+                    <div class="mt-5 flex flex-wrap gap-2">
+                        <button type="button" onclick="window._scPreviewCampaign('${escHtml(featured.PrincipleID)}')" class="btn btn-primary px-4 py-2 text-sm">Preview Campaign</button>
+                        ${featured.AttachmentUrl ? `<a href="${escHtml(featured.AttachmentUrl)}" target="_blank" rel="noopener" class="btn btn-secondary px-4 py-2 text-sm">Open Document</a>` : ''}
+                    </div>
+                </div>
+            </div>
+        </div>` : ''}
+        <div class="ds-section p-5" data-sc-card-image="safety-culture-campaign-library">
+            <div class="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4 mb-5">
+                <div>
+                    <div class="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-emerald-50 border border-emerald-100 text-emerald-700 text-xs font-bold mb-3">
+                        <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11.25 4.5l7.5 7.5-7.5 7.5m-6-15l7.5 7.5-7.5 7.5"/></svg>
+                        Campaign Library
+                    </div>
+                    <h2 class="text-lg font-bold text-slate-800">สื่อรณรงค์และกิจกรรมความปลอดภัย</h2>
+                    <p class="text-sm text-slate-500 mt-1">ใช้เป็นพื้นที่โชว์โปสเตอร์ เอกสารแนบ และกิจกรรมสื่อสารที่เกี่ยวข้องกับ Safety Culture</p>
+                </div>
+                <div class="grid grid-cols-2 gap-3 min-w-[260px]">
+                    <div class="rounded-xl border border-slate-100 bg-slate-50 px-4 py-3">
+                        <p class="text-[10px] font-bold uppercase text-slate-400">Published Items</p>
+                        <p class="text-xl font-black text-slate-800 mt-1">${_principles.length}</p>
+                    </div>
+                    <div class="rounded-xl border border-emerald-100 bg-emerald-50 px-4 py-3">
+                        <p class="text-[10px] font-bold uppercase text-emerald-600">Current Year</p>
+                        <p class="text-xl font-black text-emerald-700 mt-1">${thisYear}</p>
+                    </div>
+                </div>
+            </div>
+            <div class="mb-5 flex flex-col xl:flex-row xl:items-center gap-3 rounded-xl border border-slate-100 bg-slate-50/70 px-3 py-3">
+                <div class="flex flex-col sm:flex-row gap-2 flex-1 min-w-0">
+                <select class="form-input h-9 w-full sm:w-40 text-xs" onchange="window._scSetCampaignType(this.value)">
+                    <option value="all" ${_campaignTypeFilter === 'all' ? 'selected' : ''}>ทุกหมวดหมู่</option>
+                    <option value="poster" ${_campaignTypeFilter === 'poster' ? 'selected' : ''}>Poster</option>
+                    <option value="document" ${_campaignTypeFilter === 'document' ? 'selected' : ''}>Document</option>
+                    <option value="activity" ${_campaignTypeFilter === 'activity' ? 'selected' : ''}>Activity</option>
+                    <option value="campaign" ${_campaignTypeFilter === 'campaign' ? 'selected' : ''}>Campaign</option>
+                </select>
+                <select class="form-input h-9 w-full sm:w-40 text-xs" onchange="window._scSetCampaignStatus(this.value)">
+                    <option value="all" ${_campaignStatusFilter === 'all' ? 'selected' : ''}>ทุกสถานะ</option>
+                    <option value="ready" ${_campaignStatusFilter === 'ready' ? 'selected' : ''}>พร้อมใช้</option>
+                    <option value="needs_asset" ${_campaignStatusFilter === 'needs_asset' ? 'selected' : ''}>รออัปเดตสื่อ</option>
+                </select>
+                <div class="relative flex-1 min-w-[220px]">
+                    <svg class="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="m21 21-4.35-4.35M10.5 18a7.5 7.5 0 1 1 0-15 7.5 7.5 0 0 1 0 15z"/></svg>
+                    <input class="form-input h-9 w-full text-xs pl-9" value="${escHtml(_campaignSearch)}" oninput="window._scSetCampaignSearch(this.value)" placeholder="ค้นหาโปสเตอร์ / กิจกรรม / เอกสาร...">
+                </div>
+                </div>
+                <div class="flex items-center justify-between xl:justify-end gap-3">
+                    <span class="text-xs font-semibold text-slate-500 whitespace-nowrap">${filteredPrinciples.length}/${_principles.length} รายการ</span>
+                    <button type="button" onclick="window._scClearCampaignFilters()" class="btn btn-secondary h-9 px-3 text-xs">ล้าง</button>
+                </div>
+            </div>
             <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
                 ${cards || '<p class="col-span-full text-center py-12 text-slate-400">ไม่พบข้อมูล</p>'}
             </div>
@@ -652,11 +1008,227 @@ function buildPrinciplesHtml() {
     </div>`;
 }
 
+function previewCampaign(id) {
+    const p = _principles.find(x => x.PrincipleID === id);
+    if (!p) return;
+    const type = campaignTypeOf(p);
+    const status = campaignStatusOf(p);
+    const idx = (p.SortOrder || 1) - 1;
+    openModal('รายละเอียดสื่อรณรงค์', `
+    <div class="space-y-5">
+        <div class="rounded-2xl overflow-hidden border border-slate-100 bg-slate-50">
+            ${p.ImageUrl
+                ? `<img src="${escHtml(safeResourceUrl(p.ImageUrl))}" alt="${escHtml(p.Title)}" class="w-full max-h-[62vh] object-contain bg-white">`
+                : `<div class="w-full h-72 flex items-center justify-center" style="background:linear-gradient(135deg,#ecfdf5,#d1fae5)">${TOPIC_SVG[idx] || TOPIC_SVG[5]}</div>`}
+        </div>
+        <div class="flex flex-wrap items-center gap-2">
+            <span class="inline-flex items-center px-3 py-1 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-100 text-xs font-bold">${campaignTypeLabel(type)}</span>
+            <span class="inline-flex items-center px-3 py-1 rounded-full ${status === 'ready' ? 'bg-emerald-50 text-emerald-700 border border-emerald-100' : 'bg-amber-50 text-amber-700 border border-amber-100'} text-xs font-bold">${campaignStatusLabel(status)}</span>
+            ${p.UpdatedAt ? `<span class="text-xs text-slate-400">Updated ${fmtDate(p.UpdatedAt)}</span>` : ''}
+        </div>
+        <div>
+            <h2 class="text-xl font-black text-slate-800 leading-snug">${escHtml(p.Title)}</h2>
+            <p class="mt-3 text-sm text-slate-600 leading-relaxed whitespace-pre-line">${escHtml(p.Description || '')}</p>
+        </div>
+        <div class="flex flex-wrap gap-2 pt-3 border-t border-slate-100">
+            ${p.AttachmentUrl ? `<a href="${escHtml(p.AttachmentUrl)}" target="_blank" rel="noopener" class="btn btn-primary px-4 py-2 text-sm">เปิดเอกสารแนบ</a>` : ''}
+            ${p.ImageUrl ? `<a href="${escHtml(p.ImageUrl)}" target="_blank" rel="noopener" class="btn btn-secondary px-4 py-2 text-sm">เปิดรูปเต็ม</a>` : ''}
+            ${_isAdmin ? `<button type="button" onclick="window.closeModal();setTimeout(()=>window._scEditPrinciple('${escHtml(p.PrincipleID)}'),80)" class="btn btn-secondary px-4 py-2 text-sm">แก้ไขข้อมูล</button>` : ''}
+        </div>
+    </div>`, 'max-w-5xl');
+}
+
 // ── Tab: Assessment ────────────────────────────────────────────────────────
-function buildMonthlyAssessmentSummary() {
-    if (!_assessments.length) return '';
+function _assessmentRecordsForFilter() {
+    return _assessments.filter(a => {
+        if (_asmtFilterMonth) {
+            if (!a.AssessmentDate || parseInt(String(a.AssessmentDate).substring(5, 7), 10) !== _asmtFilterMonth) return false;
+        }
+        if (_asmtFilterArea && String(a.Area || '').trim() !== _asmtFilterArea) return false;
+        if (_asmtFilterWeek && parseInt(a.WeekNo, 10) !== _asmtFilterWeek) return false;
+        return true;
+    });
+}
+
+function _assessmentAvg(records, key) {
+    const vals = (records || []).map(r => r?.[key]).filter(v => v != null).map(v => parseFloat(v)).filter(Number.isFinite);
+    return vals.length ? vals.reduce((a, b) => a + b, 0) / vals.length : null;
+}
+
+function _assessmentOverall(records) {
+    const vals = (records || []).map(r => {
+        const row = ['T1_Score','T2_Score','T3_Score','T4_Score','T5_Score','T7_Score']
+            .map(k => r?.[k]).filter(v => v != null).map(v => parseFloat(v)).filter(Number.isFinite);
+        return row.length ? row.reduce((a, b) => a + b, 0) / row.length : null;
+    }).filter(v => v !== null);
+    return vals.length ? vals.reduce((a, b) => a + b, 0) / vals.length : null;
+}
+
+function _assessmentTopicStats(records) {
+    const keys = ['T1_Score','T2_Score','T3_Score','T4_Score','T5_Score','T7_Score'];
+    const codes = ['T1','T2','T3','T4','T5','T7'];
+    const labels = ['Walk Way','ไม่ใช้โทรศัพท์','ข้ามทางม้าลาย','หยุดยืนชี้นิ้ว','ไม่ล้วงกระเป๋า','แยกขยะ'];
+    return keys.map((key, i) => ({ key, code: codes[i], label: labels[i], avg: _assessmentAvg(records, key) }));
+}
+
+function _asmtScoreBadge(v) {
+    if (v == null) return `<span class="inline-flex items-center px-2 py-0.5 rounded-full bg-slate-100 text-slate-400 text-xs font-bold">—</span>`;
+    const n = Math.round(parseFloat(v));
+    const cls = n >= 90 ? 'bg-emerald-100 text-emerald-700' : n >= 70 ? 'bg-amber-100 text-amber-700' : 'bg-red-100 text-red-700';
+    return `<span class="inline-flex items-center px-2 py-0.5 rounded-full ${cls} text-xs font-bold">${n}%</span>`;
+}
+
+function buildAssessmentInsight(records) {
+    const overall = _assessmentOverall(records);
+    const topics = _assessmentTopicStats(records).filter(t => t.avg !== null);
+    const best = topics.length ? topics.reduce((a, b) => b.avg > a.avg ? b : a) : null;
+    const worst = topics.length ? topics.reduce((a, b) => b.avg < a.avg ? b : a) : null;
+    const lowCount = topics.filter(t => t.avg < 70).length;
+    const mat = overall != null ? getMaturity(overall) : null;
+    const monthText = _asmtFilterMonth ? (TH_MONTHS_FULL?.[_asmtFilterMonth] || `เดือน ${_asmtFilterMonth}`) : 'ทั้งปี';
+    const period = `${monthText} ${_filterYear}`;
+    const insightText = !records.length
+        ? 'ยังไม่มีข้อมูลตามตัวกรองนี้'
+        : worst && worst.avg < 70
+            ? `${worst.code} ${worst.label} ต่ำกว่าเกณฑ์ ควรติดตามเป็นลำดับแรก`
+            : lowCount
+                ? `มี ${lowCount} หัวข้อที่ต้องติดตามใกล้ชิด`
+                : 'คะแนนโดยรวมอยู่ในระดับที่ควรรักษามาตรฐานต่อเนื่อง';
+    return `
+    <div class="grid grid-cols-1 lg:grid-cols-4 gap-4">
+        <div class="ds-metric-card p-4 lg:col-span-2 border-l-4 ${mat ? mat.border : 'border-slate-200'}" data-sc-card-image="safety-culture-assessment-insight">
+            <p class="text-xs font-bold uppercase text-slate-400">Assessment Insight</p>
+            <div class="mt-2 flex items-center gap-3 flex-wrap">
+                <span class="text-3xl font-black ${overall != null ? scoreColor(overall) : 'text-slate-300'}">${overall != null ? Math.round(overall) + '%' : '—'}</span>
+                ${mat ? `<span class="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold ${mat.bg} ${mat.color}"><span class="w-1.5 h-1.5 rounded-full ${mat.dot}"></span>${mat.label}</span>` : ''}
+            </div>
+            <p class="text-sm text-slate-600 mt-2">${escHtml(insightText)}</p>
+            <p class="text-xs text-slate-400 mt-1">${escHtml(period)} · ${records.length}/${_assessments.length} รายการ</p>
+        </div>
+        <div class="ds-metric-card p-4" data-sc-card-image="safety-culture-assessment-best-topic">
+            <p class="text-xs font-bold uppercase text-emerald-600">Best Topic</p>
+            <p class="mt-2 text-sm font-black text-slate-800 truncate">${best ? `${best.code} ${escHtml(best.label)}` : '—'}</p>
+            <div class="mt-2">${_asmtScoreBadge(best?.avg)}</div>
+        </div>
+        <div class="ds-metric-card p-4" data-sc-card-image="safety-culture-assessment-focus-topic">
+            <p class="text-xs font-bold uppercase ${worst && worst.avg < 70 ? 'text-red-600' : 'text-amber-600'}">Focus Topic</p>
+            <p class="mt-2 text-sm font-black text-slate-800 truncate">${worst ? `${worst.code} ${escHtml(worst.label)}` : '—'}</p>
+            <div class="mt-2">${_asmtScoreBadge(worst?.avg)}</div>
+        </div>
+    </div>`;
+}
+
+function buildAssessmentFilterBar(records) {
+    const monthLabels = ['','ม.ค.','ก.พ.','มี.ค.','เม.ย.','พ.ค.','มิ.ย.','ก.ค.','ส.ค.','ก.ย.','ต.ค.','พ.ย.','ธ.ค.'];
+    const areas = [...new Set(_assessments.map(a => String(a.Area || '').trim()).filter(Boolean))].sort((a, b) => a.localeCompare(b, 'th'));
+    return `
+    <div class="ds-filter-bar flex flex-col xl:flex-row xl:items-center gap-3">
+        <div class="flex flex-col sm:flex-row gap-2 flex-1 min-w-0">
+            <select onchange="window._scSetAsmtMonth(this.value)" class="form-input h-9 text-xs w-full sm:w-40">
+                <option value="0" ${_asmtFilterMonth === 0 ? 'selected' : ''}>ทุกเดือน</option>
+                ${monthLabels.slice(1).map((m, i) => `<option value="${i + 1}" ${_asmtFilterMonth === i + 1 ? 'selected' : ''}>${m}</option>`).join('')}
+            </select>
+            <select onchange="window._scSetAsmtWeek(this.value)" class="form-input h-9 text-xs w-full sm:w-36">
+                <option value="0" ${_asmtFilterWeek === 0 ? 'selected' : ''}>ทุกสัปดาห์</option>
+                ${[1,2,3,4].map(w => `<option value="${w}" ${_asmtFilterWeek === w ? 'selected' : ''}>W${w}</option>`).join('')}
+            </select>
+            <select onchange="window._scSetAsmtArea(this.value)" class="form-input h-9 text-xs w-full sm:min-w-56">
+                <option value="" ${!_asmtFilterArea ? 'selected' : ''}>ทุกพื้นที่</option>
+                ${areas.map(area => `<option value="${escHtml(area)}" ${_asmtFilterArea === area ? 'selected' : ''}>${escHtml(area)}</option>`).join('')}
+            </select>
+        </div>
+        <div class="flex items-center justify-between xl:justify-end gap-3">
+            <span class="text-xs font-semibold text-slate-500 whitespace-nowrap">${records.length}/${_assessments.length} รายการ</span>
+            <button type="button" onclick="window._scClearAsmtFilters()" class="btn btn-secondary h-9 px-3 text-xs">ล้าง</button>
+        </div>
+    </div>`;
+}
+
+function buildAssessmentHeatmap(records) {
+    const monthLabels = ['','ม.ค.','ก.พ.','มี.ค.','เม.ย.','พ.ค.','มิ.ย.','ก.ค.','ส.ค.','ก.ย.','ต.ค.','พ.ย.','ธ.ค.'];
+    const topics = [
+        { key:'T1_Score', code:'T1', label:'Walk Way' },
+        { key:'T2_Score', code:'T2', label:'No Phone' },
+        { key:'T3_Score', code:'T3', label:'Crosswalk' },
+        { key:'T4_Score', code:'T4', label:'Point&Call' },
+        { key:'T5_Score', code:'T5', label:'Hands-Free' },
+        { key:'T7_Score', code:'T7', label:'Waste Sort' },
+    ];
+    const cell = (v) => {
+        if (v == null) return `<td class="px-2 py-2 text-center text-xs text-slate-300 bg-slate-50">—</td>`;
+        const n = Math.round(v);
+        const cls = n >= 90 ? 'bg-emerald-50 text-emerald-700' : n >= 70 ? 'bg-amber-50 text-amber-700' : 'bg-red-50 text-red-700';
+        return `<td class="px-2 py-2 text-center text-xs font-black ${cls}">${n}%</td>`;
+    };
+    const rows = Array.from({ length: 12 }, (_, i) => i + 1).map(m => {
+        const entries = records.filter(a => a.AssessmentDate && parseInt(String(a.AssessmentDate).substring(5, 7), 10) === m);
+        const vals = topics.map(t => _assessmentAvg(entries, t.key));
+        const overall = _assessmentOverall(entries);
+        return `<tr class="border-b border-slate-100">
+            <td class="px-4 py-2 text-xs font-bold text-slate-600 whitespace-nowrap">${monthLabels[m]}</td>
+            ${vals.map(cell).join('')}
+            ${cell(overall)}
+        </tr>`;
+    }).join('');
+    return `
+    <div class="ds-section overflow-hidden" data-sc-card-image="safety-culture-assessment-heatmap">
+        <div class="px-5 py-4 border-b border-slate-100 flex items-center justify-between gap-3">
+            <div>
+                <h3 class="font-semibold text-slate-700">Assessment Heatmap</h3>
+                <p class="text-xs text-slate-400 mt-0.5">เดือน × หัวข้อ ใช้สีแดง/เหลือง/เขียวสำหรับ Monthly Review</p>
+            </div>
+            <span class="text-xs text-slate-400 whitespace-nowrap">แดง &lt;70 · เหลือง 70-89 · เขียว ≥90</span>
+        </div>
+        <div class="overflow-x-auto">
+            <table class="ds-table text-sm">
+                <thead class="bg-slate-50">
+                    <tr>
+                        <th class="px-4 py-3 text-left text-xs font-semibold text-slate-500 uppercase">เดือน</th>
+                        ${topics.map(t => `<th class="px-2 py-3 text-center text-xs font-semibold text-slate-500 uppercase" title="${escHtml(t.label)}">${t.code}</th>`).join('')}
+                        <th class="px-2 py-3 text-center text-xs font-semibold text-slate-500 uppercase">Avg</th>
+                    </tr>
+                </thead>
+                <tbody>${rows}</tbody>
+            </table>
+        </div>
+    </div>`;
+}
+
+function buildAssessmentNotes(records) {
+    const notes = records
+        .filter(a => String(a.Notes || '').trim())
+        .sort((a, b) => String(b.AssessmentDate || '').localeCompare(String(a.AssessmentDate || '')))
+        .slice(0, 5);
+    if (!notes.length) return '';
+    return `
+    <div class="ds-section overflow-hidden" data-sc-card-image="safety-culture-assessment-notes">
+        <div class="px-5 py-4 border-b border-slate-100">
+            <h3 class="font-semibold text-slate-700">Follow-up Notes</h3>
+            <p class="text-xs text-slate-400 mt-0.5">ดึงจากช่อง Notes เดิมของผลการประเมิน</p>
+        </div>
+        <div class="divide-y divide-slate-100">
+            ${notes.map(a => {
+                const avg = _assessmentOverall([a]);
+                return `<div class="px-5 py-3 flex items-start gap-3">
+                    <div class="w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0 ${avg != null && avg < 70 ? 'bg-red-50 text-red-600' : 'bg-emerald-50 text-emerald-600'} text-xs font-black">${avg != null ? Math.round(avg) : '—'}</div>
+                    <div class="flex-1 min-w-0">
+                        <div class="flex items-center gap-2 flex-wrap">
+                            <p class="text-sm font-bold text-slate-800">${a.AssessmentDate ? fmtDate(a.AssessmentDate) : escHtml(a.AssessmentYear || '-')}</p>
+                            ${a.WeekNo ? `<span class="inline-flex items-center px-1.5 py-0.5 rounded text-xs font-bold bg-blue-100 text-blue-700">W${a.WeekNo}</span>` : ''}
+                            <span class="text-xs text-slate-400">${escHtml(a.Area || '-')}</span>
+                        </div>
+                        <p class="text-sm text-slate-600 mt-1 leading-relaxed">${escHtml(a.Notes || '')}</p>
+                    </div>
+                </div>`;
+            }).join('')}
+        </div>
+    </div>`;
+}
+
+function buildMonthlyAssessmentSummary(records = _assessments) {
+    if (!records.length) return '';
     const monthMap = {};
-    _assessments.forEach(a => {
+    records.forEach(a => {
         const key = a.AssessmentDate
             ? String(a.AssessmentDate).substring(0, 7)
             : `${a.AssessmentYear}-00`;
@@ -666,6 +1238,7 @@ function buildMonthlyAssessmentSummary() {
     const months = Object.keys(monthMap).sort().reverse();
     const SKEYS = ['T1_Score','T2_Score','T3_Score','T4_Score','T5_Score','T7_Score'];
     const SLBLS = ['T1','T2','T3','T4','T5','T7'];
+    const cardAttr = 'data-sc-card-image="safety-culture-assessment-monthly-summary"';
 
     const scoreCell = (p) => {
         if (p === null) return `<td class="px-2 py-2 text-center text-xs text-slate-300">—</td>`;
@@ -743,7 +1316,7 @@ function buildMonthlyAssessmentSummary() {
     }).join('');
 
     return `
-    <div class="ds-section overflow-hidden">
+    <div class="ds-section overflow-hidden" ${cardAttr}>
         <div class="px-5 py-4 border-b border-slate-100 flex items-center justify-between">
             <h3 class="font-semibold text-slate-700">สรุปรายเดือน ปี ${_filterYear}</h3>
             <span class="text-xs text-slate-400">${months.length} เดือน · คะแนน 0–100%</span>
@@ -764,8 +1337,134 @@ function buildMonthlyAssessmentSummary() {
     </div>`;
 }
 
+const ASSESSMENT_TOPIC_META = [
+    { key: 'T1', label: 'เดินบน Walk Way', group: 'walkway' },
+    { key: 'T2', label: 'ไม่ใช้โทรศัพท์ขณะเดิน', group: 'walkway' },
+    { key: 'T3', label: 'ข้ามถนนทางม้าลาย', group: 'walkway' },
+    { key: 'T4', label: 'หยุดยืนชี้นิ้ว', group: 'walkway' },
+    { key: 'T5', label: 'ไม่ล้วงกระเป๋า', group: 'walkway' },
+    { key: 'T7', label: 'แยกขยะถูกต้อง', group: 'waste' },
+];
+
+function assessmentLocationSummary(a = {}) {
+    const points = Array.isArray(a.points) ? a.points : [];
+    const names = [...new Set(points.map(p => String(p.LocationName || '').trim()).filter(Boolean))];
+    const pointNos = [...new Set(points.map(p => `${p.TopicKey || ''}:${p.PointNo || ''}`).filter(Boolean))];
+    return {
+        locationCount: names.length,
+        pointCount: pointNos.length,
+        names,
+        label: names.length ? names.slice(0, 2).join(', ') + (names.length > 2 ? ` +${names.length - 2}` : '') : (a.Area || 'ไม่ระบุ'),
+    };
+}
+
+function assessmentPointPct(pt = {}) {
+    const total = parseInt(pt.TotalPeople, 10) || 0;
+    const comply = parseInt(pt.ComplyPeople, 10) || 0;
+    if (pt.Pct != null && pt.Pct !== '') return parseFloat(pt.Pct);
+    return total > 0 ? (comply / total) * 100 : null;
+}
+
+function assessmentLocationStats(records = []) {
+    const topicLookup = Object.fromEntries(ASSESSMENT_TOPIC_META.map(t => [t.key, t]));
+    const map = {};
+    records.forEach(a => {
+        const points = Array.isArray(a.points) ? a.points : [];
+        points.forEach(pt => {
+            const name = String(pt.LocationName || '').trim();
+            if (!name) return;
+            const key = pt.LocationID || name;
+            if (!map[key]) {
+                map[key] = {
+                    key,
+                    name,
+                    total: 0,
+                    comply: 0,
+                    checks: 0,
+                    topicSet: new Set(),
+                    lowTopics: {},
+                    dates: new Set(),
+                };
+            }
+            const row = map[key];
+            const total = parseInt(pt.TotalPeople, 10) || 0;
+            const comply = parseInt(pt.ComplyPeople, 10) || 0;
+            row.total += total;
+            row.comply += comply;
+            row.checks++;
+            if (a.AssessmentDate) row.dates.add(String(a.AssessmentDate).substring(0, 10));
+            const topicKey = pt.TopicKey || '';
+            if (topicKey) row.topicSet.add(topicKey);
+            const pct = assessmentPointPct(pt);
+            if (pct !== null && pct < 70) {
+                const label = topicLookup[topicKey]?.label || topicKey || '-';
+                row.lowTopics[topicKey || label] = { key: topicKey, label, pct };
+            }
+        });
+    });
+    return Object.values(map).map(row => ({
+        ...row,
+        pct: row.total > 0 ? Math.round(row.comply / row.total * 100) : null,
+        topics: Array.from(row.topicSet),
+        lowTopicList: Object.values(row.lowTopics).sort((a, b) => (a.pct ?? 0) - (b.pct ?? 0)),
+        dates: Array.from(row.dates).sort(),
+    })).sort((a, b) => {
+        if (a.pct === null && b.pct !== null) return 1;
+        if (a.pct !== null && b.pct === null) return -1;
+        if ((a.pct ?? 101) !== (b.pct ?? 101)) return (a.pct ?? 101) - (b.pct ?? 101);
+        return b.checks - a.checks;
+    });
+}
+
+function buildAssessmentLocationFocus(records = [], options = {}) {
+    const stats = assessmentLocationStats(records);
+    const limit = options.limit || 6;
+    const rows = stats.slice(0, limit).map((loc, idx) => {
+        const pct = loc.pct;
+        const bar = pct === null ? 0 : Math.max(0, Math.min(100, pct));
+        const tone = pct === null ? 'slate' : pct >= 90 ? 'emerald' : pct >= 70 ? 'amber' : 'red';
+        const color = tone === 'emerald' ? '#059669' : tone === 'amber' ? '#d97706' : tone === 'red' ? '#ef4444' : '#94a3b8';
+        const badge = tone === 'emerald' ? 'bg-emerald-50 text-emerald-700 border-emerald-100'
+            : tone === 'amber' ? 'bg-amber-50 text-amber-700 border-amber-100'
+            : tone === 'red' ? 'bg-red-50 text-red-700 border-red-100'
+            : 'bg-slate-50 text-slate-600 border-slate-100';
+        const low = loc.lowTopicList.slice(0, 2).map(t => t.key || t.label).join(', ');
+        return `
+        <div class="rounded-xl border border-slate-100 bg-white px-4 py-3">
+            <div class="flex items-start justify-between gap-3">
+                <div class="min-w-0">
+                    <p class="text-sm font-bold text-slate-800 truncate">${idx + 1}. ${escHtml(loc.name)}</p>
+                    <p class="text-[11px] text-slate-400 mt-0.5">${loc.checks} point rows · ${loc.total} people${low ? ` · Focus: ${escHtml(low)}` : ''}</p>
+                </div>
+                <span class="inline-flex items-center px-2 py-0.5 rounded-full border text-xs font-black ${badge}">${pct === null ? '-' : pct + '%'}</span>
+            </div>
+            <div class="mt-3 flex items-center gap-2">
+                <div class="flex-1 h-2 rounded-full bg-slate-100 overflow-hidden">
+                    <div class="h-2 rounded-full" style="width:${bar}%;background:${color}"></div>
+                </div>
+                <span class="text-[11px] font-semibold text-slate-400">${loc.comply}/${loc.total}</span>
+            </div>
+        </div>`;
+    }).join('');
+    return `
+    <div class="ds-section p-5" data-sc-card-image="safety-culture-assessment-location-followup">
+        <div class="flex items-start justify-between gap-3 mb-4">
+            <div>
+                <h3 class="font-semibold text-slate-700">${escHtml(options.title || 'Location Follow-up')}</h3>
+                <p class="text-xs text-slate-400 mt-1">${escHtml(options.subtitle || 'Lowest assessment points from saved location rows')}</p>
+            </div>
+            <span class="text-xs font-semibold text-slate-400">${stats.length} locations</span>
+        </div>
+        <div class="grid grid-cols-1 lg:grid-cols-2 gap-3">
+            ${rows || `<div class="lg:col-span-2 rounded-xl border border-dashed border-slate-200 bg-slate-50 px-4 py-8 text-center text-sm text-slate-400">No location-level assessment data yet.</div>`}
+        </div>
+    </div>`;
+}
+
 function buildAssessmentHtml() {
-    const rows = _assessments.map(a => {
+    const filteredAssessments = _assessmentRecordsForFilter()
+        .sort((a, b) => String(b.AssessmentDate || '').localeCompare(String(a.AssessmentDate || '')));
+    const rows = filteredAssessments.map(a => {
         const vals = [a.T1_Score, a.T2_Score, a.T3_Score, a.T4_Score, a.T5_Score, a.T7_Score].filter(v => v != null);
         const avg  = vals.length ? (vals.reduce((s, v) => s + parseFloat(v), 0) / vals.length) : null;
         const mat  = avg != null ? getMaturity(avg) : null;
@@ -775,26 +1474,45 @@ function buildAssessmentHtml() {
         };
         const dateLabel = a.AssessmentDate ? fmtDate(a.AssessmentDate) : a.AssessmentYear;
         const weekLabel = a.WeekNo ? `<span class="ml-1 inline-flex items-center px-1.5 py-0.5 rounded text-xs font-bold bg-blue-100 text-blue-700">W${a.WeekNo}</span>` : '';
+        const locSummary = assessmentLocationSummary(a);
         return `
         <tr class="border-b border-slate-100 hover:bg-slate-50 transition-colors">
             <td class="px-4 py-2.5 text-sm font-medium text-slate-800 whitespace-nowrap">${dateLabel}${weekLabel}</td>
             <td class="px-4 py-2.5 text-sm text-slate-600">${escHtml(a.Area)}</td>
+            <td class="px-4 py-2.5 text-xs text-slate-500 max-w-60">
+                <button type="button" onclick="window._scViewAssessment('${a.AssessmentID}')" class="text-left hover:text-emerald-700 hover:underline">
+                    <span class="block font-semibold text-slate-700 truncate">${escHtml(locSummary.label)}</span>
+                    <span class="block text-[11px] text-slate-400">${locSummary.locationCount || locSummary.pointCount || 0} จุดตรวจ</span>
+                </button>
+            </td>
             ${scoreCell(a.T1_Score)}${scoreCell(a.T2_Score)}${scoreCell(a.T3_Score)}${scoreCell(a.T4_Score)}${scoreCell(a.T5_Score)}
             <td class="px-3 py-2.5 text-center text-xs text-slate-400 italic">PPE*</td>
             ${scoreCell(a.T7_Score)}
             <td class="px-4 py-2.5 text-center">${avg != null ? `<span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-bold ${mat.bg} ${mat.color}">${Math.round(avg)}%</span>` : '-'}</td>
             <td class="px-4 py-2.5 text-center text-xs">${mat ? `<span class="inline-flex items-center gap-1.5 font-semibold ${mat.color}"><span class="w-1.5 h-1.5 rounded-full inline-block ${mat.dot}"></span>${mat.label}</span>` : '-'}</td>
+            <td class="px-4 py-2.5 text-xs text-slate-500 max-w-56 truncate" title="${escHtml(a.Notes || '')}">${a.Notes ? escHtml(a.Notes) : '<span class="text-slate-300">—</span>'}</td>
             ${_isAdmin ? `<td class="px-4 py-2.5 whitespace-nowrap">
+                <button onclick="window._scViewAssessment('${a.AssessmentID}')" class="p-1.5 rounded text-slate-400 hover:text-blue-600 hover:bg-blue-50 transition-colors" title="รายละเอียด"><svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"/></svg></button>
                 <button onclick="window._scEditAssessment('${a.AssessmentID}')" class="p-1.5 rounded text-slate-400 hover:text-emerald-600 hover:bg-slate-100 transition-colors" title="แก้ไข"><svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"/></svg></button>
                 <button onclick="window._scDeleteAssessment('${a.AssessmentID}')" class="p-1.5 rounded text-slate-400 hover:text-red-500 hover:bg-red-50 transition-colors" title="ลบ"><svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg></button>
             </td>` : ''}
         </tr>`;
     }).join('');
 
-    const colCount = _isAdmin ? 12 : 11;
+    const colCount = _isAdmin ? 14 : 13;
     return `
     <div class="space-y-4">
-        ${buildMonthlyAssessmentSummary()}
+        ${_isAdmin ? buildAssessmentLocationsAdmin() : ''}
+        ${buildAssessmentInsight(filteredAssessments)}
+        ${buildAssessmentFilterBar(filteredAssessments)}
+        <div class="grid grid-cols-1 xl:grid-cols-2 gap-4">
+            ${buildMonthlyAssessmentSummary(filteredAssessments)}
+            ${buildAssessmentHeatmap(filteredAssessments)}
+        </div>
+        ${buildAssessmentLocationFocus(filteredAssessments, {
+            title: 'Assessment Location Follow-up',
+            subtitle: 'จุดตรวจที่ควรติดตามจากข้อมูลรายจุดในตัวกรองปัจจุบัน',
+        })}
         <div class="flex flex-wrap items-center justify-between gap-3">
             <div class="flex gap-2">
                 <button onclick="window._scExportAssessmentPDF('yearly')"
@@ -810,10 +1528,10 @@ function buildAssessmentHtml() {
             </div>
             ${_isAdmin ? `<button onclick="window._scAddAssessment()" class="btn btn-primary px-5 flex items-center gap-2"><svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/></svg>บันทึกผลการประเมิน</button>` : ''}
         </div>
-        <div class="ds-section overflow-hidden">
+        <div class="ds-section overflow-hidden" data-sc-card-image="safety-culture-assessment-history">
             <div class="px-5 py-4 border-b border-slate-100 flex items-center justify-between">
                 <h3 class="font-semibold text-slate-700">ประวัติการประเมิน ปี ${_filterYear}</h3>
-                <span class="text-xs text-slate-400">${_assessments.length} รายการ</span>
+                <span class="text-xs text-slate-400">${filteredAssessments.length}/${_assessments.length} รายการ</span>
             </div>
             <div class="overflow-x-auto">
                 <table class="ds-table text-sm">
@@ -821,6 +1539,7 @@ function buildAssessmentHtml() {
                         <tr>
                             <th class="px-4 py-3 text-left text-xs font-semibold text-slate-500 uppercase">วันที่</th>
                             <th class="px-4 py-3 text-left text-xs font-semibold text-slate-500 uppercase">พื้นที่</th>
+                            <th class="px-4 py-3 text-left text-xs font-semibold text-slate-500 uppercase">จุดตรวจ</th>
                             <th class="px-3 py-3 text-center text-xs font-semibold text-slate-500 uppercase" title="เดินบน Walk Way">T1</th>
                             <th class="px-3 py-3 text-center text-xs font-semibold text-slate-500 uppercase" title="ไม่ใช้โทรศัพท์">T2</th>
                             <th class="px-3 py-3 text-center text-xs font-semibold text-slate-500 uppercase" title="ข้ามถนนทางม้าลาย">T3</th>
@@ -830,17 +1549,19 @@ function buildAssessmentHtml() {
                             <th class="px-3 py-3 text-center text-xs font-semibold text-slate-500 uppercase" title="แยกขยะ">T7</th>
                             <th class="px-4 py-3 text-center text-xs font-semibold text-slate-500 uppercase">เฉลี่ย</th>
                             <th class="px-4 py-3 text-center text-xs font-semibold text-slate-500 uppercase">ระดับ</th>
+                            <th class="px-4 py-3 text-left text-xs font-semibold text-slate-500 uppercase">Follow-up Note</th>
                             ${_isAdmin ? '<th class="px-4 py-3"></th>' : ''}
                         </tr>
                     </thead>
                     <tbody>
-                        ${rows || `<tr><td colspan="${colCount}" class="text-center py-12 text-slate-400">ยังไม่มีผลการประเมินสำหรับปี ${_filterYear}</td></tr>`}
+                        ${rows || `<tr><td colspan="${colCount}" class="text-center py-12 text-slate-400">ไม่พบผลการประเมินตามตัวกรองนี้ — ลองล้างตัวกรองหรือเปลี่ยนเดือน/พื้นที่/สัปดาห์</td></tr>`}
                     </tbody>
                 </table>
             </div>
         </div>
+        ${buildAssessmentNotes(filteredAssessments)}
         <p class="text-xs text-slate-400">* T6 (PPE Control) คำนวณจาก PPE Inspection Checklist แยกต่างหาก</p>
-        <div class="ds-section p-4">
+        <div class="ds-section p-4" data-sc-card-image="safety-culture-assessment-maturity-guide">
             <h4 class="text-sm font-semibold text-slate-700 mb-3">Culture Maturity Level — คำอธิบายระดับ</h4>
             <div class="grid grid-cols-2 md:grid-cols-4 gap-3">
                 ${[
@@ -865,7 +1586,553 @@ function _warnBadge(level) {
     return `<span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-semibold ${c.cls}"><span class="w-1.5 h-1.5 rounded-full ${c.dot} inline-block"></span>${c.label}</span>`;
 }
 
+function _isPPEPass(r) {
+    return r?.IsPass === 1 || r?.IsPass === '1';
+}
+
+function _monthFromDate(v) {
+    if (!v) return 0;
+    const m = parseInt(String(v).substring(5, 7), 10);
+    return Number.isFinite(m) ? m : 0;
+}
+
+function _ppeRecordMatchesBaseFilters(r) {
+    const recYear = parseInt(String(r.InspectionDate || r.CreatedAt || '').substring(0, 4), 10);
+    if (recYear && recYear !== _filterYear) return false;
+    if (_ppeFilterMonth && _monthFromDate(r.InspectionDate || r.CreatedAt) !== _ppeFilterMonth) return false;
+    if (_filterPPEDept && String(r.Department || '').trim() !== _filterPPEDept) return false;
+    if (_ppeFilterWT && !(r.WorkTypeID === _ppeFilterWT || r.WorkTypeName === _ppeFilterWT)) return false;
+    if (_ppeFilterStatus === 'pass' && !_isPPEPass(r)) return false;
+    if (_ppeFilterStatus === 'fail' && _isPPEPass(r)) return false;
+    if (_ppeSearch) {
+        const q = _ppeSearch.toLowerCase();
+        return [
+            r.InspectedEmployeeName,
+            r.InspectedEmployeeID,
+            r.Department,
+            r.Area,
+            r.InspectorName,
+            r.WorkTypeName,
+        ].some(v => String(v || '').toLowerCase().includes(q));
+    }
+    return true;
+}
+
+function _filteredPPEInspections() {
+    return _ppeInspections.filter(_ppeRecordMatchesBaseFilters);
+}
+
+function _filteredPPEViolations() {
+    return _ppeViolations.filter(v => {
+        const recYear = parseInt(String(v.ViolationDate || v.CreatedAt || '').substring(0, 4), 10);
+        if (recYear && recYear !== _filterYear) return false;
+        if (_ppeFilterMonth && _monthFromDate(v.ViolationDate || v.CreatedAt) !== _ppeFilterMonth) return false;
+        if (_filterPPEDept && String(v.Department || '').trim() !== _filterPPEDept) return false;
+        if (_ppeSearch) {
+            const q = _ppeSearch.toLowerCase();
+            return [v.EmployeeName, v.EmployeeID, v.Department, v.InspectorName, v.Note]
+                .some(x => String(x || '').toLowerCase().includes(q));
+        }
+        return true;
+    });
+}
+
+function _ppeItemTotals(records) {
+    const map = {};
+    const ensure = (id, name) => {
+        const key = id || name || 'unknown';
+        if (!map[key]) map[key] = { id:key, name:name || key, total:0, ok:0, fail:0 };
+        return map[key];
+    };
+    _ppeItems.forEach(i => ensure(i.ItemID, i.ItemName));
+    records.forEach(r => {
+        if (Array.isArray(r.details) && r.details.length) {
+            r.details.forEach(d => {
+                const status = String(d.Status || '').toLowerCase();
+                if (status === 'na' || !status) return;
+                const item = ensure(d.ItemID, d.ItemName);
+                item.total++;
+                if (status === 'compliant') item.ok++;
+                if (status === 'non-compliant') item.fail++;
+            });
+        } else {
+            PPE_ITEMS.forEach(item => {
+                const status = String(r[item.key] || '').toLowerCase();
+                if (status === 'na' || !status) return;
+                const row = ensure(item.key, item.label);
+                row.total++;
+                if (status === 'compliant') row.ok++;
+                if (status === 'non-compliant') row.fail++;
+            });
+        }
+    });
+    return Object.values(map).map(x => ({
+        ...x,
+        pct: x.total ? Math.round(x.ok / x.total * 100) : null,
+    }));
+}
+
+function _ppeRepeatEmployees(violations) {
+    const map = {};
+    violations.forEach(v => {
+        const key = v.EmployeeID || v.EmployeeName || 'unknown';
+        if (!map[key]) map[key] = { id:v.EmployeeID, name:v.EmployeeName, dept:v.Department, count:0, level:v.WarningLevel };
+        map[key].count++;
+        map[key].level = v.WarningLevel;
+    });
+    return Object.values(map).sort((a,b) => b.count - a.count);
+}
+
+function _ppeFilterBar(count) {
+    const months = Array.from({ length: 12 }, (_, i) => i + 1);
+    const deptVals = [...new Set([
+        ..._departments,
+        ..._ppeInspections.map(r => r.Department).filter(Boolean),
+        ..._ppeViolations.map(v => v.Department).filter(Boolean),
+    ].map(v => String(v).trim()).filter(Boolean))].sort();
+    const wtOptions = _ppeWorkTypes.map(w => `<option value="${escHtml(w.WorkTypeID)}" ${_ppeFilterWT===w.WorkTypeID?'selected':''}>${escHtml(w.Name)}</option>`).join('');
+    return `
+    <div class="ds-filter-bar flex flex-wrap items-center gap-3">
+        <div class="w-full flex items-center justify-between gap-3 mb-1">
+            <div>
+                <p class="text-xs font-bold uppercase text-slate-500">ตัวกรอง / Filters</p>
+                <p class="text-[11px] text-slate-400">กรองข้อมูลการตรวจ PPE ตามช่วงเวลา แผนก ประเภทงาน และผลตรวจ</p>
+            </div>
+            <span class="text-xs font-semibold text-slate-400">${count} รายการ / records</span>
+        </div>
+        <label class="flex-1 min-w-56">
+            <span class="block text-[11px] font-semibold text-slate-500 mb-1">ค้นหา / Search</span>
+            <input type="text" value="${escHtml(_ppeSearch)}" oninput="window._scSetPPESearch(this.value)"
+                placeholder="รหัส/ชื่อพนักงาน แผนก หรือผู้ตรวจ..."
+                class="form-input text-sm py-1.5 px-3 w-full">
+        </label>
+        <label class="min-w-36">
+            <span class="block text-[11px] font-semibold text-slate-500 mb-1">เดือน / Month</span>
+            <select onchange="window._scSetPPEMonth(this.value)" class="form-input text-sm py-1.5 px-3 w-full">
+            <option value="0">ทุกเดือน / All</option>
+            ${months.map(m => `<option value="${m}" ${_ppeFilterMonth===m?'selected':''}>${String(m).padStart(2,'0')}</option>`).join('')}
+            </select>
+        </label>
+        <label class="min-w-44">
+            <span class="block text-[11px] font-semibold text-slate-500 mb-1">แผนก / Department</span>
+            <select onchange="window._scSetPPEDept(this.value)" class="form-input text-sm py-1.5 px-3 w-full">
+            <option value="">ทุกแผนก / All</option>
+            ${deptVals.map(d => `<option value="${escHtml(d)}" ${_filterPPEDept===d?'selected':''}>${escHtml(d)}</option>`).join('')}
+            </select>
+        </label>
+        <label class="min-w-44">
+            <span class="block text-[11px] font-semibold text-slate-500 mb-1">ประเภทงาน / Work Type</span>
+            <select onchange="window._scSetPPEWT(this.value)" class="form-input text-sm py-1.5 px-3 w-full">
+            <option value="">ทุกประเภทงาน / All</option>
+            ${wtOptions}
+            </select>
+        </label>
+        <label class="min-w-36">
+            <span class="block text-[11px] font-semibold text-slate-500 mb-1">ผลตรวจ / Result</span>
+            <select onchange="window._scSetPPEStatus(this.value)" class="form-input text-sm py-1.5 px-3 w-full">
+            <option value="">ทุกผลตรวจ / All</option>
+            <option value="pass" ${_ppeFilterStatus==='pass'?'selected':''}>ผ่าน / Pass</option>
+            <option value="fail" ${_ppeFilterStatus==='fail'?'selected':''}>ไม่ผ่าน / Fail</option>
+            </select>
+        </label>
+        <button type="button" onclick="window._scClearPPEFilters()" class="btn btn-secondary px-3 py-2 text-xs self-end">ล้างตัวกรอง / Clear</button>
+    </div>`;
+}
+
+function assessmentLocationGroupLabel(group) {
+    return {
+        walkway: 'Walkway / Crossing',
+        waste: 'Waste Sorting',
+        other: 'Other',
+    }[group] || group || '-';
+}
+
+function buildAssessmentLocationsAdmin() {
+    const rows = _assessmentLocations.map(loc => {
+        const active = Number(loc.IsActive) !== 0;
+        return `
+        <tr class="border-b border-slate-100 hover:bg-slate-50">
+            <td class="px-4 py-2.5 text-sm font-semibold text-slate-700">${escHtml(loc.LocationName || '')}</td>
+            <td class="px-3 py-2.5 text-xs text-slate-500">${escHtml(assessmentLocationGroupLabel(loc.LocationGroup))}</td>
+            <td class="px-3 py-2.5 text-xs text-slate-500">${escHtml(loc.AppliesTo || '')}</td>
+            <td class="px-3 py-2.5 text-center text-xs text-slate-500">${loc.SortOrder ?? 99}</td>
+            <td class="px-3 py-2.5 text-center">${active
+                ? '<span class="inline-flex px-2 py-0.5 rounded-full text-xs font-bold bg-emerald-100 text-emerald-700">Active</span>'
+                : '<span class="inline-flex px-2 py-0.5 rounded-full text-xs font-bold bg-slate-100 text-slate-500">Inactive</span>'}</td>
+            <td class="px-4 py-2.5 text-right whitespace-nowrap">
+                <button onclick="window._scEditAssessmentLocation('${escHtml(loc.LocationID)}')" class="p-1.5 rounded text-slate-400 hover:text-emerald-600 hover:bg-slate-100" title="แก้ไขจุดตรวจ">
+                    <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"/></svg>
+                </button>
+                ${active ? `<button onclick="window._scDeleteAssessmentLocation('${escHtml(loc.LocationID)}')" class="p-1.5 rounded text-slate-400 hover:text-red-500 hover:bg-red-50" title="ปิดใช้งานจุดตรวจ">
+                    <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M18.364 18.364A9 9 0 115.636 5.636m12.728 12.728L5.636 5.636"/></svg>
+                </button>` : ''}
+            </td>
+        </tr>`;
+    }).join('');
+
+    return `
+    <details class="ds-section overflow-hidden" open>
+        <summary class="px-5 py-4 cursor-pointer border-b border-slate-100 flex items-center justify-between gap-3">
+            <div>
+                <h3 class="font-semibold text-slate-700">ตั้งค่าจุดตรวจ Safety Culture</h3>
+                <p class="text-xs text-slate-400 mt-0.5">Master เฉพาะโมดูลนี้ ใช้เตรียม dropdown รายจุดใน Phase ถัดไป</p>
+            </div>
+            <button type="button" onclick="event.preventDefault(); window._scAddAssessmentLocation()" class="btn btn-secondary h-9 px-3 text-xs">+ เพิ่มจุดตรวจ</button>
+        </summary>
+        <div class="overflow-x-auto">
+            <table class="ds-table text-sm">
+                <thead class="bg-slate-50">
+                    <tr>
+                        <th class="px-4 py-3 text-left text-xs font-semibold text-slate-500 uppercase">จุดตรวจ</th>
+                        <th class="px-3 py-3 text-left text-xs font-semibold text-slate-500 uppercase">กลุ่ม</th>
+                        <th class="px-3 py-3 text-left text-xs font-semibold text-slate-500 uppercase">ใช้กับหัวข้อ</th>
+                        <th class="px-3 py-3 text-center text-xs font-semibold text-slate-500 uppercase">ลำดับ</th>
+                        <th class="px-3 py-3 text-center text-xs font-semibold text-slate-500 uppercase">สถานะ</th>
+                        <th class="px-4 py-3"></th>
+                    </tr>
+                </thead>
+                <tbody>${rows || '<tr><td colspan="6" class="px-4 py-8 text-center text-slate-400">ยังไม่มีจุดตรวจ กด “เพิ่มจุดตรวจ” เพื่อเริ่มตั้งค่า</td></tr>'}</tbody>
+            </table>
+        </div>
+    </details>`;
+}
+
+function viewAssessmentDetail(id) {
+    const a = _assessments.find(x => x.AssessmentID === id);
+    if (!a) return;
+    const points = Array.isArray(a.points) ? a.points : [];
+    const topicLookup = Object.fromEntries(ASSESSMENT_TOPIC_META.map(t => [t.key, t]));
+    const scoreKeys = ['T1','T2','T3','T4','T5','T7'];
+    const vals = scoreKeys.map(k => a[`${k}_Score`]).filter(v => v != null).map(v => parseFloat(v));
+    const avg = vals.length ? vals.reduce((s, v) => s + v, 0) / vals.length : null;
+    const mat = avg != null ? getMaturity(avg) : null;
+    const locSummary = assessmentLocationSummary(a);
+    const scoreCards = scoreKeys.map(k => {
+        const score = a[`${k}_Score`] != null ? parseFloat(a[`${k}_Score`]) : null;
+        const meta = topicLookup[k];
+        return `<div class="rounded-lg border border-slate-100 bg-white px-3 py-2">
+            <p class="text-[11px] font-bold text-slate-400">${k}</p>
+            <p class="text-sm font-semibold text-slate-700 truncate">${escHtml(meta?.label || k)}</p>
+            <p class="mt-1 text-lg font-black ${scoreColor(score)}">${score != null ? Math.round(score) + '%' : '-'}</p>
+        </div>`;
+    }).join('');
+
+    const grouped = {};
+    points.forEach(pt => {
+        const name = (pt.LocationName || '').trim() || `จุดที่ ${pt.PointNo || '-'}`;
+        const groupKey = `${pt.LocationID || ''}::${name}::${pt.PointNo || ''}`;
+        if (!grouped[groupKey]) grouped[groupKey] = { name, pointNo: pt.PointNo, rows: [] };
+        grouped[groupKey].rows.push(pt);
+    });
+    const groupRows = Object.values(grouped).sort((a, b) => (parseInt(a.pointNo) || 99) - (parseInt(b.pointNo) || 99));
+
+    const detailHtml = groupRows.length ? groupRows.map(group => {
+        const rows = group.rows.sort((x, y) => ASSESSMENT_TOPIC_META.findIndex(t => t.key === x.TopicKey) - ASSESSMENT_TOPIC_META.findIndex(t => t.key === y.TopicKey)).map(pt => {
+            const meta = topicLookup[pt.TopicKey] || { key: pt.TopicKey, label: pt.TopicKey };
+            const total = parseInt(pt.TotalPeople, 10) || 0;
+            const comply = parseInt(pt.ComplyPeople, 10) || 0;
+            const pct = assessmentPointPct(pt);
+            return `<tr class="border-b border-slate-50">
+                <td class="px-3 py-2 text-xs font-bold text-slate-500">${escHtml(meta.key)}</td>
+                <td class="px-3 py-2 text-sm text-slate-700">${escHtml(meta.label)}</td>
+                <td class="px-3 py-2 text-right text-sm text-slate-600">${total}</td>
+                <td class="px-3 py-2 text-right text-sm text-slate-600">${comply}</td>
+                <td class="px-3 py-2 text-right text-sm ${scoreColor(pct)}">${pct != null ? Math.round(pct) + '%' : '-'}</td>
+            </tr>`;
+        }).join('');
+        return `<div class="rounded-xl border border-slate-100 overflow-hidden bg-white">
+            <div class="px-4 py-3 bg-slate-50 border-b border-slate-100 flex items-center justify-between gap-3">
+                <div>
+                    <p class="text-sm font-bold text-slate-800">${escHtml(group.name)}</p>
+                    <p class="text-xs text-slate-400">จุดที่ ${escHtml(group.pointNo || '-')}</p>
+                </div>
+                <span class="text-xs font-semibold text-slate-400">${group.rows.length} หัวข้อ</span>
+            </div>
+            <div class="overflow-x-auto">
+                <table class="ds-table text-sm">
+                    <thead class="bg-white">
+                        <tr>
+                            <th class="px-3 py-2 text-left text-xs font-semibold text-slate-400">รหัส</th>
+                            <th class="px-3 py-2 text-left text-xs font-semibold text-slate-400">หัวข้อ</th>
+                            <th class="px-3 py-2 text-right text-xs font-semibold text-slate-400">จำนวน</th>
+                            <th class="px-3 py-2 text-right text-xs font-semibold text-slate-400">ปฏิบัติตาม</th>
+                            <th class="px-3 py-2 text-right text-xs font-semibold text-slate-400">%</th>
+                        </tr>
+                    </thead>
+                    <tbody>${rows}</tbody>
+                </table>
+            </div>
+        </div>`;
+    }).join('') : `
+        <div class="rounded-xl border border-dashed border-slate-200 bg-slate-50 px-4 py-8 text-center">
+            <p class="text-sm font-semibold text-slate-500">ยังไม่มีข้อมูลรายจุด</p>
+            <p class="text-xs text-slate-400 mt-1">บันทึกนี้อาจเป็นข้อมูลเก่าที่เก็บเฉพาะคะแนนรวม T1-T5/T7</p>
+        </div>`;
+
+    openModal('รายละเอียดผลการประเมิน', `
+    <div class="space-y-4">
+        <div class="rounded-2xl bg-gradient-to-br from-emerald-700 to-teal-600 text-white p-5">
+            <div class="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3">
+                <div>
+                    <p class="text-xs font-bold uppercase text-white/70">Safety Culture Assessment</p>
+                    <h3 class="text-xl font-black mt-1">${escHtml(a.AssessmentDate ? fmtDate(a.AssessmentDate) : String(a.AssessmentYear || '-'))}${a.WeekNo ? ` · W${a.WeekNo}` : ''}</h3>
+                    <p class="text-sm text-white/75 mt-1">${escHtml(locSummary.label)} · ${locSummary.locationCount || locSummary.pointCount || 0} จุดตรวจ</p>
+                </div>
+                <div class="text-right">
+                    <p class="text-xs text-white/70">Average</p>
+                    <p class="text-3xl font-black">${avg != null ? Math.round(avg) + '%' : '-'}</p>
+                    <p class="text-xs font-semibold text-white/80">${mat?.label || ''}</p>
+                </div>
+            </div>
+        </div>
+        <div class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">${scoreCards}</div>
+        <div class="space-y-3">${detailHtml}</div>
+        ${a.Notes ? `<div class="rounded-xl border border-amber-100 bg-amber-50 px-4 py-3">
+            <p class="text-xs font-bold uppercase text-amber-700">Follow-up Note</p>
+            <p class="text-sm text-slate-700 mt-1 whitespace-pre-line">${escHtml(a.Notes)}</p>
+        </div>` : ''}
+        <div class="flex justify-end gap-2 pt-3 border-t border-slate-100">
+            ${_isAdmin ? `<button type="button" onclick="window.closeModal();setTimeout(()=>window._scEditAssessment('${escHtml(a.AssessmentID)}'),80)" class="btn btn-secondary px-4">แก้ไข</button>` : ''}
+            <button type="button" onclick="window.closeModal()" class="btn btn-primary px-4">ปิด</button>
+        </div>
+    </div>`, 'max-w-5xl');
+}
+
+function openAssessmentLocationForm(id) {
+    const loc = id ? _assessmentLocations.find(x => x.LocationID === id) : null;
+    openModal(loc ? 'แก้ไขจุดตรวจ Safety Culture' : 'เพิ่มจุดตรวจ Safety Culture', `
+    <form id="sc-loc-form" class="space-y-4">
+        ${loc ? `<input type="hidden" name="LocationID" value="${escHtml(loc.LocationID)}">` : ''}
+        <div>
+            <label class="block text-sm font-semibold text-slate-700 mb-1.5">ชื่อจุดตรวจ</label>
+            <input name="LocationName" required maxlength="200" value="${escHtml(loc?.LocationName || '')}" class="form-input w-full" placeholder="เช่น ทางข้ามด้านหน้าบริษัท บริเวณป้อม รปภ.">
+        </div>
+        <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
+            <div>
+                <label class="block text-sm font-semibold text-slate-700 mb-1.5">กลุ่มจุดตรวจ</label>
+                <select name="LocationGroup" id="sc-loc-group" class="form-input w-full">
+                    ${[
+                        ['walkway', 'Walkway / Crossing'],
+                        ['waste', 'Waste Sorting'],
+                        ['other', 'Other'],
+                    ].map(([v, label]) => `<option value="${v}" ${String(loc?.LocationGroup || 'walkway') === v ? 'selected' : ''}>${label}</option>`).join('')}
+                </select>
+            </div>
+            <div>
+                <label class="block text-sm font-semibold text-slate-700 mb-1.5">ใช้กับหัวข้อ</label>
+                <select name="AppliesTo" id="sc-loc-applies" class="form-input w-full">
+                    ${[
+                        ['T1-T5', 'T1-T5'],
+                        ['T7', 'T7'],
+                        ['all', 'ทั้งหมด'],
+                    ].map(([v, label]) => `<option value="${v}" ${String(loc?.AppliesTo || 'T1-T5') === v ? 'selected' : ''}>${label}</option>`).join('')}
+                </select>
+            </div>
+            <div>
+                <label class="block text-sm font-semibold text-slate-700 mb-1.5">ลำดับ</label>
+                <input name="SortOrder" type="number" min="0" value="${escHtml(loc?.SortOrder ?? 99)}" class="form-input w-full">
+            </div>
+        </div>
+        <label class="inline-flex items-center gap-2 text-sm text-slate-600">
+            <input name="IsActive" type="checkbox" value="1" ${Number(loc?.IsActive ?? 1) !== 0 ? 'checked' : ''} class="rounded border-slate-300 text-emerald-600">
+            เปิดใช้งานใน dropdown
+        </label>
+        <div id="sc-loc-err" class="text-sm text-red-500 hidden"></div>
+        <div class="flex justify-end gap-3 pt-3 border-t">
+            <button type="button" onclick="window.closeModal()" class="btn btn-secondary px-5">ยกเลิก</button>
+            <button type="submit" id="sc-loc-submit" class="btn btn-primary px-5">บันทึก</button>
+        </div>
+    </form>`, 'max-w-xl');
+
+    setTimeout(() => {
+        const groupEl = document.getElementById('sc-loc-group');
+        const appliesEl = document.getElementById('sc-loc-applies');
+        groupEl?.addEventListener('change', () => {
+            if (!appliesEl) return;
+            if (groupEl.value === 'waste') appliesEl.value = 'T7';
+            if (groupEl.value === 'walkway') appliesEl.value = 'T1-T5';
+        });
+        document.getElementById('sc-loc-form')?.addEventListener('submit', guardSubmitHandler(async e => {
+            e.preventDefault();
+            const fd = new FormData(e.target);
+            const data = Object.fromEntries(fd.entries());
+            data.IsActive = fd.has('IsActive') ? 1 : 0;
+            data.SortOrder = parseInt(data.SortOrder, 10) || 99;
+            const errEl = document.getElementById('sc-loc-err');
+            const submitBtn = document.getElementById('sc-loc-submit');
+            errEl?.classList.add('hidden');
+            if (submitBtn?.disabled) return;
+            if (submitBtn) { submitBtn.disabled = true; submitBtn.textContent = 'กำลังบันทึก...'; }
+            try {
+                if (data.LocationID) await API.put(`/safety-culture/assessment-locations/${data.LocationID}`, data);
+                else await API.post('/safety-culture/assessment-locations', data);
+                closeModal();
+                showToast('บันทึกจุดตรวจสำเร็จ', 'success');
+                await _loadHeroStats();
+            } catch (err) {
+                errEl.textContent = escHtml(err.message || 'ไม่สามารถบันทึกจุดตรวจได้');
+                errEl.classList.remove('hidden');
+            } finally {
+                if (submitBtn) { submitBtn.disabled = false; submitBtn.textContent = 'บันทึก'; }
+            }
+        }));
+    }, 50);
+}
+
+async function deleteAssessmentLocation(id) {
+    const loc = _assessmentLocations.find(x => x.LocationID === id);
+    if (!confirm(`ต้องการปิดใช้งานจุดตรวจ "${loc?.LocationName || id}"?`)) return;
+    try {
+        await API.delete(`/safety-culture/assessment-locations/${id}`);
+        showToast('ปิดใช้งานจุดตรวจสำเร็จ', 'success');
+        await _loadHeroStats();
+    } catch (err) {
+        showToast('ปิดใช้งานไม่สำเร็จ: ' + escHtml(err.message || ''), 'error');
+    }
+}
+
+function _ppeComplianceInsight(records, violations) {
+    const total = records.length;
+    const pass = records.filter(_isPPEPass).length;
+    const passRate = total ? Math.round(pass / total * 100) : null;
+    const itemRisk = _ppeItemTotals(records).filter(x => x.total > 0).sort((a,b) => b.fail - a.fail || (a.pct ?? 101) - (b.pct ?? 101))[0];
+    const deptMap = {};
+    records.forEach(r => {
+        const d = (r.Department || 'ไม่ระบุ').trim();
+        if (!deptMap[d]) deptMap[d] = { dept:d, total:0, pass:0 };
+        deptMap[d].total++;
+        if (_isPPEPass(r)) deptMap[d].pass++;
+    });
+    const weakestDept = Object.values(deptMap)
+        .map(d => ({ ...d, pct: d.total ? Math.round(d.pass / d.total * 100) : null }))
+        .filter(d => d.total > 0)
+        .sort((a,b) => (a.pct ?? 101) - (b.pct ?? 101) || b.total - a.total)[0];
+    const repeat = _ppeRepeatEmployees(violations).find(e => e.count >= 2);
+    const tone = passRate == null ? 'border-slate-200 bg-white' : passRate >= 90 ? 'border-emerald-200 bg-emerald-50' : passRate >= 70 ? 'border-amber-200 bg-amber-50' : 'border-red-200 bg-red-50';
+    return `
+    <div class="ds-section border ${tone} p-5" data-sc-card-image="safety-culture-ppe-compliance-insight">
+        <div class="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
+            <div>
+                <p class="text-xs font-bold uppercase text-slate-500">PPE Compliance Insight</p>
+                <h3 class="text-lg font-bold text-slate-800 mt-1">${passRate == null ? 'ยังไม่มีข้อมูลตามตัวกรอง' : `Pass Rate ${passRate}%`}</h3>
+                <p class="text-sm text-slate-500 mt-1">${total} inspections · ${total - pass} failed · ${violations.length} violations</p>
+            </div>
+            <div class="grid grid-cols-1 sm:grid-cols-3 gap-3 flex-1">
+                <div class="rounded-lg bg-white/80 border border-white p-3">
+                    <p class="text-[11px] font-bold uppercase text-slate-400">Weakest item</p>
+                    <p class="text-sm font-semibold text-slate-700 mt-1">${itemRisk ? escHtml(itemRisk.name) : '—'}</p>
+                    <p class="text-xs text-slate-400">${itemRisk ? `${itemRisk.fail} fail / ${itemRisk.total} checks` : 'No checklist data'}</p>
+                </div>
+                <div class="rounded-lg bg-white/80 border border-white p-3">
+                    <p class="text-[11px] font-bold uppercase text-slate-400">Focus department</p>
+                    <p class="text-sm font-semibold text-slate-700 mt-1">${weakestDept ? escHtml(weakestDept.dept) : '—'}</p>
+                    <p class="text-xs text-slate-400">${weakestDept ? `${weakestDept.pct}% from ${weakestDept.total} checks` : 'No department data'}</p>
+                </div>
+                <div class="rounded-lg bg-white/80 border border-white p-3">
+                    <p class="text-[11px] font-bold uppercase text-slate-400">Repeat focus</p>
+                    <p class="text-sm font-semibold text-slate-700 mt-1">${repeat ? escHtml(repeat.name || repeat.id || '—') : '—'}</p>
+                    <p class="text-xs text-slate-400">${repeat ? `${repeat.count} violations` : 'No repeat violations'}</p>
+                </div>
+            </div>
+        </div>
+    </div>`;
+}
+
+function _ppeItemHeatmap(records) {
+    const items = _ppeItemTotals(records).filter(x => x.total > 0).sort((a,b) => (a.pct ?? 101) - (b.pct ?? 101) || b.total - a.total).slice(0, 8);
+    if (!items.length) return `
+    <div class="ds-section p-5" data-sc-card-image="safety-culture-ppe-item-heatmap">
+        <h3 class="font-semibold text-slate-700">PPE Item Heatmap</h3>
+        <div class="text-sm text-slate-400 py-8 text-center">ยังไม่มีรายละเอียดรายการ PPE สำหรับช่วงนี้</div>
+    </div>`;
+    return `
+    <div class="ds-section overflow-hidden" data-sc-card-image="safety-culture-ppe-item-heatmap">
+        <div class="px-5 py-4 border-b border-slate-100 flex items-center justify-between">
+            <h3 class="font-semibold text-slate-700">PPE Item Heatmap</h3>
+            <span class="text-xs text-slate-400">lowest compliance first</span>
+        </div>
+        <div class="p-5 space-y-3">
+            ${items.map(i => {
+                const cls = i.pct >= 90 ? 'bg-emerald-500' : i.pct >= 70 ? 'bg-amber-500' : 'bg-red-500';
+                return `<div>
+                    <div class="flex items-center justify-between gap-3 text-sm">
+                        <span class="font-medium text-slate-700 truncate">${escHtml(i.name)}</span>
+                        <span class="text-xs font-bold ${scoreColor(i.pct)}">${i.pct}%</span>
+                    </div>
+                    <div class="mt-1 bg-slate-100 rounded-full h-2"><div class="${cls} h-2 rounded-full" style="width:${Math.min(i.pct,100)}%"></div></div>
+                    <p class="text-[11px] text-slate-400 mt-0.5">${i.ok} compliant · ${i.fail} non-compliant · ${i.total} total</p>
+                </div>`;
+            }).join('')}
+        </div>
+    </div>`;
+}
+
+function _ppeRepeatFocus(violations) {
+    const repeats = _ppeRepeatEmployees(violations).filter(e => e.count >= 2).slice(0, 8);
+    return `
+    <div class="ds-section overflow-hidden" data-sc-card-image="safety-culture-ppe-repeat-focus">
+        <div class="px-5 py-4 border-b border-slate-100 flex items-center justify-between">
+            <h3 class="font-semibold text-slate-700">Repeat Violation Focus</h3>
+            <span class="text-xs text-slate-400">2+ records</span>
+        </div>
+        ${repeats.length ? `<div class="overflow-x-auto">
+            <table class="ds-table text-sm">
+                <tbody>${repeats.map(e => `<tr class="border-b border-slate-100 last:border-0">
+                    <td class="px-4 py-3 font-medium text-slate-800">${escHtml(e.name || '—')}</td>
+                    <td class="px-4 py-3 text-xs text-slate-500">${escHtml(e.dept || '—')}</td>
+                    <td class="px-4 py-3 text-center font-bold text-red-600">${e.count}</td>
+                    <td class="px-4 py-3">${_warnBadge(e.level)}</td>
+                </tr>`).join('')}</tbody>
+            </table>
+        </div>` : `<div class="p-8 text-center text-sm text-slate-400">ยังไม่พบการฝ่าฝืนซ้ำในช่วงที่เลือก</div>`}
+    </div>`;
+}
+
+function _ppeWorkTypeCoverage(records) {
+    const map = {};
+    _ppeWorkTypes.forEach(w => { map[w.WorkTypeID || w.Name] = { name:w.Name, count:0, pass:0 }; });
+    records.forEach(r => {
+        const key = r.WorkTypeID || r.WorkTypeName || 'other';
+        if (!map[key]) map[key] = { name:r.WorkTypeName || 'ไม่ระบุประเภทงาน', count:0, pass:0 };
+        map[key].count++;
+        if (_isPPEPass(r)) map[key].pass++;
+    });
+    const rows = Object.values(map).sort((a,b) => b.count - a.count || a.name.localeCompare(b.name));
+    return `
+    <div class="ds-section overflow-hidden" data-sc-card-image="safety-culture-ppe-worktype-coverage">
+        <div class="px-5 py-4 border-b border-slate-100 flex items-center justify-between">
+            <h3 class="font-semibold text-slate-700">Work Type Coverage</h3>
+            <span class="text-xs text-slate-400">${rows.length} work types</span>
+        </div>
+        <div class="divide-y divide-slate-100">
+            ${rows.length ? rows.map(r => {
+                const pct = r.count ? Math.round(r.pass / r.count * 100) : null;
+                return `<div class="px-5 py-3 flex items-center justify-between gap-3">
+                    <div class="min-w-0">
+                        <p class="text-sm font-semibold text-slate-700 truncate">${escHtml(r.name)}</p>
+                        <p class="text-xs text-slate-400">${r.count ? `${r.count} inspections · ${pct}% pass` : 'ยังไม่เคยตรวจในช่วงนี้'}</p>
+                    </div>
+                    <span class="px-2.5 py-1 rounded-full text-xs font-bold ${r.count ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-100 text-slate-400'}">${r.count}</span>
+                </div>`;
+            }).join('') : `<div class="p-8 text-center text-sm text-slate-400">ยังไม่มีเทมเพลตประเภทงาน PPE</div>`}
+        </div>
+    </div>`;
+}
+
+function _isImageEvidence(url) {
+    return /\.(png|jpe?g|gif|webp|bmp)$/i.test(String(url || '').split('?')[0]);
+}
+
+function _ppeEvidenceButton(r) {
+    if (!r?.ImageUrl) return '<span class="text-xs text-slate-300">—</span>';
+    return `<button type="button" onclick="window._scPreviewPPEEvidence('${escHtml(r.InspectionID)}')" class="inline-flex items-center gap-1 text-xs font-semibold text-emerald-700 hover:underline">
+        <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 16.5V8.25A2.25 2.25 0 015.25 6h13.5A2.25 2.25 0 0121 8.25v8.25m-18 0A2.25 2.25 0 005.25 18.75h13.5A2.25 2.25 0 0021 16.5m-18 0l4.72-4.72a1.5 1.5 0 012.12 0l2.66 2.66 1.22-1.22a1.5 1.5 0 012.12 0L21 16.5"/></svg>
+        Evidence
+    </button>`;
+}
+
 function buildPPEHtml() {
+    if (!_isAdmin && (_ppeSub === 'worktypes' || _ppeSub === 'violations')) _ppeSub = 'dashboard';
     const subTabs = [
         { id:'dashboard', label:'ภาพรวม' },
         { id:'history',   label:'ประวัติการตรวจ' },
@@ -876,7 +2143,7 @@ function buildPPEHtml() {
     <div class="flex gap-1 flex-wrap">
         ${subTabs.map(t => `
         <button onclick="window._scSetPPESub('${t.id}')"
-            class="px-4 py-2 text-xs font-semibold rounded-lg transition-colors ${_ppeSub===t.id?'bg-emerald-600 text-white shadow-sm':'bg-white/60 text-slate-600 hover:bg-white'}">${t.label}</button>`).join('')}
+            class="px-4 py-2 text-xs font-semibold rounded-lg transition-colors ${(!_isAdmin && t.id==='violations')?'hidden':''} ${_ppeSub===t.id?'bg-emerald-600 text-white shadow-sm':'bg-white/60 text-slate-600 hover:bg-white'}">${t.label}</button>`).join('')}
     </div>`;
 
     let content = '';
@@ -901,34 +2168,35 @@ function buildPPEHtml() {
 
 // ── PPE Dashboard sub-tab ──────────────────────────────────────────────────
 function buildPPEDashboard() {
-    const all = _ppeInspections;
+    const all = _filteredPPEInspections();
+    const violations = _filteredPPEViolations();
     const total      = all.length;
-    const passCount  = all.filter(r => r.IsPass === 1 || r.IsPass === '1').length;
+    const passCount  = all.filter(_isPPEPass).length;
     const failCount  = total - passCount;
     const passRate   = total > 0 ? Math.round(passCount / total * 100) : null;
-    const violCount  = _ppeViolations.length;
+    const violCount  = violations.length;
 
     const kpiCards = `
     <div class="grid grid-cols-2 lg:grid-cols-4 gap-4">
-        <div class="ds-metric-card p-4 flex items-center gap-3">
+        <div class="ds-metric-card p-4 flex items-center gap-3" data-sc-card-image="safety-culture-ppe-kpi-total">
             <div class="w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0 bg-emerald-50">
                 <svg class="w-5 h-5 text-emerald-500" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
             </div>
             <div><p class="text-2xl font-bold text-slate-800">${total}</p><p class="text-xs text-slate-500">ครั้งตรวจทั้งหมด</p></div>
         </div>
-        <div class="ds-metric-card p-4 flex items-center gap-3">
+        <div class="ds-metric-card p-4 flex items-center gap-3" data-sc-card-image="safety-culture-ppe-kpi-pass">
             <div class="w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0 bg-emerald-50">
                 <svg class="w-5 h-5 text-emerald-500" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg>
             </div>
             <div><p class="text-2xl font-bold text-emerald-600">${passCount}</p><p class="text-xs text-slate-500">ผ่าน (100% Compliant)</p></div>
         </div>
-        <div class="ds-metric-card p-4 flex items-center gap-3">
+        <div class="ds-metric-card p-4 flex items-center gap-3" data-sc-card-image="safety-culture-ppe-kpi-fail">
             <div class="w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0 bg-red-50">
                 <svg class="w-5 h-5 text-red-500" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
             </div>
             <div><p class="text-2xl font-bold text-red-600">${failCount}</p><p class="text-xs text-slate-500">ไม่ผ่าน (มีรายการบกพร่อง)</p></div>
         </div>
-        <div class="ds-metric-card p-4 flex items-center gap-3">
+        <div class="ds-metric-card p-4 flex items-center gap-3" data-sc-card-image="safety-culture-ppe-kpi-violations">
             <div class="w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0 ${violCount>0?'bg-orange-50':'bg-slate-50'}">
                 <svg class="w-5 h-5 ${violCount>0?'text-orange-500':'text-slate-400'}" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/></svg>
             </div>
@@ -937,7 +2205,7 @@ function buildPPEDashboard() {
     </div>`;
 
     const passRateBar = passRate !== null ? `
-    <div class="ds-section p-5 border-l-4 ${passRate>=90?'border-emerald-400':passRate>=70?'border-amber-400':'border-red-400'}">
+    <div class="ds-section p-5 border-l-4 ${passRate>=90?'border-emerald-400':passRate>=70?'border-amber-400':'border-red-400'}" data-sc-card-image="safety-culture-ppe-pass-rate">
         <div class="flex items-center justify-between mb-2">
             <div>
                 <p class="text-sm text-slate-500 font-medium">Pass Rate (Strict 100%) — ปี ${_filterYear}</p>
@@ -976,7 +2244,7 @@ function buildPPEDashboard() {
     }).join('');
 
     const empViolMap2 = {};
-    _ppeViolations.forEach(v => {
+    violations.forEach(v => {
         const key = v.EmployeeID || v.EmployeeName;
         if (!empViolMap2[key]) empViolMap2[key] = { name:v.EmployeeName, dept:v.Department, count:0, level:v.WarningLevel };
         empViolMap2[key].count++;
@@ -984,7 +2252,7 @@ function buildPPEDashboard() {
     });
     const highRisk2 = Object.values(empViolMap2).filter(e => e.count >= 2).sort((a,b) => b.count-a.count).slice(0,10);
     const highRiskTable2 = highRisk2.length ? `
-    <div class="ds-section overflow-hidden">
+    <div class="ds-section overflow-hidden" data-sc-card-image="safety-culture-ppe-repeat-employees">
         <div class="px-5 py-4 border-b border-slate-100 flex items-center gap-3">
             <span class="w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0 bg-red-100">
                 <svg class="w-4 h-4 text-red-500" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/></svg>
@@ -1011,10 +2279,12 @@ function buildPPEDashboard() {
 
     return `
     <div class="space-y-5">
+        ${_ppeFilterBar(all.length)}
+        ${_ppeComplianceInsight(all, violations)}
         ${kpiCards}
         ${passRateBar}
         ${depts2.length ? `
-        <div class="ds-section overflow-hidden">
+        <div class="ds-section overflow-hidden" data-sc-card-image="safety-culture-ppe-department-pass-rate">
             <div class="px-5 py-4 border-b border-slate-100 flex items-center justify-between">
                 <h3 class="font-semibold text-slate-700">Pass Rate รายแผนก — ปี ${_filterYear}</h3>
                 <span class="text-xs text-slate-400">${depts2.length} แผนก</span>
@@ -1030,7 +2300,11 @@ function buildPPEDashboard() {
                 </table>
             </div>
         </div>` : `<div class="ds-empty-state p-8 text-center text-slate-400 text-sm">ยังไม่มีข้อมูล PPE Inspection สำหรับปี ${_filterYear}</div>`}
-        ${highRiskTable2}
+        <div class="grid grid-cols-1 lg:grid-cols-2 gap-5">
+            ${_ppeItemHeatmap(all)}
+            ${_ppeWorkTypeCoverage(all)}
+        </div>
+        ${_ppeRepeatFocus(violations)}
     </div>`;
 }
 
@@ -1067,6 +2341,9 @@ function buildPPEHistory() {
         </select>
     </div>`;
 
+    filtered = _filteredPPEInspections();
+    const filterBar2 = _ppeFilterBar(filtered.length);
+
     const rows3 = filtered.map(r => {
         const isPass  = r.IsPass===1||r.IsPass==='1';
         const rowBg   = isPass ? '' : ' style="background:rgba(254,242,242,0.45)"';
@@ -1082,6 +2359,7 @@ function buildPPEHistory() {
             <td class="px-4 py-3 text-sm text-slate-500">${escHtml(r.InspectorName||'—')}</td>
             <td class="px-4 py-3 text-xs text-slate-500">${r.CompliantItems||0}/${r.TotalItems||0} (${pct3}%)</td>
             <td class="px-4 py-3">${passBadge}</td>
+            <td class="px-4 py-3">${_ppeEvidenceButton(r)}</td>
             <td class="px-4 py-3">
                 <div class="flex items-center gap-1">
                     <button onclick="window._scViewPPE('${r.InspectionID}')" class="p-1.5 rounded text-slate-400 hover:text-blue-500 hover:bg-slate-100 transition-colors" title="รายละเอียด"><svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"/></svg></button>
@@ -1093,8 +2371,8 @@ function buildPPEHistory() {
 
     return `
     <div class="space-y-4">
-        ${filterBar}
-        <div class="ds-section overflow-hidden">
+        ${filterBar2}
+        <div class="ds-section overflow-hidden" data-sc-card-image="safety-culture-ppe-history">
             <div class="px-5 py-4 border-b border-slate-100 flex items-center justify-between">
                 <h3 class="font-semibold text-slate-700">ประวัติการตรวจ PPE ปี ${_filterYear}</h3>
                 <span class="text-xs text-slate-400">${filtered.length} รายการ</span>
@@ -1109,9 +2387,10 @@ function buildPPEHistory() {
                         <th class="px-4 py-3 text-left text-xs font-semibold text-slate-500 uppercase">ผู้ตรวจ</th>
                         <th class="px-4 py-3 text-left text-xs font-semibold text-slate-500 uppercase">รายการ</th>
                         <th class="px-4 py-3 text-left text-xs font-semibold text-slate-500 uppercase">ผล</th>
+                        <th class="px-4 py-3 text-left text-xs font-semibold text-slate-500 uppercase">Evidence</th>
                         <th class="px-4 py-3"></th>
                     </tr></thead>
-                    <tbody>${rows3||`<tr><td colspan="8" class="text-center py-12 text-slate-400">ไม่พบข้อมูล</td></tr>`}</tbody>
+                    <tbody>${rows3||`<tr><td colspan="9" class="text-center py-12 text-slate-400">ไม่พบข้อมูลตามตัวกรอง — ลองเปลี่ยนปี แผนก ประเภทงาน หรือสถานะ</td></tr>`}</tbody>
                 </table>
             </div>
         </div>
@@ -1137,7 +2416,7 @@ function buildPPEWorkTypes() {
 
     return `
     <div class="space-y-4">
-        <div class="ds-section overflow-hidden">
+        <div class="ds-section overflow-hidden" data-sc-card-image="safety-culture-ppe-template-list">
             <div class="px-5 py-4 border-b border-slate-100 flex items-center justify-between">
                 <div>
                     <h3 class="font-semibold text-slate-700">เทมเพลต PPE ตามประเภทงาน</h3>
@@ -1148,9 +2427,9 @@ function buildPPEWorkTypes() {
                     เพิ่มประเภทงาน
                 </button>
             </div>
-            <div>${wtRows||'<div class="px-5 py-8 text-center text-sm text-slate-400">ยังไม่มีเทมเพลต — กดเพิ่มประเภทงาน</div>'}</div>
+            <div>${wtRows||'<div class="px-5 py-8 text-center text-sm text-slate-400">ยังไม่มีเทมเพลต PPE — กดเพิ่มประเภทงาน แล้วเลือก PPE ที่ต้องใช้ก่อนเริ่มตรวจ</div>'}</div>
         </div>
-        <div class="ds-section overflow-hidden">
+        <div class="ds-section overflow-hidden" data-sc-card-image="safety-culture-ppe-item-master">
             <div class="px-5 py-4 border-b border-slate-100 flex items-center justify-between">
                 <div>
                     <h3 class="font-semibold text-slate-700">จัดการรายการ PPE ทั้งหมด</h3>
@@ -1165,12 +2444,18 @@ function buildPPEWorkTypes() {
                 ${_ppeItems.length ? _ppeItems.map((item,idx) => `
                 <div class="flex items-center gap-3 px-5 py-3">
                     <span class="w-6 h-6 rounded-full text-xs font-bold flex items-center justify-center flex-shrink-0 bg-emerald-100 text-emerald-700">${idx+1}</span>
-                    <span class="flex-1 text-sm text-slate-800 font-medium">${escHtml(item.ItemName)}</span>
+                    ${item.ImageUrl
+                        ? `<img src="${escHtml(safeResourceUrl(item.ImageUrl))}" alt="${escHtml(item.ItemName)}" class="w-12 h-12 rounded-lg object-cover border border-slate-200 bg-white flex-shrink-0">`
+                        : `<div class="w-12 h-12 rounded-lg bg-slate-50 border border-slate-100 flex items-center justify-center text-slate-300 flex-shrink-0"><svg class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12.75L11.25 15 15 9.75"/></svg></div>`}
+                    <div class="flex-1 min-w-0">
+                        <p class="text-sm text-slate-800 font-semibold truncate">${escHtml(item.ItemName)}</p>
+                        ${item.Description ? `<p class="text-xs text-slate-400 mt-0.5 truncate">${escHtml(item.Description)}</p>` : '<p class="text-xs text-slate-300 mt-0.5">ไม่มีคำอธิบาย / No description</p>'}
+                    </div>
                     <div class="flex gap-1">
                         <button onclick="window._scEditPPEItem('${item.ItemID}')" class="p-1.5 rounded text-slate-400 hover:text-emerald-600 hover:bg-slate-100"><svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"/></svg></button>
                         <button onclick="window._scDeletePPEItem('${item.ItemID}')" class="p-1.5 rounded text-slate-400 hover:text-red-500 hover:bg-red-50"><svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg></button>
                     </div>
-                </div>`).join('') : `<p class="px-5 py-4 text-sm text-slate-400">ยังไม่มีรายการ PPE</p>`}
+                </div>`).join('') : `<p class="px-5 py-4 text-sm text-slate-400">ยังไม่มีรายการ PPE — เพิ่มหมวก แว่น ถุงมือ รองเท้า หรืออุปกรณ์ที่ต้องควบคุม</p>`}
             </div>
         </div>
     </div>`;
@@ -1178,8 +2463,9 @@ function buildPPEWorkTypes() {
 
 // ── PPE Violations sub-tab ─────────────────────────────────────────────────
 function buildPPEViolations() {
+    const violations = _filteredPPEViolations();
     const empMapV = {};
-    _ppeViolations.forEach(v => {
+    violations.forEach(v => {
         const key = v.EmployeeID || v.EmployeeName;
         if (!empMapV[key]) empMapV[key] = { id:v.EmployeeID, name:v.EmployeeName, dept:v.Department, count:0, level:v.WarningLevel };
         empMapV[key].count++;
@@ -1198,7 +2484,7 @@ function buildPPEViolations() {
         </td>
     </tr>`).join('');
 
-    const detailRowsV = _ppeViolations.slice().reverse().map(v => `
+    const detailRowsV = violations.slice().reverse().map(v => `
     <tr class="border-b border-slate-100 hover:bg-slate-50 transition-colors">
         <td class="px-4 py-3 text-sm text-slate-600 whitespace-nowrap">${fmtDate(v.ViolationDate)}</td>
         <td class="px-4 py-3 font-medium text-slate-800 text-sm">${escHtml(v.EmployeeName||'—')}</td>
@@ -1212,7 +2498,8 @@ function buildPPEViolations() {
 
     return `
     <div class="space-y-5">
-        <div class="ds-table-wrap">
+        ${_ppeFilterBar(violations.length)}
+        <div class="ds-table-wrap" data-sc-card-image="safety-culture-ppe-violation-employees">
             <div class="px-5 py-4 border-b border-slate-100">
                 <h3 class="font-semibold text-slate-700">สรุปรายพนักงาน</h3>
                 <p class="text-xs text-slate-400 mt-0.5">${empsV.length} คน — ปี ${_filterYear}</p>
@@ -1230,7 +2517,7 @@ function buildPPEViolations() {
                 </table>
             </div>
         </div>
-        <div class="ds-table-wrap">
+        <div class="ds-table-wrap" data-sc-card-image="safety-culture-ppe-violation-records">
             <div class="px-5 py-4 border-b border-slate-100">
                 <h3 class="font-semibold text-slate-700">บันทึกทั้งหมด</h3>
                 <p class="text-xs text-slate-400 mt-0.5">${_ppeViolations.length} รายการ</p>
@@ -1291,8 +2578,8 @@ function buildDashboardHtml() {
     if (filteredPPE.length > 0) {
         const passCount = filteredPPE.filter(r => r.IsPass===1||r.IsPass==='1').length;
         ppePct = Math.round(passCount / filteredPPE.length * 100);
-    } else if (mo === 0 && _dashData?.ppeStats?.overall_pct != null) {
-        ppePct = parseFloat(_dashData.ppeStats.overall_pct);
+    } else if (mo === 0 && _getPPEStats().overall_pct != null) {
+        ppePct = parseFloat(_getPPEStats().overall_pct);
     }
 
     // Store for initCharts()
@@ -1337,8 +2624,8 @@ function buildDashboardHtml() {
     // PPE item breakdown — uses itemBreakdown from new backend (SC_PPE_Inspection_Details)
     // For monthly mode: compute client-side from filteredPPE details
     let ppeItemRows = [];
-    if (mo === 0 && _dashData?.ppeStats?.itemBreakdown?.length) {
-        ppeItemRows = _dashData.ppeStats.itemBreakdown;
+    if (mo === 0 && _getPPEStats().itemBreakdown?.length) {
+        ppeItemRows = _getPPEStats().itemBreakdown;
     } else if (filteredPPE.length > 0) {
         const itemMap = {};
         filteredPPE.forEach(r => {
@@ -1363,7 +2650,7 @@ function buildDashboardHtml() {
     ].map(c => {
         const v   = c.val != null ? parseFloat(c.val) : null;
         const cls = scoreColor(v);
-        return `<div class="ds-metric-card p-4 text-center">
+        return `<div class="ds-metric-card p-4 text-center" data-sc-card-image="safety-culture-score-${c.code.toLowerCase()}">
             <div class="flex justify-center mb-2">
                 <span class="w-8 h-8 rounded-xl flex items-center justify-center text-xs font-bold text-white" style="background:linear-gradient(135deg,#059669,#0d9488)">${c.code}</span>
             </div>
@@ -1393,9 +2680,15 @@ function buildDashboardHtml() {
     }).filter(t => t.avg !== null);
     const bestTopic  = topicAvgs.length ? topicAvgs.reduce((b,t) => t.avg > b.avg ? t : b) : null;
     const worstTopic = topicAvgs.length ? topicAvgs.reduce((w,t) => t.avg < w.avg ? t : w) : null;
+    const locationStats = assessmentLocationStats(filteredAsmts);
+    const locationFollowupPanel = buildAssessmentLocationFocus(filteredAsmts, {
+        title: `Assessment Location Follow-up - ${periodLabel}`,
+        subtitle: 'Lowest saved inspection points from this dashboard period',
+        limit: 4,
+    });
     const quickCards = `
     <div class="grid grid-cols-1 sm:grid-cols-3 gap-4">
-        <div class="ds-metric-card p-4 flex items-center gap-3">
+        <div class="ds-metric-card p-4 flex items-center gap-3" data-sc-card-image="safety-culture-dashboard-average">
             <div class="w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0 bg-blue-50">
                 <svg class="w-5 h-5 text-blue-500" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"/></svg>
             </div>
@@ -1404,7 +2697,7 @@ function buildDashboardHtml() {
                 <p class="text-xs text-slate-500">คะแนนเฉลี่ย ${periodLabel}</p>
             </div>
         </div>
-        <div class="ds-metric-card p-4 flex items-center gap-3">
+        <div class="ds-metric-card p-4 flex items-center gap-3" data-sc-card-image="safety-culture-dashboard-best-topic">
             <div class="w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0 bg-emerald-50">
                 <svg class="w-5 h-5 text-emerald-500" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6"/></svg>
             </div>
@@ -1413,7 +2706,7 @@ function buildDashboardHtml() {
                 <p class="text-xs text-slate-500">หัวข้อคะแนนสูงสุด${bestTopic?' ('+bestTopic.avg+'%)':''}</p>
             </div>
         </div>
-        <div class="ds-metric-card p-4 flex items-center gap-3">
+        <div class="ds-metric-card p-4 flex items-center gap-3" data-sc-card-image="safety-culture-dashboard-focus-topic">
             <div class="w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0 ${worstTopic&&worstTopic.avg<70?'bg-red-50':'bg-amber-50'}">
                 <svg class="w-5 h-5 ${worstTopic&&worstTopic.avg<70?'text-red-500':'text-amber-500'}" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 17h8m0 0V9m0 8l-8-8-4 4-6-6"/></svg>
             </div>
@@ -1432,7 +2725,7 @@ function buildDashboardHtml() {
     const violNotice   = violInPeriod.filter(v => v.WarningLevel === 'safety_notice').length;
     const violWritten  = violInPeriod.filter(v => v.WarningLevel === 'written_warning').length;
     const violStrip = violInPeriod.length > 0 ? `
-    <div class="ds-section p-4">
+    <div class="ds-section p-4" data-sc-card-image="safety-culture-ppe-violation-summary">
         <div class="flex items-center justify-between mb-3">
             <h3 class="font-semibold text-slate-700 text-sm">PPE Violation Summary — ${periodLabel}</h3>
             <button onclick="window._scSetTab('ppe');setTimeout(()=>window._scSetPPESub('violations'),80)" class="text-xs text-emerald-600 hover:underline font-medium">ดูทั้งหมด →</button>
@@ -1502,7 +2795,7 @@ function buildDashboardHtml() {
         .map(([d, v]) => ({ dept: d, total: v.pass+v.fail, pass: v.pass, pct: Math.round(v.pass/(v.pass+v.fail)*100) }))
         .sort((a,b) => b.total - a.total).slice(0, 8);
     const deptBreakdown = deptRows.length > 1 ? `
-    <div class="ds-section p-5">
+    <div class="ds-section p-5" data-sc-card-image="safety-culture-ppe-department-breakdown">
         <h3 class="font-semibold text-slate-700 mb-4 text-sm">PPE Compliance by Department — ${periodLabel}</h3>
         <div class="space-y-2.5">
         ${deptRows.map(r => {
@@ -1518,13 +2811,83 @@ function buildDashboardHtml() {
         </div>
     </div>` : '';
 
+    const actionTopics = [
+        { code: 'T1', label: 'เดินบน Walk Way', score: computedAvgs[0], target: 70, action: 'ทบทวนเส้นทาง Walk Way และเพิ่มการสื่อสารหน้าพื้นที่' },
+        { code: 'T2', label: 'ไม่ใช้โทรศัพท์ขณะเดิน', score: computedAvgs[1], target: 70, action: 'สื่อสารย้ำจุดเสี่ยงและสุ่มสังเกตช่วงพัก/เปลี่ยนกะ' },
+        { code: 'T3', label: 'ข้ามถนนทางม้าลาย', score: computedAvgs[2], target: 70, action: 'ตรวจสภาพทางม้าลาย ป้ายเตือน และจุดข้ามประจำ' },
+        { code: 'T4', label: 'หยุดยืนชี้นิ้ว', score: computedAvgs[3], target: 70, action: 'จัดย้ำ Pointing & Calling พร้อมติดตามหน้างานรายสัปดาห์' },
+        { code: 'T5', label: 'ไม่ล้วงกระเป๋า', score: computedAvgs[4], target: 70, action: 'เพิ่มโปสเตอร์/กิจกรรมเตือนพฤติกรรมขณะเดินในพื้นที่เสี่ยง' },
+        { code: 'T6', label: 'PPE Control', score: ppePct, target: 90, action: ppePct == null ? 'เริ่มบันทึก PPE Inspection เพื่อปิดช่องข้อมูล' : 'ทบทวน PPE template และติดตามรายการไม่ผ่าน' },
+        { code: 'T7', label: 'แยกขยะถูกต้อง', score: computedAvgs[5], target: 70, action: 'สื่อสารมาตรฐานการแยกขยะและตรวจจุดทิ้งขยะหลัก' },
+    ];
+    const priorityItems = actionTopics
+        .filter(t => t.score == null || parseFloat(t.score) < t.target)
+        .sort((a, b) => {
+            if (a.score == null && b.score != null) return -1;
+            if (a.score != null && b.score == null) return 1;
+            return parseFloat(a.score || 0) - parseFloat(b.score || 0);
+        });
+    if (ppeFailCount > 0 && !priorityItems.some(t => t.code === 'T6')) {
+        priorityItems.push({ code: 'T6', label: 'PPE Control', score: ppePct, target: 90, action: `ติดตาม PPE Inspection ที่ไม่ผ่าน ${ppeFailCount} รายการ` });
+    }
+    const focusRows = priorityItems.slice(0, 4).map((item, idx) => {
+        const missing = item.score == null;
+        const score = missing ? null : Math.round(parseFloat(item.score));
+        const severity = missing ? 'Data Gap' : score < 70 ? 'Urgent' : 'Monitor';
+        const badge = missing
+            ? 'bg-slate-100 text-slate-600 border-slate-200'
+            : score < 70
+                ? 'bg-red-50 text-red-700 border-red-100'
+                : 'bg-amber-50 text-amber-700 border-amber-100';
+        const dot = missing ? 'bg-slate-400' : score < 70 ? 'bg-red-500' : 'bg-amber-500';
+        return `<div class="flex items-start gap-3 rounded-xl border border-slate-100 bg-white px-3 py-3">
+            <div class="w-8 h-8 rounded-xl flex items-center justify-center flex-shrink-0 text-xs font-black text-white" style="background:${idx === 0 ? 'linear-gradient(135deg,#ef4444,#f97316)' : 'linear-gradient(135deg,#059669,#0d9488)'}">${item.code}</div>
+            <div class="flex-1 min-w-0">
+                <div class="flex items-center justify-between gap-2">
+                    <p class="text-sm font-bold text-slate-800 truncate">${escHtml(item.label)}</p>
+                    <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full border text-[10px] font-bold ${badge}">
+                        <span class="w-1.5 h-1.5 rounded-full ${dot}"></span>${severity}
+                    </span>
+                </div>
+                <p class="text-xs text-slate-500 mt-1 leading-relaxed">${escHtml(item.action)}</p>
+                <div class="mt-2 flex items-center gap-2">
+                    <div class="flex-1 h-1.5 rounded-full bg-slate-100 overflow-hidden">
+                        <div class="h-1.5 rounded-full" style="width:${missing ? 0 : Math.max(0, Math.min(100, score))}%;background:${missing ? '#cbd5e1' : score < 70 ? '#ef4444' : '#d97706'}"></div>
+                    </div>
+                    <span class="text-xs font-black ${missing ? 'text-slate-400' : score < 70 ? 'text-red-600' : 'text-amber-600'}">${missing ? '—' : score + '%'}</span>
+                </div>
+            </div>
+        </div>`;
+    }).join('');
+    const actionPanel = `
+    <div class="ds-section p-5" data-sc-card-image="safety-culture-action-focus">
+        <div class="flex items-start justify-between gap-4 mb-4">
+            <div>
+                <h3 class="font-semibold text-slate-700">Action Focus — ${periodLabel}</h3>
+                <p class="text-xs text-slate-400 mt-1">หัวข้อเร่งติดตามจากคะแนน Assessment และ PPE</p>
+            </div>
+            <span class="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-bold ${priorityItems.length ? 'bg-amber-50 text-amber-700 border border-amber-100' : 'bg-emerald-50 text-emerald-700 border border-emerald-100'}">
+                ${priorityItems.length ? `${priorityItems.length} Focus` : 'Stable'}
+            </span>
+        </div>
+        <div class="space-y-3">
+            ${focusRows || `<div class="rounded-xl border border-emerald-100 bg-emerald-50 px-4 py-5 text-center">
+                <p class="text-sm font-bold text-emerald-700">ไม่มีหัวข้อเร่งด่วนในช่วงนี้</p>
+                <p class="text-xs text-emerald-600 mt-1">รักษามาตรฐานและติดตามผลต่อเนื่องในรอบถัดไป</p>
+            </div>`}
+        </div>
+        <div class="mt-4 grid grid-cols-2 gap-2">
+            <button type="button" onclick="window._scSetTab('assessment')" class="btn btn-secondary h-9 px-3 text-xs">Assessment</button>
+            <button type="button" onclick="window._scSetTab('ppe')" class="btn btn-primary h-9 px-3 text-xs">PPE Control</button>
+        </div>
+    </div>`;
+
     return `
     <div class="space-y-5">
         ${monthFilterBar}
-        ${enterpriseStrip}
         ${quickCards}
         ${mat ? `
-        <div class="ds-section p-5 border-l-4 ${mat.border}">
+        <div class="ds-section p-5 border-l-4 ${mat.border}" data-sc-card-image="safety-culture-maturity-level">
             <div class="flex items-center justify-between">
                 <div>
                     <p class="text-sm text-slate-500 font-medium">Culture Maturity Level — ${periodLabel}</p>
@@ -1550,30 +2913,32 @@ function buildDashboardHtml() {
 
         <div class="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-7 gap-3">${scoreCards}</div>
 
+        ${locationStats.length ? locationFollowupPanel : ''}
+
         <div class="grid grid-cols-1 lg:grid-cols-2 gap-5">
             <div class="ds-section p-5">
                 <h3 class="font-semibold text-slate-700 mb-4">คะแนนเฉลี่ยแต่ละหัวข้อ — Radar Chart <span class="text-xs font-normal text-slate-400">${periodLabel}</span></h3>
-                <div class="relative" style="height:280px"><canvas id="sc-radar-chart"></canvas></div>
+                <div class="relative" data-sc-card-image="safety-culture-radar-chart" style="height:280px"><canvas id="sc-radar-chart"></canvas></div>
             </div>
             <div class="ds-section p-5">
                 <h3 class="font-semibold text-slate-700 mb-4">คะแนนแต่ละหัวข้อ — Bar Chart <span class="text-xs font-normal text-slate-400">${periodLabel}</span></h3>
-                <div class="relative" style="height:280px"><canvas id="sc-bar-chart"></canvas></div>
+                <div class="relative" data-sc-card-image="safety-culture-bar-chart" style="height:280px"><canvas id="sc-bar-chart"></canvas></div>
             </div>
         </div>
 
         <div class="grid grid-cols-1 lg:grid-cols-2 gap-5">
             <div class="ds-section p-5">
                 <h3 class="font-semibold text-slate-700 mb-4">แนวโน้มคะแนนเฉลี่ยรายปี — Trend <span class="text-xs font-normal text-slate-400">(แสดงเฉพาะรายปี)</span></h3>
-                <div class="relative" style="height:220px"><canvas id="sc-line-chart"></canvas></div>
+                <div class="relative" data-sc-card-image="safety-culture-trend-chart" style="height:220px"><canvas id="sc-line-chart"></canvas></div>
             </div>
             ${ppeRows.length ? `
-            <div class="ds-section p-5">
+            <div class="ds-section p-5" data-sc-card-image="safety-culture-dashboard-ppe-items">
                 <div class="flex items-center justify-between mb-4">
                     <h3 class="font-semibold text-slate-700">PPE Compliance per Item — ${periodLabel}</h3>
                     <span class="text-xs text-slate-400">${filteredPPE.length} ครั้งตรวจ</span>
                 </div>
                 ${ppeRows}
-            </div>` : '<div></div>'}
+            </div>` : actionPanel}
         </div>
 
         ${deptBreakdown}
@@ -1666,32 +3031,69 @@ function openPrincipleForm(id) {
             <textarea name="Description" rows="3" class="form-textarea w-full resize-none">${escHtml(p.Description || '')}</textarea></div>
         <div><label class="block text-sm font-semibold text-slate-700 mb-1.5">URL รูปภาพ</label>
             <input name="ImageUrl" type="url" value="${escHtml(p.ImageUrl || '')}" placeholder="https://..." class="form-input w-full"></div>
+        <div><label class="block text-sm font-semibold text-slate-700 mb-1.5">อัปโหลดรูปภาพ / Upload Image</label>
+            <input id="sc-pf-image-file" type="file" accept="image/*" class="form-input w-full">
+            <p class="text-xs text-slate-400 mt-1">ถ้าเลือกไฟล์ ระบบจะอัปโหลดเข้า server และแทนที่ URL รูปภาพด้านบน</p></div>
         <div><label class="block text-sm font-semibold text-slate-700 mb-1.5">URL ไฟล์แนบ (Download)</label>
             <input name="AttachmentUrl" type="url" value="${escHtml(p.AttachmentUrl || '')}" placeholder="https://..." class="form-input w-full"></div>
+        <div><label class="block text-sm font-semibold text-slate-700 mb-1.5">อัปโหลดเอกสาร / Upload Document</label>
+            <input id="sc-pf-doc-file" type="file" accept=".pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,image/*" class="form-input w-full">
+            <p class="text-xs text-slate-400 mt-1">รองรับ PDF, Office และรูปภาพ ระบบจะกรอก URL และชื่อไฟล์ให้อัตโนมัติ</p></div>
         <div><label class="block text-sm font-semibold text-slate-700 mb-1.5">ชื่อไฟล์แนบ</label>
             <input name="AttachmentName" type="text" value="${escHtml(p.AttachmentName || '')}" placeholder="เช่น คู่มือ Walk Way.pdf" class="form-input w-full"></div>
+        <label class="flex items-start gap-3 rounded-xl border border-amber-100 bg-amber-50/60 px-4 py-3 cursor-pointer">
+            <input name="IsFeatured" type="checkbox" class="mt-1 h-4 w-4 rounded border-amber-300 text-amber-600 focus:ring-amber-500" ${(p.IsFeatured === 1 || p.IsFeatured === '1' || p.IsFeatured === true) ? 'checked' : ''}>
+            <span>
+                <span class="block text-sm font-bold text-slate-800">ตั้งเป็น Featured Campaign / Set as Featured</span>
+                <span class="block text-xs text-slate-500 mt-0.5">เลือกได้ครั้งละ 1 การ์ดเท่านั้น ถ้าเลือกใบนี้ ระบบจะยกเลิก Featured ใบเดิมอัตโนมัติ</span>
+            </span>
+        </label>
         <div id="sc-pf-err" class="text-sm text-red-500 hidden"></div>
         <div class="flex justify-end gap-3 pt-3 border-t">
             <button type="button" onclick="window.closeModal()" class="btn btn-secondary px-5">ยกเลิก</button>
-            <button type="submit" class="btn btn-primary px-5">บันทึก</button>
+            <button type="submit" id="sc-pf-submit" class="btn btn-primary px-5">บันทึก</button>
         </div>
     </form>`, 'max-w-lg');
 
     setTimeout(() => {
-        document.getElementById('sc-pf')?.addEventListener('submit', async e => {
+        document.getElementById('sc-pf')?.addEventListener('submit', guardSubmitHandler(async e => {
             e.preventDefault();
-            const data  = Object.fromEntries(new FormData(e.target).entries());
+            const formData = new FormData(e.target);
+            const data  = Object.fromEntries(formData.entries());
+            data.IsFeatured = formData.has('IsFeatured') ? 1 : 0;
             const errEl = document.getElementById('sc-pf-err');
+            const submitBtn = document.getElementById('sc-pf-submit');
+            if (submitBtn?.disabled) return;
+            if (submitBtn) { submitBtn.disabled = true; submitBtn.textContent = 'กำลังบันทึก...'; }
+            let newImageUrl = '';
+            let newDocUrl = '';
             try {
+                const imageFile = document.getElementById('sc-pf-image-file')?.files?.[0];
+                const docFile = document.getElementById('sc-pf-doc-file')?.files?.[0];
+                if (imageFile) {
+                    const uploaded = await uploadSafetyCultureFile(imageFile, 'รูปภาพ');
+                    newImageUrl = uploaded.url;
+                    data.ImageUrl = uploaded.url;
+                }
+                if (docFile) {
+                    const uploaded = await uploadSafetyCultureFile(docFile, 'เอกสาร');
+                    newDocUrl = uploaded.url;
+                    data.AttachmentUrl = uploaded.url;
+                    data.AttachmentName = uploaded.originalName || getUploadDisplayName(uploaded.url, docFile.name);
+                }
                 await API.put(`/safety-culture/principles/${data.PrincipleID}`, data);
                 closeModal();
                 showToast('บันทึกสำเร็จ', 'success');
                 await _loadHeroStats();
             } catch (err) {
+                await cleanupUploadedUrl(newImageUrl);
+                await cleanupUploadedUrl(newDocUrl);
                 errEl.textContent = escHtml(err.message || 'เกิดข้อผิดพลาด');
                 errEl.classList.remove('hidden');
+            } finally {
+                if (submitBtn) { submitBtn.disabled = false; submitBtn.textContent = 'บันทึก'; }
             }
-        });
+        }));
     }, 50);
 }
 
@@ -1700,88 +3102,121 @@ async function openAssessmentForm(id) {
     const a     = id ? _assessments.find(x => x.AssessmentID === id) : null;
     const today = new Date().toISOString().split('T')[0];
 
-    // Lazy-load areas from master (Patrol_Areas)
-    if (_scAreas.length === 0) {
+    if (_assessmentLocations.length === 0) {
         try {
-            const r = await API.get('/master/areas');
-            _scAreas = (r.data || []).map(ar => ar.Name).filter(Boolean);
-        } catch { _scAreas = []; }
+            const r = await API.get('/safety-culture/assessment-locations?all=1');
+            _assessmentLocations = r.data || [];
+        } catch { _assessmentLocations = []; }
     }
 
-    const TOPIC_DEFS = [
+    const WALK_TOPICS = [
         { key: 'T1', label: '1. เดินบน Walk Way' },
         { key: 'T2', label: '2. ไม่ใช้โทรศัพท์ขณะเดิน' },
         { key: 'T3', label: '3. ข้ามถนนทางม้าลาย' },
         { key: 'T4', label: '4. หยุดยืนชี้นิ้ว' },
         { key: 'T5', label: '5. ไม่ล้วงกระเป๋า' },
-        { key: 'T7', label: '7. แยกขยะถูกต้อง' },
     ];
+    const WASTE_TOPIC = { key: 'T7', label: '7. แยกขยะถูกต้อง' };
+    const ALL_TOPIC_KEYS = [...WALK_TOPICS.map(t => t.key), WASTE_TOPIC.key];
 
-    // Restore existing points from a.points array
-    const getPoint = (tk, pn, field) => {
+    const getPoint = (tk, pn) => {
         if (!a?.points) return '';
         const pt = a.points.find(p => p.TopicKey === tk && parseInt(p.PointNo) === pn);
-        return pt ? (pt[field] ?? '') : '';
+        return pt || null;
     };
 
-    const savedTopicAreas = a?.topicAreas || {};
-    const areaOpts = _scAreas.length > 0
-        ? `<option value="">— ไม่ระบุ —</option>` + _scAreas.map(ar => `<option value="${escHtml(ar)}">${escHtml(ar)}</option>`).join('')
-        : `<option value="">— ไม่มีพื้นที่ในระบบ —</option>`;
+    const savedPointLocation = (topicKeys, pn) => {
+        const keys = Array.isArray(topicKeys) ? topicKeys : [topicKeys];
+        const pt = keys.map(k => getPoint(k, pn)).find(p => p?.LocationID || p?.LocationName);
+        return {
+            id: pt?.LocationID || '',
+            name: pt?.LocationName || '',
+        };
+    };
 
-    const topicBlocks = TOPIC_DEFS.map(t => {
-        const existingScore = a ? (a[`${t.key}_Score`] != null ? Math.round(parseFloat(a[`${t.key}_Score`])) : '') : '';
-        const savedArea = savedTopicAreas[t.key] || '';
-        const pts = [1,2,3].map(pn => {
-            const tot = getPoint(t.key, pn, 'TotalPeople');
-            const cmp = getPoint(t.key, pn, 'ComplyPeople');
-            return `
-            <div class="flex items-center gap-2 py-1.5">
-                <span class="text-xs text-slate-400 w-14 flex-shrink-0">จุดที่ ${pn}</span>
-                <input type="number" min="0" placeholder="จำนวน"
-                    id="sc-tot-${t.key}-${pn}" value="${tot}"
-                    class="form-input text-xs py-1.5 w-24 flex-shrink-0" style="min-width:0">
-                <input type="number" min="0" placeholder="ปฏิบัติ"
-                    id="sc-cmp-${t.key}-${pn}" value="${cmp}"
-                    class="form-input text-xs py-1.5 w-24 flex-shrink-0" style="min-width:0">
-                <span id="sc-pct-${t.key}-${pn}" class="text-xs font-semibold w-12 text-right text-slate-400 flex-shrink-0">—%</span>
-            </div>`;
-        }).join('');
+    const locationOptions = (kind, saved = {}) => {
+        const isWaste = kind === 'waste';
+        const activeRows = _assessmentLocations.filter(loc => {
+            const active = Number(loc.IsActive) !== 0 || loc.LocationID === saved.id;
+            if (!active) return false;
+            const group = String(loc.LocationGroup || '').toLowerCase();
+            const applies = String(loc.AppliesTo || '').toLowerCase();
+            if (applies === 'all') return true;
+            if (isWaste) return group === 'waste' || applies === 't7';
+            return group === 'walkway' || applies === 't1-t5';
+        });
+        const hasSavedNameOnly = saved.name && !activeRows.some(loc => loc.LocationID === saved.id || loc.LocationName === saved.name);
+        const opts = [
+            '<option value="">— เลือกจุดตรวจ —</option>',
+            ...activeRows.map(loc => `<option value="${escHtml(loc.LocationID)}" data-name="${escHtml(loc.LocationName)}" ${loc.LocationID === saved.id ? 'selected' : ''}>${escHtml(loc.LocationName)}</option>`),
+            hasSavedNameOnly ? `<option value="" data-name="${escHtml(saved.name)}" selected>${escHtml(saved.name)} (ข้อมูลเดิม)</option>` : '',
+        ].join('');
+        return opts || '<option value="">— ยังไม่มีจุดตรวจ —</option>';
+    };
 
-        // Area select — set selected after rendering via JS so it handles values not in the list gracefully
-        const areaSelect = _scAreas.length > 0
-            ? `<select id="sc-area-${t.key}" class="form-input text-xs py-1 flex-1" style="min-width:0">${areaOpts}</select>`
-            : `<input id="sc-area-${t.key}" type="text" placeholder="ระบุพื้นที่..." value="${escHtml(savedArea)}" class="form-input text-xs py-1 flex-1" style="min-width:0">`;
+    const hiddenScores = ALL_TOPIC_KEYS.map(tk => {
+        const existingScore = a ? (a[`${tk}_Score`] != null ? Math.round(parseFloat(a[`${tk}_Score`])) : '') : '';
+        return `<input type="hidden" name="${tk}_Score" id="sc-hidden-${tk}" value="${existingScore}">`;
+    }).join('');
 
+    const scoreChips = ALL_TOPIC_KEYS.map(tk => `
+        <span class="inline-flex items-center gap-1 rounded-full bg-slate-100 px-2.5 py-1 text-xs font-bold text-slate-500">
+            ${tk}: <span id="sc-wscore-${tk}" class="text-slate-400">—%</span>
+        </span>`).join('');
+
+    const topicRow = (topic, pn) => {
+        const pt = getPoint(topic.key, pn);
         return `
-        <div class="border border-slate-100 rounded-lg overflow-hidden">
-            <div class="flex items-center justify-between px-3 py-2 bg-slate-50 border-b border-slate-100">
-                <span class="text-sm font-semibold text-slate-700">${t.label}</span>
-                <div class="flex items-center gap-2">
-                    <span class="text-xs text-slate-400">ผลรวม:</span>
-                    <span id="sc-wscore-${t.key}" class="text-sm font-bold text-emerald-600">—%</span>
-                    <input type="hidden" name="${t.key}_Score" id="sc-hidden-${t.key}" value="${existingScore}">
+        <div class="grid grid-cols-[1fr_88px_88px_54px] gap-2 items-center py-1.5">
+            <span class="text-xs font-medium text-slate-600">${topic.label}</span>
+            <input type="number" min="0" placeholder="จำนวน" id="sc-tot-${topic.key}-${pn}" value="${pt?.TotalPeople ?? ''}" class="form-input text-xs py-1.5 w-full" style="min-width:0">
+            <input type="number" min="0" placeholder="ปฏิบัติ" id="sc-cmp-${topic.key}-${pn}" value="${pt?.ComplyPeople ?? ''}" class="form-input text-xs py-1.5 w-full" style="min-width:0">
+            <span id="sc-pct-${topic.key}-${pn}" class="text-xs font-semibold text-right text-slate-400">—%</span>
+        </div>`;
+    };
+
+    const walkPointBlocks = [1,2,3].map(pn => {
+        const saved = savedPointLocation(WALK_TOPICS.map(t => t.key), pn);
+        return `
+        <div class="rounded-xl border border-slate-100 overflow-hidden">
+            <div class="px-3 py-2 bg-slate-50 border-b border-slate-100 flex flex-col sm:flex-row sm:items-center gap-2">
+                <span class="text-sm font-bold text-slate-700 sm:w-16 flex-shrink-0">จุดที่ ${pn}</span>
+                <select id="sc-loc-walk-${pn}" class="form-input text-sm py-1.5 flex-1">
+                    ${locationOptions('walkway', saved)}
+                </select>
+            </div>
+            <div class="px-3 py-2">
+                <div class="grid grid-cols-[1fr_88px_88px_54px] gap-2 items-center border-b border-slate-50 pb-1 mb-1">
+                    <span class="text-[11px] font-semibold text-slate-400">หัวข้อ</span>
+                    <span class="text-[11px] font-semibold text-slate-400 text-center">จำนวน</span>
+                    <span class="text-[11px] font-semibold text-slate-400 text-center">ปฏิบัติ</span>
+                    <span class="text-[11px] font-semibold text-slate-400 text-right">%</span>
                 </div>
+                ${WALK_TOPICS.map(t => topicRow(t, pn)).join('')}
             </div>
-            <div class="px-3 py-2 border-b border-slate-50 flex items-center gap-2">
-                <span class="text-xs text-slate-500 w-14 flex-shrink-0">พื้นที่</span>
-                ${areaSelect}
-            </div>
-            <div class="px-3">
-                <div class="flex items-center gap-2 py-1 border-b border-slate-50">
-                    <span class="text-xs text-slate-400 w-14 flex-shrink-0"></span>
-                    <span class="text-xs text-slate-400 w-24 flex-shrink-0 text-center">จำนวน (คน)</span>
-                    <span class="text-xs text-slate-400 w-24 flex-shrink-0 text-center">ปฏิบัติตาม</span>
-                    <span class="text-xs text-slate-400 w-12 text-right flex-shrink-0">%</span>
-                </div>
-                ${pts}
-            </div>
+        </div>`;
+    }).join('');
+
+    const wastePointBlocks = [1,2,3].map(pn => {
+        const saved = savedPointLocation(WASTE_TOPIC.key, pn);
+        const pt = getPoint(WASTE_TOPIC.key, pn);
+        return `
+        <div class="grid grid-cols-[72px_minmax(180px,1fr)_88px_88px_54px] gap-2 items-center py-1.5">
+            <span class="text-xs font-bold text-slate-500">จุดที่ ${pn}</span>
+            <select id="sc-loc-waste-${pn}" class="form-input text-xs py-1.5 w-full">
+                ${locationOptions('waste', saved)}
+            </select>
+            <input type="number" min="0" placeholder="จำนวน" id="sc-tot-${WASTE_TOPIC.key}-${pn}" value="${pt?.TotalPeople ?? ''}" class="form-input text-xs py-1.5 w-full" style="min-width:0">
+            <input type="number" min="0" placeholder="ปฏิบัติ" id="sc-cmp-${WASTE_TOPIC.key}-${pn}" value="${pt?.ComplyPeople ?? ''}" class="form-input text-xs py-1.5 w-full" style="min-width:0">
+            <span id="sc-pct-${WASTE_TOPIC.key}-${pn}" class="text-xs font-semibold text-right text-slate-400">—%</span>
         </div>`;
     }).join('');
 
     openModal(a ? 'แก้ไขผลการประเมิน' : 'บันทึกผลการประเมิน', `
     <form id="sc-af" class="space-y-4">
         ${a ? `<input type="hidden" name="AssessmentID" value="${escHtml(a.AssessmentID)}">` : ''}
+        ${hiddenScores}
+        <input type="hidden" name="Area" id="sc-area-summary" value="${escHtml(a?.Area || 'หลายจุดตรวจ')}">
         <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
             <div class="sm:col-span-2"><label class="block text-sm font-semibold text-slate-700 mb-1.5">วันที่ประเมิน</label>
                 <input name="AssessmentDate" type="date" required value="${a?.AssessmentDate ? String(a.AssessmentDate).substring(0,10) : today}" class="form-input w-full"></div>
@@ -1792,32 +3227,49 @@ async function openAssessmentForm(id) {
                 </select>
             </div>
         </div>
-        <div><label class="block text-sm font-semibold text-slate-700 mb-1.5">พื้นที่/แผนก</label>
-            <input name="Area" type="text" value="${escHtml(a?.Area || 'ทั้งหมด')}" class="form-input w-full"></div>
+        <div class="rounded-xl border border-emerald-100 bg-emerald-50/70 px-3 py-2">
+            <div class="flex flex-wrap items-center gap-2 justify-between">
+                <p class="text-xs text-emerald-800 font-semibold">เลือกจุดตรวจจาก Master ของ Safety Culture แล้วกรอกจำนวน/ปฏิบัติตามตามจุดจริง</p>
+                <div class="flex flex-wrap gap-1.5">${scoreChips}</div>
+            </div>
+        </div>
         <div class="bg-amber-50 border border-amber-100 rounded-lg px-3 py-2 text-xs text-amber-700">
             หัวข้อที่ 6 (PPE Control) ไม่ต้องกรอกที่นี่ — คำนวณจาก PPE Inspection Checklist
         </div>
-        <div class="space-y-3">${topicBlocks}</div>
+        <div class="rounded-xl border border-slate-100 overflow-hidden">
+            <div class="px-4 py-3 bg-white border-b border-slate-100">
+                <h3 class="text-sm font-bold text-slate-800">จุดเดินตรวจ / Walkway & Crossing</h3>
+                <p class="text-xs text-slate-400 mt-0.5">แต่ละจุดตรวจให้กรอกครบหัวข้อ 1-5 ตามรอบเดินตรวจเดียวกัน</p>
+            </div>
+            <div class="p-3 space-y-3">${walkPointBlocks}</div>
+        </div>
+        <div class="rounded-xl border border-slate-100 overflow-hidden">
+            <div class="px-4 py-3 bg-white border-b border-slate-100">
+                <h3 class="text-sm font-bold text-slate-800">แยกขยะถูกต้อง / Waste Sorting</h3>
+                <p class="text-xs text-slate-400 mt-0.5">ตรวจแยกจากจุดเดินตรวจได้ เลือกจุดถังขยะ/พื้นที่ทิ้งขยะแล้วกรอกเฉพาะหัวข้อ 7</p>
+            </div>
+            <div class="p-3 overflow-x-auto min-w-full">
+                <div class="grid grid-cols-[72px_minmax(180px,1fr)_88px_88px_54px] gap-2 items-center border-b border-slate-50 pb-1 mb-1 min-w-[560px]">
+                    <span class="text-[11px] font-semibold text-slate-400">จุด</span>
+                    <span class="text-[11px] font-semibold text-slate-400">จุดตรวจ</span>
+                    <span class="text-[11px] font-semibold text-slate-400 text-center">จำนวน</span>
+                    <span class="text-[11px] font-semibold text-slate-400 text-center">ปฏิบัติ</span>
+                    <span class="text-[11px] font-semibold text-slate-400 text-right">%</span>
+                </div>
+                <div class="min-w-[560px]">${wastePointBlocks}</div>
+            </div>
+        </div>
         <div><label class="block text-sm font-semibold text-slate-700 mb-1.5">หมายเหตุ</label>
             <textarea name="Notes" rows="2" class="form-textarea w-full resize-none">${escHtml(a?.Notes || '')}</textarea></div>
         <div id="sc-af-err" class="text-sm text-red-500 hidden"></div>
         <div class="flex justify-end gap-3 pt-3 border-t">
             <button type="button" onclick="window.closeModal()" class="btn btn-secondary px-5">ยกเลิก</button>
-            <button type="submit" class="btn btn-primary px-5">บันทึก</button>
+            <button type="submit" id="sc-af-submit" class="btn btn-primary px-5">บันทึก</button>
         </div>
-    </form>`, 'max-w-2xl');
+    </form>`, 'max-w-4xl');
 
     setTimeout(() => {
-        const TKEYS = ['T1','T2','T3','T4','T5','T7'];
-
-        // Restore saved per-topic areas on dropdowns (set selected after render)
-        if (_scAreas.length > 0) {
-            TKEYS.forEach(tk => {
-                const sel = document.getElementById(`sc-area-${tk}`);
-                const saved = savedTopicAreas[tk] || '';
-                if (sel && saved) sel.value = saved;
-            });
-        }
+        const TKEYS = ALL_TOPIC_KEYS;
 
         // Init display for existing point data
         TKEYS.forEach(tk => {
@@ -1866,43 +3318,77 @@ async function openAssessmentForm(id) {
                 const avg = Math.round(pcts.reduce((a,b) => a+b, 0) / pcts.length);
                 if (scoreEl) {
                     scoreEl.textContent = avg + '%';
-                    scoreEl.className = `text-sm font-bold ${avg < 70 ? 'text-red-500' : avg < 90 ? 'text-amber-500' : 'text-emerald-600'}`;
+                    scoreEl.className = avg < 70 ? 'text-red-500' : avg < 90 ? 'text-amber-600' : 'text-emerald-700';
                 }
                 if (hiddenEl) hiddenEl.value = avg;
             } else {
-                if (scoreEl) { scoreEl.textContent = '—%'; scoreEl.className = 'text-sm font-bold text-slate-400'; }
-                // Keep existing manual score if no points entered
+                const existing = hiddenEl?.value ? parseFloat(hiddenEl.value) : null;
+                if (scoreEl) {
+                    scoreEl.textContent = existing != null && !isNaN(existing) ? Math.round(existing) + '%' : '—%';
+                    scoreEl.className = 'text-slate-400';
+                }
             }
         }
 
-        document.getElementById('sc-af')?.addEventListener('submit', async e => {
+        function selectedLocation(kind, pn) {
+            const sel = document.getElementById(`sc-loc-${kind}-${pn}`);
+            const opt = sel?.selectedOptions?.[0];
+            if (!sel?.value && !opt?.dataset?.name) return { id: '', name: '' };
+            return {
+                id: sel?.value || '',
+                name: opt?.dataset?.name || opt?.textContent?.replace(/\s*\(ข้อมูลเดิม\)\s*$/, '').trim() || '',
+            };
+        }
+
+        function summarizeArea(points) {
+            const names = [...new Set(points.map(p => p.LocationName).filter(Boolean))];
+            if (names.length === 0) return 'หลายจุดตรวจ';
+            if (names.length === 1) return names[0];
+            return `หลายจุดตรวจ (${names.length} จุด)`;
+        }
+
+        document.getElementById('sc-af')?.addEventListener('submit', guardSubmitHandler(async e => {
             e.preventDefault();
             const fd    = new FormData(e.target);
             const data  = Object.fromEntries(fd.entries());
             const errEl = document.getElementById('sc-af-err');
+            const submitBtn = document.getElementById('sc-af-submit');
+            if (submitBtn?.disabled) return;
+            errEl?.classList.add('hidden');
 
             // Collect points
             const points = [];
-            TKEYS.forEach(tk => {
-                [1,2,3].forEach(pn => {
-                    const tot = parseInt(document.getElementById(`sc-tot-${tk}-${pn}`)?.value) || 0;
-                    const cmp = parseInt(document.getElementById(`sc-cmp-${tk}-${pn}`)?.value) || 0;
-                    if (tot > 0 || cmp > 0) {
-                        points.push({ TopicKey: tk, PointNo: pn, TotalPeople: tot, ComplyPeople: cmp });
-                    }
-                });
+            let validationError = '';
+
+            const collectTopicPoint = (tk, pn, kind) => {
+                const loc = selectedLocation(kind, pn);
+                const tot = parseInt(document.getElementById(`sc-tot-${tk}-${pn}`)?.value) || 0;
+                const cmp = parseInt(document.getElementById(`sc-cmp-${tk}-${pn}`)?.value) || 0;
+                if (cmp > tot) {
+                    validationError = `จุดประเมิน ${tk} จุดที่ ${pn}: จำนวนคนที่ปฏิบัติตามต้องไม่มากกว่าจำนวนทั้งหมด`;
+                }
+                if ((tot > 0 || cmp > 0) && !loc.name) {
+                    validationError = `กรุณาเลือกจุดตรวจสำหรับ ${tk} จุดที่ ${pn}`;
+                }
+                if (tot > 0 || cmp > 0) {
+                    points.push({ TopicKey: tk, PointNo: pn, LocationID: loc.id, LocationName: loc.name, TotalPeople: tot, ComplyPeople: cmp });
+                }
+            };
+
+            [1,2,3].forEach(pn => {
+                WALK_TOPICS.forEach(t => collectTopicPoint(t.key, pn, 'walk'));
+                collectTopicPoint(WASTE_TOPIC.key, pn, 'waste');
             });
+            if (validationError) {
+                errEl.textContent = validationError;
+                errEl.classList.remove('hidden');
+                return;
+            }
             data.points = JSON.stringify(points);
+            data.topicAreas = JSON.stringify({});
+            data.Area = summarizeArea(points);
 
-            // Collect per-topic areas
-            const topicAreasObj = {};
-            TKEYS.forEach(tk => {
-                const el  = document.getElementById(`sc-area-${tk}`);
-                const val = el?.value?.trim();
-                if (val) topicAreasObj[tk] = val;
-            });
-            data.topicAreas = JSON.stringify(topicAreasObj);
-
+            if (submitBtn) { submitBtn.disabled = true; submitBtn.textContent = 'กำลังบันทึก...'; }
             try {
                 if (data.AssessmentID) {
                     await API.put(`/safety-culture/assessments/${data.AssessmentID}`, data);
@@ -1915,8 +3401,10 @@ async function openAssessmentForm(id) {
             } catch (err) {
                 errEl.textContent = escHtml(err.message || 'เกิดข้อผิดพลาด');
                 errEl.classList.remove('hidden');
+            } finally {
+                if (submitBtn) { submitBtn.disabled = false; submitBtn.textContent = 'บันทึก'; }
             }
-        });
+        }));
     }, 50);
 }
 
@@ -1935,66 +3423,58 @@ async function deleteAssessment(id) {
 async function openPPEForm() {
     if (!_isAdmin) { showToast('เฉพาะผู้ดูแลระบบเท่านั้น', 'error'); return; }
     const today = new Date().toISOString().split('T')[0];
+    const currentUser = TSHSession.getUser() || {};
+    const currentUserId = currentUser.id || currentUser.EmployeeID || '';
+    const currentUserName = currentUser.name || currentUser.EmployeeName || '';
 
-    // Determine checklist items from selected work type or all items
-    const itemsToShow = _ppeItems.length > 0
-        ? _ppeItems
-        : PPE_ITEMS.map(i => ({ ItemID: i.key, ItemName: i.label }));
+    if (_scAreas.length === 0) {
+        try {
+            const r = await API.get('/master/areas');
+            _scAreas = (r.data || []).map(ar => ar.Name || ar.name).filter(Boolean);
+        } catch { _scAreas = []; }
+    }
 
     const deptOpts = _departments.map(d => `<option value="${escHtml(d)}">${escHtml(d)}</option>`).join('');
     const wtOpts   = _ppeWorkTypes.map(w => `<option value="${escHtml(w.WorkTypeID)}" data-name="${escHtml(w.Name)}">${escHtml(w.Name)}</option>`).join('');
-
-    const checklist = itemsToShow.map((item, idx) => `
-    <div id="sc-prow-${escHtml(item.ItemID)}" class="flex flex-col sm:flex-row sm:items-center justify-between py-2.5 border-b border-slate-100 gap-2">
-        <div class="flex items-center gap-2 min-w-0">
-            <span class="w-5 h-5 rounded-full text-xs font-bold flex items-center justify-center flex-shrink-0 bg-emerald-100 text-emerald-700">${idx+1}</span>
-            <span class="text-sm font-medium text-slate-700">${escHtml(item.ItemName)}</span>
-        </div>
-        <div class="flex gap-3 flex-shrink-0">
-            <label class="flex items-center gap-1.5 cursor-pointer text-sm">
-                <input type="radio" name="ppe_${escHtml(item.ItemID)}" value="compliant" class="accent-emerald-500 sc-ppe-radio" onchange="window._scPPECalc()">
-                <span class="text-emerald-600 font-medium">Compliant</span>
-            </label>
-            <label class="flex items-center gap-1.5 cursor-pointer text-sm">
-                <input type="radio" name="ppe_${escHtml(item.ItemID)}" value="non-compliant" class="accent-red-500 sc-ppe-radio" onchange="window._scPPECalc()">
-                <span class="text-red-500 font-medium">Non-Compliant</span>
-            </label>
-            <label class="flex items-center gap-1.5 cursor-pointer text-sm">
-                <input type="radio" name="ppe_${escHtml(item.ItemID)}" value="na" checked class="accent-slate-400 sc-ppe-radio" onchange="window._scPPECalc()">
-                <span class="text-slate-400">N/A</span>
-            </label>
-        </div>
-    </div>`).join('');
+    const areaOpts = _scAreas.map(a => `<option value="${escHtml(a)}">${escHtml(a)}</option>`).join('');
 
     openModal('บันทึกผล PPE Inspection', `
     <form id="sc-ppef" class="space-y-5">
         <div class="rounded-xl border border-slate-100 p-4 space-y-3 bg-slate-50/50">
-            <p class="text-xs font-bold text-slate-500 uppercase tracking-wide">ข้อมูลพื้นฐาน</p>
-            <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                <div><label class="block text-sm font-semibold text-slate-700 mb-1">วันที่ตรวจ</label>
-                    <input name="InspectionDate" type="date" required value="${today}" class="form-input w-full"></div>
-                <div><label class="block text-sm font-semibold text-slate-700 mb-1">Area/พื้นที่</label>
-                    <input name="Area" type="text" placeholder="เช่น Production Zone A" class="form-input w-full"></div>
+            <p class="text-xs font-bold text-slate-500 uppercase tracking-wide">ข้อมูลพื้นฐาน / Basic Information</p>
+            <div>
+                <label class="block text-sm font-semibold text-slate-700 mb-1">เทมเพลต PPE ตามประเภทงาน / PPE Template <span class="text-red-500">*</span></label>
+                <select id="sc-ppef-wt" name="WorkTypeID" required class="form-input w-full">
+                    <option value="">— เลือกเทมเพลต / Select Template —</option>
+                    ${wtOpts}
+                </select>
+                <p class="text-[11px] text-slate-400 mt-1">เลือกเทมเพลตก่อน ระบบจะแสดงรายการ PPE ที่ต้องตรวจตามประเภทงานนี้</p>
             </div>
             <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                <div><label class="block text-sm font-semibold text-slate-700 mb-1">แผนก <span class="text-red-500">*</span></label>
-                    ${_departments.length > 0
-                        ? `<select name="Department" required class="form-input w-full"><option value="">— เลือกแผนก —</option>${deptOpts}</select>`
-                        : `<input name="Department" type="text" required placeholder="ชื่อแผนก" class="form-input w-full">`}
-                </div>
-                <div><label class="block text-sm font-semibold text-slate-700 mb-1">ประเภทงาน</label>
-                    <select id="sc-ppef-wt" name="WorkTypeID" class="form-input w-full">
-                        <option value="">— เลือกประเภทงาน (ถ้ามี) —</option>
-                        ${wtOpts}
+                <div><label class="block text-sm font-semibold text-slate-700 mb-1">วันที่ตรวจ / Inspection Date</label>
+                    <input name="InspectionDate" type="date" required value="${today}" class="form-input w-full"></div>
+                <div>
+                    <label class="block text-sm font-semibold text-slate-700 mb-1">พื้นที่ / Area</label>
+                    <select id="sc-ppef-area-sel" class="form-input w-full">
+                        <option value="">— เลือกพื้นที่ / Select Area —</option>
+                        ${areaOpts}
+                        <option value="__other__">อื่น ๆ / Other</option>
                     </select>
+                    <input id="sc-ppef-area-other" type="text" placeholder="ระบุพื้นที่ / Specify area" class="form-input w-full mt-2 hidden">
+                    <input id="sc-ppef-area" name="Area" type="hidden">
                 </div>
+            </div>
+            <div><label class="block text-sm font-semibold text-slate-700 mb-1">แผนก / Department <span class="text-red-500">*</span></label>
+                ${_departments.length > 0
+                    ? `<select name="Department" required class="form-input w-full"><option value="">— เลือกแผนก —</option>${deptOpts}</select>`
+                    : `<input name="Department" type="text" required placeholder="ชื่อแผนก" class="form-input w-full">`}
             </div>
         </div>
 
         <div class="rounded-xl border border-slate-100 p-4 space-y-3 bg-slate-50/50">
-            <p class="text-xs font-bold text-slate-500 uppercase tracking-wide">พนักงานที่ถูกตรวจ</p>
+            <p class="text-xs font-bold text-slate-500 uppercase tracking-wide">พนักงานที่ถูกตรวจ / Inspected Employee</p>
             <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                <div><label class="block text-sm font-semibold text-slate-700 mb-1">รหัส/ชื่อพนักงาน</label>
+                <div><label class="block text-sm font-semibold text-slate-700 mb-1">รหัส/ชื่อพนักงาน / Employee ID or Name</label>
                     <div class="relative">
                         <input id="sc-ppef-emp-q" type="text" placeholder="พิมพ์เพื่อค้นหา..."
                             class="form-input w-full" autocomplete="off"
@@ -2004,35 +3484,56 @@ async function openPPEForm() {
                     <input type="hidden" id="sc-ppef-emp-id" name="InspectedEmployeeID">
                     <input type="hidden" id="sc-ppef-emp-name" name="InspectedEmployeeName">
                 </div>
-                <div><label class="block text-sm font-semibold text-slate-700 mb-1">หรือระบุชื่อด้วยตนเอง</label>
-                    <input id="sc-ppef-emp-manual" name="InspectedManual" type="text" placeholder="ชื่อพนักงาน (กรณีไม่มีในระบบ)" class="form-input w-full"></div>
+                <div><label class="block text-sm font-semibold text-slate-700 mb-1">กรณีไม่มีในระบบ / Manual Entry</label>
+                    <input id="sc-ppef-emp-manual" name="InspectedManual" type="text" placeholder="ชื่อพนักงาน / Employee name" class="form-input w-full"></div>
             </div>
         </div>
 
         <div class="rounded-xl border border-slate-100 p-4 space-y-3 bg-slate-50/50">
-            <p class="text-xs font-bold text-slate-500 uppercase tracking-wide">ผู้ตรวจ (เว้นว่าง = ใช้บัญชีปัจจุบัน)</p>
+            <p class="text-xs font-bold text-slate-500 uppercase tracking-wide">ผู้ตรวจ / Inspector</p>
             <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                <div><label class="block text-sm font-semibold text-slate-700 mb-1">รหัส/ชื่อผู้ตรวจ</label>
+                <div><label class="block text-sm font-semibold text-slate-700 mb-1">รหัส/ชื่อผู้ตรวจ / Inspector ID or Name</label>
                     <div class="relative">
-                        <input id="sc-ppef-insp-q" type="text" placeholder="พิมพ์เพื่อค้นหา..."
+                        <input id="sc-ppef-insp-q" type="text" value="${escHtml(currentUserName ? `${currentUserName} (${currentUserId})` : '')}" placeholder="พิมพ์เพื่อค้นหา..."
                             class="form-input w-full" autocomplete="off"
                             oninput="window._scPPEInspSearch(this.value)">
                         <div id="sc-ppef-insp-dd" class="absolute z-50 w-full bg-white border border-slate-200 rounded-lg shadow-lg hidden max-h-48 overflow-y-auto top-full mt-1"></div>
                     </div>
-                    <input type="hidden" id="sc-ppef-insp-id" name="InspectorID">
-                    <input type="hidden" id="sc-ppef-insp-name" name="InspectorName">
+                    <input type="hidden" id="sc-ppef-insp-id" name="InspectorID" value="${escHtml(currentUserId)}">
+                    <input type="hidden" id="sc-ppef-insp-name" name="InspectorName" value="${escHtml(currentUserName)}">
                 </div>
-                <div><label class="block text-sm font-semibold text-slate-700 mb-1">หมายเหตุ</label>
+                <div><label class="block text-sm font-semibold text-slate-700 mb-1">หมายเหตุ / Note</label>
                     <textarea name="Notes" rows="2" class="form-textarea w-full resize-none" placeholder="หมายเหตุ..."></textarea></div>
             </div>
         </div>
 
+        <div class="rounded-xl border border-slate-100 p-4 space-y-3 bg-slate-50/50">
+            <p class="text-xs font-bold text-slate-500 uppercase tracking-wide">หลักฐานประกอบ / Evidence</p>
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <label class="block">
+                    <span class="block text-xs font-semibold text-slate-500 mb-1">เลือกรูป/ไฟล์ / Choose File</span>
+                    <input id="sc-ppef-evidence" type="file" accept="image/*,.pdf,.doc,.docx,.xls,.xlsx" class="form-input w-full">
+                </label>
+                <label class="block">
+                    <span class="block text-xs font-semibold text-slate-500 mb-1">ถ่ายรูป / Take Photo</span>
+                    <input id="sc-ppef-camera" type="file" accept="image/*" capture="environment" class="form-input w-full">
+                </label>
+            </div>
+            <div id="sc-ppef-evidence-preview" class="hidden rounded-lg border border-slate-100 bg-white p-2 text-xs text-slate-500"></div>
+            <p class="text-xs text-slate-400">รองรับรูปภาพ PDF และไฟล์เอกสาร หรือถ่ายรูปจากมือถือเพื่อเก็บหลักฐานบน server บริษัท</p>
+        </div>
+
         <div class="rounded-xl border border-slate-200 overflow-hidden">
             <div class="px-4 py-3 bg-slate-50 border-b border-slate-100 flex items-center justify-between">
-                <p class="text-xs font-bold text-slate-600 uppercase tracking-wide">PPE Checklist (${itemsToShow.length} รายการ)</p>
-                <div id="sc-ppef-result" class="text-xs font-semibold text-slate-400">ยังไม่มีการเลือก</div>
+                <div>
+                    <p class="text-xs font-bold text-slate-600 uppercase tracking-wide">รายการตรวจ PPE / PPE Checklist</p>
+                    <p id="sc-ppef-template-note" class="text-[11px] text-slate-400 mt-0.5">กรุณาเลือกเทมเพลตก่อนเริ่มตรวจ / Please select a template</p>
+                </div>
+                <div id="sc-ppef-result" class="text-xs font-semibold text-slate-400">ยังไม่มีการเลือก / No selection</div>
             </div>
-            <div class="px-4 divide-y divide-slate-100">${checklist}</div>
+            <div id="sc-ppef-checklist" class="px-4 divide-y divide-slate-100">
+                <div class="py-8 text-center text-sm text-slate-400">เลือกเทมเพลต PPE ตามประเภทงานเพื่อแสดงรายการตรวจ / Select a PPE template to show checklist</div>
+            </div>
         </div>
 
         <div id="sc-ppef-err" class="text-sm text-red-500 hidden"></div>
@@ -2043,23 +3544,103 @@ async function openPPEForm() {
     </form>`, 'max-w-2xl');
 
     setTimeout(() => {
+        const getItemImg = item => item.ImageUrl
+            ? `<img src="${escHtml(safeResourceUrl(item.ImageUrl))}" alt="${escHtml(item.ItemName)}" class="w-11 h-11 rounded-lg object-cover border border-slate-200 bg-white flex-shrink-0">`
+            : `<div class="w-11 h-11 rounded-lg bg-emerald-50 border border-emerald-100 flex items-center justify-center text-emerald-600 flex-shrink-0"><svg class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12.75L11.25 15 15 9.75"/></svg></div>`;
+
+        const renderTemplateChecklist = () => {
+            const wtSel = document.getElementById('sc-ppef-wt');
+            const wrap = document.getElementById('sc-ppef-checklist');
+            const note = document.getElementById('sc-ppef-template-note');
+            const wt = _ppeWorkTypes.find(w => w.WorkTypeID === wtSel?.value);
+            const items = wt?.items || [];
+            if (!wrap) return;
+            if (!wt) {
+                wrap.innerHTML = '<div class="py-8 text-center text-sm text-slate-400">เลือกเทมเพลต PPE ตามประเภทงานเพื่อแสดงรายการตรวจ / Select a PPE template to show checklist</div>';
+                if (note) note.textContent = 'กรุณาเลือกเทมเพลตก่อนเริ่มตรวจ / Please select a template';
+                window._scPPECalc();
+                return;
+            }
+            if (!items.length) {
+                wrap.innerHTML = '<div class="py-8 text-center text-sm text-amber-600">เทมเพลตนี้ยังไม่มีรายการ PPE / This template has no PPE items</div>';
+                if (note) note.textContent = `${wt.Name} · 0 รายการ / items`;
+                window._scPPECalc();
+                return;
+            }
+            if (note) note.textContent = `${wt.Name} · ${items.length} รายการ / items`;
+            wrap.innerHTML = items.map((item, idx) => `
+            <div id="sc-prow-${escHtml(item.ItemID)}" class="flex flex-col lg:flex-row lg:items-center justify-between py-3 gap-3">
+                <div class="flex items-center gap-3 min-w-0">
+                    <span class="w-6 h-6 rounded-full text-xs font-bold flex items-center justify-center flex-shrink-0 bg-emerald-100 text-emerald-700">${idx+1}</span>
+                    ${getItemImg(item)}
+                    <div class="min-w-0">
+                        <p class="text-sm font-semibold text-slate-800 truncate">${escHtml(item.ItemName)}</p>
+                        ${item.Description ? `<p class="text-xs text-slate-400 mt-0.5">${escHtml(item.Description)}</p>` : ''}
+                    </div>
+                </div>
+                <div class="flex flex-wrap gap-3 flex-shrink-0">
+                    <label class="flex items-center gap-1.5 cursor-pointer text-sm">
+                        <input type="radio" name="ppe_${escHtml(item.ItemID)}" value="compliant" class="accent-emerald-500 sc-ppe-radio" onchange="window._scPPECalc()">
+                        <span class="text-emerald-600 font-medium">ผ่าน / Compliant</span>
+                    </label>
+                    <label class="flex items-center gap-1.5 cursor-pointer text-sm">
+                        <input type="radio" name="ppe_${escHtml(item.ItemID)}" value="non-compliant" class="accent-red-500 sc-ppe-radio" onchange="window._scPPECalc()">
+                        <span class="text-red-500 font-medium">ไม่ผ่าน / Non-Compliant</span>
+                    </label>
+                    <label class="flex items-center gap-1.5 cursor-pointer text-sm">
+                        <input type="radio" name="ppe_${escHtml(item.ItemID)}" value="na" checked class="accent-slate-400 sc-ppe-radio" onchange="window._scPPECalc()">
+                        <span class="text-slate-400">ไม่เกี่ยวข้อง / N/A</span>
+                    </label>
+                </div>
+            </div>`).join('');
+            window._scPPECalc();
+        };
+
+        document.getElementById('sc-ppef-wt')?.addEventListener('change', renderTemplateChecklist);
+
+        const syncArea = () => {
+            const sel = document.getElementById('sc-ppef-area-sel');
+            const other = document.getElementById('sc-ppef-area-other');
+            const hidden = document.getElementById('sc-ppef-area');
+            const isOther = sel?.value === '__other__';
+            other?.classList.toggle('hidden', !isOther);
+            if (hidden) hidden.value = isOther ? (other?.value || '').trim() : (sel?.value || '').trim();
+        };
+        document.getElementById('sc-ppef-area-sel')?.addEventListener('change', syncArea);
+        document.getElementById('sc-ppef-area-other')?.addEventListener('input', syncArea);
+
+        const updateEvidencePreview = () => {
+            const file = document.getElementById('sc-ppef-camera')?.files?.[0] || document.getElementById('sc-ppef-evidence')?.files?.[0];
+            const box = document.getElementById('sc-ppef-evidence-preview');
+            if (!box) return;
+            if (!file) { box.classList.add('hidden'); box.innerHTML = ''; return; }
+            box.classList.remove('hidden');
+            if (file.type?.startsWith('image/')) {
+                const url = URL.createObjectURL(file);
+                box.innerHTML = `<div class="flex items-center gap-3"><img src="${url}" class="w-16 h-16 rounded-lg object-cover border border-slate-200"><div><p class="font-semibold text-slate-700">${escHtml(file.name)}</p><p>${Math.round(file.size/1024)} KB</p></div></div>`;
+            } else {
+                box.innerHTML = `<div class="font-semibold text-slate-700">${escHtml(file.name)}</div><div>${Math.round(file.size/1024)} KB</div>`;
+            }
+        };
+        document.getElementById('sc-ppef-evidence')?.addEventListener('change', updateEvidencePreview);
+        document.getElementById('sc-ppef-camera')?.addEventListener('change', updateEvidencePreview);
+
         window._scPPECalc = () => {
             const radios = document.querySelectorAll('.sc-ppe-radio');
-            let compliant = 0, nonCompliant = 0, total = 0;
+            let compliant = 0, nonCompliant = 0, total = 0, assessed = 0;
             const names = {};
             radios.forEach(r => {
                 if (!names[r.name]) { names[r.name] = true; total++; }
-                if (r.checked && r.value === 'compliant')     compliant++;
-                if (r.checked && r.value === 'non-compliant') nonCompliant++;
+                if (r.checked && r.value === 'compliant')     { compliant++; assessed++; }
+                if (r.checked && r.value === 'non-compliant') { nonCompliant++; assessed++; }
             });
-            const checked = compliant + nonCompliant;
             const res = document.getElementById('sc-ppef-result');
             if (res) {
-                const isPass = checked > 0 && nonCompliant === 0;
-                res.textContent = checked > 0
-                    ? `${compliant}/${checked} รายการ — ${isPass ? 'ผ่าน' : 'ไม่ผ่าน'}`
-                    : 'ยังไม่มีการเลือก';
-                res.className = `text-xs font-semibold ${isPass ? 'text-emerald-600' : checked > 0 ? 'text-red-600' : 'text-slate-400'}`;
+                const isPass = assessed > 0 && nonCompliant === 0;
+                res.textContent = assessed > 0
+                    ? `${compliant}/${assessed} รายการ — ${isPass ? 'ผ่าน / Pass' : 'ไม่ผ่าน / Fail'}`
+                    : 'ยังไม่มีการเลือก / No selection';
+                res.className = `text-xs font-semibold ${isPass ? 'text-emerald-600' : assessed > 0 ? 'text-red-600' : 'text-slate-400'}`;
             }
             // Highlight non-compliant rows
             radios.forEach(r => {
@@ -2075,20 +3656,22 @@ async function openPPEForm() {
             if (!dd) return;
             if (!q || q.length < 2) { dd.classList.add('hidden'); return; }
             try {
-                const res = await API.get(`/accident/employees?q=${encodeURIComponent(q)}`);
-                const list = res?.employees || [];
+                const res = await API.get(`/person-search/employees?q=${encodeURIComponent(q)}&limit=20`);
+                const list = res?.data || [];
                 dd.innerHTML = list.length
-                    ? list.map(e => `<div class="px-3 py-2 text-sm hover:bg-slate-50 cursor-pointer" onclick="window._scPPEEmpSelect('${escHtml(e.EmployeeID)}','${escHtml(e.Name||e.EmployeeName||'')}')"><span class="font-medium">${escHtml(e.Name||e.EmployeeName||'')}</span> <span class="text-slate-400 text-xs">${escHtml(e.EmployeeID)} · ${escHtml(e.Department||'')}</span></div>`).join('')
-                    : '<div class="px-3 py-2 text-sm text-slate-400">ไม่พบพนักงาน</div>';
+                    ? list.map(e => `<div class="px-3 py-2 text-sm hover:bg-slate-50 cursor-pointer" onclick="window._scPPEEmpSelect(${inlineArg(e.EmployeeID)},${inlineArg(e.EmployeeName||'')},${inlineArg(e.Department||'')})"><span class="font-medium">${escHtml(e.EmployeeName||'')}</span> <span class="text-slate-400 text-xs">${escHtml(e.EmployeeID)} · ${escHtml(e.Department||'')}</span></div>`).join('')
+                    : '<div class="px-3 py-2 text-sm text-slate-400">ไม่พบพนักงาน / No employee found</div>';
                 dd.classList.remove('hidden');
             } catch { dd.classList.add('hidden'); }
         };
 
-        window._scPPEEmpSelect = (id, name) => {
+        window._scPPEEmpSelect = (id, name, dept) => {
             document.getElementById('sc-ppef-emp-id').value   = id;
             document.getElementById('sc-ppef-emp-name').value = name;
             document.getElementById('sc-ppef-emp-q').value    = `${name} (${id})`;
             document.getElementById('sc-ppef-emp-dd').classList.add('hidden');
+            const deptEl = document.querySelector('#sc-ppef [name="Department"]');
+            if (dept && deptEl && !deptEl.value) deptEl.value = dept;
         };
 
         window._scPPEInspSearch = async (q) => {
@@ -2096,11 +3679,11 @@ async function openPPEForm() {
             if (!dd) return;
             if (!q || q.length < 2) { dd.classList.add('hidden'); return; }
             try {
-                const res = await API.get(`/accident/employees?q=${encodeURIComponent(q)}`);
-                const list = res?.employees || [];
+                const res = await API.get(`/person-search/employees?q=${encodeURIComponent(q)}&limit=20`);
+                const list = res?.data || [];
                 dd.innerHTML = list.length
-                    ? list.map(e => `<div class="px-3 py-2 text-sm hover:bg-slate-50 cursor-pointer" onclick="window._scPPEInspSelect('${escHtml(e.EmployeeID)}','${escHtml(e.Name||e.EmployeeName||'')}')"><span class="font-medium">${escHtml(e.Name||e.EmployeeName||'')}</span> <span class="text-slate-400 text-xs">${escHtml(e.EmployeeID)}</span></div>`).join('')
-                    : '<div class="px-3 py-2 text-sm text-slate-400">ไม่พบพนักงาน</div>';
+                    ? list.map(e => `<div class="px-3 py-2 text-sm hover:bg-slate-50 cursor-pointer" onclick="window._scPPEInspSelect(${inlineArg(e.EmployeeID)},${inlineArg(e.EmployeeName||'')})"><span class="font-medium">${escHtml(e.EmployeeName||'')}</span> <span class="text-slate-400 text-xs">${escHtml(e.EmployeeID)}</span></div>`).join('')
+                    : '<div class="px-3 py-2 text-sm text-slate-400">ไม่พบพนักงาน / No employee found</div>';
                 dd.classList.remove('hidden');
             } catch { dd.classList.add('hidden'); }
         };
@@ -2112,17 +3695,27 @@ async function openPPEForm() {
             document.getElementById('sc-ppef-insp-dd').classList.add('hidden');
         };
 
-        document.getElementById('sc-ppef')?.addEventListener('submit', async e => {
+        document.getElementById('sc-ppef')?.addEventListener('submit', guardSubmitHandler(async e => {
             e.preventDefault();
             const fd    = new FormData(e.target);
             const errEl = document.getElementById('sc-ppef-err');
+            const submitBtn = document.getElementById('sc-ppef-submit');
+            if (submitBtn?.disabled) return;
+            errEl?.classList.add('hidden');
+            let uploadedEvidenceUrl = '';
             try {
                 const wtSel  = document.getElementById('sc-ppef-wt');
                 const wtName = wtSel?.options[wtSel.selectedIndex]?.dataset?.name || '';
                 const empName = fd.get('InspectedEmployeeName') || fd.get('InspectedManual') || '';
+                const selectedWorkType = _ppeWorkTypes.find(w => w.WorkTypeID === fd.get('WorkTypeID'));
+                if (!selectedWorkType) {
+                    errEl.textContent = 'กรุณาเลือกเทมเพลต PPE ตามประเภทงาน / Please select PPE template';
+                    errEl.classList.remove('hidden');
+                    return;
+                }
 
                 // Client-side: require at least one item with a Compliant/Non-Compliant status
-                const itemsToUse2 = _ppeItems.length > 0 ? _ppeItems : PPE_ITEMS.map(i => ({ ItemID: i.key }));
+                const itemsToUse2 = selectedWorkType.items || [];
                 const hasSel = itemsToUse2.some(item => {
                     const v = fd.get(`ppe_${item.ItemID}`);
                     return v === 'compliant' || v === 'non-compliant';
@@ -2145,13 +3738,21 @@ async function openPPEForm() {
                     InspectorID:            fd.get('InspectorID')   || '',
                     InspectorName:          fd.get('InspectorName') || '',
                 };
-                const itemsToUse = _ppeItems.length > 0 ? _ppeItems : PPE_ITEMS.map(i => ({ ItemID: i.key }));
+                const itemsToUse = selectedWorkType.items || [];
                 const items = itemsToUse.map(item => ({
                     ItemID: item.ItemID,
                     Status: fd.get(`ppe_${item.ItemID}`) || '',
                 }));
                 payload.items = JSON.stringify(items);
 
+                const evidenceFile = document.getElementById('sc-ppef-camera')?.files?.[0] || document.getElementById('sc-ppef-evidence')?.files?.[0];
+                if (evidenceFile) {
+                    const uploaded = await uploadSafetyCultureFile(evidenceFile, 'หลักฐาน PPE');
+                    uploadedEvidenceUrl = uploaded.url;
+                    payload.ImageUrl = uploaded.url;
+                }
+
+                if (submitBtn) { submitBtn.disabled = true; submitBtn.textContent = 'กำลังบันทึก...'; }
                 const result = await API.post('/safety-culture/ppe-inspections', payload);
 
                 // Show warning if auto-violation logging failed on the backend
@@ -2163,11 +3764,35 @@ async function openPPEForm() {
                 showToast('บันทึกผล PPE Inspection สำเร็จ', 'success');
                 await _loadHeroStats();
             } catch (err) {
+                await cleanupUploadedUrl(uploadedEvidenceUrl);
                 errEl.textContent = escHtml(err.message || 'เกิดข้อผิดพลาด');
                 errEl.classList.remove('hidden');
+            } finally {
+                if (submitBtn) { submitBtn.disabled = false; submitBtn.textContent = 'บันทึก'; }
             }
-        });
+        }));
     }, 50);
+}
+
+function previewPPEEvidence(id) {
+    const r = _ppeInspections.find(x => x.InspectionID === id);
+    if (!r?.ImageUrl) return;
+    const name = getUploadDisplayName(r.ImageUrl, 'PPE evidence');
+    if (_isImageEvidence(r.ImageUrl)) {
+        openModal('PPE Evidence', `
+            <div class="space-y-3">
+                <div class="rounded-xl overflow-hidden border border-slate-100 bg-slate-50 flex justify-center">
+                    <img src="${escHtml(safeResourceUrl(r.ImageUrl))}" alt="${escHtml(name)}" class="max-w-full" style="max-height:70vh;object-fit:contain">
+                </div>
+                <a href="${escHtml(r.ImageUrl)}" target="_blank" rel="noopener" class="inline-flex items-center gap-2 text-sm font-semibold text-emerald-700 hover:underline">${escHtml(name || 'Open evidence')}</a>
+            </div>`, 'max-w-4xl');
+        return;
+    }
+    openModal('PPE Evidence', `
+        <div class="rounded-xl border border-slate-100 bg-slate-50 p-5">
+            <p class="text-sm text-slate-600 mb-3">${escHtml(name || 'Attached evidence')}</p>
+            <a href="${escHtml(r.ImageUrl)}" target="_blank" rel="noopener" class="btn btn-primary px-4 py-2 text-sm inline-flex">Open file</a>
+        </div>`, 'max-w-lg');
 }
 
 function viewPPERecord(id) {
@@ -2181,9 +3806,9 @@ function viewPPERecord(id) {
 
     const statusBadge = (v) => {
         const s = (v || '').toLowerCase();
-        if (s === 'compliant')     return '<span class="text-sm font-semibold text-emerald-600">Compliant</span>';
-        if (s === 'non-compliant') return '<span class="text-sm font-semibold text-red-500">Non-Compliant</span>';
-        return '<span class="text-sm text-slate-400">N/A</span>';
+        if (s === 'compliant')     return '<span class="text-sm font-semibold text-emerald-600">ผ่าน / Compliant</span>';
+        if (s === 'non-compliant') return '<span class="text-sm font-semibold text-red-500">ไม่ผ่าน / Non-Compliant</span>';
+        return '<span class="text-sm text-slate-400">ไม่เกี่ยวข้อง / N/A</span>';
     };
 
     let rows;
@@ -2203,6 +3828,7 @@ function viewPPERecord(id) {
             </div>`).join('');
     }
     const pct = parseFloat(r.CompliancePct || 0);
+    const evidenceName = r.ImageUrl ? getUploadDisplayName(r.ImageUrl, 'PPE evidence') : '';
     openModal('รายละเอียด PPE Inspection', `
     <div class="space-y-4">
         <div class="flex items-center justify-between">
@@ -2222,6 +3848,16 @@ function viewPPERecord(id) {
             <span class="text-slate-700">Compliance</span>
             <span class="text-xl ${pct>=90?'text-emerald-600':pct>=70?'text-amber-600':'text-red-600'}">${pct.toFixed(0)}% <span class="text-sm font-normal text-slate-500">(${r.CompliantItems||0}/${r.TotalItems||0})</span></span>
         </div>
+        ${r.ImageUrl ? `<div class="rounded-xl border border-slate-100 bg-slate-50 p-3">
+            <div class="text-xs font-semibold text-slate-500 uppercase mb-2">Evidence / หลักฐานแนบ</div>
+            ${_isImageEvidence(r.ImageUrl) ? `<button type="button" onclick="window._scPreviewPPEEvidence('${escHtml(r.InspectionID)}')" class="block w-full mb-3 overflow-hidden rounded-lg border border-slate-200 bg-white">
+                <img src="${escHtml(safeResourceUrl(r.ImageUrl))}" alt="${escHtml(evidenceName)}" class="w-full" style="max-height:180px;object-fit:cover">
+            </button>` : ''}
+            <button type="button" onclick="window._scPreviewPPEEvidence('${escHtml(r.InspectionID)}')" class="inline-flex items-center gap-2 text-sm font-semibold text-emerald-700 hover:underline">
+                <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13.5 6H5.25A2.25 2.25 0 003 8.25v10.5A2.25 2.25 0 005.25 21h10.5A2.25 2.25 0 0018 18.75V10.5m-10.5 6L21 3m0 0h-5.25M21 3v5.25"/></svg>
+                ${escHtml(evidenceName || 'เปิดหลักฐาน')}
+            </button>
+        </div>` : ''}
         ${r.Notes ? `<div class="text-xs text-slate-500 bg-slate-50 rounded-lg p-3"><strong>หมายเหตุ:</strong> ${escHtml(r.Notes)}</div>` : ''}
     </div>`, 'max-w-md');
 }
@@ -2243,24 +3879,31 @@ function openWorkTypeForm(id) {
     const wt = id ? _ppeWorkTypes.find(w => w.WorkTypeID === id) : null;
     const selectedItemIds = new Set((wt?.items || []).map(i => i.ItemID));
     const itemCheckboxes = _ppeItems.map(item => `
-    <label class="flex items-center gap-2 py-1.5 cursor-pointer">
+    <label class="flex items-start gap-3 rounded-xl border border-slate-100 bg-white px-3 py-3 cursor-pointer hover:border-emerald-200 hover:bg-emerald-50/40 transition-colors">
         <input type="checkbox" name="item_${escHtml(item.ItemID)}" value="${escHtml(item.ItemID)}" ${selectedItemIds.has(item.ItemID)?'checked':''}
-            class="accent-emerald-500 w-4 h-4">
-        <span class="text-sm text-slate-700">${escHtml(item.ItemName)}</span>
+            class="accent-emerald-500 w-4 h-4 mt-0.5 flex-shrink-0">
+        <span class="text-sm text-slate-700 leading-5">${escHtml(item.ItemName)}</span>
     </label>`).join('');
 
     openModal(wt ? 'แก้ไขประเภทงาน' : 'เพิ่มประเภทงาน', `
-    <form id="sc-wtf" class="space-y-4">
+    <form id="sc-wtf" class="space-y-5">
         ${wt ? `<input type="hidden" name="WorkTypeID" value="${escHtml(wt.WorkTypeID)}">` : ''}
-        <div><label class="block text-sm font-semibold text-slate-700 mb-1.5">ชื่อประเภทงาน <span class="text-red-500">*</span></label>
-            <input name="Name" type="text" required value="${escHtml(wt?.Name||'')}" placeholder="เช่น งานเชื่อม, งานบรรจุ..." class="form-input w-full"></div>
-        <div><label class="block text-sm font-semibold text-slate-700 mb-1.5">คำอธิบาย</label>
-            <input name="Description" type="text" value="${escHtml(wt?.Description||'')}" class="form-input w-full"></div>
+        <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
+            <div><label class="block text-sm font-semibold text-slate-700 mb-1.5">ชื่อประเภทงาน <span class="text-red-500">*</span></label>
+                <input name="Name" type="text" required value="${escHtml(wt?.Name||'')}" placeholder="เช่น งานเชื่อม, งานบรรจุ..." class="form-input w-full"></div>
+            <div><label class="block text-sm font-semibold text-slate-700 mb-1.5">คำอธิบาย</label>
+                <input name="Description" type="text" value="${escHtml(wt?.Description||'')}" class="form-input w-full"></div>
+        </div>
         ${_ppeItems.length ? `
         <div>
-            <label class="block text-sm font-semibold text-slate-700 mb-2">PPE ที่ต้องใช้</label>
-            <div class="bg-slate-50 rounded-xl border border-slate-100 p-3 space-y-0.5 max-h-48 overflow-y-auto">
+            <div class="flex items-end justify-between gap-3 mb-2">
+                <label class="block text-sm font-semibold text-slate-700">PPE ที่ต้องใช้</label>
+                <span class="text-xs text-slate-400">${_ppeItems.length} รายการ</span>
+            </div>
+            <div class="bg-slate-50 rounded-2xl border border-slate-100 p-4 max-h-[58vh] overflow-y-auto">
+                <div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-2.5">
                 ${itemCheckboxes}
+                </div>
             </div>
         </div>` : ''}
         <div id="sc-wtf-err" class="text-sm text-red-500 hidden"></div>
@@ -2268,19 +3911,25 @@ function openWorkTypeForm(id) {
             <button type="button" onclick="window.closeModal()" class="btn btn-secondary px-5">ยกเลิก</button>
             <button type="submit" class="btn btn-primary px-5">บันทึก</button>
         </div>
-    </form>`, 'max-w-md');
+    </form>`, 'max-w-5xl');
 
     setTimeout(() => {
-        document.getElementById('sc-wtf')?.addEventListener('submit', async e => {
+        document.getElementById('sc-wtf')?.addEventListener('submit', guardSubmitHandler(async e => {
             e.preventDefault();
             const fd    = new FormData(e.target);
             const errEl = document.getElementById('sc-wtf-err');
             try {
                 const itemIds = _ppeItems.filter(item => fd.get(`item_${item.ItemID}`)).map(item => item.ItemID);
+                if (!itemIds.length) {
+                    errEl.textContent = 'กรุณาเลือก PPE ที่ต้องใช้ในเทมเพลตอย่างน้อย 1 รายการ';
+                    errEl.classList.remove('hidden');
+                    return;
+                }
                 const payload = {
                     Name:        fd.get('Name')        || '',
                     Description: fd.get('Description') || '',
                     itemIds:     JSON.stringify(itemIds),
+                    ItemIDs:     itemIds,
                 };
                 const wtId = fd.get('WorkTypeID');
                 if (wtId) {
@@ -2295,7 +3944,7 @@ function openWorkTypeForm(id) {
                 errEl.textContent = escHtml(err.message || 'เกิดข้อผิดพลาด');
                 errEl.classList.remove('hidden');
             }
-        });
+        }));
     }, 50);
 }
 
@@ -2359,9 +4008,19 @@ function openPPEItemForm(id) {
     openModal(item ? 'แก้ไขรายการ PPE' : 'เพิ่มรายการ PPE', `
     <form id="sc-pif" class="space-y-4">
         ${item ? `<input type="hidden" name="ItemID" value="${escHtml(item.ItemID)}">` : ''}
-        <div><label class="block text-sm font-semibold text-slate-700 mb-1.5">ชื่อรายการ PPE</label>
+        <div><label class="block text-sm font-semibold text-slate-700 mb-1.5">ชื่อรายการ PPE / PPE Item Name</label>
             <input name="ItemName" type="text" required value="${escHtml(item?.ItemName || '')}" placeholder="เช่น Safety Helmet, Gloves, ..." class="form-input w-full"></div>
-        <div><label class="block text-sm font-semibold text-slate-700 mb-1.5">ลำดับ (SortOrder)</label>
+        <div><label class="block text-sm font-semibold text-slate-700 mb-1.5">คำอธิบายสั้น / Description</label>
+            <textarea name="Description" rows="2" class="form-textarea w-full resize-none" placeholder="ใช้เมื่อต้องการอธิบายวิธีตรวจหรือจุดสังเกต">${escHtml(item?.Description || '')}</textarea></div>
+        <div>
+            <label class="block text-sm font-semibold text-slate-700 mb-1.5">รูปประกอบ / Item Image</label>
+            <input id="sc-pif-image-file" type="file" accept="image/*" class="form-input w-full">
+            <input name="ImageUrl" type="hidden" value="${escHtml(item?.ImageUrl || '')}">
+            <div id="sc-pif-preview" class="${item?.ImageUrl ? '' : 'hidden'} mt-2 rounded-lg border border-slate-100 bg-slate-50 p-2">
+                ${safeResourceUrl(item?.ImageUrl) ? `<img src="${escHtml(safeResourceUrl(item.ImageUrl))}" alt="${escHtml(item.ItemName)}" class="w-24 h-24 rounded-lg object-cover border border-slate-200">` : ''}
+            </div>
+        </div>
+        <div><label class="block text-sm font-semibold text-slate-700 mb-1.5">ลำดับ / Sort Order</label>
             <input name="SortOrder" type="number" min="1" value="${item?.SortOrder ?? (_ppeItems.length + 1)}" class="form-input w-full"></div>
         <div id="sc-pif-err" class="text-sm text-red-500 hidden"></div>
         <div class="flex justify-end gap-3 pt-3 border-t">
@@ -2371,11 +4030,26 @@ function openPPEItemForm(id) {
     </form>`, 'max-w-sm');
 
     setTimeout(() => {
-        document.getElementById('sc-pif')?.addEventListener('submit', async e => {
+        document.getElementById('sc-pif-image-file')?.addEventListener('change', e => {
+            const file = e.target.files?.[0];
+            const box = document.getElementById('sc-pif-preview');
+            if (!box || !file) return;
+            box.classList.remove('hidden');
+            box.innerHTML = `<img src="${URL.createObjectURL(file)}" alt="" class="w-24 h-24 rounded-lg object-cover border border-slate-200">`;
+        });
+
+        document.getElementById('sc-pif')?.addEventListener('submit', guardSubmitHandler(async e => {
             e.preventDefault();
             const data  = Object.fromEntries(new FormData(e.target).entries());
             const errEl = document.getElementById('sc-pif-err');
+            let uploadedImageUrl = '';
             try {
+                const imgFile = document.getElementById('sc-pif-image-file')?.files?.[0];
+                if (imgFile) {
+                    const uploaded = await uploadSafetyCultureFile(imgFile, 'รูป PPE');
+                    uploadedImageUrl = uploaded.url;
+                    data.ImageUrl = uploaded.url;
+                }
                 if (data.ItemID) {
                     await API.put(`/safety-culture/ppe-items/${data.ItemID}`, data);
                 } else {
@@ -2385,10 +4059,11 @@ function openPPEItemForm(id) {
                 showToast('บันทึกรายการ PPE สำเร็จ', 'success');
                 await _loadHeroStats();
             } catch (err) {
+                await cleanupUploadedUrl(uploadedImageUrl);
                 errEl.textContent = escHtml(err.message || 'เกิดข้อผิดพลาด');
                 errEl.classList.remove('hidden');
             }
-        });
+        }));
     }, 50);
 }
 
@@ -2566,7 +4241,7 @@ function _pdfPpeSection(pdf, yStart, margin, cW, pageH, ppeList) {
         });
     } else {
         // No SC_PPE_Items configured — fall back to itemBreakdown from backend ppeStats
-        const itemBreakdown = _dashData?.ppeStats?.itemBreakdown || [];
+        const itemBreakdown = _getPPEStats().itemBreakdown || [];
         if (!itemBreakdown.length) {
             pdf.setFont('helvetica', 'normal'); pdf.setFontSize(9); pdf.setTextColor(150, 150, 150);
             pdf.text('ยังไม่มีข้อมูลรายการ PPE', margin + 2, y); y += 8;
@@ -2669,8 +4344,415 @@ function _svgLine(trend, w = 340, h = 150) {
     </svg>`;
 }
 
-
 async function exportPDF() {
+    if (typeof window.jspdf === 'undefined') {
+        showToast('ไลบรารี PDF ยังโหลดไม่สำเร็จ', 'error'); return;
+    }
+    if (typeof window.html2canvas === 'undefined') {
+        showToast('ไลบรารี html2canvas ยังโหลดไม่สำเร็จ', 'error'); return;
+    }
+
+    const mo = _filterDashMonth;
+    const thMoFull = ['', 'มกราคม', 'กุมภาพันธ์', 'มีนาคม', 'เมษายน', 'พฤษภาคม', 'มิถุนายน',
+        'กรกฎาคม', 'สิงหาคม', 'กันยายน', 'ตุลาคม', 'พฤศจิกายน', 'ธันวาคม'];
+    const thMoShort = ['', 'ม.ค.', 'ก.พ.', 'มี.ค.', 'เม.ย.', 'พ.ค.', 'มิ.ย.',
+        'ก.ค.', 'ส.ค.', 'ก.ย.', 'ต.ค.', 'พ.ย.', 'ธ.ค.'];
+    const periodLabel = mo > 0 ? `${thMoFull[mo]} ${_filterYear}` : `ปี ${_filterYear}`;
+    const periodShort = mo > 0 ? `${thMoShort[mo]}${_filterYear}` : `${_filterYear}`;
+    const filename = mo > 0
+        ? `Safety_Culture_${_filterYear}_${String(mo).padStart(2, '0')}.pdf`
+        : `Safety_Culture_${_filterYear}.pdf`;
+
+    const filteredAsmts = mo === 0 ? _assessments
+        : _assessments.filter(a => a.AssessmentDate &&
+            parseInt(String(a.AssessmentDate).substring(5, 7), 10) === mo);
+    const filteredPPE = mo === 0 ? _ppeInspections
+        : _ppeInspections.filter(r => {
+            const d = r.InspectionDate || r.CreatedAt;
+            return d && parseInt(String(d).substring(5, 7), 10) === mo;
+        });
+    const filteredViol = mo === 0 ? _ppeViolations
+        : _ppeViolations.filter(v => v.ViolationDate &&
+            parseInt(String(v.ViolationDate).substring(5, 7), 10) === mo);
+
+    const ppePassCount = filteredPPE.filter(r => r.IsPass === 1 || r.IsPass === '1').length;
+    let ppePct = filteredPPE.length > 0 ? Math.round(ppePassCount / filteredPPE.length * 100) : null;
+    if (ppePct == null && mo === 0 && _getPPEStats().overall_pct != null) {
+        ppePct = parseFloat(_getPPEStats().overall_pct);
+    }
+
+    const scoreKeys = ['T1_Score', 'T2_Score', 'T3_Score', 'T4_Score', 'T5_Score', 'T7_Score'];
+    const computedAvgs = scoreKeys.map(k => {
+        const vals = filteredAsmts
+            .map(a => parseFloat(a[k]))
+            .filter(v => Number.isFinite(v));
+        return vals.length ? vals.reduce((a, b) => a + b, 0) / vals.length : null;
+    });
+    const fallbackScores = Array.isArray(_dashScores) ? _dashScores : [0, 0, 0, 0, 0, 0, 0];
+    const scoreOrFallback = (scoreIdx, avgIdx) => {
+        if (computedAvgs[avgIdx] != null) return computedAvgs[avgIdx];
+        return Number(fallbackScores[scoreIdx]) > 0 ? fallbackScores[scoreIdx] : 0;
+    };
+    const scores = [
+        scoreOrFallback(0, 0),
+        scoreOrFallback(1, 1),
+        scoreOrFallback(2, 2),
+        scoreOrFallback(3, 3),
+        scoreOrFallback(4, 4),
+        ppePct != null ? ppePct : (Number(fallbackScores[5]) > 0 ? fallbackScores[5] : 0),
+        scoreOrFallback(6, 5)
+    ];
+    _dashScores = scores;
+    const cultureScores = [scores[0], scores[1], scores[2], scores[3], scores[4], scores[6]];
+    const validScores = cultureScores.filter(v => v > 0);
+    const overallAvg = validScores.length
+        ? Math.round(validScores.reduce((a, b) => a + b, 0) / validScores.length) : null;
+    const mat = overallAvg != null ? getMaturity(overallAvg) : null;
+    const violVerbal = filteredViol.filter(v => v.WarningLevel === 'verbal').length;
+    const violNotice = filteredViol.filter(v => v.WarningLevel === 'safety_notice').length;
+    const violWritten = filteredViol.filter(v => v.WarningLevel === 'written_warning').length;
+
+    const scoreDefs = [
+        ['T1', 'เดินบน Walk Way', scores[0]],
+        ['T2', 'ไม่ใช้โทรศัพท์', scores[1]],
+        ['T3', 'ข้ามถนนทางม้าลาย', scores[2]],
+        ['T4', 'หยุดยืนชี้นิ้ว', scores[3]],
+        ['T5', 'ไม่ล้วงกระเป๋า', scores[4]],
+        ['T6', 'PPE Control', scores[5]],
+        ['T7', 'แยกขยะถูกต้อง', scores[6]]
+    ];
+    const rankedScores = scoreDefs
+        .filter(([, , score]) => Number(score) > 0)
+        .sort((a, b) => b[2] - a[2]);
+    const bestTopic = rankedScores[0];
+    const weakTopic = rankedScores[rankedScores.length - 1];
+    const suggestions = _buildSuggestionsFromScores(scores).slice(0, 4);
+
+    const deptMap = {};
+    filteredPPE.forEach(r => {
+        const dept = r.Department || r.DeptName || 'ไม่ระบุแผนก';
+        if (!deptMap[dept]) deptMap[dept] = { dept, total: 0, pass: 0 };
+        deptMap[dept].total += 1;
+        if (r.IsPass === 1 || r.IsPass === '1') deptMap[dept].pass += 1;
+    });
+    const deptRows = Object.values(deptMap)
+        .map(d => ({ ...d, pct: d.total ? Math.round(d.pass / d.total * 100) : 0 }))
+        .sort((a, b) => a.pct - b.pct || b.total - a.total)
+        .slice(0, 5);
+
+    const itemRows = [];
+    if (_ppeItems && _ppeItems.length) {
+        const itemTotals = {};
+        _ppeItems.forEach(it => {
+            const id = String(it.ItemID);
+            itemTotals[id] = { name: it.ItemName || `PPE ${id}`, total: 0, ok: 0 };
+        });
+        filteredPPE.forEach(r => {
+            let checks = r.ItemChecks || [];
+            if (typeof checks === 'string') {
+                try { checks = JSON.parse(checks); } catch { checks = []; }
+            }
+            checks.forEach(c => {
+                const id = String(c.ItemID || c.itemId || c.id || '');
+                if (!itemTotals[id]) return;
+                itemTotals[id].total += 1;
+                if (c.Status === 'ok' || c.status === 'ok' || c.IsOK === 1 || c.isOk === true) itemTotals[id].ok += 1;
+            });
+        });
+        Object.values(itemTotals)
+            .filter(it => it.total > 0)
+            .map(it => ({ ...it, pct: Math.round(it.ok / it.total * 100) }))
+            .sort((a, b) => a.pct - b.pct || b.total - a.total)
+            .slice(0, 5)
+            .forEach(it => itemRows.push(it));
+    }
+    if (!itemRows.length && _getPPEStats().itemBreakdown?.length) {
+        _getPPEStats().itemBreakdown
+            .map(item => ({
+                name: item.ItemName || '-',
+                total: item.total_count || 0,
+                ok: item.ok_count || 0,
+                pct: item.total_count > 0 ? Math.round(item.ok_count / item.total_count * 100) : 0
+            }))
+            .sort((a, b) => a.pct - b.pct || b.total - a.total)
+            .slice(0, 5)
+            .forEach(it => itemRows.push(it));
+    }
+
+    const dashboardTrend = Array.isArray(_dashData?.yearTrend) ? _dashData.yearTrend : [];
+    let trend = dashboardTrend
+        .filter(t => t && (t.avg_score != null || t.AvgScore != null))
+        .map(t => ({
+            AssessmentYear: t.AssessmentYear || t.year || t.Year || t.month_label || t.MonthLabel || '',
+            avg_score: Math.round(parseFloat(t.avg_score ?? t.AvgScore ?? 0))
+        }))
+        .filter(t => Number.isFinite(t.avg_score) && t.avg_score > 0);
+    if (!trend.length) {
+        const monthScores = Array.from({ length: 12 }, (_, i) => ({ m: i + 1, sum: 0, count: 0 }));
+        _assessments.forEach(a => {
+            if (!a.AssessmentDate || String(a.AssessmentDate).substring(0, 4) !== String(_filterYear)) return;
+            const m = parseInt(String(a.AssessmentDate).substring(5, 7), 10);
+            const vals = scoreKeys.map(k => parseFloat(a[k])).filter(v => Number.isFinite(v));
+            const val = vals.length ? vals.reduce((sum, v) => sum + v, 0) / vals.length : 0;
+            if (m >= 1 && m <= 12 && val > 0) {
+                monthScores[m - 1].sum += val;
+                monthScores[m - 1].count += 1;
+            }
+        });
+        trend = monthScores
+            .filter(r => r.count > 0)
+            .map(r => ({ AssessmentYear: thMoShort[r.m], avg_score: Math.round(r.sum / r.count) }));
+    }
+
+    const recentViol = filteredViol
+        .slice()
+        .sort((a, b) => String(b.ViolationDate || '').localeCompare(String(a.ViolationDate || '')))
+        .slice(0, 5);
+    const hasScoreData = scoreDefs.some(([, , score]) => Number(score) > 0);
+    const hasTrendData = trend.length > 0;
+
+    const statusColor = val => val == null ? '#64748b' : val >= 90 ? '#059669' : val >= 70 ? '#d97706' : '#dc2626';
+    const statusText = val => val == null ? 'N/A' : val >= 90 ? 'Good' : val >= 70 ? 'Watch' : 'Action';
+    const scoreText = val => val == null || Number(val) <= 0 ? 'N/A' : `${Math.round(val)}%`;
+    const row = (cells, opts = {}) => `<tr>${cells.map((c, i) => `<td style="${opts.bold ? 'font-weight:800;' : ''}${i === cells.length - 1 ? 'text-align:right;' : ''}">${c}</td>`).join('')}</tr>`;
+    const empty = text => `<div class="empty">${escHtml(text)}</div>`;
+    const metric = (label, value, note, color = '#065f46') => `
+        <div class="metric">
+            <div class="metric-label">${escHtml(label)}</div>
+            <div class="metric-value" style="color:${color};">${escHtml(String(value))}</div>
+            <div class="metric-note">${escHtml(note || '')}</div>
+        </div>`;
+    const section = (title, subtitle, html) => `
+        <section class="section">
+            <div class="section-head">
+                <div>
+                    <h2>${escHtml(title)}</h2>
+                    ${subtitle ? `<p>${escHtml(subtitle)}</p>` : ''}
+                </div>
+            </div>
+            ${html}
+        </section>`;
+    const table = (heads, bodyRows) => `
+        <table>
+            <thead><tr>${heads.map(h => `<th>${escHtml(h)}</th>`).join('')}</tr></thead>
+            <tbody>${bodyRows.join('')}</tbody>
+        </table>`;
+    const targetFor = code => code === 'T6' ? 90 : 70;
+    const actionDetailRows = scoreDefs
+        .map(([code, topic, score]) => {
+            const target = targetFor(code);
+            const hasScore = Number(score) > 0;
+            const gap = hasScore ? Math.max(0, target - Math.round(score)) : null;
+            const priority = !hasScore ? 'Data Gap' : gap > 0 ? (gap >= 20 ? 'Urgent' : 'Watch') : 'Stable';
+            return { code, topic, score, target, gap, priority };
+        })
+        .filter(r => r.priority !== 'Stable')
+        .sort((a, b) => {
+            if (a.priority === 'Data Gap' && b.priority !== 'Data Gap') return -1;
+            if (a.priority !== 'Data Gap' && b.priority === 'Data Gap') return 1;
+            return (b.gap || 0) - (a.gap || 0);
+        })
+        .slice(0, 5);
+    const actionDetail = section('7. Priority Action Detail', 'Topic targets and follow-up priority from Safety Culture data',
+        actionDetailRows.length
+            ? table(['Code', 'Topic', 'Current', 'Target', 'Priority'], actionDetailRows.map(r =>
+                row([
+                    escHtml(r.code),
+                    escHtml(r.topic),
+                    r.score > 0 ? `${Math.round(r.score)}%` : 'No data',
+                    `${r.target}%`,
+                    `<span style="color:${r.priority === 'Urgent' ? '#dc2626' : r.priority === 'Watch' ? '#d97706' : '#64748b'};font-weight:900;">${r.priority}</span>`
+                ])))
+            : `<div class="empty compact">ทุกหัวข้ออยู่ในเกณฑ์เป้าหมายของรอบรายงานนี้</div>`);
+    const healthItems = [
+        ['Score Readiness', hasScoreData ? 'Ready' : 'No scored topics', hasScoreData ? '#059669' : '#d97706'],
+        ['Trend Readiness', hasTrendData ? 'Ready' : 'No monthly trend', hasTrendData ? '#059669' : '#d97706'],
+        ['PPE Readiness', filteredPPE.length ? `${filteredPPE.length} checks` : 'No PPE checks', filteredPPE.length ? '#059669' : '#d97706'],
+        ['Violation Status', filteredViol.length ? `${filteredViol.length} records` : 'No violation', filteredViol.length ? '#dc2626' : '#059669']
+    ];
+    const reportHealth = section('4. Report Health', 'Data readiness for this Safety Culture dashboard export',
+        `<div class="health-grid">${healthItems.map(([label, value, color]) => `
+            <div class="health-item">
+                <b>${escHtml(label)}</b>
+                <span style="color:${color};">${escHtml(value)}</span>
+            </div>`).join('')}</div>`);
+
+    const page1 = `
+        <div class="grid metrics">
+            ${metric('Average Score', scoreText(overallAvg), 'Culture assessment topics', statusColor(overallAvg))}
+            ${metric('Maturity', mat ? mat.label : 'N/A', overallAvg != null ? `${overallAvg}% culture average` : 'No assessment', mat?.color || '#64748b')}
+            ${metric('PPE Compliance', ppePct == null ? 'N/A' : `${Math.round(ppePct)}%`, filteredPPE.length ? `${ppePassCount}/${filteredPPE.length} pass` : 'Dashboard aggregate', statusColor(ppePct))}
+            ${metric('Violations', filteredViol.length, `Verbal ${violVerbal} | Notice ${violNotice} | Written ${violWritten}`, filteredViol.length ? '#dc2626' : '#059669')}
+            ${metric('Assessment Records', filteredAsmts.length, periodLabel, '#0f766e')}
+            ${metric('PPE Checks', filteredPPE.length, 'Inspection records', '#0f766e')}
+        </div>
+        <div class="two-col">
+            ${section('1. Topic Score Register', 'Actual scores from Safety Culture dashboard',
+                table(['Code', 'Topic', 'Score', 'Status'], scoreDefs.map(([code, name, score]) =>
+                    row([escHtml(code), escHtml(name), scoreText(score), `<span style="color:${statusColor(score)};font-weight:800;">${statusText(score)}</span>`]))))}
+            ${section('2. Management Focus', 'Priority points for follow-up',
+                `<div class="focus-box">
+                    <div><b>Best Topic</b><span>${bestTopic ? `${escHtml(bestTopic[1])} (${Math.round(bestTopic[2])}%)` : 'N/A'}</span></div>
+                    <div><b>Weak Topic</b><span>${weakTopic ? `${escHtml(weakTopic[1])} (${Math.round(weakTopic[2])}%)` : 'N/A'}</span></div>
+                    <div><b>PPE Risk</b><span>${ppePct == null ? 'No PPE data' : `${ppePct}% compliance`}</span></div>
+                    <div><b>Violation Level</b><span>${filteredViol.length ? `${filteredViol.length} active records` : 'No violation record'}</span></div>
+                </div>
+                <ul class="notes">${(suggestions.length ? suggestions : ['ติดตามผล Safety Culture ตามรอบประเมิน']).map(s => `<li>${escHtml(s)}</li>`).join('')}</ul>`)}
+        </div>
+        ${section('3. Dashboard Scope', 'Records included in this PDF',
+            `<div class="scope">
+                <span>Period: <b>${escHtml(periodLabel)}</b></span>
+                <span>Assessment: <b>${filteredAsmts.length}</b></span>
+                <span>PPE Inspection: <b>${filteredPPE.length}</b></span>
+                <span>Violation: <b>${filteredViol.length}</b></span>
+                <span>Report: <b>${escHtml(periodShort)}</b></span>
+            </div>`)}
+        ${(!hasScoreData && !hasTrendData) ? reportHealth : ''}
+    `;
+
+    const page2 = `
+        ${section('4. Score Visualization', 'Bar chart and radar profile',
+            `<div class="chart-row">
+                <div>${_svgBar(scoreDefs.map(([, , score]) => score || 0), scoreDefs.map(([code]) => code), 470, 170)}</div>
+                <div>${_svgRadar(scoreDefs.map(([, , score]) => score || 0), scoreDefs.map(([code]) => code), 190)}</div>
+            </div>`)}
+        <div class="two-col">
+            ${section('5. Monthly Trend', `Assessment trend for ${_filterYear}`,
+                trend.length ? `<div class="line-chart">${_svgLine(trend, 340, 150)}</div>` : empty('ยังไม่มีข้อมูลแนวโน้มรายเดือน'))}
+            ${section('6. Follow-up Notes', 'Safety Culture actions from current score profile',
+                `<ul class="notes action-notes">${(suggestions.length ? suggestions : ['รักษาระดับวัฒนธรรมความปลอดภัยและติดตามผลตามรอบประเมิน']).map(s => `<li>${escHtml(s)}</li>`).join('')}</ul>`)}
+        </div>
+        ${actionDetail}
+    `;
+
+    const page3 = `
+        <div class="two-col">
+            ${section('7. PPE By Department', 'Lowest compliance first',
+                deptRows.length
+                    ? table(['Department', 'Pass/Total', 'Compliance'], deptRows.map(d =>
+                        row([escHtml(d.dept), `${d.pass}/${d.total}`, `<span style="color:${statusColor(d.pct)};font-weight:800;">${d.pct}%</span>`])))
+                    : empty('ยังไม่มีข้อมูล PPE ตามแผนกในช่วงที่เลือก'))}
+            ${section('8. PPE By Item', 'Items requiring attention',
+                itemRows.length
+                    ? table(['PPE Item', 'OK/Total', 'Compliance'], itemRows.map(it =>
+                        row([escHtml(it.name), `${it.ok}/${it.total}`, `<span style="color:${statusColor(it.pct)};font-weight:800;">${it.pct}%</span>`])))
+                    : empty('ยังไม่มีข้อมูลรายการ PPE ในช่วงที่เลือก'))}
+        </div>
+        ${section('9. Violation Tracker', 'Latest warning records',
+                recentViol.length
+                    ? table(['Date', 'Employee', 'Level'], recentViol.map(v =>
+                        row([escHtml(fmtDate(v.ViolationDate)), escHtml(v.EmployeeName || v.EmpName || '-'), escHtml(v.WarningLevel || '-') ])))
+                    : empty('ไม่มี violation record ในช่วงที่เลือก'))}
+    `;
+
+    const hasOperationalData = deptRows.length || itemRows.length || recentViol.length || filteredPPE.length || filteredViol.length;
+    const pages = [page1];
+    if (hasScoreData || hasTrendData) pages.push(page2);
+    if (hasOperationalData) pages.push(page3);
+    const css = `
+        <style>
+            *{box-sizing:border-box}
+            body{margin:0;font-family:Kanit,Arial,sans-serif;color:#1e293b;background:#fff}
+            .sc-pdf-page{width:794px;height:1122px;background:#fff;position:relative;overflow:hidden;display:flex;flex-direction:column;font-size:11px}
+            .header{background:#065f46;color:#fff;padding:18px 28px;display:flex;justify-content:space-between;align-items:flex-start;gap:16px;flex-shrink:0}
+            .header .eyebrow{font-size:10px;opacity:.82;margin:0 0 3px}
+            .header h1{font-size:21px;line-height:1.15;margin:0;font-weight:900;letter-spacing:0}
+            .header p{font-size:11px;margin:5px 0 0;opacity:.9;color:#fff}
+            .badge{text-align:right;font-size:9.5px;line-height:1.55;opacity:.92;color:#ecfdf5;min-width:150px}
+            .body{flex:1;padding:18px 28px 14px;overflow:hidden}
+            .inner{transform-origin:top left;width:100%;max-width:738px}
+            .footer{margin-top:auto;padding:8px 28px;background:#f8fafc;border-top:1px solid #e2e8f0;color:#64748b;font-size:9px;display:flex;justify-content:space-between;flex-shrink:0}
+            .grid{display:grid;gap:8px}.metrics{grid-template-columns:repeat(3,1fr);margin-bottom:12px}
+            .metric{background:#f8fafc;border:1px solid #e2e8f0;border-radius:10px;padding:12px;text-align:center;min-height:90px}
+            .metric-label{font-size:10px;color:#475569;font-weight:800}
+            .metric-value{font-size:26px;line-height:1;font-weight:900;margin-top:5px}
+            .metric-note{font-size:9px;color:#94a3b8;margin-top:5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+            .two-col{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:12px}
+            .section{border:1px solid #e2e8f0;border-radius:12px;background:#fff;overflow:hidden;margin-bottom:12px;padding:12px}
+            .section-head{display:flex;align-items:flex-end;justify-content:space-between;border-bottom:1px solid #dbeafe;padding:0 0 7px;margin-bottom:10px}
+            .section h2{font-size:14px;margin:0;color:#065f46;font-weight:900}
+            .section p{font-size:9.5px;margin:2px 0 0;color:#64748b}
+            table{width:100%;border-collapse:collapse;font-size:9.5px}
+            th{background:#065f46;color:#fff;text-align:left;padding:7px 8px;font-size:9px}
+            td{padding:7px 8px;border-bottom:3px solid #fff;vertical-align:top}
+            tbody tr:nth-child(odd){background:#f8fafc}
+            .focus-box{display:grid;grid-template-columns:1fr 1fr;gap:7px;padding:9px}
+            .focus-box div{border:1px solid #e2e8f0;border-radius:5px;padding:7px;background:#fbfdff;min-height:52px}
+            .focus-box b{display:block;font-size:9px;color:#64748b;text-transform:uppercase;margin-bottom:4px}
+            .focus-box span{font-size:11px;font-weight:800;color:#0f172a}
+            .notes{margin:0;padding:0 10px 9px 24px;font-size:10.5px;color:#334155}
+            .action-notes{min-height:126px;padding-top:4px}
+            .notes li{margin-bottom:4px}
+            .chart-row{display:grid;grid-template-columns:1fr 220px;gap:12px;align-items:center;padding:8px}
+            .line-chart{display:flex;justify-content:center;padding:6px}
+            .empty{height:118px;display:flex;align-items:center;justify-content:center;color:#94a3b8;font-size:11px}
+            .empty.compact{height:70px}
+            .scope{display:grid;grid-template-columns:repeat(5,1fr);gap:7px;padding:10px;font-size:10.5px}
+            .scope span{border:1px solid #e2e8f0;border-radius:5px;background:#fbfdff;padding:7px;color:#475569}
+            .health-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;padding:4px 0 0}
+            .health-item{border:1px solid #e2e8f0;border-radius:8px;background:#f8fafc;padding:10px;min-height:58px}
+            .health-item b{display:block;font-size:9.5px;color:#64748b;margin-bottom:5px;text-transform:uppercase}
+            .health-item span{font-size:13px;font-weight:900}
+        </style>`;
+
+    const root = document.createElement('div');
+    root.style.cssText = 'position:fixed;left:-10000px;top:0;z-index:-1;';
+    document.body.appendChild(root);
+
+    try {
+        const { jsPDF } = window.jspdf;
+        const pdf = new jsPDF('p', 'mm', 'a4');
+
+        for (let i = 0; i < pages.length; i++) {
+            const page = document.createElement('div');
+            page.className = 'sc-pdf-page';
+            page.innerHTML = `${css}
+                <div class="header">
+                    <div>
+                        <p class="eyebrow">Thai Summit Harness Co., Ltd. · Safety Summary Report</p>
+                        <h1>Safety Culture Dashboard Report</h1>
+                        <p>รายงานภาพรวม ${escHtml(periodLabel)} · สร้างรายงานเมื่อ ${new Date().toLocaleDateString('th-TH', { day:'numeric', month:'long', year:'numeric' })}</p>
+                    </div>
+                    <div class="badge">Assessment: ${filteredAsmts.length}<br>PPE Check: ${filteredPPE.length}<br>Violation: ${filteredViol.length}</div>
+                </div>
+                <div class="body"><div class="inner">${pages[i]}</div></div>
+                <div class="footer">
+                    <span>Safety Culture Summary Report · Thai Summit Harness Co., Ltd.</span>
+                    <span>Page ${i + 1} of ${pages.length}</span>
+                </div>`;
+            root.appendChild(page);
+
+            const body = page.querySelector('.body');
+            const inner = page.querySelector('.inner');
+            const fitW = body.clientWidth / Math.max(inner.scrollWidth, 1);
+            const fitH = body.clientHeight / Math.max(inner.scrollHeight, 1);
+            const scale = Math.min(1, fitW, fitH);
+            inner.style.transform = `scale(${scale})`;
+
+            const canvas = await html2canvas(page, {
+                scale: 1.55,
+                useCORS: true,
+                backgroundColor: '#ffffff',
+                logging: false,
+                windowWidth: 794,
+                windowHeight: 1122
+            });
+            if (i > 0) pdf.addPage();
+            pdf.addImage(canvas.toDataURL('image/jpeg', 0.94), 'JPEG', 0, 0, 210, 297);
+            page.remove();
+        }
+
+        pdf.save(filename);
+        showToast(`สร้าง PDF Dashboard สำเร็จ (${pages.length} หน้า)`, 'success');
+    } catch (err) {
+        console.error('[SafetyCulture] exportPDF failed:', err);
+        showToast('สร้าง PDF ไม่สำเร็จ', 'error');
+    } finally {
+        root.remove();
+    }
+}
+
+async function exportPDFLegacy() {
     if (typeof window.jspdf === 'undefined') {
         showToast('ไลบรารี PDF ยังโหลดไม่สำเร็จ', 'error'); return;
     }
@@ -2767,7 +4849,7 @@ async function exportPDF() {
         `<div style="font-size:22px;font-weight:700;color:${color};line-height:1;">${value}</div></div>`;
 
     const compactHeader = (title, subtitle) =>
-        `<div style="background:linear-gradient(135deg,#064e3b 0%,#065f46 60%,#0d9488 100%);` +
+        `<div style="background:#065f46;` +
         `padding:14px 28px;flex-shrink:0;display:flex;align-items:center;justify-content:space-between;">` +
         `<div><div style="font-size:11px;color:rgba(255,255,255,0.7);font-weight:400;letter-spacing:0.5px;">` +
         `THAI SUMMIT HARNESS CO., LTD.</div>` +
@@ -2779,16 +4861,16 @@ async function exportPDF() {
         `<div style="position:absolute;bottom:0;left:0;right:0;height:36px;background:#f8fafc;` +
         `border-top:1px solid #e2e8f0;display:flex;align-items:center;justify-content:space-between;` +
         `padding:0 28px;font-size:10px;color:#94a3b8;">` +
-        `<span>รายงานวัฒนธรรมความปลอดภัย · Thai Summit Harness Co., Ltd.</span>` +
-        `<span>หน้า ${n} จาก ${total} | สร้างเมื่อ ${genDate}</span></div>`;
+        `<span>Safety Culture Report - Thai Summit Harness Co., Ltd.</span>` +
+        `<span>Page ${n} / ${total} | Generated ${genDate}</span></div>`;
 
     const sectionTitle = (text, accent) =>
         `<div style="font-size:13px;font-weight:600;color:#1e293b;border-bottom:2px solid ${accent||'#059669'};` +
         `padding-bottom:5px;margin-bottom:0;">${text}</div>`;
 
     const thHead = (...cols) =>
-        `<thead><tr style="background:#f1f5f9;">${cols.map(([txt, align, w]) =>
-            `<th style="padding:6px 10px;text-align:${align||'left'};font-size:11px;color:#64748b;font-weight:600;` +
+        `<thead><tr style="background:#065f46;">${cols.map(([txt, align, w]) =>
+            `<th style="padding:6px 10px;text-align:${align||'left'};font-size:11px;color:#fff;font-weight:700;` +
             (w ? `width:${w};` : '') + `">${txt}</th>`).join('')}</tr></thead>`;
 
     // ── PAGE 1: KPI Overview ──────────────────────────────────────────────────
@@ -2815,9 +4897,9 @@ async function exportPDF() {
     ).join('');
 
     const page1Html = `<div style="${baseStyle}">
-        <div style="background:linear-gradient(135deg,#064e3b 0%,#065f46 60%,#0d9488 100%);
+        <div style="background:#065f46;
                     padding:28px 28px 22px;flex-shrink:0;position:relative;overflow:hidden;">
-            <div style="position:absolute;inset:0;opacity:0.07;">
+            <div style="display:none;">
                 <svg width="100%" height="100%"><defs><pattern id="d" width="24" height="24" patternUnits="userSpaceOnUse">
                 <circle cx="12" cy="12" r="1.5" fill="white"/></pattern></defs>
                 <rect width="100%" height="100%" fill="url(#d)"/></svg></div>
@@ -2874,18 +4956,18 @@ async function exportPDF() {
                 const pct = it.total > 0 ? (it.ok / it.total) * 100 : null;
                 const clr = scoreClr(pct); const bg = i % 2 === 0 ? '#f8fafc' : '#ffffff';
                 return `<tr style="background:${bg};">` +
-                    `<td style="padding:7px 10px;font-size:12px;color:#1e293b;">${it.name}</td>` +
+                    `<td style="padding:7px 10px;font-size:12px;color:#1e293b;">${escHtml(it.name)}</td>` +
                     `<td style="padding:7px 10px;font-size:12px;text-align:center;color:#1e293b;">${it.ok}</td>` +
                     `<td style="padding:7px 10px;font-size:12px;text-align:center;color:#1e293b;">${it.total}</td>` +
                     `<td style="padding:7px 10px;font-weight:700;color:${clr};text-align:right;">${pct != null ? pct.toFixed(1)+'%' : 'N/A'}</td>` +
                     `<td style="padding:7px 14px 7px 4px;width:130px;"><div style="display:flex;align-items:center;">${pct != null ? scoreBar(pct, clr) : ''}</div></td></tr>`;
             }).join('');
         }
-        return (_dashData?.ppeStats?.itemBreakdown || []).map((item, i) => {
+        return (_getPPEStats().itemBreakdown || []).map((item, i) => {
             const pct = item.total_count > 0 ? (item.ok_count / item.total_count) * 100 : null;
             const clr = scoreClr(pct); const bg = i % 2 === 0 ? '#f8fafc' : '#ffffff';
             return `<tr style="background:${bg};">` +
-                `<td style="padding:7px 10px;font-size:12px;color:#1e293b;">${item.ItemName||'—'}</td>` +
+                `<td style="padding:7px 10px;font-size:12px;color:#1e293b;">${escHtml(item.ItemName||'—')}</td>` +
                 `<td style="padding:7px 10px;font-size:12px;text-align:center;color:#1e293b;">${item.ok_count}</td>` +
                 `<td style="padding:7px 10px;font-size:12px;text-align:center;color:#1e293b;">${item.total_count}</td>` +
                 `<td style="padding:7px 10px;font-weight:700;color:${clr};text-align:right;">${pct != null ? pct.toFixed(1)+'%' : 'N/A'}</td>` +
@@ -2896,7 +4978,7 @@ async function exportPDF() {
     const deptTbody = deptRows.map((r, i) => {
         const clr = scoreClr(r.pct); const bg = i % 2 === 0 ? '#f8fafc' : '#ffffff';
         return `<tr style="background:${bg};">` +
-            `<td style="padding:6px 10px;font-size:12px;color:#1e293b;">${r.dept}</td>` +
+            `<td style="padding:6px 10px;font-size:12px;color:#1e293b;">${escHtml(r.dept)}</td>` +
             `<td style="padding:6px 10px;font-size:12px;text-align:center;color:#1e293b;">${r.pass}</td>` +
             `<td style="padding:6px 10px;font-size:12px;text-align:center;color:#1e293b;">${r.total}</td>` +
             `<td style="padding:6px 10px;font-weight:700;color:${clr};text-align:right;">${r.pct}%</td>` +
@@ -2912,8 +4994,8 @@ async function exportPDF() {
         const bg = i % 2 === 0 ? '#f8fafc' : '#ffffff';
         return `<tr style="background:${bg};">` +
             `<td style="padding:6px 10px;font-size:11px;color:#64748b;">${fmtDate(v.ViolationDate)}</td>` +
-            `<td style="padding:6px 6px;font-size:11px;color:#1e293b;">${(v.EmployeeName||'—').slice(0,20)}</td>` +
-            `<td style="padding:6px 6px;font-size:11px;color:#64748b;">${(v.Department||'—').slice(0,18)}</td>` +
+            `<td style="padding:6px 6px;font-size:11px;color:#1e293b;">${escHtml((v.EmployeeName||'—').slice(0,20))}</td>` +
+            `<td style="padding:6px 6px;font-size:11px;color:#64748b;">${escHtml((v.Department||'—').slice(0,18))}</td>` +
             `<td style="padding:6px 10px;font-size:11px;font-weight:600;color:${lClr};text-align:right;">${lvl}</td></tr>`;
     }).join('');
 
@@ -3306,6 +5388,487 @@ function exportAssessmentMonthlyPDF(month) {
     } catch (err) {
         console.error(err);
         showToast('สร้าง PDF ไม่สำเร็จ: ' + escHtml(err.message), 'error');
+    }
+}
+
+function _asmtNum(v) {
+    if (v === null || v === undefined || v === '') return null;
+    const n = parseFloat(v);
+    return Number.isFinite(n) ? n : null;
+}
+
+function _asmtAvg(entries, key) {
+    const vals = (entries || []).map(r => _asmtNum(r?.[key])).filter(v => v !== null);
+    return vals.length ? Math.round(vals.reduce((s, v) => s + v, 0) / vals.length) : null;
+}
+
+function _asmtOverall(entries) {
+    const vals = (entries || []).map(r => {
+        const row = ASMT_KEYS.map(k => _asmtNum(r?.[k])).filter(v => v !== null);
+        return row.length ? row.reduce((s, v) => s + v, 0) / row.length : null;
+    }).filter(v => v !== null);
+    return vals.length ? Math.round(vals.reduce((s, v) => s + v, 0) / vals.length) : null;
+}
+
+function _asmtScoreHtml(v, compact = false) {
+    const n = _asmtNum(v);
+    if (n === null) return `<span style="color:#94a3b8;font-weight:800;">-</span>`;
+    const rounded = Math.round(n);
+    const color = rounded >= 90 ? '#059669' : rounded >= 70 ? '#d97706' : '#dc2626';
+    const bg = rounded >= 90 ? '#d1fae5' : rounded >= 70 ? '#fef3c7' : '#fee2e2';
+    return `<span style="display:inline-block;min-width:${compact ? 34 : 44}px;text-align:center;padding:4px 8px;border-radius:999px;background:${bg};color:${color};font-weight:900;">${rounded}%</span>`;
+}
+
+function _asmtStatusText(v) {
+    const n = _asmtNum(v);
+    if (n === null) return 'No data';
+    if (n >= 90) return 'Good';
+    if (n >= 70) return 'Monitor';
+    return 'Action';
+}
+
+function _asmtStatusColor(v) {
+    const n = _asmtNum(v);
+    if (n === null) return '#64748b';
+    if (n >= 90) return '#059669';
+    if (n >= 70) return '#d97706';
+    return '#dc2626';
+}
+
+function _asmtTopicRows(entries, limit = ASMT_KEYS.length) {
+    return ASMT_KEYS.map((k, i) => {
+        const score = _asmtAvg(entries, k);
+        const target = 70;
+        return {
+            code: ASMT_CODES[i],
+            label: ASMT_LBLS[i],
+            score,
+            target,
+            gap: score === null ? null : Math.max(0, target - score),
+            status: _asmtStatusText(score)
+        };
+    }).sort((a, b) => {
+        if (a.score === null && b.score !== null) return -1;
+        if (a.score !== null && b.score === null) return 1;
+        return (a.score ?? 0) - (b.score ?? 0);
+    }).slice(0, limit);
+}
+
+function _asmtTopicPerformance(entries) {
+    const rows = _asmtTopicRows(entries).map(r => `
+        <tr>
+            <td style="padding:7px 8px;border-bottom:1px solid #e2e8f0;font-weight:900;color:#065f46;">${escHtml(r.code)}</td>
+            <td style="padding:7px 8px;border-bottom:1px solid #e2e8f0;">${escHtml(r.label)}</td>
+            <td style="padding:7px 8px;border-bottom:1px solid #e2e8f0;text-align:center;">${_asmtScoreHtml(r.score, true)}</td>
+            <td style="padding:7px 8px;border-bottom:1px solid #e2e8f0;text-align:center;">${r.target}%</td>
+            <td style="padding:7px 8px;border-bottom:1px solid #e2e8f0;text-align:right;color:${_asmtStatusColor(r.score)};font-weight:900;">${escHtml(r.status)}</td>
+        </tr>`).join('');
+    return `
+    <table style="width:100%;border-collapse:collapse;font-size:10.5px;border:1px solid #e2e8f0;border-radius:10px;overflow:hidden;">
+        <thead><tr style="background:#065f46;color:#fff;">
+            <th style="padding:8px;text-align:left;">Code</th>
+            <th style="padding:8px;text-align:left;">Topic</th>
+            <th style="padding:8px;text-align:center;">Avg</th>
+            <th style="padding:8px;text-align:center;">Target</th>
+            <th style="padding:8px;text-align:right;">Status</th>
+        </tr></thead>
+        <tbody>${rows}</tbody>
+    </table>`;
+}
+
+function _asmtActionFocus(entries) {
+    const focus = _asmtTopicRows(entries)
+        .filter(r => r.score === null || r.score < r.target)
+        .slice(0, 4);
+    if (!focus.length) {
+        return `<div style="height:112px;display:flex;align-items:center;justify-content:center;border:1px solid #d1fae5;background:#ecfdf5;border-radius:10px;color:#047857;font-size:12px;font-weight:900;">All assessment topics are on target.</div>`;
+    }
+    return `<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">
+        ${focus.map(r => `
+            <div style="border:1px solid #e2e8f0;background:#f8fafc;border-radius:10px;padding:10px;min-height:76px;">
+                <div style="display:flex;justify-content:space-between;gap:8px;align-items:flex-start;">
+                    <b style="font-size:11px;color:#065f46;">${escHtml(r.code)} ${escHtml(r.label)}</b>
+                    <span style="font-size:11px;font-weight:900;color:${_asmtStatusColor(r.score)};">${r.score === null ? 'No data' : `${Math.round(r.score)}%`}</span>
+                </div>
+                <div style="font-size:9.5px;color:#64748b;margin-top:6px;line-height:1.45;">Target ${r.target}% · ${r.score === null ? 'Need assessment record' : `Gap ${r.gap}%`}</div>
+            </div>`).join('')}
+    </div>`;
+}
+
+function _asmtLocationFocusBlock(entries, limit = 5) {
+    const stats = assessmentLocationStats(entries).slice(0, limit);
+    if (!stats.length) {
+        return `<div style="border:1px dashed #cbd5e1;background:#f8fafc;border-radius:10px;padding:16px;text-align:center;color:#64748b;font-size:11px;font-weight:800;">No location-level point data in this scope.</div>`;
+    }
+    const rows = stats.map(loc => {
+        const pct = loc.pct;
+        const color = pct === null ? '#64748b' : pct >= 90 ? '#059669' : pct >= 70 ? '#d97706' : '#dc2626';
+        const bg = pct === null ? '#f1f5f9' : pct >= 90 ? '#d1fae5' : pct >= 70 ? '#fef3c7' : '#fee2e2';
+        const focus = loc.lowTopicList.slice(0, 2).map(t => t.key || t.label).join(', ') || '-';
+        return `<tr>
+            <td style="padding:7px 8px;border-bottom:1px solid #e2e8f0;font-weight:800;">${escHtml(loc.name)}</td>
+            <td style="padding:7px 8px;border-bottom:1px solid #e2e8f0;text-align:center;">${loc.checks}</td>
+            <td style="padding:7px 8px;border-bottom:1px solid #e2e8f0;text-align:center;">${loc.comply}/${loc.total}</td>
+            <td style="padding:7px 8px;border-bottom:1px solid #e2e8f0;text-align:center;"><span style="display:inline-block;min-width:38px;padding:4px 8px;border-radius:999px;background:${bg};color:${color};font-weight:900;">${pct === null ? '-' : pct + '%'}</span></td>
+            <td style="padding:7px 8px;border-bottom:1px solid #e2e8f0;color:#64748b;">${escHtml(focus)}</td>
+        </tr>`;
+    }).join('');
+    return `
+    <table style="width:100%;border-collapse:collapse;font-size:10px;border:1px solid #e2e8f0;border-radius:10px;overflow:hidden;">
+        <thead><tr style="background:#064e3b;color:#fff;">
+            <th style="padding:8px;text-align:left;">Location</th>
+            <th style="padding:8px;text-align:center;">Rows</th>
+            <th style="padding:8px;text-align:center;">Comply/Total</th>
+            <th style="padding:8px;text-align:center;">Score</th>
+            <th style="padding:8px;text-align:left;">Focus Topics</th>
+        </tr></thead>
+        <tbody>${rows}</tbody>
+    </table>`;
+}
+
+function _asmtPage(title, subtitle, bodyHtml, pageNo, totalPages) {
+    return `
+    <div style="width:794px;height:1122px;background:#fff;color:#1e293b;font-family:'Kanit','Arial',sans-serif;box-sizing:border-box;position:relative;overflow:hidden;display:flex;flex-direction:column;">
+        <div style="background:#065f46;color:#fff;padding:18px 28px;display:flex;align-items:flex-start;justify-content:space-between;gap:20px;flex-shrink:0;">
+            <div>
+                <div style="font-size:10px;color:#d1fae5;font-weight:900;">Thai Summit Harness Co., Ltd. · Safety Summary Report</div>
+                <h1 style="font-size:21px;line-height:1.2;margin:7px 0 4px;font-weight:900;color:#fff;">${title}</h1>
+                <div style="font-size:11px;color:#d1fae5;font-weight:600;">${subtitle}</div>
+            </div>
+            <div style="text-align:right;font-size:9.5px;color:#d1fae5;font-weight:800;line-height:1.55;min-width:132px;">
+                <div>Assessment</div>
+                <div>FY ${_filterYear}</div>
+                <div>${new Date().toLocaleDateString('th-TH')}</div>
+            </div>
+        </div>
+        <div style="flex:1;padding:18px 28px 42px;overflow:hidden;">${bodyHtml}</div>
+        <div style="position:absolute;left:0;right:0;bottom:0;background:#f8fafc;border-top:1px solid #e2e8f0;padding:8px 28px;font-size:9px;color:#64748b;display:flex;justify-content:space-between;">
+            <span>Safety Culture Assessment Report - Thai Summit Harness Co., Ltd.</span>
+            <span>Page ${pageNo} of ${totalPages}</span>
+        </div>
+    </div>`;
+}
+
+function _asmtSummaryCards(entries, label) {
+    const overall = _asmtOverall(entries);
+    const lowest = ASMT_KEYS.map((k, i) => ({ code: ASMT_CODES[i], label: ASMT_LBLS[i], score: _asmtAvg(entries, k) }))
+        .filter(x => x.score !== null)
+        .sort((a, b) => a.score - b.score)[0];
+    const mat = overall !== null ? getMaturity(overall) : null;
+    return `
+    <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-bottom:12px;">
+        <div style="border:1px solid #e2e8f0;background:#f8fafc;border-radius:10px;padding:11px;min-height:74px;">
+            <div style="font-size:9px;color:#64748b;font-weight:900;text-transform:uppercase;">Scope / ขอบเขต</div>
+            <div style="font-size:16px;font-weight:900;margin-top:5px;">${escHtml(label)}</div>
+        </div>
+        <div style="border:1px solid #e2e8f0;background:#f8fafc;border-radius:10px;padding:11px;min-height:74px;">
+            <div style="font-size:9px;color:#64748b;font-weight:900;text-transform:uppercase;">Overall / คะแนนรวม</div>
+            <div style="font-size:24px;font-weight:900;margin-top:3px;color:${_asmtStatusColor(overall)};">${overall === null ? '-' : `${overall}%`}</div>
+        </div>
+        <div style="border:1px solid #e2e8f0;background:#f8fafc;border-radius:10px;padding:11px;min-height:74px;">
+            <div style="font-size:9px;color:#64748b;font-weight:900;text-transform:uppercase;">Maturity</div>
+            <div style="font-size:15px;font-weight:900;margin-top:5px;color:${mat?.color || '#64748b'};">${mat?.label || '-'}</div>
+            <div style="font-size:8.5px;color:#94a3b8;margin-top:2px;">${lowest ? `Focus: ${lowest.code}` : 'No focus topic'}</div>
+        </div>
+        <div style="border:1px solid #e2e8f0;background:#f8fafc;border-radius:10px;padding:11px;min-height:74px;">
+            <div style="font-size:9px;color:#64748b;font-weight:900;text-transform:uppercase;">Records / จำนวนบันทึก</div>
+            <div style="font-size:24px;font-weight:900;margin-top:3px;">${entries.length}</div>
+        </div>
+    </div>`;
+}
+
+function _asmtTable(entries) {
+    const rows = entries.map((a, idx) => {
+        const vals = ASMT_KEYS.map(k => _asmtNum(a[k]));
+        const valid = vals.filter(v => v !== null);
+        const avg = valid.length ? Math.round(valid.reduce((s, v) => s + v, 0) / valid.length) : null;
+        return `<tr style="background:${idx % 2 ? '#ffffff' : '#f8fafc'};">
+            <td style="padding:7px 8px;border-bottom:1px solid #e2e8f0;font-weight:800;">${escHtml((a.AssessmentDate || '').substring(0, 10) || '-')}</td>
+            <td style="padding:7px 8px;border-bottom:1px solid #e2e8f0;text-align:center;">${a.WeekNo ? `W${a.WeekNo}` : '-'}</td>
+            <td style="padding:7px 8px;border-bottom:1px solid #e2e8f0;">${escHtml(a.Area || '-')}</td>
+            ${vals.map(v => `<td style="padding:7px 5px;border-bottom:1px solid #e2e8f0;text-align:center;">${_asmtScoreHtml(v, true)}</td>`).join('')}
+            <td style="padding:7px 8px;border-bottom:1px solid #e2e8f0;text-align:right;font-weight:900;">${_asmtScoreHtml(avg, true)}</td>
+        </tr>`;
+    }).join('');
+    return `
+    <table style="width:100%;border-collapse:collapse;font-size:10px;border:1px solid #e2e8f0;border-radius:12px;overflow:hidden;">
+        <thead>
+            <tr style="background:#064e3b;color:#fff;">
+                <th style="padding:8px;text-align:left;">Date</th>
+                <th style="padding:8px;text-align:center;">Week</th>
+                <th style="padding:8px;text-align:left;">Area</th>
+                ${ASMT_CODES.map(c => `<th style="padding:8px;text-align:center;">${c}</th>`).join('')}
+                <th style="padding:8px;text-align:right;">Avg</th>
+            </tr>
+        </thead>
+        <tbody>${rows}</tbody>
+    </table>`;
+}
+
+function _asmtMonthlySummaryTable() {
+    const rows = Array.from({ length: 12 }, (_, i) => i + 1).map(m => {
+        const entries = _assessments.filter(a => a.AssessmentDate && parseInt(String(a.AssessmentDate).substring(5, 7), 10) === m);
+        const avg = _asmtOverall(entries);
+        return `<tr>
+            <td style="padding:7px 8px;border-bottom:1px solid #e2e8f0;font-weight:800;">${escHtml(TH_MONTHS_FULL[m])}</td>
+            <td style="padding:7px 8px;border-bottom:1px solid #e2e8f0;text-align:center;">${entries.length}</td>
+            <td style="padding:7px 8px;border-bottom:1px solid #e2e8f0;text-align:center;">${_asmtScoreHtml(avg, true)}</td>
+            <td style="padding:7px 8px;border-bottom:1px solid #e2e8f0;">${escHtml(_asmtStatusText(avg))}</td>
+        </tr>`;
+    }).join('');
+    return `
+    <table style="width:100%;border-collapse:collapse;font-size:11px;border:1px solid #e2e8f0;border-radius:12px;overflow:hidden;">
+        <thead><tr style="background:#0f766e;color:#fff;">
+            <th style="padding:8px;text-align:left;">Month / เดือน</th>
+            <th style="padding:8px;text-align:center;">Records</th>
+            <th style="padding:8px;text-align:center;">Avg</th>
+            <th style="padding:8px;text-align:left;">Status</th>
+        </tr></thead>
+        <tbody>${rows}</tbody>
+    </table>`;
+}
+
+function _asmtCompactRecords(entries, limit = 6) {
+    const rows = entries.slice(0, limit).map((a, idx) => {
+        const vals = ASMT_KEYS.map(k => _asmtNum(a[k]));
+        const valid = vals.filter(v => v !== null);
+        const avg = valid.length ? Math.round(valid.reduce((s, v) => s + v, 0) / valid.length) : null;
+        return `<tr style="background:${idx % 2 ? '#ffffff' : '#f8fafc'};">
+            <td style="padding:6px 7px;border-bottom:1px solid #e2e8f0;font-weight:800;">${escHtml((a.AssessmentDate || '').substring(0, 10) || '-')}</td>
+            <td style="padding:6px 7px;border-bottom:1px solid #e2e8f0;text-align:center;">${a.WeekNo ? `W${a.WeekNo}` : '-'}</td>
+            <td style="padding:6px 7px;border-bottom:1px solid #e2e8f0;">${escHtml(a.Area || '-')}</td>
+            ${vals.map(v => `<td style="padding:6px 4px;border-bottom:1px solid #e2e8f0;text-align:center;">${_asmtScoreHtml(v, true)}</td>`).join('')}
+            <td style="padding:6px 7px;border-bottom:1px solid #e2e8f0;text-align:right;">${_asmtScoreHtml(avg, true)}</td>
+        </tr>`;
+    }).join('');
+    return `
+    <table style="width:100%;border-collapse:collapse;font-size:9px;border:1px solid #e2e8f0;border-radius:10px;overflow:hidden;">
+        <thead><tr style="background:#065f46;color:#fff;">
+            <th style="padding:7px;text-align:left;">Date</th>
+            <th style="padding:7px;text-align:center;">Week</th>
+            <th style="padding:7px;text-align:left;">Area</th>
+            ${ASMT_CODES.map(c => `<th style="padding:7px 4px;text-align:center;">${c}</th>`).join('')}
+            <th style="padding:7px;text-align:right;">Avg</th>
+        </tr></thead>
+        <tbody>${rows}</tbody>
+    </table>`;
+}
+
+function _asmtReviewBlock(entries, scopeLabel = '') {
+    const focus = _asmtTopicRows(entries)
+        .filter(r => r.score === null || r.score < r.target)
+        .slice(0, 3);
+    const focusText = focus.length
+        ? focus.map(r => `${r.code} ${r.label}${r.score === null ? ' (No data)' : ` (${Math.round(r.score)}%)`}`).join(' | ')
+        : 'All topics are on target';
+    return `
+    <div style="margin-top:14px;display:grid;grid-template-columns:1.1fr .9fr;gap:12px;">
+        <div style="border:1px solid #e2e8f0;border-radius:12px;padding:12px;min-height:138px;">
+            <div style="border-bottom:1px solid #dbeafe;padding-bottom:7px;margin-bottom:10px;">
+                <h2 style="font-size:14px;margin:0;color:#065f46;font-weight:900;">Review & Follow-up</h2>
+                <p style="font-size:9.5px;color:#64748b;margin:2px 0 0;">${escHtml(scopeLabel)} assessment action summary</p>
+            </div>
+            <div style="font-size:11px;color:#334155;line-height:1.65;">
+                <div><b>Focus:</b> ${escHtml(focusText)}</div>
+                <div><b>Next Action:</b> Review weak topics in monthly safety meeting and assign owner for follow-up.</div>
+                <div><b>Evidence:</b> Keep assessment record, area note, and improvement action in Safety Culture module.</div>
+            </div>
+        </div>
+        <div style="border:1px solid #e2e8f0;border-radius:12px;padding:12px;min-height:138px;">
+            <div style="border-bottom:1px solid #dbeafe;padding-bottom:7px;margin-bottom:10px;">
+                <h2 style="font-size:14px;margin:0;color:#065f46;font-weight:900;">Approval</h2>
+                <p style="font-size:9.5px;color:#64748b;margin:2px 0 0;">For monthly safety review use</p>
+            </div>
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:18px;">
+                <div style="border-top:1px solid #cbd5e1;padding-top:8px;text-align:center;font-size:10px;color:#64748b;">Prepared by</div>
+                <div style="border-top:1px solid #cbd5e1;padding-top:8px;text-align:center;font-size:10px;color:#64748b;">Reviewed by</div>
+            </div>
+        </div>
+    </div>`;
+}
+
+async function _saveScAssessmentHtmlPdf(pageHtmlList, filename) {
+    if (typeof window.jspdf === 'undefined' || typeof window.html2canvas === 'undefined') {
+        showToast('ไลบรารี PDF ยังโหลดไม่สำเร็จ', 'error');
+        return;
+    }
+    const { jsPDF } = window.jspdf;
+    const pdf = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
+    const holder = document.createElement('div');
+    holder.style.cssText = 'position:fixed;left:-10000px;top:0;width:794px;background:#fff;z-index:-1;';
+    document.body.appendChild(holder);
+    try {
+        for (let i = 0; i < pageHtmlList.length; i++) {
+            holder.innerHTML = pageHtmlList[i];
+            const page = holder.firstElementChild;
+            const canvas = await window.html2canvas(page, {
+                scale: 1.5,
+                useCORS: true,
+                allowTaint: true,
+                backgroundColor: '#ffffff',
+                logging: false
+            });
+            if (i > 0) pdf.addPage();
+            pdf.addImage(canvas.toDataURL('image/jpeg', 0.95), 'JPEG', 0, 0, 210, 297);
+        }
+        pdf.save(filename);
+    } finally {
+        holder.remove();
+    }
+}
+
+function openMonthPickerForAssessmentPDF() {
+    const opts = Array.from({ length: 12 }, (_, i) => i + 1)
+        .map(m => `<option value="${m}">${escHtml(TH_MONTHS_FULL[m])}</option>`)
+        .join('');
+    openModal('Export Assessment PDF รายเดือน', `
+    <div class="space-y-4">
+        <div>
+            <label class="block text-sm font-semibold text-slate-700 mb-1.5">เลือกเดือน / Select Month</label>
+            <select id="sc-pdf-month-sel" class="form-input w-full">${opts}</select>
+        </div>
+        <p class="text-xs text-slate-500">ระบบจะสร้าง PDF แบบ A4 สำหรับนำเสนอ โดยแสดงคะแนน Safety Culture Assessment ของเดือนที่เลือกในปี ${_filterYear}</p>
+        <div class="flex justify-end gap-3 pt-3 border-t">
+            <button type="button" onclick="window.closeModal()" class="btn btn-secondary px-5">ยกเลิก</button>
+            <button type="button" onclick="window._scDoMonthAssessmentPDF()" class="btn btn-primary px-5">สร้าง PDF</button>
+        </div>
+    </div>`, 'max-w-sm');
+    window._scDoMonthAssessmentPDF = () => {
+        const mo = parseInt(document.getElementById('sc-pdf-month-sel')?.value || '1', 10);
+        closeModal();
+        exportAssessmentMonthlyHtmlPDF(mo);
+    };
+}
+
+async function exportAssessmentYearlyHtmlPDF() {
+    if (!_assessments.length) {
+        showToast('ไม่มีข้อมูลการประเมินในปี ' + _filterYear, 'warning');
+        return;
+    }
+    showToast('กำลังสร้าง Assessment PDF รายปี...', 'info');
+    try {
+        const sorted = [..._assessments].sort((a, b) => String(a.AssessmentDate || '').localeCompare(String(b.AssessmentDate || '')));
+        const detailChunks = [];
+        for (let i = 0; i < sorted.length; i += 18) detailChunks.push(sorted.slice(i, i + 18));
+        const totalPages = 1 + detailChunks.length;
+        const pages = [];
+        pages.push(_asmtPage(
+            `Safety Culture Assessment Report - ${_filterYear}`,
+            `รายงานภาพรวมประจำปี / Yearly executive summary`,
+            `${_asmtSummaryCards(sorted, `FY ${_filterYear}`)}
+             <div style="display:grid;grid-template-columns:1.05fr .95fr;gap:12px;margin-bottom:12px;">
+                <div style="border:1px solid #e2e8f0;border-radius:12px;padding:12px;">
+                    <div style="border-bottom:1px solid #dbeafe;padding-bottom:7px;margin-bottom:10px;">
+                        <h2 style="font-size:14px;margin:0;color:#065f46;font-weight:900;">1. Topic Performance</h2>
+                        <p style="font-size:9.5px;color:#64748b;margin:2px 0 0;">Average score by assessment topic</p>
+                    </div>
+                    ${_asmtTopicPerformance(sorted)}
+                </div>
+                <div style="border:1px solid #e2e8f0;border-radius:12px;padding:12px;">
+                    <div style="border-bottom:1px solid #dbeafe;padding-bottom:7px;margin-bottom:10px;">
+                        <h2 style="font-size:14px;margin:0;color:#065f46;font-weight:900;">2. Action Focus</h2>
+                        <p style="font-size:9.5px;color:#64748b;margin:2px 0 0;">Lowest topics and target gaps</p>
+                    </div>
+                    ${_asmtActionFocus(sorted)}
+                </div>
+             </div>
+             <div style="border:1px solid #e2e8f0;border-radius:12px;padding:12px;margin-bottom:12px;">
+                    <div style="border-bottom:1px solid #dbeafe;padding-bottom:7px;margin-bottom:10px;">
+                        <h2 style="font-size:14px;margin:0;color:#065f46;font-weight:900;">3. Location Follow-up</h2>
+                        <p style="font-size:9.5px;color:#64748b;margin:2px 0 0;">Lowest inspection points by saved assessment location</p>
+                    </div>
+                    ${_asmtLocationFocusBlock(sorted, 3)}
+             </div>
+                <div style="border:1px solid #e2e8f0;border-radius:12px;padding:12px;">
+                    <div style="border-bottom:1px solid #dbeafe;padding-bottom:7px;margin-bottom:10px;">
+                        <h2 style="font-size:14px;margin:0;color:#065f46;font-weight:900;">4. Monthly Performance</h2>
+                        <p style="font-size:9.5px;color:#64748b;margin:2px 0 0;">Assessment records and monthly average status</p>
+                    </div>
+                    ${_asmtMonthlySummaryTable()}
+             </div>`,
+            1,
+            totalPages
+        ));
+        detailChunks.forEach((chunk, idx) => {
+            pages.push(_asmtPage(
+                `Assessment Records - ${_filterYear}`,
+                `รายการบันทึกผลการประเมิน / Assessment detail records`,
+                `${_asmtSummaryCards(chunk, `Page ${idx + 1}`)}
+                 ${_asmtTable(chunk)}`,
+                idx + 2,
+                totalPages
+            ));
+        });
+        await _saveScAssessmentHtmlPdf(pages, `SC_Assessment_${_filterYear}.pdf`);
+        showToast('สร้าง Assessment PDF รายปีสำเร็จ', 'success');
+    } catch (err) {
+        console.error(err);
+        showToast('สร้าง Assessment PDF ไม่สำเร็จ: ' + (err.message || 'เกิดข้อผิดพลาด'), 'error');
+    }
+}
+
+async function exportAssessmentMonthlyHtmlPDF(month) {
+    const entries = _assessments.filter(a => a.AssessmentDate && parseInt(String(a.AssessmentDate).substring(5, 7), 10) === month)
+        .sort((a, b) => String(a.AssessmentDate || '').localeCompare(String(b.AssessmentDate || '')));
+    if (!entries.length) {
+        showToast(`ไม่มีข้อมูลการประเมินเดือน ${TH_MONTHS_FULL[month]} ปี ${_filterYear}`, 'warning');
+        return;
+    }
+    showToast('กำลังสร้าง Assessment PDF รายเดือน...', 'info');
+    try {
+        const chunks = [];
+        for (let i = 0; i < entries.length; i += 18) chunks.push(entries.slice(i, i + 18));
+        const totalPages = 1 + chunks.length;
+        const pages = [];
+        pages.push(_asmtPage(
+            `Safety Culture Assessment - ${TH_MONTHS_FULL[month]} ${_filterYear}`,
+            `รายงานประจำเดือน / Monthly executive summary`,
+            `${_asmtSummaryCards(entries, `${TH_MONTHS_FULL[month]} ${_filterYear}`)}
+             <div style="display:grid;grid-template-columns:1.05fr .95fr;gap:12px;margin-bottom:12px;">
+                <div style="border:1px solid #e2e8f0;border-radius:12px;padding:12px;">
+                    <div style="border-bottom:1px solid #dbeafe;padding-bottom:7px;margin-bottom:10px;">
+                        <h2 style="font-size:14px;margin:0;color:#065f46;font-weight:900;">1. Topic Performance</h2>
+                        <p style="font-size:9.5px;color:#64748b;margin:2px 0 0;">Monthly average score by topic</p>
+                    </div>
+                    ${_asmtTopicPerformance(entries)}
+                </div>
+                <div style="border:1px solid #e2e8f0;border-radius:12px;padding:12px;">
+                    <div style="border-bottom:1px solid #dbeafe;padding-bottom:7px;margin-bottom:10px;">
+                        <h2 style="font-size:14px;margin:0;color:#065f46;font-weight:900;">2. Action Focus</h2>
+                        <p style="font-size:9.5px;color:#64748b;margin:2px 0 0;">Lowest topics and target gaps</p>
+                    </div>
+                    ${_asmtActionFocus(entries)}
+                </div>
+             </div>
+             <div style="border:1px solid #e2e8f0;border-radius:12px;padding:12px;margin-bottom:12px;">
+                    <div style="border-bottom:1px solid #dbeafe;padding-bottom:7px;margin-bottom:10px;">
+                        <h2 style="font-size:14px;margin:0;color:#065f46;font-weight:900;">3. Location Follow-up</h2>
+                        <p style="font-size:9.5px;color:#64748b;margin:2px 0 0;">Lowest inspection points in selected month</p>
+                    </div>
+                    ${_asmtLocationFocusBlock(entries, 3)}
+             </div>
+             <div style="border:1px solid #d1fae5;background:#ecfdf5;border-radius:12px;padding:12px;font-size:11px;color:#047857;line-height:1.6;">
+                <strong>Monthly Safety Review:</strong> ใช้หน้านี้เพื่อดูหัวข้อที่ต่ำกว่าเป้าหมาย มอบหมายผู้รับผิดชอบ และติดตามผลในเดือนถัดไป ส่วนรายละเอียดรายครั้งอยู่ในหน้า Register ถัดไป
+             </div>`,
+            1,
+            totalPages
+        ));
+        chunks.forEach((chunk, idx) => {
+            pages.push(_asmtPage(
+                `Assessment Records - ${TH_MONTHS_FULL[month]} ${_filterYear}`,
+                `รายการบันทึกผลการประเมินรายเดือน / Monthly assessment register`,
+                `${_asmtSummaryCards(chunk, `Page ${idx + 1}`)}
+                 ${_asmtTable(chunk)}
+                 ${idx === 0 ? _asmtReviewBlock(entries, `${TH_MONTHS_FULL[month]} ${_filterYear}`) : ''}`,
+                idx + 2,
+                totalPages
+            ));
+        });
+        await _saveScAssessmentHtmlPdf(pages, `SC_Assessment_${_filterYear}_${String(month).padStart(2, '0')}.pdf`);
+        showToast('สร้าง Assessment PDF รายเดือนสำเร็จ', 'success');
+    } catch (err) {
+        console.error(err);
+        showToast('สร้าง Assessment PDF ไม่สำเร็จ: ' + (err.message || 'เกิดข้อผิดพลาด'), 'error');
     }
 }
 

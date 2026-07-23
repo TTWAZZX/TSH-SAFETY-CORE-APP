@@ -1,6 +1,7 @@
+import { guardActionHandler, guardSubmitHandler, installWindowActionLocks } from '../utils/async-ui.js?v=20260715-phase32d-remaining-async-ux';
 // public/js/pages/machine-safety.js
 import { API, apiFetch } from '../api.js';
-import * as UI from '../ui.js';
+import * as UI from '../ui.js?v=20260611-machine-doc-urlfix';
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 const RISK_META = {
@@ -34,6 +35,8 @@ const PAGE_SIZE = 25;
 
 let _machines      = [];
 let _depts         = [];
+let _areas         = [];
+let _employees     = [];
 let _search        = '';
 let _filterDept    = '';
 let _filterStatus  = '';
@@ -41,8 +44,17 @@ let _filterRisk    = '';
 let _filterMStatus = '';
 let _filterAudit   = '';
 let _filterInspection = '';
+let _viewMode      = 'list';
 let _isAdmin       = false;
 let _page          = 1;
+let _loadError     = '';
+let _msdCardSaveHold = null;
+let _msdCardSaveMenu = null;
+let _msdCardImageListenersReady = false;
+
+function _errText(err, fallback = 'เกิดข้อผิดพลาด กรุณาลองใหม่อีกครั้ง') {
+    return err?.message || err?.error || fallback;
+}
 
 // ─── Entry Point ──────────────────────────────────────────────────────────────
 export async function loadMachineSafetyPage() {
@@ -50,7 +62,8 @@ export async function loadMachineSafetyPage() {
     if (!container) return;
 
     const user = TSHSession.getUser();
-    _isAdmin = user?.role === 'Admin' || user?.Role === 'Admin';
+    _isAdmin = String(user?.role || user?.Role || '').toLowerCase() === 'admin';
+    _setupCardImageExportListeners();
 
     container.innerHTML = `
         <div class="flex flex-col items-center justify-center h-64 text-slate-400">
@@ -58,7 +71,19 @@ export async function loadMachineSafetyPage() {
             <p class="text-sm">กำลังโหลดข้อมูล...</p>
         </div>`;
 
-    await Promise.all([_fetchMachines(), _fetchDepts()]);
+    await Promise.all([_fetchMachines(), _fetchDepts(), _fetchAreas(), _fetchEmployees()]);
+    try {
+        const _inFilter = JSON.parse(sessionStorage.getItem('pending_filter_machine-safety') || 'null');
+        if (_inFilter) {
+            sessionStorage.removeItem('pending_filter_machine-safety');
+            if (_inFilter.dept) _filterDept = _inFilter.dept;
+            if (_inFilter.status) _filterMStatus = _inFilter.status;
+            if (_inFilter.risk) _filterRisk = _inFilter.risk;
+            if (_inFilter.audit) _filterAudit = _inFilter.audit;
+            if (_inFilter.inspection) _filterInspection = _inFilter.inspection;
+            _page = 1;
+        }
+    } catch (_) {}
     _renderPage(container);
 }
 
@@ -67,7 +92,11 @@ async function _fetchMachines() {
     try {
         const res = await API.get('/machine-safety');
         _machines = res.data || [];
-    } catch { _machines = []; }
+        _loadError = '';
+    } catch (err) {
+        _machines = [];
+        _loadError = _errText(err, 'ไม่สามารถโหลดข้อมูลเครื่องจักรได้');
+    }
 }
 
 async function _fetchDepts() {
@@ -75,6 +104,142 @@ async function _fetchDepts() {
         const res = await API.get('/master/departments');
         _depts = (res.data || []).map(d => d.Name);
     } catch { _depts = []; }
+}
+
+async function _fetchAreas() {
+    try {
+        const res = await API.get('/master/areas');
+        _areas = (res.data || []).map(a => a.Name || a.AreaName || a.Code).filter(Boolean);
+    } catch { _areas = []; }
+}
+
+async function _fetchEmployees() {
+    try {
+        const res = await API.get('/employees');
+        _employees = (res.data || []).filter(e => e.EmployeeID || e.EmployeeName);
+    } catch { _employees = []; }
+}
+
+function _setupCardImageExportListeners() {
+    if (_msdCardImageListenersReady) return;
+    _msdCardImageListenersReady = true;
+
+    document.addEventListener('click', e => {
+        const action = e.target?.closest?.('[data-msd-card-save-action]');
+        if (action && _msdCardSaveMenu?.card) {
+            const card = _msdCardSaveMenu.card;
+            _hideCardImageMenu();
+            _downloadCardImage(card);
+            return;
+        }
+        if (!e.target?.closest?.('#msd-card-save-menu')) _hideCardImageMenu();
+    });
+    document.addEventListener('contextmenu', _showCardContextMenu);
+    document.addEventListener('pointerdown', _startCardImageHold);
+    document.addEventListener('pointermove', _moveCardImageHold);
+    document.addEventListener('pointerup', _cancelCardImageHold);
+    document.addEventListener('pointercancel', _cancelCardImageHold);
+}
+
+function _showCardContextMenu(event) {
+    const card = event.target?.closest?.('[data-msd-card-image]');
+    if (!card || !document.getElementById('machine-safety-page')?.contains(card)) return;
+    if (event.target.closest('button,a,input,select,textarea,label,[contenteditable="true"]')) return;
+    event.preventDefault();
+    _showCardImageMenu(card, event.clientX, event.clientY);
+}
+
+function _startCardImageHold(event) {
+    if (event.button !== undefined && event.button !== 0) return;
+    const card = event.target?.closest?.('[data-msd-card-image]');
+    if (!card || !document.getElementById('machine-safety-page')?.contains(card)) return;
+    if (event.target.closest('button,a,input,select,textarea,label,[contenteditable="true"]')) return;
+    _cancelCardImageHold();
+    _msdCardSaveHold = {
+        card,
+        pointerId: event.pointerId,
+        x: event.clientX,
+        y: event.clientY,
+        timer: setTimeout(() => {
+            if (!_msdCardSaveHold || _msdCardSaveHold.card !== card) return;
+            _showCardImageMenu(card, _msdCardSaveHold.x, _msdCardSaveHold.y);
+        }, 800),
+    };
+}
+
+function _moveCardImageHold(event) {
+    if (!_msdCardSaveHold || event.pointerId !== _msdCardSaveHold.pointerId) return;
+    if (Math.abs(event.clientX - _msdCardSaveHold.x) > 10 || Math.abs(event.clientY - _msdCardSaveHold.y) > 10) {
+        _cancelCardImageHold();
+    }
+}
+
+function _cancelCardImageHold() {
+    if (_msdCardSaveHold?.timer) clearTimeout(_msdCardSaveHold.timer);
+    _msdCardSaveHold = null;
+}
+
+function _showCardImageMenu(card, clientX, clientY) {
+    _hideCardImageMenu();
+    const menu = document.createElement('div');
+    menu.id = 'msd-card-save-menu';
+    menu.className = 'fixed z-[9999] rounded-xl border border-slate-200 bg-white p-1.5 shadow-xl';
+    menu.style.minWidth = '170px';
+    menu.innerHTML = `
+        <button type="button" data-msd-card-save-action
+            class="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-xs font-black text-slate-700 hover:bg-emerald-50 hover:text-emerald-700">
+            <svg class="h-4 w-4 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 10v6m0 0l-3-3m3 3l3-3m4 7H5a2 2 0 01-2-2V7a2 2 0 012-2h4l2 2h8a2 2 0 012 2v9a2 2 0 01-2 2z"/>
+            </svg>
+            บันทึกเป็นรูปภาพ
+        </button>`;
+    document.body.appendChild(menu);
+    const rect = menu.getBoundingClientRect();
+    const left = Math.min(Math.max(8, clientX), window.innerWidth - rect.width - 8);
+    const top = Math.min(Math.max(8, clientY), window.innerHeight - rect.height - 8);
+    menu.style.left = `${left}px`;
+    menu.style.top = `${top}px`;
+    _msdCardSaveMenu = { card, menu };
+}
+
+function _hideCardImageMenu() {
+    _msdCardSaveMenu?.menu?.remove?.();
+    _msdCardSaveMenu = null;
+}
+
+async function _downloadCardImage(card) {
+    if (typeof html2canvas === 'undefined') {
+        UI.showToast('ไม่พบ library สำหรับบันทึกรูปภาพ', 'error');
+        return;
+    }
+    const name = _safeFilePart(card.dataset.msdCardImage || 'machine-safety-card');
+    try {
+        UI.showLoading('Saving card image...');
+        const canvas = await html2canvas(card, {
+            backgroundColor: '#ffffff',
+            scale: Math.min(2, window.devicePixelRatio || 1.5),
+            useCORS: true,
+            logging: false,
+            onclone: doc => {
+                doc.querySelectorAll('[data-msd-card-ignore]').forEach(el => { el.style.display = 'none'; });
+                doc.querySelectorAll('[data-msd-card-image]').forEach(el => {
+                    el.style.boxShadow = 'none';
+                    el.style.transform = 'none';
+                });
+            },
+        });
+        const link = document.createElement('a');
+        link.href = canvas.toDataURL('image/png');
+        link.download = `${name}-${new Date().toISOString().slice(0, 10)}.png`;
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+        UI.showToast('บันทึกรูปภาพการ์ดแล้ว', 'success');
+    } catch (err) {
+        UI.showToast(_errText(err, 'บันทึกรูปภาพการ์ดไม่สำเร็จ'), 'error');
+    } finally {
+        UI.hideLoading();
+    }
 }
 
 // ─── Audit Status per Machine ─────────────────────────────────────────────────
@@ -103,6 +268,19 @@ function _auditStatus(m) {
 
 // ─── Render Page ──────────────────────────────────────────────────────────────
 function _renderPage(container) {
+    if (_loadError) {
+        container.innerHTML = `
+        <div class="ds-section p-8 text-center">
+            <div class="w-12 h-12 mx-auto rounded-2xl bg-red-50 text-red-500 flex items-center justify-center mb-3">
+                <svg class="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v4m0 4h.01M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"/></svg>
+            </div>
+            <p class="text-sm font-bold text-slate-700">โหลดข้อมูล Machine & Device Safety ไม่สำเร็จ</p>
+            <p class="text-xs text-slate-400 mt-1">${UI.escHtml(_loadError)}</p>
+            <button onclick="window._msdReload()" class="btn btn-primary mt-4 px-4">ลองโหลดใหม่</button>
+        </div>`;
+        return;
+    }
+
     const today     = new Date(); today.setHours(0,0,0,0);
     const total     = _machines.length;
     const compliant = _machines.filter(m => m.SafetyDeviceCount > 0 && m.LayoutCheckpointCount > 0).length;
@@ -132,7 +310,7 @@ function _renderPage(container) {
     <div class="space-y-6 animate-fade-in pb-10">
 
         <!-- ═══ HERO HEADER ═══ -->
-        <div class="relative overflow-hidden rounded-2xl mb-2" style="background:linear-gradient(135deg,#064e3b 0%,#065f46 55%,#0d9488 100%)">
+        <div class="relative overflow-hidden rounded-2xl mb-2" data-msd-card-image="machine-safety-hero" style="background:linear-gradient(135deg,#064e3b 0%,#065f46 55%,#0d9488 100%)">
             <div class="absolute inset-0 opacity-10 pointer-events-none">
                 <svg width="100%" height="100%"><defs><pattern id="msd-dots" width="24" height="24" patternUnits="userSpaceOnUse"><circle cx="12" cy="12" r="1.3" fill="white"/></pattern></defs><rect width="100%" height="100%" fill="url(#msd-dots)"/></svg>
             </div>
@@ -149,7 +327,7 @@ function _renderPage(container) {
                         <h1 class="text-xl md:text-2xl font-bold text-white leading-snug">Machine Safety Devices</h1>
                         <p class="text-sm mt-1" style="color:rgba(167,243,208,0.85)">Safety Device Standard และ Layout &amp; Checkpoint ของเครื่องจักรทั้งหมด</p>
                     </div>
-                    <div class="flex items-center gap-2 flex-wrap justify-end flex-shrink-0">
+                    <div class="flex items-center gap-2 flex-wrap justify-end flex-shrink-0" data-msd-card-ignore>
                         <button onclick="window._msdExportExcel()" class="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-white/15 hover:bg-white/25 border border-white/20 text-white text-xs font-semibold transition-colors">
                             <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/></svg>
                             Export Excel
@@ -195,7 +373,7 @@ function _renderPage(container) {
 
         <!-- Compliance Bar -->
         ${total > 0 ? `
-        <div class="ds-section p-4 flex items-center gap-4">
+        <div class="ds-section p-4 flex items-center gap-4" data-msd-card-image="machine-safety-document-compliance">
             <div class="flex-shrink-0">
                 <div class="relative w-14 h-14">
                     <svg class="w-14 h-14 -rotate-90" viewBox="0 0 56 56">
@@ -232,7 +410,7 @@ function _renderPage(container) {
 
         <!-- Audit Readiness Summary -->
         ${total > 0 ? `
-        <div class="bg-white rounded-xl border shadow-sm p-4 ${auditPct >= 80 ? 'border-emerald-200' : auditPct >= 50 ? 'border-amber-200' : 'border-red-200'}">
+        <div class="bg-white rounded-xl border shadow-sm p-4 ${auditPct >= 80 ? 'border-emerald-200' : auditPct >= 50 ? 'border-amber-200' : 'border-red-200'}" data-msd-card-image="machine-safety-audit-readiness">
             <div class="flex flex-col sm:flex-row items-start sm:items-center gap-4">
                 <div class="flex items-center gap-3 flex-shrink-0">
                     <div class="relative w-14 h-14">
@@ -254,7 +432,7 @@ function _renderPage(container) {
                     </div>
                 </div>
                 <div class="flex-1 min-w-0">
-                    <div class="flex flex-wrap gap-3 mb-2.5">
+                    <div class="flex flex-wrap gap-3 mb-2.5" data-msd-card-ignore>
                         <button onclick="window._msdSetAuditFilter('pass')" class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-semibold bg-emerald-100 text-emerald-700 hover:bg-emerald-200 transition-colors cursor-pointer">
                             <span class="w-1.5 h-1.5 rounded-full bg-emerald-500 inline-block"></span>ผ่าน ${auditMap.pass} เครื่อง
                         </button>
@@ -282,7 +460,7 @@ function _renderPage(container) {
             const depts = [...new Set(_machines.map(m => m.Department).filter(Boolean))].sort();
             if (depts.length === 0) return '';
             return `
-        <div class="ds-section p-5">
+        <div class="ds-section p-5" data-msd-card-image="machine-safety-dept-compliance-chart">
             <div class="flex items-center justify-between mb-4">
                 <h3 class="text-sm font-bold text-slate-700 flex items-center gap-2">
                     <svg class="w-4 h-4 text-emerald-500" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"/></svg>
@@ -313,33 +491,6 @@ function _renderPage(container) {
             </span>
         </div>
 
-        <!-- Enterprise summary strip -->
-        <div class="grid grid-cols-2 lg:grid-cols-5 gap-3">
-            <button onclick="window._msdSetAuditFilter('fail')"
-                class="text-left rounded-xl border ${auditMap.fail ? 'border-red-100 bg-red-50' : 'border-slate-200 bg-white'} px-4 py-3 hover:shadow-sm transition-shadow">
-                <p class="text-[10px] font-bold uppercase ${auditMap.fail ? 'text-red-500' : 'text-slate-400'}">Audit Risk</p>
-                <p class="mt-1 text-sm font-black ${auditMap.fail ? 'text-red-700' : 'text-slate-700'}">${auditMap.fail} fail / ${auditMap.warn} warn</p>
-            </button>
-            <button onclick="window._msdSetRiskFilter('high-risk')"
-                class="text-left rounded-xl border ${highRisk ? 'border-orange-100 bg-orange-50' : 'border-slate-200 bg-white'} px-4 py-3 hover:shadow-sm transition-shadow">
-                <p class="text-[10px] font-bold uppercase ${highRisk ? 'text-orange-500' : 'text-slate-400'}">High Risk</p>
-                <p class="mt-1 text-sm font-black ${highRisk ? 'text-orange-700' : 'text-slate-700'}">${highRisk.toLocaleString()} machines</p>
-            </button>
-            <button onclick="window._msdSetInspectionFilter('due')"
-                class="text-left rounded-xl border ${overdue || dueSoon ? 'border-amber-100 bg-amber-50' : 'border-slate-200 bg-white'} px-4 py-3 hover:shadow-sm transition-shadow">
-                <p class="text-[10px] font-bold uppercase ${overdue ? 'text-red-500' : dueSoon ? 'text-amber-500' : 'text-slate-400'}">Inspection</p>
-                <p class="mt-1 text-sm font-black ${overdue ? 'text-red-700' : dueSoon ? 'text-amber-700' : 'text-slate-700'}">${overdue} overdue / ${dueSoon} due</p>
-            </button>
-            <div class="rounded-xl border border-emerald-100 bg-emerald-50 px-4 py-3">
-                <p class="text-[10px] font-bold uppercase text-emerald-500">Risk Assessment</p>
-                <p class="mt-1 text-sm font-black text-emerald-700">${total ? Math.round(riskReady * 100 / total) : 0}% ready</p>
-            </div>
-            <div class="rounded-xl border ${openIssues || restricted ? 'border-rose-100 bg-rose-50' : 'border-slate-200 bg-white'} px-4 py-3">
-                <p class="text-[10px] font-bold uppercase ${openIssues || restricted ? 'text-rose-500' : 'text-slate-400'}">Controls</p>
-                <p class="mt-1 text-sm font-black ${openIssues || restricted ? 'text-rose-700' : 'text-slate-700'}">${openIssues} issues / ${restricted} restricted</p>
-            </div>
-        </div>
-
         <!-- Filter Bar -->
         <div class="ds-filter-bar flex flex-wrap gap-3 items-center">
             <div class="relative flex-1 min-w-[180px]">
@@ -353,7 +504,7 @@ function _renderPage(container) {
                 onchange="window._msdFilter()">
                 <option value="">ทุกแผนก</option>
                 ${[...new Set(_machines.map(m => m.Department).filter(Boolean))].sort()
-                    .map(d => `<option value="${d}" ${_filterDept===d?'selected':''}>${d}</option>`).join('')}
+                    .map(d => `<option value="${UI.escHtml(d)}" ${_filterDept===d?'selected':''}>${UI.escHtml(d)}</option>`).join('')}
             </select>
             <select id="msd-status" class="text-sm border border-slate-200 rounded-lg px-3 py-2 outline-none focus:border-emerald-400"
                 onchange="window._msdFilter()">
@@ -386,11 +537,26 @@ function _renderPage(container) {
                 <option value="warn" ${_filterAudit==='warn'?'selected':''}>เตือน</option>
                 <option value="fail" ${_filterAudit==='fail'?'selected':''}>ไม่ผ่าน</option>
             </select>
+            <select id="msd-inspection" class="text-sm border border-slate-200 rounded-lg px-3 py-2 outline-none focus:border-emerald-400"
+                onchange="window._msdFilter()">
+                <option value="">Inspection: ทั้งหมด</option>
+                <option value="due" ${_filterInspection==='due'?'selected':''}>Due Soon</option>
+                <option value="overdue" ${_filterInspection==='overdue'?'selected':''}>Overdue</option>
+            </select>
+            ${_isAdmin ? `<span class="inline-flex items-center gap-2 px-3 py-2 rounded-lg border border-emerald-200 bg-emerald-50 text-xs font-semibold text-emerald-700">
+                ลำดับถัดไป <span class="font-mono">${_nextDocumentNo()}</span>
+            </span>` : ''}
+            <div class="inline-flex rounded-lg border border-slate-200 bg-white overflow-hidden">
+                <button type="button" onclick="window._msdSetView('list')"
+                    class="px-3 py-2 text-xs font-semibold ${_viewMode === 'list' ? 'bg-emerald-500 text-white' : 'text-slate-500 hover:bg-slate-50'}">List</button>
+                <button type="button" onclick="window._msdSetView('card')"
+                    class="px-3 py-2 text-xs font-semibold border-l border-slate-200 ${_viewMode === 'card' ? 'bg-emerald-500 text-white' : 'text-slate-500 hover:bg-slate-50'}">Card</button>
+            </div>
             <span id="msd-count" class="text-xs text-slate-400 ml-auto"></span>
         </div>
 
         <!-- Table -->
-        <div class="ds-table-wrap">
+        <div class="ds-table-wrap" data-msd-card-image="machine-safety-document-list">
             <div id="msd-table-wrap" class="overflow-x-auto">
                 ${_renderTable()}
             </div>
@@ -401,6 +567,18 @@ function _renderPage(container) {
     _updateCount();
     requestAnimationFrame(_drawDeptChart);
 }
+
+window._msdReload = async function() {
+    const container = document.getElementById('machine-safety-page');
+    if (!container) return;
+    container.innerHTML = `
+        <div class="flex flex-col items-center justify-center h-64 text-slate-400">
+            <div class="inline-block animate-spin rounded-full h-10 w-10 border-4 border-emerald-500 border-t-transparent mb-3"></div>
+            <p class="text-sm">กำลังโหลดข้อมูล...</p>
+        </div>`;
+    await Promise.all([_fetchMachines(), _fetchDepts(), _fetchAreas(), _fetchEmployees()]);
+    _renderPage(container);
+};
 
 // ─── Dept Chart ───────────────────────────────────────────────────────────────
 let _deptChartInst = null;
@@ -457,6 +635,10 @@ function _renderTable() {
     const totalPages = Math.ceil(filtered.length / PAGE_SIZE);
     if (_page > totalPages) _page = Math.max(1, totalPages);
     const paginated = filtered.slice((_page - 1) * PAGE_SIZE, _page * PAGE_SIZE);
+
+    if (_viewMode === 'card' && filtered.length > 0) {
+        return _renderCardView(filtered, paginated, totalPages);
+    }
 
     if (filtered.length === 0) {
         return `<div class="flex flex-col items-center justify-center py-16 text-slate-400">
@@ -536,20 +718,20 @@ function _renderTable() {
 
         // Detail button (all users)
         const detailBtn = `
-            <button onclick="window._msdOpenDetail(${m.id}, '${_esc(m.MachineName)}')"
+            <button onclick="window._msdOpenDetail(${m.id}, ${_jsArg(m.MachineName)})"
                 class="p-1.5 rounded-lg text-slate-400 hover:text-teal-600 hover:bg-teal-50 transition-colors" title="ดูรายละเอียด">
                 <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"/></svg>
             </button>`;
 
         // File buttons — linked together, open modal with both sections
         const fileBtn = `
-            <button onclick="window._msdOpenFiles(${m.id}, '${_esc(m.MachineName)}')"
+            <button onclick="window._msdOpenFiles(${m.id}, ${_jsArg(m.MachineName)})"
                 title="Safety Device Standard (${m.SafetyDeviceCount} ไฟล์)"
                 class="inline-flex items-center gap-1 px-2 py-1 rounded-l-lg text-xs font-medium border-y border-l transition-colors
                 ${hasSafety ? 'border-blue-300 text-blue-600 bg-blue-50 hover:bg-blue-100' : 'border-slate-200 text-slate-400 hover:bg-slate-50'}">
                 <svg class="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/></svg>
                 Std.${hasSafety ? ` (${m.SafetyDeviceCount})` : ''}
-            </button><button onclick="window._msdOpenFiles(${m.id}, '${_esc(m.MachineName)}', 'LayoutCheckpoint')"
+            </button><button onclick="window._msdOpenFiles(${m.id}, ${_jsArg(m.MachineName)}, 'LayoutCheckpoint')"
                 title="Layout & Checkpoint (${m.LayoutCheckpointCount} ไฟล์)"
                 class="inline-flex items-center gap-1 px-2 py-1 rounded-r-lg text-xs font-medium border transition-colors
                 ${hasLayout ? 'border-purple-300 text-purple-600 bg-purple-50 hover:bg-purple-100' : 'border-slate-200 text-slate-400 hover:bg-slate-50'}">
@@ -562,7 +744,7 @@ function _renderTable() {
                 class="p-1.5 rounded-lg text-slate-400 hover:text-blue-500 hover:bg-blue-50 transition-colors" title="แก้ไข">
                 <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"/></svg>
             </button>
-            <button onclick="window._msdDelete(${m.id}, '${_esc(m.MachineName)}')"
+            <button onclick="window._msdDelete(${m.id}, ${_jsArg(m.MachineName)})"
                 class="p-1.5 rounded-lg text-slate-400 hover:text-red-500 hover:bg-red-50 transition-colors" title="ลบ">
                 <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg>
             </button>` : '';
@@ -580,13 +762,14 @@ function _renderTable() {
             : '';
 
         return `<tr class="border-b border-slate-100 hover:bg-slate-50/80 transition-colors ${(m.Status === 'inactive' || m.Status === 'locked') ? 'opacity-60' : ''}" ${rowBg}>
-            <td class="px-4 py-3 text-sm font-mono text-slate-600 whitespace-nowrap">${m.MachineCode}</td>
+            <td class="px-4 py-3 text-sm font-mono text-slate-600 whitespace-nowrap">${UI.escHtml(m.MachineCode || '—')}</td>
             <td class="px-4 py-3 min-w-[160px]">
-                <p class="text-sm font-medium text-slate-800">${m.MachineName}</p>
-                ${m.Remark ? `<p class="text-xs text-slate-400 truncate max-w-[200px]">${m.Remark}</p>` : ''}
+                <p class="text-sm font-medium text-slate-800">${UI.escHtml(m.MachineName || '—')}</p>
+                ${m.EffectiveDate ? `<p class="text-xs text-emerald-600">บังคับใช้ ${_dateOnly(m.EffectiveDate)}</p>` : ''}
+                ${m.Remark ? `<p class="text-xs text-slate-400 truncate max-w-[200px]">${UI.escHtml(m.Remark)}</p>` : ''}
             </td>
-            <td class="px-4 py-3 text-sm text-slate-600 whitespace-nowrap">${m.Department || '—'}</td>
-            <td class="px-4 py-3 text-sm text-slate-600 whitespace-nowrap">${m.Area || '—'}</td>
+            <td class="px-4 py-3 text-sm text-slate-600 whitespace-nowrap">${UI.escHtml(m.Department || '—')}</td>
+            <td class="px-4 py-3 text-sm text-slate-600 whitespace-nowrap">${UI.escHtml(m.Area || '—')}</td>
             <td class="px-4 py-3 text-center">${machineSBadge}</td>
             <td class="px-4 py-3 text-center">${riskBadge}</td>
             <td class="px-4 py-3 text-center">${tickRisk}</td>
@@ -626,8 +809,8 @@ function _renderTable() {
     return `<table class="ds-table text-left border-collapse">
         <thead>
             <tr class="bg-slate-50 border-b-2 border-slate-200">
-                <th class="px-4 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wide whitespace-nowrap">รหัส</th>
-                <th class="px-4 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wide">ชื่อเครื่องจักร</th>
+                <th class="px-4 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wide whitespace-nowrap">ลำดับเอกสาร</th>
+                <th class="px-4 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wide">ชื่อเอกสารเครื่องจักร</th>
                 <th class="px-4 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wide">แผนก</th>
                 <th class="px-4 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wide">พื้นที่</th>
                 <th class="px-4 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wide text-center whitespace-nowrap">สถานะ</th>
@@ -649,12 +832,116 @@ function _renderTable() {
     </table>${pagination}`;
 }
 
+function _renderCardView(filtered, paginated, totalPages) {
+    const pagination = totalPages > 1 ? `
+    <div class="flex items-center justify-between px-4 py-3 border-t border-slate-100 bg-slate-50/50">
+        <span class="text-xs text-slate-500">
+            แสดง ${(_page-1)*PAGE_SIZE+1}-${Math.min(_page*PAGE_SIZE, filtered.length)} จาก ${filtered.length} รายการ
+        </span>
+        <div class="flex items-center gap-1">
+            <button onclick="window._msdGoPage(${_page-1})" ${_page<=1?'disabled':''} class="px-2.5 py-1.5 text-xs rounded-lg border border-slate-200 text-slate-500 hover:bg-slate-100 disabled:opacity-40 disabled:cursor-not-allowed transition-colors">
+                <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"/></svg>
+            </button>
+            <span class="px-3 py-1.5 text-xs font-semibold text-slate-500">Page ${_page} / ${totalPages}</span>
+            <button onclick="window._msdGoPage(${_page+1})" ${_page>=totalPages?'disabled':''} class="px-2.5 py-1.5 text-xs rounded-lg border border-slate-200 text-slate-500 hover:bg-slate-100 disabled:opacity-40 disabled:cursor-not-allowed transition-colors">
+                <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/></svg>
+            </button>
+        </div>
+    </div>` : '';
+
+    const cards = paginated.map(m => {
+        const hasSafety = m.SafetyDeviceCount > 0;
+        const hasLayout = m.LayoutCheckpointCount > 0;
+        const sm = STATUS_META[m.Status || 'active'] || STATUS_META.active;
+        const rm = RISK_META[m.RiskLevel || 'low'] || RISK_META.low;
+        const audit = _auditStatus(m);
+        const auditClass = audit.status === 'pass'
+            ? 'bg-emerald-100 text-emerald-700 border-emerald-200'
+            : audit.status === 'warn'
+            ? 'bg-amber-100 text-amber-700 border-amber-200'
+            : 'bg-red-100 text-red-700 border-red-200';
+        const auditLabel = audit.status === 'pass' ? 'ผ่าน' : audit.status === 'warn' ? 'เตือน' : 'ไม่ผ่าน';
+        const updated = m.UpdatedAt
+            ? new Date(m.UpdatedAt).toLocaleDateString('th-TH', { day:'2-digit', month:'short', year:'2-digit' })
+            : '-';
+        const completion = hasSafety && hasLayout ? 100 : hasSafety || hasLayout ? 50 : 0;
+        const adminBtns = _isAdmin ? `
+            <button onclick="window._msdOpenEdit(${m.id})" class="p-2 rounded-lg text-slate-400 hover:text-blue-500 hover:bg-blue-50 transition-colors" title="แก้ไข">
+                <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"/></svg>
+            </button>
+            <button onclick="window._msdDelete(${m.id}, ${_jsArg(m.MachineName)})" class="p-2 rounded-lg text-slate-400 hover:text-red-500 hover:bg-red-50 transition-colors" title="ลบ">
+                <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg>
+            </button>` : '';
+
+        return `<article class="rounded-xl border border-slate-200 bg-white p-4 shadow-sm hover:shadow-md hover:border-emerald-200 transition-all ${(m.Status === 'inactive' || m.Status === 'locked') ? 'opacity-70' : ''}"
+            data-msd-card-image="machine-safety-${_safeFilePart(m.MachineCode || m.MachineName || 'document')}">
+            <div class="flex items-start justify-between gap-3">
+                <div class="min-w-0">
+                    <p class="text-xs font-mono font-semibold text-emerald-700">${UI.escHtml(m.MachineCode || '')}</p>
+                    <h4 class="mt-1 text-sm font-bold text-slate-800 truncate">${UI.escHtml(m.MachineName || '-')}</h4>
+                    <p class="mt-1 text-xs text-slate-500 truncate">${UI.escHtml([m.Department, m.Area].filter(Boolean).join(' / ') || '-')}</p>
+                </div>
+                <span class="inline-flex items-center gap-1 px-2 py-1 rounded-full text-[10px] font-semibold border ${auditClass}">${auditLabel}</span>
+            </div>
+            <div class="mt-4 grid grid-cols-2 gap-2">
+                <div class="rounded-lg bg-slate-50 border border-slate-100 p-2">
+                    <p class="text-[10px] text-slate-400">Status</p>
+                    <p class="mt-1 text-xs font-semibold ${sm.text}">${sm.label}</p>
+                </div>
+                <div class="rounded-lg bg-slate-50 border border-slate-100 p-2">
+                    <p class="text-[10px] text-slate-400">Risk</p>
+                    <p class="mt-1 text-xs font-semibold ${rm.text}">${rm.label}</p>
+                </div>
+                <div class="rounded-lg bg-slate-50 border border-slate-100 p-2">
+                    <p class="text-[10px] text-slate-400">Issue by</p>
+                    <p class="mt-1 text-xs font-semibold text-slate-700 truncate">${UI.escHtml(m.IssueByName || m.IssueBy || '-')}</p>
+                </div>
+                <div class="rounded-lg bg-slate-50 border border-slate-100 p-2">
+                    <p class="text-[10px] text-slate-400">Verified by</p>
+                    <p class="mt-1 text-xs font-semibold text-slate-700 truncate">${UI.escHtml(m.VerifiedByName || m.VerifiedBy || '-')}</p>
+                </div>
+            </div>
+            <div class="mt-4">
+                <div class="flex items-center justify-between text-xs mb-1.5">
+                    <span class="font-semibold text-slate-600">Document completeness</span>
+                    <span class="font-bold text-emerald-700">${completion}%</span>
+                </div>
+                <div class="h-2 rounded-full bg-slate-100 overflow-hidden">
+                    <div class="h-full rounded-full" style="width:${completion}%;background:${completion === 100 ? '#10b981' : completion ? '#f59e0b' : '#cbd5e1'}"></div>
+                </div>
+                <div class="mt-3 flex flex-wrap gap-2">
+                    <button onclick="window._msdOpenFiles(${m.id}, ${_jsArg(m.MachineName)})" class="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-semibold border ${hasSafety ? 'border-blue-200 bg-blue-50 text-blue-700 hover:bg-blue-100' : 'border-slate-200 bg-slate-50 text-slate-400'}">
+                        Std.${hasSafety ? ` ${m.SafetyDeviceCount}` : ''}
+                    </button>
+                    <button onclick="window._msdOpenFiles(${m.id}, ${_jsArg(m.MachineName)}, 'LayoutCheckpoint')" class="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-semibold border ${hasLayout ? 'border-purple-200 bg-purple-50 text-purple-700 hover:bg-purple-100' : 'border-slate-200 bg-slate-50 text-slate-400'}">
+                        Layout${hasLayout ? ` ${m.LayoutCheckpointCount}` : ''}
+                    </button>
+                </div>
+            </div>
+            <div class="mt-4 pt-3 border-t border-slate-100 flex items-center justify-between gap-3">
+                <span class="text-[11px] text-slate-400">Updated ${updated}</span>
+                <div class="flex items-center gap-1" data-msd-card-ignore>
+                    <button onclick="window._msdOpenDetail(${m.id}, ${_jsArg(m.MachineName)})" class="p-2 rounded-lg text-slate-400 hover:text-teal-600 hover:bg-teal-50 transition-colors" title="ดูรายละเอียด">
+                        <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"/></svg>
+                    </button>
+                    ${adminBtns}
+                </div>
+            </div>
+        </article>`;
+    }).join('');
+
+    return `<div class="p-4 grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">${cards}</div>${pagination}`;
+}
+
 // ─── Filter ───────────────────────────────────────────────────────────────────
 function _getFiltered() {
     return _machines.filter(m => {
         if (_search) {
             const q = _search.toLowerCase();
-            if (!m.MachineName.toLowerCase().includes(q) && !m.MachineCode.toLowerCase().includes(q)) return false;
+            const haystack = [
+                m.MachineName, m.MachineCode, m.Area, m.IssueByName, m.VerifiedByName
+            ].map(v => String(v || '').toLowerCase()).join(' ');
+            if (!haystack.includes(q)) return false;
         }
         if (_filterDept    && m.Department !== _filterDept)              return false;
         if (_filterMStatus && (m.Status || 'active') !== _filterMStatus) return false;
@@ -689,6 +976,7 @@ window._msdFilter = function() {
     _filterMStatus = document.getElementById('msd-mstatus')?.value  || '';
     _filterRisk    = document.getElementById('msd-risk')?.value     || '';
     _filterAudit   = document.getElementById('msd-audit')?.value    || '';
+    _filterInspection = document.getElementById('msd-inspection')?.value || _filterInspection || '';
     _page = 1; // reset to first page on filter change
     const wrap = document.getElementById('msd-table-wrap');
     if (wrap) wrap.innerHTML = _renderTable();
@@ -723,6 +1011,13 @@ window._msdSetInspectionFilter = function(val) {
     _updateCount();
 };
 
+window._msdSetView = function(mode) {
+    _viewMode = mode === 'card' ? 'card' : 'list';
+    _page = 1;
+    const container = document.getElementById('machine-safety-page');
+    if (container) _renderPage(container);
+};
+
 window._msdGoPage = function(p) {
     _page = p;
     const wrap = document.getElementById('msd-table-wrap');
@@ -731,9 +1026,98 @@ window._msdGoPage = function(p) {
 };
 
 // ─── Add / Edit Form ──────────────────────────────────────────────────────────
-function _deptOptions(selected = '') {
-    const all = [...new Set([..._depts, ...(_machines.map(m => m.Department).filter(Boolean))])].sort();
-    return all.map(d => `<option value="${d}" ${d === selected ? 'selected' : ''}>${d}</option>`).join('');
+function _deptNames() {
+    return [...new Set([..._depts, ...(_machines.map(m => m.Department).filter(Boolean))])].sort();
+}
+
+function _deptDatalistHtml(selected = '') {
+    return `<input list="msd-dept-options" name="Department" value="${UI.escHtml(selected || '')}" placeholder="พิมพ์ค้นหาแผนก" class="form-input w-full">
+        <datalist id="msd-dept-options">
+            ${_deptNames().map(d => `<option value="${UI.escHtml(d)}"></option>`).join('')}
+        </datalist>`;
+}
+
+function _splitAreaValues(value = '') {
+    return String(value || '').split(',').map(v => v.trim()).filter(Boolean);
+}
+
+function _areaNames() {
+    return [...new Set([..._areas, ..._machines.flatMap(m => _splitAreaValues(m.Area))])].sort();
+}
+
+function _areaPickerHtml(selectedValue = '') {
+    const selected = new Set(_splitAreaValues(selectedValue));
+    const areas = _areaNames();
+    if (!areas.length) {
+        return `<input name="Area" value="${UI.escHtml(selectedValue || '')}" placeholder="เช่น Line A, Zone 2" class="form-input w-full">`;
+    }
+    return `<div class="rounded-xl border border-slate-200 bg-slate-50/60 p-3 max-h-36 overflow-y-auto grid grid-cols-1 sm:grid-cols-2 gap-2">
+        ${areas.map(area => `<label class="flex items-center gap-2 text-sm text-slate-700">
+            <input type="checkbox" name="Areas" value="${UI.escHtml(area)}" ${selected.has(area) ? 'checked' : ''} class="w-4 h-4 rounded accent-emerald-500">
+            <span class="truncate">${UI.escHtml(area)}</span>
+        </label>`).join('')}
+    </div>`;
+}
+
+function _employeeLookupValue(e) {
+    const id = e.EmployeeID || '';
+    const name = e.EmployeeName || id;
+    const meta = [id, e.Department, e.Position].filter(Boolean).join(' · ');
+    return `${name}${meta ? ` (${meta})` : ''}`;
+}
+
+function _employeeLookupInitial(id = '', name = '') {
+    const row = _employees.find(e => String(e.EmployeeID || '') === String(id || ''));
+    return row ? _employeeLookupValue(row) : (name || id || '');
+}
+
+function _employeeDatalistHtml(fieldName, selectedId = '', selectedName = '') {
+    const listId = `msd-${fieldName}-options`;
+    return `<input list="${listId}" name="${fieldName}" value="${UI.escHtml(_employeeLookupInitial(selectedId, selectedName))}" placeholder="ค้นหาจากรหัสหรือชื่อพนักงาน" class="form-input w-full">
+        <datalist id="${listId}">
+            ${_employees.map(e => `<option value="${UI.escHtml(_employeeLookupValue(e))}"></option>`).join('')}
+        </datalist>`;
+}
+
+function _employeeFromLookup(value = '') {
+    const text = String(value || '').trim();
+    if (!text) return { id: '', name: '' };
+    const lower = text.toLowerCase();
+    const parenId = text.match(/\(([^)]*)\)/)?.[1]?.split('·')?.[0]?.trim();
+    const match = _employees.find(e => {
+        const id = String(e.EmployeeID || '').trim();
+        const name = String(e.EmployeeName || '').trim();
+        return _employeeLookupValue(e).toLowerCase() === lower
+            || id.toLowerCase() === lower
+            || name.toLowerCase() === lower
+            || (parenId && id.toLowerCase() === parenId.toLowerCase());
+    });
+    if (!match) return { id: text, name: text };
+    return { id: match.EmployeeID || '', name: match.EmployeeName || match.EmployeeID || '' };
+}
+
+function _dateOnly(value) {
+    if (!value) return '';
+    const text = String(value);
+    if (/^\d{4}-\d{2}-\d{2}$/.test(text)) return text;
+    const date = new Date(text);
+    if (Number.isNaN(date.getTime())) return text.split('T')[0] || '';
+    const y = date.getFullYear();
+    const m = String(date.getMonth() + 1).padStart(2, '0');
+    const d = String(date.getDate()).padStart(2, '0');
+    return `${y}-${m}-${d}`;
+}
+
+function _nextDocumentNo() {
+    const year = new Date().getFullYear();
+    const prefix = `MSD-${year}-`;
+    const max = _machines.reduce((acc, m) => {
+        const code = String(m.MachineCode || '');
+        if (!code.startsWith(prefix)) return acc;
+        const n = parseInt(code.slice(prefix.length), 10);
+        return Number.isFinite(n) ? Math.max(acc, n) : acc;
+    }, 0);
+    return `${prefix}${String(max + 1).padStart(4, '0')}`;
 }
 
 function _machineFormHtml(m = {}) {
@@ -749,7 +1133,7 @@ function _machineFormHtml(m = {}) {
                     Layout & Checkpoint <span class="font-semibold text-purple-600">${m.LayoutCheckpointCount || 0}</span> ไฟล์
                 </p>
             </div>
-            <button type="button" onclick="window._msdOpenFiles(${m.id}, '${_esc(m.MachineName)}')"
+            <button type="button" onclick="window._msdOpenFiles(${m.id}, ${_jsArg(m.MachineName)})"
                 class="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold text-blue-600 bg-blue-50 hover:bg-blue-100 transition-colors flex-shrink-0">
                 <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13"/></svg>
                 จัดการไฟล์แนบ
@@ -802,29 +1186,34 @@ function _machineFormHtml(m = {}) {
     <form id="msd-form" class="space-y-4">
         <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div>
-                <label class="block text-sm font-semibold text-slate-700 mb-1.5">รหัสเครื่องจักร <span class="text-red-500">*</span></label>
-                <input name="MachineCode" required value="${m.MachineCode || ''}" placeholder="เช่น MC-001"
-                    class="form-input w-full">
+                <label class="block text-sm font-semibold text-slate-700 mb-1.5">ลำดับเอกสาร</label>
+                <div class="form-input w-full bg-slate-50 text-slate-500 flex items-center">${UI.escHtml(m.MachineCode || `ถัดไป: ${_nextDocumentNo()}`)}</div>
             </div>
             <div>
-                <label class="block text-sm font-semibold text-slate-700 mb-1.5">ชื่อเครื่องจักร <span class="text-red-500">*</span></label>
-                <input name="MachineName" required value="${m.MachineName || ''}" placeholder="ชื่อเครื่องจักร"
+                <label class="block text-sm font-semibold text-slate-700 mb-1.5">ชื่อเอกสารเครื่องจักร <span class="text-red-500">*</span></label>
+                <input name="MachineName" required value="${UI.escHtml(m.MachineName || '')}" placeholder="ชื่อเอกสารเครื่องจักร"
                     class="form-input w-full">
             </div>
         </div>
         <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div>
                 <label class="block text-sm font-semibold text-slate-700 mb-1.5">แผนก</label>
-                <select name="Department"
-                    class="form-input w-full">
-                    <option value="">— เลือกแผนก —</option>
-                    ${_deptOptions(m.Department || '')}
-                </select>
+                ${_deptDatalistHtml(m.Department || '')}
             </div>
             <div>
                 <label class="block text-sm font-semibold text-slate-700 mb-1.5">พื้นที่ / Line</label>
-                <input name="Area" value="${m.Area || ''}" placeholder="เช่น Line A, Zone 2"
-                    class="form-input w-full">
+                ${_areaPickerHtml(m.Area || '')}
+            </div>
+        </div>
+
+        <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div>
+                <label class="block text-sm font-semibold text-slate-700 mb-1.5">Issue by</label>
+                ${_employeeDatalistHtml('IssueByLookup', m.IssueBy || '', m.IssueByName || '')}
+            </div>
+            <div>
+                <label class="block text-sm font-semibold text-slate-700 mb-1.5">Verified by</label>
+                ${_employeeDatalistHtml('VerifiedByLookup', m.VerifiedBy || '', m.VerifiedByName || '')}
             </div>
         </div>
 
@@ -852,11 +1241,20 @@ function _machineFormHtml(m = {}) {
 
         <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div>
-                <label class="block text-sm font-semibold text-slate-700 mb-1.5">วันตรวจสอบครั้งถัดไป</label>
-                <input type="date" name="NextInspectionDate"
-                    value="${m.NextInspectionDate ? m.NextInspectionDate.split('T')[0] : ''}"
+                <label class="block text-sm font-semibold text-slate-700 mb-1.5">วันบังคับใช้ <span class="text-red-500">*</span></label>
+                <input type="date" name="EffectiveDate" required
+                    value="${_dateOnly(m.EffectiveDate)}"
                     class="form-input w-full">
             </div>
+            <div>
+                <label class="block text-sm font-semibold text-slate-700 mb-1.5">วันตรวจสอบครั้งถัดไป</label>
+                <input type="date" name="NextInspectionDate"
+                    value="${_dateOnly(m.NextInspectionDate)}"
+                    class="form-input w-full">
+            </div>
+        </div>
+
+        <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div class="flex items-end pb-1">
                 <label class="flex items-center gap-3 cursor-pointer">
                     <input type="checkbox" name="HasRiskAssessment" ${m.HasRiskAssessment ? 'checked' : ''}
@@ -869,7 +1267,7 @@ function _machineFormHtml(m = {}) {
         <div>
             <label class="block text-sm font-semibold text-slate-700 mb-1.5">หมายเหตุ</label>
             <textarea name="Remark" rows="2" placeholder="หมายเหตุเพิ่มเติม"
-                class="form-textarea w-full resize-none">${m.Remark || ''}</textarea>
+                class="form-textarea w-full resize-none">${UI.escHtml(m.Remark || '')}</textarea>
         </div>
 
         ${attachSection}
@@ -886,11 +1284,19 @@ function _machineFormHtml(m = {}) {
 
 function _formBody(formEl) {
     const fd = new FormData(formEl);
+    const areas = fd.getAll('Areas').map(v => String(v || '').trim()).filter(Boolean);
+    const issueBy = _employeeFromLookup(fd.get('IssueByLookup'));
+    const verifiedBy = _employeeFromLookup(fd.get('VerifiedByLookup'));
     return {
-        MachineCode:        fd.get('MachineCode'),
         MachineName:        fd.get('MachineName'),
         Department:         fd.get('Department'),
-        Area:               fd.get('Area'),
+        Area:               areas.length ? areas.join(', ') : fd.get('Area'),
+        Areas:              areas,
+        IssueBy:            issueBy.id,
+        IssueByName:        issueBy.name,
+        VerifiedBy:         verifiedBy.id,
+        VerifiedByName:     verifiedBy.name,
+        EffectiveDate:      fd.get('EffectiveDate') || null,
         HasRiskAssessment:  fd.get('HasRiskAssessment') === 'on',
         Remark:             fd.get('Remark'),
         Status:             fd.get('Status') || 'active',
@@ -900,9 +1306,9 @@ function _formBody(formEl) {
 }
 
 window._msdOpenAdd = function() {
-    UI.openModal('เพิ่มเครื่องจักร', _machineFormHtml(), 'max-w-lg');
+    UI.openModal('เพิ่มเอกสารเครื่องจักร', _machineFormHtml(), 'max-w-2xl');
     setTimeout(() => {
-        document.getElementById('msd-form')?.addEventListener('submit', async (e) => {
+        document.getElementById('msd-form')?.addEventListener('submit', guardSubmitHandler(async (e) => {
             e.preventDefault();
             const submitBtn = e.target.querySelector('button[type=submit]');
             submitBtn.disabled = true;
@@ -952,25 +1358,31 @@ window._msdOpenAdd = function() {
                 }
 
                 UI.closeModal();
-                UI.showToast('เพิ่มเครื่องจักรสำเร็จ', 'success');
+                UI.showToast('เพิ่มเอกสารเครื่องจักรสำเร็จ', 'success');
                 await _fetchMachines();
                 _renderPage(document.getElementById('machine-safety-page'));
             } catch (err) {
-                _showFormErr(err.message);
+                _showFormErr(_errText(err));
                 submitBtn.disabled = false;
                 submitBtn.textContent = 'บันทึก';
             }
-        });
+        }));
     }, 50);
 };
 
 window._msdOpenEdit = function(id) {
     const m = _machines.find(x => x.id === id);
     if (!m) return;
-    UI.openModal('แก้ไขข้อมูลเครื่องจักร', _machineFormHtml(m));
+    UI.openModal('แก้ไขเอกสารเครื่องจักร', _machineFormHtml(m), 'max-w-2xl');
     setTimeout(() => {
-        document.getElementById('msd-form')?.addEventListener('submit', async (e) => {
+        document.getElementById('msd-form')?.addEventListener('submit', guardSubmitHandler(async (e) => {
             e.preventDefault();
+            const submitBtn = e.target.querySelector('button[type=submit]');
+            if (submitBtn?.disabled) return;
+            if (submitBtn) {
+                submitBtn.disabled = true;
+                submitBtn.textContent = 'กำลังบันทึก...';
+            }
             try {
                 await apiFetch(`/machine-safety/${id}`, { method: 'PUT', body: JSON.stringify(_formBody(e.target)) });
                 UI.closeModal();
@@ -978,9 +1390,13 @@ window._msdOpenEdit = function(id) {
                 await _fetchMachines();
                 _renderPage(document.getElementById('machine-safety-page'));
             } catch (err) {
-                _showFormErr(err.message);
+                _showFormErr(_errText(err));
+                if (submitBtn) {
+                    submitBtn.disabled = false;
+                    submitBtn.textContent = 'บันทึก';
+                }
             }
-        });
+        }));
     }, 50);
 };
 
@@ -999,7 +1415,7 @@ window._msdDelete = async function(id, name) {
         await _fetchMachines();
         _renderPage(document.getElementById('machine-safety-page'));
     } catch (err) {
-        UI.showToast(err.message || 'เกิดข้อผิดพลาด', 'error');
+        UI.showToast(_errText(err), 'error');
     }
 };
 
@@ -1013,8 +1429,17 @@ window._msdOpenFiles = async function(machineId, machineName, defaultTab = 'Safe
             </div>
         </div>`);
 
-    const filesRes = await API.get(`/machine-safety/${machineId}/files`);
-    const files    = filesRes.data || [];
+    let files = [];
+    try {
+        const filesRes = await API.get(`/machine-safety/${machineId}/files`);
+        files = filesRes.data || [];
+    } catch (err) {
+        const body = document.getElementById('msd-files-body');
+        if (body) {
+            body.innerHTML = `<p class="text-red-500 text-sm text-center py-8">${UI.escHtml(_errText(err, 'ไม่สามารถโหลดไฟล์แนบได้'))}</p>`;
+        }
+        return;
+    }
 
     const safetyFiles  = files.filter(f => f.FileCategory === 'SafetyDeviceStandard');
     const layoutFiles  = files.filter(f => f.FileCategory === 'LayoutCheckpoint');
@@ -1086,22 +1511,22 @@ function _fileList(files, machineId, machineName, category) {
                         <svg class="w-4 h-4 text-${color}-500" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/></svg>
                     </div>
                     <div class="min-w-0">
-                        <p class="text-sm font-medium text-slate-700 truncate">${f.FileLabel || 'ไฟล์'}</p>
-                        <p class="text-xs text-slate-400">${f.UploadedBy} · ${new Date(f.UploadedAt).toLocaleDateString('th-TH')}</p>
+                        <p class="text-sm font-medium text-slate-700 truncate">${UI.escHtml(f.FileLabel || 'ไฟล์')}</p>
+                        <p class="text-xs text-slate-400">${UI.escHtml(f.UploadedBy || '—')} · ${new Date(f.UploadedAt).toLocaleDateString('th-TH')}</p>
                     </div>
                 </div>
                 <div class="flex items-center gap-2 flex-shrink-0">
-                    <button onclick="window._msdPreviewFile('${_esc(f.FileUrl)}', '${_esc(f.FileLabel || 'ไฟล์')}')"
+                    <button onclick="window._msdPreviewFile(${_jsArg(f.FileUrl)}, ${_jsArg(f.FileLabel || 'ไฟล์')})"
                         class="flex items-center gap-1 px-3 py-1.5 text-xs font-medium rounded-lg transition-colors bg-slate-50 text-slate-600 hover:bg-slate-100">
                         <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"/></svg>
                         ดูตัวอย่าง
                     </button>
-                    <a href="${f.FileUrl}" target="_blank" rel="noopener"
+                    <button type="button" onclick="window._msdDownloadFile(${_jsArg(f.FileUrl)}, ${_jsArg(f.FileLabel || 'ไฟล์')})"
                         class="flex items-center gap-1 px-3 py-1.5 text-xs font-medium rounded-lg transition-colors bg-${color}-50 text-${color}-600 hover:bg-${color}-100">
                         <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/></svg>
                         ดาวน์โหลด
-                    </a>
-                    ${_isAdmin ? `<button onclick="window._msdDeleteFile(${f.id}, ${machineId}, '${_esc(machineName)}', '${category}')"
+                    </button>
+                    ${_isAdmin ? `<button onclick="window._msdDeleteFile(${f.id}, ${machineId}, ${_jsArg(machineName)}, ${_jsArg(category)})"
                         class="p-1.5 text-slate-400 hover:text-red-500 hover:bg-red-50 rounded-lg transition-colors" title="ลบไฟล์">
                         <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg>
                     </button>` : ''}
@@ -1132,7 +1557,7 @@ function _attachUploadHandlers(machineId, machineName) {
     ['SafetyDeviceStandard', 'LayoutCheckpoint'].forEach(cat => {
         const form = document.getElementById(`upload-form-${cat}`);
         if (!form) return;
-        form.addEventListener('submit', async (e) => {
+        form.addEventListener('submit', guardSubmitHandler(async (e) => {
             e.preventDefault();
             const fd = new FormData(e.target);
             fd.append('FileCategory', cat);
@@ -1145,10 +1570,10 @@ function _attachUploadHandlers(machineId, machineName) {
                 window._msdOpenFiles(machineId, machineName, cat);
             } catch (err) {
                 const errEl = form.querySelector(`.upload-error-${cat}`);
-                if (errEl) { errEl.textContent = err.message || 'เกิดข้อผิดพลาด'; errEl.classList.remove('hidden'); }
+                if (errEl) { errEl.textContent = _errText(err); errEl.classList.remove('hidden'); }
                 btn.disabled = false; btn.textContent = 'อัปโหลด';
             }
-        });
+        }));
     });
 }
 
@@ -1161,32 +1586,42 @@ window._msdDeleteFile = async function(fileId, machineId, machineName, category)
         await _fetchMachines();
         window._msdOpenFiles(machineId, machineName, category);
     } catch (err) {
-        UI.showToast(err.message || 'เกิดข้อผิดพลาด', 'error');
+        UI.showToast(_errText(err), 'error');
     }
 };
 
 // ─── File Preview ─────────────────────────────────────────────────────────────
-window._msdPreviewFile = function(url, label) {
-    const isImage = /\.(jpg|jpeg|png|gif|webp)(\?|$)/i.test(url);
-    const isPdf   = /\.pdf(\?|$)/i.test(url) || url.includes('image/upload') && url.includes('.pdf');
-    let content;
-    if (isImage) {
-        content = `<div class="text-center"><img src="${url}" alt="${label}" class="max-w-full rounded-lg border border-slate-200 mx-auto"></div>`;
-    } else if (isPdf) {
-        content = `<iframe src="${url}" class="w-full rounded-lg border border-slate-200" style="height:70vh" title="${label}"></iframe>`;
-    } else {
-        content = `<div class="text-center py-10 text-slate-500">
-            <svg class="w-12 h-12 mx-auto mb-3 opacity-30" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/></svg>
-            <p class="text-sm mb-4">ไม่สามารถแสดงตัวอย่างไฟล์ประเภทนี้</p>
-            <a href="${url}" target="_blank" rel="noopener"
-                class="inline-flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-semibold text-white"
-                style="background:linear-gradient(135deg,#059669,#0d9488)">
-                <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/></svg>
-                ดาวน์โหลด / เปิดในแท็บใหม่
-            </a>
-        </div>`;
+window._msdPreviewFile = async function(url, label) {
+    const safeUrl = await _resolveDocumentUrl(url);
+    if (!safeUrl) {
+        UI.showToast('ลิงก์เอกสารไม่ปลอดภัยหรือไม่ถูกต้อง', 'error');
+        return;
     }
-    UI.openModal(label, content, 'max-w-3xl');
+    UI.showDocumentModal(safeUrl, label || 'เอกสารเครื่องจักร');
+};
+
+window._msdDownloadFile = async function(url, label) {
+    const safeUrl = await _resolveDocumentUrl(url);
+    if (!safeUrl) {
+        UI.showToast('ลิงก์เอกสารไม่ปลอดภัยหรือไม่ถูกต้อง', 'error');
+        return;
+    }
+    const filename = _fileNameFromUrl(safeUrl) || label || 'machine-safety-document';
+    try {
+        const res = await fetch(safeUrl, { mode: 'cors' });
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const blob = await res.blob();
+        const blobUrl = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = blobUrl;
+        a.download = filename;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        setTimeout(() => URL.revokeObjectURL(blobUrl), 5000);
+    } catch {
+        window.open(safeUrl, '_blank', 'noopener');
+    }
 };
 
 // ─── Machine Detail Modal (Compliance | Issues | Files) ───────────────────────
@@ -1208,11 +1643,25 @@ window._msdOpenDetail = async function(machineId, machineName) {
         const issuesData     = issueRes.data || [];
         const filesData      = filesRes.data || [];
         const openCount      = issuesData.filter(i => i.Status === 'open').length;
+        const machine        = _machines.find(m => String(m.id) === String(machineId)) || {};
+        const metaItems      = [
+            ['ลำดับเอกสาร', machine.MachineCode],
+            ['วันบังคับใช้', _dateOnly(machine.EffectiveDate)],
+            ['พื้นที่', machine.Area],
+            ['Issue by', machine.IssueByName || machine.IssueBy],
+            ['Verified by', machine.VerifiedByName || machine.VerifiedBy],
+        ].filter(([, value]) => value);
 
         const body = document.getElementById('msd-detail-body');
         if (!body) return;
 
         body.innerHTML = `
+            ${metaItems.length ? `<div class="grid grid-cols-1 sm:grid-cols-2 gap-2 mb-4">
+                ${metaItems.map(([label, value]) => `<div class="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2">
+                    <p class="text-[11px] font-semibold uppercase text-slate-400">${label}</p>
+                    <p class="text-sm font-semibold text-slate-700">${UI.escHtml(value)}</p>
+                </div>`).join('')}
+            </div>` : ''}
             <div class="flex border-b border-slate-200 mb-4">
                 <button id="dtab-compliance" onclick="window._msdDetailTab('compliance')"
                     class="px-4 py-2.5 text-sm font-semibold border-b-2 border-teal-500 text-teal-600 transition-colors">
@@ -1239,7 +1688,7 @@ window._msdOpenDetail = async function(machineId, machineName) {
         _attachUploadHandlers(machineId, machineName);
     } catch (err) {
         const body = document.getElementById('msd-detail-body');
-        if (body) body.innerHTML = `<p class="text-red-500 text-sm text-center py-8">${UI.escHtml(err.message)}</p>`;
+        if (body) body.innerHTML = `<p class="text-red-500 text-sm text-center py-8">${UI.escHtml(_errText(err, 'ไม่สามารถโหลดรายละเอียดได้'))}</p>`;
     }
 };
 
@@ -1270,7 +1719,7 @@ function _renderCompliancePanel(machineId, items) {
         const sc     = row.Status === 'pass' ? 'emerald' : row.Status === 'fail' ? 'red' : 'slate';
         const slabel = row.Status === 'pass' ? 'ผ่าน' : row.Status === 'fail' ? 'ไม่ผ่าน' : 'N/A';
         const checkedInfo = row.UpdatedBy
-            ? `<span class="text-[10px] text-slate-400 ml-2">${row.UpdatedBy}</span>`
+            ? `<span class="text-[10px] text-slate-400 ml-2">${UI.escHtml(row.UpdatedBy)}</span>`
             : '';
         const adminInputs = _isAdmin
             ? `<div class="flex items-center gap-3 flex-shrink-0">
@@ -1304,7 +1753,7 @@ function _renderCompliancePanel(machineId, items) {
 function _attachComplianceSave(machineId) {
     const btn = document.getElementById('btn-save-compliance');
     if (!btn) return;
-    btn.addEventListener('click', async () => {
+    btn.addEventListener('click', guardActionHandler(async () => {
         const items = COMPLIANCE_ITEMS.map(ci => {
             const sel = document.querySelector(`input[name="comp-${ci.code}"]:checked`);
             return { ItemCode: ci.code, Status: sel ? sel.value : 'na' };
@@ -1317,11 +1766,11 @@ function _attachComplianceSave(machineId) {
             const wrap = document.getElementById('msd-table-wrap');
             if (wrap) wrap.innerHTML = _renderTable();
         } catch (err) {
-            UI.showToast(err.message || 'เกิดข้อผิดพลาด', 'error');
+            UI.showToast(_errText(err), 'error');
         } finally {
             btn.disabled = false; btn.textContent = 'บันทึก Compliance';
         }
-    });
+    }));
 }
 
 function _renderIssuesPanel(machineId, machineName, issues) {
@@ -1338,26 +1787,26 @@ function _renderIssuesPanel(machineId, machineName, issues) {
                     <div class="flex items-center gap-2 mt-2">
                         <input id="res-text-${iss.id}" type="text" placeholder="บันทึกวิธีแก้ไข (ไม่บังคับ)..."
                             class="form-input flex-1 text-xs py-1">
-                        <button onclick="window._msdResolveIssue(${iss.id}, ${machineId}, '${_esc(machineName)}')"
+                        <button onclick="window._msdResolveIssue(${iss.id}, ${machineId}, ${_jsArg(machineName)})"
                             class="flex items-center gap-1 px-3 py-1 text-xs rounded-lg bg-emerald-100 text-emerald-700 hover:bg-emerald-200 transition-colors whitespace-nowrap">
                             <svg class="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg>
                             แก้ไขแล้ว
                         </button>
-                        <button onclick="window._msdDeleteIssue(${iss.id}, ${machineId}, '${_esc(machineName)}')"
+                        <button onclick="window._msdDeleteIssue(${iss.id}, ${machineId}, ${_jsArg(machineName)})"
                             class="p-1 text-slate-400 hover:text-red-500 hover:bg-red-50 rounded-lg transition-colors" title="ลบ">
                             <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg>
                         </button>
                     </div>` : '';
                 return `<li class="py-3 space-y-1">
                     <div class="flex items-start justify-between gap-2">
-                        <p class="text-sm text-slate-800 flex-1">${iss.Description}</p>
+                        <p class="text-sm text-slate-800 flex-1">${UI.escHtml(iss.Description || '')}</p>
                         <div class="flex items-center gap-1.5 flex-shrink-0">
                             <span class="px-2 py-0.5 rounded-full text-[10px] font-semibold bg-${rc}-100 text-${rc}-700">${SEV_LABEL[iss.Severity] || iss.Severity}</span>
                             <span class="px-2 py-0.5 rounded-full text-[10px] font-semibold bg-${sc}-100 text-${sc}-700">${iss.Status === 'open' ? 'เปิด' : 'แก้ไขแล้ว'}</span>
                         </div>
                     </div>
-                    ${iss.Resolution ? `<p class="text-xs text-emerald-700 bg-emerald-50 px-2 py-1 rounded">การแก้ไข: ${iss.Resolution}</p>` : ''}
-                    <p class="text-[10px] text-slate-400">${iss.CreatedBy || '—'} · ${new Date(iss.CreatedAt).toLocaleDateString('th-TH')}</p>
+                    ${iss.Resolution ? `<p class="text-xs text-emerald-700 bg-emerald-50 px-2 py-1 rounded">การแก้ไข: ${UI.escHtml(iss.Resolution)}</p>` : ''}
+                    <p class="text-[10px] text-slate-400">${UI.escHtml(iss.CreatedBy || '—')} · ${new Date(iss.CreatedAt).toLocaleDateString('th-TH')}</p>
                     ${resolveRow}
                 </li>`;
             }).join('')}
@@ -1387,7 +1836,7 @@ function _renderIssuesPanel(machineId, machineName, issues) {
 function _attachIssueAddHandler(machineId, machineName) {
     const btn = document.getElementById('btn-add-issue');
     if (!btn) return;
-    btn.addEventListener('click', async () => {
+    btn.addEventListener('click', guardActionHandler(async () => {
         const desc  = document.getElementById('new-issue-desc')?.value?.trim();
         const sev   = document.getElementById('new-issue-sev')?.value || 'medium';
         const errEl = document.getElementById('issue-add-error');
@@ -1402,10 +1851,10 @@ function _attachIssueAddHandler(machineId, machineName) {
             await _fetchMachines();
             window._msdOpenDetail(machineId, machineName);
         } catch (err) {
-            if (errEl) { errEl.textContent = err.message || 'เกิดข้อผิดพลาด'; errEl.classList.remove('hidden'); }
+            if (errEl) { errEl.textContent = _errText(err); errEl.classList.remove('hidden'); }
             btn.disabled = false;
         }
-    });
+    }));
 }
 
 window._msdResolveIssue = async function(issueId, machineId, machineName) {
@@ -1419,7 +1868,7 @@ window._msdResolveIssue = async function(issueId, machineId, machineName) {
         await _fetchMachines();
         window._msdOpenDetail(machineId, machineName);
     } catch (err) {
-        UI.showToast(err.message || 'เกิดข้อผิดพลาด', 'error');
+        UI.showToast(_errText(err), 'error');
     }
 };
 
@@ -1432,7 +1881,7 @@ window._msdDeleteIssue = async function(issueId, machineId, machineName) {
         await _fetchMachines();
         window._msdOpenDetail(machineId, machineName);
     } catch (err) {
-        UI.showToast(err.message || 'เกิดข้อผิดพลาด', 'error');
+        UI.showToast(_errText(err), 'error');
     }
 };
 
@@ -1455,10 +1904,13 @@ window._msdExportExcel = function() {
         const inspDate = m.NextInspectionDate ? new Date(m.NextInspectionDate) : null;
         const diffDays = inspDate ? Math.ceil((inspDate - today) / 86400000) : null;
         return {
-            'รหัส':              m.MachineCode,
-            'ชื่อเครื่องจักร':    m.MachineName,
+            'ลำดับเอกสาร':       m.MachineCode,
+            'ชื่อเอกสารเครื่องจักร': m.MachineName,
             'แผนก':              m.Department || '',
             'พื้นที่':            m.Area || '',
+            'วันบังคับใช้':       _dateOnly(m.EffectiveDate),
+            'Issue by':          m.IssueByName || m.IssueBy || '',
+            'Verified by':       m.VerifiedByName || m.VerifiedBy || '',
             'สถานะ':             STATUS_META[m.Status || 'active']?.label || '',
             'ระดับความเสี่ยง':   RISK_META[m.RiskLevel || 'low']?.label || '',
             'ประเมินความเสี่ยง': m.HasRiskAssessment ? 'มี' : 'ไม่มี',
@@ -1482,6 +1934,80 @@ window._msdExportExcel = function() {
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 window._UI_closeModal = () => UI.closeModal();
 
-function _esc(str) {
-    return String(str).replace(/'/g, "\\'").replace(/"/g, '&quot;');
+function _jsArg(value) {
+    return JSON.stringify(String(value || ''))
+        .replace(/&/g, '&amp;')
+        .replace(/"/g, '&quot;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;');
 }
+
+function _fileNameFromUrl(url) {
+    try {
+        const parsed = new URL(url, window.location.href);
+        return parsed.searchParams.get('filename') || decodeURIComponent(parsed.pathname.split('/').pop() || '');
+    } catch {
+        return decodeURIComponent(String(url || '').split('?')[0].split('/').pop() || '');
+    }
+}
+
+function _safeFilePart(value) {
+    return String(value || 'machine-safety-card')
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, '-')
+        .replace(/^-+|-+$/g, '')
+        .slice(0, 60) || 'machine-safety-card';
+}
+
+async function _resolveDocumentUrl(url) {
+    const candidates = _documentUrlCandidates(url);
+    for (const candidate of candidates) {
+        try {
+            const res = await fetch(candidate, { method: 'HEAD', mode: 'cors' });
+            if (res.ok) return candidate;
+        } catch {
+            // Try the next local/prod candidate.
+        }
+    }
+    return candidates[0] || '';
+}
+
+function _documentUrlCandidates(url) {
+    const normalized = UI.normalizeDocumentUrl(url);
+    const out = [];
+    const add = (value) => {
+        if (value && _isSafeDocumentUrl(value) && !out.includes(value)) out.push(value);
+    };
+    add(normalized);
+
+    try {
+        const currentHost = window.location.hostname.toLowerCase();
+        const currentIsLocal = ['localhost', '127.0.0.1', '::1'].includes(currentHost);
+        if (!currentIsLocal) return out;
+
+        const parsed = new URL(url, window.location.href);
+        const uploadIndex = parsed.pathname.indexOf('/uploads/');
+        if (uploadIndex < 0) return out;
+        const uploadPath = parsed.pathname.slice(uploadIndex);
+        add(`http://localhost:5000${uploadPath}${parsed.search}${parsed.hash}`);
+        add(`http://localhost:5001${uploadPath}${parsed.search}${parsed.hash}`);
+        add(`http://127.0.0.1:5000${uploadPath}${parsed.search}${parsed.hash}`);
+        add(`http://127.0.0.1:5001${uploadPath}${parsed.search}${parsed.hash}`);
+    } catch {
+        // Keep the normalized URL as the fallback.
+    }
+    return out;
+}
+
+function _isSafeDocumentUrl(value) {
+    try {
+        const parsed = new URL(String(value || ''), window.location.href);
+        return ['http:', 'https:'].includes(parsed.protocol) && !parsed.username && !parsed.password;
+    } catch {
+        return false;
+    }
+}
+
+installWindowActionLocks('machine-safety', [
+  '_msdReload', '_msdDelete', '_msdOpenFiles', '_msdDeleteFile', '_msdPreviewFile', '_msdDownloadFile', '_msdOpenDetail', '_msdResolveIssue', '_msdDeleteIssue'
+]);

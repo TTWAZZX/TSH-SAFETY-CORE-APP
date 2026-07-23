@@ -18,15 +18,19 @@ Required backend environment variables:
 - `DB_PASS`
 - `DB_NAME`
 - `DB_PORT`
-- `CLOUDINARY_CLOUD_NAME`
-- `CLOUDINARY_API_KEY`
-- `CLOUDINARY_API_SECRET`
+- `PUBLIC_UPLOAD_BASE_URL`
 - `ALLOWED_ORIGINS`
+- `EMAIL_ENABLED` (`true` or `false`; set it explicitly in every environment)
+
+`EMAIL_ENABLED=false` is a delivery kill switch shared by Node and PHP. It must
+be set for local/UAT runs whenever real SMTP credentials are present. Leaving
+the variable unset preserves the legacy behavior (SMTP is enabled when
+`SMTP_HOST` exists), so production configuration must not rely on omission.
 
 Production `ALLOWED_ORIGINS` must include only real app origins, for example:
 
 ```text
-https://your-preview-domain.vercel.app,https://your-production-domain.com
+http://company-frontend,http://company-frontend:80
 ```
 
 Keep localhost origins in local `.env`, not in production.
@@ -45,38 +49,72 @@ Run these checks with real browser sessions before opening access broadly:
 - Confirm User cannot access admin-only screens.
 - Confirm Admin can open dashboard, admin console, employee import, and audit logs.
 
-## 4. Staging deploy
+## 4. Backup
 
-Deploy a Vercel preview first:
+Back up MySQL and uploaded files together before every production change. For the current DirectAdmin/PHP shared-hosting production target, follow the full runbook:
+
+- `docs/backup-restore-runbook.md`
+
+Do not store SQL dumps or upload archives under the public web root. Production backup is normally:
+
+- Database export from DirectAdmin/phpMyAdmin.
+- FTP download of `/tsh-safety-core/uploads/`.
+- Manifest with timestamp, DB name, upload file count, owner, and reason.
+
+For local XAMPP development only, this helper remains available:
 
 ```powershell
-vercel deploy
+npm run backup
 ```
 
-After deployment, run a remote smoke check against the preview URL:
+## 5. Staging deploy
+
+Deploy first to a company staging/test server when available.
+
+After deployment, run a remote smoke check against the staging URL:
 
 ```powershell
-$env:SMOKE_BASE_URL="https://your-preview-url.vercel.app"
+$env:SMOKE_BASE_URL="http://company-staging-frontend"
 npm run smoke:remote
 ```
 
 The remote smoke script only checks read and permission surfaces. It does not write to the database.
 
-## 5. Local verification
+## 6. Local verification
 
 Before promoting to production:
 
 ```powershell
-npm test
+npm run verify:onboarding-local
 ```
 
-This delegates to the backend test suite:
+This runs the Phase 1-7 resolver/enforcement/parity suites, email kill-switch
+parity, permission audit, API smoke, 90-surface read-only preflight, and all
+read-only onboarding/data-quality database audits.
 
-- permission audit
-- local API smoke test
-- UAT preflight against the configured database
+The controlled Phase 8 write UAT is separate because it creates synthetic
+rows. Run it only after proving that the target is a local/UAT database and
+creating a backup:
 
-## 6. Database backup
+```powershell
+npm run backup
+npm run uat:onboarding-local
+```
+
+The write UAT refuses non-local/non-UAT targets, forces email delivery off,
+uses unique IDs, deletes rows by exact IDs, and requires all pre/post database
+fingerprints to match. It covers both Node and PHP:
+
+- admin create/update and authorization
+- atomic JSON import and partial Excel import
+- password then Safety Unit continuation
+- self-profile continuation
+- concurrent registration approval
+- cleanup and zero-residue verification
+
+Do not include the write UAT in an unattended production deploy command.
+
+## 7. Database backup
 
 Before production rollout:
 
@@ -85,9 +123,22 @@ Before production rollout:
 - Confirm the restore target and expected recovery time.
 - Record the backup timestamp in the release note.
 
-## 7. Controlled rollout
+## 8. Controlled rollout
 
 - Open production to a small pilot group for one working day.
 - Watch server logs for 500 errors, DB timeout, CORS failures, and upload failures.
 - Keep a simple issue log with module, user role, time, and screenshot.
 - Open to all users after the pilot day is clean or after critical issues are fixed.
+
+## 9. Monitoring
+
+After rollout, follow the operations checklist:
+
+- `docs/monitoring-error-review-checklist.md`
+
+Minimum daily review:
+
+- Admin Console > System Health.
+- Admin Console > Audit Log with `Failed Only`.
+- Failed email outboxes for Hiyari, KY, CCCF, and 4M.
+- Basic security probes for blocked config files and `/uploads/` directory listing.

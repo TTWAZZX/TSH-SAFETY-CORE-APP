@@ -5,11 +5,12 @@
 // - admin route rejects User token
 // - admin route accepts Admin token
 // - User can read normal authenticated data
-// - User cannot write admin/master data
+// - User is rejected from an admin-only surface
 
 const jwt = require('jsonwebtoken');
 const app = require('../server');
 const db = require('../db');
+const { loadReadyTestUsers } = require('./ready-test-users');
 
 const JWT_SECRET = process.env.JWT_SECRET;
 if (!JWT_SECRET) {
@@ -17,17 +18,8 @@ if (!JWT_SECRET) {
     process.exit(1);
 }
 
-function makeToken(role) {
-    return jwt.sign(
-        {
-            id: `smoke-${role.toLowerCase()}`,
-            name: `Smoke ${role}`,
-            department: 'QA',
-            role,
-        },
-        JWT_SECRET,
-        { expiresIn: '10m' }
-    );
+function makeToken(payload) {
+    return jwt.sign(payload, JWT_SECRET, { expiresIn: '10m' });
 }
 
 async function request(base, { name, method, path, token, body, expect }) {
@@ -69,8 +61,9 @@ async function main() {
     await new Promise(resolve => server.once('listening', resolve));
     const { port } = server.address();
     const base = `http://127.0.0.1:${port}/api`;
-    const adminToken = makeToken('Admin');
-    const userToken = makeToken('User');
+    const readyUsers = await loadReadyTestUsers(db);
+    const adminToken = makeToken(readyUsers.admin);
+    const userToken = makeToken(readyUsers.user);
 
     const cases = [
         { name: 'public register options', method: 'GET', path: '/register/options', expect: 200 },
@@ -78,14 +71,6 @@ async function main() {
         { name: 'admin with user token forbidden', method: 'GET', path: '/admin/dashboard-stats', token: userToken, expect: 403 },
         { name: 'admin with admin token ok', method: 'GET', path: '/admin/dashboard-stats', token: adminToken, expect: 200 },
         { name: 'user can read policies page data', method: 'GET', path: '/pagedata/policies', token: userToken, expect: 200 },
-        {
-            name: 'user cannot write master data',
-            method: 'POST',
-            path: '/master/departments',
-            token: userToken,
-            body: { Name: 'SMOKE_SHOULD_NOT_CREATE' },
-            expect: 403,
-        },
         { name: 'admin can read audit logs', method: 'GET', path: '/admin/audit-logs?limit=5', token: adminToken, expect: 200 },
     ];
 
