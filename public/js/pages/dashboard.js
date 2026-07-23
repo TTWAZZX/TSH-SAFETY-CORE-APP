@@ -679,6 +679,28 @@ function _renderComplianceMatrix(d) {
         return `<span class="inline-flex justify-center min-w-10 px-2 py-1 rounded-lg text-xs font-bold"
                       title="${escHtml(title)}" style="background:${color}12;color:${color}">${v}%</span>`;
     };
+    const coverageTitle = (row, key, label) => {
+        if (key === 'activityTargets') {
+            const meta = row.targetMeta;
+            return meta
+                ? `Missing ${meta.missing || 0} · Zero ${meta.zero || 0} · N/A ${meta.na || 0} · Scope ${meta.scope || 0} · Employee ${meta.override || 0}`
+                : '';
+        }
+        const meta = row.coverageMeta?.[key];
+        if (!meta) return `${label}: source data is unavailable for this department`;
+        const numerator = Number(meta.numerator);
+        const denominator = Number(meta.denominator);
+        const ratio = Number.isFinite(numerator) && Number.isFinite(denominator)
+            ? `${numerator}/${denominator}`
+            : '';
+        const details = [
+            ratio,
+            meta.units ? `${meta.units} Units` : '',
+            meta.overdue ? 'Review overdue' : '',
+            meta.source || '',
+        ].filter(Boolean);
+        return `${label}: ${details.join(' · ')}`;
+    };
 
     const scoreFromVisibleCols = (r) => {
         const values = cols
@@ -720,10 +742,8 @@ function _renderComplianceMatrix(d) {
                         return `
                         <tr class="hover:bg-slate-50">
                             <td class="px-4 py-3 font-semibold text-slate-700 whitespace-nowrap">${escHtml(r.department)}</td>
-                            ${cols.map(([key]) => {
-                                const m = key === 'activityTargets' ? r.targetMeta : null;
-                                const title = m ? `Missing ${m.missing || 0} &middot; Zero ${m.zero || 0} &middot; N/A ${m.na || 0} &middot; Scope ${m.scope || 0} &middot; Employee ${m.override || 0}` : '';
-                                return `<td class="px-3 py-3 text-center">${cell(r[key], title)}</td>`;
+                            ${cols.map(([key, label]) => {
+                                return `<td class="px-3 py-3 text-center">${cell(r[key], coverageTitle(r, key, label))}</td>`;
                             }).join('')}
                             <td class="px-4 py-3 text-center">
                                 <span class="inline-flex justify-center min-w-12 px-2.5 py-1 rounded-full text-xs font-extrabold text-white"

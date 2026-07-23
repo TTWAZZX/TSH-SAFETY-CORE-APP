@@ -458,8 +458,8 @@ async function getFixedCountAlignment(activityKey, { employeeId = '', department
     return fixedCountResult(0, fallbackTarget, null, 'source_unavailable', 'activity_target');
 }
 
-async function getCoverageMatrix(year = new Date().getFullYear()) {
-    await ensureTables();
+async function getCoverageMatrix(year = new Date().getFullYear(), options = {}) {
+    if (options.ensureSchema !== false) await ensureTables();
     const targetYear = Number(year || new Date().getFullYear());
     const versioned = targetYear >= 2000 && targetYear <= 2100;
     const [[employees], [templates], [scopes], [overrides], [yearTemplates], [yearScopes], [yearOverrides]] = await Promise.all([

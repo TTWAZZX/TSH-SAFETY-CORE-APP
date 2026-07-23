@@ -97,6 +97,14 @@ function normalizeDepartmentKey(value) {
         .replace(/\s+/g, ' ');
 }
 
+function normalizeUnitKey(value) {
+    return String(value || '')
+        .replace(/[\r\n]+/g, ' ')
+        .trim()
+        .toUpperCase()
+        .replace(/\s+/g, ' ');
+}
+
 function buildHealthIndex(metrics, config) {
     const positive = [
         metrics.patrolRate,
@@ -136,10 +144,15 @@ async function buildComplianceMatrix(year, config) {
         kyRows,
         hiyariRows,
         fourmRows,
+        yokotenConfigRows,
         yokotenTopicRows,
         yokotenResponseRows,
         patrolIssueRows,
         cccfWorkerProgress,
+        cccfUnitSettingRows,
+        cccfUnitTargetRows,
+        cccfWorkerUnitRows,
+        masterUnitRows,
         cccfAssignmentRows,
         cccfPermanentRows,
         accidentRows,
@@ -186,22 +199,47 @@ async function buildComplianceMatrix(year, config) {
             GROUP BY Department
         `, params),
         safeRows(`
-            SELECT YokotenID, TargetDepts
-            FROM YokotenTopics
-            WHERE IsActive = 1
+            SELECT ConfigKey, ConfigValue
+            FROM Yokoten_Dashboard_Config
+            WHERE ConfigKey IN ('pinnedDepts', 'pinnedUnits')
         `),
         safeRows(`
-            SELECT YokotenID, Department, COUNT(*) AS cnt
-            FROM YokotenResponses
-            WHERE YEAR(ResponseDate)=? AND (IsDeleted IS NULL OR IsDeleted = 0)
-            GROUP BY YokotenID, Department
+            SELECT YokotenID, TargetDepts, TargetUnits
+            FROM YokotenTopics
+            WHERE IsActive = 1 AND (DateIssued IS NULL OR YEAR(DateIssued)=?)
         `, params),
+        safeRows(`
+            SELECT r.YokotenID, r.Department,
+                   COALESCE(NULLIF(r.SafetyUnit, ''), NULLIF(e.Unit, ''), NULLIF(e.Team, '')) AS EffectiveSafetyUnit
+            FROM YokotenResponses r
+            LEFT JOIN Employees e ON e.EmployeeID = r.EmployeeID
+            WHERE (r.IsDeleted IS NULL OR r.IsDeleted = 0)
+        `),
         safeRows(`
             SELECT IssueID, ResponsibleDept, CurrentStatus
             FROM Patrol_Issues
             WHERE YEAR(DateFound)=?
         `, params),
         getCccfWorkerProgress(db, year, { ensureSchema: false }).catch(() => ({ departments: [] })),
+        safeRows(`SELECT value FROM App_Settings WHERE key_name='cccf_unit_sel' LIMIT 1`),
+        safeRows(`
+            SELECT unit_name AS Unit, yearly_target AS target, achieved_override AS achievedOverride
+            FROM CCCF_Unit_Targets
+            WHERE target_year=?
+        `, params),
+        safeRows(`
+            SELECT TRIM(COALESCE(SafetyUnit,'')) AS Unit,
+                   MAX(TRIM(COALESCE(Department,''))) AS Department,
+                   COUNT(*) AS computedAchieved
+            FROM CCCF_FormA_Worker
+            WHERE YEAR(SubmitDate)=?
+            GROUP BY TRIM(COALESCE(SafetyUnit,''))
+        `, params),
+        safeRows(`
+            SELECT TRIM(u.name) AS Unit, TRIM(COALESCE(d.Name,'')) AS Department
+            FROM Master_SafetyUnits u
+            LEFT JOIN Master_Departments d ON d.id=u.department_id
+        `),
         safeRows(`
             SELECT COALESCE(e.Department, a.Department) AS Department,
                    COUNT(DISTINCT COALESCE(NULLIF(a.EmployeeID, ''), a.id)) AS assigned
@@ -253,8 +291,15 @@ async function buildComplianceMatrix(year, config) {
             GROUP BY m.Department
         `),
         safeRows(`
-            SELECT Department, OJTDate, NextReviewDate, AttendeeCount, YearlyTarget
-            FROM OJT_Records
+            SELECT r.Department, r.OJTDate, r.NextReviewDate, r.AttendeeCount, r.YearlyTarget
+            FROM OJT_Records r
+            WHERE r.id = (
+                SELECT r2.id
+                FROM OJT_Records r2
+                WHERE TRIM(r2.Department)=TRIM(r.Department)
+                ORDER BY COALESCE(r2.UpdatedAt, r2.OJTDate) DESC, r2.id DESC
+                LIMIT 1
+            )
         `),
         safeRows(`
             SELECT Department, AVG(CompliancePct) AS pct
@@ -282,7 +327,12 @@ async function buildComplianceMatrix(year, config) {
         }
     };
     const employeeCount = byDept(employeeRows, r => parseInt(r.total, 10) || 0);
-    const training = byDept(trainingRows, r => pct(r.passed, r.total));
+    const trainingStats = byDept(trainingRows, r => ({
+        value: pct(r.passed, r.total),
+        numerator: parseInt(r.passed, 10) || 0,
+        denominator: parseInt(r.total, 10) || 0,
+    }));
+    const training = new Map([...trainingStats].map(([key, metric]) => [key, metric.value]));
     const kyActual = byDept(kyRows, r => parseInt(r.cnt, 10) || 0);
     const kyTargets = new Map();
     for (const r of kyConfigRows) {
@@ -295,20 +345,42 @@ async function buildComplianceMatrix(year, config) {
     }
     const hiyari = byDept(hiyariRows, r => parseInt(r.submitted, 10) || 0);
     const fourm = byDept(fourmRows, r => pct(r.closed, r.total));
+    const yokotenConfig = new Map(yokotenConfigRows.map(row => [
+        String(row.ConfigKey || ''),
+        parseJsonArray(row.ConfigValue),
+    ]));
+    const yokotenPinnedUnits = new Set((yokotenConfig.get('pinnedUnits') || []).map(normalizeUnitKey));
+    const yokotenTopics = yokotenTopicRows.filter(topic => {
+        if (!yokotenPinnedUnits.size) return true;
+        const targetUnits = parseJsonArray(topic.TargetUnits).map(normalizeUnitKey);
+        return !targetUnits.length || targetUnits.some(unit => yokotenPinnedUnits.has(unit));
+    });
+    const yokotenResponseSet = new Set();
+    for (const row of yokotenResponseRows) {
+        const department = normalizeDepartmentKey(row.Department);
+        if (!department) continue;
+        if (yokotenPinnedUnits.size) {
+            const responseUnits = parseJsonArray(row.EffectiveSafetyUnit).map(normalizeUnitKey);
+            if (responseUnits.length && !responseUnits.some(unit => yokotenPinnedUnits.has(unit))) continue;
+        }
+        yokotenResponseSet.add(`${department}::${row.YokotenID}`);
+    }
     const yokotenTargets = new Map();
-    for (const topic of yokotenTopicRows) {
+    const yokotenDone = new Map();
+    for (const topic of yokotenTopics) {
         const targets = parseJsonArray(topic.TargetDepts);
-        const scoped = targets.length ? targets.filter(d => deptNames.includes(d)) : deptNames;
+        const targetKeys = new Set(targets.map(normalizeDepartmentKey));
+        const scoped = targets.length
+            ? deptNames.filter(dept => targetKeys.has(normalizeDepartmentKey(dept)))
+            : deptNames;
         for (const dept of scoped) {
             const deptKey = normalizeDepartmentKey(dept);
-            if (deptKey) yokotenTargets.set(deptKey, (yokotenTargets.get(deptKey) || 0) + 1);
+            if (!deptKey) continue;
+            yokotenTargets.set(deptKey, (yokotenTargets.get(deptKey) || 0) + 1);
+            if (yokotenResponseSet.has(`${deptKey}::${topic.YokotenID}`)) {
+                yokotenDone.set(deptKey, (yokotenDone.get(deptKey) || 0) + 1);
+            }
         }
-    }
-    const yokotenDone = new Map();
-    for (const row of yokotenResponseRows) {
-        const dept = normalizeDepartmentKey(row.Department);
-        if (!dept) continue;
-        yokotenDone.set(dept, (yokotenDone.get(dept) || 0) + (parseInt(row.cnt, 10) || 0));
     }
     const patrolIssueCounts = new Map();
     for (const issue of patrolIssueRows) {
@@ -330,14 +402,64 @@ async function buildComplianceMatrix(year, config) {
         const dept = normalizeDepartmentKey(row.department);
         if (!dept) continue;
         const target = Math.max(0, parseInt(row.personalTargetTotal, 10) || 0);
-        if (target > 0) cccfWorkerEngine.set(dept, pct(row.actualTowardTarget, target));
+        if (target > 0) {
+            cccfWorkerEngine.set(dept, {
+                value: pct(row.actualTowardTarget, target),
+                numerator: Math.min(Math.max(0, Number(row.actualTowardTarget || 0)), target),
+                denominator: target,
+                source: 'CCCF per-person actual target engine',
+            });
+        }
+    }
+    const selectedCccfUnits = new Set(parseJsonArray(cccfUnitSettingRows[0]?.value).map(normalizeUnitKey));
+    const masterUnitDepartments = new Map();
+    for (const row of masterUnitRows) {
+        const unit = normalizeUnitKey(row.Unit);
+        const department = normalizeDepartmentKey(row.Department);
+        if (unit && department) masterUnitDepartments.set(unit, department);
+    }
+    const cccfWorkerUnitActual = new Map();
+    const cccfWorkerUnitDepartment = new Map();
+    for (const row of cccfWorkerUnitRows) {
+        const unit = normalizeUnitKey(row.Unit);
+        if (!unit) continue;
+        cccfWorkerUnitActual.set(unit, Math.max(0, Number(row.computedAchieved || 0)));
+        const department = normalizeDepartmentKey(row.Department);
+        if (department) cccfWorkerUnitDepartment.set(unit, department);
+    }
+    const cccfWorkerManual = new Map();
+    for (const row of cccfUnitTargetRows) {
+        const unit = normalizeUnitKey(row.Unit);
+        if (!unit || (selectedCccfUnits.size && !selectedCccfUnits.has(unit))) continue;
+        const department = masterUnitDepartments.get(unit) || cccfWorkerUnitDepartment.get(unit);
+        const target = Math.max(0, Number(row.target || 0));
+        if (!department || target <= 0) continue;
+        const computed = cccfWorkerUnitActual.get(unit) || 0;
+        const achieved = row.achievedOverride === null || row.achievedOverride === undefined || row.achievedOverride === ''
+            ? computed
+            : Math.max(0, Number(row.achievedOverride || 0));
+        const metric = cccfWorkerManual.get(department) || {
+            numerator: 0,
+            denominator: 0,
+            units: 0,
+            source: 'CCCF manual Unit target/override',
+        };
+        metric.numerator += Math.min(achieved, target);
+        metric.denominator += target;
+        metric.units += 1;
+        cccfWorkerManual.set(department, metric);
+    }
+    for (const metric of cccfWorkerManual.values()) {
+        metric.value = pct(metric.numerator, metric.denominator);
     }
     const cccfAssigned = byDept(cccfAssignmentRows, r => parseInt(r.assigned, 10) || 0);
     const cccfPermanent = byDept(cccfPermanentRows, r => parseInt(r.completed, 10) || 0);
-    const accident = byDept(accidentRows, r => {
+    const accidentStats = byDept(accidentRows, r => {
         const total = parseInt(r.total, 10) || 0;
-        return total ? pct(r.closed, total) : 100;
+        const closed = parseInt(r.closed, 10) || 0;
+        return { value: total ? pct(closed, total) : 100, numerator: closed, denominator: total };
     });
+    const accident = new Map([...accidentStats].map(([key, metric]) => [key, metric.value]));
     const machine = byDept(machineRows, r => {
         const machines = parseInt(r.machines, 10) || 0;
         if (!machines) return null;
@@ -347,20 +469,26 @@ async function buildComplianceMatrix(year, config) {
         const issuePct = issueTotal ? pct(r.issueClosed, issueTotal) : 100;
         return Math.round((compliancePct + issuePct) / 2);
     });
-    const ojt = byDept(ojtRows, r => {
-        if (!r.OJTDate) return 0;
+    const ojtStats = byDept(ojtRows, r => {
+        if (!r.OJTDate) return { value: 0, numerator: 0, denominator: 0, overdue: false };
         const target = parseInt(r.YearlyTarget, 10) || 0;
         const attendees = parseInt(r.AttendeeCount, 10) || 0;
         const coverage = target > 0 ? pct(attendees, target) : 100;
         const nextReview = r.NextReviewDate ? new Date(r.NextReviewDate) : null;
         const overdue = nextReview && !Number.isNaN(nextReview.getTime()) && nextReview < new Date();
-        return overdue ? Math.min(coverage, 50) : coverage;
+        return {
+            value: overdue ? Math.min(coverage, 50) : coverage,
+            numerator: attendees,
+            denominator: target,
+            overdue: Boolean(overdue),
+        };
     });
+    const ojt = new Map([...ojtStats].map(([key, metric]) => [key, metric.value]));
     const safetyCulture = byDept(safetyCultureRows, r => {
         const v = parseFloat(r.pct);
         return Number.isFinite(v) ? Math.max(0, Math.min(100, Math.round(v))) : null;
     });
-    const targetMatrix = await getCoverageMatrix(year).catch(() => ({ rows: [] }));
+    const targetMatrix = await getCoverageMatrix(year, { ensureSchema: false }).catch(() => ({ rows: [] }));
     const targetByDept = new Map();
     for (const row of targetMatrix.rows) {
         const dept = normalizeDepartmentKey(row.department);
@@ -382,9 +510,16 @@ async function buildComplianceMatrix(year, config) {
         const yokotenTarget = yokotenTargets.get(deptKey) || 0;
         const cccfAssignedTotal = cccfAssigned.get(deptKey) || 0;
         const targetMeta = targetByDept.get(deptKey) || { slots: 0, covered: 0, missing: 0, zero: 0, na: 0, scope: 0, override: 0, template: 0 };
+        const cccfWorkerMetric = config.cccfWorkerSource === 'actual_department_worker'
+            ? cccfWorkerEngine.get(deptKey)
+            : cccfWorkerManual.get(deptKey);
+        const patrolMetric = patrolIssueCounts.get(deptKey) || { total: 0, closed: 0 };
+        const accidentMetric = accidentStats.get(deptKey) || { numerator: 0, denominator: 0 };
+        const ojtMetric = ojtStats.get(deptKey);
+        const trainingMetric = trainingStats.get(deptKey);
         const cells = {
             activityTargets: targetMeta.slots ? pct(targetMeta.covered + targetMeta.na, targetMeta.slots) : null,
-            cccfWorker: cccfWorkerEngine.has(deptKey) ? cccfWorkerEngine.get(deptKey) : null,
+            cccfWorker: cccfWorkerMetric?.value ?? null,
             cccfPermanent: cccfAssignedTotal ? pct(cccfPermanent.get(deptKey) || 0, cccfAssignedTotal) : null,
             patrolIssues: patrolIssues.get(deptKey) ?? 100,
             hiyari: empTotal ? pct(hiyari.get(deptKey) || 0, empTotal) : null,
@@ -397,9 +532,21 @@ async function buildComplianceMatrix(year, config) {
             ojt: ojt.get(deptKey) ?? 0,
             safetyCulture: safetyCulture.get(deptKey),
         };
+        const coverageMeta = {
+            activityTargets: { numerator: targetMeta.covered + targetMeta.na, denominator: targetMeta.slots, source: 'Activity target configuration' },
+            cccfWorker: cccfWorkerMetric || null,
+            cccfPermanent: { numerator: cccfPermanent.get(deptKey) || 0, denominator: cccfAssignedTotal, source: 'Completed CCCF Permanent / current assignments' },
+            patrolIssues: { numerator: patrolMetric.closed, denominator: patrolMetric.total, source: patrolMetric.total ? 'Closed Patrol issues / issues found this year' : 'No Patrol issues found this year' },
+            hiyari: { numerator: hiyari.get(deptKey) || 0, denominator: empTotal, source: 'Distinct Hiyari reporters / employees' },
+            ky: { numerator: kyActual.get(deptKey) || 0, denominator: kyTarget, source: 'KY activities / configured Unit targets' },
+            yokoten: { numerator: yokotenDone.get(deptKey) || 0, denominator: yokotenTarget, source: 'Responded / assigned Yokoten topics issued this year' },
+            training: trainingMetric ? { ...trainingMetric, source: 'Passed / total Training department records' } : null,
+            accident: { numerator: accidentMetric.numerator, denominator: accidentMetric.denominator, source: accidentMetric.denominator ? 'Closed / reported accidents this year' : 'No accidents reported this year' },
+            ojt: ojtMetric ? { ...ojtMetric, source: 'Current OJT attendee target and review date' } : null,
+        };
         const values = Object.values(cells).filter(v => v !== null && v !== undefined);
         const score = values.length ? Math.round(values.reduce((s, v) => s + v, 0) / values.length) : 0;
-        return { department: dept, score, targetMeta, ...cells };
+        return { department: dept, score, targetMeta, coverageMeta, ...cells };
     }).sort((a, b) => a.score - b.score || a.department.localeCompare(b.department, 'th'));
 }
 
@@ -702,3 +849,4 @@ router.get('/alerts', async (_req, res) => {
 });
 
 module.exports = router;
+module.exports.buildComplianceMatrix = buildComplianceMatrix;

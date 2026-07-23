@@ -51,7 +51,9 @@
     "smoke:async-ux-phase32b": "node scripts/async-ux-phase32b-high-risk-smoke.js",
     "smoke:async-ux-phase32c": "node scripts/async-ux-phase32c-residual-smoke.js",
     "smoke:async-ux-phase32d": "node scripts/async-ux-phase32d-remaining-smoke.js",
-    "uat:async-ux-phase32e": "node scripts/async-ux-phase32e-browser-uat.js"
+    "uat:async-ux-phase32e": "node scripts/async-ux-phase32e-browser-uat.js",
+    "smoke:yokoten-admin-bulk-response": "node scripts/yokoten-admin-bulk-response-smoke.js",
+    "smoke:dashboard-coverage-source": "node scripts/dashboard-coverage-source-smoke.js"
   },
   "keywords": [],
   "author": "",

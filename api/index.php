@@ -68,6 +68,13 @@ function dashboard_department_key(string $value): string
     return (string) preg_replace('/\s+/', ' ', $value);
 }
 
+function dashboard_unit_key(string $value): string
+{
+    $value = preg_replace('/[\r\n]+/', ' ', $value);
+    $value = strtoupper(trim((string) $value));
+    return (string) preg_replace('/\s+/', ' ', $value);
+}
+
 function dashboard_compliance_matrix(int $year, array $config): array
 {
     $deptRows = safe_rows('SELECT Name FROM master_departments ORDER BY Name ASC');
@@ -95,14 +102,42 @@ function dashboard_compliance_matrix(int $year, array $config): array
     $kyRows = safe_rows('SELECT Department, COUNT(*) AS cnt FROM ky_activities WHERE YEAR(ActivityDate)=? GROUP BY Department', [$year]);
     $hiyariRows = safe_rows("SELECT Department, COUNT(DISTINCT COALESCE(NULLIF(ReporterID,''),id)) AS submitted FROM hiyarireports WHERE YEAR(ReportDate)=? GROUP BY Department", [$year]);
     $fourmRows = safe_rows("SELECT Department, COUNT(*) AS total, COALESCE(SUM(Status='Closed'),0) AS closed FROM fourm_changenotices WHERE YEAR(RequestDate)=? GROUP BY Department", [$year]);
-    $yokotenTopicRows = safe_rows('SELECT YokotenID, TargetDepts FROM yokotentopics WHERE IsActive=1');
-    $yokotenResponseRows = safe_rows('SELECT YokotenID, Department, COUNT(*) AS cnt FROM yokotenresponses WHERE YEAR(ResponseDate)=? AND (IsDeleted IS NULL OR IsDeleted=0) GROUP BY YokotenID, Department', [$year]);
+    $yokotenConfigRows = safe_rows("SELECT ConfigKey,ConfigValue FROM yokoten_dashboard_config WHERE ConfigKey IN ('pinnedDepts','pinnedUnits')");
+    $yokotenTopicRows = safe_rows('SELECT YokotenID, TargetDepts, TargetUnits FROM yokotentopics WHERE IsActive=1 AND (DateIssued IS NULL OR YEAR(DateIssued)=?)', [$year]);
+    $yokotenResponseRows = safe_rows(
+        "SELECT r.YokotenID,r.Department,
+                COALESCE(NULLIF(r.SafetyUnit,''),NULLIF(e.Unit,''),NULLIF(e.Team,'')) EffectiveSafetyUnit
+           FROM yokotenresponses r
+           LEFT JOIN employees e ON e.EmployeeID=r.EmployeeID
+          WHERE (r.IsDeleted IS NULL OR r.IsDeleted=0)"
+    );
     $patrolIssueRows = safe_rows('SELECT IssueID,ResponsibleDept,CurrentStatus FROM patrol_issues WHERE YEAR(DateFound)=?', [$year]);
     try {
         $cccfWorkerProgress = cccf_worker_progress_data($year, false);
     } catch (Throwable $e) {
         $cccfWorkerProgress = ['departments' => [], 'overall' => []];
     }
+    $cccfUnitSetting = db_row("SELECT value FROM app_settings WHERE key_name='cccf_unit_sel' LIMIT 1") ?: [];
+    $cccfUnitTargetRows = safe_rows(
+        'SELECT unit_name Unit,yearly_target target,achieved_override achievedOverride
+           FROM cccf_unit_targets
+          WHERE target_year=?',
+        [$year]
+    );
+    $cccfWorkerUnitRows = safe_rows(
+        "SELECT TRIM(COALESCE(SafetyUnit,'')) Unit,
+                MAX(TRIM(COALESCE(Department,''))) Department,
+                COUNT(*) computedAchieved
+           FROM cccf_forma_worker
+          WHERE YEAR(SubmitDate)=?
+          GROUP BY TRIM(COALESCE(SafetyUnit,''))",
+        [$year]
+    );
+    $masterUnitRows = safe_rows(
+        "SELECT TRIM(u.name) Unit,TRIM(COALESCE(d.Name,'')) Department
+           FROM master_safetyunits u
+           LEFT JOIN master_departments d ON d.id=u.department_id"
+    );
     $cccfAssignmentRows = safe_rows('SELECT COALESCE(e.Department,a.Department) AS Department, COUNT(DISTINCT COALESCE(NULLIF(a.EmployeeID,\'\'),a.id)) AS assigned FROM cccf_assignments a LEFT JOIN employees e ON e.EmployeeID=a.EmployeeID GROUP BY COALESCE(e.Department,a.Department)');
     $cccfPermanentRows = safe_rows(
         "SELECT COALESCE(e.Department,a.Department,p.Department) AS Department,
@@ -132,9 +167,19 @@ function dashboard_compliance_matrix(int $year, array $config): array
         WHERE m.Status IS NULL OR m.Status <> 'inactive'
         GROUP BY m.Department
     ");
-    $ojtRows = safe_rows('SELECT Department, OJTDate, NextReviewDate, AttendeeCount, YearlyTarget FROM ojt_records');
+    $ojtRows = safe_rows(
+        'SELECT r.Department,r.OJTDate,r.NextReviewDate,r.AttendeeCount,r.YearlyTarget
+           FROM ojt_records r
+          WHERE r.id=(
+              SELECT r2.id
+                FROM ojt_records r2
+               WHERE TRIM(r2.Department)=TRIM(r.Department)
+               ORDER BY COALESCE(r2.UpdatedAt,r2.OJTDate) DESC,r2.id DESC
+               LIMIT 1
+          )'
+    );
     $safetyCultureRows = safe_rows('SELECT Department, AVG(CompliancePct) AS pct FROM sc_ppeinspections WHERE YEAR(InspectionDate)=? AND deleted_at IS NULL GROUP BY Department', [$year]);
-    $targetMatrix = activity_target_coverage_matrix_data($year);
+    $targetMatrix = activity_target_coverage_matrix_data($year, false);
     $targetByDept = [];
     foreach ($targetMatrix['rows'] as $row) {
         $dept = dashboard_department_key((string) ($row['department'] ?? ''));
@@ -149,7 +194,15 @@ function dashboard_compliance_matrix(int $year, array $config): array
     }
 
     $employeeCount = dashboard_by_department($employeeRows, static function ($r) { return (int) ($r['total'] ?? 0); });
-    $training = dashboard_by_department($trainingRows, static function ($r) { return percent($r['passed'] ?? 0, $r['total'] ?? 0); });
+    $trainingStats = dashboard_by_department($trainingRows, static function ($r) {
+        return [
+            'value'=>percent($r['passed'] ?? 0, $r['total'] ?? 0),
+            'numerator'=>(int)($r['passed'] ?? 0),
+            'denominator'=>(int)($r['total'] ?? 0),
+        ];
+    });
+    $training = [];
+    foreach ($trainingStats as $key => $metric) $training[$key] = $metric['value'];
     $kyActual = dashboard_by_department($kyRows, static function ($r) { return (int) ($r['cnt'] ?? 0); });
     $hiyari = dashboard_by_department($hiyariRows, static function ($r) { return (int) ($r['submitted'] ?? 0); });
     $fourm = dashboard_by_department($fourmRows, static function ($r) { return percent($r['closed'] ?? 0, $r['total'] ?? 0); });
@@ -172,12 +225,71 @@ function dashboard_compliance_matrix(int $year, array $config): array
         $dept = dashboard_department_key((string) ($row['department'] ?? ''));
         $target = max(0, (int) ($row['personalTargetTotal'] ?? 0));
         if ($dept !== '' && $target > 0) {
-            $cccfWorkerEngine[$dept] = percent($row['actualTowardTarget'] ?? 0, $target);
+            $cccfWorkerEngine[$dept] = [
+                'value'=>percent($row['actualTowardTarget'] ?? 0, $target),
+                'numerator'=>min(max(0, (int)($row['actualTowardTarget'] ?? 0)), $target),
+                'denominator'=>$target,
+                'source'=>'CCCF per-person actual target engine',
+            ];
         }
     }
+    $selectedCccfUnits = [];
+    foreach (dashboard_parse_array($cccfUnitSetting['value'] ?? '') as $unit) {
+        $key = dashboard_unit_key((string)$unit);
+        if ($key !== '') $selectedCccfUnits[$key] = true;
+    }
+    $masterUnitDepartments = [];
+    foreach ($masterUnitRows as $row) {
+        $unit = dashboard_unit_key((string)($row['Unit'] ?? ''));
+        $department = dashboard_department_key((string)($row['Department'] ?? ''));
+        if ($unit !== '' && $department !== '') $masterUnitDepartments[$unit] = $department;
+    }
+    $cccfWorkerUnitActual = [];
+    $cccfWorkerUnitDepartment = [];
+    foreach ($cccfWorkerUnitRows as $row) {
+        $unit = dashboard_unit_key((string)($row['Unit'] ?? ''));
+        if ($unit === '') continue;
+        $cccfWorkerUnitActual[$unit] = max(0, (int)($row['computedAchieved'] ?? 0));
+        $department = dashboard_department_key((string)($row['Department'] ?? ''));
+        if ($department !== '') $cccfWorkerUnitDepartment[$unit] = $department;
+    }
+    $cccfWorkerManual = [];
+    foreach ($cccfUnitTargetRows as $row) {
+        $unit = dashboard_unit_key((string)($row['Unit'] ?? ''));
+        if ($unit === '' || ($selectedCccfUnits && !isset($selectedCccfUnits[$unit]))) continue;
+        $department = $masterUnitDepartments[$unit] ?? ($cccfWorkerUnitDepartment[$unit] ?? '');
+        $target = max(0, (int)($row['target'] ?? 0));
+        if ($department === '' || $target <= 0) continue;
+        $computed = $cccfWorkerUnitActual[$unit] ?? 0;
+        $rawOverride = $row['achievedOverride'] ?? null;
+        $achieved = ($rawOverride === null || $rawOverride === '')
+            ? $computed
+            : max(0, (int)$rawOverride);
+        if (!isset($cccfWorkerManual[$department])) {
+            $cccfWorkerManual[$department] = [
+                'numerator'=>0,
+                'denominator'=>0,
+                'units'=>0,
+                'source'=>'CCCF manual Unit target/override',
+            ];
+        }
+        $cccfWorkerManual[$department]['numerator'] += min($achieved, $target);
+        $cccfWorkerManual[$department]['denominator'] += $target;
+        $cccfWorkerManual[$department]['units']++;
+    }
+    foreach ($cccfWorkerManual as &$metric) {
+        $metric['value'] = percent($metric['numerator'], $metric['denominator']);
+    }
+    unset($metric);
     $cccfAssigned = dashboard_by_department($cccfAssignmentRows, static function ($r) { return (int) ($r['assigned'] ?? 0); });
     $cccfPermanent = dashboard_by_department($cccfPermanentRows, static function ($r) { return (int) ($r['completed'] ?? 0); });
-    $accident = dashboard_by_department($accidentRows, static function ($r) { return ((int) ($r['total'] ?? 0)) > 0 ? percent($r['closed'] ?? 0, $r['total'] ?? 0) : 100; });
+    $accidentStats = dashboard_by_department($accidentRows, static function ($r) {
+        $total = (int)($r['total'] ?? 0);
+        $closed = (int)($r['closed'] ?? 0);
+        return ['value'=>$total > 0 ? percent($closed, $total) : 100,'numerator'=>$closed,'denominator'=>$total];
+    });
+    $accident = [];
+    foreach ($accidentStats as $key => $metric) $accident[$key] = $metric['value'];
     $machine = dashboard_by_department($machineRows, static function ($r) {
         $machines = (int) ($r['machines'] ?? 0);
         if ($machines <= 0) {
@@ -189,16 +301,24 @@ function dashboard_compliance_matrix(int $year, array $config): array
         $issuePct = $issueTotal > 0 ? percent($r['issueClosed'] ?? 0, $issueTotal) : 100;
         return (int) round(((int) $compliancePct + (int) $issuePct) / 2);
     });
-    $ojt = dashboard_by_department($ojtRows, static function ($r) {
+    $ojtStats = dashboard_by_department($ojtRows, static function ($r) {
         if (empty($r['OJTDate'])) {
-            return 0;
+            return ['value'=>0,'numerator'=>0,'denominator'=>0,'overdue'=>false];
         }
         $target = (int) ($r['YearlyTarget'] ?? 0);
-        $coverage = $target > 0 ? percent($r['AttendeeCount'] ?? 0, $target) : 100;
+        $attendees = (int)($r['AttendeeCount'] ?? 0);
+        $coverage = $target > 0 ? percent($attendees, $target) : 100;
         $next = (string) ($r['NextReviewDate'] ?? '');
         $overdue = $next !== '' && strtotime($next) !== false && strtotime($next) < strtotime(date('Y-m-d'));
-        return $overdue ? min((int) $coverage, 50) : $coverage;
+        return [
+            'value'=>$overdue ? min((int)$coverage, 50) : $coverage,
+            'numerator'=>$attendees,
+            'denominator'=>$target,
+            'overdue'=>$overdue,
+        ];
     });
+    $ojt = [];
+    foreach ($ojtStats as $key => $metric) $ojt[$key] = $metric['value'];
     $safetyCulture = dashboard_by_department($safetyCultureRows, static function ($r) {
         return is_numeric($r['pct'] ?? null) ? max(0, min(100, (int) round((float) $r['pct']))) : null;
     });
@@ -213,22 +333,49 @@ function dashboard_compliance_matrix(int $year, array $config): array
         $kyTargets[$dept] = $unitCount * ((int) ($row['YearlyTarget'] ?? 12) ?: 12);
     }
 
-    $yokotenTargets = [];
+    $yokotenConfig = [];
+    foreach ($yokotenConfigRows as $row) {
+        $yokotenConfig[(string)($row['ConfigKey'] ?? '')] = dashboard_parse_array($row['ConfigValue'] ?? '');
+    }
+    $yokotenPinnedUnits = [];
+    foreach (($yokotenConfig['pinnedUnits'] ?? []) as $unit) {
+        $key = dashboard_unit_key((string)$unit);
+        if ($key !== '') $yokotenPinnedUnits[$key] = true;
+    }
+    $yokotenTopics = [];
     foreach ($yokotenTopicRows as $topic) {
+        $targetUnits = array_map('dashboard_unit_key', dashboard_parse_array($topic['TargetUnits'] ?? ''));
+        if (!$yokotenPinnedUnits || !$targetUnits || array_intersect_key(array_flip($targetUnits), $yokotenPinnedUnits)) {
+            $yokotenTopics[] = $topic;
+        }
+    }
+    $yokotenResponseSet = [];
+    foreach ($yokotenResponseRows as $row) {
+        $department = dashboard_department_key((string)($row['Department'] ?? ''));
+        if ($department === '') continue;
+        if ($yokotenPinnedUnits) {
+            $responseUnits = array_map('dashboard_unit_key', dashboard_parse_array($row['EffectiveSafetyUnit'] ?? ''));
+            if ($responseUnits && !array_intersect_key(array_flip($responseUnits), $yokotenPinnedUnits)) continue;
+        }
+        $yokotenResponseSet[$department.'::'.(string)($row['YokotenID'] ?? '')] = true;
+    }
+    $yokotenTargets = [];
+    $yokotenDone = [];
+    foreach ($yokotenTopics as $topic) {
         $targets = dashboard_parse_array($topic['TargetDepts'] ?? '');
-        $scoped = $targets ? array_values(array_intersect($targets, $deptNames)) : $deptNames;
+        $targetKeys = [];
+        foreach ($targets as $target) $targetKeys[dashboard_department_key((string)$target)] = true;
+        $scoped = $targets
+            ? array_values(array_filter($deptNames, static fn($dept) => isset($targetKeys[dashboard_department_key((string)$dept)])))
+            : $deptNames;
         foreach ($scoped as $dept) {
             $deptKey = dashboard_department_key((string) $dept);
             if ($deptKey !== '') {
                 $yokotenTargets[$deptKey] = ($yokotenTargets[$deptKey] ?? 0) + 1;
+                if (isset($yokotenResponseSet[$deptKey.'::'.(string)($topic['YokotenID'] ?? '')])) {
+                    $yokotenDone[$deptKey] = ($yokotenDone[$deptKey] ?? 0) + 1;
+                }
             }
-        }
-    }
-    $yokotenDone = [];
-    foreach ($yokotenResponseRows as $row) {
-        $dept = dashboard_department_key((string) ($row['Department'] ?? ''));
-        if ($dept !== '') {
-            $yokotenDone[$dept] = ($yokotenDone[$dept] ?? 0) + (int) ($row['cnt'] ?? 0);
         }
     }
 
@@ -240,9 +387,16 @@ function dashboard_compliance_matrix(int $year, array $config): array
         $yokotenTarget = $yokotenTargets[$deptKey] ?? 0;
         $cccfAssignedTotal = $cccfAssigned[$deptKey] ?? 0;
         $targetMeta = $targetByDept[$deptKey] ?? ['slots'=>0,'covered'=>0,'missing'=>0,'zero'=>0,'na'=>0,'scope'=>0,'override'=>0,'template'=>0];
+        $cccfWorkerMetric = ($config['cccfWorkerSource'] ?? 'manual_unit_target') === 'actual_department_worker'
+            ? ($cccfWorkerEngine[$deptKey] ?? null)
+            : ($cccfWorkerManual[$deptKey] ?? null);
+        $patrolMetric = $patrolIssueCounts[$deptKey] ?? ['total'=>0,'closed'=>0];
+        $accidentMetric = $accidentStats[$deptKey] ?? ['numerator'=>0,'denominator'=>0];
+        $ojtMetric = $ojtStats[$deptKey] ?? null;
+        $trainingMetric = $trainingStats[$deptKey] ?? null;
         $cells = [
             'activityTargets' => $targetMeta['slots'] > 0 ? percent($targetMeta['covered'] + $targetMeta['na'], $targetMeta['slots']) : null,
-            'cccfWorker' => array_key_exists($deptKey, $cccfWorkerEngine) ? $cccfWorkerEngine[$deptKey] : null,
+            'cccfWorker' => $cccfWorkerMetric['value'] ?? null,
             'cccfPermanent' => $cccfAssignedTotal > 0 ? percent($cccfPermanent[$deptKey] ?? 0, $cccfAssignedTotal) : null,
             'patrolIssues' => $patrolIssues[$deptKey] ?? 100,
             'hiyari' => $empTotal > 0 ? percent($hiyari[$deptKey] ?? 0, $empTotal) : null,
@@ -255,11 +409,23 @@ function dashboard_compliance_matrix(int $year, array $config): array
             'ojt' => $ojt[$deptKey] ?? 0,
             'safetyCulture' => $safetyCulture[$deptKey] ?? null,
         ];
+        $coverageMeta = [
+            'activityTargets'=>['numerator'=>$targetMeta['covered']+$targetMeta['na'],'denominator'=>$targetMeta['slots'],'source'=>'Activity target configuration'],
+            'cccfWorker'=>$cccfWorkerMetric,
+            'cccfPermanent'=>['numerator'=>$cccfPermanent[$deptKey]??0,'denominator'=>$cccfAssignedTotal,'source'=>'Completed CCCF Permanent / current assignments'],
+            'patrolIssues'=>['numerator'=>$patrolMetric['closed'],'denominator'=>$patrolMetric['total'],'source'=>$patrolMetric['total']?'Closed Patrol issues / issues found this year':'No Patrol issues found this year'],
+            'hiyari'=>['numerator'=>$hiyari[$deptKey]??0,'denominator'=>$empTotal,'source'=>'Distinct Hiyari reporters / employees'],
+            'ky'=>['numerator'=>$kyActual[$deptKey]??0,'denominator'=>$kyTarget,'source'=>'KY activities / configured Unit targets'],
+            'yokoten'=>['numerator'=>$yokotenDone[$deptKey]??0,'denominator'=>$yokotenTarget,'source'=>'Responded / assigned Yokoten topics issued this year'],
+            'training'=>$trainingMetric ? array_merge($trainingMetric,['source'=>'Passed / total Training department records']) : null,
+            'accident'=>['numerator'=>$accidentMetric['numerator'],'denominator'=>$accidentMetric['denominator'],'source'=>$accidentMetric['denominator']?'Closed / reported accidents this year':'No accidents reported this year'],
+            'ojt'=>$ojtMetric ? array_merge($ojtMetric,['source'=>'Current OJT attendee target and review date']) : null,
+        ];
         $values = array_values(array_filter($cells, static function ($v) {
             return $v !== null;
         }));
         $score = $values ? (int) round(array_sum($values) / count($values)) : 0;
-        $matrix[] = array_merge(['department' => $dept, 'score' => $score, 'targetMeta' => $targetMeta], $cells);
+        $matrix[] = array_merge(['department'=>$dept,'score'=>$score,'targetMeta'=>$targetMeta,'coverageMeta'=>$coverageMeta], $cells);
     }
     usort($matrix, static function ($a, $b) {
         if ((int) $a['score'] === (int) $b['score']) {
@@ -453,12 +619,20 @@ try {
             + min((int) ($patrolOpenIssues ?? 0), 15);
         $score = max(0, min(100, $base - $penalty));
         $status = $score >= $config['healthGreen'] ? 'Good' : ($score >= $config['healthAmber'] ? 'Watch' : 'Critical');
+        $complianceMatrix = dashboard_compliance_matrix($year, $config);
         json_response(['success' => true, 'data' => [
             'year' => $year, 'config' => $config,
             'healthIndex' => ['score' => $score, 'status' => $status, 'base' => $base, 'penalty' => $penalty, 'thresholds' => ['green' => $config['healthGreen'], 'amber' => $config['healthAmber']]],
-            'complianceMatrix' => dashboard_compliance_matrix($year, $config),
+            'complianceMatrix' => $complianceMatrix,
             'patrol' => ['sessions' => $patrolSessions, 'attended' => $patrolAttended, 'openIssues' => $patrolOpenIssues, 'rate' => percent($patrolAttended, $patrolSessions)],
-            'cccf' => ['workerYear' => $cccfWorkerActualTowardTarget, 'workerRawRecords' => $cccfWorkerRawRecords, 'workerCalculation' => 'cccf_worker_progress_engine_actual_toward_target', 'assigned' => $cccfAssigned, 'completed' => $cccfCompleted, 'permPct' => percent($cccfCompleted, $cccfAssigned)],
+            'cccf' => [
+                'workerYear'=>$cccfWorkerActualTowardTarget,
+                'workerRawRecords'=>$cccfWorkerRawRecords,
+                'workerCalculation'=>'cccf_worker_progress_engine_actual_toward_target',
+                'assigned'=>$cccfAssigned,
+                'completed'=>$cccfCompleted,
+                'permPct'=>percent($cccfCompleted,$cccfAssigned),
+            ],
             'yokoten' => ['topics' => $yokotenTopics, 'responded' => $yokotenResponded, 'pct' => percent($yokotenResponded, $yokotenTopics)],
             'training' => ['totalEmp' => $trainingTotal, 'passed' => $trainingPassed, 'passRate' => percent($trainingPassed, $trainingTotal)],
             'hiyari' => ['open' => $hiyariOpen, 'year' => $hiyariYear], 'ky' => ['year' => $kyYear],

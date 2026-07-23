@@ -424,9 +424,9 @@ function target_row(array $activity, array $merged): array
     ];
 }
 
-function activity_target_coverage_matrix_data(?int $year = null): array
+function activity_target_coverage_matrix_data(?int $year = null, bool $ensureSchema = true): array
 {
-    ensure_activity_target_tables();
+    if ($ensureSchema) ensure_activity_target_tables();
     $targetYear = (int) ($year ?: date('Y'));
     $versioned = $targetYear >= 2000 && $targetYear <= 2100;
     $employees = db_rows(

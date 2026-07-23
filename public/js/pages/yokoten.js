@@ -3663,16 +3663,70 @@ function _getTargetDepartmentsForTopic(topic) {
     return _masterDepts.map(_getDepartmentName).filter(Boolean);
 }
 
-function _buildAdminDeptOptions(topic) {
+function _getAdminDepartmentChoices(topic) {
     const responded = new Set(
         _allResponses
             .filter(r => r.YokotenID === topic?.YokotenID && r.Department)
             .map(r => String(r.Department).trim())
     );
-    return _getTargetDepartmentsForTopic(topic).map(dept => {
-        const done = responded.has(dept);
-        return `<option value="${_esc(dept)}" ${done ? 'disabled' : ''}>${_esc(dept)}${done ? ' (ตอบแล้ว)' : ''}</option>`;
+    return _getTargetDepartmentsForTopic(topic).map(dept => ({
+        name: dept,
+        responded: responded.has(dept),
+    }));
+}
+
+function _buildAdminDepartmentChecklist(choices) {
+    if (!choices.length) {
+        return '<p class="px-3 py-8 text-center text-xs text-slate-400">ไม่พบแผนกเป้าหมาย</p>';
+    }
+    return choices.map(choice => `
+        <label class="flex items-center gap-2 px-3 py-2 text-xs border-b border-slate-100 last:border-b-0 ${choice.responded ? 'bg-slate-50 text-slate-400 cursor-not-allowed' : 'text-slate-700 hover:bg-sky-50 cursor-pointer'}">
+            <input type="checkbox" name="departments" value="${_esc(choice.name)}"
+                   class="yok-admin-selection-item h-4 w-4 rounded border-slate-300 accent-sky-600"
+                   data-selection-group="departments" ${choice.responded ? 'disabled' : ''}>
+            <span class="min-w-0 flex-1 font-medium">${_esc(choice.name)}</span>
+            ${choice.responded ? '<span class="shrink-0 text-[10px] font-bold text-emerald-600">ตอบแล้ว</span>' : ''}
+        </label>`).join('');
+}
+
+function _buildAdminUnitChecklist(units, preselectedUnits) {
+    if (!units.length) {
+        return '<p class="px-3 py-8 text-center text-xs text-slate-400">หัวข้อนี้ไม่ได้กำหนด Safety Unit</p>';
+    }
+    return units.map(unit => {
+        const name = _getSafetyUnitName(unit);
+        if (!name) return '';
+        const checked = preselectedUnits.includes(name);
+        return `
+        <label class="flex items-center gap-2 px-3 py-2 text-xs text-slate-700 border-b border-slate-100 last:border-b-0 hover:bg-violet-50 cursor-pointer">
+            <input type="checkbox" name="safetyUnits" value="${_esc(name)}"
+                   class="yok-admin-selection-item h-4 w-4 rounded border-slate-300 accent-violet-600"
+                   data-selection-group="safetyUnits" ${checked ? 'checked' : ''}>
+            <span class="min-w-0 flex-1 font-medium">${_esc(name)}</span>
+        </label>`;
     }).join('');
+}
+
+function _getAdminSelectionValues(form, groupName) {
+    const checkboxes = Array.from(form.querySelectorAll(`input[name="${groupName}"]`));
+    if (checkboxes.length) {
+        return checkboxes
+            .filter(input => input.checked && !input.disabled)
+            .map(input => input.value)
+            .filter(Boolean);
+    }
+    const select = form.querySelector(`select[name="${groupName}"]`);
+    return select
+        ? Array.from(select.selectedOptions).map(option => option.value).filter(Boolean)
+        : [];
+}
+
+function _syncAdminSelectionCount(form, groupName) {
+    const counter = form?.querySelector(`[data-selection-count="${groupName}"]`);
+    if (!counter) return;
+    const available = form.querySelectorAll(`input[name="${groupName}"]:not(:disabled)`).length;
+    const selected = _getAdminSelectionValues(form, groupName).length;
+    counter.textContent = `${selected} / ${available}`;
 }
 
 function _buildResponseForm(yokotenId, existingResp = null, opts = {}) {
@@ -3681,7 +3735,8 @@ function _buildResponseForm(yokotenId, existingResp = null, opts = {}) {
     const isAdminMode = !!opts.adminMode && _isAdmin && !isEdit;
     const currentUser = TSHSession.getUser() || {};
     const curRelated = existingResp?.IsRelated || 'No';
-    const deptOptions = isAdminMode ? _buildAdminDeptOptions(opts.topic) : '';
+    const departmentChoices = isAdminMode ? _getAdminDepartmentChoices(opts.topic) : [];
+    const pendingDepartmentCount = departmentChoices.filter(choice => !choice.responded).length;
     const topicUnits = _parseTargetDepts(opts.topic?.TargetUnits);
     const responseUnits = topicUnits.length
         ? _safetyUnits.filter(u => topicUnits.includes(_getSafetyUnitName(u)))
@@ -3700,22 +3755,36 @@ function _buildResponseForm(yokotenId, existingResp = null, opts = {}) {
         <p class="text-sm font-semibold text-slate-700">${isAdminMode ? 'Respond on behalf / บันทึกการตอบกลับแทนแผนก' : (isEdit ? 'Edit response / แก้ไขการตอบกลับ' : 'Respond to this topic / ตอบกลับหัวข้อนี้')}</p>
         ${isAdminMode ? `
         <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
-            <label class="block">
-                <span class="block text-xs font-semibold text-slate-600 mb-1">Departments / แผนกที่ตอบแทน <span class="text-red-500">*</span></span>
-                <select name="departments" class="form-input w-full text-sm min-h-[220px]" size="10" multiple required>
-                    ${deptOptions || '<option value="" disabled>ไม่พบแผนกเป้าหมายที่ยังรอตอบ</option>'}
-                </select>
-                <span class="block text-[11px] text-slate-400 mt-1">Use Ctrl/Shift to select multiple departments / กด Ctrl/Shift เพื่อเลือกหลายแผนก</span>
-            </label>
-            <label class="block">
-                <span class="block text-xs font-semibold text-slate-600 mb-1">Safety Unit / หน่วยงาน</span>
-                <select name="safetyUnits" class="form-input w-full text-sm min-h-[220px]" size="10" multiple ${responseUnits.length ? 'required' : ''}>
-                    <option value="">เลือก Safety Unit</option>
-                    ${unitOptions}
-                    ${!responseUnits.length ? '<option value="" disabled>No scoped Safety Unit for this topic</option>' : ''}
-                </select>
-                <span class="block text-[11px] text-slate-400 mt-1">${responseUnits.length ? 'Use Ctrl/Shift to select multiple Safety Units' : 'Optional: this topic has no Safety Unit scope'}</span>
-            </label>
+            <div class="block">
+                <div class="flex flex-wrap items-center justify-between gap-2 mb-1">
+                    <span class="text-xs font-semibold text-slate-600">Departments / แผนกที่ตอบแทน <span class="text-red-500">*</span></span>
+                    <span class="text-[11px] font-bold text-sky-700"><span data-selection-count="departments">0 / ${pendingDepartmentCount}</span> แผนก</span>
+                </div>
+                <div class="flex items-center gap-2 mb-2">
+                    <button type="button" class="yok-admin-selection-btn px-2.5 py-1 rounded-md text-[11px] font-bold text-white bg-sky-600 hover:bg-sky-700 disabled:opacity-50"
+                            data-selection-group="departments" data-selection-mode="all" ${pendingDepartmentCount ? '' : 'disabled'}>
+                        เลือกทั้งหมดที่ยังรอตอบ
+                    </button>
+                    <button type="button" class="yok-admin-selection-btn px-2.5 py-1 rounded-md text-[11px] font-bold text-slate-600 border border-slate-200 hover:bg-slate-50"
+                            data-selection-group="departments" data-selection-mode="clear">
+                        ล้างทั้งหมด
+                    </button>
+                </div>
+                <div class="h-[220px] overflow-y-auto rounded-lg border border-slate-200 bg-white" role="group" aria-label="Departments">
+                    ${_buildAdminDepartmentChecklist(departmentChoices)}
+                </div>
+                <span class="block text-[11px] text-slate-400 mt-1">คลิกเลือกแต่ละแผนกได้ทันทีโดยไม่ต้องกด Ctrl/Shift</span>
+            </div>
+            <div class="block">
+                <div class="flex items-center justify-between gap-2 mb-1">
+                    <span class="text-xs font-semibold text-slate-600">Safety Unit / หน่วยงาน</span>
+                    <span class="text-[11px] font-bold text-violet-700"><span data-selection-count="safetyUnits">${preselectedUnits.length} / ${responseUnits.length}</span> Unit</span>
+                </div>
+                <div class="h-[258px] overflow-y-auto rounded-lg border border-slate-200 bg-white" role="group" aria-label="Safety Units">
+                    ${_buildAdminUnitChecklist(responseUnits, preselectedUnits)}
+                </div>
+                <span class="block text-[11px] text-slate-400 mt-1">${responseUnits.length ? 'คลิกเลือก Safety Unit ได้ทันทีโดยไม่ต้องกด Ctrl/Shift' : 'Optional: this topic has no Safety Unit scope'}</span>
+            </div>
         </div>` : ''}
         ${!isAdminMode && !isEdit && topicUnits.length ? `
         <label class="block">
@@ -5446,10 +5515,9 @@ async function _submitResp(form, btn) {
     const correctiveAction = form.querySelector('[name="correctiveAction"]')?.value || '';
     const files            = form.querySelector('[name="responseFiles"]')?.files;
     const isAdminMode      = form.dataset.adminMode === '1';
-    const deptSelect       = form.querySelector('[name="departments"]');
-    const departments      = deptSelect ? Array.from(deptSelect.selectedOptions).map(opt => opt.value).filter(Boolean) : [];
-    const unitSelect       = form.querySelector('[name="safetyUnits"]');
-    const safetyUnits      = unitSelect ? Array.from(unitSelect.selectedOptions).map(opt => opt.value).filter(Boolean) : [];
+    const departments      = isAdminMode ? _getAdminSelectionValues(form, 'departments') : [];
+    const unitInputs       = isAdminMode ? form.querySelectorAll('[name="safetyUnits"]') : [];
+    const safetyUnits      = isAdminMode ? _getAdminSelectionValues(form, 'safetyUnits') : [];
     const userUnitSelect   = form.querySelector('[name="safetyUnit"]');
     const selectedUserUnit = userUnitSelect ? userUnitSelect.value.trim() : '';
 
@@ -5458,7 +5526,7 @@ async function _submitResp(form, btn) {
         return;
     }
 
-    if (isAdminMode && unitSelect && Array.from(unitSelect.options).some(opt => opt.value && !opt.disabled) && safetyUnits.length === 0) {
+    if (isAdminMode && unitInputs.length > 0 && safetyUnits.length === 0) {
         showToast('Please select at least one scoped Safety Unit for this topic.', 'error');
         return;
     }
@@ -5577,6 +5645,19 @@ function setupEventListeners() {
         if (!e.target.closest('#yok-card-save-menu')) _yokHideCardImageMenu();
 
         if (!e.target.closest('#yokoten-page') && !e.target.closest('[data-yok-modal]')) return;
+
+        const adminSelectionBtn = e.target.closest('.yok-admin-selection-btn');
+        if (adminSelectionBtn) {
+            const form = adminSelectionBtn.closest('form.yok-resp-form');
+            const groupName = adminSelectionBtn.dataset.selectionGroup;
+            if (!form || !['departments', 'safetyUnits'].includes(groupName)) return;
+            const shouldSelect = adminSelectionBtn.dataset.selectionMode === 'all';
+            form.querySelectorAll(`input[name="${groupName}"]:not(:disabled)`).forEach(input => {
+                input.checked = shouldSelect;
+            });
+            _syncAdminSelectionCount(form, groupName);
+            return;
+        }
 
         // Tab switch
         const tabBtn = e.target.closest('.yok-tab');
@@ -6012,6 +6093,11 @@ function setupEventListeners() {
             _loadYokotenEmailOutbox().catch(err => {
                 showToast(err?.message || 'Load email outbox failed', 'error');
             });
+            return;
+        }
+        if (e.target.classList.contains('yok-admin-selection-item')) {
+            const form = e.target.closest('form.yok-resp-form');
+            _syncAdminSelectionCount(form, e.target.dataset.selectionGroup);
             return;
         }
         // Bulk approve: select-all checkbox
