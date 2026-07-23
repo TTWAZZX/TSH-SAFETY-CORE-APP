@@ -1,5 +1,5 @@
 import { showToast, showError, openModal, openDetailModal, closeModal, escHtml, metricCard, emptyState, statusBadge as dsStatusBadge } from '../ui.js?v=20260602-mobile-nav-m53';
-import { API } from '../api.js';
+import { API } from '../api.js?v=20260723-onboarding-release';
 import { createLatestRenderTarget, guardActionHandler, guardSubmitHandler, sectionSkeleton, withActionLock } from '../utils/async-ui.js?v=20260715-phase32c-residual-async';
 
 // â”€â”€â”€ Button loading helper (disable + spinner, returns original HTML) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€

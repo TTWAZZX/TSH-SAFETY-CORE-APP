@@ -2732,6 +2732,9 @@ function setupFormListeners() {
     }));
 }
 
+// Quarantine a legacy block appended by the upstream merge. The active
+// submit-flow implementations are defined above.
+function _quarantinedLegacyKySubmitMerge() {
 function setupKyReporterSearch() {
     const reporterSearch = document.getElementById('ky-reporter-search');
     const reporterDrop   = document.getElementById('ky-reporter-dropdown');
@@ -3126,6 +3129,8 @@ async function refreshKySubmitProgress(department) {
             noteEl.className = `text-xs ${chk?.submittedThisMonth ? 'text-amber-700' : 'text-slate-500'}`;
         }
     } catch (_) {}
+}
+
 }
 
 function _addParticipant(name, empId) {

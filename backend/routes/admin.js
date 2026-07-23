@@ -31,13 +31,6 @@ const {
     writeEmployeeProfileWithinTransaction,
 } = require('../services/employee-profile-write');
 const patrolRoutes = require('./patrol');
-const {
-    EMAIL_REQUIREMENT_SETTING_KEY,
-    DEFAULT_EMAIL_REQUIRED_POSITION_NAMES,
-    ensureAppSettingsTable,
-    getEmailRequirementRule,
-} = require('../utils/email-requirement');
-
 const upload = multer({ storage: multer.memoryStorage() });
 
 // ─── Constants ────────────────────────────────────────────────────────────────

@@ -1267,8 +1267,6 @@ router.post('/issue/save', upload.fields([
                     .catch(err => ({ queued: false, sent: false, reason: err.message }));
                 return res.json({ success: true, message: 'Close request submitted.', email });
             }
-            const [[current]] = await db.query('SELECT AfterImage FROM Patrol_Issues WHERE IssueID = ?', [data.IssueID]);
-            const afterImage = getUrl('AfterImage');
             await db.query(
                 `UPDATE Patrol_Issues
                  SET ActionDescription = ?, AfterImage = ?, FinishDate = ?, CurrentStatus = 'Closed',

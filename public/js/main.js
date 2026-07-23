@@ -4,7 +4,7 @@
 // ======================================================
 
 import * as UI from './ui.js?v=20260714-phase21-platform-shell';
-import { apiFetch } from './api.js';
+import { apiFetch } from './api.js?v=20260723-onboarding-release';
 import { guardSubmitHandler } from './utils/async-ui.js?v=20260715-phase32d-remaining-async-ux';
 
 // --- Page Loaders ---
@@ -14,7 +14,7 @@ import { loadPatrolPage } from './pages/patrol.js?v=20260715-patrol-dept-result'
 import { loadCccfPage } from './pages/cccf.js?v=20260715-phase32c-residual-async';
 import { loadKpiPage } from './pages/kpi.js?v=20260715-phase32d-remaining-async-ux';
 import { loadYokotenPage } from './pages/yokoten.js?v=20260715-phase32e-browser-closeout';
-import { loadAdminPage } from './pages/admin.js?v=20260715-phase32c-residual-async';
+import { loadAdminPage } from './pages/admin.js?v=20260723-onboarding-release';
 import { loadMachineSafetyPage } from './pages/machine-safety.js?v=20260715-phase32d-remaining-async-ux';
 import { loadForkliftPage } from './pages/forklift.js?v=20260715-phase32a-async-ux';
 import { loadOjtPage } from './pages/ojt.js?v=20260715-phase32d-remaining-async-ux';
@@ -26,7 +26,7 @@ import { loadHiyariPage } from './pages/hiyari.js?v=20260715-hiyari-learning-adm
 import { loadKyPage } from './pages/ky.js?v=20260715-phase32d-remaining-async-ux';
 import { loadFourmPage } from './pages/fourm.js?v=20260715-phase32c-residual-async';
 import { loadJohnnyAiPage } from './pages/johnny-ai.js?v=20260715-phase32d-remaining-async-ux';
-import { openProfileDrawer, closeProfileDrawer } from './pages/profile.js?v=20260715-phase32d-remaining-async-ux';
+import { openProfileDrawer, closeProfileDrawer } from './pages/profile.js?v=20260723-onboarding-release';
 import { loadDashboardPage } from './pages/dashboard.js?v=20260715-phase32d-remaining-async-ux';
 import { loadSearchPage } from './pages/search.js?v=20260715-phase32d-remaining-async-ux';
 import { initLoginModuleGuides } from './login-guides.js?v=20260714-phase21-platform-shell';
