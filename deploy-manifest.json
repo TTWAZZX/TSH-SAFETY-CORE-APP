@@ -7,8 +7,8 @@
   "cacheBust": "20260723-onboarding-release",
   "runtime": "shared-hosting-php",
   "deployPhase": "onboarding-phases-1-10",
-  "deploymentStatus": "release-candidate",
-  "deployedAt": null,
+  "deploymentStatus": "deployed-and-read-only-smoke-passed",
+  "deployedAt": "2026-07-23T09:43:10.0250216+07:00",
   "databaseMutationPlanned": false,
   "schemaMutationPlanned": false,
   "uploadStorageMutationPlanned": false,
@@ -64,5 +64,17 @@
     "nodePhpParity": true,
     "browserFunctionalUat": "12 checks PASS",
     "browserVisualNote": "External CDN unavailable during final run; overflow assertions were not asserted. Earlier CDN-enabled visual run passed."
+  },
+  "productionVerification": {
+    "codeBackup": "backups/production/onboarding-phase10-predeploy-20260723-085043",
+    "uploadVerify": "backups/production/onboarding-phase10-upload-verify-20260723-094042",
+    "readOnlySmoke": "backups/production/onboarding-phase10-smoke-20260723-094310",
+    "uploadedFiles": 20,
+    "sha256Matches": "20/20",
+    "configLocalUnchanged": true,
+    "httpsApiSmoke": "8/8 PASS",
+    "databaseMutationAttempted": false,
+    "schemaMutationAttempted": false,
+    "uploadStorageMutationAttempted": false
   }
 }

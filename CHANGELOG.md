@@ -2,13 +2,17 @@
 
 This file preserves historical production handoff, smoke test, backup, deployment, migration, and phase notes moved out of `CLAUDE.md`.
 
-## Onboarding Phases 1-10 Release Candidate (2026-07-23)
+## Onboarding Phases 1-10 Deployed (2026-07-23)
 
 Prepared the shared-hosting PHP production bundle for the centralized onboarding resolver, backend enforcement, password and Safety Unit continuation, cross-system profile validation, data-quality review, cross-path enforcement, frontend integration, and Phase 10 browser UAT. The bundle is code-only: no schema, employee data, or upload-storage mutation is planned.
 
 Local release gates passed: Node/PHP resolver and enforcement parity, continuation/profile/data-quality suites, API smoke, 91/91 read-only API/permission preflight, PHP lint for 35 files, and read-only classification of all 2,492 employees with zero unknown departments. Final Chrome functional UAT passed 12 checks and cleanup restored the original database fingerprints with zero synthetic residue. External CDN access was unavailable during the final browser run, so overflow assertions were recorded as not asserted; an earlier CDN-enabled Phase 10 visual run passed desktop/mobile checks.
 
-Production code rollback backup was captured before upload at `backups/production/onboarding-phase10-predeploy-20260723-085043/`. The exact 20-file deployment boundary and SHA-256 values are recorded in `deploy-manifest.json`. Production upload and smoke status will be appended after verification.
+Production code rollback backup was captured before upload at `backups/production/onboarding-phase10-predeploy-20260723-085043/`. The exact 20-file deployment boundary and SHA-256 values are recorded in `deploy-manifest.json`. No production database export helper or forged authentication token was used; the deployment did not change schema, employee data, or upload storage.
+
+Production FTP upload completed for all 20 files. Download-back SHA-256 verification passed 20/20 at `backups/production/onboarding-phase10-upload-verify-20260723-094042/`, and the protected `api/config.local.php` hash remained identical to the pre-deploy backup. Read-only HTTPS/API smoke passed 8/8 at `backups/production/onboarding-phase10-smoke-20260723-094310/`: application shell, release cache markers, public register options/branding, and unauthenticated onboarding/admin/profile boundaries all returned the expected status and content type. Authenticated production onboarding UAT was not run because no real production test credential was supplied; no credential was fabricated from the server secret.
+
+GitHub release commits are prepared locally through `e638127`, but the push remains pending because this workstation has no stored GitHub account and Git Credential Manager device authentication did not complete. Production is running the content identified by runtime source commit `d18eaee` plus the deployed manifest metadata.
 
 ## Current Handoff Status (2026-05-21)
 
