@@ -1,371 +1,68 @@
-﻿{
-    "schemaVersion":  1,
-    "generatedAt":  "2026-07-15T17:25:44.8452855+07:00",
-    "sourceHead":  "0cd5afd5c967f0976ca422afccb6d0126c08f241",
-    "previousProductionBuild":  "patrol-issue-export-hotfix2-20260715-171229",
-    "buildId":  "patrol-dept-result-20260715-172536",
-    "cacheBust":  "20260715-patrol-dept-result",
-    "frontendCacheBoundary":  {
-                                  "style":  "20260714-phase21-platform-shell",
-                                  "main":  "20260715-patrol-dept-result",
-                                  "moduleImports":  "module-specific versioned imports in public/js/main.js"
-                              },
-    "runtime":  "frontend-patrol-dept-result",
-    "deployPhase":  "patrol-dept-result",
-    "deployedAt":  "2026-07-15T17:26:07.0572625+07:00",
-    "deployedBy":  "managed-deploy",
-    "exactRuntimeFiles":  [
-                              "api/config.php",
-                              "api/handlers/admin_phase8.php",
-                              "api/handlers/forklift.php",
-                              "api/handlers/foundation.php",
-                              "api/handlers/fourm_phase7.php",
-                              "api/handlers/operational.php",
-                              "api/handlers/operational_phase5.php",
-                              "api/handlers/patrol.php",
-                              "api/handlers/people.php",
-                              "api/handlers/platform.php",
-                              "api/handlers/targets.php",
-                              "api/handlers/workflow_phase6.php",
-                              "api/index.php",
-                              "api/lib/cccf_worker_progress.php",
-                              "api/mailer.php",
-                              "backend/middleware/auth.js",
-                              "backend/package.json",
-                              "backend/routes/accident.js",
-                              "backend/routes/activity-targets.js",
-                              "backend/routes/admin.js",
-                              "backend/routes/cccf.js",
-                              "backend/routes/dashboard.js",
-                              "backend/routes/forklift.js",
-                              "backend/routes/fourm.js",
-                              "backend/routes/hiyari.js",
-                              "backend/routes/ky.js",
-                              "backend/routes/machine-safety.js",
-                              "backend/routes/ojt.js",
-                              "backend/routes/patrol.js",
-                              "backend/routes/person-search.js",
-                              "backend/routes/safety-culture.js",
-                              "backend/routes/settings.js",
-                              "backend/routes/training.js",
-                              "backend/routes/yokoten.js",
-                              "backend/server.js",
-                              "backend/utils/cccf-worker-progress.js",
-                              "backend/utils/email.js",
-                              "backend/utils/email-requirement.js",
-                              "backend/utils/hiyari-email-template.js",
-                              "backend/utils/registration-email-template.js",
-                              "index.html",
-                              "public/js/login-guides.js",
-                              "public/js/main.js",
-                              "public/js/pages/accident.js",
-                              "public/js/pages/admin.js",
-                              "public/js/pages/forklift.js",
-                              "public/js/pages/fourm.js",
-                              "public/js/pages/ky.js",
-                              "public/js/pages/machine-safety.js",
-                              "public/js/pages/ojt.js",
-                              "public/js/pages/patrol.js",
-                              "public/js/pages/safety-culture.js",
-                              "public/js/pages/search.js",
-                              "public/js/pages/training.js",
-                              "public/js/session.js",
-                              "public/js/ui.js",
-                              "deploy-manifest.json"
-                          ],
-    "fileHashes":  [
-                       {
-                           "path":  "api/config.php",
-                           "sha256":  "3b738c3874af571c26e00cbd9a7e25adaa9813b230b93b3acac71337319173bf"
-                       },
-                       {
-                           "path":  "api/handlers/admin_phase8.php",
-                           "sha256":  "3be80b6f5961a2d63ca3b74d8e41cd5cb64c04f2a665f20b3515fcbb1f7fd0b8"
-                       },
-                       {
-                           "path":  "api/handlers/forklift.php",
-                           "sha256":  "296732e74f4f0c9714fb45c73e4ed05041ec7c534eb3d7a81ca3c2931536253c"
-                       },
-                       {
-                           "path":  "api/handlers/foundation.php",
-                           "sha256":  "eda6c7c48b655972392542d1f49c94e1af47b2c477b8648548e1a8ebdce2e206"
-                       },
-                       {
-                           "path":  "api/handlers/fourm_phase7.php",
-                           "sha256":  "02f57ecd5b9bafc4a1385d257cbae3931ee4851a6ac69e9a8210253979081d86"
-                       },
-                       {
-                           "path":  "api/handlers/operational.php",
-                           "sha256":  "0dc2dfbc082b6cd6ab9be05a28d251126b92262ab82737d457c2a72281b51474"
-                       },
-                       {
-                           "path":  "api/handlers/operational_phase5.php",
-                           "sha256":  "2c4a6b10df939bd55b4ae2e709c12b2ea6a7ed544ef5de7be453a6aeca703eb7"
-                       },
-                       {
-                           "path":  "api/handlers/patrol.php",
-                           "sha256":  "2849d3c561afd32ebbd80204f4f8f0c7e0b5648d67398c37b9a7a82315d959ab"
-                       },
-                       {
-                           "path":  "api/handlers/people.php",
-                           "sha256":  "98a66c3077cd3e55c77f46737245e148cc41c73449a574f6f9c37a25487f75b4"
-                       },
-                       {
-                           "path":  "api/handlers/platform.php",
-                           "sha256":  "259a5dac7a977322874ea77e49a87ef364d41e009931839a660cf243c5972444"
-                       },
-                       {
-                           "path":  "api/handlers/targets.php",
-                           "sha256":  "967352a03630670b30dff56096820764c417c0e5b593b9ec98eee9b17a27044c"
-                       },
-                       {
-                           "path":  "api/handlers/workflow_phase6.php",
-                           "sha256":  "9aa886f8fc992d80fcaddf9ebef4114dd61e9119be76193106c5f6a6f6d64da8"
-                       },
-                       {
-                           "path":  "api/index.php",
-                           "sha256":  "e1d0492beedf2e699e8a035ea47dd1145093664953fb6c6bf940ed59bfbfc551"
-                       },
-                       {
-                           "path":  "api/lib/cccf_worker_progress.php",
-                           "sha256":  "13652f0113d7636e05583e20c4465e780f777b1a8728bff70cf7054b2d383283"
-                       },
-                       {
-                           "path":  "api/mailer.php",
-                           "sha256":  "3074b1987a7b17484dd643f670b2e2bf7c670f00c1632ab307fd8c5775e573d2"
-                       },
-                       {
-                           "path":  "backend/middleware/auth.js",
-                           "sha256":  "51146c38b4e9162b7e7034dca2d6361f7041f05ae17907257ebcd813260fc601"
-                       },
-                       {
-                           "path":  "backend/package.json",
-                           "sha256":  "0e8286d246df759ece5f765cf98e32ee3c029ea3a2536dad0f67fe33fd6d9fbb"
-                       },
-                       {
-                           "path":  "backend/routes/accident.js",
-                           "sha256":  "840eb4a848733b684095f6e51a115293e97327911d22935a777439caf26ccb3d"
-                       },
-                       {
-                           "path":  "backend/routes/activity-targets.js",
-                           "sha256":  "974dd0cd6b7cd579440ff54b699b2a8e2faf977ae27f2a05f63943bb3dc89a64"
-                       },
-                       {
-                           "path":  "backend/routes/admin.js",
-                           "sha256":  "2684ac3f44ea76efc4d886d52c79045f3b5269d53b0ba43817e11613b4ba084d"
-                       },
-                       {
-                           "path":  "backend/routes/cccf.js",
-                           "sha256":  "b492b24879057607a47a5dc555fd16ef4112b4390093cccfbb4728671ad76a18"
-                       },
-                       {
-                           "path":  "backend/routes/dashboard.js",
-                           "sha256":  "b449f2688a4a13db15b6611eba024339385f2155914687e12df8318c29622672"
-                       },
-                       {
-                           "path":  "backend/routes/forklift.js",
-                           "sha256":  "7319d513d863e0859286aacef469ed7fff97b93e265b02f179d07f2a770b81a7"
-                       },
-                       {
-                           "path":  "backend/routes/fourm.js",
-                           "sha256":  "43325cf00e4ae0491360c344a270c5ab569d39386825a7ab0298818d6622d797"
-                       },
-                       {
-                           "path":  "backend/routes/hiyari.js",
-                           "sha256":  "5675b1d04b0b68f65580bbf6cc589796dd70097d844dbb463fa72f86d9372c57"
-                       },
-                       {
-                           "path":  "backend/routes/ky.js",
-                           "sha256":  "31ca1cc2fa4bd94c4b2dd1afc7298eac086cd55e784a4ec5f2135de3fd5c9cb9"
-                       },
-                       {
-                           "path":  "backend/routes/machine-safety.js",
-                           "sha256":  "a82a9947275dc6b9f4e58a9e6dae2499288aadb97bdec7d1f856223d5bf86d51"
-                       },
-                       {
-                           "path":  "backend/routes/ojt.js",
-                           "sha256":  "7ac7f787f32ef5bcf7fec57408a716a0ad5b9b0fbb0d682d4afc43c7a76fa0a4"
-                       },
-                       {
-                           "path":  "backend/routes/patrol.js",
-                           "sha256":  "495959ff13f62bdf91e6c7b0fed512dbab346d9fa2c0391ccffdb43aec436f2b"
-                       },
-                       {
-                           "path":  "backend/routes/person-search.js",
-                           "sha256":  "2aca946d127e25657a69cb627c73c93f3ac77efaadbe2dca80aae10453bb32ab"
-                       },
-                       {
-                           "path":  "backend/routes/safety-culture.js",
-                           "sha256":  "ca7fca33c9387ea412c024f8451609475ddda37e83b69a0dc40913903872f69c"
-                       },
-                       {
-                           "path":  "backend/routes/settings.js",
-                           "sha256":  "09d2226aca5dd5077fb759c0c2a6814ad5291c194611af005fb79c99d3de60d7"
-                       },
-                       {
-                           "path":  "backend/routes/training.js",
-                           "sha256":  "ca4de3c9ddba6a06c549f3a5c557ed8f7e05b748c5280ee82ede48e0f5208433"
-                       },
-                       {
-                           "path":  "backend/routes/yokoten.js",
-                           "sha256":  "dd6277ada1e4f930863bea4b0d90e5809b7871b0ebab395cd3d6e541cfac49b9"
-                       },
-                       {
-                           "path":  "backend/server.js",
-                           "sha256":  "bc6ccad65368725286ea41fcf64e5e437d8b7ee8c0409875a25d5297ac386082"
-                       },
-                       {
-                           "path":  "backend/utils/cccf-worker-progress.js",
-                           "sha256":  "36e97658ab2c4e20de45d1fb408db6c586ea4ca2319efc6a61bec35fa694cb57"
-                       },
-                       {
-                           "path":  "backend/utils/email.js",
-                           "sha256":  "4a7b01f108a8b926b06165afbfa42dfff169169aed54c45d990d767a22a6553e"
-                       },
-                       {
-                           "path":  "backend/utils/email-requirement.js",
-                           "sha256":  "0a6b0db6094bf46d624bc8c9ae692764d258040e6bd67ba7350a7865a66b1744"
-                       },
-                       {
-                           "path":  "backend/utils/hiyari-email-template.js",
-                           "sha256":  "f7634a36ac70fa2e237fa22293d692dd861c53bca82dc6da6ab432dcb969897c"
-                       },
-                       {
-                           "path":  "backend/utils/registration-email-template.js",
-                           "sha256":  "d9d7afca137bbedd9eefd920b2861d3b21882c7708167fb88281cf2ff7ca133b"
-                       },
-                       {
-                           "path":  "index.html",
-                           "sha256":  "a16261c977281a53a67c7bd57bf87f1b9c2f0686f97b716a3fdc4db3b427917c"
-                       },
-                       {
-                           "path":  "public/js/login-guides.js",
-                           "sha256":  "161810736239d75e935dfbc2a084badb3044d0baf91c1f9dc55c301e59c9ca81"
-                       },
-                       {
-                           "path":  "public/js/main.js",
-                           "sha256":  "690cf5f7e88788b5a323d2b48aacd870e0edd4b19a61518aa1d676b7f8e67ff2"
-                       },
-                       {
-                           "path":  "public/js/pages/accident.js",
-                           "sha256":  "c5b24a16db8fff8d30d0e831ccfe316245c5473378576b313537a4e7677fbf1f"
-                       },
-                       {
-                           "path":  "public/js/pages/admin.js",
-                           "sha256":  "989ae6d021a7c44bec4a0c9f4bd183af0035f7b3e46f38d07a9286ed3e0f6acf"
-                       },
-                       {
-                           "path":  "public/js/pages/forklift.js",
-                           "sha256":  "a4ae6f1ee1eaf4f964991b35be4b83701b04ec596d3d8618ba749e5ff597a6d9"
-                       },
-                       {
-                           "path":  "public/js/pages/fourm.js",
-                           "sha256":  "8f082e45d7d9aec383dd8feff9946e50b58c913522a31566b3ff2a640cecdc69"
-                       },
-                       {
-                           "path":  "public/js/pages/ky.js",
-                           "sha256":  "9073fb1ae695bc4f16c2aca0c9a492310096b4ce3672791510a51a61f56bb366"
-                       },
-                       {
-                           "path":  "public/js/pages/machine-safety.js",
-                           "sha256":  "ba15fd7f65db5db8b51583ea101b695d394cb018912b60c25fc3f9e1637f31c5"
-                       },
-                       {
-                           "path":  "public/js/pages/ojt.js",
-                           "sha256":  "a56255d7fae0d890155343417a320ab961b59f66b819e9400136777402d78b1e"
-                       },
-                       {
-                           "path":  "public/js/pages/patrol.js",
-                           "sha256":  "6b31434816c770cd0eee3b2dc0a6476d553c116e03b280930c6ba0cdba425f60"
-                       },
-                       {
-                           "path":  "public/js/pages/safety-culture.js",
-                           "sha256":  "a7e2fcbb3c10ea0a25e2ed7869485796cd387ed2294c24c5a24d871f2a61fe68"
-                       },
-                       {
-                           "path":  "public/js/pages/search.js",
-                           "sha256":  "3a5117a16420c3e234c5fdc1731671a2051e3fba1d0c36c1289680eab0b6ddfb"
-                       },
-                       {
-                           "path":  "public/js/pages/training.js",
-                           "sha256":  "e02be0297940815490508737e0c07c793207d1b1f6b529e180c13b07dd60ec77"
-                       },
-                       {
-                           "path":  "public/js/session.js",
-                           "sha256":  "e6acec7029847c7ca35774496e2b657b0b8900cf6b7d68e297dfed1ef293104f"
-                       },
-                       {
-                           "path":  "public/js/ui.js",
-                           "sha256":  "0ee243efe95318ab0ea4a1bf2d0a7aefaf67036985145f6fe542c5a79b0e68a4"
-                       },
-                       {
-                           "path":  "public/js/utils/async-ui.js",
-                           "sha256":  "d21e4f37bbd26a4d939e301ac7573d7af3685c4d728ed0a1ceae672769c80ad8"
-                       },
-                       {
-                           "path":  "public/js/pages/cccf.js",
-                           "sha256":  "aafe9a41331f5e7dcc8e94bf2453b2ccb4113736674043e50c24596f3cae3c63"
-                       },
-                       {
-                           "path":  "public/js/pages/committee.js",
-                           "sha256":  "ed539d69b09fd225a1441cdf5d0b9b98b853891dac2fb3f56fe5b7ac786e79b2"
-                       },
-                       {
-                           "path":  "public/js/pages/contractor.js",
-                           "sha256":  "a3b51b436cc364b2ddd53dc3dd00776cdd18afe74b6caad791799dee941e232e"
-                       },
-                       {
-                           "path":  "public/js/pages/dashboard.js",
-                           "sha256":  "060c542a3d7a18948e9dfa7c6210872399743d9093f4b0f413d69f6d5a700318"
-                       },
-                       {
-                           "path":  "public/js/pages/hiyari.js",
-                           "sha256":  "11b95cf75bde1d7641d2dfee7ef4111b3028562300e7f591cc23dd83be3a5b94"
-                       },
-                       {
-                           "path":  "public/js/pages/johnny-ai.js",
-                           "sha256":  "f8c65e2aa79a9189ac4a2624c5b7fc359b1bec94f909d2de78494bde3f8c7958"
-                       },
-                       {
-                           "path":  "public/js/pages/kpi.js",
-                           "sha256":  "81161e64572ed1407f484d4efe834f7de79f2d4617750cfc65b93c33882a564b"
-                       },
-                       {
-                           "path":  "public/js/pages/policy.js",
-                           "sha256":  "b5ea9a393401487f7063bf9085edf3d5748e7bd4a0e60e631c0b5b61becd4671"
-                       },
-                       {
-                           "path":  "public/js/pages/profile.js",
-                           "sha256":  "383d242cee9ff07feda9af24c2b8c4bad9a11dd0327520ba085cfae3c02e13a6"
-                       },
-                       {
-                           "path":  "public/js/pages/yokoten.js",
-                           "sha256":  "89f8757fd3a7c8d9be4f427d7fcbea3dc6bfedcc9e9767b7b5e719bdbe789710"
-                       },
-                       {
-                           "path":  "backend/scripts/hiyari-email-flow-contract-smoke.js",
-                           "sha256":  "67abc7925567618a413640f7ea56602d9c8b66a3954dd3ece6cddd7cbc43480b"
-                       },
-                       {
-                           "path":  "backend/scripts/hiyari-learning-admin-edit-smoke.js",
-                           "sha256":  "94ea998d0960456dcc86d9026e607cc2866147caa190084ebb667b85cd50ebd1"
-                       },
-                       {
-                           "path":  "backend/scripts/hiyari-learning-readonly-api-smoke.js",
-                           "sha256":  "88d81dca23d3e0b5bae31f486742f69b206306da8232ab702e01bc03dc6c4ac0"
-                       }
-                   ],
-    "previousManifestSha256":  "3bcf164c7670080cff58549070d27010d5f771effe085072028f1684caf94b74",
-    "backupLocation":  "C:\\xampp\\htdocs\\tsh-safety-core-app\\backups\\production\\patrol-dept-result-20260715-172536-backup",
-    "lastSmoke":  {
-                      "status":  "passed",
-                      "checkedAt":  "2026-07-15T17:26:07.0552621+07:00",
-                      "summary":  "Patrol issue Summary/Full export read-only smoke passed; Admin saw 31 issue(s), User saw 31 issue(s), frontend markers and SHA verified; no DB write or email."
-                  },
-    "schemaChange":  false,
-    "uploadStorageChange":  false,
-    "productionDbWrite":  false,
-    "emailSend":  false,
-    "productionWriteUat":  "not run",
-    "rollbackPlan":  "Restore exact pre-deploy frontend files and previous manifest; verify rollback SHA."
+{
+  "schemaVersion": 1,
+  "generatedAt": "2026-07-23T09:22:46.3593715+07:00",
+  "sourceHead": "d18eaee849d819cd6b00b44526a9838cd3848146",
+  "previousProductionBuild": "patrol-dept-result-20260715-172536",
+  "buildId": "onboarding-phase10-20260723",
+  "cacheBust": "20260723-onboarding-release",
+  "runtime": "shared-hosting-php",
+  "deployPhase": "onboarding-phases-1-10",
+  "deploymentStatus": "release-candidate",
+  "deployedAt": null,
+  "databaseMutationPlanned": false,
+  "schemaMutationPlanned": false,
+  "uploadStorageMutationPlanned": false,
+  "exactRuntimeFiles": [
+    "index.html",
+    "public/js/api.js",
+    "public/js/main.js",
+    "public/js/pages/admin.js",
+    "public/js/pages/profile.js",
+    "public/js/session.js",
+    "api/bootstrap.php",
+    "api/config.php",
+    "api/handlers/admin_phase8.php",
+    "api/handlers/foundation.php",
+    "api/index.php",
+    "api/lib/employee_profile_write.php",
+    "api/lib/onboarding_enforcement.php",
+    "api/lib/onboarding_resolver.php",
+    "api/lib/password_continuation.php",
+    "api/lib/profile_update.php",
+    "api/lib/profile_validator.php",
+    "api/lib/safety_unit_continuation.php",
+    "api/mailer.php",
+    "deploy-manifest.json"
+  ],
+  "fileHashes": [
+    { "path": "index.html", "sha256": "ae9b4b73b429daf9ab33f554ee0957274259be29612e188f2823bd4b9ed3ba7d" },
+    { "path": "public/js/api.js", "sha256": "9d03ca2608c230539f34cc281dcd04cf11a38290c082064c0e7af84ce315e577" },
+    { "path": "public/js/main.js", "sha256": "cc595f777c0add0fa8c5135a45db9ce00158e8962d18b231115f1e7645da68e9" },
+    { "path": "public/js/pages/admin.js", "sha256": "462105219b606deab78d95d92eae8bab70c3d93dde9e9534fa34525e1288401a" },
+    { "path": "public/js/pages/profile.js", "sha256": "b1174a690f04942592c980d35d486ed57f53bd0070ba464a4277f6f23b377273" },
+    { "path": "public/js/session.js", "sha256": "0a21d1b41f9de4a6d9397671a585e056e9adb19cccbb1cf073f490926d704f2b" },
+    { "path": "api/bootstrap.php", "sha256": "aa55cc2b5d55560d83784a16d4e90284fa3850133e3763d2a4879d23418812dc" },
+    { "path": "api/config.php", "sha256": "8dd9c7c42715b14bfc329c65497cac2a1b5fcdbe21ecbbea41be0bd438085f06" },
+    { "path": "api/handlers/admin_phase8.php", "sha256": "0a3427c5c301440e19e274fba1b1c4bc886bd5e6666d9541d1cd0d6593e1a5c8" },
+    { "path": "api/handlers/foundation.php", "sha256": "94deff9c9f2f0fddb97132e0c5a52d3f57649dd4eed45eb0b1476adcd707e340" },
+    { "path": "api/index.php", "sha256": "facecdaaa6f34887dbba5510c0809e57d3d51c4e308151c3df8b7976e286644d" },
+    { "path": "api/lib/employee_profile_write.php", "sha256": "0bd6562291bcd3fa73dcbdea8b3588057bee7d8f49e03eb8319e04d414eb661f" },
+    { "path": "api/lib/onboarding_enforcement.php", "sha256": "1cfab00a2823525a704d4fbc4e8eceacfde7cb530a94dc74899e20a23fa7203a" },
+    { "path": "api/lib/onboarding_resolver.php", "sha256": "ddca4dd0dd4831202eb67272e922f2547245ba29bdc3bc2a0d2db925a323bbf6" },
+    { "path": "api/lib/password_continuation.php", "sha256": "644c93abe3a8931c9ce7b98a42b513172622a11f3cc80de54b0ba4d48960d270" },
+    { "path": "api/lib/profile_update.php", "sha256": "919427d0146f4564b83f9d970d962e549f4cf0f2aadc99e72ba569cb6b5bdfd0" },
+    { "path": "api/lib/profile_validator.php", "sha256": "50a56538ea44606735038ec42ed6f55bbab44f202f5f8581d924647b785f6a61" },
+    { "path": "api/lib/safety_unit_continuation.php", "sha256": "fed72fe2484639911dd57d43b1668529db68819cb5d58c29f5984ac55a78e8f2" },
+    { "path": "api/mailer.php", "sha256": "db3aff4797427d3a692f1e1dc2bb1bd35dcb2a8fed8bef1c39f65668ef6dd103" }
+  ],
+  "verification": {
+    "localReleaseGate": "PASS",
+    "phpLintFiles": 35,
+    "readOnlyApiPreflight": "91/91",
+    "employeeAuditCount": 2492,
+    "unknownDepartments": 0,
+    "nodePhpParity": true,
+    "browserFunctionalUat": "12 checks PASS",
+    "browserVisualNote": "External CDN unavailable during final run; overflow assertions were not asserted. Earlier CDN-enabled visual run passed."
+  }
 }

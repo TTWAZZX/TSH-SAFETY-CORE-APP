@@ -2,6 +2,14 @@
 
 This file preserves historical production handoff, smoke test, backup, deployment, migration, and phase notes moved out of `CLAUDE.md`.
 
+## Onboarding Phases 1-10 Release Candidate (2026-07-23)
+
+Prepared the shared-hosting PHP production bundle for the centralized onboarding resolver, backend enforcement, password and Safety Unit continuation, cross-system profile validation, data-quality review, cross-path enforcement, frontend integration, and Phase 10 browser UAT. The bundle is code-only: no schema, employee data, or upload-storage mutation is planned.
+
+Local release gates passed: Node/PHP resolver and enforcement parity, continuation/profile/data-quality suites, API smoke, 91/91 read-only API/permission preflight, PHP lint for 35 files, and read-only classification of all 2,492 employees with zero unknown departments. Final Chrome functional UAT passed 12 checks and cleanup restored the original database fingerprints with zero synthetic residue. External CDN access was unavailable during the final browser run, so overflow assertions were recorded as not asserted; an earlier CDN-enabled Phase 10 visual run passed desktop/mobile checks.
+
+Production code rollback backup was captured before upload at `backups/production/onboarding-phase10-predeploy-20260723-085043/`. The exact 20-file deployment boundary and SHA-256 values are recorded in `deploy-manifest.json`. Production upload and smoke status will be appended after verification.
+
 ## Current Handoff Status (2026-05-21)
 
 Use this section when switching accounts or resuming work. The current production target is the company server with Company MySQL/MariaDB and local server storage in `backend/uploads/`. Do not push to GitHub unless the user explicitly asks in the current chat.
