@@ -2,6 +2,7 @@
 declare(strict_types=1);
 
 require_once __DIR__ . '/../lib/cccf_worker_progress.php';
+require_once __DIR__ . '/../lib/yokoten_admin_scope.php';
 
 function wf_user_name(array $user): string
 {
@@ -2205,6 +2206,16 @@ function wf_yokoten_master_units(): array
     }
 }
 
+function wf_yokoten_master_unit_rows(): array
+{
+    return db_rows(
+        'SELECT u.name,u.short_code,d.Name AS department
+         FROM master_safetyunits u
+         LEFT JOIN master_departments d ON d.id=u.department_id
+         ORDER BY u.department_id,u.sort_order,u.name'
+    );
+}
+
 function wf_yokoten_filter_master_values($values, array $master): array
 {
     $source = is_array($values) ? $values : wf_json($values, []);
@@ -2437,12 +2448,27 @@ function handle_yokoten_routes(string $method, string $path): bool
                 if(!$depts){wf_cleanup_files($files);json_response(['success'=>false,'message'=>'Department is required.'],400);}
                 $invalidDepts=array_values(array_filter($depts,static fn($dept)=>!wf_yokoten_dept_targeted($topic,(string)$dept)));
                 if($invalidDepts){wf_cleanup_files($files);json_response(['success'=>false,'message'=>'Department is outside this topic scope: '.implode(', ',$invalidDepts)],400);}
-                if($admin&&!empty($topic['TargetUnits'])&&!$responseUnits){wf_cleanup_files($files);json_response(['success'=>false,'message'=>'Safety Unit is required for this scoped topic.'],400);}
+                $departmentUnitsRaw=wf_first_value($b,['departmentUnits','DepartmentUnits'],null);
+                $hasDepartmentUnitMap=$departmentUnitsRaw!==null&&$departmentUnitsRaw!=='';
+                $parsedDepartmentUnits=$hasDepartmentUnitMap?yokoten_scope_parse_department_units($departmentUnitsRaw):null;
+                if($hasDepartmentUnitMap&&$parsedDepartmentUnits===null){wf_cleanup_files($files);json_response(['success'=>false,'message'=>'Invalid Department-to-Safety-Unit mapping.'],400);}
+                $departmentUnitPlan=null;
+                if($admin&&$hasDepartmentUnitMap){
+                    $departmentUnitPlan=yokoten_scope_build_department_unit_plan([
+                        'departments'=>$depts,
+                        'departmentUnits'=>$parsedDepartmentUnits,
+                        'fallbackUnits'=>$responseUnits,
+                        'topicUnits'=>$topic['TargetUnits'],
+                        'masterUnits'=>wf_yokoten_master_unit_rows(),
+                    ]);
+                    if(!$departmentUnitPlan['ok']){wf_cleanup_files($files);json_response(['success'=>false,'message'=>implode('; ',$departmentUnitPlan['errors']),'errors'=>$departmentUnitPlan['errors']],400);}
+                }
+                if($admin&&$departmentUnitPlan===null&&!empty($topic['TargetUnits'])&&!$responseUnits){wf_cleanup_files($files);json_response(['success'=>false,'message'=>'Safety Unit is required for this scoped topic.'],400);}
                 $masterUnits=wf_yokoten_master_units();
                 $badResponseUnits=$masterUnits?array_values(array_diff($responseUnits,$masterUnits)):[];
-                if($badResponseUnits){wf_cleanup_files($files);json_response(['success'=>false,'message'=>'Safety Unit is not in Master Data.'],400);}
+                if($departmentUnitPlan===null&&$badResponseUnits){wf_cleanup_files($files);json_response(['success'=>false,'message'=>'Safety Unit is not in Master Data.'],400);}
                 $badTopicUnits=array_values(array_filter($responseUnits,static fn($unit)=>!wf_yokoten_unit_targeted($topic,$unit)));
-                if($badTopicUnits){wf_cleanup_files($files);json_response(['success'=>false,'message'=>'Safety Unit is outside this topic scope.'],400);}
+                if($departmentUnitPlan===null&&$badTopicUnits){wf_cleanup_files($files);json_response(['success'=>false,'message'=>'Safety Unit is outside this topic scope.'],400);}
                 $ph=implode(',',array_fill(0,count($depts),'?'));
                 $existing=db_rows("SELECT ResponseID,Department FROM yokotenresponses WHERE YokotenID=? AND Department IN ($ph) AND (IsDeleted IS NULL OR IsDeleted=0)",array_merge([$yid],$depts));
                 if($existing){
@@ -2454,7 +2480,8 @@ function handle_yokoten_routes(string $method, string $path): bool
                 $ids=[];
                 foreach($depts as $dept){
                     $rid=wf_uuid();$ids[]=$rid;$approval=$related==='Yes'?'pending':null;
-                    db_execute('INSERT INTO yokotenresponses (ResponseID,YokotenID,Department,SafetyUnit,EmployeeID,EmployeeName,IsRelated,Comment,CorrectiveAction,ApprovalStatus) VALUES (?,?,?,?,?,?,?,?,?,?)',[$rid,$yid,$dept,$safetyUnit,wf_user_id($user),$actor,$related,$comment,$related==='Yes'?$corrective:null,$approval]);
+                    $departmentSafetyUnit=$departmentUnitPlan!==null?(implode(', ',$departmentUnitPlan['unitMap'][$dept]??[])?:null):$safetyUnit;
+                    db_execute('INSERT INTO yokotenresponses (ResponseID,YokotenID,Department,SafetyUnit,EmployeeID,EmployeeName,IsRelated,Comment,CorrectiveAction,ApprovalStatus) VALUES (?,?,?,?,?,?,?,?,?,?)',[$rid,$yid,$dept,$departmentSafetyUnit,wf_user_id($user),$actor,$related,$comment,$related==='Yes'?$corrective:null,$approval]);
                     foreach($files as $f)db_execute('INSERT INTO yokoten_response_files (FileID,ResponseID,YokotenID,Department,FileName,FileURL,PublicID,FileType,FileSize,UploadedBy) VALUES (?,?,?,?,?,?,?,?,?,?)',[wf_uuid(),$rid,$yid,$dept,$f['name'],$f['url'],$f['stored'],$f['type'],$f['size'],$actor]);
                 }
                 foreach($ids as $rid){wf_yokoten_queue_email((string)$rid,'Submitted',$actor);if($related==='Yes')wf_yokoten_queue_email((string)$rid,'RelatedSubmitted',$actor);}

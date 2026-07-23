@@ -21,6 +21,8 @@
     "audit:data-quality:json": "npm --prefix backend run audit:data-quality:json",
     "test:cross-path-profile": "npm --prefix backend run test:cross-path-profile",
     "test:email-switch": "npm --prefix backend run test:email-switch",
+    "test:yokoten-admin-scope": "npm --prefix backend run test:yokoten-admin-scope",
+    "audit:yokoten-admin-selection": "npm --prefix backend run audit:yokoten-admin-selection",
     "smoke:api": "npm --prefix backend run smoke:api",
     "smoke:cccf": "npm --prefix backend run smoke:cccf",
     "smoke:machine-safety-responsive": "npm --prefix backend run smoke:machine-safety-responsive",

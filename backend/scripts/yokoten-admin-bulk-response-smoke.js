@@ -16,25 +16,35 @@ function check(name, condition) {
     checks.push(name);
 }
 
-check('Admin department picker uses directly clickable checkboxes',
-    frontend.includes('type="checkbox" name="departments"')
-        && frontend.includes('data-selection-group="departments"'));
+check('Admin department picker uses directly clickable accessible controls',
+    frontend.includes('class="yok-admin-selection-item')
+        && frontend.includes('data-selection-group="departments"')
+        && frontend.includes('role="checkbox"'));
 check('Admin can select every unanswered department with one action',
     frontend.includes('data-selection-group="departments" data-selection-mode="all"')
         && frontend.includes('เลือกทั้งหมดที่ยังรอตอบ'));
 check('Already answered departments are excluded from bulk selection',
     frontend.includes("${choice.responded ? 'disabled' : ''}")
-        && frontend.includes('input[name="${groupName}"]:not(:disabled)'));
+        && frontend.includes('filter(item => !item.disabled)'));
 check('Selection count is visible and updated',
     frontend.includes('data-selection-count="departments"')
         && frontend.includes('function _syncAdminSelectionCount'));
 check('Department payload remains an explicit JSON list',
     frontend.includes("fd.append('departments', JSON.stringify(departments));"));
+check('Department-to-Unit payload is explicit and generated from selected controls',
+    frontend.includes('function _getAdminDepartmentUnitMap')
+        && frontend.includes("fd.append('departmentUnits', JSON.stringify(departmentUnits));"));
+check('Select-all Departments also selects matching scoped Units',
+    frontend.includes('_renderAdminUnitSelection(form, { selectAll: shouldSelect })')
+        && frontend.includes('data-admin-unit-list'));
 check('One frontend submit continues to call the bulk-capable endpoint',
     frontend.includes("await API.post('/yokoten/respond', fd);"));
 check('Node endpoint parses and inserts all requested departments',
     nodeRoute.includes('const requestedDepartments = parseDepartmentList(departments, department);')
         && nodeRoute.includes('const responseRows = targetDepartments.map(dept => ['));
+check('Node endpoint validates and stores Units per Department',
+    nodeRoute.includes('buildDepartmentUnitPlan({')
+        && nodeRoute.includes('departmentUnitPlan.unitMap[dept]'));
 check('Node endpoint rejects an already answered department before insert',
     nodeRoute.includes('Check if any selected dept already responded')
         && nodeRoute.includes('return res.status(409).json({'));
@@ -42,6 +52,9 @@ check('PHP endpoint parses a unique department list and inserts each department'
     phpRoute.includes('function wf_yokoten_departments')
         && phpRoute.includes('return array_values(array_unique($out));')
         && phpRoute.includes('foreach($depts as $dept){'));
+check('PHP endpoint validates and stores Units per Department',
+    phpRoute.includes('yokoten_scope_build_department_unit_plan([')
+        && phpRoute.includes("$departmentUnitPlan['unitMap'][$dept]"));
 check('PHP endpoint rejects an already answered department before insert',
     phpRoute.includes("'Selected department already responded.'")
         && phpRoute.includes("],409);"));

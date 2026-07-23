@@ -9,6 +9,9 @@ const path = require('path');
 const { spawn } = require('child_process');
 
 const baseUrl = String(process.env.PROD_UAT_URL || 'https://dev.tshpcl.com/safety/tsh-safety-core').replace(/\/+$/, '');
+const isLocal = ['localhost', '127.0.0.1'].includes(new URL(baseUrl).hostname);
+const apiPort = Number(process.env.YOKOTEN_UAT_API_PORT || 5000);
+const apiBaseUrl = isLocal ? `http://127.0.0.1:${apiPort}` : baseUrl;
 const adminId = String(process.env.PROD_UAT_ADMIN_ID || '').trim();
 const adminPassword = String(process.env.PROD_UAT_ADMIN_PASSWORD || '');
 const chromePath = process.env.PROD_UAT_BROWSER || 'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe';
@@ -17,13 +20,15 @@ const profileDir = fs.mkdtempSync(path.join(os.tmpdir(), 'tsh-prod-dashboard-uat
 const artifactDir = path.join(
     path.resolve(__dirname, '..', '..'),
     'backups',
-    'production',
+    isLocal ? 'local' : 'production',
     `yokoten-dashboard-browser-uat-${new Date().toISOString().replace(/[-:]/g, '').replace(/\..+/, '')}`
 );
 
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
 let browser;
 let client;
+let server;
+let db;
 
 class Cdp {
     constructor(url) {
@@ -127,8 +132,18 @@ async function connectBrowser() {
     await client.command('Runtime.enable');
 }
 
+async function listenLocalApi() {
+    if (!isLocal) return;
+    const app = require('../server');
+    db = require('../db');
+    server = await new Promise((resolve, reject) => {
+        const instance = app.listen(apiPort, '127.0.0.1', () => resolve(instance));
+        instance.once('error', reject);
+    });
+}
+
 async function loginProduction() {
-    const response = await fetch(`${baseUrl}/api/login`, {
+    const response = await fetch(`${apiBaseUrl}/api/login`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
         body: JSON.stringify({ employeeId: adminId, password: adminPassword }),
@@ -141,11 +156,22 @@ async function loginProduction() {
     return json;
 }
 
+async function responseCount(token) {
+    const response = await fetch(`${apiBaseUrl}/api/yokoten/all-responses`, {
+        headers: { Authorization: `Bearer ${token}`, Accept: 'application/json' },
+    });
+    const json = await response.json();
+    assert.strictEqual(response.status, 200, `Yokoten response count failed: ${JSON.stringify(json).slice(0, 300)}`);
+    return Array.isArray(json?.data) ? json.data.length : 0;
+}
+
 async function main() {
     assert.ok(adminId && adminPassword, 'Production Admin UAT credentials are required');
     assert.ok(fs.existsSync(chromePath), `Chrome not found: ${chromePath}`);
     fs.mkdirSync(artifactDir, { recursive: true });
+    await listenLocalApi();
     const session = await loginProduction();
+    const beforeResponseCount = await responseCount(session.token);
     await connectBrowser();
 
     await client.command('Page.navigate', { url: `${baseUrl}/?browserUat=${Date.now()}` });
@@ -199,8 +225,8 @@ async function main() {
         hash: location.hash,
         hasYokoten: document.body.innerText.toUpperCase().includes('YOKOTEN'),
         hasSelectAll: Boolean(document.querySelector('[data-selection-group="departments"][data-selection-mode="all"]')),
-        departmentChoices: document.querySelectorAll('input[type="checkbox"][name="departments"]').length,
-        selectableDepartments: document.querySelectorAll('input[type="checkbox"][name="departments"]:not(:disabled)').length,
+        departmentChoices: document.querySelectorAll('.yok-admin-selection-item[data-selection-group="departments"]').length,
+        selectableDepartments: document.querySelectorAll('.yok-admin-selection-item[data-selection-group="departments"]:not(:disabled)').length,
         horizontalOverflow: document.documentElement.scrollWidth > document.documentElement.clientWidth
     }))()`);
     assert.strictEqual(yokotenState.hash, '#yokoten');
@@ -208,17 +234,73 @@ async function main() {
     assert.strictEqual(yokotenState.hasSelectAll, true);
     assert.ok(yokotenState.departmentChoices > 0, 'Yokoten department choices are empty');
     assert.strictEqual(yokotenState.horizontalOverflow, false, 'Yokoten has page-level horizontal overflow');
+
+    const individualState = await evaluate(`(() => {
+        const rows = [...document.querySelectorAll('.yok-admin-selection-item[data-selection-group="departments"]:not(:disabled)')];
+        const row = rows.find(item => item.dataset.selectionValue === 'MAINTENANCE SEC.') || rows[0];
+        row.click();
+        const units = [...document.querySelectorAll('.yok-admin-selection-item[data-selection-group="safetyUnits"]')];
+        const result = {
+            department: row.dataset.selectionValue,
+            selected: row.getAttribute('aria-checked') === 'true',
+            unitCount: units.length,
+            selectedUnits: units.filter(item => item.getAttribute('aria-checked') === 'true').length,
+            unitsBelongToDepartment: units.every(item => item.dataset.department === row.dataset.selectionValue)
+        };
+        row.click();
+        result.cleared = row.getAttribute('aria-checked') === 'false'
+            && document.querySelectorAll('.yok-admin-selection-item[data-selection-group="safetyUnits"]').length === 0;
+        return result;
+    })()`);
+    assert.strictEqual(individualState.selected, true, 'Individual Department click did not select the row');
+    assert.strictEqual(individualState.unitsBelongToDepartment, true, 'Unit list was not filtered by Department');
+    assert.strictEqual(individualState.cleared, true, 'Individual Department click did not clear the row');
+
+    const selectAllState = await evaluate(`(() => {
+        document.querySelector('[data-selection-group="departments"][data-selection-mode="all"]').click();
+        const departments = [...document.querySelectorAll('.yok-admin-selection-item[data-selection-group="departments"]:not(:disabled)')];
+        const units = [...document.querySelectorAll('.yok-admin-selection-item[data-selection-group="safetyUnits"]:not(:disabled)')];
+        const firstUnit = units[0];
+        let unitToggleWorks = units.length === 0;
+        if (firstUnit) {
+            firstUnit.click();
+            const cleared = firstUnit.getAttribute('aria-checked') === 'false';
+            firstUnit.click();
+            unitToggleWorks = cleared && firstUnit.getAttribute('aria-checked') === 'true';
+        }
+        return {
+            selectedDepartments: departments.filter(item => item.getAttribute('aria-checked') === 'true').length,
+            selectableDepartments: departments.length,
+            selectedUnits: units.filter(item => item.getAttribute('aria-checked') === 'true').length,
+            selectableUnits: units.length,
+            unitToggleWorks
+        };
+    })()`);
+    assert.strictEqual(selectAllState.selectedDepartments, selectAllState.selectableDepartments, 'Select-all missed a Department');
+    assert.ok(selectAllState.selectableUnits > 0, 'Select-all did not expose scoped Units');
+    assert.strictEqual(selectAllState.selectedUnits, selectAllState.selectableUnits, 'Select-all did not select all scoped Units');
+    assert.strictEqual(selectAllState.unitToggleWorks, true, 'Individual Safety Unit toggle did not work');
+
     await screenshot('yokoten.png');
-    console.log(`PASS Yokoten bulk-response browser — ${yokotenState.selectableDepartments}/${yokotenState.departmentChoices} departments selectable`);
+    console.log(`PASS Yokoten individual selection — ${individualState.department}, ${individualState.unitCount} scoped Units`);
+    console.log(`PASS Yokoten select-all — ${selectAllState.selectedDepartments} Departments, ${selectAllState.selectedUnits} Units`);
+
+    const afterResponseCount = await responseCount(session.token);
+    assert.strictEqual(afterResponseCount, beforeResponseCount, 'Read-only browser UAT changed Yokoten response data');
 
     fs.writeFileSync(path.join(artifactDir, 'result.json'), JSON.stringify({
-        production: baseUrl,
+        environment: isLocal ? 'local' : 'production',
+        baseUrl,
         executedAt: new Date().toISOString(),
         authenticated: true,
         businessDataWrites: false,
         expectedSideEffects: ['successful login audit/attempt record', 'normal login housekeeping'],
         dashboard: dashboardState,
         yokoten: yokotenState,
+        yokotenIndividualSelection: individualState,
+        yokotenSelectAll: selectAllState,
+        responseCountBefore: beforeResponseCount,
+        responseCountAfter: afterResponseCount,
         passed: true,
     }, null, 2));
     console.log(`ARTIFACT ${artifactDir}`);
@@ -232,6 +314,8 @@ main()
     .finally(async () => {
         client?.close();
         if (browser && !browser.killed) browser.kill();
+        if (server) await new Promise(resolve => server.close(resolve));
+        if (db) await db.end();
         await sleep(500);
         try { fs.rmSync(profileDir, { recursive: true, force: true }); } catch (_) {}
     });

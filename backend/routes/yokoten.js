@@ -11,6 +11,7 @@ const multer   = require('multer');
 const { randomUUID } = require('crypto');
 const { sendMail, smtpConfigured } = require('../utils/email');
 const { buildHiyariEmail } = require('../utils/hiyari-email-template');
+const { buildDepartmentUnitPlan, parseDepartmentUnitMap } = require('../utils/yokoten-admin-scope');
 
 // ─── Multer for response files (multiple, up to 10, 20MB each) ───────────────
 const responseFileFilter = (req, file, cb) => {
@@ -203,6 +204,15 @@ async function getMasterSafetyUnitNames() {
     } catch (_) {
         return [];
     }
+}
+async function getMasterSafetyUnitsWithDepartment() {
+    const [rows] = await db.query(
+        `SELECT u.name, u.short_code, d.Name AS department
+         FROM Master_SafetyUnits u
+         LEFT JOIN Master_Departments d ON d.id = u.department_id
+         ORDER BY u.department_id, u.sort_order, u.name`
+    );
+    return rows;
 }
 function filterMasterValues(values, masterValues) {
     const master = new Set((masterValues || []).map(v => String(v || '').trim()).filter(Boolean));
@@ -1040,7 +1050,10 @@ router.post('/respond', (req, res, next) => {
     try {
         await ensureTables();
         const user = req.user;
-        const { yokotenId, isRelated, comment, correctiveAction, department, departments, safetyUnit, safetyUnits } = req.body;
+        const {
+            yokotenId, isRelated, comment, correctiveAction,
+            department, departments, safetyUnit, safetyUnits, departmentUnits,
+        } = req.body;
         const isAdminUser = ['admin', 'super_admin'].includes(String(user.role || user.Role || '').toLowerCase());
         const requestedDepartments = parseDepartmentList(departments, department);
         const targetDepartments = isAdminUser && requestedDepartments.length
@@ -1077,17 +1090,41 @@ router.post('/respond', (req, res, next) => {
             return res.status(400).json({ success: false, message: `แผนกอยู่นอกขอบเขตหัวข้อ: ${invalidDepartments.join(', ')}` });
         }
         const topicUnits = parseJson(topic.TargetUnits).map(v => String(v || '').trim()).filter(Boolean);
-        if (isAdminUser && topicUnits.length && selectedUnits.length === 0) {
+        const hasDepartmentUnitMap = departmentUnits !== undefined && departmentUnits !== null && departmentUnits !== '';
+        const parsedDepartmentUnits = hasDepartmentUnitMap ? parseDepartmentUnitMap(departmentUnits) : null;
+        if (hasDepartmentUnitMap && parsedDepartmentUnits === null) {
+            await cleanupUploadedFiles(req.files || []);
+            return res.status(400).json({ success: false, message: 'Invalid Department-to-Safety-Unit mapping.' });
+        }
+        let departmentUnitPlan = null;
+        if (isAdminUser && hasDepartmentUnitMap) {
+            departmentUnitPlan = buildDepartmentUnitPlan({
+                departments: targetDepartments,
+                departmentUnits: parsedDepartmentUnits,
+                fallbackUnits: selectedUnits,
+                topicUnits,
+                masterUnits: await getMasterSafetyUnitsWithDepartment(),
+            });
+            if (!departmentUnitPlan.ok) {
+                await cleanupUploadedFiles(req.files || []);
+                return res.status(400).json({
+                    success: false,
+                    message: departmentUnitPlan.errors.join('; '),
+                    errors: departmentUnitPlan.errors,
+                });
+            }
+        }
+        if (isAdminUser && !departmentUnitPlan && topicUnits.length && selectedUnits.length === 0) {
             await cleanupUploadedFiles(req.files || []);
             return res.status(400).json({ success: false, message: 'Safety Unit is required for this scoped topic.' });
         }
         const targetUnit = selectedUnits.join(', ') || null;
         const masterUnits = await getMasterSafetyUnitNames();
-        if (selectedUnits.some(unit => masterUnits.length && !masterUnits.includes(unit))) {
+        if (!departmentUnitPlan && selectedUnits.some(unit => masterUnits.length && !masterUnits.includes(unit))) {
             await cleanupUploadedFiles(req.files || []);
             return res.status(400).json({ success: false, message: 'Safety Unit ไม่อยู่ใน Master Data' });
         }
-        if (selectedUnits.some(unit => !isSafetyUnitTargeted(topic, unit))) {
+        if (!departmentUnitPlan && selectedUnits.some(unit => !isSafetyUnitTargeted(topic, unit))) {
             await cleanupUploadedFiles(req.files || []);
             return res.status(400).json({ success: false, message: 'Safety Unit อยู่นอกขอบเขตหัวข้อนี้' });
         }
@@ -1125,7 +1162,9 @@ router.post('/respond', (req, res, next) => {
         const actionValue = related === 'Yes' ? (s(correctiveAction) || null) : null;
         const responseRows = targetDepartments.map(dept => [
             randomUUID(), yokotenId,
-            dept, targetUnit,
+            dept, departmentUnitPlan
+                ? (departmentUnitPlan.unitMap[dept] || []).join(', ') || null
+                : targetUnit,
             user.id, responderName,
             related,
             s(comment) || null,

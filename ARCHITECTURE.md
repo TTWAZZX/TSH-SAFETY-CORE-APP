@@ -146,7 +146,7 @@ Major modules include Admin/System Console, Dashboard, Patrol, CCCF, Machine Saf
 | `/api/machine-safety/*` | User | Machine & Device Safety |
 | `/api/ojt/*` | User | Stop-Call-Wait (OJT/SCW) |
 | `/api/yokoten/topics` | User (write=Admin) | GET topics (includes `deptResponse` for caller's dept) / POST create / PUT :id / DELETE :id |
-| `/api/yokoten/respond` | User | POST new dept response (FormData, field: `responseFiles`) |
+| `/api/yokoten/respond` | User | POST new dept response (FormData, field: `responseFiles`); Admin bulk mode accepts `departments[]` plus `departmentUnits` mapping and validates each Unit against its Department/topic scope |
 | `/api/yokoten/respond/:id` | User/Admin | PUT update response / POST approve / POST reject |
 | `/api/yokoten/respond/:id/approve` | Admin | อนุมัติ response (ApprovalStatus → approved) |
 | `/api/yokoten/respond/:id/reject` | Admin | ปฏิเสธ response (body: { comment }) |
@@ -217,6 +217,8 @@ Primary key ของ generic CRUD คือ `id` — ยกเว้น `Employ
 | `Yokoten_Dashboard_Config` | `/api/yokoten/dashboard-config` | JSON config row: `pinnedDepts` + `pinnedUnits` arrays |
 | `Policy_Acknowledgements` | `/api/policies/:id/acknowledge*` | Policy acknowledgement rows. Unique key `(PolicyID, UserID)`. Columns `AckSource`, `AcknowledgedByAdminID`, `AcknowledgedByAdminName` record whether acknowledgement was self-service or Admin bulk action. |
 | `Committees` | `/api/committees` | `SubCommitteeData` JSON array. Each subcommittee should use `departmentId`, `department`, `unitId`, `unit`, `documentUrl`, `documentName`, and `positions[]` (`positionId`, `positionName`, `count`). `memberCount` is derived from `positions[]`; legacy `activeLink` is still mirrored for compatibility. |
+
+Yokoten Admin bulk responses resolve topic Unit aliases against `Master_SafetyUnits`, build a canonical Unit list per selected Department, and store that Department-specific list in `YokotenResponses.SafetyUnit`. Node and PHP use parity-tested scope resolvers. The legacy column remains `VARCHAR(100)`, so both stacks reject an over-limit Unit list before insertion instead of allowing truncation.
 
 ### File Upload
 - Uploads use local company-server storage through `backend/storage.js`

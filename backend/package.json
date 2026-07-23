@@ -53,6 +53,8 @@
     "smoke:async-ux-phase32d": "node scripts/async-ux-phase32d-remaining-smoke.js",
     "uat:async-ux-phase32e": "node scripts/async-ux-phase32e-browser-uat.js",
     "smoke:yokoten-admin-bulk-response": "node scripts/yokoten-admin-bulk-response-smoke.js",
+    "test:yokoten-admin-scope": "node scripts/yokoten-admin-scope.test.js",
+    "audit:yokoten-admin-selection": "node scripts/yokoten-admin-selection-audit.js",
     "smoke:dashboard-coverage-source": "node scripts/dashboard-coverage-source-smoke.js",
     "smoke:machine-safety-responsive": "node scripts/machine-safety-responsive-smoke.js",
     "uat:machine-safety-responsive": "node scripts/machine-safety-responsive-browser-uat.js",

@@ -3638,6 +3638,79 @@ function _getSafetyUnitName(row) {
     return (row?.Name || row?.name || row?.UnitName || row?.unitName || row?.SafetyUnit || row?.safetyUnit || row || '').toString().trim();
 }
 
+function _normalizeYokotenScopeValue(value) {
+    return String(value || '')
+        .replace(/[\r\n]+/g, ' ')
+        .replace(/\s+/g, ' ')
+        .trim()
+        .toLocaleLowerCase();
+}
+
+function _getSafetyUnitDepartment(row) {
+    if (row?.DeptName || row?.deptName || row?.departmentName) {
+        return String(row.DeptName || row.deptName || row.departmentName || '').trim();
+    }
+    const deptId = row?.department_id ?? row?.DepartmentID ?? row?.departmentId;
+    const dept = _masterDepts.find(item => String(item?.id ?? item?.ID) === String(deptId));
+    return _getDepartmentName(dept);
+}
+
+function _resolveTopicSafetyUnits(topic) {
+    const requested = _parseSafetyUnitList(topic?.TargetUnits);
+    if (!requested.length) return { units: [], unresolved: [], aliases: [] };
+
+    const units = [];
+    const unresolved = [];
+    const aliases = [];
+    requested.forEach(scopeName => {
+        const scopeKey = _normalizeYokotenScopeValue(scopeName);
+        let matches = _safetyUnits.filter(unit => {
+            const names = [
+                _getSafetyUnitName(unit),
+                unit?.short_code,
+                unit?.ShortCode,
+                unit?.shortCode,
+            ].map(_normalizeYokotenScopeValue).filter(Boolean);
+            return names.includes(scopeKey);
+        });
+        if (!matches.length) {
+            matches = _safetyUnits.filter(unit => {
+                const unitKey = _normalizeYokotenScopeValue(_getSafetyUnitName(unit));
+                return unitKey.startsWith(`${scopeKey} `) || scopeKey.startsWith(`${unitKey} `);
+            });
+        }
+        const unique = [...new Map(matches.map(unit => [
+            `${_normalizeYokotenScopeValue(_getSafetyUnitDepartment(unit))}::${_normalizeYokotenScopeValue(_getSafetyUnitName(unit))}`,
+            unit,
+        ])).values()];
+        if (unique.length !== 1) {
+            unresolved.push(scopeName);
+            return;
+        }
+        const unit = unique[0];
+        const canonicalName = _getSafetyUnitName(unit);
+        if (_normalizeYokotenScopeValue(canonicalName) !== scopeKey) {
+            aliases.push({ requested: scopeName, resolved: canonicalName });
+        }
+        if (!units.some(item =>
+            _normalizeYokotenScopeValue(_getSafetyUnitName(item)) === _normalizeYokotenScopeValue(canonicalName)
+            && _normalizeYokotenScopeValue(_getSafetyUnitDepartment(item)) === _normalizeYokotenScopeValue(_getSafetyUnitDepartment(unit))
+        )) {
+            units.push(unit);
+        }
+    });
+    return { units, unresolved, aliases };
+}
+
+function _getScopedUnitsForDepartments(topic, departments) {
+    const selected = new Set(departments.map(_normalizeYokotenScopeValue));
+    const resolved = _resolveTopicSafetyUnits(topic);
+    return {
+        ...resolved,
+        units: resolved.units.filter(unit => selected.has(_normalizeYokotenScopeValue(_getSafetyUnitDepartment(unit)))),
+    };
+}
+
 function _parseSafetyUnitList(raw) {
     if (!raw) return [];
     if (Array.isArray(raw)) return raw.map(v => String(v || '').trim()).filter(Boolean);
@@ -3680,13 +3753,14 @@ function _buildAdminDepartmentChecklist(choices) {
         return '<p class="px-3 py-8 text-center text-xs text-slate-400">ไม่พบแผนกเป้าหมาย</p>';
     }
     return choices.map(choice => `
-        <label class="flex items-center gap-2 px-3 py-2 text-xs border-b border-slate-100 last:border-b-0 ${choice.responded ? 'bg-slate-50 text-slate-400 cursor-not-allowed' : 'text-slate-700 hover:bg-sky-50 cursor-pointer'}">
-            <input type="checkbox" name="departments" value="${_esc(choice.name)}"
-                   class="yok-admin-selection-item h-4 w-4 rounded border-slate-300 accent-sky-600"
-                   data-selection-group="departments" ${choice.responded ? 'disabled' : ''}>
+        <button type="button"
+                class="yok-admin-selection-item w-full flex items-center gap-2 px-3 py-2 text-left text-xs border-b border-slate-100 last:border-b-0 ${choice.responded ? 'bg-slate-50 text-slate-400 cursor-not-allowed' : 'text-slate-700 hover:bg-sky-50 cursor-pointer'}"
+                data-selection-group="departments" data-selection-value="${_esc(choice.name)}"
+                aria-checked="false" role="checkbox" ${choice.responded ? 'disabled' : ''}>
+            <span data-selection-indicator class="h-4 w-4 shrink-0 rounded border border-slate-300 bg-white flex items-center justify-center text-[11px] font-black text-white"></span>
             <span class="min-w-0 flex-1 font-medium">${_esc(choice.name)}</span>
             ${choice.responded ? '<span class="shrink-0 text-[10px] font-bold text-emerald-600">ตอบแล้ว</span>' : ''}
-        </label>`).join('');
+        </button>`).join('');
 }
 
 function _buildAdminUnitChecklist(units, preselectedUnits) {
@@ -3696,23 +3770,47 @@ function _buildAdminUnitChecklist(units, preselectedUnits) {
     return units.map(unit => {
         const name = _getSafetyUnitName(unit);
         if (!name) return '';
-        const checked = preselectedUnits.includes(name);
+        const checked = preselectedUnits.some(unit => _normalizeYokotenScopeValue(unit) === _normalizeYokotenScopeValue(name));
+        const department = _getSafetyUnitDepartment(unit);
         return `
-        <label class="flex items-center gap-2 px-3 py-2 text-xs text-slate-700 border-b border-slate-100 last:border-b-0 hover:bg-violet-50 cursor-pointer">
-            <input type="checkbox" name="safetyUnits" value="${_esc(name)}"
-                   class="yok-admin-selection-item h-4 w-4 rounded border-slate-300 accent-violet-600"
-                   data-selection-group="safetyUnits" ${checked ? 'checked' : ''}>
-            <span class="min-w-0 flex-1 font-medium">${_esc(name)}</span>
-        </label>`;
+        <button type="button"
+                class="yok-admin-selection-item w-full flex items-center gap-2 px-3 py-2 text-left text-xs text-slate-700 border-b border-slate-100 last:border-b-0 hover:bg-violet-50 cursor-pointer"
+                data-selection-group="safetyUnits" data-selection-value="${_esc(name)}"
+                data-department="${_esc(department)}" aria-checked="${checked ? 'true' : 'false'}" role="checkbox">
+            <span data-selection-indicator class="h-4 w-4 shrink-0 rounded border border-slate-300 bg-white flex items-center justify-center text-[11px] font-black text-white"></span>
+            <span class="min-w-0 flex-1">
+                <span class="block font-medium">${_esc(name)}</span>
+                <span class="block text-[10px] text-slate-400">${_esc(department)}</span>
+            </span>
+        </button>`;
     }).join('');
 }
 
+function _getAdminSelectionItems(form, groupName) {
+    return Array.from(form?.querySelectorAll(`.yok-admin-selection-item[data-selection-group="${groupName}"]`) || []);
+}
+
+function _setAdminSelectionItem(item, checked) {
+    if (!item || item.disabled) return;
+    item.setAttribute('aria-checked', checked ? 'true' : 'false');
+    item.classList.toggle('bg-sky-50', checked && item.dataset.selectionGroup === 'departments');
+    item.classList.toggle('bg-violet-50', checked && item.dataset.selectionGroup === 'safetyUnits');
+    const indicator = item.querySelector('[data-selection-indicator]');
+    if (indicator) {
+        indicator.textContent = checked ? '✓' : '';
+        indicator.classList.toggle('bg-sky-600', checked && item.dataset.selectionGroup === 'departments');
+        indicator.classList.toggle('border-sky-600', checked && item.dataset.selectionGroup === 'departments');
+        indicator.classList.toggle('bg-violet-600', checked && item.dataset.selectionGroup === 'safetyUnits');
+        indicator.classList.toggle('border-violet-600', checked && item.dataset.selectionGroup === 'safetyUnits');
+    }
+}
+
 function _getAdminSelectionValues(form, groupName) {
-    const checkboxes = Array.from(form.querySelectorAll(`input[name="${groupName}"]`));
-    if (checkboxes.length) {
-        return checkboxes
-            .filter(input => input.checked && !input.disabled)
-            .map(input => input.value)
+    const items = _getAdminSelectionItems(form, groupName);
+    if (items.length) {
+        return items
+            .filter(item => item.getAttribute('aria-checked') === 'true' && !item.disabled)
+            .map(item => item.dataset.selectionValue)
             .filter(Boolean);
     }
     const select = form.querySelector(`select[name="${groupName}"]`);
@@ -3724,9 +3822,73 @@ function _getAdminSelectionValues(form, groupName) {
 function _syncAdminSelectionCount(form, groupName) {
     const counter = form?.querySelector(`[data-selection-count="${groupName}"]`);
     if (!counter) return;
-    const available = form.querySelectorAll(`input[name="${groupName}"]:not(:disabled)`).length;
+    const available = _getAdminSelectionItems(form, groupName).filter(item => !item.disabled).length;
     const selected = _getAdminSelectionValues(form, groupName).length;
     counter.textContent = `${selected} / ${available}`;
+}
+
+function _renderAdminUnitSelection(form, options = {}) {
+    if (!form) return;
+    const panel = form.querySelector('[data-admin-unit-list]');
+    if (!panel) return;
+    const topic = _topics.find(item => String(item.YokotenID) === String(form.dataset.id));
+    const departments = _getAdminSelectionValues(form, 'departments');
+    const previous = new Set(_getAdminSelectionValues(form, 'safetyUnits').map(_normalizeYokotenScopeValue));
+    const scoped = _getScopedUnitsForDepartments(topic, departments);
+    if (options.selectAll) {
+        scoped.units.forEach(unit => previous.add(_normalizeYokotenScopeValue(_getSafetyUnitName(unit))));
+    }
+    if (options.selectDepartment) {
+        const deptKey = _normalizeYokotenScopeValue(options.selectDepartment);
+        scoped.units
+            .filter(unit => _normalizeYokotenScopeValue(_getSafetyUnitDepartment(unit)) === deptKey)
+            .forEach(unit => previous.add(_normalizeYokotenScopeValue(_getSafetyUnitName(unit))));
+    }
+    const selected = scoped.units
+        .map(_getSafetyUnitName)
+        .filter(name => previous.has(_normalizeYokotenScopeValue(name)));
+
+    if (!departments.length) {
+        panel.innerHTML = '<p class="px-3 py-8 text-center text-xs text-slate-400">เลือกแผนกเพื่อแสดง Safety Unit ที่เกี่ยวข้อง</p>';
+    } else {
+        panel.innerHTML = _buildAdminUnitChecklist(scoped.units, selected);
+        _getAdminSelectionItems(form, 'safetyUnits').forEach(item => {
+            _setAdminSelectionItem(item, selected.some(name =>
+                _normalizeYokotenScopeValue(name) === _normalizeYokotenScopeValue(item.dataset.selectionValue)
+            ));
+        });
+    }
+    form.dataset.unresolvedTopicUnits = JSON.stringify(scoped.unresolved);
+    const warning = form.querySelector('[data-admin-unit-warning]');
+    if (warning) {
+        warning.textContent = scoped.unresolved.length
+            ? `Topic scope is not in Master Data: ${scoped.unresolved.join(', ')}`
+            : '';
+        warning.classList.toggle('hidden', scoped.unresolved.length === 0);
+    }
+    const emptyHint = form.querySelector('[data-admin-unit-empty-hint]');
+    if (emptyHint) {
+        emptyHint.textContent = departments.length && scoped.units.length === 0
+            ? 'แผนกที่เลือกไม่มี Safety Unit ในขอบเขต สามารถตอบในระดับแผนกได้'
+            : 'ระบบกรอง Unit ตามแผนกที่เลือก และปุ่มเลือกทุกแผนกจะเลือก Unit ที่สัมพันธ์ให้อัตโนมัติ';
+    }
+    form.querySelectorAll('.yok-admin-selection-btn[data-selection-group="safetyUnits"]').forEach(button => {
+        button.disabled = scoped.units.length === 0;
+    });
+    _syncAdminSelectionCount(form, 'safetyUnits');
+}
+
+function _getAdminDepartmentUnitMap(form) {
+    const result = Object.fromEntries(_getAdminSelectionValues(form, 'departments').map(dept => [dept, []]));
+    _getAdminSelectionItems(form, 'safetyUnits')
+        .filter(item => item.getAttribute('aria-checked') === 'true' && !item.disabled)
+        .forEach(item => {
+            const department = item.dataset.department;
+            if (Object.prototype.hasOwnProperty.call(result, department)) {
+                result[department].push(item.dataset.selectionValue);
+            }
+        });
+    return result;
 }
 
 function _buildResponseForm(yokotenId, existingResp = null, opts = {}) {
@@ -3778,12 +3940,23 @@ function _buildResponseForm(yokotenId, existingResp = null, opts = {}) {
             <div class="block">
                 <div class="flex items-center justify-between gap-2 mb-1">
                     <span class="text-xs font-semibold text-slate-600">Safety Unit / หน่วยงาน</span>
-                    <span class="text-[11px] font-bold text-violet-700"><span data-selection-count="safetyUnits">${preselectedUnits.length} / ${responseUnits.length}</span> Unit</span>
+                    <span class="text-[11px] font-bold text-violet-700"><span data-selection-count="safetyUnits">0 / 0</span> Unit</span>
                 </div>
-                <div class="h-[258px] overflow-y-auto rounded-lg border border-slate-200 bg-white" role="group" aria-label="Safety Units">
-                    ${_buildAdminUnitChecklist(responseUnits, preselectedUnits)}
+                <div class="flex items-center gap-2 mb-2">
+                    <button type="button" class="yok-admin-selection-btn px-2.5 py-1 rounded-md text-[11px] font-bold text-white bg-violet-600 hover:bg-violet-700 disabled:opacity-50"
+                            data-selection-group="safetyUnits" data-selection-mode="all" disabled>
+                        เลือก Unit ในขอบเขตทั้งหมด
+                    </button>
+                    <button type="button" class="yok-admin-selection-btn px-2.5 py-1 rounded-md text-[11px] font-bold text-slate-600 border border-slate-200 hover:bg-slate-50 disabled:opacity-50"
+                            data-selection-group="safetyUnits" data-selection-mode="clear" disabled>
+                        ล้าง Unit
+                    </button>
                 </div>
-                <span class="block text-[11px] text-slate-400 mt-1">${responseUnits.length ? 'คลิกเลือก Safety Unit ได้ทันทีโดยไม่ต้องกด Ctrl/Shift' : 'Optional: this topic has no Safety Unit scope'}</span>
+                <div data-admin-unit-list class="h-[220px] overflow-y-auto rounded-lg border border-slate-200 bg-white" role="group" aria-label="Safety Units">
+                    <p class="px-3 py-8 text-center text-xs text-slate-400">เลือกแผนกเพื่อแสดง Safety Unit ที่เกี่ยวข้อง</p>
+                </div>
+                <span data-admin-unit-empty-hint class="block text-[11px] text-slate-400 mt-1">ระบบกรอง Unit ตามแผนกที่เลือก และปุ่มเลือกทุกแผนกจะเลือก Unit ที่สัมพันธ์ให้อัตโนมัติ</span>
+                <span data-admin-unit-warning class="hidden block text-[11px] font-semibold text-red-600 mt-1"></span>
             </div>
         </div>` : ''}
         ${!isAdminMode && !isEdit && topicUnits.length ? `
@@ -5516,8 +5689,8 @@ async function _submitResp(form, btn) {
     const files            = form.querySelector('[name="responseFiles"]')?.files;
     const isAdminMode      = form.dataset.adminMode === '1';
     const departments      = isAdminMode ? _getAdminSelectionValues(form, 'departments') : [];
-    const unitInputs       = isAdminMode ? form.querySelectorAll('[name="safetyUnits"]') : [];
     const safetyUnits      = isAdminMode ? _getAdminSelectionValues(form, 'safetyUnits') : [];
+    const departmentUnits  = isAdminMode ? _getAdminDepartmentUnitMap(form) : {};
     const userUnitSelect   = form.querySelector('[name="safetyUnit"]');
     const selectedUserUnit = userUnitSelect ? userUnitSelect.value.trim() : '';
 
@@ -5526,9 +5699,28 @@ async function _submitResp(form, btn) {
         return;
     }
 
-    if (isAdminMode && unitInputs.length > 0 && safetyUnits.length === 0) {
-        showToast('Please select at least one scoped Safety Unit for this topic.', 'error');
-        return;
+    if (isAdminMode) {
+        const unresolved = JSON.parse(form.dataset.unresolvedTopicUnits || '[]');
+        if (unresolved.length) {
+            showToast(`Topic Safety Unit scope is not in Master Data: ${unresolved.join(', ')}`, 'error');
+            return;
+        }
+        const missingUnitDepartments = departments.filter(department => {
+            const hasScopedUnits = _getAdminSelectionItems(form, 'safetyUnits')
+                .some(item => _normalizeYokotenScopeValue(item.dataset.department) === _normalizeYokotenScopeValue(department));
+            return hasScopedUnits && !(departmentUnits[department] || []).length;
+        });
+        if (missingUnitDepartments.length) {
+            showToast(`Please select at least one scoped Safety Unit for: ${missingUnitDepartments.join(', ')}`, 'error');
+            return;
+        }
+        const overLimitDepartments = departments.filter(department =>
+            (departmentUnits[department] || []).join(', ').length > 100
+        );
+        if (overLimitDepartments.length) {
+            showToast(`Too many Safety Units for the current storage limit. Please reduce Units for: ${overLimitDepartments.join(', ')}`, 'error');
+            return;
+        }
     }
     if (!isAdminMode && userUnitSelect && !selectedUserUnit) {
         showToast('Please select Safety Unit for this scoped topic.', 'error');
@@ -5558,6 +5750,7 @@ async function _submitResp(form, btn) {
     fd.append('correctiveAction', correctiveAction);
     if (isAdminMode) {
         fd.append('departments', JSON.stringify(departments));
+        fd.append('departmentUnits', JSON.stringify(departmentUnits));
         fd.append('safetyUnits', JSON.stringify(safetyUnits));
         fd.append('safetyUnit', safetyUnits.join(', '));
     } else if (selectedUserUnit) {
@@ -5646,16 +5839,36 @@ function setupEventListeners() {
 
         if (!e.target.closest('#yokoten-page') && !e.target.closest('[data-yok-modal]')) return;
 
+        const adminSelectionItem = e.target.closest('.yok-admin-selection-item');
+        if (adminSelectionItem) {
+            e.preventDefault();
+            if (adminSelectionItem.disabled) return;
+            const form = adminSelectionItem.closest('form.yok-resp-form');
+            const groupName = adminSelectionItem.dataset.selectionGroup;
+            const nextChecked = adminSelectionItem.getAttribute('aria-checked') !== 'true';
+            _setAdminSelectionItem(adminSelectionItem, nextChecked);
+            _syncAdminSelectionCount(form, groupName);
+            if (groupName === 'departments') {
+                _renderAdminUnitSelection(form, {
+                    selectDepartment: nextChecked ? adminSelectionItem.dataset.selectionValue : '',
+                });
+            }
+            return;
+        }
+
         const adminSelectionBtn = e.target.closest('.yok-admin-selection-btn');
         if (adminSelectionBtn) {
             const form = adminSelectionBtn.closest('form.yok-resp-form');
             const groupName = adminSelectionBtn.dataset.selectionGroup;
             if (!form || !['departments', 'safetyUnits'].includes(groupName)) return;
             const shouldSelect = adminSelectionBtn.dataset.selectionMode === 'all';
-            form.querySelectorAll(`input[name="${groupName}"]:not(:disabled)`).forEach(input => {
-                input.checked = shouldSelect;
+            _getAdminSelectionItems(form, groupName).forEach(item => {
+                _setAdminSelectionItem(item, shouldSelect);
             });
             _syncAdminSelectionCount(form, groupName);
+            if (groupName === 'departments') {
+                _renderAdminUnitSelection(form, { selectAll: shouldSelect });
+            }
             return;
         }
 
@@ -6054,7 +6267,10 @@ function setupEventListeners() {
             finally { hideLoading(); }
             return;
         }
-    }, delegatedActionOptions('yokoten')));
+    }, delegatedActionOptions(
+        'yokoten',
+        'button:not(.yok-admin-selection-item):not(.yok-admin-selection-btn), [data-action], [data-id]:not(form), [data-person-id], [data-topic-id], [role="button"]'
+    )));
 
     // Form submit delegation
     document.addEventListener('submit', guardSubmitHandler(async (e) => {
