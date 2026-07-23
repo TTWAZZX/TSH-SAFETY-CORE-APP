@@ -2,6 +2,16 @@
 
 This file preserves historical production handoff, smoke test, backup, deployment, migration, and phase notes moved out of `CLAUDE.md`.
 
+## Machine & Device Safety Responsive Layout Deployed (2026-07-23)
+
+Implemented and deployed a frontend-only responsive layout release for Machine & Device Safety. Card view is now the default on desktop and mobile, while List view remains available and contains its wide table inside a module-scoped horizontal scroller instead of widening the application page. The module content shell is capped at 1,440px, desktop filters use a responsive grid, mobile advanced filters start collapsed behind a toggle, cards use one column on phones, and pagination remains usable at narrow widths. Cache busting advanced to `20260723-machine-safety-responsive`.
+
+No PHP/Node API behavior, MySQL schema/data, or upload storage changed. Local source-contract smoke, JavaScript syntax, `git diff --check`, and authenticated Chrome UAT passed at desktop 1,424px and mobile 390px. Local browser evidence is stored under `backups/local/machine-safety-responsive-20260723T101256/`.
+
+Production rollback backup was captured before upload at `backups/production/machine-safety-responsive-predeploy-20260723-171920/`. Uploaded runtime files were `index.html`, `public/style.css`, `public/js/main.js`, `public/js/pages/machine-safety.js`, and `deploy-manifest.json`. Download-back SHA-256 verification passed 5/5 at `backups/production/machine-safety-responsive-upload-verify-20260723-172036/`.
+
+Authenticated Production browser UAT passed at `backups/production/machine-safety-responsive-20260723T102124/`: desktop and mobile had no page-level horizontal overflow, Card view loaded by default, Desktop List view scrolled only inside the results frame, mobile cards stayed inside the viewport, and advanced filters started collapsed and expanded successfully. No business-data endpoint was called; expected Production side effects were limited to successful-login audit/attempt records and normal login housekeeping.
+
 ## Yokoten Admin Bulk Response / Dashboard Source Alignment Deployed (2026-07-23)
 
 Implemented and deployed a code-only PHP shared-hosting release for Yokoten Admin on-behalf response selection and Dashboard Department Coverage source alignment. Yokoten now uses directly clickable Department and Safety Unit checkboxes, supports selecting every unanswered Department in one action, and keeps already-answered Departments disabled. Dashboard `CCCF A (Manual)` now aggregates the configured CCCF Units from `cccf_unit_sel`, Unit yearly targets, manual achieved overrides, and actual worker records when no override exists. Yokoten coverage now follows the module's selected year and Unit scope, OJT deterministically selects the latest current Department record, and all visible coverage columns expose numerator/denominator/source metadata in tooltips.

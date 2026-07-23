@@ -1,75 +1,68 @@
 {
   "schemaVersion": 1,
-  "generatedAt": "2026-07-23T16:29:45.3658993+07:00",
-  "sourceHead": "db637920907afd36aabc6a58bfa0f4327c97e2fc",
-  "previousProductionBuild": "onboarding-phase10-20260723",
-  "buildId": "yokoten-dashboard-source-fix-20260723",
-  "cacheBust": "20260723-yokoten-dashboard-source-fix",
+  "generatedAt": "2026-07-23T17:19:30.9908927+07:00",
+  "sourceHead": "4c6f1952b4b09b143052f3208815aa77522e0e8d",
+  "previousProductionBuild": "yokoten-dashboard-source-fix-20260723",
+  "buildId": "machine-safety-responsive-20260723",
+  "cacheBust": "20260723-machine-safety-responsive",
   "runtime": "shared-hosting-php",
-  "deployPhase": "yokoten-admin-bulk-response-and-dashboard-source-alignment",
+  "deployPhase": "machine-safety-responsive-layout",
   "deploymentStatus": "deployed-and-authenticated-read-only-uat-passed",
-  "deployedAt": "2026-07-23T16:30:41+07:00",
+  "deployedAt": "2026-07-23T17:21:30+07:00",
   "databaseMutationPlanned": false,
   "schemaMutationPlanned": false,
   "uploadStorageMutationPlanned": false,
   "exactRuntimeFiles": [
     "index.html",
+    "public/style.css",
     "public/js/main.js",
-    "public/js/pages/yokoten.js",
-    "public/js/pages/dashboard.js",
-    "api/index.php",
-    "api/handlers/targets.php",
+    "public/js/pages/machine-safety.js",
     "deploy-manifest.json"
   ],
   "fileHashes": [
     {
       "path": "index.html",
-      "sha256": "68ab84ef069052108540f1e0f83871ead89a2988ff20708ab001fc44af83f08a"
+      "sha256": "f1353e1f9f232cf80cc2e3293aa7e7458d1d99d1b5fda11482ec63a2071c83a4"
+    },
+    {
+      "path": "public/style.css",
+      "sha256": "c05c4314e6d7af4ef5f3f18b599c6525a7f7e07584b005791349085214a93694"
     },
     {
       "path": "public/js/main.js",
-      "sha256": "2737a9c96e52497aa6b3cce892f2ef5fc00c0c69b9e8aadbf546385422a1ca5b"
+      "sha256": "2f5363eef6435d358b5b6c3636756b622833bdcd128ca798230edb9fae753f3b"
     },
     {
-      "path": "public/js/pages/yokoten.js",
-      "sha256": "6396c04ce79fff08fd77f91e2ba26470cec2cf20178ed08993bc14ecf5cd092a"
-    },
-    {
-      "path": "public/js/pages/dashboard.js",
-      "sha256": "ecd937f91c9ab1429ad1a89951f1b0a3d9eb37234d0587502eaddb86bee5b723"
-    },
-    {
-      "path": "api/index.php",
-      "sha256": "57cd3bfc07a7a2b3906957703e8a96e47e74c8a9930a052e406debea2a555f6b"
-    },
-    {
-      "path": "api/handlers/targets.php",
-      "sha256": "c902d357cde27a584d999ffd9811598e4e15217935a834df76230da804a1230d"
+      "path": "public/js/pages/machine-safety.js",
+      "sha256": "d0cfe4bc95c345815521598ad6c31de58e1fcd403b799a533bae73fbad7df946"
     }
   ],
   "verification": {
-    "localReleaseGate": "PASS",
-    "readOnlyApiPreflight": "91/91",
-    "dashboardCoverageSourceContracts": "15/15",
-    "dashboardDepartmentRows": "10/10",
-    "yokotenAdminBulkResponse": "10/10",
-    "phpLint": "PASS",
+    "responsiveSourceContract": "PASS",
     "nodeSyntax": "PASS",
+    "localAuthenticatedBrowserUat": "PASS",
+    "desktopViewport": "1424px",
+    "mobileViewport": "390px",
+    "pageLevelHorizontalOverflow": false,
+    "desktopCardDefault": true,
+    "desktopListInternalScroll": true,
+    "mobileAdvancedFilterToggle": true,
     "databaseMutationAttempted": false,
     "schemaMutationAttempted": false,
     "uploadStorageMutationAttempted": false
   },
   "productionVerification": {
-    "codeBackup": "backups/production/yokoten-dashboard-predeploy-20260723-162854",
-    "uploadVerify": "backups/production/yokoten-dashboard-upload-verify-20260723-163041",
-    "readOnlySmoke": "backups/production/yokoten-dashboard-readonly-uat-20260723T093207",
-    "authenticatedUat": "backups/production/yokoten-dashboard-browser-uat-20260723T093903",
-    "uploadedFiles": 7,
-    "sha256Matches": "7/7",
-    "dashboardBrowserRows": "10/10",
-    "dashboardCccfPositiveRows": "8/10",
-    "yokotenDashboardModuleParity": "10/10",
-    "yokotenSelectableDepartments": "9/10; 1 already responded and disabled",
+    "codeBackup": "backups/production/machine-safety-responsive-predeploy-20260723-171920",
+    "uploadVerify": "backups/production/machine-safety-responsive-upload-verify-20260723-172036",
+    "authenticatedUat": "backups/production/machine-safety-responsive-20260723T102124",
+    "uploadedFiles": 5,
+    "sha256Matches": "5/5",
+    "desktopPageOverflow": false,
+    "desktopCardDefault": true,
+    "desktopListInternalScroll": true,
+    "mobilePageOverflow": false,
+    "mobileCardInsideViewport": true,
+    "mobileAdvancedFiltersCollapsed": true,
     "expectedLoginSideEffects": true,
     "databaseMutationAttempted": false,
     "schemaMutationAttempted": false,

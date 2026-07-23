@@ -7,12 +7,14 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const { spawn } = require('child_process');
-const app = require('../server');
-const db = require('../db');
 
 const apiPort = Number(process.env.MACHINE_SAFETY_UAT_API_PORT || 5000);
 const cdpPort = Number(process.env.MACHINE_SAFETY_UAT_CDP_PORT || 9814);
-const baseUrl = `http://localhost/tsh-safety-core`;
+const baseUrl = String(
+    process.env.MACHINE_SAFETY_UAT_URL || 'http://localhost/tsh-safety-core'
+).replace(/\/+$/, '');
+const isLocal = ['localhost', '127.0.0.1'].includes(new URL(baseUrl).hostname);
+const apiBaseUrl = isLocal ? `http://127.0.0.1:${apiPort}` : baseUrl;
 const adminId = String(process.env.PROD_UAT_ADMIN_ID || '').trim();
 const adminPassword = String(process.env.PROD_UAT_ADMIN_PASSWORD || '');
 const chromePath = process.env.PROD_UAT_BROWSER || 'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe';
@@ -20,7 +22,7 @@ const profileDir = fs.mkdtempSync(path.join(os.tmpdir(), 'tsh-machine-responsive
 const artifactDir = path.join(
     path.resolve(__dirname, '..', '..'),
     'backups',
-    'local',
+    isLocal ? 'local' : 'production',
     `machine-safety-responsive-${new Date().toISOString().replace(/[-:]/g, '').replace(/\..+/, '')}`
 );
 
@@ -28,6 +30,7 @@ const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
 let browser;
 let client;
 let server;
+let db;
 
 class Cdp {
     constructor(url) {
@@ -105,6 +108,9 @@ async function screenshot(name) {
 }
 
 async function listen() {
+    if (!isLocal) return;
+    const app = require('../server');
+    db = require('../db');
     server = await new Promise((resolve, reject) => {
         const instance = app.listen(apiPort, '127.0.0.1', () => resolve(instance));
         instance.once('error', reject);
@@ -145,7 +151,7 @@ async function connectBrowser() {
 }
 
 async function login() {
-    const response = await fetch(`http://127.0.0.1:${apiPort}/api/login`, {
+    const response = await fetch(`${apiBaseUrl}/api/login`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
         body: JSON.stringify({ employeeId: adminId, password: adminPassword }),
@@ -293,7 +299,7 @@ main()
             server.closeAllConnections?.();
             await new Promise(resolve => server.close(resolve));
         }
-        await db.end().catch(() => {});
+        await db?.end().catch(() => {});
         await sleep(300);
         try { fs.rmSync(profileDir, { recursive: true, force: true }); } catch (_) {}
     });
