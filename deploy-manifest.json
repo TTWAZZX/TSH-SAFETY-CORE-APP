@@ -69,10 +69,13 @@
     "codeBackup": "backups/production/onboarding-phase10-predeploy-20260723-085043",
     "uploadVerify": "backups/production/onboarding-phase10-upload-verify-20260723-094042",
     "readOnlySmoke": "backups/production/onboarding-phase10-smoke-20260723-094310",
+    "authenticatedUat": "backups/production/production-authenticated-uat-20260723T042711",
     "uploadedFiles": 20,
     "sha256Matches": "20/20",
     "configLocalUnchanged": true,
     "httpsApiSmoke": "8/8 PASS",
+    "authenticatedUserUat": "READY; 5 API checks PASS; Chrome READY shell PASS",
+    "authenticatedAdminUat": "READY; 6 API checks PASS; Chrome READY shell PASS",
     "databaseMutationAttempted": false,
     "schemaMutationAttempted": false,
     "uploadStorageMutationAttempted": false
