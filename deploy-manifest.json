@@ -1,68 +1,76 @@
 {
   "schemaVersion": 1,
-  "generatedAt": "2026-07-23T17:19:30.9908927+07:00",
-  "sourceHead": "4c6f1952b4b09b143052f3208815aa77522e0e8d",
-  "previousProductionBuild": "yokoten-dashboard-source-fix-20260723",
-  "buildId": "machine-safety-responsive-20260723",
-  "cacheBust": "20260723-machine-safety-responsive",
+  "generatedAt": "2026-07-23T18:01:30+07:00",
+  "sourceHead": "70adffd3efd19d5b6534720c5c345a87cd74304a",
+  "previousProductionBuild": "machine-safety-responsive-20260723",
+  "buildId": "yokoten-admin-department-unit-scope-20260723",
+  "cacheBust": "20260723-yokoten-admin-scope-r5",
   "runtime": "shared-hosting-php",
-  "deployPhase": "machine-safety-responsive-layout",
+  "deployPhase": "yokoten-admin-department-unit-coupling",
   "deploymentStatus": "deployed-and-authenticated-read-only-uat-passed",
-  "deployedAt": "2026-07-23T17:21:30+07:00",
+  "deployedAt": "2026-07-23T18:00:42+07:00",
   "databaseMutationPlanned": false,
   "schemaMutationPlanned": false,
   "uploadStorageMutationPlanned": false,
   "exactRuntimeFiles": [
     "index.html",
-    "public/style.css",
     "public/js/main.js",
-    "public/js/pages/machine-safety.js",
+    "public/js/pages/yokoten.js",
+    "api/handlers/workflow_phase6.php",
+    "api/lib/yokoten_admin_scope.php",
     "deploy-manifest.json"
   ],
   "fileHashes": [
     {
       "path": "index.html",
-      "sha256": "f1353e1f9f232cf80cc2e3293aa7e7458d1d99d1b5fda11482ec63a2071c83a4"
-    },
-    {
-      "path": "public/style.css",
-      "sha256": "c05c4314e6d7af4ef5f3f18b599c6525a7f7e07584b005791349085214a93694"
+      "sha256": "587709b51e6c28c32143a84b30e887fb38bc74b9cdfbae5a18db82860257f583"
     },
     {
       "path": "public/js/main.js",
-      "sha256": "2f5363eef6435d358b5b6c3636756b622833bdcd128ca798230edb9fae753f3b"
+      "sha256": "d39ebc947cac9365102600cd3ac4642aa8bfd48fd6394d3e6a1a8f15a2453000"
     },
     {
-      "path": "public/js/pages/machine-safety.js",
-      "sha256": "d0cfe4bc95c345815521598ad6c31de58e1fcd403b799a533bae73fbad7df946"
+      "path": "public/js/pages/yokoten.js",
+      "sha256": "830e807b786e6db0563176d0e0536dae2a6ba2b81c449c5d216392a42a959074"
+    },
+    {
+      "path": "api/handlers/workflow_phase6.php",
+      "sha256": "8206406fb62561f89f8db7abc7f58496bbeddcbe9b35e0d66afa75a859bb3b38"
+    },
+    {
+      "path": "api/lib/yokoten_admin_scope.php",
+      "sha256": "3e3c4ba17d543467bc67aa1361949de22577f26f084f8638fd57b3817870ad9f"
     }
   ],
   "verification": {
-    "responsiveSourceContract": "PASS",
-    "nodeSyntax": "PASS",
+    "fullBackendRegression": "PASS",
+    "readOnlyApiPreflight": "91/91",
+    "yokotenAdminScopeNodePhpParity": "8/8",
+    "yokotenAdminBulkResponse": "14/14",
     "localAuthenticatedBrowserUat": "PASS",
-    "desktopViewport": "1424px",
-    "mobileViewport": "390px",
-    "pageLevelHorizontalOverflow": false,
-    "desktopCardDefault": true,
-    "desktopListInternalScroll": true,
-    "mobileAdvancedFilterToggle": true,
+    "individualDepartmentSelection": true,
+    "selectAllDepartments": "9/9",
+    "selectAllScopedUnits": "11/11",
+    "responseCountBeforeAfter": "1/1",
+    "phpLint": "PASS",
+    "nodeSyntax": "PASS",
     "databaseMutationAttempted": false,
     "schemaMutationAttempted": false,
     "uploadStorageMutationAttempted": false
   },
   "productionVerification": {
-    "codeBackup": "backups/production/machine-safety-responsive-predeploy-20260723-171920",
-    "uploadVerify": "backups/production/machine-safety-responsive-upload-verify-20260723-172036",
-    "authenticatedUat": "backups/production/machine-safety-responsive-20260723T102124",
-    "uploadedFiles": 5,
-    "sha256Matches": "5/5",
-    "desktopPageOverflow": false,
-    "desktopCardDefault": true,
-    "desktopListInternalScroll": true,
-    "mobilePageOverflow": false,
-    "mobileCardInsideViewport": true,
-    "mobileAdvancedFiltersCollapsed": true,
+    "codeBackup": "backups/production/yokoten-admin-scope-predeploy-20260723-175817",
+    "authenticatedUat": "backups/production/yokoten-dashboard-browser-uat-20260723T110106",
+    "uploadVerify": "backups/production/yokoten-admin-scope-upload-verify-20260723-180042",
+    "uploadedFiles": 6,
+    "sha256Matches": "6/6",
+    "individualDepartmentSelection": true,
+    "selectedDepartmentScopedUnits": "2/2",
+    "selectAllDepartments": "9/9",
+    "selectAllScopedUnits": "11/11",
+    "unitToggleWorks": true,
+    "responseCountBeforeAfter": "1/1",
+    "pageLevelHorizontalOverflow": false,
     "expectedLoginSideEffects": true,
     "databaseMutationAttempted": false,
     "schemaMutationAttempted": false,

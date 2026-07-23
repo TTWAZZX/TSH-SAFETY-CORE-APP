@@ -2,6 +2,18 @@
 
 This file preserves historical production handoff, smoke test, backup, deployment, migration, and phase notes moved out of `CLAUDE.md`.
 
+## Yokoten Admin Department–Safety Unit Coupling Deployed (2026-07-23)
+
+Implemented and deployed the Yokoten Admin on-behalf response control follow-up. Root cause of the apparently silent individual Department controls was the delegated async action guard resolving the surrounding response form through `closest('[data-id]')` and restoring the form HTML after each click. Department and Safety Unit choices now use accessible row controls with centralized state, the response form is excluded from that action-lock target, and selecting every unanswered Department also selects only the topic-scoped Units that belong to those Departments.
+
+The frontend sends an explicit `departmentUnits` mapping. PHP production and Node development validate the same canonical per-Department Unit plan against `master_departments`, `master_safetyunits`, and the topic scope before inserting one response per Department. Legacy topic values `QC1` and `QC2` resolve uniquely to current master names `QC1 AUTO` and `QC2 MOTOR`. Unknown/ambiguous scope, wrong-Department Units, missing required Units, unselected mapping keys, and values exceeding the existing `YokotenResponses.SafetyUnit VARCHAR(100)` limit fail closed. No MySQL schema/data migration or upload-storage change was required.
+
+Local verification passed: full backend regression, read-only API preflight 91/91, Node/PHP scope parity 8/8, Yokoten bulk-response smoke 14/14, PHP/Node syntax checks, mojibake scan, `git diff --check`, and authenticated Chrome UAT. Local UAT selected `MAINTENANCE SEC.` with 2/2 scoped Units, cleared it successfully, selected 9/9 unanswered Departments with 11/11 scoped Units, toggled an individual Unit, and preserved Yokoten response count at 1/1.
+
+Production rollback backup was captured before upload at `backups/production/yokoten-admin-scope-predeploy-20260723-175817/`; the new `api/lib/yokoten_admin_scope.php` correctly had no previous remote version. Uploaded runtime files were `index.html`, `public/js/main.js`, `public/js/pages/yokoten.js`, `api/handlers/workflow_phase6.php`, `api/lib/yokoten_admin_scope.php`, and `deploy-manifest.json`. Download-back SHA-256 verification passed 6/6 at `backups/production/yokoten-admin-scope-upload-verify-20260723-180042/`. The final post-UAT manifest was uploaded separately and SHA-256 verified at `backups/production/yokoten-admin-scope-final-manifest-verify-20260723-180214/`.
+
+Authenticated Production browser UAT passed at `backups/production/yokoten-dashboard-browser-uat-20260723T110106/`: Dashboard rendered 10 rows without page-level overflow; Yokoten individual Department selection and clearing worked; 9/9 unanswered Departments and 11/11 scoped Units were selected; individual Unit toggling worked; and response count remained 1/1 because Submit was never called. Expected Production side effects were limited to successful-login audit/attempt records and normal login housekeeping.
+
 ## Machine & Device Safety Responsive Layout Deployed (2026-07-23)
 
 Implemented and deployed a frontend-only responsive layout release for Machine & Device Safety. Card view is now the default on desktop and mobile, while List view remains available and contains its wide table inside a module-scoped horizontal scroller instead of widening the application page. The module content shell is capped at 1,440px, desktop filters use a responsive grid, mobile advanced filters start collapsed behind a toggle, cards use one column on phones, and pagination remains usable at narrow widths. Cache busting advanced to `20260723-machine-safety-responsive`.
