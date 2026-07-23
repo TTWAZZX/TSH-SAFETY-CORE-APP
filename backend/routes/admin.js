@@ -42,6 +42,106 @@ const upload = multer({ storage: multer.memoryStorage() });
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 const ALLOWED_ROLES = ['Admin', 'User', 'Viewer'];
+const EMAIL_REQUIREMENT_SETTING_KEY = 'employee_email_required_positions';
+const DEFAULT_EMAIL_REQUIRED_POSITION_NAMES = [
+    'ประธานกิตติมศักดิ์',
+    'ผู้จัดการ',
+    'ผู้จัดการทั่วไป',
+    'ผู้ชำนาญการพิเศษ',
+    'ผู้ช่วยผู้จัดการทั่วไป',
+    'ผู้อำนวยการสายธุรกิจ Wiring Harness',
+    'รักษาการผู้จัดการ',
+    'หัวหน้าส่วน',
+    'หัวหน้าแผนก',
+];
+
+async function ensureAppSettingsTable() {
+    await db.query(`
+        CREATE TABLE IF NOT EXISTS App_Settings (
+            key_name  VARCHAR(100) PRIMARY KEY,
+            value     TEXT,
+            UpdatedAt DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+    `);
+}
+
+function parseEmailRequirementSetting(rawValue) {
+    if (!rawValue) return [];
+    try {
+        const parsed = JSON.parse(rawValue);
+        const ids = Array.isArray(parsed) ? parsed : parsed?.positionIds;
+        return Array.isArray(ids)
+            ? [...new Set(ids.map(id => Number(id)).filter(id => Number.isInteger(id) && id > 0))]
+            : [];
+    } catch (_) {
+        return [];
+    }
+}
+
+async function getEmailRequirementRule() {
+    await ensureAppSettingsTable();
+    const [positions] = await db.query('SELECT id, Name FROM Master_Positions ORDER BY Name ASC');
+    const [settings] = await db.query('SELECT value FROM App_Settings WHERE key_name = ? LIMIT 1', [EMAIL_REQUIREMENT_SETTING_KEY]);
+    const availableIds = new Set(positions.map(position => Number(position.id)));
+    const storedIds = parseEmailRequirementSetting(settings[0]?.value).filter(id => availableIds.has(id));
+    const seededIds = positions
+        .filter(position => DEFAULT_EMAIL_REQUIRED_POSITION_NAMES.includes(position.Name))
+        .map(position => Number(position.id));
+    return {
+        positions,
+        requiredPositionIds: settings.length ? storedIds : seededIds,
+        isUsingDefault: !settings.length,
+    };
+}
+
+async function getEmailReadinessData() {
+    await ensureEmployeeCompanyEmailColumn(db);
+    const rule = await getEmailRequirementRule();
+    const requiredIds = new Set(rule.requiredPositionIds.map(Number));
+    const requiredNames = new Set(
+        rule.positions
+            .filter(position => requiredIds.has(Number(position.id)))
+            .map(position => String(position.Name || '').trim())
+            .filter(Boolean)
+    );
+    const [employees] = await db.query(
+        `SELECT EmployeeID, EmployeeName, Department, Unit, Position, CompanyEmail
+         FROM Employees
+         ORDER BY Department, Position, EmployeeName`
+    );
+    const rows = employees.map(employee => {
+        const position = String(employee.Position || '').trim();
+        const companyEmail = String(employee.CompanyEmail || '').trim().toLowerCase();
+        const emailCheck = validateCompanyEmail(companyEmail);
+        const required = requiredNames.has(position);
+        let status = 'optional';
+        if (companyEmail && !emailCheck.ok) status = 'invalid_domain';
+        else if (required && !companyEmail) status = 'missing_required';
+        else if (companyEmail) status = 'ready';
+        return {
+            ...employee,
+            CompanyEmail: companyEmail || null,
+            IsEmailRequired: required,
+            EmailReadinessStatus: status,
+        };
+    });
+    const requiredRows = rows.filter(row => row.IsEmailRequired);
+    return {
+        summary: {
+            totalEmployees: rows.length,
+            requiredEmployees: requiredRows.length,
+            readyRequired: requiredRows.filter(row => row.EmailReadinessStatus === 'ready').length,
+            missingRequired: requiredRows.filter(row => row.EmailReadinessStatus === 'missing_required').length,
+            invalidDomain: rows.filter(row => row.EmailReadinessStatus === 'invalid_domain').length,
+        },
+        rule: {
+            requiredPositionIds: rule.requiredPositionIds,
+            requiredPositions: rule.positions.filter(position => requiredIds.has(Number(position.id))),
+            isUsingDefault: rule.isUsingDefault,
+        },
+        rows,
+    };
+}
 
 function crossPathErrorResponse(res, error, fallbackMessage) {
     if (error instanceof ProfileValidationError) {
@@ -1430,6 +1530,7 @@ router.post('/registration-requests/:id/reject', async (req, res) => {
 // GET /admin/employees
 router.get('/employees', async (_req, res) => {
     try {
+        await ensureEmployeeCompanyEmailColumn(db);
         const [rows] = await db.query(
             'SELECT EmployeeID, EmployeeName, Department, Unit, Team, Position, CompanyEmail, Role FROM Employees ORDER BY Department, EmployeeName'
         );
@@ -1569,6 +1670,7 @@ router.post('/employee/:id/reset-password', async (req, res) => {
 // GET /admin/employee/import-template-data — master lists for Excel template
 router.get('/employee/import-template-data', async (_req, res) => {
     try {
+        await ensureEmployeeCompanyEmailColumn(db);
         const [[depts], [positions], [units]] = await Promise.all([
             db.query('SELECT Name FROM Master_Departments ORDER BY Name ASC'),
             db.query('SELECT Name FROM Master_Positions ORDER BY Name ASC'),

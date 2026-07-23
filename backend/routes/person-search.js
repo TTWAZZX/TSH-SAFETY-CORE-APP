@@ -176,6 +176,125 @@ function timelineItem({ type, module, date, title, status, detail, refId }) {
     };
 }
 
+function pct(part, total) {
+    const p = n(part);
+    const t = n(total);
+    if (t <= 0) return null;
+    return Math.round((p / t) * 100);
+}
+
+function signalStatus({ actionNeeded = false, watch = false }) {
+    if (actionNeeded) return 'Action Needed';
+    if (watch) return 'Watch';
+    return 'Good';
+}
+
+function clampScore(value) {
+    return Math.max(0, Math.min(100, Math.round(Number(value) || 0)));
+}
+
+function buildRiskProfile(metrics, { trainingPassRate, ppePassRate, currentYearActivity }) {
+    const trainingScore = metrics.training === 0
+        ? 55
+        : clampScore(trainingPassRate);
+    const fourmScore = metrics.fourmScopes > 0 ? 100 : 65;
+    const riskEventCount = metrics.accidents + metrics.ppeViolations + metrics.patrolIssues;
+    const riskScore = metrics.accidents > 0 || metrics.ppeViolations > 0
+        ? 35
+        : metrics.patrolIssues > 0 ? 70 : 100;
+    const activityScore = currentYearActivity > 0 ? 100 : 60;
+    const ppeScore = metrics.ppeViolations > 0
+        ? 35
+        : metrics.ppeInspections === 0 ? 75 : clampScore(ppePassRate);
+
+    const factors = [
+        { key: 'training', label: 'Training pass rate', score: trainingScore, weight: 30 },
+        { key: 'fourm', label: '4M Training Matrix scope', score: fourmScore, weight: 20 },
+        { key: 'risk', label: 'Accident / PPE / Patrol issue', score: riskScore, weight: 25 },
+        { key: 'activity', label: 'KY / Hiyari / CCCF activity', score: activityScore, weight: 15 },
+        { key: 'ppe', label: 'PPE compliance', score: ppeScore, weight: 10 },
+    ];
+    const score = clampScore(factors.reduce((sum, factor) => sum + (factor.score * factor.weight / 100), 0));
+
+    const reasons = [];
+    const nextActions = [];
+    if (metrics.training === 0) {
+        reasons.push('No individual training record in selected year');
+        nextActions.push('Confirm required training record or add missing training evidence');
+    } else if (trainingPassRate < 80) {
+        reasons.push(`Training pass rate is ${trainingPassRate}%`);
+        nextActions.push('Review failed training records and plan re-training');
+    }
+    if (metrics.fourmScopes === 0) {
+        reasons.push('No active 4M Training Matrix curriculum scope');
+        nextActions.push('Check whether this employee should be assigned to a 4M curriculum');
+    }
+    if (metrics.accidents > 0) {
+        reasons.push(`${metrics.accidents} accident record(s) in selected year`);
+        nextActions.push('Review accident investigation and corrective action status');
+    }
+    if (metrics.ppeViolations > 0) {
+        reasons.push(`${metrics.ppeViolations} PPE violation(s) in selected year`);
+        nextActions.push('Follow up PPE coaching or escalation records');
+    }
+    if (metrics.patrolIssues > 0) {
+        reasons.push(`${metrics.patrolIssues} patrol issue(s) reported by this person`);
+        nextActions.push('Review patrol issue closure and responsible department action');
+    }
+    if (currentYearActivity === 0) {
+        reasons.push('No KY, Hiyari, or CCCF activity in selected year');
+        nextActions.push('Encourage at least one proactive safety activity record');
+    }
+    if (metrics.ppeInspections > 0 && ppePassRate != null && ppePassRate < 90) {
+        reasons.push(`PPE inspection pass rate is ${ppePassRate}%`);
+        nextActions.push('Review PPE inspection findings for repeat gaps');
+    }
+    if (!reasons.length) reasons.push('No major risk or compliance gap detected for selected year');
+    if (!nextActions.length) nextActions.push('Maintain current safety activity and training evidence');
+
+    const status = metrics.accidents > 0 || metrics.ppeViolations > 0 || score < 60
+        ? 'Action Needed'
+        : score < 80 || metrics.patrolIssues > 0 || metrics.training === 0 || metrics.fourmScopes === 0 || currentYearActivity === 0
+            ? 'Watch'
+            : 'Good';
+
+    return {
+        score,
+        status,
+        factors,
+        reasons,
+        nextActions: [...new Set(nextActions)].slice(0, 5),
+        thresholds: { good: 80, watch: 60 },
+        counters: {
+            trainingPassRate,
+            ppePassRate,
+            riskEventCount,
+            currentYearActivity,
+        },
+    };
+}
+
+function timelineSeverity(type, status = '') {
+    const t = String(type || '').toLowerCase();
+    const s = String(status || '').toLowerCase();
+    if (t.includes('accident') || t.includes('violation') || s.includes('not passed') || s.includes('issue')) return 'risk';
+    if (t.includes('4m') || t.includes('training') || t.includes('cccf')) return 'info';
+    return 'normal';
+}
+
+function timelineItem({ type, module, date, title, status, detail, refId }) {
+    return {
+        type,
+        module,
+        date,
+        title: title || type,
+        status: status || '',
+        detail: detail || '',
+        severity: timelineSeverity(type, status),
+        refId: refId ?? null,
+    };
+}
+
 router.get('/employees', async (req, res) => {
     const isAdmin = isAdminRequest(req);
     if ((req.query.q !== undefined && typeof req.query.q !== 'string')
@@ -214,6 +333,7 @@ router.get('/employees', async (req, res) => {
     sql += ` ORDER BY EmployeeName ASC, EmployeeID ASC LIMIT ${limit} OFFSET ${offset}`;
 
     try {
+        await ensureEmployeeCompanyEmailColumn(db);
         const [rows] = await db.query(sql, params);
         res.json({ success: true, data: rows, pagination: { page, limit, returned: rows.length } });
     } catch {

@@ -181,7 +181,7 @@ function setupDashboardEvents() {
         }
 
         // Dashboard drill-down: write filter state before module navigation
-        const card = e.target.closest('#db-module-cards a[data-filter]');
+        const card = e.target.closest('#db-module-cards a[data-filter], #db-alerts-wrap a[data-filter]');
         if (card) {
             try {
                 const hash = card.getAttribute('href').replace('#', '');

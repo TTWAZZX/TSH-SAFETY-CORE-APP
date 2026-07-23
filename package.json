@@ -28,7 +28,6 @@
     "uat:preflight": "npm --prefix backend run uat:preflight"
   },
   "dependencies": {
-    "@vendia/serverless-express": "^4.10.2",
     "bcrypt": "^6.0.0",
     "bcryptjs": "^3.0.3",
     "cors": "^2.8.5",

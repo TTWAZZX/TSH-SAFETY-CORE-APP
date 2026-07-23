@@ -114,6 +114,7 @@ function cases(adminToken, userToken) {
         ['Contractor activity', '/contractor/activity'],
         ['Activity target activities', '/activity-targets/activities'],
         ['Activity target position templates', '/activity-targets/position-templates'],
+        ['Activity target scope overrides', '/activity-targets/scope-overrides'],
         ['Activity targets me', '/activity-targets/me'],
         ['Module forms hiyari', '/module-forms?module=hiyari'],
         ['Person search employees', '/person-search/employees?limit=5'],

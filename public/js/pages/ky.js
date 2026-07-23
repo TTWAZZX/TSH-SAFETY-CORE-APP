@@ -2930,6 +2930,204 @@ async function refreshKySubmitProgress(department) {
     } catch (_) {}
 }
 
+function setupKyReporterSearch() {
+    const reporterSearch = document.getElementById('ky-reporter-search');
+    const reporterDrop   = document.getElementById('ky-reporter-dropdown');
+    if (!reporterSearch || !reporterDrop) return;
+
+    reporterSearch.addEventListener('input', () => {
+        clearTimeout(_reporterSearchTimer);
+        const q = reporterSearch.value.trim();
+        if (!q) {
+            reporterDrop.classList.add('hidden');
+            return;
+        }
+
+        _reporterSearchTimer = setTimeout(async () => {
+            try {
+                const res = await API.get(`/ky/employees?q=${encodeURIComponent(q)}`);
+                _reporterSearchResults = normalizeApiArray(res?.data ?? res);
+                reporterDrop.innerHTML = _reporterSearchResults.length
+                    ? _reporterSearchResults.map((emp, i) => `
+                        <button type="button" data-reporter-idx="${i}"
+                                class="w-full text-left px-4 py-2.5 text-sm hover:bg-indigo-50 transition-colors border-b border-slate-50 last:border-0">
+                            <span class="font-semibold text-slate-700">${escHtml(emp.EmployeeName || '')}</span>
+                            <span class="text-xs text-slate-400 ml-2">${escHtml(emp.EmployeeID || '')}</span>
+                            <span class="text-xs text-slate-400 ml-1">· ${escHtml(emp.Department || '-')}</span>
+                        </button>`).join('')
+                    : `<div class="px-4 py-3 text-xs text-slate-400">ไม่พบพนักงานจากมาสเตอร์</div>`;
+                reporterDrop.classList.remove('hidden');
+            } catch {
+                reporterDrop.classList.add('hidden');
+            }
+        }, 300);
+    });
+
+    reporterDrop.addEventListener('click', (e) => {
+        const btn = e.target.closest('[data-reporter-idx]');
+        if (!btn) return;
+        const reporter = _reporterSearchResults[parseInt(btn.dataset.reporterIdx)];
+        if (!reporter) return;
+        _submitReporter = reporter;
+        reporterSearch.value = `${reporter.EmployeeName || ''} (${reporter.EmployeeID || ''})`;
+        reporterDrop.classList.add('hidden');
+        renderKySubmitReporter();
+    });
+
+    reporterSearch.addEventListener('keydown', (e) => {
+        if (e.key !== 'Escape') return;
+        reporterDrop.classList.add('hidden');
+    });
+
+    document.getElementById('ky-form')?.querySelector('[name="ActivityDate"]')?.addEventListener('change', async () => {
+        const activityDate = document.getElementById('ky-form')?.querySelector('[name="ActivityDate"]')?.value;
+        const year = activityDate ? new Date(activityDate).getFullYear() : new Date().getFullYear();
+        await _fetchProgramConfig(year);
+        const deptSelect = document.getElementById('ky-main-dept');
+        const previousDept = deptSelect?.value || _submitReporter?.Department || (TSHSession.getUser() || {}).department || '';
+        if (deptSelect) {
+            deptSelect.innerHTML = `<option value="">-- Select Department --</option>${buildKyDepartmentOptions(previousDept, year)}`;
+            deptSelect.value = previousDept;
+        }
+        const dept = deptSelect?.value || previousDept;
+        renderKySafetyUnitSelect(dept);
+        if (dept) refreshKySubmitProgress(dept);
+    });
+}
+
+function renderKySafetyUnitSelect(department) {
+    const wrap = document.getElementById('ky-safety-unit-wrap');
+    if (!wrap) return;
+    const activityDate = document.getElementById('ky-form')?.querySelector('[name="ActivityDate"]')?.value;
+    const year = activityDate ? new Date(activityDate).getFullYear() : new Date().getFullYear();
+    const units = getKySafetyUnitsForDept(department, year);
+
+    if (!department) {
+        wrap.innerHTML = `
+            <div class="rounded-xl border border-slate-200 bg-slate-50 p-4 text-sm text-slate-500">
+                เลือกพนักงานผู้รายงานก่อน ระบบจะแสดง Safety Unit ตาม Program Config ของแผนกนั้น
+            </div>`;
+        return;
+    }
+
+    if (!units.length) {
+        wrap.innerHTML = `
+            <div class="rounded-xl border border-slate-200 bg-slate-50 p-4 text-sm text-slate-500">
+                แผนก ${escHtml(department)} ยังไม่ได้ผูก Safety Unit ใน Program Config — ระบบจะนับเป้าหมายระดับแผนก
+            </div>`;
+        return;
+    }
+
+    wrap.innerHTML = `
+        <div class="rounded-xl border border-indigo-100 bg-indigo-50/50 p-4">
+            <div class="flex flex-col lg:flex-row lg:items-center justify-between gap-3">
+                <div>
+                    <label class="block text-sm font-bold text-slate-800 mb-1" for="ky-safety-unit-select">Safety Unit <span class="text-red-500">*</span></label>
+                    <p class="text-xs text-slate-500">เลือกหน่วยงานย่อยที่ทำกิจกรรม KY — 1 Safety Unit ต้องทำตามเป้าหมายรายปีที่ Admin ตั้งไว้</p>
+                </div>
+                <span class="px-3 py-1.5 rounded-full bg-white border border-indigo-100 text-xs font-bold text-indigo-700">${units.length} Safety Units</span>
+            </div>
+            <select id="ky-safety-unit-select" name="SafetyUnit" class="form-input w-full mt-3" required>
+                <option value="">— เลือก Safety Unit —</option>
+                ${units.map(unit => `<option value="${escHtml(unit)}">${escHtml(unit)}</option>`).join('')}
+            </select>
+        </div>`;
+
+    document.getElementById('ky-safety-unit-select')?.addEventListener('change', () => {
+        refreshKySubmitProgress(department);
+        renderKySubmitSummary();
+    });
+    renderKySubmitSummary();
+}
+
+function renderKySubmitReporter() {
+    const idInput = document.getElementById('ky-reporter-id');
+    const card = document.getElementById('ky-submit-reporter-card');
+    const search = document.getElementById('ky-reporter-search');
+    if (!idInput || !card) return;
+
+    if (!_submitReporter) {
+        idInput.value = '';
+        if (search) search.value = '';
+        card.innerHTML = 'ยังไม่ได้เลือกพนักงาน ระบบจะบันทึกด้วยบัญชี Admin ปัจจุบัน';
+        const note = document.getElementById('ky-submit-progress-note');
+        if (note) note.textContent = '';
+        const currentUser = TSHSession.getUser() || {};
+        const deptSelect = document.getElementById('ky-main-dept');
+        const dept = deptSelect?.value || currentUser.department || '';
+        if (deptSelect && !deptSelect.value && currentUser.department) deptSelect.value = currentUser.department;
+        updateKyReporterEmailStatus(_submitEmailProfile?.CompanyEmail || '', 'current');
+        renderKySafetyUnitSelect(dept);
+        if (dept) refreshKySubmitProgress(dept);
+        renderKySubmitSummary();
+        return;
+    }
+
+    idInput.value = _submitReporter.EmployeeID || '';
+    updateKyReporterEmailStatus(_submitReporter.CompanyEmail || '', 'selected');
+    card.innerHTML = `
+        <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
+            <div>
+                <p class="font-bold text-slate-800">${escHtml(_submitReporter.EmployeeName || '-')}</p>
+                <p class="text-xs text-slate-500">${escHtml(_submitReporter.EmployeeID || '-')} · ${escHtml(_submitReporter.Department || '-')} ${_submitReporter.Position ? `· ${escHtml(_submitReporter.Position)}` : ''}</p>
+            </div>
+            <button type="button" id="ky-clear-reporter"
+                    class="px-2.5 py-1 rounded-lg border border-slate-200 text-xs font-semibold text-slate-600 hover:border-red-200 hover:text-red-600">
+                ล้างการเลือก
+            </button>
+        </div>`;
+    document.getElementById('ky-clear-reporter')?.addEventListener('click', () => {
+        _submitReporter = null;
+        renderKySubmitReporter();
+    });
+    const deptSelect = document.getElementById('ky-main-dept');
+    const reporterDept = _submitReporter.Department || '';
+    if (deptSelect && reporterDept) deptSelect.value = reporterDept;
+    const dept = deptSelect?.value || reporterDept;
+    renderKySafetyUnitSelect(dept);
+    if (dept) refreshKySubmitProgress(dept);
+    renderKySubmitSummary();
+}
+
+async function refreshKySubmitProgress(department) {
+    const activityDate = document.getElementById('ky-form')?.querySelector('[name="ActivityDate"]')?.value;
+    const year = activityDate ? new Date(activityDate).getFullYear() : new Date().getFullYear();
+    if (!department || !year) return;
+    const selectedUnit = document.getElementById('ky-safety-unit-select')?.value || '';
+
+    try {
+        const unitParam = selectedUnit ? `&safetyUnit=${encodeURIComponent(selectedUnit)}` : '';
+        const chk = await API.get(`/ky/check?dept=${encodeURIComponent(department)}&year=${year}${unitParam}`);
+        const done = chk?.yearlyDone ?? chk?.count ?? 0;
+        const target = chk?.yearlyTarget ?? chk?.target ?? 12;
+        const pct = target > 0 ? Math.min(100, Math.round((done / target) * 100)) : 0;
+        const color = pct >= 100 ? '#10b981' : pct >= 50 ? '#f59e0b' : '#ef4444';
+        const countEl = document.getElementById('ky-submit-progress-count');
+        const barEl = document.getElementById('ky-submit-progress-bar');
+        const pctEl = document.getElementById('ky-submit-progress-pct');
+        const noteEl = document.getElementById('ky-submit-progress-note');
+        if (countEl) {
+            countEl.textContent = `${done} / ${target} ครั้ง`;
+            countEl.style.color = color;
+        }
+        if (barEl) {
+            barEl.style.width = `${pct}%`;
+            barEl.style.background = color;
+        }
+        if (pctEl) {
+            pctEl.textContent = `${pct}%`;
+            pctEl.style.color = color;
+        }
+        if (noteEl) {
+            const scope = selectedUnit ? `Safety Unit ${selectedUnit}` : `แผนก ${department}`;
+            noteEl.textContent = chk?.submittedThisMonth
+                ? `${scope} มีรายการ KY ของเดือนปัจจุบันแล้ว ระบบจะตรวจซ้ำตามวันที่กิจกรรมอีกครั้งตอนบันทึก`
+                : `ความคืบหน้าปี ${year} ของ${scope}`;
+            noteEl.className = `text-xs ${chk?.submittedThisMonth ? 'text-amber-700' : 'text-slate-500'}`;
+        }
+    } catch (_) {}
+}
+
 function _addParticipant(name, empId) {
     if (!name) return;
     if (_participants.some(p => p.name === name)) return;

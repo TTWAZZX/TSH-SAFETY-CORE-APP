@@ -5141,6 +5141,1670 @@ async function showTrainingAuditLogModal(scope = 'current') {
     await loadLogs();
 }
 
+async function renderTrainingMatrix(container) {
+    if (!container) return;
+    const yearOpts = [0,1,2,3].map(i => {
+        const y = new Date().getFullYear() - i;
+        return `<option value="${y}" ${y === _tmFilter.year ? 'selected' : ''}>${y}</option>`;
+    }).join('');
+    const deptOpts = _departments.map(d => `<option value="${escHtml(d)}" ${_tmFilter.dept === d ? 'selected' : ''}>${escHtml(d)}</option>`).join('');
+    container.innerHTML = `
+        <div class="space-y-4">
+            <div class="ds-filter-bar flex flex-wrap gap-3 items-center justify-between">
+                <div class="flex flex-wrap items-center gap-2">
+                    <label class="text-xs font-semibold text-slate-500" for="tm-filter-year">ปี / Year</label>
+                    <select id="tm-filter-year" class="form-input py-1.5 text-sm w-24">${yearOpts}</select>
+                    ${_isAdmin ? `
+                    <select id="tm-filter-dept" class="form-input py-1.5 text-sm min-w-[180px]">
+                        <option value="all" ${_tmFilter.dept === 'all' ? 'selected' : ''}>ทุกแผนก / All Departments</option>
+                        ${deptOpts}
+                    </select>` : `
+                    <span class="px-3 py-2 rounded-lg bg-slate-50 border border-slate-200 text-sm font-semibold text-slate-600">
+                        ${escHtml(_currentUser.department || _currentUser.Department || 'แผนกของฉัน / My Department')}
+                    </span>`}
+                </div>
+                <div class="flex items-center gap-2">
+                    <button id="btn-tm-refresh" type="button"
+                            class="px-3 py-2 rounded-lg text-sm font-bold text-slate-600 border border-slate-200 hover:bg-slate-50">
+                        รีเฟรช
+                    </button>
+                    <button id="btn-tm-audit-log" type="button"
+                            class="px-3 py-2 rounded-lg text-sm font-bold text-slate-600 border border-slate-200 hover:bg-slate-50">
+                        Log
+                    </button>
+                    <button id="btn-tm-export-excel" type="button"
+                            class="px-3 py-2 rounded-lg text-sm font-bold text-slate-600 border border-slate-200 hover:bg-slate-50">
+                        Excel
+                    </button>
+                    <button id="btn-tm-export-pdf" type="button"
+                            class="px-3 py-2 rounded-lg text-sm font-bold text-slate-600 border border-slate-200 hover:bg-slate-50">
+                        PDF
+                    </button>
+                    ${_isAdmin ? `<button id="btn-tm-course-master" type="button"
+                            class="px-3 py-2 rounded-lg text-sm font-bold text-indigo-700 border border-indigo-200 hover:bg-indigo-50">
+                        คลังรายวิชา
+                    </button>
+                    <button id="btn-tm-add-curriculum" type="button"
+                            class="px-4 py-2 rounded-lg text-sm font-bold text-white"
+                            style="background:linear-gradient(135deg,#6366f1,#0284c7)">
+                        เพิ่มหลักสูตร / Add
+                    </button>` : `<span class="px-3 py-2 rounded-lg text-xs font-bold text-slate-500 bg-slate-50 border border-slate-200">User: จัดการพนักงาน / Employees only</span>`}
+                </div>
+            </div>
+            <div id="tm-kpi-strip" class="grid grid-cols-2 lg:grid-cols-5 gap-3">
+                ${Array(5).fill(0).map(() => `
+                <div class="ds-metric-card flex items-center gap-3 animate-pulse">
+                    <div class="w-9 h-9 rounded-xl bg-slate-100 flex-shrink-0"></div>
+                    <div class="flex-1 min-w-0">
+                        <div class="h-6 bg-slate-100 rounded mb-2 w-12"></div>
+                        <div class="h-3 bg-slate-50 rounded w-20"></div>
+                    </div>
+                </div>`).join('')}
+            </div>
+            <div id="tm-selection-summary"
+                 class="rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-500">
+                กำลังโหลด Scope... / Loading selection...
+            </div>
+            <div class="grid grid-cols-1 xl:grid-cols-[380px_1fr] gap-4">
+                <div class="ds-section p-0 overflow-hidden">
+                    <div class="px-4 py-3 border-b border-slate-100 flex items-center justify-between gap-2">
+                        <div>
+                            <p class="text-[11px] font-bold uppercase tracking-wider text-indigo-500">หลักสูตร / Curriculum</p>
+                            <h3 class="text-sm font-black text-slate-700">หลักสูตร / Curriculum</h3>
+                        </div>
+                    </div>
+                    <div class="px-3 pt-3">
+                        <div class="relative">
+                            <input id="tm-curriculum-search" type="text" class="form-input w-full pl-9 py-2 text-sm"
+                                   value="${escHtml(_tmSearch.curriculum)}"
+                                   placeholder="ค้นหาหลักสูตร / Search curriculum">
+                            <svg class="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400 pointer-events-none" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/>
+                            </svg>
+                        </div>
+                    </div>
+                    <div id="tm-curriculum-list" class="p-3 space-y-2 min-h-[280px]">
+                        <div class="text-center py-8 text-slate-400 text-sm">กำลังโหลด... / Loading...</div>
+                    </div>
+                </div>
+                <div class="ds-section p-0 overflow-hidden">
+                    <div id="tm-detail-shell" class="min-h-[520px]">
+                        <div class="p-6 text-center text-sm text-slate-400">เลือกหลักสูตร / Select a curriculum</div>
+                    </div>
+                </div>
+            </div>
+        </div>`;
+    await fetchTrainingMatrix();
+}
+
+function renderTrainingMatrixKpis() {
+    const el = document.getElementById('tm-kpi-strip');
+    if (!el) return;
+
+    const curriculumTotal = _tmCurriculums.length;
+    const courseTotal = _tmCurriculums.reduce((sum, c) => sum + (parseInt(c.CourseCount, 10) || 0), 0);
+    const employeeTotal = _tmCurriculums.reduce((sum, c) => sum + (parseInt(c.AssignedCount, 10) || 0), 0);
+    const selectedTransferred = _tmAssignments.filter(a => a.Status === 'Transferred').length;
+    const inactiveTotal = _tmCurriculums.filter(c => Number(c.IsActive) !== 1).length
+        + _tmCourses.filter(c => Number(c.IsActive) !== 1).length;
+    const scopeDept = _isAdmin
+        ? (_tmFilter.dept === 'all' ? 'ทุกแผนก / All Depts' : _tmFilter.dept)
+        : (_currentUser.department || _currentUser.Department || 'แผนกของฉัน / My Dept');
+    const selectedCourse = _tmCourses.find(c => c.id === _tmSelectedCourseId);
+
+    const cards = [
+        {
+            label: 'หลักสูตร / Curr.',
+            sub: `${_tmFilter.year} · ${scopeDept}`,
+            value: curriculumTotal,
+            color: '#6366f1',
+            icon: '<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5S19.832 5.477 21 6.253v13C19.832 18.477 18.246 18 16.5 18s-3.332.477-4.5 1.253"/>',
+        },
+        {
+            label: 'รายวิชา / Course',
+            sub: 'รวมใน Scope',
+            value: courseTotal,
+            color: '#0284c7',
+            icon: '<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5h6m-6 4h6m-7 4h8m-9 6h10a2 2 0 002-2V7.5L14.5 3H7a2 2 0 00-2 2v12a2 2 0 002 2z"/>',
+        },
+        {
+            label: 'พนักงาน / Emp.',
+            sub: 'Assigned ทั้งหมด',
+            value: employeeTotal,
+            color: '#059669',
+            icon: '<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 20h5v-2a4 4 0 00-4-4h-1M9 20H4v-2a4 4 0 014-4h1m8-4a4 4 0 10-8 0 4 4 0 008 0z"/>',
+        },
+        {
+            label: 'ย้ายแล้ว / Transferred',
+            sub: selectedCourse ? `${selectedCourse.CourseCode || '-'} · วิชานี้` : 'เลือกรายวิชา',
+            value: selectedTransferred,
+            color: '#0ea5e9',
+            icon: '<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 16V4m0 0L3 8m4-4l4 4m6 0v12m0 0l4-4m-4 4l-4-4"/>',
+        },
+        {
+            label: 'ปิดใช้งาน / Inactive',
+            sub: 'หลักสูตร + วิชา',
+            value: inactiveTotal,
+            color: inactiveTotal ? '#e11d48' : '#64748b',
+            icon: '<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M18.364 18.364A9 9 0 005.636 5.636m12.728 12.728A9 9 0 015.636 5.636m12.728 12.728L5.636 5.636"/>',
+        },
+    ];
+
+    el.innerHTML = cards.map(card => `
+        <div class="ds-metric-card flex items-center gap-3 min-w-0">
+            <div class="w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0"
+                 style="background:${card.color}18;color:${card.color}">
+                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">${card.icon}</svg>
+            </div>
+            <div class="min-w-0">
+                <p class="text-xl font-black text-slate-800 leading-tight">${card.value}</p>
+                <p class="text-[11px] font-bold text-slate-600 truncate">${escHtml(card.label)}</p>
+                <p class="text-[10px] text-slate-400 truncate">${escHtml(card.sub)}</p>
+            </div>
+        </div>
+    `).join('');
+}
+
+function renderTrainingMatrixBreadcrumb() {
+    const el = document.getElementById('tm-selection-summary');
+    if (!el) return;
+
+    const iconPaths = {
+        calendar: '<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7V3m8 4V3M5 11h14M6 5h12a2 2 0 012 2v12a2 2 0 01-2 2H6a2 2 0 01-2-2V7a2 2 0 012-2z"/>',
+        building: '<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 21h18M5 21V7l7-4 7 4v14M9 21v-6h6v6M9 9h.01M15 9h.01M9 13h.01M15 13h.01"/>',
+        book: '<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5S19.832 5.477 21 6.253v13C19.832 18.477 18.246 18 16.5 18s-3.332.477-4.5 1.253"/>',
+        file: '<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5h6m-6 4h6m-7 4h8m-9 6h10a2 2 0 002-2V7.5L14.5 3H7a2 2 0 00-2 2v12a2 2 0 002 2z"/>',
+        users: '<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 20h5v-2a4 4 0 00-4-4h-1M9 20H4v-2a4 4 0 014-4h1m8-4a4 4 0 10-8 0 4 4 0 008 0z"/>',
+        shield: '<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 3l7 4v5c0 4.5-3 8.5-7 9.8C8 20.5 5 16.5 5 12V7l7-4zM9.5 12l1.8 1.8 3.7-4"/>',
+        user: '<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM4 21a8 8 0 0116 0"/>'
+    };
+    const curriculum = _tmCurriculums.find(c => c.id === _tmSelectedCurriculumId);
+    const dept = curriculum?.Department
+        || (_isAdmin ? (_tmFilter.dept === 'all' ? 'All Departments' : _tmFilter.dept) : (_currentUser.department || _currentUser.Department || 'My Department'));
+    const activeCount = _tmAssignments.filter(a => a.Status === 'Assigned').length;
+    const courseCount = _tmCourses.filter(c => Number(c.IsActive) !== 0).length;
+    const roleLabel = _isAdmin ? 'Admin' : 'User';
+    const curriculumLabel = curriculum
+        ? `${curriculum.CurriculumCode || '-'} ${curriculum.CurriculumTitle || ''}`.trim()
+        : 'เลือกหลักสูตร';
+    const contextChip = (iconName, value, cls = 'border-slate-200 bg-white text-slate-700', iconCls = 'bg-slate-100 text-slate-600') => `
+        <span class="inline-flex items-center gap-2 px-2.5 py-1.5 rounded-xl border text-xs font-black shadow-sm ${cls}">
+            <span class="inline-flex items-center justify-center w-7 h-7 rounded-lg ${iconCls}">
+                <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">${iconPaths[iconName] || iconPaths.file}</svg>
+            </span>
+            <span class="truncate max-w-[220px]">${escHtml(value || '-')}</span>
+        </span>`;
+
+    el.innerHTML = `
+        <div class="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-2 rounded-2xl border border-white/80 bg-gradient-to-r from-white via-slate-50 to-emerald-50/70 px-3 py-3 shadow-[0_10px_28px_rgba(15,23,42,0.08)] ring-1 ring-slate-900/5">
+            <div class="flex flex-wrap items-center gap-2 min-w-0">
+                ${contextChip('calendar', String(_tmFilter.year || '-'), 'border-indigo-100 bg-white text-indigo-700', 'bg-indigo-50 text-indigo-600')}
+                ${contextChip('building', dept || '-', 'border-sky-100 bg-white text-sky-700', 'bg-sky-50 text-sky-600')}
+                ${contextChip('book', curriculumLabel, curriculum ? 'border-violet-100 bg-white text-violet-700' : 'border-slate-200 bg-white text-slate-500', curriculum ? 'bg-violet-50 text-violet-600' : 'bg-slate-100 text-slate-500')}
+            </div>
+            <div class="flex flex-wrap items-center gap-2 shrink-0">
+                ${contextChip('file', `${courseCount} วิชา`, 'border-slate-200 bg-white text-slate-700', 'bg-slate-100 text-slate-600')}
+                ${contextChip('users', `${activeCount} คน`, 'border-emerald-100 bg-white text-emerald-700', 'bg-emerald-50 text-emerald-600')}
+                ${contextChip(_isAdmin ? 'shield' : 'user', roleLabel, _isAdmin ? 'border-amber-100 bg-white text-amber-700' : 'border-slate-200 bg-white text-slate-600', _isAdmin ? 'bg-amber-50 text-amber-600' : 'bg-slate-100 text-slate-600')}
+            </div>
+        </div>`;
+}
+
+function renderTrainingDetailShell() {
+    const el = document.getElementById('tm-detail-shell');
+    if (!el) return;
+    const curriculum = _tmCurriculums.find(c => c.id === _tmSelectedCurriculumId);
+    if (!curriculum) {
+        el.innerHTML = `<div class="p-6 text-center text-sm text-slate-400">เลือกหลักสูตร / Select a curriculum</div>`;
+        return;
+    }
+    const courseCount = _tmCourses.filter(c => Number(c.IsActive) !== 0).length;
+    const assignedCount = _tmAssignments.filter(a => a.Status === 'Assigned').length;
+    const tabBtn = (tab, label) => `
+        <button type="button" class="tm-detail-tab px-3 py-2 text-sm font-bold border-b-2 ${_tmDetailTab === tab ? 'border-indigo-500 text-indigo-700' : 'border-transparent text-slate-500 hover:text-slate-700'}"
+                data-tm-detail-tab="${tab}">
+            ${label}
+        </button>`;
+    el.innerHTML = `
+        <div class="px-4 py-4 border-b border-slate-100">
+            <div class="flex flex-col lg:flex-row lg:items-start lg:justify-between gap-3">
+                <div class="min-w-0">
+                    <p class="text-[11px] font-bold uppercase tracking-wider text-indigo-500">รายละเอียดหลักสูตร / Curriculum detail</p>
+                    <h3 class="mt-1 text-lg font-black text-slate-800 truncate" title="${escHtml(curriculum.CurriculumTitle || '-')}">
+                        ${escHtml(curriculum.CurriculumCode || '-')} - ${escHtml(curriculum.CurriculumTitle || '-')}
+                    </h3>
+                    <p class="mt-1 text-xs font-semibold text-slate-500">${escHtml(curriculum.Department || '-')} · ${escHtml(String(curriculum.Year || _tmFilter.year))}</p>
+                </div>
+                <div class="flex flex-wrap gap-2">
+                    <span class="px-2.5 py-1 rounded-full bg-sky-50 border border-sky-200 text-[11px] font-bold text-sky-700">${courseCount} วิชา / Courses</span>
+                    <span class="px-2.5 py-1 rounded-full bg-emerald-50 border border-emerald-200 text-[11px] font-bold text-emerald-700">${assignedCount} คน / Employees</span>
+                    ${!courseCount ? '<span class="px-2.5 py-1 rounded-full bg-amber-50 border border-amber-200 text-[11px] font-bold text-amber-700">เพิ่มรายวิชาก่อน Assign</span>' : ''}
+                </div>
+            </div>
+            <div class="mt-4 flex flex-wrap gap-2 border-b border-slate-100">
+                ${tabBtn('courses', 'รายวิชา / Courses')}
+                ${tabBtn('employees', 'พนักงาน / Employees')}
+            </div>
+        </div>
+        <div id="tm-detail-body" class="p-4"></div>`;
+    renderTrainingDetailBody();
+}
+
+function renderTrainingDetailBody() {
+    const body = document.getElementById('tm-detail-body');
+    if (!body) return;
+    const courseCount = _tmCourses.filter(c => Number(c.IsActive) !== 0).length;
+    if (_tmDetailTab === 'employees') {
+        const readyToAssign = _tmSelectedCurriculumId && courseCount;
+        body.innerHTML = `
+            <div class="grid grid-cols-1 2xl:grid-cols-[minmax(0,1fr)_360px] gap-4">
+                <div class="min-w-0">
+            <div class="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-3 mb-3">
+                <div class="relative flex-1">
+                    <input id="tm-assignment-search" type="text" class="form-input w-full pl-9 py-2 text-sm"
+                           value="${escHtml(_tmSearch.employee)}"
+                           placeholder="ค้นหาพนักงาน / Search employees"
+                           ${_tmSelectedCurriculumId ? '' : 'disabled'}>
+                    <svg class="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400 pointer-events-none" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/>
+                    </svg>
+                </div>
+                <button id="btn-tm-assign-employees" type="button"
+                        class="px-3 py-2 rounded-lg text-sm font-bold text-white disabled:opacity-40"
+                        style="background:#059669" ${readyToAssign && _tmInlineSelectedEmployees.size ? '' : 'disabled'}>
+                    เพิ่มที่เลือก / Assign
+                </button>
+                <button id="btn-tm-toggle-employee-master" type="button"
+                        class="px-3 py-2 rounded-lg text-sm font-bold text-slate-600 border border-slate-200 hover:bg-slate-50">
+                    ${_tmShowEmployeeMaster ? 'ซ่อน Employee Master' : 'เลือกพนักงาน'}
+                </button>
+            </div>
+            ${!courseCount ? '<div class="mb-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs font-bold text-amber-800">ต้องเพิ่มรายวิชาในหลักสูตรก่อน จึงจะเพิ่มพนักงานได้ / Add courses first</div>' : ''}
+            <div class="overflow-x-auto border border-slate-100 rounded-xl">
+                <table class="ds-table text-sm">
+                    <thead>
+                        <tr class="bg-slate-50 text-left text-xs font-semibold text-slate-500 uppercase tracking-wider">
+                            <th class="px-4 py-3">พนักงาน / Employee</th>
+                            <th class="px-4 py-3">แผนก / Department</th>
+                            <th class="px-4 py-3">สถานะ / Status</th>
+                            <th class="px-4 py-3 text-right"></th>
+                        </tr>
+                    </thead>
+                    <tbody id="tm-assignment-tbody">${loadingRow(4)}</tbody>
+                </table>
+            </div>
+                </div>
+                ${_tmShowEmployeeMaster ? `<div class="rounded-xl border border-slate-200 bg-white overflow-hidden">
+                    <div class="px-3 py-2 border-b border-slate-100">
+                        <p class="text-[11px] font-bold uppercase tracking-wider text-indigo-500">Employee Master</p>
+                        <p class="text-sm font-black text-slate-700">เลือกพนักงาน / Pick employees</p>
+                    </div>
+                    <div id="tm-inline-employee-master" class="max-h-[430px] overflow-y-auto"></div>
+                    <div id="tm-inline-employee-summary" class="border-t border-slate-100 px-3 py-2 text-xs font-bold text-slate-500">
+                        เลือกแล้ว 0 คน / 0 selected
+                    </div>
+                </div>` : ''}
+            </div>`;
+        renderTrainingAssignments();
+        renderInlineEmployeeMaster();
+        return;
+    }
+
+    body.innerHTML = `
+        <div class="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-3 mb-3">
+            <div class="relative flex-1">
+                <input id="tm-course-search" type="text" class="form-input w-full pl-9 py-2 text-sm"
+                       value="${escHtml(_tmSearch.course)}"
+                       placeholder="ค้นหารายวิชา / Search course"
+                       ${_tmSelectedCurriculumId ? '' : 'disabled'}>
+                <svg class="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400 pointer-events-none" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/>
+                </svg>
+            </div>
+            ${_isAdmin ? `<button id="btn-tm-add-course" type="button"
+                    class="px-3 py-2 rounded-lg text-sm font-bold text-indigo-700 border border-indigo-200 hover:bg-indigo-50 disabled:opacity-40"
+                    ${_tmSelectedCurriculumId ? '' : 'disabled'}>
+                เลือกจากคลังรายวิชา / Add
+            </button>` : `<span class="px-3 py-2 rounded-lg text-xs font-bold text-slate-500 bg-slate-50 border border-slate-200">อ่านอย่างเดียว / Read only</span>`}
+        </div>
+        <div id="tm-course-list" class="space-y-4 min-h-[280px]"></div>`;
+    renderTrainingCourses();
+}
+
+async function fetchTrainingMatrix() {
+    const list = document.getElementById('tm-curriculum-list');
+    if (list) list.innerHTML = `<div class="text-center py-8 text-slate-400 text-sm">กำลังโหลด... / Loading...</div>`;
+    try {
+        const p = new URLSearchParams();
+        p.set('year', _tmFilter.year);
+        if (_tmFilter.dept !== 'all') p.set('dept', _tmFilter.dept);
+        const res = await API.get(`/fourm/training-curriculums?${p}`);
+        _tmCurriculums = normalizeApiArray(res?.data ?? res);
+        if (!_tmCurriculums.some(c => c.id === _tmSelectedCurriculumId)) {
+            _tmSelectedCurriculumId = _tmCurriculums[0]?.id || null;
+        }
+        renderTrainingMatrixKpis();
+        renderTrainingMatrixBreadcrumb();
+        await renderTrainingCurriculums();
+        if (_tmSelectedCurriculumId) await fetchTrainingCourses(_tmSelectedCurriculumId);
+        else {
+            _tmCourses = [];
+            _tmAssignments = [];
+            renderTrainingDetailShell();
+            renderTrainingMatrixKpis();
+            renderTrainingMatrixBreadcrumb();
+        }
+    } catch (err) {
+        if (list) list.innerHTML = `<div class="p-4 text-sm text-rose-600">${escHtml(err.message || 'โหลดหลักสูตรไม่สำเร็จ / Cannot load curriculums')}</div>`;
+    }
+}
+
+async function fetchTrainingCourseMaster({ force = false } = {}) {
+    if (_tmCourseMaster.length && !force) return _tmCourseMaster;
+    const res = await API.get('/fourm/training-course-master');
+    _tmCourseMaster = normalizeApiArray(res?.data ?? res);
+    return _tmCourseMaster;
+}
+
+async function fetchTrainingEmployeeMaster({ force = false } = {}) {
+    if (!_tmEmployees.length || force) {
+        const res = await API.get('/employees');
+        _tmEmployees = normalizeApiArray(res?.data ?? res);
+    }
+    const curriculum = _tmCurriculums.find(c => c.id === _tmSelectedCurriculumId);
+    if (curriculum) {
+        const scopeParams = new URLSearchParams();
+        scopeParams.set('year', _tmFilter.year);
+        if (curriculum.Department) scopeParams.set('dept', curriculum.Department);
+        const scopeRes = await API.get(`/fourm/training-employee-scopes?${scopeParams}`).catch(() => ({ data: [] }));
+        _tmEmployeeScopes = normalizeApiArray(scopeRes?.data ?? scopeRes);
+    }
+    return _tmEmployees;
+}
+
+function _tmTextMatches(row, keys, q) {
+    const needle = (q || '').trim().toLowerCase();
+    if (!needle) return true;
+    return keys.some(key => String(row?.[key] || '').toLowerCase().includes(needle));
+}
+
+async function renderTrainingCurriculums() {
+    const el = document.getElementById('tm-curriculum-list');
+    if (!el) return;
+    const rows = _tmCurriculums.filter(c => _tmTextMatches(c, ['CurriculumCode', 'CurriculumTitle', 'Department', 'Notes'], _tmSearch.curriculum));
+    if (!_tmCurriculums.length) {
+        el.innerHTML = `<div class="rounded-xl border border-dashed border-slate-200 bg-slate-50 p-5 text-center text-sm text-slate-400">ยังไม่มีหลักสูตรใน Scope นี้ / No curriculum in selected scope</div>`;
+        return;
+    }
+    if (!rows.length) {
+        el.innerHTML = `<div class="rounded-xl border border-dashed border-slate-200 bg-slate-50 p-5 text-center text-sm text-slate-400">ไม่พบหลักสูตรที่ค้นหา / No matching curriculum</div>`;
+        return;
+    }
+    el.innerHTML = rows.map(c => {
+        const active = c.id === _tmSelectedCurriculumId;
+        return `
+        <button type="button" class="tm-curriculum-item w-full text-left rounded-xl border p-3 transition-all ${active ? 'border-indigo-300 bg-indigo-50' : 'border-slate-100 hover:border-slate-200 hover:bg-slate-50'}"
+                data-id="${c.id}">
+            <div class="flex items-start justify-between gap-2">
+                <div class="min-w-0">
+                    <p class="text-xs font-mono text-slate-400">${escHtml(c.CurriculumCode || '-')}</p>
+                    <p class="text-sm font-black text-slate-800 truncate" title="${escHtml(c.CurriculumTitle || '-')}">${escHtml(c.CurriculumTitle || '-')}</p>
+                    <p class="text-xs text-slate-500 mt-1 truncate">${escHtml(c.Department || '-')}</p>
+                </div>
+                <span class="text-xs font-bold text-indigo-700 bg-white/70 rounded-full px-2 py-1">${parseInt(c.AssignedCount) || 0}</span>
+            </div>
+            <div class="flex items-center justify-between mt-2 text-[11px] text-slate-400">
+                <span>${parseInt(c.CourseCount) || 0} วิชา / courses</span>
+                <span>${c.IsActive ? 'ใช้งาน / Active' : 'ปิด / Inactive'}</span>
+            </div>
+            ${_isAdmin ? `<div class="flex justify-end gap-1.5 mt-2">
+                <span class="btn-tm-edit-curriculum px-2 py-1 rounded-lg text-[11px] font-bold text-indigo-700 hover:bg-white" data-id="${c.id}">แก้ไข / Edit</span>
+                <span class="btn-tm-disable-curriculum px-2 py-1 rounded-lg text-[11px] font-bold text-rose-600 hover:bg-white" data-id="${c.id}" data-title="${escHtml(c.CurriculumTitle || '')}">ปิด / Disable</span>
+            </div>` : ''}
+        </button>`;
+    }).join('');
+}
+
+async function fetchTrainingCourses(curriculumId) {
+    const el = document.getElementById('tm-course-list');
+    if (el) el.innerHTML = `<div class="text-center py-8 text-slate-400 text-sm">กำลังโหลด... / Loading...</div>`;
+    const btn = document.getElementById('btn-tm-add-course');
+    if (btn) btn.disabled = !curriculumId;
+    try {
+        const [res] = await Promise.all([
+            API.get(`/fourm/training-curriculums/${curriculumId}/courses`),
+            fetchTrainingCourseMaster({ force: true }),
+            fetchTrainingEmployeeMaster({ force: true }),
+        ]);
+        _tmCourses = normalizeApiArray(res?.data ?? res);
+        _tmSelectedCourseId = null;
+        renderTrainingMatrixKpis();
+        renderTrainingMatrixBreadcrumb();
+        await fetchTrainingAssignments(curriculumId);
+        renderTrainingDetailShell();
+    } catch (err) {
+        if (el) el.innerHTML = `<div class="p-4 text-sm text-rose-600">${escHtml(err.message || 'โหลดรายวิชาไม่สำเร็จ / Cannot load courses')}</div>`;
+    }
+}
+
+function renderTrainingCourses() {
+    const el = document.getElementById('tm-course-list');
+    if (!el) return;
+    const search = document.getElementById('tm-course-search');
+    if (search) search.disabled = !_tmSelectedCurriculumId;
+    if (!_tmSelectedCurriculumId) {
+        el.innerHTML = `<div class="text-center py-8 text-slate-400 text-sm">เลือกหลักสูตรก่อน / Select a curriculum</div>`;
+        return;
+    }
+    const rows = _tmCourses.filter(c => _tmTextMatches(c, ['CourseCode', 'CourseTitle'], _tmSearch.course));
+    const linkedCodes = new Set(_tmCourses.filter(c => Number(c.IsActive) !== 0).map(c => String(c.CourseCode || '').toLowerCase()));
+    const masterRows = _tmCourseMaster
+        .filter(m => _tmTextMatches(m, ['CourseCode', 'CourseTitle', 'Category'], _tmSearch.course))
+        .slice(0, _tmShowCourseMaster ? 120 : 8);
+    const linkedHtml = rows.length ? rows.map(c => {
+        const active = c.id === _tmSelectedCourseId;
+        return `
+        <button type="button" class="tm-course-item w-full text-left rounded-xl border p-3 transition-all ${active ? 'border-sky-300 bg-sky-50' : 'border-slate-100 hover:border-slate-200 hover:bg-slate-50'}"
+                data-id="${c.id}">
+            <div class="flex items-start justify-between gap-2">
+                <div class="min-w-0">
+                    <p class="text-xs font-mono text-slate-400">${escHtml(c.CourseCode || '-')}</p>
+                    <p class="text-sm font-black text-slate-800 truncate" title="${escHtml(c.CourseTitle || '-')}">${escHtml(c.CourseTitle || '-')}</p>
+                </div>
+                <span class="text-xs font-bold text-sky-700 bg-white/70 rounded-full px-2 py-1">${parseInt(c.AssignedCount) || 0}</span>
+            </div>
+            <div class="flex justify-end gap-1.5 mt-2">
+                ${_isAdmin ? `<span class="btn-tm-edit-course px-2 py-1 rounded-lg text-[11px] font-bold text-indigo-700 hover:bg-white" data-id="${c.id}">แก้ไข / Edit</span>
+                <span class="btn-tm-disable-course px-2 py-1 rounded-lg text-[11px] font-bold text-rose-600 hover:bg-white" data-id="${c.id}" data-title="${escHtml(c.CourseTitle || '')}">ลบออก / Remove</span>` : ''}
+            </div>
+        </button>`;
+    }).join('') : `<div class="rounded-xl border border-dashed border-slate-200 bg-slate-50 p-5 text-center text-sm text-slate-400">ยังไม่มีรายวิชาในหลักสูตร / No linked course</div>`;
+    const masterHtml = masterRows.length ? masterRows.map(m => {
+        const linked = linkedCodes.has(String(m.CourseCode || '').toLowerCase());
+        return `
+        <div class="flex items-start justify-between gap-3 rounded-xl border ${linked ? 'border-emerald-100 bg-emerald-50/60' : 'border-slate-100 bg-white hover:bg-slate-50'} p-3">
+            <div class="min-w-0">
+                <p class="text-xs font-mono text-slate-400">${escHtml(m.CourseCode || '-')}</p>
+                <p class="text-sm font-black text-slate-800 truncate" title="${escHtml(m.CourseTitle || '-')}">${escHtml(m.CourseTitle || '-')}</p>
+                <p class="text-xs text-slate-500 mt-1">${escHtml(m.Category || 'General')}</p>
+            </div>
+            ${linked
+                ? '<span class="px-2 py-1 rounded-full text-[11px] font-bold text-emerald-700 bg-white border border-emerald-200">อยู่แล้ว / Linked</span>'
+                : _isAdmin ? `<button type="button" class="btn-tm-link-master-course px-2.5 py-1.5 rounded-lg text-xs font-bold text-indigo-700 border border-indigo-200 hover:bg-indigo-50" data-id="${escHtml(m.id || '')}">เพิ่ม / Add</button>` : '<span class="px-2 py-1 rounded-full text-[11px] font-bold text-slate-500 bg-slate-50 border border-slate-200">Admin only</span>'}
+        </div>`;
+    }).join('') : `<div class="rounded-xl border border-dashed border-slate-200 bg-slate-50 p-5 text-center text-sm text-slate-400">ไม่พบรายวิชาในคลัง / No master course</div>`;
+    el.innerHTML = `
+        <div>
+            <div class="flex items-center justify-between mb-2">
+                <h4 class="text-sm font-black text-slate-700">รายวิชาในหลักสูตร / Linked courses</h4>
+                <span class="text-xs font-bold text-slate-400">${rows.length} รายการ</span>
+            </div>
+            <div class="space-y-2">${linkedHtml}</div>
+        </div>
+        ${_isAdmin ? `<div>
+            <div class="flex items-center justify-between mb-2">
+                <h4 class="text-sm font-black text-slate-700">คลังรายวิชา / Course Master</h4>
+                <button type="button" id="btn-tm-toggle-course-master" class="text-xs font-bold text-indigo-700 hover:underline">
+                    ${_tmShowCourseMaster ? 'แสดงแบบย่อ / Compact' : 'ดูเพิ่ม / Expand'}
+                </button>
+            </div>
+            <div class="space-y-2">${masterHtml}</div>
+        </div>` : ''}`;
+}
+
+async function fetchTrainingAssignments(curriculumId) {
+    const tbody = document.getElementById('tm-assignment-tbody');
+    if (tbody) tbody.innerHTML = loadingRow(4);
+    const btn = document.getElementById('btn-tm-assign-employees');
+    if (btn) btn.disabled = !curriculumId || !_tmCourses.length;
+    try {
+        const res = await API.get(`/fourm/training-curriculums/${curriculumId}/assignments?status=all`);
+        _tmAssignments = normalizeApiArray(res?.data ?? res);
+        renderTrainingAssignments();
+        renderTrainingMatrixKpis();
+        renderTrainingMatrixBreadcrumb();
+    } catch (err) {
+        if (tbody) tbody.innerHTML = `<tr><td colspan="4" class="text-center py-6 text-rose-600 text-sm">${escHtml(err.message || 'โหลดรายชื่อพนักงานไม่สำเร็จ / Cannot load assignments')}</td></tr>`;
+    }
+}
+
+function _tmStatusBadge(status) {
+    const s = status || 'Assigned';
+    const label = s === 'Assigned' ? 'อยู่ในรายวิชา / Assigned'
+        : s === 'Transferred' ? 'ย้ายแล้ว / Transferred'
+        : s === 'Removed' ? 'ลบออก / Removed'
+        : s;
+    const cls = s === 'Assigned'
+        ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
+        : s === 'Transferred'
+            ? 'bg-sky-50 text-sky-700 border-sky-200'
+            : 'bg-slate-50 text-slate-500 border-slate-200';
+    return `<span class="inline-flex px-2 py-1 rounded-full border text-[11px] font-bold ${cls}">${escHtml(label)}</span>`;
+}
+
+function renderTrainingAssignments() {
+    const tbody = document.getElementById('tm-assignment-tbody');
+    const title = document.getElementById('tm-assignment-title');
+    const search = document.getElementById('tm-assignment-search');
+    if (search) search.disabled = !_tmSelectedCurriculumId;
+    if (title) {
+        title.textContent = 'รายชื่อ / Assignments';
+        title.title = title.textContent;
+    }
+    if (!tbody) return;
+    if (!_tmSelectedCurriculumId) {
+        tbody.innerHTML = `<tr><td colspan="4" class="text-center py-10 text-slate-400 text-sm">เลือกหลักสูตรก่อน / Select a curriculum</td></tr>`;
+        return;
+    }
+    const rows = _tmAssignments.filter(a => _tmTextMatches(a, ['EmployeeID', 'EmployeeName', 'Department', 'Position', 'Status', 'Notes'], _tmSearch.employee));
+    if (!_tmAssignments.length) {
+        tbody.innerHTML = `<tr><td colspan="4" class="text-center py-10 text-slate-400 text-sm">ยังไม่มีพนักงานในหลักสูตรนี้ / No employee assigned</td></tr>`;
+        return;
+    }
+    if (!rows.length) {
+        tbody.innerHTML = `<tr><td colspan="4" class="text-center py-10 text-slate-400 text-sm">ไม่พบพนักงานที่ค้นหา / No matching employee</td></tr>`;
+        return;
+    }
+    tbody.innerHTML = rows.map(a => `
+        <tr class="hover:bg-slate-50 group">
+            <td class="px-4 py-3">
+                <p class="font-bold text-slate-800">${escHtml(a.EmployeeName || a.EmployeeID || '-')}</p>
+                <p class="text-xs font-mono text-slate-400">${escHtml(a.EmployeeID || '')}</p>
+            </td>
+            <td class="px-4 py-3">
+                <p class="text-sm text-slate-600">${escHtml(a.Department || '-')}</p>
+                <p class="text-xs text-slate-400">${escHtml(a.Position || '')}</p>
+            </td>
+            <td class="px-4 py-3">${_tmStatusBadge(a.Status)}</td>
+            <td class="px-4 py-3 text-right">
+                <div class="flex flex-wrap items-center justify-end gap-1.5">
+                    <button type="button" class="btn-tm-employee-history px-2 py-1 rounded-lg text-xs font-bold text-indigo-700 hover:bg-indigo-50"
+                            data-employee-id="${escHtml(a.EmployeeID || '')}" data-name="${escHtml(a.EmployeeName || a.EmployeeID || '')}">
+                        ประวัติ / History
+                    </button>
+                    ${a.Status === 'Assigned' ? `
+                    <button type="button" class="btn-tm-transfer-curriculum px-2 py-1 rounded-lg text-xs font-bold text-sky-700 hover:bg-sky-50"
+                            data-id="${a.id}" data-name="${escHtml(a.EmployeeName || a.EmployeeID || '')}">
+                        ย้าย / Transfer
+                    </button>
+                    <button type="button" class="btn-tm-remove-assignment px-2 py-1 rounded-lg text-xs font-bold text-rose-600 hover:bg-rose-50"
+                            data-id="${a.id}" data-name="${escHtml(a.EmployeeName || a.EmployeeID || '')}">ลบออก / Remove</button>
+                    ` : ''}
+                </div>
+            </td>
+        </tr>`).join('');
+}
+
+function renderInlineEmployeeMaster() {
+    const list = document.getElementById('tm-inline-employee-master');
+    const summary = document.getElementById('tm-inline-employee-summary');
+    const btn = document.getElementById('btn-tm-assign-employees');
+    if (!list) {
+        if (btn) {
+            btn.disabled = !_tmSelectedCurriculumId || !_tmCourses.length || !_tmInlineSelectedEmployees.size;
+            btn.textContent = _tmInlineSelectedEmployees.size
+                ? `เพิ่ม ${_tmInlineSelectedEmployees.size} คน / Assign ${_tmInlineSelectedEmployees.size}`
+                : 'เพิ่มที่เลือก / Assign';
+        }
+        return;
+    }
+    const curriculum = _tmCurriculums.find(c => c.id === _tmSelectedCurriculumId);
+    if (!curriculum) {
+        list.innerHTML = `<div class="p-4 text-center text-sm text-slate-400">เลือกหลักสูตรก่อน / Select curriculum</div>`;
+        return;
+    }
+    const dept = curriculum.Department || '';
+    const assigned = new Set(_tmAssignments.filter(a => a.Status === 'Assigned').map(a => String(a.EmployeeID)));
+    const activeScopeByEmployee = new Map(_tmEmployeeScopes.map(row => [String(row.EmployeeID), row]));
+    const q = (_tmSearch.employee || '').trim().toLowerCase();
+    const rows = _tmEmployees
+        .filter(e => !dept || String(e.Department || '').trim() === String(dept).trim())
+        .filter(e => {
+            const hay = [e.EmployeeID, e.EmployeeName, e.Department, e.Position, e.Unit].join(' ').toLowerCase();
+            return !q || hay.includes(q);
+        })
+        .slice(0, 160);
+    if (!rows.length) {
+        list.innerHTML = `<div class="p-4 text-center text-sm text-slate-400">ไม่พบพนักงาน / No employee found</div>`;
+    } else {
+        list.innerHTML = rows.map(e => {
+            const activeScope = activeScopeByEmployee.get(String(e.EmployeeID));
+            const isAssigned = assigned.has(String(e.EmployeeID));
+            const isOtherCurriculum = activeScope && String(activeScope.CurriculumID) !== String(curriculum.id);
+            const disabled = isAssigned || isOtherCurriculum || !_tmCourses.length;
+            const checked = _tmInlineSelectedEmployees.has(String(e.EmployeeID));
+            const note = isAssigned
+                ? 'อยู่ในหลักสูตรนี้แล้ว'
+                : isOtherCurriculum
+                    ? `อยู่ ${activeScope.CurriculumCode || 'หลักสูตรอื่น'} แล้ว`
+                    : !_tmCourses.length
+                        ? 'เพิ่มรายวิชาก่อน'
+                        : '';
+            return `
+            <label class="flex items-start gap-3 p-3 border-b border-slate-100 last:border-0 ${disabled ? 'bg-slate-50 opacity-60' : 'hover:bg-slate-50'}">
+                <input type="checkbox" name="InlineEmployeeIDs" value="${escHtml(e.EmployeeID || '')}" class="mt-1 rounded border-slate-300" ${disabled ? 'disabled' : ''} ${checked ? 'checked' : ''}>
+                <span class="min-w-0">
+                    <span class="block text-sm font-bold text-slate-800 truncate">${escHtml(e.EmployeeName || e.EmployeeID || '-')}</span>
+                    <span class="block text-xs text-slate-500">${escHtml(e.EmployeeID || '')} · ${escHtml(e.Position || '-')}</span>
+                    ${note ? `<span class="inline-flex mt-1 text-[11px] font-bold ${isOtherCurriculum ? 'text-amber-700' : 'text-emerald-700'}">${escHtml(note)}</span>` : ''}
+                </span>
+            </label>`;
+        }).join('');
+    }
+    if (summary) {
+        summary.textContent = `เลือกแล้ว ${_tmInlineSelectedEmployees.size} คน / ${_tmInlineSelectedEmployees.size} selected`;
+    }
+    if (btn) {
+        btn.disabled = !_tmSelectedCurriculumId || !_tmCourses.length || !_tmInlineSelectedEmployees.size;
+        btn.textContent = _tmInlineSelectedEmployees.size
+            ? `เพิ่ม ${_tmInlineSelectedEmployees.size} คน / Assign ${_tmInlineSelectedEmployees.size}`
+            : 'เพิ่มที่เลือก / Assign';
+    }
+}
+
+function showTrainingCurriculumForm(existing = null) {
+    const r = normalizeApiObject(existing);
+    const ownDept = _currentUser.department || _currentUser.Department || '';
+    const deptField = !_isAdmin
+        ? `<input type="hidden" name="Department" value="${escHtml(r.Department || ownDept)}">
+           <div class="form-input w-full bg-slate-50 text-slate-600">${escHtml(r.Department || ownDept || 'แผนกของฉัน / My Department')}</div>`
+        : _departments.length
+        ? `<select name="Department" class="form-input w-full" required>
+            <option value="">เลือกแผนก / Select department</option>
+            ${_departments.map(d => `<option value="${escHtml(d)}" ${(r.Department || _tmFilter.dept) === d ? 'selected' : ''}>${escHtml(d)}</option>`).join('')}
+        </select>`
+        : `<input name="Department" class="form-input w-full" required value="${escHtml(r.Department || (_tmFilter.dept !== 'all' ? _tmFilter.dept : ''))}">`;
+    const html = `
+        <form id="tm-curriculum-form" class="space-y-4">
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div>
+                    <label class="block text-sm font-semibold text-slate-700 mb-1.5">ปี / Year</label>
+                    <input type="number" name="Year" class="form-input w-full" required value="${r.Year || _tmFilter.year}">
+                </div>
+                <div>
+                    <label class="block text-sm font-semibold text-slate-700 mb-1.5">แผนก / Department</label>
+                    ${deptField}
+                </div>
+            </div>
+            <div>
+                <label class="block text-sm font-semibold text-slate-700 mb-1.5">รหัสหลักสูตร / Curriculum Code</label>
+                <input name="CurriculumCode" class="form-input w-full" required value="${escHtml(r.CurriculumCode || '')}" placeholder="4M-MAN-001">
+            </div>
+            <div>
+                <label class="block text-sm font-semibold text-slate-700 mb-1.5">ชื่อหลักสูตร / Curriculum Title</label>
+                <input name="CurriculumTitle" class="form-input w-full" required value="${escHtml(r.CurriculumTitle || '')}" placeholder="4M Change Management Basic">
+            </div>
+            <div>
+                <label class="block text-sm font-semibold text-slate-700 mb-1.5">หมายเหตุ / Notes</label>
+                <textarea name="Notes" rows="3" class="form-input w-full resize-none">${escHtml(r.Notes || '')}</textarea>
+            </div>
+            <div class="flex justify-end gap-3 pt-4 border-t border-slate-100">
+                <button type="button" class="btn btn-secondary px-4" onclick="window.closeModal&&window.closeModal()">ยกเลิก / Cancel</button>
+                <button type="submit" id="tm-curriculum-save-btn" class="btn btn-primary px-5">บันทึก / Save</button>
+            </div>
+        </form>`;
+    openModal(existing ? 'แก้ไขหลักสูตร / Edit Curriculum' : 'เพิ่มหลักสูตร / Add Curriculum', html, 'max-w-lg');
+    document.getElementById('tm-curriculum-form')?.addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const btn = document.getElementById('tm-curriculum-save-btn');
+        btn.disabled = true;
+        try {
+            showLoading('กำลังบันทึกหลักสูตร... / Saving curriculum...');
+            const body = Object.fromEntries(new FormData(e.target).entries());
+            if (existing) await API.put(`/fourm/training-curriculums/${r.id}`, body);
+            else await API.post('/fourm/training-curriculums', body);
+            closeModal();
+            showToast('บันทึกหลักสูตรสำเร็จ / Curriculum saved', 'success');
+            _tmFilter.year = parseInt(body.Year, 10) || _tmFilter.year;
+            if (_isAdmin) _tmFilter.dept = body.Department || _tmFilter.dept;
+            await renderTrainingMatrix(document.getElementById('fourm-man-subtab-content'));
+        } catch (err) { showError(err); }
+        finally { hideLoading(); btn.disabled = false; }
+    });
+}
+
+function showTrainingCourseForm(existing = null) {
+    const curriculum = _tmCurriculums.find(c => c.id === _tmSelectedCurriculumId);
+    if (!curriculum) { showToast('เลือกหลักสูตรก่อน / Select a curriculum first', 'warning'); return; }
+    const r = normalizeApiObject(existing);
+    const html = `
+        <form id="tm-course-form" class="space-y-4">
+            <div class="rounded-xl bg-slate-50 border border-slate-100 p-3 text-sm text-slate-600">
+                <span class="font-bold">${escHtml(curriculum.CurriculumCode || '')}</span> ${escHtml(curriculum.CurriculumTitle || '')}
+            </div>
+            <div>
+                <label class="block text-sm font-semibold text-slate-700 mb-1.5">รหัสรายวิชา / Course Code</label>
+                <input name="CourseCode" class="form-input w-full" required value="${escHtml(r.CourseCode || '')}" placeholder="MAN-01">
+            </div>
+            <div>
+                <label class="block text-sm font-semibold text-slate-700 mb-1.5">ชื่อรายวิชา / Course Title</label>
+                <input name="CourseTitle" class="form-input w-full" required value="${escHtml(r.CourseTitle || '')}" placeholder="Change awareness">
+            </div>
+            <div>
+                <label class="block text-sm font-semibold text-slate-700 mb-1.5">ลำดับ / Sort Order</label>
+                <input type="number" name="SortOrder" class="form-input w-full" value="${r.SortOrder || 99}">
+            </div>
+            <div class="flex justify-end gap-3 pt-4 border-t border-slate-100">
+                <button type="button" class="btn btn-secondary px-4" onclick="window.closeModal&&window.closeModal()">ยกเลิก / Cancel</button>
+                <button type="submit" id="tm-course-save-btn" class="btn btn-primary px-5">บันทึก / Save</button>
+            </div>
+        </form>`;
+    openModal(existing ? 'แก้ไขรายวิชา / Edit Course' : 'เพิ่มรายวิชา / Add Course', html, 'max-w-lg');
+    document.getElementById('tm-course-form')?.addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const btn = document.getElementById('tm-course-save-btn');
+        btn.disabled = true;
+        try {
+            showLoading('กำลังบันทึกรายวิชา... / Saving course...');
+            const body = Object.fromEntries(new FormData(e.target).entries());
+            if (existing) await API.put(`/fourm/training-courses/${r.id}`, body);
+            else await API.post(`/fourm/training-curriculums/${_tmSelectedCurriculumId}/courses`, body);
+            closeModal();
+            showToast('บันทึกรายวิชาสำเร็จ / Course saved', 'success');
+            await fetchTrainingCourses(_tmSelectedCurriculumId);
+        } catch (err) { showError(err); }
+        finally { hideLoading(); btn.disabled = false; }
+    });
+}
+
+async function showTrainingCourseMasterModal() {
+    let masters = [];
+    try {
+        showLoading('กำลังโหลดคลังรายวิชา... / Loading course master...');
+        const res = await API.get('/fourm/training-course-master?includeInactive=1');
+        masters = normalizeApiArray(res?.data ?? res);
+        hideLoading();
+    } catch (err) {
+        hideLoading();
+        showError(err);
+        return;
+    }
+    const renderRows = (rows) => rows.length ? rows.map(m => {
+        const active = Number(m.IsActive) === 1;
+        const payload = encodeURIComponent(JSON.stringify(m));
+        return `
+        <div class="flex items-start justify-between gap-3 p-3 border-b border-slate-100 last:border-0">
+            <div class="min-w-0">
+                <p class="text-sm font-black text-slate-800 truncate">${escHtml(m.CourseCode || '-')} - ${escHtml(m.CourseTitle || '-')}</p>
+                <p class="text-xs text-slate-500">${escHtml(m.Category || 'General')} · ${active ? 'Active' : 'Inactive'}</p>
+            </div>
+            <div class="flex flex-wrap justify-end gap-1.5 shrink-0">
+                <button type="button" class="btn-tm-master-edit px-2 py-1 rounded-lg text-xs font-bold text-indigo-700 hover:bg-indigo-50"
+                        data-master="${payload}">แก้ไข / Edit</button>
+                ${active
+                    ? `<button type="button" class="btn-tm-master-disable px-2 py-1 rounded-lg text-xs font-bold text-rose-600 hover:bg-rose-50"
+                            data-id="${escHtml(m.id || '')}" data-title="${escHtml(m.CourseTitle || '')}">ปิด / Disable</button>`
+                    : `<button type="button" class="btn-tm-master-restore px-2 py-1 rounded-lg text-xs font-bold text-emerald-700 hover:bg-emerald-50"
+                            data-id="${escHtml(m.id || '')}" data-title="${escHtml(m.CourseTitle || '')}">เปิดใช้ / Restore</button>
+                       <button type="button" class="btn-tm-master-hard-delete px-2 py-1 rounded-lg text-xs font-bold text-rose-600 hover:bg-rose-50"
+                            data-id="${escHtml(m.id || '')}" data-title="${escHtml(m.CourseTitle || '')}">ลบถาวร / Delete</button>`}
+            </div>
+        </div>`;
+    }).join('') : `<div class="p-5 text-center text-sm text-slate-400">ยังไม่มีรายวิชา / No course master</div>`;
+    const html = `
+        <div class="space-y-4">
+            <form id="tm-course-master-form" class="grid grid-cols-1 lg:grid-cols-[120px_1fr_140px_auto_auto] gap-2 items-end">
+                <input type="hidden" name="id" value="">
+                <div>
+                    <label class="block text-xs font-bold text-slate-500 mb-1">รหัส / Code</label>
+                    <input name="CourseCode" class="form-input w-full" required placeholder="MAN-01">
+                </div>
+                <div>
+                    <label class="block text-xs font-bold text-slate-500 mb-1">ชื่อรายวิชา / Title</label>
+                    <input name="CourseTitle" class="form-input w-full" required placeholder="Course title">
+                </div>
+                <div>
+                    <label class="block text-xs font-bold text-slate-500 mb-1">หมวด / Category</label>
+                    <select name="Category" class="form-input w-full" required>
+                        <option value="">เลือกหมวด / Select category</option>
+                        ${COURSE_MASTER_CATEGORIES.map(c => `<option value="${escHtml(c)}">${escHtml(c)}</option>`).join('')}
+                    </select>
+                </div>
+                <button type="submit" id="tm-course-master-save-btn" class="btn btn-primary px-4">เพิ่ม / Add</button>
+                <button type="button" id="tm-course-master-reset-btn" class="btn btn-secondary px-4 hidden">ยกเลิกแก้ไข</button>
+            </form>
+            <div class="relative">
+                <input id="tm-course-master-admin-search" class="form-input w-full pl-9" placeholder="ค้นหารายวิชา / Search">
+                <svg class="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/>
+                </svg>
+            </div>
+            <div id="tm-course-master-admin-list" class="max-h-[420px] overflow-y-auto border border-slate-200 rounded-xl">${renderRows(masters)}</div>
+        </div>`;
+    openModal('คลังรายวิชา / Course Master', html, 'max-w-4xl');
+    const refreshRows = () => {
+        const q = (document.getElementById('tm-course-master-admin-search')?.value || '').trim().toLowerCase();
+        const rows = masters.filter(m => {
+            const hay = [m.CourseCode, m.CourseTitle, m.Category].join(' ').toLowerCase();
+            return !q || hay.includes(q);
+        });
+        const list = document.getElementById('tm-course-master-admin-list');
+        if (list) list.innerHTML = renderRows(rows);
+    };
+    document.getElementById('tm-course-master-admin-search')?.addEventListener('input', debounce(refreshRows, 120));
+    const resetMasterForm = () => {
+        const form = document.getElementById('tm-course-master-form');
+        if (!form) return;
+        form.reset();
+        form.elements.id.value = '';
+        const saveBtn = document.getElementById('tm-course-master-save-btn');
+        const resetBtn = document.getElementById('tm-course-master-reset-btn');
+        if (saveBtn) saveBtn.textContent = 'เพิ่ม / Add';
+        if (resetBtn) resetBtn.classList.add('hidden');
+    };
+    document.getElementById('tm-course-master-reset-btn')?.addEventListener('click', resetMasterForm);
+    document.getElementById('tm-course-master-form')?.addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const btn = document.getElementById('tm-course-master-save-btn');
+        btn.disabled = true;
+        try {
+            showLoading('กำลังบันทึกรายวิชา... / Saving course...');
+            const body = Object.fromEntries(new FormData(e.target).entries());
+            const id = body.id;
+            delete body.id;
+            if (id) await API.put(`/fourm/training-course-master/${id}`, body);
+            else await API.post('/fourm/training-course-master', body);
+            const res = await API.get('/fourm/training-course-master?includeInactive=1');
+            masters = normalizeApiArray(res?.data ?? res);
+            _tmCourseMaster = masters.filter(m => Number(m.IsActive) === 1);
+            resetMasterForm();
+            refreshRows();
+            renderTrainingCourses();
+            showToast(id ? 'แก้ไขรายวิชาสำเร็จ / Course updated' : 'เพิ่มรายวิชาสำเร็จ / Course added', 'success');
+        } catch (err) { showError(err); }
+        finally { hideLoading(); btn.disabled = false; }
+    });
+    document.getElementById('tm-course-master-admin-list')?.addEventListener('click', async (e) => {
+        const editBtn = e.target.closest('.btn-tm-master-edit');
+        if (editBtn) {
+            try {
+                const rec = JSON.parse(decodeURIComponent(editBtn.dataset.master || '{}'));
+                const form = document.getElementById('tm-course-master-form');
+                if (!form) return;
+                form.elements.id.value = rec.id || '';
+                form.elements.CourseCode.value = rec.CourseCode || '';
+                form.elements.CourseTitle.value = rec.CourseTitle || '';
+                form.elements.Category.value = COURSE_MASTER_CATEGORIES.includes(rec.Category || '') ? rec.Category : '';
+                const saveBtn = document.getElementById('tm-course-master-save-btn');
+                const resetBtn = document.getElementById('tm-course-master-reset-btn');
+                if (saveBtn) saveBtn.textContent = 'บันทึก / Save';
+                if (resetBtn) resetBtn.classList.remove('hidden');
+                form.elements.CourseCode.focus();
+            } catch (_) {}
+            return;
+        }
+        const restoreBtn = e.target.closest('.btn-tm-master-restore');
+        if (restoreBtn) {
+            try {
+                showLoading('กำลังเปิดใช้งานรายวิชา... / Restoring course...');
+                await API.put(`/fourm/training-course-master/${restoreBtn.dataset.id}`, { IsActive: 1 });
+                const res = await API.get('/fourm/training-course-master?includeInactive=1');
+                masters = normalizeApiArray(res?.data ?? res);
+                _tmCourseMaster = masters.filter(m => Number(m.IsActive) === 1);
+                refreshRows();
+                renderTrainingCourses();
+                showToast('เปิดใช้งานรายวิชาสำเร็จ / Course restored', 'success');
+            } catch (err) { showError(err); }
+            finally { hideLoading(); }
+            return;
+        }
+        const btn = e.target.closest('.btn-tm-master-disable');
+        const hardBtn = e.target.closest('.btn-tm-master-hard-delete');
+        if (!btn && !hardBtn) return;
+        const targetBtn = btn || hardBtn;
+        const hardDelete = Boolean(hardBtn);
+        const ok = await showConfirmationModal(
+            hardDelete ? 'ลบถาวรรายวิชา? / Permanently delete?' : 'ปิดรายวิชา? / Disable course?',
+            hardDelete
+                ? `ลบ "${targetBtn.dataset.title || 'course'}" ออกจากคลังถาวรใช่ไหม? ทำได้เฉพาะรายวิชาที่ไม่ถูกผูกกับหลักสูตร / Permanently delete this unused course?`
+                : `ปิดใช้งาน "${targetBtn.dataset.title || 'course'}" ในคลังรายวิชาใช่ไหม? / Disable this Course Master item?`
+        );
+        if (!ok) return;
+        try {
+            showLoading(hardDelete ? 'กำลังลบถาวรรายวิชา... / Permanently deleting course...' : 'กำลังปิดรายวิชา... / Disabling course...');
+            await API.delete(`/fourm/training-course-master/${targetBtn.dataset.id}${hardDelete ? '?hard=1' : ''}`);
+            const res = await API.get('/fourm/training-course-master?includeInactive=1');
+            masters = normalizeApiArray(res?.data ?? res);
+            _tmCourseMaster = masters.filter(m => Number(m.IsActive) === 1);
+            refreshRows();
+            renderTrainingCourses();
+            showToast(hardDelete ? 'ลบรายวิชาถาวรสำเร็จ / Course permanently deleted' : 'ปิดรายวิชาสำเร็จ / Course disabled', 'success');
+        } catch (err) { showError(err); }
+        finally { hideLoading(); }
+    });
+}
+
+async function linkTrainingMasterCourse(masterId) {
+    if (!_tmSelectedCurriculumId || !masterId) return;
+    try {
+        showLoading('กำลังเพิ่มรายวิชา... / Linking course...');
+        await API.post(`/fourm/training-curriculums/${_tmSelectedCurriculumId}/courses`, { CourseMasterIDs: [masterId] });
+        showToast('เพิ่มรายวิชาเข้าหลักสูตรสำเร็จ / Course linked', 'success');
+        await fetchTrainingCourses(_tmSelectedCurriculumId);
+        await fetchTrainingMatrix();
+    } catch (err) { showError(err); }
+    finally { hideLoading(); }
+}
+
+async function assignInlineTrainingEmployees() {
+    if (!_tmSelectedCurriculumId || !_tmInlineSelectedEmployees.size) return;
+    try {
+        showLoading('กำลังเพิ่มพนักงาน... / Assigning employees...');
+        const res = await API.post(`/fourm/training-curriculums/${_tmSelectedCurriculumId}/assignments`, {
+            EmployeeIDs: Array.from(_tmInlineSelectedEmployees),
+        });
+        const blocked = normalizeApiArray(res?.data?.blocked || []);
+        _tmInlineSelectedEmployees.clear();
+        showToast(
+            blocked.length
+                ? `เพิ่มสำเร็จบางส่วน: ${blocked.length} คนอยู่หลักสูตรอื่นแล้ว / Partially assigned`
+                : 'เพิ่มพนักงานสำเร็จ / Employees assigned',
+            blocked.length ? 'warning' : 'success'
+        );
+        await fetchTrainingCourses(_tmSelectedCurriculumId);
+        await fetchTrainingEmployeeMaster({ force: true });
+        renderTrainingDetailShell();
+    } catch (err) { showError(err); }
+    finally { hideLoading(); }
+}
+
+async function showTransferCurriculumAssignmentModal(assignmentId) {
+    const assignment = _tmAssignments.find(a => String(a.id) === String(assignmentId));
+    const currentCurriculum = _tmCurriculums.find(c => String(c.id) === String(_tmSelectedCurriculumId));
+    if (!assignment || !currentCurriculum) {
+        showToast('เลือกพนักงานและหลักสูตรก่อน / Select employee and curriculum first', 'warning');
+        return;
+    }
+    let curriculums = [];
+    try {
+        showLoading('กำลังโหลดหลักสูตรปลายทาง... / Loading destination curriculums...');
+        const p = new URLSearchParams();
+        p.set('year', _tmFilter.year);
+        if (_tmFilter.dept !== 'all') p.set('dept', _tmFilter.dept);
+        const res = await API.get(`/fourm/training-curriculums?${p}`);
+        curriculums = normalizeApiArray(res?.data ?? res)
+            .filter(c => String(c.id) !== String(currentCurriculum.id))
+            .filter(c => (parseInt(c.CourseCount, 10) || 0) > 0);
+        hideLoading();
+    } catch (err) {
+        hideLoading();
+        showError(err);
+        return;
+    }
+    const options = curriculums.map(c => `<option value="${escHtml(c.id)}" data-dept="${escHtml(c.Department || '')}" data-code="${escHtml(c.CurriculumCode || '')}" data-title="${escHtml(c.CurriculumTitle || '')}">
+        ${escHtml(`${c.Department || '-'} / ${c.CurriculumCode || '-'} - ${c.CurriculumTitle || '-'}`)}
+    </option>`).join('');
+    const html = `
+        <form id="tm-curriculum-transfer-form" class="space-y-4">
+            <div class="rounded-xl border border-slate-100 bg-slate-50 p-3">
+                <p class="text-sm font-black text-slate-800">${escHtml(assignment.EmployeeName || assignment.EmployeeID || '-')}</p>
+                <p class="text-xs text-slate-500 mt-1">${escHtml(assignment.EmployeeID || '')}</p>
+            </div>
+            <div class="grid grid-cols-1 sm:grid-cols-[1fr_auto_1fr] gap-3 items-stretch">
+                <div class="rounded-xl border border-slate-200 bg-white p-3">
+                    <p class="text-[11px] font-black uppercase tracking-wider text-slate-400">เดิม / Current</p>
+                    <p class="mt-2 text-sm font-black text-slate-800">${escHtml(currentCurriculum.CurriculumCode || '-')} - ${escHtml(currentCurriculum.CurriculumTitle || '-')}</p>
+                    <p class="mt-1 text-xs font-semibold text-slate-400">${escHtml(currentCurriculum.Department || '-')}</p>
+                </div>
+                <div class="hidden sm:flex items-center justify-center text-slate-300 font-black">&rarr;</div>
+                <div id="tm-curriculum-transfer-preview" class="rounded-xl border border-dashed border-slate-200 bg-slate-50 p-3">
+                    <p class="text-[11px] font-black uppercase tracking-wider text-slate-400">ใหม่ / Destination</p>
+                    <p class="mt-2 text-sm font-black text-slate-400">เลือกหลักสูตรปลายทาง</p>
+                </div>
+            </div>
+            <div id="tm-curriculum-transfer-warning" class="hidden rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs font-bold text-amber-800"></div>
+            <div>
+                <label class="block text-sm font-semibold text-slate-700 mb-1.5">หลักสูตรปลายทาง / Destination Curriculum</label>
+                <select name="TargetCurriculumID" class="form-input w-full" required>
+                    <option value="">เลือกหลักสูตร / Select curriculum</option>
+                    ${options}
+                </select>
+            </div>
+            <div>
+                <label class="block text-sm font-semibold text-slate-700 mb-1.5">หมายเหตุ / Transfer Note</label>
+                <textarea name="Notes" rows="3" class="form-input w-full resize-none"></textarea>
+            </div>
+            <div class="flex justify-end gap-3 pt-4 border-t border-slate-100">
+                <button type="button" class="btn btn-secondary px-4" onclick="window.closeModal&&window.closeModal()">ยกเลิก / Cancel</button>
+                <button type="submit" id="tm-curriculum-transfer-save-btn" class="btn btn-primary px-5">ย้าย / Transfer</button>
+            </div>
+        </form>`;
+    openModal('ย้ายพนักงานข้ามหลักสูตร / Transfer Employee', html, 'max-w-lg');
+    const updatePreview = () => {
+        const select = document.querySelector('#tm-curriculum-transfer-form select[name="TargetCurriculumID"]');
+        const opt = select?.selectedOptions?.[0];
+        const preview = document.getElementById('tm-curriculum-transfer-preview');
+        const warning = document.getElementById('tm-curriculum-transfer-warning');
+        if (!preview || !warning) return;
+        if (!opt?.value) {
+            preview.className = 'rounded-xl border border-dashed border-slate-200 bg-slate-50 p-3';
+            preview.innerHTML = '<p class="text-[11px] font-black uppercase tracking-wider text-slate-400">ใหม่ / Destination</p><p class="mt-2 text-sm font-black text-slate-400">เลือกหลักสูตรปลายทาง</p>';
+            warning.classList.add('hidden');
+            return;
+        }
+        preview.className = 'rounded-xl border border-sky-200 bg-sky-50 p-3';
+        preview.innerHTML = `<p class="text-[11px] font-black uppercase tracking-wider text-sky-500">ใหม่ / Destination</p>
+            <p class="mt-2 text-sm font-black text-slate-800">${escHtml(opt.dataset.code || '-')} - ${escHtml(opt.dataset.title || '-')}</p>
+            <p class="mt-1 text-xs font-semibold text-sky-700">${escHtml(opt.dataset.dept || '-')}</p>`;
+        if (String(opt.dataset.dept || '') !== String(currentCurriculum.Department || '')) {
+            warning.textContent = 'โปรดตรวจสอบ: หลักสูตรปลายทางอยู่คนละแผนก / Different department';
+            warning.classList.remove('hidden');
+        } else {
+            warning.classList.add('hidden');
+        }
+    };
+    document.querySelector('#tm-curriculum-transfer-form select[name="TargetCurriculumID"]')?.addEventListener('change', updatePreview);
+    document.getElementById('tm-curriculum-transfer-form')?.addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const form = e.target;
+        const targetId = form.querySelector('select[name="TargetCurriculumID"]')?.value || '';
+        const target = curriculums.find(c => String(c.id) === String(targetId));
+        if (!target) { showToast('เลือกหลักสูตรปลายทางก่อน / Select destination curriculum', 'warning'); return; }
+        const ok = await showConfirmationModal(
+            'ยืนยันการย้าย / Confirm transfer',
+            `คุณกำลังย้าย ${assignment.EmployeeName || assignment.EmployeeID || '-'} จาก ${currentCurriculum.CurriculumCode || '-'} ไป ${target.CurriculumCode || '-'} ใช่ไหม?`
+        );
+        if (!ok) return;
+        const btn = document.getElementById('tm-curriculum-transfer-save-btn');
+        btn.disabled = true;
+        try {
+            showLoading('กำลังย้ายพนักงาน... / Transferring employee...');
+            const body = Object.fromEntries(new FormData(form).entries());
+            await API.post(`/fourm/training-curriculum-assignments/${assignment.id}/transfer`, body);
+            closeModal();
+            showToast('ย้ายพนักงานสำเร็จ / Employee transferred', 'success');
+            await fetchTrainingAssignments(_tmSelectedCurriculumId);
+            await fetchTrainingMatrix();
+        } catch (err) { showError(err); }
+        finally { hideLoading(); btn.disabled = false; }
+    });
+}
+
+async function showTrainingCoursePickerModal() {
+    const curriculum = _tmCurriculums.find(c => c.id === _tmSelectedCurriculumId);
+    if (!curriculum) { showToast('เลือกหลักสูตรก่อน / Select a curriculum first', 'warning'); return; }
+    let masters = [];
+    try {
+        showLoading('กำลังโหลดคลังรายวิชา... / Loading course master...');
+        const res = await API.get('/fourm/training-course-master');
+        masters = normalizeApiArray(res?.data ?? res);
+        hideLoading();
+    } catch (err) {
+        hideLoading();
+        showError(err);
+        return;
+    }
+    const linkedCodes = new Set(_tmCourses.filter(c => Number(c.IsActive) !== 0).map(c => String(c.CourseCode || '').toLowerCase()));
+    const selectedIds = new Set();
+    const html = `
+        <form id="tm-course-picker-form" class="space-y-4">
+            <div class="rounded-xl bg-slate-50 border border-slate-100 p-3">
+                <p class="text-sm font-bold text-slate-700">${escHtml(curriculum.CurriculumCode || '')} - ${escHtml(curriculum.CurriculumTitle || '')}</p>
+                <p class="text-xs text-slate-500 mt-1">เลือกจากคลังรายวิชา / Pick courses from master</p>
+            </div>
+            <div class="relative">
+                <input id="tm-course-master-search" type="text" class="form-input w-full pl-9" placeholder="ค้นหารหัสหรือชื่อรายวิชา / Search course master">
+                <svg class="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/>
+                </svg>
+            </div>
+            <div id="tm-course-master-list" class="max-h-[360px] overflow-y-auto border border-slate-200 rounded-xl divide-y divide-slate-100"></div>
+            <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 pt-3 border-t border-slate-100">
+                <div id="tm-course-picker-summary" class="text-sm font-bold text-slate-500">เลือกแล้ว 0 วิชา / 0 selected</div>
+                <div class="flex justify-end gap-3">
+                    <button type="button" class="btn btn-secondary px-4" onclick="window.closeModal&&window.closeModal()">ยกเลิก / Cancel</button>
+                    <button type="submit" id="tm-course-picker-save-btn" class="btn btn-primary px-5" disabled>เพิ่มที่เลือก / Add selected</button>
+                </div>
+            </div>
+        </form>`;
+    openModal('เลือกจากคลังรายวิชา / Add Courses', html, 'max-w-2xl');
+    const updateSummary = () => {
+        const count = selectedIds.size;
+        const summary = document.getElementById('tm-course-picker-summary');
+        const btn = document.getElementById('tm-course-picker-save-btn');
+        if (summary) summary.textContent = `เลือกแล้ว ${count} วิชา / ${count} selected`;
+        if (btn) btn.disabled = count === 0;
+    };
+    const renderMasterList = () => {
+        const q = (document.getElementById('tm-course-master-search')?.value || '').trim().toLowerCase();
+        const rows = masters.filter(m => {
+            const hay = [m.CourseCode, m.CourseTitle, m.Category].join(' ').toLowerCase();
+            return !q || hay.includes(q);
+        }).slice(0, 250);
+        const list = document.getElementById('tm-course-master-list');
+        if (!list) return;
+        if (!rows.length) {
+            list.innerHTML = `<div class="p-5 text-center text-sm text-slate-400">ไม่พบรายวิชา / No course found</div>`;
+            return;
+        }
+        list.innerHTML = rows.map(m => {
+            const linked = linkedCodes.has(String(m.CourseCode || '').toLowerCase());
+            const checked = selectedIds.has(String(m.id));
+            return `
+            <label class="flex items-start gap-3 p-3 ${linked ? 'bg-slate-50 opacity-60' : 'hover:bg-slate-50'}">
+                <input type="checkbox" name="CourseMasterIDs" value="${escHtml(m.id || '')}" class="mt-1 rounded border-slate-300" ${linked ? 'disabled' : ''} ${checked ? 'checked' : ''}>
+                <span class="min-w-0">
+                    <span class="block text-sm font-black text-slate-800">${escHtml(m.CourseCode || '-')} - ${escHtml(m.CourseTitle || '-')}</span>
+                    <span class="block text-xs text-slate-500">${escHtml(m.Category || 'General')}</span>
+                    ${linked ? '<span class="inline-flex mt-1 text-[11px] font-bold text-emerald-700">อยู่ในหลักสูตรแล้ว / Already linked</span>' : ''}
+                </span>
+            </label>`;
+        }).join('');
+        updateSummary();
+    };
+    renderMasterList();
+    document.getElementById('tm-course-master-search')?.addEventListener('input', debounce(renderMasterList, 120));
+    document.getElementById('tm-course-master-list')?.addEventListener('change', (e) => {
+        if (e.target?.name !== 'CourseMasterIDs') return;
+        if (e.target.checked) selectedIds.add(String(e.target.value));
+        else selectedIds.delete(String(e.target.value));
+        updateSummary();
+    });
+    document.getElementById('tm-course-picker-form')?.addEventListener('submit', async (e) => {
+        e.preventDefault();
+        if (!selectedIds.size) return;
+        const btn = document.getElementById('tm-course-picker-save-btn');
+        btn.disabled = true;
+        try {
+            showLoading('กำลังเพิ่มรายวิชา... / Linking courses...');
+            await API.post(`/fourm/training-curriculums/${_tmSelectedCurriculumId}/courses`, { CourseMasterIDs: Array.from(selectedIds) });
+            closeModal();
+            showToast('เพิ่มรายวิชาเข้าหลักสูตรสำเร็จ / Courses linked', 'success');
+            await fetchTrainingCourses(_tmSelectedCurriculumId);
+            await fetchTrainingMatrix();
+        } catch (err) { showError(err); }
+        finally { hideLoading(); btn.disabled = false; }
+    });
+}
+
+async function showAssignEmployeesModal() {
+    const curriculum = _tmCurriculums.find(c => c.id === _tmSelectedCurriculumId);
+    if (!curriculum) { showToast('เลือกหลักสูตรก่อน / Select a curriculum first', 'warning'); return; }
+    if (!_tmCourses.length) { showToast('เพิ่มรายวิชาในหลักสูตรก่อน / Add courses first', 'warning'); return; }
+    let activeScopeByEmployee = new Map();
+    try {
+        showLoading('กำลังโหลดรายชื่อพนักงาน... / Loading employees...');
+        if (!_tmEmployees.length) {
+            const res = await API.get('/employees');
+            _tmEmployees = normalizeApiArray(res?.data ?? res);
+        }
+        const scopeParams = new URLSearchParams();
+        scopeParams.set('year', _tmFilter.year);
+        if (curriculum.Department) scopeParams.set('dept', curriculum.Department);
+        const scopeRes = await API.get(`/fourm/training-employee-scopes?${scopeParams}`);
+        const activeScopes = normalizeApiArray(scopeRes?.data ?? scopeRes);
+        activeScopeByEmployee = new Map(activeScopes.map(row => [String(row.EmployeeID), row]));
+        hideLoading();
+    } catch (err) {
+        hideLoading();
+        showError(err);
+        return;
+    }
+    const assigned = new Set(_tmAssignments.filter(a => a.Status === 'Assigned').map(a => String(a.EmployeeID)));
+    const selectedEmployeeIds = new Set();
+    const dept = curriculum.Department || '';
+    const html = `
+        <form id="tm-assign-form" class="space-y-4">
+            <div class="rounded-xl bg-slate-50 border border-slate-100 p-3">
+                <p class="text-sm font-bold text-slate-700">${escHtml(curriculum.CurriculumCode || '')} - ${escHtml(curriculum.CurriculumTitle || '')}</p>
+                <p class="text-xs text-slate-500 mt-1">${escHtml(dept || '-')} · ${_tmCourses.length} วิชา / courses</p>
+            </div>
+            <div class="relative">
+                <input id="tm-employee-search" type="text" class="form-input w-full pl-9" placeholder="ค้นหาพนักงานด้วยรหัส ชื่อ แผนก หรือตำแหน่ง / Search employee">
+                <svg class="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/>
+                </svg>
+            </div>
+            <div id="tm-employee-pick-list" class="max-h-[360px] overflow-y-auto border border-slate-200 rounded-xl divide-y divide-slate-100"></div>
+            <div>
+                <label class="block text-sm font-semibold text-slate-700 mb-1.5">หมายเหตุ / Notes</label>
+                <textarea name="Notes" rows="2" class="form-input w-full resize-none"></textarea>
+            </div>
+            <div class="sticky bottom-0 -mx-1 bg-white/95 backdrop-blur border-t border-slate-100 pt-3 pb-1">
+                <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+                    <div id="tm-assign-selected-summary" class="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm font-bold text-slate-600">
+                        เลือกแล้ว 0 คน / 0 selected
+                    </div>
+                    <div class="flex justify-end gap-3">
+                        <button type="button" class="btn btn-secondary px-4" onclick="window.closeModal&&window.closeModal()">ยกเลิก / Cancel</button>
+                        <button type="submit" id="tm-assign-save-btn" class="btn btn-primary px-5" disabled>เพิ่มที่เลือก / Assign Selected</button>
+                    </div>
+                </div>
+            </div>
+        </form>`;
+    openModal('เพิ่มพนักงานเข้า Scope / Assign Employees', html, 'max-w-2xl');
+    const updateSelectedSummary = () => {
+        const count = selectedEmployeeIds.size;
+        const summary = document.getElementById('tm-assign-selected-summary');
+        const btn = document.getElementById('tm-assign-save-btn');
+        if (summary) {
+            summary.className = `rounded-lg border px-3 py-2 text-sm font-bold ${count ? 'border-emerald-200 bg-emerald-50 text-emerald-700' : 'border-slate-200 bg-slate-50 text-slate-600'}`;
+            summary.textContent = `เลือกแล้ว ${count} คน / ${count} selected`;
+        }
+        if (btn) {
+            btn.disabled = count === 0;
+            btn.textContent = count ? `เพิ่ม ${count} คน / Assign ${count}` : 'เพิ่มที่เลือก / Assign Selected';
+        }
+    };
+    const renderPickList = () => {
+        const q = (document.getElementById('tm-employee-search')?.value || '').trim().toLowerCase();
+        const rows = _tmEmployees
+            .filter(e => !dept || String(e.Department || '').trim() === String(dept).trim())
+            .filter(e => {
+                const hay = [e.EmployeeID, e.EmployeeName, e.Department, e.Position, e.Unit].join(' ').toLowerCase();
+                return !q || hay.includes(q);
+            })
+            .slice(0, 200);
+        const list = document.getElementById('tm-employee-pick-list');
+        if (!list) return;
+        if (!rows.length) {
+            list.innerHTML = `<div class="p-5 text-center text-sm text-slate-400">ไม่พบพนักงาน / No employee found</div>`;
+            return;
+        }
+        list.innerHTML = rows.map(e => {
+            const isAssigned = assigned.has(String(e.EmployeeID));
+            const isSelected = selectedEmployeeIds.has(String(e.EmployeeID));
+            const activeScope = activeScopeByEmployee.get(String(e.EmployeeID));
+            const isInOtherCurriculum = activeScope && String(activeScope.CurriculumID) !== String(curriculum.id);
+            const isInSameCurriculum = activeScope && String(activeScope.CurriculumID) === String(curriculum.id);
+            const disabled = isAssigned || isInOtherCurriculum;
+            const rowNote = isAssigned
+                ? 'อยู่ในรายวิชานี้แล้ว / Already assigned'
+                : isInOtherCurriculum
+                    ? `อยู่หลักสูตร ${activeScope.CurriculumCode || '-'} แล้ว / In another curriculum`
+                    : isInSameCurriculum
+                        ? `อยู่หลักสูตรนี้แล้ว / Same curriculum`
+                        : '';
+            return `
+            <label class="flex items-start gap-3 p-3 ${disabled ? 'bg-slate-50 opacity-60' : 'hover:bg-slate-50'}">
+                <input type="checkbox" name="EmployeeIDs" value="${escHtml(e.EmployeeID || '')}" class="mt-1 rounded border-slate-300" ${disabled ? 'disabled' : ''} ${isSelected ? 'checked' : ''}>
+                <span class="min-w-0">
+                    <span class="block text-sm font-bold text-slate-800">${escHtml(e.EmployeeName || e.EmployeeID || '-')}</span>
+                    <span class="block text-xs text-slate-500">${escHtml(e.EmployeeID || '')} · ${escHtml(e.Department || '-')} · ${escHtml(e.Position || '-')}</span>
+                    ${rowNote ? `<span class="inline-flex mt-1 text-[11px] font-bold ${isInOtherCurriculum ? 'text-amber-700' : 'text-emerald-700'}">${escHtml(rowNote)}</span>` : ''}
+                </span>
+            </label>`;
+        }).join('');
+        updateSelectedSummary();
+    };
+    renderPickList();
+    document.getElementById('tm-employee-search')?.addEventListener('input', debounce(renderPickList, 120));
+    document.getElementById('tm-employee-pick-list')?.addEventListener('change', (e) => {
+        if (e.target?.name !== 'EmployeeIDs') return;
+        if (e.target.checked) selectedEmployeeIds.add(String(e.target.value));
+        else selectedEmployeeIds.delete(String(e.target.value));
+        updateSelectedSummary();
+    });
+    document.getElementById('tm-assign-form')?.addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const checked = Array.from(selectedEmployeeIds);
+        if (!checked.length) { showToast('เลือกพนักงานอย่างน้อย 1 คน / Select at least one employee', 'warning'); return; }
+        const btn = document.getElementById('tm-assign-save-btn');
+        btn.disabled = true;
+        try {
+            showLoading('กำลังเพิ่มพนักงาน... / Assigning employees...');
+            const body = { EmployeeIDs: checked, Notes: new FormData(e.target).get('Notes') || '' };
+            const res = await API.post(`/fourm/training-curriculums/${_tmSelectedCurriculumId}/assignments`, body);
+            const blocked = normalizeApiArray(res?.data?.blocked || []);
+            closeModal();
+            showToast(
+                blocked.length
+                    ? `เพิ่มสำเร็จบางส่วน: ${blocked.length} คนอยู่หลักสูตรอื่นแล้ว / Partially assigned`
+                    : 'เพิ่มพนักงานสำเร็จ / Employees assigned',
+                blocked.length ? 'warning' : 'success'
+            );
+            await fetchTrainingAssignments(_tmSelectedCurriculumId);
+            await fetchTrainingMatrix();
+        } catch (err) { showError(err); }
+        finally { hideLoading(); btn.disabled = false; }
+    });
+}
+
+async function showTransferAssignmentModal(assignmentId) {
+    const assignment = _tmAssignments.find(a => String(a.id) === String(assignmentId));
+    const currentCourse = _tmCourses.find(c => c.id === _tmSelectedCourseId);
+    if (!assignment || !currentCourse) { showToast('เลือกพนักงานที่อยู่ในรายวิชาก่อน / Select an assigned employee first', 'warning'); return; }
+
+    let curriculums = [];
+    let courseMap = new Map();
+    try {
+        showLoading('กำลังโหลดรายวิชาปลายทาง... / Loading destination courses...');
+        const p = new URLSearchParams();
+        p.set('year', _tmFilter.year);
+        if (_tmFilter.dept !== 'all') p.set('dept', _tmFilter.dept);
+        const curRes = await API.get(`/fourm/training-curriculums?${p}`);
+        curriculums = normalizeApiArray(curRes?.data ?? curRes);
+        for (const cur of curriculums) {
+            const courseRes = await API.get(`/fourm/training-curriculums/${cur.id}/courses`).catch(() => ({ data: [] }));
+            courseMap.set(cur.id, normalizeApiArray(courseRes?.data ?? courseRes).filter(c => c.id !== currentCourse.id));
+        }
+        hideLoading();
+    } catch (err) {
+        hideLoading();
+        showError(err);
+        return;
+    }
+
+    const currentCurriculum = _tmCurriculums.find(c => c.id === _tmSelectedCurriculumId) || curriculums.find(c => (courseMap.get(c.id) || []).some(x => x.id === currentCourse.id)) || {};
+    const destinationCourses = [];
+    const optionGroups = curriculums.map(cur => {
+        const courses = courseMap.get(cur.id) || [];
+        if (!courses.length) return '';
+        courses.forEach(c => destinationCourses.push({ ...c, CurriculumID: cur.id, CurriculumCode: cur.CurriculumCode, CurriculumTitle: cur.CurriculumTitle, Department: cur.Department }));
+        return `<optgroup label="${escHtml(`${cur.Department || '-'} / ${cur.CurriculumCode || ''} ${cur.CurriculumTitle || ''}`)}">
+            ${courses.map(c => `<option value="${c.id}"
+                data-course-code="${escHtml(c.CourseCode || '')}"
+                data-course-title="${escHtml(c.CourseTitle || '')}"
+                data-curriculum-code="${escHtml(cur.CurriculumCode || '')}"
+                data-curriculum-title="${escHtml(cur.CurriculumTitle || '')}"
+                data-department="${escHtml(cur.Department || '')}">${escHtml(`${c.CourseCode || '-'} - ${c.CourseTitle || '-'}`)}</option>`).join('')}
+        </optgroup>`;
+    }).join('');
+
+    const html = `
+        <form id="tm-transfer-form" class="space-y-4">
+            <div class="rounded-xl bg-slate-50 border border-slate-100 p-3">
+                <p class="text-sm font-bold text-slate-700">${escHtml(assignment.EmployeeName || assignment.EmployeeID || '-')}</p>
+                <p class="text-xs text-slate-500 mt-1">${escHtml(assignment.EmployeeID || '')} · ปัจจุบัน / Current: ${escHtml(currentCourse.CourseCode || '')} - ${escHtml(currentCourse.CourseTitle || '')}</p>
+            </div>
+            <div class="grid grid-cols-1 sm:grid-cols-[1fr_auto_1fr] gap-3 items-stretch">
+                <div class="rounded-xl border border-slate-200 bg-white p-3">
+                    <p class="text-[11px] font-black uppercase tracking-wider text-slate-400">เดิม / Current</p>
+                    <p class="mt-2 text-sm font-black text-slate-800">${escHtml(currentCourse.CourseCode || '-')} - ${escHtml(currentCourse.CourseTitle || '-')}</p>
+                    <p class="mt-1 text-xs text-slate-500">${escHtml(currentCurriculum.CurriculumCode || '-')} ${escHtml(currentCurriculum.CurriculumTitle || '')}</p>
+                    <p class="mt-1 text-xs font-semibold text-slate-400">${escHtml(currentCurriculum.Department || '-')}</p>
+                </div>
+                <div class="hidden sm:flex items-center justify-center text-slate-300 font-black">&rarr;</div>
+                <div id="tm-transfer-target-preview" class="rounded-xl border border-dashed border-slate-200 bg-slate-50 p-3">
+                    <p class="text-[11px] font-black uppercase tracking-wider text-slate-400">ใหม่ / Destination</p>
+                    <p class="mt-2 text-sm font-black text-slate-400">เลือกรายวิชาปลายทาง / Select destination</p>
+                    <p class="mt-1 text-xs text-slate-400">ระบบจะแสดงหลักสูตรและแผนกที่นี่</p>
+                </div>
+            </div>
+            <div id="tm-transfer-warning" class="hidden rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs font-bold text-amber-800"></div>
+            <div>
+                <label class="block text-sm font-semibold text-slate-700 mb-1.5">รายวิชาปลายทาง / Destination Course</label>
+                <select name="TargetCourseID" class="form-input w-full" required>
+                    <option value="">เลือกรายวิชาปลายทาง / Select destination course</option>
+                    ${optionGroups}
+                </select>
+            </div>
+            <div>
+                <label class="block text-sm font-semibold text-slate-700 mb-1.5">หมายเหตุการย้าย / Transfer Note</label>
+                <textarea name="Notes" rows="3" class="form-input w-full resize-none" placeholder="เหตุผลหรือหมายเหตุ audit / Reason or audit note..."></textarea>
+            </div>
+            <div class="flex justify-end gap-3 pt-4 border-t border-slate-100">
+                <button type="button" class="btn btn-secondary px-4" onclick="window.closeModal&&window.closeModal()">ยกเลิก / Cancel</button>
+                <button type="submit" id="tm-transfer-save-btn" class="btn btn-primary px-5">ย้าย / Transfer</button>
+            </div>
+        </form>`;
+    openModal('ย้ายพนักงาน / Transfer Employee', html, 'max-w-lg');
+    if (!optionGroups.trim()) {
+        const select = document.querySelector('#tm-transfer-form select[name="TargetCourseID"]');
+        if (select) select.innerHTML = '<option value="">ไม่มีรายวิชาปลายทาง / No destination course available</option>';
+    }
+    const updateTransferPreview = () => {
+        const select = document.querySelector('#tm-transfer-form select[name="TargetCourseID"]');
+        const preview = document.getElementById('tm-transfer-target-preview');
+        const warning = document.getElementById('tm-transfer-warning');
+        const option = select?.selectedOptions?.[0];
+        if (!preview || !warning) return;
+        if (!option || !option.value) {
+            preview.className = 'rounded-xl border border-dashed border-slate-200 bg-slate-50 p-3';
+            preview.innerHTML = `
+                <p class="text-[11px] font-black uppercase tracking-wider text-slate-400">ใหม่ / Destination</p>
+                <p class="mt-2 text-sm font-black text-slate-400">เลือกรายวิชาปลายทาง / Select destination</p>
+                <p class="mt-1 text-xs text-slate-400">ระบบจะแสดงหลักสูตรและแผนกที่นี่</p>`;
+            warning.classList.add('hidden');
+            warning.textContent = '';
+            return;
+        }
+        const target = {
+            CourseCode: option.dataset.courseCode || '',
+            CourseTitle: option.dataset.courseTitle || '',
+            CurriculumCode: option.dataset.curriculumCode || '',
+            CurriculumTitle: option.dataset.curriculumTitle || '',
+            Department: option.dataset.department || '',
+        };
+        preview.className = 'rounded-xl border border-sky-200 bg-sky-50 p-3';
+        preview.innerHTML = `
+            <p class="text-[11px] font-black uppercase tracking-wider text-sky-500">ใหม่ / Destination</p>
+            <p class="mt-2 text-sm font-black text-slate-800">${escHtml(target.CourseCode || '-')} - ${escHtml(target.CourseTitle || '-')}</p>
+            <p class="mt-1 text-xs text-slate-600">${escHtml(target.CurriculumCode || '-')} ${escHtml(target.CurriculumTitle || '')}</p>
+            <p class="mt-1 text-xs font-semibold text-sky-700">${escHtml(target.Department || '-')}</p>`;
+        const warnings = [];
+        if (String(target.CurriculumCode || '') !== String(currentCurriculum.CurriculumCode || '')) warnings.push('คนละหลักสูตร / Different curriculum');
+        if (String(target.Department || '') !== String(currentCurriculum.Department || '')) warnings.push('คนละแผนก / Different department');
+        if (warnings.length) {
+            warning.classList.remove('hidden');
+            warning.textContent = `โปรดตรวจสอบ: ${warnings.join(' · ')}`;
+        } else {
+            warning.classList.add('hidden');
+            warning.textContent = '';
+        }
+    };
+    document.querySelector('#tm-transfer-form select[name="TargetCourseID"]')?.addEventListener('change', updateTransferPreview);
+    updateTransferPreview();
+    document.getElementById('tm-transfer-form')?.addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const btn = document.getElementById('tm-transfer-save-btn');
+        const form = e.target;
+        const targetCourseId = form.querySelector('select[name="TargetCourseID"]')?.value || '';
+        const targetCourse = destinationCourses.find(c => String(c.id) === String(targetCourseId));
+        if (!targetCourse) { showToast('เลือกรายวิชาปลายทางก่อน / Select destination course first', 'warning'); return; }
+        const ok = await showConfirmationModal(
+            'ยืนยันการย้ายพนักงาน / Confirm transfer',
+            `คุณกำลังย้าย ${assignment.EmployeeName || assignment.EmployeeID || '-'} จาก ${currentCourse.CourseCode || '-'} ไป ${targetCourse.CourseCode || '-'} ใช่ไหม? / Move from ${currentCourse.CourseCode || '-'} to ${targetCourse.CourseCode || '-'}?`
+        );
+        if (!ok) return;
+        btn.disabled = true;
+        try {
+            showLoading('กำลังย้ายพนักงาน... / Transferring employee...');
+            const body = Object.fromEntries(new FormData(form).entries());
+            await API.post(`/fourm/training-assignments/${assignment.id}/transfer`, body);
+            closeModal();
+            showToast('ย้ายพนักงานสำเร็จ / Employee transferred', 'success');
+            await fetchTrainingAssignments(_tmSelectedCourseId);
+            await fetchTrainingMatrix();
+        } catch (err) { showError(err); }
+        finally { hideLoading(); btn.disabled = false; }
+    });
+}
+
+async function showTrainingEmployeeHistoryModal(employeeId, employeeName = '') {
+    if (!employeeId) { showToast('ไม่พบรหัสพนักงาน / Employee ID not found', 'warning'); return; }
+    const safeName = employeeName || employeeId;
+    const html = `
+        <div class="space-y-4">
+            <div class="rounded-xl bg-slate-50 border border-slate-100 p-3">
+                <p class="text-sm font-black text-slate-800">${escHtml(safeName)}</p>
+                <p class="text-xs font-mono text-slate-500 mt-1">${escHtml(employeeId)}</p>
+            </div>
+            <div id="tm-employee-history-list" class="max-h-[520px] overflow-y-auto rounded-xl border border-slate-200 divide-y divide-slate-100">
+                <div class="p-6 text-center text-sm text-slate-400">กำลังโหลดประวัติ... / Loading history...</div>
+            </div>
+        </div>`;
+    openModal('ประวัติพนักงาน / Employee History', html, 'max-w-3xl');
+
+    const list = document.getElementById('tm-employee-history-list');
+    try {
+        const p = new URLSearchParams();
+        p.set('employeeId', employeeId);
+        p.set('year', _tmFilter.year);
+        p.set('limit', '120');
+        if (_isAdmin && _tmFilter.dept !== 'all') p.set('dept', _tmFilter.dept);
+        const res = await API.get(`/fourm/training-logs?${p}`);
+        const rows = normalizeApiArray(res?.data ?? res);
+        if (!list) return;
+        if (!rows.length) {
+            list.innerHTML = `<div class="p-6 text-center text-sm text-slate-400">ยังไม่มีประวัติของพนักงานคนนี้ในปี ${_tmFilter.year} / No history in this year</div>`;
+            return;
+        }
+        list.innerHTML = rows.map(row => {
+            const when = row.PerformedAt ? new Date(row.PerformedAt).toLocaleString('th-TH', { dateStyle:'medium', timeStyle:'short' }) : '-';
+            const oldValue = _tmParseJson(row.OldValue) || {};
+            const newValue = _tmParseJson(row.NewValue) || {};
+            const transferMeta = row.Action === 'ASSIGNMENT_TRANSFER'
+                ? `<div class="mt-2 rounded-lg bg-sky-50 border border-sky-100 px-3 py-2 text-xs text-sky-800">
+                    <span class="font-bold">เดิม / Old:</span> ${escHtml(oldValue.curriculumCode || '')} / ${escHtml(oldValue.courseCode || '-')}
+                    <span class="mx-2 text-sky-300">&rarr;</span>
+                    <span class="font-bold">ใหม่ / New:</span> ${escHtml(newValue.curriculumCode || '')} / ${escHtml(newValue.courseCode || '-')}
+                </div>` : '';
+            return `
+            <div class="p-4">
+                <div class="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-2">
+                    <div class="min-w-0">
+                        <div class="flex flex-wrap items-center gap-2">
+                            ${_tmLogActionBadge(row.Action)}
+                            <span class="text-xs text-slate-400">${escHtml(row.Department || '-')} · ${escHtml(String(row.Year || _tmFilter.year))}</span>
+                        </div>
+                        <p class="mt-2 text-sm font-bold text-slate-800">${escHtml(_tmLogSummary(row))}</p>
+                        <p class="mt-1 text-xs text-slate-500">
+                            หลักสูตร / Curriculum: ${escHtml(row.CurriculumCode || '-')} · รายวิชา / Course: ${escHtml(row.CourseCode || '-')}
+                        </p>
+                        ${transferMeta}
+                    </div>
+                    <div class="text-right shrink-0">
+                        <p class="text-xs font-bold text-slate-600">${escHtml(row.PerformedBy || '-')}</p>
+                        <p class="text-[11px] text-slate-400 mt-1">${escHtml(when)}</p>
+                    </div>
+                </div>
+            </div>`;
+        }).join('');
+    } catch (err) {
+        if (list) list.innerHTML = `<div class="p-6 text-center text-sm text-rose-600">${escHtml(err.message || 'โหลดประวัติพนักงานไม่สำเร็จ / Cannot load employee history')}</div>`;
+    }
+}
+
+function _tmParseJson(value) {
+    if (!value) return null;
+    if (typeof value === 'object') return value;
+    try { return JSON.parse(value); } catch (_) { return null; }
+}
+
+function _tmLogActionBadge(action) {
+    const a = action || '-';
+    const cls = a.includes('TRANSFER') ? 'bg-sky-50 text-sky-700 border-sky-200'
+        : a.includes('REMOVE') || a.includes('DISABLE') ? 'bg-rose-50 text-rose-700 border-rose-200'
+        : a.includes('CREATE') || a.includes('REASSIGN') ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
+        : 'bg-slate-50 text-slate-600 border-slate-200';
+    return `<span class="inline-flex px-2 py-1 rounded-full border text-[11px] font-bold ${cls}">${escHtml(a)}</span>`;
+}
+
+function _tmLogSummary(row) {
+    const oldValue = _tmParseJson(row.OldValue) || {};
+    const newValue = _tmParseJson(row.NewValue) || {};
+    if ((row.Action || '').includes('TRANSFER')) {
+        return `From ${oldValue.courseCode || row.CourseCode || '-'} to ${newValue.courseCode || '-'}`;
+    }
+    if ((row.Action || '').includes('ASSIGNMENT')) {
+        return `${row.EmployeeID || '-'} · ${newValue.EmployeeName || oldValue.EmployeeName || ''}`;
+    }
+    if ((row.Action || '').includes('COURSE')) {
+        return `${row.CourseCode || newValue.CourseCode || oldValue.CourseCode || '-'} · ${row.CourseTitle || newValue.CourseTitle || oldValue.CourseTitle || ''}`;
+    }
+    if ((row.Action || '').includes('CURRICULUM')) {
+        return `${row.CurriculumCode || newValue.CurriculumCode || oldValue.CurriculumCode || '-'} · ${row.CurriculumTitle || newValue.CurriculumTitle || oldValue.CurriculumTitle || ''}`;
+    }
+    return row.EmployeeID || row.CourseCode || row.CurriculumCode || '-';
+}
+
+async function showTrainingAuditLogModal(scope = 'current') {
+    const actionOptions = [
+        ['all', 'ทุก Action / All Actions'],
+        ['CURRICULUM_CREATE', 'สร้างหลักสูตร / Curriculum Create'],
+        ['CURRICULUM_UPDATE', 'แก้ไขหลักสูตร / Curriculum Update'],
+        ['CURRICULUM_DISABLE', 'ปิดหลักสูตร / Curriculum Disable'],
+        ['COURSE_CREATE', 'สร้างรายวิชา / Course Create'],
+        ['COURSE_UPDATE', 'แก้ไขรายวิชา / Course Update'],
+        ['COURSE_DISABLE', 'ปิดรายวิชา / Course Disable'],
+        ['ASSIGNMENT_CREATE', 'เพิ่มพนักงาน / Assignment Create'],
+        ['ASSIGNMENT_REASSIGN', 'เพิ่มซ้ำกลับเข้า Scope / Assignment Reassign'],
+        ['ASSIGNMENT_UPDATE', 'แก้ไข Assignment / Assignment Update'],
+        ['ASSIGNMENT_REMOVE', 'ลบพนักงานออก / Assignment Remove'],
+        ['ASSIGNMENT_TRANSFER', 'ย้ายพนักงาน / Assignment Transfer'],
+    ];
+    const html = `
+        <div class="space-y-4">
+            <div class="flex flex-wrap gap-2 items-center">
+                <select id="tm-log-scope" class="form-input py-2 text-sm">
+                    <option value="current" ${scope === 'current' ? 'selected' : ''}>รายการที่เลือก / Current Selection</option>
+                    <option value="year" ${scope === 'year' ? 'selected' : ''}>ทั้งปี / แผนก / Whole Year / Department</option>
+                </select>
+                <select id="tm-log-action" class="form-input py-2 text-sm">
+                    ${actionOptions.map(([value, label]) => `<option value="${value}">${label}</option>`).join('')}
+                </select>
+                <button type="button" id="tm-log-refresh" class="px-3 py-2 rounded-lg text-sm font-bold text-slate-600 border border-slate-200 hover:bg-slate-50">รีเฟรช / Refresh</button>
+            </div>
+            <div id="tm-log-list" class="max-h-[520px] overflow-y-auto rounded-xl border border-slate-200 divide-y divide-slate-100">
+                <div class="p-6 text-center text-sm text-slate-400">กำลังโหลด... / Loading...</div>
+            </div>
+        </div>`;
+    openModal('ประวัติ Training Matrix / Training Matrix Audit Log', html, 'max-w-4xl');
+
+    const loadLogs = async () => {
+        const list = document.getElementById('tm-log-list');
+        if (!list) return;
+        list.innerHTML = `<div class="p-6 text-center text-sm text-slate-400">กำลังโหลด... / Loading...</div>`;
+        try {
+            const p = new URLSearchParams();
+            p.set('year', _tmFilter.year);
+            p.set('limit', '120');
+            const selectedScope = document.getElementById('tm-log-scope')?.value || 'current';
+            const action = document.getElementById('tm-log-action')?.value || 'all';
+            if (action !== 'all') p.set('action', action);
+            if (_isAdmin && _tmFilter.dept !== 'all') p.set('dept', _tmFilter.dept);
+            if (selectedScope === 'current') {
+                if (_tmSelectedCourseId) p.set('courseId', _tmSelectedCourseId);
+                else if (_tmSelectedCurriculumId) p.set('curriculumId', _tmSelectedCurriculumId);
+            }
+            const res = await API.get(`/fourm/training-logs?${p}`);
+            const rows = normalizeApiArray(res?.data ?? res);
+            if (!rows.length) {
+                list.innerHTML = `<div class="p-6 text-center text-sm text-slate-400">ยังไม่มีประวัติใน Scope นี้ / No audit log in this scope</div>`;
+                return;
+            }
+            list.innerHTML = rows.map(row => {
+                const when = row.PerformedAt ? new Date(row.PerformedAt).toLocaleString('th-TH', { dateStyle:'medium', timeStyle:'short' }) : '-';
+                const oldValue = _tmParseJson(row.OldValue) || {};
+                const newValue = _tmParseJson(row.NewValue) || {};
+                const transferMeta = row.Action === 'ASSIGNMENT_TRANSFER'
+                    ? `<div class="mt-2 rounded-lg bg-sky-50 border border-sky-100 px-3 py-2 text-xs text-sky-800">
+                        <span class="font-bold">เดิม / Old:</span> ${escHtml(oldValue.curriculumCode || '')} / ${escHtml(oldValue.courseCode || '-')}
+                        <span class="mx-2 text-sky-300">→</span>
+                        <span class="font-bold">ใหม่ / New:</span> ${escHtml(newValue.curriculumCode || '')} / ${escHtml(newValue.courseCode || '-')}
+                    </div>` : '';
+                return `
+                <div class="p-4">
+                    <div class="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-2">
+                        <div class="min-w-0">
+                            <div class="flex flex-wrap items-center gap-2">
+                                ${_tmLogActionBadge(row.Action)}
+                                <span class="text-xs text-slate-400">${escHtml(row.Department || '-')} · ${escHtml(String(row.Year || _tmFilter.year))}</span>
+                            </div>
+                            <p class="mt-2 text-sm font-bold text-slate-800">${escHtml(_tmLogSummary(row))}</p>
+                            <p class="mt-1 text-xs text-slate-500">
+                                หลักสูตร / Curriculum: ${escHtml(row.CurriculumCode || '-')} · รายวิชา / Course: ${escHtml(row.CourseCode || '-')} · พนักงาน / Employee: ${escHtml(row.EmployeeID || '-')}
+                            </p>
+                            ${transferMeta}
+                        </div>
+                        <div class="text-right shrink-0">
+                            <p class="text-xs font-bold text-slate-600">${escHtml(row.PerformedBy || '-')}</p>
+                            <p class="text-[11px] text-slate-400 mt-1">${escHtml(when)}</p>
+                        </div>
+                    </div>
+                </div>`;
+            }).join('');
+        } catch (err) {
+            list.innerHTML = `<div class="p-6 text-center text-sm text-rose-600">${escHtml(err.message || 'โหลดประวัติไม่สำเร็จ / Cannot load audit log')}</div>`;
+        }
+    };
+    document.getElementById('tm-log-refresh')?.addEventListener('click', loadLogs);
+    document.getElementById('tm-log-scope')?.addEventListener('change', loadLogs);
+    document.getElementById('tm-log-action')?.addEventListener('change', loadLogs);
+    await loadLogs();
+}
+
 
 async function _loadFourmForms(adminAll = false) {
     try {

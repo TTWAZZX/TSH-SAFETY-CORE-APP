@@ -549,6 +549,73 @@ async function _loadHeroKpiSummary() {
         </div>`;
 }
 
+async function _loadHeroKpiSummary() {
+    const el = document.getElementById('acc-hero-kpi-summary');
+    if (!el) return;
+    el.innerHTML = `<div class="h-20 rounded-xl bg-white/10 animate-pulse"></div>`;
+    try {
+        const res = await API.get(`/accident/performance?year=${_statsYear}`);
+        _perfData = res.data || null;
+    } catch {
+        _perfData = null;
+    }
+    if (!_perfData) {
+        el.innerHTML = '';
+        return;
+    }
+    const p = _perfData;
+    const isZero = (parseInt(p.recordableCount) || 0) === 0;
+    el.innerHTML = `
+        <div class="rounded-2xl border border-white/20 bg-white/10 p-4 md:p-5 backdrop-blur-sm shadow-[inset_0_1px_0_rgba(255,255,255,0.18)]">
+            <div class="grid grid-cols-1 xl:grid-cols-[1fr_280px_190px] gap-4 items-stretch">
+                <div class="min-w-0 flex flex-col justify-between">
+                    <div>
+                        <div class="inline-flex items-center gap-2 px-3 py-1 rounded-full text-xs font-black bg-white/20 text-white border border-white/30 mb-2">
+                            <span class="w-2 h-2 rounded-full ${isZero ? 'bg-emerald-300' : 'bg-red-300'}"></span>
+                            Safety KPI Board
+                        </div>
+                        <h2 class="text-xl md:text-2xl font-black text-white leading-tight">บอร์ดสถิติความปลอดภัยประจำปี ${_statsYear}</h2>
+                        <p class="text-sm mt-1" style="color:rgba(209,250,229,0.92)">คำนวณจาก Accident Report + Man-hour · ไม่รวม First Aid / Near Miss</p>
+                    </div>
+                    <div class="mt-3 grid grid-cols-1 sm:grid-cols-2 gap-2 text-[11px] font-bold text-white">
+                        <div class="rounded-xl bg-black/10 border border-white/15 px-3 py-2">
+                            <p class="uppercase tracking-wide text-white/50">Case Source</p>
+                            <p class="mt-0.5 inline-flex items-center gap-1.5"><span class="w-1.5 h-1.5 rounded-full bg-red-300"></span>Accident Report</p>
+                        </div>
+                        <div class="rounded-xl bg-black/10 border border-white/15 px-3 py-2">
+                            <p class="uppercase tracking-wide text-white/50">Exposure Source</p>
+                            <p class="mt-0.5 inline-flex items-center gap-1.5"><span class="w-1.5 h-1.5 rounded-full bg-emerald-300"></span>Man-hour</p>
+                        </div>
+                    </div>
+                </div>
+                <div class="rounded-2xl border ${isZero ? 'border-emerald-200/40 bg-emerald-300/15' : 'border-red-200/40 bg-red-300/15'} px-5 py-4 flex items-center justify-between gap-4">
+                    <div>
+                        <p class="text-[11px] font-black uppercase tracking-wide text-white/65">Current Status</p>
+                        <p class="mt-1 text-2xl md:text-3xl font-black text-white leading-none">${isZero ? 'ZERO ACCIDENT' : 'ACTION REQUIRED'}</p>
+                        <p class="text-xs mt-2 text-white/75">${parseInt(p.recordableCount) || 0} counted cases · FY ${_statsYear}</p>
+                    </div>
+                    <div class="w-12 h-12 rounded-2xl bg-white/20 border border-white/25 flex items-center justify-center flex-shrink-0">
+                        <svg class="w-6 h-6 ${isZero ? 'text-emerald-100' : 'text-red-100'}" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.2" d="${isZero ? 'M9 12l2 2 4-4m5 2a9 9 0 11-18 0 9 9 0 0118 0z' : 'M12 9v2m0 4h.01M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z'}"/></svg>
+                    </div>
+                </div>
+                <div class="flex flex-col gap-2 justify-center">
+                    <button onclick="window._accShowCountedReports&&window._accShowCountedReports()"
+                        class="flex items-center justify-center gap-1.5 px-4 py-2.5 rounded-xl text-xs font-black text-white border border-white/30 bg-white/10 hover:bg-white/20 transition-all whitespace-nowrap">
+                        <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 17v-2a4 4 0 014-4h6m0 0l-3-3m3 3l-3 3M5 5h7M5 9h4M5 13h2"/></svg>
+                        ดูรายงานที่นำมาคิด
+                    </button>
+                    ${_isAdmin ? `
+                    <button onclick="window._accEditPerformance()"
+                        class="flex items-center justify-center gap-1.5 px-4 py-2.5 rounded-xl text-xs font-black text-white border border-white/30 bg-white/15 hover:bg-white/25 transition-all whitespace-nowrap">
+                        <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z"/></svg>
+                        แก้ไข Man-hour
+                    </button>` : ''}
+                    <p class="text-[10px] font-semibold text-white/55 text-center">${p.UpdatedBy ? `Updated by ${p.UpdatedBy}` : 'Man-hour not updated'}</p>
+                </div>
+            </div>
+        </div>`;
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // DATA FETCHERS
 // ─────────────────────────────────────────────────────────────────────────────

@@ -708,6 +708,8 @@ async function _renderDashboardPanel() {
                                ${bestRows.map(row => `<span class="inline-flex items-center rounded-full bg-emerald-50 px-2.5 py-1 font-bold text-emerald-700">${_html(row.dept)} ${row.pct}%</span>`).join('')}
                            </div>`}
                 </div>
+                <p class="text-2xl font-bold ${topFollowUp && topFollowUp.pct < 80 ? 'text-red-600' : 'text-emerald-700'}">${topFollowUp ? topFollowUp.pct + '%' : '-'}</p>
+                <p class="text-xs text-slate-400 mt-1 truncate" title="${_esc(topFollowUp?.dept || '')}">${topFollowUp?.dept || 'ยังไม่มีข้อมูลให้ติดตาม'}</p>
             </div>
         </div>
 

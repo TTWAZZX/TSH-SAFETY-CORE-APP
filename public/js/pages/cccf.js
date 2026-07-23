@@ -3460,6 +3460,12 @@ function renderPage(container) {
               <option value="due_soon" ${_pFilterDue === 'due_soon' ? 'selected' : ''}>Due Soon</option>
               <option value="no_due" ${_pFilterDue === 'no_due' ? 'selected' : ''}>No Due Date</option>
             </select>
+            <select id="p-filter-due" class="text-xs py-2 px-3 rounded-xl border border-slate-200 bg-white focus:outline-none focus:border-emerald-400 text-slate-600">
+              <option value="">ทุก Due</option>
+              <option value="overdue" ${_pFilterDue === 'overdue' ? 'selected' : ''}>Overdue</option>
+              <option value="due_soon" ${_pFilterDue === 'due_soon' ? 'selected' : ''}>Due Soon</option>
+              <option value="no_due" ${_pFilterDue === 'no_due' ? 'selected' : ''}>No Due Date</option>
+            </select>
             <select id="p-filter-rank" class="text-xs py-2 px-3 rounded-xl border border-slate-200 bg-white focus:outline-none focus:border-emerald-400 text-slate-600">
               <option value="">ทุก Rank</option>
               ${RANKS.map(r => `<option value="${r.rank}" ${_pFilterRank === r.rank ? 'selected' : ''}>${r.label}</option>`).join('')}
