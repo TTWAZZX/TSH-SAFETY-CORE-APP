@@ -2,6 +2,16 @@
 
 This file preserves historical production handoff, smoke test, backup, deployment, migration, and phase notes moved out of `CLAUDE.md`.
 
+## Yokoten Admin Bulk Response / Dashboard Source Alignment Deployed (2026-07-23)
+
+Implemented and deployed a code-only PHP shared-hosting release for Yokoten Admin on-behalf response selection and Dashboard Department Coverage source alignment. Yokoten now uses directly clickable Department and Safety Unit checkboxes, supports selecting every unanswered Department in one action, and keeps already-answered Departments disabled. Dashboard `CCCF A (Manual)` now aggregates the configured CCCF Units from `cccf_unit_sel`, Unit yearly targets, manual achieved overrides, and actual worker records when no override exists. Yokoten coverage now follows the module's selected year and Unit scope, OJT deterministically selects the latest current Department record, and all visible coverage columns expose numerator/denominator/source metadata in tooltips.
+
+Local verification passed: full `npm --prefix backend test`, 91/91 read/permission preflight, Dashboard source contracts 15/15 across 10 configured Departments, Yokoten bulk-response smoke 10/10, PHP lint, Node syntax, `git diff --check`, and no newly introduced replacement characters. The release required no MySQL schema/data migration and no upload-storage change.
+
+Production rollback backup was captured at `backups/production/yokoten-dashboard-predeploy-20260723-162854/`. Uploaded runtime files were `index.html`, `public/js/main.js`, `public/js/pages/yokoten.js`, `public/js/pages/dashboard.js`, `api/index.php`, `api/handlers/targets.php`, and `deploy-manifest.json`. Download-back verification passed SHA-256 7/7 at `backups/production/yokoten-dashboard-upload-verify-20260723-163041/`.
+
+Authenticated Production read-only API UAT passed at `backups/production/yokoten-dashboard-readonly-uat-20260723T093207/`: all 10 Dashboard rows returned source metadata, 8 CCCF Manual rows were correctly above 0%, and Yokoten Dashboard/module parity passed 10/10 Departments. Browser evidence is stored at `backups/production/yokoten-dashboard-browser-uat-20260723T093903/`: Dashboard rendered 10 rows without page-level horizontal overflow, and the Yokoten Admin modal showed 10 Department choices with 9 unanswered choices selectable and the already-answered Department disabled. No business write endpoint was called; expected Production side effects were limited to successful-login audit/attempt records and normal login housekeeping.
+
 ## Onboarding Phases 1-10 Deployed (2026-07-23)
 
 Prepared the shared-hosting PHP production bundle for the centralized onboarding resolver, backend enforcement, password and Safety Unit continuation, cross-system profile validation, data-quality review, cross-path enforcement, frontend integration, and Phase 10 browser UAT. The bundle is code-only: no schema, employee data, or upload-storage mutation is planned.
