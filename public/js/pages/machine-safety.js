@@ -63,6 +63,7 @@ export async function loadMachineSafetyPage() {
 
     const user = TSHSession.getUser();
     _isAdmin = String(user?.role || user?.Role || '').toLowerCase() === 'admin';
+    _viewMode = 'card';
     _setupCardImageExportListeners();
 
     container.innerHTML = `
@@ -297,6 +298,14 @@ function _renderPage(container) {
     const restricted = _machines.filter(m => ['restricted', 'locked'].includes(m.Status || '')).length;
     const riskReady = _machines.filter(m => m.HasRiskAssessment).length;
     const openIssues = _machines.reduce((sum, m) => sum + (parseInt(m.OpenIssueCount) || 0), 0);
+    const activeFilterCount = [
+        _filterDept,
+        _filterStatus,
+        _filterMStatus,
+        _filterRisk,
+        _filterAudit,
+        _filterInspection,
+    ].filter(Boolean).length;
 
     // Audit readiness across all machines
     const auditMap  = _machines.reduce((acc, m) => { acc[_auditStatus(m).status]++; return acc; }, { pass: 0, warn: 0, fail: 0 });
@@ -307,7 +316,7 @@ function _renderPage(container) {
     const topHints  = Object.entries(hintFreq).sort((a, b) => b[1] - a[1]).slice(0, 4);
 
     container.innerHTML = `
-    <div class="space-y-6 animate-fade-in pb-10">
+    <div class="msd-page-shell space-y-6 animate-fade-in pb-10">
 
         <!-- ═══ HERO HEADER ═══ -->
         <div class="relative overflow-hidden rounded-2xl mb-2" data-msd-card-image="machine-safety-hero" style="background:linear-gradient(135deg,#064e3b 0%,#065f46 55%,#0d9488 100%)">
@@ -373,7 +382,7 @@ function _renderPage(container) {
 
         <!-- Compliance Bar -->
         ${total > 0 ? `
-        <div class="ds-section p-4 flex items-center gap-4" data-msd-card-image="machine-safety-document-compliance">
+        <div class="msd-compliance-summary ds-section p-4 flex items-center gap-4" data-msd-card-image="machine-safety-document-compliance">
             <div class="flex-shrink-0">
                 <div class="relative w-14 h-14">
                     <svg class="w-14 h-14 -rotate-90" viewBox="0 0 56 56">
@@ -492,28 +501,33 @@ function _renderPage(container) {
         </div>
 
         <!-- Filter Bar -->
-        <div class="ds-filter-bar flex flex-wrap gap-3 items-center">
-            <div class="relative flex-1 min-w-[180px]">
+        <div class="msd-filter-grid ds-filter-bar">
+            <div class="msd-filter-search relative">
                 <svg class="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-4.35-4.35M17 11A6 6 0 115 11a6 6 0 0112 0z"/></svg>
                 <input id="msd-search" type="text" placeholder="ค้นหาชื่อ / รหัสเครื่องจักร..."
                     value="${_search}"
                     class="w-full pl-9 pr-3 py-2 text-sm border border-slate-200 rounded-lg outline-none focus:border-emerald-400 focus:ring-2 focus:ring-emerald-100"
                     oninput="window._msdFilter()">
             </div>
-            <select id="msd-dept" class="text-sm border border-slate-200 rounded-lg px-3 py-2 outline-none focus:border-emerald-400"
+            <button type="button" class="msd-mobile-filter-toggle" aria-expanded="false"
+                onclick="window._msdToggleFilters(this)">
+                <span>ตัวกรองเพิ่มเติม${activeFilterCount ? ` (${activeFilterCount})` : ''}</span>
+                <svg class="w-4 h-4 transition-transform" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/></svg>
+            </button>
+            <select id="msd-dept" class="msd-filter-advanced msd-filter-control text-sm border border-slate-200 rounded-lg px-3 py-2 outline-none focus:border-emerald-400"
                 onchange="window._msdFilter()">
                 <option value="">ทุกแผนก</option>
                 ${[...new Set(_machines.map(m => m.Department).filter(Boolean))].sort()
                     .map(d => `<option value="${UI.escHtml(d)}" ${_filterDept===d?'selected':''}>${UI.escHtml(d)}</option>`).join('')}
             </select>
-            <select id="msd-status" class="text-sm border border-slate-200 rounded-lg px-3 py-2 outline-none focus:border-emerald-400"
+            <select id="msd-status" class="msd-filter-advanced msd-filter-control text-sm border border-slate-200 rounded-lg px-3 py-2 outline-none focus:border-emerald-400"
                 onchange="window._msdFilter()">
                 <option value="">เอกสาร: ทุกสถานะ</option>
                 <option value="full"    ${_filterStatus==='full'?'selected':''}>ครบทั้ง 2 รายการ</option>
                 <option value="partial" ${_filterStatus==='partial'?'selected':''}>มีบางส่วน</option>
                 <option value="none"    ${_filterStatus==='none'?'selected':''}>ยังไม่มีเลย</option>
             </select>
-            <select id="msd-mstatus" class="text-sm border border-slate-200 rounded-lg px-3 py-2 outline-none focus:border-emerald-400"
+            <select id="msd-mstatus" class="msd-filter-advanced msd-filter-control text-sm border border-slate-200 rounded-lg px-3 py-2 outline-none focus:border-emerald-400"
                 onchange="window._msdFilter()">
                 <option value="">สถานะเครื่อง: ทั้งหมด</option>
                 <option value="active"      ${_filterMStatus==='active'?'selected':''}>ใช้งาน</option>
@@ -522,7 +536,7 @@ function _renderPage(container) {
                 <option value="maintenance" ${_filterMStatus==='maintenance'?'selected':''}>ซ่อมบำรุง</option>
                 <option value="inactive"    ${_filterMStatus==='inactive'?'selected':''}>หยุดใช้งาน</option>
             </select>
-            <select id="msd-risk" class="text-sm border border-slate-200 rounded-lg px-3 py-2 outline-none focus:border-emerald-400"
+            <select id="msd-risk" class="msd-filter-advanced msd-filter-control text-sm border border-slate-200 rounded-lg px-3 py-2 outline-none focus:border-emerald-400"
                 onchange="window._msdFilter()">
                 <option value="">ความเสี่ยง: ทั้งหมด</option>
                 <option value="critical" ${_filterRisk==='critical'?'selected':''}>วิกฤต</option>
@@ -530,34 +544,36 @@ function _renderPage(container) {
                 <option value="medium"   ${_filterRisk==='medium'?'selected':''}>ปานกลาง</option>
                 <option value="low"      ${_filterRisk==='low'?'selected':''}>ต่ำ</option>
             </select>
-            <select id="msd-audit" class="text-sm border border-slate-200 rounded-lg px-3 py-2 outline-none focus:border-emerald-400"
+            <select id="msd-audit" class="msd-filter-advanced msd-filter-control text-sm border border-slate-200 rounded-lg px-3 py-2 outline-none focus:border-emerald-400"
                 onchange="window._msdFilter()">
                 <option value="">Audit: ทั้งหมด</option>
                 <option value="pass" ${_filterAudit==='pass'?'selected':''}>ผ่าน</option>
                 <option value="warn" ${_filterAudit==='warn'?'selected':''}>เตือน</option>
                 <option value="fail" ${_filterAudit==='fail'?'selected':''}>ไม่ผ่าน</option>
             </select>
-            <select id="msd-inspection" class="text-sm border border-slate-200 rounded-lg px-3 py-2 outline-none focus:border-emerald-400"
+            <select id="msd-inspection" class="msd-filter-advanced msd-filter-control text-sm border border-slate-200 rounded-lg px-3 py-2 outline-none focus:border-emerald-400"
                 onchange="window._msdFilter()">
                 <option value="">Inspection: ทั้งหมด</option>
                 <option value="due" ${_filterInspection==='due'?'selected':''}>Due Soon</option>
                 <option value="overdue" ${_filterInspection==='overdue'?'selected':''}>Overdue</option>
             </select>
-            ${_isAdmin ? `<span class="inline-flex items-center gap-2 px-3 py-2 rounded-lg border border-emerald-200 bg-emerald-50 text-xs font-semibold text-emerald-700">
+            ${_isAdmin ? `<span class="msd-filter-docno inline-flex items-center gap-2 px-3 py-2 rounded-lg border border-emerald-200 bg-emerald-50 text-xs font-semibold text-emerald-700">
                 ลำดับถัดไป <span class="font-mono">${_nextDocumentNo()}</span>
             </span>` : ''}
-            <div class="inline-flex rounded-lg border border-slate-200 bg-white overflow-hidden">
+            <div class="msd-view-toggle inline-flex rounded-lg border border-slate-200 bg-white overflow-hidden">
                 <button type="button" onclick="window._msdSetView('list')"
+                    aria-pressed="${_viewMode === 'list'}"
                     class="px-3 py-2 text-xs font-semibold ${_viewMode === 'list' ? 'bg-emerald-500 text-white' : 'text-slate-500 hover:bg-slate-50'}">List</button>
                 <button type="button" onclick="window._msdSetView('card')"
+                    aria-pressed="${_viewMode === 'card'}"
                     class="px-3 py-2 text-xs font-semibold border-l border-slate-200 ${_viewMode === 'card' ? 'bg-emerald-500 text-white' : 'text-slate-500 hover:bg-slate-50'}">Card</button>
             </div>
-            <span id="msd-count" class="text-xs text-slate-400 ml-auto"></span>
+            <span id="msd-count" class="msd-filter-count text-xs text-slate-400"></span>
         </div>
 
         <!-- Table -->
-        <div class="ds-table-wrap" data-msd-card-image="machine-safety-document-list">
-            <div id="msd-table-wrap" class="overflow-x-auto">
+        <div class="msd-results-shell ds-table-wrap" data-msd-card-image="machine-safety-document-list">
+            <div id="msd-table-wrap" class="msd-results-scroll">
                 ${_renderTable()}
             </div>
         </div>
@@ -787,7 +803,7 @@ function _renderTable() {
     }).join('');
 
     const pagination = totalPages > 1 ? `
-    <div class="flex items-center justify-between px-4 py-3 border-t border-slate-100 bg-slate-50/50">
+    <div class="msd-pagination flex items-center justify-between px-4 py-3 border-t border-slate-100 bg-slate-50/50">
         <span class="text-xs text-slate-500">
             แสดง ${(_page-1)*PAGE_SIZE+1}–${Math.min(_page*PAGE_SIZE, filtered.length)} จาก ${filtered.length} รายการ
         </span>
@@ -795,18 +811,14 @@ function _renderTable() {
             <button onclick="window._msdGoPage(${_page-1})" ${_page<=1?'disabled':''} class="px-2.5 py-1.5 text-xs rounded-lg border border-slate-200 text-slate-500 hover:bg-slate-100 disabled:opacity-40 disabled:cursor-not-allowed transition-colors">
                 <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"/></svg>
             </button>
-            ${Array.from({length:totalPages},(_,i)=>i+1).map(p=>`
-            <button onclick="window._msdGoPage(${p})"
-                class="min-w-[28px] px-2 py-1.5 text-xs rounded-lg border transition-colors ${p===_page?'bg-emerald-500 text-white border-emerald-500':'border-slate-200 text-slate-500 hover:bg-slate-100'}">
-                ${p}
-            </button>`).join('')}
+            <span class="px-3 py-1.5 text-xs font-semibold text-slate-500">Page ${_page} / ${totalPages}</span>
             <button onclick="window._msdGoPage(${_page+1})" ${_page>=totalPages?'disabled':''} class="px-2.5 py-1.5 text-xs rounded-lg border border-slate-200 text-slate-500 hover:bg-slate-100 disabled:opacity-40 disabled:cursor-not-allowed transition-colors">
                 <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/></svg>
             </button>
         </div>
     </div>` : '';
 
-    return `<table class="ds-table text-left border-collapse">
+    return `<table class="msd-data-table ds-table text-left border-collapse">
         <thead>
             <tr class="bg-slate-50 border-b-2 border-slate-200">
                 <th class="px-4 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wide whitespace-nowrap">ลำดับเอกสาร</th>
@@ -834,7 +846,7 @@ function _renderTable() {
 
 function _renderCardView(filtered, paginated, totalPages) {
     const pagination = totalPages > 1 ? `
-    <div class="flex items-center justify-between px-4 py-3 border-t border-slate-100 bg-slate-50/50">
+    <div class="msd-pagination flex items-center justify-between px-4 py-3 border-t border-slate-100 bg-slate-50/50">
         <span class="text-xs text-slate-500">
             แสดง ${(_page-1)*PAGE_SIZE+1}-${Math.min(_page*PAGE_SIZE, filtered.length)} จาก ${filtered.length} รายการ
         </span>
@@ -930,7 +942,7 @@ function _renderCardView(filtered, paginated, totalPages) {
         </article>`;
     }).join('');
 
-    return `<div class="p-4 grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">${cards}</div>${pagination}`;
+    return `<div class="msd-card-grid p-4 grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">${cards}</div>${pagination}`;
 }
 
 // ─── Filter ───────────────────────────────────────────────────────────────────
@@ -1009,6 +1021,13 @@ window._msdSetInspectionFilter = function(val) {
     const wrap = document.getElementById('msd-table-wrap');
     if (wrap) wrap.innerHTML = _renderTable();
     _updateCount();
+};
+
+window._msdToggleFilters = function(button) {
+    const grid = button?.closest('.msd-filter-grid');
+    if (!grid) return;
+    const isOpen = grid.classList.toggle('msd-filters-open');
+    button.setAttribute('aria-expanded', String(isOpen));
 };
 
 window._msdSetView = function(mode) {

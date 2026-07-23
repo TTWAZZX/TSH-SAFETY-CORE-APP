@@ -23,6 +23,8 @@
     "test:email-switch": "npm --prefix backend run test:email-switch",
     "smoke:api": "npm --prefix backend run smoke:api",
     "smoke:cccf": "npm --prefix backend run smoke:cccf",
+    "smoke:machine-safety-responsive": "npm --prefix backend run smoke:machine-safety-responsive",
+    "uat:machine-safety-responsive": "npm --prefix backend run uat:machine-safety-responsive",
     "smoke:ky-email": "npm --prefix backend run smoke:ky-email",
     "smoke:remote": "npm --prefix backend run smoke:remote",
     "uat:preflight": "npm --prefix backend run uat:preflight"

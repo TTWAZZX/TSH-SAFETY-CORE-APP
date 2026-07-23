@@ -54,6 +54,8 @@
     "uat:async-ux-phase32e": "node scripts/async-ux-phase32e-browser-uat.js",
     "smoke:yokoten-admin-bulk-response": "node scripts/yokoten-admin-bulk-response-smoke.js",
     "smoke:dashboard-coverage-source": "node scripts/dashboard-coverage-source-smoke.js",
+    "smoke:machine-safety-responsive": "node scripts/machine-safety-responsive-smoke.js",
+    "uat:machine-safety-responsive": "node scripts/machine-safety-responsive-browser-uat.js",
     "uat:production-yokoten-dashboard-readonly": "node scripts/production-yokoten-dashboard-readonly-uat.js",
     "uat:production-yokoten-dashboard-browser": "node scripts/production-yokoten-dashboard-browser-uat.js"
   },
