@@ -31,6 +31,7 @@ let browser;
 let client;
 let server;
 let db;
+let browserStderr = '';
 
 class Cdp {
     constructor(url) {
@@ -41,15 +42,27 @@ class Cdp {
 
     async connect() {
         this.socket.addEventListener('message', async event => {
-            let raw = event.data;
-            if (raw && typeof raw.text === 'function') raw = await raw.text();
-            if (raw instanceof ArrayBuffer) raw = Buffer.from(raw).toString('utf8');
-            const message = JSON.parse(String(raw));
-            const pending = this.pending.get(message.id);
-            if (!pending) return;
-            this.pending.delete(message.id);
-            clearTimeout(pending.timer);
-            message.error ? pending.reject(new Error(message.error.message)) : pending.resolve(message.result);
+            try {
+                let raw = event.data;
+                if (raw && typeof raw.text === 'function') raw = await raw.text();
+                if (raw instanceof ArrayBuffer) raw = Buffer.from(raw).toString('utf8');
+                if (ArrayBuffer.isView(raw)) raw = Buffer.from(raw.buffer, raw.byteOffset, raw.byteLength).toString('utf8');
+                const message = JSON.parse(String(raw));
+                const pending = this.pending.get(message.id);
+                if (!pending) return;
+                this.pending.delete(message.id);
+                clearTimeout(pending.timer);
+                message.error ? pending.reject(new Error(message.error.message)) : pending.resolve(message.result);
+            } catch (error) {
+                console.warn(`CDP message warning: ${error.message}`);
+            }
+        });
+        this.socket.addEventListener('close', () => {
+            for (const pending of this.pending.values()) {
+                clearTimeout(pending.timer);
+                pending.reject(new Error(`CDP socket closed${browserStderr ? `: ${browserStderr.slice(-500)}` : ''}`));
+            }
+            this.pending.clear();
         });
         await new Promise((resolve, reject) => {
             const timer = setTimeout(() => reject(new Error('CDP connection timed out')), 15000);
@@ -121,14 +134,20 @@ async function connectBrowser() {
     browser = spawn(chromePath, [
         '--headless=new',
         '--disable-gpu',
+        '--no-sandbox',
+        '--disable-dev-shm-usage',
         '--disable-extensions',
         '--no-first-run',
         '--no-default-browser-check',
+        '--remote-allow-origins=*',
         '--window-size=1440,1000',
         `--remote-debugging-port=${cdpPort}`,
         `--user-data-dir=${profileDir}`,
         'about:blank',
-    ], { stdio: 'ignore', windowsHide: true });
+    ], { stdio: ['ignore', 'ignore', 'pipe'], windowsHide: true });
+    browser.stderr?.on('data', chunk => {
+        browserStderr += String(chunk);
+    });
 
     let targets;
     for (let index = 0; index < 60; index += 1) {
@@ -144,7 +163,7 @@ async function connectBrowser() {
 
     const page = targets?.find(target => target.type === 'page');
     assert.ok(page?.webSocketDebuggerUrl, 'Chrome CDP page target was not available');
-    client = new Cdp(page.webSocketDebuggerUrl);
+    client = new Cdp(page.webSocketDebuggerUrl.replace('://localhost:', '://127.0.0.1:'));
     await client.connect();
     await client.command('Page.enable');
     await client.command('Runtime.enable');
@@ -192,43 +211,93 @@ async function main() {
         const results = document.querySelector('.msd-results-scroll');
         const filter = document.querySelector('.msd-filter-grid');
         const table = document.querySelector('.msd-data-table');
+        const firstRow = document.querySelector('.msd-data-table tbody .msd-clickable-row');
         return {
             viewport: document.documentElement.clientWidth,
             pageOverflow: document.documentElement.scrollWidth > document.documentElement.clientWidth,
             shellWidth: Math.round(shell.getBoundingClientRect().width),
+            shellParentWidth: Math.round(shell.parentElement.getBoundingClientRect().width),
             shellMaxWidth: getComputedStyle(shell).maxWidth,
             resultClientWidth: results.clientWidth,
             resultScrollWidth: results.scrollWidth,
             filterColumns: getComputedStyle(filter).gridTemplateColumns.split(' ').length,
             listVisible: Boolean(table),
             cardVisible: Boolean(document.querySelector('.msd-card-grid')),
+            headerColumns: table?.querySelectorAll('thead th').length || 0,
+            rowRole: firstRow?.getAttribute('role') || '',
+            rowTabIndex: firstRow?.getAttribute('tabindex') || '',
+            resultFitsWithoutHorizontalScroll: results.scrollWidth <= results.clientWidth + 1,
         };
     })()`);
     assert.strictEqual(desktop.pageOverflow, false, 'desktop has page-level horizontal overflow');
-    assert.ok(desktop.shellWidth <= 1440, `desktop shell exceeds 1440px: ${desktop.shellWidth}`);
-    assert.strictEqual(desktop.shellMaxWidth, '1440px');
-    assert.strictEqual(desktop.listVisible, false, 'desktop must not start in list view');
-    assert.strictEqual(desktop.cardVisible, true, 'desktop must start in card view');
+    assert.ok(
+        Math.abs(desktop.shellWidth - desktop.shellParentWidth) <= 2,
+        `desktop shell must fill its parent: ${desktop.shellWidth}/${desktop.shellParentWidth}`
+    );
+    assert.strictEqual(desktop.shellMaxWidth, 'none');
+    assert.strictEqual(desktop.listVisible, true, 'desktop must start in compact list view');
+    assert.strictEqual(desktop.cardVisible, false, 'desktop must not start in card view');
     assert.ok(desktop.filterColumns >= 4, `desktop filter grid is too narrow: ${desktop.filterColumns} columns`);
+    assert.strictEqual(desktop.headerColumns, 4, `desktop list must have 4 columns, got ${desktop.headerColumns}`);
+    assert.strictEqual(desktop.rowRole, 'button', 'desktop row must expose button semantics');
+    assert.strictEqual(desktop.rowTabIndex, '0', 'desktop row must be keyboard focusable');
+    assert.strictEqual(desktop.resultFitsWithoutHorizontalScroll, true, 'desktop 4-column list should fit without horizontal scrolling');
+    await evaluate(`(() => {
+        const row = document.querySelector('.msd-data-table tbody .msd-clickable-row');
+        row?.focus();
+        row?.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+        return true;
+    })()`);
+    await waitFor(`Boolean(document.querySelector('#dtab-compliance'))
+        && Boolean(document.querySelector('#dtab-issues'))
+        && Boolean(document.querySelector('#dtab-files'))`);
+    const detailManagement = await evaluate(`(() => ({
+        visible: !document.querySelector('#modal-wrapper').classList.contains('hidden'),
+        complianceTab: Boolean(document.querySelector('#dtab-compliance')),
+        issuesTab: Boolean(document.querySelector('#dtab-issues')),
+        filesTab: Boolean(document.querySelector('#dtab-files')),
+        adminComplianceSave: Boolean(document.querySelector('#btn-save-compliance')),
+        adminIssueAdd: Boolean(document.querySelector('#btn-add-issue')),
+        adminEdit: Boolean(document.querySelector('[onclick^="window._msdEditFromDetail"]')),
+        adminDelete: Boolean(document.querySelector('[onclick^="window._msdDeleteFromDetail"]')),
+    }))()`);
+    assert.deepStrictEqual(detailManagement, {
+        visible: true,
+        complianceTab: true,
+        issuesTab: true,
+        filesTab: true,
+        adminComplianceSave: true,
+        adminIssueAdd: true,
+        adminEdit: true,
+        adminDelete: true,
+    }, 'Admin detail management controls are incomplete');
+    await screenshot('desktop-detail.png');
+    await evaluate(`document.querySelector('#modal-close-btn')?.click(); true`);
+    await waitFor(`document.querySelector('#modal-wrapper').classList.contains('hidden')`);
     await evaluate(`document.querySelector('.msd-filter-grid').scrollIntoView({ block: 'start' }); true`);
     await sleep(300);
-    await screenshot('desktop.png');
+    await screenshot('desktop-list.png');
 
-    await evaluate(`document.querySelector('.msd-view-toggle button')?.click(); true`);
-    await waitFor(`Boolean(document.querySelector('.msd-data-table'))`);
     const desktopList = await evaluate(`(() => {
         const results = document.querySelector('.msd-results-scroll');
         return {
             pageOverflow: document.documentElement.scrollWidth > document.documentElement.clientWidth,
             resultClientWidth: results.clientWidth,
             resultScrollWidth: results.scrollWidth,
+            headerColumns: document.querySelectorAll('.msd-data-table thead th').length,
         };
     })()`);
     assert.strictEqual(desktopList.pageOverflow, false, 'desktop list mode has page-level horizontal overflow');
-    assert.ok(
-        desktopList.resultScrollWidth > desktopList.resultClientWidth,
-        'desktop list mode should scroll inside its result frame'
-    );
+    assert.strictEqual(desktopList.headerColumns, 4, 'desktop compact list column count changed');
+
+    await evaluate(`document.querySelectorAll('.msd-view-toggle button')[1]?.click(); true`);
+    await waitFor(`Boolean(document.querySelector('.msd-card-grid article'))`);
+    const desktopCard = await evaluate(`(() => ({
+        pageOverflow: document.documentElement.scrollWidth > document.documentElement.clientWidth,
+        cards: document.querySelectorAll('.msd-card-grid article').length
+    }))()`);
+    assert.strictEqual(desktopCard.pageOverflow, false, 'desktop card mode has page-level horizontal overflow');
+    assert.ok(desktopCard.cards > 0, 'desktop card mode is empty');
 
     await client.command('Emulation.setDeviceMetricsOverride', {
         width: 390,
@@ -278,7 +347,9 @@ async function main() {
         businessDataWrites: false,
         expectedSideEffects: ['successful login audit/attempt record', 'normal login housekeeping'],
         desktop,
+        detailManagement,
         desktopList,
+        desktopCard,
         mobile,
         passed: true,
     };

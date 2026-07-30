@@ -10,7 +10,7 @@ let _currentUser = {};
 let _isAdmin = false;
 let _dashboardEventsReady = false;
 let _myTargetsExpanded = false;
-let _myTargetsSnapshot = { targets: [], year: null };
+let _myTargetsSnapshot = { targets: [], year: null, eligibility: null };
 let _dbCardSaveHold = null;
 let _dbCardSaveMenu = null;
 let _dashboardFocus = {
@@ -169,7 +169,11 @@ function setupDashboardEvents() {
         const targetToggle = e.target.closest('#btn-db-toggle-targets');
         if (targetToggle) {
             _myTargetsExpanded = !_myTargetsExpanded;
-            _renderMyTargets(_myTargetsSnapshot.targets || [], _myTargetsSnapshot.year || new Date().getFullYear());
+            _renderMyTargets(
+                _myTargetsSnapshot.targets || [],
+                _myTargetsSnapshot.year || new Date().getFullYear(),
+                _myTargetsSnapshot.eligibility || {}
+            );
             return;
         }
 
@@ -842,6 +846,33 @@ function _complianceSummaryCard(label, value, color, sub) {
         </div>`;
 }
 
+const MODULE_HEALTH_STATUS = {
+    DATA_UNAVAILABLE: { label: 'Data unavailable', color: '#7c3aed', sort: 0 },
+    CRITICAL: { label: 'Critical', color: '#dc2626', sort: 1 },
+    WATCH: { label: 'Watch', color: '#d97706', sort: 2 },
+    ON_TRACK: { label: 'On Track', color: '#059669', sort: 3 },
+    N_A: { label: 'N/A', color: '#64748b', sort: 4 },
+};
+
+function _moduleMetricUnit(unit) {
+    const labels = {
+        attendance_slots: 'attendance slots',
+        reports: 'reports',
+        activities: 'activities',
+        employees: 'employees',
+        department_topic_pairs: 'Department-topic pairs',
+        recordable_incidents: 'recordable incidents',
+        change_notices: 'change notices',
+        metrics: 'KPI metrics',
+        committees: 'committees',
+        compliance_items: 'compliance items',
+        attendees: 'attendees',
+        documents: 'documents',
+        assessment_score_points: 'assessment score points',
+    };
+    return labels[unit] || unit || 'records';
+}
+
 function _renderModuleCards(d) {
     const wrap = document.getElementById('db-module-cards');
     if (!wrap) return;
@@ -1055,42 +1086,83 @@ function _renderModuleCards(d) {
 
     const moduleMeta = modules.map(m => {
         const meta = Object.values(MODULE_META).find(item => item.route === m.hash) || {};
+        const metric = d.moduleMetrics?.[m.hash] || null;
+        let secondary = m.secondary;
+        if (m.hash === 'hiyari' && metric) {
+            const target = Number(metric.denominator || 0);
+            const closed = Number(metric.numerator || 0);
+            secondary = metric.dataAvailable !== true
+                ? '<span class="text-violet-600">ไม่สามารถอ่านข้อมูล Assignment ได้</span>'
+                : target <= 0
+                    ? '<span class="text-slate-400">ยังไม่มี Assignment ที่ Admin ตั้งค่า</span>'
+                    : closed >= target
+                        ? '<span class="text-emerald-600">ปิดครบตาม Assignment แล้ว</span>'
+                        : `<span class="text-red-600 font-semibold">${Math.max(0, target - closed)} Assignment รอปิด</span>`;
+        }
         return {
             ...m,
             label: meta.quickLabel || meta.shortTitle || meta.title || m.label,
             icon: MODULE_ICONS[m.hash] ? `<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="${MODULE_ICONS[m.hash]}"/>` : m.icon,
+            metric,
+            secondary,
         };
     });
     const hiddenModules = new Set(d.config?.hiddenModules || []);
     const visibleModules = moduleMeta.filter(m => !hiddenModules.has(m.hash));
     const moduleRows = visibleModules.map((m, index) => {
-        const rawPct = Number(m.pct);
-        const hasPct = m.pct != null && Number.isFinite(rawPct);
+        const metric = m.metric;
+        const rawPct = Number(metric?.percent);
+        const hasPct = metric?.metricType === 'progress'
+            && metric?.dataAvailable === true
+            && metric?.percent != null
+            && Number.isFinite(rawPct);
         const pct = hasPct ? Math.max(0, Math.min(100, Math.round(rawPct))) : null;
-        const isCritical = Boolean(m.alert) || (hasPct && pct < 50);
-        const isWatch = !isCritical && hasPct && pct < 80;
-        const status = isCritical ? 'Critical' : isWatch ? 'Watch' : 'On Track';
-        const statusColor = isCritical ? '#dc2626' : isWatch ? '#d97706' : '#059669';
-        return { ...m, pct, _index: index, _hasPct: hasPct, _pct: pct, _status: status, _statusColor: statusColor, _sort: isCritical ? 0 : isWatch ? 1 : 2 };
+        const statusCode = MODULE_HEALTH_STATUS[metric?.status] ? metric.status : 'DATA_UNAVAILABLE';
+        const statusMeta = MODULE_HEALTH_STATUS[statusCode];
+        return {
+            ...m,
+            pct,
+            _index: index,
+            _hasPct: hasPct,
+            _pct: pct,
+            _statusCode: statusCode,
+            _status: statusMeta.label,
+            _statusColor: statusMeta.color,
+            _sort: statusMeta.sort,
+        };
     }).sort((a, b) => a._sort - b._sort || a._index - b._index);
     const moduleSummary = {
-        critical: moduleRows.filter(m => m._status === 'Critical').length,
-        watch: moduleRows.filter(m => m._status === 'Watch').length,
-        onTrack: moduleRows.filter(m => m._status === 'On Track').length,
+        unavailable: moduleRows.filter(m => m._statusCode === 'DATA_UNAVAILABLE').length,
+        critical: moduleRows.filter(m => m._statusCode === 'CRITICAL').length,
+        watch: moduleRows.filter(m => m._statusCode === 'WATCH').length,
+        onTrack: moduleRows.filter(m => m._statusCode === 'ON_TRACK').length,
+        na: moduleRows.filter(m => m._statusCode === 'N_A').length,
     };
     _dashboardFocus.modules = {
-        value: moduleSummary.critical,
-        label: moduleSummary.critical ? 'Critical' : moduleSummary.watch ? 'Watch' : 'On Track',
-        color: moduleSummary.critical ? '#dc2626' : moduleSummary.watch ? '#d97706' : '#059669',
+        value: moduleSummary.unavailable || moduleSummary.critical,
+        label: moduleSummary.unavailable ? 'Data issue' : moduleSummary.critical ? 'Critical' : moduleSummary.watch ? 'Watch' : 'On Track',
+        color: moduleSummary.unavailable ? '#7c3aed' : moduleSummary.critical ? '#dc2626' : moduleSummary.watch ? '#d97706' : '#059669',
     };
     _renderDashboardFocus();
 
     const cardsHtml = moduleRows.map(m => {
-        const mainValue = m._hasPct ? `${m._pct}%` : m.primary;
+        const metric = m.metric;
+        const mainValue = m._hasPct
+            ? `${m._pct}%`
+            : m._statusCode === 'DATA_UNAVAILABLE'
+                ? '-'
+                : metric?.metricType === 'progress'
+                    ? 'N/A'
+                    : metric?.value ?? m.primary;
         const primaryText = String(m.primary ?? '').trim();
+        const metricUnit = _moduleMetricUnit(metric?.unit);
         const detailLabel = m._hasPct
-            ? (m.primaryDetail || (primaryText.includes('%') ? m.primaryLabel : `${primaryText} ${m.primaryLabel}`.trim()))
-            : m.primaryLabel;
+            ? `${metric.numerator}/${metric.denominator} ${metricUnit}`
+            : m._statusCode === 'DATA_UNAVAILABLE' || m._statusCode === 'N_A'
+                ? escHtml(metric?.statusReason || 'No evaluable metric for this scope.')
+                : metric
+                    ? `${metric.value ?? '-'} ${metricUnit}`
+                    : (m.primaryDetail || (primaryText.includes('%') ? m.primaryLabel : `${primaryText} ${m.primaryLabel}`.trim()));
         const pctBar  = m._hasPct ? `
             <div class="mt-3">
                 <div class="flex justify-between text-[11px] text-slate-400 mb-1">
@@ -1105,9 +1177,10 @@ function _renderModuleCards(d) {
         return `
         <a href="#${m.hash}" ${_dbCardAttrs(`module-${m.hash}`)}
            ${m.filterState ? `data-filter='${m.filterState}'` : ''}
-           class="bg-white rounded-xl border ${m.alert ? 'border-red-200' : 'border-slate-100'}
+           title="${escHtml(metric?.source?.description || '')}"
+           class="bg-white rounded-xl border ${m._statusCode === 'DATA_UNAVAILABLE' ? 'border-violet-200' : m._statusCode === 'CRITICAL' ? 'border-red-200' : 'border-slate-100'}
                   shadow-sm p-5 hover:shadow-md transition-all group cursor-pointer
-                  ${m.alert ? 'ring-1 ring-red-200' : ''}">
+                  ${m._statusCode === 'DATA_UNAVAILABLE' ? 'ring-1 ring-violet-200' : m._statusCode === 'CRITICAL' ? 'ring-1 ring-red-200' : ''}">
             <div class="flex items-start justify-between mb-3">
                 <div class="w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0"
                      style="background:${m.grad};box-shadow:0 2px 10px ${m.shadow}">
@@ -1138,10 +1211,12 @@ function _renderModuleCards(d) {
                     <p class="text-[11px] font-bold text-slate-400 uppercase tracking-wider">Module Signal</p>
                     <h3 class="text-sm font-black text-slate-800 mt-1">Priority order by current system status</h3>
                 </div>
-                <div class="grid grid-cols-3 gap-2 min-w-0 lg:min-w-96">
+                <div class="grid grid-cols-2 sm:grid-cols-5 gap-2 min-w-0 lg:min-w-[40rem]">
+                    ${_moduleSignalPill('Unavailable', moduleSummary.unavailable, '#7c3aed')}
                     ${_moduleSignalPill('Critical', moduleSummary.critical, '#dc2626')}
                     ${_moduleSignalPill('Watch', moduleSummary.watch, '#d97706')}
                     ${_moduleSignalPill('On Track', moduleSummary.onTrack, '#059669')}
+                    ${_moduleSignalPill('N/A', moduleSummary.na, '#64748b')}
                 </div>
             </div>
         </div>
@@ -1167,9 +1242,10 @@ async function _loadMyTargets() {
         const res = await API.get('/activity-targets/me');
         const targets = res?.data?.targets ?? [];
         const year    = res?.data?.year ?? new Date().getFullYear();
+        const eligibility = res?.data?.eligibility ?? {};
 
-        _myTargetsSnapshot = { targets, year };
-        _renderMyTargets(targets, year);
+        _myTargetsSnapshot = { targets, year, eligibility };
+        _renderMyTargets(targets, year, eligibility);
         return;
 
         if (!targets.length) {
@@ -1277,7 +1353,7 @@ async function _loadMyTargets() {
 // ─────────────────────────────────────────────────────────────────────────────
 // ALERTS WIDGET
 // ─────────────────────────────────────────────────────────────────────────────
-function _renderMyTargets(targets, year) {
+function _renderMyTargets(targets, year, eligibility = {}) {
     const wrap = document.getElementById('db-my-targets');
     if (!wrap) return;
 
@@ -1320,6 +1396,20 @@ function _renderMyTargets(targets, year) {
     const visibleRows = _myTargetsExpanded ? targets : attentionRows.slice(0, 4);
     const hiddenCount = Math.max(0, targets.length - visibleRows.length);
     const rowWrapStyle = _myTargetsExpanded ? 'max-height:520px;overflow-y:auto' : '';
+    const hasAdditionalTargets = eligibility.hasAdditionalConfiguredTargets
+        ?? targets.some(target => target.eligibilityType === 'admin_configured');
+    const eligibilityNotice = !hasAdditionalTargets ? `
+        <div class="px-5 py-3 border-b border-sky-100 bg-sky-50/60 flex items-start gap-3">
+            <span class="mt-0.5 w-7 h-7 rounded-lg bg-white border border-sky-100 text-sky-600 flex items-center justify-center flex-shrink-0">
+                <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/>
+                </svg>
+            </span>
+            <div>
+                <p class="text-xs font-bold text-sky-800">Company baseline only</p>
+                <p class="text-[11px] text-sky-700 mt-0.5">No additional activity target has been assigned by Admin for ${year}. Only mandatory company requirements are shown.</p>
+            </div>
+        </div>` : '';
 
     wrap.innerHTML = `
         <div class="bg-white rounded-xl border border-slate-100 shadow-sm overflow-hidden" ${_dbCardAttrs('personal-activity-targets')}>
@@ -1349,6 +1439,7 @@ function _renderMyTargets(targets, year) {
                          style="width:${overallPct ?? 0}%;background:${overallPct === null ? '#cbd5e1' : overallPct >= 80 ? '#10b981' : overallPct >= 50 ? '#f59e0b' : '#ef4444'}"></div>
                 </div>
             </div>
+            ${eligibilityNotice}
             <div class="divide-y divide-slate-50" style="${rowWrapStyle}">
                 ${visibleRows.map(t => _renderMyTargetRow(t)).join('')}
             </div>
@@ -1366,9 +1457,11 @@ function _renderMyTargetRow(t) {
                    <span class="w-1.5 h-1.5 rounded-full bg-emerald-400 inline-block animate-pulse"></span>On Track
                </span>`
             : `<span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-100 text-amber-700">
-                   <span class="w-1.5 h-1.5 rounded-full bg-amber-400 inline-block"></span>Watch
+                   <span class="w-1.5 h-1.5 rounded-full bg-amber-400 inline-block"></span>${t.isMandatory ? 'Required' : 'Watch'}
                </span>`;
-    const source = t.source === 'scope'
+    const source = t.source === 'mandatory_policy'
+        ? `<span class="text-[10px] font-bold text-rose-600">Mandatory company baseline</span>`
+        : t.source === 'scope'
         ? `<span class="text-[10px] font-bold text-emerald-600">Department/Unit Override</span>`
         : t.source === 'override'
             ? `<span class="text-[10px] font-bold text-violet-600">Employee Override</span>`
@@ -1380,12 +1473,15 @@ function _renderMyTargetRow(t) {
     const calculationScope = t.calculationScope
         ? `<span class="ml-2 text-[10px] font-bold text-slate-500">${t.calculationScope.type === 'employee' ? 'Personal KPI' : t.calculationScope.type === 'department_unit' ? 'Scope KPI &middot; Department/Unit' : 'Scope KPI &middot; Department'}${t.targetSource === 'patrol_roster' ? ' &middot; Patrol Roster' : t.targetSource === 'ky_program_config' ? ' &middot; KY Program Config' : ''}</span>`
         : '';
+    const action = t.navigationHash && !t.passed && !t.noData
+        ? `<a href="#${escHtml(t.navigationHash)}" class="inline-flex mt-1 ml-2 text-[10px] font-bold text-sky-600 hover:text-sky-700">Open ${escHtml(t.label)} &rarr;</a>`
+        : '';
 
     return `
         <div class="px-5 py-3 flex items-center gap-4">
             <div class="flex-1 min-w-0">
                 <div class="flex items-center justify-between mb-1 gap-2">
-                    <div class="min-w-0"><p class="text-sm font-medium text-slate-700 truncate">${escHtml(t.label)}</p>${source}${calculationScope}</div>
+                    <div class="min-w-0"><p class="text-sm font-medium text-slate-700 truncate">${escHtml(t.label)}</p>${source}${calculationScope}${action}</div>
                     ${badge}
                 </div>
                 <div class="h-2 bg-slate-100 rounded-full overflow-hidden">

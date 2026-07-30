@@ -1,11 +1,31 @@
 <?php
 declare(strict_types=1);
 
+function yokoten_scope_lower(string $value): string
+{
+    return function_exists('mb_strtolower')
+        ? mb_strtolower($value, 'UTF-8')
+        : strtolower($value);
+}
+
+function yokoten_scope_length(string $value): int
+{
+    return function_exists('mb_strlen')
+        ? mb_strlen($value, 'UTF-8')
+        : strlen($value);
+}
+
+function yokoten_scope_starts_with(string $value, string $prefix): bool
+{
+    if ($prefix === '') return true;
+    return strncmp($value, $prefix, strlen($prefix)) === 0;
+}
+
 function yokoten_scope_normalize($value): string
 {
     $text = preg_replace('/[\r\n]+/u', ' ', (string)($value ?? '')) ?? '';
     $text = preg_replace('/\s+/u', ' ', $text) ?? '';
-    return mb_strtolower(trim($text), 'UTF-8');
+    return yokoten_scope_lower(trim($text));
 }
 
 function yokoten_scope_unit_name(array $unit): string
@@ -57,7 +77,8 @@ function yokoten_scope_resolve_topic_units(array $topicUnits, array $masterUnits
         if (!$matches) {
             $matches = array_values(array_filter($masterUnits, static function (array $unit) use ($key): bool {
                 $nameKey = yokoten_scope_normalize(yokoten_scope_unit_name($unit));
-                return str_starts_with($nameKey, $key . ' ') || str_starts_with($key, $nameKey . ' ');
+                return yokoten_scope_starts_with($nameKey, $key . ' ')
+                    || yokoten_scope_starts_with($key, $nameKey . ' ');
             }));
         }
         $matches = yokoten_scope_unique_units($matches);
@@ -179,7 +200,7 @@ function yokoten_scope_build_department_unit_plan(array $input): array
         $canonicalSelected = array_keys($canonicalSelected);
         if ($scopedUnits && !$canonicalSelected) $errors[] = 'Safety Unit is required for ' . $department;
         if (!$scopedUnits && $canonicalSelected) $errors[] = 'No scoped Safety Unit is assigned to ' . $department;
-        if (mb_strlen(implode(', ', $canonicalSelected), 'UTF-8') > 100) {
+        if (yokoten_scope_length(implode(', ', $canonicalSelected)) > 100) {
             $errors[] = 'Selected Safety Units exceed the 100-character storage limit for ' . $department;
         }
         $unitMap[$department] = $canonicalSelected;

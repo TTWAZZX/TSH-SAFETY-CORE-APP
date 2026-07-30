@@ -220,6 +220,13 @@ Primary key ของ generic CRUD คือ `id` — ยกเว้น `Employ
 
 Yokoten Admin bulk responses resolve topic Unit aliases against `Master_SafetyUnits`, build a canonical Unit list per selected Department, and store that Department-specific list in `YokotenResponses.SafetyUnit`. Node and PHP use parity-tested scope resolvers. The legacy column remains `VARCHAR(100)`, so both stacks reject an over-limit Unit list before insertion instead of allowing truncation.
 
+When the one-response-per-Department slot exists as a soft-deleted row, both
+runtimes restore that slot using its existing `ResponseID`. Stale response-file
+rows are replaced transactionally, while physical cleanup runs after commit
+and only when the stored file URL has no remaining references. This avoids
+changing an identifier that legacy Production constraints or related rows may
+still reference.
+
 ### File Upload
 - Uploads use local company-server storage through `backend/storage.js`
 - Files are stored in `backend/uploads/` and served at `/uploads`
@@ -272,7 +279,7 @@ Yokoten Admin bulk responses resolve topic Unit aliases against `Master_SafetyUn
 | **Yokoten** | แบ่งปันบทเรียน/ความรู้ความปลอดภัย (Phase 3) — **หนึ่ง response ต่อแผนก**, Approval workflow (pending→approved/rejected), Bulk approve (checkboxes + `POST /bulk-approve`), Corrective Action + evidence required when IsRelated=Yes, ไฟล์แนบ (FormData, field: `responseFiles`, สูงสุด 10 ไฟล์/20 MB), Dashboard pinned depts config, Admin approve/reject/delete (soft delete), Excel export |
 | **Policy** | นโยบายความปลอดภัย, รับทราบนโยบาย — Description field ใช้ Rich Text Editor (RTE) เดียวกับ Yokoten (`pol-*` prefix), HTML ถูก sanitize ก่อนบันทึก/แสดง, PDF export รองรับ rich formatting |
 | **Committee** | คณะกรรมการความปลอดภัย, SubCommittee (JSON array), ผังองค์กร |
-| **Machine Safety** | ข้อมูลเครื่องจักร/อุปกรณ์ความปลอดภัย, Safety Device Std., Layout & Checkpoint, Compliance Checklist (5.1–5.8), Issue Tracker, Audit Readiness |
+| **Machine Safety** | ข้อมูลเครื่องจักร/อุปกรณ์ความปลอดภัย, full-width 4-column Master List แบบคลิกทั้งแถวเพื่อเปิดรายละเอียดครบและ Admin actions, mobile Card view, Safety Device Std., Layout & Checkpoint, Compliance Checklist (5.1–5.8), Issue Tracker, Audit Readiness |
 | **OJT / SCW** | มาตรฐาน Stop-Call-Wait (แก้ไขได้), จัดการเอกสาร SCW (อัปโหลด/ดู/ลบ), OJT Compliance รายแผนก (เป้าหมาย/ผู้เข้าร่วม/สถานะ, เลือกแผนกที่แสดง persisted, คำนวณ metric จากแผนกที่เลือกเท่านั้น, year filter) |
 | **Accident** | รายงานอุบัติเหตุ/อุบัติการณ์ — Dashboard (KPI cards + trend chart + dept breakdown), Analytics (dept risk ranking + hotspot + root cause), Records (full 6-section form + file attachments + PDF export ต่อรายการ), Safety KPI Board (Zero Accident banner + Days/Hours without accident + target progress + monthly status grid), Soft delete (IsDeleted=1) |
 | **Safety Culture** | กิจกรรมวัฒนธรรมความปลอดภัย — 4 tabs: Principles / Dashboard / ผลการประเมิน / PPE Control; คะแนน T1–T5,T7 (0–100%); PPE Inspection + Violation tracking; Dashboard PDF (html2canvas, fixed A4 paginated by content, Thai font); Culture Maturity Level (Reactive/Basic/Proactive/Generative) |
@@ -291,6 +298,49 @@ Yokoten Admin bulk responses resolve topic Unit aliases against `Master_SafetyUn
 ## Enterprise Dashboard — Architecture
 
 หน้า `#dashboard` เป็น cross-module command center ที่ authenticated users ทุกคนเห็นได้ แต่ control/config เป็นของ admin เท่านั้น
+
+### Module Health and Personal Target Contract (Phases D1-D5)
+
+- Canonical machine-readable contract: `config/dashboard-module-health-contract.json`.
+- Human-readable source map: `docs/dashboard-module-health-contract.md`.
+- The contract covers all 15 Module Health cards and defines metric type,
+  numerator, denominator, 0-100 percentage rules, source, scope, data
+  availability, status, reason, and as-of time.
+- A missing/zero denominator is `N_A`; a failed source is
+  `DATA_UNAVAILABLE`. Neither state is automatically On Track or 100%.
+- Risk-count and information cards do not receive synthetic percentages and do
+  not contribute to Module Signal until they have an explicit health rule.
+- D1 recorded the Node/PHP/frontend gaps. D2 returns aligned Node/PHP formulas
+  under `data.moduleMetrics` while preserving the legacy response keys.
+- D2 uses same-unit progress calculations for Patrol, KY, CCCF, Yokoten,
+  Training, Hiyari, 4M, Policy, Machine Safety, OJT, and Safety Culture.
+  Accident is an explicit risk count; KPI, Committee, and Contractor are
+  information metrics without synthetic percentages.
+- Hiyari Module Health is assignment-driven: distinct current Admin
+  assignments whose employee has a closed, non-deleted current-year report /
+  all current `Hiyari_Assignments`. Multiple closed reports from the same
+  assignee count once; zero assignments is `N_A`.
+- D3 Personal Targets always include current-policy acknowledgement. Additional
+  targets require an effective non-N/A employee, Department/Unit, or position
+  configuration; module/system ratios cannot create eligibility.
+- D4 Module Health cards consume `data.moduleMetrics` directly. `N_A` and
+  `DATA_UNAVAILABLE` are displayed explicitly and do not count as On Track.
+- D5 adds a single read-only release gate plus authenticated browser coverage
+  for READY users with only the Policy baseline and with additional
+  Admin-configured targets. Test evidence is written under `backups/local`.
+- Static verification:
+  `npm --prefix backend run test:dashboard-metric-contract`.
+- Database baseline:
+  `npm --prefix backend run audit:dashboard-metric-baseline` (SELECT-only).
+- Runtime parity:
+  `npm --prefix backend run test:dashboard-metric-parity`,
+  `test:dashboard-module-health-d2`, and
+  `test:dashboard-module-health-php`.
+- Personal Target and browser verification:
+  `test:personal-target-eligibility`, `test:personal-target-runtime`,
+  `test:personal-target-variants`, and `audit:personal-target-eligibility`.
+- Consolidated D5 gate:
+  `npm --prefix backend run verify:dashboard-d5`.
 
 ### Access Model
 | Endpoint | Access | Purpose |
@@ -656,6 +706,9 @@ WHERE Department = ? AND Year = ? AND (CourseID <=> ?)
 - `CorrectiveAction` and evidence files are enforced client+server side when `IsRelated = 'Yes'`.
 - Status ที่ frontend ใช้ filter: `'responded'` | `'pending'` | `'rejected'`
 - Admin response-on-behalf supports multi-department submit from the dashboard/detail modal. Frontend sends `departments: JSON.stringify([...])` in FormData; backend creates one `YokotenResponses` row per selected department while preserving the one-response-per `(YokotenID, Department)` unique-key rule.
+- Multi-department persistence is atomic in PHP and Node: the selected Department rows are locked with `FOR UPDATE`, all response/file rows commit together, and an active response still returns 409.
+- A soft-deleted `(YokotenID, Department)` row occupies the same unique-key slot. A new response therefore reuses that deleted row and its existing `ResponseID`, resets approval metadata, replaces stale response-file rows transactionally, and sets `IsDeleted=0`. Unreferenced physical files are removed only after commit.
+- One-department submit may attempt immediate notification delivery. Multi-department submit only creates `Yokoten_EmailOutbox` rows and returns `notificationMode: "queued"` so SMTP latency cannot turn a successful bulk save into HTTP 500.
 - When one uploaded file is attached to multiple admin-created responses, each response gets its own `Yokoten_Response_Files` row pointing at the same stored file URL. `DELETE /response-files/:fileId` only removes the physical file when no other DB file row references that `FileURL`.
 
 ### Dashboard UX — Enterprise Phase 1
@@ -2286,3 +2339,10 @@ let _chartManDonut = null; // Man Record pass/fail donut chart
 **KY specifics:**
 - Forms section อยู่ใน `config` sub-tab ของ Manage (ไม่ใช่ coverage)
 - `_renderKyFormsManageSection()` + `_renderKyFormsUserCard()` — ฟังก์ชันแยกเพื่อ KY accent color (indigo)
+
+## Forklift Card Template Type Matching
+
+- `forklift_card_template_type_map` maps card templates to one or two license types.
+- Existing `forklift_card_templates.LicenseTypeID` remains as the legacy primary type and is backfilled into the map.
+- Card rendering ranks templates by exact type set first, then single matching type, then all-license templates.
+- This allows a `Forklift + Stacker` license to use a combined template instead of falling back to the `Forklift` template.

@@ -176,7 +176,7 @@ function fl_schema_ready(): bool
             'forklift_license_types','forklift_licenses','forklift_license_requests','forklift_license_type_map',
             'forklift_request_type_map','forklift_request_documents','forklift_request_events','forklift_license_renewals',
             'forklift_license_documents','forklift_employee_photos','forklift_card_templates','forklift_card_template_versions',
-            'forklift_card_template_fields','forklift_layout_presets','forklift_card_print_logs','forklift_verification_tokens',
+            'forklift_card_template_fields','forklift_card_template_type_map','forklift_layout_presets','forklift_card_print_logs','forklift_verification_tokens',
             'forklift_emailoutbox','forklift_sequences','forklift_settings',
         ];
         $placeholders = implode(',', array_fill(0, count($tables), '?'));
@@ -211,6 +211,7 @@ function fl_ensure(): void
     db()->exec("CREATE TABLE IF NOT EXISTS forklift_card_templates (ID INT AUTO_INCREMENT PRIMARY KEY,LicenseTypeID INT NULL,TemplateName VARCHAR(150) NOT NULL,IsActive TINYINT(1) NOT NULL DEFAULT 1,IsDefault TINYINT(1) NOT NULL DEFAULT 0,CreatedAt DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,UpdatedAt DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
     db()->exec("CREATE TABLE IF NOT EXISTS forklift_card_template_versions (ID INT AUTO_INCREMENT PRIMARY KEY,TemplateID INT NOT NULL,VersionNo INT NOT NULL DEFAULT 1,FrontImageUrl TEXT,BackImageUrl TEXT,CardWidthMm DECIMAL(8,2) DEFAULT 60.00,CardHeightMm DECIMAL(8,2) DEFAULT 82.00,Dpi INT DEFAULT 300,Status VARCHAR(30) NOT NULL DEFAULT 'draft',CreatedBy VARCHAR(100),CreatedAt DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,PublishedAt DATETIME NULL,UNIQUE KEY uq_template_version(TemplateID,VersionNo)) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
     db()->exec("CREATE TABLE IF NOT EXISTS forklift_card_template_fields (ID INT AUTO_INCREMENT PRIMARY KEY,TemplateVersionID INT NOT NULL,FieldKey VARCHAR(80) NOT NULL,FieldConfig JSON NULL,SortOrder INT NOT NULL DEFAULT 100,CreatedAt DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,UpdatedAt DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,KEY idx_version(TemplateVersionID)) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
+    db()->exec("CREATE TABLE IF NOT EXISTS forklift_card_template_type_map (ID INT AUTO_INCREMENT PRIMARY KEY,TemplateID INT NOT NULL,LicenseTypeID INT NOT NULL,CreatedAt DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,UNIQUE KEY uq_fl_template_type(TemplateID,LicenseTypeID),KEY idx_type(LicenseTypeID),KEY idx_template(TemplateID)) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
     db()->exec("CREATE TABLE IF NOT EXISTS forklift_layout_presets (ID INT AUTO_INCREMENT PRIMARY KEY,PresetName VARCHAR(150) NOT NULL,FieldsJson LONGTEXT NOT NULL,CreatedBy VARCHAR(100),CreatedAt DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,UpdatedBy VARCHAR(100),UpdatedAt DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,UNIQUE KEY uq_fl_layout_preset_name(PresetName)) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
     db()->exec("CREATE TABLE IF NOT EXISTS forklift_card_print_logs (ID INT AUTO_INCREMENT PRIMARY KEY,LicenseID INT NOT NULL,TemplateVersionID INT NULL,Action VARCHAR(40) NOT NULL,PrintedBy VARCHAR(100),PrintedAt DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,SnapshotJson JSON NULL,RenderMetadata JSON NULL,KEY idx_license(LicenseID),KEY idx_printed(PrintedAt)) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
     db()->exec("CREATE TABLE IF NOT EXISTS forklift_verification_tokens (ID INT AUTO_INCREMENT PRIMARY KEY,LicenseID INT NOT NULL,Token VARCHAR(120) NOT NULL,IsActive TINYINT(1) NOT NULL DEFAULT 1,RevokedAt DATETIME NULL,CreatedAt DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,LastAccessedAt DATETIME NULL,AccessCount INT NOT NULL DEFAULT 0,UNIQUE KEY uq_fl_token(Token),KEY idx_license(LicenseID,IsActive)) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
@@ -234,6 +235,7 @@ function fl_ensure(): void
     try { db()->exec("ALTER TABLE forklift_license_requests ADD COLUMN ReturnedAt DATETIME NULL AFTER ReviewStartedAt"); } catch (Throwable $e) {}
     db_execute('INSERT IGNORE INTO forklift_license_type_map(LicenseID,LicenseTypeID) SELECT ID,LicenseTypeID FROM forklift_licenses WHERE LicenseTypeID IS NOT NULL');
     db_execute('INSERT IGNORE INTO forklift_request_type_map(RequestID,LicenseTypeID) SELECT ID,LicenseTypeID FROM forklift_license_requests WHERE LicenseTypeID IS NOT NULL');
+    db_execute('INSERT IGNORE INTO forklift_card_template_type_map(TemplateID,LicenseTypeID) SELECT ID,LicenseTypeID FROM forklift_card_templates WHERE LicenseTypeID IS NOT NULL');
 }
 
 function fl_next_no(PDO $pdo, string $key, string $prefix): string
@@ -373,6 +375,25 @@ function fl_type_ids_from($body, array $fallback = []): array
         if ($id > 0 && !in_array($id, $ids, true)) $ids[] = $id;
     }
     return array_slice($ids, 0, 2);
+}
+
+function fl_normalize_type_ids($values): array
+{
+    $items = is_array($values) ? $values : [$values];
+    $ids = [];
+    foreach ($items as $value) {
+        $id = (int)$value;
+        if ($id > 0 && !in_array($id, $ids, true)) $ids[] = $id;
+    }
+    sort($ids, SORT_NUMERIC);
+    return array_slice($ids, 0, 2);
+}
+
+function fl_same_type_set($left, $right): bool
+{
+    $a = fl_normalize_type_ids($left);
+    $b = fl_normalize_type_ids($right);
+    return count($a) === count($b) && $a === $b;
 }
 
 function fl_sync_type_map(PDO $pdo, string $table, string $ownerColumn, int $ownerId, array $typeIds): void
@@ -692,7 +713,8 @@ function fl_template_payload(?int $templateId = null): array
 {
     $where = $templateId ? ' WHERE tpl.ID=?' : '';
     $params = $templateId ? [$templateId] : [];
-    $templates = db_rows("SELECT tpl.*,typ.Code AS LicenseTypeCode,typ.NameTH AS LicenseTypeNameTH,(SELECT COUNT(*) FROM forklift_card_template_versions pv JOIN forklift_card_print_logs pl ON pl.TemplateVersionID=pv.ID WHERE pv.TemplateID=tpl.ID) AS PrintLogCount FROM forklift_card_templates tpl LEFT JOIN forklift_license_types typ ON typ.ID=tpl.LicenseTypeID$where ORDER BY COALESCE(tpl.ArchivedAt,'1000-01-01') ASC,tpl.UpdatedAt DESC,tpl.ID DESC", $params);
+    $templates = db_rows("SELECT tpl.*,typ.Code AS LicenseTypeCode,typ.NameTH AS LicenseTypeNameTH,typ.NameEN AS LicenseTypeNameEN,(SELECT COUNT(*) FROM forklift_card_template_versions pv JOIN forklift_card_print_logs pl ON pl.TemplateVersionID=pv.ID WHERE pv.TemplateID=tpl.ID) AS PrintLogCount FROM forklift_card_templates tpl LEFT JOIN forklift_license_types typ ON typ.ID=tpl.LicenseTypeID$where ORDER BY COALESCE(tpl.ArchivedAt,'1000-01-01') ASC,tpl.UpdatedAt DESC,tpl.ID DESC", $params);
+    $templates = fl_attach_type_names($templates, 'forklift_card_template_type_map', 'TemplateID');
     foreach ($templates as &$tpl) {
         $versions = db_rows('SELECT * FROM forklift_card_template_versions WHERE TemplateID=? ORDER BY VersionNo DESC,ID DESC', [$tpl['ID']]);
         foreach ($versions as &$ver) {
@@ -771,20 +793,49 @@ function fl_card_payload(int $licenseId, ?int $templateVersionId = null): ?array
     $license = db_row(fl_license_select() . ' WHERE l.ID=? AND l.DeletedAt IS NULL LIMIT 1', [$licenseId]);
     if (!$license) return null;
     $license = fl_attach_type_names(fl_attach_effective([$license]))[0];
+    $licenseTypeIds = fl_normalize_type_ids(!empty($license['LicenseTypeIDs']) ? $license['LicenseTypeIDs'] : [($license['LicenseTypeID'] ?? 0)]);
+    $primaryTypeId = (int)($license['LicenseTypeID'] ?? ($licenseTypeIds[0] ?? 0));
     $where = "v.Status='published'";
     $params = [];
     if ($templateVersionId) {
         $where = 'v.ID=?';
         $params[] = $templateVersionId;
     }
-    $params[] = $license['LicenseTypeID'];
-    $params[] = $license['LicenseTypeID'];
-    $version = db_row("SELECT v.*,tpl.TemplateName,tpl.LicenseTypeID AS TemplateLicenseTypeID,tpl.IsDefault
+    $candidateVersions = db_rows("SELECT v.*,tpl.TemplateName,tpl.LicenseTypeID AS TemplateLicenseTypeID,tpl.IsDefault
         FROM forklift_card_template_versions v
         JOIN forklift_card_templates tpl ON tpl.ID=v.TemplateID
-        WHERE $where AND tpl.IsActive=1 AND tpl.ArchivedAt IS NULL AND (tpl.LicenseTypeID IS NULL OR tpl.LicenseTypeID=?)
-        ORDER BY CASE WHEN tpl.LicenseTypeID=? THEN 0 ELSE 1 END, tpl.IsDefault DESC, v.PublishedAt DESC, v.ID DESC
-        LIMIT 1", $params);
+        WHERE $where AND tpl.IsActive=1 AND tpl.ArchivedAt IS NULL
+        ORDER BY tpl.IsDefault DESC, v.PublishedAt DESC, v.ID DESC", $params);
+    $templateIds = array_values(array_unique(array_filter(array_map(static fn($row) => (int)($row['TemplateID'] ?? 0), $candidateVersions))));
+    $templateTypes = [];
+    if ($templateIds) {
+        $placeholders = implode(',', array_fill(0, count($templateIds), '?'));
+        $maps = db_rows("SELECT TemplateID,LicenseTypeID FROM forklift_card_template_type_map WHERE TemplateID IN ($placeholders) ORDER BY ID ASC", $templateIds);
+        foreach ($maps as $map) {
+            $templateTypes[(int)$map['TemplateID']][] = (int)$map['LicenseTypeID'];
+        }
+    }
+    $ranked = [];
+    foreach ($candidateVersions as $row) {
+        $typeIds = fl_normalize_type_ids($templateTypes[(int)($row['TemplateID'] ?? 0)] ?? (!empty($row['TemplateLicenseTypeID']) ? [(int)$row['TemplateLicenseTypeID']] : []));
+        $rank = null;
+        if (!$typeIds) $rank = 20;
+        elseif (fl_same_type_set($typeIds, $licenseTypeIds)) $rank = 0;
+        elseif (count($typeIds) === 1 && in_array($typeIds[0], $licenseTypeIds, true)) $rank = $typeIds[0] === $primaryTypeId ? 10 : 11;
+        if ($rank === null) continue;
+        $row['TemplateTypeIDs'] = $typeIds;
+        $row['_matchRank'] = $rank;
+        $ranked[] = $row;
+    }
+    usort($ranked, static function($a, $b) {
+        if (($a['_matchRank'] ?? 99) !== ($b['_matchRank'] ?? 99)) return ($a['_matchRank'] ?? 99) <=> ($b['_matchRank'] ?? 99);
+        if ((int)($a['IsDefault'] ?? 0) !== (int)($b['IsDefault'] ?? 0)) return (int)($b['IsDefault'] ?? 0) <=> (int)($a['IsDefault'] ?? 0);
+        $ap = !empty($a['PublishedAt']) ? strtotime((string)$a['PublishedAt']) : 0;
+        $bp = !empty($b['PublishedAt']) ? strtotime((string)$b['PublishedAt']) : 0;
+        if ($ap !== $bp) return $bp <=> $ap;
+        return (int)($b['ID'] ?? 0) <=> (int)($a['ID'] ?? 0);
+    });
+    $version = $ranked[0] ?? null;
     if (!$version) return ['license'=>$license,'template'=>null,'version'=>null,'fields'=>[],'values'=>[],'verification'=>null];
     $fields = db_rows('SELECT * FROM forklift_card_template_fields WHERE TemplateVersionID=? ORDER BY SortOrder ASC,ID ASC', [$version['ID']]);
     foreach ($fields as &$field) $field['FieldConfig'] = json_decode((string)($field['FieldConfig'] ?? '{}'), true) ?: [];
@@ -812,7 +863,7 @@ function fl_card_payload(int $licenseId, ?int $templateVersionId = null): ?array
     $version['Fields'] = $fields;
     return [
         'license'=>$license,
-        'template'=>['ID'=>$version['TemplateID'],'TemplateName'=>$version['TemplateName'],'LicenseTypeID'=>$version['TemplateLicenseTypeID'],'IsDefault'=>$version['IsDefault']],
+        'template'=>['ID'=>$version['TemplateID'],'TemplateName'=>$version['TemplateName'],'LicenseTypeID'=>$version['TemplateLicenseTypeID'],'LicenseTypeIDs'=>$version['TemplateTypeIDs'] ?? [],'IsDefault'=>$version['IsDefault']],
         'version'=>$version,
         'fields'=>$fields,
         'values'=>$values,
@@ -1198,15 +1249,15 @@ function handle_forklift_routes(string $method, string $path): bool
     if($presetDelete!==null&&$method==='DELETE'){ fl_require_permission($user,'FORKLIFT_TEMPLATE_MANAGE');db_execute('DELETE FROM forklift_layout_presets WHERE ID=?',[(int)$presetDelete['id']]);fl_audit($user,'DELETE_LAYOUT_PRESET','forklift_layout_preset',$presetDelete['id']);json_response(['success'=>true]); }
     if($method==='GET'&&$path==='/forklift/templates'){ fl_require_permission($user,'FORKLIFT_TEMPLATE_MANAGE'); json_response(['success'=>true,'data'=>fl_template_payload()]); }
     if($method==='POST'&&$path==='/forklift/templates'){
-        fl_require_permission($user,'FORKLIFT_TEMPLATE_MANAGE'); $name=fl_text($_POST['TemplateName']??'',150); if($name==='')json_response(['success'=>false,'message'=>'TemplateName is required.'],400);
-        $front=fl_template_image('FrontImage'); $guard=fl_upload_guard(array_values(array_filter([$front]))); $back=fl_template_image('BackImage',array_values(array_filter([$front]))); $guard->files=array_values(array_filter([$front,$back])); $pdo=db(); try{$pdo->beginTransaction(); $stmt=$pdo->prepare('INSERT INTO forklift_card_templates(LicenseTypeID,TemplateName,IsActive,IsDefault) VALUES(?,?,1,?)'); $stmt->execute([($_POST['LicenseTypeID']??'')!==''?(int)$_POST['LicenseTypeID']:null,$name,!empty($_POST['IsDefault'])?1:0]); $templateId=(int)$pdo->lastInsertId(); $stmt=$pdo->prepare('INSERT INTO forklift_card_template_versions(TemplateID,VersionNo,FrontImageUrl,BackImageUrl,CardWidthMm,CardHeightMm,Dpi,Status,CreatedBy) VALUES(?,?,?,?,?,?,?,?,?)'); $stmt->execute([$templateId,1,$front['url']??null,$back['url']??null,(float)($_POST['CardWidthMm']??60),(float)($_POST['CardHeightMm']??82),(int)($_POST['Dpi']??300),'draft',fl_user_name($user)]); $versionId=(int)$pdo->lastInsertId(); fl_seed_template_fields($pdo,$versionId); $pdo->commit(); fl_upload_persist($guard); fl_audit($user,'UPDATE_TEMPLATE','forklift_card_template',$templateId,['versionId'=>$versionId],201); json_response(['success'=>true,'id'=>$templateId,'versionId'=>$versionId],201);}catch(Throwable $e){if($pdo->inTransaction())$pdo->rollBack(); if($front)p5_cleanup([$front]); if($back)p5_cleanup([$back]); throw $e;}
+        fl_require_permission($user,'FORKLIFT_TEMPLATE_MANAGE'); $name=fl_text($_POST['TemplateName']??'',150); if($name==='')json_response(['success'=>false,'message'=>'TemplateName is required.'],400); $typeIds=fl_type_ids_from($_POST); $primaryTypeId=$typeIds[0]??null;
+        $front=fl_template_image('FrontImage'); $guard=fl_upload_guard(array_values(array_filter([$front]))); $back=fl_template_image('BackImage',array_values(array_filter([$front]))); $guard->files=array_values(array_filter([$front,$back])); $pdo=db(); try{$pdo->beginTransaction(); $stmt=$pdo->prepare('INSERT INTO forklift_card_templates(LicenseTypeID,TemplateName,IsActive,IsDefault) VALUES(?,?,1,?)'); $stmt->execute([$primaryTypeId,$name,!empty($_POST['IsDefault'])?1:0]); $templateId=(int)$pdo->lastInsertId(); fl_sync_type_map($pdo,'forklift_card_template_type_map','TemplateID',$templateId,$typeIds); $stmt=$pdo->prepare('INSERT INTO forklift_card_template_versions(TemplateID,VersionNo,FrontImageUrl,BackImageUrl,CardWidthMm,CardHeightMm,Dpi,Status,CreatedBy) VALUES(?,?,?,?,?,?,?,?,?)'); $stmt->execute([$templateId,1,$front['url']??null,$back['url']??null,(float)($_POST['CardWidthMm']??60),(float)($_POST['CardHeightMm']??82),(int)($_POST['Dpi']??300),'draft',fl_user_name($user)]); $versionId=(int)$pdo->lastInsertId(); fl_seed_template_fields($pdo,$versionId); $pdo->commit(); fl_upload_persist($guard); fl_audit($user,'UPDATE_TEMPLATE','forklift_card_template',$templateId,['versionId'=>$versionId],201); json_response(['success'=>true,'id'=>$templateId,'versionId'=>$versionId],201);}catch(Throwable $e){if($pdo->inTransaction())$pdo->rollBack(); if($front)p5_cleanup([$front]); if($back)p5_cleanup([$back]); throw $e;}
     }
     $tpl=route_params($path,'/forklift/templates/:id');
     if($tpl!==null&&$method==='GET'){ fl_require_permission($user,'FORKLIFT_TEMPLATE_MANAGE'); $rows=fl_template_payload((int)$tpl['id']); if(!$rows)json_response(['success'=>false,'message'=>'Not found.'],404); json_response(['success'=>true,'data'=>$rows[0]]); }
     if($tpl!==null&&$method==='DELETE'){
         fl_require_permission($user,'FORKLIFT_TEMPLATE_MANAGE'); $templateId=(int)$tpl['id']; $row=fl_template_row($templateId); if(!$row)json_response(['success'=>false,'message'=>'Template not found.'],404);
         $used=fl_template_print_log_count($templateId); $force=(string)($_GET['force']??'')==='1';if($force&&!fl_is_admin($user))json_response(['success'=>false,'message'=>'Force delete is restricted to Admin.'],403);if($used>0&&!$force)json_response(['success'=>false,'message'=>'Template has print/export history. Archive it instead of hard delete.','printLogCount'=>$used],409);
-        $pdo=db(); try{$pdo->beginTransaction(); $versions=db_rows('SELECT ID FROM forklift_card_template_versions WHERE TemplateID=?',[$templateId]); foreach($versions as $v){if($force)$pdo->prepare('DELETE FROM forklift_card_print_logs WHERE TemplateVersionID=?')->execute([(int)$v['ID']]); $pdo->prepare('DELETE FROM forklift_card_template_fields WHERE TemplateVersionID=?')->execute([(int)$v['ID']]);} $pdo->prepare('DELETE FROM forklift_card_template_versions WHERE TemplateID=?')->execute([$templateId]); $pdo->prepare('DELETE FROM forklift_card_templates WHERE ID=?')->execute([$templateId]); $pdo->commit(); fl_audit($user,$force?'DELETE_TEMPLATE_FORCE':'DELETE_TEMPLATE','forklift_card_template',$templateId,['printLogCount'=>$used,'force'=>$force]); json_response(['success'=>true]);}catch(Throwable $e){if($pdo->inTransaction())$pdo->rollBack(); throw $e;}
+        $pdo=db(); try{$pdo->beginTransaction(); $versions=db_rows('SELECT ID FROM forklift_card_template_versions WHERE TemplateID=?',[$templateId]); foreach($versions as $v){if($force)$pdo->prepare('DELETE FROM forklift_card_print_logs WHERE TemplateVersionID=?')->execute([(int)$v['ID']]); $pdo->prepare('DELETE FROM forklift_card_template_fields WHERE TemplateVersionID=?')->execute([(int)$v['ID']]);} $pdo->prepare('DELETE FROM forklift_card_template_type_map WHERE TemplateID=?')->execute([$templateId]); $pdo->prepare('DELETE FROM forklift_card_template_versions WHERE TemplateID=?')->execute([$templateId]); $pdo->prepare('DELETE FROM forklift_card_templates WHERE ID=?')->execute([$templateId]); $pdo->commit(); fl_audit($user,$force?'DELETE_TEMPLATE_FORCE':'DELETE_TEMPLATE','forklift_card_template',$templateId,['printLogCount'=>$used,'force'=>$force]); json_response(['success'=>true]);}catch(Throwable $e){if($pdo->inTransaction())$pdo->rollBack(); throw $e;}
     }
     $tplArchive=route_params($path,'/forklift/templates/:id/archive');
     if($tplArchive!==null&&$method==='POST'){ fl_require_permission($user,'FORKLIFT_TEMPLATE_MANAGE'); $templateId=(int)$tplArchive['id']; if(!fl_template_row($templateId))json_response(['success'=>false,'message'=>'Template not found.'],404); db_execute('UPDATE forklift_card_templates SET IsActive=0,ArchivedAt=NOW(),ArchivedBy=? WHERE ID=? AND ArchivedAt IS NULL',[fl_user_name($user),$templateId]); fl_audit($user,'ARCHIVE_TEMPLATE','forklift_card_template',$templateId); json_response(['success'=>true]); }

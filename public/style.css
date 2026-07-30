@@ -1222,7 +1222,7 @@ body { font-family: 'Kanit', sans-serif; background-color: #1e5c3e; }
 .ds-table tbody tr:hover { background: #f8fafc; }
 .ds-table tbody tr:last-child td { border-bottom: 0; }
 
-/* Machine & Device Safety: keep dense records readable without widening the app shell. */
+/* Machine & Device Safety: full-width workspace with a compact operational list. */
 #machine-safety-page {
     width: 100%;
     min-width: 0;
@@ -1230,9 +1230,9 @@ body { font-family: 'Kanit', sans-serif; background-color: #1e5c3e; }
 }
 .msd-page-shell {
     width: 100%;
-    max-width: 1440px;
+    max-width: none;
     min-width: 0;
-    margin-inline: auto;
+    margin-inline: 0;
     overflow-x: clip;
 }
 .msd-filter-grid {
@@ -1274,8 +1274,40 @@ body { font-family: 'Kanit', sans-serif; background-color: #1e5c3e; }
     -webkit-overflow-scrolling: touch;
 }
 .msd-data-table {
-    width: max-content;
-    min-width: 1720px;
+    width: 100%;
+    min-width: 760px;
+    table-layout: fixed;
+}
+.msd-data-table th,
+.msd-data-table td {
+    overflow: hidden;
+}
+.msd-data-table tbody tr {
+    background-color: #fff;
+}
+.msd-clickable-row {
+    cursor: pointer;
+}
+.msd-clickable-row:hover {
+    background: #f0fdfa !important;
+}
+.msd-clickable-row:focus-visible {
+    position: relative;
+    z-index: 1;
+    outline: 2px solid #14b8a6;
+    outline-offset: -2px;
+    background: #f0fdfa !important;
+}
+.msd-clickable-row:hover .msd-row-open-hint svg,
+.msd-clickable-row:focus-visible .msd-row-open-hint svg {
+    color: #0d9488;
+    transform: translateX(2px);
+}
+.msd-row-open-hint svg {
+    transition: color 160ms ease, transform 160ms ease;
+}
+.msd-machine-cell {
+    min-width: 0;
 }
 .msd-pagination {
     min-width: 0;

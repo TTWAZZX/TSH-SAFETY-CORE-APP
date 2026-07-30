@@ -75,6 +75,187 @@ function dashboard_unit_key(string $value): string
     return (string) preg_replace('/\s+/', ' ', $value);
 }
 
+function dashboard_metric_row_state(string $sql, array $params = []): array
+{
+    try {
+        $stmt = db()->prepare($sql);
+        $stmt->execute($params);
+        return ['available' => true, 'row' => $stmt->fetch() ?: []];
+    } catch (Throwable $e) {
+        return ['available' => false, 'row' => [], 'error' => $e->getMessage()];
+    }
+}
+
+function dashboard_patrol_company_progress(int $year): array
+{
+    $currentYear = (int) date('Y');
+    $elapsedMonths = $year < $currentYear ? 12 : ($year > $currentYear ? 0 : (int) date('n'));
+    $state = dashboard_metric_row_state(
+        "SELECT COALESCE(SUM(LEAST(COALESCE(actual.actualCount,0),roster.requiredSlots)),0) numerator,
+                COALESCE(SUM(roster.requiredSlots),0) denominator
+           FROM (
+                 SELECT EmployeeID,CEIL(SUM(COALESCE(TargetPerYear,0))*?/12) requiredSlots
+                   FROM patrol_roster
+                  GROUP BY EmployeeID
+                ) roster
+           LEFT JOIN (
+                 SELECT EmployeeID,SUM(actualCount) actualCount
+                   FROM (
+                         SELECT UserID EmployeeID,COUNT(*) actualCount
+                           FROM patrol_attendance
+                          WHERE YEAR(PatrolDate)=?
+                          GROUP BY UserID
+                         UNION ALL
+                         SELECT EmployeeID,COUNT(*) actualCount
+                           FROM patrol_self_checkin
+                          WHERE Year=?
+                          GROUP BY EmployeeID
+                        ) activity
+                  GROUP BY EmployeeID
+                ) actual ON actual.EmployeeID=roster.EmployeeID",
+        [$elapsedMonths, $year, $year]
+    );
+    $state['numerator'] = (float) ($state['row']['numerator'] ?? 0);
+    $state['denominator'] = (float) ($state['row']['denominator'] ?? 0);
+    $state['elapsedMonths'] = $elapsedMonths;
+    return $state;
+}
+
+function dashboard_ky_company_progress(int $year): array
+{
+    try {
+        $configs = db_rows(
+            'SELECT Department,SafetyUnits,YearlyTarget FROM ky_program_config WHERE Year=? AND IsActive=1',
+            [$year]
+        );
+        $activities = db_rows(
+            'SELECT Department,SafetyUnit,COUNT(*) actual
+               FROM ky_activities
+              WHERE YEAR(ActivityDate)=?
+              GROUP BY Department,SafetyUnit',
+            [$year]
+        );
+        $activityMap = [];
+        foreach ($activities as $row) {
+            $key = dashboard_department_key((string) ($row['Department'] ?? ''))
+                . '::' . dashboard_unit_key((string) ($row['SafetyUnit'] ?? ''));
+            $activityMap[$key] = (int) ($row['actual'] ?? 0);
+        }
+        $numerator = 0;
+        $denominator = 0;
+        foreach ($configs as $config) {
+            $department = dashboard_department_key((string) ($config['Department'] ?? ''));
+            $units = array_values(array_filter(array_map('dashboard_unit_key', dashboard_parse_array($config['SafetyUnits'] ?? null))));
+            $target = max(0, (int) ($config['YearlyTarget'] ?? 0));
+            if ($department === '' || $target <= 0) continue;
+            if ($units) {
+                $denominator += count($units) * $target;
+                foreach ($units as $unit) {
+                    $numerator += (int) ($activityMap[$department . '::' . $unit] ?? 0);
+                }
+            } else {
+                $denominator += $target;
+                foreach ($activityMap as $key => $actual) {
+                    if (strpos($key, $department . '::') === 0) $numerator += $actual;
+                }
+            }
+        }
+        return [
+            'available' => true,
+            'numerator' => $numerator,
+            'denominator' => $denominator,
+            'configuredScopes' => count($configs),
+        ];
+    } catch (Throwable $e) {
+        return [
+            'available' => false,
+            'numerator' => 0,
+            'denominator' => 0,
+            'configuredScopes' => 0,
+            'error' => $e->getMessage(),
+        ];
+    }
+}
+
+function dashboard_yokoten_company_progress(int $year): array
+{
+    try {
+        $departments = db_rows('SELECT Name FROM master_departments ORDER BY Name');
+        $topics = db_rows(
+            'SELECT YokotenID,TargetDepts FROM yokotentopics
+              WHERE IsActive=1 AND (DateIssued IS NULL OR YEAR(DateIssued)=?)',
+            [$year]
+        );
+        $responses = db_rows(
+            'SELECT YokotenID,Department FROM yokotenresponses
+              WHERE IsDeleted IS NULL OR IsDeleted=0'
+        );
+        $departmentMap = [];
+        foreach ($departments as $row) {
+            $key = dashboard_department_key((string) ($row['Name'] ?? ''));
+            if ($key !== '') $departmentMap[$key] = trim((string) $row['Name']);
+        }
+        $assignedPairs = [];
+        $topicIds = [];
+        $unknown = [];
+        foreach ($topics as $topic) {
+            $topicId = (string) ($topic['YokotenID'] ?? '');
+            $topicIds[$topicId] = true;
+            $configured = dashboard_parse_array($topic['TargetDepts'] ?? null);
+            $targets = $configured
+                ? array_map('dashboard_department_key', $configured)
+                : array_keys($departmentMap);
+            foreach ($targets as $department) {
+                if (!isset($departmentMap[$department])) {
+                    $unknown[$department] = true;
+                    continue;
+                }
+                $assignedPairs[$department . '::' . $topicId] = true;
+            }
+        }
+        if ($unknown) {
+            return [
+                'available' => false,
+                'numerator' => 0,
+                'denominator' => 0,
+                'topics' => count($topics),
+                'respondedDepartments' => 0,
+                'unknownDepartments' => array_keys($unknown),
+                'error' => 'One or more Yokoten target Departments do not resolve to master_departments.',
+            ];
+        }
+        $respondedPairs = [];
+        $respondedDepartments = [];
+        foreach ($responses as $response) {
+            $topicId = (string) ($response['YokotenID'] ?? '');
+            if (!isset($topicIds[$topicId])) continue;
+            $department = dashboard_department_key((string) ($response['Department'] ?? ''));
+            $pair = $department . '::' . $topicId;
+            if (!isset($assignedPairs[$pair])) continue;
+            $respondedPairs[$pair] = true;
+            $respondedDepartments[$department] = true;
+        }
+        return [
+            'available' => true,
+            'numerator' => count($respondedPairs),
+            'denominator' => count($assignedPairs),
+            'topics' => count($topics),
+            'respondedDepartments' => count($respondedDepartments),
+            'unknownDepartments' => [],
+        ];
+    } catch (Throwable $e) {
+        return [
+            'available' => false,
+            'numerator' => 0,
+            'denominator' => 0,
+            'topics' => 0,
+            'respondedDepartments' => 0,
+            'unknownDepartments' => [],
+            'error' => $e->getMessage(),
+        ];
+    }
+}
+
 function dashboard_compliance_matrix(int $year, array $config): array
 {
     $deptRows = safe_rows('SELECT Name FROM master_departments ORDER BY Name ASC');
@@ -571,7 +752,10 @@ try {
         $year = (int) date('Y');
         $patrolSessions = safe_scalar('SELECT COUNT(DISTINCT DATE(PatrolDate)) FROM patrol_attendance WHERE YEAR(PatrolDate)=?', [$year]);
         $patrolAttended = safe_scalar('SELECT COUNT(*) FROM patrol_attendance WHERE YEAR(PatrolDate)=?', [$year]);
-        $patrolOpenIssues = safe_scalar("SELECT COUNT(*) FROM patrol_issues WHERE CurrentStatus NOT IN ('Closed')");
+        $patrolOpenIssues = safe_scalar(
+            "SELECT COUNT(*) FROM patrol_issues WHERE YEAR(DateFound)=? AND CurrentStatus NOT IN ('Closed')",
+            [$year]
+        );
         $cccfWorker = safe_scalar('SELECT COUNT(*) FROM cccf_forma_worker WHERE YEAR(SubmitDate)=?', [$year]);
         try {
             $cccfWorkerOverview = cccf_worker_progress_data($year, false);
@@ -580,35 +764,303 @@ try {
         }
         $cccfWorkerActualTowardTarget = (int) ($cccfWorkerOverview['overall']['actualTowardTarget'] ?? $cccfWorker);
         $cccfWorkerRawRecords = (int) ($cccfWorkerOverview['overall']['rawRecords'] ?? $cccfWorker);
-        $cccfAssigned = safe_scalar('SELECT COUNT(*) FROM cccf_assignments');
+        $cccfAssigned = safe_scalar(
+            "SELECT COUNT(DISTINCT a.EmployeeID)
+               FROM cccf_assignments a
+               JOIN employees e ON e.EmployeeID=a.EmployeeID
+              WHERE a.EmployeeID IS NOT NULL AND TRIM(a.EmployeeID)<>''"
+        );
         $cccfCompleted = safe_scalar(
             "SELECT COUNT(DISTINCT fa.AssigneeID)
              FROM cccf_forma_permanent fa
              JOIN cccf_assignments ca ON fa.AssigneeID = ca.EmployeeID
+             JOIN employees e ON e.EmployeeID = ca.EmployeeID
              WHERE YEAR(fa.SubmitDate)=?
                AND (fa.ReviewStatus='Completed' OR (fa.ReviewStatus IS NULL AND fa.FileUrl IS NOT NULL))",
             [$year]
         );
-        $yokotenTopics = safe_scalar('SELECT COUNT(*) FROM yokotentopics WHERE IsActive=1');
-        $yokotenResponded = safe_scalar('SELECT COUNT(DISTINCT Department) FROM yokotenresponses WHERE YEAR(ResponseDate)=?', [$year]);
+        $yokotenTopics = safe_scalar(
+            'SELECT COUNT(*) FROM yokotentopics
+              WHERE IsActive=1 AND (DateIssued IS NULL OR YEAR(DateIssued)=?)',
+            [$year]
+        );
+        $yokotenResponded = safe_scalar(
+            'SELECT COUNT(DISTINCT r.Department)
+               FROM yokotenresponses r
+               JOIN yokotentopics t ON t.YokotenID=r.YokotenID
+              WHERE (r.IsDeleted IS NULL OR r.IsDeleted=0)
+                AND t.IsActive=1
+                AND (t.DateIssued IS NULL OR YEAR(t.DateIssued)=?)',
+            [$year]
+        );
         $trainingTotal = safe_scalar('SELECT COALESCE(SUM(TotalEmp),0) FROM training_dept_records WHERE Year=?', [$year]);
-        $trainingPassed = safe_scalar('SELECT COALESCE(SUM(PassedCount),0) FROM training_dept_records WHERE Year=?', [$year]);
-        $hiyariOpen = safe_scalar("SELECT COUNT(*) FROM hiyarireports WHERE Status NOT IN ('Closed','closed')");
-        $hiyariYear = safe_scalar('SELECT COUNT(*) FROM hiyarireports WHERE YEAR(ReportDate)=?', [$year]);
+        $trainingPassed = safe_scalar(
+            'SELECT COALESCE(SUM(LEAST(GREATEST(COALESCE(PassedCount,0),0),GREATEST(COALESCE(TotalEmp,0),0))),0)
+               FROM training_dept_records WHERE Year=?',
+            [$year]
+        );
+        $hiyariOpen = safe_scalar(
+            "SELECT COUNT(*) FROM hiyarireports
+              WHERE YEAR(ReportDate)=? AND DeletedAt IS NULL AND Status NOT IN ('Closed','closed')",
+            [$year]
+        );
+        $hiyariYear = safe_scalar(
+            'SELECT COUNT(*) FROM hiyarireports WHERE YEAR(ReportDate)=? AND DeletedAt IS NULL',
+            [$year]
+        );
+        $hiyariClosed = safe_scalar(
+            "SELECT COUNT(*) FROM hiyarireports
+              WHERE YEAR(ReportDate)=? AND DeletedAt IS NULL AND Status IN ('Closed','closed')",
+            [$year]
+        );
+        $hiyariAssignmentTarget = safe_scalar('SELECT COUNT(*) FROM hiyari_assignments');
+        $hiyariAssignmentClosed = safe_scalar(
+            "SELECT COUNT(DISTINCT a.id)
+               FROM hiyari_assignments a
+               JOIN hiyarireports r
+                 ON NULLIF(TRIM(r.ReporterID),'')=NULLIF(TRIM(a.EmployeeID),'')
+              WHERE YEAR(r.ReportDate)=?
+                AND r.DeletedAt IS NULL
+                AND r.Status IN ('Closed','closed')",
+            [$year]
+        );
         $kyYear = safe_scalar('SELECT COUNT(*) FROM ky_activities WHERE YEAR(ActivityDate)=?', [$year]);
-        $accidentYear = safe_scalar('SELECT COUNT(*) FROM accident_reports WHERE YEAR(AccidentDate)=?', [$year]);
-        $recordable = safe_scalar('SELECT COUNT(*) FROM accident_reports WHERE YEAR(AccidentDate)=? AND IsRecordable=1', [$year]);
+        $accidentYear = safe_scalar(
+            'SELECT COUNT(*) FROM accident_reports
+              WHERE YEAR(AccidentDate)=? AND (IsDeleted IS NULL OR IsDeleted=0)',
+            [$year]
+        );
+        $recordable = safe_scalar(
+            'SELECT COUNT(*) FROM accident_reports
+              WHERE YEAR(AccidentDate)=? AND IsRecordable=1 AND (IsDeleted IS NULL OR IsDeleted=0)',
+            [$year]
+        );
         $fourmTotal = safe_scalar('SELECT COUNT(*) FROM fourm_changenotices WHERE YEAR(RequestDate)=?', [$year]);
         $fourmOpen = safe_scalar("SELECT COUNT(*) FROM fourm_changenotices WHERE Status='Open' AND YEAR(RequestDate)=?", [$year]);
         $fourmPending = safe_scalar("SELECT COUNT(*) FROM fourm_changenotices WHERE Status='Pending' AND YEAR(RequestDate)=?", [$year]);
         $fourmClosed = safe_scalar("SELECT COUNT(*) FROM fourm_changenotices WHERE Status='Closed' AND YEAR(RequestDate)=?", [$year]);
         $active = (int) ($fourmOpen ?? 0) + (int) ($fourmPending ?? 0);
+        $fourmOverdue = safe_scalar(
+            "SELECT COUNT(*) FROM fourm_changenotices
+              WHERE Status IN ('Open','Pending') AND DATEDIFF(CURDATE(),RequestDate)>30
+                AND YEAR(RequestDate)=?",
+            [$year]
+        );
+        $fourmTrainingRequired = safe_scalar(
+            'SELECT COUNT(*) FROM fourm_changenotices WHERE TrainingRequired=1 AND YEAR(RequestDate)=?',
+            [$year]
+        );
+        $fourmMatrixCurriculums = safe_scalar(
+            'SELECT COUNT(*) FROM fourm_curriculums WHERE IsActive=1 AND Year=?',
+            [$year]
+        );
+        $fourmMatrixCourses = safe_scalar(
+            'SELECT COUNT(*) FROM fourm_courses co
+              JOIN fourm_curriculums cur ON cur.id=co.CurriculumID
+             WHERE co.IsActive=1 AND cur.IsActive=1 AND cur.Year=?',
+            [$year]
+        );
+        $fourmMatrixEmployees = safe_scalar(
+            "SELECT COUNT(DISTINCT ce.EmployeeID) FROM fourm_curriculumemployees ce
+              JOIN fourm_curriculums cur ON cur.id=ce.CurriculumID
+             WHERE ce.Status='Assigned' AND cur.IsActive=1 AND cur.Year=?",
+            [$year]
+        );
+        $fourmMatrixTransferred = safe_scalar(
+            "SELECT COUNT(*) FROM fourm_curriculumemployees ce
+              JOIN fourm_curriculums cur ON cur.id=ce.CurriculumID
+             WHERE ce.Status='Transferred' AND cur.Year=?",
+            [$year]
+        );
+
+        $kpiMetrics = safe_scalar('SELECT COUNT(*) FROM kpidata WHERE Year=?', [$year]);
+        $kpiAnnouncements = safe_scalar('SELECT COUNT(*) FROM kpiannouncements WHERE IsCurrent=1');
+        $policyTotal = safe_scalar('SELECT COUNT(*) FROM policies WHERE IsCurrent=1');
+        $policyAcked = safe_scalar(
+            'SELECT COUNT(DISTINCT pa.UserID) FROM policy_acknowledgements pa
+              JOIN policies p ON p.id=pa.PolicyID WHERE p.IsCurrent=1'
+        );
+        $policyEligible = safe_scalar('SELECT COUNT(*) FROM employees');
+        $committeeTotal = safe_scalar('SELECT COUNT(*) FROM committees WHERE IsCurrent=1');
+        $machineTotal = safe_scalar("SELECT COUNT(*) FROM machine_safety WHERE Status IS NULL OR Status<>'inactive'");
+        $machineOpenIssues = safe_scalar(
+            "SELECT COUNT(*) FROM machine_safety_issues i
+              JOIN machine_safety m ON m.id=i.MachineID
+             WHERE i.Status='open' AND (m.Status IS NULL OR m.Status<>'inactive')"
+        );
+        $machineCritical = safe_scalar(
+            "SELECT COUNT(*) FROM machine_safety
+              WHERE RiskLevel IN ('high','critical') AND (Status IS NULL OR Status<>'inactive')"
+        );
+        $ojtRecords = safe_scalar('SELECT COUNT(*) FROM ojt_records WHERE YEAR(OJTDate)=?', [$year]);
+        $ojtDocs = safe_scalar('SELECT COUNT(*) FROM scw_documents WHERE YEAR(UploadedAt)=?', [$year]);
+        $contractorDocs = safe_scalar('SELECT COUNT(*) FROM contractor_documents');
+        $contractorRecent = safe_scalar(
+            'SELECT COUNT(*) FROM contractor_documents WHERE UploadedAt>=DATE_SUB(NOW(),INTERVAL 30 DAY)'
+        );
+        $safetyCultureYear = safe_scalar('SELECT COUNT(*) FROM sc_assessments WHERE AssessmentYear=?', [$year]);
+
+        $patrolProgress = dashboard_patrol_company_progress($year);
+        $kyProgress = dashboard_ky_company_progress($year);
+        $yokotenProgress = dashboard_yokoten_company_progress($year);
+        $machineComplianceState = dashboard_metric_row_state(
+            "SELECT COALESCE(SUM(c.Status='pass'),0) numerator,
+                    COALESCE(SUM(c.Status<>'na'),0) denominator
+               FROM machine_safety m
+               JOIN machine_safety_compliance c ON c.MachineID=m.id
+              WHERE m.Status IS NULL OR m.Status<>'inactive'"
+        );
+        $ojtProgressState = dashboard_metric_row_state(
+            'SELECT COALESCE(SUM(LEAST(GREATEST(COALESCE(AttendeeCount,0),0),
+                                           GREATEST(COALESCE(YearlyTarget,0),0))),0) numerator,
+                    COALESCE(SUM(GREATEST(COALESCE(YearlyTarget,0),0)),0) denominator,
+                    COUNT(*) records,
+                    COALESCE(SUM(NextReviewDate IS NOT NULL AND NextReviewDate<CURDATE()),0) overdue
+               FROM ojt_records WHERE YEAR(OJTDate)=?',
+            [$year]
+        );
+        $safetyCultureProgressState = dashboard_metric_row_state(
+            'SELECT COUNT(*) assessments,
+                    COALESCE(SUM(COALESCE(T1_Score,0)+COALESCE(T2_Score,0)+
+                                 COALESCE(T3_Score,0)+COALESCE(T4_Score,0)+
+                                 COALESCE(T5_Score,0)+COALESCE(T7_Score,0)),0) numerator,
+                    COALESCE(SUM((T1_Score IS NOT NULL)+(T2_Score IS NOT NULL)+
+                                 (T3_Score IS NOT NULL)+(T4_Score IS NOT NULL)+
+                                 (T5_Score IS NOT NULL)+(T7_Score IS NOT NULL)),0)*100 denominator,
+                    (SELECT AVG(CompliancePct) FROM sc_ppeinspections
+                      WHERE YEAR(InspectionDate)=? AND deleted_at IS NULL) ppePct
+               FROM sc_assessments WHERE AssessmentYear=?',
+            [$year, $year]
+        );
+
+        $asOf = gmdate('c');
+        $scope = ['year' => $year];
+        $machineNumerator = (float) ($machineComplianceState['row']['numerator'] ?? 0);
+        $machineDenominator = (float) ($machineComplianceState['row']['denominator'] ?? 0);
+        $ojtNumerator = (float) ($ojtProgressState['row']['numerator'] ?? 0);
+        $ojtDenominator = (float) ($ojtProgressState['row']['denominator'] ?? 0);
+        $ojtOverdue = (int) ($ojtProgressState['row']['overdue'] ?? 0);
+        $safetyCultureNumerator = (float) ($safetyCultureProgressState['row']['numerator'] ?? 0);
+        $safetyCultureDenominator = (float) ($safetyCultureProgressState['row']['denominator'] ?? 0);
+        $safetyCulturePpePct = isset($safetyCultureProgressState['row']['ppePct'])
+            ? (float) $safetyCultureProgressState['row']['ppePct']
+            : null;
+
+        $moduleMetrics = [
+            'patrol' => dashboard_metric_create('patrol', [
+                'numerator'=>$patrolProgress['numerator'],
+                'denominator'=>$patrolProgress['denominator'],
+                'unit'=>'attendance_slots',
+                'scope'=>array_merge($scope, ['window'=>'year_to_date','elapsedMonths'=>$patrolProgress['elapsedMonths']]),
+                'dataAvailable'=>$patrolProgress['available'],
+                'unavailableReason'=>$patrolProgress['error'] ?? null,
+                'sourceDescription'=>'Completed eligible attendance slots / roster attendance slots due year-to-date.',
+                'asOf'=>$asOf,
+            ]),
+            'hiyari' => dashboard_metric_create('hiyari', [
+                'numerator'=>$hiyariAssignmentClosed,
+                'denominator'=>$hiyariAssignmentTarget,
+                'unit'=>'employees',
+                'scope'=>$scope,
+                'dataAvailable'=>$hiyariAssignmentClosed !== null && $hiyariAssignmentTarget !== null,
+                'sourceDescription'=>'Distinct assigned employees with a closed current-year report / current Admin Hiyari assignments.',
+                'asOf'=>$asOf,
+            ]),
+            'ky' => dashboard_metric_create('ky', [
+                'numerator'=>$kyProgress['numerator'],'denominator'=>$kyProgress['denominator'],'unit'=>'activities',
+                'scope'=>array_merge($scope, ['configuredScopes'=>$kyProgress['configuredScopes']]),
+                'dataAvailable'=>$kyProgress['available'],'unavailableReason'=>$kyProgress['error'] ?? null,
+                'sourceDescription'=>'Eligible activities in configured Department and Safety Unit scopes / active configured yearly targets.',
+                'asOf'=>$asOf,
+            ]),
+            'cccf' => dashboard_metric_create('cccf', [
+                'numerator'=>$cccfCompleted,'denominator'=>$cccfAssigned,'unit'=>'employees','scope'=>$scope,
+                'dataAvailable'=>$cccfCompleted !== null && $cccfAssigned !== null,
+                'sourceDescription'=>'Distinct valid current-year permanent Form A completions / distinct current employee assignments.',
+                'asOf'=>$asOf,
+            ]),
+            'yokoten' => dashboard_metric_create('yokoten', [
+                'numerator'=>$yokotenProgress['numerator'],'denominator'=>$yokotenProgress['denominator'],
+                'unit'=>'department_topic_pairs','scope'=>array_merge($scope, ['topics'=>$yokotenProgress['topics']]),
+                'dataAvailable'=>$yokotenProgress['available'],'unavailableReason'=>$yokotenProgress['error'] ?? null,
+                'sourceDescription'=>'Valid Department-topic response pairs / assigned Department-topic pairs for active topics issued in the year.',
+                'asOf'=>$asOf,
+            ]),
+            'training' => dashboard_metric_create('training', [
+                'numerator'=>$trainingPassed,'denominator'=>$trainingTotal,'unit'=>'employees','scope'=>$scope,
+                'dataAvailable'=>$trainingPassed !== null && $trainingTotal !== null,
+                'sourceDescription'=>'Capped passed employee count / total employee count in current-year training records.',
+                'asOf'=>$asOf,
+            ]),
+            'accident' => dashboard_metric_create('accident', [
+                'numerator'=>$recordable,'value'=>$recordable,'unit'=>'recordable_incidents','scope'=>$scope,
+                'dataAvailable'=>$recordable !== null,
+                'status'=>(int) ($recordable ?? 0) === 0 ? 'ON_TRACK' : 'CRITICAL',
+                'statusReason'=>(int) ($recordable ?? 0) === 0
+                    ? 'No recordable incidents in the current year.'
+                    : $recordable . ' recordable incident(s) in the current year.',
+                'sourceDescription'=>'Count of non-deleted recordable accident reports in the current year.',
+                'asOf'=>$asOf,
+            ]),
+            'fourm' => dashboard_metric_create('fourm', [
+                'numerator'=>$fourmClosed,'denominator'=>$fourmTotal,'unit'=>'change_notices','scope'=>$scope,
+                'dataAvailable'=>$fourmClosed !== null && $fourmTotal !== null,
+                'sourceDescription'=>'Closed change notices / all change notices requested in the current year.',
+                'asOf'=>$asOf,
+            ]),
+            'kpi' => dashboard_metric_create('kpi', [
+                'numerator'=>$kpiMetrics,'value'=>$kpiMetrics,'unit'=>'metrics','scope'=>$scope,
+                'dataAvailable'=>$kpiMetrics !== null,
+                'sourceDescription'=>'Count of KPI metric rows configured for the current year.','asOf'=>$asOf,
+            ]),
+            'policy' => dashboard_metric_create('policy', [
+                'numerator'=>$policyAcked,'denominator'=>(int) ($policyTotal ?? 0) > 0 ? $policyEligible : 0,
+                'unit'=>'employees','scope'=>array_merge($scope, ['currentPolicies'=>(int) ($policyTotal ?? 0)]),
+                'dataAvailable'=>$policyTotal !== null && $policyAcked !== null && $policyEligible !== null,
+                'zeroDenominatorReason'=>(int) ($policyTotal ?? 0) > 0
+                    ? 'No eligible employees are present.'
+                    : 'No current safety policy is configured.',
+                'sourceDescription'=>'Distinct employees acknowledging the current policy / all employees eligible to acknowledge it.',
+                'asOf'=>$asOf,
+            ]),
+            'committee' => dashboard_metric_create('committee', [
+                'numerator'=>$committeeTotal,'value'=>$committeeTotal,'unit'=>'committees','scope'=>$scope,
+                'dataAvailable'=>$committeeTotal !== null,'sourceDescription'=>'Count of current committee records.','asOf'=>$asOf,
+            ]),
+            'machine-safety' => dashboard_metric_create('machine-safety', [
+                'numerator'=>$machineNumerator,'denominator'=>$machineDenominator,'unit'=>'compliance_items','scope'=>$scope,
+                'dataAvailable'=>$machineComplianceState['available'],'unavailableReason'=>$machineComplianceState['error'] ?? null,
+                'sourceDescription'=>'Passed applicable compliance items / checked applicable compliance items on active machines.',
+                'asOf'=>$asOf,
+            ]),
+            'ojt' => dashboard_metric_create('ojt', [
+                'numerator'=>$ojtNumerator,'denominator'=>$ojtDenominator,'unit'=>'attendees','scope'=>$scope,
+                'dataAvailable'=>$ojtProgressState['available'],'unavailableReason'=>$ojtProgressState['error'] ?? null,
+                'sourceDescription'=>'Capped attendee counts / configured yearly attendee targets in current-year OJT records.',
+                'asOf'=>$asOf,
+            ]),
+            'contractor' => dashboard_metric_create('contractor', [
+                'numerator'=>$contractorDocs,'value'=>$contractorDocs,'unit'=>'documents','scope'=>$scope,
+                'dataAvailable'=>$contractorDocs !== null,'sourceDescription'=>'Count of contractor and supplier documents.',
+                'asOf'=>$asOf,
+            ]),
+            'safety-culture' => dashboard_metric_create('safety-culture', [
+                'numerator'=>$safetyCultureNumerator,'denominator'=>$safetyCultureDenominator,
+                'unit'=>'assessment_score_points',
+                'scope'=>array_merge($scope, ['ppeCompliancePercent'=>$safetyCulturePpePct]),
+                'dataAvailable'=>$safetyCultureProgressState['available'],
+                'unavailableReason'=>$safetyCultureProgressState['error'] ?? null,
+                'sourceDescription'=>'Sum of entered safety-culture topic scores / maximum points for those entered topics.',
+                'asOf'=>$asOf,
+            ]),
+        ];
+
         $config = dashboard_config();
         $positive = array_values(array_filter([
-            percent($patrolAttended, $patrolSessions),
-            percent($cccfCompleted, $cccfAssigned),
-            percent($yokotenResponded, $yokotenTopics),
-            percent($trainingPassed, $trainingTotal),
+            $moduleMetrics['patrol']['percent'],
+            $moduleMetrics['cccf']['percent'],
+            $moduleMetrics['yokoten']['percent'],
+            $moduleMetrics['training']['percent'],
         ], static function ($value) {
             return $value !== null;
         }));
@@ -622,29 +1074,78 @@ try {
         $complianceMatrix = dashboard_compliance_matrix($year, $config);
         json_response(['success' => true, 'data' => [
             'year' => $year, 'config' => $config,
+            'moduleMetrics' => $moduleMetrics,
             'healthIndex' => ['score' => $score, 'status' => $status, 'base' => $base, 'penalty' => $penalty, 'thresholds' => ['green' => $config['healthGreen'], 'amber' => $config['healthAmber']]],
             'complianceMatrix' => $complianceMatrix,
-            'patrol' => ['sessions' => $patrolSessions, 'attended' => $patrolAttended, 'openIssues' => $patrolOpenIssues, 'rate' => percent($patrolAttended, $patrolSessions)],
+            'patrol' => [
+                'sessions'=>$patrolSessions,
+                'attended'=>$patrolAttended,
+                'required'=>$moduleMetrics['patrol']['denominator'],
+                'completed'=>$moduleMetrics['patrol']['numerator'],
+                'openIssues'=>$patrolOpenIssues,
+                'rate'=>$moduleMetrics['patrol']['percent'],
+            ],
             'cccf' => [
                 'workerYear'=>$cccfWorkerActualTowardTarget,
                 'workerRawRecords'=>$cccfWorkerRawRecords,
                 'workerCalculation'=>'cccf_worker_progress_engine_actual_toward_target',
                 'assigned'=>$cccfAssigned,
                 'completed'=>$cccfCompleted,
-                'permPct'=>percent($cccfCompleted,$cccfAssigned),
+                'permPct'=>$moduleMetrics['cccf']['percent'],
             ],
-            'yokoten' => ['topics' => $yokotenTopics, 'responded' => $yokotenResponded, 'pct' => percent($yokotenResponded, $yokotenTopics)],
-            'training' => ['totalEmp' => $trainingTotal, 'passed' => $trainingPassed, 'passRate' => percent($trainingPassed, $trainingTotal)],
-            'hiyari' => ['open' => $hiyariOpen, 'year' => $hiyariYear], 'ky' => ['year' => $kyYear],
-            'accident' => ['year' => $accidentYear, 'recordable' => $recordable],
-            'fourm' => ['total' => $fourmTotal, 'open' => $fourmOpen, 'pending' => $fourmPending, 'closed' => $fourmClosed, 'active' => $active, 'overdue' => 0, 'trainingRequired' => 0, 'closureRate' => percent($fourmClosed, $fourmTotal), 'matrix' => ['curriculums' => 0, 'courses' => 0, 'employees' => 0, 'transferred' => 0]],
-            'safetyCulture' => ['year' => safe_scalar('SELECT COUNT(*) FROM sc_assessments WHERE AssessmentYear=?', [$year])],
-            'kpi' => ['metrics' => safe_scalar('SELECT COUNT(*) FROM kpidata WHERE Year=?', [$year]), 'announcements' => safe_scalar('SELECT COUNT(*) FROM kpiannouncements')],
-            'policy' => ['total' => safe_scalar('SELECT COUNT(*) FROM policies'), 'acknowledged' => safe_scalar('SELECT COUNT(*) FROM policy_acknowledgements')],
-            'committee' => ['total' => safe_scalar('SELECT COUNT(*) FROM committees')],
-            'machineSafety' => ['total' => safe_scalar("SELECT COUNT(*) FROM machine_safety WHERE Status IS NULL OR Status <> 'inactive'"), 'openIssues' => safe_scalar("SELECT COUNT(*) FROM machine_safety_issues WHERE Status='open'"), 'critical' => safe_scalar("SELECT COUNT(*) FROM machine_safety WHERE RiskLevel IN ('high','critical')")],
-            'ojt' => ['records' => safe_scalar('SELECT COUNT(*) FROM ojt_records'), 'docs' => safe_scalar('SELECT COUNT(*) FROM scw_documents')],
-            'contractor' => ['docs' => safe_scalar('SELECT COUNT(*) FROM contractor_documents'), 'recent' => safe_scalar('SELECT COUNT(*) FROM contractor_documents WHERE UploadedAt >= DATE_SUB(NOW(), INTERVAL 30 DAY)')],
+            'yokoten' => [
+                'topics'=>$yokotenTopics,
+                'responded'=>$yokotenResponded,
+                'respondedPairs'=>$moduleMetrics['yokoten']['numerator'],
+                'assignedPairs'=>$moduleMetrics['yokoten']['denominator'],
+                'pct'=>$moduleMetrics['yokoten']['percent'],
+            ],
+            'training' => ['totalEmp'=>$trainingTotal,'passed'=>$trainingPassed,'passRate'=>$moduleMetrics['training']['percent']],
+            'hiyari' => [
+                'open'=>$hiyariOpen,'year'=>$hiyariYear,'closed'=>$hiyariClosed,
+                'assignmentTarget'=>$moduleMetrics['hiyari']['denominator'],
+                'assignmentClosed'=>$moduleMetrics['hiyari']['numerator'],
+                'assignmentRemaining'=>max(
+                    0,
+                    (int) ($moduleMetrics['hiyari']['denominator'] ?? 0)
+                    - (int) ($moduleMetrics['hiyari']['numerator'] ?? 0)
+                ),
+                'closureRate'=>$moduleMetrics['hiyari']['percent'],
+            ],
+            'ky' => ['year'=>$kyYear,'target'=>$moduleMetrics['ky']['denominator'],'pct'=>$moduleMetrics['ky']['percent']],
+            'accident' => ['year'=>$accidentYear,'recordable'=>$recordable,'metricStatus'=>$moduleMetrics['accident']['status']],
+            'fourm' => [
+                'total'=>$fourmTotal,'open'=>$fourmOpen,'pending'=>$fourmPending,'closed'=>$fourmClosed,
+                'active'=>$active,'overdue'=>$fourmOverdue,'trainingRequired'=>$fourmTrainingRequired,
+                'closureRate'=>$moduleMetrics['fourm']['percent'],
+                'matrix'=>[
+                    'curriculums'=>$fourmMatrixCurriculums,
+                    'courses'=>$fourmMatrixCourses,
+                    'employees'=>$fourmMatrixEmployees,
+                    'transferred'=>$fourmMatrixTransferred,
+                ],
+            ],
+            'safetyCulture' => [
+                'year'=>$safetyCultureYear,
+                'pct'=>$moduleMetrics['safety-culture']['percent'],
+                'ppePct'=>$safetyCulturePpePct,
+            ],
+            'kpi' => ['metrics'=>$kpiMetrics,'announcements'=>$kpiAnnouncements],
+            'policy' => [
+                'total'=>$policyTotal,'acknowledged'=>$policyAcked,'eligible'=>$policyEligible,
+                'pct'=>$moduleMetrics['policy']['percent'],
+            ],
+            'committee' => ['total'=>$committeeTotal],
+            'machineSafety' => [
+                'total'=>$machineTotal,'openIssues'=>$machineOpenIssues,'critical'=>$machineCritical,
+                'passed'=>$machineNumerator,'applicable'=>$machineDenominator,
+                'pct'=>$moduleMetrics['machine-safety']['percent'],
+            ],
+            'ojt' => [
+                'records'=>$ojtRecords,'docs'=>$ojtDocs,'completed'=>$ojtNumerator,
+                'target'=>$ojtDenominator,'overdue'=>$ojtOverdue,'pct'=>$moduleMetrics['ojt']['percent'],
+            ],
+            'contractor' => ['docs'=>$contractorDocs,'recent'=>$contractorRecent],
         ]]);
     }
 

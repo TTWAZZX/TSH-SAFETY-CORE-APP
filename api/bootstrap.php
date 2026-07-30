@@ -9,6 +9,8 @@ require_once __DIR__ . '/lib/safety_unit_continuation.php';
 require_once __DIR__ . '/lib/profile_validator.php';
 require_once __DIR__ . '/lib/profile_update.php';
 require_once __DIR__ . '/lib/employee_profile_write.php';
+require_once __DIR__ . '/lib/dashboard_metric_contract.php';
+require_once __DIR__ . '/lib/personal_target_eligibility.php';
 
 function json_response(array $payload, int $status = 200)
 {

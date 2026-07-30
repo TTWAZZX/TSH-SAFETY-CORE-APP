@@ -165,6 +165,24 @@ function runPhp(input) {
     throw new Error('PHP executable was not found or the PHP parity runner failed.');
 }
 
+function runPhpWithoutExtensions(input) {
+    const candidates = [
+        process.env.PHP_BIN,
+        process.platform === 'win32' ? 'C:\\xampp\\php\\php.exe' : null,
+        'php',
+    ].filter(Boolean);
+    for (const executable of candidates) {
+        const result = spawnSync(executable, ['-n', phpRunner], {
+            cwd: projectRoot,
+            encoding: 'utf8',
+            input: JSON.stringify(input),
+            windowsHide: true,
+        });
+        if (!result.error && result.status === 0) return JSON.parse(result.stdout);
+    }
+    throw new Error('PHP no-extension compatibility runner failed.');
+}
+
 for (const scenario of scenarios) {
     const nodeResult = buildDepartmentUnitPlan(scenario.input);
     const phpResult = runPhp(scenario.input);
@@ -174,5 +192,13 @@ for (const scenario of scenarios) {
     if (scenario.aliases) assert.strictEqual(nodeResult.aliases.length, scenario.aliases, `${scenario.name}: alias count`);
     console.log(`PASS ${scenario.name}`);
 }
+
+const noExtensionScenario = scenarios[0];
+assert.deepStrictEqual(
+    runPhpWithoutExtensions(noExtensionScenario.input),
+    buildDepartmentUnitPlan(noExtensionScenario.input),
+    'PHP resolver must work without mbstring and PHP 8 string helpers'
+);
+console.log('PASS PHP resolver works without optional mbstring support');
 
 console.log(`Yokoten Department/Unit scope tests passed ${scenarios.length}/${scenarios.length} with Node/PHP parity.`);

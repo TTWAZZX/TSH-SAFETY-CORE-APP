@@ -16,6 +16,16 @@ function tokenPayload(employee) {
 }
 
 async function loadReadyTestUsers(db) {
+    const ready = await loadReadyEmployees(db);
+    const admin = ready.find(employee => String(employee.role || '').toLowerCase() === 'admin');
+    const user = ready.find(employee => String(employee.role || '').toLowerCase() === 'user');
+    if (!admin || !user) {
+        throw new Error('A READY Admin and READY User are required for read-only API verification.');
+    }
+    return { admin, user };
+}
+
+async function loadReadyEmployees(db) {
     const [[employees], [departments], [units]] = await Promise.all([
         db.query(
             `SELECT EmployeeID,EmployeeName,Department,Unit,Team,Position,Role,Password,MustChangePassword
@@ -29,13 +39,7 @@ async function loadReadyTestUsers(db) {
         try { return resolver.resolve(employee) === ONBOARDING_STATUS.READY; }
         catch (_) { return false; }
     });
-    const admin = ready.find(employee => String(employee.Role || '').toLowerCase() === 'admin');
-    const user = ready.find(employee => String(employee.Role || '').toLowerCase() === 'user');
-    if (!admin || !user) {
-        throw new Error('A READY Admin and READY User are required for read-only API verification.');
-    }
-    return { admin: tokenPayload(admin), user: tokenPayload(user) };
+    return ready.map(tokenPayload);
 }
 
-module.exports = { loadReadyTestUsers };
-
+module.exports = { loadReadyEmployees, loadReadyTestUsers };

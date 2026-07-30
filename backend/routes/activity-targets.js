@@ -5,6 +5,10 @@ const router  = express.Router();
 const db      = require('../db');
 const { isAdmin } = require('../middleware/auth');
 const { getCccfWorkerProgress } = require('../utils/cccf-worker-progress');
+const {
+    buildMandatoryPolicyTarget,
+    isAdminConfiguredTargetEligible,
+} = require('../utils/personal-target-eligibility');
 
 // ─── Activity definitions (static metadata) ───────────────────────────────────
 const ACTIVITIES = [
@@ -161,6 +165,30 @@ async function safeCount(sql, params) {
         const [[r]] = await db.query(sql, params);
         return r?.cnt ?? 0;
     } catch { return 0; }
+}
+
+async function getMandatoryPolicyTarget(employeeId, year) {
+    try {
+        const [[policy]] = await db.query(
+            `SELECT p.id, p.PolicyTitle AS title,
+                    EXISTS(
+                        SELECT 1 FROM Policy_Acknowledgements pa
+                         WHERE pa.PolicyID=p.id AND pa.UserID=?
+                    ) AS acknowledged
+               FROM Policies p
+              WHERE p.IsCurrent=1
+              ORDER BY p.EffectiveDate DESC, p.id DESC
+              LIMIT 1`,
+            [employeeId]
+        );
+        return buildMandatoryPolicyTarget({
+            available: true,
+            policy: policy ? { id: policy.id, title: policy.title } : null,
+            acknowledged: Boolean(policy?.acknowledged),
+        }, year);
+    } catch (error) {
+        return buildMandatoryPolicyTarget({ available: false, error: error.message }, year);
+    }
 }
 
 // ─── Helper: merge position template + per-person override ────────────────────
@@ -511,7 +539,7 @@ async function getCoverageMatrix(year = new Date().getFullYear(), options = {}) 
             const template = templateMap.get(`${position}::${key}`);
             const row = override || scope || template || null;
             const isDynamic = activity.metricType === 'dynamic_ratio';
-            const source = override ? 'override' : scope ? 'scope' : template ? 'template' : isDynamic ? 'system' : 'missing';
+            const source = override ? 'override' : scope ? 'scope' : template ? 'template' : 'missing';
             const isNA = Boolean(row?.IsNA);
             const yearlyTarget = row ? Number(row.YearlyTarget) : null;
             const isZero = !isDynamic && !isNA && yearlyTarget === 0;
@@ -799,7 +827,7 @@ router.get('/employee/:empId', async (req, res) => {
                 yearlyTarget: d?.YearlyTarget ?? null,
                 passPct:      d?.PassPct      ?? null,
                 isNA:         d?.IsNA ?? 0,
-                source:       d?.source       ?? (a.metricType === 'dynamic_ratio' ? 'system' : 'none'),
+                source:       d?.source       ?? 'none',
                 targetYear:   d?.targetYear   ?? null,
                 scope:        d?.source === 'scope' ? { department: d.Department, unit: d.Unit || '' } : null,
             };
@@ -863,15 +891,23 @@ router.get('/me', async (req, res) => {
         const year    = new Date().getFullYear();
 
         const { overrideMap, scopeMap, templateMap, unit } = await getMergedTargets(empId);
-        const dynamicRatios = {
-            patrol_issue: await getDynamicActivityRatio('patrol_issue', req.user.department, year),
-            yokoten: await getDynamicActivityRatio('yokoten', req.user.department, year),
-        };
         const effectiveTarget = key => overrideMap[key] || scopeMap[key] || templateMap[key] || null;
+        const eligibleActivities = ACTIVITIES.filter(activity =>
+            isAdminConfiguredTargetEligible(activity, effectiveTarget(activity.key)).eligible
+        );
+        const eligibleKeys = new Set(eligibleActivities.map(activity => activity.key));
+        const mandatoryPolicyTarget = await getMandatoryPolicyTarget(empId, year);
+        const dynamicRatios = {};
+        for (const activity of eligibleActivities.filter(activity => activity.metricType === 'dynamic_ratio')) {
+            dynamicRatios[activity.key] = await getDynamicActivityRatio(
+                activity.key,
+                req.user.department,
+                year
+            );
+        }
         const peopleCoverages = {};
-        for (const activity of ACTIVITIES.filter(a => a.metricType === 'people_coverage')) {
+        for (const activity of eligibleActivities.filter(a => a.metricType === 'people_coverage')) {
             const target = effectiveTarget(activity.key);
-            if (!target) continue;
             const isPersonalCccfWorker = activity.key === 'cccf_worker'
                 && templateMap.cccf_worker
                 && !templateMap.cccf_worker.IsNA
@@ -884,11 +920,18 @@ router.get('/me', async (req, res) => {
                 target.YearlyTarget
             );
         }
-        const fixedCountAlignments = {
-            patrol: await getFixedCountAlignment('patrol', { employeeId: empId, department: req.user.department, unit }, year, effectiveTarget('patrol')?.YearlyTarget),
-            ky: await getFixedCountAlignment('ky', { employeeId: empId, department: req.user.department, unit }, year, effectiveTarget('ky')?.YearlyTarget),
-        };
-        const cccfWorkerProgress = await getCccfWorkerProgress(db, year).catch(() => ({ employees: [] }));
+        const fixedCountAlignments = {};
+        for (const activity of eligibleActivities.filter(activity => ['patrol', 'ky'].includes(activity.key))) {
+            fixedCountAlignments[activity.key] = await getFixedCountAlignment(
+                activity.key,
+                { employeeId: empId, department: req.user.department, unit },
+                year,
+                effectiveTarget(activity.key).YearlyTarget
+            );
+        }
+        const cccfWorkerProgress = eligibleKeys.has('cccf_worker')
+            ? await getCccfWorkerProgress(db, year).catch(() => ({ employees: [] }))
+            : { employees: [] };
         const cccfWorkerSelf = (cccfWorkerProgress.employees || [])
             .find(row => String(row.employeeId || '').trim() === String(empId || '').trim()) || null;
 
@@ -920,7 +963,7 @@ router.get('/me', async (req, res) => {
             ky:             kyCount,
         };
 
-        const targets = ACTIVITIES.map(a => {
+        const additionalTargets = eligibleActivities.map(a => {
             const d           = overrideMap[a.key] || scopeMap[a.key] || templateMap[a.key] || null;
             const ratio       = dynamicRatios[a.key] || peopleCoverages[a.key] || fixedCountAlignments[a.key] || null;
             const yearlyTarget = a.key === 'cccf_worker' && cccfWorkerSelf
@@ -947,7 +990,10 @@ router.get('/me', async (req, res) => {
                 yearlyTarget:  ratio ? ratio.denominator : yearlyTarget,
                 passPct,
                 isNA,
-                source:        d?.source || (ratio?.targetSource && ratio.targetSource !== 'activity_target' ? 'module' : ratio ? 'system' : 'none'),
+                source:        d.source,
+                eligibilityType: 'admin_configured',
+                eligibilitySource: d.source,
+                isMandatory: false,
                 targetYear:    d?.targetYear ?? null,
                 scope:         d?.source === 'scope' ? { department: d.Department, unit: d.Unit || '' } : null,
                 actualCount:   ratio ? ratio.numerator : actual,
@@ -960,10 +1006,20 @@ router.get('/me', async (req, res) => {
                 rawRecords:     a.key === 'cccf_worker' && cccfWorkerSelf ? Number(cccfWorkerSelf.rawRecords || 0) : undefined,
                 calculationMethod: isPersonalCccfWorker ? 'cccf_worker_progress_engine_actual_toward_target' : (ratio?.calculationMethod || null),
                 targetSource: ratio?.targetSource || null,
+                measurementSource: ratio?.targetSource && ratio.targetSource !== 'activity_target'
+                    ? 'module'
+                    : ratio ? 'system' : 'employee_activity',
             };
-        }).filter(t => t.metricType === 'dynamic_ratio' ? !t.isNA : t.yearlyTarget !== null && !t.isNA);
+        });
+        const targets = [mandatoryPolicyTarget, ...additionalTargets];
+        const eligibility = {
+            mandatoryTargets: 1,
+            additionalConfiguredTargets: additionalTargets.length,
+            hasAdditionalConfiguredTargets: additionalTargets.length > 0,
+            emptyState: additionalTargets.length ? null : 'NO_ADDITIONAL_ADMIN_TARGETS',
+        };
 
-        res.json({ success: true, data: { year, targets } });
+        res.json({ success: true, data: { year, targets, eligibility } });
     } catch (err) {
         res.status(500).json({ success: false, message: err.message });
     }

@@ -155,6 +155,10 @@ function licenseTypeLabel(row = {}) {
     return row.LicenseTypeNames || (Array.isArray(row.LicenseTypes) ? row.LicenseTypes.map(type => type.NameTH || type.Code).filter(Boolean).join(', ') : '') || row.LicenseTypeNameTH || row.LicenseTypeCode || '-';
 }
 
+function templateTypeLabel(row = {}) {
+    return row.LicenseTypeNames || (Array.isArray(row.LicenseTypes) ? row.LicenseTypes.map(type => type.NameTH || type.Code).filter(Boolean).join(' + ') : '') || row.LicenseTypeNameTH || 'All license types';
+}
+
 function imageFromFile(file) {
     return new Promise((resolve, reject) => {
         const url = URL.createObjectURL(file);
@@ -408,6 +412,17 @@ function typeCheckboxes(row = {}) {
             <span>${esc(type.NameTH || type.Code)}</span>
         </label>`).join('')}
         <p class="sm:col-span-2 text-[11px] text-slate-400">เลือกได้สูงสุด 2 ประเภทต่อหนึ่งบัตร</p>
+    </div>`;
+}
+
+function templateTypeCheckboxes(row = {}) {
+    const selected = new Set(selectedTypeIds(row));
+    return `<div id="fl-template-type-checks" class="grid grid-cols-1 sm:grid-cols-2 gap-2">
+        ${_types.map(type => `<label class="flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-bold text-slate-700">
+            <input type="checkbox" name="LicenseTypeIDs" value="${esc(type.ID)}" class="fl-template-type-check h-4 w-4 rounded border-slate-300" ${selected.has(String(type.ID)) ? 'checked' : ''}>
+            <span>${esc(type.NameTH || type.Code)}</span>
+        </label>`).join('')}
+        <p class="sm:col-span-2 text-[11px] text-slate-400">ไม่เลือก = ทุกประเภท, เลือก Forklift + Stacker = ใช้เฉพาะบัตรแบบรวม</p>
     </div>`;
 }
 
@@ -1136,7 +1151,7 @@ function renderTemplateCard(tpl) {
     const used = Number(tpl.PrintLogCount || 0);
     return `<article class="rounded-2xl border ${status === 'archived' ? 'border-slate-200 bg-slate-50' : 'border-slate-100 bg-white'} p-4">
         <div class="flex items-start justify-between gap-3">
-            <div><h3 class="font-black text-slate-800">${esc(tpl.TemplateName)}</h3><p class="text-xs text-slate-500">${esc(tpl.LicenseTypeNameTH || 'All license types')} - v${esc(ver.VersionNo || '-')} - ${esc(ver.Status || 'draft')} - used ${used}</p></div>
+            <div><h3 class="font-black text-slate-800">${esc(tpl.TemplateName)}</h3><p class="text-xs text-slate-500">${esc(templateTypeLabel(tpl))} - v${esc(ver.VersionNo || '-')} - ${esc(ver.Status || 'draft')} - used ${used}</p></div>
             ${templateStatusBadge(tpl)}
         </div>
         <div class="mt-4 grid grid-cols-2 gap-3">
@@ -1177,7 +1192,7 @@ function renderTemplatesLegacy() {
                 const ver = templateVersion(tpl);
                 return `<article class="rounded-2xl border border-slate-100 bg-white p-4">
                     <div class="flex items-start justify-between gap-3">
-                        <div><h3 class="font-black text-slate-800">${esc(tpl.TemplateName)}</h3><p class="text-xs text-slate-500">${esc(tpl.LicenseTypeNameTH || 'ทุกประเภท')} · v${esc(ver.VersionNo || '-')} · ${esc(ver.Status || 'draft')}</p></div>
+                        <div><h3 class="font-black text-slate-800">${esc(tpl.TemplateName)}</h3><p class="text-xs text-slate-500">${esc(templateTypeLabel(tpl))} · v${esc(ver.VersionNo || '-')} · ${esc(ver.Status || 'draft')}</p></div>
                         <span class="px-2 py-1 rounded-lg text-xs font-black ${String(ver.Status).toLowerCase() === 'published' ? 'bg-emerald-50 text-emerald-700' : 'bg-amber-50 text-amber-700'}">${esc(ver.Status || 'draft')}</span>
                     </div>
                     <div class="mt-4 grid grid-cols-2 gap-3">
@@ -1219,7 +1234,7 @@ function renderTemplates() {
 function templateFormHtml() {
     return `<form id="fl-template-form" class="space-y-4">
         <label class="text-xs font-bold text-slate-500">Template name<input name="TemplateName" required class="form-input w-full rounded-xl mt-1" placeholder="เช่น Forklift standard 2026"></label>
-        <label class="text-xs font-bold text-slate-500">License type<select name="LicenseTypeID" class="form-input w-full rounded-xl mt-1"><option value="">ทุกประเภท</option>${typeOptions('')}</select></label>
+        <div><span class="text-xs font-bold text-slate-500">License type</span><div class="mt-1">${templateTypeCheckboxes()}</div></div>
         <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
             <label class="text-xs font-bold text-slate-500">Front image<input name="FrontImage" type="file" accept=".jpg,.jpeg,.png,.webp" class="form-input w-full rounded-xl mt-1"></label>
             <label class="text-xs font-bold text-slate-500">Back image<input name="BackImage" type="file" accept=".jpg,.jpeg,.png,.webp" class="form-input w-full rounded-xl mt-1"></label>
@@ -1245,10 +1260,25 @@ function versionFormHtml() {
 async function openTemplateForm() {
     UI.openModal('เพิ่ม Template บัตร', templateFormHtml(), 'max-w-2xl');
     document.getElementById('fl-template-cancel')?.addEventListener('click', UI.closeModal);
+    document.querySelectorAll('.fl-template-type-check').forEach(input => input.addEventListener('change', () => {
+        const checked = [...document.querySelectorAll('.fl-template-type-check:checked')];
+        if (checked.length > 2) {
+            input.checked = false;
+            UI.showToast('เลือก License type ได้สูงสุด 2 ประเภทต่อ Template', 'warning');
+        }
+    }));
     document.getElementById('fl-template-form')?.addEventListener('submit', async event => {
         event.preventDefault();
-        await runForkliftForm(event.target, event.submitter || event.target.querySelector('button:not([type="button"])'), 'กำลังสร้าง...', async () => {
-            await API.post('/forklift/templates', new FormData(event.target));
+        const form = event.currentTarget;
+        const fd = new FormData(form);
+        const typeIds = [...form.querySelectorAll('.fl-template-type-check:checked')].map(input => input.value);
+        fd.set('TemplateName', form.elements.TemplateName?.value || '');
+        fd.delete('LicenseTypeIDs');
+        fd.delete('LicenseTypeIDs[]');
+        fd.set('LicenseTypeIDs', typeIds.join('|'));
+        fd.set('LicenseTypeID', typeIds[0] || '');
+        await runForkliftForm(form, event.submitter || form.querySelector('button:not([type="button"])'), 'กำลังสร้าง...', async () => {
+            await API.post('/forklift/templates', fd);
             UI.closeModal();
             UI.showToast('สร้าง Template สำเร็จ', 'success');
             await render();

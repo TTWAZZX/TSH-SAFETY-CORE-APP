@@ -2,6 +2,317 @@
 
 This file preserves historical production handoff, smoke test, backup, deployment, migration, and phase notes moved out of `CLAUDE.md`.
 
+## Forklift Card Template Type Map Production Deploy (2026-07-30)
+
+Fixed Forklift License card templates so Admin can create a template for the
+combined `Forklift + Stacker` license type set. Template setup now accepts one
+or two license types, stores the exact mapping in
+`forklift_card_template_type_map`, and card rendering ranks exact type-set
+matches ahead of single-type fallback templates. The legacy
+`forklift_card_templates.LicenseTypeID` remains as the primary/fallback type.
+
+Production deploy completed on 2026-07-30 as
+`forklift-card-template-type-map-20260730`. Uploaded runtime files were
+`api/handlers/forklift.php`, `api/handlers/admin_phase8.php`,
+`public/js/main.js`, `public/js/pages/forklift.js`, and
+`deploy-manifest.json`. The previous production files are backed up at
+`backups/production/forklift-card-template-type-map-predeploy-20260730-163801/`;
+the read-only forklift DB snapshot is
+`backups/production/forklift-card-template-type-map-predeploy-20260730-163801/forklift-db-snapshot.json`.
+
+FTP download-back SHA-256 verification matched 5/5 at
+`backups/production/forklift-card-template-type-map-upload-verify-20260730-164409/`;
+the final manifest upload was verified at
+`backups/production/forklift-card-template-type-map-final-manifest-verify-20260730-164742/`.
+Authenticated Production smoke passed 12 checks at
+`backups/production/forklift-card-template-type-map-smoke-20260730-164658/`:
+static cache bust and UI contract were present, Admin login worked, the
+forklift route created/backfilled the schema, a temporary `Forklift+Stacker`
+template persisted both license type IDs, card payload accepted the combined
+type set when a combined license was available, and cleanup left temporary
+template rows at `0`. The temporary DB snapshot helper was removed from
+Production and verified by HTTP `404` plus absent FTP listing. No upload
+storage mutation was performed.
+
+Follow-up hotfix `forklift-card-template-type-map-20260730-hf1` was deployed
+after browser testing showed `POST /api/forklift/templates` returning
+`TemplateName is required`. Root cause: the frontend created `FormData` inside
+the `runFormBusy()` task, after that helper disabled form controls; disabled
+controls are omitted from browser `FormData`. The template form now snapshots
+`FormData` and explicitly sets `TemplateName` before entering the busy state.
+`index.html` and `public/js/main.js` cache busts were advanced to
+`20260730-forklift-template-type-map-hf1`. Hotfix backup:
+`backups/production/forklift-card-template-formdata-hf1-predeploy-20260730-165625/`;
+hotfix SHA-256 verification matched 4/4 at
+`backups/production/forklift-card-template-formdata-hf1-upload-verify-20260730-165649/`.
+Production hf1 smoke passed 9 checks at
+`backups/production/forklift-card-template-formdata-hf1-smoke-20260730-165849/`
+and cleanup left temporary template rows at `0`.
+
+Schema migration applied by PHP/Node ensure logic:
+
+```sql
+CREATE TABLE IF NOT EXISTS forklift_card_template_type_map (
+  ID INT AUTO_INCREMENT PRIMARY KEY,
+  TemplateID INT NOT NULL,
+  LicenseTypeID INT NOT NULL,
+  CreatedAt DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE KEY uq_fl_template_type (TemplateID, LicenseTypeID),
+  KEY idx_type (LicenseTypeID),
+  KEY idx_template (TemplateID)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+INSERT IGNORE INTO forklift_card_template_type_map (TemplateID, LicenseTypeID)
+SELECT ID, LicenseTypeID
+FROM forklift_card_templates
+WHERE LicenseTypeID IS NOT NULL;
+```
+
+## Yokoten Production Soft-delete Restore Compatibility (2026-07-24)
+
+Fixed Admin response-on-behalf failing with HTTP 500 when a selected
+Production Department had a soft-deleted Yokoten response. The restore path
+now reuses the existing `ResponseID` instead of changing it, preserving
+compatibility with legacy references and database constraints. Stale
+`yokoten_response_files` rows are cleared inside the same transaction before
+new evidence is inserted; physical files are removed only after commit and
+only when no response still references them.
+
+Node.js and PHP retain the same behavior. Local verification passed scope
+parity 8/8, bulk-response smoke 20/20, and a real PHP rollback probe confirmed
+`RESTORED_RESPONSE_ID_REUSED=true`, `STALE_RESPONSE_FILES_CLEARED=true`, and
+unchanged response/file fingerprints after rollback.
+
+The PHP hotfix was deployed as
+`yokoten-soft-delete-restore-hotfix-20260724`. The previous handler and
+manifest are backed up at
+`backups/production/yokoten-soft-delete-hotfix-predeploy-20260724-1213/`.
+FTP download-back SHA-256 matched 2/2 at
+`backups/production/yokoten-soft-delete-hotfix-upload-verify-20260724-1215/`.
+Authenticated Production checks passed for topics and Department completion;
+an invalid submit returned HTTP 400 and left active responses unchanged at
+1/1. A valid Production response was deliberately left for the Admin to submit
+because it is real business data, not test data.
+
+## Machine & Device Safety Compact Master List Local (2026-07-24)
+
+Redesigned the Machine & Device Safety frontend as a full-width workspace.
+Desktop now opens in a compact 4-column Master List; mobile continues to open
+in Card view. The list shows only Machine, Department/Area, Status/Risk, and a
+combined readiness summary. Each row is clickable and keyboard accessible
+(Enter/Space), opening a wider Detail modal with the complete master record,
+Compliance, Issues, Files, and Admin Edit/Delete controls.
+
+Information removed from the row remains available in the existing Detail
+modal. The modal metadata now also includes Department, machine status, risk,
+and remark, while its Compliance, Issues, and Files tabs and Admin controls
+remain unchanged. The module shell no longer has a 1,440px cap and fills the
+available application content width. No API, permission, schema, business-data,
+or upload-storage behavior changed.
+
+Local source contract, JavaScript syntax, and authenticated Chrome UAT passed
+at desktop 1,424px and mobile 390px. UAT verified full-width layout, 4-column
+List default on desktop, Card default on mobile, row-click and keyboard Detail
+opening, complete Admin controls inside the modal,
+Compliance/Issues/Files tabs, and no page-level horizontal overflow.
+Evidence is at
+`backups/local/machine-safety-responsive-20260724T061124/`.
+
+Production deployment completed as
+`machine-safety-row-detail-20260724`. The previous 5-file runtime boundary is
+backed up at
+`backups/production/machine-safety-row-detail-predeploy-20260724-1316/`.
+FTP download-back SHA-256 matched 5/5 at
+`backups/production/machine-safety-row-detail-upload-verify-20260724-1319/`.
+Authenticated Production Chrome UAT passed at desktop 1,424px and mobile
+390px with evidence under
+`backups/production/machine-safety-responsive-20260724T061706/`. No schema,
+business-data, or upload-storage mutation was performed.
+
+## Dashboard D1-D5 / Hiyari / Yokoten Production Deploy (2026-07-24)
+
+Deployed the PHP shared-hosting runtime for the canonical 15-card Dashboard
+metric contract, Admin-configured Personal Target eligibility, the
+assignment-driven Hiyari metric, and the Yokoten Admin bulk-submit HTTP 500
+fix. No schema, business-data, or upload-storage migration was performed.
+
+The exact 11-file Production boundary is recorded in `deploy-manifest.json`.
+The pre-deploy rollback backup is
+`backups/production/dashboard-hiyari-yokoten-predeploy-20260724-102545/`;
+three new contract/helper files were correctly recorded as previously absent.
+FTP download-back SHA-256 verification passed 11/11 at
+`backups/production/dashboard-hiyari-yokoten-upload-verify-20260724-102805/`.
+
+Authenticated read-only Production UAT passed at
+`backups/production/yokoten-dashboard-readonly-uat-20260724T033127/`: all 15
+canonical Module Health metrics and fields were present, Hiyari resolved from
+Admin assignments as 29/66 (44%), Department Coverage contained 10
+Departments with 8 non-zero CCCF Manual rows, Personal Targets returned one
+mandatory Policy target plus only effective Admin-configured targets, and
+Dashboard/Yokoten parity matched all 10 Departments. A deliberately invalid
+Yokoten submission returned HTTP 400 and left response count unchanged at
+1/1. Authenticated browser evidence at
+`backups/production/yokoten-dashboard-browser-uat-20260724T033137/` passed
+Dashboard rendering and Yokoten individual/select-all behavior for 9
+Departments and 11 scoped Units with no business-data write. Successful login
+audit/housekeeping was the only expected Production side effect.
+
+## Yokoten Admin Bulk Submit HTTP 500 Fix Local (2026-07-24)
+
+Fixed the Admin response-on-behalf submit path in PHP production parity and
+Node development. The failure had two backend hazards: a soft-deleted response
+could still occupy the unique `(YokotenID, Department)` slot and fail the first
+INSERT, while a successful multi-Department save attempted synchronous SMTP
+delivery once per Department and could exceed the PHP request timeout.
+
+The endpoint now locks every selected Department row with `FOR UPDATE` and
+persists all response/file rows atomically. Active responses still return 409.
+A matching soft-deleted row is safely reused with its existing `ResponseID`,
+current response values, reset approval metadata, replacement file rows, and
+`IsDeleted=0`; unreferenced physical files are removed after commit. Bulk notifications are written to
+`Yokoten_EmailOutbox` with `notificationMode=queued` and no synchronous SMTP
+wait. Single-Department response behavior keeps immediate best-effort delivery.
+No MySQL schema migration or upload-storage change is required.
+
+Authenticated Production diagnosis was read-only except for the expected login
+audit side effect and confirmed the failed request had inserted zero visible
+responses: the latest topic still contained only the original
+`PRODUCTION 1 SEC.` response. The final Local PHP handler probe submitted all
+9 unanswered Departments inside an outer rollback transaction, exercised one
+soft-delete collision, returned success with `restoredResponseCount=1`, and
+verified an unchanged database fingerprint.
+
+During development, the first rollback probe exposed that Yokoten's runtime
+DDL caused an implicit transaction commit before the test writes. The exact
+9 probe response rows and 8 probe outbox rows were identified and immediately
+deleted; Local baseline was restored to 7 total responses / 1 active response.
+The PHP table ensure now runs once per request, and the final probe no longer
+leaves residue.
+
+Verification passed: `verify:yokoten-admin-submit` (scope parity 8/8, static
+contracts 20/20, PHP rollback handler probe), PHP lint, Node syntax,
+`git diff --check`, full backend regression, and read-only API/permission
+preflight 91/91. The fix was deployed and verified on Production in the release
+record above.
+
+## Dashboard Hiyari Assignment Metric Local (2026-07-24)
+
+Changed the Hiyari Module Health card from raw report closure
+(`closed reports / all reports`) to the assignment-driven KPI already used by
+the Hiyari module. The denominator is every current `Hiyari_Assignments` row
+configured by Admin. The numerator counts each assignment once when its
+employee has at least one non-deleted `Closed` Hiyari report in the current
+year. Completion is capped at 100%; no configured assignments returns `N_A`.
+Raw current-year report/open counts remain available as operational details.
+
+Node and PHP return the same canonical metric and legacy response metadata
+(`assignmentTarget`, `assignmentClosed`, and `assignmentRemaining`). The card
+shows the remaining assignments and advances to 100% only when all configured
+assignments have a closed current-year report. Local data currently resolves
+to 26/66, or 39%, with 40 assignments remaining.
+
+Local verification passed: Hiyari read-only source integration, authenticated
+Node/PHP overview parity, D5 gate 11/11, authenticated desktop/mobile Chrome
+UAT, full backend regression, read-only API preflight 91/91, and unchanged
+database fingerprints. Browser evidence is under
+`backups/local/dashboard-d5-browser-20260724T025202/`; consolidated evidence
+is under `backups/local/dashboard-d5-gate-20260724T025157/`.
+
+## Dashboard Automated Tests / Local UAT D5 (2026-07-24)
+
+Added a consolidated, read-only Dashboard release gate covering the 15-card
+metric contract, Node/PHP calculation parity, authenticated Node and PHP
+overview sources, Personal Target fixture/runtime parity, all-employee
+eligibility classification, Department Coverage sources, SELECT-only metric
+baseline audit, and authenticated Chrome UAT.
+
+Personal Target UAT now selects READY employees in both eligibility states:
+company Policy baseline only and effective Admin-configured targets. It checks
+API/DOM row counts, mandatory Policy ordering, Node/PHP parity, the
+company-baseline-only notice, all 15 canonical Module Health statuses, and
+desktop/mobile page overflow. D5 writes test evidence only under
+`backups/local`; it does not alter schema, business data, or upload storage.
+
+Local verification passed: consolidated D5 gate 11/11, READY eligibility
+availability 36 users (26 with Admin-configured targets and 10 baseline-only),
+2,492/2,492 population classification with zero system-generated eligibility,
+full backend regression, read-only API preflight 91/91, JavaScript/PHP/JSON
+syntax, `git diff --check`, and changed-file encoding scan. Gate evidence is at
+`backups/local/dashboard-d5-gate-20260724T023628/`; browser screenshots and
+JSON evidence are at
+`backups/local/dashboard-d5-browser-20260724T023633/`.
+
+## Dashboard Personal Targets D3 / Module Health D4 Local (2026-07-24)
+
+Personal Targets now always include current safety-policy acknowledgement as a
+mandatory company baseline. Additional rows appear only when an effective
+non-N/A Admin configuration resolves from employee override, Department/Unit
+scope, or position template. Patrol Issue, Yokoten, Patrol roster, KY program,
+and other module calculations can measure an eligible target but no longer
+create Personal Target eligibility themselves. Users without additional Admin
+targets receive a clear company-baseline-only state.
+
+Dashboard Module Health now consumes the canonical D2 `moduleMetrics` response
+for all 15 cards. Card percentages, status, source, reason, and values come
+from the module contract. N/A and Data Unavailable are explicit Module Signal
+states and no longer default to On Track; risk-count and information cards do
+not receive synthetic percentages. Cache busting advanced to
+`20260724-dashboard-d4`.
+
+Local verification passed: 10 Node/PHP eligibility fixtures, authenticated
+Node/PHP Personal Target runtime parity, 2,492/2,492 read-only eligibility
+classification (2,095 with additional Admin targets, 397 company-baseline
+only, zero system-generated eligibility), 15/15 canonical frontend contract
+checks, and authenticated Chrome UAT on desktop/mobile with no page-level
+horizontal overflow. Database fingerprints remained unchanged. No schema,
+business-data, or upload-storage mutation was introduced.
+
+## Dashboard Module Health Phase D2 Local (2026-07-24)
+
+Implemented a backward-compatible canonical `data.moduleMetrics` response for
+all 15 Module Health cards in both Node and PHP. Corrected Patrol and Yokoten
+mixed-unit percentages, aligned Hiyari year/deletion scope, removed the KY
+fallback target, capped Training passed counts, scoped current Policy and
+Committee data, and added real progress sources for Machine Safety, OJT, and
+Safety Culture. PHP 4M Training Required and matrix values now come from their
+real tables instead of hardcoded zeros. Risk-count and information cards no
+longer receive synthetic percentages in the canonical response.
+
+Legacy overview response fields remain available and now derive their
+percentages from the canonical metrics. No frontend, personal-target resolver,
+schema, business data, or upload-storage change is included in D2.
+
+Local verification passed: 15/15 contract mappings, 13 canonical fields, nine
+backend correction assertions, seven Node/PHP calculation fixtures, six
+read-only complex-source integrations, authenticated PHP overview contract
+15/15, live Patrol/KY/Yokoten Node/PHP source parity, PHP/Node syntax checks,
+and unchanged guarded database fingerprints.
+
+## Dashboard Metric Contract Phase D1 Local (2026-07-24)
+
+Added a machine-readable source contract for all 15 Dashboard Module Health
+cards at `config/dashboard-module-health-contract.json`, with a human-readable
+mapping and D2 handoff at `docs/dashboard-module-health-contract.md`. The
+contract standardizes 0-100 progress semantics, same-unit numerator and
+denominator requirements, `N_A` for absent denominators,
+`DATA_UNAVAILABLE` for source failures, and non-percentage handling for
+risk-count/information cards.
+
+Added a database-independent Node/PHP/frontend mapping test plus a guarded
+SELECT-only baseline audit. D1 intentionally does not change Dashboard API
+responses, frontend formulas, PHP/Node runtime behavior, MySQL schema/data, or
+upload storage. The frozen baseline gaps are inputs to D2/D3 and must be
+replaced by positive contract assertions when those phases implement the
+corrected formulas and personal-target eligibility.
+
+Local verification passed: 15/15 Module Health source mappings, 13 canonical
+metric fields, seven frozen D2/D3 baseline gaps, the existing 15-contract
+Department Coverage smoke across 10 Departments, JSON/Node syntax checks,
+`git diff --check`, and the changed-file encoding scan. The SELECT-only audit
+confirmed an unchanged database fingerprint and classified all 2,492 employees
+as 2,095 with at least one matching non-N/A Admin target configuration and 397
+without an additional configured target.
+
 ## Yokoten Admin Department–Safety Unit Coupling Deployed (2026-07-23)
 
 Implemented and deployed the Yokoten Admin on-behalf response control follow-up. Root cause of the apparently silent individual Department controls was the delegated async action guard resolving the surrounding response form through `closest('[data-id]')` and restoring the form HTML after each click. Department and Safety Unit choices now use accessible row controls with centralized state, the response form is excluded from that action-lock target, and selecting every unanswered Department also selects only the topic-scoped Units that belong to those Departments.

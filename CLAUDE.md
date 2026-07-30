@@ -111,6 +111,92 @@ npm test
 npm run backup
 ```
 
+## Machine & Device Safety Compact Master List Local Handoff (2026-07-24)
+
+The module frontend now fills the available application width. Desktop defaults
+to a compact 4-column Master List whose rows open the complete Detail modal by
+mouse, Enter, or Space; mobile defaults to Card view. The list keeps only
+Machine, Department/Area, Status/Risk, and combined readiness. Full metadata,
+Compliance 5.1-5.8, Issues, Files, and Admin Edit/Delete controls live in the
+Detail modal.
+
+No PHP/Node API, permission, schema, business-data, or upload-storage behavior
+changed. Local source smoke and authenticated desktop/mobile Chrome UAT passed
+without page-level horizontal overflow; evidence is under
+`backups/local/machine-safety-responsive-20260724T061124/`. Cache marker:
+`20260724-machine-safety-row-detail`. Production deployment and authenticated
+desktop/mobile browser UAT passed; rollback backup:
+`backups/production/machine-safety-row-detail-predeploy-20260724-1316/`;
+Production evidence:
+`backups/production/machine-safety-responsive-20260724T061706/`.
+
+## Dashboard Metric / Personal Target D1-D5 Handoff (2026-07-24)
+
+The canonical 15-module mapping is
+`config/dashboard-module-health-contract.json`, with design notes in
+`docs/dashboard-module-health-contract.md`. D2 implements the canonical
+`data.moduleMetrics` response in both Node and PHP and preserves all legacy
+overview keys. Progress metrics use same-unit 0-100 calculations; zero
+denominators are `N_A`, failed sources are `DATA_UNAVAILABLE`, and risk or
+information cards have no synthetic percentage.
+
+D3 now gives every employee a mandatory current-policy acknowledgement target
+and returns additional targets only from effective non-N/A Admin employee,
+Department/Unit, or position configuration. System/module ratios measure
+eligible rows but cannot create eligibility. D4 consumes canonical
+`moduleMetrics` in the frontend, including explicit N/A and unavailable states.
+Legacy API keys remain for compatibility.
+
+Local D2 verification passed: contract mapping 15/15, 13 canonical fields,
+Node/PHP helper parity, live Patrol/KY/Yokoten source parity, PHP authenticated
+overview contract 15/15, and read-only source integration. Database
+fingerprints remained unchanged. The D1 baseline classification remains 2,095
+employees with a matching non-N/A Admin target configuration and 397 without
+an additional configured target. D3/D4 verification additionally passed
+Node/PHP eligibility parity, authenticated runtime parity, a SELECT-only
+2,492-employee eligibility audit, and authenticated desktop/mobile browser UAT
+for all 15 canonical card statuses. No schema/data/upload mutation is required.
+
+D5 consolidates those checks under
+`npm --prefix backend run verify:dashboard-d5`. Its authenticated browser and
+runtime UAT cover both READY eligibility states: Policy baseline only and
+effective Admin-configured targets. The gate stores logs, JSON results, and
+screenshots under `backups/local` and remains read-only for business data.
+The completed Local gate passed 11/11; READY test availability was 26
+Admin-configured and 10 baseline-only users. Full backend regression and the
+91/91 read-only API preflight also passed.
+
+The Hiyari Module Health card now follows the module's Admin assignment KPI,
+not raw report closure. It counts distinct current assignments with at least
+one closed current-year report over all current `Hiyari_Assignments`; zero
+assignments is N/A and full assignment completion is 100%. Local data at the
+2026-07-24 verification point was 26/66 (39%). Node/PHP parity, D5 gate 11/11,
+authenticated browser UAT, and full regression passed without database
+mutation.
+
+The Yokoten Admin bulk-submit HTTP 500 fix is deployed. PHP production and
+Node dev now persist every selected Department in one transaction, reject
+active duplicates, and safely reuse a soft-deleted unique-key slot with a new
+`ResponseID`. Bulk notifications are queued without synchronous SMTP delivery;
+single-Department submit retains immediate best-effort delivery. `npm --prefix backend run
+verify:yokoten-admin-submit` passed scope parity 8/8, contracts 20/20, and an
+authenticated PHP handler probe for 9 Departments with one soft-delete
+collision; the probe reported `notificationMode=queued` and an unchanged
+post-rollback fingerprint. No schema or upload-storage change is required.
+
+Production deployment on 2026-07-24 used the exact 11-file boundary in
+`deploy-manifest.json`. Rollback backup:
+`backups/production/dashboard-hiyari-yokoten-predeploy-20260724-102545/`.
+Download-back SHA-256 verification passed 11/11 at
+`backups/production/dashboard-hiyari-yokoten-upload-verify-20260724-102805/`.
+Authenticated read-only API UAT passed all 15 Module Health contracts, Hiyari
+29/66 (44%), 10-Department Dashboard/Yokoten parity, Personal Target
+eligibility, and an invalid Yokoten submit with response count unchanged 1/1.
+Authenticated browser UAT passed Dashboard plus Yokoten individual/select-all
+selection for 9 Departments and 11 Units. Evidence is under
+`backups/production/yokoten-dashboard-readonly-uat-20260724T033127/` and
+`backups/production/yokoten-dashboard-browser-uat-20260724T033137/`.
+
 ## Collaboration Guardrails
 
 - Do not push to GitHub unless the user explicitly asks for it in the current task.
@@ -1513,6 +1599,9 @@ WHERE Department = ? AND Year = ? AND (CourseID <=> ?)
 - `CorrectiveAction` and evidence files are enforced client+server side when `IsRelated = 'Yes'`.
 - Status ที่ frontend ใช้ filter: `'responded'` | `'pending'` | `'rejected'`
 - Admin response-on-behalf supports multi-department submit from the dashboard/detail modal. Frontend sends `departments: JSON.stringify([...])` in FormData; backend creates one `YokotenResponses` row per selected department while preserving the one-response-per `(YokotenID, Department)` unique-key rule.
+- Multi-department persistence is atomic in PHP and Node: the selected Department rows are locked with `FOR UPDATE`, all response/file rows commit together, and an active response still returns 409.
+- A soft-deleted `(YokotenID, Department)` row occupies the same unique-key slot. A new response therefore reuses that deleted row with a new `ResponseID`, resets approval metadata, and sets `IsDeleted=0`; historical attachment files are not physically deleted.
+- One-department submit may attempt immediate notification delivery. Multi-department submit only creates `Yokoten_EmailOutbox` rows and returns `notificationMode: "queued"` so SMTP latency cannot turn a successful bulk save into HTTP 500.
 - When one uploaded file is attached to multiple admin-created responses, each response gets its own `Yokoten_Response_Files` row pointing at the same stored file URL. `DELETE /response-files/:fileId` only removes the physical file when no other DB file row references that `FileURL`.
 
 ### Dashboard UX — Enterprise Phase 1
@@ -3164,6 +3253,49 @@ let _chartManDonut = null; // Man Record pass/fail donut chart
 **KY specifics:**
 - Forms section อยู่ใน `config` sub-tab ของ Manage (ไม่ใช่ coverage)
 - `_renderKyFormsManageSection()` + `_renderKyFormsUserCard()` — ฟังก์ชันแยกเพื่อ KY accent color (indigo)
+
+## Forklift Card Template Type Matching Handoff (2026-07-30)
+
+Forklift card templates now support a one-or-two-license-type mapping through
+`forklift_card_template_type_map`. The legacy
+`forklift_card_templates.LicenseTypeID` column remains as the primary/fallback
+type and is backfilled into the map automatically by both Node and PHP ensure
+logic. Card rendering chooses an exact type-set template first, then a single
+matching type, then an all-license template. This fixes combined
+`Forklift + Stacker` licenses using the `Forklift` template.
+
+Production deploy completed on 2026-07-30 as
+`forklift-card-template-type-map-20260730`. Uploaded and SHA-256 verified:
+`api/handlers/forklift.php`, `api/handlers/admin_phase8.php`,
+`public/js/main.js`, `public/js/pages/forklift.js`, and
+`deploy-manifest.json`. Backup:
+`backups/production/forklift-card-template-type-map-predeploy-20260730-163801/`;
+read-only forklift DB snapshot:
+`backups/production/forklift-card-template-type-map-predeploy-20260730-163801/forklift-db-snapshot.json`;
+upload verify:
+`backups/production/forklift-card-template-type-map-upload-verify-20260730-164409/`;
+final manifest verify:
+`backups/production/forklift-card-template-type-map-final-manifest-verify-20260730-164742/`.
+Authenticated Production smoke passed 12 checks at
+`backups/production/forklift-card-template-type-map-smoke-20260730-164658/`.
+The smoke created and deleted a temporary combined `Forklift+Stacker` card
+template, verified both license type IDs were returned by the API, and left
+temporary template rows at `0`. The temporary DB snapshot helper was removed
+from Production and verified by HTTP `404` plus absent FTP listing. Upload
+storage was not changed.
+
+Follow-up hotfix `forklift-card-template-type-map-20260730-hf1` is also
+deployed. Browser testing found `POST /api/forklift/templates` returned
+`TemplateName is required` because the frontend created `FormData` after
+`runFormBusy()` disabled the form controls. The template form now snapshots
+`FormData` and sets `TemplateName` before entering busy state, and cache busts
+were advanced in `index.html` and `public/js/main.js`. Hotfix backup:
+`backups/production/forklift-card-template-formdata-hf1-predeploy-20260730-165625/`;
+hotfix upload verify:
+`backups/production/forklift-card-template-formdata-hf1-upload-verify-20260730-165649/`;
+hf1 smoke:
+`backups/production/forklift-card-template-formdata-hf1-smoke-20260730-165849/`.
+Hotfix smoke passed 9 checks and left temporary template rows at `0`.
 
 ## Common Pitfalls
 

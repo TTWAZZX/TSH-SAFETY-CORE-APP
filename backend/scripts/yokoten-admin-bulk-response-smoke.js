@@ -45,9 +45,23 @@ check('Node endpoint parses and inserts all requested departments',
 check('Node endpoint validates and stores Units per Department',
     nodeRoute.includes('buildDepartmentUnitPlan({')
         && nodeRoute.includes('departmentUnitPlan.unitMap[dept]'));
-check('Node endpoint rejects an already answered department before insert',
-    nodeRoute.includes('Check if any selected dept already responded')
+check('Node endpoint locks the selected department scope in one transaction',
+    nodeRoute.includes('await connection.beginTransaction();')
+        && nodeRoute.includes('FOR UPDATE')
+        && nodeRoute.includes('await connection.commit();'));
+check('Node endpoint rejects an active response before persistence',
+    nodeRoute.includes('const activeExisting = existingRows.filter')
         && nodeRoute.includes('return res.status(409).json({'));
+check('Node endpoint safely reuses a soft-deleted slot without changing ResponseID',
+    nodeRoute.includes('const deletedByDepartment = new Map();')
+        && nodeRoute.includes('row[0] = deletedRow.ResponseID;')
+        && nodeRoute.includes("'DELETE FROM Yokoten_Response_Files WHERE ResponseID = ?'")
+        && nodeRoute.includes('SET SafetyUnit=?, EmployeeID=?')
+        && nodeRoute.includes('IsDeleted=0')
+        && !nodeRoute.includes('SET ResponseID=?, SafetyUnit=?'));
+check('Node bulk response queues notifications without synchronous SMTP delivery',
+    nodeRoute.includes('const attemptImmediate = responseRows.length === 1;')
+        && nodeRoute.includes('{ attemptImmediate }'));
 check('PHP endpoint parses a unique department list and inserts each department',
     phpRoute.includes('function wf_yokoten_departments')
         && phpRoute.includes('return array_values(array_unique($out));')
@@ -55,9 +69,23 @@ check('PHP endpoint parses a unique department list and inserts each department'
 check('PHP endpoint validates and stores Units per Department',
     phpRoute.includes('yokoten_scope_build_department_unit_plan([')
         && phpRoute.includes("$departmentUnitPlan['unitMap'][$dept]"));
-check('PHP endpoint rejects an already answered department before insert',
+check('PHP endpoint rejects an active response before persistence',
     phpRoute.includes("'Selected department already responded.'")
         && phpRoute.includes("],409);"));
+check('PHP endpoint locks the selected department scope in one transaction',
+    phpRoute.includes('$pdo=db();$ownsTransaction=!$pdo->inTransaction()')
+        && phpRoute.includes('FOR UPDATE')
+        && phpRoute.includes('if($ownsTransaction)$pdo->commit();'));
+check('PHP endpoint safely reuses a soft-deleted slot without changing ResponseID',
+    phpRoute.includes('$deletedByDepartment=[];')
+        && phpRoute.includes("$rid=(string)$deletedRow['ResponseID'];")
+        && phpRoute.includes("'DELETE FROM yokoten_response_files WHERE ResponseID=?'")
+        && phpRoute.includes('SET SafetyUnit=?,EmployeeID=?')
+        && phpRoute.includes('IsDeleted=0')
+        && !phpRoute.includes('SET ResponseID=?,SafetyUnit=?'));
+check('PHP bulk response queues notifications without synchronous SMTP delivery',
+    phpRoute.includes('$attemptImmediate=count($ids)===1;')
+        && phpRoute.includes("'notificationMode'=>"));
 
 console.log(`Yokoten admin bulk-response smoke passed ${checks.length}/${checks.length}`);
 for (const name of checks) console.log(`PASS ${name}`);

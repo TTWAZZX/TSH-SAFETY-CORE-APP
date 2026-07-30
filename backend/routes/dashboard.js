@@ -7,6 +7,7 @@ const db      = require('../db');
 const { isAdmin } = require('../middleware/auth');
 const { getCoverageMatrix } = require('./activity-targets');
 const { getCccfWorkerProgress } = require('../utils/cccf-worker-progress');
+const { createDashboardMetric } = require('../utils/dashboard-metric-contract');
 
 const safe = async (sql, params = []) => {
     try { const [[r]] = await db.query(sql, params); return r?.cnt ?? r?.val ?? 0; }
@@ -550,6 +551,207 @@ async function buildComplianceMatrix(year, config) {
     }).sort((a, b) => a.score - b.score || a.department.localeCompare(b.department, 'th'));
 }
 
+function dashboardList(value) {
+    if (!value) return [];
+    if (Array.isArray(value)) return value.map(item => String(item || '').trim()).filter(Boolean);
+    try {
+        const parsed = JSON.parse(value);
+        return Array.isArray(parsed) ? parsed.map(item => String(item || '').trim()).filter(Boolean) : [];
+    } catch (_) {
+        return String(value).split(/\s*(?:\|+|;|,)\s*/).map(item => item.trim()).filter(Boolean);
+    }
+}
+
+async function dashboardRowState(sql, params = []) {
+    try {
+        const [rows] = await db.query(sql, params);
+        return { available: true, row: rows[0] || {} };
+    } catch (error) {
+        return { available: false, row: {}, error: error.message };
+    }
+}
+
+async function buildHiyariCompanyProgress(year) {
+    const state = await dashboardRowState(`
+        SELECT COUNT(DISTINCT a.id) AS denominator,
+               COUNT(DISTINCT CASE WHEN r.id IS NOT NULL THEN a.id END) AS numerator
+          FROM Hiyari_Assignments a
+          LEFT JOIN HiyariReports r
+            ON NULLIF(TRIM(r.ReporterID),'') = NULLIF(TRIM(a.EmployeeID),'')
+           AND YEAR(r.ReportDate)=?
+           AND r.DeletedAt IS NULL
+           AND r.Status IN ('Closed','closed')
+    `, [year]);
+    return {
+        available: state.available,
+        error: state.error || null,
+        numerator: Number(state.row.numerator || 0),
+        denominator: Number(state.row.denominator || 0),
+    };
+}
+
+async function buildPatrolCompanyProgress(year) {
+    const now = new Date();
+    const elapsedMonths = year < now.getFullYear() ? 12 : year > now.getFullYear() ? 0 : now.getMonth() + 1;
+    const state = await dashboardRowState(`
+        SELECT COALESCE(SUM(LEAST(COALESCE(actual.actualCount,0), roster.requiredSlots)),0) AS numerator,
+               COALESCE(SUM(roster.requiredSlots),0) AS denominator
+          FROM (
+                SELECT EmployeeID,
+                       CEIL(SUM(COALESCE(TargetPerYear,0)) * ? / 12) AS requiredSlots
+                  FROM Patrol_Roster
+                 GROUP BY EmployeeID
+               ) roster
+          LEFT JOIN (
+                SELECT EmployeeID, SUM(actualCount) AS actualCount
+                  FROM (
+                        SELECT UserID AS EmployeeID, COUNT(*) AS actualCount
+                          FROM Patrol_Attendance
+                         WHERE YEAR(PatrolDate)=?
+                         GROUP BY UserID
+                        UNION ALL
+                        SELECT EmployeeID, COUNT(*) AS actualCount
+                          FROM Patrol_Self_Checkin
+                         WHERE Year=?
+                         GROUP BY EmployeeID
+                       ) activity
+                 GROUP BY EmployeeID
+               ) actual ON actual.EmployeeID=roster.EmployeeID
+    `, [elapsedMonths, year, year]);
+    return {
+        ...state,
+        numerator: Number(state.row.numerator || 0),
+        denominator: Number(state.row.denominator || 0),
+        elapsedMonths,
+    };
+}
+
+async function buildKyCompanyProgress(year) {
+    try {
+        const [[configs], [activities]] = await Promise.all([
+            db.query(`
+                SELECT Department, SafetyUnits, YearlyTarget
+                  FROM KY_Program_Config
+                 WHERE Year=? AND IsActive=1
+            `, [year]),
+            db.query(`
+                SELECT Department, SafetyUnit, COUNT(*) AS actual
+                  FROM KY_Activities
+                 WHERE YEAR(ActivityDate)=?
+                 GROUP BY Department, SafetyUnit
+            `, [year]),
+        ]);
+        const activityMap = new Map();
+        for (const row of activities) {
+            const department = normalizeDepartmentKey(row.Department);
+            const unit = normalizeUnitKey(row.SafetyUnit);
+            activityMap.set(`${department}::${unit}`, Number(row.actual || 0));
+        }
+
+        let numerator = 0;
+        let denominator = 0;
+        for (const config of configs) {
+            const department = normalizeDepartmentKey(config.Department);
+            const units = dashboardList(config.SafetyUnits).map(normalizeUnitKey).filter(Boolean);
+            const target = Math.max(0, Number(config.YearlyTarget || 0));
+            if (!department || target <= 0) continue;
+            if (units.length) {
+                denominator += units.length * target;
+                for (const unit of units) numerator += activityMap.get(`${department}::${unit}`) || 0;
+            } else {
+                denominator += target;
+                for (const [scope, actual] of activityMap) {
+                    if (scope.startsWith(`${department}::`)) numerator += actual;
+                }
+            }
+        }
+        return { available: true, numerator, denominator, configuredScopes: configs.length };
+    } catch (error) {
+        return { available: false, numerator: 0, denominator: 0, configuredScopes: 0, error: error.message };
+    }
+}
+
+async function buildYokotenCompanyProgress(year) {
+    try {
+        const [[departments], [topics], [responses]] = await Promise.all([
+            db.query('SELECT Name FROM Master_Departments ORDER BY Name'),
+            db.query(`
+                SELECT YokotenID, TargetDepts
+                  FROM YokotenTopics
+                 WHERE IsActive=1 AND (DateIssued IS NULL OR YEAR(DateIssued)=?)
+            `, [year]),
+            db.query(`
+                SELECT YokotenID, Department
+                  FROM YokotenResponses
+                 WHERE IsDeleted IS NULL OR IsDeleted=0
+            `),
+        ]);
+        const departmentMap = new Map();
+        for (const row of departments) {
+            const key = normalizeDepartmentKey(row.Name);
+            if (key) departmentMap.set(key, String(row.Name).trim());
+        }
+
+        const assignedPairs = new Set();
+        const topicIds = new Set();
+        const unknownDepartments = new Set();
+        for (const topic of topics) {
+            const topicId = String(topic.YokotenID);
+            topicIds.add(topicId);
+            const configured = dashboardList(topic.TargetDepts);
+            const targets = configured.length ? configured.map(normalizeDepartmentKey) : [...departmentMap.keys()];
+            for (const department of targets) {
+                if (!departmentMap.has(department)) {
+                    unknownDepartments.add(department);
+                    continue;
+                }
+                assignedPairs.add(`${department}::${topicId}`);
+            }
+        }
+        if (unknownDepartments.size) {
+            return {
+                available: false,
+                numerator: 0,
+                denominator: 0,
+                topics: topics.length,
+                respondedDepartments: 0,
+                unknownDepartments: [...unknownDepartments],
+                error: 'One or more Yokoten target Departments do not resolve to Master_Departments.',
+            };
+        }
+
+        const respondedPairs = new Set();
+        const respondedDepartments = new Set();
+        for (const response of responses) {
+            const topicId = String(response.YokotenID);
+            if (!topicIds.has(topicId)) continue;
+            const department = normalizeDepartmentKey(response.Department);
+            const pair = `${department}::${topicId}`;
+            if (!assignedPairs.has(pair)) continue;
+            respondedPairs.add(pair);
+            respondedDepartments.add(department);
+        }
+        return {
+            available: true,
+            numerator: respondedPairs.size,
+            denominator: assignedPairs.size,
+            topics: topics.length,
+            respondedDepartments: respondedDepartments.size,
+            unknownDepartments: [],
+        };
+    } catch (error) {
+        return {
+            available: false,
+            numerator: 0,
+            denominator: 0,
+            topics: 0,
+            respondedDepartments: 0,
+            unknownDepartments: [],
+            error: error.message,
+        };
+    }
+}
+
 // ─── GET /api/dashboard/overview ─────────────────────────────────────────────
 router.get('/config', async (_req, res) => {
     const config = await getDashboardConfig();
@@ -587,7 +789,7 @@ router.get('/overview', async (_req, res) => {
             // Training
             trTotalEmp, trTotalPassed,
             // Hiyari
-            hiyariOpen, hiyariYear,
+            hiyariOpen, hiyariYear, hiyariClosed,
             // KY
             kyYear,
             // Accident
@@ -599,43 +801,67 @@ router.get('/overview', async (_req, res) => {
             fourmMatrixCurriculums, fourmMatrixCourses, fourmMatrixEmployees, fourmMatrixTransferred,
             // Enterprise modules not previously shown as cards
             kpiMetrics, kpiAnnouncements,
-            policyTotal, policyAcked,
+            policyTotal, policyAcked, policyEligible,
             committeeTotal,
             machineTotal, machineOpenIssues, machineCritical,
             ojtRecords, ojtDocs,
             contractorDocs, contractorRecent,
+            // Canonical same-unit progress states
+            patrolProgress, hiyariProgress, kyProgress, yokotenProgress,
+            machineComplianceState, ojtProgressState, safetyCultureProgressState,
         ] = await Promise.all([
             // Patrol: unique sessions with at least 1 attendee this year
             safe(`SELECT COUNT(DISTINCT DATE(PatrolDate)) AS cnt FROM Patrol_Attendance WHERE YEAR(PatrolDate)=?`, [year]),
             safe(`SELECT COUNT(*) AS cnt FROM Patrol_Attendance WHERE YEAR(PatrolDate)=?`, [year]),
-            safe(`SELECT COUNT(*) AS cnt FROM Patrol_Issues WHERE CurrentStatus NOT IN ('Closed')`),
+            safe(`SELECT COUNT(*) AS cnt FROM Patrol_Issues
+                  WHERE YEAR(DateFound)=? AND CurrentStatus NOT IN ('Closed')`, [year]),
 
             // CCCF
             safe(`SELECT COUNT(*) AS cnt FROM CCCF_FormA_Worker WHERE YEAR(SubmitDate)=?`, [year]),
-            safe(`SELECT COUNT(*) AS cnt FROM CCCF_Assignments`),
+            safe(`SELECT COUNT(DISTINCT a.EmployeeID) AS cnt
+                    FROM CCCF_Assignments a
+                    JOIN Employees e ON e.EmployeeID=a.EmployeeID
+                   WHERE a.EmployeeID IS NOT NULL AND TRIM(a.EmployeeID)<>''`),
             safe(`SELECT COUNT(DISTINCT fa.AssigneeID) AS cnt FROM CCCF_FormA_Permanent fa
                   JOIN CCCF_Assignments ca ON fa.AssigneeID = ca.EmployeeID
+                  JOIN Employees e ON e.EmployeeID = ca.EmployeeID
                   WHERE YEAR(fa.SubmitDate)=?
                     AND (fa.ReviewStatus = 'Completed' OR (fa.ReviewStatus IS NULL AND fa.FileUrl IS NOT NULL))`, [year]),
 
             // Yokoten
-            safe(`SELECT COUNT(*) AS cnt FROM YokotenTopics WHERE IsActive=1`),
-            safe(`SELECT COUNT(DISTINCT Department) AS cnt FROM YokotenResponses WHERE YEAR(ResponseDate)=?`, [year]),
+            safe(`SELECT COUNT(*) AS cnt FROM YokotenTopics
+                  WHERE IsActive=1 AND (DateIssued IS NULL OR YEAR(DateIssued)=?)`, [year]),
+            safe(`SELECT COUNT(DISTINCT r.Department) AS cnt
+                    FROM YokotenResponses r
+                    JOIN YokotenTopics t ON t.YokotenID=r.YokotenID
+                   WHERE (r.IsDeleted IS NULL OR r.IsDeleted=0)
+                     AND t.IsActive=1
+                     AND (t.DateIssued IS NULL OR YEAR(t.DateIssued)=?)`, [year]),
 
             // Training
             safe(`SELECT COALESCE(SUM(TotalEmp),0) AS cnt FROM Training_Dept_Records WHERE Year=?`, [year]),
-            safe(`SELECT COALESCE(SUM(PassedCount),0) AS cnt FROM Training_Dept_Records WHERE Year=?`, [year]),
+            safe(`SELECT COALESCE(SUM(LEAST(GREATEST(COALESCE(PassedCount,0),0), GREATEST(COALESCE(TotalEmp,0),0))),0) AS cnt
+                    FROM Training_Dept_Records WHERE Year=?`, [year]),
 
             // Hiyari
-            safe(`SELECT COUNT(*) AS cnt FROM HiyariReports WHERE Status NOT IN ('Closed','closed')`),
-            safe(`SELECT COUNT(*) AS cnt FROM HiyariReports WHERE YEAR(ReportDate)=?`, [year]),
+            safe(`SELECT COUNT(*) AS cnt FROM HiyariReports
+                  WHERE YEAR(ReportDate)=? AND DeletedAt IS NULL
+                    AND Status NOT IN ('Closed','closed')`, [year]),
+            safe(`SELECT COUNT(*) AS cnt FROM HiyariReports
+                  WHERE YEAR(ReportDate)=? AND DeletedAt IS NULL`, [year]),
+            safe(`SELECT COUNT(*) AS cnt FROM HiyariReports
+                  WHERE YEAR(ReportDate)=? AND DeletedAt IS NULL
+                    AND Status IN ('Closed','closed')`, [year]),
 
             // KY
             safe(`SELECT COUNT(*) AS cnt FROM KY_Activities WHERE YEAR(ActivityDate)=?`, [year]),
 
             // Accident
-            safe(`SELECT COUNT(*) AS cnt FROM Accident_Reports WHERE YEAR(AccidentDate)=?`, [year]),
-            safe(`SELECT COUNT(*) AS cnt FROM Accident_Reports WHERE YEAR(AccidentDate)=? AND IsRecordable=1`, [year]),
+            safe(`SELECT COUNT(*) AS cnt FROM Accident_Reports
+                  WHERE YEAR(AccidentDate)=? AND (IsDeleted IS NULL OR IsDeleted=0)`, [year]),
+            safe(`SELECT COUNT(*) AS cnt FROM Accident_Reports
+                  WHERE YEAR(AccidentDate)=? AND IsRecordable=1
+                    AND (IsDeleted IS NULL OR IsDeleted=0)`, [year]),
 
             // Safety Culture
             safe(`SELECT COUNT(*) AS cnt FROM SC_Assessments WHERE AssessmentYear=?`, [year]),
@@ -665,48 +891,244 @@ router.get('/overview', async (_req, res) => {
 
             // KPI
             safe(`SELECT COUNT(*) AS cnt FROM KPIData WHERE Year=?`, [year]),
-            safe(`SELECT COUNT(*) AS cnt FROM KPIAnnouncements`),
+            safe(`SELECT COUNT(*) AS cnt FROM KPIAnnouncements WHERE IsCurrent=1`),
 
             // Policy
-            safe(`SELECT COUNT(*) AS cnt FROM Policies`),
-            safe(`SELECT COUNT(*) AS cnt FROM Policy_Acknowledgements pa
+            safe(`SELECT COUNT(*) AS cnt FROM Policies WHERE IsCurrent=1`),
+            safe(`SELECT COUNT(DISTINCT pa.UserID) AS cnt FROM Policy_Acknowledgements pa
                   JOIN Policies p ON p.id = pa.PolicyID
                   WHERE p.IsCurrent = 1`),
+            safe(`SELECT COUNT(*) AS cnt FROM Employees`),
 
             // Committee
-            safe(`SELECT COUNT(*) AS cnt FROM Committees`),
+            safe(`SELECT COUNT(*) AS cnt FROM Committees WHERE IsCurrent=1`),
 
             // Machine Safety
             safe(`SELECT COUNT(*) AS cnt FROM Machine_Safety WHERE Status IS NULL OR Status <> 'inactive'`),
-            safe(`SELECT COUNT(*) AS cnt FROM Machine_Safety_Issues WHERE Status='open'`),
+            safe(`SELECT COUNT(*) AS cnt
+                    FROM Machine_Safety_Issues i
+                    JOIN Machine_Safety m ON m.id=i.MachineID
+                   WHERE i.Status='open' AND (m.Status IS NULL OR m.Status<>'inactive')`),
             safe(`SELECT COUNT(*) AS cnt FROM Machine_Safety WHERE RiskLevel IN ('high','critical') AND (Status IS NULL OR Status <> 'inactive')`),
 
             // OJT / SCW
-            safe(`SELECT COUNT(*) AS cnt FROM OJT_Records`),
-            safe(`SELECT COUNT(*) AS cnt FROM SCW_Documents`),
+            safe(`SELECT COUNT(*) AS cnt FROM OJT_Records WHERE YEAR(OJTDate)=?`, [year]),
+            safe(`SELECT COUNT(*) AS cnt FROM SCW_Documents WHERE YEAR(UploadedAt)=?`, [year]),
 
             // Contractor
             safe(`SELECT COUNT(*) AS cnt FROM Contractor_Documents`),
             safe(`SELECT COUNT(*) AS cnt FROM Contractor_Documents WHERE UploadedAt >= DATE_SUB(NOW(), INTERVAL 30 DAY)`),
+
+            buildPatrolCompanyProgress(year),
+            buildHiyariCompanyProgress(year),
+            buildKyCompanyProgress(year),
+            buildYokotenCompanyProgress(year),
+            dashboardRowState(`
+                SELECT COALESCE(SUM(c.Status='pass'),0) AS numerator,
+                       COALESCE(SUM(c.Status<>'na'),0) AS denominator
+                  FROM Machine_Safety m
+                  JOIN Machine_Safety_Compliance c ON c.MachineID=m.id
+                 WHERE m.Status IS NULL OR m.Status<>'inactive'
+            `),
+            dashboardRowState(`
+                SELECT COALESCE(SUM(LEAST(GREATEST(COALESCE(AttendeeCount,0),0),
+                                              GREATEST(COALESCE(YearlyTarget,0),0))),0) AS numerator,
+                       COALESCE(SUM(GREATEST(COALESCE(YearlyTarget,0),0)),0) AS denominator,
+                       COUNT(*) AS records,
+                       COALESCE(SUM(NextReviewDate IS NOT NULL AND NextReviewDate<CURDATE()),0) AS overdue
+                  FROM OJT_Records
+                 WHERE YEAR(OJTDate)=?
+            `, [year]),
+            dashboardRowState(`
+                SELECT COUNT(*) AS assessments,
+                       COALESCE(SUM(COALESCE(T1_Score,0)+COALESCE(T2_Score,0)+
+                                    COALESCE(T3_Score,0)+COALESCE(T4_Score,0)+
+                                    COALESCE(T5_Score,0)+COALESCE(T7_Score,0)),0) AS numerator,
+                       COALESCE(SUM((T1_Score IS NOT NULL)+(T2_Score IS NOT NULL)+
+                                    (T3_Score IS NOT NULL)+(T4_Score IS NOT NULL)+
+                                    (T5_Score IS NOT NULL)+(T7_Score IS NOT NULL)),0) * 100 AS denominator,
+                       (SELECT AVG(CompliancePct) FROM SC_PPEInspections
+                         WHERE YEAR(InspectionDate)=? AND deleted_at IS NULL) AS ppePct
+                  FROM SC_Assessments
+                 WHERE AssessmentYear=?
+            `, [year, year]),
         ]);
 
         const cccfWorkerOverview = await getCccfWorkerProgress(db, year, { ensureSchema: false }).catch(() => ({ overall: {} }));
         const cccfWorkerActualTowardTarget = Number(cccfWorkerOverview.overall?.actualTowardTarget || cccfWorkerYear || 0);
         const cccfWorkerRawRecords = Number(cccfWorkerOverview.overall?.rawRecords || cccfWorkerYear || 0);
 
-        // Derived metrics
-        const patrolRate  = patrolAttended && patrolSessions
-            ? Math.min(Math.round(patrolAttended / (patrolSessions * 1) * 100), 100) : null;
-        const cccfPermPct = cccfAssigned
-            ? Math.min(Math.round((cccfCompleted / cccfAssigned) * 100), 100) : null;
-        const yokotenPct  = yokotenTopics
-            ? Math.min(Math.round((yokotenResponded / yokotenTopics) * 100), 100) : null;
-        const trainingPassRate = trTotalEmp
-            ? Math.min(Math.round((trTotalPassed / trTotalEmp) * 100), 100) : null;
+        const asOf = new Date().toISOString();
+        const scope = { year };
         const fourmActive = (parseInt(fourmOpen, 10) || 0) + (parseInt(fourmPending, 10) || 0);
-        const fourmClosureRate = fourmTotal
-            ? Math.min(Math.round((fourmClosed / fourmTotal) * 100), 100)
-            : null;
+        const machineNumerator = Number(machineComplianceState.row.numerator || 0);
+        const machineDenominator = Number(machineComplianceState.row.denominator || 0);
+        const ojtNumerator = Number(ojtProgressState.row.numerator || 0);
+        const ojtDenominator = Number(ojtProgressState.row.denominator || 0);
+        const ojtOverdue = Number(ojtProgressState.row.overdue || 0);
+        const safetyCultureNumerator = Number(safetyCultureProgressState.row.numerator || 0);
+        const safetyCultureDenominator = Number(safetyCultureProgressState.row.denominator || 0);
+        const safetyCulturePpePct = safetyCultureProgressState.row.ppePct == null
+            ? null
+            : Number(safetyCultureProgressState.row.ppePct);
+
+        const moduleMetrics = {
+            patrol: createDashboardMetric('patrol', {
+                numerator: patrolProgress.numerator,
+                denominator: patrolProgress.denominator,
+                unit: 'attendance_slots',
+                scope: { ...scope, window: 'year_to_date', elapsedMonths: patrolProgress.elapsedMonths },
+                dataAvailable: patrolProgress.available,
+                unavailableReason: patrolProgress.error,
+                sourceDescription: 'Completed eligible attendance slots / roster attendance slots due year-to-date.',
+                asOf,
+            }),
+            hiyari: createDashboardMetric('hiyari', {
+                numerator: hiyariProgress.numerator,
+                denominator: hiyariProgress.denominator,
+                unit: 'employees',
+                scope,
+                dataAvailable: hiyariProgress.available,
+                unavailableReason: hiyariProgress.error,
+                sourceDescription: 'Distinct assigned employees with a closed current-year report / current Admin Hiyari assignments.',
+                asOf,
+            }),
+            ky: createDashboardMetric('ky', {
+                numerator: kyProgress.numerator,
+                denominator: kyProgress.denominator,
+                unit: 'activities',
+                scope: { ...scope, configuredScopes: kyProgress.configuredScopes },
+                dataAvailable: kyProgress.available,
+                unavailableReason: kyProgress.error,
+                sourceDescription: 'Eligible activities in configured Department and Safety Unit scopes / active configured yearly targets.',
+                asOf,
+            }),
+            cccf: createDashboardMetric('cccf', {
+                numerator: cccfCompleted,
+                denominator: cccfAssigned,
+                unit: 'employees',
+                scope,
+                dataAvailable: cccfCompleted !== null && cccfAssigned !== null,
+                sourceDescription: 'Distinct valid current-year permanent Form A completions / distinct current employee assignments.',
+                asOf,
+            }),
+            yokoten: createDashboardMetric('yokoten', {
+                numerator: yokotenProgress.numerator,
+                denominator: yokotenProgress.denominator,
+                unit: 'department_topic_pairs',
+                scope: { ...scope, topics: yokotenProgress.topics },
+                dataAvailable: yokotenProgress.available,
+                unavailableReason: yokotenProgress.error,
+                sourceDescription: 'Valid Department-topic response pairs / assigned Department-topic pairs for active topics issued in the year.',
+                asOf,
+            }),
+            training: createDashboardMetric('training', {
+                numerator: trTotalPassed,
+                denominator: trTotalEmp,
+                unit: 'employees',
+                scope,
+                dataAvailable: trTotalPassed !== null && trTotalEmp !== null,
+                sourceDescription: 'Capped passed employee count / total employee count in current-year training records.',
+                asOf,
+            }),
+            accident: createDashboardMetric('accident', {
+                numerator: accRecordable,
+                value: accRecordable,
+                unit: 'recordable_incidents',
+                scope,
+                dataAvailable: accRecordable !== null,
+                status: Number(accRecordable || 0) === 0 ? 'ON_TRACK' : 'CRITICAL',
+                statusReason: Number(accRecordable || 0) === 0
+                    ? 'No recordable incidents in the current year.'
+                    : `${accRecordable} recordable incident(s) in the current year.`,
+                sourceDescription: 'Count of non-deleted recordable accident reports in the current year.',
+                asOf,
+            }),
+            fourm: createDashboardMetric('fourm', {
+                numerator: fourmClosed,
+                denominator: fourmTotal,
+                unit: 'change_notices',
+                scope,
+                dataAvailable: fourmClosed !== null && fourmTotal !== null,
+                sourceDescription: 'Closed change notices / all change notices requested in the current year.',
+                asOf,
+            }),
+            kpi: createDashboardMetric('kpi', {
+                numerator: kpiMetrics,
+                value: kpiMetrics,
+                unit: 'metrics',
+                scope,
+                dataAvailable: kpiMetrics !== null,
+                sourceDescription: 'Count of KPI metric rows configured for the current year.',
+                asOf,
+            }),
+            policy: createDashboardMetric('policy', {
+                numerator: policyAcked,
+                denominator: Number(policyTotal || 0) > 0 ? policyEligible : 0,
+                unit: 'employees',
+                scope: { ...scope, currentPolicies: Number(policyTotal || 0) },
+                dataAvailable: policyTotal !== null && policyAcked !== null && policyEligible !== null,
+                zeroDenominatorReason: Number(policyTotal || 0) > 0
+                    ? 'No eligible employees are present.'
+                    : 'No current safety policy is configured.',
+                sourceDescription: 'Distinct employees acknowledging the current policy / all employees eligible to acknowledge it.',
+                asOf,
+            }),
+            committee: createDashboardMetric('committee', {
+                numerator: committeeTotal,
+                value: committeeTotal,
+                unit: 'committees',
+                scope,
+                dataAvailable: committeeTotal !== null,
+                sourceDescription: 'Count of current committee records.',
+                asOf,
+            }),
+            'machine-safety': createDashboardMetric('machine-safety', {
+                numerator: machineNumerator,
+                denominator: machineDenominator,
+                unit: 'compliance_items',
+                scope,
+                dataAvailable: machineComplianceState.available,
+                unavailableReason: machineComplianceState.error,
+                sourceDescription: 'Passed applicable compliance items / checked applicable compliance items on active machines.',
+                asOf,
+            }),
+            ojt: createDashboardMetric('ojt', {
+                numerator: ojtNumerator,
+                denominator: ojtDenominator,
+                unit: 'attendees',
+                scope,
+                dataAvailable: ojtProgressState.available,
+                unavailableReason: ojtProgressState.error,
+                sourceDescription: 'Capped attendee counts / configured yearly attendee targets in current-year OJT records.',
+                asOf,
+            }),
+            contractor: createDashboardMetric('contractor', {
+                numerator: contractorDocs,
+                value: contractorDocs,
+                unit: 'documents',
+                scope,
+                dataAvailable: contractorDocs !== null,
+                sourceDescription: 'Count of contractor and supplier documents.',
+                asOf,
+            }),
+            'safety-culture': createDashboardMetric('safety-culture', {
+                numerator: safetyCultureNumerator,
+                denominator: safetyCultureDenominator,
+                unit: 'assessment_score_points',
+                scope: { ...scope, ppeCompliancePercent: safetyCulturePpePct },
+                dataAvailable: safetyCultureProgressState.available,
+                unavailableReason: safetyCultureProgressState.error,
+                sourceDescription: 'Sum of entered safety-culture topic scores / maximum points for those entered topics.',
+                asOf,
+            }),
+        };
+
+        const patrolRate = moduleMetrics.patrol.percent;
+        const cccfPermPct = moduleMetrics.cccf.percent;
+        const yokotenPct = moduleMetrics.yokoten.percent;
+        const trainingPassRate = moduleMetrics.training.percent;
+        const fourmClosureRate = moduleMetrics.fourm.percent;
         const healthIndex = buildHealthIndex({
             patrolRate, cccfPermPct, yokotenPct, trainingPassRate,
             accRecordable, hiyariOpen, fourmOpen: fourmActive, patrolOpenIssues,
@@ -718,16 +1140,45 @@ router.get('/overview', async (_req, res) => {
             data: {
                 year,
                 config,
+                moduleMetrics,
                 healthIndex,
                 complianceMatrix,
-                patrol:       { sessions: patrolSessions, attended: patrolAttended, openIssues: patrolOpenIssues, rate: patrolRate },
+                patrol:       {
+                    sessions: patrolSessions,
+                    attended: patrolAttended,
+                    required: moduleMetrics.patrol.denominator,
+                    completed: moduleMetrics.patrol.numerator,
+                    openIssues: patrolOpenIssues,
+                    rate: patrolRate,
+                },
                 cccf:         { workerYear: cccfWorkerActualTowardTarget, workerRawRecords: cccfWorkerRawRecords, workerCalculation: 'cccf_worker_progress_engine_actual_toward_target', assigned: cccfAssigned, completed: cccfCompleted, permPct: cccfPermPct },
-                yokoten:      { topics: yokotenTopics, responded: yokotenResponded, pct: yokotenPct },
+                yokoten:      {
+                    topics: yokotenTopics,
+                    responded: yokotenResponded,
+                    respondedPairs: moduleMetrics.yokoten.numerator,
+                    assignedPairs: moduleMetrics.yokoten.denominator,
+                    pct: yokotenPct,
+                },
                 training:     { totalEmp: trTotalEmp, passed: trTotalPassed, passRate: trainingPassRate },
-                hiyari:       { open: hiyariOpen, year: hiyariYear },
-                ky:           { year: kyYear },
-                accident:     { year: accYear, recordable: accRecordable },
-                safetyCulture:{ year: scYear },
+                hiyari: {
+                    open: hiyariOpen,
+                    year: hiyariYear,
+                    closed: hiyariClosed,
+                    assignmentTarget: moduleMetrics.hiyari.denominator,
+                    assignmentClosed: moduleMetrics.hiyari.numerator,
+                    assignmentRemaining: Math.max(
+                        0,
+                        Number(moduleMetrics.hiyari.denominator || 0) - Number(moduleMetrics.hiyari.numerator || 0)
+                    ),
+                    closureRate: moduleMetrics.hiyari.percent,
+                },
+                ky:           { year: kyYear, target: moduleMetrics.ky.denominator, pct: moduleMetrics.ky.percent },
+                accident:     { year: accYear, recordable: accRecordable, metricStatus: moduleMetrics.accident.status },
+                safetyCulture:{
+                    year: scYear,
+                    pct: moduleMetrics['safety-culture'].percent,
+                    ppePct: safetyCulturePpePct,
+                },
                 fourm:        {
                     total: fourmTotal,
                     open: fourmOpen,
@@ -745,10 +1196,24 @@ router.get('/overview', async (_req, res) => {
                     },
                 },
                 kpi:          { metrics: kpiMetrics, announcements: kpiAnnouncements },
-                policy:       { total: policyTotal, acknowledged: policyAcked },
+                policy:       { total: policyTotal, acknowledged: policyAcked, eligible: policyEligible, pct: moduleMetrics.policy.percent },
                 committee:    { total: committeeTotal },
-                machineSafety:{ total: machineTotal, openIssues: machineOpenIssues, critical: machineCritical },
-                ojt:          { records: ojtRecords, docs: ojtDocs },
+                machineSafety:{
+                    total: machineTotal,
+                    openIssues: machineOpenIssues,
+                    critical: machineCritical,
+                    passed: machineNumerator,
+                    applicable: machineDenominator,
+                    pct: moduleMetrics['machine-safety'].percent,
+                },
+                ojt:          {
+                    records: ojtRecords,
+                    docs: ojtDocs,
+                    completed: ojtNumerator,
+                    target: ojtDenominator,
+                    overdue: ojtOverdue,
+                    pct: moduleMetrics.ojt.percent,
+                },
                 contractor:   { docs: contractorDocs, recent: contractorRecent },
             }
         });
@@ -850,3 +1315,10 @@ router.get('/alerts', async (_req, res) => {
 
 module.exports = router;
 module.exports.buildComplianceMatrix = buildComplianceMatrix;
+module.exports.dashboardMetricBuilders = {
+    buildPatrolCompanyProgress,
+    buildHiyariCompanyProgress,
+    buildKyCompanyProgress,
+    buildYokotenCompanyProgress,
+    dashboardRowState,
+};

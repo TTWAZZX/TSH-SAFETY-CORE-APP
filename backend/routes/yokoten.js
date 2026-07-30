@@ -440,7 +440,7 @@ function buildYokotenMail({ row, eventType, actorName, recipientKind }) {
     };
 }
 
-async function queueYokotenEmail(responseId, eventType, actorName) {
+async function queueYokotenEmail(responseId, eventType, actorName, { attemptImmediate = true } = {}) {
     try {
         const [rows] = await db.query(
             `SELECT r.ResponseID, r.Department, r.EmployeeID, r.EmployeeName, r.IsRelated,
@@ -467,9 +467,11 @@ async function queueYokotenEmail(responseId, eventType, actorName) {
             [responseId, eventType, recipient, mail.subject, mail.text, mail.html]
         );
         const outboxId = insertResult?.insertId;
-        try {
-            if (outboxId) await sendYokotenOutboxItem(outboxId);
-        } catch (_) { /* status already updated by sender */ }
+        if (attemptImmediate) {
+            try {
+                if (outboxId) await sendYokotenOutboxItem(outboxId);
+            } catch (_) { /* status already updated by sender */ }
+        }
     } catch (err) {
         console.warn(`[Yokoten] ${eventType} email skipped:`, err.message);
     }
@@ -1129,23 +1131,7 @@ router.post('/respond', (req, res, next) => {
             return res.status(400).json({ success: false, message: 'Safety Unit อยู่นอกขอบเขตหัวข้อนี้' });
         }
 
-        // Check if any selected dept already responded
         const placeholders = targetDepartments.map(() => '?').join(',');
-        const [existing] = await db.query(
-            `SELECT * FROM YokotenResponses
-             WHERE YokotenID = ? AND Department IN (${placeholders})
-               AND (IsDeleted IS NULL OR IsDeleted = 0)`,
-            [yokotenId, ...targetDepartments]
-        );
-        if (existing.length > 0) {
-            await cleanupUploadedFiles(req.files || []);
-            const existingDepts = existing.map(r => r.Department).filter(Boolean).join(', ');
-            return res.status(409).json({
-                success: false,
-                message: `ส่วนงานที่เลือกมีการตอบกลับแล้ว: ${existingDepts}`,
-                existingResponse: existing[0],
-            });
-        }
 
         const related = s(isRelated) || 'No';
         const files = req.files || [];
@@ -1172,40 +1158,118 @@ router.post('/respond', (req, res, next) => {
             approvalStatus,
         ]);
 
-        await db.query(
-            `INSERT INTO YokotenResponses
-             (ResponseID, YokotenID, Department, SafetyUnit, EmployeeID, EmployeeName,
-              IsRelated, Comment, CorrectiveAction, ApprovalStatus, ResponseDate)
-             VALUES ?`,
-            [responseRows.map(row => [...row, new Date()])]
-        );
-
-        // Attach the same uploaded files to each created response record.
-        if (files.length > 0) {
-            const fileRows = [];
-            responseRows.forEach(row => {
-                const responseId = row[0];
-                const dept = row[2];
-                files.forEach(f => {
-                    fileRows.push([
-                        randomUUID(), responseId, yokotenId, dept,
-                        displayUploadName(f), f.path, f.filename || null,
-                        f.mimetype, f.size, responderName,
-                    ]);
-                });
-            });
-            await db.query(
-                `INSERT INTO Yokoten_Response_Files
-                 (FileID, ResponseID, YokotenID, Department, FileName, FileURL, PublicID, FileType, FileSize, UploadedBy)
-                 VALUES ?`,
-                [fileRows]
+        const connection = await db.getConnection();
+        let restoredResponseCount = 0;
+        const staleResponseFiles = [];
+        try {
+            await connection.beginTransaction();
+            const [existingRows] = await connection.query(
+                `SELECT ResponseID, Department, IsDeleted
+                   FROM YokotenResponses
+                  WHERE YokotenID = ? AND Department IN (${placeholders})
+                  FOR UPDATE`,
+                [yokotenId, ...targetDepartments]
             );
+            const activeExisting = existingRows.filter(row => Number(row.IsDeleted || 0) === 0);
+            if (activeExisting.length > 0) {
+                await connection.rollback();
+                await cleanupUploadedFiles(files);
+                const existingDepts = activeExisting.map(row => row.Department).filter(Boolean).join(', ');
+                return res.status(409).json({
+                    success: false,
+                    message: `ส่วนงานที่เลือกมีการตอบกลับแล้ว: ${existingDepts}`,
+                    existingResponse: activeExisting[0],
+                });
+            }
+
+            const deletedByDepartment = new Map();
+            existingRows.forEach(row => {
+                const departmentName = String(row.Department || '').trim();
+                if (Number(row.IsDeleted) === 1 && departmentName && !deletedByDepartment.has(departmentName)) {
+                    deletedByDepartment.set(departmentName, row);
+                }
+            });
+            const freshRows = [];
+            for (const row of responseRows) {
+                const deletedRow = deletedByDepartment.get(row[2]);
+                if (!deletedRow) {
+                    freshRows.push(row);
+                    continue;
+                }
+                row[0] = deletedRow.ResponseID;
+                const [deletedFiles] = await connection.query(
+                    `SELECT FileID, FileURL, PublicID
+                       FROM Yokoten_Response_Files
+                      WHERE ResponseID = ?
+                      FOR UPDATE`,
+                    [deletedRow.ResponseID]
+                );
+                staleResponseFiles.push(...deletedFiles);
+                await connection.query(
+                    'DELETE FROM Yokoten_Response_Files WHERE ResponseID = ?',
+                    [deletedRow.ResponseID]
+                );
+                const [updateResult] = await connection.query(
+                    `UPDATE YokotenResponses
+                        SET SafetyUnit=?, EmployeeID=?, EmployeeName=?, IsRelated=?,
+                            Comment=?, CorrectiveAction=?, ApprovalStatus=?, ApprovalComment=NULL,
+                            ApprovedBy=NULL, ApprovedAt=NULL, ResponseDate=NOW(), IsDeleted=0
+                      WHERE ResponseID=? AND IsDeleted=1`,
+                    [row[3], row[4], row[5], row[6], row[7], row[8], row[9], deletedRow.ResponseID]
+                );
+                if (updateResult.affectedRows !== 1) {
+                    throw new Error(`Unable to restore the deleted Yokoten response for ${row[2]}.`);
+                }
+                restoredResponseCount += 1;
+            }
+            if (freshRows.length > 0) {
+                await connection.query(
+                    `INSERT INTO YokotenResponses
+                     (ResponseID, YokotenID, Department, SafetyUnit, EmployeeID, EmployeeName,
+                      IsRelated, Comment, CorrectiveAction, ApprovalStatus, ResponseDate)
+                     VALUES ?`,
+                    [freshRows.map(row => [...row, new Date()])]
+                );
+            }
+
+            // Attach the same uploaded files to each created response record.
+            if (files.length > 0) {
+                const fileRows = [];
+                responseRows.forEach(row => {
+                    const responseId = row[0];
+                    const dept = row[2];
+                    files.forEach(f => {
+                        fileRows.push([
+                            randomUUID(), responseId, yokotenId, dept,
+                            displayUploadName(f), f.path, f.filename || null,
+                            f.mimetype, f.size, responderName,
+                        ]);
+                    });
+                });
+                await connection.query(
+                    `INSERT INTO Yokoten_Response_Files
+                     (FileID, ResponseID, YokotenID, Department, FileName, FileURL, PublicID, FileType, FileSize, UploadedBy)
+                     VALUES ?`,
+                    [fileRows]
+                );
+            }
+            await connection.commit();
+        } catch (transactionError) {
+            try { await connection.rollback(); } catch (_) {}
+            throw transactionError;
+        } finally {
+            connection.release();
         }
 
+        for (const staleFile of staleResponseFiles) {
+            await deletePhysicalFileIfUnreferenced(staleFile);
+        }
+
+        const attemptImmediate = responseRows.length === 1;
         for (const row of responseRows) {
-            await queueYokotenEmail(row[0], 'Submitted', responderName);
+            await queueYokotenEmail(row[0], 'Submitted', responderName, { attemptImmediate });
             if (related === 'Yes') {
-                await queueYokotenEmail(row[0], 'RelatedSubmitted', responderName);
+                await queueYokotenEmail(row[0], 'RelatedSubmitted', responderName, { attemptImmediate });
             }
         }
 
@@ -1216,10 +1280,16 @@ router.post('/respond', (req, res, next) => {
                 : 'บันทึกการตอบกลับสำเร็จ',
             responseIds: responseRows.map(row => row[0]),
             responseId: responseRows[0]?.[0],
+            restoredResponseCount,
+            notificationMode: attemptImmediate ? 'immediate' : 'queued',
         });
     } catch (err) {
         await cleanupUploadedFiles(req.files || []);
-        res.status(500).json({ success: false, message: err.message });
+        const duplicate = err?.code === 'ER_DUP_ENTRY';
+        res.status(duplicate ? 409 : 500).json({
+            success: false,
+            message: duplicate ? 'Selected department already has a Yokoten response.' : err.message,
+        });
     }
 });
 

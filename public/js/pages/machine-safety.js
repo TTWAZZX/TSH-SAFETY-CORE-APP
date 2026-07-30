@@ -52,6 +52,10 @@ let _msdCardSaveHold = null;
 let _msdCardSaveMenu = null;
 let _msdCardImageListenersReady = false;
 
+function _msdDefaultViewMode() {
+    return window.matchMedia?.('(max-width: 767px)').matches ? 'card' : 'list';
+}
+
 function _errText(err, fallback = 'เกิดข้อผิดพลาด กรุณาลองใหม่อีกครั้ง') {
     return err?.message || err?.error || fallback;
 }
@@ -63,7 +67,7 @@ export async function loadMachineSafetyPage() {
 
     const user = TSHSession.getUser();
     _isAdmin = String(user?.role || user?.Role || '').toLowerCase() === 'admin';
-    _viewMode = 'card';
+    _viewMode = _msdDefaultViewMode();
     _setupCardImageExportListeners();
 
     container.innerHTML = `
@@ -735,8 +739,9 @@ function _renderTable() {
         // Detail button (all users)
         const detailBtn = `
             <button onclick="window._msdOpenDetail(${m.id}, ${_jsArg(m.MachineName)})"
-                class="p-1.5 rounded-lg text-slate-400 hover:text-teal-600 hover:bg-teal-50 transition-colors" title="ดูรายละเอียด">
+                class="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border border-teal-200 bg-teal-50 text-teal-700 hover:bg-teal-100 transition-colors text-xs font-semibold" title="จัดการรายละเอียด">
                 <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"/></svg>
+                <span>จัดการ</span>
             </button>`;
 
         // File buttons — linked together, open modal with both sections
@@ -777,28 +782,49 @@ function _renderTable() {
             ? 'style="background:rgba(255,251,235,0.45)"'
             : '';
 
-        return `<tr class="border-b border-slate-100 hover:bg-slate-50/80 transition-colors ${(m.Status === 'inactive' || m.Status === 'locked') ? 'opacity-60' : ''}" ${rowBg}>
-            <td class="px-4 py-3 text-sm font-mono text-slate-600 whitespace-nowrap">${UI.escHtml(m.MachineCode || '—')}</td>
-            <td class="px-4 py-3 min-w-[160px]">
-                <p class="text-sm font-medium text-slate-800">${UI.escHtml(m.MachineName || '—')}</p>
-                ${m.EffectiveDate ? `<p class="text-xs text-emerald-600">บังคับใช้ ${_dateOnly(m.EffectiveDate)}</p>` : ''}
-                ${m.Remark ? `<p class="text-xs text-slate-400 truncate max-w-[200px]">${UI.escHtml(m.Remark)}</p>` : ''}
+        const documentPct = isFull ? 100 : isPartial ? 50 : 0;
+        const documentTone = documentPct === 100
+            ? 'bg-emerald-100 text-emerald-700'
+            : documentPct > 0
+            ? 'bg-amber-100 text-amber-700'
+            : 'bg-slate-100 text-slate-500';
+        const rowLabel = `ดูรายละเอียด ${m.MachineCode || ''} ${m.MachineName || ''}`.trim();
+
+        return `<tr class="msd-clickable-row border-b border-slate-100 transition-colors ${(m.Status === 'inactive' || m.Status === 'locked') ? 'opacity-60' : ''}"
+            tabindex="0" role="button" aria-label="${UI.escHtml(rowLabel)}"
+            onclick="window._msdOpenDetail(${m.id}, ${_jsArg(m.MachineName)})"
+            onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();window._msdOpenDetail(${m.id}, ${_jsArg(m.MachineName)})}" ${rowBg}>
+            <td class="msd-machine-cell px-3 py-3">
+                <p class="text-xs font-mono font-semibold text-emerald-700 whitespace-nowrap">${UI.escHtml(m.MachineCode || '-')}</p>
+                <p class="mt-0.5 text-sm font-semibold text-slate-800 truncate" title="${UI.escHtml(m.MachineName || '')}">${UI.escHtml(m.MachineName || '-')}</p>
+                ${m.EffectiveDate ? `<p class="mt-0.5 text-[11px] text-emerald-600">บังคับใช้ ${_dateOnly(m.EffectiveDate)}</p>` : ''}
             </td>
-            <td class="px-4 py-3 text-sm text-slate-600 whitespace-nowrap">${UI.escHtml(m.Department || '—')}</td>
-            <td class="px-4 py-3 text-sm text-slate-600 whitespace-nowrap">${UI.escHtml(m.Area || '—')}</td>
-            <td class="px-4 py-3 text-center">${machineSBadge}</td>
-            <td class="px-4 py-3 text-center">${riskBadge}</td>
-            <td class="px-4 py-3 text-center">${tickRisk}</td>
-            <td class="px-4 py-3 text-center">${tick(hasSafety)}</td>
-            <td class="px-4 py-3 text-center">${tick(hasLayout)}</td>
-            <td class="px-4 py-3 text-center">${statusBadge}</td>
-            <td class="px-4 py-3 whitespace-nowrap">${fileBtn}</td>
-            <td class="px-4 py-3 text-center">${complianceScore}</td>
-            <td class="px-4 py-3 text-center">${openIssues}</td>
-            <td class="px-4 py-3 text-center">${auditBadge}</td>
-            <td class="px-4 py-3 whitespace-nowrap">${inspectionCell}</td>
-            <td class="px-4 py-3 text-xs text-slate-400 whitespace-nowrap">${updated}</td>
-            <td class="px-4 py-3"><div class="flex items-center gap-1">${detailBtn}${adminBtns}</div></td>
+            <td class="px-3 py-3 min-w-0">
+                <p class="text-xs font-semibold text-slate-700 truncate" title="${UI.escHtml(m.Department || '')}">${UI.escHtml(m.Department || '-')}</p>
+                <p class="mt-1 text-[11px] text-slate-400 truncate" title="${UI.escHtml(m.Area || '')}">${UI.escHtml(m.Area || 'ไม่ระบุพื้นที่')}</p>
+            </td>
+            <td class="px-3 py-3">
+                <div class="flex flex-col items-start gap-1.5">${machineSBadge}${riskBadge}</div>
+            </td>
+            <td class="px-3 py-3">
+                <div class="flex items-center justify-between gap-3">
+                    <div class="min-w-0">
+                        <div class="flex flex-wrap items-center gap-1.5">
+                            <span class="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-semibold ${documentTone}">เอกสาร ${documentPct}%</span>
+                            ${auditBadge}
+                            ${m.OpenIssueCount > 0 ? `<span class="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-semibold bg-rose-100 text-rose-700">${m.OpenIssueCount} ปัญหา</span>` : ''}
+                        </div>
+                        <div class="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-[10px] text-slate-400">
+                            <span>ตรวจครั้งถัดไป: ${inspectionCell}</span>
+                            <span>อัปเดต ${updated}</span>
+                        </div>
+                    </div>
+                    <div class="msd-row-open-hint flex-shrink-0 text-right">
+                        <svg class="w-5 h-5 text-slate-300" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/></svg>
+                        <span class="sr-only">เปิดรายละเอียด</span>
+                    </div>
+                </div>
+            </td>
         </tr>`;
     }).join('');
 
@@ -819,25 +845,18 @@ function _renderTable() {
     </div>` : '';
 
     return `<table class="msd-data-table ds-table text-left border-collapse">
+        <colgroup>
+            <col style="width:32%">
+            <col style="width:24%">
+            <col style="width:17%">
+            <col style="width:27%">
+        </colgroup>
         <thead>
             <tr class="bg-slate-50 border-b-2 border-slate-200">
-                <th class="px-4 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wide whitespace-nowrap">ลำดับเอกสาร</th>
-                <th class="px-4 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wide">ชื่อเอกสารเครื่องจักร</th>
-                <th class="px-4 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wide">แผนก</th>
-                <th class="px-4 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wide">พื้นที่</th>
-                <th class="px-4 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wide text-center whitespace-nowrap">สถานะ</th>
-                <th class="px-4 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wide text-center whitespace-nowrap">ความเสี่ยง</th>
-                <th class="px-4 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wide text-center whitespace-nowrap">ประเมินความเสี่ยง</th>
-                <th class="px-4 py-3 text-xs font-semibold text-blue-500 uppercase tracking-wide text-center whitespace-nowrap">Safety Device Std.</th>
-                <th class="px-4 py-3 text-xs font-semibold text-purple-500 uppercase tracking-wide text-center whitespace-nowrap">Layout & Checkpoint</th>
-                <th class="px-4 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wide text-center whitespace-nowrap">สถานะรวม</th>
-                <th class="px-4 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wide whitespace-nowrap">ไฟล์แนบ</th>
-                <th class="px-4 py-3 text-xs font-semibold text-teal-500 uppercase tracking-wide text-center whitespace-nowrap">Compliance</th>
-                <th class="px-4 py-3 text-xs font-semibold text-rose-500 uppercase tracking-wide text-center whitespace-nowrap">ปัญหาเปิด</th>
-                <th class="px-4 py-3 text-xs font-semibold text-violet-500 uppercase tracking-wide text-center whitespace-nowrap">Audit</th>
-                <th class="px-4 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wide whitespace-nowrap">ตรวจสอบครั้งถัดไป</th>
-                <th class="px-4 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wide whitespace-nowrap">อัปเดต</th>
-                <th class="px-4 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wide text-center">จัดการ</th>
+                <th class="px-3 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wide">เครื่องจักร</th>
+                <th class="px-3 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wide">แผนก / พื้นที่</th>
+                <th class="px-3 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wide">สถานะ / ความเสี่ยง</th>
+                <th class="px-3 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wide">ภาพรวมความพร้อม</th>
             </tr>
         </thead>
         <tbody>${rows}</tbody>
@@ -1644,13 +1663,23 @@ window._msdDownloadFile = async function(url, label) {
 };
 
 // ─── Machine Detail Modal (Compliance | Issues | Files) ───────────────────────
+window._msdEditFromDetail = function(machineId) {
+    UI.closeModal();
+    setTimeout(() => window._msdOpenEdit(machineId), 80);
+};
+
+window._msdDeleteFromDetail = function(machineId, machineName) {
+    UI.closeModal();
+    setTimeout(() => window._msdDelete(machineId, machineName), 80);
+};
+
 window._msdOpenDetail = async function(machineId, machineName) {
     UI.openModal(`รายละเอียด — ${machineName}`, `
         <div id="msd-detail-body">
             <div class="flex justify-center py-8">
                 <div class="animate-spin rounded-full h-8 w-8 border-4 border-emerald-500 border-t-transparent"></div>
             </div>
-        </div>`, 'max-w-2xl');
+        </div>`, 'max-w-4xl');
 
     try {
         const [compRes, issueRes, filesRes] = await Promise.all([
@@ -1663,18 +1692,44 @@ window._msdOpenDetail = async function(machineId, machineName) {
         const filesData      = filesRes.data || [];
         const openCount      = issuesData.filter(i => i.Status === 'open').length;
         const machine        = _machines.find(m => String(m.id) === String(machineId)) || {};
+        const detailAudit    = _auditStatus(machine);
         const metaItems      = [
             ['ลำดับเอกสาร', machine.MachineCode],
+            ['แผนก', machine.Department],
             ['วันบังคับใช้', _dateOnly(machine.EffectiveDate)],
             ['พื้นที่', machine.Area],
+            ['สถานะเครื่องจักร', (STATUS_META[machine.Status || 'active'] || STATUS_META.active).label],
+            ['ระดับความเสี่ยง', (RISK_META[machine.RiskLevel || 'low'] || RISK_META.low).label],
+            ['Safety Device Standard', `${Number(machine.SafetyDeviceCount || 0)} ไฟล์`],
+            ['Layout & Checkpoint', `${Number(machine.LayoutCheckpointCount || 0)} ไฟล์`],
+            ['Risk Assessment', machine.HasRiskAssessment ? 'มีข้อมูล' : 'ยังไม่มีข้อมูล'],
+            ['Compliance', `${Number(machine.CompliancePassCount || 0)}/${COMPLIANCE_ITEMS.length} ข้อ`],
+            ['Audit Readiness', detailAudit.status === 'pass' ? 'ผ่าน' : detailAudit.status === 'warn' ? 'เฝ้าระวัง' : 'ไม่ผ่าน'],
+            ['ปัญหาที่ยังเปิด', `${openCount} รายการ`],
+            ['ตรวจครั้งถัดไป', _dateOnly(machine.NextInspectionDate)],
+            ['อัปเดตล่าสุด', machine.UpdatedAt ? new Date(machine.UpdatedAt).toLocaleString('th-TH') : null],
             ['Issue by', machine.IssueByName || machine.IssueBy],
             ['Verified by', machine.VerifiedByName || machine.VerifiedBy],
+            ['หมายเหตุ', machine.Remark],
         ].filter(([, value]) => value);
 
         const body = document.getElementById('msd-detail-body');
         if (!body) return;
 
         body.innerHTML = `
+            ${_isAdmin ? `<div class="mb-4 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-teal-100 bg-teal-50/70 px-3 py-2.5">
+                <p class="text-xs text-teal-700">จัดการข้อมูลเครื่องจักรและรายละเอียดทั้งหมดจากหน้าต่างนี้</p>
+                <div class="flex items-center gap-2">
+                    <button type="button" onclick="window._msdEditFromDetail(${machineId})"
+                        class="inline-flex items-center gap-1.5 rounded-lg border border-blue-200 bg-white px-3 py-1.5 text-xs font-semibold text-blue-700 hover:bg-blue-50">
+                        แก้ไขข้อมูล
+                    </button>
+                    <button type="button" onclick="window._msdDeleteFromDetail(${machineId}, ${_jsArg(machineName)})"
+                        class="inline-flex items-center gap-1.5 rounded-lg border border-rose-200 bg-white px-3 py-1.5 text-xs font-semibold text-rose-700 hover:bg-rose-50">
+                        ลบรายการ
+                    </button>
+                </div>
+            </div>` : ''}
             ${metaItems.length ? `<div class="grid grid-cols-1 sm:grid-cols-2 gap-2 mb-4">
                 ${metaItems.map(([label, value]) => `<div class="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2">
                     <p class="text-[11px] font-semibold uppercase text-slate-400">${label}</p>

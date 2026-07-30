@@ -1,79 +1,72 @@
 {
   "schemaVersion": 1,
-  "generatedAt": "2026-07-23T18:01:30+07:00",
-  "sourceHead": "70adffd3efd19d5b6534720c5c345a87cd74304a",
-  "previousProductionBuild": "machine-safety-responsive-20260723",
-  "buildId": "yokoten-admin-department-unit-scope-20260723",
-  "cacheBust": "20260723-yokoten-admin-scope-r5",
+  "generatedAt": "2026-07-30T16:58:49+07:00",
+  "sourceHead": "5b6eefd26823be7918e027f98988d39d6b07994a",
+  "previousProductionBuild": "machine-safety-row-detail-20260724",
+  "buildId": "forklift-card-template-type-map-20260730-hf1",
+  "cacheBust": "20260730-forklift-template-type-map-hf1",
   "runtime": "shared-hosting-php",
-  "deployPhase": "yokoten-admin-department-unit-coupling",
-  "deploymentStatus": "deployed-and-authenticated-read-only-uat-passed",
-  "deployedAt": "2026-07-23T18:00:42+07:00",
+  "deployPhase": "forklift-card-template-type-map",
+  "deploymentStatus": "deployed-and-authenticated-smoke-passed",
+  "deployedAt": "2026-07-30T16:58:49+07:00",
   "databaseMutationPlanned": false,
-  "schemaMutationPlanned": false,
+  "schemaMutationPlanned": true,
   "uploadStorageMutationPlanned": false,
   "exactRuntimeFiles": [
     "index.html",
+    "api/handlers/forklift.php",
+    "api/handlers/admin_phase8.php",
     "public/js/main.js",
-    "public/js/pages/yokoten.js",
-    "api/handlers/workflow_phase6.php",
-    "api/lib/yokoten_admin_scope.php",
+    "public/js/pages/forklift.js",
     "deploy-manifest.json"
   ],
   "fileHashes": [
     {
       "path": "index.html",
-      "sha256": "587709b51e6c28c32143a84b30e887fb38bc74b9cdfbae5a18db82860257f583"
+      "sha256": "b48db25f91f22b3bb9aa8377986c04a931127028b84770bf3a3870e5da94546b"
+    },
+    {
+      "path": "api/handlers/forklift.php",
+      "sha256": "4f09e60bdcaa0f65bb7445b332c00c339dde667266eeb1ae80127a75e5b0f791"
+    },
+    {
+      "path": "api/handlers/admin_phase8.php",
+      "sha256": "52643746a8dfe97a5971e9ec639a49c9d11c22513fb0520d27e706defabc1518"
     },
     {
       "path": "public/js/main.js",
-      "sha256": "d39ebc947cac9365102600cd3ac4642aa8bfd48fd6394d3e6a1a8f15a2453000"
+      "sha256": "4fe1f1cbb5ad92f27af350a4bc1366d120f835c9d7df1b1f4149510b176b0946"
     },
     {
-      "path": "public/js/pages/yokoten.js",
-      "sha256": "830e807b786e6db0563176d0e0536dae2a6ba2b81c449c5d216392a42a959074"
-    },
-    {
-      "path": "api/handlers/workflow_phase6.php",
-      "sha256": "8206406fb62561f89f8db7abc7f58496bbeddcbe9b35e0d66afa75a859bb3b38"
-    },
-    {
-      "path": "api/lib/yokoten_admin_scope.php",
-      "sha256": "3e3c4ba17d543467bc67aa1361949de22577f26f084f8638fd57b3817870ad9f"
+      "path": "public/js/pages/forklift.js",
+      "sha256": "40ae8629f6a5ffde0c30b76bc35faffd33a8db029e20dae9803b44192d9d62cc"
     }
   ],
   "verification": {
-    "fullBackendRegression": "PASS",
-    "readOnlyApiPreflight": "91/91",
-    "yokotenAdminScopeNodePhpParity": "8/8",
-    "yokotenAdminBulkResponse": "14/14",
-    "localAuthenticatedBrowserUat": "PASS",
-    "individualDepartmentSelection": true,
-    "selectAllDepartments": "9/9",
-    "selectAllScopedUnits": "11/11",
-    "responseCountBeforeAfter": "1/1",
     "phpLint": "PASS",
     "nodeSyntax": "PASS",
+    "forkliftWorkflowSmoke": "PASS 40/40",
+    "templateRankingSanity": "PASS exact combined rank before single fallback",
+    "fullBackendRegression": "PASS",
+    "gitDiffCheck": "PASS",
+    "hotfix": "Template FormData is snapshotted before runFormBusy disables controls; index.html/main.js cache bust advanced to hf1",
     "databaseMutationAttempted": false,
-    "schemaMutationAttempted": false,
+    "schemaMutationAttempted": true,
     "uploadStorageMutationAttempted": false
   },
   "productionVerification": {
-    "codeBackup": "backups/production/yokoten-admin-scope-predeploy-20260723-175817",
-    "authenticatedUat": "backups/production/yokoten-dashboard-browser-uat-20260723T110106",
-    "uploadVerify": "backups/production/yokoten-admin-scope-upload-verify-20260723-180042",
-    "uploadedFiles": 6,
-    "sha256Matches": "6/6",
-    "individualDepartmentSelection": true,
-    "selectedDepartmentScopedUnits": "2/2",
-    "selectAllDepartments": "9/9",
-    "selectAllScopedUnits": "11/11",
-    "unitToggleWorks": true,
-    "responseCountBeforeAfter": "1/1",
-    "pageLevelHorizontalOverflow": false,
-    "expectedLoginSideEffects": true,
-    "databaseMutationAttempted": false,
-    "schemaMutationAttempted": false,
+    "codeBackup": "backups/production/forklift-card-template-type-map-predeploy-20260730-163801",
+    "dbSnapshot": "backups/production/forklift-card-template-type-map-predeploy-20260730-163801/forklift-db-snapshot.json",
+    "uploadVerify": "backups/production/forklift-card-template-type-map-upload-verify-20260730-164409",
+    "hotfixBackup": "backups/production/forklift-card-template-formdata-hf1-predeploy-20260730-165625",
+    "hotfixUploadVerify": "backups/production/forklift-card-template-formdata-hf1-upload-verify-20260730-165649",
+    "hotfixFinalManifestVerify": "backups/production/forklift-card-template-formdata-hf1-final-manifest-verify-20260730-170000",
+    "sha256Matches": "4/4 hotfix plus 5/5 original deploy",
+    "authenticatedSmoke": "PASS 9 hf1 checks after PASS 12 original checks",
+    "smokeEvidence": "backups/production/forklift-card-template-formdata-hf1-smoke-20260730-165849",
+    "temporaryHelperCleanup": "PASS db snapshot helper removed before deploy upload; HTTP 404 and FTP absent",
+    "temporaryRowsRemaining": 0,
+    "schemaMutationAttempted": true,
     "uploadStorageMutationAttempted": false
   }
 }

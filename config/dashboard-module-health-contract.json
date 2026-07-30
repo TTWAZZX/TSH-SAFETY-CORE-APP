@@ -1,0 +1,356 @@
+{
+  "contractVersion": "D4-2026-07-24",
+  "route": "/api/dashboard/overview",
+  "yearMode": "current_calendar_year",
+  "requiredMetricFields": [
+    "key",
+    "metricType",
+    "numerator",
+    "denominator",
+    "percent",
+    "value",
+    "unit",
+    "source",
+    "scope",
+    "dataAvailable",
+    "status",
+    "statusReason",
+    "asOf"
+  ],
+  "metricTypes": ["progress", "risk_count", "information"],
+  "statuses": ["ON_TRACK", "WATCH", "CRITICAL", "N_A", "DATA_UNAVAILABLE"],
+  "percentageRules": {
+    "scaleMinimum": 0,
+    "scaleMaximum": 100,
+    "formula": "round(min(max(numerator, 0), denominator) / denominator * 100)",
+    "zeroDenominator": "N_A",
+    "queryFailure": "DATA_UNAVAILABLE",
+    "defaultThresholds": {
+      "onTrackMinimum": 80,
+      "watchMinimum": 50
+    },
+    "notes": [
+      "Numerator and denominator must use the same business unit and scope.",
+      "A missing or zero denominator is N_A, never an automatic 100 percent.",
+      "Pass thresholds and progress percentage are separate concepts.",
+      "Risk-count and information metrics do not receive a synthetic percentage."
+    ]
+  },
+  "modules": [
+    {
+      "key": "patrol",
+      "frontendHash": "patrol",
+      "responseKey": "patrol",
+      "metricType": "progress",
+      "percentagePolicy": "required",
+      "current": {
+        "sourceTables": ["Patrol_Attendance", "Patrol_Issues"],
+        "calculation": "attendance rows / distinct patrol dates",
+        "knownGap": "Attendance rows and patrol dates are different units, so the result is capped to 100 without representing completion."
+      },
+      "target": {
+        "sourceTables": ["Patrol_Attendance", "Patrol_Self_Checkin", "Patrol_Roster"],
+        "numerator": "eligible completed attendance slots due in the selected year window",
+        "denominator": "required roster attendance slots due in the same year window",
+        "formula": "completed eligible slots / required eligible slots",
+        "zeroDenominator": "N_A",
+        "yearScope": "year_to_date"
+      },
+      "implementationState": "implemented_d4"
+    },
+    {
+      "key": "hiyari",
+      "frontendHash": "hiyari",
+      "responseKey": "hiyari",
+      "metricType": "progress",
+      "percentagePolicy": "required",
+      "current": {
+        "sourceTables": ["HiyariReports"],
+        "calculation": "(current-year reports - all open reports) / current-year reports",
+        "knownGap": "The open count is not constrained to the same year as the total."
+      },
+      "target": {
+        "sourceTables": ["Hiyari_Assignments", "HiyariReports"],
+        "numerator": "distinct current Admin assignments whose employee has at least one non-deleted closed report in the selected year",
+        "denominator": "all current Hiyari assignments configured by Admin",
+        "formula": "assigned employees with a closed current-year report / current Admin assignments",
+        "zeroDenominator": "N_A",
+        "yearScope": "calendar_year"
+      },
+      "implementationState": "implemented_d4"
+    },
+    {
+      "key": "ky",
+      "frontendHash": "ky",
+      "responseKey": "ky",
+      "metricType": "progress",
+      "percentagePolicy": "required",
+      "current": {
+        "sourceTables": ["KY_Activities", "KY_Program_Config"],
+        "calculation": "arithmetic average of Department percentages",
+        "knownGap": "Department percentages are unweighted and a fallback target of 12 is used when configuration is absent."
+      },
+      "target": {
+        "sourceTables": ["KY_Activities", "KY_Program_Config"],
+        "numerator": "eligible KY activities in configured Department and Safety Unit scopes",
+        "denominator": "sum of active configured Safety Unit yearly targets",
+        "formula": "sum eligible activities / sum configured targets",
+        "zeroDenominator": "N_A",
+        "yearScope": "calendar_year"
+      },
+      "implementationState": "implemented_d4"
+    },
+    {
+      "key": "cccf",
+      "frontendHash": "cccf",
+      "responseKey": "cccf",
+      "metricType": "progress",
+      "percentagePolicy": "required",
+      "current": {
+        "sourceTables": ["CCCF_Assignments", "CCCF_FormA_Permanent", "CCCF_FormA_Worker"],
+        "calculation": "current-year permanent completions / all assignment rows",
+        "knownGap": "Completion year and assignment population are not explicitly aligned to one active scope."
+      },
+      "target": {
+        "sourceTables": ["CCCF_Assignments", "CCCF_FormA_Permanent", "Employees"],
+        "numerator": "completed permanent assignees in the current eligible assignment population",
+        "denominator": "current eligible in-scope assignments",
+        "formula": "completed eligible assignees / eligible assignments",
+        "zeroDenominator": "N_A",
+        "yearScope": "current_assignment_population"
+      },
+      "implementationState": "implemented_d4"
+    },
+    {
+      "key": "yokoten",
+      "frontendHash": "yokoten",
+      "responseKey": "yokoten",
+      "metricType": "progress",
+      "percentagePolicy": "required",
+      "current": {
+        "sourceTables": ["YokotenTopics", "YokotenResponses"],
+        "calculation": "distinct responding Departments / active topics",
+        "knownGap": "Responding Departments and topics are different units and topic assignment scope is not represented."
+      },
+      "target": {
+        "sourceTables": ["YokotenTopics", "YokotenResponses", "Master_Departments"],
+        "numerator": "distinct assigned Department-topic pairs with a valid non-deleted response",
+        "denominator": "distinct Department-topic pairs assigned by topic Department scope",
+        "formula": "responded assigned pairs / assigned pairs",
+        "zeroDenominator": "N_A",
+        "yearScope": "issued_calendar_year"
+      },
+      "implementationState": "implemented_d4"
+    },
+    {
+      "key": "training",
+      "frontendHash": "training",
+      "responseKey": "training",
+      "metricType": "progress",
+      "percentagePolicy": "required",
+      "current": {
+        "sourceTables": ["Training_Dept_Records"],
+        "calculation": "sum PassedCount / sum TotalEmp for the selected year",
+        "knownGap": "The mathematics is aligned, but the business population may contain repeated employees across Department or course records."
+      },
+      "target": {
+        "sourceTables": ["Training_Dept_Records"],
+        "numerator": "capped passed employee count in current-year Department records",
+        "denominator": "total employee count in the same current-year Department records",
+        "formula": "passed eligible records / eligible records",
+        "zeroDenominator": "N_A",
+        "yearScope": "calendar_year"
+      },
+      "implementationState": "implemented_d4"
+    },
+    {
+      "key": "accident",
+      "frontendHash": "accident",
+      "responseKey": "accident",
+      "metricType": "risk_count",
+      "percentagePolicy": "not_applicable",
+      "current": {
+        "sourceTables": ["Accident_Reports"],
+        "calculation": "current-year report count with recordable count as the risk signal",
+        "knownGap": "A card without a percentage defaults to On Track unless an explicit alert is present."
+      },
+      "target": {
+        "sourceTables": ["Accident_Reports"],
+        "numerator": "current-year non-deleted recordable accident count",
+        "denominator": null,
+        "formula": null,
+        "zeroDenominator": "not_applicable",
+        "yearScope": "calendar_year"
+      },
+      "implementationState": "implemented_d4"
+    },
+    {
+      "key": "fourm",
+      "frontendHash": "fourm",
+      "responseKey": "fourm",
+      "metricType": "progress",
+      "percentagePolicy": "required",
+      "current": {
+        "sourceTables": ["FourM_ChangeNotices", "FourM_Curriculums", "FourM_Courses", "FourM_CurriculumEmployees"],
+        "calculation": "closed current-year notices / all current-year notices",
+        "knownGap": "The closure formula is aligned, but PHP returns Training Required and matrix counts as hardcoded zero values."
+      },
+      "target": {
+        "sourceTables": ["FourM_ChangeNotices", "FourM_Curriculums", "FourM_Courses", "FourM_CurriculumEmployees"],
+        "numerator": "closed change notices in the selected year",
+        "denominator": "all eligible change notices in the selected year",
+        "formula": "closed notices / eligible notices",
+        "zeroDenominator": "N_A",
+        "yearScope": "calendar_year"
+      },
+      "implementationState": "implemented_d4"
+    },
+    {
+      "key": "kpi",
+      "frontendHash": "kpi",
+      "responseKey": "kpi",
+      "metricType": "information",
+      "percentagePolicy": "not_applicable",
+      "current": {
+        "sourceTables": ["KPIData"],
+        "calculation": "current-year KPI row count with all announcement rows",
+        "knownGap": "Announcement scope is not limited to the current announcement and information cards default to On Track."
+      },
+      "target": {
+        "sourceTables": ["KPIData", "KPIAnnouncements"],
+        "numerator": "current-year KPI metric count",
+        "denominator": null,
+        "formula": null,
+        "zeroDenominator": "not_applicable",
+        "yearScope": "calendar_year"
+      },
+      "implementationState": "implemented_d4"
+    },
+    {
+      "key": "policy",
+      "frontendHash": "policy",
+      "responseKey": "policy",
+      "metricType": "progress",
+      "percentagePolicy": "required",
+      "current": {
+        "sourceTables": ["Policies", "Policy_Acknowledgements"],
+        "calculation": "policy count with acknowledgement count",
+        "knownGap": "The card does not calculate current-policy acknowledgement coverage against the employee population, and PHP counts all acknowledgements."
+      },
+      "target": {
+        "sourceTables": ["Policies", "Policy_Acknowledgements", "Employees"],
+        "numerator": "distinct employees acknowledging the current policy",
+        "denominator": "employees required to acknowledge the current policy",
+        "formula": "current-policy acknowledged employees / eligible employees",
+        "zeroDenominator": "N_A",
+        "yearScope": "current_policy"
+      },
+      "implementationState": "implemented_d4"
+    },
+    {
+      "key": "committee",
+      "frontendHash": "committee",
+      "responseKey": "committee",
+      "metricType": "information",
+      "percentagePolicy": "not_applicable",
+      "current": {
+        "sourceTables": ["Committees"],
+        "calculation": "all committee rows",
+        "knownGap": "Historical and current committee records are counted together and the information card defaults to On Track."
+      },
+      "target": {
+        "sourceTables": ["Committees"],
+        "numerator": "current committee or working-group count",
+        "denominator": null,
+        "formula": null,
+        "zeroDenominator": "not_applicable",
+        "yearScope": "current_records"
+      },
+      "implementationState": "implemented_d4"
+    },
+    {
+      "key": "machine-safety",
+      "frontendHash": "machine-safety",
+      "responseKey": "machineSafety",
+      "metricType": "progress",
+      "percentagePolicy": "required",
+      "current": {
+        "sourceTables": ["Machine_Safety", "Machine_Safety_Issues"],
+        "calculation": "active machine count with open issue and critical-risk counts",
+        "knownGap": "The card has no compliance percentage, and PHP critical count does not consistently exclude inactive machines."
+      },
+      "target": {
+        "sourceTables": ["Machine_Safety", "Machine_Safety_Compliance"],
+        "numerator": "passing checked compliance items on active machines",
+        "denominator": "checked non-N/A compliance items on active machines",
+        "formula": "passing checked items / checked non-N/A items",
+        "zeroDenominator": "N_A",
+        "yearScope": "current_active_population"
+      },
+      "implementationState": "implemented_d4"
+    },
+    {
+      "key": "ojt",
+      "frontendHash": "ojt",
+      "responseKey": "ojt",
+      "metricType": "progress",
+      "percentagePolicy": "required",
+      "current": {
+        "sourceTables": ["OJT_Records", "SCW_Documents"],
+        "calculation": "arithmetic average of latest Department coverage values with overdue values capped at 50",
+        "knownGap": "The displayed percentage mixes completion and overdue risk, and Department percentages are unweighted."
+      },
+      "target": {
+        "sourceTables": ["OJT_Records", "SCW_Documents"],
+        "numerator": "sum of capped attained participants from the latest eligible Department records",
+        "denominator": "sum of positive yearly targets from the same records",
+        "formula": "sum attained toward target / sum target",
+        "zeroDenominator": "N_A",
+        "yearScope": "latest_record_per_department_for_year"
+      },
+      "implementationState": "implemented_d4"
+    },
+    {
+      "key": "contractor",
+      "frontendHash": "contractor",
+      "responseKey": "contractor",
+      "metricType": "information",
+      "percentagePolicy": "not_applicable",
+      "current": {
+        "sourceTables": ["Contractor_Documents"],
+        "calculation": "all document rows with documents uploaded in the last 30 days",
+        "knownGap": "The all-time count is mixed with a rolling window and the information card defaults to On Track."
+      },
+      "target": {
+        "sourceTables": ["Contractor_Documents"],
+        "numerator": "documents in the explicitly labelled reporting scope",
+        "denominator": null,
+        "formula": null,
+        "zeroDenominator": "not_applicable",
+        "yearScope": "explicit_all_time_and_recent_counts"
+      },
+      "implementationState": "implemented_d4"
+    },
+    {
+      "key": "safety-culture",
+      "frontendHash": "safety-culture",
+      "responseKey": "safetyCulture",
+      "metricType": "progress",
+      "percentagePolicy": "required",
+      "current": {
+        "sourceTables": ["SC_Assessments"],
+        "calculation": "current-year assessment row count",
+        "knownGap": "The card does not expose the real assessment or PPE compliance percentage and defaults to On Track."
+      },
+      "target": {
+        "sourceTables": ["SC_Assessments", "SC_PPEInspections"],
+        "numerator": "sum of non-null normalized assessment topic scores",
+        "denominator": "count of non-null assessment topic scores multiplied by 100",
+        "formula": "sum normalized topic scores / maximum available score",
+        "zeroDenominator": "N_A",
+        "yearScope": "calendar_year"
+      },
+      "implementationState": "implemented_d4"
+    }
+  ]
+}

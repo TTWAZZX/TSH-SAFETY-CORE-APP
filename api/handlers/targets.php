@@ -408,8 +408,6 @@ function target_row(array $activity, array $merged): array
         $source = 'scope';
     } elseif (isset($merged['templateMap'][$key])) {
         $source = 'template';
-    } elseif ($activity['metricType'] === 'dynamic_ratio') {
-        $source = 'system';
     }
     return [
         'activityKey' => $key, 'label' => $activity['label'], 'desc' => $activity['desc'],
@@ -422,6 +420,31 @@ function target_row(array $activity, array $merged): array
         'targetYear' => $row['targetYear'] ?? null,
         'scope' => $source === 'scope' ? ['department' => $row['Department'] ?? null, 'unit' => $row['Unit'] ?? ''] : null,
     ];
+}
+
+function mandatory_policy_target_for_employee(string $employeeId, int $year): array
+{
+    try {
+        $policy = db_row(
+            'SELECT p.id,p.PolicyTitle title,
+                    EXISTS(
+                        SELECT 1 FROM policy_acknowledgements pa
+                         WHERE pa.PolicyID=p.id AND pa.UserID=?
+                    ) acknowledged
+               FROM policies p
+              WHERE p.IsCurrent=1
+              ORDER BY p.EffectiveDate DESC,p.id DESC
+              LIMIT 1',
+            [$employeeId]
+        );
+        return personal_target_mandatory_policy([
+            'available'=>true,
+            'policy'=>$policy ? ['id'=>$policy['id'],'title'=>$policy['title'] ?? ''] : null,
+            'acknowledged'=>!empty($policy['acknowledged']),
+        ], $year);
+    } catch (Throwable $e) {
+        return personal_target_mandatory_policy(['available'=>false,'error'=>$e->getMessage()], $year);
+    }
 }
 
 function activity_target_coverage_matrix_data(?int $year = null, bool $ensureSchema = true): array
@@ -485,7 +508,7 @@ function activity_target_coverage_matrix_data(?int $year = null, bool $ensureSch
             }
             $row = $overrideMap[$empId . '::' . $key] ?? $scope ?? $templateMap[$position . '::' . $key] ?? null;
             $isDynamic = $activity['metricType'] === 'dynamic_ratio';
-            $source = isset($overrideMap[$empId . '::' . $key]) ? 'override' : ($scope !== null ? 'scope' : (isset($templateMap[$position . '::' . $key]) ? 'template' : ($isDynamic ? 'system' : 'missing')));
+            $source = isset($overrideMap[$empId . '::' . $key]) ? 'override' : ($scope !== null ? 'scope' : (isset($templateMap[$position . '::' . $key]) ? 'template' : 'missing'));
             $isNA = $row !== null && !empty($row['IsNA']);
             $target = $row !== null ? (int) $row['YearlyTarget'] : null;
             $zero = !$isDynamic && !$isNA && $target !== null && $target === 0;
@@ -747,7 +770,22 @@ function handle_target_routes(string $method, string $path): bool
     if ($method === 'GET' && $path === '/activity-targets/me') {
         $merged = merged_activity_targets((string) ($user['id'] ?? ''));
         $year = (int) date('Y');
-        $cccfWorkerProgress = cccf_worker_progress_data($year);
+        $eligibleActivities = [];
+        $eligibleRows = [];
+        foreach (activity_definitions() as $activity) {
+            $target = target_row($activity, $merged);
+            $eligibility = personal_target_admin_eligibility($activity, $target);
+            if (!$eligibility['eligible']) continue;
+            $eligibleActivities[] = $activity;
+            $eligibleRows[$activity['key']] = $target;
+        }
+        $eligibleKeys = array_fill_keys(array_map(static function ($activity) {
+            return $activity['key'];
+        }, $eligibleActivities), true);
+        $mandatoryPolicyTarget = mandatory_policy_target_for_employee((string) ($user['id'] ?? ''), $year);
+        $cccfWorkerProgress = isset($eligibleKeys['cccf_worker'])
+            ? cccf_worker_progress_data($year)
+            : ['employees'=>[]];
         $cccfWorkerSelf = null;
         foreach (($cccfWorkerProgress['employees'] ?? []) as $progressRow) {
             if ((string) ($progressRow['employeeId'] ?? '') === (string) ($user['id'] ?? '')) {
@@ -755,15 +793,19 @@ function handle_target_routes(string $method, string $path): bool
                 break;
             }
         }
-        $dynamicRatios = [
-            'patrol_issue' => dynamic_activity_ratio('patrol_issue', (string) ($user['department'] ?? ''), $year),
-            'yokoten' => dynamic_activity_ratio('yokoten', (string) ($user['department'] ?? ''), $year),
-        ];
+        $dynamicRatios = [];
+        foreach ($eligibleActivities as $activity) {
+            if ($activity['metricType'] !== 'dynamic_ratio') continue;
+            $dynamicRatios[$activity['key']] = dynamic_activity_ratio(
+                $activity['key'],
+                (string) ($user['department'] ?? ''),
+                $year
+            );
+        }
         $peopleCoverages = [];
-        foreach (activity_definitions() as $activity) {
+        foreach ($eligibleActivities as $activity) {
             if ($activity['metricType'] !== 'people_coverage') continue;
-            $target = target_row($activity, $merged);
-            if ($target['yearlyTarget'] === null) continue;
+            $target = $eligibleRows[$activity['key']];
             $isPersonalCccfWorker = $activity['key'] === 'cccf_worker'
                 && isset($merged['templateMap']['cccf_worker'])
                 && empty($merged['templateMap']['cccf_worker']['IsNA'])
@@ -778,9 +820,9 @@ function handle_target_routes(string $method, string $path): bool
             );
         }
         $fixedCountAlignments = [];
-        foreach (activity_definitions() as $activity) {
+        foreach ($eligibleActivities as $activity) {
             if (!in_array($activity['key'], ['patrol', 'ky'], true)) continue;
-            $target = target_row($activity, $merged);
+            $target = $eligibleRows[$activity['key']];
             $fixedCountAlignments[$activity['key']] = fixed_count_alignment(
                 $activity['key'],
                 (string) ($user['id'] ?? ''),
@@ -801,13 +843,10 @@ function handle_target_routes(string $method, string $path): bool
             'hiyari' => safe_scalar('SELECT COUNT(*) FROM hiyarireports WHERE ReporterID=? AND YEAR(ReportDate)=?', [$user['id'], $year]),
             'ky' => safe_scalar('SELECT COUNT(*) FROM ky_activities WHERE ReporterID=? AND YEAR(ActivityDate)=?', [$user['id'], $year]),
         ];
-        $targets = [];
-        foreach (activity_definitions() as $activity) {
-            $row = target_row($activity, $merged);
+        $additionalTargets = [];
+        foreach ($eligibleActivities as $activity) {
+            $row = $eligibleRows[$activity['key']];
             $ratio = $dynamicRatios[$activity['key']] ?? $peopleCoverages[$activity['key']] ?? $fixedCountAlignments[$activity['key']] ?? null;
-            if ($row['isNA'] || ($ratio === null && $row['metricType'] !== 'dynamic_ratio' && $row['yearlyTarget'] === null)) {
-                continue;
-            }
             $actual = $ratio ? (int) $ratio['numerator'] : (int) ($actuals[$activity['key']] ?? 0);
             if ($ratio) $row['yearlyTarget'] = (int) $ratio['denominator'];
             if ($activity['key'] === 'cccf_worker' && $cccfWorkerSelf) {
@@ -823,6 +862,12 @@ function handle_target_routes(string $method, string $path): bool
             $row['calculationScope'] = $ratio ? ($ratio['calculationScope'] ?? ['type' => 'department', 'department' => $ratio['department']]) : null;
             $row['calculationMethod'] = $ratio['calculationMethod'] ?? null;
             $row['targetSource'] = $ratio['targetSource'] ?? null;
+            $row['eligibilityType'] = 'admin_configured';
+            $row['eligibilitySource'] = $row['source'];
+            $row['isMandatory'] = false;
+            $row['measurementSource'] = $ratio
+                ? (!empty($ratio['targetSource']) && $ratio['targetSource'] !== 'activity_target' ? 'module' : 'system')
+                : 'employee_activity';
             if ($activity['key'] === 'cccf_worker'
                 && isset($merged['templateMap']['cccf_worker'])
                 && empty($merged['templateMap']['cccf_worker']['IsNA'])
@@ -830,10 +875,16 @@ function handle_target_routes(string $method, string $path): bool
                 $row['calculationScope'] = ['type' => 'employee', 'employeeId' => (string) ($user['id'] ?? '')];
                 $row['calculationMethod'] = 'cccf_worker_progress_engine_actual_toward_target';
             }
-            if ($row['source'] === 'none' && !empty($row['targetSource']) && $row['targetSource'] !== 'activity_target') $row['source'] = 'module';
-            $targets[] = $row;
+            $additionalTargets[] = $row;
         }
-        json_response(['success' => true, 'data' => compact('year', 'targets')]);
+        $targets = array_merge([$mandatoryPolicyTarget], $additionalTargets);
+        $eligibility = [
+            'mandatoryTargets'=>1,
+            'additionalConfiguredTargets'=>count($additionalTargets),
+            'hasAdditionalConfiguredTargets'=>count($additionalTargets) > 0,
+            'emptyState'=>count($additionalTargets) > 0 ? null : 'NO_ADDITIONAL_ADMIN_TARGETS',
+        ];
+        json_response(['success' => true, 'data' => compact('year', 'targets', 'eligibility')]);
     }
     return false;
 }

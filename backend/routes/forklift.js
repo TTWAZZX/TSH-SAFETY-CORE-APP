@@ -85,6 +85,16 @@ function parseTypeIds(body, fallback = []) {
     return ids.slice(0, 2);
 }
 
+function normalizeTypeIds(values = []) {
+    return [...new Set((Array.isArray(values) ? values : [values]).map(value => Number(value)).filter(value => Number.isInteger(value) && value > 0))].sort((a, b) => a - b).slice(0, 2);
+}
+
+function sameTypeSet(left = [], right = []) {
+    const a = normalizeTypeIds(left);
+    const b = normalizeTypeIds(right);
+    return a.length === b.length && a.every((value, index) => value === b[index]);
+}
+
 async function syncTypeMap(conn, table, ownerColumn, ownerId, typeIds) {
     await conn.query(`DELETE FROM ${table} WHERE ${ownerColumn}=?`, [ownerId]);
     for (const typeId of typeIds.slice(0, 2)) {
@@ -151,7 +161,8 @@ async function templatePayload(templateId = null) {
     const params = [];
     let where = '';
     if (templateId) { where = ' WHERE tpl.ID=?'; params.push(templateId); }
-    const [templates] = await db.query(`SELECT tpl.*,typ.Code AS LicenseTypeCode,typ.NameTH AS LicenseTypeNameTH,(SELECT COUNT(*) FROM forklift_card_template_versions pv JOIN forklift_card_print_logs pl ON pl.TemplateVersionID=pv.ID WHERE pv.TemplateID=tpl.ID) AS PrintLogCount FROM forklift_card_templates tpl LEFT JOIN forklift_license_types typ ON typ.ID=tpl.LicenseTypeID${where} ORDER BY COALESCE(tpl.ArchivedAt,'1000-01-01') ASC,tpl.UpdatedAt DESC,tpl.ID DESC`, params);
+    let [templates] = await db.query(`SELECT tpl.*,typ.Code AS LicenseTypeCode,typ.NameTH AS LicenseTypeNameTH,typ.NameEN AS LicenseTypeNameEN,(SELECT COUNT(*) FROM forklift_card_template_versions pv JOIN forklift_card_print_logs pl ON pl.TemplateVersionID=pv.ID WHERE pv.TemplateID=tpl.ID) AS PrintLogCount FROM forklift_card_templates tpl LEFT JOIN forklift_license_types typ ON typ.ID=tpl.LicenseTypeID${where} ORDER BY COALESCE(tpl.ArchivedAt,'1000-01-01') ASC,tpl.UpdatedAt DESC,tpl.ID DESC`, params);
+    templates = await attachTypeNames(templates, 'ID', 'forklift_card_template_type_map', 'TemplateID');
     for (const tpl of templates) {
         const [versions] = await db.query('SELECT * FROM forklift_card_template_versions WHERE TemplateID=? ORDER BY VersionNo DESC,ID DESC', [tpl.ID]);
         for (const ver of versions) {
@@ -213,7 +224,7 @@ async function schemaReady() {
         'forklift_license_types','forklift_licenses','forklift_license_requests','forklift_license_type_map',
         'forklift_request_type_map','forklift_request_documents','forklift_request_events','forklift_license_renewals',
         'forklift_license_documents','forklift_employee_photos','forklift_card_templates','forklift_card_template_versions',
-        'forklift_card_template_fields','forklift_layout_presets','forklift_card_print_logs','forklift_verification_tokens',
+        'forklift_card_template_fields','forklift_card_template_type_map','forklift_layout_presets','forklift_card_print_logs','forklift_verification_tokens',
         'forklift_emailoutbox','forklift_sequences','forklift_settings',
     ];
     try {
@@ -261,6 +272,7 @@ async function ensure() {
     await db.query(`CREATE TABLE IF NOT EXISTS forklift_card_templates (ID INT AUTO_INCREMENT PRIMARY KEY,LicenseTypeID INT NULL,TemplateName VARCHAR(150) NOT NULL,IsActive TINYINT(1) NOT NULL DEFAULT 1,IsDefault TINYINT(1) NOT NULL DEFAULT 0,CreatedAt DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,UpdatedAt DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`);
     await db.query(`CREATE TABLE IF NOT EXISTS forklift_card_template_versions (ID INT AUTO_INCREMENT PRIMARY KEY,TemplateID INT NOT NULL,VersionNo INT NOT NULL DEFAULT 1,FrontImageUrl TEXT,BackImageUrl TEXT,CardWidthMm DECIMAL(8,2) DEFAULT 60.00,CardHeightMm DECIMAL(8,2) DEFAULT 82.00,Dpi INT DEFAULT 300,Status VARCHAR(30) NOT NULL DEFAULT 'draft',CreatedBy VARCHAR(100),CreatedAt DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,PublishedAt DATETIME NULL,UNIQUE KEY uq_template_version(TemplateID,VersionNo)) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`);
     await db.query(`CREATE TABLE IF NOT EXISTS forklift_card_template_fields (ID INT AUTO_INCREMENT PRIMARY KEY,TemplateVersionID INT NOT NULL,FieldKey VARCHAR(80) NOT NULL,FieldConfig JSON NULL,SortOrder INT NOT NULL DEFAULT 100,CreatedAt DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,UpdatedAt DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,KEY idx_version(TemplateVersionID)) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`);
+    await db.query(`CREATE TABLE IF NOT EXISTS forklift_card_template_type_map (ID INT AUTO_INCREMENT PRIMARY KEY,TemplateID INT NOT NULL,LicenseTypeID INT NOT NULL,CreatedAt DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,UNIQUE KEY uq_fl_template_type(TemplateID,LicenseTypeID),KEY idx_type(LicenseTypeID),KEY idx_template(TemplateID)) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`);
     await db.query(`CREATE TABLE IF NOT EXISTS forklift_layout_presets (ID INT AUTO_INCREMENT PRIMARY KEY,PresetName VARCHAR(150) NOT NULL,FieldsJson LONGTEXT NOT NULL,CreatedBy VARCHAR(100),CreatedAt DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,UpdatedBy VARCHAR(100),UpdatedAt DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,UNIQUE KEY uq_fl_layout_preset_name(PresetName)) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`);
     await db.query(`CREATE TABLE IF NOT EXISTS forklift_card_print_logs (ID INT AUTO_INCREMENT PRIMARY KEY,LicenseID INT NOT NULL,TemplateVersionID INT NULL,Action VARCHAR(40) NOT NULL,PrintedBy VARCHAR(100),PrintedAt DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,SnapshotJson JSON NULL,RenderMetadata JSON NULL,KEY idx_license(LicenseID),KEY idx_printed(PrintedAt)) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`);
     await db.query(`CREATE TABLE IF NOT EXISTS forklift_verification_tokens (ID INT AUTO_INCREMENT PRIMARY KEY,LicenseID INT NOT NULL,Token VARCHAR(120) NOT NULL,IsActive TINYINT(1) NOT NULL DEFAULT 1,RevokedAt DATETIME NULL,CreatedAt DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,LastAccessedAt DATETIME NULL,AccessCount INT NOT NULL DEFAULT 0,UNIQUE KEY uq_fl_token(Token),KEY idx_license(LicenseID,IsActive)) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`);
@@ -280,6 +292,7 @@ async function ensure() {
     await db.query(`INSERT IGNORE INTO forklift_settings(SettingKey,SettingValue) VALUES ('expiry_warn_days_primary','60'),('expiry_warn_days_secondary','30'),('expiry_warn_days_urgent','7'),('default_validity_months','12'),('document_max_upload_mb','5'),('manager_signature_url',''),('approval_queue_enabled','1'),('request_sla_days','3')`);
     await db.query(`INSERT IGNORE INTO forklift_license_type_map(LicenseID,LicenseTypeID) SELECT ID,LicenseTypeID FROM forklift_licenses WHERE LicenseTypeID IS NOT NULL`);
     await db.query(`INSERT IGNORE INTO forklift_request_type_map(RequestID,LicenseTypeID) SELECT ID,LicenseTypeID FROM forklift_license_requests WHERE LicenseTypeID IS NOT NULL`);
+    await db.query(`INSERT IGNORE INTO forklift_card_template_type_map(TemplateID,LicenseTypeID) SELECT ID,LicenseTypeID FROM forklift_card_templates WHERE LicenseTypeID IS NOT NULL`);
     ready = true;
 }
 
@@ -647,22 +660,50 @@ async function cardPayload(req, licenseId, templateVersionId = null) {
     const [[licenseRaw]] = await db.query(`${selectSql()} WHERE l.ID=? AND l.DeletedAt IS NULL LIMIT 1`, [licenseId]);
     if (!licenseRaw) return null;
     const license = (await attachTypeNames(await attachEffective([licenseRaw])))[0];
+    const licenseTypeIds = normalizeTypeIds(license.LicenseTypeIDs?.length ? license.LicenseTypeIDs : [license.LicenseTypeID]);
+    const primaryTypeId = Number(license.LicenseTypeID || licenseTypeIds[0] || 0);
     const templateParams = [];
     let versionWhere = "v.Status='published'";
     if (templateVersionId) {
         versionWhere = 'v.ID=?';
         templateParams.push(templateVersionId);
     }
-    templateParams.push(license.LicenseTypeID, license.LicenseTypeID);
-    const [[version]] = await db.query(
+    const [candidateVersions] = await db.query(
         `SELECT v.*,tpl.TemplateName,tpl.LicenseTypeID AS TemplateLicenseTypeID,tpl.IsDefault
          FROM forklift_card_template_versions v
          JOIN forklift_card_templates tpl ON tpl.ID=v.TemplateID
-         WHERE ${versionWhere} AND tpl.IsActive=1 AND tpl.ArchivedAt IS NULL AND (tpl.LicenseTypeID IS NULL OR tpl.LicenseTypeID=?)
-         ORDER BY CASE WHEN tpl.LicenseTypeID=? THEN 0 ELSE 1 END, tpl.IsDefault DESC, v.PublishedAt DESC, v.ID DESC
-         LIMIT 1`,
+         WHERE ${versionWhere} AND tpl.IsActive=1 AND tpl.ArchivedAt IS NULL
+         ORDER BY tpl.IsDefault DESC, v.PublishedAt DESC, v.ID DESC`,
         templateParams
     );
+    const templateIds = [...new Set(candidateVersions.map(row => row.TemplateID).filter(Boolean))];
+    const templateTypes = new Map();
+    if (templateIds.length) {
+        const [maps] = await db.query('SELECT TemplateID,LicenseTypeID FROM forklift_card_template_type_map WHERE TemplateID IN (?) ORDER BY ID ASC', [templateIds]);
+        for (const item of maps) {
+            const list = templateTypes.get(item.TemplateID) || [];
+            list.push(Number(item.LicenseTypeID));
+            templateTypes.set(item.TemplateID, list);
+        }
+    }
+    const rankedVersions = candidateVersions.map(row => {
+        const mapped = templateTypes.get(row.TemplateID);
+        const typeIds = normalizeTypeIds(mapped?.length ? mapped : (row.TemplateLicenseTypeID ? [row.TemplateLicenseTypeID] : []));
+        let matchRank = null;
+        if (typeIds.length === 0) matchRank = 20;
+        else if (sameTypeSet(typeIds, licenseTypeIds)) matchRank = 0;
+        else if (typeIds.length === 1 && licenseTypeIds.includes(typeIds[0])) matchRank = typeIds[0] === primaryTypeId ? 10 : 11;
+        if (matchRank === null) return null;
+        return { ...row, TemplateTypeIDs: typeIds, _matchRank: matchRank };
+    }).filter(Boolean).sort((a, b) => {
+        if (a._matchRank !== b._matchRank) return a._matchRank - b._matchRank;
+        if (Number(a.IsDefault || 0) !== Number(b.IsDefault || 0)) return Number(b.IsDefault || 0) - Number(a.IsDefault || 0);
+        const ap = a.PublishedAt ? new Date(a.PublishedAt).getTime() : 0;
+        const bp = b.PublishedAt ? new Date(b.PublishedAt).getTime() : 0;
+        if (ap !== bp) return bp - ap;
+        return Number(b.ID || 0) - Number(a.ID || 0);
+    });
+    const version = rankedVersions[0] || null;
     if (!version) return { license, template: null, version: null, fields: [], values: {}, verification: null };
     const [fields] = await db.query('SELECT * FROM forklift_card_template_fields WHERE TemplateVersionID=? ORDER BY SortOrder ASC,ID ASC', [version.ID]);
     version.Fields = fields.map(normalizeField);
@@ -695,7 +736,7 @@ async function cardPayload(req, licenseId, templateVersionId = null) {
     };
     return {
         license,
-        template: { ID: version.TemplateID, TemplateName: version.TemplateName, LicenseTypeID: version.TemplateLicenseTypeID, IsDefault: version.IsDefault },
+        template: { ID: version.TemplateID, TemplateName: version.TemplateName, LicenseTypeID: version.TemplateLicenseTypeID, LicenseTypeIDs: version.TemplateTypeIDs || [], IsDefault: version.IsDefault },
         version,
         fields: version.Fields,
         values,
@@ -1661,12 +1702,15 @@ router.post('/templates', upload.fields([{ name: 'FrontImage', maxCount: 1 }, { 
     if (!(await requirePermission(req, res, 'FORKLIFT_TEMPLATE_MANAGE'))) return;
     const name = clean(req.body.TemplateName, 150);
     if (!name) return res.status(400).json({ success: false, message: 'TemplateName is required.' });
+    const typeIds = parseTypeIds(req.body);
+    const primaryTypeId = typeIds[0] || null;
     const front = uploadedImage(req, 'FrontImage');
     const back = uploadedImage(req, 'BackImage');
     const conn = await db.getConnection();
     try {
         await conn.beginTransaction();
-        const [tpl] = await conn.query('INSERT INTO forklift_card_templates(LicenseTypeID,TemplateName,IsActive,IsDefault) VALUES(?,?,1,?)', [req.body.LicenseTypeID ? Number(req.body.LicenseTypeID) : null, name, req.body.IsDefault ? 1 : 0]);
+        const [tpl] = await conn.query('INSERT INTO forklift_card_templates(LicenseTypeID,TemplateName,IsActive,IsDefault) VALUES(?,?,1,?)', [primaryTypeId, name, req.body.IsDefault ? 1 : 0]);
+        await syncTypeMap(conn, 'forklift_card_template_type_map', 'TemplateID', tpl.insertId, typeIds);
         const [ver] = await conn.query('INSERT INTO forklift_card_template_versions(TemplateID,VersionNo,FrontImageUrl,BackImageUrl,CardWidthMm,CardHeightMm,Dpi,Status,CreatedBy) VALUES(?,?,?,?,?,?,?,?,?)', [tpl.insertId, 1, front, back, Number(req.body.CardWidthMm || 60), Number(req.body.CardHeightMm || 82), Number(req.body.Dpi || 300), 'draft', userName(req)]);
         await seedTemplateFields(conn, ver.insertId);
         await conn.commit();
@@ -1708,6 +1752,7 @@ router.delete('/templates/:id', async (req, res) => {
             if (force) await conn.query('DELETE FROM forklift_card_print_logs WHERE TemplateVersionID=?', [ver.ID]);
             await conn.query('DELETE FROM forklift_card_template_fields WHERE TemplateVersionID=?', [ver.ID]);
         }
+        await conn.query('DELETE FROM forklift_card_template_type_map WHERE TemplateID=?', [req.params.id]);
         await conn.query('DELETE FROM forklift_card_template_versions WHERE TemplateID=?', [req.params.id]);
         await conn.query('DELETE FROM forklift_card_templates WHERE ID=?', [req.params.id]);
         await conn.commit();

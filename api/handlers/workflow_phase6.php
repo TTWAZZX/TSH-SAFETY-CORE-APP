@@ -96,7 +96,7 @@ function wf_text($value, int $max = 1000): ?string
     return $v === '' ? null : mb_substr($v, 0, $max);
 }
 
-function wf_email_outbox(string $table, array $cols): void
+function wf_email_outbox(string $table, array $cols, bool $attemptImmediate = true): void
 {
     try {
         db_execute(
@@ -104,8 +104,10 @@ function wf_email_outbox(string $table, array $cols): void
             array_values($cols)
         );
         $id = (int) db()->lastInsertId();
-        $recipientColumn = array_key_exists('Recipient', $cols) ? 'Recipient' : 'Recipients';
-        mailer_outbox_best_effort($table, $id, $recipientColumn, array_key_exists('HtmlBody', $cols) ? 'HtmlBody' : null);
+        if ($attemptImmediate) {
+            $recipientColumn = array_key_exists('Recipient', $cols) ? 'Recipient' : 'Recipients';
+            mailer_outbox_best_effort($table, $id, $recipientColumn, array_key_exists('HtmlBody', $cols) ? 'HtmlBody' : null);
+        }
     } catch (Throwable $e) {
         // Email delivery is best-effort; never fail the user workflow.
     }
@@ -2022,6 +2024,9 @@ function handle_ky_routes(string $method, string $path): bool
 
 function wf_ensure_yokoten_tables(): void
 {
+    static $ready = false;
+    if ($ready) return;
+
     db()->exec("CREATE TABLE IF NOT EXISTS yokotentopics (
         YokotenID VARCHAR(36) PRIMARY KEY,Title VARCHAR(200),TopicDescription TEXT NOT NULL,Category VARCHAR(50) DEFAULT 'General',
         RiskLevel VARCHAR(20) DEFAULT 'Low',DateIssued DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,Deadline DATE,AttachmentUrl TEXT,AttachmentName VARCHAR(255),
@@ -2059,6 +2064,7 @@ function wf_ensure_yokoten_tables(): void
         "ALTER TABLE yokotenresponses ADD COLUMN IsDeleted TINYINT(1) DEFAULT 0",
         "ALTER TABLE yokotenresponses MODIFY COLUMN EmployeeID VARCHAR(50) NOT NULL",
     ] as $sql) wf_try_exec($sql);
+    $ready = true;
 }
 
 function wf_yokoten_attach_responses(array $topics, array $user): array
@@ -2315,6 +2321,17 @@ function wf_yokoten_queue_approval_email(string $responseId, string $actor): voi
     wf_yokoten_queue_email($responseId, 'Approved', $actor);
 }
 
+function wf_yokoten_delete_file_if_unreferenced(?string $fileUrl): void
+{
+    $fileUrl = trim((string)$fileUrl);
+    if ($fileUrl === '') return;
+    $references = (int)(safe_scalar(
+        'SELECT COUNT(*) FROM yokoten_response_files WHERE FileURL=?',
+        [$fileUrl]
+    ) ?? 0);
+    if ($references === 0) delete_uploaded_file($fileUrl);
+}
+
 function wf_yokoten_admin_email(): string
 {
     $candidates = [
@@ -2400,7 +2417,7 @@ function wf_yokoten_mail(array $row, string $event, string $actor, string $recip
     return ['subject' => $cfg['subject'], 'body' => $mail['body'], 'html' => $mail['html']];
 }
 
-function wf_yokoten_queue_email(string $responseId, string $event, string $actor): void
+function wf_yokoten_queue_email(string $responseId, string $event, string $actor, bool $attemptImmediate = true): void
 {
     try {
         $row = db_row('SELECT r.ResponseID,r.Department,r.EmployeeID,r.EmployeeName,r.IsRelated,r.ApprovalComment,r.ApprovedAt,t.Title,t.TopicDescription,t.RiskLevel,e.CompanyEmail FROM yokotenresponses r LEFT JOIN yokotentopics t ON t.YokotenID=r.YokotenID LEFT JOIN employees e ON e.EmployeeID=r.EmployeeID WHERE r.ResponseID=?', [$responseId]);
@@ -2409,7 +2426,11 @@ function wf_yokoten_queue_email(string $responseId, string $event, string $actor
         $recipient = $recipientKind === 'admin' ? wf_yokoten_admin_email() : trim((string)($row['CompanyEmail'] ?? ''));
         if ($recipient === '') return;
         $mail = wf_yokoten_mail($row, $event, $actor, $recipientKind);
-        wf_email_outbox('yokoten_emailoutbox', ['ResponseID'=>$responseId,'EventType'=>$event,'Recipients'=>$recipient,'Subject'=>$mail['subject'],'Body'=>$mail['body'],'HtmlBody'=>$mail['html'],'Status'=>'Queued']);
+        wf_email_outbox(
+            'yokoten_emailoutbox',
+            ['ResponseID'=>$responseId,'EventType'=>$event,'Recipients'=>$recipient,'Subject'=>$mail['subject'],'Body'=>$mail['body'],'HtmlBody'=>$mail['html'],'Status'=>'Queued'],
+            $attemptImmediate
+        );
     } catch (Throwable $e) {
         // Email is best-effort; workflow actions must not fail because notification failed.
     }
@@ -2469,23 +2490,72 @@ function handle_yokoten_routes(string $method, string $path): bool
                 if($departmentUnitPlan===null&&$badResponseUnits){wf_cleanup_files($files);json_response(['success'=>false,'message'=>'Safety Unit is not in Master Data.'],400);}
                 $badTopicUnits=array_values(array_filter($responseUnits,static fn($unit)=>!wf_yokoten_unit_targeted($topic,$unit)));
                 if($departmentUnitPlan===null&&$badTopicUnits){wf_cleanup_files($files);json_response(['success'=>false,'message'=>'Safety Unit is outside this topic scope.'],400);}
-                $ph=implode(',',array_fill(0,count($depts),'?'));
-                $existing=db_rows("SELECT ResponseID,Department FROM yokotenresponses WHERE YokotenID=? AND Department IN ($ph) AND (IsDeleted IS NULL OR IsDeleted=0)",array_merge([$yid],$depts));
-                if($existing){
-                    wf_cleanup_files($files);
-                    json_response(['success'=>false,'message'=>'Selected department already responded.','existingResponse'=>$existing[0]],409);
-                }
                 if($related==='Yes'&&$corrective===null){wf_cleanup_files($files);json_response(['success'=>false,'message'=>'CorrectiveAction is required when IsRelated is Yes.'],400);}
                 if($related==='Yes'&&!$files){json_response(['success'=>false,'message'=>'At least one evidence file is required when IsRelated is Yes.'],400);}
-                $ids=[];
-                foreach($depts as $dept){
-                    $rid=wf_uuid();$ids[]=$rid;$approval=$related==='Yes'?'pending':null;
-                    $departmentSafetyUnit=$departmentUnitPlan!==null?(implode(', ',$departmentUnitPlan['unitMap'][$dept]??[])?:null):$safetyUnit;
-                    db_execute('INSERT INTO yokotenresponses (ResponseID,YokotenID,Department,SafetyUnit,EmployeeID,EmployeeName,IsRelated,Comment,CorrectiveAction,ApprovalStatus) VALUES (?,?,?,?,?,?,?,?,?,?)',[$rid,$yid,$dept,$departmentSafetyUnit,wf_user_id($user),$actor,$related,$comment,$related==='Yes'?$corrective:null,$approval]);
-                    foreach($files as $f)db_execute('INSERT INTO yokoten_response_files (FileID,ResponseID,YokotenID,Department,FileName,FileURL,PublicID,FileType,FileSize,UploadedBy) VALUES (?,?,?,?,?,?,?,?,?,?)',[wf_uuid(),$rid,$yid,$dept,$f['name'],$f['url'],$f['stored'],$f['type'],$f['size'],$actor]);
+                $ph=implode(',',array_fill(0,count($depts),'?'));
+                $ids=[];$restoredResponseCount=0;$staleResponseFiles=[];$pdo=db();$ownsTransaction=!$pdo->inTransaction();
+                try{
+                    if($ownsTransaction)$pdo->beginTransaction();
+                    $existingRows=db_rows(
+                        "SELECT ResponseID,Department,IsDeleted FROM yokotenresponses WHERE YokotenID=? AND Department IN ($ph) FOR UPDATE",
+                        array_merge([$yid],$depts)
+                    );
+                    $activeExisting=array_values(array_filter($existingRows,static fn($row)=>(int)($row['IsDeleted']??0)===0));
+                    if($activeExisting){
+                        if($ownsTransaction&&$pdo->inTransaction())$pdo->rollBack();
+                        wf_cleanup_files($files);
+                        json_response(['success'=>false,'message'=>'Selected department already responded.','existingResponse'=>$activeExisting[0]],409);
+                    }
+                    $deletedByDepartment=[];
+                    foreach($existingRows as $existingRow){
+                        if((int)($existingRow['IsDeleted']??0)!==1)continue;
+                        $departmentKey=trim((string)($existingRow['Department']??''));
+                        if($departmentKey!==''&&!isset($deletedByDepartment[$departmentKey]))$deletedByDepartment[$departmentKey]=$existingRow;
+                    }
+                    foreach($depts as $dept){
+                        $rid=wf_uuid();$approval=$related==='Yes'?'pending':null;
+                        $departmentSafetyUnit=$departmentUnitPlan!==null?(implode(', ',$departmentUnitPlan['unitMap'][$dept]??[])?:null):$safetyUnit;
+                        $deletedRow=$deletedByDepartment[$dept]??null;
+                        if($deletedRow){
+                            $rid=(string)$deletedRow['ResponseID'];
+                            $deletedFiles=db_rows(
+                                'SELECT FileID,FileURL FROM yokoten_response_files WHERE ResponseID=? FOR UPDATE',
+                                [$rid]
+                            );
+                            foreach($deletedFiles as $deletedFile)$staleResponseFiles[]=$deletedFile;
+                            db_execute('DELETE FROM yokoten_response_files WHERE ResponseID=?',[$rid]);
+                            $changed=db_execute(
+                                'UPDATE yokotenresponses SET SafetyUnit=?,EmployeeID=?,EmployeeName=?,IsRelated=?,Comment=?,CorrectiveAction=?,ApprovalStatus=?,ApprovalComment=NULL,ApprovedBy=NULL,ApprovedAt=NULL,ResponseDate=NOW(),IsDeleted=0 WHERE ResponseID=? AND IsDeleted=1',
+                                [$departmentSafetyUnit,wf_user_id($user),$actor,$related,$comment,$related==='Yes'?$corrective:null,$approval,$rid]
+                            );
+                            if($changed!==1)throw new RuntimeException('Unable to restore the deleted Yokoten response for '.$dept.'.');
+                            $restoredResponseCount++;
+                        }else{
+                            db_execute(
+                                'INSERT INTO yokotenresponses (ResponseID,YokotenID,Department,SafetyUnit,EmployeeID,EmployeeName,IsRelated,Comment,CorrectiveAction,ApprovalStatus) VALUES (?,?,?,?,?,?,?,?,?,?)',
+                                [$rid,$yid,$dept,$departmentSafetyUnit,wf_user_id($user),$actor,$related,$comment,$related==='Yes'?$corrective:null,$approval]
+                            );
+                        }
+                        $ids[]=$rid;
+                        foreach($files as $f)db_execute('INSERT INTO yokoten_response_files (FileID,ResponseID,YokotenID,Department,FileName,FileURL,PublicID,FileType,FileSize,UploadedBy) VALUES (?,?,?,?,?,?,?,?,?,?)',[wf_uuid(),$rid,$yid,$dept,$f['name'],$f['url'],$f['stored'],$f['type'],$f['size'],$actor]);
+                    }
+                    if($ownsTransaction)$pdo->commit();
+                }catch(Throwable $transactionError){
+                    if($ownsTransaction&&$pdo->inTransaction())$pdo->rollBack();
+                    throw $transactionError;
                 }
-                foreach($ids as $rid){wf_yokoten_queue_email((string)$rid,'Submitted',$actor);if($related==='Yes')wf_yokoten_queue_email((string)$rid,'RelatedSubmitted',$actor);}
-                json_response(['success'=>true,'id'=>$ids[0]??null,'responseId'=>$ids[0]??null,'responseIds'=>$ids]);
+                if($ownsTransaction)foreach($staleResponseFiles as $staleFile)wf_yokoten_delete_file_if_unreferenced($staleFile['FileURL']??null);
+                $attemptImmediate=count($ids)===1;
+                foreach($ids as $rid){wf_yokoten_queue_email((string)$rid,'Submitted',$actor,$attemptImmediate);if($related==='Yes')wf_yokoten_queue_email((string)$rid,'RelatedSubmitted',$actor,$attemptImmediate);}
+                json_response([
+                    'success'=>true,
+                    'message'=>count($ids)>1?'Responses saved for '.count($ids).' departments.':'Response saved.',
+                    'id'=>$ids[0]??null,
+                    'responseId'=>$ids[0]??null,
+                    'responseIds'=>$ids,
+                    'restoredResponseCount'=>$restoredResponseCount,
+                    'notificationMode'=>$attemptImmediate?'immediate':'queued',
+                ]);
             }else{
                 $row=db_row('SELECT * FROM yokotenresponses WHERE ResponseID=? AND (IsDeleted IS NULL OR IsDeleted=0)',[$p['id']]);
                 if(!$row){wf_cleanup_files($files);json_response(['success'=>false,'message'=>'Not found.'],404);}

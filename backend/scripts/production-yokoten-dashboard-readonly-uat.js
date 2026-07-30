@@ -44,22 +44,22 @@ async function main() {
     assert.ok(adminId && adminPassword, 'Production Admin UAT credentials are required in backend/.env');
 
     const index = await staticText('/');
-    assert.ok(index.includes('public/js/main.js?v=20260723-yokoten-dashboard-source-fix'), 'Production index cache marker');
+    assert.ok(index.includes('public/js/main.js?v=20260724-dashboard-hiyari-assignment'), 'Production index cache marker');
     pass('Production index cache marker');
 
     const mainSource = await staticText('/public/js/main.js');
-    assert.ok(mainSource.includes('yokoten.js?v=20260723-yokoten-dashboard-source-fix'), 'Production Yokoten cache marker');
-    assert.ok(mainSource.includes('dashboard.js?v=20260723-yokoten-dashboard-source-fix'), 'Production Dashboard cache marker');
+    assert.ok(mainSource.includes('yokoten.js?v=20260723-yokoten-admin-scope-r5'), 'Production Yokoten cache marker');
+    assert.ok(mainSource.includes('dashboard.js?v=20260724-dashboard-hiyari-assignment'), 'Production Dashboard cache marker');
     pass('Production module cache markers');
 
     const yokotenSource = await staticText('/public/js/pages/yokoten.js');
     assert.ok(yokotenSource.includes('data-selection-mode="all"'), 'Yokoten select-all control');
-    assert.ok(yokotenSource.includes('input[name="${groupName}"]:not(:disabled)'), 'Yokoten unanswered-only selection');
+    assert.ok(yokotenSource.includes("choice.responded ? 'bg-slate-50 text-slate-400 cursor-not-allowed'"), 'Yokoten answered Department lock');
     pass('Production Yokoten bulk-response controls');
 
     const dashboardSource = await staticText('/public/js/pages/dashboard.js');
-    assert.ok(dashboardSource.includes('row.coverageMeta?.[key]'), 'Dashboard source metadata tooltip');
-    pass('Production Dashboard coverage tooltip');
+    assert.ok(dashboardSource.includes('const metric = d.moduleMetrics?.[m.hash] || null'), 'Dashboard canonical metric source');
+    pass('Production Dashboard canonical moduleMetrics rendering');
 
     const login = await request('/api/login', {
         method: 'POST',
@@ -75,6 +75,40 @@ async function main() {
     assert.strictEqual(dashboard.response.status, 200, `Dashboard overview failed: ${dashboard.text.slice(0, 300)}`);
     const data = dashboard.json?.data;
     const matrix = data?.complianceMatrix;
+    const moduleMetrics = data?.moduleMetrics;
+    const expectedModuleKeys = [
+        'patrol', 'hiyari', 'ky', 'cccf', 'yokoten', 'training', 'accident', 'fourm',
+        'kpi', 'policy', 'committee', 'machine-safety', 'ojt', 'contractor', 'safety-culture',
+    ];
+    const requiredMetricFields = [
+        'key', 'metricType', 'numerator', 'denominator', 'percent', 'value', 'unit',
+        'source', 'scope', 'dataAvailable', 'status', 'statusReason', 'asOf',
+    ];
+    assert.deepStrictEqual(Object.keys(moduleMetrics || {}).sort(), [...expectedModuleKeys].sort(), 'Canonical module metric keys');
+    for (const key of expectedModuleKeys) {
+        const metric = moduleMetrics[key];
+        for (const field of requiredMetricFields) {
+            assert.ok(Object.prototype.hasOwnProperty.call(metric || {}, field), `${key}.${field} missing`);
+        }
+        if (metric.metricType === 'progress' && metric.dataAvailable && Number(metric.denominator) > 0) {
+            const expected = Math.round(
+                Math.min(Math.max(Number(metric.numerator), 0), Number(metric.denominator))
+                / Number(metric.denominator)
+                * 100
+            );
+            assert.strictEqual(Number(metric.percent), expected, `${key} percentage formula`);
+        }
+    }
+    assert.ok(
+        String(moduleMetrics.hiyari.source?.description || '').includes('Admin Hiyari assignments'),
+        'Hiyari source must be Admin assignments'
+    );
+    assert.strictEqual(Number(data?.hiyari?.assignmentTarget), Number(moduleMetrics.hiyari.denominator), 'Hiyari target parity');
+    assert.strictEqual(Number(data?.hiyari?.assignmentClosed), Number(moduleMetrics.hiyari.numerator), 'Hiyari closed parity');
+    pass(
+        'Production canonical Module Health metrics',
+        `${expectedModuleKeys.length} cards; Hiyari ${moduleMetrics.hiyari.numerator}/${moduleMetrics.hiyari.denominator} = ${moduleMetrics.hiyari.percent}%`
+    );
     assert.ok(Array.isArray(matrix) && matrix.length > 0, 'Dashboard matrix is empty');
     assert.strictEqual(data?.config?.cccfWorkerSource, 'manual_unit_target', 'CCCF source must be manual Unit targets');
     const visible = ['activityTargets', 'cccfWorker', 'cccfPermanent', 'patrolIssues', 'hiyari', 'ky', 'yokoten', 'training', 'accident', 'ojt'];
@@ -93,6 +127,25 @@ async function main() {
     assert.ok(positiveCccf.length > 0, 'Production CCCF Manual is still all zero');
     pass('Production Dashboard coverage matrix', `${matrix.length} departments; ${positiveCccf.length} CCCF rows above 0%`);
 
+    const personalTargets = await request('/api/activity-targets/me', { token });
+    assert.strictEqual(personalTargets.response.status, 200, `Personal Targets failed: ${personalTargets.text.slice(0, 300)}`);
+    const personalData = personalTargets.json?.data;
+    assert.ok(Array.isArray(personalData?.targets) && personalData.targets.length >= 1, 'Personal Targets are empty');
+    const mandatoryPolicy = personalData.targets.find(target => target.activityKey === 'policy_acknowledgement');
+    assert.ok(mandatoryPolicy?.isMandatory, 'Mandatory Safety Policy target missing');
+    const additionalTargets = personalData.targets.filter(target => !target.isMandatory);
+    assert.strictEqual(
+        Number(personalData.eligibility?.additionalConfiguredTargets),
+        additionalTargets.length,
+        'Admin-configured Personal Target count'
+    );
+    assert.strictEqual(
+        Boolean(personalData.eligibility?.hasAdditionalConfiguredTargets),
+        additionalTargets.length > 0,
+        'Personal Target eligibility flag'
+    );
+    pass('Production Personal Target eligibility', `1 mandatory + ${additionalTargets.length} Admin-configured`);
+
     const companyOverview = await request(`/api/yokoten/company-overview?year=${year}`, { token });
     assert.strictEqual(companyOverview.response.status, 200, `Yokoten company overview failed: ${companyOverview.text.slice(0, 300)}`);
     const companyRows = companyOverview.json?.data?.departments || [];
@@ -107,6 +160,17 @@ async function main() {
     assert.ok(compared > 0, 'No Yokoten department rows were comparable');
     pass('Yokoten Dashboard/module parity', `${compared} departments`);
 
+    const responseCountBefore = await request('/api/yokoten/all-responses', { token });
+    assert.strictEqual(responseCountBefore.response.status, 200, `Yokoten response count failed: ${responseCountBefore.text.slice(0, 300)}`);
+    const beforeCount = Array.isArray(responseCountBefore.json?.data) ? responseCountBefore.json.data.length : 0;
+    const invalidSubmit = await request('/api/yokoten/respond', { method: 'POST', token, body: {} });
+    assert.strictEqual(invalidSubmit.response.status, 400, `Invalid Yokoten submit must fail validation without a write: ${invalidSubmit.text.slice(0, 300)}`);
+    const responseCountAfter = await request('/api/yokoten/all-responses', { token });
+    assert.strictEqual(responseCountAfter.response.status, 200, `Yokoten response re-count failed: ${responseCountAfter.text.slice(0, 300)}`);
+    const afterCount = Array.isArray(responseCountAfter.json?.data) ? responseCountAfter.json.data.length : 0;
+    assert.strictEqual(afterCount, beforeCount, 'Invalid Yokoten submit changed response data');
+    pass('Production Yokoten submit validation', `HTTP 400; response count unchanged ${beforeCount}/${afterCount}`);
+
     const outputDir = path.join(
         path.resolve(__dirname, '..', '..'),
         'backups',
@@ -120,6 +184,10 @@ async function main() {
         authenticated: true,
         businessDataWrites: false,
         expectedSideEffects: ['successful login audit/attempt record', 'normal login housekeeping'],
+        moduleMetrics,
+        personalTargetEligibility: personalData.eligibility,
+        yokotenResponseCountBefore: beforeCount,
+        yokotenResponseCountAfter: afterCount,
         matrix: matrix.map(row => ({
             department: row.department,
             cccfWorker: row.cccfWorker,
