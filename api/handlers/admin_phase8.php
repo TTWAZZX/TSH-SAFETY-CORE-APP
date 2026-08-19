@@ -900,12 +900,23 @@ function admin8_parse_ky_participants($raw): array
     return array_values(array_filter(array_map('trim', preg_split('/[,;\n]+/', $text) ?: [])));
 }
 
+function admin8_safety_ky_coverage_key(array $row, int $fallbackIndex): string
+{
+    $date = trim((string) ($row['ActivityDate'] ?? ''));
+    if (preg_match('/^(\d{4})-(\d{2})/', $date, $match)) {
+        return $match[1] . '-' . $match[2];
+    }
+    $activityId = trim((string) ($row['id'] ?? $row['ID'] ?? $row['ActivityID'] ?? ''));
+    return $activityId !== '' ? $activityId : 'ky-' . $fallbackIndex;
+}
+
 function admin8_safety_ky_count_map(array $rows, array $employees): array
 {
     $rosterIds = [];
     $employeeIdByName = [];
-    $employeeIdsByUnit = [];
+    $employeeIdsByDepartmentUnit = [];
     $employeeIdsByDepartment = [];
+    $employeeIdsWithoutUnitByDepartment = [];
     $addIndex = static function (&$map, $key, $employeeId): void {
         $normalizedKey = admin8_safety_normalize_lookup($key);
         $id = admin8_safety_normalize_lookup($employeeId);
@@ -916,20 +927,25 @@ function admin8_safety_ky_count_map(array $rows, array $employees): array
     foreach ($employees as $emp) {
         $id = admin8_safety_normalize_lookup($emp['EmployeeID'] ?? '');
         $name = admin8_safety_normalize_lookup($emp['EmployeeName'] ?? '');
+        $department = admin8_safety_normalize_lookup($emp['Department'] ?? '');
+        $unit = admin8_safety_normalize_lookup($emp['Unit'] ?? '');
         if ($id !== '') $rosterIds[$id] = true;
         if ($id !== '' && $name !== '') $employeeIdByName[$name] = $id;
-        $addIndex($employeeIdsByUnit, $emp['Unit'] ?? '', $id);
-        $addIndex($employeeIdsByDepartment, $emp['Department'] ?? '', $id);
+        if ($department !== '' && $unit !== '') {
+            $addIndex($employeeIdsByDepartmentUnit, $department . "\x1F" . $unit, $id);
+        }
+        if ($department !== '' && $unit === '') {
+            $addIndex($employeeIdsWithoutUnitByDepartment, $department, $id);
+        }
+        $addIndex($employeeIdsByDepartment, $department, $id);
     }
 
-    $activityByEmployee = [];
-    $add = static function ($employeeId, $activityId) use (&$activityByEmployee, $rosterIds): void {
+    $coverageByEmployee = [];
+    $add = static function ($employeeId, string $coverageKey) use (&$coverageByEmployee, $rosterIds): void {
         $id = admin8_safety_normalize_lookup($employeeId);
         if ($id === '' || ($rosterIds && !isset($rosterIds[$id]))) return;
-        $key = trim((string) ($activityId ?? ''));
-        if ($key === '') $key = 'ky-' . (count($activityByEmployee) + 1);
-        if (!isset($activityByEmployee[$id])) $activityByEmployee[$id] = [];
-        $activityByEmployee[$id][$key] = true;
+        if (!isset($coverageByEmployee[$id])) $coverageByEmployee[$id] = [];
+        $coverageByEmployee[$id][$coverageKey] = true;
     };
     $resolveParticipant = static function ($participant) use ($rosterIds, $employeeIdByName): string {
         if (is_array($participant)) {
@@ -952,22 +968,27 @@ function admin8_safety_ky_count_map(array $rows, array $employees): array
         return $employeeIdByName[$text] ?? '';
     };
 
-    foreach ($rows as $row) {
-        $activityId = $row['id'] ?? $row['ID'] ?? $row['ActivityID'] ?? (($row['ReporterID'] ?? '') . '-' . ($row['ActivityDate'] ?? ''));
-        $add($row['ReporterID'] ?? '', $activityId);
-        $add($row['SubmittedByID'] ?? '', $activityId);
+    foreach ($rows as $index => $row) {
+        $coverageKey = admin8_safety_ky_coverage_key($row, $index + 1);
+        $add($row['ReporterID'] ?? '', $coverageKey);
+        $add($row['SubmittedByID'] ?? '', $coverageKey);
         foreach (admin8_parse_ky_participants($row['Participants'] ?? '') as $participant) {
-            $add($resolveParticipant($participant), $activityId);
+            $add($resolveParticipant($participant), $coverageKey);
         }
         $unit = admin8_safety_normalize_lookup($row['SafetyUnit'] ?? ($row['Unit'] ?? ''));
         $department = admin8_safety_normalize_lookup($row['Department'] ?? '');
-        foreach (($employeeIdsByUnit[$unit] ?? []) as $employeeId) $add($employeeId, $activityId);
-        foreach (($employeeIdsByDepartment[$department] ?? []) as $employeeId) $add($employeeId, $activityId);
+        $scopeIds = $unit !== ''
+            ? array_merge(
+                $employeeIdsByDepartmentUnit[$department . "\x1F" . $unit] ?? [],
+                $employeeIdsWithoutUnitByDepartment[$department] ?? []
+            )
+            : ($employeeIdsByDepartment[$department] ?? []);
+        foreach ($scopeIds as $employeeId) $add($employeeId, $coverageKey);
     }
 
     $map = [];
-    foreach ($activityByEmployee as $employeeId => $activityIds) {
-        $map[$employeeId] = count($activityIds);
+    foreach ($coverageByEmployee as $employeeId => $coverageKeys) {
+        $map[$employeeId] = count($coverageKeys);
     }
     return $map;
 }
@@ -1073,7 +1094,7 @@ function admin8_safety_target_record($actual, ?array $targetRow, string $activit
     if (!$targetRow || (int) ($targetRow['IsNA'] ?? 0) === 1) return 'N/A';
     $target = (int) ($targetRow['YearlyTarget'] ?? 0);
     if ($target <= 0) return 'N/A';
-    $unit = (string) ($defs[$activityKey]['unitLabel'] ?? 'target');
+    $unit = $activityKey === 'ky' ? 'เดือน' : (string) ($defs[$activityKey]['unitLabel'] ?? 'target');
     return ((int) $actual) . '/' . $target . ' (' . $unit . ')';
 }
 

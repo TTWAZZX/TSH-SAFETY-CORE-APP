@@ -25,6 +25,7 @@ const { getCccfWorkerProgress } = require('../utils/cccf-worker-progress');
 const { sendMail, smtpConfigured } = require('../utils/email');
 const { registrationEmailTemplate } = require('../utils/registration-email-template');
 const { ProfileValidationError } = require('../utils/profile-validator');
+const { buildKySafetyCoreCountMap } = require('../utils/safety-core-ky');
 const {
     CROSS_PATH_OPERATION,
     executeEmployeeProfileWrite,
@@ -751,90 +752,6 @@ function countMap(rows, key = 'EmployeeID', count = 'count') {
     return map;
 }
 
-function normalizeSafetyCoreLookup(value = '') {
-    return String(value || '').replace(/\s+/g, ' ').trim();
-}
-
-function parseKyParticipants(raw) {
-    if (!raw) return [];
-    if (Array.isArray(raw)) return raw;
-    const text = String(raw || '').trim();
-    if (!text) return [];
-    try {
-        const parsed = JSON.parse(text);
-        if (Array.isArray(parsed)) return parsed;
-        if (parsed && typeof parsed === 'object') return [parsed];
-    } catch {
-        // Older KY rows may store participants as plain comma/newline separated names.
-    }
-    return text.split(/[,;\n]+/).map(item => item.trim()).filter(Boolean);
-}
-
-function buildKySafetyCoreCountMap(kyRows = [], employees = []) {
-    const rosterIds = new Set();
-    const employeeIdByName = new Map();
-    const employeeIdsByUnit = new Map();
-    const employeeIdsByDepartment = new Map();
-    const addIndex = (map, key, employeeId) => {
-        const normalizedKey = normalizeSafetyCoreLookup(key);
-        const id = normalizeSafetyCoreLookup(employeeId);
-        if (!normalizedKey || !id) return;
-        if (!map.has(normalizedKey)) map.set(normalizedKey, []);
-        map.get(normalizedKey).push(id);
-    };
-    (employees || []).forEach(emp => {
-        const id = normalizeSafetyCoreLookup(emp.EmployeeID);
-        const name = normalizeSafetyCoreLookup(emp.EmployeeName);
-        if (id) rosterIds.add(id);
-        if (id && name) employeeIdByName.set(name, id);
-        addIndex(employeeIdsByUnit, emp.Unit, id);
-        addIndex(employeeIdsByDepartment, emp.Department, id);
-    });
-
-    const activityByEmployee = new Map();
-    const add = (employeeId, activityId) => {
-        const id = normalizeSafetyCoreLookup(employeeId);
-        if (!id || (rosterIds.size && !rosterIds.has(id))) return;
-        const key = String(activityId || '').trim() || `ky-${activityByEmployee.size + 1}`;
-        if (!activityByEmployee.has(id)) activityByEmployee.set(id, new Set());
-        activityByEmployee.get(id).add(key);
-    };
-    const resolveParticipant = participant => {
-        if (!participant) return '';
-        if (typeof participant === 'object') {
-            const directId = normalizeSafetyCoreLookup(
-                participant.EmployeeID ?? participant.employeeId ?? participant.empId ?? participant.id ?? participant.code
-            );
-            if (directId) return directId;
-            const objectName = normalizeSafetyCoreLookup(
-                participant.EmployeeName ?? participant.employeeName ?? participant.name ?? participant.Name
-            );
-            return employeeIdByName.get(objectName) || '';
-        }
-        const text = normalizeSafetyCoreLookup(participant);
-        if (!text) return '';
-        if (rosterIds.has(text)) return text;
-        const parenId = text.match(/\(([^()]+)\)\s*$/)?.[1];
-        if (parenId && rosterIds.has(normalizeSafetyCoreLookup(parenId))) return normalizeSafetyCoreLookup(parenId);
-        return employeeIdByName.get(text) || '';
-    };
-
-    (kyRows || []).forEach(row => {
-        const activityId = row.id ?? row.ID ?? row.ActivityID ?? `${row.ReporterID || ''}-${row.ActivityDate || ''}`;
-        add(row.ReporterID, activityId);
-        add(row.SubmittedByID, activityId);
-        parseKyParticipants(row.Participants).forEach(participant => {
-            add(resolveParticipant(participant), activityId);
-        });
-        const unit = normalizeSafetyCoreLookup(row.SafetyUnit ?? row.Unit);
-        const department = normalizeSafetyCoreLookup(row.Department);
-        (employeeIdsByUnit.get(unit) || []).forEach(employeeId => add(employeeId, activityId));
-        (employeeIdsByDepartment.get(department) || []).forEach(employeeId => add(employeeId, activityId));
-    });
-
-    return new Map([...activityByEmployee.entries()].map(([employeeId, activityIds]) => [employeeId, activityIds.size]));
-}
-
 function safetyCoreRecord(actual, target, unitText = 'เรื่อง/ปี') {
     const a = Number(actual || 0);
     const t = Number(target || 0);
@@ -911,7 +828,8 @@ function safetyCoreTargetRecord(actual, targetRow, activityKey) {
     if (!targetRow || Number(targetRow.IsNA || 0) === 1) return 'N/A';
     const target = Number(targetRow.YearlyTarget || 0);
     if (target <= 0) return 'N/A';
-    return `${Number(actual || 0)}/${target} (${activity.unitLabel || 'target'})`;
+    const unitLabel = activityKey === 'ky' ? 'เดือน' : (activity.unitLabel || 'target');
+    return `${Number(actual || 0)}/${target} (${unitLabel})`;
 }
 
 function safetyCoreRatioRecord(ratio, targetRow) {
