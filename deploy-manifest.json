@@ -1,14 +1,14 @@
 {
   "schemaVersion": 1,
-  "generatedAt": "2026-08-19T16:02:39+07:00",
-  "sourceHead": "2c447be54e89a4127bb76256f0e2b5ff61f0a262",
-  "previousProductionBuild": "patrol-close-review-idempotent-20260818",
-  "buildId": "fourm-stabilization-20260819",
-  "cacheBust": "20260819-fourm-stabilization",
+  "generatedAt": "2026-08-19T16:58:41+07:00",
+  "sourceHead": "d18b604",
+  "previousProductionBuild": "fourm-stabilization-20260819",
+  "buildId": "fourm-white-screen-hotfix-20260819",
+  "cacheBust": "20260819-fourm-white-screen-hotfix",
   "runtime": "shared-hosting-php",
-  "deployPhase": "fourm-stabilization",
-  "deploymentStatus": "deployed-and-authenticated-smoke-passed",
-  "deployedAt": "2026-08-19T16:00:23+07:00",
+  "deployPhase": "fourm-white-screen-hotfix",
+  "deploymentStatus": "deployed-and-static-smoke-passed",
+  "deployedAt": "2026-08-19T16:57:00+07:00",
   "databaseMutationPlanned": false,
   "schemaMutationPlanned": false,
   "uploadStorageMutationPlanned": false,
@@ -16,47 +16,37 @@
     "index.html",
     "public/js/main.js",
     "public/js/pages/fourm.js",
-    "api/handlers/fourm_phase7.php",
     "deploy-manifest.json"
   ],
   "fileHashes": [
     {
       "path": "index.html",
-      "sha256": "b71d7c380018f963e1b2bb9b2b42190a5107ddb903bc0a36cd41b50ae876f9cf"
+      "sha256": "cda8337a6816337ff6659e323494ae73f875b71a39015aa228e33fd6ef40bee4"
     },
     {
       "path": "public/js/main.js",
-      "sha256": "685f0ac2d099c69745360d5fbf80aa19f8a794e5ef42f879c2dc396bc2260442"
+      "sha256": "4d4c8638f4dea9fba440c3212095feeb463fbd01b5fe91cc9890951f3aa81bae"
     },
     {
       "path": "public/js/pages/fourm.js",
-      "sha256": "2228d0a5253aa3a6c8f4922afca168ec43d07231a6a98e174a2b6609e803935e"
-    },
-    {
-      "path": "api/handlers/fourm_phase7.php",
-      "sha256": "2c197929ff8b4e316fb9fd9bfbe2d78277e9ec69a263ae905067f2631fa10693"
+      "sha256": "95484ae91dc3037c9f51d314587e119219e631e0e4daf269f41844523bc89ca1"
     }
   ],
   "verification": {
-    "phpLint": "PASS",
     "nodeSyntax": "PASS",
-    "fourmFocusedRegression": "PASS including app-level duplicate guards for legacy schemas without unique indexes",
-    "fullBackendRegression": "PASS including API smoke and read-only UAT 91/91",
-    "productionReadOnlyBaseline": "PASS: all 4M Training Matrix endpoints used by the frontend returned HTTP 200",
+    "fourmFocusedRegression": "PASS",
+    "rootCause": "three orphaned HTML/template lines remained outside a function in fourm.js and caused Unexpected token '<' during module parsing",
     "gitDiffCheck": "PASS",
     "databaseMutationAttempted": false,
     "schemaMutationAttempted": false,
     "uploadStorageMutationAttempted": false
   },
   "productionVerification": {
-    "codeAndUploadBackup": "backups/production/fourm-stabilization-predeploy-20260819-152348",
-    "uploadBackupFiles": 774,
-    "uploadBackupBytes": 1143117547,
-    "initialUploadVerify": "backups/production/fourm-stabilization-upload-verify-20260819-155131",
-    "hotfixUploadVerify": "backups/production/fourm-stabilization-hotfix-verify-20260819-155653",
-    "finalRuntimeVerify": "backups/production/fourm-stabilization-final-verify-20260819-160239",
-    "sha256Matches": "PASS: final Production download-back matched all 5 runtime files",
-    "smoke": "PASS: authenticated Production smoke passed 11 checks; evidence backups/production/fourm-stabilization-smoke-20260819T090007Z/result.json",
+    "codeBackup": "backups/production/fourm-white-screen-hotfix-predeploy-20260819-165556",
+    "uploadVerify": "backups/production/fourm-white-screen-hotfix-upload-verify-20260819-165556",
+    "finalRuntimeVerify": "backups/production/fourm-white-screen-hotfix-final-verify-20260819-165841",
+    "sha256Matches": "PASS: Production download-back matched 3/3 runtime files",
+    "smoke": "PASS: Production HTTP returned the new cache markers and exact fourm.js SHA-256; node --check passed",
     "businessDataChanged": false,
     "temporaryHelperCleanup": "no helper uploaded; FTP check found zero temporary backup files",
     "temporaryRowsRemaining": 0,

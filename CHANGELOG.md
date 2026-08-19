@@ -2,6 +2,26 @@
 
 This file preserves historical production handoff, smoke test, backup, deployment, migration, and phase notes moved out of `CLAUDE.md`.
 
+## 4M White-screen Syntax Hotfix (2026-08-19)
+
+Fixed the 4M page rendering as a blank white screen with browser console error
+`Unexpected token '<'`. Three orphaned HTML/template lines remained outside a
+function in `public/js/pages/fourm.js` after the Training Matrix duplicate-code
+cleanup, preventing the entire ES module from parsing. The orphaned lines were
+removed and the `main.js` plus 4M import cache keys were advanced to
+`20260819-fourm-white-screen-hotfix`.
+
+Production rollback files are stored at
+`backups/production/fourm-white-screen-hotfix-predeploy-20260819-165556/`.
+Uploaded runtime files were `index.html`, `public/js/main.js`, and
+`public/js/pages/fourm.js`; FTP download-back SHA-256 matched 3/3 at
+`backups/production/fourm-white-screen-hotfix-upload-verify-20260819-165556/`.
+The final manifest-inclusive verification matched 4/4 at
+`backups/production/fourm-white-screen-hotfix-final-verify-20260819-165841/`.
+Production HTTP smoke returned the new cache markers and the exact local
+`fourm.js` SHA-256 after JavaScript syntax and focused 4M regression passed.
+No API, MySQL schema/data, upload storage, helper, or temporary test row changed.
+
 ## 4M Change Notice And Training Matrix Stabilization (2026-08-19)
 
 Fixed Admin editing a closed 4M Change Notice without choosing a replacement

@@ -3249,10 +3249,6 @@ function showManForm(existing = null) {
         finally { hideLoading(); btn.disabled = false; btn.textContent = 'บันทึก'; }
     }));
 }
-        <div id="tm-course-list" class="space-y-4 min-h-[280px]"></div>`;
-    renderTrainingCourses();
-}
-
 function renderTrainingHistoryTab(body) {
     const rows = _tmAssignments
         .filter(a => a.Status && a.Status !== 'Assigned')

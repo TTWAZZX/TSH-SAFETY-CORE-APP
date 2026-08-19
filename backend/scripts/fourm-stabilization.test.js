@@ -60,8 +60,8 @@ assert.match(phpHandler, /Select a different destination course\./);
 assert.match(phpHandler, /COURSE_MASTER_UPDATE/);
 assert.match(phpHandler, /CURRICULUM_ASSIGNMENT_TRANSFER/);
 assert.match(frontend, /fd\.delete\('attachment'\)/);
-assert.match(main, /fourm\.js\?v=20260819-fourm-stabilization/);
-assert.match(index, /main\.js\?v=20260819-fourm-stabilization/);
+assert.match(main, /fourm\.js\?v=20260819-fourm-white-screen-hotfix/);
+assert.match(index, /main\.js\?v=20260819-fourm-white-screen-hotfix/);
 
 const declarations = [...frontend.matchAll(/^(?:export\s+)?(?:async\s+)?function\s+([A-Za-z0-9_$]+)\s*\(/gm)].map(match => match[1]);
 const duplicates = declarations.filter((name, index) => declarations.indexOf(name) !== index);
