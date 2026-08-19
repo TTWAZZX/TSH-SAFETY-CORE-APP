@@ -2,6 +2,128 @@
 
 This file preserves historical production handoff, smoke test, backup, deployment, migration, and phase notes moved out of `CLAUDE.md`.
 
+## 4M Change Notice And Training Matrix Stabilization (2026-08-19)
+
+Fixed Admin editing a closed 4M Change Notice without choosing a replacement
+attachment. The browser now omits an empty attachment field, and the PHP PUT
+multipart parser ignores `filename=""` parts instead of rejecting them as an
+unsupported upload. Existing attachments remain unchanged when no new file is
+selected.
+
+Stabilized Man Record > Training Matrix on the PHP production path with
+required-field and status validation,
+department permission checks, transactional curriculum/course/assignment
+writes, safe transfer guards, explicit audit actions, and HTTP 409 responses
+for duplicate curriculum or course data instead of generic HTTP 500 errors.
+Unexpected schema, write, and email-queue failures are now logged server-side.
+The frontend's repeated Training Matrix function implementations were removed,
+leaving one implementation per action and adding the new audit action labels.
+The SPA entry and 4M module import cache keys were advanced so browsers load
+the corrected bundle after deployment.
+
+4M email routing remains: `NoticeCreated` targets the configured 4M Admin
+address; `NoticePending`, `NoticeClosed`, `ActionTaskCreated`, and
+`ActionTaskDone` target the 4M Admin plus the notice creator's Employee Master
+`CompanyEmail`, with duplicate addresses removed. Email queue failure remains
+non-blocking for the business transaction and is now written to the PHP error
+log.
+
+Added focused multipart/source regression coverage in
+`backend/scripts/fourm-stabilization.test.js` and its PHP fixture. Focused tests,
+PHP/JavaScript syntax checks, permission audit, the complete backend suite,
+API smoke, and 91-surface read-only UAT all pass locally. No upload file or
+business-data mutation was made. Production read-only baseline confirmed every
+Training Matrix endpoint used by the frontend returns HTTP 200 on the existing
+schema, so the deployment does not introduce a schema or business-data change.
+
+Production deployment completed on 2026-08-19. The rollback backup is stored
+at `backups/production/fourm-stabilization-predeploy-20260819-152348/`; it
+contains the five previous runtime files plus a complete download of Production
+upload storage (774 files, 1,143,117,547 bytes). Uploaded runtime files were
+`index.html`, `public/js/main.js`, `public/js/pages/fourm.js`,
+`api/handlers/fourm_phase7.php`, and `deploy-manifest.json`. Final FTP
+download-back SHA-256 verification matched 5/5 at
+`backups/production/fourm-stabilization-final-verify-20260819-160239/`.
+
+Authenticated Production smoke passed 11 checks at
+`backups/production/fourm-stabilization-smoke-20260819T090007Z/result.json`:
+static hashes and cache markers matched, auth boundaries and User Notice
+validation behaved correctly, all six 4M/Training read paths passed, a closed
+notice accepted an edit with no replacement attachment and retained its data,
+duplicate Course Master returned HTTP 409, and invalid Man Record returned HTTP
+400. Production has no Course Master unique index, so the final handler includes
+an application-level duplicate guard without changing schema. Two temporary
+Course Master rows created while discovering that legacy-schema condition were
+hard-deleted; final temporary-row count is 0. No temporary backup helper was
+uploaded, and FTP cleanup checks found zero helper/backup files. No MySQL schema,
+business data, or Production upload-storage content remains changed by the
+deployment; successful-login audit/housekeeping is the only expected side
+effect.
+
+## Safety Patrol Close Review Double-submit Fix (2026-08-18)
+
+Fixed Safety Patrol > Issues Admin Approve/Reject showing a false 409 error after
+the first request had already succeeded, closed/rejected the issue, and sent its
+notification email. The frontend now locks both review buttons while a request
+is in flight. The PHP production and Node development endpoints now use a
+conditional Pending-state update and return an idempotent success response for
+the same action when it was already processed, preventing duplicate event,
+audit, and email records during concurrent clicks.
+
+Close-approved and close-rejected notifications continue to target both the
+close requester and the original reporter through Employee Master
+`CompanyEmail`, with duplicate addresses collapsed to one message. No MySQL
+schema, business-data, or upload-storage change is required. Local syntax,
+PHP lint, JavaScript syntax, diff, and replacement-character checks passed. The
+full backend regression subsequently passed with local MySQL available,
+including API smoke and the 91/91 read/permission UAT preflight.
+
+Production deployment completed on 2026-08-18. The rollback backup is stored
+at `backups/production/patrol-close-review-idempotent-predeploy-20260818-084228/`.
+Uploaded runtime files were `index.html`, `public/js/main.js`,
+`public/js/pages/patrol.js`, `api/handlers/patrol.php`, and
+`deploy-manifest.json`; FTP download-back SHA-256 verification matched 5/5 at
+`backups/production/patrol-close-review-idempotent-upload-verify-20260818-084353/`.
+Authenticated Production smoke passed 6/6 at
+`backups/production/patrol-close-review-idempotent-smoke-20260818T084557/`:
+static hashes/cache markers matched, the unauthenticated boundary returned 401,
+Admin login returned 200, and a repeated approve for already-approved issue
+`#90042` returned idempotent HTTP 200 without adding an event or email row.
+The final manifest was separately SHA-256 verified at
+`backups/production/patrol-close-review-idempotent-final-manifest-verify-20260818-084620/`.
+No temporary helper or test row was created; remaining temporary rows: 0.
+
+## Safety Core KY Unit/Monthly Count Fix (2026-08-17)
+
+Fixed System Console > Safety Core Data showing inflated KY Ability values such
+as `26/12` and `21/12` for departments that contain several Safety Units. The
+old aggregation credited every unit activity to every employee in the same
+department, in addition to the matching Safety Unit, and counted multiple KY
+submissions in one month as separate annual target slots.
+
+The Node and PHP paths now count distinct activity months, scope unit rows by
+the combined Department + Safety Unit key, and use distinct department months
+only for employees whose Unit is blank or for department-level KY rows.
+Reporter, submitter, and participant matching is retained. Added a focused
+Node/PHP parity regression at `backend/scripts/safety-core-ky-count.test.js`.
+No database schema, production data, or upload-storage change is required.
+
+Production deploy completed as `safety-core-ky-unit-monthly-fix-20260817`.
+The rollback backup is stored at
+`backups/production/safety-core-ky-unit-monthly-fix-predeploy-20260817-163831/`.
+Uploaded runtime files were `api/handlers/admin_phase8.php` and
+`deploy-manifest.json`; initial FTP download-back SHA-256 verification matched
+2/2 at
+`backups/production/safety-core-ky-unit-monthly-fix-upload-verify-20260817-163936/`.
+Authenticated read-only Production smoke passed at
+`backups/production/safety-core-ky-unit-monthly-fix-smoke-20260817T094056/`:
+unauthenticated access returned 401, Admin login and Safety Core Data returned
+200, and the 21 Production 1/2 rows contained 19 scoped KY values plus 2
+intentional `N/A` targets. The maximum scoped numerator was `8/12`; the old
+inflated `26/12` and `21/12` values were absent. No temporary helper or test
+row was created; normal login audit/housekeeping was the only expected side
+effect.
+
 ## Forklift Card Template Type Map Production Deploy (2026-07-30)
 
 Fixed Forklift License card templates so Admin can create a template for the

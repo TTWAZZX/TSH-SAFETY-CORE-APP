@@ -5,6 +5,64 @@
 ระบบจัดการกิจกรรมความปลอดภัย (Safety Core Activity) สำหรับองค์กร TSH
 ภาษา UI: ภาษาไทย (ข้อความ error/success ทุกอย่างเป็นภาษาไทย)
 
+## Current Production Handoff (2026-08-17)
+
+- Fixed System Console > Safety Core Data KY Ability counts for departments with multiple Safety Units.
+- KY progress is now counted by distinct activity month (maximum 12 monthly slots per year), and a unit-scoped KY row credits only employees in the same Department + Safety Unit. Employees without a Unit use distinct department months as a fallback; explicit reporter/submitter/participant credit remains supported.
+- Node development and PHP production implementations are aligned. Production deploy `safety-core-ky-unit-monthly-fix-20260817` completed with FTP SHA-256 verification and authenticated read-only smoke. No MySQL schema, data, or upload-storage change was required.
+- Focused parity regression: `npm --prefix backend run test:safety-core-ky`.
+
+## Current Safety Patrol Handoff (2026-08-18)
+
+- Safety Patrol > Issues close-review double-submit handling is fixed and
+  deployed.
+- The frontend disables Approve/Reject during an in-flight review. PHP and Node
+  update only rows still in `Pending` and treat a repeated identical action as
+  successful without creating duplicate events, audit rows, or emails.
+- Close approval/rejection email recipients are the close requester and the
+  original reporter, sourced from Employee Master `CompanyEmail` and
+  de-duplicated by address.
+- No MySQL schema, business-data, or `backend/uploads/` change is required.
+- Syntax, PHP lint, diff, and encoding checks passed. Full backend verification
+  subsequently passed with local MySQL available, including API smoke and the
+  91/91 read/permission UAT preflight.
+- Production deploy completed with rollback backup
+  `backups/production/patrol-close-review-idempotent-predeploy-20260818-084228/`,
+  FTP SHA-256 verification 5/5, and authenticated smoke 6/6. Repeating Approve
+  for already-approved issue `#90042` returned HTTP 200 with no duplicate event
+  or email. No temporary rows were created; remaining count is 0.
+
+## Current 4M Change Management Handoff (2026-08-19, deployed)
+
+- Closed Change Notices can be edited without uploading a replacement file;
+  empty file inputs are ignored by both the frontend and PHP multipart parser.
+- Training Matrix PHP writes now validate input, use transactions, return 409
+  for duplicates, enforce assignment transfer state/target rules, and record
+  explicit curriculum, course, assignment, and Course Master audit actions.
+- Production read-only baseline confirmed all Training Matrix endpoints used by
+  the frontend return HTTP 200 with the existing schema. Production has no
+  Course Master unique index, so duplicate protection is enforced in the PHP
+  application layer without adding or altering MySQL columns/indexes.
+- The duplicated Training Matrix frontend implementations were consolidated to
+  one function per action, with updated SPA/module cache keys. Focused
+  regression, syntax/lint, permission audit,
+  full backend tests, API smoke, and read-only UAT (91/91) pass locally.
+- Email recipients are unchanged: NoticeCreated goes to the configured 4M
+  Admin; later notice/task events go to that Admin plus the creator's
+  `CompanyEmail`, de-duplicated. Queue failures are non-blocking and now logged.
+- Production deploy completed with rollback backup
+  `backups/production/fourm-stabilization-predeploy-20260819-152348/`, including
+  all five previous runtime files and 774 Production upload files
+  (1,143,117,547 bytes). Final FTP SHA-256 download-back matched 5/5 at
+  `backups/production/fourm-stabilization-final-verify-20260819-160239/`.
+- Authenticated Production smoke passed 11 checks; evidence is
+  `backups/production/fourm-stabilization-smoke-20260819T090007Z/result.json`.
+  Closed-notice empty-attachment edit, User Notice permission boundary,
+  duplicate Course Master 409, invalid Man Record 400, and six read paths all
+  passed. Two discovery-only Course Master rows were deleted and remaining test
+  rows are 0. No helper was uploaded; no MySQL schema, business-data, or upload
+  storage mutation remains.
+
 ## Tech Stack
 
 | Layer | Technology |
