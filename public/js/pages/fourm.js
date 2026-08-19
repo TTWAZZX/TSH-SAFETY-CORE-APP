@@ -3311,8 +3311,8 @@ function renderTrainingHistoryTab(body) {
                         }).join('') : `<tr><td colspan="5" class="text-center py-10 text-slate-400 text-sm">No removed or transferred employee history in this curriculum</td></tr>`}
                     </tbody>
                 </table>
-        if (list) list.innerHTML = `<div class="p-4 text-sm text-rose-600">${escHtml(err.message || 'โหลดหลักสูตรไม่สำเร็จ / Cannot load curriculums')}</div>`;
-    }
+            </div>
+        </div>`;
 }
 
 async function fetchTrainingPermissions({ force = false } = {}) {
@@ -3338,7 +3338,7 @@ async function fetchTrainingPermissions({ force = false } = {}) {
             _loaded: true,
         };
     }
-    return row.EmployeeID || row.CourseCode || row.CurriculumCode || '-';
+    return _tmPermissions;
 }
 
 async function deleteTrainingLog(logId) {
@@ -3359,9 +3359,9 @@ async function deleteTrainingLog(logId) {
     } finally {
         hideLoading();
     }
-    document.getElementById('tm-log-action')?.addEventListener('change', loadLogs);
-    await loadLogs();
 }
+
+window._tmDeleteTrainingLog = deleteTrainingLog;
 
 async function renderTrainingMatrix(container) {
     if (!container) return;
@@ -5034,10 +5034,6 @@ async function showTrainingAuditLogModal(scope = 'current') {
     document.getElementById('tm-log-action')?.addEventListener('change', loadLogs);
     await loadLogs();
 }
-
-
-}
-
 async function _loadFourmForms(adminAll = false) {
     try {
         const res = await API.get(`/module-forms?module=fourm${adminAll ? '&all=1' : ''}`);

@@ -34,12 +34,15 @@
 
 ## Current 4M Change Management Handoff (2026-08-19, deployed)
 
-- Emergency white-screen hotfix is deployed. Three orphaned HTML/template
-  lines outside a function caused `Unexpected token '<'` while parsing
-  `fourm.js`; they were removed and both SPA/module cache keys now use
-  `20260819-fourm-white-screen-hotfix`. Production FTP SHA-256 verification
-  passed 3/3 runtime files and 4/4 including the final manifest; HTTP smoke
-  matched the exact corrected `fourm.js` hash.
+- Emergency white-screen hotfix r2 is deployed. Duplicate-code cleanup left an
+  incomplete History template, incorrect permissions return, orphaned audit
+  lines, and an extra closing brace, causing consecutive ES-module parse
+  errors. The complete source now passes an explicit ES-module syntax gate;
+  SPA/module cache keys use `20260819-fourm-white-screen-hotfix-r2`.
+  Production FTP SHA-256 verification passed 3/3, then final
+  manifest-inclusive verification matched 4/4 at
+  `backups/production/fourm-white-screen-hotfix-r2-final-verify-20260819-172007/`.
+  HTTP smoke matched the exact corrected `fourm.js` hash.
 - Closed Change Notices can be edited without uploading a replacement file;
   empty file inputs are ignored by both the frontend and PHP multipart parser.
 - Training Matrix PHP writes now validate input, use transactions, return 409

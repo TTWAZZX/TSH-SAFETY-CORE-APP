@@ -60,8 +60,14 @@ assert.match(phpHandler, /Select a different destination course\./);
 assert.match(phpHandler, /COURSE_MASTER_UPDATE/);
 assert.match(phpHandler, /CURRICULUM_ASSIGNMENT_TRANSFER/);
 assert.match(frontend, /fd\.delete\('attachment'\)/);
-assert.match(main, /fourm\.js\?v=20260819-fourm-white-screen-hotfix/);
-assert.match(index, /main\.js\?v=20260819-fourm-white-screen-hotfix/);
+assert.match(main, /fourm\.js\?v=20260819-fourm-white-screen-hotfix-r2/);
+assert.match(index, /main\.js\?v=20260819-fourm-white-screen-hotfix-r2/);
+
+const moduleSyntax = spawnSync(process.execPath, ['--input-type=module', '--check'], {
+    input: frontend,
+    encoding: 'utf8',
+});
+assert.strictEqual(moduleSyntax.status, 0, moduleSyntax.stderr || 'fourm.js ES module syntax check failed');
 
 const declarations = [...frontend.matchAll(/^(?:export\s+)?(?:async\s+)?function\s+([A-Za-z0-9_$]+)\s*\(/gm)].map(match => match[1]);
 const duplicates = declarations.filter((name, index) => declarations.indexOf(name) !== index);

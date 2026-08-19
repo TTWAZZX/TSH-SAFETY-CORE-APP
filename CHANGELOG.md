@@ -22,6 +22,23 @@ Production HTTP smoke returned the new cache markers and the exact local
 `fourm.js` SHA-256 after JavaScript syntax and focused 4M regression passed.
 No API, MySQL schema/data, upload storage, helper, or temporary test row changed.
 
+Follow-up r2 was required after the browser exposed a second ES-module parse
+failure (`Unexpected token 'class'`). The duplicate-code cleanup had also left
+the Training History template incomplete, returned an unrelated variable from
+`fetchTrainingPermissions()`, left audit-modal listener lines inside the delete
+handler, and retained an extra closing brace. These fragments were restored or
+removed against the last known-good function boundaries. Regression now parses
+the complete source explicitly as an ES module with
+`node --input-type=module --check`, which catches errors that the earlier
+script-mode check missed. r2 rollback backup:
+`backups/production/fourm-white-screen-hotfix-r2-predeploy-20260819-170450/`;
+FTP SHA-256 verification passed 3/3 at
+`backups/production/fourm-white-screen-hotfix-r2-upload-verify-20260819-170450/`,
+final manifest-inclusive verification matched 4/4 at
+`backups/production/fourm-white-screen-hotfix-r2-final-verify-20260819-172007/`,
+and Production HTTP smoke passed with cache key
+`20260819-fourm-white-screen-hotfix-r2` and the exact corrected module hash.
+
 ## 4M Change Notice And Training Matrix Stabilization (2026-08-19)
 
 Fixed Admin editing a closed 4M Change Notice without choosing a replacement
