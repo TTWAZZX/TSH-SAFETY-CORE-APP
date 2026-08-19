@@ -1,72 +1,67 @@
 {
   "schemaVersion": 1,
-  "generatedAt": "2026-07-30T16:58:49+07:00",
-  "sourceHead": "5b6eefd26823be7918e027f98988d39d6b07994a",
-  "previousProductionBuild": "machine-safety-row-detail-20260724",
-  "buildId": "forklift-card-template-type-map-20260730-hf1",
-  "cacheBust": "20260730-forklift-template-type-map-hf1",
+  "generatedAt": "2026-08-19T16:02:39+07:00",
+  "sourceHead": "2c447be54e89a4127bb76256f0e2b5ff61f0a262",
+  "previousProductionBuild": "patrol-close-review-idempotent-20260818",
+  "buildId": "fourm-stabilization-20260819",
+  "cacheBust": "20260819-fourm-stabilization",
   "runtime": "shared-hosting-php",
-  "deployPhase": "forklift-card-template-type-map",
+  "deployPhase": "fourm-stabilization",
   "deploymentStatus": "deployed-and-authenticated-smoke-passed",
-  "deployedAt": "2026-07-30T16:58:49+07:00",
+  "deployedAt": "2026-08-19T16:00:23+07:00",
   "databaseMutationPlanned": false,
-  "schemaMutationPlanned": true,
+  "schemaMutationPlanned": false,
   "uploadStorageMutationPlanned": false,
   "exactRuntimeFiles": [
     "index.html",
-    "api/handlers/forklift.php",
-    "api/handlers/admin_phase8.php",
     "public/js/main.js",
-    "public/js/pages/forklift.js",
+    "public/js/pages/fourm.js",
+    "api/handlers/fourm_phase7.php",
     "deploy-manifest.json"
   ],
   "fileHashes": [
     {
       "path": "index.html",
-      "sha256": "b48db25f91f22b3bb9aa8377986c04a931127028b84770bf3a3870e5da94546b"
-    },
-    {
-      "path": "api/handlers/forklift.php",
-      "sha256": "4f09e60bdcaa0f65bb7445b332c00c339dde667266eeb1ae80127a75e5b0f791"
-    },
-    {
-      "path": "api/handlers/admin_phase8.php",
-      "sha256": "52643746a8dfe97a5971e9ec639a49c9d11c22513fb0520d27e706defabc1518"
+      "sha256": "b71d7c380018f963e1b2bb9b2b42190a5107ddb903bc0a36cd41b50ae876f9cf"
     },
     {
       "path": "public/js/main.js",
-      "sha256": "4fe1f1cbb5ad92f27af350a4bc1366d120f835c9d7df1b1f4149510b176b0946"
+      "sha256": "685f0ac2d099c69745360d5fbf80aa19f8a794e5ef42f879c2dc396bc2260442"
     },
     {
-      "path": "public/js/pages/forklift.js",
-      "sha256": "40ae8629f6a5ffde0c30b76bc35faffd33a8db029e20dae9803b44192d9d62cc"
+      "path": "public/js/pages/fourm.js",
+      "sha256": "2228d0a5253aa3a6c8f4922afca168ec43d07231a6a98e174a2b6609e803935e"
+    },
+    {
+      "path": "api/handlers/fourm_phase7.php",
+      "sha256": "2c197929ff8b4e316fb9fd9bfbe2d78277e9ec69a263ae905067f2631fa10693"
     }
   ],
   "verification": {
     "phpLint": "PASS",
     "nodeSyntax": "PASS",
-    "forkliftWorkflowSmoke": "PASS 40/40",
-    "templateRankingSanity": "PASS exact combined rank before single fallback",
-    "fullBackendRegression": "PASS",
+    "fourmFocusedRegression": "PASS including app-level duplicate guards for legacy schemas without unique indexes",
+    "fullBackendRegression": "PASS including API smoke and read-only UAT 91/91",
+    "productionReadOnlyBaseline": "PASS: all 4M Training Matrix endpoints used by the frontend returned HTTP 200",
     "gitDiffCheck": "PASS",
-    "hotfix": "Template FormData is snapshotted before runFormBusy disables controls; index.html/main.js cache bust advanced to hf1",
     "databaseMutationAttempted": false,
-    "schemaMutationAttempted": true,
+    "schemaMutationAttempted": false,
     "uploadStorageMutationAttempted": false
   },
   "productionVerification": {
-    "codeBackup": "backups/production/forklift-card-template-type-map-predeploy-20260730-163801",
-    "dbSnapshot": "backups/production/forklift-card-template-type-map-predeploy-20260730-163801/forklift-db-snapshot.json",
-    "uploadVerify": "backups/production/forklift-card-template-type-map-upload-verify-20260730-164409",
-    "hotfixBackup": "backups/production/forklift-card-template-formdata-hf1-predeploy-20260730-165625",
-    "hotfixUploadVerify": "backups/production/forklift-card-template-formdata-hf1-upload-verify-20260730-165649",
-    "hotfixFinalManifestVerify": "backups/production/forklift-card-template-formdata-hf1-final-manifest-verify-20260730-170000",
-    "sha256Matches": "4/4 hotfix plus 5/5 original deploy",
-    "authenticatedSmoke": "PASS 9 hf1 checks after PASS 12 original checks",
-    "smokeEvidence": "backups/production/forklift-card-template-formdata-hf1-smoke-20260730-165849",
-    "temporaryHelperCleanup": "PASS db snapshot helper removed before deploy upload; HTTP 404 and FTP absent",
+    "codeAndUploadBackup": "backups/production/fourm-stabilization-predeploy-20260819-152348",
+    "uploadBackupFiles": 774,
+    "uploadBackupBytes": 1143117547,
+    "initialUploadVerify": "backups/production/fourm-stabilization-upload-verify-20260819-155131",
+    "hotfixUploadVerify": "backups/production/fourm-stabilization-hotfix-verify-20260819-155653",
+    "finalRuntimeVerify": "backups/production/fourm-stabilization-final-verify-20260819-160239",
+    "sha256Matches": "PASS: final Production download-back matched all 5 runtime files",
+    "smoke": "PASS: authenticated Production smoke passed 11 checks; evidence backups/production/fourm-stabilization-smoke-20260819T090007Z/result.json",
+    "businessDataChanged": false,
+    "temporaryHelperCleanup": "no helper uploaded; FTP check found zero temporary backup files",
     "temporaryRowsRemaining": 0,
-    "schemaMutationAttempted": true,
+    "databaseMutationAttempted": false,
+    "schemaMutationAttempted": false,
     "uploadStorageMutationAttempted": false
   }
 }

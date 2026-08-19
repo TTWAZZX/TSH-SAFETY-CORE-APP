@@ -10,7 +10,7 @@ import { guardSubmitHandler } from './utils/async-ui.js?v=20260715-phase32d-rema
 // --- Page Loaders ---
 import { loadPolicyPage } from './pages/policy.js?v=20260715-phase32d-remaining-async-ux';
 import { loadCommitteePage } from './pages/committee.js?v=20260715-phase32d-remaining-async-ux';
-import { loadPatrolPage } from './pages/patrol.js?v=20260715-patrol-dept-result';
+import { loadPatrolPage } from './pages/patrol.js?v=20260818-patrol-close-review-idempotent';
 import { loadCccfPage } from './pages/cccf.js?v=20260715-phase32c-residual-async';
 import { loadKpiPage } from './pages/kpi.js?v=20260715-phase32d-remaining-async-ux';
 import { loadYokotenPage } from './pages/yokoten.js?v=20260723-yokoten-admin-scope-r5';
@@ -24,7 +24,7 @@ import { loadSafetyCulturePage } from './pages/safety-culture.js?v=20260715-phas
 import { loadContractorPage } from './pages/contractor.js?v=20260715-phase32d-remaining-async-ux';
 import { loadHiyariPage } from './pages/hiyari.js?v=20260715-hiyari-learning-admin-edit';
 import { loadKyPage } from './pages/ky.js?v=20260715-phase32d-remaining-async-ux';
-import { loadFourmPage } from './pages/fourm.js?v=20260715-phase32c-residual-async';
+import { loadFourmPage } from './pages/fourm.js?v=20260819-fourm-stabilization';
 import { loadJohnnyAiPage } from './pages/johnny-ai.js?v=20260715-phase32d-remaining-async-ux';
 import { openProfileDrawer, closeProfileDrawer } from './pages/profile.js?v=20260723-onboarding-release';
 import { loadDashboardPage } from './pages/dashboard.js?v=20260724-dashboard-hiyari-assignment';
