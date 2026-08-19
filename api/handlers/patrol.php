@@ -2440,17 +2440,42 @@ function handle_patrol_routes(string $method, string $path): bool
         if (!$issue) {
             json_response(['success' => false, 'message' => 'Issue not found.'], 404);
         }
-        if ((string) ($issue['CloseApprovalStatus'] ?? '') !== 'Pending') {
+        $approvalStatus = (string) ($issue['CloseApprovalStatus'] ?? '');
+        $requestedStatus = $action === 'approve' ? 'Approved' : 'Rejected';
+        if ($approvalStatus === $requestedStatus) {
+            json_response([
+                'success' => true,
+                'message' => 'Close request was already ' . strtolower($requestedStatus) . '.',
+                'status' => $requestedStatus,
+                'alreadyProcessed' => true,
+                'email' => ['queued' => false, 'sent' => false, 'reason' => 'Already processed'],
+            ]);
+        }
+        if ($approvalStatus !== 'Pending') {
             json_response(['success' => false, 'message' => 'This issue has no pending close request.'], 409);
         }
         if ($action === 'approve') {
-            db_execute("UPDATE patrol_issues SET CurrentStatus='Closed',ResultStatus='Closed',ClosedByID=COALESCE(CloseRequestedBy,ClosedByID),ClosedAt=NOW(),CloseApprovalStatus='Approved',CloseApprovedBy=?,CloseApprovedAt=NOW(),CloseRejectedBy=NULL,CloseRejectedAt=NULL,CloseRejectReason=NULL WHERE IssueID=?", [$uid, $issueId]);
+            $updated = db_execute("UPDATE patrol_issues SET CurrentStatus='Closed',ResultStatus='Closed',ClosedByID=COALESCE(CloseRequestedBy,ClosedByID),ClosedAt=NOW(),CloseApprovalStatus='Approved',CloseApprovedBy=?,CloseApprovedAt=NOW(),CloseRejectedBy=NULL,CloseRejectedAt=NULL,CloseRejectReason=NULL WHERE IssueID=? AND CloseApprovalStatus='Pending'", [$uid, $issueId]);
+            if ($updated === 0) {
+                $latest = db_row('SELECT CloseApprovalStatus FROM patrol_issues WHERE IssueID=?', [$issueId]);
+                if ((string) ($latest['CloseApprovalStatus'] ?? '') === 'Approved') {
+                    json_response(['success' => true, 'message' => 'Close request was already approved.', 'status' => 'Approved', 'alreadyProcessed' => true, 'email' => ['queued' => false, 'sent' => false, 'reason' => 'Already processed']]);
+                }
+                json_response(['success' => false, 'message' => 'This close request was reviewed by another Admin.'], 409);
+            }
             patrol_record_issue_event($issueId, 'CLOSE_APPROVED', $user, $issue['CurrentStatus'] ?? null, 'Closed', $issue['ActionDescription'] ?? null, ['afterImage' => $issue['AfterImage'] ?? null], array_merge($issue, ['CurrentStatus' => 'Closed', 'CloseApprovalStatus' => 'Approved']));
             patrol_log_audit($user, 'APPROVE_CLOSE_PATROL_ISSUE', 'patrol_issues', $issueId, 'Approve close request for patrol issue #' . $issueId, array_merge($issue, ['CurrentStatus' => 'Closed', 'CloseApprovalStatus' => 'Approved']));
             $email = patrol_queue_issue_email($issueId, 'CloseApproved', $user);
             json_response(['success' => true, 'message' => 'Close request approved.', 'status' => 'Approved', 'email' => $email]);
         }
-        db_execute("UPDATE patrol_issues SET CloseApprovalStatus='Rejected',CloseRejectedBy=?,CloseRejectedAt=NOW(),CloseRejectReason=?,CloseApprovedBy=NULL,CloseApprovedAt=NULL WHERE IssueID=?", [$uid, $reason, $issueId]);
+        $updated = db_execute("UPDATE patrol_issues SET CloseApprovalStatus='Rejected',CloseRejectedBy=?,CloseRejectedAt=NOW(),CloseRejectReason=?,CloseApprovedBy=NULL,CloseApprovedAt=NULL WHERE IssueID=? AND CloseApprovalStatus='Pending'", [$uid, $reason, $issueId]);
+        if ($updated === 0) {
+            $latest = db_row('SELECT CloseApprovalStatus FROM patrol_issues WHERE IssueID=?', [$issueId]);
+            if ((string) ($latest['CloseApprovalStatus'] ?? '') === 'Rejected') {
+                json_response(['success' => true, 'message' => 'Close request was already rejected.', 'status' => 'Rejected', 'alreadyProcessed' => true, 'email' => ['queued' => false, 'sent' => false, 'reason' => 'Already processed']]);
+            }
+            json_response(['success' => false, 'message' => 'This close request was reviewed by another Admin.'], 409);
+        }
         patrol_record_issue_event($issueId, 'CLOSE_REJECTED', $user, $issue['CurrentStatus'] ?? null, $issue['CurrentStatus'] ?? null, $reason, ['afterImage' => $issue['AfterImage'] ?? null], array_merge($issue, ['CloseApprovalStatus' => 'Rejected', 'CloseRejectReason' => $reason]));
         patrol_log_audit($user, 'REJECT_CLOSE_PATROL_ISSUE', 'patrol_issues', $issueId, 'Reject close request for patrol issue #' . $issueId, array_merge($issue, ['CloseApprovalStatus' => 'Rejected', 'CloseRejectReason' => $reason]));
         $email = patrol_queue_issue_email($issueId, 'CloseRejected', $user);

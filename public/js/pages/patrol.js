@@ -5827,8 +5827,8 @@ function _issueApprovalPanelHtml(issue = {}, isView = false) {
           </div>
           ${isAdmin && isView && status === 'Pending' ? `
           <div class="flex flex-shrink-0 gap-2">
-            <button type="button" onclick="window.reviewPatrolIssueClose(${JSON.stringify(issue.IssueID)}, 'reject')" class="rounded-xl border border-rose-200 bg-white px-4 py-2 text-xs font-black text-rose-700 hover:bg-rose-50">Reject</button>
-            <button type="button" onclick="window.reviewPatrolIssueClose(${JSON.stringify(issue.IssueID)}, 'approve')" class="rounded-xl bg-emerald-600 px-4 py-2 text-xs font-black text-white hover:bg-emerald-700">Approve</button>
+            <button type="button" data-close-review-issue="${escHtml(issue.IssueID)}" onclick="window.reviewPatrolIssueClose(${JSON.stringify(issue.IssueID)}, 'reject')" class="rounded-xl border border-rose-200 bg-white px-4 py-2 text-xs font-black text-rose-700 hover:bg-rose-50 disabled:cursor-wait disabled:opacity-50">Reject</button>
+            <button type="button" data-close-review-issue="${escHtml(issue.IssueID)}" onclick="window.reviewPatrolIssueClose(${JSON.stringify(issue.IssueID)}, 'approve')" class="rounded-xl bg-emerald-600 px-4 py-2 text-xs font-black text-white hover:bg-emerald-700 disabled:cursor-wait disabled:opacity-50">Approve</button>
           </div>` : ''}
         </div>
       </section>`;
@@ -5873,9 +5873,13 @@ async function _loadIssueEventsIntoModal(issueId) {
     }
 }
 
+const _issueCloseReviewsInFlight = new Set();
+
 window.reviewPatrolIssueClose = async function(issueId, action) {
     if (!isAdmin || !issueId) return;
     const normalized = String(action || '').toLowerCase();
+    const reviewKey = String(issueId);
+    if (_issueCloseReviewsInFlight.has(reviewKey)) return;
     let reason = '';
     if (normalized === 'reject') {
         reason = window.prompt('Reject reason / เหตุผลที่ไม่อนุมัติ') || '';
@@ -5884,6 +5888,10 @@ window.reviewPatrolIssueClose = async function(issueId, action) {
             return;
         }
     }
+    _issueCloseReviewsInFlight.add(reviewKey);
+    const reviewButtons = [...document.querySelectorAll('[data-close-review-issue]')]
+        .filter(button => button.dataset.closeReviewIssue === reviewKey);
+    reviewButtons.forEach(button => { button.disabled = true; });
     try {
         showLoading(normalized === 'approve' ? 'Approving close request...' : 'Rejecting close request...');
         const res = await API.post(`/patrol/issue/${issueId}/close-review`, normalized === 'approve' ? { action: 'approve' } : { action: 'reject', reason });
@@ -5897,6 +5905,8 @@ window.reviewPatrolIssueClose = async function(issueId, action) {
     } catch (err) {
         showError(getReadableError(err, 'Cannot review close request.'));
     } finally {
+        _issueCloseReviewsInFlight.delete(reviewKey);
+        reviewButtons.forEach(button => { button.disabled = false; });
         hideLoading();
     }
 };

@@ -1510,12 +1510,23 @@ router.post('/issue/:id/close-review', async (req, res) => {
         if (!issue) {
             return res.status(404).json({ success: false, message: 'Issue not found.' });
         }
-        if (String(issue.CloseApprovalStatus || '') !== 'Pending') {
+        const approvalStatus = String(issue.CloseApprovalStatus || '');
+        const requestedStatus = action === 'approve' ? 'Approved' : 'Rejected';
+        if (approvalStatus === requestedStatus) {
+            return res.json({
+                success: true,
+                message: `Close request was already ${requestedStatus.toLowerCase()}.`,
+                status: requestedStatus,
+                alreadyProcessed: true,
+                email: { queued: false, sent: false, reason: 'Already processed' },
+            });
+        }
+        if (approvalStatus !== 'Pending') {
             return res.status(409).json({ success: false, message: 'This issue has no pending close request.' });
         }
 
         if (action === 'approve') {
-            await db.query(
+            const [update] = await db.query(
                 `UPDATE Patrol_Issues
                  SET CurrentStatus = 'Closed', ResultStatus = 'Closed',
                      ClosedByID = COALESCE(CloseRequestedBy, ClosedByID),
@@ -1523,9 +1534,16 @@ router.post('/issue/:id/close-review', async (req, res) => {
                      CloseApprovalStatus = 'Approved',
                      CloseApprovedBy = ?, CloseApprovedAt = NOW(),
                      CloseRejectedBy = NULL, CloseRejectedAt = NULL, CloseRejectReason = NULL
-                 WHERE IssueID = ?`,
+                 WHERE IssueID = ? AND CloseApprovalStatus = 'Pending'`,
                 [req.user.id, issueId]
             );
+            if (!update.affectedRows) {
+                const [[latest]] = await db.query('SELECT CloseApprovalStatus FROM Patrol_Issues WHERE IssueID = ?', [issueId]);
+                if (String(latest?.CloseApprovalStatus || '') === 'Approved') {
+                    return res.json({ success: true, message: 'Close request was already approved.', status: 'Approved', alreadyProcessed: true, email: { queued: false, sent: false, reason: 'Already processed' } });
+                }
+                return res.status(409).json({ success: false, message: 'This close request was reviewed by another Admin.' });
+            }
             await recordPatrolIssueEvent({
                 issueId,
                 eventType: 'CLOSE_APPROVED',
@@ -1549,14 +1567,21 @@ router.post('/issue/:id/close-review', async (req, res) => {
             return res.json({ success: true, message: 'Close request approved.', status: 'Approved', email });
         }
 
-        await db.query(
+        const [update] = await db.query(
             `UPDATE Patrol_Issues
              SET CloseApprovalStatus = 'Rejected',
                  CloseRejectedBy = ?, CloseRejectedAt = NOW(), CloseRejectReason = ?,
                  CloseApprovedBy = NULL, CloseApprovedAt = NULL
-             WHERE IssueID = ?`,
+             WHERE IssueID = ? AND CloseApprovalStatus = 'Pending'`,
             [req.user.id, reason, issueId]
         );
+        if (!update.affectedRows) {
+            const [[latest]] = await db.query('SELECT CloseApprovalStatus FROM Patrol_Issues WHERE IssueID = ?', [issueId]);
+            if (String(latest?.CloseApprovalStatus || '') === 'Rejected') {
+                return res.json({ success: true, message: 'Close request was already rejected.', status: 'Rejected', alreadyProcessed: true, email: { queued: false, sent: false, reason: 'Already processed' } });
+            }
+            return res.status(409).json({ success: false, message: 'This close request was reviewed by another Admin.' });
+        }
         await recordPatrolIssueEvent({
             issueId,
             eventType: 'CLOSE_REJECTED',
