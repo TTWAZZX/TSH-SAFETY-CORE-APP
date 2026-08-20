@@ -108,9 +108,9 @@ async function main() {
         `Shared export imports must remain inside the approved Phase 2 rollout and pilot set: ${normalizedReferences.join(', ')}`,
     );
     const mainSource = fs.readFileSync(path.join(frontendRoot, 'main.js'), 'utf8');
-    const enabledModules = ['dashboard', 'accident', 'machine-safety', 'yokoten', 'fourm', 'safety-culture'];
+    const enabledModules = ['dashboard', 'accident', 'machine-safety', 'yokoten', 'fourm', 'safety-culture', 'ojt', 'training'];
     enabledModules.forEach(moduleKey => {
-        assert.ok(mainSource.includes(`'${moduleKey}'`), `Phase 2C default module is missing: ${moduleKey}`);
+        assert.ok(mainSource.includes(`'${moduleKey}'`), `Default card export module is missing: ${moduleKey}`);
     });
     assert.ok(
         mainSource.includes('cardImageExportV2 === undefined'),

@@ -39,6 +39,8 @@ const CARD_IMAGE_EXPORT_V2_MODULES = Object.freeze([
     'yokoten',
     'fourm',
     'safety-culture',
+    'ojt',
+    'training',
 ]);
 window.__TSH_FEATURE_FLAGS__ = window.__TSH_FEATURE_FLAGS__ || {};
 if (window.__TSH_FEATURE_FLAGS__.cardImageExportV2 === undefined) {

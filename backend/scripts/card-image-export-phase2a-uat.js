@@ -12,14 +12,15 @@ const root = path.resolve(__dirname, '..', '..');
 const base = String(process.env.PROD_UAT_URL || 'https://dev.tshpcl.com/safety/tsh-safety-core').replace(/\/+$/, '');
 const browserPath = process.env.EDGE_PATH || 'C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe';
 const requestedPhase = String(process.env.CARD_IMAGE_UAT_PHASE || '2a').toLowerCase();
-const uatPhase = ['2b', '2c', '2d', '2e'].includes(requestedPhase) ? requestedPhase : '2a';
-const cdpPort = uatPhase === '2e' ? 9838 : uatPhase === '2d' ? 9837 : uatPhase === '2c' ? 9836 : uatPhase === '2b' ? 9835 : 9834;
-const serveLocalAssets = uatPhase !== '2c';
+const uatPhase = ['2b', '2c', '2d', '2e', '2f'].includes(requestedPhase) ? requestedPhase : '2a';
+const cdpPort = uatPhase === '2f' ? 9839 : uatPhase === '2e' ? 9838 : uatPhase === '2d' ? 9837 : uatPhase === '2c' ? 9836 : uatPhase === '2b' ? 9835 : 9834;
+const productionDefaultUat = uatPhase === '2c' || uatPhase === '2f';
+const serveLocalAssets = !productionDefaultUat;
 const stamp = new Date().toISOString().replace(/[-:]/g, '').replace(/\.\d{3}Z$/, 'Z');
 const artifactDir = path.join(
     root,
     'backups',
-    uatPhase === '2c' ? 'production' : 'local',
+    productionDefaultUat ? 'production' : 'local',
     `card-image-phase${uatPhase}-comparison-${stamp}`,
 );
 const profileDir = fs.mkdtempSync(path.join(os.tmpdir(), `card-image-phase${uatPhase}-`));
@@ -65,7 +66,9 @@ const PHASE2E_PILOTS = [
     },
 ];
 
-const PILOTS = uatPhase === '2c'
+const PILOTS = uatPhase === '2f'
+    ? [...PHASE2A_PILOTS, ...PHASE2B_PILOTS, ...PHASE2D_PILOTS, ...PHASE2E_PILOTS]
+    : uatPhase === '2c'
     ? [...PHASE2A_PILOTS, ...PHASE2B_PILOTS]
     : uatPhase === '2e' ? PHASE2E_PILOTS
         : uatPhase === '2d' ? PHASE2D_PILOTS
@@ -377,7 +380,7 @@ async function main() {
 
         for (const pilot of PILOTS) {
             await openModule(pilot);
-            if (uatPhase === '2c') {
+            if (productionDefaultUat) {
                 results.push(await triggerExport(pilot, 'shared-default', viewport));
             } else {
                 results.push(await triggerExport(pilot, 'legacy', viewport));
@@ -394,7 +397,9 @@ async function main() {
             && captures.every(result => result.width === captures[0].width && result.height === captures[0].height);
     }).length;
     const report = {
-        phase: uatPhase === '2c'
+        phase: uatPhase === '2f'
+            ? 'Phase 2D - Production default-enabled controlled rollout'
+            : uatPhase === '2c'
             ? 'Phase 2C - Production default-enabled controlled rollout'
             : uatPhase === '2e'
                 ? 'Phase 2D Batch 2 - Safety Training feature-flagged pilot'
@@ -411,7 +416,7 @@ async function main() {
         results,
         runtimeErrors,
         summary: {
-            comparisons: uatPhase === '2c' ? 0 : results.length / 2,
+            comparisons: productionDefaultUat ? 0 : results.length / 2,
             pngFiles: results.length,
             sharedCaptures: results.filter(result => result.mode !== 'legacy' && result.events.some(event => event.engine === 'shared')).length,
             fallbackCaptures: results.filter(result => result.events.some(event => event.engine === 'legacy-fallback')).length,
@@ -437,8 +442,8 @@ async function main() {
     ].join('\n');
     fs.writeFileSync(path.join(artifactDir, 'comparison.md'), markdown);
 
-    assert.strictEqual(report.summary.comparisons, uatPhase === '2c' ? 0 : PILOTS.length * VIEWPORTS.length);
-    assert.strictEqual(report.summary.pngFiles, PILOTS.length * VIEWPORTS.length * (uatPhase === '2c' ? 1 : 2));
+    assert.strictEqual(report.summary.comparisons, productionDefaultUat ? 0 : PILOTS.length * VIEWPORTS.length);
+    assert.strictEqual(report.summary.pngFiles, PILOTS.length * VIEWPORTS.length * (productionDefaultUat ? 1 : 2));
     assert.strictEqual(report.summary.sharedCaptures, PILOTS.length * VIEWPORTS.length);
     assert.strictEqual(report.summary.fallbackCaptures, 0);
     assert.strictEqual(report.summary.consistentSharedLayouts, PILOTS.length);

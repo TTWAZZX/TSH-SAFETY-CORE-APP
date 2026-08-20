@@ -35,6 +35,7 @@
     "uat:card-image-export-phase2c": "node scripts/card-image-export-phase2c-production-uat.js",
     "uat:card-image-export-phase2d": "node scripts/card-image-export-phase2d-uat.js",
     "uat:card-image-export-phase2d-batch2": "node scripts/card-image-export-phase2d-batch2-uat.js",
+    "uat:card-image-export-phase2d-production": "node scripts/card-image-export-phase2d-production-uat.js",
     "smoke:registration-email-template": "node scripts/registration-email-template-smoke.js",
     "smoke:johnny-mobile-compact": "node scripts/johnny-mobile-compact-smoke.js",
     "uat:johnny-mobile-compact": "node scripts/johnny-mobile-compact-browser-uat.js",
