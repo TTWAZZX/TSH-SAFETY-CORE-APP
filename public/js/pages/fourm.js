@@ -8,6 +8,7 @@ import {
 } from '../ui.js?v=20260602-mobile-nav-m53';
 import { normalizeApiArray, normalizeApiObject } from '../utils/normalize.js';
 import { createLatestRenderTarget, guardActionHandler, guardSubmitHandler, sectionSkeleton, withActionLock } from '../utils/async-ui.js?v=20260715-phase32c-residual-async';
+import { captureCardImage, isSharedCardImageExportEnabled } from '../utils/card-image-export.js?v=20260820-card-image-phase2b';
 
 function lockFourmInlineActions() {
     ['_fourmExportNoticePDF', '_fourmExportDashPDF', '_fourmExportDashPDFLegacy'].forEach(name => {
@@ -8323,6 +8324,42 @@ function _fourmHideCardImageMenu() {
 }
 
 async function _fourmDownloadCardImage(card) {
+    const targetName = card?.dataset?.fourmCardImage || _fourmCardTitle(card) || 'fourm-card';
+    const pilotEnabled = targetName === '4m-change-overview'
+        && isSharedCardImageExportEnabled(undefined, 'fourm');
+    if (!pilotEnabled) return _fourmDownloadCardImageLegacy(card);
+
+    const name = _fourmSafeFilePart(targetName);
+    try {
+        showLoading('กำลังบันทึกรูปภาพการ์ด... / Saving card image...');
+        const result = await captureCardImage(card, {
+            filename: `${name}-${_statsYear}`,
+            width: 1200,
+            expandTruncatedText: true,
+            renderControlsAsText: true,
+            prepareClone: clone => {
+                clone.querySelectorAll('[data-fourm-card-ignore], #fourm-card-save-menu').forEach(element => {
+                    element.style.setProperty('display', 'none', 'important');
+                });
+            },
+        });
+        document.dispatchEvent(new CustomEvent('tsh:card-image-export-complete', {
+            detail: { module: 'fourm', target: targetName, engine: 'shared', width: result.width, height: result.height },
+        }));
+        showToast('บันทึกรูปภาพการ์ดแล้ว / Card image saved', 'success');
+    } catch (error) {
+        console.warn('[CardImageExport] 4M shared capture failed; using legacy fallback.', error);
+        document.dispatchEvent(new CustomEvent('tsh:card-image-export-complete', {
+            detail: { module: 'fourm', target: targetName, engine: 'legacy-fallback', errorCode: error?.code || 'CAPTURE_FAILED' },
+        }));
+        hideLoading();
+        return _fourmDownloadCardImageLegacy(card);
+    } finally {
+        hideLoading();
+    }
+}
+
+async function _fourmDownloadCardImageLegacy(card) {
     if (typeof html2canvas === 'undefined') {
         showToast('ไม่พบ library สำหรับบันทึกรูปภาพ / Image export library not found', 'error');
         return;

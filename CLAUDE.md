@@ -110,6 +110,62 @@
   rows are 0. No helper was uploaded; no MySQL schema, business-data, or upload
   storage mutation remains.
 
+## Current Card Image Export Handoff (2026-08-20, Phases 0-2C deployed)
+
+- Phase 0 baseline and safety audit is complete for right-click card image
+  export across 12 modules. Controlled read-only Production audits covered 174
+  visible desktop targets and 199 visible mobile targets, with 24 representative
+  PNG downloads, zero export failures, and zero runtime errors.
+- The principal quality risks are Machine Safety long-table baseline clipping,
+  Accident text clipping, Yokoten truncation, 4M linked-system/KPI clipping, and
+  Safety Culture form/oversized capture behavior. Mobile also exposes extreme
+  height risks in Machine Safety, Accident, and KY.
+- Evidence is under
+  `backups/local/card-image-baseline-20260820T043416Z/` and
+  `backups/local/card-image-baseline-mobile-20260820T043646Z/`; the full report
+  is `docs/card-image-export-phase0-audit.md`.
+- No frontend runtime, API, permission, database, upload storage, or business
+  data changed, and Phase 0 was not deployed.
+- Phase 1 added `public/js/utils/card-image-export.js` as the shared foundation.
+  The fixture has expanded with the rollout and now passes 19/19; its safety
+  assertion confirms runtime imports match the approved six-module allowlist.
+  Existing module exporters remain the fallback; Phase 1 was not deployed.
+  Details are in
+  `docs/card-image-export-phase1-foundation.md`.
+- Phase 2A wired only Dashboard hero and Accident performance board behind
+  per-module feature flags. Flags are off by default and both targets retain
+  legacy fallback. Controlled read-only old/new desktop/mobile comparison
+  passed 4 shared captures, 0 fallbacks, 0 runtime errors, and consistent output
+  dimensions; visual review confirmed Accident rate descriptions are no longer
+  clipped. Evidence is at
+  `backups/local/card-image-phase2a-comparison-20260820T051525Z/` and details are
+  in `docs/card-image-export-phase2a-pilot.md`. Phase 2A was not deployed.
+- Phase 2B wired the four P1 targets in Machine Safety, Yokoten, 4M, and Safety
+  Culture behind exact per-module flags with legacy fallback. Machine Safety
+  mobile export uses an off-screen list surrogate; 4M and Safety Culture use
+  clone-only static form values. Foundation tests passed 19/19 and controlled
+  read-only UAT passed 8 comparisons / 16 PNGs, 8 shared captures, 0 fallbacks,
+  4/4 viewport-consistent layouts, and 0 runtime errors. Visual review found no
+  remaining clipped target text or blank controls. Evidence is at
+  `backups/local/card-image-phase2b-comparison-20260820T061809Z/`; details are in
+  `docs/card-image-export-phase2b-rollout.md`. Flags remain off and Phase 2B was
+  not deployed.
+- Phase 2C enabled the six approved modules by default while preserving explicit
+  emergency flag override, exact target allowlists, and legacy fallback. Fresh
+  Production backup:
+  `backups/production/card-image-phase2c-predeploy-20260820-133849/` (147 DB
+  tables, DB SHA-256
+  `a82a3fbac8770c5ad12629b8ece2759229be0f487c8b2f131c14482c391d6e98`,
+  774 uploads / 1,143,117,547 bytes). FTP verify passed 10/10, HTTPS hashes
+  passed 9/9, and authenticated Production UAT passed 12/12 shared captures,
+  0 fallbacks, 6/6 viewport-consistent layouts, and 0 runtime errors. Helper
+  and remote DB archive cleanup passed. Final manifest SHA-256 is
+  `d450063a838dc7704f45efffd894dd8435893c7591bd27320060502080f23ca8`.
+  No API/schema/business-data/upload mutation occurred. Details:
+  `docs/card-image-export-phase2c-production.md`.
+- The next step is Phase 2D: inventory and migrate remaining lower-risk card
+  targets in small batches, retaining the same rollback and visual gates.
+
 ## Tech Stack
 
 | Layer | Technology |

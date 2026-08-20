@@ -1,5 +1,50 @@
 # TSH Safety Core Activity - Roadmap
 
+## Card Image Export Improvement (Phases 0-2C deployed, 2026-08-20)
+
+Phase 0 established a read-only desktop/mobile Production baseline for the
+right-click card image feature across 12 modules. It captured 24 representative
+PNGs, inventoried 174 visible desktop and 199 visible mobile export targets,
+and confirmed the largest quality risks in Machine Safety, Accident, Yokoten,
+4M, and Safety Culture. No application behavior, API, database, upload storage,
+or business data changed, and nothing from this phase was deployed.
+
+Evidence:
+
+- `docs/card-image-export-phase0-audit.md`
+- `backups/local/card-image-baseline-20260820T043416Z/`
+- `backups/local/card-image-baseline-mobile-20260820T043646Z/`
+
+Phase 1 is complete locally. The shared utility and browser fixture form the
+safety foundation; after Phase 2B the fixture passes 19/19 and confirms the
+approved six-module runtime import allowlist. Every migrated module retains its
+legacy fallback; Phase 1 was not deployed. See
+`docs/card-image-export-phase1-foundation.md`.
+
+Phase 2A is complete locally. Dashboard hero and Accident performance board are
+wired behind per-module feature flags with legacy fallback. Controlled
+desktop/mobile comparison passed 4/4 shared captures, 0 fallbacks, 0 runtime
+errors, and consistent output dimensions. Visual review confirmed the Accident
+rate descriptions no longer clip. No flag is enabled by default and Phase 2A
+was not deployed. See `docs/card-image-export-phase2a-pilot.md`.
+
+Phase 2B is complete locally for Machine Safety document list, Yokoten topic
+cards, 4M change overview, and Safety Culture campaign library. Controlled UAT
+passed 8 comparisons / 16 PNGs, 8 shared captures, 0 fallbacks, 4/4
+viewport-consistent layouts, and 0 runtime errors. Machine Safety uses an
+off-screen list export on mobile; 4M and Safety Culture render current form
+values as clone-only static text. See
+`docs/card-image-export-phase2b-rollout.md`.
+
+Phase 2C is deployed. The six approved module flags are enabled by default with
+an explicit override for emergency rollback. Production verification passed
+FTP SHA-256 10/10, HTTPS hashes 9/9, shared captures 12/12, fallbacks 0,
+viewport-consistent layouts 6/6, and runtime errors 0. See
+`docs/card-image-export-phase2c-production.md`.
+
+The next correct step is Phase 2D: continue lower-risk targets in small batches
+under the same exact allowlist, fallback, comparison, and visual-review gates.
+
 ## Current Known Remaining Work
 
 ## Remaining PHP API Migration Inventory (after Phase 6)

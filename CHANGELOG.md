@@ -2,6 +2,115 @@
 
 This file preserves historical production handoff, smoke test, backup, deployment, migration, and phase notes moved out of `CLAUDE.md`.
 
+## Card Image Export Phase 2C Production Rollout (2026-08-20)
+
+Enabled the shared exporter by default for the six approved modules: Dashboard,
+Accident, Machine Safety, Yokoten, 4M, and Safety Culture. An explicit external
+feature-flag value still overrides the default for emergency rollback. Exact
+target allowlists and per-module legacy fallback remain unchanged.
+
+Pre-deploy verification passed foundation 19/19, approved imports 6/6, Phase 2A
+shared captures 4/4, Phase 2B shared captures 8/8, zero fallbacks, and zero
+runtime errors. A fresh full Production backup was completed first at
+`backups/production/card-image-phase2c-predeploy-20260820-133849/`: 147 database
+tables (SHA-256
+`a82a3fbac8770c5ad12629b8ece2759229be0f487c8b2f131c14482c391d6e98`)
+and 774 upload files / 1,143,117,547 bytes. The temporary helper and remote
+database archive were deleted immediately after verified download.
+
+Uploaded runtime files were `index.html`, `public/js/main.js`, the shared export
+utility, six module pages, and `deploy-manifest.json`. FTP download-back SHA-256
+matched 10/10 at
+`backups/production/card-image-phase2c-upload-verify-20260820-135434/`; HTTPS
+runtime hashes matched 9/9 with the Phase 2C cache marker at
+`backups/production/card-image-phase2c-http-smoke-20260820-135609/`.
+The final deployed manifest matched SHA-256
+`d450063a838dc7704f45efffd894dd8435893c7591bd27320060502080f23ca8`
+at `backups/production/card-image-phase2c-final-manifest-verify-20260820-140100/`.
+
+Authenticated Production browser UAT passed at
+`backups/production/card-image-phase2c-production-uat-20260820T065800Z/`:
+12/12 shared-default captures, 0 fallbacks, 6/6 desktop/mobile-consistent
+layouts, and 0 runtime errors. Visual review found no clipped target text,
+blank form values, or incomplete images. No API, permission, schema, business
+data, or upload-storage mutation was performed; normal login audit/housekeeping
+was the only expected side effect. See
+`docs/card-image-export-phase2c-production.md`.
+
+## Card Image Export Phase 2B High-Risk Rollout (2026-08-20, local only)
+
+Wired four P1 targets to the shared exporter behind explicit per-module flags:
+Machine Safety document list, Yokoten topic cards, 4M change overview, and
+Safety Culture campaign library. All other targets stay on unchanged legacy
+exporters, and shared failures fall back immediately.
+
+Machine Safety now creates an off-screen list surrogate for mobile card view,
+producing the same 1,440 x 2,560 output as desktop. 4M and Safety Culture render
+live form values as static clone-only text so filter values are not blank or
+clipped in PNG output.
+
+Foundation verification passed 19/19 with approved runtime imports 6/6.
+Controlled read-only comparison UAT passed 8 comparisons / 16 PNGs, 8 shared
+captures, 0 fallbacks, 4/4 viewport-consistent layouts, and 0 runtime errors.
+Evidence is under
+`backups/local/card-image-phase2b-comparison-20260820T061809Z/`.
+
+Feature flags remain off by default. No API, permission, MySQL, upload storage,
+business data, or Production files changed; Phase 2B was not deployed. See
+`docs/card-image-export-phase2b-rollout.md`.
+
+## Card Image Export Phase 2A Pilot (2026-08-20, local only)
+
+Wired the shared card image exporter only to Dashboard hero and Accident
+performance board behind explicit per-module feature flags. Both targets use
+their unchanged legacy exporter when disabled, and shared failures immediately
+fall back. All other export targets and modules remain legacy.
+
+Controlled read-only comparison UAT produced 8 old/new PNGs across desktop and
+mobile. All 4 shared captures used the shared engine with 0 fallbacks and 0
+runtime errors. Dashboard and Accident shared dimensions were identical across
+viewports. Visual review confirmed Dashboard remained clean and clone-only
+truncated-text expansion fixed the Accident rate-description clipping. Evidence
+is under `backups/local/card-image-phase2a-comparison-20260820T051525Z/`.
+
+The feature flags remain off by default. No API, permissions, MySQL, upload
+storage, business data, or Production files changed; Phase 2A was not deployed.
+See `docs/card-image-export-phase2a-pilot.md`.
+
+## Card Image Export Phase 1 Shared Foundation (2026-08-20, local only)
+
+Added `public/js/utils/card-image-export.js` as an unwired shared capture
+foundation. It provides deterministic plans, font/image readiness, clone-only
+normalization, live form-state transfer, safe image-size limits, concurrent
+capture coalescing, cleanup, structured failure reasons, sanitized filenames,
+and opt-in legacy fallback orchestration.
+
+The headless Edge fixture passed 15/15 cases for sizing, excessive-height
+rejection, duplicate capture, asset warning, text/sticky normalization, form
+values, table/canvas preservation, ignored controls, live-DOM immutability, and
+legacy fallback. A source-boundary assertion confirmed no runtime module imports
+the utility. Phase 1 changes no existing exporter, application behavior, API,
+permissions, MySQL, upload storage, or business data and was not deployed. See
+`docs/card-image-export-phase1-foundation.md`.
+
+## Card Image Export Phase 0 Baseline Audit (2026-08-20, local only)
+
+Completed a controlled read-only Production browser audit of the right-click
+card image feature across 12 modules. Desktop covered 174 visible targets and
+mobile covered 199; 24 representative PNG exports completed with zero export
+failures and zero runtime errors. Visual review confirmed material clipping or
+format risks in Machine Safety, Accident, Yokoten, 4M, and Safety Culture, plus
+oversized/mobile consistency risks in KY, Patrol, CCCF, and Training.
+
+Added the repeatable audit runner
+`backend/scripts/card-image-baseline-audit.js` and documented findings,
+acceptance gates, and the phased rollout in
+`docs/card-image-export-phase0-audit.md`. Evidence is under
+`backups/local/card-image-baseline-20260820T043416Z/` and
+`backups/local/card-image-baseline-mobile-20260820T043646Z/`. This phase did not
+change application behavior, API, permissions, MySQL, upload storage, or
+business data and was not deployed.
+
 ## 4M Training Matrix Workspace UX (2026-08-20, deployed)
 
 Improved Man Record > Training Matrix for departments with long curriculum and

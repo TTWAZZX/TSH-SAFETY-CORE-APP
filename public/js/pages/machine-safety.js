@@ -2,6 +2,7 @@ import { guardActionHandler, guardSubmitHandler, installWindowActionLocks } from
 // public/js/pages/machine-safety.js
 import { API, apiFetch } from '../api.js';
 import * as UI from '../ui.js?v=20260611-machine-doc-urlfix';
+import { captureCardImage, isSharedCardImageExportEnabled } from '../utils/card-image-export.js?v=20260820-card-image-phase2b';
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 const RISK_META = {
@@ -213,6 +214,68 @@ function _hideCardImageMenu() {
 }
 
 async function _downloadCardImage(card) {
+    const targetName = card?.dataset?.msdCardImage || 'machine-safety-card';
+    const pilotEnabled = targetName === 'machine-safety-document-list'
+        && isSharedCardImageExportEnabled(undefined, 'machine-safety');
+    if (!pilotEnabled) return _downloadCardImageLegacy(card);
+
+    const name = _safeFilePart(targetName);
+    let exportTarget = card;
+    let exportSurrogate = null;
+    try {
+        UI.showLoading('Saving card image...');
+        if (_viewMode === 'card') {
+            const previousViewMode = _viewMode;
+            _viewMode = 'list';
+            const listMarkup = _renderTable();
+            _viewMode = previousViewMode;
+            exportSurrogate = card.cloneNode(false);
+            exportSurrogate.innerHTML = `<div class="msd-results-scroll">${listMarkup}</div>`;
+            Object.assign(exportSurrogate.style, {
+                position: 'fixed',
+                left: '-20000px',
+                top: '0',
+                width: '1200px',
+                zIndex: '-1',
+            });
+            document.body.appendChild(exportSurrogate);
+            exportTarget = exportSurrogate;
+        }
+        const result = await captureCardImage(exportTarget, {
+            filename: `${name}-${new Date().toISOString().slice(0, 10)}`,
+            width: 1200,
+            scale: 1.2,
+            minScale: 1.2,
+            maxHeight: 10000,
+            maxPixels: 18000000,
+            expandTruncatedText: true,
+            prepareClone: clone => {
+                clone.style.transform = 'none';
+                clone.style.boxShadow = 'none';
+                clone.querySelectorAll('[data-msd-card-ignore]').forEach(element => {
+                    element.style.setProperty('display', 'none', 'important');
+                });
+            },
+        });
+        document.dispatchEvent(new CustomEvent('tsh:card-image-export-complete', {
+            detail: { module: 'machine-safety', target: targetName, engine: 'shared', width: result.width, height: result.height },
+        }));
+        UI.showToast('บันทึกรูปภาพการ์ดแล้ว', 'success');
+    } catch (error) {
+        console.warn('[CardImageExport] Machine Safety shared capture failed; using legacy fallback.', error);
+        document.dispatchEvent(new CustomEvent('tsh:card-image-export-complete', {
+            detail: { module: 'machine-safety', target: targetName, engine: 'legacy-fallback', errorCode: error?.code || 'CAPTURE_FAILED' },
+        }));
+        exportSurrogate?.remove();
+        UI.hideLoading();
+        return _downloadCardImageLegacy(card);
+    } finally {
+        exportSurrogate?.remove();
+        UI.hideLoading();
+    }
+}
+
+async function _downloadCardImageLegacy(card) {
     if (typeof html2canvas === 'undefined') {
         UI.showToast('ไม่พบ library สำหรับบันทึกรูปภาพ', 'error');
         return;

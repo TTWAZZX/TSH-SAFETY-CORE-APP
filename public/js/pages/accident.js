@@ -3,6 +3,7 @@ import { guardSubmitHandler, installWindowActionLocks } from '../utils/async-ui.
 // Accident Report — enterprise pattern (buildShell + switchTab)
 import { API } from '../api.js';
 import { openModal, openDetailModal, closeModal, showToast, showConfirmationModal, showLoading, hideLoading } from '../ui.js?v=20260602-mobile-nav-m53';
+import { captureCardImage, isSharedCardImageExportEnabled } from '../utils/card-image-export.js?v=20260820-card-image-phase2a';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Constants
@@ -388,6 +389,41 @@ function _accHideCardImageMenu() {
 }
 
 async function _accDownloadCardImage(card) {
+    const targetName = card?.dataset?.accCardImage || 'accident-card';
+    const pilotEnabled = targetName === 'accident-performance-board'
+        && isSharedCardImageExportEnabled(undefined, 'accident');
+    if (!pilotEnabled) return _accDownloadCardImageLegacy(card);
+
+    const name = _accSafeFilePart(targetName);
+    try {
+        showLoading('Saving card image...');
+        const result = await captureCardImage(card, {
+            filename: `${name}-${_statsYear}`,
+            width: 1200,
+            expandTruncatedText: true,
+            prepareClone: clone => {
+                clone.querySelectorAll('[data-acc-card-ignore]').forEach(element => {
+                    element.style.setProperty('display', 'none', 'important');
+                });
+            },
+        });
+        document.dispatchEvent(new CustomEvent('tsh:card-image-export-complete', {
+            detail: { module: 'accident', target: targetName, engine: 'shared', width: result.width, height: result.height },
+        }));
+        showToast('บันทึกรูปภาพการ์ดแล้ว', 'success');
+    } catch (error) {
+        console.warn('[CardImageExport] Accident shared capture failed; using legacy fallback.', error);
+        document.dispatchEvent(new CustomEvent('tsh:card-image-export-complete', {
+            detail: { module: 'accident', target: targetName, engine: 'legacy-fallback', errorCode: error?.code || 'CAPTURE_FAILED' },
+        }));
+        hideLoading();
+        return _accDownloadCardImageLegacy(card);
+    } finally {
+        hideLoading();
+    }
+}
+
+async function _accDownloadCardImageLegacy(card) {
     if (typeof html2canvas === 'undefined') {
         showToast('ไม่พบ library สำหรับบันทึกรูปภาพ', 'error');
         return;

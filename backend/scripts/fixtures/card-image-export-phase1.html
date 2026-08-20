@@ -1,0 +1,158 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <title>Card image export Phase 1 fixture</title>
+    <style>
+        body { margin: 0; font-family: sans-serif; }
+        #fixture-card { display: block; width: 480px; overflow: auto; max-height: 500px; }
+        .sticky { position: sticky; top: 0; }
+        .tight { font-size: 16px; line-height: 12px; }
+        .truncate { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; width: 40px; }
+    </style>
+</head>
+<body>
+    <section id="fixture-card" data-card-image-name="fixture/card">
+        <div class="sticky">Sticky heading</div>
+        <p class="tight">Text with an intentionally unsafe live line height.</p>
+        <p class="truncate">Truncated text must expand in the export clone.</p>
+        <input id="fixture-input" value="initial">
+        <input id="fixture-check" type="checkbox">
+        <select id="fixture-select"><option>One</option><option>Two</option></select>
+        <div style="max-height:40px;overflow:auto"><table><tbody><tr><td>Row 1</td></tr><tr><td>Row 2</td></tr></tbody></table></div>
+        <canvas id="fixture-chart" width="120" height="40"></canvas>
+        <span data-card-image-ignore>Do not export</span>
+        <img alt="ready fixture" src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='2' height='2'%3E%3Crect width='2' height='2' fill='green'/%3E%3C/svg%3E">
+        <img alt="unavailable fixture" src="data:image/png;base64,not-valid">
+    </section>
+    <script type="module">
+        import {
+            CardImageExportError,
+            buildCardImageExportPlan,
+            captureCardImage,
+            createCardImageExporter,
+            isSharedCardImageExportEnabled,
+            sanitizeCardImageFilename,
+        } from '/public/js/utils/card-image-export.js';
+
+        const checks = [];
+        const check = (condition, label) => {
+            if (!condition) throw new Error(label);
+            checks.push(label);
+        };
+
+        async function cloneDocumentFor(target) {
+            const frame = document.createElement('iframe');
+            frame.style.cssText = 'position:fixed;left:-9999px;width:1200px;height:800px';
+            document.body.appendChild(frame);
+            const loaded = new Promise(resolve => frame.addEventListener('load', resolve, { once: true }));
+            frame.srcdoc = `<!doctype html><html><head><style>${document.querySelector('style').textContent}</style></head><body>${target.outerHTML}</body></html>`;
+            await loaded;
+            return frame;
+        }
+
+        async function run() {
+            check(sanitizeCardImageFilename(' Report: A/B? ') === 'Report-A-B.png', 'filename is sanitized');
+            const plan = buildCardImageExportPlan({ contentWidth: 390, contentHeight: 800 }, { width: 1000 });
+            check(plan.width === 1000 && plan.scale >= 1, 'deterministic plan is created');
+            let tooTall = false;
+            try {
+                buildCardImageExportPlan({ contentWidth: 390, contentHeight: 6000 });
+            } catch (error) {
+                tooTall = error instanceof CardImageExportError && error.code === 'CARD_TOO_TALL';
+            }
+            check(tooTall, 'oversized card is rejected before render');
+            check(isSharedCardImageExportEnabled({ cardImageExportV2: ['dashboard'] }, 'dashboard'), 'module feature flag enables approved pilot');
+            check(!isSharedCardImageExportEnabled({ cardImageExportV2: ['dashboard'] }, 'accident'), 'module feature flag isolates non-approved module');
+
+            const target = document.getElementById('fixture-card');
+            document.getElementById('fixture-input').value = 'current value';
+            document.getElementById('fixture-check').checked = true;
+            document.getElementById('fixture-select').selectedIndex = 1;
+            document.getElementById('fixture-chart').getContext('2d').fillRect(0, 0, 20, 20);
+            const originalStyle = target.getAttribute('style');
+            let renderCalls = 0;
+            let cloneSnapshot;
+            const fakeRenderer = async (liveTarget, options) => {
+                renderCalls += 1;
+                await new Promise(resolve => setTimeout(resolve, 25));
+                const frame = await cloneDocumentFor(liveTarget);
+                try {
+                    options.onclone(frame.contentDocument);
+                    const clone = frame.contentDocument.querySelector('[data-card-export-session]');
+                    cloneSnapshot = {
+                        width: clone.style.width,
+                        maxHeight: clone.style.maxHeight,
+                        overflow: clone.style.overflow,
+                        stickyPosition: clone.querySelector('.sticky').style.position,
+                        lineHeight: parseFloat(clone.querySelector('.tight').style.lineHeight),
+                        truncatedWhiteSpace: clone.querySelector('.truncate').style.whiteSpace,
+                        input: clone.querySelector('#fixture-input').value,
+                        checked: clone.querySelector('#fixture-check').checked,
+                        selectedIndex: clone.querySelector('#fixture-select').selectedIndex,
+                        ignored: clone.querySelector('[data-card-image-ignore]').style.display,
+                        tableRows: clone.querySelectorAll('tbody tr').length,
+                        canvasWidth: clone.querySelector('#fixture-chart').width,
+                    };
+                } finally {
+                    frame.remove();
+                }
+                return {
+                    width: Math.round(options.width * options.scale),
+                    height: 900,
+                    toBlob(callback) { callback(new Blob(['fixture'], { type: 'image/png' })); },
+                };
+            };
+
+            const first = captureCardImage(target, { width: 900, download: false, expandTruncatedText: true, html2canvas: fakeRenderer });
+            const second = captureCardImage(target, { width: 900, download: false, expandTruncatedText: true, html2canvas: fakeRenderer });
+            const [firstResult, secondResult] = await Promise.all([first, second]);
+            check(renderCalls === 1, 'concurrent captures are coalesced');
+            check(firstResult.filename === 'fixture-card.png' && secondResult.filename === firstResult.filename, 'capture returns deterministic filename');
+            check(firstResult.warnings.some(warning => warning.type === 'image'), 'unavailable image becomes a non-fatal warning');
+            check(cloneSnapshot.width === '900px' && cloneSnapshot.maxHeight === 'none' && cloneSnapshot.overflow === 'visible', 'clone receives deterministic dimensions');
+            check(cloneSnapshot.stickyPosition === 'static', 'sticky content is normalized in clone');
+            check(cloneSnapshot.lineHeight >= 20, 'unsafe text line height is normalized in clone');
+            check(cloneSnapshot.truncatedWhiteSpace === 'normal', 'truncated text expands only in clone');
+            check(cloneSnapshot.input === 'current value' && cloneSnapshot.checked && cloneSnapshot.selectedIndex === 1, 'live form values are copied to clone');
+            check(cloneSnapshot.tableRows === 2, 'table structure is retained in clone');
+            check(cloneSnapshot.canvasWidth === 120, 'canvas dimensions are retained in clone');
+            check(cloneSnapshot.ignored === 'none', 'ignored controls are hidden in clone');
+            check(target.getAttribute('style') === originalStyle && !target.hasAttribute('data-card-export-session'), 'live target remains unchanged');
+
+            let staticControls;
+            await captureCardImage(target, {
+                width: 900,
+                download: false,
+                renderControlsAsText: true,
+                html2canvas: async (liveTarget, options) => {
+                    const frame = await cloneDocumentFor(liveTarget);
+                    try {
+                        options.onclone(frame.contentDocument);
+                        const clone = frame.contentDocument.querySelector('[data-card-export-session]');
+                        staticControls = Array.from(clone.querySelectorAll('[data-card-export-static-control]')).map(control => control.textContent);
+                    } finally {
+                        frame.remove();
+                    }
+                    return {
+                        width: Math.round(options.width * options.scale),
+                        height: 900,
+                        toBlob(callback) { callback(new Blob(['fixture'], { type: 'image/png' })); },
+                    };
+                },
+            });
+            check(staticControls.join('|') === 'current value|✓|Two', 'form controls can render as stable export text');
+
+            let fallbackCalls = 0;
+            const shadowExporter = createCardImageExporter({ fallback: () => { fallbackCalls += 1; return 'legacy'; } });
+            check(await shadowExporter(target) === 'legacy' && fallbackCalls === 1, 'shadow mode retains legacy fallback');
+
+            window.__phase1Result = { passed: true, checks };
+        }
+
+        run().catch(error => {
+            window.__phase1Result = { passed: false, checks, error: error.stack || error.message };
+        });
+    </script>
+</body>
+</html>

@@ -1,5 +1,33 @@
 # TSH Safety Core Activity - Architecture
 
+## Card Image Export Shared Foundation (Phase 1 shadow-only)
+
+`public/js/utils/card-image-export.js` defines the future shared client-side
+capture boundary. It owns deterministic sizing, font/image readiness, clone-only
+normalization, form-state transfer, output limits, cleanup, concurrent-action
+coalescing, structured errors, and legacy fallback orchestration.
+
+The utility is intentionally not imported by `main.js` directly. Phase 2A/2B
+permit imports only from Dashboard, Accident, Machine Safety, Yokoten, 4M, and
+Safety Culture; the shared path remains disabled unless the matching module
+feature flag is enabled, and every page has an explicit target allowlist.
+Existing module-specific handlers remain the fallback and all other targets
+remain legacy.
+
+Phase 2B adds clone-only static rendering for form controls whose values would
+otherwise be omitted or clipped by canvas capture. Machine Safety mobile card
+view uses a temporary off-screen list surrogate so desktop and mobile produce
+the same bounded document-list image without changing visible UI or business
+state. The foundation and rollout gates are documented under
+`docs/card-image-export-phase*.md`. This architecture adds no API, database,
+permission, or storage dependency.
+
+Phase 2C enables the approved six-module allowlist by default in `main.js`.
+An explicitly supplied `window.__TSH_FEATURE_FLAGS__.cardImageExportV2` value
+always takes precedence, preserving an emergency flags-off rollback without
+removing module code. Production continues to use exact per-page target
+allowlists and legacy fallback on capture failure.
+
 ## Document Map
 
 - `CLAUDE.md` is the quick-start entry point.
