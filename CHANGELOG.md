@@ -2,6 +2,21 @@
 
 This file preserves historical production handoff, smoke test, backup, deployment, migration, and phase notes moved out of `CLAUDE.md`.
 
+## Card Image Export Phase 2D Pilot Batch 1 (2026-08-20, local only)
+
+Added a feature-flagged shared export path only for the OJT/SCW `scw-hero`
+target. The export clone uses a deterministic title/KPI grid and retains the
+unchanged legacy fallback. Foundation tests passed 19/19 with 7/7 approved
+runtime imports; controlled desktop/mobile UAT passed 2 shared captures, 0
+fallbacks, 1/1 consistent layout, and 0 runtime errors. Visual review passed.
+
+Hiyari was investigated but removed from the rollout after repeated mobile
+captures exposed non-deterministic clone clipping despite passing dimension
+checks. Hiyari has no remaining code diff and stays on its legacy exporter.
+OJT is not enabled by default, and Phase 2D was not deployed. No API,
+permission, database, upload-storage, or business-data change occurred. See
+`docs/card-image-export-phase2d-pilot.md`.
+
 ## Card Image Export Phase 2C Production Rollout (2026-08-20)
 
 Enabled the shared exporter by default for the six approved modules: Dashboard,

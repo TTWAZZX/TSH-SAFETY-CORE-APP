@@ -9,6 +9,7 @@ import {
 } from '../ui.js?v=20260602-mobile-nav-m53';
 import { normalizeApiArray } from '../utils/normalize.js';
 import { buildActivityCard } from '../utils/activity-widget.js?v=20260602-activity-targets-at10';
+import { captureCardImage, isSharedCardImageExportEnabled } from '../utils/card-image-export.js?v=20260820-card-image-phase2d';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Constants
@@ -786,6 +787,58 @@ function _ojtHideCardImageMenu() {
 }
 
 async function _ojtDownloadCardImage(card) {
+    const targetName = card?.dataset?.ojtCardImage || 'scw-card';
+    const pilotEnabled = targetName === 'scw-hero'
+        && isSharedCardImageExportEnabled(undefined, 'ojt');
+    if (!pilotEnabled) return _ojtDownloadCardImageLegacy(card);
+
+    const name = _ojtSafeFilePart(targetName);
+    try {
+        showLoading('Saving card image...');
+        const result = await captureCardImage(card, {
+            filename: `${name}-${new Date().getFullYear()}`,
+            width: 1200,
+            expandTruncatedText: true,
+            prepareClone: clone => {
+                const stats = clone.querySelector('#ojt-hero-stats');
+                const titleRow = stats?.parentElement;
+                if (titleRow && stats) {
+                    titleRow.style.setProperty('display', 'grid', 'important');
+                    titleRow.style.setProperty('grid-template-columns', 'minmax(0, 1fr) 560px', 'important');
+                    titleRow.style.setProperty('align-items', 'center', 'important');
+                    titleRow.style.setProperty('gap', '16px', 'important');
+                    titleRow.firstElementChild?.style?.setProperty('min-width', '0', 'important');
+                    stats.style.setProperty('display', 'grid', 'important');
+                    stats.style.setProperty('grid-template-columns', `repeat(${Math.max(1, stats.children.length)}, minmax(0, 1fr))`, 'important');
+                    stats.style.setProperty('width', '560px', 'important');
+                    stats.style.setProperty('min-width', '560px', 'important');
+                    stats.querySelectorAll(':scope > *').forEach(element => {
+                        element.style.setProperty('min-width', '0', 'important');
+                        element.style.setProperty('width', 'auto', 'important');
+                    });
+                }
+                clone.querySelectorAll('[data-ojt-card-ignore], #ojt-card-save-menu').forEach(element => {
+                    element.style.setProperty('display', 'none', 'important');
+                });
+            },
+        });
+        document.dispatchEvent(new CustomEvent('tsh:card-image-export-complete', {
+            detail: { module: 'ojt', target: targetName, engine: 'shared', width: result.width, height: result.height },
+        }));
+        showToast('บันทึกรูปภาพการ์ดแล้ว', 'success');
+    } catch (error) {
+        console.warn('[CardImageExport] OJT shared capture failed; using legacy fallback.', error);
+        document.dispatchEvent(new CustomEvent('tsh:card-image-export-complete', {
+            detail: { module: 'ojt', target: targetName, engine: 'legacy-fallback', errorCode: error?.code || 'CAPTURE_FAILED' },
+        }));
+        hideLoading();
+        return _ojtDownloadCardImageLegacy(card);
+    } finally {
+        hideLoading();
+    }
+}
+
+async function _ojtDownloadCardImageLegacy(card) {
     if (typeof html2canvas === 'undefined') {
         showToast('ไม่พบ library สำหรับบันทึกรูปภาพ', 'error');
         return;

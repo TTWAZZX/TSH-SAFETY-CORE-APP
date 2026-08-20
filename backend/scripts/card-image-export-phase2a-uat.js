@@ -12,8 +12,8 @@ const root = path.resolve(__dirname, '..', '..');
 const base = String(process.env.PROD_UAT_URL || 'https://dev.tshpcl.com/safety/tsh-safety-core').replace(/\/+$/, '');
 const browserPath = process.env.EDGE_PATH || 'C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe';
 const requestedPhase = String(process.env.CARD_IMAGE_UAT_PHASE || '2a').toLowerCase();
-const uatPhase = ['2b', '2c'].includes(requestedPhase) ? requestedPhase : '2a';
-const cdpPort = uatPhase === '2c' ? 9836 : uatPhase === '2b' ? 9835 : 9834;
+const uatPhase = ['2b', '2c', '2d'].includes(requestedPhase) ? requestedPhase : '2a';
+const cdpPort = uatPhase === '2d' ? 9837 : uatPhase === '2c' ? 9836 : uatPhase === '2b' ? 9835 : 9834;
 const serveLocalAssets = uatPhase !== '2c';
 const stamp = new Date().toISOString().replace(/[-:]/g, '').replace(/\.\d{3}Z$/, 'Z');
 const artifactDir = path.join(
@@ -45,15 +45,36 @@ const PHASE2B_PILOTS = [
     { module: 'safety-culture', hash: 'safety-culture', selector: '[data-sc-card-image="safety-culture-campaign-library"]', menu: 'sc-card-save-menu' },
 ];
 
+const PHASE2D_PILOTS = [
+    {
+        module: 'ojt',
+        hash: 'ojt',
+        selector: '[data-ojt-card-image="scw-hero"]',
+        menu: 'ojt-card-save-menu',
+        ready: `document.querySelectorAll('#ojt-hero-stats > *').length >= 4 && !document.querySelector('#ojt-hero-stats .animate-pulse')`,
+    },
+];
+
 const PILOTS = uatPhase === '2c'
     ? [...PHASE2A_PILOTS, ...PHASE2B_PILOTS]
-    : uatPhase === '2b' ? PHASE2B_PILOTS : PHASE2A_PILOTS;
+    : uatPhase === '2d' ? PHASE2D_PILOTS
+        : uatPhase === '2b' ? PHASE2B_PILOTS : PHASE2A_PILOTS;
 if (uatPhase !== '2a') {
     [
         ['machine-safety.js', 'machine-safety.js'],
         ['yokoten.js', 'yokoten.js'],
         ['fourm.js', 'fourm.js'],
         ['safety-culture.js', 'safety-culture.js'],
+    ].forEach(([urlName, fileName]) => {
+        LOCAL_ASSETS.set(`/public/js/pages/${urlName}`, {
+            file: path.join(root, 'public', 'js', 'pages', fileName),
+            mime: 'text/javascript; charset=utf-8',
+        });
+    });
+}
+if (uatPhase === '2d') {
+    [
+        ['ojt.js', 'ojt.js'],
     ].forEach(([urlName, fileName]) => {
         LOCAL_ASSETS.set(`/public/js/pages/${urlName}`, {
             file: path.join(root, 'public', 'js', 'pages', fileName),
@@ -223,7 +244,13 @@ async function triggerExport(pilot, mode, viewport) {
         const button = document.getElementById(${JSON.stringify(pilot.menu)})?.querySelector('button');
         if (!button) return { ok:false, reason:'save action missing' };
         button.click();
-        return { ok:true, liveWidth:Math.round(rect.width), liveHeight:Math.round(rect.height) };
+        const stats = card.querySelector('#hiyari-hero-stats, #ojt-hero-stats');
+        return {
+            ok:true,
+            liveWidth:Math.round(rect.width),
+            liveHeight:Math.round(rect.height),
+            sourceText:String(stats?.innerText || '').replace(/\s+/g, ' ').trim(),
+        };
     })()`);
     assert.ok(triggered.ok, `${viewport.name} ${pilot.module} ${mode}: ${triggered.reason}`);
     const downloaded = await waitForDownload(before);
@@ -242,6 +269,7 @@ async function triggerExport(pilot, mode, viewport) {
         file: destinationName,
         liveWidth: triggered.liveWidth,
         liveHeight: triggered.liveHeight,
+        sourceText: triggered.sourceText,
         ...pngDimensions(path.join(artifactDir, destinationName)),
         events,
     };
@@ -250,6 +278,7 @@ async function triggerExport(pilot, mode, viewport) {
 async function openModule(pilot) {
     await client.evaluate(`location.hash = ${JSON.stringify(`#${pilot.hash}`)}`);
     await waitFor(`location.hash === ${JSON.stringify(`#${pilot.hash}`)} && document.querySelector(${JSON.stringify(pilot.selector)})`, pilot.module);
+    if (pilot.ready) await waitFor(pilot.ready, `${pilot.module} export readiness`);
     await sleep(1800);
     await client.evaluate('document.fonts?.ready?.then?.(() => true) || true');
 }

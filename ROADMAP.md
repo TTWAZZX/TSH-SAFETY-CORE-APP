@@ -1,6 +1,6 @@
 # TSH Safety Core Activity - Roadmap
 
-## Card Image Export Improvement (Phases 0-2C deployed, 2026-08-20)
+## Card Image Export Improvement (Phases 0-2C deployed; Phase 2D batch 1 local, 2026-08-20)
 
 Phase 0 established a read-only desktop/mobile Production baseline for the
 right-click card image feature across 12 modules. It captured 24 representative
@@ -42,8 +42,17 @@ FTP SHA-256 10/10, HTTPS hashes 9/9, shared captures 12/12, fallbacks 0,
 viewport-consistent layouts 6/6, and runtime errors 0. See
 `docs/card-image-export-phase2c-production.md`.
 
-The next correct step is Phase 2D: continue lower-risk targets in small batches
-under the same exact allowlist, fallback, comparison, and visual-review gates.
+Phase 2D batch 1 is complete locally for the OJT/SCW hero only. Foundation
+tests pass 19/19 with 7/7 approved runtime imports; desktop/mobile comparison
+passed 2/2 shared captures, 0 fallbacks, 1/1 consistent layout, and 0 runtime
+errors. Hiyari was removed from the batch after visual review exposed
+non-deterministic mobile clone clipping, so it remains fully legacy. OJT is not
+enabled by default and nothing from Phase 2D has been deployed. See
+`docs/card-image-export-phase2d-pilot.md`.
+
+The next correct step is a controlled OJT rollout decision or another isolated
+lower-risk pilot such as Training. Hiyari needs a purpose-built static export
+surrogate before reconsideration.
 
 ## Current Known Remaining Work
 

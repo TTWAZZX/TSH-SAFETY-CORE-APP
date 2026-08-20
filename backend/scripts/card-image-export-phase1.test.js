@@ -100,10 +100,11 @@ async function main() {
             'pages/dashboard.js',
             'pages/fourm.js',
             'pages/machine-safety.js',
+            'pages/ojt.js',
             'pages/safety-culture.js',
             'pages/yokoten.js',
         ],
-        `Shared export imports must remain inside the approved Phase 2 rollout: ${normalizedReferences.join(', ')}`,
+        `Shared export imports must remain inside the approved Phase 2 rollout and pilot set: ${normalizedReferences.join(', ')}`,
     );
     const mainSource = fs.readFileSync(path.join(frontendRoot, 'main.js'), 'utf8');
     const enabledModules = ['dashboard', 'accident', 'machine-safety', 'yokoten', 'fourm', 'safety-culture'];
