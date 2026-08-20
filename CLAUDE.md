@@ -34,6 +34,13 @@
 
 ## Current 4M Change Management Handoff (2026-08-19, deployed)
 
+- Module-scope hotfix r4 (2026-08-20) moved the existing legacy quarantine
+  wrapper to the actual duplicate Training Matrix block. This exposes the
+  active `fetchTrainingPermissions`, `renderTrainingMatrix`, and related
+  functions to `loadFourmPage()` without deleting functions. Regression checks
+  12 required symbols in ES-module scope; Production FTP SHA-256 matched 4/4
+  including the manifest and HTTP cache/hash smoke passed using
+  `20260820-fourm-scope-hotfix-r4`.
 - Scope correction r3 (2026-08-20) restored the complete pre-stabilization
   `fourm.js` after the duplicate-code cleanup removed about 1,900 lines. Against
   the restored source, the frontend behavior diff is only four added lines to

@@ -1,14 +1,14 @@
 {
   "schemaVersion": 1,
-  "generatedAt": "2026-08-20T08:28:34+07:00",
-  "sourceHead": "c278e3e",
-  "previousProductionBuild": "fourm-white-screen-hotfix-r2-20260819",
-  "buildId": "fourm-restore-r3-20260820",
-  "cacheBust": "20260820-fourm-restore-r3",
+  "generatedAt": "2026-08-20T08:35:36+07:00",
+  "sourceHead": "8f56fcd",
+  "previousProductionBuild": "fourm-restore-r3-20260820",
+  "buildId": "fourm-scope-hotfix-r4-20260820",
+  "cacheBust": "20260820-fourm-scope-hotfix-r4",
   "runtime": "shared-hosting-php",
-  "deployPhase": "fourm-restore-r3",
+  "deployPhase": "fourm-scope-hotfix-r4",
   "deploymentStatus": "deployed-and-static-smoke-passed",
-  "deployedAt": "2026-08-20T08:27:30+07:00",
+  "deployedAt": "2026-08-20T08:34:30+07:00",
   "databaseMutationPlanned": false,
   "schemaMutationPlanned": false,
   "uploadStorageMutationPlanned": false,
@@ -21,30 +21,31 @@
   "fileHashes": [
     {
       "path": "index.html",
-      "sha256": "e1fe1c85bf1f1be6cfabb9d21aa16113563fef7ebdfdc1a39ad900105cee46fa"
+      "sha256": "1c3d29da12a1c817734e99f23f49997ecd95d2cffb850f6cd505c19009f35e80"
     },
     {
       "path": "public/js/main.js",
-      "sha256": "9a5dd429925695ac5a361ea4245d7b698d9553759a6100c64d43b3d775cc9650"
+      "sha256": "dc3bd3b175d36bbb7de41ec357fcc2144be3b46110e0a1414234499204a65069"
     },
     {
       "path": "public/js/pages/fourm.js",
-      "sha256": "937b003489c6f30d075c8b7eb1221058fb63e7168af16b30e2c5ee0f1665f212"
+      "sha256": "c2312702c06ff3657d22c00ce0b69fe56f0c27621030788d0087c032932ca2b8"
     }
   ],
   "verification": {
     "nodeSyntax": "PASS as ES module via node --input-type=module --check",
     "fourmFocusedRegression": "PASS with mandatory ES-module syntax gate",
-    "scopeCorrection": "restored the complete pre-stabilization fourm.js; relative to that source the only behavior change is four lines that omit an empty optional attachment",
+    "scopeCorrection": "moved the existing legacy quarantine wrapper to the actual duplicate block so the active Training Matrix implementations remain in ES-module scope; no functions were deleted",
+    "requiredTrainingSymbols": "PASS: 12 Training Matrix functions resolve in module scope",
     "gitDiffCheck": "PASS",
     "databaseMutationAttempted": false,
     "schemaMutationAttempted": false,
     "uploadStorageMutationAttempted": false
   },
   "productionVerification": {
-    "codeBackup": "backups/production/fourm-restore-r3-predeploy-20260820",
-    "uploadVerify": "backups/production/fourm-restore-r3-upload-verify-20260820",
-    "finalRuntimeVerify": "backups/production/fourm-restore-r3-final-verify-20260820",
+    "codeBackup": "backups/production/fourm-scope-hotfix-r4-predeploy-20260820",
+    "uploadVerify": "backups/production/fourm-scope-hotfix-r4-upload-verify-20260820",
+    "finalRuntimeVerify": "backups/production/fourm-scope-hotfix-r4-final-verify-20260820",
     "sha256Matches": "PASS: Production download-back matched 4/4 runtime and manifest files",
     "smoke": "PASS: Production HTTP returned the new cache markers and exact fourm.js SHA-256; node --check passed",
     "businessDataChanged": false,

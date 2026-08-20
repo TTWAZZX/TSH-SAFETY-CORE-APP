@@ -60,13 +60,36 @@ assert.match(phpHandler, /Select a different destination course\./);
 assert.match(phpHandler, /COURSE_MASTER_UPDATE/);
 assert.match(phpHandler, /CURRICULUM_ASSIGNMENT_TRANSFER/);
 assert.match(frontend, /fd\.delete\('attachment'\)/);
-assert.match(main, /fourm\.js\?v=20260820-fourm-restore-r3/);
-assert.match(index, /main\.js\?v=20260820-fourm-restore-r3/);
+assert.match(main, /fourm\.js\?v=20260820-fourm-scope-hotfix-r4/);
+assert.match(index, /main\.js\?v=20260820-fourm-scope-hotfix-r4/);
 
 const moduleSyntax = spawnSync(process.execPath, ['--input-type=module', '--check'], {
     input: frontend,
     encoding: 'utf8',
 });
 assert.strictEqual(moduleSyntax.status, 0, moduleSyntax.stderr || 'fourm.js ES module syntax check failed');
+
+const requiredTrainingSymbols = spawnSync(process.execPath, ['--input-type=module', '--check'], {
+    input: `${frontend}\nexport {
+        fetchTrainingPermissions,
+        renderTrainingMatrix,
+        fetchTrainingMatrix,
+        renderTrainingCurriculums,
+        fetchTrainingCourses,
+        renderTrainingCourses,
+        fetchTrainingAssignments,
+        renderTrainingAssignments,
+        showTrainingCurriculumForm,
+        showTrainingCourseForm,
+        showAssignEmployeesModal,
+        showTrainingAuditLogModal
+    };\n`,
+    encoding: 'utf8',
+});
+assert.strictEqual(
+    requiredTrainingSymbols.status,
+    0,
+    requiredTrainingSymbols.stderr || 'Training Matrix functions are not available in module scope'
+);
 
 console.log('4M stabilization regression tests passed.');

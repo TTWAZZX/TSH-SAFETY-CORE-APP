@@ -2,6 +2,27 @@
 
 This file preserves historical production handoff, smoke test, backup, deployment, migration, and phase notes moved out of `CLAUDE.md`.
 
+## 4M Training Matrix Module-scope Hotfix (2026-08-20)
+
+Fixed `fetchTrainingPermissions is not defined` and
+`renderTrainingMatrix is not defined`. The existing
+`_quarantinedLegacyTrainingMatrixMerge()` wrapper began before the active
+Training Matrix block, unintentionally hiding the active functions from
+`loadFourmPage()` and `renderMan()`. The wrapper opening was moved to the actual
+legacy duplicate block; no Training Matrix functions were deleted. Regression
+now verifies ES-module syntax plus 12 required Training Matrix symbols in
+module scope.
+
+Production backup is at
+`backups/production/fourm-scope-hotfix-r4-predeploy-20260820/`. Uploaded files
+were `index.html`, `public/js/main.js`, and `public/js/pages/fourm.js`; FTP
+SHA-256 matched 3/3 at
+`backups/production/fourm-scope-hotfix-r4-upload-verify-20260820/`. Production
+HTTP cache/hash smoke passed, and final manifest-inclusive SHA-256 matched 4/4
+at `backups/production/fourm-scope-hotfix-r4-final-verify-20260820/`, with cache key
+`20260820-fourm-scope-hotfix-r4`. No API, database, upload storage, helper, or
+test row changed.
+
 ## 4M Frontend Full Restore / Scope Correction (2026-08-20)
 
 Restored `public/js/pages/fourm.js` in full from the version before the 4M

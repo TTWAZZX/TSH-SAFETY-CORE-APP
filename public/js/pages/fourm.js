@@ -3250,9 +3250,6 @@ function showManForm(existing = null) {
     }));
 }
 
-// Quarantine a legacy block appended by the upstream merge. The active,
-// concurrency-safe implementations are defined above.
-function _quarantinedLegacyTrainingMatrixMerge() {
 async function renderTrainingMatrix(container) {
     if (!container) return;
     await fetchTrainingPermissions({ force: true });
@@ -5148,6 +5145,9 @@ async function showTrainingAuditLogModal(scope = 'current') {
     await loadLogs();
 }
 
+// Quarantine the legacy duplicate block appended by the upstream merge.
+// The active implementations above must remain in module scope.
+function _quarantinedLegacyTrainingMatrixMerge() {
 async function renderTrainingMatrix(container) {
     if (!container) return;
     const yearOpts = [0,1,2,3].map(i => {
