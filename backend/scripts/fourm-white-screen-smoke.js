@@ -7,7 +7,7 @@ const path = require('path');
 
 const root = path.resolve(__dirname, '..', '..');
 const base = String(process.env.PROD_UAT_URL || 'https://dev.tshpcl.com/safety/tsh-safety-core').replace(/\/+$/, '');
-const release = '20260819-fourm-white-screen-hotfix-r2';
+const release = '20260820-fourm-restore-r3';
 
 const sha256 = value => crypto.createHash('sha256').update(value).digest('hex');
 

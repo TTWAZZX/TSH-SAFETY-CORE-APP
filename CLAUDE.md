@@ -34,6 +34,13 @@
 
 ## Current 4M Change Management Handoff (2026-08-19, deployed)
 
+- Scope correction r3 (2026-08-20) restored the complete pre-stabilization
+  `fourm.js` after the duplicate-code cleanup removed about 1,900 lines. Against
+  the restored source, the frontend behavior diff is only four added lines to
+  omit an empty optional Notice attachment. The full 8,134-line ES module
+  parses successfully; cache key is `20260820-fourm-restore-r3`; Production FTP
+  SHA-256 matched 4/4 including the final manifest and HTTP cache/hash smoke
+  passed.
 - Emergency white-screen hotfix r2 is deployed. Duplicate-code cleanup left an
   incomplete History template, incorrect permissions return, orphaned audit
   lines, and an extra closing brace, causing consecutive ES-module parse

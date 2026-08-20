@@ -1,14 +1,14 @@
 {
   "schemaVersion": 1,
-  "generatedAt": "2026-08-19T17:04:50+07:00",
-  "sourceHead": "0ada9f8",
-  "previousProductionBuild": "fourm-white-screen-hotfix-20260819",
-  "buildId": "fourm-white-screen-hotfix-r2-20260819",
-  "cacheBust": "20260819-fourm-white-screen-hotfix-r2",
+  "generatedAt": "2026-08-20T08:28:34+07:00",
+  "sourceHead": "c278e3e",
+  "previousProductionBuild": "fourm-white-screen-hotfix-r2-20260819",
+  "buildId": "fourm-restore-r3-20260820",
+  "cacheBust": "20260820-fourm-restore-r3",
   "runtime": "shared-hosting-php",
-  "deployPhase": "fourm-white-screen-hotfix-r2",
+  "deployPhase": "fourm-restore-r3",
   "deploymentStatus": "deployed-and-static-smoke-passed",
-  "deployedAt": "2026-08-19T17:05:30+07:00",
+  "deployedAt": "2026-08-20T08:27:30+07:00",
   "databaseMutationPlanned": false,
   "schemaMutationPlanned": false,
   "uploadStorageMutationPlanned": false,
@@ -21,30 +21,30 @@
   "fileHashes": [
     {
       "path": "index.html",
-      "sha256": "2b3e1d52891036aa8cdecf1c08c29928f5729d9f24481fc4f260f425c0e4202a"
+      "sha256": "e1fe1c85bf1f1be6cfabb9d21aa16113563fef7ebdfdc1a39ad900105cee46fa"
     },
     {
       "path": "public/js/main.js",
-      "sha256": "1bc21b624d52fa7c25251a2b294a6b770c6a03e6ee473bfe969438b8728561e4"
+      "sha256": "9a5dd429925695ac5a361ea4245d7b698d9553759a6100c64d43b3d775cc9650"
     },
     {
       "path": "public/js/pages/fourm.js",
-      "sha256": "4f0fd4cda3d9d4c4190b1989419dec919053936801e645d413e8ef54400ddc3b"
+      "sha256": "937b003489c6f30d075c8b7eb1221058fb63e7168af16b30e2c5ee0f1665f212"
     }
   ],
   "verification": {
     "nodeSyntax": "PASS as ES module via node --input-type=module --check",
     "fourmFocusedRegression": "PASS with mandatory ES-module syntax gate",
-    "rootCause": "duplicate-code cleanup left an incomplete History template, an incorrect permissions return, orphaned audit lines, and an extra closing brace; script-mode syntax checking did not expose every ES-module parse error",
+    "scopeCorrection": "restored the complete pre-stabilization fourm.js; relative to that source the only behavior change is four lines that omit an empty optional attachment",
     "gitDiffCheck": "PASS",
     "databaseMutationAttempted": false,
     "schemaMutationAttempted": false,
     "uploadStorageMutationAttempted": false
   },
   "productionVerification": {
-    "codeBackup": "backups/production/fourm-white-screen-hotfix-r2-predeploy-20260819-170450",
-    "uploadVerify": "backups/production/fourm-white-screen-hotfix-r2-upload-verify-20260819-170450",
-    "finalRuntimeVerify": "backups/production/fourm-white-screen-hotfix-r2-final-verify-20260819-172007",
+    "codeBackup": "backups/production/fourm-restore-r3-predeploy-20260820",
+    "uploadVerify": "backups/production/fourm-restore-r3-upload-verify-20260820",
+    "finalRuntimeVerify": "backups/production/fourm-restore-r3-final-verify-20260820",
     "sha256Matches": "PASS: Production download-back matched 4/4 runtime and manifest files",
     "smoke": "PASS: Production HTTP returned the new cache markers and exact fourm.js SHA-256; node --check passed",
     "businessDataChanged": false,

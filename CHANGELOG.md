@@ -2,6 +2,26 @@
 
 This file preserves historical production handoff, smoke test, backup, deployment, migration, and phase notes moved out of `CLAUDE.md`.
 
+## 4M Frontend Full Restore / Scope Correction (2026-08-20)
+
+Restored `public/js/pages/fourm.js` in full from the version before the 4M
+stabilization cleanup. That cleanup removed about 1,900 lines while attempting
+to consolidate duplicate Training Matrix functions and caused the subsequent
+white-screen syntax regressions. Relative to the restored source, the only
+functional frontend change retained is four lines that omit an empty optional
+Change Notice attachment before submit. The SPA and module cache key is
+`20260820-fourm-restore-r3`.
+
+Production r2 rollback files are at
+`backups/production/fourm-restore-r3-predeploy-20260820/`. The restored
+`index.html`, `public/js/main.js`, and `public/js/pages/fourm.js` matched
+Production FTP download-back SHA-256 3/3 at
+`backups/production/fourm-restore-r3-upload-verify-20260820/`. The complete
+8,134-line ES module passed syntax parsing, focused regression, and Production
+HTTP cache/hash smoke. Final manifest-inclusive SHA-256 matched 4/4 at
+`backups/production/fourm-restore-r3-final-verify-20260820/`. No API, database,
+upload storage, helper, or test row changed.
+
 ## 4M White-screen Syntax Hotfix (2026-08-19)
 
 Fixed the 4M page rendering as a blank white screen with browser console error
