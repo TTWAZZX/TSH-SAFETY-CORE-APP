@@ -110,7 +110,7 @@
   rows are 0. No helper was uploaded; no MySQL schema, business-data, or upload
   storage mutation remains.
 
-## Current Card Image Export Handoff (2026-08-20, Phases 0-2C deployed; Phase 2D batches 1-2 local)
+## Current Card Image Export Handoff (2026-08-20, Phases 0-2D deployed)
 
 - Phase 0 baseline and safety audit is complete for right-click card image
   export across 12 modules. Controlled read-only Production audits covered 174
@@ -163,24 +163,34 @@
   `d450063a838dc7704f45efffd894dd8435893c7591bd27320060502080f23ca8`.
   No API/schema/business-data/upload mutation occurred. Details:
   `docs/card-image-export-phase2c-production.md`.
-- Phase 2D batch 1 adds a local, feature-flagged shared path only for OJT/SCW
+- Phase 2D batch 1 added a feature-flagged shared path only for OJT/SCW
   `scw-hero`. Foundation tests pass 19/19 with 7/7 approved runtime imports;
   desktop/mobile UAT passes 2/2 shared captures, 0 fallbacks, 1/1 consistent
   layout, and 0 runtime errors. Visual evidence is at
   `backups/local/card-image-phase2d-comparison-20260820T075710Z/`.
 - Hiyari was rejected from this batch because responsive mobile clone output
   was non-deterministic. Its experimental changes were removed and it remains
-  fully legacy. OJT is not enabled by default; Phase 2D is not deployed. See
+  fully legacy. See
   `docs/card-image-export-phase2d-pilot.md`.
-- Phase 2D batch 2 adds a local, feature-flagged shared path only for Safety
+- Phase 2D batch 2 added a feature-flagged shared path only for Safety
   Training `training-hero`. Training Matrix and all other Training targets stay
   legacy. Foundation tests pass 19/19 with 8/8 approved runtime imports;
   desktop/mobile UAT passes 2/2 shared captures, 0 fallbacks, 1/1 consistent
   layout, and 0 runtime errors. Visual evidence is at
   `backups/local/card-image-phase2e-comparison-20260820T085807Z/`.
-- OJT and Training are not enabled by default; Phase 2D is not deployed. The
-  next step is a controlled combined rollout decision for these two hero
-  targets. Hiyari requires a purpose-built static surrogate.
+- Phase 2D is deployed with OJT and Training enabled by default only for their
+  exact hero targets. Fresh backup:
+  `backups/production/card-image-phase2d-predeploy-20260820-164000/` (147 DB
+  tables, DB SHA-256
+  `01b3206d75d35b8fb04ee5e04b34740f7d687b1f255a1d241172c83b2f7a7969`,
+  776 uploads / 1,152,308,206 bytes). Temporary helper/archive cleanup left 0.
+  Final Production UAT passed 16/16 shared captures, 0 fallbacks, 8/8
+  viewport-consistent layouts, and 0 runtime errors. Visual evidence:
+  `backups/production/card-image-phase2f-comparison-20260820T095823Z/`.
+  Final manifest SHA-256 is
+  `f47d124f290fd58be8b42ea1f05ae39d52205be996286051bbb8f7fd4c40cd51`.
+- The next step is normal-use monitoring. Hiyari still requires a purpose-built
+  static surrogate.
 
 ## Tech Stack
 

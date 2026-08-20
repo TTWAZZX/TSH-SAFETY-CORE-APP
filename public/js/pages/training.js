@@ -333,6 +333,9 @@ async function _trDownloadCardImage(card) {
             width: 1200,
             expandTruncatedText: true,
             prepareClone: clone => {
+                clone.style.setProperty('height', '200px', 'important');
+                clone.style.setProperty('min-height', '200px', 'important');
+                clone.style.setProperty('box-sizing', 'border-box', 'important');
                 clone.querySelectorAll('[data-tr-card-ignore], #tr-card-save-menu').forEach(element => {
                     element.style.setProperty('display', 'none', 'important');
                 });

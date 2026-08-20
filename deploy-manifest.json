@@ -1,13 +1,14 @@
 {
   "schemaVersion": 1,
   "generatedAt": "2026-08-20T16:23:48+07:00",
-  "sourceHead": "d10f225+phase2d-rollout",
+  "sourceHead": "19fb95e+deterministic-training-hotfix",
   "previousProductionBuild": "card-image-export-phase2c-20260820",
   "buildId": "card-image-export-phase2d-rollout-20260820",
-  "cacheBust": "20260820-card-image-phase2d-rollout",
+  "cacheBust": "20260820-card-image-phase2d-rollout-r2",
   "runtime": "shared-hosting-php",
   "deployPhase": "card-image-export-phase2d-rollout",
-  "deploymentStatus": "ready-for-production-backup",
+  "deploymentStatus": "deployed-and-uat-passed",
+  "deployedAt": "2026-08-20T16:59:54+07:00",
   "databaseMutationPlanned": false,
   "schemaMutationPlanned": false,
   "uploadStorageMutationPlanned": false,
@@ -19,19 +20,38 @@
     "deploy-manifest.json"
   ],
   "fileHashes": [
-    { "path": "index.html", "sha256": "533d3f3d2d8bf9a3a6eec20191cd9aa39ec764f3c1d343203148d0236d1ee32c" },
-    { "path": "public/js/main.js", "sha256": "f0243207ba7c0cb4f42c0460b8018500629452d5ae4adaa0423725974def2380" },
+    { "path": "index.html", "sha256": "1c0fe9af095b53400c69810c76365683847c580ac30c7b43c47b53e2e02d9d04" },
+    { "path": "public/js/main.js", "sha256": "157ce379bd41764f505737962628f8d747e3a48ad8a1624f9a3380e093cd6cf6" },
     { "path": "public/js/pages/ojt.js", "sha256": "b8e7b313147d27bcbe728851158ea959d8a20b321dd9cdf4ed49ae211ae21baf" },
-    { "path": "public/js/pages/training.js", "sha256": "ebbbec414e2ed0d3def4c788fa59a7179bb64f15e7a61afe07d16cd5d85bf5ab" }
+    { "path": "public/js/pages/training.js", "sha256": "116a2bebb1ec8ea5ea946408488bdd1653801f4e1dabe49b1a8bddc7480a005e" }
   ],
   "verification": {
     "foundation": "PASS: 19/19",
     "approvedImports": "PASS: 8/8",
     "ojtComparison": "PASS: 2 shared captures, 0 fallbacks, 1/1 consistent layout, 0 runtime errors",
-    "trainingComparison": "PASS: 2 shared captures, 0 fallbacks, 1/1 consistent layout, 0 runtime errors",
+    "trainingComparison": "PASS after deterministic-height hotfix: 2 shared captures at 1800x300, 0 fallbacks, 1/1 consistent layout, 0 runtime errors",
+    "initialProductionUat": "STOPPED: 16/16 shared captures and 0 runtime errors, but Training differed by 2 px between viewports; deterministic-height hotfix required",
     "gitDiffCheck": "PASS",
     "databaseMutationAttempted": false,
     "schemaMutationAttempted": false,
     "uploadStorageMutationAttempted": false
+  },
+  "productionVerification": {
+    "databaseBackup": "backups/production/card-image-phase2d-predeploy-20260820-164000",
+    "databaseBackupSha256": "01b3206d75d35b8fb04ee5e04b34740f7d687b1f255a1d241172c83b2f7a7969",
+    "databaseTables": 147,
+    "uploadsBackupFiles": 776,
+    "uploadsBackupBytes": 1152308206,
+    "codeBackup": "backups/production/card-image-phase2d-predeploy-20260820-164000/code",
+    "uploadVerify": "backups/production/card-image-phase2d-upload-verify-20260820-165300",
+    "hotfixUploadVerify": "backups/production/card-image-phase2d-hotfix-upload-verify-20260820-170000",
+    "httpSmoke": "backups/production/card-image-phase2d-http-smoke-20260820-165700",
+    "hotfixHttpSmoke": "backups/production/card-image-phase2d-hotfix-http-smoke-20260820-170100",
+    "browserUat": "backups/production/card-image-phase2f-comparison-20260820T095823Z",
+    "sha256Matches": "PASS: FTP download-back and HTTPS runtime hashes match all deployed files",
+    "browserUatResult": "PASS: 16/16 shared captures, 0 fallbacks, 8/8 viewport-consistent layouts, 0 runtime errors",
+    "visualReview": "PASS: OJT and Training desktop/mobile output has complete text, KPI values, labels, tabs, and backgrounds",
+    "temporaryHelperCleanup": "PASS: helper and remote database archive removed before deployment",
+    "businessDataChanged": false
   }
 }

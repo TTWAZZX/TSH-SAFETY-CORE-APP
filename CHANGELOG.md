@@ -2,6 +2,30 @@
 
 This file preserves historical production handoff, smoke test, backup, deployment, migration, and phase notes moved out of `CLAUDE.md`.
 
+## Card Image Export Phase 2D Production Rollout (2026-08-20)
+
+Enabled the exact OJT `scw-hero` and Safety Training `training-hero` shared
+export paths by default, preserving per-target allowlists, explicit feature flag
+override, and unchanged legacy fallback. Training Matrix and all other OJT and
+Training targets remain legacy.
+
+Fresh Production backup `card-image-phase2d-predeploy-20260820-164000` passed:
+147 database tables with SHA-256
+`01b3206d75d35b8fb04ee5e04b34740f7d687b1f255a1d241172c83b2f7a7969`,
+776 uploads / 1,152,308,206 bytes, five rollback code files, and zero remote
+temporary files after cleanup. FTP download-back and HTTPS hashes matched all
+deployed files.
+
+The first Production UAT correctly stopped at 7/8 consistent layouts because
+Training differed by 2 px between desktop and mobile. A deterministic 200 px
+clone height was applied, locally verified, and redeployed. Final authenticated
+Production UAT passed 16/16 shared captures, 0 fallbacks, 8/8 consistent
+layouts, and 0 runtime errors; visual review passed. No API, permission,
+database, schema, upload-storage, or business-data mutation occurred. See
+`docs/card-image-export-phase2d-pilot.md`.
+Final manifest SHA-256 is
+`f47d124f290fd58be8b42ea1f05ae39d52205be996286051bbb8f7fd4c40cd51`.
+
 ## Card Image Export Phase 2D Pilot Batch 2 (2026-08-20, local only)
 
 Added a feature-flagged shared export path only for the Safety Training

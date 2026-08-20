@@ -1,6 +1,6 @@
 # TSH Safety Core Activity - Roadmap
 
-## Card Image Export Improvement (Phases 0-2C deployed; Phase 2D batches 1-2 local, 2026-08-20)
+## Card Image Export Improvement (Phases 0-2D deployed, 2026-08-20)
 
 Phase 0 established a read-only desktop/mobile Production baseline for the
 right-click card image feature across 12 modules. It captured 24 representative
@@ -17,7 +17,7 @@ Evidence:
 
 Phase 1 is complete locally. The shared utility and browser fixture form the
 safety foundation; after Phase 2B the fixture passes 19/19 and confirms the
-approved six-module runtime import allowlist. Every migrated module retains its
+approved eight-module runtime import allowlist. Every migrated module retains its
 legacy fallback; Phase 1 was not deployed. See
 `docs/card-image-export-phase1-foundation.md`.
 
@@ -42,24 +42,23 @@ FTP SHA-256 10/10, HTTPS hashes 9/9, shared captures 12/12, fallbacks 0,
 viewport-consistent layouts 6/6, and runtime errors 0. See
 `docs/card-image-export-phase2c-production.md`.
 
-Phase 2D batch 1 is complete locally for the OJT/SCW hero only. Foundation
+Phase 2D batch 1 covers the OJT/SCW hero only. Foundation
 tests pass 19/19; desktop/mobile comparison
 passed 2/2 shared captures, 0 fallbacks, 1/1 consistent layout, and 0 runtime
 errors. Hiyari was removed from the batch after visual review exposed
-non-deterministic mobile clone clipping, so it remains fully legacy. OJT is not
-enabled by default and nothing from Phase 2D has been deployed. See
+non-deterministic mobile clone clipping, so it remains fully legacy. See
 `docs/card-image-export-phase2d-pilot.md`.
 
-Phase 2D batch 2 is complete locally for the Safety Training hero only.
+Phase 2D batch 2 covers the Safety Training hero only.
 Foundation tests pass 19/19 with 8/8 approved runtime imports;
 desktop/mobile comparison passed 2/2 shared captures, 0 fallbacks, 1/1
 consistent layout, and 0 runtime errors. Training Matrix and all other Training
-targets remain legacy. OJT and Training are not enabled by default and Phase 2D
-has not been deployed.
+targets remain legacy.
 
-The next correct step is a controlled combined rollout decision for the OJT and
-Training hero targets. Hiyari needs a purpose-built static export surrogate
-before reconsideration.
+Phase 2D is deployed after a fresh 147-table database + 776-file uploads backup.
+Final Production UAT passed 16/16 shared captures, 0 fallbacks, 8/8 consistent
+layouts, and 0 runtime errors. The next step is normal-use monitoring. Hiyari
+still needs a purpose-built static export surrogate before reconsideration.
 
 ## Current Known Remaining Work
 

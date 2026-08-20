@@ -15,16 +15,16 @@ Existing module-specific handlers remain the fallback and all other targets
 remain legacy.
 
 Phase 2D batch 1 permits one additional import from OJT, but only the exact
-`scw-hero` target can enter the shared path. OJT is not in the default flag
-list, so this remains a local pilot. Its clone forces a fixed title/KPI grid to
-avoid responsive breakpoint drift. Hiyari remains legacy after mobile visual
-UAT rejected responsive clone output.
+`scw-hero` target can enter the shared path. Its clone forces a fixed title/KPI
+grid to avoid responsive breakpoint drift. Hiyari remains legacy after mobile
+visual UAT rejected responsive clone output.
 
 Phase 2D batch 2 permits one additional import from Safety Training, but only
-the exact `training-hero` target can enter the shared path. Training is not in
-the default flag list. Its clone hides interactive hero controls and forces a
-fixed title/KPI grid; Training Matrix and all other Training targets remain on
-the unchanged legacy exporter.
+the exact `training-hero` target can enter the shared path. Its clone hides
+interactive hero controls and forces a fixed title/KPI grid and height;
+Training Matrix and all other Training targets remain on the unchanged legacy
+exporter. Phase 2D enables OJT and Training by default for only these two exact
+targets while retaining explicit flag override and legacy fallback.
 
 Phase 2B adds clone-only static rendering for form controls whose values would
 otherwise be omitted or clipped by canvas capture. Machine Safety mobile card
