@@ -34,6 +34,30 @@
 
 ## Current 4M Change Management Handoff (2026-08-19, deployed)
 
+- Training Matrix workspace UX revision is deployed as
+  `20260820-fourm-training-workspace-r6`.
+  Desktop uses independent curriculum/detail scrolling with sticky detail
+  controls and retained curriculum scroll position. Mobile uses a full-screen
+  detail panel with a back action. Controlled read-only browser UAT against
+  Production data passed desktop/mobile behavior with zero runtime errors.
+  Production download-back SHA-256 matched 4/4 after a fresh verified 147-table
+  database backup; temporary backup artifacts were removed. No API, database,
+  upload storage, or business-data change was required.
+- Controlled Production UAT completed on 2026-08-20 after r4. The final run
+  passed 16 write/read groups across Change Notice, Action Plan, attachments,
+  closed-Notice editing, SMTP outbox, Man Record, Training Matrix lifecycle,
+  permissions, audit logs, and document/dashboard reads. All five final-run
+  notification events were `Sent`; post-cleanup Admin and Viewer browser UAT
+  rendered all four views with zero runtime exceptions.
+- Fresh full Production DB backup: 147 tables, SHA-256
+  `3f6b773a92526bb8d0123fb99b2063eaa0fee31cb16d2da149be98e1b7529642`, stored
+  under `backups/production/fourm-controlled-uat-prebackup-20260820-085418/`.
+  Final evidence is under
+  `backups/production/fourm-controlled-uat-run-20260820-1787191233104/`.
+  Cleanup confirmed controlled-UAT rows `0`, temporary Production files `0`,
+  and all three test upload URLs HTTP 404. The temporary API route was removed
+  and Production `api/index.php` restored to SHA-256
+  `287494115eb370c30cc2811df0fdff9c0f3b0a0578512e1bdf75aa0451af7454`.
 - Module-scope hotfix r4 (2026-08-20) moved the existing legacy quarantine
   wrapper to the actual duplicate Training Matrix block. This exposes the
   active `fetchTrainingPermissions`, `renderTrainingMatrix`, and related

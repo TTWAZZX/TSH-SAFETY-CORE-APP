@@ -2,6 +2,62 @@
 
 This file preserves historical production handoff, smoke test, backup, deployment, migration, and phase notes moved out of `CLAUDE.md`.
 
+## 4M Training Matrix Workspace UX (2026-08-20, deployed)
+
+Improved Man Record > Training Matrix for departments with long curriculum and
+course lists. Desktop now uses a bounded split workspace with independently
+scrollable curriculum and detail panes, sticky detail controls, and retained
+curriculum-list position after selection. Mobile opens the selected curriculum
+in a full-screen detail panel with an explicit back action.
+
+The focused stabilization regression, ES-module syntax check, and diff check
+passed. A controlled read-only browser UAT loaded the local `fourm.js` against
+Production data and passed desktop split-scroll, scroll retention, mobile detail
+navigation, and runtime-error checks. No API, database, upload storage, or
+business data changed.
+
+Production release `20260820-fourm-training-workspace-r6` was deployed after a
+fresh 147-table database backup at
+`backups/production/fourm-controlled-uat-prebackup-20260820-100939/` (SHA-256
+`05f305ec47730dc7ab35edb0f583d6d6011b3d9fa72dfab22a97e0629a9db7ce`).
+The temporary helper, remote archive, and route were removed before upload.
+Runtime files matched Production download-back SHA-256 4/4, static HTTP/hash
+smoke passed, and authenticated desktop/mobile browser UAT passed with zero
+runtime errors. No schema, API, upload storage, or business-data change was
+made.
+
+## 4M Controlled Production UAT (2026-08-20)
+
+Completed an authenticated write UAT against the shared-hosting PHP Production
+runtime after the r4 module-scope hotfix. A fresh full database backup covering
+147 tables was downloaded to
+`backups/production/fourm-controlled-uat-prebackup-20260820-085418/` and verified
+at SHA-256
+`3f6b773a92526bb8d0123fb99b2063eaa0fee31cb16d2da149be98e1b7529642`.
+The temporary backup route, helper, and remote backup were removed immediately;
+the original Production `api/index.php` was restored with SHA-256
+`287494115eb370c30cc2811df0fdff9c0f3b0a0578512e1bdf75aa0451af7454`.
+
+The final run at
+`backups/production/fourm-controlled-uat-run-20260820-1787191233104/` passed 16
+groups covering User Notice creation, impact fields, initial/replacement/closing
+attachments, Action Plan create/update/Done, Pending, owner close, editing a
+closed Notice without reopening, Admin delete, Man Record CRUD/filter, Course
+Master and Curriculum CRUD guards, course links, employee assignment/update/
+transfer/remove, training audit logs, permissions, and all dashboard/document
+read paths. Production SMTP was configured and all five final-run events
+(`NoticeCreated`, `ActionTaskCreated`, `ActionTaskDone`, `NoticePending`, and
+`NoticeClosed`) reached `Sent`. Iterative controlled runs generated 11 clearly
+marked UAT messages in total.
+
+Cleanup physically removed the temporary Training Matrix rows/logs and email
+outbox rows after API lifecycle checks. Remaining controlled-UAT database rows,
+temporary server helpers/backups, and uploaded files are all `0`; all three
+final-run upload URLs return HTTP 404. Post-cleanup authenticated browser UAT
+passed for Admin and Viewer across Dashboard, Change Notice, Man Record, and
+Training Matrix with zero runtime exceptions. No schema or application code was
+changed.
+
 ## 4M Training Matrix Module-scope Hotfix (2026-08-20)
 
 Fixed `fetchTrainingPermissions is not defined` and

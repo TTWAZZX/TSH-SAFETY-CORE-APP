@@ -131,6 +131,8 @@ let _tmDetailTab    = 'courses';
 let _tmShowCourseMaster = false;
 let _tmShowEmployeeMaster = false;
 let _tmSearch       = { curriculum:'', course:'', employee:'', inlineEmployee:'' };
+let _tmMobileDetailOpen = false;
+let _tmCurriculumScrollTop = 0;
 let _fourmCardSaveMenu = null;
 let _fourmCardSaveHold = null;
 
@@ -3252,6 +3254,8 @@ function showManForm(existing = null) {
 
 async function renderTrainingMatrix(container) {
     if (!container) return;
+    _tmMobileDetailOpen = false;
+    _tmCurriculumScrollTop = 0;
     await fetchTrainingPermissions({ force: true });
     const yearOpts = [0,1,2,3].map(i => {
         const y = new Date().getFullYear() - i;
@@ -3317,15 +3321,16 @@ async function renderTrainingMatrix(container) {
                  class="rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-500">
                 กำลังโหลด Scope... / Loading selection...
             </div>
-            <div class="grid grid-cols-1 xl:grid-cols-[380px_1fr] gap-4">
-                <div class="ds-section p-0 overflow-hidden">
-                    <div class="px-4 py-3 border-b border-slate-100 flex items-center justify-between gap-2">
+            <div id="tm-workspace" class="grid grid-cols-1 xl:grid-cols-[380px_minmax(0,1fr)] gap-4 min-h-0"
+                 style="height:clamp(560px,calc(100vh - 180px),760px)">
+                <div id="tm-curriculum-pane" class="ds-section p-0 overflow-hidden min-h-0 flex flex-col">
+                    <div class="px-4 py-3 border-b border-slate-100 flex items-center justify-between gap-2 flex-none">
                         <div>
                             <p class="text-[11px] font-bold uppercase tracking-wider text-indigo-500">หลักสูตร / Curriculum</p>
                             <h3 class="text-sm font-black text-slate-700">หลักสูตร / Curriculum</h3>
                         </div>
                     </div>
-                    <div class="px-3 pt-3">
+                    <div class="px-3 pt-3 flex-none">
                         <div class="relative">
                             <input id="tm-curriculum-search" type="text" class="form-input w-full pl-9 py-2 text-sm"
                                    value="${escHtml(_tmSearch.curriculum)}"
@@ -3335,18 +3340,51 @@ async function renderTrainingMatrix(container) {
                             </svg>
                         </div>
                     </div>
-                    <div id="tm-curriculum-list" class="p-3 space-y-2 min-h-[280px]">
+                    <div id="tm-curriculum-list" class="p-3 space-y-2 flex-1 min-h-0 overflow-y-auto overscroll-contain">
                         <div class="text-center py-8 text-slate-400 text-sm">กำลังโหลด... / Loading...</div>
                     </div>
                 </div>
-                <div class="ds-section p-0 overflow-hidden">
-                    <div id="tm-detail-shell" class="min-h-[520px]">
+                <div id="tm-detail-pane" class="hidden xl:flex min-h-0">
+                    <div class="ds-section p-0 overflow-hidden min-h-0 w-full flex flex-col">
+                    <div id="tm-detail-shell" class="h-full min-h-0 flex flex-col">
                         <div class="p-6 text-center text-sm text-slate-400">เลือกหลักสูตร / Select a curriculum</div>
+                    </div>
                     </div>
                 </div>
             </div>
         </div>`;
+    _tmApplyWorkspaceMode();
     await fetchTrainingMatrix();
+}
+
+function _tmApplyWorkspaceMode() {
+    const curriculumPane = document.getElementById('tm-curriculum-pane');
+    const detailPane = document.getElementById('tm-detail-pane');
+    if (!curriculumPane || !detailPane) return;
+    curriculumPane.className = `ds-section p-0 overflow-hidden min-h-0 flex-col ${_tmMobileDetailOpen ? 'hidden xl:flex' : 'flex'}`;
+    detailPane.className = _tmMobileDetailOpen
+        ? 'fixed inset-0 z-40 flex min-h-0 bg-slate-100 p-3 xl:static xl:z-auto xl:bg-transparent xl:p-0'
+        : 'hidden xl:flex min-h-0';
+    if (!_tmMobileDetailOpen) {
+        requestAnimationFrame(() => {
+            const list = document.getElementById('tm-curriculum-list');
+            if (list) list.scrollTop = _tmCurriculumScrollTop;
+        });
+    }
+}
+
+function _tmOpenWorkspaceDetail() {
+    _tmMobileDetailOpen = true;
+    _tmApplyWorkspaceMode();
+    requestAnimationFrame(() => {
+        const body = document.getElementById('tm-detail-body');
+        if (body) body.scrollTop = 0;
+    });
+}
+
+function _tmCloseWorkspaceDetail() {
+    _tmMobileDetailOpen = false;
+    _tmApplyWorkspaceMode();
 }
 
 function renderTrainingMatrixKpis() {
@@ -3479,7 +3517,16 @@ function renderTrainingDetailShell() {
             ${label}
         </button>`;
     el.innerHTML = `
-        <div class="px-4 py-4 border-b border-slate-100">
+        <div class="xl:hidden flex-none px-3 py-2 border-b border-slate-200 bg-slate-50">
+            <button id="btn-tm-mobile-back" type="button"
+                    class="inline-flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-bold text-slate-700 bg-white border border-slate-200 shadow-sm">
+                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"/>
+                </svg>
+                กลับไปหลักสูตร / Back to curriculum
+            </button>
+        </div>
+        <div class="px-4 py-4 border-b border-slate-100 flex-none bg-white">
             <div class="flex flex-col lg:flex-row lg:items-start lg:justify-between gap-3">
                 <div class="min-w-0">
                     <p class="text-[11px] font-bold uppercase tracking-wider text-indigo-500">รายละเอียดหลักสูตร / Curriculum detail</p>
@@ -3509,7 +3556,7 @@ function renderTrainingDetailShell() {
                 ${tabBtn('history', 'History')}
             </div>
         </div>
-        <div id="tm-detail-body" class="p-4"></div>`;
+        <div id="tm-detail-body" class="p-4 flex-1 min-h-0 overflow-y-auto overscroll-contain"></div>`;
     renderTrainingDetailBody();
 }
 
@@ -3531,7 +3578,7 @@ function renderTrainingDetailBody() {
         body.innerHTML = `
             <div class="${employeeGridClass}">
                 <div class="min-w-0">
-            <div class="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-3 mb-3">
+            <div class="sticky top-0 z-10 flex flex-col lg:flex-row lg:items-center lg:justify-between gap-3 mb-3 pb-3 bg-white">
                 <div class="relative flex-1">
                     <input id="tm-assignment-search" type="text" class="form-input w-full pl-9 py-2 text-sm"
                            value="${escHtml(_tmSearch.employee)}"
@@ -3593,7 +3640,7 @@ function renderTrainingDetailBody() {
     }
 
     body.innerHTML = `
-        <div class="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-3 mb-3">
+        <div class="sticky top-0 z-10 flex flex-col lg:flex-row lg:items-center lg:justify-between gap-3 mb-3 pb-3 bg-white">
             <div class="relative flex-1">
                 <input id="tm-course-search" type="text" class="form-input w-full pl-9 py-2 text-sm"
                        value="${escHtml(_tmSearch.course)}"
@@ -3621,7 +3668,7 @@ function renderTrainingHistoryTab(body) {
     const transferred = _tmAssignments.filter(a => a.Status === 'Transferred').length;
     body.innerHTML = `
         <div class="space-y-3">
-            <div class="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-3">
+            <div class="sticky top-0 z-10 flex flex-col lg:flex-row lg:items-center lg:justify-between gap-3 pb-3 bg-white">
                 <div class="flex flex-wrap gap-2">
                     <span class="px-2.5 py-1 rounded-full bg-slate-50 border border-slate-200 text-[11px] font-bold text-slate-600">${rows.length} History</span>
                     <span class="px-2.5 py-1 rounded-full bg-rose-50 border border-rose-200 text-[11px] font-bold text-rose-700">${removed} Removed</span>
@@ -3778,7 +3825,7 @@ async function renderTrainingCurriculums() {
         const active = c.id === _tmSelectedCurriculumId;
         return `
         <button type="button" class="tm-curriculum-item w-full text-left rounded-xl border p-3 transition-all ${active ? 'border-indigo-300 bg-indigo-50' : 'border-slate-100 hover:border-slate-200 hover:bg-slate-50'}"
-                data-id="${c.id}">
+                data-id="${c.id}" aria-current="${active ? 'true' : 'false'}">
             <div class="flex items-start justify-between gap-2">
                 <div class="min-w-0">
                     <p class="text-xs font-mono text-slate-400">${escHtml(c.CurriculumCode || '-')}</p>
@@ -3797,6 +3844,12 @@ async function renderTrainingCurriculums() {
             </div>` : ''}
         </button>`;
     }).join('');
+    el.onscroll = () => {
+        _tmCurriculumScrollTop = el.scrollTop;
+    };
+    requestAnimationFrame(() => {
+        el.scrollTop = _tmCurriculumScrollTop;
+    });
 }
 
 async function fetchTrainingCourses(curriculumId) {
@@ -7765,6 +7818,11 @@ function setupEventListeners() {
 
         if (!e.target.closest('#fourm-page')) return;
 
+        if (e.target.closest('#btn-tm-mobile-back')) {
+            _tmCloseWorkspaceDetail();
+            return;
+        }
+
         if (e.target.closest('#fourm-dashboard-retry')) {
             await _renderDashInner();
             return;
@@ -7911,6 +7969,7 @@ function setupEventListeners() {
         }
         const tmCurriculum = e.target.closest('.tm-curriculum-item');
         if (tmCurriculum) {
+            _tmCurriculumScrollTop = document.getElementById('tm-curriculum-list')?.scrollTop || 0;
             _tmSelectedCurriculumId = tmCurriculum.dataset.id;
             _tmSelectedCourseId = null;
             _tmAssignments = [];
@@ -7918,7 +7977,18 @@ function setupEventListeners() {
             _tmSearch.inlineEmployee = '';
             renderTrainingMatrixBreadcrumb();
             await renderTrainingCurriculums();
+            const detailShell = document.getElementById('tm-detail-shell');
+            if (detailShell) detailShell.innerHTML = `
+                <div class="xl:hidden flex-none px-3 py-2 border-b border-slate-200 bg-slate-50">
+                    <button id="btn-tm-mobile-back" type="button"
+                            class="inline-flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-bold text-slate-700 bg-white border border-slate-200 shadow-sm">
+                        กลับไปหลักสูตร / Back to curriculum
+                    </button>
+                </div>
+                <div class="flex-1 flex items-center justify-center p-6 text-sm text-slate-400">กำลังโหลดรายละเอียด... / Loading detail...</div>`;
+            _tmOpenWorkspaceDetail();
             await fetchTrainingCourses(_tmSelectedCurriculumId);
+            _tmOpenWorkspaceDetail();
             return;
         }
         const tmCourse = e.target.closest('.tm-course-item');
@@ -8136,8 +8206,8 @@ function setupEventListeners() {
         if (e.target.id === 'notice-filter-dept') { _noticeFilter.dept = e.target.value; await fetchAndRenderNotices(); return; }
         if (e.target.id === 'man-filter-year')    { _manFilter.year    = parseInt(e.target.value); await fetchAndRenderMan();     return; }
         if (e.target.id === 'man-filter-status')  { _manFilter.status  = e.target.value; await fetchAndRenderMan();               return; }
-        if (e.target.id === 'tm-filter-year')     { _tmFilter.year     = parseInt(e.target.value); _tmSelectedCurriculumId = null; _tmSelectedCourseId = null; _tmInlineSelectedEmployees.clear(); _tmSearch.inlineEmployee = ''; await fetchTrainingMatrix(); return; }
-        if (e.target.id === 'tm-filter-dept')     { _tmFilter.dept     = e.target.value; _tmSelectedCurriculumId = null; _tmSelectedCourseId = null; _tmInlineSelectedEmployees.clear(); _tmSearch.inlineEmployee = ''; await fetchTrainingMatrix(); return; }
+        if (e.target.id === 'tm-filter-year')     { _tmFilter.year     = parseInt(e.target.value); _tmSelectedCurriculumId = null; _tmSelectedCourseId = null; _tmMobileDetailOpen = false; _tmCurriculumScrollTop = 0; _tmInlineSelectedEmployees.clear(); _tmSearch.inlineEmployee = ''; _tmApplyWorkspaceMode(); await fetchTrainingMatrix(); return; }
+        if (e.target.id === 'tm-filter-dept')     { _tmFilter.dept     = e.target.value; _tmSelectedCurriculumId = null; _tmSelectedCourseId = null; _tmMobileDetailOpen = false; _tmCurriculumScrollTop = 0; _tmInlineSelectedEmployees.clear(); _tmSearch.inlineEmployee = ''; _tmApplyWorkspaceMode(); await fetchTrainingMatrix(); return; }
     });
 
     document.addEventListener('input', debounce(async (e) => {

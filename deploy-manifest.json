@@ -1,14 +1,14 @@
 {
   "schemaVersion": 1,
-  "generatedAt": "2026-08-20T08:35:36+07:00",
-  "sourceHead": "8f56fcd",
-  "previousProductionBuild": "fourm-restore-r3-20260820",
-  "buildId": "fourm-scope-hotfix-r4-20260820",
-  "cacheBust": "20260820-fourm-scope-hotfix-r4",
+  "generatedAt": "2026-08-20T10:13:39+07:00",
+  "sourceHead": "063c775+working-tree",
+  "previousProductionBuild": "fourm-scope-hotfix-r4-20260820",
+  "buildId": "fourm-training-workspace-r6-20260820",
+  "cacheBust": "20260820-fourm-training-workspace-r6",
   "runtime": "shared-hosting-php",
-  "deployPhase": "fourm-scope-hotfix-r4",
-  "deploymentStatus": "deployed-and-static-smoke-passed",
-  "deployedAt": "2026-08-20T08:34:30+07:00",
+  "deployPhase": "fourm-training-workspace-r6",
+  "deploymentStatus": "deployed-and-uat-passed",
+  "deployedAt": "2026-08-20T10:16:00+07:00",
   "databaseMutationPlanned": false,
   "schemaMutationPlanned": false,
   "uploadStorageMutationPlanned": false,
@@ -21,21 +21,21 @@
   "fileHashes": [
     {
       "path": "index.html",
-      "sha256": "1c3d29da12a1c817734e99f23f49997ecd95d2cffb850f6cd505c19009f35e80"
+      "sha256": "d63db2e5b90f06aeb234b0dbd8a1cb08852fd4c264fb2e84d6abe0b9909656db"
     },
     {
       "path": "public/js/main.js",
-      "sha256": "dc3bd3b175d36bbb7de41ec357fcc2144be3b46110e0a1414234499204a65069"
+      "sha256": "13bb4f123082a6d2813d12f03700bc36cf5d11ea77d516304669a08f1f9508b1"
     },
     {
       "path": "public/js/pages/fourm.js",
-      "sha256": "c2312702c06ff3657d22c00ce0b69fe56f0c27621030788d0087c032932ca2b8"
+      "sha256": "06005f20f8b2559484d466eb7658b0552c4998cbdef1b93ff68962099e661022"
     }
   ],
   "verification": {
     "nodeSyntax": "PASS as ES module via node --input-type=module --check",
     "fourmFocusedRegression": "PASS with mandatory ES-module syntax gate",
-    "scopeCorrection": "moved the existing legacy quarantine wrapper to the actual duplicate block so the active Training Matrix implementations remain in ES-module scope; no functions were deleted",
+    "workspaceUx": "desktop independent curriculum/detail scrolling, sticky detail controls, retained curriculum scroll position, and mobile full-screen detail with back navigation",
     "requiredTrainingSymbols": "PASS: 12 Training Matrix functions resolve in module scope",
     "gitDiffCheck": "PASS",
     "databaseMutationAttempted": false,
@@ -43,13 +43,15 @@
     "uploadStorageMutationAttempted": false
   },
   "productionVerification": {
-    "codeBackup": "backups/production/fourm-scope-hotfix-r4-predeploy-20260820",
-    "uploadVerify": "backups/production/fourm-scope-hotfix-r4-upload-verify-20260820",
-    "finalRuntimeVerify": "backups/production/fourm-scope-hotfix-r4-final-verify-20260820",
+    "databaseBackup": "backups/production/fourm-controlled-uat-prebackup-20260820-100939",
+    "databaseBackupSha256": "05f305ec47730dc7ab35edb0f583d6d6011b3d9fa72dfab22a97e0629a9db7ce",
+    "codeBackup": "backups/production/fourm-training-workspace-r6-predeploy-20260820",
+    "uploadVerify": "backups/production/fourm-training-workspace-r6-upload-verify-20260820",
+    "finalRuntimeVerify": "backups/production/fourm-training-workspace-r6-final-verify-20260820",
     "sha256Matches": "PASS: Production download-back matched 4/4 runtime and manifest files",
-    "smoke": "PASS: Production HTTP returned the new cache markers and exact fourm.js SHA-256; node --check passed",
+    "smoke": "PASS: Production HTTP cache/hash smoke and authenticated desktop/mobile browser UAT; zero runtime errors",
     "businessDataChanged": false,
-    "temporaryHelperCleanup": "no helper uploaded; FTP check found zero temporary backup files",
+    "temporaryHelperCleanup": "PASS: database backup helper, remote archive, and temporary route were removed before deployment",
     "temporaryRowsRemaining": 0,
     "databaseMutationAttempted": false,
     "schemaMutationAttempted": false,

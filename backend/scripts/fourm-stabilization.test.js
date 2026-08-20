@@ -60,8 +60,14 @@ assert.match(phpHandler, /Select a different destination course\./);
 assert.match(phpHandler, /COURSE_MASTER_UPDATE/);
 assert.match(phpHandler, /CURRICULUM_ASSIGNMENT_TRANSFER/);
 assert.match(frontend, /fd\.delete\('attachment'\)/);
-assert.match(main, /fourm\.js\?v=20260820-fourm-scope-hotfix-r4/);
-assert.match(index, /main\.js\?v=20260820-fourm-scope-hotfix-r4/);
+assert.match(frontend, /id="tm-workspace"/);
+assert.match(frontend, /id="tm-curriculum-pane"/);
+assert.match(frontend, /id="tm-detail-pane"/);
+assert.match(frontend, /id="btn-tm-mobile-back"/);
+assert.match(frontend, /function _tmApplyWorkspaceMode\(\)/);
+assert.match(frontend, /overflow-y-auto overscroll-contain/);
+assert.match(main, /fourm\.js\?v=20260820-fourm-training-workspace-r6/);
+assert.match(index, /main\.js\?v=20260820-fourm-training-workspace-r6/);
 
 const moduleSyntax = spawnSync(process.execPath, ['--input-type=module', '--check'], {
     input: frontend,
