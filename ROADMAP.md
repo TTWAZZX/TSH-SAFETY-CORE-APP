@@ -1,6 +1,6 @@
 # TSH Safety Core Activity - Roadmap
 
-## Card Image Export Improvement (Phases 0-2C deployed; Phase 2D batch 1 local, 2026-08-20)
+## Card Image Export Improvement (Phases 0-2C deployed; Phase 2D batches 1-2 local, 2026-08-20)
 
 Phase 0 established a read-only desktop/mobile Production baseline for the
 right-click card image feature across 12 modules. It captured 24 representative
@@ -43,16 +43,23 @@ viewport-consistent layouts 6/6, and runtime errors 0. See
 `docs/card-image-export-phase2c-production.md`.
 
 Phase 2D batch 1 is complete locally for the OJT/SCW hero only. Foundation
-tests pass 19/19 with 7/7 approved runtime imports; desktop/mobile comparison
+tests pass 19/19; desktop/mobile comparison
 passed 2/2 shared captures, 0 fallbacks, 1/1 consistent layout, and 0 runtime
 errors. Hiyari was removed from the batch after visual review exposed
 non-deterministic mobile clone clipping, so it remains fully legacy. OJT is not
 enabled by default and nothing from Phase 2D has been deployed. See
 `docs/card-image-export-phase2d-pilot.md`.
 
-The next correct step is a controlled OJT rollout decision or another isolated
-lower-risk pilot such as Training. Hiyari needs a purpose-built static export
-surrogate before reconsideration.
+Phase 2D batch 2 is complete locally for the Safety Training hero only.
+Foundation tests pass 19/19 with 8/8 approved runtime imports;
+desktop/mobile comparison passed 2/2 shared captures, 0 fallbacks, 1/1
+consistent layout, and 0 runtime errors. Training Matrix and all other Training
+targets remain legacy. OJT and Training are not enabled by default and Phase 2D
+has not been deployed.
+
+The next correct step is a controlled combined rollout decision for the OJT and
+Training hero targets. Hiyari needs a purpose-built static export surrogate
+before reconsideration.
 
 ## Current Known Remaining Work
 

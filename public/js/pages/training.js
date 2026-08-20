@@ -4,6 +4,7 @@ import { guardSubmitHandler, installWindowActionLocks } from '../utils/async-ui.
 import { API } from '../api.js';
 import { openModal, closeModal, showToast, showConfirmationModal, showLoading, hideLoading } from '../ui.js?v=20260602-mobile-nav-m53';
 import { buildActivityCard } from '../utils/activity-widget.js?v=20260602-activity-targets-at10';
+import { captureCardImage, isSharedCardImageExportEnabled } from '../utils/card-image-export.js?v=20260820-card-image-phase2d-batch2';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // State
@@ -318,6 +319,63 @@ function _trHideCardImageMenu() {
 }
 
 async function _trDownloadCardImage(card) {
+    const targetName = card?.dataset?.trCardImage || 'training-card';
+    const pilotEnabled = targetName === 'training-hero'
+        && isSharedCardImageExportEnabled(undefined, 'training');
+    if (!pilotEnabled) return _trDownloadCardImageLegacy(card);
+
+    const name = _trSafeFilePart(targetName);
+    const year = _statsYear || new Date().getFullYear();
+    try {
+        showLoading('Saving card image...');
+        const result = await captureCardImage(card, {
+            filename: `${name}-${year}`,
+            width: 1200,
+            expandTruncatedText: true,
+            prepareClone: clone => {
+                clone.querySelectorAll('[data-tr-card-ignore], #tr-card-save-menu').forEach(element => {
+                    element.style.setProperty('display', 'none', 'important');
+                });
+                const stats = clone.querySelector('#tr-stats-strip');
+                const controls = stats?.parentElement;
+                const titleRow = controls?.parentElement;
+                if (titleRow && controls && stats) {
+                    titleRow.style.setProperty('display', 'grid', 'important');
+                    titleRow.style.setProperty('grid-template-columns', 'minmax(0, 1fr) 620px', 'important');
+                    titleRow.style.setProperty('align-items', 'center', 'important');
+                    titleRow.style.setProperty('gap', '16px', 'important');
+                    titleRow.firstElementChild?.style?.setProperty('min-width', '0', 'important');
+                    controls.style.setProperty('display', 'block', 'important');
+                    controls.style.setProperty('width', '620px', 'important');
+                    controls.style.setProperty('min-width', '620px', 'important');
+                    stats.style.setProperty('display', 'grid', 'important');
+                    stats.style.setProperty('grid-template-columns', `repeat(${Math.max(1, stats.children.length)}, minmax(0, 1fr))`, 'important');
+                    stats.style.setProperty('width', '620px', 'important');
+                    stats.style.setProperty('min-width', '620px', 'important');
+                    stats.querySelectorAll(':scope > *').forEach(element => {
+                        element.style.setProperty('min-width', '0', 'important');
+                        element.style.setProperty('width', 'auto', 'important');
+                    });
+                }
+            },
+        });
+        document.dispatchEvent(new CustomEvent('tsh:card-image-export-complete', {
+            detail: { module: 'training', target: targetName, engine: 'shared', width: result.width, height: result.height },
+        }));
+        showToast('บันทึกรูปภาพการ์ดแล้ว', 'success');
+    } catch (error) {
+        console.warn('[CardImageExport] Training shared capture failed; using legacy fallback.', error);
+        document.dispatchEvent(new CustomEvent('tsh:card-image-export-complete', {
+            detail: { module: 'training', target: targetName, engine: 'legacy-fallback', errorCode: error?.code || 'CAPTURE_FAILED' },
+        }));
+        hideLoading();
+        return _trDownloadCardImageLegacy(card);
+    } finally {
+        hideLoading();
+    }
+}
+
+async function _trDownloadCardImageLegacy(card) {
     if (typeof html2canvas === 'undefined') {
         showToast('ไม่พบ library สำหรับบันทึกรูปภาพ', 'error');
         return;

@@ -102,6 +102,7 @@ async function main() {
             'pages/machine-safety.js',
             'pages/ojt.js',
             'pages/safety-culture.js',
+            'pages/training.js',
             'pages/yokoten.js',
         ],
         `Shared export imports must remain inside the approved Phase 2 rollout and pilot set: ${normalizedReferences.join(', ')}`,

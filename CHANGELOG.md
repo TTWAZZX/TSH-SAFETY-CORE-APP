@@ -2,6 +2,21 @@
 
 This file preserves historical production handoff, smoke test, backup, deployment, migration, and phase notes moved out of `CLAUDE.md`.
 
+## Card Image Export Phase 2D Pilot Batch 2 (2026-08-20, local only)
+
+Added a feature-flagged shared export path only for the Safety Training
+`training-hero` target. The clone uses a deterministic title/KPI grid and hides
+interactive hero controls; Training Matrix and every other Training target
+retain the unchanged legacy handler. Shared failure also returns immediately to
+that legacy path.
+
+Foundation tests passed 19/19 with 8/8 approved runtime imports. Controlled
+desktop/mobile UAT passed 2 shared captures, 0 fallbacks, 1/1 consistent layout,
+and 0 runtime errors; visual review passed. Training is not enabled by default
+and nothing in Phase 2D is deployed. No API, permission, database,
+upload-storage, or business-data change occurred. See
+`docs/card-image-export-phase2d-pilot.md`.
+
 ## Card Image Export Phase 2D Pilot Batch 1 (2026-08-20, local only)
 
 Added a feature-flagged shared export path only for the OJT/SCW `scw-hero`

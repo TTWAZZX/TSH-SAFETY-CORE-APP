@@ -12,8 +12,8 @@ const root = path.resolve(__dirname, '..', '..');
 const base = String(process.env.PROD_UAT_URL || 'https://dev.tshpcl.com/safety/tsh-safety-core').replace(/\/+$/, '');
 const browserPath = process.env.EDGE_PATH || 'C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe';
 const requestedPhase = String(process.env.CARD_IMAGE_UAT_PHASE || '2a').toLowerCase();
-const uatPhase = ['2b', '2c', '2d'].includes(requestedPhase) ? requestedPhase : '2a';
-const cdpPort = uatPhase === '2d' ? 9837 : uatPhase === '2c' ? 9836 : uatPhase === '2b' ? 9835 : 9834;
+const uatPhase = ['2b', '2c', '2d', '2e'].includes(requestedPhase) ? requestedPhase : '2a';
+const cdpPort = uatPhase === '2e' ? 9838 : uatPhase === '2d' ? 9837 : uatPhase === '2c' ? 9836 : uatPhase === '2b' ? 9835 : 9834;
 const serveLocalAssets = uatPhase !== '2c';
 const stamp = new Date().toISOString().replace(/[-:]/g, '').replace(/\.\d{3}Z$/, 'Z');
 const artifactDir = path.join(
@@ -55,9 +55,20 @@ const PHASE2D_PILOTS = [
     },
 ];
 
+const PHASE2E_PILOTS = [
+    {
+        module: 'training',
+        hash: 'training',
+        selector: '[data-tr-card-image="training-hero"]',
+        menu: 'tr-card-save-menu',
+        ready: `document.querySelectorAll('#tr-stats-strip .tr-stat-val').length >= 4 && Array.from(document.querySelectorAll('#tr-stats-strip .tr-stat-val')).every(element => String(element.textContent || '').trim() !== '\u2014')`,
+    },
+];
+
 const PILOTS = uatPhase === '2c'
     ? [...PHASE2A_PILOTS, ...PHASE2B_PILOTS]
-    : uatPhase === '2d' ? PHASE2D_PILOTS
+    : uatPhase === '2e' ? PHASE2E_PILOTS
+        : uatPhase === '2d' ? PHASE2D_PILOTS
         : uatPhase === '2b' ? PHASE2B_PILOTS : PHASE2A_PILOTS;
 if (uatPhase !== '2a') {
     [
@@ -72,9 +83,9 @@ if (uatPhase !== '2a') {
         });
     });
 }
-if (uatPhase === '2d') {
+if (uatPhase === '2d' || uatPhase === '2e') {
     [
-        ['ojt.js', 'ojt.js'],
+        [uatPhase === '2d' ? 'ojt.js' : 'training.js', uatPhase === '2d' ? 'ojt.js' : 'training.js'],
     ].forEach(([urlName, fileName]) => {
         LOCAL_ASSETS.set(`/public/js/pages/${urlName}`, {
             file: path.join(root, 'public', 'js', 'pages', fileName),
@@ -168,7 +179,14 @@ async function waitFor(expression, label, timeout = 90000) {
         if (await client.evaluate(`Boolean(${expression})`).catch(() => false)) return;
         await sleep(250);
     }
-    throw new Error(`Timed out waiting for ${label}`);
+    const diagnostics = await client.evaluate(`(() => ({
+        url: location.href,
+        hash: location.hash,
+        readyState: document.readyState,
+        pageText: String(document.body?.innerText || '').replace(/\s+/g, ' ').trim().slice(0, 240),
+        runtimeErrors: window.__phase2RuntimeErrors || [],
+    }))()`).catch(error => ({ diagnosticError: error.message }));
+    throw new Error(`Timed out waiting for ${label}: ${JSON.stringify(diagnostics)}`);
 }
 
 async function login() {
@@ -244,7 +262,7 @@ async function triggerExport(pilot, mode, viewport) {
         const button = document.getElementById(${JSON.stringify(pilot.menu)})?.querySelector('button');
         if (!button) return { ok:false, reason:'save action missing' };
         button.click();
-        const stats = card.querySelector('#hiyari-hero-stats, #ojt-hero-stats');
+        const stats = card.querySelector('#hiyari-hero-stats, #ojt-hero-stats, #tr-stats-strip');
         return {
             ok:true,
             liveWidth:Math.round(rect.width),
@@ -378,6 +396,8 @@ async function main() {
     const report = {
         phase: uatPhase === '2c'
             ? 'Phase 2C - Production default-enabled controlled rollout'
+            : uatPhase === '2e'
+                ? 'Phase 2D Batch 2 - Safety Training feature-flagged pilot'
             : uatPhase === '2b'
                 ? 'Phase 2B - High-risk module feature-flagged rollout'
                 : 'Phase 2A - Dashboard and Accident feature-flagged pilot',

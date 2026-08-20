@@ -110,7 +110,7 @@
   rows are 0. No helper was uploaded; no MySQL schema, business-data, or upload
   storage mutation remains.
 
-## Current Card Image Export Handoff (2026-08-20, Phases 0-2C deployed; Phase 2D batch 1 local)
+## Current Card Image Export Handoff (2026-08-20, Phases 0-2C deployed; Phase 2D batches 1-2 local)
 
 - Phase 0 baseline and safety audit is complete for right-click card image
   export across 12 modules. Controlled read-only Production audits covered 174
@@ -172,8 +172,15 @@
   was non-deterministic. Its experimental changes were removed and it remains
   fully legacy. OJT is not enabled by default; Phase 2D is not deployed. See
   `docs/card-image-export-phase2d-pilot.md`.
-- The next step is a controlled OJT rollout decision or another isolated local
-  pilot such as Training. Hiyari requires a purpose-built static surrogate.
+- Phase 2D batch 2 adds a local, feature-flagged shared path only for Safety
+  Training `training-hero`. Training Matrix and all other Training targets stay
+  legacy. Foundation tests pass 19/19 with 8/8 approved runtime imports;
+  desktop/mobile UAT passes 2/2 shared captures, 0 fallbacks, 1/1 consistent
+  layout, and 0 runtime errors. Visual evidence is at
+  `backups/local/card-image-phase2e-comparison-20260820T085807Z/`.
+- OJT and Training are not enabled by default; Phase 2D is not deployed. The
+  next step is a controlled combined rollout decision for these two hero
+  targets. Hiyari requires a purpose-built static surrogate.
 
 ## Tech Stack
 
