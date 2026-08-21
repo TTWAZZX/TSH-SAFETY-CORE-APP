@@ -2,6 +2,30 @@
 
 This file preserves historical production handoff, smoke test, backup, deployment, migration, and phase notes moved out of `CLAUDE.md`.
 
+## 4M Training Matrix Transfer And Remove UX Fix (2026-08-21, deployed)
+
+Fixed curriculum and course employee transfers that lost their destination ID
+when the guarded submit disabled/replaced the modal form during confirmation.
+Transfer payloads and button references are now captured before confirmation,
+and detached buttons are never dereferenced during cleanup.
+
+The destination curriculum field is now a searchable picker across curriculum
+code, title, and department. Hovering or keyboard-focusing a destination loads
+and previews its active linked courses on demand; selecting it also shows the
+course list in the destination summary. Curriculum removal now performs an API
+read-back and reports success only after the assignment is no longer active.
+Cache key is `20260821-fourm-transfer-picker-r2`. The Production User browser
+gate also corrected the header badge so ordinary users see `Read only`, while
+authorized 4M Training PIC users see own-department assignment scope. No API,
+schema, upload, or existing business-data migration is required.
+
+Production was backed up before deployment, and the final r2 runtime upload
+matched SHA-256 for all 4 files. Controlled Admin/User API UAT passed the
+curriculum and course assignment create, update, transfer, remove, read-back,
+and permission-boundary paths. Browser UAT passed for Admin and a Viewer with
+the 4M Training PIC grant with zero runtime errors. Cleanup left zero temporary
+database rows/files, and all three temporary attachment URLs return HTTP 404.
+
 ## 4M Training Matrix Paste Employee IDs Fix (2026-08-21, deployed)
 
 Changed the Paste Employee IDs action from a selection-only step with a

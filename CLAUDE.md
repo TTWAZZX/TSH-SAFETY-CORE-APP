@@ -34,6 +34,19 @@
 
 ## Current 4M Change Management Handoff (2026-08-21, deployed)
 
+- Deployed transfer/remove correction captures transfer payloads before the
+  confirmation modal disables or detaches the guarded form, preventing missing
+  destination IDs and null-button errors. Destination curricula can now be
+  searched by code/title/department, and hover or keyboard focus lazily shows
+  linked courses. Removal now verifies the assignment is inactive by API
+  read-back before success. Ordinary users now see an explicit `Read only`
+  badge, while 4M Training PIC users see own-department assignment scope. Cache
+  key `20260821-fourm-transfer-picker-r2`; no API, schema, upload, or
+  existing-data migration.
+  Production upload verification matched 4/4 files. Controlled Admin/User API
+  UAT passed assignment create/update/transfer/remove and permission boundaries;
+  Admin and 4M Training PIC browser UAT both completed with zero runtime errors.
+  Temporary database rows/files are 0 and all UAT attachment URLs return 404.
 - Deployed Training Matrix fix: `Paste Employee IDs` now saves eligible IDs
   immediately instead of only selecting hidden checkboxes and showing a
   misleading `Added` toast. Success requires a GET read-back that confirms the

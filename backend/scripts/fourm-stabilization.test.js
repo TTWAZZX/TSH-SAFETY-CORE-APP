@@ -66,8 +66,8 @@ assert.match(frontend, /id="tm-detail-pane"/);
 assert.match(frontend, /id="btn-tm-mobile-back"/);
 assert.match(frontend, /function _tmApplyWorkspaceMode\(\)/);
 assert.match(frontend, /overflow-y-auto overscroll-contain/);
-assert.match(main, /fourm\.js\?v=20260821-fourm-paste-assign-r1/);
-assert.match(index, /main\.js\?v=20260821-fourm-paste-assign-r1/);
+assert.match(main, /fourm\.js\?v=20260821-fourm-transfer-picker-r2/);
+assert.match(index, /main\.js\?v=20260821-fourm-transfer-picker-r2/);
 assert.match(frontend, /id="notice-responsible-search"/);
 assert.match(frontend, /notice-responsible-dept-warning/);
 assert.match(frontend, /\/fourm\/responsible-employees\?q=/);
@@ -76,7 +76,32 @@ assert.match(phpHandler, /NoticeReassigned/);
 assert.match(frontend, /เพิ่มเข้าหลักสูตร \/ Assign IDs/);
 assert.match(frontend, /await saveAssignments\(eligible, event\.currentTarget\)/);
 assert.match(frontend, /Assignment read-back verification failed/);
+assert.match(frontend, /id="tm-curriculum-transfer-search"/);
+assert.match(frontend, /data-course-hover-preview/);
+assert.match(frontend, /loadDestinationCourses/);
+assert.match(frontend, /Assignment is still active after removal/);
+assert.match(frontend, /อ่านอย่างเดียว \/ Read only/);
+assert.match(frontend, /4M Training PIC: จัดการพนักงานในแผนก/);
 assert.doesNotMatch(frontend, /Added \$\{eligible\.length\}/);
+const curriculumTransferHandler = frontend.slice(
+    frontend.indexOf('async function showTransferCurriculumAssignmentModal'),
+    frontend.indexOf('async function showTrainingCoursePickerModal'),
+);
+assert.ok(
+    curriculumTransferHandler.indexOf('const body = Object.fromEntries(new FormData(form).entries())')
+        < curriculumTransferHandler.indexOf('await showConfirmationModal'),
+    'curriculum transfer payload must be captured before confirmation detaches/disables the form',
+);
+assert.match(curriculumTransferHandler, /if \(btn\?\.isConnected\) btn\.disabled = false/);
+const courseTransferHandler = frontend.slice(
+    frontend.indexOf('async function showTransferAssignmentModal'),
+    frontend.indexOf('async function showTrainingEmployeeHistoryModal'),
+);
+assert.ok(
+    courseTransferHandler.indexOf('const body = Object.fromEntries(new FormData(form).entries())')
+        < courseTransferHandler.indexOf('await showConfirmationModal'),
+    'course transfer payload must be captured before confirmation detaches/disables the form',
+);
 assert.strictEqual(
     (frontend.match(/^async function showAssignEmployeesModal\(\)/gm) || []).length,
     1,

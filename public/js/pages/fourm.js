@@ -3444,7 +3444,9 @@ async function renderTrainingMatrix(container) {
                             class="px-4 py-2 rounded-lg text-sm font-bold text-white"
                             style="background:linear-gradient(135deg,#6366f1,#0284c7)">
                         เพิ่มหลักสูตร / Add
-                    </button>` : `<span class="px-3 py-2 rounded-lg text-xs font-bold text-slate-500 bg-slate-50 border border-slate-200">User: จัดการพนักงาน / Employees only</span>`}
+                    </button>` : (canManageMatrix
+                        ? `<span class="px-3 py-2 rounded-lg text-xs font-bold text-emerald-700 bg-emerald-50 border border-emerald-200">4M Training PIC: จัดการพนักงานในแผนก / Own-department assignments</span>`
+                        : `<span class="px-3 py-2 rounded-lg text-xs font-bold text-slate-500 bg-slate-50 border border-slate-200">อ่านอย่างเดียว / Read only</span>`)}
                 </div>
             </div>
             <div id="tm-kpi-strip" class="grid grid-cols-2 lg:grid-cols-5 gap-3">
@@ -4633,9 +4635,18 @@ async function showTransferCurriculumAssignmentModal(assignmentId) {
         showError(err);
         return;
     }
-    const options = curriculums.map(c => `<option value="${escHtml(c.id)}" data-dept="${escHtml(c.Department || '')}" data-code="${escHtml(c.CurriculumCode || '')}" data-title="${escHtml(c.CurriculumTitle || '')}">
-        ${escHtml(`${c.Department || '-'} / ${c.CurriculumCode || '-'} - ${c.CurriculumTitle || '-'}`)}
-    </option>`).join('');
+    const destinationCourseCache = new Map();
+    const loadDestinationCourses = async (curriculumId) => {
+        if (destinationCourseCache.has(curriculumId)) return destinationCourseCache.get(curriculumId);
+        const request = API.get(`/fourm/training-curriculums/${curriculumId}/courses`)
+            .then(response => normalizeApiArray(response?.data ?? response).filter(course => Number(course.IsActive) !== 0))
+            .catch(error => {
+                destinationCourseCache.delete(curriculumId);
+                throw error;
+            });
+        destinationCourseCache.set(curriculumId, request);
+        return request;
+    };
     const html = `
         <form id="tm-curriculum-transfer-form" class="space-y-4">
             <div class="rounded-xl border border-slate-100 bg-slate-50 p-3">
@@ -4657,10 +4668,16 @@ async function showTransferCurriculumAssignmentModal(assignmentId) {
             <div id="tm-curriculum-transfer-warning" class="hidden rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs font-bold text-amber-800"></div>
             <div>
                 <label class="block text-sm font-semibold text-slate-700 mb-1.5">หลักสูตรปลายทาง / Destination Curriculum</label>
-                <select name="TargetCurriculumID" class="form-input w-full" required>
-                    <option value="">เลือกหลักสูตร / Select curriculum</option>
-                    ${options}
-                </select>
+                <input type="hidden" name="TargetCurriculumID" id="tm-curriculum-transfer-target-id" required>
+                <div class="relative">
+                    <input type="search" id="tm-curriculum-transfer-search" class="form-input w-full pl-9"
+                           autocomplete="off" placeholder="พิมพ์รหัส ชื่อหลักสูตร หรือแผนก / Search destination curriculum">
+                    <svg class="pointer-events-none absolute left-3 top-3.5 h-4 w-4 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <circle cx="11" cy="11" r="7" stroke-width="2"></circle><path d="m20 20-3.5-3.5" stroke-width="2"></path>
+                    </svg>
+                </div>
+                <div id="tm-curriculum-transfer-results" class="mt-2 max-h-64 overflow-y-auto rounded-xl border border-slate-200 bg-white p-1"></div>
+                <p class="mt-1.5 text-xs text-slate-400">พิมพ์เพื่อค้นหา และวางเมาส์หรือโฟกัสรายการเพื่อดูรายวิชา / Type to search; hover or focus to preview courses</p>
             </div>
             <div>
                 <label class="block text-sm font-semibold text-slate-700 mb-1.5">หมายเหตุ / Transfer Note</label>
@@ -4671,14 +4688,21 @@ async function showTransferCurriculumAssignmentModal(assignmentId) {
                 <button type="submit" id="tm-curriculum-transfer-save-btn" class="btn btn-primary px-5">ย้าย / Transfer</button>
             </div>
         </form>`;
-    openModal('ย้ายพนักงานข้ามหลักสูตร / Transfer Employee', html, 'max-w-lg');
-    const updatePreview = () => {
-        const select = document.querySelector('#tm-curriculum-transfer-form select[name="TargetCurriculumID"]');
-        const opt = select?.selectedOptions?.[0];
+    openModal('ย้ายพนักงานข้ามหลักสูตร / Transfer Employee', html, 'max-w-2xl');
+    const searchInput = document.getElementById('tm-curriculum-transfer-search');
+    const targetInput = document.getElementById('tm-curriculum-transfer-target-id');
+    const results = document.getElementById('tm-curriculum-transfer-results');
+    const renderCoursePreview = (courses) => courses.length
+        ? `<div class="mt-2 border-t border-slate-100 pt-2">
+               <p class="mb-1 text-[10px] font-black uppercase tracking-wider text-slate-400">รายวิชา / Courses (${courses.length})</p>
+               <div class="flex flex-wrap gap-1">${courses.map(course => `<span class="rounded-md bg-slate-100 px-1.5 py-1 text-[10px] font-semibold text-slate-600">${escHtml(course.CourseCode || '-')} · ${escHtml(course.CourseTitle || '-')}</span>`).join('')}</div>
+           </div>`
+        : '<p class="mt-2 border-t border-slate-100 pt-2 text-[11px] text-amber-600">ไม่มีรายวิชาที่ใช้งาน / No active course</p>';
+    const updatePreview = async (target) => {
         const preview = document.getElementById('tm-curriculum-transfer-preview');
         const warning = document.getElementById('tm-curriculum-transfer-warning');
         if (!preview || !warning) return;
-        if (!opt?.value) {
+        if (!target?.id) {
             preview.className = 'rounded-xl border border-dashed border-slate-200 bg-slate-50 p-3';
             preview.innerHTML = '<p class="text-[11px] font-black uppercase tracking-wider text-slate-400">ใหม่ / Destination</p><p class="mt-2 text-sm font-black text-slate-400">เลือกหลักสูตรปลายทาง</p>';
             warning.classList.add('hidden');
@@ -4686,39 +4710,96 @@ async function showTransferCurriculumAssignmentModal(assignmentId) {
         }
         preview.className = 'rounded-xl border border-sky-200 bg-sky-50 p-3';
         preview.innerHTML = `<p class="text-[11px] font-black uppercase tracking-wider text-sky-500">ใหม่ / Destination</p>
-            <p class="mt-2 text-sm font-black text-slate-800">${escHtml(opt.dataset.code || '-')} - ${escHtml(opt.dataset.title || '-')}</p>
-            <p class="mt-1 text-xs font-semibold text-sky-700">${escHtml(opt.dataset.dept || '-')}</p>`;
-        if (String(opt.dataset.dept || '') !== String(currentCurriculum.Department || '')) {
+            <p class="mt-2 text-sm font-black text-slate-800">${escHtml(target.CurriculumCode || '-')} - ${escHtml(target.CurriculumTitle || '-')}</p>
+            <p class="mt-1 text-xs font-semibold text-sky-700">${escHtml(target.Department || '-')}</p>
+            <div data-selected-course-preview><p class="mt-2 text-[11px] text-sky-600">กำลังโหลดรายวิชา... / Loading courses...</p></div>`;
+        if (String(target.Department || '') !== String(currentCurriculum.Department || '')) {
             warning.textContent = 'โปรดตรวจสอบ: หลักสูตรปลายทางอยู่คนละแผนก / Different department';
             warning.classList.remove('hidden');
         } else {
             warning.classList.add('hidden');
         }
+        try {
+            const courses = await loadDestinationCourses(target.id);
+            const coursePreview = preview.querySelector('[data-selected-course-preview]');
+            if (coursePreview && String(targetInput?.value || '') === String(target.id)) coursePreview.innerHTML = renderCoursePreview(courses);
+        } catch (_) {
+            const coursePreview = preview.querySelector('[data-selected-course-preview]');
+            if (coursePreview) coursePreview.innerHTML = '<p class="mt-2 text-[11px] text-rose-600">โหลดรายวิชาไม่สำเร็จ / Cannot load courses</p>';
+        }
     };
-    document.querySelector('#tm-curriculum-transfer-form select[name="TargetCurriculumID"]')?.addEventListener('change', updatePreview);
+    const renderDestinations = () => {
+        if (!results) return;
+        const query = String(searchInput?.value || '').trim().toLowerCase();
+        const rows = curriculums.filter(curriculum => [curriculum.CurriculumCode, curriculum.CurriculumTitle, curriculum.Department]
+            .some(value => String(value || '').toLowerCase().includes(query)));
+        results.innerHTML = rows.length ? rows.map(curriculum => `
+            <button type="button" class="tm-transfer-curriculum-option block w-full rounded-lg px-3 py-2.5 text-left transition-colors ${String(targetInput?.value || '') === String(curriculum.id) ? 'bg-sky-50 ring-1 ring-sky-200' : 'hover:bg-slate-50'}"
+                    data-id="${escHtml(curriculum.id)}">
+                <span class="flex items-start justify-between gap-3">
+                    <span class="min-w-0">
+                        <span class="block text-xs font-mono font-bold text-sky-700">${escHtml(curriculum.CurriculumCode || '-')}</span>
+                        <span class="block truncate text-sm font-black text-slate-800">${escHtml(curriculum.CurriculumTitle || '-')}</span>
+                        <span class="block text-xs text-slate-400">${escHtml(curriculum.Department || '-')} · ${parseInt(curriculum.CourseCount, 10) || 0} วิชา</span>
+                    </span>
+                    <span class="shrink-0 text-xs font-bold text-slate-400">เลือก / Select</span>
+                </span>
+                <div data-course-hover-preview class="hidden"></div>
+            </button>`).join('') : '<div class="px-3 py-6 text-center text-sm text-slate-400">ไม่พบหลักสูตรปลายทาง / No destination curriculum found</div>';
+    };
+    searchInput?.addEventListener('input', renderDestinations);
+    results?.addEventListener('click', event => {
+        const option = event.target.closest('.tm-transfer-curriculum-option');
+        if (!option) return;
+        const target = curriculums.find(curriculum => String(curriculum.id) === String(option.dataset.id));
+        if (!target || !targetInput) return;
+        targetInput.value = target.id;
+        if (searchInput) searchInput.value = `${target.CurriculumCode || '-'} - ${target.CurriculumTitle || '-'}`;
+        renderDestinations();
+        updatePreview(target);
+    });
+    results?.addEventListener('pointerover', async event => {
+        const option = event.target.closest('.tm-transfer-curriculum-option');
+        if (!option || (event.relatedTarget instanceof Node && option.contains(event.relatedTarget))) return;
+        const holder = option.querySelector('[data-course-hover-preview]');
+        if (!holder) return;
+        holder.classList.remove('hidden');
+        holder.innerHTML = '<p class="mt-2 border-t border-slate-100 pt-2 text-[11px] text-slate-400">กำลังโหลดรายวิชา... / Loading courses...</p>';
+        try { holder.innerHTML = renderCoursePreview(await loadDestinationCourses(option.dataset.id)); }
+        catch (_) { holder.innerHTML = '<p class="mt-2 border-t border-slate-100 pt-2 text-[11px] text-rose-600">โหลดรายวิชาไม่สำเร็จ / Cannot load courses</p>'; }
+    });
+    results?.addEventListener('pointerout', event => {
+        const option = event.target.closest('.tm-transfer-curriculum-option');
+        if (!option || (event.relatedTarget instanceof Node && option.contains(event.relatedTarget))) return;
+        option.querySelector('[data-course-hover-preview]')?.classList.add('hidden');
+    });
+    results?.addEventListener('focusin', event => {
+        const option = event.target.closest('.tm-transfer-curriculum-option');
+        if (option) option.dispatchEvent(new PointerEvent('pointerover', { bubbles: true }));
+    });
+    renderDestinations();
     document.getElementById('tm-curriculum-transfer-form')?.addEventListener('submit', guardSubmitHandler(async (e) => {
         e.preventDefault();
         const form = e.target;
-        const targetId = form.querySelector('select[name="TargetCurriculumID"]')?.value || '';
+        const targetId = form.querySelector('[name="TargetCurriculumID"]')?.value || '';
         const target = curriculums.find(c => String(c.id) === String(targetId));
         if (!target) { showToast('เลือกหลักสูตรปลายทางก่อน / Select destination curriculum', 'warning'); return; }
+        const body = Object.fromEntries(new FormData(form).entries());
+        const btn = form.querySelector('#tm-curriculum-transfer-save-btn');
         const ok = await showConfirmationModal(
             'ยืนยันการย้าย / Confirm transfer',
             `คุณกำลังย้าย ${assignment.EmployeeName || assignment.EmployeeID || '-'} จาก ${currentCurriculum.CurriculumCode || '-'} ไป ${target.CurriculumCode || '-'} ใช่ไหม?`
         );
         if (!ok) return;
-        const btn = document.getElementById('tm-curriculum-transfer-save-btn');
-        btn.disabled = true;
         try {
             showLoading('กำลังย้ายพนักงาน... / Transferring employee...');
-            const body = Object.fromEntries(new FormData(form).entries());
             await API.post(`/fourm/training-curriculum-assignments/${assignment.id}/transfer`, body);
             closeModal();
             showToast('ย้ายพนักงานสำเร็จ / Employee transferred', 'success');
             await fetchTrainingAssignments(_tmSelectedCurriculumId);
             await fetchTrainingMatrix();
         } catch (err) { showError(err); }
-        finally { hideLoading(); btn.disabled = false; }
+        finally { hideLoading(); if (btn?.isConnected) btn.disabled = false; }
     }));
 }
 
@@ -5231,27 +5312,26 @@ async function showTransferAssignmentModal(assignmentId) {
     updateTransferPreview();
     document.getElementById('tm-transfer-form')?.addEventListener('submit', guardSubmitHandler(async (e) => {
         e.preventDefault();
-        const btn = document.getElementById('tm-transfer-save-btn');
         const form = e.target;
         const targetCourseId = form.querySelector('select[name="TargetCourseID"]')?.value || '';
         const targetCourse = destinationCourses.find(c => String(c.id) === String(targetCourseId));
         if (!targetCourse) { showToast('เลือกรายวิชาปลายทางก่อน / Select destination course first', 'warning'); return; }
+        const body = Object.fromEntries(new FormData(form).entries());
+        const btn = form.querySelector('#tm-transfer-save-btn');
         const ok = await showConfirmationModal(
             'ยืนยันการย้ายพนักงาน / Confirm transfer',
             `คุณกำลังย้าย ${assignment.EmployeeName || assignment.EmployeeID || '-'} จาก ${currentCourse.CourseCode || '-'} ไป ${targetCourse.CourseCode || '-'} ใช่ไหม? / Move from ${currentCourse.CourseCode || '-'} to ${targetCourse.CourseCode || '-'}?`
         );
         if (!ok) return;
-        btn.disabled = true;
         try {
             showLoading('กำลังย้ายพนักงาน... / Transferring employee...');
-            const body = Object.fromEntries(new FormData(form).entries());
             await API.post(`/fourm/training-assignments/${assignment.id}/transfer`, body);
             closeModal();
             showToast('ย้ายพนักงานสำเร็จ / Employee transferred', 'success');
             await fetchTrainingAssignments(_tmSelectedCourseId);
             await fetchTrainingMatrix();
         } catch (err) { showError(err); }
-        finally { hideLoading(); btn.disabled = false; }
+        finally { hideLoading(); if (btn?.isConnected) btn.disabled = false; }
     }));
 }
 
@@ -8286,16 +8366,19 @@ function setupEventListeners() {
         const tmRemove = e.target.closest('.btn-tm-remove-assignment');
         if (tmRemove) {
             if (!canManageTrainingMatrix()) { showToast('Read only: 4M Training PIC permission is required.', 'warning'); return; }
-            const ok = await showConfirmationModal('ลบพนักงานออก? / Remove employee?', `ลบ "${tmRemove.dataset.name || 'employee'}" ออกจากรายวิชานี้ใช่ไหม? / Remove from this course?`);
+            const ok = await showConfirmationModal('ลบพนักงานออก? / Remove employee?', `ลบ "${tmRemove.dataset.name || 'employee'}" ออกจากหลักสูตรนี้ใช่ไหม? / Remove from this curriculum?`);
             if (!ok) return;
+            if (tmRemove.isConnected) tmRemove.disabled = true;
             try {
                 showLoading('กำลังลบพนักงานออก... / Removing assignment...');
                 await API.delete(`/fourm/training-curriculum-assignments/${tmRemove.dataset.id}`);
-                showToast('ลบพนักงานออกสำเร็จ / Assignment removed', 'success');
                 await fetchTrainingAssignments(_tmSelectedCurriculumId);
+                const stillAssigned = _tmAssignments.some(assignment => String(assignment.id) === String(tmRemove.dataset.id) && assignment.Status === 'Assigned');
+                if (stillAssigned) throw new Error('ระบบยังพบพนักงานอยู่ในหลักสูตรหลังการลบ กรุณาลองใหม่ / Assignment is still active after removal');
+                showToast('ลบพนักงานออกสำเร็จ / Assignment removed', 'success');
                 await fetchTrainingMatrix();
             } catch (err) { showError(err); }
-            finally { hideLoading(); }
+            finally { hideLoading(); if (tmRemove.isConnected) tmRemove.disabled = false; }
             return;
         }
         const tmEmployeeHistory = e.target.closest('.btn-tm-employee-history');
