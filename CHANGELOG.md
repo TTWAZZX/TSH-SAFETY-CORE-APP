@@ -2,6 +2,25 @@
 
 This file preserves historical production handoff, smoke test, backup, deployment, migration, and phase notes moved out of `CLAUDE.md`.
 
+## 4M Training Matrix Authoritative KPI Refresh (2026-08-21, deployed)
+
+Added a year/department-scoped Training Matrix summary API with Node/PHP parity.
+The five KPI cards now use database totals for active curricula, active linked
+courses, distinct actively assigned employees, curriculum/course transfers,
+and inactive curricula/courses instead of inferring totals from the selected
+curriculum. Successful Training Matrix mutations now reload the authoritative
+summary, including inline employee assignment and Course Master changes. Cache
+key is `20260821-fourm-kpi-refresh-r1`. No schema or upload-storage change is
+required.
+
+Production was backed up before upload, and all five runtime files matched the
+local SHA-256 values after download-back verification. Controlled Admin/User
+UAT passed the curriculum/course create, assignment, transfer, removal,
+disable, restore, permission, audit-log, and KPI refresh paths. Final read-only
+browser UAT passed for Admin and a Viewer with 4M Training PIC scope with zero
+runtime errors. Cleanup left zero temporary rows/files; all three temporary UAT
+attachments return HTTP 404.
+
 ## 4M Training Matrix Transfer And Remove UX Fix (2026-08-21, deployed)
 
 Fixed curriculum and course employee transfers that lost their destination ID

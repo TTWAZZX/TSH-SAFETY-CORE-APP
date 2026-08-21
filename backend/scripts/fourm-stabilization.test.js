@@ -7,7 +7,9 @@ const { spawnSync } = require('child_process');
 
 const root = path.resolve(__dirname, '..', '..');
 const phpHandler = fs.readFileSync(path.join(root, 'api', 'handlers', 'fourm_phase7.php'), 'utf8');
+const nodeRoute = fs.readFileSync(path.join(root, 'backend', 'routes', 'fourm.js'), 'utf8');
 const frontend = fs.readFileSync(path.join(root, 'public', 'js', 'pages', 'fourm.js'), 'utf8');
+const activeFrontend = frontend.slice(0, frontend.indexOf('function _quarantinedLegacyTrainingMatrixMerge'));
 const main = fs.readFileSync(path.join(root, 'public', 'js', 'main.js'), 'utf8');
 const index = fs.readFileSync(path.join(root, 'index.html'), 'utf8');
 const php = process.env.PHP_BIN || 'C:\\xampp\\php\\php.exe';
@@ -66,8 +68,8 @@ assert.match(frontend, /id="tm-detail-pane"/);
 assert.match(frontend, /id="btn-tm-mobile-back"/);
 assert.match(frontend, /function _tmApplyWorkspaceMode\(\)/);
 assert.match(frontend, /overflow-y-auto overscroll-contain/);
-assert.match(main, /fourm\.js\?v=20260821-fourm-transfer-picker-r2/);
-assert.match(index, /main\.js\?v=20260821-fourm-transfer-picker-r2/);
+assert.match(main, /fourm\.js\?v=20260821-fourm-kpi-refresh-r1/);
+assert.match(index, /main\.js\?v=20260821-fourm-kpi-refresh-r1/);
 assert.match(frontend, /id="notice-responsible-search"/);
 assert.match(frontend, /notice-responsible-dept-warning/);
 assert.match(frontend, /\/fourm\/responsible-employees\?q=/);
@@ -82,6 +84,16 @@ assert.match(frontend, /loadDestinationCourses/);
 assert.match(frontend, /Assignment is still active after removal/);
 assert.match(frontend, /อ่านอย่างเดียว \/ Read only/);
 assert.match(frontend, /4M Training PIC: จัดการพนักงานในแผนก/);
+assert.match(nodeRoute, /router\.get\('\/training-matrix-summary'/);
+assert.match(phpHandler, /\$path==='\/fourm\/training-matrix-summary'/);
+for (const metric of ['activeCurriculums', 'activeCourses', 'assignedEmployees', 'curriculumTransfers', 'courseTransfers', 'inactiveCurriculums', 'inactiveCourses']) {
+    assert.match(nodeRoute, new RegExp(metric));
+    assert.match(phpHandler, new RegExp(metric));
+    assert.match(activeFrontend, new RegExp(metric));
+}
+assert.match(activeFrontend, /API\.get\(`\/fourm\/training-matrix-summary\?\$\{p\}`\)/);
+assert.doesNotMatch(activeFrontend, /const selectedTransferred = _tmAssignments\.filter/);
+assert.match(activeFrontend, /async function assignInlineTrainingEmployees[\s\S]*?await fetchTrainingMatrix\(\)/);
 assert.doesNotMatch(frontend, /Added \$\{eligible\.length\}/);
 const curriculumTransferHandler = frontend.slice(
     frontend.indexOf('async function showTransferCurriculumAssignmentModal'),

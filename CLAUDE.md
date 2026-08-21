@@ -34,6 +34,16 @@
 
 ## Current 4M Change Management Handoff (2026-08-21, deployed)
 
+- Deployed and verified the authoritative Training Matrix KPI refresh.
+  `GET /fourm/training-matrix-summary` is scoped by year/department and returns
+  active curricula/courses, distinct assigned employees, curriculum/course
+  transfer totals, and inactive curricula/courses. The SPA reloads this summary
+  after every successful matrix mutation. Node/PHP parity, syntax, backend test
+  suite, and 94/94 read/permission preflight pass. Cache key is
+  `20260821-fourm-kpi-refresh-r1`. Production SHA-256 upload verification,
+  controlled Admin/User lifecycle UAT, and final Admin/User browser UAT pass
+  with zero runtime errors. Cleanup confirmed zero temporary rows/files and
+  three of three UAT attachments return HTTP 404.
 - Deployed transfer/remove correction captures transfer payloads before the
   confirmation modal disables or detaches the guarded form, preventing missing
   destination IDs and null-button errors. Destination curricula can now be

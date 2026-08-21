@@ -1093,6 +1093,95 @@ router.get('/training-department-scopes', async (req, res) => {
     }
 });
 
+router.get('/training-matrix-summary', async (req, res) => {
+    try {
+        await ensureTables();
+        const year = parseInt(req.query.year, 10) || new Date().getFullYear();
+        const requestedDept = cleanText(req.query.dept, 100);
+        const department = isFourmAdmin(req)
+            ? (requestedDept && requestedDept !== 'all' ? requestedDept : '')
+            : currentUserDept(req);
+
+        if (!isFourmAdmin(req) && !department) {
+            return res.json({
+                success: true,
+                data: {
+                    activeCurriculums: 0,
+                    activeCourses: 0,
+                    assignedEmployees: 0,
+                    curriculumTransfers: 0,
+                    courseTransfers: 0,
+                    transferredTotal: 0,
+                    inactiveCurriculums: 0,
+                    inactiveCourses: 0,
+                    inactiveTotal: 0,
+                },
+            });
+        }
+
+        const scopeSql = `cur.\`Year\` = ?${department ? ' AND cur.Department = ?' : ''}`;
+        const scopeParams = department ? [year, department] : [year];
+        const [curriculumResult, courseResult, curriculumAssignmentResult, courseAssignmentResult] = await Promise.all([
+            db.query(
+                `SELECT
+                    COALESCE(SUM(cur.IsActive = 1), 0) AS activeCurriculums,
+                    COALESCE(SUM(cur.IsActive <> 1), 0) AS inactiveCurriculums
+                 FROM FourM_Curriculums cur
+                 WHERE ${scopeSql}`,
+                scopeParams
+            ),
+            db.query(
+                `SELECT
+                    COALESCE(SUM(cur.IsActive = 1 AND co.IsActive = 1), 0) AS activeCourses,
+                    COALESCE(SUM(cur.IsActive <> 1 OR co.IsActive <> 1), 0) AS inactiveCourses
+                 FROM FourM_Courses co
+                 JOIN FourM_Curriculums cur ON cur.id = co.CurriculumID
+                 WHERE ${scopeSql}`,
+                scopeParams
+            ),
+            db.query(
+                `SELECT
+                    COUNT(DISTINCT CASE
+                        WHEN cur.IsActive = 1 AND ce.Status = 'Assigned' THEN ce.EmployeeID
+                    END) AS assignedEmployees,
+                    COALESCE(SUM(ce.Status = 'Transferred'), 0) AS curriculumTransfers
+                 FROM FourM_CurriculumEmployees ce
+                 JOIN FourM_Curriculums cur ON cur.id = ce.CurriculumID
+                 WHERE ${scopeSql}`,
+                scopeParams
+            ),
+            db.query(
+                `SELECT COALESCE(SUM(ce.Status = 'Transferred'), 0) AS courseTransfers
+                 FROM FourM_CourseEmployees ce
+                 JOIN FourM_Courses co ON co.id = ce.CourseID
+                 JOIN FourM_Curriculums cur ON cur.id = co.CurriculumID
+                 WHERE ${scopeSql}`,
+                scopeParams
+            ),
+        ]);
+
+        const curriculum = curriculumResult[0][0] || {};
+        const course = courseResult[0][0] || {};
+        const curriculumAssignment = curriculumAssignmentResult[0][0] || {};
+        const courseAssignment = courseAssignmentResult[0][0] || {};
+        const summary = {
+            activeCurriculums: Number(curriculum.activeCurriculums) || 0,
+            activeCourses: Number(course.activeCourses) || 0,
+            assignedEmployees: Number(curriculumAssignment.assignedEmployees) || 0,
+            curriculumTransfers: Number(curriculumAssignment.curriculumTransfers) || 0,
+            courseTransfers: Number(courseAssignment.courseTransfers) || 0,
+            inactiveCurriculums: Number(curriculum.inactiveCurriculums) || 0,
+            inactiveCourses: Number(course.inactiveCourses) || 0,
+        };
+        summary.transferredTotal = summary.curriculumTransfers + summary.courseTransfers;
+        summary.inactiveTotal = summary.inactiveCurriculums + summary.inactiveCourses;
+        res.json({ success: true, data: summary });
+    } catch (error) {
+        console.error('4M training matrix summary error:', error);
+        res.status(500).json({ success: false, message: 'Cannot load Training Matrix summary.' });
+    }
+});
+
 router.post('/man-records', isAdmin, async (req, res) => {
     try {
         await ensureTables();

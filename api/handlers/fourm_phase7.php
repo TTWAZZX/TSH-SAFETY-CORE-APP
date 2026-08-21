@@ -439,6 +439,30 @@ function handle_fourm_routes(string $method,string $path): bool {
     if($method==='POST'&&$path==='/fourm/man-records'){require_admin();[$t,$p,$f]=fm_counts($b);$dept=fm_required($b['Department']??'',100,'Department required.');$status=fm_text($b['Status']??'Pending',20);if(!in_array($status,['Pending','Pass','Fail'],true))json_response(['success'=>false,'message'=>'Invalid Man Record status.'],400);db_execute('INSERT INTO fourm_manrecords (id,Department,TotalAttendance,Pass,Fail,Status,ExamDate,Notes,CreatedBy) VALUES (?,?,?,?,?,?,?,?,?)',[fm_uuid(),$dept,$t,$p,$f,$status,$b['ExamDate']??null,fm_text($b['Notes']??'',1000)?:null,fm_actor($u)]);json_response(['success'=>true],201);}
     $p=route_params($path,'/fourm/man-records/:id');if($p!==null&&in_array($method,['PUT','DELETE'],true)){require_admin();$old=db_row('SELECT * FROM fourm_manrecords WHERE id=?',[$p['id']]);if(!$old)json_response(['success'=>false,'message'=>'Not found.'],404);if($method==='DELETE'){db_execute('DELETE FROM fourm_manrecords WHERE id=?',[$p['id']]);json_response(['success'=>true]);}[$t,$pa,$f]=fm_counts($b,$old);$status=fm_text($b['Status']??$old['Status'],20);if(!in_array($status,['Pending','Pass','Fail'],true))json_response(['success'=>false,'message'=>'Invalid Man Record status.'],400);db_execute('UPDATE fourm_manrecords SET Department=?,TotalAttendance=?,Pass=?,Fail=?,Status=?,ExamDate=?,Notes=? WHERE id=?',[fm_required($b['Department']??$old['Department'],100,'Department required.'),$t,$pa,$f,$status,$b['ExamDate']??$old['ExamDate'],array_key_exists('Notes',$b)?(fm_text($b['Notes'],1000)?:null):$old['Notes'],$p['id']]);json_response(['success'=>true]);}
     if($method==='GET'&&$path==='/fourm/training-department-scopes'){ $y=(int)($_GET['year']??date('Y'));$sql="SELECT cur.Department,COUNT(DISTINCT cur.id) CurriculumCount,COUNT(DISTINCT CASE WHEN co.IsActive=1 THEN co.id END) CourseCount,COUNT(DISTINCT CASE WHEN ce.Status='Assigned' THEN ce.EmployeeID END) ScopeEmployees,COUNT(DISTINCT CASE WHEN ce.Status='Transferred' THEN ce.id END) TransferredCount FROM fourm_curriculums cur LEFT JOIN fourm_courses co ON co.CurriculumID=cur.id LEFT JOIN fourm_curriculumemployees ce ON ce.CurriculumID=cur.id WHERE cur.IsActive=1 AND cur.`Year`=?";$pa=[$y];$d=fm_admin($u)?fm_text($_GET['dept']??'',100):fm_text($u['department']??'',100);if($d&&$d!=='all'){$sql.=' AND cur.Department=?';$pa[]=$d;}if(!empty($_GET['q'])){$sql.=' AND cur.Department LIKE ?';$pa[]='%'.fm_text($_GET['q'],100).'%';}json_response(['success'=>true,'data'=>db_rows($sql.' GROUP BY cur.Department ORDER BY cur.Department',$pa)]);}
+    if($method==='GET'&&$path==='/fourm/training-matrix-summary'){
+        $y=(int)($_GET['year']??date('Y'));
+        $requestedDept=fm_text($_GET['dept']??'',100);
+        $d=fm_admin($u)?(($requestedDept!==''&&$requestedDept!=='all')?$requestedDept:''):fm_text($u['department']??$u['Department']??'',100);
+        if(!fm_admin($u)&&$d==='')json_response(['success'=>true,'data'=>['activeCurriculums'=>0,'activeCourses'=>0,'assignedEmployees'=>0,'curriculumTransfers'=>0,'courseTransfers'=>0,'transferredTotal'=>0,'inactiveCurriculums'=>0,'inactiveCourses'=>0,'inactiveTotal'=>0]]);
+        $scope='cur.`Year`=?'.($d!==''?' AND cur.Department=?':'');
+        $params=$d!==''?[$y,$d]:[$y];
+        $curriculum=db_row("SELECT COALESCE(SUM(cur.IsActive=1),0) activeCurriculums,COALESCE(SUM(cur.IsActive<>1),0) inactiveCurriculums FROM fourm_curriculums cur WHERE $scope",$params)?:[];
+        $course=db_row("SELECT COALESCE(SUM(cur.IsActive=1 AND co.IsActive=1),0) activeCourses,COALESCE(SUM(cur.IsActive<>1 OR co.IsActive<>1),0) inactiveCourses FROM fourm_courses co JOIN fourm_curriculums cur ON cur.id=co.CurriculumID WHERE $scope",$params)?:[];
+        $curriculumAssignment=db_row("SELECT COUNT(DISTINCT CASE WHEN cur.IsActive=1 AND ce.Status='Assigned' THEN ce.EmployeeID END) assignedEmployees,COALESCE(SUM(ce.Status='Transferred'),0) curriculumTransfers FROM fourm_curriculumemployees ce JOIN fourm_curriculums cur ON cur.id=ce.CurriculumID WHERE $scope",$params)?:[];
+        $courseAssignment=db_row("SELECT COALESCE(SUM(ce.Status='Transferred'),0) courseTransfers FROM fourm_courseemployees ce JOIN fourm_courses co ON co.id=ce.CourseID JOIN fourm_curriculums cur ON cur.id=co.CurriculumID WHERE $scope",$params)?:[];
+        $summary=[
+            'activeCurriculums'=>(int)($curriculum['activeCurriculums']??0),
+            'activeCourses'=>(int)($course['activeCourses']??0),
+            'assignedEmployees'=>(int)($curriculumAssignment['assignedEmployees']??0),
+            'curriculumTransfers'=>(int)($curriculumAssignment['curriculumTransfers']??0),
+            'courseTransfers'=>(int)($courseAssignment['courseTransfers']??0),
+            'inactiveCurriculums'=>(int)($curriculum['inactiveCurriculums']??0),
+            'inactiveCourses'=>(int)($course['inactiveCourses']??0),
+        ];
+        $summary['transferredTotal']=$summary['curriculumTransfers']+$summary['courseTransfers'];
+        $summary['inactiveTotal']=$summary['inactiveCurriculums']+$summary['inactiveCourses'];
+        json_response(['success'=>true,'data'=>$summary]);
+    }
     if($method==='POST'&&$path==='/fourm/training-curriculums/bulk-code-preview'){require_admin();$options=fm_bulk_code_options($b);$rows=db_rows('SELECT id,`Year`,Department,CurriculumCode,CurriculumTitle,IsActive FROM fourm_curriculums WHERE `Year`=?',[$options['year']]);json_response(['success'=>true,'data'=>fm_bulk_code_preview($rows,$options)]);}
     if($method==='PUT'&&$path==='/fourm/training-curriculums/bulk-code'){
         require_admin();$options=fm_bulk_code_options($b);$expected=fm_bulk_code_changes($b['expectedChanges']??[]);

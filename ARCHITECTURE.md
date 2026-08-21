@@ -252,6 +252,20 @@ Major modules include Admin/System Console, Dashboard, Patrol, CCCF, Machine Saf
 - Node development behavior lives in `backend/routes/fourm.js`; PHP production
   parity lives in `api/handlers/fourm_phase7.php`.
 
+### 4M Training Matrix KPI summary
+
+- `GET /api/fourm/training-matrix-summary?year=&dept=` is the authoritative
+  source for the five Training Matrix KPI cards. Admin may request all or one
+  department; non-Admin users are always restricted to their JWT department.
+- The response separates active curricula/courses, distinct employees with an
+  active curriculum assignment, curriculum/course transfer history, and
+  inactive curricula/courses. `transferredTotal` and `inactiveTotal` are server
+  totals, not values inferred from the currently selected curriculum.
+- The SPA reloads the summary together with the active curriculum list after
+  every successful create, update, assignment, transfer, removal, disable, or
+  restore action. Node development and PHP production implementations must stay
+  behaviorally aligned. No schema or upload-storage change is required.
+
 ### 4M Change Notice responsible-person assignment
 
 - `FourM_ChangeNotices.ResponsibleEmployeeID` is the stable Employee Master

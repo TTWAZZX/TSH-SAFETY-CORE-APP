@@ -121,6 +121,17 @@ let _fourmForms     = [];
 let _tmCurriculums  = [];
 let _tmCourses      = [];
 let _tmAssignments  = [];
+let _tmKpiSummary   = {
+    activeCurriculums: 0,
+    activeCourses: 0,
+    assignedEmployees: 0,
+    curriculumTransfers: 0,
+    courseTransfers: 0,
+    transferredTotal: 0,
+    inactiveCurriculums: 0,
+    inactiveCourses: 0,
+    inactiveTotal: 0,
+};
 let _tmEmployees    = [];
 let _tmCourseMaster = [];
 let _tmEmployeeScopes = [];
@@ -3533,16 +3544,18 @@ function renderTrainingMatrixKpis() {
     const el = document.getElementById('tm-kpi-strip');
     if (!el) return;
 
-    const curriculumTotal = _tmCurriculums.length;
-    const courseTotal = _tmCurriculums.reduce((sum, c) => sum + (parseInt(c.CourseCount, 10) || 0), 0);
-    const employeeTotal = _tmCurriculums.reduce((sum, c) => sum + (parseInt(c.AssignedCount, 10) || 0), 0);
-    const selectedTransferred = _tmAssignments.filter(a => a.Status === 'Transferred').length;
-    const inactiveTotal = _tmCurriculums.filter(c => Number(c.IsActive) !== 1).length
-        + _tmCourses.filter(c => Number(c.IsActive) !== 1).length;
+    const curriculumTotal = parseInt(_tmKpiSummary.activeCurriculums, 10) || 0;
+    const courseTotal = parseInt(_tmKpiSummary.activeCourses, 10) || 0;
+    const employeeTotal = parseInt(_tmKpiSummary.assignedEmployees, 10) || 0;
+    const curriculumTransfers = parseInt(_tmKpiSummary.curriculumTransfers, 10) || 0;
+    const courseTransfers = parseInt(_tmKpiSummary.courseTransfers, 10) || 0;
+    const transferredTotal = parseInt(_tmKpiSummary.transferredTotal, 10) || 0;
+    const inactiveCurriculums = parseInt(_tmKpiSummary.inactiveCurriculums, 10) || 0;
+    const inactiveCourses = parseInt(_tmKpiSummary.inactiveCourses, 10) || 0;
+    const inactiveTotal = parseInt(_tmKpiSummary.inactiveTotal, 10) || 0;
     const scopeDept = _isAdmin
         ? (_tmFilter.dept === 'all' ? 'ทุกแผนก / All Depts' : _tmFilter.dept)
         : (_currentUser.department || _currentUser.Department || 'แผนกของฉัน / My Dept');
-    const selectedCourse = _tmCourses.find(c => c.id === _tmSelectedCourseId);
 
     const cards = [
         {
@@ -3568,14 +3581,14 @@ function renderTrainingMatrixKpis() {
         },
         {
             label: 'ย้ายแล้ว / Transferred',
-            sub: selectedCourse ? `${selectedCourse.CourseCode || '-'} · วิชานี้` : 'เลือกรายวิชา',
-            value: selectedTransferred,
+            sub: `${curriculumTransfers} หลักสูตร · ${courseTransfers} วิชา`,
+            value: transferredTotal,
             color: '#0ea5e9',
             icon: '<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 16V4m0 0L3 8m4-4l4 4m6 0v12m0 0l4-4m-4 4l-4-4"/>',
         },
         {
             label: 'ปิดใช้งาน / Inactive',
-            sub: 'หลักสูตร + วิชา',
+            sub: `${inactiveCurriculums} หลักสูตร · ${inactiveCourses} วิชา`,
             value: inactiveTotal,
             color: inactiveTotal ? '#e11d48' : '#64748b',
             icon: '<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M18.364 18.364A9 9 0 005.636 5.636m12.728 12.728A9 9 0 015.636 5.636m12.728 12.728L5.636 5.636"/>',
@@ -3875,8 +3888,15 @@ async function fetchTrainingMatrix() {
         const p = new URLSearchParams();
         p.set('year', _tmFilter.year);
         if (_tmFilter.dept !== 'all') p.set('dept', _tmFilter.dept);
-        const res = await API.get(`/fourm/training-curriculums?${p}`);
+        const [res, summaryRes] = await Promise.all([
+            API.get(`/fourm/training-curriculums?${p}`),
+            API.get(`/fourm/training-matrix-summary?${p}`),
+        ]);
         _tmCurriculums = normalizeApiArray(res?.data ?? res);
+        _tmKpiSummary = {
+            ..._tmKpiSummary,
+            ...(normalizeApiObject(summaryRes?.data ?? summaryRes) || {}),
+        };
         if (!_tmCurriculums.some(c => c.id === _tmSelectedCurriculumId)) {
             _tmSelectedCurriculumId = _tmCurriculums[0]?.id || null;
         }
@@ -4403,7 +4423,7 @@ function showTrainingCourseForm(existing = null) {
             else await API.post(`/fourm/training-curriculums/${_tmSelectedCurriculumId}/courses`, body);
             closeModal();
             showToast('บันทึกรายวิชาสำเร็จ / Course saved', 'success');
-            await fetchTrainingCourses(_tmSelectedCurriculumId);
+            await fetchTrainingMatrix();
         } catch (err) { showError(err); }
         finally { hideLoading(); btn.disabled = false; }
     }));
@@ -4511,7 +4531,7 @@ async function showTrainingCourseMasterModal() {
             _tmCourseMaster = masters.filter(m => Number(m.IsActive) === 1);
             resetMasterForm();
             refreshRows();
-            renderTrainingCourses();
+            await fetchTrainingMatrix();
             showToast(id ? 'แก้ไขรายวิชาสำเร็จ / Course updated' : 'เพิ่มรายวิชาสำเร็จ / Course added', 'success');
         } catch (err) { showError(err); }
         finally { hideLoading(); btn.disabled = false; }
@@ -4544,7 +4564,7 @@ async function showTrainingCourseMasterModal() {
                 masters = normalizeApiArray(res?.data ?? res);
                 _tmCourseMaster = masters.filter(m => Number(m.IsActive) === 1);
                 refreshRows();
-                renderTrainingCourses();
+                await fetchTrainingMatrix();
                 showToast('เปิดใช้งานรายวิชาสำเร็จ / Course restored', 'success');
             } catch (err) { showError(err); }
             finally { hideLoading(); }
@@ -4569,7 +4589,7 @@ async function showTrainingCourseMasterModal() {
             masters = normalizeApiArray(res?.data ?? res);
             _tmCourseMaster = masters.filter(m => Number(m.IsActive) === 1);
             refreshRows();
-            renderTrainingCourses();
+            await fetchTrainingMatrix();
             showToast(hardDelete ? 'ลบรายวิชาถาวรสำเร็จ / Course permanently deleted' : 'ปิดรายวิชาสำเร็จ / Course disabled', 'success');
         } catch (err) { showError(err); }
         finally { hideLoading(); }
@@ -4604,9 +4624,7 @@ async function assignInlineTrainingEmployees() {
                 : 'เพิ่มพนักงานสำเร็จ / Employees assigned',
             blocked.length ? 'warning' : 'success'
         );
-        await fetchTrainingCourses(_tmSelectedCurriculumId);
-        await fetchTrainingEmployeeMaster({ force: true });
-        renderTrainingDetailShell();
+        await fetchTrainingMatrix();
     } catch (err) { showError(err); }
     finally { hideLoading(); }
 }

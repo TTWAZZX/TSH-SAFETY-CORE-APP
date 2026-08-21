@@ -94,6 +94,7 @@ function cases(adminToken, userToken) {
         ['Training department summary', '/training/dept-summary'],
         ['Training department records', '/training/dept-records'],
         ['Training course summary', '/training/course-summary'],
+        ['4M Training Matrix summary', `/fourm/training-matrix-summary?year=${new Date().getFullYear()}`],
         ['Accident reports', '/accident/reports'],
         ['Accident summary', '/accident/summary'],
         ['Accident analytics', '/accident/analytics'],
