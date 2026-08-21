@@ -66,8 +66,22 @@ assert.match(frontend, /id="tm-detail-pane"/);
 assert.match(frontend, /id="btn-tm-mobile-back"/);
 assert.match(frontend, /function _tmApplyWorkspaceMode\(\)/);
 assert.match(frontend, /overflow-y-auto overscroll-contain/);
-assert.match(main, /fourm\.js\?v=20260820-fourm-training-workspace-r6/);
-assert.match(index, /main\.js\?v=20260820-fourm-training-workspace-r6/);
+assert.match(main, /fourm\.js\?v=20260821-fourm-paste-assign-r1/);
+assert.match(index, /main\.js\?v=20260821-fourm-paste-assign-r1/);
+assert.match(frontend, /id="notice-responsible-search"/);
+assert.match(frontend, /notice-responsible-dept-warning/);
+assert.match(frontend, /\/fourm\/responsible-employees\?q=/);
+assert.match(phpHandler, /ResponsibleEmployeeID/);
+assert.match(phpHandler, /NoticeReassigned/);
+assert.match(frontend, /เพิ่มเข้าหลักสูตร \/ Assign IDs/);
+assert.match(frontend, /await saveAssignments\(eligible, event\.currentTarget\)/);
+assert.match(frontend, /Assignment read-back verification failed/);
+assert.doesNotMatch(frontend, /Added \$\{eligible\.length\}/);
+assert.strictEqual(
+    (frontend.match(/^async function showAssignEmployeesModal\(\)/gm) || []).length,
+    1,
+    'only one active Assign Employees modal implementation is allowed'
+);
 
 const moduleSyntax = spawnSync(process.execPath, ['--input-type=module', '--check'], {
     input: frontend,

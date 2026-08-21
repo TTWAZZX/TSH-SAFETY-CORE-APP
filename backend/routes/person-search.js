@@ -261,7 +261,7 @@ router.get('/profile/:employeeId', async (req, res) => {
             safeOne(`SELECT COUNT(*) AS cnt FROM KY_Activities WHERE ReporterID=? AND YEAR(ActivityDate)=?`, [employeeId, year]),
             safeOne(`SELECT COUNT(*) AS cnt FROM YokotenResponses WHERE EmployeeID=? AND YEAR(ResponseDate)=?`, [employeeId, year]),
             safeOne(`SELECT COUNT(*) AS cnt FROM Accident_Reports WHERE EmployeeID=? AND YEAR(AccidentDate)=? AND (IsDeleted IS NULL OR IsDeleted=0)`, [employeeId, year]),
-            safeOne(`SELECT COUNT(*) AS cnt FROM FourM_ChangeNotices WHERE ResponsiblePerson=? AND YEAR(RequestDate)=?`, [employee.EmployeeName, year]),
+            safeOne(`SELECT COUNT(*) AS cnt FROM FourM_ChangeNotices WHERE (ResponsibleEmployeeID=? OR (ResponsibleEmployeeID IS NULL AND ResponsiblePerson=?)) AND YEAR(RequestDate)=?`, [employeeId, employee.EmployeeName, year]),
             safeOne(`SELECT COUNT(*) AS cnt FROM FourM_ChangeNotices WHERE CreatedByID=? AND YEAR(RequestDate)=?`, [employeeId, year]),
             safeOne(`SELECT COUNT(*) AS cnt FROM Policy_Acknowledgements WHERE UserID=?`, [employeeId]),
             safeOne(`SELECT COUNT(*) AS cnt FROM SC_PPE_Violations WHERE EmployeeID=? AND YEAR(ViolationDate)=? AND (deleted_at IS NULL)`, [employeeId, year]),
@@ -286,8 +286,8 @@ router.get('/profile/:employeeId', async (req, res) => {
                       ORDER BY AccidentDate DESC LIMIT 6`, [employeeId, year]),
             safeRows(`SELECT id, NoticeNo, RequestDate, Title, Status, ChangeType
                       FROM FourM_ChangeNotices
-                      WHERE (CreatedByID=? OR ResponsiblePerson=?) AND YEAR(RequestDate)=?
-                      ORDER BY RequestDate DESC LIMIT 6`, [employeeId, employee.EmployeeName, year]),
+                      WHERE (CreatedByID=? OR ResponsibleEmployeeID=? OR (ResponsibleEmployeeID IS NULL AND ResponsiblePerson=?)) AND YEAR(RequestDate)=?
+                      ORDER BY RequestDate DESC LIMIT 6`, [employeeId, employeeId, employee.EmployeeName, year]),
             safeRows(`SELECT ResponseID, ResponseDate, YokotenID, ApprovalStatus, IsRelated
                       FROM YokotenResponses WHERE EmployeeID=? AND YEAR(ResponseDate)=?
                       ORDER BY ResponseDate DESC LIMIT 6`, [employeeId, year]),

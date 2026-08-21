@@ -1674,7 +1674,27 @@ function _exportNoticesToExcel() {
 async function showNoticeForm(existing = null) {
     const r     = normalizeApiObject(existing);
     const today = new Date().toISOString().split('T')[0];
-    const ownerName = r?.ResponsiblePerson || _currentUser.name || _currentUser.EmployeeName || _currentUser.id || '';
+    const currentEmployeeId = _currentUser.id || _currentUser.EmployeeID || '';
+    const currentEmployeeName = _currentUser.name || _currentUser.EmployeeName || currentEmployeeId;
+    let selectedResponsible = null;
+    const initialResponsibleId = r?.ResponsibleEmployeeID || (!existing ? currentEmployeeId : '');
+    if (_isAdmin && initialResponsibleId) {
+        try {
+            const employeeRes = await API.get(`/fourm/responsible-employees?q=${encodeURIComponent(initialResponsibleId)}&limit=20`);
+            selectedResponsible = (employeeRes?.data || []).find(employee => String(employee.EmployeeID) === String(initialResponsibleId)) || null;
+        } catch (_) {}
+    }
+    if (!selectedResponsible && !existing && currentEmployeeId) {
+        selectedResponsible = {
+            EmployeeID: currentEmployeeId,
+            EmployeeName: currentEmployeeName,
+            Department: _currentUser.department || _currentUser.Department || '',
+            Position: _currentUser.position || _currentUser.Position || '',
+            CompanyEmail: _currentUser.CompanyEmail || null,
+            EmailReady: _currentUser.CompanyEmail ? true : null,
+        };
+    }
+    const ownerName = selectedResponsible?.EmployeeName || r?.ResponsiblePerson || currentEmployeeName || '';
     let previewNoticeNo = r?.NoticeNo || 'Loading...';
     if (!existing) {
         try {
@@ -1688,7 +1708,7 @@ async function showNoticeForm(existing = null) {
         <form id="notice-form" class="space-y-4" enctype="multipart/form-data">
             <div class="rounded-xl border border-indigo-100 bg-indigo-50/70 p-3 text-sm text-slate-600">
                 <p class="font-bold text-indigo-700">ข้อมูลประกอบการบันทึก / Notice Guidance</p>
-                <p class="mt-1 leading-relaxed">ระบบสร้าง Notice No ให้อัตโนมัติ ผู้บันทึกปัจจุบันเป็นผู้รับผิดชอบรายการ และสามารถแนบหลักฐานประกอบได้เมื่อมีเอกสารที่เกี่ยวข้อง</p>
+                <p class="mt-1 leading-relaxed">ระบบสร้าง Notice No ให้อัตโนมัติ ผู้ใช้ทั่วไปจะรับผิดชอบรายการของตนเอง ส่วน Admin สามารถเลือกผู้รับผิดชอบจาก Employee Master ได้ และสามารถแนบหลักฐานประกอบเมื่อมีเอกสารที่เกี่ยวข้อง</p>
             </div>
             <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div>
@@ -1737,8 +1757,21 @@ async function showNoticeForm(existing = null) {
             </div>
             <div>
                 <label class="block text-sm font-semibold text-slate-700 mb-1.5">ผู้รับผิดชอบ</label>
-                <input type="text" class="form-input w-full bg-slate-50 text-slate-500" readonly disabled
-                       value="${escHtml(ownerName)}" placeholder="Owner">
+                ${_isAdmin ? `
+                    <input type="hidden" name="ResponsibleEmployeeID" id="notice-responsible-id" value="${escHtml(selectedResponsible?.EmployeeID || r?.ResponsibleEmployeeID || '')}">
+                    <div class="relative">
+                        <input type="search" id="notice-responsible-search" class="form-input w-full"
+                               autocomplete="off" placeholder="ค้นหารหัส ชื่อ แผนก หรือตำแหน่ง... / Search employee">
+                        <div id="notice-responsible-results" class="hidden absolute z-30 left-0 right-0 mt-1 max-h-56 overflow-y-auto rounded-xl border border-slate-200 bg-white shadow-xl"></div>
+                    </div>
+                    <div id="notice-responsible-selected" class="mt-2"></div>
+                    <div id="notice-responsible-dept-warning" class="hidden mt-2 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-700"></div>
+                ` : `
+                    <input type="hidden" name="ResponsibleEmployeeID" value="${escHtml(currentEmployeeId)}">
+                    <input type="text" class="form-input w-full bg-slate-50 text-slate-500" readonly disabled
+                           value="${escHtml(ownerName)}" placeholder="Owner">
+                    <p class="mt-1 text-xs text-slate-400">ผู้สร้าง Notice เป็นผู้รับผิดชอบอัตโนมัติ / You are assigned automatically</p>
+                `}
             </div>
             <div class="rounded-xl border border-slate-200 bg-slate-50/60 p-4 space-y-3">
                 <div>
@@ -1778,6 +1811,103 @@ async function showNoticeForm(existing = null) {
 
     openModal(existing ? 'แก้ไข Change Notice' : 'สร้าง Change Notice', html, 'max-w-xl');
 
+    if (_isAdmin) {
+        const idInput = document.getElementById('notice-responsible-id');
+        const searchInput = document.getElementById('notice-responsible-search');
+        const resultsEl = document.getElementById('notice-responsible-results');
+        const selectedEl = document.getElementById('notice-responsible-selected');
+        const warningEl = document.getElementById('notice-responsible-dept-warning');
+        const departmentEl = document.querySelector('#notice-form [name="Department"]');
+        let searchRows = [];
+        let searchTimer = null;
+
+        const renderDepartmentWarning = () => {
+            if (!warningEl) return;
+            const noticeDepartment = String(departmentEl?.value || '').trim();
+            const responsibleDepartment = String(selectedResponsible?.Department || '').trim();
+            const mismatch = Boolean(noticeDepartment && responsibleDepartment && noticeDepartment !== responsibleDepartment);
+            warningEl.classList.toggle('hidden', !mismatch);
+            if (mismatch) {
+                warningEl.innerHTML = `แผนกของ Notice คือ <strong>${escHtml(noticeDepartment)}</strong> แต่ผู้รับผิดชอบอยู่ <strong>${escHtml(responsibleDepartment)}</strong> — สามารถบันทึกได้ เนื่องจากรองรับงานข้ามแผนก`;
+            }
+        };
+
+        const renderResponsibleSelection = () => {
+            if (!selectedEl || !idInput) return;
+            if (!selectedResponsible) {
+                idInput.value = r?.ResponsibleEmployeeID || '';
+                selectedEl.innerHTML = r?.ResponsiblePerson
+                    ? `<div class="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm">
+                           <p class="font-bold text-slate-700">${escHtml(r.ResponsiblePerson)}</p>
+                           <p class="mt-0.5 text-xs text-amber-600">ข้อมูลเดิมยังไม่มี EmployeeID — ค้นหาและเลือกใหม่เพื่อเปิดการแจ้งเตือนทางอีเมล</p>
+                       </div>`
+                    : `<div class="rounded-xl border border-dashed border-slate-300 px-3 py-3 text-sm text-slate-400">กรุณาเลือกผู้รับผิดชอบ / Select responsible employee</div>`;
+                warningEl?.classList.add('hidden');
+                return;
+            }
+            idInput.value = selectedResponsible.EmployeeID || '';
+            const emailState = selectedResponsible.EmailReady === true
+                ? `<span class="font-bold text-emerald-600">พร้อมส่งอีเมล · ${escHtml(selectedResponsible.CompanyEmail || '')}</span>`
+                : selectedResponsible.EmailReady === false
+                    ? '<span class="font-bold text-amber-600">ไม่มี CompanyEmail — ระบบจะส่งให้ Admin เท่านั้น</span>'
+                    : '<span class="font-bold text-sky-600">ระบบจะตรวจ CompanyEmail อีกครั้งเมื่อบันทึก</span>';
+            selectedEl.innerHTML = `
+                <div class="rounded-xl border border-indigo-100 bg-indigo-50/60 px-3 py-2.5 text-sm">
+                    <div class="flex items-start justify-between gap-3">
+                        <div>
+                            <p class="font-black text-slate-800">${escHtml(selectedResponsible.EmployeeName || '-')}</p>
+                            <p class="mt-0.5 text-xs text-slate-500">${escHtml(selectedResponsible.EmployeeID || '-')} · ${escHtml(selectedResponsible.Department || 'ไม่ระบุแผนก')} · ${escHtml(selectedResponsible.Position || 'ไม่ระบุตำแหน่ง')}</p>
+                            <p class="mt-1 text-xs">${emailState}</p>
+                        </div>
+                        <button type="button" id="notice-responsible-change" class="shrink-0 text-xs font-bold text-indigo-600 hover:text-indigo-800">เลือกใหม่</button>
+                    </div>
+                </div>`;
+            document.getElementById('notice-responsible-change')?.addEventListener('click', () => searchInput?.focus());
+            renderDepartmentWarning();
+        };
+
+        searchInput?.addEventListener('input', () => {
+            clearTimeout(searchTimer);
+            const q = searchInput.value.trim();
+            if (q.length < 2) {
+                resultsEl?.classList.add('hidden');
+                return;
+            }
+            searchTimer = setTimeout(async () => {
+                try {
+                    const response = await API.get(`/fourm/responsible-employees?q=${encodeURIComponent(q)}&limit=20`);
+                    searchRows = response?.data || [];
+                    if (!resultsEl) return;
+                    resultsEl.innerHTML = searchRows.length
+                        ? searchRows.map((employee, index) => `
+                            <button type="button" data-index="${index}" class="notice-responsible-option block w-full border-b border-slate-100 px-3 py-2.5 text-left last:border-0 hover:bg-indigo-50">
+                                <span class="block text-sm font-bold text-slate-700">${escHtml(employee.EmployeeName || '-')}</span>
+                                <span class="block text-xs text-slate-400">${escHtml(employee.EmployeeID || '-')} · ${escHtml(employee.Department || 'ไม่ระบุแผนก')} · ${escHtml(employee.Position || 'ไม่ระบุตำแหน่ง')}</span>
+                                <span class="mt-0.5 block text-xs font-semibold ${employee.EmailReady ? 'text-emerald-600' : 'text-amber-600'}">${employee.EmailReady ? `พร้อมส่งอีเมล · ${escHtml(employee.CompanyEmail || '')}` : 'ไม่มี CompanyEmail'}</span>
+                            </button>`).join('')
+                        : '<div class="px-3 py-3 text-sm text-slate-400">ไม่พบพนักงาน / No employee found</div>';
+                    resultsEl.classList.remove('hidden');
+                } catch (error) {
+                    if (resultsEl) {
+                        resultsEl.innerHTML = `<div class="px-3 py-3 text-sm text-red-500">${escHtml(error?.message || 'ค้นหาพนักงานไม่สำเร็จ')}</div>`;
+                        resultsEl.classList.remove('hidden');
+                    }
+                }
+            }, 250);
+        });
+
+        resultsEl?.addEventListener('click', event => {
+            const option = event.target.closest('.notice-responsible-option');
+            if (!option) return;
+            selectedResponsible = searchRows[Number(option.dataset.index)] || null;
+            if (searchInput && selectedResponsible) searchInput.value = `${selectedResponsible.EmployeeName} (${selectedResponsible.EmployeeID})`;
+            resultsEl.classList.add('hidden');
+            renderResponsibleSelection();
+        });
+        departmentEl?.addEventListener('change', renderDepartmentWarning);
+        renderResponsibleSelection();
+    }
+
     if (!existing) {
         document.getElementById('notice-request-date')?.addEventListener('change', async (e) => {
             const input = document.getElementById('notice-preview-no');
@@ -1799,6 +1929,11 @@ async function showNoticeForm(existing = null) {
         try {
             showLoading('กำลังบันทึก...');
             const fd = new FormData(e.target);
+            const responsibleEmployeeId = String(fd.get('ResponsibleEmployeeID') || '').trim();
+            if (!existing && !responsibleEmployeeId) {
+                throw new Error('กรุณาเลือกผู้รับผิดชอบจาก Employee Master');
+            }
+            if (existing && !responsibleEmployeeId) fd.delete('ResponsibleEmployeeID');
             if (!fd.has('TrainingRequired')) fd.set('TrainingRequired', '0');
             const attachment = fd.get('attachment');
             if (attachment instanceof File && attachment.name === '' && attachment.size === 0) {
@@ -3301,6 +3436,10 @@ async function renderTrainingMatrix(container) {
                             class="px-3 py-2 rounded-lg text-sm font-bold text-indigo-700 border border-indigo-200 hover:bg-indigo-50">
                         คลังรายวิชา
                     </button>
+                    <button id="btn-tm-bulk-code" type="button"
+                            class="px-3 py-2 rounded-lg text-sm font-bold text-amber-700 border border-amber-200 hover:bg-amber-50">
+                        เปลี่ยนรหัสแบบกลุ่ม / Bulk Code
+                    </button>
                     <button id="btn-tm-add-curriculum" type="button"
                             class="px-4 py-2 rounded-lg text-sm font-bold text-white"
                             style="background:linear-gradient(135deg,#6366f1,#0284c7)">
@@ -4126,6 +4265,104 @@ function showTrainingCurriculumForm(existing = null) {
     }));
 }
 
+function showTrainingBulkCodeModal() {
+    if (!_isAdmin) return;
+    const departmentOptions = _departments.map(dept => `
+        <option value="${escHtml(dept)}" ${_tmFilter.dept === dept ? 'selected' : ''}>${escHtml(dept)}</option>`).join('');
+    const html = `
+        <form id="tm-bulk-code-form" class="space-y-4">
+            <div class="rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">
+                เปลี่ยนเฉพาะรหัสหลักสูตรในปีและแผนกที่เลือก โดยไม่เปลี่ยนปี รายวิชา พนักงาน หรือผลอบรม<br>
+                <span class="text-xs font-semibold">Bulk update changes curriculum codes only. Preview is required before applying.</span>
+            </div>
+            <div class="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                <div><label class="mb-1.5 block text-sm font-semibold text-slate-700">ปี / Year</label><input name="year" type="number" min="2000" max="2100" required class="form-input w-full" value="${escHtml(String(_tmFilter.year))}"></div>
+                <div><label class="mb-1.5 block text-sm font-semibold text-slate-700">แผนก / Department</label><select name="department" class="form-input w-full"><option value="all" ${_tmFilter.dept === 'all' ? 'selected' : ''}>ทุกแผนก / All departments</option>${departmentOptions}</select></div>
+                <div><label class="mb-1.5 block text-sm font-semibold text-slate-700">ค้นหาส่วนของรหัส / Find</label><input name="find" maxlength="50" required autocomplete="off" class="form-input w-full uppercase" placeholder="CU68"></div>
+                <div><label class="mb-1.5 block text-sm font-semibold text-slate-700">เปลี่ยนเป็น / Replace</label><input name="replace" maxlength="50" required autocomplete="off" class="form-input w-full uppercase" placeholder="CU69"></div>
+            </div>
+            <label class="flex items-center gap-2 text-sm font-semibold text-slate-700"><input name="activeOnly" type="checkbox" checked class="h-4 w-4 rounded border-slate-300 text-indigo-600">เฉพาะหลักสูตรที่ใช้งานอยู่ / Active curriculums only</label>
+            <div id="tm-bulk-code-preview" class="rounded-xl border border-dashed border-slate-300 p-5 text-center text-sm text-slate-400">กรอกข้อมูลแล้วกดตรวจสอบ / Enter values and preview changes</div>
+            <div class="flex flex-wrap justify-end gap-3 border-t border-slate-100 pt-4">
+                <button type="button" class="btn btn-secondary px-4" onclick="window.closeModal&&window.closeModal()">ยกเลิก / Cancel</button>
+                <button type="submit" id="tm-bulk-preview-btn" class="rounded-lg border border-indigo-200 px-4 py-2 text-sm font-bold text-indigo-700 hover:bg-indigo-50">ตรวจสอบ / Preview</button>
+                <button type="button" id="tm-bulk-apply-btn" disabled class="rounded-lg bg-emerald-600 px-5 py-2 text-sm font-bold text-white disabled:cursor-not-allowed disabled:opacity-40">ยืนยันการเปลี่ยน / Apply</button>
+            </div>
+        </form>`;
+    openModal('เปลี่ยนรหัสหลักสูตรแบบกลุ่ม / Bulk Curriculum Code Change', html, 'max-w-5xl');
+
+    const form = document.getElementById('tm-bulk-code-form');
+    const previewEl = document.getElementById('tm-bulk-code-preview');
+    const previewBtn = document.getElementById('tm-bulk-preview-btn');
+    const applyBtn = document.getElementById('tm-bulk-apply-btn');
+    let approvedPayload = null;
+    const getPayload = () => {
+        const data = new FormData(form);
+        return { year: parseInt(data.get('year'), 10), department: data.get('department') || 'all', find: String(data.get('find') || '').trim().toUpperCase(), replace: String(data.get('replace') || '').trim().toUpperCase(), activeOnly: data.get('activeOnly') === 'on' };
+    };
+    const invalidatePreview = () => {
+        approvedPayload = null;
+        applyBtn.disabled = true;
+        previewEl.textContent = 'ข้อมูลเปลี่ยนแล้ว กรุณาตรวจสอบใหม่ / Values changed; preview again';
+    };
+    form.addEventListener('input', invalidatePreview);
+    form.addEventListener('change', invalidatePreview);
+    let previewInFlight = false;
+    form.addEventListener('submit', async event => {
+        event.preventDefault();
+        if (previewInFlight) return;
+        previewInFlight = true;
+        previewBtn.disabled = true;
+        try {
+            const payload = getPayload();
+            const response = await API.post('/fourm/training-curriculums/bulk-code-preview', payload);
+            const preview = normalizeApiObject(response?.data ?? response);
+            const rows = normalizeApiArray(preview.rows);
+            const blocked = (parseInt(preview.conflictCount, 10) || 0) + (parseInt(preview.ambiguousCount, 10) || 0) + (parseInt(preview.invalidCount, 10) || 0);
+            const statusLabel = {
+                ready: '<span class="font-bold text-emerald-700">พร้อม / Ready</span>',
+                conflict: '<span class="font-bold text-rose-700">รหัสซ้ำ / Conflict</span>',
+                ambiguous: '<span class="font-bold text-amber-700">พบมากกว่า 1 จุด / Ambiguous</span>',
+                invalid: '<span class="font-bold text-rose-700">ไม่ถูกต้อง / Invalid</span>',
+            };
+            previewEl.innerHTML = rows.length ? `
+                <div class="mb-3 grid grid-cols-2 gap-2 text-left sm:grid-cols-4">
+                    <div class="rounded-lg bg-slate-50 p-3"><div class="text-xs text-slate-500">พบ / Matched</div><div class="text-xl font-black text-slate-800">${parseInt(preview.matchedCount, 10) || 0}</div></div>
+                    <div class="rounded-lg bg-emerald-50 p-3"><div class="text-xs text-emerald-700">พร้อม / Ready</div><div class="text-xl font-black text-emerald-700">${parseInt(preview.readyCount, 10) || 0}</div></div>
+                    <div class="rounded-lg bg-rose-50 p-3"><div class="text-xs text-rose-700">รหัสซ้ำ / Conflict</div><div class="text-xl font-black text-rose-700">${parseInt(preview.conflictCount, 10) || 0}</div></div>
+                    <div class="rounded-lg bg-amber-50 p-3"><div class="text-xs text-amber-700">ต้องตรวจ / Review</div><div class="text-xl font-black text-amber-700">${(parseInt(preview.ambiguousCount, 10) || 0) + (parseInt(preview.invalidCount, 10) || 0)}</div></div>
+                </div>
+                <div class="max-h-[360px] overflow-auto rounded-lg border border-slate-200"><table class="w-full min-w-[760px] text-left text-sm">
+                    <thead class="sticky top-0 bg-slate-100 text-xs uppercase text-slate-600"><tr><th class="p-3">แผนก</th><th class="p-3">รหัสเดิม</th><th class="p-3">รหัสใหม่</th><th class="p-3">สถานะ</th></tr></thead>
+                    <tbody>${rows.map(row => `<tr class="border-t border-slate-100"><td class="p-3">${escHtml(row.Department || '-')}</td><td class="p-3 font-mono font-bold">${escHtml(row.oldCode || '-')}</td><td class="p-3 font-mono font-bold text-indigo-700">${escHtml(row.newCode || '-')}</td><td class="p-3">${statusLabel[row.status] || escHtml(row.status || '-')}${row.reason ? `<div class="mt-1 text-xs text-slate-500">${escHtml(row.reason)}</div>` : ''}</td></tr>`).join('')}</tbody>
+                </table></div>` : '<div class="py-4 font-semibold text-amber-700">ไม่พบรหัสที่ตรงกับคำค้น / No matching curriculum codes</div>';
+            if (rows.length && !blocked && Number(preview.readyCount) === rows.length) {
+                approvedPayload = {
+                    ...payload,
+                    expectedChanges: rows.map(row => ({ id: row.id, oldCode: row.oldCode, newCode: row.newCode })),
+                };
+                applyBtn.disabled = false;
+            }
+        } catch (err) { showError(err); }
+        finally { previewBtn.disabled = false; previewInFlight = false; }
+    });
+    applyBtn.addEventListener('click', guardSubmitHandler(async () => {
+        if (!approvedPayload) return;
+        const ok = await showConfirmationModal('ยืนยันเปลี่ยนรหัสหลักสูตรแบบกลุ่ม?', `เปลี่ยน ${approvedPayload.find} เป็น ${approvedPayload.replace} ตามรายการ Preview ใช่ไหม? การดำเนินการจะถูกบันทึกใน Audit Log`);
+        if (!ok) return;
+        applyBtn.disabled = true;
+        try {
+            showLoading('กำลังเปลี่ยนรหัสหลักสูตร... / Updating curriculum codes...');
+            const response = await API.put('/fourm/training-curriculums/bulk-code', approvedPayload);
+            const result = normalizeApiObject(response?.data ?? response);
+            closeModal();
+            showToast(`เปลี่ยนรหัสสำเร็จ ${parseInt(result.changedCount, 10) || 0} หลักสูตร / Curriculum codes updated`, 'success');
+            await fetchTrainingMatrix();
+        } catch (err) { showError(err); applyBtn.disabled = false; }
+        finally { hideLoading(); }
+    }));
+}
+
 function showTrainingCourseForm(existing = null) {
     const curriculum = _tmCurriculums.find(c => c.id === _tmSelectedCurriculumId);
     if (!curriculum) { showToast('เลือกหลักสูตรก่อน / Select a curriculum first', 'warning'); return; }
@@ -4629,7 +4866,7 @@ async function showAssignEmployeesModal() {
                     </div>
                     <button type="button" id="tm-bulk-employee-apply"
                         class="px-3 py-2 rounded-lg text-xs font-black text-white bg-emerald-600 hover:bg-emerald-700">
-                        เพิ่มจากรหัส / Add IDs
+                        เพิ่มเข้าหลักสูตร / Assign IDs
                     </button>
                 </div>
                 <textarea id="tm-bulk-employee-ids" rows="5"
@@ -4639,7 +4876,7 @@ async function showAssignEmployeesModal() {
 SP-1234
 AP-1234"></textarea>
                 <div id="tm-bulk-employee-preview" class="mt-2 text-xs font-semibold text-emerald-700">
-                    วางรหัสแล้วกด Add IDs เพื่อตรวจสอบและเลือกอัตโนมัติ
+                    วางรหัสแล้วกด Assign IDs เพื่อบันทึกเข้าหลักสูตรทันที
                 </div>
             </div>
             <div id="tm-employee-pick-list" class="max-h-[360px] overflow-y-auto border border-slate-200 rounded-xl divide-y divide-slate-100"></div>
@@ -4682,6 +4919,65 @@ AP-1234"></textarea>
         || employeeById.get(String(token || '').replace(/-/g, '').trim().toUpperCase())
         || null
     );
+    const saveAssignments = async (employeeIds, triggerButton) => {
+        const requestedIds = [...new Set((employeeIds || []).map(id => String(id || '').trim()).filter(Boolean))];
+        if (!requestedIds.length) {
+            showToast('เลือกพนักงานอย่างน้อย 1 คน / Select at least one employee', 'warning');
+            return false;
+        }
+        if (triggerButton) triggerButton.disabled = true;
+        try {
+            showLoading('กำลังเพิ่มพนักงาน... / Assigning employees...');
+            const notes = document.querySelector('#tm-assign-form [name="Notes"]')?.value || '';
+            const response = await API.post(`/fourm/training-curriculums/${_tmSelectedCurriculumId}/assignments`, {
+                EmployeeIDs: requestedIds,
+                Notes: notes,
+            });
+            const result = normalizeApiObject(response?.data ?? response);
+            const created = normalizeApiArray(result.created);
+            const reassigned = normalizeApiArray(result.reassigned);
+            const skipped = normalizeApiArray(result.skipped);
+            const missing = normalizeApiArray(result.missing);
+            const blocked = normalizeApiArray(result.blocked);
+            const excludedIds = new Set([
+                ...missing.map(value => String(value || '')),
+                ...blocked.map(value => String(value?.employeeId || value?.EmployeeID || value || '')),
+            ]);
+
+            await fetchTrainingAssignments(_tmSelectedCurriculumId);
+            const visibleIds = new Set(
+                _tmAssignments
+                    .filter(row => row.Status === 'Assigned')
+                    .map(row => String(row.EmployeeID || ''))
+            );
+            const notVisible = requestedIds.filter(id => !excludedIds.has(id) && !visibleIds.has(id));
+            if (notVisible.length) {
+                throw new Error(`ระบบบันทึกแล้วแต่ยังอ่านรายชื่อกลับมาไม่ครบ: ${notVisible.join(', ')} / Assignment read-back verification failed`);
+            }
+
+            closeModal();
+            await fetchTrainingMatrix();
+            const savedCount = created.length + reassigned.length;
+            const existingCount = skipped.length;
+            const rejectedCount = missing.length + blocked.length;
+            const summary = savedCount
+                ? `เพิ่มพนักงานสำเร็จ ${savedCount} คน / Assigned ${savedCount}`
+                : existingCount
+                    ? `พนักงาน ${existingCount} คนอยู่ในหลักสูตรนี้แล้ว / Already assigned`
+                    : 'ไม่มีพนักงานที่เพิ่มได้ / No employee was assigned';
+            showToast(
+                rejectedCount ? `${summary} · ตรวจสอบไม่ได้ ${rejectedCount} คน / Rejected ${rejectedCount}` : summary,
+                rejectedCount ? 'warning' : 'success'
+            );
+            return true;
+        } catch (err) {
+            showError(err);
+            return false;
+        } finally {
+            hideLoading();
+            if (triggerButton?.isConnected) triggerButton.disabled = false;
+        }
+    };
     const setBulkPreview = ({ eligible = [], missing = [], already = [], blocked = [] } = {}) => {
         const el = document.getElementById('tm-bulk-employee-preview');
         if (!el) return;
@@ -4768,7 +5064,7 @@ AP-1234"></textarea>
         });
         setBulkPreview({ eligible, missing, already: alreadyRows, blocked: blockedRows });
     }, 120));
-    document.getElementById('tm-bulk-employee-apply')?.addEventListener('click', () => {
+    document.getElementById('tm-bulk-employee-apply')?.addEventListener('click', guardSubmitHandler(async (event) => {
         const tokens = parseBulkIds(document.getElementById('tm-bulk-employee-ids')?.value || '');
         const eligible = [];
         const missing = [];
@@ -4787,9 +5083,12 @@ AP-1234"></textarea>
         setBulkPreview({ eligible, missing, already: alreadyRows, blocked: blockedRows });
         renderPickList();
         updateSelectedSummary();
-        if (eligible.length) showToast(`เลือกพนักงานเพิ่ม ${eligible.length} คน / Added ${eligible.length}`, 'success');
-        else showToast('ไม่พบรหัสที่เพิ่มได้ / No eligible employee ID found', 'warning');
-    });
+        if (!eligible.length) {
+            showToast('ไม่พบรหัสที่เพิ่มได้ / No eligible employee ID found', 'warning');
+            return;
+        }
+        await saveAssignments(eligible, event.currentTarget);
+    }));
     document.getElementById('tm-employee-pick-list')?.addEventListener('change', (e) => {
         if (e.target?.name !== 'EmployeeIDs') return;
         if (e.target.checked) selectedEmployeeIds.add(String(e.target.value));
@@ -4800,24 +5099,7 @@ AP-1234"></textarea>
         e.preventDefault();
         const checked = Array.from(selectedEmployeeIds);
         if (!checked.length) { showToast('เลือกพนักงานอย่างน้อย 1 คน / Select at least one employee', 'warning'); return; }
-        const btn = document.getElementById('tm-assign-save-btn');
-        btn.disabled = true;
-        try {
-            showLoading('กำลังเพิ่มพนักงาน... / Assigning employees...');
-            const body = { EmployeeIDs: checked, Notes: new FormData(e.target).get('Notes') || '' };
-            const res = await API.post(`/fourm/training-curriculums/${_tmSelectedCurriculumId}/assignments`, body);
-            const blocked = normalizeApiArray(res?.data?.blocked || []);
-            closeModal();
-            showToast(
-                blocked.length
-                    ? `เพิ่มสำเร็จบางส่วน: ${blocked.length} คนอยู่หลักสูตรอื่นแล้ว / Partially assigned`
-                    : 'เพิ่มพนักงานสำเร็จ / Employees assigned',
-                blocked.length ? 'warning' : 'success'
-            );
-            await fetchTrainingAssignments(_tmSelectedCurriculumId);
-            await fetchTrainingMatrix();
-        } catch (err) { showError(err); }
-        finally { hideLoading(); btn.disabled = false; }
+        await saveAssignments(checked, document.getElementById('tm-assign-save-btn'));
     }));
 }
 
@@ -5102,6 +5384,7 @@ async function showTrainingAuditLogModal(scope = 'current') {
     const actionOptions = [
         ['all', 'ทุก Action / All Actions'],
         ['CURRICULUM_CREATE', 'สร้างหลักสูตร / Curriculum Create'],
+        ['CURRICULUM_CODE_BULK_UPDATE', 'เปลี่ยนรหัสหลักสูตรแบบกลุ่ม / Bulk Code Update'],
         ['CURRICULUM_UPDATE', 'แก้ไขหลักสูตร / Curriculum Update'],
         ['CURRICULUM_DISABLE', 'ปิดหลักสูตร / Curriculum Disable'],
         ['COURSE_CREATE', 'สร้างรายวิชา / Course Create'],
@@ -6378,7 +6661,7 @@ async function showTrainingCoursePickerModal() {
     });
 }
 
-async function showAssignEmployeesModal() {
+async function showAssignEmployeesModalLegacy() {
     const curriculum = _tmCurriculums.find(c => c.id === _tmSelectedCurriculumId);
     if (!curriculum) { showToast('เลือกหลักสูตรก่อน / Select a curriculum first', 'warning'); return; }
     if (!_tmCourses.length) { showToast('เพิ่มรายวิชาในหลักสูตรก่อน / Add courses first', 'warning'); return; }
@@ -7899,6 +8182,7 @@ function setupEventListeners() {
         }
         if (e.target.closest('#btn-tm-export-pdf')) { await _exportTrainingMatrixPdf(); return; }
         if (e.target.closest('#btn-tm-course-master')) { await showTrainingCourseMasterModal(); return; }
+        if (e.target.closest('#btn-tm-bulk-code')) { showTrainingBulkCodeModal(); return; }
         if (e.target.closest('#btn-tm-add-curriculum')) { showTrainingCurriculumForm(); return; }
         if (e.target.closest('#btn-tm-add-course')) { await showTrainingCoursePickerModal(); return; }
         if (e.target.closest('#btn-tm-assign-employees')) {

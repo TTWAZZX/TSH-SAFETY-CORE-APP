@@ -30,6 +30,8 @@
     "verify:onboarding-local": "npm run test:onboarding && npm run test:onboarding-enforcement && npm run test:password-continuation && npm run test:safety-unit-continuation && npm run test:safety-core-ky && npm run test:profile-validation && npm run test:data-quality && npm run test:cross-path-profile && npm run test:email-switch && npm run permission:audit && npm run smoke:api && npm run uat:preflight && npm run audit:onboarding && npm run audit:profile-validation && npm run audit:data-quality",
     "test": "npm run verify:onboarding-local",
     "test:card-image-export-phase1": "node scripts/card-image-export-phase1.test.js",
+    "test:fourm-bulk-code": "node scripts/fourm-bulk-curriculum-code.test.js",
+    "test:fourm-notice-responsible": "node scripts/fourm-notice-responsible.test.js",
     "uat:card-image-export-phase2a": "node scripts/card-image-export-phase2a-uat.js",
     "uat:card-image-export-phase2b": "node scripts/card-image-export-phase2b-uat.js",
     "uat:card-image-export-phase2c": "node scripts/card-image-export-phase2c-production-uat.js",

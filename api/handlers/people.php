@@ -141,7 +141,7 @@ function handle_people_routes(string $method, string $path): bool
         'ky' => count_value('SELECT COUNT(*) FROM ky_activities WHERE ReporterID=? AND YEAR(ActivityDate)=?', [$employeeId, $year]),
         'yokoten' => count_value('SELECT COUNT(*) FROM yokotenresponses WHERE EmployeeID=? AND YEAR(ResponseDate)=?', [$employeeId, $year]),
         'accidents' => count_value('SELECT COUNT(*) FROM accident_reports WHERE EmployeeID=? AND YEAR(AccidentDate)=? AND (IsDeleted IS NULL OR IsDeleted=0)', [$employeeId, $year]),
-        'fourmOwner' => count_value('SELECT COUNT(*) FROM fourm_changenotices WHERE ResponsiblePerson=? AND YEAR(RequestDate)=?', [$employee['EmployeeName'], $year]),
+        'fourmOwner' => count_value('SELECT COUNT(*) FROM fourm_changenotices WHERE (ResponsibleEmployeeID=? OR (ResponsibleEmployeeID IS NULL AND ResponsiblePerson=?)) AND YEAR(RequestDate)=?', [$employeeId, $employee['EmployeeName'], $year]),
         'fourmCreated' => count_value('SELECT COUNT(*) FROM fourm_changenotices WHERE CreatedByID=? AND YEAR(RequestDate)=?', [$employeeId, $year]),
         'policyAck' => count_value('SELECT COUNT(*) FROM policy_acknowledgements WHERE UserID=?', [$employeeId]),
         'ppeViolations' => count_value('SELECT COUNT(*) FROM sc_ppe_violations WHERE EmployeeID=? AND YEAR(ViolationDate)=? AND deleted_at IS NULL', [$employeeId, $year]),
@@ -290,7 +290,7 @@ function handle_people_routes(string $method, string $path): bool
     $hiyariRecords = safe_rows('SELECT id,ReportDate,Location,Description,Status FROM hiyarireports WHERE ReporterID=? AND YEAR(ReportDate)=? ORDER BY ReportDate DESC LIMIT 6', [$employeeId, $year]);
     $kyRecords = safe_rows('SELECT id,ActivityDate,TeamName,HazardDescription,Status FROM ky_activities WHERE ReporterID=? AND YEAR(ActivityDate)=? ORDER BY ActivityDate DESC LIMIT 6', [$employeeId, $year]);
     $accidentRecords = safe_rows('SELECT id,AccidentDate,AccidentType,Status,Location FROM accident_reports WHERE EmployeeID=? AND YEAR(AccidentDate)=? AND (IsDeleted IS NULL OR IsDeleted=0) ORDER BY AccidentDate DESC LIMIT 6', [$employeeId, $year]);
-    $fourmRecords = safe_rows('SELECT id,NoticeNo,RequestDate,Title,Status,ChangeType FROM fourm_changenotices WHERE (CreatedByID=? OR ResponsiblePerson=?) AND YEAR(RequestDate)=? ORDER BY RequestDate DESC LIMIT 6', [$employeeId, $employee['EmployeeName'], $year]);
+    $fourmRecords = safe_rows('SELECT id,NoticeNo,RequestDate,Title,Status,ChangeType FROM fourm_changenotices WHERE (CreatedByID=? OR ResponsibleEmployeeID=? OR (ResponsibleEmployeeID IS NULL AND ResponsiblePerson=?)) AND YEAR(RequestDate)=? ORDER BY RequestDate DESC LIMIT 6', [$employeeId, $employeeId, $employee['EmployeeName'], $year]);
     $yokotenRecords = safe_rows('SELECT ResponseID,ResponseDate,YokotenID,ApprovalStatus,IsRelated FROM yokotenresponses WHERE EmployeeID=? AND YEAR(ResponseDate)=? ORDER BY ResponseDate DESC LIMIT 6', [$employeeId, $year]);
     $selfPatrolRecords = safe_rows('SELECT id,CheckinDate,Location,Notes FROM patrol_self_checkin WHERE EmployeeID=? AND Year=? ORDER BY CheckinDate DESC LIMIT 8', [$employeeId, $year]);
     $cccfWorkerRecords = safe_rows('SELECT id,SubmitDate,JobArea,Equipment,SafetyUnit FROM cccf_forma_worker WHERE EmployeeID=? AND YEAR(SubmitDate)=? ORDER BY SubmitDate DESC,id DESC LIMIT 6', [$employeeId, $year]);

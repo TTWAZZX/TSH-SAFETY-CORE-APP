@@ -47,6 +47,64 @@ function fm_transaction(callable $callback) {
     try { $result=$callback(); if($owns)$pdo->commit(); return $result; }
     catch(Throwable $e){ if($owns&&$pdo->inTransaction())$pdo->rollBack(); throw $e; }
 }
+function fm_bulk_code_options(array $body): array {
+    $year=(int)($body['year']??$body['Year']??0);
+    $department=trim((string)($body['department']??$body['Department']??'all'))?:'all';
+    $find=strtoupper(trim((string)($body['find']??$body['Find']??'')));
+    $replace=strtoupper(trim((string)($body['replace']??$body['Replace']??'')));
+    $activeRaw=$body['activeOnly']??$body['ActiveOnly']??true;
+    $activeOnly=!in_array($activeRaw,[false,0,'0','false'],true);
+    if($year<2000||$year>2100)json_response(['success'=>false,'message'=>'Invalid curriculum year.'],400);
+    if($find===''||$replace==='')json_response(['success'=>false,'message'=>'Find and replacement code fragments are required.'],400);
+    if($find===$replace)json_response(['success'=>false,'message'=>'The replacement must be different from the current code fragment.'],400);
+    if(strlen($find)>50||strlen($replace)>50)json_response(['success'=>false,'message'=>'Code fragments must not exceed 50 characters.'],400);
+    if(strlen($department)>100)json_response(['success'=>false,'message'=>'Department must not exceed 100 characters.'],400);
+    return ['year'=>$year,'department'=>$department,'find'=>$find,'replace'=>$replace,'activeOnly'=>$activeOnly];
+}
+function fm_bulk_code_key(array $row,string $code): string {
+    return strtolower(trim((string)($row['Department']??''))).'::'.strtolower(trim($code));
+}
+function fm_bulk_code_changes($rows): array {
+    if(!is_array($rows))return [];$out=[];
+    foreach($rows as $row)$out[]=['id'=>(string)($row['id']??''),'oldCode'=>(string)($row['oldCode']??''),'newCode'=>(string)($row['newCode']??'')];
+    usort($out,fn($a,$b)=>strcmp($a['id'],$b['id']));return $out;
+}
+function fm_bulk_code_preview(array $rows,array $options): array {
+    $scoped=[];
+    foreach($rows as $row){
+        if((int)($row['Year']??0)!==$options['year'])continue;
+        if($options['department']!=='all'&&(string)($row['Department']??'')!==$options['department'])continue;
+        if($options['activeOnly']&&(int)($row['IsActive']??0)!==1)continue;
+        $scoped[]=$row;
+    }
+    $preview=[];$proposed=[];
+    foreach($scoped as $row){
+        $old=(string)($row['CurriculumCode']??'');$upper=strtoupper($old);
+        $occurrences=substr_count($upper,$options['find']);
+        if($occurrences<1)continue;
+        $offset=strpos($upper,$options['find']);
+        $new=$occurrences===1?substr($old,0,$offset).$options['replace'].substr($old,$offset+strlen($options['find'])):$old;
+        $item=['id'=>(string)$row['id'],'Year'=>(int)$row['Year'],'Department'=>(string)($row['Department']??''),'CurriculumTitle'=>(string)($row['CurriculumTitle']??''),'IsActive'=>(int)($row['IsActive']??0)===1?1:0,'oldCode'=>$old,'newCode'=>$new,'status'=>'ready','reason'=>''];
+        if($occurrences>1){$item['status']='ambiguous';$item['reason']='Current fragment occurs more than once in this code.';}
+        elseif(strlen($new)>50){$item['status']='invalid';$item['reason']='Resulting curriculum code exceeds 50 characters.';}
+        $preview[]=$item;
+        if($item['status']==='ready')$proposed[$item['id']]=$item;
+    }
+    $groups=[];
+    foreach($rows as $row){
+        if((int)($row['Year']??0)!==$options['year'])continue;
+        $id=(string)$row['id'];$code=isset($proposed[$id])?$proposed[$id]['newCode']:(string)($row['CurriculumCode']??'');
+        $key=fm_bulk_code_key($row,$code);$groups[$key][]=$id;
+    }
+    foreach($preview as &$item){
+        if($item['status']!=='ready')continue;
+        if(count($groups[fm_bulk_code_key($item,$item['newCode'])]??[])>1){$item['status']='conflict';$item['reason']='Resulting code already exists in the same year and department.';}
+    }
+    unset($item);
+    $counts=['ready'=>0,'conflict'=>0,'ambiguous'=>0,'invalid'=>0];
+    foreach($preview as $item)if(isset($counts[$item['status']]))$counts[$item['status']]++;
+    return ['scope'=>$options,'scopeCount'=>count($scoped),'matchedCount'=>count($preview),'readyCount'=>$counts['ready'],'conflictCount'=>$counts['conflict'],'ambiguousCount'=>$counts['ambiguous'],'invalidCount'=>$counts['invalid'],'rows'=>$preview];
+}
 function fm_required($value,int $max,string $message): string {
     $clean=fm_text($value,$max); if($clean==='')json_response(['success'=>false,'message'=>$message],400); return $clean;
 }
@@ -143,14 +201,31 @@ function fm_admin_email(): string {
     if ($email === '') $email = trim((string)($config['admin_email'] ?? ''));
     return $email !== '' ? $email : 'sattaya_w@thaisummit-harness.co.th';
 }
+function fm_valid_email($value): ?string {
+    $email=strtolower(trim((string)($value??'')));
+    return preg_match('/^[^\s@]+@thaisummit-harness\.co\.th$/i',$email)===1?$email:null;
+}
 function fm_company_email(?string $employeeId): ?string {
     $id=fm_text($employeeId,50); if(!$id)return null;
     $row=db_row("SELECT CompanyEmail FROM employees WHERE EmployeeID=? AND CompanyEmail IS NOT NULL AND TRIM(CompanyEmail)<>'' LIMIT 1",[$id]);
-    return $row['CompanyEmail']??null;
+    return fm_valid_email($row['CompanyEmail']??null);
+}
+function fm_responsible_employee(array $u,$requestedEmployeeId=null): array {
+    $selected=fm_admin($u)&&fm_text($requestedEmployeeId,50)!==''?fm_text($requestedEmployeeId,50):fm_uid($u);
+    if($selected==='')json_response(['success'=>false,'message'=>'Responsible employee is required.'],400);
+    $employee=db_row('SELECT EmployeeID,EmployeeName,Department,Unit,Position,CompanyEmail FROM employees WHERE EmployeeID=? LIMIT 1',[$selected]);
+    if(!$employee)json_response(['success'=>false,'message'=>'Responsible employee was not found in Employee Master.'],400);
+    $employee['CompanyEmail']=fm_valid_email($employee['CompanyEmail']??null);
+    $employee['EmailReady']=$employee['CompanyEmail']!==null;
+    return $employee;
+}
+function fm_notice_department_mismatch($noticeDepartment,$responsibleDepartment): bool {
+    $notice=fm_key($noticeDepartment);$responsible=fm_key($responsibleDepartment);
+    return $notice!==''&&$responsible!==''&&$notice!==$responsible;
 }
 function fm_recipients(array $values): string {
-    $out=[];
-    foreach($values as $value){foreach(explode(',',(string)$value) as $email){$email=trim($email);if($email&&!in_array($email,$out,true))$out[]=$email;}}
+    $out=[];$seen=[];
+    foreach($values as $value){foreach(explode(',',(string)$value) as $raw){$email=fm_valid_email($raw);$key=$email?strtolower($email):'';if($email&&!isset($seen[$key])){$seen[$key]=true;$out[]=$email;}}}
     return implode(',',$out);
 }
 function fm_mail_subject(string $action,string $detail=''): string { return '[4M Change] '.$action.($detail!==''?' - '.$detail:''); }
@@ -190,8 +265,27 @@ function fm_notice_mail(array $notice,string $event,string $status=null): array 
         ['label'=>'Department','value'=>$notice['Department']??'-'],
         ['label'=>'Request Date','value'=>$notice['RequestDate']??'-'],
         ['label'=>'Created By','value'=>$notice['CreatedBy']??'-'],
+        ['label'=>'Responsible Person','value'=>$notice['ResponsiblePerson']??'-'],
         ['label'=>'Status','value'=>$status??($notice['Status']??'Open'),'highlight'=>true],
     ],['เปิดระบบเพื่อตรวจสอบรายละเอียด 4M Change Notice และติดตาม action plan']);
+}
+function fm_notice_reassigned_mail(array $notice): array {
+    return fm_mail(
+        fm_mail_subject('Responsible Person Assigned',(string)($notice['NoticeNo']??'-')),
+        'มอบหมายผู้รับผิดชอบ 4M Change Notice / Notice Assignment',
+        'pending',
+        ['คุณได้รับมอบหมายให้เป็นผู้รับผิดชอบ Change Notice นี้ กรุณาตรวจสอบรายละเอียดและติดตามการดำเนินงานในระบบ'],
+        [
+            ['label'=>'Notice No','value'=>$notice['NoticeNo']??'-','highlight'=>true],
+            ['label'=>'Title','value'=>$notice['Title']??'-','highlight'=>true],
+            ['label'=>'Notice Department','value'=>$notice['Department']??'-'],
+            ['label'=>'Responsible Person','value'=>$notice['ResponsiblePerson']??'-','highlight'=>true],
+            ['label'=>'Responsible Department','value'=>$notice['ResponsibleDepartment']??'-'],
+            ['label'=>'Status','value'=>$notice['Status']??'Open'],
+        ],
+        ['เปิดระบบเพื่อตรวจสอบ Change Notice ที่ได้รับมอบหมาย'],
+        'แผนกของ Notice และแผนกของผู้รับผิดชอบสามารถแตกต่างกันได้ตามลักษณะงาน'
+    );
 }
 function fm_task_mail(array $notice,array $task,string $eventLabel): array {
     $done=strcasecmp($eventLabel,'Done')===0;
@@ -220,7 +314,7 @@ function fm_notice_no($date): string {
 function fm_ensure(): void {
     static $done=false; if($done)return;
     db()->exec("CREATE TABLE IF NOT EXISTS fourm_manrecords (id VARCHAR(36) PRIMARY KEY,Department VARCHAR(100) NOT NULL,TotalAttendance INT DEFAULT 0,Pass INT DEFAULT 0,Fail INT DEFAULT 0,Status VARCHAR(20) DEFAULT 'Pending',ExamDate DATE,Notes TEXT,CreatedBy VARCHAR(100),CreatedAt DATETIME DEFAULT CURRENT_TIMESTAMP,UpdatedAt TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,KEY idx_dept(Department),KEY idx_date(ExamDate)) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
-    db()->exec("CREATE TABLE IF NOT EXISTS fourm_changenotices (id VARCHAR(36) PRIMARY KEY,NoticeNo VARCHAR(50) NOT NULL,RequestDate DATE NOT NULL,Title VARCHAR(255) NOT NULL,Description TEXT,ChangeType VARCHAR(20) NOT NULL,ResponsiblePerson VARCHAR(100),Department VARCHAR(100),AttachmentUrl TEXT,Status VARCHAR(20) NOT NULL DEFAULT 'Open',ClosingComment TEXT,ClosingDocUrl TEXT,ClosedDate DATE,ClosedBy VARCHAR(100),SafetyImpact VARCHAR(20) DEFAULT 'N/A',QualityImpact VARCHAR(20) DEFAULT 'N/A',ProductionImpact VARCHAR(20) DEFAULT 'N/A',EnvironmentImpact VARCHAR(20) DEFAULT 'N/A',TrainingRequired TINYINT(1) DEFAULT 0,ImpactNote TEXT,CreatedByID VARCHAR(50) NOT NULL,CreatedBy VARCHAR(100) NOT NULL,CreatedAt DATETIME DEFAULT CURRENT_TIMESTAMP,UpdatedAt TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,UNIQUE KEY uq_noticeno(NoticeNo),KEY idx_status(Status),KEY idx_date(RequestDate)) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
+    db()->exec("CREATE TABLE IF NOT EXISTS fourm_changenotices (id VARCHAR(36) PRIMARY KEY,NoticeNo VARCHAR(50) NOT NULL,RequestDate DATE NOT NULL,Title VARCHAR(255) NOT NULL,Description TEXT,ChangeType VARCHAR(20) NOT NULL,ResponsiblePerson VARCHAR(100),ResponsibleEmployeeID VARCHAR(50),Department VARCHAR(100),AttachmentUrl TEXT,Status VARCHAR(20) NOT NULL DEFAULT 'Open',ClosingComment TEXT,ClosingDocUrl TEXT,ClosedDate DATE,ClosedBy VARCHAR(100),SafetyImpact VARCHAR(20) DEFAULT 'N/A',QualityImpact VARCHAR(20) DEFAULT 'N/A',ProductionImpact VARCHAR(20) DEFAULT 'N/A',EnvironmentImpact VARCHAR(20) DEFAULT 'N/A',TrainingRequired TINYINT(1) DEFAULT 0,ImpactNote TEXT,CreatedByID VARCHAR(50) NOT NULL,CreatedBy VARCHAR(100) NOT NULL,CreatedAt DATETIME DEFAULT CURRENT_TIMESTAMP,UpdatedAt TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,UNIQUE KEY uq_noticeno(NoticeNo),KEY idx_status(Status),KEY idx_date(RequestDate),KEY idx_responsible_employee(ResponsibleEmployeeID)) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
     db()->exec("CREATE TABLE IF NOT EXISTS fourm_actiontasks (id VARCHAR(36) PRIMARY KEY,NoticeID VARCHAR(36) NOT NULL,TaskTitle VARCHAR(255) NOT NULL,OwnerName VARCHAR(100),DueDate DATE,Status VARCHAR(20) NOT NULL DEFAULT 'Pending',Notes TEXT,CompletedAt DATETIME,CompletedBy VARCHAR(100),CreatedByID VARCHAR(50) NOT NULL,CreatedBy VARCHAR(100) NOT NULL,CreatedAt DATETIME DEFAULT CURRENT_TIMESTAMP,UpdatedAt TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,KEY idx_notice(NoticeID)) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
     db()->exec("CREATE TABLE IF NOT EXISTS fourm_emailoutbox (id INT AUTO_INCREMENT PRIMARY KEY,NoticeID VARCHAR(36),TaskID VARCHAR(36),EventType VARCHAR(50) NOT NULL,Recipients TEXT NOT NULL,Subject VARCHAR(255) NOT NULL,Body TEXT NOT NULL,HtmlBody MEDIUMTEXT,Status VARCHAR(20) NOT NULL DEFAULT 'Queued',SentAt DATETIME,Error TEXT,CreatedAt DATETIME DEFAULT CURRENT_TIMESTAMP,KEY idx_status(Status)) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
     db()->exec("CREATE TABLE IF NOT EXISTS fourm_curriculums (id VARCHAR(36) PRIMARY KEY,`Year` INT NOT NULL,Department VARCHAR(100) NOT NULL,CurriculumCode VARCHAR(50) NOT NULL,CurriculumTitle VARCHAR(255) NOT NULL,Notes TEXT,IsActive TINYINT(1) NOT NULL DEFAULT 1,CreatedByID VARCHAR(50),CreatedBy VARCHAR(100),CreatedAt DATETIME DEFAULT CURRENT_TIMESTAMP,UpdatedAt TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,UNIQUE KEY uq_cur(`Year`,Department,CurriculumCode)) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
@@ -229,7 +323,8 @@ function fm_ensure(): void {
     db()->exec("CREATE TABLE IF NOT EXISTS fourm_courseemployees (id VARCHAR(36) PRIMARY KEY,CourseID VARCHAR(36) NOT NULL,EmployeeID VARCHAR(50) NOT NULL,EmployeeName VARCHAR(100) NOT NULL,Department VARCHAR(100),Position VARCHAR(100),Status VARCHAR(20) NOT NULL DEFAULT 'Assigned',AssignedAt DATETIME DEFAULT CURRENT_TIMESTAMP,AssignedByID VARCHAR(50),AssignedBy VARCHAR(100),RemovedAt DATETIME,RemovedByID VARCHAR(50),RemovedBy VARCHAR(100),Notes TEXT,CreatedAt DATETIME DEFAULT CURRENT_TIMESTAMP,UpdatedAt TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,UNIQUE KEY uq_course_emp(CourseID,EmployeeID)) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
     db()->exec("CREATE TABLE IF NOT EXISTS fourm_curriculumemployees (id VARCHAR(36) PRIMARY KEY,CurriculumID VARCHAR(36) NOT NULL,EmployeeID VARCHAR(50) NOT NULL,EmployeeName VARCHAR(100) NOT NULL,Department VARCHAR(100),Position VARCHAR(100),Status VARCHAR(20) NOT NULL DEFAULT 'Assigned',AssignedAt DATETIME DEFAULT CURRENT_TIMESTAMP,AssignedByID VARCHAR(50),AssignedBy VARCHAR(100),RemovedAt DATETIME,RemovedByID VARCHAR(50),RemovedBy VARCHAR(100),Notes TEXT,CreatedAt DATETIME DEFAULT CURRENT_TIMESTAMP,UpdatedAt TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,UNIQUE KEY uq_cur_emp(CurriculumID,EmployeeID)) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
     db()->exec("CREATE TABLE IF NOT EXISTS fourm_curriculumlogs (id INT AUTO_INCREMENT PRIMARY KEY,Action VARCHAR(50) NOT NULL,CurriculumID VARCHAR(36),CourseID VARCHAR(36),EmployeeID VARCHAR(50),OldValue LONGTEXT,NewValue LONGTEXT,PerformedByID VARCHAR(50),PerformedBy VARCHAR(100),PerformedAt DATETIME DEFAULT CURRENT_TIMESTAMP,KEY idx_time(PerformedAt)) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
-    foreach(["SafetyImpact VARCHAR(20) DEFAULT 'N/A'","QualityImpact VARCHAR(20) DEFAULT 'N/A'","ProductionImpact VARCHAR(20) DEFAULT 'N/A'","EnvironmentImpact VARCHAR(20) DEFAULT 'N/A'","TrainingRequired TINYINT(1) DEFAULT 0","ImpactNote TEXT"] as $col) fm_try("ALTER TABLE fourm_changenotices ADD COLUMN $col");
+    foreach(["SafetyImpact VARCHAR(20) DEFAULT 'N/A'","QualityImpact VARCHAR(20) DEFAULT 'N/A'","ProductionImpact VARCHAR(20) DEFAULT 'N/A'","EnvironmentImpact VARCHAR(20) DEFAULT 'N/A'","TrainingRequired TINYINT(1) DEFAULT 0","ImpactNote TEXT","ResponsibleEmployeeID VARCHAR(50) DEFAULT NULL AFTER ResponsiblePerson"] as $col) fm_try("ALTER TABLE fourm_changenotices ADD COLUMN $col");
+    fm_try('ALTER TABLE fourm_changenotices ADD INDEX idx_responsible_employee (ResponsibleEmployeeID)');
     fm_try("ALTER TABLE fourm_emailoutbox ADD COLUMN HtmlBody MEDIUMTEXT");
     fm_try("ALTER TABLE fourm_courses ADD COLUMN CourseMasterID VARCHAR(36)");
     $done=true;
@@ -344,6 +439,24 @@ function handle_fourm_routes(string $method,string $path): bool {
     if($method==='POST'&&$path==='/fourm/man-records'){require_admin();[$t,$p,$f]=fm_counts($b);$dept=fm_required($b['Department']??'',100,'Department required.');$status=fm_text($b['Status']??'Pending',20);if(!in_array($status,['Pending','Pass','Fail'],true))json_response(['success'=>false,'message'=>'Invalid Man Record status.'],400);db_execute('INSERT INTO fourm_manrecords (id,Department,TotalAttendance,Pass,Fail,Status,ExamDate,Notes,CreatedBy) VALUES (?,?,?,?,?,?,?,?,?)',[fm_uuid(),$dept,$t,$p,$f,$status,$b['ExamDate']??null,fm_text($b['Notes']??'',1000)?:null,fm_actor($u)]);json_response(['success'=>true],201);}
     $p=route_params($path,'/fourm/man-records/:id');if($p!==null&&in_array($method,['PUT','DELETE'],true)){require_admin();$old=db_row('SELECT * FROM fourm_manrecords WHERE id=?',[$p['id']]);if(!$old)json_response(['success'=>false,'message'=>'Not found.'],404);if($method==='DELETE'){db_execute('DELETE FROM fourm_manrecords WHERE id=?',[$p['id']]);json_response(['success'=>true]);}[$t,$pa,$f]=fm_counts($b,$old);$status=fm_text($b['Status']??$old['Status'],20);if(!in_array($status,['Pending','Pass','Fail'],true))json_response(['success'=>false,'message'=>'Invalid Man Record status.'],400);db_execute('UPDATE fourm_manrecords SET Department=?,TotalAttendance=?,Pass=?,Fail=?,Status=?,ExamDate=?,Notes=? WHERE id=?',[fm_required($b['Department']??$old['Department'],100,'Department required.'),$t,$pa,$f,$status,$b['ExamDate']??$old['ExamDate'],array_key_exists('Notes',$b)?(fm_text($b['Notes'],1000)?:null):$old['Notes'],$p['id']]);json_response(['success'=>true]);}
     if($method==='GET'&&$path==='/fourm/training-department-scopes'){ $y=(int)($_GET['year']??date('Y'));$sql="SELECT cur.Department,COUNT(DISTINCT cur.id) CurriculumCount,COUNT(DISTINCT CASE WHEN co.IsActive=1 THEN co.id END) CourseCount,COUNT(DISTINCT CASE WHEN ce.Status='Assigned' THEN ce.EmployeeID END) ScopeEmployees,COUNT(DISTINCT CASE WHEN ce.Status='Transferred' THEN ce.id END) TransferredCount FROM fourm_curriculums cur LEFT JOIN fourm_courses co ON co.CurriculumID=cur.id LEFT JOIN fourm_curriculumemployees ce ON ce.CurriculumID=cur.id WHERE cur.IsActive=1 AND cur.`Year`=?";$pa=[$y];$d=fm_admin($u)?fm_text($_GET['dept']??'',100):fm_text($u['department']??'',100);if($d&&$d!=='all'){$sql.=' AND cur.Department=?';$pa[]=$d;}if(!empty($_GET['q'])){$sql.=' AND cur.Department LIKE ?';$pa[]='%'.fm_text($_GET['q'],100).'%';}json_response(['success'=>true,'data'=>db_rows($sql.' GROUP BY cur.Department ORDER BY cur.Department',$pa)]);}
+    if($method==='POST'&&$path==='/fourm/training-curriculums/bulk-code-preview'){require_admin();$options=fm_bulk_code_options($b);$rows=db_rows('SELECT id,`Year`,Department,CurriculumCode,CurriculumTitle,IsActive FROM fourm_curriculums WHERE `Year`=?',[$options['year']]);json_response(['success'=>true,'data'=>fm_bulk_code_preview($rows,$options)]);}
+    if($method==='PUT'&&$path==='/fourm/training-curriculums/bulk-code'){
+        require_admin();$options=fm_bulk_code_options($b);$expected=fm_bulk_code_changes($b['expectedChanges']??[]);
+        $result=fm_write(fn()=>fm_transaction(function()use($u,$options,$expected){
+            $rows=db_rows('SELECT id,`Year`,Department,CurriculumCode,CurriculumTitle,IsActive FROM fourm_curriculums WHERE `Year`=? FOR UPDATE',[$options['year']]);
+            $preview=fm_bulk_code_preview($rows,$options);$blocked=$preview['conflictCount']+$preview['ambiguousCount']+$preview['invalidCount'];
+            if(!$preview['matchedCount'])return ['state'=>'empty','preview'=>$preview];
+            if($blocked||$preview['readyCount']!==$preview['matchedCount'])return ['state'=>'blocked','preview'=>$preview];
+            if(!$expected||json_encode($expected)!==json_encode(fm_bulk_code_changes($preview['rows'])))return ['state'=>'stale','preview'=>$preview];
+            foreach($preview['rows'] as $item)db_execute('UPDATE fourm_curriculums SET CurriculumCode=? WHERE id=?',['__BULK__'.fm_uuid(),$item['id']]);
+            foreach($preview['rows'] as $item){db_execute('UPDATE fourm_curriculums SET CurriculumCode=? WHERE id=?',[$item['newCode'],$item['id']]);fm_log($u,'CURRICULUM_CODE_BULK_UPDATE',$item['id'],null,null,['CurriculumCode'=>$item['oldCode']],['CurriculumCode'=>$item['newCode'],'BatchScope'=>$options]);}
+            return ['state'=>'updated','preview'=>$preview];
+        }),'A resulting curriculum code already exists in the same year and department.');
+        if($result['state']==='empty')json_response(['success'=>false,'message'=>'No curriculum codes match the requested fragment.','data'=>$result['preview']],400);
+        if($result['state']==='blocked')json_response(['success'=>false,'message'=>'Bulk change blocked. Resolve every preview conflict first.','data'=>$result['preview']],409);
+        if($result['state']==='stale')json_response(['success'=>false,'message'=>'Curriculum data changed after preview. Preview the batch again.','data'=>$result['preview']],409);
+        $result['preview']['changedCount']=$result['preview']['readyCount'];json_response(['success'=>true,'message'=>'Curriculum codes updated.','data'=>$result['preview']]);
+    }
     if($method==='POST'&&$path==='/fourm/training-course-master'){require_admin();$code=fm_text($b['CourseCode']??'',50);if($code!==''&&fm_course_master_duplicate($code))fm_duplicate_response('Course code already exists in master.');}
     if($method==='POST'&&$path==='/fourm/training-curriculums'){require_admin();$year=(int)($b['Year']??date('Y'));$dept=fm_text($b['Department']??'',100);$code=fm_text($b['CurriculumCode']??'',50);if($dept!==''&&$code!==''&&fm_curriculum_duplicate($year,$dept,$code))fm_duplicate_response('Curriculum code already exists for this year and department.');}
     $duplicateParams=route_params($path,'/fourm/training-course-master/:id');if($duplicateParams!==null&&$method==='PUT'){require_admin();$master=db_row('SELECT * FROM fourm_coursemaster WHERE id=?',[$duplicateParams['id']]);$code=fm_text($b['CourseCode']??($master['CourseCode']??''),50);if($master&&$code!==''&&fm_course_master_duplicate($code,$duplicateParams['id']))fm_duplicate_response('Course code already exists in master.');}
@@ -370,17 +483,49 @@ function handle_fourm_routes(string $method,string $path): bool {
     $p=route_params($path,'/fourm/training-assignments/:id/transfer');if($p!==null&&$method==='POST'){ $a=fm_course_ass($p['id']);$targetId=fm_text($b['TargetCourseID']??$b['NewCourseID']??'',36);$target=fm_course($targetId);if(!$a||!$target||!(int)$target['IsActive'])json_response(['success'=>false,'message'=>'Active destination course not found.'],404);if(($a['Status']??'')!=='Assigned')json_response(['success'=>false,'message'=>'Only assigned employees can be transferred.'],400);if($targetId===(string)$a['CourseID'])json_response(['success'=>false,'message'=>'Select a different destination course.'],400);if(!fm_training_manage_ok($u,$a['CurriculumDepartment'])||!fm_training_manage_ok($u,$target['Department']))fm_deny();$out=fm_transaction(function()use($u,$b,$p,$a,$target){db_execute("UPDATE fourm_courseemployees SET Status='Transferred',RemovedAt=NOW(),RemovedByID=?,RemovedBy=? WHERE id=?",[fm_uid($u),fm_actor($u),$p['id']]);$result=fm_assign($u,'course',$target['id'],[$a['EmployeeID']],fm_text($b['Notes']??'',1000)?:null,['Year'=>$target['Year'],'Department'=>$target['Department'],'CurriculumID'=>$target['CurriculumID']]);fm_log($u,'ASSIGNMENT_TRANSFER',$a['CurriculumID'],$a['CourseID'],$a['EmployeeID'],$a,['TargetCurriculumID'=>$target['CurriculumID'],'TargetCourseID'=>$target['id'],'Status'=>'Assigned']);return $result;});json_response(['success'=>true,'data'=>$out]);}
     if($method==='GET'&&$path==='/fourm/training-logs'){ $sql='SELECT l.*,c.Department,c.`Year`,c.CurriculumCode,c.CurriculumTitle,co.CourseCode,co.CourseTitle FROM fourm_curriculumlogs l LEFT JOIN fourm_curriculums c ON c.id=l.CurriculumID LEFT JOIN fourm_courses co ON co.id=l.CourseID WHERE 1=1';$pa=[];foreach(['curriculumId'=>'l.CurriculumID','courseId'=>'l.CourseID','employeeId'=>'l.EmployeeID','action'=>'l.Action'] as $q=>$col)if(!empty($_GET[$q])&&$_GET[$q]!=='all'){$sql.=" AND $col=?";$pa[]=fm_text($_GET[$q],100);}if(!empty($_GET['year'])){$sql.=' AND (c.`Year`=? OR l.CurriculumID IS NULL)';$pa[]=(int)$_GET['year'];}$d=fm_admin($u)?fm_text($_GET['dept']??'',100):fm_text($u['department']??'',100);if($d&&$d!=='all'){$sql.=fm_admin($u)?' AND (c.Department=? OR l.CurriculumID IS NULL)':' AND c.Department=?';$pa[]=$d;}$limit=min(300,max(1,(int)($_GET['limit']??100)));json_response(['success'=>true,'data'=>db_rows($sql.' ORDER BY l.PerformedAt DESC,l.id DESC LIMIT '.$limit,$pa)]);}
     $p=route_params($path,'/fourm/training-logs/:id');if($p!==null&&$method==='DELETE'){require_admin();$id=(int)$p['id'];if($id<=0)json_response(['success'=>false,'message'=>'Invalid training log id.'],400);$row=db_row('SELECT * FROM fourm_curriculumlogs WHERE id=?',[$id]);if(!$row)json_response(['success'=>false,'message'=>'Training log not found.'],404);db_execute('DELETE FROM fourm_curriculumlogs WHERE id=?',[$id]);json_response(['success'=>true]);}
-    if($method==='GET'&&$path==='/fourm/notices'){ $sql='SELECT * FROM fourm_changenotices WHERE 1=1';$pa=[];if(($_GET['overdue']??'')==='1')$sql.=" AND Status IN ('Open','Pending') AND DATEDIFF(CURDATE(),RequestDate)>30";elseif(!empty($_GET['status'])&&$_GET['status']!=='all'){$sql.=' AND Status=?';$pa[]=$_GET['status'];}foreach(['type'=>'ChangeType','dept'=>'Department'] as $q=>$c)if(!empty($_GET[$q])&&$_GET[$q]!=='all'){$sql.=" AND $c=?";$pa[]=$_GET[$q];}if(($_GET['mine']??'')==='1'){$sql.=' AND CreatedByID=?';$pa[]=fm_uid($u);}if(($_GET['trainingRequired']??'')==='1')$sql.=' AND TrainingRequired=1';if(!empty($_GET['year'])){$sql.=' AND YEAR(RequestDate)=?';$pa[]=(int)$_GET['year'];}if(!empty($_GET['q'])){$like='%'.fm_text($_GET['q'],120).'%';$sql.=' AND (Title LIKE ? OR NoticeNo LIKE ? OR ResponsiblePerson LIKE ?)';array_push($pa,$like,$like,$like);}json_response(['success'=>true,'data'=>db_rows($sql.' ORDER BY RequestDate DESC,CreatedAt DESC',$pa)]);}
+    if($method==='GET'&&$path==='/fourm/responsible-employees'){require_admin();$q=fm_text($_GET['q']??'',100);if(mb_strlen($q,'UTF-8')<2)json_response(['success'=>false,'message'=>'Search must contain 2 to 100 characters.'],400);$limit=max(1,min(30,(int)($_GET['limit']??20)));$like='%'.$q.'%';$rows=db_rows("SELECT EmployeeID,EmployeeName,Department,Unit,Position,CompanyEmail FROM employees WHERE EmployeeID LIKE ? OR EmployeeName LIKE ? OR Department LIKE ? OR Position LIKE ? ORDER BY (EmployeeID=?) DESC,EmployeeName,EmployeeID LIMIT $limit",[$like,$like,$like,$like,$q]);foreach($rows as &$row){$row['CompanyEmail']=fm_valid_email($row['CompanyEmail']??null);$row['EmailReady']=$row['CompanyEmail']!==null;}unset($row);json_response(['success'=>true,'data'=>$rows]);}
+    if($method==='GET'&&$path==='/fourm/notices'){ $sql='SELECT * FROM fourm_changenotices WHERE 1=1';$pa=[];if(($_GET['overdue']??'')==='1')$sql.=" AND Status IN ('Open','Pending') AND DATEDIFF(CURDATE(),RequestDate)>30";elseif(!empty($_GET['status'])&&$_GET['status']!=='all'){$sql.=' AND Status=?';$pa[]=$_GET['status'];}foreach(['type'=>'ChangeType','dept'=>'Department'] as $q=>$c)if(!empty($_GET[$q])&&$_GET[$q]!=='all'){$sql.=" AND $c=?";$pa[]=$_GET[$q];}if(($_GET['mine']??'')==='1'){$sql.=' AND (CreatedByID=? OR ResponsibleEmployeeID=?)';$pa[]=fm_uid($u);$pa[]=fm_uid($u);}if(($_GET['trainingRequired']??'')==='1')$sql.=' AND TrainingRequired=1';if(!empty($_GET['year'])){$sql.=' AND YEAR(RequestDate)=?';$pa[]=(int)$_GET['year'];}if(!empty($_GET['q'])){$like='%'.fm_text($_GET['q'],120).'%';$sql.=' AND (Title LIKE ? OR NoticeNo LIKE ? OR ResponsiblePerson LIKE ?)';array_push($pa,$like,$like,$like);}json_response(['success'=>true,'data'=>db_rows($sql.' ORDER BY RequestDate DESC,CreatedAt DESC',$pa)]);}
     if($method==='GET'&&$path==='/fourm/notice-next-no')json_response(['success'=>true,'data'=>['NoticeNo'=>fm_notice_no($_GET['date']??null)]]);
     if($method==='GET'&&$path==='/fourm/email-outbox'){require_admin();json_response(['success'=>true,'data'=>db_rows('SELECT id,NoticeID,TaskID,EventType,Recipients,Subject,Status,SentAt,Error,CreatedAt FROM fourm_emailoutbox ORDER BY CreatedAt DESC,id DESC LIMIT 200'),'smtpConfigured'=>mailer_smtp_configured()]);}
     $p=route_params($path,'/fourm/email-outbox/:id/retry');if($p!==null&&$method==='POST'){require_admin();try{$r=mailer_outbox_send('fourm_emailoutbox',(int)$p['id'],'Recipients','HtmlBody');json_response(['success'=>true,'message'=>'Email sent.','data'=>$r]);}catch(Throwable $e){json_response(['success'=>false,'message'=>'Cannot retry 4M email.','error'=>$e->getMessage()],500);}}
     $p=route_params($path,'/fourm/notices/:id/tasks');if($p!==null&&$method==='GET'){json_response(['success'=>true,'data'=>db_rows("SELECT * FROM fourm_actiontasks WHERE NoticeID=? ORDER BY Status='Done',COALESCE(DueDate,'9999-12-31'),CreatedAt",[$p['id']])]);}
     if($p!==null&&$method==='POST'){ $n=db_row('SELECT * FROM fourm_changenotices WHERE id=?',[$p['id']]);if(!$n)json_response(['success'=>false,'message'=>'Not found.'],404);if(!fm_admin($u)&&fm_uid($u)!==(string)$n['CreatedByID'])fm_deny();$t=fm_task_payload($b);$id=fm_uuid();db_execute('INSERT INTO fourm_actiontasks (id,NoticeID,TaskTitle,OwnerName,DueDate,Status,Notes,CompletedAt,CompletedBy,CreatedByID,CreatedBy) VALUES (?,?,?,?,?,?,?,?,?,?,?)',[$id,$p['id'],$t['TaskTitle'],$t['OwnerName'],$t['DueDate'],$t['Status'],$t['Notes'],$t['Status']==='Done'?date('Y-m-d H:i:s'):null,$t['Status']==='Done'?fm_actor($u):null,fm_uid($u),fm_actor($u)]);$mail=fm_task_mail($n,array_merge($t,['id'=>$id]),'Created');fm_queue($p['id'],$id,'ActionTaskCreated',$mail['subject'],$mail['body'],$mail['html'],fm_recipients([fm_admin_email(),fm_company_email($n['CreatedByID']??null)]));json_response(['success'=>true,'data'=>['id'=>$id]],201);}
     $p=route_params($path,'/fourm/notice-tasks/:id');if($p!==null&&in_array($method,['PUT','DELETE'],true)){ $t=db_row('SELECT t.*,n.NoticeNo,n.Title,n.Department,n.ChangeType,n.Status NoticeStatus,n.CreatedByID NoticeCreatedByID FROM fourm_actiontasks t JOIN fourm_changenotices n ON n.id=t.NoticeID WHERE t.id=?',[$p['id']]);if(!$t)json_response(['success'=>false,'message'=>'Not found.'],404);if(!fm_admin($u)&&fm_uid($u)!==(string)$t['NoticeCreatedByID'])fm_deny();if($method==='DELETE'){db_execute('DELETE FROM fourm_actiontasks WHERE id=?',[$p['id']]);json_response(['success'=>true]);}$v=fm_task_payload($b,$t);db_execute('UPDATE fourm_actiontasks SET TaskTitle=?,OwnerName=?,DueDate=?,Status=?,Notes=?,CompletedAt=?,CompletedBy=? WHERE id=?',[$v['TaskTitle'],$v['OwnerName'],$v['DueDate'],$v['Status'],$v['Notes'],$v['Status']==='Done'?($t['CompletedAt']?:date('Y-m-d H:i:s')):null,$v['Status']==='Done'?($t['CompletedBy']?:fm_actor($u)):null,$p['id']]);if($v['Status']==='Done'&&($t['Status']??'')!=='Done'){$mail=fm_task_mail($t,array_merge($t,$v),'Done');fm_queue($t['NoticeID']??null,$p['id'],'ActionTaskDone',$mail['subject'],$mail['body'],$mail['html'],fm_recipients([fm_admin_email(),fm_company_email($t['NoticeCreatedByID']??null)]));}json_response(['success'=>true]);}
-    $p=route_params($path,'/fourm/notices/:id/close');if($p!==null&&$method==='POST'){ $file=fm_upload('closingDoc');$n=db_row('SELECT * FROM fourm_changenotices WHERE id=?',[$p['id']]);if(!$n){fm_cleanup($file);json_response(['success'=>false,'message'=>'Not found.'],404);}if(!fm_admin($u)&&fm_uid($u)!==(string)$n['CreatedByID']){fm_cleanup($file);fm_deny();}if(fm_text($b['ClosingComment']??'',1000)===''){fm_cleanup($file);json_response(['success'=>false,'message'=>'Closing comment is required.'],400);}try{db_execute("UPDATE fourm_changenotices SET Status='Closed',ClosingComment=?,ClosingDocUrl=COALESCE(?,ClosingDocUrl),ClosedDate=?,ClosedBy=? WHERE id=?",[$b['ClosingComment'], $file['url']??null,$b['ClosedDate']??date('Y-m-d'),fm_actor($u),$p['id']]);if($file)delete_uploaded_file($n['ClosingDocUrl']??null);$mail=fm_notice_mail($n,'NoticeClosed','Closed');fm_queue($p['id'],null,'NoticeClosed',$mail['subject'],$mail['body'],$mail['html'],fm_recipients([fm_admin_email(),fm_company_email($n['CreatedByID']??null)]));json_response(['success'=>true]);}catch(Throwable $e){fm_cleanup($file);throw $e;}}
+    $p=route_params($path,'/fourm/notices/:id/close');if($p!==null&&$method==='POST'){ $file=fm_upload('closingDoc');$n=db_row('SELECT * FROM fourm_changenotices WHERE id=?',[$p['id']]);if(!$n){fm_cleanup($file);json_response(['success'=>false,'message'=>'Not found.'],404);}if(!fm_admin($u)&&fm_uid($u)!==(string)$n['CreatedByID']){fm_cleanup($file);fm_deny();}if(fm_text($b['ClosingComment']??'',1000)===''){fm_cleanup($file);json_response(['success'=>false,'message'=>'Closing comment is required.'],400);}try{db_execute("UPDATE fourm_changenotices SET Status='Closed',ClosingComment=?,ClosingDocUrl=COALESCE(?,ClosingDocUrl),ClosedDate=?,ClosedBy=? WHERE id=?",[$b['ClosingComment'], $file['url']??null,$b['ClosedDate']??date('Y-m-d'),fm_actor($u),$p['id']]);if($file)delete_uploaded_file($n['ClosingDocUrl']??null);$mail=fm_notice_mail($n,'NoticeClosed','Closed');fm_queue($p['id'],null,'NoticeClosed',$mail['subject'],$mail['body'],$mail['html'],fm_recipients([fm_admin_email(),fm_company_email($n['CreatedByID']??null),fm_company_email($n['ResponsibleEmployeeID']??null)]));json_response(['success'=>true]);}catch(Throwable $e){fm_cleanup($file);throw $e;}}
     $p=route_params($path,'/fourm/notices/:id');if($p!==null&&$method==='GET'){ $n=db_row('SELECT * FROM fourm_changenotices WHERE id=?',[$p['id']]);if(!$n)json_response(['success'=>false,'message'=>'Not found.'],404);json_response(['success'=>true,'data'=>$n]);}
     if($p!==null&&$method==='DELETE'){require_admin();$n=db_row('SELECT * FROM fourm_changenotices WHERE id=?',[$p['id']]);if(!$n)json_response(['success'=>false,'message'=>'Not found.'],404);db_execute('DELETE FROM fourm_actiontasks WHERE NoticeID=?',[$p['id']]);db_execute('DELETE FROM fourm_changenotices WHERE id=?',[$p['id']]);delete_uploaded_file($n['AttachmentUrl']??null);delete_uploaded_file($n['ClosingDocUrl']??null);json_response(['success'=>true]);}
-    if($p!==null&&$method==='PUT'){require_admin();$file=fm_upload('attachment');$n=db_row('SELECT * FROM fourm_changenotices WHERE id=?',[$p['id']]);if(!$n){fm_cleanup($file);json_response(['success'=>false,'message'=>'Not found.'],404);}if(($b['Status']??'')==='Closed'){fm_cleanup($file);json_response(['success'=>false,'message'=>'Use the close workflow to close a notice.'],400);}try{$newStatus=$b['Status']??$n['Status'];db_execute('UPDATE fourm_changenotices SET RequestDate=?,Title=?,Description=?,ChangeType=?,ResponsiblePerson=?,Department=?,AttachmentUrl=?,Status=?,SafetyImpact=?,QualityImpact=?,ProductionImpact=?,EnvironmentImpact=?,TrainingRequired=?,ImpactNote=? WHERE id=?',[$b['RequestDate']??$n['RequestDate'],$b['Title']??$n['Title'],$b['Description']??$n['Description'],$b['ChangeType']??$n['ChangeType'],$b['ResponsiblePerson']??$n['ResponsiblePerson'],$b['Department']??$n['Department'],$file['url']??$n['AttachmentUrl'],$newStatus,$b['SafetyImpact']??$n['SafetyImpact'],$b['QualityImpact']??$n['QualityImpact'],$b['ProductionImpact']??$n['ProductionImpact'],$b['EnvironmentImpact']??$n['EnvironmentImpact'],isset($b['TrainingRequired'])?fm_bool($b['TrainingRequired']):(int)$n['TrainingRequired'],$b['ImpactNote']??$n['ImpactNote'],$p['id']]);if($file)delete_uploaded_file($n['AttachmentUrl']??null);if($newStatus==='Pending'&&($n['Status']??'')!=='Pending'){$mail=fm_notice_mail(array_merge($n,['Title'=>$b['Title']??$n['Title'],'Department'=>$b['Department']??$n['Department']]),'NoticePending','Pending');fm_queue($p['id'],null,'NoticePending',$mail['subject'],$mail['body'],$mail['html'],fm_recipients([fm_admin_email(),fm_company_email($n['CreatedByID']??null)]));}json_response(['success'=>true]);}catch(Throwable $e){fm_cleanup($file);throw $e;}}
-    if($method==='POST'&&$path==='/fourm/notices'){ $file=fm_upload('attachment');try{if(empty($b['RequestDate'])||empty($b['Title'])||!in_array($b['ChangeType']??'', ['Man','Machine','Material','Method'],true))json_response(['success'=>false,'message'=>'Invalid notice.'],400);$id=fm_uuid();$no=fm_notice_no($b['RequestDate']);db_execute('INSERT INTO fourm_changenotices (id,NoticeNo,RequestDate,Title,Description,ChangeType,ResponsiblePerson,Department,AttachmentUrl,SafetyImpact,QualityImpact,ProductionImpact,EnvironmentImpact,TrainingRequired,ImpactNote,CreatedByID,CreatedBy) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)',[$id,$no,$b['RequestDate'],$b['Title'],$b['Description']??null,$b['ChangeType'],fm_actor($u),$b['Department']??null,$file['url']??null,$b['SafetyImpact']??'N/A',$b['QualityImpact']??'N/A',$b['ProductionImpact']??'N/A',$b['EnvironmentImpact']??'N/A',fm_bool($b['TrainingRequired']??0),$b['ImpactNote']??null,fm_uid($u),fm_actor($u)]);$mail=fm_notice_mail(['NoticeNo'=>$no,'Title'=>$b['Title'],'ChangeType'=>$b['ChangeType'],'Department'=>$b['Department']??null,'RequestDate'=>$b['RequestDate'],'CreatedBy'=>fm_actor($u),'Status'=>'Open'],'NoticeCreated','Open');fm_queue($id,null,'NoticeCreated',$mail['subject'],$mail['body'],$mail['html'],fm_admin_email());json_response(['success'=>true,'data'=>['NoticeNo'=>$no]],201);}catch(Throwable $e){fm_cleanup($file);throw $e;}}
+    if($p!==null&&$method==='PUT'){
+        require_admin();$file=null;
+        $n=db_row('SELECT * FROM fourm_changenotices WHERE id=?',[$p['id']]);
+        if(!$n)json_response(['success'=>false,'message'=>'Not found.'],404);
+        if(($b['Status']??'')==='Closed')json_response(['success'=>false,'message'=>'Use the close workflow to close a notice.'],400);
+        $responsible=null;
+        if(fm_text($b['ResponsibleEmployeeID']??'',50)!=='')$responsible=fm_responsible_employee($u,$b['ResponsibleEmployeeID']);
+        $responsibleChanged=$responsible&&((string)$responsible['EmployeeID']!==(string)($n['ResponsibleEmployeeID']??''));
+        try{
+            $file=fm_upload('attachment');$newStatus=$b['Status']??$n['Status'];
+            $responsibleName=$responsible['EmployeeName']??$n['ResponsiblePerson'];
+            $responsibleId=$responsible['EmployeeID']??$n['ResponsibleEmployeeID'];
+            db_execute('UPDATE fourm_changenotices SET RequestDate=?,Title=?,Description=?,ChangeType=?,ResponsiblePerson=?,ResponsibleEmployeeID=?,Department=?,AttachmentUrl=?,Status=?,SafetyImpact=?,QualityImpact=?,ProductionImpact=?,EnvironmentImpact=?,TrainingRequired=?,ImpactNote=? WHERE id=?',[$b['RequestDate']??$n['RequestDate'],$b['Title']??$n['Title'],$b['Description']??$n['Description'],$b['ChangeType']??$n['ChangeType'],$responsibleName,$responsibleId,$b['Department']??$n['Department'],$file['url']??$n['AttachmentUrl'],$newStatus,$b['SafetyImpact']??$n['SafetyImpact'],$b['QualityImpact']??$n['QualityImpact'],$b['ProductionImpact']??$n['ProductionImpact'],$b['EnvironmentImpact']??$n['EnvironmentImpact'],isset($b['TrainingRequired'])?fm_bool($b['TrainingRequired']):(int)$n['TrainingRequired'],$b['ImpactNote']??$n['ImpactNote'],$p['id']]);
+            if($file)delete_uploaded_file($n['AttachmentUrl']??null);
+            $notice=array_merge($n,['Title'=>$b['Title']??$n['Title'],'Department'=>$b['Department']??$n['Department'],'ResponsiblePerson'=>$responsibleName,'ResponsibleEmployeeID'=>$responsibleId,'Status'=>$newStatus]);
+            $recipients=fm_recipients([fm_admin_email(),fm_company_email($n['CreatedByID']??null),$responsible['CompanyEmail']??fm_company_email($responsibleId)]);
+            if($newStatus==='Pending'&&($n['Status']??'')!=='Pending'){$mail=fm_notice_mail($notice,'NoticePending','Pending');fm_queue($p['id'],null,'NoticePending',$mail['subject'],$mail['body'],$mail['html'],$recipients);}
+            if($responsibleChanged){$notice['ResponsibleDepartment']=$responsible['Department']??null;$mail=fm_notice_reassigned_mail($notice);fm_queue($p['id'],null,'NoticeReassigned',$mail['subject'],$mail['body'],$mail['html'],$recipients);}
+            json_response(['success'=>true,'data'=>['ResponsibleEmployeeID'=>$responsibleId,'ResponsiblePerson'=>$responsibleName,'ResponsibleEmailReady'=>$responsible?$responsible['EmailReady']:null,'DepartmentMismatch'=>$responsible?fm_notice_department_mismatch($notice['Department'],$responsible['Department']??null):null]]);
+        }catch(Throwable $e){fm_cleanup($file);throw $e;}
+    }
+    if($method==='POST'&&$path==='/fourm/notices'){
+        $file=null;
+        try{
+            if(empty($b['RequestDate'])||empty($b['Title'])||!in_array($b['ChangeType']??'', ['Man','Machine','Material','Method'],true))json_response(['success'=>false,'message'=>'Invalid notice.'],400);
+            $responsible=fm_responsible_employee($u,$b['ResponsibleEmployeeID']??null);$file=fm_upload('attachment');$id=fm_uuid();$no=fm_notice_no($b['RequestDate']);
+            db_execute('INSERT INTO fourm_changenotices (id,NoticeNo,RequestDate,Title,Description,ChangeType,ResponsiblePerson,ResponsibleEmployeeID,Department,AttachmentUrl,SafetyImpact,QualityImpact,ProductionImpact,EnvironmentImpact,TrainingRequired,ImpactNote,CreatedByID,CreatedBy) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)',[$id,$no,$b['RequestDate'],$b['Title'],$b['Description']??null,$b['ChangeType'],$responsible['EmployeeName'],$responsible['EmployeeID'],$b['Department']??null,$file['url']??null,$b['SafetyImpact']??'N/A',$b['QualityImpact']??'N/A',$b['ProductionImpact']??'N/A',$b['EnvironmentImpact']??'N/A',fm_bool($b['TrainingRequired']??0),$b['ImpactNote']??null,fm_uid($u),fm_actor($u)]);
+            $notice=['NoticeNo'=>$no,'Title'=>$b['Title'],'ChangeType'=>$b['ChangeType'],'Department'=>$b['Department']??null,'RequestDate'=>$b['RequestDate'],'CreatedBy'=>fm_actor($u),'ResponsiblePerson'=>$responsible['EmployeeName'],'ResponsibleEmployeeID'=>$responsible['EmployeeID'],'Status'=>'Open'];
+            $mail=fm_notice_mail($notice,'NoticeCreated','Open');
+            fm_queue($id,null,'NoticeCreated',$mail['subject'],$mail['body'],$mail['html'],fm_recipients([fm_admin_email(),$responsible['CompanyEmail']]));
+            json_response(['success'=>true,'data'=>['NoticeNo'=>$no,'ResponsibleEmployeeID'=>$responsible['EmployeeID'],'ResponsiblePerson'=>$responsible['EmployeeName'],'ResponsibleDepartment'=>$responsible['Department']??null,'ResponsibleEmailReady'=>$responsible['EmailReady'],'DepartmentMismatch'=>fm_notice_department_mismatch($b['Department']??null,$responsible['Department']??null)]],201);
+        }catch(Throwable $e){fm_cleanup($file);throw $e;}
+    }
     return false;
 }

@@ -13,6 +13,13 @@ const { storage: uploadStorage, fileFilter, deleteLocalUpload } = require('../st
 const { logAudit } = require('../utils/audit');
 const { sendMail, smtpConfigured } = require('../utils/email');
 const { buildHiyariEmail } = require('../utils/hiyari-email-template');
+const { normalizeBulkCodeOptions, buildBulkCodePreview, canonicalBulkCodeChanges } = require('../utils/fourmCurriculumBulkCode');
+const {
+    normalizeCompanyEmail,
+    selectResponsibleEmployeeId,
+    uniqueNoticeRecipients,
+    noticeDepartmentMismatch,
+} = require('../utils/fourmNoticeResponsible');
 
 const upload = multer({
     storage: uploadStorage,
@@ -293,9 +300,7 @@ function buildFourMTemplate({ subject, title, tone = 'neutral', intro, details, 
 }
 
 function uniqueRecipients(values = []) {
-    return [...new Set(values.flatMap(value => String(value || '').split(','))
-        .map(value => value.trim())
-        .filter(Boolean))];
+    return uniqueNoticeRecipients(values);
 }
 
 async function queueFourMEmail({ to, noticeId, taskId, eventType, subject, body, html }) {
@@ -345,7 +350,34 @@ async function getEmployeeCompanyEmail(employeeId) {
          LIMIT 1`,
         [id]
     ).catch(() => [[]]);
-    return rows[0]?.CompanyEmail || null;
+    return normalizeCompanyEmail(rows[0]?.CompanyEmail);
+}
+
+async function getResponsibleEmployee(employeeId) {
+    const id = String(employeeId || '').trim();
+    if (!id) return null;
+    const [rows] = await db.query(
+        `SELECT EmployeeID, EmployeeName, Department, Unit, Position, CompanyEmail
+         FROM Employees WHERE EmployeeID = ? LIMIT 1`,
+        [id]
+    );
+    if (!rows.length) return null;
+    const employee = rows[0];
+    const companyEmail = normalizeCompanyEmail(employee.CompanyEmail);
+    return {
+        ...employee,
+        CompanyEmail: companyEmail,
+        EmailReady: Boolean(companyEmail),
+    };
+}
+
+async function resolveNoticeResponsible(req, requestedEmployeeId) {
+    const employeeId = selectResponsibleEmployeeId({
+        isAdmin: isFourmAdmin(req),
+        requestedEmployeeId,
+        actorEmployeeId: req.user?.id || req.user?.EmployeeID,
+    });
+    return getResponsibleEmployee(employeeId);
 }
 
 function buildNoticeCreatedEmail(notice) {
@@ -361,10 +393,30 @@ function buildNoticeCreatedEmail(notice) {
             { label: 'Department', value: notice.Department },
             { label: 'Request Date', value: notice.RequestDate },
             { label: 'Created By', value: notice.CreatedBy },
+            { label: 'Responsible Person', value: notice.ResponsiblePerson },
             { label: 'Status', value: notice.Status || 'Open', highlight: true },
         ],
         actions: ['Open Safety Core and review the Change Notice details.'],
         note: 'This email is generated from the 4M Change Management workflow.',
+    });
+}
+
+function buildNoticeReassignedEmail(notice) {
+    return buildFourMTemplate({
+        subject: `[4M Change] Responsible person assigned - ${notice.NoticeNo || '-'}`,
+        title: '4M Change Notice Assignment',
+        tone: 'pending',
+        intro: ['You have been assigned as the responsible person for this 4M Change Notice. Please review the details and follow up in Safety Core.'],
+        details: [
+            { label: 'Notice No', value: notice.NoticeNo, highlight: true },
+            { label: 'Title', value: notice.Title, highlight: true },
+            { label: 'Notice Department', value: notice.Department },
+            { label: 'Responsible Person', value: notice.ResponsiblePerson, highlight: true },
+            { label: 'Responsible Department', value: notice.ResponsibleDepartment },
+            { label: 'Status', value: notice.Status || 'Open' },
+        ],
+        actions: ['Open Safety Core and review the assigned Change Notice.'],
+        note: 'The Notice department and responsible employee department may be different by design.',
     });
 }
 
@@ -378,6 +430,7 @@ function buildNoticeStatusEmail(notice, status) {
             { label: 'Notice No', value: notice.NoticeNo, highlight: true },
             { label: 'Title', value: notice.Title, highlight: true },
             { label: 'Department', value: notice.Department },
+            { label: 'Responsible Person', value: notice.ResponsiblePerson },
             { label: 'Status', value: status, highlight: true },
         ],
         actions: ['Open Safety Core and confirm the current notice status.'],
@@ -467,6 +520,7 @@ async function ensureTables() {
             Description        TEXT,
             ChangeType         VARCHAR(20)  NOT NULL,
             ResponsiblePerson  VARCHAR(100),
+            ResponsibleEmployeeID VARCHAR(50),
             Department         VARCHAR(100),
             AttachmentUrl      TEXT,
             Status             VARCHAR(20)  NOT NULL DEFAULT 'Open',
@@ -498,6 +552,8 @@ async function ensureTables() {
         `ALTER TABLE FourM_ChangeNotices ADD COLUMN EnvironmentImpact VARCHAR(20) DEFAULT 'N/A'`,
         `ALTER TABLE FourM_ChangeNotices ADD COLUMN TrainingRequired TINYINT(1) DEFAULT 0`,
         `ALTER TABLE FourM_ChangeNotices ADD COLUMN ImpactNote TEXT`,
+        `ALTER TABLE FourM_ChangeNotices ADD COLUMN ResponsibleEmployeeID VARCHAR(50) DEFAULT NULL AFTER ResponsiblePerson`,
+        `ALTER TABLE FourM_ChangeNotices ADD INDEX idx_responsible_employee (ResponsibleEmployeeID)`,
     ]) {
         try { await db.query(sql); } catch (_) {}
     }
@@ -1345,6 +1401,118 @@ router.get('/training-curriculums', async (req, res) => {
     } catch (error) {
         console.error('4M training curriculum list error:', error);
         res.status(500).json({ success: false, message: 'ไม่สามารถดึงข้อมูลหลักสูตร 4M ได้' });
+    }
+});
+
+router.post('/training-curriculums/bulk-code-preview', isAdmin, async (req, res) => {
+    try {
+        await ensureTables();
+        if (!isFourmAdmin(req)) return res.status(403).json({ success: false, message: 'Admin only' });
+        const options = normalizeBulkCodeOptions(req.body);
+        const [rows] = await db.query(
+            'SELECT id, `Year`, Department, CurriculumCode, CurriculumTitle, IsActive FROM FourM_Curriculums WHERE `Year` = ?',
+            [options.year]
+        );
+        res.json({ success: true, data: buildBulkCodePreview(rows, options) });
+    } catch (error) {
+        if (error instanceof Error && /^Invalid|^Find|^The replacement|^Code fragments|^Department/.test(error.message)) {
+            return res.status(400).json({ success: false, message: error.message });
+        }
+        console.error('4M curriculum bulk code preview error:', error);
+        res.status(500).json({ success: false, message: 'Cannot preview bulk curriculum code change.' });
+    }
+});
+
+router.put('/training-curriculums/bulk-code', isAdmin, async (req, res) => {
+    let client;
+    try {
+        await ensureTables();
+        if (!isFourmAdmin(req)) return res.status(403).json({ success: false, message: 'Admin only' });
+        const options = normalizeBulkCodeOptions(req.body);
+        client = await db.getConnection();
+        await client.beginTransaction();
+        const [rows] = await client.query(
+            'SELECT id, `Year`, Department, CurriculumCode, CurriculumTitle, IsActive FROM FourM_Curriculums WHERE `Year` = ? FOR UPDATE',
+            [options.year]
+        );
+        const preview = buildBulkCodePreview(rows, options);
+        const blockedCount = preview.conflictCount + preview.ambiguousCount + preview.invalidCount;
+        if (!preview.matchedCount) {
+            await client.rollback();
+            return res.status(400).json({ success: false, message: 'No curriculum codes match the requested fragment.', data: preview });
+        }
+        if (blockedCount || preview.readyCount !== preview.matchedCount) {
+            await client.rollback();
+            return res.status(409).json({ success: false, message: 'Bulk change blocked. Resolve every preview conflict first.', data: preview });
+        }
+        const expectedChanges = canonicalBulkCodeChanges(req.body.expectedChanges);
+        const currentChanges = canonicalBulkCodeChanges(preview.rows);
+        if (!expectedChanges.length || JSON.stringify(expectedChanges) !== JSON.stringify(currentChanges)) {
+            await client.rollback();
+            return res.status(409).json({ success: false, message: 'Curriculum data changed after preview. Preview the batch again.', data: preview });
+        }
+
+        const sourceById = new Map(rows.map(row => [String(row.id), row]));
+        for (const item of preview.rows) {
+            await client.query('UPDATE FourM_Curriculums SET CurriculumCode = ? WHERE id = ?', [
+                `__BULK__${randomUUID()}`,
+                item.id,
+            ]);
+        }
+        for (const item of preview.rows) {
+            await client.query('UPDATE FourM_Curriculums SET CurriculumCode = ? WHERE id = ?', [item.newCode, item.id]);
+            await insertTrainingMatrixLog(client, req, {
+                action: 'CURRICULUM_CODE_BULK_UPDATE',
+                curriculumId: item.id,
+                oldValue: { CurriculumCode: item.oldCode },
+                newValue: {
+                    CurriculumCode: item.newCode,
+                    BatchScope: options,
+                },
+            });
+        }
+        await client.commit();
+        const changedIds = preview.rows.map(row => row.id);
+        try {
+            await logAudit(req, {
+                action: 'FOURM_TRAINING_CURRICULUM_CODE_BULK_UPDATE',
+                module: 'fourm',
+                targetType: 'FourM_TrainingMatrix',
+                targetId: `${options.year}:${options.department}`,
+                detail: `Bulk replace curriculum code ${options.find} -> ${options.replace} (${preview.readyCount} rows)`,
+                metadata: {
+                    scope: options,
+                    changedIds,
+                    changes: preview.rows.map(item => ({
+                        id: item.id,
+                        oldCode: sourceById.get(item.id)?.CurriculumCode || item.oldCode,
+                        newCode: item.newCode,
+                    })),
+                },
+                statusCode: 200,
+            });
+        } catch (auditError) {
+            console.warn('4M curriculum bulk code admin audit error:', auditError?.message || auditError);
+        }
+        res.json({
+            success: true,
+            data: { ...preview, changedCount: preview.readyCount },
+            message: `Updated ${preview.readyCount} curriculum codes.`,
+        });
+    } catch (error) {
+        if (client) {
+            try { await client.rollback(); } catch (_) { /* transaction already closed */ }
+        }
+        if (error instanceof Error && /^Invalid|^Find|^The replacement|^Code fragments|^Department/.test(error.message)) {
+            return res.status(400).json({ success: false, message: error.message });
+        }
+        if (error?.code === 'ER_DUP_ENTRY') {
+            return res.status(409).json({ success: false, message: 'A resulting curriculum code already exists in the same year and department.' });
+        }
+        console.error('4M curriculum bulk code update error:', error);
+        res.status(500).json({ success: false, message: 'Cannot update curriculum codes.' });
+    } finally {
+        if (client) client.release();
     }
 });
 
@@ -2509,6 +2677,39 @@ router.delete('/training-logs/:id', isAdmin, async (req, res) => {
     }
 });
 
+router.get('/responsible-employees', isAdmin, async (req, res) => {
+    try {
+        await ensureTables();
+        const q = String(req.query.q || '').trim();
+        if (q.length < 2 || q.length > 100 || /[\u0000-\u001f\u007f]/.test(q)) {
+            return res.status(400).json({ success: false, message: 'Search must contain 2 to 100 characters.' });
+        }
+        const limit = Math.min(Math.max(Number.parseInt(req.query.limit, 10) || 20, 1), 30);
+        const like = `%${q}%`;
+        const [rows] = await db.query(
+            `SELECT EmployeeID, EmployeeName, Department, Unit, Position, CompanyEmail
+             FROM Employees
+             WHERE EmployeeID LIKE ?
+                OR EmployeeName LIKE ?
+                OR Department LIKE ?
+                OR Position LIKE ?
+             ORDER BY (EmployeeID = ?) DESC, EmployeeName, EmployeeID
+             LIMIT ?`,
+            [like, like, like, like, q, limit]
+        );
+        res.json({
+            success: true,
+            data: rows.map(row => {
+                const companyEmail = normalizeCompanyEmail(row.CompanyEmail);
+                return { ...row, CompanyEmail: companyEmail, EmailReady: Boolean(companyEmail) };
+            }),
+        });
+    } catch (error) {
+        console.error('4M responsible employee search error:', error);
+        res.status(500).json({ success: false, message: 'Cannot search responsible employees.' });
+    }
+});
+
 router.get('/notices', async (req, res) => {
     try {
         await ensureTables();
@@ -2523,7 +2724,10 @@ router.get('/notices', async (req, res) => {
         if (type   && type   !== 'all') { sql += ' AND ChangeType = ?'; params.push(type); }
         if (dept   && dept   !== 'all') { sql += ' AND Department = ?'; params.push(dept); }
         if (trainingRequired === '1') { sql += ' AND TrainingRequired = 1'; }
-        if (mine === '1') { sql += ' AND CreatedByID = ?'; params.push(req.user.id); }
+        if (mine === '1') {
+            sql += ' AND (CreatedByID = ? OR ResponsibleEmployeeID = ?)';
+            params.push(req.user.id, req.user.id);
+        }
         if (year) { sql += ' AND YEAR(RequestDate) = ?'; params.push(parseInt(year)); }
         if (q && q.trim()) {
             sql += ' AND (Title LIKE ? OR NoticeNo LIKE ? OR ResponsiblePerson LIKE ?)';
@@ -2794,7 +2998,7 @@ router.delete('/notice-tasks/:taskId', async (req, res) => {
 router.post('/notices', _handleUpload('attachment'), async (req, res) => {
     try {
         await ensureTables();
-        const { RequestDate, Title, Description, ChangeType, Department } = req.body;
+        const { RequestDate, Title, Description, ChangeType, Department, ResponsibleEmployeeID } = req.body;
         if (!Title || !RequestDate || !ChangeType) {
             return res.status(400).json({ success: false, message: 'กรุณากรอก วันที่, หัวข้อ และ Change Type' });
         }
@@ -2808,6 +3012,11 @@ router.post('/notices', _handleUpload('attachment'), async (req, res) => {
             return res.status(400).json({ success: false, message: impactResult.error });
         }
         const impact = impactResult.impact;
+        const responsible = await resolveNoticeResponsible(req, ResponsibleEmployeeID);
+        if (!responsible) {
+            if (req.file) deleteLocalUpload(req.file.path);
+            return res.status(400).json({ success: false, message: 'Responsible employee was not found in Employee Master.' });
+        }
         const noticeNo = await generateNoticeNo(RequestDate);
         const actorName = getActorName(req);
 
@@ -2816,14 +3025,15 @@ router.post('/notices', _handleUpload('attachment'), async (req, res) => {
         await db.query(
             `INSERT INTO FourM_ChangeNotices
                 (id,NoticeNo,RequestDate,Title,Description,ChangeType,
-                 ResponsiblePerson,Department,AttachmentUrl,
+                 ResponsiblePerson,ResponsibleEmployeeID,Department,AttachmentUrl,
                  SafetyImpact,QualityImpact,ProductionImpact,EnvironmentImpact,TrainingRequired,ImpactNote,
                  CreatedByID,CreatedBy)
-             VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+             VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
             [
                 id, noticeNo, RequestDate, Title.trim(),
                 (Description||'').trim()||null, ChangeType,
-                actorName,
+                responsible.EmployeeName,
+                responsible.EmployeeID,
                 (Department||'').trim()||null,
                 attachUrl,
                 impact.SafetyImpact,
@@ -2847,7 +3057,15 @@ router.post('/notices', _handleUpload('attachment'), async (req, res) => {
                 Department: (Department || '').trim() || null,
                 ChangeType,
                 Status: 'Open',
-            }, { hasAttachment: Boolean(attachUrl), impact }),
+            }, {
+                hasAttachment: Boolean(attachUrl),
+                impact,
+                responsibleEmployeeId: responsible.EmployeeID,
+                responsiblePerson: responsible.EmployeeName,
+                responsibleDepartment: responsible.Department || null,
+                responsibleEmailReady: responsible.EmailReady,
+                departmentMismatch: noticeDepartmentMismatch(Department, responsible.Department),
+            }),
             statusCode: 201,
         });
         const createdNotice = {
@@ -2858,12 +3076,15 @@ router.post('/notices', _handleUpload('attachment'), async (req, res) => {
             Department: (Department || '').trim() || null,
             ChangeType,
             CreatedBy: actorName,
+            ResponsibleEmployeeID: responsible.EmployeeID,
+            ResponsiblePerson: responsible.EmployeeName,
+            ResponsibleDepartment: responsible.Department || null,
             Status: 'Open',
         };
         const createMail = buildNoticeCreatedEmail(createdNotice);
         try {
             await queueFourMEmail({
-                to: FOURM_ADMIN_EMAIL,
+                to: uniqueRecipients([responsible.CompanyEmail, FOURM_ADMIN_EMAIL]).join(','),
                 noticeId: id,
                 eventType: 'NoticeCreated',
                 subject: createMail.subject,
@@ -2888,7 +3109,9 @@ router.put('/notices/:id', isAdmin, _handleUpload('attachment'), async (req, res
         await ensureTables();
         const { id } = req.params;
         const [rows] = await db.query(
-            'SELECT id, NoticeNo, Title, Department, ChangeType, Status, CreatedByID, AttachmentUrl FROM FourM_ChangeNotices WHERE id = ?',
+            `SELECT id, NoticeNo, Title, Department, ChangeType, Status, CreatedByID, AttachmentUrl,
+                    ResponsibleEmployeeID, ResponsiblePerson
+             FROM FourM_ChangeNotices WHERE id = ?`,
             [id]
         );
         if (!rows.length) {
@@ -2896,7 +3119,7 @@ router.put('/notices/:id', isAdmin, _handleUpload('attachment'), async (req, res
             return res.status(404).json({ success: false, message: 'ไม่พบ Change Notice' });
         }
 
-        const { Title, Description, ChangeType, ResponsiblePerson, Department, Status, RequestDate } = req.body;
+        const { Title, Description, ChangeType, ResponsibleEmployeeID, Department, Status, RequestDate } = req.body;
         const VALID_TYPES  = ['Man','Machine','Material','Method'];
         const VALID_STATUS = ['Open','Pending','Closed'];
         const impactResult = normalizeImpactAssessment(req.body);
@@ -2905,6 +3128,17 @@ router.put('/notices/:id', isAdmin, _handleUpload('attachment'), async (req, res
             return res.status(400).json({ success: false, message: impactResult.error });
         }
         const impact = impactResult.impact;
+        let responsible = null;
+        if (ResponsibleEmployeeID !== undefined && String(ResponsibleEmployeeID || '').trim()) {
+            responsible = await resolveNoticeResponsible(req, ResponsibleEmployeeID);
+            if (!responsible) {
+                if (req.file) deleteLocalUpload(req.file.path);
+                return res.status(400).json({ success: false, message: 'Responsible employee was not found in Employee Master.' });
+            }
+        }
+        const responsibleChanged = Boolean(
+            responsible && String(responsible.EmployeeID) !== String(rows[0].ResponsibleEmployeeID || '')
+        );
         if (Status === 'Closed') {
             if (req.file) deleteLocalUpload(req.file.path);
             return res.status(400).json({
@@ -2925,7 +3159,10 @@ router.put('/notices/:id', isAdmin, _handleUpload('attachment'), async (req, res
         if (Description !== undefined)       { fields.push('Description = ?');       vals.push(Description); }
         if (ChangeType && VALID_TYPES.includes(ChangeType)) { fields.push('ChangeType = ?'); vals.push(ChangeType); }
         if (Status && VALID_STATUS.includes(Status))        { fields.push('Status = ?');     vals.push(Status); }
-        if (ResponsiblePerson !== undefined) { fields.push('ResponsiblePerson = ?'); vals.push(ResponsiblePerson); }
+        if (responsible) {
+            fields.push('ResponsiblePerson = ?', 'ResponsibleEmployeeID = ?');
+            vals.push(responsible.EmployeeName, responsible.EmployeeID);
+        }
         if (Department !== undefined)        { fields.push('Department = ?');        vals.push(Department); }
         if (RequestDate !== undefined)       { fields.push('RequestDate = ?');       vals.push(RequestDate); }
         if (req.body.SafetyImpact !== undefined)      { fields.push('SafetyImpact = ?');      vals.push(impact.SafetyImpact); }
@@ -2957,21 +3194,51 @@ router.put('/notices/:id', isAdmin, _handleUpload('attachment'), async (req, res
                 updatedFields: fields.map(field => field.split(' = ')[0]),
                 replacedAttachment: Boolean(req.file),
                 impact,
+                responsibleEmployeeId: responsible?.EmployeeID || rows[0].ResponsibleEmployeeID || null,
+                responsiblePerson: responsible?.EmployeeName || rows[0].ResponsiblePerson || null,
+                responsibleDepartment: responsible?.Department || null,
+                responsibleEmailReady: responsible ? responsible.EmailReady : undefined,
+                departmentMismatch: responsible
+                    ? noticeDepartmentMismatch(Department !== undefined ? Department : rows[0].Department, responsible.Department)
+                    : undefined,
             }),
             statusCode: 200,
         });
         if (Status === 'Pending' && rows[0].Status !== 'Pending') {
             const creatorEmail = await getEmployeeCompanyEmail(rows[0].CreatedByID);
-            const recipients = uniqueRecipients([creatorEmail, FOURM_ADMIN_EMAIL]);
+            const responsibleEmail = responsible?.CompanyEmail
+                || await getEmployeeCompanyEmail(rows[0].ResponsibleEmployeeID);
+            const recipients = uniqueRecipients([responsibleEmail, creatorEmail, FOURM_ADMIN_EMAIL]);
             const mail = buildNoticeStatusEmail({
                 NoticeNo: rows[0].NoticeNo,
                 Title: Title !== undefined ? Title : rows[0].Title,
                 Department: Department !== undefined ? Department : rows[0].Department,
+                ResponsiblePerson: responsible?.EmployeeName || rows[0].ResponsiblePerson,
             }, 'Pending');
             await queueFourMEmail({
                 to: recipients.join(','),
                 noticeId: id,
                 eventType: 'NoticePending',
+                subject: mail.subject,
+                body: mail.body,
+                html: mail.html,
+            });
+        }
+        if (responsibleChanged) {
+            const creatorEmail = await getEmployeeCompanyEmail(rows[0].CreatedByID);
+            const reassignedNotice = {
+                NoticeNo: rows[0].NoticeNo,
+                Title: Title !== undefined ? Title : rows[0].Title,
+                Department: Department !== undefined ? Department : rows[0].Department,
+                ResponsiblePerson: responsible.EmployeeName,
+                ResponsibleDepartment: responsible.Department || null,
+                Status: Status || rows[0].Status,
+            };
+            const mail = buildNoticeReassignedEmail(reassignedNotice);
+            await queueFourMEmail({
+                to: uniqueRecipients([responsible.CompanyEmail, creatorEmail, FOURM_ADMIN_EMAIL]).join(','),
+                noticeId: id,
+                eventType: 'NoticeReassigned',
                 subject: mail.subject,
                 body: mail.body,
                 html: mail.html,
@@ -2991,7 +3258,9 @@ router.post('/notices/:id/close', _handleUpload('closingDoc'), async (req, res) 
         await ensureTables();
         const { id } = req.params;
         const [rows] = await db.query(
-            'SELECT id, NoticeNo, Title, Department, ChangeType, CreatedByID, Status, ClosingDocUrl FROM FourM_ChangeNotices WHERE id = ?', [id]
+            `SELECT id, NoticeNo, Title, Department, ChangeType, CreatedByID,
+                    ResponsibleEmployeeID, ResponsiblePerson, Status, ClosingDocUrl
+             FROM FourM_ChangeNotices WHERE id = ?`, [id]
         );
         if (!rows.length) {
             if (req.file) deleteLocalUpload(req.file.path);
@@ -3042,9 +3311,10 @@ router.post('/notices/:id/close', _handleUpload('closingDoc'), async (req, res) 
             statusCode: 200,
         });
         const creatorEmail = await getEmployeeCompanyEmail(notice.CreatedByID);
+        const responsibleEmail = await getEmployeeCompanyEmail(notice.ResponsibleEmployeeID);
         const closeMail = buildNoticeStatusEmail(notice, 'Closed');
         await queueFourMEmail({
-            to: uniqueRecipients([creatorEmail, FOURM_ADMIN_EMAIL]).join(','),
+            to: uniqueRecipients([responsibleEmail, creatorEmail, FOURM_ADMIN_EMAIL]).join(','),
             noticeId: id,
             eventType: 'NoticeClosed',
             subject: closeMail.subject,

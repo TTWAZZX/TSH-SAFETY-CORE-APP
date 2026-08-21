@@ -32,8 +32,51 @@
   for already-approved issue `#90042` returned HTTP 200 with no duplicate event
   or email. No temporary rows were created; remaining count is 0.
 
-## Current 4M Change Management Handoff (2026-08-19, deployed)
+## Current 4M Change Management Handoff (2026-08-21, deployed)
 
+- Deployed Training Matrix fix: `Paste Employee IDs` now saves eligible IDs
+  immediately instead of only selecting hidden checkboxes and showing a
+  misleading `Added` toast. Success requires a GET read-back that confirms the
+  active assignments are visible; missing/blocked IDs are reported separately.
+  Manual checkbox assignment uses the same verified save path. The duplicate
+  legacy modal declaration is renamed so it cannot override the active
+  paste-capable implementation. Cache key:
+  `20260821-fourm-paste-assign-r1`. No upload or business-data migration is
+  required. Controlled assignment POST/GET read-back passed and cleanup left
+  zero temporary rows.
+- Production work on 2026-08-21 adds Admin-selectable Change Notice
+  responsibility from Employee Master. `ResponsibleEmployeeID` is the stable
+  identity while `ResponsiblePerson` remains the legacy-compatible name
+  snapshot. Notice and responsible departments stay independent; the UI warns
+  but allows cross-department assignment. User-created notices remain forced to
+  the authenticated user's EmployeeID. NoticeCreated/Pending/Closed and
+  NoticeReassigned email recipients now include the responsible employee's
+  validated CompanyEmail plus creator/Admin as applicable. Missing responsible
+  email does not block saving. `mine=1` and Safety 360 use EmployeeID with
+  name fallback for legacy rows. Node/PHP focused parity and 4M stabilization
+  tests pass. Production authenticated UAT passed responsible search and
+  permissions, assigned-user `My Notices`, responsible CompanyEmail delivery,
+  and Training assignment read-back. Browser UAT passed all four 4M views with
+  zero runtime errors. FTP download-back matched 6/6; database/uploads/code
+  rollback evidence is under
+  `backups/production/fourm-controlled-uat-prebackup-20260821-111822/` and
+  `backups/production/fourm-responsible-paste-predeploy-20260821-112312/`.
+  Cleanup confirmed temporary rows/files `0` and restored `api/index.php` hash.
+- Production work on 2026-08-21 adds an Admin-only Training Matrix bulk
+  curriculum-code change workflow. It requires a read-only preview, scopes by
+  year/department and active state, blocks the whole batch on collisions,
+  ambiguous matches, or overlength codes, and applies all rows in one locked
+  transaction with per-curriculum audit history. Node and PHP production routes
+  are kept in parity. No schema, upload-storage, or existing business-data
+  change is required. Deployment `20260821-fourm-bulk-code-r1` passed FTP
+  SHA-256 verification 5/5 and authenticated controlled UAT for Anonymous,
+  User, and Admin permission boundaries, preview, validation, and transaction
+  rollback. Full backup evidence is under
+  `backups/production/fourm-bulk-code-predeploy-20260821-101238/`; UAT evidence
+  is under
+  `backups/production/fourm-bulk-code-controlled-uat-20260821T032248Z/`.
+  Business data changed `false`, temporary rows remaining `0`, and the remote
+  backup helper/archive were removed and verified FTP-absent plus HTTP 404.
 - Training Matrix workspace UX revision is deployed as
   `20260820-fourm-training-workspace-r6`.
   Desktop uses independent curriculum/detail scrolling with sticky detail

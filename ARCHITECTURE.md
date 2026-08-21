@@ -235,6 +235,49 @@ Major modules include Admin/System Console, Dashboard, Patrol, CCCF, Machine Saf
 | `/api/activity-targets/employee/:empId` | User (write=Admin) | GET/PUT per-person override targets (IsNA supported) |
 | `/api/activity-targets/me` | User | My merged targets + actual yearly counts for all 9 activities |
 
+### 4M Training Matrix bulk curriculum-code update
+
+- `POST /api/fourm/training-curriculums/bulk-code-preview` is Admin-only and
+  returns the exact proposed old/new codes without writing data.
+- `PUT /api/fourm/training-curriculums/bulk-code` is Admin-only and recomputes
+  the preview while holding `FourM_Curriculums` rows for the selected year with
+  `FOR UPDATE`. Any conflict, invalid row, or change since preview blocks the
+  complete batch.
+- Code uniqueness remains `(Year, Department, CurriculumCode)`. A two-pass
+  temporary-code update avoids intermediate unique-key collisions; the final
+  update and per-row `CURRICULUM_CODE_BULK_UPDATE` history entries are atomic.
+- The operation changes only `CurriculumCode`. Linked courses and employee
+  assignments retain their existing `CurriculumID`; curriculum `Year`, training
+  history, and upload storage are not changed.
+- Node development behavior lives in `backend/routes/fourm.js`; PHP production
+  parity lives in `api/handlers/fourm_phase7.php`.
+
+### 4M Change Notice responsible-person assignment
+
+- `FourM_ChangeNotices.ResponsibleEmployeeID` is the stable Employee Master
+  identity. `ResponsiblePerson` remains the display-name snapshot and preserves
+  compatibility for legacy notices where the new ID is `NULL`.
+- Admins search the scoped `GET /api/fourm/responsible-employees?q=` endpoint.
+  It returns EmployeeID, name, department, unit, position, and validated Company
+  Email readiness. Ordinary users cannot use this directory endpoint and the
+  create API always assigns them to their own authenticated EmployeeID.
+- Notice `Department` and the responsible employee's `Department` are
+  intentionally independent. The browser warns on a mismatch but does not
+  block cross-department responsibility; the API records the exact selected
+  EmployeeID without rewriting the Notice department.
+- `NoticeCreated`, `NoticePending`, `NoticeClosed`, and `NoticeReassigned`
+  resolve the responsible recipient from the current Employee Master
+  `CompanyEmail`. Recipients are validated against
+  `@thaisummit-harness.co.th` and de-duplicated with the creator/Admin where
+  applicable. Missing/invalid responsible email never blocks the Notice write;
+  the Admin recipient remains the fallback.
+- `mine=1` includes notices created by or assigned to the authenticated user.
+  Safety 360 uses `ResponsibleEmployeeID`, with a name fallback only for legacy
+  rows where that ID is `NULL`.
+- Node and PHP lazily add `ResponsibleEmployeeID VARCHAR(50) NULL` plus
+  `idx_responsible_employee`. Production deployment therefore requires the
+  normal fresh DB/upload/code backup before the first updated 4M request.
+
 ### Generic CRUD Tables
 ตารางเหล่านี้มี auto-generated CRUD endpoints (GET/POST/PUT/DELETE):
 `Patrol_Sessions`, `Patrol_Attendance`, `Patrol_Issues`, `Patrol_Areas`, `CCCF_Activity`, `CCCF_Targets`,

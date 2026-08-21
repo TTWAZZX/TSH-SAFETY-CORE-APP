@@ -2,6 +2,107 @@
 
 This file preserves historical production handoff, smoke test, backup, deployment, migration, and phase notes moved out of `CLAUDE.md`.
 
+## 4M Training Matrix Paste Employee IDs Fix (2026-08-21, deployed)
+
+Changed the Paste Employee IDs action from a selection-only step with a
+misleading `Added` toast into an immediate assignment action. The frontend now
+posts eligible pasted IDs to the curriculum assignment API, reads the active
+assignment list back, and only reports success after every non-rejected ID is
+visible. Missing and cross-curriculum blocked IDs are reported separately.
+
+Manual checkbox selection continues to use the bottom `Assign Selected` action
+and now shares the same write/read-back verification. The older duplicate
+`showAssignEmployeesModal` declaration was quarantined under a legacy name so
+it cannot override the active paste-capable implementation. Cache key is
+`20260821-fourm-paste-assign-r1`. No API, schema, upload-storage, or existing
+business-data migration is required.
+
+Production verification used a real curriculum assignment POST followed by an
+active-row GET read-back. The controlled curriculum, linked course,
+assignment, history, and Course Master rows were removed after UAT; remaining
+count is `0`.
+
+## 4M Change Notice Responsible Person Assignment (2026-08-21, deployed)
+
+Added an Admin Employee Master picker to Change Notice create/edit. The picker
+searches employee code, name, department, and position; shows CompanyEmail
+readiness; and warns without blocking when the Notice department differs from
+the responsible employee's department. Ordinary users remain self-assigned and
+cannot spoof another EmployeeID.
+
+Notice ownership now stores stable `ResponsibleEmployeeID` alongside the
+existing `ResponsiblePerson` name snapshot. Legacy notices with a null ID
+remain readable/editable and retain name-based Safety 360 fallback. `My
+Notices` now includes both created and assigned records.
+
+Node/PHP parity sends `NoticeCreated`, `NoticePending`, `NoticeClosed`, and new
+`NoticeReassigned` notifications to the responsible employee's validated
+Employee Master CompanyEmail, plus creator/Admin where applicable, with
+case-insensitive recipient de-duplication. A missing or invalid responsible
+email does not block the Notice write and falls back to Admin notification.
+
+Local verification passes the focused Node/PHP responsible-person parity test,
+4M stabilization regression, JavaScript syntax, and PHP lint. Schema change is
+the lazy-compatible nullable `ResponsibleEmployeeID VARCHAR(50)` plus index;
+no existing rows are rewritten and upload storage is unchanged.
+
+Production UAT passed Admin Employee Master search, User 403 permission
+boundary, Admin creation for another responsible employee, assigned-user `My
+Notices`, and `NoticeCreated` delivery to the responsible CompanyEmail. Browser
+UAT rendered Dashboard, Change Notice, Man Record, and Training Matrix with
+zero runtime errors.
+
+Fresh rollback evidence: database backup
+`backups/production/fourm-controlled-uat-prebackup-20260821-111822/` (147
+tables, SHA-256
+`21afeab33ee7e1c2fbc9a3d9248f94aee2daefabde2dfda6287a4c849e4d8969`),
+uploads/code backup
+`backups/production/fourm-responsible-paste-predeploy-20260821-112312/` (776
+files / 1,152,308,206 bytes), and final FTP download-back verification
+`backups/production/fourm-responsible-paste-upload-verify-20260821-113159/`
+(6/6 SHA-256 matches). Controlled UAT evidence is under
+`backups/production/fourm-controlled-uat-run-20260821-1787286463238/`.
+Cleanup confirmed temporary rows `0`, temporary Production files `0`, and
+restored `api/index.php` SHA-256
+`287494115eb370c30cc2811df0fdff9c0f3b0a0578512e1bdf75aa0451af7454`.
+
+## 4M Training Matrix Bulk Curriculum Code Change (2026-08-21, deployed)
+
+Added an Admin-only bulk code workflow for curriculum codes such as
+`PD2CU681008` -> `PD2CU691008`. The modal scopes changes to the selected year,
+optional department, and active curricula by default. Apply remains disabled
+until a server-generated preview passes.
+
+Node and PHP production handlers both revalidate under a database transaction,
+lock the year's curriculum rows, block the complete batch on duplicate final
+codes, ambiguous multiple matches, or codes longer than 50 characters, and use
+a temporary-code pass to avoid transient unique-key collisions. Every changed
+curriculum receives a `CURRICULUM_CODE_BULK_UPDATE` history row. Courses,
+employee assignments, training results, and the separate curriculum `Year`
+remain unchanged because relations continue to use `CurriculumID`.
+
+Focused Node/PHP parity, 4M stabilization, frontend module syntax, PHP lint,
+permission audit, and diff checks pass. No schema, upload-storage, or existing
+business-data change is required.
+
+Production deployment completed with cache key
+`20260821-fourm-bulk-code-r1`. A fresh full rollback backup is stored under
+`backups/production/fourm-bulk-code-predeploy-20260821-101238/`: 147 database
+tables, DB archive SHA-256
+`5e605f677055b8a08606beac8a82810aceb955bc3c25ccec2f2ced94cf755def`,
+776 uploaded files / 1,152,308,206 bytes, and five previous runtime files.
+FTP upload/download-back SHA-256 matched 5/5 under
+`backups/production/fourm-bulk-code-upload-verify-20260821-102107/`.
+
+Authenticated controlled Production UAT passed static hashes, Anonymous 401,
+User preview/apply 403, Admin read/validation/preview, and the transactional
+no-match rollback path. Production curriculum rows were identical before and
+after UAT; business data changed `false` and temporary rows remaining `0`.
+Evidence is under
+`backups/production/fourm-bulk-code-controlled-uat-20260821T032248Z/`.
+The temporary backup helper and remote SQL archive were deleted and verified
+absent by FTP plus HTTP 404.
+
 ## Card Image Export Phase 2D Production Rollout (2026-08-20)
 
 Enabled the exact OJT `scw-hero` and Safety Training `training-hero` shared
