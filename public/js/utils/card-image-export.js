@@ -337,6 +337,9 @@ export function captureCardImage(target, options = {}) {
                 logging: false,
                 width: plan.width,
                 windowWidth: plan.width,
+                ...(profile.fullHeightViewport ? {
+                    windowHeight: Math.ceil(Math.max(plan.estimatedHeight, globalThis.innerHeight || 0)),
+                } : {}),
                 scrollX: 0,
                 scrollY: 0,
                 onclone: cloneDocument => normalizeClone(cloneDocument, sessionId, plan, controls, options),

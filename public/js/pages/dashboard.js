@@ -14,6 +14,14 @@ let _myTargetsExpanded = false;
 let _myTargetsSnapshot = { targets: [], year: null, eligibility: null };
 let _dbCardSaveHold = null;
 let _dbCardSaveMenu = null;
+
+function resolveDashboardCccfWorkerSource(config = {}, year = new Date().getFullYear()) {
+    const annual = config?.cccfWorkerSourceByYear;
+    const source = annual && typeof annual === 'object' && !Array.isArray(annual)
+        ? annual[String(parseInt(year, 10))] || config?.cccfWorkerSource
+        : config?.cccfWorkerSource;
+    return source === 'actual_department_worker' ? 'actual_department_worker' : 'manual_unit_target';
+}
 let _dashboardFocus = {
     health: null,
     actions: null,
@@ -386,7 +394,7 @@ function _dbSafeFilePart(value) {
 
 async function openDashboardConfigModal() {
     if (!_isAdmin) return;
-    const cfg = { healthGreen: 85, healthAmber: 65, alertDueSoonDays: 7, hiddenModules: [], pinnedDepartments: [], cccfWorkerSource: 'manual_unit_target', ...(_dashboardConfig || {}) };
+    const cfg = { healthGreen: 85, healthAmber: 65, alertDueSoonDays: 7, hiddenModules: [], pinnedDepartments: [], cccfWorkerSource: 'manual_unit_target', cccfWorkerSourceByYear: {}, ...(_dashboardConfig || {}) };
     const deptRes = await API.get('/master/departments').catch(() => ({ data: [] }));
     const departments = (deptRes?.data || []).map(d => d.Name || d.name || d).filter(Boolean);
     const pinnedSet = new Set(cfg.pinnedDepartments || []);
@@ -412,11 +420,11 @@ async function openDashboardConfigModal() {
             <div class="grid grid-cols-1 sm:grid-cols-2 gap-2 rounded-xl border border-slate-200 bg-slate-50 p-2">
                 <label class="flex items-start gap-2 rounded-lg border border-slate-100 bg-white px-3 py-2 text-sm text-slate-700">
                     <input type="radio" name="cccfWorkerSource" value="manual_unit_target" class="mt-1 accent-emerald-600" ${cfg.cccfWorkerSource === 'actual_department_worker' ? '' : 'checked'}>
-                    <span><span class="block font-bold">Admin monitoring engine</span><span class="block text-xs text-slate-400">Use capped Actual toward target from cccf_worker engine</span></span>
+                    <span><span class="block font-bold">Manual / Override fallback</span><span class="block text-xs text-slate-400">ค่าเริ่มต้นเมื่อปีนั้นยังไม่ได้กำหนดโหมดจากหน้า CCCF</span></span>
                 </label>
                 <label class="flex items-start gap-2 rounded-lg border border-slate-100 bg-white px-3 py-2 text-sm text-slate-700">
                     <input type="radio" name="cccfWorkerSource" value="actual_department_worker" class="mt-1 accent-emerald-600" ${cfg.cccfWorkerSource === 'actual_department_worker' ? 'checked' : ''}>
-                    <span><span class="block font-bold">Actual worker records</span><span class="block text-xs text-slate-400">Use the same cccf_worker engine; raw records remain audit-only</span></span>
+                    <span><span class="block font-bold">Actual records fallback</span><span class="block text-xs text-slate-400">ค่าเริ่มต้นจากรายการ Worker จริงเมื่อปีนั้นยังไม่ได้กำหนดโหมด</span></span>
                 </label>
             </div>
         </div>
@@ -461,6 +469,7 @@ async function openDashboardConfigModal() {
                 healthAmber: parseInt(fd.get('healthAmber'), 10),
                 alertDueSoonDays: parseInt(fd.get('alertDueSoonDays'), 10),
                 cccfWorkerSource: fd.get('cccfWorkerSource') === 'actual_department_worker' ? 'actual_department_worker' : 'manual_unit_target',
+                cccfWorkerSourceByYear: cfg.cccfWorkerSourceByYear || {},
                 pinnedDepartments: fd.getAll('pinnedDepartments').map(s => String(s).trim()).filter(Boolean),
                 hiddenModules: DASHBOARD_MODULES.map(m => m.hash).filter(hash => !fd.getAll('visibleModules').includes(hash)),
             };
@@ -697,7 +706,7 @@ function _renderComplianceMatrix(d) {
         </div>`;
         return;
     }
-    const cccfWorkerLabel = d.config?.cccfWorkerSource === 'actual_department_worker' ? 'CCCF A (Actual)' : 'CCCF A (Manual)';
+    const cccfWorkerLabel = resolveDashboardCccfWorkerSource(d.config, d.year) === 'actual_department_worker' ? 'CCCF A (Actual)' : 'CCCF A (Manual)';
     const cols = [
         ['activityTargets', 'Targets'],
         ['cccfWorker', cccfWorkerLabel],

@@ -258,6 +258,7 @@ function dashboard_yokoten_company_progress(int $year): array
 
 function dashboard_compliance_matrix(int $year, array $config): array
 {
+    $cccfWorkerSource = dashboard_cccf_worker_source_for_year($config, $year);
     $deptRows = safe_rows('SELECT Name FROM master_departments ORDER BY Name ASC');
     $allDeptNames = array_values(array_filter(array_map(static function ($row) {
         return trim((string) ($row['Name'] ?? ''));
@@ -293,11 +294,6 @@ function dashboard_compliance_matrix(int $year, array $config): array
           WHERE (r.IsDeleted IS NULL OR r.IsDeleted=0)"
     );
     $patrolIssueRows = safe_rows('SELECT IssueID,ResponsibleDept,CurrentStatus FROM patrol_issues WHERE YEAR(DateFound)=?', [$year]);
-    try {
-        $cccfWorkerProgress = cccf_worker_progress_data($year, false);
-    } catch (Throwable $e) {
-        $cccfWorkerProgress = ['departments' => [], 'overall' => []];
-    }
     $cccfUnitSetting = db_row("SELECT value FROM app_settings WHERE key_name='cccf_unit_sel' LIMIT 1") ?: [];
     $cccfUnitTargetRows = safe_rows(
         'SELECT unit_name Unit,yearly_target target,achieved_override achievedOverride
@@ -308,7 +304,11 @@ function dashboard_compliance_matrix(int $year, array $config): array
     $cccfWorkerUnitRows = safe_rows(
         "SELECT TRIM(COALESCE(SafetyUnit,'')) Unit,
                 MAX(TRIM(COALESCE(Department,''))) Department,
-                COUNT(*) computedAchieved
+                COUNT(DISTINCT COALESCE(
+                    NULLIF(TRIM(EmployeeID),''),
+                    NULLIF(LOWER(TRIM(EmployeeName)),''),
+                    CONCAT('__legacy_row__',id)
+                )) computedAchieved
            FROM cccf_forma_worker
           WHERE YEAR(SubmitDate)=?
           GROUP BY TRIM(COALESCE(SafetyUnit,''))",
@@ -401,19 +401,6 @@ function dashboard_compliance_matrix(int $year, array $config): array
     foreach ($patrolIssueCounts as $key => $counts) {
         $patrolIssues[$key] = $counts['total'] > 0 ? percent($counts['closed'], $counts['total']) : 100;
     }
-    $cccfWorkerEngine = [];
-    foreach (($cccfWorkerProgress['departments'] ?? []) as $row) {
-        $dept = dashboard_department_key((string) ($row['department'] ?? ''));
-        $target = max(0, (int) ($row['personalTargetTotal'] ?? 0));
-        if ($dept !== '' && $target > 0) {
-            $cccfWorkerEngine[$dept] = [
-                'value'=>percent($row['actualTowardTarget'] ?? 0, $target),
-                'numerator'=>min(max(0, (int)($row['actualTowardTarget'] ?? 0)), $target),
-                'denominator'=>$target,
-                'source'=>'CCCF per-person actual target engine',
-            ];
-        }
-    }
     $selectedCccfUnits = [];
     foreach (dashboard_parse_array($cccfUnitSetting['value'] ?? '') as $unit) {
         $key = dashboard_unit_key((string)$unit);
@@ -434,7 +421,7 @@ function dashboard_compliance_matrix(int $year, array $config): array
         $department = dashboard_department_key((string)($row['Department'] ?? ''));
         if ($department !== '') $cccfWorkerUnitDepartment[$unit] = $department;
     }
-    $cccfWorkerManual = [];
+    $cccfWorkerByUnit = [];
     foreach ($cccfUnitTargetRows as $row) {
         $unit = dashboard_unit_key((string)($row['Unit'] ?? ''));
         if ($unit === '' || ($selectedCccfUnits && !isset($selectedCccfUnits[$unit]))) continue;
@@ -443,22 +430,25 @@ function dashboard_compliance_matrix(int $year, array $config): array
         if ($department === '' || $target <= 0) continue;
         $computed = $cccfWorkerUnitActual[$unit] ?? 0;
         $rawOverride = $row['achievedOverride'] ?? null;
-        $achieved = ($rawOverride === null || $rawOverride === '')
+        $hasOverride = $rawOverride !== null && $rawOverride !== '';
+        $achieved = $cccfWorkerSource === 'actual_department_worker'
             ? $computed
-            : max(0, (int)$rawOverride);
-        if (!isset($cccfWorkerManual[$department])) {
-            $cccfWorkerManual[$department] = [
+            : ($hasOverride ? max(0, (int)$rawOverride) : $computed);
+        if (!isset($cccfWorkerByUnit[$department])) {
+            $cccfWorkerByUnit[$department] = [
                 'numerator'=>0,
                 'denominator'=>0,
                 'units'=>0,
-                'source'=>'CCCF manual Unit target/override',
+                'source'=>$cccfWorkerSource === 'actual_department_worker'
+                    ? 'Distinct CCCF Worker submitters / shared Unit targets'
+                    : 'CCCF manual Unit target/override',
             ];
         }
-        $cccfWorkerManual[$department]['numerator'] += min($achieved, $target);
-        $cccfWorkerManual[$department]['denominator'] += $target;
-        $cccfWorkerManual[$department]['units']++;
+        $cccfWorkerByUnit[$department]['numerator'] += min($achieved, $target);
+        $cccfWorkerByUnit[$department]['denominator'] += $target;
+        $cccfWorkerByUnit[$department]['units']++;
     }
-    foreach ($cccfWorkerManual as &$metric) {
+    foreach ($cccfWorkerByUnit as &$metric) {
         $metric['value'] = percent($metric['numerator'], $metric['denominator']);
     }
     unset($metric);
@@ -568,9 +558,7 @@ function dashboard_compliance_matrix(int $year, array $config): array
         $yokotenTarget = $yokotenTargets[$deptKey] ?? 0;
         $cccfAssignedTotal = $cccfAssigned[$deptKey] ?? 0;
         $targetMeta = $targetByDept[$deptKey] ?? ['slots'=>0,'covered'=>0,'missing'=>0,'zero'=>0,'na'=>0,'scope'=>0,'override'=>0,'template'=>0];
-        $cccfWorkerMetric = ($config['cccfWorkerSource'] ?? 'manual_unit_target') === 'actual_department_worker'
-            ? ($cccfWorkerEngine[$deptKey] ?? null)
-            : ($cccfWorkerManual[$deptKey] ?? null);
+        $cccfWorkerMetric = $cccfWorkerByUnit[$deptKey] ?? null;
         $patrolMetric = $patrolIssueCounts[$deptKey] ?? ['total'=>0,'closed'=>0];
         $accidentMetric = $accidentStats[$deptKey] ?? ['numerator'=>0,'denominator'=>0];
         $ojtMetric = $ojtStats[$deptKey] ?? null;

@@ -1,5 +1,38 @@
 # TSH Safety Core Activity - AI Quick Start
 
+## Current CCCF Form A Worker Mode Handoff (2026-08-22, deployed)
+
+- Production deployment is complete at cache key `20260822-cccf-worker-pdf-r10`. Backup/rollback point: `backups/production/cccf-worker-predeploy-20260822-160532`; upload verification: `backups/production/cccf-worker-upload-verify-20260822-162229`; final r10 verification: `backups/production/cccf-worker-pdf-r10-verify-20260822-164633`. FTP/HTTPS hashes, authenticated Manual/Actual/Permanent/Dashboard/Safety Core Data checks, and Production Manual/Actual PDF exports passed with zero browser runtime errors. The annual mode was restored to Manual / Override. No schema, business-record, permission, or upload-storage mutation occurred; temporary test rows remaining: `0`, and the root backup helper is absent by FTP plus HTTP 404.
+
+- Fixed the first-login Admin UI race: `cccf.js` is imported before authentication, so its former module-level `currentUser`/`isAdmin` constants could remain a User snapshot until a browser refresh. `loadCccfPage()` now refreshes its auth context from `TSHSession.getUser()` before choosing Admin/User API requests or rendering controls. Same-page logout/login and module navigation therefore re-evaluate both Admin and User roles without widening backend permissions.
+- Admin selects the Form A Worker calculation mode per year from the Worker page. `cccfWorkerSourceByYear[YYYY]` in the existing Dashboard config JSON has priority; legacy `cccfWorkerSource` remains the fallback.
+- Manual / Override renders the manual Unit Summary and Admin Unit-edit workflow while hiding Actual-only Rank, My Records, Stop 1-6, Worker form/submit controls, and the normal All Records view. Its Export PDF action remains available and produces a Unit-progress report without Actual-only record data. Existing actual rows remain intact in a collapsed, year-scoped Admin audit disclosure.
+- Actual records preserves the existing Worker submission workflow, cards, filters, edit/delete actions, PDF, and related forms. Its Target is the same selected `CCCF_Unit_Targets.yearly_target` used by Manual; only Achieved changes to distinct Worker submitters for the selected year/Unit. Raw duplicate forms remain visible for audit but do not inflate KPI progress. Form A Permanent is unchanged.
+- Node/PHP Overview compliance and System Console > Safety Core Data use the same selected Unit scope, Unit targets, annual Worker source, and distinct-Actual rule. Safety Core Data labels its Worker column as Manual or Actual; its separate CCCF Permanent column and Form A Permanent workflow are unchanged. The Worker Unit summary now leads with `ต้องส่ง / ส่งแล้ว / ยังไม่ส่ง / ความคืบหน้า` and per-Unit progress bars; Actual-only personal-target/raw-record diagnostics remain available to Admin in a collapsed disclosure. Worker PDF export is mode-aware: Manual produces a summary plus every configured Unit; Actual adds audit metrics, compact Rank A/B treatment, Stop counts, and paginated actual-record details with EmployeeID and attachment status. No MySQL schema, business-record, permission, upload-storage, or `backend/uploads/` change. Cache key: `20260822-cccf-worker-pdf-r7`. This change is local and has not been deployed.
+- Focused Node/PHP parity regression, JavaScript syntax, PHP lint, full backend suite/read-permission UAT `94/94`, and authenticated Manual/Actual/Overview/Safety Core Data/Permanent browser UAT pass. Auth regression covers Admin and User session transitions in the same loaded module. Browser navigation Hiyari -> CCCF without refresh displayed both Admin source buttons and all 21 Manual edit controls, omitted the User fallback, and produced zero runtime errors. The simplified summary check passed with Actual totals `1538 / 1 / 1537 / 0%`, Maintenance `23 / 1 / 22 / 4%`; Manual totals remain `1538 / 1315 / 223 / 86%` and Maintenance `23 / 23 / 0 / 100%`. Final PDF UAT exported and visually inspected Manual 3 pages plus Actual 4 pages; all 21 Unit rows, document metadata, signatures, Actual EmployeeID/detail/attachment columns, and page footers are present. Rendered-page pixel checks passed `7/7` with no clipped header pixels, browser errors were `0`, and the local annual mode was restored to Manual. Run `npm --prefix backend run test:cccf-worker-mode` after related changes.
+
+## Current Hiyari History Filter Handoff (2026-08-22, local)
+
+- Root cause: History sends the department query as `dept`, while the shared-hosting PHP route read only `department`; PHP also ignored `stopType`, `month`, `area`, and `q`.
+- `GET /api/hiyari` now has Node/PHP parity for `status`, `risk`, `dept`/`department`, `stopType`, `rank`, `month`, `area`, `year`, `q`, and `review`/`reviewStatus`. SQL remains parameterized and viewer visibility is unchanged.
+- No MySQL schema, business-data, permission, frontend cache, or `backend/uploads/` change. This fix is local and has not yet been deployed.
+- Focused filter regression, Node syntax, PHP lint, UTF-8 scan, diff check, full backend test, and read/permission UAT `94/94` pass. Browser UAT passed department `2/35`, Stop 5 `13/35`, Stop 5 + July `1/35`, area `6/35`, name search `1/35`, combined empty state, and Clear restoring `35/35`, with no new browser errors.
+
+## Current Hiyari Assignment Progress Handoff (2026-08-22, deployed)
+
+- Hiyari Manage > Assignment Progress now uses the selected calendar year, matching the assignment-driven dashboard KPI, instead of resetting every assignee to `ยังไม่ส่ง` when the current month has no report.
+- The imported Production snapshot resolves to 33 submitted assignees out of 66 assignments for 2026; the old August-only filter resolved to 0/66. Per-person status and department progress now use the same annual reporter-ID set.
+- The complete Assignment panel supports right-click PNG download. This exact tall panel uses the shared deterministic exporter, while all other Hiyari image targets retain the existing exporter.
+- The existing two-page Hiyari PDF summary is preserved and now appends paginated assignee-register pages showing name, EmployeeID, department, due date, sent/not-sent, report count, and follow-up status. Page totals update automatically.
+- The hero heading is now `รายงานเหตุการณ์เกือบเกิดอุบัติเหตุ`. Cache key: `20260822-hiyari-assignment-export-r12`. No API, schema, permission, business-data, or upload-storage change.
+- Production backup `backups/production/ky-hiyari-predeploy-20260822-130637/` contains 147 DB tables and 777 uploads. FTP and HTTPS hashes passed 6/6; authenticated Production UAT passed the 66-row PNG and seven-page PDF with zero JavaScript errors. The temporary HMAC backup helper is FTP-absent and HTTP 404.
+
+## Current KY Card Image Export Handoff (2026-08-22, deployed)
+
+- Fixed blank/off-screen rows and clipped labels in the KY Program Progress and Evidence Completion PNG downloads by moving only those two targets to the shared deterministic exporter.
+- KY requests a full-height capture viewport, waits for assets/fonts, expands truncated text in the clone, and preserves the legacy exporter as fallback. Cache key: `20260822-ky-export-r1`.
+- No API, schema, permission, business-data, or upload-storage change. The shared-export regression passes 19/19. Authenticated Production UAT downloaded and visually verified both complete PNGs with all department/Safety Unit rows and no clipped labels; an unrelated 4M page loaded with zero JavaScript errors.
+
 ## Project Overview
 
 ระบบจัดการกิจกรรมความปลอดภัย (Safety Core Activity) สำหรับองค์กร TSH
@@ -3166,6 +3199,7 @@ let _assignments = [];     // loaded from GET /hiyari/assignments
 
 - **Dashboard**: Executive Summary Strip, clickable KPI cards (filter History), overdue alert strip, monthly trend, consequence chart, STOP×Rank matrix, SLA Compliance Gauge, Top Overdue/Near Due list, Department Risk Ranking, Near-Miss Heatmap, pinned dept summary
 - **KPI basis**: assignment-driven — total/submitted/pending/in-progress/closed/closure rate calculated against assigned employees (not raw report count)
+- **Assignment Progress scope**: the Manage assignment card and per-person `ส่งแล้ว` status use distinct assigned `ReporterID` values for the selected calendar year. They do not reset by the current month.
 - **SLA**: Rank A=7d, B=15d, C=30d — overdue rows: light red + "เกิน X วัน" badge; near-due: light amber + "เหลือ X วัน"
 - **Submit**: full-width 3-step wizard (Stop Type → Details → Recommendation+Attachment), image preview before upload
 - **History**: main admin control surface — view/filter/edit/delete/update status/export; clickable KPI cards auto-filter here; date range filter overrides year filter

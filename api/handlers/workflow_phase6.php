@@ -1216,10 +1216,27 @@ function handle_hiyari_routes(string $method, string $path): bool
     if($method==='GET'&&$path==='/hiyari'){
         $sql='SELECT * FROM hiyarireports WHERE DeletedAt IS NULL';
         $pa=[];
-        foreach(['status'=>'Status','department'=>'Department','risk'=>'RiskLevel','rank'=>'RiskRank','reviewStatus'=>'ReviewStatus'] as $q=>$c){
-            if(!empty($_GET[$q])&&$_GET[$q]!=='all'){$sql.=" AND $c=?";$pa[]=$_GET[$q];}
+        $department=$_GET['dept']??($_GET['department']??null);
+        $review=$_GET['review']??($_GET['reviewStatus']??null);
+        foreach([
+            [$_GET['status']??null,'Status'],
+            [$department,'Department'],
+            [$_GET['risk']??null,'RiskLevel'],
+            [$_GET['rank']??null,'RiskRank'],
+            [$review,'ReviewStatus'],
+        ] as [$value,$column]){
+            if($value!==null&&$value!==''&&$value!=='all'){$sql.=" AND $column=?";$pa[]=$value;}
         }
-        if(!empty($_GET['year'])){$sql.=' AND YEAR(ReportDate)=?';$pa[]=(int)$_GET['year'];}
+        $stopType=(int)($_GET['stopType']??0);
+        if($stopType>=1&&$stopType<=6){$sql.=' AND StopType=?';$pa[]=$stopType;}
+        $month=(int)($_GET['month']??0);
+        if($month>=1&&$month<=12){$sql.=' AND MONTH(ReportDate)=?';$pa[]=$month;}
+        $area=trim((string)($_GET['area']??''));
+        if($area!==''&&$area!=='all'){$sql.=" AND COALESCE(NULLIF(TRIM(Location),''),'Unspecified')=?";$pa[]=$area;}
+        $year=(int)($_GET['year']??0);
+        if($year>0){$sql.=' AND YEAR(ReportDate)=?';$pa[]=$year;}
+        $query=trim((string)($_GET['q']??''));
+        if($query!==''){$sql.=' AND (ReporterName LIKE ? OR Description LIKE ? OR Location LIKE ?)';$like='%'.$query.'%';array_push($pa,$like,$like,$like);}
         [$visibleSql,$visibleParams]=wf_hiyari_visibility_clause($user);
         $sql.=$visibleSql;
         $pa=array_merge($pa,$visibleParams);

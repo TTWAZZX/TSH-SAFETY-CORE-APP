@@ -99,6 +99,8 @@ async function main() {
             'pages/accident.js',
             'pages/dashboard.js',
             'pages/fourm.js',
+            'pages/hiyari.js',
+            'pages/ky.js',
             'pages/machine-safety.js',
             'pages/ojt.js',
             'pages/safety-culture.js',
@@ -108,10 +110,28 @@ async function main() {
         `Shared export imports must remain inside the approved Phase 2 rollout and pilot set: ${normalizedReferences.join(', ')}`,
     );
     const mainSource = fs.readFileSync(path.join(frontendRoot, 'main.js'), 'utf8');
-    const enabledModules = ['dashboard', 'accident', 'machine-safety', 'yokoten', 'fourm', 'safety-culture', 'ojt', 'training'];
+    const enabledModules = ['dashboard', 'accident', 'machine-safety', 'yokoten', 'fourm', 'safety-culture', 'ojt', 'training', 'ky'];
     enabledModules.forEach(moduleKey => {
         assert.ok(mainSource.includes(`'${moduleKey}'`), `Default card export module is missing: ${moduleKey}`);
     });
+    const kySource = fs.readFileSync(path.join(frontendRoot, 'pages', 'ky.js'), 'utf8');
+    assert.ok(
+        kySource.includes("new Set(['ky-program-progress', 'ky-evidence-completion'])"),
+        'KY shared image export must remain limited to the two approved progress targets',
+    );
+    assert.ok(
+        kySource.includes('fullHeightViewport: true'),
+        'KY progress exports must request a full-height capture viewport',
+    );
+    const hiyariSource = fs.readFileSync(path.join(frontendRoot, 'pages', 'hiyari.js'), 'utf8');
+    assert.ok(
+        hiyariSource.includes("if (name === 'hiyari-assignment-list')"),
+        'Hiyari shared image export must remain limited to the approved assignment-list target',
+    );
+    assert.ok(
+        !enabledModules.includes('hiyari'),
+        'Hiyari must keep its existing card exporter outside the assignment-list exception',
+    );
     assert.ok(
         mainSource.includes('cardImageExportV2 === undefined'),
         'Phase 2C must preserve an explicit emergency feature-flag override',

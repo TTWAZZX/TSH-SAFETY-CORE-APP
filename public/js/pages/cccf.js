@@ -3,7 +3,6 @@ import { showLoading, hideLoading, showError, showToast, openModal, closeModal, 
 import { createLatestRequestController, guardActionHandler, guardSubmitHandler, pageSkeleton } from '../utils/async-ui.js?v=20260715-phase32c-residual-async';
 
 // ─── Auth ─────────────────────────────────────────────────────────────────────
-const currentUser = TSHSession.getUser() || { name: '', id: '', department: '', team: '', role: 'User' };
 function hasAdminRole(user = {}) {
     const roleText = [
         user.role,
@@ -17,7 +16,22 @@ function hasAdminRole(user = {}) {
     ].map(v => String(v || '').trim().toLowerCase()).filter(Boolean);
     return user.isAdmin === true || user.IsAdmin === true || roleText.some(v => v === 'admin' || v.includes('admin'));
 }
-const isAdmin = hasAdminRole(currentUser);
+
+function resolveCccfAuthContext(sessionUser) {
+    const user = sessionUser && typeof sessionUser === 'object'
+        ? sessionUser
+        : { name: '', id: '', department: '', team: '', role: 'User' };
+    return { user, isAdmin: hasAdminRole(user) };
+}
+
+let currentUser = resolveCccfAuthContext(TSHSession.getUser()).user;
+let isAdmin = hasAdminRole(currentUser);
+
+function refreshCccfAuthContext() {
+    const auth = resolveCccfAuthContext(TSHSession.getUser());
+    currentUser = auth.user;
+    isAdmin = auth.isAdmin;
+}
 
 // expose closeModal สำหรับ inline onclick ใน modal HTML strings
 window.closeModal = closeModal;
@@ -59,8 +73,8 @@ let _employees     = [];
 let _assignments   = [];
 let _cccfForms     = [];
 let _safetyUnits   = [];   // { id, name, department_id, DeptName }
-let _unitTargets   = [];   // { unit_name, target_year, yearly_target } — yearly Form A record target
-let _dashboardConfig = { cccfWorkerSource: 'manual_unit_target' };
+let _unitTargets   = [];   // { unit_name, target_year, yearly_target } — yearly Form A people target
+let _dashboardConfig = { cccfWorkerSource: 'manual_unit_target', cccfWorkerSourceByYear: {} };
 let _cccfWorkerSource = 'manual_unit_target';
 let _cccfUnitSel   = null;   // null = all units, array = selected unit names
 let _cccfTargetSummary = null;
@@ -107,6 +121,78 @@ function escapeAttr(value) {
 
 function toInlineJsString(value) {
     return JSON.stringify(String(value ?? '')).replace(/"/g, '&quot;');
+}
+
+function normalizeCccfWorkerSource(source) {
+    return source === 'actual_department_worker' ? 'actual_department_worker' : 'manual_unit_target';
+}
+
+function resolveCccfWorkerSource(config = {}, year = new Date().getFullYear()) {
+    const annual = config?.cccfWorkerSourceByYear;
+    const annualSource = annual && typeof annual === 'object' && !Array.isArray(annual)
+        ? annual[String(parseInt(year, 10))]
+        : null;
+    return normalizeCccfWorkerSource(annualSource || config?.cccfWorkerSource);
+}
+
+function getCccfWorkerRecordsForYear(year = _unitYear) {
+    return _workerData.filter(row => new Date(row.SubmitDate).getFullYear() === Number(year));
+}
+
+function renderCccfWorkerModePanel() {
+    const isActual = _cccfWorkerSource === 'actual_department_worker';
+    const buddhistYear = _unitYear + 543;
+    const actualYearCount = getCccfWorkerRecordsForYear(_unitYear).length;
+    const currentYear = new Date().getFullYear();
+    const yearOptions = [currentYear, currentYear - 1, currentYear - 2]
+        .map(year => `<option value="${year}" ${year === _unitYear ? 'selected' : ''}>ปี ${year + 543}</option>`)
+        .join('');
+    const sourceButtons = isAdmin ? `
+      <div class="inline-flex rounded-xl border border-slate-200 bg-white p-1 shadow-sm" role="group" aria-label="รูปแบบติดตามผล Form A Worker">
+        <button type="button" data-cccf-source="manual_unit_target" onclick="window._cccfSetWorkerSource('manual_unit_target')"
+          aria-pressed="${!isActual ? 'true' : 'false'}"
+          class="px-3 py-2 rounded-lg text-xs font-black transition-colors ${!isActual ? 'bg-emerald-600 text-white shadow-sm' : 'text-slate-500 hover:bg-slate-50'}">
+          กรอกผลรวมราย Unit
+          <span class="block text-[9px] font-semibold opacity-75">Manual / Override</span>
+        </button>
+        <button type="button" data-cccf-source="actual_department_worker" onclick="window._cccfSetWorkerSource('actual_department_worker')"
+          aria-pressed="${isActual ? 'true' : 'false'}"
+          class="px-3 py-2 rounded-lg text-xs font-black transition-colors ${isActual ? 'bg-emerald-600 text-white shadow-sm' : 'text-slate-500 hover:bg-slate-50'}">
+          คำนวณจากแบบฟอร์มจริง
+          <span class="block text-[9px] font-semibold opacity-75">Actual records</span>
+        </button>
+      </div>` : `
+      <span class="inline-flex items-center px-3 py-2 rounded-xl border text-xs font-bold ${isActual ? 'border-blue-200 bg-blue-50 text-blue-700' : 'border-emerald-200 bg-emerald-50 text-emerald-700'}">
+        ${isActual ? 'คำนวณจากแบบฟอร์มที่ส่งจริง' : 'กรอกผลรวมราย Unit โดยผู้ดูแลระบบ'}
+      </span>`;
+
+    return `
+    <div id="cccf-worker-mode-panel" class="rounded-2xl border p-4 ${isActual ? 'border-blue-200 bg-blue-50/70' : 'border-emerald-200 bg-emerald-50/70'}">
+      <div class="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
+        <div class="flex items-start gap-3 min-w-0">
+          <div class="w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0 ${isActual ? 'bg-blue-600' : 'bg-emerald-600'} text-white font-black">
+            ${isActual ? 'A' : 'M'}
+          </div>
+          <div class="min-w-0">
+            <p class="text-sm font-black text-slate-800">รูปแบบติดตามผล Form A Worker · ปี ${buddhistYear}</p>
+            <p class="text-xs text-slate-600 mt-1 leading-relaxed">
+              ${isActual
+                ? 'ใช้แบบฟอร์มที่พนักงานส่งจริงในการคำนวณ และแสดง Rank, รายการของฉัน, Stop 1–6 และรายการทั้งหมด'
+                : 'ใช้ Target และผลที่ Admin กรอก/Override ราย Unit โดยไม่ใช้รายการแบบฟอร์มจริงในการคำนวณหน้าหลัก'}
+            </p>
+            ${!isActual && actualYearCount > 0 && isAdmin ? `
+              <p class="text-[10px] text-amber-700 mt-1.5">มีข้อมูล Actual เดิม ${actualYearCount.toLocaleString()} รายการในปีนี้ เก็บไว้ครบและเปิดดูได้ด้านล่าง แต่ไม่นำมาปนกับผล Manual</p>` : ''}
+          </div>
+        </div>
+        <div class="flex flex-wrap items-center gap-2 flex-shrink-0" data-cccf-card-ignore>
+          <select id="cccf-worker-mode-year" onchange="window._unitSetYear(+this.value)"
+            class="text-xs py-2 px-3 rounded-xl border border-slate-200 bg-white text-slate-600 focus:outline-none focus:border-emerald-400">
+            ${yearOptions}
+          </select>
+          ${sourceButtons}
+        </div>
+      </div>
+    </div>`;
 }
 
 function setupCccfCardImageExport() {
@@ -1027,6 +1113,9 @@ window._cccfEditWorker = (id) => {
 export async function loadCccfPage() {
     const container = document.getElementById('cccf-page');
     if (!container) return;
+    // The CCCF module is imported before login. Re-read the verified session on
+    // every page load so a same-page login/logout never leaves stale privileges.
+    refreshCccfAuthContext();
     const request = createLatestRequestController('cccf:page-load');
     container.innerHTML = pageSkeleton({ label: 'กำลังโหลดข้อมูล CCCF', cards: 3, rows: 6 });
     try {
@@ -1068,9 +1157,7 @@ export async function loadCccfPage() {
             ? Number(myWorkerMetric.yearlyTarget)
             : null;
         _dashboardConfig = dashboardConfigRes?.data || dashboardConfigRes || {};
-        _cccfWorkerSource = _dashboardConfig.cccfWorkerSource === 'actual_department_worker'
-            ? 'actual_department_worker'
-            : 'manual_unit_target';
+        _cccfWorkerSource = resolveCccfWorkerSource(_dashboardConfig, _unitYear);
         try {
             const savedUnits = settingRes?.value ? JSON.parse(settingRes.value) : null;
             _cccfUnitSel = Array.isArray(savedUnits)
@@ -1094,6 +1181,7 @@ export async function loadCccfPage() {
 // ─── Computed helpers ─────────────────────────────────────────────────────────
 function getFilteredWorker() {
     return _workerData.filter(r => {
+        if (new Date(r.SubmitDate).getFullYear() !== Number(_unitYear)) return false;
         if (_wFilterDept && r.Department !== _wFilterDept) return false;
         if (_wFilterUnit && (r.SafetyUnit || 'ไม่ระบุ') !== _wFilterUnit) return false;
         if (_wFilterRank && r.Rank !== _wFilterRank) return false;
@@ -1565,6 +1653,19 @@ function renderMyCard() {
 }
 
 // ─── Unit data helper ─────────────────────────────────────────────────────────
+function cccfWorkerPersonKey(row = {}) {
+    const employeeId = String(row.EmployeeID || '').trim();
+    if (employeeId) return `employee:${employeeId}`;
+    const employeeName = String(row.EmployeeName || '').trim().toLocaleLowerCase('th-TH');
+    if (employeeName) return `legacy-name:${employeeName}`;
+    const rowId = String(row.id || row.ID || '').trim();
+    return rowId ? `legacy-row:${rowId}` : '';
+}
+
+function countDistinctCccfWorkerSubmitters(rows = []) {
+    return new Set(rows.map(cccfWorkerPersonKey).filter(Boolean)).size;
+}
+
 function buildUnitData() {
     const masterUnitNames = _safetyUnits.map(u => normalizeUnitName(u.name)).filter(Boolean);
     const dataUnitNames   = [...new Set(_workerData.map(r => normalizeUnitName(r.SafetyUnit)).filter(Boolean))];
@@ -1581,7 +1682,7 @@ function buildUnitData() {
             normalizeUnitName(r.SafetyUnit) === unit &&
             new Date(r.SubmitDate).getFullYear() === _unitYear
         );
-        const achievedComputed = yearData.length;
+        const achievedComputed = countDistinctCccfWorkerSubmitters(yearData);
         const achievedOverride = (tgtRow?.achieved_override != null) ? tgtRow.achieved_override : null;
         const achieved = _cccfWorkerSource === 'actual_department_worker'
             ? achievedComputed
@@ -1690,11 +1791,19 @@ function renderCccfWorkerAdminMonitoring() {
           <td class="px-3 py-2 text-center text-[11px]">${bucketButton('exceeded', 'exceeded')}</td>
         </tr>`;
     }).join('');
-    return `<div class="mb-5 rounded-2xl border border-emerald-100 bg-white overflow-hidden" data-cccf-worker-admin-monitoring="phase3">
+    return `<details class="mb-5 rounded-2xl border border-slate-200 bg-white overflow-hidden group" data-cccf-worker-admin-monitoring="phase4">
+      <summary class="list-none cursor-pointer px-4 py-3 bg-slate-50 hover:bg-slate-100 transition-colors flex flex-wrap items-center justify-between gap-3" data-cccf-card-ignore>
+        <div>
+          <h4 class="text-sm font-black text-slate-800">รายละเอียดตรวจสอบสำหรับแอดมิน</h4>
+          <p class="text-[10px] text-slate-500 mt-0.5">ข้อมูลรายบุคคลและยอดดิบสำหรับตรวจสอบเมื่อยอดไม่ตรง</p>
+        </div>
+        <span class="text-[10px] font-bold text-slate-600">กดเพื่อดูรายละเอียด</span>
+      </summary>
+      <div>
       <div class="px-4 py-3 bg-gradient-to-r from-emerald-50 to-teal-50 border-b border-emerald-100 flex flex-wrap items-center justify-between gap-3">
         <div>
           <h4 class="text-sm font-black text-slate-800">CCCF Worker Admin Monitoring</h4>
-          <p class="text-[10px] text-slate-500 mt-0.5">Phase 3 · ใช้ calculation engine กลาง · Actual toward target = min(records, personal target)</p>
+          <p class="text-[10px] text-slate-500 mt-0.5">ข้อมูลตรวจสอบรายบุคคลเท่านั้น · KPI หลักใช้ Target ราย Unit และผู้ส่งจริงไม่ซ้ำ</p>
         </div>
         <span class="px-3 py-1.5 rounded-xl border text-[10px] font-bold ${allocationClass}">${allocationText} · เตือนเท่านั้น ไม่บล็อก</span>
       </div>
@@ -1740,7 +1849,8 @@ function renderCccfWorkerAdminMonitoring() {
           <tbody>${rows || `<tr><td colspan="10" class="px-3 py-8 text-center text-sm text-slate-400">ไม่มี Unit ในตัวกรองนี้</td></tr>`}</tbody>
         </table>
       </div>
-    </div>`;
+      </div>
+    </details>`;
 }
 
 // ─── Sub-renders ──────────────────────────────────────────────────────────────
@@ -1752,7 +1862,8 @@ function renderUnitSummary() {
 
     const totalTarget   = units.reduce((s, u) => s + u.target, 0);
     const totalAchieved = units.reduce((s, u) => s + u.achieved, 0);
-    const overallPct    = totalTarget > 0 ? Math.round((totalAchieved / totalTarget) * 100) : 0;
+    const totalRemaining = units.reduce((s, u) => s + u.remaining, 0);
+    const overallPct    = totalTarget > 0 ? Math.min(100, Math.round((totalAchieved / totalTarget) * 100)) : 0;
     const targetSummary = +_cccfTargetSummary?.year === _unitYear ? _cccfTargetSummary : null;
     const systemTarget = targetSummary?.systemTarget ?? null;
     const distributedTarget = targetSummary?.distributedTarget ?? null;
@@ -1763,44 +1874,36 @@ function renderUnitSummary() {
 
     const editSvg = `<svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"/></svg>`;
 
-    const sourceControl = isAdmin ? `
-        <div class="inline-flex rounded-lg border border-slate-200 bg-white p-0.5 shadow-sm" id="cccf-worker-source-filter" role="group" aria-label="CCCF worker source">
-          <button type="button" data-cccf-source="manual_unit_target" onclick="window._cccfSetWorkerSource('manual_unit_target')"
-            class="px-2.5 py-1.5 rounded-md text-[10px] font-black transition-colors ${!isActualSource ? 'bg-emerald-600 text-white shadow-sm' : 'text-slate-500 hover:bg-slate-50'}">
-            Manual / Override
-          </button>
-          <button type="button" data-cccf-source="actual_department_worker" onclick="window._cccfSetWorkerSource('actual_department_worker')"
-            class="px-2.5 py-1.5 rounded-md text-[10px] font-black transition-colors ${isActualSource ? 'bg-emerald-600 text-white shadow-sm' : 'text-slate-500 hover:bg-slate-50'}">
-            Actual records
-          </button>
-        </div>` : `
-        <span class="text-[10px] font-bold px-2.5 py-1 rounded-lg bg-slate-100 text-slate-500">
-          ${isActualSource ? 'Actual worker records' : 'Manual / Override progress'}
+    const sourceControl = `
+        <span class="text-[10px] font-bold px-2.5 py-1 rounded-lg ${isActualSource ? 'bg-blue-50 text-blue-700 border border-blue-100' : 'bg-emerald-50 text-emerald-700 border border-emerald-100'}">
+          ${isActualSource ? 'คำนวณจากผู้ส่งจริงไม่ซ้ำ' : 'ผล Manual / Override'}
         </span>`;
 
     const tableRows = units.map((u, i) => {
-        const bg = u.status === 'done' ? '#059669'
-            : u.status === 'progress' ? '#d97706'
-            : u.status === 'not_started' ? '#dc2626'
-            : '#64748b';
         const unitArg  = toInlineJsString(u.unit);
+        const progressPct = u.target > 0 ? Math.min(100, Math.round((u.achieved / u.target) * 100)) : 0;
+        const progressColor = progressPct >= 100 ? '#10b981' : progressPct >= 50 ? '#f59e0b' : '#ef4444';
         const overrideBadge = (!isActualSource && isAdmin && u.achievedOverride !== null)
-            ? `<span class="ml-1 text-[8px] font-bold opacity-70">(M)</span>` : '';
-        const statusLabel = u.status === 'done' ? 'ครบเป้า'
-            : u.status === 'progress' ? 'กำลังดำเนินการ'
-            : u.status === 'not_started' ? 'ยังไม่เริ่ม'
-            : 'ยังไม่ได้ตั้งเป้า';
-        const rowClick = `window._wSetUnit(${unitArg})`;
-        return `<tr class="text-white cursor-pointer hover:opacity-90 transition-opacity border-b border-white/20"
-          style="background:${bg}" onclick="${rowClick}">
-          <td class="px-3 py-2 text-center text-xs font-semibold opacity-70 w-7 flex-shrink-0">${i + 1}.</td>
-          <td class="px-3 py-2 text-xs font-semibold" style="white-space:normal;word-break:break-word">${escapeHtml(u.unit)}</td>
-          <td class="px-3 py-2 text-center text-xs font-bold w-16">${u.target > 0 ? u.target : 'N/A'}</td>
-          <td class="px-3 py-2 text-center text-xs font-bold w-16">${u.achieved}${overrideBadge}</td>
-          <td class="px-3 py-2 text-center text-[9px] font-bold w-24">${statusLabel}</td>
+            ? `<span class="ml-1 text-[8px] font-bold text-emerald-600">(M)</span>` : '';
+        const rowClick = isActualSource ? `window._wSetUnit(${unitArg})` : '';
+        return `<tr class="${isActualSource ? 'cursor-pointer hover:bg-slate-50' : ''} transition-colors border-b border-slate-100 bg-white"
+          ${rowClick ? `onclick="${rowClick}" title="คลิกเพื่อดูรายการของ Unit นี้"` : ''}>
+          <td class="px-3 py-3 text-center text-xs font-semibold text-slate-400 w-7 flex-shrink-0">${i + 1}.</td>
+          <td class="px-3 py-3 text-xs font-bold text-slate-700" style="white-space:normal;word-break:break-word">${escapeHtml(u.unit)}</td>
+          <td class="px-3 py-3 text-center text-sm font-black text-slate-800 w-20">${u.target > 0 ? u.target.toLocaleString() : 'N/A'}</td>
+          <td class="px-3 py-3 text-center text-sm font-black text-emerald-700 w-20">${u.achieved.toLocaleString()}${overrideBadge}</td>
+          <td class="px-3 py-3 text-center text-sm font-black ${u.remaining > 0 ? 'text-rose-600' : 'text-emerald-700'} w-20">${u.target > 0 ? u.remaining.toLocaleString() : 'N/A'}</td>
+          <td class="px-3 py-3 w-44">
+            <div class="flex items-center gap-2">
+              <div class="h-2 flex-1 rounded-full bg-slate-100 overflow-hidden">
+                <div class="h-full rounded-full" style="width:${progressPct}%;background:${progressColor}"></div>
+              </div>
+              <span class="w-10 text-right text-xs font-black text-slate-700">${u.target > 0 ? `${progressPct}%` : 'N/A'}</span>
+            </div>
+          </td>
           ${isAdmin && !isActualSource ? `<td class="px-1 py-2 text-center w-8">
             <button onclick="event.stopPropagation();window._cccfSetUnitTarget(${unitArg},${u.target},${u.achievedOverride !== null ? u.achievedOverride : 'null'},${u.achievedComputed})"
-              class="p-1 rounded text-white/50 hover:text-white hover:bg-white/20 transition-colors">${editSvg}</button>
+              class="p-1.5 rounded-lg text-slate-400 hover:text-emerald-700 hover:bg-emerald-50 transition-colors" title="แก้ไข Target และผล Manual">${editSvg}</button>
           </td>` : ''}
         </tr>`;
     }).join('');
@@ -1808,12 +1911,13 @@ function renderUnitSummary() {
     return `
     <!-- Stats strip -->
     <div class="flex flex-wrap items-center gap-3 mb-4">
-      <div class="flex gap-3">
+      <div class="grid grid-cols-2 sm:grid-cols-4 gap-3 flex-1">
         ${[
-          { label: 'Target (ครั้ง)', val: totalTarget.toLocaleString(), color: '#1e293b' },
-          { label: 'Achieved (ครั้ง)', val: totalAchieved.toLocaleString(), color: '#059669' },
-          { label: 'Percent', val: totalTarget > 0 ? overallPct + '%' : 'N/A', color: totalTarget <= 0 ? '#64748b' : overallPct >= 100 ? '#059669' : overallPct >= 50 ? '#d97706' : '#dc2626' },
-        ].map(s => `<div class="text-center px-4 py-2 bg-slate-50 rounded-xl border border-slate-200 min-w-[80px]">
+          { label: 'ต้องส่งทั้งหมด', val: totalTarget.toLocaleString(), color: '#1e293b' },
+          { label: 'ส่งแล้ว', val: totalAchieved.toLocaleString(), color: '#059669' },
+          { label: 'ยังไม่ส่ง', val: totalRemaining.toLocaleString(), color: totalRemaining > 0 ? '#e11d48' : '#059669' },
+          { label: 'ความคืบหน้า', val: totalTarget > 0 ? overallPct + '%' : 'N/A', color: totalTarget <= 0 ? '#64748b' : overallPct >= 100 ? '#059669' : overallPct >= 50 ? '#d97706' : '#dc2626' },
+        ].map(s => `<div class="text-center px-4 py-3 bg-slate-50 rounded-xl border border-slate-200 min-w-[110px]">
           <p class="text-lg font-black" style="color:${s.color}">${s.val}</p>
           <p class="text-[10px] text-slate-500 font-semibold mt-0.5">${s.label}</p>
         </div>`).join('')}
@@ -1868,15 +1972,16 @@ function renderUnitSummary() {
     <div class="flex gap-0 border border-slate-200 rounded-xl overflow-hidden" data-cccf-card-image="cccf-unit-summary-chart">
 
       <!-- Table: no fixed height, all rows visible -->
-      <div class="flex-shrink-0 border-r border-slate-200" style="min-width:340px">
+      <div class="flex-shrink-0 border-r border-slate-200 overflow-x-auto" style="min-width:620px">
         <table class="w-full">
           <thead>
             <tr class="bg-slate-100 border-b border-slate-200 sticky top-0">
               <th class="px-3 py-2.5 text-center text-[10px] font-bold text-slate-500 w-7"> </th>
               <th class="px-3 py-2.5 text-left text-[10px] font-bold text-slate-600">${sectionName}</th>
-              <th class="px-3 py-2.5 text-center text-[10px] font-bold text-slate-600 w-16">Target</th>
-              <th class="px-3 py-2.5 text-center text-[10px] font-bold text-slate-600 w-16">Done</th>
-              <th class="px-3 py-2.5 text-center text-[10px] font-bold text-slate-600 w-24">Status</th>
+              <th class="px-3 py-2.5 text-center text-[10px] font-bold text-slate-600 w-20">ต้องส่ง</th>
+              <th class="px-3 py-2.5 text-center text-[10px] font-bold text-slate-600 w-20">ส่งแล้ว</th>
+              <th class="px-3 py-2.5 text-center text-[10px] font-bold text-slate-600 w-20">ยังไม่ส่ง</th>
+              <th class="px-3 py-2.5 text-center text-[10px] font-bold text-slate-600 w-44">ความคืบหน้า</th>
               ${isAdmin && !isActualSource ? `<th class="w-8"></th>` : ''}
             </tr>
           </thead>
@@ -2007,7 +2112,7 @@ window._cccfOpenWorkerProgressBucket = (unit, status) => {
       <div class="space-y-4" data-cccf-worker-admin-monitoring-modal="phase3">
         <div class="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3">
           <p class="text-sm font-bold text-slate-700">${employees.length.toLocaleString()} คน</p>
-          <p class="text-[10px] text-slate-500 mt-0.5">Actual toward target = min(raw records, personal target) · Raw records แสดงจำนวนรายการจริงทั้งหมด</p>
+          <p class="text-[10px] text-slate-500 mt-0.5">รายละเอียดตรวจสอบรายบุคคล · KPI หลักนับผู้ส่งจริงไม่ซ้ำเทียบกับ Target ราย Unit</p>
         </div>
         <div class="overflow-x-auto border border-slate-200 rounded-xl">
           <table class="w-full min-w-[980px]">
@@ -2047,9 +2152,9 @@ window._unitSetYear = async (year) => {
     _unitYear = year;
     await refreshCccfTargetSummary(year);
     await refreshCccfWorkerProgress(year);
-    const wrap = document.getElementById('cccf-unit-summary-inner');
-    if (wrap) { wrap.innerHTML = renderUnitSummary(); setTimeout(() => initUnitChart(), 0); }
-    refreshCccfHeroKpis();
+    _cccfWorkerSource = resolveCccfWorkerSource(_dashboardConfig, year);
+    const page = document.getElementById('cccf-page');
+    if (page) renderPage(page);
 };
 
 window._myCardSetYear = (year) => {
@@ -2078,7 +2183,7 @@ window._cccfSetUnitTarget = (unit, currentTarget, achievedOverride, computedAchi
 
         <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
           <div>
-            <label class="block text-[10px] font-bold text-slate-400 uppercase mb-1.5">เป้าหมาย (ครั้ง/ปี) <span class="text-red-500">*</span></label>
+            <label class="block text-[10px] font-bold text-slate-400 uppercase mb-1.5">เป้าหมาย (คน/ปี) <span class="text-red-500">*</span></label>
             <input id="unit-target-input" type="number" min="0" max="9999" value="${currentTarget || 0}"
               oninput="window._unitUpdateRemaining()"
               class="form-input w-full rounded-xl text-sm text-center font-bold" style="color:#1e293b">
@@ -2580,14 +2685,17 @@ function getPermanentDashboardStats() {
     };
 }
 
-window.exportCccfWorkerPDF = async function() {
+async function exportCccfWorkerPDF() {
+    console.info('[cccf] Worker PDF export requested', { mode: _cccfWorkerSource, year: _unitYear });
     if (!window.jspdf || !window.html2canvas) {
+        console.warn('[cccf] Worker PDF export dependencies are unavailable');
         showToast('ไม่พบ jsPDF หรือ html2canvas', 'error');
         return;
     }
 
-    const filtered = getFilteredWorker();
-    if (!filtered.length) {
+    const isActual = _cccfWorkerSource === 'actual_department_worker';
+    const filtered = isActual ? getFilteredWorker() : [];
+    if (isActual && !filtered.length) {
         showToast('ไม่มีข้อมูลสำหรับส่งออก PDF', 'warning');
         return;
     }
@@ -2596,28 +2704,42 @@ window.exportCccfWorkerPDF = async function() {
     const now = new Date();
     const pad = n => String(n).padStart(2, '0');
     const issueDate = formatThaiDate(now, { day: 'numeric', month: 'long', year: 'numeric' });
-    const docNo = `CCCF-WK-${now.getFullYear()}-${pad(now.getMonth() + 1)}${pad(now.getDate())}${pad(now.getHours())}${pad(now.getMinutes())}`;
+    const modeCode = isActual ? 'ACT' : 'MNL';
+    const docNo = `CCCF-WK-${modeCode}-${now.getFullYear()}-${pad(now.getMonth() + 1)}${pad(now.getDate())}${pad(now.getHours())}${pad(now.getMinutes())}`;
     const reportYear = _unitYear;
+    const units = buildUnitData()
+        .filter(u => u.target > 0 || u.achieved > 0)
+        .sort((a, b) => a.unit.localeCompare(b.unit));
+    if (!units.length) {
+        showToast('ไม่มีข้อมูล Unit สำหรับส่งออก PDF', 'warning');
+        return;
+    }
+    const totalTarget = units.reduce((sum, unit) => sum + Number(unit.target || 0), 0);
+    const totalAchieved = units.reduce((sum, unit) => sum + Number(unit.achieved || 0), 0);
+    const totalRemaining = units.reduce((sum, unit) => sum + Number(unit.remaining || 0), 0);
+    const totalProgress = totalTarget > 0
+        ? Math.min(100, Math.round((totalAchieved / totalTarget) * 100))
+        : 0;
     const filteredRanks = { A: 0, B: 0, C: 0 };
     const filteredStops = STOP_TYPES.map(s => ({ ...s, count: filtered.filter(r => +r.StopType === +s.id).length }));
     filtered.forEach(r => { if (filteredRanks[r.Rank] !== undefined) filteredRanks[r.Rank]++; });
-    const filteredUnits = [...new Set(filtered.map(r => (r.SafetyUnit || '').trim()).filter(Boolean))];
-    const uniqueEmployees = new Set(filtered.map(r => r.EmployeeID).filter(Boolean)).size;
-    const topUnitRows = buildUnitData()
-        .filter(u => u.target > 0 || u.achieved > 0)
-        .sort((a, b) => (b.achieved - a.achieved) || (b.target - a.target) || a.unit.localeCompare(b.unit))
-        .slice(0, 8);
-    const unitSourceNote = 'Actual toward target = min(raw records, personal target) from cccf_worker engine; Raw records remain audit-only; Unit target = CCCF_Unit_Targets';
+    const uniqueEmployees = isActual ? countDistinctCccfWorkerSubmitters(filtered) : 0;
+    const attachmentRecordCount = isActual
+        ? filtered.filter(record => getWorkerAttachments(record).length > 0).length
+        : 0;
+    const unitSourceNote = isActual
+        ? 'Target ใช้ CCCF_Unit_Targets และส่งแล้วนับผู้ส่ง Form A Worker จริงแบบไม่ซ้ำในแต่ละ Unit'
+        : 'Target และส่งแล้วใช้ผล Manual / Override ราย Unit โดยไม่นำรายการแบบฟอร์มจริงมาปนในการคำนวณ';
     const allocationNote = _cccfTargetSummary?.systemTarget == null
-        ? 'System Console overall target: Not configured'
-        : `Unit target allocation: ${Number(_cccfTargetSummary.distributedTarget || 0).toLocaleString()} / ${Number(_cccfTargetSummary.systemTarget).toLocaleString()}`;
+        ? 'ยังไม่ได้ตั้งเป้ารวมใน System Console'
+        : `กระจายเป้าราย Unit ${Number(_cccfTargetSummary.distributedTarget || 0).toLocaleString()} / เป้ารวม ${Number(_cccfTargetSummary.systemTarget).toLocaleString()}`;
     const criticalRows = filtered
         .filter(r => r.Rank === 'A' || r.Rank === 'B')
         .sort((a, b) => {
             const rankOrder = { A: 0, B: 1, C: 2 };
             return (rankOrder[a.Rank] ?? 9) - (rankOrder[b.Rank] ?? 9) || new Date(b.SubmitDate) - new Date(a.SubmitDate);
         })
-        .slice(0, 8);
+        .slice(0, 6);
 
     const activeFilters = [
         _wSearch ? `ค้นหา: ${_wSearch}` : '',
@@ -2626,8 +2748,12 @@ window.exportCccfWorkerPDF = async function() {
         _wFilterRank ? `Rank: ${_wFilterRank}` : '',
         _wFilterStop ? `Stop: ${(STOP_TYPES.find(s => +s.id === +_wFilterStop)?.code) || _wFilterStop}` : '',
     ].filter(Boolean);
-    const filterText = activeFilters.length ? activeFilters.join(' | ') : 'ไม่มีตัวกรองเพิ่มเติม';
-
+    const filterText = isActual
+        ? (activeFilters.length ? activeFilters.join(' | ') : 'ไม่มีตัวกรองรายการเพิ่มเติม')
+        : 'รายงานทุก Unit ที่เลือกในหน้าสรุป';
+    const selectedUnitScope = Array.isArray(_cccfUnitSel) && _cccfUnitSel.length
+        ? _cccfUnitSel.join(', ')
+        : 'ทุก Unit ที่ตั้งค่าไว้';
     const PAGE_STYLE = K + 'width:794px;height:1122px;background:#ffffff;box-sizing:border-box;display:flex;flex-direction:column;overflow:hidden;color:#1e293b;font-size:11px';
     const buildFooter = (pageNo, totalPages) => `
       <div style="margin-top:auto;padding:8px 28px;background:#f8fafc;border-top:1px solid #e2e8f0;color:#64748b;display:flex;align-items:center;justify-content:space-between;flex-shrink:0">
@@ -2635,8 +2761,8 @@ window.exportCccfWorkerPDF = async function() {
         <span style="${K}font-size:8.8px">${escapeHtml(docNo)} · Page ${pageNo} / ${totalPages}</span>
       </div>`;
     const cccfHeader = (title, subtitle, meta = '') => `
-      <div style="background:#065f46;color:#fff;padding:18px 28px;flex-shrink:0">
-        <div style="display:flex;justify-content:space-between;gap:16px;align-items:flex-start">
+      <div style="background:#065f46;color:#fff;height:112px;box-sizing:border-box;position:relative;flex-shrink:0;overflow:hidden">
+        <div style="position:absolute;left:28px;right:28px;top:18px;display:flex;justify-content:space-between;gap:16px;align-items:flex-start">
           <div>
             <p style="${K}font-size:10px;opacity:.82;margin:0 0 3px">Thai Summit Harness Co., Ltd. · Safety Summary Report</p>
             <h1 style="${K}font-size:21px;font-weight:900;margin:0;line-height:1.18">${title}</h1>
@@ -2659,29 +2785,6 @@ window.exportCccfWorkerPDF = async function() {
               <div style="${K}font-size:8.5px;font-weight:700;color:${s.color};margin-top:4px">${escapeHtml(s.code)}</div>
             </div>`
         ).join('');
-
-        const topUnitsTable = topUnitRows.length
-            ? `<table style="width:100%;border-collapse:collapse">
-                <thead>
-                  <tr style="background:#f0fdf4">
-                    <th style="${K}padding:7px 8px;font-size:8.5px;color:#475569;text-align:left;border-bottom:1px solid #d1fae5">Unit</th>
-                    <th style="${K}padding:7px 8px;font-size:8.5px;color:#475569;text-align:center;border-bottom:1px solid #d1fae5;width:52px">Target</th>
-                    <th style="${K}padding:7px 8px;font-size:8.5px;color:#475569;text-align:center;border-bottom:1px solid #d1fae5;width:52px">Done</th>
-                    <th style="${K}padding:7px 8px;font-size:8.5px;color:#475569;text-align:center;border-bottom:1px solid #d1fae5;width:62px">Remain</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  ${topUnitRows.map(u => `
-                    <tr>
-                      <td style="${K}padding:7px 8px;font-size:8.8px;color:#1e293b;border-bottom:1px solid #eef2f7">${escapeHtml(u.unit)}</td>
-                      <td style="${K}padding:7px 8px;font-size:8.8px;color:#475569;text-align:center;border-bottom:1px solid #eef2f7">${u.target > 0 ? u.target : 'N/A'}</td>
-                      <td style="${K}padding:7px 8px;font-size:8.8px;color:#059669;text-align:center;border-bottom:1px solid #eef2f7">${u.achieved}</td>
-                      <td style="${K}padding:7px 8px;font-size:8.8px;color:${u.target <= 0 ? '#64748b' : u.remaining > 0 ? '#dc2626' : '#059669'};text-align:center;border-bottom:1px solid #eef2f7">${u.target > 0 ? u.remaining : 'N/A'}</td>
-                    </tr>
-                  `).join('')}
-                </tbody>
-              </table>`
-            : `<div style="${K}font-size:9px;color:#94a3b8">ยังไม่มีข้อมูล Unit Summary สำหรับปี ${reportYear}</div>`;
 
         const criticalTable = criticalRows.length
             ? `<table style="width:100%;border-collapse:collapse">
@@ -2706,38 +2809,61 @@ window.exportCccfWorkerPDF = async function() {
               </table>`
             : `<div style="${K}font-size:9px;color:#94a3b8">ไม่มีรายการ Rank A/B ตามตัวกรองปัจจุบัน</div>`;
 
+        const unitDoneCount = units.filter(unit => unit.target > 0 && unit.remaining === 0).length;
+        const unitProgressCount = units.filter(unit => unit.target > 0 && unit.achieved > 0 && unit.remaining > 0).length;
+        const unitNotStartedCount = units.filter(unit => unit.target <= 0 || unit.achieved <= 0).length;
+        const modeBreakdown = isActual
+            ? `<div style="display:grid;grid-template-columns:repeat(2,1fr);gap:12px">
+                <div style="border:1px solid #dbeafe;border-radius:14px;padding:14px;background:#f8fafc">
+                  <div style="${K}font-size:10px;font-weight:800;color:#334155;margin-bottom:10px">ข้อมูลประกอบการตรวจสอบ</div>
+                  <div style="display:grid;grid-template-columns:repeat(2,1fr);gap:8px">
+                    ${kpiCard('รายการแบบฟอร์ม', filtered.length.toLocaleString(), '#334155', 'Raw records')}
+                    ${kpiCard('ผู้ส่งในรายการที่กรอง', uniqueEmployees.toLocaleString(), '#2563eb', 'ไม่ซ้ำ')}
+                    ${kpiCard('Rank A / B', `${filteredRanks.A} / ${filteredRanks.B}`, filteredRanks.A ? '#dc2626' : '#d97706', 'Critical / High')}
+                    ${kpiCard('มีไฟล์แนบ', attachmentRecordCount.toLocaleString(), '#7c3aed', 'รายการ')}
+                  </div>
+                </div>
+                <div style="border:1px solid #e2e8f0;border-radius:14px;padding:14px;background:#ffffff">
+                  <div style="${K}font-size:10px;font-weight:800;color:#334155;margin-bottom:10px">ประเภทอันตราย Stop 1-6</div>
+                  <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:7px">${stopCards}</div>
+                </div>
+              </div>
+              <div style="border:1px solid ${criticalRows.length ? '#fed7aa' : '#bbf7d0'};border-radius:14px;padding:13px 14px;background:${criticalRows.length ? '#fff7ed' : '#f0fdf4'}">
+                <div style="${K}font-size:10px;font-weight:800;color:${criticalRows.length ? '#9a3412' : '#166534'};margin-bottom:${criticalRows.length ? '9px' : '0'}">ประเด็น Rank A/B ที่ควรติดตาม</div>
+                ${criticalRows.length ? criticalTable : `<div style="${K}font-size:9px;color:#15803d">ไม่พบรายการ Rank A/B ตามตัวกรองปัจจุบัน</div>`}
+              </div>`
+            : `<div style="border:1px solid #d1fae5;border-radius:14px;padding:14px;background:#f0fdf4">
+                <div style="${K}font-size:10px;font-weight:800;color:#065f46;margin-bottom:10px">สถานะ Unit ในโหมด Manual / Override</div>
+                <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:10px">
+                  ${kpiCard('ครบเป้า', unitDoneCount.toLocaleString(), '#059669', 'Unit')}
+                  ${kpiCard('กำลังดำเนินการ', unitProgressCount.toLocaleString(), '#d97706', 'Unit')}
+                  ${kpiCard('ยังไม่เริ่ม / ไม่ตั้งเป้า', unitNotStartedCount.toLocaleString(), '#dc2626', 'Unit')}
+                </div>
+              </div>`;
+
         return `<div style="${PAGE_STYLE}">
-          ${cccfHeader('CCCF Form A Worker Report', 'รายงานสรุปผลการค้นหาอันตรายจากผู้ปฏิบัติงาน', `Period: ${reportYear + 543}`)}
+          ${cccfHeader(
+              isActual ? 'CCCF Form A Worker - Actual Records' : 'CCCF Form A Worker - Unit Progress',
+              isActual ? 'รายงานผลจากแบบฟอร์มจริงของผู้ปฏิบัติงาน' : 'รายงานความคืบหน้าราย Unit แบบ Manual / Override',
+              `ปี ${reportYear + 543} · ${isActual ? 'ACTUAL' : 'MANUAL'}`
+          )}
           <div style="flex:1;padding:18px 32px 20px;display:flex;flex-direction:column;gap:14px;min-height:0">
-            ${sectionTitle('1. Report Summary / ภาพรวมรายงาน', 'สรุปรายการค้นหาอันตรายและประเด็นสำคัญตามตัวกรองปัจจุบัน')}
+            ${sectionTitle('1. ภาพรวมรายงาน', isActual ? 'KPI หลักนับผู้ส่งจริงไม่ซ้ำตาม Target ราย Unit' : 'KPI หลักใช้ผล Manual / Override ตาม Target ราย Unit')}
             <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px">
-              ${kpiCard('จำนวนรายการ', filtered.length, '#0f766e', 'Total Records')}
-              ${kpiCard('พนักงานไม่ซ้ำ', uniqueEmployees, '#2563eb', 'Employees')}
-              ${kpiCard('Rank A', filteredRanks.A, filteredRanks.A ? '#dc2626' : '#64748b', 'Critical')}
-              ${kpiCard('Safety Units', filteredUnits.length, '#059669', 'Units')}
+              ${kpiCard('ต้องส่งทั้งหมด', totalTarget.toLocaleString(), '#1e293b', 'Target')}
+              ${kpiCard('ส่งแล้ว', totalAchieved.toLocaleString(), '#059669', isActual ? 'ผู้ส่งจริงไม่ซ้ำ' : 'Manual / Override')}
+              ${kpiCard('ยังไม่ส่ง', totalRemaining.toLocaleString(), totalRemaining > 0 ? '#dc2626' : '#059669', 'Remaining')}
+              ${kpiCard('ความคืบหน้า', totalTarget > 0 ? `${totalProgress}%` : 'N/A', totalProgress >= 100 ? '#059669' : totalProgress >= 50 ? '#d97706' : '#dc2626', 'Progress')}
             </div>
             <div style="border:1px solid #dbe7df;border-radius:12px;padding:12px 14px;background:#f8fafc">
-              <div style="${K}font-size:9px;font-weight:700;color:#64748b;letter-spacing:1px;text-transform:uppercase;margin-bottom:5px">Report Scope / ขอบเขตรายงาน</div>
-              <div style="${K}font-size:9px;color:#475569;line-height:1.6">Filters Applied: ${escapeHtml(filterText)}</div>
-              <div style="${K}font-size:9px;color:#475569;line-height:1.6">Unit Summary Year: ${reportYear + 543} · Prepared by ${escapeHtml(currentUser.name || 'ไม่ระบุ')}</div>
+              <div style="${K}font-size:9px;font-weight:800;color:#64748b;letter-spacing:.8px;margin-bottom:5px">ขอบเขตรายงาน</div>
+              <div style="${K}font-size:9px;color:#475569;line-height:1.65">โหมด: ${isActual ? 'คำนวณจากแบบฟอร์มจริง (Actual records)' : 'กรอกผลรวมราย Unit (Manual / Override)'}</div>
+              <div style="${K}font-size:9px;color:#475569;line-height:1.65">ปี ${reportYear + 543} · Unit: ${escapeHtml(selectedUnitScope)} · ผู้จัดทำ: ${escapeHtml(currentUser.name || 'ไม่ระบุ')}</div>
+              <div style="${K}font-size:9px;color:#475569;line-height:1.65">รายละเอียดรายการ: ${escapeHtml(filterText)}</div>
               <div style="${K}font-size:9px;color:#475569;line-height:1.6">${escapeHtml(unitSourceNote)}</div>
               <div style="${K}font-size:9px;color:#475569;line-height:1.6">${escapeHtml(allocationNote)}</div>
             </div>
-            <div style="display:grid;grid-template-columns:1.1fr .9fr;gap:14px">
-              <div style="border:1px solid #e2e8f0;border-radius:14px;padding:14px;background:#ffffff">
-                <div style="${K}font-size:10px;font-weight:700;color:#334155;margin-bottom:3px">Unit Performance Summary / สรุปผลตาม Safety Unit</div>
-                <div style="${K}font-size:8px;color:#64748b;margin-bottom:10px">Target is shared by Manual and Actual modes.</div>
-                ${topUnitsTable}
-              </div>
-              <div style="border:1px solid #e2e8f0;border-radius:14px;padding:14px;background:#ffffff">
-                <div style="${K}font-size:10px;font-weight:700;color:#334155;margin-bottom:10px">Stop Type Distribution / สัดส่วนประเภทอันตราย</div>
-                <div style="display:grid;grid-template-columns:repeat(2,1fr);gap:8px">${stopCards}</div>
-              </div>
-            </div>
-            <div style="border:1px solid #e2e8f0;border-radius:14px;padding:14px;background:#ffffff;flex:1;min-height:0">
-              <div style="${K}font-size:10px;font-weight:700;color:#334155;margin-bottom:10px">Priority Issues for Management Attention / ประเด็นสำคัญที่ควรติดตาม</div>
-              ${criticalTable}
-            </div>
+            ${modeBreakdown}
             <div style="display:flex;justify-content:space-between;gap:24px;padding-top:6px">
               <div style="flex:1;border-top:1px solid #cbd5e1;padding-top:6px;text-align:center">
                 <div style="${K}font-size:8px;color:#94a3b8">Prepared By / ผู้จัดทำรายงาน</div>
@@ -2749,11 +2875,73 @@ window.exportCccfWorkerPDF = async function() {
               </div>
             </div>
           </div>
-          __FOOTER_SUMMARY__
+          __PAGE_FOOTER__
         </div>`;
     })();
 
-    const rowsPerPage = 24;
+    const unitRowsPerPage = 16;
+    const unitPages = [];
+    for (let start = 0; start < units.length; start += unitRowsPerPage) {
+        const rows = units.slice(start, start + unitRowsPerPage);
+        const rowsHtml = rows.map((unit, idx) => {
+            const progress = unit.target > 0
+                ? Math.min(100, Math.round((unit.achieved / unit.target) * 100))
+                : 0;
+            const progressColor = progress >= 100 ? '#059669' : progress >= 50 ? '#d97706' : '#dc2626';
+            const rowNumber = start + idx + 1;
+            return `<tr style="background:${rowNumber % 2 === 0 ? '#f8fafc' : '#ffffff'}">
+              <td style="${K}padding:10px 8px;font-size:9px;color:#94a3b8;text-align:center;border-bottom:1px solid #e2e8f0">${rowNumber}</td>
+              <td style="${K}padding:10px 10px;font-size:9.4px;color:#1e293b;font-weight:700;border-bottom:1px solid #e2e8f0">${escapeHtml(unit.unit)}</td>
+              <td style="${K}padding:10px 8px;font-size:9.4px;color:#334155;font-weight:800;text-align:center;border-bottom:1px solid #e2e8f0">${unit.target > 0 ? unit.target.toLocaleString() : 'N/A'}</td>
+              <td style="${K}padding:10px 8px;font-size:9.4px;color:#047857;font-weight:800;text-align:center;border-bottom:1px solid #e2e8f0">${unit.achieved.toLocaleString()}</td>
+              <td style="${K}padding:10px 8px;font-size:9.4px;color:${unit.remaining > 0 ? '#dc2626' : '#047857'};font-weight:800;text-align:center;border-bottom:1px solid #e2e8f0">${unit.target > 0 ? unit.remaining.toLocaleString() : 'N/A'}</td>
+              <td style="${K}padding:10px 10px;border-bottom:1px solid #e2e8f0">
+                <div style="display:flex;align-items:center;gap:8px">
+                  <div style="height:7px;flex:1;background:#e2e8f0;border-radius:999px;overflow:hidden">
+                    <div style="height:100%;width:${progress}%;background:${progressColor};border-radius:999px"></div>
+                  </div>
+                  <span style="${K}width:34px;text-align:right;font-size:9px;color:${progressColor};font-weight:800">${unit.target > 0 ? `${progress}%` : 'N/A'}</span>
+                </div>
+              </td>
+            </tr>`;
+        }).join('');
+
+        unitPages.push(`<div style="${PAGE_STYLE}">
+          ${cccfHeader(
+              'CCCF Form A Worker - Unit Progress',
+              `สรุปความคืบหน้าราย Unit · Unit ${start + 1}-${Math.min(start + unitRowsPerPage, units.length)} / ${units.length}`,
+              `ปี ${reportYear + 543} · ${isActual ? 'ACTUAL' : 'MANUAL'}`
+          )}
+          <div style="flex:1;padding:18px 28px 14px;min-height:0">
+            ${sectionTitle('2. ความคืบหน้าราย Unit', `ต้องส่ง / ส่งแล้ว / ยังไม่ส่ง / เปอร์เซ็นต์ · ${unitSourceNote}`)}
+            <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-bottom:12px">
+              ${kpiCard('ต้องส่งทั้งหมด', totalTarget.toLocaleString(), '#1e293b')}
+              ${kpiCard('ส่งแล้ว', totalAchieved.toLocaleString(), '#059669')}
+              ${kpiCard('ยังไม่ส่ง', totalRemaining.toLocaleString(), totalRemaining > 0 ? '#dc2626' : '#059669')}
+              ${kpiCard('ความคืบหน้า', totalTarget > 0 ? `${totalProgress}%` : 'N/A', totalProgress >= 100 ? '#059669' : totalProgress >= 50 ? '#d97706' : '#dc2626')}
+            </div>
+            <table style="width:100%;border-collapse:collapse;table-layout:fixed;border:1px solid #dbe7df">
+              <thead>
+                <tr style="background:#065f46">
+                  <th style="${K}padding:9px 8px;font-size:8.8px;color:#fff;text-align:center;width:30px">#</th>
+                  <th style="${K}padding:9px 10px;font-size:8.8px;color:#fff;text-align:left">Unit</th>
+                  <th style="${K}padding:9px 8px;font-size:8.8px;color:#fff;text-align:center;width:68px">ต้องส่ง</th>
+                  <th style="${K}padding:9px 8px;font-size:8.8px;color:#fff;text-align:center;width:68px">ส่งแล้ว</th>
+                  <th style="${K}padding:9px 8px;font-size:8.8px;color:#fff;text-align:center;width:68px">ยังไม่ส่ง</th>
+                  <th style="${K}padding:9px 10px;font-size:8.8px;color:#fff;text-align:left;width:190px">ความคืบหน้า</th>
+                </tr>
+              </thead>
+              <tbody>${rowsHtml}</tbody>
+            </table>
+            <div style="margin-top:10px;padding:9px 11px;border:1px solid #d1fae5;border-radius:9px;background:#f0fdf4;${K}font-size:8.8px;color:#166534;line-height:1.5">
+              ${escapeHtml(allocationNote)} · แสดงครบทุก Unit ที่มี Target หรือผลการดำเนินงาน
+            </div>
+          </div>
+          __PAGE_FOOTER__
+        </div>`);
+    }
+
+    const rowsPerPage = 14;
     const detailPages = [];
     for (let start = 0; start < filtered.length; start += rowsPerPage) {
         const rows = filtered.slice(start, start + rowsPerPage);
@@ -2761,47 +2949,92 @@ window.exportCccfWorkerPDF = async function() {
             const stop = STOP_TYPES.find(s => +s.id === +r.StopType) || STOP_TYPES[5];
             const rankColor = r.Rank === 'A' ? '#dc2626' : r.Rank === 'B' ? '#ea580c' : '#059669';
             const desc = (r.HazardDescription || '—').trim();
+            const attachmentCount = getWorkerAttachments(r).length;
             return `<tr style="background:${(start + idx) % 2 === 0 ? '#ffffff' : '#f8fafc'}">
-              <td style="${K}padding:6px 6px;font-size:8.3px;color:#94a3b8;text-align:center;border-bottom:1px solid #eef2f7">${start + idx + 1}</td>
-              <td style="${K}padding:6px 8px;font-size:8.3px;color:#475569;border-bottom:1px solid #eef2f7">${escapeHtml(formatThaiDate(r.SubmitDate))}</td>
-              <td style="${K}padding:6px 8px;font-size:8.4px;color:#1e293b;border-bottom:1px solid #eef2f7">${escapeHtml(r.EmployeeName || '—')}<div style="${K}font-size:7.6px;color:#94a3b8">${escapeHtml(r.Department || '—')}</div></td>
-              <td style="${K}padding:6px 8px;font-size:8.2px;color:#475569;border-bottom:1px solid #eef2f7">${escapeHtml(r.SafetyUnit || '—')}</td>
-              <td style="${K}padding:6px 8px;font-size:8.2px;color:#475569;border-bottom:1px solid #eef2f7">${escapeHtml(stop.code)}</td>
-              <td style="${K}padding:6px 8px;font-size:8.2px;font-weight:700;color:${rankColor};text-align:center;border-bottom:1px solid #eef2f7">${escapeHtml(r.Rank || '—')}</td>
-              <td style="${K}padding:6px 8px;font-size:8.2px;color:#475569;border-bottom:1px solid #eef2f7">${escapeHtml(r.JobArea || '—')}</td>
-              <td style="${K}padding:6px 8px;font-size:8.1px;color:#475569;border-bottom:1px solid #eef2f7;line-height:1.45">${escapeHtml(desc.slice(0, 150))}${desc.length > 150 ? '…' : ''}</td>
+              <td style="${K}padding:9px 6px;font-size:8.6px;color:#94a3b8;text-align:center;border-bottom:1px solid #eef2f7">${start + idx + 1}</td>
+              <td style="${K}padding:9px 7px;font-size:8.6px;color:#475569;border-bottom:1px solid #eef2f7">${escapeHtml(formatThaiDate(r.SubmitDate))}</td>
+              <td style="${K}padding:9px 7px;font-size:8.8px;color:#1e293b;font-weight:700;border-bottom:1px solid #eef2f7">${escapeHtml(r.EmployeeName || '—')}<div style="${K}font-size:8px;color:#64748b;font-weight:500">ID: ${escapeHtml(r.EmployeeID || '—')}</div><div style="${K}font-size:7.8px;color:#94a3b8;font-weight:500">${escapeHtml(r.Department || '—')}</div></td>
+              <td style="${K}padding:9px 7px;font-size:8.6px;color:#475569;border-bottom:1px solid #eef2f7">${escapeHtml(r.SafetyUnit || '—')}</td>
+              <td style="${K}padding:9px 7px;font-size:8.6px;color:#475569;border-bottom:1px solid #eef2f7">${escapeHtml(stop.code)}<div style="${K}font-size:8px;font-weight:800;color:${rankColor};margin-top:2px">Rank ${escapeHtml(r.Rank || '—')}</div></td>
+              <td style="${K}padding:9px 7px;font-size:8.6px;color:#475569;border-bottom:1px solid #eef2f7">${escapeHtml(r.JobArea || '—')}</td>
+              <td style="${K}padding:9px 7px;font-size:8.5px;color:#334155;border-bottom:1px solid #eef2f7;line-height:1.45">${escapeHtml(desc.slice(0, 180))}${desc.length > 180 ? '...' : ''}</td>
+              <td style="${K}padding:9px 6px;font-size:8.4px;color:${attachmentCount > 0 ? '#047857' : '#64748b'};font-weight:700;text-align:center;border-bottom:1px solid #eef2f7">${attachmentCount > 0 ? `${attachmentCount} ไฟล์` : 'ไม่มี'}</td>
             </tr>`;
         }).join('');
 
         detailPages.push(`<div style="${PAGE_STYLE}">
-          ${cccfHeader('CCCF Form A Worker Detail', `รายงานรายละเอียดรายการค้นหาอันตราย · Records ${start + 1}-${Math.min(start + rowsPerPage, filtered.length)} / ${filtered.length}`, `Period: ${reportYear + 543}`)}
+          ${cccfHeader('CCCF Form A Worker - Actual Records Detail', `รายละเอียดแบบฟอร์มจริง · รายการ ${start + 1}-${Math.min(start + rowsPerPage, filtered.length)} / ${filtered.length}`, `ปี ${reportYear + 543} · ACTUAL`)}
           <div style="flex:1;padding:18px 24px 12px;min-height:0">
-            ${sectionTitle('2. Detail Register / รายละเอียดรายการ', `Records ${start + 1}-${Math.min(start + rowsPerPage, filtered.length)} ตามเงื่อนไขที่เลือก`)}
+            ${sectionTitle('3. รายละเอียดแบบฟอร์มจริง', `EmployeeID / ชื่อ / Unit / Stop / Rank / พื้นที่ / อันตราย / ไฟล์แนบ · ${filterText}`)}
             <table style="width:100%;border-collapse:collapse;table-layout:fixed">
               <thead>
                 <tr style="background:#065f46">
                   <th style="${K}padding:7px 6px;font-size:8px;color:#fff;text-align:center;width:26px">#</th>
                   <th style="${K}padding:7px 8px;font-size:8px;color:#fff;text-align:left;width:58px">วันที่</th>
-                  <th style="${K}padding:7px 8px;font-size:8px;color:#fff;text-align:left;width:116px">พนักงาน / Employee</th>
-                  <th style="${K}padding:7px 8px;font-size:8px;color:#fff;text-align:left;width:86px">Safety Unit</th>
-                  <th style="${K}padding:7px 8px;font-size:8px;color:#fff;text-align:left;width:52px">Stop</th>
-                  <th style="${K}padding:7px 8px;font-size:8px;color:#fff;text-align:center;width:34px">Rank</th>
-                  <th style="${K}padding:7px 8px;font-size:8px;color:#fff;text-align:left;width:94px">พื้นที่งาน / Area</th>
-                  <th style="${K}padding:7px 8px;font-size:8px;color:#fff;text-align:left">รายละเอียดอันตราย / Hazard Description</th>
+                  <th style="${K}padding:7px 8px;font-size:8px;color:#fff;text-align:left;width:120px">พนักงาน / EmployeeID</th>
+                  <th style="${K}padding:7px 8px;font-size:8px;color:#fff;text-align:left;width:82px">Unit</th>
+                  <th style="${K}padding:7px 8px;font-size:8px;color:#fff;text-align:left;width:60px">Stop / Rank</th>
+                  <th style="${K}padding:7px 8px;font-size:8px;color:#fff;text-align:left;width:88px">พื้นที่ / Area</th>
+                  <th style="${K}padding:7px 8px;font-size:8px;color:#fff;text-align:left">รายละเอียดอันตราย / Hazard</th>
+                  <th style="${K}padding:7px 6px;font-size:8px;color:#fff;text-align:center;width:48px">ไฟล์แนบ</th>
                 </tr>
               </thead>
               <tbody>${rowsHtml}</tbody>
             </table>
           </div>
-          __FOOTER_DETAIL_${start}__
+          __PAGE_FOOTER__
         </div>`);
     }
 
-    const totalPages = 1 + detailPages.length;
-    const pageHTMLs = [
-        summaryHtml.replace('__FOOTER_SUMMARY__', buildFooter(1, totalPages)),
-        ...detailPages.map((html, idx) => html.replace(`__FOOTER_DETAIL_${idx * rowsPerPage}__`, buildFooter(idx + 2, totalPages)))
-    ];
+    const pageTemplates = [summaryHtml, ...unitPages, ...(isActual ? detailPages : [])];
+    const totalPages = pageTemplates.length;
+    const pageHTMLs = pageTemplates.map((html, idx) => html.replace('__PAGE_FOOTER__', buildFooter(idx + 1, totalPages)));
+
+    const headerCaptureLooksClipped = canvas => {
+        try {
+            const context = canvas.getContext('2d', { willReadFrequently: true });
+            const bandHeight = Math.max(8, Math.round((canvas.height / 1122) * 12));
+            const pixels = context.getImageData(0, 0, canvas.width, bandHeight).data;
+            let sampled = 0;
+            let nonHeaderPixels = 0;
+            for (let y = 0; y < bandHeight; y += 2) {
+                for (let x = 0; x < canvas.width; x += 4) {
+                    const offset = (y * canvas.width + x) * 4;
+                    const distance = Math.abs(pixels[offset] - 6)
+                        + Math.abs(pixels[offset + 1] - 95)
+                        + Math.abs(pixels[offset + 2] - 70);
+                    sampled += 1;
+                    if (pixels[offset + 3] > 0 && distance > 70) nonHeaderPixels += 1;
+                }
+            }
+            return nonHeaderPixels > Math.max(12, sampled * 0.002);
+        } catch (error) {
+            console.warn('CCCF PDF header validation skipped:', error);
+            return false;
+        }
+    };
+
+    const capturePdfPage = async html => {
+        const el = document.createElement('div');
+        try {
+            // Keep the fixed A4 sheet inside the real viewport. html2canvas
+            // can crop nodes that are off-screen or document-positioned while
+            // the SPA is scrolled, especially on later pages.
+            el.style.cssText = 'position:fixed;left:0;top:0;width:794px;height:1122px;z-index:-1;pointer-events:none';
+            el.innerHTML = html;
+            document.body.appendChild(el);
+            await new Promise(resolve => requestAnimationFrame(resolve));
+            return await window.html2canvas(el.firstElementChild, {
+                scale: 2,
+                useCORS: true,
+                logging: false,
+                backgroundColor: '#ffffff',
+                windowWidth: 794
+            });
+        } finally {
+            el.remove();
+        }
+    };
 
     showLoading('กำลังสร้าง PDF...');
     await document.fonts.ready;
@@ -2813,31 +3046,32 @@ window.exportCccfWorkerPDF = async function() {
 
         for (let i = 0; i < pageHTMLs.length; i++) {
             showLoading(`กำลังสร้าง PDF... หน้า ${i + 1} / ${pageHTMLs.length}`);
-            const el = document.createElement('div');
-            el.style.cssText = 'position:fixed;left:-9999px;top:0;z-index:-1';
-            el.innerHTML = pageHTMLs[i];
-            document.body.appendChild(el);
-            const canvas = await window.html2canvas(el.firstElementChild, {
-                scale: 2,
-                useCORS: true,
-                logging: false,
-                backgroundColor: '#ffffff',
-                windowWidth: 794
-            });
-            document.body.removeChild(el);
+            let canvas = null;
+            for (let attempt = 1; attempt <= 3; attempt++) {
+                canvas = await capturePdfPage(pageHTMLs[i]);
+                if (!headerCaptureLooksClipped(canvas)) break;
+                if (attempt === 3) throw new Error(`CCCF PDF header capture failed on page ${i + 1}`);
+                console.warn(`CCCF PDF header retry: page ${i + 1}, attempt ${attempt + 1}`);
+                await new Promise(resolve => setTimeout(resolve, 300));
+            }
             if (i > 0) pdf.addPage();
             pdf.addImage(canvas.toDataURL('image/jpeg', 0.92), 'JPEG', 0, 0, 210, 297);
         }
 
         pdf.save(`${docNo}.pdf`);
-        showToast(`ดาวน์โหลด PDF สำเร็จ (${filtered.length} รายการ)`, 'success');
+        console.info('[cccf] Worker PDF export completed', { mode: _cccfWorkerSource, year: _unitYear, pages: pageHTMLs.length });
+        showToast(isActual
+            ? `ดาวน์โหลด PDF สำเร็จ (${filtered.length} รายการจริง)`
+            : `ดาวน์โหลด PDF สำเร็จ (${units.length} Unit)`, 'success');
     } catch (err) {
         console.error('CCCF PDF export error:', err);
         showToast('เกิดข้อผิดพลาดในการสร้าง PDF', 'error');
     } finally {
         hideLoading();
     }
-};
+}
+
+window.exportCccfWorkerPDF = exportCccfWorkerPDF;
 
 window.exportCccfPermanentPDF = async function() {
     if (!window.jspdf || !window.html2canvas) {
@@ -3122,23 +3356,38 @@ function renderCccfHeroKpis() {
             { label: 'ความคืบหน้า Permanent', val: `${submitPct}%`, color: submitPct >= 100 ? '#6ee7b7' : submitPct >= 50 ? '#fdba74' : '#fca5a5' },
         ];
     } else {
-        const byRank = { A: 0, B: 0, C: 0 };
-        _workerData.forEach(row => {
-            if (byRank[row.Rank] !== undefined) byRank[row.Rank] += 1;
-        });
         const units = buildUnitData();
         const target = units.reduce((sum, row) => sum + Number(row.target || 0), 0);
         const achieved = units.reduce((sum, row) => sum + Number(row.achieved || 0), 0);
         const progress = target > 0 ? Math.round((Math.min(achieved, target) / target) * 100) : 0;
-        const withPhotos = _workerData.filter(row => getWorkerAttachments(row).length > 0).length;
-        items = [
-            { label: 'รายงาน Worker ทั้งหมด', val: _workerData.length, color: '#fff' },
-            { label: 'Rank A (วิกฤต)', val: byRank.A, color: '#fca5a5' },
-            { label: 'Rank B (หยุดงาน)', val: byRank.B, color: '#fdba74' },
-            { label: 'Rank C (เล็กน้อย)', val: byRank.C, color: '#6ee7b7' },
-            { label: 'มีรูปแนบ', val: withPhotos, color: '#a5f3fc' },
-            { label: 'ความคืบหน้า Worker', val: target > 0 ? `${progress}%` : '—', color: progress >= 100 ? '#6ee7b7' : progress >= 50 ? '#fdba74' : '#fca5a5' },
-        ];
+        if (_cccfWorkerSource === 'actual_department_worker') {
+            const workerYearData = getCccfWorkerRecordsForYear(_unitYear);
+            const byRank = { A: 0, B: 0, C: 0 };
+            workerYearData.forEach(row => {
+                if (byRank[row.Rank] !== undefined) byRank[row.Rank] += 1;
+            });
+            const withPhotos = workerYearData.filter(row => getWorkerAttachments(row).length > 0).length;
+            items = [
+                { label: `รายงาน Worker ปี ${_unitYear + 543}`, val: workerYearData.length, color: '#fff' },
+                { label: 'Rank A (วิกฤต)', val: byRank.A, color: '#fca5a5' },
+                { label: 'Rank B (หยุดงาน)', val: byRank.B, color: '#fdba74' },
+                { label: 'Rank C (เล็กน้อย)', val: byRank.C, color: '#6ee7b7' },
+                { label: 'มีรูปแนบ', val: withPhotos, color: '#a5f3fc' },
+                { label: 'ความคืบหน้า Worker', val: target > 0 ? `${progress}%` : '—', color: progress >= 100 ? '#6ee7b7' : progress >= 50 ? '#fdba74' : '#fca5a5' },
+            ];
+        } else {
+            const completedUnits = units.filter(row => row.status === 'done').length;
+            const progressUnits = units.filter(row => row.status === 'progress').length;
+            const waitingUnits = units.filter(row => row.status === 'not_started' || row.status === 'unset').length;
+            items = [
+                { label: `Target ปี ${_unitYear + 543}`, val: target.toLocaleString(), color: '#fff' },
+                { label: 'Achieved / Override', val: achieved.toLocaleString(), color: '#6ee7b7' },
+                { label: 'ความคืบหน้า Manual', val: target > 0 ? `${progress}%` : '—', color: progress >= 100 ? '#6ee7b7' : progress >= 50 ? '#fdba74' : '#fca5a5' },
+                { label: 'Unit ครบเป้า', val: completedUnits, color: '#6ee7b7' },
+                { label: 'Unit กำลังดำเนินการ', val: progressUnits, color: '#fdba74' },
+                { label: 'Unit ยังไม่เริ่ม/ไม่ตั้งเป้า', val: waitingUnits, color: '#fca5a5' },
+            ];
+        }
     }
 
     return items.map(item => `<div class="rounded-xl px-4 py-3 text-center" style="background:rgba(255,255,255,0.12)">
@@ -3155,6 +3404,8 @@ function refreshCccfHeroKpis() {
 function renderPage(container) {
     const { totalAssigned, completedCount, submitPct } = getPermanentProgressStats();
     const totalTracked = getFilteredPermanent().length;
+    const isActualWorkerMode = _cccfWorkerSource === 'actual_department_worker';
+    const manualLegacyCount = getCccfWorkerRecordsForYear(_unitYear).length;
 
     const today = new Date().toLocaleDateString('th-TH', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
     const deptOpts = ['', ...[...new Set(_workerData.map(r => r.Department).filter(Boolean))].sort()]
@@ -3226,20 +3477,24 @@ function renderPage(container) {
             <p class="text-sm text-slate-400 mt-0.5 ml-10">การค้นหาอันตรายจากผู้ปฏิบัติงาน</p>
           </div>
           <div class="flex gap-2 flex-shrink-0">
-            <button onclick="window.exportCccfWorkerPDF&&window.exportCccfWorkerPDF()"
+            <button id="btn-export-worker-pdf" type="button"
               class="flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-bold border border-emerald-200 text-emerald-700 bg-white hover:bg-emerald-50 transition-all">
               <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 10v6m0 0l-3-3m3 3l3-3M4 17v1a2 2 0 002 2h12a2 2 0 002-2v-1M7 7l4.586-4.586a2 2 0 012.828 0L19 7"/></svg>
               Export PDF
             </button>
+            ${isActualWorkerMode ? `
             <button id="btn-open-worker-form"
               class="flex items-center gap-2 px-5 py-2.5 rounded-xl text-sm font-bold text-white shadow-sm hover:shadow-md transition-all"
               style="background:linear-gradient(135deg,#059669,#0d9488)">
               <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/></svg>
               ส่งแบบฟอร์ม CCCF
-            </button>
+            </button>` : ''}
           </div>
         </div>
 
+        ${renderCccfWorkerModePanel()}
+
+        <div id="cccf-worker-actual-overview" class="${isActualWorkerMode ? 'space-y-5' : 'hidden'}">
         ${renderCccfFormsUserCard(_cccfForms)}
 
         <!-- Rank criteria -->
@@ -3263,7 +3518,7 @@ function renderPage(container) {
           <h3 class="text-sm font-bold text-slate-700 mb-4">อันตราย 6 ประการ (Stop 1–6)</h3>
           <div class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-2">
             ${STOP_TYPES.map(s => {
-                const cnt = _workerData.filter(r => r.StopType == s.id).length;
+                const cnt = getCccfWorkerRecordsForYear(_unitYear).filter(r => r.StopType == s.id).length;
                 return `<div class="rounded-xl border p-3 text-center cursor-pointer transition-all hover:shadow-md" style="background:${s.bg};border-color:${s.border}" onclick="window._wSetStop(${s.id})">
                   <div class="w-8 h-8 rounded-lg flex items-center justify-center mx-auto mb-2" style="background:${s.color}20">
                     <svg class="w-4 h-4" style="color:${s.color}" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="${s.icon}"/></svg>
@@ -3274,19 +3529,31 @@ function renderPage(container) {
             }).join('')}
           </div>
         </div>
+        </div>
 
         <!-- Unit summary — full width -->
         <div class="bg-white rounded-2xl border border-slate-100 shadow-sm p-5" data-cccf-card-image="cccf-unit-summary-board" style="box-shadow:0 4px 16px rgba(5,150,105,0.08)">
           <div class="mb-4">
             <h3 class="text-sm font-bold text-slate-700">สรุปราย Unit</h3>
             <p class="text-[10px] text-slate-400 mt-0.5">${_cccfWorkerSource === 'actual_department_worker'
-              ? 'คลิก Unit เพื่อกรองตาราง · Target จาก CCCF_Unit_Targets · Done จากจำนวน CCCF_FormA_Worker ที่ส่งจริงในปีและ Unit ที่เลือก'
-              : 'คลิก Unit เพื่อกรองตาราง · Target จาก CCCF_Unit_Targets · Done ใช้ manual override หรือค่าที่ระบบคำนวณ'}</p>
+              ? 'คลิก Unit เพื่อกรองตาราง · Target ชุดเดียวกับ Manual / Override · Done นับผู้ส่ง Form A Worker จริงแบบไม่ซ้ำในปีและ Unit ที่เลือก'
+              : 'Target จาก CCCF_Unit_Targets · Done ใช้ Manual / Override · Admin กดไอคอนดินสอเพื่อแก้ไขผลราย Unit'}</p>
           </div>
           <div id="cccf-unit-summary">
             <div id="cccf-unit-summary-inner">${renderUnitSummary()}</div>
           </div>
         </div>
+
+        ${!isActualWorkerMode && isAdmin ? `
+        <details id="cccf-manual-legacy-records" class="rounded-2xl border border-amber-200 bg-amber-50/60 overflow-hidden" data-cccf-card-ignore>
+          <summary class="cursor-pointer list-none px-5 py-4 flex flex-col sm:flex-row sm:items-center justify-between gap-2 hover:bg-amber-50">
+            <div>
+              <p class="text-sm font-black text-amber-900">ข้อมูล Actual เดิม · ปี ${_unitYear + 543}</p>
+              <p class="text-[11px] text-amber-700 mt-0.5">เก็บข้อมูลไว้ครบเพื่อการตรวจสอบ แต่ไม่นำมาคำนวณในโหมด Manual / Override</p>
+            </div>
+            <span class="inline-flex items-center px-3 py-1.5 rounded-full bg-white border border-amber-200 text-xs font-black text-amber-800">${manualLegacyCount.toLocaleString()} รายการ · คลิกเพื่อเปิดดู</span>
+          </summary>
+          <div class="p-4 pt-0">` : !isActualWorkerMode ? '<div class="hidden">' : ''}
 
         <!-- Submission table — full width -->
         <div class="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden" data-cccf-card-image="cccf-worker-all-records" style="box-shadow:0 4px 16px rgba(5,150,105,0.08)">
@@ -3351,6 +3618,7 @@ function renderPage(container) {
             </div>
           </div>
         </div>
+        ${!isActualWorkerMode && isAdmin ? '</div></details>' : !isActualWorkerMode ? '</div>' : ''}
       </div>
 
       <!-- ═══ PERMANENT TAB ═══ -->
@@ -3526,7 +3794,9 @@ function renderPage(container) {
 
     const applyWorkerRender = () => {
         const filtered = getFilteredWorker();
-        document.getElementById('worker-table-body').innerHTML = renderWorkerRows(getPagedWorker(filtered));
+        const tbody = document.getElementById('worker-table-body');
+        if (!tbody) return;
+        tbody.innerHTML = renderWorkerRows(getPagedWorker(filtered));
         updatePagination(filtered);
     };
     applyWorkerRender();
@@ -3703,27 +3973,32 @@ function renderPage(container) {
         setTimeout(() => window._adminTab?.('targets'), 250);
     };
     window._cccfSetWorkerSource = async (source) => {
-        const nextSource = source === 'actual_department_worker' ? 'actual_department_worker' : 'manual_unit_target';
+        const nextSource = normalizeCccfWorkerSource(source);
         if (nextSource === _cccfWorkerSource) return;
         const previousSource = _cccfWorkerSource;
-        _cccfWorkerSource = nextSource;
-        _dashboardConfig = { ..._dashboardConfig, cccfWorkerSource: nextSource };
-        const wrap = document.getElementById('cccf-unit-summary-inner');
-        if (wrap) { wrap.innerHTML = renderUnitSummary(); setTimeout(() => initUnitChart(), 0); }
-        refreshCccfHeroKpis();
+        const previousConfig = _dashboardConfig;
+        const sourceByYear = {
+            ...(_dashboardConfig.cccfWorkerSourceByYear && typeof _dashboardConfig.cccfWorkerSourceByYear === 'object'
+                ? _dashboardConfig.cccfWorkerSourceByYear
+                : {}),
+            [String(_unitYear)]: nextSource,
+        };
+        const nextConfig = {
+            ..._dashboardConfig,
+            cccfWorkerSource: nextSource,
+            cccfWorkerSourceByYear: sourceByYear,
+        };
         showLoading('กำลังบันทึกแหล่งข้อมูล CCCF...');
         try {
-            const saved = await API.put('/dashboard/config', _dashboardConfig);
-            _dashboardConfig = saved?.data || _dashboardConfig;
-            _cccfWorkerSource = _dashboardConfig.cccfWorkerSource === 'actual_department_worker'
-                ? 'actual_department_worker'
-                : 'manual_unit_target';
-            showToast('บันทึกแหล่งข้อมูล CCCF สำเร็จ', 'success');
+            const saved = await API.put('/dashboard/config', nextConfig);
+            _dashboardConfig = saved?.data || nextConfig;
+            _cccfWorkerSource = resolveCccfWorkerSource(_dashboardConfig, _unitYear);
+            const page = document.getElementById('cccf-page');
+            if (page) renderPage(page);
+            showToast(`บันทึกรูปแบบติดตามผลปี ${_unitYear + 543} สำเร็จ`, 'success');
         } catch (err) {
             _cccfWorkerSource = previousSource;
-            _dashboardConfig = { ..._dashboardConfig, cccfWorkerSource: previousSource };
-            if (wrap) { wrap.innerHTML = renderUnitSummary(); setTimeout(() => initUnitChart(), 0); }
-            refreshCccfHeroKpis();
+            _dashboardConfig = previousConfig;
             showError(err);
         } finally {
             hideLoading();
@@ -3732,6 +4007,9 @@ function renderPage(container) {
 
     // ── Buttons
     document.getElementById('btn-open-worker-form')?.addEventListener('click', openWorkerForm);
+    document.getElementById('btn-export-worker-pdf')?.addEventListener('click', () => {
+        exportCccfWorkerPDF();
+    });
     document.getElementById('btn-open-permanent-form')?.addEventListener('click', () => openPermanentForm());
     document.getElementById('btn-manage-assignments')?.addEventListener('click', openAssignmentManager);
     document.getElementById('btn-manage-cccf-forms')?.addEventListener('click', openCccfFormsManager);

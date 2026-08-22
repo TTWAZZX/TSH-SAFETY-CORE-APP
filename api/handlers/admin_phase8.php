@@ -1155,7 +1155,7 @@ function admin8_safety_linked_cccf_worker_record(?array $progressEmployee, ?arra
 
 function admin8_dashboard_config(): array
 {
-    $default = ['cccfWorkerSource' => 'manual_unit_target'];
+    $default = ['cccfWorkerSource' => 'manual_unit_target', 'cccfWorkerSourceByYear' => []];
     try {
         $row = db_row("SELECT ConfigValue FROM dashboard_config WHERE ConfigKey='enterprise' LIMIT 1");
         $value = $row ? json_decode((string) ($row['ConfigValue'] ?? '{}'), true) : [];
@@ -1165,11 +1165,31 @@ function admin8_dashboard_config(): array
     }
 }
 
-function admin8_safety_cccf_worker_unit_map(int $year): array
+function admin8_cccf_worker_source_for_year(array $config, int $year): string
 {
-    $source = (admin8_dashboard_config()['cccfWorkerSource'] ?? 'manual_unit_target') === 'actual_department_worker'
+    $annual = is_array($config['cccfWorkerSourceByYear'] ?? null) ? $config['cccfWorkerSourceByYear'] : [];
+    $source = $annual[(string) $year] ?? ($config['cccfWorkerSource'] ?? 'manual_unit_target');
+    return $source === 'actual_department_worker'
         ? 'actual_department_worker'
         : 'manual_unit_target';
+}
+
+function admin8_safety_cccf_unit_key($value): string
+{
+    $normalized = trim((string) preg_replace('/\s+/u', ' ', (string) ($value ?? '')));
+    return function_exists('mb_strtolower') ? mb_strtolower($normalized, 'UTF-8') : strtolower($normalized);
+}
+
+function admin8_safety_cccf_worker_unit_map(int $year, ?string $source = null): array
+{
+    $source = $source ?? admin8_cccf_worker_source_for_year(admin8_dashboard_config(), $year);
+    $setting = db_row("SELECT value FROM app_settings WHERE key_name='cccf_unit_sel' LIMIT 1") ?: [];
+    $selectedRaw = json_decode((string) ($setting['value'] ?? '[]'), true);
+    $selectedUnits = [];
+    foreach (is_array($selectedRaw) ? $selectedRaw : [] as $selectedUnit) {
+        $key = admin8_safety_cccf_unit_key($selectedUnit);
+        if ($key !== '') $selectedUnits[$key] = true;
+    }
     $rows = safe_rows(
         "SELECT TRIM(t.unit_name) AS UnitName,
                 t.yearly_target,
@@ -1177,7 +1197,12 @@ function admin8_safety_cccf_worker_unit_map(int $year): array
                 COALESCE(w.computed_achieved,0) AS computed_achieved
            FROM cccf_unit_targets t
            LEFT JOIN (
-               SELECT TRIM(SafetyUnit) AS UnitName, COUNT(*) AS computed_achieved
+               SELECT TRIM(SafetyUnit) AS UnitName,
+                      COUNT(DISTINCT COALESCE(
+                          NULLIF(TRIM(EmployeeID),''),
+                          NULLIF(LOWER(TRIM(EmployeeName)),''),
+                          CONCAT('__legacy_row__',id)
+                      )) AS computed_achieved
                  FROM cccf_forma_worker
                 WHERE YEAR(SubmitDate)=?
                 GROUP BY TRIM(SafetyUnit)
@@ -1188,7 +1213,8 @@ function admin8_safety_cccf_worker_unit_map(int $year): array
     $map = [];
     foreach ($rows as $row) {
         $unit = trim((string) ($row['UnitName'] ?? ''));
-        if ($unit === '') continue;
+        $unitKey = admin8_safety_cccf_unit_key($unit);
+        if ($unitKey === '' || ($selectedUnits && !isset($selectedUnits[$unitKey]))) continue;
         $target = max(0, (int) ($row['yearly_target'] ?? 0));
         if ($target <= 0) continue;
         $override = $row['achieved_override'] ?? null;
@@ -1196,7 +1222,7 @@ function admin8_safety_cccf_worker_unit_map(int $year): array
         $achieved = $source === 'actual_department_worker'
             ? $computed
             : (($override !== null && $override !== '') ? max(0, (int) $override) : $computed);
-        $map[$unit] = [
+        $map[$unitKey] = [
             'target' => $target,
             'achieved' => $achieved,
             'computed' => $computed,
@@ -1208,9 +1234,9 @@ function admin8_safety_cccf_worker_unit_map(int $year): array
 
 function admin8_safety_cccf_worker_unit_record(string $unit, array $unitMap): string
 {
-    $unit = trim($unit);
-    if ($unit === '' || !isset($unitMap[$unit])) return 'N/A';
-    $row = $unitMap[$unit];
+    $unitKey = admin8_safety_cccf_unit_key($unit);
+    if ($unitKey === '' || !isset($unitMap[$unitKey])) return 'N/A';
+    $row = $unitMap[$unitKey];
     $target = (int) ($row['target'] ?? 0);
     if ($target <= 0) return 'N/A';
     return max(0, (int) ($row['achieved'] ?? 0)) . '/' . $target . ' (' . (admin8_safety_activity_defs()['cccf_worker']['unitLabel'] ?? 'target') . ')';
@@ -1280,7 +1306,8 @@ function admin8_safety_core_data(int $year, int $month): array
     foreach (($cccfWorkerProgress['employees'] ?? []) as $progressRow) {
         $cccfWorkerProgressMap[trim((string) ($progressRow['employeeId'] ?? ''))] = $progressRow;
     }
-    $cccfWorkerUnitMap = admin8_safety_cccf_worker_unit_map($year);
+    $cccfWorkerSource = admin8_cccf_worker_source_for_year(admin8_dashboard_config(), $year);
+    $cccfWorkerUnitMap = admin8_safety_cccf_worker_unit_map($year, $cccfWorkerSource);
     $cccfPermanentMap = admin8_safety_count_map($cccfPermanentRows);
     $patrolIssueDepartmentTargets = admin8_safety_department_scope_targets('patrol_issue', $year);
 
@@ -1327,6 +1354,7 @@ function admin8_safety_core_data(int $year, int $month): array
         'year' => $year,
         'month' => $month,
         'statusLabel' => admin8_safety_month_label($month),
+        'cccfWorkerSource' => $cccfWorkerSource,
         'summary' => [
             'employees' => count($rows),
             'patrolScoped' => count(array_filter($rows, static fn($row) => $row['SafetyPatrolRecord'] !== 'N/A')),

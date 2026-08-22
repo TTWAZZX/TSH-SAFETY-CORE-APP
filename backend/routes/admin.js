@@ -876,7 +876,7 @@ function safetyCoreLinkedCccfWorkerRecord(progressEmployee, targetRow) {
 }
 
 async function getSafetyCoreDashboardConfig() {
-    const defaults = { cccfWorkerSource: 'manual_unit_target' };
+    const defaults = { cccfWorkerSource: 'manual_unit_target', cccfWorkerSourceByYear: {} };
     try {
         const [[row]] = await db.query(
             "SELECT ConfigValue FROM Dashboard_Config WHERE ConfigKey='enterprise' LIMIT 1"
@@ -889,38 +889,65 @@ async function getSafetyCoreDashboardConfig() {
     }
 }
 
-async function getSafetyCoreCccfWorkerUnitMap(year) {
-    const config = await getSafetyCoreDashboardConfig();
-    const source = config.cccfWorkerSource === 'actual_department_worker'
+function resolveSafetyCoreCccfWorkerSource(config = {}, year = new Date().getFullYear()) {
+    const annual = config.cccfWorkerSourceByYear;
+    const annualSource = annual && typeof annual === 'object' && !Array.isArray(annual)
+        ? annual[String(parseInt(year, 10))]
+        : null;
+    const source = annualSource || config.cccfWorkerSource;
+    return source === 'actual_department_worker'
         ? 'actual_department_worker'
         : 'manual_unit_target';
+}
+
+function normalizeSafetyCoreCccfUnit(value) {
+    return String(value || '').trim().replace(/\s+/g, ' ').toLocaleLowerCase('en-US');
+}
+
+async function getSafetyCoreCccfWorkerUnitMap(year, source = null) {
+    const resolvedSource = source || resolveSafetyCoreCccfWorkerSource(await getSafetyCoreDashboardConfig(), year);
     try {
-        const [rows] = await db.query(
+        const [[rows], [settingRows]] = await Promise.all([
+            db.query(
             `SELECT TRIM(t.unit_name) AS UnitName,
                     t.yearly_target,
                     t.achieved_override,
                     COALESCE(w.computed_achieved, 0) AS computed_achieved
                FROM CCCF_Unit_Targets t
                LEFT JOIN (
-                   SELECT TRIM(SafetyUnit) AS UnitName, COUNT(*) AS computed_achieved
+                   SELECT TRIM(SafetyUnit) AS UnitName,
+                          COUNT(DISTINCT COALESCE(
+                              NULLIF(TRIM(EmployeeID), ''),
+                              NULLIF(LOWER(TRIM(EmployeeName)), ''),
+                              CONCAT('__legacy_row__', id)
+                          )) AS computed_achieved
                      FROM CCCF_FormA_Worker
                     WHERE YEAR(SubmitDate) = ?
                     GROUP BY TRIM(SafetyUnit)
                ) w ON TRIM(w.UnitName) = TRIM(t.unit_name)
               WHERE t.target_year = ?`,
             [year, year]
-        );
+            ),
+            db.query("SELECT value FROM App_Settings WHERE key_name='cccf_unit_sel' LIMIT 1").catch(() => [[]]),
+        ]);
+        let selectedUnits = [];
+        try {
+            const parsed = JSON.parse(settingRows?.[0]?.value || '[]');
+            selectedUnits = Array.isArray(parsed) ? parsed : [];
+        } catch { selectedUnits = []; }
+        const selectedUnitKeys = new Set(selectedUnits.map(normalizeSafetyCoreCccfUnit).filter(Boolean));
         const map = new Map();
         (rows || []).forEach(row => {
             const unit = String(row.UnitName || '').trim();
+            const unitKey = normalizeSafetyCoreCccfUnit(unit);
             const target = Math.max(0, Number(row.yearly_target || 0));
-            if (!unit || target <= 0) return;
+            if (!unitKey || target <= 0 || (selectedUnitKeys.size && !selectedUnitKeys.has(unitKey))) return;
             const computed = Math.max(0, Number(row.computed_achieved || 0));
             const hasOverride = row.achieved_override !== null && row.achieved_override !== undefined && String(row.achieved_override) !== '';
-            const achieved = source === 'actual_department_worker'
+            const achieved = resolvedSource === 'actual_department_worker'
                 ? computed
                 : (hasOverride ? Math.max(0, Number(row.achieved_override || 0)) : computed);
-            map.set(unit, { target, achieved, computed, source });
+            map.set(unitKey, { target, achieved, computed, source: resolvedSource });
         });
         return map;
     } catch {
@@ -929,7 +956,7 @@ async function getSafetyCoreCccfWorkerUnitMap(year) {
 }
 
 function safetyCoreCccfWorkerUnitRecord(unit, unitMap) {
-    const key = String(unit || '').trim();
+    const key = normalizeSafetyCoreCccfUnit(unit);
     const row = key ? unitMap.get(key) : null;
     if (!row) return 'N/A';
     const target = Number(row.target || 0);
@@ -1089,7 +1116,8 @@ async function getSafetyCoreData({ year, month }) {
     const kyMap = buildKySafetyCoreCountMap(kyRows, employees);
     const cccfWorkerProgressMap = new Map((cccfWorkerProgress.employees || [])
         .map(row => [String(row.employeeId || '').trim(), row]));
-    const cccfWorkerUnitMap = await getSafetyCoreCccfWorkerUnitMap(year);
+    const cccfWorkerSource = resolveSafetyCoreCccfWorkerSource(await getSafetyCoreDashboardConfig(), year);
+    const cccfWorkerUnitMap = await getSafetyCoreCccfWorkerUnitMap(year, cccfWorkerSource);
     const cccfPermanentMap = countMap(cccfPermanentRows);
     const patrolIssueDepartmentTargets = await getSafetyCoreDepartmentScopeTargetMap('patrol_issue', year);
 
@@ -1138,6 +1166,7 @@ async function getSafetyCoreData({ year, month }) {
         year,
         month,
         statusLabel: safetyCoreMonthLabel(month),
+        cccfWorkerSource,
         summary: {
             employees: rows.length,
             patrolScoped: rows.filter(row => row.SafetyPatrolRecord !== 'N/A').length,

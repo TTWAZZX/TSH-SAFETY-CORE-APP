@@ -884,7 +884,10 @@ function _safetyCoreStatusBadge(value) {
 }
 
 function _safetyCoreExcelHeaders() {
-    return ['รหัส', 'ชื่อ-สกุล', 'ฝ่าย', 'ตำแหน่ง', 'Safety Patrol Record', 'Hiyari Hatto', 'KY ability', 'CCCF Permanent', 'CCCF FormA', 'Patrol System', 'Status'];
+    const cccfWorkerLabel = _safetyCoreData.cccfWorkerSource === 'actual_department_worker'
+        ? 'CCCF Form A Worker (Actual)'
+        : 'CCCF Form A Worker (Manual)';
+    return ['รหัส', 'ชื่อ-สกุล', 'ฝ่าย', 'ตำแหน่ง', 'Safety Patrol Record', 'Hiyari Hatto', 'KY ability', 'CCCF Permanent', cccfWorkerLabel, 'Patrol System', 'Status'];
 }
 
 function _safetyCoreExcelRow(row) {

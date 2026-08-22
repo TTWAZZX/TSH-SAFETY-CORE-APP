@@ -11,10 +11,10 @@ import { guardSubmitHandler } from './utils/async-ui.js?v=20260715-phase32d-rema
 import { loadPolicyPage } from './pages/policy.js?v=20260715-phase32d-remaining-async-ux';
 import { loadCommitteePage } from './pages/committee.js?v=20260715-phase32d-remaining-async-ux';
 import { loadPatrolPage } from './pages/patrol.js?v=20260818-patrol-close-review-idempotent';
-import { loadCccfPage } from './pages/cccf.js?v=20260715-phase32c-residual-async';
+import { loadCccfPage } from './pages/cccf.js?v=20260822-cccf-worker-pdf-r10';
 import { loadKpiPage } from './pages/kpi.js?v=20260715-phase32d-remaining-async-ux';
 import { loadYokotenPage } from './pages/yokoten.js?v=20260820-card-image-phase2b';
-import { loadAdminPage } from './pages/admin.js?v=20260723-onboarding-release';
+import { loadAdminPage } from './pages/admin.js?v=20260822-cccf-shared-target-r4';
 import { loadMachineSafetyPage } from './pages/machine-safety.js?v=20260820-card-image-phase2b';
 import { loadForkliftPage } from './pages/forklift.js?v=20260730-forklift-template-type-map-hf1';
 import { loadOjtPage } from './pages/ojt.js?v=20260820-card-image-phase2d';
@@ -22,12 +22,12 @@ import { loadTrainingPage } from './pages/training.js?v=20260820-card-image-phas
 import { loadAccidentPage } from './pages/accident.js?v=20260820-card-image-phase2a';
 import { loadSafetyCulturePage } from './pages/safety-culture.js?v=20260820-card-image-phase2b';
 import { loadContractorPage } from './pages/contractor.js?v=20260715-phase32d-remaining-async-ux';
-import { loadHiyariPage } from './pages/hiyari.js?v=20260715-hiyari-learning-admin-edit';
-import { loadKyPage } from './pages/ky.js?v=20260715-phase32d-remaining-async-ux';
+import { loadHiyariPage } from './pages/hiyari.js?v=20260822-hiyari-assignment-export-r12';
+import { loadKyPage } from './pages/ky.js?v=20260822-ky-export-r1';
 import { loadFourmPage } from './pages/fourm.js?v=20260821-fourm-kpi-refresh-r1';
 import { loadJohnnyAiPage } from './pages/johnny-ai.js?v=20260715-phase32d-remaining-async-ux';
 import { openProfileDrawer, closeProfileDrawer } from './pages/profile.js?v=20260723-onboarding-release';
-import { loadDashboardPage } from './pages/dashboard.js?v=20260820-card-image-phase2a';
+import { loadDashboardPage } from './pages/dashboard.js?v=20260822-cccf-shared-target-r4';
 import { loadSearchPage } from './pages/search.js?v=20260715-phase32d-remaining-async-ux';
 import { initLoginModuleGuides } from './login-guides.js?v=20260714-phase21-platform-shell';
 import { MODULE_ORDER, moduleTitleMap } from './module-meta.js?v=20260714-phase21-platform-shell';
@@ -41,6 +41,7 @@ const CARD_IMAGE_EXPORT_V2_MODULES = Object.freeze([
     'safety-culture',
     'ojt',
     'training',
+    'ky',
 ]);
 window.__TSH_FEATURE_FLAGS__ = window.__TSH_FEATURE_FLAGS__ || {};
 if (window.__TSH_FEATURE_FLAGS__.cardImageExportV2 === undefined) {

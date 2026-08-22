@@ -3,7 +3,7 @@ declare(strict_types=1);
 
 function dashboard_default_config(): array
 {
-    return ['healthGreen' => 85, 'healthAmber' => 65, 'alertDueSoonDays' => 7, 'hiddenModules' => [], 'pinnedDepartments' => [], 'cccfWorkerSource' => 'manual_unit_target'];
+    return ['healthGreen' => 85, 'healthAmber' => 65, 'alertDueSoonDays' => 7, 'hiddenModules' => [], 'pinnedDepartments' => [], 'cccfWorkerSource' => 'manual_unit_target', 'cccfWorkerSourceByYear' => []];
 }
 
 function dashboard_config(): array
@@ -12,6 +12,13 @@ function dashboard_config(): array
     $row = db_row("SELECT ConfigValue FROM dashboard_config WHERE ConfigKey='enterprise' LIMIT 1");
     $value = $row ? json_decode((string) ($row['ConfigValue'] ?? '{}'), true) : [];
     return array_merge($default, is_array($value) ? $value : []);
+}
+
+function dashboard_cccf_worker_source_for_year(array $config, int $year): string
+{
+    $annual = is_array($config['cccfWorkerSourceByYear'] ?? null) ? $config['cccfWorkerSourceByYear'] : [];
+    $source = $annual[(string) $year] ?? ($config['cccfWorkerSource'] ?? 'manual_unit_target');
+    return $source === 'actual_department_worker' ? 'actual_department_worker' : 'manual_unit_target';
 }
 
 function platform_normalize_patrol_flexible_monthly_requirement($value): ?int
@@ -41,6 +48,12 @@ function handle_platform_routes(string $method, string $path): bool
         $strings = function ($value) {
             return array_slice(array_values(array_filter(array_map('strval', is_array($value) ? $value : []))), 0, 30);
         };
+        $sourceByYear = [];
+        foreach (is_array($body['cccfWorkerSourceByYear'] ?? null) ? $body['cccfWorkerSourceByYear'] : [] as $year => $source) {
+            $yearNo = (int) $year;
+            if ($yearNo < 2000 || $yearNo > 2100) continue;
+            $sourceByYear[(string) $yearNo] = $source === 'actual_department_worker' ? 'actual_department_worker' : 'manual_unit_target';
+        }
         $config = [
             'healthGreen' => $clamp($body['healthGreen'] ?? null, 85, 1, 100),
             'healthAmber' => $clamp($body['healthAmber'] ?? null, 65, 1, 100),
@@ -48,6 +61,7 @@ function handle_platform_routes(string $method, string $path): bool
             'hiddenModules' => $strings($body['hiddenModules'] ?? []),
             'pinnedDepartments' => $strings($body['pinnedDepartments'] ?? []),
             'cccfWorkerSource' => ($body['cccfWorkerSource'] ?? '') === 'actual_department_worker' ? 'actual_department_worker' : 'manual_unit_target',
+            'cccfWorkerSourceByYear' => $sourceByYear,
         ];
         db_execute(
             "INSERT INTO dashboard_config (ConfigKey, ConfigValue, UpdatedBy) VALUES ('enterprise', ?, ?)

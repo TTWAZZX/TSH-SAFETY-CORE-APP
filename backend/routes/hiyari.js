@@ -1018,7 +1018,9 @@ router.get('/file-health', isAdmin, async (req, res) => {
 router.get('/', async (req, res) => {
     try {
         await ensureTables();
-        const { status, review, dept, year, q, risk, stopType, rank, month, area } = req.query;
+        const { status, year, q, risk, stopType, rank, month, area } = req.query;
+        const review = req.query.review ?? req.query.reviewStatus;
+        const dept = req.query.dept ?? req.query.department;
         let sql = 'SELECT *, RiskRank AS `Rank` FROM HiyariReports WHERE DeletedAt IS NULL';
         let params = [];
         if (status && status !== 'all') { sql += ' AND Status = ?';     params.push(status); }

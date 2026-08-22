@@ -9,6 +9,7 @@ import {
 } from '../ui.js?v=20260602-mobile-nav-m53';
 import { normalizeApiArray, normalizeApiObject } from '../utils/normalize.js';
 import { buildActivityCard } from '../utils/activity-widget.js?v=20260602-activity-targets-at10';
+import { captureCardImage, isSharedCardImageExportEnabled } from '../utils/card-image-export.js?v=20260822-ky-export-r1';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Constants
@@ -5379,6 +5380,59 @@ function _kyHideCardImageMenu() {
 }
 
 async function _kyDownloadCardImage(card) {
+    const targetName = card?.dataset?.kyCardImage || 'ky-card';
+    const sharedTargets = new Set(['ky-program-progress', 'ky-evidence-completion']);
+    const sharedEnabled = sharedTargets.has(targetName)
+        && isSharedCardImageExportEnabled(undefined, 'ky');
+    if (!sharedEnabled) return _kyDownloadCardImageLegacy(card);
+
+    const name = _kySafeFilePart(targetName);
+    try {
+        showLoading('Saving card image...');
+        const result = await captureCardImage(card, {
+            filename: `${name}-${_statsYear}`,
+            width: 1400,
+            maxHeight: 5000,
+            fullHeightViewport: true,
+            expandTruncatedText: true,
+            prepareClone: clone => {
+                clone.style.setProperty('position', 'absolute', 'important');
+                clone.style.setProperty('inset', '0 auto auto 0', 'important');
+                clone.style.setProperty('margin', '0', 'important');
+                clone.querySelectorAll('[data-ky-card-ignore], #ky-card-save-menu').forEach(element => {
+                    element.style.setProperty('display', 'none', 'important');
+                });
+                clone.querySelectorAll('[data-ky-evidence-unit]').forEach(element => {
+                    element.style.setProperty('display', 'block', 'important');
+                    element.style.setProperty('width', '100%', 'important');
+                    element.style.setProperty('height', 'auto', 'important');
+                    element.style.setProperty('min-height', '0', 'important');
+                    element.style.setProperty('overflow', 'visible', 'important');
+                    element.style.setProperty('opacity', '1', 'important');
+                    element.style.setProperty('visibility', 'visible', 'important');
+                });
+                clone.querySelectorAll('[data-ky-evidence-department], [data-ky-progress-dept-header]').forEach(element => {
+                    element.style.setProperty('break-inside', 'avoid', 'important');
+                });
+            },
+        });
+        document.dispatchEvent(new CustomEvent('tsh:card-image-export-complete', {
+            detail: { module: 'ky', target: targetName, engine: 'shared', width: result.width, height: result.height },
+        }));
+        showToast('บันทึกเป็นรูปภาพการ์ดแล้ว', 'success');
+    } catch (error) {
+        console.warn('[CardImageExport] KY shared capture failed; using legacy fallback.', error);
+        document.dispatchEvent(new CustomEvent('tsh:card-image-export-complete', {
+            detail: { module: 'ky', target: targetName, engine: 'legacy-fallback', errorCode: error?.code || 'CAPTURE_FAILED' },
+        }));
+        hideLoading();
+        return _kyDownloadCardImageLegacy(card);
+    } finally {
+        hideLoading();
+    }
+}
+
+async function _kyDownloadCardImageLegacy(card) {
     if (typeof html2canvas === 'undefined') {
         showToast('ไม่พบ library สำหรับบันทึกรูปภาพ', 'error');
         return;

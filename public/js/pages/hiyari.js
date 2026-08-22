@@ -8,6 +8,7 @@ import {
 } from '../ui.js?v=20260602-mobile-nav-m53';
 import { normalizeApiArray, normalizeApiObject } from '../utils/normalize.js';
 import { buildActivityCard } from '../utils/activity-widget.js?v=20260602-activity-targets-at10';
+import { captureCardImage } from '../utils/card-image-export.js?v=20260822-hiyari-assignment-export-r1';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Constants  (STOP_TYPES + RANKS mirror CCCF exactly)
@@ -565,15 +566,18 @@ function _validateHiyariSupportingFile(file) {
         : 'ไฟล์เพิ่มเติมรองรับเฉพาะ PDF, JPG, PNG, WEBP';
 }
 
-function _getAssignmentPeriod() {
-    const now = new Date();
-    const start = new Date(now.getFullYear(), now.getMonth(), 1);
-    const end = new Date(now.getFullYear(), now.getMonth() + 1, 1);
+function _getAssignmentPeriod(year = _statsYear) {
+    const parsedYear = Number(year);
+    const selectedYear = Number.isInteger(parsedYear) && parsedYear >= 2000 && parsedYear <= 2100
+        ? parsedYear
+        : new Date().getFullYear();
+    const start = new Date(selectedYear, 0, 1);
+    const end = new Date(selectedYear + 1, 0, 1);
     return {
         start,
         end,
-        year: now.getFullYear(),
-        label: now.toLocaleDateString('th-TH', { month: 'long', year: 'numeric' }),
+        year: selectedYear,
+        label: String(selectedYear + 543),
     };
 }
 
@@ -583,12 +587,46 @@ function _isReportInPeriod(report, period) {
     return dt >= period.start && dt < period.end;
 }
 
-function _buildAssignmentProgress(assignments, reports) {
-    const period = _getAssignmentPeriod();
+function _normalizeEmployeeKey(value) {
+    return String(value || '').trim().toLowerCase();
+}
+
+function _buildAssignmentRoster(assignments, reports, year = _statsYear) {
+    const period = _getAssignmentPeriod(year);
+    const reportsByEmployee = new Map();
+    reports
+        .filter(report => _isReportInPeriod(report, period))
+        .forEach(report => {
+            const key = _normalizeEmployeeKey(report.ReporterID);
+            if (!key) return;
+            if (!reportsByEmployee.has(key)) reportsByEmployee.set(key, []);
+            reportsByEmployee.get(key).push(report);
+        });
+
+    return assignments
+        .map(assignment => {
+            const matchedReports = reportsByEmployee.get(_normalizeEmployeeKey(assignment.EmployeeID)) || [];
+            const submitted = matchedReports.length > 0;
+            const closed = matchedReports.some(report => report.Status === 'Closed');
+            return {
+                ...assignment,
+                submitted,
+                closed,
+                reportCount: matchedReports.length,
+                submissionStatus: submitted ? 'ส่งแล้ว' : 'ยังไม่ส่ง',
+                followUpStatus: !submitted ? 'รอส่ง' : (closed ? 'ปิดแล้ว' : 'กำลังดำเนินการ'),
+            };
+        })
+        .sort((a, b) => String(a.Department || '').localeCompare(String(b.Department || ''), 'th')
+            || String(a.AssigneeName || '').localeCompare(String(b.AssigneeName || ''), 'th'));
+}
+
+function _buildAssignmentProgress(assignments, reports, year = _statsYear) {
+    const period = _getAssignmentPeriod(year);
     const submittedIds = new Set(
         reports
             .filter(r => _isReportInPeriod(r, period))
-            .map(r => String(r.ReporterID || '').trim())
+            .map(r => _normalizeEmployeeKey(r.ReporterID))
             .filter(Boolean)
     );
     const byDept = new Map();
@@ -598,7 +636,7 @@ function _buildAssignmentProgress(assignments, reports) {
         if (!byDept.has(dept)) byDept.set(dept, { dept, total: 0, submitted: 0 });
         const row = byDept.get(dept);
         row.total += 1;
-        if (submittedIds.has(String(a.EmployeeID || '').trim())) row.submitted += 1;
+        if (submittedIds.has(_normalizeEmployeeKey(a.EmployeeID))) row.submitted += 1;
     });
 
     return {
@@ -615,17 +653,17 @@ async function _loadAssignmentKpi(year = new Date().getFullYear()) {
     ]);
     const assignments = normalizeApiArray(assignRes?.data ?? assignRes);
     const reports = normalizeApiArray(reportRes?.data ?? reportRes);
-    const assignedIds = assignments.map(a => String(a.EmployeeID || '').trim()).filter(Boolean);
+    const assignedIds = assignments.map(a => _normalizeEmployeeKey(a.EmployeeID)).filter(Boolean);
     const assignedSet = new Set(assignedIds);
     const submittedIds = new Set(
         reports
-            .map(r => String(r.ReporterID || '').trim())
+            .map(r => _normalizeEmployeeKey(r.ReporterID))
             .filter(id => assignedSet.has(id))
     );
     const closedIds = new Set(
         reports
             .filter(r => r.Status === 'Closed')
-            .map(r => String(r.ReporterID || '').trim())
+            .map(r => _normalizeEmployeeKey(r.ReporterID))
             .filter(id => assignedSet.has(id))
     );
 
@@ -660,7 +698,7 @@ function _renderAssignmentProgress(progress) {
             <div class="flex flex-col md:flex-row md:items-center md:justify-between gap-2 mb-3">
                 <div>
                     <p class="text-sm font-bold text-slate-800">Assignment Progress</p>
-                    <p class="text-xs text-slate-500">รอบเดือน ${escHtml(progress.period.label)} · ส่งแล้ว ${submitted}/${total} คน (${pct}%)</p>
+                    <p class="text-xs text-slate-500">ปี ${escHtml(progress.period.label)} · ส่งแล้ว ${submitted}/${total} คน (${pct}%)</p>
                 </div>
                 <div class="w-full md:w-48 h-2 rounded-full bg-white border border-orange-100 overflow-hidden">
                     <div class="h-full rounded-full" style="width:${pct}%;background:linear-gradient(90deg,#f97316,#ef4444)"></div>
@@ -821,7 +859,7 @@ function buildShell() {
                                 Hiyari-Hatto
                             </span>
                         </div>
-                        <h1 class="text-xl md:text-2xl font-bold text-white leading-snug">รายงานเหตุการณ์เฉียดอุบัติเหตุ</h1>
+                        <h1 class="text-xl md:text-2xl font-bold text-white leading-snug">รายงานเหตุการณ์เกือบเกิดอุบัติเหตุ</h1>
                         <p class="text-sm mt-1" style="color:rgba(167,243,208,0.85)">Near Miss Reporting · Thai Summit Harness Co., Ltd.</p>
                     </div>
                     <!-- Stats strip -->
@@ -2101,9 +2139,13 @@ async function exportHiyariPDF() {
         btn.disabled = true;
         btn.textContent = 'กำลังสร้าง PDF...';
     }
+    showLoading('กำลังสร้าง PDF Hiyari...');
 
     const pages = [];
+    const originalScroll = { x: window.scrollX, y: window.scrollY };
     try {
+        window.scrollTo(0, 0);
+        await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
         const [statsRes, assignmentKpi] = await Promise.all([
             API.get(`/hiyari/stats?${new URLSearchParams({ year: String(_statsYear), month: _statsMonth, department: _statsDept, status: _statsStatus, rank: _statsRank })}`),
             _loadAssignmentKpi(_statsYear),
@@ -2176,9 +2218,11 @@ async function exportHiyariPDF() {
         const buildPage = (innerHtml) => {
             const div = document.createElement('div');
             div.style.cssText = [
-                'position:fixed',
-                'left:-9999px',
+                'position:absolute',
+                'left:0',
                 'top:0',
+                'z-index:-10000',
+                'pointer-events:none',
                 'width:794px',
                 'height:1122px',
                 'background:#ffffff',
@@ -2199,6 +2243,15 @@ async function exportHiyariPDF() {
         const safe = (v) => escHtml(String(v ?? '-'));
         const reportTotal = Number(reportKpi.total) || reports.length || 0;
         const generatedDate = new Date().toLocaleDateString('th-TH', { day:'numeric', month:'long', year:'numeric' });
+        const assignmentRoster = _buildAssignmentRoster(assignmentKpi?.assignments || [], reports, _statsYear);
+        const assignmentRowsPerPage = 16;
+        const assignmentChunks = assignmentRoster.length
+            ? Array.from(
+                { length: Math.ceil(assignmentRoster.length / assignmentRowsPerPage) },
+                (_, index) => assignmentRoster.slice(index * assignmentRowsPerPage, (index + 1) * assignmentRowsPerPage),
+            )
+            : [[]];
+        const totalPdfPages = 2 + assignmentChunks.length;
         const bar = (pct, color, h = 7) => `
             <div style="height:${h}px;background:#e2e8f0;border-radius:999px;overflow:hidden">
                 <div style="height:100%;width:${Math.max(0, Math.min(100, pct))}%;background:${color};border-radius:999px"></div>
@@ -2234,7 +2287,7 @@ async function exportHiyariPDF() {
         const footerHtml = (page) => `
             <div style="margin-top:auto;padding:8px 28px;background:#f8fafc;border-top:1px solid #e2e8f0;color:#64748b;font-size:9px;display:flex;justify-content:space-between;flex-shrink:0">
                 <span>Hiyari-Hatto Summary Report · Thai Summit Harness Co., Ltd.</span>
-                <span>Page ${page} of 2</span>
+                <span>Page ${page} of ${totalPdfPages}</span>
             </div>`;
 
         const stopRows = STOP_TYPES.map(s => {
@@ -2420,12 +2473,99 @@ async function exportHiyariPDF() {
             </div>
             ${footerHtml(2)}`);
 
+        assignmentChunks.forEach((chunk, chunkIndex) => {
+            const rosterRows = chunk.length ? chunk.map((row, rowIndex) => {
+                const sequence = (chunkIndex * assignmentRowsPerPage) + rowIndex + 1;
+                const dueDateValue = row.DueDate ? new Date(row.DueDate) : null;
+                const dueDate = dueDateValue && !Number.isNaN(dueDateValue.getTime())
+                    ? dueDateValue.toLocaleDateString('th-TH', { day:'numeric', month:'short', year:'numeric' })
+                    : '-';
+                const submissionColor = row.submitted ? '#047857' : '#b45309';
+                const submissionBg = row.submitted ? '#d1fae5' : '#fef3c7';
+                const followColor = row.closed ? '#047857' : (row.submitted ? '#0369a1' : '#b45309');
+                const followBg = row.closed ? '#d1fae5' : (row.submitted ? '#e0f2fe' : '#fff7ed');
+                return `<tr style="background:${rowIndex % 2 ? '#fff' : '#f8fafc'};page-break-inside:avoid">
+                    <td style="padding:8px 6px;text-align:center;color:#64748b;border-bottom:1px solid #e2e8f0">${sequence}</td>
+                    <td style="padding:8px 7px;border-bottom:1px solid #e2e8f0"><b style="color:#1e293b">${safe(row.AssigneeName || '-')}</b></td>
+                    <td style="padding:8px 7px;color:#475569;border-bottom:1px solid #e2e8f0;white-space:nowrap">${safe(row.EmployeeID || '-')}</td>
+                    <td style="padding:8px 7px;color:#334155;border-bottom:1px solid #e2e8f0">${safe(row.Department || '-')}</td>
+                    <td style="padding:8px 7px;color:#475569;border-bottom:1px solid #e2e8f0;white-space:nowrap">${safe(dueDate)}</td>
+                    <td style="padding:8px 7px;text-align:center;border-bottom:1px solid #e2e8f0">
+                        <span style="display:inline-block;padding:3px 7px;border-radius:999px;background:${submissionBg};color:${submissionColor};font-weight:900;white-space:nowrap">${safe(row.submissionStatus)}</span>
+                        ${row.reportCount ? `<div style="font-size:7.5px;color:#64748b;margin-top:2px">${row.reportCount} รายงาน</div>` : ''}
+                    </td>
+                    <td style="padding:8px 7px;text-align:center;border-bottom:1px solid #e2e8f0">
+                        <span style="display:inline-block;padding:3px 7px;border-radius:999px;background:${followBg};color:${followColor};font-weight:900;white-space:nowrap">${safe(row.followUpStatus)}</span>
+                    </td>
+                </tr>`;
+            }).join('') : `<tr><td colspan="7" style="padding:28px;text-align:center;color:#94a3b8">ยังไม่มีรายชื่อผู้ได้รับมอบหมาย</td></tr>`;
+
+            buildPage(`
+                <div style="height:8px;background:#065f46;flex-shrink:0"></div>
+                <div style="padding:18px 28px 14px;flex:1">
+                    ${sectionTitle('9. Assignment Submission Register', `รายชื่อผู้ได้รับมอบหมายและสถานะการส่ง ประจำปี ${_statsYear + 543} · ชุดที่ ${chunkIndex + 1}/${assignmentChunks.length}`)}
+                    <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-bottom:12px">
+                        ${metricCard('มอบหมายทั้งหมด', assignedTotal, '#0f766e', 'คน')}
+                        ${metricCard('ส่งแล้ว', submitted, '#047857', `${submitPct}% ของผู้ได้รับมอบหมาย`)}
+                        ${metricCard('ยังไม่ส่ง', Math.max(assignedTotal - submitted, 0), '#b45309', 'รอติดตาม')}
+                        ${metricCard('ปิดแล้ว', Number(assignmentKpi?.closed) || 0, '#0369a1', 'ดำเนินการครบถ้วน')}
+                    </div>
+                    <table style="width:100%;border-collapse:collapse;font-size:8.8px;table-layout:fixed">
+                        <colgroup><col style="width:4%"><col style="width:20%"><col style="width:12%"><col style="width:20%"><col style="width:14%"><col style="width:15%"><col style="width:15%"></colgroup>
+                        <tr style="background:#065f46;color:#fff">
+                            <th style="padding:7px 5px;text-align:center">#</th>
+                            <th style="padding:7px;text-align:left">ชื่อผู้ได้รับมอบหมาย</th>
+                            <th style="padding:7px;text-align:left">รหัสพนักงาน</th>
+                            <th style="padding:7px;text-align:left">แผนก</th>
+                            <th style="padding:7px;text-align:left">กำหนดส่ง</th>
+                            <th style="padding:7px;text-align:center">การส่ง</th>
+                            <th style="padding:7px;text-align:center">ติดตามผล</th>
+                        </tr>
+                        ${rosterRows}
+                    </table>
+                </div>
+                ${footerHtml(3 + chunkIndex)}`);
+        });
+
         const { jsPDF } = jspdf;
         const pdf = new jsPDF('p', 'mm', 'a4');
-        for (const [i, el] of [p1, p2].entries()) {
-            const canvas = await html2canvas(el, { scale: 1.7, useCORS: true, logging: false });
+        pages.forEach(page => { page.style.display = 'none'; });
+        for (const [i, el] of pages.entries()) {
+            const renderPage = el.cloneNode(true);
+            Object.assign(renderPage.style, {
+                display: 'flex',
+                position: 'absolute',
+                left: '0',
+                top: '0',
+                zIndex: '0',
+                pointerEvents: 'none',
+            });
+            document.body.appendChild(renderPage);
+            let canvas;
+            try {
+                void renderPage.offsetHeight;
+                await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+                await new Promise(resolve => setTimeout(resolve, 200));
+                canvas = await html2canvas(renderPage, {
+                    scale: 1.7,
+                    useCORS: true,
+                    logging: false,
+                    width: 794,
+                    height: 1122,
+                    windowWidth: 794,
+                    windowHeight: 1122,
+                    scrollX: 0,
+                    scrollY: 0,
+                });
+            } finally {
+                renderPage.remove();
+            }
             if (i > 0) pdf.addPage();
-            pdf.addImage(canvas.toDataURL('image/jpeg', 0.94), 'JPEG', 0, 0, 210, 297);
+            if (i < 2) {
+                pdf.addImage(canvas.toDataURL('image/jpeg', 0.94), 'JPEG', 0, 0, 210, 297);
+            } else {
+                pdf.addImage(canvas.toDataURL('image/png'), 'PNG', 0, 0, 210, 297, undefined, 'FAST');
+            }
         }
 
         const period = _statsMonth !== 'all' ? `${_statsYear}-${String(_statsMonth).padStart(2,'0')}` : String(_statsYear);
@@ -2437,6 +2577,8 @@ async function exportHiyariPDF() {
         showToast('เกิดข้อผิดพลาดในการสร้าง PDF', 'error');
     } finally {
         pages.forEach(el => el?.parentNode?.removeChild(el));
+        window.scrollTo(originalScroll.x, originalScroll.y);
+        hideLoading();
         if (btn) { btn.disabled = false; btn.textContent = 'PDF'; }
     }
 }
@@ -3510,13 +3652,14 @@ async function renderManage(container) {
             </div>
 
             <!-- ── Assignment section ── -->
-            <div id="hiyari-manage-panel-assignments" class="ds-section p-5 hidden">
+            <div id="hiyari-manage-panel-assignments" class="ds-section p-5 hidden"
+                data-hiyari-card-image="hiyari-assignment-list" data-card-image-name="hiyari-assignment-list">
                 <div class="flex items-center justify-between mb-4">
                     <div>
                         <h3 class="text-sm font-bold text-slate-700">รายการมอบหมาย</h3>
                         <p class="text-xs text-slate-400 mt-0.5">กำหนดพนักงานที่ต้องรายงาน Hiyari-Hatto</p>
                     </div>
-                    <button id="btn-add-assignment"
+                    <button id="btn-add-assignment" data-hiyari-card-ignore data-card-image-ignore
                         class="flex items-center gap-1.5 px-4 py-2 rounded-xl text-sm font-bold text-white shadow-sm transition-all"
                         style="background:linear-gradient(135deg,#f97316,#ef4444)">
                         <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -3537,7 +3680,7 @@ async function renderManage(container) {
                                 <th class="px-4 py-3">ส่ง PDF โดยตรง</th>
                                 <th class="px-4 py-3">หมายเหตุ</th>
                                 <th class="px-4 py-3">สถานะ</th>
-                                <th class="px-4 py-3"></th>
+                                <th class="px-4 py-3" data-hiyari-card-ignore data-card-image-ignore></th>
                             </tr>
                         </thead>
                         <tbody id="assignments-tbody" class="divide-y divide-slate-100">
@@ -3676,7 +3819,7 @@ async function loadAndRenderAssignments() {
         ]);
         _assignments = normalizeApiArray(assignRes?.data ?? assignRes);
         const periodReports = normalizeApiArray(reportRes?.data ?? reportRes);
-        const progress = _buildAssignmentProgress(_assignments, periodReports);
+        const progress = _buildAssignmentProgress(_assignments, periodReports, period.year);
         _renderAssignmentProgress(progress);
 
         if (!_assignments.length) {
@@ -3693,7 +3836,7 @@ async function loadAndRenderAssignments() {
 
         tbody.innerHTML = _assignments.map(a => {
             const due = a.DueDate ? new Date(a.DueDate).toLocaleDateString('th-TH', { day:'numeric', month:'short', year:'numeric' }) : '-';
-            const submitted = progress.submittedIds.has(String(a.EmployeeID || '').trim());
+            const submitted = progress.submittedIds.has(_normalizeEmployeeKey(a.EmployeeID));
             const statusHtml = submitted
                 ? `<span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 text-emerald-700"><span class="w-1.5 h-1.5 rounded-full bg-emerald-500"></span>ส่งแล้ว</span>`
                 : `<span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-100 text-amber-700"><span class="w-1.5 h-1.5 rounded-full bg-amber-500"></span>ยังไม่ส่ง</span>`;
@@ -3708,7 +3851,7 @@ async function loadAndRenderAssignments() {
                     : '<span class="text-xs text-slate-400">Flow Excel</span>'}</td>
                 <td class="px-4 py-3 text-slate-400 text-xs max-w-[160px] truncate">${escHtml(a.Note || '-')}</td>
                 <td class="px-4 py-3 whitespace-nowrap">${statusHtml}</td>
-                <td class="px-4 py-3 text-right whitespace-nowrap">
+                <td class="px-4 py-3 text-right whitespace-nowrap" data-hiyari-card-ignore data-card-image-ignore>
                     <button class="btn-edit-assignment px-3 py-1 rounded-lg text-xs font-semibold text-orange-600 hover:bg-orange-50 transition-colors"
                             data-id="${a.id}">แก้ไข</button>
                     <button class="btn-delete-assignment p-1.5 text-slate-300 hover:text-red-500 hover:bg-red-50 rounded-lg transition-colors ml-1"
@@ -5481,6 +5624,35 @@ async function _hiyariDownloadCardImage(card) {
     const name = _hiyariSafeFilePart(card.dataset.hiyariCardImage || 'hiyari-card');
     try {
         showLoading('Saving card image...');
+        if (name === 'hiyari-assignment-list') {
+            await captureCardImage(card, {
+                filename: `${name}-${_statsYear}`,
+                width: 1400,
+                minWidth: 1100,
+                maxWidth: 1600,
+                maxHeight: 9000,
+                maxPixels: 24000000,
+                scale: 1.25,
+                minScale: 0.9,
+                fullHeightViewport: true,
+                expandTruncatedText: true,
+                prepareClone: cloneTarget => {
+                    cloneTarget.querySelectorAll('[data-hiyari-card-ignore]').forEach(el => {
+                        el.style.setProperty('display', 'none', 'important');
+                    });
+                    cloneTarget.querySelectorAll('.overflow-x-auto').forEach(el => {
+                        el.style.setProperty('overflow', 'visible', 'important');
+                        el.style.setProperty('width', '100%', 'important');
+                    });
+                    cloneTarget.querySelectorAll('table').forEach(el => {
+                        el.style.setProperty('width', '100%', 'important');
+                        el.style.setProperty('table-layout', 'auto', 'important');
+                    });
+                },
+            });
+            showToast('บันทึกรูปรายการมอบหมายทั้งหมดแล้ว', 'success');
+            return;
+        }
         const canvas = await html2canvas(card, {
             backgroundColor: '#ffffff',
             scale: Math.min(2, window.devicePixelRatio || 1.5),

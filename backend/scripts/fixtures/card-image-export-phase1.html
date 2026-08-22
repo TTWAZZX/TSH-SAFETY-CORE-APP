@@ -93,6 +93,7 @@
                         ignored: clone.querySelector('[data-card-image-ignore]').style.display,
                         tableRows: clone.querySelectorAll('tbody tr').length,
                         canvasWidth: clone.querySelector('#fixture-chart').width,
+                        windowHeight: options.windowHeight,
                     };
                 } finally {
                     frame.remove();
@@ -104,13 +105,13 @@
                 };
             };
 
-            const first = captureCardImage(target, { width: 900, download: false, expandTruncatedText: true, html2canvas: fakeRenderer });
-            const second = captureCardImage(target, { width: 900, download: false, expandTruncatedText: true, html2canvas: fakeRenderer });
+            const first = captureCardImage(target, { width: 900, download: false, fullHeightViewport: true, expandTruncatedText: true, html2canvas: fakeRenderer });
+            const second = captureCardImage(target, { width: 900, download: false, fullHeightViewport: true, expandTruncatedText: true, html2canvas: fakeRenderer });
             const [firstResult, secondResult] = await Promise.all([first, second]);
             check(renderCalls === 1, 'concurrent captures are coalesced');
             check(firstResult.filename === 'fixture-card.png' && secondResult.filename === firstResult.filename, 'capture returns deterministic filename');
             check(firstResult.warnings.some(warning => warning.type === 'image'), 'unavailable image becomes a non-fatal warning');
-            check(cloneSnapshot.width === '900px' && cloneSnapshot.maxHeight === 'none' && cloneSnapshot.overflow === 'visible', 'clone receives deterministic dimensions');
+            check(cloneSnapshot.width === '900px' && cloneSnapshot.maxHeight === 'none' && cloneSnapshot.overflow === 'visible' && cloneSnapshot.windowHeight >= target.getBoundingClientRect().height, 'clone receives deterministic full-height dimensions');
             check(cloneSnapshot.stickyPosition === 'static', 'sticky content is normalized in clone');
             check(cloneSnapshot.lineHeight >= 20, 'unsafe text line height is normalized in clone');
             check(cloneSnapshot.truncatedWhiteSpace === 'normal', 'truncated text expands only in clone');

@@ -19,6 +19,15 @@ Phase 2D batch 1 permits one additional import from OJT, but only the exact
 grid to avoid responsive breakpoint drift. Hiyari remains legacy after mobile
 visual UAT rejected responsive clone output.
 
+The Hiyari Manage Assignment panel is a bounded exception: only the exact
+`hiyari-assignment-list` target uses the deterministic tall-card path so its
+full annual progress and assignee table can be captured. Hiyari is not added to
+the module-wide feature-flag allowlist; all other Hiyari targets remain on the
+existing exporter. Its PDF keeps the original two fixed A4 summary pages and
+appends fixed A4 Assignment Submission Register pages built from the same
+annual assignments/reports payload. This adds no API, schema, permission, or
+storage dependency.
+
 Phase 2D batch 2 permits one additional import from Safety Training, but only
 the exact `training-hero` target can enter the shared path. Its clone hides
 interactive hero controls and forces a fixed title/KPI grid and height;
@@ -367,6 +376,40 @@ still reference.
 - Admin-only endpoints ต้องมีทั้ง `authenticateToken` และ `isAdmin`
 
 ## Modules / Features
+
+CCCF Form A Worker has a year-scoped display/calculation source. The existing
+Dashboard config JSON stores explicit selections in
+`cccfWorkerSourceByYear[YYYY]`; `cccfWorkerSource` is retained as the legacy
+fallback. Manual / Override renders the Unit target/override summary only.
+Because page modules are imported before interactive login, CCCF must not retain
+an immutable role snapshot from module import. `loadCccfPage()` refreshes its
+frontend auth context from the verified `TSHSession` before choosing Admin/User
+requests and rendering controls; backend middleware remains authoritative.
+Actual records retains the submission-oriented Rank, My Records, Stop 1-6,
+forms, and All Records surfaces. Both modes use the selected
+`CCCF_Unit_Targets.yearly_target` rows as the shared Unit denominator. Manual
+uses `achieved_override` (with the legacy computed fallback when NULL), while
+Actual counts distinct submitters per year/Unit using EmployeeID with stable
+legacy fallbacks; duplicate forms remain audit records and do not increase the
+KPI. The primary Unit summary exposes only `ต้องส่ง / ส่งแล้ว / ยังไม่ส่ง /
+ความคืบหน้า`; Personal Target, Raw records, Diff, and per-person status remain
+available inside a collapsed Admin-only diagnostic disclosure. Historical Worker rows are never removed
+when Manual mode is selected; Admin can inspect the selected year's rows in a
+collapsed audit disclosure. Node and PHP dashboard compliance use the same
+annual resolver, selected Unit scope, Unit targets, and achieved-source rule.
+System Console > Safety Core Data follows the same contract and exposes Worker
+separately from its existing CCCF Permanent
+column. The Worker source never changes Form A Permanent calculations, UI, or
+records, so no schema or storage migration is required.
+
+The existing Form A Worker HTML-to-PDF export is mode-aware and remains a
+frontend-only fixed-A4 composition. Manual / Override exports the shared Unit
+target/achieved/remaining/progress KPIs, allocation state, and every relevant
+Unit across paginated Unit tables; it never includes Rank, Stop, or employee
+records. Actual records uses the same Unit pages and appends secondary audit
+metrics plus paginated form-detail rows with EmployeeID, Unit, Stop, Rank, area,
+hazard description, and attachment status. Raw records never replace the
+distinct-submitter KPI. Form A Permanent export and storage are independent.
 
 | Module | Description |
 |--------|-------------|
@@ -1953,6 +1996,7 @@ Phase 4 admin-review notes:
 Phase 5 dashboard/analytics notes:
 - `/api/hiyari/stats` now returns `areaRank`, `monthlyRank`, and `monthlyStatus` in addition to the existing KPI/chart data.
 - History list supports drill-down query filters for `stopType`, `rank`, `month`, and `area` while preserving existing `status`, `risk`, `dept`, `year`, and search filters.
+- Node and shared-hosting PHP list routes accept the same History contract: `status`, `risk`, `dept`/`department`, `stopType`, `rank`, `month`, `area`, `year`, `q`, and `review`/`reviewStatus`. Every filter is parameterized and is applied before the existing viewer-visibility clause.
 - Dashboard adds Top Area Focus and Monthly Rank Focus panels. Heatmap, KPI, SLA, area, rank-month, and department widgets can drill into the History tab with the matching filters.
 - Dashboard has an Export Year action that exports all reports for the selected dashboard year; History export still uses the currently filtered record set.
 
@@ -2007,7 +2051,7 @@ const RANK_TO_RISK = { A: 'Critical', B: 'High', C: 'Low' };
 | Endpoint | Auth | Description |
 |----------|------|-------------|
 | `GET /hiyari/stats?year=` | User | KPI + monthly + stopDist + rankDist + deptRank (top 20) + consequence |
-| `GET /hiyari` | User | รายการรายงาน — filter params: `status`, `risk`, `dept`, `year`, `q` |
+| `GET /hiyari` | User | รายการรายงาน — filter params: `status`, `risk`, `dept`/`department`, `stopType`, `rank`, `month`, `area`, `year`, `q`, `review`/`reviewStatus` |
 | `GET /hiyari/:id` | User | รายงานเดี่ยว |
 | `POST /hiyari` | User | ส่งรายงาน (multipart: `attachment`) — backend validates `StopType` (1–6), `Rank` (A/B/C), derives `RiskLevel` |
 | `POST /hiyari/direct-signed` | User | ส่ง signed PDF โดยตรงสำหรับ assignee ที่ Admin เปิด `AllowDirectSignedPdf` หรือ Admin; creates completed document-flow report and queues admin email |
@@ -2096,6 +2140,7 @@ let _assignments = [];     // loaded from GET /hiyari/assignments
 
 - **Dashboard**: Executive Summary Strip, clickable KPI cards (filter History), overdue alert strip, monthly trend, consequence chart, STOP×Rank matrix, SLA Compliance Gauge, Top Overdue/Near Due list, Department Risk Ranking, Near-Miss Heatmap, pinned dept summary
 - **KPI basis**: assignment-driven — total/submitted/pending/in-progress/closed/closure rate calculated against assigned employees (not raw report count)
+- **Assignment Progress scope**: the Manage assignment card and per-person `ส่งแล้ว` status use distinct assigned `ReporterID` values for the selected calendar year. They do not reset by the current month.
 - **SLA**: Rank A=7d, B=15d, C=30d — overdue rows: light red + "เกิน X วัน" badge; near-due: light amber + "เหลือ X วัน"
 - **Submit**: full-width 3-step wizard (Stop Type → Details → Recommendation+Attachment), image preview before upload
 - **History**: main admin control surface — view/filter/edit/delete/update status/export; clickable KPI cards auto-filter here; date range filter overrides year filter

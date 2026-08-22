@@ -26,6 +26,7 @@ const DEFAULT_CONFIG = {
     hiddenModules: [],
     pinnedDepartments: [],
     cccfWorkerSource: 'manual_unit_target',
+    cccfWorkerSourceByYear: {},
 };
 
 let configReady = false;
@@ -70,6 +71,19 @@ function sanitizeConfig(body = {}) {
     const toStringArray = (value) => Array.isArray(value)
         ? value.map(v => String(v || '').trim()).filter(Boolean).slice(0, 30)
         : [];
+    const sourceByYear = Object.entries(
+        body.cccfWorkerSourceByYear && typeof body.cccfWorkerSourceByYear === 'object' && !Array.isArray(body.cccfWorkerSourceByYear)
+            ? body.cccfWorkerSourceByYear
+            : {}
+    ).reduce((result, [year, source]) => {
+        const yearNo = parseInt(year, 10);
+        if (yearNo >= 2000 && yearNo <= 2100) {
+            result[String(yearNo)] = source === 'actual_department_worker'
+                ? 'actual_department_worker'
+                : 'manual_unit_target';
+        }
+        return result;
+    }, {});
 
     return {
         healthGreen: clamp(body.healthGreen, DEFAULT_CONFIG.healthGreen, 1, 100),
@@ -80,7 +94,14 @@ function sanitizeConfig(body = {}) {
         cccfWorkerSource: body.cccfWorkerSource === 'actual_department_worker'
             ? 'actual_department_worker'
             : 'manual_unit_target',
+        cccfWorkerSourceByYear: sourceByYear,
     };
+}
+
+function resolveCccfWorkerSource(config = {}, year = new Date().getFullYear()) {
+    const annual = config.cccfWorkerSourceByYear?.[String(parseInt(year, 10))];
+    const source = annual || config.cccfWorkerSource;
+    return source === 'actual_department_worker' ? 'actual_department_worker' : 'manual_unit_target';
 }
 
 function pct(n, d) {
@@ -129,6 +150,7 @@ function buildHealthIndex(metrics, config) {
 }
 
 async function buildComplianceMatrix(year, config) {
+    const cccfWorkerSource = resolveCccfWorkerSource(config, year);
     const deptRows = await safeRows(`SELECT Name FROM Master_Departments ORDER BY Name ASC`);
     const allDeptNames = deptRows.map(r => r.Name).filter(Boolean);
     const deptNames = config.pinnedDepartments?.length
@@ -149,7 +171,6 @@ async function buildComplianceMatrix(year, config) {
         yokotenTopicRows,
         yokotenResponseRows,
         patrolIssueRows,
-        cccfWorkerProgress,
         cccfUnitSettingRows,
         cccfUnitTargetRows,
         cccfWorkerUnitRows,
@@ -221,7 +242,6 @@ async function buildComplianceMatrix(year, config) {
             FROM Patrol_Issues
             WHERE YEAR(DateFound)=?
         `, params),
-        getCccfWorkerProgress(db, year, { ensureSchema: false }).catch(() => ({ departments: [] })),
         safeRows(`SELECT value FROM App_Settings WHERE key_name='cccf_unit_sel' LIMIT 1`),
         safeRows(`
             SELECT unit_name AS Unit, yearly_target AS target, achieved_override AS achievedOverride
@@ -231,7 +251,11 @@ async function buildComplianceMatrix(year, config) {
         safeRows(`
             SELECT TRIM(COALESCE(SafetyUnit,'')) AS Unit,
                    MAX(TRIM(COALESCE(Department,''))) AS Department,
-                   COUNT(*) AS computedAchieved
+                   COUNT(DISTINCT COALESCE(
+                       NULLIF(TRIM(EmployeeID), ''),
+                       NULLIF(LOWER(TRIM(EmployeeName)), ''),
+                       CONCAT('__legacy_row__', id)
+                   )) AS computedAchieved
             FROM CCCF_FormA_Worker
             WHERE YEAR(SubmitDate)=?
             GROUP BY TRIM(COALESCE(SafetyUnit,''))
@@ -398,20 +422,6 @@ async function buildComplianceMatrix(year, config) {
         key,
         counts.total ? pct(counts.closed, counts.total) : 100,
     ]));
-    const cccfWorkerEngine = new Map();
-    for (const row of cccfWorkerProgress.departments || []) {
-        const dept = normalizeDepartmentKey(row.department);
-        if (!dept) continue;
-        const target = Math.max(0, parseInt(row.personalTargetTotal, 10) || 0);
-        if (target > 0) {
-            cccfWorkerEngine.set(dept, {
-                value: pct(row.actualTowardTarget, target),
-                numerator: Math.min(Math.max(0, Number(row.actualTowardTarget || 0)), target),
-                denominator: target,
-                source: 'CCCF per-person actual target engine',
-            });
-        }
-    }
     const selectedCccfUnits = new Set(parseJsonArray(cccfUnitSettingRows[0]?.value).map(normalizeUnitKey));
     const masterUnitDepartments = new Map();
     for (const row of masterUnitRows) {
@@ -428,7 +438,7 @@ async function buildComplianceMatrix(year, config) {
         const department = normalizeDepartmentKey(row.Department);
         if (department) cccfWorkerUnitDepartment.set(unit, department);
     }
-    const cccfWorkerManual = new Map();
+    const cccfWorkerByUnit = new Map();
     for (const row of cccfUnitTargetRows) {
         const unit = normalizeUnitKey(row.Unit);
         if (!unit || (selectedCccfUnits.size && !selectedCccfUnits.has(unit))) continue;
@@ -436,21 +446,24 @@ async function buildComplianceMatrix(year, config) {
         const target = Math.max(0, Number(row.target || 0));
         if (!department || target <= 0) continue;
         const computed = cccfWorkerUnitActual.get(unit) || 0;
-        const achieved = row.achievedOverride === null || row.achievedOverride === undefined || row.achievedOverride === ''
+        const hasOverride = row.achievedOverride !== null && row.achievedOverride !== undefined && row.achievedOverride !== '';
+        const achieved = cccfWorkerSource === 'actual_department_worker'
             ? computed
-            : Math.max(0, Number(row.achievedOverride || 0));
-        const metric = cccfWorkerManual.get(department) || {
+            : (hasOverride ? Math.max(0, Number(row.achievedOverride || 0)) : computed);
+        const metric = cccfWorkerByUnit.get(department) || {
             numerator: 0,
             denominator: 0,
             units: 0,
-            source: 'CCCF manual Unit target/override',
+            source: cccfWorkerSource === 'actual_department_worker'
+                ? 'Distinct CCCF Worker submitters / shared Unit targets'
+                : 'CCCF manual Unit target/override',
         };
         metric.numerator += Math.min(achieved, target);
         metric.denominator += target;
         metric.units += 1;
-        cccfWorkerManual.set(department, metric);
+        cccfWorkerByUnit.set(department, metric);
     }
-    for (const metric of cccfWorkerManual.values()) {
+    for (const metric of cccfWorkerByUnit.values()) {
         metric.value = pct(metric.numerator, metric.denominator);
     }
     const cccfAssigned = byDept(cccfAssignmentRows, r => parseInt(r.assigned, 10) || 0);
@@ -511,9 +524,7 @@ async function buildComplianceMatrix(year, config) {
         const yokotenTarget = yokotenTargets.get(deptKey) || 0;
         const cccfAssignedTotal = cccfAssigned.get(deptKey) || 0;
         const targetMeta = targetByDept.get(deptKey) || { slots: 0, covered: 0, missing: 0, zero: 0, na: 0, scope: 0, override: 0, template: 0 };
-        const cccfWorkerMetric = config.cccfWorkerSource === 'actual_department_worker'
-            ? cccfWorkerEngine.get(deptKey)
-            : cccfWorkerManual.get(deptKey);
+        const cccfWorkerMetric = cccfWorkerByUnit.get(deptKey);
         const patrolMetric = patrolIssueCounts.get(deptKey) || { total: 0, closed: 0 };
         const accidentMetric = accidentStats.get(deptKey) || { numerator: 0, denominator: 0 };
         const ojtMetric = ojtStats.get(deptKey);
@@ -1315,6 +1326,7 @@ router.get('/alerts', async (_req, res) => {
 
 module.exports = router;
 module.exports.buildComplianceMatrix = buildComplianceMatrix;
+module.exports.resolveCccfWorkerSource = resolveCccfWorkerSource;
 module.exports.dashboardMetricBuilders = {
     buildPatrolCompanyProgress,
     buildHiyariCompanyProgress,
