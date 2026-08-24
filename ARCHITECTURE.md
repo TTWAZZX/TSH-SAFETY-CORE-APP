@@ -562,7 +562,7 @@ distinct-submitter KPI. Form A Permanent export and storage are independent.
   - `CCCF A`: distinct `CCCF_FormA_Worker.EmployeeID` submitted this year / Employee Master count in that department.
   - `CCCF Perm.`: distinct completed `CCCF_FormA_Permanent.AssigneeID` this year / `CCCF_Assignments` in that department.
   - `Patrol Issue`: closed `Patrol_Issues` / total issues found this year by `ResponsibleDept`; departments with no issue are treated as 100%.
-  - `Hiyari`: closed reports / total reports this year; departments with no report are treated as 100%.
+  - `Hiyari`: distinct current Hiyari assignees who submitted at least one non-deleted report in the selected year / current Hiyari assignments in that department. Report status does not affect submission credit; departments with no current assignment return `N/A`.
   - `KY`: submitted KY activities this year / configured annual target from `KY_Program_Config`; fallback target is 12 when no active config exists.
   - `Yokoten`: responses this year / active Yokoten topics targeted to the department.
   - `Training`: `PassedCount / TotalEmp` from `Training_Dept_Records`.
@@ -826,21 +826,57 @@ WHERE Department = ? AND Year = ? AND (CourseID <=> ?)
 | `DELETE /yokoten/respond/:id` | Admin | Soft delete → IsDeleted=1 (ไฟล์ server file storage ยังคงอยู่) |
 | `DELETE /yokoten/response-files/:fileId` | Admin | ลบไฟล์เดี่ยว (server file storage + DB) |
 | `GET /yokoten/dept-history` | User | ประวัติ response ของแผนกตัวเอง พร้อมไฟล์ |
+| `GET /yokoten/company-overview?year=` | User | User-safe company aggregate; a targeted `(Department, YokotenID)` completes only when its response covers every target Unit in that Department. Dashboard Safety Unit scope selects topics but never discards a stored response before coverage evaluation. |
 | `GET /yokoten/dept-completion` | Admin | `{ topics, deptSummary }` — สรุปทุกแผนกจาก Master_Departments |
 | `GET /yokoten/all-responses` | Admin | response ทั้งหมด พร้อมไฟล์ (filterable) |
 | `GET /yokoten/employee-completion` | Admin | employee-level completion view; ห้ามเปิดให้ User เพราะสรุปข้อมูลรายบุคคล/ทุกแผนก |
 | `GET /yokoten/dashboard-config` | User | `{ pinnedDepts: [], pinnedUnits: [] }` |
 | `PUT /yokoten/dashboard-config` | Admin | บันทึก config |
 
+| `POST /yokoten/reminders/send` | Admin | Send or queue reminders only for requested Department scopes that remain incomplete after server-side full-Unit coverage recomputation; follows Email Requirement Rules and suppresses same-day duplicates. |
+
 ### Permission Boundary
 - User can read active topics, but `GET /topics` attaches only `deptResponse` for `req.user.department`. It must not include other departments' response bodies/files.
 - User can read `GET /dept-history`, scoped to `req.user.department` only.
+- For non-Admin callers, responses submitted by an Admin expose `SubmittedByAdmin=1` and the neutral `ResponderDisplayName`; the real actor remains available to Admin APIs and the stored audit record.
 - User can create a response only for their own department. `POST /respond` ignores submitted `department/departments` unless the caller is Admin.
 - User can update a response only when it belongs to their department and `ApprovalStatus='rejected'`; otherwise update returns 403.
-- Admin-only: topic create/update/delete, all-responses, dept-completion, employee-completion, approve/reject/delete response, delete response files, bulk approve, dashboard-config update.
+- Admin-only: topic create/update/delete, all-responses, dept-completion,
+  employee-completion, scoped Reminder send, approve/reject/delete response,
+  delete response files, bulk approve, dashboard-config update.
 - UAT preflight must assert user-token 403 for Yokoten `dept-completion`, `all-responses`, and `employee-completion`.
 
 ### Response Model — Approval Workflow
+- Storage remains one response row per `(YokotenID, Department)`. `SafetyUnit`
+  stores the canonical comma-separated Unit set covered by that response.
+- If the topic has target Units belonging to a Department, all of those Units
+  must be selected before create/update succeeds and before the Department-topic
+  pair contributes 1 to completion. A topic with no Unit target completes from
+  the Department response alone.
+- `buildUnitCoverage()` / `yokoten_scope_build_unit_coverage()` are the shared
+  Node/PHP source of truth. The same result feeds Yokoten dashboards,
+  employee completion, Activity Targets, and Department Coverage Overview.
+- Yearly aggregate surfaces use active topics where `DateIssued` is null or
+  belongs to the requested year. This scope is shared by Company Overview,
+  Overview Dashboard, and the Yokoten dynamic ratio in Activity Targets, so an
+  older active topic cannot lower the selected year's result.
+- Admin `ภาพรวม + อนุมัติ` exposes the same data in two client-side views.
+  Department mode keeps the existing ranking/matrix/export workflow. Topic mode
+  pivots `dept-completion.topicBreakdown` by `YokotenID` and joins the existing
+  `all-responses` rows only to open response detail; it does not add an endpoint
+  or mutate data. Topic rows are `complete` when `responded=true`, `partial`
+  when a response exists but Unit coverage is incomplete, and `missing` when
+  no response exists. Existing Department PDF/Excel exports are hidden while
+  Topic mode is active because their report contract remains Department-based.
+- Topic mode also provides year/risk filters, a selected-topic Excel export,
+  deadline and overdue-day status, and per-row/current-view Reminder actions.
+  Reminder requests contain only topic and Department identifiers; Node/PHP
+  recompute required and covered Units before resolving recipients, so stale
+  client data cannot remind a completed scope. Same-topic/Department reminders
+  are deduplicated for the current day through the existing email outbox.
+- A missing row can open the existing Admin response-on-behalf form with its
+  Department and required Unit set preselected. It does not submit until the
+  Admin completes and confirms the existing response workflow.
 - `IsRelated = 'Yes'` → `CorrectiveAction` + at least one evidence file required → `ApprovalStatus = 'pending'` → admin approve/reject
 - `IsRelated = 'No'` → `ApprovalStatus = NULL` (auto-approved/no action required)
 - `CorrectiveAction` and evidence files are enforced client+server side when `IsRelated = 'Yes'`.
@@ -1215,6 +1251,56 @@ const { UserID, UserName } = req.body;
 ## Admin Hub (System Console) — 9 Tabs
 
 `public/js/pages/admin.js` มี 9 tabs:
+
+### Employee Master create-only import contract (2026-08-24)
+
+- Manual employee creation and both Admin employee-import routes use the shared
+  `CROSS_PATH_CREATE` operation. `EmployeeID` is the authoritative duplicate
+  key; an existing ID returns/is classified as `EMPLOYEE_ALREADY_EXISTS` and
+  the stored employee row is never updated by Import.
+- The current multipart Excel route (`POST /api/admin/employee/import`) is
+  partial-success by row. It returns backward-compatible `successCount` plus
+  `addedCount`, `duplicateCount`, `errorCount`, `warnCount`, and `details`.
+  Repeated IDs inside one workbook are case-insensitively classified as
+  `DUPLICATE_EMPLOYEE_ID_IN_FILE`; the first occurrence is the only candidate
+  for insertion.
+- The legacy JSON route (`POST /api/admin/employees/import`) remains
+  transaction-based for validation failures, but skips existing/in-file
+  duplicate IDs and never performs an upsert. Node development and PHP shared
+  hosting follow the same create-only contract.
+- Import supports `EmployeeID`, `EmployeeName`, `Department`, `Unit`,
+  `Position`, `Team`, `CompanyEmail`, and `Role`. The downloadable template and
+  master reference sheet expose the same fields. No MySQL schema or upload
+  storage change is required; the existing `Employees.EmployeeID` primary key
+  remains the final concurrency guard.
+
+### Employee Master recent additions (2026-08-24)
+
+- System Console > Employee Data extends the existing Employee Master card with
+  a compact five-item `พนักงานที่เพิ่มล่าสุด` strip between its heading and
+  filter toolbar. Each item shows the current Employee Master name/ID,
+  department, creating Admin, time, and `manual` or `import` source; selecting
+  an item filters the existing table by that EmployeeID.
+- Admin-only `GET /api/admin/employee/recent-additions` reads the latest
+  successful `CREATE_EMPLOYEE` entries from `Admin_AuditLogs` and joins them to
+  the current Employee Master. Deleted employees and failed/duplicate import
+  rows are therefore not shown. Node and PHP return the same response shape.
+- Manual create and both Excel/legacy JSON import paths write one
+  `CREATE_EMPLOYEE` audit entry per employee that was actually inserted. The
+  existing `IMPORT_EMPLOYEES` batch summary remains unchanged. Audit writes are
+  best-effort and no Employee table, audit-table schema, upload storage, or new
+  database table is added.
+- The Admin employee list enriches current Employee Master rows with nullable
+  `CreatedAt` and `CreationSource` fields from each EmployeeID's latest
+  successful `CREATE_EMPLOYEE` audit entry. Employees created before this audit
+  contract remain valid and return null metadata; they sort after timestamped
+  rows for both newest and oldest modes.
+- Employee Master sorting remains client-side after the existing search and
+  Department/Unit filters. EmployeeID natural order treats all-digit IDs as
+  strings (preserving leading zeroes), followed by letter-prefix + numeric IDs;
+  numeric segments are compared by value rather than plain lexical order.
+  Recent-addition source chips filter the latest 20 audited entries and render
+  at most five cards.
 
 2026-05-26 System Console Phase A layout shell:
 
@@ -1747,6 +1833,22 @@ closeModal();
 | `assessment` | ผลการประเมิน | ตารางประเมิน + CRUD form (Admin), PDF export per record |
 | `ppe` | PPE Control | sub-tabs: dashboard / records / violations / work-types / items (Admin) |
 
+### Assessment View Composition
+
+- `history` is the default view. Compact mode shows decision-oriented columns;
+  detailed mode retains T1-T7. Explicit `colgroup` widths plus an
+  `overflow-x-auto` table container prevent column text from collapsing or
+  causing page-level horizontal overflow.
+- History pagination is client-side over the current year/month/week/area
+  result set. Supported page sizes are 10, 20, and 50; filter and year changes
+  reset the page to 1.
+- `overview` reuses the existing insight, monthly summary, heatmap, and
+  location follow-up builders. Notes and the maturity guide are rendered in a
+  native collapsed `<details>` section.
+- `setup` reuses the existing checkpoint master and is included only for Admin
+  sessions. Existing assessment CRUD/detail/PDF workflows remain unchanged;
+  this layout pass adds no API, schema, calculation, or permission change.
+
 ### State Variables
 ```js
 let _assessments    = [];    // SC_Assessments rows (with details)
@@ -1995,6 +2097,7 @@ Phase 4 admin-review notes:
 
 Phase 5 dashboard/analytics notes:
 - `/api/hiyari/stats` now returns `areaRank`, `monthlyRank`, and `monthlyStatus` in addition to the existing KPI/chart data.
+- `/api/hiyari/stats` also returns annual `assignmentCompletion.byDepartment` aggregates (`department`, `total`, `completed`). These counts use distinct non-deleted annual reporters matched to current Hiyari assignments, are independent of month/status/rank report filters, and expose no per-person report detail.
 - History list supports drill-down query filters for `stopType`, `rank`, `month`, and `area` while preserving existing `status`, `risk`, `dept`, `year`, and search filters.
 - Node and shared-hosting PHP list routes accept the same History contract: `status`, `risk`, `dept`/`department`, `stopType`, `rank`, `month`, `area`, `year`, `q`, and `review`/`reviewStatus`. Every filter is parameterized and is applied before the existing viewer-visibility clause.
 - Dashboard adds Top Area Focus and Monthly Rank Focus panels. Heatmap, KPI, SLA, area, rank-month, and department widgets can drill into the History tab with the matching filters.
@@ -2050,7 +2153,7 @@ const RANK_TO_RISK = { A: 'Critical', B: 'High', C: 'Low' };
 ### Key API Endpoints
 | Endpoint | Auth | Description |
 |----------|------|-------------|
-| `GET /hiyari/stats?year=` | User | KPI + monthly + stopDist + rankDist + deptRank (top 20) + consequence |
+| `GET /hiyari/stats?year=` | User | KPI + monthly + stopDist + rankDist + deptRank + consequence + annual assignment completion by department |
 | `GET /hiyari` | User | รายการรายงาน — filter params: `status`, `risk`, `dept`/`department`, `stopType`, `rank`, `month`, `area`, `year`, `q`, `review`/`reviewStatus` |
 | `GET /hiyari/:id` | User | รายงานเดี่ยว |
 | `POST /hiyari` | User | ส่งรายงาน (multipart: `attachment`) — backend validates `StopType` (1–6), `Rank` (A/B/C), derives `RiskLevel` |

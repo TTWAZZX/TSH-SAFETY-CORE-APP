@@ -8,6 +8,7 @@ const { isAdmin } = require('../middleware/auth');
 const { getCoverageMatrix } = require('./activity-targets');
 const { getCccfWorkerProgress } = require('../utils/cccf-worker-progress');
 const { createDashboardMetric } = require('../utils/dashboard-metric-contract');
+const { buildUnitCoverage } = require('../utils/yokoten-admin-scope');
 
 const safe = async (sql, params = []) => {
     try { const [[r]] = await db.query(sql, params); return r?.cnt ?? r?.val ?? 0; }
@@ -127,6 +128,32 @@ function normalizeUnitKey(value) {
         .replace(/\s+/g, ' ');
 }
 
+function buildHiyariAssignmentCoverage(assignmentRows = [], submissionRows = []) {
+    const submittedEmployees = new Set(
+        submissionRows
+            .map(row => String(row.ReporterID || '').trim().toLowerCase())
+            .filter(Boolean)
+    );
+    const coverage = new Map();
+    for (const row of assignmentRows) {
+        const department = normalizeDepartmentKey(row.Department);
+        if (!department) continue;
+        const metric = coverage.get(department) || {
+            numerator: 0,
+            denominator: 0,
+            source: 'Distinct annual Hiyari assignees submitted / current assignments',
+        };
+        metric.denominator += 1;
+        const employeeId = String(row.EmployeeID || '').trim().toLowerCase();
+        if (employeeId && submittedEmployees.has(employeeId)) metric.numerator += 1;
+        coverage.set(department, metric);
+    }
+    for (const metric of coverage.values()) {
+        metric.value = pct(metric.numerator, metric.denominator);
+    }
+    return coverage;
+}
+
 function buildHealthIndex(metrics, config) {
     const positive = [
         metrics.patrolRate,
@@ -161,11 +188,11 @@ async function buildComplianceMatrix(year, config) {
     const params = [year];
 
     const [
-        employeeRows,
+        hiyariAssignmentRows,
         trainingRows,
         kyConfigRows,
         kyRows,
-        hiyariRows,
+        hiyariSubmissionRows,
         fourmRows,
         yokotenConfigRows,
         yokotenTopicRows,
@@ -183,10 +210,9 @@ async function buildComplianceMatrix(year, config) {
         safetyCultureRows,
     ] = await Promise.all([
         safeRows(`
-            SELECT Department, COUNT(DISTINCT EmployeeID) AS total
-            FROM Employees
-            WHERE Department IS NOT NULL AND Department <> ''
-            GROUP BY Department
+            SELECT a.EmployeeID, COALESCE(e.Department, a.Department) AS Department
+            FROM Hiyari_Assignments a
+            LEFT JOIN Employees e ON e.EmployeeID = a.EmployeeID
         `),
         safeRows(`
             SELECT Department, SUM(PassedCount) AS passed, SUM(TotalEmp) AS total
@@ -206,11 +232,9 @@ async function buildComplianceMatrix(year, config) {
             GROUP BY Department
         `, params),
         safeRows(`
-            SELECT Department,
-                   COUNT(DISTINCT COALESCE(NULLIF(ReporterID, ''), id)) AS submitted
+            SELECT DISTINCT ReporterID
             FROM HiyariReports
-            WHERE YEAR(ReportDate)=?
-            GROUP BY Department
+            WHERE DeletedAt IS NULL AND YEAR(ReportDate)=?
         `, params),
         safeRows(`
             SELECT Department,
@@ -261,7 +285,8 @@ async function buildComplianceMatrix(year, config) {
             GROUP BY TRIM(COALESCE(SafetyUnit,''))
         `, params),
         safeRows(`
-            SELECT TRIM(u.name) AS Unit, TRIM(COALESCE(d.Name,'')) AS Department
+            SELECT TRIM(u.name) AS Unit, TRIM(u.name) AS name, u.short_code,
+                   TRIM(COALESCE(d.Name,'')) AS Department, TRIM(COALESCE(d.Name,'')) AS department
             FROM Master_SafetyUnits u
             LEFT JOIN Master_Departments d ON d.id=u.department_id
         `),
@@ -351,7 +376,6 @@ async function buildComplianceMatrix(year, config) {
             return String(value).split(/\s*(?:\|+|;|,)\s*/).map(v => v.trim()).filter(Boolean);
         }
     };
-    const employeeCount = byDept(employeeRows, r => parseInt(r.total, 10) || 0);
     const trainingStats = byDept(trainingRows, r => ({
         value: pct(r.passed, r.total),
         numerator: parseInt(r.passed, 10) || 0,
@@ -368,7 +392,7 @@ async function buildComplianceMatrix(year, config) {
         const yearlyTarget = parseInt(r.YearlyTarget, 10) || 12;
         kyTargets.set(dept, unitCount * yearlyTarget);
     }
-    const hiyari = byDept(hiyariRows, r => parseInt(r.submitted, 10) || 0);
+    const hiyariCoverage = buildHiyariAssignmentCoverage(hiyariAssignmentRows, hiyariSubmissionRows);
     const fourm = byDept(fourmRows, r => pct(r.closed, r.total));
     const yokotenConfig = new Map(yokotenConfigRows.map(row => [
         String(row.ConfigKey || ''),
@@ -380,15 +404,11 @@ async function buildComplianceMatrix(year, config) {
         const targetUnits = parseJsonArray(topic.TargetUnits).map(normalizeUnitKey);
         return !targetUnits.length || targetUnits.some(unit => yokotenPinnedUnits.has(unit));
     });
-    const yokotenResponseSet = new Set();
+    const yokotenResponseMap = new Map();
     for (const row of yokotenResponseRows) {
         const department = normalizeDepartmentKey(row.Department);
         if (!department) continue;
-        if (yokotenPinnedUnits.size) {
-            const responseUnits = parseJsonArray(row.EffectiveSafetyUnit).map(normalizeUnitKey);
-            if (responseUnits.length && !responseUnits.some(unit => yokotenPinnedUnits.has(unit))) continue;
-        }
-        yokotenResponseSet.add(`${department}::${row.YokotenID}`);
+        yokotenResponseMap.set(`${department}::${row.YokotenID}`, row);
     }
     const yokotenTargets = new Map();
     const yokotenDone = new Map();
@@ -402,7 +422,15 @@ async function buildComplianceMatrix(year, config) {
             const deptKey = normalizeDepartmentKey(dept);
             if (!deptKey) continue;
             yokotenTargets.set(deptKey, (yokotenTargets.get(deptKey) || 0) + 1);
-            if (yokotenResponseSet.has(`${deptKey}::${topic.YokotenID}`)) {
+            const response = yokotenResponseMap.get(`${deptKey}::${topic.YokotenID}`) || null;
+            const coverage = buildUnitCoverage({
+                department: dept,
+                topicUnits: parseJsonArray(topic.TargetUnits),
+                responseUnits: parseJsonArray(response?.EffectiveSafetyUnit),
+                responseExists: !!response,
+                masterUnits: masterUnitRows,
+            });
+            if (coverage.complete) {
                 yokotenDone.set(deptKey, (yokotenDone.get(deptKey) || 0) + 1);
             }
         }
@@ -519,7 +547,6 @@ async function buildComplianceMatrix(year, config) {
 
     return deptNames.map(dept => {
         const deptKey = normalizeDepartmentKey(dept);
-        const empTotal = employeeCount.get(deptKey) || 0;
         const kyTarget = kyTargets.get(deptKey) || 12;
         const yokotenTarget = yokotenTargets.get(deptKey) || 0;
         const cccfAssignedTotal = cccfAssigned.get(deptKey) || 0;
@@ -529,12 +556,13 @@ async function buildComplianceMatrix(year, config) {
         const accidentMetric = accidentStats.get(deptKey) || { numerator: 0, denominator: 0 };
         const ojtMetric = ojtStats.get(deptKey);
         const trainingMetric = trainingStats.get(deptKey);
+        const hiyariMetric = hiyariCoverage.get(deptKey);
         const cells = {
             activityTargets: targetMeta.slots ? pct(targetMeta.covered + targetMeta.na, targetMeta.slots) : null,
             cccfWorker: cccfWorkerMetric?.value ?? null,
             cccfPermanent: cccfAssignedTotal ? pct(cccfPermanent.get(deptKey) || 0, cccfAssignedTotal) : null,
             patrolIssues: patrolIssues.get(deptKey) ?? 100,
-            hiyari: empTotal ? pct(hiyari.get(deptKey) || 0, empTotal) : null,
+            hiyari: hiyariMetric?.value ?? null,
             ky: pct(kyActual.get(deptKey) || 0, kyTarget),
             yokoten: yokotenTarget ? pct(yokotenDone.get(deptKey) || 0, yokotenTarget) : null,
             training: training.get(deptKey),
@@ -549,7 +577,7 @@ async function buildComplianceMatrix(year, config) {
             cccfWorker: cccfWorkerMetric || null,
             cccfPermanent: { numerator: cccfPermanent.get(deptKey) || 0, denominator: cccfAssignedTotal, source: 'Completed CCCF Permanent / current assignments' },
             patrolIssues: { numerator: patrolMetric.closed, denominator: patrolMetric.total, source: patrolMetric.total ? 'Closed Patrol issues / issues found this year' : 'No Patrol issues found this year' },
-            hiyari: { numerator: hiyari.get(deptKey) || 0, denominator: empTotal, source: 'Distinct Hiyari reporters / employees' },
+            hiyari: hiyariMetric || null,
             ky: { numerator: kyActual.get(deptKey) || 0, denominator: kyTarget, source: 'KY activities / configured Unit targets' },
             yokoten: { numerator: yokotenDone.get(deptKey) || 0, denominator: yokotenTarget, source: 'Responded / assigned Yokoten topics issued this year' },
             training: trainingMetric ? { ...trainingMetric, source: 'Passed / total Training department records' } : null,
@@ -684,17 +712,24 @@ async function buildKyCompanyProgress(year) {
 
 async function buildYokotenCompanyProgress(year) {
     try {
-        const [[departments], [topics], [responses]] = await Promise.all([
+        const [[departments], [topics], [responses], [masterUnits]] = await Promise.all([
             db.query('SELECT Name FROM Master_Departments ORDER BY Name'),
             db.query(`
-                SELECT YokotenID, TargetDepts
+                SELECT YokotenID, TargetDepts, TargetUnits
                   FROM YokotenTopics
                  WHERE IsActive=1 AND (DateIssued IS NULL OR YEAR(DateIssued)=?)
             `, [year]),
             db.query(`
-                SELECT YokotenID, Department
-                  FROM YokotenResponses
-                 WHERE IsDeleted IS NULL OR IsDeleted=0
+                SELECT r.YokotenID, r.Department,
+                       COALESCE(NULLIF(r.SafetyUnit, ''), NULLIF(e.Unit, ''), NULLIF(e.Team, '')) AS EffectiveSafetyUnit
+                  FROM YokotenResponses r
+                  LEFT JOIN Employees e ON e.EmployeeID=r.EmployeeID
+                 WHERE r.IsDeleted IS NULL OR r.IsDeleted=0
+            `),
+            db.query(`
+                SELECT u.name, u.short_code, d.Name AS department
+                  FROM Master_SafetyUnits u
+                  LEFT JOIN Master_Departments d ON d.id=u.department_id
             `),
         ]);
         const departmentMap = new Map();
@@ -704,11 +739,13 @@ async function buildYokotenCompanyProgress(year) {
         }
 
         const assignedPairs = new Set();
+        const topicMap = new Map();
         const topicIds = new Set();
         const unknownDepartments = new Set();
         for (const topic of topics) {
             const topicId = String(topic.YokotenID);
             topicIds.add(topicId);
+            topicMap.set(topicId, topic);
             const configured = dashboardList(topic.TargetDepts);
             const targets = configured.length ? configured.map(normalizeDepartmentKey) : [...departmentMap.keys()];
             for (const department of targets) {
@@ -739,6 +776,15 @@ async function buildYokotenCompanyProgress(year) {
             const department = normalizeDepartmentKey(response.Department);
             const pair = `${department}::${topicId}`;
             if (!assignedPairs.has(pair)) continue;
+            const topic = topicMap.get(topicId);
+            const coverage = buildUnitCoverage({
+                department: departmentMap.get(department) || response.Department,
+                topicUnits: dashboardList(topic?.TargetUnits),
+                responseUnits: dashboardList(response.EffectiveSafetyUnit),
+                responseExists: true,
+                masterUnits,
+            });
+            if (!coverage.complete) continue;
             respondedPairs.add(pair);
             respondedDepartments.add(department);
         }
@@ -760,6 +806,48 @@ async function buildYokotenCompanyProgress(year) {
             unknownDepartments: [],
             error: error.message,
         };
+    }
+}
+
+async function buildYokotenOverdueAlerts() {
+    try {
+        const [[departments], [topics], [responses], [masterUnits]] = await Promise.all([
+            db.query('SELECT Name FROM Master_Departments ORDER BY Name'),
+            db.query(`SELECT YokotenID,Title,Deadline,TargetDepts,TargetUnits
+                        FROM YokotenTopics
+                       WHERE Deadline IS NOT NULL AND Deadline<CURDATE() AND IsActive=1
+                       ORDER BY Deadline ASC`),
+            db.query(`SELECT r.YokotenID,r.Department,
+                             COALESCE(NULLIF(r.SafetyUnit,''),NULLIF(e.Unit,''),NULLIF(e.Team,'')) EffectiveSafetyUnit
+                        FROM YokotenResponses r
+                        LEFT JOIN Employees e ON e.EmployeeID=r.EmployeeID
+                       WHERE r.IsDeleted IS NULL OR r.IsDeleted=0`),
+            db.query(`SELECT u.name,u.short_code,d.Name department
+                        FROM Master_SafetyUnits u
+                        LEFT JOIN Master_Departments d ON d.id=u.department_id`),
+        ]);
+        const departmentNames = departments.map(row => String(row.Name || '').trim()).filter(Boolean);
+        const responseMap = new Map(responses.map(row => [
+            `${normalizeDepartmentKey(row.Department)}::${String(row.YokotenID)}`,
+            row,
+        ]));
+        return topics.map(topic => {
+            const configured = dashboardList(topic.TargetDepts);
+            const targets = configured.length ? configured.filter(dept => departmentNames.includes(dept)) : departmentNames;
+            const respondedCount = targets.filter(dept => {
+                const response = responseMap.get(`${normalizeDepartmentKey(dept)}::${String(topic.YokotenID)}`) || null;
+                return buildUnitCoverage({
+                    department: dept,
+                    topicUnits: dashboardList(topic.TargetUnits),
+                    responseUnits: dashboardList(response?.EffectiveSafetyUnit),
+                    responseExists: !!response,
+                    masterUnits,
+                }).complete;
+            }).length;
+            return { ...topic, respondedCount, targetDeptCount: targets.length };
+        }).filter(topic => topic.respondedCount < topic.targetDeptCount).slice(0, 10);
+    } catch (_) {
+        return [];
     }
 }
 
@@ -1279,17 +1367,7 @@ router.get('/alerts', async (_req, res) => {
             ).then(([r]) => r).catch(() => []),
 
             // Yokoten topics past deadline still active
-            db.query(
-                `SELECT t.YokotenID, t.Title, t.Deadline,
-                        COUNT(r.ResponseID) AS respondedCount
-                 FROM YokotenTopics t
-                 LEFT JOIN YokotenResponses r
-                        ON r.YokotenID = t.YokotenID
-                           AND (r.IsDeleted IS NULL OR r.IsDeleted = 0)
-                 WHERE t.Deadline IS NOT NULL AND t.Deadline < CURDATE() AND t.IsActive = 1
-                 GROUP BY t.YokotenID, t.Title, t.Deadline
-                 ORDER BY t.Deadline ASC LIMIT 10`
-            ).then(([r]) => r).catch(() => []),
+            buildYokotenOverdueAlerts(),
 
             // Open patrol issues (all time)
             db.query(
@@ -1327,6 +1405,7 @@ router.get('/alerts', async (_req, res) => {
 module.exports = router;
 module.exports.buildComplianceMatrix = buildComplianceMatrix;
 module.exports.resolveCccfWorkerSource = resolveCccfWorkerSource;
+module.exports.buildHiyariAssignmentCoverage = buildHiyariAssignmentCoverage;
 module.exports.dashboardMetricBuilders = {
     buildPatrolCompanyProgress,
     buildHiyariCompanyProgress,

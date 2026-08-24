@@ -67,6 +67,11 @@ let _searchQ        = '';
 let _topicView      = localStorage.getItem('yok_topic_view') || 'card'; // 'card' | 'list'
 let _topicSort      = localStorage.getItem('yok_topic_sort') || 'latest'; // 'latest' | 'oldest' | 'urgent' | 'deadline'
 let _adminView      = 'topics';      // 'topics' | 'work' | 'dept' | 'emp' | 'email' | 'config'
+let _adminCoverageMode = 'department'; // 'department' | 'topic'
+let _adminCoverageTopicId = '';
+let _adminCoverageStatus = 'all';    // 'all' | 'complete' | 'partial' | 'missing'
+let _adminCoverageYear = String(new Date().getFullYear());
+let _adminCoverageRisk = '';
 let _listenersReady = false;
 let _chartCat       = null;
 let _chartDept      = null;
@@ -283,6 +288,20 @@ async function refreshData() {
         _masterDepts = normalizeApiArray(base[2]?.data ?? base[2]);
         _safetyUnits = normalizeApiArray(base[3]?.data ?? base[3]);
         _dashConfig  = _normalizeDashConfig(base[4]?.data ?? {});
+        _topics = _topics.map(topic => {
+            const coverage = _getTopicResponseUnitCoverage(topic, topic.deptResponse);
+            return {
+                ...topic,
+                unitCoverageComplete: coverage.complete,
+                deptResponse: topic.deptResponse ? {
+                    ...topic.deptResponse,
+                    unitCoverageComplete: coverage.complete,
+                    requiredUnits: coverage.requiredUnits,
+                    coveredUnits: coverage.coveredUnits,
+                    missingUnits: coverage.missingUnits,
+                } : null,
+            };
+        });
         _sharedResponses = new Map();
         _companyOverview = null;
         _companyOverviewYear = null;
@@ -295,6 +314,20 @@ async function refreshData() {
             const raw = dc?.data ?? dc;
             _deptCompletion = raw?.deptSummary ? _normalizeDeptCompletion(raw) : null;
             _allResponses = _normalizeResponseRows(ar?.data ?? ar);
+            if (_deptCompletion) {
+                const completedByTopic = new Map();
+                (_deptCompletion.deptSummary || []).forEach(dept => {
+                    (dept.topicBreakdown || []).forEach(row => {
+                        if (!row.responded) return;
+                        const key = String(row.YokotenID);
+                        completedByTopic.set(key, (completedByTopic.get(key) || 0) + 1);
+                    });
+                });
+                _topics = _topics.map(topic => ({
+                    ...topic,
+                    totalDeptCount: completedByTopic.get(String(topic.YokotenID)) || 0,
+                }));
+            }
         } else {
             _deptCompletion = null;
             _allResponses = [];
@@ -406,10 +439,10 @@ async function _renderHeroStats() {
     const strip = document.getElementById('yok-hero-stats');
     if (!strip) return;
     const total     = _topics.length;
-    const responded = _topics.filter(t => t.deptResponse).length;
+    const responded = _topics.filter(_isDeptTopicComplete).length;
     const pending   = total - responded;
     const rejected  = _topics.filter(t => t.deptResponse?.ApprovalStatus === 'rejected').length;
-    const near      = _topics.filter(t => !t.deptResponse && _isNearOrOver(t.Deadline)).length;
+    const near      = _topics.filter(t => !_isDeptTopicComplete(t) && _isNearOrOver(t.Deadline)).length;
 
     const stats = [
         { value: total,     label: 'หัวข้อทั้งหมด',  color: '#6ee7b7' },
@@ -464,11 +497,11 @@ function renderDashboardLegacy(container) {
         : _topics;
 
     const total     = topics.length;
-    const responded = topics.filter(t => t.deptResponse).length;
+    const responded = topics.filter(_isDeptTopicComplete).length;
     const pending   = total - responded;
     const rejected  = topics.filter(t => t.deptResponse?.ApprovalStatus === 'rejected').length;
     const pendingAppr = topics.filter(t => t.deptResponse?.ApprovalStatus === 'pending').length;
-    const overdue   = topics.filter(t => !t.deptResponse && _isOverdue(t.Deadline)).length;
+    const overdue   = topics.filter(t => !_isDeptTopicComplete(t) && _isOverdue(t.Deadline)).length;
     const pct       = total ? Math.round(responded * 100 / total) : 0;
     const barColor  = pct === 100 ? '#059669' : pct >= 60 ? '#0ea5e9' : pct >= 30 ? '#f59e0b' : '#ef4444';
 
@@ -484,7 +517,7 @@ function renderDashboardLegacy(container) {
 
     // Urgent topics: rejected + overdue (no response)
     const urgentTopics = topics
-        .filter(t => t.deptResponse?.ApprovalStatus === 'rejected' || (!t.deptResponse && _isNearOrOver(t.Deadline)))
+        .filter(t => t.deptResponse?.ApprovalStatus === 'rejected' || (!_isDeptTopicComplete(t) && _isNearOrOver(t.Deadline)))
         .sort((a, b) => {
             const score = t => t.deptResponse?.ApprovalStatus === 'rejected' ? 10 : _urgency(t.Deadline);
             return score(b) - score(a);
@@ -734,20 +767,20 @@ function renderUserDashboard(container) {
         ? _topics.filter(t => !t.DateIssued || new Date(t.DateIssued).getFullYear() === _dashYear)
         : _topics;
     const total = topics.length;
-    const responded = topics.filter(t => t.deptResponse).length;
+    const responded = topics.filter(_isDeptTopicComplete).length;
     const missing = Math.max(0, total - responded);
     const pendingApproval = topics.filter(t => t.deptResponse?.ApprovalStatus === 'pending').length;
     const rejected = topics.filter(t => t.deptResponse?.ApprovalStatus === 'rejected').length;
     const approved = topics.filter(t => t.deptResponse?.ApprovalStatus === 'approved').length;
     const notRelated = topics.filter(t => t.deptResponse?.IsRelated === 'No' && !t.deptResponse?.ApprovalStatus).length;
-    const dueSoon = topics.filter(t => !t.deptResponse && _isNearOrOver(t.Deadline)).length;
+    const dueSoon = topics.filter(t => !_isDeptTopicComplete(t) && _isNearOrOver(t.Deadline)).length;
     const pct = total ? Math.round(responded * 100 / total) : 0;
     const pctColor = pct === 100 ? '#059669' : pct >= 60 ? '#0ea5e9' : pct >= 30 ? '#d97706' : '#dc2626';
     const needAction = topics
-        .filter(t => !t.deptResponse || t.deptResponse?.ApprovalStatus === 'rejected')
+        .filter(t => !_isDeptTopicComplete(t) || t.deptResponse?.ApprovalStatus === 'rejected')
         .map(t => ({
             topic: t,
-            type: t.deptResponse?.ApprovalStatus === 'rejected' ? 'rejected' : 'missing',
+            type: t.deptResponse?.ApprovalStatus === 'rejected' ? 'rejected' : (t.deptResponse ? 'unit_gap' : 'missing'),
             urgency: t.deptResponse?.ApprovalStatus === 'rejected' ? 100 : _urgency(t.Deadline),
         }))
         .sort((a, b) => b.urgency - a.urgency);
@@ -1135,13 +1168,13 @@ function _getDashboardOperationMetrics(topics) {
     }
 
     const totalTopics = topics.length;
-    const responded = topics.filter(t => t.deptResponse).length;
+    const responded = topics.filter(_isDeptTopicComplete).length;
     const rejected = topics.filter(t => t.deptResponse?.ApprovalStatus === 'rejected').length;
     const pendingApproval = topics.filter(t => t.deptResponse?.ApprovalStatus === 'pending').length;
     const notResponded = Math.max(0, totalTopics - responded);
     const approved = topics.filter(t => t.deptResponse?.ApprovalStatus === 'approved').length;
     const notRelated = topics.filter(t => t.deptResponse?.IsRelated === 'No' && !t.deptResponse?.ApprovalStatus).length;
-    const dueSoon = topics.filter(t => !t.deptResponse && _isNearOrOver(t.Deadline)).length;
+    const dueSoon = topics.filter(t => !_isDeptTopicComplete(t) && _isNearOrOver(t.Deadline)).length;
     const pct = totalTopics ? Math.round(responded * 100 / totalTopics) : 0;
     return {
         totalTopics,
@@ -1280,8 +1313,11 @@ function _buildDashboardActionRow(row) {
 
 function _buildUserActionTopicRow(topic, type) {
     const isRejected = type === 'rejected';
+    const isUnitGap = type === 'unit_gap';
     const tone = isRejected
         ? { label: 'Returned', cls: 'bg-red-100 text-red-700' }
+        : isUnitGap
+        ? { label: 'Unit incomplete', cls: 'bg-violet-100 text-violet-700' }
         : { label: 'Missing', cls: 'bg-slate-100 text-slate-600' };
     return `
     <button type="button" class="w-full px-5 py-4 text-left hover:bg-slate-50 transition-colors yok-open-topic-btn"
@@ -1313,19 +1349,20 @@ function _getDashboardMissingRows(topics) {
                 const topic = topicMap.get(String(tb.YokotenID));
                 if (!topic) return;
                 rows.push({
-                    type: 'missing',
+                    type: tb.responseExists ? 'unit_gap' : 'missing',
                     title: topic.Title || _htmlToText(topic.TopicDescription),
                     dept: dept.department,
                     date: topic.Deadline,
                     yid: topic.YokotenID,
                     urgency: _urgency(topic.Deadline),
+                    missingUnits: tb.missingUnits || [],
                 });
             });
         });
         return rows;
     }
     return (topics || [])
-        .filter(t => !t.deptResponse)
+        .filter(t => !_isDeptTopicComplete(t))
         .map(t => ({
             type: 'missing',
             title: t.Title || _htmlToText(t.TopicDescription),
@@ -1339,7 +1376,7 @@ function _getDashboardMissingRows(topics) {
 function _buildUserTopicOverview(topics) {
     const rows = [...(topics || [])].sort((a, b) => {
         const score = t => t.deptResponse?.ApprovalStatus === 'rejected' ? 100
-            : !t.deptResponse ? 50 + _urgency(t.Deadline)
+            : !_isDeptTopicComplete(t) ? 50 + _urgency(t.Deadline)
             : t.deptResponse?.ApprovalStatus === 'pending' ? 30
             : 0;
         return score(b) - score(a);
@@ -1363,6 +1400,7 @@ function _buildUserTopicOverview(topics) {
 function _buildUserTopicOverviewRow(topic) {
     const resp = topic.deptResponse;
     const status = !resp ? { label: 'ยังไม่ตอบ', cls: 'bg-slate-100 text-slate-600', color: '#64748b', pct: 0 }
+        : !_isDeptTopicComplete(topic) ? { label: 'Unit ไม่ครบ', cls: 'bg-violet-100 text-violet-700', color: '#7c3aed', pct: 50 }
         : resp.ApprovalStatus === 'rejected' ? { label: 'ส่งกลับแก้ไข', cls: 'bg-red-100 text-red-700', color: '#dc2626', pct: 60 }
         : resp.ApprovalStatus === 'pending' ? { label: 'รออนุมัติ', cls: 'bg-amber-100 text-amber-700', color: '#d97706', pct: 75 }
         : resp.ApprovalStatus === 'approved' ? { label: 'อนุมัติแล้ว', cls: 'bg-blue-100 text-blue-700', color: '#2563eb', pct: 100 }
@@ -1470,8 +1508,8 @@ function _buildDashboardAnalytics(topics, metrics) {
 function _buildCompactProgressList(topics) {
     const rows = (topics || []).map(t => ({
         title: t.Title || _htmlToText(t.TopicDescription),
-        pct: t.deptResponse ? 100 : 0,
-        status: t.deptResponse?.ApprovalStatus || (t.deptResponse ? 'recorded' : 'missing'),
+        pct: _isDeptTopicComplete(t) ? 100 : 0,
+        status: t.deptResponse?.ApprovalStatus || (_isDeptTopicComplete(t) ? 'recorded' : (t.deptResponse ? 'unit_gap' : 'missing')),
     })).slice(0, 8);
     return `
     <div class="space-y-3">
@@ -1555,7 +1593,7 @@ function _getTopicCoverage(topic) {
         const total = targeted.length;
         return { responded, total, pct: total ? Math.round(responded * 100 / total) : 0 };
     }
-    const responded = topic.deptResponse ? 1 : 0;
+    const responded = _isDeptTopicComplete(topic) ? 1 : 0;
     return { responded, total: 1, pct: responded ? 100 : 0 };
 }
 
@@ -1690,7 +1728,8 @@ function _buildExecSection() {
     const rejected     = allResp.filter(r => r.ApprovalStatus === 'rejected').length;
     // Sum actual totalTopics per targeted dept
     const totalPossible = deptSummary.reduce((s, d) => s + (d.totalTopics || 0), 0);
-    const notResponded  = Math.max(0, totalPossible - allResp.length);
+    const completedResponses = deptSummary.reduce((sum, dept) => sum + Number(dept.respondedCount || 0), 0);
+    const notResponded  = Math.max(0, totalPossible - completedResponses);
 
     const fullD    = deptSummary.filter(d => d.completionPct === 100).length;
     const partialD = deptSummary.filter(d => d.completionPct > 0 && d.completionPct < 100).length;
@@ -2733,11 +2772,11 @@ function renderTopics(container) {
     let filtered = [...yearBase];
     if (_filterRisk) filtered = filtered.filter(t => t.RiskLevel === _filterRisk);
     if (_filterCat)  filtered = filtered.filter(t => (t.Category || 'ทั่วไป') === _filterCat);
-    if (_filterAck === 'pending')   filtered = filtered.filter(t => !t.deptResponse);
-    if (_filterAck === 'responded') filtered = filtered.filter(t => !!t.deptResponse);
+    if (_filterAck === 'pending')   filtered = filtered.filter(t => !_isDeptTopicComplete(t));
+    if (_filterAck === 'responded') filtered = filtered.filter(_isDeptTopicComplete);
     if (_filterAck === 'rejected')  filtered = filtered.filter(t => t.deptResponse?.ApprovalStatus === 'rejected');
-    if (_filterSla === 'overdue')     filtered = filtered.filter(t => !t.deptResponse && _isOverdue(t.Deadline));
-    if (_filterSla === 'due_soon')    filtered = filtered.filter(t => !t.deptResponse && _isNearDeadline(t.Deadline));
+    if (_filterSla === 'overdue')     filtered = filtered.filter(t => !_isDeptTopicComplete(t) && _isOverdue(t.Deadline));
+    if (_filterSla === 'due_soon')    filtered = filtered.filter(t => !_isDeptTopicComplete(t) && _isNearDeadline(t.Deadline));
     if (_filterSla === 'no_deadline') filtered = filtered.filter(t => !t.Deadline);
     if (_searchQ.trim()) {
         const q = _searchQ.trim().toLowerCase();
@@ -2751,10 +2790,10 @@ function renderTopics(container) {
 
     // ── Mini KPI strip (from year-filtered base, before other filters) ──────
     const yTotal     = yearBase.length;
-    const yResponded = yearBase.filter(t => t.deptResponse).length;
+    const yResponded = yearBase.filter(_isDeptTopicComplete).length;
     const yPending   = yTotal - yResponded;
     const yUrgent    = yearBase.filter(t =>
-        t.deptResponse?.ApprovalStatus === 'rejected' || (!t.deptResponse && _isNearOrOver(t.Deadline))
+        t.deptResponse?.ApprovalStatus === 'rejected' || (!_isDeptTopicComplete(t) && _isNearOrOver(t.Deadline))
     ).length;
     const yPct       = yTotal ? Math.round(yResponded * 100 / yTotal) : 0;
 
@@ -2903,7 +2942,7 @@ function renderTopics(container) {
 function _sortTopics(rows, mode = 'latest') {
     const topicScore = topic => {
         if (topic.deptResponse?.ApprovalStatus === 'rejected') return 1000;
-        if (!topic.deptResponse) return _urgency(topic.Deadline);
+        if (!_isDeptTopicComplete(topic)) return 500 + _urgency(topic.Deadline);
         return -1;
     };
     const deadlineTs = topic => {
@@ -2982,6 +3021,7 @@ function _topicStatusMeta(t) {
     const dr = t.deptResponse;
     const approval = dr?.ApprovalStatus || null;
     if (approval === 'rejected') return { label: 'Rejected', className: 'bg-red-100 text-red-700 border-red-200' };
+    if (dr && !_isDeptTopicComplete(t)) return { label: 'Unit incomplete', className: 'bg-violet-100 text-violet-700 border-violet-200' };
     if (approval === 'pending') return { label: 'Pending approval', className: 'bg-yellow-100 text-yellow-700 border-yellow-200' };
     if (dr) return { label: 'Responded', className: 'bg-emerald-100 text-emerald-700 border-emerald-200' };
     if (_isOverdue(t.Deadline)) return { label: 'Overdue', className: 'bg-red-100 text-red-700 border-red-200' };
@@ -2993,7 +3033,7 @@ function _buildTopicListRow(t, index) {
     const targetDeptCount = _isAdmin
         ? ((Array.isArray(t.TargetDepts) && t.TargetDepts.length > 0) ? t.TargetDepts.length : _masterDepts.length)
         : 1;
-    const respondedCount = _isAdmin ? (t.totalDeptCount || 0) : (t.deptResponse ? 1 : 0);
+    const respondedCount = _isAdmin ? (t.totalDeptCount || 0) : (_isDeptTopicComplete(t) ? 1 : 0);
     const pct = targetDeptCount > 0 ? Math.round(respondedCount * 100 / targetDeptCount) : 0;
     const status = _topicStatusMeta(t);
     const sharedCount = Number(t.sharedResponseCount || 0);
@@ -3042,7 +3082,9 @@ function _buildTopicListRow(t, index) {
 
 function _buildTopicSummaryCard(t) {
     const dr        = t.deptResponse;
-    const responded = !!dr;
+    const responseExists = !!dr;
+    const responded = _isDeptTopicComplete(t);
+    const unitGap = responseExists && !responded;
     const approval  = dr?.ApprovalStatus || null;
     const rejected  = approval === 'rejected';
     const pending   = approval === 'pending';
@@ -3053,6 +3095,8 @@ function _buildTopicSummaryCard(t) {
         ? 'linear-gradient(90deg,#ef4444,#dc2626)'
         : urgency === 'near'
         ? 'linear-gradient(90deg,#f97316,#ef4444)'
+        : unitGap
+        ? 'linear-gradient(90deg,#7c3aed,#6366f1)'
         : responded
         ? 'linear-gradient(90deg,#059669,#0d9488)'
         : 'linear-gradient(90deg,#0ea5e9,#6366f1)';
@@ -3061,6 +3105,8 @@ function _buildTopicSummaryCard(t) {
         ? `<span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-semibold bg-red-100 text-red-700"><span class="w-1.5 h-1.5 rounded-full bg-red-500"></span>Rejected / ส่งกลับแก้ไข</span>`
         : pending
         ? `<span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-semibold bg-yellow-100 text-yellow-700"><span class="w-1.5 h-1.5 rounded-full bg-yellow-500 animate-pulse"></span>Pending / รออนุมัติ</span>`
+        : unitGap
+        ? `<span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-semibold bg-violet-100 text-violet-700"><span class="w-1.5 h-1.5 rounded-full bg-violet-500"></span>Unit incomplete / Unit ไม่ครบ</span>`
         : responded
         ? `<span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-semibold bg-emerald-100 text-emerald-700"><span class="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span>Responded / ตอบแล้ว</span>`
         : urgency === 'overdue'
@@ -3070,11 +3116,11 @@ function _buildTopicSummaryCard(t) {
     const targetDeptCount = _isAdmin
         ? ((Array.isArray(t.TargetDepts) && t.TargetDepts.length > 0) ? t.TargetDepts.length : _masterDepts.length)
         : 1;
-    const respondedCount  = _isAdmin ? (t.totalDeptCount || 0) : (responded ? 1 : 0);
+    const respondedCount  = _isAdmin ? (t.totalDeptCount || 0) : (_isDeptTopicComplete(t) ? 1 : 0);
     const sharedCount = Number(t.sharedResponseCount || 0);
     const deptPct  = targetDeptCount > 0 ? Math.round(respondedCount * 100 / targetDeptCount) : 0;
     const barColor = deptPct === 100 ? '#059669' : deptPct >= 50 ? '#f59e0b' : '#94a3b8';
-    const btnLabel = responded ? 'View detail / ดูรายละเอียด' : 'View / Respond · ดู / ตอบกลับ';
+    const btnLabel = responseExists ? 'View detail / ดูรายละเอียด' : 'View / Respond · ดู / ตอบกลับ';
 
     return `
     <div class="ds-section overflow-hidden flex flex-col" data-yok-card-image="yokoten-topic-${_esc(t.YokotenID || 'card')}">
@@ -3557,6 +3603,12 @@ function _buildResponseDisplay(t, dr) {
         : '';
 
     const files = dr.files || [];
+    const unitCoverage = _getTopicResponseUnitCoverage(t, dr);
+    const unitCoverageHtml = unitCoverage.requiredCount > 0
+        ? `<span class="px-2 py-0.5 rounded-full text-xs font-semibold ${unitCoverage.complete ? 'bg-emerald-100 text-emerald-700' : 'bg-violet-100 text-violet-700'}">
+                Unit ${unitCoverage.coveredCount}/${unitCoverage.requiredCount}
+           </span>`
+        : '';
 
     let html = `
     <div class="space-y-2">
@@ -3572,7 +3624,13 @@ function _buildResponseDisplay(t, dr) {
             <span class="text-slate-400">·</span>
             <span class="text-xs text-slate-400">${_fmtDate(dr.ResponseDate)}</span>
             ${approvalHtml}
+            ${unitCoverageHtml}
         </div>
+        ${unitCoverage.missingUnits.length ? `
+        <div class="ml-6 p-3 rounded-lg bg-violet-50 border border-violet-200">
+            <p class="text-xs font-semibold text-violet-700">ยังไม่นับว่าครบทั้งแผนก — ขาด Unit</p>
+            <p class="text-xs text-violet-600 mt-1">${unitCoverage.missingUnits.map(_esc).join(', ')}</p>
+        </div>` : ''}
         ${dr.Comment ? `<p class="text-sm text-slate-500 ml-6 italic">"${_esc(dr.Comment)}"</p>` : ''}
         ${dr.CorrectiveAction ? `
         <div class="ml-6 p-3 rounded-lg bg-amber-50 border border-amber-200">
@@ -3729,6 +3787,34 @@ function _getResponseUnits(row) {
         row?.safetyUnits || row?.SafetyUnits || row?.EffectiveSafetyUnit ||
         row?.effectiveSafetyUnit || row?.safetyUnit || row?.SafetyUnit
     );
+}
+
+function _getTopicResponseUnitCoverage(topic, response, department = '') {
+    const dept = String(department || response?.Department || TSHSession.getUser()?.department || '').trim();
+    const topicScope = _resolveTopicSafetyUnits(topic);
+    const requiredUnits = topicScope.units
+        .filter(unit => !dept || _normalizeYokotenScopeValue(_getSafetyUnitDepartment(unit)) === _normalizeYokotenScopeValue(dept))
+        .map(_getSafetyUnitName)
+        .filter(Boolean);
+    const selected = new Set(_getResponseUnits(response).map(_normalizeYokotenScopeValue));
+    const coveredUnits = requiredUnits.filter(unit => selected.has(_normalizeYokotenScopeValue(unit)));
+    const missingUnits = requiredUnits.filter(unit => !selected.has(_normalizeYokotenScopeValue(unit)));
+    return {
+        requiredUnits,
+        coveredUnits,
+        missingUnits,
+        requiredCount: requiredUnits.length,
+        coveredCount: coveredUnits.length,
+        complete: !!response && missingUnits.length === 0 && topicScope.unresolved.length === 0,
+    };
+}
+
+function _isDeptTopicComplete(topic) {
+    if (!topic?.deptResponse) return false;
+    if (typeof topic.deptResponse.unitCoverageComplete === 'boolean') {
+        return topic.deptResponse.unitCoverageComplete;
+    }
+    return _getTopicResponseUnitCoverage(topic, topic.deptResponse).complete;
 }
 
 function _getTargetDepartmentsForTopic(topic) {
@@ -3901,18 +3987,17 @@ function _buildResponseForm(yokotenId, existingResp = null, opts = {}) {
     const departmentChoices = isAdminMode ? _getAdminDepartmentChoices(opts.topic) : [];
     const pendingDepartmentCount = departmentChoices.filter(choice => !choice.responded).length;
     const topicUnits = _parseTargetDepts(opts.topic?.TargetUnits);
-    const responseUnits = topicUnits.length
-        ? _safetyUnits.filter(u => topicUnits.includes(_getSafetyUnitName(u)))
-        : [];
     const existingUnits = _getResponseUnits(existingResp);
     const userUnits = _parseSafetyUnitList(currentUser.unit || currentUser.Unit || currentUser.team || currentUser.Team);
-    const preselectedUnits = existingUnits.length ? existingUnits : userUnits.filter(unit => !topicUnits.length || topicUnits.includes(unit));
-    const unitOptions = (isAdminMode || (!isEdit && topicUnits.length))
-        ? responseUnits.map(u => {
-            const name = _getSafetyUnitName(u);
-            return name ? `<option value="${_esc(name)}" ${preselectedUnits.includes(name) ? 'selected' : ''}>${_esc(name)}</option>` : '';
-        }).join('')
-        : '';
+    const responseDepartment = String(existingResp?.Department || currentUser.department || currentUser.Department || '').trim();
+    const resolvedTopicUnits = _resolveTopicSafetyUnits(opts.topic);
+    const requiredUnitNames = resolvedTopicUnits.units
+        .filter(unit => _normalizeYokotenScopeValue(_getSafetyUnitDepartment(unit)) === _normalizeYokotenScopeValue(responseDepartment))
+        .map(_getSafetyUnitName)
+        .filter(Boolean);
+    const preselectedUnits = existingUnits.length
+        ? existingUnits
+        : (requiredUnitNames.length ? requiredUnitNames : userUnits.filter(unit => !topicUnits.length || topicUnits.includes(unit)));
     return `
     <form class="yok-resp-form space-y-3 rounded-xl border ${isAdminMode ? 'border-sky-200 bg-white p-4' : 'border-transparent'}" data-id="${yokotenId}" data-rid="${rid}" data-admin-mode="${isAdminMode ? '1' : ''}" data-existing-files="${existingResp?.files?.length || 0}">
         <p class="text-sm font-semibold text-slate-700">${isAdminMode ? 'Respond on behalf / บันทึกการตอบกลับแทนแผนก' : (isEdit ? 'Edit response / แก้ไขการตอบกลับ' : 'Respond to this topic / ตอบกลับหัวข้อนี้')}</p>
@@ -3960,15 +4045,23 @@ function _buildResponseForm(yokotenId, existingResp = null, opts = {}) {
                 <span data-admin-unit-warning class="hidden block text-[11px] font-semibold text-red-600 mt-1"></span>
             </div>
         </div>` : ''}
-        ${!isAdminMode && !isEdit && topicUnits.length ? `
-        <label class="block">
-            <span class="block text-xs font-semibold text-slate-600 mb-1">Safety Unit / หน่วยงาน <span class="text-red-500">*</span></span>
-            <select name="safetyUnit" class="form-input w-full text-sm" required>
-                <option value="">เลือก Safety Unit</option>
-                ${unitOptions || topicUnits.map(unit => `<option value="${_esc(unit)}" ${preselectedUnits.includes(unit) ? 'selected' : ''}>${_esc(unit)}</option>`).join('')}
-            </select>
-            <span class="block text-[11px] text-slate-400 mt-1">เลือก Safety Unit ที่ตรงกับ scope ของหัวข้อนี้</span>
-        </label>` : ''}
+        ${!isAdminMode && requiredUnitNames.length ? `
+        <div class="rounded-lg border border-violet-200 bg-violet-50/40 p-3" data-unit-coverage-required="${requiredUnitNames.length}">
+            <div class="flex flex-wrap items-center justify-between gap-2 mb-2">
+                <div>
+                    <span class="block text-xs font-semibold text-slate-700">Unit Coverage / Unit ที่ดำเนินการแล้ว <span class="text-red-500">*</span></span>
+                    <span class="block text-[11px] text-slate-500">ต้องเลือกครบทุก Unit เป้าหมายก่อนนับหัวข้อนี้ให้แผนก</span>
+                </div>
+                <button type="button" class="yok-select-required-units px-2.5 py-1 rounded-md text-[11px] font-bold text-violet-700 border border-violet-200 bg-white hover:bg-violet-100">เลือกทั้งหมด</button>
+            </div>
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-1.5">
+                ${requiredUnitNames.map(unit => `
+                <label class="flex items-center gap-2 rounded-md border border-violet-100 bg-white px-2.5 py-2 text-xs text-slate-700 cursor-pointer">
+                    <input type="checkbox" name="unitCoverage" value="${_esc(unit)}" class="accent-violet-600" ${preselectedUnits.includes(unit) ? 'checked' : ''}>
+                    <span class="font-medium">${_esc(unit)}</span>
+                </label>`).join('')}
+            </div>
+        </div>` : ''}
         <div class="flex gap-5">
             <label class="flex items-center gap-2 cursor-pointer text-sm">
                 <input type="radio" name="isRelated" value="Yes" class="accent-emerald-500"
@@ -4179,7 +4272,7 @@ function renderAdmin(container) {
                 </svg>
                 ตั้งค่า Dashboard
             </button>
-            ${_adminView === 'dept' ? `
+            ${_adminView === 'dept' && _adminCoverageMode === 'department' ? `
             <div class="ml-auto flex items-center gap-2">
                 <button id="yok-export-btn-pdf"
                     class="flex items-center gap-1.5 px-4 py-2 rounded-lg text-xs font-semibold text-white"
@@ -4349,6 +4442,21 @@ function _getAdminWorkItems() {
         targeted.forEach(dept => {
             const tb = (dept.topicBreakdown || []).find(row => String(row.YokotenID) === String(topic.YokotenID));
             if (tb?.responded) return;
+            if (tb?.responseExists) {
+                const response = (_allResponses || []).find(row =>
+                    String(row.YokotenID) === String(topic.YokotenID)
+                    && String(row.Department || '') === String(dept.department || '')
+                ) || null;
+                items.push({
+                    type: 'unit_gap',
+                    priority: 85,
+                    topic,
+                    response,
+                    dept: dept.department,
+                    missingUnits: tb.missingUnits || [],
+                });
+                return;
+            }
             const daysLeft = topic.Deadline ? Math.ceil((new Date(topic.Deadline) - now) / 86400000) : null;
             let type = null;
             let priority = 0;
@@ -4376,6 +4484,7 @@ function _workItemBadge(type) {
         overdue:  ['Overdue', 'bg-rose-100 text-rose-700 border-rose-200'],
         due_soon: ['Due soon', 'bg-yellow-100 text-yellow-700 border-yellow-200'],
         high_gap: ['High-risk gap', 'bg-orange-100 text-orange-700 border-orange-200'],
+        unit_gap: ['Unit coverage incomplete', 'bg-violet-100 text-violet-700 border-violet-200'],
     };
     const [label, cls] = map[type] || ['Action', 'bg-slate-100 text-slate-600 border-slate-200'];
     return `<span class="px-2 py-0.5 rounded-full text-[11px] font-bold border ${cls}">${label}</span>`;
@@ -4394,6 +4503,7 @@ function _buildAdminWorkQueue() {
     const overdue = items.filter(i => i.type === 'overdue').length;
     const dueSoon = items.filter(i => i.type === 'due_soon').length;
     const highGap = items.filter(i => i.type === 'high_gap').length;
+    const unitGap = items.filter(i => i.type === 'unit_gap').length;
 
     const rowHtml = items.slice(0, 80).map(item => {
         const topic = item.topic || {};
@@ -4419,6 +4529,7 @@ function _buildAdminWorkQueue() {
                     </div>
                     <p class="text-sm font-bold text-slate-800 truncate">${_esc(title)}</p>
                     <p class="text-xs text-slate-500 mt-1">${responseMeta}</p>
+                    ${item.missingUnits?.length ? `<p class="text-xs text-violet-600 mt-1">Missing Unit: ${item.missingUnits.map(_esc).join(', ')}</p>` : ''}
                     ${response?.ApprovalComment ? `<p class="text-xs text-red-600 mt-1">Comment: ${_esc(response.ApprovalComment)}</p>` : ''}
                 </div>
                 <div class="flex flex-wrap gap-2 justify-end">
@@ -4447,12 +4558,13 @@ function _buildAdminWorkQueue() {
 
     return `
     <div class="space-y-4">
-        <div class="grid grid-cols-2 md:grid-cols-5 gap-3" data-yok-card-image="yokoten-admin-work-kpis">
+        <div class="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-6 gap-3" data-yok-card-image="yokoten-admin-work-kpis">
             ${_kpiCard(pending, 'Pending approval', '#f59e0b', `<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3"/>`, 'amber')}
             ${_kpiCard(rejected, 'Rejected', '#ef4444', `<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01"/>`, 'red')}
             ${_kpiCard(overdue, 'Overdue', '#dc2626', `<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6v6l4 2"/>`, 'red')}
             ${_kpiCard(dueSoon, 'Due soon', '#eab308', `<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7V3m8 4V3M5 11h14"/>`, 'amber')}
             ${_kpiCard(highGap, 'High-risk gap', '#f97316', `<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"/>`, 'orange')}
+            ${_kpiCard(unitGap, 'Unit coverage gap', '#7c3aed', `<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h10M4 18h7"/>`, 'violet')}
         </div>
         <div class="ds-section overflow-hidden" data-yok-card-image="yokoten-admin-work-queue">
             <div class="px-5 py-4 border-b border-slate-100 flex flex-wrap items-center gap-2 justify-between">
@@ -4572,6 +4684,362 @@ function _buildAdminEmailOutbox() {
     </div>`;
 }
 
+function _buildAdminCoverageSwitch() {
+    const button = (mode, label, description) => `
+        <button type="button" class="yok-admin-coverage-mode flex-1 sm:flex-none px-4 py-2.5 rounded-xl text-left transition-all border ${_adminCoverageMode === mode
+            ? 'bg-emerald-600 text-white border-emerald-600 shadow-sm'
+            : 'bg-white text-slate-600 border-slate-200 hover:border-emerald-300 hover:bg-emerald-50'}"
+            data-coverage-mode="${mode}">
+            <span class="block text-xs font-black">${label}</span>
+            <span class="block text-[10px] mt-0.5 ${_adminCoverageMode === mode ? 'text-emerald-100' : 'text-slate-400'}">${description}</span>
+        </button>`;
+    return `
+        <div class="ds-filter-bar flex flex-wrap gap-2" data-yok-card-image="yokoten-admin-coverage-switch">
+            ${button('department', 'ดูตามแผนก', 'ความคืบหน้าทุกหัวข้อของแต่ละแผนก')}
+            ${button('topic', 'ดูตามหัวข้อ', 'แผนกและ Unit ที่ส่งแล้วหรือยังไม่ส่ง')}
+        </div>`;
+}
+
+function _getAdminCoverageYears(topics) {
+    return [...new Set((topics || []).map(topic => {
+        const date = topic.DateIssued ? new Date(topic.DateIssued) : null;
+        return date && !Number.isNaN(date.getTime()) ? String(date.getFullYear()) : '';
+    }).filter(Boolean))].sort((a, b) => Number(b) - Number(a));
+}
+
+function _filterAdminCoverageTopics(topics) {
+    return (topics || []).filter(topic => {
+        const date = topic.DateIssued ? new Date(topic.DateIssued) : null;
+        const topicYear = date && !Number.isNaN(date.getTime()) ? String(date.getFullYear()) : '';
+        const yearMatch = !_adminCoverageYear || !topicYear || topicYear === String(_adminCoverageYear);
+        const riskMatch = !_adminCoverageRisk || String(topic.RiskLevel || '') === _adminCoverageRisk;
+        return yearMatch && riskMatch;
+    });
+}
+
+function _topicCoverageDeadlineMeta(deadline, incomplete) {
+    if (!deadline) return { label: 'ไม่กำหนด', overdueDays: 0, daysLeft: null, className: 'text-slate-400' };
+    const due = new Date(deadline);
+    if (Number.isNaN(due.getTime())) return { label: '-', overdueDays: 0, daysLeft: null, className: 'text-slate-400' };
+    due.setHours(0, 0, 0, 0);
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const diffDays = Math.round((due - today) / 86400000);
+    if (!incomplete) return { label: _fmtDateOnly(deadline), overdueDays: 0, daysLeft: diffDays, className: 'text-slate-500' };
+    if (diffDays < 0) return { label: `เกินกำหนด ${Math.abs(diffDays)} วัน`, overdueDays: Math.abs(diffDays), daysLeft: diffDays, className: 'text-red-600 font-black' };
+    if (diffDays === 0) return { label: 'ครบกำหนดวันนี้', overdueDays: 0, daysLeft: 0, className: 'text-amber-600 font-black' };
+    return { label: `เหลือ ${diffDays} วัน`, overdueDays: 0, daysLeft: diffDays, className: diffDays <= 3 ? 'text-amber-600 font-bold' : 'text-slate-500' };
+}
+
+function _getAdminTopicCoverageRows(deptSummary, topic) {
+    return _getTopicTargetedDepts(deptSummary, topic).map(dept => {
+        const breakdown = (dept.topicBreakdown || []).find(row =>
+            String(row.YokotenID) === String(topic.YokotenID));
+        const response = _allResponses.find(row =>
+            String(row.YokotenID) === String(topic.YokotenID)
+            && String(row.Department || '').trim() === String(dept.department || '').trim());
+        const requiredUnits = Array.isArray(breakdown?.requiredUnits) ? breakdown.requiredUnits : [];
+        const coveredUnits = Array.isArray(breakdown?.coveredUnits) ? breakdown.coveredUnits : [];
+        const missingUnits = Array.isArray(breakdown?.missingUnits) ? breakdown.missingUnits : [];
+        const responseExists = Boolean(breakdown?.responseExists || response);
+        const complete = Boolean(breakdown?.responded);
+        const status = complete ? 'complete' : responseExists ? 'partial' : 'missing';
+        return {
+            department: dept.department,
+            status,
+            responseExists,
+            requiredUnits,
+            coveredUnits,
+            missingUnits,
+            requiredCount: Number(breakdown?.requiredUnitCount ?? requiredUnits.length ?? 0),
+            coveredCount: Number(breakdown?.coveredUnitCount ?? coveredUnits.length ?? 0),
+            approvalStatus: breakdown?.approvalStatus || response?.ApprovalStatus || null,
+            responseDate: breakdown?.responseDate || response?.ResponseDate || null,
+            responseId: _getResponseId(response),
+        };
+    }).sort((a, b) => {
+        const order = { missing: 0, partial: 1, complete: 2 };
+        return order[a.status] - order[b.status] || a.department.localeCompare(b.department);
+    });
+}
+
+function _buildAdminTopicCoverage(deptSummary, topics) {
+    if (!topics.length) return '<div class="ds-section p-10 text-center text-sm text-slate-400">ยังไม่มีหัวข้อ Yokoten</div>';
+
+    const allTopics = topics;
+    const years = _getAdminCoverageYears(allTopics);
+    const filteredTopics = _filterAdminCoverageTopics(allTopics);
+    const filterControls = `
+        <div class="grid grid-cols-1 sm:grid-cols-2 gap-3 w-full lg:w-[420px]">
+            <label class="block">
+                <span class="block text-xs font-bold text-slate-600 mb-1.5">ปี</span>
+                <select id="yok-admin-coverage-year" class="w-full px-3 py-2.5 rounded-xl border border-slate-200 bg-white text-sm font-semibold text-slate-700">
+                    <option value="" ${_adminCoverageYear === '' ? 'selected' : ''}>ทุกปี</option>
+                    ${years.map(year => `<option value="${year}" ${String(_adminCoverageYear) === year ? 'selected' : ''}>${year}</option>`).join('')}
+                </select>
+            </label>
+            <label class="block">
+                <span class="block text-xs font-bold text-slate-600 mb-1.5">ระดับความเสี่ยง</span>
+                <select id="yok-admin-coverage-risk" class="w-full px-3 py-2.5 rounded-xl border border-slate-200 bg-white text-sm font-semibold text-slate-700">
+                    <option value="" ${_adminCoverageRisk === '' ? 'selected' : ''}>ทุกระดับ</option>
+                    ${RISK_LEVELS.map(risk => `<option value="${risk.value}" ${_adminCoverageRisk === risk.value ? 'selected' : ''}>${risk.label}</option>`).join('')}
+                </select>
+            </label>
+        </div>`;
+    if (!filteredTopics.length) {
+        return `<div class="space-y-4">
+            <div class="ds-section p-5 flex flex-col lg:flex-row gap-4 lg:items-end lg:justify-between">
+                <div><p class="text-[10px] font-black tracking-widest text-emerald-600 uppercase">Topic Response Coverage</p><h3 class="text-base font-black text-slate-800 mt-1">ภาพรวมการตอบกลับรายหัวข้อ</h3></div>
+                ${filterControls}
+            </div>
+            <div class="ds-section p-10 text-center text-sm text-slate-400">ไม่พบหัวข้อในปีและระดับความเสี่ยงที่เลือก</div>
+        </div>`;
+    }
+
+    const summaries = filteredTopics.map(topic => {
+        const rows = _getAdminTopicCoverageRows(deptSummary, topic);
+        return {
+            topic,
+            rows,
+            complete: rows.filter(row => row.status === 'complete').length,
+            partial: rows.filter(row => row.status === 'partial').length,
+            missing: rows.filter(row => row.status === 'missing').length,
+        };
+    });
+    let selected = summaries.find(item => String(item.topic.YokotenID) === String(_adminCoverageTopicId));
+    if (!selected) {
+        selected = summaries.find(item => item.partial > 0 || item.missing > 0) || summaries[0];
+        _adminCoverageTopicId = String(selected.topic.YokotenID);
+    }
+
+    const rows = selected.rows;
+    const filteredRows = _adminCoverageStatus === 'all'
+        ? rows
+        : rows.filter(row => row.status === _adminCoverageStatus);
+    const complete = rows.filter(row => row.status === 'complete').length;
+    const partial = rows.filter(row => row.status === 'partial').length;
+    const missing = rows.filter(row => row.status === 'missing').length;
+    const unitRequired = rows.reduce((sum, row) => sum + row.requiredCount, 0);
+    const unitCovered = rows.reduce((sum, row) => sum + Math.min(row.coveredCount, row.requiredCount), 0);
+    const completionPct = rows.length ? Math.round(complete * 100 / rows.length) : 0;
+    const topicTitle = selected.topic.Title || selected.topic.title || _htmlToText(selected.topic.TopicDescription) || selected.topic.YokotenID;
+
+    const statusButton = (status, label, count, color) => `
+        <button type="button" class="yok-admin-coverage-status px-3 py-2 rounded-xl border text-xs font-bold transition-colors ${_adminCoverageStatus === status
+            ? `text-white border-transparent`
+            : 'bg-white border-slate-200 text-slate-500 hover:bg-slate-50'}"
+            style="${_adminCoverageStatus === status ? `background:${color}` : ''}"
+            data-coverage-status="${status}">${label} <span class="ml-1 opacity-80">${count}</span></button>`;
+
+    const statusBadge = row => row.status === 'complete'
+        ? '<span class="inline-flex px-2.5 py-1 rounded-full text-xs font-black bg-emerald-100 text-emerald-700">ส่งครบ</span>'
+        : row.status === 'partial'
+            ? `<span class="inline-flex px-2.5 py-1 rounded-full text-xs font-black bg-violet-100 text-violet-700">ส่งบางส่วน ${row.coveredCount}/${row.requiredCount}</span>`
+            : '<span class="inline-flex px-2.5 py-1 rounded-full text-xs font-black bg-red-100 text-red-600">ยังไม่ตอบ</span>';
+    const unitList = (items, emptyText, cls) => items.length
+        ? `<div class="flex flex-wrap gap-1">${items.map(unit => `<span class="px-2 py-1 rounded-lg text-[11px] font-semibold ${cls}">${_esc(unit)}</span>`).join('')}</div>`
+        : `<span class="text-xs text-slate-400">${emptyText}</span>`;
+
+    return `
+        <div class="space-y-4" data-yok-card-image="yokoten-admin-topic-coverage">
+            <div class="ds-section p-5">
+                <div class="flex flex-col xl:flex-row xl:items-end gap-4 justify-between">
+                    <div class="min-w-0 flex-1">
+                        <p class="text-[10px] font-black tracking-widest text-emerald-600 uppercase">Topic Response Coverage</p>
+                        <h3 class="text-base font-black text-slate-800 mt-1">ภาพรวมการตอบกลับรายหัวข้อ</h3>
+                        <p class="text-xs text-slate-400 mt-1">ตรวจว่าแต่ละแผนกและ Unit ส่งครบ ส่งบางส่วน หรือยังไม่ตอบ</p>
+                    </div>
+                    <div class="w-full xl:w-[720px] space-y-3">
+                        ${filterControls}
+                        <label class="block">
+                            <span class="block text-xs font-bold text-slate-600 mb-1.5">เลือกหัวข้อ Yokoten</span>
+                            <select id="yok-admin-coverage-topic" class="w-full px-3 py-2.5 rounded-xl border border-slate-200 bg-white text-sm font-semibold text-slate-700">
+                                ${summaries.map(item => {
+                                const title = item.topic.Title || item.topic.title || _htmlToText(item.topic.TopicDescription) || item.topic.YokotenID;
+                                const code = _topicDisplayCode(item.topic);
+                                const cleanTitle = code && title.toUpperCase().startsWith(code.toUpperCase())
+                                    ? title.slice(code.length).replace(/^[\s\-–—:]+/, '').trim()
+                                    : title;
+                                const optionLabel = code ? `${code}${cleanTitle ? ` — ${cleanTitle}` : ''}` : cleanTitle;
+                                    return `<option value="${_esc(item.topic.YokotenID)}" ${String(item.topic.YokotenID) === String(selected.topic.YokotenID) ? 'selected' : ''}>${_esc(optionLabel)} (${item.complete}/${item.rows.length})</option>`;
+                                }).join('')}
+                            </select>
+                        </label>
+                    </div>
+                </div>
+            </div>
+
+            <div class="grid grid-cols-2 lg:grid-cols-4 gap-3">
+                ${_kpiCard(`${complete}/${rows.length}`, 'แผนกส่งครบ', '#059669', `<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/>`, 'emerald')}
+                ${_kpiCard(partial, 'ส่งบางส่วน / Unit ไม่ครบ', '#7c3aed', `<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h10M4 18h7"/>`, 'violet')}
+                ${_kpiCard(missing, 'แผนกยังไม่ตอบ', '#ef4444', `<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>`, 'red')}
+                ${_kpiCard(unitRequired ? `${unitCovered}/${unitRequired}` : 'N/A', 'Unit ส่งแล้ว/ทั้งหมด', '#0284c7', `<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h16"/>`, 'sky')}
+            </div>
+
+            <div class="ds-section overflow-hidden">
+                <div class="px-5 py-4 border-b border-slate-100">
+                    <div class="flex flex-col lg:flex-row lg:items-center gap-3 justify-between">
+                        <div class="min-w-0">
+                            <div class="flex flex-wrap items-center gap-2">
+                                <h3 class="text-sm font-black text-slate-800">${_esc(topicTitle)}</h3>
+                                <span class="px-2 py-0.5 rounded-full text-[10px] font-black ${RISK_BADGE[selected.topic.RiskLevel] || 'bg-slate-100 text-slate-500'}">${_esc(RISK_LABEL[selected.topic.RiskLevel] || selected.topic.RiskLevel || '')}</span>
+                            </div>
+                            <div class="flex items-center gap-2 mt-2">
+                                <div class="w-44 max-w-full h-2 rounded-full bg-slate-100 overflow-hidden"><div class="h-full rounded-full bg-emerald-500" style="width:${completionPct}%"></div></div>
+                                <span class="text-xs font-black text-emerald-700">${completionPct}%</span>
+                            </div>
+                        </div>
+                        <div class="flex flex-col items-start lg:items-end gap-2">
+                            <div class="flex flex-wrap gap-2">
+                                <button type="button" id="yok-topic-coverage-export" class="px-3 py-2 rounded-xl text-xs font-bold text-emerald-700 bg-emerald-50 border border-emerald-200 hover:bg-emerald-100">Export Excel รายหัวข้อ</button>
+                                ${(partial + missing) > 0 ? `<button type="button" id="yok-topic-reminder-all" class="px-3 py-2 rounded-xl text-xs font-bold text-white bg-amber-500 hover:bg-amber-600">ส่ง Reminder รายการค้าง (${partial + missing})</button>` : ''}
+                            </div>
+                            <div class="flex flex-wrap gap-2">
+                                ${statusButton('all', 'ทั้งหมด', rows.length, '#334155')}
+                                ${statusButton('complete', 'ส่งครบ', complete, '#059669')}
+                                ${statusButton('partial', 'ส่งบางส่วน', partial, '#7c3aed')}
+                                ${statusButton('missing', 'ยังไม่ตอบ', missing, '#ef4444')}
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                <div class="overflow-x-auto">
+                    <table class="ds-table text-sm">
+                        <thead><tr class="bg-slate-50 text-xs font-semibold text-slate-500 text-left">
+                            <th class="px-4 py-3 min-w-[180px]">แผนก</th>
+                            <th class="px-4 py-3 min-w-[130px]">สถานะ</th>
+                            <th class="px-4 py-3 min-w-[240px]">Unit ที่ส่งแล้ว</th>
+                            <th class="px-4 py-3 min-w-[260px]">Unit ที่ยังไม่ส่ง</th>
+                            <th class="px-4 py-3 min-w-[150px]">กำหนดส่ง</th>
+                            <th class="px-4 py-3 whitespace-nowrap">ตอบล่าสุด</th>
+                            <th class="px-4 py-3 min-w-[210px] text-right">ดำเนินการ</th>
+                        </tr></thead>
+                        <tbody class="divide-y divide-slate-100">
+                            ${filteredRows.length ? filteredRows.map(row => {
+                                const deadline = _topicCoverageDeadlineMeta(selected.topic.Deadline, row.status !== 'complete');
+                                return `
+                                <tr class="align-top hover:bg-slate-50">
+                                    <td class="px-4 py-4"><div class="font-black text-slate-700">${_esc(row.department)}</div>${row.requiredCount ? `<div class="text-[11px] text-slate-400 mt-1">Unit ${row.coveredCount}/${row.requiredCount}</div>` : '<div class="text-[11px] text-slate-400 mt-1">ตอบระดับแผนก</div>'}</td>
+                                    <td class="px-4 py-4">${statusBadge(row)}</td>
+                                    <td class="px-4 py-4">${row.requiredCount ? unitList(row.coveredUnits, row.responseExists ? 'ยังไม่มี Unit ที่ครอบคลุม' : 'ยังไม่ตอบ', 'bg-emerald-50 text-emerald-700') : unitList([], row.responseExists ? 'ตอบในระดับแผนกแล้ว' : 'ยังไม่ตอบ', 'bg-slate-100 text-slate-600')}</td>
+                                    <td class="px-4 py-4">${row.requiredCount ? unitList(row.missingUnits.length ? row.missingUnits : (row.responseExists ? [] : row.requiredUnits), row.status === 'complete' ? 'ครบทุก Unit แล้ว' : 'ไม่พบ Unit ที่ขาด', 'bg-red-50 text-red-600') : '<span class="text-xs text-slate-300">—</span>'}</td>
+                                    <td class="px-4 py-4 text-xs whitespace-nowrap"><div class="text-slate-500">${selected.topic.Deadline ? _fmtDateOnly(selected.topic.Deadline) : 'ไม่กำหนด'}</div>${row.status !== 'complete' ? `<div class="mt-1 ${deadline.className}">${_esc(deadline.label)}</div>` : ''}</td>
+                                    <td class="px-4 py-4 text-xs text-slate-500 whitespace-nowrap">${row.responseDate ? _fmtDate(row.responseDate) : '—'}</td>
+                                    <td class="px-4 py-4 text-right"><div class="flex flex-wrap justify-end gap-1.5">
+                                        ${row.responseId ? `<button type="button" class="yok-open-topic-btn px-2.5 py-1.5 rounded-lg text-xs font-bold text-sky-700 bg-sky-50 hover:bg-sky-100" data-yid="${_esc(selected.topic.YokotenID)}" data-rid="${_esc(row.responseId)}">ดูคำตอบ</button>` : ''}
+                                        ${row.status !== 'complete' ? `<button type="button" class="yok-topic-reminder-btn px-2.5 py-1.5 rounded-lg text-xs font-bold text-amber-700 bg-amber-50 hover:bg-amber-100" data-yid="${_esc(selected.topic.YokotenID)}" data-department="${_esc(row.department)}">Reminder</button>` : ''}
+                                        ${row.status === 'missing' ? `<button type="button" class="yok-topic-respond-behalf-btn px-2.5 py-1.5 rounded-lg text-xs font-bold text-white bg-sky-600 hover:bg-sky-700" data-yid="${_esc(selected.topic.YokotenID)}" data-department="${_esc(row.department)}">ตอบแทนแผนก</button>` : ''}
+                                    </div></td>
+                                </tr>`;
+                            }).join('') : `<tr><td colspan="7" class="px-5 py-12 text-center text-sm text-slate-400">ไม่มีรายการตามตัวกรองนี้</td></tr>`}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>`;
+}
+
+function _getCurrentAdminTopicCoverageContext() {
+    if (!_deptCompletion?.topics?.length) return null;
+    const topics = _filterAdminCoverageTopics(_deptCompletion.topics);
+    const topic = topics.find(item => String(item.YokotenID) === String(_adminCoverageTopicId));
+    if (!topic) return null;
+    const deptSummary = _filterToTargetedDepts(_deptCompletion.deptSummary || [], topics);
+    const rows = _getAdminTopicCoverageRows(deptSummary, topic);
+    const visibleRows = _adminCoverageStatus === 'all'
+        ? rows
+        : rows.filter(row => row.status === _adminCoverageStatus);
+    return { topic, rows, visibleRows };
+}
+
+function _exportAdminTopicCoverageExcel() {
+    const context = _getCurrentAdminTopicCoverageContext();
+    if (!context) { showToast('ไม่พบข้อมูลรายหัวข้อสำหรับ Export', 'error'); return; }
+    if (typeof XLSX === 'undefined') { showToast('SheetJS ยังโหลดไม่เสร็จ กรุณาลองใหม่', 'error'); return; }
+    const { topic, visibleRows } = context;
+    const topicTitle = topic.Title || _htmlToText(topic.TopicDescription) || topic.YokotenID;
+    const meta = [
+        ['Yokoten Topic Coverage'],
+        ['รหัสหัวข้อ', topic.YokotenID],
+        ['หัวข้อ', topicTitle],
+        ['ปี', _adminCoverageYear || 'ทุกปี'],
+        ['ระดับความเสี่ยง', RISK_LABEL[topic.RiskLevel] || topic.RiskLevel || '-'],
+        ['กำหนดส่ง', topic.Deadline ? _fmtDateOnly(topic.Deadline) : 'ไม่กำหนด'],
+        ['ตัวกรองสถานะ', _adminCoverageStatus],
+        [],
+    ];
+    const data = [
+        ['แผนก', 'สถานะ', 'Unit ที่กำหนด', 'Unit ที่ส่งแล้ว', 'Unit ที่ยังไม่ส่ง', 'จำนวน Unit', 'กำหนดส่ง', 'เกินกำหนด (วัน)', 'ตอบล่าสุด'],
+        ...visibleRows.map(row => {
+            const deadline = _topicCoverageDeadlineMeta(topic.Deadline, row.status !== 'complete');
+            return [
+                row.department,
+                row.status === 'complete' ? 'ส่งครบ' : row.status === 'partial' ? 'ส่งบางส่วน' : 'ยังไม่ตอบ',
+                row.requiredUnits.join(', ') || '-',
+                row.coveredUnits.join(', ') || '-',
+                (row.missingUnits.length ? row.missingUnits : (row.status === 'missing' ? row.requiredUnits : [])).join(', ') || '-',
+                row.requiredCount ? `${row.coveredCount}/${row.requiredCount}` : 'ระดับแผนก',
+                topic.Deadline ? _fmtDateOnly(topic.Deadline) : 'ไม่กำหนด',
+                deadline.overdueDays || 0,
+                row.responseDate ? _fmtDate(row.responseDate) : '-',
+            ];
+        }),
+    ];
+    const wb = XLSX.utils.book_new();
+    const ws = XLSX.utils.aoa_to_sheet([...meta, ...data]);
+    ws['!cols'] = [{ wch: 28 }, { wch: 16 }, { wch: 42 }, { wch: 42 }, { wch: 42 }, { wch: 16 }, { wch: 16 }, { wch: 18 }, { wch: 22 }];
+    XLSX.utils.book_append_sheet(wb, ws, 'Topic Coverage');
+    const date = new Date().toISOString().slice(0, 10);
+    XLSX.writeFile(wb, `Yokoten-Topic-${_yokSafeFilePart(topic.YokotenID)}-${date}.xlsx`);
+    showToast('Export Excel รายหัวข้อสำเร็จ', 'success');
+}
+
+async function _sendAdminTopicReminders(departments) {
+    const context = _getCurrentAdminTopicCoverageContext();
+    const uniqueDepartments = [...new Set((departments || []).map(value => String(value || '').trim()).filter(Boolean))];
+    if (!context || !uniqueDepartments.length) { showToast('ไม่มีแผนกหรือ Unit ที่ค้างสำหรับส่ง Reminder', 'error'); return; }
+    const confirmed = await showConfirmationModal(
+        'ยืนยันการส่ง Reminder',
+        `ส่ง Reminder สำหรับหัวข้อนี้ไปยังผู้รับผิดชอบ ${uniqueDepartments.length} แผนก/ขอบเขตที่ยังตอบไม่ครบ?`
+    );
+    if (!confirmed) return;
+    try {
+        showLoading('กำลังตรวจสอบผู้รับและส่ง Reminder...');
+        const result = await API.post('/yokoten/reminders/send', {
+            topicId: context.topic.YokotenID,
+            departments: uniqueDepartments,
+        });
+        const summary = result?.data?.summary || {};
+        _emailOutbox = null;
+        showToast(`Reminder สำเร็จ/เข้าคิว ${summary.processed || 0} ขอบเขต, ข้าม ${summary.skipped || 0}`, 'success');
+    } catch (err) {
+        showToast(err?.message || 'ส่ง Reminder ไม่สำเร็จ', 'error');
+    } finally {
+        hideLoading();
+    }
+}
+
+function _openAdminResponseForDepartment(topicId, department) {
+    const topic = _topics.find(item => String(item.YokotenID) === String(topicId))
+        || _deptCompletion?.topics?.find(item => String(item.YokotenID) === String(topicId));
+    if (!topic || !department) return;
+    _openTopicDetailModal(topic);
+    setTimeout(() => {
+        const area = document.getElementById(`yok-admin-resp-area-${topicId}`);
+        if (!area) return;
+        area.innerHTML = _buildResponseForm(topicId, null, { adminMode: true, topic });
+        const form = area.querySelector('form.yok-resp-form');
+        const departmentItem = _getAdminSelectionItems(form, 'departments').find(item =>
+            String(item.dataset.selectionValue || '').trim() === String(department).trim());
+        if (departmentItem && !departmentItem.disabled) {
+            _setAdminSelectionItem(departmentItem, true);
+            _syncAdminSelectionCount(form, 'departments');
+            _renderAdminUnitSelection(form, { selectDepartment: department });
+        }
+        area.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }, 80);
+}
+
 function _buildAdminDept() {
     if (!_deptCompletion) {
         return `<div class="card text-center py-16 text-slate-400">
@@ -4600,8 +5068,17 @@ function _buildAdminDept() {
     const respLookup = new Map();
     _allResponses.forEach(r => { respLookup.set(`${r.Department}::${r.YokotenID}`, r); });
 
+    if (_adminCoverageMode === 'topic') {
+        return `
+        <div class="space-y-4">
+            ${_buildAdminCoverageSwitch()}
+            ${_buildAdminTopicCoverage(deptSummary, topics)}
+        </div>`;
+    }
+
     return `
     <div class="space-y-4">
+        ${_buildAdminCoverageSwitch()}
         <div class="grid grid-cols-2 md:grid-cols-4 gap-3" data-yok-card-image="yokoten-admin-dept-kpis">
             ${_kpiCard(totalDepts,    'แผนกทั้งหมด',    '#6366f1', `<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0z"/>`, 'indigo')}
             ${_kpiCard(fullDepts,     'ตอบครบทุกหัวข้อ', '#059669', `<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/>`, 'emerald')}
@@ -4764,11 +5241,15 @@ function _buildAdminDept() {
                                 ${_esc(d.department)}
                             </td>
                             ${d.topicBreakdown.map(tb => {
-                                const cellBg = !tb.responded ? '#fff1f2'
+                                const unitGap = tb.responseExists && !tb.unitCoverageComplete;
+                                const cellBg = unitGap ? '#f5f3ff'
+                                    : !tb.responded ? '#fff1f2'
                                     : tb.approvalStatus === 'rejected'  ? '#fef9c3'
                                     : tb.approvalStatus === 'pending'   ? '#fefce8'
                                     : '#f0fdf4';
-                                const icon = !tb.responded
+                                const icon = unitGap
+                                    ? `<span class="text-[10px] font-black text-violet-700">${Number(tb.coveredUnitCount || 0)}/${Number(tb.requiredUnitCount || 0)}</span>`
+                                    : !tb.responded
                                     ? `<svg class="w-3.5 h-3.5 text-red-300" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>`
                                     : tb.approvalStatus === 'rejected'
                                     ? `<svg class="w-3.5 h-3.5 text-red-500" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01"/></svg>`
@@ -4778,7 +5259,7 @@ function _buildAdminDept() {
                                 return `
                                 <td class="px-2 py-2 text-center" style="background:${cellBg}">
                                     <div class="flex items-center justify-center">${icon}</div>
-                                    ${tb.responded ? `<div class="text-[10px] text-slate-400 mt-0.5">${_esc(tb.respondedBy || '')}</div>` : ''}
+                                    ${tb.responseExists ? `<div class="text-[10px] ${unitGap ? 'text-violet-500' : 'text-slate-400'} mt-0.5" title="${_esc((tb.missingUnits || []).join(', '))}">${unitGap ? 'Unit ไม่ครบ' : _esc(tb.respondedBy || '')}</div>` : ''}
                                 </td>`;
                             }).join('')}
                             <td class="px-3 py-2.5 text-center border-l border-slate-100">
@@ -5694,6 +6175,8 @@ async function _submitResp(form, btn) {
     const departmentUnits  = isAdminMode ? _getAdminDepartmentUnitMap(form) : {};
     const userUnitSelect   = form.querySelector('[name="safetyUnit"]');
     const selectedUserUnit = userUnitSelect ? userUnitSelect.value.trim() : '';
+    const unitCoverageInputs = Array.from(form.querySelectorAll('input[name="unitCoverage"]'));
+    const selectedCoverageUnits = unitCoverageInputs.filter(input => input.checked).map(input => input.value).filter(Boolean);
 
     if (isAdminMode && departments.length === 0) {
         showToast('กรุณาเลือกอย่างน้อย 1 แผนกที่ต้องการตอบแทน', 'error');
@@ -5707,12 +6190,13 @@ async function _submitResp(form, btn) {
             return;
         }
         const missingUnitDepartments = departments.filter(department => {
-            const hasScopedUnits = _getAdminSelectionItems(form, 'safetyUnits')
-                .some(item => _normalizeYokotenScopeValue(item.dataset.department) === _normalizeYokotenScopeValue(department));
-            return hasScopedUnits && !(departmentUnits[department] || []).length;
+            const scopedUnits = _getAdminSelectionItems(form, 'safetyUnits')
+                .filter(item => _normalizeYokotenScopeValue(item.dataset.department) === _normalizeYokotenScopeValue(department));
+            const selected = departmentUnits[department] || [];
+            return scopedUnits.length > 0 && selected.length !== scopedUnits.length;
         });
         if (missingUnitDepartments.length) {
-            showToast(`Please select at least one scoped Safety Unit for: ${missingUnitDepartments.join(', ')}`, 'error');
+            showToast(`Please select every scoped Safety Unit for: ${missingUnitDepartments.join(', ')}`, 'error');
             return;
         }
         const overLimitDepartments = departments.filter(department =>
@@ -5725,6 +6209,11 @@ async function _submitResp(form, btn) {
     }
     if (!isAdminMode && userUnitSelect && !selectedUserUnit) {
         showToast('Please select Safety Unit for this scoped topic.', 'error');
+        return;
+    }
+    if (!isAdminMode && unitCoverageInputs.length && selectedCoverageUnits.length !== unitCoverageInputs.length) {
+        const missing = unitCoverageInputs.filter(input => !input.checked).map(input => input.value);
+        showToast(`กรุณายืนยัน Unit ให้ครบก่อนบันทึก: ${missing.join(', ')}`, 'error');
         return;
     }
 
@@ -5754,6 +6243,9 @@ async function _submitResp(form, btn) {
         fd.append('departmentUnits', JSON.stringify(departmentUnits));
         fd.append('safetyUnits', JSON.stringify(safetyUnits));
         fd.append('safetyUnit', safetyUnits.join(', '));
+    } else if (selectedCoverageUnits.length) {
+        fd.append('safetyUnits', JSON.stringify(selectedCoverageUnits));
+        fd.append('safetyUnit', selectedCoverageUnits.join(', '));
     } else if (selectedUserUnit) {
         fd.append('safetyUnit', selectedUserUnit);
     }
@@ -5873,6 +6365,13 @@ function setupEventListeners() {
             return;
         }
 
+        const selectRequiredUnitsBtn = e.target.closest('.yok-select-required-units');
+        if (selectRequiredUnitsBtn) {
+            const form = selectRequiredUnitsBtn.closest('form.yok-resp-form');
+            form?.querySelectorAll('input[name="unitCoverage"]').forEach(input => { input.checked = true; });
+            return;
+        }
+
         // Tab switch
         const tabBtn = e.target.closest('.yok-tab');
         if (tabBtn?.dataset.tab) { switchTab(tabBtn.dataset.tab); return; }
@@ -5945,6 +6444,48 @@ function setupEventListeners() {
                 key: briefDrillBtn.dataset.drillKey,
                 label: briefDrillBtn.dataset.drillLabel || briefDrillBtn.dataset.drillKey,
             });
+            return;
+        }
+
+        const coverageModeBtn = e.target.closest('.yok-admin-coverage-mode');
+        if (coverageModeBtn?.dataset.coverageMode) {
+            _adminCoverageMode = coverageModeBtn.dataset.coverageMode === 'topic' ? 'topic' : 'department';
+            _adminCoverageStatus = 'all';
+            renderAdmin(document.getElementById('yok-content'));
+            return;
+        }
+
+        const coverageStatusBtn = e.target.closest('.yok-admin-coverage-status');
+        if (coverageStatusBtn?.dataset.coverageStatus) {
+            _adminCoverageStatus = ['complete', 'partial', 'missing'].includes(coverageStatusBtn.dataset.coverageStatus)
+                ? coverageStatusBtn.dataset.coverageStatus
+                : 'all';
+            const admContent = document.getElementById('adm-view-content');
+            if (admContent) admContent.innerHTML = _buildAdminDept();
+            return;
+        }
+
+        if (e.target.closest('#yok-topic-coverage-export')) {
+            _exportAdminTopicCoverageExcel();
+            return;
+        }
+
+        if (e.target.closest('#yok-topic-reminder-all')) {
+            const context = _getCurrentAdminTopicCoverageContext();
+            const pendingRows = (context?.visibleRows || []).filter(row => row.status !== 'complete');
+            await _sendAdminTopicReminders(pendingRows.map(row => row.department));
+            return;
+        }
+
+        const topicReminderBtn = e.target.closest('.yok-topic-reminder-btn');
+        if (topicReminderBtn) {
+            await _sendAdminTopicReminders([topicReminderBtn.dataset.department]);
+            return;
+        }
+
+        const topicRespondBehalfBtn = e.target.closest('.yok-topic-respond-behalf-btn');
+        if (topicRespondBehalfBtn) {
+            _openAdminResponseForDepartment(topicRespondBehalfBtn.dataset.yid, topicRespondBehalfBtn.dataset.department);
             return;
         }
 
@@ -6303,6 +6844,29 @@ function setupEventListeners() {
             _empFilterDept = e.target.value;
             const admContent = document.getElementById('adm-view-content');
             if (admContent) admContent.innerHTML = _buildAdminEmp();
+            return;
+        }
+        if (e.target.id === 'yok-admin-coverage-topic') {
+            _adminCoverageTopicId = e.target.value;
+            _adminCoverageStatus = 'all';
+            const admContent = document.getElementById('adm-view-content');
+            if (admContent) admContent.innerHTML = _buildAdminDept();
+            return;
+        }
+        if (e.target.id === 'yok-admin-coverage-year') {
+            _adminCoverageYear = e.target.value;
+            _adminCoverageTopicId = '';
+            _adminCoverageStatus = 'all';
+            const admContent = document.getElementById('adm-view-content');
+            if (admContent) admContent.innerHTML = _buildAdminDept();
+            return;
+        }
+        if (e.target.id === 'yok-admin-coverage-risk') {
+            _adminCoverageRisk = e.target.value;
+            _adminCoverageTopicId = '';
+            _adminCoverageStatus = 'all';
+            const admContent = document.getElementById('adm-view-content');
+            if (admContent) admContent.innerHTML = _buildAdminDept();
             return;
         }
         if (e.target.id === 'yok-email-status-filter') {

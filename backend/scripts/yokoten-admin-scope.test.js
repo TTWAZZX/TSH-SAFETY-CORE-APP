@@ -3,7 +3,7 @@
 const assert = require('assert');
 const path = require('path');
 const { spawnSync } = require('child_process');
-const { buildDepartmentUnitPlan } = require('../utils/yokoten-admin-scope');
+const { buildDepartmentUnitPlan, buildUnitCoverage } = require('../utils/yokoten-admin-scope');
 
 const projectRoot = path.resolve(__dirname, '..', '..');
 const phpRunner = path.join(projectRoot, 'api', 'tests', 'yokoten_admin_scope_runner.php');
@@ -201,4 +201,61 @@ assert.deepStrictEqual(
 );
 console.log('PASS PHP resolver works without optional mbstring support');
 
-console.log(`Yokoten Department/Unit scope tests passed ${scenarios.length}/${scenarios.length} with Node/PHP parity.`);
+const productionUnits = [
+    'PD1 Assy 3/1',
+    'PD1 Assy 3/2',
+    'PD1 Assy 3/3',
+    'PD1 Element 3/1',
+    'PD1 Element 3/2',
+    'PD1 Element Diecast',
+].map(name => ({ name, department: 'PRODUCTION 1 SEC.' }));
+const coverageScenarios = [
+    {
+        name: 'does not complete without a response row',
+        input: { department: 'WAREHOUSE SEC.', topicUnits: ['WH'], responseUnits: [], responseExists: false, masterUnits },
+        complete: false,
+        missing: ['WH'],
+    },
+    {
+        name: 'completes a department topic without configured Units when a response exists',
+        input: { department: 'OUTSOURCE SEC.', topicUnits: [], responseUnits: [], responseExists: true, masterUnits },
+        complete: true,
+        missing: [],
+    },
+    {
+        name: 'resolves legacy topic aliases before checking coverage',
+        input: { department: 'QUALITY CONTROL SEC.', topicUnits: ['QC1', 'QC2'], responseUnits: ['QC1 AUTO', 'QC2 MOTOR'], responseExists: true, masterUnits },
+        complete: true,
+        missing: [],
+    },
+    {
+        name: 'keeps Production 1 incomplete when only one of six Units responded',
+        input: { department: 'PRODUCTION 1 SEC.', topicUnits: productionUnits.map(unit => unit.name), responseUnits: ['PD1 Assy 3/1'], responseExists: true, masterUnits: productionUnits },
+        complete: false,
+        missing: productionUnits.slice(1).map(unit => unit.name),
+    },
+    {
+        name: 'completes Production 1 only after all six Units are covered',
+        input: { department: 'PRODUCTION 1 SEC.', topicUnits: productionUnits.map(unit => unit.name), responseUnits: productionUnits.map(unit => unit.name), responseExists: true, masterUnits: productionUnits },
+        complete: true,
+        missing: [],
+    },
+    {
+        name: 'fails closed when a legacy topic Unit cannot resolve',
+        input: { department: 'WAREHOUSE SEC.', topicUnits: ['UNKNOWN'], responseUnits: [], responseExists: true, masterUnits },
+        complete: false,
+        missing: [],
+    },
+];
+
+for (const scenario of coverageScenarios) {
+    const input = { action: 'coverage', ...scenario.input };
+    const nodeResult = buildUnitCoverage(input);
+    const phpResult = runPhp(input);
+    assert.deepStrictEqual(phpResult, nodeResult, `${scenario.name}: Node/PHP coverage parity mismatch`);
+    assert.strictEqual(nodeResult.complete, scenario.complete, `${scenario.name}: unexpected completion`);
+    assert.deepStrictEqual(nodeResult.missingUnits, scenario.missing, `${scenario.name}: unexpected missing Units`);
+    console.log(`PASS ${scenario.name}`);
+}
+
+console.log(`Yokoten Department/Unit scope tests passed ${scenarios.length + coverageScenarios.length}/${scenarios.length + coverageScenarios.length} with Node/PHP parity.`);

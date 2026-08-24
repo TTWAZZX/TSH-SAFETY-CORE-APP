@@ -61,6 +61,7 @@ let _viewMode     = 'list';
 // Employee tab state
 let _empCache     = [];
 let _empEmailReadiness = { summary: {}, rows: [], rule: {} };
+let _empRecentAdditions = [];
 let _deptCache    = [];
 let _posCache     = [];
 let _unitCache    = [];
@@ -68,6 +69,8 @@ let _empSearch    = '';
 let _empDeptFilter = 'all';
 let _empUnitFilter = 'all';
 let _empSafetyUnitFilter = 'all';
+let _empSort = 'default';
+let _empRecentSource = 'all';
 let _empPage      = 1;
 let _empEmailReviewSearch = '';
 let _empEmailReviewDept = 'all';
@@ -5581,6 +5584,8 @@ async function renderEmployeesTab(container) {
     _empEmailReviewDept = 'all';
     _empEmailReviewPosition = 'all';
     _empEmailReviewStatus = 'all';
+    _empSort = 'default';
+    _empRecentSource = 'all';
     container.innerHTML = `
     <div class="animate-fade-in space-y-5">
         <div id="emp-email-readiness"></div>
@@ -5594,8 +5599,11 @@ async function renderEmployeesTab(container) {
                     </div>
                     <div id="emp-toolbar-summary" class="flex flex-wrap gap-2 text-[11px] text-slate-500"></div>
                 </div>
+                <div id="emp-recent-additions" class="mt-4">
+                    <div class="rounded-lg border border-slate-200 bg-slate-50 px-3 py-4 text-xs text-slate-400">กำลังโหลดพนักงานที่เพิ่มล่าสุด...</div>
+                </div>
                 <div class="ds-filter-bar mt-4 flex flex-col xl:flex-row gap-3 items-stretch xl:items-center justify-between">
-                    <div class="grid grid-cols-1 md:grid-cols-[minmax(220px,1fr),200px,180px,210px,auto] gap-2 flex-1 w-full">
+                    <div class="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-[minmax(220px,1fr),180px,160px,190px,190px,auto] gap-2 flex-1 w-full">
                         <input type="text" id="emp-search-input" placeholder="ค้นหาชื่อ / รหัส / หน่วยงาน..."
                             class="form-input w-full rounded-lg text-sm border-slate-200"
                             oninput="window._empSearch(this.value)">
@@ -5611,6 +5619,15 @@ async function renderEmployeesTab(container) {
                             onchange="window._empSafetyUnitFilterChange(this.value)">
                             <option value="all">ทุกสถานะ Safety Unit</option>
                             <option value="missing">ยังไม่ระบุ Safety Unit</option>
+                        </select>
+                        <select id="emp-sort-filter" class="form-input w-full rounded-lg text-sm border-slate-200"
+                            onchange="window._empSortChange(this.value)" aria-label="เรียงลำดับข้อมูลพนักงาน">
+                            <option value="default">เรียงลำดับ: ค่าเริ่มต้น</option>
+                            <option value="created_desc">เพิ่มล่าสุด</option>
+                            <option value="created_asc">เพิ่มเก่าสุด</option>
+                            <option value="id_asc">รหัส: น้อย → มาก</option>
+                            <option value="id_desc">รหัส: มาก → น้อย</option>
+                            <option value="name_asc">ชื่อ: ก → ฮ</option>
                         </select>
                         <button type="button" onclick="window._empClearFilters()"
                             class="px-3 py-2 rounded-lg border border-slate-200 bg-white text-xs font-bold text-slate-600 hover:bg-slate-50">
@@ -5660,11 +5677,19 @@ async function renderEmployeesTab(container) {
         _empPage = 1;
         _renderEmpTable();
     };
+    window._empSortChange = (sort) => {
+        _empSort = ['default', 'created_desc', 'created_asc', 'id_asc', 'id_desc', 'name_asc'].includes(sort)
+            ? sort
+            : 'default';
+        _empPage = 1;
+        _renderEmpTable();
+    };
     window._empClearFilters = () => {
         _empSearch = '';
         _empDeptFilter = 'all';
         _empUnitFilter = 'all';
         _empSafetyUnitFilter = 'all';
+        _empSort = 'default';
         _empPage = 1;
         const search = document.getElementById('emp-search-input');
         if (search) search.value = '';
@@ -5672,21 +5697,126 @@ async function renderEmployeesTab(container) {
         _renderEmpTable();
     };
 
-    const [empsRes, deptsRes, posRes, unitsRes, emailReadinessRes] = await Promise.all([
-        API.get('/employees').catch(() => ({ data: [] })),
+    window._empShowRecent = (employeeId) => {
+        _empSearch = String(employeeId || '').toLowerCase();
+        _empPage = 1;
+        const search = document.getElementById('emp-search-input');
+        if (search) search.value = employeeId || '';
+        _renderEmpTable();
+        document.getElementById('emp-table-wrap')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    };
+    window._empRecentSourceFilter = (source) => {
+        _empRecentSource = ['all', 'manual', 'import'].includes(source) ? source : 'all';
+        _renderEmpRecentAdditions();
+    };
+
+    const [empsRes, deptsRes, posRes, unitsRes, emailReadinessRes, recentRes] = await Promise.all([
+        API.get('/admin/employees').catch(() => ({ data: [] })),
         API.get('/master/departments').catch(() => ({ data: [] })),
         API.get('/master/positions').catch(() => ({ data: [] })),
         API.get('/admin/org/units').catch(() => ({ data: [] })),
         API.get('/admin/email-readiness').catch(() => ({ data: { summary: {}, rows: [], rule: {} } })),
+        API.get('/admin/employee/recent-additions?limit=20').catch(() => ({ data: null })),
     ]);
     _empCache  = empsRes?.data   || [];
     _deptCache = deptsRes?.data  || [];
     _posCache  = posRes?.data    || [];
     _unitCache = unitsRes?.data  || [];
     _empEmailReadiness = emailReadinessRes?.data || { summary: {}, rows: [], rule: {} };
+    _empRecentAdditions = Array.isArray(recentRes?.data) ? recentRes.data : null;
     _syncEmpEmailReadinessRows();
+    _renderEmpRecentAdditions();
     _renderEmpFilterControls();
     _renderEmpTable();
+}
+
+function _formatEmpAddedAt(value) {
+    if (!value) return 'ไม่ทราบเวลา';
+    const normalized = String(value).includes(' ') ? String(value).replace(' ', 'T') : String(value);
+    const date = new Date(normalized);
+    if (Number.isNaN(date.getTime())) return String(value);
+    return date.toLocaleString('th-TH', { dateStyle: 'short', timeStyle: 'short' });
+}
+
+function _renderEmpRecentAdditions() {
+    const wrap = document.getElementById('emp-recent-additions');
+    if (!wrap) return;
+    if (_empRecentAdditions === null) {
+        wrap.innerHTML = `<div class="rounded-lg border border-amber-200 bg-amber-50 px-3 py-3 text-xs text-amber-700">ไม่สามารถโหลดข้อมูลพนักงานที่เพิ่มล่าสุดได้ในขณะนี้</div>`;
+        return;
+    }
+    const allRows = Array.isArray(_empRecentAdditions) ? _empRecentAdditions : [];
+    const rows = allRows
+        .filter(row => _empRecentSource === 'all' || row.Source === _empRecentSource)
+        .slice(0, 5);
+    const sourceButtons = [
+        ['all', 'ทั้งหมด'],
+        ['manual', 'เพิ่มทีละคน'],
+        ['import', 'Import Excel'],
+    ].map(([value, label]) => `
+        <button type="button" onclick="window._empRecentSourceFilter('${value}')"
+            class="rounded-lg border px-2.5 py-1.5 text-[10px] font-bold transition ${_empRecentSource === value
+                ? 'border-emerald-600 bg-emerald-600 text-white'
+                : 'border-emerald-200 bg-white text-emerald-700 hover:bg-emerald-50'}">
+            ${label}
+        </button>`).join('');
+    wrap.innerHTML = `
+        <div class="rounded-xl border border-emerald-200 bg-gradient-to-r from-emerald-50/80 to-white p-3">
+            <div class="mb-3 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                <div class="flex items-center gap-2.5">
+                    <span class="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-emerald-600 text-white shadow-sm shadow-emerald-100">
+                        <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/></svg>
+                    </span>
+                    <div>
+                        <p class="text-xs font-bold text-slate-800">พนักงานที่เพิ่มล่าสุด</p>
+                        <p class="mt-0.5 text-[11px] text-slate-500">รายการที่สร้างสำเร็จจากการเพิ่มทีละคนและ Import Excel</p>
+                    </div>
+                </div>
+                <div class="flex flex-wrap items-center gap-1.5">
+                    ${sourceButtons}
+                    <button type="button" onclick="window._adminTab('audit')" class="rounded-lg border border-emerald-200 bg-white px-2.5 py-1.5 text-[10px] font-bold text-emerald-700 hover:bg-emerald-50">ดู Audit Log</button>
+                </div>
+            </div>
+            ${rows.length ? `
+                <div class="grid grid-cols-1 gap-2 sm:grid-cols-2 xl:grid-cols-5">
+                    ${rows.map(row => {
+                        const name = String(row.EmployeeName || row.EmployeeID || 'ไม่ทราบชื่อ');
+                        const initial = name.trim().charAt(0).toUpperCase() || '?';
+                        const source = row.Source === 'import' ? 'Import Excel' : 'เพิ่มทีละคน';
+                        const sourceClass = row.Source === 'import'
+                            ? 'bg-sky-50 text-sky-700 border-sky-200'
+                            : 'bg-emerald-50 text-emerald-700 border-emerald-200';
+                        return `
+                            <button type="button" onclick="window._empShowRecent(${_adminInlineArg(row.EmployeeID)})"
+                                class="min-w-0 rounded-lg border border-slate-200 bg-white p-2.5 text-left transition hover:border-emerald-300 hover:shadow-sm">
+                                <div class="flex min-w-0 items-center gap-2">
+                                    <span class="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-slate-100 text-[11px] font-bold text-slate-600">${escHtml(initial)}</span>
+                                    <div class="min-w-0">
+                                        <p class="truncate text-xs font-bold text-slate-800" title="${escHtml(name)}">${escHtml(name)}</p>
+                                        <p class="truncate font-mono text-[10px] text-slate-400">${escHtml(String(row.EmployeeID || '-'))}</p>
+                                    </div>
+                                </div>
+                                <p class="mt-2 truncate text-[10px] text-slate-500" title="${escHtml(String(row.Department || 'ไม่ระบุแผนก'))}">${escHtml(String(row.Department || 'ไม่ระบุแผนก'))}</p>
+                                <p class="mt-1 truncate text-[9px] text-slate-400" title="เพิ่มโดย ${escHtml(String(row.AdminName || row.AdminID || 'System'))}">โดย ${escHtml(String(row.AdminName || row.AdminID || 'System'))}</p>
+                                <div class="mt-2 flex items-center justify-between gap-1">
+                                    <span class="rounded-full border px-1.5 py-0.5 text-[9px] font-bold ${sourceClass}">${source}</span>
+                                    <span class="truncate text-[9px] text-slate-400">${escHtml(_formatEmpAddedAt(row.ActionTime))}</span>
+                                </div>
+                            </button>`;
+                    }).join('')}
+                </div>` : `
+                <div class="rounded-lg border border-dashed border-emerald-200 bg-white/70 px-3 py-4 text-center text-xs text-slate-500">
+                    ${allRows.length
+                        ? 'ไม่พบรายการในช่องทางที่เลือก'
+                        : 'ยังไม่มีประวัติการเพิ่มพนักงาน รายการใหม่ที่เพิ่มสำเร็จจะแสดงที่นี่'}
+                </div>`}
+        </div>`;
+}
+
+async function _reloadEmpRecentAdditions() {
+    const res = await API.get('/admin/employee/recent-additions?limit=20').catch(() => ({ data: null }));
+    _empRecentAdditions = Array.isArray(res?.data) ? res.data : null;
+    _renderEmpRecentAdditions();
 }
 
 function _syncEmpEmailReadinessRows() {
@@ -5916,6 +6046,7 @@ function _renderEmpFilterControls() {
     const deptSel = document.getElementById('emp-dept-filter');
     const unitSel = document.getElementById('emp-unit-filter');
     const safetyUnitSel = document.getElementById('emp-safety-unit-filter');
+    const sortSel = document.getElementById('emp-sort-filter');
     if (deptSel) {
         const depts = _empUniqueValues('Department');
         deptSel.innerHTML = `<option value="all">ทุกแผนก</option>${depts.map(dept => `<option value="${escHtml(dept)}" ${_empDeptFilter === dept ? 'selected' : ''}>${escHtml(dept)}</option>`).join('')}`;
@@ -5931,10 +6062,71 @@ function _renderEmpFilterControls() {
     if (safetyUnitSel) {
         safetyUnitSel.value = _empSafetyUnitFilter;
     }
+    if (sortSel) {
+        sortSel.value = _empSort;
+    }
+}
+
+const _empIdCollator = new Intl.Collator('en', { numeric: true, sensitivity: 'base' });
+const _empNameCollator = new Intl.Collator('th', { numeric: true, sensitivity: 'base' });
+
+function _empIdSortKey(value) {
+    const raw = String(value ?? '').trim().toUpperCase();
+    if (/^\d+$/.test(raw)) return { group: 0, prefix: '', digits: raw, raw };
+    const prefixed = raw.match(/^([A-Z]+)(\d+)$/);
+    if (prefixed) return { group: 1, prefix: prefixed[1], digits: prefixed[2], raw };
+    return { group: 2, prefix: raw, digits: '', raw };
+}
+
+function _empCompareDigitStrings(left, right) {
+    const a = String(left || '').replace(/^0+(?=\d)/, '') || '0';
+    const b = String(right || '').replace(/^0+(?=\d)/, '') || '0';
+    if (a.length !== b.length) return a.length - b.length;
+    const valueCompare = a.localeCompare(b, 'en');
+    if (valueCompare) return valueCompare;
+    return String(left).localeCompare(String(right), 'en');
+}
+
+function _empCompareIds(left, right) {
+    const a = _empIdSortKey(left?.EmployeeID ?? left);
+    const b = _empIdSortKey(right?.EmployeeID ?? right);
+    if (a.group !== b.group) return a.group - b.group;
+    if (a.group === 0) return _empCompareDigitStrings(a.digits, b.digits);
+    if (a.group === 1) {
+        const prefixCompare = _empIdCollator.compare(a.prefix, b.prefix);
+        return prefixCompare || _empCompareDigitStrings(a.digits, b.digits);
+    }
+    return _empIdCollator.compare(a.raw, b.raw);
+}
+
+function _empCreatedTimestamp(employee) {
+    if (!employee?.CreatedAt) return null;
+    const raw = String(employee.CreatedAt);
+    const timestamp = Date.parse(raw.includes(' ') ? raw.replace(' ', 'T') : raw);
+    return Number.isFinite(timestamp) ? timestamp : null;
+}
+
+function _empSortRows(rows) {
+    if (_empSort === 'default') return rows;
+    return [...rows].sort((a, b) => {
+        if (_empSort === 'id_asc') return _empCompareIds(a, b);
+        if (_empSort === 'id_desc') return _empCompareIds(b, a);
+        if (_empSort === 'name_asc') {
+            return _empNameCollator.compare(String(a.EmployeeName || ''), String(b.EmployeeName || ''))
+                || _empCompareIds(a, b);
+        }
+        const aTime = _empCreatedTimestamp(a);
+        const bTime = _empCreatedTimestamp(b);
+        if (aTime === null && bTime === null) return _empCompareIds(a, b);
+        if (aTime === null) return 1;
+        if (bTime === null) return -1;
+        const timeCompare = _empSort === 'created_asc' ? aTime - bTime : bTime - aTime;
+        return timeCompare || _empCompareIds(a, b);
+    });
 }
 
 function _empFilteredRows() {
-    return _empCache.filter(e => {
+    const filtered = _empCache.filter(e => {
         const textMatch = !_empSearch ||
             (e.EmployeeName||'').toLowerCase().includes(_empSearch) ||
             (e.EmployeeID  ||'').toLowerCase().includes(_empSearch) ||
@@ -5947,6 +6139,7 @@ function _empFilteredRows() {
         const safetyUnitMatch = _empSafetyUnitFilter !== 'missing' || _empMissingSafetyUnit(e);
         return textMatch && deptMatch && unitMatch && safetyUnitMatch;
     });
+    return _empSortRows(filtered);
 }
 
 function _renderEmpTable() {
@@ -6011,7 +6204,10 @@ function _renderEmpTable() {
         <tbody class="divide-y divide-slate-100">
             ${paged.map(emp => `
             <tr class="hover:bg-slate-50 transition-colors group">
-                <td class="px-4 py-3 font-mono text-xs text-slate-500">${escHtml(emp.EmployeeID)}</td>
+                <td class="px-4 py-3 text-slate-500">
+                    <div class="font-mono text-xs">${escHtml(emp.EmployeeID)}</div>
+                    ${emp.CreatedAt ? `<div class="mt-1 text-[9px] text-slate-400" title="เวลาที่เพิ่มเข้าระบบ">เพิ่ม ${escHtml(_formatEmpAddedAt(emp.CreatedAt))}</div>` : ''}
+                </td>
                 <td class="px-4 py-3 font-semibold text-slate-800 text-sm">${escHtml(emp.EmployeeName||'—')}</td>
                 <td class="px-4 py-3 text-slate-600 text-xs">${escHtml(emp.Department||'—')}</td>
                 <td class="px-4 py-3 text-slate-600 text-xs">${escHtml(emp.Position||'—')}</td>
@@ -6158,11 +6354,16 @@ window._openAddEmpModal = () => {
                 await API.post('/admin/employee/create', body);
                 showToast('เพิ่มพนักงานสำเร็จ', 'success');
                 closeModal();
-                const res = await API.get('/employees').catch(() => ({ data: [] }));
+                const res = await API.get('/admin/employees').catch(() => ({ data: [] }));
                 _empCache = res?.data || [];
                 await _reloadEmpEmailReadiness();
+                await _reloadEmpRecentAdditions();
                 _renderEmpTable();
-            } catch (err) { showError(err?.message || 'ไม่สามารถเพิ่มพนักงานได้'); }
+            } catch (err) {
+                showError(err?.code === 'EMPLOYEE_ALREADY_EXISTS'
+                    ? 'รหัสพนักงานนี้มีอยู่แล้ว ระบบไม่ได้แก้ไขข้อมูลเดิม กรุณาใช้ปุ่มแก้ไขพนักงาน'
+                    : (err?.message || 'ไม่สามารถเพิ่มพนักงานได้'));
+            }
         }));
     }, 50);
 };
@@ -6265,6 +6466,7 @@ window._deleteEmployee = async (empId, empName) => {
                 showToast('ลบข้อมูลสำเร็จ', 'success');
                 closeModal();
                 _empCache = _empCache.filter(e => e.EmployeeID !== empId);
+                await _reloadEmpRecentAdditions();
                 _renderEmpTable();
             } catch (err) { showError(err?.message || 'ลบไม่สำเร็จ'); }
         }));
@@ -6278,7 +6480,8 @@ window._openImportModal = () => {
                 <p class="font-bold mb-1">คอลัมน์ที่รองรับ:</p>
                 <code class="block bg-amber-100 px-2 py-1 rounded">EmployeeID, EmployeeName, Department, Unit, Position, Team, CompanyEmail, Role</code>
                 <p class="mt-1">CompanyEmail เว้นว่างได้ หากกรอกต้องใช้อีเมลบริษัทที่ลงท้ายด้วย ${EMP_COMPANY_EMAIL_DOMAIN}</p>
-                <p class="mt-1.5">ถ้า EmployeeID ซ้ำ จะอัปเดตข้อมูลเดิม (Upsert) · ค่าใน Department / Position / Team ต้องตรงกับ master</p>
+                <p class="mt-1.5 font-semibold">ระบบจะเพิ่มเฉพาะ EmployeeID ใหม่เท่านั้น หากรหัสซ้ำจะข้ามและไม่แก้ไขข้อมูลเดิม</p>
+                <p class="mt-1">ค่าใน Department / Position / Team ต้องตรงกับ master</p>
             </div>
             <button onclick="window._downloadImportTemplate()" class="w-full flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl border-2 border-dashed border-emerald-300 text-emerald-700 text-xs font-bold hover:bg-emerald-50 transition-all">
                 <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/></svg>
@@ -6293,7 +6496,7 @@ window._openImportModal = () => {
             <div id="import-result" class="hidden text-sm"></div>
             <div class="flex justify-end gap-2 pt-2 border-t">
                 <button onclick="window.closeModal&&window.closeModal()" class="btn bg-slate-100 text-slate-700 px-4 py-2 rounded-lg text-sm">ปิด</button>
-                <button id="import-btn" onclick="window._doImport()" class="btn bg-emerald-600 text-white px-5 py-2 rounded-lg text-sm font-medium">นำเข้าข้อมูล</button>
+                <button id="import-btn" onclick="window._doImport()" class="btn bg-emerald-600 text-white px-5 py-2 rounded-lg text-sm font-medium">เพิ่มเฉพาะพนักงานใหม่</button>
             </div>
         </div>`, 'max-w-lg');
     setTimeout(() => {
@@ -6331,30 +6534,33 @@ window._doImport = async () => {
         const res = await API.post('/admin/employee/import', fd);
 
         // â”€â”€ Build result UI â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-        const ok   = res.successCount || 0;
-        const err  = res.errorCount   || 0;
-        const warn = res.warnCount    || 0;
+        const added = res.addedCount ?? res.successCount ?? 0;
+        const duplicate = res.duplicateCount || 0;
+        const err = res.errorCount || 0;
+        const warn = res.warnCount || 0;
         const details = res.details   || [];
 
         const statusBadge = (s) => {
             if (s === 'ok')    return `<span class="px-1.5 py-0.5 rounded text-[10px] font-bold bg-emerald-100 text-emerald-700">สำเร็จ</span>`;
             if (s === 'warn')  return `<span class="px-1.5 py-0.5 rounded text-[10px] font-bold bg-amber-100 text-amber-700">คำเตือน</span>`;
+            if (s === 'duplicate') return `<span class="px-1.5 py-0.5 rounded text-[10px] font-bold bg-sky-100 text-sky-700">ข้ามรายการซ้ำ</span>`;
             if (s === 'error') return `<span class="px-1.5 py-0.5 rounded text-[10px] font-bold bg-red-100 text-red-700">ล้มเหลว</span>`;
             return `<span class="px-1.5 py-0.5 rounded text-[10px] font-bold bg-slate-100 text-slate-500">ข้าม</span>`;
         };
 
         const rows = details.map(d => `
-            <tr class="${d.status === 'error' ? 'bg-red-50' : d.status === 'warn' ? 'bg-amber-50' : ''}">
-                <td class="px-2 py-1.5 font-mono text-[10px] text-slate-500">${d.id}</td>
-                <td class="px-2 py-1.5 text-[10px] text-slate-700">${d.name}</td>
+            <tr class="${d.status === 'error' ? 'bg-red-50' : d.status === 'warn' ? 'bg-amber-50' : d.status === 'duplicate' ? 'bg-sky-50' : ''}">
+                <td class="px-2 py-1.5 font-mono text-[10px] text-slate-500">${escHtml(String(d.id ?? ''))}</td>
+                <td class="px-2 py-1.5 text-[10px] text-slate-700">${escHtml(String(d.name ?? ''))}</td>
                 <td class="px-2 py-1.5">${statusBadge(d.status)}</td>
-                <td class="px-2 py-1.5 text-[10px] text-slate-500">${d.reason || ''}</td>
+                <td class="px-2 py-1.5 text-[10px] text-slate-500">${escHtml(String(d.reason || ''))}</td>
             </tr>`).join('');
 
         resEl.innerHTML = `
             <div class="space-y-3">
                 <div class="flex items-center gap-2 flex-wrap">
-                    <span class="px-2.5 py-1 rounded-full text-xs font-bold bg-emerald-100 text-emerald-700">สำเร็จ ${ok}</span>
+                    <span class="px-2.5 py-1 rounded-full text-xs font-bold bg-emerald-100 text-emerald-700">เพิ่มใหม่ ${added}</span>
+                    ${duplicate ? `<span class="px-2.5 py-1 rounded-full text-xs font-bold bg-sky-100 text-sky-700">ข้ามรายการซ้ำ ${duplicate}</span>` : ''}
                     ${warn ? `<span class="px-2.5 py-1 rounded-full text-xs font-bold bg-amber-100 text-amber-700">คำเตือน ${warn}</span>` : ''}
                     ${err  ? `<span class="px-2.5 py-1 rounded-full text-xs font-bold bg-red-100 text-red-700">ล้มเหลว ${err}</span>` : ''}
                 </div>
@@ -6376,16 +6582,17 @@ window._doImport = async () => {
         resEl.className = '';
         resEl.classList.remove('hidden');
 
-        showToast(`Import สำเร็จ ${ok} รายการ${warn ? ` (คำเตือน ${warn})` : ''}`, err ? 'warning' : 'success');
-        const empsRes = await API.get('/employees').catch(() => ({ data: [] }));
+        showToast(`เพิ่มพนักงานใหม่ ${added} รายการ${duplicate ? ` · ข้ามซ้ำ ${duplicate}` : ''}`, err ? 'warning' : 'success');
+        const empsRes = await API.get('/admin/employees').catch(() => ({ data: [] }));
         _empCache = empsRes?.data || [];
         await _reloadEmpEmailReadiness();
+        await _reloadEmpRecentAdditions();
         _renderEmpTable();
     } catch (err) {
         resEl.className = 'text-sm text-red-600 bg-red-50 p-3 rounded-xl border border-red-200';
         resEl.textContent = err?.message || 'เกิดข้อผิดพลาด';
         resEl.classList.remove('hidden');
-    } finally { btn.disabled = false; btn.textContent = 'นำเข้าข้อมูล'; }
+    } finally { btn.disabled = false; btn.textContent = 'เพิ่มเฉพาะพนักงานใหม่'; }
 };
 
 window._downloadImportTemplate = async () => {
@@ -6395,34 +6602,36 @@ window._downloadImportTemplate = async () => {
         const wb   = XLSX.utils.book_new();
 
         // â”€â”€ Sheet 1: Template â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-        const headers = ['EmployeeID', 'EmployeeName', 'Department', 'Unit', 'Position', 'CompanyEmail', 'Role'];
+        const headers = ['EmployeeID', 'EmployeeName', 'Department', 'Unit', 'Position', 'Team', 'CompanyEmail', 'Role'];
         const example = [
             '012345',
             'ชื่อ นามสกุล',
             tmpl.departments[0] || '',
             tmpl.units[0]       || '',
             tmpl.positions[0]   || '',
+            tmpl.teams?.[0]     || '',
             'name@thaisummit-harness.co.th',
             'User',
         ];
         const ws1 = XLSX.utils.aoa_to_sheet([headers, example]);
-        ws1['!cols'] = [14, 24, 30, 30, 24, 34, 10].map(w => ({ wch: w }));
+        ws1['!cols'] = [14, 24, 30, 30, 24, 24, 34, 10].map(w => ({ wch: w }));
         XLSX.utils.book_append_sheet(wb, ws1, 'พนักงาน');
 
         // â”€â”€ Sheet 2: Reference â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-        const refHeaders = ['Department', 'Position', 'Unit', 'Role'];
+        const refHeaders = ['Department', 'Position', 'Unit', 'Team', 'Role'];
         const maxLen = Math.max(
             tmpl.departments.length, tmpl.positions.length,
-            tmpl.units.length, tmpl.roles.length
+            tmpl.units.length, (tmpl.teams || []).length, tmpl.roles.length
         );
         const refRows = Array.from({ length: maxLen }, (_, i) => [
             tmpl.departments[i] || '',
             tmpl.positions[i]   || '',
             tmpl.units[i]       || '',
+            tmpl.teams?.[i]     || '',
             tmpl.roles[i]       || '',
         ]);
         const ws2 = XLSX.utils.aoa_to_sheet([refHeaders, ...refRows]);
-        ws2['!cols'] = [30, 24, 30, 10].map(w => ({ wch: w }));
+        ws2['!cols'] = [30, 24, 30, 24, 10].map(w => ({ wch: w }));
         XLSX.utils.book_append_sheet(wb, ws2, 'ค่าอ้างอิง');
 
         XLSX.writeFile(wb, 'Employee_Import_Template.xlsx');

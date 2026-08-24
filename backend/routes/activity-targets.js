@@ -5,6 +5,7 @@ const router  = express.Router();
 const db      = require('../db');
 const { isAdmin } = require('../middleware/auth');
 const { getCccfWorkerProgress } = require('../utils/cccf-worker-progress');
+const { buildUnitCoverage } = require('../utils/yokoten-admin-scope');
 const {
     buildMandatoryPolicyTarget,
     isAdminConfiguredTargetEligible,
@@ -310,25 +311,48 @@ async function getDynamicActivityRatio(activityKey, department, year = new Date(
             return { numerator, denominator, completionPct: denominator ? Math.round(numerator * 100 / denominator) : null, noData: denominator === 0, department: dept };
         }
         if (activityKey === 'yokoten') {
-            const [topics] = await db.query('SELECT YokotenID, TargetDepts FROM YokotenTopics WHERE IsActive = 1');
-            const targetedIds = topics
+            const [topics] = await db.query(
+                `SELECT YokotenID, TargetDepts, TargetUnits
+                   FROM YokotenTopics
+                  WHERE IsActive = 1
+                    AND (DateIssued IS NULL OR YEAR(DateIssued) = ?)`,
+                [year]
+            );
+            const targetedTopics = topics
                 .filter(topic => {
                     const targetDepts = parseList(topic.TargetDepts);
                     return targetDepts.length === 0 || targetDepts.includes(dept);
-                })
-                .map(topic => topic.YokotenID);
-            if (!targetedIds.length) return empty;
+                });
+            if (!targetedTopics.length) return empty;
+            const targetedIds = targetedTopics.map(topic => topic.YokotenID);
             const placeholders = targetedIds.map(() => '?').join(',');
-            const [[row]] = await db.query(
-                `SELECT COUNT(DISTINCT YokotenID) AS numerator
-                   FROM YokotenResponses
-                  WHERE TRIM(Department) = ?
-                    AND YokotenID IN (${placeholders})
-                    AND (IsDeleted IS NULL OR IsDeleted = 0)`,
-                [dept, ...targetedIds]
-            );
-            const numerator = Number(row?.numerator || 0);
-            const denominator = targetedIds.length;
+            const [[responses], [masterUnits]] = await Promise.all([
+                db.query(
+                    `SELECT r.YokotenID,
+                            COALESCE(NULLIF(r.SafetyUnit, ''), NULLIF(e.Unit, ''), NULLIF(e.Team, '')) AS EffectiveSafetyUnit
+                       FROM YokotenResponses r
+                       LEFT JOIN Employees e ON e.EmployeeID=r.EmployeeID
+                      WHERE TRIM(r.Department) = ?
+                        AND r.YokotenID IN (${placeholders})
+                        AND (r.IsDeleted IS NULL OR r.IsDeleted = 0)`,
+                    [dept, ...targetedIds]
+                ),
+                db.query(`SELECT u.name, u.short_code, d.Name AS department
+                            FROM Master_SafetyUnits u
+                            LEFT JOIN Master_Departments d ON d.id=u.department_id`),
+            ]);
+            const responseMap = new Map(responses.map(row => [String(row.YokotenID), row]));
+            const numerator = targetedTopics.filter(topic => {
+                const response = responseMap.get(String(topic.YokotenID)) || null;
+                return buildUnitCoverage({
+                    department: dept,
+                    topicUnits: parseList(topic.TargetUnits),
+                    responseUnits: parseList(response?.EffectiveSafetyUnit),
+                    responseExists: !!response,
+                    masterUnits,
+                }).complete;
+            }).length;
+            const denominator = targetedTopics.length;
             return { numerator, denominator, completionPct: Math.round(numerator * 100 / denominator), noData: false, department: dept };
         }
     } catch {

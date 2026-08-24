@@ -44,18 +44,53 @@ async function main() {
     assert.ok(adminId && adminPassword, 'Production Admin UAT credentials are required in backend/.env');
 
     const index = await staticText('/');
-    assert.ok(index.includes('public/js/main.js?v=20260724-dashboard-hiyari-assignment'), 'Production index cache marker');
+    assert.ok(index.includes('public/js/main.js?v=20260824-safety-culture-ppe-form-r1'), 'Production index cache marker');
     pass('Production index cache marker');
 
     const mainSource = await staticText('/public/js/main.js');
-    assert.ok(mainSource.includes('yokoten.js?v=20260723-yokoten-admin-scope-r5'), 'Production Yokoten cache marker');
-    assert.ok(mainSource.includes('dashboard.js?v=20260724-dashboard-hiyari-assignment'), 'Production Dashboard cache marker');
+    assert.ok(mainSource.includes('yokoten.js?v=20260824-yokoten-topic-coverage-r3'), 'Production Yokoten cache marker');
+    assert.ok(mainSource.includes('dashboard.js?v=20260822-cccf-shared-target-r4'), 'Production Dashboard cache marker');
+    assert.ok(mainSource.includes('safety-culture.js?v=20260824-safety-culture-ppe-form-r1'), 'Production Safety Culture cache marker');
     pass('Production module cache markers');
+
+    const safetyCultureSource = await staticText('/public/js/pages/safety-culture.js');
+    for (const marker of [
+        "let _asmtView = 'history'",
+        "let _asmtTableMode = 'compact'",
+        'data-asmt-view=',
+        'data-asmt-table-mode=',
+        'sc-asmt-page-size',
+        'const columnWidths',
+    ]) {
+        assert.ok(safetyCultureSource.includes(marker), `Production Safety Culture Assessment marker missing: ${marker}`);
+    }
+    pass('Production Safety Culture Assessment layout markers', 'History, Overview, Setup, detailed scores, pagination');
+    for (const marker of [
+        "stepper.id = 'sc-ppef-stepper'",
+        "['3', 'ผลตรวจ PPE', 'Checklist']",
+        'form.insertBefore(checklistSection, evidenceSection)',
+        'data-ppe-status-option="compliant"',
+        'value="na" checked class="accent-slate-400 sc-ppe-radio"',
+        "API.post('/safety-culture/ppe-inspections', payload)",
+    ]) {
+        assert.ok(safetyCultureSource.includes(marker), `Production Safety Culture PPE marker missing: ${marker}`);
+    }
+    pass('Production Safety Culture PPE form markers', 'three steps, checklist controls, N/A default, API unchanged');
 
     const yokotenSource = await staticText('/public/js/pages/yokoten.js');
     assert.ok(yokotenSource.includes('data-selection-mode="all"'), 'Yokoten select-all control');
     assert.ok(yokotenSource.includes("choice.responded ? 'bg-slate-50 text-slate-400 cursor-not-allowed'"), 'Yokoten answered Department lock');
     pass('Production Yokoten bulk-response controls');
+    for (const marker of [
+        'yok-admin-coverage-year',
+        'yok-admin-coverage-risk',
+        'yok-topic-coverage-export',
+        'yok-topic-reminder-all',
+        'yok-topic-respond-behalf-btn',
+    ]) {
+        assert.ok(yokotenSource.includes(marker), `Production Topic Coverage marker missing: ${marker}`);
+    }
+    pass('Production Yokoten Topic Coverage follow-up controls', 'year, risk, Excel, Reminder, response-on-behalf');
 
     const dashboardSource = await staticText('/public/js/pages/dashboard.js');
     assert.ok(dashboardSource.includes('const metric = d.moduleMetrics?.[m.hash] || null'), 'Dashboard canonical metric source');
@@ -171,6 +206,17 @@ async function main() {
     assert.strictEqual(afterCount, beforeCount, 'Invalid Yokoten submit changed response data');
     pass('Production Yokoten submit validation', `HTTP 400; response count unchanged ${beforeCount}/${afterCount}`);
 
+    const outboxBefore = await request('/api/yokoten/email-outbox?limit=200', { token });
+    assert.strictEqual(outboxBefore.response.status, 200, `Yokoten outbox read failed: ${outboxBefore.text.slice(0, 300)}`);
+    const beforeOutboxCount = Array.isArray(outboxBefore.json?.data) ? outboxBefore.json.data.length : 0;
+    const invalidReminder = await request('/api/yokoten/reminders/send', { method: 'POST', token, body: {} });
+    assert.strictEqual(invalidReminder.response.status, 400, `Invalid Reminder request must fail before send: ${invalidReminder.text.slice(0, 300)}`);
+    const outboxAfter = await request('/api/yokoten/email-outbox?limit=200', { token });
+    assert.strictEqual(outboxAfter.response.status, 200, `Yokoten outbox re-read failed: ${outboxAfter.text.slice(0, 300)}`);
+    const afterOutboxCount = Array.isArray(outboxAfter.json?.data) ? outboxAfter.json.data.length : 0;
+    assert.strictEqual(afterOutboxCount, beforeOutboxCount, 'Invalid Reminder request changed the Production outbox');
+    pass('Production Yokoten Reminder route', `Admin validation HTTP 400; outbox unchanged ${beforeOutboxCount}/${afterOutboxCount}`);
+
     const outputDir = path.join(
         path.resolve(__dirname, '..', '..'),
         'backups',
@@ -188,6 +234,8 @@ async function main() {
         personalTargetEligibility: personalData.eligibility,
         yokotenResponseCountBefore: beforeCount,
         yokotenResponseCountAfter: afterCount,
+        yokotenOutboxCountBefore: beforeOutboxCount,
+        yokotenOutboxCountAfter: afterOutboxCount,
         matrix: matrix.map(row => ({
             department: row.department,
             cccfWorker: row.cccfWorker,

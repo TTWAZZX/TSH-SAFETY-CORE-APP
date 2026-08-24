@@ -218,7 +218,9 @@ async function handleExcelUpload(e) {
         const res = await API.post('/admin/employees/import', { data: formattedRows });
 
         if (res.success) {
-            showToast(`นำเข้าสำเร็จ ${formattedRows.length} รายการ`, 'success');
+            const added = res.addedCount ?? res.successCount ?? 0;
+            const duplicate = res.duplicateCount || 0;
+            showToast(`เพิ่มพนักงานใหม่ ${added} รายการ${duplicate ? ` · ข้ามซ้ำ ${duplicate}` : ''}`, 'success');
             fetchEmployees();
         } else {
             throw new Error(res.message);

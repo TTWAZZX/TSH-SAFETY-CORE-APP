@@ -1116,10 +1116,16 @@ async function renderDashboard(container) {
             <!-- Dept summary -->
             <div class="grid grid-cols-1 xl:grid-cols-2 gap-4">
                 <div class="ds-section p-5" data-hiyari-card-image="hiyari-department-summary">
-                    <div class="flex items-center justify-between mb-4">
-                        <h3 class="text-sm font-bold text-slate-600">สรุปรายแผนก</h3>
+                    <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-4">
+                        <div>
+                            <div class="flex items-center gap-2">
+                                <h3 class="text-sm font-bold text-slate-700">ความคืบหน้าผู้ได้รับมอบหมายรายแผนก</h3>
+                                <span class="px-2 py-0.5 rounded-full bg-emerald-50 text-[10px] font-bold text-emerald-700 border border-emerald-100">เป้าหมายรายปี</span>
+                            </div>
+                            <p class="text-xs text-slate-400 mt-1">นับผู้ที่ส่ง Hiyari อย่างน้อย 1 รายการ เทียบกับรายชื่อที่แอดมินมอบหมาย</p>
+                        </div>
                         ${_isAdmin ? `<button id="hiyari-dept-config-btn" data-hiyari-card-ignore
-                            class="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold border border-slate-200 text-slate-600 hover:bg-slate-50 transition-all">
+                            class="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold border border-slate-200 text-slate-600 hover:bg-slate-50 transition-all self-start sm:self-auto">
                             <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
                                       d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"/>
@@ -1166,7 +1172,14 @@ async function renderDashboard(container) {
         renderMonthlyRankFocus(data.monthlyRank || []);
         renderLineChart(data.monthly || []);
         renderPieChart(data.consequence || []);
-        renderDeptRank(data.deptRank || []);
+        renderDeptAssignmentProgress({
+            period: _getAssignmentPeriod(_statsYear),
+            depts: (data.assignmentCompletion?.byDepartment || []).map(row => ({
+                dept: row.department,
+                total: Number(row.total || 0),
+                submitted: Number(row.completed || 0),
+            })),
+        });
 
         // Overdue alert strip
         const alertEl = document.getElementById('overdue-alert');
@@ -2033,37 +2046,83 @@ function renderPieChart(data) {
     });
 }
 
-function renderDeptRank(allDepts) {
+function renderDeptAssignmentProgress(progress) {
     const el = document.getElementById('dept-rank');
     if (!el) return;
 
     const pinned = _dashConfig.pinnedDepts || [];
-    const countMap = Object.fromEntries(allDepts.map(d => [d.Department, d.count || 0]));
-    const depts  = pinned.length
-        ? pinned.map(dept => ({ Department: dept, count: countMap[dept] || 0 }))
-        : allDepts.slice(0, 8);
+    const progressMap = new Map((progress?.depts || []).map(row => [row.dept, row]));
+    let depts;
+    if (_statsDept && _statsDept !== 'all') {
+        depts = [progressMap.get(_statsDept) || { dept: _statsDept, total: 0, submitted: 0 }];
+    } else if (pinned.length) {
+        depts = pinned.map(dept => progressMap.get(dept) || { dept, total: 0, submitted: 0 });
+    } else {
+        depts = [...(progress?.depts || [])];
+    }
+
+    depts.sort((a, b) => {
+        const aPct = a.total ? a.submitted / a.total : -1;
+        const bPct = b.total ? b.submitted / b.total : -1;
+        return aPct - bPct || b.total - a.total || a.dept.localeCompare(b.dept, 'th');
+    });
+
     if (!depts.length) {
         el.innerHTML = `<div class="text-center py-6 text-slate-400">
-            <p class="text-sm">${pinned.length ? 'ยังไม่มีรายการในแผนกที่เลือก' : 'ยังไม่มีข้อมูล'}</p>
+            <p class="text-sm">ยังไม่มีรายการมอบหมาย Hiyari สำหรับปีนี้</p>
         </div>`;
         return;
     }
 
-    const max = Math.max(...depts.map(d => d.count), 1);
+    const total = depts.reduce((sum, row) => sum + Number(row.total || 0), 0);
+    const submitted = depts.reduce((sum, row) => sum + Number(row.submitted || 0), 0);
+    const remaining = Math.max(total - submitted, 0);
+    const overallPct = total ? Math.min(100, Math.round((submitted / total) * 100)) : 0;
+    const overallColor = total <= 0 ? '#64748b' : overallPct >= 100 ? '#059669' : overallPct >= 50 ? '#d97706' : '#dc2626';
+
     el.innerHTML = `
-        <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
-            ${depts.map(d => `
-            <div class="flex items-center gap-2">
-                <div class="flex-1 min-w-0">
-                    <div class="flex justify-between items-center mb-0.5">
-                        <span class="text-xs font-medium text-slate-700 truncate">${escHtml(d.Department)}</span>
-                        <span class="text-xs font-bold text-orange-600 ml-2 flex-shrink-0">${d.count}</span>
-                    </div>
-                    <div class="h-1.5 rounded-full bg-slate-100 overflow-hidden">
-                        <div class="h-full rounded-full" style="width:${Math.round((d.count/max)*100)}%;background:linear-gradient(90deg,#f97316,#ef4444)"></div>
+        <div class="rounded-2xl border border-slate-100 bg-slate-50/70 p-4 mb-4">
+            <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+                <div>
+                    <p class="text-[10px] font-bold text-slate-400 uppercase tracking-wide">ภาพรวมแผนกที่แสดง · ปี ${escHtml(progress?.period?.label || String(_statsYear + 543))}</p>
+                    <div class="flex flex-wrap items-baseline gap-x-2 gap-y-1 mt-1">
+                        <span class="text-2xl font-black" style="color:${overallColor}">${submitted}/${total}</span>
+                        <span class="text-xs font-semibold text-slate-500">คน · เหลือ ${remaining} คน</span>
                     </div>
                 </div>
-            </div>`).join('')}
+                <div class="flex items-center gap-3 sm:w-52">
+                    <div class="h-2.5 flex-1 rounded-full bg-white border border-slate-200 overflow-hidden">
+                        <div class="h-full rounded-full transition-all" style="width:${overallPct}%;background:${overallColor}"></div>
+                    </div>
+                    <span class="text-lg font-black min-w-[52px] text-right" style="color:${overallColor}">${total ? `${overallPct}%` : 'N/A'}</span>
+                </div>
+            </div>
+        </div>
+        <div class="space-y-3">
+            ${depts.map(d => {
+                const deptTotal = Number(d.total || 0);
+                const deptSubmitted = Number(d.submitted || 0);
+                const deptRemaining = Math.max(deptTotal - deptSubmitted, 0);
+                const pct = deptTotal ? Math.min(100, Math.round((deptSubmitted / deptTotal) * 100)) : 0;
+                const color = deptTotal <= 0 ? '#94a3b8' : pct >= 100 ? '#059669' : pct >= 50 ? '#d97706' : '#dc2626';
+                const status = deptTotal <= 0 ? 'ยังไม่ได้มอบหมาย' : deptRemaining === 0 ? 'ครบแล้ว' : `เหลือ ${deptRemaining} คน`;
+                return `
+                <div class="rounded-xl border border-slate-100 bg-white px-3.5 py-3">
+                    <div class="flex items-start justify-between gap-3 mb-2">
+                        <div class="min-w-0">
+                            <p class="text-xs font-bold text-slate-700 truncate">${escHtml(d.dept)}</p>
+                            <p class="text-[10px] font-semibold mt-0.5" style="color:${color}">${status}</p>
+                        </div>
+                        <div class="text-right flex-shrink-0">
+                            <p class="text-xs font-black text-slate-700">${deptSubmitted}/${deptTotal} คน</p>
+                            <p class="text-[10px] font-bold" style="color:${color}">${deptTotal ? `${pct}%` : 'N/A'}</p>
+                        </div>
+                    </div>
+                    <div class="h-2 rounded-full bg-slate-100 overflow-hidden">
+                        <div class="h-full rounded-full transition-all" style="width:${pct}%;background:${color}"></div>
+                    </div>
+                </div>`;
+            }).join('')}
         </div>`;
 }
 
@@ -2079,7 +2138,7 @@ function openDashConfigModal() {
                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
                           d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/>
                 </svg>
-                เลือกแผนกที่ต้องการแสดงในส่วน "สรุปรายแผนก" ถ้าไม่เลือกจะแสดง 8 แผนกแรก
+                เลือกแผนกที่ต้องการแสดงในส่วน "ความคืบหน้าผู้ได้รับมอบหมายรายแผนก" ถ้าไม่เลือกจะแสดงทุกแผนกที่มีรายการมอบหมาย
             </div>
             <div>
                 <label class="block text-[10px] font-bold text-slate-400 uppercase mb-2">แผนกที่แสดง</label>
@@ -2114,9 +2173,16 @@ function openDashConfigModal() {
             _dashConfig.pinnedDepts = checked;
             closeModal();
             showToast('บันทึกการตั้งค่าสำเร็จ', 'success');
-            // Refresh dept display without full reload
-            const allRes = await API.get(`/hiyari/stats?year=${_statsYear}`);
-            renderDeptRank(allRes?.data?.deptRank || []);
+            // Refresh assignment progress without reloading the full dashboard.
+            const statsRes = await API.get(`/hiyari/stats?year=${_statsYear}`);
+            renderDeptAssignmentProgress({
+                period: _getAssignmentPeriod(_statsYear),
+                depts: (statsRes?.data?.assignmentCompletion?.byDepartment || []).map(row => ({
+                    dept: row.department,
+                    total: Number(row.total || 0),
+                    submitted: Number(row.completed || 0),
+                })),
+            });
         } catch (err) {
             showError(err);
         } finally {

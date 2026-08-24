@@ -75,6 +75,37 @@ function dashboard_unit_key(string $value): string
     return (string) preg_replace('/\s+/', ' ', $value);
 }
 
+function dashboard_hiyari_assignment_coverage(array $assignmentRows, array $submissionRows): array
+{
+    $submittedEmployees = [];
+    foreach ($submissionRows as $row) {
+        $employeeId = strtolower(trim((string) ($row['ReporterID'] ?? '')));
+        if ($employeeId !== '') $submittedEmployees[$employeeId] = true;
+    }
+    $coverage = [];
+    foreach ($assignmentRows as $row) {
+        $department = dashboard_department_key((string) ($row['Department'] ?? ''));
+        if ($department === '') continue;
+        if (!isset($coverage[$department])) {
+            $coverage[$department] = [
+                'numerator' => 0,
+                'denominator' => 0,
+                'source' => 'Distinct annual Hiyari assignees submitted / current assignments',
+            ];
+        }
+        $coverage[$department]['denominator']++;
+        $employeeId = strtolower(trim((string) ($row['EmployeeID'] ?? '')));
+        if ($employeeId !== '' && isset($submittedEmployees[$employeeId])) {
+            $coverage[$department]['numerator']++;
+        }
+    }
+    foreach ($coverage as &$metric) {
+        $metric['value'] = percent($metric['numerator'], $metric['denominator']);
+    }
+    unset($metric);
+    return $coverage;
+}
+
 function dashboard_metric_row_state(string $sql, array $params = []): array
 {
     try {
@@ -182,14 +213,17 @@ function dashboard_yokoten_company_progress(int $year): array
     try {
         $departments = db_rows('SELECT Name FROM master_departments ORDER BY Name');
         $topics = db_rows(
-            'SELECT YokotenID,TargetDepts FROM yokotentopics
+            'SELECT YokotenID,TargetDepts,TargetUnits FROM yokotentopics
               WHERE IsActive=1 AND (DateIssued IS NULL OR YEAR(DateIssued)=?)',
             [$year]
         );
         $responses = db_rows(
-            'SELECT YokotenID,Department FROM yokotenresponses
-              WHERE IsDeleted IS NULL OR IsDeleted=0'
+            'SELECT r.YokotenID,r.Department,COALESCE(NULLIF(r.SafetyUnit,""),NULLIF(e.Unit,""),NULLIF(e.Team,"")) EffectiveSafetyUnit
+               FROM yokotenresponses r
+               LEFT JOIN employees e ON e.EmployeeID=r.EmployeeID
+              WHERE r.IsDeleted IS NULL OR r.IsDeleted=0'
         );
+        $masterUnits=db_rows('SELECT u.name,u.short_code,d.Name department FROM master_safetyunits u LEFT JOIN master_departments d ON d.id=u.department_id');
         $departmentMap = [];
         foreach ($departments as $row) {
             $key = dashboard_department_key((string) ($row['Name'] ?? ''));
@@ -197,10 +231,12 @@ function dashboard_yokoten_company_progress(int $year): array
         }
         $assignedPairs = [];
         $topicIds = [];
+        $topicMap = [];
         $unknown = [];
         foreach ($topics as $topic) {
             $topicId = (string) ($topic['YokotenID'] ?? '');
             $topicIds[$topicId] = true;
+            $topicMap[$topicId] = $topic;
             $configured = dashboard_parse_array($topic['TargetDepts'] ?? null);
             $targets = $configured
                 ? array_map('dashboard_department_key', $configured)
@@ -232,6 +268,14 @@ function dashboard_yokoten_company_progress(int $year): array
             $department = dashboard_department_key((string) ($response['Department'] ?? ''));
             $pair = $department . '::' . $topicId;
             if (!isset($assignedPairs[$pair])) continue;
+            $coverage=yokoten_scope_build_unit_coverage([
+                'department'=>$departmentMap[$department]??($response['Department']??''),
+                'topicUnits'=>dashboard_parse_array($topicMap[$topicId]['TargetUnits']??null),
+                'responseUnits'=>dashboard_parse_array($response['EffectiveSafetyUnit']??null),
+                'responseExists'=>true,
+                'masterUnits'=>$masterUnits,
+            ]);
+            if(!$coverage['complete'])continue;
             $respondedPairs[$pair] = true;
             $respondedDepartments[$department] = true;
         }
@@ -253,6 +297,33 @@ function dashboard_yokoten_company_progress(int $year): array
             'unknownDepartments' => [],
             'error' => $e->getMessage(),
         ];
+    }
+}
+
+function dashboard_yokoten_overdue_alerts(): array
+{
+    try {
+        $departmentNames=array_values(array_filter(array_map(static fn($row)=>trim((string)($row['Name']??'')),db_rows('SELECT Name FROM master_departments ORDER BY Name'))));
+        $topics=db_rows('SELECT YokotenID,Title,Deadline,TargetDepts,TargetUnits FROM yokotentopics WHERE Deadline IS NOT NULL AND Deadline<CURDATE() AND IsActive=1 ORDER BY Deadline ASC');
+        $responses=db_rows('SELECT r.YokotenID,r.Department,COALESCE(NULLIF(r.SafetyUnit,""),NULLIF(e.Unit,""),NULLIF(e.Team,"")) EffectiveSafetyUnit FROM yokotenresponses r LEFT JOIN employees e ON e.EmployeeID=r.EmployeeID WHERE r.IsDeleted IS NULL OR r.IsDeleted=0');
+        $masterUnits=db_rows('SELECT u.name,u.short_code,d.Name department FROM master_safetyunits u LEFT JOIN master_departments d ON d.id=u.department_id');
+        $responseMap=[];foreach($responses as $response)$responseMap[dashboard_department_key((string)($response['Department']??'')).'::'.(string)($response['YokotenID']??'')]=$response;
+        $alerts=[];
+        foreach($topics as $topic){
+            $configured=dashboard_parse_array($topic['TargetDepts']??null);
+            $targets=$configured?array_values(array_intersect($configured,$departmentNames)):$departmentNames;
+            $responded=0;
+            foreach($targets as $department){
+                $response=$responseMap[dashboard_department_key($department).'::'.(string)$topic['YokotenID']]??null;
+                $coverage=yokoten_scope_build_unit_coverage(['department'=>$department,'topicUnits'=>dashboard_parse_array($topic['TargetUnits']??null),'responseUnits'=>dashboard_parse_array($response['EffectiveSafetyUnit']??null),'responseExists'=>!!$response,'masterUnits'=>$masterUnits]);
+                if($coverage['complete'])$responded++;
+            }
+            if($responded<count($targets))$alerts[]=array_merge($topic,['respondedCount'=>$responded,'targetDeptCount'=>count($targets)]);
+            if(count($alerts)>=10)break;
+        }
+        return $alerts;
+    } catch(Throwable $e){
+        return [];
     }
 }
 
@@ -278,11 +349,11 @@ function dashboard_compliance_matrix(int $year, array $config): array
         return [];
     }
 
-    $employeeRows = safe_rows("SELECT Department, COUNT(DISTINCT EmployeeID) AS total FROM employees WHERE Department IS NOT NULL AND Department <> '' GROUP BY Department");
+    $hiyariAssignmentRows = safe_rows('SELECT a.EmployeeID,COALESCE(e.Department,a.Department) AS Department FROM hiyari_assignments a LEFT JOIN employees e ON e.EmployeeID=a.EmployeeID');
     $trainingRows = safe_rows('SELECT Department, SUM(PassedCount) AS passed, SUM(TotalEmp) AS total FROM training_dept_records WHERE Year=? GROUP BY Department', [$year]);
     $kyConfigRows = safe_rows('SELECT Department, SafetyUnits, YearlyTarget FROM ky_program_config WHERE Year=? AND IsActive=1', [$year]);
     $kyRows = safe_rows('SELECT Department, COUNT(*) AS cnt FROM ky_activities WHERE YEAR(ActivityDate)=? GROUP BY Department', [$year]);
-    $hiyariRows = safe_rows("SELECT Department, COUNT(DISTINCT COALESCE(NULLIF(ReporterID,''),id)) AS submitted FROM hiyarireports WHERE YEAR(ReportDate)=? GROUP BY Department", [$year]);
+    $hiyariSubmissionRows = safe_rows('SELECT DISTINCT ReporterID FROM hiyarireports WHERE DeletedAt IS NULL AND YEAR(ReportDate)=?', [$year]);
     $fourmRows = safe_rows("SELECT Department, COUNT(*) AS total, COALESCE(SUM(Status='Closed'),0) AS closed FROM fourm_changenotices WHERE YEAR(RequestDate)=? GROUP BY Department", [$year]);
     $yokotenConfigRows = safe_rows("SELECT ConfigKey,ConfigValue FROM yokoten_dashboard_config WHERE ConfigKey IN ('pinnedDepts','pinnedUnits')");
     $yokotenTopicRows = safe_rows('SELECT YokotenID, TargetDepts, TargetUnits FROM yokotentopics WHERE IsActive=1 AND (DateIssued IS NULL OR YEAR(DateIssued)=?)', [$year]);
@@ -315,7 +386,8 @@ function dashboard_compliance_matrix(int $year, array $config): array
         [$year]
     );
     $masterUnitRows = safe_rows(
-        "SELECT TRIM(u.name) Unit,TRIM(COALESCE(d.Name,'')) Department
+        "SELECT TRIM(u.name) Unit,TRIM(u.name) name,u.short_code,
+                TRIM(COALESCE(d.Name,'')) Department,TRIM(COALESCE(d.Name,'')) department
            FROM master_safetyunits u
            LEFT JOIN master_departments d ON d.id=u.department_id"
     );
@@ -374,7 +446,6 @@ function dashboard_compliance_matrix(int $year, array $config): array
         if (isset($targetByDept[$dept][$row['source'] ?? ''])) $targetByDept[$dept][$row['source']]++;
     }
 
-    $employeeCount = dashboard_by_department($employeeRows, static function ($r) { return (int) ($r['total'] ?? 0); });
     $trainingStats = dashboard_by_department($trainingRows, static function ($r) {
         return [
             'value'=>percent($r['passed'] ?? 0, $r['total'] ?? 0),
@@ -385,7 +456,7 @@ function dashboard_compliance_matrix(int $year, array $config): array
     $training = [];
     foreach ($trainingStats as $key => $metric) $training[$key] = $metric['value'];
     $kyActual = dashboard_by_department($kyRows, static function ($r) { return (int) ($r['cnt'] ?? 0); });
-    $hiyari = dashboard_by_department($hiyariRows, static function ($r) { return (int) ($r['submitted'] ?? 0); });
+    $hiyariCoverage = dashboard_hiyari_assignment_coverage($hiyariAssignmentRows, $hiyariSubmissionRows);
     $fourm = dashboard_by_department($fourmRows, static function ($r) { return percent($r['closed'] ?? 0, $r['total'] ?? 0); });
     $patrolIssueCounts = [];
     foreach ($patrolIssueRows as $issue) {
@@ -520,15 +591,11 @@ function dashboard_compliance_matrix(int $year, array $config): array
             $yokotenTopics[] = $topic;
         }
     }
-    $yokotenResponseSet = [];
+    $yokotenResponseMap = [];
     foreach ($yokotenResponseRows as $row) {
         $department = dashboard_department_key((string)($row['Department'] ?? ''));
         if ($department === '') continue;
-        if ($yokotenPinnedUnits) {
-            $responseUnits = array_map('dashboard_unit_key', dashboard_parse_array($row['EffectiveSafetyUnit'] ?? ''));
-            if ($responseUnits && !array_intersect_key(array_flip($responseUnits), $yokotenPinnedUnits)) continue;
-        }
-        $yokotenResponseSet[$department.'::'.(string)($row['YokotenID'] ?? '')] = true;
+        $yokotenResponseMap[$department.'::'.(string)($row['YokotenID'] ?? '')] = $row;
     }
     $yokotenTargets = [];
     $yokotenDone = [];
@@ -543,7 +610,9 @@ function dashboard_compliance_matrix(int $year, array $config): array
             $deptKey = dashboard_department_key((string) $dept);
             if ($deptKey !== '') {
                 $yokotenTargets[$deptKey] = ($yokotenTargets[$deptKey] ?? 0) + 1;
-                if (isset($yokotenResponseSet[$deptKey.'::'.(string)($topic['YokotenID'] ?? '')])) {
+                $response=$yokotenResponseMap[$deptKey.'::'.(string)($topic['YokotenID']??'')]??null;
+                $coverage=yokoten_scope_build_unit_coverage(['department'=>$dept,'topicUnits'=>dashboard_parse_array($topic['TargetUnits']??null),'responseUnits'=>dashboard_parse_array($response['EffectiveSafetyUnit']??null),'responseExists'=>!!$response,'masterUnits'=>$masterUnitRows]);
+                if ($coverage['complete']) {
                     $yokotenDone[$deptKey] = ($yokotenDone[$deptKey] ?? 0) + 1;
                 }
             }
@@ -553,7 +622,6 @@ function dashboard_compliance_matrix(int $year, array $config): array
     $matrix = [];
     foreach ($deptNames as $dept) {
         $deptKey = dashboard_department_key((string) $dept);
-        $empTotal = $employeeCount[$deptKey] ?? 0;
         $kyTarget = $kyTargets[$deptKey] ?? 12;
         $yokotenTarget = $yokotenTargets[$deptKey] ?? 0;
         $cccfAssignedTotal = $cccfAssigned[$deptKey] ?? 0;
@@ -563,12 +631,13 @@ function dashboard_compliance_matrix(int $year, array $config): array
         $accidentMetric = $accidentStats[$deptKey] ?? ['numerator'=>0,'denominator'=>0];
         $ojtMetric = $ojtStats[$deptKey] ?? null;
         $trainingMetric = $trainingStats[$deptKey] ?? null;
+        $hiyariMetric = $hiyariCoverage[$deptKey] ?? null;
         $cells = [
             'activityTargets' => $targetMeta['slots'] > 0 ? percent($targetMeta['covered'] + $targetMeta['na'], $targetMeta['slots']) : null,
             'cccfWorker' => $cccfWorkerMetric['value'] ?? null,
             'cccfPermanent' => $cccfAssignedTotal > 0 ? percent($cccfPermanent[$deptKey] ?? 0, $cccfAssignedTotal) : null,
             'patrolIssues' => $patrolIssues[$deptKey] ?? 100,
-            'hiyari' => $empTotal > 0 ? percent($hiyari[$deptKey] ?? 0, $empTotal) : null,
+            'hiyari' => $hiyariMetric['value'] ?? null,
             'ky' => percent($kyActual[$deptKey] ?? 0, $kyTarget),
             'yokoten' => $yokotenTarget > 0 ? percent($yokotenDone[$deptKey] ?? 0, $yokotenTarget) : null,
             'training' => $training[$deptKey] ?? null,
@@ -583,7 +652,7 @@ function dashboard_compliance_matrix(int $year, array $config): array
             'cccfWorker'=>$cccfWorkerMetric,
             'cccfPermanent'=>['numerator'=>$cccfPermanent[$deptKey]??0,'denominator'=>$cccfAssignedTotal,'source'=>'Completed CCCF Permanent / current assignments'],
             'patrolIssues'=>['numerator'=>$patrolMetric['closed'],'denominator'=>$patrolMetric['total'],'source'=>$patrolMetric['total']?'Closed Patrol issues / issues found this year':'No Patrol issues found this year'],
-            'hiyari'=>['numerator'=>$hiyari[$deptKey]??0,'denominator'=>$empTotal,'source'=>'Distinct Hiyari reporters / employees'],
+            'hiyari'=>$hiyariMetric,
             'ky'=>['numerator'=>$kyActual[$deptKey]??0,'denominator'=>$kyTarget,'source'=>'KY activities / configured Unit targets'],
             'yokoten'=>['numerator'=>$yokotenDone[$deptKey]??0,'denominator'=>$yokotenTarget,'source'=>'Responded / assigned Yokoten topics issued this year'],
             'training'=>$trainingMetric ? array_merge($trainingMetric,['source'=>'Passed / total Training department records']) : null,
@@ -1164,15 +1233,7 @@ try {
                    AND (Status IS NULL OR Status NOT IN ('inactive'))
                  ORDER BY NextInspectionDate ASC LIMIT 10"
             ),
-            'yokotenOverdue' => safe_rows(
-                "SELECT t.YokotenID, t.Title, t.Deadline, COUNT(r.ResponseID) AS respondedCount
-                 FROM yokotentopics t
-                 LEFT JOIN yokotenresponses r ON r.YokotenID = t.YokotenID
-                   AND (r.IsDeleted IS NULL OR r.IsDeleted = 0)
-                 WHERE t.Deadline IS NOT NULL AND t.Deadline < CURDATE() AND t.IsActive = 1
-                 GROUP BY t.YokotenID, t.Title, t.Deadline
-                 ORDER BY t.Deadline ASC LIMIT 10"
-            ),
+            'yokotenOverdue' => dashboard_yokoten_overdue_alerts(),
             'openPatrolIssues' => safe_rows(
                 "SELECT id, DateFound, Area, HazardType, ResponsibleDept, `Rank`
                  FROM patrol_issues WHERE CurrentStatus NOT IN ('Closed')

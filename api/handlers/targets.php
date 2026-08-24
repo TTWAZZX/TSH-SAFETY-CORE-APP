@@ -2,6 +2,7 @@
 declare(strict_types=1);
 
 require_once __DIR__ . '/../lib/cccf_worker_progress.php';
+require_once __DIR__ . '/../lib/yokoten_admin_scope.php';
 
 function activity_definitions(): array
 {
@@ -98,19 +99,36 @@ function dynamic_activity_ratio(string $key, string $department, int $year): arr
         return ['numerator' => $numerator, 'denominator' => $denominator, 'completionPct' => $denominator ? (int) round($numerator * 100 / $denominator) : null, 'noData' => $denominator === 0, 'department' => $dept];
     }
     if ($key === 'yokoten') {
-        $targetedIds = [];
-        foreach (safe_rows('SELECT YokotenID,TargetDepts FROM yokotentopics WHERE IsActive=1') as $topic) {
+        $targetedTopics = [];
+        foreach (safe_rows(
+            'SELECT YokotenID,TargetDepts,TargetUnits
+               FROM yokotentopics
+              WHERE IsActive=1
+                AND (DateIssued IS NULL OR YEAR(DateIssued)=?)',
+            [$year]
+        ) as $topic) {
             $targetDepts = activity_target_parse_list($topic['TargetDepts'] ?? null);
-            if (!$targetDepts || in_array($dept, $targetDepts, true)) $targetedIds[] = $topic['YokotenID'];
+            if (!$targetDepts || in_array($dept, $targetDepts, true)) $targetedTopics[] = $topic;
         }
-        if (!$targetedIds) return $empty;
+        if (!$targetedTopics) return $empty;
+        $targetedIds = array_column($targetedTopics, 'YokotenID');
         $placeholders = implode(',', array_fill(0, count($targetedIds), '?'));
-        $numerator = (int) (safe_scalar(
-            "SELECT COUNT(DISTINCT YokotenID) FROM yokotenresponses
-              WHERE TRIM(Department)=? AND YokotenID IN ($placeholders)
-                AND (IsDeleted IS NULL OR IsDeleted=0)",
+        $responses = safe_rows(
+            "SELECT r.YokotenID,COALESCE(NULLIF(r.SafetyUnit,''),NULLIF(e.Unit,''),NULLIF(e.Team,'')) AS EffectiveSafetyUnit
+               FROM yokotenresponses r
+               LEFT JOIN employees e ON e.EmployeeID=r.EmployeeID
+              WHERE TRIM(r.Department)=? AND r.YokotenID IN ($placeholders)
+                AND (r.IsDeleted IS NULL OR r.IsDeleted=0)",
             array_merge([$dept], $targetedIds)
-        ) ?? 0);
+        );
+        $responseMap=[];foreach($responses as $response)$responseMap[(string)$response['YokotenID']]=$response;
+        $masterUnits=safe_rows('SELECT u.name,u.short_code,d.Name AS department FROM master_safetyunits u LEFT JOIN master_departments d ON d.id=u.department_id');
+        $numerator=0;
+        foreach($targetedTopics as $topic){
+            $response=$responseMap[(string)$topic['YokotenID']]??null;
+            $coverage=yokoten_scope_build_unit_coverage(['department'=>$dept,'topicUnits'=>activity_target_parse_list($topic['TargetUnits']??null),'responseUnits'=>activity_target_parse_list($response['EffectiveSafetyUnit']??null),'responseExists'=>!!$response,'masterUnits'=>$masterUnits]);
+            if($coverage['complete'])$numerator++;
+        }
         $denominator = count($targetedIds);
         return ['numerator' => $numerator, 'denominator' => $denominator, 'completionPct' => (int) round($numerator * 100 / $denominator), 'noData' => false, 'department' => $dept];
     }

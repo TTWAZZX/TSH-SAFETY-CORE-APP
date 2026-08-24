@@ -5,6 +5,8 @@ const vm = require('vm');
 
 const sourcePath = path.join(__dirname, '..', '..', 'public', 'js', 'pages', 'hiyari.js');
 const source = fs.readFileSync(sourcePath, 'utf8');
+const nodeRoute = fs.readFileSync(path.join(__dirname, '..', 'routes', 'hiyari.js'), 'utf8');
+const phpRoute = fs.readFileSync(path.join(__dirname, '..', '..', 'api', 'handlers', 'workflow_phase6.php'), 'utf8');
 
 function extractFunction(name) {
     const marker = `function ${name}(`;
@@ -68,5 +70,12 @@ assert.ok(source.includes('const canvas = await html2canvas(card'), 'Existing Hi
 assert.ok(source.includes('Assignment Submission Register'), 'PDF must include an assignment submission register');
 assert.ok(source.includes('Page ${page} of ${totalPdfPages}'), 'PDF footer must reflect the appended assignment pages');
 assert.ok(source.includes('for (const [i, el] of pages.entries())'), 'PDF export must render the original report and appended register pages');
+assert.ok(source.includes('renderDeptAssignmentProgress'), 'Dashboard must render assignment progress by department');
+assert.ok(source.includes('data.assignmentCompletion?.byDepartment'), 'Dashboard progress must use the aggregate stats contract');
+assert.ok(source.includes('ความคืบหน้าผู้ได้รับมอบหมายรายแผนก'), 'Dashboard progress card must explain its assignment scope');
+assert.ok(nodeRoute.includes('byDepartment:assignmentByDepartment'), 'Node stats must expose annual assignment progress by department');
+assert.ok(nodeRoute.includes('SELECT DISTINCT ReporterID FROM HiyariReports'), 'Node stats must count unique annual reporters independently of dashboard report filters');
+assert.ok(phpRoute.includes("'byDepartment'=>$assignmentByDept"), 'PHP stats must expose annual assignment progress by department');
+assert.ok(phpRoute.includes('SELECT DISTINCT ReporterID FROM hiyarireports'), 'PHP stats must count unique annual reporters independently of dashboard report filters');
 
 console.log('Hiyari assignment regression passed: annual status, image export, and PDF roster remain linked.');

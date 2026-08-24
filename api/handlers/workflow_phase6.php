@@ -1186,6 +1186,14 @@ function handle_hiyari_routes(string $method, string $path): bool
         $actions=array_values(array_filter($enriched,static fn($r)=>($r['Status']??'')!=='Closed'&&(($r['slaStatus']??'')!=='on_track'||in_array($r['ReviewStatus']??'',['PendingReview','Rejected','Approved'],true))));usort($actions,static fn($a,$b)=>($a['remainingDays']??0)<=>($b['remainingDays']??0));$actions=array_slice($actions,0,20);
         $enriched=array_map(static fn($r)=>wf_hiyari_sanitize_for_viewer($r,$user),$enriched);
         $actions=array_map(static fn($r)=>wf_hiyari_sanitize_for_viewer($r,$user),$actions);
+        $assignmentRows=db_rows('SELECT a.EmployeeID,COALESCE(e.Department,a.Department) AS Department FROM hiyari_assignments a LEFT JOIN employees e ON e.EmployeeID=a.EmployeeID');
+        $annualSubmissionRows=db_rows('SELECT DISTINCT ReporterID FROM hiyarireports WHERE DeletedAt IS NULL AND YEAR(ReportDate)=?',[$year]);
+        $annualSubmitted=[];foreach($annualSubmissionRows as $row){$key=strtolower(trim((string)($row['ReporterID']??'')));if($key!=='')$annualSubmitted[$key]=true;}
+        $assignmentByDept=[];foreach($assignmentRows as $row){$department=trim((string)($row['Department']??''))?:'ไม่ระบุ';if(!isset($assignmentByDept[$department]))$assignmentByDept[$department]=['department'=>$department,'total'=>0,'completed'=>0];$assignmentByDept[$department]['total']++;$employeeKey=strtolower(trim((string)($row['EmployeeID']??'')));if($employeeKey!==''&&isset($annualSubmitted[$employeeKey]))$assignmentByDept[$department]['completed']++;}
+        $assignmentByDept=array_values($assignmentByDept);usort($assignmentByDept,static function($a,$b){$ar=($a['total']??0)>0?($a['completed']??0)/$a['total']:0;$br=($b['total']??0)>0?($b['completed']??0)/$b['total']:0;return $ar<=>$br?:($b['total']??0)<=>($a['total']??0)?:strcmp((string)($a['department']??''),(string)($b['department']??''));});
+        $scopedAssignmentRows=$dept!==''&&$dept!=='all'?array_values(array_filter($assignmentRows,static fn($row)=>trim((string)($row['Department']??''))===$dept)):$assignmentRows;
+        $scopedCompleted=0;foreach($scopedAssignmentRows as $row){$employeeKey=strtolower(trim((string)($row['EmployeeID']??'')));if($employeeKey!==''&&isset($annualSubmitted[$employeeKey]))$scopedCompleted++;}
+        $assignmentCompletion=['total'=>count($scopedAssignmentRows),'completed'=>$scopedCompleted,'pending'=>max(0,count($scopedAssignmentRows)-$scopedCompleted),'rate'=>count($scopedAssignmentRows)?(int)round($scopedCompleted*100/count($scopedAssignmentRows)):0,'byDepartment'=>$assignmentByDept];
         $base="FROM hiyarireports WHERE $where"; json_response(['success'=>true,'data'=>[
         'phase'=>'dashboard_sla_intelligence','filters'=>['year'=>$year,'month'=>$month,'department'=>$dept?:'all','status'=>$status?:'all','rank'=>$rank?:'all'],
         'kpi'=>$kpi,
@@ -1200,7 +1208,7 @@ function handle_hiyari_routes(string $method, string $path): bool
         'monthlyStatus'=>safe_rows("SELECT MONTH(ReportDate) AS month,Status,COUNT(*) AS count $base GROUP BY MONTH(ReportDate),Status",$params),
         'stopRankMatrix'=>safe_rows("SELECT StopType,RiskRank AS `Rank`,COUNT(*) AS count $base GROUP BY StopType,RiskRank",$params),
         'departmentRiskRanking'=>safe_rows("SELECT Department,COUNT(*) AS count,SUM(RiskRank='A') AS rankA,SUM(RiskRank='B') AS rankB,SUM(RiskRank='C') AS rankC,SUM(CASE WHEN Status<>'Closed' AND DATEDIFF(CURDATE(),ReportDate)>CASE RiskRank WHEN 'A' THEN 7 WHEN 'B' THEN 15 ELSE 30 END THEN 1 ELSE 0 END) AS overdue,SUM(CASE RiskRank WHEN 'A' THEN 5 WHEN 'B' THEN 3 ELSE 1 END)+2*SUM(CASE WHEN Status<>'Closed' AND DATEDIFF(CURDATE(),ReportDate)>CASE RiskRank WHEN 'A' THEN 7 WHEN 'B' THEN 15 ELSE 30 END THEN 1 ELSE 0 END) AS score $base GROUP BY Department ORDER BY score DESC",$params),
-        'assignmentCompletion'=>['total'=>(int)(db_row('SELECT COUNT(*) AS n FROM hiyari_assignments'.($dept!==''&&$dept!=='all'?' WHERE Department=?':''),$dept!==''&&$dept!=='all'?[$dept]:[])['n']??0),'completed'=>count(array_unique(array_filter(array_column($reports,'ReporterID'))))],
+        'assignmentCompletion'=>$assignmentCompletion,
         'actionList'=>$actions,'reports'=>$enriched,
     ]]);}
     if($method==='GET'&&$path==='/hiyari/dashboard-config'){ $cfg=['pinnedDepts'=>[]]; foreach(db_rows('SELECT ConfigKey,ConfigValue FROM hiyari_dashboard_config') as $r)$cfg[$r['ConfigKey']]=wf_json($r['ConfigValue'],[]); json_response(['success'=>true,'data'=>$cfg]);}
@@ -2084,6 +2092,22 @@ function wf_ensure_yokoten_tables(): void
     $ready = true;
 }
 
+function wf_yokoten_response_for_viewer(array $row, bool $canSeeActor): array
+{
+    $role = strtolower(trim((string)($row['SubmitterRole'] ?? '')));
+    $submittedByAdmin = in_array($role, ['admin', 'super_admin'], true);
+    unset($row['SubmitterRole']);
+    $row['SubmittedByAdmin'] = $submittedByAdmin ? 1 : 0;
+    $row['ResponderDisplayName'] = (string)(($row['EmployeeName'] ?? '') ?: (($row['EmployeeID'] ?? '') ?: '-'));
+    if (!$canSeeActor && $submittedByAdmin) {
+        $label = 'ผู้ดูแลระบบตอบแทนหน่วยงาน';
+        $row['EmployeeID'] = null;
+        $row['EmployeeName'] = $label;
+        $row['ResponderDisplayName'] = $label;
+    }
+    return $row;
+}
+
 function wf_yokoten_attach_responses(array $topics, array $user): array
 {
     $admin = wf_is_admin($user);
@@ -2099,14 +2123,15 @@ function wf_yokoten_attach_responses(array $topics, array $user): array
         $t['targetDepts'] = $targetDepts;
         $t['targetUnits'] = $targetUnits;
         unset($t['TargetDepts'], $t['TargetUnits']);
-        $sql = 'SELECT * FROM yokotenresponses WHERE YokotenID=? AND (IsDeleted IS NULL OR IsDeleted=0)';
+        $sql = 'SELECT r.*,e.Role AS SubmitterRole FROM yokotenresponses r LEFT JOIN employees e ON e.EmployeeID=r.EmployeeID WHERE r.YokotenID=? AND (r.IsDeleted IS NULL OR r.IsDeleted=0)';
         $params = [$t['YokotenID']];
         if (!$admin) {
-            $sql .= ' AND Department=?';
+            $sql .= ' AND r.Department=?';
             $params[] = $dept;
         }
-        $responses = db_rows($sql . ' ORDER BY ResponseDate DESC', $params);
+        $responses = db_rows($sql . ' ORDER BY r.ResponseDate DESC', $params);
         foreach ($responses as &$r) {
+            $r = wf_yokoten_response_for_viewer($r, $admin);
             $r['files'] = db_rows('SELECT * FROM yokoten_response_files WHERE ResponseID=? ORDER BY CreatedAt ASC', [$r['ResponseID']]);
         }
         unset($r);
@@ -2184,12 +2209,11 @@ function wf_yokoten_response_unit_list($value): array
 
 function wf_yokoten_response_units(array $body, array $user, bool $admin): array
 {
-    if ($admin) {
-        return array_values(array_unique(array_merge(
-            wf_yokoten_response_unit_list(wf_first_value($body, ['safetyUnits', 'SafetyUnits'], null)),
-            wf_yokoten_response_unit_list(wf_first_value($body, ['safetyUnit', 'SafetyUnit'], null))
-        )));
-    }
+    $requested = array_values(array_unique(array_merge(
+        wf_yokoten_response_unit_list(wf_first_value($body, ['safetyUnits', 'SafetyUnits'], null)),
+        wf_yokoten_response_unit_list(wf_first_value($body, ['safetyUnit', 'SafetyUnit'], null))
+    )));
+    if ($admin || $requested) return $requested;
     return wf_yokoten_response_unit_list(wf_first_value($user, ['unit', 'Unit', 'team', 'Team'], null));
 }
 
@@ -2276,22 +2300,19 @@ function wf_yokoten_company_overview(int $year): array
     $configuredDepts = wf_yokoten_filter_master_values($cfg['pinnedDepts'] ?? [], $masterDepts);
     $configuredUnits = wf_yokoten_filter_master_values($cfg['pinnedUnits'] ?? [], $masterUnits);
     $scopeDepts = $configuredDepts ?: $masterDepts;
+    $masterUnitRows = wf_yokoten_master_unit_rows();
     $topicRows = array_map('wf_yokoten_normalize_topic', db_rows('SELECT YokotenID,Title,TopicDescription,RiskLevel,Category,Deadline,DateIssued,TargetDepts,TargetUnits FROM yokotentopics WHERE IsActive=1 AND (DateIssued IS NULL OR YEAR(DateIssued)=?) ORDER BY DateIssued DESC', [$year]));
     $topics = [];
     foreach ($topicRows as $t) {
         if (wf_yokoten_topic_unit_in_scope($t, $configuredUnits)) $topics[] = $t;
     }
-    $responses = db_rows('SELECT r.YokotenID,r.Department,NULLIF(r.SafetyUnit,"") AS EffectiveSafetyUnit FROM yokotenresponses r WHERE r.YokotenID IN (SELECT YokotenID FROM yokotentopics WHERE IsActive=1) AND (r.IsDeleted IS NULL OR r.IsDeleted=0)');
+    $responses = db_rows('SELECT r.YokotenID,r.Department,COALESCE(NULLIF(r.SafetyUnit,""),NULLIF(e.Unit,""),NULLIF(e.Team,"")) AS EffectiveSafetyUnit FROM yokotenresponses r LEFT JOIN employees e ON e.EmployeeID=r.EmployeeID WHERE r.YokotenID IN (SELECT YokotenID FROM yokotentopics WHERE IsActive=1) AND (r.IsDeleted IS NULL OR r.IsDeleted=0)');
     $deptSet = array_flip($scopeDepts);
     $respSet = [];
     foreach ($responses as $r) {
         $dept = trim((string)($r['Department'] ?? ''));
         if (!isset($deptSet[$dept])) continue;
-        if ($configuredUnits) {
-            $units = wf_yokoten_response_unit_list($r['EffectiveSafetyUnit'] ?? null);
-            if ($units && !array_intersect($units, $configuredUnits)) continue;
-        }
-        $respSet[$dept.'::'.(string)$r['YokotenID']] = true;
+        $respSet[$dept.'::'.(string)$r['YokotenID']] = $r;
     }
     $sharedRows = db_rows("SELECT YokotenID,COUNT(*) AS cnt FROM yokotenresponses WHERE IsRelated='Yes' AND ApprovalStatus='approved' AND (IsDeleted IS NULL OR IsDeleted=0) GROUP BY YokotenID");
     $shared = [];
@@ -2303,7 +2324,17 @@ function wf_yokoten_company_overview(int $year): array
             if (wf_yokoten_dept_targeted($t, $dept)) $assigned[] = $t;
         }
         $responded = 0;
-        foreach ($assigned as $t) if (isset($respSet[$dept.'::'.(string)$t['YokotenID']])) $responded++;
+        foreach ($assigned as $t) {
+            $response = $respSet[$dept.'::'.(string)$t['YokotenID']] ?? null;
+            $coverage = yokoten_scope_build_unit_coverage([
+                'department'=>$dept,
+                'topicUnits'=>$t['TargetUnits'] ?? [],
+                'responseUnits'=>wf_yokoten_response_unit_list($response['EffectiveSafetyUnit'] ?? null),
+                'responseExists'=>!!$response,
+                'masterUnits'=>$masterUnitRows,
+            ]);
+            if($coverage['complete'])$responded++;
+        }
         $total = count($assigned);
         $departments[] = ['department'=>$dept,'totalTopics'=>$total,'respondedCount'=>$responded,'completionPct'=>$total?round($responded*100/$total):0];
     }
@@ -2317,7 +2348,17 @@ function wf_yokoten_company_overview(int $year): array
         }
         if (!$target) continue;
         $responded = 0;
-        foreach ($target as $dept) if (isset($respSet[$dept.'::'.(string)$t['YokotenID']])) $responded++;
+        foreach ($target as $dept) {
+            $response = $respSet[$dept.'::'.(string)$t['YokotenID']] ?? null;
+            $coverage = yokoten_scope_build_unit_coverage([
+                'department'=>$dept,
+                'topicUnits'=>$t['TargetUnits'] ?? [],
+                'responseUnits'=>wf_yokoten_response_unit_list($response['EffectiveSafetyUnit'] ?? null),
+                'responseExists'=>!!$response,
+                'masterUnits'=>$masterUnitRows,
+            ]);
+            if($coverage['complete'])$responded++;
+        }
         $riskLevel = (string)($t['RiskLevel'] ?? 'Low');
         $category = (string)($t['Category'] ?? 'General');
         $risk[$riskLevel] = ($risk[$riskLevel] ?? 0) + 1;
@@ -2336,6 +2377,94 @@ function wf_yokoten_company_overview(int $year): array
 function wf_yokoten_queue_approval_email(string $responseId, string $actor): void
 {
     wf_yokoten_queue_email($responseId, 'Approved', $actor);
+}
+
+function wf_yokoten_reminder_required_position_names(): array
+{
+    if (function_exists('admin8_email_rule')) {
+        $rule = admin8_email_rule();
+        $ids = array_map('intval', $rule['requiredPositionIds'] ?? []);
+        $names = [];
+        foreach ($rule['positions'] ?? [] as $position) {
+            if (in_array((int)($position['id'] ?? 0), $ids, true)) {
+                $name = trim((string)($position['Name'] ?? ''));
+                if ($name !== '') $names[$name] = $name;
+            }
+        }
+        return array_values($names);
+    }
+    $setting = db_row("SELECT value FROM app_settings WHERE key_name='employee_email_required_positions' LIMIT 1");
+    if (!$setting) return [];
+    $raw = json_decode((string)($setting['value'] ?? ''), true);
+    $ids = is_array($raw) && isset($raw['positionIds']) ? $raw['positionIds'] : $raw;
+    $safeIds = array_values(array_unique(array_filter(array_map('intval', is_array($ids) ? $ids : []), static fn($id) => $id > 0)));
+    if (!$safeIds) return [];
+    $placeholders = implode(',', array_fill(0, count($safeIds), '?'));
+    return array_values(array_filter(array_map(static fn($row) => trim((string)($row['Name'] ?? '')), db_rows("SELECT Name FROM master_positions WHERE id IN ($placeholders)", $safeIds))));
+}
+
+function wf_yokoten_reminder_recipients(string $department, array $missingUnits): array
+{
+    $requiredNames = wf_yokoten_reminder_required_position_names();
+    if (!$requiredNames) return ['readiness'=>'rule_not_configured','candidateScope'=>'department','recipients'=>[]];
+    $employees = db_rows('SELECT EmployeeID,EmployeeName,Department,Unit,Team,Position,CompanyEmail FROM employees WHERE TRIM(COALESCE(Department,""))=? ORDER BY Position,EmployeeName', [$department]);
+    $responsible = array_values(array_filter($employees, static fn($employee) => in_array(trim((string)($employee['Position'] ?? '')), $requiredNames, true)));
+    $missingKeys = [];
+    foreach ($missingUnits as $unit) {
+        $key = mb_strtolower(trim((string)$unit), 'UTF-8');
+        if ($key !== '') $missingKeys[$key] = true;
+    }
+    $unitCandidates = [];
+    if ($missingKeys) {
+        foreach ($responsible as $employee) {
+            foreach (wf_yokoten_response_unit_list([$employee['Unit'] ?? null, $employee['Team'] ?? null]) as $unit) {
+                if (isset($missingKeys[mb_strtolower(trim((string)$unit), 'UTF-8')])) {
+                    $unitCandidates[] = $employee;
+                    break;
+                }
+            }
+        }
+    }
+    $candidates = $unitCandidates ?: $responsible;
+    $recipients = [];
+    foreach ($candidates as $employee) {
+        $email = strtolower(trim((string)($employee['CompanyEmail'] ?? '')));
+        if ($email === '' || !preg_match('/^[^\s@]+@thaisummit-harness\.co\.th$/i', $email)) continue;
+        $recipients[$email] = ['employeeId'=>$employee['EmployeeID'] ?? null,'employeeName'=>$employee['EmployeeName'] ?? null,'position'=>$employee['Position'] ?? null,'unit'=>($employee['Unit'] ?? null) ?: ($employee['Team'] ?? null),'email'=>$email];
+    }
+    return [
+        'readiness'=>$recipients ? 'ready' : ($responsible ? 'missing_or_invalid_email' : 'no_responsible_employee'),
+        'candidateScope'=>$unitCandidates ? 'unit' : 'department',
+        'recipients'=>array_values($recipients),
+    ];
+}
+
+function wf_yokoten_reminder_mail(array $topic, string $department, array $missingUnits, string $actor): array
+{
+    $title = trim((string)($topic['Title'] ?? '')) ?: wf_text($topic['TopicDescription'] ?? $topic['YokotenID'] ?? 'Yokoten', 180);
+    $deadline = !empty($topic['Deadline']) ? date('d/m/Y', strtotime((string)$topic['Deadline'])) : 'Not specified';
+    $unitLabel = $missingUnits ? implode(', ', $missingUnits) : 'Department response';
+    $subject = '[Yokoten Reminder] ' . substr((string)($topic['YokotenID'] ?? ''), 0, 36) . ' - ' . $department;
+    $mail = wf_hiyari_mail([
+        'subject'=>$subject,
+        'title'=>'Yokoten response reminder',
+        'kicker'=>'Yokoten / Lesson Learned Sharing',
+        'moduleLabel'=>'Yokoten / Lesson Learned Sharing Module',
+        'tone'=>'pending',
+        'greeting'=>'Dear '.$department.' responsible person,',
+        'intro'=>['This Yokoten topic is still waiting for a complete response from your Department or required Safety Units.','Please review the topic and submit the outstanding response in Safety Core.'],
+        'details'=>[
+            ['label'=>'Topic','value'=>$title],
+            ['label'=>'Department','value'=>$department],
+            ['label'=>'Missing Unit / Scope','value'=>$unitLabel,'highlight'=>true],
+            ['label'=>'Risk Level','value'=>$topic['RiskLevel'] ?? '-'],
+            ['label'=>'Deadline','value'=>$deadline],
+            ['label'=>'Reminder By','value'=>$actor ?: 'Safety Admin'],
+        ],
+        'actions'=>['Open Safety Core > Yokoten, review the topic, and submit the complete Department/Unit response.'],
+        'footerNote'=>'This is an automated Yokoten reminder from TSH Safety Core Activity System.',
+    ]);
+    return ['subject'=>$subject,'body'=>$mail['body'],'html'=>$mail['html']];
 }
 
 function wf_yokoten_delete_file_if_unreferenced(?string $fileUrl): void
@@ -2458,15 +2587,76 @@ function handle_yokoten_routes(string $method, string $path): bool
     if (strpos($path, '/yokoten') !== 0) return false;
     $user=require_user(); wf_ensure_yokoten_tables(); $admin=wf_is_admin($user); $actor=wf_user_name($user);
     if($method==='GET'&&$path==='/yokoten/topics'){ $topics=db_rows('SELECT * FROM yokotentopics WHERE IsActive=1 ORDER BY DateIssued DESC'); json_response(['success'=>true,'data'=>wf_yokoten_attach_responses($topics,$user)]);}
-    if($method==='GET'&&$path==='/yokoten/dept-completion'){$depts=db_rows('SELECT Name FROM master_departments ORDER BY Name');$topics=array_map('wf_yokoten_normalize_topic',db_rows('SELECT YokotenID,Title,TopicDescription,RiskLevel,Category,Deadline,TargetDepts,TargetUnits FROM yokotentopics WHERE IsActive=1 ORDER BY DateIssued DESC'));$responses=db_rows('SELECT r.*,NULLIF(r.SafetyUnit,"") AS EffectiveSafetyUnit,(SELECT COUNT(*) FROM yokoten_response_files f WHERE f.ResponseID=r.ResponseID) AS fileCount FROM yokotenresponses r WHERE r.YokotenID IN (SELECT YokotenID FROM yokotentopics WHERE IsActive=1) AND (r.IsDeleted IS NULL OR r.IsDeleted=0)');$lookup=[];foreach($responses as $r)$lookup[(string)$r['Department'].'::'.(string)$r['YokotenID']]=$r;$summary=[];foreach($depts as $d){$dept=$d['Name'];$responded=0;$pending=0;$rejected=0;$last=null;$break=[];foreach($topics as $t){if(!wf_yokoten_dept_targeted($t,(string)$dept))continue;$key=(string)$dept.'::'.(string)$t['YokotenID'];$resp=$lookup[$key]??null;if($resp){$responded++;if(($resp['ApprovalStatus']??null)==='pending')$pending++;if(($resp['ApprovalStatus']??null)==='rejected')$rejected++;if(!$last||strtotime((string)$resp['ResponseDate'])>strtotime((string)$last))$last=$resp['ResponseDate'];}$unit=$resp?($resp['EffectiveSafetyUnit']??($resp['SafetyUnit']??null)):null;$break[]=['YokotenID'=>$t['YokotenID'],'title'=>($t['Title']?:$t['TopicDescription']),'responded'=>!!$resp,'isRelated'=>$resp['IsRelated']??null,'approvalStatus'=>$resp['ApprovalStatus']??null,'responseCount'=>$resp?1:0,'fileCount'=>$resp?(int)($resp['fileCount']??0):0,'respondedBy'=>$admin?($resp['EmployeeName']??null):null,'responseDate'=>$admin?($resp['ResponseDate']??null):null,'safetyUnit'=>$unit,'safetyUnits'=>wf_yokoten_response_unit_list($unit)];}$total=count($break);$summary[]=['department'=>$dept,'totalTopics'=>$total,'respondedCount'=>$responded,'pendingApproval'=>$pending,'rejected'=>$rejected,'completionPct'=>$total?round($responded*100/$total):0,'lastResponse'=>$admin?$last:null,'topicBreakdown'=>$break];}json_response(['success'=>true,'data'=>['topics'=>$topics,'deptSummary'=>$summary]]);}
+    if($method==='GET'&&$path==='/yokoten/dept-completion'){
+        $depts=db_rows('SELECT Name FROM master_departments ORDER BY Name');
+        $topics=array_map('wf_yokoten_normalize_topic',db_rows('SELECT YokotenID,Title,TopicDescription,RiskLevel,Category,DateIssued,Deadline,TargetDepts,TargetUnits FROM yokotentopics WHERE IsActive=1 ORDER BY DateIssued DESC'));
+        $masterUnitRows=wf_yokoten_master_unit_rows();
+        $responses=db_rows('SELECT r.*,COALESCE(NULLIF(r.SafetyUnit,""),NULLIF(e.Unit,""),NULLIF(e.Team,"")) AS EffectiveSafetyUnit,(SELECT COUNT(*) FROM yokoten_response_files f WHERE f.ResponseID=r.ResponseID) AS fileCount FROM yokotenresponses r LEFT JOIN employees e ON e.EmployeeID=r.EmployeeID WHERE r.YokotenID IN (SELECT YokotenID FROM yokotentopics WHERE IsActive=1) AND (r.IsDeleted IS NULL OR r.IsDeleted=0)');
+        $lookup=[];foreach($responses as $r)$lookup[(string)$r['Department'].'::'.(string)$r['YokotenID']]=$r;
+        $summary=[];
+        foreach($depts as $d){
+            $dept=$d['Name'];$responded=0;$recorded=0;$unitPending=0;$pending=0;$rejected=0;$last=null;$break=[];
+            foreach($topics as $t){
+                if(!wf_yokoten_dept_targeted($t,(string)$dept))continue;
+                $key=(string)$dept.'::'.(string)$t['YokotenID'];$resp=$lookup[$key]??null;
+                $unit=$resp?($resp['EffectiveSafetyUnit']??($resp['SafetyUnit']??null)):null;
+                $coverage=yokoten_scope_build_unit_coverage(['department'=>$dept,'topicUnits'=>$t['TargetUnits']??[],'responseUnits'=>wf_yokoten_response_unit_list($unit),'responseExists'=>!!$resp,'masterUnits'=>$masterUnitRows]);
+                if($resp){$recorded++;if($coverage['complete'])$responded++;else $unitPending++;if(($resp['ApprovalStatus']??null)==='pending')$pending++;if(($resp['ApprovalStatus']??null)==='rejected')$rejected++;if(!$last||strtotime((string)$resp['ResponseDate'])>strtotime((string)$last))$last=$resp['ResponseDate'];}
+                $break[]=['YokotenID'=>$t['YokotenID'],'title'=>($t['Title']?:$t['TopicDescription']),'responded'=>$coverage['complete'],'responseExists'=>!!$resp,'unitCoverageComplete'=>$coverage['complete'],'requiredUnits'=>$coverage['requiredUnits'],'coveredUnits'=>$coverage['coveredUnits'],'missingUnits'=>$coverage['missingUnits'],'requiredUnitCount'=>$coverage['requiredCount'],'coveredUnitCount'=>$coverage['coveredCount'],'isRelated'=>$resp['IsRelated']??null,'approvalStatus'=>$resp['ApprovalStatus']??null,'responseCount'=>$resp?1:0,'fileCount'=>$resp?(int)($resp['fileCount']??0):0,'respondedBy'=>$admin?($resp['EmployeeName']??null):null,'responseDate'=>$admin?($resp['ResponseDate']??null):null,'safetyUnit'=>$unit,'safetyUnits'=>wf_yokoten_response_unit_list($unit)];
+            }
+            $total=count($break);$summary[]=['department'=>$dept,'totalTopics'=>$total,'respondedCount'=>$responded,'recordedCount'=>$recorded,'unitCoveragePending'=>$unitPending,'pendingApproval'=>$pending,'rejected'=>$rejected,'completionPct'=>$total?round($responded*100/$total):0,'lastResponse'=>$admin?$last:null,'topicBreakdown'=>$break];
+        }
+        json_response(['success'=>true,'data'=>['topics'=>$topics,'deptSummary'=>$summary]]);
+    }
     if($method==='GET'&&$path==='/yokoten/company-overview'){json_response(['success'=>true,'data'=>wf_yokoten_company_overview((int)($_GET['year']??date('Y')))]);}
     if($method==='GET'&&$path==='/yokoten/all-responses'){require_admin();$rows=db_rows('SELECT r.*,NULLIF(r.SafetyUnit,"") AS EffectiveSafetyUnit,t.Title,t.TopicDescription,t.Category,t.RiskLevel FROM yokotenresponses r JOIN yokotentopics t ON t.YokotenID=r.YokotenID WHERE (r.IsDeleted IS NULL OR r.IsDeleted=0) ORDER BY r.ResponseDate DESC');foreach($rows as &$r)$r['files']=db_rows('SELECT * FROM yokoten_response_files WHERE ResponseID=? ORDER BY CreatedAt ASC',[$r['ResponseID']]);unset($r);json_response(['success'=>true,'data'=>$rows]);}
     $p=route_params($path,'/yokoten/topics/:id/shared-responses'); if($p!==null&&$method==='GET'){$topic=db_row('SELECT YokotenID FROM yokotentopics WHERE YokotenID=? AND IsActive=1',[$p['id']]);if(!$topic)json_response(['success'=>false,'message'=>'Topic not found.'],404);$rows=db_rows('SELECT r.ResponseID,r.YokotenID,r.Department,NULLIF(r.SafetyUnit,"") AS SafetyUnit,r.IsRelated,r.Comment,r.CorrectiveAction,r.ResponseDate FROM yokotenresponses r WHERE r.YokotenID=? AND r.IsRelated="Yes" AND r.ApprovalStatus="approved" AND (r.IsDeleted IS NULL OR r.IsDeleted=0) ORDER BY r.ResponseDate DESC',[$p['id']]);$out=[];foreach($rows as $r){$files=db_rows('SELECT FileID,ResponseID,FileName,FileURL,FileType,FileSize FROM yokoten_response_files WHERE ResponseID=? ORDER BY CreatedAt ASC',[$r['ResponseID']]);$out[]=['responseId'=>$r['ResponseID'],'yokotenId'=>$r['YokotenID'],'department'=>$r['Department'],'safetyUnit'=>$r['SafetyUnit']?:null,'isRelated'=>$r['IsRelated'],'comment'=>$r['Comment']?:null,'correctiveAction'=>$r['CorrectiveAction']?:null,'responseDate'=>$r['ResponseDate'],'files'=>$files];}json_response(['success'=>true,'data'=>$out]);}
     if($method==='GET'&&$path==='/yokoten/email-outbox'){require_admin();$limit=min(max((int)($_GET['limit']??50),1),200);$sql='SELECT * FROM yokoten_emailoutbox';$pa=[];if(!empty($_GET['status'])&&$_GET['status']!=='all'){$sql.=' WHERE Status=?';$pa[]=$_GET['status'];}$pa[]=$limit;json_response(['success'=>true,'data'=>db_rows($sql.' ORDER BY CreatedAt DESC LIMIT ?',$pa),'smtpConfigured'=>mailer_smtp_configured()]);}
     if($method==='POST'&&$path==='/yokoten/email-outbox/retry-queued'){require_admin();if(!mailer_smtp_configured())json_response(['success'=>false,'message'=>'SMTP is not configured.'],400);$b=json_body();$r=mailer_outbox_retry_queued('yokoten_emailoutbox','Recipients','HtmlBody',(int)($b['limit']??20));json_response(['success'=>true,'message'=>"Retry email queue completed: sent {$r['sent']}, failed {$r['failed']}",'processed'=>$r['processed'],'sent'=>$r['sent'],'failed'=>$r['failed'],'data'=>$r]);}
     $p=route_params($path,'/yokoten/email-outbox/:id/retry'); if($p!==null&&$method==='POST'){require_admin();try{$r=mailer_outbox_send('yokoten_emailoutbox',(int)$p['id'],'Recipients','HtmlBody');json_response(['success'=>true,'message'=>'Email sent.','data'=>$r]);}catch(Throwable $e){json_response(['success'=>false,'message'=>'Email send failed.','error'=>$e->getMessage()],500);}}
-    if($method==='GET'&&$path==='/yokoten/dept-history'){ $dept=$admin?trim((string)($_GET['department']??'')):($user['department']??'');$pa=[];$sql='SELECT r.*,t.Title,t.TopicDescription,t.Category,t.RiskLevel FROM yokotenresponses r JOIN yokotentopics t ON t.YokotenID=r.YokotenID WHERE (r.IsDeleted IS NULL OR r.IsDeleted=0)';if($dept!==''){$sql.=' AND r.Department=?';$pa[]=$dept;}if(!empty($_GET['topicId'])){$sql.=' AND r.YokotenID=?';$pa[]=$_GET['topicId'];}$rows=db_rows($sql.' ORDER BY r.ResponseDate DESC',$pa);foreach($rows as &$r)$r['files']=db_rows('SELECT * FROM yokoten_response_files WHERE ResponseID=? ORDER BY CreatedAt ASC',[$r['ResponseID']]);unset($r);json_response(['success'=>true,'data'=>$rows]);}
-    if($method==='GET'&&$path==='/yokoten/employee-completion'){require_admin();$topics=array_map('wf_yokoten_normalize_topic',db_rows('SELECT YokotenID,Title,TopicDescription,RiskLevel,TargetDepts,TargetUnits FROM yokotentopics WHERE IsActive=1 ORDER BY DateIssued DESC'));$emps=db_rows('SELECT EmployeeID,EmployeeName,Department,Position FROM employees ORDER BY Department,EmployeeName');$responses=db_rows('SELECT YokotenID,Department,EmployeeID,IsRelated,ApprovalStatus,ResponseDate FROM yokotenresponses WHERE YokotenID IN (SELECT YokotenID FROM yokotentopics WHERE IsActive=1) AND (IsDeleted IS NULL OR IsDeleted=0)');$lookup=[];foreach($responses as $r)$lookup[(string)$r['Department'].'::'.(string)$r['YokotenID']]=$r;$out=[];foreach($emps as $e){$dept=(string)($e['Department']??'');$assigned=array_values(array_filter($topics,static fn($t)=>wf_yokoten_dept_targeted($t,$dept)));if(!$assigned)continue;$count=0;$break=[];foreach($assigned as $t){$resp=$lookup[$dept.'::'.(string)$t['YokotenID']]??null;if($resp)$count++;$break[]=['YokotenID'=>$t['YokotenID'],'title'=>($t['Title']?:$t['TopicDescription']),'deptResponded'=>!!$resp,'isDeptResponder'=>$resp&&((string)$resp['EmployeeID']===(string)$e['EmployeeID']),'isRelated'=>$resp['IsRelated']??null,'approvalStatus'=>$resp['ApprovalStatus']??null];}$total=count($assigned);$out[]=['employeeId'=>$e['EmployeeID'],'name'=>$e['EmployeeName'],'department'=>$e['Department'],'position'=>$e['Position'],'respondedCount'=>$count,'totalTopics'=>$total,'completionPct'=>$total?round($count*100/$total):0,'breakdown'=>$break];}json_response(['success'=>true,'data'=>['topics'=>$topics,'employees'=>$out]]);}
+    if($method==='POST'&&$path==='/yokoten/reminders/send'){
+        require_admin();$b=json_body();$topicId=trim((string)($b['topicId']??''));$requested=array_values(array_unique(array_filter(array_map(static fn($value)=>trim((string)$value),is_array($b['departments']??null)?$b['departments']:[]))));
+        if($topicId===''||!$requested)json_response(['success'=>false,'message'=>'Topic and at least one Department are required.'],400);
+        $topic=db_row('SELECT YokotenID,Title,TopicDescription,RiskLevel,Deadline,TargetDepts,TargetUnits FROM yokotentopics WHERE YokotenID=? AND IsActive=1 LIMIT 1',[$topicId]);
+        if(!$topic)json_response(['success'=>false,'message'=>'Yokoten topic not found.'],404);
+        $topic=wf_yokoten_normalize_topic($topic);$masterDepts=db_rows('SELECT Name FROM master_departments ORDER BY Name');$masterUnits=wf_yokoten_master_unit_rows();
+        $allowed=[];foreach($masterDepts as $row){$dept=trim((string)($row['Name']??''));if($dept!==''&&wf_yokoten_dept_targeted($topic,$dept))$allowed[$dept]=true;}
+        $responseRows=db_rows('SELECT r.Department,COALESCE(NULLIF(r.SafetyUnit,""),NULLIF(e.Unit,""),NULLIF(e.Team,"")) AS EffectiveSafetyUnit FROM yokotenresponses r LEFT JOIN employees e ON e.EmployeeID=r.EmployeeID WHERE r.YokotenID=? AND (r.IsDeleted IS NULL OR r.IsDeleted=0)',[$topicId]);
+        $responseMap=[];foreach($responseRows as $row)$responseMap[trim((string)($row['Department']??''))]=$row;
+        $targets=[];foreach($requested as $department){if(!isset($allowed[$department]))continue;$response=$responseMap[$department]??null;$coverage=yokoten_scope_build_unit_coverage(['department'=>$department,'topicUnits'=>$topic['TargetUnits']??[],'responseUnits'=>wf_yokoten_response_unit_list($response['EffectiveSafetyUnit']??null),'responseExists'=>!!$response,'masterUnits'=>$masterUnits]);if(!$coverage['complete'])$targets[]=['department'=>$department,'coverage'=>$coverage];}
+        if(!$targets)json_response(['success'=>false,'message'=>'Selected Departments have already completed this topic.'],400);
+        $results=[];foreach($targets as $target){$missing=((int)($target['coverage']['requiredCount']??0)>0)?($target['coverage']['missingUnits']??[]):[];$recipientInfo=wf_yokoten_reminder_recipients($target['department'],$missing);if($recipientInfo['readiness']!=='ready'){$results[]=['department'=>$target['department'],'missingUnits'=>$missing,'status'=>'Skipped','reason'=>$recipientInfo['readiness'],'recipients'=>0];continue;}$emails=array_map(static fn($row)=>(string)$row['email'],$recipientInfo['recipients']);sort($emails);$recipients=implode(',',$emails);$mail=wf_yokoten_reminder_mail($topic,$target['department'],$missing,$actor);$duplicate=db_row("SELECT id FROM yokoten_emailoutbox WHERE EventType='MissingResponseReminder' AND Subject=? AND Recipients=? AND DATE(CreatedAt)=CURDATE() LIMIT 1",[$mail['subject'],$recipients]);if($duplicate){$results[]=['department'=>$target['department'],'missingUnits'=>$missing,'status'=>'Skipped','reason'=>'already_sent_today','recipients'=>count($emails)];continue;}wf_email_outbox('yokoten_emailoutbox',['ResponseID'=>null,'EventType'=>'MissingResponseReminder','Recipients'=>$recipients,'Subject'=>$mail['subject'],'Body'=>$mail['body'],'HtmlBody'=>$mail['html'],'Status'=>'Queued'],true);$results[]=['department'=>$target['department'],'missingUnits'=>$missing,'candidateScope'=>$recipientInfo['candidateScope'],'status'=>mailer_smtp_configured()?'Processed':'Queued','recipients'=>count($emails)];}
+        $processed=count(array_filter($results,static fn($row)=>$row['status']!=='Skipped'));$summary=['scopes'=>count($targets),'processed'=>$processed,'sent'=>0,'queued'=>count(array_filter($results,static fn($row)=>$row['status']==='Queued')),'failed'=>0,'skipped'=>count(array_filter($results,static fn($row)=>$row['status']==='Skipped')),'recipients'=>array_sum(array_column($results,'recipients'))];
+        if(function_exists('admin8_log'))admin8_log($user,'YOKOTEN_MISSING_RESPONSE_REMINDER_SEND','YokotenTopic',$topicId,'Processed reminders for '.$processed.' incomplete Department scope(s).');
+        json_response(['success'=>true,'message'=>'Reminder processed for '.$processed.' Department scope(s).','data'=>['summary'=>$summary,'results'=>$results,'smtpConfigured'=>mailer_smtp_configured()]]);
+    }
+    if($method==='GET'&&$path==='/yokoten/dept-history'){ $dept=$admin?trim((string)($_GET['department']??'')):($user['department']??'');$pa=[];$sql='SELECT r.*,t.Title,t.TopicDescription,t.Category,t.RiskLevel,e.Role AS SubmitterRole FROM yokotenresponses r JOIN yokotentopics t ON t.YokotenID=r.YokotenID LEFT JOIN employees e ON e.EmployeeID=r.EmployeeID WHERE (r.IsDeleted IS NULL OR r.IsDeleted=0)';if($dept!==''){$sql.=' AND r.Department=?';$pa[]=$dept;}if(!empty($_GET['topicId'])){$sql.=' AND r.YokotenID=?';$pa[]=$_GET['topicId'];}$rows=db_rows($sql.' ORDER BY r.ResponseDate DESC',$pa);foreach($rows as &$r){$r=wf_yokoten_response_for_viewer($r,$admin);$r['files']=db_rows('SELECT * FROM yokoten_response_files WHERE ResponseID=? ORDER BY CreatedAt ASC',[$r['ResponseID']]);}unset($r);json_response(['success'=>true,'data'=>$rows]);}
+    if($method==='GET'&&$path==='/yokoten/employee-completion'){
+        require_admin();
+        $topics=array_map('wf_yokoten_normalize_topic',db_rows('SELECT YokotenID,Title,TopicDescription,RiskLevel,TargetDepts,TargetUnits FROM yokotentopics WHERE IsActive=1 ORDER BY DateIssued DESC'));
+        $emps=db_rows('SELECT EmployeeID,EmployeeName,Department,Position FROM employees ORDER BY Department,EmployeeName');
+        $masterUnitRows=wf_yokoten_master_unit_rows();
+        $responses=db_rows('SELECT r.YokotenID,r.Department,r.EmployeeID,r.IsRelated,r.ApprovalStatus,r.ResponseDate,COALESCE(NULLIF(r.SafetyUnit,""),NULLIF(e.Unit,""),NULLIF(e.Team,"")) AS EffectiveSafetyUnit FROM yokotenresponses r LEFT JOIN employees e ON e.EmployeeID=r.EmployeeID WHERE r.YokotenID IN (SELECT YokotenID FROM yokotentopics WHERE IsActive=1) AND (r.IsDeleted IS NULL OR r.IsDeleted=0)');
+        $lookup=[];foreach($responses as $r)$lookup[(string)$r['Department'].'::'.(string)$r['YokotenID']]=$r;
+        $coverageLookup=[];$out=[];
+        foreach($emps as $e){
+            $dept=(string)($e['Department']??'');
+            $assigned=array_values(array_filter($topics,static fn($t)=>wf_yokoten_dept_targeted($t,$dept)));
+            if(!$assigned)continue;
+            $count=0;$break=[];
+            foreach($assigned as $t){
+                $resp=$lookup[$dept.'::'.(string)$t['YokotenID']]??null;
+                $coverageKey=$dept.'::'.(string)$t['YokotenID'];
+                if(!isset($coverageLookup[$coverageKey]))$coverageLookup[$coverageKey]=yokoten_scope_build_unit_coverage(['department'=>$dept,'topicUnits'=>$t['TargetUnits']??[],'responseUnits'=>wf_yokoten_response_unit_list($resp['EffectiveSafetyUnit']??null),'responseExists'=>!!$resp,'masterUnits'=>$masterUnitRows]);
+                $coverage=$coverageLookup[$coverageKey];
+                if($coverage['complete'])$count++;
+                $break[]=['YokotenID'=>$t['YokotenID'],'title'=>($t['Title']?:$t['TopicDescription']),'deptResponded'=>$coverage['complete'],'responseExists'=>!!$resp,'isDeptResponder'=>$resp&&((string)$resp['EmployeeID']===(string)$e['EmployeeID']),'isRelated'=>$resp['IsRelated']??null,'approvalStatus'=>$resp['ApprovalStatus']??null,'unitCoverageComplete'=>$coverage['complete'],'requiredUnits'=>$coverage['requiredUnits'],'coveredUnits'=>$coverage['coveredUnits'],'missingUnits'=>$coverage['missingUnits']];
+            }
+            $total=count($assigned);
+            $out[]=['employeeId'=>$e['EmployeeID'],'name'=>$e['EmployeeName'],'department'=>$e['Department'],'position'=>$e['Position'],'respondedCount'=>$count,'totalTopics'=>$total,'completionPct'=>$total?round($count*100/$total):0,'breakdown'=>$break];
+        }
+        json_response(['success'=>true,'data'=>['topics'=>$topics,'employees'=>$out]]);
+    }
     if(($method==='POST'&&$path==='/yokoten/respond')||(($p=route_params($path,'/yokoten/respond/:id'))!==null&&$method==='PUT')){
         $files=wf_store_files('responseFiles',10);$b=wf_body();
         try{
@@ -2507,6 +2697,14 @@ function handle_yokoten_routes(string $method, string $path): bool
                 if($departmentUnitPlan===null&&$badResponseUnits){wf_cleanup_files($files);json_response(['success'=>false,'message'=>'Safety Unit is not in Master Data.'],400);}
                 $badTopicUnits=array_values(array_filter($responseUnits,static fn($unit)=>!wf_yokoten_unit_targeted($topic,$unit)));
                 if($departmentUnitPlan===null&&$badTopicUnits){wf_cleanup_files($files);json_response(['success'=>false,'message'=>'Safety Unit is outside this topic scope.'],400);}
+                $masterUnitRows=wf_yokoten_master_unit_rows();
+                $coverageErrors=[];
+                foreach($depts as $dept){
+                    $unitsForDept=$departmentUnitPlan!==null?($departmentUnitPlan['unitMap'][$dept]??[]):$responseUnits;
+                    $coverage=yokoten_scope_build_unit_coverage(['department'=>$dept,'topicUnits'=>$topic['TargetUnits'],'responseUnits'=>$unitsForDept,'responseExists'=>true,'masterUnits'=>$masterUnitRows]);
+                    if(!$coverage['complete'])$coverageErrors[]=$dept.': missing '.implode(', ',$coverage['missingUnits']);
+                }
+                if($coverageErrors){wf_cleanup_files($files);json_response(['success'=>false,'message'=>'Safety Unit coverage is incomplete. '.implode('; ',$coverageErrors),'errors'=>$coverageErrors],400);}
                 if($related==='Yes'&&$corrective===null){wf_cleanup_files($files);json_response(['success'=>false,'message'=>'CorrectiveAction is required when IsRelated is Yes.'],400);}
                 if($related==='Yes'&&!$files){json_response(['success'=>false,'message'=>'At least one evidence file is required when IsRelated is Yes.'],400);}
                 $ph=implode(',',array_fill(0,count($depts),'?'));
@@ -2576,6 +2774,9 @@ function handle_yokoten_routes(string $method, string $path): bool
             }else{
                 $row=db_row('SELECT * FROM yokotenresponses WHERE ResponseID=? AND (IsDeleted IS NULL OR IsDeleted=0)',[$p['id']]);
                 if(!$row){wf_cleanup_files($files);json_response(['success'=>false,'message'=>'Not found.'],404);}
+                $topic=db_row('SELECT * FROM yokotentopics WHERE YokotenID=? AND IsActive=1',[$row['YokotenID']]);
+                if(!$topic){wf_cleanup_files($files);json_response(['success'=>false,'message'=>'Topic not found.'],404);}
+                $topic=wf_yokoten_normalize_topic($topic);
                 $wasRejected=strcasecmp((string)($row['ApprovalStatus']??''),'rejected')===0;
                 $sameDept=trim((string)($row['Department']??''))===trim((string)($user['department']??''));
                 if(!$admin&&!$sameDept){wf_cleanup_files($files);json_response(['success'=>false,'message'=>'Permission denied.'],403);}
@@ -2583,8 +2784,17 @@ function handle_yokoten_routes(string $method, string $path): bool
                 $existingFiles=(int)(safe_scalar('SELECT COUNT(*) FROM yokoten_response_files WHERE ResponseID=?',[$p['id']])??0);
                 if($related==='Yes'&&$corrective===null){wf_cleanup_files($files);json_response(['success'=>false,'message'=>'CorrectiveAction is required when IsRelated is Yes.'],400);}
                 if($related==='Yes'&&$existingFiles+count($files)===0){json_response(['success'=>false,'message'=>'At least one evidence file is required when IsRelated is Yes.'],400);}
+                $hasUnitInput=array_key_exists('safetyUnits',$b)||array_key_exists('SafetyUnits',$b)||array_key_exists('safetyUnit',$b)||array_key_exists('SafetyUnit',$b);
+                $editUnits=$hasUnitInput?$responseUnits:wf_yokoten_response_unit_list($row['SafetyUnit']??null);
+                $masterUnitRows=wf_yokoten_master_unit_rows();
+                $plan=yokoten_scope_build_department_unit_plan(['departments'=>[$row['Department']],'departmentUnits'=>[$row['Department']=>$editUnits],'topicUnits'=>$topic['TargetUnits'],'masterUnits'=>$masterUnitRows]);
+                $coverage=yokoten_scope_build_unit_coverage(['department'=>$row['Department'],'topicUnits'=>$topic['TargetUnits'],'responseUnits'=>$plan['unitMap'][$row['Department']]??[],'responseExists'=>true,'masterUnits'=>$masterUnitRows]);
+                $errors=$plan['errors'];if(!$coverage['complete']&&$coverage['missingUnits'])$errors[]='Missing Safety Units: '.implode(', ',$coverage['missingUnits']);
+                if(!$plan['ok']||!$coverage['complete']){wf_cleanup_files($files);json_response(['success'=>false,'message'=>'Safety Unit coverage is incomplete. '.implode('; ',$errors),'errors'=>$errors],400);}
+                $editUnits=$plan['unitMap'][$row['Department']]??[];
+                $safetyUnit=$editUnits?wf_text(implode(', ',$editUnits),100):null;
                 $approval=$related==='Yes'?($admin?($row['ApprovalStatus']?:'pending'):'pending'):null;
-                db_execute('UPDATE yokotenresponses SET SafetyUnit=COALESCE(?,SafetyUnit),IsRelated=?,Comment=?,CorrectiveAction=?,ApprovalStatus=?,ApprovalComment=?,ApprovedBy=?,ApprovedAt=? WHERE ResponseID=?',[$safetyUnit,$related,$comment,$related==='Yes'?$corrective:null,$approval,$admin?($row['ApprovalComment']??null):null,$admin?($row['ApprovedBy']??null):null,$admin?($row['ApprovedAt']??null):null,$p['id']]);
+                db_execute('UPDATE yokotenresponses SET SafetyUnit=?,IsRelated=?,Comment=?,CorrectiveAction=?,ApprovalStatus=?,ApprovalComment=?,ApprovedBy=?,ApprovedAt=? WHERE ResponseID=?',[$safetyUnit,$related,$comment,$related==='Yes'?$corrective:null,$approval,$admin?($row['ApprovalComment']??null):null,$admin?($row['ApprovedBy']??null):null,$admin?($row['ApprovedAt']??null):null,$p['id']]);
                 foreach($files as $f)db_execute('INSERT INTO yokoten_response_files (FileID,ResponseID,YokotenID,Department,FileName,FileURL,PublicID,FileType,FileSize,UploadedBy) VALUES (?,?,?,?,?,?,?,?,?,?)',[wf_uuid(),$p['id'],$row['YokotenID'],$row['Department'],$f['name'],$f['url'],$f['stored'],$f['type'],$f['size'],$actor]);
                 if($wasRejected&&$approval==='pending')wf_yokoten_queue_email((string)$p['id'],'Resubmitted',$actor);
                 json_response(['success'=>true,'id'=>$p['id']]);

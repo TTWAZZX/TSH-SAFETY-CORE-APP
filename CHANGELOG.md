@@ -1,5 +1,294 @@
 # TSH Safety Core Activity - Changelog And Handoff History
 
+## Safety Culture PPE inspection form layout (2026-08-24, deployed)
+
+- Reorganized the existing Admin `บันทึกผล PPE Inspection` modal into three
+  guided UI steps: inspection information, inspected employee/inspector, and
+  PPE checklist/evidence. The wider modal adds step progress, back/next
+  navigation, a sticky action footer, and larger status controls.
+- The PPE template, fields, validation, payload, API endpoint, evidence upload,
+  and automatic Violation behavior are unchanged. Every checklist item still
+  defaults to `N/A`, and `N/A` remains selectable exactly as before.
+- Frontend cache key: `20260824-safety-culture-ppe-form-r1`. No schema, API,
+  permission, business-data, or upload-storage migration is required.
+- Focused PPE form regression passed `12/12`; existing Safety Culture
+  Assessment layout regression remained green at `13/13`; JavaScript syntax,
+  diff whitespace, and UTF-8 replacement-character checks passed.
+- Production deployment completed from rollback backup
+  `backups/production/safety-culture-ppe-form-predeploy-20260824-170100`.
+  FTP download-back and public HTTPS SHA-256 passed `4/4`. Authenticated
+  read-only UAT passed the new PPE markers and the existing system surfaces.
+  Headless Chrome UAT opened the live PPE form, navigated all three steps, and
+  confirmed all `3/3` rendered checklist items still default to `N/A` without
+  submitting. Assessment rows remained `32/32`, PPE inspection rows `2/2`,
+  Yokoten responses `101/101`, and outbox `128/128`. No schema, business-data,
+  permission, API, or upload-storage mutation occurred; expected side effects
+  were limited to Admin login audit/housekeeping.
+
+## Safety Culture Assessment history layout (2026-08-24, deployed)
+
+- Reorganized the existing `ผลการประเมิน` tab into three client-side views:
+  `ประวัติการประเมิน`, `ภาพรวมและแนวโน้ม`, and the Admin-only
+  `ตั้งค่าจุดตรวจ`. Existing assessment data, APIs, permissions, CRUD forms,
+  detail modal, and PDF exports are unchanged.
+- History now defaults to a compact decision view (date, area, checkpoint,
+  average, weakest topic, maturity, note, and actions). `คะแนนทั้งหมด` keeps
+  T1-T7 available in a fixed-width table with explicit column widths and
+  table-local horizontal scrolling. Page size supports 10/20/50 rows, and all
+  assessment filters reset pagination to page 1.
+- Monthly summary, heatmap, insight, and location follow-up moved to the
+  Overview view. Follow-up Notes and the Culture Maturity guide are retained in
+  a collapsed additional-information section, reducing the default page
+  length without removing information.
+- Focused regression passed `13/13`; JavaScript syntax passed; authenticated
+  local Chrome UAT passed compact/detailed History, Overview, and Admin Setup
+  with no page-level horizontal overflow and unchanged assessment/response
+  counts. Evidence:
+  `backups/local/yokoten-dashboard-browser-uat-20260824T091046`. No schema,
+  API, permission, business-data, or upload-storage change. Cache key:
+  `20260824-safety-culture-assessment-r1`.
+- Production deployment completed after rollback backup
+  `backups/production/safety-culture-assessment-predeploy-20260824-162134`.
+  FTP download-back SHA-256 passed `4/4`; public HTTPS SHA-256 and cache checks
+  passed `4/4`; authenticated read-only UAT preserved Yokoten responses
+  `101/101` and outbox `128/128`; Chrome UAT passed compact History (10 rows),
+  detailed T1-T7, Overview, and Admin Setup. Assessment count remained `24/24`.
+  No schema, API, business-data, permission, or upload-storage mutation.
+
+## Yokoten topic follow-up actions (2026-08-24, deployed)
+
+- Extended the existing Admin Topic Coverage view with year/risk filters,
+  topic-specific Excel export, due date and overdue days for incomplete rows,
+  per-row/current-view Reminder actions, and a direct response-on-behalf link
+  for Departments that have not responded.
+- Added Admin-only `POST /api/yokoten/reminders/send` to Node development and
+  PHP shared-hosting routes. Both paths recompute missing Department/Unit scope
+  server-side, skip completed scope, resolve recipients through Email
+  Requirement Rules with company-domain validation, and suppress duplicate
+  reminders for the same topic/Department on the same day.
+- A successful Reminder uses the existing `Yokoten_EmailOutbox` and Admin audit
+  log. No MySQL schema, response-data migration, permission widening, or upload
+  storage change is required. Cache key:
+  `20260824-yokoten-topic-coverage-r3`.
+- Focused Topic Coverage regression passed `20/20`; Node/PHP Reminder
+  permission and completed-scope guards passed with unchanged response/outbox
+  fingerprints; the full backend suite and read/permission UAT passed `97/97`;
+  JavaScript syntax and PHP lint passed. Automated Chrome UAT was attempted
+  twice but timed out at DevTools `Page.enable` before page navigation, so it
+  made no UI or business-data write.
+- After explicit authorization, one real SMTP delivery test was sent to the
+  configured company Admin mailbox. Local Yokoten outbox row `109` is `Sent`
+  with marker `YOKOTEN_REMINDER_TEST_20260824082655` and no ResponseID. The
+  temporary sender script was removed after verification; response and
+  completion data were not modified.
+- Production deployment completed after rollback backup
+  `backups/production/yokoten-topic-followup-predeploy-20260824-152953`.
+  FTP download-back SHA-256 passed `6/6`; public HTTPS SHA-256 passed `4/4`;
+  authenticated read-only UAT passed with responses unchanged `101/101` and
+  outbox unchanged `128/128`; browser UAT passed 10 Dashboard rows, 10 Yokoten
+  matrix rows, and 10 Topic Coverage options. Current Production data has zero
+  incomplete/missing rows, so conditional Reminder and response-on-behalf
+  actions are correctly hidden. No Production Reminder was sent during deploy;
+  expected side effects were limited to Admin login audit/housekeeping.
+
+## Yokoten cross-view year-scope parity (2026-08-24, deployed)
+
+- Read-only Production comparison found the same 10-Department scope in
+  Company Overview and Admin Department/Topic completion. Every active 2026
+  topic matched at `10/10`; the earlier localhost `2 complete / 1 partial /
+  7 missing` result comes from its older local database snapshot.
+- Closed a future cross-year mismatch in Activity Targets. Node and PHP now
+  filter active Yokoten topics by the requested year, including legacy topics
+  with a null `DateIssued`, exactly like Company Overview and Dashboard.
+  Department completion still requires the existing shared full-Unit coverage
+  result.
+- Focused year-scope parity passed `4/4`; authenticated Node/PHP Personal Target
+  runtime parity passed without changing the database fingerprint; the full
+  backend suite and read/permission UAT `97/97` passed. No schema,
+  business-data, permission, upload-storage, or frontend cache change.
+  Deployed together with the topic-centric coverage follow-up release.
+
+## Yokoten topic-centric Department/Unit coverage (2026-08-24, deployed)
+
+- Extended the existing Admin `ภาพรวม + อนุมัติ` surface with a two-mode switch:
+  the current Department overview remains unchanged, while `ดูตามหัวข้อ` shows
+  exactly which targeted Departments have completed, partially covered Units,
+  or not responded to the selected topic.
+- Topic Coverage reuses `dept-completion.topicBreakdown` and `all-responses`.
+  Its KPI strip shows completed Departments, partial responses, missing
+  responses, and covered/required Units. The table lists covered and missing
+  Unit names, response time, and opens the existing response detail modal.
+  Filters cover all/complete/partial/missing states. Department PDF/Excel
+  buttons are hidden in Topic mode to avoid exporting a mismatched view.
+- No API, schema, business-data, permission, upload-storage, or workflow change.
+  Focused regression passes `12/12`; local browser UAT passed 10 topics, the
+  Robot topic at 2 complete + 1 partial (`1/6`) + 7 missing, a one-row partial
+  filter, and unchanged response count. Evidence:
+  `backups/local/yokoten-dashboard-browser-uat-20260824T075348`. Cache key:
+  `20260824-yokoten-topic-coverage-r2`. Deployed through the final `r3`
+  follow-up release.
+
+## Yokoten Unit-complete department workflow and Admin-on-behalf privacy (2026-08-24, deployed)
+
+- Kept the existing one-response-per `(Department, YokotenID)` storage model,
+  but changed completion semantics: when a topic targets Units in a Department,
+  that Department-topic pair counts as 1 only after the response covers every
+  required Unit. Topics without Unit scope still complete with one Department
+  response. Node and PHP fail closed when legacy Unit scope cannot be resolved.
+- New and edited responses validate full Unit coverage before any transaction.
+  The existing response form now shows the required Unit checklist; Admin work
+  queue, response detail, Department matrix, user progress, employee completion,
+  company overview, Activity Targets, and Overview Dashboard use the same rule.
+- Configured dashboard Units continue to select in-scope topics but never
+  discard a stored response before its target Unit coverage is evaluated.
+- Node and PHP now identify an Admin responder from Employee Master. User-facing
+  topic/detail/history payloads replace the real Admin actor with
+  `ผู้ดูแลระบบตอบแทนหน่วยงาน`; Admin views and stored response/audit identity
+  remain unchanged.
+- Production read-only diagnosis found the former dashboard filter excluded 13
+  responses, while one Production 1 response covers only `PD1 Assy 3/1` of six
+  required Units. Under the corrected rule that Department remains `9/10`
+  until Admin edits the existing response and selects all six Units; the other
+  five named Units do not require separate response rows.
+- No schema, business-data, permission, or upload-storage change was required.
+  Focused Node/PHP parity tests pass `14/14`, bulk-response smoke passes
+  `20/20`, the full backend suite passes, and local read/permission UAT passes
+  `97/97`.
+- Production rollback backup is
+  `backups/production/yokoten-unit-coverage-predeploy-20260824-135900`. FTP
+  download-back SHA-256 passed `8/8` at
+  `backups/production/yokoten-unit-coverage-upload-verify-20260824-140019`;
+  public HTTPS SHA-256 passed `3/3` at
+  `backups/production/yokoten-unit-coverage-https-verify-20260824-140847`.
+  Authenticated read-only smoke passed `11/11` at
+  `backups/production/yokoten-unit-coverage-readonly-uat-20260824-140237`:
+  company completion is correctly `99/100`, Production 1 is `9/10`, and the
+  one partial topic is `1/6` Units with the expected five missing Units.
+  Response count stayed `100/100`. Browser UAT at
+  `backups/production/yokoten-dashboard-browser-uat-20260824T070818` rendered
+  the 10-row Overview and 10-row Yokoten Unit matrix, including `1/6`, without
+  changing response data. No temporary helper/test row was created; normal UAT
+  login audit/housekeeping was the only expected side effect. Final manifest
+  download-back verification passed at
+  `backups/production/yokoten-unit-coverage-final-manifest-verify-20260824-140938`;
+  FTP temporary-helper count is `0` and the HTTP helper probe returns `404`.
+
+## System Console Employee Master sorting and source filters (2026-08-24, deployed)
+
+- Added an in-place `เรียงลำดับ` control to the existing Employee Master filter
+  bar: default, newest, oldest, EmployeeID ascending/descending, and Thai name
+  ascending. EmployeeID natural sorting preserves six-digit leading zeroes and
+  orders prefix IDs such as `AP0002` before `AP0010`.
+- Admin employee list responses now include nullable `CreatedAt` and
+  `CreationSource` metadata from the latest successful `CREATE_EMPLOYEE` audit
+  for that EmployeeID, with Node/PHP parity. Employees without historical audit
+  time remain in the list and are placed after timestamped employees in both
+  time modes.
+- Added `ทั้งหมด / เพิ่มทีละคน / Import Excel` source chips to the existing
+  recent-additions strip. The UI reads the latest 20 audit entries but displays
+  at most five matching cards. No schema, business-data, permission, or upload
+  storage change is required. Cache key: `20260824-employee-sort-r1`.
+- Focused cross-path regression, the full backend suite, API smoke, and
+  read/permission UAT `96/96` pass. Node/PHP write UAT expanded to `26/26` and
+  cleanup restored baseline fingerprints with zero synthetic residue. Local
+  Chrome UAT passed natural ID sorting, newest sorting, source filtering, 25
+  table rows, and zero blocking runtime errors. The only ignored localhost
+  errors were three expected 404s for a Production Branding image URL that is
+  not stored in the local uploads directory.
+- Production code rollback is
+  `backups/production/employee-sort-predeploy-20260824-113422`; FTP SHA-256
+  passed `5/5` at
+  `backups/production/employee-sort-upload-verify-20260824-113536`, and HTTPS
+  passed `3/3` at
+  `backups/production/employee-sort-https-verify-20260824-113600`.
+  Authenticated read-only UAT passed `9/9`: 5 of 2,495 current employees have
+  auditable creation metadata, unauthenticated access returned 401, and Viewer
+  access returned 403. Production browser evidence is
+  `backups/production/employee-master-browser-uat-20260824T043702`; natural ID
+  sort, newest sort, source filtering, and 25 rendered rows passed with zero
+  runtime errors. No Production business-data write or temporary helper was
+  used; expected side effects were normal UAT login audit/housekeeping only.
+  Final manifest download-back verification passed at
+  `backups/production/employee-sort-final-manifest-verify-20260824-113900`.
+
+## System Console Employee Master recent additions (2026-08-24, deployed)
+
+- Extended the existing Employee Master card with a compact five-person recent
+  additions strip. It shows employee name/ID, department, adding Admin, date and
+  time, plus `เพิ่มทีละคน` or `Import Excel`; clicking a person reuses the
+  existing EmployeeID table search, and the Audit Log button opens the existing
+  audit tab.
+- Added Admin-only `GET /api/admin/employee/recent-additions` with Node/PHP
+  parity. It reads successful `CREATE_EMPLOYEE` audit entries and joins current
+  Employee Master rows, so duplicates, failed rows, and employees later deleted
+  from the master are excluded.
+- Manual create, current multipart Excel import, and legacy JSON import now
+  write per-created-employee audit entries while preserving the existing batch
+  `IMPORT_EMPLOYEES` summary. No schema, new table, business-data migration,
+  permission widening, or upload-storage change is required. Frontend cache
+  key: `20260824-employee-recent-additions-r2`.
+- Local verification passed the full backend suite, read/permission UAT
+  `96/96`, and Node/PHP employee write UAT `24/24`. The write UAT verified both
+  `manual` and `import` recent-addition sources, removed every synthetic row,
+  and restored the baseline data fingerprints.
+- Production deployment included the create-only import protection and recent
+  additions UI/API. Code rollback backup:
+  `backups/production/employee-master-predeploy-20260824-101440`; FTP upload
+  verification: `backups/production/employee-master-upload-verify-20260824-101635`
+  (`6/6`); HTTPS verification:
+  `backups/production/employee-master-https-verify-20260824-101900` (`4/4`).
+  Authenticated read-only UAT passed `8/8`, including Admin 200,
+  unauthenticated 401, and Viewer 403. Browser UAT evidence is
+  `backups/production/employee-master-browser-uat-20260824T032659`: three recent
+  cards and 25 employee rows rendered with zero JavaScript/runtime errors.
+  Production business-data writes were false; only normal UAT login
+  audit/housekeeping side effects occurred, and no temporary helper was used.
+  Final manifest download-back verification passed at
+  `backups/production/employee-master-final-manifest-verify-20260824-102900`.
+
+## System Console Employee Import create-only protection (2026-08-24, deployed above)
+
+- Confirmed manual Admin employee creation already used the shared `CREATE`
+  path and rejected duplicate `EmployeeID` with HTTP 409 without changing the
+  existing row. The UI now explains that duplicate IDs must be edited through
+  the explicit employee-edit action.
+- Changed both the current multipart Excel import and the legacy JSON import
+  from `UPSERT` to `CREATE` in Node development and PHP shared-hosting routes.
+  Existing EmployeeIDs and repeated IDs inside the same file are skipped; they
+  can no longer clear profile fields, clear CompanyEmail, or change an existing
+  Role.
+- Multipart import results now separate `addedCount`, `duplicateCount`,
+  `errorCount`, and row-level duplicate reasons while retaining
+  `successCount` compatibility. The System Console presents the same split and
+  HTML-escapes all workbook/API values shown in the result table.
+- Completed the existing advertised `Team` import path in Node/PHP and added
+  Team to the downloadable template/reference data. No MySQL schema,
+  business-data, permission, or upload-storage change is required. Frontend cache key:
+  `20260824-employee-import-create-only-r1`.
+- Verification passed: JavaScript syntax, PHP lint, focused Node/PHP import
+  contract regression, full backend verification, API smoke, read/permission
+  UAT `94/94`, and local write UAT `22/22`. The write UAT proved that manual
+  duplicate creation and Import both preserve the existing employee's
+  name/Role, a new ID is inserted once, duplicate workbook rows are skipped,
+  and cleanup leaves zero synthetic rows with baseline database fingerprints
+  restored.
+
+## Hiyari dashboard, History filters, and Overview alignment deployed (2026-08-24)
+
+- Corrected the Hiyari column in `Department Coverage Overview` to use the same annual people-progress definition as the Hiyari Dashboard: current assignees with at least one non-deleted report in the selected year divided by current assignments in each department.
+- Reporter and assignment matching is EmployeeID-based, case/whitespace tolerant, and independent of report status. Unassigned reporters do not inflate the numerator, and departments without current Hiyari assignments display `N/A` instead of a misleading percentage.
+- Node and shared-hosting PHP now return matching `coverageMeta` numerator, denominator, and source values. Focused parity regression and the live local 10-department coverage smoke passed; the full backend suite, API smoke, and read/permission UAT passed `94/94`. No MySQL schema/data, permission, or upload-storage change was required.
+- Production deployment combined all Hiyari work from 2026-08-24: the Dashboard assignee progress card, complete PHP History filter parity, and Overview assignment-based Hiyari coverage. The six runtime files were `index.html`, `public/js/main.js`, `public/js/pages/hiyari.js`, `api/handlers/workflow_phase6.php`, `api/index.php`, and `deploy-manifest.json`; cache key is `20260824-hiyari-dept-progress-r1`.
+- Code rollback backup is `backups/production/hiyari-today-predeploy-20260824-091147`; upload verification is `backups/production/hiyari-today-upload-verify-20260824-091147`. FTP SHA-256 matched `6/6`, HTTPS matched `4/4`, and no temporary Production helper/file remains. A full database export was not captured because this was a code-only release with no schema or business-data mutation.
+- Authenticated read-only Production UAT passed at `backups/production/hiyari-today-readonly-uat-20260824T021630`: annual assignment progress was `33/66 = 50%`, Overview Hiyari numerator/denominator/percentage matched the Hiyari Dashboard for all 10 scoped departments, and combined Department + Stop Type + month + area History filtering returned `1/35` matching rows. Business-data writes were `false`; expected side effects were limited to normal successful-login audit/housekeeping.
+
+## Hiyari Dashboard assignment progress by department (2026-08-24, deployed above)
+
+- Reworked the existing Dashboard department-summary card into annual assignment progress by department. Each configured department now shows distinct assignees who submitted at least one Hiyari report, total current assignments, completion percentage, and remaining people; the displayed-scope summary shows the same totals.
+- The existing `pinnedDepts` Dashboard configuration still selects which departments are shown. With no pinned selection, every department with a Hiyari assignment is shown; the Dashboard department filter narrows the card to that department.
+- Extended the existing `/api/hiyari/stats` response with `assignmentCompletion.byDepartment` in both Node and shared-hosting PHP. The aggregate is calculated from the selected year independently of month/status/rank filters and viewer report visibility, so normal users receive accurate counts without receiving other employees' report details.
+- No new endpoint, MySQL table/column, business-data migration, permission, or upload-storage change is required. Frontend cache keys advanced to `20260824-hiyari-dept-progress-r1`. Focused Hiyari regressions, JavaScript syntax, PHP lint, UTF-8 scan, and `git diff --check` passed locally. After local MySQL became available, the full backend suite, API smoke, and read/permission UAT also passed `94/94`.
+
 ## CCCF Form A Worker annual mode-aware UI (2026-08-22, deployed)
 
 - Production deployment completed with final cache key `20260822-cccf-worker-pdf-r10`. The exact runtime scope was `index.html`, `public/js/main.js`, `public/js/pages/cccf.js`, `public/js/pages/admin.js`, `public/js/pages/dashboard.js`, `api/handlers/platform.php`, `api/handlers/admin_phase8.php`, `api/index.php`, and `deploy-manifest.json`. FTP and HTTPS SHA-256 verification passed. Authenticated Production UAT passed Manual, Actual, Form A Permanent, Dashboard, Safety Core Data, and both Worker PDF modes with zero browser runtime errors. The annual Worker source was restored to Manual / Override after testing.

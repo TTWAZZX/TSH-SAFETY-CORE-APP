@@ -67,6 +67,40 @@ function resolveTopicUnitScope(topicUnits, masterUnits) {
     return { units: resolved, unresolved, aliases };
 }
 
+function buildUnitCoverage({
+    department,
+    topicUnits = [],
+    responseUnits = [],
+    responseExists = false,
+    masterUnits = [],
+}) {
+    const departmentKey = normalizeScopeValue(department);
+    const topicScope = resolveTopicUnitScope(topicUnits, masterUnits);
+    const responseScope = resolveTopicUnitScope(responseUnits, masterUnits);
+    const requiredUnits = topicScope.units
+        .filter(unit => normalizeScopeValue(unitDepartment(unit)) === departmentKey)
+        .map(unitName);
+    const selectedUnits = responseScope.units
+        .filter(unit => normalizeScopeValue(unitDepartment(unit)) === departmentKey)
+        .map(unitName);
+    const selectedKeys = new Set(selectedUnits.map(normalizeScopeValue));
+    const coveredUnits = requiredUnits.filter(unit => selectedKeys.has(normalizeScopeValue(unit)));
+    const missingUnits = requiredUnits.filter(unit => !selectedKeys.has(normalizeScopeValue(unit)));
+    return {
+        responseExists: !!responseExists,
+        requiredUnits,
+        selectedUnits,
+        coveredUnits,
+        missingUnits,
+        requiredCount: requiredUnits.length,
+        coveredCount: coveredUnits.length,
+        complete: !!responseExists && missingUnits.length === 0 && topicScope.unresolved.length === 0,
+        unresolvedTopicUnits: topicScope.unresolved,
+        unresolvedResponseUnits: responseScope.unresolved,
+        aliases: [...topicScope.aliases, ...responseScope.aliases],
+    };
+}
+
 function parseDepartmentUnitMap(raw) {
     if (raw == null || raw === '') return null;
     let value = raw;
@@ -166,6 +200,7 @@ function buildDepartmentUnitPlan({
 
 module.exports = {
     buildDepartmentUnitPlan,
+    buildUnitCoverage,
     normalizeScopeValue,
     parseDepartmentUnitMap,
     resolveTopicUnitScope,

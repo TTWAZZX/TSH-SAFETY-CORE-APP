@@ -383,8 +383,8 @@ function handle_foundation_routes(string $method, string $path): bool
         json_response(['success' => true, 'data' => $employee]);
     }
     if ($method === 'POST' && $path === '/employees') {
-        require_admin();
-        create_employee(json_body());
+        $admin = require_admin();
+        create_employee(json_body(), $admin, 'manual_legacy');
     }
     if ($params !== null && $method === 'PUT') {
         require_admin();
@@ -398,13 +398,35 @@ function handle_foundation_routes(string $method, string $path): bool
 
     if ($method === 'GET' && $path === '/admin/employees') {
         require_admin();
+        ensure_auth_security_schema();
         json_response(['success' => true, 'data' => db_rows(
-            'SELECT EmployeeID, EmployeeName, Department, Unit, Team, Position, CompanyEmail, Role FROM employees ORDER BY Department, EmployeeName'
+            "SELECT e.EmployeeID,e.EmployeeName,e.Department,e.Unit,e.Team,e.Position,e.CompanyEmail,e.Role,
+                    created.ActionTime AS CreatedAt,
+                    CASE
+                        WHEN created.id IS NULL THEN NULL
+                        WHEN LOWER(COALESCE(created.Path,'')) LIKE '%/import%'
+                          OR LOWER(COALESCE(created.Detail,'')) LIKE '%source: import%'
+                          OR LOWER(COALESCE(created.Metadata,'')) LIKE '%\"source\":\"import%' THEN 'import'
+                        ELSE 'manual'
+                    END AS CreationSource
+             FROM employees e
+             LEFT JOIN (
+                 SELECT l.id,l.ActionTime,l.Path,l.Detail,l.Metadata,l.TargetID
+                 FROM admin_auditlogs l
+                 INNER JOIN (
+                     SELECT MAX(id) AS AuditID
+                     FROM admin_auditlogs
+                     WHERE Action='CREATE_EMPLOYEE'
+                       AND COALESCE(TRIM(TargetID),'')<>''
+                     GROUP BY LOWER(TRIM(TargetID))
+                 ) latest ON latest.AuditID=l.id
+             ) created ON LOWER(TRIM(created.TargetID))=LOWER(TRIM(e.EmployeeID))
+             ORDER BY e.Department,e.EmployeeName"
         )]);
     }
     if ($method === 'POST' && $path === '/admin/employee/create') {
-        require_admin();
-        create_employee(json_body());
+        $admin = require_admin();
+        create_employee(json_body(), $admin, 'manual');
     }
     if ($method === 'POST' && $path === '/admin/employee/update') {
         require_admin();
@@ -412,7 +434,7 @@ function handle_foundation_routes(string $method, string $path): bool
         update_employee((string) ($body['EmployeeID'] ?? ''), $body);
     }
     if ($method === 'POST' && $path === '/admin/employees/import') {
-        require_admin();
+        $admin = require_admin();
         $body = json_body();
         $rows = $body['data'] ?? null;
         if (!is_array($rows)) {
@@ -422,6 +444,10 @@ function handle_foundation_routes(string $method, string $path): bool
         $pdo->beginTransaction();
         $importRow = null;
         $importEmployeeId = null;
+        $addedCount = 0;
+        $duplicateCount = 0;
+        $seenEmployeeIds = [];
+        $addedEmployees = [];
         try {
             foreach ($rows as $rowIndex => $employee) {
                 $importRow = (int)$rowIndex + 1;
@@ -430,28 +456,52 @@ function handle_foundation_routes(string $method, string $path): bool
                 }
                 $employeeId = trim((string) ($employee['EmployeeID'] ?? ''));
                 $importEmployeeId = $employeeId;
+                $normalizedIdKey = strtolower($employeeId);
+                if ($normalizedIdKey !== '' && isset($seenEmployeeIds[$normalizedIdKey])) {
+                    $duplicateCount++;
+                    continue;
+                }
+                if ($normalizedIdKey !== '') {
+                    $seenEmployeeIds[$normalizedIdKey] = true;
+                }
                 $email = validate_company_email($employee['CompanyEmail'] ?? $employee['Email'] ?? '');
                 if (!$email['ok']) {
                     throw new ProfileValidationException('INVALID_COMPANY_EMAIL',$email['message'],400);
                 }
-                crosspath_write_employee_profile_in_transaction(
-                    $pdo,
-                    CROSS_PATH_UPSERT,
-                    $employeeId,
-                    [
-                        'EmployeeName'=>$employee['EmployeeName']??null,
-                        'Department'=>$employee['Department']??'',
-                        'Unit'=>$employee['Unit']??'',
-                        'Position'=>$employee['Position']??($employee['Team']??''),
-                    ],
-                    [
-                        'Team'=>trim((string)($employee['Team']??'')),
-                        'CompanyEmail'=>$email['email'],
-                        'Role'=>normalize_role($employee['Role']??'User'),
-                    ]
-                );
+                try {
+                    $write = crosspath_write_employee_profile_in_transaction(
+                        $pdo,
+                        CROSS_PATH_CREATE,
+                        $employeeId,
+                        [
+                            'EmployeeName'=>$employee['EmployeeName']??null,
+                            'Department'=>$employee['Department']??'',
+                            'Unit'=>$employee['Unit']??'',
+                            'Position'=>$employee['Position']??($employee['Team']??''),
+                        ],
+                        [
+                            'Team'=>trim((string)($employee['Team']??'')),
+                            'CompanyEmail'=>$email['email'],
+                            'Role'=>normalize_role($employee['Role']??'User'),
+                        ]
+                    );
+                    $addedCount++;
+                    $addedEmployees[] = $write['employee'];
+                } catch (ProfileValidationException $error) {
+                    if ($error->reason === 'EMPLOYEE_ALREADY_EXISTS') {
+                        $duplicateCount++;
+                        continue;
+                    }
+                    throw $error;
+                }
             }
             $pdo->commit();
+            foreach ($addedEmployees as $employee) {
+                auth_audit_log('CREATE_EMPLOYEE', (string)$employee['EmployeeID'], 200, [
+                    'source'=>'import_json',
+                    'role'=>$employee['Role'] ?? 'User',
+                ], $admin);
+            }
         } catch (Throwable $error) {
             $pdo->rollBack();
             if ($error instanceof ProfileValidationException) {
@@ -465,10 +515,16 @@ function handle_foundation_routes(string $method, string $path): bool
             }
             throw $error;
         }
-        json_response(['success' => true, 'message' => 'Imported ' . count($rows) . ' rows']);
+        json_response([
+            'success' => true,
+            'message' => 'Added ' . $addedCount . ' new employees; skipped ' . $duplicateCount . ' duplicates',
+            'addedCount' => $addedCount,
+            'duplicateCount' => $duplicateCount,
+            'successCount' => $addedCount,
+        ]);
     }
     if ($method === 'POST' && $path === '/admin/employee/import') {
-        require_admin();
+        $admin = require_admin();
         $rows = json_decode((string) ($_POST['rows'] ?? ''), true);
         if (!is_array($rows) && !empty($_POST['rowsBase64'])) {
             $decodedRows = base64_decode((string) $_POST['rowsBase64'], true);
@@ -478,8 +534,10 @@ function handle_foundation_routes(string $method, string $path): bool
             json_response(['success' => false, 'message' => 'Excel rows were not provided. Please refresh the page and try again.'], 400);
         }
         $details = [];
-        $successCount = 0;
+        $addedCount = 0;
+        $duplicateCount = 0;
         $errorCount = 0;
+        $seenEmployeeIds = [];
         foreach ($rows as $rowIndex => $row) {
             if (!is_array($row)) {
                 continue;
@@ -493,7 +551,24 @@ function handle_foundation_routes(string $method, string $path): bool
             }
             $department = trim((string) ($row['Department'] ?? $row['Dept'] ?? ''));
             $position = trim((string) ($row['Position'] ?? ''));
+            $team = trim((string) ($row['Team'] ?? ''));
             $role = normalize_role($row['Role'] ?? 'User');
+
+            $normalizedIdKey = strtolower($id);
+            if (isset($seenEmployeeIds[$normalizedIdKey])) {
+                $duplicateCount++;
+                $details[] = [
+                    'row'=>(int)$rowIndex+2,
+                    'id'=>$id,
+                    'name'=>$name,
+                    'status'=>'duplicate',
+                    'code'=>'DUPLICATE_EMPLOYEE_ID_IN_FILE',
+                    'reason'=>'EmployeeID ซ้ำภายในไฟล์ จึงข้ามรายการนี้',
+                ];
+                continue;
+            }
+            $seenEmployeeIds[$normalizedIdKey] = true;
+
             $email = validate_company_email($row['CompanyEmail'] ?? $row['Company Email'] ?? $row['Email'] ?? '');
             if (!$email['ok']) {
                 $details[] = ['row'=>(int)$rowIndex+2,'id'=>$id,'name'=>$name,'status'=>'skip','code'=>'INVALID_COMPANY_EMAIL','reason'=>$email['message']];
@@ -507,7 +582,7 @@ function handle_foundation_routes(string $method, string $path): bool
             try {
                 $write = crosspath_execute_employee_profile_write(
                     db(),
-                    CROSS_PATH_UPSERT,
+                    CROSS_PATH_CREATE,
                     $id,
                     [
                         'EmployeeName'=>$name,
@@ -515,9 +590,13 @@ function handle_foundation_routes(string $method, string $path): bool
                         'Unit'=>$row['Unit']??'',
                         'Position'=>$position,
                     ],
-                    ['CompanyEmail'=>$email['email'],'Role'=>$role]
+                    ['Team'=>$team,'CompanyEmail'=>$email['email'],'Role'=>$role]
                 );
-                $successCount++;
+                $addedCount++;
+                auth_audit_log('CREATE_EMPLOYEE', (string)$write['employee']['EmployeeID'], 200, [
+                    'source'=>'import_excel',
+                    'role'=>$write['employee']['Role'] ?? 'User',
+                ], $admin);
                 $details[] = [
                     'row'=>(int)$rowIndex+2,
                     'id'=>$id,
@@ -528,6 +607,18 @@ function handle_foundation_routes(string $method, string $path): bool
                     'onboardingStatus'=>$write['status'],
                 ];
             } catch (ProfileValidationException $error) {
+                if ($error->reason === 'EMPLOYEE_ALREADY_EXISTS') {
+                    $duplicateCount++;
+                    $details[] = [
+                        'row'=>(int)$rowIndex+2,
+                        'id'=>$id,
+                        'name'=>$name,
+                        'status'=>'duplicate',
+                        'code'=>$error->reason,
+                        'reason'=>'EmployeeID นี้มีอยู่ในระบบแล้ว ระบบไม่ได้แก้ไขข้อมูลเดิม',
+                    ];
+                    continue;
+                }
                 $errorCount++;
                 $details[] = [
                     'row'=>(int)$rowIndex+2,
@@ -550,13 +641,40 @@ function handle_foundation_routes(string $method, string $path): bool
             }
         }
         json_response([
-            'success' => true, 'message' => 'Imported ' . $successCount . ' rows',
-            'successCount' => $successCount, 'errorCount' => $errorCount,
+            'success' => true,
+            'message' => 'Added ' . $addedCount . ' new employees; skipped ' . $duplicateCount . ' duplicates',
+            'addedCount' => $addedCount,
+            'duplicateCount' => $duplicateCount,
+            'successCount' => $addedCount,
+            'errorCount' => $errorCount,
             'warnCount' => count(array_filter($details, static function ($row) {
                 return ($row['status'] ?? '') === 'warn';
             })),
             'details' => $details,
         ]);
+    }
+    if ($method === 'GET' && $path === '/admin/employee/recent-additions') {
+        require_admin();
+        ensure_auth_security_schema();
+        $limit = max(1, min(20, (int)($_GET['limit'] ?? 5)));
+        $rows = db_rows(
+            "SELECT l.id AS AuditID,l.ActionTime,l.AdminID,l.AdminName,l.Path,l.Detail,l.TargetID AS EmployeeID,
+                    e.EmployeeName,e.Department,e.Unit,e.Position,e.Role,
+                    CASE
+                        WHEN LOWER(COALESCE(l.Path,'')) LIKE '%/import%'
+                          OR LOWER(COALESCE(l.Detail,'')) LIKE '%source: import%'
+                          OR LOWER(COALESCE(l.Metadata,'')) LIKE '%\"source\":\"import%' THEN 'import'
+                        ELSE 'manual'
+                    END AS Source
+             FROM admin_auditlogs l
+             INNER JOIN employees e
+                ON LOWER(TRIM(e.EmployeeID))=LOWER(TRIM(l.TargetID))
+             WHERE l.Action='CREATE_EMPLOYEE'
+               AND COALESCE(TRIM(l.TargetID),'')<>''
+             ORDER BY l.ActionTime DESC,l.id DESC
+             LIMIT " . $limit
+        );
+        json_response(['success'=>true,'data'=>$rows]);
     }
     $params = route_params($path, '/admin/employee/:id');
     if ($params !== null && $method === 'PUT') {
@@ -592,6 +710,7 @@ function handle_foundation_routes(string $method, string $path): bool
             'departments' => array_column(db_rows('SELECT Name FROM master_departments ORDER BY Name'), 'Name'),
             'positions' => array_column(db_rows('SELECT Name FROM master_positions ORDER BY Name'), 'Name'),
             'units' => array_column(db_rows('SELECT name FROM master_safetyunits ORDER BY name'), 'name'),
+            'teams' => array_column(db_rows('SELECT Name FROM master_teams ORDER BY Name'), 'Name'),
             'roles' => ['Admin', 'User', 'Viewer'],
         ]);
     }
@@ -599,7 +718,7 @@ function handle_foundation_routes(string $method, string $path): bool
     return false;
 }
 
-function create_employee(array $body)
+function create_employee(array $body, ?array $actor = null, string $source = 'manual')
 {
     $employeeId = trim((string) ($body['EmployeeID'] ?? ''));
     $email = validate_company_email($body['CompanyEmail'] ?? '');
@@ -625,6 +744,12 @@ function create_employee(array $body)
         );
     } catch (ProfileValidationException $error) {
         json_response(['success'=>false,'code'=>$error->reason,'message'=>$error->getMessage()],$error->httpStatus);
+    }
+    if ($actor !== null) {
+        auth_audit_log('CREATE_EMPLOYEE', $employeeId, 200, [
+            'source'=>$source,
+            'role'=>$result['employee']['Role'] ?? 'User',
+        ], $actor);
     }
     json_response(['success'=>true,'message'=>'เพิ่มพนักงานสำเร็จ','onboardingStatus'=>$result['status']]);
 }

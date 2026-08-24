@@ -10,6 +10,8 @@ if (!is_array($input)) {
 }
 
 echo json_encode(
-    yokoten_scope_build_department_unit_plan($input),
+    (($input['action'] ?? 'plan') === 'coverage')
+        ? yokoten_scope_build_unit_coverage($input)
+        : yokoten_scope_build_department_unit_plan($input),
     JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES
 );

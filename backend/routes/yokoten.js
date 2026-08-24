@@ -11,7 +11,11 @@ const multer   = require('multer');
 const { randomUUID } = require('crypto');
 const { sendMail, smtpConfigured } = require('../utils/email');
 const { buildHiyariEmail } = require('../utils/hiyari-email-template');
-const { buildDepartmentUnitPlan, parseDepartmentUnitMap } = require('../utils/yokoten-admin-scope');
+const { buildDepartmentUnitPlan, buildUnitCoverage, parseDepartmentUnitMap } = require('../utils/yokoten-admin-scope');
+const { isAdminRole, responseForViewer } = require('../utils/yokoten-response-visibility');
+const { getEmailRequirementRule } = require('../utils/email-requirement');
+const { validateCompanyEmail } = require('../utils/company-email');
+const { logAudit } = require('../utils/audit');
 
 // ─── Multer for response files (multiple, up to 10, 20MB each) ───────────────
 const responseFileFilter = (req, file, cb) => {
@@ -481,6 +485,81 @@ async function queueYokotenApprovalEmail(responseId, actorName) {
     return queueYokotenEmail(responseId, 'Approved', actorName);
 }
 
+async function getYokotenReminderRecipients(department, missingUnits = []) {
+    const rule = await getEmailRequirementRule({ ensureSchema: false });
+    const requiredIds = new Set(rule.requiredPositionIds.map(Number));
+    const requiredNames = new Set(rule.positions
+        .filter(position => requiredIds.has(Number(position.id)))
+        .map(position => String(position.Name || '').trim())
+        .filter(Boolean));
+    if (!requiredNames.size) {
+        return { readiness: 'rule_not_configured', candidateScope: 'department', recipients: [] };
+    }
+
+    const [employees] = await db.query(
+        `SELECT EmployeeID, EmployeeName, Department, Unit, Team, Position, CompanyEmail
+           FROM Employees
+          WHERE TRIM(COALESCE(Department, '')) = ?
+          ORDER BY Position, EmployeeName`,
+        [department]
+    );
+    const responsible = employees.filter(employee => requiredNames.has(String(employee.Position || '').trim()));
+    const missingKeys = new Set(missingUnits.map(unit => String(unit || '').trim().toLowerCase()).filter(Boolean));
+    const unitCandidates = missingKeys.size
+        ? responsible.filter(employee => parseSafetyUnitList(employee.Unit, employee.Team)
+            .some(unit => missingKeys.has(String(unit || '').trim().toLowerCase())))
+        : [];
+    const candidates = unitCandidates.length ? unitCandidates : responsible;
+    const unique = [];
+    const seen = new Set();
+    candidates.forEach(employee => {
+        const check = validateCompanyEmail(employee.CompanyEmail);
+        if (!check.ok || !check.email || seen.has(check.email)) return;
+        seen.add(check.email);
+        unique.push({
+            employeeId: employee.EmployeeID,
+            employeeName: employee.EmployeeName,
+            position: employee.Position,
+            unit: employee.Unit || employee.Team || null,
+            email: check.email,
+        });
+    });
+    return {
+        readiness: unique.length ? 'ready' : responsible.length ? 'missing_or_invalid_email' : 'no_responsible_employee',
+        candidateScope: unitCandidates.length ? 'unit' : 'department',
+        recipients: unique,
+    };
+}
+
+function buildYokotenReminderMail(topic, department, missingUnits, actorName) {
+    const title = topic.Title || topic.TopicDescription || topic.YokotenID;
+    const deadline = topic.Deadline ? new Date(topic.Deadline).toLocaleDateString('th-TH') : 'Not specified';
+    const unitLabel = missingUnits.length ? missingUnits.join(', ') : 'Department response';
+    const mail = buildHiyariEmail({
+        title: 'Yokoten response reminder',
+        kicker: 'Yokoten / Lesson Learned Sharing',
+        moduleLabel: 'Yokoten / Lesson Learned Sharing Module',
+        tone: 'pending',
+        greeting: `Dear ${department} responsible person,`,
+        intro: [
+            'This Yokoten topic is still waiting for a complete response from your Department or required Safety Units.',
+            'Please review the topic and submit the outstanding response in Safety Core.',
+        ],
+        details: [
+            { label: 'Topic', value: title },
+            { label: 'Department', value: department },
+            { label: 'Missing Unit / Scope', value: unitLabel, highlight: true },
+            { label: 'Risk Level', value: topic.RiskLevel || '-' },
+            { label: 'Deadline', value: deadline },
+            { label: 'Reminder By', value: actorName || 'Safety Admin' },
+        ],
+        actions: ['Open Safety Core > Yokoten, review the topic, and submit the complete Department/Unit response.'],
+        footerNote: 'This is an automated Yokoten reminder from TSH Safety Core Activity System.',
+    });
+    const code = String(topic.YokotenID || '').slice(0, 36);
+    return { ...mail, subject: `[Yokoten Reminder] ${code} - ${department}` };
+}
+
 router.get('/email-outbox', isAdmin, async (req, res) => {
     try {
         await ensureTables();
@@ -547,6 +626,116 @@ router.post('/email-outbox/:id/retry', isAdmin, async (req, res) => {
     }
 });
 
+router.post('/reminders/send', isAdmin, async (req, res) => {
+    try {
+        await ensureTables();
+        const topicId = String(req.body?.topicId || '').trim();
+        const requestedDepartments = [...new Set((Array.isArray(req.body?.departments) ? req.body.departments : [])
+            .map(value => String(value || '').trim()).filter(Boolean))];
+        if (!topicId || !requestedDepartments.length) {
+            return res.status(400).json({ success: false, message: 'Topic and at least one Department are required.' });
+        }
+
+        const [topicResult, departmentResult, masterUnits, responseResult] = await Promise.all([
+            db.query(`SELECT YokotenID, Title, TopicDescription, RiskLevel, Deadline, TargetDepts, TargetUnits
+                        FROM YokotenTopics WHERE YokotenID = ? AND IsActive = 1 LIMIT 1`, [topicId]),
+            db.query('SELECT Name FROM Master_Departments ORDER BY Name'),
+            getMasterSafetyUnitsWithDepartment(),
+            db.query(`SELECT r.Department,
+                             COALESCE(NULLIF(r.SafetyUnit, ''), NULLIF(e.Unit, ''), NULLIF(e.Team, '')) AS EffectiveSafetyUnit
+                        FROM YokotenResponses r
+                        LEFT JOIN Employees e ON e.EmployeeID = r.EmployeeID
+                       WHERE r.YokotenID = ? AND (r.IsDeleted IS NULL OR r.IsDeleted = 0)`, [topicId]),
+        ]);
+        const topic = topicResult[0][0] || null;
+        const masterDepartments = departmentResult[0] || [];
+        const responses = responseResult[0] || [];
+        if (!topic) return res.status(404).json({ success: false, message: 'Yokoten topic not found.' });
+
+        const allowedDepartments = new Set(topicTargetedDepts(topic, masterDepartments).map(row => String(row.Name || '').trim()));
+        const responseMap = new Map(responses.map(row => [String(row.Department || '').trim(), row]));
+        const targets = [];
+        for (const department of requestedDepartments) {
+            if (!allowedDepartments.has(department)) continue;
+            const response = responseMap.get(department) || null;
+            const coverage = buildUnitCoverage({
+                department,
+                topicUnits: parseJson(topic.TargetUnits),
+                responseUnits: parseSafetyUnitList(response?.EffectiveSafetyUnit),
+                responseExists: !!response,
+                masterUnits,
+            });
+            if (coverage.complete) continue;
+            targets.push({ department, coverage });
+        }
+        if (!targets.length) {
+            return res.status(400).json({ success: false, message: 'Selected Departments have already completed this topic.' });
+        }
+
+        const results = [];
+        for (const target of targets) {
+            const missingUnits = target.coverage.requiredCount ? target.coverage.missingUnits : [];
+            const recipientInfo = await getYokotenReminderRecipients(target.department, missingUnits);
+            if (recipientInfo.readiness !== 'ready') {
+                results.push({ department: target.department, missingUnits, status: 'Skipped', reason: recipientInfo.readiness, recipients: 0 });
+                continue;
+            }
+            const mail = buildYokotenReminderMail(topic, target.department, missingUnits, req.user?.name || req.user?.EmployeeName);
+            const recipients = recipientInfo.recipients.map(item => item.email).sort().join(',');
+            const [[duplicate]] = await db.query(
+                `SELECT id FROM Yokoten_EmailOutbox
+                  WHERE EventType = 'MissingResponseReminder'
+                    AND Subject = ? AND Recipients = ? AND DATE(CreatedAt) = CURDATE()
+                  LIMIT 1`,
+                [mail.subject, recipients]
+            );
+            if (duplicate) {
+                results.push({ department: target.department, missingUnits, status: 'Skipped', reason: 'already_sent_today', recipients: recipientInfo.recipients.length });
+                continue;
+            }
+            const [insertResult] = await db.query(
+                `INSERT INTO Yokoten_EmailOutbox
+                 (ResponseID, EventType, Recipients, Subject, Body, HtmlBody, Status)
+                 VALUES (NULL, 'MissingResponseReminder', ?, ?, ?, ?, 'Queued')`,
+                [recipients, mail.subject, mail.text, mail.html]
+            );
+            let status = 'Queued';
+            if (insertResult?.insertId) {
+                try { status = (await sendYokotenOutboxItem(insertResult.insertId)).status; } catch (_) { status = 'Failed'; }
+            }
+            results.push({
+                department: target.department,
+                missingUnits,
+                candidateScope: recipientInfo.candidateScope,
+                status,
+                recipients: recipientInfo.recipients.length,
+            });
+        }
+        const summary = {
+            scopes: targets.length,
+            processed: results.filter(row => row.status !== 'Skipped').length,
+            sent: results.filter(row => row.status === 'Sent').length,
+            queued: results.filter(row => row.status === 'Queued').length,
+            failed: results.filter(row => row.status === 'Failed').length,
+            skipped: results.filter(row => row.status === 'Skipped').length,
+            recipients: results.reduce((sum, row) => sum + Number(row.recipients || 0), 0),
+        };
+        await logAudit(req, {
+            action: 'YOKOTEN_MISSING_RESPONSE_REMINDER_SEND',
+            module: 'yokoten',
+            targetType: 'YokotenTopic',
+            targetId: topicId,
+            detail: `Sent or queued Yokoten reminders for ${summary.processed} incomplete Department scope(s)`,
+            metadata: { requestedDepartments, summary },
+            statusCode: 200,
+        });
+        res.json({ success: true, message: `Reminder processed for ${summary.processed} Department scope(s).`, data: { summary, results, smtpConfigured: smtpConfigured() } });
+    } catch (err) {
+        console.error('Yokoten reminder send error:', err);
+        res.status(500).json({ success: false, message: err.message });
+    }
+});
+
 router.get('/topics', async (req, res) => {
     try {
         await ensureTables();
@@ -556,17 +745,20 @@ router.get('/topics', async (req, res) => {
         const [topicRows] = await db.query(
             `SELECT * FROM YokotenTopics WHERE IsActive = 1 ORDER BY DateIssued DESC`
         );
-        const isAdminUser = ['admin', 'super_admin'].includes(String(req.user.role || req.user.Role || '').toLowerCase());
+        const isAdminUser = isAdminRole(req.user.role || req.user.Role);
         const topics = topicRows
             .map(normalizeTopicRow)
             .filter(t => isAdminUser || isDeptTargeted(t, userDept));
 
         // Dept response for caller's department (exclude soft-deleted)
-        const [deptResponses] = await db.query(
-            `SELECT r.* FROM YokotenResponses r
+        const [deptResponseRows] = await db.query(
+            `SELECT r.*, submitter.Role AS SubmitterRole
+             FROM YokotenResponses r
+             LEFT JOIN Employees submitter ON submitter.EmployeeID = r.EmployeeID
              WHERE r.Department = ? AND (r.IsDeleted IS NULL OR r.IsDeleted = 0)`,
             [userDept]
         );
+        const deptResponses = deptResponseRows.map(row => responseForViewer(row, isAdminUser));
         const deptMap = new Map(deptResponses.map(r => [r.YokotenID, r]));
 
         // Files for each dept response
@@ -623,12 +815,12 @@ router.get('/dept-completion', async (req, res) => {
         const canSeeDetails = String(req.user?.role || req.user?.Role || '').toLowerCase() === 'admin';
 
         const [topicRows] = await db.query(
-            `SELECT YokotenID, Title, TopicDescription, RiskLevel, Category, Deadline, TargetDepts, TargetUnits
+            `SELECT YokotenID, Title, TopicDescription, RiskLevel, Category, DateIssued, Deadline, TargetDepts, TargetUnits
              FROM YokotenTopics WHERE IsActive = 1 ORDER BY DateIssued DESC`
         );
         const topics = topicRows.map(normalizeTopicRow);
-
         const [depts] = await db.query(`SELECT Name FROM Master_Departments ORDER BY Name ASC`);
+        const masterUnits = await getMasterSafetyUnitsWithDepartment();
 
         // All responses + files for active topics (exclude soft-deleted)
         const [responses] = await db.query(
@@ -646,14 +838,24 @@ router.get('/dept-completion', async (req, res) => {
 
         const deptSummary = depts.map(d => {
             const dept = d.Name;
-            let respondedCount = 0, pendingApproval = 0, rejected = 0;
+            let respondedCount = 0, recordedCount = 0, pendingApproval = 0, rejected = 0, unitCoveragePending = 0;
             let lastResponse = null;
 
             const topicBreakdown = topics.filter(t => isDeptTargeted(t, dept)).map(t => {
                 const key  = `${dept}::${t.YokotenID}`;
                 const resp = lookup.get(key) || null;
+                const unit = resp?.EffectiveSafetyUnit || resp?.SafetyUnit || null;
+                const coverage = buildUnitCoverage({
+                    department: dept,
+                    topicUnits: parseJson(t.TargetUnits),
+                    responseUnits: parseSafetyUnitList(unit),
+                    responseExists: !!resp,
+                    masterUnits,
+                });
                 if (resp) {
-                    respondedCount++;
+                    recordedCount++;
+                    if (coverage.complete) respondedCount++;
+                    else unitCoveragePending++;
                     if (resp.ApprovalStatus === 'pending')  pendingApproval++;
                     if (resp.ApprovalStatus === 'rejected') rejected++;
                     if (!lastResponse || new Date(resp.ResponseDate) > new Date(lastResponse))
@@ -662,15 +864,22 @@ router.get('/dept-completion', async (req, res) => {
                 return {
                     YokotenID:      t.YokotenID,
                     title:          t.Title || t.TopicDescription,
-                    responded:      !!resp,
+                    responded:      coverage.complete,
+                    responseExists: !!resp,
+                    unitCoverageComplete: coverage.complete,
+                    requiredUnits:  coverage.requiredUnits,
+                    coveredUnits:   coverage.coveredUnits,
+                    missingUnits:   coverage.missingUnits,
+                    requiredUnitCount: coverage.requiredCount,
+                    coveredUnitCount: coverage.coveredCount,
                     isRelated:      resp?.IsRelated || null,
                     approvalStatus: resp?.ApprovalStatus || null,
                     responseCount:  resp ? 1 : 0,
                     fileCount:      resp ? Number(resp.fileCount) : 0,
                     respondedBy:    canSeeDetails ? (resp?.EmployeeName || null) : null,
                     responseDate:   canSeeDetails ? (resp?.ResponseDate || null) : null,
-                    safetyUnit:     resp?.EffectiveSafetyUnit || resp?.SafetyUnit || null,
-                    safetyUnits:    parseSafetyUnitList(resp?.EffectiveSafetyUnit || resp?.SafetyUnit),
+                    safetyUnit:     unit,
+                    safetyUnits:    parseSafetyUnitList(unit),
                 };
             });
 
@@ -678,6 +887,8 @@ router.get('/dept-completion', async (req, res) => {
                 department:    dept,
                 totalTopics:   topicBreakdown.length,
                 respondedCount,
+                recordedCount,
+                unitCoveragePending,
                 pendingApproval,
                 rejected,
                 completionPct: topicBreakdown.length > 0 ? Math.round(respondedCount * 100 / topicBreakdown.length) : 0,
@@ -703,6 +914,7 @@ router.get('/company-overview', async (req, res) => {
         const scopeDepts = cfg.pinnedDepts.length ? cfg.pinnedDepts : cfg.masterDepts;
         const scopeUnits = cfg.pinnedUnits;
         const scopeDeptSet = new Set(scopeDepts);
+        const masterUnits = await getMasterSafetyUnitsWithDepartment();
 
         const [topicRows] = await db.query(
             `SELECT YokotenID, Title, TopicDescription, RiskLevel, Category, Deadline, DateIssued, TargetDepts, TargetUnits
@@ -725,14 +937,10 @@ router.get('/company-overview', async (req, res) => {
              WHERE r.YokotenID IN (SELECT YokotenID FROM YokotenTopics WHERE IsActive = 1)
                AND (r.IsDeleted IS NULL OR r.IsDeleted = 0)`
         );
-        const responseSet = new Set();
+        const responseMap = new Map();
         responses.forEach(r => {
             if (!scopeDeptSet.has(String(r.Department || '').trim())) return;
-            if (scopeUnits.length) {
-                const responseUnits = parseSafetyUnitList(r.EffectiveSafetyUnit);
-                if (responseUnits.length && !responseUnits.some(unit => scopeUnits.includes(unit))) return;
-            }
-            responseSet.add(`${String(r.Department || '').trim()}::${r.YokotenID}`);
+            responseMap.set(`${String(r.Department || '').trim()}::${r.YokotenID}`, r);
         });
 
         const [sharedRows] = await db.query(
@@ -747,7 +955,16 @@ router.get('/company-overview', async (req, res) => {
 
         const deptStats = scopeDepts.map(dept => {
             const assigned = topics.filter(t => isDeptTargeted(t, dept));
-            const responded = assigned.filter(t => responseSet.has(`${dept}::${t.YokotenID}`)).length;
+            const responded = assigned.filter(t => {
+                const row = responseMap.get(`${dept}::${t.YokotenID}`) || null;
+                return buildUnitCoverage({
+                    department: dept,
+                    topicUnits: parseJson(t.TargetUnits),
+                    responseUnits: parseSafetyUnitList(row?.EffectiveSafetyUnit),
+                    responseExists: !!row,
+                    masterUnits,
+                }).complete;
+            }).length;
             return {
                 department: dept,
                 totalTopics: assigned.length,
@@ -758,7 +975,16 @@ router.get('/company-overview', async (req, res) => {
 
         const topicStats = topics.map(t => {
             const targetDepts = scopeDepts.filter(dept => isDeptTargeted(t, dept));
-            const responded = targetDepts.filter(dept => responseSet.has(`${dept}::${t.YokotenID}`)).length;
+            const responded = targetDepts.filter(dept => {
+                const row = responseMap.get(`${dept}::${t.YokotenID}`) || null;
+                return buildUnitCoverage({
+                    department: dept,
+                    topicUnits: parseJson(t.TargetUnits),
+                    responseUnits: parseSafetyUnitList(row?.EffectiveSafetyUnit),
+                    responseExists: !!row,
+                    masterUnits,
+                }).complete;
+            }).length;
             return {
                 yokotenId: t.YokotenID,
                 title: t.Title || t.TopicDescription || '',
@@ -920,15 +1146,17 @@ router.get('/topics/:id/shared-responses', async (req, res) => {
 router.get('/dept-history', async (req, res) => {
     try {
         await ensureTables();
-        const isAdminUser = ['admin', 'super_admin'].includes(String(req.user.role || '').toLowerCase());
+        const isAdminUser = isAdminRole(req.user.role || req.user.Role);
         const requestedDept = String(req.query.department || '').trim();
         const dept = isAdminUser ? requestedDept : req.user.department;
         const { topicId } = req.query;
 
         let sql = `
-            SELECT r.*, t.Title, t.TopicDescription AS TopicTitle, t.RiskLevel, t.Category
+            SELECT r.*, t.Title, t.TopicDescription AS TopicTitle, t.RiskLevel, t.Category,
+                   submitter.Role AS SubmitterRole
             FROM YokotenResponses r
             LEFT JOIN YokotenTopics t ON t.YokotenID = r.YokotenID
+            LEFT JOIN Employees submitter ON submitter.EmployeeID = r.EmployeeID
             WHERE (r.IsDeleted IS NULL OR r.IsDeleted = 0)
         `;
         const params = [];
@@ -952,7 +1180,10 @@ router.get('/dept-history', async (req, res) => {
             });
         }
 
-        const result = rows.map(r => ({ ...r, files: filesMap.get(r.ResponseID) || [] }));
+        const result = rows.map(r => responseForViewer({
+            ...r,
+            files: filesMap.get(r.ResponseID) || [],
+        }, isAdminUser));
         res.json({ success: true, data: result });
     } catch (err) {
         res.status(500).json({ success: false, message: err.message });
@@ -972,6 +1203,7 @@ router.get('/employee-completion', isAdmin, async (req, res) => {
              FROM YokotenTopics WHERE IsActive = 1 ORDER BY DateIssued DESC`
         );
         const topics = topicRows.map(normalizeTopicRow);
+        const masterUnits = await getMasterSafetyUnitsWithDepartment();
 
         const targetedDeptSet = new Set();
         topics.forEach(t => {
@@ -994,13 +1226,30 @@ router.get('/employee-completion', isAdmin, async (req, res) => {
 
         // Dept responses (one per dept per topic, exclude soft-deleted)
         const [responses] = await db.query(
-            `SELECT YokotenID, Department, EmployeeID, IsRelated, ApprovalStatus, ResponseDate
-             FROM YokotenResponses
-             WHERE YokotenID IN (SELECT YokotenID FROM YokotenTopics WHERE IsActive = 1)
-               AND (IsDeleted IS NULL OR IsDeleted = 0)`
+            `SELECT r.YokotenID, r.Department, r.EmployeeID, r.IsRelated, r.ApprovalStatus, r.ResponseDate,
+                    COALESCE(NULLIF(r.SafetyUnit, ''), NULLIF(e.Unit, ''), NULLIF(e.Team, '')) AS EffectiveSafetyUnit
+             FROM YokotenResponses r
+             LEFT JOIN Employees e ON e.EmployeeID = r.EmployeeID
+             WHERE r.YokotenID IN (SELECT YokotenID FROM YokotenTopics WHERE IsActive = 1)
+               AND (r.IsDeleted IS NULL OR r.IsDeleted = 0)`
         );
         const deptLookup = new Map();
         responses.forEach(r => { deptLookup.set(`${r.Department}::${r.YokotenID}`, r); });
+        const coverageLookup = new Map();
+        const getCoverage = (departmentName, topic) => {
+            const key = `${departmentName}::${topic.YokotenID}`;
+            if (coverageLookup.has(key)) return coverageLookup.get(key);
+            const response = deptLookup.get(key) || null;
+            const coverage = buildUnitCoverage({
+                department: departmentName,
+                topicUnits: parseJson(topic.TargetUnits),
+                responseUnits: parseSafetyUnitList(response?.EffectiveSafetyUnit),
+                responseExists: !!response,
+                masterUnits,
+            });
+            coverageLookup.set(key, coverage);
+            return coverage;
+        };
 
         const result = scopedEmployees.map(emp => {
             let respondedCount = 0;
@@ -1009,14 +1258,20 @@ router.get('/employee-completion', isAdmin, async (req, res) => {
                 const key  = `${emp.Department}::${t.YokotenID}`;
                 const resp = deptLookup.get(key) || null;
                 const isDeptResponder = resp?.EmployeeID === emp.EmployeeID;
-                if (resp) respondedCount++;
+                const unitCoverage = getCoverage(emp.Department, t);
+                if (unitCoverage.complete) respondedCount++;
                 return {
                     YokotenID:      t.YokotenID,
                     title:          t.Title || t.TopicDescription,
-                    deptResponded:  !!resp,
+                    deptResponded:  unitCoverage.complete,
+                    responseExists: !!resp,
                     isDeptResponder,
                     isRelated:      resp?.IsRelated || null,
                     approvalStatus: resp?.ApprovalStatus || null,
+                    unitCoverageComplete: unitCoverage.complete,
+                    requiredUnits: unitCoverage.requiredUnits,
+                    coveredUnits: unitCoverage.coveredUnits,
+                    missingUnits: unitCoverage.missingUnits,
                 };
             });
             return {
@@ -1068,7 +1323,7 @@ router.post('/respond', (req, res, next) => {
         const requestUnits = parseSafetyUnitList(safetyUnits, safetyUnit);
         const selectedUnits = isAdminUser
             ? requestUnits
-            : parseSafetyUnitList(user.unit, user.Unit, user.team, user.Team);
+            : (requestUnits.length ? requestUnits : parseSafetyUnitList(user.unit, user.Unit, user.team, user.Team));
         if (false) {
             return res.status(400).json({ success: false, message: 'กรุณาเลือก Safety Unit' });
         }
@@ -1121,7 +1376,8 @@ router.post('/respond', (req, res, next) => {
             return res.status(400).json({ success: false, message: 'Safety Unit is required for this scoped topic.' });
         }
         const targetUnit = selectedUnits.join(', ') || null;
-        const masterUnits = await getMasterSafetyUnitNames();
+        const masterUnitRows = await getMasterSafetyUnitsWithDepartment();
+        const masterUnits = masterUnitRows.map(unit => String(unit.name || unit.Name || '').trim()).filter(Boolean);
         if (!departmentUnitPlan && selectedUnits.some(unit => masterUnits.length && !masterUnits.includes(unit))) {
             await cleanupUploadedFiles(req.files || []);
             return res.status(400).json({ success: false, message: 'Safety Unit ไม่อยู่ใน Master Data' });
@@ -1142,6 +1398,29 @@ router.post('/respond', (req, res, next) => {
         if (related === 'Yes' && files.length === 0) {
             await cleanupUploadedFiles(files);
             return res.status(400).json({ success: false, message: 'กรุณาแนบไฟล์หลักฐานอย่างน้อย 1 ไฟล์ เนื่องจากเลือก "เกี่ยวข้อง"' });
+        }
+
+        const incompleteDepartments = targetDepartments.map(dept => {
+            const unitsForDept = departmentUnitPlan ? (departmentUnitPlan.unitMap[dept] || []) : selectedUnits;
+            const coverage = buildUnitCoverage({
+                department: dept,
+                topicUnits,
+                responseUnits: unitsForDept,
+                responseExists: true,
+                masterUnits: masterUnitRows,
+            });
+            return coverage.complete ? null : { department: dept, missingUnits: coverage.missingUnits };
+        }).filter(Boolean);
+        if (incompleteDepartments.length) {
+            await cleanupUploadedFiles(files);
+            const errors = incompleteDepartments.map(row =>
+                `${row.department}: missing ${row.missingUnits.join(', ')}`
+            );
+            return res.status(400).json({
+                success: false,
+                message: `Safety Unit coverage is incomplete. ${errors.join('; ')}`,
+                errors,
+            });
         }
 
         const approvalStatus = related === 'Yes' ? 'pending' : null;
@@ -1260,7 +1539,6 @@ router.post('/respond', (req, res, next) => {
         } finally {
             connection.release();
         }
-
         for (const staleFile of staleResponseFiles) {
             await deletePhysicalFileIfUnreferenced(staleFile);
         }
@@ -1321,6 +1599,15 @@ router.put('/respond/:id', (req, res, next) => {
         }
 
         const resp = rows[0];
+        const [topicRows] = await db.query(
+            'SELECT * FROM YokotenTopics WHERE YokotenID = ? AND IsActive = 1',
+            [resp.YokotenID]
+        );
+        if (!topicRows.length) {
+            await cleanupUploadedFiles(req.files || []);
+            return res.status(404).json({ success: false, message: 'Topic not found.' });
+        }
+        const topic = normalizeTopicRow(topicRows[0]);
         const wasRejected = resp.ApprovalStatus === 'rejected';
         // Permission: admin OR same department (for rejected responses)
         const isAdminUser = ['admin', 'super_admin'].includes(String(user.role || user.Role || '').toLowerCase());
@@ -1359,14 +1646,40 @@ router.put('/respond/:id', (req, res, next) => {
             : null;
         const actionValue = related === 'Yes' ? (s(correctiveAction) || null) : null;
         const requestUnits = parseSafetyUnitList(safetyUnits, safetyUnit);
-        const selectedUnits = isAdminUser
-            ? requestUnits
-            : parseSafetyUnitList(user.unit, user.Unit, user.team, user.Team);
-        const targetUnit = selectedUnits.join(', ') || null;
+        const hasUnitInput = Object.prototype.hasOwnProperty.call(req.body || {}, 'safetyUnits')
+            || Object.prototype.hasOwnProperty.call(req.body || {}, 'safetyUnit');
+        const selectedUnits = hasUnitInput ? requestUnits : parseSafetyUnitList(resp.SafetyUnit);
+        const masterUnitRows = await getMasterSafetyUnitsWithDepartment();
+        const plan = buildDepartmentUnitPlan({
+            departments: [resp.Department],
+            departmentUnits: { [resp.Department]: selectedUnits },
+            topicUnits: parseJson(topic.TargetUnits),
+            masterUnits: masterUnitRows,
+        });
+        const coverage = buildUnitCoverage({
+            department: resp.Department,
+            topicUnits: parseJson(topic.TargetUnits),
+            responseUnits: plan.unitMap[resp.Department] || [],
+            responseExists: true,
+            masterUnits: masterUnitRows,
+        });
+        if (!plan.ok || !coverage.complete) {
+            await cleanupUploadedFiles(files);
+            const errors = [...plan.errors];
+            if (!coverage.complete && coverage.missingUnits.length) {
+                errors.push(`Missing Safety Units: ${coverage.missingUnits.join(', ')}`);
+            }
+            return res.status(400).json({
+                success: false,
+                message: `Safety Unit coverage is incomplete. ${errors.join('; ')}`,
+                errors,
+            });
+        }
+        const targetUnit = (plan.unitMap[resp.Department] || []).join(', ') || null;
 
         await db.query(
             `UPDATE YokotenResponses
-             SET SafetyUnit=COALESCE(?, SafetyUnit), IsRelated=?, Comment=?, CorrectiveAction=?, ApprovalStatus=?,
+             SET SafetyUnit=?, IsRelated=?, Comment=?, CorrectiveAction=?, ApprovalStatus=?,
                  ApprovalComment=?, ApprovedBy=?, ApprovedAt=?
              WHERE ResponseID=?`,
             [

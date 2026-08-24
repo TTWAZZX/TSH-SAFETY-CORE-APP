@@ -1885,6 +1885,15 @@ app.post('/api/employees', authenticateToken, isAdmin, async (req, res) => {
                 Role: ['Admin', 'User', 'Viewer'].includes(Role) ? Role : 'User',
             },
         });
+        await logAudit(req, {
+            action: 'CREATE_EMPLOYEE',
+            module: 'admin',
+            targetType: 'Employee',
+            targetId: result.employee.EmployeeID,
+            detail: `Source: manual_legacy; Role: ${result.employee.Role || 'User'}`,
+            metadata: { source: 'manual_legacy' },
+            statusCode: 200,
+        });
         res.json({ success: true, message: 'เพิ่มพนักงานสำเร็จ', onboardingStatus: result.status });
     } catch (err) {
         sendCrossPathProfileError(res, err, 'ไม่สามารถเพิ่มพนักงานได้');
@@ -1953,7 +1962,18 @@ app.post('/api/admin/employees/import', authenticateToken, isAdmin, async (req, 
     try {
         await ensureEmployeeCompanyEmailColumn(connection);
         await connection.beginTransaction();
+        let addedCount = 0;
+        let duplicateCount = 0;
+        const seenEmployeeIds = new Set();
+        const addedEmployees = [];
         for (const [rowIndex, emp] of data.entries()) {
+            const employeeId = String(emp.EmployeeID ?? '').trim();
+            const normalizedIdKey = employeeId.toLowerCase();
+            if (normalizedIdKey && seenEmployeeIds.has(normalizedIdKey)) {
+                duplicateCount++;
+                continue;
+            }
+            if (normalizedIdKey) seenEmployeeIds.add(normalizedIdKey);
             const position = emp.Position || emp.Team || '';
             const role = allowedRoles.includes(emp.Role) ? emp.Role : 'User';
             const emailCheck = validateCompanyEmail(emp.CompanyEmail || emp.Email || '');
@@ -1964,10 +1984,10 @@ app.post('/api/admin/employees/import', authenticateToken, isAdmin, async (req, 
                 throw error;
             }
             try {
-                await writeEmployeeProfileWithinTransaction({
+                const write = await writeEmployeeProfileWithinTransaction({
                     connection,
-                    operation: CROSS_PATH_OPERATION.UPSERT,
-                    employeeId: emp.EmployeeID,
+                    operation: CROSS_PATH_OPERATION.CREATE,
+                    employeeId,
                     profilePayload: {
                         EmployeeName: typeof emp.EmployeeName === 'string' ? emp.EmployeeName : '',
                         Department: typeof emp.Department === 'string' ? emp.Department : '',
@@ -1975,18 +1995,42 @@ app.post('/api/admin/employees/import', authenticateToken, isAdmin, async (req, 
                         Position: typeof position === 'string' ? position : '',
                     },
                     protectedFields: {
+                        Team: typeof emp.Team === 'string' ? emp.Team.trim() : '',
                         CompanyEmail: emailCheck.email,
                         Role: role,
                     },
                 });
+                addedCount++;
+                addedEmployees.push(write.employee);
             } catch (error) {
+                if (error instanceof ProfileValidationError && error.code === 'EMPLOYEE_ALREADY_EXISTS') {
+                    duplicateCount++;
+                    continue;
+                }
                 error.importRow = rowIndex + 1;
                 error.employeeId = String(emp.EmployeeID ?? '');
                 throw error;
             }
         }
         await connection.commit();
-        res.json({ success: true, message: `Imported ${data.length} rows` });
+        for (const employee of addedEmployees) {
+            await logAudit(req, {
+                action: 'CREATE_EMPLOYEE',
+                module: 'admin',
+                targetType: 'Employee',
+                targetId: employee.EmployeeID,
+                detail: `Source: import_json; Role: ${employee.Role || 'User'}`,
+                metadata: { source: 'import_json' },
+                statusCode: 200,
+            });
+        }
+        res.json({
+            success: true,
+            message: `Added ${addedCount} new employees; skipped ${duplicateCount} duplicates`,
+            addedCount,
+            duplicateCount,
+            successCount: addedCount,
+        });
     } catch (err) {
         await connection.rollback();
         if (err instanceof ProfileValidationError) {

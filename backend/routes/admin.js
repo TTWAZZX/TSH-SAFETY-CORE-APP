@@ -1471,12 +1471,61 @@ router.post('/registration-requests/:id/reject', async (req, res) => {
 router.get('/employees', async (_req, res) => {
     try {
         await ensureEmployeeCompanyEmailColumn(db);
+        await ensureAuditTable();
         const [rows] = await db.query(
-            'SELECT EmployeeID, EmployeeName, Department, Unit, Team, Position, CompanyEmail, Role FROM Employees ORDER BY Department, EmployeeName'
+            `SELECT e.EmployeeID,e.EmployeeName,e.Department,e.Unit,e.Team,e.Position,e.CompanyEmail,e.Role,
+                    created.ActionTime AS CreatedAt,
+                    CASE
+                        WHEN created.id IS NULL THEN NULL
+                        WHEN LOWER(COALESCE(created.Path,'')) LIKE '%/import%'
+                          OR LOWER(COALESCE(created.Detail,'')) LIKE '%source: import%' THEN 'import'
+                        ELSE 'manual'
+                    END AS CreationSource
+             FROM Employees e
+             LEFT JOIN (
+                 SELECT l.id,l.ActionTime,l.Path,l.Detail,l.TargetID
+                 FROM Admin_AuditLogs l
+                 INNER JOIN (
+                     SELECT MAX(id) AS AuditID
+                     FROM Admin_AuditLogs
+                     WHERE Action='CREATE_EMPLOYEE'
+                       AND COALESCE(TRIM(TargetID),'')<>''
+                     GROUP BY LOWER(TRIM(TargetID))
+                 ) latest ON latest.AuditID=l.id
+             ) created ON LOWER(TRIM(created.TargetID))=LOWER(TRIM(e.EmployeeID))
+             ORDER BY e.Department,e.EmployeeName`
         );
         res.json({ success: true, data: rows });
     } catch (err) {
         res.status(500).json({ success: false, message: err.message });
+    }
+});
+
+// GET /admin/employee/recent-additions — latest successful Employee Master creates
+router.get('/employee/recent-additions', async (req, res) => {
+    const limit = Math.max(1, Math.min(20, Number.parseInt(req.query.limit, 10) || 5));
+    try {
+        await ensureAuditTable();
+        const [rows] = await db.query(
+            `SELECT l.id AS AuditID,l.ActionTime,l.AdminID,l.AdminName,l.Path,l.Detail,l.TargetID AS EmployeeID,
+                    e.EmployeeName,e.Department,e.Unit,e.Position,e.Role,
+                    CASE
+                        WHEN LOWER(COALESCE(l.Path,'')) LIKE '%/import%'
+                          OR LOWER(COALESCE(l.Detail,'')) LIKE '%source: import%' THEN 'import'
+                        ELSE 'manual'
+                    END AS Source
+             FROM Admin_AuditLogs l
+             INNER JOIN Employees e
+                ON LOWER(TRIM(e.EmployeeID))=LOWER(TRIM(l.TargetID))
+             WHERE l.Action='CREATE_EMPLOYEE'
+               AND COALESCE(TRIM(l.TargetID),'')<>''
+             ORDER BY l.ActionTime DESC,l.id DESC
+             LIMIT ?`,
+            [limit]
+        );
+        res.json({ success: true, data: rows });
+    } catch (err) {
+        res.status(500).json({ success: false, message: 'Unable to load recent employee additions.' });
     }
 });
 
@@ -1611,16 +1660,18 @@ router.post('/employee/:id/reset-password', async (req, res) => {
 router.get('/employee/import-template-data', async (_req, res) => {
     try {
         await ensureEmployeeCompanyEmailColumn(db);
-        const [[depts], [positions], [units]] = await Promise.all([
+        const [[depts], [positions], [units], [teams]] = await Promise.all([
             db.query('SELECT Name FROM Master_Departments ORDER BY Name ASC'),
             db.query('SELECT Name FROM Master_Positions ORDER BY Name ASC'),
             db.query('SELECT name FROM Master_SafetyUnits ORDER BY name ASC'),
+            db.query('SELECT Name FROM Master_Teams ORDER BY Name ASC'),
         ]);
         res.json({
             success: true,
             departments: depts.map(r => r.Name),
             positions:   positions.map(r => r.Name),
             units:       units.map(r => r.name),
+            teams:       teams.map(r => r.Name),
             roles:       ALLOWED_ROLES,
         });
     } catch (err) {
@@ -1641,9 +1692,12 @@ router.post('/employee/import', upload.single('file'), async (req, res) => {
             return res.status(400).json({ success: false, message: 'ไฟล์ไม่มีข้อมูล' });
         }
 
-        let successCount = 0;
-        let errorCount   = 0;
-        const details    = [];   // per-row result for frontend
+        let addedCount     = 0;
+        let duplicateCount = 0;
+        let errorCount     = 0;
+        const details      = [];   // per-row result for frontend
+        const seenEmployeeIds = new Set();
+        const addedEmployees = [];
 
         for (const [rowIndex, row] of data.entries()) {
             const id   = String(row['EmployeeID'] || row['ID']   || row['รหัสพนักงาน'] || '').trim();
@@ -1651,6 +1705,7 @@ router.post('/employee/import', upload.single('file'), async (req, res) => {
             const dept = String(row['Department']   || row['Dept'] || row['แผนก']   || '').trim();
             const unit = String(row['Unit']         || row['หน่วย']                 || '').trim();
             const pos  = String(row['Position']     || row['ตำแหน่ง']               || '').trim();
+            const team = String(row['Team']         || row['ทีม']                   || '').trim();
             const rawRole = String(row['Role'] || row['สิทธิ์'] || '').trim();
             const companyEmail = String(row['CompanyEmail'] || row['Company Email'] || row['Email'] || row['อีเมลบริษัท'] || '').trim();
             const role    = ALLOWED_ROLES.includes(rawRole) ? rawRole : 'User';
@@ -1660,6 +1715,21 @@ router.post('/employee/import', upload.single('file'), async (req, res) => {
                 errorCount++;
                 continue;
             }
+
+            const normalizedIdKey = id.toLowerCase();
+            if (seenEmployeeIds.has(normalizedIdKey)) {
+                duplicateCount++;
+                details.push({
+                    row: rowIndex + 2,
+                    id,
+                    name,
+                    status: 'duplicate',
+                    code: 'DUPLICATE_EMPLOYEE_ID_IN_FILE',
+                    reason: 'EmployeeID ซ้ำภายในไฟล์ จึงข้ามรายการนี้',
+                });
+                continue;
+            }
+            seenEmployeeIds.add(normalizedIdKey);
 
             const warnings = [];
             if (rawRole && !ALLOWED_ROLES.includes(rawRole)) warnings.push(`Role "${rawRole}" ไม่ถูกต้อง → ใช้ User`);
@@ -1676,7 +1746,7 @@ router.post('/employee/import', upload.single('file'), async (req, res) => {
                 connection = await db.getConnection();
                 const write = await executeEmployeeProfileWrite({
                     connection,
-                    operation: CROSS_PATH_OPERATION.UPSERT,
+                    operation: CROSS_PATH_OPERATION.CREATE,
                     employeeId: id,
                     profilePayload: {
                         EmployeeName: name,
@@ -1685,11 +1755,13 @@ router.post('/employee/import', upload.single('file'), async (req, res) => {
                         Position: pos,
                     },
                     protectedFields: {
+                        Team: team,
                         CompanyEmail: emailCheck.email,
                         Role: role,
                     },
                 });
-                successCount++;
+                addedCount++;
+                addedEmployees.push(write.employee);
                 details.push({
                     row: rowIndex + 2,
                     id,
@@ -1700,6 +1772,18 @@ router.post('/employee/import', upload.single('file'), async (req, res) => {
                     onboardingStatus: write.status,
                 });
             } catch (e) {
+                if (e instanceof ProfileValidationError && e.code === 'EMPLOYEE_ALREADY_EXISTS') {
+                    duplicateCount++;
+                    details.push({
+                        row: rowIndex + 2,
+                        id,
+                        name,
+                        status: 'duplicate',
+                        code: e.code,
+                        reason: 'EmployeeID นี้มีอยู่ในระบบแล้ว ระบบไม่ได้แก้ไขข้อมูลเดิม',
+                    });
+                    continue;
+                }
                 errorCount++;
                 details.push({
                     row: rowIndex + 2,
@@ -1714,11 +1798,22 @@ router.post('/employee/import', upload.single('file'), async (req, res) => {
             }
         }
 
-        await auditLog(req, 'IMPORT_EMPLOYEES', 'Employee', null, `สำเร็จ ${successCount} / ล้มเหลว ${errorCount}`);
+        for (const employee of addedEmployees) {
+            await auditLog(
+                req,
+                'CREATE_EMPLOYEE',
+                'Employee',
+                employee.EmployeeID,
+                `Source: import_excel; Role: ${employee.Role || 'User'}`
+            );
+        }
+        await auditLog(req, 'IMPORT_EMPLOYEES', 'Employee', null, `เพิ่มใหม่ ${addedCount} / ข้ามซ้ำ ${duplicateCount} / ล้มเหลว ${errorCount}`);
         res.json({
             success: true,
-            message: `นำเข้าสำเร็จ ${successCount} รายการ (ล้มเหลว ${errorCount})`,
-            successCount,
+            message: `เพิ่มพนักงานใหม่ ${addedCount} รายการ (ข้ามรายการซ้ำ ${duplicateCount}, ล้มเหลว ${errorCount})`,
+            addedCount,
+            duplicateCount,
+            successCount: addedCount,
             errorCount,
             warnCount: details.filter(d => d.status === 'warn').length,
             details,

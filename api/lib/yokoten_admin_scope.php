@@ -214,3 +214,35 @@ function yokoten_scope_build_department_unit_plan(array $input): array
         'aliases' => $scope['aliases'],
     ];
 }
+
+function yokoten_scope_build_unit_coverage(array $input): array
+{
+    $departmentKey = yokoten_scope_normalize($input['department'] ?? '');
+    $topicScope = yokoten_scope_resolve_topic_units(array_values($input['topicUnits'] ?? []), array_values($input['masterUnits'] ?? []));
+    $responseScope = yokoten_scope_resolve_topic_units(array_values($input['responseUnits'] ?? []), array_values($input['masterUnits'] ?? []));
+    $requiredUnits = array_values(array_map('yokoten_scope_unit_name', array_filter(
+        $topicScope['units'],
+        static fn(array $unit): bool => yokoten_scope_normalize(yokoten_scope_unit_department($unit)) === $departmentKey
+    )));
+    $selectedUnits = array_values(array_map('yokoten_scope_unit_name', array_filter(
+        $responseScope['units'],
+        static fn(array $unit): bool => yokoten_scope_normalize(yokoten_scope_unit_department($unit)) === $departmentKey
+    )));
+    $selectedKeys = array_fill_keys(array_map('yokoten_scope_normalize', $selectedUnits), true);
+    $coveredUnits = array_values(array_filter($requiredUnits, static fn(string $unit): bool => isset($selectedKeys[yokoten_scope_normalize($unit)])));
+    $missingUnits = array_values(array_filter($requiredUnits, static fn(string $unit): bool => !isset($selectedKeys[yokoten_scope_normalize($unit)])));
+    $responseExists = !empty($input['responseExists']);
+    return [
+        'responseExists' => $responseExists,
+        'requiredUnits' => $requiredUnits,
+        'selectedUnits' => $selectedUnits,
+        'coveredUnits' => $coveredUnits,
+        'missingUnits' => $missingUnits,
+        'requiredCount' => count($requiredUnits),
+        'coveredCount' => count($coveredUnits),
+        'complete' => $responseExists && !$missingUnits && !$topicScope['unresolved'],
+        'unresolvedTopicUnits' => $topicScope['unresolved'],
+        'unresolvedResponseUnits' => $responseScope['unresolved'],
+        'aliases' => array_merge($topicScope['aliases'], $responseScope['aliases']),
+    ];
+}

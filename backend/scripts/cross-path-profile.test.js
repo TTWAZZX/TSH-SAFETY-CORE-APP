@@ -303,6 +303,7 @@ function assertIntegrationContracts() {
     const service = read('backend/services/employee-profile-write.js');
     const server = read('backend/server.js');
     const admin = read('backend/routes/admin.js');
+    const adminPage = read('public/js/pages/admin.js');
     const foundation = read('api/handlers/foundation.php');
     const phpAdmin = read('api/handlers/admin_phase8.php');
     assert.ok(service.includes('FOR UPDATE'));
@@ -314,6 +315,48 @@ function assertIntegrationContracts() {
     for (const source of [server, admin, foundation, phpAdmin]) {
         assert.ok(source.includes('CROSS_PATH_'));
     }
+
+    const nodeLegacyImport = server.slice(
+        server.indexOf("app.post('/api/admin/employees/import'"),
+        server.indexOf('app.use((err, req, res, next)')
+    );
+    const nodeExcelImport = admin.slice(
+        admin.indexOf("router.post('/employee/import'"),
+        admin.indexOf("router.get('/email-requirement-rules'")
+    );
+    const phpLegacyImport = foundation.slice(
+        foundation.indexOf("$path === '/admin/employees/import'"),
+        foundation.indexOf("$path === '/admin/employee/import'")
+    );
+    const phpExcelImport = foundation.slice(
+        foundation.indexOf("$path === '/admin/employee/import'"),
+        foundation.indexOf("route_params($path, '/admin/employee/:id')")
+    );
+    for (const importSource of [nodeLegacyImport, nodeExcelImport]) {
+        assert.ok(importSource.includes('CROSS_PATH_OPERATION.CREATE'));
+        assert.ok(!importSource.includes('CROSS_PATH_OPERATION.UPSERT'));
+        assert.ok(importSource.includes('duplicateCount'));
+    }
+    for (const importSource of [phpLegacyImport, phpExcelImport]) {
+        assert.ok(importSource.includes('CROSS_PATH_CREATE'));
+        assert.ok(!importSource.includes('CROSS_PATH_UPSERT'));
+        assert.ok(importSource.includes('$duplicateCount'));
+    }
+    assert.ok(admin.includes("router.get('/employee/recent-additions'"));
+    assert.ok(admin.includes("l.Action='CREATE_EMPLOYEE'"));
+    assert.ok(nodeExcelImport.includes("'CREATE_EMPLOYEE'"));
+    assert.ok(foundation.includes("$path === '/admin/employee/recent-additions'"));
+    assert.ok(foundation.includes("auth_audit_log('CREATE_EMPLOYEE'"));
+    for (const employeeListSource of [admin, foundation]) {
+        assert.ok(employeeListSource.includes('created.ActionTime AS CreatedAt'));
+        assert.ok(employeeListSource.includes('CreationSource'));
+        assert.ok(employeeListSource.includes("Action='CREATE_EMPLOYEE'"));
+    }
+    assert.ok(adminPage.includes("API.get('/admin/employees')"));
+    assert.ok(adminPage.includes("value=\"created_desc\""));
+    assert.ok(adminPage.includes('function _empCompareIds'));
+    assert.ok(adminPage.includes('function _empSortRows'));
+    assert.ok(adminPage.includes("_empRecentSourceFilter"));
     for (const historicalTable of ['patrol_', 'cccf_', 'ky_', 'fourm_', 'hiyari', 'yokoten']) {
         assert.ok(!service.toLowerCase().includes(`update ${historicalTable}`));
     }

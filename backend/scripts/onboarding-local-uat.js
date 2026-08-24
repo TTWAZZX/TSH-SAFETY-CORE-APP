@@ -338,6 +338,27 @@ async function runBackendSuite(kind, token, userToken, registrationPosition) {
         );
     });
 
+    await check(`${kind}: manual duplicate create preserves existing employee`, async () => {
+        const response = await apiRequest(kind, '/admin/employee/create', {
+            method: 'POST', token,
+            body: {
+                EmployeeID: createId,
+                EmployeeName: 'Must Not Replace Manual Existing',
+                Department: masters.department,
+                Unit: masters.unit,
+                Position: masters.position,
+                Role: 'Admin',
+            },
+        });
+        assertStatus(response, 409, `${kind} duplicate manual create`);
+        assert.strictEqual(response.json?.code, 'EMPLOYEE_ALREADY_EXISTS');
+        const [[row]] = await db.query('SELECT EmployeeName,Role FROM employees WHERE EmployeeID=?', [createId]);
+        assert.deepStrictEqual(
+            { EmployeeName: row.EmployeeName, Role: row.Role },
+            { EmployeeName: `Local UAT ${kind} Create`, Role: 'User' }
+        );
+    });
+
     await check(`${kind}: invalid department fails closed`, async () => {
         const response = await apiRequest(kind, '/admin/employee/create', {
             method: 'POST', token,
@@ -409,6 +430,68 @@ async function runBackendSuite(kind, token, userToken, registrationPosition) {
         assert.strictEqual(Number(response.json?.errorCount), 1);
         const [created] = await db.query('SELECT EmployeeID FROM employees WHERE EmployeeID IN (?,?) ORDER BY EmployeeID', [partialGood, partialBad]);
         assert.deepStrictEqual(created.map(row => row.EmployeeID), [partialGood]);
+    });
+
+    await check(`${kind}: create-only import preserves existing employee and skips file duplicates`, async () => {
+        let response;
+        const rows = [
+            { EmployeeID: partialGood, EmployeeName: 'Must Not Replace Existing', Department: masters.department, Unit: masters.unit, Position: masters.position, Role: 'Admin' },
+            { EmployeeID: atomicGood, EmployeeName: 'Create Only First', Department: masters.department, Unit: masters.unit, Position: masters.position, Role: 'User' },
+            { EmployeeID: atomicGood, EmployeeName: 'Must Skip Duplicate In File', Department: masters.department, Unit: masters.unit, Position: masters.position, Role: 'Viewer' },
+        ];
+        if (isNode) {
+            const sheet = xlsx.utils.json_to_sheet(rows);
+            const workbook = xlsx.utils.book_new();
+            xlsx.utils.book_append_sheet(workbook, sheet, 'Employees');
+            const buffer = xlsx.write(workbook, { type: 'buffer', bookType: 'xlsx' });
+            const form = new FormData();
+            form.append('file', new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }), 'create-only-uat.xlsx');
+            response = await apiRequest(kind, '/admin/employee/import', { method: 'POST', token, form });
+        } else {
+            const form = new FormData();
+            form.append('rows', JSON.stringify(rows));
+            response = await apiRequest(kind, '/admin/employee/import', { method: 'POST', token, form });
+        }
+        assertStatus(response, 200, `${kind} create-only import`);
+        assert.strictEqual(Number(response.json?.addedCount), 1);
+        assert.strictEqual(Number(response.json?.duplicateCount), 2);
+        assert.strictEqual(Number(response.json?.errorCount), 0);
+
+        const [[existing]] = await db.query('SELECT EmployeeName,Role FROM employees WHERE EmployeeID=?', [partialGood]);
+        assert.deepStrictEqual(
+            { EmployeeName: existing.EmployeeName, Role: existing.Role },
+            { EmployeeName: 'Partial Good', Role: 'User' }
+        );
+        const [[created]] = await db.query('SELECT EmployeeName,Role FROM employees WHERE EmployeeID=?', [atomicGood]);
+        assert.deepStrictEqual(
+            { EmployeeName: created.EmployeeName, Role: created.Role },
+            { EmployeeName: 'Create Only First', Role: 'User' }
+        );
+    });
+
+    await check(`${kind}: recent employee additions show manual and import sources`, async () => {
+        const response = await apiRequest(kind, '/admin/employee/recent-additions', { token });
+        assertStatus(response, 200, `${kind} recent employee additions`);
+        const rows = Array.isArray(response.json?.data) ? response.json.data : [];
+        const manual = rows.find(row => String(row.EmployeeID) === createId);
+        const imported = rows.find(row => String(row.EmployeeID) === atomicGood);
+        assert(manual, `${kind} manual employee missing from recent additions`);
+        assert(imported, `${kind} imported employee missing from recent additions`);
+        assert.strictEqual(manual.Source, 'manual');
+        assert.strictEqual(imported.Source, 'import');
+        assert.strictEqual(imported.EmployeeName, 'Create Only First');
+    });
+
+    await check(`${kind}: Admin employee list includes creation time and source metadata`, async () => {
+        const response = await apiRequest(kind, '/admin/employees', { token });
+        assertStatus(response, 200, `${kind} Admin employees metadata`);
+        const rows = Array.isArray(response.json?.data) ? response.json.data : [];
+        const manual = rows.find(row => String(row.EmployeeID) === createId);
+        const imported = rows.find(row => String(row.EmployeeID) === atomicGood);
+        assert(manual?.CreatedAt, `${kind} manual employee creation time missing`);
+        assert(imported?.CreatedAt, `${kind} imported employee creation time missing`);
+        assert.strictEqual(manual.CreationSource, 'manual');
+        assert.strictEqual(imported.CreationSource, 'import');
     });
 
     await check(`${kind}: password then Safety Unit continuation`, async () => {

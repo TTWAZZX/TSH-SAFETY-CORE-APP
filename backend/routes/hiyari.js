@@ -616,7 +616,15 @@ router.get('/stats', async (req, res) => {
             params.push(requester, requester);
         }
         const [reports] = await db.query(`SELECT *, RiskRank AS \`Rank\` FROM HiyariReports WHERE ${where} ORDER BY ReportDate DESC`, params);
-        const [assignments] = await db.query('SELECT EmployeeID,Department FROM Hiyari_Assignments');
+        const [assignments] = await db.query(`
+            SELECT a.EmployeeID, COALESCE(e.Department, a.Department) AS Department
+            FROM Hiyari_Assignments a
+            LEFT JOIN Employees e ON e.EmployeeID = a.EmployeeID
+        `);
+        const [annualSubmissions] = await db.query(
+            'SELECT DISTINCT ReporterID FROM HiyariReports WHERE DeletedAt IS NULL AND YEAR(ReportDate) = ?',
+            [year]
+        );
         const days = value => Math.max(0, Math.floor((Date.now() - new Date(value).getTime()) / 86400000));
         const slaDays = r => ({ A:7, B:15, C:30 }[r.Rank] || 30);
         const active = reports.filter(r => r.Status !== 'Closed');
@@ -627,9 +635,20 @@ router.get('/stats', async (req, res) => {
         const monthly = Array.from({length:12},(_,i)=>({month:i+1,count:reports.filter(r=>new Date(r.ReportDate).getMonth()===i).length})).filter(r=>r.count);
         const stopRankMatrix=[]; for(let s=1;s<=6;s++) for(const rk of ['A','B','C']) stopRankMatrix.push({StopType:s,Rank:rk,count:reports.filter(r=>Number(r.StopType)===s&&r.Rank===rk).length});
         const deptRisk = group('Department','Department').map(d=>{const rows=reports.filter(r=>(r.Department||'Unspecified')===d.Department);const overdue=rows.map(enrich).filter(r=>r.Status!=='Closed'&&r.slaStatus==='overdue').length;return {...d,rankA:rows.filter(r=>r.Rank==='A').length,rankB:rows.filter(r=>r.Rank==='B').length,rankC:rows.filter(r=>r.Rank==='C').length,overdue,score:rows.reduce((n,r)=>n+({A:5,B:3,C:1}[r.Rank]||1),0)+overdue*2};}).sort((a,b)=>b.score-a.score);
-        const submittedIds = new Set(reports.map(r=>String(r.ReporterID||'')));
+        const submittedIds = new Set(annualSubmissions.map(r=>String(r.ReporterID||'').trim().toLowerCase()).filter(Boolean));
         const scopedAssignments = department&&department!=='all' ? assignments.filter(a=>a.Department===department) : assignments;
-        const assignmentCompletion={total:scopedAssignments.length,completed:scopedAssignments.filter(a=>submittedIds.has(String(a.EmployeeID||''))).length};
+        const assignmentByDepartment = Object.values(assignments.reduce((map, assignment) => {
+            const dept = String(assignment.Department || 'ไม่ระบุ').trim() || 'ไม่ระบุ';
+            map[dept] ||= { department: dept, total: 0, completed: 0 };
+            map[dept].total += 1;
+            if (submittedIds.has(String(assignment.EmployeeID || '').trim().toLowerCase())) map[dept].completed += 1;
+            return map;
+        }, {})).sort((a, b) => {
+            const aRate = a.total ? a.completed / a.total : 0;
+            const bRate = b.total ? b.completed / b.total : 0;
+            return aRate - bRate || b.total - a.total || a.department.localeCompare(b.department, 'th');
+        });
+        const assignmentCompletion={total:scopedAssignments.length,completed:scopedAssignments.filter(a=>submittedIds.has(String(a.EmployeeID||'').trim().toLowerCase())).length,byDepartment:assignmentByDepartment};
         assignmentCompletion.pending=Math.max(0,assignmentCompletion.total-assignmentCompletion.completed); assignmentCompletion.rate=assignmentCompletion.total?Math.round(assignmentCompletion.completed*100/assignmentCompletion.total):0;
         const kpi={total:reports.length,open:countBy('Status','Open'),inProgress:countBy('Status','In Progress'),closed:countBy('Status','Closed'),overdueCount:active.map(enrich).filter(r=>r.slaStatus==='overdue').length,nearDueCount:active.map(enrich).filter(r=>r.slaStatus==='near_due').length,pendingReview:countBy('ReviewStatus','PendingReview'),pendingSignedPdf:reports.filter(r=>r.ReviewStatus==='Approved'&&!r.SignedFileUrl).length,rejectedWaitingResubmit:countBy('ReviewStatus','Rejected')};
         res.json({success:true,data:{phase:'dashboard_sla_intelligence',filters:{year,month,department:department||'all',status:status||'all',rank:rank||'all'},kpi,monthly,consequence:group('PotentialConsequence','label'),riskDist:group('RiskLevel','level'),stopDist:group('StopType','StopType'),rankDist:group('Rank','Rank'),deptRank:group('Department','Department').sort((a,b)=>b.count-a.count),areaRank:group('Location','Location').sort((a,b)=>b.count-a.count).slice(0,12),monthlyRank:reports.map(r=>({month:new Date(r.ReportDate).getMonth()+1,Rank:r.Rank})).reduce((a,r)=>{const x=a.find(v=>v.month===r.month&&v.Rank===r.Rank);x?x.count++:a.push({...r,count:1});return a;},[]),monthlyStatus:reports.map(r=>({month:new Date(r.ReportDate).getMonth()+1,Status:r.Status})).reduce((a,r)=>{const x=a.find(v=>v.month===r.month&&v.Status===r.Status);x?x.count++:a.push({...r,count:1});return a;},[]),stopRankMatrix,departmentRiskRanking:deptRisk,assignmentCompletion,actionList:actionList.map(r=>sanitizeHiyariReportForViewer(req,r)),reports:reports.map(r=>sanitizeHiyariReportForViewer(req,r))}});
