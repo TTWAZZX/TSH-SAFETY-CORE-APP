@@ -146,17 +146,27 @@ async function main() {
   try {
     const [[admin]] = await db.query("SELECT EmployeeID,EmployeeName,Department,Unit,Role FROM Employees WHERE LOWER(Role)='admin' ORDER BY EmployeeID LIMIT 1");
     check('admin user available for signed local token', Boolean(admin), {});
+    const [[masterScope]] = await db.query(
+      `SELECT d.Name AS Department,u.name AS Unit
+       FROM master_departments d
+       LEFT JOIN master_safetyunits u ON u.department_id=d.id
+       ORDER BY CASE WHEN u.id IS NULL THEN 1 ELSE 0 END,d.id,u.id
+       LIMIT 1`
+    );
+    check('onboarding-ready Master scope available', Boolean(masterScope?.Department), masterScope || {});
+    const fixtureDepartment = String(masterScope.Department);
+    const fixtureUnit = String(masterScope.Unit || '');
 
     const employees = [
-      [result.created.employeeIds[0], 'Forklift Request E2E User', 'SMOKE', 'SMOKE-REQ', 'Smoke Driver', 'User', `flreq.${stamp}@example.com`],
-      [result.created.employeeIds[1], 'Forklift Renewal E2E User', 'SMOKE', 'SMOKE-REN', 'Smoke Driver', 'User', `flren.${stamp}@example.com`],
-      [result.created.employeeIds[2], 'Forklift SLA E2E User', 'SMOKE', 'SMOKE-SLA', 'Smoke Driver', 'User', `flsla.${stamp}@example.com`],
+      [result.created.employeeIds[0], 'Forklift Request E2E User', fixtureDepartment, fixtureUnit, 'Smoke Driver', 'User', `flreq.${stamp}@example.com`, 'E2E_TOKEN_ONLY', 0],
+      [result.created.employeeIds[1], 'Forklift Renewal E2E User', fixtureDepartment, fixtureUnit, 'Smoke Driver', 'User', `flren.${stamp}@example.com`, 'E2E_TOKEN_ONLY', 0],
+      [result.created.employeeIds[2], 'Forklift SLA E2E User', fixtureDepartment, fixtureUnit, 'Smoke Driver', 'User', `flsla.${stamp}@example.com`, 'E2E_TOKEN_ONLY', 0],
     ];
     for (const row of employees) {
       await db.query(
-        `INSERT INTO Employees(EmployeeID,EmployeeName,Department,Unit,Position,Role,CompanyEmail)
-         VALUES(?,?,?,?,?,?,?)
-         ON DUPLICATE KEY UPDATE EmployeeName=VALUES(EmployeeName),Department=VALUES(Department),Unit=VALUES(Unit),Position=VALUES(Position),Role=VALUES(Role),CompanyEmail=VALUES(CompanyEmail)`,
+        `INSERT INTO Employees(EmployeeID,EmployeeName,Department,Unit,Position,Role,CompanyEmail,Password,MustChangePassword)
+         VALUES(?,?,?,?,?,?,?,?,?)
+         ON DUPLICATE KEY UPDATE EmployeeName=VALUES(EmployeeName),Department=VALUES(Department),Unit=VALUES(Unit),Position=VALUES(Position),Role=VALUES(Role),CompanyEmail=VALUES(CompanyEmail),Password=VALUES(Password),MustChangePassword=VALUES(MustChangePassword)`,
         row
       );
     }
@@ -184,9 +194,9 @@ async function main() {
       return data;
     };
     const adminApi = makeApi(tokenFor({ ...admin, Role: 'Admin' }));
-    const userApi = makeApi(tokenFor({ EmployeeID: result.created.employeeIds[0], EmployeeName: employees[0][1], Department: 'SMOKE', Unit: 'SMOKE-REQ', Role: 'User' }));
-    const renewalUserApi = makeApi(tokenFor({ EmployeeID: result.created.employeeIds[1], EmployeeName: employees[1][1], Department: 'SMOKE', Unit: 'SMOKE-REN', Role: 'User' }));
-    const slaUserApi = makeApi(tokenFor({ EmployeeID: result.created.employeeIds[2], EmployeeName: employees[2][1], Department: 'SMOKE', Unit: 'SMOKE-SLA', Role: 'User' }));
+    const userApi = makeApi(tokenFor({ EmployeeID: result.created.employeeIds[0], EmployeeName: employees[0][1], Department: fixtureDepartment, Unit: fixtureUnit, Role: 'User' }));
+    const renewalUserApi = makeApi(tokenFor({ EmployeeID: result.created.employeeIds[1], EmployeeName: employees[1][1], Department: fixtureDepartment, Unit: fixtureUnit, Role: 'User' }));
+    const slaUserApi = makeApi(tokenFor({ EmployeeID: result.created.employeeIds[2], EmployeeName: employees[2][1], Department: fixtureDepartment, Unit: fixtureUnit, Role: 'User' }));
 
     const types = await adminApi('/forklift/license-types');
     const type = (types.data || []).find(row => row.Code === 'FORKLIFT') || types.data?.[0];
@@ -271,6 +281,20 @@ async function main() {
       }),
     });
     result.created.requestIds.push(renewalDraft.id);
+    const renewalRetry = await renewalUserApi(`/forklift/licenses/${sourceLicense.id}/renewal-request`, {
+      method: 'POST',
+      body: JSON.stringify({
+        NewIssueDate: todayPlus(31),
+        NewExpireDate: todayPlus(396),
+        NewCertificateNo: `REN-NEW-${stamp}`,
+        RenewalNote: `E2E renewal retry ${stamp}`,
+      }),
+    });
+    check('renewal retry reuses the same Draft', renewalRetry.reused === true && Number(renewalRetry.id) === Number(renewalDraft.id), renewalRetry);
+    const renewalFiltered = await renewalUserApi(`/forklift/requests?kind=RENEWAL&sourceLicenseId=${sourceLicense.id}&limit=1`);
+    check('renewal source filter finds the open Draft', Number(renewalFiltered.data?.[0]?.ID) === Number(renewalDraft.id), { count: renewalFiltered.data?.length || 0, firstId: renewalFiltered.data?.[0]?.ID });
+    const [[reuseEvent]] = await db.query("SELECT COUNT(*) AS count FROM forklift_request_events WHERE RequestID=? AND EventType='RENEWAL_DRAFT_REUSED'", [renewalDraft.id]);
+    check('renewal retry records an audit timeline event', Number(reuseEvent.count || 0) === 1, reuseEvent);
     await uploadRequiredDocs(renewalUserApi, renewalDraft.id, 'renewal', { renewal: true });
     await renewalUserApi(`/forklift/requests/${renewalDraft.id}/submit`, { method: 'POST', body: JSON.stringify({}) });
     const renewalApproved = await adminApi(`/forklift/requests/${renewalDraft.id}/approve`, { method: 'POST', body: JSON.stringify({ ReviewNote: 'Renewal approved by E2E smoke' }) });

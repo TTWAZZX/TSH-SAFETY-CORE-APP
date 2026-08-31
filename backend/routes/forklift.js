@@ -1082,6 +1082,12 @@ router.get('/requests', async (req, res) => {
     if (!global) { where.push('(r.EmployeeID=? OR r.RequestedByID=?)'); params.push(userId(req), userId(req)); }
     if (req.query.status && req.query.status !== 'all') { where.push('r.RequestStatus=?'); params.push(clean(req.query.status, 30).toUpperCase()); }
     if (req.query.kind && req.query.kind !== 'all') { where.push('r.RequestKind=?'); params.push(clean(req.query.kind, 20).toUpperCase()); }
+    if (req.query.sourceLicenseId !== undefined) {
+        const sourceLicenseId = Number(req.query.sourceLicenseId);
+        if (!Number.isInteger(sourceLicenseId) || sourceLicenseId <= 0) return res.status(400).json({ success: false, message: 'Invalid source license ID.' });
+        where.push('r.SourceLicenseID=?');
+        params.push(sourceLicenseId);
+    }
     if (String(req.query.overdue || '') === '1') {
         const [[setting]] = await db.query("SELECT SettingValue FROM forklift_settings WHERE SettingKey='request_sla_days' LIMIT 1");
         where.push("r.RequestStatus IN ('SUBMITTED','UNDER_REVIEW','PENDING') AND TIMESTAMPDIFF(DAY,COALESCE(r.SubmittedAt,r.RequestedAt),NOW())>?");
@@ -1135,8 +1141,6 @@ router.post('/licenses/:id/renewal-request', async (req, res) => {
     if (!license) return res.status(404).json({ success: false, message: 'License not found.' });
     const manage = await hasPermission(req, 'FORKLIFT_MANAGE');
     if (!manage && String(license.EmployeeID) !== userId(req)) return res.status(403).json({ success: false, message: 'You can only renew your own license.' });
-    const [[existing]] = await db.query("SELECT ID FROM forklift_license_requests WHERE SourceLicenseID=? AND RequestKind='RENEWAL' AND RequestStatus IN ('DRAFT','RETURNED','SUBMITTED','UNDER_REVIEW','PENDING') LIMIT 1", [license.ID]);
-    if (existing) return res.status(409).json({ success: false, message: 'A renewal request is already open for this license.', id: existing.ID });
     const issue = validDate(req.body.NewIssueDate || req.body.IssueDate);
     const expire = validDate(req.body.NewExpireDate || req.body.ExpireDate);
     if (!issue || !expire || new Date(expire) < new Date(issue)) return res.status(400).json({ success: false, message: 'Invalid renewal dates.' });
@@ -1146,13 +1150,40 @@ router.post('/licenses/:id/renewal-request', async (req, res) => {
     const conn = await db.getConnection();
     try {
         await conn.beginTransaction();
+        await conn.query('SELECT ID FROM forklift_licenses WHERE ID=? FOR UPDATE', [license.ID]);
+        const [[existing]] = await conn.query(
+            "SELECT ID,RequestNo,RequestStatus FROM forklift_license_requests WHERE SourceLicenseID=? AND RequestKind='RENEWAL' AND RequestStatus IN ('DRAFT','RETURNED','SUBMITTED','UNDER_REVIEW','PENDING') ORDER BY FIELD(RequestStatus,'UNDER_REVIEW','SUBMITTED','PENDING','RETURNED','DRAFT'),ID DESC LIMIT 1 FOR UPDATE",
+            [license.ID]
+        );
+        if (existing && !['DRAFT', 'RETURNED'].includes(String(existing.RequestStatus).toUpperCase())) {
+            await conn.rollback();
+            return res.status(409).json({
+                success: false,
+                code: 'RENEWAL_REQUEST_ALREADY_OPEN',
+                message: 'A renewal request is already open for this license.',
+                id: existing.ID,
+                RequestNo: existing.RequestNo,
+                RequestStatus: existing.RequestStatus,
+            });
+        }
+        if (existing) {
+            await conn.query(
+                'UPDATE forklift_license_requests SET LicenseTypeID=?,IssueDate=?,ExpireDate=?,CertificateNo=?,RequestNote=?,EmployeeNameSnapshot=?,DepartmentSnapshot=?,UnitSnapshot=?,PositionSnapshot=? WHERE ID=? AND RequestStatus IN (\'DRAFT\',\'RETURNED\')',
+                [license.LicenseTypeID, issue, expire, clean(req.body.NewCertificateNo || req.body.CertificateNo, 120) || license.CertificateNo || null, req.body.RenewalNote || req.body.Note || null, emp?.EmployeeName || license.EmployeeNameSnapshot, emp?.Department || license.DepartmentSnapshot, emp?.Unit || license.UnitSnapshot, emp?.Position || license.PositionSnapshot, existing.ID]
+            );
+            await syncTypeMap(conn, 'forklift_request_type_map', 'RequestID', existing.ID, typeIds);
+            await requestEvent(conn, req, existing.ID, 'RENEWAL_DRAFT_REUSED', existing.RequestStatus, existing.RequestStatus, `License ${license.LicenseNo || license.ID}`);
+            await conn.commit();
+            await logAudit(req, { action: 'REUSE_RENEWAL_REQUEST_DRAFT', module: 'forklift', targetType: 'forklift_license_request', targetId: existing.ID, metadata: { SourceLicenseID: license.ID, EmployeeID: license.EmployeeID, RequestStatus: existing.RequestStatus }, statusCode: 200 });
+            return res.json({ success: true, id: existing.ID, RequestNo: existing.RequestNo, RequestStatus: existing.RequestStatus, RequestKind: 'RENEWAL', reused: true });
+        }
         const requestNo = await nextNo(conn, 'REQUEST', 'FLR');
         const [insert] = await conn.query("INSERT INTO forklift_license_requests(RequestNo,RequestKind,SourceLicenseID,EmployeeID,LicenseTypeID,IssueDate,ExpireDate,CertificateNo,RequestStatus,RequestNote,EmployeeNameSnapshot,DepartmentSnapshot,UnitSnapshot,PositionSnapshot,RequestedBy,RequestedByID) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)", [requestNo, 'RENEWAL', license.ID, license.EmployeeID, license.LicenseTypeID, issue, expire, clean(req.body.NewCertificateNo || req.body.CertificateNo, 120) || license.CertificateNo || null, 'DRAFT', req.body.RenewalNote || req.body.Note || null, emp?.EmployeeName || license.EmployeeNameSnapshot, emp?.Department || license.DepartmentSnapshot, emp?.Unit || license.UnitSnapshot, emp?.Position || license.PositionSnapshot, userName(req), userId(req)]);
         await syncTypeMap(conn, 'forklift_request_type_map', 'RequestID', insert.insertId, typeIds);
         await requestEvent(conn, req, insert.insertId, 'RENEWAL_DRAFT_CREATED', null, 'DRAFT', `License ${license.LicenseNo || license.ID}`);
         await conn.commit();
         await logAudit(req, { action: 'CREATE_RENEWAL_REQUEST_DRAFT', module: 'forklift', targetType: 'forklift_license_request', targetId: insert.insertId, metadata: { SourceLicenseID: license.ID, EmployeeID: license.EmployeeID }, statusCode: 201 });
-        res.status(201).json({ success: true, id: insert.insertId, RequestNo: requestNo, RequestStatus: 'DRAFT', RequestKind: 'RENEWAL' });
+        res.status(201).json({ success: true, id: insert.insertId, RequestNo: requestNo, RequestStatus: 'DRAFT', RequestKind: 'RENEWAL', reused: false });
     } catch (err) { await conn.rollback(); throw err; } finally { conn.release(); }
 });
 

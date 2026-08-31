@@ -1,5 +1,226 @@
 # TSH Safety Core Activity - Architecture
 
+## BBS Phase 10C-3 Runtime Resilience Boundary
+
+Phase 10C-3 adds a client-only resilience layer to the existing BBS page. Initial data is divided into independent `core`, `community`, `inspectors` and Admin `cards` reads; History, Actions and Analytics keep their own recovery keys. A section failure is captured as UI state instead of rejecting the whole module. If the section has confirmed data from an earlier successful read, that data remains visible below an explicit stale-data warning; otherwise the UI displays only the failure and retry control so an unknown value is never represented as zero.
+
+Retry calls the unchanged section loader and keeps the active workspace. Critical mutation controls use one `WeakSet` operation lock, `aria-busy` and temporary disabling while the established API call is pending. This is a UI guard only: server authorization, idempotency, row versions, transaction behavior and immutable Observation/card rules remain the source of truth. No API, schema, storage or configuration contract changed.
+
+## BBS Phase 10C-2 Mobile And Accessibility Boundary
+
+Phase 10C-2 is a frontend projection over the established BBS contracts. The primary workspace navigation is one semantic tablist with a single labelled tabpanel, roving tab focus and automatic Left/Right/Home/End activation. Client renders preserve the initiating control and scroll position where the workflow stays on the same step; tab and wizard transitions scroll the real `#main-content` container to the new content start.
+
+Module-scoped responsive rules keep phone touch targets at least 44 px, text-entry controls at 16 px, sticky workflow actions above safe areas and both portrait and landscape layouts free of document-level horizontal overflow. Tables remain structurally unchanged but their existing horizontal containers become labelled, keyboard-focusable regions with column scopes.
+
+Observation, Corrective Action and Analytics detail overlays share one dialog lifecycle: `role=dialog`, modal state, focus trap, Escape/backdrop/close handling, background scroll lock, shared visual-viewport overlay registration and trigger-focus restoration. Client validation returns focus to the unchanged required answer/remark/action/evidence field. No API, permission, schema, Master/Pilot configuration, upload location or persisted BBS workflow changed.
+
+## Forklift Renewal Retry Recovery
+
+`POST /api/forklift/licenses/:id/renewal-request` is idempotent at the business-workflow level. Node and PHP lock the source license, inspect the current open renewal, and update the same `DRAFT` or `RETURNED` record when a prior upload or submit attempt was interrupted. The request number, already-uploaded documents and event history remain intact; supplied files continue through the established per-document replacement endpoint.
+
+Processing states (`SUBMITTED`, `PENDING`, `UNDER_REVIEW`) still fail closed with `409 RENEWAL_REQUEST_ALREADY_OPEN`, now including the existing request ID, number and status. `GET /api/forklift/requests?kind=RENEWAL&sourceLicenseId=:id` applies the existing self/Admin scope before returning the matching request. The SPA uses that route to resume editable work or open the in-progress detail, including requested dates, certificate and note. No schema or upload-path change is involved.
+
+## BBS Phase 10C-1 Workflow Reliability
+
+The SPA now treats server Drafts as durable workflow records. Opening the Start workspace loads the signed-in observer's Draft list independently from the selected History view. Leaving a single or batch form saves first and cancels navigation if persistence fails. Starting the same observed employee resumes the existing Draft, while the established server idempotency key remains the final duplicate guard. Submitted Observation immutability, per-person batch records and server authorization are unchanged.
+
+Personal-card issue and replacement now pre-open a print window and preload the authorized private template before the API mutation. This protects the one-time raw QR response from browser popup blocking. If rendering fails after mutation, the window shows a recovery warning and does not retry or pretend the card was unchanged. Analytics Excel, PDF and Print now all refresh from `/api/bbs/analytics/export-data` before output so the three formats share the same scoped payload. No API, schema, database record or upload path changed.
+
+## BBS Phase 10B-3 Searchable Master Pickers And Department Configuration
+
+Department Card Admin now projects the existing `/api/bbs/admin/department-cards` result onto the central Foundation Department list. A client-only configuration index computes Template/QR/handler readiness, supports name and readiness filtering, and renders exactly one selected Department detail. The selected Master Department ID is carried into the existing hidden template field and QR/handler route parameters.
+
+Owner and Verifier controls remain backed by the existing Admin-only Employee query. Client search filters the returned Admin accounts by EmployeeID, name or Department; the selected EmployeeID is submitted through the unchanged handler API, where Node/PHP continue enforcing current Admin role. No API contract, authorization, database table, private upload path or card lifecycle changed.
+
+## BBS Phase 10B-2 Card Management Information Architecture
+
+The Admin `จัดการบัตร / QR` tab is now a UI-only workspace router with three states: Overview, Personal Card and Department Card. Overview combines the Phase 10B-1 readiness result with separate card-type summaries and recommended next actions. Personal Card contains the existing private-template lifecycle, eligible Group-Leader-or-higher selection, issue/print and active-card maintenance. Department Card contains the existing Department template, shared QR and Risk handler workflow.
+
+The workspace state is client-only and invokes the unchanged Phase 4/8 handlers. It does not persist a new setting or automatically perform lifecycle mutations. Entering from Community preserves Department context; normal Card Admin entry begins at Overview. No API, database table, upload path, permission or QR behavior changed.
+
+## BBS Phase 10B-1 Master Data Integration
+
+The BBS Admin card workspace now loads `/api/bbs/admin/foundation` as its central reference contract. Personal Card Department and BBS Level controls are rendered from Foundation Master data rather than being derived from the Group-Leader-or-higher card-recipient result. The existing Department Card endpoint remains Master Department backed, and its UI reference list is synchronized with the same Foundation response.
+
+Readiness is calculated read-only in the frontend from Foundation positions/mappings/employees plus the existing Personal and Department card API results. It explains missing Master data, eligible personal-card mappings, Active templates, Department QR and handlers. No database table, upload path, permission rule or issue/replace/revoke behavior changed; a failed Foundation read falls back to an explanatory state while the established card endpoints continue loading.
+
+## BBS Phase 10A Mobile Batch Observation
+
+- `BBS_Observation_Batches` stores the observer-owned idempotent container, date, status, counts and draft recovery metadata. `BBS_Observation_Batch_Members` links each selected employee to one normal `BBS_Observations` row and its server-resolved immutable checklist version.
+- `POST /api/bbs/batch-observations/preview` validates 2-50 employees and groups server-resolved versions. Draft creation immediately creates every individual Draft Observation and answer snapshot in one transaction.
+- Batch draft save updates all linked individual answers atomically. Batch submit revalidates every answer/evidence rule, submits all linked Observations and creates applicable Corrective Actions in the same transaction.
+- Only the observer or Admin may read a batch container. Existing individual Observation authorization remains unchanged, so an observed employee can see their own result without learning the identities of batch peers.
+- Mobile draft recovery stores only the batch id/current step locally; authoritative answers remain on the server. Images are optionally downscaled client-side and then use the existing private Phase 3 evidence endpoint and storage path.
+
+## BBS Smart Card Phase 9B Inspector Schedule Boundary
+
+`BBS_Inspector_Schedule_Rules` stores effective-dated schedule versions per inspector enrollment. Admin changes create a new version and preserve earlier dates. `BBS_Inspector_Schedule_Overrides` records one `Required` or `Exempt` decision per enrollment/date, while `BBS_Inspector_Schedule_Events` is the append-only audit stream.
+
+Node and PHP expose matching schedule, override, detail and compliance APIs. Admin sees all enrolled inspectors; an inspector sees only self. The shared compliance formula caps submitted formal observations at the effective target for each due day. Workspace KPI, Phase 6 analytics/export data and the Phase 9B dashboard consume that formula; Community Reports remain excluded. The additive migration is `backend/migrations/20260826_bbs_phase9b_inspector_schedule.sql`; `inspector_schedule_enabled=0` blocks schedule APIs without deleting data. Upload/storage paths are unchanged.
+
+## BBS Smart Card Phase 9 Inspector Enrollment Boundary
+
+`BBS_Inspector_Enrollments` is the authoritative effective-dated opt-in for formal BBS inspectors. Position mapping still determines the BBS level, while enrollment determines whether a Group Leader may observe and whether their work enters KPI. `BBS_Hierarchy_Assignments` remains the effective team relationship; Phase 9 adds `BBS_Inspector_Team_Events` for append-only add/remove history.
+
+Node and PHP expose matching `/api/bbs/inspectors/*` and `/api/bbs/admin/inspectors/*` routes. Every mutation resolves Department and Safety Unit from the enrollment, enforces one active primary inspector per Operator and checks Admin or owning-inspector self-service permission. `inspector_team_management_enabled=0` blocks detail/mutation paths without modifying existing workflow rows.
+
+
+## BBS Smart Card Phase 8 Department Cards And Community Reporting
+
+Phase 8 adds a Community lane without changing formal Observation, KPI or Phase 5 Action records. Personal `BBS_Cards` remain unique per employee and can be issued only from `Group Leader` upward. Department cards use `BBS_Department_QR_Cards`: one active, rotatable, hash-only QR per Master Department. Multiple Active `BBS_Department_Card_Templates` may share that QR, so employees can choose a named visual and print A4/A5/A6 copies while print events retain template attribution. There is no Unit-card model.
+
+Every authenticated employee may create a `BBS_Community_Reports` row for their Employee Master Department; the observed employee and Safety Unit are optional but, when supplied, must belong to that Department. Good reports are company-visible but omit reporter identity. Risky data and its private evidence are returned only to Admin. A Risky submission transaction immediately creates one `BBS_Community_Actions` row using the Medium SLA; its configured owner and verifier must both resolve to current Admin accounts. Community records are deliberately excluded from formal BBS analytics and KPI formulas.
+
+Node and PHP expose matching `/api/bbs/department-*` and `/api/bbs/community/*` contracts. Department QR tokens are deterministically reconstructed with HMAC for authorized printing but only SHA-256 hash/fingerprint is stored. Templates and Community evidence remain under private server directories and are retrieved only through authorized endpoints. `community_reporting_enabled` and `department_cards_enabled` provide non-destructive operational rollback.
+
+## BBS Smart Card Phase 7 Security And Rollout Boundary
+
+All `/api/bbs/*` responses receive module-level defense headers in Node and PHP: `X-Content-Type-Options: nosniff`, `X-Frame-Options: SAMEORIGIN`, `Referrer-Policy: strict-origin-when-cross-origin`, a self-only camera `Permissions-Policy`, and `Cache-Control: private, no-store`. The only anonymous BBS operation remains `POST /bbs/qr/resolve`; it returns active/navigation state without identity. Every other BBS route runs after JWT authentication, with Admin and object-scope authorization inside the relevant router/handler.
+
+Authenticated `POST /bbs/qr/claim` returns one `employee` object in both stacks and never changes the current JWT/session identity. Raw QR tokens are never persisted, malformed tokens are not reflected, resolve attempts are rate-limited, and replacement/revocation invalidates the old token. Private evidence and card-template downloads require object/Admin authorization and stored-path confinement; upload acceptance uses detected file signatures rather than the client MIME alone.
+
+Phase 7 adds no schema or Production migration. Its gates are executable contracts plus a read-only Pilot audit. Pilot readiness requires the approved Master Department/Unit, mapped people, effective hierarchy assignments, an applicable Published Checklist, zero source/action mismatches, zero orphan rows and business-owner sign-off. The valid Master scope does not by itself activate or authorize the Pilot.
+
+## BBS Smart Card Phase 6 Analytics And Management Reporting
+
+Phase 6 adds read-only analytics contracts at `GET /api/bbs/analytics`, `GET /api/bbs/analytics/export-data`, and `GET /api/bbs/analytics/drilldown`. Node and PHP derive every report from submitted `BBS_Observations`, immutable answer snapshots, current corrective actions, KPI rules and effective-dated hierarchy assignments. The SPA renders Personal, Team, Department and Company views with year/month/Department/Safety Unit/risk filters, KPI numerator/denominator, Safe/Unsafe trend, Pareto, comparison heatmap, action aging/overdue and recent rows.
+
+Scope is resolved on the server. Personal is self-only; Team requires Group Leader-or-higher plus an effective hierarchy assignment; Department requires Department Head-or-higher and remains in the employee's Department; Company is Admin-only. User-supplied Department or Unit filters are validated against that scope before queries run. Drill-down uses the identical scoped payload, and Excel/PDF/Print first fetch `/analytics/export-data` with the active filters so exports cannot silently widen the screen scope.
+
+KPI required count is derived from `BBS_KPI_Rules` and eligible workdays in the selected period. Actual submissions are capped at the configured daily target before summing, preventing multiple same-day submissions from inflating completion. `20260825_bbs_phase6_analytics.sql` adds covering indexes and the `analytics_enabled` / `analytics_export_enabled` feature flags. Operational rollback turns both flags off and preserves Observations, Actions and all reporting indexes/data.
+
+## BBS Smart Card Phase 5 Corrective Action, SLA And Closure
+
+Phase 5 adds `BBS_Action_SLA_Rules`, `BBS_Corrective_Actions`, `BBS_Action_Files`, `BBS_Action_History`, and `BBS_Action_EmailOutbox` through `20260825_bbs_phase5_corrective_actions.sql`. A submitted Unsafe answer creates one idempotent action when its immutable checklist snapshot requires action. The observed employee is the initial Owner, the observer is the Verifier, and the initial Medium SLA is seven calendar days.
+
+The server-enforced lifecycle is `Open -> In Progress -> Pending Verification -> Closed`; `Pending Verification` or `Closed` may become `Reopened`, which must return through `In Progress`. Owner/Admin perform work transitions; Verifier/Admin manage assignment/SLA and close or reopen. At least one private After image is required before verification. Every mutation increments `RowVersion` where applicable and writes action history plus Admin audit.
+
+Near-due reminders queue for Owners. Overdue items additionally queue an escalation for the Verifier, with daily duplicate suppression. Delivery is disabled by default (`action_notifications_enabled=0`); tests only queue outbox records. Operational rollback disables delivery and preserves all action/evidence/history data. Node and PHP compatibility routes expose the same contract under `/api/bbs/actions*` and `/api/bbs/admin/action-*`.
+
+## BBS Smart Card Phase 4 QR, Card And Print
+
+Phase 4 adds `BBS_Card_Templates`, `BBS_Cards`, `BBS_Card_Print_Logs`, and
+`BBS_QR_Resolve_Attempts`. Card templates are Admin-managed, exact-scope
+Draft/Active/Archived records. Activating a template archives the previous
+Active template for the same Department/BBS-level scope.
+
+Each card has one opaque 32-byte base64url token. The database stores only its
+SHA-256 hash and a 12-character diagnostic fingerprint. The raw token is
+returned once during issue or replacement and appears after `#bbs-qr=` so it
+is not sent in the initial HTTP request. Replacement rotates the token and
+marks the previous card Replaced; revocation requires a reason.
+`ActiveEmployeeID` is a generated nullable column with a unique key, enforcing
+one Active card per employee at the database layer while retaining history.
+
+`POST /api/bbs/qr/resolve` is the only public endpoint. It is database-rate
+limited and returns only active/route/login-required state. Authenticated
+`POST /api/bbs/qr/claim` rechecks the card and authorizes self, Admin, or a
+current direct hierarchy assignment without changing the session identity.
+Node and PHP expose matching contracts.
+
+Template images live in `backend/private-uploads/bbs-card-templates` behind
+deny-all rules and are served only by an Admin-authorized endpoint. Print uses
+an 85.60 x 53.98 mm CR80 layout and records card IDs, actor, mode, and reason.
+No employee-photo source was introduced; the card uses an initial fallback.
+
+## BBS Smart Card Phase 3 Observation MVP
+
+Phase 3 adds `BBS_Observations`, `BBS_Observation_Answers`, and
+`BBS_Observation_Files`. An Observation stores organization snapshots and a
+foreign key to the immutable Published Checklist Version. Answer rows snapshot
+item prompts and Unsafe requirements so later versions cannot rewrite history.
+
+Node and PHP expose matching authenticated `/api/bbs/workspace` and
+`/api/bbs/observations/*` contracts. Draft creation resolves the Checklist on
+the server and uses `(ObserverEmployeeID, IdempotencyKey)` for safe retries.
+Submit is immutable and validates required answers plus configured Unsafe
+remark/photo/immediate-action rules.
+
+Ordinary detail/history is limited to observations involving self or a current
+effective-dated hierarchy assignment in the same Department. Admin has global,
+audited detail access. The Pilot/Admin SPA route is `#bbs-smart-card` below
+Safety Culture.
+
+BBS images are not stored in public `backend/uploads/`. They live in
+`backend/private-uploads/bbs`, protected by deny-all `.htaccess`, and are read
+only through the object-authorized API. Both runtimes limit files to 10 MB and
+verify JPEG/PNG/WebP content. Backups must include this private directory.
+
+## BBS Smart Card Phase 2B Validated Excel Exchange
+
+Phase 2B extends the existing Checklist Builder without adding tables or file
+storage. The browser exports a round-trip `.xlsx` workbook with `README`,
+`Checklist`, `Items`, `Scopes`, and `Master Reference` sheets. Import reads the
+workbook client-side, then sends the structured payload to matching Node/PHP
+Preview APIs. The server is the source of truth for checklist rules and Master
+Data validation.
+
+`POST /api/bbs/admin/checklist-versions/:versionId/import-preview` performs no
+write and returns normalized data plus category/item/scope totals. After Admin
+confirmation, `POST .../:versionId/import` locks the Draft, rechecks
+`RowVersion`, validation, and Master IDs, then atomically replaces categories,
+items, scopes, and effective dates. Invalid data, stale drafts, and immutable
+versions fail before replacement. Successful Import writes
+`BBS_CHECKLIST_IMPORT` to the existing audit log.
+
+## BBS Smart Card Phase 2 Checklist Builder
+
+Phase 2 extends the Phase 1 foundation with five additive tables:
+`BBS_Checklist_Templates`, `BBS_Checklist_Versions`,
+`BBS_Checklist_Categories`, `BBS_Checklist_Items`, and
+`BBS_Checklist_Scope_Mappings`. The migration is
+`backend/migrations/20260825_bbs_phase2_checklist_builder.sql`.
+
+Admin Checklist APIs have matching Node and PHP implementations. A version can
+move from Draft to Published to Archived. Categories, items, scope, effective
+dates, and Unsafe rules can be replaced only while the version is Draft.
+Publishing locks the version; changes require cloning to a new version number.
+Template activation is a soft status change and never deletes versions.
+
+The resolver filters active Published versions by effective date and matching
+Department, optional Safety Unit, Position, and BBS level. It then selects by
+specificity, explicit priority, and latest effective date. Equal top candidates
+return `CHECKLIST_CONFLICT`; no candidate returns `NO_CHECKLIST`. Both cases fail
+closed. Non-Admin resolution additionally requires an active Phase 1 hierarchy
+assignment to the observed employee.
+
+Phase 2 supports `Safe / Unsafe / N/A` items. Each item independently controls
+required answer and whether Unsafe requires a remark, photo, or future
+Corrective Action. Phase 3 consumes these definitions; Phase 2 creates no
+observation/action/upload records. Import/Export remains deferred to Phase 2B.
+The main BBS navigation remains hidden until Phase 3.
+
+## BBS Smart Card Phase 1 Foundation
+
+Phase 1 adds the organization and authorization foundation without exposing a
+main BBS workspace. The main `#bbs-smart-card` navigation remains intentionally
+hidden until the Phase 3 observation workflow is usable.
+
+The additive schema is owned by
+`backend/migrations/20260825_bbs_phase1_foundation.sql` and contains
+`BBS_Settings`, `BBS_Position_Level_Mappings`,
+`BBS_Hierarchy_Assignments`, `BBS_Employee_Eligibility`, `BBS_KPI_Rules`, and
+`BBS_Pilot_Scopes`.
+
+Both runtimes expose the same authenticated `/api/bbs/*` contract. Local Node
+uses `backend/routes/bbs-smart-card.js`; Production PHP uses
+`api/handlers/bbs_smart_card.php`. Public endpoints return the current BBS
+context, reporting team, and eligible employees. Configuration endpoints under
+`/api/bbs/admin/*` require the existing global Admin role and write audit rows
+under module `bbs`.
+
+BBS level is module-specific and is resolved from the employee's Position via
+an Admin-reviewed mapping. It does not alter the global `Admin/User/Viewer`
+role model. Hierarchy assignments are effective-dated, adjacent-level only,
+self-assignment is rejected, and Group Leader-to-Operator assignments require
+both employees in the selected Safety Unit. Invalid configuration denies by
+default.
+
+The seeded pilot is resolved by Master Data IDs for `MAINTENANCE SEC.` and
+`Tube Cutting`. The seeded Group Leader KPI requires one submitted observation
+per Monday-Friday day in `Asia/Bangkok`; drafts do not count. Observation and
+checklist tables are deferred to later phases.
+
 ## Card Image Export Shared Foundation (Phase 1 shadow-only)
 
 `public/js/utils/card-image-export.js` defines the future shared client-side
@@ -2287,6 +2508,13 @@ let _assignments = [];     // loaded from GET /hiyari/assignments
 - KY History/detail/Excel export now surfaces Safety Unit so Admin can trace which configured unit submitted each KY record.
 - KY Submit now exposes **Main Department + Safety Unit** in the form. Department options come from active `KY_Program_Config` for the selected year, falling back to Master Departments; changing the department/date refreshes the Safety Unit list and target progress before submit.
 - KY Admin edit now supports full submitted-detail correction: Activity Date, Main Department, Safety Unit, participants, status, KYT keyword, risk category, team name, hazard detail, countermeasure, admin comment, attachment, and video. Backend admin update revalidates yearly/monthly target rules against the edited Department + Safety Unit scope before saving.
+
+### KY Large Video Transport (2026-08-31)
+
+- The browser creates/saves the KY activity and its required attachment first, then uploads an optional video through `POST /ky/:id/video-upload/init`, sequential `POST /ky/:id/video-upload/:uploadId/chunk/:index`, and `POST /ky/:id/video-upload/:uploadId/complete`. `DELETE /ky/:id/video-upload/:uploadId` is a safe abort endpoint.
+- Server chunk size is 5 MB and total video size is capped at 200 MB. Manifests and parts are private temporary transport data under `backend/private-uploads/ky-video-chunks`; stale sets are removed after 24 hours and are never exposed by URL or used in reports.
+- Node and PHP re-authorize the KY activity and initiating employee on every stage. Completion checks all indexes, expected part sizes, exact assembled size and MP4/MOV/WebM/MKV/AVI/MPEG signatures before a transaction updates `KY_Activities.VideoUrl`.
+- Completed videos keep the established public `/uploads` storage contract and original-filename URL metadata (Node and PHP retain their existing disk helpers). Admin replacement removes the previous file only after commit; ordinary users cannot replace an existing video. Legacy single-request upload endpoints remain compatible for small clients, while oversized PHP requests receive `413 KY_UPLOAD_REQUEST_TOO_LARGE`.
 
 ### KY Specific Patterns
 - `_kyProgConfig` — cached per year; cleared and re-fetched when year filter changes

@@ -44,11 +44,11 @@ async function main() {
     assert.ok(adminId && adminPassword, 'Production Admin UAT credentials are required in backend/.env');
 
     const index = await staticText('/');
-    assert.ok(index.includes('public/js/main.js?v=20260824-safety-culture-ppe-form-r1'), 'Production index cache marker');
+    assert.ok(index.includes('public/js/main.js?v=20260825-yokoten-department-relevance-r1'), 'Production index cache marker');
     pass('Production index cache marker');
 
     const mainSource = await staticText('/public/js/main.js');
-    assert.ok(mainSource.includes('yokoten.js?v=20260824-yokoten-topic-coverage-r3'), 'Production Yokoten cache marker');
+    assert.ok(mainSource.includes('yokoten.js?v=20260825-yokoten-department-relevance-r1'), 'Production Yokoten cache marker');
     assert.ok(mainSource.includes('dashboard.js?v=20260822-cccf-shared-target-r4'), 'Production Dashboard cache marker');
     assert.ok(mainSource.includes('safety-culture.js?v=20260824-safety-culture-ppe-form-r1'), 'Production Safety Culture cache marker');
     pass('Production module cache markers');
@@ -91,6 +91,15 @@ async function main() {
         assert.ok(yokotenSource.includes(marker), `Production Topic Coverage marker missing: ${marker}`);
     }
     pass('Production Yokoten Topic Coverage follow-up controls', 'year, risk, Excel, Reminder, response-on-behalf');
+    for (const marker of [
+        'data-dept-chart-mode="relevance"',
+        'yok-dept-relevance-filter',
+        "const filterByDataset = ['related', 'not_related', 'incomplete']",
+        "if (!item?.responded) return 'incomplete'",
+    ]) {
+        assert.ok(yokotenSource.includes(marker), `Production Department relevance marker missing: ${marker}`);
+    }
+    pass('Production Yokoten Department relevance controls', 'stacked chart, full-Unit classification, Department drill-down');
 
     const dashboardSource = await staticText('/public/js/pages/dashboard.js');
     assert.ok(dashboardSource.includes('const metric = d.moduleMetrics?.[m.hash] || null'), 'Dashboard canonical metric source');

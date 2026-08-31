@@ -30,6 +30,11 @@ const ADMIN_PHASE32C_INLINE_ACTIONS = [
     '_downloadImportTemplate', '_atLoadTemplate', '_atSaveTemplate', '_atBulkApply',
     '_atLoadScope', '_atSaveScope', '_atClearScope', '_atToggleScopeNA', '_atSelectEmp',
     '_atSaveOverride', '_atClearOverride', '_atToggleNA', '_atMatrixExport',
+    '_bbsSavePositionMapping', '_bbsSaveKpi', '_bbsSavePilot',
+    '_bbsSaveAssignment', '_bbsDeactivateAssignment', '_bbsSaveEligibility',
+    '_bbsCreateChecklist', '_bbsSaveChecklist', '_bbsPublishChecklist',
+    '_bbsCloneChecklist', '_bbsArchiveChecklist',
+    '_bbsToggleChecklistTemplate', '_bbsConfirmChecklistImport',
 ];
 function lockAdminInlineActions() {
     ADMIN_PHASE32C_INLINE_ACTIONS.forEach(name => {
@@ -118,6 +123,11 @@ let _safetyCoreTablePageSize = 10;
 let _safetyCoreTableFilters = { department: '', position: '' };
 let _registrationAdminState = { rows: [], summary: {}, status: 'Pending', department: '', dateFrom: '', dateTo: '', q: '' };
 let _registrationLoadGeneration = 0;
+let _bbsFoundation = null;
+let _bbsChecklists = [];
+let _bbsChecklistDetail = null;
+let _bbsEditor = null;
+let _bbsImportPreview = null;
 
 // â”€â”€â”€ Tab Config â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 const TABS = [
@@ -141,6 +151,12 @@ TABS.splice(4, 0, {
     key: 'registrations',
     label: 'คำขอสมัคร',
     icon: `<svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M18 9v3m0 0v3m0-3h3m-3 0h-3M13 7a4 4 0 11-8 0 4 4 0 018 0zM3 21v-1a6 6 0 0112 0v1"/></svg>`,
+});
+TABS.splice(5, 0, {
+    key: 'bbs-foundation',
+    label: 'BBS Foundation',
+    badge: 'Phase 2B',
+    icon: `<svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6V4m0 2a2 2 0 100 4m0-4a2 2 0 110 4m-6 8a2 2 0 100-4m0 4v2m0-6V4m12 14a2 2 0 100-4m0 4v2m0-6V4M6 10h12M6 14h12"/></svg>`,
 });
 
 // =============================================================================
@@ -315,6 +331,7 @@ async function switchTab(key) {
     else if (key === 'employees')     renderTask = renderEmployeesTab(target);
     else if (key === 'registrations') renderTask = renderRegistrationRequestsTab(target);
     else if (key === 'safety-data')   renderTask = renderSafetyCoreData(target);
+    else if (key === 'bbs-foundation') renderTask = renderBbsFoundation(target);
     else if (key === 'reference')     renderTask = renderReference(target);
     else if (key === 'permissions')   renderTask = renderPermissions(target);
     else if (key === 'health')        renderTask = renderSystemHealth(target);
@@ -8959,4 +8976,602 @@ async function _atToggleNA(empId, actKey, setNA, btn) {
         btn.disabled = false;
         alert('ไม่สำเร็จ: ' + e.message);
     }
+}
+
+// =============================================================================
+// BBS SMART CARD — PHASE 1 FOUNDATION (ADMIN-ONLY, MAIN MODULE STILL HIDDEN)
+// =============================================================================
+
+function _bbsBangkokToday() {
+    const parts = new Intl.DateTimeFormat('en-CA', {
+        timeZone: 'Asia/Bangkok', year: 'numeric', month: '2-digit', day: '2-digit',
+    }).formatToParts(new Date());
+    const values = Object.fromEntries(parts.map(part => [part.type, part.value]));
+    return `${values.year}-${values.month}-${values.day}`;
+}
+
+function _bbsEmployeeOptions(selectedId = '') {
+    return (_bbsFoundation?.employees || []).map(employee => {
+        const id = String(employee.EmployeeID || '');
+        const selected = id === String(selectedId || '') ? 'selected' : '';
+        return `<option value="${escHtml(id)}" ${selected}>${escHtml(id)} — ${escHtml(employee.EmployeeName || '')} · ${escHtml(employee.Position || 'ไม่ระบุตำแหน่ง')} · ${escHtml(employee.Unit || employee.Department || '')}</option>`;
+    }).join('');
+}
+
+function _bbsDepartmentOptions(selectedId = '') {
+    return (_bbsFoundation?.departments || []).map(department =>
+        `<option value="${Number(department.id)}" ${Number(selectedId) === Number(department.id) ? 'selected' : ''}>${escHtml(department.Name || '')}</option>`
+    ).join('');
+}
+
+function _bbsUnitOptions(departmentId, selectedId = '', allowBlank = true) {
+    const rows = (_bbsFoundation?.units || []).filter(unit => Number(unit.department_id) === Number(departmentId));
+    return `${allowBlank ? '<option value="">— ไม่กำหนด Unit —</option>' : ''}${rows.map(unit =>
+        `<option value="${Number(unit.id)}" ${Number(selectedId) === Number(unit.id) ? 'selected' : ''}>${escHtml(unit.name || '')}</option>`
+    ).join('')}`;
+}
+
+function _bbsLevelBadge(level) {
+    const colors = {
+        'Operator': 'bg-slate-100 text-slate-700 border-slate-200',
+        'Group Leader': 'bg-sky-50 text-sky-700 border-sky-200',
+        'Department Head': 'bg-indigo-50 text-indigo-700 border-indigo-200',
+        'Section Head': 'bg-violet-50 text-violet-700 border-violet-200',
+        'Manager': 'bg-amber-50 text-amber-700 border-amber-200',
+    };
+    return `<span class="inline-flex rounded-full border px-2 py-0.5 text-[10px] font-bold ${colors[level] || 'bg-rose-50 text-rose-700 border-rose-200'}">${escHtml(level || 'ยังไม่ Mapping')}</span>`;
+}
+
+async function renderBbsFoundation(container) {
+    try {
+        const [response, checklistResponse] = await Promise.all([
+            API.get('/bbs/admin/foundation'),
+            API.get('/bbs/admin/checklists'),
+        ]);
+        _bbsFoundation = response.data || {};
+        _bbsChecklists = checklistResponse.data || [];
+        _renderBbsFoundationContent(container);
+        window._bbsSavePositionMapping = _bbsSavePositionMapping;
+        window._bbsSaveKpi = _bbsSaveKpi;
+        window._bbsPilotDeptChanged = _bbsPilotDeptChanged;
+        window._bbsSavePilot = _bbsSavePilot;
+        window._bbsOpenAssignment = _bbsOpenAssignment;
+        window._bbsAssignmentDeptChanged = _bbsAssignmentDeptChanged;
+        window._bbsSaveAssignment = _bbsSaveAssignment;
+        window._bbsDeactivateAssignment = _bbsDeactivateAssignment;
+        window._bbsOpenEligibility = _bbsOpenEligibility;
+        window._bbsSaveEligibility = _bbsSaveEligibility;
+        window._bbsOpenCreateChecklist = _bbsOpenCreateChecklist;
+        window._bbsCreateChecklist = _bbsCreateChecklist;
+        window._bbsOpenChecklist = _bbsOpenChecklist;
+        window._bbsAddCategory = _bbsAddCategory;
+        window._bbsRemoveCategory = _bbsRemoveCategory;
+        window._bbsMoveCategory = _bbsMoveCategory;
+        window._bbsAddItem = _bbsAddItem;
+        window._bbsRemoveItem = _bbsRemoveItem;
+        window._bbsMoveItem = _bbsMoveItem;
+        window._bbsAddScope = _bbsAddScope;
+        window._bbsRemoveScope = _bbsRemoveScope;
+        window._bbsScopeDeptChanged = _bbsScopeDeptChanged;
+        window._bbsSaveChecklist = _bbsSaveChecklist;
+        window._bbsPublishChecklist = _bbsPublishChecklist;
+        window._bbsCloneChecklist = _bbsCloneChecklist;
+        window._bbsArchiveChecklist = _bbsArchiveChecklist;
+        window._bbsToggleChecklistTemplate = _bbsToggleChecklistTemplate;
+        window._bbsExportChecklist = _bbsExportChecklist;
+        window._bbsOpenImportChecklist = _bbsOpenImportChecklist;
+        window._bbsPreviewImportFile = _bbsPreviewImportFile;
+        window._bbsConfirmChecklistImport = _bbsConfirmChecklistImport;
+        window._bbsOpenResolverPreview = _bbsOpenResolverPreview;
+        window._bbsRunResolverPreview = _bbsRunResolverPreview;
+    } catch (error) {
+        container.innerHTML = `
+            <section class="rounded-xl border border-rose-200 bg-white p-6">
+                <p class="text-sm font-black text-rose-700">ไม่สามารถเปิด BBS Foundation ได้</p>
+                <p class="mt-2 text-xs text-slate-500">${escHtml(error.message || 'Unknown error')}</p>
+                <p class="mt-3 text-xs text-slate-500">ตรวจว่าได้รัน Phase 1 migration บนฐานข้อมูล localhost แล้ว</p>
+            </section>`;
+    }
+}
+
+function _renderBbsFoundationContent(container) {
+    const data = _bbsFoundation || {};
+    const summary = data.summary || {};
+    const kpi = (data.kpiRules || []).find(rule => rule.BBSLevel === 'Group Leader' && rule.MetricKey === 'submitted_observation') || {};
+    const pilot = (data.pilotScopes || []).find(scope => Number(scope.IsActive) === 1) || {};
+    const pilotDepartment = (data.departments || []).find(department => Number(department.id) === Number(pilot.DepartmentID)) || (data.departments || [])[0] || {};
+    const mappingRows = (data.positions || []).map(position => {
+        const mapping = position.mapping || {};
+        return `
+            <tr class="border-b border-slate-100 last:border-0">
+                <td class="px-4 py-3 text-sm font-semibold text-slate-700">${escHtml(position.Name || '')}</td>
+                <td class="px-4 py-3">
+                    <select id="bbs-map-level-${Number(position.id)}" onchange="const box=document.getElementById('bbs-map-active-${Number(position.id)}');box.disabled=!this.value;if(this.value&&!${mapping.BBSLevel ? 'true' : 'false'})box.checked=true" class="w-full rounded-lg border border-slate-200 px-3 py-2 text-xs">
+                        <option value="">— ยังไม่ Mapping —</option>
+                        ${(data.levels || []).map(level => `<option value="${escHtml(level)}" ${mapping.BBSLevel === level ? 'selected' : ''}>${escHtml(level)}</option>`).join('')}
+                    </select>
+                </td>
+                <td class="px-4 py-3 text-center">
+                    <input id="bbs-map-active-${Number(position.id)}" type="checkbox" class="h-4 w-4 accent-emerald-600" ${Number(mapping.IsActive) === 1 ? 'checked' : ''} ${mapping.BBSLevel ? '' : 'disabled'}>
+                </td>
+                <td class="px-4 py-3 text-right">
+                    <button type="button" onclick="window._bbsSavePositionMapping(${Number(position.id)})" class="rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs font-bold text-emerald-700 hover:bg-emerald-100">บันทึก</button>
+                </td>
+            </tr>`;
+    }).join('');
+    const assignmentRows = (data.assignments || []).map(row => `
+        <tr class="border-b border-slate-100 last:border-0 ${Number(row.IsActive) === 1 ? '' : 'opacity-50'}">
+            <td class="px-4 py-3"><p class="text-xs font-bold text-slate-700">${escHtml(row.SupervisorName || row.SupervisorEmployeeID)}</p><p class="text-[10px] text-slate-400">${escHtml(row.SupervisorEmployeeID || '')}</p></td>
+            <td class="px-4 py-3"><p class="text-xs font-bold text-slate-700">${escHtml(row.MemberName || row.MemberEmployeeID)}</p><p class="text-[10px] text-slate-400">${escHtml(row.MemberEmployeeID || '')}</p></td>
+            <td class="px-4 py-3 text-xs text-slate-600">${escHtml(row.DepartmentName || '')}<br><span class="text-[10px] text-slate-400">${escHtml(row.SafetyUnitName || 'ทั้งแผนก')}</span></td>
+            <td class="px-4 py-3 text-xs text-slate-600">${escHtml(row.EffectiveFrom || '')} → ${escHtml(row.EffectiveTo || 'ไม่มีกำหนด')}</td>
+            <td class="px-4 py-3 text-right whitespace-nowrap">
+                <button type="button" onclick="window._bbsOpenAssignment(${Number(row.id)})" class="rounded-lg border border-slate-200 px-2.5 py-1.5 text-[10px] font-bold text-slate-600">แก้ไข</button>
+                ${Number(row.IsActive) === 1 ? `<button type="button" onclick="window._bbsDeactivateAssignment(${Number(row.id)})" class="ml-1 rounded-lg border border-rose-200 bg-rose-50 px-2.5 py-1.5 text-[10px] font-bold text-rose-700">ปิดใช้งาน</button>` : ''}
+            </td>
+        </tr>`).join('');
+    const eligibilityRows = (data.eligibility || []).slice(0, 20).map(row => `
+        <tr class="border-b border-slate-100 last:border-0">
+            <td class="px-4 py-3 text-xs"><span class="font-bold text-slate-700">${escHtml(row.EmployeeName || '')}</span><br><span class="text-slate-400">${escHtml(row.EmployeeID || '')}</span></td>
+            <td class="px-4 py-3 text-xs font-bold ${row.Eligibility === 'active' ? 'text-emerald-700' : 'text-amber-700'}">${escHtml(row.Eligibility || '')}</td>
+            <td class="px-4 py-3 text-xs text-slate-500">${escHtml(row.EffectiveFrom || '')} → ${escHtml(row.EffectiveTo || 'ไม่มีกำหนด')}</td>
+            <td class="px-4 py-3 text-xs text-slate-500">${row.Reason ? escHtml(row.Reason) : '&mdash;'}</td>
+        </tr>`).join('');
+    const checklistRows = (_bbsChecklists || []).map(row => `
+        <button type="button" onclick="window._bbsOpenChecklist(${Number(row.id)})" class="w-full rounded-xl border border-slate-200 bg-white p-4 text-left transition hover:border-emerald-300 hover:shadow-sm">
+            <div class="flex items-start justify-between gap-3">
+                <div class="min-w-0"><p class="truncate text-sm font-black text-slate-800">${escHtml(row.TemplateName || '')}</p><p class="mt-0.5 text-[10px] font-bold text-slate-400">${escHtml(row.TemplateCode || '')}</p></div>
+                <span class="rounded-full px-2 py-1 text-[10px] font-black ${Number(row.PublishedCount) > 0 ? 'bg-emerald-50 text-emerald-700' : 'bg-amber-50 text-amber-700'}">${Number(row.PublishedCount) > 0 ? 'Published' : 'Draft only'}</span>
+            </div>
+            <div class="mt-3 flex gap-3 text-[10px] font-bold text-slate-500"><span>${Number(row.VersionCount || 0)} versions</span><span>${Number(row.DraftCount || 0)} draft</span><span>${Number(row.PublishedCount || 0)} published</span></div>
+        </button>`).join('');
+
+    container.innerHTML = `
+    <div class="animate-fade-in space-y-5">
+        <section class="rounded-xl border border-emerald-200 bg-gradient-to-r from-emerald-50 to-white p-5">
+            <div class="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
+                <div>
+                    <p class="text-[10px] font-black uppercase tracking-widest text-emerald-600">BBS Smart Card · Phase 1</p>
+                    <h2 class="mt-1 text-lg font-black text-slate-800">Foundation, Hierarchy & Permission Engine</h2>
+                    <p class="mt-1 text-xs text-slate-500">หน้า Admin-only สำหรับเตรียม Mapping และสายบังคับบัญชา เมนู BBS ของผู้ใช้ทั่วไปยังไม่เปิดจนถึง Phase 3</p>
+                </div>
+                <span class="inline-flex w-fit rounded-full border border-amber-200 bg-amber-50 px-3 py-1.5 text-xs font-black text-amber-700">Configuration only</span>
+            </div>
+            <div class="mt-4 grid grid-cols-2 lg:grid-cols-4 gap-3">
+                ${[
+                    ['Position Mapping', `${Number(summary.mappedPositions || 0)}/${Number(summary.positions || 0)}`],
+                    ['Active Assignment', Number(summary.activeAssignments || 0)],
+                    ['Pilot Scope', Number(summary.activePilotScopes || 0)],
+                    ['KPI', '1 ครั้ง / จ.–ศ.'],
+                ].map(([label, value]) => `<div class="rounded-xl border border-emerald-100 bg-white p-3"><p class="text-xl font-black text-slate-800">${escHtml(String(value))}</p><p class="text-[10px] font-bold text-slate-500">${escHtml(label)}</p></div>`).join('')}
+            </div>
+        </section>
+
+        <section class="rounded-xl border border-indigo-200 bg-gradient-to-br from-indigo-50 via-white to-emerald-50 p-5 shadow-sm">
+            <div class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                <div><p class="text-[10px] font-black uppercase tracking-widest text-indigo-600">Phase 2B · Validated Excel Exchange</p><h3 class="mt-1 text-base font-black text-slate-800">Checklist Builder</h3><p class="mt-1 text-xs text-slate-500">สร้างและจัด Version พร้อม Export Excel หรือ Import แบบ Preview ก่อนแทนที่ Draft ทั้งก้อน</p></div>
+                <div class="flex flex-wrap gap-2"><button type="button" onclick="window._bbsOpenResolverPreview()" class="rounded-lg border border-indigo-200 bg-white px-4 py-2.5 text-xs font-black text-indigo-700">ทดสอบ Resolver</button><button type="button" onclick="window._bbsOpenCreateChecklist()" class="rounded-lg bg-indigo-600 px-4 py-2.5 text-xs font-black text-white hover:bg-indigo-700">+ สร้าง Checklist</button></div>
+            </div>
+            <div class="mt-4 grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-3">${checklistRows || `<div class="col-span-full rounded-xl border border-dashed border-slate-300 bg-white/70 p-8 text-center text-sm text-slate-400">ยังไม่มี Checklist — เริ่มจาก Draft แรกได้เลย</div>`}</div>
+            <p class="mt-3 text-[10px] text-slate-400">Import ใช้ transaction และรับเฉพาะ Draft · ไฟล์ที่ไม่ผ่าน validation จะไม่เปลี่ยนข้อมูลแม้แต่บางส่วน</p>
+        </section>
+
+        <div class="grid grid-cols-1 xl:grid-cols-2 gap-5">
+            <section class="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
+                <p class="text-[10px] font-black uppercase tracking-widest text-emerald-600">Approved KPI</p>
+                <h3 class="mt-1 text-sm font-black text-slate-800">Group Leader Daily Observation</h3>
+                <div class="mt-4 grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <label class="text-xs font-bold text-slate-600">จำนวนต่อวัน
+                        <input id="bbs-kpi-target" type="number" min="1" max="100" value="${Number(kpi.TargetCount || 1)}" class="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2.5">
+                    </label>
+                    <label class="text-xs font-bold text-slate-600">เขตเวลา
+                        <input value="Asia/Bangkok" readonly class="mt-1 w-full rounded-lg border border-slate-200 bg-slate-50 px-3 py-2.5 text-slate-500">
+                    </label>
+                </div>
+                <p class="mt-3 text-xs text-slate-500">นับเฉพาะ Submitted · จันทร์–ศุกร์ · Draft ไม่นับ · ยังไม่หักวันหยุดบริษัท</p>
+                <button type="button" onclick="window._bbsSaveKpi()" class="mt-4 rounded-lg bg-emerald-600 px-4 py-2.5 text-xs font-black text-white hover:bg-emerald-700">บันทึก KPI</button>
+            </section>
+
+            <section class="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
+                <p class="text-[10px] font-black uppercase tracking-widest text-emerald-600">Pilot Scope</p>
+                <h3 class="mt-1 text-sm font-black text-slate-800">Department / Safety Unit</h3>
+                <div class="mt-4 grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <label class="text-xs font-bold text-slate-600">แผนก
+                        <select id="bbs-pilot-dept" onchange="window._bbsPilotDeptChanged(this.value)" class="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2.5">${_bbsDepartmentOptions(pilot.DepartmentID || pilotDepartment.id)}</select>
+                    </label>
+                    <label class="text-xs font-bold text-slate-600">Safety Unit
+                        <select id="bbs-pilot-unit" class="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2.5">${_bbsUnitOptions(pilot.DepartmentID || pilotDepartment.id, pilot.SafetyUnitID, false)}</select>
+                    </label>
+                    <label class="text-xs font-bold text-slate-600">เริ่มใช้
+                        <input id="bbs-pilot-from" type="date" value="${escHtml(String(pilot.EffectiveFrom || _bbsBangkokToday()).slice(0, 10))}" class="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2.5">
+                    </label>
+                    <label class="text-xs font-bold text-slate-600">สิ้นสุด (ไม่บังคับ)
+                        <input id="bbs-pilot-to" type="date" value="${escHtml(String(pilot.EffectiveTo || '').slice(0, 10))}" class="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2.5">
+                    </label>
+                </div>
+                <button type="button" onclick="window._bbsSavePilot()" class="mt-4 rounded-lg bg-emerald-600 px-4 py-2.5 text-xs font-black text-white hover:bg-emerald-700">บันทึก Pilot</button>
+            </section>
+        </div>
+
+        <section class="rounded-xl border border-slate-200 bg-white shadow-sm overflow-hidden">
+            <div class="p-5 border-b border-slate-100">
+                <p class="text-[10px] font-black uppercase tracking-widest text-emerald-600">Admin-reviewed Mapping</p>
+                <h3 class="mt-1 text-sm font-black text-slate-800">ตำแหน่ง → BBS Level</h3>
+                <p class="mt-1 text-xs text-slate-500">ไม่มีการเดาระดับจากชื่อตำแหน่ง ระบบจะให้สิทธิ์เฉพาะ Mapping ที่เปิดใช้งานแล้ว</p>
+            </div>
+            <div class="overflow-x-auto"><table class="w-full min-w-[760px]"><thead class="bg-slate-50 text-[10px] uppercase text-slate-500"><tr><th class="px-4 py-3 text-left">Position</th><th class="px-4 py-3 text-left">BBS Level</th><th class="px-4 py-3 text-center">Active</th><th class="px-4 py-3"></th></tr></thead><tbody>${mappingRows}</tbody></table></div>
+        </section>
+
+        <section class="rounded-xl border border-slate-200 bg-white shadow-sm overflow-hidden">
+            <div class="p-5 border-b border-slate-100 flex items-center justify-between gap-3">
+                <div><p class="text-[10px] font-black uppercase tracking-widest text-emerald-600">Effective-dated Hierarchy</p><h3 class="mt-1 text-sm font-black text-slate-800">สายบังคับบัญชา BBS</h3></div>
+                <button type="button" onclick="window._bbsOpenAssignment()" class="rounded-lg bg-emerald-600 px-4 py-2.5 text-xs font-black text-white">+ เพิ่ม Assignment</button>
+            </div>
+            <div class="overflow-x-auto"><table class="w-full min-w-[900px]"><thead class="bg-slate-50 text-[10px] uppercase text-slate-500"><tr><th class="px-4 py-3 text-left">Supervisor</th><th class="px-4 py-3 text-left">Member</th><th class="px-4 py-3 text-left">Scope</th><th class="px-4 py-3 text-left">Effective</th><th class="px-4 py-3"></th></tr></thead><tbody>${assignmentRows || `<tr><td colspan="5" class="p-8 text-center text-sm text-slate-400">ยังไม่มี Hierarchy Assignment</td></tr>`}</tbody></table></div>
+        </section>
+
+        <section class="rounded-xl border border-slate-200 bg-white shadow-sm overflow-hidden">
+            <div class="p-5 border-b border-slate-100 flex items-center justify-between gap-3">
+                <div><p class="text-[10px] font-black uppercase tracking-widest text-emerald-600">Eligibility Override</p><h3 class="mt-1 text-sm font-black text-slate-800">Active / Inactive / Exempt / Unavailable</h3><p class="mt-1 text-xs text-slate-500">ห้ามอนุมานว่าลางานจากการไม่มี Observation ทุกสถานะต้องมีช่วงเวลาและเหตุผล</p></div>
+                <button type="button" onclick="window._bbsOpenEligibility()" class="rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-2.5 text-xs font-black text-emerald-700">ตั้งสถานะ</button>
+            </div>
+            <div class="overflow-x-auto"><table class="w-full min-w-[760px]"><thead class="bg-slate-50 text-[10px] uppercase text-slate-500"><tr><th class="px-4 py-3 text-left">Employee</th><th class="px-4 py-3 text-left">Status</th><th class="px-4 py-3 text-left">Effective</th><th class="px-4 py-3 text-left">Reason</th></tr></thead><tbody>${eligibilityRows || `<tr><td colspan="4" class="p-8 text-center text-sm text-slate-400">ไม่มี Eligibility Override — ค่าเริ่มต้นคือ active</td></tr>`}</tbody></table></div>
+        </section>
+    </div>`;
+}
+
+async function _bbsReload() {
+    const container = document.getElementById('admin-content-area');
+    if (container) await renderBbsFoundation(container);
+}
+
+function _bbsOpenCreateChecklist() {
+    openModal('สร้าง BBS Checklist', `
+        <form onsubmit="event.preventDefault();window._bbsCreateChecklist()" class="space-y-4">
+            <div class="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                <label class="text-xs font-bold text-slate-600">รหัส Template<input id="bbs-new-code" maxlength="50" required placeholder="เช่น BBS-TUBE-01" class="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2.5 uppercase"></label>
+                <label class="text-xs font-bold text-slate-600">ชื่อ Checklist<input id="bbs-new-name" maxlength="160" required class="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2.5"></label>
+            </div>
+            <label class="block text-xs font-bold text-slate-600">รายละเอียด<textarea id="bbs-new-description" rows="3" maxlength="2000" class="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2.5"></textarea></label>
+            <label class="block text-xs font-bold text-slate-600">วันที่เริ่มใช้ Draft<input id="bbs-new-from" type="date" required value="${_bbsBangkokToday()}" class="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2.5"></label>
+            <div class="flex justify-end gap-2"><button type="button" onclick="window.closeModal()" class="rounded-lg border border-slate-200 px-4 py-2.5 text-xs font-bold">ยกเลิก</button><button type="submit" class="rounded-lg bg-indigo-600 px-4 py-2.5 text-xs font-black text-white">สร้าง Draft</button></div>
+        </form>`, 'max-w-2xl');
+}
+
+async function _bbsCreateChecklist() {
+    const response = await API.post('/bbs/admin/checklists', {
+        templateCode: document.getElementById('bbs-new-code')?.value || '',
+        templateName: document.getElementById('bbs-new-name')?.value || '',
+        description: document.getElementById('bbs-new-description')?.value || '',
+        effectiveFrom: document.getElementById('bbs-new-from')?.value || '',
+    });
+    closeModal(); showToast(response.message || 'สร้าง Checklist แล้ว', 'success');
+    await _bbsReload(); await _bbsOpenChecklist(response.data.templateId);
+}
+
+function _bbsNormalizeVersion(version) {
+    return {
+        id: Number(version.id), templateId: Number(version.TemplateID), versionNo: Number(version.VersionNo), status: version.Status,
+        rowVersion: Number(version.RowVersion), effectiveFrom: String(version.EffectiveFrom || '').slice(0, 10), effectiveTo: String(version.EffectiveTo || '').slice(0, 10),
+        categories: (version.categories || []).map(category => ({ name: category.CategoryName || '', items: (category.items || []).map(item => ({ code: item.ItemCode || '', prompt: item.ItemPrompt || '', helpText: item.HelpText || '', responseType: item.ResponseType || 'safe_unsafe_na', isRequired: Number(item.IsRequired) === 1, unsafeRequiresRemark: Number(item.UnsafeRequiresRemark) === 1, unsafeRequiresPhoto: Number(item.UnsafeRequiresPhoto) === 1, unsafeRequiresAction: Number(item.UnsafeRequiresAction) === 1 })) })),
+        scopes: (version.scopes || []).map(scope => ({ departmentId: scope.DepartmentID || '', safetyUnitId: scope.SafetyUnitID || '', positionId: scope.PositionID || '', bbsLevel: scope.BBSLevel || '', priority: Number(scope.Priority || 0) })),
+    };
+}
+
+async function _bbsOpenChecklist(templateId, preferredVersionId = null) {
+    const response = await API.get(`/bbs/admin/checklists/${templateId}`);
+    _bbsChecklistDetail = response.data || {};
+    const versions = _bbsChecklistDetail.versions || [];
+    const selected = versions.find(version => Number(version.id) === Number(preferredVersionId)) || versions.find(version => version.Status === 'Draft') || versions[0];
+    if (!selected) return showToast('ไม่พบ Checklist version', 'warning');
+    _bbsEditor = _bbsNormalizeVersion(selected);
+    if (!_bbsEditor.categories.length) _bbsEditor.categories = [{ name: 'พฤติกรรมความปลอดภัย', items: [{ code: 'ITEM-01', prompt: '', helpText: '', responseType: 'safe_unsafe_na', isRequired: true, unsafeRequiresRemark: true, unsafeRequiresPhoto: false, unsafeRequiresAction: false }] }];
+    if (!_bbsEditor.scopes.length) _bbsEditor.scopes = [{ departmentId: '', safetyUnitId: '', positionId: '', bbsLevel: '', priority: 0 }];
+    _bbsRenderChecklistEditor();
+}
+
+function _bbsCaptureEditor() {
+    if (!_bbsEditor || _bbsEditor.status !== 'Draft') return;
+    _bbsEditor.effectiveFrom = document.getElementById('bbs-version-from')?.value || _bbsEditor.effectiveFrom;
+    _bbsEditor.effectiveTo = document.getElementById('bbs-version-to')?.value || '';
+    _bbsEditor.categories = _bbsEditor.categories.map((category, categoryIndex) => ({
+        name: document.getElementById(`bbs-cat-name-${categoryIndex}`)?.value || '',
+        items: category.items.map((item, itemIndex) => ({
+            code: document.getElementById(`bbs-item-code-${categoryIndex}-${itemIndex}`)?.value || '', prompt: document.getElementById(`bbs-item-prompt-${categoryIndex}-${itemIndex}`)?.value || '', helpText: document.getElementById(`bbs-item-help-${categoryIndex}-${itemIndex}`)?.value || '', responseType: 'safe_unsafe_na',
+            isRequired: document.getElementById(`bbs-item-required-${categoryIndex}-${itemIndex}`)?.checked !== false, unsafeRequiresRemark: document.getElementById(`bbs-item-remark-${categoryIndex}-${itemIndex}`)?.checked !== false, unsafeRequiresPhoto: document.getElementById(`bbs-item-photo-${categoryIndex}-${itemIndex}`)?.checked === true, unsafeRequiresAction: document.getElementById(`bbs-item-action-${categoryIndex}-${itemIndex}`)?.checked === true,
+        })),
+    }));
+    _bbsEditor.scopes = _bbsEditor.scopes.map((scope, index) => ({ departmentId: document.getElementById(`bbs-scope-dept-${index}`)?.value || '', safetyUnitId: document.getElementById(`bbs-scope-unit-${index}`)?.value || '', positionId: document.getElementById(`bbs-scope-position-${index}`)?.value || '', bbsLevel: document.getElementById(`bbs-scope-level-${index}`)?.value || '', priority: Number(document.getElementById(`bbs-scope-priority-${index}`)?.value || 0) }));
+}
+
+function _bbsRenderChecklistEditor() {
+    const template = _bbsChecklistDetail?.template || {}; const editor = _bbsEditor; const editable = editor.status === 'Draft';
+    const versions = (_bbsChecklistDetail?.versions || []).map(version => `<button type="button" onclick="window._bbsOpenChecklist(${Number(template.id)},${Number(version.id)})" class="rounded-lg border px-3 py-2 text-[10px] font-black ${Number(version.id) === editor.id ? 'border-indigo-500 bg-indigo-50 text-indigo-700' : 'border-slate-200 text-slate-500'}">v${Number(version.VersionNo)} · ${escHtml(version.Status)}</button>`).join('');
+    const categories = editor.categories.map((category, ci) => `<section class="rounded-xl border border-slate-200 bg-white p-4"><div class="flex gap-2"><input id="bbs-cat-name-${ci}" value="${escHtml(category.name)}" ${editable ? '' : 'disabled'} placeholder="ชื่อหมวดหมู่" class="min-w-0 flex-1 rounded-lg border border-slate-200 px-3 py-2 text-sm font-bold"><div class="flex gap-1">${editable ? `<button type="button" onclick="window._bbsMoveCategory(${ci},-1)" class="rounded border px-2">↑</button><button type="button" onclick="window._bbsMoveCategory(${ci},1)" class="rounded border px-2">↓</button><button type="button" onclick="window._bbsRemoveCategory(${ci})" class="rounded border border-rose-200 px-2 text-rose-600">×</button>` : ''}</div></div><div class="mt-3 space-y-3">${category.items.map((item, ii) => `<div class="rounded-lg border border-slate-100 bg-slate-50 p-3"><div class="grid grid-cols-1 gap-2 md:grid-cols-[120px_1fr_auto]"><input id="bbs-item-code-${ci}-${ii}" value="${escHtml(item.code)}" ${editable ? '' : 'disabled'} placeholder="ITEM-01" class="rounded-lg border border-slate-200 px-3 py-2 text-xs font-bold uppercase"><input id="bbs-item-prompt-${ci}-${ii}" value="${escHtml(item.prompt)}" ${editable ? '' : 'disabled'} placeholder="ข้อความตรวจสอบ / พฤติกรรมที่สังเกต" class="rounded-lg border border-slate-200 px-3 py-2 text-xs"><div class="flex gap-1">${editable ? `<button type="button" onclick="window._bbsMoveItem(${ci},${ii},-1)" class="rounded border px-2">↑</button><button type="button" onclick="window._bbsMoveItem(${ci},${ii},1)" class="rounded border px-2">↓</button><button type="button" onclick="window._bbsRemoveItem(${ci},${ii})" class="rounded border border-rose-200 px-2 text-rose-600">×</button>` : ''}</div></div><input id="bbs-item-help-${ci}-${ii}" value="${escHtml(item.helpText)}" ${editable ? '' : 'disabled'} placeholder="คำแนะนำเพิ่มเติม (ไม่บังคับ)" class="mt-2 w-full rounded-lg border border-slate-200 px-3 py-2 text-xs"><div class="mt-2 flex flex-wrap gap-3 text-[10px] font-bold text-slate-600"><span class="rounded bg-white px-2 py-1">Safe / Unsafe / N/A</span><label><input id="bbs-item-required-${ci}-${ii}" type="checkbox" ${item.isRequired ? 'checked' : ''} ${editable ? '' : 'disabled'}> บังคับตอบ</label><label><input id="bbs-item-remark-${ci}-${ii}" type="checkbox" ${item.unsafeRequiresRemark ? 'checked' : ''} ${editable ? '' : 'disabled'}> Unsafe: หมายเหตุ</label><label><input id="bbs-item-photo-${ci}-${ii}" type="checkbox" ${item.unsafeRequiresPhoto ? 'checked' : ''} ${editable ? '' : 'disabled'}> รูป</label><label><input id="bbs-item-action-${ci}-${ii}" type="checkbox" ${item.unsafeRequiresAction ? 'checked' : ''} ${editable ? '' : 'disabled'}> Action</label></div></div>`).join('')}</div>${editable ? `<button type="button" onclick="window._bbsAddItem(${ci})" class="mt-3 rounded-lg border border-indigo-200 bg-indigo-50 px-3 py-2 text-xs font-bold text-indigo-700">+ เพิ่มข้อ</button>` : ''}</section>`).join('');
+    const scopes = editor.scopes.map((scope, index) => `<div class="grid grid-cols-1 gap-2 rounded-lg border border-slate-200 bg-white p-3 md:grid-cols-5"><select id="bbs-scope-dept-${index}" onchange="window._bbsScopeDeptChanged(${index})" ${editable ? '' : 'disabled'} class="rounded-lg border px-2 py-2 text-xs"><option value="">ทั้งบริษัท</option>${(_bbsFoundation?.departments || []).map(d => `<option value="${Number(d.id)}" ${Number(scope.departmentId) === Number(d.id) ? 'selected' : ''}>${escHtml(d.Name)}</option>`).join('')}</select><select id="bbs-scope-unit-${index}" ${editable ? '' : 'disabled'} class="rounded-lg border px-2 py-2 text-xs">${_bbsUnitOptions(scope.departmentId, scope.safetyUnitId, true)}</select><select id="bbs-scope-position-${index}" ${editable ? '' : 'disabled'} class="rounded-lg border px-2 py-2 text-xs"><option value="">ทุกตำแหน่ง</option>${(_bbsFoundation?.positions || []).map(p => `<option value="${Number(p.id)}" ${Number(scope.positionId) === Number(p.id) ? 'selected' : ''}>${escHtml(p.Name)}</option>`).join('')}</select><select id="bbs-scope-level-${index}" ${editable ? '' : 'disabled'} class="rounded-lg border px-2 py-2 text-xs"><option value="">ทุก BBS Level</option>${(_bbsFoundation?.levels || []).map(level => `<option value="${escHtml(level)}" ${scope.bbsLevel === level ? 'selected' : ''}>${escHtml(level)}</option>`).join('')}</select><div class="flex gap-2"><input id="bbs-scope-priority-${index}" type="number" min="-100" max="100" value="${Number(scope.priority)}" ${editable ? '' : 'disabled'} title="Priority" class="min-w-0 flex-1 rounded-lg border px-2 py-2 text-xs">${editable ? `<button type="button" onclick="window._bbsRemoveScope(${index})" class="rounded border border-rose-200 px-3 text-rose-600">×</button>` : ''}</div></div>`).join('');
+    const exchangeActions = `<div class="flex flex-wrap gap-2"><button type="button" onclick="window._bbsExportChecklist()" class="rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-[10px] font-black text-emerald-700">Export Excel</button>${editable ? '<button type="button" onclick="window._bbsOpenImportChecklist()" class="rounded-lg border border-indigo-200 bg-indigo-50 px-3 py-2 text-[10px] font-black text-indigo-700">Import Excel</button>' : ''}<button type="button" onclick="window._bbsToggleChecklistTemplate()" class="rounded-lg border px-3 py-2 text-[10px] font-black ${Number(template.IsActive)===1?'border-rose-200 text-rose-700':'border-emerald-200 text-emerald-700'}">${Number(template.IsActive)===1?'Deactivate Template':'Activate Template'}</button></div>`;
+    openModal(`${escHtml(template.TemplateName || '')} · v${editor.versionNo}`, `<div class="space-y-5"><div class="flex flex-wrap items-center justify-between gap-2"><div class="flex flex-wrap gap-2">${versions}</div>${exchangeActions}</div><div class="rounded-xl border ${editable ? 'border-amber-200 bg-amber-50' : 'border-emerald-200 bg-emerald-50'} p-3 text-xs font-bold ${editable ? 'text-amber-800' : 'text-emerald-800'}">${editable ? 'Draft แก้ไขได้ — เมื่อ Publish แล้วข้อมูลทุกข้อและ Scope จะถูกล็อกถาวร' : `${escHtml(editor.status)} version เป็น read-only หากต้องแก้ให้ Clone เป็น Draft ใหม่`}</div><div class="grid grid-cols-1 gap-3 sm:grid-cols-2"><label class="text-xs font-bold">เริ่มใช้<input id="bbs-version-from" type="date" value="${escHtml(editor.effectiveFrom)}" ${editable ? '' : 'disabled'} class="mt-1 w-full rounded-lg border px-3 py-2"></label><label class="text-xs font-bold">สิ้นสุด<input id="bbs-version-to" type="date" value="${escHtml(editor.effectiveTo)}" ${editable ? '' : 'disabled'} class="mt-1 w-full rounded-lg border px-3 py-2"></label></div><div><div class="mb-2 flex items-center justify-between"><h4 class="text-sm font-black">หมวดหมู่และรายการตรวจ</h4>${editable ? `<button type="button" onclick="window._bbsAddCategory()" class="rounded-lg border px-3 py-2 text-xs font-bold">+ หมวดหมู่</button>` : ''}</div><div class="space-y-3">${categories}</div></div><div><div class="mb-2 flex items-center justify-between"><div><h4 class="text-sm font-black">Scope และ Priority</h4><p class="text-[10px] text-slate-400">Department → Unit / Position / BBS Level → Priority → Effective date</p></div>${editable ? `<button type="button" onclick="window._bbsAddScope()" class="rounded-lg border px-3 py-2 text-xs font-bold">+ Scope</button>` : ''}</div><div class="space-y-2">${scopes}</div></div><div class="sticky bottom-0 flex flex-wrap justify-end gap-2 border-t bg-white py-3">${editable ? `<button type="button" onclick="window._bbsSaveChecklist()" class="rounded-lg border border-indigo-200 px-4 py-2.5 text-xs font-black text-indigo-700">บันทึก Draft</button><button type="button" onclick="window._bbsPublishChecklist()" class="rounded-lg bg-emerald-600 px-4 py-2.5 text-xs font-black text-white">Publish และล็อก Version</button>` : `<button type="button" onclick="window._bbsCloneChecklist()" class="rounded-lg border border-indigo-200 px-4 py-2.5 text-xs font-black text-indigo-700">Clone เป็น Draft ใหม่</button>${editor.status === 'Published' ? `<button type="button" onclick="window._bbsArchiveChecklist()" class="rounded-lg border border-rose-200 px-4 py-2.5 text-xs font-black text-rose-700">Archive</button>` : ''}`}</div></div>`, 'max-w-7xl');
+}
+
+function _bbsAddCategory(){_bbsCaptureEditor();_bbsEditor.categories.push({name:'หมวดหมู่ใหม่',items:[{code:`ITEM-${String(_bbsEditor.categories.reduce((n,c)=>n+c.items.length,0)+1).padStart(2,'0')}`,prompt:'',helpText:'',responseType:'safe_unsafe_na',isRequired:true,unsafeRequiresRemark:true,unsafeRequiresPhoto:false,unsafeRequiresAction:false}]});_bbsRenderChecklistEditor();}
+function _bbsRemoveCategory(index){_bbsCaptureEditor();if(_bbsEditor.categories.length<=1)return showToast('ต้องมีอย่างน้อย 1 หมวดหมู่','warning');_bbsEditor.categories.splice(index,1);_bbsRenderChecklistEditor();}
+function _bbsMoveCategory(index,direction){_bbsCaptureEditor();const next=index+direction;if(next<0||next>=_bbsEditor.categories.length)return;[_bbsEditor.categories[index],_bbsEditor.categories[next]]=[_bbsEditor.categories[next],_bbsEditor.categories[index]];_bbsRenderChecklistEditor();}
+function _bbsAddItem(categoryIndex){_bbsCaptureEditor();const count=_bbsEditor.categories.reduce((n,c)=>n+c.items.length,0)+1;_bbsEditor.categories[categoryIndex].items.push({code:`ITEM-${String(count).padStart(2,'0')}`,prompt:'',helpText:'',responseType:'safe_unsafe_na',isRequired:true,unsafeRequiresRemark:true,unsafeRequiresPhoto:false,unsafeRequiresAction:false});_bbsRenderChecklistEditor();}
+function _bbsRemoveItem(categoryIndex,itemIndex){_bbsCaptureEditor();const items=_bbsEditor.categories[categoryIndex].items;if(items.length<=1)return showToast('แต่ละหมวดต้องมีอย่างน้อย 1 ข้อ','warning');items.splice(itemIndex,1);_bbsRenderChecklistEditor();}
+function _bbsMoveItem(categoryIndex,itemIndex,direction){_bbsCaptureEditor();const items=_bbsEditor.categories[categoryIndex].items;const next=itemIndex+direction;if(next<0||next>=items.length)return;[items[itemIndex],items[next]]=[items[next],items[itemIndex]];_bbsRenderChecklistEditor();}
+function _bbsAddScope(){_bbsCaptureEditor();_bbsEditor.scopes.push({departmentId:'',safetyUnitId:'',positionId:'',bbsLevel:'',priority:0});_bbsRenderChecklistEditor();}
+function _bbsRemoveScope(index){_bbsCaptureEditor();if(_bbsEditor.scopes.length<=1)return showToast('ต้องมีอย่างน้อย 1 Scope','warning');_bbsEditor.scopes.splice(index,1);_bbsRenderChecklistEditor();}
+function _bbsScopeDeptChanged(index){_bbsCaptureEditor();_bbsEditor.scopes[index].safetyUnitId='';_bbsRenderChecklistEditor();}
+async function _bbsSaveChecklist(showSuccess=true){_bbsCaptureEditor();const response=await API.put(`/bbs/admin/checklist-versions/${_bbsEditor.id}`,{rowVersion:_bbsEditor.rowVersion,effectiveFrom:_bbsEditor.effectiveFrom,effectiveTo:_bbsEditor.effectiveTo||null,categories:_bbsEditor.categories,scopes:_bbsEditor.scopes});_bbsEditor=_bbsNormalizeVersion(response.data);if(showSuccess)showToast(response.message||'บันทึก Draft แล้ว','success');await _bbsOpenChecklist(_bbsEditor.templateId,_bbsEditor.id);return response;}
+async function _bbsPublishChecklist(){if(!window.confirm('Publish แล้ว version นี้จะแก้ไขหรือลบย้อนหลังไม่ได้ ยืนยันหรือไม่?'))return;await _bbsSaveChecklist(false);const response=await API.post(`/bbs/admin/checklist-versions/${_bbsEditor.id}/publish`,{});showToast(response.message||'Publish แล้ว','success');await _bbsReload();await _bbsOpenChecklist(_bbsEditor.templateId,_bbsEditor.id);}
+async function _bbsCloneChecklist(){const response=await API.post(`/bbs/admin/checklist-versions/${_bbsEditor.id}/clone`,{});showToast(response.message||'Clone แล้ว','success');await _bbsReload();await _bbsOpenChecklist(_bbsEditor.templateId,response.data.id);}
+async function _bbsArchiveChecklist(){if(!window.confirm('Archive version นี้หรือไม่? ประวัติจะไม่ถูกลบ'))return;const templateId=_bbsEditor.templateId;await API.post(`/bbs/admin/checklist-versions/${_bbsEditor.id}/archive`,{});showToast('Archive แล้ว','success');await _bbsReload();await _bbsOpenChecklist(templateId,_bbsEditor.id);}
+async function _bbsToggleChecklistTemplate(){const templateId=Number(_bbsChecklistDetail?.template?.id||0);const next=Number(_bbsChecklistDetail?.template?.IsActive)!==1;if(!templateId)return;const response=await API.put(`/bbs/admin/checklists/${templateId}/status`,{isActive:next});showToast(response.message||'บันทึกสถานะแล้ว','success');await _bbsReload();await _bbsOpenChecklist(templateId,_bbsEditor.id);}
+
+function _bbsExportChecklist() {
+    if (typeof XLSX === 'undefined') return showToast('ไม่พบไลบรารี Excel กรุณารีเฟรชหน้าแล้วลองใหม่', 'error');
+    if (_bbsEditor?.status === 'Draft') _bbsCaptureEditor();
+    const editor = _bbsEditor; const template = _bbsChecklistDetail?.template || {};
+    if (!editor) return showToast('ไม่พบ Checklist ที่จะ Export', 'warning');
+    const itemRows = [];
+    editor.categories.forEach((category, categoryIndex) => category.items.forEach((item, itemIndex) => itemRows.push({
+        CategoryOrder: categoryIndex + 1, CategoryName: category.name, ItemOrder: itemIndex + 1,
+        ItemCode: item.code, ItemPrompt: item.prompt, HelpText: item.helpText || '', ResponseType: 'safe_unsafe_na',
+        Required: item.isRequired ? 'Yes' : 'No', UnsafeRequiresRemark: item.unsafeRequiresRemark ? 'Yes' : 'No',
+        UnsafeRequiresPhoto: item.unsafeRequiresPhoto ? 'Yes' : 'No', UnsafeRequiresAction: item.unsafeRequiresAction ? 'Yes' : 'No',
+    })));
+    const scopeRows = editor.scopes.map((scope, index) => {
+        const department = (_bbsFoundation?.departments || []).find(row => Number(row.id) === Number(scope.departmentId));
+        const unit = (_bbsFoundation?.units || []).find(row => Number(row.id) === Number(scope.safetyUnitId));
+        const position = (_bbsFoundation?.positions || []).find(row => Number(row.id) === Number(scope.positionId));
+        return { ScopeOrder: index + 1, DepartmentID: scope.departmentId || '', DepartmentName: department?.Name || '', SafetyUnitID: scope.safetyUnitId || '', SafetyUnitName: unit?.name || '', PositionID: scope.positionId || '', PositionName: position?.Name || '', BBSLevel: scope.bbsLevel || '', Priority: Number(scope.priority || 0) };
+    });
+    const masterRows = [
+        ...(_bbsFoundation?.departments || []).map(row => ({ Type: 'Department', ID: row.id, ParentID: '', Name: row.Name })),
+        ...(_bbsFoundation?.units || []).map(row => ({ Type: 'SafetyUnit', ID: row.id, ParentID: row.department_id, Name: row.name })),
+        ...(_bbsFoundation?.positions || []).map(row => ({ Type: 'Position', ID: row.id, ParentID: '', Name: row.Name })),
+        ...(_bbsFoundation?.levels || []).map(row => ({ Type: 'BBSLevel', ID: '', ParentID: '', Name: row })),
+    ];
+    const workbook = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(workbook, XLSX.utils.aoa_to_sheet([
+        ['BBS Checklist Excel Exchange - Phase 2B'],
+        ['Edit only Checklist, Items, and Scopes sheets. Do not rename column headers.'],
+        ['Import is allowed only into a Draft version and replaces its categories, items, scopes, and effective dates atomically.'],
+        ['Use IDs from Master Reference. Blank scope dimensions mean all values in that dimension.'],
+        ['Boolean values: Yes/No, True/False, or 1/0. ResponseType currently supports safe_unsafe_na only.'],
+    ]), 'README');
+    XLSX.utils.book_append_sheet(workbook, XLSX.utils.json_to_sheet([{ TemplateCode: template.TemplateCode || '', TemplateName: template.TemplateName || '', VersionNo: editor.versionNo, Status: editor.status, EffectiveFrom: editor.effectiveFrom, EffectiveTo: editor.effectiveTo || '' }]), 'Checklist');
+    XLSX.utils.book_append_sheet(workbook, XLSX.utils.json_to_sheet(itemRows), 'Items');
+    XLSX.utils.book_append_sheet(workbook, XLSX.utils.json_to_sheet(scopeRows), 'Scopes');
+    XLSX.utils.book_append_sheet(workbook, XLSX.utils.json_to_sheet(masterRows), 'Master Reference');
+    const safeCode = String(template.TemplateCode || 'BBS_CHECKLIST').replace(/[^A-Za-z0-9_-]/g, '_');
+    XLSX.writeFile(workbook, `${safeCode}_v${editor.versionNo}_${editor.status}.xlsx`);
+}
+
+function _bbsExcelBoolean(value, fallback, field, rowNumber) {
+    if (value === '' || value === null || value === undefined) return fallback;
+    const normalized = String(value).trim().toLowerCase();
+    if (['yes', 'true', '1', 'y', 'ใช่'].includes(normalized)) return true;
+    if (['no', 'false', '0', 'n', 'ไม่'].includes(normalized)) return false;
+    throw new Error(`${field} แถว ${rowNumber} ต้องเป็น Yes/No, True/False หรือ 1/0`);
+}
+
+function _bbsExcelOptionalId(value) {
+    if (value === '' || value === null || value === undefined) return '';
+    const number = Number(value);
+    return Number.isInteger(number) && number > 0 ? number : value;
+}
+
+function _bbsExcelPriority(value, rowNumber) {
+    if (value === '' || value === null || value === undefined) return 0;
+    const number = Number(value);
+    if (!Number.isInteger(number)) throw new Error(`Priority แถว ${rowNumber} ต้องเป็นจำนวนเต็ม`);
+    return number;
+}
+
+function _bbsImportPayloadFromWorkbook(workbook) {
+    for (const name of ['Checklist', 'Items', 'Scopes']) if (!workbook.Sheets[name]) throw new Error(`ไม่พบชีต ${name}`);
+    const metaRows = XLSX.utils.sheet_to_json(workbook.Sheets.Checklist, { defval: '', raw: false });
+    const itemRows = XLSX.utils.sheet_to_json(workbook.Sheets.Items, { defval: '', raw: false }).filter(row => Object.values(row).some(value => String(value).trim() !== ''));
+    const scopeRows = XLSX.utils.sheet_to_json(workbook.Sheets.Scopes, { defval: '', raw: false }).filter(row => Object.values(row).some(value => String(value).trim() !== ''));
+    if (!metaRows.length) throw new Error('ชีต Checklist ต้องมีข้อมูล 1 แถว');
+    if (!itemRows.length) throw new Error('ชีต Items ต้องมีอย่างน้อย 1 แถว');
+    if (!scopeRows.length) throw new Error('ชีต Scopes ต้องมีอย่างน้อย 1 แถว');
+    const requiredItemHeaders = ['CategoryName', 'ItemCode', 'ItemPrompt'];
+    for (const header of requiredItemHeaders) if (!Object.prototype.hasOwnProperty.call(itemRows[0], header)) throw new Error(`ชีต Items ไม่มีคอลัมน์ ${header}`);
+    for (const header of ['DepartmentID', 'SafetyUnitID', 'PositionID', 'BBSLevel', 'Priority']) if (!Object.prototype.hasOwnProperty.call(scopeRows[0], header)) throw new Error(`ชีต Scopes ไม่มีคอลัมน์ ${header}`);
+    if (!Object.prototype.hasOwnProperty.call(metaRows[0], 'EffectiveFrom')) throw new Error('ชีต Checklist ไม่มีคอลัมน์ EffectiveFrom');
+    const sortedItems = itemRows.map((row, index) => ({ row, excelRow: index + 2 })).sort((a, b) => Number(a.row.CategoryOrder || 0) - Number(b.row.CategoryOrder || 0) || Number(a.row.ItemOrder || 0) - Number(b.row.ItemOrder || 0));
+    const categories = []; const categoryMap = new Map();
+    for (const entry of sortedItems) {
+        const categoryName = String(entry.row.CategoryName || '').trim();
+        const categoryKey = `${Number(entry.row.CategoryOrder || 0)}::${categoryName}`;
+        let category = categoryMap.get(categoryKey);
+        if (!category) { category = { name: categoryName, items: [] }; categoryMap.set(categoryKey, category); categories.push(category); }
+        category.items.push({
+            code: String(entry.row.ItemCode || '').trim(), prompt: String(entry.row.ItemPrompt || '').trim(), helpText: String(entry.row.HelpText || '').trim(),
+            responseType: String(entry.row.ResponseType || 'safe_unsafe_na').trim(),
+            isRequired: _bbsExcelBoolean(entry.row.Required, true, 'Required', entry.excelRow),
+            unsafeRequiresRemark: _bbsExcelBoolean(entry.row.UnsafeRequiresRemark, true, 'UnsafeRequiresRemark', entry.excelRow),
+            unsafeRequiresPhoto: _bbsExcelBoolean(entry.row.UnsafeRequiresPhoto, false, 'UnsafeRequiresPhoto', entry.excelRow),
+            unsafeRequiresAction: _bbsExcelBoolean(entry.row.UnsafeRequiresAction, false, 'UnsafeRequiresAction', entry.excelRow),
+        });
+    }
+    const scopes = scopeRows.map((row, index) => ({ departmentId: _bbsExcelOptionalId(row.DepartmentID), safetyUnitId: _bbsExcelOptionalId(row.SafetyUnitID), positionId: _bbsExcelOptionalId(row.PositionID), bbsLevel: String(row.BBSLevel || '').trim(), priority: _bbsExcelPriority(row.Priority, index + 2) }));
+    const meta = metaRows[0];
+    return { rowVersion: _bbsEditor.rowVersion, effectiveFrom: String(meta.EffectiveFrom || _bbsEditor.effectiveFrom).trim(), effectiveTo: String(meta.EffectiveTo || '').trim() || null, categories, scopes };
+}
+
+function _bbsOpenImportChecklist() {
+    if (!_bbsEditor || _bbsEditor.status !== 'Draft') return showToast('Import ได้เฉพาะ Draft version', 'warning');
+    _bbsCaptureEditor(); _bbsImportPreview = null;
+    openModal('Import BBS Checklist Excel', `<div class="space-y-4"><div class="rounded-xl border border-amber-200 bg-amber-50 p-4 text-xs text-amber-800"><p class="font-black">Import จะแทนที่ข้อมูลใน Draft นี้ทั้งหมด</p><p class="mt-1">ระบบจะ Preview และตรวจรูปแบบ, รหัสซ้ำ, Master Data, Scope และวันที่ก่อน โดยยังไม่บันทึกจนกด “ยืนยัน Import”</p></div><label class="block rounded-xl border-2 border-dashed border-indigo-200 bg-indigo-50/40 p-6 text-center"><span class="text-sm font-black text-indigo-700">เลือกไฟล์ .xlsx หรือ .xls</span><input id="bbs-checklist-import-file" type="file" accept=".xlsx,.xls" onchange="window._bbsPreviewImportFile(this.files?.[0])" class="mt-3 block w-full text-xs"></label><div id="bbs-import-preview-result" class="rounded-xl border border-slate-200 p-5 text-center text-xs text-slate-400">ยังไม่ได้เลือกไฟล์</div><div class="flex justify-end"><button type="button" onclick="window._bbsOpenChecklist(${Number(_bbsEditor.templateId)},${Number(_bbsEditor.id)})" class="rounded-lg border border-slate-200 px-4 py-2.5 text-xs font-bold">กลับไป Checklist</button></div></div>`, 'max-w-3xl');
+}
+
+async function _bbsPreviewImportFile(file) {
+    const target = document.getElementById('bbs-import-preview-result'); _bbsImportPreview = null;
+    if (!file) return;
+    if (!/\.xlsx?$/i.test(file.name || '') || file.size > 5 * 1024 * 1024) { if (target) target.innerHTML = '<p class="font-bold text-rose-700">รองรับเฉพาะ .xlsx/.xls ขนาดไม่เกิน 5 MB</p>'; return; }
+    if (typeof XLSX === 'undefined') { if (target) target.innerHTML = '<p class="font-bold text-rose-700">ไม่พบไลบรารี Excel</p>'; return; }
+    if (target) target.innerHTML = '<p class="animate-pulse font-bold text-indigo-600">กำลังอ่านและตรวจสอบไฟล์...</p>';
+    try {
+        const workbook = XLSX.read(await file.arrayBuffer(), { type: 'array', raw: false });
+        const payload = _bbsImportPayloadFromWorkbook(workbook);
+        const response = await API.post(`/bbs/admin/checklist-versions/${_bbsEditor.id}/import-preview`, payload);
+        _bbsImportPreview = { ...response.data.normalized, rowVersion: response.data.rowVersion };
+        const summary = response.data.summary || {};
+        if (target) target.innerHTML = `<div class="text-left"><div class="flex items-center justify-between gap-3"><div><p class="text-sm font-black text-emerald-700">Validation ผ่าน — ยังไม่มีการเปลี่ยนข้อมูล</p><p class="mt-1 text-[10px] text-slate-500">${escHtml(file.name)}</p></div><span class="rounded-full bg-emerald-50 px-3 py-1 text-[10px] font-black text-emerald-700">Ready</span></div><div class="mt-4 grid grid-cols-3 gap-2">${[['หมวดหมู่',summary.categoryCount],['รายการ',summary.itemCount],['Scope',summary.scopeCount]].map(([label,value])=>`<div class="rounded-lg bg-slate-50 p-3 text-center"><p class="text-lg font-black text-slate-800">${Number(value||0)}</p><p class="text-[10px] text-slate-500">${label}</p></div>`).join('')}</div><p class="mt-3 text-[10px] text-slate-500">Effective: ${escHtml(summary.effectiveFrom||'')} → ${escHtml(summary.effectiveTo||'ไม่มีกำหนด')}</p><button type="button" onclick="window._bbsConfirmChecklistImport()" class="mt-4 w-full rounded-lg bg-indigo-600 px-4 py-3 text-xs font-black text-white">ยืนยัน Import และแทนที่ Draft</button></div>`;
+    } catch (error) {
+        if (target) target.innerHTML = `<div class="text-left rounded-lg border border-rose-200 bg-rose-50 p-4"><p class="font-black text-rose-700">ไฟล์ไม่ผ่าน Validation</p><p class="mt-1 text-xs text-rose-600">${escHtml(error.message || 'Unknown error')}</p><p class="mt-2 text-[10px] text-slate-500">Draft เดิมยังไม่ถูกเปลี่ยนแปลง</p></div>`;
+    }
+}
+
+async function _bbsConfirmChecklistImport() {
+    if (!_bbsImportPreview || !_bbsEditor) return showToast('กรุณา Preview ไฟล์ให้ผ่านก่อน', 'warning');
+    const versionId = _bbsEditor.id; const templateId = _bbsEditor.templateId;
+    const response = await API.post(`/bbs/admin/checklist-versions/${versionId}/import`, { ..._bbsImportPreview, confirmed: true });
+    _bbsImportPreview = null; showToast(response.message || 'Import Checklist แล้ว', 'success');
+    await _bbsReload(); await _bbsOpenChecklist(templateId, versionId);
+}
+
+function _bbsOpenResolverPreview(){openModal('ทดสอบ Checklist Resolver',`<div class="space-y-4"><div class="rounded-lg border border-sky-200 bg-sky-50 p-3 text-xs text-sky-800">Preview นี้เรียก resolver ตัวเดียวกับ observation flow: specificity → priority → effective date และจะ Fail closed เมื่อไม่พบหรือมี conflict</div><div class="grid grid-cols-1 gap-3 sm:grid-cols-[1fr_180px_auto]"><label class="text-xs font-bold">พนักงาน<input id="bbs-resolve-employee" list="bbs-resolve-employees" placeholder="รหัสพนักงาน" class="mt-1 w-full rounded-lg border px-3 py-2.5"><datalist id="bbs-resolve-employees">${(_bbsFoundation?.employees||[]).map(e=>`<option value="${escHtml(e.EmployeeID)}">${escHtml(e.EmployeeName)} · ${escHtml(e.Department||'')} / ${escHtml(e.Unit||'')}</option>`).join('')}</datalist></label><label class="text-xs font-bold">วันที่<input id="bbs-resolve-date" type="date" value="${_bbsBangkokToday()}" class="mt-1 w-full rounded-lg border px-3 py-2.5"></label><button type="button" onclick="window._bbsRunResolverPreview()" class="self-end rounded-lg bg-indigo-600 px-4 py-2.5 text-xs font-black text-white">Resolve</button></div><div id="bbs-resolve-result" class="rounded-xl border border-dashed border-slate-200 p-6 text-center text-xs text-slate-400">เลือกพนักงานและวันที่เพื่อดู Checklist ที่ระบบจะใช้จริง</div></div>`,'max-w-4xl');}
+async function _bbsRunResolverPreview(){const target=document.getElementById('bbs-resolve-result');const employeeId=document.getElementById('bbs-resolve-employee')?.value?.trim()||'';const asOf=document.getElementById('bbs-resolve-date')?.value||'';if(!employeeId||!asOf)return showToast('กรุณาระบุพนักงานและวันที่','warning');if(target)target.innerHTML='<p class="animate-pulse text-indigo-600">กำลัง Resolve...</p>';try{const response=await API.get(`/bbs/checklists/resolve?employeeId=${encodeURIComponent(employeeId)}&asOf=${encodeURIComponent(asOf)}`);const data=response.data||{};const checklist=data.checklist||{};if(target)target.innerHTML=`<div class="text-left"><div class="flex flex-wrap items-start justify-between gap-3"><div><p class="text-base font-black text-slate-800">${escHtml(checklist.TemplateName||'')}</p><p class="text-xs text-slate-500">${escHtml(checklist.TemplateCode||'')} · v${Number(checklist.VersionNo||0)} · ${escHtml(checklist.Status||'')}</p></div><span class="rounded-full bg-emerald-50 px-3 py-1 text-[10px] font-black text-emerald-700">Resolved</span></div><p class="mt-3 rounded-lg bg-slate-50 p-3 text-[10px] text-slate-500">${escHtml(data.reason||'')}</p><div class="mt-4 space-y-3">${(checklist.categories||[]).map(category=>`<div><p class="text-xs font-black text-slate-700">${escHtml(category.CategoryName||'')}</p><div class="mt-1 space-y-1">${(category.items||[]).map(item=>`<div class="rounded-lg border border-slate-100 p-2 text-xs text-slate-600"><span class="mr-2 font-bold text-indigo-600">${escHtml(item.ItemCode||'')}</span>${escHtml(item.ItemPrompt||'')}</div>`).join('')}</div></div>`).join('')}</div></div>`;}catch(error){if(target)target.innerHTML=`<div class="text-left rounded-lg border border-rose-200 bg-rose-50 p-4"><p class="font-black text-rose-700">Resolver ไม่สามารถเลือก Checklist ได้</p><p class="mt-1 text-xs text-rose-600">${escHtml(error.message||'Unknown error')}</p></div>`;}}
+
+async function _bbsSavePositionMapping(positionId) {
+    const level = document.getElementById(`bbs-map-level-${positionId}`)?.value || '';
+    const activeInput = document.getElementById(`bbs-map-active-${positionId}`);
+    if (!level) return showToast('กรุณาเลือก BBS Level', 'warning');
+    await API.put(`/bbs/admin/position-mappings/${positionId}`, { bbsLevel: level, isActive: activeInput?.checked !== false });
+    showToast('บันทึก Position Mapping แล้ว', 'success');
+    await _bbsReload();
+}
+
+async function _bbsSaveKpi() {
+    const targetCount = Number(document.getElementById('bbs-kpi-target')?.value || 0);
+    await API.put('/bbs/admin/kpi-rules/Group%20Leader', { targetCount, weekdays: [1, 2, 3, 4, 5], isActive: true });
+    showToast('บันทึก KPI แล้ว', 'success');
+    await _bbsReload();
+}
+
+function _bbsPilotDeptChanged(departmentId) {
+    const unit = document.getElementById('bbs-pilot-unit');
+    if (unit) unit.innerHTML = _bbsUnitOptions(departmentId, '', false);
+}
+
+async function _bbsSavePilot() {
+    const payload = {
+        departmentId: Number(document.getElementById('bbs-pilot-dept')?.value || 0),
+        safetyUnitId: Number(document.getElementById('bbs-pilot-unit')?.value || 0),
+        effectiveFrom: document.getElementById('bbs-pilot-from')?.value || '',
+        effectiveTo: document.getElementById('bbs-pilot-to')?.value || null,
+    };
+    await API.put('/bbs/admin/pilot-scope', payload);
+    showToast('บันทึก Pilot Scope แล้ว', 'success');
+    await _bbsReload();
+}
+
+function _bbsOpenAssignment(id = null) {
+    const row = id ? (_bbsFoundation?.assignments || []).find(item => Number(item.id) === Number(id)) : null;
+    const departmentId = row?.DepartmentID || (_bbsFoundation?.pilotScopes || []).find(scope => Number(scope.IsActive) === 1)?.DepartmentID || _bbsFoundation?.departments?.[0]?.id || '';
+    openModal(row ? 'แก้ไข BBS Hierarchy Assignment' : 'เพิ่ม BBS Hierarchy Assignment', `
+        <form onsubmit="event.preventDefault();window._bbsSaveAssignment(${id ? Number(id) : 'null'})" class="space-y-4">
+            <div class="rounded-lg border border-amber-200 bg-amber-50 p-3 text-xs text-amber-800">ระบบอนุญาตเฉพาะระดับที่ติดกัน และป้องกันช่วง Assignment ซ้อนกันของ Member คนเดียวกัน</div>
+            <label class="block text-xs font-bold text-slate-600">Supervisor
+                <select id="bbs-assignment-supervisor" required class="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2.5">${_bbsEmployeeOptions(row?.SupervisorEmployeeID)}</select>
+            </label>
+            <label class="block text-xs font-bold text-slate-600">Member
+                <select id="bbs-assignment-member" required class="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2.5">${_bbsEmployeeOptions(row?.MemberEmployeeID)}</select>
+            </label>
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <label class="text-xs font-bold text-slate-600">Department
+                    <select id="bbs-assignment-dept" onchange="window._bbsAssignmentDeptChanged(this.value)" required class="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2.5">${_bbsDepartmentOptions(departmentId)}</select>
+                </label>
+                <label class="text-xs font-bold text-slate-600">Safety Unit
+                    <select id="bbs-assignment-unit" class="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2.5">${_bbsUnitOptions(departmentId, row?.SafetyUnitID, true)}</select>
+                </label>
+                <label class="text-xs font-bold text-slate-600">Assignment Type
+                    <select id="bbs-assignment-type" class="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2.5">${(_bbsFoundation?.assignmentTypes || []).map(type => `<option value="${escHtml(type)}" ${row?.AssignmentType === type ? 'selected' : ''}>${escHtml(type)}</option>`).join('')}</select>
+                </label>
+                <label class="text-xs font-bold text-slate-600">เริ่มใช้
+                    <input id="bbs-assignment-from" type="date" required value="${escHtml(String(row?.EffectiveFrom || _bbsBangkokToday()).slice(0, 10))}" class="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2.5">
+                </label>
+                <label class="text-xs font-bold text-slate-600">สิ้นสุด
+                    <input id="bbs-assignment-to" type="date" value="${escHtml(String(row?.EffectiveTo || '').slice(0, 10))}" class="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2.5">
+                </label>
+            </div>
+            <label class="block text-xs font-bold text-slate-600">เหตุผล / หมายเหตุ
+                <input id="bbs-assignment-reason" maxlength="255" value="${escHtml(row?.Reason || '')}" class="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2.5">
+            </label>
+            <div class="flex justify-end gap-2 pt-2"><button type="button" onclick="closeModal()" class="rounded-lg border border-slate-200 px-4 py-2.5 text-xs font-bold text-slate-600">ยกเลิก</button><button type="submit" class="rounded-lg bg-emerald-600 px-4 py-2.5 text-xs font-black text-white">บันทึก Assignment</button></div>
+        </form>`, 'max-w-3xl');
+}
+
+function _bbsAssignmentDeptChanged(departmentId) {
+    const unit = document.getElementById('bbs-assignment-unit');
+    if (unit) unit.innerHTML = _bbsUnitOptions(departmentId, '', true);
+}
+
+async function _bbsSaveAssignment(id = null) {
+    const payload = {
+        supervisorEmployeeId: document.getElementById('bbs-assignment-supervisor')?.value || '',
+        memberEmployeeId: document.getElementById('bbs-assignment-member')?.value || '',
+        departmentId: Number(document.getElementById('bbs-assignment-dept')?.value || 0),
+        safetyUnitId: document.getElementById('bbs-assignment-unit')?.value ? Number(document.getElementById('bbs-assignment-unit').value) : null,
+        assignmentType: document.getElementById('bbs-assignment-type')?.value || 'permanent',
+        effectiveFrom: document.getElementById('bbs-assignment-from')?.value || '',
+        effectiveTo: document.getElementById('bbs-assignment-to')?.value || null,
+        reason: document.getElementById('bbs-assignment-reason')?.value || '',
+        isActive: true,
+    };
+    if (id) await API.put(`/bbs/admin/hierarchy-assignments/${id}`, payload);
+    else await API.post('/bbs/admin/hierarchy-assignments', payload);
+    closeModal();
+    showToast('บันทึก Hierarchy Assignment แล้ว', 'success');
+    await _bbsReload();
+}
+
+async function _bbsDeactivateAssignment(id) {
+    if (!confirm('ปิดใช้งาน Assignment นี้? ประวัติจะยังคงอยู่')) return;
+    await API.delete(`/bbs/admin/hierarchy-assignments/${id}`);
+    showToast('ปิดใช้งาน Assignment แล้ว', 'success');
+    await _bbsReload();
+}
+
+function _bbsOpenEligibility() {
+    openModal('ตั้งสถานะ BBS Employee Eligibility', `
+        <form onsubmit="event.preventDefault();window._bbsSaveEligibility()" class="space-y-4">
+            <div class="rounded-lg border border-sky-200 bg-sky-50 p-3 text-xs text-sky-800">ค่าเริ่มต้นของทุกคนคือ active ใช้ Override เฉพาะเมื่อมีข้อมูลที่ตรวจสอบได้ พร้อมเหตุผลและช่วงเวลา</div>
+            <label class="block text-xs font-bold text-slate-600">พนักงาน
+                <select id="bbs-eligibility-employee" required class="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2.5">${_bbsEmployeeOptions()}</select>
+            </label>
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <label class="text-xs font-bold text-slate-600">สถานะ
+                    <select id="bbs-eligibility-status" class="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2.5">${(_bbsFoundation?.eligibilityValues || []).map(value => `<option value="${escHtml(value)}">${escHtml(value)}</option>`).join('')}</select>
+                </label>
+                <label class="text-xs font-bold text-slate-600">เริ่มใช้
+                    <input id="bbs-eligibility-from" type="date" required value="${_bbsBangkokToday()}" class="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2.5">
+                </label>
+                <label class="text-xs font-bold text-slate-600">สิ้นสุด
+                    <input id="bbs-eligibility-to" type="date" class="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2.5">
+                </label>
+            </div>
+            <label class="block text-xs font-bold text-slate-600">เหตุผล
+                <input id="bbs-eligibility-reason" required maxlength="255" class="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2.5">
+            </label>
+            <div class="flex justify-end gap-2"><button type="button" onclick="closeModal()" class="rounded-lg border border-slate-200 px-4 py-2.5 text-xs font-bold text-slate-600">ยกเลิก</button><button type="submit" class="rounded-lg bg-emerald-600 px-4 py-2.5 text-xs font-black text-white">บันทึกสถานะ</button></div>
+        </form>`, 'max-w-2xl');
+}
+
+async function _bbsSaveEligibility() {
+    const employeeId = document.getElementById('bbs-eligibility-employee')?.value || '';
+    const payload = {
+        eligibility: document.getElementById('bbs-eligibility-status')?.value || '',
+        effectiveFrom: document.getElementById('bbs-eligibility-from')?.value || '',
+        effectiveTo: document.getElementById('bbs-eligibility-to')?.value || null,
+        reason: document.getElementById('bbs-eligibility-reason')?.value || '',
+    };
+    await API.put(`/bbs/admin/eligibility/${encodeURIComponent(employeeId)}`, payload);
+    closeModal();
+    showToast('บันทึก Eligibility แล้ว', 'success');
+    await _bbsReload();
 }

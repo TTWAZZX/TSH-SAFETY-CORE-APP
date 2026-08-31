@@ -48,9 +48,57 @@ const CHART_COLORS = ['#6366f1','#f97316','#10b981','#0284c7','#a855f7','#f59e0b
 const MONTHS_TH    = ['ม.ค.','ก.พ.','มี.ค.','เม.ย.','พ.ค.','มิ.ย.','ก.ค.','ส.ค.','ก.ย.','ต.ค.','พ.ย.','ธ.ค.'];
 const KY_ATTACHMENT_LIMIT = 20 * 1024 * 1024;
 const KY_VIDEO_LIMIT = 200 * 1024 * 1024;
+const KY_VIDEO_CHUNK_SIZE = 5 * 1024 * 1024;
 const KY_VIDEO_SHOWCASE_LIMIT = 6;
 const KY_COMPANY_EMAIL_DOMAIN = '@thaisummit-harness.co.th';
 const JOHNNY_IMAGE_RISK_DRAFT_KEY = 'johnny_image_risk_draft';
+
+async function uploadKyVideoInChunks(activityId, file, onProgress = () => {}) {
+    if (!activityId) throw new Error('ไม่พบรหัสกิจกรรม KY สำหรับอัปโหลดวิดีโอ');
+    if (!file || file.size <= 0 || file.size > KY_VIDEO_LIMIT) throw new Error('วิดีโอต้องมีขนาดไม่เกิน 200 MB');
+
+    const initialized = await API.post(`/ky/${encodeURIComponent(activityId)}/video-upload/init`, {
+        fileName: file.name,
+        fileSize: file.size,
+        mimeType: file.type || '',
+    });
+    const uploadId = initialized?.data?.uploadId;
+    const chunkSize = Number(initialized?.data?.chunkSize || KY_VIDEO_CHUNK_SIZE);
+    const totalChunks = Number(initialized?.data?.totalChunks || Math.ceil(file.size / chunkSize));
+    if (!uploadId || !Number.isSafeInteger(chunkSize) || chunkSize <= 0 || !Number.isSafeInteger(totalChunks) || totalChunks <= 0) {
+        throw new Error('เซิร์ฟเวอร์ไม่สามารถเริ่มชุดอัปโหลดวิดีโอได้');
+    }
+
+    onProgress(0, totalChunks);
+    for (let index = 0; index < totalChunks; index += 1) {
+        const start = index * chunkSize;
+        const chunk = file.slice(start, Math.min(file.size, start + chunkSize));
+        let lastError = null;
+        for (let attempt = 1; attempt <= 3; attempt += 1) {
+            try {
+                const form = new FormData();
+                form.append('chunk', chunk, `${file.name}.part-${index}`);
+                await API.post(`/ky/${encodeURIComponent(activityId)}/video-upload/${uploadId}/chunk/${index}`, form);
+                lastError = null;
+                break;
+            } catch (error) {
+                lastError = error;
+                if (attempt < 3) await new Promise(resolve => setTimeout(resolve, attempt * 500));
+            }
+        }
+        if (lastError) throw lastError;
+        onProgress(index + 1, totalChunks);
+    }
+    const completed = await API.post(`/ky/${encodeURIComponent(activityId)}/video-upload/${uploadId}/complete`, {});
+    onProgress(totalChunks, totalChunks, true);
+    return completed;
+}
+
+function setKyVideoUploadProgress(button, completed, total, done = false, label = 'กำลังอัปโหลดวิดีโอ') {
+    if (!button) return;
+    const percent = done ? 100 : (total > 0 ? Math.min(95, Math.round((completed / total) * 95)) : 0);
+    button.textContent = `${label} ${percent}%`;
+}
 
 function kyMediaUrl(url) {
     return normalizeDocumentUrl(url || '');
@@ -1323,7 +1371,7 @@ function openKyFollowupVideoModal(record) {
             <div>
                 <label class="block text-sm font-semibold text-slate-700 mb-1.5" for="ky-followup-video-file">ไฟล์วิดีโอ</label>
                 <input id="ky-followup-video-file" name="video" type="file" accept="video/*" required class="form-input w-full">
-                <p class="text-xs text-slate-400 mt-1">รองรับ MP4, MOV, WebM, AVI, MKV และ MPEG · สูงสุด 200 MB</p>
+                <p class="text-xs text-slate-400 mt-1">รองรับ MP4, MOV, WebM, AVI, MKV และ MPEG · สูงสุด 200 MB · ระบบอัปโหลดแบบแบ่งส่วน</p>
             </div>
             <div class="flex justify-end gap-2">
                 <button type="button" id="ky-followup-video-cancel" class="px-3 py-2 rounded-lg border border-slate-200 text-sm font-bold text-slate-600">ยกเลิก</button>
@@ -1338,7 +1386,9 @@ function openKyFollowupVideoModal(record) {
         if (save) save.disabled = true;
         try {
             showLoading('กำลังอัปโหลดวิดีโอ...');
-            await API.post(`/ky/${record.id}/video`, new FormData(event.target));
+            const file = document.getElementById('ky-followup-video-file')?.files?.[0];
+            if (!file || !validateKySelectedFile(document.getElementById('ky-followup-video-file'), 'video')) return;
+            await uploadKyVideoInChunks(record.id, file, (completed, total, done) => setKyVideoUploadProgress(save, completed, total, done));
             closeModal();
             showToast('แนบวิดีโอ KY สำเร็จ', 'success');
             await loadAndRenderKyEvidenceCompletion();
@@ -1347,7 +1397,10 @@ function openKyFollowupVideoModal(record) {
             showError(error);
         } finally {
             hideLoading();
-            if (save) save.disabled = false;
+            if (save) {
+                save.disabled = false;
+                save.textContent = 'อัปโหลดวิดีโอ';
+            }
         }
     }));
 }
@@ -2537,7 +2590,7 @@ async function renderSubmitForm(container) {
                                     <svg class="w-6 h-6 text-slate-300 group-hover:text-purple-400 transition-colors mb-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 10l4.553-2.069A1 1 0 0121 8.82v6.361a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z"/>
                                     </svg>
-                                    <span class="text-xs text-slate-500">MP4, MOV, AVI · ≤ 200 MB</span>
+                                    <span class="text-xs text-slate-500">MP4, MOV, WebM, AVI, MKV, MPEG · ≤ 200 MB · อัปโหลดแบบแบ่งส่วน</span>
                                     <input type="file" name="video" id="ky-video" class="hidden"
                                            accept="video/mp4,video/quicktime,video/avi,video/webm,video/x-msvideo,video/mpeg">
                                 </label>
@@ -2690,6 +2743,8 @@ function setupFormListeners() {
         try {
             showLoading('กำลังส่งกิจกรรม KY...');
             const fd = new FormData(e.target);
+            const videoFile = document.getElementById('ky-video')?.files?.[0] || null;
+            fd.delete('video');
             const reporterEmail = String(fd.get('ReporterEmail') || '').trim().toLowerCase();
             if (reporterEmail && !/^[^\s@]+@thaisummit-harness\.co\.th$/i.test(reporterEmail)) {
                 showToast(`Company Email ต้องลงท้ายด้วย ${KY_COMPANY_EMAIL_DOMAIN}`, 'warning');
@@ -2709,8 +2764,23 @@ function setupFormListeners() {
             }
             fd.set('Department', dept);
             fd.set('Participants', JSON.stringify(_participants.map(p => p.name)));
-            await API.post('/ky', fd);
-            showToast('ส่งกิจกรรม KY สำเร็จ', 'success');
+            const created = await API.post('/ky', fd);
+            const activityId = created?.id || created?.data?.id;
+            let videoUploadFailed = false;
+            if (videoFile) {
+                try {
+                    await uploadKyVideoInChunks(activityId, videoFile, (completed, total, done) => setKyVideoUploadProgress(btn, completed, total, done));
+                } catch (videoError) {
+                    videoUploadFailed = true;
+                    console.error('KY video upload after submit failed:', videoError);
+                }
+            }
+            showToast(
+                videoUploadFailed
+                    ? 'บันทึกกิจกรรม KY แล้ว แต่วิดีโออัปโหลดไม่สำเร็จ กรุณาแนบย้อนหลังจากประวัติ'
+                    : 'ส่งกิจกรรม KY สำเร็จ',
+                videoUploadFailed ? 'warning' : 'success'
+            );
             _participants = [];
             e.target.reset();
             updateKyReporterEmailStatus(_submitEmailProfile?.CompanyEmail || '', 'current');
@@ -2733,9 +2803,15 @@ function setupFormListeners() {
     }));
 }
 
-// Quarantine a legacy block appended by the upstream merge. The active
-// submit-flow implementations are defined above.
-function _quarantinedLegacyKySubmitMerge() {
+// The upstream merge left these submit helpers inside a private wrapper,
+// which made them unavailable to setupFormListeners(). Keep the merged block
+// scoped, but expose the four helpers used by the active KY submit flow.
+const {
+    setupKyReporterSearch,
+    renderKySafetyUnitSelect,
+    renderKySubmitReporter,
+    refreshKySubmitProgress,
+} = (() => {
 function setupKyReporterSearch() {
     const reporterSearch = document.getElementById('ky-reporter-search');
     const reporterDrop   = document.getElementById('ky-reporter-dropdown');
@@ -3132,7 +3208,13 @@ async function refreshKySubmitProgress(department) {
     } catch (_) {}
 }
 
-}
+return {
+    setupKyReporterSearch,
+    renderKySafetyUnitSelect,
+    renderKySubmitReporter,
+    refreshKySubmitProgress,
+};
+})();
 
 function _addParticipant(name, empId) {
     if (!name) return;
@@ -4959,10 +5041,26 @@ async function showManageModal(id) {
             try {
                 showLoading('กำลังบันทึก...');
                 const fd = new FormData(e.target);
+                const videoFile = document.getElementById('ky-manage-video')?.files?.[0] || null;
                 fd.delete('id');
+                fd.delete('video');
                 await API.put(`/ky/${r.id}`, fd);
+                let videoUploadFailed = false;
+                if (videoFile) {
+                    try {
+                        await uploadKyVideoInChunks(r.id, videoFile, (completed, total, done) => setKyVideoUploadProgress(saveBtn, completed, total, done));
+                    } catch (videoError) {
+                        videoUploadFailed = true;
+                        console.error('KY admin video replacement failed:', videoError);
+                    }
+                }
                 closeModal();
-                showToast('อัปเดตกิจกรรม KY สำเร็จ', 'success');
+                showToast(
+                    videoUploadFailed
+                        ? 'บันทึกข้อมูลกิจกรรมแล้ว แต่วิดีโออัปโหลดไม่สำเร็จ กรุณาเปิดรายการแล้วลองแนบอีกครั้ง'
+                        : 'อัปเดตกิจกรรม KY สำเร็จ',
+                    videoUploadFailed ? 'warning' : 'success'
+                );
                 if (_activeTab === 'history') await fetchAndRenderHistory();
                 if (_activeTab === 'manage') await fetchAndRenderManage('all');
                 await _loadHeroStats();

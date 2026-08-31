@@ -1,5 +1,265 @@
 # TSH Safety Core Activity - Changelog And Handoff History
 
+## BBS Smart Card Phase 10C-3 Runtime Resilience And Safe Recovery (2026-08-31, Production staged)
+
+- Split BBS read failures into Core, History, Community, Inspector, Action, Analytics and Card recovery states so one unavailable endpoint no longer blanks the complete module or silently moves the user to another tab.
+- Added actionable retry banners that preserve previously confirmed section data with a stale-data warning, while first-load failures hide unknown totals instead of displaying misleading zero values.
+- Added accessible pending feedback and repeat-activation locks to critical Observation/batch, Action, Community, inspector, template, card and Department QR mutation controls. Existing server idempotency, concurrency and one-time QR rules are unchanged.
+- Added `test:bbs-phase10c3`, authenticated read-only `uat:bbs-phase10c3-browser` and normal-login `uat:bbs-phase10c3-production`. Local Browser UAT passes 8 tabs and five phone viewports, including a simulated temporary Analytics connection failure followed by successful in-place Retry. Phase 4-10C-2 regressions and the complete Backend suite pass (`exit 0`). Production deploy advanced only `index.html`, `public/js/main.js` and `public/js/pages/bbs-smart-card.js`; FTPS/HTTPS SHA-256 checks pass `3/3`, normal-login Chrome UAT passes 8 tabs/three phone orientations with zero console errors, and the staged gate remains Admin `200`, User `403`, anonymous `401`. No API, schema, Master/Pilot data, business record or upload path changed; temporary rows remaining `0`.
+
+## BBS Smart Card Phase 10C-2 Mobile And Accessibility Hardening (2026-08-31, Local only)
+
+- Added semantic BBS tabs with roving keyboard focus, one labelled tabpanel, focus-preserving rerenders and correct `#main-content` scrolling for tab/wizard transitions.
+- Hardened phone layouts with 44 px touch controls, 16 px inputs, safe-area sticky actions and keyboard-labelled horizontal table regions. Read-only Chrome UAT covers 320×568, 360×800, 390×844, 430×932 and 844×390 across all 8 available Admin tabs.
+- Single and batch validation now focuses and scrolls to the existing missing answer, Unsafe remark/action or evidence control without changing the established Safe/Unsafe/N/A rules.
+- Observation, Corrective Action and Analytics dialogs now trap focus, close by Escape/backdrop/close button, integrate with the shared mobile visual viewport and restore the trigger focus.
+- Added `test:bbs-phase10c2` and `uat:bbs-phase10c2-browser`; Phase 8/9/9B/10A/10B-1/2/3/10C-1 regressions and the complete Backend test suite pass (`exit 0`). No API, schema, Master/Pilot data, business record, upload path, Production deployment or GitHub push changed.
+
+## KY Large Video Upload Recovery (2026-08-31, Production deployed)
+
+- Fixed the misleading `กรุณาระบุวันที่และรายละเอียดอันตราย` error for valid KY forms carrying large videos. On shared-hosting PHP, requests above `post_max_size=40M` arrived with empty `$_POST`/`$_FILES` even though the UI allowed a 200 MB video.
+- Added authenticated 5 MB chunk upload/init/complete/abort APIs with Node/PHP parity, 200 MB enforcement, activity/initiator authorization, exact-size and file-signature validation, 24-hour temporary cleanup and transactional `VideoUrl` replacement.
+- Updated new submission, follow-up video and Admin replacement flows to keep video out of the main multipart request. A saved activity is preserved and clearly reported if its optional video later fails, preventing duplicate resubmission.
+- Added an explanatory `413 KY_UPLOAD_REQUEST_TOO_LARGE` response for legacy oversized PHP multipart requests, new cache keys and the `test:ky-chunked-video` contract. No schema or existing KY row/upload changed; final videos remain in the established public `/uploads` storage, while temporary chunks use HTTP-denied `backend/private-uploads/ky-video-chunks`.
+- Production deployment used application backup `ky-forklift-predeploy-20260831-115425`, FTPS SHA-256 verification `6/6`, HTTPS verification `4/4`, authenticated two-part upload/hash smoke and Chrome smoke with zero console errors. Temporary Production KY rows/files/chunks/audit were cleaned to `0`; GitHub was not changed.
+
+## Forklift Renewal Retry Recovery (2026-08-31, Production deployed)
+
+- Fixed renewal retries that previously returned an opaque `409` after the initial Draft had been created but document upload or final submit was interrupted.
+- Node and PHP now reuse the same `DRAFT`/`RETURNED` request transactionally, preserve existing documents/history and return structured identity for a renewal already under review.
+- Added permission-scoped source-license filtering and UI recovery: editable requests reopen with prior values/files, while submitted/reviewing requests open their existing detail instead of creating duplicates.
+- Forklift parity contract passes `46/46`; Node lifecycle UAT passes `20/20` including same-Draft retry, source filtering, approval and cleanup of all temporary rows/files. Production authenticated smoke confirmed create-then-retry returns the same Draft ID/request number and the source-license filter resolves it. Temporary rows/events/maps/audit/files were cleaned to `0`; no schema, existing business row, upload path or GitHub state changed.
+
+## BBS Smart Card Phase 10C-1 Workflow Reliability (2026-08-31, Local only)
+
+- Preserved single and batch Observation Drafts across tab navigation, added server-backed Draft recovery in Start/History and resumed an existing per-employee Draft instead of creating a duplicate.
+- Hardened Personal Card issue/replace by opening the print window and validating the private template before the one-time QR mutation; post-issue render failure now leaves an explicit recovery message.
+- Updated Excel, PDF and Print analytics to fetch the current filtered `/analytics/export-data` payload before generating output.
+- Phase 10C-1, Phase 4/6/8/10A and Phase 10B-1/2/3 contracts pass. Full backend regression and read-only preflight pass `131/131`.
+- Phase 10C-0B business configuration was explicitly deferred to the user. No fallback roster/checklist/card data, schema change, database write, upload-path change, Production deployment or GitHub push was performed.
+
+## BBS Smart Card Phase 10C-0A Readiness Audit (2026-08-31, Local only)
+
+- Added a repeatable SELECT-only Pilot audit and documented the safe Phase 10C-0B configuration order.
+- Confirmed the active `MAINTENANCE SEC.` / `Tube Cutting` scope and correct Group Leader Monday-Friday KPI rule, but found 0 Operators, enrollments, assignments, schedule rules and applicable Published business Checklists.
+- Confirmed card/community setup has no Active Personal template, Department template, shared Department QR or handler. Fifteen UAT Checklists and two Draft Observations were preserved without modification.
+- Critical BBS orphan checks remain 0. No API behavior, schema, database data, uploads, Production deployment or GitHub push changed.
+
+## KY Employee Master Search Runtime Fix (2026-08-31, Production deployed)
+
+- Fixed the KY submit tab runtime `ReferenceError` caused by `setupKyReporterSearch` and its related submit helpers being hidden inside a legacy merge wrapper.
+- Restored Admin reporter and participant typeahead results from the existing authenticated `/api/ky/employees` route without changing KY records, schemas, upload paths or submission behavior.
+- Deployed only `index.html`, a Production-derived `public/js/main.js`, and `public/js/pages/ky.js`. The deploy candidate retained the existing Production BBS Phase 10A cache reference; local BBS Phase 10B changes were not released.
+- Production code backup `ky-search-predeploy-20260831-093217`, FTPS download-back SHA-256 `3/3` at `ky-search-upload-verify-20260831-093635`, and public HTTPS SHA-256 `3/3` at `ky-search-static-smoke-20260831-093756` passed.
+- Full backend regression and read-only preflight `131/131`, KY Node/PHP parity, authenticated Production Employee Master API lookup, reporter selection, participant search and zero browser console errors passed. No schema, database data, uploads, KY business rows or GitHub state changed.
+
+## BBS Smart Card Phase 10B-3 Searchable Pickers / Department Configuration (2026-08-31, Local only)
+
+- Replaced the dense all-Department configuration runtime with a Master-backed Department index, name/status filters and one selected Department detail workspace.
+- Added per-Department readiness badges for Active Template, shared QR and Risk handler, with Draft/Active/Archived template actions scoped to the selected Department.
+- Added searchable Owner and Verifier controls over the existing Admin Employee list, filtering by EmployeeID, name or Department while submitting the same EmployeeID payload to server validation.
+- Added Phase 10B-3 source contracts and extended authenticated 390px browser UAT for 41 Master Departments, empty search state, Admin picker matching and mobile overflow. Phase 8 desktop regression and the full backend/read-only preflight `131/131` pass. No API, schema, database data, upload storage, Production deployment or GitHub push was performed.
+
+## BBS Smart Card Phase 10B-2 Card Management IA / Guided Workflow (2026-08-31, Local only)
+
+- Reorganized Card Admin into Overview, Personal Card and Department Card workspaces so both detailed configuration forms no longer appear together.
+- Added separate guided steps, card-type status summaries, readiness counts and clear next-workspace actions while keeping the Phase 10B-1 Master Foundation source.
+- Preserved all existing Personal template/issue/print/replace/revoke and Department template/QR/handler operations. Community-to-Card navigation opens the relevant Department workspace; other entries begin at Overview.
+- Added Phase 10B-2 UI contracts and extended authenticated 390px browser coverage across Overview, Personal and Department workflows. Phase 8 desktop browser regression and the full backend/read-only preflight `131/131` pass. No API, schema, database data, upload storage, Production deployment or GitHub push was performed.
+
+## BBS Smart Card Phase 10B-1 Master Data Integration / Readiness (2026-08-27, Local only)
+
+- Connected the BBS card Admin workspace to the existing Admin Foundation contract so Personal Card Department and BBS Level dropdowns use central Master data rather than eligible-recipient rows or a hardcoded level list.
+- Added a read-only Master Data & Card Readiness panel with explicit reasons for missing departments, positions/mappings, eligible Group-Leader-or-higher employees, Active templates, Department QR and Risk handlers.
+- Added a clear Personal Card empty state and synchronized the Department-card list with Foundation departments while preserving the existing server-side issuance, authorization, upload and QR behavior.
+- Added a Phase 10B-1 source/parity contract and cache bust. Contract/regression tests, 390px authenticated browser UAT with 41 Master departments, and the full backend/read-only preflight `131/131` pass. No schema, database data, upload storage, Production deployment or GitHub push was performed.
+
+## BBS Smart Card Phases 1-10A Staged Production Deployment (2026-08-27)
+
+- Deployed the completed BBS Smart Card stack to shared-hosting PHP Production in Admin-only staged mode. `BBS_Settings.staged_admin_only=1` blocks ordinary and anonymous BBS access while allowing Admin configuration and validation.
+- Took and verified a fresh 147-table database backup `bbs-smart-card-predeploy-20260827-022206` (1,443,310 bytes; SHA-256 `2a77efd8f0c6d9796c36722010058a8ede13da60021a75fe1d62a5ce897aed46`) plus application rollback backup `backups/production/bbs-smart-card-stage-predeploy-20260827-090333` before applying additive Phase 1-10A migrations.
+- Production now has 38 `BBS_*` tables. Existing business data was not deleted or rewritten. Private BBS storage is writable through authorized APIs and denied to direct HTTP access.
+- Download-back SHA-256 passed `51/51` for the deployment bundle and `6/6` for final Linux table-case/PHP 7.4 compatibility corrections. Admin read-only API smoke, User/anonymous denial, 390x844 browser smoke, the full backend regression and read/permission preflight `131/131` passed with no overflow or console error.
+- No BBS smoke business row was created. Temporary migration/diagnostic helpers, candidate API and diagnostic logs were removed and verified absent by FTPS. The Pilot remains closed pending Tube Cutting roster, assignment and Published Checklist readiness; GitHub was not changed.
+
+## BBS Smart Card Phase 10A Mobile Batch Observation (2026-08-27, Local only)
+
+- Added multi-select mobile team workflow, checklist grouping, common answers with per-person overrides, review, autosave/recovery and 390px responsive controls.
+- Added atomic/idempotent Node and PHP batch APIs backed by two additive tables while preserving individual Observation, KPI, privacy, evidence and Corrective Action behavior.
+- Added safe-disable flags, cache bust, migration/parity/lifecycle/browser tests and local cleanup verification. No Production deployment or GitHub push was performed.
+
+## BBS Smart Card Phase 9B Inspector Schedule / Compliance (2026-08-26, Local only)
+
+- Added effective-dated Admin schedule versions plus per-date `Required`/`Exempt` overrides; past schedule dates are immutable and every change is event/audit logged.
+- Added matching Node/PHP APIs and a responsive Inspector Compliance dashboard with year/month filters, per-person totals, completed/partial/missed days and daily calendar drill-down.
+- Unified workspace KPI and Phase 6 analytics/export KPI with the effective daily schedule and per-day cap. Community Reports remain outside KPI.
+- Added three additive tables and the safe-disable setting `inspector_schedule_enabled`; uploads/storage are unchanged.
+- Local migration, Node/PHP route/formula contracts, UI contract, PHP/Node syntax, full backend regression/preflight and cross-stack lifecycle/privacy/rollback UAT pass. UAT cleanup is `enrollments=0`, `events=0`; Production and GitHub were not changed.
+
+## BBS Smart Card Phase 9 Inspector / Team Management (2026-08-26, Local only)
+
+- Added Admin appointment of specific Group Leaders with effective dates, Active/Suspended/Ended status, KPI-required flag and optional self-service team management.
+- Added scoped self-service team selection, one-primary-inspector duplicate protection, immutable team events and Admin audit history.
+- Formal Observation and KPI eligibility now require an effective Active enrollment; analytics and workspace share enrollment-period and daily-cap rules.
+- Added two additive tables, one safe-disable setting, matching Node/PHP APIs and a responsive `ผู้ตรวจ / ทีม` view. Upload storage is unchanged.
+- Local verification passed migration/parity/UI contracts, permission audit, cross-stack lifecycle/rollback UAT and cleanup `0`, Phase 6 regression and full backend preflight. Production and GitHub were not changed.
+
+
+## BBS Smart Card Phase 8 Department Cards / Community Reporting (2026-08-26, Local only)
+
+- Added Department-only cards with multiple named Active templates, one shared rotatable Department QR, preview/print controls and A4/A5/A6 print logging. Unit cards were intentionally omitted.
+- Restricted personal-card issue/reissue to Group Leader and above while preserving opaque per-person QR and existing formal Observation behavior.
+- Added Community Good/Risky reporting for all authenticated employees with optional observed person, optional Unit/area and private image evidence.
+- Added company-visible Good dashboard without reporter identity and Admin-only Risky details, immediate Community Corrective Action, owner/verifier handler configuration and status lifecycle.
+- Added 8 additive tables, two safe-disable settings, Node/PHP API parity, QR claim integration, permission-audit classifications and responsive UI that renders before the formal BBS Level gate.
+- Local migration, contracts, PHP/Node syntax, Phase 4/7 regression, lifecycle/privacy/action/cleanup UAT and authenticated Chrome UAT pass. Temporary rows/files are `0`; Production deployment and GitHub push were not performed.
+
+## BBS Smart Card Phase 7 Security / Pilot Readiness (2026-08-25, Local only)
+
+- Added BBS-specific response security headers to Node and PHP and corrected QR claim response parity from a Node query-array shape to one employee object.
+- Added security contract/runtime UAT for auth and object boundaries, IDOR, XSS/non-reflection, private content-verified uploads, SQL parameterization, QR controls, concurrency/idempotency and transaction rollback.
+- Added a read-only Pilot audit for the approved `MAINTENANCE SEC.` / `Tube Cutting` Master scope, people/mapping/configuration counts, Observation-to-Action reconciliation and orphan detection.
+- Improved card-management form accessibility with accessible names and extended authenticated Chrome UAT for duplicate IDs, named controls, full-width desktop and mobile overflow.
+- All Phase 1-7 local gates, Node/PHP lifecycle UAT, migration regression, performance and backend preflight `121/121` pass. Temporary lifecycle rows/files are `0`.
+- Pilot is intentionally not activated: the approved scope currently has 0 Active Assignments, 0 Published Checklists and 0 Operators. Production deployment and GitHub push were not performed.
+
+## BBS Smart Card Phase 6 Analytics / Management Reporting (2026-08-25, Local only)
+
+- Added matching Node/PHP analytics, export-data and drill-down APIs with server-enforced Personal, Team, Department and Company scopes.
+- Added KPI numerator/denominator with per-workday target caps, Safe/Unsafe trend, Pareto, Department/Unit comparison, action aging/overdue and scoped recent detail.
+- Added year, month, Department, Safety Unit and risk filters plus Excel, PDF and Print exports that reload the same authoritative filter scope before output.
+- Removed the BBS-only `max-w-7xl` page cap so the workspace fills the same content width as Hiyari, Yokoten and Safety Culture; added a 1,920px browser assertion plus mobile overflow regression coverage.
+- Applied the additive Phase 6 reporting-index/feature-flag migration to local MySQL only. Rollback disables analytics/export and preserves all Observation and Action workflow data.
+- Verification passed locally for formula parity, migration/idempotency/rollback, production-like query performance (10,000 Observations / 100,000 answers / 2,000 Actions; slowest query 260 ms), Node/PHP/source reconciliation, permission denial, export/drill-down scope, cleanup `observations=0`, responsive authenticated browser rendering, permission audit and full backend preflight `121/121`. Production and GitHub are unchanged.
+
+## BBS Smart Card Phase 5 Corrective Action / SLA / Escalation / Closure (2026-08-25, Local only)
+
+- Unsafe answers with an immutable action-required snapshot now create one corrective action automatically and idempotently at Observation submission.
+- Added Owner/Verifier permissions, optimistic concurrency, SLA rules, Before/After private evidence, closure verification, reopen flow, complete action history and Admin audit coverage in both Node and PHP APIs.
+- Added the `Corrective Action` tab, dashboard alert, filters, overdue display, action detail modal, evidence workflow and Admin SLA controls.
+- Added queued Owner reminders and Verifier overdue escalation with daily duplicate suppression. Real delivery remains disabled by default and was not enabled during testing.
+- Applied the additive Phase 5 migration to local MySQL only. Production and GitHub are unchanged.
+- Verification passed: PHP/Node syntax, rule parity, isolated migration and idempotency, cross-stack lifecycle UAT with cleanup `actions=0`, permission audit, and read/permission preflight `118/118`.
+
+## BBS Smart Card Phase 4 QR / Smart Card / Print (2026-08-25, Local only)
+
+- Added four additive tables and matching Node/PHP APIs for private card
+  templates, issue/replace/revoke lifecycle, print audit, and QR throttling.
+- Added a database-level generated unique guard for one Active card per
+  employee, including safe transactional replacement under concurrent writes.
+- QR is a locator rather than authentication: raw opaque tokens are returned
+  once, only hashes/fingerprints are stored, public resolve discloses no
+  identity, and authenticated claim never changes the current user.
+- Added the Admin Cards workspace, 1-100 employee issue flow, template preview,
+  CR80/A4 printing, pre-login scan capture, safe post-login return, and initial
+  fallback where no approved employee photo source exists.
+- Migration/idempotency/rollback, Node/PHP parity, permissions, Phase 3
+  regression, lifecycle/rate-limit cleanup `0`, and desktop/mobile plus QR
+  browser UAT pass. Production and GitHub are unchanged.
+
+## BBS Smart Card Phase 3 Observation MVP (2026-08-25, Local only)
+
+- Opened the Pilot/Admin module below Safety Culture with My Workspace,
+  server-scoped team/eligible employees, KPI, Start Observation, and histories.
+- Added three additive tables and matching Node/PHP APIs for immutable
+  Checklist snapshots, Draft/Submit, concurrency, privacy, and idempotent retry.
+- Added Safe/Unsafe/N/A with frontend/server Unsafe validation and private
+  content-verified evidence with object authorization.
+- Local migration, isolated rollback, rule parity, authenticated lifecycle and
+  evidence UAT cleanup `0`, desktop/mobile browser UAT, preflight `106/106`,
+  and the full backend regression pass. Production and GitHub are unchanged.
+
+## BBS Smart Card Phase 2B Excel Import/Export (2026-08-25, Local only)
+
+- Added round-trip Checklist Excel export with instructions and current Master
+  Data reference values.
+- Added Admin Import Preview and confirmed atomic Import in matching Node/PHP
+  routes. Validation covers full checklist structure, duplicate item codes,
+  Safe/Unsafe/N/A flags, dates, scope IDs, BBS level, priority, and Master Data.
+- Draft concurrency and immutable Published/Archived guards remain enforced.
+  Invalid Preview/Import writes nothing; successful Import is audit-logged.
+- No database migration, Production deployment, GitHub push, or upload-storage
+  change was made in Phase 2B.
+- Node/PHP parity, authenticated import lifecycle/atomicity, migration
+  regression, browser UAT, preflight `104/104`, and full backend regression
+  passed; temporary checklist templates remaining after UAT: `0`.
+
+## BBS Smart Card Phase 2 Checklist Builder (2026-08-25, Local only)
+
+- Added five additive checklist tables, idempotent migration, and guarded
+  rollback while preserving all Phase 1 tables.
+- Added matching Node/PHP Admin CRUD for templates and full Draft contents,
+  Publish immutability, Clone, Archive, soft Activate/Deactivate, audit logging,
+  optimistic `RowVersion`, and Master Data validation.
+- Added deterministic scoped resolver and publish conflict detector. Missing or
+  tied configuration fails closed; non-Admin resolution requires an active
+  hierarchy assignment.
+- Added responsive Checklist Builder and Resolver Preview inside the existing
+  Admin BBS Foundation tab. Published/Archived versions are read-only; Unsafe
+  remark/photo/action flags are configured per item.
+- Import/Export is intentionally deferred to Phase 2B. No observation, action,
+  upload-storage, main-menu, Production, or GitHub change was made.
+- Verification passed: Node/PHP rule parity, migration/idempotency/rollback,
+  authenticated Node/PHP lifecycle UAT with cleanup `0`, browser UAT, preflight
+  `104/104`, full backend regression, syntax/lint, encoding, and diff checks.
+
+## BBS Smart Card Phase 1 foundation (2026-08-25, Local only)
+
+- Added six additive `BBS_*` configuration tables with idempotent migration and
+  explicit rollback. Employee/Master tables and upload storage were unchanged.
+- Added matching authenticated Node/PHP APIs for context, team, eligibility,
+  position mapping, KPI, pilot scope, and effective-dated hierarchy.
+- Enforced deny-by-default authorization, adjacent-level reporting, same-Unit
+  Group Leader assignments, overlap protection, and Admin audit.
+- Added an Admin-only BBS Foundation panel in System Console. The main BBS
+  module/navigation remains hidden until Phase 3.
+- Seeded five approved mappings, the weekday KPI, and Maintenance/Tube Cutting
+  pilot using Master Data IDs.
+- Node/PHP parity, isolated migration/rollback, authenticated runtime UAT and
+  cleanup, browser UAT, full backend tests, and preflight `102/102` passed.
+- Local migration was applied. Production and GitHub were not changed.
+
+## BBS Smart Card Phase 0 discovery and design (2026-08-25, documentation only)
+
+- Completed a read-only audit of the existing Employee, Department, Safety
+  Unit, Position, Team, organization API, authentication, upload, and audit
+  integration points.
+- Documented the Local aggregate baseline, data-quality gaps, proposed
+  effective-dated hierarchy, permission matrix, ERD, Node/PHP API contract,
+  checklist resolution, UI flows, QR threat model, action lifecycle, KPI
+  formulas, migration/testing strategy, and Phase 1 approval gates.
+- No application code, API behavior, database schema/data, permission,
+  upload-storage, Production, deployment, or GitHub change was made. See
+  `docs/bbs-smart-card-phase0-discovery-design.md`.
+
+## Yokoten Department topic relevance dashboard (2026-08-25, deployed)
+
+- Extended the existing Admin `Department Progress Ranking` card with an
+  in-place `ความคืบหน้า / ความเกี่ยวข้อง` switch. Relevance mode shows stacked
+  counts for related, not-related, and incomplete topics by Department.
+- Clicking a Department or a chart segment opens an Admin-only drill-down with
+  all/related/not-related/incomplete filters, workflow status, missing Safety
+  Units, and the existing topic-detail action.
+- Counts reuse `dept-completion.topicBreakdown` and `all-responses`, follow the
+  selected Dashboard year, and only classify Yes/No after full Department Unit
+  coverage. Partial Unit coverage remains incomplete. No API, schema,
+  permission, response-data, or upload-storage behavior changed.
+- Cache key: `20260825-yokoten-department-relevance-r1`. Focused regression
+  passed `11/11`; existing Yokoten Admin scope `14/14`, privacy `5/5`, Topic
+  Coverage `20/20`, and year-scope parity `4/4` remained green. JavaScript
+  syntax and diff whitespace checks passed. Authenticated local browser UAT
+  was attempted but Chrome DevTools timed out at `Page.enable` before page
+  navigation; no Yokoten business-data path was reached.
+- Production deployment completed after rollback backup
+  `backups/production/yokoten-department-relevance-predeploy-20260825-081903`.
+  FTPS download-back SHA-256 passed `4/4`; public HTTPS SHA-256 and cache/UI
+  markers passed `4/4`. Authenticated read-only UAT passed with Yokoten
+  responses unchanged `101/101` and outbox unchanged `128/128`. Headless Chrome
+  UAT passed 10 Departments, stacked totals `1 related / 99 not related / 0
+  incomplete`, all four drill-down filters, and no page-level overflow. No
+  schema, business-data, permission, API, or upload-storage mutation occurred;
+  expected side effects were limited to Admin login audit/housekeeping.
+
 ## Safety Culture PPE inspection form layout (2026-08-24, deployed)
 
 - Reorganized the existing Admin `บันทึกผล PPE Inspection` modal into three

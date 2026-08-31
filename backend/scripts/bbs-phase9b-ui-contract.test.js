@@ -1,0 +1,2 @@
+'use strict';
+const fs=require('fs');const path=require('path');const assert=require('assert');const ui=fs.readFileSync(path.join(__dirname,'..','..','public','js','pages','bbs-smart-card.js'),'utf8');for(const token of ['Inspector Schedule & Compliance','data-inspector-period','bbs-inspector-schedule-form','bbs-inspector-override-form','data-inspector-override-remove'])assert(ui.includes(token),`Phase 9B UI missing ${token}`);assert(ui.includes('/bbs/inspectors/compliance'));assert(ui.includes('/schedule-overrides/'));console.log('BBS Phase 9B UI contract: PASS');

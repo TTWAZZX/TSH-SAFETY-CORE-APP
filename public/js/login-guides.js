@@ -1,6 +1,7 @@
-import { BADGE_LABELS, CENTER_GROUPS, GUIDE_STATUS_LABELS, MODULE_META, MODULE_ORDER, moduleIcon } from './module-meta.js?v=20260714-phase21-platform-shell';
+import { BADGE_LABELS, CENTER_GROUPS, GUIDE_STATUS_LABELS, MODULE_META, MODULE_ORDER, moduleIcon } from './module-meta.js?v=20260825-bbs-phase3-r1';
 
 const GUIDE_EXAMPLES = {
+    'bbs-smart-card': 'หัวหน้ากลุ่มเลือกพนักงานใน Unit ที่ได้รับมอบหมาย ตอบ Safe/Unsafe/N/A แนบหลักฐานเมื่อจำเป็น บันทึกร่าง และส่งเพื่อให้นับ KPI ประจำวัน',
     dashboard: 'เปิดระบบตอนเริ่มวันเพื่อดูภาพรวมกิจกรรม ความคืบหน้า และรายการที่ควรติดตามก่อนเข้าแต่ละโมดูล',
     search: 'ต้องการดู Safety 360 ของพนักงานหนึ่งคน ให้ค้นหาด้วยรหัสหรือชื่อ แล้วเลือกปีเพื่อดูเป้าหมายและผลงานจริง',
     policy: 'ต้องการอ่านนโยบายความปลอดภัยฉบับล่าสุดก่อนประชุมหรือก่อนเริ่มงาน ให้เปิดโมดูลนี้เพื่อตรวจเอกสารและไฟล์แนบ',
@@ -163,6 +164,18 @@ export const LOGIN_MODULE_GUIDES = [
         actions: ['เปิด dashboard เพื่อดูคะแนนและแนวโน้ม', 'บันทึก assessment หรือ PPE inspection ตามงานจริง', 'ติดตาม violation/action และส่งออก PDF'],
         reports: ['Safety Culture Dashboard PDF', 'Assessment PDF'],
         warnings: ['PDF จะเพิ่มหน้าตามข้อมูลที่มี เพื่อหลีกเลี่ยงหน้าว่างเมื่อข้อมูลยังน้อย']
+    },
+    {
+        key: 'bbs-smart-card',
+        title: 'BBS Smart Card',
+        purpose: 'บันทึกการสังเกตพฤติกรรมความปลอดภัยตาม Checklist ที่เหมาะกับพนักงานและขอบเขตงาน',
+        whenToUse: 'ใช้โดยหัวหน้าที่ได้รับมอบหมาย เมื่อต้องสังเกต Safe/Unsafe/N/A และเก็บหลักฐานเพื่อการเรียนรู้',
+        audience: ['User', 'Admin', 'หัวหน้างาน', 'Safety'],
+        badges: ['User', 'QR', 'Print'],
+        actions: ['เปิด My Workspace เพื่อตรวจ KPI และทีม', 'สแกน QR แล้ว Login ด้วยบัญชีของตนเองเพื่อกลับเข้า Workspace', 'เลือกพนักงานจากรายชื่อที่ระบบอนุญาตและส่ง Observation', 'Admin อัปโหลด Template ออกบัตร Revoke/Replace และพิมพ์รายคนหรือ Batch'],
+        reports: ['Personal KPI numerator/denominator', 'ประวัติ Observation ตามสิทธิ์', 'Card issue/revoke/replace/print audit'],
+        warnings: ['QR ไม่ใช่รหัสผ่านและไม่เปลี่ยนตัวตนใน Session', 'พิมพ์บัตรซ้ำต้อง Replace เพื่อยกเลิก QR เดิม', 'Unsafe และหลักฐานยังใช้กติกาและสิทธิ์เดิม'],
+        updatedAt: '2026-08-25'
     },
     {
         key: 'contractor',

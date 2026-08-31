@@ -5,6 +5,10 @@ dist/
 backend/uploads/
 uploads/
 backups/
+exports/
+backend/private-uploads/*
+!backend/private-uploads/.htaccess
+!backend/private-uploads/index.html
 api/config.local.php
 backend/*.log
 backend-start*.log

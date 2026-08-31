@@ -248,6 +248,38 @@ async function main() {
 
     await evaluate(`location.hash = '#yokoten'; true`);
     await waitFor(`location.hash === '#yokoten' && Boolean(document.querySelector('#yok-content [data-yok-card-image]'))`);
+    await evaluate(`document.querySelector('#yok-tab-btn-dashboard')?.click(); true`);
+    await waitFor(`Boolean(document.querySelector('.yok-dept-chart-mode[data-dept-chart-mode="relevance"]')) && Boolean(Chart.getChart('yok-dept-chart'))`);
+    await evaluate(`document.querySelector('.yok-dept-chart-mode[data-dept-chart-mode="relevance"]')?.click(); true`);
+    await waitFor(`document.querySelector('.yok-dept-chart-mode[data-dept-chart-mode="relevance"]')?.classList.contains('bg-white') && Chart.getChart('yok-dept-chart')?.data.datasets.length === 3`);
+    const yokotenRelevanceState = await evaluate(`(() => {
+        const chart = Chart.getChart('yok-dept-chart');
+        const datasets = chart?.data?.datasets || [];
+        return {
+            labels: chart?.data?.labels || [],
+            datasetLabels: datasets.map(dataset => dataset.label),
+            totals: datasets.map(dataset => dataset.data.reduce((sum, value) => sum + Number(value || 0), 0)),
+            hasLegend: document.body.innerText.includes('ยังไม่ตอบ / Unit ไม่ครบ'),
+            horizontalOverflow: document.documentElement.scrollWidth > document.documentElement.clientWidth
+        };
+    })()`);
+    assert.ok(yokotenRelevanceState.labels.length > 0, 'Yokoten Department relevance chart has no Departments');
+    assert.deepStrictEqual(yokotenRelevanceState.datasetLabels, ['เกี่ยวข้อง', 'ไม่เกี่ยวข้อง', 'ยังไม่ตอบ / Unit ไม่ครบ']);
+    assert.strictEqual(yokotenRelevanceState.hasLegend, true, 'Yokoten Department relevance legend is missing');
+    assert.strictEqual(yokotenRelevanceState.horizontalOverflow, false, 'Yokoten relevance view has page-level horizontal overflow');
+    await evaluate(`(() => {
+        const chart = Chart.getChart('yok-dept-chart');
+        chart.options.onClick(null, [{ index: 0, datasetIndex: 0 }]);
+        return true;
+    })()`);
+    await waitFor(`document.querySelectorAll('[data-yok-modal] .yok-dept-relevance-filter').length === 4`);
+    yokotenRelevanceState.drilldownFilters = await evaluate(`document.querySelectorAll('[data-yok-modal] .yok-dept-relevance-filter').length`);
+    yokotenRelevanceState.drilldownRows = await evaluate(`document.querySelectorAll('[data-yok-modal] .yok-open-topic-btn').length`);
+    assert.strictEqual(yokotenRelevanceState.drilldownFilters, 4, 'Yokoten Department relevance drill-down filters are incomplete');
+    await screenshot('yokoten-department-relevance.png');
+    await evaluate(`window.closeModal?.(); true`);
+    console.log(`PASS Yokoten Department relevance — ${yokotenRelevanceState.labels.length} Departments; totals ${yokotenRelevanceState.totals.join('/')}`);
+
     await evaluate(`document.querySelector('#yok-tab-btn-admin')?.click(); true`);
     await waitFor(`Boolean(document.querySelector('.adm-view-btn[data-adm-view="dept"]'))`);
     await evaluate(`document.querySelector('.adm-view-btn[data-adm-view="dept"]')?.click(); true`);
@@ -432,6 +464,7 @@ async function main() {
         businessDataWrites: false,
         expectedSideEffects: ['successful login audit/attempt record', 'normal login housekeeping'],
         dashboard: dashboardState,
+        yokotenRelevance: yokotenRelevanceState,
         yokoten: yokotenState,
         topicCoverage: topicCoverageState,
         safetyCultureAssessment: assessmentHistoryState,

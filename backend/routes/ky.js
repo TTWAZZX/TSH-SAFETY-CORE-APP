@@ -11,7 +11,7 @@ const fs      = require('fs');
 const path    = require('path');
 const { randomUUID } = require('crypto');
 const { isAdmin } = require('../middleware/auth');
-const { storage: uploadStorage, fileFilter, deleteLocalUpload, uploadsDir } = require('../storage');
+const { storage: uploadStorage, fileFilter, deleteLocalUpload, uploadsDir, cleanOriginalFilename } = require('../storage');
 const { logAudit } = require('../utils/audit');
 const { sendMail, smtpConfigured } = require('../utils/email');
 const { buildHiyariEmail } = require('../utils/hiyari-email-template');
@@ -65,6 +65,22 @@ const uploadCombined = multer({
 });
 
 const KY_ATTACHMENT_LIMIT = 20 * 1024 * 1024;
+const KY_VIDEO_LIMIT = 200 * 1024 * 1024;
+const KY_VIDEO_CHUNK_SIZE = 5 * 1024 * 1024;
+const KY_VIDEO_CHUNK_MAX_AGE_MS = 24 * 60 * 60 * 1000;
+const KY_VIDEO_CHUNK_ROOT = path.join(__dirname, '..', 'private-uploads', 'ky-video-chunks');
+const KY_VIDEO_EXTENSIONS = new Set(['mp4', 'mov', 'webm', 'avi', 'mkv', 'mpeg', 'mpg']);
+const KY_VIDEO_MIME_TYPES = new Set([
+    'video/mp4', 'video/quicktime', 'video/webm', 'video/avi',
+    'video/x-msvideo', 'video/x-matroska', 'video/mpeg',
+]);
+const uploadKyVideoChunk = multer({
+    storage: multer.memoryStorage(),
+    // Busboy marks a file as limited when it reaches the exact configured cap.
+    // Keep a tiny parser margin; the route still requires the exact expected bytes.
+    limits: { files: 1, fileSize: KY_VIDEO_CHUNK_SIZE + (1024 * 1024) },
+});
+fs.mkdirSync(KY_VIDEO_CHUNK_ROOT, { recursive: true });
 const KY_REACTIONS = ['useful', 'practice', 'awareness', 'attention'];
 const KY_VIDEO_SHOWCASE_DEFAULT_LIMIT = 6;
 const KY_VIDEO_SHOWCASE_MAX_LIMIT = 50;
@@ -353,6 +369,100 @@ function kyCanUploadFollowupVideoForUser(row, req) {
     if (!userId) return false;
     if ([row.ReporterID, row.SubmittedByID].some(id => String(id || '').trim() === userId)) return true;
     return kyParticipantEmployeeIds(row.Participants).some(id => String(id || '').trim() === userId);
+}
+
+function kyVideoUploadDirectory(uploadId) {
+    if (!/^[a-f0-9]{32}$/i.test(String(uploadId || ''))) return null;
+    const target = path.resolve(KY_VIDEO_CHUNK_ROOT, uploadId);
+    const root = `${path.resolve(KY_VIDEO_CHUNK_ROOT)}${path.sep}`;
+    return target.startsWith(root) ? target : null;
+}
+
+function kyVideoManifestPath(uploadId) {
+    const dir = kyVideoUploadDirectory(uploadId);
+    return dir ? path.join(dir, 'manifest.json') : null;
+}
+
+function kyReadVideoManifest(uploadId) {
+    const manifestPath = kyVideoManifestPath(uploadId);
+    if (!manifestPath || !fs.existsSync(manifestPath)) return null;
+    try {
+        const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
+        return manifest && manifest.uploadId === uploadId ? manifest : null;
+    } catch (_) {
+        return null;
+    }
+}
+
+function kyRemoveVideoUploadDirectory(uploadId) {
+    const dir = kyVideoUploadDirectory(uploadId);
+    if (dir && fs.existsSync(dir)) fs.rmSync(dir, { recursive: true, force: true });
+}
+
+function kyCleanupStaleVideoUploads() {
+    const cutoff = Date.now() - KY_VIDEO_CHUNK_MAX_AGE_MS;
+    for (const entry of fs.readdirSync(KY_VIDEO_CHUNK_ROOT, { withFileTypes: true })) {
+        if (!entry.isDirectory() || !/^[a-f0-9]{32}$/i.test(entry.name)) continue;
+        const dir = kyVideoUploadDirectory(entry.name);
+        if (!dir) continue;
+        try {
+            if (fs.statSync(dir).mtimeMs < cutoff) kyRemoveVideoUploadDirectory(entry.name);
+        } catch (_) {}
+    }
+}
+
+function kyVideoPartPath(manifest, index) {
+    const dir = kyVideoUploadDirectory(manifest?.uploadId);
+    return dir ? path.join(dir, `${String(index).padStart(6, '0')}.part`) : null;
+}
+
+function kyVideoExpectedChunkSize(manifest, index) {
+    const offset = index * manifest.chunkSize;
+    return Math.min(manifest.chunkSize, manifest.fileSize - offset);
+}
+
+function kyVideoFileHeaderIsValid(filePath, extension) {
+    const handle = fs.openSync(filePath, 'r');
+    try {
+        const header = Buffer.alloc(16);
+        const count = fs.readSync(handle, header, 0, header.length, 0);
+        if (count < 4) return false;
+        if (extension === 'avi') return header.toString('ascii', 0, 4) === 'RIFF' && header.toString('ascii', 8, 12) === 'AVI ';
+        if (extension === 'webm' || extension === 'mkv') return header.subarray(0, 4).equals(Buffer.from([0x1a, 0x45, 0xdf, 0xa3]));
+        if (extension === 'mpeg' || extension === 'mpg') {
+            return header[0] === 0x00 && header[1] === 0x00 && header[2] === 0x01 && (header[3] === 0xba || header[3] === 0xb3);
+        }
+        if (extension === 'mp4' || extension === 'mov') return count >= 12 && header.toString('ascii', 4, 8) === 'ftyp';
+        return false;
+    } finally {
+        fs.closeSync(handle);
+    }
+}
+
+function kyVideoPublicUrl(req, storedName, originalName) {
+    const configured = String(process.env.PUBLIC_UPLOAD_BASE_URL || '').replace(/\/+$/, '');
+    const base = configured || `${req.protocol}://${req.get('host')}`;
+    return `${base}/uploads/${encodeURIComponent(storedName)}?filename=${encodeURIComponent(cleanOriginalFilename(originalName))}`;
+}
+
+async function kyLoadVideoUploadActivity(activityId) {
+    const [rows] = await db.query(
+        'SELECT id, ReporterID, SubmittedByID, Participants, VideoUrl, Status FROM KY_Activities WHERE id = ? LIMIT 1',
+        [activityId]
+    );
+    return rows[0] || null;
+}
+
+function kyCheckVideoUploadAccess(row, req, manifest = null) {
+    const userId = currentUserId(req);
+    const admin = isKyAdmin(req);
+    if (!row) return { status: 404, message: 'ไม่พบกิจกรรม KY' };
+    if (!kyCanUploadFollowupVideoForUser(row, req)) return { status: 403, message: 'แนบวิดีโอได้เฉพาะเจ้าของรายการหรือ Admin' };
+    if (manifest && (manifest.activityId !== row.id || manifest.initiatedBy !== userId)) {
+        return { status: 403, message: 'ไม่สามารถใช้งานชุดอัปโหลดนี้ได้' };
+    }
+    if (!admin && row.VideoUrl) return { status: 409, message: 'รายการนี้มีวิดีโอแล้ว กรุณาติดต่อ Admin หากต้องการเปลี่ยนไฟล์' };
+    return { userId, admin };
 }
 
 function kyMediaHealthStatus(rawUrl, field) {
@@ -1848,6 +1958,195 @@ router.post('/:id/reaction', async (req, res) => {
     }
 });
 
+router.post('/:id/video-upload/init', async (req, res) => {
+    try {
+        await ensureTables();
+        kyCleanupStaleVideoUploads();
+        const row = await kyLoadVideoUploadActivity(req.params.id);
+        const access = kyCheckVideoUploadAccess(row, req);
+        if (access.status) return res.status(access.status).json({ success: false, message: access.message });
+
+        const fileName = cleanOriginalFilename(req.body?.fileName || 'video');
+        const fileSize = Number(req.body?.fileSize || 0);
+        const mimeType = String(req.body?.mimeType || '').trim().toLowerCase();
+        const extension = path.extname(fileName).slice(1).toLowerCase();
+        if (!Number.isSafeInteger(fileSize) || fileSize <= 0 || fileSize > KY_VIDEO_LIMIT) {
+            return res.status(400).json({ success: false, code: 'KY_VIDEO_SIZE_INVALID', message: 'วิดีโอต้องมีขนาดไม่เกิน 200 MB' });
+        }
+        if (!KY_VIDEO_EXTENSIONS.has(extension) || (mimeType && !KY_VIDEO_MIME_TYPES.has(mimeType))) {
+            return res.status(400).json({ success: false, code: 'KY_VIDEO_TYPE_INVALID', message: 'รองรับเฉพาะ MP4, MOV, WebM, AVI, MKV และ MPEG' });
+        }
+
+        const uploadId = randomUUID().replace(/-/g, '');
+        const dir = kyVideoUploadDirectory(uploadId);
+        fs.mkdirSync(dir, { recursive: false });
+        const manifest = {
+            uploadId,
+            activityId: row.id,
+            initiatedBy: access.userId,
+            fileName,
+            fileSize,
+            mimeType,
+            extension,
+            chunkSize: KY_VIDEO_CHUNK_SIZE,
+            totalChunks: Math.ceil(fileSize / KY_VIDEO_CHUNK_SIZE),
+            createdAt: new Date().toISOString(),
+        };
+        fs.writeFileSync(kyVideoManifestPath(uploadId), JSON.stringify(manifest), { encoding: 'utf8', flag: 'wx' });
+        res.status(201).json({ success: true, data: { uploadId, chunkSize: manifest.chunkSize, totalChunks: manifest.totalChunks } });
+    } catch (error) {
+        console.error('KY video chunk init error:', error);
+        res.status(500).json({ success: false, message: 'ไม่สามารถเริ่มอัปโหลดวิดีโอ KY ได้' });
+    }
+});
+
+router.post('/:id/video-upload/:uploadId/chunk/:index', (req, res) => {
+    uploadKyVideoChunk.single('chunk')(req, res, async uploadError => {
+        if (uploadError) {
+            const message = uploadError.code === 'LIMIT_FILE_SIZE' ? 'ส่วนวิดีโอมีขนาดเกิน 5 MB' : (uploadError.message || 'อัปโหลดส่วนวิดีโอไม่สำเร็จ');
+            return res.status(400).json({ success: false, code: 'KY_VIDEO_CHUNK_INVALID', message });
+        }
+        try {
+            await ensureTables();
+            const manifest = kyReadVideoManifest(req.params.uploadId);
+            if (!manifest) return res.status(404).json({ success: false, message: 'ไม่พบชุดอัปโหลดหรือชุดอัปโหลดหมดอายุแล้ว' });
+            const row = await kyLoadVideoUploadActivity(req.params.id);
+            const access = kyCheckVideoUploadAccess(row, req, manifest);
+            if (access.status) return res.status(access.status).json({ success: false, message: access.message });
+
+            const index = Number(req.params.index);
+            if (!Number.isInteger(index) || index < 0 || index >= manifest.totalChunks || !req.file?.buffer) {
+                return res.status(400).json({ success: false, code: 'KY_VIDEO_CHUNK_INVALID', message: 'ข้อมูลส่วนวิดีโอไม่ถูกต้อง' });
+            }
+            const expectedSize = kyVideoExpectedChunkSize(manifest, index);
+            if (req.file.buffer.length !== expectedSize) {
+                return res.status(400).json({ success: false, code: 'KY_VIDEO_CHUNK_SIZE_MISMATCH', message: 'ขนาดส่วนวิดีโอไม่ตรงกับที่ระบบกำหนด' });
+            }
+            const partPath = kyVideoPartPath(manifest, index);
+            fs.writeFileSync(partPath, req.file.buffer);
+            res.json({ success: true, data: { uploadId: manifest.uploadId, index, receivedBytes: expectedSize } });
+        } catch (error) {
+            console.error('KY video chunk upload error:', error);
+            res.status(500).json({ success: false, message: 'ไม่สามารถอัปโหลดส่วนวิดีโอ KY ได้' });
+        }
+    });
+});
+
+router.post('/:id/video-upload/:uploadId/complete', async (req, res) => {
+    let finalPath = null;
+    let connection = null;
+    let lockHandle = null;
+    let lockPath = null;
+    try {
+        await ensureTables();
+        const manifest = kyReadVideoManifest(req.params.uploadId);
+        if (!manifest) return res.status(404).json({ success: false, message: 'ไม่พบชุดอัปโหลดหรือชุดอัปโหลดหมดอายุแล้ว' });
+        const initialRow = await kyLoadVideoUploadActivity(req.params.id);
+        const initialAccess = kyCheckVideoUploadAccess(initialRow, req, manifest);
+        if (initialAccess.status) return res.status(initialAccess.status).json({ success: false, message: initialAccess.message });
+
+        lockPath = path.join(kyVideoUploadDirectory(manifest.uploadId), 'complete.lock');
+        try {
+            lockHandle = fs.openSync(lockPath, 'wx');
+        } catch (error) {
+            if (error.code === 'EEXIST') return res.status(409).json({ success: false, message: 'ระบบกำลังรวมวิดีโอนี้อยู่ กรุณารอสักครู่' });
+            throw error;
+        }
+
+        let assembledSize = 0;
+        for (let index = 0; index < manifest.totalChunks; index += 1) {
+            const partPath = kyVideoPartPath(manifest, index);
+            const expectedSize = kyVideoExpectedChunkSize(manifest, index);
+            if (!partPath || !fs.existsSync(partPath) || fs.statSync(partPath).size !== expectedSize) {
+                return res.status(409).json({ success: false, code: 'KY_VIDEO_CHUNKS_INCOMPLETE', message: `อัปโหลดวิดีโอยังไม่ครบ (ส่วนที่ ${index + 1})` });
+            }
+            assembledSize += expectedSize;
+        }
+        if (assembledSize !== manifest.fileSize) {
+            return res.status(409).json({ success: false, code: 'KY_VIDEO_SIZE_MISMATCH', message: 'ขนาดวิดีโอรวมไม่ถูกต้อง' });
+        }
+
+        const storedName = `${Date.now()}-${randomUUID().replace(/-/g, '').slice(0, 16)}.${manifest.extension}`;
+        finalPath = path.join(uploadsDir, storedName);
+        const finalHandle = fs.openSync(finalPath, 'wx');
+        try {
+            for (let index = 0; index < manifest.totalChunks; index += 1) {
+                fs.writeSync(finalHandle, fs.readFileSync(kyVideoPartPath(manifest, index)));
+            }
+        } finally {
+            fs.closeSync(finalHandle);
+        }
+        if (fs.statSync(finalPath).size !== manifest.fileSize || !kyVideoFileHeaderIsValid(finalPath, manifest.extension)) {
+            fs.unlinkSync(finalPath);
+            finalPath = null;
+            return res.status(400).json({ success: false, code: 'KY_VIDEO_CONTENT_INVALID', message: 'เนื้อหาไฟล์ไม่ใช่วิดีโอชนิดที่รองรับ' });
+        }
+
+        const videoUrl = kyVideoPublicUrl(req, storedName, manifest.fileName);
+        connection = await db.getConnection();
+        await connection.beginTransaction();
+        const [lockedRows] = await connection.query(
+            'SELECT id, ReporterID, SubmittedByID, Participants, VideoUrl, Status FROM KY_Activities WHERE id = ? FOR UPDATE',
+            [req.params.id]
+        );
+        const lockedRow = lockedRows[0] || null;
+        const access = kyCheckVideoUploadAccess(lockedRow, req, manifest);
+        if (access.status) {
+            const err = new Error(access.message);
+            err.status = access.status;
+            throw err;
+        }
+        const previousUrl = lockedRow.VideoUrl || null;
+        await connection.query('UPDATE KY_Activities SET VideoUrl = ? WHERE id = ?', [videoUrl, req.params.id]);
+        await connection.commit();
+        connection.release();
+        connection = null;
+
+        if (access.admin && previousUrl) deleteLocalUpload(previousUrl);
+        kyRemoveVideoUploadDirectory(manifest.uploadId);
+        finalPath = null;
+        try {
+            await logAudit(req, {
+                action: 'KY_VIDEO_CHUNK_UPLOAD_COMPLETE',
+                module: 'ky',
+                targetType: 'KY_Activities',
+                targetId: req.params.id,
+                detail: access.admin && previousUrl ? 'Admin replaced KY video with chunk upload' : 'Uploaded KY video in chunks',
+                metadata: { chunks: manifest.totalChunks, bytes: manifest.fileSize, replacedExisting: Boolean(previousUrl) },
+            });
+        } catch (auditError) {
+            console.error('KY video chunk audit error:', auditError);
+        }
+        res.json({ success: true, data: { id: req.params.id, videoUrl } });
+    } catch (error) {
+        if (connection) {
+            await connection.rollback().catch(() => {});
+            connection.release();
+        }
+        if (finalPath && fs.existsSync(finalPath)) fs.unlinkSync(finalPath);
+        console.error('KY video chunk complete error:', error);
+        res.status(error.status || 500).json({ success: false, message: error.message || 'ไม่สามารถรวมวิดีโอ KY ได้' });
+    } finally {
+        if (lockHandle !== null) fs.closeSync(lockHandle);
+        if (lockPath && fs.existsSync(lockPath)) fs.unlinkSync(lockPath);
+    }
+});
+
+router.delete('/:id/video-upload/:uploadId', async (req, res) => {
+    try {
+        const manifest = kyReadVideoManifest(req.params.uploadId);
+        if (!manifest) return res.json({ success: true });
+        const row = await kyLoadVideoUploadActivity(req.params.id);
+        const access = kyCheckVideoUploadAccess(row, req, manifest);
+        if (access.status && access.status !== 409) return res.status(access.status).json({ success: false, message: access.message });
+        kyRemoveVideoUploadDirectory(manifest.uploadId);
+        res.json({ success: true });
+    } catch (error) {
+        console.error('KY video chunk abort error:', error);
+        res.status(500).json({ success: false, message: 'ไม่สามารถยกเลิกชุดอัปโหลดวิดีโอได้' });
+    }
+});
+
 router.post('/:id/video', uploadVideo.single('video'), async (req, res) => {
     try {
         await ensureTables();
@@ -2348,6 +2647,8 @@ router.post('/', handleKyUpload, async (req, res) => {
         }
         res.status(201).json({
             success: true,
+            id,
+            data: { id },
             message: safeSafetyUnit
                 ? `ส่งกิจกรรม KY สำเร็จ (${safeSafetyUnit}: ${cnt + 1}/${target} เรื่องในปีนี้)`
                 : `ส่งกิจกรรม KY สำเร็จ (${cnt + 1}/${target} เรื่องในปีนี้)`

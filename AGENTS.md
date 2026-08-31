@@ -1,5 +1,134 @@
 # TSH Safety Core Activity - AGENTS.md
 
+## BBS Smart Card Phase 10C-3 Constraints
+
+- Phase 10C-3 is frontend-only runtime resilience. It must not change BBS routes, payloads, schema, authorization, Master/Pilot configuration, business rules, private upload paths or stored workflow data.
+- Core, History, Community, Inspector, Action, Analytics and Card reads fail independently. A failed section must show an actionable retry state, preserve previously confirmed data when available and never replace an unknown result with a fabricated zero or silently navigate away.
+- Critical mutation forms/buttons must reject repeat activation while their request is pending and expose an accessible busy state. Existing server idempotency, optimistic concurrency, immutable Observation/batch behavior and one-time card QR safeguards remain authoritative.
+
+## KY Chunked Video Upload Constraints
+
+- KY videos up to 200 MB must be uploaded through the authenticated `video-upload/init`, per-index `chunk`, and `complete` flow so shared-hosting PHP never receives the full video in one multipart request. Each chunk is 5 MB or smaller.
+- Every chunk operation must re-check the existing KY owner/participant/Admin rule and bind the private upload manifest to the initiating employee and activity. Non-Admin users may not replace an existing video.
+- Temporary chunks live only in HTTP-denied `backend/private-uploads/ky-video-chunks`, expire after 24 hours and never become `VideoUrl`. Completion must verify every chunk, exact total size and the supported video signature before atomically updating `KY_Activities.VideoUrl`; only then may an Admin replacement remove the prior upload.
+- New submit and Admin edit requests must exclude the video from their main multipart body. If record save succeeds but chunk upload fails, preserve the KY record and tell the user to attach the video later rather than resubmitting a duplicate activity.
+
+## Forklift Renewal Retry Constraints
+
+- Creating a renewal request is retry-safe. An open `DRAFT` or `RETURNED` renewal for the same source license is reused and updated; its documents, request number and history are preserved. A `SUBMITTED`, `PENDING` or `UNDER_REVIEW` renewal remains a `409` conflict and must return the existing request identity for UI recovery.
+- Renewal retry checks are serialized by locking the source license inside the transaction. Keep Node/PHP route behavior in parity and never resolve the conflict by deleting request/document/history rows.
+- The frontend must query the permission-scoped request API by `sourceLicenseId`, resume editable requests, and open processing requests rather than displaying an opaque 409 or creating a duplicate.
+
+## BBS Smart Card Phase 10C-2 Constraints
+
+- Phase 10C-2 is frontend-only mobile and accessibility hardening. It must not change BBS schema, APIs, authorization, Master/Pilot configuration, private upload paths, stored observations/actions/cards, or the Phase 10A per-employee batch model.
+- BBS primary tabs use one semantic tablist/tabpanel contract with keyboard navigation. Phone controls retain at least a 44 px touch target, text-entry controls avoid iOS focus zoom, and horizontal data regions remain keyboard-focusable and labelled.
+- BBS dialogs must expose dialog semantics, trap focus, close with Escape/backdrop/close control, restore focus and participate in the shared mobile overlay/viewport state. Validation must move users to the existing invalid field without relaxing Safe/Unsafe/N/A or evidence requirements.
+
+## BBS Smart Card Phase 10C-1 Constraints
+
+- Leaving the Observation tab must save the current single or batch Draft before navigation. Draft recovery is server-backed, and only the original observer may resume a Draft; changing tabs must never silently discard it or create a second Draft for the same observed employee.
+- Personal-card issue/replace must synchronously open the print window and validate the private template before the one-time raw QR mutation. A blocked popup must leave the card unchanged; post-issue rendering failure must show an explicit recovery state rather than imply the card was not issued.
+- Excel, PDF and Print analytics must fetch `/api/bbs/analytics/export-data` with current filters before producing output. Phase 10C-1 changes no schema, business configuration, authorization, upload path or stored workflow data.
+
+## BBS Smart Card Phase 10B-3 Constraints
+
+- Department Configuration is a read-only client projection over the Master Department list plus existing Department template, QR and handler records. Searching, filtering or selecting a Department must not mutate records.
+- The selected Department ID comes from Master data and is submitted through the unchanged template/QR/handler APIs. Owner and Verifier pickers list only Admin accounts returned by the existing Department-card Admin API; server-side Admin validation remains authoritative.
+- Render only one Department detail/form set at a time. Preserve one shared Active QR per Department, multiple named templates and existing lifecycle/audit behavior. Phase 10B-3 adds no API, schema, storage path or role change.
+
+## BBS Smart Card Phase 10B-2 Constraints
+
+- Card Admin has three UI-only workspaces: Overview, Personal Card and Department Card. Keep the established Personal/Department endpoints, payloads, permissions and lifecycle actions unchanged.
+- Overview readiness may guide Admin to the next workspace but must never create, activate, issue, rotate, replace, revoke or archive records automatically. Detailed Personal and Department forms must not be rendered together in the same workspace.
+- Entering Card Admin from the Community tab may open Department Card context; all other normal entries begin at Overview. Phase 10B-2 adds no schema, storage path or rollback flag.
+
+## BBS Smart Card Phase 10B-1 Constraints
+
+- BBS Admin reference controls must use `/api/bbs/admin/foundation` and the central Master Department, Safety Unit, Position and Employee sources. Do not derive Personal Card Department options from the currently eligible card-recipient rows.
+- Personal Card issuance remains limited to effective Group Leader-or-higher mappings. Readiness messages explain missing Master/mapping/template/QR/handler configuration but must not weaken server authorization or create fallback business data.
+- Phase 10B-1 is frontend/readiness integration only: no schema, upload-path or workflow behavior change. Foundation failure must degrade to an explanatory state without blocking existing card/template API reads.
+
+## BBS Smart Card Staged Production Constraint
+
+- `BBS_Settings.staged_admin_only=1` is the production Pilot configuration gate. While enabled, every `/api/bbs/*` surface, including public QR resolution, is Admin-only in both PHP and Node; the normal user rollout must not be opened until the Pilot roster, Active inspector/team assignments and an applicable Published Checklist are confirmed.
+- Disabling staged mode is a separate business rollout action. It must not alter observations, actions, cards, schedules or audit history.
+
+## BBS Smart Card Phase 10A Constraints
+
+- A batch is only a mobile orchestration layer. Every selected employee must still receive a separate immutable `BBS_Observations` record and separate answers; batch totals must never replace individual KPI, team coverage, history, analytics or action sources.
+- Batch selection is 2-50 unique employees from the server-authorized effective team scope. The server resolves and freezes each employee's checklist; the frontend may group matching versions but may not choose or override a version.
+- Draft save and final submit are atomic across every batch member. Final validation, status transition and per-answer Corrective Action creation occur in one transaction; any invalid member rolls back the complete batch.
+- Batch detail is visible only to the originating observer or Admin. An observed employee may read their individual Observation under existing rules but must never receive the batch container or peer identities.
+- `batch_observation_enabled`, `mobile_observation_wizard_enabled` and `draft_autosave_enabled` are safe rollback flags. Disabling them must not delete batches, observations, evidence, actions or history. Evidence remains in `backend/private-uploads/bbs` under existing authorization and validation rules.
+
+## BBS Smart Card Phase 9B Constraints
+
+- Inspector schedules are effective-dated versions. Never rewrite a historical rule or past-day override; a new rule may only start today or later, and replaced rules remain for audit.
+- KPI, workspace, compliance dashboard, analytics and exports must use the same per-day capped schedule target. `Exempt` contributes no denominator; `Required` supplies the explicit target for that date.
+- Admin may configure schedules and date overrides. A non-Admin inspector may read only their own schedule/compliance. `inspector_schedule_enabled` is the safe API rollback flag and must not delete schedules, observations or history.
+
+## BBS Smart Card Phase 9 Constraints
+
+- Formal Observation access and KPI eligibility require an effective Active `BBS_Inspector_Enrollments` row. A Group Leader mapping by itself is not sufficient.
+- Admin may appoint Group Leaders and manage their teams. A Group Leader may mutate only their own team when `AllowSelfManage=1`; server scope always comes from the enrollment, never frontend Department/Unit values.
+- One Operator may have only one effective primary `BBS_Hierarchy_Assignments` inspector at a time. Team changes preserve assignment and `BBS_Inspector_Team_Events` history.
+- KPI includes only effective Active enrollments with `KpiRequired=1`, Monday-Friday rules and the existing daily target cap. Team coverage is a separate metric.
+- `inspector_team_management_enabled` is the rollback flag. When disabled, team writes and detail APIs fail closed and existing Observation/Action/history data must not mutate.
+
+## BBS Smart Card Phase 8 Constraints
+
+- There are only personal cards and Department cards. Never add Unit cards implicitly. Personal issue/reissue requires `Group Leader` or higher. A Department may have many named Active templates, but exactly one Active shared Department QR.
+- Community Report is authenticated and Department-scoped from Employee Master for ordinary users. Observed employee/Unit are optional; supplied values must belong to that Department. Community records never count formal BBS KPI or formal Observation analytics.
+- Good reports may be shown to all authenticated users but must not expose reporter identity. Risky report/detail/evidence and Community Actions are Admin-only. Risky submission creates its Action immediately; active owner and verifier must both be current Admin accounts.
+- Department templates and Community evidence are private uploads. Keep Node/PHP API parity, content-signature/10 MB checks, object authorization and path confinement. `community_reporting_enabled` and `department_cards_enabled` disable UI/workflows without deleting data.
+
+## BBS Smart Card Phase 6 Constraints
+
+- Analytics scopes are server-enforced: Personal=self, Team=effective hierarchy assignment, Department=own Department unless Admin, Company=Admin only. Never trust a frontend Department or Safety Unit filter.
+- KPI actuals are capped per eligible workday by the active `BBS_KPI_Rules.TargetCount`; dashboard, drill-down and exports must share that formula and filter scope.
+- Excel/PDF/Print must fetch `/api/bbs/analytics/export-data` with the current filters before generating output. `analytics_enabled` and `analytics_export_enabled` are the safe operational rollback flags; disabling them must not mutate Observation or Action workflows.
+
+## BBS Smart Card Phase 2B Constraints
+
+- Checklist Excel exchange uses sheets `Checklist`, `Items`, and `Scopes`;
+  `README` and `Master Reference` are informational export sheets. Keep these
+  names and English column headers stable for round-trip compatibility.
+- Import Preview is read-only. Confirmed Import may replace only a Draft and
+  must validate the complete payload plus Master IDs before one transaction
+  replaces categories, items, scopes, and effective dates. Invalid input must
+  leave the existing Draft unchanged.
+- Import endpoints are Admin-only in both Node and PHP. Published/Archived
+  versions return `409 IMMUTABLE_VERSION`; stale `RowVersion` returns
+  `409 VERSION_CONFLICT`. Phase 2B adds no schema or upload-storage change.
+
+## BBS Smart Card Phase 2 Constraints
+
+- Phase 2 checklist tables come from
+  `backend/migrations/20260825_bbs_phase2_checklist_builder.sql`. Use exact
+  `BBS_*` casing in Node and PHP and keep the API behavior/status codes in
+  parity.
+- Only Draft versions are editable. Published/Archived content and scope are
+  immutable; clone to a new Draft. Never hard-delete a version during normal
+  operation. Template deactivate and Version archive preserve history.
+- Resolver order is specificity, priority, then effective date. No match or an
+  equal top match fails closed. Do not let the frontend choose a version to
+  bypass the server resolver.
+- Phase 2 uses only `safe_unsafe_na`; Unsafe remark/photo/action requirements
+  are item configuration. Import/Export is Phase 2B, observations are Phase 3,
+  and the main BBS menu remains hidden. No upload storage changed in Phase 2.
+
+## BBS Smart Card Phase 1 Constraints
+
+- The six `BBS_*` tables come from
+  `backend/migrations/20260825_bbs_phase1_foundation.sql`. Node and PHP must use
+  the exact migration table-name casing and preserve `/api/bbs/*` parity.
+- BBS level maps from Master Position and is not a global role. Missing mapping
+  or hierarchy denies by default. Resolve pilot Department/Safety Unit from
+  Master IDs and do not hardcode the business names.
+- Keep the main BBS navigation hidden until Phase 3. Phase 1 changes no upload
+  storage path.
+
 ## How Codex Should Work In This Repo
 
 - Read `CLAUDE.md` first, then this file, then the architecture/deployment/history document relevant to the task.
@@ -269,6 +398,9 @@ The goal is that a new Codex session can continue work immediately without re-di
 
 ## Common Pitfalls
 
+0a. **BBS Phase 3 private evidence** — Observation images live under `backend/private-uploads/bbs`, never under public `/uploads`. Keep the deny-all `.htaccess`, validate JPEG/PNG/WebP content and the 10 MB limit in Node/PHP, retrieve only through the object-authorized evidence API, and back up this directory with MySQL.
+0b. **BBS Observation immutability/retries** — Draft creation is unique by `(ObserverEmployeeID, IdempotencyKey)` and returns the same record on retry. Submitted Observations and Checklist/item snapshots are immutable; submit retry returns the existing record. Unsafe remark/photo/immediate-action rules require frontend and server validation.
+
 1. **Uploaded files live on disk now** — use `backend/storage.js`; files are saved under `backend/uploads/` and served from `/uploads`
 2. **`backend/.env` path** — โค้ด dotenv ใช้ `__dirname + '/.env'` ไม่ใช่ root `.env`
 3. **`Employees` primary key** คือ `EmployeeID` (string) ไม่ใช่ `id`
@@ -356,3 +488,8 @@ The goal is that a new Codex session can continue work immediately without re-di
 82. **4M Paste Employee IDs is a verified write** — `Assign IDs` must POST eligible IDs to `/fourm/training-curriculums/:id/assignments` and then GET the curriculum assignments to confirm every non-missing/non-blocked ID is visible before showing success. Do not use an `Added` toast for selection-only state. Keep only one active `showAssignEmployeesModal()` declaration; legacy duplicates must not override it.
 83. **4M transfer confirmation detaches/disables the form** — `guardSubmitHandler()` disables form controls immediately after the handler reaches its first `await`, and `showConfirmationModal()` can replace the transfer modal. Capture `FormData` and element references before awaiting confirmation; after completion, only restore a referenced control when `element?.isConnected`. Otherwise the destination ID is omitted and `document.getElementById(...)` returns null.
 84. **4M Training Matrix KPI source** — the five matrix KPI cards must use `GET /fourm/training-matrix-summary`, not `_tmCurriculums`, `_tmCourses`, or the currently selected `_tmAssignments`. The summary is scoped by year/department server-side and includes active curricula/courses, distinct assigned employees, both curriculum/course transfer rows, and inactive curricula/courses. Every successful Training Matrix mutation must finish with `fetchTrainingMatrix()` so the authoritative summary is read again.
+85. **BBS Phase 4 QR is a locator, never authentication** — store only SHA-256 token hashes plus short fingerprints. Raw tokens are returned only on issue/replace and travel in `#bbs-qr=`. Public resolve must not return identity. Authenticated claim must preserve the current session and authorize only self, Admin, or a current direct hierarchy assignment.
+86. **BBS card templates are private CR80 assets** — store verified JPG/PNG/WebP files in `backend/private-uploads/bbs-card-templates`, serve them through the Admin-authorized API only, and back them up with MySQL/private evidence. Replace/reprint rotates the QR token; normal rollback uses archive/revoke rather than deleting issued history.
+87. **BBS Phase 5 action lifecycle** — qualifying submitted Unsafe answers create exactly one action per `AnswerID`; lifecycle is `Open -> In Progress -> Pending Verification -> Closed`, with `Pending Verification/Closed -> Reopened`. After evidence is mandatory before verification. Reminder tests queue only; keep `BBS_Settings.action_notifications_enabled=0` unless real delivery is explicitly approved. Operational rollback preserves action/history/evidence data.
+88. **BBS Phase 6 analytics scope/formula** — enforce Personal/Team/Department/Company permission in Node and PHP before applying filters. KPI actual is capped per eligible workday by the configured daily target. Drill-down and `/analytics/export-data` must reuse the same scoped query; rollback disables `analytics_enabled` and `analytics_export_enabled` only.
+89. **BBS Phase 7 rollout gate** — `/api/bbs/qr/claim` must return `data.employee` as one object in both Node and PHP, never a MySQL row array. BBS API responses use `private, no-store` and module security headers. A valid Master scope alone is not Pilot-ready: require business-approved roster, Active Assignments, an applicable Published Checklist, and a clean read-only Pilot reconciliation before deployment approval.

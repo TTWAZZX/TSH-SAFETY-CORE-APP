@@ -4,7 +4,7 @@
 // ======================================================
 
 import * as UI from './ui.js?v=20260714-phase21-platform-shell';
-import { apiFetch } from './api.js?v=20260723-onboarding-release';
+import { API, apiFetch } from './api.js?v=20260723-onboarding-release';
 import { guardSubmitHandler } from './utils/async-ui.js?v=20260715-phase32d-remaining-async-ux';
 
 // --- Page Loaders ---
@@ -13,24 +13,25 @@ import { loadCommitteePage } from './pages/committee.js?v=20260715-phase32d-rema
 import { loadPatrolPage } from './pages/patrol.js?v=20260818-patrol-close-review-idempotent';
 import { loadCccfPage } from './pages/cccf.js?v=20260822-cccf-worker-pdf-r10';
 import { loadKpiPage } from './pages/kpi.js?v=20260715-phase32d-remaining-async-ux';
-import { loadYokotenPage } from './pages/yokoten.js?v=20260824-yokoten-topic-coverage-r3';
-import { loadAdminPage } from './pages/admin.js?v=20260824-employee-sort-r1';
+import { loadYokotenPage } from './pages/yokoten.js?v=20260825-yokoten-department-relevance-r1';
+import { loadAdminPage } from './pages/admin.js?v=20260825-bbs-phase2b-r1';
 import { loadMachineSafetyPage } from './pages/machine-safety.js?v=20260820-card-image-phase2b';
-import { loadForkliftPage } from './pages/forklift.js?v=20260730-forklift-template-type-map-hf1';
+import { loadForkliftPage } from './pages/forklift.js?v=20260831-forklift-renewal-retry-r1';
 import { loadOjtPage } from './pages/ojt.js?v=20260820-card-image-phase2d';
 import { loadTrainingPage } from './pages/training.js?v=20260820-card-image-phase2d-rollout-r2';
 import { loadAccidentPage } from './pages/accident.js?v=20260820-card-image-phase2a';
 import { loadSafetyCulturePage } from './pages/safety-culture.js?v=20260824-safety-culture-ppe-form-r1';
+import { loadBbsSmartCardPage } from './pages/bbs-smart-card.js?v=20260831-bbs-phase10c3';
 import { loadContractorPage } from './pages/contractor.js?v=20260715-phase32d-remaining-async-ux';
 import { loadHiyariPage } from './pages/hiyari.js?v=20260824-hiyari-dept-progress-r1';
-import { loadKyPage } from './pages/ky.js?v=20260822-ky-export-r1';
+import { loadKyPage } from './pages/ky.js?v=20260831-ky-chunk-upload-r1';
 import { loadFourmPage } from './pages/fourm.js?v=20260821-fourm-kpi-refresh-r1';
 import { loadJohnnyAiPage } from './pages/johnny-ai.js?v=20260715-phase32d-remaining-async-ux';
 import { openProfileDrawer, closeProfileDrawer } from './pages/profile.js?v=20260723-onboarding-release';
 import { loadDashboardPage } from './pages/dashboard.js?v=20260822-cccf-shared-target-r4';
 import { loadSearchPage } from './pages/search.js?v=20260715-phase32d-remaining-async-ux';
-import { initLoginModuleGuides } from './login-guides.js?v=20260714-phase21-platform-shell';
-import { MODULE_ORDER, moduleTitleMap } from './module-meta.js?v=20260714-phase21-platform-shell';
+import { initLoginModuleGuides } from './login-guides.js?v=20260825-bbs-phase4-r1';
+import { MODULE_ORDER, moduleTitleMap } from './module-meta.js?v=20260825-bbs-phase4-r1';
 
 const CARD_IMAGE_EXPORT_V2_MODULES = Object.freeze([
     'dashboard',
@@ -167,6 +168,8 @@ document.addEventListener('DOMContentLoaded', async () => {
     setupGlobalEventListeners();
     setupMobileViewportBehavior();
 
+    await captureBbsQrIntent();
+
     // 🔒 รอ session ให้จบก่อนทำอย่างอื่น
     await initializeSession();
 });
@@ -237,6 +240,7 @@ async function startApp(user, onboardingStatus = null) {
     }
 
     toggleAdminFeatures();
+    await refreshBbsNavigation();
 
     // เริ่ม routing หลัง login สำเร็จเท่านั้น
     const gate = await getSafetyUnitGateRequirement(onboardingStatus);
@@ -245,8 +249,52 @@ async function startApp(user, onboardingStatus = null) {
         return;
     }
 
+    if (await consumeBbsQrIntent()) return;
     consumePendingGuideRoute();
     handleRouting();
+}
+
+async function captureBbsQrIntent() {
+    const match = String(window.location.hash || '').match(/^#bbs-qr=([A-Za-z0-9_-]{43})$/);
+    if (!match) return false;
+    const token = match[1];
+    history.replaceState(null, '', `${window.location.pathname}${window.location.search}`);
+    try {
+        await API.post('/bbs/qr/resolve', { token });
+        sessionStorage.setItem('bbs_qr_intent', token);
+        return true;
+    } catch (error) {
+        sessionStorage.removeItem('bbs_qr_intent');
+        window.__bbsQrError = error?.message || 'QR นี้ไม่พร้อมใช้งาน';
+        return false;
+    }
+}
+
+async function consumeBbsQrIntent() {
+    const token = sessionStorage.getItem('bbs_qr_intent');
+    if (!token || !AppState.currentUser) {
+        if (window.__bbsQrError) { UI.showToast(window.__bbsQrError, 'error'); delete window.__bbsQrError; }
+        return false;
+    }
+    try {
+        const result = await API.post('/bbs/qr/claim', { token, returnRoute:'#bbs-smart-card' });
+        sessionStorage.removeItem('bbs_qr_intent');
+        if (result.data?.mode === 'observation' && result.data?.employee?.EmployeeID) {
+            sessionStorage.setItem('bbs_qr_observed_employee', String(result.data.employee.EmployeeID));
+        }
+        if (result.data?.mode === 'community' && result.data?.departmentId) {
+            sessionStorage.setItem('bbs_community_department_id', String(result.data.departmentId));
+        }
+        window.location.hash = 'bbs-smart-card';
+        handleRouting();
+        return true;
+    } catch (error) {
+        sessionStorage.removeItem('bbs_qr_intent');
+        UI.showToast(error?.message || 'ไม่สามารถเปิด BBS Workspace จาก QR นี้ได้', 'error');
+        window.location.hash = 'bbs-smart-card';
+        handleRouting();
+        return true;
+    }
 }
 
 function consumePendingGuideRoute() {
@@ -290,6 +338,16 @@ function toggleAdminFeatures() {
         if (AppState.isAdmin) el.classList.remove('hidden');
         else el.classList.add('hidden');
     });
+}
+
+async function refreshBbsNavigation() {
+    const nav = document.getElementById('bbs-smart-card-nav-item');
+    if (!nav) return;
+    nav.classList.add('hidden');
+    try {
+        const response = await apiFetch('/bbs/me/context');
+        if (AppState.isAdmin || response?.data?.pilot?.inPilot) nav.classList.remove('hidden');
+    } catch (_) {}
 }
 
 function normalizeSafetyGateName(value) {
@@ -596,6 +654,9 @@ async function handleRouting() {
         case 'safety-culture':
             await loadSafetyCulturePage();
             break;
+        case 'bbs-smart-card':
+            await loadBbsSmartCardPage();
+            break;
         case 'contractor':
             await loadContractorPage();
             break;
@@ -718,7 +779,9 @@ function setupMobileViewportBehavior() {
     const isStandalone = () => window.matchMedia?.('(display-mode: standalone)').matches || window.navigator.standalone === true;
     const recoverOverlayState = () => {
         const wrapper = document.getElementById('modal-wrapper');
-        const hasVisibleModal = !!wrapper && !wrapper.classList.contains('hidden') && document.body.classList.contains('mobile-modal-open');
+        const hasSharedModal = !!wrapper && !wrapper.classList.contains('hidden');
+        const hasModuleDialog = !!document.querySelector('[data-mobile-overlay-dialog="true"]');
+        const hasVisibleModal = (hasSharedModal || hasModuleDialog) && document.body.classList.contains('mobile-modal-open');
         const hasDocumentViewer = !!document.getElementById('__dv_overlay') && document.body.classList.contains('mobile-document-viewer-open');
         const overlayActive = hasVisibleModal || hasDocumentViewer;
         document.body.dataset.mobileOverlayActive = overlayActive ? '1' : '0';

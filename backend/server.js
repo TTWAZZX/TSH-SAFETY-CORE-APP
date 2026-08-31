@@ -71,6 +71,15 @@ const dashboardRoutes         = require('./routes/dashboard');
 const moduleFormsRoutes       = require('./routes/module-forms');
 const personSearchRoutes      = require('./routes/person-search');
 const johnnyAiRoutes          = require('./routes/johnny-ai');
+const bbsSmartCardRoutes      = require('./routes/bbs-smart-card');
+const bbsChecklistRoutes      = require('./routes/bbs-checklists');
+const bbsObservationRoutes    = require('./routes/bbs-observations');
+const bbsCardRoutes           = require('./routes/bbs-cards');
+const bbsActionRoutes         = require('./routes/bbs-actions');
+const bbsAnalyticsRoutes      = require('./routes/bbs-analytics');
+const bbsCommunityRoutes      = require('./routes/bbs-community');
+const bbsInspectorRoutes      = require('./routes/bbs-inspectors');
+const bbsInspectorScheduleRoutes = require('./routes/bbs-inspector-schedules');
 
 // =================================================================
 // SECTION 1: SETUP
@@ -1745,6 +1754,26 @@ if (forkliftRoutes.publicVerify) {
     app.get('/api/forklift/verify/:token', forkliftRoutes.publicVerify);
 }
 
+app.use('/api/bbs',               (_req, res, next) => {
+    res.setHeader('X-Content-Type-Options', 'nosniff');
+    res.setHeader('X-Frame-Options', 'SAMEORIGIN');
+    res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
+    res.setHeader('Permissions-Policy', 'camera=(self), microphone=(), geolocation=()');
+    res.setHeader('Cache-Control', 'private, no-store');
+    next();
+});
+app.use('/api/bbs',               async (req, res, next) => {
+    try {
+        const [rows] = await pool.query("SELECT SettingValue FROM BBS_Settings WHERE SettingKey='staged_admin_only' LIMIT 1");
+        if (String(rows[0]?.SettingValue || '0') !== '1') return next();
+        res.setHeader('X-BBS-Rollout-Mode', 'staged-admin-only');
+        return authenticateToken(req, res, () => isAdmin(req, res, next));
+    } catch (error) {
+        if (error?.code === 'ER_NO_SUCH_TABLE') return next();
+        return next(error);
+    }
+});
+app.use('/api/bbs',               bbsCardRoutes.publicRouter);
 app.use('/api/patrol',          authenticateToken, patrolRoutes);
 app.use('/api/admin',          authenticateToken, isAdmin, adminRoutes);
 app.use('/api/cccf',           authenticateToken, cccfRoutes);
@@ -1766,6 +1795,15 @@ app.use('/api/dashboard',         authenticateToken, dashboardRoutes);
 app.use('/api/module-forms',      authenticateToken, moduleFormsRoutes);
 app.use('/api/person-search',     authenticateToken, personSearchRoutes);
 app.use('/api/johnny',            authenticateToken, johnnyAiRoutes);
+app.use('/api/bbs',               authenticateToken, bbsSmartCardRoutes);
+app.use('/api/bbs',               authenticateToken, bbsChecklistRoutes);
+app.use('/api/bbs',               authenticateToken, bbsObservationRoutes);
+app.use('/api/bbs',               authenticateToken, bbsCardRoutes);
+app.use('/api/bbs',               authenticateToken, bbsActionRoutes);
+app.use('/api/bbs',               authenticateToken, bbsAnalyticsRoutes);
+app.use('/api/bbs',               authenticateToken, bbsCommunityRoutes);
+app.use('/api/bbs',               authenticateToken, bbsInspectorRoutes);
+app.use('/api/bbs',               authenticateToken, bbsInspectorScheduleRoutes);
 
 // =================================================================
 // SECTION 4B: GENERIC CRUD

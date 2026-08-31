@@ -120,6 +120,21 @@ function cases(adminToken, userToken) {
         ['Activity targets me', '/activity-targets/me'],
         ['Module forms hiyari', '/module-forms?module=hiyari'],
         ['Person search employees', '/person-search/employees?limit=5'],
+        ['BBS my context', '/bbs/me/context'],
+        ['BBS my team', '/bbs/me/team'],
+        ['BBS eligible employees', '/bbs/eligible-employees'],
+        ['BBS Phase 3 workspace', '/bbs/workspace'],
+        ['BBS Phase 3 self history', '/bbs/observations?view=observer'],
+        ['BBS Phase 5 action summary', '/bbs/actions/summary'],
+        ['BBS Phase 5 visible actions', '/bbs/actions'],
+        ['BBS Phase 6 analytics', `/bbs/analytics?scope=personal&year=${new Date().getFullYear()}`],
+        ['BBS Phase 6 scoped export data', `/bbs/analytics/export-data?scope=personal&year=${new Date().getFullYear()}`],
+        ['BBS Phase 6 drill-down', `/bbs/analytics/drilldown?scope=personal&year=${new Date().getFullYear()}&metric=observations`],
+        ['BBS Phase 8 Department cards', '/bbs/department-cards/me'],
+        ['BBS Phase 8 Community employees', '/bbs/community/employees'],
+        ['BBS Phase 8 Community dashboard', `/bbs/community/dashboard?year=${new Date().getFullYear()}`],
+        ['BBS Phase 9 inspector self workspace', '/bbs/inspectors/me'],
+        ['BBS Phase 9B inspector self compliance', `/bbs/inspectors/compliance?year=${new Date().getFullYear()}&month=${new Date().getMonth()+1}`],
     ].map(([name, path]) => ({ name, path, token: userToken, expect: 200 }));
 
     const adminRead = [
@@ -141,6 +156,16 @@ function cases(adminToken, userToken) {
         ['Yokoten employee completion', '/yokoten/employee-completion'],
         ['Safety Culture PPE violation summary', '/safety-culture/ppe-violations/summary'],
         ['Safety Culture PPE violations', '/safety-culture/ppe-violations'],
+        ['BBS Phase 1 foundation', '/bbs/admin/foundation'],
+        ['BBS Phase 2 checklists', '/bbs/admin/checklists'],
+        ['BBS Phase 4 card templates', '/bbs/admin/card-templates'],
+        ['BBS Phase 4 card employees', '/bbs/admin/card-employees'],
+        ['BBS Phase 4 cards', '/bbs/admin/cards'],
+        ['BBS Phase 5 SLA rules', '/bbs/admin/action-sla-rules'],
+        ['BBS Phase 5 action outbox', '/bbs/admin/action-outbox'],
+        ['BBS Phase 8 Department card admin', '/bbs/admin/department-cards'],
+        ['BBS Phase 9 inspector admin', '/bbs/admin/inspectors'],
+        ['BBS Phase 9B inspector company compliance', `/bbs/inspectors/compliance?year=${new Date().getFullYear()}&month=${new Date().getMonth()+1}`],
     ].map(([name, path]) => ({ name, path, token: adminToken, expect: 200 }));
 
     const userBlocked = [
@@ -154,6 +179,15 @@ function cases(adminToken, userToken) {
         ['User blocked from Yokoten all responses', '/yokoten/all-responses'],
         ['User blocked from Yokoten employee completion', '/yokoten/employee-completion'],
         ['User blocked from Safety Culture PPE violations', '/safety-culture/ppe-violations'],
+        ['User blocked from BBS Phase 1 foundation', '/bbs/admin/foundation'],
+        ['User blocked from BBS Phase 2 checklists', '/bbs/admin/checklists'],
+        ['User blocked from BBS Phase 4 card templates', '/bbs/admin/card-templates'],
+        ['User blocked from BBS Phase 4 card employees', '/bbs/admin/card-employees'],
+        ['User blocked from BBS Phase 4 cards', '/bbs/admin/cards'],
+        ['User blocked from BBS Phase 5 SLA rules', '/bbs/admin/action-sla-rules'],
+        ['User blocked from BBS Phase 5 action outbox', '/bbs/admin/action-outbox'],
+        ['User blocked from BBS Phase 8 Department card admin', '/bbs/admin/department-cards'],
+        ['User blocked from BBS Phase 9 inspector admin', '/bbs/admin/inspectors'],
     ].map(([name, path]) => ({ name, path, token: userToken, expect: 403 }));
 
     return [

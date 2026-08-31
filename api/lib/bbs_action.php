@@ -1,0 +1,26 @@
+<?php
+declare(strict_types=1);
+
+function bbs_action_statuses(): array { return ['Open','In Progress','Pending Verification','Closed','Reopened']; }
+function bbs_action_priorities(): array { return ['Critical','High','Medium','Low']; }
+function bbs_action_clean($value,int $max=4000): string { return mb_substr(trim((string)($value??'')),0,$max); }
+function bbs_action_priority($value): ?string { $raw=bbs_action_clean($value,20);foreach(bbs_action_priorities() as$item)if(strcasecmp($item,$raw)===0)return$item;return null; }
+function bbs_action_status($value): ?string { $raw=bbs_action_clean($value,30);foreach(bbs_action_statuses() as$item)if(strcasecmp($item,$raw)===0)return$item;return null; }
+function bbs_action_date($value): ?string { $text=bbs_action_clean($value,10);if(!preg_match('/^\d{4}-\d{2}-\d{2}$/',$text))return null;$date=DateTimeImmutable::createFromFormat('!Y-m-d',$text,new DateTimeZone('UTC'));return$date&&$date->format('Y-m-d')===$text?$text:null; }
+function bbs_action_transition_allowed(string $from,string $to): bool { $map=['Open'=>['In Progress'],'Reopened'=>['In Progress'],'In Progress'=>['Pending Verification'],'Pending Verification'=>['Closed','Reopened'],'Closed'=>['Reopened']];return in_array($to,$map[$from]??[],true); }
+function bbs_action_owner_transition(string $from,string $to): bool { return in_array($from,['Open','Reopened','In Progress'],true)&&in_array($to,['In Progress','Pending Verification'],true); }
+function bbs_action_verifier_transition(string $from,string $to): bool { return in_array($from,['Pending Verification','Closed'],true)&&in_array($to,['Closed','Reopened'],true); }
+function bbs_action_suppression_key(int $actionId,string $event,string $recipient,string $discriminator=''): string { return hash('sha256',implode('|',[$actionId,$event,$recipient,$discriminator])); }
+function bbs_action_no(int $answerId): string { return 'BBS-ACT-'.str_pad((string)$answerId,10,'0',STR_PAD_LEFT); }
+
+function bbs_action_queue(PDO $pdo,array $payload): array {
+    $stmt=$pdo->prepare('SELECT EmployeeID,EmployeeName,CompanyEmail FROM employees WHERE EmployeeID=? LIMIT 1');$stmt->execute([(string)$payload['recipientEmployeeId']]);$employee=$stmt->fetch();$email=bbs_action_clean($employee['CompanyEmail']??'',255);if($email==='')return['queued'=>false,'reason'=>'missing_email'];
+    $key=bbs_action_suppression_key((int)$payload['actionId'],(string)$payload['eventType'],(string)$payload['recipientEmployeeId'],(string)($payload['discriminator']??''));$body=bbs_action_clean($payload['body']??'',8000);$html='<p>'.nl2br(htmlspecialchars($body,ENT_QUOTES|ENT_SUBSTITUTE,'UTF-8')).'</p>';
+    $stmt=$pdo->prepare("INSERT IGNORE INTO BBS_Action_EmailOutbox(ActionID,EventType,RecipientEmployeeID,Recipients,Subject,Body,HtmlBody,Status,SuppressionKey) VALUES(?,?,?,?,?,?,?,'Queued',?)");$stmt->execute([(int)$payload['actionId'],bbs_action_clean($payload['eventType']??'',50),(string)$payload['recipientEmployeeId'],$email,bbs_action_clean($payload['subject']??'',255),$body,$html,$key]);return['queued'=>$stmt->rowCount()>0,'reason'=>$stmt->rowCount()>0?null:'suppressed'];
+}
+
+function bbs_action_create_for_observation(PDO $pdo,array $observation,array $answers,string $actorId): array {
+    $stmt=$pdo->query("SELECT SLADays FROM BBS_Action_SLA_Rules WHERE Priority='Medium' AND IsActive=1 LIMIT 1");$rule=$stmt->fetch();$days=max(1,min(365,(int)($rule['SLADays']??7)));$created=[];
+    foreach($answers as$answer){if(($answer['Response']??'')!=='Unsafe'||(int)($answer['UnsafeRequiresActionSnapshot']??0)!==1)continue;$description=trim(bbs_action_clean($answer['ItemCodeSnapshot']??'',50).' - '.bbs_action_clean($answer['ItemPromptSnapshot']??'',500).(!empty($answer['Remark'])?"\nRemark: ".bbs_action_clean($answer['Remark']):'').(!empty($answer['ImmediateAction'])?"\nImmediate action: ".bbs_action_clean($answer['ImmediateAction']):''));$stmt=$pdo->prepare("INSERT IGNORE INTO BBS_Corrective_Actions(ActionNo,ObservationID,AnswerID,OwnerEmployeeID,VerifierEmployeeID,Priority,DueDate,Description,Status,CreatedBy) VALUES(?,?,?,?,?,'Medium',DATE_ADD(?,INTERVAL ? DAY),?,'Open',?)");$stmt->execute([bbs_action_no((int)$answer['id']),(int)$observation['id'],(int)$answer['id'],(string)$observation['ObservedEmployeeID'],(string)$observation['ObserverEmployeeID'],(string)$observation['ObservationDate'],$days,$description,$actorId]);$inserted=$stmt->rowCount()>0;$stmt=$pdo->prepare('SELECT * FROM BBS_Corrective_Actions WHERE AnswerID=? LIMIT 1');$stmt->execute([(int)$answer['id']]);$action=$stmt->fetch();if($inserted&&$action){$pdo->prepare("INSERT INTO BBS_Action_History(ActionID,FromStatus,ToStatus,ActorEmployeeID,Note,EventType) VALUES(?,NULL,'Open',?,'Created automatically from submitted Unsafe answer.','Created')")->execute([(int)$action['id'],$actorId]);bbs_action_queue($pdo,['actionId'=>(int)$action['id'],'eventType'=>'Assigned','recipientEmployeeId'=>(string)$action['OwnerEmployeeID'],'subject'=>'BBS corrective action assigned: '.$action['ActionNo'],'body'=>'A corrective action was assigned to you and is due on '.substr((string)$action['DueDate'],0,10).'.','discriminator'=>(string)$action['RowVersion']]);$created[]=$action;}}
+    return$created;
+}

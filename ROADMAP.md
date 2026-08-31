@@ -1,5 +1,147 @@
 # TSH Safety Core Activity - Roadmap
 
+## BBS Smart Card Phase 10C-3 runtime resilience (2026-08-31)
+
+Runtime resilience is complete and deployed to Production behind the existing Admin-only staged gate. Seven BBS data areas fail and retry independently, retain only confirmed stale data with an explicit warning and avoid misleading zero states. Critical write controls prevent repeat activation while pending and provide accessible progress feedback without replacing server-side idempotency or concurrency controls. Local regression and simulated disconnect/retry checks pass; Production normal-login Chrome UAT passes all 8 tabs at three phone orientations with zero console errors. No API, schema, business configuration or upload path changed. Phase 10C-0B Pilot data remains user-owned; next work is real Pilot configuration and multi-role acceptance before ordinary-user rollout.
+
+## BBS Smart Card Phase 10C-2 mobile/accessibility hardening (2026-08-31)
+
+Frontend hardening is complete locally. The eight BBS workspaces now provide semantic/keyboard tab navigation, focus-preserving renders, labelled keyboard-scrollable tables, phone-safe 44 px controls, 16 px text fields, safe-area actions, focused validation recovery and accessible focus-trapped dialogs. Authenticated read-only Chrome UAT passes 320×568, 360×800, 390×844, 430×932 and 844×390 without page overflow, small touch targets, iOS zoom-risk fields or console errors; the complete Backend test suite also passes (`exit 0`). No API, schema, business configuration, upload path, Production or GitHub state changed. Phase 10C-0B Pilot business data remains user-owned; continue with the next approved 10C audit phase after review.
+
+## BBS Smart Card Phase 10C-1 workflow reliability (2026-08-31)
+
+Frontend reliability work is complete locally: Observation Drafts survive tab navigation and can be resumed, duplicate per-employee Draft creation is avoided, Personal Card issue/replace protects the one-time QR response from popup blocking, and every analytics output refreshes the same scoped export payload. The user elected to configure and test the missing Pilot business data separately, so Phase 10C-0B remains user-owned and no fallback data was created. Phase 10C-2 mobile/accessibility hardening is now complete locally.
+
+## BBS Smart Card Phase 10C-0A readiness audit (2026-08-31)
+
+The repeatable, read-only Pilot readiness audit is complete locally. `MAINTENANCE SEC.` / `Tube Cutting` resolves correctly and the Group Leader KPI rule is already 1 submitted Observation per Monday-Friday day, but readiness remains `CONFIGURATION_REQUIRED`: 0 Operators, 0 Active inspector enrollments, 0 Active assignments, 0 Active schedule rules and 0 applicable Published business Checklists. Card/Community setup also has 0 Active Personal templates, Department templates, Department QR and handlers. Phase 10C-0B must begin with business confirmation of the real Operator roster and Checklist content; no database record or UAT/Draft data was changed or deleted.
+
+## BBS Smart Card Phase 10B-3 implementation update (2026-08-31)
+
+Searchable Master pickers and the Department Configuration Workspace are complete locally. Admin can search/filter 41 Master Departments, inspect readiness, configure one Department at a time and search current Admin accounts for Owner/Verifier without changing the existing API. Recommended next work is Phase 10B-4 Template Preview & Print Readiness, adding a clearer pre-activation visual preview and print-safe validation while preserving private storage.
+
+## BBS Smart Card Phase 10B-2 implementation update (2026-08-31)
+
+Card Management information architecture and Guided Workflow are complete locally. Admin now starts from a card-type overview and opens only the Personal or Department workflow needed, with readiness-driven steps and status summaries. Existing APIs and business behavior are unchanged. Phase 10B-3 now completes the earlier searchable picker recommendation; Template Preview & Print Readiness is next.
+
+## BBS Smart Card Phase 10B-1 implementation update (2026-08-27)
+
+Master Data integration and read-only card readiness are complete locally. Personal Card Department and BBS Level controls now use the central Foundation contract, and Admin receives actionable reasons when mappings, eligible employees, templates, Department QR or handlers are incomplete. No schema/workflow change was introduced and Production remains on the previously deployed Phase 1-10A Admin-only build. Phase 10B-2 now supersedes the earlier next-step recommendation; Phase 10B-3 searchable Master pickers is next.
+
+## BBS Smart Card Phase 10A implementation update (2026-08-27)
+
+Mobile Batch Observation is complete locally for 2-50 assigned employees. Production rollout remains pending explicit approval and must include a fresh backup, the Phase 10A migration, PHP/JS hash verification, an authenticated mobile smoke, rollback-flag verification and test residue cleanup. Recommended next gate is Pilot acceptance on representative iOS/Android devices, including camera permission, low-bandwidth draft recovery and a real Unsafe item requiring evidence.
+
+## BBS Smart Card Phase 9B implementation update (2026-08-26)
+
+Inspector schedule configuration and compliance reporting are complete locally and not deployed. Admin can version recurring inspection days and add future Required/Exempt date overrides. Inspectors can read only their own schedule. Workspace, compliance dashboard and management analytics now share the same capped daily target. Next work is business acceptance of schedule rules and Pilot dates, followed by a separately approved controlled Production rollout.
+
+## BBS Smart Card Phase 9 implementation update (2026-08-26)
+
+Inspector enrollment and team management are complete locally and not deployed. Admin can appoint Group Leaders and manage teams; appointed leaders can manage only their own team when enabled. Formal Observation/KPI now require effective enrollment, and one Operator has one primary inspector. Next work is business acceptance with the Pilot roster and a separately approved controlled Production rollout after backup and migration rehearsal.
+
+
+## BBS Smart Card Phase 8 implementation update (2026-08-26)
+
+Department-card templates, one shared Department QR, Community Good/Risky reporting and the Admin-only Risk action dashboard are complete locally with Node/PHP parity. Community reports are available to all authenticated employees, allow an unknown observed person and remain outside formal KPI. Production remains unchanged. Next work is business acceptance of the card artwork/QR placement and privacy labels, configuration of one Admin owner/verifier per participating Department, and the separately approved Phase 1-8 controlled rollout.
+
+## BBS Smart Card Phase 7 implementation update (2026-08-25)
+
+Local security hardening and controlled-rollout preparation are complete and not deployed. Node/PHP security headers, QR claim object parity, security/runtime contracts, responsive/accessibility Chrome UAT and read-only Pilot reconciliation pass. The approved `MAINTENANCE SEC.` / `Tube Cutting` scope is valid, but Pilot activation is gated by its current 0 Active Assignments, 0 Published Checklists and 0 Operators. Next actions require business-owner roster confirmation, hierarchy assignment, Checklist publication and Pilot acceptance; Production rollout remains blocked until explicit deployment approval, fresh verified backups and the runbook gates in `DEPLOYMENT.md`.
+
+## BBS Smart Card Phase 6 implementation update (2026-08-25)
+
+Phase 6 is complete locally and not deployed. Permission-scoped Personal/Team/Department/Company analytics, consistent KPI calculation, trends, Pareto, comparison heatmap, action aging, drill-down and same-scope Excel/PDF/Print are implemented with Node/PHP parity. Local reconciliation, privacy, performance and browser UAT passed. Phase 7 security hardening, Maintenance / Tube Cutting pilot validation and controlled Production rollout are next after explicit approval.
+
+## BBS Smart Card Phase 5 implementation update (2026-08-25)
+
+Phase 5 is complete locally and not deployed. Corrective Action creation, Owner/Verifier workflow, SLA, secure Before/After evidence, reminder and overdue escalation outbox, verification, closure and reopen are implemented with Node/PHP parity. Email delivery remains disabled by default. Phase 6 analytics and management reporting is next after user review.
+
+## BBS Smart Card Phase 4 implementation update (2026-08-25)
+
+Phase 4 is complete locally and not deployed. Secure private templates,
+one-time opaque QR issue, scoped claim without impersonation, replacement,
+revocation, CR80/A4 printing, print audit, and public resolve rate limiting are
+implemented with Node/PHP parity. Local migration and rollback, Phase 3
+regression, lifecycle cleanup `0`, and responsive/pre-login QR browser UAT
+pass. Phase 5 Corrective Action ownership, SLA, escalation, and closure is next.
+
+## BBS Smart Card Phase 3 implementation update (2026-08-25)
+
+Phase 3 is complete locally and not deployed. My Workspace, eligible scope,
+immutable Checklist-backed Observation Draft/Submit, Safe/Unsafe/N/A, private
+evidence, scoped history, and basic KPI are implemented with Node/PHP parity.
+Phase 4 secure Smart Card/QR and print lifecycle is next; QR remains an opaque
+navigation token and must never authenticate as another employee.
+
+## BBS Smart Card Phase 2B implementation update (2026-08-25)
+
+Phase 2B is complete locally and not deployed. Checklist Builder supports
+five-sheet Excel export, client parsing, server-side validation Preview, and
+confirmed atomic Draft replacement with Node/PHP parity, Master validation,
+optimistic concurrency, immutable-version guards, and audit. No schema or
+upload-storage change was required. Phase 3 My Workspace and the core
+Observation MVP remains next; the main BBS navigation remains hidden.
+
+## BBS Smart Card Phase 2 implementation update (2026-08-25)
+
+Phase 2 is complete locally and not deployed. Checklist templates, immutable
+versions, categories, items, scoped mappings, lifecycle/audit, conflict-safe
+resolver, Admin Builder, and Resolver Preview are implemented with Node/PHP
+parity. Local migration and rollback, lifecycle UAT, cleanup `0`, browser UAT,
+preflight `104/104`, and full regression pass. Import/Export remains the
+optional Phase 2B follow-up. Phase 3 My Workspace and core Observation MVP is
+next; the main BBS menu remains hidden until that phase is usable.
+
+## BBS Smart Card Phase 1 implementation update (2026-08-25)
+
+Phase 1 is complete locally and not deployed. Six additive configuration
+tables, Node/PHP API parity, deny-by-default scope resolution, Admin System
+Console configuration, audit logging, the weekday KPI, and the
+Maintenance/Tube Cutting pilot are implemented. Migration/rollback,
+authenticated runtime parity, browser UAT, full backend tests, and preflight
+`102/102` pass. The main menu remains hidden. Phase 2 immutable Checklist
+Builder is next after review. This status supersedes the older Phase 0 wording
+below that says implementation had not started.
+
+## BBS Smart Card (Phase 0 approved; Phase 1 ready — 2026-08-25)
+
+- Phase 0 read-only discovery/design is complete locally. The audit found
+  2,492 employees, 41 Departments, 26 Safety Units, and 23 Positions. Position
+  coverage is strong, but Unit is blank for 2,125 employees, Team is blank for
+  2,491 employees, and the current schema has no general reporting-line,
+  employee-status/leave, or profile-photo source. Phase 1 therefore requires
+  an Admin-reviewed BBS level mapping and effective-dated hierarchy rather
+  than deriving access from Role, Team, or position text.
+- The proposed ERD, permission model, API/UI flows, checklist resolver, QR
+  threat model, KPI formulas, migration strategy, risks, and approval gates are
+  documented in `docs/bbs-smart-card-phase0-discovery-design.md`. Phase 0 and
+  the Phase 1 foundation direction are approved; implementation has not started
+  and still requires an explicit start request.
+- Approved Phase 1 baseline: Group Leader observes Operators inside the assigned
+  Unit and must submit at least one observation each Monday–Friday in
+  `Asia/Bangkok`; Operator history is limited to observations involving self,
+  Department-level personal/Unsafe detail is limited to the user's Department,
+  and Admin access is global/auditable. Pilot is `MAINTENANCE SEC.` /
+  `Tube Cutting`, resolved from Master Data IDs.
+- Proposed as a new SPA module at route `#bbs-smart-card`, positioned directly
+  below Safety Culture and above Contractor / Supplier in the main navigation.
+- Recommended sequence: Phase 0 discovery/design; Phase 1 hierarchy and
+  permission foundation; Phase 2 immutable Checklist Builder; Phase 3 My
+  Workspace and core observation MVP; Phase 4 secure QR/card lifecycle; Phase
+  5 Actions/notifications; Phase 6 analytics/reports; Phase 7 security, pilot,
+  and Production rollout.
+- The navigation remains hidden until the Phase 3 workspace is usable. The
+  design reuses `Employees`, Department/Safety Unit masters, JWT, audit,
+  uploads, and Node/PHP compatibility patterns; it does not introduce new
+  global roles or use QR as authentication.
+- Detailed prompt and phased plan:
+  `docs/bbs-smart-card-development-prompt.md` and
+  `docs/bbs-smart-card-development-plan.md`.
+- No BBS application, API, database, permission, upload-storage, or Production
+  change has been implemented yet. Unsafe/action/card/QR decisions remain gates
+  for Phases 2, 4, and 5 respectively.
+
 ## Card Image Export Improvement (Phases 0-2D deployed, 2026-08-20)
 
 Phase 0 established a read-only desktop/mobile Production baseline for the

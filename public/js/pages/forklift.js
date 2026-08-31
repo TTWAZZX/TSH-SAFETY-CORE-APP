@@ -979,11 +979,12 @@ async function openRequestDetail(id) {
         const editable = ['DRAFT', 'RETURNED'].includes(String(detail.RequestStatus).toUpperCase());
         const reviewable = ['SUBMITTED', 'UNDER_REVIEW', 'PENDING'].includes(String(detail.RequestStatus).toUpperCase());
         const docByType = Object.fromEntries((detail.Documents || []).map(doc => [doc.DocumentType, doc]));
-        const eventLabels = { CREATED: 'สร้าง Draft', DOCUMENT_UPLOADED: 'อัปโหลดเอกสาร', DOCUMENT_REMOVED: 'ลบเอกสาร', SUBMITTED: 'ส่งคำขอ', REVIEW_STARTED: 'เริ่มตรวจสอบ', RETURNED: 'ตีกลับให้แก้ไข', APPROVED: 'อนุมัติ', REJECTED: 'ไม่อนุมัติ', CANCELLED: 'ยกเลิก' };
+        const eventLabels = { CREATED: 'สร้าง Draft', RENEWAL_DRAFT_CREATED: 'สร้าง Draft ต่ออายุ', RENEWAL_DRAFT_REUSED: 'ดำเนินการต่อจาก Draft เดิม', DOCUMENT_UPLOADED: 'อัปโหลดเอกสาร', DOCUMENT_REMOVED: 'ลบเอกสาร', SUBMITTED: 'ส่งคำขอ', REVIEW_STARTED: 'เริ่มตรวจสอบ', RETURNED: 'ตีกลับให้แก้ไข', APPROVED: 'อนุมัติ', REJECTED: 'ไม่อนุมัติ', CANCELLED: 'ยกเลิก' };
         UI.openModal(`คำขอ ${detail.RequestNo || ''}`, `<div class="space-y-5">
             <section class="grid gap-3 md:grid-cols-4 text-sm"><div><p class="text-xs font-bold text-slate-400">พนักงาน</p><p class="font-black text-slate-800">${esc(detail.EmployeeName || detail.EmployeeNameSnapshot || '-')}</p><p class="text-xs text-slate-500">${esc(detail.EmployeeID || '')}</p></div><div><p class="text-xs font-bold text-slate-400">ประเภทรถยก</p><p class="font-bold text-slate-800">${esc(licenseTypeLabel(detail))}</p></div><div><p class="text-xs font-bold text-slate-400">ประเภทคำขอ</p>${requestKindBadge(detail)}</div><div><p class="text-xs font-bold text-slate-400">สถานะ</p>${requestStatusBadge(detail.RequestStatus)}</div></section>
             ${sourceLicensePanel(detail)}
             ${approvedRequestHint(detail)}
+            <section class="grid gap-3 rounded-xl border border-slate-100 bg-slate-50 p-3 text-sm md:grid-cols-4"><div><p class="text-xs font-bold text-slate-400">วันที่เริ่มรอบใหม่</p><p class="font-bold text-slate-800">${fmtDate(detail.IssueDate)}</p></div><div><p class="text-xs font-bold text-slate-400">วันหมดอายุใหม่</p><p class="font-bold text-slate-800">${fmtDate(detail.ExpireDate)}</p></div><div><p class="text-xs font-bold text-slate-400">Certificate No.</p><p class="font-bold text-slate-800">${esc(detail.CertificateNo || '-')}</p></div><div><p class="text-xs font-bold text-slate-400">หมายเหตุคำขอ</p><p class="font-bold text-slate-800">${esc(detail.RequestNote || '-')}</p></div></section>
             ${detail.ReviewNote ? `<div class="rounded-lg border border-orange-200 bg-orange-50 p-3 text-sm"><b>หมายเหตุผู้ตรวจ:</b> ${esc(detail.ReviewNote)}</div>` : ''}
             <section><h3 class="mb-2 font-black text-slate-800">เอกสารประกอบ</h3><div class="space-y-2">${(detail.Checklist || []).map(item => { const doc = docByType[item.type]; const required = item.required !== false; const accept = item.accept || '.pdf,.jpg,.jpeg,.png,.webp'; return `<div class="flex flex-col gap-2 rounded-lg border p-3 md:flex-row md:items-center md:justify-between"><div><p class="font-bold text-slate-800">${item.complete ? '✓' : '○'} ${esc(item.label)} <span class="ml-1 rounded-full ${required ? 'bg-red-50 text-red-700' : 'bg-slate-100 text-slate-500'} px-2 py-0.5 text-[10px] font-black">${required ? 'บังคับ' : 'ไม่บังคับ'}</span></p>${doc ? `<a class="text-xs text-blue-700 underline" href="${esc(doc.FileUrl)}" target="_blank" rel="noopener">${esc(doc.OriginalName || 'เปิดเอกสาร')}</a>` : `<p class="text-xs ${required ? 'text-red-600' : 'text-slate-400'}">${required ? 'ยังไม่มีเอกสาร' : 'แนบเพิ่มได้ถ้ามี'}</p>`}</div>${editable ? `<form class="fl-request-doc-upload flex items-center gap-2" data-type="${item.type}"><input name="file" type="file" required accept="${esc(accept)}" class="max-w-[220px] text-xs"><button class="rounded-lg bg-emerald-600 px-3 py-2 text-xs font-bold text-white">อัปโหลด</button>${doc ? `<button type="button" class="fl-request-doc-delete rounded-lg border px-3 py-2 text-xs font-bold" data-id="${doc.ID}">ลบ</button>` : ''}</form>` : ''}</div>`; }).join('')}</div></section>
             <section><h3 class="mb-2 font-black text-slate-800">Timeline</h3><div class="space-y-2">${(detail.Events || []).map(event => `<div class="border-l-2 border-emerald-200 pl-3 text-sm"><p class="font-bold text-slate-800">${esc(eventLabels[event.EventType] || event.EventType)}</p><p class="text-xs text-slate-500">${esc(event.ActorName || event.ActorID || '-')} · ${fmtDate(event.CreatedAt)}${event.Comment ? ` · ${esc(event.Comment)}` : ''}</p></div>`).join('') || '<p class="text-sm text-slate-400">ยังไม่มีประวัติ</p>'}</div></section>
@@ -1005,21 +1006,57 @@ async function openRequestDetail(id) {
     }
 }
 
+const RENEWAL_PROCESSING_STATUSES = new Set(['SUBMITTED', 'UNDER_REVIEW', 'PENDING']);
+
+async function findOpenRenewalRequest(licenseId) {
+    const response = await API.get(`/forklift/requests?kind=RENEWAL&sourceLicenseId=${encodeURIComponent(licenseId)}&limit=1`);
+    return (response.data || [])[0] || null;
+}
+
+async function focusExistingRenewalRequest(request, message = 'เปิดคำขอต่ออายุที่มีอยู่แล้ว') {
+    const requestId = Number(request?.ID || request?.id || 0);
+    if (!requestId) return;
+    UI.closeModal();
+    _activeTab = 'approvals';
+    invalidateForkliftCache('data');
+    await render();
+    await openRequestDetail(requestId);
+    UI.showToast(message, 'info');
+}
+
 async function openRenewalRequest(id) {
-    const row = (await API.get(`/forklift/licenses/${id}`)).data;
-    const renewalIssue = isoToday();
-    const renewalExpire = addMonths(renewalIssue, selectedValidityMonths({ querySelectorAll: () => [] }, row.LicenseTypeID || row.LicenseTypeIDs?.[0]));
+    const [licenseResponse, existing] = await Promise.all([
+        API.get(`/forklift/licenses/${id}`),
+        findOpenRenewalRequest(id),
+    ]);
+    const row = licenseResponse.data;
+    const existingStatus = String(existing?.RequestStatus || '').toUpperCase();
+    if (existing && RENEWAL_PROCESSING_STATUSES.has(existingStatus)) {
+        await focusExistingRenewalRequest(existing, `คำขอ ${existing.RequestNo || ''} อยู่ระหว่างดำเนินการแล้ว`);
+        return;
+    }
+    const existingDetail = existing && ['DRAFT', 'RETURNED'].includes(existingStatus)
+        ? (await API.get(`/forklift/requests/${existing.ID}`)).data
+        : null;
+    const existingDocuments = new Set((existingDetail?.Documents || []).map(document => String(document.DocumentType || '').toUpperCase()));
+    const renewalIssue = fmtDate(existingDetail?.IssueDate) !== '-' ? fmtDate(existingDetail.IssueDate) : isoToday();
+    const renewalExpire = fmtDate(existingDetail?.ExpireDate) !== '-'
+        ? fmtDate(existingDetail.ExpireDate)
+        : addMonths(renewalIssue, selectedValidityMonths({ querySelectorAll: () => [] }, row.LicenseTypeID || row.LicenseTypeIDs?.[0]));
+    const existingFileHint = type => existingDocuments.has(type) ? '<span class="text-emerald-600">มีไฟล์เดิมแล้ว เลือกใหม่เมื่อต้องการแทนที่</span>' : '<span class="text-red-600">บังคับ</span>';
+    const requiredUnlessExisting = type => existingDocuments.has(type) ? '' : 'required';
     UI.openModal('สร้างคำขอต่ออายุใบอนุญาต', `<form id="fl-renew-request-form" class="space-y-4">
         <div class="rounded-lg border border-cyan-100 bg-cyan-50 p-3"><p class="font-black text-slate-800">${esc(row.EmployeeName || row.EmployeeNameSnapshot || '-')}</p><p class="text-xs text-slate-600">${esc(row.LicenseNo || '-')} · หมดอายุ ${fmtDate(row.ExpireDate)}</p></div>
+        ${existingDetail ? `<div class="rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800"><p class="font-black">ดำเนินการต่อจากคำขอ ${esc(existingDetail.RequestNo || '')}</p><p class="mt-1 text-xs">ระบบจะใช้ Draft/รายการที่ถูกตีกลับเดิม เอกสารเดิมยังอยู่และไฟล์ที่เลือกใหม่จะแทนที่เฉพาะประเภทนั้น</p>${existingDetail.ReviewNote ? `<p class="mt-2 text-xs"><b>สิ่งที่ต้องแก้ไข:</b> ${esc(existingDetail.ReviewNote)}</p>` : ''}</div>` : ''}
         <div class="grid gap-3 md:grid-cols-2"><label class="text-xs font-bold text-slate-500">วันที่เริ่มรอบใหม่<input name="NewIssueDate" type="date" required class="form-input mt-1 w-full rounded-lg" value="${esc(renewalIssue)}"></label><label class="text-xs font-bold text-slate-500">วันหมดอายุใหม่ <span class="text-slate-400">(อัตโนมัติ)</span><input name="NewExpireDate" type="date" required readonly class="form-input mt-1 w-full rounded-lg bg-slate-50" value="${esc(renewalExpire)}"></label></div>
-        <label class="text-xs font-bold text-slate-500">Certificate No. ใหม่<input name="NewCertificateNo" class="form-input mt-1 w-full rounded-lg" value="${esc(row.CertificateNo || '')}"></label>
-        <label class="text-xs font-bold text-slate-500">เหตุผล/หมายเหตุ<textarea name="RenewalNote" rows="3" class="form-input mt-1 w-full rounded-lg"></textarea></label>
+        <label class="text-xs font-bold text-slate-500">Certificate No. ใหม่<input name="NewCertificateNo" class="form-input mt-1 w-full rounded-lg" value="${esc(existingDetail?.CertificateNo || row.CertificateNo || '')}"></label>
+        <label class="text-xs font-bold text-slate-500">เหตุผล/หมายเหตุ<textarea name="RenewalNote" rows="3" class="form-input mt-1 w-full rounded-lg">${esc(existingDetail?.RequestNote || '')}</textarea></label>
         <section class="rounded-xl border border-cyan-100 bg-cyan-50/40 p-3">
             <h3 class="text-sm font-black text-slate-800">เอกสารประกอบคำขอต่ออายุ</h3>
             <div class="mt-3 grid gap-3 md:grid-cols-2">
-                <label class="text-xs font-bold text-slate-500">Certificate อบรม <span class="text-red-600">บังคับ</span><input name="TrainingCertificateFile" type="file" required accept=".pdf,.jpg,.jpeg,.png,.webp" class="mt-1 block w-full text-xs"></label>
-                <label class="text-xs font-bold text-slate-500">รูปพนักงาน <span class="text-red-600">บังคับ</span><input name="EmployeePhotoFile" type="file" required accept=".jpg,.jpeg,.png,.webp" class="mt-1 block w-full text-xs"></label>
-                <label class="text-xs font-bold text-slate-500">เอกสารต่ออายุ <span class="text-red-600">บังคับ</span><input name="RenewalDocumentFile" type="file" required accept=".pdf,.jpg,.jpeg,.png,.webp" class="mt-1 block w-full text-xs"></label>
+                <label class="text-xs font-bold text-slate-500">Certificate อบรม ${existingFileHint('TRAINING_CERTIFICATE')}<input name="TrainingCertificateFile" type="file" ${requiredUnlessExisting('TRAINING_CERTIFICATE')} accept=".pdf,.jpg,.jpeg,.png,.webp" class="mt-1 block w-full text-xs"></label>
+                <label class="text-xs font-bold text-slate-500">รูปพนักงาน ${existingFileHint('EMPLOYEE_PHOTO')}<input name="EmployeePhotoFile" type="file" ${requiredUnlessExisting('EMPLOYEE_PHOTO')} accept=".jpg,.jpeg,.png,.webp" class="mt-1 block w-full text-xs"></label>
+                <label class="text-xs font-bold text-slate-500">เอกสารต่ออายุ ${existingFileHint('RENEWAL_DOCUMENT')}<input name="RenewalDocumentFile" type="file" ${requiredUnlessExisting('RENEWAL_DOCUMENT')} accept=".pdf,.jpg,.jpeg,.png,.webp" class="mt-1 block w-full text-xs"></label>
                 <label class="text-xs font-bold text-slate-500">อื่นๆ <span class="text-slate-400">ไม่บังคับ</span><input name="OtherDocumentFile" type="file" accept=".pdf,.jpg,.jpeg,.png,.webp" class="mt-1 block w-full text-xs"></label>
             </div>
         </section>
@@ -1042,19 +1079,28 @@ async function openRenewalRequest(id) {
         delete body.RenewalDocumentFile;
         delete body.OtherDocumentFile;
         body.NewExpireDate = form.NewExpireDate.value;
-        if (!trainingFile || !photoFile || !renewalFile) return UI.showToast('กรุณาแนบ Certificate อบรม รูปพนักงาน และเอกสารต่ออายุให้ครบ', 'error');
+        if ((!trainingFile && !existingDocuments.has('TRAINING_CERTIFICATE')) || (!photoFile && !existingDocuments.has('EMPLOYEE_PHOTO')) || (!renewalFile && !existingDocuments.has('RENEWAL_DOCUMENT'))) return UI.showToast('กรุณาแนบ Certificate อบรม รูปพนักงาน และเอกสารต่ออายุให้ครบ', 'error');
         await runForkliftForm(form, event.submitter || form.querySelector('button:not([type="button"])'), 'กำลังส่งคำขอต่ออายุ...', async () => {
-            const result = await API.post(`/forklift/licenses/${id}/renewal-request`, body);
-            await uploadRequestDocumentFile(result.id, 'TRAINING_CERTIFICATE', trainingFile);
-            await uploadRequestDocumentFile(result.id, 'EMPLOYEE_PHOTO', photoFile);
-            await uploadRequestDocumentFile(result.id, 'RENEWAL_DOCUMENT', renewalFile);
+            let result;
+            try {
+                result = await API.post(`/forklift/licenses/${id}/renewal-request`, body);
+            } catch (error) {
+                if (error?.code === 'RENEWAL_REQUEST_ALREADY_OPEN' && error?.id) {
+                    await focusExistingRenewalRequest(error, `คำขอ ${error.RequestNo || ''} อยู่ระหว่างดำเนินการแล้ว`);
+                    return;
+                }
+                throw error;
+            }
+            if (trainingFile?.size) await uploadRequestDocumentFile(result.id, 'TRAINING_CERTIFICATE', trainingFile);
+            if (photoFile?.size) await uploadRequestDocumentFile(result.id, 'EMPLOYEE_PHOTO', photoFile);
+            if (renewalFile?.size) await uploadRequestDocumentFile(result.id, 'RENEWAL_DOCUMENT', renewalFile);
             if (otherFile?.size) await uploadRequestDocumentFile(result.id, 'OTHER', otherFile);
             await API.post(`/forklift/requests/${result.id}/submit`, {});
             UI.closeModal();
             _activeTab = 'approvals';
             invalidateForkliftCache('data');
             await render();
-            UI.showToast('ส่งคำขอต่ออายุแล้ว', 'success');
+            UI.showToast(result.reused ? 'ดำเนินการต่อจาก Draft เดิมและส่งคำขอต่ออายุแล้ว' : 'ส่งคำขอต่ออายุแล้ว', 'success');
         }, 'ส่งคำขอต่ออายุไม่สำเร็จ');
     });
 }
@@ -2417,7 +2463,7 @@ function bindEvents() {
         }, 'ส่ง Escalation ไม่สำเร็จ');
     });
     document.querySelectorAll('.fl-renew').forEach(btn => btn.addEventListener('click', () => openRenew(btn.dataset.id)));
-    document.querySelectorAll('.fl-renew-request').forEach(btn => btn.addEventListener('click', () => openRenewalRequest(btn.dataset.id)));
+    document.querySelectorAll('.fl-renew-request').forEach(btn => btn.addEventListener('click', () => reportAsyncAction(openRenewalRequest(btn.dataset.id), 'เปิดคำขอต่ออายุไม่สำเร็จ')));
     document.querySelectorAll('.fl-docs').forEach(btn => btn.addEventListener('click', () => openDocs(btn.dataset.id)));
     document.querySelectorAll('.fl-card').forEach(btn => btn.addEventListener('click', () => openCard(btn.dataset.id)));
     document.querySelectorAll('.fl-archive').forEach(btn => btn.addEventListener('click', () => { if (!confirm('Archive ใบอนุญาตนี้?')) return; return runBusy(btn, 'กำลัง Archive...', async () => { await API.delete(`/forklift/licenses/${btn.dataset.id}`); invalidateForkliftCache('data'); UI.showToast('Archive สำเร็จ', 'success'); await render(); }); }));

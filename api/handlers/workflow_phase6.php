@@ -1611,6 +1611,113 @@ function wf_ky_can_upload_followup_video(array $row, array $user): bool
     return in_array($userId, wf_ky_participant_employee_ids($row['Participants'] ?? ''), true);
 }
 
+function wf_ini_bytes(string $value): int
+{
+    $value = trim($value);
+    if ($value === '') return 0;
+    $unit = strtolower(substr($value, -1));
+    $number = (float)$value;
+    if ($unit === 'g') $number *= 1024;
+    if ($unit === 'g' || $unit === 'm') $number *= 1024;
+    if ($unit === 'g' || $unit === 'm' || $unit === 'k') $number *= 1024;
+    return (int)$number;
+}
+
+function wf_ky_reject_oversized_legacy_upload(): void
+{
+    $length = (int)($_SERVER['CONTENT_LENGTH'] ?? 0);
+    $postLimit = wf_ini_bytes((string)ini_get('post_max_size'));
+    if ($length > 0 && $postLimit > 0 && $length > $postLimit) {
+        json_response([
+            'success' => false,
+            'code' => 'KY_UPLOAD_REQUEST_TOO_LARGE',
+            'message' => 'ขนาดข้อมูลอัปโหลดรวมเกินข้อจำกัดของเซิร์ฟเวอร์ กรุณาอัปโหลดวิดีโอด้วยระบบแบ่งส่วน',
+        ], 413);
+    }
+}
+
+function wf_ky_video_chunk_root(): string
+{
+    $dir = dirname(__DIR__, 2) . DIRECTORY_SEPARATOR . 'backend' . DIRECTORY_SEPARATOR . 'private-uploads' . DIRECTORY_SEPARATOR . 'ky-video-chunks';
+    if (!is_dir($dir) && !mkdir($dir, 0750, true) && !is_dir($dir)) throw new RuntimeException('Cannot create KY video chunk directory');
+    return $dir;
+}
+
+function wf_ky_video_upload_dir(string $uploadId): ?string
+{
+    if (!preg_match('/^[a-f0-9]{32}$/i', $uploadId)) return null;
+    return wf_ky_video_chunk_root() . DIRECTORY_SEPARATOR . strtolower($uploadId);
+}
+
+function wf_ky_video_remove_tree(string $uploadId): void
+{
+    $dir = wf_ky_video_upload_dir($uploadId);
+    if (!$dir || !is_dir($dir)) return;
+    foreach (scandir($dir) ?: [] as $name) {
+        if ($name === '.' || $name === '..') continue;
+        $target = $dir . DIRECTORY_SEPARATOR . $name;
+        if (is_file($target)) @unlink($target);
+    }
+    @rmdir($dir);
+}
+
+function wf_ky_video_cleanup_stale_uploads(): void
+{
+    $cutoff = time() - 86400;
+    foreach (scandir(wf_ky_video_chunk_root()) ?: [] as $name) {
+        if (!preg_match('/^[a-f0-9]{32}$/i', $name)) continue;
+        $dir = wf_ky_video_upload_dir($name);
+        if ($dir && is_dir($dir) && (int)filemtime($dir) < $cutoff) wf_ky_video_remove_tree($name);
+    }
+}
+
+function wf_ky_video_manifest(string $uploadId): ?array
+{
+    $dir = wf_ky_video_upload_dir($uploadId);
+    $file = $dir ? $dir . DIRECTORY_SEPARATOR . 'manifest.json' : '';
+    if ($file === '' || !is_file($file)) return null;
+    $manifest = json_decode((string)file_get_contents($file), true);
+    return is_array($manifest) && ($manifest['uploadId'] ?? '') === strtolower($uploadId) ? $manifest : null;
+}
+
+function wf_ky_video_part_path(array $manifest, int $index): string
+{
+    return (string)wf_ky_video_upload_dir((string)$manifest['uploadId']) . DIRECTORY_SEPARATOR . str_pad((string)$index, 6, '0', STR_PAD_LEFT) . '.part';
+}
+
+function wf_ky_video_expected_chunk_size(array $manifest, int $index): int
+{
+    $offset = $index * (int)$manifest['chunkSize'];
+    return min((int)$manifest['chunkSize'], (int)$manifest['fileSize'] - $offset);
+}
+
+function wf_ky_video_header_valid(string $file, string $extension): bool
+{
+    $handle = @fopen($file, 'rb');
+    if (!$handle) return false;
+    $header = (string)fread($handle, 16);
+    fclose($handle);
+    if (strlen($header) < 4) return false;
+    if ($extension === 'avi') return substr($header, 0, 4) === 'RIFF' && substr($header, 8, 4) === 'AVI ';
+    if (in_array($extension, ['webm', 'mkv'], true)) return substr($header, 0, 4) === "\x1A\x45\xDF\xA3";
+    if (in_array($extension, ['mpeg', 'mpg'], true)) return substr($header, 0, 3) === "\x00\x00\x01" && in_array(ord($header[3]), [0xBA, 0xB3], true);
+    if (in_array($extension, ['mp4', 'mov'], true)) return strlen($header) >= 12 && substr($header, 4, 4) === 'ftyp';
+    return false;
+}
+
+function wf_ky_video_chunk_access(?array $row, array $user, ?array $manifest = null): array
+{
+    if (!$row) return ['status' => 404, 'message' => 'ไม่พบกิจกรรม KY'];
+    if (!wf_ky_can_upload_followup_video($row, $user)) return ['status' => 403, 'message' => 'แนบวิดีโอได้เฉพาะเจ้าของรายการหรือ Admin'];
+    $userId = wf_user_id($user);
+    if ($manifest && (($manifest['activityId'] ?? '') !== ($row['id'] ?? '') || ($manifest['initiatedBy'] ?? '') !== $userId)) {
+        return ['status' => 403, 'message' => 'ไม่สามารถใช้งานชุดอัปโหลดนี้ได้'];
+    }
+    $admin = wf_is_admin($user);
+    if (!$admin && !empty($row['VideoUrl'])) return ['status' => 409, 'message' => 'รายการนี้มีวิดีโอแล้ว กรุณาติดต่อ Admin หากต้องการเปลี่ยนไฟล์'];
+    return ['status' => 0, 'userId' => $userId, 'admin' => $admin];
+}
+
 function wf_ky_mail(string $event, array $row, array $extra = []): array
 {
     $labels = [
@@ -1933,6 +2040,7 @@ function handle_ky_routes(string $method, string $path): bool
     $p=route_params($path,'/ky/email-outbox/:id/retry'); if($p!==null&&$method==='POST'){require_admin();try{$r=mailer_outbox_send('ky_emailoutbox',(int)$p['id'],'Recipient','HtmlBody');json_response(['success'=>true,'message'=>'Email sent.','data'=>$r]);}catch(Throwable $e){json_response(['success'=>false,'message'=>'Email send failed.','error'=>$e->getMessage()],500);}}
     $p=route_params($path,'/ky/:id'); if($p!==null&&$method==='GET'){ $row=db_row('SELECT * FROM ky_activities WHERE id=?',[$p['id']]);if(!$row)json_response(['success'=>false,'message'=>'Not found.'],404);$row['reactions']=db_rows('SELECT Reaction,COUNT(*) AS count FROM ky_video_reactions WHERE ActivityID=? GROUP BY Reaction',[$p['id']]);json_response(['success'=>true,'data'=>$row]);}
     if($method==='POST'&&$path==='/ky'){
+        wf_ky_reject_oversized_legacy_upload();
         $files=wf_store_files('attachment',1);
         $videos=wf_store_files('video',1,200*1024*1024);
         $b=wf_body();
@@ -1987,7 +2095,99 @@ function handle_ky_routes(string $method, string $path): bool
             json_response(['success'=>true,'id'=>$id]);
         }catch(Throwable $e){wf_cleanup_files($files);wf_cleanup_files($videos);throw $e;}
     }
+    $p=route_params($path,'/ky/:id/video-upload/init'); if($p!==null&&$method==='POST'){
+        wf_ky_video_cleanup_stale_uploads();
+        $row=db_row('SELECT id,ReporterID,SubmittedByID,Participants,VideoUrl,Status FROM ky_activities WHERE id=?',[$p['id']]);
+        $access=wf_ky_video_chunk_access($row,$user);
+        if(!empty($access['status']))json_response(['success'=>false,'message'=>$access['message']],(int)$access['status']);
+        $b=json_body();
+        $fileName=clean_upload_name($b['fileName']??'video');
+        $fileSize=(int)($b['fileSize']??0);
+        $mimeType=strtolower(trim((string)($b['mimeType']??'')));
+        $extension=strtolower(pathinfo($fileName,PATHINFO_EXTENSION));
+        $extensions=['mp4','mov','webm','avi','mkv','mpeg','mpg'];
+        $mimeTypes=['video/mp4','video/quicktime','video/webm','video/avi','video/x-msvideo','video/x-matroska','video/mpeg'];
+        if($fileSize<=0||$fileSize>200*1024*1024)json_response(['success'=>false,'code'=>'KY_VIDEO_SIZE_INVALID','message'=>'วิดีโอต้องมีขนาดไม่เกิน 200 MB'],400);
+        if(!in_array($extension,$extensions,true)||($mimeType!==''&&!in_array($mimeType,$mimeTypes,true)))json_response(['success'=>false,'code'=>'KY_VIDEO_TYPE_INVALID','message'=>'รองรับเฉพาะ MP4, MOV, WebM, AVI, MKV และ MPEG'],400);
+        $uploadId=bin2hex(random_bytes(16));
+        $dir=wf_ky_video_upload_dir($uploadId);
+        if(!$dir||!mkdir($dir,0750))json_response(['success'=>false,'message'=>'ไม่สามารถเริ่มอัปโหลดวิดีโอ KY ได้'],500);
+        $chunkSize=5*1024*1024;
+        $manifest=['uploadId'=>$uploadId,'activityId'=>$row['id'],'initiatedBy'=>$access['userId'],'fileName'=>$fileName,'fileSize'=>$fileSize,'mimeType'=>$mimeType,'extension'=>$extension,'chunkSize'=>$chunkSize,'totalChunks'=>(int)ceil($fileSize/$chunkSize),'createdAt'=>date(DATE_ATOM)];
+        if(file_put_contents($dir.DIRECTORY_SEPARATOR.'manifest.json',json_encode($manifest,JSON_UNESCAPED_UNICODE),LOCK_EX)===false){wf_ky_video_remove_tree($uploadId);json_response(['success'=>false,'message'=>'ไม่สามารถเริ่มอัปโหลดวิดีโอ KY ได้'],500);}
+        json_response(['success'=>true,'data'=>['uploadId'=>$uploadId,'chunkSize'=>$chunkSize,'totalChunks'=>$manifest['totalChunks']]],201);
+    }
+    $p=route_params($path,'/ky/:id/video-upload/:uploadId/chunk/:index'); if($p!==null&&$method==='POST'){
+        $manifest=wf_ky_video_manifest($p['uploadId']);
+        if(!$manifest)json_response(['success'=>false,'message'=>'ไม่พบชุดอัปโหลดหรือชุดอัปโหลดหมดอายุแล้ว'],404);
+        $row=db_row('SELECT id,ReporterID,SubmittedByID,Participants,VideoUrl,Status FROM ky_activities WHERE id=?',[$p['id']]);
+        $access=wf_ky_video_chunk_access($row,$user,$manifest);
+        if(!empty($access['status']))json_response(['success'=>false,'message'=>$access['message']],(int)$access['status']);
+        $index=filter_var($p['index'],FILTER_VALIDATE_INT,['options'=>['min_range'=>0]]);
+        $file=$_FILES['chunk']??null;
+        if($index===false||$index>=(int)$manifest['totalChunks']||!is_array($file)||(int)($file['error']??UPLOAD_ERR_NO_FILE)!==UPLOAD_ERR_OK)json_response(['success'=>false,'code'=>'KY_VIDEO_CHUNK_INVALID','message'=>'ข้อมูลส่วนวิดีโอไม่ถูกต้อง'],400);
+        $expected=wf_ky_video_expected_chunk_size($manifest,(int)$index);
+        if((int)($file['size']??0)!==$expected||$expected<=0||$expected>5*1024*1024)json_response(['success'=>false,'code'=>'KY_VIDEO_CHUNK_SIZE_MISMATCH','message'=>'ขนาดส่วนวิดีโอไม่ตรงกับที่ระบบกำหนด'],400);
+        $target=wf_ky_video_part_path($manifest,(int)$index);
+        $temporary=$target.'.'.bin2hex(random_bytes(4)).'.upload';
+        if(!move_uploaded_file((string)$file['tmp_name'],$temporary)){@unlink($temporary);json_response(['success'=>false,'message'=>'ไม่สามารถบันทึกส่วนวิดีโอ KY ได้'],500);}
+        if(is_file($target))@unlink($target);
+        if(!rename($temporary,$target)){@unlink($temporary);json_response(['success'=>false,'message'=>'ไม่สามารถบันทึกส่วนวิดีโอ KY ได้'],500);}
+        @chmod($target,0640);
+        json_response(['success'=>true,'data'=>['uploadId'=>$manifest['uploadId'],'index'=>(int)$index,'receivedBytes'=>$expected]]);
+    }
+    $p=route_params($path,'/ky/:id/video-upload/:uploadId/complete'); if($p!==null&&$method==='POST'){
+        $manifest=wf_ky_video_manifest($p['uploadId']);
+        if(!$manifest)json_response(['success'=>false,'message'=>'ไม่พบชุดอัปโหลดหรือชุดอัปโหลดหมดอายุแล้ว'],404);
+        $row=db_row('SELECT id,ReporterID,SubmittedByID,Participants,VideoUrl,Status FROM ky_activities WHERE id=?',[$p['id']]);
+        $access=wf_ky_video_chunk_access($row,$user,$manifest);
+        if(!empty($access['status']))json_response(['success'=>false,'message'=>$access['message']],(int)$access['status']);
+        $assembledSize=0;
+        for($index=0;$index<(int)$manifest['totalChunks'];$index++){
+            $part=wf_ky_video_part_path($manifest,$index);$expected=wf_ky_video_expected_chunk_size($manifest,$index);
+            if(!is_file($part)||(int)filesize($part)!==$expected)json_response(['success'=>false,'code'=>'KY_VIDEO_CHUNKS_INCOMPLETE','message'=>'อัปโหลดวิดีโอยังไม่ครบ (ส่วนที่ '.($index+1).')'],409);
+            $assembledSize+=$expected;
+        }
+        if($assembledSize!==(int)$manifest['fileSize'])json_response(['success'=>false,'code'=>'KY_VIDEO_SIZE_MISMATCH','message'=>'ขนาดวิดีโอรวมไม่ถูกต้อง'],409);
+        $dir=wf_ky_video_upload_dir($manifest['uploadId']);$lockPath=$dir.DIRECTORY_SEPARATOR.'complete.lock';$lock=@fopen($lockPath,'x');
+        if(!$lock)json_response(['success'=>false,'message'=>'ระบบกำลังรวมวิดีโอนี้อยู่ กรุณารอสักครู่'],409);
+        $storedName=date('YmdHis').'-'.bin2hex(random_bytes(8)).'.'.$manifest['extension'];$final=upload_dir().DIRECTORY_SEPARATOR.$storedName;$out=null;$pdo=db();
+        try{
+            $out=fopen($final,'xb');if(!$out)throw new RuntimeException('ไม่สามารถสร้างไฟล์วิดีโอปลายทางได้');
+            for($index=0;$index<(int)$manifest['totalChunks'];$index++){
+                $part=wf_ky_video_part_path($manifest,$index);$in=fopen($part,'rb');if(!$in)throw new RuntimeException('ไม่สามารถอ่านส่วนวิดีโอได้');
+                stream_copy_to_stream($in,$out);fclose($in);
+            }
+            fclose($out);$out=null;
+            if((int)filesize($final)!==(int)$manifest['fileSize']||!wf_ky_video_header_valid($final,(string)$manifest['extension']))throw new RuntimeException('เนื้อหาไฟล์ไม่ใช่วิดีโอชนิดที่รองรับ',400);
+            $videoUrl=upload_public_url($storedName,(string)$manifest['fileName']);
+            $pdo->beginTransaction();
+            $locked=db_row('SELECT id,ReporterID,SubmittedByID,Participants,VideoUrl,Status FROM ky_activities WHERE id=? FOR UPDATE',[$p['id']]);
+            $lockedAccess=wf_ky_video_chunk_access($locked,$user,$manifest);
+            if(!empty($lockedAccess['status']))throw new RuntimeException((string)$lockedAccess['message'],(int)$lockedAccess['status']);
+            $previous=$locked['VideoUrl']??null;
+            db_execute('UPDATE ky_activities SET VideoUrl=? WHERE id=?',[$videoUrl,$p['id']]);
+            $pdo->commit();
+            if(!empty($lockedAccess['admin'])&&!empty($previous))delete_uploaded_file($previous);
+            try{wf_ky_audit($user,'KY_VIDEO_CHUNK_UPLOAD_COMPLETE',(string)$p['id'],!empty($lockedAccess['admin'])&&!empty($previous)?'Admin replaced KY video with chunk upload':'Uploaded KY video in chunks',['chunks'=>$manifest['totalChunks'],'bytes'=>$manifest['fileSize'],'replacedExisting'=>!empty($previous)]);}catch(Throwable $auditError){error_log('KY video chunk audit error: '.$auditError->getMessage());}
+            fclose($lock);@unlink($lockPath);wf_ky_video_remove_tree($manifest['uploadId']);
+            json_response(['success'=>true,'data'=>['id'=>$p['id'],'videoUrl'=>$videoUrl]]);
+        }catch(Throwable $e){
+            if(is_resource($out))fclose($out);if($pdo->inTransaction())$pdo->rollBack();@unlink($final);fclose($lock);@unlink($lockPath);
+            $status=(int)$e->getCode();if($status<400||$status>599)$status=500;
+            json_response(['success'=>false,'message'=>$e->getMessage()?:'ไม่สามารถรวมวิดีโอ KY ได้'],$status);
+        }
+    }
+    $p=route_params($path,'/ky/:id/video-upload/:uploadId'); if($p!==null&&$method==='DELETE'){
+        $manifest=wf_ky_video_manifest($p['uploadId']);
+        if(!$manifest)json_response(['success'=>true]);
+        $row=db_row('SELECT id,ReporterID,SubmittedByID,Participants,VideoUrl,Status FROM ky_activities WHERE id=?',[$p['id']]);
+        $access=wf_ky_video_chunk_access($row,$user,$manifest);
+        if(!empty($access['status'])&&(int)$access['status']!==409)json_response(['success'=>false,'message'=>$access['message']],(int)$access['status']);
+        wf_ky_video_remove_tree($manifest['uploadId']);json_response(['success'=>true]);
+    }
     $p=route_params($path,'/ky/:id/video'); if($p!==null&&$method==='POST'){
+        wf_ky_reject_oversized_legacy_upload();
         $row=db_row('SELECT id,ReporterID,SubmittedByID,Participants,VideoUrl,Status FROM ky_activities WHERE id=?',[$p['id']]);
         if(!$row)json_response(['success'=>false,'message'=>'ไม่พบกิจกรรม KY'],404);
         $isOwner=wf_ky_can_upload_followup_video($row,$user);$isAdmin=wf_is_admin($user);
@@ -2006,6 +2206,7 @@ function handle_ky_routes(string $method, string $path): bool
     }
     $p=route_params($path,'/ky/:id'); if($p!==null&&$method==='PUT'){
         require_admin();
+        wf_ky_reject_oversized_legacy_upload();
         $files=wf_store_files('attachment',1);
         $videos=wf_store_files('video',1,200*1024*1024);
         try{

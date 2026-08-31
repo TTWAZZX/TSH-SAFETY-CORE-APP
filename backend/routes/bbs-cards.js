@@ -1,0 +1,202 @@
+'use strict';
+
+const express = require('express');
+const multer = require('multer');
+const path = require('path');
+const fs = require('fs');
+const crypto = require('crypto');
+const db = require('../db');
+const { isAdmin } = require('../middleware/auth');
+const { logAudit } = require('../utils/audit');
+const { BBS_LEVELS, bangkokIsoDate, levelRank } = require('../services/bbs-phase1');
+const { clean, createRawToken, hashToken, tokenFingerprint, validRawToken, normalizeInternalRoute, cardPayload } = require('../services/bbs-card');
+
+const publicRouter = express.Router();
+const router = express.Router();
+const templateDir = path.join(__dirname, '..', 'private-uploads', 'bbs-card-templates');
+fs.mkdirSync(templateDir, { recursive: true });
+
+const templateUpload = multer({
+    storage: multer.diskStorage({
+        destination: (_req, _file, cb) => cb(null, templateDir),
+        filename: (_req, file, cb) => cb(null, `${Date.now()}-${crypto.randomBytes(18).toString('hex')}${({ 'image/jpeg':'.jpg', 'image/png':'.png', 'image/webp':'.webp' })[file.mimetype] || ''}`),
+    }),
+    limits: { fileSize: 10 * 1024 * 1024, files: 1 },
+    fileFilter: (_req, file, cb) => cb(null, ['image/jpeg','image/png','image/webp'].includes(file.mimetype)),
+});
+
+function actorId(req) { return String(req.user?.id || req.user?.EmployeeID || '').trim(); }
+function admin(req) { return String(req.user?.role || req.user?.Role || '').toLowerCase() === 'admin'; }
+function positiveInt(value) { return Number.isInteger(Number(value)) && Number(value) > 0 ? Number(value) : null; }
+function unlinkStored(name) { if (!name) return; const file = path.join(templateDir, path.basename(name)); if (file.startsWith(templateDir)) fs.promises.rm(file, { force:true }).catch(() => {}); }
+function verifiedImageMime(filePath) {
+    const head = fs.readFileSync(filePath).subarray(0, 16);
+    if (head[0] === 0xff && head[1] === 0xd8 && head[2] === 0xff) return 'image/jpeg';
+    if (head.length >= 8 && head.subarray(0,8).equals(Buffer.from([0x89,0x50,0x4e,0x47,0x0d,0x0a,0x1a,0x0a]))) return 'image/png';
+    if (head.subarray(0,4).toString('ascii') === 'RIFF' && head.subarray(8,12).toString('ascii') === 'WEBP') return 'image/webp';
+    return null;
+}
+function phase4Error(res, error, label) {
+    console.error(`[bbs-phase4] ${label}:`, error?.message || error);
+    if (error?.code === 'ER_NO_SUCH_TABLE') return res.status(503).json({ success:false, code:'BBS_CARD_SETUP_REQUIRED', message:'BBS Phase 4 database migration is required.' });
+    if (error?.code === 'ER_DUP_ENTRY') return res.status(409).json({ success:false, code:'ACTIVE_CARD_EXISTS', message:'This employee already has an Active card. Use Replace.' });
+    return res.status(500).json({ success:false, message:'Unable to process the BBS card request.' });
+}
+async function qrLimit(ip, token) {
+    const ipHash = crypto.createHash('sha256').update(`${process.env.JWT_SECRET}:${String(ip || '')}`).digest('hex');
+    const fingerprint = tokenFingerprint(token);
+    const [[setting]] = await db.query("SELECT SettingValue FROM BBS_Settings WHERE SettingKey='qr_resolve_limit_5m' LIMIT 1");
+    const limit = Math.max(5, Math.min(200, Number(setting?.SettingValue || 30)));
+    const [[row]] = await db.query('SELECT COUNT(*) count FROM BBS_QR_Resolve_Attempts WHERE IPHash=? AND AttemptedAt>=DATE_SUB(NOW(),INTERVAL 5 MINUTE)', [ipHash]);
+    if (Number(row.count) >= limit) return { allowed:false, ipHash, fingerprint };
+    return { allowed:true, ipHash, fingerprint };
+}
+async function recordResolve(limitState, successful) {
+    await db.query('INSERT INTO BBS_QR_Resolve_Attempts(IPHash,TokenFingerprint,Successful) VALUES(?,?,?)', [limitState.ipHash, limitState.fingerprint, successful ? 1 : 0]);
+    if (Math.random() < 0.02) await db.query('DELETE FROM BBS_QR_Resolve_Attempts WHERE AttemptedAt<DATE_SUB(NOW(),INTERVAL 7 DAY)').catch(() => {});
+}
+async function activeCardForToken(rawToken, queryable = db) {
+    const [[row]] = await queryable.query(`SELECT c.*,t.Status TemplateStatus FROM BBS_Cards c JOIN BBS_Card_Templates t ON t.id=c.TemplateID WHERE c.TokenHash=? AND c.Status='Active' AND t.Status='Active' LIMIT 1`, [hashToken(rawToken)]);
+    return row || null;
+}
+async function activeDepartmentCardForToken(rawToken, queryable = db) {
+    const [[row]] = await queryable.query(`SELECT q.*,d.Name DepartmentName FROM BBS_Department_QR_Cards q JOIN Master_Departments d ON d.id=q.DepartmentID WHERE q.TokenHash=? AND q.Status='Active' LIMIT 1`, [hashToken(rawToken)]);
+    return row || null;
+}
+async function canUseCardTarget(req, card, queryable = db) {
+    const userId = actorId(req);
+    if (admin(req) || String(card.EmployeeID).toLowerCase() === userId.toLowerCase()) return true;
+    const asOf = bangkokIsoDate();
+    const [[row]] = await queryable.query(`SELECT id FROM BBS_Hierarchy_Assignments WHERE SupervisorEmployeeID=? AND MemberEmployeeID=? AND IsActive=1 AND EffectiveFrom<=? AND (EffectiveTo IS NULL OR EffectiveTo>=?) LIMIT 1`, [userId, card.EmployeeID, asOf, asOf]);
+    return Boolean(row);
+}
+async function employeeCardData(employeeIds, queryable = db) {
+    if (!employeeIds.length) return [];
+    const placeholders = employeeIds.map(() => '?').join(',');
+    const [rows] = await queryable.query(`SELECT e.EmployeeID,e.EmployeeName,e.Department,e.Unit,e.Position,m.BBSLevel,md.id DepartmentID FROM Employees e LEFT JOIN Master_Departments md ON LOWER(TRIM(md.Name))=LOWER(TRIM(e.Department)) LEFT JOIN Master_Positions p ON LOWER(TRIM(p.Name))=LOWER(TRIM(e.Position)) LEFT JOIN BBS_Position_Level_Mappings m ON m.PositionID=p.id AND m.IsActive=1 WHERE e.EmployeeID IN (${placeholders})`, employeeIds);
+    return rows.map(row => ({ ...row, PhotoUrl:'' }));
+}
+function templateMatches(template, employee) {
+    return (!template.DepartmentID || Number(template.DepartmentID) === Number(employee.DepartmentID))
+        && (!template.BBSLevel || String(template.BBSLevel) === String(employee.BBSLevel));
+}
+function appBase(req) {
+    const configured = clean(process.env.PUBLIC_APP_URL || process.env.APP_BASE_URL || process.env.FRONTEND_URL || '', 500);
+    if (configured) return configured;
+    const origin = clean(req.get('origin') || '', 500);
+    if (/^https?:\/\/[A-Za-z0-9.:[\]-]+$/.test(origin)) return `${origin}/index.html`;
+    return `${req.protocol}://${req.get('host')}/index.html`;
+}
+async function issueWithin(connection, req, employee, template, reason) {
+    const rawToken = createRawToken();
+    const [result] = await connection.query(`INSERT INTO BBS_Cards(EmployeeID,TemplateID,TokenHash,TokenFingerprint,Status,IssueReason,IssuedBy) VALUES(?,?,?,?,'Active',?,?)`, [employee.EmployeeID, template.id, hashToken(rawToken), tokenFingerprint(rawToken), reason || null, actorId(req)]);
+    return { cardId:Number(result.insertId), rawToken, ...cardPayload(employee, template, rawToken, appBase(req)) };
+}
+
+publicRouter.post('/qr/resolve', async (req, res) => {
+    try {
+        const token = String(req.body?.token || '');
+        const limiter = await qrLimit(req.ip || req.headers['x-forwarded-for'], token);
+        if (!limiter.allowed) return res.status(429).json({ success:false, code:'QR_RATE_LIMITED', message:'Too many QR attempts. Please try again later.' });
+        if (!validRawToken(token)) { await recordResolve(limiter, false); return res.status(404).json({ success:false, code:'QR_NOT_ACTIVE', message:'This BBS QR is not active.' }); }
+        const card = await activeCardForToken(token);
+        const departmentCard = card ? null : await activeDepartmentCardForToken(token);
+        await recordResolve(limiter, Boolean(card || departmentCard));
+        if (!card && !departmentCard) return res.status(404).json({ success:false, code:'QR_NOT_ACTIVE', message:'This BBS QR is not active.' });
+        if (card) await db.query('UPDATE BBS_Cards SET LastResolvedAt=NOW(),ResolveCount=ResolveCount+1 WHERE id=?', [card.id]);
+        else await db.query('UPDATE BBS_Department_QR_Cards SET LastResolvedAt=NOW(),ResolveCount=ResolveCount+1 WHERE id=?', [departmentCard.id]);
+        return res.json({ success:true, data:{ active:true, route:'#bbs-smart-card', requiresLogin:true } });
+    } catch (error) { return phase4Error(res, error, 'public QR resolve'); }
+});
+
+router.post('/qr/claim', async (req, res) => {
+    try {
+        const token = String(req.body?.token || '');
+        if (!validRawToken(token)) return res.status(404).json({ success:false, code:'QR_NOT_ACTIVE', message:'This BBS QR is not active.' });
+        const card = await activeCardForToken(token);
+        const departmentCard = card ? null : await activeDepartmentCardForToken(token);
+        if (!card && !departmentCard) return res.status(404).json({ success:false, code:'QR_NOT_ACTIVE', message:'This BBS QR is not active.' });
+        if (departmentCard) {
+            const [[employee]] = await db.query(`SELECT e.EmployeeID,d.id DepartmentID FROM Employees e LEFT JOIN Master_Departments d ON LOWER(TRIM(d.Name))=LOWER(TRIM(e.Department)) WHERE e.EmployeeID=? LIMIT 1`, [actorId(req)]);
+            if (!admin(req) && Number(employee?.DepartmentID) !== Number(departmentCard.DepartmentID)) return res.status(403).json({ success:false, code:'QR_SCOPE_DENIED', message:'This Community QR belongs to another Department.' });
+            return res.json({ success:true, data:{ mode:'community', route:normalizeInternalRoute(req.body?.returnRoute), departmentId:Number(departmentCard.DepartmentID), departmentName:departmentCard.DepartmentName } });
+        }
+        if (!await canUseCardTarget(req, card)) return res.status(403).json({ success:false, code:'QR_SCOPE_DENIED', message:'You do not have permission to use this employee card.' });
+        const [employee] = await employeeCardData([card.EmployeeID]);
+        if (!employee) return res.status(404).json({ success:false, message:'Card owner is no longer available.' });
+        const self = String(card.EmployeeID).toLowerCase() === actorId(req).toLowerCase();
+        return res.json({ success:true, data:{ mode:self ? 'workspace' : 'observation', route:normalizeInternalRoute(req.body?.returnRoute), employee:self ? null : employee } });
+    } catch (error) { return phase4Error(res, error, 'QR claim'); }
+});
+
+router.get('/admin/card-templates', isAdmin, async (_req, res) => {
+    try { const [rows] = await db.query(`SELECT t.*,d.Name DepartmentName FROM BBS_Card_Templates t LEFT JOIN Master_Departments d ON d.id=t.DepartmentID ORDER BY FIELD(t.Status,'Active','Draft','Archived'),t.UpdatedAt DESC,t.id DESC`); return res.json({ success:true, data:rows }); }
+    catch (error) { return phase4Error(res, error, 'template list'); }
+});
+
+router.post('/admin/card-templates', isAdmin, templateUpload.single('template'), async (req, res) => {
+    let persisted = false;
+    try {
+        if (!req.file) return res.status(400).json({ success:false, message:'A JPG, PNG, or WebP card template is required.' });
+        const actualMime = verifiedImageMime(req.file.path);
+        if (!actualMime || actualMime !== req.file.mimetype) { unlinkStored(req.file.filename); return res.status(400).json({ success:false, message:'Template file content does not match its image type.' }); }
+        const name = clean(req.body?.templateName, 160); const departmentId = positiveInt(req.body?.departmentId); const level = clean(req.body?.bbsLevel, 40) || null;
+        if (!name) { unlinkStored(req.file.filename); return res.status(400).json({ success:false, message:'Template name is required.' }); }
+        if (level && !BBS_LEVELS.includes(level)) { unlinkStored(req.file.filename); return res.status(400).json({ success:false, message:'BBS level is invalid.' }); }
+        if (departmentId) { const [[dept]] = await db.query('SELECT id FROM Master_Departments WHERE id=? LIMIT 1',[departmentId]); if (!dept) { unlinkStored(req.file.filename); return res.status(400).json({success:false,message:'Department is invalid.'}); } }
+        const [result] = await db.query(`INSERT INTO BBS_Card_Templates(TemplateName,DepartmentID,BBSLevel,BackgroundStoredName,OriginalName,MimeType,FileSize,IncludeEmployeeID,CreatedBy,UpdatedBy) VALUES(?,?,?,?,?,?,?,?,?,?)`, [name,departmentId,level,req.file.filename,clean(req.file.originalname),actualMime,req.file.size,String(req.body?.includeEmployeeId) === '0' ? 0 : 1,actorId(req),actorId(req)]);
+        persisted = true; await logAudit(req,{action:'BBS_CARD_TEMPLATE_CREATE',module:'bbs',targetType:'BBS_Card_Template',targetId:result.insertId,detail:'Created Draft BBS card template.'});
+        const [[row]] = await db.query('SELECT * FROM BBS_Card_Templates WHERE id=?',[result.insertId]); return res.status(201).json({success:true,data:row});
+    } catch (error) { if (req.file && !persisted) unlinkStored(req.file.filename); return phase4Error(res,error,'template create'); }
+});
+
+router.get('/admin/card-templates/:id/file', isAdmin, async (req,res) => {
+    try { const id=positiveInt(req.params.id); const [[row]]=await db.query('SELECT BackgroundStoredName,OriginalName,MimeType FROM BBS_Card_Templates WHERE id=? LIMIT 1',[id]); if(!row)return res.status(404).json({success:false,message:'Template was not found.'}); const file=path.join(templateDir,path.basename(row.BackgroundStoredName)); if(!file.startsWith(templateDir)||!fs.existsSync(file))return res.status(404).json({success:false,message:'Template file was not found.'}); res.setHeader('Content-Type',row.MimeType);res.setHeader('Content-Disposition',`inline; filename="${clean(row.OriginalName).replace(/["\\]/g,'_')}"`);res.setHeader('Cache-Control','private, no-store');return res.sendFile(file); }
+    catch(error){return phase4Error(res,error,'template file');}
+});
+
+router.put('/admin/card-templates/:id', isAdmin, async (req,res) => {
+    const connection=await db.getConnection();
+    try { const id=positiveInt(req.params.id),version=positiveInt(req.body?.rowVersion); if(!id||!version)return res.status(400).json({success:false,message:'Valid template ID and RowVersion are required.'}); await connection.beginTransaction(); const [[row]]=await connection.query('SELECT * FROM BBS_Card_Templates WHERE id=? FOR UPDATE',[id]); if(!row){await connection.rollback();return res.status(404).json({success:false,message:'Template was not found.'});} if(Number(row.RowVersion)!==version){await connection.rollback();return res.status(409).json({success:false,code:'VERSION_CONFLICT',message:'Template was changed by another user.'});}
+        const action=clean(req.body?.action,20).toLowerCase(); if(!['activate','archive'].includes(action)){await connection.rollback();return res.status(400).json({success:false,message:'Action must be activate or archive.'});}
+        if(action==='activate'){if(row.Status==='Archived'){await connection.rollback();return res.status(409).json({success:false,message:'Archived templates cannot be activated.'});} await connection.query(`UPDATE BBS_Card_Templates SET Status='Archived',ArchivedAt=NOW(),ArchivedBy=?,UpdatedBy=?,RowVersion=RowVersion+1 WHERE Status='Active' AND id<>? AND DepartmentID <=> ? AND BBSLevel <=> ?`,[actorId(req),actorId(req),id,row.DepartmentID,row.BBSLevel]);await connection.query(`UPDATE BBS_Card_Templates SET Status='Active',ActivatedAt=NOW(),ActivatedBy=?,UpdatedBy=?,RowVersion=RowVersion+1 WHERE id=?`,[actorId(req),actorId(req),id]);}
+        else {await connection.query(`UPDATE BBS_Card_Templates SET Status='Archived',ArchivedAt=NOW(),ArchivedBy=?,UpdatedBy=?,RowVersion=RowVersion+1 WHERE id=?`,[actorId(req),actorId(req),id]);}
+        await connection.commit(); await logAudit(req,{action:action==='activate'?'BBS_CARD_TEMPLATE_ACTIVATE':'BBS_CARD_TEMPLATE_ARCHIVE',module:'bbs',targetType:'BBS_Card_Template',targetId:id,detail:`${action} card template.`}); const[[updated]]=await db.query('SELECT * FROM BBS_Card_Templates WHERE id=?',[id]);return res.json({success:true,data:updated});
+    } catch(error){await connection.rollback().catch(()=>{});return phase4Error(res,error,'template transition');} finally{connection.release();}
+});
+
+router.get('/admin/card-employees', isAdmin, async (_req,res) => {
+    try { const [rows]=await db.query(`SELECT e.EmployeeID,e.EmployeeName,e.Department,e.Unit,e.Position,m.BBSLevel,md.id DepartmentID,c.id ActiveCardID,c.TokenFingerprint,c.IssuedAt FROM Employees e JOIN Master_Positions p ON LOWER(TRIM(p.Name))=LOWER(TRIM(e.Position)) JOIN BBS_Position_Level_Mappings m ON m.PositionID=p.id AND m.IsActive=1 LEFT JOIN Master_Departments md ON LOWER(TRIM(md.Name))=LOWER(TRIM(e.Department)) LEFT JOIN BBS_Cards c ON c.id=(SELECT x.id FROM BBS_Cards x WHERE x.EmployeeID=e.EmployeeID AND x.Status='Active' ORDER BY x.id DESC LIMIT 1) ORDER BY e.Department,e.Unit,e.EmployeeName`);return res.json({success:true,data:rows.filter(row=>levelRank(row.BBSLevel)>=levelRank('Group Leader'))}); }
+    catch(error){return phase4Error(res,error,'card employees');}
+});
+
+router.get('/admin/cards', isAdmin, async (_req,res) => {
+    try {const[rows]=await db.query(`SELECT c.id,c.EmployeeID,c.TemplateID,c.TokenFingerprint,c.Status,c.IssueReason,c.IssuedAt,c.IssuedBy,c.RevokedAt,c.RevokedBy,c.RevokeReason,c.ReplacedByCardID,c.ResolveCount,e.EmployeeName,e.Department,e.Unit,e.Position,t.TemplateName FROM BBS_Cards c JOIN Employees e ON e.EmployeeID=c.EmployeeID JOIN BBS_Card_Templates t ON t.id=c.TemplateID ORDER BY c.IssuedAt DESC,c.id DESC LIMIT 500`);return res.json({success:true,data:rows});}
+    catch(error){return phase4Error(res,error,'card list');}
+});
+
+router.post('/admin/cards/issue', isAdmin, async (req,res) => {
+    const ids=[...new Set((Array.isArray(req.body?.employeeIds)?req.body.employeeIds:[]).map(value=>clean(value,50)).filter(Boolean))];const templateId=positiveInt(req.body?.templateId);const reason=clean(req.body?.reason,255);
+    if(!ids.length||ids.length>100||!templateId)return res.status(400).json({success:false,message:'Choose 1-100 employees and an Active template.'});
+    const connection=await db.getConnection();
+    try {await connection.beginTransaction();const[[template]]=await connection.query("SELECT * FROM BBS_Card_Templates WHERE id=? AND Status='Active' FOR UPDATE",[templateId]);if(!template){await connection.rollback();return res.status(409).json({success:false,message:'The selected card template is not Active.'});}const employees=await employeeCardData(ids,connection);if(employees.length!==ids.length){await connection.rollback();return res.status(400).json({success:false,message:'One or more employees were not found.'});}for(const employee of employees){if(levelRank(employee.BBSLevel)<levelRank('Group Leader')){await connection.rollback();return res.status(400).json({success:false,message:`Personal cards are available from Group Leader level upward (${employee.EmployeeID}).`});}if(!templateMatches(template,employee)){await connection.rollback();return res.status(400).json({success:false,message:`Template scope does not match employee ${employee.EmployeeID}.`});}const[[active]]=await connection.query("SELECT id FROM BBS_Cards WHERE EmployeeID=? AND Status='Active' LIMIT 1",[employee.EmployeeID]);if(active){await connection.rollback();return res.status(409).json({success:false,code:'ACTIVE_CARD_EXISTS',message:`Employee ${employee.EmployeeID} already has an Active card. Use Replace.`});}}
+        const cards=[];for(const employee of employees)cards.push(await issueWithin(connection,req,employee,template,reason));await connection.commit();await logAudit(req,{action:'BBS_CARD_ISSUE',module:'bbs',targetType:'BBS_Card_Batch',targetId:cards.map(c=>c.cardId).join(','),detail:`Issued ${cards.length} BBS card(s).`,metadata:{count:cards.length,templateId}});return res.status(201).json({success:true,data:cards});
+    }catch(error){await connection.rollback().catch(()=>{});return phase4Error(res,error,'card issue');}finally{connection.release();}
+});
+
+router.post('/admin/cards/:id/revoke', isAdmin, async (req,res) => {
+    try {const id=positiveInt(req.params.id),reason=clean(req.body?.reason,255);if(!id||!reason)return res.status(400).json({success:false,message:'Card ID and revoke reason are required.'});const[result]=await db.query("UPDATE BBS_Cards SET Status='Revoked',RevokedAt=NOW(),RevokedBy=?,RevokeReason=? WHERE id=? AND Status='Active'",[actorId(req),reason,id]);if(!result.affectedRows)return res.status(409).json({success:false,message:'Only an Active card can be revoked.'});await logAudit(req,{action:'BBS_CARD_REVOKE',module:'bbs',targetType:'BBS_Card',targetId:id,detail:'Revoked BBS card.',metadata:{reason}});return res.json({success:true});}catch(error){return phase4Error(res,error,'card revoke');}
+});
+
+router.post('/admin/cards/:id/replace', isAdmin, async (req,res) => {
+    const id=positiveInt(req.params.id),reason=clean(req.body?.reason,255)||'Replace / reprint';if(!id)return res.status(400).json({success:false,message:'Valid card ID is required.'});const connection=await db.getConnection();
+    try{await connection.beginTransaction();const[[old]]=await connection.query("SELECT c.id CardID,c.EmployeeID,c.TemplateID,t.TemplateName,t.DepartmentID,t.BBSLevel,t.WidthMM,t.HeightMM,t.IncludeEmployeeID,t.Status TemplateStatus FROM BBS_Cards c JOIN BBS_Card_Templates t ON t.id=c.TemplateID WHERE c.id=? AND c.Status='Active' FOR UPDATE",[id]);if(!old){await connection.rollback();return res.status(409).json({success:false,message:'Only an Active card can be replaced.'});}if(old.TemplateStatus!=='Active'){await connection.rollback();return res.status(409).json({success:false,message:'The card template is not Active.'});}const[employee]=await employeeCardData([old.EmployeeID],connection);if(!employee){await connection.rollback();return res.status(404).json({success:false,message:'Employee was not found.'});}if(levelRank(employee.BBSLevel)<levelRank('Group Leader')){await connection.rollback();return res.status(409).json({success:false,message:'The employee is no longer eligible for a personal BBS card.'});}const template={...old,id:old.TemplateID,Status:old.TemplateStatus};await connection.query("UPDATE BBS_Cards SET Status='Replaced',RevokedAt=NOW(),RevokedBy=?,RevokeReason=? WHERE id=?",[actorId(req),reason,id]);const replacement=await issueWithin(connection,req,employee,template,reason);await connection.query('UPDATE BBS_Cards SET ReplacedByCardID=? WHERE id=?',[replacement.cardId,id]);await connection.commit();await logAudit(req,{action:'BBS_CARD_REPLACE',module:'bbs',targetType:'BBS_Card',targetId:id,detail:'Replaced BBS card and rotated QR token.',metadata:{replacementCardId:replacement.cardId,reason}});return res.status(201).json({success:true,data:replacement});}catch(error){await connection.rollback().catch(()=>{});return phase4Error(res,error,'card replace');}finally{connection.release();}
+});
+
+router.post('/admin/cards/print-log', isAdmin, async (req,res) => {
+    const ids=[...new Set((Array.isArray(req.body?.cardIds)?req.body.cardIds:[]).map(positiveInt).filter(Boolean))];const mode=ids.length>1?'batch':'single';const reason=clean(req.body?.reason,255);if(!ids.length||ids.length>100)return res.status(400).json({success:false,message:'Choose 1-100 cards.'});
+    try{const placeholders=ids.map(()=>'?').join(',');const[rows]=await db.query(`SELECT id FROM BBS_Cards WHERE id IN (${placeholders})`,ids);if(rows.length!==ids.length)return res.status(400).json({success:false,message:'One or more cards were not found.'});const values=ids.map(id=>[id,mode,actorId(req),reason||null]);await db.query('INSERT INTO BBS_Card_Print_Logs(CardID,PrintMode,PrintedBy,Reason) VALUES ?',[values]);await logAudit(req,{action:'BBS_CARD_PRINT',module:'bbs',targetType:'BBS_Card_Batch',targetId:ids.join(','),detail:`Recorded ${mode} card print.`,metadata:{count:ids.length}});return res.status(201).json({success:true,data:{count:ids.length,mode}});}catch(error){return phase4Error(res,error,'print log');}
+});
+
+module.exports = router;
+module.exports.publicRouter = publicRouter;

@@ -80,6 +80,7 @@ let _chartTrend     = null;
 let _chartCompanyDept = null;
 let _chartCompanyRisk = null;
 let _dashboardDrilldown = null;
+let _deptChartMode = localStorage.getItem('yok_dept_chart_mode') === 'relevance' ? 'relevance' : 'progress';
 let _yokCardSaveMenu = null;
 let _yokCardSaveHold = null;
 
@@ -1467,6 +1468,120 @@ function _buildUserHistoryPreview(rows) {
     </div>`;
 }
 
+function _classifyDeptRelevanceItem(item) {
+    if (!item?.responded) return 'incomplete';
+    if (String(item.isRelated || '').toLowerCase() === 'yes') return 'related';
+    if (String(item.isRelated || '').toLowerCase() === 'no') return 'not_related';
+    return 'incomplete';
+}
+
+function _getDashboardDeptRelevanceRows() {
+    if (!_deptCompletion?.deptSummary?.length) return [];
+    const yearTopics = _topics.filter(topic => !topic.DateIssued || new Date(topic.DateIssued).getFullYear() === _dashYear);
+    const activeIds = new Set(yearTopics.map(topic => String(topic.YokotenID)));
+    const targeted = _filterToTargetedDepts(_deptCompletion.deptSummary, _deptCompletion.topics || []);
+    return targeted.map(dept => {
+        const topicBreakdown = normalizeApiArray(dept.topicBreakdown)
+            .filter(item => activeIds.has(String(item.YokotenID)));
+        const related = topicBreakdown.filter(item => _classifyDeptRelevanceItem(item) === 'related').length;
+        const notRelated = topicBreakdown.filter(item => _classifyDeptRelevanceItem(item) === 'not_related').length;
+        const incomplete = Math.max(0, topicBreakdown.length - related - notRelated);
+        const respondedCount = related + notRelated;
+        return {
+            ...dept,
+            topicBreakdown,
+            totalTopics: topicBreakdown.length,
+            related,
+            notRelated,
+            incomplete,
+            respondedCount,
+            completionPct: topicBreakdown.length ? Math.round(respondedCount * 100 / topicBreakdown.length) : 0,
+        };
+    }).filter(dept => dept.totalTopics > 0);
+}
+
+function _openDeptRelevanceModal(department, filter = 'all') {
+    if (!_isAdmin) return;
+    const dept = _getDashboardDeptRelevanceRows().find(row => row.department === department);
+    if (!dept) return;
+    const topicMap = new Map((_deptCompletion?.topics || []).map(topic => [String(topic.YokotenID), topic]));
+    const validFilter = ['all', 'related', 'not_related', 'incomplete'].includes(filter) ? filter : 'all';
+    const visibleRows = dept.topicBreakdown.filter(item => validFilter === 'all' || _classifyDeptRelevanceItem(item) === validFilter);
+    const filterItems = [
+        { key: 'all', label: 'ทั้งหมด', value: dept.totalTopics, tone: 'slate' },
+        { key: 'related', label: 'เกี่ยวข้อง', value: dept.related, tone: 'orange' },
+        { key: 'not_related', label: 'ไม่เกี่ยวข้อง', value: dept.notRelated, tone: 'emerald' },
+        { key: 'incomplete', label: 'ยังไม่ครบ', value: dept.incomplete, tone: 'slate' },
+    ];
+    const toneClass = tone => tone === 'orange'
+        ? 'border-orange-200 bg-orange-50 text-orange-700'
+        : tone === 'emerald'
+            ? 'border-emerald-200 bg-emerald-50 text-emerald-700'
+            : 'border-slate-200 bg-slate-50 text-slate-600';
+
+    openModal(`รายละเอียดความเกี่ยวข้อง · ${_esc(department)}`, `
+    <div data-yok-modal class="space-y-4">
+        <div class="grid grid-cols-2 lg:grid-cols-4 gap-3">
+            ${filterItems.map(item => `
+            <button type="button" class="yok-dept-relevance-filter rounded-xl border p-3 text-left transition-all ${toneClass(item.tone)} ${validFilter === item.key ? 'ring-2 ring-offset-1 ring-sky-400' : 'hover:shadow-sm'}"
+                    data-department="${_esc(department)}" data-relevance-filter="${item.key}">
+                <span class="block text-[11px] font-bold">${item.label}</span>
+                <span class="mt-1 block text-xl font-black">${item.value}</span>
+            </button>`).join('')}
+        </div>
+        <div class="rounded-xl border border-slate-200 overflow-hidden">
+            <div class="px-4 py-3 bg-slate-50 border-b border-slate-200 flex flex-wrap items-center justify-between gap-2">
+                <div>
+                    <p class="text-sm font-black text-slate-800">หัวข้อ Yokoten ของแผนก</p>
+                    <p class="text-xs text-slate-500 mt-0.5">นับตาม Unit coverage ที่ครบแล้ว · ปี ${_dashYear}</p>
+                </div>
+                <span class="text-xs font-bold text-slate-500">${visibleRows.length}/${dept.totalTopics} หัวข้อ</span>
+            </div>
+            <div class="divide-y divide-slate-100 max-h-[58vh] overflow-y-auto">
+                ${visibleRows.length ? visibleRows.map(item => {
+                    const topic = topicMap.get(String(item.YokotenID)) || {};
+                    const relevance = _classifyDeptRelevanceItem(item);
+                    const response = (_allResponses || []).find(row => String(row.YokotenID) === String(item.YokotenID) && String(row.Department || '').trim() === department);
+                    const relevanceBadge = relevance === 'related'
+                        ? '<span class="px-2 py-0.5 rounded-full text-[11px] font-bold bg-orange-100 text-orange-700">เกี่ยวข้อง</span>'
+                        : relevance === 'not_related'
+                            ? '<span class="px-2 py-0.5 rounded-full text-[11px] font-bold bg-emerald-100 text-emerald-700">ไม่เกี่ยวข้อง</span>'
+                            : '<span class="px-2 py-0.5 rounded-full text-[11px] font-bold bg-slate-100 text-slate-600">ยังไม่ครบ</span>';
+                    const workflowBadge = item.approvalStatus === 'pending'
+                        ? '<span class="text-[11px] font-bold text-amber-700">รออนุมัติ</span>'
+                        : item.approvalStatus === 'rejected'
+                            ? '<span class="text-[11px] font-bold text-red-700">ส่งกลับแก้ไข</span>'
+                            : item.approvalStatus === 'approved'
+                                ? '<span class="text-[11px] font-bold text-blue-700">อนุมัติแล้ว</span>'
+                                : relevance === 'not_related'
+                                    ? '<span class="text-[11px] font-bold text-emerald-700">ปิดอัตโนมัติ</span>'
+                                    : item.responseExists
+                                        ? '<span class="text-[11px] font-bold text-violet-700">Unit ยังไม่ครบ</span>'
+                                        : '<span class="text-[11px] font-bold text-slate-500">ยังไม่ตอบ</span>';
+                    return `
+                    <button type="button" class="yok-open-topic-btn w-full px-4 py-3 text-left hover:bg-slate-50 transition-colors"
+                            data-yid="${_esc(item.YokotenID || '')}" data-rid="${_esc(response?.ResponseID || '')}">
+                        <div class="flex flex-col lg:flex-row lg:items-center gap-2 lg:gap-4">
+                            <div class="min-w-0 flex-1">
+                                <div class="flex flex-wrap items-center gap-2">
+                                    <span class="text-sm font-bold text-slate-800">${_esc(item.title || topic.Title || topic.TopicDescription || '-')}</span>
+                                    <span class="px-1.5 py-0.5 rounded text-[10px] font-bold ${RISK_BADGE[topic.RiskLevel] || 'bg-slate-100 text-slate-600'}">${_esc(RISK_LABEL[topic.RiskLevel] || topic.RiskLevel || '-')}</span>
+                                </div>
+                                ${item.missingUnits?.length ? `<p class="text-xs text-violet-600 mt-1">Unit ที่ยังไม่ส่ง: ${item.missingUnits.map(unit => _esc(unit)).join(', ')}</p>` : ''}
+                            </div>
+                            <div class="flex flex-wrap items-center gap-3 lg:justify-end">
+                                ${relevanceBadge}
+                                ${workflowBadge}
+                                <span class="text-xs font-bold text-sky-600">ดูรายละเอียด</span>
+                            </div>
+                        </div>
+                    </button>`;
+                }).join('') : '<div class="px-4 py-10 text-center text-sm text-slate-400">ไม่มีหัวข้อในสถานะนี้</div>'}
+            </div>
+        </div>
+    </div>`, 'max-w-5xl');
+}
+
 function _buildDashboardAnalytics(topics, metrics) {
     const statusRows = metrics.statusRows || [];
     const totalStatus = Math.max(1, statusRows.reduce((sum, row) => sum + row.value, 0));
@@ -1478,12 +1593,26 @@ function _buildDashboardAnalytics(topics, metrics) {
         <div class="ds-section p-5 ${hasDeptChart ? 'xl:col-span-2' : 'xl:col-span-1'}" data-yok-card-image="yokoten-department-ranking">
             <div class="flex flex-wrap items-center gap-2 justify-between mb-4">
                 <div>
-                    <h3 class="text-sm font-black text-slate-800">Department Progress Ranking</h3>
-                    <p class="text-xs text-slate-400 mt-0.5">เรียงจากส่วนงานที่ต้องติดตามก่อน</p>
+                    <h3 class="text-sm font-black text-slate-800">${_deptChartMode === 'relevance' ? 'Department Topic Relevance' : 'Department Progress Ranking'}</h3>
+                    <p class="text-xs text-slate-400 mt-0.5">${_deptChartMode === 'relevance' ? 'เกี่ยวข้อง · ไม่เกี่ยวข้อง · ยังตอบไม่ครบ — คลิกแผนกเพื่อดูหัวข้อ' : 'เรียงจากส่วนงานที่ต้องติดตามก่อน — คลิกแผนกเพื่อดูรายละเอียด'}</p>
                 </div>
-                ${_isAdmin ? `<button id="yok-config-dash-btn" class="text-xs font-bold text-sky-600 hover:underline">ตั้งค่า Dashboard</button>` : ''}
+                <div class="flex flex-wrap items-center gap-2">
+                    ${hasDeptChart ? `
+                    <div class="inline-flex rounded-lg border border-slate-200 bg-slate-50 p-1">
+                        <button type="button" class="yok-dept-chart-mode rounded-md px-3 py-1.5 text-xs font-bold transition-colors ${_deptChartMode === 'progress' ? 'bg-white text-sky-700 shadow-sm' : 'text-slate-500'}" data-dept-chart-mode="progress">ความคืบหน้า</button>
+                        <button type="button" class="yok-dept-chart-mode rounded-md px-3 py-1.5 text-xs font-bold transition-colors ${_deptChartMode === 'relevance' ? 'bg-white text-sky-700 shadow-sm' : 'text-slate-500'}" data-dept-chart-mode="relevance">ความเกี่ยวข้อง</button>
+                    </div>` : ''}
+                    ${_isAdmin ? `<button id="yok-config-dash-btn" class="text-xs font-bold text-sky-600 hover:underline">ตั้งค่า Dashboard</button>` : ''}
+                </div>
             </div>
-            ${hasDeptChart ? `<div style="height:320px"><canvas id="yok-dept-chart"></canvas></div>` : _buildCompactProgressList(topics)}
+            ${hasDeptChart ? `
+                ${_deptChartMode === 'relevance' ? `
+                <div class="mb-3 flex flex-wrap items-center gap-4 text-[11px] font-semibold text-slate-500">
+                    <span class="inline-flex items-center gap-1.5"><span class="h-2.5 w-2.5 rounded-sm bg-orange-500"></span>เกี่ยวข้อง</span>
+                    <span class="inline-flex items-center gap-1.5"><span class="h-2.5 w-2.5 rounded-sm bg-emerald-500"></span>ไม่เกี่ยวข้อง</span>
+                    <span class="inline-flex items-center gap-1.5"><span class="h-2.5 w-2.5 rounded-sm bg-slate-300"></span>ยังไม่ตอบ / Unit ไม่ครบ</span>
+                </div>` : ''}
+                <div style="height:320px"><canvas id="yok-dept-chart"></canvas></div>` : _buildCompactProgressList(topics)}
         </div>
         <div class="space-y-4">
             <div class="ds-section p-5" data-yok-card-image="yokoten-approval-funnel">
@@ -2701,55 +2830,83 @@ function _initDeptChart() {
     const canvas = document.getElementById('yok-dept-chart');
     if (!canvas || !_deptCompletion?.deptSummary?.length || typeof Chart === 'undefined') return;
 
-    // Only chart depts targeted by at least one topic
-    const filtered = _filterToTargetedDepts(_deptCompletion.deptSummary, _deptCompletion.topics || []);
-    const sorted = [...filtered].sort((a, b) => a.completionPct - b.completionPct);
-    const labels  = sorted.map(d => d.department);
-    const data    = sorted.map(d => d.completionPct);
-    const colors  = sorted.map(d =>
-        d.completionPct === 100 ? '#059669' :
-        d.completionPct >= 50   ? '#f59e0b' : '#ef4444'
-    );
+    const relevanceMode = _deptChartMode === 'relevance';
+    const rows = _getDashboardDeptRelevanceRows();
+    const sorted = [...rows].sort((a, b) => relevanceMode
+        ? (b.related - a.related || a.department.localeCompare(b.department))
+        : (a.completionPct - b.completionPct || a.department.localeCompare(b.department)));
+    const labels = sorted.map(dept => dept.department);
+    const datasets = relevanceMode
+        ? [
+            { label: 'เกี่ยวข้อง', data: sorted.map(dept => dept.related), backgroundColor: '#f97316' },
+            { label: 'ไม่เกี่ยวข้อง', data: sorted.map(dept => dept.notRelated), backgroundColor: '#10b981' },
+            { label: 'ยังไม่ตอบ / Unit ไม่ครบ', data: sorted.map(dept => dept.incomplete), backgroundColor: '#cbd5e1' },
+        ].map(dataset => ({ ...dataset, borderRadius: 4, borderSkipped: false, barPercentage: 0.72 }))
+        : [{
+            label: 'ความคืบหน้า',
+            data: sorted.map(dept => dept.completionPct),
+            backgroundColor: sorted.map(dept =>
+                dept.completionPct === 100 ? '#059669' :
+                dept.completionPct >= 50 ? '#f59e0b' : '#ef4444'),
+            borderRadius: 4,
+            borderSkipped: false,
+        }];
 
     _chartDept = new Chart(canvas, {
         type: 'bar',
         data: {
             labels,
-            datasets: [{
-                data,
-                backgroundColor: colors,
-                borderRadius: 4,
-                borderSkipped: false,
-            }],
+            datasets,
         },
         options: {
             indexAxis: 'y',
             responsive: true,
             maintainAspectRatio: false,
+            interaction: { mode: 'nearest', axis: 'y', intersect: true },
+            onClick: (_event, elements) => {
+                if (!elements.length) return;
+                const element = elements[0];
+                const department = labels[element.index];
+                const filterByDataset = ['related', 'not_related', 'incomplete'];
+                _openDeptRelevanceModal(department, relevanceMode ? (filterByDataset[element.datasetIndex] || 'all') : 'all');
+            },
+            onHover: (event, elements) => {
+                if (event?.native?.target) event.native.target.style.cursor = elements.length ? 'pointer' : 'default';
+            },
             plugins: {
                 legend: { display: false },
                 tooltip: {
                     callbacks: {
                         label: ctx => {
-                            const dept = _deptCompletion.deptSummary.find(d => d.department === ctx.label);
-                            return ` ${ctx.raw}% · ${dept?.respondedCount || 0}/${dept?.totalTopics || 0} หัวข้อ`;
+                            const dept = sorted[ctx.dataIndex];
+                            return relevanceMode
+                                ? ` ${ctx.dataset.label}: ${ctx.raw} หัวข้อ`
+                                : ` ${ctx.raw}% · ${dept?.respondedCount || 0}/${dept?.totalTopics || 0} หัวข้อ`;
                         },
+                        footer: items => relevanceMode && items.length
+                            ? `ทั้งหมด ${sorted[items[0].dataIndex]?.totalTopics || 0} หัวข้อ · คลิกเพื่อดูรายละเอียด`
+                            : '',
                     },
                 },
             },
             scales: {
                 x: {
                     min: 0,
-                    max: 100,
-                    ticks: { callback: v => v + '%', font: { size: 10 } },
+                    ...(relevanceMode ? { stacked: true } : { max: 100 }),
+                    ticks: {
+                        callback: value => relevanceMode ? (Number.isInteger(value) ? value : '') : value + '%',
+                        precision: 0,
+                        font: { size: 10 },
+                    },
                     grid: { color: '#f1f5f9' },
                 },
                 y: {
+                    stacked: relevanceMode,
                     ticks: {
                         font: { size: 10 },
                         callback: function(val) {
                             const name = this.getLabelForValue(val);
-                            return name.length > 22 ? name.slice(0, 21) + '…' : name;
+                            return name.length > 22 ? name.slice(0, 21) + '\u2026' : name;
                         },
                     },
                     grid: { display: false },
@@ -6444,6 +6601,21 @@ function setupEventListeners() {
                 key: briefDrillBtn.dataset.drillKey,
                 label: briefDrillBtn.dataset.drillLabel || briefDrillBtn.dataset.drillKey,
             });
+            return;
+        }
+
+        const deptChartModeBtn = e.target.closest('.yok-dept-chart-mode');
+        if (deptChartModeBtn?.dataset.deptChartMode) {
+            _deptChartMode = deptChartModeBtn.dataset.deptChartMode === 'relevance' ? 'relevance' : 'progress';
+            localStorage.setItem('yok_dept_chart_mode', _deptChartMode);
+            _destroyCharts();
+            renderDashboard(document.getElementById('yok-content'));
+            return;
+        }
+
+        const relevanceFilterBtn = e.target.closest('.yok-dept-relevance-filter');
+        if (relevanceFilterBtn) {
+            _openDeptRelevanceModal(relevanceFilterBtn.dataset.department, relevanceFilterBtn.dataset.relevanceFilter);
             return;
         }
 

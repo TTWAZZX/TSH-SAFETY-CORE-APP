@@ -17,6 +17,15 @@ require __DIR__ . '/handlers/workflow_phase6.php';
 require __DIR__ . '/handlers/fourm_phase7.php';
 require __DIR__ . '/handlers/admin_phase8.php';
 require __DIR__ . '/handlers/johnny_ai.php';
+require __DIR__ . '/handlers/bbs_smart_card.php';
+require __DIR__ . '/handlers/bbs_checklists.php';
+require __DIR__ . '/handlers/bbs_observations.php';
+require __DIR__ . '/handlers/bbs_cards.php';
+require __DIR__ . '/handlers/bbs_actions.php';
+require __DIR__ . '/handlers/bbs_analytics.php';
+require __DIR__ . '/handlers/bbs_community.php';
+require __DIR__ . '/handlers/bbs_inspectors.php';
+require __DIR__ . '/handlers/bbs_inspector_schedules.php';
 
 header('X-Content-Type-Options: nosniff');
 if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
@@ -26,6 +35,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
 
 $method = strtoupper($_SERVER['REQUEST_METHOD'] ?? 'GET');
 $path = '/' . trim((string) ($_GET['route'] ?? ''), '/');
+
+if (strpos($path, '/bbs/') === 0) {
+    header('X-Frame-Options: SAMEORIGIN');
+    header('Referrer-Policy: strict-origin-when-cross-origin');
+    header('Permissions-Policy: camera=(self), microphone=(), geolocation=()');
+    header('Cache-Control: private, no-store');
+}
 
 function dashboard_parse_array($value): array
 {
@@ -696,6 +712,26 @@ try {
     handle_fourm_routes($method, $path);
     handle_admin_phase8_routes($method, $path);
     handle_johnny_ai_routes($method, $path);
+    if (strpos($path, '/bbs/') === 0) {
+        try {
+            $stagedAdminOnly = (string) (db_row("SELECT SettingValue FROM BBS_Settings WHERE SettingKey='staged_admin_only' LIMIT 1")['SettingValue'] ?? '0') === '1';
+        } catch (Throwable $ignored) {
+            $stagedAdminOnly = false;
+        }
+        if ($stagedAdminOnly) {
+            header('X-BBS-Rollout-Mode: staged-admin-only');
+            require_admin();
+        }
+    }
+    handle_bbs_card_routes($method, $path);
+    handle_bbs_community_routes($method, $path);
+    handle_bbs_inspector_routes($method, $path);
+    handle_bbs_inspector_schedule_routes($method, $path);
+    handle_bbs_action_routes($method, $path);
+    handle_bbs_analytics_routes($method, $path);
+    handle_bbs_observation_routes($method, $path);
+    handle_bbs_checklist_routes($method, $path);
+    handle_bbs_smart_card_routes($method, $path);
 
     if ($method === 'GET' && $path === '/public/branding') {
         $stmt = db()->prepare('SELECT value FROM app_settings WHERE key_name = ? LIMIT 1');
