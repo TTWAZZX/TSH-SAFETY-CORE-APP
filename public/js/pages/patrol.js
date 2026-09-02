@@ -1164,10 +1164,14 @@ function renderDashboard(container, data) {
     function renderStatsStrip(stats) {
         const el = document.getElementById('hero-stats-strip');
         if (!el) return;
+        // Personal view has exactly three live metrics. Keep them in one equal
+        // row on phones so the monthly card does not appear stranded below.
+        const isThreeMetricStrip = stats.length === 3;
+        el.className = `grid ${isThreeMetricStrip ? 'grid-cols-3' : 'grid-cols-2 md:grid-cols-4'} gap-2 sm:gap-3 mt-5`;
         el.innerHTML = stats.map(s => `
-        <div class="rounded-xl px-4 py-3 text-center transition-all duration-300" style="background:rgba(255,255,255,0.12);backdrop-filter:blur(6px)">
-          <p class="text-xl font-bold truncate" style="color:${s.color}">${s.val}</p>
-          <p class="text-[11px] mt-0.5 text-white/70">${s.label}</p>
+        <div class="min-w-0 rounded-xl ${isThreeMetricStrip ? 'px-2 py-3 sm:px-4' : 'px-4 py-3'} text-center transition-all duration-300" style="background:rgba(255,255,255,0.12);backdrop-filter:blur(6px)">
+          <p class="${isThreeMetricStrip ? 'text-lg sm:text-xl' : 'text-xl'} font-bold leading-tight truncate" style="color:${s.color}">${s.val}</p>
+          <p class="text-[10px] sm:text-[11px] mt-1 text-white/70 leading-tight">${s.label}</p>
         </div>`).join('');
     }
 
