@@ -10,7 +10,7 @@ import { guardSubmitHandler } from './utils/async-ui.js?v=20260715-phase32d-rema
 // --- Page Loaders ---
 import { loadPolicyPage } from './pages/policy.js?v=20260715-phase32d-remaining-async-ux';
 import { loadCommitteePage } from './pages/committee.js?v=20260715-phase32d-remaining-async-ux';
-import { loadPatrolPage } from './pages/patrol.js?v=20260902-patrol-live-stats-r3';
+import { loadPatrolPage } from './pages/patrol.js?v=20260902-patrol-live-stats-r4';
 import { loadCccfPage } from './pages/cccf.js?v=20260822-cccf-worker-pdf-r10';
 import { loadKpiPage } from './pages/kpi.js?v=20260715-phase32d-remaining-async-ux';
 import { loadYokotenPage } from './pages/yokoten.js?v=20260825-yokoten-department-relevance-r1';
