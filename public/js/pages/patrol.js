@@ -1387,7 +1387,7 @@ function renderDashboard(container, data) {
         <div class="xl:contents xl:space-y-0 space-y-5">
 
           <!-- Check-in Card -->
-          <div class="xl:col-span-2 bg-white rounded-2xl overflow-hidden shadow-sm border border-slate-100" data-patrol-card-image="patrol-personal-checkin" style="box-shadow:0 4px 24px rgba(5,150,105,0.07)">
+          <div class="xl:col-span-2 bg-white rounded-2xl overflow-hidden shadow-sm border border-slate-100" data-patrol-card-image="patrol-personal-checkin" style="box-shadow:0 4px 24px rgba(5,150,105,0.07);align-self:start">
             <div class="flex flex-col md:flex-row">
               <div class="md:w-5/12 p-5 flex flex-col justify-between relative overflow-hidden" style="background:linear-gradient(135deg,#064e3b,#065f46)">
                 <div class="absolute -right-6 -top-6 w-28 h-28 rounded-full opacity-10" style="background:radial-gradient(circle,#fff,transparent 70%)"></div>
@@ -1587,7 +1587,7 @@ function renderDashboard(container, data) {
           </div>
 
           <!-- Mini Calendar -->
-          <div class="xl:col-span-1 bg-white rounded-xl shadow-sm border border-slate-100 p-5">
+          <div class="xl:col-span-1 bg-white rounded-xl shadow-sm border border-slate-100 p-5" style="align-self:start">
             <div class="flex justify-between items-center mb-4">
               <h3 class="font-bold text-slate-700 text-sm flex items-center gap-2">
                 <div class="w-7 h-7 rounded-lg flex items-center justify-center" style="background:#ecfdf5">
@@ -1612,7 +1612,7 @@ function renderDashboard(container, data) {
             const urgentDot = nextDaysLeft <= 3 ? 'bg-amber-400 animate-pulse' : 'bg-emerald-400 animate-pulse';
             const urgentText= nextDaysLeft <= 3 ? 'text-amber-700' : 'text-emerald-700';
             return `
-          <div class="xl:col-span-2 flex items-center gap-3 px-4 py-3 rounded-xl border ${urgentCls}">
+          <div class="xl:col-span-2 flex items-center gap-3 px-4 py-3 rounded-xl border ${urgentCls}" style="align-self:start">
             <div class="w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0" style="background:linear-gradient(135deg,#059669,#0d9488)">
               <svg class="w-5 h-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"/></svg>
             </div>
@@ -1636,7 +1636,7 @@ function renderDashboard(container, data) {
             const monthNames = ['ม.ค','ก.พ','มี.ค','เม.ย','พ.ค','มิ.ย','ก.ค','ส.ค','ก.ย','ต.ค','พ.ย','ธ.ค'];
             const maxDots = 4; // max dots to show per month
             return `
-          <div class="xl:col-span-2 ds-filter-bar" data-patrol-card-image="patrol-year-activity-tracker">
+          <div class="xl:col-span-2 ds-filter-bar" data-patrol-card-image="patrol-year-activity-tracker" style="align-self:start">
             <div class="flex items-center justify-between mb-3">
               <h3 class="text-xs font-bold text-slate-700 flex items-center gap-2">
                 <div class="w-5 h-5 rounded-lg flex items-center justify-center" style="background:#ecfdf5">
@@ -1685,7 +1685,7 @@ function renderDashboard(container, data) {
             const pct            = total > 0 ? Math.min(Math.round((attended / total) * 100), 100) : 0;
             const barColor       = pct >= 100 ? '#10b981' : pct >= 60 ? '#f59e0b' : '#f43f5e';
             if (!sessions.length) return `
-          <div class="xl:col-span-2 ds-section p-5" data-patrol-card-image="patrol-monthly-session-tracker-empty">
+          <div class="xl:col-span-2 ds-section p-5" data-patrol-card-image="patrol-monthly-session-tracker-empty" style="align-self:start">
             <div class="flex items-center gap-2 mb-3">
               <div class="w-6 h-6 rounded-lg flex items-center justify-center" style="background:#ecfdf5">
                 <svg class="w-3.5 h-3.5 text-emerald-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"/></svg>
@@ -1698,7 +1698,7 @@ function renderDashboard(container, data) {
             </div>
           </div>`;
             return `
-          <div class="xl:col-span-2 ds-table-wrap" data-patrol-card-image="patrol-monthly-session-tracker">
+          <div class="xl:col-span-2 ds-table-wrap" data-patrol-card-image="patrol-monthly-session-tracker" style="align-self:start">
             <!-- Header -->
             <div class="px-4 py-3 border-b border-slate-50 flex items-center justify-between">
               <h3 class="text-xs font-bold text-slate-700 flex items-center gap-2">
@@ -2013,7 +2013,7 @@ function renderDashboard(container, data) {
         <div class="xl:contents xl:space-y-0 space-y-5">
 
           <!-- Performance Card — Compliance Ring (B+D) -->
-          <div class="bg-white rounded-2xl shadow-sm border border-slate-100 p-5 overflow-hidden relative" data-patrol-card-image="patrol-personal-performance">
+          <div class="bg-white rounded-2xl shadow-sm border border-slate-100 p-5 overflow-hidden relative" data-patrol-card-image="patrol-personal-performance" style="align-self:start">
             <div class="absolute -right-4 -bottom-4 w-24 h-24 rounded-full opacity-5" style="background:${rank.color}"></div>
             <div class="flex items-center justify-between mb-4">
               <h3 class="font-bold text-slate-700 text-sm flex items-center gap-2">
@@ -2094,7 +2094,7 @@ function renderDashboard(container, data) {
 
           <!-- Recent Check-in Timeline (Phase 3) -->
           ${_myYearlyStats?.recentCheckins?.length > 0 ? `
-          <div class="bg-white rounded-2xl shadow-sm border border-slate-100 p-5" data-patrol-card-image="patrol-recent-checkins">
+          <div class="bg-white rounded-2xl shadow-sm border border-slate-100 p-5" data-patrol-card-image="patrol-recent-checkins" style="align-self:start">
             <h3 class="font-bold text-slate-700 text-sm flex items-center gap-2 mb-4">
               <div class="w-7 h-7 rounded-lg flex items-center justify-center bg-indigo-50 flex-shrink-0">
                 <svg class="w-4 h-4 text-indigo-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
