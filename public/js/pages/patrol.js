@@ -4260,13 +4260,11 @@ function generateMiniCalendarHTML(scheduleData) {
 // Also update the legend in the calendar card
 function getCalendarLegendHTML() {
     return `
-      <div class="flex items-center gap-3 text-[10px] text-slate-400 flex-wrap">
-        <span class="flex items-center gap-1"><span class="w-3 h-3 rounded-md inline-block" style="background:linear-gradient(135deg,#059669,#0d9488)"></span>วันนี้</span>
-        <span class="flex items-center gap-1"><span class="w-3 h-3 rounded-md bg-emerald-500 inline-block"></span>ตามรอบ</span>
-        <span class="flex items-center gap-1"><span class="w-3 h-3 rounded-md bg-amber-400 inline-block"></span>เดินซ่อม</span>
-        <span class="flex items-center gap-1"><span class="w-3 h-3 rounded-md bg-violet-500 inline-block"></span>เดินเพิ่ม</span>
-        <span class="flex items-center gap-1"><span class="w-3 h-3 rounded-md bg-emerald-50 border border-emerald-200 inline-block"></span>กำหนดเดิน</span>
-        <span class="flex items-center gap-1"><span class="w-3 h-3 rounded-md bg-amber-50 border border-amber-200 inline-block"></span>ยังไม่ได้เดิน</span>
+      <div class="flex items-center justify-end gap-2 text-[9px] text-slate-400 whitespace-nowrap">
+        <span class="flex items-center gap-1"><span class="w-2.5 h-2.5 rounded-full inline-block" style="background:linear-gradient(135deg,#059669,#0d9488)"></span>วันนี้</span>
+        <span class="flex items-center gap-1"><span class="w-2.5 h-2.5 rounded-full bg-emerald-500 inline-block"></span>ตรงรอบ</span>
+        <span class="flex items-center gap-1"><span class="w-2.5 h-2.5 rounded-full bg-amber-400 inline-block"></span>ซ่อม</span>
+        <span class="flex items-center gap-1"><span class="w-2.5 h-2.5 rounded-full bg-violet-500 inline-block"></span>เพิ่ม</span>
       </div>`;
 }
 
