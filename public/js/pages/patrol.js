@@ -1383,8 +1383,8 @@ function renderDashboard(container, data) {
         </button>
       </div>
 
-      <div class="grid grid-cols-1 xl:grid-cols-3 xl:grid-flow-dense xl:items-start gap-5">
-        <div class="xl:contents xl:space-y-0 space-y-5">
+      <div class="grid grid-cols-1 xl:grid-cols-3 gap-5">
+        <div class="xl:col-span-2 space-y-5">
 
           <!-- Check-in Card -->
           <div class="xl:col-span-2 bg-white rounded-2xl overflow-hidden shadow-sm border border-slate-100" data-patrol-card-image="patrol-personal-checkin" style="box-shadow:0 4px 24px rgba(5,150,105,0.07);align-self:start">
@@ -1587,7 +1587,7 @@ function renderDashboard(container, data) {
           </div>
 
           <!-- Mini Calendar -->
-          <div class="xl:col-span-1 bg-white rounded-xl shadow-sm border border-slate-100 p-5" style="align-self:start">
+          <div class="xl:hidden bg-white rounded-xl shadow-sm border border-slate-100 p-5">
             <div class="flex justify-between items-center mb-4">
               <h3 class="font-bold text-slate-700 text-sm flex items-center gap-2">
                 <div class="w-7 h-7 rounded-lg flex items-center justify-center" style="background:#ecfdf5">
@@ -2010,7 +2010,24 @@ function renderDashboard(container, data) {
 
         </div>
 
-        <div class="xl:contents xl:space-y-0 space-y-5">
+        <div class="xl:col-span-1 space-y-5">
+
+          <!-- Mini Calendar (desktop sidebar) -->
+          <div class="hidden xl:block bg-white rounded-xl shadow-sm border border-slate-100 p-5">
+            <div class="flex justify-between items-center mb-4">
+              <h3 class="font-bold text-slate-700 text-sm flex items-center gap-2">
+                <div class="w-7 h-7 rounded-lg flex items-center justify-center" style="background:#ecfdf5">
+                  <svg class="w-4 h-4 text-emerald-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5v12a2 2 0 002 2h14a2 2 0 002-2V7a2 2 0 00-2-2h-2"/></svg>
+                </div>
+                ปฏิทินประจำเดือน
+              </h3>
+              ${getCalendarLegendHTML()}
+            </div>
+            <div class="grid grid-cols-7 gap-1 text-center mb-2">
+              ${['อา','จ','อ','พ','พฤ','ศ','ส'].map(d=>`<div class="text-[9px] font-bold text-slate-400">${d}</div>`).join('')}
+            </div>
+            <div class="grid grid-cols-7 gap-1 text-center">${generateMiniCalendarHTML(data.schedule)}</div>
+          </div>
 
           <!-- Performance Card — Compliance Ring (B+D) -->
           <div class="bg-white rounded-2xl shadow-sm border border-slate-100 p-5 overflow-hidden relative" data-patrol-card-image="patrol-personal-performance" style="align-self:start">
