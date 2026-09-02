@@ -1151,7 +1151,6 @@ function renderDashboard(container, data) {
     const _personalStats = [
         { label: 'รวมปีนี้',         val: _yearlyDue ? `${_yearlyCount}/${_yearlyDue}${_yearlyTarget ? ` (${_yearlyTarget})` : ''}` : (_yearlyTarget ? `${_yearlyCount} (${_yearlyTarget})` : _yearlyCount), color: '#6ee7b7' },
         { label: 'Accepted %',       val: `${_acceptedPct}%`,                                                        color: '#6ee7b7' },
-        { label: 'ทีมของฉัน',        val: _myPlan ? _myPlan.team.name.replace(/^ทีม\s*/,'') : rank.title,              color: '#a5f3fc' },
         { label: 'สถานะเดือนนี้',    val: _myPlan ? `${_myPlan.compliance.attended}/${_myPlan.compliance.required} รอบ` : '—',
           color: _myPlan?.compliance?.done ? '#6ee7b7' : '#fcd34d' },
     ];
@@ -1356,7 +1355,7 @@ function renderDashboard(container, data) {
       <div id="content-patrol" class="space-y-5 animate-fade-in">
 
       <!-- Quick Actions (mobile only) -->
-      <div class="md:hidden grid grid-cols-4 gap-2">
+      <div class="hidden">
         <button onclick="openPersonalPatrolCheckin()"
           class="flex flex-col items-center gap-1.5 py-3 px-1 rounded-xl text-center transition-all active:scale-95"
           style="background:linear-gradient(135deg,#064e3b,#065f46)">
@@ -1771,7 +1770,7 @@ function renderDashboard(container, data) {
           })()}
 
           <!-- Team Roster Card — YTD stats + pass/fail -->
-          ${_myPlan?.roster?.length > 0 ? (() => {
+          ${false && _myPlan?.roster?.length > 0 ? (() => {
             const typeColor = { top:'rose', committee:'amber', management:'indigo' };
             const typeLabel = { top:'Top', committee:'คปอ.', management:'Mgmt' };
             const roster    = _myPlan.roster;
