@@ -5,6 +5,7 @@
 - Connected the Personal hero and performance card to the same Top & Management attendance-detail summary as Team & Overview, showing Accepted Coverage / due sessions, the annual target in parentheses, and Accepted %.
 - Added nullable `Patrol_Attendance.CheckinAt` with Node/PHP parity. New check-ins and idempotent replays return the actual Asia/Bangkok save time; historical rows remain NULL instead of displaying a fabricated midnight value.
 - Preserved Scheduled Compliance semantics: Extra walks remain Actual Walk Activity only and do not change `0/2 รอบ` unless an authorized Scheduled or Makeup session is completed. No upload/storage path changed.
+- Added explicit mobile save feedback for Personal and Self-Patrol check-in: each form locks while saving, shows an in-modal progress layer and preserves the established success refresh. Team & Overview now uses compact per-person cards on phones while retaining the full tables on desktop.
 
 ## Safety Patrol Check-in v2 - dev deployment (2026-09-02)
 

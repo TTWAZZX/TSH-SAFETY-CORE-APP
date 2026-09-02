@@ -1,7 +1,7 @@
 import { openModal, closeModal, showLoading, hideLoading, showToast, showError, escHtml, showConfirmationModal } from '../ui.js?v=20260602-mobile-nav-m53';
 import { API } from '../api.js?v=20260902-patrol-checkin-v2';
 import { normalizeApiArray, normalizeApiObject } from '../utils/normalize.js';
-import { createLatestRequestController, guardSubmitHandler, pageSkeleton } from '../utils/async-ui.js?v=20260715-phase32c-residual-async';
+import { createLatestRequestController, guardSubmitHandler, pageSkeleton, runFormBusy } from '../utils/async-ui.js?v=20260715-phase32c-residual-async';
 
 // ─── Auth ─────────────────────────────────────────────────────────────────────
 const PATROL_FALLBACK_USER = { name: 'Staff', id: '', department: '', team: 'Safety Team', role: 'User' };
@@ -2354,7 +2354,7 @@ function renderDashboard(container, data) {
                 </div>
               </div>
               <!-- Table -->
-              <div class="overflow-x-auto flex-1">
+              <div class="hidden md:block overflow-x-auto flex-1">
                 <table class="w-full text-xs text-left">
                   <thead class="text-[10px] uppercase bg-slate-50 border-b border-slate-100">
                     <tr>
@@ -2381,6 +2381,7 @@ function renderDashboard(container, data) {
                   </tbody>
                 </table>
               </div>
+              <div id="overview-mobile-cards" class="md:hidden space-y-2 p-3 bg-slate-50/50"></div>
               <!-- Pagination -->
               <div id="ov-mgmt-pagination" class="px-4 py-2.5 border-t border-slate-100 flex items-center justify-between min-h-[40px]"></div>
               <!-- Evaluation Criteria -->
@@ -2494,7 +2495,7 @@ function renderDashboard(container, data) {
                 </div>
               </div>
               <!-- Table -->
-              <div class="overflow-x-auto flex-1">
+              <div class="hidden md:block overflow-x-auto flex-1">
                 <table class="w-full text-xs text-left">
                   <thead class="text-[10px] uppercase bg-slate-50 border-b border-slate-100">
                     <tr>
@@ -2521,6 +2522,7 @@ function renderDashboard(container, data) {
                   </tbody>
                 </table>
               </div>
+              <div id="sv-overview-mobile-cards" class="md:hidden space-y-2 p-3 bg-amber-50/30"></div>
               <!-- Pagination -->
               <div id="sv-pagination" class="px-4 py-2.5 border-t border-amber-100 flex items-center justify-between min-h-[40px]"></div>
             </div>
@@ -4538,7 +4540,14 @@ function openCheckInModal() {
     </div>` : '';
 
     openModal('บันทึกการเดินตรวจ', `
-      <form id="checkin-form" data-today-session-id="${escHtml(todaySessionId)}" onsubmit="handleCheckInSubmit(event)" class="space-y-4 max-[420px]:space-y-3">
+      <form id="checkin-form" data-today-session-id="${escHtml(todaySessionId)}" onsubmit="handleCheckInSubmit(event)" class="relative space-y-4 max-[420px]:space-y-3">
+        <div id="checkin-submit-busy" class="hidden absolute inset-0 z-20 flex min-h-[360px] items-center justify-center rounded-2xl bg-white/90 px-5 text-center backdrop-blur-sm">
+          <div>
+            <div class="mx-auto mb-3 h-10 w-10 animate-spin rounded-full border-4 border-emerald-600 border-t-transparent"></div>
+            <p class="text-sm font-black text-slate-800">กำลังบันทึกการเช็คอิน…</p>
+            <p class="mt-1 text-xs font-medium text-slate-500">กรุณารอสักครู่ และอย่าปิดหน้านี้</p>
+          </div>
+        </div>
         <!-- User info -->
         <div class="flex items-center gap-3 p-3 rounded-xl border border-slate-100 bg-slate-50">
           <div class="w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0 bg-emerald-100">
@@ -4661,18 +4670,19 @@ async function handleCheckInSubmit(e) {
         const todaySessionId = e.target?.dataset?.todaySessionId || '';
         if (!checkinV2Enabled && todaySessionId) body.ScheduledSessionID = todaySessionId;
     }
-    if (submitButton) { submitButton.disabled = true; submitButton.setAttribute('aria-busy', 'true'); }
-    showLoading();
-    try {
-        const res = await API.post('/patrol/checkin', body);
-        closeModal();
-        showCheckinSuccessScreen(type, res?.data || {});
-    } catch (err) {
-        showError(err);
-    } finally {
-        hideLoading();
-        if (submitButton) { submitButton.disabled = false; submitButton.removeAttribute('aria-busy'); }
-    }
+    const busyLayer = document.getElementById('checkin-submit-busy');
+    await runFormBusy(form, 'กำลังบันทึก…', async () => {
+        busyLayer?.classList.remove('hidden');
+        try {
+            const res = await API.post('/patrol/checkin', body);
+            closeModal();
+            showCheckinSuccessScreen(type, res?.data || {});
+        } catch (err) {
+            showError(err);
+        } finally {
+            busyLayer?.classList.add('hidden');
+        }
+    }, { submitter: submitButton, actionKey: `patrol:checkin:${form.dataset.idempotencyKey || 'new'}` });
 }
 
 window._onCheckinTypeChange = async function(val) {
@@ -6623,9 +6633,32 @@ async function loadOverview(year) {
     }
 }
 
+function patrolOverviewMobileCard(member, group, yearlyTarget, acceptedCoverage, actualAttended, acceptedPct, final, isMe) {
+    const name = member.Name || member.EmployeeName || '-';
+    const position = member.Position || '-';
+    const department = member.Department || '-';
+    const action = `window.openPatrolAttendanceDetailModal(${_patrolJsArg(member.EmployeeID)},${_patrolJsArg(name)},${_patrolJsArg(group)},${Number(yearlyTarget) || 0})`;
+    return `<button type="button" onclick="${action}" class="w-full rounded-xl border border-slate-100 bg-white p-3 text-left shadow-sm transition-all active:scale-[0.99] active:bg-slate-50">
+      <div class="flex items-start justify-between gap-3">
+        <div class="min-w-0">
+          <p class="truncate text-sm font-black text-slate-800">${escHtml(name)}${isMe ? ' <span class="text-[10px] text-emerald-600">(ฉัน)</span>' : ''}</p>
+          <p class="mt-0.5 truncate text-[11px] font-medium text-slate-400">${escHtml(position)} · ${escHtml(department)}</p>
+        </div>
+        <span class="shrink-0 rounded-full px-2 py-1 text-[10px] font-black ${final.cls}">${escHtml(final.label)}</span>
+      </div>
+      <div class="mt-3 grid grid-cols-3 gap-2">
+        <div class="rounded-lg bg-slate-50 px-2 py-2"><p class="text-[9px] font-bold uppercase text-slate-400">เป้าทั้งปี</p><p class="mt-0.5 text-sm font-black text-slate-700">${Number(yearlyTarget) || 0}</p></div>
+        <div class="rounded-lg bg-emerald-50 px-2 py-2"><p class="text-[9px] font-bold uppercase text-emerald-600">Accepted</p><p class="mt-0.5 text-sm font-black text-emerald-700">${Number(acceptedCoverage) || 0}</p>${Number(acceptedCoverage) !== Number(actualAttended) ? `<p class="text-[9px] text-emerald-600/70">เดินจริง ${Number(actualAttended) || 0}</p>` : ''}</div>
+        <div class="rounded-lg bg-sky-50 px-2 py-2"><p class="text-[9px] font-bold uppercase text-sky-600">Accepted %</p><p class="mt-0.5 text-sm font-black text-sky-700">${Number(acceptedPct) || 0}%</p></div>
+      </div>
+      <div class="mt-3 flex items-center justify-end gap-1 text-[11px] font-bold text-emerald-700">ดูรายละเอียด <span aria-hidden="true">›</span></div>
+    </button>`;
+}
+
 function renderOverviewTable(members) {
     const tbody  = document.getElementById('overview-table-body');
     const pagEl  = document.getElementById('ov-mgmt-pagination');
+    const mobileCards = document.getElementById('overview-mobile-cards');
     if (!tbody) return;
 
     // Sort: TargetPerYear ascending (12 before 24), then SortOrder
@@ -6665,6 +6698,7 @@ function renderOverviewTable(members) {
           </div>
         </td></tr>`;
         if (pagEl) pagEl.innerHTML = '';
+        if (mobileCards) mobileCards.innerHTML = `<div class="rounded-xl border border-dashed border-slate-200 bg-white px-4 py-8 text-center text-xs font-medium text-slate-400">${_ovMgmtQ ? 'ไม่พบผลการค้นหา' : 'ยังไม่มีสมาชิกในรายการ'}</div>`;
         return;
     }
 
@@ -6736,6 +6770,16 @@ function renderOverviewTable(members) {
           </td>` : ''}
         </tr>`;
     }).join('');
+
+    if (mobileCards) {
+        mobileCards.innerHTML = page.map(m => {
+            const actualAttended = Number(m.Attended || 0);
+            const acceptedCoverage = _patrolOverviewLeave(m, false, 'acceptedCoverageToDate', actualAttended);
+            const acceptedPct = _patrolOverviewLeave(m, false, 'acceptedCoverageToDatePct', m.Percent || 0);
+            const yearlyTarget = Number(m.YearlyTarget || m.TargetPerYear || m.yearlyTarget || m.Total || 0);
+            return patrolOverviewMobileCard(m, 'top_management', yearlyTarget, acceptedCoverage, actualAttended, acceptedPct, _patrolOverviewFinalInfo(m, false), m.EmployeeID === currentUser.id);
+        }).join('');
+    }
 
     // Render pagination controls
     if (pagEl) {
@@ -7100,6 +7144,7 @@ async function loadSupervisorOverview(year) {
 function renderSvTable() {
     const tbody = document.getElementById('sv-overview-body');
     const pagEl = document.getElementById('sv-pagination');
+    const mobileCards = document.getElementById('sv-overview-mobile-cards');
     if (!tbody) return;
 
     const q = _svQ.toLowerCase();
@@ -7126,6 +7171,7 @@ function renderSvTable() {
           </div>
         </td></tr>`;
         if (pagEl) pagEl.innerHTML = '';
+        if (mobileCards) mobileCards.innerHTML = `<div class="rounded-xl border border-dashed border-amber-200 bg-white px-4 py-8 text-center text-xs font-medium text-slate-400">${_svQ ? 'ไม่พบผลการค้นหา' : 'ยังไม่มีสมาชิกในรายการ'}</div>`;
         return;
     }
 
@@ -7193,6 +7239,16 @@ function renderSvTable() {
               </td>` : ''}
             </tr>`;
     }).join('');
+
+    if (mobileCards) {
+        mobileCards.innerHTML = page.map(m => {
+            const actualAttended = Number(m.attended || 0);
+            const acceptedCoverage = _patrolOverviewLeave(m, true, 'acceptedCoverageToDate', actualAttended);
+            const acceptedPct = _patrolOverviewLeave(m, true, 'acceptedCoverageToDatePct', m.percent || 0);
+            const yearlyTarget = Number(m.yearlyTarget || m.YearlyTarget || m.TargetPerYear || m.target || 0);
+            return patrolOverviewMobileCard(m, 'supervisor', yearlyTarget, acceptedCoverage, actualAttended, acceptedPct, _patrolOverviewFinalInfo(m, true), m.EmployeeID === currentUser.id);
+        }).join('');
+    }
 
     if (pagEl) {
         pagEl.innerHTML = totalPages <= 1 ? '' : `
@@ -7663,7 +7719,14 @@ function openSelfCheckinModal(selectedSessionId = '') {
         : [{ Name:'โรงงาน 1' },{ Name:'โรงงาน 2' },{ Name:'รอบนอก+พื้นที่ส่วนกลาง' }];
 
     openModal('บันทึกการเดินตรวจ', `
-        <form id="self-checkin-form" class="space-y-4">
+        <form id="self-checkin-form" class="relative space-y-4">
+          <div id="self-checkin-submit-busy" class="hidden absolute inset-0 z-20 flex min-h-[360px] items-center justify-center rounded-2xl bg-white/90 px-5 text-center backdrop-blur-sm">
+            <div>
+              <div class="mx-auto mb-3 h-10 w-10 animate-spin rounded-full border-4 border-amber-500 border-t-transparent"></div>
+              <p class="text-sm font-black text-slate-800">กำลังบันทึกการเดินตรวจ…</p>
+              <p class="mt-1 text-xs font-medium text-slate-500">กรุณารอสักครู่ และอย่าปิดหน้านี้</p>
+            </div>
+          </div>
           <div>
             <label class="block text-xs font-semibold text-slate-500 mb-1.5">รอบตามกำหนดการ</label>
             ${isFlexible ? `
@@ -7767,6 +7830,8 @@ function openSelfCheckinModal(selectedSessionId = '') {
             form.dataset.submitting = '1';
             const submitBtn = e.submitter || form.querySelector('button[type="submit"]');
             if (submitBtn) submitBtn.disabled = true;
+            const busyLayer = document.getElementById('self-checkin-submit-busy');
+            busyLayer?.classList.remove('hidden');
             try {
                 const res = await API.post('/patrol/self-checkin', { CheckinDate, Location, Notes, ScheduledSessionID, PatrolType });
                 if (res.success) {
@@ -7776,6 +7841,7 @@ function openSelfCheckinModal(selectedSessionId = '') {
                 else showError(res.message);
             } catch (err) { showError(getReadableError(err, 'บันทึก Self-Patrol ไม่สำเร็จ')); }
             finally {
+                busyLayer?.classList.add('hidden');
                 form.dataset.submitting = '0';
                 if (submitBtn) submitBtn.disabled = false;
             }

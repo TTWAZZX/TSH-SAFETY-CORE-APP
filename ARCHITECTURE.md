@@ -5,6 +5,7 @@
 - The Personal hero and performance card consume the same authorized Top & Management attendance-detail projection used by Team & Overview: Accepted Coverage to date, required sessions due to date, annual target, and Accepted %.
 - Scheduled Compliance remains session-linked. Extra walks increase Actual Walk Activity only and never satisfy the monthly scheduled denominator.
 - `Patrol_Attendance.PatrolDate` remains the business walk date. The additive nullable `CheckinAt` stores the actual Asia/Bangkok save time for new check-ins and is returned by Node/PHP for live confirmation and recent records. Historical rows remain NULL; no synthetic time is created.
+- Personal and Self-Patrol check-in mutations use an in-modal busy state that disables every form control, labels the save in progress and preserves idempotent retry safety. Top & Management and Sec. & Supervisor retain desktop tables at `md` and above; phone users receive the same server-derived values in per-person detail cards, avoiding a horizontal table scroll.
 
 ## Safety Patrol Check-in v2 (Local, 2026-09-02)
 
