@@ -380,3 +380,11 @@ The dev-only phase was executed and verified on 2026-09-02. Follow `docs/safety-
 - Smoke PHP shared-hosting routes with the flag off, then enable the flag and test User/Admin Scheduled, Makeup, Extra, multiple rounds, statistics, calendar, and retries.
 - Remove all uniquely marked smoke records and verify residue `0`.
 - Roll back operationally by disabling the flag and restoring runtime files. Preserve Attendance and normally preserve the additive nullable column/index.
+
+## Safety Patrol live statistics Production deployment — 2026-09-02
+
+- Fresh Production MySQL export was downloaded before deployment and retained at `backups/production/20260902-2301-patrol-live-stats/uattshpc_safetytsh-predeploy.sql` (SHA-256 `2365F42C484D1AF5705980A84EA2C8520901102A01CE6AE84EB55F782B7279B8`). No database tables or records were deleted.
+- The pre-deploy runtime copy is retained under `backups/production/20260902-2301-patrol-live-stats/runtime-before/`.
+- Uploaded runtime scope: `index.html`, `public/js/main.js`, `public/js/pages/patrol.js`, and `api/handlers/patrol.php`.
+- Each uploaded file was downloaded back to `runtime-after/` and SHA-256 matched its local source before smoke testing.
+- Public smoke passed for the app shell, Patrol JavaScript, and `/api/public/branding` (HTTP 200). The deployed Patrol handler retains the additive `CheckinAt` schema initialization; historical values remain NULL and future Patrol requests record the actual Bangkok check-in time.

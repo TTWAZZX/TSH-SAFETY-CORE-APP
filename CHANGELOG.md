@@ -1,5 +1,10 @@
 # TSH Safety Core Activity - Changelog And Handoff History
 
+## Safety Patrol live statistics deployed to Production — 2026-09-02
+
+- Production backup retained at `backups/production/20260902-2301-patrol-live-stats/` (database export and pre-deploy runtime files); no Production database data was deleted.
+- Verified all four uploaded Patrol runtime files by SHA-256 and completed read-only public smoke tests successfully.
+
 ## Safety Patrol Personal Live Statistics (2026-09-02, local release candidate)
 
 - Connected the Personal hero and performance card to the same Top & Management attendance-detail summary as Team & Overview, showing Accepted Coverage / due sessions, the annual target in parentheses, and Accepted %.
