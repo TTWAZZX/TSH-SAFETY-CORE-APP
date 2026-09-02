@@ -1,5 +1,9 @@
 # TSH Safety Core Activity - Roadmap
 
+## BBS Smart Card Phase 10F Visual Card Designer (2026-09-02)
+
+Phase 10F-0 architecture, Phase 10F-1 additive foundation and Phase 10F-2 Visual Designer Editor are complete locally. Admin can compose Draft Personal/Department layouts on a Front/Back canvas, upload Draft-bound private artwork, use layers/properties and undo/redo, and preview immutable versions. Local editing is enabled while live designer rendering remains disabled, so all existing card/QR/print output still uses the established renderer. The next phase is 10F-3 Personal Card Integration and render-contract reconciliation; it must preserve the one-time Personal QR lifecycle and remain behind the rendering flag until separate acceptance. Production and GitHub are unchanged.
+
 ## BBS Foundation Admin Readiness (2026-09-02)
 
 System Console readiness and guided setup are deployed to Production behind `staged_admin_only=1`. Admin can now complete Production Mapping, Pilot, Inspector/Team, Checklist and Card/QR configuration from the guided workflow, then rerun the Phase 10E acceptance audit. Controlled Pilot and company-wide rollout remain separate explicit approvals.

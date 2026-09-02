@@ -14,6 +14,29 @@
 - Added an additive nullable idempotency column/index migration. Existing Attendance was not rewritten or deleted.
 - Node lifecycle, PHP lifecycle, concurrent retry, legacy, rotation, multiple-round, cross-year, Browser mobile modal, and zero-residue UAT passed locally. See `docs/safety-patrol-checkin-v2-local-handoff.md` for the exact deployment/rollback plan and known data anomalies.
 
+## BBS Smart Card Phase 10F-2 Visual Designer Editor (2026-09-02, Local complete)
+
+- Added an Admin Personal/Department layout chooser and a responsive Front/Back canvas with drag/resize, layer selection/order, numeric properties, lock/visibility, duplicate/delete, orientation, zoom, keyboard nudge, 50-step undo/redo and unsaved-change protection.
+- Added Node/PHP parity routes for Draft-bound private background assets and authorized side/asset reads. Uploads are JPG/PNG/WebP, content verified, limited to 10 MB and stored under `backend/private-uploads/bbs-card-designer`; safe JSON never exposes stored filenames or paths.
+- Active/Archived versions are immutable previews. Phone mode is preview-only, and preview QR values remain non-functional. The existing issue/replace/revoke/print and QR lifecycle are untouched because live designer rendering remains disabled.
+- Contract tests, PHP/Node syntax, a real Admin API lifecycle UAT and authenticated Chrome desktop/390 px UAT pass with no console error or overflow. API UAT covered Draft creation, parent and designer background reads, duplex save, ordinary-user denial and immutable-version rejection, then removed all temporary rows/files (`templates=0`, `versions=0`, `assets=0`). No Production deploy or GitHub push occurred.
+
+## BBS Smart Card Phase 10F-1 Additive Foundation And Compatibility (2026-09-02, Local complete)
+
+- Added five additive BBS designer tables for layout versions, Front/Back sides, positioned elements, static-asset metadata and immutable print snapshots. The two designer flags are installed disabled by default; rollback is flag-only and preserves all records.
+- Added Admin-only Node/PHP parity endpoints for the field catalog, version list/detail, Draft creation/update and readiness. Server validation allowlists data fields, element/style keys and integer basis-point geometry; Draft updates are transactional and protected by `RowVersion`.
+- Added a SELECT-only legacy inventory and a dry-run-by-default, explicit-apply idempotent bootstrap. Neither updates existing template/card/QR/print rows nor moves/deletes private artwork.
+- Applied the additive migration to Local only. Local contains no legacy Personal/Department templates, so inventory/bootstrap found zero candidates and inserted zero designer rows; both feature flags remain `0`.
+- Phase 10F-1 contract/parity tests, PHP/Node syntax, BBS regressions, full Backend suite and authenticated permission preflight pass. No existing business data, upload path, Production deployment or GitHub push changed.
+
+## BBS Smart Card Phase 10F-0 Visual Card Designer Architecture (2026-09-02, documentation only)
+
+- Defined separate BBS layout versions, Front/Back sides, positioned elements, private static assets and print-render snapshots for Personal and Department template parents.
+- Defined server allowlists for Personal identity/BBS/one-time QR fields and Department Master/shared-Community-QR fields. Unit cards and invented QR destinations remain out of scope.
+- Defined portrait/landscape geometry, integer basis-point coordinates, Draft-only editing, immutable Active versions, readiness severity and one normalized preview/print render contract.
+- Defined an additive idempotent legacy bootstrap that references existing private artwork without moving bytes or updating/deleting existing template/card/QR/print data. Missing layouts retain the current renderer and rollback is flag-only.
+- Added the sequenced Phase 10F-1 through 10F-5 implementation roadmap. No migration, API, runtime, schema, business data, upload, Production deployment or GitHub push occurred.
+
 ## BBS Automatic Checklist References (2026-09-02, Production Admin-only)
 
 - Checklist creation no longer asks Admin to invent a Template code. Matching Node/PHP transactions now assign the stable `BBS-CHK-000001` format from the new template identity and return it to the UI.

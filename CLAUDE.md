@@ -7,6 +7,29 @@
 - The final dev audit found no duplicate base-team member or scheduled-round completion, five orphan scheduled links, nine unlinked legacy normal rows and one valid multiple-round date. Do not repair or delete anomalies automatically.
 - Verified database backup: `patrol-checkin-v2-dev-predeploy-20260902-184046`; runtime rollback backup: `backups/production/patrol-checkin-v2-dev-predeploy-20260902-183249`. Full evidence and rollback instructions are in `DEPLOYMENT.md` and `docs/safety-patrol-checkin-v2-local-handoff.md`.
 
+## Current BBS Smart Card Phase 10F-2 Handoff (2026-09-02, Local complete; not deployed)
+
+- Admin Personal and Department template rows now open a Visual Designer version chooser and Draft editor with Front/Back canvas, portrait/landscape dimensions, drag/resize, layers, properties, keyboard movement, zoom and 50-step undo/redo. Active/Archived versions and phone mode are preview-only.
+- Node/PHP parity supports Draft-bound JPG/PNG/WebP private background assets (10 MB, signature checked), authorized asset/side reads and server-canonicalized resource references. New files use `backend/private-uploads/bbs-card-designer`; no existing template or upload was moved or deleted.
+- Preview QR is non-functional and the editor contains no issue/replace/revoke/print calls. Local `visual_card_designer_enabled=1`, but `visual_card_designer_rendering_enabled=0`, so established card output is unchanged.
+- Static contracts, PHP/Node syntax, Admin API lifecycle UAT and authenticated Chrome desktop/390 px UAT pass; temporary templates/layouts/assets/files were cleaned to zero. Production and GitHub are unchanged.
+- Next task: Phase 10F-3 Personal Card Integration. Reconcile the validated designer contract with existing Personal preview/issue/replace output behind the disabled rendering flag; do not expose or regenerate a previous raw Personal QR.
+
+## Current BBS Smart Card Phase 10F-1 Handoff (2026-09-02, Local complete; not deployed)
+
+- The additive designer foundation is implemented in five new `BBS_Card_*` tables. Local migration succeeded; `visual_card_designer_enabled=0` and `visual_card_designer_rendering_enabled=0`, so existing card runtime/printing still uses the established renderer.
+- Admin-only Node/PHP parity APIs provide the field catalog and Draft layout list/detail/create/update/readiness contract. Server validation owns allowed data fields, styles and basis-point geometry; Draft replacement is transactional and `RowVersion` protected.
+- The SELECT-only inventory and dry-run-by-default legacy bootstrap preserve existing parent rows and private artwork. Local has zero legacy Personal/Department templates, so zero bootstrap candidates and zero designer rows were created.
+- Phase 10F-1 tests, syntax/parity, BBS regressions, full Backend suite and authenticated preflight pass. Local schema changed additively; no existing data/upload path, Production deploy or GitHub push changed.
+- Next task: Phase 10F-2 Visual Designer Editor. Build the Admin Front/Back canvas and preview-only workflow over the Draft APIs without activating designer rendering or changing card/QR issuance.
+
+## Current BBS Smart Card Phase 10F-0 Handoff (2026-09-02, architecture complete; not implemented)
+
+- The approved design is documented in `docs/bbs-smart-card-phase10f0-visual-card-designer.md`. It covers Personal and Department cards only, with Front/Back artwork, portrait/landscape dimensions, field/layer editing, immutable Active versions and server-authoritative render/readiness contracts.
+- The future schema is additive and BBS-specific. It must not share Forklift tables, alter existing template/card/QR/print rows, move private files, weaken authorization or change Personal/Department QR lifecycle.
+- Legacy templates retain the existing renderer. A later idempotent bootstrap may insert Front-only designer versions that reference the same background metadata; feature flags remain disabled until reconciliation and acceptance.
+- Next implementation phase is 10F-1 Additive Foundation And Compatibility. Phase 10F-0 added documentation only: no migration, runtime/API/schema/data/upload, Production deploy or GitHub push.
+
 ## Current BBS Automatic Checklist References (2026-09-02, Production Admin-only)
 
 - New Checklist templates use a server-generated `BBS-CHK-000001`-style reference in matching Node/PHP transactions; System Console no longer accepts a manual Template code.

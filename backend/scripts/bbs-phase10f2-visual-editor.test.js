@@ -1,0 +1,11 @@
+'use strict';
+const fs=require('fs');const path=require('path');const assert=require('assert');const root=path.join(__dirname,'..','..');const read=file=>fs.readFileSync(path.join(root,file),'utf8');
+const node=read('backend/routes/bbs-card-designer.js'),php=read('api/handlers/bbs_card_designer.php'),service=read('backend/services/bbs-card-designer.js'),editor=read('public/js/pages/bbs-card-designer.js'),page=read('public/js/pages/bbs-smart-card.js'),enable=read('backend/scripts/bbs-phase10f2-enable-local.js');
+for(const marker of ['/admin/card-designer/versions/:id/assets','/admin/card-designer/assets/:assetId/file','/admin/card-designer/versions/:id/sides/:side/background']){assert.ok(node.includes(marker),`Node missing ${marker}`);assert.ok(php.includes(`/bbs${marker}`),`PHP missing ${marker}`);}
+for(const source of [node,php]){assert.match(source,/DesignerAsset/);assert.match(source,/FOR UPDATE/);assert.match(source,/IMMUTABLE_LAYOUT_VERSION/);assert.match(source,/10\s*\*\s*1024\s*\*\s*1024|10\*1024\*1024/);assert.match(source,/image\/jpeg/);assert.match(source,/image\/png/);assert.match(source,/image\/webp/);}
+assert.match(service,/backgroundAssetId/);assert.match(node,/canonicalizeResources/);assert.match(php,/bbs_designer_canonicalize_resources/);
+for(const marker of ['bbs-designer-canvas','data-designer-resize','data-layer-key','data-undo','data-redo','onpointerdown','ArrowLeft','beforeunload','Preview-only QR','data-upload-background'])assert.ok(editor.includes(marker),`Editor missing ${marker}`);
+assert.match(editor,/@media\(max-width:767px\)/);assert.match(editor,/Phone mode is preview-only/);assert.match(editor,/if\(!editable\)return/);assert.match(editor,/fieldset \$\{disabled\}/);assert.match(editor,/\[data-save\]\{display:none!important\}/);assert.doesNotMatch(editor,/\/cards\/issue|\/replace|\/revoke|print-log/);
+assert.match(page,/openBbsCardDesigner/);assert.match(page,/data-card-designer-personal/);assert.match(page,/data-card-designer-department/);
+assert.match(enable,/localhost/);assert.match(enable,/visual_card_designer_enabled','1/);assert.match(enable,/visual_card_designer_rendering_enabled','0/);
+console.log('BBS Phase 10F-2 private resource parity, visual editor, accessibility and preview-only boundary: PASS');

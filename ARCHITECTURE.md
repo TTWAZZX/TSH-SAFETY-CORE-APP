@@ -10,6 +10,30 @@
 - Node development and PHP shared-hosting routes implement the same contract behind `App_Settings.patrol_checkin_v2_enabled`.
 - Full design, migration, risks, verification, and Phase 9 runbook: `docs/safety-patrol-checkin-v2-local-handoff.md`.
 
+## BBS Visual Card Designer Editor (Phase 10F-2)
+
+Phase 10F-2 adds an Admin-only editor over the Phase 10F-1 Draft contract. Personal and Department template rows open a version chooser, then a Front/Back canvas with basis-point geometry, drag/resize, layer ordering, visibility/lock controls, properties, keyboard nudging and a bounded 50-step undo/redo history. Active and Archived layouts remain view-only. On phones, editing controls and saving are removed so the canvas is an accessible preview only.
+
+Designer artwork uses the additive private directory `backend/private-uploads/bbs-card-designer`. Node and PHP accept one content-verified JPG/PNG/WebP image up to 10 MB, bind it to one Draft, and serve it only through Admin-authorized resource routes. Safe API projections expose an asset ID and display metadata, never the stored name or filesystem path. During Draft save, the server canonicalizes parent and designer asset references before transactional replacement of sides/elements.
+
+Rendering remains isolated: `visual_card_designer_enabled=1` is permitted only for local Admin editing, while `visual_card_designer_rendering_enabled=0` keeps all issue/replace/print output on the established renderer. Preview QR content is a labelled placeholder. No existing Personal/Department template, card, QR, print record or private file is rewritten, and Phase 10F-2 adds no activation or card lifecycle integration.
+
+## BBS Visual Card Designer Foundation (Phase 10F-1)
+
+Phase 10F-1 implements the additive persistence and compatibility boundary defined by Phase 10F-0. `BBS_Card_Layout_Versions` owns physical card dimensions, immutable lifecycle state and optimistic row versioning; `BBS_Card_Layout_Sides`, `BBS_Card_Layout_Elements` and `BBS_Card_Layout_Assets` own the normalized Front/Back composition; `BBS_Card_Designer_Print_Snapshots` can later freeze the resolved render contract against an existing Personal or Department print log. Existing template parents remain authoritative and are referenced by foreign key without being altered.
+
+Admin-only Node/PHP parity routes expose the allowlisted field catalog, version list/detail, Draft creation/update and readiness projection. All write routes are disabled while `visual_card_designer_enabled=0`; `visual_card_designer_rendering_enabled=0` independently prevents later runtime output adoption. Draft replacement is transactional, `RowVersion` protected and server validated. Phase 10F-1 deliberately adds no Activate/Archive renderer integration, asset upload UI or card-issuance behavior.
+
+The compatibility inventory is SELECT-only and verifies private background metadata/signatures/hashes. The legacy bootstrap is dry-run by default and, only when explicitly applied, inserts an idempotent Front-only designer version referencing existing artwork metadata. It hashes parent rows before and after execution and never moves or deletes private files. Missing designer layouts continue through the established legacy renderer.
+
+## BBS Visual Card Designer Target Architecture (Phase 10F-0)
+
+Phase 10F-0 defines a future Admin visual designer over the existing Personal and Department template parents. BBS will use its own additive layout-version, side, element, asset and render-snapshot records rather than sharing Forklift tables. A layout belongs to exactly one existing Personal or Department template, uses common physical dimensions for Front/Back, derives portrait/landscape orientation from those dimensions and stores element geometry as integer basis points. Only Draft layouts are editable; Active and Archived versions are immutable.
+
+Dynamic content is resolved from an allowlisted server catalog. Personal layouts may project Employee Master identity/scope, effective BBS level, approved photo fallback and the existing one-time Personal QR. Department layouts may project Master Department identity and the single existing Active shared Community QR. The browser cannot supply an arbitrary data value, raw HTML/CSS, external resource, QR token or layout version. Personal composite preview continues to use a visibly non-functional QR; live output receives a raw Personal QR only from the existing issue/replace mutation.
+
+Legacy migration is deliberately dual-read and additive. New designer tables are installed empty, then an idempotent bootstrap may insert a Front-only version referencing the existing private background metadata and fixed field composition without moving file bytes or updating a parent template. Designer rendering remains behind separate disabled-by-default settings. When enabled, a valid server-resolved Active layout is preferred and a template with no valid layout falls back to the established renderer. Rollback disables the flags and never deletes template, card, QR, print, layout or private-file history. The full field catalog, readiness contract and staged delivery plan are in `docs/bbs-smart-card-phase10f0-visual-card-designer.md`.
+
 ## BBS Pilot Acceptance Gate (Phase 10E)
 
 Phase 10E adds no business table or application workflow route. A repeatable SELECT-only acceptance audit projects the existing Master/Pilot roster, inspector enrollment/team/schedule, server-resolved Checklist coverage, Personal/Department Card configuration, Community handler, workflow evidence, Action reconciliation, email operational state and rollout settings into one deployment decision.

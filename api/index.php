@@ -26,6 +26,7 @@ require __DIR__ . '/handlers/bbs_analytics.php';
 require __DIR__ . '/handlers/bbs_community.php';
 require __DIR__ . '/handlers/bbs_inspectors.php';
 require __DIR__ . '/handlers/bbs_inspector_schedules.php';
+require __DIR__ . '/handlers/bbs_card_designer.php';
 require __DIR__ . '/lib/bbs_rollout_access.php';
 
 header('X-Content-Type-Options: nosniff');
@@ -714,6 +715,7 @@ try {
     handle_admin_phase8_routes($method, $path);
     handle_johnny_ai_routes($method, $path);
     if (strpos($path, '/bbs/') === 0) bbs_enforce_rollout_access();
+    handle_bbs_card_designer_routes($method, $path);
     handle_bbs_card_routes($method, $path);
     handle_bbs_community_routes($method, $path);
     handle_bbs_inspector_routes($method, $path);

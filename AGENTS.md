@@ -7,6 +7,30 @@
 - Retry safety uses nullable `Patrol_Attendance.IdempotencyKey`, unique `(UserID,IdempotencyKey)` and unique `(UserID,ScheduledSessionID)`. A new idempotency key intentionally permits another Extra walk.
 - `patrol_checkin_v2_enabled` is the operational rollback flag. Disable it before runtime rollback; do not drop the additive column/indexes or delete Attendance history.
 
+## BBS Smart Card Phase 10F-2 Constraints
+
+- The Visual Designer is Admin-only. It may create and edit only `Draft` layout versions; `Active` and `Archived` versions are immutable previews in both the client and server.
+- Canvas QR elements are visibly non-functional placeholders. Phase 10F-2 must keep `visual_card_designer_rendering_enabled=0` and must not call or alter issue, replace, revoke, rotate, print-log or QR-resolution workflows.
+- New JPG/PNG/WebP designer artwork is limited to 10 MB, content-signature validated and stored under denied private storage `backend/private-uploads/bbs-card-designer`. Reads are object-authorized and APIs must never expose stored filenames or filesystem paths.
+- The server canonicalizes every parent/background/asset reference. A client cannot select another Draft's asset, a foreign parent file, an arbitrary path, dynamic value or QR token.
+- Desktop/tablet may edit with drag/resize, layers, properties and keyboard equivalents. Phone mode is preview-only. Phase 10F-2 changes no existing template/card/QR record or established renderer, and it does not authorize Production deployment or GitHub push.
+
+## BBS Smart Card Phase 10F-1 Constraints
+
+- Phase 10F-1 installs only the additive BBS designer foundation: layout versions, sides, elements, assets and print snapshots. It must not alter or delete existing Personal/Department templates, cards, QR rows, print logs or private files.
+- `visual_card_designer_enabled` and `visual_card_designer_rendering_enabled` default to `0`. Phase 10F-1 may expose the Admin catalog and Draft-version APIs, but it must not activate designer rendering, issue cards through a designer layout or change the established legacy renderer.
+- Node and PHP must validate the same allowlisted fields, element types, styles and integer basis-point geometry. Draft writes are transactional, require optimistic `RowVersion`, and fail closed for non-Draft versions or foreign assets.
+- The inventory command is SELECT-only. Legacy bootstrap is dry-run by default, requires explicit `--apply`, is idempotent and must prove that existing parent rows and private artwork remain unchanged.
+- Phase 10F-1 adds no Unit card, public designer route, new QR destination, upload-path change, Production deployment or GitHub push.
+
+## BBS Smart Card Phase 10F-0 Constraints
+
+- Visual Card Designer supports only the established Personal Card and Department Card domains. It may provide front/back artwork and portrait/landscape layouts, but it must not introduce Unit cards or reuse Forklift tables/authorization as BBS storage.
+- Layout data is server-authoritative and versioned. Only Draft layouts are editable; Active/Archived layouts are immutable, and clients may not select a layout version, employee, Department, QR value or dynamic field outside the authorized server context.
+- Personal preview QR remains visibly non-functional; the raw Personal QR remains available only during the existing issue/replace response. Department output continues to use the single existing Active shared Department QR. Static uploads must never bypass either QR lifecycle.
+- Legacy adoption must be additive and idempotent: do not update/delete existing Personal/Department templates, cards, QR rows, print logs or private files. Designer-disabled or missing-layout templates must continue through the existing renderer. Operational rollback disables designer flags and preserves all designer records.
+- Phase 10F-0 is documentation/design only. It adds no migration, API, runtime behavior, business record, upload path, Production deployment or GitHub push.
+
 ## BBS Smart Card Phase 10E Constraints
 
 - Pilot acceptance is a gate, not automatic rollout. Use `staged_admin_only=1` during Production setup. After a fresh backup and explicit Pilot-test approval, `staged_admin_only=0` plus `pilot_scope_only=1` may be used for controlled multi-role UAT; keep company-wide mode (`0`/`0`) blocked until acceptance, integrity reconciliation and explicit ordinary-user rollout approval.
