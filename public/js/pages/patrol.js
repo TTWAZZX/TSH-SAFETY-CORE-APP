@@ -1383,7 +1383,7 @@ function renderDashboard(container, data) {
         </button>
       </div>
 
-      <div class="grid grid-cols-1 xl:grid-cols-3 xl:grid-flow-dense gap-5">
+      <div class="grid grid-cols-1 xl:grid-cols-3 xl:grid-flow-dense xl:items-start gap-5">
         <div class="xl:contents xl:space-y-0 space-y-5">
 
           <!-- Check-in Card -->
