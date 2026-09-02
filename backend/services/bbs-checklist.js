@@ -15,6 +15,17 @@ function nullablePositiveInt(value) {
     return Number.isInteger(number) && number > 0 ? number : false;
 }
 
+function automaticItemCode(categoryIndex, itemIndex, reservedCodes = new Set()) {
+    const categoryPart = String(categoryIndex + 1).padStart(2, '0');
+    let itemNumber = itemIndex + 1;
+    let code = '';
+    do {
+        code = `C${categoryPart}-I${String(itemNumber).padStart(3, '0')}`;
+        itemNumber += 1;
+    } while (reservedCodes.has(code));
+    return code;
+}
+
 function validateDraftPayload(payload = {}) {
     const range = validateEffectiveRange(payload.effectiveFrom, payload.effectiveTo);
     if (!range.ok) return range;
@@ -23,6 +34,17 @@ function validateDraftPayload(payload = {}) {
     if (!categories.length || categories.length > 50) return { ok: false, message: 'Checklist requires 1-50 categories.' };
     if (!scopes.length || scopes.length > 100) return { ok: false, message: 'Checklist requires 1-100 scope mappings.' };
     const itemCodes = new Set();
+    for (const category of categories) {
+        const items = Array.isArray(category?.items) ? category.items : [];
+        for (const item of items) {
+            const suppliedCode = cleanText(item?.code, 50).toUpperCase();
+            if (!suppliedCode) continue;
+            if (!/^[A-Z0-9][A-Z0-9_-]{0,49}$/.test(suppliedCode)) return { ok: false, message: `Item code ${suppliedCode} is invalid.` };
+            if (itemCodes.has(suppliedCode)) return { ok: false, message: `Item code ${suppliedCode} is duplicated in this version.` };
+            itemCodes.add(suppliedCode);
+        }
+    }
+    const assignedCodes = new Set(itemCodes);
     let itemCount = 0;
     const normalizedCategories = [];
     for (let categoryIndex = 0; categoryIndex < categories.length; categoryIndex += 1) {
@@ -33,13 +55,13 @@ function validateDraftPayload(payload = {}) {
         const normalizedItems = [];
         for (let itemIndex = 0; itemIndex < items.length; itemIndex += 1) {
             const item = items[itemIndex] || {};
-            const code = cleanText(item.code, 50).toUpperCase();
+            const suppliedCode = cleanText(item.code, 50).toUpperCase();
+            const code = suppliedCode || automaticItemCode(categoryIndex, itemIndex, assignedCodes);
             const prompt = cleanText(item.prompt, 500);
             const responseType = cleanText(item.responseType || 'safe_unsafe_na', 30).toLowerCase();
-            if (!/^[A-Z0-9][A-Z0-9_-]{0,49}$/.test(code) || !prompt) return { ok: false, message: `Item ${itemIndex + 1} in category ${categoryIndex + 1} requires a valid code and prompt.` };
-            if (itemCodes.has(code)) return { ok: false, message: `Item code ${code} is duplicated in this version.` };
+            if (!prompt) return { ok: false, message: `Item ${itemIndex + 1} in category ${categoryIndex + 1} requires a prompt.` };
             if (!RESPONSE_TYPES.includes(responseType)) return { ok: false, message: `Response type ${responseType} is not supported in Phase 2.` };
-            itemCodes.add(code); itemCount += 1;
+            assignedCodes.add(code); itemCount += 1;
             normalizedItems.push({ code, prompt, responseType, helpText: cleanText(item.helpText, 500) || null, sortOrder: itemIndex + 1, isRequired: item.isRequired === false ? 0 : 1, unsafeRequiresRemark: item.unsafeRequiresRemark === false ? 0 : 1, unsafeRequiresPhoto: item.unsafeRequiresPhoto === true ? 1 : 0, unsafeRequiresAction: item.unsafeRequiresAction === true ? 1 : 0 });
         }
         normalizedCategories.push({ name: categoryName, sortOrder: categoryIndex + 1, items: normalizedItems });
@@ -150,4 +172,4 @@ function checklistReadiness(candidates = [], context = {}, asOf = '') {
     return { ready: false, code: 'NO_CHECKLIST', message: 'No checklist is configured for this employee and date.' };
 }
 
-module.exports = { VERSION_STATUSES, RESPONSE_TYPES, cleanText, nullablePositiveInt, validateDraftPayload, buildImportPreview, scopeSpecificity, scopeMatches, scopesCanOverlap, detectPublishConflicts, resolveCandidates, checklistReadiness };
+module.exports = { VERSION_STATUSES, RESPONSE_TYPES, cleanText, nullablePositiveInt, automaticItemCode, validateDraftPayload, buildImportPreview, scopeSpecificity, scopeMatches, scopesCanOverlap, detectPublishConflicts, resolveCandidates, checklistReadiness };

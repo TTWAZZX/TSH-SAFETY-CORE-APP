@@ -13,7 +13,7 @@ const valid = {
     scopes: [{ departmentId: 18, safetyUnitId: 2, positionId: '', bbsLevel: 'Operator', priority: 10 }],
 };
 const fixture = {
-    drafts: [valid, { ...valid, categories: [{ name: 'Behavior', items: [{ code: 'BAD CODE', prompt: 'x' }] }] }, { ...valid, scopes: [{ safetyUnitId: 2, priority: 0 }] }],
+    drafts: [valid, { ...valid, categories: [{ name: 'Behavior', items: [{ code: 'BAD CODE', prompt: 'x' }] }] }, { ...valid, scopes: [{ safetyUnitId: 2, priority: 0 }] }, { ...valid, categories: [{ name: 'Auto', items: [{ code: '', prompt: 'First automatic item' }, { prompt: 'Second automatic item' }] }] }],
     importPreviews: [valid, { ...valid, categories: [{ name: 'Behavior', items: [{ code: 'DUP-01', prompt: 'x' }, { code: 'DUP-01', prompt: 'y' }] }] }],
     resolutions: [
         { context: { departmentId: 18, safetyUnitId: 2, positionId: 1, bbsLevel: 'Operator' }, candidates: [{ VersionID: 1, DepartmentID: 18, SafetyUnitID: null, PositionID: null, BBSLevel: null, Priority: 1, EffectiveFrom: '2026-09-01' }, { VersionID: 2, DepartmentID: 18, SafetyUnitID: 2, PositionID: null, BBSLevel: 'Operator', Priority: 0, EffectiveFrom: '2026-09-01' }] },
@@ -35,6 +35,8 @@ assert.deepStrictEqual(JSON.parse(result.stdout), js, 'Node/PHP checklist rule p
 assert.strictEqual(js.drafts[0].ok, true);
 assert.strictEqual(js.drafts[1].ok, false);
 assert.strictEqual(js.drafts[2].ok, false);
+assert.strictEqual(js.drafts[3].ok, true);
+assert.deepStrictEqual(js.drafts[3].categories[0].items.map(item => item.code), ['C01-I001', 'C01-I002']);
 assert.deepStrictEqual(js.importPreviews[0].summary, { categoryCount: 1, itemCount: 1, scopeCount: 1, effectiveFrom: '2026-09-01', effectiveTo: null });
 assert.strictEqual(js.importPreviews[1].ok, false);
 assert.strictEqual(js.resolutions[0].selected.VersionID, 2);
@@ -48,7 +50,11 @@ for (const marker of ['/admin/checklists', '/admin/checklist-versions/:versionId
 for (const marker of ['/bbs/admin/checklists', '/bbs/admin/checklist-versions/:versionId/publish', '/bbs/admin/checklist-versions/:versionId/clone', '/bbs/admin/checklist-versions/:versionId/archive', '/bbs/admin/checklist-versions/:versionId/import-preview', '/bbs/admin/checklist-versions/:versionId/import', '/bbs/checklists/resolve']) assert.ok(phpRoute.includes(marker), `PHP missing ${marker}`);
 assert.ok(nodeRoute.includes('/admin/checklists/:templateId/status'));
 assert.ok(phpRoute.includes('/bbs/admin/checklists/:templateId/status'));
+assert.ok(nodeRoute.includes('BBS-CHK-${String(templateResult.insertId).padStart(6'), 'Node must derive the Checklist code from the template identity.');
+assert.ok(phpRoute.includes("'BBS-CHK-' . str_pad((string)$templateId, 6"), 'PHP must derive the same Checklist code format.');
 for (const marker of ['Checklist Management', '_bbsExportChecklist', '_bbsPreviewImportFile', '/import-preview']) assert.ok(admin.includes(marker), `Admin missing ${marker}`);
 assert.ok(admin.includes("API.get('/bbs/admin/checklists')"));
+assert.ok(!admin.includes('id="bbs-new-code"'), 'Admin must not request a manually entered Checklist code.');
+assert.ok(admin.includes('placeholder="สร้างอัตโนมัติ"'), 'New Checklist items must explain automatic code assignment.');
 assert.ok(admin.includes("sessionStorage.setItem('bbs_admin_workspace', tab)"), 'Admin must guide configuration into the canonical BBS workspace.');
 console.log('BBS Phase 2B checklist parity/contracts: PASS');

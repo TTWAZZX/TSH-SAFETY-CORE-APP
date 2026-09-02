@@ -1,5 +1,13 @@
 # TSH Safety Core Activity - Changelog And Handoff History
 
+## BBS Automatic Checklist References (2026-09-02, Production Admin-only)
+
+- Checklist creation no longer asks Admin to invent a Template code. Matching Node/PHP transactions now assign the stable `BBS-CHK-000001` format from the new template identity and return it to the UI.
+- New browser-created Checklist items show a read-only automatic-code state; authoritative Node/PHP Draft validation assigns `C01-I001`-style codes. Existing, cloned and explicitly imported item codes remain unchanged.
+- Preserved Phase 2B Excel sheet names and headers, immutable Published/Archived versions, resolver behavior, authorization, private uploads and all existing BBS records. No schema or stored-data migration was added.
+- Node/PHP syntax, Phase 2B parity, Phase 3 and Phase 10B-1 through 10D-5 regressions, full Backend/read-permission preflight (`131/131`), authenticated browser UAT and the temporary Node/PHP lifecycle UAT pass.
+- Deployed the five scoped runtime files plus `deploy-manifest.json` after fresh Production database/application/BBS-private backups. FTPS download-back passed `6/6`, public HTTPS passed `4/4`, and authenticated Production write smoke confirmed automatic Template/Item references with Admin `201`, User `403`, anonymous QR `401` and residue `0`. Temporary helpers were removed and return HTTP `404`; `staged_admin_only=1` remains unchanged. The release is included in the current GitHub synchronization.
+
 ## BBS Foundation Admin Readiness (2026-09-02, Production Admin-only)
 
 - Reworked System Console `BBS Foundation` into a production-facing readiness and guided-setup view; removed user-visible development phase/badge/configuration-only wording.

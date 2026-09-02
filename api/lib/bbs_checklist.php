@@ -13,6 +13,17 @@ function bbs_checklist_nullable_id($value)
     return $number === false ? false : (int) $number;
 }
 
+function bbs_checklist_automatic_item_code(int $categoryIndex, int $itemIndex, array $reservedCodes = []): string
+{
+    $categoryPart = str_pad((string) ($categoryIndex + 1), 2, '0', STR_PAD_LEFT);
+    $itemNumber = $itemIndex + 1;
+    do {
+        $code = 'C' . $categoryPart . '-I' . str_pad((string) $itemNumber, 3, '0', STR_PAD_LEFT);
+        $itemNumber++;
+    } while (isset($reservedCodes[$code]));
+    return $code;
+}
+
 function bbs_checklist_validate_draft(array $payload): array
 {
     $range = bbs_phase1_validate_range($payload['effectiveFrom'] ?? null, $payload['effectiveTo'] ?? null);
@@ -21,20 +32,31 @@ function bbs_checklist_validate_draft(array $payload): array
     $scopes = isset($payload['scopes']) && is_array($payload['scopes']) ? $payload['scopes'] : [];
     if (count($categories) < 1 || count($categories) > 50) return ['ok' => false, 'message' => 'Checklist requires 1-50 categories.'];
     if (count($scopes) < 1 || count($scopes) > 100) return ['ok' => false, 'message' => 'Checklist requires 1-100 scope mappings.'];
-    $codes = []; $itemCount = 0; $normalizedCategories = [];
+    $codes = [];
+    foreach ($categories as $category) {
+        $items = isset($category['items']) && is_array($category['items']) ? $category['items'] : [];
+        foreach ($items as $item) {
+            $suppliedCode = strtoupper(bbs_checklist_clean_text($item['code'] ?? '', 50));
+            if ($suppliedCode === '') continue;
+            if (!preg_match('/^[A-Z0-9][A-Z0-9_-]{0,49}$/', $suppliedCode)) return ['ok' => false, 'message' => 'Item code ' . $suppliedCode . ' is invalid.'];
+            if (isset($codes[$suppliedCode])) return ['ok' => false, 'message' => 'Item code ' . $suppliedCode . ' is duplicated in this version.'];
+            $codes[$suppliedCode] = true;
+        }
+    }
+    $assignedCodes = $codes; $itemCount = 0; $normalizedCategories = [];
     foreach ($categories as $categoryIndex => $category) {
         $name = bbs_checklist_clean_text($category['name'] ?? '', 160);
         $items = isset($category['items']) && is_array($category['items']) ? $category['items'] : [];
         if ($name === '' || !$items) return ['ok' => false, 'message' => 'Category ' . ($categoryIndex + 1) . ' requires a name and at least one item.'];
         $normalizedItems = [];
         foreach ($items as $itemIndex => $item) {
-            $code = strtoupper(bbs_checklist_clean_text($item['code'] ?? '', 50));
+            $suppliedCode = strtoupper(bbs_checklist_clean_text($item['code'] ?? '', 50));
+            $code = $suppliedCode !== '' ? $suppliedCode : bbs_checklist_automatic_item_code($categoryIndex, $itemIndex, $assignedCodes);
             $prompt = bbs_checklist_clean_text($item['prompt'] ?? '', 500);
             $type = strtolower(bbs_checklist_clean_text($item['responseType'] ?? 'safe_unsafe_na', 30));
-            if (!preg_match('/^[A-Z0-9][A-Z0-9_-]{0,49}$/', $code) || $prompt === '') return ['ok' => false, 'message' => 'Item ' . ($itemIndex + 1) . ' in category ' . ($categoryIndex + 1) . ' requires a valid code and prompt.'];
-            if (isset($codes[$code])) return ['ok' => false, 'message' => 'Item code ' . $code . ' is duplicated in this version.'];
+            if ($prompt === '') return ['ok' => false, 'message' => 'Item ' . ($itemIndex + 1) . ' in category ' . ($categoryIndex + 1) . ' requires a prompt.'];
             if ($type !== 'safe_unsafe_na') return ['ok' => false, 'message' => 'Response type ' . $type . ' is not supported in Phase 2.'];
-            $codes[$code] = true; $itemCount++;
+            $assignedCodes[$code] = true; $itemCount++;
             $normalizedItems[] = ['code' => $code, 'prompt' => $prompt, 'responseType' => $type,
                 'helpText' => bbs_checklist_clean_text($item['helpText'] ?? '', 500) ?: null,
                 'sortOrder' => $itemIndex + 1, 'isRequired' => (($item['isRequired'] ?? true) === false) ? 0 : 1,

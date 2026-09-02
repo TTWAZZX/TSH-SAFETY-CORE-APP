@@ -67,16 +67,19 @@ function handle_bbs_checklist_routes(string $method, string $path): bool
     }
     if ($method === 'POST' && $path === '/bbs/admin/checklists') {
         $admin = require_admin(); $body = json_body();
-        $code = strtoupper(bbs_checklist_clean_text($body['templateCode'] ?? '', 50)); $name = bbs_checklist_clean_text($body['templateName'] ?? '', 160); $description = bbs_checklist_clean_text($body['description'] ?? '', 2000) ?: null;
+        $name = bbs_checklist_clean_text($body['templateName'] ?? '', 160); $description = bbs_checklist_clean_text($body['description'] ?? '', 2000) ?: null;
         $effectiveFrom = bbs_phase1_iso_date($body['effectiveFrom'] ?? (new DateTimeImmutable('now', new DateTimeZone('Asia/Bangkok')))->format('Y-m-d'), true);
-        if (!preg_match('/^[A-Z0-9][A-Z0-9_-]{1,49}$/', $code) || $name === '' || !$effectiveFrom) json_response(['success' => false, 'message' => 'Template code, name, and valid effective date are required.'], 400);
+        if ($name === '' || !$effectiveFrom) json_response(['success' => false, 'message' => 'Template name and valid effective date are required.'], 400);
         $pdo = db(); $pdo->beginTransaction();
         try {
-            $stmt = $pdo->prepare('INSERT INTO BBS_Checklist_Templates(TemplateCode,TemplateName,Description,CreatedBy,UpdatedBy) VALUES(?,?,?,?,?)'); $stmt->execute([$code,$name,$description,(string)$admin['id'],(string)$admin['id']]); $templateId=(int)$pdo->lastInsertId();
+            $temporaryCode = 'BBS-TMP-' . strtoupper(bin2hex(random_bytes(12)));
+            $stmt = $pdo->prepare('INSERT INTO BBS_Checklist_Templates(TemplateCode,TemplateName,Description,CreatedBy,UpdatedBy) VALUES(?,?,?,?,?)'); $stmt->execute([$temporaryCode,$name,$description,(string)$admin['id'],(string)$admin['id']]); $templateId=(int)$pdo->lastInsertId();
+            $code = 'BBS-CHK-' . str_pad((string)$templateId, 6, '0', STR_PAD_LEFT);
+            $stmt = $pdo->prepare('UPDATE BBS_Checklist_Templates SET TemplateCode=? WHERE id=?'); $stmt->execute([$code,$templateId]);
             $stmt=$pdo->prepare("INSERT INTO BBS_Checklist_Versions(TemplateID,VersionNo,Status,EffectiveFrom,CreatedBy,UpdatedBy) VALUES(?,1,'Draft',?,?,?)");$stmt->execute([$templateId,$effectiveFrom,(string)$admin['id'],(string)$admin['id']]);$versionId=(int)$pdo->lastInsertId();$pdo->commit();
             bbs_phase1_audit($admin,'BBS_CHECKLIST_CREATE','BBS_Checklist_Template',(string)$templateId,$code.'; draftVersion='.$versionId);
-            json_response(['success'=>true,'data'=>compact('templateId','versionId'),'message'=>'Checklist template and first draft created.'],201);
-        } catch (PDOException $error) { if($pdo->inTransaction())$pdo->rollBack(); if((string)$error->getCode()==='23000')json_response(['success'=>false,'message'=>'Template code already exists.'],409); throw $error; }
+            json_response(['success'=>true,'data'=>['templateId'=>$templateId,'versionId'=>$versionId,'templateCode'=>$code],'message'=>'Checklist '.$code.' and first draft created.'],201);
+        } catch (PDOException $error) { if($pdo->inTransaction())$pdo->rollBack(); if((string)$error->getCode()==='23000')json_response(['success'=>false,'message'=>'Unable to reserve a unique Checklist code. Please retry.'],409); throw $error; }
     }
     $statusParams = route_params($path, '/bbs/admin/checklists/:templateId/status');
     if ($method === 'PUT' && $statusParams !== null) {

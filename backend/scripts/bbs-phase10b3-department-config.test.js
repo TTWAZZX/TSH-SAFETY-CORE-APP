@@ -36,7 +36,7 @@ assert.match(ui, /masterDepartments\(\)\.map\(department =>/);
 assert.match(ui, /state\.departmentConfigSelectedId=n\(btn\.dataset\.departmentId\)/);
 assert.match(ui, /option\.hidden=Boolean\(query\)/);
 assert.match(main, /bbs-smart-card\.js\?v=(?:20260831-bbs-phase10c[123]|20260901-bbs-phase10(?:b4|d[1-5]))/);
-assert.match(html, /main\.js\?v=(?:20260831-bbs-phase10c[123]-forklift-renewal-ky-chunk-r1|20260901-bbs-phase10(?:b4|d[1-5]))/);
+assert.match(html, /main\.js\?v=(?:20260831-bbs-phase10c[123]-forklift-renewal-ky-chunk-r1|20260901-bbs-phase10(?:b4|d[1-5])|20260902-bbs-auto-reference-r1)/);
 
 for (const preserved of [
     "API.get('/bbs/admin/department-cards')",

@@ -1,5 +1,12 @@
 # TSH Safety Core Activity - AI Quick Start
 
+## Current BBS Automatic Checklist References (2026-09-02, Production Admin-only)
+
+- New Checklist templates use a server-generated `BBS-CHK-000001`-style reference in matching Node/PHP transactions; System Console no longer accepts a manual Template code.
+- New Checklist items receive `C01-I001`-style codes from authoritative Draft validation and display as read-only in the builder. Existing/clone/import codes and Phase 2B Excel headers remain stable.
+- No schema, existing business row, resolver rule, authorization, private-upload path or rollout flag changed. Node/PHP parity, the BBS regression matrix, full Backend preflight, browser UAT and temporary lifecycle UAT pass with residue `0`.
+- Production deploy advanced only the five affected runtime paths plus `deploy-manifest.json`. Backup/hash/smoke evidence is recorded in `DEPLOYMENT.md`; FTPS is `6/6`, HTTPS is `4/4`, Admin create is `201`, staged User/anonymous denials remain `403/401`, all eight BBS tabs pass three responsive viewports with zero console errors, and temporary helpers/rows are absent. The source is included in the current GitHub synchronization.
+
 ## Current BBS Foundation Admin Readiness (2026-09-02, Production deployed Admin-only)
 
 - System Console `BBS Foundation` now presents operational readiness instead of internal phase labels: Position/BBS-Level coverage, Active inspectors and team members, Published Checklist count and Active Pilot scope.

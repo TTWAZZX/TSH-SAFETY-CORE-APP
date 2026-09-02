@@ -38,6 +38,6 @@ assert.ok(ui.includes("inspectorScheduleMode:'agenda'"), 'Agenda must be the def
 assert.match(ui, /min-h-11/, 'Agenda and Risk controls must keep mobile touch targets');
 assert.match(ui, /apiFetch\(`\/bbs\/community\/reports\/\$\{reportId\}\/evidence\/\$\{fileId\}`\)/, 'Evidence must use the existing authenticated private endpoint');
 assert.match(main, /bbs-smart-card\.js\?v=20260901-bbs-phase10d5/, 'BBS page cache bust must include Phase 10D-5');
-assert.match(index, /main\.js\?v=20260901-bbs-phase10d5/, 'Application cache bust must include Phase 10D-5');
+assert.match(index, /main\.js\?v=(?:20260901-bbs-phase10d5|20260902-bbs-auto-reference-r1)/, 'Application cache bust must include Phase 10D-5');
 
 console.log('BBS Phase 10D-5 Mobile Agenda and Community Risk Detail contract tests passed.');

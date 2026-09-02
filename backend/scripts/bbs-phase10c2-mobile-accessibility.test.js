@@ -40,7 +40,7 @@ for (const marker of [
 }
 
 assert.match(main, /bbs-smart-card\.js\?v=(?:20260831-bbs-phase10c[23]|20260901-bbs-phase10(?:b4|d[1-5]))/);
-assert.match(html, /main\.js\?v=(?:20260831-bbs-phase10c[23]-forklift-renewal-ky-chunk-r1|20260901-bbs-phase10(?:b4|d[1-5]))/);
+assert.match(html, /main\.js\?v=(?:20260831-bbs-phase10c[23]-forklift-renewal-ky-chunk-r1|20260901-bbs-phase10(?:b4|d[1-5])|20260902-bbs-auto-reference-r1)/);
 assert.ok(main.includes("document.querySelector('[data-mobile-overlay-dialog=\"true\"]')"), 'Shared mobile viewport logic must recognize BBS dialogs');
 assert.doesNotMatch(ui, /window\.scrollTo\(\{top:0,behavior:'smooth'\}\)/, 'BBS step navigation must scroll the real app container');
 

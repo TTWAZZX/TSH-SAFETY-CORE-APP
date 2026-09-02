@@ -1,6 +1,7 @@
 'use strict';
 
 const express = require('express');
+const crypto = require('crypto');
 const db = require('../db');
 const { isAdmin } = require('../middleware/auth');
 const { logAudit } = require('../utils/audit');
@@ -102,22 +103,24 @@ router.get('/admin/checklists/:templateId', isAdmin, async (req, res) => {
 });
 
 router.post('/admin/checklists', isAdmin, async (req, res) => {
-    const code = cleanText(req.body?.templateCode, 50).toUpperCase();
     const name = cleanText(req.body?.templateName, 160);
     const description = cleanText(req.body?.description, 2000) || null;
     const effectiveFrom = normalizeIsoDate(req.body?.effectiveFrom || bangkokIsoDate(), { required: true });
-    if (!/^[A-Z0-9][A-Z0-9_-]{1,49}$/.test(code) || !name || !effectiveFrom) return res.status(400).json({ success: false, message: 'Template code, name, and valid effective date are required.' });
+    if (!name || !effectiveFrom) return res.status(400).json({ success: false, message: 'Template name and valid effective date are required.' });
     const conn = await db.getConnection();
     try {
         await conn.beginTransaction();
-        const [templateResult] = await conn.query('INSERT INTO BBS_Checklist_Templates(TemplateCode,TemplateName,Description,CreatedBy,UpdatedBy) VALUES(?,?,?,?,?)', [code, name, description, actorId(req), actorId(req)]);
+        const temporaryCode = `BBS-TMP-${crypto.randomBytes(12).toString('hex').toUpperCase()}`;
+        const [templateResult] = await conn.query('INSERT INTO BBS_Checklist_Templates(TemplateCode,TemplateName,Description,CreatedBy,UpdatedBy) VALUES(?,?,?,?,?)', [temporaryCode, name, description, actorId(req), actorId(req)]);
+        const code = `BBS-CHK-${String(templateResult.insertId).padStart(6, '0')}`;
+        await conn.query('UPDATE BBS_Checklist_Templates SET TemplateCode=? WHERE id=?', [code, templateResult.insertId]);
         const [versionResult] = await conn.query("INSERT INTO BBS_Checklist_Versions(TemplateID,VersionNo,Status,EffectiveFrom,CreatedBy,UpdatedBy) VALUES(?,1,'Draft',?,?,?)", [templateResult.insertId, effectiveFrom, actorId(req), actorId(req)]);
         await conn.commit();
         await logAudit(req, { action: 'BBS_CHECKLIST_CREATE', module: 'bbs', targetType: 'BBS_Checklist_Template', targetId: templateResult.insertId, detail: `${code}; draftVersion=${versionResult.insertId}` });
-        res.status(201).json({ success: true, data: { templateId: templateResult.insertId, versionId: versionResult.insertId }, message: 'Checklist template and first draft created.' });
+        res.status(201).json({ success: true, data: { templateId: templateResult.insertId, versionId: versionResult.insertId, templateCode: code }, message: `Checklist ${code} and first draft created.` });
     } catch (error) {
         try { await conn.rollback(); } catch (_) {}
-        if (error?.code === 'ER_DUP_ENTRY') return res.status(409).json({ success: false, message: 'Template code already exists.' });
+        if (error?.code === 'ER_DUP_ENTRY') return res.status(409).json({ success: false, message: 'Unable to reserve a unique Checklist code. Please retry.' });
         return checklistError(res, error, 'create');
     } finally { conn.release(); }
 });

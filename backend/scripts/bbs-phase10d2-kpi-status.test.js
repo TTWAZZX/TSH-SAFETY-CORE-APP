@@ -52,6 +52,6 @@ for (const source of [sources.nodeObservation,sources.phpObservation,sources.nod
 for (const marker of ['function kpiSemantic(','function kpiStatusBadge(','N_A','NOT_CONFIGURED','NOT_INSPECTED','ZERO_PERCENT','KPI status code','ตารางสถานะ KPI ผู้ตรวจ']) assert.ok(sources.ui.includes(marker), `KPI clarity UI/export missing ${marker}`);
 assert.match(sources.ui, /tabindex="0" role="region" aria-label="ตารางสถานะ KPI ผู้ตรวจ"/);
 assert.match(sources.main, /bbs-smart-card\.js\?v=20260901-bbs-phase10d[2-5]/);
-assert.match(sources.html, /main\.js\?v=20260901-bbs-phase10d[2-5]/);
+assert.match(sources.html, /main\.js\?v=(?:20260901-bbs-phase10d[2-5]|20260902-bbs-auto-reference-r1)/);
 
 console.log('BBS Phase 10D-2 KPI Status Clarity Node/PHP/UI/export: PASS');

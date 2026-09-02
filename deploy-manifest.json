@@ -181,6 +181,46 @@
         "temporaryArtifacts": "backup helper removed; HTTP 404",
         "githubPush": "included in the current release commit and pushed to origin/main"
       }
+    },
+    {
+      "generatedAt": "2026-09-02T12:00:00+07:00",
+      "buildId": "bbs-automatic-checklist-references-20260902-r1",
+      "runtime": "shared-hosting-php-7.4",
+      "status": "deployed-and-verified-admin-only",
+      "cacheBust": "20260902-bbs-auto-reference-r1",
+      "schemaMutation": "none",
+      "businessDataMutation": "none; temporary authenticated smoke records must be cleaned to zero",
+      "uploadStorageMutation": "none",
+      "runtimeFiles": [
+        "index.html",
+        "public/js/main.js",
+        "public/js/pages/admin.js",
+        "api/handlers/bbs_checklists.php",
+        "api/lib/bbs_checklist.php"
+      ],
+      "fileHashes": [
+        { "path": "index.html", "sha256": "d813475d9165c5b9cb691072250196c6f32c9eb341a46744b852ff3093a798d4" },
+        { "path": "public/js/main.js", "sha256": "b8bbffc3d736ea8466d14655ba97b4b88a473fe9572e0f4fd10a89887d82e278" },
+        { "path": "public/js/pages/admin.js", "sha256": "a5a254cd224121faac867f238adfe831120703c4d5778351555154f7863de9b3" },
+        { "path": "api/handlers/bbs_checklists.php", "sha256": "bda5b7e6f2c58dbbf2d317897cd9b2993985c7ff26d4c847cdca7ef607cee7a8" },
+        { "path": "api/lib/bbs_checklist.php", "sha256": "4577cfe425b557e279b51429ae914e413be58536bd6fbddb83f19a9dd3021786" }
+      ],
+      "productionVerification": {
+        "stagedAdminOnly": true,
+        "databaseBackupId": "bbs-auto-reference-production-20260902-050849",
+        "databaseBackupSha256": "49d2dcf10ff99860aa1977f51791702a90d1d2cf7e5a60cb84cab9107a80e7e5",
+        "databaseBackupTables": 185,
+        "databaseBackupRows": 15791,
+        "applicationRollbackBackup": "backups/production/bbs-auto-reference-predeploy-20260902-115729",
+        "privateUploadBackup": "four BBS private directories plus deny files in the application rollback backup",
+        "ftpDownloadBackSha256": "PASS 6/6",
+        "httpsSha256": "PASS 4/4",
+        "authenticatedWriteSmoke": "PASS: automatic TemplateCode and ItemCode; Admin 201, User 403, anonymous 401",
+        "browserSmoke": "PASS: 8 tabs, three phone/desktop orientations, zero console errors",
+        "temporaryRowsRemaining": 0,
+        "temporaryHelpers": "removed; FTPS absent and HTTP 404",
+        "githubPush": "included in the current release commit and pushed to origin/main"
+      }
     }
   ]
 }

@@ -1,5 +1,20 @@
 # TSH Safety Core Activity - Deployment
 
+## BBS Automatic Checklist References Production record (2026-09-02)
+
+The server-generated Checklist Template/Item reference release is deployed to the shared-hosting PHP Production target. The release was limited to `index.html`, `public/js/main.js`, `public/js/pages/admin.js`, `api/handlers/bbs_checklists.php`, `api/lib/bbs_checklist.php` and `deploy-manifest.json`. No schema, existing business data, authorization, resolver rule, private-upload path or rollout setting changed; `staged_admin_only=1` remains authoritative.
+
+Backup and verification references:
+
+- Production database backup: `backups/production/bbs-auto-reference-production-20260902-050849/bbs-auto-reference-production-20260902-050849.sql.gz` (185 tables, 15,791 rows, 1,470,054 bytes, SHA-256 `49d2dcf10ff99860aa1977f51791702a90d1d2cf7e5a60cb84cab9107a80e7e5`)
+- Application/BBS private-upload rollback backup: `backups/production/bbs-auto-reference-predeploy-20260902-115729` (six application files, both private deny files and four empty BBS private directories)
+- Exact candidate: `backups/production/bbs-auto-reference-deploy-candidate-20260902-115805`
+- FTPS download-back and HTTPS verification: `backups/production/bbs-auto-reference-upload-verify-20260902-115840` (FTPS `6/6`, HTTPS `4/4`, final manifest SHA-256 `4f9aaac1ee05fdeaeccfb50a0217c466aa4a9c243d78820dde0f3e6c050557c0`)
+- Authenticated write smoke: Admin created a temporary Checklist without a supplied Template code (`201`), PHP generated a canonical `BBS-CHK-...` reference and `C01-I001`; ordinary User remained `403` and anonymous QR remained `401`.
+- Normal-login Chrome UAT: all eight BBS tabs passed at 320x568, 390x844 and 844x390 with zero console errors.
+
+The temporary Checklist/version/items/scopes/audit rows were removed and verified at `0`. Both token-protected deployment helpers were removed, are absent by FTPS and return HTTP `404`. Normal rollback restores the five runtime files and prior manifest from the application backup; database/private restore is reserved for an authorized data incident.
+
 ## BBS Foundation Admin Readiness Production record (2026-09-02)
 
 The System Console `BBS Foundation` readiness/guided-setup UI is deployed to the shared-hosting PHP Production target. The release was limited to `index.html`, `public/js/main.js`, `public/js/pages/admin.js`, `public/js/pages/bbs-smart-card.js` and `deploy-manifest.json`; no API, schema, business data, private-upload path or rollout setting changed. `staged_admin_only=1` remains authoritative, so this release is Admin-only.

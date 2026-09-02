@@ -37,6 +37,6 @@ assert.match(ui, /meta\.deliveryEnabled&&meta\.smtpConfigured/, 'Retry availabil
 assert.match(ui, /row\.Status===['"]Failed['"]/, 'Only Failed rows may render Retry');
 assert.match(ui, /min-h-11/, 'Operational controls must retain mobile touch targets');
 assert.match(main, /bbs-smart-card\.js\?v=20260901-bbs-phase10d[45]/, 'BBS page cache bust must include Phase 10D-4 or later');
-assert.match(index, /main\.js\?v=20260901-bbs-phase10d[45]/, 'Application cache bust must include Phase 10D-4 or later');
+assert.match(index, /main\.js\?v=(?:20260901-bbs-phase10d[45]|20260902-bbs-auto-reference-r1)/, 'Application cache bust must include Phase 10D-4 or later');
 
 console.log('BBS Phase 10D-4 operational follow-up contract tests passed.');

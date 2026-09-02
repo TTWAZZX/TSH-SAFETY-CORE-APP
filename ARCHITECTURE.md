@@ -218,6 +218,13 @@ dates, and Unsafe rules can be replaced only while the version is Draft.
 Publishing locks the version; changes require cloning to a new version number.
 Template activation is a soft status change and never deletes versions.
 
+New Checklist templates receive a server-generated stable reference in the
+format `BBS-CHK-000001`, derived transactionally from the template identity;
+the browser never allocates this number. New Checklist items with no existing
+or imported `ItemCode` receive `C01-I001`-style codes during authoritative
+Node/PHP Draft validation. Existing codes, cloned versions and Excel round-trip
+codes are preserved and are never renumbered.
+
 The resolver filters active Published versions by effective date and matching
 Department, optional Safety Unit, Position, and BBS level. It then selects by
 specificity, explicit priority, and latest effective date. Equal top candidates

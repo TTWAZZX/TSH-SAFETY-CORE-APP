@@ -43,6 +43,6 @@ for (const marker of ['function employeeChecklistReadiness(','function checklist
 assert.match(ui, /data-batch-employee[^>]+disabled/);
 assert.match(ui, /disabled[^>]+data-bbs-start/);
 assert.match(main, /bbs-smart-card\.js\?v=20260901-bbs-phase10d[1-5]/);
-assert.match(html, /main\.js\?v=20260901-bbs-phase10d[1-5]/);
+assert.match(html, /main\.js\?v=(?:20260901-bbs-phase10d[1-5]|20260902-bbs-auto-reference-r1)/);
 
 console.log('BBS Phase 10D-1 Checklist Readiness & Observation Eligibility: PASS');
