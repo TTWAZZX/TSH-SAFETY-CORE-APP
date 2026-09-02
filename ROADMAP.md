@@ -281,3 +281,9 @@ Current focus after the completed PHP migration:
 - Consolidate duplicated PHP/Node compatibility notes into route-level checklists.
 - Add a concise API inventory by module after the current production documentation split settles.
 - Keep UI/filter abstractions conservative; follow existing module patterns unless duplication becomes a real maintenance risk.
+
+## Safety Patrol Check-in v2
+
+- Local phases 1–8: complete on 2026-09-02.
+- Phase 9 dev-only deployment: complete with fresh backup, additive migration, SHA-256 verification, flag enablement, authenticated smoke, zero-residue cleanup, and rollback evidence.
+- The Patrol-only source is included in its dedicated GitHub release commit. Production rollout remains out of scope.

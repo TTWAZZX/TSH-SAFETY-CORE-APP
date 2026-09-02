@@ -1,5 +1,5 @@
 import { openModal, closeModal, showLoading, hideLoading, showToast, showError, escHtml, showConfirmationModal } from '../ui.js?v=20260602-mobile-nav-m53';
-import { API } from '../api.js';
+import { API } from '../api.js?v=20260902-patrol-checkin-v2';
 import { normalizeApiArray, normalizeApiObject } from '../utils/normalize.js';
 import { createLatestRequestController, guardSubmitHandler, pageSkeleton } from '../utils/async-ui.js?v=20260715-phase32c-residual-async';
 
@@ -4457,6 +4457,7 @@ function getSkeletonHTML() {
 function openCheckInModal() {
     const today    = new Date();
     const displayUser = patrolDisplayUser();
+    const checkinV2Enabled = Boolean(_myPlan?.features?.checkinV2Enabled);
 
     // ── ป้องกันเช็คอินซ้ำวันเดียวกัน ──────────────────────────────────────────
     const statsArr  = normalizeApiArray(window._lastStatsData || []);
@@ -4465,7 +4466,7 @@ function openCheckInModal() {
         ? new Date(myStat.LastWalk).toDateString() === today.toDateString()
         : false;
 
-    if (alreadyToday && !window._skipDuplicateCheck) {
+    if (!checkinV2Enabled && alreadyToday && !window._skipDuplicateCheck) {
         const timeStr = new Date(myStat.LastWalk).toLocaleTimeString('th-TH', { hour: '2-digit', minute: '2-digit' });
         openModal('เช็คอินซ้ำ?', `
           <div class="text-center py-2 space-y-4">
@@ -4486,16 +4487,18 @@ function openCheckInModal() {
     }
     // ──────────────────────────────────────────────────────────────────────────
 
-    const todaySess = _myPlan?.sessions?.find(s => {
+    const todaySessions = (_myPlan?.sessions || []).filter(s => {
         const d = new Date(s.PatrolDate);
-        return d.toDateString() === today.toDateString();
-    }) || null;
+        return d.toDateString() === today.toDateString() && !patrolSessionCompleted(s) && !patrolSessionLeave(s);
+    });
+    const todaySess = todaySessions[0] || null;
     const isPatrolDay = !!todaySess;
     const isRequired  = todaySess ? (_myPlan?.required?.some(r => r.id === todaySess.id) ?? true) : false;
     const areaLabel   = todaySess ? (todaySess.AreaName || todaySess.AreaCode || '') : '';
     const areaCode    = todaySess ? (todaySess.AreaCode || '') : '';
     const todaySessionId = todaySess ? patrolSessionId(todaySess) : '';
     const compliance  = _myPlan?.compliance;
+    const initialMode = checkinV2Enabled ? (todaySessions.length ? 'scheduled' : 'extra') : 'normal';
     const todayLabel = today.toLocaleDateString('th-TH', { day: 'numeric', month: 'short', year: 'numeric' });
 
     const planBanner = _myPlan ? `
@@ -4513,7 +4516,10 @@ function openCheckInModal() {
       ${compliance ? `
       <div class="px-4 py-2 flex items-center justify-between bg-slate-50">
         <span class="text-[10px] text-slate-500">ความครบถ้วนเดือนนี้</span>
-        <span class="text-[10px] font-bold ${compliance.done?'text-emerald-600':'text-amber-600'}">${compliance.attended}/${compliance.required} รอบ ${compliance.done?'✓':''}</span>
+        <div class="text-right">
+          <span class="block text-[10px] font-bold ${compliance.done?'text-emerald-600':'text-amber-600'}">${compliance.attended}/${compliance.required} รอบ ${compliance.done?'✓':''}</span>
+          ${_myPlan?.actualActivity ? `<span class="block text-[9px] text-violet-600">เดินจริง ${_myPlan.actualActivity.total || 0} · เดินเพิ่ม ${_myPlan.actualActivity.extra || 0}</span>` : ''}
+        </div>
       </div>` : ''}
     </div>` : '';
 
@@ -4539,24 +4545,31 @@ function openCheckInModal() {
           <span>วันนี้ไม่ใช่วันเดินตรวจตามตาราง สามารถ Check-in ได้แต่จะนับเป็นการเดินนอกตาราง</span>
         </div>` : ''}
 
-        <div class="grid grid-cols-2 gap-2">
-          <label class="cursor-pointer">
-            <input type="radio" name="PatrolType" value="normal" class="peer sr-only" checked onchange="window._onCheckinTypeChange(this.value)">
-            <div class="p-3 rounded-xl border-2 border-slate-100 bg-white text-center hover:border-emerald-100 peer-checked:border-emerald-500 peer-checked:bg-emerald-50 transition-all">
-              <svg class="w-5 h-5 mx-auto mb-1 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"/></svg>
-              <p class="text-[11px] font-bold text-slate-700">ปกติ</p>
-              <p class="text-[9px] text-slate-400">Routine</p>
+        ${checkinV2Enabled ? `
+        <input type="hidden" name="PatrolType" value="${initialMode === 'makeup' ? 'compensation' : 'normal'}">
+        <div class="grid grid-cols-3 gap-2">
+          ${[
+            { value:'scheduled', label:'ตามรอบ', en:'Scheduled', tone:'emerald', disabled:!todaySessions.length },
+            { value:'makeup', label:'เดินซ่อม', en:'Makeup', tone:'amber', disabled:false },
+            { value:'extra', label:'เดินเพิ่ม', en:'Extra', tone:'violet', disabled:false },
+          ].map(option => `<label class="${option.disabled ? 'cursor-not-allowed opacity-50' : 'cursor-pointer'}">
+            <input type="radio" name="CheckinMode" value="${option.value}" class="peer sr-only" ${initialMode === option.value ? 'checked' : ''} ${option.disabled ? 'disabled' : ''} onchange="window._onCheckinTypeChange(this.value)">
+            <div class="p-3 rounded-xl border-2 border-slate-100 bg-white text-center peer-checked:border-${option.tone}-500 peer-checked:bg-${option.tone}-50 transition-all">
+              <p class="text-[11px] font-bold text-slate-700">${option.label}</p>
+              <p class="text-[9px] text-slate-400">${option.en}</p>
             </div>
-          </label>
-          <label class="cursor-pointer">
-            <input type="radio" name="PatrolType" value="compensation" class="peer sr-only" onchange="window._onCheckinTypeChange(this.value)">
-            <div class="p-3 rounded-xl border-2 border-slate-100 bg-white text-center hover:border-violet-100 peer-checked:border-violet-500 peer-checked:bg-violet-50 transition-all">
-              <svg class="w-5 h-5 mx-auto mb-1 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
-              <p class="text-[11px] font-bold text-slate-700">เดินซ่อม</p>
-              <p class="text-[9px] text-slate-400">Makeup</p>
-            </div>
-          </label>
+          </label>`).join('')}
         </div>
+        <div id="checkin-today-row" class="${initialMode === 'scheduled' ? '' : 'hidden'}">
+          <label class="block text-xs font-semibold text-slate-500 mb-1.5">รอบตามตารางวันนี้ <span class="text-emerald-500">*</span></label>
+          <select name="TodayScheduledSessionID" id="checkin-today-select" onchange="window._onCheckinTodaySessionChange()" class="w-full rounded-xl border border-emerald-200 bg-white px-3 py-2.5 text-sm text-slate-700 focus:outline-none focus:ring-2 focus:ring-emerald-400">
+            ${todaySessions.map(s => `<option value="${escHtml(patrolSessionId(s))}" data-area="${escHtml(s.AreaName || s.AreaCode || '')}" data-area-code="${escHtml(s.AreaCode || '')}">${escHtml(`${patrolDateOnly(s.PatrolDate)} · รอบ ${s.PatrolRound || '-'}${s.AreaName || s.AreaCode ? ' · ' + (s.AreaName || s.AreaCode) : ''}`)}</option>`).join('')}
+          </select>
+        </div>` : `
+        <div class="grid grid-cols-2 gap-2">
+          <label class="cursor-pointer"><input type="radio" name="PatrolType" value="normal" class="peer sr-only" checked onchange="window._onCheckinTypeChange(this.value)"><div class="p-3 rounded-xl border-2 border-slate-100 bg-white text-center peer-checked:border-emerald-500 peer-checked:bg-emerald-50"><p class="text-[11px] font-bold text-slate-700">ปกติ</p><p class="text-[9px] text-slate-400">Routine</p></div></label>
+          <label class="cursor-pointer"><input type="radio" name="PatrolType" value="compensation" class="peer sr-only" onchange="window._onCheckinTypeChange(this.value)"><div class="p-3 rounded-xl border-2 border-slate-100 bg-white text-center peer-checked:border-violet-500 peer-checked:bg-violet-50"><p class="text-[11px] font-bold text-slate-700">เดินซ่อม</p><p class="text-[9px] text-slate-400">Makeup</p></div></label>
+        </div>`}
 
         <!-- Missed session picker: shown only when เดินซ่อม is selected -->
         <div id="checkin-date-row" class="hidden">
@@ -4605,34 +4618,62 @@ function openCheckInModal() {
 
 async function handleCheckInSubmit(e) {
     e.preventDefault();
+    const form = e.currentTarget;
+    const submitButton = form?.querySelector('button[type="submit"]');
+    if (submitButton?.disabled) return;
     const fd    = new FormData(e.target);
-    const type  = fd.get('PatrolType');
+    const checkinV2Enabled = Boolean(_myPlan?.features?.checkinV2Enabled);
+    const mode = checkinV2Enabled ? String(fd.get('CheckinMode') || '') : (fd.get('PatrolType') === 'compensation' ? 'makeup' : 'normal');
+    const type  = mode === 'makeup' ? 'compensation' : 'normal';
     const area  = fd.get('Area') || null;
     const notes = fd.get('Notes')?.trim() || null;
     const body  = { PatrolType: type, Area: area, Notes: notes };
-    if (type === 'compensation') {
+    if (checkinV2Enabled) {
+        body.CheckinMode = mode;
+        if (!form.dataset.idempotencyKey) {
+            form.dataset.idempotencyKey = globalThis.crypto?.randomUUID?.() || `patrol:${Date.now()}:${Math.random().toString(36).slice(2)}`;
+        }
+        body.IdempotencyKey = form.dataset.idempotencyKey;
+    }
+    if (mode === 'makeup') {
         const dateVal = fd.get('ScheduledSessionID');
         if (!dateVal) { showToast('กรุณาเลือกรอบที่ต้องการชดเชย', 'error'); return; }
         body.ScheduledSessionID = dateVal;
+    } else if (mode === 'scheduled') {
+        const scheduledSessionId = fd.get('TodayScheduledSessionID') || e.target?.dataset?.todaySessionId || '';
+        if (!scheduledSessionId) { showToast('กรุณาเลือกรอบตามตารางวันนี้', 'error'); return; }
+        body.ScheduledSessionID = scheduledSessionId;
     } else {
         const todaySessionId = e.target?.dataset?.todaySessionId || '';
-        if (todaySessionId) body.ScheduledSessionID = todaySessionId;
+        if (!checkinV2Enabled && todaySessionId) body.ScheduledSessionID = todaySessionId;
     }
+    if (submitButton) { submitButton.disabled = true; submitButton.setAttribute('aria-busy', 'true'); }
     showLoading();
     try {
         const res = await API.post('/patrol/checkin', body);
         closeModal();
         showCheckinSuccessScreen(type, res?.data || {});
-    } catch (err) { showError(err); } finally { hideLoading(); }
+    } catch (err) {
+        showError(err);
+    } finally {
+        hideLoading();
+        if (submitButton) { submitButton.disabled = false; submitButton.removeAttribute('aria-busy'); }
+    }
 }
 
 window._onCheckinTypeChange = async function(val) {
     const row  = document.getElementById('checkin-date-row');
     const wrap = document.getElementById('checkin-missed-wrap');
     const sel  = document.getElementById('checkin-missed-select');
+    const todayRow = document.getElementById('checkin-today-row');
+    const hiddenType = document.querySelector('#checkin-form input[type="hidden"][name="PatrolType"]');
     if (!row) return;
 
-    if (val !== 'compensation') {
+    const isMakeup = val === 'compensation' || val === 'makeup';
+    if (hiddenType) hiddenType.value = isMakeup ? 'compensation' : 'normal';
+    if (todayRow) todayRow.classList.toggle('hidden', val !== 'scheduled');
+
+    if (!isMakeup) {
         row.classList.add('hidden');
         if (sel) { sel.required = false; sel.value = ''; sel.classList.add('hidden'); }
         if (wrap) wrap.classList.remove('hidden');
@@ -4646,7 +4687,8 @@ window._onCheckinTypeChange = async function(val) {
 
     try {
         const year = new Date().getFullYear();
-        const res  = await API.get(`/patrol/my-missed-sessions?year=${year}`);
+        const scope = _myPlan?.features?.checkinV2Enabled ? '&scope=all' : '';
+        const res  = await API.get(`/patrol/my-missed-sessions?year=${year}${scope}`);
         const sessions = res.data || [];
 
         if (!wrap || !sel) return;
@@ -4662,7 +4704,7 @@ window._onCheckinTypeChange = async function(val) {
             wrap.innerHTML = `
               <div class="flex items-center gap-2 px-3 py-2.5 rounded-xl border border-emerald-200 bg-emerald-50 text-xs text-emerald-600">
                 <svg class="w-4 h-4 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
-                ไม่มีรอบที่ขาดในปีนี้ — เดินครบทุกรอบแล้ว
+                ไม่มีรอบที่ขาดซึ่งสามารถเดินซ่อมได้
               </div>`;
             return;
         }
@@ -4676,11 +4718,12 @@ window._onCheckinTypeChange = async function(val) {
                 const dow   = thDay[d.getDay()];
                 const day   = d.getDate();
                 const mon   = thMonth[d.getMonth()];
+                const yearLabel = d.getFullYear() + 543;
                 const area  = s.AreaName || s.AreaCode || '';
                 const areaCode = s.AreaCode || '';
                 const round = `รอบ ${s.PatrolRound}`;
                 const dateStr = d.toISOString().split('T')[0];
-                const label = `${dow}ที่ ${day} ${mon} · ${round}${area ? ' · ' + area : ''}`;
+                const label = `${dow}ที่ ${day} ${mon} ${yearLabel} · ${round}${area ? ' · ' + area : ''}`;
                 return `<option value="${escHtml(s.id || s.ScheduledSessionID || '')}" data-area="${escHtml(area)}" data-area-code="${escHtml(areaCode)}">${label}</option>`;
             }).join('');
 
@@ -4718,7 +4761,9 @@ function showCheckinSuccessScreen(patrolType, result = {}) {
     const required    = compliance?.required || 0;
     const nowDone     = newAttended >= required && required > 0;
     const pct         = required > 0 ? Math.min(Math.round((newAttended / required) * 100), 100) : 0;
-    const typeMeta    = patrolTypeMeta(checkin.type || patrolType);
+    const typeMeta    = checkin.mode === 'extra'
+        ? { label: 'เดินเพิ่ม', en: 'Extra Patrol' }
+        : patrolTypeMeta(checkin.type || patrolType);
     const actualDate  = checkin.actualDate || patrolDateOnly(now);
     const scheduledDate = checkin.scheduledDate || actualDate;
     const emailText   = email.sent ? 'ส่งอีเมลแล้ว' : email.queued ? 'บันทึกอีเมลเข้าคิวแล้ว' : 'ยังไม่มีอีเมลผู้ใช้';
@@ -4961,6 +5006,12 @@ function _patrolDetailSummaryGrid(detail, group) {
     const acceptedPct = Number(summary.acceptedCoverageToDatePct ?? leave.acceptedCoverageToDatePct ?? progress);
     const overLeave = Number(summary.overLeaveYear ?? leave.overLeaveYear ?? 0);
     const final = String(summary.finalStatus || (summary.actualPassToDate ? 'Pass' : summary.acceptedPassToDate ? 'Accepted by leave' : 'Below target'));
+    const activity = detail?.actualActivity || {};
+    const actualCards = group === 'top_management' ? `
+      ${_patrolAdminSummaryCard('Actual Walks', String(activity.total ?? summary.actualWalks ?? 0), 'violet')}
+      ${_patrolAdminSummaryCard('Scheduled Walks', String(activity.scheduledNormal ?? summary.scheduledNormalWalks ?? 0), 'emerald')}
+      ${_patrolAdminSummaryCard('Makeup Walks', String(activity.makeup ?? summary.makeupWalks ?? 0), 'amber')}
+      ${_patrolAdminSummaryCard('Extra Walks', String(activity.extra ?? summary.extraWalks ?? 0), 'violet')}` : '';
     return `<div class="grid grid-cols-2 sm:grid-cols-4 gap-2">
       ${_patrolAdminSummaryCard('Progress To Date', `${progress}%`, progress >= 80 ? 'emerald' : (progress > 0 ? 'amber' : 'red'))}
       ${_patrolAdminSummaryCard('Full Year', `${fullYear}%`, 'slate')}
@@ -4970,6 +5021,7 @@ function _patrolDetailSummaryGrid(detail, group) {
       ${_patrolAdminSummaryCard('Accepted Coverage', `${acceptedCoverage}/${required}`, acceptedPct >= progress ? 'emerald' : 'slate')}
       ${_patrolAdminSummaryCard('Accepted %', `${acceptedPct}%`, acceptedPct >= 80 ? 'emerald' : 'sky')}
       ${_patrolAdminSummaryCard('Final Status', final, final === 'Pass' ? 'emerald' : final === 'Accepted by leave' ? 'sky' : 'red')}
+      ${actualCards}
     </div>`;
 }
 
@@ -5169,6 +5221,7 @@ function _armRenderTopDetail(detail, employeeId, year) {
     const schedule = Array.isArray(detail?.schedule) ? detail.schedule : [];
     const records = Array.isArray(detail?.records) ? detail.records : [];
     const extraRecords = Array.isArray(detail?.extraRecords) ? detail.extraRecords : [];
+    const activity = detail?.actualActivity || {};
     const detailEl = document.getElementById('arm-detail');
     const listEl = document.getElementById('arm-list');
     const countEl = document.getElementById('arm-count');
@@ -5181,6 +5234,9 @@ function _armRenderTopDetail(detail, employeeId, year) {
             ${_patrolAdminSummaryCard('Full Year', `${summary.fullYearPct || 0}%`, 'slate')}
             ${_patrolAdminSummaryCard('Required Due', String(summary.requiredToDate || 0), 'slate')}
             ${_patrolAdminSummaryCard('Missing Due', String(summary.missingToDate || 0), (summary.missingToDate || 0) > 0 ? 'red' : 'emerald')}
+            ${_patrolAdminSummaryCard('Actual Walks', String(activity.total || 0), 'violet')}
+            ${_patrolAdminSummaryCard('Makeup Walks', String(activity.makeup || 0), 'amber')}
+            ${_patrolAdminSummaryCard('Extra Walks', String(activity.extra || 0), 'violet')}
           </div>`;
     }
     if (!listEl) return;
@@ -5909,6 +5965,14 @@ window.reviewPatrolIssueClose = async function(issueId, action) {
         reviewButtons.forEach(button => { button.disabled = false; });
         hideLoading();
     }
+};
+
+window._onCheckinTodaySessionChange = function() {
+    const sel = document.getElementById('checkin-today-select');
+    const areaSel = document.getElementById('checkin-area-select');
+    const area = sel?.selectedOptions?.[0]?.dataset?.area || '';
+    const areaCode = sel?.selectedOptions?.[0]?.dataset?.areaCode || '';
+    if (area && areaSel) patrolSetAreaSelectValue(areaSel, area, areaCode);
 };
 
 window.openIssueForm = function(mode, rawIssueData = null) {

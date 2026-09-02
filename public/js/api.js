@@ -20,11 +20,12 @@ function resolveApiBase() {
 const API_BASE = resolveApiBase();
 
 export async function apiFetch(endpoint, options = {}) {
+    const { suppressErrorLog = false, ...fetchOptions } = options;
     const token = TSHSession.getToken();
-    const body = options.body;
+    const body = fetchOptions.body;
 
     const headers = {
-        ...(options.headers || {})
+        ...(fetchOptions.headers || {})
     };
 
     // ✅ ใส่ Content-Type เฉพาะตอนที่ body เป็น JSON
@@ -41,7 +42,7 @@ export async function apiFetch(endpoint, options = {}) {
 
     try {
         const res = await fetch(`${API_BASE}${endpoint}`, {
-            ...options,
+            ...fetchOptions,
             headers
         });
 
@@ -70,7 +71,7 @@ export async function apiFetch(endpoint, options = {}) {
         return data;
 
     } catch (err) {
-        console.error('API Error:', err);
+        if (!suppressErrorLog) console.error('API Error:', err);
         throw err;
     }
 }

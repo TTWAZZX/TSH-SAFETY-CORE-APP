@@ -1,5 +1,22 @@
 # TSH Safety Core Activity - Deployment
 
+## Safety Patrol Check-in v2 dev deployment record (2026-09-02)
+
+Safety Patrol Check-in v2 is deployed and verified on `dev.tshpcl.com` only. Production was not rolled out. The Patrol-only source is included in its dedicated GitHub release commit. The shared-hosting PHP release was limited to `index.html`, `public/js/main.js`, `public/js/api.js`, `public/js/pages/patrol.js`, `api/handlers/patrol.php` and `deploy-manifest.json`; the Node route remains the Local development parity implementation.
+
+Backup and verification references:
+
+- Verified database backup: `backups/production/patrol-checkin-v2-dev-predeploy-20260902-184046/patrol-checkin-v2-dev-predeploy-20260902-184046.sql.gz` (185 tables, 15,996 rows, 1,441,927 bytes, SHA-256 `e993a46a8d8d52d541a1d9251463f9c58c8416eb154b160d7f5846de3869215b`; download hash matched and gzip validation passed).
+- A preliminary server-side backup `patrol-checkin-v2-dev-predeploy-20260902-183953` was retained in the same HTTP-denied backup storage. It was superseded because the FTP account correctly could not read private storage directly; it was not used for restore evidence.
+- Runtime rollback backup: `backups/production/patrol-checkin-v2-dev-predeploy-20260902-183249` (the six pre-deploy files and hashes).
+- Exact scoped candidate: `backups/production/patrol-checkin-v2-dev-candidate-20260902-184300`.
+- FTPS download-back verification: `backups/production/patrol-checkin-v2-dev-upload-verify-20260902-184700` (six runtime files matched; final manifest SHA-256 `8ae52c59fe5106ce005cd3a46663ce2621d891a17674711b111cf522987edc6e`).
+- HTTPS verification: `backups/production/patrol-checkin-v2-dev-https-verify-20260902-185200` (`4/4` public static assets matched).
+
+The additive migration retained `384/384` Attendance rows, installed the nullable idempotency column and all three unique indexes, and kept the flag off until runtime verification. The final flag is `patrol_checkin_v2_enabled=1`. Authenticated PHP UAT passed Scheduled, cross-month/year Makeup, Extra, three same-day rounds, scheduled-round duplicate rejection, concurrent retry idempotency, Member Rotation, Actual Walk Activity and Scheduled Compliance. The observed activity split was 7 total: 2 Scheduled, 2 Makeup and 3 Extra. Chrome 390x844 passed with the expected cache assets, three selectable same-day rounds, prior-year Makeup, no overflow and zero console errors. All temporary employees, teams, members, rotations, sessions, Attendance, leave and outbox rows were removed; remaining count is `0`. Both token-protected helpers were removed through FTPS and return HTTP `404`.
+
+The final read-only audit reports no base-team conflict and no duplicate `(UserID,ScheduledSessionID)`, while retaining five pre-existing orphan session links, nine unlinked legacy normal rows and one valid multiple-round date. These records were not repaired or deleted. The configured User/Admin password credentials currently return `401`; deployment UAT therefore used short-lived server-signed tokens for isolated onboarding-ready fixtures. Operational rollback sets the flag to `0`, restores the six runtime files from the runtime backup and preserves the additive schema plus all Attendance history. Database restore is reserved for an integrity incident and uses the verified backup above.
+
 ## BBS Automatic Checklist References Production record (2026-09-02)
 
 The server-generated Checklist Template/Item reference release is deployed to the shared-hosting PHP Production target. The release was limited to `index.html`, `public/js/main.js`, `public/js/pages/admin.js`, `api/handlers/bbs_checklists.php`, `api/lib/bbs_checklist.php` and `deploy-manifest.json`. No schema, existing business data, authorization, resolver rule, private-upload path or rollout setting changed; `staged_admin_only=1` remains authoritative.
@@ -351,3 +368,15 @@ npm run backup
 - Delete temporary employees/records/files created by smoke tests.
 - Record cleanup result and remaining count.
 - Never leave test data in production as a handoff shortcut.
+
+## Safety Patrol Check-in v2 — Phase 9
+
+The dev-only phase was executed and verified on 2026-09-02. Follow `docs/safety-patrol-checkin-v2-local-handoff.md` for evidence and rollback details. Production rollout remains separately gated.
+
+- Back up database and the exact runtime files before applying anything; record and verify the backup.
+- Run the SELECT-only team/link audit and stop on duplicate base-team membership.
+- Apply `backend/migrations/20260902_patrol_checkin_v2.sql` while `patrol_checkin_v2_enabled=0`; verify column, unique index, flag, and unchanged Attendance row count.
+- Upload only approved Patrol/frontend files and verify downloaded SHA-256 hashes.
+- Smoke PHP shared-hosting routes with the flag off, then enable the flag and test User/Admin Scheduled, Makeup, Extra, multiple rounds, statistics, calendar, and retries.
+- Remove all uniquely marked smoke records and verify residue `0`.
+- Roll back operationally by disabling the flag and restoring runtime files. Preserve Attendance and normally preserve the additive nullable column/index.

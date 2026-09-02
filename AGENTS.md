@@ -1,5 +1,12 @@
 # TSH Safety Core Activity - AGENTS.md
 
+## Safety Patrol Check-in v2 Constraints
+
+- Scheduled check-in must link one authorized Admin-created Patrol session. Makeup may complete an earlier missed session across month/year; Extra remains unlinked, counts only in Actual Walk Activity for the actual walk month, and never closes Scheduled Compliance.
+- Team/Member Rotation and Patrol Sessions in System Control are the calendar authority. Preserve multiple same-day rounds, one base team per employee and historical Attendance without automatic repair.
+- Retry safety uses nullable `Patrol_Attendance.IdempotencyKey`, unique `(UserID,IdempotencyKey)` and unique `(UserID,ScheduledSessionID)`. A new idempotency key intentionally permits another Extra walk.
+- `patrol_checkin_v2_enabled` is the operational rollback flag. Disable it before runtime rollback; do not drop the additive column/indexes or delete Attendance history.
+
 ## BBS Smart Card Phase 10E Constraints
 
 - Pilot acceptance is a gate, not automatic rollout. Use `staged_admin_only=1` during Production setup. After a fresh backup and explicit Pilot-test approval, `staged_admin_only=0` plus `pilot_scope_only=1` may be used for controlled multi-role UAT; keep company-wide mode (`0`/`0`) blocked until acceptance, integrity reconciliation and explicit ordinary-user rollout approval.

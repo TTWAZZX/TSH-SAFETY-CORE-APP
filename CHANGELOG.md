@@ -1,5 +1,19 @@
 # TSH Safety Core Activity - Changelog And Handoff History
 
+## Safety Patrol Check-in v2 - dev deployment (2026-09-02)
+
+- Deployed the verified PHP/frontend Safety Patrol v2 candidate to `dev.tshpcl.com` behind the additive `patrol_checkin_v2_enabled` flag, then enabled it after migration and flag-off smoke.
+- Verified Scheduled, cross-month/year Makeup, Extra Actual Walk Activity, unchanged Scheduled Compliance, multiple same-day rounds, Member Rotation, duplicate rejection and retry idempotency.
+- Preserved all historical Attendance rows and reported five orphan session links plus nine unlinked legacy rows without automatic repair.
+- Completed fresh database/runtime backups, FTPS and HTTPS SHA-256 verification, authenticated API/390 px browser UAT and zero-residue cleanup. No Production rollout was performed; the Patrol-only source is included in its dedicated GitHub release commit.
+
+## Safety Patrol Check-in v2 — Local completion (2026-09-02)
+
+- Completed Local phases 1–8 only. No dev/production deployment, remote data mutation, or GitHub push was performed.
+- Added flag-gated Scheduled/Makeup/Extra semantics, cross-month/year Makeup, multi-round selection, Actual Walk Activity, concurrency-safe retry idempotency, rotation-aware calendar resolution, and one-base-team validation in Node/PHP parity.
+- Added an additive nullable idempotency column/index migration. Existing Attendance was not rewritten or deleted.
+- Node lifecycle, PHP lifecycle, concurrent retry, legacy, rotation, multiple-round, cross-year, Browser mobile modal, and zero-residue UAT passed locally. See `docs/safety-patrol-checkin-v2-local-handoff.md` for the exact deployment/rollback plan and known data anomalies.
+
 ## BBS Automatic Checklist References (2026-09-02, Production Admin-only)
 
 - Checklist creation no longer asks Admin to invent a Template code. Matching Node/PHP transactions now assign the stable `BBS-CHK-000001` format from the new template identity and return it to the UI.

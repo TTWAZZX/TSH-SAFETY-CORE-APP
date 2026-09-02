@@ -1,5 +1,12 @@
 # TSH Safety Core Activity - AI Quick Start
 
+## Current Safety Patrol Check-in v2 Handoff (2026-09-02, dev deployed and verified)
+
+- Local phases 1-8 and the approved Phase 9 rollout to `dev.tshpcl.com` are complete. Production was not rolled out; the Patrol-only source is included in its dedicated GitHub release commit.
+- The shared-hosting PHP/frontend candidate passed additive migration, FTPS/HTTPS SHA-256, authenticated API lifecycle and Chrome 390x844 UAT. `patrol_checkin_v2_enabled=1` on dev and all smoke residue is `0`.
+- The final dev audit found no duplicate base-team member or scheduled-round completion, five orphan scheduled links, nine unlinked legacy normal rows and one valid multiple-round date. Do not repair or delete anomalies automatically.
+- Verified database backup: `patrol-checkin-v2-dev-predeploy-20260902-184046`; runtime rollback backup: `backups/production/patrol-checkin-v2-dev-predeploy-20260902-183249`. Full evidence and rollback instructions are in `DEPLOYMENT.md` and `docs/safety-patrol-checkin-v2-local-handoff.md`.
+
 ## Current BBS Automatic Checklist References (2026-09-02, Production Admin-only)
 
 - New Checklist templates use a server-generated `BBS-CHK-000001`-style reference in matching Node/PHP transactions; System Console no longer accepts a manual Template code.

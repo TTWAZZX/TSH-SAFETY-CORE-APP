@@ -47,6 +47,10 @@ const {
         'ALTER TABLE Patrol_Attendance ADD COLUMN RecordedBy VARCHAR(50) DEFAULT NULL',
         'ALTER TABLE Patrol_Attendance ADD COLUMN ScheduledSessionID VARCHAR(50) DEFAULT NULL',
         'ALTER TABLE Patrol_Attendance ADD INDEX idx_patrol_attendance_session (ScheduledSessionID)',
+        'ALTER TABLE Patrol_Attendance ADD COLUMN IdempotencyKey VARCHAR(80) DEFAULT NULL',
+        'ALTER TABLE Patrol_Attendance ADD UNIQUE INDEX uq_patrol_attendance_user_request (UserID, IdempotencyKey)',
+        'ALTER TABLE Patrol_Attendance ADD UNIQUE INDEX uq_patrol_attendance_user_session (UserID, ScheduledSessionID)',
+        'ALTER TABLE Patrol_Team_Members ADD UNIQUE INDEX uq_patrol_team_members_employee (EmployeeID)',
         'ALTER TABLE Patrol_Self_Checkin ADD COLUMN RecordedBy VARCHAR(50) DEFAULT NULL',
         "ALTER TABLE Patrol_Self_Checkin ADD COLUMN PatrolType VARCHAR(20) DEFAULT 'normal'",
         'ALTER TABLE Patrol_Self_Checkin ADD COLUMN ScheduledSessionID VARCHAR(50) DEFAULT NULL',
@@ -74,6 +78,9 @@ const {
         // Allow AreaID=NULL so we can store "explicit no-patrol" sentinel (PatrolRound=0, AreaID=NULL)
         'ALTER TABLE Patrol_Team_Rotation MODIFY COLUMN AreaID INT DEFAULT NULL',
     ]) { try { await db.query(sql); } catch (_) {} }
+    try {
+        await db.query("INSERT INTO App_Settings (key_name,value) VALUES ('patrol_checkin_v2_enabled','0') ON DUPLICATE KEY UPDATE value=value");
+    } catch (_) {}
 
     // Note: imported MySQL-compatible schemas may not allow changing this AUTO_INCREMENT safely.
     // IDs are generated in application code using MAX(SessionID)+1 within transactions.
@@ -441,7 +448,9 @@ function sendPatrolError(res, err, fallback = 'ไม่สามารถดำ
     console.error('[patrol]', err?.message || err);
     return res.status(err?.statusCode || statusCode).json({
         success: false,
-        message: fallback,
+        ...(err?.code ? { code: err.code } : {}),
+        message: err?.statusCode ? err.message : fallback,
+        ...(err?.data ? { data: err.data } : {}),
     });
 }
 
@@ -486,6 +495,51 @@ async function getPatrolFlexibleMonthlyRequirement() {
     }
 }
 
+async function patrolCheckinV2Enabled() {
+    try {
+        const [[row]] = await db.query(
+            "SELECT value FROM App_Settings WHERE key_name='patrol_checkin_v2_enabled' LIMIT 1"
+        );
+        return String(row?.value || '0') === '1';
+    } catch {
+        return false;
+    }
+}
+
+function patrolIdempotencyKey(value) {
+    const key = String(value || '').trim();
+    return /^[A-Za-z0-9][A-Za-z0-9:_-]{15,79}$/.test(key) ? key : null;
+}
+
+function patrolTodayBangkok() {
+    const parts = new Intl.DateTimeFormat('en-CA', {
+        timeZone: 'Asia/Bangkok', year: 'numeric', month: '2-digit', day: '2-digit',
+    }).formatToParts(new Date());
+    const values = Object.fromEntries(parts.map(part => [part.type, part.value]));
+    return `${values.year}-${values.month}-${values.day}`;
+}
+
+function patrolActualActivity(records = [], sessionMap = new Map()) {
+    const summary = { total: 0, scheduledNormal: 0, makeup: 0, extra: 0 };
+    const scheduledDates = new Set([...sessionMap.values()].map(session => dateOnly(session.PatrolDate)));
+    for (const record of records) {
+        summary.total++;
+        const sid = String(record.ScheduledSessionID || '').trim();
+        if (!sid) {
+            if (record.IsV2Request || !scheduledDates.has(dateOnly(record.PatrolDate))) summary.extra++;
+            else summary.scheduledNormal++;
+            continue;
+        }
+        const session = sessionMap.get(sid);
+        const actualDate = dateOnly(record.PatrolDate);
+        const scheduledDate = session ? dateOnly(session.PatrolDate) : '';
+        if (String(record.PatrolType || '').toLowerCase() === 'compensation'
+            || (scheduledDate && actualDate !== scheduledDate)) summary.makeup++;
+        else summary.scheduledNormal++;
+    }
+    return summary;
+}
+
 // ==========================================
 // PART 1: Schedule & Stats
 // ==========================================
@@ -499,14 +553,7 @@ router.get('/my-monthly-plan', async (req, res) => {
     if (ym.error) return res.status(400).json({ success: false, message: ym.error });
     try {
         // 1. Base team membership
-        const [[base]] = await db.query(`
-            SELECT tm.TeamID, tm.PatrolType,
-                   t.Name AS TeamName, t.PatrolGroup, t.Color
-            FROM   Patrol_Team_Members tm
-            JOIN   Patrol_Teams t ON t.id = tm.TeamID
-            WHERE  tm.EmployeeID = ?
-            LIMIT  1
-        `, [employeeId]);
+        const base = await patrolBaseMembership(employeeId);
 
         if (!base) return res.json({ success: true, data: null }); // ไม่ได้อยู่ในทีม
 
@@ -523,6 +570,7 @@ router.get('/my-monthly-plan', async (req, res) => {
             : { id: base.TeamID,     name: base.TeamName,     group: base.PatrolGroup,     color: base.Color };
 
         const personalSchedule = await buildPersonalMonthlySchedule(employeeId, ym.year, ym.month);
+        const checkinV2Enabled = await patrolCheckinV2Enabled();
         const sessions = personalSchedule.items;
         const required = personalSchedule.items;
         const attendance = personalSchedule.attendance;
@@ -554,6 +602,8 @@ router.get('/my-monthly-plan', async (req, res) => {
                 required,
                 attended: personalSchedule.completed,
                 attendanceDates,
+                actualActivity: personalSchedule.actualActivity,
+                features: { checkinV2Enabled },
                 roster,
                 compliance: {
                     required: personalSchedule.required,
@@ -880,25 +930,32 @@ router.post('/checkin', async (req, res) => {
         // ดึงข้อมูลผู้ใช้จาก JWT (req.user) ไม่รับจาก req.body เพื่อป้องกันการปลอมแปลง
         const UserID   = req.user.id;
         const [[employee]] = await db.query(
-            `SELECT e.EmployeeID,e.EmployeeName,e.Department,e.Position,e.CompanyEmail,t.Name AS TeamName
-             FROM Employees e
-             LEFT JOIN Patrol_Team_Members tm ON tm.EmployeeID=e.EmployeeID
-             LEFT JOIN Patrol_Teams t ON t.id=tm.TeamID
-             WHERE e.EmployeeID=?
-             LIMIT 1`,
+            `SELECT e.EmployeeID,e.EmployeeName,e.Department,e.Position,e.CompanyEmail
+             FROM Employees e WHERE e.EmployeeID=? LIMIT 1`,
             [UserID]
         );
         const UserName = employee?.EmployeeName || req.user.name || UserID;
-        const TeamName = employee?.TeamName || req.user.team || '';
         const Notes     = req.body.Notes?.trim() || null;
         let Area      = req.body.Area?.trim()  || null;
+        const checkinV2Enabled = await patrolCheckinV2Enabled();
         const ALLOWED_PATROL_TYPES = ['normal', 'compensation'];
-        const PatrolType = ALLOWED_PATROL_TYPES.includes(req.body.PatrolType || 'normal') ? (req.body.PatrolType || 'normal') : null;
+        let PatrolType = ALLOWED_PATROL_TYPES.includes(req.body.PatrolType || 'normal') ? (req.body.PatrolType || 'normal') : null;
         if (!PatrolType) {
             return res.status(400).json({ success: false, message: 'Self check-in supports only normal or compensation patrol.' });
         }
-        if (PatrolType === 'compensation' && !String(req.body.ScheduledSessionID || '').trim()) {
+        const requestedMode = String(req.body.CheckinMode || '').trim().toLowerCase();
+        const mode = checkinV2Enabled
+            ? (requestedMode || (PatrolType === 'compensation' ? 'makeup' : (req.body.ScheduledSessionID ? 'scheduled' : 'extra')))
+            : (PatrolType === 'compensation' ? 'makeup' : (req.body.ScheduledSessionID ? 'scheduled' : 'extra'));
+        if (!['scheduled', 'makeup', 'extra'].includes(mode)) {
+            return res.status(400).json({ success: false, message: 'CheckinMode must be scheduled, makeup or extra.' });
+        }
+        PatrolType = mode === 'makeup' ? 'compensation' : 'normal';
+        if (mode === 'makeup' && !String(req.body.ScheduledSessionID || '').trim()) {
             return res.status(400).json({ success: false, message: 'ScheduledSessionID is required for makeup patrol.' });
+        }
+        if (checkinV2Enabled && mode === 'extra' && String(req.body.ScheduledSessionID || '').trim()) {
+            return res.status(400).json({ success: false, message: 'Extra patrol must not be linked to a scheduled round.' });
         }
         // PatrolDate: user may supply an explicit date for compensation patrol (same year only)
         let patrolDate = null;
@@ -906,10 +963,37 @@ router.post('/checkin', async (req, res) => {
             const d = new Date(req.body.PatrolDate);
             if (!isNaN(d.getTime())) patrolDate = d.toISOString().split('T')[0];
         }
-        const effectiveDate = patrolDate || new Date().toISOString().split('T')[0];
+        const effectiveDate = checkinV2Enabled ? patrolTodayBangkok() : (patrolDate || new Date().toISOString().split('T')[0]);
+        const idempotencyRaw = String(req.body.IdempotencyKey || '').trim();
+        const idempotencyKey = idempotencyRaw ? patrolIdempotencyKey(idempotencyRaw) : null;
+        if (idempotencyRaw && !idempotencyKey) {
+            return res.status(400).json({ success: false, message: 'IdempotencyKey is invalid.' });
+        }
+        if (checkinV2Enabled && idempotencyKey) {
+            const [[existingRequest]] = await db.query(
+                `SELECT id,UserID,UserName,TeamName,PatrolDate,PatrolType,Area,Notes,ScheduledSessionID
+                   FROM Patrol_Attendance WHERE UserID=? AND IdempotencyKey=? LIMIT 1`,
+                [UserID, idempotencyKey]
+            );
+            if (existingRequest) {
+                return res.json({
+                    success: true,
+                    message: 'Check-in was already saved.',
+                    data: {
+                        idempotentReplay: true,
+                        checkin: {
+                            id: Number(existingRequest.id), employeeId: UserID, employeeName: existingRequest.UserName,
+                            type: existingRequest.PatrolType, mode,
+                            actualDate: dateOnly(existingRequest.PatrolDate), scheduledSessionId: existingRequest.ScheduledSessionID || null,
+                            area: existingRequest.Area || null, teamName: existingRequest.TeamName || '',
+                        },
+                    },
+                });
+            }
+        }
 
         // ป้องกัน check-in ซ้ำในวันเดียวกัน (ยกเว้น compensation ที่ใช้วันอื่น)
-        const [[dupCheck]] = await db.query(
+        const [[dupCheck]] = checkinV2Enabled ? [[null]] : await db.query(
             `SELECT id FROM Patrol_Attendance
              WHERE UserID = ? AND DATE(PatrolDate) = ? AND PatrolType = ?
              LIMIT 1`,
@@ -919,13 +1003,61 @@ router.post('/checkin', async (req, res) => {
             return res.status(409).json({ success: false, message: 'คุณได้เช็คอินประเภทนี้ในวันนี้แล้ว' });
         }
 
-        const currentWeek = getWeekNumber(patrolDate ? new Date(patrolDate) : new Date());
-        const { session } = await resolveTopScheduledSession(UserID, effectiveDate, req.body.ScheduledSessionID);
+        const currentWeek = getWeekNumber(new Date(`${effectiveDate}T12:00:00`));
+        const { session } = mode === 'extra'
+            ? { session: null }
+            : await resolveTopScheduledSession(UserID, effectiveDate, req.body.ScheduledSessionID, { checkinV2Enabled, mode });
+        if (checkinV2Enabled && mode === 'scheduled' && !session) {
+            return res.status(409).json({ success: false, code: 'PATROL_SCHEDULE_NOT_FOUND', message: 'No scheduled Patrol round is assigned to this user today.' });
+        }
+        const effectiveTeam = await patrolEffectiveTeam(UserID, Number(effectiveDate.slice(0, 4)), Number(effectiveDate.slice(5, 7)));
+        const TeamName = effectiveTeam?.TeamName || req.user.team || '';
         if (!Area && session) Area = session.AreaName || session.AreaCode || null;
-        const [insert] = await db.query(
-            'INSERT INTO Patrol_Attendance (UserID, UserName, TeamName, WeekNumber, Notes, Area, PatrolType, PatrolDate, RecordedBy, ScheduledSessionID) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
-            [UserID, UserName, TeamName, currentWeek, Notes, Area, PatrolType, effectiveDate, UserID, session?.id || null]
-        );
+        let insert;
+        try {
+            [insert] = await db.query(
+                'INSERT INTO Patrol_Attendance (UserID, UserName, TeamName, WeekNumber, Notes, Area, PatrolType, PatrolDate, RecordedBy, ScheduledSessionID, IdempotencyKey) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+                [UserID, UserName, TeamName, currentWeek, Notes, Area, PatrolType, effectiveDate, UserID, session?.id || null, idempotencyKey]
+            );
+        } catch (err) {
+            if (checkinV2Enabled && idempotencyKey && err.code === 'ER_DUP_ENTRY') {
+                const [[replayed]] = await db.query(
+                    `SELECT id,UserName,TeamName,PatrolDate,PatrolType,Area,ScheduledSessionID
+                       FROM Patrol_Attendance WHERE UserID=? AND IdempotencyKey=? LIMIT 1`,
+                    [UserID, idempotencyKey]
+                );
+                if (replayed) {
+                    return res.json({
+                        success: true,
+                        message: 'Check-in was already saved.',
+                        data: {
+                            idempotentReplay: true,
+                            checkin: {
+                                id: Number(replayed.id), employeeId: UserID, employeeName: replayed.UserName,
+                                type: replayed.PatrolType, mode, actualDate: dateOnly(replayed.PatrolDate),
+                                scheduledSessionId: replayed.ScheduledSessionID || null, area: replayed.Area || null,
+                                teamName: replayed.TeamName || '',
+                            },
+                        },
+                    });
+                }
+            }
+            if (session?.id && err.code === 'ER_DUP_ENTRY') {
+                const [[completedSession]] = await db.query(
+                    'SELECT id FROM Patrol_Attendance WHERE UserID=? AND ScheduledSessionID=? LIMIT 1',
+                    [UserID, session.id]
+                );
+                if (completedSession) {
+                    return res.status(409).json({
+                        success: false,
+                        code: 'PATROL_SESSION_ALREADY_COMPLETED',
+                        message: 'Selected schedule is already completed.',
+                        data: { attendanceId:Number(completedSession.id), scheduledSessionId:String(session.id) },
+                    });
+                }
+            }
+            throw err;
+        }
         const attendanceId = insert.insertId;
         const attendance = { id: attendanceId, UserID, UserName, TeamName, PatrolDate: effectiveDate, PatrolType, Area, Notes, ScheduledSessionID: session?.id || null };
         const email = await queuePatrolCheckinEmail({ attendanceId, employee, attendance, session }).catch(err => ({ queued: false, sent: false, reason: err.message }));
@@ -939,7 +1071,8 @@ router.post('/checkin', async (req, res) => {
             [TeamName]
         );
         const [todayWalkers] = await db.query(
-            'SELECT UserName, PatrolDate FROM Patrol_Attendance WHERE DATE(PatrolDate) = CURDATE() ORDER BY PatrolDate DESC LIMIT 5'
+            'SELECT UserName, PatrolDate FROM Patrol_Attendance WHERE DATE(PatrolDate) = ? ORDER BY PatrolDate DESC LIMIT 5',
+            [effectiveDate]
         );
 
         res.json({
@@ -956,6 +1089,7 @@ router.post('/checkin', async (req, res) => {
                     position: employee?.Position || null,
                     department: employee?.Department || null,
                     type: PatrolType,
+                    mode,
                     actualDate: effectiveDate,
                     scheduledDate: session ? dateOnly(session.PatrolDate) : effectiveDate,
                     isMakeup: Boolean(session) && dateOnly(session.PatrolDate) !== effectiveDate,
@@ -970,7 +1104,7 @@ router.post('/checkin', async (req, res) => {
     } catch (err) {
         console.error(err);
         if (err?.statusCode) {
-            return res.status(err.statusCode).json({ success: false, message: err.message });
+            return res.status(err.statusCode).json({ success: false, ...(err.code ? { code: err.code } : {}), message: err.message, ...(err.data ? { data: err.data } : {}) });
         }
         res.status(500).json({ success: false, message: 'ไม่สามารถเช็คอินได้' });
     }
@@ -1731,6 +1865,21 @@ router.post('/teams/:id/members', isAdmin, async (req, res) => {
         return res.status(400).json({ success: false, message: 'PatrolType ไม่ถูกต้อง' });
     }
     try {
+        const [[existingMembership]] = await db.query(
+            `SELECT tm.TeamID,t.Name AS TeamName
+               FROM Patrol_Team_Members tm
+               LEFT JOIN Patrol_Teams t ON t.id=tm.TeamID
+              WHERE tm.EmployeeID=? LIMIT 1`,
+            [EmployeeID]
+        );
+        if (existingMembership) {
+            return res.status(409).json({
+                success: false,
+                code: 'PATROL_TEAM_CONFLICT',
+                message: 'Employee already belongs to a base Patrol team. Use Member Rotation for a monthly reassignment.',
+                data: { teamId: Number(existingMembership.TeamID), teamName: existingMembership.TeamName || '' },
+            });
+        }
         const [r] = await db.query(
             'INSERT INTO Patrol_Team_Members (TeamID, EmployeeID, PatrolType) VALUES (?,?,?)',
             [req.params.id, EmployeeID, PatrolType]
@@ -2549,10 +2698,7 @@ function patrolSelfCheckinType(value) {
 }
 
 async function topManagementSessionsForEmployee(employeeId, year) {
-    const [[base]] = await db.query(
-        'SELECT TeamID,PatrolType FROM Patrol_Team_Members WHERE EmployeeID=? LIMIT 1',
-        [employeeId]
-    );
+    const base = await patrolBaseMembership(employeeId);
     if (!base) return [];
     const [rotations] = await db.query(
         'SELECT Month,TeamID FROM Patrol_Member_Rotation WHERE EmployeeID=? AND Year=?',
@@ -2582,21 +2728,69 @@ async function topManagementSessionsForEmployee(employeeId, year) {
     }).map(s => ({ ...s, PatrolDate: dateOnly(s.PatrolDate) }));
 }
 
+async function patrolBaseMembership(employeeId) {
+    const [rows] = await db.query(
+        `SELECT tm.TeamID,tm.PatrolType,t.Name AS TeamName,t.PatrolGroup,t.Color
+           FROM Patrol_Team_Members tm
+           JOIN Patrol_Teams t ON t.id=tm.TeamID
+          WHERE tm.EmployeeID=?
+          ORDER BY tm.id`,
+        [employeeId]
+    );
+    if (rows.length > 1) {
+        const err = new Error('Employee belongs to more than one base Patrol team. Resolve the conflict in System Control.');
+        err.statusCode = 409;
+        err.code = 'PATROL_TEAM_CONFLICT';
+        err.data = { teamIds: rows.map(row => Number(row.TeamID)) };
+        throw err;
+    }
+    return rows[0] || null;
+}
+
+async function patrolEffectiveTeam(employeeId, year, month) {
+    const base = await patrolBaseMembership(employeeId);
+    if (!base) return null;
+    const [[rotation]] = await db.query(
+        `SELECT mr.TeamID,t.Name AS TeamName,t.PatrolGroup,t.Color
+           FROM Patrol_Member_Rotation mr
+           JOIN Patrol_Teams t ON t.id=mr.TeamID
+          WHERE mr.EmployeeID=? AND mr.Year=? AND mr.Month=?
+          LIMIT 1`,
+        [employeeId, year, month]
+    );
+    return rotation || base;
+}
+
 async function buildPersonalMonthlySchedule(employeeId, year, month) {
-    const sessions = (await topManagementSessionsForEmployee(employeeId, year))
+    const yearSessions = await topManagementSessionsForEmployee(employeeId, year);
+    const sessions = yearSessions
         .filter(s => Number(dateOnly(s.PatrolDate).slice(5, 7)) === Number(month));
     const leaveRows = (await patrolLeaveRows(employeeId, 'top_management', year))
         .filter(row => Number(dateOnly(row.ScheduledDate).slice(5, 7)) === Number(month));
     const [attendance] = await db.query(
-        `SELECT id,PatrolDate,PatrolType,Area,Notes,RecordedBy,ScheduledSessionID
-         FROM Patrol_Attendance
+        `SELECT id,PatrolDate,PatrolType,Area,Notes,RecordedBy,ScheduledSessionID,(IdempotencyKey IS NOT NULL) AS IsV2Request
+           FROM Patrol_Attendance
          WHERE UserID=? AND YEAR(PatrolDate)=? AND MONTH(PatrolDate)=?
          ORDER BY PatrolDate,id`,
         [employeeId, year, month]
     );
+    let linkedAttendance = [];
+    const sessionIds = sessions.map(session => String(session.id));
+    if (sessionIds.length) {
+        [linkedAttendance] = await db.query(
+            `SELECT id,PatrolDate,PatrolType,Area,Notes,RecordedBy,ScheduledSessionID,(IdempotencyKey IS NOT NULL) AS IsV2Request
+               FROM Patrol_Attendance
+              WHERE UserID=? AND ScheduledSessionID IN (${sessionIds.map(() => '?').join(',')})
+              ORDER BY PatrolDate,id`,
+            [employeeId, ...sessionIds]
+        );
+    }
+    const scheduleAttendance = [...new Map(
+        [...attendance, ...linkedAttendance].map(record => [Number(record.id), record])
+    ).values()];
     const attByDate = {};
     const attBySession = {};
-    attendance.forEach(row => {
+    scheduleAttendance.forEach(row => {
         const actual = dateOnly(row.PatrolDate);
         const record = { ...row, PatrolDate: actual };
         if (!attByDate[actual]) attByDate[actual] = [];
@@ -2608,10 +2802,13 @@ async function buildPersonalMonthlySchedule(employeeId, year, month) {
         }
     });
     let completed = 0;
+    const legacyAttendanceByDate = Object.fromEntries(
+        Object.entries(attByDate).map(([date, dateRecords]) => [date, dateRecords.filter(r => !r.ScheduledSessionID && !r.IsV2Request)])
+    );
     const items = sessions.map(s => {
         const scheduledDate = dateOnly(s.PatrolDate);
         const sessionRecords = attBySession[String(s.id)] || [];
-        const dateRecords = (attByDate[scheduledDate] || []).filter(r => !r.ScheduledSessionID);
+        const dateRecords = sessionRecords.length ? [] : (legacyAttendanceByDate[scheduledDate] || []).splice(0, 1);
         const records = [...sessionRecords, ...dateRecords].map(r => ({
             ...r,
             scheduledDate,
@@ -2636,7 +2833,15 @@ async function buildPersonalMonthlySchedule(employeeId, year, month) {
         };
     });
     const itemsWithLeave = attachLeaveToScheduledItems(items, leaveRows);
-    return { items: itemsWithLeave, required: items.length, completed, attendance, leaveRequests: leaveRows };
+    const sessionMap = new Map(yearSessions.map(session => [String(session.id), session]));
+    return {
+        items: itemsWithLeave,
+        required: items.length,
+        completed,
+        attendance,
+        actualActivity: patrolActualActivity(attendance, sessionMap),
+        leaveRequests: leaveRows,
+    };
 }
 
 async function supervisorScheduleSlotsForYear(year) {
@@ -3208,12 +3413,19 @@ async function queuePatrolIssueEmail({ issueId, eventType, actor }) {
     };
 }
 
-async function resolveTopScheduledSession(employeeId, date, requestedSessionId) {
-    const year = Number(String(date).slice(0, 4));
+async function resolveTopScheduledSession(employeeId, date, requestedSessionId, options = {}) {
+    let year = Number(String(date).slice(0, 4));
+    const sid = String(requestedSessionId || '').trim();
+    if (sid) {
+        const [[candidate]] = await db.query(
+            'SELECT YEAR(PatrolDate) AS ScheduledYear FROM Patrol_Sessions WHERE SessionID=? LIMIT 1',
+            [sid]
+        );
+        if (candidate?.ScheduledYear) year = Number(candidate.ScheduledYear);
+    }
     const sessions = await topManagementSessionsForEmployee(employeeId, year);
     const map = new Map(sessions.map(s => [String(s.id), s]));
     let session = null;
-    const sid = String(requestedSessionId || '').trim();
     if (sid) {
         session = map.get(sid);
         if (!session) {
@@ -3221,28 +3433,49 @@ async function resolveTopScheduledSession(employeeId, date, requestedSessionId) 
             err.statusCode = 400;
             throw err;
         }
-        if (String(date).slice(0, 7) !== dateOnly(session.PatrolDate).slice(0, 7)) {
+        const scheduledDate = dateOnly(session.PatrolDate);
+        if (!options.checkinV2Enabled && String(date).slice(0, 7) !== scheduledDate.slice(0, 7)) {
             const err = new Error('Makeup patrol must be linked to a scheduled round in the same month.');
             err.statusCode = 400;
+            throw err;
+        }
+        if (options.checkinV2Enabled && options.mode === 'scheduled' && scheduledDate !== date) {
+            const err = new Error('Scheduled patrol must use a round assigned for today. Choose Makeup for an earlier round.');
+            err.statusCode = 400;
+            err.code = 'PATROL_SCHEDULE_DATE_MISMATCH';
+            throw err;
+        }
+        if (options.checkinV2Enabled && options.mode === 'makeup' && scheduledDate > date) {
+            const err = new Error('Makeup patrol cannot complete a future scheduled round.');
+            err.statusCode = 400;
+            err.code = 'PATROL_FUTURE_MAKEUP_NOT_ALLOWED';
             throw err;
         }
     } else {
         const matches = sessions.filter(s => dateOnly(s.PatrolDate) === date);
         if (matches.length === 1) session = matches[0];
+        else if (options.checkinV2Enabled && options.mode === 'scheduled' && matches.length > 1) {
+            const err = new Error('More than one Patrol round is scheduled today. Select the round to check in.');
+            err.statusCode = 409;
+            err.code = 'PATROL_SESSION_SELECTION_REQUIRED';
+            throw err;
+        }
     }
     if (session) {
         const [[existing]] = await db.query(
             'SELECT id FROM Patrol_Attendance WHERE UserID=? AND ScheduledSessionID=? LIMIT 1',
             [employeeId, session.id]
         );
-        const [[existingDate]] = await db.query(
-            `SELECT id FROM Patrol_Attendance
+        const [[legacyDate]] = await db.query(
+            `SELECT COUNT(*) AS count FROM Patrol_Attendance
              WHERE UserID=? AND DATE(PatrolDate)=?
-               AND (ScheduledSessionID IS NULL OR ScheduledSessionID='')
-             LIMIT 1`,
+               AND (ScheduledSessionID IS NULL OR ScheduledSessionID='') AND IdempotencyKey IS NULL`,
             [employeeId, dateOnly(session.PatrolDate)]
         );
-        if (existing || existingDate) {
+        const sameDateSessions = sessions.filter(item => dateOnly(item.PatrolDate) === dateOnly(session.PatrolDate));
+        const legacySlot = sameDateSessions.findIndex(item => String(item.id) === String(session.id));
+        const completedByLegacy = legacySlot >= 0 && legacySlot < Number(legacyDate?.count || 0);
+        if (existing || completedByLegacy) {
             const err = new Error('Selected schedule is already completed.');
             err.statusCode = 409;
             throw err;
@@ -3284,7 +3517,7 @@ async function buildTopManagementAttendanceDetail(employeeId, year) {
     const sessions = await topManagementSessionsForEmployee(employeeId, year);
     const leaveRows = await patrolLeaveRows(employeeId, 'top_management', year);
     const [attendance] = await db.query(
-        `SELECT pa.id,pa.PatrolDate,pa.PatrolType,pa.Area,pa.Notes,pa.RecordedBy,pa.ScheduledSessionID,e.EmployeeName AS RecordedByName
+        `SELECT pa.id,pa.PatrolDate,pa.PatrolType,pa.Area,pa.Notes,pa.RecordedBy,pa.ScheduledSessionID,(pa.IdempotencyKey IS NOT NULL) AS IsV2Request,e.EmployeeName AS RecordedByName
          FROM Patrol_Attendance pa
          LEFT JOIN Employees e ON e.EmployeeID=pa.RecordedBy
          WHERE pa.UserID=? AND YEAR(pa.PatrolDate)=?
@@ -3296,9 +3529,28 @@ async function buildTopManagementAttendanceDetail(employeeId, year) {
         PatrolDate: dateOnly(a.PatrolDate),
         mode: !a.RecordedBy || String(a.RecordedBy) === employeeId ? 'self' : 'admin_recorded',
     }));
+    let linkedAttendance = [];
+    const sessionIds = sessions.map(session => String(session.id));
+    if (sessionIds.length) {
+        [linkedAttendance] = await db.query(
+            `SELECT pa.id,pa.PatrolDate,pa.PatrolType,pa.Area,pa.Notes,pa.RecordedBy,pa.ScheduledSessionID,(pa.IdempotencyKey IS NOT NULL) AS IsV2Request,e.EmployeeName AS RecordedByName
+               FROM Patrol_Attendance pa
+               LEFT JOIN Employees e ON e.EmployeeID=pa.RecordedBy
+              WHERE pa.UserID=? AND pa.ScheduledSessionID IN (${sessionIds.map(() => '?').join(',')})
+              ORDER BY pa.PatrolDate,pa.id`,
+            [employeeId, ...sessionIds]
+        );
+    }
+    const scheduleRecords = [...new Map(
+        [...records, ...linkedAttendance.map(a => ({
+            ...a,
+            PatrolDate: dateOnly(a.PatrolDate),
+            mode: !a.RecordedBy || String(a.RecordedBy) === employeeId ? 'self' : 'admin_recorded',
+        }))].map(record => [Number(record.id), record])
+    ).values()];
     const attByDate = {};
     const attBySession = {};
-    records.forEach(a => {
+    scheduleRecords.forEach(a => {
         if (!attByDate[a.PatrolDate]) attByDate[a.PatrolDate] = [];
         attByDate[a.PatrolDate].push(a);
         if (a.ScheduledSessionID) {
@@ -3311,11 +3563,14 @@ async function buildTopManagementAttendanceDetail(employeeId, year) {
     const periods = Array.from({ length: 12 }, (_, i) => ({ month: i + 1, required: 0, completed: 0, missed: 0, upcoming: 0, items: [] }));
     let requiredToDate = 0;
     let completedScheduled = 0;
+    const legacyAttendanceByDate = Object.fromEntries(
+        Object.entries(attByDate).map(([date, dateRecords]) => [date, dateRecords.filter(r => !r.ScheduledSessionID && !r.IsV2Request)])
+    );
     const schedule = sessions.map(s => {
         const date = dateOnly(s.PatrolDate);
         const month = Number(date.slice(5, 7));
         const sessionRecords = attBySession[String(s.id)] || [];
-        const dateRecords = (attByDate[date] || []).filter(r => !r.ScheduledSessionID);
+        const dateRecords = sessionRecords.length ? [] : (legacyAttendanceByDate[date] || []).splice(0, 1);
         const itemRecords = [...sessionRecords, ...dateRecords].map(r => ({
             ...r,
             scheduledDate: date,
@@ -3348,7 +3603,8 @@ async function buildTopManagementAttendanceDetail(employeeId, year) {
     });
     const scheduleWithLeave = attachLeaveToScheduledItems(schedule, leaveRows);
     const scheduledDates = new Set(schedule.map(s => s.date));
-    const extraRecords = records.filter(r => !r.ScheduledSessionID && !scheduledDates.has(r.PatrolDate));
+    const extraRecords = records.filter(r => !r.ScheduledSessionID && (r.IsV2Request || !scheduledDates.has(r.PatrolDate)));
+    const actualActivity = patrolActualActivity(records, new Map(sessions.map(session => [String(session.id), session])));
     const yearlyTarget = Number(roster.TargetPerYear || 0);
     const leaveStats = patrolLeaveStats({
         requiredToDate,
@@ -3386,6 +3642,10 @@ async function buildTopManagementAttendanceDetail(employeeId, year) {
             fullYearPct: patrolPct(records.length, yearlyTarget),
             acceptedCoverageToDatePct: leaveStats.acceptedCoverageToDatePct,
             acceptedCoverageYearPct: leaveStats.acceptedCoverageYearPct,
+            actualWalks: actualActivity.total,
+            scheduledNormalWalks: actualActivity.scheduledNormal,
+            makeupWalks: actualActivity.makeup,
+            extraWalks: actualActivity.extra,
             ...phase3,
         },
         periods,
@@ -3393,6 +3653,7 @@ async function buildTopManagementAttendanceDetail(employeeId, year) {
         leaveRequests: leaveRows,
         records,
         extraRecords,
+        actualActivity,
     };
 }
 
@@ -4436,28 +4697,45 @@ router.get('/my-missed-sessions', async (req, res) => {
     const employeeId = req.user.id;
     const year = parseInt(req.query.year) || new Date().getFullYear();
     try {
-        const sessions = await topManagementSessionsForEmployee(employeeId, year);
+        const checkinV2Enabled = await patrolCheckinV2Enabled();
+        let years = [year];
+        if (checkinV2Enabled && String(req.query.scope || '').toLowerCase() === 'all') {
+            const [yearRows] = await db.query(
+                'SELECT DISTINCT YEAR(PatrolDate) AS Year FROM Patrol_Sessions WHERE DATE(PatrolDate) <= ? ORDER BY Year DESC',
+                [patrolTodayBangkok()]
+            );
+            years = yearRows.map(row => Number(row.Year)).filter(value => value >= 2000 && value <= 2100);
+        }
+        const sessions = [];
+        for (const scheduledYear of years) {
+            sessions.push(...await topManagementSessionsForEmployee(employeeId, scheduledYear));
+        }
         const [linkedRows] = await db.query(
             `SELECT DISTINCT ScheduledSessionID
              FROM Patrol_Attendance
-             WHERE UserID=? AND YEAR(PatrolDate)=?
+             WHERE UserID=?
                AND ScheduledSessionID IS NOT NULL AND ScheduledSessionID<>''`,
-            [employeeId, year]
+            [employeeId]
         );
         const completed = new Set(linkedRows.map(r => String(r.ScheduledSessionID)));
-        const today = new Date().toISOString().split('T')[0];
+        const [legacyRows] = await db.query(
+            `SELECT DATE(PatrolDate) AS PatrolDate,COUNT(*) AS count
+               FROM Patrol_Attendance
+              WHERE UserID=? AND (ScheduledSessionID IS NULL OR ScheduledSessionID='') AND IdempotencyKey IS NULL
+              GROUP BY DATE(PatrolDate)`,
+            [employeeId]
+        );
+        const legacyRemaining = new Map(legacyRows.map(row => [dateOnly(row.PatrolDate), Number(row.count || 0)]));
+        const today = patrolTodayBangkok();
         const rows = [];
         for (const s of sessions) {
             const date = dateOnly(s.PatrolDate);
             if (date >= today) continue;
             if (completed.has(String(s.id))) continue;
-            const [[sameDate]] = await db.query(
-                `SELECT id FROM Patrol_Attendance
-                 WHERE UserID=? AND DATE(PatrolDate)=? AND (ScheduledSessionID IS NULL OR ScheduledSessionID='')
-                 LIMIT 1`,
-                [employeeId, date]
-            );
-            if (sameDate) continue;
+            if ((legacyRemaining.get(date) || 0) > 0) {
+                legacyRemaining.set(date, legacyRemaining.get(date) - 1);
+                continue;
+            }
             rows.push({
                 id: s.id,
                 ScheduledSessionID: s.id,
@@ -4468,7 +4746,8 @@ router.get('/my-missed-sessions', async (req, res) => {
                 TeamName: s.TeamName || '',
             });
         }
-        res.json({ success: true, data: rows });
+        rows.sort((a, b) => String(b.PatrolDate).localeCompare(String(a.PatrolDate)) || Number(a.PatrolRound) - Number(b.PatrolRound));
+        res.json({ success: true, data: rows.slice(0, 500), meta: { scope: years.length > 1 ? 'all' : 'year', checkinV2Enabled } });
     } catch (err) {
         sendPatrolError(res, err);
     }

@@ -1,5 +1,15 @@
 # TSH Safety Core Activity - Architecture
 
+## Safety Patrol Check-in v2 (Local, 2026-09-02)
+
+- System Control tables (`Patrol_Team_Members`, monthly `Patrol_Member_Rotation`, `Patrol_Team_Rotation`, and generated `Patrol_Sessions`) are the only calendar authority.
+- Scheduled Compliance is session-linked and remains separate from Actual Walk Activity. Scheduled and Makeup complete exactly one authorized session; Extra is unlinked and never completes a session.
+- Cross-month/year Makeup is attributed to the scheduled period for compliance and to the actual check-in period for activity totals.
+- Multiple same-day sessions require an explicit `ScheduledSessionID`. Request-level idempotency uses the additive nullable `Patrol_Attendance.IdempotencyKey` unique per user.
+- Legacy unlinked attendance is preserved and consumed at most once as a same-date compatibility completion. V2 Extra is excluded from that fallback.
+- Node development and PHP shared-hosting routes implement the same contract behind `App_Settings.patrol_checkin_v2_enabled`.
+- Full design, migration, risks, verification, and Phase 9 runbook: `docs/safety-patrol-checkin-v2-local-handoff.md`.
+
 ## BBS Pilot Acceptance Gate (Phase 10E)
 
 Phase 10E adds no business table or application workflow route. A repeatable SELECT-only acceptance audit projects the existing Master/Pilot roster, inspector enrollment/team/schedule, server-resolved Checklist coverage, Personal/Department Card configuration, Community handler, workflow evidence, Action reconciliation, email operational state and rollout settings into one deployment decision.

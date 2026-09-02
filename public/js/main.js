@@ -4,13 +4,13 @@
 // ======================================================
 
 import * as UI from './ui.js?v=20260714-phase21-platform-shell';
-import { API, apiFetch } from './api.js?v=20260723-onboarding-release';
+import { API, apiFetch } from './api.js?v=20260902-patrol-checkin-v2-r1';
 import { guardSubmitHandler } from './utils/async-ui.js?v=20260715-phase32d-remaining-async-ux';
 
 // --- Page Loaders ---
 import { loadPolicyPage } from './pages/policy.js?v=20260715-phase32d-remaining-async-ux';
 import { loadCommitteePage } from './pages/committee.js?v=20260715-phase32d-remaining-async-ux';
-import { loadPatrolPage } from './pages/patrol.js?v=20260818-patrol-close-review-idempotent';
+import { loadPatrolPage } from './pages/patrol.js?v=20260902-patrol-checkin-v2-r1';
 import { loadCccfPage } from './pages/cccf.js?v=20260822-cccf-worker-pdf-r10';
 import { loadKpiPage } from './pages/kpi.js?v=20260715-phase32d-remaining-async-ux';
 import { loadYokotenPage } from './pages/yokoten.js?v=20260825-yokoten-department-relevance-r1';
@@ -345,7 +345,7 @@ async function refreshBbsNavigation() {
     if (!nav) return;
     nav.classList.add('hidden');
     try {
-        const response = await apiFetch('/bbs/me/context');
+        const response = await apiFetch('/bbs/me/context', { suppressErrorLog: true });
         if (AppState.isAdmin || response?.data?.pilot?.inPilot) nav.classList.remove('hidden');
     } catch (_) {}
 }
