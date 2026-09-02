@@ -34,8 +34,8 @@ for (const marker of [
 
 assert.ok(!ui.includes('function departmentOptions()'), 'Personal Card must not derive Department options from eligible card employees.');
 assert.ok(!ui.includes("${['Operator','Group Leader','Department Head','Section Head','Manager'].map"), 'Personal Card BBS Level options must come from Foundation.');
-assert.match(main, /bbs-smart-card\.js\?v=20260831-bbs-phase10c[123]/);
-assert.match(html, /main\.js\?v=20260831-bbs-phase10c[123]-forklift-renewal-ky-chunk-r1/);
+assert.match(main, /bbs-smart-card\.js\?v=(?:20260831-bbs-phase10c[123]|20260901-bbs-phase10(?:b4|d[1-5]))/);
+assert.match(html, /main\.js\?v=(?:20260831-bbs-phase10c[123]-forklift-renewal-ky-chunk-r1|20260901-bbs-phase10(?:b4|d[1-5])|20260902-bbs-foundation-readiness-r2)/);
 
 for (const marker of [
     "router.get('/admin/foundation', isAdmin",

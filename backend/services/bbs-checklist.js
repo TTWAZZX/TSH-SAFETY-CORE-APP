@@ -121,4 +121,33 @@ function resolveCandidates(candidates = [], context = {}) {
     return { ok: true, selected: top, reason: `specificity=${top.specificity}; priority=${Number(top.Priority)}; effectiveFrom=${top.EffectiveFrom}` };
 }
 
-module.exports = { VERSION_STATUSES, RESPONSE_TYPES, cleanText, nullablePositiveInt, validateDraftPayload, buildImportPreview, scopeSpecificity, scopeMatches, scopesCanOverlap, detectPublishConflicts, resolveCandidates };
+function checklistReadiness(candidates = [], context = {}, asOf = '') {
+    const date = String(asOf || '').slice(0, 10);
+    const activePublished = candidates.filter(row => Number(row.MappingIsActive ?? row.IsActive) === 1
+        && Number(row.TemplateIsActive ?? 1) === 1
+        && String(row.VersionStatus || row.Status || '') === 'Published'
+        && String(row.EffectiveFrom || '') <= date
+        && (!row.EffectiveTo || String(row.EffectiveTo).slice(0, 10) >= date));
+    const resolved = resolveCandidates(activePublished, context);
+    if (resolved.ok) return {
+        ready: true,
+        code: 'READY',
+        message: `Ready: ${resolved.selected.TemplateName || resolved.selected.TemplateCode || 'Published checklist'} v${Number(resolved.selected.VersionNo || 0)}.`,
+        checklistVersionId: Number(resolved.selected.VersionID),
+        templateName: resolved.selected.TemplateName || null,
+        versionNo: Number(resolved.selected.VersionNo || 0),
+    };
+    if (resolved.code === 'CHECKLIST_CONFLICT') return { ready: false, code: resolved.code, message: resolved.message, conflicts: resolved.conflicts || [] };
+
+    const matching = candidates.filter(row => Number(row.MappingIsActive ?? row.IsActive) === 1 && scopeMatches(row, context));
+    if (matching.some(row => String(row.VersionStatus || row.Status || '') === 'Draft')) {
+        return { ready: false, code: 'VERSION_NOT_PUBLISHED', message: 'A matching checklist exists, but its version is not Published.' };
+    }
+    if (matching.some(row => String(row.VersionStatus || row.Status || '') === 'Published')) {
+        return { ready: false, code: 'VERSION_NOT_EFFECTIVE', message: 'A matching Published checklist exists, but it is inactive or outside the effective date.' };
+    }
+    if (activePublished.length) return { ready: false, code: 'SCOPE_MISMATCH', message: 'Published checklists exist, but none matches this employee scope.' };
+    return { ready: false, code: 'NO_CHECKLIST', message: 'No checklist is configured for this employee and date.' };
+}
+
+module.exports = { VERSION_STATUSES, RESPONSE_TYPES, cleanText, nullablePositiveInt, validateDraftPayload, buildImportPreview, scopeSpecificity, scopeMatches, scopesCanOverlap, detectPublishConflicts, resolveCandidates, checklistReadiness };

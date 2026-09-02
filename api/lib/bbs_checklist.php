@@ -120,3 +120,34 @@ function bbs_checklist_resolve_candidates(array $candidates, array $context): ar
     if (count($versionIds) > 1) return ['ok' => false, 'code' => 'CHECKLIST_CONFLICT', 'message' => 'Multiple published checklist versions have equal resolution priority.', 'conflicts' => array_keys($versionIds)];
     return ['ok' => true, 'selected' => $top, 'reason' => 'specificity=' . $top['specificity'] . '; priority=' . (int) $top['Priority'] . '; effectiveFrom=' . $top['EffectiveFrom']];
 }
+
+function bbs_checklist_readiness(array $candidates, array $context, string $asOf): array
+{
+    $activePublished = array_values(array_filter($candidates, static function (array $row) use ($asOf): bool {
+        $mappingActive = (int) ($row['MappingIsActive'] ?? $row['IsActive'] ?? 0) === 1;
+        $templateActive = (int) ($row['TemplateIsActive'] ?? 1) === 1;
+        $published = (string) ($row['VersionStatus'] ?? $row['Status'] ?? '') === 'Published';
+        $from = substr((string) ($row['EffectiveFrom'] ?? ''), 0, 10);
+        $to = empty($row['EffectiveTo']) ? null : substr((string) $row['EffectiveTo'], 0, 10);
+        return $mappingActive && $templateActive && $published && $from <= $asOf && ($to === null || $to >= $asOf);
+    }));
+    $resolved = bbs_checklist_resolve_candidates($activePublished, $context);
+    if (!empty($resolved['ok'])) {
+        $selected = $resolved['selected'];
+        return [
+            'ready' => true,
+            'code' => 'READY',
+            'message' => 'Ready: ' . ($selected['TemplateName'] ?? $selected['TemplateCode'] ?? 'Published checklist') . ' v' . (int) ($selected['VersionNo'] ?? 0) . '.',
+            'checklistVersionId' => (int) $selected['VersionID'],
+            'templateName' => $selected['TemplateName'] ?? null,
+            'versionNo' => (int) ($selected['VersionNo'] ?? 0),
+        ];
+    }
+    if (($resolved['code'] ?? '') === 'CHECKLIST_CONFLICT') return ['ready' => false, 'code' => 'CHECKLIST_CONFLICT', 'message' => $resolved['message'], 'conflicts' => $resolved['conflicts'] ?? []];
+
+    $matching = array_values(array_filter($candidates, static fn(array $row): bool => (int) ($row['MappingIsActive'] ?? $row['IsActive'] ?? 0) === 1 && bbs_checklist_scope_matches($row, $context)));
+    foreach ($matching as $row) if ((string) ($row['VersionStatus'] ?? $row['Status'] ?? '') === 'Draft') return ['ready' => false, 'code' => 'VERSION_NOT_PUBLISHED', 'message' => 'A matching checklist exists, but its version is not Published.'];
+    foreach ($matching as $row) if ((string) ($row['VersionStatus'] ?? $row['Status'] ?? '') === 'Published') return ['ready' => false, 'code' => 'VERSION_NOT_EFFECTIVE', 'message' => 'A matching Published checklist exists, but it is inactive or outside the effective date.'];
+    if ($activePublished) return ['ready' => false, 'code' => 'SCOPE_MISMATCH', 'message' => 'Published checklists exist, but none matches this employee scope.'];
+    return ['ready' => false, 'code' => 'NO_CHECKLIST', 'message' => 'No checklist is configured for this employee and date.'];
+}

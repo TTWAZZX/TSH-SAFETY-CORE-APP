@@ -50,7 +50,7 @@ async function request(base, testCase) {
     };
 }
 
-function cases(adminToken, userToken) {
+function cases(adminToken, userToken, { bbsRestrictedToApprovedParticipants = false } = {}) {
     const userRead = [
         ['Policies page data', '/pagedata/policies'],
         ['Committees page data', '/pagedata/committees'],
@@ -135,7 +135,12 @@ function cases(adminToken, userToken) {
         ['BBS Phase 8 Community dashboard', `/bbs/community/dashboard?year=${new Date().getFullYear()}`],
         ['BBS Phase 9 inspector self workspace', '/bbs/inspectors/me'],
         ['BBS Phase 9B inspector self compliance', `/bbs/inspectors/compliance?year=${new Date().getFullYear()}&month=${new Date().getMonth()+1}`],
-    ].map(([name, path]) => ({ name, path, token: userToken, expect: 200 }));
+    ].map(([name, path]) => ({
+        name,
+        path,
+        token: userToken,
+        expect: bbsRestrictedToApprovedParticipants && path.startsWith('/bbs/') ? 403 : 200,
+    }));
 
     const adminRead = [
         ['Admin dashboard stats', '/admin/dashboard-stats'],
@@ -206,7 +211,12 @@ async function main() {
 
     try {
         const readyUsers = await loadReadyTestUsers(db);
-        const tests = cases(tokenFor(readyUsers.admin), tokenFor(readyUsers.user));
+        const [bbsGateRows] = await db.query(
+            "SELECT SettingKey,SettingValue FROM BBS_Settings WHERE SettingKey IN ('staged_admin_only','pilot_scope_only')"
+        ).catch(() => [[]]);
+        const bbsGate = Object.fromEntries(bbsGateRows.map(row => [row.SettingKey, String(row.SettingValue)]));
+        const bbsRestrictedToApprovedParticipants = bbsGate.staged_admin_only === '1' || bbsGate.pilot_scope_only === '1';
+        const tests = cases(tokenFor(readyUsers.admin), tokenFor(readyUsers.user), { bbsRestrictedToApprovedParticipants });
         const results = [];
         for (const testCase of tests) {
             results.push(await request(base, testCase));

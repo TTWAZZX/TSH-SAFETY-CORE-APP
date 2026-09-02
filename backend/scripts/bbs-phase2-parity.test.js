@@ -48,7 +48,7 @@ for (const marker of ['/admin/checklists', '/admin/checklist-versions/:versionId
 for (const marker of ['/bbs/admin/checklists', '/bbs/admin/checklist-versions/:versionId/publish', '/bbs/admin/checklist-versions/:versionId/clone', '/bbs/admin/checklist-versions/:versionId/archive', '/bbs/admin/checklist-versions/:versionId/import-preview', '/bbs/admin/checklist-versions/:versionId/import', '/bbs/checklists/resolve']) assert.ok(phpRoute.includes(marker), `PHP missing ${marker}`);
 assert.ok(nodeRoute.includes('/admin/checklists/:templateId/status'));
 assert.ok(phpRoute.includes('/bbs/admin/checklists/:templateId/status'));
-for (const marker of ['Phase 2B · Validated Excel Exchange', '_bbsExportChecklist', '_bbsPreviewImportFile', '/import-preview']) assert.ok(admin.includes(marker), `Admin missing ${marker}`);
+for (const marker of ['Checklist Management', '_bbsExportChecklist', '_bbsPreviewImportFile', '/import-preview']) assert.ok(admin.includes(marker), `Admin missing ${marker}`);
 assert.ok(admin.includes("API.get('/bbs/admin/checklists')"));
-assert.ok(!admin.includes("window.location.hash = '#bbs-smart-card'"));
+assert.ok(admin.includes("sessionStorage.setItem('bbs_admin_workspace', tab)"), 'Admin must guide configuration into the canonical BBS workspace.');
 console.log('BBS Phase 2B checklist parity/contracts: PASS');

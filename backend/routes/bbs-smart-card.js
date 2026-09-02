@@ -17,6 +17,7 @@ const {
     bangkokIsoDate,
     kpiDueForDate,
 } = require('../services/bbs-phase1');
+const { checklistReadiness } = require('../services/bbs-checklist');
 
 const router = express.Router();
 
@@ -35,6 +36,29 @@ function phase1Error(res, error, label) {
         return res.status(503).json({ success: false, code: 'BBS_SETUP_REQUIRED', message: 'BBS Phase 1 database migration is required.' });
     }
     return res.status(500).json({ success: false, message: 'Unable to load BBS configuration.' });
+}
+
+async function loadChecklistReadinessCandidates(queryable = db) {
+    const [rows] = await queryable.query(
+        `SELECT s.*,s.IsActive MappingIsActive,v.id VersionID,v.VersionNo,v.Status VersionStatus,
+                v.EffectiveFrom,v.EffectiveTo,t.id TemplateID,t.TemplateCode,t.TemplateName,t.IsActive TemplateIsActive
+           FROM BBS_Checklist_Scope_Mappings s
+           JOIN BBS_Checklist_Versions v ON v.id=s.VersionID
+           JOIN BBS_Checklist_Templates t ON t.id=v.TemplateID`
+    );
+    return rows;
+}
+
+function withChecklistReadiness(rows, candidates, asOf) {
+    return rows.map(row => ({
+        ...row,
+        ChecklistReadiness: checklistReadiness(candidates, {
+            departmentId: row.DepartmentID,
+            safetyUnitId: row.SafetyUnitID,
+            positionId: row.PositionID,
+            bbsLevel: row.BBSLevel,
+        }, asOf),
+    }));
 }
 
 async function loadEmployeeContext(employeeId, asOf = bangkokIsoDate(), queryable = db) {
@@ -183,10 +207,13 @@ router.get('/eligible-employees', async (req, res) => {
         let rows;
         if (role === 'admin') {
             [rows] = await db.query(
-                `SELECT e.EmployeeID,e.EmployeeName,e.Department,e.Unit,e.Position,m.BBSLevel
+                `SELECT e.EmployeeID,e.EmployeeName,e.Department,e.Unit,e.Position,m.BBSLevel,
+                        p.id PositionID,md.id DepartmentID,su.id SafetyUnitID
                    FROM Employees e
                    JOIN Master_Positions p ON LOWER(TRIM(p.Name))=LOWER(TRIM(e.Position))
                    JOIN BBS_Position_Level_Mappings m ON m.PositionID=p.id AND m.IsActive=1
+                   LEFT JOIN Master_Departments md ON LOWER(TRIM(md.Name))=LOWER(TRIM(e.Department))
+                   LEFT JOIN Master_SafetyUnits su ON su.department_id=md.id AND LOWER(TRIM(su.name))=LOWER(TRIM(e.Unit))
                    LEFT JOIN BBS_Employee_Eligibility elig ON elig.id=(
                         SELECT ee.id FROM BBS_Employee_Eligibility ee
                          WHERE ee.EmployeeID=e.EmployeeID AND ee.IsActive=1
@@ -199,11 +226,13 @@ router.get('/eligible-employees', async (req, res) => {
         } else {
             [rows] = await db.query(
                 `SELECT DISTINCT e.EmployeeID,e.EmployeeName,e.Department,e.Unit,e.Position,mapping.BBSLevel,
-                        a.DepartmentID,a.SafetyUnitID
+                        md.id DepartmentID,su.id SafetyUnitID,p.id PositionID
                    FROM BBS_Hierarchy_Assignments a
                    JOIN Employees e ON e.EmployeeID=a.MemberEmployeeID
                    JOIN Master_Positions p ON LOWER(TRIM(p.Name))=LOWER(TRIM(e.Position))
                    JOIN BBS_Position_Level_Mappings mapping ON mapping.PositionID=p.id AND mapping.IsActive=1
+                   LEFT JOIN Master_Departments md ON LOWER(TRIM(md.Name))=LOWER(TRIM(e.Department))
+                   LEFT JOIN Master_SafetyUnits su ON su.department_id=md.id AND LOWER(TRIM(su.name))=LOWER(TRIM(e.Unit))
                    LEFT JOIN BBS_Employee_Eligibility elig ON elig.id=(
                         SELECT ee.id FROM BBS_Employee_Eligibility ee
                          WHERE ee.EmployeeID=e.EmployeeID AND ee.IsActive=1
@@ -216,6 +245,8 @@ router.get('/eligible-employees', async (req, res) => {
                 [context.data.asOf, context.data.asOf, employeeId, context.data.asOf, context.data.asOf]
             );
         }
+        const candidates = await loadChecklistReadinessCandidates();
+        rows = withChecklistReadiness(rows, candidates, context.data.asOf);
         return res.json({ success: true, data: { asOf: context.data.asOf, rows, denyReason: null } });
     } catch (error) {
         return phase1Error(res, error, 'eligible employees');

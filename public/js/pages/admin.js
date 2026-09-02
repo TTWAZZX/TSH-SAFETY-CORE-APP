@@ -125,6 +125,14 @@ let _registrationAdminState = { rows: [], summary: {}, status: 'Pending', depart
 let _registrationLoadGeneration = 0;
 let _bbsFoundation = null;
 let _bbsChecklists = [];
+let _bbsInspectorAdmin = null;
+let _bbsFoundationErrors = {};
+let _bbsFoundationFilterTimer = null;
+const _bbsFoundationFilters = {
+    checklistQuery: '', checklistStatus: 'all', checklistKind: 'all', checklistPage: 1, checklistPageSize: 9,
+    assignmentQuery: '', assignmentStatus: 'active', assignmentPage: 1, assignmentPageSize: 10,
+    eligibilityQuery: '', eligibilityStatus: 'all', eligibilityPage: 1, eligibilityPageSize: 10,
+};
 let _bbsChecklistDetail = null;
 let _bbsEditor = null;
 let _bbsImportPreview = null;
@@ -155,7 +163,6 @@ TABS.splice(4, 0, {
 TABS.splice(5, 0, {
     key: 'bbs-foundation',
     label: 'BBS Foundation',
-    badge: 'Phase 2B',
     icon: `<svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6V4m0 2a2 2 0 100 4m0-4a2 2 0 110 4m-6 8a2 2 0 100-4m0 4v2m0-6V4m12 14a2 2 0 100-4m0 4v2m0-6V4M6 10h12M6 14h12"/></svg>`,
 });
 
@@ -2065,7 +2072,7 @@ function _adminHealthModuleDrilldown(key) {
                 <p class="text-xs font-black ${item.severity === 'high' ? 'text-rose-700' : 'text-amber-700'}">${escHtml(item.label || item.type || 'Root cause')}</p>
                 <p class="text-[11px] text-slate-500 mt-0.5">${escHtml(item.detail || '')}</p>
             </div>`).join('')
-        : `<div class="rounded-lg border border-emerald-100 bg-emerald-50 px-3 py-2 text-xs font-bold text-emerald-700">ไม่พบสาเหตุผิดปกติจาก Phase 4 / No root cause detected.</div>`;
+        : `<div class="rounded-lg border border-emerald-100 bg-emerald-50 px-3 py-2 text-xs font-bold text-emerald-700">ไม่พบสาเหตุผิดปกติจากข้อมูลที่ตรวจสอบ / No root cause detected.</div>`;
     const failedRows = failedPaths.length
         ? failedPaths.map(item => `
             <div class="flex items-center justify-between gap-3 py-1.5 border-b border-slate-100 last:border-0">
@@ -2481,7 +2488,7 @@ function _adminHealthSnapshotPanelHtml(snapshotHealth = {}) {
     <div class="ds-section border-l-4 border-l-violet-400">
         <div class="flex flex-col xl:flex-row xl:items-start xl:justify-between gap-3 mb-4">
             <div>
-                <p class="text-[10px] font-black uppercase tracking-widest text-violet-600">Phase 10</p>
+                <p class="text-[10px] font-black uppercase tracking-widest text-violet-600">Operational History</p>
                 <h3 class="mt-1 text-sm font-black text-slate-800">ประวัติสุขภาพระบบ / Health Snapshot History</h3>
                 <p class="mt-1 text-xs text-slate-500">เก็บ snapshot เพื่อดู trend, compare ก่อน/หลัง deploy และใช้เป็น daily system check</p>
             </div>
@@ -6822,7 +6829,7 @@ async function renderSystemHealth(container) {
             </div>
             ${workflowHealth.phase4Complete === false ? `
             <div class="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3">
-                <p class="text-xs font-black text-amber-800">Phase 4 ยังครอบคลุม workflow ไม่ครบ / Coverage incomplete</p>
+                <p class="text-xs font-black text-amber-800">การตรวจสอบยังครอบคลุม workflow ไม่ครบ / Coverage incomplete</p>
                 <p class="mt-1 text-[11px] text-amber-700">${escHtml((workflowHealth.phase4Gaps || []).join(' · ') || 'Additional workflow rules still need coverage.')}</p>
             </div>` : ''}
             ${_adminHealthSnapshotPanelHtml(snapshotHealth)}
@@ -6830,7 +6837,7 @@ async function renderSystemHealth(container) {
                 class="w-full text-left rounded-xl border ${storageHealth.status === 'critical' ? 'border-rose-200 bg-rose-50' : storageHealth.status === 'warning' ? 'border-amber-200 bg-amber-50' : 'border-emerald-200 bg-emerald-50'} px-4 py-4 hover:shadow-sm transition-shadow">
                 <div class="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-3">
                     <div>
-                        <p class="text-[10px] font-black uppercase text-slate-400">Phase 6</p>
+                        <p class="text-[10px] font-black uppercase text-slate-400">Storage Check</p>
                         <h3 class="mt-1 text-sm font-black text-slate-800">พื้นที่จัดเก็บและไฟล์ / Storage Health</h3>
                         <p class="mt-1 text-[11px] text-slate-500">ตรวจ ${storageHealth.referencesTotal ?? 0} รายการอ้างอิงจาก CCCF, Hiyari, Contractor, Accident, Forklift และโมดูลที่เกี่ยวข้อง</p>
                     </div>
@@ -6845,7 +6852,7 @@ async function renderSystemHealth(container) {
                 class="w-full text-left rounded-xl border ${securityHealth.status === 'critical' ? 'border-rose-200 bg-rose-50' : securityHealth.status === 'warning' ? 'border-amber-200 bg-amber-50' : 'border-emerald-200 bg-emerald-50'} px-4 py-4 hover:shadow-sm transition-shadow">
                 <div class="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-3">
                     <div>
-                        <p class="text-[10px] font-black uppercase text-slate-400">Phase 7</p>
+                        <p class="text-[10px] font-black uppercase text-slate-400">Security Check</p>
                         <h3 class="mt-1 text-sm font-black text-slate-800">สิทธิ์และความปลอดภัย / Security Health</h3>
                         <p class="mt-1 text-[11px] text-slate-500">ตารางสิทธิ์, route guards, ความครบถ้วนโปรไฟล์, auth policy และเหตุการณ์ 24 ชั่วโมง</p>
                     </div>
@@ -6859,7 +6866,7 @@ async function renderSystemHealth(container) {
             <button type="button" onclick="window._adminVersionHealthDrilldown&&window._adminVersionHealthDrilldown()"
                 class="w-full text-left rounded-xl border ${versionHealth.status === 'critical' ? 'border-rose-200 bg-rose-50' : versionHealth.status === 'warning' ? 'border-amber-200 bg-amber-50' : 'border-emerald-200 bg-emerald-50'} px-4 py-4 hover:shadow-sm transition-shadow">
                 <div class="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-3">
-                    <div><p class="text-[10px] font-black uppercase text-slate-400">Phase 8</p><h3 class="mt-1 text-sm font-black text-slate-800">การติดตั้งและเวอร์ชัน / Deploy Health</h3><p class="mt-1 text-[11px] text-slate-500">Build ID, cache bust, smoke ล่าสุด, ไฟล์ runtime และความเท่ากัน PHP/Node</p></div>
+                    <div><p class="text-[10px] font-black uppercase text-slate-400">Deploy Check</p><h3 class="mt-1 text-sm font-black text-slate-800">การติดตั้งและเวอร์ชัน / Deploy Health</h3><p class="mt-1 text-[11px] text-slate-500">Build ID, cache bust, smoke ล่าสุด, ไฟล์ runtime และความเท่ากัน PHP/Node</p></div>
                     <div class="grid grid-cols-3 gap-2 text-center min-w-[280px]">
                         <div class="rounded-lg bg-white/70 px-3 py-2"><p class="text-xs font-black text-slate-800 truncate">${escHtml(versionHealth.manifest?.buildId || '-')}</p><p class="text-[10px] font-bold text-slate-400">Build</p></div>
                         <div class="rounded-lg bg-white/70 px-3 py-2"><p class="text-sm font-black ${versionHealth.lastSmoke?.status === 'passed' ? 'text-emerald-600' : 'text-amber-600'}">${escHtml(String(versionHealth.lastSmoke?.status || 'unknown').toUpperCase())}</p><p class="text-[10px] font-bold text-slate-400">Smoke</p></div>
@@ -8979,7 +8986,7 @@ async function _atToggleNA(empId, actKey, setNA, btn) {
 }
 
 // =============================================================================
-// BBS SMART CARD — PHASE 1 FOUNDATION (ADMIN-ONLY, MAIN MODULE STILL HIDDEN)
+// BBS SMART CARD — ADMIN FOUNDATION READINESS AND GUIDED SETUP
 // =============================================================================
 
 function _bbsBangkokToday() {
@@ -9023,24 +9030,43 @@ function _bbsLevelBadge(level) {
 }
 
 async function renderBbsFoundation(container) {
+    const requests = await Promise.allSettled([
+        API.get('/bbs/admin/foundation'),
+        API.get('/bbs/admin/checklists'),
+        API.get('/bbs/admin/inspectors'),
+    ]);
+    const [foundationResult, checklistResult, inspectorResult] = requests;
+    _bbsFoundationErrors = {};
+    if (foundationResult.status === 'fulfilled') _bbsFoundation = foundationResult.value.data || {};
+    else _bbsFoundationErrors.foundation = foundationResult.reason?.message || 'โหลด Master Data ไม่สำเร็จ';
+    if (checklistResult.status === 'fulfilled') _bbsChecklists = checklistResult.value.data || [];
+    else _bbsFoundationErrors.checklists = checklistResult.reason?.message || 'โหลด Checklist ไม่สำเร็จ';
+    if (inspectorResult.status === 'fulfilled') _bbsInspectorAdmin = inspectorResult.value.data || {};
+    else _bbsFoundationErrors.inspectors = inspectorResult.reason?.message || 'โหลดข้อมูลผู้ตรวจและทีมไม่สำเร็จ';
+
+    if (!_bbsFoundation && _bbsFoundationErrors.foundation) {
+        container.innerHTML = `
+            <section role="alert" class="rounded-xl border border-rose-200 bg-white p-6">
+                <p class="text-sm font-black text-rose-700">ไม่สามารถเปิด BBS Foundation ได้</p>
+                <p class="mt-2 text-xs text-slate-500">${escHtml(_bbsFoundationErrors.foundation)}</p>
+                <button type="button" onclick="window._bbsReload()" class="mt-4 min-h-[44px] rounded-lg bg-rose-600 px-4 py-2.5 text-sm font-black text-white">ลองโหลดใหม่</button>
+            </section>`;
+        window._bbsReload = _bbsReload;
+        return;
+    }
+
+    _renderBbsFoundationContent(container);
     try {
-        const [response, checklistResponse] = await Promise.all([
-            API.get('/bbs/admin/foundation'),
-            API.get('/bbs/admin/checklists'),
-        ]);
-        _bbsFoundation = response.data || {};
-        _bbsChecklists = checklistResponse.data || [];
-        _renderBbsFoundationContent(container);
         window._bbsSavePositionMapping = _bbsSavePositionMapping;
         window._bbsSaveKpi = _bbsSaveKpi;
         window._bbsPilotDeptChanged = _bbsPilotDeptChanged;
         window._bbsSavePilot = _bbsSavePilot;
-        window._bbsOpenAssignment = _bbsOpenAssignment;
-        window._bbsAssignmentDeptChanged = _bbsAssignmentDeptChanged;
-        window._bbsSaveAssignment = _bbsSaveAssignment;
-        window._bbsDeactivateAssignment = _bbsDeactivateAssignment;
         window._bbsOpenEligibility = _bbsOpenEligibility;
         window._bbsSaveEligibility = _bbsSaveEligibility;
+        window._bbsOpenModuleWorkspace = _bbsOpenModuleWorkspace;
+        window._bbsSetFoundationFilter = _bbsSetFoundationFilter;
+        window._bbsFoundationPage = _bbsFoundationPage;
+        window._bbsReload = _bbsReload;
         window._bbsOpenCreateChecklist = _bbsOpenCreateChecklist;
         window._bbsCreateChecklist = _bbsCreateChecklist;
         window._bbsOpenChecklist = _bbsOpenChecklist;
@@ -9064,160 +9090,128 @@ async function renderBbsFoundation(container) {
         window._bbsConfirmChecklistImport = _bbsConfirmChecklistImport;
         window._bbsOpenResolverPreview = _bbsOpenResolverPreview;
         window._bbsRunResolverPreview = _bbsRunResolverPreview;
-    } catch (error) {
-        container.innerHTML = `
-            <section class="rounded-xl border border-rose-200 bg-white p-6">
-                <p class="text-sm font-black text-rose-700">ไม่สามารถเปิด BBS Foundation ได้</p>
-                <p class="mt-2 text-xs text-slate-500">${escHtml(error.message || 'Unknown error')}</p>
-                <p class="mt-3 text-xs text-slate-500">ตรวจว่าได้รัน Phase 1 migration บนฐานข้อมูล localhost แล้ว</p>
-            </section>`;
-    }
+    } catch (error) { console.error('[BBS Foundation] handler registration failed:', error); }
+}
+
+function _bbsPagedRows(rows, page, pageSize) {
+    const total = rows.length;
+    const totalPages = Math.max(1, Math.ceil(total / pageSize));
+    const current = Math.min(Math.max(1, Number(page) || 1), totalPages);
+    return { rows: rows.slice((current - 1) * pageSize, current * pageSize), page: current, pageSize, total, totalPages };
+}
+
+function _bbsPager(key, meta) {
+    if (meta.totalPages <= 1) return `<p class="text-xs text-slate-400">ทั้งหมด ${meta.total} รายการ</p>`;
+    return `<div class="flex flex-wrap items-center justify-between gap-2 text-xs text-slate-500"><span>ทั้งหมด ${meta.total} รายการ · หน้า ${meta.page}/${meta.totalPages}</span><div class="flex gap-2"><button type="button" ${meta.page <= 1 ? 'disabled' : ''} onclick="window._bbsFoundationPage('${key}',${meta.page - 1})" class="min-h-[44px] rounded-lg border px-3 py-2 font-bold disabled:opacity-40">ก่อนหน้า</button><button type="button" ${meta.page >= meta.totalPages ? 'disabled' : ''} onclick="window._bbsFoundationPage('${key}',${meta.page + 1})" class="min-h-[44px] rounded-lg border px-3 py-2 font-bold disabled:opacity-40">ถัดไป</button></div></div>`;
+}
+
+function _bbsWeekdaysLabel(value) {
+    let days = value;
+    if (typeof days === 'string') { try { days = JSON.parse(days); } catch (_) { days = days.split(',').map(Number); } }
+    if (!Array.isArray(days) || !days.length) return 'ยังไม่กำหนดวัน';
+    const labels = { 1: 'จ.', 2: 'อ.', 3: 'พ.', 4: 'พฤ.', 5: 'ศ.', 6: 'ส.', 7: 'อา.' };
+    return days.map(day => labels[Number(day)] || String(day)).join(', ');
+}
+
+function _bbsReadinessCard(label, value, ready, detail, action = '') {
+    const tone = ready === true ? 'emerald' : ready === false ? 'amber' : 'slate';
+    const classes = {
+        emerald: ['border-emerald-200 bg-emerald-50/60', 'text-emerald-700'],
+        amber: ['border-amber-200 bg-amber-50/60', 'text-amber-700'],
+        slate: ['border-slate-200 bg-slate-50/60', 'text-slate-700'],
+    }[tone];
+    return `<div class="rounded-xl border ${classes[0]} p-4"><div class="flex items-start justify-between gap-2"><div><p class="text-[10px] font-black uppercase tracking-wide ${classes[1]}">${escHtml(label)}</p><p class="mt-1 text-xl font-black text-slate-800">${escHtml(String(value))}</p></div><span class="rounded-full bg-white px-2 py-1 text-[10px] font-black ${classes[1]}">${ready === true ? 'พร้อม' : ready === false ? 'ต้องตั้งค่า' : 'ตรวจสอบ'}</span></div><p class="mt-2 text-xs text-slate-500">${escHtml(detail)}</p>${action}</div>`;
 }
 
 function _renderBbsFoundationContent(container) {
-    const data = _bbsFoundation || {};
-    const summary = data.summary || {};
+    const data = _bbsFoundation || {}, summary = data.summary || {};
     const kpi = (data.kpiRules || []).find(rule => rule.BBSLevel === 'Group Leader' && rule.MetricKey === 'submitted_observation') || {};
     const pilot = (data.pilotScopes || []).find(scope => Number(scope.IsActive) === 1) || {};
-    const pilotDepartment = (data.departments || []).find(department => Number(department.id) === Number(pilot.DepartmentID)) || (data.departments || [])[0] || {};
-    const mappingRows = (data.positions || []).map(position => {
-        const mapping = position.mapping || {};
-        return `
-            <tr class="border-b border-slate-100 last:border-0">
-                <td class="px-4 py-3 text-sm font-semibold text-slate-700">${escHtml(position.Name || '')}</td>
-                <td class="px-4 py-3">
-                    <select id="bbs-map-level-${Number(position.id)}" onchange="const box=document.getElementById('bbs-map-active-${Number(position.id)}');box.disabled=!this.value;if(this.value&&!${mapping.BBSLevel ? 'true' : 'false'})box.checked=true" class="w-full rounded-lg border border-slate-200 px-3 py-2 text-xs">
-                        <option value="">— ยังไม่ Mapping —</option>
-                        ${(data.levels || []).map(level => `<option value="${escHtml(level)}" ${mapping.BBSLevel === level ? 'selected' : ''}>${escHtml(level)}</option>`).join('')}
-                    </select>
-                </td>
-                <td class="px-4 py-3 text-center">
-                    <input id="bbs-map-active-${Number(position.id)}" type="checkbox" class="h-4 w-4 accent-emerald-600" ${Number(mapping.IsActive) === 1 ? 'checked' : ''} ${mapping.BBSLevel ? '' : 'disabled'}>
-                </td>
-                <td class="px-4 py-3 text-right">
-                    <button type="button" onclick="window._bbsSavePositionMapping(${Number(position.id)})" class="rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs font-bold text-emerald-700 hover:bg-emerald-100">บันทึก</button>
-                </td>
-            </tr>`;
-    }).join('');
-    const assignmentRows = (data.assignments || []).map(row => `
-        <tr class="border-b border-slate-100 last:border-0 ${Number(row.IsActive) === 1 ? '' : 'opacity-50'}">
-            <td class="px-4 py-3"><p class="text-xs font-bold text-slate-700">${escHtml(row.SupervisorName || row.SupervisorEmployeeID)}</p><p class="text-[10px] text-slate-400">${escHtml(row.SupervisorEmployeeID || '')}</p></td>
-            <td class="px-4 py-3"><p class="text-xs font-bold text-slate-700">${escHtml(row.MemberName || row.MemberEmployeeID)}</p><p class="text-[10px] text-slate-400">${escHtml(row.MemberEmployeeID || '')}</p></td>
-            <td class="px-4 py-3 text-xs text-slate-600">${escHtml(row.DepartmentName || '')}<br><span class="text-[10px] text-slate-400">${escHtml(row.SafetyUnitName || 'ทั้งแผนก')}</span></td>
-            <td class="px-4 py-3 text-xs text-slate-600">${escHtml(row.EffectiveFrom || '')} → ${escHtml(row.EffectiveTo || 'ไม่มีกำหนด')}</td>
-            <td class="px-4 py-3 text-right whitespace-nowrap">
-                <button type="button" onclick="window._bbsOpenAssignment(${Number(row.id)})" class="rounded-lg border border-slate-200 px-2.5 py-1.5 text-[10px] font-bold text-slate-600">แก้ไข</button>
-                ${Number(row.IsActive) === 1 ? `<button type="button" onclick="window._bbsDeactivateAssignment(${Number(row.id)})" class="ml-1 rounded-lg border border-rose-200 bg-rose-50 px-2.5 py-1.5 text-[10px] font-bold text-rose-700">ปิดใช้งาน</button>` : ''}
-            </td>
-        </tr>`).join('');
-    const eligibilityRows = (data.eligibility || []).slice(0, 20).map(row => `
-        <tr class="border-b border-slate-100 last:border-0">
-            <td class="px-4 py-3 text-xs"><span class="font-bold text-slate-700">${escHtml(row.EmployeeName || '')}</span><br><span class="text-slate-400">${escHtml(row.EmployeeID || '')}</span></td>
-            <td class="px-4 py-3 text-xs font-bold ${row.Eligibility === 'active' ? 'text-emerald-700' : 'text-amber-700'}">${escHtml(row.Eligibility || '')}</td>
-            <td class="px-4 py-3 text-xs text-slate-500">${escHtml(row.EffectiveFrom || '')} → ${escHtml(row.EffectiveTo || 'ไม่มีกำหนด')}</td>
-            <td class="px-4 py-3 text-xs text-slate-500">${row.Reason ? escHtml(row.Reason) : '&mdash;'}</td>
-        </tr>`).join('');
-    const checklistRows = (_bbsChecklists || []).map(row => `
-        <button type="button" onclick="window._bbsOpenChecklist(${Number(row.id)})" class="w-full rounded-xl border border-slate-200 bg-white p-4 text-left transition hover:border-emerald-300 hover:shadow-sm">
-            <div class="flex items-start justify-between gap-3">
-                <div class="min-w-0"><p class="truncate text-sm font-black text-slate-800">${escHtml(row.TemplateName || '')}</p><p class="mt-0.5 text-[10px] font-bold text-slate-400">${escHtml(row.TemplateCode || '')}</p></div>
-                <span class="rounded-full px-2 py-1 text-[10px] font-black ${Number(row.PublishedCount) > 0 ? 'bg-emerald-50 text-emerald-700' : 'bg-amber-50 text-amber-700'}">${Number(row.PublishedCount) > 0 ? 'Published' : 'Draft only'}</span>
-            </div>
-            <div class="mt-3 flex gap-3 text-[10px] font-bold text-slate-500"><span>${Number(row.VersionCount || 0)} versions</span><span>${Number(row.DraftCount || 0)} draft</span><span>${Number(row.PublishedCount || 0)} published</span></div>
-        </button>`).join('');
+    const pilotDepartment = (data.departments || []).find(department => Number(department.id) === Number(pilot.DepartmentID))
+        || (data.departments || []).find(department => (data.units || []).some(unit => Number(unit.department_id) === Number(department.id)))
+        || (data.departments || [])[0]
+        || {};
+    const inspectors = _bbsInspectorAdmin?.enrollments || [];
+    const activeInspectors = inspectors.filter(row => Number(row.IsActive) === 1 && row.Status === 'Active');
+    const activeTeamMembers = activeInspectors.reduce((sum, row) => sum + Number(row.TeamCount || 0), 0);
+    const publishedChecklists = (_bbsChecklists || []).filter(row => Number(row.PublishedCount) > 0).length;
+    const activeMappedLevels = new Set((data.positions || []).filter(row => Number(row.mapping?.IsActive) === 1).map(row => row.mapping?.BBSLevel).filter(Boolean));
+    const kpiValue = kpi.id ? `${Number(kpi.TargetCount || 0)} ครั้ง / ${_bbsWeekdaysLabel(kpi.Weekdays)}` : 'ยังไม่ตั้งค่า';
 
-    container.innerHTML = `
-    <div class="animate-fade-in space-y-5">
-        <section class="rounded-xl border border-emerald-200 bg-gradient-to-r from-emerald-50 to-white p-5">
-            <div class="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
-                <div>
-                    <p class="text-[10px] font-black uppercase tracking-widest text-emerald-600">BBS Smart Card · Phase 1</p>
-                    <h2 class="mt-1 text-lg font-black text-slate-800">Foundation, Hierarchy & Permission Engine</h2>
-                    <p class="mt-1 text-xs text-slate-500">หน้า Admin-only สำหรับเตรียม Mapping และสายบังคับบัญชา เมนู BBS ของผู้ใช้ทั่วไปยังไม่เปิดจนถึง Phase 3</p>
-                </div>
-                <span class="inline-flex w-fit rounded-full border border-amber-200 bg-amber-50 px-3 py-1.5 text-xs font-black text-amber-700">Configuration only</span>
-            </div>
-            <div class="mt-4 grid grid-cols-2 lg:grid-cols-4 gap-3">
-                ${[
-                    ['Position Mapping', `${Number(summary.mappedPositions || 0)}/${Number(summary.positions || 0)}`],
-                    ['Active Assignment', Number(summary.activeAssignments || 0)],
-                    ['Pilot Scope', Number(summary.activePilotScopes || 0)],
-                    ['KPI', '1 ครั้ง / จ.–ศ.'],
-                ].map(([label, value]) => `<div class="rounded-xl border border-emerald-100 bg-white p-3"><p class="text-xl font-black text-slate-800">${escHtml(String(value))}</p><p class="text-[10px] font-bold text-slate-500">${escHtml(label)}</p></div>`).join('')}
-            </div>
-        </section>
+    const mappingRows = (data.positions || []).map(position => { const mapping = position.mapping || {}; return `<tr class="border-b border-slate-100 last:border-0"><td class="px-4 py-3 text-sm font-semibold text-slate-700">${escHtml(position.Name || '')}</td><td class="px-4 py-3"><select id="bbs-map-level-${Number(position.id)}" onchange="const box=document.getElementById('bbs-map-active-${Number(position.id)}');box.disabled=!this.value;if(this.value&&!${mapping.BBSLevel ? 'true' : 'false'})box.checked=true" class="min-h-[44px] w-full rounded-lg border border-slate-200 px-3 py-2 text-base sm:text-sm"><option value="">&mdash; ยังไม่ Mapping &mdash;</option>${(data.levels || []).map(level => `<option value="${escHtml(level)}" ${mapping.BBSLevel === level ? 'selected' : ''}>${escHtml(level)}</option>`).join('')}</select></td><td class="px-4 py-3 text-center"><input id="bbs-map-active-${Number(position.id)}" type="checkbox" class="h-5 w-5 accent-emerald-600" ${Number(mapping.IsActive) === 1 ? 'checked' : ''} ${mapping.BBSLevel ? '' : 'disabled'}></td><td class="px-4 py-3 text-right"><button type="button" onclick="window._bbsSavePositionMapping(${Number(position.id)})" class="min-h-[44px] rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs font-bold text-emerald-700">บันทึก</button></td></tr>`; }).join('');
 
-        <section class="rounded-xl border border-indigo-200 bg-gradient-to-br from-indigo-50 via-white to-emerald-50 p-5 shadow-sm">
-            <div class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-                <div><p class="text-[10px] font-black uppercase tracking-widest text-indigo-600">Phase 2B · Validated Excel Exchange</p><h3 class="mt-1 text-base font-black text-slate-800">Checklist Builder</h3><p class="mt-1 text-xs text-slate-500">สร้างและจัด Version พร้อม Export Excel หรือ Import แบบ Preview ก่อนแทนที่ Draft ทั้งก้อน</p></div>
-                <div class="flex flex-wrap gap-2"><button type="button" onclick="window._bbsOpenResolverPreview()" class="rounded-lg border border-indigo-200 bg-white px-4 py-2.5 text-xs font-black text-indigo-700">ทดสอบ Resolver</button><button type="button" onclick="window._bbsOpenCreateChecklist()" class="rounded-lg bg-indigo-600 px-4 py-2.5 text-xs font-black text-white hover:bg-indigo-700">+ สร้าง Checklist</button></div>
-            </div>
-            <div class="mt-4 grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-3">${checklistRows || `<div class="col-span-full rounded-xl border border-dashed border-slate-300 bg-white/70 p-8 text-center text-sm text-slate-400">ยังไม่มี Checklist — เริ่มจาก Draft แรกได้เลย</div>`}</div>
-            <p class="mt-3 text-[10px] text-slate-400">Import ใช้ transaction และรับเฉพาะ Draft · ไฟล์ที่ไม่ผ่าน validation จะไม่เปลี่ยนข้อมูลแม้แต่บางส่วน</p>
-        </section>
+    const assignmentQuery = _bbsFoundationFilters.assignmentQuery.trim().toLowerCase();
+    const assignmentFiltered = (data.assignments || []).filter(row => (_bbsFoundationFilters.assignmentStatus === 'all' || (_bbsFoundationFilters.assignmentStatus === 'active' ? Number(row.IsActive) === 1 : Number(row.IsActive) !== 1)) && (!assignmentQuery || [row.SupervisorName,row.SupervisorEmployeeID,row.MemberName,row.MemberEmployeeID,row.DepartmentName,row.SafetyUnitName].some(value => String(value || '').toLowerCase().includes(assignmentQuery))));
+    const assignmentPage = _bbsPagedRows(assignmentFiltered, _bbsFoundationFilters.assignmentPage, _bbsFoundationFilters.assignmentPageSize);
+    _bbsFoundationFilters.assignmentPage = assignmentPage.page;
+    const assignmentRows = assignmentPage.rows.map(row => `<tr class="border-b border-slate-100 last:border-0 ${Number(row.IsActive) === 1 ? '' : 'opacity-55'}"><td class="px-4 py-3"><p class="text-xs font-bold text-slate-700">${escHtml(row.SupervisorName || row.SupervisorEmployeeID)}</p><p class="text-[10px] text-slate-400">${escHtml(row.SupervisorEmployeeID || '')}</p></td><td class="px-4 py-3"><p class="text-xs font-bold text-slate-700">${escHtml(row.MemberName || row.MemberEmployeeID)}</p><p class="text-[10px] text-slate-400">${escHtml(row.MemberEmployeeID || '')}</p></td><td class="px-4 py-3 text-xs text-slate-600">${escHtml(row.DepartmentName || '')}<br><span class="text-[10px] text-slate-400">${escHtml(row.SafetyUnitName || 'ทั้งแผนก')}</span></td><td class="px-4 py-3 text-xs text-slate-600">${escHtml(String(row.EffectiveFrom || '').slice(0,10))} &rarr; ${escHtml(String(row.EffectiveTo || 'ไม่มีกำหนด').slice(0,10))}</td><td class="px-4 py-3 text-xs font-bold ${Number(row.IsActive) === 1 ? 'text-emerald-700' : 'text-slate-400'}">${Number(row.IsActive) === 1 ? 'Active' : 'Inactive'}</td></tr>`).join('');
 
-        <div class="grid grid-cols-1 xl:grid-cols-2 gap-5">
-            <section class="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
-                <p class="text-[10px] font-black uppercase tracking-widest text-emerald-600">Approved KPI</p>
-                <h3 class="mt-1 text-sm font-black text-slate-800">Group Leader Daily Observation</h3>
-                <div class="mt-4 grid grid-cols-1 sm:grid-cols-2 gap-3">
-                    <label class="text-xs font-bold text-slate-600">จำนวนต่อวัน
-                        <input id="bbs-kpi-target" type="number" min="1" max="100" value="${Number(kpi.TargetCount || 1)}" class="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2.5">
-                    </label>
-                    <label class="text-xs font-bold text-slate-600">เขตเวลา
-                        <input value="Asia/Bangkok" readonly class="mt-1 w-full rounded-lg border border-slate-200 bg-slate-50 px-3 py-2.5 text-slate-500">
-                    </label>
-                </div>
-                <p class="mt-3 text-xs text-slate-500">นับเฉพาะ Submitted · จันทร์–ศุกร์ · Draft ไม่นับ · ยังไม่หักวันหยุดบริษัท</p>
-                <button type="button" onclick="window._bbsSaveKpi()" class="mt-4 rounded-lg bg-emerald-600 px-4 py-2.5 text-xs font-black text-white hover:bg-emerald-700">บันทึก KPI</button>
-            </section>
+    const eligibilityQuery = _bbsFoundationFilters.eligibilityQuery.trim().toLowerCase();
+    const eligibilityFiltered = (data.eligibility || []).filter(row => (_bbsFoundationFilters.eligibilityStatus === 'all' || row.Eligibility === _bbsFoundationFilters.eligibilityStatus) && (!eligibilityQuery || [row.EmployeeName,row.EmployeeID,row.Eligibility,row.Reason].some(value => String(value || '').toLowerCase().includes(eligibilityQuery))));
+    const eligibilityPage = _bbsPagedRows(eligibilityFiltered, _bbsFoundationFilters.eligibilityPage, _bbsFoundationFilters.eligibilityPageSize);
+    _bbsFoundationFilters.eligibilityPage = eligibilityPage.page;
+    const eligibilityRows = eligibilityPage.rows.map(row => `<tr class="border-b border-slate-100 last:border-0"><td class="px-4 py-3 text-xs"><span class="font-bold text-slate-700">${escHtml(row.EmployeeName || '')}</span><br><span class="text-slate-400">${escHtml(row.EmployeeID || '')}</span></td><td class="px-4 py-3 text-xs font-bold ${row.Eligibility === 'active' ? 'text-emerald-700' : 'text-amber-700'}">${escHtml(row.Eligibility || '')}</td><td class="px-4 py-3 text-xs text-slate-500">${escHtml(String(row.EffectiveFrom || '').slice(0,10))} &rarr; ${escHtml(String(row.EffectiveTo || 'ไม่มีกำหนด').slice(0,10))}</td><td class="px-4 py-3 text-xs text-slate-500">${row.Reason ? escHtml(row.Reason) : '&mdash;'}</td></tr>`).join('');
 
-            <section class="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
-                <p class="text-[10px] font-black uppercase tracking-widest text-emerald-600">Pilot Scope</p>
-                <h3 class="mt-1 text-sm font-black text-slate-800">Department / Safety Unit</h3>
-                <div class="mt-4 grid grid-cols-1 sm:grid-cols-2 gap-3">
-                    <label class="text-xs font-bold text-slate-600">แผนก
-                        <select id="bbs-pilot-dept" onchange="window._bbsPilotDeptChanged(this.value)" class="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2.5">${_bbsDepartmentOptions(pilot.DepartmentID || pilotDepartment.id)}</select>
-                    </label>
-                    <label class="text-xs font-bold text-slate-600">Safety Unit
-                        <select id="bbs-pilot-unit" class="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2.5">${_bbsUnitOptions(pilot.DepartmentID || pilotDepartment.id, pilot.SafetyUnitID, false)}</select>
-                    </label>
-                    <label class="text-xs font-bold text-slate-600">เริ่มใช้
-                        <input id="bbs-pilot-from" type="date" value="${escHtml(String(pilot.EffectiveFrom || _bbsBangkokToday()).slice(0, 10))}" class="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2.5">
-                    </label>
-                    <label class="text-xs font-bold text-slate-600">สิ้นสุด (ไม่บังคับ)
-                        <input id="bbs-pilot-to" type="date" value="${escHtml(String(pilot.EffectiveTo || '').slice(0, 10))}" class="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2.5">
-                    </label>
-                </div>
-                <button type="button" onclick="window._bbsSavePilot()" class="mt-4 rounded-lg bg-emerald-600 px-4 py-2.5 text-xs font-black text-white hover:bg-emerald-700">บันทึก Pilot</button>
-            </section>
-        </div>
+    const checklistQuery = _bbsFoundationFilters.checklistQuery.trim().toLowerCase();
+    const checklistFiltered = (_bbsChecklists || []).filter(row => { const isUat = /^UAT[-_]/i.test(String(row.TemplateCode || '')) || /^UAT[-_]/i.test(String(row.TemplateName || '')); const status = Number(row.PublishedCount) > 0 ? 'published' : 'draft'; return (_bbsFoundationFilters.checklistStatus === 'all' || _bbsFoundationFilters.checklistStatus === status) && (_bbsFoundationFilters.checklistKind === 'all' || (_bbsFoundationFilters.checklistKind === 'uat') === isUat) && (!checklistQuery || [row.TemplateName,row.TemplateCode].some(value => String(value || '').toLowerCase().includes(checklistQuery))); });
+    const checklistPage = _bbsPagedRows(checklistFiltered, _bbsFoundationFilters.checklistPage, _bbsFoundationFilters.checklistPageSize);
+    _bbsFoundationFilters.checklistPage = checklistPage.page;
+    const checklistRows = checklistPage.rows.map(row => { const isUat = /^UAT[-_]/i.test(String(row.TemplateCode || '')) || /^UAT[-_]/i.test(String(row.TemplateName || '')); return `<button type="button" onclick="window._bbsOpenChecklist(${Number(row.id)})" class="min-h-[108px] w-full rounded-xl border border-slate-200 bg-white p-4 text-left transition hover:border-emerald-300 focus:outline-none focus:ring-2 focus:ring-emerald-500"><div class="flex items-start justify-between gap-3"><div class="min-w-0"><p class="truncate text-sm font-black text-slate-800">${escHtml(row.TemplateName || '')}</p><p class="mt-0.5 text-[10px] font-bold text-slate-400">${escHtml(row.TemplateCode || '')}</p></div><div class="flex flex-wrap justify-end gap-1">${isUat ? '<span class="rounded-full bg-violet-50 px-2 py-1 text-[10px] font-black text-violet-700">UAT</span>' : ''}<span class="rounded-full px-2 py-1 text-[10px] font-black ${Number(row.PublishedCount) > 0 ? 'bg-emerald-50 text-emerald-700' : 'bg-amber-50 text-amber-700'}">${Number(row.PublishedCount) > 0 ? 'Published' : 'Draft only'}</span></div></div><div class="mt-3 flex flex-wrap gap-3 text-[10px] font-bold text-slate-500"><span>${Number(row.VersionCount || 0)} versions</span><span>${Number(row.DraftCount || 0)} draft</span><span>${Number(row.PublishedCount || 0)} published</span></div></button>`; }).join('');
 
-        <section class="rounded-xl border border-slate-200 bg-white shadow-sm overflow-hidden">
-            <div class="p-5 border-b border-slate-100">
-                <p class="text-[10px] font-black uppercase tracking-widest text-emerald-600">Admin-reviewed Mapping</p>
-                <h3 class="mt-1 text-sm font-black text-slate-800">ตำแหน่ง → BBS Level</h3>
-                <p class="mt-1 text-xs text-slate-500">ไม่มีการเดาระดับจากชื่อตำแหน่ง ระบบจะให้สิทธิ์เฉพาะ Mapping ที่เปิดใช้งานแล้ว</p>
-            </div>
-            <div class="overflow-x-auto"><table class="w-full min-w-[760px]"><thead class="bg-slate-50 text-[10px] uppercase text-slate-500"><tr><th class="px-4 py-3 text-left">Position</th><th class="px-4 py-3 text-left">BBS Level</th><th class="px-4 py-3 text-center">Active</th><th class="px-4 py-3"></th></tr></thead><tbody>${mappingRows}</tbody></table></div>
-        </section>
+    const sectionError = (key, label) => _bbsFoundationErrors[key] ? `<div role="alert" class="mb-4 flex flex-col gap-2 rounded-xl border border-amber-200 bg-amber-50 p-4 sm:flex-row sm:items-center sm:justify-between"><p class="text-xs text-amber-800"><strong>${escHtml(label)}:</strong> ${escHtml(_bbsFoundationErrors[key])}</p><button type="button" onclick="window._bbsReload()" class="min-h-[44px] rounded-lg border border-amber-300 bg-white px-3 py-2 text-xs font-black text-amber-800">ลองโหลดใหม่</button></div>` : '';
 
-        <section class="rounded-xl border border-slate-200 bg-white shadow-sm overflow-hidden">
-            <div class="p-5 border-b border-slate-100 flex items-center justify-between gap-3">
-                <div><p class="text-[10px] font-black uppercase tracking-widest text-emerald-600">Effective-dated Hierarchy</p><h3 class="mt-1 text-sm font-black text-slate-800">สายบังคับบัญชา BBS</h3></div>
-                <button type="button" onclick="window._bbsOpenAssignment()" class="rounded-lg bg-emerald-600 px-4 py-2.5 text-xs font-black text-white">+ เพิ่ม Assignment</button>
-            </div>
-            <div class="overflow-x-auto"><table class="w-full min-w-[900px]"><thead class="bg-slate-50 text-[10px] uppercase text-slate-500"><tr><th class="px-4 py-3 text-left">Supervisor</th><th class="px-4 py-3 text-left">Member</th><th class="px-4 py-3 text-left">Scope</th><th class="px-4 py-3 text-left">Effective</th><th class="px-4 py-3"></th></tr></thead><tbody>${assignmentRows || `<tr><td colspan="5" class="p-8 text-center text-sm text-slate-400">ยังไม่มี Hierarchy Assignment</td></tr>`}</tbody></table></div>
-        </section>
+    container.innerHTML = `<div class="animate-fade-in space-y-5">${sectionError('foundation','Master/Foundation')}
+        <section class="rounded-xl border border-emerald-200 bg-gradient-to-r from-emerald-50 to-white p-5"><div class="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between"><div><p class="text-[10px] font-black uppercase tracking-widest text-emerald-600">BBS Smart Card Administration</p><h2 class="mt-1 text-lg font-black text-slate-800">ความพร้อมและการตั้งค่าระบบ BBS</h2><p class="mt-1 text-xs text-slate-500">ตรวจ Master Data, ผู้ตรวจและทีม, Checklist, KPI และขอบเขต Pilot จากจุดเดียว โดยข้อมูลการใช้งานจริงยังจัดการผ่านโมดูล BBS</p></div><button type="button" onclick="window._bbsOpenModuleWorkspace('workspace')" class="min-h-[44px] rounded-xl bg-emerald-700 px-4 py-2.5 text-sm font-black text-white">เปิดโมดูล BBS</button></div>
+        <div class="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">${_bbsReadinessCard('BBS Level Mapping', `${activeMappedLevels.size}/5 ระดับ`, activeMappedLevels.size === 5, `${Number(summary.mappedPositions || 0)} จาก ${Number(summary.positions || 0)} ตำแหน่งถูก Mapping`)}${_bbsReadinessCard('ผู้ตรวจที่ Active', activeInspectors.length, _bbsFoundationErrors.inspectors ? null : activeInspectors.length > 0, _bbsFoundationErrors.inspectors || `สมาชิกทีม Active ${activeTeamMembers} คน`, '<button type="button" onclick="window._bbsOpenModuleWorkspace(\'team-management\')" class="mt-3 min-h-[44px] w-full rounded-lg border border-emerald-200 bg-white px-3 py-2 text-xs font-black text-emerald-700">จัดผู้ตรวจและทีม</button>')}${_bbsReadinessCard('Checklist Published', publishedChecklists, _bbsFoundationErrors.checklists ? null : publishedChecklists > 0, _bbsFoundationErrors.checklists || 'ต้องมี Scope ที่ตรงกับพนักงานก่อนเริ่มตรวจ')}${_bbsReadinessCard('Pilot Scope', Number(summary.activePilotScopes || 0), Number(summary.activePilotScopes || 0) > 0, pilot.DepartmentName ? `${pilot.DepartmentName} / ${pilot.SafetyUnitName || 'ทั้งแผนก'}` : 'ยังไม่มีขอบเขต Pilot ที่ Active')}</div></section>
 
-        <section class="rounded-xl border border-slate-200 bg-white shadow-sm overflow-hidden">
-            <div class="p-5 border-b border-slate-100 flex items-center justify-between gap-3">
-                <div><p class="text-[10px] font-black uppercase tracking-widest text-emerald-600">Eligibility Override</p><h3 class="mt-1 text-sm font-black text-slate-800">Active / Inactive / Exempt / Unavailable</h3><p class="mt-1 text-xs text-slate-500">ห้ามอนุมานว่าลางานจากการไม่มี Observation ทุกสถานะต้องมีช่วงเวลาและเหตุผล</p></div>
-                <button type="button" onclick="window._bbsOpenEligibility()" class="rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-2.5 text-xs font-black text-emerald-700">ตั้งสถานะ</button>
-            </div>
-            <div class="overflow-x-auto"><table class="w-full min-w-[760px]"><thead class="bg-slate-50 text-[10px] uppercase text-slate-500"><tr><th class="px-4 py-3 text-left">Employee</th><th class="px-4 py-3 text-left">Status</th><th class="px-4 py-3 text-left">Effective</th><th class="px-4 py-3 text-left">Reason</th></tr></thead><tbody>${eligibilityRows || `<tr><td colspan="4" class="p-8 text-center text-sm text-slate-400">ไม่มี Eligibility Override — ค่าเริ่มต้นคือ active</td></tr>`}</tbody></table></div>
-        </section>
+        <section class="rounded-xl border border-sky-200 bg-sky-50/50 p-5"><h3 class="text-sm font-black text-slate-800">ลำดับการตั้งค่าที่แนะนำ</h3><div class="mt-3 grid grid-cols-1 gap-2 md:grid-cols-2 xl:grid-cols-5">${[['1','Mapping ตำแหน่ง','#bbs-foundation-mapping'],['2','กำหนด Pilot','#bbs-foundation-pilot'],['3','แต่งตั้งผู้ตรวจ/ทีม','team-management'],['4','Publish Checklist','#bbs-foundation-checklists'],['5','ตั้งค่าบัตร/QR','cards']].map(([step,label,target]) => target.startsWith('#') ? `<a href="${target}" class="min-h-[44px] rounded-xl border border-sky-200 bg-white p-3 text-xs font-bold text-slate-700"><span class="mr-2 text-sky-700">${step}</span>${label}</a>` : `<button type="button" onclick="window._bbsOpenModuleWorkspace('${target}')" class="min-h-[44px] rounded-xl border border-sky-200 bg-white p-3 text-left text-xs font-bold text-slate-700"><span class="mr-2 text-sky-700">${step}</span>${label}</button>`).join('')}</div></section>
+
+        <section id="bbs-foundation-checklists" class="scroll-mt-6 rounded-xl border border-indigo-200 bg-gradient-to-br from-indigo-50 via-white to-emerald-50 p-5 shadow-sm">${sectionError('checklists','Checklist')}<div class="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between"><div><p class="text-[10px] font-black uppercase tracking-widest text-indigo-600">Checklist Management</p><h3 class="mt-1 text-base font-black text-slate-800">Checklist Builder</h3><p class="mt-1 text-xs text-slate-500">สร้าง Version, Import/Export และตรวจ Resolver โดยรายการ UAT จะแสดงป้ายแยกจาก Checklist ใช้งานจริง</p></div><div class="flex flex-wrap gap-2"><button type="button" onclick="window._bbsOpenResolverPreview()" class="min-h-[44px] rounded-lg border border-indigo-200 bg-white px-4 py-2.5 text-xs font-black text-indigo-700">ทดสอบ Resolver</button><button type="button" onclick="window._bbsOpenCreateChecklist()" class="min-h-[44px] rounded-lg bg-indigo-600 px-4 py-2.5 text-xs font-black text-white">+ สร้าง Checklist</button></div></div>
+        <div class="mt-4 grid grid-cols-1 gap-2 md:grid-cols-3"><input type="search" value="${escHtml(_bbsFoundationFilters.checklistQuery)}" oninput="window._bbsSetFoundationFilter('checklistQuery',this.value)" placeholder="ค้นหาชื่อหรือรหัส Checklist" class="min-h-[44px] rounded-lg border px-3 text-base sm:text-sm"><select onchange="window._bbsSetFoundationFilter('checklistStatus',this.value)" class="min-h-[44px] rounded-lg border px-3 text-base sm:text-sm"><option value="all">ทุกสถานะ</option><option value="published" ${_bbsFoundationFilters.checklistStatus === 'published' ? 'selected' : ''}>Published</option><option value="draft" ${_bbsFoundationFilters.checklistStatus === 'draft' ? 'selected' : ''}>Draft only</option></select><select onchange="window._bbsSetFoundationFilter('checklistKind',this.value)" class="min-h-[44px] rounded-lg border px-3 text-base sm:text-sm"><option value="all">ทั้งหมด</option><option value="business" ${_bbsFoundationFilters.checklistKind === 'business' ? 'selected' : ''}>ใช้งานจริง</option><option value="uat" ${_bbsFoundationFilters.checklistKind === 'uat' ? 'selected' : ''}>UAT</option></select></div><div class="mt-4 grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-3">${checklistRows || `<div class="col-span-full rounded-xl border border-dashed border-slate-300 bg-white/70 p-8 text-center text-sm text-slate-400">ไม่พบ Checklist ตามตัวกรอง</div>`}</div><div class="mt-4">${_bbsPager('checklist', checklistPage)}</div></section>
+
+        <div class="grid grid-cols-1 gap-5 xl:grid-cols-2"><section class="rounded-xl border border-slate-200 bg-white p-5 shadow-sm"><p class="text-[10px] font-black uppercase tracking-widest text-emerald-600">KPI Rule</p><h3 class="mt-1 text-sm font-black text-slate-800">Group Leader Daily Observation</h3><p class="mt-1 text-xs font-bold text-emerald-700">ปัจจุบัน: ${escHtml(kpiValue)}</p><div class="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2"><label class="text-xs font-bold text-slate-600">จำนวนต่อวัน<input id="bbs-kpi-target" type="number" min="1" max="100" value="${Number(kpi.TargetCount || 1)}" class="mt-1 min-h-[44px] w-full rounded-lg border border-slate-200 px-3 text-base sm:text-sm"></label><label class="text-xs font-bold text-slate-600">เขตเวลา<input value="Asia/Bangkok" readonly class="mt-1 min-h-[44px] w-full rounded-lg border border-slate-200 bg-slate-50 px-3 text-base text-slate-500 sm:text-sm"></label></div><p class="mt-3 text-xs text-slate-500">การบันทึกจากหน้านี้ใช้วันจันทร์&ndash;ศุกร์ตามกติกาที่อนุมัติ</p><button type="button" onclick="window._bbsSaveKpi()" class="mt-4 min-h-[44px] rounded-lg bg-emerald-600 px-4 py-2.5 text-xs font-black text-white">บันทึก KPI</button></section>
+        <section id="bbs-foundation-pilot" class="scroll-mt-6 rounded-xl border border-slate-200 bg-white p-5 shadow-sm"><p class="text-[10px] font-black uppercase tracking-widest text-emerald-600">Pilot Scope</p><h3 class="mt-1 text-sm font-black text-slate-800">Department / Safety Unit</h3>${pilot.id ? `<p class="mt-2 rounded-lg bg-slate-50 p-3 text-xs text-slate-600">ปัจจุบัน: <strong>${escHtml(pilot.DepartmentName || '')} / ${escHtml(pilot.SafetyUnitName || 'ทั้งแผนก')}</strong><br>${escHtml(String(pilot.EffectiveFrom || '').slice(0,10))} &rarr; ${escHtml(String(pilot.EffectiveTo || 'ไม่มีกำหนด').slice(0,10))}</p>` : '<p class="mt-2 rounded-lg bg-amber-50 p-3 text-xs text-amber-700">ยังไม่มี Pilot Scope ที่ Active</p>'}<div class="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2"><label class="text-xs font-bold text-slate-600">แผนก<select id="bbs-pilot-dept" onchange="window._bbsPilotDeptChanged(this.value)" class="mt-1 min-h-[44px] w-full rounded-lg border px-3 text-base sm:text-sm">${_bbsDepartmentOptions(pilot.DepartmentID || pilotDepartment.id)}</select></label><label class="text-xs font-bold text-slate-600">Safety Unit<select id="bbs-pilot-unit" class="mt-1 min-h-[44px] w-full rounded-lg border px-3 text-base sm:text-sm">${_bbsUnitOptions(pilot.DepartmentID || pilotDepartment.id, pilot.SafetyUnitID, false)}</select></label><label class="text-xs font-bold text-slate-600">เริ่มใช้<input id="bbs-pilot-from" type="date" value="${escHtml(String(pilot.EffectiveFrom || _bbsBangkokToday()).slice(0,10))}" class="mt-1 min-h-[44px] w-full rounded-lg border px-3 text-base sm:text-sm"></label><label class="text-xs font-bold text-slate-600">สิ้นสุด (ไม่บังคับ)<input id="bbs-pilot-to" type="date" value="${escHtml(String(pilot.EffectiveTo || '').slice(0,10))}" class="mt-1 min-h-[44px] w-full rounded-lg border px-3 text-base sm:text-sm"></label></div><button type="button" onclick="window._bbsSavePilot()" class="mt-4 min-h-[44px] rounded-lg bg-emerald-600 px-4 py-2.5 text-xs font-black text-white">ตรวจสอบและบันทึก Pilot</button></section></div>
+
+        <section id="bbs-foundation-mapping" class="scroll-mt-6 overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm"><div class="border-b p-5"><p class="text-[10px] font-black uppercase tracking-widest text-emerald-600">Master Position Mapping</p><h3 class="mt-1 text-sm font-black text-slate-800">ตำแหน่ง &rarr; BBS Level</h3><p class="mt-1 text-xs text-slate-500">ระบบให้สิทธิ์ตาม Mapping ที่เปิดใช้งานเท่านั้น ไม่เดาระดับจากชื่อตำแหน่ง</p></div><div role="region" tabindex="0" aria-label="ตาราง Position Mapping" class="overflow-x-auto"><table class="w-full min-w-[760px]"><thead class="bg-slate-50 text-[10px] uppercase text-slate-500"><tr><th scope="col" class="px-4 py-3 text-left">Position</th><th scope="col" class="px-4 py-3 text-left">BBS Level</th><th scope="col" class="px-4 py-3 text-center">Active</th><th scope="col" class="px-4 py-3"><span class="sr-only">จัดการ</span></th></tr></thead><tbody>${mappingRows}</tbody></table></div></section>
+
+        <section class="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">${sectionError('inspectors','ผู้ตรวจและทีม')}<div class="flex flex-col gap-3 border-b p-5 sm:flex-row sm:items-center sm:justify-between"><div><p class="text-[10px] font-black uppercase tracking-widest text-emerald-600">Inspector & Team Workflow</p><h3 class="mt-1 text-sm font-black text-slate-800">สายบังคับบัญชา BBS (อ่านอย่างเดียว)</h3><p class="mt-1 text-xs text-slate-500">เพิ่ม ย้าย หรือปิดสมาชิกทีมผ่านหน้าผู้ตรวจ/ทีม เพื่อให้ Enrollment, KPI และ Team Event History เชื่อมกันครบ</p></div><button type="button" onclick="window._bbsOpenModuleWorkspace('team-management')" class="min-h-[44px] rounded-lg bg-emerald-600 px-4 py-2.5 text-xs font-black text-white">จัดผู้ตรวจและทีม</button></div><div class="grid grid-cols-1 gap-2 border-b bg-slate-50 p-4 sm:grid-cols-2"><input type="search" value="${escHtml(_bbsFoundationFilters.assignmentQuery)}" oninput="window._bbsSetFoundationFilter('assignmentQuery',this.value)" placeholder="ค้นหาผู้ตรวจ สมาชิก แผนก หรือ Unit" class="min-h-[44px] rounded-lg border px-3 text-base sm:text-sm"><select onchange="window._bbsSetFoundationFilter('assignmentStatus',this.value)" class="min-h-[44px] rounded-lg border px-3 text-base sm:text-sm"><option value="active">Active</option><option value="inactive" ${_bbsFoundationFilters.assignmentStatus === 'inactive' ? 'selected' : ''}>Inactive</option><option value="all" ${_bbsFoundationFilters.assignmentStatus === 'all' ? 'selected' : ''}>ทั้งหมด</option></select></div><div role="region" tabindex="0" aria-label="ตารางสายบังคับบัญชา BBS" class="overflow-x-auto"><table class="w-full min-w-[880px]"><thead class="bg-slate-50 text-[10px] uppercase text-slate-500"><tr><th scope="col" class="px-4 py-3 text-left">Inspector</th><th scope="col" class="px-4 py-3 text-left">Member</th><th scope="col" class="px-4 py-3 text-left">Scope</th><th scope="col" class="px-4 py-3 text-left">Effective</th><th scope="col" class="px-4 py-3 text-left">Status</th></tr></thead><tbody>${assignmentRows || `<tr><td colspan="5" class="p-8 text-center text-sm text-slate-400">ไม่พบ Assignment ตามตัวกรอง</td></tr>`}</tbody></table></div><div class="p-4">${_bbsPager('assignment', assignmentPage)}</div></section>
+
+        <section class="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm"><div class="flex flex-col gap-3 border-b p-5 sm:flex-row sm:items-center sm:justify-between"><div><p class="text-[10px] font-black uppercase tracking-widest text-emerald-600">Eligibility Override</p><h3 class="mt-1 text-sm font-black text-slate-800">สถานะพนักงานสำหรับ BBS</h3><p class="mt-1 text-xs text-slate-500">ใช้ Override เฉพาะกรณีที่มีหลักฐาน พร้อมช่วงเวลาและเหตุผล ค่าเริ่มต้นของพนักงานคือ Active</p></div><button type="button" onclick="window._bbsOpenEligibility()" class="min-h-[44px] rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-2.5 text-xs font-black text-emerald-700">ตั้งสถานะ</button></div><div class="grid grid-cols-1 gap-2 border-b bg-slate-50 p-4 sm:grid-cols-2"><input type="search" value="${escHtml(_bbsFoundationFilters.eligibilityQuery)}" oninput="window._bbsSetFoundationFilter('eligibilityQuery',this.value)" placeholder="ค้นหาชื่อ รหัส สถานะ หรือเหตุผล" class="min-h-[44px] rounded-lg border px-3 text-base sm:text-sm"><select onchange="window._bbsSetFoundationFilter('eligibilityStatus',this.value)" class="min-h-[44px] rounded-lg border px-3 text-base sm:text-sm"><option value="all">ทุกสถานะ</option>${(data.eligibilityValues || []).map(value => `<option value="${escHtml(value)}" ${_bbsFoundationFilters.eligibilityStatus === value ? 'selected' : ''}>${escHtml(value)}</option>`).join('')}</select></div><div role="region" tabindex="0" aria-label="ตาราง Eligibility Override" class="overflow-x-auto"><table class="w-full min-w-[760px]"><thead class="bg-slate-50 text-[10px] uppercase text-slate-500"><tr><th scope="col" class="px-4 py-3 text-left">Employee</th><th scope="col" class="px-4 py-3 text-left">Status</th><th scope="col" class="px-4 py-3 text-left">Effective</th><th scope="col" class="px-4 py-3 text-left">Reason</th></tr></thead><tbody>${eligibilityRows || `<tr><td colspan="4" class="p-8 text-center text-sm text-slate-400">ไม่มี Eligibility Override ตามตัวกรอง</td></tr>`}</tbody></table></div><div class="p-4">${_bbsPager('eligibility', eligibilityPage)}</div></section>
     </div>`;
+}
+
+function _bbsSetFoundationFilter(key, value) {
+    if (!(key in _bbsFoundationFilters)) return;
+    _bbsFoundationFilters[key] = value;
+    if (key.startsWith('checklist')) _bbsFoundationFilters.checklistPage = 1;
+    if (key.startsWith('assignment')) _bbsFoundationFilters.assignmentPage = 1;
+    if (key.startsWith('eligibility')) _bbsFoundationFilters.eligibilityPage = 1;
+    const rerender = () => {
+        const container = document.getElementById('admin-content-area');
+        if (container) _renderBbsFoundationContent(container);
+        if (key.endsWith('Query')) {
+            const input = document.querySelector(`[oninput*="${key}"]`);
+            input?.focus();
+            if (input?.setSelectionRange) input.setSelectionRange(input.value.length, input.value.length);
+        }
+    };
+    if (key.endsWith('Query')) {
+        window.clearTimeout(_bbsFoundationFilterTimer);
+        _bbsFoundationFilterTimer = window.setTimeout(rerender, 250);
+    } else rerender();
+}
+
+function _bbsFoundationPage(key, page) {
+    const field = `${key}Page`;
+    if (!(field in _bbsFoundationFilters)) return;
+    _bbsFoundationFilters[field] = Math.max(1, Number(page) || 1);
+    const container = document.getElementById('admin-content-area');
+    if (container) _renderBbsFoundationContent(container);
+}
+
+function _bbsOpenModuleWorkspace(tab = 'workspace') {
+    sessionStorage.setItem('bbs_admin_workspace', tab);
+    window.location.hash = '#bbs-smart-card';
 }
 
 async function _bbsReload() {
@@ -9334,7 +9328,7 @@ function _bbsExportChecklist() {
     ];
     const workbook = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(workbook, XLSX.utils.aoa_to_sheet([
-        ['BBS Checklist Excel Exchange - Phase 2B'],
+        ['BBS Checklist Excel Exchange'],
         ['Edit only Checklist, Items, and Scopes sheets. Do not rename column headers.'],
         ['Import is allowed only into a Draft version and replaces its categories, items, scopes, and effective dates atomically.'],
         ['Use IDs from Master Reference. Blank scope dimensions mean all values in that dimension.'],
@@ -9465,6 +9459,13 @@ async function _bbsSavePilot() {
         effectiveFrom: document.getElementById('bbs-pilot-from')?.value || '',
         effectiveTo: document.getElementById('bbs-pilot-to')?.value || null,
     };
+    if (!payload.departmentId || !payload.safetyUnitId || !payload.effectiveFrom) return showToast('กรุณาระบุแผนก, Safety Unit และวันที่เริ่มใช้ให้ครบ', 'warning');
+    const current = (_bbsFoundation?.pilotScopes || []).find(scope => Number(scope.IsActive) === 1) || null;
+    const department = (_bbsFoundation?.departments || []).find(row => Number(row.id) === payload.departmentId);
+    const unit = (_bbsFoundation?.units || []).find(row => Number(row.id) === payload.safetyUnitId);
+    const currentLabel = current ? `${current.DepartmentName || '-'} / ${current.SafetyUnitName || '-'}` : 'ยังไม่มี Pilot Scope';
+    const nextLabel = `${department?.Name || payload.departmentId} / ${unit?.name || payload.safetyUnitId}`;
+    if (!window.confirm(`ยืนยันเปลี่ยน Pilot Scope\n\nปัจจุบัน: ${currentLabel}\nใหม่: ${nextLabel}\nเริ่มใช้: ${payload.effectiveFrom}${payload.effectiveTo ? ` ถึง ${payload.effectiveTo}` : ' (ไม่มีกำหนด)'}\n\nการบันทึกจะปิดขอบเขต Active เดิมตามกติกาของระบบ แต่จะไม่เปลี่ยน Rollout gate`)) return;
     await API.put('/bbs/admin/pilot-scope', payload);
     showToast('บันทึก Pilot Scope แล้ว', 'success');
     await _bbsReload();
@@ -9542,7 +9543,9 @@ function _bbsOpenEligibility() {
         <form onsubmit="event.preventDefault();window._bbsSaveEligibility()" class="space-y-4">
             <div class="rounded-lg border border-sky-200 bg-sky-50 p-3 text-xs text-sky-800">ค่าเริ่มต้นของทุกคนคือ active ใช้ Override เฉพาะเมื่อมีข้อมูลที่ตรวจสอบได้ พร้อมเหตุผลและช่วงเวลา</div>
             <label class="block text-xs font-bold text-slate-600">พนักงาน
-                <select id="bbs-eligibility-employee" required class="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2.5">${_bbsEmployeeOptions()}</select>
+                <input id="bbs-eligibility-employee" list="bbs-eligibility-employees" required autocomplete="off" placeholder="พิมพ์รหัสหรือค้นหาชื่อพนักงาน" class="mt-1 min-h-[44px] w-full rounded-lg border border-slate-200 px-3 text-base sm:text-sm">
+                <datalist id="bbs-eligibility-employees">${(_bbsFoundation?.employees || []).map(employee => `<option value="${escHtml(employee.EmployeeID || '')}">${escHtml(employee.EmployeeName || '')} · ${escHtml(employee.Department || '')} / ${escHtml(employee.Unit || '')}</option>`).join('')}</datalist>
+                <p class="mt-1 text-[10px] font-normal text-slate-400">เลือกจาก Employee Master โดยใช้รหัสพนักงานเป็นค่าที่บันทึก</p>
             </label>
             <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <label class="text-xs font-bold text-slate-600">สถานะ
@@ -9563,7 +9566,9 @@ function _bbsOpenEligibility() {
 }
 
 async function _bbsSaveEligibility() {
-    const employeeId = document.getElementById('bbs-eligibility-employee')?.value || '';
+    const employeeId = document.getElementById('bbs-eligibility-employee')?.value?.trim() || '';
+    const employee = (_bbsFoundation?.employees || []).find(row => String(row.EmployeeID) === employeeId);
+    if (!employee) return showToast('กรุณาเลือกรหัสพนักงานที่มีอยู่ใน Employee Master', 'warning');
     const payload = {
         eligibility: document.getElementById('bbs-eligibility-status')?.value || '',
         effectiveFrom: document.getElementById('bbs-eligibility-from')?.value || '',

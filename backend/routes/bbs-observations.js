@@ -11,7 +11,8 @@ const { bangkokIsoDate, normalizeIsoDate, levelRank } = require('../services/bbs
 const { resolveCandidates } = require('../services/bbs-checklist');
 const { clean, normalizeAnswers, validateSubmission, businessWeekdays } = require('../services/bbs-observation');
 const { createActionsForObservation } = require('../services/bbs-action');
-const { computeCompliance } = require('../services/bbs-inspector-schedule');
+const { computeCompliance, kpiStatus } = require('../services/bbs-inspector-schedule');
+const { listQuery, pagination, searchText } = require('../services/bbs-list-query');
 
 const router = express.Router();
 const privateDir = path.join(__dirname, '..', 'private-uploads', 'bbs');
@@ -328,11 +329,11 @@ router.get('/workspace', async (req, res) => {
         const nowYear = Number(today.slice(0, 4)); const nowMonth = Number(today.slice(5, 7));
         const through = year < nowYear || (year === nowYear && month < nowMonth) ? null : (year === nowYear && month === nowMonth ? Number(today.slice(8, 10)) : 0);
         const ruleRows = observer.BBSLevel ? await db.query("SELECT TargetCount,Weekdays FROM BBS_KPI_Rules WHERE BBSLevel=? AND MetricKey='submitted_observation' AND IsActive=1 ORDER BY id LIMIT 1", [observer.BBSLevel]).then(([rows]) => rows) : [];
-        const [[enrollment]] = await db.query("SELECT id EnrollmentID,InspectorEmployeeID,DATE_FORMAT(EffectiveFrom,'%Y-%m-%d') EnrollmentFrom,DATE_FORMAT(EffectiveTo,'%Y-%m-%d') EnrollmentTo FROM BBS_Inspector_Enrollments WHERE InspectorEmployeeID=? AND Status='Active' AND KpiRequired=1 AND IsActive=1 AND EffectiveFrom<? AND COALESCE(EffectiveTo,'9999-12-31')>=? ORDER BY EffectiveFrom DESC,id DESC LIMIT 1", [actorId(req), to, from]);
+        const [[enrollment]] = await db.query("SELECT id EnrollmentID,InspectorEmployeeID,KpiRequired,DATE_FORMAT(EffectiveFrom,'%Y-%m-%d') EnrollmentFrom,DATE_FORMAT(EffectiveTo,'%Y-%m-%d') EnrollmentTo FROM BBS_Inspector_Enrollments WHERE InspectorEmployeeID=? AND Status='Active' AND IsActive=1 AND EffectiveFrom<? AND COALESCE(EffectiveTo,'9999-12-31')>=? ORDER BY EffectiveFrom DESC,id DESC LIMIT 1", [actorId(req), to, from]);
         const throughDate = through === null ? new Date(Date.UTC(year, month, 0)).toISOString().slice(0,10) : (through > 0 ? `${year}-${String(month).padStart(2,'0')}-${String(through).padStart(2,'0')}` : '0000-00-00');
         const [dailyActual] = await db.query("SELECT ObservationDate,COUNT(*) ActualCount FROM BBS_Observations WHERE ObserverEmployeeID=? AND Status='Submitted' AND ObservationDate>=? AND ObservationDate<? GROUP BY ObservationDate", [actorId(req), from, to]);
         let kpiCompliance={summary:{numerator:0,denominator:0,percentage:0}};
-        if(enrollment){
+        if(enrollment && Number(enrollment.KpiRequired) === 1){
             const [scheduleRules,scheduleOverrides]=await Promise.all([
                 db.query("SELECT * FROM BBS_Inspector_Schedule_Rules WHERE EnrollmentID=? AND Status='Active' AND EffectiveFrom<? AND COALESCE(EffectiveTo,'9999-12-31')>=?",[enrollment.EnrollmentID,to,from]).then(([rows])=>rows),
                 db.query("SELECT * FROM BBS_Inspector_Schedule_Overrides WHERE EnrollmentID=? AND ScheduleDate>=? AND ScheduleDate<? AND IsActive=1",[enrollment.EnrollmentID,from,to]).then(([rows])=>rows)
@@ -340,6 +341,9 @@ router.get('/workspace', async (req, res) => {
             kpiCompliance=computeCompliance({enrollments:[{...enrollment,TargetCount:Number(ruleRows[0]?.TargetCount||1),Weekdays:ruleRows[0]?.Weekdays||'1,2,3,4,5'}],rules:scheduleRules,overrides:scheduleOverrides,actualRows:dailyActual.map(row=>({...row,ObserverEmployeeID:actorId(req)})),range:{start:from,end:to},today:throughDate});
         }
         const cappedNumerator=kpiCompliance.summary.numerator,target=kpiCompliance.summary.denominator;
+        const semanticStatus=enrollment && Number(enrollment.KpiRequired) === 1
+            ? (kpiCompliance.summary.kpiStatus || kpiStatus({ configured:true, applicable:false }))
+            : kpiStatus({ configured:Boolean(enrollment), applicable:false });
         const [recent] = await db.query(`SELECT id,ObservationNo,ObservedEmployeeID,ObservedNameSnapshot,Status,ObservationDate,SubmittedAt FROM BBS_Observations WHERE ObserverEmployeeID=? ORDER BY CreatedAt DESC LIMIT 8`, [actorId(req)]);
         const [team] = await db.query(
             `SELECT e.EmployeeID,e.EmployeeName,e.Department,e.Unit,e.Position,m.BBSLevel,
@@ -350,7 +354,7 @@ router.get('/workspace', async (req, res) => {
                LEFT JOIN BBS_Observations o ON o.ObservedEmployeeID=e.EmployeeID AND o.ObserverEmployeeID=? AND o.Status='Submitted' AND o.ObservationDate>=? AND o.ObservationDate<?
               WHERE h.SupervisorEmployeeID=? AND h.IsActive=1 AND h.EffectiveFrom<=? AND COALESCE(h.EffectiveTo,'9999-12-31')>=?
               GROUP BY e.EmployeeID,e.EmployeeName,e.Department,e.Unit,e.Position,m.BBSLevel ORDER BY e.EmployeeName`, [actorId(req), from, to, actorId(req), today, today]);
-        res.json({ success: true, data: { observer, period: { year, month, from, to }, kpi: { numerator: cappedNumerator, denominator: target, percentage: target ? kpiCompliance.summary.percentage : null, formula: 'Capped submitted observations / effective inspector schedule target (Asia/Bangkok)', enrolled: Boolean(enrollment), uniqueObserved: Number(metric.UniqueObserved || 0), safe: Number(metric.SafeCount || 0), unsafe: Number(metric.UnsafeCount || 0) }, team, recent } });
+        res.json({ success: true, data: { observer, period: { year, month, from, to }, kpi: { numerator: cappedNumerator, denominator: target, percentage: semanticStatus.percentage, status:semanticStatus, formula: 'Capped submitted observations / effective inspector schedule target (Asia/Bangkok)', enrolled: Boolean(enrollment), kpiRequired:Boolean(Number(enrollment?.KpiRequired)), uniqueObserved: Number(metric.UniqueObserved || 0), safe: Number(metric.SafeCount || 0), unsafe: Number(metric.UnsafeCount || 0) }, team, recent } });
     } catch (error) { return phase3Error(res, error, 'workspace'); }
 });
 
@@ -442,6 +446,7 @@ router.get('/observations', async (req, res) => {
         const view = ['observer', 'observed', 'team'].includes(String(req.query.view)) ? String(req.query.view) : 'observer';
         const status = ['Draft', 'Submitted'].includes(String(req.query.status)) ? String(req.query.status) : null;
         const year = Number(req.query.year); const params = []; let where = '1=1';
+        const departmentId = positiveInt(req.query.departmentId); const safetyUnitId = positiveInt(req.query.safetyUnitId); const q = searchText(req.query.q); const paging = listQuery(req.query);
         if (!isAdmin(req)) {
             if (view === 'observer') { where += ' AND o.ObserverEmployeeID=?'; params.push(actorId(req)); }
             else if (view === 'observed') { where += ' AND o.ObservedEmployeeID=?'; params.push(actorId(req)); }
@@ -449,8 +454,15 @@ router.get('/observations', async (req, res) => {
         }
         if (status) { where += ' AND o.Status=?'; params.push(status); }
         if (Number.isInteger(year) && year >= 2000 && year <= 2100) { where += ' AND YEAR(o.ObservationDate)=?'; params.push(year); }
-        const [rows] = await db.query(`SELECT o.id,o.ObservationNo,o.ObserverEmployeeID,o.ObserverNameSnapshot,o.ObservedEmployeeID,o.ObservedNameSnapshot,o.ObservedDepartmentSnapshot,o.ObservedUnitSnapshot,o.Status,o.ObservationDate,o.SubmittedAt,SUM(a.Response='Safe') SafeCount,SUM(a.Response='Unsafe') UnsafeCount,SUM(a.Response='N/A') NACount FROM BBS_Observations o LEFT JOIN BBS_Observation_Answers a ON a.ObservationID=o.id WHERE ${where} GROUP BY o.id ORDER BY o.ObservationDate DESC,o.id DESC LIMIT 250`, params);
-        res.json({ success: true, data: rows });
+        if (departmentId) { where += ' AND o.ObservedDepartmentID=?'; params.push(departmentId); }
+        if (safetyUnitId) { where += ' AND o.ObservedSafetyUnitID=?'; params.push(safetyUnitId); }
+        if (q) { where += ' AND (o.ObservationNo LIKE ? OR o.ObserverEmployeeID LIKE ? OR o.ObserverNameSnapshot LIKE ? OR o.ObservedEmployeeID LIKE ? OR o.ObservedNameSnapshot LIKE ? OR o.ObservedDepartmentSnapshot LIKE ? OR o.ObservedUnitSnapshot LIKE ?)'; params.push(...Array(7).fill(`%${q}%`)); }
+        const select = `SELECT o.id,o.ObservationNo,o.ObserverEmployeeID,o.ObserverNameSnapshot,o.ObservedEmployeeID,o.ObservedNameSnapshot,o.ObservedDepartmentID,o.ObservedSafetyUnitID,o.ObservedDepartmentSnapshot,o.ObservedUnitSnapshot,o.Status,o.ObservationDate,o.SubmittedAt,(SELECT COUNT(*) FROM BBS_Observation_Answers a WHERE a.ObservationID=o.id AND a.Response='Safe') SafeCount,(SELECT COUNT(*) FROM BBS_Observation_Answers a WHERE a.ObservationID=o.id AND a.Response='Unsafe') UnsafeCount,(SELECT COUNT(*) FROM BBS_Observation_Answers a WHERE a.ObservationID=o.id AND a.Response='N/A') NACount FROM BBS_Observations o WHERE ${where}`;
+        if (!paging.paged) { const [rows] = await db.query(`${select} ORDER BY o.ObservationDate DESC,o.id DESC LIMIT 250`, params); return res.json({ success: true, data: rows }); }
+        const [[countRow]] = await db.query(`SELECT COUNT(*) total FROM BBS_Observations o WHERE ${where}`, params);
+        const meta = pagination(countRow?.total, paging.page, paging.pageSize); const offset = (meta.page - 1) * meta.pageSize;
+        const [rows] = await db.query(`${select} ORDER BY o.ObservationDate DESC,o.id DESC LIMIT ? OFFSET ?`, [...params, meta.pageSize, offset]);
+        res.json({ success: true, data: { rows, pagination: meta } });
     } catch (error) { return phase3Error(res, error, 'history'); }
 });
 

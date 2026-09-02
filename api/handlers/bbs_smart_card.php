@@ -2,6 +2,7 @@
 declare(strict_types=1);
 
 require_once __DIR__ . '/../lib/bbs_phase1.php';
+require_once __DIR__ . '/../lib/bbs_checklist.php';
 
 function bbs_phase1_audit(array $user, string $action, string $targetType, string $targetId, string $detail): void
 {
@@ -41,6 +42,29 @@ function bbs_phase1_employee_context(string $employeeId, string $asOf): ?array
           WHERE LOWER(TRIM(e.EmployeeID))=LOWER(TRIM(?)) LIMIT 1",
         [$asOf, $asOf, $employeeId]
     );
+}
+
+function bbs_phase1_checklist_readiness_candidates(): array
+{
+    return db_rows("SELECT s.*,s.IsActive MappingIsActive,v.id VersionID,v.VersionNo,v.Status VersionStatus,
+                           v.EffectiveFrom,v.EffectiveTo,t.id TemplateID,t.TemplateCode,t.TemplateName,t.IsActive TemplateIsActive
+                      FROM BBS_Checklist_Scope_Mappings s
+                      JOIN BBS_Checklist_Versions v ON v.id=s.VersionID
+                      JOIN BBS_Checklist_Templates t ON t.id=v.TemplateID");
+}
+
+function bbs_phase1_with_checklist_readiness(array $rows, array $candidates, string $asOf): array
+{
+    foreach ($rows as &$row) {
+        $row['ChecklistReadiness'] = bbs_checklist_readiness($candidates, [
+            'departmentId' => $row['DepartmentID'] ?? null,
+            'safetyUnitId' => $row['SafetyUnitID'] ?? null,
+            'positionId' => $row['PositionID'] ?? null,
+            'bbsLevel' => $row['BBSLevel'] ?? null,
+        ], $asOf);
+    }
+    unset($row);
+    return $rows;
 }
 
 function bbs_phase1_current_assignments(string $employeeId, string $asOf): array
@@ -250,9 +274,12 @@ function handle_bbs_smart_card_routes(string $method, string $path): bool
         }
         if ($isAdmin) {
             $rows = db_rows(
-                "SELECT e.EmployeeID,e.EmployeeName,e.Department,e.Unit,e.Position,m.BBSLevel
+                "SELECT e.EmployeeID,e.EmployeeName,e.Department,e.Unit,e.Position,m.BBSLevel,
+                        p.id PositionID,md.id DepartmentID,su.id SafetyUnitID
                    FROM employees e JOIN master_positions p ON LOWER(TRIM(p.Name))=LOWER(TRIM(e.Position))
                    JOIN BBS_Position_Level_Mappings m ON m.PositionID=p.id AND m.IsActive=1
+                   LEFT JOIN master_departments md ON LOWER(TRIM(md.Name))=LOWER(TRIM(e.Department))
+                   LEFT JOIN master_safetyunits su ON su.department_id=md.id AND LOWER(TRIM(su.name))=LOWER(TRIM(e.Unit))
                    LEFT JOIN BBS_Employee_Eligibility elig ON elig.id=(SELECT ee.id FROM BBS_Employee_Eligibility ee
                     WHERE ee.EmployeeID=e.EmployeeID AND ee.IsActive=1 AND ee.EffectiveFrom<=?
                       AND (ee.EffectiveTo IS NULL OR ee.EffectiveTo>=?) ORDER BY ee.EffectiveFrom DESC,ee.id DESC LIMIT 1)
@@ -261,10 +288,12 @@ function handle_bbs_smart_card_routes(string $method, string $path): bool
             );
         } else {
             $rows = db_rows(
-                "SELECT DISTINCT e.EmployeeID,e.EmployeeName,e.Department,e.Unit,e.Position,mapping.BBSLevel,a.DepartmentID,a.SafetyUnitID
+                "SELECT DISTINCT e.EmployeeID,e.EmployeeName,e.Department,e.Unit,e.Position,mapping.BBSLevel,md.id DepartmentID,su.id SafetyUnitID,p.id PositionID
                    FROM BBS_Hierarchy_Assignments a JOIN employees e ON e.EmployeeID=a.MemberEmployeeID
                    JOIN master_positions p ON LOWER(TRIM(p.Name))=LOWER(TRIM(e.Position))
                    JOIN BBS_Position_Level_Mappings mapping ON mapping.PositionID=p.id AND mapping.IsActive=1
+                   LEFT JOIN master_departments md ON LOWER(TRIM(md.Name))=LOWER(TRIM(e.Department))
+                   LEFT JOIN master_safetyunits su ON su.department_id=md.id AND LOWER(TRIM(su.name))=LOWER(TRIM(e.Unit))
                    LEFT JOIN BBS_Employee_Eligibility elig ON elig.id=(SELECT ee.id FROM BBS_Employee_Eligibility ee
                     WHERE ee.EmployeeID=e.EmployeeID AND ee.IsActive=1 AND ee.EffectiveFrom<=?
                       AND (ee.EffectiveTo IS NULL OR ee.EffectiveTo>=?) ORDER BY ee.EffectiveFrom DESC,ee.id DESC LIMIT 1)
@@ -274,6 +303,7 @@ function handle_bbs_smart_card_routes(string $method, string $path): bool
                 [$asOf, $asOf, (string) ($user['id'] ?? ''), $asOf, $asOf]
             );
         }
+        $rows = bbs_phase1_with_checklist_readiness($rows, bbs_phase1_checklist_readiness_candidates(), $asOf);
         json_response(['success' => true, 'data' => ['asOf' => $asOf, 'rows' => $rows, 'denyReason' => null]]);
     }
 

@@ -80,6 +80,7 @@ const bbsAnalyticsRoutes      = require('./routes/bbs-analytics');
 const bbsCommunityRoutes      = require('./routes/bbs-community');
 const bbsInspectorRoutes      = require('./routes/bbs-inspectors');
 const bbsInspectorScheduleRoutes = require('./routes/bbs-inspector-schedules');
+const { createBbsRolloutAccessMiddleware } = require('./services/bbs-rollout-access');
 
 // =================================================================
 // SECTION 1: SETUP
@@ -1762,17 +1763,7 @@ app.use('/api/bbs',               (_req, res, next) => {
     res.setHeader('Cache-Control', 'private, no-store');
     next();
 });
-app.use('/api/bbs',               async (req, res, next) => {
-    try {
-        const [rows] = await pool.query("SELECT SettingValue FROM BBS_Settings WHERE SettingKey='staged_admin_only' LIMIT 1");
-        if (String(rows[0]?.SettingValue || '0') !== '1') return next();
-        res.setHeader('X-BBS-Rollout-Mode', 'staged-admin-only');
-        return authenticateToken(req, res, () => isAdmin(req, res, next));
-    } catch (error) {
-        if (error?.code === 'ER_NO_SUCH_TABLE') return next();
-        return next(error);
-    }
-});
+app.use('/api/bbs',               createBbsRolloutAccessMiddleware(pool));
 app.use('/api/bbs',               bbsCardRoutes.publicRouter);
 app.use('/api/patrol',          authenticateToken, patrolRoutes);
 app.use('/api/admin',          authenticateToken, isAdmin, adminRoutes);

@@ -34,8 +34,8 @@ for (const marker of [
 
 assert.match(ui, /state\.cardWorkspace === 'personal' \? personalCardsView\(\) : state\.cardWorkspace === 'department' \? departmentCardsAdminView\(\) : cardOverviewView\(\)/);
 assert.match(ui, /if \(nextTab === 'cards' && state\.tab === 'community'\) state\.cardWorkspace = 'department'/);
-assert.match(main, /bbs-smart-card\.js\?v=20260831-bbs-phase10c[123]/);
-assert.match(html, /main\.js\?v=20260831-bbs-phase10c[123]-forklift-renewal-ky-chunk-r1/);
+assert.match(main, /bbs-smart-card\.js\?v=(?:20260831-bbs-phase10c[123]|20260901-bbs-phase10(?:b4|d[1-5]))/);
+assert.match(html, /main\.js\?v=(?:20260831-bbs-phase10c[123]-forklift-renewal-ky-chunk-r1|20260901-bbs-phase10(?:b4|d[1-5]))/);
 
 for (const preserved of [
     'id="bbs-template-form"',

@@ -1,5 +1,49 @@
 # TSH Safety Core Activity - AGENTS.md
 
+## BBS Smart Card Phase 10E Constraints
+
+- Pilot acceptance is a gate, not automatic rollout. Use `staged_admin_only=1` during Production setup. After a fresh backup and explicit Pilot-test approval, `staged_admin_only=0` plus `pilot_scope_only=1` may be used for controlled multi-role UAT; keep company-wide mode (`0`/`0`) blocked until acceptance, integrity reconciliation and explicit ordinary-user rollout approval.
+- Controlled Pilot access permits Admin, effective Active inspectors in an effective `BBS_Pilot_Scopes` scope, and effective assigned members in that scope. It does not grant Admin privileges, does not infer access from Department text alone, and requires authentication for shared QR resolution while active.
+- `backend/scripts/bbs-phase10e-pilot-acceptance-audit.js` is SELECT-only. A blocked result must identify missing platform/configuration/evidence inputs without creating Operators, assignments, Checklists, templates, QR cards, handlers or workflow records.
+- `READY_FOR_ROLLOUT_REVIEW` means the release may be reviewed; it does not authorize a flag change, deployment or GitHub push. Production rollout still requires fresh database/private-upload/application backups, reviewed file hashes, staged Admin smoke, multi-role smoke after the approved gate change, rollback verification and zero test residue.
+
+## BBS Smart Card Phase 10D-5 Constraints
+
+- Inspector Agenda is a responsive projection of the existing server-computed schedule `days`; it must not calculate targets, actuals, exemptions or KPI status independently. Agenda and Calendar are alternate presentations of the same response.
+- Community Risk detail is Admin-only in Node and PHP. It may expose report identity, private evidence metadata, assigned owner/verifier and Action History only after Admin authorization; stored filenames and private filesystem paths must never appear in JSON.
+- Evidence remains readable only through the existing object-authorized `/bbs/community/reports/:id/evidence/:fileId` route. Phase 10D-5 changes no schema, Action transition rule, schedule mutation, Master/Pilot configuration, private upload path, stored workflow data or staged rollout gate.
+
+## BBS Smart Card Phase 10D-4 Constraints
+
+- Action Email Outbox visibility is Admin-only and projects the existing `BBS_Action_EmailOutbox` records. Status totals, filters and pagination must not modify or infer delivery state.
+- Manual Retry is allowed only for an existing `Failed` row while BBS action notifications and SMTP are enabled. Lock the selected row before delivery, reject `Queued`/`Sent` retries, increment attempt metadata and audit both success and failure without creating a replacement outbox row.
+- Existing suppression keys, notification events, recipients, SMTP configuration and action workflow remain authoritative. Phase 10D-4 changes no schema, business rule, authorization, private upload path, stored Action/Observation data or staged rollout gate.
+
+## BBS Smart Card Phase 10D-3 Constraints
+
+- History, Corrective Actions, Community Good/Risky reports, Personal Card recipients and issued Cards use opt-in server-side pagination. Requests without `paged=1` retain their legacy array response so existing consumers remain compatible.
+- Every paged response uses server-computed `rows` plus `pagination` (`page`, `pageSize`, `total`, `totalPages`, `hasPrevious`, `hasNext`). Page size is bounded to 100 and out-of-range pages are clamped without fabricating records.
+- Search and Department/Unit/year/status/priority filters are applied after the existing authorization scope. Risky Community rows/evidence remain Admin-only, Good reports remain reporter-anonymous, and Cards endpoints remain Admin-only.
+- Phase 10D-3 changes no schema, stored data, card/QR lifecycle, Observation/Action business rule, authorization, Master/Pilot configuration, private upload path or rollout gate.
+
+## BBS Smart Card Phase 10D-2 Constraints
+
+- KPI status is a server-derived semantic projection over the existing effective inspector enrollment, `KpiRequired`, schedule target and capped submitted-observation formula. `N_A`, `NOT_CONFIGURED`, `NOT_INSPECTED`, `ZERO_PERCENT` and `PERCENT` must remain distinct; clients and exports must not coerce a null percentage to zero.
+- `N_A` means KPI is not applicable, `NOT_CONFIGURED` means no effective KPI enrollment/configuration, `NOT_INSPECTED` means a schedule exists but no target is due yet, and `ZERO_PERCENT` means a positive target is due with zero credited observations. Existing `Exempt` dates remain outside the denominator.
+- Dashboard, inspector compliance, analytics and exports use the same semantic status and existing per-day capped schedule formula. Phase 10D-2 changes no schema, authorization, target formula, enrollment/schedule mutation, Observation immutability, batch behavior, Master/Pilot configuration, private upload path or rollout gate.
+
+## BBS Smart Card Phase 10D-1 Constraints
+
+- Checklist readiness in employee selectors is a server projection from the existing resolver, Employee Master context and effective date. The client may display and filter the result but must not select, publish, override or substitute a Checklist version.
+- `READY` is the only state that enables a new Single or Batch Observation selection. `NO_CHECKLIST`, `SCOPE_MISMATCH`, `VERSION_NOT_PUBLISHED`, `VERSION_NOT_EFFECTIVE`, `CHECKLIST_CONFLICT` and unknown results fail closed with an actionable reason. Existing Drafts remain resumable because their Checklist snapshot is already frozen.
+- Draft creation and Batch preview/draft APIs remain authoritative and must resolve again inside their existing transaction/atomic workflow. Phase 10D-1 changes no schema, authorization, Observation immutability, batch per-employee model, Master/Pilot configuration, private upload path or rollout gate.
+
+## BBS Smart Card Phase 10B-4 Constraints
+
+- Phase 10B-4 composes a read-only preview from existing private Personal/Department template reads and existing Master/card context. It must not change BBS routes, payloads, schema, authorization, card eligibility, QR lifecycle, private upload paths or stored workflow data.
+- Personal preview QR is visibly non-functional. Actual one-time Personal QR remains available only after the existing issue/replace mutation; popup pre-open and template validation remain before that mutation. Department preview/print uses the current Active Department QR returned by the existing permission-scoped Department-card endpoint.
+- Readiness distinguishes Ready, Warning and Blocked. Aspect ratio or low resolution warns without inventing business data; missing/unreadable background, invalid dimensions, unavailable QR generation, scope mismatch or missing Active Department QR blocks only the affected print/mutation action.
+
 ## BBS Smart Card Phase 10C-3 Constraints
 
 - Phase 10C-3 is frontend-only runtime resilience. It must not change BBS routes, payloads, schema, authorization, Master/Pilot configuration, business rules, private upload paths or stored workflow data.

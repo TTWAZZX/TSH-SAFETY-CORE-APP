@@ -26,6 +26,7 @@ require __DIR__ . '/handlers/bbs_analytics.php';
 require __DIR__ . '/handlers/bbs_community.php';
 require __DIR__ . '/handlers/bbs_inspectors.php';
 require __DIR__ . '/handlers/bbs_inspector_schedules.php';
+require __DIR__ . '/lib/bbs_rollout_access.php';
 
 header('X-Content-Type-Options: nosniff');
 if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
@@ -712,17 +713,7 @@ try {
     handle_fourm_routes($method, $path);
     handle_admin_phase8_routes($method, $path);
     handle_johnny_ai_routes($method, $path);
-    if (strpos($path, '/bbs/') === 0) {
-        try {
-            $stagedAdminOnly = (string) (db_row("SELECT SettingValue FROM BBS_Settings WHERE SettingKey='staged_admin_only' LIMIT 1")['SettingValue'] ?? '0') === '1';
-        } catch (Throwable $ignored) {
-            $stagedAdminOnly = false;
-        }
-        if ($stagedAdminOnly) {
-            header('X-BBS-Rollout-Mode: staged-admin-only');
-            require_admin();
-        }
-    }
+    if (strpos($path, '/bbs/') === 0) bbs_enforce_rollout_access();
     handle_bbs_card_routes($method, $path);
     handle_bbs_community_routes($method, $path);
     handle_bbs_inspector_routes($method, $path);

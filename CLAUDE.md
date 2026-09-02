@@ -1,5 +1,72 @@
 # TSH Safety Core Activity - AI Quick Start
 
+## Current BBS Foundation Admin Readiness (2026-09-02, Production deployed Admin-only)
+
+- System Console `BBS Foundation` now presents operational readiness instead of internal phase labels: Position/BBS-Level coverage, Active inspectors and team members, Published Checklist count and Active Pilot scope.
+- Admin setup is guided in the safe order Mapping -> Pilot -> Inspector/Team -> Checklist -> Cards/QR. Inspector/team changes are no longer exposed through the legacy hierarchy mutation UI; the System Console table is read-only and opens the canonical BBS Inspector/Team workspace, preserving enrollment, KPI and team-event history.
+- Checklist and Eligibility lists now have search/status filters and client-side pagination; UAT Checklists are visibly separated. Eligibility uses a searchable Employee Master picker, and Pilot changes show the existing and proposed scope before confirmation.
+- Foundation, Checklist and Inspector reads recover independently. Mobile controls retain 44 px targets, horizontal tables are keyboard-focusable/labelled and the authenticated Production browser UAT passes at 390 px without page overflow or console errors. When no Pilot is active, the form defaults to the first Master Department that actually has a Safety Unit.
+- The frontend-only release is deployed and verified by FTP `5/5` and HTTPS `4/4` SHA-256 matches. Production API smoke passed Admin reads and retained ordinary-user/anonymous denials (`403`/`401`) under `staged_admin_only=1`; no API/schema/business data/private upload/rollout flag changed. The completed BBS work is included in the 2026-09-02 GitHub synchronization.
+
+## Current BBS Smart Card Phase 10E Handoff (2026-09-01, deployed Admin-only; Production configuration required)
+
+- Phase 10B-4 and 10D-1 through 10E are deployed to Production. Exact upload/download hashes, backups and smoke references are recorded in `DEPLOYMENT.md`; the completed implementation is included in the 2026-09-02 GitHub synchronization.
+- Production is safely `staged_admin_only=1`, `pilot_scope_only=0`. Admin UAT is available now, while ordinary users and anonymous QR remain closed.
+- Production currently has 0 effective Active Pilot scopes, enrollments and assignments. Configure the real Production scope, inspector/team, applicable Published Checklist and remaining card/Community inputs before requesting a separate Controlled Pilot `0/1` activation.
+- Deployment verification passed 28/28 FTP hashes, 4/4 HTTPS hashes, authenticated Admin API reads and all 8 BBS browser tabs at three mobile orientations with zero console errors. No test business data was created and the temporary helper was removed (`404`).
+
+- Added SELECT-only `npm --prefix backend run audit:bbs-phase10e`, which classifies platform safety, Pilot configuration, representative workflow evidence, integrity/reconciliation and email operations without mutating data or flags.
+- Full Phase 7-10E contracts, Backend suite `131/131`, and authenticated browser UAT across 8 tabs and 5 phone/landscape viewports pass. Test-only stale Phase 9 KPI and Phase 10D-5 cache assertions were corrected; application behavior did not change.
+- Applied the idempotent local-only safety configuration `20260901_bbs_phase10e_staged_admin_gate.sql`; Local `staged_admin_only=1` now passes and created 0 business rows. Current decision advanced from `PLATFORM_BLOCKED` to `CONFIGURATION_REQUIRED`.
+- The business owner explicitly approved Local configuration: `012816` now resolves to Tube Cutting as an Operator; `002671` has Active KPI-required/self-managed enrollment, one effective team assignment and an Active Monday-Friday target-1 schedule. `111111` is not enrolled or assigned. The idempotent API-driven configuration script reruns with zero new changes.
+- Current remaining configuration blockers are a second real Operator/team assignment for the minimum-two-person Batch acceptance, an applicable Published Checklist, Active Personal and Department templates, Active Department QR and an Active Community handler. Do not fabricate these business inputs.
+- Added a separate Controlled Pilot boundary: `staged_admin_only=1` remains Admin-only; `0/1` permits Admin plus effective appointed inspectors and assigned Pilot members; `0/0` remains company-wide and unauthorized. The setting is installed locally as `pilot_scope_only=0`, so rollout did not change.
+- The supplied employee workbook was inspected read-only and not imported. It contains 14 Maintenance / Tube Cutting references; access still requires an existing enrollment/team assignment. The workbook itself is not included in GitHub.
+
+## Current BBS Smart Card Phase 10D-5 Handoff (2026-09-01, Local complete; not deployed)
+
+- Inspector Schedule defaults to a responsive Agenda and can switch to Calendar; both use the unchanged server-computed `days` target/actual/status/source/reason contract.
+- Admin-only Community Risk detail now combines report context, safe evidence metadata, linked Action ownership/status and ordered Action History. Private file bytes still use the existing authorized evidence route and stored names/paths are not returned.
+- Phase 8/9B/10D-3..5 contracts, Node/PHP syntax, authenticated 390 px browser UAT and the full Backend suite pass (`131/131` preflight). No schema/data/upload-path/Production/GitHub change occurred; `staged_admin_only=1` remains enabled.
+- Remaining work before a separately approved ordinary-user rollout: residual searchable-picker audit and business-owner Pilot configuration/multi-role acceptance.
+
+## Current BBS Smart Card Phase 10D-4 Handoff (2026-09-01, Local complete; not deployed)
+
+- The Actions tab now includes an Admin-only Email Outbox over existing `BBS_Action_EmailOutbox` data with Queued/Sent/Failed totals, delivery readiness, search, status/event/year filters and bounded pagination.
+- Node/PHP Retry permits Failed rows only, locks the selected row, rejects Queued/Sent retries, preserves the suppression key and original message, increments attempt metadata and audits success/failure. No real Retry/email send was executed during UAT.
+- Phase 5/8/10C-1..3/10D-1..4 contracts, authenticated 390 px browser UAT and the full Backend suite pass (`131/131` preflight). No schema, business data, SMTP configuration, Production deployment or GitHub push changed; `staged_admin_only=1` remains enabled.
+- Next recommended phase is Community Risk Detail with evidence and Action History. Later work is the mobile Schedule agenda and residual searchable pickers before separately approved ordinary-user rollout.
+
+## Current BBS Smart Card Phase 10D-3 Handoff (2026-09-01, Local complete; not deployed)
+
+- `GET /api/bbs/observations`, `/actions`, `/community/dashboard`, `/admin/card-employees` and `/admin/cards` now accept `paged=1`, bounded `page/pageSize` and applicable search/year/status/priority/Department/Safety Unit filters. Requests without `paged=1` retain the legacy response shape.
+- History, Actions, Community Good/Risky, Personal Card recipients and Card history have responsive server-backed filters and accessible previous/next navigation. Good and Risky Community lists page independently; Risky data remains Admin-only and Good reports still hide reporter identity.
+- Node/PHP list contracts share one-based clamped pagination with a maximum page size of 100. Existing Observation/Action scope, Admin Card authorization, QR lifecycle, Master/Pilot settings, private uploads and stored records are unchanged.
+- `test:bbs-phase10d3`, Phase 4/5/8/10B-1..4/10C-1..3/10D-1..2 regressions, authenticated 390 px/1365 px browser UAT and the full Backend test suite pass (`131/131` read/permission preflight). Production and GitHub remain unchanged; `staged_admin_only=1` remains enabled.
+- Next recommended phase is 10D-4 Action Email Outbox & Retry visibility. Later remaining items are Community Risk Detail with evidence/action history, mobile Schedule agenda and searchable pickers at any residual System Console/Inspector/Team locations.
+
+## Current BBS Smart Card Phase 10D-2 Handoff (2026-09-01, Local complete; not deployed)
+
+- KPI presentation now distinguishes `N/A`, `Not configured`, `ยังไม่ได้ตรวจ`, true `0%`, and calculated percentages through an additive server semantic status shared by Node/PHP.
+- Workspace, Inspector Compliance, Analytics and Excel export use the same state. A null percentage remains null/blank and `0%` appears only when a positive target is already due with zero credited observations.
+- The existing effective enrollment, schedule override, Exempt denominator, per-day cap, Submitted-only count and server authorization remain unchanged. No schema, stored data, Master/Pilot configuration, private upload path or rollout gate changed.
+- Phase 10D-2 parity/contract tests, Phase 6/9B/10D-1 regressions and authenticated 390 px/1365 px Browser UAT pass. Production and GitHub remain unchanged; `staged_admin_only=1` remains enabled.
+
+## Current BBS Smart Card Phase 10D-1 Handoff (2026-09-01, Local complete; not deployed)
+
+- `/api/bbs/eligible-employees` now adds a server-computed `ChecklistReadiness` object for each permission-scoped employee using the same Employee Master dimensions, effective date and checklist resolution rules as Observation creation. Node/PHP readiness rules are parity-tested.
+- Single, Team and Mobile Batch selectors show Ready/NO_CHECKLIST/scope/version/conflict reasons. Only `READY` enables selection; Batch select-all ignores disabled employees and stale selections are removed after refresh. Existing Draft recovery is unchanged.
+- Draft creation and Batch preview/draft continue to resolve Checklist versions server-side and remain authoritative. No business rule, schema, authorization, Observation immutability, per-employee batch behavior, Master/Pilot data, private upload path or stored workflow data changed.
+- Phase 10D-1 contracts, Phase 10A/10B-1..4/10C-1..3 regressions and authenticated 390 px/1365 px browser UAT pass against 252 permission-scoped employees. Production/GitHub remain unchanged and `staged_admin_only=1` remains the rollout gate.
+
+## Current BBS Smart Card Phase 10B-4 Handoff (2026-09-01, Local complete; not deployed)
+
+- Personal and Department templates now open a responsive Composite Preview instead of a raw background file. Preview shows representative identity/Department data, QR placement, cut boundary, safe area and the stored card dimensions.
+- Print Readiness checks image decoding/type, aspect ratio, estimated DPI, physical dimensions, QR size/availability, Personal template scope and text space. It reports Ready/Warning/Blocked and prevents the affected Activate/Issue/Replace/Print confirmation only when blocked.
+- Personal preview uses a labelled non-functional QR; the real one-time QR is still returned only after the existing issue/replace mutation. Department preview and printing use the existing permission-scoped `/api/bbs/department-cards/me?departmentId=` read. No API, schema, authorization, QR lifecycle, private upload path or business data changed.
+- Phase 10B-1/2/3/4 and 10C-1/2/3 contracts pass. Authenticated 390 px Master/Department browser UAT passes with 41 Master Departments. Local BBS card tables remain unchanged at zero templates/QR records, so no real-template visual acceptance was fabricated. Production remains Admin-only staged and this phase has not been deployed or pushed.
+- Phase 10D-1 Observation Checklist Readiness and Phase 10D-2 KPI semantics are complete locally. Next recommended work is Phase 10D-3 server-side pagination. Business-owner visual acceptance with approved real card artwork remains required before ordinary-user rollout.
+
 ## Current BBS Smart Card Phase 10C-3 Handoff (2026-08-31, Production staged)
 
 - BBS reads now recover independently across Core, History, Community, Inspector, Action, Analytics and Card workspaces. A failure shows an in-place Retry and retains only previously confirmed data; it does not fabricate zero values, blank the complete module or silently change tabs.

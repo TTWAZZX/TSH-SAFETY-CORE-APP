@@ -1,6 +1,7 @@
 'use strict';
 
 const { normalizeWeekdays, isoWeekday, databaseIsoDate } = require('./bbs-phase1');
+const { kpiStatus } = require('./bbs-inspector-schedule');
 
 const ANALYTICS_SCOPES = ['personal', 'team', 'department', 'company'];
 const ANALYTICS_RISKS = ['Critical', 'High', 'Medium', 'Low'];
@@ -46,9 +47,9 @@ function computeKpi(people = [], actualRows = [], range) {
         numerator += achieved; denominator += expected;
         const met = expected > 0 && achieved >= expected;
         if (met) peopleMeeting += 1;
-        return { employeeId: String(person.EmployeeID), employeeName: String(person.EmployeeName || ''), targetPerDay: target, numerator: achieved, denominator: expected, percentage: percent(achieved, expected), met };
+        return { employeeId: String(person.EmployeeID), employeeName: String(person.EmployeeName || ''), targetPerDay: target, numerator: achieved, denominator: expected, percentage: expected > 0 ? percent(achieved, expected) : null, kpiStatus:kpiStatus({ configured:true, applicable:dates.length > 0, numerator:achieved, denominator:expected, scheduledDays:dates.length }), met };
     });
-    return { numerator, denominator, percentage: percent(numerator, denominator), peopleMeeting, peopleTotal: peopleRows.length, people: peopleRows };
+    return { numerator, denominator, percentage:denominator > 0 ? percent(numerator, denominator) : null, kpiStatus:kpiStatus({ configured:peopleRows.length > 0, applicable:peopleRows.some(row => row.denominator > 0), numerator, denominator, scheduledDays:peopleRows.reduce((sum,row)=>sum+(row.denominator>0?1:0),0) }), peopleMeeting, peopleTotal: peopleRows.length, people: peopleRows };
 }
 function agingBucket(days) { const value = Math.max(0, number(days)); return value <= 3 ? '0-3 days' : value <= 7 ? '4-7 days' : value <= 14 ? '8-14 days' : '15+ days'; }
 

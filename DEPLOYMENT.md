@@ -1,5 +1,45 @@
 # TSH Safety Core Activity - Deployment
 
+## BBS Foundation Admin Readiness Production record (2026-09-02)
+
+The System Console `BBS Foundation` readiness/guided-setup UI is deployed to the shared-hosting PHP Production target. The release was limited to `index.html`, `public/js/main.js`, `public/js/pages/admin.js`, `public/js/pages/bbs-smart-card.js` and `deploy-manifest.json`; no API, schema, business data, private-upload path or rollout setting changed. `staged_admin_only=1` remains authoritative, so this release is Admin-only.
+
+Backup and verification references:
+
+- Database backup: `backups/production/fourm-controlled-uat-prebackup-20260902-085541/__codex_fourm_uat_full_20260902_015557_70d0ca6d.sql.gz` (185 tables, 1,464,971 bytes, SHA-256 `6d170371c8fc472ee3c9cb11415835799405540947b8648b02beaca54a504832`)
+- Final application rollback backup: `backups/production/bbs-foundation-readiness-predeploy-20260902-090611`
+- Final candidate/download-back evidence: `backups/production/bbs-foundation-readiness-upload-verify-20260902-090626` (FTP `5/5`, HTTPS `4/4`)
+- Authenticated API smoke: `backups/production/bbs-phase10e-production-smoke-20260902T020649` (Admin reads `200`, ordinary user `403`, anonymous QR `401`)
+- Authenticated Chrome UAT: System Console/BBS Foundation passed Desktop and 390 px Mobile, 23 Master Positions, Checklist Builder/Excel exchange, Department/Safety Unit readiness and BBS workspace deep-link with zero console errors.
+
+No test business row/file was created and temporary Production files remaining are `0`. The completed BBS source is included in the 2026-09-02 GitHub synchronization. A normal rollback restores the four runtime files and prior manifest from the final application backup; database restore is not required for this frontend-only release.
+
+## BBS Smart Card Phase 10B-4 / 10D-1 through 10E staged Production record (2026-09-01)
+
+The completed BBS card preview, checklist readiness, KPI semantics, scalable lists, Action Email Outbox, mobile Agenda, Community Risk detail and Controlled Pilot access boundary are deployed to the shared-hosting PHP Production target. Production remains intentionally `staged_admin_only=1` and `pilot_scope_only=0` because the Production database currently has no effective Active Pilot scope, inspector enrollment or team assignment. Admin can perform business UAT and configuration; ordinary users and anonymous QR access remain closed. Company-wide mode was not enabled.
+
+Backup and verification references:
+
+- Full database backup: `backups/production/fourm-controlled-uat-prebackup-20260901-165755/__codex_fourm_uat_full_20260901_095813_0829c202.sql.gz` (185 tables, 1,464,823 bytes, SHA-256 `12532528b7bb75210034f55b58de7265b97a786cad990e9a6d2d1386e21e797f`)
+- Application/private-upload rollback backup: `backups/production/bbs-phase10e-predeploy-20260901-170032` (23 existing files; four BBS private directories backed up with 0 files)
+- Exact candidate and manifest: `backups/production/bbs-phase10e-deploy-candidate-20260901-170623` (28 files; manifest SHA-256 `ca6af5c2cd4ca760f9a3362c15780bd652b214b28a72e836128b8e9bdd4e4f78`)
+- FTP download-back verification: `backups/production/bbs-phase10e-upload-verify-20260901-171150` (`28/28` plus manifest)
+- HTTPS static verification: `backups/production/bbs-phase10e-https-verify-20260901-171650` (`4/4`)
+- Authenticated API smoke: `backups/production/bbs-phase10e-production-smoke-20260901T101210` (Admin reads `200`, ordinary user `403`, anonymous QR `401`)
+- Normal-login Chrome UAT: all 8 tabs passed at 320x568, 390x844 and 844x390 with zero console errors.
+
+The additive `pilot_scope_only` setting was installed and the safe gate was explicitly retained at `1/0`. No employee, Pilot scope, enrollment, team assignment, Checklist, card/template, Community handler, Observation, Action or test business row was created. Temporary row/file residue is `0`; the rollout helper was removed and returns HTTP `404`. To open Controlled Pilot later, configure the real Production Pilot scope/roster/Checklist and rerun the Phase 10E gate before a separately approved `0/1` change.
+
+## BBS Smart Card Phase 10E Controlled Pilot activation gate (not yet approved)
+
+Local Pilot configuration has been applied through the established authenticated APIs for Inspector `002671` and Operator `012816`; it is not a Production migration. Production business configuration remains unchanged and must not receive these Local business rows implicitly.
+
+Do not open company-wide access unless `npm --prefix backend run audit:bbs-phase10e` reports `READY_FOR_ROLLOUT_REVIEW` and the business owner gives explicit approval. During Production setup retain `staged_admin_only=1`. After fresh backups and explicit Pilot-test approval, Controlled Pilot UAT may use `staged_admin_only=0` with `pilot_scope_only=1`; only Admin, effective appointed inspectors and effective assigned Pilot members can enter. Same-scope unassigned users and anonymous QR requests must remain blocked.
+
+After approval, take fresh verified MySQL/MariaDB, private-upload and application backups before changing the gate. Deploy only reviewed files, apply `20260901_bbs_phase10e_controlled_pilot_access.sql`, verify download-back SHA-256, smoke Admin with Admin-only still enabled, then switch to `0/1` and run the multi-role phone/desktop Pilot matrix. Verify Admin `200`, an appointed inspector/member `200`, an unassigned same-scope user `403`, an unrelated user `403`, Pilot denial on Admin APIs `403`, and anonymous QR `401`. Immediately restore `staged_admin_only=1` and `pilot_scope_only=0` for any critical failure. Remove every temporary test row/file and record remaining count `0`; retain backup identifiers and the rollback manifest.
+
+Local preparation applied `backend/migrations/20260901_bbs_phase10e_staged_admin_gate.sql` on 2026-09-01 and verified `staged_admin_only=1` with 0 business rows created. This was not a Production deployment. Production already requires the value `1`; do not run a gate-changing rollout action until the separate approval above.
+
 ## BBS Smart Card Phase 10B-1 through 10C-3 staged Production record (2026-08-31)
 
 The completed BBS frontend integration, guided Card Admin workspaces, Master-data readiness, workflow recovery, mobile/accessibility hardening and runtime retry protection are deployed to the shared-hosting PHP Production target. The release was intentionally limited to `index.html`, `public/js/main.js` and `public/js/pages/bbs-smart-card.js`; no API, schema, upload path or business configuration changed. `BBS_Settings.staged_admin_only=1` remains enforced, so Admin access succeeds while authenticated non-Admin and anonymous access remain blocked.

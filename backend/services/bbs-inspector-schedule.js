@@ -4,6 +4,14 @@ const { databaseIsoDate, isoWeekday, normalizeWeekdays } = require('./bbs-phase1
 
 function number(value) { const parsed = Number(value); return Number.isFinite(parsed) ? parsed : 0; }
 function percent(numerator, denominator) { return denominator > 0 ? Math.round(numerator * 10000 / denominator) / 100 : 0; }
+function kpiStatus({ configured = true, applicable = true, numerator = 0, denominator = 0, scheduledDays = 0, upcomingDays = 0 } = {}) {
+    if (!configured) return { code:'NOT_CONFIGURED', label:'Not configured', description:'ยังไม่ได้กำหนดผู้ตรวจและ KPI สำหรับช่วงเวลานี้', percentage:null };
+    if (!applicable) return { code:'N_A', label:'N/A', description:'บุคคลหรือช่วงเวลานี้ไม่อยู่ในเกณฑ์ KPI', percentage:null };
+    if (number(denominator) > 0 && number(numerator) <= 0) return { code:'ZERO_PERCENT', label:'0%', description:'ถึงกำหนดตรวจแล้ว แต่ยังไม่มีผลงานที่นับ KPI', percentage:0 };
+    if (number(denominator) > 0) return { code:'PERCENT', label:`${percent(numerator, denominator)}%`, description:'ผลงานเทียบเป้าหมายที่ถึงกำหนดแล้ว', percentage:percent(numerator, denominator) };
+    if (number(upcomingDays) > 0 || number(scheduledDays) > 0) return { code:'NOT_INSPECTED', label:'ยังไม่ได้ตรวจ', description:'มีตารางตรวจ แต่ยังไม่มีเป้าหมายที่ถึงกำหนด', percentage:null };
+    return { code:'N_A', label:'N/A', description:'ไม่มีวันตรวจที่นำมาคำนวณในช่วงเวลานี้', percentage:null };
+}
 function dateRows(start, end) {
     const rows = [];
     for (let cursor = new Date(`${start}T00:00:00Z`); cursor < new Date(`${end}T00:00:00Z`); cursor = new Date(cursor.getTime() + 86400000)) rows.push(cursor.toISOString().slice(0, 10));
@@ -57,6 +65,8 @@ function computeCompliance({ enrollments = [], rules = [], overrides = [], actua
         const scheduled = days.filter(row => row.target > 0);
         const numerator = due.reduce((sum, row) => sum + row.achieved, 0);
         const denominator = due.reduce((sum, row) => sum + row.target, 0);
+        const upcomingDays = days.filter(row => row.status === 'Upcoming').length;
+        const exemptDays = days.filter(row => row.status === 'Exempt').length;
         people.push({
             enrollmentId,
             inspectorEmployeeId:String(enrollment.InspectorEmployeeID || enrollment.EmployeeID),
@@ -68,11 +78,13 @@ function computeCompliance({ enrollments = [], rules = [], overrides = [], actua
             completedDays:due.filter(row => row.status === 'Completed').length,
             partialDays:due.filter(row => row.status === 'Partial').length,
             missedDays:due.filter(row => row.status === 'Missed').length,
-            upcomingDays:days.filter(row => row.status === 'Upcoming').length,
+            upcomingDays,
+            exemptDays,
             actualObservations:days.reduce((sum, row) => sum + row.actual, 0),
             numerator,
             denominator,
-            percentage:percent(numerator, denominator),
+            percentage:denominator > 0 ? percent(numerator, denominator) : null,
+            kpiStatus:kpiStatus({ configured:true, applicable:scheduled.length > 0, numerator, denominator, scheduledDays:scheduled.length, upcomingDays }),
             days
         });
     }
@@ -87,11 +99,13 @@ function computeCompliance({ enrollments = [], rules = [], overrides = [], actua
             partialDays:people.reduce((sum, row) => sum + row.partialDays, 0),
             missedDays:people.reduce((sum, row) => sum + row.missedDays, 0),
             upcomingDays:people.reduce((sum, row) => sum + row.upcomingDays, 0),
+            exemptDays:people.reduce((sum, row) => sum + row.exemptDays, 0),
             actualObservations:people.reduce((sum, row) => sum + row.actualObservations, 0),
-            numerator, denominator, percentage:percent(numerator, denominator)
+            numerator, denominator, percentage:denominator > 0 ? percent(numerator, denominator) : null,
+            kpiStatus:kpiStatus({ configured:people.length > 0, applicable:people.some(row => row.scheduledDays > 0), numerator, denominator, scheduledDays:people.reduce((sum, row) => sum + row.scheduledDays, 0), upcomingDays:people.reduce((sum, row) => sum + row.upcomingDays, 0) })
         },
         people
     };
 }
 
-module.exports = { dateRows, inRange, scheduleTarget, computeCompliance };
+module.exports = { dateRows, inRange, scheduleTarget, kpiStatus, computeCompliance };

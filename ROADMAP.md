@@ -1,5 +1,41 @@
 # TSH Safety Core Activity - Roadmap
 
+## BBS Foundation Admin Readiness (2026-09-02)
+
+System Console readiness and guided setup are deployed to Production behind `staged_admin_only=1`. Admin can now complete Production Mapping, Pilot, Inspector/Team, Checklist and Card/QR configuration from the guided workflow, then rerun the Phase 10E acceptance audit. Controlled Pilot and company-wide rollout remain separate explicit approvals.
+
+## BBS Smart Card Phase 10E Pilot Acceptance (2026-09-01)
+
+The code is now deployed to Production behind the Admin-only gate. Production business configuration remains incomplete: there is no effective Active Pilot scope, inspector enrollment or team assignment, so the safe state is `staged_admin_only=1`, `pilot_scope_only=0`. The next milestone is Admin-led Production configuration and business UAT, followed by a fresh gate audit and separately approved Controlled Pilot activation (`0/1`). Company-wide rollout (`0/0`) remains out of scope.
+
+Controlled Pilot access is deployed as an intermediate UAT boundary but remains disabled. The remaining path is to complete real Production Pilot Checklist/card/QR/handler/team inputs, rerun the gate, then explicitly switch to Controlled Pilot for representative UAT before any separate company-wide approval.
+
+Technical pre-acceptance is complete locally: the repeatable gate, Phase 7-10E contracts, full Backend regression and authenticated mobile/desktop browser UAT pass. The local staged gate remains `1`. The approved Maintenance / Tube Cutting Pilot now has confirmed Inspector `002671`, Operator/team member `012816` and a Monday-Friday target-1 schedule; test account `111111` is excluded from enrollment and assignment. The decision remains `CONFIGURATION_REQUIRED` because Batch acceptance needs a second real Operator/team member and the Pilot still needs an applicable Published Checklist, approved Personal/Department templates, Department QR, Community handler and representative business workflow evidence. After those owner-supplied inputs are accepted, rerun `audit:bbs-phase10e`; only `READY_FOR_ROLLOUT_REVIEW` plus explicit approval may advance to the Production runbook.
+
+## BBS Smart Card Phase 10D-5 Mobile Agenda & Risk Detail (2026-09-01)
+
+Deployed behind the Admin-only Production gate. Inspector schedules now have a mobile-first Agenda backed by the existing authoritative daily schedule response, and Admin Community Risk review combines evidence and Action History in one accessible detail view. Remaining pre-rollout work is the residual searchable-picker audit plus business-owner Pilot data/role acceptance; ordinary-user Production rollout remains a separate approval.
+
+## BBS Smart Card Phase 10D-4 Operational Follow-up (2026-09-01)
+
+Deployed behind the Admin-only Production gate. Admin can monitor the existing Corrective Action Email Outbox by Queued/Sent/Failed state, search/filter/page large histories and safely retry Failed messages only when delivery is operational. Ordinary-user rollout remains a separate Pilot acceptance action.
+
+## BBS Smart Card Phase 10D-3 Scalable Lists & Filtering (2026-09-01)
+
+Deployed behind the Admin-only Production gate. History, Actions, Community Good/Risky, Personal Card recipients and Card history use bounded server-side pagination and server-side search/filtering while preserving legacy API consumers and every existing authorization/privacy rule. Ordinary-user rollout remains a separate Pilot acceptance action.
+
+## BBS Smart Card Phase 10D-2 KPI Status Clarity (2026-09-01)
+
+Deployed behind the Admin-only Production gate. KPI semantics are server-authoritative and consistently distinguish not applicable, not configured, scheduled but not yet due, due with true zero performance, and calculated completion. Dashboard, compliance, analytics and exports remain aligned with the existing capped schedule formula; ordinary-user rollout remains separately gated by Pilot acceptance.
+
+## BBS Smart Card Phase 10D-1 Checklist Readiness & Observation Eligibility (2026-09-01)
+
+Deployed behind the Admin-only Production gate. Employee selectors expose server-authoritative Checklist Readiness, explain non-ready states and fail closed for new Single/Batch selection while preserving existing Draft recovery and immutable Checklist snapshots. Ordinary-user rollout remains separate and gated by Pilot acceptance.
+
+## BBS Smart Card Phase 10B-4 Template Preview & Print Readiness (2026-09-01)
+
+Phase 10B-4 is deployed behind the Admin-only Production gate. Personal/Department card workflows share a responsive composite preview with cut/safe boundaries and readiness checks for dimensions, background aspect ratio/DPI/type, QR placement/availability and text/Master scope. Blocked output cannot be confirmed; warnings remain visible for Admin review. Existing private reads, authorization, issue/replace popup safety and QR lifecycle are unchanged.
+
 ## BBS Smart Card Phase 10C-3 runtime resilience (2026-08-31)
 
 Runtime resilience is complete and deployed to Production behind the existing Admin-only staged gate. Seven BBS data areas fail and retry independently, retain only confirmed stale data with an explicit warning and avoid misleading zero states. Critical write controls prevent repeat activation while pending and provide accessible progress feedback without replacing server-side idempotency or concurrency controls. Local regression and simulated disconnect/retry checks pass; Production normal-login Chrome UAT passes all 8 tabs at three phone orientations with zero console errors. No API, schema, business configuration or upload path changed. Phase 10C-0B Pilot data remains user-owned; next work is real Pilot configuration and multi-role acceptance before ordinary-user rollout.

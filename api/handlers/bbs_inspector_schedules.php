@@ -12,6 +12,19 @@ function bbs_schedule_today(): string
     return (new DateTimeImmutable('now', new DateTimeZone('Asia/Bangkok')))->format('Y-m-d');
 }
 
+function bbs_schedule_kpi_status(array $input = []): array
+{
+    $configured = (bool)($input['configured'] ?? true); $applicable = (bool)($input['applicable'] ?? true);
+    $numerator = (int)($input['numerator'] ?? 0); $denominator = (int)($input['denominator'] ?? 0);
+    $scheduledDays = (int)($input['scheduledDays'] ?? 0); $upcomingDays = (int)($input['upcomingDays'] ?? 0);
+    if (!$configured) return ['code'=>'NOT_CONFIGURED','label'=>'Not configured','description'=>'ยังไม่ได้กำหนดผู้ตรวจและ KPI สำหรับช่วงเวลานี้','percentage'=>null];
+    if (!$applicable) return ['code'=>'N_A','label'=>'N/A','description'=>'บุคคลหรือช่วงเวลานี้ไม่อยู่ในเกณฑ์ KPI','percentage'=>null];
+    if ($denominator > 0 && $numerator <= 0) return ['code'=>'ZERO_PERCENT','label'=>'0%','description'=>'ถึงกำหนดตรวจแล้ว แต่ยังไม่มีผลงานที่นับ KPI','percentage'=>0];
+    if ($denominator > 0) { $percentage=round($numerator*100/$denominator,2); return ['code'=>'PERCENT','label'=>$percentage.'%','description'=>'ผลงานเทียบเป้าหมายที่ถึงกำหนดแล้ว','percentage'=>$percentage]; }
+    if ($upcomingDays > 0 || $scheduledDays > 0) return ['code'=>'NOT_INSPECTED','label'=>'ยังไม่ได้ตรวจ','description'=>'มีตารางตรวจ แต่ยังไม่มีเป้าหมายที่ถึงกำหนด','percentage'=>null];
+    return ['code'=>'N_A','label'=>'N/A','description'=>'ไม่มีวันตรวจที่นำมาคำนวณในช่วงเวลานี้','percentage'=>null];
+}
+
 function bbs_schedule_period(array $query): ?array
 {
     $today = bbs_schedule_today();
@@ -86,6 +99,7 @@ function bbs_schedule_compliance(array $enrollments, array $rules, array $overri
         $due = array_values(array_filter($days, static fn($row) => $row['target'] > 0 && $row['date'] <= $range['today']));
         $scheduled = array_values(array_filter($days, static fn($row) => $row['target'] > 0));
         $numerator = array_sum(array_column($due, 'achieved')); $denominator = array_sum(array_column($due, 'target'));
+        $upcomingDays=count(array_filter($days, static fn($row) => $row['status'] === 'Upcoming')); $exemptDays=count(array_filter($days, static fn($row) => $row['status'] === 'Exempt'));
         $people[] = [
             'enrollmentId'=>(int)($enrollment['EnrollmentID'] ?? $enrollment['id']),
             'inspectorEmployeeId'=>(string)($enrollment['InspectorEmployeeID'] ?? $enrollment['EmployeeID']),
@@ -96,16 +110,18 @@ function bbs_schedule_compliance(array $enrollments, array $rules, array $overri
             'completedDays'=>count(array_filter($due, static fn($row) => $row['status'] === 'Completed')),
             'partialDays'=>count(array_filter($due, static fn($row) => $row['status'] === 'Partial')),
             'missedDays'=>count(array_filter($due, static fn($row) => $row['status'] === 'Missed')),
-            'upcomingDays'=>count(array_filter($days, static fn($row) => $row['status'] === 'Upcoming')),
+            'upcomingDays'=>$upcomingDays, 'exemptDays'=>$exemptDays,
             'actualObservations'=>array_sum(array_column($days, 'actual')),
             'numerator'=>$numerator, 'denominator'=>$denominator,
-            'percentage'=>$denominator > 0 ? round($numerator * 100 / $denominator, 2) : 0,
+            'percentage'=>$denominator > 0 ? round($numerator * 100 / $denominator, 2) : null,
+            'kpiStatus'=>bbs_schedule_kpi_status(['configured'=>true,'applicable'=>count($scheduled)>0,'numerator'=>$numerator,'denominator'=>$denominator,'scheduledDays'=>count($scheduled),'upcomingDays'=>$upcomingDays]),
             'days'=>$days
         ];
     }
     $summary = ['inspectors'=>count($people)];
-    foreach (['scheduledDays','dueDays','completedDays','partialDays','missedDays','upcomingDays','actualObservations','numerator','denominator'] as $key) $summary[$key] = array_sum(array_column($people, $key));
-    $summary['percentage'] = $summary['denominator'] > 0 ? round($summary['numerator'] * 100 / $summary['denominator'], 2) : 0;
+    foreach (['scheduledDays','dueDays','completedDays','partialDays','missedDays','upcomingDays','exemptDays','actualObservations','numerator','denominator'] as $key) $summary[$key] = array_sum(array_column($people, $key));
+    $summary['percentage'] = $summary['denominator'] > 0 ? round($summary['numerator'] * 100 / $summary['denominator'], 2) : null;
+    $summary['kpiStatus'] = bbs_schedule_kpi_status(['configured'=>count($people)>0,'applicable'=>count(array_filter($people,static fn($row)=>$row['scheduledDays']>0))>0,'numerator'=>$summary['numerator'],'denominator'=>$summary['denominator'],'scheduledDays'=>$summary['scheduledDays'],'upcomingDays'=>$summary['upcomingDays']]);
     return ['summary'=>$summary, 'people'=>$people];
 }
 

@@ -39,8 +39,8 @@ for (const marker of [
     assert.ok(ui.includes(marker), `Phase 10C-2 UI missing ${marker}`);
 }
 
-assert.match(main, /bbs-smart-card\.js\?v=20260831-bbs-phase10c[23]/);
-assert.match(html, /main\.js\?v=20260831-bbs-phase10c[23]-forklift-renewal-ky-chunk-r1/);
+assert.match(main, /bbs-smart-card\.js\?v=(?:20260831-bbs-phase10c[23]|20260901-bbs-phase10(?:b4|d[1-5]))/);
+assert.match(html, /main\.js\?v=(?:20260831-bbs-phase10c[23]-forklift-renewal-ky-chunk-r1|20260901-bbs-phase10(?:b4|d[1-5]))/);
 assert.ok(main.includes("document.querySelector('[data-mobile-overlay-dialog=\"true\"]')"), 'Shared mobile viewport logic must recognize BBS dialogs');
 assert.doesNotMatch(ui, /window\.scrollTo\(\{top:0,behavior:'smooth'\}\)/, 'BBS step navigation must scroll the real app container');
 

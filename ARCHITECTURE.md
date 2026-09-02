@@ -1,5 +1,46 @@
 # TSH Safety Core Activity - Architecture
 
+## BBS Pilot Acceptance Gate (Phase 10E)
+
+Phase 10E adds no business table or application workflow route. A repeatable SELECT-only acceptance audit projects the existing Master/Pilot roster, inspector enrollment/team/schedule, server-resolved Checklist coverage, Personal/Department Card configuration, Community handler, workflow evidence, Action reconciliation, email operational state and rollout settings into one deployment decision.
+
+The BBS dispatch boundary now has three explicit modes with strict precedence: `staged_admin_only=1` is Admin-only; otherwise `pilot_scope_only=1` is Controlled Pilot; both values `0` retain the existing company-wide authorization model. Controlled Pilot checks the effective Pilot scope plus an Active inspector enrollment or an effective member assignment on every BBS request in Node and PHP. An Employee Master Department/Unit match alone is insufficient. Admin endpoints retain their existing Admin checks, and anonymous shared QR resolution is unavailable during Controlled Pilot because anonymous identity cannot be reconciled to an approved participant.
+
+The decision states are `PLATFORM_BLOCKED`, `CONFIGURATION_REQUIRED`, `PILOT_EXECUTION_REQUIRED` and `READY_FOR_ROLLOUT_REVIEW`. None changes a feature flag or grants access. Production setup remains Admin-only; an explicitly approved Controlled Pilot UAT may use `0/1` after backup and smoke preparation, while company-wide `0/0` remains a later rollout decision.
+
+Representative Batch acceptance requires at least two effective team assignments because Phase 10A accepts 2-50 unique employees and persists one immutable Observation per employee. Phase 10E reports fewer than two assignments as configuration work rather than generating a synthetic participant.
+
+## BBS Mobile Agenda And Community Risk Detail (Phase 10D-5)
+
+Inspector Schedule now defaults to a phone-friendly Agenda while retaining a Calendar switch. Both render the same `days` returned by the existing inspector schedule/compliance service, including server-derived target, actual, status, source and override reason. The client does not recalculate schedule or KPI eligibility.
+
+`GET /api/bbs/admin/community-reports/:id` is an Admin-only Node/PHP parity projection for a Risky Community report. It returns explicit report fields, safe evidence metadata without `StoredName`, the linked Community Action with owner/verifier display names, and ordered Action History with actor names. Evidence bytes remain behind the existing authenticated object-authorized evidence endpoint and private storage. No schema, upload path, stored row or transition rule changed.
+
+## BBS Operational Email Outbox (Phase 10D-4)
+
+`GET /api/bbs/admin/action-outbox` remains Admin-only and now supports the shared opt-in `paged=1` contract plus `status`, `eventType`, `year` and free-text filters. It returns the existing outbox rows joined only to the related Action number, global Queued/Sent/Failed totals, delivery readiness and known event types. Legacy requests still receive the existing array response.
+
+`POST /api/bbs/admin/action-outbox/:id/retry` accepts only an existing `Failed` item when both `action_notifications_enabled=1` and SMTP are ready. Node and PHP lock that row before delivery, reject `Queued` and `Sent` with `409 BBS_ACTION_EMAIL_RETRY_NOT_ALLOWED`, increment `RetryCount`/`LastAttemptAt`, retain a Failed row and error after delivery failure, and audit either outcome. Suppression keys and recipient/message content are preserved; Retry never inserts a replacement event. No schema or delivery configuration changed.
+
+## BBS Scalable List Projection (Phase 10D-3)
+
+The established BBS list reads support an additive, opt-in paged contract. `GET /api/bbs/observations`, `/actions`, `/community/dashboard`, `/admin/card-employees` and `/admin/cards` return their legacy array shape unless `paged=1` is supplied. Paged consumers receive `data.rows` and `data.pagination`; Community retains its dashboard object and adds independent `pagination.good` / `pagination.risky` metadata because both privacy classes appear in one workspace.
+
+Filtering occurs inside the permission-scoped SQL query before `COUNT`, `LIMIT` and `OFFSET`. Observation and Action scope remains server-authoritative; Card lists remain Admin-only; Community Risky rows remain Admin-only while Good rows never expose reporter identity. Page sizes are capped at 100, page numbers are one-based and clamped against the filtered total. Node uses `backend/services/bbs-list-query.js`; PHP uses `api/handlers/bbs_list_query.php` with parity-tested field names and behavior. No table, index, upload path or stored workflow row changes in this phase.
+
+## BBS KPI Semantic Projection (Phase 10D-2)
+
+- `backend/services/bbs-inspector-schedule.js` and `api/handlers/bbs_inspector_schedules.php` own the parity-tested KPI semantic state derived from effective enrollment, applicability, schedule days, due denominator and capped numerator.
+- Workspace returns the additive `kpi.status`; inspector compliance returns `summary.kpiStatus` and one `kpiStatus` per inspector; Analytics and export-data return the same aggregate and per-person status.
+- Percent is nullable when it is not mathematically applicable. `0%` is returned only when the denominator is positive and credited observations are zero. No stored KPI, schedule or Observation data is changed.
+
+## BBS Checklist Readiness Projection (Phase 10D-1)
+
+- `GET /api/bbs/eligible-employees` remains the permission-scoped employee source and now carries an additive `ChecklistReadiness` object per row.
+- Node `backend/services/bbs-checklist.js` and PHP `api/lib/bbs_checklist.php` classify readiness from existing Checklist templates, versions and scopes using Employee Master Department/Safety Unit/Position/BBS Level plus the requested effective date.
+- The projection is advisory for UI enablement only. Single Draft creation and Batch preview/draft resolve the Checklist again through the existing authoritative server workflow; the frontend cannot submit a Checklist version ID.
+- No table, payload mutation contract, upload path or authorization boundary was added.
+
 ## BBS Phase 10C-3 Runtime Resilience Boundary
 
 Phase 10C-3 adds a client-only resilience layer to the existing BBS page. Initial data is divided into independent `core`, `community`, `inspectors` and Admin `cards` reads; History, Actions and Analytics keep their own recovery keys. A section failure is captured as UI state instead of rejecting the whole module. If the section has confirmed data from an earlier successful read, that data remains visible below an explicit stale-data warning; otherwise the UI displays only the failure and retry control so an unknown value is never represented as zero.

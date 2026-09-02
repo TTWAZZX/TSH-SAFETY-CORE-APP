@@ -9,4 +9,7 @@ $result = [
     'resolutions' => array_map(static fn($row) => bbs_checklist_resolve_candidates($row['candidates'], $row['context']), $fixture['resolutions'] ?? []),
     'publishConflicts' => array_map(static fn($row) => bbs_checklist_publish_conflicts($row['mine'], $row['others']), $fixture['publishConflicts'] ?? []),
 ];
+if (array_key_exists('readiness', $fixture)) {
+    $result['readiness'] = array_map(static fn($row) => bbs_checklist_readiness($row['candidates'], $row['context'], $row['asOf']), $fixture['readiness']);
+}
 echo json_encode($result, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR);

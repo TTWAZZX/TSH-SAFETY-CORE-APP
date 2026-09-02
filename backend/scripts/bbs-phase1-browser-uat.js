@@ -111,34 +111,52 @@ async function main() {
     await waitFor(`typeof window._adminTab === 'function' && document.querySelector('#tab-btn-bbs-foundation')`);
     console.log('INFO Admin console ready');
     await evaluate(`window._adminTab('bbs-foundation')`);
-    await waitFor(`document.querySelector('#admin-content-area')?.innerText?.includes('Foundation, Hierarchy & Permission Engine')`);
+    await waitFor(`document.querySelector('#admin-content-area')?.innerText?.includes('ความพร้อมและการตั้งค่าระบบ BBS')`);
     console.log('INFO BBS Foundation rendered');
     const state = await evaluate(`(() => ({
         tabExists: Boolean(document.querySelector('#tab-btn-bbs-foundation')),
         tabActive: document.querySelector('#tab-btn-bbs-foundation')?.classList.contains('is-active'),
         positionRows: document.querySelectorAll('[id^="bbs-map-level-"]').length,
-        mappingSummary: document.querySelector('#admin-content-area')?.innerText?.includes('5/23'),
-        kpiText: document.querySelector('#admin-content-area')?.innerText?.includes('1 ครั้ง / จ.–ศ.'),
+        mappingSummary: /BBS Level Mapping/i.test(document.querySelector('#admin-content-area')?.innerText || ''),
+        kpiText: document.querySelector('#admin-content-area')?.innerText?.includes('ปัจจุบัน:'),
         pilotDept: document.querySelector('#bbs-pilot-dept')?.selectedOptions?.[0]?.textContent?.trim(),
         pilotUnit: document.querySelector('#bbs-pilot-unit')?.selectedOptions?.[0]?.textContent?.trim(),
         mainBbsMenuVisible: [...document.querySelectorAll('a,button')].some(el => /BBS Smart Card/i.test(el.textContent || '') && !el.closest('#admin-content-area') && !el.closest('.admin-console-tabs')),
         bodyOverflow: document.documentElement.scrollWidth > document.documentElement.clientWidth + 2,
         checklistBuilder: document.querySelector('#admin-content-area')?.innerText?.includes('Checklist Builder'),
-        phase2Badge: document.querySelector('#tab-btn-bbs-foundation')?.innerText?.includes('Phase 2B'),
+        phaseBadge: /Phase\s*\d/i.test(document.querySelector('#tab-btn-bbs-foundation')?.innerText || ''),
         phase2bExchange: typeof window._bbsExportChecklist === 'function' && typeof window._bbsOpenImportChecklist === 'function' && typeof window._bbsPreviewImportFile === 'function',
+        guidedTeam: document.querySelector('#admin-content-area')?.innerText?.includes('จัดผู้ตรวจและทีม'),
+        legacyAssignmentCreate: document.querySelector('#admin-content-area')?.innerText?.includes('+ เพิ่ม Assignment'),
+        checklistSearch: Boolean(document.querySelector('[oninput*="checklistQuery"]')),
     }))()`);
     assert.strictEqual(state.tabExists, true);
     assert.strictEqual(state.tabActive, true);
     assert.strictEqual(state.positionRows, 23);
     assert.strictEqual(state.mappingSummary, true);
     assert.strictEqual(state.kpiText, true);
-    assert.strictEqual(state.pilotDept, 'MAINTENANCE SEC.');
-    assert.strictEqual(state.pilotUnit, 'Tube Cutting');
+    assert.ok(state.pilotDept, 'Master Department picker must have at least one option.');
+    assert.ok(state.pilotUnit, 'Safety Unit picker must have at least one option for the selected Department.');
     assert.strictEqual(state.mainBbsMenuVisible, true, 'Main BBS module must be visible after Phase 3 opens the Pilot/Admin workspace.');
     assert.strictEqual(state.bodyOverflow, false, 'BBS Foundation page-level overflow detected.');
     assert.strictEqual(state.checklistBuilder, true, 'Phase 2 Checklist Builder is missing.');
-    assert.strictEqual(state.phase2Badge, true, 'BBS Foundation tab must show Phase 2B.');
+    assert.strictEqual(state.phaseBadge, false, 'Development Phase labels must not appear in the BBS Foundation tab.');
     assert.strictEqual(state.phase2bExchange, true, 'Phase 2B Excel exchange actions are not wired.');
+    assert.strictEqual(state.guidedTeam, true, 'Canonical Inspector/Team guidance is missing.');
+    assert.strictEqual(state.legacyAssignmentCreate, false, 'Legacy hierarchy mutation must not be exposed in System Console.');
+    assert.strictEqual(state.checklistSearch, true, 'Checklist search/filter controls are missing.');
+    await cdp.command('Emulation.setDeviceMetricsOverride', { width: 390, height: 844, deviceScaleFactor: 1, mobile: true });
+    await sleep(400);
+    const mobileState = await evaluate(`(() => ({
+        overflow: document.documentElement.scrollWidth > document.documentElement.clientWidth + 2,
+        guidedButtonHeight: Math.round(document.querySelector('[onclick*="team-management"]')?.getBoundingClientRect().height || 0),
+        tableRegionLabelled: [...document.querySelectorAll('#admin-content-area [role="region"][tabindex="0"]')].every(el => Boolean(el.getAttribute('aria-label'))),
+    }))()`);
+    assert.strictEqual(mobileState.overflow, false, 'BBS Foundation caused page-level overflow at 390 px.');
+    assert.ok(mobileState.guidedButtonHeight >= 44, 'Primary BBS Foundation controls must retain a 44 px touch target.');
+    assert.strictEqual(mobileState.tableRegionLabelled, true, 'Scrollable BBS Foundation tables must be keyboard-focusable and labelled.');
+    await cdp.command('Emulation.setDeviceMetricsOverride', { width: 1600, height: 1000, deviceScaleFactor: 1, mobile: false });
+    await sleep(300);
     await evaluate(`window._bbsOpenCreateChecklist()`);
     await waitFor(`document.querySelector('#bbs-new-code') && document.querySelector('#bbs-new-name') && document.querySelector('#bbs-new-from')`);
     const createModal = await evaluate(`({code:Boolean(document.querySelector('#bbs-new-code')),name:Boolean(document.querySelector('#bbs-new-name')),date:document.querySelector('#bbs-new-from')?.value,overflow:document.documentElement.scrollWidth>document.documentElement.clientWidth+2})`);
@@ -151,6 +169,9 @@ async function main() {
     await waitFor(`document.querySelector('#bbs-resolve-employee') && document.querySelector('#bbs-resolve-date') && document.querySelector('#bbs-resolve-result')`);
     assert.strictEqual(await evaluate(`document.querySelector('#bbs-resolve-result')?.innerText?.includes('Checklist')`), true, 'Resolver Preview guidance is missing.');
     await evaluate(`window.closeModal()`);
+    await evaluate(`window._bbsOpenModuleWorkspace('team-management')`);
+    await waitFor(`location.hash === '#bbs-smart-card' && document.querySelector('[data-bbs-tab="team-management"]')?.classList.contains('bg-white')`);
+    assert.strictEqual(await evaluate(`sessionStorage.getItem('bbs_admin_workspace') === null`), true, 'BBS Admin workspace intent was not consumed.');
     assert.deepStrictEqual(errors, [], `Browser runtime errors: ${errors.join(' | ')}`);
     console.log(`BBS Phase 1-3 browser regression UAT: PASS (${state.positionRows} positions, Checklist Builder, Excel exchange, and main module visible)`);
 }

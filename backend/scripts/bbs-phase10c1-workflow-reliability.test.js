@@ -29,7 +29,7 @@ for (const marker of [
 
 assert.doesNotMatch(ui, /state\.draft\s*=\s*state\.tab\s*===\s*['"]start['"]\s*\?/);
 
-const issueStart = ui.indexOf('async function issueCards()');
+const issueStart = ui.indexOf('async function issueCards(');
 const issueEnd = ui.indexOf('async function replaceCard(', issueStart);
 const issueSource = ui.slice(issueStart, issueEnd);
 assert.ok(issueSource.indexOf('openCardPrintPopup()') < issueSource.indexOf("API.post('/bbs/admin/cards/issue'"), 'Issue must open the print window before mutation');
@@ -48,7 +48,7 @@ assert.ok(exportSource.indexOf('const data = await analyticsExportData()') < exp
 assert.ok(exportSource.includes("if (type === 'print')"), 'Print must pre-open its popup before the async fetch');
 assert.ok(exportSource.includes('applyAnalyticsPayload(data)'), 'PDF and Print must render the freshly fetched payload');
 
-assert.match(main, /bbs-smart-card\.js\?v=20260831-bbs-phase10c[123]/);
-assert.match(html, /main\.js\?v=20260831-bbs-phase10c[123]-forklift-renewal-ky-chunk-r1/);
+assert.match(main, /bbs-smart-card\.js\?v=(?:20260831-bbs-phase10c[123]|20260901-bbs-phase10(?:b4|d[1-5]))/);
+assert.match(html, /main\.js\?v=(?:20260831-bbs-phase10c[123]-forklift-renewal-ky-chunk-r1|20260901-bbs-phase10(?:b4|d[1-5]))/);
 
 console.log('BBS Phase 10C-1 workflow reliability contract: PASS');
