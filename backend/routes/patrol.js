@@ -529,23 +529,21 @@ function patrolBangkokDateTime() {
     return `${values.year}-${values.month}-${values.day} ${values.hour}:${values.minute}:${values.second}`;
 }
 
+function patrolActualActivityKind(record = {}, sessionMap = new Map()) {
+    const sid = String(record.ScheduledSessionID || '').trim();
+    if (!sid) return record.IsV2Request ? 'extra' : 'scheduledNormal';
+    const session = sessionMap.get(sid);
+    const actualDate = dateOnly(record.PatrolDate);
+    const scheduledDate = session ? dateOnly(session.PatrolDate) : '';
+    return String(record.PatrolType || '').toLowerCase() === 'compensation'
+        || (scheduledDate && actualDate !== scheduledDate) ? 'makeup' : 'scheduledNormal';
+}
+
 function patrolActualActivity(records = [], sessionMap = new Map()) {
     const summary = { total: 0, scheduledNormal: 0, makeup: 0, extra: 0 };
-    const scheduledDates = new Set([...sessionMap.values()].map(session => dateOnly(session.PatrolDate)));
     for (const record of records) {
         summary.total++;
-        const sid = String(record.ScheduledSessionID || '').trim();
-        if (!sid) {
-            if (record.IsV2Request || !scheduledDates.has(dateOnly(record.PatrolDate))) summary.extra++;
-            else summary.scheduledNormal++;
-            continue;
-        }
-        const session = sessionMap.get(sid);
-        const actualDate = dateOnly(record.PatrolDate);
-        const scheduledDate = session ? dateOnly(session.PatrolDate) : '';
-        if (String(record.PatrolType || '').toLowerCase() === 'compensation'
-            || (scheduledDate && actualDate !== scheduledDate)) summary.makeup++;
-        else summary.scheduledNormal++;
+        summary[patrolActualActivityKind(record, sessionMap)]++;
     }
     return summary;
 }
@@ -613,6 +611,7 @@ router.get('/my-monthly-plan', async (req, res) => {
                 attended: personalSchedule.completed,
                 attendanceDates,
                 actualActivity: personalSchedule.actualActivity,
+                activityRecords: personalSchedule.activityRecords,
                 features: { checkinV2Enabled },
                 roster,
                 compliance: {
@@ -696,12 +695,32 @@ router.get('/my-yearly-stats', async (req, res) => {
             [employeeId, year, curMonth]
         );
 
-        // 7. Monthly attendance breakdown (for dot tracker)
-        const [monthlyAtt] = await db.query(
-            `SELECT MONTH(PatrolDate) AS month, COUNT(*) AS cnt
-             FROM Patrol_Attendance
-             WHERE UserID = ? AND YEAR(PatrolDate) = ?
-             GROUP BY MONTH(PatrolDate)`,
+        // 7. Monthly actual-walk breakdown. The actual walk month is the visual
+        // authority, while the linked session month remains the compliance source.
+        const [monthlyActivity] = await db.query(
+            `SELECT MONTH(pa.PatrolDate) AS month,
+                    SUM(CASE WHEN pa.ScheduledSessionID IS NOT NULL
+                                  AND (LOWER(COALESCE(pa.PatrolType,'')) = 'compensation' OR DATE(pa.PatrolDate) <> DATE(ps.PatrolDate))
+                             THEN 1 ELSE 0 END) AS makeup,
+                    SUM(CASE WHEN pa.ScheduledSessionID IS NULL AND pa.IdempotencyKey IS NOT NULL THEN 1 ELSE 0 END) AS extra,
+                    SUM(CASE WHEN (pa.ScheduledSessionID IS NOT NULL
+                                      AND NOT (LOWER(COALESCE(pa.PatrolType,'')) = 'compensation' OR DATE(pa.PatrolDate) <> DATE(ps.PatrolDate)))
+                                   OR (pa.ScheduledSessionID IS NULL AND pa.IdempotencyKey IS NULL)
+                             THEN 1 ELSE 0 END) AS scheduledNormal,
+                    COUNT(*) AS cnt
+             FROM Patrol_Attendance pa
+             LEFT JOIN Patrol_Sessions ps ON ps.SessionID = pa.ScheduledSessionID
+             WHERE pa.UserID = ? AND YEAR(pa.PatrolDate) = ?
+             GROUP BY MONTH(pa.PatrolDate)`,
+            [employeeId, year]
+        );
+
+        const [monthlyCompletedBySchedule] = await db.query(
+            `SELECT MONTH(ps.PatrolDate) AS month, COUNT(pa.id) AS cnt
+             FROM Patrol_Attendance pa
+             JOIN Patrol_Sessions ps ON ps.SessionID = pa.ScheduledSessionID
+             WHERE pa.UserID = ? AND YEAR(ps.PatrolDate) = ?
+             GROUP BY MONTH(ps.PatrolDate)`,
             [employeeId, year]
         );
 
@@ -719,15 +738,26 @@ router.get('/my-yearly-stats', async (req, res) => {
             monthlySched = ms;
         }
 
-        const monthlyAttMap  = {};
+        const monthlyActivityMap = {};
+        const monthlyCompletedMap = {};
         const monthlySchedMap = {};
-        monthlyAtt.forEach(r => { monthlyAttMap[r.month] = parseInt(r.cnt); });
+        monthlyActivity.forEach(r => { monthlyActivityMap[r.month] = r; });
+        monthlyCompletedBySchedule.forEach(r => { monthlyCompletedMap[r.month] = parseInt(r.cnt); });
         monthlySched.forEach(r => { monthlySchedMap[r.month] = parseInt(r.cnt); });
-        const monthlyBreakdown = Array.from({ length: 12 }, (_, i) => ({
-            month: i + 1,
-            attended:  monthlyAttMap[i + 1]  || 0,
-            scheduled: monthlySchedMap[i + 1] || 0,
-        }));
+        const monthlyBreakdown = Array.from({ length: 12 }, (_, i) => {
+            const month = i + 1;
+            const activity = monthlyActivityMap[month] || {};
+            const scheduled = monthlySchedMap[month] || 0;
+            return {
+                month,
+                attended: Number(activity.cnt || 0),
+                scheduled,
+                scheduledNormal: Number(activity.scheduledNormal || 0),
+                makeup: Number(activity.makeup || 0),
+                extra: Number(activity.extra || 0),
+                missed: Math.max(0, scheduled - Number(monthlyCompletedMap[month] || 0)),
+            };
+        });
 
         res.json({
             success: true,
@@ -2854,6 +2884,10 @@ async function buildPersonalMonthlySchedule(employeeId, year, month) {
         completed,
         attendance,
         actualActivity: patrolActualActivity(attendance, sessionMap),
+        activityRecords: attendance.map(record => ({
+            PatrolDate: dateOnly(record.PatrolDate),
+            activityKind: patrolActualActivityKind(record, sessionMap),
+        })),
         leaveRequests: leaveRows,
     };
 }

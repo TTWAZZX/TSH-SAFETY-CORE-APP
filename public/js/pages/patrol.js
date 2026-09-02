@@ -1152,6 +1152,8 @@ function renderDashboard(container, data) {
         { label: 'รวมปีนี้',         val: _yearlyDue ? `${_yearlyCount}/${_yearlyDue}${_yearlyTarget ? ` (${_yearlyTarget})` : ''}` : (_yearlyTarget ? `${_yearlyCount} (${_yearlyTarget})` : _yearlyCount), color: '#6ee7b7' },
         { label: 'Accepted %',       val: `${_acceptedPct}%`,                                                        color: '#6ee7b7' },
         { label: 'สถานะเดือนนี้',    val: _myPlan ? `${_myPlan.compliance.attended}/${_myPlan.compliance.required} รอบ` : '—',
+          hint: _myPlan ? (_myPlan.compliance.done ? 'ครบแล้ว' : `เหลืออีก ${Math.max(0, _myPlan.compliance.required - _myPlan.compliance.attended)} รอบ`) : '',
+          action: 'openPersonalPlanStatusModal()',
           color: _myPlan?.compliance?.done ? '#6ee7b7' : '#fcd34d' },
     ];
     const _issueStats = [
@@ -1169,10 +1171,11 @@ function renderDashboard(container, data) {
         const isThreeMetricStrip = stats.length === 3;
         el.className = `grid ${isThreeMetricStrip ? 'grid-cols-3' : 'grid-cols-2 md:grid-cols-4'} gap-2 sm:gap-3 mt-5`;
         el.innerHTML = stats.map(s => `
-        <div class="min-w-0 rounded-xl ${isThreeMetricStrip ? 'px-2 py-3 sm:px-4' : 'px-4 py-3'} text-center transition-all duration-300" style="background:rgba(255,255,255,0.12);backdrop-filter:blur(6px)">
+        <${s.action ? 'button type="button" onclick="' + s.action + '"' : 'div'} class="min-w-0 rounded-xl ${isThreeMetricStrip ? 'px-2 py-3 sm:px-4' : 'px-4 py-3'} text-center transition-all duration-300 ${s.action ? 'cursor-pointer hover:bg-white/20 active:scale-[0.98]' : ''}" style="background:rgba(255,255,255,0.12);backdrop-filter:blur(6px)">
           <p class="${isThreeMetricStrip ? 'text-lg sm:text-xl' : 'text-xl'} font-bold leading-tight truncate" style="color:${s.color}">${s.val}</p>
           <p class="text-[10px] sm:text-[11px] mt-1 text-white/70 leading-tight">${s.label}</p>
-        </div>`).join('');
+          ${s.hint ? `<p class="mt-1 text-[9px] font-bold text-white/80">${s.hint}</p>` : ''}
+        </${s.action ? 'button' : 'div'}>`).join('');
     }
 
     function getOverviewHeroStats() {
@@ -1644,27 +1647,34 @@ function renderDashboard(container, data) {
                 </div>
                 กิจกรรมตลอดปี ${_myYearlyStats.year || curY}
               </h3>
-              <div class="flex items-center gap-3 text-[9px] text-slate-400">
-                <span class="flex items-center gap-1"><span class="w-2 h-2 rounded-full bg-emerald-400 inline-block"></span>เข้าร่วม</span>
-                <span class="flex items-center gap-1"><span class="w-2 h-2 rounded-full bg-slate-200 inline-block"></span>พลาด</span>
+              <div class="flex flex-wrap justify-end gap-x-3 gap-y-1 text-[9px] text-slate-400">
+                <span class="flex items-center gap-1"><span class="w-2 h-2 rounded-full bg-emerald-400 inline-block"></span>ตามรอบ</span>
+                <span class="flex items-center gap-1"><span class="w-2 h-2 rounded-full bg-amber-400 inline-block"></span>เดินซ่อม</span>
+                <span class="flex items-center gap-1"><span class="w-2 h-2 rounded-full bg-violet-400 inline-block"></span>เดินเพิ่ม</span>
+                <span class="flex items-center gap-1"><span class="w-2 h-2 rounded-full bg-slate-200 inline-block"></span>ยังขาด</span>
               </div>
             </div>
             <div class="grid grid-cols-6 sm:grid-cols-12 gap-1.5">
               ${bd.map(m => {
                 const isFuture = _myYearlyStats.year === curY && m.month > curM;
                 const isCurrent = _myYearlyStats.year === curY && m.month === curM;
-                const dotCount  = Math.min(m.attended, maxDots);
-                const missCount = isFuture ? 0 : Math.min(Math.max((m.scheduled || 0) - m.attended, 0), maxDots - dotCount);
-                const dots = Array(dotCount).fill('<span class="w-2 h-2 rounded-full bg-emerald-400 inline-block flex-shrink-0"></span>').join('')
+                const normalCount = Math.min(Number(m.scheduledNormal ?? m.attended ?? 0), maxDots);
+                const makeupCount = Math.min(Number(m.makeup || 0), Math.max(0, maxDots - normalCount));
+                const extraCount  = Math.min(Number(m.extra || 0), Math.max(0, maxDots - normalCount - makeupCount));
+                const missCount   = isFuture ? 0 : Math.min(Number(m.missed ?? Math.max((m.scheduled || 0) - (m.attended || 0), 0)), Math.max(0, maxDots - normalCount - makeupCount - extraCount));
+                const dots = Array(normalCount).fill('<span class="w-2 h-2 rounded-full bg-emerald-400 inline-block flex-shrink-0"></span>').join('')
+                           + Array(makeupCount).fill('<span class="w-2 h-2 rounded-full bg-amber-400 inline-block flex-shrink-0"></span>').join('')
+                           + Array(extraCount).fill('<span class="w-2 h-2 rounded-full bg-violet-400 inline-block flex-shrink-0"></span>').join('')
                            + Array(missCount).fill('<span class="w-2 h-2 rounded-full bg-slate-200 inline-block flex-shrink-0"></span>').join('');
-                const hasActivity = m.attended > 0 || (m.scheduled > 0 && !isFuture);
+                const hasActivity = Number(m.attended || 0) > 0 || (m.scheduled > 0 && !isFuture);
                 const cellBg = isCurrent ? 'ring-2 ring-emerald-400 ring-offset-1' : '';
-                return `<div class="flex flex-col items-center gap-1 p-1.5 rounded-lg ${isFuture ? 'opacity-35' : hasActivity ? 'bg-emerald-50/60' : 'bg-slate-50'} ${cellBg}" title="${monthNames[m.month-1]}: เข้าร่วม ${m.attended} ครั้ง${m.scheduled ? ' / กำหนด ' + m.scheduled + ' ครั้ง' : ''}">
+                const totalActivity = Number(m.attended || 0);
+                return `<div class="flex flex-col items-center gap-1 p-1.5 rounded-lg ${isFuture ? 'opacity-35' : hasActivity ? 'bg-emerald-50/60' : 'bg-slate-50'} ${cellBg}" title="${monthNames[m.month-1]}: ตามรอบ ${m.scheduledNormal || 0} · เดินซ่อม ${m.makeup || 0} · เดินเพิ่ม ${m.extra || 0} · ยังขาด ${m.missed || 0}">
                   <span class="text-[9px] font-bold ${isCurrent ? 'text-emerald-600' : 'text-slate-400'}">${monthNames[m.month-1]}</span>
                   <div class="flex flex-wrap gap-0.5 justify-center min-h-[12px]">
                     ${dots || (isFuture ? '' : '<span class="w-2 h-2 rounded-full bg-slate-100 inline-block"></span>')}
                   </div>
-                  <span class="text-[9px] font-bold ${m.attended > 0 ? 'text-emerald-600' : isFuture ? 'text-slate-300' : 'text-slate-300'}">${isFuture ? '' : m.attended || '0'}</span>
+                  <span class="text-[9px] font-bold ${totalActivity > 0 ? 'text-emerald-600' : isFuture ? 'text-slate-300' : 'text-slate-300'}">${isFuture ? '' : totalActivity || '0'}</span>
                 </div>`;
               }).join('')}
             </div>
@@ -4191,6 +4201,16 @@ function generateMiniCalendarHTML(scheduleData) {
         if (!dayMap[day]) dayMap[day] = [];
         dayMap[day].push(s);
     });
+    const activityByDay = {};
+    (_myPlan?.activityRecords || []).forEach(record => {
+        const date = patrolDateOnly(record.PatrolDate);
+        if (!date) return;
+        const recordDate = new Date(`${date}T00:00:00`);
+        if (recordDate.getFullYear() !== year || recordDate.getMonth() !== month) return;
+        const day = recordDate.getDate();
+        if (!activityByDay[day]) activityByDay[day] = [];
+        activityByDay[day].push(record.activityKind || 'scheduledNormal');
+    });
 
     let html = '';
     for (let i = 0; i < firstDay; i++) html += `<div class="h-8"></div>`;
@@ -4201,6 +4221,8 @@ function generateMiniCalendarHTML(scheduleData) {
         const isPast    = new Date(year, month, day) < today && !isToday;
         const hasCompleted = sessions.some(s => s.Status === 'Completed');
         const hasMissed    = isPast && hasSess && !hasCompleted;
+        const activityKinds = activityByDay[day] || [];
+        const hasActivity = activityKinds.length > 0;
 
         const dateStr = `${year}-${String(month+1).padStart(2,'0')}-${String(day).padStart(2,'0')}`;
 
@@ -4210,6 +4232,13 @@ function generateMiniCalendarHTML(scheduleData) {
         if (isToday) {
             cls   += ' text-white font-bold shadow-sm';
             style  = 'background:linear-gradient(135deg,#059669,#0d9488)';
+        } else if (hasActivity) {
+            const primary = activityKinds.includes('extra') ? 'extra' : activityKinds.includes('makeup') ? 'makeup' : 'scheduledNormal';
+            cls += primary === 'extra'
+                ? ' bg-violet-500 text-white font-bold shadow-sm'
+                : primary === 'makeup'
+                    ? ' bg-amber-400 text-white font-bold shadow-sm'
+                    : ' bg-emerald-500 text-white font-bold shadow-sm';
         } else if (hasCompleted) {
             cls   += ' bg-emerald-500 text-white font-bold shadow-sm cursor-pointer hover:bg-emerald-600';
         } else if (hasMissed) {
@@ -4221,7 +4250,9 @@ function generateMiniCalendarHTML(scheduleData) {
         }
 
         const onclick = hasSess ? `onclick="openCalendarDay('${dateStr}')"` : '';
-        html += `<div class="${cls}" style="${style}" ${onclick} title="${hasSess ? sessions.length+' session(s)' : ''}">${day}</div>`;
+        const dots = activityKinds.map(kind => `<span class="w-1.5 h-1.5 rounded-full border border-white/70 ${kind === 'extra' ? 'bg-violet-200' : kind === 'makeup' ? 'bg-amber-100' : 'bg-emerald-100'}"></span>`).join('');
+        const activityLabel = activityKinds.map(kind => kind === 'extra' ? 'เดินเพิ่ม' : kind === 'makeup' ? 'เดินซ่อม' : 'ตามรอบ').join(', ');
+        html += `<div class="${cls}" style="${style}" ${onclick} title="${activityLabel || (hasSess ? sessions.length+' session(s)' : '')}">${day}${dots ? `<span class="absolute bottom-0.5 right-0.5 flex gap-0.5">${dots}</span>` : ''}</div>`;
     }
     return html;
 }
@@ -4231,7 +4262,9 @@ function getCalendarLegendHTML() {
     return `
       <div class="flex items-center gap-3 text-[10px] text-slate-400 flex-wrap">
         <span class="flex items-center gap-1"><span class="w-3 h-3 rounded-md inline-block" style="background:linear-gradient(135deg,#059669,#0d9488)"></span>วันนี้</span>
-        <span class="flex items-center gap-1"><span class="w-3 h-3 rounded-md bg-emerald-500 inline-block"></span>เดินแล้ว</span>
+        <span class="flex items-center gap-1"><span class="w-3 h-3 rounded-md bg-emerald-500 inline-block"></span>ตามรอบ</span>
+        <span class="flex items-center gap-1"><span class="w-3 h-3 rounded-md bg-amber-400 inline-block"></span>เดินซ่อม</span>
+        <span class="flex items-center gap-1"><span class="w-3 h-3 rounded-md bg-violet-500 inline-block"></span>เดินเพิ่ม</span>
         <span class="flex items-center gap-1"><span class="w-3 h-3 rounded-md bg-emerald-50 border border-emerald-200 inline-block"></span>กำหนดเดิน</span>
         <span class="flex items-center gap-1"><span class="w-3 h-3 rounded-md bg-amber-50 border border-amber-200 inline-block"></span>ยังไม่ได้เดิน</span>
       </div>`;
@@ -4521,6 +4554,24 @@ function getSkeletonHTML() {
 }
 
 // ─── Check-in Modal (Smart) ───────────────────────────────────────────────────
+window.openPersonalPlanStatusModal = function() {
+    const plan = _myPlan;
+    if (!plan?.compliance) return;
+    const missing = (plan.sessions || []).filter(item => !patrolSessionCompleted(item) && !patrolSessionLeave(item));
+    const remaining = Math.max(0, Number(plan.compliance.required || 0) - Number(plan.compliance.attended || 0));
+    openModal('สถานะรอบเดินตรวจเดือนนี้', `
+      <div class="space-y-4">
+        <div class="rounded-xl border ${plan.compliance.done ? 'border-emerald-200 bg-emerald-50' : 'border-amber-200 bg-amber-50'} p-4">
+          <p class="text-sm font-black ${plan.compliance.done ? 'text-emerald-700' : 'text-amber-700'}">${plan.compliance.attended}/${plan.compliance.required} รอบ ${plan.compliance.done ? '· ครบแล้ว' : `· เหลืออีก ${remaining} รอบ`}</p>
+          <p class="mt-1 text-[11px] text-slate-500">เดินเพิ่มนับเป็นกิจกรรมจริง แต่ไม่นับรอบบังคับ</p>
+        </div>
+        ${missing.length ? `<div><p class="mb-2 text-xs font-black text-slate-700">รอบที่ยังต้องดำเนินการ</p><div class="space-y-2">${missing.map(item => {
+            const date = new Date(item.PatrolDate || item.ScheduledDate);
+            return `<div class="flex items-center justify-between gap-3 rounded-xl border border-slate-100 bg-slate-50 px-3 py-2.5"><div><p class="text-xs font-bold text-slate-700">${date.toLocaleDateString('th-TH', { weekday:'short', day:'numeric', month:'short' })} · รอบ ${escHtml(item.PatrolRound || '-')}</p><p class="mt-0.5 text-[10px] text-slate-400">${escHtml(item.AreaName || item.AreaCode || 'ไม่ระบุพื้นที่')}</p></div><span class="shrink-0 rounded-full bg-amber-100 px-2 py-1 text-[10px] font-black text-amber-700">รอดำเนินการ</span></div>`;
+        }).join('')}</div></div>` : '<p class="py-4 text-center text-sm font-semibold text-emerald-600">ไม่มีรอบค้างแล้ว</p>'}
+      </div>`, 'max-w-md');
+};
+
 function openCheckInModal() {
     const today    = new Date();
     const displayUser = patrolDisplayUser();
@@ -4585,7 +4636,7 @@ function openCheckInModal() {
         <span class="text-[10px] text-slate-500">ความครบถ้วนเดือนนี้</span>
         <div class="text-right">
           <span class="block text-[10px] font-bold ${compliance.done?'text-emerald-600':'text-amber-600'}">${compliance.attended}/${compliance.required} รอบ ${compliance.done?'✓':''}</span>
-          ${_myPlan?.actualActivity ? `<span class="block text-[9px] text-violet-600">เดินจริง ${_myPlan.actualActivity.total || 0} · เดินเพิ่ม ${_myPlan.actualActivity.extra || 0}</span>` : ''}
+          ${_myPlan?.actualActivity ? `<span class="block text-[9px] text-violet-600">เดินจริง ${_myPlan.actualActivity.total || 0} · ตามรอบ ${_myPlan.actualActivity.scheduledNormal || 0} · ซ่อม ${_myPlan.actualActivity.makeup || 0} · เพิ่ม ${_myPlan.actualActivity.extra || 0}</span>` : ''}
         </div>
       </div>` : ''}
     </div>` : '';
@@ -4618,6 +4669,8 @@ function openCheckInModal() {
           <svg class="w-4 h-4 flex-shrink-0 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
           <span>วันนี้ไม่ใช่วันเดินตรวจตามตาราง สามารถ Check-in ได้แต่จะนับเป็นการเดินนอกตาราง</span>
         </div>` : ''}
+
+        <p class="rounded-lg bg-violet-50 px-3 py-2 text-[10px] leading-relaxed text-violet-700">เดินเพิ่มนับเป็นกิจกรรมจริง แต่จะไม่เพิ่มความครบถ้วนของรอบบังคับ</p>
 
         ${checkinV2Enabled ? `
         <input type="hidden" name="PatrolType" value="${initialMode === 'makeup' ? 'compensation' : 'normal'}">
@@ -4832,7 +4885,8 @@ function showCheckinSuccessScreen(patrolType, result = {}) {
     const email       = result.email || {};
     const displayUser = patrolDisplayUser();
     const areaName    = checkin.area || null;
-    const newAttended = (compliance?.attended || 0) + 1;
+    const countsTowardCompliance = checkin.mode !== 'extra';
+    const newAttended = (compliance?.attended || 0) + (countsTowardCompliance ? 1 : 0);
     const required    = compliance?.required || 0;
     const nowDone     = newAttended >= required && required > 0;
     const pct         = required > 0 ? Math.min(Math.round((newAttended / required) * 100), 100) : 0;
@@ -4880,7 +4934,9 @@ function showCheckinSuccessScreen(patrolType, result = {}) {
           <div class="w-full bg-slate-200 rounded-full h-2 overflow-hidden">
             <div class="h-full rounded-full transition-all duration-700" style="width:${pct}%;background:${nowDone ? 'linear-gradient(90deg,#059669,#10b981)' : 'linear-gradient(90deg,#f59e0b,#fbbf24)'}"></div>
           </div>
-          ${nowDone ? `<p class="text-[10px] text-emerald-600 font-semibold mt-2 text-center">ครบเป้าหมายเดือนนี้แล้ว</p>` : ''}
+          ${countsTowardCompliance
+            ? (nowDone ? `<p class="text-[10px] text-emerald-600 font-semibold mt-2 text-center">ครบเป้าหมายเดือนนี้แล้ว</p>` : `<p class="text-[10px] text-amber-600 font-semibold mt-2 text-center">เหลืออีก ${Math.max(0, required - newAttended)} รอบ</p>`)
+            : `<p class="text-[10px] text-violet-600 font-semibold mt-2 text-center">เดินเพิ่มแล้ว · ไม่นับรอบบังคับ</p>`}
         </div>` : ''}
 
         <!-- CTA -->

@@ -199,26 +199,22 @@ function patrol_idempotency_key($value): ?string
     return preg_match('/^[A-Za-z0-9][A-Za-z0-9:_-]{15,79}$/', $key) ? $key : null;
 }
 
+function patrol_activity_kind(array $record, array $sessionMap = []): string
+{
+    $sid = trim((string) ($record['ScheduledSessionID'] ?? ''));
+    if ($sid === '') return !empty($record['IsV2Request']) ? 'extra' : 'scheduledNormal';
+    $session = $sessionMap[$sid] ?? null;
+    $actualDate = substr((string) ($record['PatrolDate'] ?? ''), 0, 10);
+    $scheduledDate = $session ? substr((string) ($session['PatrolDate'] ?? ''), 0, 10) : '';
+    return strtolower((string) ($record['PatrolType'] ?? '')) === 'compensation' || ($scheduledDate !== '' && $actualDate !== $scheduledDate) ? 'makeup' : 'scheduledNormal';
+}
+
 function patrol_actual_activity(array $records, array $sessionMap = []): array
 {
     $summary = ['total' => 0, 'scheduledNormal' => 0, 'makeup' => 0, 'extra' => 0];
-    $scheduledDates = [];
-    foreach ($sessionMap as $session) $scheduledDates[substr((string) ($session['PatrolDate'] ?? ''), 0, 10)] = true;
     foreach ($records as $record) {
         $summary['total']++;
-        $sid = trim((string) ($record['ScheduledSessionID'] ?? ''));
-        if ($sid === '') {
-            $actualDate = substr((string) ($record['PatrolDate'] ?? ''), 0, 10);
-            if (!empty($record['IsV2Request']) || empty($scheduledDates[$actualDate])) $summary['extra']++;
-            else $summary['scheduledNormal']++;
-            continue;
-        }
-        $session = $sessionMap[$sid] ?? null;
-        $actualDate = substr((string) ($record['PatrolDate'] ?? ''), 0, 10);
-        $scheduledDate = $session ? substr((string) ($session['PatrolDate'] ?? ''), 0, 10) : '';
-        if (strtolower((string) ($record['PatrolType'] ?? '')) === 'compensation'
-            || ($scheduledDate !== '' && $actualDate !== $scheduledDate)) $summary['makeup']++;
-        else $summary['scheduledNormal']++;
+        $summary[patrol_activity_kind($record, $sessionMap)]++;
     }
     return $summary;
 }
@@ -1062,6 +1058,9 @@ function patrol_user_month_schedule(string $employeeId, int $year, int $month): 
         'completed' => $completed,
         'attendance' => $attendance,
         'actualActivity' => patrol_actual_activity($attendance, patrol_session_map($yearSessions)),
+        'activityRecords' => array_map(static function ($record) use ($yearSessions) {
+            return ['PatrolDate' => substr((string) ($record['PatrolDate'] ?? ''), 0, 10), 'activityKind' => patrol_activity_kind($record, patrol_session_map($yearSessions))];
+        }, $attendance),
     ];
 }
 
@@ -2270,7 +2269,7 @@ function handle_patrol_routes(string $method, string $path): bool
         $attendanceDates = [];
         foreach ($attendance as $row) $attendanceDates[] = substr((string) $row['PatrolDate'], 0, 10);
         $roster = db_rows("SELECT tm.EmployeeID,tm.PatrolType,e.EmployeeName,COALESCE(mr.TeamID,tm.TeamID) AS EffectiveTeamID FROM patrol_team_members tm JOIN employees e ON e.EmployeeID=tm.EmployeeID LEFT JOIN patrol_member_rotation mr ON mr.EmployeeID=tm.EmployeeID AND mr.Year=? AND mr.Month=? WHERE COALESCE(mr.TeamID,tm.TeamID)=? ORDER BY FIELD(tm.PatrolType,'top','committee','management'),e.EmployeeName", [$year, $month, $team['id']]);
-        json_response(['success' => true, 'data' => ['patrolType' => $base['PatrolType'], 'team' => $team, 'sessions' => $sessions, 'required' => $required, 'attended' => (int) $personalSchedule['completed'], 'attendanceDates' => $attendanceDates, 'actualActivity' => $personalSchedule['actualActivity'] ?? ['total' => 0, 'scheduledNormal' => 0, 'makeup' => 0, 'extra' => 0], 'features' => ['checkinV2Enabled' => patrol_checkin_v2_enabled()], 'roster' => $roster, 'compliance' => ['required' => (int) $personalSchedule['required'], 'attended' => (int) $personalSchedule['completed'], 'done' => (int) $personalSchedule['completed'] >= (int) $personalSchedule['required']]]]);
+        json_response(['success' => true, 'data' => ['patrolType' => $base['PatrolType'], 'team' => $team, 'sessions' => $sessions, 'required' => $required, 'attended' => (int) $personalSchedule['completed'], 'attendanceDates' => $attendanceDates, 'actualActivity' => $personalSchedule['actualActivity'] ?? ['total' => 0, 'scheduledNormal' => 0, 'makeup' => 0, 'extra' => 0], 'activityRecords' => $personalSchedule['activityRecords'] ?? [], 'features' => ['checkinV2Enabled' => patrol_checkin_v2_enabled()], 'roster' => $roster, 'compliance' => ['required' => (int) $personalSchedule['required'], 'attended' => (int) $personalSchedule['completed'], 'done' => (int) $personalSchedule['completed'] >= (int) $personalSchedule['required']]]]);
     }
 
     if ($method === 'GET' && $path === '/patrol/my-yearly-stats') {
@@ -2289,12 +2288,14 @@ function handle_patrol_routes(string $method, string $path): bool
             $monthlySched = db_rows('SELECT MONTH(s.PatrolDate) AS month,COUNT(*) AS cnt FROM patrol_sessions s JOIN patrol_team_members tm ON tm.TeamID=s.TeamID AND tm.EmployeeID=? WHERE YEAR(s.PatrolDate)=? GROUP BY MONTH(s.PatrolDate)', [$uid, $year]);
         }
         $monthlyRequired = safe_scalar('SELECT COUNT(*) FROM patrol_sessions s JOIN patrol_team_members tm ON tm.TeamID=s.TeamID AND tm.EmployeeID=? WHERE YEAR(s.PatrolDate)=? AND MONTH(s.PatrolDate)=? AND s.PatrolRound=2', [$uid, $year, patrol_month()]);
-        $monthlyAtt = db_rows('SELECT MONTH(PatrolDate) AS month,COUNT(*) AS cnt FROM patrol_attendance WHERE UserID=? AND YEAR(PatrolDate)=? GROUP BY MONTH(PatrolDate)', [$uid, $year]);
-        $attMap = []; $schedMap = [];
-        foreach ($monthlyAtt as $r) $attMap[(int) $r['month']] = (int) $r['cnt'];
+        $monthlyActivity = db_rows("SELECT MONTH(pa.PatrolDate) AS month,SUM(CASE WHEN pa.ScheduledSessionID IS NOT NULL AND (LOWER(COALESCE(pa.PatrolType,''))='compensation' OR DATE(pa.PatrolDate)<>DATE(ps.PatrolDate)) THEN 1 ELSE 0 END) AS makeup,SUM(CASE WHEN pa.ScheduledSessionID IS NULL AND pa.IdempotencyKey IS NOT NULL THEN 1 ELSE 0 END) AS extra,SUM(CASE WHEN (pa.ScheduledSessionID IS NOT NULL AND NOT (LOWER(COALESCE(pa.PatrolType,''))='compensation' OR DATE(pa.PatrolDate)<>DATE(ps.PatrolDate))) OR (pa.ScheduledSessionID IS NULL AND pa.IdempotencyKey IS NULL) THEN 1 ELSE 0 END) AS scheduledNormal,COUNT(*) AS cnt FROM patrol_attendance pa LEFT JOIN patrol_sessions ps ON ps.SessionID=pa.ScheduledSessionID WHERE pa.UserID=? AND YEAR(pa.PatrolDate)=? GROUP BY MONTH(pa.PatrolDate)", [$uid, $year]);
+        $monthlyCompleted = db_rows('SELECT MONTH(ps.PatrolDate) AS month,COUNT(pa.id) AS cnt FROM patrol_attendance pa JOIN patrol_sessions ps ON ps.SessionID=pa.ScheduledSessionID WHERE pa.UserID=? AND YEAR(ps.PatrolDate)=? GROUP BY MONTH(ps.PatrolDate)', [$uid, $year]);
+        $activityMap = []; $completedMap = []; $schedMap = [];
+        foreach ($monthlyActivity as $r) $activityMap[(int) $r['month']] = $r;
+        foreach ($monthlyCompleted as $r) $completedMap[(int) $r['month']] = (int) $r['cnt'];
         foreach ($monthlySched as $r) $schedMap[(int) $r['month']] = (int) $r['cnt'];
         $breakdown = [];
-        for ($m = 1; $m <= 12; $m++) $breakdown[] = ['month' => $m, 'attended' => $attMap[$m] ?? 0, 'scheduled' => $schedMap[$m] ?? 0];
+        for ($m = 1; $m <= 12; $m++) { $activity = $activityMap[$m] ?? []; $scheduled = $schedMap[$m] ?? 0; $breakdown[] = ['month' => $m, 'attended' => (int) ($activity['cnt'] ?? 0), 'scheduled' => $scheduled, 'scheduledNormal' => (int) ($activity['scheduledNormal'] ?? 0), 'makeup' => (int) ($activity['makeup'] ?? 0), 'extra' => (int) ($activity['extra'] ?? 0), 'missed' => max(0, $scheduled - ($completedMap[$m] ?? 0))]; }
         json_response(['success' => true, 'data' => ['year' => $year, 'yearlyCount' => $yearlyCount, 'yearlyTarget' => $rosterRow['TargetPerYear'] ?? null, 'recentCheckins' => $recent, 'teamRank' => $teamRank, 'teamMemberStats' => $teamMemberStats, 'monthlyRequired' => $monthlyRequired, 'selfPatrolYear' => ['count' => (int) (safe_scalar('SELECT COUNT(*) FROM patrol_self_checkin WHERE EmployeeID=? AND Year=?', [$uid, $year]) ?? 0)], 'monthlyBreakdown' => $breakdown]]);
     }
 
