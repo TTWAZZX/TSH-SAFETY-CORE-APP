@@ -1,5 +1,11 @@
 # TSH Safety Core Activity - Architecture
 
+## Safety Patrol Personal Live Statistics (2026-09-02)
+
+- The Personal hero and performance card consume the same authorized Top & Management attendance-detail projection used by Team & Overview: Accepted Coverage to date, required sessions due to date, annual target, and Accepted %.
+- Scheduled Compliance remains session-linked. Extra walks increase Actual Walk Activity only and never satisfy the monthly scheduled denominator.
+- `Patrol_Attendance.PatrolDate` remains the business walk date. The additive nullable `CheckinAt` stores the actual Asia/Bangkok save time for new check-ins and is returned by Node/PHP for live confirmation and recent records. Historical rows remain NULL; no synthetic time is created.
+
 ## Safety Patrol Check-in v2 (Local, 2026-09-02)
 
 - System Control tables (`Patrol_Team_Members`, monthly `Patrol_Member_Rotation`, `Patrol_Team_Rotation`, and generated `Patrol_Sessions`) are the only calendar authority.

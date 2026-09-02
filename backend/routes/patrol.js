@@ -46,6 +46,7 @@ const {
         'ALTER TABLE Patrol_Attendance ADD COLUMN PatrolType VARCHAR(20) DEFAULT NULL',
         'ALTER TABLE Patrol_Attendance ADD COLUMN RecordedBy VARCHAR(50) DEFAULT NULL',
         'ALTER TABLE Patrol_Attendance ADD COLUMN ScheduledSessionID VARCHAR(50) DEFAULT NULL',
+        'ALTER TABLE Patrol_Attendance ADD COLUMN CheckinAt DATETIME DEFAULT NULL',
         'ALTER TABLE Patrol_Attendance ADD INDEX idx_patrol_attendance_session (ScheduledSessionID)',
         'ALTER TABLE Patrol_Attendance ADD COLUMN IdempotencyKey VARCHAR(80) DEFAULT NULL',
         'ALTER TABLE Patrol_Attendance ADD UNIQUE INDEX uq_patrol_attendance_user_request (UserID, IdempotencyKey)',
@@ -519,6 +520,15 @@ function patrolTodayBangkok() {
     return `${values.year}-${values.month}-${values.day}`;
 }
 
+function patrolBangkokDateTime() {
+    const parts = new Intl.DateTimeFormat('en-CA', {
+        timeZone: 'Asia/Bangkok', year: 'numeric', month: '2-digit', day: '2-digit',
+        hour: '2-digit', minute: '2-digit', second: '2-digit', hourCycle: 'h23',
+    }).formatToParts(new Date());
+    const values = Object.fromEntries(parts.map(part => [part.type, part.value]));
+    return `${values.year}-${values.month}-${values.day} ${values.hour}:${values.minute}:${values.second}`;
+}
+
 function patrolActualActivity(records = [], sessionMap = new Map()) {
     const summary = { total: 0, scheduledNormal: 0, makeup: 0, extra: 0 };
     const scheduledDates = new Set([...sessionMap.values()].map(session => dateOnly(session.PatrolDate)));
@@ -639,7 +649,7 @@ router.get('/my-yearly-stats', async (req, res) => {
 
         // 3. Recent check-ins (last 6)
         const [recentCheckins] = await db.query(
-            `SELECT PatrolDate, PatrolType, Area, Notes FROM Patrol_Attendance
+            `SELECT PatrolDate, CheckinAt, PatrolType, Area, Notes FROM Patrol_Attendance
              WHERE UserID = ?
              ORDER BY PatrolDate DESC, id DESC LIMIT 6`,
             [employeeId]
@@ -821,6 +831,7 @@ router.get('/attendance-stats', async (req, res) => {
                 UserName AS Name,
                 COUNT(*) AS Total,
                 MAX(PatrolDate) AS LastWalk,
+                MAX(CheckinAt) AS LastCheckinAt,
                 ROUND(COUNT(*) * 100.0 / NULLIF(
                     (SELECT COUNT(DISTINCT YEARWEEK(PatrolDate)) FROM Patrol_Attendance), 0
                 )) AS Percent
@@ -964,6 +975,7 @@ router.post('/checkin', async (req, res) => {
             if (!isNaN(d.getTime())) patrolDate = d.toISOString().split('T')[0];
         }
         const effectiveDate = checkinV2Enabled ? patrolTodayBangkok() : (patrolDate || new Date().toISOString().split('T')[0]);
+        const checkinAt = patrolBangkokDateTime();
         const idempotencyRaw = String(req.body.IdempotencyKey || '').trim();
         const idempotencyKey = idempotencyRaw ? patrolIdempotencyKey(idempotencyRaw) : null;
         if (idempotencyRaw && !idempotencyKey) {
@@ -971,7 +983,7 @@ router.post('/checkin', async (req, res) => {
         }
         if (checkinV2Enabled && idempotencyKey) {
             const [[existingRequest]] = await db.query(
-                `SELECT id,UserID,UserName,TeamName,PatrolDate,PatrolType,Area,Notes,ScheduledSessionID
+                `SELECT id,UserID,UserName,TeamName,PatrolDate,CheckinAt,PatrolType,Area,Notes,ScheduledSessionID
                    FROM Patrol_Attendance WHERE UserID=? AND IdempotencyKey=? LIMIT 1`,
                 [UserID, idempotencyKey]
             );
@@ -984,7 +996,8 @@ router.post('/checkin', async (req, res) => {
                         checkin: {
                             id: Number(existingRequest.id), employeeId: UserID, employeeName: existingRequest.UserName,
                             type: existingRequest.PatrolType, mode,
-                            actualDate: dateOnly(existingRequest.PatrolDate), scheduledSessionId: existingRequest.ScheduledSessionID || null,
+                            actualDate: dateOnly(existingRequest.PatrolDate), checkinAt: existingRequest.CheckinAt || null,
+                            scheduledSessionId: existingRequest.ScheduledSessionID || null,
                             area: existingRequest.Area || null, teamName: existingRequest.TeamName || '',
                         },
                     },
@@ -1016,13 +1029,13 @@ router.post('/checkin', async (req, res) => {
         let insert;
         try {
             [insert] = await db.query(
-                'INSERT INTO Patrol_Attendance (UserID, UserName, TeamName, WeekNumber, Notes, Area, PatrolType, PatrolDate, RecordedBy, ScheduledSessionID, IdempotencyKey) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
-                [UserID, UserName, TeamName, currentWeek, Notes, Area, PatrolType, effectiveDate, UserID, session?.id || null, idempotencyKey]
+                'INSERT INTO Patrol_Attendance (UserID, UserName, TeamName, WeekNumber, Notes, Area, PatrolType, PatrolDate, CheckinAt, RecordedBy, ScheduledSessionID, IdempotencyKey) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+                [UserID, UserName, TeamName, currentWeek, Notes, Area, PatrolType, effectiveDate, checkinAt, UserID, session?.id || null, idempotencyKey]
             );
         } catch (err) {
             if (checkinV2Enabled && idempotencyKey && err.code === 'ER_DUP_ENTRY') {
                 const [[replayed]] = await db.query(
-                    `SELECT id,UserName,TeamName,PatrolDate,PatrolType,Area,ScheduledSessionID
+                    `SELECT id,UserName,TeamName,PatrolDate,CheckinAt,PatrolType,Area,ScheduledSessionID
                        FROM Patrol_Attendance WHERE UserID=? AND IdempotencyKey=? LIMIT 1`,
                     [UserID, idempotencyKey]
                 );
@@ -1034,7 +1047,7 @@ router.post('/checkin', async (req, res) => {
                             idempotentReplay: true,
                             checkin: {
                                 id: Number(replayed.id), employeeId: UserID, employeeName: replayed.UserName,
-                                type: replayed.PatrolType, mode, actualDate: dateOnly(replayed.PatrolDate),
+                                type: replayed.PatrolType, mode, actualDate: dateOnly(replayed.PatrolDate), checkinAt: replayed.CheckinAt || null,
                                 scheduledSessionId: replayed.ScheduledSessionID || null, area: replayed.Area || null,
                                 teamName: replayed.TeamName || '',
                             },
@@ -1063,7 +1076,7 @@ router.post('/checkin', async (req, res) => {
         const email = await queuePatrolCheckinEmail({ attendanceId, employee, attendance, session }).catch(err => ({ queued: false, sent: false, reason: err.message }));
 
         const [stats] = await db.query(
-            'SELECT COUNT(*) AS TotalWalks, MAX(PatrolDate) AS LastWalk FROM Patrol_Attendance WHERE UserID = ?',
+            'SELECT COUNT(*) AS TotalWalks, MAX(PatrolDate) AS LastWalk, MAX(CheckinAt) AS LastCheckinAt FROM Patrol_Attendance WHERE UserID = ?',
             [UserID]
         );
         const [teamStats] = await db.query(
@@ -1091,6 +1104,7 @@ router.post('/checkin', async (req, res) => {
                     type: PatrolType,
                     mode,
                     actualDate: effectiveDate,
+                    checkinAt: stats[0].LastCheckinAt || null,
                     scheduledDate: session ? dateOnly(session.PatrolDate) : effectiveDate,
                     isMakeup: Boolean(session) && dateOnly(session.PatrolDate) !== effectiveDate,
                     scheduledSessionId: session?.id || null,
@@ -3517,7 +3531,7 @@ async function buildTopManagementAttendanceDetail(employeeId, year) {
     const sessions = await topManagementSessionsForEmployee(employeeId, year);
     const leaveRows = await patrolLeaveRows(employeeId, 'top_management', year);
     const [attendance] = await db.query(
-        `SELECT pa.id,pa.PatrolDate,pa.PatrolType,pa.Area,pa.Notes,pa.RecordedBy,pa.ScheduledSessionID,(pa.IdempotencyKey IS NOT NULL) AS IsV2Request,e.EmployeeName AS RecordedByName
+        `SELECT pa.id,pa.PatrolDate,pa.CheckinAt,pa.PatrolType,pa.Area,pa.Notes,pa.RecordedBy,pa.ScheduledSessionID,(pa.IdempotencyKey IS NOT NULL) AS IsV2Request,e.EmployeeName AS RecordedByName
          FROM Patrol_Attendance pa
          LEFT JOIN Employees e ON e.EmployeeID=pa.RecordedBy
          WHERE pa.UserID=? AND YEAR(pa.PatrolDate)=?
@@ -3533,7 +3547,7 @@ async function buildTopManagementAttendanceDetail(employeeId, year) {
     const sessionIds = sessions.map(session => String(session.id));
     if (sessionIds.length) {
         [linkedAttendance] = await db.query(
-            `SELECT pa.id,pa.PatrolDate,pa.PatrolType,pa.Area,pa.Notes,pa.RecordedBy,pa.ScheduledSessionID,(pa.IdempotencyKey IS NOT NULL) AS IsV2Request,e.EmployeeName AS RecordedByName
+            `SELECT pa.id,pa.PatrolDate,pa.CheckinAt,pa.PatrolType,pa.Area,pa.Notes,pa.RecordedBy,pa.ScheduledSessionID,(pa.IdempotencyKey IS NOT NULL) AS IsV2Request,e.EmployeeName AS RecordedByName
                FROM Patrol_Attendance pa
                LEFT JOIN Employees e ON e.EmployeeID=pa.RecordedBy
               WHERE pa.UserID=? AND pa.ScheduledSessionID IN (${sessionIds.map(() => '?').join(',')})

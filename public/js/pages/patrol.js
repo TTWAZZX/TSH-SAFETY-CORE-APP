@@ -468,6 +468,12 @@ function patrolDateOnly(value) {
     return String(value).slice(0, 10);
 }
 
+function patrolCheckinTime(value) {
+    if (!value) return '';
+    const parsed = new Date(value);
+    return Number.isNaN(parsed.getTime()) ? '' : parsed.toLocaleTimeString('th-TH', { hour: '2-digit', minute: '2-digit' });
+}
+
 function patrolSessionId(item = {}) {
     return String(item.id || item.SessionID || item.ScheduledSessionID || item.sessionId || '');
 }
@@ -1077,9 +1083,15 @@ function renderDashboard(container, data) {
     const myStats = statsArray.find(r => r.Name === displayUser.name || r.EmployeeID === displayUser.id || r.UserID === displayUser.id) || { Total: 0, Percent: 0 };
 
     // Smart CTA helpers
-    const todayCheckedIn = myStats.LastWalk
-        ? new Date(myStats.LastWalk).toDateString() === today.toDateString()
-        : false;
+    const personalDetail = _myTopManagementDetail?.summary || null;
+    const personalRecords = Array.isArray(_myTopManagementDetail?.records) ? _myTopManagementDetail.records : [];
+    const todayCheckedIn = personalRecords.some(record => patrolDateOnly(record.PatrolDate) === patrolDateOnly(today))
+        || (myStats.LastWalk ? patrolDateOnly(myStats.LastWalk) === patrolDateOnly(today) : false);
+    const latestPersonalCheckin = personalRecords
+        .filter(record => patrolDateOnly(record.PatrolDate) === patrolDateOnly(today))
+        .sort((a, b) => String(b.CheckinAt || '').localeCompare(String(a.CheckinAt || '')))[0]?.CheckinAt
+        || myStats.LastCheckinAt
+        || '';
     const todaySessForCTA = _myPlan?.sessions?.find(s => new Date(s.PatrolDate).toDateString() === today.toDateString()) || null;
     const nextSess = _myPlan?.sessions?.find(s => new Date(s.PatrolDate) > today) || null;
     const nextDaysLeft = nextSess ? Math.ceil((new Date(nextSess.PatrolDate) - today) / 86400000) : null;
@@ -1132,11 +1144,13 @@ function renderDashboard(container, data) {
     const rank = rankTiers.find(r => walks >= r.min && walks <= r.max) || rankTiers[0];
     const rankPct = rank.needed ? Math.min(Math.round((walks / rank.needed) * 100), 100) : 100;
     // ── Per-tab hero stats ───────────────────────────────────────────────────
-    const _yearlyCount  = _myYearlyStats?.yearlyCount  ?? walks;
-    const _yearlyTarget = _myYearlyStats?.yearlyTarget ?? null;
+    const _yearlyCount  = Number(personalDetail?.acceptedCoverageToDate ?? _myYearlyStats?.yearlyCount ?? walks);
+    const _yearlyDue    = Number(personalDetail?.requiredToDate ?? 0);
+    const _yearlyTarget = Number(personalDetail?.yearlyTarget ?? _myYearlyStats?.yearlyTarget ?? 0) || null;
+    const _acceptedPct  = Number(personalDetail?.acceptedCoverageToDatePct ?? myStats.Percent ?? 0);
     const _personalStats = [
-        { label: 'รวมปีนี้',         val: _yearlyTarget ? `${_yearlyCount}/${_yearlyTarget}` : _yearlyCount,           color: '#6ee7b7' },
-        { label: 'อัตราผ่านเกณฑ์',  val: `${myStats.Percent || 0}%`,                                                   color: '#6ee7b7' },
+        { label: 'รวมปีนี้',         val: _yearlyDue ? `${_yearlyCount}/${_yearlyDue}${_yearlyTarget ? ` (${_yearlyTarget})` : ''}` : (_yearlyTarget ? `${_yearlyCount} (${_yearlyTarget})` : _yearlyCount), color: '#6ee7b7' },
+        { label: 'Accepted %',       val: `${_acceptedPct}%`,                                                        color: '#6ee7b7' },
         { label: 'ทีมของฉัน',        val: _myPlan ? _myPlan.team.name.replace(/^ทีม\s*/,'') : rank.title,              color: '#a5f3fc' },
         { label: 'สถานะเดือนนี้',    val: _myPlan ? `${_myPlan.compliance.attended}/${_myPlan.compliance.required} รอบ` : '—',
           color: _myPlan?.compliance?.done ? '#6ee7b7' : '#fcd34d' },
@@ -1454,7 +1468,7 @@ function renderDashboard(container, data) {
                   : todayCheckedIn
                   ? `<div class="relative z-10 mt-3 w-full py-2.5 rounded-xl font-bold text-sm text-center flex items-center justify-center gap-2" style="background:rgba(255,255,255,0.15);color:rgba(255,255,255,0.6);border:1px solid rgba(255,255,255,0.2)">
                       <svg class="w-4 h-4 text-emerald-300 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"/></svg>
-                      เช็คอินแล้ว · ${new Date(myStats.LastWalk).toLocaleTimeString('th-TH',{hour:'2-digit',minute:'2-digit'})} น.
+                      เช็คอินแล้ว${patrolCheckinTime(latestPersonalCheckin) ? ` · ${patrolCheckinTime(latestPersonalCheckin)} น.` : ''}
                     </div>
                     <button onclick="openPersonalPatrolCheckin()" class="relative z-10 mt-2 w-full py-1.5 rounded-xl text-xs font-semibold transition-all active:scale-[0.98]" style="background:rgba(255,255,255,0.1);color:rgba(255,255,255,0.5)">
                       บันทึกอีกครั้ง
@@ -2008,9 +2022,9 @@ function renderDashboard(container, data) {
 
             <!-- Compliance Ring + Team Avg (B+D) -->
             ${(() => {
-              const yc   = _myYearlyStats?.yearlyCount ?? walks;
-              const yt   = _myYearlyStats?.yearlyTarget ?? null;
-              const yPct = yt ? Math.min(Math.round((yc / yt) * 100), 100) : null;
+              const yc   = Number(personalDetail?.acceptedCoverageToDate ?? _myYearlyStats?.yearlyCount ?? walks);
+              const yt   = Number(personalDetail?.requiredToDate ?? 0) || null;
+              const yPct = personalDetail ? Number(personalDetail.acceptedCoverageToDatePct ?? 0) : (yt ? Math.min(Math.round((yc / yt) * 100), 100) : null);
               const yDone = yt ? yc >= yt : false;
               const tr   = _myYearlyStats?.teamRank;
               const circ = 2 * Math.PI * 42;
@@ -2050,7 +2064,7 @@ function renderDashboard(container, data) {
                   </svg>
                   <div class="absolute inset-0 flex flex-col items-center justify-center">
                     <p class="text-2xl font-bold" style="color:${ringColor}">${yPct !== null ? yPct + '%' : walks}</p>
-                    <p class="text-[9px] text-slate-400 mt-0.5">${yt ? yc + '/' + yt + ' ครั้ง' : yPct === null ? 'ครั้งรวม' : ''}</p>
+                    <p class="text-[9px] text-slate-400 mt-0.5">${yt ? yc + '/' + yt + (_yearlyTarget ? ' (' + _yearlyTarget + ')' : '') + ' ครั้ง' : yPct === null ? 'ครั้งรวม' : ''}</p>
                   </div>
                 </div>
                 <!-- Status badge -->
@@ -2070,7 +2084,7 @@ function renderDashboard(container, data) {
               </div>
               <div class="text-right">
                 <p class="text-[10px] text-slate-400 font-medium">อัตราผ่าน</p>
-                <p class="text-xl font-bold text-emerald-600">${myStats.Percent || 0}%</p>
+                <p class="text-xl font-bold text-emerald-600">${_acceptedPct}%</p>
               </div>
             </div>
           </div>
@@ -4750,10 +4764,10 @@ window._onCheckinSessionChange = function() {
 };
 
 function showCheckinSuccessScreen(patrolType, result = {}) {
-    const now         = new Date();
-    const timeStr     = now.toLocaleTimeString('th-TH', { hour: '2-digit', minute: '2-digit' });
-    const compliance  = result.group === 'supervisor' ? null : _myPlan?.compliance;
     const checkin     = result.checkin || {};
+    const now         = new Date();
+    const timeStr     = patrolCheckinTime(checkin.checkinAt) || now.toLocaleTimeString('th-TH', { hour: '2-digit', minute: '2-digit' });
+    const compliance  = result.group === 'supervisor' ? null : _myPlan?.compliance;
     const email       = result.email || {};
     const displayUser = patrolDisplayUser();
     const areaName    = checkin.area || null;

@@ -1,5 +1,11 @@
 # TSH Safety Core Activity - Changelog And Handoff History
 
+## Safety Patrol Personal Live Statistics (2026-09-02, local release candidate)
+
+- Connected the Personal hero and performance card to the same Top & Management attendance-detail summary as Team & Overview, showing Accepted Coverage / due sessions, the annual target in parentheses, and Accepted %.
+- Added nullable `Patrol_Attendance.CheckinAt` with Node/PHP parity. New check-ins and idempotent replays return the actual Asia/Bangkok save time; historical rows remain NULL instead of displaying a fabricated midnight value.
+- Preserved Scheduled Compliance semantics: Extra walks remain Actual Walk Activity only and do not change `0/2 รอบ` unless an authorized Scheduled or Makeup session is completed. No upload/storage path changed.
+
 ## Safety Patrol Check-in v2 - dev deployment (2026-09-02)
 
 - Deployed the verified PHP/frontend Safety Patrol v2 candidate to `dev.tshpcl.com` behind the additive `patrol_checkin_v2_enabled` flag, then enabled it after migration and flag-off smoke.

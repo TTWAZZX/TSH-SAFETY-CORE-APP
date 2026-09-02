@@ -1,5 +1,12 @@
 # TSH Safety Core Activity - AI Quick Start
 
+## Current Safety Patrol Personal Live Statistics (2026-09-02, release candidate)
+
+- Personal Patrol now projects its hero and performance card from the same authorized Top & Management attendance-detail summary as the Team & Overview screen: Accepted Coverage to date / due sessions, annual target in parentheses, and Accepted %.
+- `0/2 รอบ` remains Scheduled Compliance by design. Extra walks continue to increase Actual Walk Activity only and never complete a scheduled round; the UI continues to show actual/scheduled/makeup/extra separately.
+- Added nullable `patrol_attendance.CheckinAt` through `backend/migrations/20260902_patrol_live_stats.sql`. New normal check-ins store the actual save time, while existing history stays NULL so no historical time is fabricated. Node and PHP expose the time for live confirmation; no upload path changed.
+- Local Production-data refresh and the additive migration are verified. Node syntax, PHP lint, Patrol v2 parity contract and `git diff --check` pass. Production deployment evidence must be appended after the release is uploaded and smoked.
+
 ## Current Safety Patrol Check-in v2 Handoff (2026-09-02, dev deployed and verified)
 
 - Local phases 1-8 and the approved Phase 9 rollout to `dev.tshpcl.com` are complete. Production was not rolled out; the Patrol-only source is included in its dedicated GitHub release commit.
