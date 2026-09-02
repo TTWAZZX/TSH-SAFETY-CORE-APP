@@ -2008,6 +2008,35 @@ function renderDashboard(container, data) {
           </div>`;
           })() : ''}
 
+          <!-- Safety Knowledge fills the desktop work column after this month's sessions. -->
+          <div class="hidden xl:block">
+            <div class="flex items-center gap-2 mb-2">
+              <div class="flex-1 h-px bg-slate-100"></div>
+              <span class="text-[10px] font-bold text-slate-400 uppercase tracking-wider px-2">Safety Knowledge</span>
+              <div class="flex-1 h-px bg-slate-100"></div>
+            </div>
+            <div class="relative overflow-hidden rounded-2xl shadow-md bg-slate-900 group" data-patrol-carousel style="height:200px">
+              <div class="relative w-full h-full">
+                ${SAFETY_IMAGES.map((img, idx) => `
+                <div class="carousel-item absolute inset-0 pointer-events-none transition-opacity duration-700 opacity-0 z-0" data-index="${idx}">
+                  <img src="${img.src}" class="w-full h-full object-cover opacity-50 group-hover:scale-105 transition-transform duration-1000 ease-out">
+                  <div class="absolute inset-0" style="background:linear-gradient(to right,rgba(6,30,20,0.95) 0%,rgba(6,30,20,0.5) 50%,transparent 100%)"></div>
+                  <div class="absolute inset-0 flex items-center p-8">
+                    <div class="max-w-md">
+                      <span class="inline-block px-2 py-0.5 rounded-full text-[9px] font-bold mb-3" style="background:rgba(16,185,129,0.3);color:#6ee7b7;border:1px solid rgba(16,185,129,0.4)">Safety Knowledge</span>
+                      <h3 class="text-lg font-bold text-white leading-tight mb-1">${img.title}</h3>
+                      <p class="text-[11px] line-clamp-2" style="color:rgba(167,243,208,0.7)">${img.desc}</p>
+                      <button onclick="openCarouselDetail(${idx})" class="mt-4 text-[10px] font-semibold px-4 py-1.5 rounded-full border border-white/30 text-white hover:bg-white/20 transition-colors pointer-events-auto backdrop-blur-sm">ดูรายละเอียด →</button>
+                    </div>
+                  </div>
+                </div>`).join('')}
+              </div>
+              <div class="absolute bottom-3 left-0 right-0 flex justify-center gap-1.5 z-20 pointer-events-auto">
+                ${SAFETY_IMAGES.map((_, idx) => `<button class="carousel-dot h-1 w-1.5 bg-white/30 rounded-full transition-all duration-300 hover:bg-white/60" data-index="${idx}"></button>`).join('')}
+              </div>
+            </div>
+          </div>
+
         </div>
 
         <div class="xl:col-span-1 space-y-5">
@@ -2204,13 +2233,14 @@ function renderDashboard(container, data) {
         </div><!-- /sidebar -->
       </div><!-- /grid -->
 
-      <!-- Safety Tips Carousel — full width -->
+      <!-- Safety Tips Carousel — full width on mobile -->
+      <div class="xl:hidden">
       <div class="flex items-center gap-2 mt-1 mb-2">
         <div class="flex-1 h-px bg-slate-100"></div>
         <span class="text-[10px] font-bold text-slate-400 uppercase tracking-wider px-2">Safety Knowledge</span>
         <div class="flex-1 h-px bg-slate-100"></div>
       </div>
-      <div id="promo-carousel" class="relative overflow-hidden rounded-2xl shadow-md bg-slate-900 group" data-patrol-card-image="patrol-safety-knowledge" style="height:200px">
+      <div id="promo-carousel" class="relative overflow-hidden rounded-2xl shadow-md bg-slate-900 group" data-patrol-card-image="patrol-safety-knowledge" data-patrol-carousel style="height:200px">
         <div id="carousel-slides" class="relative w-full h-full">
           ${SAFETY_IMAGES.map((img, idx) => `
           <div class="carousel-item absolute inset-0 pointer-events-none transition-opacity duration-700 opacity-0 z-0" data-index="${idx}">
@@ -2234,6 +2264,7 @@ function renderDashboard(container, data) {
         <div class="absolute bottom-3 left-0 right-0 flex justify-center gap-1.5 z-20 pointer-events-auto">
           ${SAFETY_IMAGES.map((_, idx) => `<button class="carousel-dot h-1 w-1.5 bg-white/30 rounded-full transition-all duration-300 hover:bg-white/60" data-index="${idx}"></button>`).join('')}
         </div>
+      </div>
       </div>
       </div><!-- /content-patrol -->
 
@@ -6535,9 +6566,12 @@ function _issueChangeDept(deptNames) {
 
 // ─── Carousel ─────────────────────────────────────────────────────────────────
 function initPromoCarousel() {
-    const slides = document.querySelectorAll('.carousel-item');
-    const dots = document.querySelectorAll('.carousel-dot');
-    const counter = document.getElementById('carousel-counter');
+    const carousel = [...document.querySelectorAll('[data-patrol-carousel]')]
+        .find(el => el.getClientRects().length > 0);
+    if (!carousel) return;
+    const slides = carousel.querySelectorAll('.carousel-item');
+    const dots = carousel.querySelectorAll('.carousel-dot');
+    const counter = carousel.querySelector('#carousel-counter');
     if (!slides.length) return;
 
     let current = 0;
