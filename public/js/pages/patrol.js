@@ -1429,7 +1429,7 @@ function renderDashboard(container, data) {
         <div class="xl:col-span-2 ${isSupervisorPersonal ? 'flex flex-col gap-5' : 'space-y-5'}">
 
           <!-- Check-in Card -->
-          <div class="xl:col-span-2 bg-white rounded-2xl overflow-hidden shadow-sm border border-slate-100" data-patrol-card-image="patrol-personal-checkin" style="box-shadow:0 4px 24px rgba(5,150,105,0.07);align-self:start">
+          <div class="xl:col-span-2 bg-white rounded-2xl overflow-hidden shadow-sm border border-slate-100" data-patrol-card-image="patrol-personal-checkin" style="box-shadow:0 4px 24px rgba(5,150,105,0.07);align-self:${isSupervisorPersonal ? 'stretch' : 'start'}">
             <div class="flex flex-col md:flex-row">
               <div class="md:w-5/12 p-5 flex flex-col justify-between relative overflow-hidden" style="background:linear-gradient(135deg,#064e3b,#065f46)">
                 <div class="absolute -right-6 -top-6 w-28 h-28 rounded-full opacity-10" style="background:radial-gradient(circle,#fff,transparent 70%)"></div>
