@@ -2883,6 +2883,11 @@ function handle_patrol_routes(string $method, string $path): bool
             'periodStatus' => $period['status'] ?? 'upcoming',
             'yearlyTarget' => (int) ($detail['summary']['yearlyTarget'] ?? 0),
             'yearlyCompleted' => (int) ($detail['summary']['completed'] ?? 0),
+            // Read-only projection for the personal dashboard. Keep the same
+            // capped, due-to-date semantics used by supervisor-overview.
+            'completedToDate' => (int) ($detail['summary']['completedToDateCapped'] ?? 0),
+            'requiredToDate' => (int) ($detail['summary']['requiredToDate'] ?? 0),
+            'acceptedCoverageToDate' => (int) ($detail['summary']['acceptedCoverageToDate'] ?? ($detail['summary']['leave']['acceptedCoverageToDate'] ?? 0)),
             'passPct' => (int) ($detail['summary']['passPct'] ?? ($detail['passPct'] ?? 80)),
             'leave' => $detail['summary']['leave'] ?? null,
             'leaveRequests' => $detail['leaveRequests'] ?? [],

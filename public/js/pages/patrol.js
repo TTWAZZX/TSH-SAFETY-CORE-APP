@@ -1174,16 +1174,19 @@ function renderDashboard(container, data) {
     const supervisorPeriod = supervisorSummary.currentPeriod || {};
     const supervisorYearlyCompleted = Number(supervisorSummary.yearlyCompleted ?? 0);
     const supervisorYearlyTarget = Number(supervisorSummary.yearlyTarget ?? 0);
+    const supervisorCompletedToDate = Number(supervisorSummary.completedToDate ?? supervisorYearlyCompleted);
+    const supervisorRequiredToDate = Number(supervisorSummary.requiredToDate ?? supervisorYearlyTarget);
+    const supervisorAcceptedToDate = Number(supervisorSummary.acceptedCoverageToDate ?? supervisorCompletedToDate);
+    const supervisorAcceptedToDatePct = Number(supervisorSummary.acceptedCoverageToDatePct ?? supervisorSummary.leave?.acceptedCoverageToDatePct ?? 0);
     const supervisorMonthCompleted = Number(supervisorPeriod.completed ?? supervisorSummary.completed ?? 0);
     const supervisorMonthTarget = Number(supervisorPeriod.required ?? supervisorSummary.monthlyRequirement ?? supervisorSummary.target ?? 0);
-    const supervisorAcceptedPct = Number(supervisorSummary.acceptedCoverageYearPct ?? supervisorSummary.leave?.acceptedCoverageYearPct ?? 0);
     const _yearlyCount  = Number(personalDetail?.acceptedCoverageToDate ?? _myYearlyStats?.yearlyCount ?? walks);
     const _yearlyDue    = Number(personalDetail?.requiredToDate ?? 0);
     const _yearlyTarget = Number(personalDetail?.yearlyTarget ?? _myYearlyStats?.yearlyTarget ?? 0) || null;
     const _acceptedPct  = Number(personalDetail?.acceptedCoverageToDatePct ?? myStats.Percent ?? 0);
     const _personalStats = isSupervisorPersonal ? [
-        { label: 'รวมปีนี้', val: supervisorYearlyTarget ? `${supervisorYearlyCompleted}/${supervisorYearlyTarget}` : supervisorYearlyCompleted, color: '#6ee7b7' },
-        { label: 'Accepted %', val: `${supervisorAcceptedPct}%`, color: '#6ee7b7' },
+        { label: 'ตามรอบถึงวันนี้', val: supervisorRequiredToDate ? `${supervisorAcceptedToDate}/${supervisorRequiredToDate}` : supervisorAcceptedToDate, color: '#6ee7b7' },
+        { label: 'Accepted %', val: `${supervisorAcceptedToDatePct}%`, color: '#6ee7b7' },
         { label: 'สถานะเดือนนี้', val: supervisorMonthTarget ? `${supervisorMonthCompleted}/${supervisorMonthTarget} รอบ` : '—',
           hint: supervisorMonthTarget ? (supervisorPeriod.periodStatus === 'completed' ? 'ครบแล้ว' : `เหลืออีก ${Math.max(0, supervisorMonthTarget - supervisorMonthCompleted)} รอบ`) : '',
           color: supervisorPeriod.periodStatus === 'completed' ? '#6ee7b7' : '#fcd34d' },
@@ -1924,6 +1927,10 @@ function renderDashboard(container, data) {
             const leaveYear      = Number(leaveStats.leaveYear || 0);
             const allowedLeave   = Number(leaveStats.allowedLeaveYear || 0);
             const acceptedCoveragePct = Number(sp.acceptedCoverageYearPct || leaveStats.acceptedCoverageYearPct || 0);
+            const completedToDate = Number(sp.completedToDate ?? yearlySpCount);
+            const requiredToDate = Number(sp.requiredToDate ?? yearlySpTarget);
+            const acceptedCoverageToDate = Number(sp.acceptedCoverageToDate ?? completedToDate);
+            const acceptedCoverageToDatePct = Number(sp.acceptedCoverageToDatePct ?? leaveStats.acceptedCoverageToDatePct ?? acceptedCoveragePct);
             const periods = Array.isArray(sp.periods) ? sp.periods : [];
             return `
           <div class="bg-white rounded-2xl shadow-sm border border-amber-100 overflow-hidden ${useSelfPatrolGreen ? 'flex flex-1 flex-col' : ''}" data-patrol-card-image="patrol-self-patrol-progress" style="box-shadow:0 4px 24px rgba(245,158,11,0.08)">
@@ -1940,8 +1947,8 @@ function renderDashboard(container, data) {
               ${spYear !== undefined ? `
               <div class="mt-3">
                 <div class="flex items-center justify-between mb-1">
-                  <span class="text-[10px] font-semibold text-amber-700/80">ความก้าวหน้ารายปี</span>
-                  <span class="text-[10px] font-bold ${yearlySpDone ? 'text-emerald-600' : 'text-amber-700'}">${yearlySpCount}/${yearlySpTarget} ครั้ง · ${yearlySpPct}%</span>
+                  <span class="text-[10px] font-semibold text-amber-700/80">เดินจริงสะสมปี</span>
+                  <span class="text-[10px] font-bold ${yearlySpDone ? 'text-emerald-600' : 'text-amber-700'}">${yearlySpCount} ครั้ง</span>
                 </div>
                 <div class="w-full bg-amber-100/60 rounded-full h-2 overflow-hidden">
                   <div class="h-full rounded-full transition-all duration-700" style="width:${yearlySpPct}%;background:${yearlySpDone ? 'linear-gradient(90deg,#059669,#10b981)' : 'linear-gradient(90deg,#d97706,#f59e0b)'}"></div>
@@ -2036,7 +2043,7 @@ function renderDashboard(container, data) {
                 <div class="h-full rounded-full transition-all duration-700" style="width:${pct}%;background:${done?'linear-gradient(90deg,#059669,#10b981)':'linear-gradient(90deg,#f59e0b,#fbbf24)'}"></div>
               </div>
               ${periods.length ? `<div class="mb-4 rounded-xl border border-slate-100 bg-white px-3 py-3">
-                <div class="flex items-center justify-between gap-2 mb-2"><p class="text-[10px] font-black text-slate-600">กิจกรรมตลอดปี</p><p class="text-[10px] font-bold text-slate-500">${yearlySpCount}/${yearlySpTarget || '—'} ครั้ง · ${acceptedCoveragePct}%</p></div>
+                <div class="flex items-center justify-between gap-2 mb-2"><p class="text-[10px] font-black text-slate-600">กิจกรรมตลอดปี</p><p class="text-[10px] font-bold text-slate-500">เดินจริง ${yearlySpCount} · ตามรอบ ${acceptedCoverageToDate}/${requiredToDate || '—'} · ${acceptedCoverageToDatePct}%</p></div>
                 <div class="grid grid-cols-6 sm:grid-cols-12 gap-1.5">
                   ${periods.map(period => {
                     const status = String(period.status || '').toLowerCase();
@@ -2140,9 +2147,9 @@ function renderDashboard(container, data) {
 
             <!-- Compliance Ring + Team Avg (B+D) -->
             ${(() => {
-              const yc   = isSupervisorPersonal ? supervisorYearlyCompleted : Number(personalDetail?.acceptedCoverageToDate ?? _myYearlyStats?.yearlyCount ?? walks);
-              const yt   = isSupervisorPersonal ? (supervisorYearlyTarget || null) : (Number(personalDetail?.requiredToDate ?? 0) || null);
-              const yPct = isSupervisorPersonal ? supervisorAcceptedPct : (personalDetail ? Number(personalDetail.acceptedCoverageToDatePct ?? 0) : (yt ? Math.min(Math.round((yc / yt) * 100), 100) : null));
+              const yc   = isSupervisorPersonal ? supervisorAcceptedToDate : Number(personalDetail?.acceptedCoverageToDate ?? _myYearlyStats?.yearlyCount ?? walks);
+              const yt   = isSupervisorPersonal ? (supervisorRequiredToDate || null) : (Number(personalDetail?.requiredToDate ?? 0) || null);
+              const yPct = isSupervisorPersonal ? supervisorAcceptedToDatePct : (personalDetail ? Number(personalDetail.acceptedCoverageToDatePct ?? 0) : (yt ? Math.min(Math.round((yc / yt) * 100), 100) : null));
               const yDone = yt ? yc >= yt : false;
               const tr   = isSupervisorPersonal ? null : _myYearlyStats?.teamRank;
               const circ = 2 * Math.PI * 42;
@@ -2182,7 +2189,7 @@ function renderDashboard(container, data) {
                   </svg>
                   <div class="absolute inset-0 flex flex-col items-center justify-center">
                     <p class="text-2xl font-bold" style="color:${ringColor}">${yPct !== null ? yPct + '%' : walks}</p>
-                    <p class="text-[9px] text-slate-400 mt-0.5">${yt ? yc + '/' + yt + (_yearlyTarget ? ' (' + _yearlyTarget + ')' : '') + ' ครั้ง' : yPct === null ? 'ครั้งรวม' : ''}</p>
+                    <p class="text-[9px] text-slate-400 mt-0.5">${yt ? isSupervisorPersonal ? `${yc}/${yt} รอบ` : yc + '/' + yt + (_yearlyTarget ? ' (' + _yearlyTarget + ')' : '') + ' ครั้ง' : yPct === null ? 'ครั้งรวม' : ''}</p>
                   </div>
                 </div>
                 <!-- Status badge -->
@@ -2197,12 +2204,13 @@ function renderDashboard(container, data) {
             <!-- Footer stats -->
             <div class="bg-slate-50 rounded-xl p-3 border border-slate-100 flex items-center justify-between">
               <div>
-                <p class="text-[10px] text-slate-400 font-medium">เดินตรวจรวม</p>
-                <p class="text-xl font-bold" style="color:${isSupervisorPersonal ? '#059669' : rank.color}">${isSupervisorPersonal ? supervisorYearlyCompleted : walks} <span class="text-xs font-normal text-slate-400">ครั้ง</span></p>
+                <p class="text-[10px] text-slate-400 font-medium">${isSupervisorPersonal ? 'นับตามรอบ' : 'เดินตรวจรวม'}</p>
+                <p class="text-xl font-bold" style="color:${isSupervisorPersonal ? '#059669' : rank.color}">${isSupervisorPersonal ? supervisorAcceptedToDate : walks} <span class="text-xs font-normal text-slate-400">ครั้ง</span></p>
+                ${isSupervisorPersonal && supervisorYearlyCompleted !== supervisorAcceptedToDate ? `<p class="text-[9px] text-slate-400 mt-0.5">เดินจริง ${supervisorYearlyCompleted} ครั้ง</p>` : ''}
               </div>
               <div class="text-right">
                 <p class="text-[10px] text-slate-400 font-medium">${isSupervisorPersonal ? 'Accepted' : 'อัตราผ่าน'}</p>
-                <p class="text-xl font-bold text-emerald-600">${isSupervisorPersonal ? supervisorAcceptedPct : _acceptedPct}%</p>
+                <p class="text-xl font-bold text-emerald-600">${isSupervisorPersonal ? supervisorAcceptedToDatePct : _acceptedPct}%</p>
               </div>
             </div>
           </div>
@@ -5219,7 +5227,10 @@ function _patrolDetailSummaryGrid(detail, group) {
       ${_patrolAdminSummaryCard('Actual Walks', String(activity.total ?? summary.actualWalks ?? 0), 'violet')}
       ${_patrolAdminSummaryCard('Scheduled Walks', String(activity.scheduledNormal ?? summary.scheduledNormalWalks ?? 0), 'emerald')}
       ${_patrolAdminSummaryCard('Makeup Walks', String(activity.makeup ?? summary.makeupWalks ?? 0), 'amber')}
-      ${_patrolAdminSummaryCard('Extra Walks', String(activity.extra ?? summary.extraWalks ?? 0), 'violet')}` : '';
+      ${_patrolAdminSummaryCard('Extra Walks', String(activity.extra ?? summary.extraWalks ?? 0), 'violet')}`
+        : group === 'supervisor'
+          ? _patrolAdminSummaryCard('Actual Self Check-ins', String(summary.completed ?? detail?.records?.length ?? 0), 'violet')
+          : '';
     return `<div class="grid grid-cols-2 sm:grid-cols-4 gap-2">
       ${_patrolAdminSummaryCard('Progress To Date', `${progress}%`, progress >= 80 ? 'emerald' : (progress > 0 ? 'amber' : 'red'))}
       ${_patrolAdminSummaryCard('Full Year', `${fullYear}%`, 'slate')}
@@ -7365,7 +7376,7 @@ function renderSvTable() {
     tbody.innerHTML = page.map((m, i) => {
         const final = _patrolOverviewFinalInfo(m, true);
         const done = final.label === 'Pass' || final.label === 'Accepted';
-        const actualAttended = Number(m.attended || 0);
+        const actualAttended = Number(m.fullYearCompleted ?? m.attended ?? 0);
         const acceptedCoverage = _patrolOverviewLeave(m, true, 'acceptedCoverageToDate', actualAttended);
         const acceptedPct = _patrolOverviewLeave(m, true, 'acceptedCoverageToDatePct', m.percent || 0);
         const half = acceptedCoverage > 0 && acceptedCoverage < m.target;
@@ -7387,7 +7398,7 @@ function renderSvTable() {
               <td class="px-4 py-3 text-center font-bold text-slate-600">${yearlyTarget || m.target || 0}</td>
               <td class="px-4 py-3 text-center font-bold ${done ? 'text-emerald-600' : half ? 'text-amber-600' : 'text-slate-400'}">
                 ${acceptedCoverage}
-                ${acceptedCoverage !== actualAttended ? `<span class="block text-[9px] text-slate-400">actual ${actualAttended}</span>` : ''}
+                ${acceptedCoverage !== actualAttended ? `<span class="block text-[9px] text-slate-400">เดินจริง ${actualAttended}</span>` : ''}
               </td>
               <td class="px-4 py-3 text-center">
                 <span class="inline-flex items-center justify-center px-2 py-0.5 rounded-full text-[10px] font-bold ${overLeave > 0 ? 'bg-red-50 text-red-600' : 'bg-sky-50 text-sky-700'}">${leaveYear}/${allowedLeave}</span>
@@ -7429,7 +7440,7 @@ function renderSvTable() {
 
     if (mobileCards) {
         mobileCards.innerHTML = page.map(m => {
-            const actualAttended = Number(m.attended || 0);
+            const actualAttended = Number(m.fullYearCompleted ?? m.attended ?? 0);
             const acceptedCoverage = _patrolOverviewLeave(m, true, 'acceptedCoverageToDate', actualAttended);
             const acceptedPct = _patrolOverviewLeave(m, true, 'acceptedCoverageToDatePct', m.percent || 0);
             const yearlyTarget = Number(m.yearlyTarget || m.YearlyTarget || m.TargetPerYear || m.target || 0);

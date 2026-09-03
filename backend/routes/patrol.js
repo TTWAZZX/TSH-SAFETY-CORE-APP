@@ -4448,6 +4448,11 @@ router.get('/my-self-patrol', async (req, res) => {
                 periodStatus: period.status || 'upcoming',
                 yearlyTarget: Number(detail.summary?.yearlyTarget || 0),
                 yearlyCompleted: Number(detail.summary?.completed || 0),
+                // Read-only projection for the personal dashboard. Keep the same
+                // capped, due-to-date semantics used by supervisor-overview.
+                completedToDate: Number(detail.summary?.completedToDateCapped || 0),
+                requiredToDate: Number(detail.summary?.requiredToDate || 0),
+                acceptedCoverageToDate: Number(detail.summary?.acceptedCoverageToDate || detail.summary?.leave?.acceptedCoverageToDate || 0),
                 passPct: Number(detail.summary?.passPct || detail.passPct || 80),
                 leave: detail.summary?.leave || null,
                 leaveRequests: detail.leaveRequests || [],
