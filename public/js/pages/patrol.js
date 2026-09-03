@@ -1897,7 +1897,7 @@ function renderDashboard(container, data) {
           })() : ''}
 
           <!-- Self-Patrol Card (หัวหน้าส่วน/แผนก) — conditional -->
-          ${_mySelfPatrol?.isSupervisorPatrol ? (() => {
+          ${_mySelfPatrol?.isSupervisorPatrol && !useSelfPatrolGreen ? (() => {
             const sp        = _mySelfPatrol;
             const isFlexible = sp.scheduleMode === 'flexible';
             const scheduleItems = patrolSelfScheduledMonthItems();
