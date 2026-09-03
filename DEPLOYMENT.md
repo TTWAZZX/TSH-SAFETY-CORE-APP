@@ -1,5 +1,15 @@
 # TSH Safety Core Activity - Deployment
 
+## Safety Patrol Top/Management and Sec/Supervisor UI release (2026-09-03)
+
+The approved Safety Patrol UI/API projection is deployed to the shared-hosting PHP target at `dev.tshpcl.com/safety/tsh-safety-core`. The scoped release contains only `index.html`, Production-derived `public/js/main.js`, `public/js/pages/patrol.js`, and `api/handlers/patrol.php`. It adds no schema or database/data mutation, and does not alter check-in, quota, target, roster, session, rotation, schedule, or Attendance rules.
+
+- Runtime rollback backup: `backups/production/patrol-supervisor-ui-predeploy-20260903-102020` (four Production files before upload).
+- Release candidate: `backups/production/patrol-supervisor-ui-candidate-20260903-102020`.
+- FTPS download-back verification: `backups/production/patrol-supervisor-ui-upload-verify-20260903-102020`; SHA-256 matched `4/4` files.
+- HTTPS read-only smoke passed: `index.html` serves the new main cache key, `main.js` serves the new Patrol cache key, the Patrol page exposes the new Supervisor projection, and unauthenticated `/api/patrol/my-self-patrol` correctly returns `401`.
+- Authenticated Top & Management/Sec. & Supervisor API smoke could not run because the local `PROD_UAT_*` login credentials are rejected by this target with `401`; no retry or test data was created. Complete the role smoke with valid target-specific UAT credentials before any further Patrol release.
+
 ## Safety Patrol Check-in v2 dev deployment record (2026-09-02)
 
 Safety Patrol Check-in v2 is deployed and verified on `dev.tshpcl.com` only. Production was not rolled out. The Patrol-only source is included in its dedicated GitHub release commit. The shared-hosting PHP release was limited to `index.html`, `public/js/main.js`, `public/js/api.js`, `public/js/pages/patrol.js`, `api/handlers/patrol.php` and `deploy-manifest.json`; the Node route remains the Local development parity implementation.

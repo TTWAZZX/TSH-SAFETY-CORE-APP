@@ -1,5 +1,12 @@
 # TSH Safety Core Activity - Changelog And Handoff History
 
+## Safety Patrol Top/Management and Sec/Supervisor UI release (2026-09-03)
+
+- Deployed the approved Safety Patrol UI/API projection to the PHP target at `dev.tshpcl.com/safety/tsh-safety-core`: Supervisor personal summary/history/layout refresh and Top yearly activity type colouring are live.
+- Preserved all Patrol business rules and existing Attendance/Self Checkin data. No migration, database mutation, roster/session/target/quota change, or test record was made.
+- Created a four-file runtime rollback backup and verified the uploaded files by FTPS SHA-256 (`4/4`). HTTPS static/cache and unauthenticated API-boundary smoke passed.
+- The local `PROD_UAT_*` login credentials are not valid for this target (`401`), so authenticated Top & Management and Sec. & Supervisor smoke remains pending valid target-specific UAT access.
+
 ## Safety Patrol Check-in v2 - dev deployment (2026-09-02)
 
 - Deployed the verified PHP/frontend Safety Patrol v2 candidate to `dev.tshpcl.com` behind the additive `patrol_checkin_v2_enabled` flag, then enabled it after migration and flag-off smoke.
