@@ -2128,7 +2128,7 @@ function renderDashboard(container, data) {
           </div>
 
           <!-- Performance Card — Compliance Ring (B+D) -->
-          <div class="bg-white rounded-2xl shadow-sm border border-slate-100 p-5 overflow-hidden relative" data-patrol-card-image="patrol-personal-performance" style="align-self:start">
+          <div class="bg-white rounded-2xl shadow-sm border border-slate-100 p-5 overflow-hidden relative" data-patrol-card-image="patrol-personal-performance" style="align-self:${isSupervisorPersonal ? 'stretch' : 'start'}">
             <div class="absolute -right-4 -bottom-4 w-24 h-24 rounded-full opacity-5" style="background:${isSupervisorPersonal ? '#059669' : rank.color}"></div>
             <div class="flex items-center justify-between mb-4">
               <h3 class="font-bold text-slate-700 text-sm flex items-center gap-2">
