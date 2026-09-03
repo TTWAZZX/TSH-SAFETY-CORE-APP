@@ -1897,7 +1897,7 @@ function renderDashboard(container, data) {
           })() : ''}
 
           <!-- Self-Patrol Card (หัวหน้าส่วน/แผนก) — conditional -->
-          ${_mySelfPatrol?.isSupervisorPatrol && !useSelfPatrolGreen ? (() => {
+          ${_mySelfPatrol?.isSupervisorPatrol ? (() => {
             const sp        = _mySelfPatrol;
             const isFlexible = sp.scheduleMode === 'flexible';
             const scheduleItems = patrolSelfScheduledMonthItems();
@@ -2069,10 +2069,10 @@ function renderDashboard(container, data) {
                       </button>
                     </div>`;
                   }).join('')}
-              <button onclick="openSelfCheckinModal()" ${actionableScheduleCount ? '' : 'disabled'} class="mt-4 w-full py-2.5 rounded-xl text-xs font-bold text-white transition-all hover:opacity-90 active:scale-[0.98] disabled:opacity-45 disabled:cursor-not-allowed" style="background:linear-gradient(135deg,#d97706,#f59e0b)">
+              ${!useSelfPatrolGreen ? `<button onclick="openSelfCheckinModal()" ${actionableScheduleCount ? '' : 'disabled'} class="mt-4 w-full py-2.5 rounded-xl text-xs font-bold text-white transition-all hover:opacity-90 active:scale-[0.98] disabled:opacity-45 disabled:cursor-not-allowed" style="background:linear-gradient(135deg,#d97706,#f59e0b)">
                 <svg class="w-3.5 h-3.5 inline-block mr-1.5 -mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/></svg>
                 ${actionableScheduleCount ? 'บันทึกการเดินตรวจ' : 'ไม่มีรอบที่ต้องบันทึก'}
-              </button>
+              </button>` : ''}
             </div>
           </div>`;
           })() : ''}
