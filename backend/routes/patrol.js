@@ -3687,7 +3687,7 @@ async function buildSupervisorAttendanceDetail(employeeId, year, options = {}) {
     const dueMonth = patrolDueMonth(year);
     const leaveRows = await patrolLeaveRows(employeeId, 'supervisor', year);
     const [rows] = await db.query(
-        `SELECT sc.id,sc.CheckinDate,sc.Location,sc.Notes,sc.Year,sc.Month,sc.PatrolType,sc.RecordedBy,sc.ScheduledSessionID,e.EmployeeName AS RecordedByName
+        `SELECT sc.id,sc.CheckinDate,sc.CreatedAt,sc.Location,sc.Notes,sc.Year,sc.Month,sc.PatrolType,sc.RecordedBy,sc.ScheduledSessionID,e.EmployeeName AS RecordedByName
          FROM Patrol_Self_Checkin sc
          LEFT JOIN Employees e ON e.EmployeeID=sc.RecordedBy
          WHERE sc.EmployeeID=? AND sc.Year=?
@@ -3813,7 +3813,7 @@ async function buildFlexibleSelfPatrolPayload(employeeId, year, month, employee 
     const { monthlyRequirement, targetSource } = await getPatrolFlexibleMonthlyRequirement();
     const [areas] = await db.query('SELECT id, Name, Code FROM Patrol_Areas ORDER BY SortOrder, id');
     const [rows] = await db.query(
-        `SELECT sc.id,sc.CheckinDate,sc.Location,sc.Notes,sc.Year,sc.Month,sc.PatrolType,sc.RecordedBy,sc.ScheduledSessionID,e.EmployeeName AS RecordedByName
+        `SELECT sc.id,sc.CheckinDate,sc.CreatedAt,sc.Location,sc.Notes,sc.Year,sc.Month,sc.PatrolType,sc.RecordedBy,sc.ScheduledSessionID,e.EmployeeName AS RecordedByName
          FROM Patrol_Self_Checkin sc
          LEFT JOIN Employees e ON e.EmployeeID=sc.RecordedBy
          WHERE sc.EmployeeID=? AND sc.Year=?
@@ -3880,7 +3880,7 @@ async function buildFlexibleSupervisorAttendanceDetail(employeeId, year, employe
     const dueMonth = patrolDueMonth(year);
     const [areas] = await db.query('SELECT id, Name, Code FROM Patrol_Areas ORDER BY SortOrder, id');
     const [rows] = await db.query(
-        `SELECT sc.id,sc.CheckinDate,sc.Location,sc.Notes,sc.Year,sc.Month,sc.PatrolType,sc.RecordedBy,sc.ScheduledSessionID,e.EmployeeName AS RecordedByName
+        `SELECT sc.id,sc.CheckinDate,sc.CreatedAt,sc.Location,sc.Notes,sc.Year,sc.Month,sc.PatrolType,sc.RecordedBy,sc.ScheduledSessionID,e.EmployeeName AS RecordedByName
          FROM Patrol_Self_Checkin sc
          LEFT JOIN Employees e ON e.EmployeeID=sc.RecordedBy
          WHERE sc.EmployeeID=? AND sc.Year=?
@@ -4440,6 +4440,7 @@ router.get('/my-self-patrol', async (req, res) => {
                 scheduleMode: 'scheduled',
                 position: emp?.Position || detail.employee?.Position || '',
                 checkins: period.records || [],
+                recentCheckins: (detail.records || []).slice().reverse().slice(0, 3),
                 target: monthlyRequirement,
                 monthlyRequirement,
                 completed,
@@ -4759,7 +4760,7 @@ router.get('/supervisor-checkins', async (req, res) => {
     const year = parseInt(yearStr) || new Date().getFullYear();
     try {
         const [rows] = await db.query(
-            `SELECT id, CheckinDate, Location, Notes, Year, Month, PatrolType, RecordedBy, ScheduledSessionID
+            `SELECT id, CheckinDate, CreatedAt, Location, Notes, Year, Month, PatrolType, RecordedBy, ScheduledSessionID
              FROM Patrol_Self_Checkin WHERE EmployeeID = ? AND Year = ?
              ORDER BY CheckinDate DESC`,
             [employeeId, year]

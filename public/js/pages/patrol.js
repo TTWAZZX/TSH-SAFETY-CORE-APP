@@ -319,6 +319,7 @@ let _masterUnits    = [];    // safety units per department (Master_SafetyUnits)
 let _deptStatSel    = null;  // admin-saved dept stat selection (from DB)
 let _unitStatSel    = null;  // admin-saved unit stat selection (from DB)
 let _myYearlyStats       = null;  // yearly patrol stats for personal dashboard (Phase 3)
+let _patrolDashboardData = null;  // last successful personal projection for in-place refresh
 let _overviewYear   = new Date().getFullYear();
 let _overviewData   = null;  // attendance overview cache
 let _arsvCurrentDetail = null; // Sec. & Supervisor admin schedule/detail cache
@@ -466,6 +467,31 @@ function patrolDateOnly(value) {
         return `${value.getFullYear()}-${String(value.getMonth() + 1).padStart(2, '0')}-${String(value.getDate()).padStart(2, '0')}`;
     }
     return String(value).slice(0, 10);
+}
+
+function patrolRecordedAtLabel(value) {
+    if (!value) return 'ไม่มีข้อมูลเวลา';
+    const date = new Date(String(value).replace(' ', 'T'));
+    if (Number.isNaN(date.getTime())) return 'ไม่มีข้อมูลเวลา';
+    return `บันทึก ${date.toLocaleTimeString('th-TH', { hour: '2-digit', minute: '2-digit' })} น.`;
+}
+
+async function refreshSupervisorPatrolProjection() {
+    const container = document.getElementById('patrol-page');
+    if (!container || !_patrolDashboardData) return;
+    const now = new Date();
+    const year = now.getFullYear();
+    const month = now.getMonth() + 1;
+    const [selfRes, yearlyRes] = await Promise.all([
+        API.get(`/patrol/my-self-patrol?year=${year}&month=${month}`),
+        API.get(`/patrol/my-yearly-stats?year=${year}`),
+    ]);
+    _mySelfPatrol = selfRes?.data || _mySelfPatrol;
+    _myYearlyStats = yearlyRes?.data || _myYearlyStats;
+    // Overview is a separately rendered tab. Mark it stale so its existing server projection
+    // is refreshed on entry, without inventing or recalculating any Supervisor totals here.
+    window._svLoaded = false;
+    renderDashboard(container, _patrolDashboardData);
 }
 
 function patrolSessionId(item = {}) {
@@ -630,7 +656,9 @@ function patrolHasSelfPatrolDuty() {
 }
 
 function patrolUseSelfPatrolGreenFallback() {
-    return !_myPlan && !_patrolGreenHasNormalSchedule && patrolHasSelfPatrolDuty();
+    // A Sec. & Supervisor may also be a base-team member.  The base-team plan
+    // must not replace their own Supervisor projection on the Personal tab.
+    return patrolHasSelfPatrolDuty();
 }
 
 function patrolSelfPatrolProgress() {
@@ -1014,13 +1042,14 @@ export async function loadPatrolPage() {
         try { _areaStatSel = areaSelRes.value ? JSON.parse(areaSelRes.value) : null; } catch { _areaStatSel = null; }
         _spotlightMgmtId = spotlightRes.value || null;
 
-        renderDashboard(container, {
+        _patrolDashboardData = {
             schedule: normalizeApiArray(scheduleRes),
             topManagementDetail: topDetailData,
             stats:    normalizeApiArray(statsRes),
             issues:   _allIssues,
             summary:  _monthlySummary,
-        });
+        };
+        renderDashboard(container, _patrolDashboardData);
 
         setTimeout(() => initPromoCarousel(), 100);
         loadDashboardCharts();
@@ -1104,7 +1133,10 @@ function renderDashboard(container, data) {
             PatrolRound: item.PatrolRound || item.patrolRound || item.round || '',
             completionStatus: item.completionStatus || item.status || 'upcoming',
         }));
-    const normalScheduleRows = [...currentMonthScheduleRows, ...upcomingTopScheduleRows];
+    const isSupervisorPersonal = patrolHasSelfPatrolDuty();
+    const normalScheduleRows = isSupervisorPersonal
+        ? []
+        : [...currentMonthScheduleRows, ...upcomingTopScheduleRows];
     _patrolGreenHasNormalSchedule = normalScheduleRows.length > 0;
     const useSelfPatrolGreen = patrolUseSelfPatrolGreenFallback();
     const greenSelfScheduleItems = useSelfPatrolGreen ? patrolSelfScheduledMonthItems() : [];
@@ -1134,7 +1166,19 @@ function renderDashboard(container, data) {
     // ── Per-tab hero stats ───────────────────────────────────────────────────
     const _yearlyCount  = _myYearlyStats?.yearlyCount  ?? walks;
     const _yearlyTarget = _myYearlyStats?.yearlyTarget ?? null;
-    const _personalStats = [
+    const supervisorSummary = _mySelfPatrol || {};
+    const supervisorPeriod = supervisorSummary.currentPeriod || {};
+    const supervisorYearlyCompleted = Number(supervisorSummary.yearlyCompleted ?? 0);
+    const supervisorYearlyTarget = Number(supervisorSummary.yearlyTarget ?? 0);
+    const supervisorMonthCompleted = Number(supervisorPeriod.completed ?? supervisorSummary.completed ?? 0);
+    const supervisorMonthTarget = Number(supervisorPeriod.required ?? supervisorSummary.monthlyRequirement ?? supervisorSummary.target ?? 0);
+    const supervisorAcceptedPct = Number(supervisorSummary.acceptedCoverageYearPct ?? supervisorSummary.leave?.acceptedCoverageYearPct ?? 0);
+    const _personalStats = isSupervisorPersonal ? [
+        { label: 'รวมปีนี้', val: supervisorYearlyTarget ? `${supervisorYearlyCompleted}/${supervisorYearlyTarget}` : supervisorYearlyCompleted, color: '#6ee7b7' },
+        { label: 'Accepted', val: `${supervisorAcceptedPct}%`, color: '#6ee7b7' },
+        { label: 'ทีมของฉัน', val: 'Sec. & Supervisor', color: '#a5f3fc' },
+        { label: 'สถานะเดือนนี้', val: supervisorMonthTarget ? `${supervisorMonthCompleted}/${supervisorMonthTarget} รอบ` : '—', color: supervisorPeriod.periodStatus === 'completed' ? '#6ee7b7' : '#fcd34d' },
+    ] : [
         { label: 'รวมปีนี้',         val: _yearlyTarget ? `${_yearlyCount}/${_yearlyTarget}` : _yearlyCount,           color: '#6ee7b7' },
         { label: 'อัตราผ่านเกณฑ์',  val: `${myStats.Percent || 0}%`,                                                   color: '#6ee7b7' },
         { label: 'ทีมของฉัน',        val: _myPlan ? _myPlan.team.name.replace(/^ทีม\s*/,'') : rank.title,              color: '#a5f3fc' },
@@ -1486,7 +1530,7 @@ function renderDashboard(container, data) {
                   <h3 class="font-bold text-slate-700 text-sm">ตารางงาน (My Schedule)</h3>
                   <span class="text-[10px] text-slate-400">${today.toLocaleString('th-TH',{month:'long',year:'numeric'})}${upcomingTopScheduleRows.length ? ` · รอบถัดไป ${upcomingTopScheduleRows.length}` : ''}</span>
                 </div>
-                <div class="flex-1 overflow-y-auto custom-scrollbar divide-y divide-slate-50" style="max-height:200px">
+                <div class="flex-1 flex flex-col divide-y divide-slate-50">
                   ${normalScheduleRows.length > 0 ? normalScheduleRows.map(item => {
                     const d     = new Date(item.PatrolDate || item.ScheduledDate);
                     const isTd  = d.toDateString() === today.toDateString();
@@ -1507,7 +1551,7 @@ function renderDashboard(container, data) {
                     const schedDate = patrolDateOnly(item.PatrolDate || item.ScheduledDate || item.date);
                     const statusText = isLeave ? 'Leave' : isLeavePending ? 'Pending Leave' : completed ? (makeup ? 'Makeup' : 'Completed') : (item.completionStatus === 'missing' ? 'Missing' : 'Pending');
                     const sc = isLeave ? 'bg-sky-100 text-sky-700' : isLeavePending ? 'bg-indigo-100 text-indigo-700' : completed ? 'bg-emerald-100 text-emerald-700' : item.completionStatus === 'missing' ? 'bg-red-100 text-red-600' : 'bg-amber-100 text-amber-700';
-                    return `<div class="flex items-center px-4 py-3 hover:bg-slate-50 transition-colors ${isTd ? 'bg-emerald-50/40' : ''}">
+                    return `<div class="flex flex-1 min-h-[62px] items-center px-4 py-3 hover:bg-slate-50 transition-colors ${isTd ? 'bg-emerald-50/40' : ''}">
                       <div class="w-10 text-center border-r border-slate-100 pr-3 mr-3 flex-shrink-0">
                         <div class="text-lg font-bold ${isTd ? 'text-emerald-600' : 'text-slate-700'}">${d.getDate()}</div>
                         <div class="text-[9px] font-bold text-slate-400 uppercase">${d.toLocaleString('en-US',{month:'short'})}</div>
@@ -1541,7 +1585,7 @@ function renderDashboard(container, data) {
                     const statusText = isLeave ? 'Leave' : isLeavePending ? 'Pending Leave' : completed ? (makeup ? 'Makeup' : 'Completed') : locked ? 'Locked' : 'Open';
                     const sc = isLeave ? 'bg-sky-100 text-sky-700' : isLeavePending ? 'bg-indigo-100 text-indigo-700' : completed ? 'bg-emerald-100 text-emerald-700' : locked ? 'bg-slate-100 text-slate-400' : 'bg-amber-100 text-amber-700';
                     const id = item.ScheduledSessionID || patrolSessionId(item);
-                    return `<button type="button" ${locked ? 'disabled' : `onclick="openPersonalPatrolCheckin(${_patrolJsArg(id)}, 'self')"`} class="w-full flex items-center text-left px-4 py-3 hover:bg-emerald-50/40 transition-colors ${isTd ? 'bg-emerald-50/40' : ''} disabled:cursor-not-allowed disabled:hover:bg-transparent">
+                    return `<button type="button" ${locked ? 'disabled' : `onclick="openPersonalPatrolCheckin(${_patrolJsArg(id)}, 'self')"`} class="w-full flex flex-1 min-h-[62px] items-center text-left px-4 py-3 hover:bg-emerald-50/40 transition-colors ${isTd ? 'bg-emerald-50/40' : ''} disabled:cursor-not-allowed disabled:hover:bg-transparent">
                       <div class="w-10 text-center border-r border-slate-100 pr-3 mr-3 flex-shrink-0">
                         <div class="text-lg font-bold ${isTd ? 'text-emerald-600' : 'text-slate-700'}">${date ? d.getDate() : '-'}</div>
                         <div class="text-[9px] font-bold text-slate-400 uppercase">${date ? d.toLocaleString('en-US',{month:'short'}) : ''}</div>
@@ -1612,7 +1656,7 @@ function renderDashboard(container, data) {
           })() : ''}
 
           <!-- A: Month Dot Tracker -->
-          ${_myYearlyStats?.monthlyBreakdown ? (() => {
+          ${!isSupervisorPersonal && _myYearlyStats?.monthlyBreakdown ? (() => {
             const curM = new Date().getMonth() + 1;
             const curY = new Date().getFullYear();
             const bd   = _myYearlyStats.monthlyBreakdown;
@@ -1655,7 +1699,7 @@ function renderDashboard(container, data) {
           })() : ''}
 
           <!-- Monthly Session Tracker -->
-          ${(() => {
+          ${!isSupervisorPersonal ? (() => {
             const sessions       = _myPlan?.sessions || [];
             const required       = _myPlan?.required || [];
             const reqIds         = new Set(required.map(r => patrolSessionId(r)));
@@ -1754,10 +1798,10 @@ function renderDashboard(container, data) {
               }).join('')}
             </div>
           </div>`;
-          })()}
+          })() : ''}
 
           <!-- Team Roster Card — YTD stats + pass/fail -->
-          ${_myPlan?.roster?.length > 0 ? (() => {
+          ${!isSupervisorPersonal && _myPlan?.roster?.length > 0 ? (() => {
             const typeColor = { top:'rose', committee:'amber', management:'indigo' };
             const typeLabel = { top:'Top', committee:'คปอ.', management:'Mgmt' };
             const roster    = _myPlan.roster;
@@ -1831,12 +1875,14 @@ function renderDashboard(container, data) {
           })() : ''}
 
           <!-- Self-Patrol Card (หัวหน้าส่วน/แผนก) — conditional -->
-          ${_mySelfPatrol?.isSupervisorPatrol && !useSelfPatrolGreen ? (() => {
+          ${_mySelfPatrol?.isSupervisorPatrol ? (() => {
             const sp        = _mySelfPatrol;
             const isFlexible = sp.scheduleMode === 'flexible';
             const scheduleItems = patrolSelfScheduledMonthItems();
             const flexDays = Array.isArray(sp.calendarDays) ? sp.calendarDays : [];
             const checkins = Array.isArray(sp.checkins) ? sp.checkins : [];
+            const actualMonthRecords = Array.isArray(sp.currentPeriod?.actualRecords) ? sp.currentPeriod.actualRecords : checkins;
+            const actualWalks = actualMonthRecords.length;
             const attended  = Number(sp.completed ?? checkins.length);
             const target    = Number(sp.monthlyRequirement ?? sp.target ?? 0);
             const pct       = target > 0 ? Math.min(Math.round((attended / target) * 100), 100) : 0;
@@ -1856,6 +1902,8 @@ function renderDashboard(container, data) {
             const leaveYear      = Number(leaveStats.leaveYear || 0);
             const allowedLeave   = Number(leaveStats.allowedLeaveYear || 0);
             const acceptedCoveragePct = Number(sp.acceptedCoverageYearPct || leaveStats.acceptedCoverageYearPct || 0);
+            const acceptedToDatePct = Number(sp.acceptedCoverageToDatePct || leaveStats.acceptedCoverageToDatePct || 0);
+            const periods = Array.isArray(sp.periods) ? sp.periods : [];
             return `
           <div class="bg-white rounded-2xl shadow-sm border border-amber-100 overflow-hidden" data-patrol-card-image="patrol-self-patrol-progress" style="box-shadow:0 4px 24px rgba(245,158,11,0.08)">
             <div class="px-5 py-3.5 border-b border-amber-100" style="background:linear-gradient(135deg,#fffbeb,#fef3c7)">
@@ -1896,7 +1944,13 @@ function renderDashboard(container, data) {
               </div>` : ''}
             </div>
             <div class="p-5">
-              ${isFlexible && flexDays.length ? `
+              <div class="grid grid-cols-2 sm:grid-cols-4 gap-2 mb-4">
+                <div class="rounded-xl border border-slate-100 bg-slate-50 px-3 py-2.5"><p class="text-[9px] font-black uppercase text-slate-400">เดินจริงเดือนนี้</p><p class="mt-0.5 text-lg font-black text-slate-800">${actualWalks}</p></div>
+                <div class="rounded-xl border border-slate-100 bg-slate-50 px-3 py-2.5"><p class="text-[9px] font-black uppercase text-slate-400">เป้าหมายเดือนนี้</p><p class="mt-0.5 text-lg font-black text-slate-800">${target}</p></div>
+                <div class="rounded-xl border border-slate-100 bg-slate-50 px-3 py-2.5"><p class="text-[9px] font-black uppercase text-slate-400">สถานะเดือนนี้</p><p class="mt-0.5 text-sm font-black ${done ? 'text-emerald-700' : 'text-amber-700'}">${done ? 'ครบแล้ว' : `เหลือ ${remaining}`}</p></div>
+                <div class="rounded-xl border border-slate-100 bg-slate-50 px-3 py-2.5"><p class="text-[9px] font-black uppercase text-slate-400">Accepted</p><p class="mt-0.5 text-lg font-black text-emerald-700">${acceptedToDatePct}%</p></div>
+              </div>
+              ${!useSelfPatrolGreen && isFlexible && flexDays.length ? `
               <div class="mb-4 rounded-xl border border-amber-100 bg-amber-50/60 px-3 py-2">
                 <div class="flex items-center justify-between gap-2 mb-2">
                   <p class="text-[10px] font-bold text-amber-700">ปฏิทินงานตรวจเดือนนี้</p>
@@ -1923,7 +1977,7 @@ function renderDashboard(container, data) {
                   }).join('')}
                 </div>
               </div>` : ''}
-              ${!isFlexible && scheduleItems.length ? `
+              ${!useSelfPatrolGreen && !isFlexible && scheduleItems.length ? `
               <div class="mb-4 rounded-xl border border-amber-100 bg-amber-50/60 px-3 py-2">
                 <div class="flex items-center justify-between gap-2 mb-2">
                   <p class="text-[10px] font-bold text-amber-700">รอบตรวจตามปฏิทินเดือนนี้</p>
@@ -1960,6 +2014,16 @@ function renderDashboard(container, data) {
               <div class="w-full bg-slate-100 rounded-full h-2 mb-4 overflow-hidden">
                 <div class="h-full rounded-full transition-all duration-700" style="width:${pct}%;background:${done?'linear-gradient(90deg,#059669,#10b981)':'linear-gradient(90deg,#f59e0b,#fbbf24)'}"></div>
               </div>
+              ${periods.length ? `<div class="mb-4 rounded-xl border border-slate-100 bg-white px-3 py-3">
+                <div class="flex items-center justify-between gap-2 mb-2"><p class="text-[10px] font-black text-slate-600">กิจกรรมตลอดปี</p><p class="text-[10px] font-bold text-slate-500">${yearlySpCount}/${yearlySpTarget || '—'} ครั้ง · ${acceptedCoveragePct}%</p></div>
+                <div class="grid grid-cols-6 sm:grid-cols-12 gap-1.5">
+                  ${periods.map(period => {
+                    const status = String(period.status || '').toLowerCase();
+                    const tone = status === 'completed' ? 'border-emerald-200 bg-emerald-50 text-emerald-700' : status === 'partial' ? 'border-amber-200 bg-amber-50 text-amber-700' : status === 'missed' ? 'border-red-200 bg-red-50 text-red-600' : 'border-slate-100 bg-slate-50 text-slate-400';
+                    return `<div class="min-w-0 rounded-lg border px-1 py-1.5 text-center ${tone}" title="เดือน ${period.month}: ${period.completed || 0}/${period.monthlyRequirement || 0}"><p class="text-[8px] font-black">${period.month}</p><p class="text-[9px] font-black">${period.completed || 0}/${period.monthlyRequirement || 0}</p></div>`;
+                  }).join('')}
+                </div>
+              </div>` : ''}
               ${checkins.length === 0
                 ? `<p class="text-xs text-slate-400 text-center py-3 italic">ยังไม่มีการบันทึกเดือนนี้</p>`
                 : checkins.map(c => {
@@ -1975,25 +2039,26 @@ function renderDashboard(container, data) {
                       </div>
                       <div class="flex-1 min-w-0">
                         <p class="text-xs font-semibold text-slate-700 truncate">${c.Location || 'ไม่ระบุสถานที่'}</p>
+                        <p class="text-[9px] text-slate-400">${escHtml(patrolTypeMeta(c.PatrolType).en)} · ${escHtml(patrolRecordedAtLabel(c.CreatedAt))}</p>
                         ${checkedItems ? `<p class="text-[9px] text-slate-400 truncate">ตรวจ: ${checkedItems.replace(/ \/ /g,' · ')}</p>` : ''}
                         ${notesPreview ? `<p class="text-[9px] text-slate-400 truncate italic">${notesPreview}</p>` : ''}
                       </div>
-                      <button onclick="deleteSelfCheckin(${c.id})" class="p-1 text-slate-300 hover:text-red-500 transition-colors flex-shrink-0 mt-0.5">
+                      ${!useSelfPatrolGreen ? `<button onclick="deleteSelfCheckin(${c.id})" class="p-1 text-slate-300 hover:text-red-500 transition-colors flex-shrink-0 mt-0.5">
                         <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
-                      </button>
+                      </button>` : ''}
                     </div>`;
                   }).join('')}
-              <button onclick="openSelfCheckinModal()" ${actionableScheduleCount ? '' : 'disabled'} class="mt-4 w-full py-2.5 rounded-xl text-xs font-bold text-white transition-all hover:opacity-90 active:scale-[0.98] disabled:opacity-45 disabled:cursor-not-allowed" style="background:linear-gradient(135deg,#d97706,#f59e0b)">
+              ${!useSelfPatrolGreen ? `<button onclick="openSelfCheckinModal()" ${actionableScheduleCount ? '' : 'disabled'} class="mt-4 w-full py-2.5 rounded-xl text-xs font-bold text-white transition-all hover:opacity-90 active:scale-[0.98] disabled:opacity-45 disabled:cursor-not-allowed" style="background:linear-gradient(135deg,#d97706,#f59e0b)">
                 <svg class="w-3.5 h-3.5 inline-block mr-1.5 -mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/></svg>
                 ${actionableScheduleCount ? 'บันทึกการเดินตรวจ' : 'ไม่มีรอบที่ต้องบันทึก'}
-              </button>
+              </button>` : ''}
             </div>
           </div>`;
           })() : ''}
 
         </div>
 
-        <div class="xl:col-span-1 space-y-5">
+        <div class="xl:col-span-1 ${isSupervisorPersonal ? 'flex flex-col gap-5' : 'space-y-5'}">
 
           <!-- Performance Card — Compliance Ring (B+D) -->
           <div class="bg-white rounded-2xl shadow-sm border border-slate-100 p-5 overflow-hidden relative" data-patrol-card-image="patrol-personal-performance">
@@ -2003,16 +2068,18 @@ function renderDashboard(container, data) {
                 <svg class="w-4 h-4 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z"/></svg>
                 ผลงานของฉัน
               </h3>
-              <span class="text-[10px] font-bold px-2 py-1 rounded-full" style="background:${rank.bg};color:${rank.color}">${rank.title}</span>
+              <span class="text-[10px] font-bold px-2 py-1 rounded-full" style="background:${isSupervisorPersonal ? '#ecfdf5' : rank.bg};color:${isSupervisorPersonal ? '#047857' : rank.color}">${isSupervisorPersonal ? 'Sec. & Supervisor' : rank.title}</span>
             </div>
 
             <!-- Compliance Ring + Team Avg (B+D) -->
             ${(() => {
-              const yc   = _myYearlyStats?.yearlyCount ?? walks;
-              const yt   = _myYearlyStats?.yearlyTarget ?? null;
-              const yPct = yt ? Math.min(Math.round((yc / yt) * 100), 100) : null;
-              const yDone = yt ? yc >= yt : false;
-              const tr   = _myYearlyStats?.teamRank;
+              const yc   = isSupervisorPersonal ? supervisorYearlyCompleted : (_myYearlyStats?.yearlyCount ?? walks);
+              const yt   = isSupervisorPersonal ? (supervisorYearlyTarget || null) : (_myYearlyStats?.yearlyTarget ?? null);
+              const yPct = isSupervisorPersonal
+                ? supervisorAcceptedPct
+                : (yt ? Math.min(Math.round((yc / yt) * 100), 100) : null);
+              const yDone = isSupervisorPersonal ? false : (yt ? yc >= yt : false);
+              const tr   = isSupervisorPersonal ? null : _myYearlyStats?.teamRank;
               const circ = 2 * Math.PI * 42;
               const offset = yPct !== null ? circ * (1 - yPct / 100) : circ;
               const ringColor = yDone ? '#10b981' : yPct !== null && yPct >= 75 ? '#10b981' : yPct !== null && yPct >= 50 ? '#f59e0b' : yPct !== null ? '#f43f5e' : '#e2e8f0';
@@ -2066,17 +2133,41 @@ function renderDashboard(container, data) {
             <div class="bg-slate-50 rounded-xl p-3 border border-slate-100 flex items-center justify-between">
               <div>
                 <p class="text-[10px] text-slate-400 font-medium">เดินตรวจรวม</p>
-                <p class="text-xl font-bold" style="color:${rank.color}">${walks} <span class="text-xs font-normal text-slate-400">ครั้ง</span></p>
+                <p class="text-xl font-bold" style="color:${isSupervisorPersonal ? '#059669' : rank.color}">${isSupervisorPersonal ? supervisorYearlyCompleted : walks} <span class="text-xs font-normal text-slate-400">ครั้ง</span></p>
               </div>
               <div class="text-right">
-                <p class="text-[10px] text-slate-400 font-medium">อัตราผ่าน</p>
-                <p class="text-xl font-bold text-emerald-600">${myStats.Percent || 0}%</p>
+                <p class="text-[10px] text-slate-400 font-medium">${isSupervisorPersonal ? 'Accepted' : 'อัตราผ่าน'}</p>
+                <p class="text-xl font-bold text-emerald-600">${isSupervisorPersonal ? supervisorAcceptedPct : (myStats.Percent || 0)}%</p>
               </div>
             </div>
           </div>
 
+          ${isSupervisorPersonal ? `
+          <div class="bg-white rounded-2xl shadow-sm border border-slate-100 p-5" data-patrol-card-image="patrol-supervisor-recent-history">
+            <div class="flex items-center justify-between gap-3 mb-3">
+              <h3 class="font-bold text-slate-700 text-sm flex items-center gap-2">
+                <svg class="w-4 h-4 text-emerald-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+                ประวัติล่าสุด
+              </h3>
+              <span class="text-[10px] font-bold text-emerald-700 bg-emerald-50 rounded-full px-2 py-1">Self Patrol</span>
+            </div>
+            ${Array.isArray(supervisorSummary.recentCheckins) && supervisorSummary.recentCheckins.length ? `
+              <div class="divide-y divide-slate-50">
+                ${supervisorSummary.recentCheckins.map(c => {
+                  const checkedAt = c.CheckinDate ? new Date(`${String(c.CheckinDate).slice(0, 10)}T00:00:00`) : null;
+                  const dateLabel = checkedAt && !Number.isNaN(checkedAt.getTime()) ? checkedAt.toLocaleDateString('th-TH', { day: 'numeric', month: 'short', year: '2-digit' }) : 'ไม่มีข้อมูลวัน';
+                  const type = patrolTypeMeta(c.PatrolType);
+                  return `<div class="flex items-center gap-3 py-2.5 first:pt-0 last:pb-0">
+                    <div class="w-9 text-center flex-shrink-0"><p class="text-xs font-black text-slate-700">${escHtml(dateLabel)}</p></div>
+                    <div class="min-w-0 flex-1"><p class="text-xs font-bold text-slate-700 truncate">${escHtml(c.Location || 'ไม่ระบุพื้นที่')}</p><p class="text-[10px] text-slate-400 truncate">${escHtml(type.label)} · ${escHtml(patrolRecordedAtLabel(c.CreatedAt))}</p></div>
+                  </div>`;
+                }).join('')}
+              </div>` : `<p class="py-4 text-center text-xs text-slate-400">ยังไม่มีประวัติการบันทึก</p>`}
+          </div>` : ''}
+          ${isSupervisorPersonal ? '<div id="supervisor-sidebar-knowledge-slot" class="flex flex-1 flex-col min-h-0"></div>' : ''}
+
           <!-- Recent Check-in Timeline (Phase 3) -->
-          ${_myYearlyStats?.recentCheckins?.length > 0 ? `
+          ${!isSupervisorPersonal && _myYearlyStats?.recentCheckins?.length > 0 ? `
           <div class="bg-white rounded-2xl shadow-sm border border-slate-100 p-5" data-patrol-card-image="patrol-recent-checkins">
             <h3 class="font-bold text-slate-700 text-sm flex items-center gap-2 mb-4">
               <div class="w-7 h-7 rounded-lg flex items-center justify-center bg-indigo-50 flex-shrink-0">
@@ -2171,12 +2262,13 @@ function renderDashboard(container, data) {
       </div><!-- /grid -->
 
       <!-- Safety Tips Carousel — full width -->
+      <div id="patrol-safety-knowledge-shell" class="${isSupervisorPersonal ? 'flex flex-1 flex-col min-h-0' : ''}">
       <div class="flex items-center gap-2 mt-1 mb-2">
         <div class="flex-1 h-px bg-slate-100"></div>
         <span class="text-[10px] font-bold text-slate-400 uppercase tracking-wider px-2">Safety Knowledge</span>
         <div class="flex-1 h-px bg-slate-100"></div>
       </div>
-      <div id="promo-carousel" class="relative overflow-hidden rounded-2xl shadow-md bg-slate-900 group" data-patrol-card-image="patrol-safety-knowledge" style="height:200px">
+      <div id="promo-carousel" class="relative overflow-hidden rounded-2xl shadow-md bg-slate-900 group ${isSupervisorPersonal ? 'flex-1 min-h-[300px]' : ''}" data-patrol-card-image="patrol-safety-knowledge" style="height:${isSupervisorPersonal ? 'auto' : '200px'}">
         <div id="carousel-slides" class="relative w-full h-full">
           ${SAFETY_IMAGES.map((img, idx) => `
           <div class="carousel-item absolute inset-0 pointer-events-none transition-opacity duration-700 opacity-0 z-0" data-index="${idx}">
@@ -2200,6 +2292,7 @@ function renderDashboard(container, data) {
         <div class="absolute bottom-3 left-0 right-0 flex justify-center gap-1.5 z-20 pointer-events-auto">
           ${SAFETY_IMAGES.map((_, idx) => `<button class="carousel-dot h-1 w-1.5 bg-white/30 rounded-full transition-all duration-300 hover:bg-white/60" data-index="${idx}"></button>`).join('')}
         </div>
+      </div>
       </div>
       </div><!-- /content-patrol -->
 
@@ -2508,6 +2601,7 @@ function renderDashboard(container, data) {
                 </table>
               </div>
               <!-- Pagination -->
+              <div id="sv-overview-mobile" class="md:hidden divide-y divide-slate-100"></div>
               <div id="sv-pagination" class="px-4 py-2.5 border-t border-amber-100 flex items-center justify-between min-h-[40px]"></div>
             </div>
 
@@ -2834,6 +2928,12 @@ function renderDashboard(container, data) {
       <svg class="w-6 h-6 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/></svg>
       <span class="absolute right-16 bg-slate-900 text-white text-[10px] font-bold px-3 py-1.5 rounded-lg opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap pointer-events-none shadow-lg">รายงานเร่งด่วน</span>
     </button>`;
+
+    if (isSupervisorPersonal) {
+        const knowledge = document.getElementById('patrol-safety-knowledge-shell');
+        const knowledgeSlot = document.getElementById('supervisor-sidebar-knowledge-slot');
+        if (knowledge && knowledgeSlot) knowledgeSlot.appendChild(knowledge);
+    }
 
     // Initialize hero stats and FAB for default tab (patrol)
     renderStatsStrip(_personalStats);
@@ -7086,7 +7186,9 @@ async function loadSupervisorOverview(year) {
 function renderSvTable() {
     const tbody = document.getElementById('sv-overview-body');
     const pagEl = document.getElementById('sv-pagination');
+    const mobileEl = document.getElementById('sv-overview-mobile');
     if (!tbody) return;
+    tbody.closest('table')?.classList.add('hidden', 'md:table');
 
     const q = _svQ.toLowerCase();
     const filtered = q ? _svAllMembers.filter(m =>
@@ -7112,6 +7214,7 @@ function renderSvTable() {
           </div>
         </td></tr>`;
         if (pagEl) pagEl.innerHTML = '';
+        if (mobileEl) mobileEl.innerHTML = `<div class="px-4 py-10 text-center text-xs text-slate-400">${_svQ ? 'ไม่พบผลการค้นหา' : 'ยังไม่มีสมาชิกในรายการ'}</div>`;
         return;
     }
 
@@ -7179,6 +7282,21 @@ function renderSvTable() {
               </td>` : ''}
             </tr>`;
     }).join('');
+
+    if (mobileEl) {
+        mobileEl.innerHTML = page.map(m => {
+            const final = _patrolOverviewFinalInfo(m, true);
+            const actual = Number(m.attended || 0);
+            const accepted = _patrolOverviewLeave(m, true, 'acceptedCoverageToDate', actual);
+            const acceptedPct = _patrolOverviewLeave(m, true, 'acceptedCoverageToDatePct', m.percent || 0);
+            const yearlyTarget = Number(m.yearlyTarget || m.TargetPerYear || m.target || 0);
+            const isMe = m.EmployeeID === currentUser.id;
+            return `<button type="button" onclick="window.openPatrolAttendanceDetailModal(${_patrolJsArg(m.EmployeeID)},${_patrolJsArg(m.EmployeeName)},'supervisor',${yearlyTarget})" class="w-full min-h-11 px-4 py-3 text-left hover:bg-amber-50/40 transition-colors ${isMe ? 'bg-amber-50/40' : ''}">
+              <div class="flex items-start justify-between gap-3"><div class="min-w-0"><p class="text-sm font-black text-slate-800 truncate">${escHtml(m.EmployeeName || '-')} ${isMe ? '<span class="text-[9px] text-amber-600">(ฉัน)</span>' : ''}</p><p class="mt-0.5 text-[10px] text-slate-500 truncate">${escHtml(m.Position || '—')} · ${escHtml(m.Department || '—')}</p></div><span class="shrink-0 rounded-full px-2 py-1 text-[10px] font-black ${final.cls}">${escHtml(final.label)}</span></div>
+              <div class="mt-2 grid grid-cols-3 gap-2 text-center"><div class="rounded-lg bg-slate-50 px-1.5 py-1.5"><p class="text-[8px] text-slate-400">เดินจริง</p><p class="text-xs font-black text-slate-700">${actual}/${yearlyTarget || '—'}</p></div><div class="rounded-lg bg-emerald-50 px-1.5 py-1.5"><p class="text-[8px] text-emerald-600">Accepted</p><p class="text-xs font-black text-emerald-700">${accepted}</p></div><div class="rounded-lg bg-amber-50 px-1.5 py-1.5"><p class="text-[8px] text-amber-600">Pass rate</p><p class="text-xs font-black text-amber-700">${acceptedPct}%</p></div></div>
+            </button>`;
+        }).join('');
+    }
 
     if (pagEl) {
         pagEl.innerHTML = totalPages <= 1 ? '' : `
@@ -7757,6 +7875,11 @@ function openSelfCheckinModal(selectedSessionId = '') {
                 const res = await API.post('/patrol/self-checkin', { CheckinDate, Location, Notes, ScheduledSessionID, PatrolType });
                 if (res.success) {
                     closeModal();
+                    try {
+                        await refreshSupervisorPatrolProjection();
+                    } catch (refreshErr) {
+                        console.warn('Patrol self-check-in saved but personal projection refresh failed:', refreshErr);
+                    }
                     showCheckinSuccessScreen(PatrolType, res?.data || { group: 'supervisor', email: res?.email || {} });
                 }
                 else showError(res.message);

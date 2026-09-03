@@ -1892,7 +1892,7 @@ function patrol_flexible_supervisor_attendance_detail(string $employeeId, int $y
     $targetSource = (string) $flexConfig['targetSource'];
     $dueMonth = patrol_due_month($year);
     $areas = db_rows('SELECT id,Name,Code FROM patrol_areas ORDER BY SortOrder,id');
-    $records = db_rows("SELECT sc.id,sc.CheckinDate,sc.Location,sc.Notes,sc.Year,sc.Month,sc.PatrolType,sc.RecordedBy,sc.ScheduledSessionID,e.EmployeeName AS RecordedByName FROM patrol_self_checkin sc LEFT JOIN employees e ON e.EmployeeID=sc.RecordedBy WHERE sc.EmployeeID=? AND sc.Year=? ORDER BY sc.CheckinDate,sc.id", [$employeeId, $year]);
+    $records = db_rows("SELECT sc.id,sc.CheckinDate,sc.CreatedAt,sc.Location,sc.Notes,sc.Year,sc.Month,sc.PatrolType,sc.RecordedBy,sc.ScheduledSessionID,e.EmployeeName AS RecordedByName FROM patrol_self_checkin sc LEFT JOIN employees e ON e.EmployeeID=sc.RecordedBy WHERE sc.EmployeeID=? AND sc.Year=? ORDER BY sc.CheckinDate,sc.id", [$employeeId, $year]);
     $recordsByMonth = [];
     $recordsByDate = [];
     foreach ($records as $idx => $r) {
@@ -1999,7 +1999,7 @@ function patrol_attendance_detail_supervisor(string $employeeId, int $year, bool
     $targetSource = $activityTarget['source'] ?? ($roster ? 'patrol_roster' : 'position_schedule');
     $dueMonth = patrol_due_month($year);
     $leaveRows = patrol_leave_rows($employeeId, 'supervisor', $year);
-    $records = db_rows("SELECT sc.id,sc.CheckinDate,sc.Location,sc.Notes,sc.Year,sc.Month,sc.PatrolType,sc.RecordedBy,sc.ScheduledSessionID,e.EmployeeName AS RecordedByName FROM patrol_self_checkin sc LEFT JOIN employees e ON e.EmployeeID=sc.RecordedBy WHERE sc.EmployeeID=? AND sc.Year=? ORDER BY sc.CheckinDate,sc.id", [$employeeId, $year]);
+    $records = db_rows("SELECT sc.id,sc.CheckinDate,sc.CreatedAt,sc.Location,sc.Notes,sc.Year,sc.Month,sc.PatrolType,sc.RecordedBy,sc.ScheduledSessionID,e.EmployeeName AS RecordedByName FROM patrol_self_checkin sc LEFT JOIN employees e ON e.EmployeeID=sc.RecordedBy WHERE sc.EmployeeID=? AND sc.Year=? ORDER BY sc.CheckinDate,sc.id", [$employeeId, $year]);
     $actualRecordsByMonth = [];
     foreach ($records as $idx => $r) {
         $m = (int) ($r['Month'] ?? substr((string) $r['CheckinDate'], 5, 2));
@@ -2121,7 +2121,7 @@ function patrol_flexible_self_payload(string $employeeId, int $year, int $month,
     $monthlyRequirement = (int) $flexConfig['monthlyRequirement'];
     $targetSource = (string) $flexConfig['targetSource'];
     $areas = db_rows('SELECT id,Name,Code FROM patrol_areas ORDER BY SortOrder,id');
-    $records = db_rows("SELECT sc.id,sc.CheckinDate,sc.Location,sc.Notes,sc.Year,sc.Month,sc.PatrolType,sc.RecordedBy,sc.ScheduledSessionID,e.EmployeeName AS RecordedByName FROM patrol_self_checkin sc LEFT JOIN employees e ON e.EmployeeID=sc.RecordedBy WHERE sc.EmployeeID=? AND sc.Year=? ORDER BY sc.CheckinDate,sc.id", [$employeeId, $year]);
+    $records = db_rows("SELECT sc.id,sc.CheckinDate,sc.CreatedAt,sc.Location,sc.Notes,sc.Year,sc.Month,sc.PatrolType,sc.RecordedBy,sc.ScheduledSessionID,e.EmployeeName AS RecordedByName FROM patrol_self_checkin sc LEFT JOIN employees e ON e.EmployeeID=sc.RecordedBy WHERE sc.EmployeeID=? AND sc.Year=? ORDER BY sc.CheckinDate,sc.id", [$employeeId, $year]);
     $normalized = [];
     $monthlyRecords = [];
     $recordsByDate = [];
@@ -2875,6 +2875,7 @@ function handle_patrol_routes(string $method, string $path): bool
             'scheduleMode' => 'scheduled',
             'position' => $emp['Position'] ?? ($detail['employee']['Position'] ?? ''),
             'checkins' => $period['records'] ?? [],
+            'recentCheckins' => array_slice(array_values(array_reverse($detail['records'] ?? [])), 0, 3),
             'target' => $monthlyRequirement,
             'monthlyRequirement' => $monthlyRequirement,
             'completed' => $completed,
@@ -3139,7 +3140,7 @@ function handle_patrol_routes(string $method, string $path): bool
         });
         json_response(['success' => true, 'data' => array_slice($out, 0, 500), 'meta' => ['scope' => count($years) > 1 ? 'all' : 'year', 'checkinV2Enabled' => $v2]]);
     }
-    if ($method === 'GET' && $path === '/patrol/supervisor-checkins') { if (empty($_GET['employeeId'])) json_response(['success' => false, 'message' => 'employeeId is required.'], 400); json_response(['success' => true, 'data' => db_rows('SELECT id,CheckinDate,Location,Notes,Year,Month,PatrolType,RecordedBy,ScheduledSessionID FROM patrol_self_checkin WHERE EmployeeID=? AND Year=? ORDER BY CheckinDate DESC', [$_GET['employeeId'], patrol_query_year()])]); }
+    if ($method === 'GET' && $path === '/patrol/supervisor-checkins') { if (empty($_GET['employeeId'])) json_response(['success' => false, 'message' => 'employeeId is required.'], 400); json_response(['success' => true, 'data' => db_rows('SELECT id,CheckinDate,CreatedAt,Location,Notes,Year,Month,PatrolType,RecordedBy,ScheduledSessionID FROM patrol_self_checkin WHERE EmployeeID=? AND Year=? ORDER BY CheckinDate DESC', [$_GET['employeeId'], patrol_query_year()])]); }
     if ($method === 'POST' && $path === '/patrol/admin-record') { require_admin(); $b = json_body(); $date = patrol_valid_date($b['PatrolDate'] ?? null); if (empty($b['EmployeeID']) || !$date) json_response(['success' => false, 'message' => 'EmployeeID and PatrolDate are required.'], 400); if (trim((string) ($b['ScheduledSessionID'] ?? '')) === '') json_response(['success' => false, 'message' => 'ScheduledSessionID is required for admin on-behalf patrol records.'], 400); $emp = db_row('SELECT e.EmployeeName,t.Name AS TeamName FROM employees e LEFT JOIN patrol_team_members tm ON tm.EmployeeID=e.EmployeeID LEFT JOIN patrol_teams t ON t.id=tm.TeamID WHERE e.EmployeeID=? LIMIT 1', [$b['EmployeeID']]); if (!$emp) json_response(['success' => false, 'message' => 'Employee not found.'], 404); $resolved = patrol_resolve_scheduled_session((string) $b['EmployeeID'], $date, $b['ScheduledSessionID'] ?? null); $session = $resolved['session'] ?? null; $area = trim((string) ($b['Area'] ?? '')) ?: null; if (!$area && $session) $area = $session['AreaName'] ?: ($session['AreaCode'] ?? null); db_execute('INSERT INTO patrol_attendance(UserID,UserName,TeamName,WeekNumber,PatrolDate,Year,PatrolType,Area,Notes,RecordedBy,ScheduledSessionID) VALUES(?,?,?,?,?,?,?,?,?,?,?)', [$b['EmployeeID'], $emp['EmployeeName'], $emp['TeamName'] ?? '', patrol_week($date), $date, (int) substr($date, 0, 4), patrol_allowed_type($b['PatrolType'] ?? null), $area, $b['Notes'] ?? null, $uid, $session['id'] ?? null]); json_response(['success' => true, 'id' => (int) db()->lastInsertId()]); }
     $p = route_params($path, '/patrol/admin-record/:id'); if ($p !== null && $method === 'DELETE') { require_admin(); db_execute('DELETE FROM patrol_attendance WHERE id=?', [$p['id']]); json_response(['success' => true]); }
     if ($method === 'POST' && $path === '/patrol/admin-record/supervisor') { require_admin(); $b = json_body(); $date = patrol_valid_date($b['CheckinDate'] ?? null); if (empty($b['EmployeeID']) || !$date) json_response(['success' => false, 'message' => 'EmployeeID and CheckinDate are required.'], 400); $type = patrol_self_checkin_type($b['PatrolType'] ?? 'normal'); if (!$type) json_response(['success' => false, 'message' => 'PatrolType is invalid.'], 400); $sid = trim((string) ($b['ScheduledSessionID'] ?? '')); if ($sid === '') json_response(['success' => false, 'message' => 'ScheduledSessionID is required for admin on-behalf self-patrol records.'], 400); $resolved = strpos($sid, 'FLEX:') === 0 ? patrol_resolve_flexible_self_checkin((string) $b['EmployeeID'], $date, $sid, $b['Location'] ?? null) : patrol_resolve_supervisor_scheduled_session((string) $b['EmployeeID'], $date, $sid, ['requireSession' => true, 'preserveActualDate' => $type === 'compensation']); $effectiveDate = $resolved['date']; $session = $resolved['session'] ?? null; $location = $b['Location'] ?? null; if (strpos($sid, 'FLEX:') === 0) $location = $session['AreaName'] ?? ($session['AreaCode'] ?? $location); elseif (!$location && $session) $location = $session['AreaName'] ?? ($session['AreaCode'] ?? null); db_execute('INSERT INTO patrol_self_checkin(EmployeeID,CheckinDate,Location,Notes,Year,Month,PatrolType,RecordedBy,ScheduledSessionID) VALUES(?,?,?,?,?,?,?,?,?)', [$b['EmployeeID'], $effectiveDate, $location, $b['Notes'] ?? null, (int) substr($effectiveDate, 0, 4), (int) substr($effectiveDate, 5, 2), $type, $uid, $session['id'] ?? null]); json_response(['success' => true, 'id' => (int) db()->lastInsertId()]); }
