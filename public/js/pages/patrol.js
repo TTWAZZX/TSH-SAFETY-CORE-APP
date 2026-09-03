@@ -1926,7 +1926,7 @@ function renderDashboard(container, data) {
             const acceptedCoveragePct = Number(sp.acceptedCoverageYearPct || leaveStats.acceptedCoverageYearPct || 0);
             const periods = Array.isArray(sp.periods) ? sp.periods : [];
             return `
-          <div class="bg-white rounded-2xl shadow-sm border border-amber-100 overflow-hidden" data-patrol-card-image="patrol-self-patrol-progress" style="box-shadow:0 4px 24px rgba(245,158,11,0.08)">
+          <div class="bg-white rounded-2xl shadow-sm border border-amber-100 overflow-hidden ${useSelfPatrolGreen ? 'flex flex-1 flex-col' : ''}" data-patrol-card-image="patrol-self-patrol-progress" style="box-shadow:0 4px 24px rgba(245,158,11,0.08)">
             <div class="px-5 py-3.5 border-b border-amber-100" style="background:linear-gradient(135deg,#fffbeb,#fef3c7)">
               <div class="flex items-center justify-between">
                 <h3 class="font-bold text-amber-800 text-sm flex items-center gap-2">
@@ -1964,7 +1964,7 @@ function renderDashboard(container, data) {
                 </div>
               </div>` : ''}
             </div>
-            <div class="p-5">
+            <div class="p-5 ${useSelfPatrolGreen ? 'flex-1' : ''}">
               <div class="grid grid-cols-2 sm:grid-cols-4 gap-2 mb-4">
                 <div class="rounded-xl border border-slate-100 bg-slate-50 px-3 py-2.5"><p class="text-[9px] font-black uppercase text-slate-400">เดินจริงเดือนนี้</p><p class="mt-0.5 text-lg font-black text-slate-800">${actualWalks}</p></div>
                 <div class="rounded-xl border border-slate-100 bg-slate-50 px-3 py-2.5"><p class="text-[9px] font-black uppercase text-slate-400">เป้าหมายเดือนนี้</p><p class="mt-0.5 text-lg font-black text-slate-800">${target}</p></div>
