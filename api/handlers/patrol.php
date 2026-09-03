@@ -2283,12 +2283,33 @@ function handle_patrol_routes(string $method, string $path): bool
             $monthlySched = db_rows('SELECT MONTH(s.PatrolDate) AS month,COUNT(*) AS cnt FROM patrol_sessions s JOIN patrol_team_members tm ON tm.TeamID=s.TeamID AND tm.EmployeeID=? WHERE YEAR(s.PatrolDate)=? GROUP BY MONTH(s.PatrolDate)', [$uid, $year]);
         }
         $monthlyRequired = safe_scalar('SELECT COUNT(*) FROM patrol_sessions s JOIN patrol_team_members tm ON tm.TeamID=s.TeamID AND tm.EmployeeID=? WHERE YEAR(s.PatrolDate)=? AND MONTH(s.PatrolDate)=? AND s.PatrolRound=2', [$uid, $year, patrol_month()]);
-        $monthlyAtt = db_rows('SELECT MONTH(PatrolDate) AS month,COUNT(*) AS cnt FROM patrol_attendance WHERE UserID=? AND YEAR(PatrolDate)=? GROUP BY MONTH(PatrolDate)', [$uid, $year]);
+        $monthlyAtt = db_rows("SELECT MONTH(PatrolDate) AS month,
+            COUNT(*) AS cnt,
+            SUM(CASE WHEN LOWER(COALESCE(PatrolType, 'normal'))='compensation' THEN 1 ELSE 0 END) AS makeup,
+            SUM(CASE WHEN LOWER(COALESCE(PatrolType, 'normal'))='extra' OR (ScheduledSessionID IS NULL AND IdempotencyKey IS NOT NULL) THEN 1 ELSE 0 END) AS extra
+            FROM patrol_attendance WHERE UserID=? AND YEAR(PatrolDate)=? GROUP BY MONTH(PatrolDate)", [$uid, $year]);
         $attMap = []; $schedMap = [];
-        foreach ($monthlyAtt as $r) $attMap[(int) $r['month']] = (int) $r['cnt'];
+        foreach ($monthlyAtt as $r) {
+            $makeup = (int) ($r['makeup'] ?? 0);
+            $extra = (int) ($r['extra'] ?? 0);
+            $total = (int) ($r['cnt'] ?? 0);
+            $attMap[(int) $r['month']] = [
+                'attended' => $total,
+                'scheduledNormal' => max(0, $total - $makeup - $extra),
+                'makeup' => $makeup,
+                'extra' => $extra,
+            ];
+        }
         foreach ($monthlySched as $r) $schedMap[(int) $r['month']] = (int) $r['cnt'];
         $breakdown = [];
-        for ($m = 1; $m <= 12; $m++) $breakdown[] = ['month' => $m, 'attended' => $attMap[$m] ?? 0, 'scheduled' => $schedMap[$m] ?? 0];
+        for ($m = 1; $m <= 12; $m++) $breakdown[] = [
+            'month' => $m,
+            'attended' => $attMap[$m]['attended'] ?? 0,
+            'scheduled' => $schedMap[$m] ?? 0,
+            'scheduledNormal' => $attMap[$m]['scheduledNormal'] ?? 0,
+            'makeup' => $attMap[$m]['makeup'] ?? 0,
+            'extra' => $attMap[$m]['extra'] ?? 0,
+        ];
         json_response(['success' => true, 'data' => ['year' => $year, 'yearlyCount' => $yearlyCount, 'yearlyTarget' => $rosterRow['TargetPerYear'] ?? null, 'recentCheckins' => $recent, 'teamRank' => $teamRank, 'teamMemberStats' => $teamMemberStats, 'monthlyRequired' => $monthlyRequired, 'selfPatrolYear' => ['count' => (int) (safe_scalar('SELECT COUNT(*) FROM patrol_self_checkin WHERE EmployeeID=? AND Year=?', [$uid, $year]) ?? 0)], 'monthlyBreakdown' => $breakdown]]);
     }
 

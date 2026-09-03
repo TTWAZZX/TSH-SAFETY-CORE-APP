@@ -688,7 +688,12 @@ router.get('/my-yearly-stats', async (req, res) => {
 
         // 7. Monthly attendance breakdown (for dot tracker)
         const [monthlyAtt] = await db.query(
-            `SELECT MONTH(PatrolDate) AS month, COUNT(*) AS cnt
+            `SELECT MONTH(PatrolDate) AS month,
+                    COUNT(*) AS cnt,
+                    SUM(CASE WHEN LOWER(COALESCE(PatrolType, 'normal')) = 'compensation' THEN 1 ELSE 0 END) AS makeup,
+                    SUM(CASE WHEN LOWER(COALESCE(PatrolType, 'normal')) = 'extra'
+                              OR (ScheduledSessionID IS NULL AND IdempotencyKey IS NOT NULL)
+                             THEN 1 ELSE 0 END) AS extra
              FROM Patrol_Attendance
              WHERE UserID = ? AND YEAR(PatrolDate) = ?
              GROUP BY MONTH(PatrolDate)`,
@@ -711,12 +716,25 @@ router.get('/my-yearly-stats', async (req, res) => {
 
         const monthlyAttMap  = {};
         const monthlySchedMap = {};
-        monthlyAtt.forEach(r => { monthlyAttMap[r.month] = parseInt(r.cnt); });
+        monthlyAtt.forEach(r => {
+            const makeup = Number(r.makeup) || 0;
+            const extra = Number(r.extra) || 0;
+            const total = Number(r.cnt) || 0;
+            monthlyAttMap[r.month] = {
+                attended: total,
+                scheduledNormal: Math.max(0, total - makeup - extra),
+                makeup,
+                extra,
+            };
+        });
         monthlySched.forEach(r => { monthlySchedMap[r.month] = parseInt(r.cnt); });
         const monthlyBreakdown = Array.from({ length: 12 }, (_, i) => ({
             month: i + 1,
-            attended:  monthlyAttMap[i + 1]  || 0,
+            attended:  monthlyAttMap[i + 1]?.attended || 0,
             scheduled: monthlySchedMap[i + 1] || 0,
+            scheduledNormal: monthlyAttMap[i + 1]?.scheduledNormal || 0,
+            makeup: monthlyAttMap[i + 1]?.makeup || 0,
+            extra: monthlyAttMap[i + 1]?.extra || 0,
         }));
 
         res.json({
