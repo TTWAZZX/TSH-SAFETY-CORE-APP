@@ -1,7 +1,7 @@
 import { openModal, closeModal, showLoading, hideLoading, showToast, showError, escHtml, showConfirmationModal } from '../ui.js?v=20260602-mobile-nav-m53';
 import { API } from '../api.js?v=20260902-patrol-checkin-v2';
 import { normalizeApiArray, normalizeApiObject } from '../utils/normalize.js';
-import { createLatestRequestController, guardSubmitHandler, pageSkeleton } from '../utils/async-ui.js?v=20260715-phase32c-residual-async';
+import { createLatestRequestController, guardSubmitHandler, pageSkeleton, runFormBusy } from '../utils/async-ui.js?v=20260715-phase32c-residual-async';
 
 // ─── Auth ─────────────────────────────────────────────────────────────────────
 const PATROL_FALLBACK_USER = { name: 'Staff', id: '', department: '', team: 'Safety Team', role: 'User' };
@@ -317,9 +317,9 @@ let _patrolAreas    = [];    // master areas list — synced from Patrol_Areas t
 let _masterDepts    = [];    // master departments for issue form responsible dept
 let _masterUnits    = [];    // safety units per department (Master_SafetyUnits)
 let _deptStatSel    = null;  // admin-saved dept stat selection (from DB)
+let _patrolDashboardData = null; // confirmed server projection, used only for an in-place personal refresh
 let _unitStatSel    = null;  // admin-saved unit stat selection (from DB)
 let _myYearlyStats       = null;  // yearly patrol stats for personal dashboard (Phase 3)
-let _patrolDashboardData = null;  // last successful personal projection for in-place refresh
 let _overviewYear   = new Date().getFullYear();
 let _overviewData   = null;  // attendance overview cache
 let _arsvCurrentDetail = null; // Sec. & Supervisor admin schedule/detail cache
@@ -469,6 +469,12 @@ function patrolDateOnly(value) {
     return String(value).slice(0, 10);
 }
 
+function patrolCheckinTime(value) {
+    if (!value) return '';
+    const parsed = new Date(value);
+    return Number.isNaN(parsed.getTime()) ? '' : parsed.toLocaleTimeString('th-TH', { hour: '2-digit', minute: '2-digit' });
+}
+
 function patrolRecordedAtLabel(value) {
     if (!value) return 'ไม่มีข้อมูลเวลา';
     const date = new Date(String(value).replace(' ', 'T'));
@@ -480,16 +486,12 @@ async function refreshSupervisorPatrolProjection() {
     const container = document.getElementById('patrol-page');
     if (!container || !_patrolDashboardData) return;
     const now = new Date();
-    const year = now.getFullYear();
-    const month = now.getMonth() + 1;
     const [selfRes, yearlyRes] = await Promise.all([
-        API.get(`/patrol/my-self-patrol?year=${year}&month=${month}`),
-        API.get(`/patrol/my-yearly-stats?year=${year}`),
+        API.get(`/patrol/my-self-patrol?year=${now.getFullYear()}&month=${now.getMonth() + 1}`),
+        API.get(`/patrol/my-yearly-stats?year=${now.getFullYear()}`),
     ]);
     _mySelfPatrol = selfRes?.data || _mySelfPatrol;
     _myYearlyStats = yearlyRes?.data || _myYearlyStats;
-    // Overview is a separately rendered tab. Mark it stale so its existing server projection
-    // is refreshed on entry, without inventing or recalculating any Supervisor totals here.
     window._svLoaded = false;
     renderDashboard(container, _patrolDashboardData);
 }
@@ -656,8 +658,8 @@ function patrolHasSelfPatrolDuty() {
 }
 
 function patrolUseSelfPatrolGreenFallback() {
-    // A Sec. & Supervisor may also be a base-team member.  The base-team plan
-    // must not replace their own Supervisor projection on the Personal tab.
+    // Sec. & Supervisor keeps its own server projection even when the employee
+    // also appears in a base team. This changes presentation only.
     return patrolHasSelfPatrolDuty();
 }
 
@@ -1106,9 +1108,15 @@ function renderDashboard(container, data) {
     const myStats = statsArray.find(r => r.Name === displayUser.name || r.EmployeeID === displayUser.id || r.UserID === displayUser.id) || { Total: 0, Percent: 0 };
 
     // Smart CTA helpers
-    const todayCheckedIn = myStats.LastWalk
-        ? new Date(myStats.LastWalk).toDateString() === today.toDateString()
-        : false;
+    const personalDetail = _myTopManagementDetail?.summary || null;
+    const personalRecords = Array.isArray(_myTopManagementDetail?.records) ? _myTopManagementDetail.records : [];
+    const todayCheckedIn = personalRecords.some(record => patrolDateOnly(record.PatrolDate) === patrolDateOnly(today))
+        || (myStats.LastWalk ? patrolDateOnly(myStats.LastWalk) === patrolDateOnly(today) : false);
+    const latestPersonalCheckin = personalRecords
+        .filter(record => patrolDateOnly(record.PatrolDate) === patrolDateOnly(today))
+        .sort((a, b) => String(b.CheckinAt || '').localeCompare(String(a.CheckinAt || '')))[0]?.CheckinAt
+        || myStats.LastCheckinAt
+        || '';
     const todaySessForCTA = _myPlan?.sessions?.find(s => new Date(s.PatrolDate).toDateString() === today.toDateString()) || null;
     const nextSess = _myPlan?.sessions?.find(s => new Date(s.PatrolDate) > today) || null;
     const nextDaysLeft = nextSess ? Math.ceil((new Date(nextSess.PatrolDate) - today) / 86400000) : null;
@@ -1134,9 +1142,7 @@ function renderDashboard(container, data) {
             completionStatus: item.completionStatus || item.status || 'upcoming',
         }));
     const isSupervisorPersonal = patrolHasSelfPatrolDuty();
-    const normalScheduleRows = isSupervisorPersonal
-        ? []
-        : [...currentMonthScheduleRows, ...upcomingTopScheduleRows];
+    const normalScheduleRows = isSupervisorPersonal ? [] : [...currentMonthScheduleRows, ...upcomingTopScheduleRows];
     _patrolGreenHasNormalSchedule = normalScheduleRows.length > 0;
     const useSelfPatrolGreen = patrolUseSelfPatrolGreenFallback();
     const greenSelfScheduleItems = useSelfPatrolGreen ? patrolSelfScheduledMonthItems() : [];
@@ -1164,8 +1170,6 @@ function renderDashboard(container, data) {
     const rank = rankTiers.find(r => walks >= r.min && walks <= r.max) || rankTiers[0];
     const rankPct = rank.needed ? Math.min(Math.round((walks / rank.needed) * 100), 100) : 100;
     // ── Per-tab hero stats ───────────────────────────────────────────────────
-    const _yearlyCount  = _myYearlyStats?.yearlyCount  ?? walks;
-    const _yearlyTarget = _myYearlyStats?.yearlyTarget ?? null;
     const supervisorSummary = _mySelfPatrol || {};
     const supervisorPeriod = supervisorSummary.currentPeriod || {};
     const supervisorYearlyCompleted = Number(supervisorSummary.yearlyCompleted ?? 0);
@@ -1173,16 +1177,22 @@ function renderDashboard(container, data) {
     const supervisorMonthCompleted = Number(supervisorPeriod.completed ?? supervisorSummary.completed ?? 0);
     const supervisorMonthTarget = Number(supervisorPeriod.required ?? supervisorSummary.monthlyRequirement ?? supervisorSummary.target ?? 0);
     const supervisorAcceptedPct = Number(supervisorSummary.acceptedCoverageYearPct ?? supervisorSummary.leave?.acceptedCoverageYearPct ?? 0);
+    const _yearlyCount  = Number(personalDetail?.acceptedCoverageToDate ?? _myYearlyStats?.yearlyCount ?? walks);
+    const _yearlyDue    = Number(personalDetail?.requiredToDate ?? 0);
+    const _yearlyTarget = Number(personalDetail?.yearlyTarget ?? _myYearlyStats?.yearlyTarget ?? 0) || null;
+    const _acceptedPct  = Number(personalDetail?.acceptedCoverageToDatePct ?? myStats.Percent ?? 0);
     const _personalStats = isSupervisorPersonal ? [
         { label: 'รวมปีนี้', val: supervisorYearlyTarget ? `${supervisorYearlyCompleted}/${supervisorYearlyTarget}` : supervisorYearlyCompleted, color: '#6ee7b7' },
-        { label: 'Accepted', val: `${supervisorAcceptedPct}%`, color: '#6ee7b7' },
-        { label: 'ทีมของฉัน', val: 'Sec. & Supervisor', color: '#a5f3fc' },
-        { label: 'สถานะเดือนนี้', val: supervisorMonthTarget ? `${supervisorMonthCompleted}/${supervisorMonthTarget} รอบ` : '—', color: supervisorPeriod.periodStatus === 'completed' ? '#6ee7b7' : '#fcd34d' },
+        { label: 'Accepted %', val: `${supervisorAcceptedPct}%`, color: '#6ee7b7' },
+        { label: 'สถานะเดือนนี้', val: supervisorMonthTarget ? `${supervisorMonthCompleted}/${supervisorMonthTarget} รอบ` : '—',
+          hint: supervisorMonthTarget ? (supervisorPeriod.periodStatus === 'completed' ? 'ครบแล้ว' : `เหลืออีก ${Math.max(0, supervisorMonthTarget - supervisorMonthCompleted)} รอบ`) : '',
+          color: supervisorPeriod.periodStatus === 'completed' ? '#6ee7b7' : '#fcd34d' },
     ] : [
-        { label: 'รวมปีนี้',         val: _yearlyTarget ? `${_yearlyCount}/${_yearlyTarget}` : _yearlyCount,           color: '#6ee7b7' },
-        { label: 'อัตราผ่านเกณฑ์',  val: `${myStats.Percent || 0}%`,                                                   color: '#6ee7b7' },
-        { label: 'ทีมของฉัน',        val: _myPlan ? _myPlan.team.name.replace(/^ทีม\s*/,'') : rank.title,              color: '#a5f3fc' },
+        { label: 'รวมปีนี้',         val: _yearlyDue ? `${_yearlyCount}/${_yearlyDue}${_yearlyTarget ? ` (${_yearlyTarget})` : ''}` : (_yearlyTarget ? `${_yearlyCount} (${_yearlyTarget})` : _yearlyCount), color: '#6ee7b7' },
+        { label: 'Accepted %',       val: `${_acceptedPct}%`,                                                        color: '#6ee7b7' },
         { label: 'สถานะเดือนนี้',    val: _myPlan ? `${_myPlan.compliance.attended}/${_myPlan.compliance.required} รอบ` : '—',
+          hint: _myPlan ? (_myPlan.compliance.done ? 'ครบแล้ว' : `เหลืออีก ${Math.max(0, _myPlan.compliance.required - _myPlan.compliance.attended)} รอบ`) : '',
+          action: 'openPersonalPlanStatusModal()',
           color: _myPlan?.compliance?.done ? '#6ee7b7' : '#fcd34d' },
     ];
     const _issueStats = [
@@ -1195,11 +1205,16 @@ function renderDashboard(container, data) {
     function renderStatsStrip(stats) {
         const el = document.getElementById('hero-stats-strip');
         if (!el) return;
+        // Personal view has exactly three live metrics. Keep them in one equal
+        // row on phones so the monthly card does not appear stranded below.
+        const isThreeMetricStrip = stats.length === 3;
+        el.className = `grid ${isThreeMetricStrip ? 'grid-cols-3' : 'grid-cols-2 md:grid-cols-4'} gap-2 sm:gap-3 mt-5`;
         el.innerHTML = stats.map(s => `
-        <div class="rounded-xl px-4 py-3 text-center transition-all duration-300" style="background:rgba(255,255,255,0.12);backdrop-filter:blur(6px)">
-          <p class="text-xl font-bold truncate" style="color:${s.color}">${s.val}</p>
-          <p class="text-[11px] mt-0.5 text-white/70">${s.label}</p>
-        </div>`).join('');
+        <${s.action ? 'button type="button" onclick="' + s.action + '"' : 'div'} class="min-w-0 rounded-xl ${isThreeMetricStrip ? 'px-2 py-3 sm:px-4' : 'px-4 py-3'} text-center transition-all duration-300 ${s.action ? 'cursor-pointer hover:bg-white/20 active:scale-[0.98]' : ''}" style="background:rgba(255,255,255,0.12);backdrop-filter:blur(6px)">
+          <p class="${isThreeMetricStrip ? 'text-lg sm:text-xl' : 'text-xl'} font-bold leading-tight truncate" style="color:${s.color}">${s.val}</p>
+          <p class="text-[10px] sm:text-[11px] mt-1 text-white/70 leading-tight">${s.label}</p>
+          ${s.hint ? `<p class="mt-1 text-[9px] font-bold text-white/80">${s.hint}</p>` : ''}
+        </${s.action ? 'button' : 'div'}>`).join('');
     }
 
     function getOverviewHeroStats() {
@@ -1386,7 +1401,7 @@ function renderDashboard(container, data) {
       <div id="content-patrol" class="space-y-5 animate-fade-in">
 
       <!-- Quick Actions (mobile only) -->
-      <div class="md:hidden grid grid-cols-4 gap-2">
+      <div class="hidden">
         <button onclick="openPersonalPatrolCheckin()"
           class="flex flex-col items-center gap-1.5 py-3 px-1 rounded-xl text-center transition-all active:scale-95"
           style="background:linear-gradient(135deg,#064e3b,#065f46)">
@@ -1414,7 +1429,7 @@ function renderDashboard(container, data) {
         <div class="xl:col-span-2 space-y-5">
 
           <!-- Check-in Card -->
-          <div class="bg-white rounded-2xl overflow-hidden shadow-sm border border-slate-100" data-patrol-card-image="patrol-personal-checkin" style="box-shadow:0 4px 24px rgba(5,150,105,0.07)">
+          <div class="xl:col-span-2 bg-white rounded-2xl overflow-hidden shadow-sm border border-slate-100" data-patrol-card-image="patrol-personal-checkin" style="box-shadow:0 4px 24px rgba(5,150,105,0.07);align-self:start">
             <div class="flex flex-col md:flex-row">
               <div class="md:w-5/12 p-5 flex flex-col justify-between relative overflow-hidden" style="background:linear-gradient(135deg,#064e3b,#065f46)">
                 <div class="absolute -right-6 -top-6 w-28 h-28 rounded-full opacity-10" style="background:radial-gradient(circle,#fff,transparent 70%)"></div>
@@ -1498,7 +1513,7 @@ function renderDashboard(container, data) {
                   : todayCheckedIn
                   ? `<div class="relative z-10 mt-3 w-full py-2.5 rounded-xl font-bold text-sm text-center flex items-center justify-center gap-2" style="background:rgba(255,255,255,0.15);color:rgba(255,255,255,0.6);border:1px solid rgba(255,255,255,0.2)">
                       <svg class="w-4 h-4 text-emerald-300 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"/></svg>
-                      เช็คอินแล้ว · ${new Date(myStats.LastWalk).toLocaleTimeString('th-TH',{hour:'2-digit',minute:'2-digit'})} น.
+                      เช็คอินแล้ว${patrolCheckinTime(latestPersonalCheckin) ? ` · ${patrolCheckinTime(latestPersonalCheckin)} น.` : ''}
                     </div>
                     <button onclick="openPersonalPatrolCheckin()" class="relative z-10 mt-2 w-full py-1.5 rounded-xl text-xs font-semibold transition-all active:scale-[0.98]" style="background:rgba(255,255,255,0.1);color:rgba(255,255,255,0.5)">
                       บันทึกอีกครั้ง
@@ -1530,7 +1545,7 @@ function renderDashboard(container, data) {
                   <h3 class="font-bold text-slate-700 text-sm">ตารางงาน (My Schedule)</h3>
                   <span class="text-[10px] text-slate-400">${today.toLocaleString('th-TH',{month:'long',year:'numeric'})}${upcomingTopScheduleRows.length ? ` · รอบถัดไป ${upcomingTopScheduleRows.length}` : ''}</span>
                 </div>
-                <div class="flex-1 flex flex-col divide-y divide-slate-50">
+                <div class="flex-1 overflow-y-auto custom-scrollbar divide-y divide-slate-50" style="max-height:200px">
                   ${normalScheduleRows.length > 0 ? normalScheduleRows.map(item => {
                     const d     = new Date(item.PatrolDate || item.ScheduledDate);
                     const isTd  = d.toDateString() === today.toDateString();
@@ -1551,7 +1566,7 @@ function renderDashboard(container, data) {
                     const schedDate = patrolDateOnly(item.PatrolDate || item.ScheduledDate || item.date);
                     const statusText = isLeave ? 'Leave' : isLeavePending ? 'Pending Leave' : completed ? (makeup ? 'Makeup' : 'Completed') : (item.completionStatus === 'missing' ? 'Missing' : 'Pending');
                     const sc = isLeave ? 'bg-sky-100 text-sky-700' : isLeavePending ? 'bg-indigo-100 text-indigo-700' : completed ? 'bg-emerald-100 text-emerald-700' : item.completionStatus === 'missing' ? 'bg-red-100 text-red-600' : 'bg-amber-100 text-amber-700';
-                    return `<div class="flex flex-1 min-h-[62px] items-center px-4 py-3 hover:bg-slate-50 transition-colors ${isTd ? 'bg-emerald-50/40' : ''}">
+                    return `<div class="flex items-center px-4 py-3 hover:bg-slate-50 transition-colors ${isTd ? 'bg-emerald-50/40' : ''}">
                       <div class="w-10 text-center border-r border-slate-100 pr-3 mr-3 flex-shrink-0">
                         <div class="text-lg font-bold ${isTd ? 'text-emerald-600' : 'text-slate-700'}">${d.getDate()}</div>
                         <div class="text-[9px] font-bold text-slate-400 uppercase">${d.toLocaleString('en-US',{month:'short'})}</div>
@@ -1585,7 +1600,7 @@ function renderDashboard(container, data) {
                     const statusText = isLeave ? 'Leave' : isLeavePending ? 'Pending Leave' : completed ? (makeup ? 'Makeup' : 'Completed') : locked ? 'Locked' : 'Open';
                     const sc = isLeave ? 'bg-sky-100 text-sky-700' : isLeavePending ? 'bg-indigo-100 text-indigo-700' : completed ? 'bg-emerald-100 text-emerald-700' : locked ? 'bg-slate-100 text-slate-400' : 'bg-amber-100 text-amber-700';
                     const id = item.ScheduledSessionID || patrolSessionId(item);
-                    return `<button type="button" ${locked ? 'disabled' : `onclick="openPersonalPatrolCheckin(${_patrolJsArg(id)}, 'self')"`} class="w-full flex flex-1 min-h-[62px] items-center text-left px-4 py-3 hover:bg-emerald-50/40 transition-colors ${isTd ? 'bg-emerald-50/40' : ''} disabled:cursor-not-allowed disabled:hover:bg-transparent">
+                    return `<button type="button" ${locked ? 'disabled' : `onclick="openPersonalPatrolCheckin(${_patrolJsArg(id)}, 'self')"`} class="w-full flex items-center text-left px-4 py-3 hover:bg-emerald-50/40 transition-colors ${isTd ? 'bg-emerald-50/40' : ''} disabled:cursor-not-allowed disabled:hover:bg-transparent">
                       <div class="w-10 text-center border-r border-slate-100 pr-3 mr-3 flex-shrink-0">
                         <div class="text-lg font-bold ${isTd ? 'text-emerald-600' : 'text-slate-700'}">${date ? d.getDate() : '-'}</div>
                         <div class="text-[9px] font-bold text-slate-400 uppercase">${date ? d.toLocaleString('en-US',{month:'short'}) : ''}</div>
@@ -1614,7 +1629,7 @@ function renderDashboard(container, data) {
           </div>
 
           <!-- Mini Calendar -->
-          <div class="bg-white rounded-xl shadow-sm border border-slate-100 p-5">
+          <div class="xl:hidden bg-white rounded-xl shadow-sm border border-slate-100 p-5">
             <div class="flex justify-between items-center mb-4">
               <h3 class="font-bold text-slate-700 text-sm flex items-center gap-2">
                 <div class="w-7 h-7 rounded-lg flex items-center justify-center" style="background:#ecfdf5">
@@ -1639,7 +1654,7 @@ function renderDashboard(container, data) {
             const urgentDot = nextDaysLeft <= 3 ? 'bg-amber-400 animate-pulse' : 'bg-emerald-400 animate-pulse';
             const urgentText= nextDaysLeft <= 3 ? 'text-amber-700' : 'text-emerald-700';
             return `
-          <div class="flex items-center gap-3 px-4 py-3 rounded-xl border ${urgentCls}">
+          <div class="xl:col-span-2 flex items-center gap-3 px-4 py-3 rounded-xl border ${urgentCls}" style="align-self:start">
             <div class="w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0" style="background:linear-gradient(135deg,#059669,#0d9488)">
               <svg class="w-5 h-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"/></svg>
             </div>
@@ -1656,14 +1671,14 @@ function renderDashboard(container, data) {
           })() : ''}
 
           <!-- A: Month Dot Tracker -->
-          ${!isSupervisorPersonal && _myYearlyStats?.monthlyBreakdown ? (() => {
+          ${_myYearlyStats?.monthlyBreakdown ? (() => {
             const curM = new Date().getMonth() + 1;
             const curY = new Date().getFullYear();
             const bd   = _myYearlyStats.monthlyBreakdown;
             const monthNames = ['ม.ค','ก.พ','มี.ค','เม.ย','พ.ค','มิ.ย','ก.ค','ส.ค','ก.ย','ต.ค','พ.ย','ธ.ค'];
             const maxDots = 4; // max dots to show per month
             return `
-          <div class="ds-filter-bar" data-patrol-card-image="patrol-year-activity-tracker">
+          <div class="xl:col-span-2 ds-filter-bar" data-patrol-card-image="patrol-year-activity-tracker" style="align-self:start">
             <div class="flex items-center justify-between mb-3">
               <h3 class="text-xs font-bold text-slate-700 flex items-center gap-2">
                 <div class="w-5 h-5 rounded-lg flex items-center justify-center" style="background:#ecfdf5">
@@ -1671,27 +1686,34 @@ function renderDashboard(container, data) {
                 </div>
                 กิจกรรมตลอดปี ${_myYearlyStats.year || curY}
               </h3>
-              <div class="flex items-center gap-3 text-[9px] text-slate-400">
-                <span class="flex items-center gap-1"><span class="w-2 h-2 rounded-full bg-emerald-400 inline-block"></span>เข้าร่วม</span>
-                <span class="flex items-center gap-1"><span class="w-2 h-2 rounded-full bg-slate-200 inline-block"></span>พลาด</span>
+              <div class="flex flex-wrap justify-end gap-x-3 gap-y-1 text-[9px] text-slate-400">
+                <span class="flex items-center gap-1"><span class="w-2 h-2 rounded-full bg-emerald-400 inline-block"></span>ตามรอบ</span>
+                <span class="flex items-center gap-1"><span class="w-2 h-2 rounded-full bg-amber-400 inline-block"></span>เดินซ่อม</span>
+                <span class="flex items-center gap-1"><span class="w-2 h-2 rounded-full bg-violet-400 inline-block"></span>เดินเพิ่ม</span>
+                <span class="flex items-center gap-1"><span class="w-2 h-2 rounded-full bg-slate-200 inline-block"></span>ยังขาด</span>
               </div>
             </div>
             <div class="grid grid-cols-6 sm:grid-cols-12 gap-1.5">
               ${bd.map(m => {
                 const isFuture = _myYearlyStats.year === curY && m.month > curM;
                 const isCurrent = _myYearlyStats.year === curY && m.month === curM;
-                const dotCount  = Math.min(m.attended, maxDots);
-                const missCount = isFuture ? 0 : Math.min(Math.max((m.scheduled || 0) - m.attended, 0), maxDots - dotCount);
-                const dots = Array(dotCount).fill('<span class="w-2 h-2 rounded-full bg-emerald-400 inline-block flex-shrink-0"></span>').join('')
+                const normalCount = Math.min(Number(m.scheduledNormal ?? m.attended ?? 0), maxDots);
+                const makeupCount = Math.min(Number(m.makeup || 0), Math.max(0, maxDots - normalCount));
+                const extraCount  = Math.min(Number(m.extra || 0), Math.max(0, maxDots - normalCount - makeupCount));
+                const missCount   = isFuture ? 0 : Math.min(Number(m.missed ?? Math.max((m.scheduled || 0) - (m.attended || 0), 0)), Math.max(0, maxDots - normalCount - makeupCount - extraCount));
+                const dots = Array(normalCount).fill('<span class="w-2 h-2 rounded-full bg-emerald-400 inline-block flex-shrink-0"></span>').join('')
+                           + Array(makeupCount).fill('<span class="w-2 h-2 rounded-full bg-amber-400 inline-block flex-shrink-0"></span>').join('')
+                           + Array(extraCount).fill('<span class="w-2 h-2 rounded-full bg-violet-400 inline-block flex-shrink-0"></span>').join('')
                            + Array(missCount).fill('<span class="w-2 h-2 rounded-full bg-slate-200 inline-block flex-shrink-0"></span>').join('');
-                const hasActivity = m.attended > 0 || (m.scheduled > 0 && !isFuture);
+                const hasActivity = Number(m.attended || 0) > 0 || (m.scheduled > 0 && !isFuture);
                 const cellBg = isCurrent ? 'ring-2 ring-emerald-400 ring-offset-1' : '';
-                return `<div class="flex flex-col items-center gap-1 p-1.5 rounded-lg ${isFuture ? 'opacity-35' : hasActivity ? 'bg-emerald-50/60' : 'bg-slate-50'} ${cellBg}" title="${monthNames[m.month-1]}: เข้าร่วม ${m.attended} ครั้ง${m.scheduled ? ' / กำหนด ' + m.scheduled + ' ครั้ง' : ''}">
+                const totalActivity = Number(m.attended || 0);
+                return `<div class="flex flex-col items-center gap-1 p-1.5 rounded-lg ${isFuture ? 'opacity-35' : hasActivity ? 'bg-emerald-50/60' : 'bg-slate-50'} ${cellBg}" title="${monthNames[m.month-1]}: ตามรอบ ${m.scheduledNormal || 0} · เดินซ่อม ${m.makeup || 0} · เดินเพิ่ม ${m.extra || 0} · ยังขาด ${m.missed || 0}">
                   <span class="text-[9px] font-bold ${isCurrent ? 'text-emerald-600' : 'text-slate-400'}">${monthNames[m.month-1]}</span>
                   <div class="flex flex-wrap gap-0.5 justify-center min-h-[12px]">
                     ${dots || (isFuture ? '' : '<span class="w-2 h-2 rounded-full bg-slate-100 inline-block"></span>')}
                   </div>
-                  <span class="text-[9px] font-bold ${m.attended > 0 ? 'text-emerald-600' : isFuture ? 'text-slate-300' : 'text-slate-300'}">${isFuture ? '' : m.attended || '0'}</span>
+                  <span class="text-[9px] font-bold ${totalActivity > 0 ? 'text-emerald-600' : isFuture ? 'text-slate-300' : 'text-slate-300'}">${isFuture ? '' : totalActivity || '0'}</span>
                 </div>`;
               }).join('')}
             </div>
@@ -1699,7 +1721,7 @@ function renderDashboard(container, data) {
           })() : ''}
 
           <!-- Monthly Session Tracker -->
-          ${!isSupervisorPersonal ? (() => {
+          ${(() => {
             const sessions       = _myPlan?.sessions || [];
             const required       = _myPlan?.required || [];
             const reqIds         = new Set(required.map(r => patrolSessionId(r)));
@@ -1712,7 +1734,7 @@ function renderDashboard(container, data) {
             const pct            = total > 0 ? Math.min(Math.round((attended / total) * 100), 100) : 0;
             const barColor       = pct >= 100 ? '#10b981' : pct >= 60 ? '#f59e0b' : '#f43f5e';
             if (!sessions.length) return `
-          <div class="ds-section p-5" data-patrol-card-image="patrol-monthly-session-tracker-empty">
+          <div class="xl:col-span-2 ds-section p-5" data-patrol-card-image="patrol-monthly-session-tracker-empty" style="align-self:start">
             <div class="flex items-center gap-2 mb-3">
               <div class="w-6 h-6 rounded-lg flex items-center justify-center" style="background:#ecfdf5">
                 <svg class="w-3.5 h-3.5 text-emerald-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"/></svg>
@@ -1725,7 +1747,7 @@ function renderDashboard(container, data) {
             </div>
           </div>`;
             return `
-          <div class="ds-table-wrap" data-patrol-card-image="patrol-monthly-session-tracker">
+          <div class="xl:col-span-2 ds-table-wrap" data-patrol-card-image="patrol-monthly-session-tracker" style="align-self:start">
             <!-- Header -->
             <div class="px-4 py-3 border-b border-slate-50 flex items-center justify-between">
               <h3 class="text-xs font-bold text-slate-700 flex items-center gap-2">
@@ -1798,10 +1820,10 @@ function renderDashboard(container, data) {
               }).join('')}
             </div>
           </div>`;
-          })() : ''}
+          })()}
 
           <!-- Team Roster Card — YTD stats + pass/fail -->
-          ${!isSupervisorPersonal && _myPlan?.roster?.length > 0 ? (() => {
+          ${false && _myPlan?.roster?.length > 0 ? (() => {
             const typeColor = { top:'rose', committee:'amber', management:'indigo' };
             const typeLabel = { top:'Top', committee:'คปอ.', management:'Mgmt' };
             const roster    = _myPlan.roster;
@@ -1902,7 +1924,6 @@ function renderDashboard(container, data) {
             const leaveYear      = Number(leaveStats.leaveYear || 0);
             const allowedLeave   = Number(leaveStats.allowedLeaveYear || 0);
             const acceptedCoveragePct = Number(sp.acceptedCoverageYearPct || leaveStats.acceptedCoverageYearPct || 0);
-            const acceptedToDatePct = Number(sp.acceptedCoverageToDatePct || leaveStats.acceptedCoverageToDatePct || 0);
             const periods = Array.isArray(sp.periods) ? sp.periods : [];
             return `
           <div class="bg-white rounded-2xl shadow-sm border border-amber-100 overflow-hidden" data-patrol-card-image="patrol-self-patrol-progress" style="box-shadow:0 4px 24px rgba(245,158,11,0.08)">
@@ -1948,7 +1969,7 @@ function renderDashboard(container, data) {
                 <div class="rounded-xl border border-slate-100 bg-slate-50 px-3 py-2.5"><p class="text-[9px] font-black uppercase text-slate-400">เดินจริงเดือนนี้</p><p class="mt-0.5 text-lg font-black text-slate-800">${actualWalks}</p></div>
                 <div class="rounded-xl border border-slate-100 bg-slate-50 px-3 py-2.5"><p class="text-[9px] font-black uppercase text-slate-400">เป้าหมายเดือนนี้</p><p class="mt-0.5 text-lg font-black text-slate-800">${target}</p></div>
                 <div class="rounded-xl border border-slate-100 bg-slate-50 px-3 py-2.5"><p class="text-[9px] font-black uppercase text-slate-400">สถานะเดือนนี้</p><p class="mt-0.5 text-sm font-black ${done ? 'text-emerald-700' : 'text-amber-700'}">${done ? 'ครบแล้ว' : `เหลือ ${remaining}`}</p></div>
-                <div class="rounded-xl border border-slate-100 bg-slate-50 px-3 py-2.5"><p class="text-[9px] font-black uppercase text-slate-400">Accepted</p><p class="mt-0.5 text-lg font-black text-emerald-700">${acceptedToDatePct}%</p></div>
+                <div class="rounded-xl border border-slate-100 bg-slate-50 px-3 py-2.5"><p class="text-[9px] font-black uppercase text-slate-400">Accepted</p><p class="mt-0.5 text-lg font-black text-emerald-700">${acceptedCoveragePct}%</p></div>
               </div>
               ${!useSelfPatrolGreen && isFlexible && flexDays.length ? `
               <div class="mb-4 rounded-xl border border-amber-100 bg-amber-50/60 px-3 py-2">
@@ -2024,9 +2045,9 @@ function renderDashboard(container, data) {
                   }).join('')}
                 </div>
               </div>` : ''}
-              ${checkins.length === 0
+              ${actualMonthRecords.length === 0
                 ? `<p class="text-xs text-slate-400 text-center py-3 italic">ยังไม่มีการบันทึกเดือนนี้</p>`
-                : checkins.map(c => {
+                : actualMonthRecords.map(c => {
                     const d = new Date(c.CheckinDate);
                     const notesPreview = c.Notes ? c.Notes.replace(/\[ตรวจแล้ว:[^\]]*\]\n?/, '').trim() : '';
                     const checkedItems = c.Notes?.match(/\[ตรวจแล้ว: ([^\]]+)\]/)?.[1] || '';
@@ -2039,30 +2060,76 @@ function renderDashboard(container, data) {
                       </div>
                       <div class="flex-1 min-w-0">
                         <p class="text-xs font-semibold text-slate-700 truncate">${c.Location || 'ไม่ระบุสถานที่'}</p>
-                        <p class="text-[9px] text-slate-400">${escHtml(patrolTypeMeta(c.PatrolType).en)} · ${escHtml(patrolRecordedAtLabel(c.CreatedAt))}</p>
                         ${checkedItems ? `<p class="text-[9px] text-slate-400 truncate">ตรวจ: ${checkedItems.replace(/ \/ /g,' · ')}</p>` : ''}
+                        <p class="text-[9px] text-slate-400 truncate">${escHtml(patrolTypeMeta(c.PatrolType).en)} · ${escHtml(patrolRecordedAtLabel(c.CreatedAt))}</p>
                         ${notesPreview ? `<p class="text-[9px] text-slate-400 truncate italic">${notesPreview}</p>` : ''}
                       </div>
-                      ${!useSelfPatrolGreen ? `<button onclick="deleteSelfCheckin(${c.id})" class="p-1 text-slate-300 hover:text-red-500 transition-colors flex-shrink-0 mt-0.5">
+                      <button onclick="deleteSelfCheckin(${c.id})" class="p-1 text-slate-300 hover:text-red-500 transition-colors flex-shrink-0 mt-0.5">
                         <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
-                      </button>` : ''}
+                      </button>
                     </div>`;
                   }).join('')}
-              ${!useSelfPatrolGreen ? `<button onclick="openSelfCheckinModal()" ${actionableScheduleCount ? '' : 'disabled'} class="mt-4 w-full py-2.5 rounded-xl text-xs font-bold text-white transition-all hover:opacity-90 active:scale-[0.98] disabled:opacity-45 disabled:cursor-not-allowed" style="background:linear-gradient(135deg,#d97706,#f59e0b)">
+              <button onclick="openSelfCheckinModal()" ${actionableScheduleCount ? '' : 'disabled'} class="mt-4 w-full py-2.5 rounded-xl text-xs font-bold text-white transition-all hover:opacity-90 active:scale-[0.98] disabled:opacity-45 disabled:cursor-not-allowed" style="background:linear-gradient(135deg,#d97706,#f59e0b)">
                 <svg class="w-3.5 h-3.5 inline-block mr-1.5 -mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/></svg>
                 ${actionableScheduleCount ? 'บันทึกการเดินตรวจ' : 'ไม่มีรอบที่ต้องบันทึก'}
-              </button>` : ''}
+              </button>
             </div>
           </div>`;
           })() : ''}
 
+          <!-- Safety Knowledge fills the desktop work column after this month's sessions. -->
+          <div class="hidden xl:block">
+            <div class="flex items-center gap-2 mb-2">
+              <div class="flex-1 h-px bg-slate-100"></div>
+              <span class="text-[10px] font-bold text-slate-400 uppercase tracking-wider px-2">Safety Knowledge</span>
+              <div class="flex-1 h-px bg-slate-100"></div>
+            </div>
+            <div class="relative overflow-hidden rounded-2xl shadow-md bg-slate-900 group" data-patrol-carousel style="height:200px">
+              <div class="relative w-full h-full">
+                ${SAFETY_IMAGES.map((img, idx) => `
+                <div class="carousel-item absolute inset-0 pointer-events-none transition-opacity duration-700 opacity-0 z-0" data-index="${idx}">
+                  <img src="${img.src}" class="w-full h-full object-cover opacity-50 group-hover:scale-105 transition-transform duration-1000 ease-out">
+                  <div class="absolute inset-0" style="background:linear-gradient(to right,rgba(6,30,20,0.95) 0%,rgba(6,30,20,0.5) 50%,transparent 100%)"></div>
+                  <div class="absolute inset-0 flex items-center p-8">
+                    <div class="max-w-md">
+                      <span class="inline-block px-2 py-0.5 rounded-full text-[9px] font-bold mb-3" style="background:rgba(16,185,129,0.3);color:#6ee7b7;border:1px solid rgba(16,185,129,0.4)">Safety Knowledge</span>
+                      <h3 class="text-lg font-bold text-white leading-tight mb-1">${img.title}</h3>
+                      <p class="text-[11px] line-clamp-2" style="color:rgba(167,243,208,0.7)">${img.desc}</p>
+                      <button onclick="openCarouselDetail(${idx})" class="mt-4 text-[10px] font-semibold px-4 py-1.5 rounded-full border border-white/30 text-white hover:bg-white/20 transition-colors pointer-events-auto backdrop-blur-sm">ดูรายละเอียด →</button>
+                    </div>
+                  </div>
+                </div>`).join('')}
+              </div>
+              <div class="absolute bottom-3 left-0 right-0 flex justify-center gap-1.5 z-20 pointer-events-auto">
+                ${SAFETY_IMAGES.map((_, idx) => `<button class="carousel-dot h-1 w-1.5 bg-white/30 rounded-full transition-all duration-300 hover:bg-white/60" data-index="${idx}"></button>`).join('')}
+              </div>
+            </div>
+          </div>
+
         </div>
 
-        <div class="xl:col-span-1 ${isSupervisorPersonal ? 'flex flex-col gap-5' : 'space-y-5'}">
+        <div class="xl:col-span-1 space-y-5">
+
+          <!-- Mini Calendar (desktop sidebar) -->
+          <div class="${isSupervisorPersonal ? 'hidden' : 'hidden xl:block'} bg-white rounded-xl shadow-sm border border-slate-100 p-5">
+            <div class="flex justify-between items-center mb-4">
+              <h3 class="font-bold text-slate-700 text-sm flex items-center gap-2">
+                <div class="w-7 h-7 rounded-lg flex items-center justify-center" style="background:#ecfdf5">
+                  <svg class="w-4 h-4 text-emerald-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5v12a2 2 0 002 2h14a2 2 0 002-2V7a2 2 0 00-2-2h-2"/></svg>
+                </div>
+                ปฏิทินประจำเดือน
+              </h3>
+              ${getCalendarLegendHTML()}
+            </div>
+            <div class="grid grid-cols-7 gap-1 text-center mb-2">
+              ${['อา','จ','อ','พ','พฤ','ศ','ส'].map(d=>`<div class="text-[9px] font-bold text-slate-400">${d}</div>`).join('')}
+            </div>
+            <div class="grid grid-cols-7 gap-1 text-center">${generateMiniCalendarHTML(data.schedule)}</div>
+          </div>
 
           <!-- Performance Card — Compliance Ring (B+D) -->
-          <div class="bg-white rounded-2xl shadow-sm border border-slate-100 p-5 overflow-hidden relative" data-patrol-card-image="patrol-personal-performance">
-            <div class="absolute -right-4 -bottom-4 w-24 h-24 rounded-full opacity-5" style="background:${rank.color}"></div>
+          <div class="bg-white rounded-2xl shadow-sm border border-slate-100 p-5 overflow-hidden relative" data-patrol-card-image="patrol-personal-performance" style="align-self:start">
+            <div class="absolute -right-4 -bottom-4 w-24 h-24 rounded-full opacity-5" style="background:${isSupervisorPersonal ? '#059669' : rank.color}"></div>
             <div class="flex items-center justify-between mb-4">
               <h3 class="font-bold text-slate-700 text-sm flex items-center gap-2">
                 <svg class="w-4 h-4 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z"/></svg>
@@ -2073,12 +2140,10 @@ function renderDashboard(container, data) {
 
             <!-- Compliance Ring + Team Avg (B+D) -->
             ${(() => {
-              const yc   = isSupervisorPersonal ? supervisorYearlyCompleted : (_myYearlyStats?.yearlyCount ?? walks);
-              const yt   = isSupervisorPersonal ? (supervisorYearlyTarget || null) : (_myYearlyStats?.yearlyTarget ?? null);
-              const yPct = isSupervisorPersonal
-                ? supervisorAcceptedPct
-                : (yt ? Math.min(Math.round((yc / yt) * 100), 100) : null);
-              const yDone = isSupervisorPersonal ? false : (yt ? yc >= yt : false);
+              const yc   = isSupervisorPersonal ? supervisorYearlyCompleted : Number(personalDetail?.acceptedCoverageToDate ?? _myYearlyStats?.yearlyCount ?? walks);
+              const yt   = isSupervisorPersonal ? (supervisorYearlyTarget || null) : (Number(personalDetail?.requiredToDate ?? 0) || null);
+              const yPct = isSupervisorPersonal ? supervisorAcceptedPct : (personalDetail ? Number(personalDetail.acceptedCoverageToDatePct ?? 0) : (yt ? Math.min(Math.round((yc / yt) * 100), 100) : null));
+              const yDone = yt ? yc >= yt : false;
               const tr   = isSupervisorPersonal ? null : _myYearlyStats?.teamRank;
               const circ = 2 * Math.PI * 42;
               const offset = yPct !== null ? circ * (1 - yPct / 100) : circ;
@@ -2117,7 +2182,7 @@ function renderDashboard(container, data) {
                   </svg>
                   <div class="absolute inset-0 flex flex-col items-center justify-center">
                     <p class="text-2xl font-bold" style="color:${ringColor}">${yPct !== null ? yPct + '%' : walks}</p>
-                    <p class="text-[9px] text-slate-400 mt-0.5">${yt ? yc + '/' + yt + ' ครั้ง' : yPct === null ? 'ครั้งรวม' : ''}</p>
+                    <p class="text-[9px] text-slate-400 mt-0.5">${yt ? yc + '/' + yt + (_yearlyTarget ? ' (' + _yearlyTarget + ')' : '') + ' ครั้ง' : yPct === null ? 'ครั้งรวม' : ''}</p>
                   </div>
                 </div>
                 <!-- Status badge -->
@@ -2137,7 +2202,7 @@ function renderDashboard(container, data) {
               </div>
               <div class="text-right">
                 <p class="text-[10px] text-slate-400 font-medium">${isSupervisorPersonal ? 'Accepted' : 'อัตราผ่าน'}</p>
-                <p class="text-xl font-bold text-emerald-600">${isSupervisorPersonal ? supervisorAcceptedPct : (myStats.Percent || 0)}%</p>
+                <p class="text-xl font-bold text-emerald-600">${isSupervisorPersonal ? supervisorAcceptedPct : _acceptedPct}%</p>
               </div>
             </div>
           </div>
@@ -2145,30 +2210,19 @@ function renderDashboard(container, data) {
           ${isSupervisorPersonal ? `
           <div class="bg-white rounded-2xl shadow-sm border border-slate-100 p-5" data-patrol-card-image="patrol-supervisor-recent-history">
             <div class="flex items-center justify-between gap-3 mb-3">
-              <h3 class="font-bold text-slate-700 text-sm flex items-center gap-2">
-                <svg class="w-4 h-4 text-emerald-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
-                ประวัติล่าสุด
-              </h3>
+              <h3 class="font-bold text-slate-700 text-sm flex items-center gap-2">ประวัติล่าสุด</h3>
               <span class="text-[10px] font-bold text-emerald-700 bg-emerald-50 rounded-full px-2 py-1">Self Patrol</span>
             </div>
-            ${Array.isArray(supervisorSummary.recentCheckins) && supervisorSummary.recentCheckins.length ? `
-              <div class="divide-y divide-slate-50">
-                ${supervisorSummary.recentCheckins.map(c => {
-                  const checkedAt = c.CheckinDate ? new Date(`${String(c.CheckinDate).slice(0, 10)}T00:00:00`) : null;
-                  const dateLabel = checkedAt && !Number.isNaN(checkedAt.getTime()) ? checkedAt.toLocaleDateString('th-TH', { day: 'numeric', month: 'short', year: '2-digit' }) : 'ไม่มีข้อมูลวัน';
-                  const type = patrolTypeMeta(c.PatrolType);
-                  return `<div class="flex items-center gap-3 py-2.5 first:pt-0 last:pb-0">
-                    <div class="w-9 text-center flex-shrink-0"><p class="text-xs font-black text-slate-700">${escHtml(dateLabel)}</p></div>
-                    <div class="min-w-0 flex-1"><p class="text-xs font-bold text-slate-700 truncate">${escHtml(c.Location || 'ไม่ระบุพื้นที่')}</p><p class="text-[10px] text-slate-400 truncate">${escHtml(type.label)} · ${escHtml(patrolRecordedAtLabel(c.CreatedAt))}</p></div>
-                  </div>`;
-                }).join('')}
-              </div>` : `<p class="py-4 text-center text-xs text-slate-400">ยังไม่มีประวัติการบันทึก</p>`}
+            ${Array.isArray(supervisorSummary.recentCheckins) && supervisorSummary.recentCheckins.length ? `<div class="divide-y divide-slate-50">${supervisorSummary.recentCheckins.map(c => {
+              const checkedAt = c.CheckinDate ? new Date(`${String(c.CheckinDate).slice(0, 10)}T00:00:00`) : null;
+              const dateLabel = checkedAt && !Number.isNaN(checkedAt.getTime()) ? checkedAt.toLocaleDateString('th-TH', { day: 'numeric', month: 'short', year: '2-digit' }) : 'ไม่มีข้อมูลวัน';
+              return `<div class="flex items-center gap-3 py-2.5 first:pt-0 last:pb-0"><p class="w-12 flex-shrink-0 text-[10px] font-black text-slate-600">${escHtml(dateLabel)}</p><div class="min-w-0 flex-1"><p class="text-xs font-bold text-slate-700 truncate">${escHtml(c.Location || 'ไม่ระบุพื้นที่')}</p><p class="text-[10px] text-slate-400 truncate">${escHtml(patrolTypeMeta(c.PatrolType).en)} · ${escHtml(patrolRecordedAtLabel(c.CreatedAt))}</p></div></div>`;
+            }).join('')}</div>` : `<p class="py-4 text-center text-xs text-slate-400">ยังไม่มีประวัติการบันทึก</p>`}
           </div>` : ''}
-          ${isSupervisorPersonal ? '<div id="supervisor-sidebar-knowledge-slot" class="flex flex-1 flex-col min-h-0"></div>' : ''}
 
           <!-- Recent Check-in Timeline (Phase 3) -->
           ${!isSupervisorPersonal && _myYearlyStats?.recentCheckins?.length > 0 ? `
-          <div class="bg-white rounded-2xl shadow-sm border border-slate-100 p-5" data-patrol-card-image="patrol-recent-checkins">
+          <div class="bg-white rounded-2xl shadow-sm border border-slate-100 p-5" data-patrol-card-image="patrol-recent-checkins" style="align-self:start">
             <h3 class="font-bold text-slate-700 text-sm flex items-center gap-2 mb-4">
               <div class="w-7 h-7 rounded-lg flex items-center justify-center bg-indigo-50 flex-shrink-0">
                 <svg class="w-4 h-4 text-indigo-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
@@ -2261,14 +2315,14 @@ function renderDashboard(container, data) {
         </div><!-- /sidebar -->
       </div><!-- /grid -->
 
-      <!-- Safety Tips Carousel — full width -->
-      <div id="patrol-safety-knowledge-shell" class="${isSupervisorPersonal ? 'flex flex-1 flex-col min-h-0' : ''}">
+      <!-- Safety Tips Carousel — full width on mobile -->
+      <div class="xl:hidden">
       <div class="flex items-center gap-2 mt-1 mb-2">
         <div class="flex-1 h-px bg-slate-100"></div>
         <span class="text-[10px] font-bold text-slate-400 uppercase tracking-wider px-2">Safety Knowledge</span>
         <div class="flex-1 h-px bg-slate-100"></div>
       </div>
-      <div id="promo-carousel" class="relative overflow-hidden rounded-2xl shadow-md bg-slate-900 group ${isSupervisorPersonal ? 'flex-1 min-h-[300px]' : ''}" data-patrol-card-image="patrol-safety-knowledge" style="height:${isSupervisorPersonal ? 'auto' : '200px'}">
+      <div id="promo-carousel" class="relative overflow-hidden rounded-2xl shadow-md bg-slate-900 group" data-patrol-card-image="patrol-safety-knowledge" data-patrol-carousel style="height:200px">
         <div id="carousel-slides" class="relative w-full h-full">
           ${SAFETY_IMAGES.map((img, idx) => `
           <div class="carousel-item absolute inset-0 pointer-events-none transition-opacity duration-700 opacity-0 z-0" data-index="${idx}">
@@ -2433,7 +2487,7 @@ function renderDashboard(container, data) {
                 </div>
               </div>
               <!-- Table -->
-              <div class="overflow-x-auto flex-1">
+              <div class="hidden md:block overflow-x-auto flex-1">
                 <table class="w-full text-xs text-left">
                   <thead class="text-[10px] uppercase bg-slate-50 border-b border-slate-100">
                     <tr>
@@ -2460,6 +2514,7 @@ function renderDashboard(container, data) {
                   </tbody>
                 </table>
               </div>
+              <div id="overview-mobile-cards" class="md:hidden space-y-2 p-3 bg-slate-50/50"></div>
               <!-- Pagination -->
               <div id="ov-mgmt-pagination" class="px-4 py-2.5 border-t border-slate-100 flex items-center justify-between min-h-[40px]"></div>
               <!-- Evaluation Criteria -->
@@ -2573,7 +2628,7 @@ function renderDashboard(container, data) {
                 </div>
               </div>
               <!-- Table -->
-              <div class="overflow-x-auto flex-1">
+              <div class="hidden md:block overflow-x-auto flex-1">
                 <table class="w-full text-xs text-left">
                   <thead class="text-[10px] uppercase bg-slate-50 border-b border-slate-100">
                     <tr>
@@ -2600,8 +2655,8 @@ function renderDashboard(container, data) {
                   </tbody>
                 </table>
               </div>
+              <div id="sv-overview-mobile-cards" class="md:hidden space-y-2 p-3 bg-amber-50/30"></div>
               <!-- Pagination -->
-              <div id="sv-overview-mobile" class="md:hidden divide-y divide-slate-100"></div>
               <div id="sv-pagination" class="px-4 py-2.5 border-t border-amber-100 flex items-center justify-between min-h-[40px]"></div>
             </div>
 
@@ -2928,12 +2983,6 @@ function renderDashboard(container, data) {
       <svg class="w-6 h-6 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/></svg>
       <span class="absolute right-16 bg-slate-900 text-white text-[10px] font-bold px-3 py-1.5 rounded-lg opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap pointer-events-none shadow-lg">รายงานเร่งด่วน</span>
     </button>`;
-
-    if (isSupervisorPersonal) {
-        const knowledge = document.getElementById('patrol-safety-knowledge-shell');
-        const knowledgeSlot = document.getElementById('supervisor-sidebar-knowledge-slot');
-        if (knowledge && knowledgeSlot) knowledgeSlot.appendChild(knowledge);
-    }
 
     // Initialize hero stats and FAB for default tab (patrol)
     renderStatsStrip(_personalStats);
@@ -4224,6 +4273,16 @@ function generateMiniCalendarHTML(scheduleData) {
         if (!dayMap[day]) dayMap[day] = [];
         dayMap[day].push(s);
     });
+    const activityByDay = {};
+    (_myPlan?.activityRecords || []).forEach(record => {
+        const date = patrolDateOnly(record.PatrolDate);
+        if (!date) return;
+        const recordDate = new Date(`${date}T00:00:00`);
+        if (recordDate.getFullYear() !== year || recordDate.getMonth() !== month) return;
+        const day = recordDate.getDate();
+        if (!activityByDay[day]) activityByDay[day] = [];
+        activityByDay[day].push(record.activityKind || 'scheduledNormal');
+    });
 
     let html = '';
     for (let i = 0; i < firstDay; i++) html += `<div class="h-8"></div>`;
@@ -4234,6 +4293,8 @@ function generateMiniCalendarHTML(scheduleData) {
         const isPast    = new Date(year, month, day) < today && !isToday;
         const hasCompleted = sessions.some(s => s.Status === 'Completed');
         const hasMissed    = isPast && hasSess && !hasCompleted;
+        const activityKinds = activityByDay[day] || [];
+        const hasActivity = activityKinds.length > 0;
 
         const dateStr = `${year}-${String(month+1).padStart(2,'0')}-${String(day).padStart(2,'0')}`;
 
@@ -4243,6 +4304,13 @@ function generateMiniCalendarHTML(scheduleData) {
         if (isToday) {
             cls   += ' text-white font-bold shadow-sm';
             style  = 'background:linear-gradient(135deg,#059669,#0d9488)';
+        } else if (hasActivity) {
+            const primary = activityKinds.includes('extra') ? 'extra' : activityKinds.includes('makeup') ? 'makeup' : 'scheduledNormal';
+            cls += primary === 'extra'
+                ? ' bg-violet-500 text-white font-bold shadow-sm'
+                : primary === 'makeup'
+                    ? ' bg-amber-400 text-white font-bold shadow-sm'
+                    : ' bg-emerald-500 text-white font-bold shadow-sm';
         } else if (hasCompleted) {
             cls   += ' bg-emerald-500 text-white font-bold shadow-sm cursor-pointer hover:bg-emerald-600';
         } else if (hasMissed) {
@@ -4254,7 +4322,9 @@ function generateMiniCalendarHTML(scheduleData) {
         }
 
         const onclick = hasSess ? `onclick="openCalendarDay('${dateStr}')"` : '';
-        html += `<div class="${cls}" style="${style}" ${onclick} title="${hasSess ? sessions.length+' session(s)' : ''}">${day}</div>`;
+        const dots = activityKinds.map(kind => `<span class="w-1.5 h-1.5 rounded-full border border-white/70 ${kind === 'extra' ? 'bg-violet-200' : kind === 'makeup' ? 'bg-amber-100' : 'bg-emerald-100'}"></span>`).join('');
+        const activityLabel = activityKinds.map(kind => kind === 'extra' ? 'เดินเพิ่ม' : kind === 'makeup' ? 'เดินซ่อม' : 'ตามรอบ').join(', ');
+        html += `<div class="${cls}" style="${style}" ${onclick} title="${activityLabel || (hasSess ? sessions.length+' session(s)' : '')}">${day}${dots ? `<span class="absolute bottom-0.5 right-0.5 flex gap-0.5">${dots}</span>` : ''}</div>`;
     }
     return html;
 }
@@ -4262,11 +4332,11 @@ function generateMiniCalendarHTML(scheduleData) {
 // Also update the legend in the calendar card
 function getCalendarLegendHTML() {
     return `
-      <div class="flex items-center gap-3 text-[10px] text-slate-400 flex-wrap">
-        <span class="flex items-center gap-1"><span class="w-3 h-3 rounded-md inline-block" style="background:linear-gradient(135deg,#059669,#0d9488)"></span>วันนี้</span>
-        <span class="flex items-center gap-1"><span class="w-3 h-3 rounded-md bg-emerald-500 inline-block"></span>เดินแล้ว</span>
-        <span class="flex items-center gap-1"><span class="w-3 h-3 rounded-md bg-emerald-50 border border-emerald-200 inline-block"></span>กำหนดเดิน</span>
-        <span class="flex items-center gap-1"><span class="w-3 h-3 rounded-md bg-amber-50 border border-amber-200 inline-block"></span>ยังไม่ได้เดิน</span>
+      <div class="flex items-center justify-end gap-2 text-[9px] text-slate-400 whitespace-nowrap">
+        <span class="flex items-center gap-1"><span class="w-2.5 h-2.5 rounded-full inline-block" style="background:linear-gradient(135deg,#059669,#0d9488)"></span>วันนี้</span>
+        <span class="flex items-center gap-1"><span class="w-2.5 h-2.5 rounded-full bg-emerald-500 inline-block"></span>ตรงรอบ</span>
+        <span class="flex items-center gap-1"><span class="w-2.5 h-2.5 rounded-full bg-amber-400 inline-block"></span>ซ่อม</span>
+        <span class="flex items-center gap-1"><span class="w-2.5 h-2.5 rounded-full bg-violet-500 inline-block"></span>เพิ่ม</span>
       </div>`;
 }
 
@@ -4554,6 +4624,24 @@ function getSkeletonHTML() {
 }
 
 // ─── Check-in Modal (Smart) ───────────────────────────────────────────────────
+window.openPersonalPlanStatusModal = function() {
+    const plan = _myPlan;
+    if (!plan?.compliance) return;
+    const missing = (plan.sessions || []).filter(item => !patrolSessionCompleted(item) && !patrolSessionLeave(item));
+    const remaining = Math.max(0, Number(plan.compliance.required || 0) - Number(plan.compliance.attended || 0));
+    openModal('สถานะรอบเดินตรวจเดือนนี้', `
+      <div class="space-y-4">
+        <div class="rounded-xl border ${plan.compliance.done ? 'border-emerald-200 bg-emerald-50' : 'border-amber-200 bg-amber-50'} p-4">
+          <p class="text-sm font-black ${plan.compliance.done ? 'text-emerald-700' : 'text-amber-700'}">${plan.compliance.attended}/${plan.compliance.required} รอบ ${plan.compliance.done ? '· ครบแล้ว' : `· เหลืออีก ${remaining} รอบ`}</p>
+          <p class="mt-1 text-[11px] text-slate-500">เดินเพิ่มนับเป็นกิจกรรมจริง แต่ไม่นับรอบบังคับ</p>
+        </div>
+        ${missing.length ? `<div><p class="mb-2 text-xs font-black text-slate-700">รอบที่ยังต้องดำเนินการ</p><div class="space-y-2">${missing.map(item => {
+            const date = new Date(item.PatrolDate || item.ScheduledDate);
+            return `<div class="flex items-center justify-between gap-3 rounded-xl border border-slate-100 bg-slate-50 px-3 py-2.5"><div><p class="text-xs font-bold text-slate-700">${date.toLocaleDateString('th-TH', { weekday:'short', day:'numeric', month:'short' })} · รอบ ${escHtml(item.PatrolRound || '-')}</p><p class="mt-0.5 text-[10px] text-slate-400">${escHtml(item.AreaName || item.AreaCode || 'ไม่ระบุพื้นที่')}</p></div><span class="shrink-0 rounded-full bg-amber-100 px-2 py-1 text-[10px] font-black text-amber-700">รอดำเนินการ</span></div>`;
+        }).join('')}</div></div>` : '<p class="py-4 text-center text-sm font-semibold text-emerald-600">ไม่มีรอบค้างแล้ว</p>'}
+      </div>`, 'max-w-md');
+};
+
 function openCheckInModal() {
     const today    = new Date();
     const displayUser = patrolDisplayUser();
@@ -4618,13 +4706,20 @@ function openCheckInModal() {
         <span class="text-[10px] text-slate-500">ความครบถ้วนเดือนนี้</span>
         <div class="text-right">
           <span class="block text-[10px] font-bold ${compliance.done?'text-emerald-600':'text-amber-600'}">${compliance.attended}/${compliance.required} รอบ ${compliance.done?'✓':''}</span>
-          ${_myPlan?.actualActivity ? `<span class="block text-[9px] text-violet-600">เดินจริง ${_myPlan.actualActivity.total || 0} · เดินเพิ่ม ${_myPlan.actualActivity.extra || 0}</span>` : ''}
+          ${_myPlan?.actualActivity ? `<span class="block text-[9px] text-violet-600">เดินจริง ${_myPlan.actualActivity.total || 0} · ตามรอบ ${_myPlan.actualActivity.scheduledNormal || 0} · ซ่อม ${_myPlan.actualActivity.makeup || 0} · เพิ่ม ${_myPlan.actualActivity.extra || 0}</span>` : ''}
         </div>
       </div>` : ''}
     </div>` : '';
 
     openModal('บันทึกการเดินตรวจ', `
-      <form id="checkin-form" data-today-session-id="${escHtml(todaySessionId)}" onsubmit="handleCheckInSubmit(event)" class="space-y-4 max-[420px]:space-y-3">
+      <form id="checkin-form" data-today-session-id="${escHtml(todaySessionId)}" onsubmit="handleCheckInSubmit(event)" class="relative space-y-4 max-[420px]:space-y-3">
+        <div id="checkin-submit-busy" class="hidden absolute inset-0 z-20 flex min-h-[360px] items-center justify-center rounded-2xl bg-white/90 px-5 text-center backdrop-blur-sm">
+          <div>
+            <div class="mx-auto mb-3 h-10 w-10 animate-spin rounded-full border-4 border-emerald-600 border-t-transparent"></div>
+            <p class="text-sm font-black text-slate-800">กำลังบันทึกการเช็คอิน…</p>
+            <p class="mt-1 text-xs font-medium text-slate-500">กรุณารอสักครู่ และอย่าปิดหน้านี้</p>
+          </div>
+        </div>
         <!-- User info -->
         <div class="flex items-center gap-3 p-3 rounded-xl border border-slate-100 bg-slate-50">
           <div class="w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0 bg-emerald-100">
@@ -4644,6 +4739,8 @@ function openCheckInModal() {
           <svg class="w-4 h-4 flex-shrink-0 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
           <span>วันนี้ไม่ใช่วันเดินตรวจตามตาราง สามารถ Check-in ได้แต่จะนับเป็นการเดินนอกตาราง</span>
         </div>` : ''}
+
+        <p class="rounded-lg bg-violet-50 px-3 py-2 text-[10px] leading-relaxed text-violet-700">เดินเพิ่มนับเป็นกิจกรรมจริง แต่จะไม่เพิ่มความครบถ้วนของรอบบังคับ</p>
 
         ${checkinV2Enabled ? `
         <input type="hidden" name="PatrolType" value="${initialMode === 'makeup' ? 'compensation' : 'normal'}">
@@ -4747,18 +4844,19 @@ async function handleCheckInSubmit(e) {
         const todaySessionId = e.target?.dataset?.todaySessionId || '';
         if (!checkinV2Enabled && todaySessionId) body.ScheduledSessionID = todaySessionId;
     }
-    if (submitButton) { submitButton.disabled = true; submitButton.setAttribute('aria-busy', 'true'); }
-    showLoading();
-    try {
-        const res = await API.post('/patrol/checkin', body);
-        closeModal();
-        showCheckinSuccessScreen(type, res?.data || {});
-    } catch (err) {
-        showError(err);
-    } finally {
-        hideLoading();
-        if (submitButton) { submitButton.disabled = false; submitButton.removeAttribute('aria-busy'); }
-    }
+    const busyLayer = document.getElementById('checkin-submit-busy');
+    await runFormBusy(form, 'กำลังบันทึก…', async () => {
+        busyLayer?.classList.remove('hidden');
+        try {
+            const res = await API.post('/patrol/checkin', body);
+            closeModal();
+            showCheckinSuccessScreen(type, res?.data || {});
+        } catch (err) {
+            showError(err);
+        } finally {
+            busyLayer?.classList.add('hidden');
+        }
+    }, { submitter: submitButton, actionKey: `patrol:checkin:${form.dataset.idempotencyKey || 'new'}` });
 }
 
 window._onCheckinTypeChange = async function(val) {
@@ -4850,14 +4948,15 @@ window._onCheckinSessionChange = function() {
 };
 
 function showCheckinSuccessScreen(patrolType, result = {}) {
-    const now         = new Date();
-    const timeStr     = now.toLocaleTimeString('th-TH', { hour: '2-digit', minute: '2-digit' });
-    const compliance  = result.group === 'supervisor' ? null : _myPlan?.compliance;
     const checkin     = result.checkin || {};
+    const now         = new Date();
+    const timeStr     = patrolCheckinTime(checkin.checkinAt) || now.toLocaleTimeString('th-TH', { hour: '2-digit', minute: '2-digit' });
+    const compliance  = result.group === 'supervisor' ? null : _myPlan?.compliance;
     const email       = result.email || {};
     const displayUser = patrolDisplayUser();
     const areaName    = checkin.area || null;
-    const newAttended = (compliance?.attended || 0) + 1;
+    const countsTowardCompliance = checkin.mode !== 'extra';
+    const newAttended = (compliance?.attended || 0) + (countsTowardCompliance ? 1 : 0);
     const required    = compliance?.required || 0;
     const nowDone     = newAttended >= required && required > 0;
     const pct         = required > 0 ? Math.min(Math.round((newAttended / required) * 100), 100) : 0;
@@ -4905,7 +5004,9 @@ function showCheckinSuccessScreen(patrolType, result = {}) {
           <div class="w-full bg-slate-200 rounded-full h-2 overflow-hidden">
             <div class="h-full rounded-full transition-all duration-700" style="width:${pct}%;background:${nowDone ? 'linear-gradient(90deg,#059669,#10b981)' : 'linear-gradient(90deg,#f59e0b,#fbbf24)'}"></div>
           </div>
-          ${nowDone ? `<p class="text-[10px] text-emerald-600 font-semibold mt-2 text-center">ครบเป้าหมายเดือนนี้แล้ว</p>` : ''}
+          ${countsTowardCompliance
+            ? (nowDone ? `<p class="text-[10px] text-emerald-600 font-semibold mt-2 text-center">ครบเป้าหมายเดือนนี้แล้ว</p>` : `<p class="text-[10px] text-amber-600 font-semibold mt-2 text-center">เหลืออีก ${Math.max(0, required - newAttended)} รอบ</p>`)
+            : `<p class="text-[10px] text-violet-600 font-semibold mt-2 text-center">เดินเพิ่มแล้ว · ไม่นับรอบบังคับ</p>`}
         </div>` : ''}
 
         <!-- CTA -->
@@ -6591,9 +6692,12 @@ function _issueChangeDept(deptNames) {
 
 // ─── Carousel ─────────────────────────────────────────────────────────────────
 function initPromoCarousel() {
-    const slides = document.querySelectorAll('.carousel-item');
-    const dots = document.querySelectorAll('.carousel-dot');
-    const counter = document.getElementById('carousel-counter');
+    const carousel = [...document.querySelectorAll('[data-patrol-carousel]')]
+        .find(el => el.getClientRects().length > 0);
+    if (!carousel) return;
+    const slides = carousel.querySelectorAll('.carousel-item');
+    const dots = carousel.querySelectorAll('.carousel-dot');
+    const counter = carousel.querySelector('#carousel-counter');
     if (!slides.length) return;
 
     let current = 0;
@@ -6709,9 +6813,32 @@ async function loadOverview(year) {
     }
 }
 
+function patrolOverviewMobileCard(member, group, yearlyTarget, acceptedCoverage, actualAttended, acceptedPct, final, isMe) {
+    const name = member.Name || member.EmployeeName || '-';
+    const position = member.Position || '-';
+    const department = member.Department || '-';
+    const action = `window.openPatrolAttendanceDetailModal(${_patrolJsArg(member.EmployeeID)},${_patrolJsArg(name)},${_patrolJsArg(group)},${Number(yearlyTarget) || 0})`;
+    return `<button type="button" onclick="${action}" class="w-full rounded-xl border border-slate-100 bg-white p-3 text-left shadow-sm transition-all active:scale-[0.99] active:bg-slate-50">
+      <div class="flex items-start justify-between gap-3">
+        <div class="min-w-0">
+          <p class="truncate text-sm font-black text-slate-800">${escHtml(name)}${isMe ? ' <span class="text-[10px] text-emerald-600">(ฉัน)</span>' : ''}</p>
+          <p class="mt-0.5 truncate text-[11px] font-medium text-slate-400">${escHtml(position)} · ${escHtml(department)}</p>
+        </div>
+        <span class="shrink-0 rounded-full px-2 py-1 text-[10px] font-black ${final.cls}">${escHtml(final.label)}</span>
+      </div>
+      <div class="mt-3 grid grid-cols-3 gap-2">
+        <div class="rounded-lg bg-slate-50 px-2 py-2"><p class="text-[9px] font-bold uppercase text-slate-400">เป้าทั้งปี</p><p class="mt-0.5 text-sm font-black text-slate-700">${Number(yearlyTarget) || 0}</p></div>
+        <div class="rounded-lg bg-emerald-50 px-2 py-2"><p class="text-[9px] font-bold uppercase text-emerald-600">Accepted</p><p class="mt-0.5 text-sm font-black text-emerald-700">${Number(acceptedCoverage) || 0}</p>${Number(acceptedCoverage) !== Number(actualAttended) ? `<p class="text-[9px] text-emerald-600/70">เดินจริง ${Number(actualAttended) || 0}</p>` : ''}</div>
+        <div class="rounded-lg bg-sky-50 px-2 py-2"><p class="text-[9px] font-bold uppercase text-sky-600">Accepted %</p><p class="mt-0.5 text-sm font-black text-sky-700">${Number(acceptedPct) || 0}%</p></div>
+      </div>
+      <div class="mt-3 flex items-center justify-end gap-1 text-[11px] font-bold text-emerald-700">ดูรายละเอียด <span aria-hidden="true">›</span></div>
+    </button>`;
+}
+
 function renderOverviewTable(members) {
     const tbody  = document.getElementById('overview-table-body');
     const pagEl  = document.getElementById('ov-mgmt-pagination');
+    const mobileCards = document.getElementById('overview-mobile-cards');
     if (!tbody) return;
 
     // Sort: TargetPerYear ascending (12 before 24), then SortOrder
@@ -6751,6 +6878,7 @@ function renderOverviewTable(members) {
           </div>
         </td></tr>`;
         if (pagEl) pagEl.innerHTML = '';
+        if (mobileCards) mobileCards.innerHTML = `<div class="rounded-xl border border-dashed border-slate-200 bg-white px-4 py-8 text-center text-xs font-medium text-slate-400">${_ovMgmtQ ? 'ไม่พบผลการค้นหา' : 'ยังไม่มีสมาชิกในรายการ'}</div>`;
         return;
     }
 
@@ -6822,6 +6950,16 @@ function renderOverviewTable(members) {
           </td>` : ''}
         </tr>`;
     }).join('');
+
+    if (mobileCards) {
+        mobileCards.innerHTML = page.map(m => {
+            const actualAttended = Number(m.Attended || 0);
+            const acceptedCoverage = _patrolOverviewLeave(m, false, 'acceptedCoverageToDate', actualAttended);
+            const acceptedPct = _patrolOverviewLeave(m, false, 'acceptedCoverageToDatePct', m.Percent || 0);
+            const yearlyTarget = Number(m.YearlyTarget || m.TargetPerYear || m.yearlyTarget || m.Total || 0);
+            return patrolOverviewMobileCard(m, 'top_management', yearlyTarget, acceptedCoverage, actualAttended, acceptedPct, _patrolOverviewFinalInfo(m, false), m.EmployeeID === currentUser.id);
+        }).join('');
+    }
 
     // Render pagination controls
     if (pagEl) {
@@ -7186,9 +7324,8 @@ async function loadSupervisorOverview(year) {
 function renderSvTable() {
     const tbody = document.getElementById('sv-overview-body');
     const pagEl = document.getElementById('sv-pagination');
-    const mobileEl = document.getElementById('sv-overview-mobile');
+    const mobileCards = document.getElementById('sv-overview-mobile-cards');
     if (!tbody) return;
-    tbody.closest('table')?.classList.add('hidden', 'md:table');
 
     const q = _svQ.toLowerCase();
     const filtered = q ? _svAllMembers.filter(m =>
@@ -7214,7 +7351,7 @@ function renderSvTable() {
           </div>
         </td></tr>`;
         if (pagEl) pagEl.innerHTML = '';
-        if (mobileEl) mobileEl.innerHTML = `<div class="px-4 py-10 text-center text-xs text-slate-400">${_svQ ? 'ไม่พบผลการค้นหา' : 'ยังไม่มีสมาชิกในรายการ'}</div>`;
+        if (mobileCards) mobileCards.innerHTML = `<div class="rounded-xl border border-dashed border-amber-200 bg-white px-4 py-8 text-center text-xs font-medium text-slate-400">${_svQ ? 'ไม่พบผลการค้นหา' : 'ยังไม่มีสมาชิกในรายการ'}</div>`;
         return;
     }
 
@@ -7283,18 +7420,13 @@ function renderSvTable() {
             </tr>`;
     }).join('');
 
-    if (mobileEl) {
-        mobileEl.innerHTML = page.map(m => {
-            const final = _patrolOverviewFinalInfo(m, true);
-            const actual = Number(m.attended || 0);
-            const accepted = _patrolOverviewLeave(m, true, 'acceptedCoverageToDate', actual);
+    if (mobileCards) {
+        mobileCards.innerHTML = page.map(m => {
+            const actualAttended = Number(m.attended || 0);
+            const acceptedCoverage = _patrolOverviewLeave(m, true, 'acceptedCoverageToDate', actualAttended);
             const acceptedPct = _patrolOverviewLeave(m, true, 'acceptedCoverageToDatePct', m.percent || 0);
-            const yearlyTarget = Number(m.yearlyTarget || m.TargetPerYear || m.target || 0);
-            const isMe = m.EmployeeID === currentUser.id;
-            return `<button type="button" onclick="window.openPatrolAttendanceDetailModal(${_patrolJsArg(m.EmployeeID)},${_patrolJsArg(m.EmployeeName)},'supervisor',${yearlyTarget})" class="w-full min-h-11 px-4 py-3 text-left hover:bg-amber-50/40 transition-colors ${isMe ? 'bg-amber-50/40' : ''}">
-              <div class="flex items-start justify-between gap-3"><div class="min-w-0"><p class="text-sm font-black text-slate-800 truncate">${escHtml(m.EmployeeName || '-')} ${isMe ? '<span class="text-[9px] text-amber-600">(ฉัน)</span>' : ''}</p><p class="mt-0.5 text-[10px] text-slate-500 truncate">${escHtml(m.Position || '—')} · ${escHtml(m.Department || '—')}</p></div><span class="shrink-0 rounded-full px-2 py-1 text-[10px] font-black ${final.cls}">${escHtml(final.label)}</span></div>
-              <div class="mt-2 grid grid-cols-3 gap-2 text-center"><div class="rounded-lg bg-slate-50 px-1.5 py-1.5"><p class="text-[8px] text-slate-400">เดินจริง</p><p class="text-xs font-black text-slate-700">${actual}/${yearlyTarget || '—'}</p></div><div class="rounded-lg bg-emerald-50 px-1.5 py-1.5"><p class="text-[8px] text-emerald-600">Accepted</p><p class="text-xs font-black text-emerald-700">${accepted}</p></div><div class="rounded-lg bg-amber-50 px-1.5 py-1.5"><p class="text-[8px] text-amber-600">Pass rate</p><p class="text-xs font-black text-amber-700">${acceptedPct}%</p></div></div>
-            </button>`;
+            const yearlyTarget = Number(m.yearlyTarget || m.YearlyTarget || m.TargetPerYear || m.target || 0);
+            return patrolOverviewMobileCard(m, 'supervisor', yearlyTarget, acceptedCoverage, actualAttended, acceptedPct, _patrolOverviewFinalInfo(m, true), m.EmployeeID === currentUser.id);
         }).join('');
     }
 
@@ -7767,7 +7899,14 @@ function openSelfCheckinModal(selectedSessionId = '') {
         : [{ Name:'โรงงาน 1' },{ Name:'โรงงาน 2' },{ Name:'รอบนอก+พื้นที่ส่วนกลาง' }];
 
     openModal('บันทึกการเดินตรวจ', `
-        <form id="self-checkin-form" class="space-y-4">
+        <form id="self-checkin-form" class="relative space-y-4">
+          <div id="self-checkin-submit-busy" class="hidden absolute inset-0 z-20 flex min-h-[360px] items-center justify-center rounded-2xl bg-white/90 px-5 text-center backdrop-blur-sm">
+            <div>
+              <div class="mx-auto mb-3 h-10 w-10 animate-spin rounded-full border-4 border-amber-500 border-t-transparent"></div>
+              <p class="text-sm font-black text-slate-800">กำลังบันทึกการเดินตรวจ…</p>
+              <p class="mt-1 text-xs font-medium text-slate-500">กรุณารอสักครู่ และอย่าปิดหน้านี้</p>
+            </div>
+          </div>
           <div>
             <label class="block text-xs font-semibold text-slate-500 mb-1.5">รอบตามกำหนดการ</label>
             ${isFlexible ? `
@@ -7871,20 +8010,20 @@ function openSelfCheckinModal(selectedSessionId = '') {
             form.dataset.submitting = '1';
             const submitBtn = e.submitter || form.querySelector('button[type="submit"]');
             if (submitBtn) submitBtn.disabled = true;
+            const busyLayer = document.getElementById('self-checkin-submit-busy');
+            busyLayer?.classList.remove('hidden');
             try {
                 const res = await API.post('/patrol/self-checkin', { CheckinDate, Location, Notes, ScheduledSessionID, PatrolType });
                 if (res.success) {
                     closeModal();
-                    try {
-                        await refreshSupervisorPatrolProjection();
-                    } catch (refreshErr) {
-                        console.warn('Patrol self-check-in saved but personal projection refresh failed:', refreshErr);
-                    }
+                    try { await refreshSupervisorPatrolProjection(); }
+                    catch (refreshErr) { console.warn('Self Patrol refresh failed after a successful check-in.', refreshErr); }
                     showCheckinSuccessScreen(PatrolType, res?.data || { group: 'supervisor', email: res?.email || {} });
                 }
                 else showError(res.message);
             } catch (err) { showError(getReadableError(err, 'บันทึก Self-Patrol ไม่สำเร็จ')); }
             finally {
+                busyLayer?.classList.add('hidden');
                 form.dataset.submitting = '0';
                 if (submitBtn) submitBtn.disabled = false;
             }
