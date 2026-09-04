@@ -7,6 +7,13 @@
 - Retry safety uses nullable `Patrol_Attendance.IdempotencyKey`, unique `(UserID,IdempotencyKey)` and unique `(UserID,ScheduledSessionID)`. A new idempotency key intentionally permits another Extra walk.
 - `patrol_checkin_v2_enabled` is the operational rollback flag. Disable it before runtime rollback; do not drop the additive column/indexes or delete Attendance history.
 
+## CCCF Form A Permanent Submit-on-behalf Constraints
+
+- `AssigneeID` is the accountable owner for CCCF KPI, tracking, review recipient and history. `SubmittedByEmployeeID` and `SubmittedByName` identify the authenticated actor and must never replace the owner or create a second KPI count.
+- An ordinary user may submit for themselves, or for an owner with both an active `CCCF_Assignments` row and an active `CCCF_Submit_Delegations` grant for that exact delegate. Admin retains the established Employee Master selection authority. The server resolves owner and actor data; the client only presents permission-scoped choices.
+- Direct-signed PDF remains self-only for non-Admin users. Delegation grants submit authority only and must not inherit an owner's direct-signed privilege.
+- `CCCF_Submit_Delegations` and the actor columns are additive. Preserve legacy rows, use creator/name fallback for old records, retain history/audit rows when a grant is disabled, and reuse the existing `SubmittedByAdmin` email template/outbox event.
+
 ## BBS Smart Card Phase 10F-2 Constraints
 
 - The Visual Designer is Admin-only. It may create and edit only `Draft` layout versions; `Active` and `Archived` versions are immutable previews in both the client and server.

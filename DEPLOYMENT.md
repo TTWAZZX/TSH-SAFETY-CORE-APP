@@ -1,5 +1,15 @@
 # TSH Safety Core Activity - Deployment
 
+## CCCF Phase C1-C4 Ownership, Delegation and Review Queue release (2026-09-04)
+
+The approved CCCF release is deployed to the shared-hosting PHP target at `dev.tshpcl.com/safety/tsh-safety-core`. It contains only `index.html`, `public/js/main.js`, `public/js/pages/cccf.js`, and `api/handlers/workflow_phase6.php`. The schema change is additive only: `SubmittedByEmployeeID`, `SubmittedByName`, and `cccf_submit_delegations`; no existing Permanent row, private upload or SMTP data was changed.
+
+- Production SQL backup: `backups/production/cccf-c1c4-20260904-081838/production-before-cccf-migration.sql` (2,544,468 bytes; SHA-256 `A2D2EC9D19EB26D90F3E6E611A4985DC66D90661A8FAD89DD6BCEB8875F7C847`).
+- Runtime rollback backup: `backups/production/cccf-c1c4-20260904-081838/application-before`.
+- Migration result: all `37` existing Permanent rows remained; both actor columns and `cccf_submit_delegations` were verified.
+- FTPS download-back verification: `backups/production/cccf-c1c4-20260904-081838/application-after`; SHA-256 matched `4/4` files.
+- HTTPS smoke passed for the cache-busted `index.html`, `main.js` and `cccf.js`, and schema probe passed. The temporary token-protected helper was removed through FTPS and its URL returns HTTP `404`.
+
 ## Safety Patrol Top/Management and Sec/Supervisor UI release (2026-09-03)
 
 The approved Safety Patrol UI/API projection is deployed to the shared-hosting PHP target at `dev.tshpcl.com/safety/tsh-safety-core`. The scoped release contains only `index.html`, Production-derived `public/js/main.js`, `public/js/pages/patrol.js`, and `api/handlers/patrol.php`. It adds no schema or database/data mutation, and does not alter check-in, quota, target, roster, session, rotation, schedule, or Attendance rules.

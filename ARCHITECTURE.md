@@ -1372,7 +1372,8 @@ CSS classes: `.rte-active` = alignment button ที่ active อยู่ (bg-
 | Table | Purpose |
 |-------|---------|
 | `CCCF_FormA_Worker` | รายการค้นหาอันตรายรายบุคคล (พนักงานส่งเอง) — มี `SafetyUnit` column (auto-migrated) |
-| `CCCF_FormA_Permanent` | เอกสารผลดำเนินการถาวร — ส่งโดย supervisor หรือ admin ส่งแทนได้ พร้อมแนบไฟล์ server file storage, มี `AssigneeID`, `StopType`, `Rank` |
+| `CCCF_FormA_Permanent` | เอกสารผลดำเนินการถาวร — `AssigneeID` คือเจ้าของ/ผู้รับผิดชอบสำหรับ KPI และ `SubmittedByEmployeeID` / `SubmittedByName` คือผู้ส่งจริง; มี `StopType`, `Rank` และไฟล์ private server storage |
+| `CCCF_Submit_Delegations` | สิทธิ์ยื่นแทนแบบ active/inactive ที่ Admin กำหนดต่อ owner/delegate; owner ต้องมี `CCCF_Assignments` ก่อน และสิทธิ์นี้ไม่อนุญาต Direct Signed PDF |
 | `CCCF_EmailOutbox` | คิวอีเมล CCCF Form A Permanent แบบ text+HTML แยกจาก Hiyari; ใช้ retry ได้ผ่าน admin endpoint |
 | `CCCF_Unit_Targets` | เป้าหมายต่อ Unit — `yearly_target` (จำนวนคน ไม่ใช่ครั้ง) + `achieved_override` (admin override) |
 | `CCCF_Assignments` | กำหนดผู้รับผิดชอบจาก Master Employee ว่าใครต้องส่ง Form A Permanent — admin เพิ่ม/แก้ไข/ลบได้ |
@@ -1390,6 +1391,8 @@ CSS classes: `.rte-active` = alignment button ที่ active อยู่ (bg-
 - Permanent tab แสดง “แบบฟอร์มที่เกี่ยวข้อง” จาก `Module_Forms` ด้วย `module=cccf`; admin จัดการ template ได้จากปุ่มแบบฟอร์ม และ user เห็นเฉพาะ active forms
 - ถ้าเป็น admin ต้องเลือกผู้รับผิดชอบ (`AssigneeID`) จาก assignment/master employee ได้ และระบบเติม `SubmitterName` + `Department` ตาม master
 - backend helper `resolvePermanentSubmitter()` ใช้ source of truth จาก `Employees` เมื่อมี `AssigneeID`
+- Submit-on-behalf is server-authoritative: a normal user is always bound to their authenticated `EmployeeID`; only an Admin may select an alternate Employee Master owner. The Admin picker is searchable but does not grant or infer any extra permission.
+- Excel review uses an atomic PendingReview transition. Reject requires a comment, an exact retry of the recorded decision is idempotent, and all other stale review attempts receive a conflict response. The owner notification uses the resolved Employee Master owner and is not duplicated by a retry.
 - endpoint ที่เกี่ยวข้อง:
   - `POST /cccf/form-a-permanent` — supervisor ส่งเอง หรือ admin ส่งแทนผู้ใช้
   - `PUT /cccf/form-a-permanent/:id` — admin แก้ไขรายการ Permanent และอัปไฟล์แทนได้

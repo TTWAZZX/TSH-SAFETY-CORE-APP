@@ -1,5 +1,16 @@
 # TSH Safety Core Activity - AI Quick Start
 
+## Current CCCF Phase C1-C4 Handoff (2026-09-04, deployed)
+
+- Form A Permanent labels the owner selection as `ยื่นแบบฟอร์มแทนใคร`, and clearly separates the accountable `เจ้าของแบบฟอร์ม` from the authenticated `ผู้ส่งรายการ`. Self-submit defaults to the current user.
+- Admin can grant, disable, and audit an active submit-on-behalf delegation only after the owner has a CCCF assignment. A delegated user may select only their active delegated owner; Admin retains its existing ability to select any Employee Master record.
+- `AssigneeID` remains the sole KPI/tracking owner. New records additionally retain `SubmittedByEmployeeID` and `SubmittedByName`; legacy records fall back to their existing creator/name fields. Direct-signed PDF remains self-only for non-Admin users.
+- Delegated owner notice reuses the existing `SubmittedByAdmin` CCCF outbox/template event; no new email template or SMTP behavior was introduced.
+- Excel review is concurrency-safe in Node/PHP: only PendingReview can transition, Reject needs a reason, an identical retry is idempotent, and stale decisions return conflict. The review dialog no longer closes/reopens while its comment is being entered.
+- Added additive migration `backend/migrations/20260903_cccf_submit_delegations.sql`; it creates `CCCF_Submit_Delegations` and actor columns without updating/deleting existing Permanent rows. No upload path changed.
+- Static contracts, Node/PHP syntax, API lifecycle UAT, Chrome desktop/390 px UAT, full backend regression/read-only preflight, and zero-residue cleanup pass. Local smoke queues mail only.
+- Shared-hosting PHP deployment completed on 2026-09-04: the fresh SQL backup is `backups/production/cccf-c1c4-20260904-081838/production-before-cccf-migration.sql` (SHA-256 `A2D2EC9D19EB26D90F3E6E611A4985DC66D90661A8FAD89DD6BCEB8875F7C847`), the migration retained 37 existing Permanent rows, FTPS download-back matched the four runtime files, HTTPS static/schema smoke passed, and the temporary helper was deleted and verified HTTP 404.
+
 ## Current Safety Patrol Check-in v2 Handoff (2026-09-02, dev deployed and verified)
 
 - Local phases 1-8 and the approved Phase 9 rollout to `dev.tshpcl.com` are complete. Production was not rolled out; the Patrol-only source is included in its dedicated GitHub release commit.

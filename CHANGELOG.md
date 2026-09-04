@@ -1,5 +1,15 @@
 # TSH Safety Core Activity - Changelog And Handoff History
 
+## CCCF Phase C1-C4 Ownership, Delegation and Review Queue (2026-09-04, deployed)
+
+- Form A Permanent now distinguishes the accountable form owner from the authenticated submitter. Self-submit defaults to the current user; an authorized delegate selects only an Admin-granted owner with an active CCCF assignment, while Admin retains the existing Employee Master selection.
+- New actor fields preserve `SubmittedByEmployeeID` / `SubmittedByName`; KPI, tracking and review ownership remain keyed only to `AssigneeID`. Direct-signed PDF does not inherit through delegation.
+- Added Admin delegation management with Employee Master searchable pickers and active/inactive lifecycle. The owner notification reuses the existing `SubmittedByAdmin` outbox/template event.
+- Admin Excel review now holds the selected record while changing status, requires a reason for Reject, treats an identical review retry as idempotent, rejects stale/conflicting transitions, and keeps the review dialog/comment visible rather than closing and reopening it.
+- Node and PHP compatibility paths were kept aligned. The new migration is additive (`20260903_cccf_submit_delegations.sql`); no existing CCCF record, upload path or SMTP configuration changed.
+- Contract/API/browser/mobile UAT, PHP/Node syntax, full backend regression and read-only preflight passed. Test records, assignments, delegations, audit rows and temporary test employees were removed; local smoke verifies Outbox queueing without sending real email.
+- Deployed to the shared-hosting PHP target after a verified SQL backup (`cccf-c1c4-20260904-081838`, SHA-256 `A2D2EC9D19EB26D90F3E6E611A4985DC66D90661A8FAD89DD6BCEB8875F7C847`). The additive migration retained all `37` Permanent records, installed both actor columns and `cccf_submit_delegations`; download-back SHA-256 matched all four runtime files. The temporary token-protected helper was removed and returns HTTP `404`.
+
 ## Safety Patrol Top/Management and Sec/Supervisor UI release (2026-09-03)
 
 - Deployed the approved Safety Patrol UI/API projection to the PHP target at `dev.tshpcl.com/safety/tsh-safety-core`: Supervisor personal summary/history/layout refresh and Top yearly activity type colouring are live.
