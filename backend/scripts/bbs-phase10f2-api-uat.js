@@ -105,6 +105,9 @@ async function cleanup() {
     response = await call(base, `/admin/card-designer/versions/${layoutId}/assets`, { method:'POST', token:adminToken, form });
     assert.strictEqual(response.status, 201, JSON.stringify(response.json));
     const assetId = Number(response.json.data.id);
+    const [[assetRow]] = await db.query('SELECT StoredName FROM BBS_Card_Layout_Assets WHERE id=?', [assetId]);
+    const privateStoredName = String(assetRow.StoredName);
+    assert.strictEqual(JSON.stringify(response.json.data).includes(privateStoredName), false, 'Asset JSON must not expose a stored file name');
 
     response = await call(base, `/admin/card-designer/assets/${assetId}/file`, { token:adminToken });
     assert.strictEqual(response.status, 200);
@@ -130,6 +133,11 @@ async function cleanup() {
     assert.strictEqual(response.json.data.layout.sides.length, 2);
     assert.strictEqual(response.json.data.layout.sides[1].backgroundAssetId, assetId);
     assert.strictEqual(response.json.data.layout.elements.some(row => row.elementKey === 'uat-static-text'), true);
+    assert.strictEqual(JSON.stringify(response.json.data).includes(privateStoredName), false, 'Layout detail must not expose a stored file name');
+
+    response = await call(base, `/admin/card-designer/personal/${templateId}/versions`, { method:'POST', token:adminToken, body:{ sourceVersionId:layoutId } });
+    assert.strictEqual(response.status, 400, 'A clone must not cross-reference a private Draft asset');
+    assert.strictEqual(response.json.code, 'PRIVATE_ASSET_CLONE_FORBIDDEN');
 
     response = await call(base, `/admin/card-designer/versions/${layoutId}/sides/back/background`, { token:adminToken });
     assert.strictEqual(response.status, 200);

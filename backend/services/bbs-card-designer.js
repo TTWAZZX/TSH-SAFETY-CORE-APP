@@ -123,6 +123,12 @@ function normalizeLayoutPayload(payload, expectedKind) {
 function assessLayout(layout) {
     const items=[];
     if (!layout.sides.some(side=>side.side==='Back')) items.push({severity:'Warning',code:'BACK_SIDE_MISSING',message:'Back side is not configured.'});
+    if (Number(layout.dpi)<200) items.push({severity:'Warning',code:'DPI_LOW',message:'Print DPI is below the recommended 200 DPI.'});
+    for (const side of layout.sides) {
+        if (Number(side.bleedMM||0)<1) items.push({severity:'Warning',code:`BLEED_LOW_${side.side.toUpperCase()}`,message:`${side.side} bleed is below the recommended 1 mm.`});
+        if (Number(side.safeMarginMM||0)<2) items.push({severity:'Warning',code:`SAFE_MARGIN_LOW_${side.side.toUpperCase()}`,message:`${side.side} safe margin is below the recommended 2 mm.`});
+        if (side.pixelWidth&&side.pixelHeight) { const requiredWidth=(Number(layout.widthMM)/25.4)*Number(layout.dpi),requiredHeight=(Number(layout.heightMM)/25.4)*Number(layout.dpi); if(Number(side.pixelWidth)<requiredWidth||Number(side.pixelHeight)<requiredHeight)items.push({severity:'Warning',code:`BACKGROUND_RESOLUTION_LOW_${side.side.toUpperCase()}`,message:`${side.side} background may be below the selected print DPI.`}); }
+    }
     const expectedQr=layout.templateKind==='Personal'?'card.personal_qr':'department.community_qr';
     const qr=layout.elements.filter(element=>element.visible && element.elementType==='QR' && element.dataSourceKey===expectedQr);
     if (!qr.length) items.push({severity:'Blocked',code:'QR_MISSING',message:'An approved BBS QR element is required.'});
