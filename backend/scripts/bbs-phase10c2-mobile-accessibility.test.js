@@ -51,6 +51,10 @@ assert.ok(mountSource.includes("document.body.style.overflow = 'hidden'"), 'Dial
 assert.ok(mountSource.includes("document.body.style.overflow = previousOverflow"), 'Dialog must restore background scrolling');
 assert.ok(mountSource.includes("button.addEventListener('click', close)"), 'Dialog close control must use the shared close path');
 
+for (const marker of ['function inspectorTeamModal(', 'data-inspector-team-modal', 'data-inspector-modal-close', 'inspectorModalReturnFocus', "event.key!=='Tab'", "returnFocus?.focus?.({preventScroll:true})"]) {
+    assert.ok(ui.includes(marker), `Inspector team modal accessibility missing ${marker}`);
+}
+
 const validationStart = ui.indexOf('function validateClient()');
 const validationEnd = ui.indexOf('async function submitObservation()', validationStart);
 const validationSource = ui.slice(validationStart, validationEnd);
