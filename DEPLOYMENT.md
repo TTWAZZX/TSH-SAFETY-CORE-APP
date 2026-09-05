@@ -1,5 +1,11 @@
 # TSH Safety Core Activity - Deployment
 
+## BBS Visual Designer and Designer printing Admin-only activation (2026-09-05)
+
+Production source `eefa68b` deployed `index.html`, `public/js/main.js`, `public/js/pages/bbs-smart-card.js`, and `api/handlers/bbs_card_designer.php`. FTPS download-back SHA-256 passed `4/4`; protected Patrol/CCCF paths remained unchanged `4/4`; HTTPS hashes passed `3/3`. The Production Admin API then enabled both `visual_card_designer_enabled=1` and `visual_card_designer_rendering_enabled=1`, while retaining `staged_admin_only=1` and `pilot_scope_only=0`. Admin catalog smoke passed; ordinary user/anonymous requests remain `403`/`401`; no business test records were created.
+
+The fresh pre-activation SQL/application/upload backup is `backups/production/bbs-admin-deploy-20260905T093502Z/` (191 tables; SQL SHA-256 `9ac57a6808ab438da5b0a006253ca4c2613c10a815d60246f3d9678c33c80f08`). The four-file rollback snapshot is `backups/production/bbs-designer-runtime-popup-20260905-164109/application-before/`. Operational rollback calls the Admin-only runtime endpoint with `action=disable`; it preserves all layout, card, QR, print and private-upload history. Restore the four files only for code rollback.
+
 ## BBS Admin-only integration deployed (2026-09-05)
 
 User explicitly approved push and deployment, then explicitly approved the temporary protected backup helper after automatic review initially rejected that helper. Source commit `c822277` is pushed on `integration/production-bbs-20260905`. Deployment completed at 2026-09-05T08:54:15.039Z to `https://dev.tshpcl.com/safety/tsh-safety-core`.

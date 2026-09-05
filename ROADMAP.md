@@ -1,5 +1,9 @@
 # TSH Safety Core Activity - Roadmap
 
+## BBS Admin-only Designer UAT in progress (2026-09-05)
+
+Visual Designer and Designer printing are enabled for Admin-only UAT with the staged gate still `1/0`. Next, create a real Draft layout for each required Personal/Department template, verify print output through the business printer, and retain the Active layout only after acceptance. Then add safe Template/Designer edit and archive/delete behavior without removing historical cards, print records or private artwork. Ordinary-user rollout remains a separate Phase 10E decision.
+
 ## BBS integration deployed; activation remains gated (2026-09-05)
 
 The eight-file Admin-only candidate is now pushed/deployed and verified, with both Designer flags disabled. Next work remains controlled signed-receipt API lifecycle and desktop/mobile/physical print acceptance plus Department asset authorization review. No ordinary-user rollout is authorized. See `docs/bbs-integration-review-20260905.md`.

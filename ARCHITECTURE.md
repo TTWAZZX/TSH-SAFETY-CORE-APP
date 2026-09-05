@@ -1,5 +1,9 @@
 # TSH Safety Core Activity - Architecture
 
+## BBS Designer runtime control (2026-09-05)
+
+`POST /api/bbs/admin/card-designer/runtime` is Admin-only in the Node and PHP routes. `enable` locks the four BBS gate settings and succeeds only while BBS is staged Admin-only (`staged_admin_only=1`, `pilot_scope_only=0`), then updates both Designer flags together and writes an audit entry. `disable` turns both flags off as the operational rollback without deleting layouts, cards, QR records, print snapshots or private assets. The endpoint returns the effective gate state; the browser cannot enable Designer rendering by itself.
+
 ## BBS immutable print receipts (2026-09-05 integration candidate)
 
 Node/PHP render responses now sign an actor/subject/QR-fingerprint-bound snapshot with a 24-hour HMAC receipt. Optional `designerReceipts` (Personal) and `designerReceipt` (Department) print-log inputs persist that exact prepared snapshot rather than rebuilding from current layout/Master state. Legacy calls still log without a fabricated snapshot. Shared browser style and physical duplex planning live in `public/js/utils/bbs-card-print.js`. No receipt schema or upload-path change. See `docs/bbs-integration-review-20260905.md` for validation limits.

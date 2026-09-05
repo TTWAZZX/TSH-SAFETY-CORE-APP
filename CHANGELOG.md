@@ -1,5 +1,9 @@
 # TSH Safety Core Activity - Changelog And Handoff History
 
+## BBS Visual Designer and printing enabled for Admin-only UAT (2026-09-05)
+
+Committed and pushed `eefa68b` on `main`. Production now exposes the Admin-only Designer runtime control, retains the BBS staged gate, opens Admin team/schedule data in an accessible modal, and serves the Thai Designer UI. Both Designer flags are enabled after authenticated smoke; Admin requests pass while ordinary user and anonymous requests remain blocked. FTPS/HTTPS hashes and Patrol/CCCF unchanged checks pass. Rollback disables both flags without deleting history; exact backup evidence is in `docs/bbs-integration-review-20260905.md`.
+
 ## BBS Admin-only integration Production release (2026-09-05)
 
 Pushed source `c822277` on the integration branch and deployed the eight-file candidate after verified fresh SQL/application/upload backup. Download-back hashes pass 8/8; combined API/HTTP smoke passes 17/17; Patrol/CCCF preserved; helper removed and business test residue zero. Designer flags remain off and ordinary-user access stays blocked. See `docs/bbs-integration-review-20260905.md` for the exact backup ID, limits and rollback.

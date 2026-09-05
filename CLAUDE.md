@@ -1,5 +1,9 @@
 # TSH Safety Core Activity - AI Quick Start
 
+## Current BBS Designer Admin-only UAT state (2026-09-05)
+
+`main` commit `eefa68b` is pushed and its four PHP Production files are verified. Production keeps `staged_admin_only=1`, `pilot_scope_only=0`, while `visual_card_designer_enabled=1` and `visual_card_designer_rendering_enabled=1`. Admin Designer/catalog smoke passes; ordinary user and anonymous remain denied. The fresh database/private-upload/application backup is `bbs-admin-deploy-20260905T093502Z`; four-file rollback snapshot is `backups/production/bbs-designer-runtime-popup-20260905-164109/application-before/`. To roll back normal operation, call the Admin-only Designer runtime endpoint with `action=disable`; do not alter the staged gate or delete historical rows/files. The Admin inspector team/schedule UI is now a focus-trapped modal.
+
 ## Current deployed state (2026-09-05)
 
 BBS integration source `c822277` is pushed on `integration/production-bbs-20260905`; eight candidate files are deployed and verified on Production. Fresh backup `bbs-admin-deploy-20260905T083722Z`; 17 API/static checks pass; Patrol/CCCF unchanged. Admin-only=1, pilot=0, Designer=0, rendering=0. Earlier unmerged/not-pushed/not-deployed notes below are historical. Continue from the activation acceptance tasks in `docs/bbs-integration-review-20260905.md`; do not repeat reconciliation/deployment or open flags automatically.

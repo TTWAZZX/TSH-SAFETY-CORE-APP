@@ -1,5 +1,14 @@
 # BBS integration: Admin review candidate (2026-09-05)
 
+## Visual Designer and Designer printing enabled for Admin-only UAT (2026-09-05)
+
+Source commit `eefa68b` is on `main` and four required PHP Production files are deployed: `index.html`, `public/js/main.js`, `public/js/pages/bbs-smart-card.js`, and `api/handlers/bbs_card_designer.php`. The inspector team/schedule action now opens an accessible modal for Admin instead of expanding below the list. The Designer runtime endpoint is Admin-only and permits enablement only while `staged_admin_only=1` and `pilot_scope_only=0`.
+
+- Production flags are verified as `staged_admin_only=1`, `pilot_scope_only=0`, `visual_card_designer_enabled=1`, and `visual_card_designer_rendering_enabled=1`. Admin can create/edit Draft layouts, activate a ready layout, and use that active layout for Designer printing. An existing card/template without an Active Designer layout keeps the established renderer.
+- Fresh SQL/application/upload backup before the setting change: `backups/production/bbs-admin-deploy-20260905T093502Z/`, 191 tables, SQL SHA-256 `9ac57a6808ab438da5b0a006253ca4c2613c10a815d60246f3d9678c33c80f08`, archive transfer SHA-256 `aa0dbddf22d3d6c32d182b9407610f19532bd1411af8b8ba8a09ebf0b0446c05`. Fresh four-file rollback backup: `backups/production/bbs-designer-runtime-popup-20260905-164109/application-before/`.
+- FTPS download-back matched the four deployed files `4/4`; Patrol/CCCF protected runtime files remained byte-identical `4/4`. HTTPS hashes matched the three public files `3/3`. Admin enable/API/catalog smoke passed; ordinary user remains `403`, anonymous remains `401`, and no business test row or file was created.
+- Roll back operationally by `POST /api/bbs/admin/card-designer/runtime` with `{ "action": "disable" }` as Admin, which turns both Designer flags off without deleting layouts, cards, QR, print history or private assets. Restore the four files above from `application-before/` only if a code rollback is needed. Do not change the staged Admin-only gate.
+
 ## BBS Admin-only integration deployed (2026-09-05)
 
 User explicitly approved push and deployment, then explicitly approved the temporary protected backup helper after automatic review initially rejected that helper. Source commit `c822277` is pushed on `integration/production-bbs-20260905`. Deployment completed at 2026-09-05T08:54:15.039Z to `https://dev.tshpcl.com/safety/tsh-safety-core`.
