@@ -1,5 +1,10 @@
 # TSH Safety Core Activity - Roadmap
 
+## BBS integration deployed; activation remains gated (2026-09-05)
+
+The eight-file Admin-only candidate is now pushed/deployed and verified, with both Designer flags disabled. Next work remains controlled signed-receipt API lifecycle and desktop/mobile/physical print acceptance plus Department asset authorization review. No ordinary-user rollout is authorized. See `docs/bbs-integration-review-20260905.md`.
+
+
 ## BBS next acceptance gate (2026-09-05)
 
 Local reconciliation and 49-suite regression are complete. Next: signed-receipt authenticated API UAT, desktop/mobile/physical duplex acceptance and Department asset authorization review. The Admin-only candidate is prepared, not deployed. Keep ordinary-user rollout closed under Phase 10E; use `docs/bbs-integration-review-20260905.md` as the current continuation scope.

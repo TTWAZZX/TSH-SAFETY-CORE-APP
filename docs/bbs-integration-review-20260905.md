@@ -1,5 +1,18 @@
 # BBS integration: Admin review candidate (2026-09-05)
 
+## BBS Admin-only integration deployed (2026-09-05)
+
+User explicitly approved push and deployment, then explicitly approved the temporary protected backup helper after automatic review initially rejected that helper. Source commit `c822277` is pushed on `integration/production-bbs-20260905`. Deployment completed at 2026-09-05T08:54:15.039Z to `https://dev.tshpcl.com/safety/tsh-safety-core`.
+
+- Uploaded only the eight files in the review manifest. FTPS download-back SHA-256 matched **8/8**; HTTPS static SHA-256 matched **5/5**; authenticated Admin, ordinary-user denial, anonymous denial and invalid empty print-log checks passed (**17 combined API/static checks**).
+- Four protected Patrol/CCCF runtime files are byte-identical to the fresh pre-deploy backup. No Production schema/data migration, upload-path or setting change. Flags remain `staged_admin_only=1`, `pilot_scope_only=0`, `visual_card_designer_enabled=0`, `visual_card_designer_rendering_enabled=0`.
+- Fresh backup: `backups/production/bbs-admin-deploy-20260905T083722Z/`. `production-before.zip` contains SQL plus manifest; `application-before/` holds all **1,037** application/upload files (1,330,893,322 bytes), each verified against remote SHA-256. SQL has **191 tables**, 15,385,425 bytes, SHA-256 `91a9cc729a54242d76c50a44d477b1bf81b4f567f0b0698139bd2a96338f3672`. Archive SHA-256: `4f5dde072bf3e4ebcd7697e8e06e52808f52aea56e382cc21955dfa13121f974`. SQL uses a consistent transaction; file hashes agree between inspection and SQL manifest. No company-wide write freeze was imposed.
+- The host could not close a combined 1.3 GB ZIP, so SQL was archived separately and application/uploads downloaded through authenticated FTPS. The helper was deleted before deployment; FTPS absence and HTTP 404 verified. No temporary business test rows were created: **0**. Normal authentication logs are retained.
+- Local rollback rehearsal restored all six pre-existing candidate paths with matching hashes. Production rollback was not needed or executed. Restore those six paths from this fresh backup if needed; the two new dependency files can remain inert after callers are restored. Keep staged Admin-only and Designer flags off, preserve all database/upload history.
+- Evidence: `deployment-verification.json`, `smoke-before.json`, `smoke-after.json`, `backup-content-verification.json`, `files-backup-verification.json`, `helper-cleanup-verification.json`, `rollback-rehearsal.json` within the backup directory.
+- This deployment does **not** activate Designer rendering or ordinary-user BBS rollout. Signed-receipt endpoint lifecycle, desktop/mobile and physical duplex acceptance, plus Department asset authorization review, remain the next separate activation gate.
+
+
 ## Scope and current state
 
 Authorized scope: close BBS regression, protect deployed Patrol/CCCF, prepare an Admin-only review package. No push, deployment, Production database write or flag change is authorized by this package.

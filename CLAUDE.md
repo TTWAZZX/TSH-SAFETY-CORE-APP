@@ -1,5 +1,10 @@
 # TSH Safety Core Activity - AI Quick Start
 
+## Current deployed state (2026-09-05)
+
+BBS integration source `c822277` is pushed on `integration/production-bbs-20260905`; eight candidate files are deployed and verified on Production. Fresh backup `bbs-admin-deploy-20260905T083722Z`; 17 API/static checks pass; Patrol/CCCF unchanged. Admin-only=1, pilot=0, Designer=0, rendering=0. Earlier unmerged/not-pushed/not-deployed notes below are historical. Continue from the activation acceptance tasks in `docs/bbs-integration-review-20260905.md`; do not repeat reconciliation/deployment or open flags automatically.
+
+
 ## Current handoff: BBS integration review (2026-09-05)
 
 Work now lives on `integration/production-bbs-20260905` after merge `126f5be`; the earlier unmerged status below is historical. BBS regression passes 49/49. See `docs/bbs-integration-review-20260905.md` for changed files, exact remaining UAT, rollback and the eight-file Admin-only review package. No push/deploy/Production flag change. Do not repeat discovery; continue from the report.

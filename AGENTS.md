@@ -1,5 +1,10 @@
 # TSH Safety Core Activity - AGENTS.md
 
+## BBS Admin-only Production backup (2026-09-05)
+
+- User explicitly authorized push/deploy and the temporary protected backup helper. Fresh backup ID: `bbs-admin-deploy-20260905T083722Z` under `backups/production/`. SQL: 191 tables, 15,385,425 bytes, SHA-256 `91a9cc729a54242d76c50a44d477b1bf81b4f567f0b0698139bd2a96338f3672`; SQL archive and all 1,037 application/upload files verified against remote SHA-256. Helper removed; FTPS absence and HTTP 404 verified.
+- This release requires no Production schema/data migration or upload-path change. Preserve staged Admin-only=1, pilot=0 and both Designer flags=0. Deployment outcome is recorded in `docs/bbs-integration-review-20260905.md`.
+
 ## BBS integration local migration evidence (2026-09-05)
 
 Local-only CCCF delegation and BBS designer foundation migrations were applied after backup `backups/bbs-integration-local-2026-09-05T08-17-05-534Z` (SQL SHA-256 `b2b4f087467a3364a714cb7a6db2d784c707bf0162ffc0986601bf4f25b2fd78`). Six additive tables and two actor columns; existing row counts preserved. No Production DB update or `backend/uploads/` path change. Print receipts add no schema. Keep staged=1 and both Designer flags=0 pending acceptance. See `docs/bbs-integration-review-20260905.md`.

@@ -1,5 +1,10 @@
 # TSH Safety Core Activity - Changelog And Handoff History
 
+## BBS Admin-only integration Production release (2026-09-05)
+
+Pushed source `c822277` on the integration branch and deployed the eight-file candidate after verified fresh SQL/application/upload backup. Download-back hashes pass 8/8; combined API/HTTP smoke passes 17/17; Patrol/CCCF preserved; helper removed and business test residue zero. Designer flags remain off and ordinary-user access stays blocked. See `docs/bbs-integration-review-20260905.md` for the exact backup ID, limits and rollback.
+
+
 ## BBS branch reconciliation and Admin review candidate (2026-09-05)
 
 Merged BBS branch locally while preserving verified Production Patrol/CCCF. Fixed designer print styles/imposition and signed frozen print snapshots in Node/PHP. BBS tests pass 49/49; CCCF contracts pass and protected runtime baseline comparison passes. Prepared eight-file review package only; endpoint/browser acceptance remains outstanding. Full evidence, local migration backup and rollback: `docs/bbs-integration-review-20260905.md`.
