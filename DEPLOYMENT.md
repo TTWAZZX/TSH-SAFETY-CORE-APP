@@ -1,5 +1,11 @@
 # TSH Safety Core Activity - Deployment
 
+## Verified Production identity and local recovery (2026-09-05)
+
+The user confirmed that `https://dev.tshpcl.com/safety/tsh-safety-core` is the actual Production application. Read-only inspection found the two BBS frontend files identical to branch commit `4805291` and an authenticated Designer catalog with both Designer flags disabled. This is observed current state, not a new deployment record or rollout approval. Other sampled runtime files differ from both main and the BBS branch; reconcile the release before uploading either checkout.
+
+Local XAMPP recovery is complete at normal port 3306. Cold backup: `backups/local-mysql-recovery-20260905/`; untouched original data directory retained as `C:/xampp/mysql/data-before-recovery-20260905`. No Production database, application upload or flag was changed by the recovery. See `docs/project-review-and-mysql-recovery-20260905.md` for export hash, restored-table checks, restart evidence, technical-log retention changes and force-recovery limitations.
+
 ## Safety Patrol Check-in v2 dev deployment record (2026-09-02)
 
 Safety Patrol Check-in v2 is deployed and verified on `dev.tshpcl.com` only. Production was not rolled out. The Patrol-only source is included in its dedicated GitHub release commit. The shared-hosting PHP release was limited to `index.html`, `public/js/main.js`, `public/js/api.js`, `public/js/pages/patrol.js`, `api/handlers/patrol.php` and `deploy-manifest.json`; the Node route remains the Local development parity implementation.

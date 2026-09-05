@@ -1,5 +1,12 @@
 # TSH Safety Core Activity - AI Quick Start
 
+## Current project review and local MySQL recovery (2026-09-05)
+
+- See `docs/project-review-and-mysql-recovery-20260905.md` for verified Git/Production state, findings, test results and recovery evidence. Main is `82f7416`; the unmerged `wip/bbs-card-designer-10f2` branch is `4805291` and also contains Patrol/CCCF work.
+- The user confirmed `https://dev.tshpcl.com/safety/tsh-safety-core` is Production. Live BBS frontend files match `4805291`; authenticated Designer catalog is available, but `designerEnabled=false` and `renderingEnabled=false`. Historical local-only Designer notes are stale. No merge/push/deploy/flag change occurred.
+- Local XAMPP MariaDB was recovered from a verified cold copy after a missing InnoDB checkpoint. It now runs normally on 3306 with force recovery disabled. Preserve `backups/local-mysql-recovery-20260905/` and `C:/xampp/mysql/data-before-recovery-20260905`. All readable table counts matched immediately after restore; later existing retention removed 24 technical-log rows, explicitly recorded in the report. Recovery cannot certify writes absent from the damaged redo log.
+- Backend suite and 131/131 read/permission preflight pass. Syntax checks pass 156/156. The separate BBS matrix has 12 stale assertions; Designer print imposition, print-snapshot consistency and style rendering need work before activation. Dependency audit reports five high-severity packages. No application code or application schema was changed in this task.
+
 ## Current Safety Patrol Personal Live Statistics (2026-09-02, release candidate)
 
 - Personal Patrol now projects its hero and performance card from the same authorized Top & Management attendance-detail summary as the Team & Overview screen: Accepted Coverage to date / due sessions, annual target in parentheses, and Accepted %.

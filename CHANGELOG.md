@@ -1,5 +1,11 @@
 # TSH Safety Core Activity - Changelog And Handoff History
 
+## Project review and local XAMPP recovery (2026-09-05)
+
+- Verified that main and `wip/bbs-card-designer-10f2` remain unmerged. Production BBS frontend matches `4805291`; the Designer API responds but both Designer flags are disabled. Recorded release drift and outstanding print/test/dependency findings without modifying application code or deploying.
+- Recovered local MariaDB through a cold-copy export and clean import. Preserved the original data directory and verified backups; reinitialized the damaged MySQL `transaction_registry` system table. Normal-mode table checks and XAMPP-equivalent restart pass. No application schema/upload-path change occurred; later application retention changes to two technical-log tables are recorded explicitly.
+- Full backend tests and 131/131 API permission/read preflight pass after recovery. Detailed evidence and limits are in `docs/project-review-and-mysql-recovery-20260905.md`.
+
 ## Safety Patrol live statistics deployed to Production — 2026-09-02
 
 - Production backup retained at `backups/production/20260902-2301-patrol-live-stats/` (database export and pre-deploy runtime files); no Production database data was deleted.

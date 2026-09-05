@@ -1,5 +1,10 @@
 # TSH Safety Core Activity - AGENTS.md
 
+## Local MySQL recovery evidence (2026-09-05)
+
+- Local XAMPP data was rebuilt from a verified cold-copy export after an InnoDB checkpoint failure. Preserve `backups/local-mysql-recovery-20260905/` and `C:/xampp/mysql/data-before-recovery-20260905`; do not delete redo files or replace business tables as a generic startup fix.
+- Normal runtime must keep `innodb_force_recovery=0`. The recovery changed no application schema or `backend/uploads/` path. Only the damaged MySQL system table `mysql.transaction_registry` was reinitialized. Exact verification, technical-log retention differences and recovery limits are in `docs/project-review-and-mysql-recovery-20260905.md`.
+
 ## Safety Patrol Check-in v2 Constraints
 
 - Scheduled check-in must link one authorized Admin-created Patrol session. Makeup may complete an earlier missed session across month/year; Extra remains unlinked, counts only in Actual Walk Activity for the actual walk month, and never closes Scheduled Compliance.
