@@ -80,6 +80,7 @@ const bbsAnalyticsRoutes      = require('./routes/bbs-analytics');
 const bbsCommunityRoutes      = require('./routes/bbs-community');
 const bbsInspectorRoutes      = require('./routes/bbs-inspectors');
 const bbsInspectorScheduleRoutes = require('./routes/bbs-inspector-schedules');
+const bbsCardDesignerRoutes  = require('./routes/bbs-card-designer');
 const { createBbsRolloutAccessMiddleware } = require('./services/bbs-rollout-access');
 
 // =================================================================
@@ -1795,6 +1796,7 @@ app.use('/api/bbs',               authenticateToken, bbsAnalyticsRoutes);
 app.use('/api/bbs',               authenticateToken, bbsCommunityRoutes);
 app.use('/api/bbs',               authenticateToken, bbsInspectorRoutes);
 app.use('/api/bbs',               authenticateToken, bbsInspectorScheduleRoutes);
+app.use('/api/bbs',               authenticateToken, bbsCardDesignerRoutes);
 
 // =================================================================
 // SECTION 4B: GENERIC CRUD

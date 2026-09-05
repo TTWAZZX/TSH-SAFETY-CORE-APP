@@ -4,14 +4,14 @@
 // ======================================================
 
 import * as UI from './ui.js?v=20260714-phase21-platform-shell';
-import { API, apiFetch } from './api.js?v=20260902-patrol-live-stats-r1';
+import { API, apiFetch } from './api.js?v=20260902-patrol-checkin-v2-r1';
 import { guardSubmitHandler } from './utils/async-ui.js?v=20260715-phase32d-remaining-async-ux';
 
 // --- Page Loaders ---
 import { loadPolicyPage } from './pages/policy.js?v=20260715-phase32d-remaining-async-ux';
 import { loadCommitteePage } from './pages/committee.js?v=20260715-phase32d-remaining-async-ux';
-import { loadPatrolPage } from './pages/patrol.js?v=20260902-patrol-live-stats-r11';
-import { loadCccfPage } from './pages/cccf.js?v=20260822-cccf-worker-pdf-r10';
+import { loadPatrolPage } from './pages/patrol.js?v=20260902-patrol-checkin-v2-r1';
+import { loadCccfPage } from './pages/cccf.js?v=20260904-cccf-c1-c4-r1';
 import { loadKpiPage } from './pages/kpi.js?v=20260715-phase32d-remaining-async-ux';
 import { loadYokotenPage } from './pages/yokoten.js?v=20260825-yokoten-department-relevance-r1';
 import { loadAdminPage } from './pages/admin.js?v=20260902-bbs-auto-reference-r1';
@@ -21,7 +21,7 @@ import { loadOjtPage } from './pages/ojt.js?v=20260820-card-image-phase2d';
 import { loadTrainingPage } from './pages/training.js?v=20260820-card-image-phase2d-rollout-r2';
 import { loadAccidentPage } from './pages/accident.js?v=20260820-card-image-phase2a';
 import { loadSafetyCulturePage } from './pages/safety-culture.js?v=20260824-safety-culture-ppe-form-r1';
-import { loadBbsSmartCardPage } from './pages/bbs-smart-card.js?v=20260901-bbs-phase10d5-foundation-r1';
+import { loadBbsSmartCardPage } from './pages/bbs-smart-card.js?v=20260904-bbs-phase10f5-r2';
 import { loadContractorPage } from './pages/contractor.js?v=20260715-phase32d-remaining-async-ux';
 import { loadHiyariPage } from './pages/hiyari.js?v=20260824-hiyari-dept-progress-r1';
 import { loadKyPage } from './pages/ky.js?v=20260831-ky-chunk-upload-r1';

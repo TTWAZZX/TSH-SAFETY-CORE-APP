@@ -46,7 +46,6 @@ const {
         'ALTER TABLE Patrol_Attendance ADD COLUMN PatrolType VARCHAR(20) DEFAULT NULL',
         'ALTER TABLE Patrol_Attendance ADD COLUMN RecordedBy VARCHAR(50) DEFAULT NULL',
         'ALTER TABLE Patrol_Attendance ADD COLUMN ScheduledSessionID VARCHAR(50) DEFAULT NULL',
-        'ALTER TABLE Patrol_Attendance ADD COLUMN CheckinAt DATETIME DEFAULT NULL',
         'ALTER TABLE Patrol_Attendance ADD INDEX idx_patrol_attendance_session (ScheduledSessionID)',
         'ALTER TABLE Patrol_Attendance ADD COLUMN IdempotencyKey VARCHAR(80) DEFAULT NULL',
         'ALTER TABLE Patrol_Attendance ADD UNIQUE INDEX uq_patrol_attendance_user_request (UserID, IdempotencyKey)',
@@ -520,30 +519,23 @@ function patrolTodayBangkok() {
     return `${values.year}-${values.month}-${values.day}`;
 }
 
-function patrolBangkokDateTime() {
-    const parts = new Intl.DateTimeFormat('en-CA', {
-        timeZone: 'Asia/Bangkok', year: 'numeric', month: '2-digit', day: '2-digit',
-        hour: '2-digit', minute: '2-digit', second: '2-digit', hourCycle: 'h23',
-    }).formatToParts(new Date());
-    const values = Object.fromEntries(parts.map(part => [part.type, part.value]));
-    return `${values.year}-${values.month}-${values.day} ${values.hour}:${values.minute}:${values.second}`;
-}
-
-function patrolActualActivityKind(record = {}, sessionMap = new Map()) {
-    const sid = String(record.ScheduledSessionID || '').trim();
-    if (!sid) return record.IsV2Request ? 'extra' : 'scheduledNormal';
-    const session = sessionMap.get(sid);
-    const actualDate = dateOnly(record.PatrolDate);
-    const scheduledDate = session ? dateOnly(session.PatrolDate) : '';
-    return String(record.PatrolType || '').toLowerCase() === 'compensation'
-        || (scheduledDate && actualDate !== scheduledDate) ? 'makeup' : 'scheduledNormal';
-}
-
 function patrolActualActivity(records = [], sessionMap = new Map()) {
     const summary = { total: 0, scheduledNormal: 0, makeup: 0, extra: 0 };
+    const scheduledDates = new Set([...sessionMap.values()].map(session => dateOnly(session.PatrolDate)));
     for (const record of records) {
         summary.total++;
-        summary[patrolActualActivityKind(record, sessionMap)]++;
+        const sid = String(record.ScheduledSessionID || '').trim();
+        if (!sid) {
+            if (record.IsV2Request || !scheduledDates.has(dateOnly(record.PatrolDate))) summary.extra++;
+            else summary.scheduledNormal++;
+            continue;
+        }
+        const session = sessionMap.get(sid);
+        const actualDate = dateOnly(record.PatrolDate);
+        const scheduledDate = session ? dateOnly(session.PatrolDate) : '';
+        if (String(record.PatrolType || '').toLowerCase() === 'compensation'
+            || (scheduledDate && actualDate !== scheduledDate)) summary.makeup++;
+        else summary.scheduledNormal++;
     }
     return summary;
 }
@@ -611,7 +603,6 @@ router.get('/my-monthly-plan', async (req, res) => {
                 attended: personalSchedule.completed,
                 attendanceDates,
                 actualActivity: personalSchedule.actualActivity,
-                activityRecords: personalSchedule.activityRecords,
                 features: { checkinV2Enabled },
                 roster,
                 compliance: {
@@ -648,7 +639,7 @@ router.get('/my-yearly-stats', async (req, res) => {
 
         // 3. Recent check-ins (last 6)
         const [recentCheckins] = await db.query(
-            `SELECT PatrolDate, CheckinAt, PatrolType, Area, Notes FROM Patrol_Attendance
+            `SELECT PatrolDate, PatrolType, Area, Notes FROM Patrol_Attendance
              WHERE UserID = ?
              ORDER BY PatrolDate DESC, id DESC LIMIT 6`,
             [employeeId]
@@ -695,32 +686,17 @@ router.get('/my-yearly-stats', async (req, res) => {
             [employeeId, year, curMonth]
         );
 
-        // 7. Monthly actual-walk breakdown. The actual walk month is the visual
-        // authority, while the linked session month remains the compliance source.
-        const [monthlyActivity] = await db.query(
-            `SELECT MONTH(pa.PatrolDate) AS month,
-                    SUM(CASE WHEN pa.ScheduledSessionID IS NOT NULL
-                                  AND (LOWER(COALESCE(pa.PatrolType,'')) = 'compensation' OR DATE(pa.PatrolDate) <> DATE(ps.PatrolDate))
-                             THEN 1 ELSE 0 END) AS makeup,
-                    SUM(CASE WHEN pa.ScheduledSessionID IS NULL AND pa.IdempotencyKey IS NOT NULL THEN 1 ELSE 0 END) AS extra,
-                    SUM(CASE WHEN (pa.ScheduledSessionID IS NOT NULL
-                                      AND NOT (LOWER(COALESCE(pa.PatrolType,'')) = 'compensation' OR DATE(pa.PatrolDate) <> DATE(ps.PatrolDate)))
-                                   OR (pa.ScheduledSessionID IS NULL AND pa.IdempotencyKey IS NULL)
-                             THEN 1 ELSE 0 END) AS scheduledNormal,
-                    COUNT(*) AS cnt
-             FROM Patrol_Attendance pa
-             LEFT JOIN Patrol_Sessions ps ON ps.SessionID = pa.ScheduledSessionID
-             WHERE pa.UserID = ? AND YEAR(pa.PatrolDate) = ?
-             GROUP BY MONTH(pa.PatrolDate)`,
-            [employeeId, year]
-        );
-
-        const [monthlyCompletedBySchedule] = await db.query(
-            `SELECT MONTH(ps.PatrolDate) AS month, COUNT(pa.id) AS cnt
-             FROM Patrol_Attendance pa
-             JOIN Patrol_Sessions ps ON ps.SessionID = pa.ScheduledSessionID
-             WHERE pa.UserID = ? AND YEAR(ps.PatrolDate) = ?
-             GROUP BY MONTH(ps.PatrolDate)`,
+        // 7. Monthly attendance breakdown (for dot tracker)
+        const [monthlyAtt] = await db.query(
+            `SELECT MONTH(PatrolDate) AS month,
+                    COUNT(*) AS cnt,
+                    SUM(CASE WHEN LOWER(COALESCE(PatrolType, 'normal')) = 'compensation' THEN 1 ELSE 0 END) AS makeup,
+                    SUM(CASE WHEN LOWER(COALESCE(PatrolType, 'normal')) = 'extra'
+                              OR (ScheduledSessionID IS NULL AND IdempotencyKey IS NOT NULL)
+                             THEN 1 ELSE 0 END) AS extra
+             FROM Patrol_Attendance
+             WHERE UserID = ? AND YEAR(PatrolDate) = ?
+             GROUP BY MONTH(PatrolDate)`,
             [employeeId, year]
         );
 
@@ -738,26 +714,28 @@ router.get('/my-yearly-stats', async (req, res) => {
             monthlySched = ms;
         }
 
-        const monthlyActivityMap = {};
-        const monthlyCompletedMap = {};
+        const monthlyAttMap  = {};
         const monthlySchedMap = {};
-        monthlyActivity.forEach(r => { monthlyActivityMap[r.month] = r; });
-        monthlyCompletedBySchedule.forEach(r => { monthlyCompletedMap[r.month] = parseInt(r.cnt); });
-        monthlySched.forEach(r => { monthlySchedMap[r.month] = parseInt(r.cnt); });
-        const monthlyBreakdown = Array.from({ length: 12 }, (_, i) => {
-            const month = i + 1;
-            const activity = monthlyActivityMap[month] || {};
-            const scheduled = monthlySchedMap[month] || 0;
-            return {
-                month,
-                attended: Number(activity.cnt || 0),
-                scheduled,
-                scheduledNormal: Number(activity.scheduledNormal || 0),
-                makeup: Number(activity.makeup || 0),
-                extra: Number(activity.extra || 0),
-                missed: Math.max(0, scheduled - Number(monthlyCompletedMap[month] || 0)),
+        monthlyAtt.forEach(r => {
+            const makeup = Number(r.makeup) || 0;
+            const extra = Number(r.extra) || 0;
+            const total = Number(r.cnt) || 0;
+            monthlyAttMap[r.month] = {
+                attended: total,
+                scheduledNormal: Math.max(0, total - makeup - extra),
+                makeup,
+                extra,
             };
         });
+        monthlySched.forEach(r => { monthlySchedMap[r.month] = parseInt(r.cnt); });
+        const monthlyBreakdown = Array.from({ length: 12 }, (_, i) => ({
+            month: i + 1,
+            attended:  monthlyAttMap[i + 1]?.attended || 0,
+            scheduled: monthlySchedMap[i + 1] || 0,
+            scheduledNormal: monthlyAttMap[i + 1]?.scheduledNormal || 0,
+            makeup: monthlyAttMap[i + 1]?.makeup || 0,
+            extra: monthlyAttMap[i + 1]?.extra || 0,
+        }));
 
         res.json({
             success: true,
@@ -861,7 +839,6 @@ router.get('/attendance-stats', async (req, res) => {
                 UserName AS Name,
                 COUNT(*) AS Total,
                 MAX(PatrolDate) AS LastWalk,
-                MAX(CheckinAt) AS LastCheckinAt,
                 ROUND(COUNT(*) * 100.0 / NULLIF(
                     (SELECT COUNT(DISTINCT YEARWEEK(PatrolDate)) FROM Patrol_Attendance), 0
                 )) AS Percent
@@ -1005,7 +982,6 @@ router.post('/checkin', async (req, res) => {
             if (!isNaN(d.getTime())) patrolDate = d.toISOString().split('T')[0];
         }
         const effectiveDate = checkinV2Enabled ? patrolTodayBangkok() : (patrolDate || new Date().toISOString().split('T')[0]);
-        const checkinAt = patrolBangkokDateTime();
         const idempotencyRaw = String(req.body.IdempotencyKey || '').trim();
         const idempotencyKey = idempotencyRaw ? patrolIdempotencyKey(idempotencyRaw) : null;
         if (idempotencyRaw && !idempotencyKey) {
@@ -1013,7 +989,7 @@ router.post('/checkin', async (req, res) => {
         }
         if (checkinV2Enabled && idempotencyKey) {
             const [[existingRequest]] = await db.query(
-                `SELECT id,UserID,UserName,TeamName,PatrolDate,CheckinAt,PatrolType,Area,Notes,ScheduledSessionID
+                `SELECT id,UserID,UserName,TeamName,PatrolDate,PatrolType,Area,Notes,ScheduledSessionID
                    FROM Patrol_Attendance WHERE UserID=? AND IdempotencyKey=? LIMIT 1`,
                 [UserID, idempotencyKey]
             );
@@ -1026,8 +1002,7 @@ router.post('/checkin', async (req, res) => {
                         checkin: {
                             id: Number(existingRequest.id), employeeId: UserID, employeeName: existingRequest.UserName,
                             type: existingRequest.PatrolType, mode,
-                            actualDate: dateOnly(existingRequest.PatrolDate), checkinAt: existingRequest.CheckinAt || null,
-                            scheduledSessionId: existingRequest.ScheduledSessionID || null,
+                            actualDate: dateOnly(existingRequest.PatrolDate), scheduledSessionId: existingRequest.ScheduledSessionID || null,
                             area: existingRequest.Area || null, teamName: existingRequest.TeamName || '',
                         },
                     },
@@ -1059,13 +1034,13 @@ router.post('/checkin', async (req, res) => {
         let insert;
         try {
             [insert] = await db.query(
-                'INSERT INTO Patrol_Attendance (UserID, UserName, TeamName, WeekNumber, Notes, Area, PatrolType, PatrolDate, CheckinAt, RecordedBy, ScheduledSessionID, IdempotencyKey) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
-                [UserID, UserName, TeamName, currentWeek, Notes, Area, PatrolType, effectiveDate, checkinAt, UserID, session?.id || null, idempotencyKey]
+                'INSERT INTO Patrol_Attendance (UserID, UserName, TeamName, WeekNumber, Notes, Area, PatrolType, PatrolDate, RecordedBy, ScheduledSessionID, IdempotencyKey) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+                [UserID, UserName, TeamName, currentWeek, Notes, Area, PatrolType, effectiveDate, UserID, session?.id || null, idempotencyKey]
             );
         } catch (err) {
             if (checkinV2Enabled && idempotencyKey && err.code === 'ER_DUP_ENTRY') {
                 const [[replayed]] = await db.query(
-                    `SELECT id,UserName,TeamName,PatrolDate,CheckinAt,PatrolType,Area,ScheduledSessionID
+                    `SELECT id,UserName,TeamName,PatrolDate,PatrolType,Area,ScheduledSessionID
                        FROM Patrol_Attendance WHERE UserID=? AND IdempotencyKey=? LIMIT 1`,
                     [UserID, idempotencyKey]
                 );
@@ -1077,7 +1052,7 @@ router.post('/checkin', async (req, res) => {
                             idempotentReplay: true,
                             checkin: {
                                 id: Number(replayed.id), employeeId: UserID, employeeName: replayed.UserName,
-                                type: replayed.PatrolType, mode, actualDate: dateOnly(replayed.PatrolDate), checkinAt: replayed.CheckinAt || null,
+                                type: replayed.PatrolType, mode, actualDate: dateOnly(replayed.PatrolDate),
                                 scheduledSessionId: replayed.ScheduledSessionID || null, area: replayed.Area || null,
                                 teamName: replayed.TeamName || '',
                             },
@@ -1106,7 +1081,7 @@ router.post('/checkin', async (req, res) => {
         const email = await queuePatrolCheckinEmail({ attendanceId, employee, attendance, session }).catch(err => ({ queued: false, sent: false, reason: err.message }));
 
         const [stats] = await db.query(
-            'SELECT COUNT(*) AS TotalWalks, MAX(PatrolDate) AS LastWalk, MAX(CheckinAt) AS LastCheckinAt FROM Patrol_Attendance WHERE UserID = ?',
+            'SELECT COUNT(*) AS TotalWalks, MAX(PatrolDate) AS LastWalk FROM Patrol_Attendance WHERE UserID = ?',
             [UserID]
         );
         const [teamStats] = await db.query(
@@ -1134,7 +1109,6 @@ router.post('/checkin', async (req, res) => {
                     type: PatrolType,
                     mode,
                     actualDate: effectiveDate,
-                    checkinAt: stats[0].LastCheckinAt || null,
                     scheduledDate: session ? dateOnly(session.PatrolDate) : effectiveDate,
                     isMakeup: Boolean(session) && dateOnly(session.PatrolDate) !== effectiveDate,
                     scheduledSessionId: session?.id || null,
@@ -2884,10 +2858,6 @@ async function buildPersonalMonthlySchedule(employeeId, year, month) {
         completed,
         attendance,
         actualActivity: patrolActualActivity(attendance, sessionMap),
-        activityRecords: attendance.map(record => ({
-            PatrolDate: dateOnly(record.PatrolDate),
-            activityKind: patrolActualActivityKind(record, sessionMap),
-        })),
         leaveRequests: leaveRows,
     };
 }
@@ -3565,7 +3535,7 @@ async function buildTopManagementAttendanceDetail(employeeId, year) {
     const sessions = await topManagementSessionsForEmployee(employeeId, year);
     const leaveRows = await patrolLeaveRows(employeeId, 'top_management', year);
     const [attendance] = await db.query(
-        `SELECT pa.id,pa.PatrolDate,pa.CheckinAt,pa.PatrolType,pa.Area,pa.Notes,pa.RecordedBy,pa.ScheduledSessionID,(pa.IdempotencyKey IS NOT NULL) AS IsV2Request,e.EmployeeName AS RecordedByName
+        `SELECT pa.id,pa.PatrolDate,pa.PatrolType,pa.Area,pa.Notes,pa.RecordedBy,pa.ScheduledSessionID,(pa.IdempotencyKey IS NOT NULL) AS IsV2Request,e.EmployeeName AS RecordedByName
          FROM Patrol_Attendance pa
          LEFT JOIN Employees e ON e.EmployeeID=pa.RecordedBy
          WHERE pa.UserID=? AND YEAR(pa.PatrolDate)=?
@@ -3581,7 +3551,7 @@ async function buildTopManagementAttendanceDetail(employeeId, year) {
     const sessionIds = sessions.map(session => String(session.id));
     if (sessionIds.length) {
         [linkedAttendance] = await db.query(
-            `SELECT pa.id,pa.PatrolDate,pa.CheckinAt,pa.PatrolType,pa.Area,pa.Notes,pa.RecordedBy,pa.ScheduledSessionID,(pa.IdempotencyKey IS NOT NULL) AS IsV2Request,e.EmployeeName AS RecordedByName
+            `SELECT pa.id,pa.PatrolDate,pa.PatrolType,pa.Area,pa.Notes,pa.RecordedBy,pa.ScheduledSessionID,(pa.IdempotencyKey IS NOT NULL) AS IsV2Request,e.EmployeeName AS RecordedByName
                FROM Patrol_Attendance pa
                LEFT JOIN Employees e ON e.EmployeeID=pa.RecordedBy
               WHERE pa.UserID=? AND pa.ScheduledSessionID IN (${sessionIds.map(() => '?').join(',')})
@@ -3735,7 +3705,7 @@ async function buildSupervisorAttendanceDetail(employeeId, year, options = {}) {
     const dueMonth = patrolDueMonth(year);
     const leaveRows = await patrolLeaveRows(employeeId, 'supervisor', year);
     const [rows] = await db.query(
-        `SELECT sc.id,sc.CheckinDate,sc.Location,sc.Notes,sc.Year,sc.Month,sc.PatrolType,sc.RecordedBy,sc.ScheduledSessionID,e.EmployeeName AS RecordedByName
+        `SELECT sc.id,sc.CheckinDate,sc.CreatedAt,sc.Location,sc.Notes,sc.Year,sc.Month,sc.PatrolType,sc.RecordedBy,sc.ScheduledSessionID,e.EmployeeName AS RecordedByName
          FROM Patrol_Self_Checkin sc
          LEFT JOIN Employees e ON e.EmployeeID=sc.RecordedBy
          WHERE sc.EmployeeID=? AND sc.Year=?
@@ -3861,7 +3831,7 @@ async function buildFlexibleSelfPatrolPayload(employeeId, year, month, employee 
     const { monthlyRequirement, targetSource } = await getPatrolFlexibleMonthlyRequirement();
     const [areas] = await db.query('SELECT id, Name, Code FROM Patrol_Areas ORDER BY SortOrder, id');
     const [rows] = await db.query(
-        `SELECT sc.id,sc.CheckinDate,sc.Location,sc.Notes,sc.Year,sc.Month,sc.PatrolType,sc.RecordedBy,sc.ScheduledSessionID,e.EmployeeName AS RecordedByName
+        `SELECT sc.id,sc.CheckinDate,sc.CreatedAt,sc.Location,sc.Notes,sc.Year,sc.Month,sc.PatrolType,sc.RecordedBy,sc.ScheduledSessionID,e.EmployeeName AS RecordedByName
          FROM Patrol_Self_Checkin sc
          LEFT JOIN Employees e ON e.EmployeeID=sc.RecordedBy
          WHERE sc.EmployeeID=? AND sc.Year=?
@@ -3928,7 +3898,7 @@ async function buildFlexibleSupervisorAttendanceDetail(employeeId, year, employe
     const dueMonth = patrolDueMonth(year);
     const [areas] = await db.query('SELECT id, Name, Code FROM Patrol_Areas ORDER BY SortOrder, id');
     const [rows] = await db.query(
-        `SELECT sc.id,sc.CheckinDate,sc.Location,sc.Notes,sc.Year,sc.Month,sc.PatrolType,sc.RecordedBy,sc.ScheduledSessionID,e.EmployeeName AS RecordedByName
+        `SELECT sc.id,sc.CheckinDate,sc.CreatedAt,sc.Location,sc.Notes,sc.Year,sc.Month,sc.PatrolType,sc.RecordedBy,sc.ScheduledSessionID,e.EmployeeName AS RecordedByName
          FROM Patrol_Self_Checkin sc
          LEFT JOIN Employees e ON e.EmployeeID=sc.RecordedBy
          WHERE sc.EmployeeID=? AND sc.Year=?
@@ -4488,6 +4458,7 @@ router.get('/my-self-patrol', async (req, res) => {
                 scheduleMode: 'scheduled',
                 position: emp?.Position || detail.employee?.Position || '',
                 checkins: period.records || [],
+                recentCheckins: (detail.records || []).slice().reverse().slice(0, 3),
                 target: monthlyRequirement,
                 monthlyRequirement,
                 completed,
@@ -4495,6 +4466,11 @@ router.get('/my-self-patrol', async (req, res) => {
                 periodStatus: period.status || 'upcoming',
                 yearlyTarget: Number(detail.summary?.yearlyTarget || 0),
                 yearlyCompleted: Number(detail.summary?.completed || 0),
+                // Read-only projection for the personal dashboard. Keep the same
+                // capped, due-to-date semantics used by supervisor-overview.
+                completedToDate: Number(detail.summary?.completedToDateCapped || 0),
+                requiredToDate: Number(detail.summary?.requiredToDate || 0),
+                acceptedCoverageToDate: Number(detail.summary?.acceptedCoverageToDate || detail.summary?.leave?.acceptedCoverageToDate || 0),
                 passPct: Number(detail.summary?.passPct || detail.passPct || 80),
                 leave: detail.summary?.leave || null,
                 leaveRequests: detail.leaveRequests || [],
@@ -4807,7 +4783,7 @@ router.get('/supervisor-checkins', async (req, res) => {
     const year = parseInt(yearStr) || new Date().getFullYear();
     try {
         const [rows] = await db.query(
-            `SELECT id, CheckinDate, Location, Notes, Year, Month, PatrolType, RecordedBy, ScheduledSessionID
+            `SELECT id, CheckinDate, CreatedAt, Location, Notes, Year, Month, PatrolType, RecordedBy, ScheduledSessionID
              FROM Patrol_Self_Checkin WHERE EmployeeID = ? AND Year = ?
              ORDER BY CheckinDate DESC`,
             [employeeId, year]

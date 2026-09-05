@@ -5,6 +5,25 @@
 The user confirmed that `https://dev.tshpcl.com/safety/tsh-safety-core` is the actual Production application. Read-only inspection found the two BBS frontend files identical to branch commit `4805291` and an authenticated Designer catalog with both Designer flags disabled. This is observed current state, not a new deployment record or rollout approval. Other sampled runtime files differ from both main and the BBS branch; reconcile the release before uploading either checkout.
 
 Local XAMPP recovery is complete at normal port 3306. Cold backup: `backups/local-mysql-recovery-20260905/`; untouched original data directory retained as `C:/xampp/mysql/data-before-recovery-20260905`. No Production database, application upload or flag was changed by the recovery. See `docs/project-review-and-mysql-recovery-20260905.md` for export hash, restored-table checks, restart evidence, technical-log retention changes and force-recovery limitations.
+## CCCF Phase C1-C4 Ownership, Delegation and Review Queue release (2026-09-04)
+
+The approved CCCF release is deployed to the shared-hosting PHP target at `dev.tshpcl.com/safety/tsh-safety-core`. It contains only `index.html`, `public/js/main.js`, `public/js/pages/cccf.js`, and `api/handlers/workflow_phase6.php`. The schema change is additive only: `SubmittedByEmployeeID`, `SubmittedByName`, and `cccf_submit_delegations`; no existing Permanent row, private upload or SMTP data was changed.
+
+- Production SQL backup: `backups/production/cccf-c1c4-20260904-081838/production-before-cccf-migration.sql` (2,544,468 bytes; SHA-256 `A2D2EC9D19EB26D90F3E6E611A4985DC66D90661A8FAD89DD6BCEB8875F7C847`).
+- Runtime rollback backup: `backups/production/cccf-c1c4-20260904-081838/application-before`.
+- Migration result: all `37` existing Permanent rows remained; both actor columns and `cccf_submit_delegations` were verified.
+- FTPS download-back verification: `backups/production/cccf-c1c4-20260904-081838/application-after`; SHA-256 matched `4/4` files.
+- HTTPS smoke passed for the cache-busted `index.html`, `main.js` and `cccf.js`, and schema probe passed. The temporary token-protected helper was removed through FTPS and its URL returns HTTP `404`.
+
+## Safety Patrol Top/Management and Sec/Supervisor UI release (2026-09-03)
+
+The approved Safety Patrol UI/API projection is deployed to the shared-hosting PHP target at `dev.tshpcl.com/safety/tsh-safety-core`. The scoped release contains only `index.html`, Production-derived `public/js/main.js`, `public/js/pages/patrol.js`, and `api/handlers/patrol.php`. It adds no schema or database/data mutation, and does not alter check-in, quota, target, roster, session, rotation, schedule, or Attendance rules.
+
+- Runtime rollback backup: `backups/production/patrol-supervisor-ui-predeploy-20260903-102020` (four Production files before upload).
+- Release candidate: `backups/production/patrol-supervisor-ui-candidate-20260903-102020`.
+- FTPS download-back verification: `backups/production/patrol-supervisor-ui-upload-verify-20260903-102020`; SHA-256 matched `4/4` files.
+- HTTPS read-only smoke passed: `index.html` serves the new main cache key, `main.js` serves the new Patrol cache key, the Patrol page exposes the new Supervisor projection, and unauthenticated `/api/patrol/my-self-patrol` correctly returns `401`.
+- Authenticated Top & Management/Sec. & Supervisor API smoke could not run because the local `PROD_UAT_*` login credentials are rejected by this target with `401`; no retry or test data was created. Complete the role smoke with valid target-specific UAT credentials before any further Patrol release.
 
 ## Safety Patrol Check-in v2 dev deployment record (2026-09-02)
 

@@ -315,6 +315,9 @@ function buildCccfAdminSubmittedEmail(record) {
 }
 
 function buildCccfOwnerSubmittedByAdminEmail(record) {
+    const submittedBy = record.SubmittedByName || record.CreatedBy || '-';
+    // Reuse the existing owner-notification template/outbox event for every
+    // authorized delegate. The record carries the actual actor for audit.
     return cccfCorporateMail({
         subject: cccfMailSubject('Admin ส่งแบบฟอร์มแทนท่าน', record.JobArea),
         title: 'มีการส่ง CCCF Form A Permanent แทนท่าน',
@@ -325,6 +328,7 @@ function buildCccfOwnerSubmittedByAdminEmail(record) {
             'กรุณาตรวจสอบความถูกต้องของข้อมูลและประสาน Safety Admin หากต้องการแก้ไข',
         ],
         details: [
+            { label: 'Submitted by', value: submittedBy },
             { label: 'งาน / พื้นที่', value: record.JobArea || '-', highlight: true },
             { label: 'วันที่ส่ง', value: record.SubmitDate || '-' },
             { label: 'Stop Type', value: record.StopType ? `Stop ${record.StopType}` : '-' },
@@ -534,11 +538,45 @@ function parseOptionalNonNegativeInt(value, fieldName) {
     return parsed;
 }
 
+async function readCccfDelegationRows() {
+    // This configuration read must never inherit a stale transaction snapshot
+    // from an unrelated pooled request. It is always a fresh, read-only query.
+    const connection = await db.getConnection();
+    try {
+        await connection.query('ROLLBACK').catch(() => {});
+        const [rows] = await connection.query('SELECT id, OwnerEmployeeID, DelegateEmployeeID, IsActive, CreatedBy, CreatedAt, UpdatedAt FROM CCCF_Submit_Delegations ORDER BY UpdatedAt DESC, id DESC');
+        return rows;
+    } finally {
+        connection.release();
+    }
+}
+
 async function resolvePermanentSubmitter(req, payload = {}) {
     const admin = isAdminUser(req);
+    const requesterId = String(req.user?.id || req.user?.EmployeeID || '').trim();
+    if (!requesterId) {
+        const err = new Error('ไม่พบรหัสพนักงานของผู้ส่งจาก session');
+        err.statusCode = 403;
+        throw err;
+    }
     let submitterName = req.user?.name || 'User';
     let department = req.user?.department || '';
-    let assigneeId = payload.AssigneeID ? String(payload.AssigneeID).trim() : '';
+    const requestedAssigneeId = String(payload.AssigneeID || requesterId).trim();
+    const assigneeId = requestedAssigneeId || requesterId;
+
+    if (!admin && assigneeId !== requesterId) {
+        const [[delegation]] = await db.query(`
+            SELECT d.id
+            FROM CCCF_Submit_Delegations d
+            INNER JOIN CCCF_Assignments a ON a.EmployeeID = d.OwnerEmployeeID
+            WHERE d.OwnerEmployeeID = ? AND d.DelegateEmployeeID = ? AND d.IsActive = 1
+            LIMIT 1`, [assigneeId, requesterId]);
+        if (!delegation) {
+            const err = new Error('คุณยังไม่ได้รับสิทธิ์ให้ยื่น CCCF Permanent แทนเจ้าของแบบฟอร์มรายนี้');
+            err.statusCode = 403;
+            throw err;
+        }
+    }
 
     if (assigneeId) {
         const [empRows] = await db.query(
@@ -552,15 +590,20 @@ async function resolvePermanentSubmitter(req, payload = {}) {
         }
         submitterName = empRows[0].EmployeeName || submitterName;
         department = empRows[0].Department || department;
-    } else if (admin) {
-        submitterName = String(payload.SubmitterName || '').trim() || submitterName;
-        department = String(payload.Department || '').trim() || department;
     }
+
+    const [[actor]] = await db.query(
+        'SELECT EmployeeID, EmployeeName FROM Employees WHERE EmployeeID = ? LIMIT 1',
+        [requesterId]
+    );
 
     return {
         SubmitterName: submitterName,
         Department: department,
         AssigneeID: assigneeId || null,
+        SubmittedByEmployeeID: requesterId,
+        SubmittedByName: actor?.EmployeeName || req.user?.name || 'User',
+        IsSubmittedOnBehalf: assigneeId !== requesterId,
     };
 }
 
@@ -587,6 +630,28 @@ async function assertDirectSignedAllowed(req, assigneeId) {
 // Auto-migrate & auto-create tables
 (async () => {
     try {
+        await db.query(`CREATE TABLE IF NOT EXISTS CCCF_FormA_Permanent (
+            id INT AUTO_INCREMENT PRIMARY KEY,
+            PermanentYear SMALLINT UNSIGNED DEFAULT NULL,
+            PermanentSeq INT UNSIGNED DEFAULT NULL,
+            PermanentNo VARCHAR(50) DEFAULT NULL,
+            SubmitterName VARCHAR(100), Department VARCHAR(100), JobArea VARCHAR(255), SubmitDate DATE NOT NULL,
+            Summary TEXT, StopType INT, \`Rank\` VARCHAR(10), FileUrl TEXT, ExcelFileUrl TEXT, SignedFileUrl TEXT,
+            SignedUploadedAt DATETIME DEFAULT NULL, AssigneeID VARCHAR(50) DEFAULT NULL,
+            SubmittedByEmployeeID VARCHAR(50) DEFAULT NULL, SubmittedByName VARCHAR(100) DEFAULT NULL,
+            DocumentMode VARCHAR(30) NOT NULL DEFAULT 'legacy', ReviewStatus VARCHAR(30) NOT NULL DEFAULT 'Completed',
+            ReviewComment TEXT DEFAULT NULL, ReviewedBy VARCHAR(100) DEFAULT NULL, ReviewedAt DATETIME DEFAULT NULL,
+            CompletedBy VARCHAR(100) DEFAULT NULL, CompletedAt DATETIME DEFAULT NULL, CreatedBy VARCHAR(100) DEFAULT NULL,
+            CreatedAt DATETIME DEFAULT CURRENT_TIMESTAMP, UpdatedAt DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+            KEY idx_cccf_permanent_owner (AssigneeID), KEY idx_cccf_permanent_date (SubmitDate)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`);
+        await db.query(`CREATE TABLE IF NOT EXISTS CCCF_Assignments (
+            id INT AUTO_INCREMENT PRIMARY KEY, EmployeeID VARCHAR(50) DEFAULT NULL, AssigneeName VARCHAR(100) NOT NULL,
+            Department VARCHAR(100) DEFAULT NULL, AllowDirectSignedPdf TINYINT(1) NOT NULL DEFAULT 0,
+            DueDate DATE DEFAULT NULL, Note TEXT DEFAULT NULL, CreatedBy VARCHAR(100) DEFAULT NULL,
+            CreatedAt DATETIME DEFAULT CURRENT_TIMESTAMP, UpdatedAt DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+            UNIQUE KEY uq_cccf_assignment_employee (EmployeeID)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`);
         await db.query(`ALTER TABLE CCCF_FormA_Worker ADD COLUMN SafetyUnit VARCHAR(100) NOT NULL DEFAULT '' AFTER Department`);
     } catch (e) { /* column already exists or table not yet created */ }
     try {
@@ -620,6 +685,12 @@ async function assertDirectSignedAllowed(req, assigneeId) {
         await db.query(`ALTER TABLE CCCF_FormA_Permanent ADD COLUMN SignedUploadedAt DATETIME DEFAULT NULL AFTER SignedFileUrl`);
     } catch (e) { /* column already exists or table not yet created */ }
     try {
+        await db.query(`ALTER TABLE CCCF_FormA_Permanent ADD COLUMN SubmittedByEmployeeID VARCHAR(50) DEFAULT NULL AFTER AssigneeID`);
+    } catch (e) { /* column already exists or table not yet created */ }
+    try {
+        await db.query(`ALTER TABLE CCCF_FormA_Permanent ADD COLUMN SubmittedByName VARCHAR(100) DEFAULT NULL AFTER SubmittedByEmployeeID`);
+    } catch (e) { /* column already exists or table not yet created */ }
+    try {
         await db.query(`ALTER TABLE CCCF_Assignments ADD COLUMN EmployeeID VARCHAR(50) DEFAULT NULL AFTER id`);
     } catch (e) { /* column already exists or table not yet created */ }
     try {
@@ -634,6 +705,21 @@ async function assertDirectSignedAllowed(req, assigneeId) {
     try {
         await db.query(`ALTER TABLE CCCF_Assignments ADD UNIQUE KEY uq_cccf_assignment_employee (EmployeeID)`);
     } catch (e) { /* index may already exist, table may not exist, or duplicate legacy rows may need manual cleanup */ }
+    try {
+        await db.query(`
+            CREATE TABLE IF NOT EXISTS CCCF_Submit_Delegations (
+                id INT AUTO_INCREMENT PRIMARY KEY,
+                OwnerEmployeeID VARCHAR(50) NOT NULL,
+                DelegateEmployeeID VARCHAR(50) NOT NULL,
+                IsActive TINYINT(1) NOT NULL DEFAULT 1,
+                CreatedBy VARCHAR(100) DEFAULT NULL,
+                CreatedAt DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                UpdatedAt DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+                UNIQUE KEY uq_cccf_submit_delegation (OwnerEmployeeID, DelegateEmployeeID),
+                KEY idx_cccf_submit_delegate (DelegateEmployeeID, IsActive),
+                KEY idx_cccf_submit_owner (OwnerEmployeeID, IsActive)
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`);
+    } catch (e) { console.error('[cccf] CCCF_Submit_Delegations create:', e.message); }
     try {
         await db.query(`
             CREATE TABLE IF NOT EXISTS CCCF_Unit_Targets (
@@ -960,7 +1046,7 @@ router.post('/form-a-permanent', upload.single('FormFile'), async (req, res) => 
             return res.status(400).json({ success: false, message: 'วันที่ส่งข้อมูลไม่ถูกต้อง' });
         }
 
-        const { SubmitterName, Department, AssigneeID } = await resolvePermanentSubmitter(req, req.body);
+        const { SubmitterName, Department, AssigneeID, SubmittedByEmployeeID, SubmittedByName, IsSubmittedOnBehalf } = await resolvePermanentSubmitter(req, req.body);
         const ownerEmail = await getEmployeeCompanyEmail(AssigneeID);
         if (await getCccfRequireCompanyEmail() && !ownerEmail) {
             safeDeleteLocalUpload(req.file?.path);
@@ -994,8 +1080,8 @@ router.post('/form-a-permanent', upload.single('FormFile'), async (req, res) => 
                 `INSERT INTO CCCF_FormA_Permanent
                  (PermanentYear, PermanentSeq, PermanentNo, SubmitterName, Department, JobArea,
                   SubmitDate, Summary, StopType, \`Rank\`, FileUrl, ExcelFileUrl, SignedFileUrl,
-                  SignedUploadedAt, AssigneeID, DocumentMode, ReviewStatus, CreatedBy)
-                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+                  SignedUploadedAt, AssigneeID, SubmittedByEmployeeID, SubmittedByName, DocumentMode, ReviewStatus, CreatedBy)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
                 [
                     permanentNumber.permanentYear,
                     permanentNumber.permanentSeq,
@@ -1012,9 +1098,11 @@ router.post('/form-a-permanent', upload.single('FormFile'), async (req, res) => 
                     signedFileUrl,
                     signedFileUrl ? new Date() : null,
                     AssigneeID || null,
+                    SubmittedByEmployeeID,
+                    SubmittedByName,
                     documentMode,
                     reviewStatus,
-                    req.user?.name || SubmitterName,
+                    SubmittedByName,
                 ]
             );
             await connection.commit();
@@ -1037,6 +1125,9 @@ router.post('/form-a-permanent', upload.single('FormFile'), async (req, res) => 
                 StopType,
                 Rank,
                 AssigneeID,
+                SubmittedByEmployeeID,
+                SubmittedByName,
+                IsSubmittedOnBehalf,
                 PermanentNo: permanentNumber.permanentNo,
                 uploaded: !!req.file,
             }
@@ -1059,6 +1150,8 @@ router.post('/form-a-permanent', upload.single('FormFile'), async (req, res) => 
             DocumentMode: documentMode,
             ReviewStatus: reviewStatus,
             AssigneeID: AssigneeID || null,
+            SubmittedByEmployeeID,
+            SubmittedByName,
         };
         const adminMail = documentMode === 'direct_signed'
             ? buildCccfAdminSignedFileEmail(submittedRecord, true)
@@ -1071,7 +1164,7 @@ router.post('/form-a-permanent', upload.single('FormFile'), async (req, res) => 
             body: adminMail.body,
             html: adminMail.html,
         });
-        if (isAdminUser(req) && ownerEmail) {
+        if (IsSubmittedOnBehalf && ownerEmail) {
             const ownerMail = buildCccfOwnerSubmittedByAdminEmail(submittedRecord);
             await queueCccfEmail({
                 to: ownerEmail,
@@ -1120,8 +1213,15 @@ router.put('/form-a-permanent/:id', isAdmin, upload.single('FormFile'), async (r
             return res.status(400).json({ success: false, message: 'วันที่ส่งข้อมูลไม่ถูกต้อง' });
         }
 
-        const { SubmitterName, Department, AssigneeID } = await resolvePermanentSubmitter(req, req.body);
         const currentRow = existing[0];
+        // Admin edits normally include the picker value. Retain the persisted
+        // owner when an older client or retry omits it, rather than silently
+        // changing ownership to the current Admin account.
+        const submitterPayload = {
+            ...req.body,
+            AssigneeID: String(req.body?.AssigneeID || currentRow.AssigneeID || '').trim(),
+        };
+        const { SubmitterName, Department, AssigneeID } = await resolvePermanentSubmitter(req, submitterPayload);
         const fileUrl = req.file?.path || currentRow.FileUrl || null;
         const stopTypeValue = parsePositiveInt(StopType, 'Stop Type');
 
@@ -1191,6 +1291,7 @@ router.put('/form-a-permanent/:id', isAdmin, upload.single('FormFile'), async (r
 
 // POST /cccf/form-a-permanent/:id/review  (admin: approve/reject Excel stage)
 router.post('/form-a-permanent/:id/review', isAdmin, async (req, res) => {
+    const connection = await db.getConnection();
     try {
         const { id } = req.params;
         const reviewStatus = String(req.body?.ReviewStatus || '').trim();
@@ -1201,18 +1302,39 @@ router.post('/form-a-permanent/:id/review', isAdmin, async (req, res) => {
         if (reviewStatus === 'Rejected' && !reviewComment) {
             return res.status(400).json({ success: false, message: 'กรุณาระบุเหตุผลเมื่อ Reject' });
         }
-        const [rows] = await db.query('SELECT * FROM CCCF_FormA_Permanent WHERE id = ? LIMIT 1', [id]);
-        if (!rows.length) return res.status(404).json({ success: false, message: 'ไม่พบรายการ' });
+        await connection.beginTransaction();
+        const [rows] = await connection.query('SELECT * FROM CCCF_FormA_Permanent WHERE id = ? LIMIT 1 FOR UPDATE', [id]);
+        if (!rows.length) {
+            await connection.rollback();
+            return res.status(404).json({ success: false, message: 'ไม่พบรายการ' });
+        }
         const record = rows[0];
+        const currentStatus = String(record.ReviewStatus || '');
+        const currentComment = String(record.ReviewComment || '').trim();
+        if (currentStatus === reviewStatus && currentComment === reviewComment) {
+            await connection.rollback();
+            return res.json({ success: true, alreadyReviewed: true, reviewStatus, message: 'รายการนี้บันทึกผลการตรวจไว้แล้ว' });
+        }
+        if (currentStatus !== 'PendingReview') {
+            await connection.rollback();
+            return res.status(409).json({
+                success: false,
+                code: 'CCCF_REVIEW_STATE_CONFLICT',
+                currentStatus,
+                message: 'สถานะรายการเปลี่ยนไปแล้ว กรุณาโหลดข้อมูลล่าสุดก่อนตรวจอีกครั้ง',
+            });
+        }
         if (!record.ExcelFileUrl && record.DocumentMode === 'excel_review') {
+            await connection.rollback();
             return res.status(400).json({ success: false, message: 'รายการนี้ยังไม่มีไฟล์ Excel สำหรับตรวจสอบ' });
         }
-        await db.query(
+        await connection.query(
             `UPDATE CCCF_FormA_Permanent
              SET ReviewStatus = ?, ReviewComment = ?, ReviewedBy = ?, ReviewedAt = NOW()
              WHERE id = ?`,
             [reviewStatus, reviewComment || null, req.user?.name || 'Admin', id]
         );
+        await connection.commit();
         await logAudit(req, {
             action: reviewStatus === 'Approved' ? 'REVIEW_APPROVE_CCCF_PERMANENT' : 'REVIEW_REJECT_CCCF_PERMANENT',
             module: 'cccf',
@@ -1239,7 +1361,10 @@ router.post('/form-a-permanent/:id/review', isAdmin, async (req, res) => {
         }
         res.json({ success: true, message: 'บันทึกผลการตรวจสำเร็จ' });
     } catch (err) {
+        await connection.rollback().catch(() => {});
         sendCccfError(res, err, 'ไม่สามารถบันทึกผลการตรวจ CCCF Permanent ได้');
+    } finally {
+        connection.release();
     }
 });
 
@@ -1633,6 +1758,83 @@ router.put('/unit-targets/:unit', isAdmin, async (req, res) => {
 // -----------------------------------------------------------------------------
 // ASSIGNMENTS - Admin manages who must submit Form A Permanent
 // -----------------------------------------------------------------------------
+
+// Delegation is deliberately separate from assignment. Assignment owns KPI and
+// tracking; delegation only authorizes another authenticated employee to submit
+// a document for that assigned owner.
+router.get('/delegations', async (req, res) => {
+    try {
+        await cccfEnhancementReady;
+        const requesterId = String(req.user?.id || req.user?.EmployeeID || '').trim();
+        if (!requesterId) return res.status(403).json({ success: false, message: 'Missing authenticated employee identity.' });
+        const admin = isAdminUser(req);
+        const allRows = await readCccfDelegationRows();
+        const rows = admin ? allRows : allRows.filter(row => String(row.DelegateEmployeeID) === requesterId && Number(row.IsActive) === 1);
+        res.json({ success: true, data: rows });
+    } catch (err) {
+        if (err.code === 'ER_NO_SUCH_TABLE') return res.json({ success: true, data: [] });
+        sendCccfError(res, err, 'Unable to load CCCF submission delegations.');
+    }
+});
+
+router.post('/delegations', isAdmin, async (req, res) => {
+    let connection;
+    try {
+        await cccfEnhancementReady;
+        const ownerId = String(req.body?.OwnerEmployeeID || '').trim();
+        const delegateId = String(req.body?.DelegateEmployeeID || '').trim();
+        if (!ownerId || !delegateId || ownerId === delegateId) {
+            return res.status(400).json({ success: false, message: 'Owner and delegate must be two different employees.' });
+        }
+        connection = await db.getConnection();
+        await connection.beginTransaction();
+        const [[owner]] = await connection.query('SELECT EmployeeID FROM Employees WHERE EmployeeID = ? LIMIT 1', [ownerId]);
+        const [[delegate]] = await connection.query('SELECT EmployeeID FROM Employees WHERE EmployeeID = ? LIMIT 1', [delegateId]);
+        const [[assignment]] = await connection.query('SELECT id FROM CCCF_Assignments WHERE EmployeeID = ? LIMIT 1', [ownerId]);
+        if (!owner || !delegate) { const err = new Error('Employee Master record was not found.'); err.statusCode = 404; throw err; }
+        if (!assignment) { const err = new Error('The form owner must be assigned by Admin before delegation can be enabled.'); err.statusCode = 400; throw err; }
+        await connection.query(`
+            INSERT INTO CCCF_Submit_Delegations (OwnerEmployeeID, DelegateEmployeeID, IsActive, CreatedBy)
+            VALUES (?, ?, 1, ?)
+            ON DUPLICATE KEY UPDATE IsActive = 1, CreatedBy = VALUES(CreatedBy), UpdatedAt = CURRENT_TIMESTAMP`,
+            [ownerId, delegateId, req.user?.name || 'Safety Admin']);
+        const [[row]] = await connection.query(
+            'SELECT id, OwnerEmployeeID, DelegateEmployeeID, IsActive FROM CCCF_Submit_Delegations WHERE OwnerEmployeeID = ? AND DelegateEmployeeID = ? LIMIT 1',
+            [ownerId, delegateId]
+        );
+        await connection.commit();
+        connection.release(); connection = null;
+        await logAudit(req, {
+            action: 'ENABLE_CCCF_SUBMISSION_DELEGATION', module: 'cccf', targetType: 'CCCF_Submit_Delegations', targetId: row.id,
+            detail: `Enabled CCCF submission delegation ${delegateId} -> ${ownerId}`,
+            metadata: { OwnerEmployeeID: ownerId, DelegateEmployeeID: delegateId, IsActive: 1 }
+        });
+        res.status(201).json({ success: true, data: row });
+    } catch (err) {
+        if (connection) { await connection.rollback().catch(() => {}); connection.release(); }
+        if (err.statusCode) return res.status(err.statusCode).json({ success: false, message: err.message });
+        sendCccfError(res, err, 'Unable to enable CCCF submission delegation.');
+    }
+});
+
+router.put('/delegations/:id', isAdmin, async (req, res) => {
+    try {
+        await cccfEnhancementReady;
+        const id = Number(req.params.id);
+        const isActive = req.body?.IsActive === true || req.body?.IsActive === 1 || req.body?.IsActive === '1' ? 1 : 0;
+        const [result] = await db.query('UPDATE CCCF_Submit_Delegations SET IsActive = ?, CreatedBy = ? WHERE id = ?', [isActive, req.user?.name || 'Safety Admin', id]);
+        if (!result.affectedRows) return res.status(404).json({ success: false, message: 'Delegation was not found.' });
+        await logAudit(req, {
+            action: isActive ? 'ENABLE_CCCF_SUBMISSION_DELEGATION' : 'DISABLE_CCCF_SUBMISSION_DELEGATION',
+            module: 'cccf', targetType: 'CCCF_Submit_Delegations', targetId: id,
+            detail: `${isActive ? 'Enabled' : 'Disabled'} CCCF submission delegation ${id}`,
+            metadata: { IsActive: isActive }
+        });
+        res.json({ success: true, id, IsActive: isActive });
+    } catch (err) {
+        sendCccfError(res, err, 'Unable to update CCCF submission delegation.');
+    }
+});
 
 // GET /cccf/assignments
 router.get('/assignments', async (req, res) => {

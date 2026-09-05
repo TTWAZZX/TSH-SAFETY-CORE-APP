@@ -54,7 +54,7 @@ check('PHP outbox joins permanent and filters event type', phpOutbox.includes('c
 check('Frontend shows owner preview before complete', frontend.includes('cccf-complete-recipient') && frontend.includes('getPermanentOwnerInfo(record)'));
 check('Frontend hides repeat close action after completed', frontend.includes('const isCompleted') && frontend.includes('!isCompleted'));
 check('Frontend has closed status label and filter', frontend.includes('ปิดงานแล้ว') && frontend.includes('cccf-email-event-filter'));
-check('Cache bust points to CCCF owner complete build', mainJs.includes('20260709-cccf-permanent-owner-complete') && indexHtml.includes('20260709-cccf-permanent-owner-complete'));
+check('Cache bust points to the current CCCF Phase C1-C4 build', mainJs.includes('20260904-cccf-c1-c4-r1') && indexHtml.includes('20260904-cccf-c1-c4-r1'));
 
 const failed = checks.filter(item => !item.pass);
 checks.forEach(item => console.log(`${item.pass ? 'PASS' : 'FAIL'} ${item.name}`));

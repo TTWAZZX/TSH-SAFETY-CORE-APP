@@ -71,6 +71,7 @@ let _permanentData = [];
 let _departments   = [];
 let _employees     = [];
 let _assignments   = [];
+let _delegations   = [];
 let _cccfForms     = [];
 let _safetyUnits   = [];   // { id, name, department_id, DeptName }
 let _unitTargets   = [];   // { unit_name, target_year, yearly_target } — yearly Form A people target
@@ -617,6 +618,27 @@ function lockedWorkerUnitField(unit, missingMessage = 'ยังไม่ได�
 }
 
 function getPermanentOwnerOptions() {
+    if (!isAdmin) {
+        const currentId = String(currentUser?.id || '').trim();
+        const self = getEmployeeById(currentId) || {
+            EmployeeID: currentId,
+            EmployeeName: currentUser?.name || '',
+            Department: currentUser?.department || '',
+            CompanyEmail: currentUser?.email || '',
+        };
+        const rows = [
+            { ...self, EmployeeID: currentId, source: 'self' },
+            ..._delegations.map(row => ({
+                EmployeeID: String(row.OwnerEmployeeID || '').trim(),
+                EmployeeName: row.OwnerName || getEmployeeById(row.OwnerEmployeeID)?.EmployeeName || '',
+                Department: row.OwnerDepartment || getEmployeeById(row.OwnerEmployeeID)?.Department || '',
+                CompanyEmail: row.OwnerCompanyEmail || getEmployeeById(row.OwnerEmployeeID)?.CompanyEmail || '',
+                source: 'delegation',
+            })),
+        ].filter(row => row.EmployeeID);
+        return [...new Map(rows.map(row => [row.EmployeeID, row])).values()]
+            .sort((a, b) => (a.source === 'self' ? -1 : 0) - (b.source === 'self' ? -1 : 0) || String(a.EmployeeName).localeCompare(String(b.EmployeeName)));
+    }
     const assignmentRows = _assignments
         .map(assignment => {
             const employee = getEmployeeById(assignment.EmployeeID);
@@ -739,7 +761,7 @@ window._cccfShowPermanentDetail = (id) => {
           <div>
             <p class="text-[10px] font-black uppercase text-emerald-600">${escapeHtml(getPermanentNumber(r))}</p>
             <p class="font-bold text-sm text-emerald-800">${escapeHtml(r.JobArea || '—')}</p>
-            <p class="text-xs text-slate-500 mt-0.5">ส่งโดย ${escapeHtml(r.SubmitterName || '—')} · ${escapeHtml(dateStr)}</p>
+            <p class="text-xs text-slate-500 mt-0.5">เจ้าของ: ${escapeHtml(r.SubmitterName || '—')} · ผู้ส่ง: ${escapeHtml(r.SubmittedByName || r.CreatedBy || r.SubmitterName || '—')} · ${escapeHtml(dateStr)}</p>
           </div>
           <span class="ml-auto inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-[10px] font-bold ${status.className}">
             <span class="h-1.5 w-1.5 rounded-full ${status.dotClass}"></span>${escapeHtml(status.label)}
@@ -747,7 +769,8 @@ window._cccfShowPermanentDetail = (id) => {
         </div>
         <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
           <div><p class="text-[10px] font-bold text-slate-400 uppercase mb-1">หมายเลข CCCF</p><p class="text-sm font-black text-emerald-700">${escapeHtml(getPermanentNumber(r))}</p></div>
-          <div><p class="text-[10px] font-bold text-slate-400 uppercase mb-1">ชื่อผู้ส่ง</p><p class="text-sm text-slate-700">${escapeHtml(r.SubmitterName || '—')}</p></div>
+          <div><p class="text-[10px] font-bold text-slate-400 uppercase mb-1">เจ้าของแบบฟอร์ม</p><p class="text-sm text-slate-700">${escapeHtml(r.SubmitterName || '—')}</p></div>
+          <div><p class="text-[10px] font-bold text-slate-400 uppercase mb-1">ผู้ส่งรายการ</p><p class="text-sm text-slate-700">${escapeHtml(r.SubmittedByName || r.CreatedBy || r.SubmitterName || '—')}</p></div>
           <div><p class="text-[10px] font-bold text-slate-400 uppercase mb-1">หน่วยงาน</p><p class="text-sm text-slate-700">${escapeHtml(r.Department || '—')}</p></div>
           <div><p class="text-[10px] font-bold text-slate-400 uppercase mb-1">ชื่องาน / พื้นที่</p><p class="text-sm text-slate-700">${escapeHtml(r.JobArea || '—')}</p></div>
           <div><p class="text-[10px] font-bold text-slate-400 uppercase mb-1">วันที่ส่ง</p><p class="text-sm text-slate-700">${escapeHtml(dateStr)}</p></div>
@@ -771,10 +794,10 @@ window._cccfShowPermanentDetail = (id) => {
           ${canUploadSigned ? `<button onclick="closeModal();window._cccfUploadSignedPdf(${r.id})" class="flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-semibold text-sky-700 hover:bg-sky-50 border border-sky-100 transition-colors">
             ส่ง PDF หลังผ่านการตรวจ
           </button>` : ''}
-          ${isAdmin && r.ReviewStatus === 'PendingReview' ? `<button onclick="closeModal();window._cccfReviewPermanent(${r.id}, 'Approved')" class="flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-semibold text-emerald-700 hover:bg-emerald-50 border border-emerald-100 transition-colors">
+          ${isAdmin && r.ReviewStatus === 'PendingReview' ? `<button type="button" onclick="window._cccfReviewPermanent(${r.id}, 'Approved')" class="flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-semibold text-emerald-700 hover:bg-emerald-50 border border-emerald-100 transition-colors">
             Approve Excel
           </button>
-          <button onclick="closeModal();window._cccfReviewPermanent(${r.id}, 'Rejected')" class="flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-semibold text-rose-700 hover:bg-rose-50 border border-rose-100 transition-colors">
+          <button type="button" onclick="window._cccfReviewPermanent(${r.id}, 'Rejected')" class="flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-semibold text-rose-700 hover:bg-rose-50 border border-rose-100 transition-colors">
             Reject Excel
           </button>` : ''}
           ${canAdminComplete ? `<button onclick="closeModal();window._cccfCompletePermanent(${r.id})" class="flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-semibold text-indigo-700 hover:bg-indigo-50 border border-indigo-100 transition-colors">
@@ -799,33 +822,58 @@ window._cccfReviewPermanent = (id, reviewStatus) => {
     if (!record) return;
     const isRejected = reviewStatus === 'Rejected';
     openModal(isRejected ? 'Reject Excel / ตีกลับให้แก้ไข' : 'Approve Excel / อนุมัติให้ส่ง PDF', `
-      <div class="space-y-4">
+      <form id="cccf-review-form" class="space-y-4">
         <div class="rounded-xl border ${isRejected ? 'border-rose-100 bg-rose-50 text-rose-800' : 'border-emerald-100 bg-emerald-50 text-emerald-800'} px-4 py-3">
           <p class="text-sm font-bold">${escapeHtml(record.JobArea || 'CCCF Form A Permanent')}</p>
           <p class="mt-1 text-xs">${isRejected ? 'ระบุเหตุผลให้ผู้รับผิดชอบแก้ไขไฟล์ Excel' : 'ยืนยันว่าไฟล์ Excel ผ่านการตรวจแล้ว และให้ผู้รับผิดชอบส่ง PDF ที่ลงนามแล้ว'}</p>
         </div>
         <div>
           <label class="mb-1.5 block text-xs font-bold text-slate-500">หมายเหตุถึงผู้รับผิดชอบ ${isRejected ? '<span class="text-red-500">*</span>' : ''}</label>
-          <textarea id="cccf-review-comment" rows="4" class="form-input w-full resize-none rounded-xl text-sm" placeholder="${isRejected ? 'เช่น กรุณาแก้ไขข้อมูลในช่อง...' : 'เช่น ตรวจสอบแล้ว ข้อมูลครบถ้วน สามารถพิมพ์ลงนามและส่ง PDF ได้'}"></textarea>
+          <textarea id="cccf-review-comment" rows="4" maxlength="2000" class="form-input w-full resize-none rounded-xl text-sm" placeholder="${isRejected ? 'เช่น กรุณาแก้ไขข้อมูลในช่อง...' : 'เช่น ตรวจสอบแล้ว ข้อมูลครบถ้วน สามารถพิมพ์ลงนามและส่ง PDF ได้'}">${escapeHtml(record.ReviewStatus === 'PendingReview' ? (record.ReviewComment || '') : '')}</textarea>
+          <p id="cccf-review-error" class="mt-1 hidden text-xs font-semibold text-rose-600" role="alert"></p>
         </div>
         <div class="flex justify-end gap-2 border-t border-slate-100 pt-2">
           <button type="button" onclick="closeModal()" class="rounded-xl px-4 py-2 text-sm text-slate-600 hover:bg-slate-100">ยกเลิก</button>
-          <button id="cccf-submit-review" type="button" class="rounded-xl px-5 py-2 text-sm font-bold text-white" style="background:${isRejected ? '#e11d48' : 'linear-gradient(135deg,#059669,#0d9488)'}">${isRejected ? 'Reject Excel' : 'Approve Excel'}</button>
+          <button id="cccf-submit-review" type="submit" class="rounded-xl px-5 py-2 text-sm font-bold text-white disabled:cursor-not-allowed disabled:opacity-60" style="background:${isRejected ? '#e11d48' : 'linear-gradient(135deg,#059669,#0d9488)'}">${isRejected ? 'Reject Excel' : 'Approve Excel'}</button>
         </div>
-      </div>`, 'max-w-lg');
-    document.getElementById('cccf-submit-review')?.addEventListener('click', guardActionHandler(async e => {
-        const btn = e.currentTarget;
+      </form>`, 'max-w-lg');
+    const reviewForm = document.getElementById('cccf-review-form');
+    const reviewComment = document.getElementById('cccf-review-comment');
+    reviewComment?.focus({ preventScroll: true });
+    reviewForm?.addEventListener('submit', guardSubmitHandler(async e => {
+        e.preventDefault();
+        const btn = document.getElementById('cccf-submit-review');
+        const error = document.getElementById('cccf-review-error');
         const comment = document.getElementById('cccf-review-comment')?.value.trim() || '';
-        if (isRejected && !comment) { showToast('กรุณาระบุเหตุผลเมื่อ Reject', 'error'); return; }
+        if (isRejected && !comment) {
+            if (error) { error.textContent = 'กรุณาระบุเหตุผลเมื่อ Reject'; error.classList.remove('hidden'); }
+            reviewComment?.focus();
+            return;
+        }
+        if (error) { error.textContent = ''; error.classList.add('hidden'); }
         btn.disabled = true;
+        btn.setAttribute('aria-busy', 'true');
+        btn.dataset.defaultLabel = btn.textContent;
+        btn.textContent = 'กำลังบันทึก...';
         showLoading('กำลังบันทึกผลการตรวจ...');
         try {
-            await API.post(`/cccf/form-a-permanent/${id}/review`, { ReviewStatus: reviewStatus, ReviewComment: comment });
+            const response = await API.post(`/cccf/form-a-permanent/${id}/review`, { ReviewStatus: reviewStatus, ReviewComment: comment });
             closeModal();
-            showToast('บันทึกผลการตรวจสำเร็จ', 'success');
+            showToast(response?.alreadyReviewed ? 'รายการนี้บันทึกผลการตรวจไว้แล้ว' : 'บันทึกผลการตรวจสำเร็จ', 'success');
             await loadCccfPage();
-        } catch (err) { showError(err); } finally { hideLoading(); btn.disabled = false; }
-    }));
+        } catch (err) {
+            if (error) {
+                error.textContent = err?.message || 'ไม่สามารถบันทึกผลการตรวจได้ กรุณาลองใหม่';
+                error.classList.remove('hidden');
+            }
+            reviewComment?.focus();
+        } finally {
+            hideLoading();
+            btn.disabled = false;
+            btn.removeAttribute('aria-busy');
+            btn.textContent = btn.dataset.defaultLabel || (isRejected ? 'Reject Excel' : 'Approve Excel');
+        }
+    }, { render: false }));
 };
 
 window._cccfUploadSignedPdf = (id) => {
@@ -1119,12 +1167,13 @@ export async function loadCccfPage() {
     const request = createLatestRequestController('cccf:page-load');
     container.innerHTML = pageSkeleton({ label: 'กำลังโหลดข้อมูล CCCF', cards: 3, rows: 6 });
     try {
-        const [workerRes, permanentRes, deptRes, empRes, assignRes, formsRes, unitsRes, unitTgtRes, targetSummaryRes, workerProgressRes, settingRes, emailPolicyRes, dashboardConfigRes, myTargetsRes] = await Promise.all([
+        const [workerRes, permanentRes, deptRes, empRes, assignRes, delegationRes, formsRes, unitsRes, unitTgtRes, targetSummaryRes, workerProgressRes, settingRes, emailPolicyRes, dashboardConfigRes, myTargetsRes] = await Promise.all([
             API.get('/cccf/form-a-worker').catch(() => []),
             API.get('/cccf/form-a-permanent').catch(() => []),
             API.get('/master/departments').catch(() => ({ data: [] })),
             API.get('/employees').catch(() => ({ data: [] })),
             API.get('/cccf/assignments').catch(() => []),
+            API.get('/cccf/delegations').catch(() => ({ data: [] })),
             API.get(isAdmin ? '/module-forms?module=cccf&all=1' : '/module-forms?module=cccf').catch(() => ({ data: [] })),
             API.get('/master/safety-units').catch(() => ({ data: [] })),
             API.get('/cccf/unit-targets').catch(() => []),
@@ -1142,6 +1191,7 @@ export async function loadCccfPage() {
         _departments   = Array.isArray(deptRes)      ? deptRes      : deptRes?.data      ?? [];
         _employees     = Array.isArray(empRes)       ? empRes       : empRes?.data       ?? [];
         _assignments   = Array.isArray(assignRes)    ? assignRes    : assignRes?.data    ?? [];
+        _delegations   = Array.isArray(delegationRes) ? delegationRes : delegationRes?.data ?? [];
         _cccfForms     = Array.isArray(formsRes)     ? formsRes     : formsRes?.data     ?? [];
         _safetyUnits   = (Array.isArray(unitsRes)     ? unitsRes     : unitsRes?.data     ?? [])
             .map(u => ({ ...u, name: normalizeUnitName(u.name) }))
@@ -4326,12 +4376,12 @@ function openPermanentForm(record = null, forcedAssigneeId = '') {
         ) || null;
     const selectedOwnerId = String(forcedAssigneeId || record?.AssigneeID || inferredOwner?.EmployeeID || currentUser.id || '').trim();
     const selectedOwner = ownerOptions.find(opt => opt.EmployeeID === selectedOwnerId) || getEmployeeById(selectedOwnerId) || null;
-    const ownerName = isAdmin ? (selectedOwner?.EmployeeName || record?.SubmitterName || currentUser.name || '') : (record?.SubmitterName || currentUser.name || '');
-    const ownerDept = isAdmin ? (selectedOwner?.Department || record?.Department || currentUser.department || '') : (record?.Department || currentUser.department || '');
+    const ownerName = selectedOwner?.EmployeeName || record?.SubmitterName || currentUser.name || '';
+    const ownerDept = selectedOwner?.Department || record?.Department || currentUser.department || '';
     const ownerEmail = getPermanentOwnerEmail(selectedOwnerId);
     const defaultMode = isEdit ? (record?.DocumentMode || 'legacy') : 'excel_review';
-    const directAllowed = isAdmin || canDirectSignedPdf(selectedOwnerId);
-    const approvedRecords = getApprovedPermanentRecordsForOwner(selectedOwnerId);
+    const directAllowed = isAdmin || (selectedOwnerId === String(currentUser.id || '') && canDirectSignedPdf(selectedOwnerId));
+    let approvedRecords = getApprovedPermanentRecordsForOwner(selectedOwnerId);
 
     openModal(`CCCF Form A - Permanent${isEdit ? ' (แก้ไข)' : ''}`, `
       <form id="cccf-permanent-form" class="space-y-4 px-1">
@@ -4367,15 +4417,15 @@ function openPermanentForm(record = null, forcedAssigneeId = '') {
                 <p class="mt-1 text-[11px] leading-relaxed text-amber-700">แนบ Excel ให้ Admin ตรวจสอบก่อนพิมพ์ลงนาม</p>
               </div>
             </label>
-            <label class="${approvedRecords.length ? 'cursor-pointer' : 'cursor-not-allowed opacity-50'}">
-              <input type="radio" name="PermanentDocumentModeChoice" value="signed_after_review" class="peer hidden" ${approvedRecords.length ? '' : 'disabled'}>
+            <label id="permanent-signed-after-label" class="${approvedRecords.length ? 'cursor-pointer' : 'cursor-not-allowed opacity-50'}">
+              <input id="permanent-signed-after-radio" type="radio" name="PermanentDocumentModeChoice" value="signed_after_review" class="peer hidden" ${approvedRecords.length ? '' : 'disabled'}>
               <div class="h-full rounded-xl border border-sky-200 bg-sky-50 p-3 peer-checked:ring-2 peer-checked:ring-sky-300">
                 <p class="text-sm font-black text-sky-800">ส่ง PDF หลังผ่านการตรวจ</p>
-                <p class="mt-1 text-[11px] leading-relaxed text-sky-700">${approvedRecords.length ? 'เลือก Excel ที่ Approved แล้ว แล้วแนบ PDF ลงนาม' : 'ยังไม่มีรายการ Excel ที่ Approved สำหรับเจ้าของงานนี้'}</p>
+                <p id="permanent-signed-after-help" class="mt-1 text-[11px] leading-relaxed text-sky-700">${approvedRecords.length ? 'เลือก Excel ที่ Approved แล้ว แล้วแนบ PDF ลงนาม' : 'ยังไม่มีรายการ Excel ที่ Approved สำหรับเจ้าของงานนี้'}</p>
               </div>
             </label>
             <label class="${directAllowed ? 'cursor-pointer' : 'cursor-not-allowed opacity-50'}">
-              <input type="radio" name="PermanentDocumentModeChoice" value="direct_signed" class="peer hidden" ${directAllowed ? '' : 'disabled'}>
+              <input id="permanent-direct-signed-radio" type="radio" name="PermanentDocumentModeChoice" value="direct_signed" class="peer hidden" ${directAllowed ? '' : 'disabled'}>
               <div class="h-full rounded-xl border border-emerald-200 bg-emerald-50 p-3 peer-checked:ring-2 peer-checked:ring-emerald-300">
                 <p class="text-sm font-black text-emerald-800">ส่ง PDF ลงนามโดยตรง</p>
                 <p class="mt-1 text-[11px] leading-relaxed text-emerald-700">${directAllowed ? 'แนบ PDF ที่ลงนามแล้วได้ทันที' : 'ต้องให้ Admin เปิดสิทธิ์ในรายการมอบหมายก่อน'}</p>
@@ -4398,27 +4448,31 @@ function openPermanentForm(record = null, forcedAssigneeId = '') {
           </div>
           <div class="space-y-3">
         <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
-          ${isAdmin ? `
+          ${(isAdmin || ownerOptions.length > 1) && !isEdit ? `
             <div class="col-span-2">
-              <label class="block text-[10px] font-bold text-slate-400 uppercase mb-1.5">ผู้รับผิดชอบ / ส่งแทน</label>
-              <select id="permanent-owner-select" class="form-select w-full rounded-xl text-sm">
-                <option value="">-- เลือกผู้ใช้ --</option>
-                ${ownerOptions.map(opt => `
-                  <option value="${escapeAttr(opt.EmployeeID)}" ${String(opt.EmployeeID) === selectedOwnerId ? 'selected' : ''}>
-                    ${escapeHtml(opt.EmployeeName || 'Unknown')} (${escapeHtml(opt.EmployeeID)}) - ${escapeHtml(opt.Department || 'No Department')}${opt.source === 'assignment' ? ' [Assigned]' : ''}
-                  </option>
-                `).join('')}
-              </select>
-              <p class="text-[11px] text-slate-400 mt-1">รายการที่ถูก assign จะขึ้นก่อนเพื่อให้แอดมินตามงานและอัปโหลดแทนได้เร็ว</p>
+              <label for="permanent-owner-search" class="block text-[10px] font-bold text-slate-400 uppercase mb-1.5">ยื่นแบบฟอร์มแทนใคร</label>
+              <div class="relative">
+                <input id="permanent-owner-search" type="search" autocomplete="off" role="combobox"
+                  aria-autocomplete="list" aria-expanded="false" aria-controls="permanent-owner-results"
+                  class="form-input w-full rounded-xl text-sm" placeholder="ค้นหารหัส ชื่อ หรือแผนก"
+                  value="${escapeAttr(selectedOwner ? `${selectedOwner.EmployeeName || ''} (${selectedOwner.EmployeeID}) - ${selectedOwner.Department || 'No Department'}` : '')}">
+                <div id="permanent-owner-results" role="listbox" aria-label="ผลการค้นหาผู้รับผิดชอบ"
+                  class="absolute z-30 mt-1 hidden max-h-64 w-full overflow-y-auto rounded-xl border border-slate-200 bg-white p-1 shadow-xl"></div>
+              </div>
+              <p id="permanent-owner-search-status" class="text-[11px] text-slate-400 mt-1" aria-live="polite">เลือกได้เฉพาะตนเองและเจ้าของแบบฟอร์มที่ Admin มอบสิทธิ์ให้</p>
             </div>
           ` : ''}
           <div>
-            <label class="block text-[10px] font-bold text-slate-400 uppercase mb-1.5">ชื่อผู้ส่ง</label>
+            <label class="block text-[10px] font-bold text-slate-400 uppercase mb-1.5">เจ้าของแบบฟอร์ม</label>
             <input type="text" id="permanent-owner-name-display" class="form-input w-full rounded-xl text-sm bg-slate-50 text-slate-500 cursor-not-allowed" readonly value="${escapeAttr(ownerName || '')}">
           </div>
           <div>
-            <label class="block text-[10px] font-bold text-slate-400 uppercase mb-1.5">หน่วยงาน</label>
+            <label class="block text-[10px] font-bold text-slate-400 uppercase mb-1.5">แผนกเจ้าของแบบฟอร์ม</label>
             <input type="text" id="permanent-owner-dept-display" class="form-input w-full rounded-xl text-sm bg-slate-50 text-slate-500 cursor-not-allowed" readonly value="${escapeAttr(ownerDept || '—')}">
+          </div>
+          <div class="col-span-2">
+            <label class="block text-[10px] font-bold text-slate-400 uppercase mb-1.5">ผู้ส่งรายการ</label>
+            <div class="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-xs font-semibold text-slate-600">${escapeHtml(currentUser.name || '—')} ${currentUser.id ? `(${escapeHtml(currentUser.id)})` : ''}</div>
           </div>
           <div class="col-span-2">
             <label class="block text-[10px] font-bold text-slate-400 uppercase mb-1.5">Company Email</label>
@@ -4485,7 +4539,9 @@ function openPermanentForm(record = null, forcedAssigneeId = '') {
         </div>
       </form>`, 'max-w-5xl');
 
-    const ownerSelect = document.getElementById('permanent-owner-select');
+    const ownerSearch = document.getElementById('permanent-owner-search');
+    const ownerResults = document.getElementById('permanent-owner-results');
+    const ownerSearchStatus = document.getElementById('permanent-owner-search-status');
     const ownerNameDisplay = document.getElementById('permanent-owner-name-display');
     const ownerDeptDisplay = document.getElementById('permanent-owner-dept-display');
     const ownerEmailDisplay = document.getElementById('permanent-owner-email-display');
@@ -4493,9 +4549,14 @@ function openPermanentForm(record = null, forcedAssigneeId = '') {
     const submitterInput = document.getElementById('permanent-submitter-name');
     const deptInput = document.getElementById('permanent-submitter-dept');
     const documentModeInput = document.getElementById('permanent-document-mode');
-    const syncOwnerPreview = () => {
-        if (!isAdmin) return;
-        const selected = ownerOptions.find(opt => String(opt.EmployeeID) === String(ownerSelect?.value || '')) || null;
+    let refreshOwnerDependentControls = () => {};
+    let ownerMatches = [];
+    let ownerActiveIndex = -1;
+    const ownerLabel = option => `${option?.EmployeeName || 'Unknown'} (${option?.EmployeeID || ''}) - ${option?.Department || 'No Department'}`;
+    const syncOwnerPreview = selectedOption => {
+        const selected = selectedOption === undefined
+            ? ownerOptions.find(opt => String(opt.EmployeeID) === String(assigneeInput?.value || '')) || null
+            : selectedOption;
         assigneeInput.value = selected?.EmployeeID || '';
         submitterInput.value = selected?.EmployeeName || record?.SubmitterName || currentUser.name || '';
         deptInput.value = selected?.Department || record?.Department || currentUser.department || '';
@@ -4506,9 +4567,79 @@ function openPermanentForm(record = null, forcedAssigneeId = '') {
             ownerEmailDisplay.className = `rounded-xl border ${email ? 'border-emerald-100 bg-emerald-50 text-emerald-800' : 'border-amber-100 bg-amber-50 text-amber-800'} px-3 py-2 text-xs font-semibold`;
             ownerEmailDisplay.textContent = email ? `Email: ${email}` : 'ยังไม่มี CompanyEmail ใน Employee Master ระบบจะไม่ส่งอีเมลหาเจ้าของงาน';
         }
+        refreshOwnerDependentControls();
     };
-    ownerSelect?.addEventListener('change', syncOwnerPreview);
-    syncOwnerPreview();
+    const closeOwnerResults = () => {
+        ownerResults?.classList.add('hidden');
+        ownerSearch?.setAttribute('aria-expanded', 'false');
+        ownerSearch?.removeAttribute('aria-activedescendant');
+        ownerActiveIndex = -1;
+    };
+    const selectOwner = option => {
+        if (!option) return;
+        if (ownerSearch) ownerSearch.value = ownerLabel(option);
+        syncOwnerPreview(option);
+        closeOwnerResults();
+        ownerSearchStatus.textContent = `เลือก ${option.EmployeeName || option.EmployeeID} · ${option.Department || 'ไม่ระบุแผนก'}`;
+    };
+    const renderOwnerResults = query => {
+        if (!ownerResults || !ownerSearch) return;
+        const needle = normalizeText(query);
+        ownerMatches = ownerOptions.filter(option => {
+            if (!needle) return true;
+            return normalizeText(`${option.EmployeeID} ${option.EmployeeName} ${option.Department}`).includes(needle);
+        }).slice(0, 30);
+        ownerActiveIndex = ownerMatches.length ? 0 : -1;
+        ownerResults.innerHTML = ownerMatches.length
+            ? ownerMatches.map((option, index) => `
+                <button type="button" role="option" id="permanent-owner-option-${index}" data-owner-id="${escapeAttr(option.EmployeeID)}"
+                  aria-selected="${index === ownerActiveIndex ? 'true' : 'false'}"
+                  class="block min-h-11 w-full rounded-lg px-3 py-2 text-left hover:bg-emerald-50 ${index === ownerActiveIndex ? 'bg-emerald-50' : ''}">
+                  <span class="block text-sm font-bold text-slate-800">${escapeHtml(option.EmployeeName || 'Unknown')} <span class="font-mono text-xs text-slate-500">${escapeHtml(option.EmployeeID)}</span></span>
+                  <span class="block text-[11px] text-slate-500">${escapeHtml(option.Department || 'No Department')}${option.source === 'assignment' ? ' · Assigned' : ''}</span>
+                </button>`).join('')
+            : '<p class="px-3 py-4 text-center text-sm text-slate-500">ไม่พบพนักงานที่ตรงกับคำค้นหา</p>';
+        ownerResults.classList.remove('hidden');
+        ownerSearch.setAttribute('aria-expanded', 'true');
+        if (ownerActiveIndex >= 0) ownerSearch.setAttribute('aria-activedescendant', `permanent-owner-option-${ownerActiveIndex}`);
+        ownerSearchStatus.textContent = ownerMatches.length ? `พบ ${ownerMatches.length} รายการ${ownerMatches.length === 30 ? ' (แสดง 30 รายการแรก)' : ''}` : 'ไม่พบรายชื่อใน Employee Master';
+    };
+    const syncOwnerActiveOption = () => {
+        ownerResults?.querySelectorAll('[role="option"]').forEach((element, index) => {
+            const active = index === ownerActiveIndex;
+            element.setAttribute('aria-selected', active ? 'true' : 'false');
+            element.classList.toggle('bg-emerald-50', active);
+        });
+        if (ownerActiveIndex >= 0) {
+            const active = document.getElementById(`permanent-owner-option-${ownerActiveIndex}`);
+            ownerSearch?.setAttribute('aria-activedescendant', active?.id || '');
+            active?.scrollIntoView({ block: 'nearest' });
+        }
+    };
+    ownerSearch?.addEventListener('focus', () => renderOwnerResults(ownerSearch.value === ownerLabel(selectedOwner) ? '' : ownerSearch.value));
+    ownerSearch?.addEventListener('input', () => {
+        syncOwnerPreview(null);
+        renderOwnerResults(ownerSearch.value);
+    });
+    ownerSearch?.addEventListener('keydown', event => {
+        if (event.key === 'Escape') { closeOwnerResults(); return; }
+        if (!['ArrowDown', 'ArrowUp', 'Enter'].includes(event.key)) return;
+        event.preventDefault();
+        if (ownerResults?.classList.contains('hidden')) renderOwnerResults(ownerSearch.value);
+        if (!ownerMatches.length) return;
+        if (event.key === 'ArrowDown') ownerActiveIndex = (ownerActiveIndex + 1) % ownerMatches.length;
+        if (event.key === 'ArrowUp') ownerActiveIndex = (ownerActiveIndex - 1 + ownerMatches.length) % ownerMatches.length;
+        if (event.key === 'Enter') { selectOwner(ownerMatches[Math.max(0, ownerActiveIndex)]); return; }
+        syncOwnerActiveOption();
+    });
+    ownerResults?.addEventListener('mousedown', event => event.preventDefault());
+    ownerResults?.addEventListener('click', event => {
+        const optionButton = event.target.closest('[data-owner-id]');
+        if (!optionButton) return;
+        selectOwner(ownerOptions.find(option => String(option.EmployeeID) === String(optionButton.dataset.ownerId)) || null);
+    });
+    ownerSearch?.addEventListener('blur', () => setTimeout(closeOwnerResults, 120));
+    syncOwnerPreview(selectedOwner);
 
     const fileInput = document.getElementById('permanent-file-input');
     const filePreview = document.getElementById('permanent-file-preview');
@@ -4554,6 +4685,49 @@ function openPermanentForm(record = null, forcedAssigneeId = '') {
         }
         if (selectedMode === 'signed_after_review') syncApprovedRecordPreview();
     };
+    refreshOwnerDependentControls = () => {
+        if (isEdit || !approvedRecordSelect) return;
+        approvedRecords = getApprovedPermanentRecordsForOwner(assigneeInput?.value || '');
+        approvedRecordSelect.innerHTML = `
+          <option value="">-- เลือกรายการ Approved --</option>
+          ${approvedRecords.map(item => `
+            <option value="${escapeAttr(item.id)}">
+              #${escapeHtml(item.id)} - ${escapeHtml(item.JobArea || 'ไม่ระบุงาน')} (${escapeHtml(item.SubmitDate ? String(item.SubmitDate).split('T')[0] : 'ไม่ระบุวันที่')})
+            </option>`).join('')}`;
+        const signedRadio = document.getElementById('permanent-signed-after-radio');
+        const signedLabel = document.getElementById('permanent-signed-after-label');
+        const signedHelp = document.getElementById('permanent-signed-after-help');
+        const available = approvedRecords.length > 0;
+        if (signedRadio) signedRadio.disabled = !available;
+        signedLabel?.classList.toggle('cursor-pointer', available);
+        signedLabel?.classList.toggle('cursor-not-allowed', !available);
+        signedLabel?.classList.toggle('opacity-50', !available);
+        if (signedHelp) signedHelp.textContent = available
+            ? 'เลือก Excel ที่ Approved แล้ว แล้วแนบ PDF ลงนาม'
+            : 'ยังไม่มีรายการ Excel ที่ Approved สำหรับเจ้าของงานนี้';
+        if (!available && signedRadio?.checked) {
+            const excelRadio = document.querySelector('input[name="PermanentDocumentModeChoice"][value="excel_review"]');
+            if (excelRadio) excelRadio.checked = true;
+        }
+        const directRadio = document.getElementById('permanent-direct-signed-radio');
+        const directAllowedForSelected = isAdmin || (
+            String(assigneeInput?.value || '') === String(currentUser.id || '')
+            && canDirectSignedPdf(assigneeInput?.value || '')
+        );
+        if (directRadio) {
+            directRadio.disabled = !directAllowedForSelected;
+            directRadio.closest('label')?.classList.toggle('cursor-pointer', directAllowedForSelected);
+            directRadio.closest('label')?.classList.toggle('cursor-not-allowed', !directAllowedForSelected);
+            directRadio.closest('label')?.classList.toggle('opacity-50', !directAllowedForSelected);
+            if (!directAllowedForSelected && directRadio.checked) {
+                const excelRadio = document.querySelector('input[name="PermanentDocumentModeChoice"][value="excel_review"]');
+                if (excelRadio) excelRadio.checked = true;
+            }
+        }
+        syncApprovedRecordPreview();
+        syncDocumentMode();
+    };
+    refreshOwnerDependentControls();
     approvedRecordSelect?.addEventListener('change', syncApprovedRecordPreview);
     document.querySelectorAll('input[name="PermanentDocumentModeChoice"]').forEach(input => {
         input.addEventListener('change', syncDocumentMode);
@@ -4591,7 +4765,11 @@ function openPermanentForm(record = null, forcedAssigneeId = '') {
         if (!String(form.SubmitDate?.value || '').trim()) { showToast('กรุณาระบุวันที่ส่ง', 'error'); return; }
         if (!stopType) { showToast('กรุณาเลือก Stop Type', 'error'); return; }
         if (!rank) { showToast('กรุณาเลือก Rank', 'error'); return; }
-        if (isAdmin && !String(assigneeInput?.value || '').trim()) { showToast('กรุณาเลือกผู้รับผิดชอบ', 'error'); return; }
+        const selectedOwnerIdForSubmit = String(assigneeInput?.value || '').trim();
+        if (!selectedOwnerIdForSubmit || !ownerOptions.some(option => String(option.EmployeeID) === selectedOwnerIdForSubmit)) {
+            showToast('กรุณาเลือกเจ้าของแบบฟอร์มจากรายการที่ได้รับสิทธิ์', 'error');
+            return;
+        }
         if (_cccfRequireCompanyEmail && !getPermanentOwnerEmail(assigneeInput?.value || currentUser.id)) {
             showToast('Employee Master ยังไม่มี CompanyEmail ของผู้รับผิดชอบ กรุณาอัปเดตก่อนส่ง', 'error');
             return;
@@ -5091,6 +5269,55 @@ async function openAssignmentManagerLegacy() {
     }, cccfDelegatedActionOptions('assignments', '.btn-edit-assignment, .btn-del-assignment', { render: false })));
 }
 
+async function openSubmitDelegationManager() {
+    const owners = _assignments.filter(row => String(row.EmployeeID || '').trim());
+    const employees = _employees.filter(row => String(row.EmployeeID || '').trim());
+    const ownerOptions = owners.map(row => ({
+        id: String(row.EmployeeID), name: row.AssigneeName || getEmployeeById(row.EmployeeID)?.EmployeeName || '', dept: row.Department || '',
+    }));
+    const employeeOptions = employees.map(row => ({
+        id: String(row.EmployeeID), name: row.EmployeeName || row.name || '', dept: row.Department || '',
+    }));
+    const selectorOptions = list => list.map(row => `<option value="${escapeAttr(row.id)}">${escapeHtml(row.name)} — ${escapeHtml(row.dept || 'No Department')}</option>`).join('');
+    const renderRows = () => _delegations.length ? _delegations.map(row => `
+        <div class="flex flex-col gap-2 rounded-xl border border-slate-200 bg-white p-3 sm:flex-row sm:items-center sm:justify-between">
+        <div class="min-w-0 text-xs"><p class="font-bold text-slate-800">${escapeHtml(row.DelegateName || getEmployeeById(row.DelegateEmployeeID)?.EmployeeName || row.DelegateEmployeeID)} <span class="font-normal text-slate-400">ยื่นแทน</span> ${escapeHtml(row.OwnerName || getEmployeeById(row.OwnerEmployeeID)?.EmployeeName || row.OwnerEmployeeID)}</p><p class="mt-0.5 text-slate-400">${escapeHtml(row.OwnerDepartment || getEmployeeById(row.OwnerEmployeeID)?.Department || '—')} · ${Number(row.IsActive) === 1 ? 'ใช้งานอยู่' : 'ปิดแล้ว'}</p></div>
+        <button type="button" data-delegation-id="${escapeAttr(row.id)}" data-delegation-active="${Number(row.IsActive) === 1 ? '0' : '1'}" class="btn-toggle-submit-delegation min-h-11 rounded-lg border px-3 text-xs font-bold ${Number(row.IsActive) === 1 ? 'border-rose-100 bg-rose-50 text-rose-700' : 'border-emerald-100 bg-emerald-50 text-emerald-700'}">${Number(row.IsActive) === 1 ? 'ปิดสิทธิ์' : 'เปิดสิทธิ์'}</button>
+      </div>`).join('') : '<div class="rounded-xl border border-dashed border-slate-200 p-5 text-center text-sm text-slate-400">ยังไม่มีสิทธิ์ยื่นแทน</div>';
+    openModal('จัดการสิทธิ์ยื่น CCCF แทนเจ้าของแบบฟอร์ม', `
+      <div class="space-y-4">
+        <div class="rounded-xl border border-indigo-100 bg-indigo-50 px-4 py-3 text-xs leading-relaxed text-indigo-800">สิทธิ์นี้อนุญาตเฉพาะการยื่นเอกสารแทนเท่านั้น สถิติและ KPI ยังคงนับที่เจ้าของแบบฟอร์มซึ่งต้องอยู่ในรายการมอบหมายของ Admin</div>
+        <div class="grid gap-3 rounded-xl border border-slate-200 bg-slate-50 p-4 sm:grid-cols-2">
+          <label class="text-xs font-bold text-slate-600">เจ้าของแบบฟอร์ม (มี Assignment แล้ว)<input id="cccf-delegation-owner" list="cccf-delegation-owner-list" class="form-input mt-1 w-full rounded-xl text-sm" placeholder="ค้นหารหัสหรือชื่อ"><datalist id="cccf-delegation-owner-list">${selectorOptions(ownerOptions)}</datalist></label>
+          <label class="text-xs font-bold text-slate-600">ผู้ได้รับสิทธิ์ยื่นแทน<input id="cccf-delegation-delegate" list="cccf-delegation-employee-list" class="form-input mt-1 w-full rounded-xl text-sm" placeholder="ค้นหารหัสหรือชื่อ"><datalist id="cccf-delegation-employee-list">${selectorOptions(employeeOptions)}</datalist></label>
+          <div class="sm:col-span-2"><button type="button" id="btn-save-submit-delegation" class="min-h-11 rounded-xl bg-indigo-600 px-4 text-sm font-bold text-white hover:bg-indigo-700">เพิ่ม / เปิดสิทธิ์ยื่นแทน</button></div>
+        </div>
+        <div class="space-y-2" id="cccf-delegation-list">${renderRows()}</div>
+      </div>`, 'max-w-3xl');
+    document.getElementById('btn-save-submit-delegation')?.addEventListener('click', guardActionHandler(async event => {
+        const ownerId = String(document.getElementById('cccf-delegation-owner')?.value || '').trim();
+        const delegateId = String(document.getElementById('cccf-delegation-delegate')?.value || '').trim();
+        if (!ownerOptions.some(row => row.id === ownerId) || !employeeOptions.some(row => row.id === delegateId) || ownerId === delegateId) {
+            showToast('กรุณาเลือกเจ้าของที่ได้รับมอบหมายและผู้ยื่นแทนเป็นคนละคนจาก Employee Master', 'error'); return;
+        }
+        event.currentTarget.disabled = true;
+        try {
+            await API.post('/cccf/delegations', { OwnerEmployeeID: ownerId, DelegateEmployeeID: delegateId });
+            showToast('บันทึกสิทธิ์ยื่นแทนสำเร็จ', 'success');
+            await loadCccfPage(); closeModal(); openSubmitDelegationManager();
+        } catch (error) { showError(error); } finally { event.currentTarget.disabled = false; }
+    }, { render: false }));
+    document.getElementById('cccf-delegation-list')?.addEventListener('click', guardActionHandler(async event => {
+        const button = event.target.closest('.btn-toggle-submit-delegation'); if (!button) return;
+        button.disabled = true;
+        try {
+            await API.put(`/cccf/delegations/${button.dataset.delegationId}`, { IsActive: button.dataset.delegationActive === '1' });
+            showToast('อัปเดตสิทธิ์ยื่นแทนสำเร็จ', 'success');
+            await loadCccfPage(); closeModal(); openSubmitDelegationManager();
+        } catch (error) { showError(error); } finally { button.disabled = false; }
+    }, { render: false }));
+}
+
 async function openAssignmentManager() {
     const employeeOptions = getAssignmentEmployeeOptions();
     const getEmployeePosition = (emp) => String(emp?.Position || emp?.Team || '').trim();
@@ -5112,6 +5339,7 @@ async function openAssignmentManager() {
           <div class="flex items-center gap-2">
             <span class="text-xs font-bold px-2.5 py-1 rounded-full bg-slate-100 text-slate-500">${_assignments.length} รายการ</span>
             <span class="text-xs font-bold px-2.5 py-1 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-100">${_assignments.filter(a => Number(a.AllowDirectSignedPdf || 0) === 1).length} Direct PDF</span>
+            <button type="button" id="btn-manage-submit-delegations" class="min-h-11 rounded-xl border border-indigo-200 bg-indigo-50 px-3 text-xs font-bold text-indigo-700 hover:bg-indigo-100">สิทธิ์ยื่นแทน</button>
           </div>
         </div>
         <div class="grid grid-cols-1 xl:grid-cols-[minmax(320px,0.85fr)_minmax(0,1.4fr)] gap-4 items-start">
@@ -5196,6 +5424,8 @@ async function openAssignmentManager() {
         </div>
         </div>
       </div>`, 'max-w-6xl');
+
+    document.getElementById('btn-manage-submit-delegations')?.addEventListener('click', openSubmitDelegationManager);
 
     const previewEl = document.getElementById('assignment-master-preview');
     const positionFilterEl = document.getElementById('assignment-position-filter');

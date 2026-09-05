@@ -17,6 +17,30 @@
 - Node development and PHP shared-hosting routes implement the same contract behind `App_Settings.patrol_checkin_v2_enabled`.
 - Full design, migration, risks, verification, and Phase 9 runbook: `docs/safety-patrol-checkin-v2-local-handoff.md`.
 
+## BBS Visual Card Designer Editor (Phase 10F-2)
+
+Phase 10F-2 adds an Admin-only editor over the Phase 10F-1 Draft contract. Personal and Department template rows open a version chooser, then a Front/Back canvas with basis-point geometry, drag/resize, layer ordering, visibility/lock controls, properties, keyboard nudging and a bounded 50-step undo/redo history. Active and Archived layouts remain view-only. On phones, editing controls and saving are removed so the canvas is an accessible preview only.
+
+Designer artwork uses the additive private directory `backend/private-uploads/bbs-card-designer`. Node and PHP accept one content-verified JPG/PNG/WebP image up to 10 MB, bind it to one Draft, and serve it only through Admin-authorized resource routes. Safe API projections expose an asset ID and display metadata, never the stored name or filesystem path. During Draft save, the server canonicalizes parent and designer asset references before transactional replacement of sides/elements.
+
+Rendering remains isolated: `visual_card_designer_enabled=1` is permitted only for local Admin editing, while `visual_card_designer_rendering_enabled=0` keeps all issue/replace/print output on the established renderer. Preview QR content is a labelled placeholder. No existing Personal/Department template, card, QR, print record or private file is rewritten, and Phase 10F-2 adds no activation or card lifecycle integration.
+
+## BBS Visual Card Designer Foundation (Phase 10F-1)
+
+Phase 10F-1 implements the additive persistence and compatibility boundary defined by Phase 10F-0. `BBS_Card_Layout_Versions` owns physical card dimensions, immutable lifecycle state and optimistic row versioning; `BBS_Card_Layout_Sides`, `BBS_Card_Layout_Elements` and `BBS_Card_Layout_Assets` own the normalized Front/Back composition; `BBS_Card_Designer_Print_Snapshots` can later freeze the resolved render contract against an existing Personal or Department print log. Existing template parents remain authoritative and are referenced by foreign key without being altered.
+
+Admin-only Node/PHP parity routes expose the allowlisted field catalog, version list/detail, Draft creation/update and readiness projection. All write routes are disabled while `visual_card_designer_enabled=0`; `visual_card_designer_rendering_enabled=0` independently prevents later runtime output adoption. Draft replacement is transactional, `RowVersion` protected and server validated. Phase 10F-1 deliberately adds no Activate/Archive renderer integration, asset upload UI or card-issuance behavior.
+
+The compatibility inventory is SELECT-only and verifies private background metadata/signatures/hashes. The legacy bootstrap is dry-run by default and, only when explicitly applied, inserts an idempotent Front-only designer version referencing existing artwork metadata. It hashes parent rows before and after execution and never moves or deletes private files. Missing designer layouts continue through the established legacy renderer.
+
+## BBS Visual Card Designer Target Architecture (Phase 10F-0)
+
+Phase 10F-0 defines a future Admin visual designer over the existing Personal and Department template parents. BBS will use its own additive layout-version, side, element, asset and render-snapshot records rather than sharing Forklift tables. A layout belongs to exactly one existing Personal or Department template, uses common physical dimensions for Front/Back, derives portrait/landscape orientation from those dimensions and stores element geometry as integer basis points. Only Draft layouts are editable; Active and Archived versions are immutable.
+
+Dynamic content is resolved from an allowlisted server catalog. Personal layouts may project Employee Master identity/scope, effective BBS level, approved photo fallback and the existing one-time Personal QR. Department layouts may project Master Department identity and the single existing Active shared Community QR. The browser cannot supply an arbitrary data value, raw HTML/CSS, external resource, QR token or layout version. Personal composite preview continues to use a visibly non-functional QR; live output receives a raw Personal QR only from the existing issue/replace mutation.
+
+Legacy migration is deliberately dual-read and additive. New designer tables are installed empty, then an idempotent bootstrap may insert a Front-only version referencing the existing private background metadata and fixed field composition without moving file bytes or updating a parent template. Designer rendering remains behind separate disabled-by-default settings. When enabled, a valid server-resolved Active layout is preferred and a template with no valid layout falls back to the established renderer. Rollback disables the flags and never deletes template, card, QR, print, layout or private-file history. The full field catalog, readiness contract and staged delivery plan are in `docs/bbs-smart-card-phase10f0-visual-card-designer.md`.
+
 ## BBS Pilot Acceptance Gate (Phase 10E)
 
 Phase 10E adds no business table or application workflow route. A repeatable SELECT-only acceptance audit projects the existing Master/Pilot roster, inspector enrollment/team/schedule, server-resolved Checklist coverage, Personal/Department Card configuration, Community handler, workflow evidence, Action reconciliation, email operational state and rollout settings into one deployment decision.
@@ -1355,7 +1379,8 @@ CSS classes: `.rte-active` = alignment button ที่ active อยู่ (bg-
 | Table | Purpose |
 |-------|---------|
 | `CCCF_FormA_Worker` | รายการค้นหาอันตรายรายบุคคล (พนักงานส่งเอง) — มี `SafetyUnit` column (auto-migrated) |
-| `CCCF_FormA_Permanent` | เอกสารผลดำเนินการถาวร — ส่งโดย supervisor หรือ admin ส่งแทนได้ พร้อมแนบไฟล์ server file storage, มี `AssigneeID`, `StopType`, `Rank` |
+| `CCCF_FormA_Permanent` | เอกสารผลดำเนินการถาวร — `AssigneeID` คือเจ้าของ/ผู้รับผิดชอบสำหรับ KPI และ `SubmittedByEmployeeID` / `SubmittedByName` คือผู้ส่งจริง; มี `StopType`, `Rank` และไฟล์ private server storage |
+| `CCCF_Submit_Delegations` | สิทธิ์ยื่นแทนแบบ active/inactive ที่ Admin กำหนดต่อ owner/delegate; owner ต้องมี `CCCF_Assignments` ก่อน และสิทธิ์นี้ไม่อนุญาต Direct Signed PDF |
 | `CCCF_EmailOutbox` | คิวอีเมล CCCF Form A Permanent แบบ text+HTML แยกจาก Hiyari; ใช้ retry ได้ผ่าน admin endpoint |
 | `CCCF_Unit_Targets` | เป้าหมายต่อ Unit — `yearly_target` (จำนวนคน ไม่ใช่ครั้ง) + `achieved_override` (admin override) |
 | `CCCF_Assignments` | กำหนดผู้รับผิดชอบจาก Master Employee ว่าใครต้องส่ง Form A Permanent — admin เพิ่ม/แก้ไข/ลบได้ |
@@ -1373,6 +1398,8 @@ CSS classes: `.rte-active` = alignment button ที่ active อยู่ (bg-
 - Permanent tab แสดง “แบบฟอร์มที่เกี่ยวข้อง” จาก `Module_Forms` ด้วย `module=cccf`; admin จัดการ template ได้จากปุ่มแบบฟอร์ม และ user เห็นเฉพาะ active forms
 - ถ้าเป็น admin ต้องเลือกผู้รับผิดชอบ (`AssigneeID`) จาก assignment/master employee ได้ และระบบเติม `SubmitterName` + `Department` ตาม master
 - backend helper `resolvePermanentSubmitter()` ใช้ source of truth จาก `Employees` เมื่อมี `AssigneeID`
+- Submit-on-behalf is server-authoritative: a normal user is always bound to their authenticated `EmployeeID`; only an Admin may select an alternate Employee Master owner. The Admin picker is searchable but does not grant or infer any extra permission.
+- Excel review uses an atomic PendingReview transition. Reject requires a comment, an exact retry of the recorded decision is idempotent, and all other stale review attempts receive a conflict response. The owner notification uses the resolved Employee Master owner and is not duplicated by a retry.
 - endpoint ที่เกี่ยวข้อง:
   - `POST /cccf/form-a-permanent` — supervisor ส่งเอง หรือ admin ส่งแทนผู้ใช้
   - `PUT /cccf/form-a-permanent/:id` — admin แก้ไขรายการ Permanent และอัปไฟล์แทนได้

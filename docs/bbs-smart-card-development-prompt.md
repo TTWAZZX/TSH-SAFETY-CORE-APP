@@ -542,3 +542,15 @@ UI ต้อง:
 - รอผู้ใช้อนุมัติแผนก่อนเริ่ม implementation
 
 หากพบว่า Requirement ใดขัดกับระบบเดิมหรือมีความเสี่ยงด้าน security/privacy ให้ชี้แจงด้วยหลักฐานจาก repository และเสนอทางเลือกที่ปลอดภัยกว่า ห้ามเปลี่ยนพฤติกรรมสำคัญโดยเดาเอง
+
+## Phase 10F Visual Card Designer Requirement Amendment
+
+- ระบบยังคงใช้ artwork ที่บริษัทจัดเตรียม แต่ Admin สามารถจัดวางข้อมูลแบบ visual บน artwork ได้
+- รองรับเฉพาะ Personal Card และ Department Card แบบหน้า/หลัง แนวตั้ง/แนวนอน ไม่มี Unit Card
+- Admin ต้องย้าย ปรับขนาด เพิ่ม ลบ ซ่อน ล็อก และจัดลำดับ field ได้จาก Draft layout
+- Dynamic fields และ QR ต้อง resolve โดย server จาก Master/Card context เท่านั้น Frontend ห้ามกำหนดค่าหรือเลือก version เอง
+- Personal preview ใช้ QR จำลองที่ใช้งานไม่ได้; QR จริงยังออกได้เฉพาะ response ของ issue/replace เดิม
+- Department Card ใช้ Active shared Department Community QR เดิมเท่านั้น QR ปลายทางอื่นต้องเป็นงาน integration ที่อนุมัติแยก
+- Active/Archived layout ต้อง immutable การแก้ไขต้อง clone เป็น Draft version ใหม่
+- การนำ Template เดิมเข้าระบบต้อง additive/idempotent ห้ามแก้หรือลบ row/file เดิม และต้อง fallback ไป renderer เดิมได้
+- รายละเอียด architecture, field mapping, readiness และ migration plan อยู่ที่ `docs/bbs-smart-card-phase10f0-visual-card-designer.md`

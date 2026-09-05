@@ -78,15 +78,42 @@
     "20260827_bbs_phase10a_mobile_batch_observation.sql"
   ],
   "fileHashes": [
-    { "path": "index.html", "sha256": "6e589530f8f4cf6eb84c86f849dbd78eaf05e0f5097f80ce92ddfe82cf729c8c" },
-    { "path": "public/js/main.js", "sha256": "7b275bec4d5282996f3d159e3ac9f3a298ca31640e0fd3eb60103024e721ae2d" },
-    { "path": "public/js/pages/bbs-smart-card.js", "sha256": "06bc429a71e8cdcea176ff82ff038e5e3957d8d66af656038b8983085e963832" },
-    { "path": "api/index.php", "sha256": "174d6badcab9d4ef6d32f44da686f0ce5748fcbcc55982641caf59d0ef24bdfb" },
-    { "path": "api/handlers/bbs_actions.php", "sha256": "89c9510bfb39ff39b740976e821f8eca7f75ee7e9df80eced1a4b5edb55c1f97" },
-    { "path": "api/handlers/bbs_community.php", "sha256": "860d9b002094f803051b4398eb474c6d283662b8655e22159505a32c3b55799d" },
-    { "path": "api/handlers/bbs_cards.php", "sha256": "ad3ad7cee0dcc97e8485a9b842eebf7a33559b8c750f7e5f79d04645c3f2be67" },
-    { "path": "api/handlers/bbs_inspector_schedules.php", "sha256": "101444e817662e8881761ef29d98c87b33bed3e9bc3959f851a103b36e4ba2a6" },
-    { "path": "api/lib/bbs_action.php", "sha256": "57b7fbc2276a94fd418d4e4ad3e42137d289c1fc6d31f81a953212bdb5cf8480" }
+    {
+      "path": "index.html",
+      "sha256": "6e589530f8f4cf6eb84c86f849dbd78eaf05e0f5097f80ce92ddfe82cf729c8c"
+    },
+    {
+      "path": "public/js/main.js",
+      "sha256": "7b275bec4d5282996f3d159e3ac9f3a298ca31640e0fd3eb60103024e721ae2d"
+    },
+    {
+      "path": "public/js/pages/bbs-smart-card.js",
+      "sha256": "06bc429a71e8cdcea176ff82ff038e5e3957d8d66af656038b8983085e963832"
+    },
+    {
+      "path": "api/index.php",
+      "sha256": "174d6badcab9d4ef6d32f44da686f0ce5748fcbcc55982641caf59d0ef24bdfb"
+    },
+    {
+      "path": "api/handlers/bbs_actions.php",
+      "sha256": "89c9510bfb39ff39b740976e821f8eca7f75ee7e9df80eced1a4b5edb55c1f97"
+    },
+    {
+      "path": "api/handlers/bbs_community.php",
+      "sha256": "860d9b002094f803051b4398eb474c6d283662b8655e22159505a32c3b55799d"
+    },
+    {
+      "path": "api/handlers/bbs_cards.php",
+      "sha256": "ad3ad7cee0dcc97e8485a9b842eebf7a33559b8c750f7e5f79d04645c3f2be67"
+    },
+    {
+      "path": "api/handlers/bbs_inspector_schedules.php",
+      "sha256": "101444e817662e8881761ef29d98c87b33bed3e9bc3959f851a103b36e4ba2a6"
+    },
+    {
+      "path": "api/lib/bbs_action.php",
+      "sha256": "57b7fbc2276a94fd418d4e4ad3e42137d289c1fc6d31f81a953212bdb5cf8480"
+    }
   ],
   "productionVerification": {
     "status": "deployed-and-verified-admin-only",
@@ -126,12 +153,30 @@
         "api/handlers/forklift.php"
       ],
       "fileHashes": [
-        { "path": "index.html", "sha256": "4a9d22601ef67e97d510be57b1fd6e02e773df7ce8b070d4c29db0fdca342321" },
-        { "path": "public/js/main.js", "sha256": "1c4710f70c996ebf44eef15fb0dfe7f8b3bcbdb87c092fda5c9e9970b9ea8064" },
-        { "path": "public/js/pages/ky.js", "sha256": "ae086cd152b63938c317becc8bdd552c17acafae0608a4a9e9add9d7ec59998e" },
-        { "path": "public/js/pages/forklift.js", "sha256": "a491a2c85d9c9c6b3acce181b535d921add16b1ed0fb7df91e6556a8ff4e5e14" },
-        { "path": "api/handlers/workflow_phase6.php", "sha256": "5104404a228eb346d8eb7fc71bed8478c8414d382330d33e5da12c08da085b66" },
-        { "path": "api/handlers/forklift.php", "sha256": "f2b43fd124f94ef54eb782cb87392235da594dadfdaf7ecf849d55a912e35e0c" }
+        {
+          "path": "index.html",
+          "sha256": "4a9d22601ef67e97d510be57b1fd6e02e773df7ce8b070d4c29db0fdca342321"
+        },
+        {
+          "path": "public/js/main.js",
+          "sha256": "1c4710f70c996ebf44eef15fb0dfe7f8b3bcbdb87c092fda5c9e9970b9ea8064"
+        },
+        {
+          "path": "public/js/pages/ky.js",
+          "sha256": "ae086cd152b63938c317becc8bdd552c17acafae0608a4a9e9add9d7ec59998e"
+        },
+        {
+          "path": "public/js/pages/forklift.js",
+          "sha256": "a491a2c85d9c9c6b3acce181b535d921add16b1ed0fb7df91e6556a8ff4e5e14"
+        },
+        {
+          "path": "api/handlers/workflow_phase6.php",
+          "sha256": "5104404a228eb346d8eb7fc71bed8478c8414d382330d33e5da12c08da085b66"
+        },
+        {
+          "path": "api/handlers/forklift.php",
+          "sha256": "f2b43fd124f94ef54eb782cb87392235da594dadfdaf7ecf849d55a912e35e0c"
+        }
       ],
       "productionVerification": {
         "databaseBackupId": "ky-forklift-predeploy-20260831-115425",
@@ -160,9 +205,18 @@
         "public/js/pages/bbs-smart-card.js"
       ],
       "fileHashes": [
-        { "path": "index.html", "sha256": "bf81739cd97a3fe1fbde7de4b25db2f17f0110b1f82b573e907742f8a2301dfd" },
-        { "path": "public/js/main.js", "sha256": "e2e0a8668797c2f562f769eeb80c15bb7a0013d2b8d13bb479a768fb349fddfa" },
-        { "path": "public/js/pages/bbs-smart-card.js", "sha256": "3486ea20b0805c8af28bb0a274864c3b9c01b2430d2207a1f83714f46c741ee5" }
+        {
+          "path": "index.html",
+          "sha256": "bf81739cd97a3fe1fbde7de4b25db2f17f0110b1f82b573e907742f8a2301dfd"
+        },
+        {
+          "path": "public/js/main.js",
+          "sha256": "e2e0a8668797c2f562f769eeb80c15bb7a0013d2b8d13bb479a768fb349fddfa"
+        },
+        {
+          "path": "public/js/pages/bbs-smart-card.js",
+          "sha256": "3486ea20b0805c8af28bb0a274864c3b9c01b2430d2207a1f83714f46c741ee5"
+        }
       ],
       "productionVerification": {
         "databaseBackupId": "bbs-phase10c3-predeploy-20260831-164456",
@@ -199,11 +253,26 @@
         "api/lib/bbs_checklist.php"
       ],
       "fileHashes": [
-        { "path": "index.html", "sha256": "d813475d9165c5b9cb691072250196c6f32c9eb341a46744b852ff3093a798d4" },
-        { "path": "public/js/main.js", "sha256": "b8bbffc3d736ea8466d14655ba97b4b88a473fe9572e0f4fd10a89887d82e278" },
-        { "path": "public/js/pages/admin.js", "sha256": "a5a254cd224121faac867f238adfe831120703c4d5778351555154f7863de9b3" },
-        { "path": "api/handlers/bbs_checklists.php", "sha256": "bda5b7e6f2c58dbbf2d317897cd9b2993985c7ff26d4c847cdca7ef607cee7a8" },
-        { "path": "api/lib/bbs_checklist.php", "sha256": "4577cfe425b557e279b51429ae914e413be58536bd6fbddb83f19a9dd3021786" }
+        {
+          "path": "index.html",
+          "sha256": "d813475d9165c5b9cb691072250196c6f32c9eb341a46744b852ff3093a798d4"
+        },
+        {
+          "path": "public/js/main.js",
+          "sha256": "b8bbffc3d736ea8466d14655ba97b4b88a473fe9572e0f4fd10a89887d82e278"
+        },
+        {
+          "path": "public/js/pages/admin.js",
+          "sha256": "a5a254cd224121faac867f238adfe831120703c4d5778351555154f7863de9b3"
+        },
+        {
+          "path": "api/handlers/bbs_checklists.php",
+          "sha256": "bda5b7e6f2c58dbbf2d317897cd9b2993985c7ff26d4c847cdca7ef607cee7a8"
+        },
+        {
+          "path": "api/lib/bbs_checklist.php",
+          "sha256": "4577cfe425b557e279b51429ae914e413be58536bd6fbddb83f19a9dd3021786"
+        }
       ],
       "productionVerification": {
         "stagedAdminOnly": true,
@@ -220,6 +289,60 @@
         "temporaryRowsRemaining": 0,
         "temporaryHelpers": "removed; FTPS absent and HTTP 404",
         "githubPush": "included in the current release commit and pushed to origin/main"
+      }
+    },
+    {
+      "generatedAt": "2026-09-02T11:52:06.755Z",
+      "buildId": "patrol-checkin-v2-dev-20260902-r1",
+      "runtime": "shared-hosting-php-7.4",
+      "status": "deployed-and-verified-dev",
+      "cacheBust": "20260902-patrol-checkin-v2-r1",
+      "schemaMutation": "additive IdempotencyKey and three unique indexes; feature flag installed disabled",
+      "businessDataMutation": "none before smoke; temporary authenticated smoke data must be cleaned to zero",
+      "uploadStorageMutation": "none",
+      "runtimeFiles": [
+        "index.html",
+        "public/js/main.js",
+        "public/js/api.js",
+        "public/js/pages/patrol.js",
+        "api/handlers/patrol.php"
+      ],
+      "fileHashes": [
+        {
+          "path": "index.html",
+          "sha256": "53632312ec12519372942a93c3b7ff50768ed3b88ab80c0785272ba356532ca0"
+        },
+        {
+          "path": "public/js/main.js",
+          "sha256": "5c75af748075a3c8e92d2432dfc436a0fbce823b591aafadb43ca141c83d7ca7"
+        },
+        {
+          "path": "public/js/api.js",
+          "sha256": "bfb61964f7d518e6eb2d40fa3513255332e210541f6ca7589a4470084774943f"
+        },
+        {
+          "path": "public/js/pages/patrol.js",
+          "sha256": "d95891ab33a842b3be816bdefed53564564f6bae649b1aaf5cee80c8389ecae8"
+        },
+        {
+          "path": "api/handlers/patrol.php",
+          "sha256": "9056089d61d0eda33ae44696c0941d045d4ff503aff52b3554edb9f18d36385e"
+        }
+      ],
+      "deploymentVerification": {
+        "environment": "dev.tshpcl.com",
+        "databaseBackupId": "patrol-checkin-v2-dev-predeploy-20260902-184046",
+        "databaseBackupSha256": "e993a46a8d8d52d541a1d9251463f9c58c8416eb154b160d7f5846de3869215b",
+        "databaseBackupTables": 185,
+        "databaseBackupRows": 15996,
+        "applicationRollbackBackup": "backups/production/patrol-checkin-v2-dev-predeploy-20260902-183249",
+        "additiveMigration": "PASS: attendance 384 before/after; flag disabled; column/indexes 1/1/1/1",
+        "ftpDownloadBackSha256": "PASS 6/6",
+        "authenticatedWriteSmoke": "PASS: Scheduled/Makeup/Extra/cross-month/cross-year/multiple-round/idempotency/duplicate/rotation/statistics",
+        "browserSmoke": "PASS: Chrome 390x844, three same-day rounds, prior-year Makeup, no overflow, zero console errors",
+        "temporaryRowsRemaining": 0,
+        "temporaryHelpers": "removed after final audit; HTTP/FTPS absence verified",
+        "githubPush": "not performed"
       }
     }
   ]

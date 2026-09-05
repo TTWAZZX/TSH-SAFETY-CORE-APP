@@ -490,3 +490,49 @@ MVP แรกที่ควรใช้งานได้จริงคือ 
 - Dashboard แสดงผู้ตรวจ วันครบ วันตรวจไม่ครบ วันไม่ได้ตรวจ ผลงาน/เป้า เปอร์เซ็นต์ และปฏิทินรายวัน
 - Workspace KPI, Analytics และ Export ใช้สูตรเดียวกัน: ผลงานแต่ละวันถูก cap ไม่เกิน target ของวันนั้น; วัน `Exempt` ไม่นับ denominator
 - Migration เป็น additive สามตารางและมี `inspector_schedule_enabled` เป็น safe rollback flag; ไม่มีการเปลี่ยน upload/storage
+
+## 11. Phase 10F — Visual Card Designer
+
+### Phase 10F-0 — Architecture & Field Mapping
+
+สถานะ ณ 2 กันยายน 2026: ออกแบบเอกสารเสร็จบน Localhost ยังไม่สร้าง Migration, ไม่แก้ Runtime, ไม่ Deploy และไม่ Push
+
+- รองรับ Personal Card และ Department Card แบบหน้า/หลัง แนวตั้ง/แนวนอน
+- ใช้ Draft layout ที่แก้ไขได้ และ Active/Archived version ที่ immutable
+- ใช้ server-authoritative field catalog สำหรับ Employee Master, BBS level, Department และ QR เดิม
+- ใช้ geometry แบบ integer basis points เพื่อให้ Preview/Print ใช้ layout เดียวกัน
+- เตรียม additive legacy bootstrap ที่อ้างอิงไฟล์เดิมโดยไม่ย้าย/ทำสำเนาและไม่แก้ row เดิม
+- เมื่อไม่มี layout ใหม่หรือปิด feature flag ต้อง fallback ไป renderer เดิม
+- รายละเอียดอยู่ที่ `docs/bbs-smart-card-phase10f0-visual-card-designer.md`
+
+### Phase 10F-1 — Additive Foundation & Compatibility
+
+Status as of 2 September 2026: complete on Local; not deployed or pushed. The additive migration is installed locally with both designer flags disabled. Local legacy inventory contains no Personal/Department template candidates, so bootstrap inserted no designer row.
+
+- Review และสร้าง migration สำหรับ layout version, sides, elements, assets และ print snapshots
+- เพิ่ม feature flags ที่ default เป็นปิด
+- เพิ่ม Node/PHP validation และ Admin Draft API parity
+- เพิ่ม SELECT-only inventory และ idempotent legacy bootstrap
+
+### Phase 10F-2 — Visual Designer Editor
+
+Status as of 2 September 2026: complete on Local; not deployed or pushed. Local Admin editing is enabled, but live designer rendering remains disabled and all existing card output still uses the established renderer.
+
+- Front/Back canvas, drag/resize, layers, properties, orientation, undo/redo และ accessibility
+- private artwork/static asset upload และ preview-only rendering
+
+### Phase 10F-3 — Personal Card Integration
+
+- bind Employee/BBS fields และ one-time Personal QR flow เดิม
+- reconcile output กับ legacy renderer ก่อนเปิด designer rendering
+
+### Phase 10F-4 — Department Card Integration
+
+- bind Master Department และ Active shared Community QR เดิม
+- รองรับ named template และ duplex print
+
+### Phase 10F-5 — Print Readiness, Audit & UAT
+
+- ใช้ render contract เดียวกันสำหรับ preview/print/export
+- ตรวจ QR scan, safe/bleed, duplex registration, portrait/landscape, security และ Node/PHP parity
+- ต้องได้รับ business acceptance และคำสั่งแยกก่อน Deploy หรือเปลี่ยน Production flag

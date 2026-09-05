@@ -2,10 +2,18 @@
 // Verifies Excel review, signed PDF upload, direct signed PDF, admin complete,
 // and CCCF email outbox events without requiring SMTP to be configured.
 
+// This is a local lifecycle test: verify queued Outbox events without sending
+// messages to real company recipients. dotenv in server.js preserves these
+// explicitly supplied values.
+process.env.SMTP_HOST = '';
+process.env.SMTP_USER = '';
+process.env.SMTP_PASS = '';
+
 const jwt = require('jsonwebtoken');
 const app = require('../server');
 const db = require('../db');
 const { ensureEmployeeCompanyEmailColumn } = require('../utils/company-email');
+const { deleteLocalUpload } = require('../storage');
 
 const JWT_SECRET = process.env.JWT_SECRET;
 if (!JWT_SECRET) {
@@ -61,9 +69,9 @@ async function ensureEmployees() {
     ];
     for (const row of rows) {
         await db.query(
-            `INSERT INTO Employees (EmployeeID, EmployeeName, Department, Position, CompanyEmail, Role)
-             VALUES (?, ?, ?, ?, ?, ?)
-             ON DUPLICATE KEY UPDATE EmployeeName=VALUES(EmployeeName), Department=VALUES(Department), Position=VALUES(Position), CompanyEmail=VALUES(CompanyEmail), Role=VALUES(Role)`,
+            `INSERT INTO Employees (EmployeeID, EmployeeName, Department, Position, CompanyEmail, Role, Password, MustChangePassword)
+             VALUES (?, ?, ?, ?, ?, ?, 'cccf-smoke-only', 0)
+             ON DUPLICATE KEY UPDATE EmployeeName=VALUES(EmployeeName), Department=VALUES(Department), Position=VALUES(Position), CompanyEmail=VALUES(CompanyEmail), Role=VALUES(Role), MustChangePassword=0`,
             row
         );
     }
@@ -175,11 +183,14 @@ async function main() {
             token: userToken,
             form: signedPdfForm(),
         });
-        await api(base, `/cccf/form-a-permanent/${excelRecord.id}/complete`, {
+        const alreadyCompleted = await api(base, `/cccf/form-a-permanent/${excelRecord.id}/complete`, {
             method: 'POST',
             token: adminToken,
             body: { CompleteComment: `CODX complete ${RUN}` },
         });
+        if (!alreadyCompleted.alreadyCompleted) {
+            throw new Error('Signed PDF upload must retain the established completed/idempotent close state.');
+        }
 
         const rejectMarker = `CODX CCCF Excel Rejected ${RUN}`;
         await api(base, '/cccf/form-a-permanent', {
@@ -212,7 +223,10 @@ async function main() {
         const afterQueue = await api(base, '/cccf/email-outbox', { token: adminToken });
         const newEvents = (afterQueue.data || []).filter(row => Number(row.id || 0) > beforeMaxId);
         const eventTypes = new Set(newEvents.map(row => row.EventType));
-        const required = ['Assigned', 'Submitted', 'Approved', 'SignedFileUploaded', 'Completed', 'Rejected', 'DirectSignedSubmitted'];
+        // Uploading the signed PDF is the established completion transition and
+        // sends SignedFileUploaded. The following Admin Complete call is an
+        // idempotent no-op, so it must not create a duplicate Completed email.
+        const required = ['Assigned', 'Submitted', 'Approved', 'SignedFileUploaded', 'Rejected', 'DirectSignedSubmitted'];
         const missing = required.filter(type => !eventTypes.has(type));
         if (missing.length) throw new Error(`Missing CCCF email events: ${missing.join(', ')}`);
 
@@ -233,10 +247,33 @@ async function main() {
             ).catch(() => {});
         }
         if (created.length) {
+            const placeholders = created.map(() => '?').join(',');
+            const [rows] = await db.query(
+                `SELECT FileUrl, ExcelFileUrl, SignedFileUrl FROM CCCF_FormA_Permanent WHERE id IN (${placeholders})`,
+                created
+            ).catch(() => [[]]);
+            await db.query(`DELETE FROM CCCF_EmailOutbox WHERE PermanentID IN (${placeholders})`, created).catch(() => {});
+            for (const row of rows) {
+                for (const url of new Set([row.FileUrl, row.ExcelFileUrl, row.SignedFileUrl].filter(Boolean))) {
+                    try { deleteLocalUpload(url); } catch (_) {}
+                }
+            }
             await db.query(`DELETE FROM CCCF_FormA_Permanent WHERE id IN (${created.map(() => '?').join(',')})`, created).catch(() => {});
         }
         await db.query('DELETE FROM CCCF_Assignments WHERE EmployeeID IN (?, ?, ?, ?)', [ADMIN_ID, USER_ID, DIRECT_ID, NOEMAIL_ID]).catch(() => {});
         await db.query('DELETE FROM Employees WHERE EmployeeID IN (?, ?, ?, ?)', [ADMIN_ID, USER_ID, DIRECT_ID, NOEMAIL_ID]).catch(() => {});
+        if (created.length) {
+            const placeholders = created.map(() => '?').join(',');
+            const [[residue]] = await db.query(
+                `SELECT
+                    (SELECT COUNT(*) FROM CCCF_FormA_Permanent WHERE id IN (${placeholders})) AS records,
+                    (SELECT COUNT(*) FROM CCCF_EmailOutbox WHERE PermanentID IN (${placeholders})) AS outbox`,
+                [...created, ...created]
+            );
+            if (Number(residue.records) !== 0 || Number(residue.outbox) !== 0) {
+                throw new Error(`CCCF smoke cleanup residue: records=${residue.records}, outbox=${residue.outbox}`);
+            }
+        }
         await new Promise(resolve => server.close(resolve));
         await db.end().catch(() => {});
     }

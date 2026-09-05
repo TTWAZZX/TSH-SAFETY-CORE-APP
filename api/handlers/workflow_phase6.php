@@ -207,10 +207,11 @@ function wf_ensure_cccf_tables(): void
 {
     db()->exec("CREATE TABLE IF NOT EXISTS cccf_activity (id INT AUTO_INCREMENT PRIMARY KEY,ActivityDate DATE NOT NULL,Area VARCHAR(255),Department VARCHAR(100),Description TEXT,Outcome TEXT,CreatedBy VARCHAR(100),CreatedAt DATETIME DEFAULT CURRENT_TIMESTAMP) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
     db()->exec("CREATE TABLE IF NOT EXISTS cccf_forma_worker (id INT AUTO_INCREMENT PRIMARY KEY,EmployeeName VARCHAR(100),EmployeeID VARCHAR(50),Department VARCHAR(100),SafetyUnit VARCHAR(100) NOT NULL DEFAULT '',SubmitDate DATE NOT NULL,JobArea VARCHAR(255),Equipment VARCHAR(255),HazardDescription TEXT,HowItHappened TEXT,BodyPart VARCHAR(255),Suggestion TEXT,StopType INT,`Rank` VARCHAR(10),CreatedBy VARCHAR(100),CreatedAt DATETIME DEFAULT CURRENT_TIMESTAMP,UpdatedAt DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
-    db()->exec("CREATE TABLE IF NOT EXISTS cccf_forma_permanent (id INT AUTO_INCREMENT PRIMARY KEY,SubmitterName VARCHAR(100),Department VARCHAR(100),JobArea VARCHAR(255),SubmitDate DATE NOT NULL,Summary TEXT,StopType INT,`Rank` VARCHAR(10),FileUrl TEXT,ExcelFileUrl TEXT,SignedFileUrl TEXT,SignedUploadedAt DATETIME,AssigneeID VARCHAR(50),DocumentMode VARCHAR(30) NOT NULL DEFAULT 'legacy',ReviewStatus VARCHAR(30) NOT NULL DEFAULT 'Completed',ReviewComment TEXT,ReviewedBy VARCHAR(100),ReviewedAt DATETIME,CompletedBy VARCHAR(100),CompletedAt DATETIME,CreatedBy VARCHAR(100),CreatedAt DATETIME DEFAULT CURRENT_TIMESTAMP,UpdatedAt DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
+    db()->exec("CREATE TABLE IF NOT EXISTS cccf_forma_permanent (id INT AUTO_INCREMENT PRIMARY KEY,SubmitterName VARCHAR(100),Department VARCHAR(100),JobArea VARCHAR(255),SubmitDate DATE NOT NULL,Summary TEXT,StopType INT,`Rank` VARCHAR(10),FileUrl TEXT,ExcelFileUrl TEXT,SignedFileUrl TEXT,SignedUploadedAt DATETIME,AssigneeID VARCHAR(50),SubmittedByEmployeeID VARCHAR(50),SubmittedByName VARCHAR(100),DocumentMode VARCHAR(30) NOT NULL DEFAULT 'legacy',ReviewStatus VARCHAR(30) NOT NULL DEFAULT 'Completed',ReviewComment TEXT,ReviewedBy VARCHAR(100),ReviewedAt DATETIME,CompletedBy VARCHAR(100),CompletedAt DATETIME,CreatedBy VARCHAR(100),CreatedAt DATETIME DEFAULT CURRENT_TIMESTAMP,UpdatedAt DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
     db()->exec("CREATE TABLE IF NOT EXISTS cccf_worker_attachments (id INT AUTO_INCREMENT PRIMARY KEY,WorkerRecordID INT NOT NULL,OriginalName VARCHAR(255) NOT NULL,StoredName VARCHAR(255) NOT NULL,FileUrl TEXT NOT NULL,MimeType VARCHAR(100) NOT NULL,FileSize INT NOT NULL DEFAULT 0,UploadedBy VARCHAR(100),CreatedAt DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,IsDeleted TINYINT(1) NOT NULL DEFAULT 0,DeletedBy VARCHAR(100),DeletedAt DATETIME,KEY idx_cccf_worker_attachment_record(WorkerRecordID,IsDeleted)) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
     db()->exec("CREATE TABLE IF NOT EXISTS cccf_permanent_sequences (PermanentYear SMALLINT UNSIGNED PRIMARY KEY,LastSeq INT UNSIGNED NOT NULL DEFAULT 0,UpdatedAt DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
     db()->exec("CREATE TABLE IF NOT EXISTS cccf_assignments (id INT AUTO_INCREMENT PRIMARY KEY,EmployeeID VARCHAR(50),AssigneeName VARCHAR(100) NOT NULL,Department VARCHAR(100),AllowDirectSignedPdf TINYINT(1) NOT NULL DEFAULT 0,DueDate DATE,Note TEXT,CreatedBy VARCHAR(100),CreatedAt DATETIME DEFAULT CURRENT_TIMESTAMP,UpdatedAt DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,UNIQUE KEY uq_cccf_emp(EmployeeID)) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
+    db()->exec("CREATE TABLE IF NOT EXISTS cccf_submit_delegations (id INT AUTO_INCREMENT PRIMARY KEY,OwnerEmployeeID VARCHAR(50) NOT NULL,DelegateEmployeeID VARCHAR(50) NOT NULL,IsActive TINYINT(1) NOT NULL DEFAULT 1,CreatedBy VARCHAR(100),CreatedAt DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,UpdatedAt DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,UNIQUE KEY uq_cccf_submit_delegation(OwnerEmployeeID,DelegateEmployeeID),KEY idx_cccf_submit_delegate(DelegateEmployeeID,IsActive),KEY idx_cccf_submit_owner(OwnerEmployeeID,IsActive)) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
     db()->exec("CREATE TABLE IF NOT EXISTS cccf_unit_targets (id INT AUTO_INCREMENT PRIMARY KEY,unit_name VARCHAR(200) NOT NULL,target_year INT NOT NULL DEFAULT 2026,yearly_target INT NOT NULL DEFAULT 1,achieved_override INT DEFAULT NULL,UpdatedBy VARCHAR(100),UpdatedAt DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,UNIQUE KEY uq_unit_year(unit_name,target_year)) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
     db()->exec("CREATE TABLE IF NOT EXISTS cccf_emailoutbox (id INT AUTO_INCREMENT PRIMARY KEY,PermanentID INT DEFAULT NULL,EventType VARCHAR(80) NOT NULL DEFAULT 'General',Recipients TEXT NOT NULL,Subject VARCHAR(255) NOT NULL,Body MEDIUMTEXT,HtmlBody MEDIUMTEXT,Status VARCHAR(30) NOT NULL DEFAULT 'Queued',Error TEXT,SentAt DATETIME DEFAULT NULL,CreatedAt DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,KEY idx_status(Status),KEY idx_perm(PermanentID)) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
     wf_try_exec("ALTER TABLE cccf_forma_worker ADD COLUMN SafetyUnit VARCHAR(100) NOT NULL DEFAULT '' AFTER Department");
@@ -233,6 +234,8 @@ function wf_ensure_cccf_tables(): void
     wf_try_exec("ALTER TABLE cccf_assignments ADD COLUMN AllowDirectSignedPdf TINYINT(1) NOT NULL DEFAULT 0 AFTER Department");
     wf_try_exec("ALTER TABLE cccf_assignments ADD COLUMN DueDate DATE DEFAULT NULL AFTER AllowDirectSignedPdf");
     wf_try_exec("ALTER TABLE cccf_assignments ADD COLUMN Note TEXT DEFAULT NULL AFTER DueDate");
+    wf_try_exec("ALTER TABLE cccf_forma_permanent ADD COLUMN SubmittedByEmployeeID VARCHAR(50) DEFAULT NULL AFTER AssigneeID");
+    wf_try_exec("ALTER TABLE cccf_forma_permanent ADD COLUMN SubmittedByName VARCHAR(100) DEFAULT NULL AFTER SubmittedByEmployeeID");
     wf_cccf_backfill_permanent_numbers();
     wf_try_exec("ALTER TABLE cccf_forma_permanent ADD UNIQUE KEY uq_cccf_permanent_year_seq (PermanentYear,PermanentSeq)");
 }
@@ -481,6 +484,7 @@ function wf_cccf_mail(string $event, array $record, array $extra = []): array
 {
     $eventLabel = [
         'Submitted' => 'Submitted',
+        'SubmittedByAdmin' => 'Submitted on behalf of form owner',
         'DirectSignedSubmitted' => 'Direct signed PDF submitted',
         'Approved' => 'Excel approved',
         'Rejected' => 'Excel rejected',
@@ -507,6 +511,7 @@ function wf_cccf_mail(string $event, array $record, array $extra = []): array
             ['label' => 'Record ID', 'value' => $record['id'] ?? $record['PermanentID'] ?? '-', 'highlight' => true],
             ['label' => 'Event', 'value' => $eventLabel, 'highlight' => true],
             ['label' => 'Submitter', 'value' => $record['SubmitterName'] ?? '-'],
+            ['label' => 'Submitted by', 'value' => $record['SubmittedByName'] ?? ($record['CreatedBy'] ?? ($record['SubmitterName'] ?? '-'))],
             ['label' => 'Employee ID', 'value' => $record['AssigneeID'] ?? '-'],
             ['label' => 'Department', 'value' => $record['Department'] ?? '-'],
             ['label' => 'Job / Area', 'value' => $record['JobArea'] ?? '-'],
@@ -585,6 +590,14 @@ function handle_cccf_routes(string $method, string $path): bool
         $b=wf_body();
         $committed=false;
         try{
+            $existing=null;
+            if($method==='PUT'){
+                $existing=db_row('SELECT * FROM cccf_forma_permanent WHERE id=?',[$p['id']]);
+                if(!$existing){wf_cleanup_files($files);json_response(['success'=>false,'message'=>'Not found.'],404);}
+                // Old clients and retries may omit AssigneeID. Preserve the
+                // existing owner instead of accidentally assigning the Admin.
+                if($admin&&empty($b['AssigneeID'])&&!empty($existing['AssigneeID']))$b['AssigneeID']=$existing['AssigneeID'];
+            }
             if(!wf_date($b['SubmitDate']??null)||empty($b['JobArea'])||empty($b['StopType'])||empty($b['Rank'])) {
                 wf_cleanup_files($files);
                 json_response(['success'=>false,'message'=>'Invalid permanent form payload.'],400);
@@ -592,16 +605,13 @@ function handle_cccf_routes(string $method, string $path): bool
             $mode=$b['DocumentMode']??$b['documentMode']??'excel_review';
             if(!in_array($mode,['excel_review','direct_signed','legacy'],true))$mode='excel_review';
             $file=$files[0]['url']??null;
-            $submitter=$admin&& !empty($b['SubmitterName'])?$b['SubmitterName']:$actor;
-            $dept=$admin&& !empty($b['Department'])?$b['Department']:($user['department']??'');
-            $assignee=$b['AssigneeID']??($admin?null:wf_user_id($user));
-            $assignee=$assignee!==null?trim((string)$assignee):null;
-            if($assignee!==null&&$assignee!==''){
-                $employee=db_row('SELECT EmployeeName,Department FROM employees WHERE EmployeeID=? LIMIT 1',[$assignee]);
-                if(!$employee){wf_cleanup_files($files);json_response(['success'=>false,'message'=>'Employee not found.'],404);}
-                $submitter=$employee['EmployeeName']??$submitter;
-                $dept=$employee['Department']??$dept;
-            }
+            $resolved=wf_cccf_resolve_submitter($user,$b);
+            $submitter=$resolved['SubmitterName'];
+            $dept=$resolved['Department'];
+            $assignee=$resolved['AssigneeID'];
+            $submittedByEmployeeId=$resolved['SubmittedByEmployeeID'];
+            $submittedByName=$resolved['SubmittedByName'];
+            $submittedOnBehalf=(bool)$resolved['IsSubmittedOnBehalf'];
             if($method==='POST'&&$mode==='excel_review'&&(!$files||!wf_cccf_is_excel_upload($files[0]))){wf_cleanup_files($files);json_response(['success'=>false,'message'=>'Excel review requires an Excel file.'],400);}
             if($method==='POST'&&$mode==='direct_signed'&&(!$files||!wf_cccf_is_pdf_upload($files[0]))){wf_cleanup_files($files);json_response(['success'=>false,'message'=>'Direct signed submission requires a PDF file.'],400);}
             if($method==='POST'&&$mode==='direct_signed'&&!wf_cccf_direct_signed_allowed($user,$assignee)){wf_cleanup_files($files);json_response(['success'=>false,'message'=>'Permission denied.'],403);}
@@ -615,7 +625,7 @@ function handle_cccf_routes(string $method, string $path): bool
                 try{
                     $year=(int)date('Y',strtotime((string)$b['SubmitDate']));
                     $number=wf_cccf_allocate_permanent_number($year);
-                    db_execute('INSERT INTO cccf_forma_permanent (PermanentYear,PermanentSeq,PermanentNo,SubmitterName,Department,JobArea,SubmitDate,Summary,StopType,`Rank`,FileUrl,ExcelFileUrl,SignedFileUrl,SignedUploadedAt,AssigneeID,DocumentMode,ReviewStatus,CreatedBy) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)',[$number['year'],$number['sequence'],$number['number'],$submitter,$dept,$b['JobArea'],wf_date($b['SubmitDate']),$b['Summary']??'',(int)$b['StopType'],$b['Rank'],$file,$excel,$signed,$signed?date('Y-m-d H:i:s'):null,$assignee,$mode,$review,$actor]);
+                    db_execute('INSERT INTO cccf_forma_permanent (PermanentYear,PermanentSeq,PermanentNo,SubmitterName,Department,JobArea,SubmitDate,Summary,StopType,`Rank`,FileUrl,ExcelFileUrl,SignedFileUrl,SignedUploadedAt,AssigneeID,SubmittedByEmployeeID,SubmittedByName,DocumentMode,ReviewStatus,CreatedBy) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)',[$number['year'],$number['sequence'],$number['number'],$submitter,$dept,$b['JobArea'],wf_date($b['SubmitDate']),$b['Summary']??'',(int)$b['StopType'],$b['Rank'],$file,$excel,$signed,$signed?date('Y-m-d H:i:s'):null,$assignee,$submittedByEmployeeId,$submittedByName,$mode,$review,$submittedByName]);
                     $id=(int)$pdo->lastInsertId();
                     $permanentNo=$number['number'];
                     $pdo->commit();
@@ -625,25 +635,70 @@ function handle_cccf_routes(string $method, string $path): bool
                     throw $e;
                 }
             }else{
-                $old=db_row('SELECT FileUrl,ExcelFileUrl,SignedFileUrl,PermanentNo FROM cccf_forma_permanent WHERE id=?',[$p['id']]);
-                if(!$old){wf_cleanup_files($files);json_response(['success'=>false,'message'=>'Not found.'],404);}
+                $old=$existing;
                 $file=$file?:($old['FileUrl']??null);
-                db_execute('UPDATE cccf_forma_permanent SET SubmitterName=?,Department=?,JobArea=?,SubmitDate=?,Summary=?,StopType=?,`Rank`=?,FileUrl=?,ExcelFileUrl=COALESCE(?,ExcelFileUrl),DocumentMode=? WHERE id=?',[$submitter,$dept,$b['JobArea'],wf_date($b['SubmitDate']),$b['Summary']??'',(int)$b['StopType'],$b['Rank'],$file,$excel,$mode,$p['id']]);
+                db_execute('UPDATE cccf_forma_permanent SET SubmitterName=?,Department=?,JobArea=?,SubmitDate=?,Summary=?,StopType=?,`Rank`=?,FileUrl=?,ExcelFileUrl=COALESCE(?,ExcelFileUrl),AssigneeID=?,DocumentMode=? WHERE id=?',[$submitter,$dept,$b['JobArea'],wf_date($b['SubmitDate']),$b['Summary']??'',(int)$b['StopType'],$b['Rank'],$file,$excel,$assignee,$mode,$p['id']]);
                 $id=(int)$p['id'];
                 $permanentNo=$old['PermanentNo']??null;
                 $committed=true;
                 if($files&&($old['FileUrl']??null)!==$file)delete_uploaded_file($old['FileUrl']??null);
             }
-            $mailRecord=db_row('SELECT * FROM cccf_forma_permanent WHERE id=?',[$id])?:['id'=>$id,'PermanentNo'=>$permanentNo,'SubmitterName'=>$submitter,'Department'=>$dept,'JobArea'=>$b['JobArea']??'','SubmitDate'=>wf_date($b['SubmitDate']??null),'Summary'=>$b['Summary']??'','StopType'=>$b['StopType']??null,'Rank'=>$b['Rank']??null,'ReviewStatus'=>$review,'AssigneeID'=>$assignee];
+            $mailRecord=db_row('SELECT * FROM cccf_forma_permanent WHERE id=?',[$id])?:['id'=>$id,'PermanentNo'=>$permanentNo,'SubmitterName'=>$submitter,'Department'=>$dept,'JobArea'=>$b['JobArea']??'','SubmitDate'=>wf_date($b['SubmitDate']??null),'Summary'=>$b['Summary']??'','StopType'=>$b['StopType']??null,'Rank'=>$b['Rank']??null,'ReviewStatus'=>$review,'AssigneeID'=>$assignee,'SubmittedByEmployeeID'=>$submittedByEmployeeId,'SubmittedByName'=>$submittedByName];
             $mail=wf_cccf_mail($mode==='direct_signed'?'DirectSignedSubmitted':'Submitted',$mailRecord);
             wf_email_outbox('cccf_emailoutbox',['PermanentID'=>$id,'EventType'=>$mode==='direct_signed'?'DirectSignedSubmitted':'Submitted','Recipients'=>wf_cccf_admin_email(),'Subject'=>$mail['subject'],'Body'=>$mail['body'],'HtmlBody'=>$mail['html'],'Status'=>'Queued']);
+            if($method==='POST'&&$submittedOnBehalf){$owner=wf_cccf_owner_recipient($mailRecord);if($owner['email']!==''){$ownerMail=wf_cccf_mail('SubmittedByAdmin',$mailRecord,['submittedBy'=>$submittedByName]);wf_email_outbox('cccf_emailoutbox',['PermanentID'=>$id,'EventType'=>'SubmittedByAdmin','Recipients'=>$owner['email'],'Subject'=>$ownerMail['subject'],'Body'=>$ownerMail['body'],'HtmlBody'=>$ownerMail['html'],'Status'=>'Queued']);}}
             json_response(['success'=>true,'id'=>$id,'permanentNo'=>$permanentNo]);
         }catch(Throwable $e){
             if(!$committed)wf_cleanup_files($files);
             throw $e;
         }
     }
-    $p=route_params($path,'/cccf/form-a-permanent/:id/review'); if($p!==null&&$method==='POST'){require_admin();$b=json_body();$st=$b['ReviewStatus']??'Approved';if(!in_array($st,['PendingReview','Approved','Rejected','Completed'],true))json_response(['success'=>false,'message'=>'Invalid review status.'],400);db_execute('UPDATE cccf_forma_permanent SET ReviewStatus=?,ReviewComment=?,ReviewedBy=?,ReviewedAt=NOW() WHERE id=?',[$st,$b['ReviewComment']??null,$actor,$p['id']]);$mailRecord=db_row('SELECT * FROM cccf_forma_permanent WHERE id=?',[$p['id']])?:['id'=>$p['id'],'ReviewStatus'=>$st];$mail=wf_cccf_mail($st,$mailRecord,['comment'=>$b['ReviewComment']??'']);wf_email_outbox('cccf_emailoutbox',['PermanentID'=>$p['id'],'EventType'=>$st,'Recipients'=>wf_cccf_admin_email(),'Subject'=>$mail['subject'],'Body'=>$mail['body'],'HtmlBody'=>$mail['html'],'Status'=>'Queued']);json_response(['success'=>true]);}
+    $p=route_params($path,'/cccf/form-a-permanent/:id/review');
+    if($p!==null&&$method==='POST'){
+        require_admin();
+        $b=json_body();
+        $st=trim((string)($b['ReviewStatus']??''));
+        $comment=trim((string)($b['ReviewComment']??''));
+        if(!in_array($st,['Approved','Rejected'],true))json_response(['success'=>false,'message'=>'Review status must be Approved or Rejected.'],400);
+        if($st==='Rejected'&&$comment==='')json_response(['success'=>false,'message'=>'A rejection reason is required.'],400);
+        $pdo=db();
+        $pdo->beginTransaction();
+        try{
+            $stmt=$pdo->prepare('SELECT * FROM cccf_forma_permanent WHERE id=? LIMIT 1 FOR UPDATE');
+            $stmt->execute([$p['id']]);
+            $row=$stmt->fetch();
+            if(!$row){$pdo->rollBack();json_response(['success'=>false,'message'=>'Not found.'],404);}
+            $currentStatus=(string)($row['ReviewStatus']??'');
+            $currentComment=trim((string)($row['ReviewComment']??''));
+            if($currentStatus===$st&&$currentComment===$comment){
+                $pdo->rollBack();
+                json_response(['success'=>true,'alreadyReviewed'=>true,'reviewStatus'=>$st,'message'=>'This review was already recorded.']);
+            }
+            if($currentStatus!=='PendingReview'){
+                $pdo->rollBack();
+                json_response(['success'=>false,'code'=>'CCCF_REVIEW_STATE_CONFLICT','currentStatus'=>$currentStatus,'message'=>'The review state changed. Reload the latest record before reviewing again.'],409);
+            }
+            if(empty($row['ExcelFileUrl'])&&($row['DocumentMode']??'')==='excel_review'){
+                $pdo->rollBack();
+                json_response(['success'=>false,'message'=>'This record has no Excel file to review.'],400);
+            }
+            $stmt=$pdo->prepare('UPDATE cccf_forma_permanent SET ReviewStatus=?,ReviewComment=?,ReviewedBy=?,ReviewedAt=NOW() WHERE id=?');
+            $stmt->execute([$st,$comment!==''?$comment:null,$actor,$p['id']]);
+            $pdo->commit();
+        }catch(Throwable $e){
+            if($pdo->inTransaction())$pdo->rollBack();
+            throw $e;
+        }
+        $mailRecord=db_row('SELECT * FROM cccf_forma_permanent WHERE id=?',[$p['id']])?:array_merge($row,['ReviewStatus'=>$st,'ReviewComment'=>$comment]);
+        $owner=wf_cccf_owner_recipient($mailRecord);
+        $emailStatus='SkippedNoRecipient';
+        if($owner['email']!==''){
+            $mail=wf_cccf_mail($st,$mailRecord,['comment'=>$comment]);
+            wf_email_outbox('cccf_emailoutbox',['PermanentID'=>$p['id'],'EventType'=>$st,'Recipients'=>$owner['email'],'Subject'=>$mail['subject'],'Body'=>$mail['body'],'HtmlBody'=>$mail['html'],'Status'=>'Queued']);
+            $emailStatus='Queued';
+        }
+        json_response(['success'=>true,'reviewStatus'=>$st,'emailStatus'=>$emailStatus]);
+    }
     $p=route_params($path,'/cccf/form-a-permanent/:id/signed-file');
     if($p!==null&&$method==='POST'){
         $files=wf_store_files('FormFile',1);
@@ -676,6 +731,26 @@ function handle_cccf_routes(string $method, string $path): bool
     if($method==='GET'&&$path==='/cccf/target-summary'){ $year=(int)($_GET['year']??date('Y')); json_response(['success'=>true,'data'=>wf_cccf_target_summary($year)]); }
     if($method==='PUT'&&$path==='/cccf/unit-targets'){require_admin();$b=json_body();wf_cccf_save_unit_target($b,(string)($b['unit_name']??''),$actor);}
     $p=route_params($path,'/cccf/unit-targets/:unit'); if($p!==null&&$method==='PUT'){require_admin();$b=json_body();wf_cccf_save_unit_target($b,(string)$p['unit'],$actor);}
+    if($method==='GET'&&$path==='/cccf/delegations'){
+        $requester=wf_user_id($user);
+        if(!$requester)json_response(['success'=>false,'message'=>'Missing authenticated employee identity.'],403);
+        $sql='SELECT d.id,d.OwnerEmployeeID,d.DelegateEmployeeID,d.IsActive,d.CreatedBy,d.CreatedAt,d.UpdatedAt,owner.EmployeeName AS OwnerName,owner.Department AS OwnerDepartment,owner.CompanyEmail AS OwnerCompanyEmail,delegate.EmployeeName AS DelegateName,delegate.Department AS DelegateDepartment FROM cccf_submit_delegations d INNER JOIN cccf_assignments a ON a.EmployeeID=d.OwnerEmployeeID LEFT JOIN employees owner ON owner.EmployeeID=d.OwnerEmployeeID LEFT JOIN employees delegate ON delegate.EmployeeID=d.DelegateEmployeeID';
+        $params=[];
+        if(!$admin){$sql.=' WHERE d.DelegateEmployeeID=? AND d.IsActive=1';$params[]=$requester;}
+        json_response(['success'=>true,'data'=>db_rows($sql.' ORDER BY owner.Department,owner.EmployeeName,delegate.EmployeeName',$params)]);
+    }
+    if($method==='POST'&&$path==='/cccf/delegations'){
+        require_admin();$b=json_body();$owner=trim((string)($b['OwnerEmployeeID']??''));$delegate=trim((string)($b['DelegateEmployeeID']??''));
+        if($owner===''||$delegate===''||$owner===$delegate)json_response(['success'=>false,'message'=>'Owner and delegate must be two different employees.'],400);
+        if(!db_row('SELECT EmployeeID FROM employees WHERE EmployeeID=? LIMIT 1',[$owner])||!db_row('SELECT EmployeeID FROM employees WHERE EmployeeID=? LIMIT 1',[$delegate]))json_response(['success'=>false,'message'=>'Employee not found.'],404);
+        if(!db_row('SELECT id FROM cccf_assignments WHERE EmployeeID=? LIMIT 1',[$owner]))json_response(['success'=>false,'message'=>'The form owner must be assigned by Admin before delegation can be enabled.'],400);
+        db_execute('INSERT INTO cccf_submit_delegations (OwnerEmployeeID,DelegateEmployeeID,IsActive,CreatedBy) VALUES (?,?,1,?) ON DUPLICATE KEY UPDATE IsActive=1,CreatedBy=VALUES(CreatedBy),UpdatedAt=CURRENT_TIMESTAMP',[$owner,$delegate,$actor]);
+        $row=db_row('SELECT id,OwnerEmployeeID,DelegateEmployeeID,IsActive FROM cccf_submit_delegations WHERE OwnerEmployeeID=? AND DelegateEmployeeID=? LIMIT 1',[$owner,$delegate]);
+        json_response(['success'=>true,'data'=>$row],201);
+    }
+    $p=route_params($path,'/cccf/delegations/:id'); if($p!==null&&$method==='PUT'){
+        require_admin();$b=json_body();$active=wf_bool($b['IsActive']??0);$count=db_execute('UPDATE cccf_submit_delegations SET IsActive=?,CreatedBy=? WHERE id=?',[$active,$actor,$p['id']]);if(!$count)json_response(['success'=>false,'message'=>'Delegation was not found.'],404);json_response(['success'=>true,'id'=>(int)$p['id'],'IsActive'=>$active]);
+    }
     if($method==='GET'&&$path==='/cccf/assignments')json_response(db_rows('SELECT a.*,COALESCE(e.EmployeeName,a.AssigneeName) AS AssigneeName,COALESCE(e.Department,a.Department) AS Department,e.CompanyEmail FROM cccf_assignments a LEFT JOIN employees e ON e.EmployeeID=a.EmployeeID ORDER BY Department,AssigneeName'));
     if(($method==='POST'&&$path==='/cccf/assignments')||(($p=route_params($path,'/cccf/assignments/:id'))!==null&&$method==='PUT')){require_admin();$b=json_body();$emp=$b['EmployeeID']??null;$name=$b['AssigneeName']??null;$dept=$b['Department']??null;if($emp){$er=db_row('SELECT EmployeeName,Department,CompanyEmail FROM employees WHERE EmployeeID=?',[$emp]);if(!$er)json_response(['success'=>false,'message'=>'Employee not found.'],404);$name=$er['EmployeeName'];$dept=$er['Department'];} if(!$emp&&(!$name||!$dept))json_response(['success'=>false,'message'=>'Invalid assignment payload.'],400); if($method==='POST'){db_execute('INSERT INTO cccf_assignments (EmployeeID,AssigneeName,Department,AllowDirectSignedPdf,DueDate,Note,CreatedBy) VALUES (?,?,?,?,?,?,?)',[$emp,$name,$dept,wf_bool($b['AllowDirectSignedPdf']??0),wf_date($b['DueDate']??null),$b['Note']??null,$actor]);json_response(['success'=>true,'id'=>(int)db()->lastInsertId()]);} db_execute('UPDATE cccf_assignments SET EmployeeID=?,AssigneeName=?,Department=?,AllowDirectSignedPdf=?,DueDate=?,Note=?,CreatedBy=? WHERE id=?',[$emp,$name,$dept,wf_bool($b['AllowDirectSignedPdf']??0),wf_date($b['DueDate']??null),$b['Note']??null,$actor,$p['id']]);json_response(['success'=>true]);}
     $p=route_params($path,'/cccf/assignments/:id'); if($p!==null&&$method==='DELETE'){require_admin();db_execute('DELETE FROM cccf_assignments WHERE id=?',[$p['id']]);json_response(['success'=>true]);}
@@ -1609,6 +1684,30 @@ function wf_ky_can_upload_followup_video(array $row, array $user): bool
     if ($userId === '' || $userId === 'unknown') return false;
     if (in_array($userId, [trim((string)($row['ReporterID'] ?? '')), trim((string)($row['SubmittedByID'] ?? ''))], true)) return true;
     return in_array($userId, wf_ky_participant_employee_ids($row['Participants'] ?? ''), true);
+}
+
+function wf_cccf_resolve_submitter(array $user, array $body): array
+{
+    $admin = wf_is_admin($user);
+    $requesterId = trim((string)wf_user_id($user));
+    if ($requesterId === '') json_response(['success' => false, 'message' => 'Missing authenticated employee identity.'], 403);
+    $assigneeId = trim((string)($body['AssigneeID'] ?? $requesterId));
+    if ($assigneeId === '') $assigneeId = $requesterId;
+    if (!$admin && $assigneeId !== $requesterId) {
+        $delegation = db_row('SELECT d.id FROM cccf_submit_delegations d INNER JOIN cccf_assignments a ON a.EmployeeID=d.OwnerEmployeeID WHERE d.OwnerEmployeeID=? AND d.DelegateEmployeeID=? AND d.IsActive=1 LIMIT 1', [$assigneeId, $requesterId]);
+        if (!$delegation) json_response(['success' => false, 'message' => 'You are not authorized to submit CCCF Permanent for this form owner.'], 403);
+    }
+    $owner = db_row('SELECT EmployeeID,EmployeeName,Department FROM employees WHERE EmployeeID=? LIMIT 1', [$assigneeId]);
+    if (!$owner) json_response(['success' => false, 'message' => 'Employee not found.'], 404);
+    $actor = db_row('SELECT EmployeeID,EmployeeName FROM employees WHERE EmployeeID=? LIMIT 1', [$requesterId]);
+    return [
+        'AssigneeID' => $assigneeId,
+        'SubmitterName' => (string)($owner['EmployeeName'] ?? ''),
+        'Department' => (string)($owner['Department'] ?? ''),
+        'SubmittedByEmployeeID' => $requesterId,
+        'SubmittedByName' => (string)($actor['EmployeeName'] ?? ($user['name'] ?? 'User')),
+        'IsSubmittedOnBehalf' => $assigneeId !== $requesterId,
+    ];
 }
 
 function wf_ini_bytes(string $value): int

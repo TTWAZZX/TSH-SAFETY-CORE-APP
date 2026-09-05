@@ -17,6 +17,22 @@
 - Added nullable `Patrol_Attendance.CheckinAt` with Node/PHP parity. New check-ins and idempotent replays return the actual Asia/Bangkok save time; historical rows remain NULL instead of displaying a fabricated midnight value.
 - Preserved Scheduled Compliance semantics: Extra walks remain Actual Walk Activity only and do not change `0/2 รอบ` unless an authorized Scheduled or Makeup session is completed. No upload/storage path changed.
 - Added explicit mobile save feedback for Personal and Self-Patrol check-in: each form locks while saving, shows an in-modal progress layer and preserves the established success refresh. Team & Overview now uses compact per-person cards on phones while retaining the full tables on desktop.
+## CCCF Phase C1-C4 Ownership, Delegation and Review Queue (2026-09-04, deployed)
+
+- Form A Permanent now distinguishes the accountable form owner from the authenticated submitter. Self-submit defaults to the current user; an authorized delegate selects only an Admin-granted owner with an active CCCF assignment, while Admin retains the existing Employee Master selection.
+- New actor fields preserve `SubmittedByEmployeeID` / `SubmittedByName`; KPI, tracking and review ownership remain keyed only to `AssigneeID`. Direct-signed PDF does not inherit through delegation.
+- Added Admin delegation management with Employee Master searchable pickers and active/inactive lifecycle. The owner notification reuses the existing `SubmittedByAdmin` outbox/template event.
+- Admin Excel review now holds the selected record while changing status, requires a reason for Reject, treats an identical review retry as idempotent, rejects stale/conflicting transitions, and keeps the review dialog/comment visible rather than closing and reopening it.
+- Node and PHP compatibility paths were kept aligned. The new migration is additive (`20260903_cccf_submit_delegations.sql`); no existing CCCF record, upload path or SMTP configuration changed.
+- Contract/API/browser/mobile UAT, PHP/Node syntax, full backend regression and read-only preflight passed. Test records, assignments, delegations, audit rows and temporary test employees were removed; local smoke verifies Outbox queueing without sending real email.
+- Deployed to the shared-hosting PHP target after a verified SQL backup (`cccf-c1c4-20260904-081838`, SHA-256 `A2D2EC9D19EB26D90F3E6E611A4985DC66D90661A8FAD89DD6BCEB8875F7C847`). The additive migration retained all `37` Permanent records, installed both actor columns and `cccf_submit_delegations`; download-back SHA-256 matched all four runtime files. The temporary token-protected helper was removed and returns HTTP `404`.
+
+## Safety Patrol Top/Management and Sec/Supervisor UI release (2026-09-03)
+
+- Deployed the approved Safety Patrol UI/API projection to the PHP target at `dev.tshpcl.com/safety/tsh-safety-core`: Supervisor personal summary/history/layout refresh and Top yearly activity type colouring are live.
+- Preserved all Patrol business rules and existing Attendance/Self Checkin data. No migration, database mutation, roster/session/target/quota change, or test record was made.
+- Created a four-file runtime rollback backup and verified the uploaded files by FTPS SHA-256 (`4/4`). HTTPS static/cache and unauthenticated API-boundary smoke passed.
+- The local `PROD_UAT_*` login credentials are not valid for this target (`401`), so authenticated Top & Management and Sec. & Supervisor smoke remains pending valid target-specific UAT access.
 
 ## Safety Patrol Check-in v2 - dev deployment (2026-09-02)
 
@@ -31,6 +47,29 @@
 - Added flag-gated Scheduled/Makeup/Extra semantics, cross-month/year Makeup, multi-round selection, Actual Walk Activity, concurrency-safe retry idempotency, rotation-aware calendar resolution, and one-base-team validation in Node/PHP parity.
 - Added an additive nullable idempotency column/index migration. Existing Attendance was not rewritten or deleted.
 - Node lifecycle, PHP lifecycle, concurrent retry, legacy, rotation, multiple-round, cross-year, Browser mobile modal, and zero-residue UAT passed locally. See `docs/safety-patrol-checkin-v2-local-handoff.md` for the exact deployment/rollback plan and known data anomalies.
+
+## BBS Smart Card Phase 10F-2 Visual Designer Editor (2026-09-02, Local complete)
+
+- Added an Admin Personal/Department layout chooser and a responsive Front/Back canvas with drag/resize, layer selection/order, numeric properties, lock/visibility, duplicate/delete, orientation, zoom, keyboard nudge, 50-step undo/redo and unsaved-change protection.
+- Added Node/PHP parity routes for Draft-bound private background assets and authorized side/asset reads. Uploads are JPG/PNG/WebP, content verified, limited to 10 MB and stored under `backend/private-uploads/bbs-card-designer`; safe JSON never exposes stored filenames or paths.
+- Active/Archived versions are immutable previews. Phone mode is preview-only, and preview QR values remain non-functional. The existing issue/replace/revoke/print and QR lifecycle are untouched because live designer rendering remains disabled.
+- Contract tests, PHP/Node syntax, a real Admin API lifecycle UAT and authenticated Chrome desktop/390 px UAT pass with no console error or overflow. API UAT covered Draft creation, parent and designer background reads, duplex save, ordinary-user denial and immutable-version rejection, then removed all temporary rows/files (`templates=0`, `versions=0`, `assets=0`). No Production deploy or GitHub push occurred.
+
+## BBS Smart Card Phase 10F-1 Additive Foundation And Compatibility (2026-09-02, Local complete)
+
+- Added five additive BBS designer tables for layout versions, Front/Back sides, positioned elements, static-asset metadata and immutable print snapshots. The two designer flags are installed disabled by default; rollback is flag-only and preserves all records.
+- Added Admin-only Node/PHP parity endpoints for the field catalog, version list/detail, Draft creation/update and readiness. Server validation allowlists data fields, element/style keys and integer basis-point geometry; Draft updates are transactional and protected by `RowVersion`.
+- Added a SELECT-only legacy inventory and a dry-run-by-default, explicit-apply idempotent bootstrap. Neither updates existing template/card/QR/print rows nor moves/deletes private artwork.
+- Applied the additive migration to Local only. Local contains no legacy Personal/Department templates, so inventory/bootstrap found zero candidates and inserted zero designer rows; both feature flags remain `0`.
+- Phase 10F-1 contract/parity tests, PHP/Node syntax, BBS regressions, full Backend suite and authenticated permission preflight pass. No existing business data, upload path, Production deployment or GitHub push changed.
+
+## BBS Smart Card Phase 10F-0 Visual Card Designer Architecture (2026-09-02, documentation only)
+
+- Defined separate BBS layout versions, Front/Back sides, positioned elements, private static assets and print-render snapshots for Personal and Department template parents.
+- Defined server allowlists for Personal identity/BBS/one-time QR fields and Department Master/shared-Community-QR fields. Unit cards and invented QR destinations remain out of scope.
+- Defined portrait/landscape geometry, integer basis-point coordinates, Draft-only editing, immutable Active versions, readiness severity and one normalized preview/print render contract.
+- Defined an additive idempotent legacy bootstrap that references existing private artwork without moving bytes or updating/deleting existing template/card/QR/print data. Missing layouts retain the current renderer and rollback is flag-only.
+- Added the sequenced Phase 10F-1 through 10F-5 implementation roadmap. No migration, API, runtime, schema, business data, upload, Production deployment or GitHub push occurred.
 
 ## BBS Automatic Checklist References (2026-09-02, Production Admin-only)
 
