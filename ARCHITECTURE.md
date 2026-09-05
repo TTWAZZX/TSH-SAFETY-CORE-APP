@@ -1,5 +1,9 @@
 # TSH Safety Core Activity - Architecture
 
+## BBS immutable print receipts (2026-09-05 integration candidate)
+
+Node/PHP render responses now sign an actor/subject/QR-fingerprint-bound snapshot with a 24-hour HMAC receipt. Optional `designerReceipts` (Personal) and `designerReceipt` (Department) print-log inputs persist that exact prepared snapshot rather than rebuilding from current layout/Master state. Legacy calls still log without a fabricated snapshot. Shared browser style and physical duplex planning live in `public/js/utils/bbs-card-print.js`. No receipt schema or upload-path change. See `docs/bbs-integration-review-20260905.md` for validation limits.
+
 ## Safety Patrol Personal Live Statistics (2026-09-02)
 
 - The Personal hero and performance card consume the same authorized Top & Management attendance-detail projection used by Team & Overview: Accepted Coverage to date, required sessions due to date, annual target, and Accepted %.

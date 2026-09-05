@@ -5,7 +5,7 @@ const root=path.resolve(__dirname,'..','..');
 const read=file=>fs.readFileSync(path.join(root,file),'utf8');
 const nodeReadiness=read('backend/services/bbs-card-designer.js');
 const phpReadiness=read('api/lib/bbs_card_designer.php');
-const ui=read('public/js/pages/bbs-smart-card.js');
+const ui=read('public/js/pages/bbs-smart-card.js')+read('public/js/utils/bbs-card-print.js');
 
 for(const source of [nodeReadiness,phpReadiness]){
   for(const token of ['QR_TOO_SMALL','DPI_LOW','BLEED_LOW_','SAFE_MARGIN_LOW_','BACKGROUND_RESOLUTION_LOW_']) assert.match(source,new RegExp(token),'print readiness parity is missing '+token);

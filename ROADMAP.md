@@ -1,5 +1,9 @@
 # TSH Safety Core Activity - Roadmap
 
+## BBS next acceptance gate (2026-09-05)
+
+Local reconciliation and 49-suite regression are complete. Next: signed-receipt authenticated API UAT, desktop/mobile/physical duplex acceptance and Department asset authorization review. The Admin-only candidate is prepared, not deployed. Keep ordinary-user rollout closed under Phase 10E; use `docs/bbs-integration-review-20260905.md` as the current continuation scope.
+
 ## CCCF Phase C1-C4 Ownership, Delegation and Review Queue (2026-09-03)
 
 Implementation and verified shared-hosting PHP deployment are complete. Business UAT should cover self-submit, Admin-granted delegated submit, disabled-delegation rejection, owner KPI attribution, owner/submitted-by detail/history, Approve with comment and Reject with required reason on Desktop/Mobile.

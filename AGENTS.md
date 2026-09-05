@@ -1,5 +1,9 @@
 # TSH Safety Core Activity - AGENTS.md
 
+## BBS integration local migration evidence (2026-09-05)
+
+Local-only CCCF delegation and BBS designer foundation migrations were applied after backup `backups/bbs-integration-local-2026-09-05T08-17-05-534Z` (SQL SHA-256 `b2b4f087467a3364a714cb7a6db2d784c707bf0162ffc0986601bf4f25b2fd78`). Six additive tables and two actor columns; existing row counts preserved. No Production DB update or `backend/uploads/` path change. Print receipts add no schema. Keep staged=1 and both Designer flags=0 pending acceptance. See `docs/bbs-integration-review-20260905.md`.
+
 ## Local MySQL recovery evidence (2026-09-05)
 
 - Local XAMPP data was rebuilt from a verified cold-copy export after an InnoDB checkpoint failure. Preserve `backups/local-mysql-recovery-20260905/` and `C:/xampp/mysql/data-before-recovery-20260905`; do not delete redo files or replace business tables as a generic startup fix.

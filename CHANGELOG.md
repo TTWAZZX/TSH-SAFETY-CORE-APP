@@ -1,5 +1,9 @@
 # TSH Safety Core Activity - Changelog And Handoff History
 
+## BBS branch reconciliation and Admin review candidate (2026-09-05)
+
+Merged BBS branch locally while preserving verified Production Patrol/CCCF. Fixed designer print styles/imposition and signed frozen print snapshots in Node/PHP. BBS tests pass 49/49; CCCF contracts pass and protected runtime baseline comparison passes. Prepared eight-file review package only; endpoint/browser acceptance remains outstanding. Full evidence, local migration backup and rollback: `docs/bbs-integration-review-20260905.md`.
+
 ## Project review and local XAMPP recovery (2026-09-05)
 
 - Verified that main and `wip/bbs-card-designer-10f2` remain unmerged. Production BBS frontend matches `4805291`; the Designer API responds but both Designer flags are disabled. Recorded release drift and outstanding print/test/dependency findings without modifying application code or deploying.

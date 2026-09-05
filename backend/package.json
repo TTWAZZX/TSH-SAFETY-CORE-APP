@@ -34,7 +34,7 @@
     "smoke:ky-chunked-video-php": "node scripts/ky-chunked-video-lifecycle-smoke.js",
     "uat:preflight": "node scripts/uat-preflight.js",
     "verify:onboarding-local": "npm run test:onboarding && npm run test:onboarding-enforcement && npm run test:password-continuation && npm run test:safety-unit-continuation && npm run test:safety-core-ky && npm run test:profile-validation && npm run test:data-quality && npm run test:cross-path-profile && npm run test:email-switch && npm run permission:audit && npm run smoke:api && npm run uat:preflight && npm run audit:onboarding && npm run audit:profile-validation && npm run audit:data-quality",
-    "test": "npm run verify:onboarding-local",
+    "test": "npm run verify:onboarding-local && npm run test:bbs",
     "audit:patrol-checkin-v2": "node scripts/patrol-checkin-v2-audit.js",
     "migrate:patrol-checkin-v2-local": "node scripts/patrol-checkin-v2-migrate-local.js",
     "test:patrol-checkin-v2": "node scripts/patrol-checkin-v2.test.js",
@@ -216,7 +216,10 @@
     "smoke:machine-safety-responsive": "node scripts/machine-safety-responsive-smoke.js",
     "uat:machine-safety-responsive": "node scripts/machine-safety-responsive-browser-uat.js",
     "uat:production-yokoten-dashboard-readonly": "node scripts/production-yokoten-dashboard-readonly-uat.js",
-    "uat:production-yokoten-dashboard-browser": "node scripts/production-yokoten-dashboard-browser-uat.js"
+    "uat:production-yokoten-dashboard-browser": "node scripts/production-yokoten-dashboard-browser-uat.js",
+    "test:bbs": "node scripts/bbs-regression.js",
+    "test:bbs-integration-print": "node scripts/bbs-integration-print.test.js",
+    "setup:bbs-integration-local": "node scripts/bbs-integration-local-setup.js"
   },
   "keywords": [],
   "author": "",

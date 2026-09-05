@@ -58,8 +58,8 @@ assert.ok(replace.indexOf("intent:'replace'") < replace.indexOf('openCardPrintPo
 assert.ok(replace.indexOf('openCardPrintPopup()') < replace.indexOf("API.post(`/bbs/admin/cards/${id}/replace`"), 'Replacement popup safety must remain before QR rotation');
 
 assert.ok(ui.includes("border:.2mm dashed #f97316"), 'Print output must expose the cut boundary');
-assert.ok(ui.includes(".safe{position:absolute;inset:4%;border:.2mm dashed #0891b2"), 'Print output must retain a non-printing safe-area guide');
-assert.match(main, /bbs-smart-card\.js\?v=20260901-bbs-phase10(?:b4|d[1-5])/);
-assert.match(html, /main\.js\?v=(?:20260901-bbs-phase10(?:b4|d[1-5])|20260902-bbs-auto-reference-r1)/);
+assert.ok(ui.includes('.safe,.designer-safe{position:absolute;border:.2mm dashed #0891b2') && ui.includes('.safe{inset:4%}') && ui.includes('.safe,.designer-safe,.designer-bleed{display:none}'), 'Print output must retain a safe-area guide and hide it when printing');
+require('./bbs-runtime-assets').assertBbsRuntimeAssets();
+
 
 console.log('BBS Phase 10B-4 Template Preview & Print Readiness contract: PASS');

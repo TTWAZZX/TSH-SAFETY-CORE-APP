@@ -44,8 +44,8 @@ for (const busyLabel of ['กำลังส่ง...', 'กำลังบั�
     assert.ok(ui.includes(busyLabel), `Busy feedback missing ${busyLabel}`);
 }
 
-assert.match(main, /bbs-smart-card\.js\?v=(?:20260831-bbs-phase10c3|20260901-bbs-phase10(?:b4|d[1-5]))/);
-assert.match(html, /main\.js\?v=(?:20260831-bbs-phase10c3-forklift-renewal-ky-chunk-r1|20260901-bbs-phase10(?:b4|d[1-5])|20260902-bbs-auto-reference-r1)/);
+require('./bbs-runtime-assets').assertBbsRuntimeAssets();
+
 
 const loadInspectorStart = ui.indexOf('async function loadInspectorData()');
 const loadInspectorEnd = ui.indexOf('async function appointInspector', loadInspectorStart);

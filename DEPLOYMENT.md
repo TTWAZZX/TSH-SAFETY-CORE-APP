@@ -1,5 +1,9 @@
 # TSH Safety Core Activity - Deployment
 
+## BBS Admin-only review package (2026-09-05; not deployed)
+
+`output/bbs-admin-review-20260905/` contains eight candidate runtime files, SHA-256 manifest and historical rollback references. Follow `docs/bbs-integration-review-20260905.md` for fresh-backup requirements, blocked activation/rollout gates and rollback. This is not a deployment approval. Correction to the earlier raw-hash review: most apparent branch/runtime differences were line endings; four Patrol/CCCF runtime files now match the verified Production baseline.
+
 ## Verified Production identity and local recovery (2026-09-05)
 
 The user confirmed that `https://dev.tshpcl.com/safety/tsh-safety-core` is the actual Production application. Read-only inspection found the two BBS frontend files identical to branch commit `4805291` and an authenticated Designer catalog with both Designer flags disabled. This is observed current state, not a new deployment record or rollout approval. Other sampled runtime files differ from both main and the BBS branch; reconcile the release before uploading either checkout.

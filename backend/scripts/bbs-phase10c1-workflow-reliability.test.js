@@ -48,7 +48,7 @@ assert.ok(exportSource.indexOf('const data = await analyticsExportData()') < exp
 assert.ok(exportSource.includes("if (type === 'print')"), 'Print must pre-open its popup before the async fetch');
 assert.ok(exportSource.includes('applyAnalyticsPayload(data)'), 'PDF and Print must render the freshly fetched payload');
 
-assert.match(main, /bbs-smart-card\.js\?v=(?:20260831-bbs-phase10c[123]|20260901-bbs-phase10(?:b4|d[1-5]))/);
-assert.match(html, /main\.js\?v=(?:20260831-bbs-phase10c[123]-forklift-renewal-ky-chunk-r1|20260901-bbs-phase10(?:b4|d[1-5])|20260902-bbs-auto-reference-r1)/);
+require('./bbs-runtime-assets').assertBbsRuntimeAssets();
+
 
 console.log('BBS Phase 10C-1 workflow reliability contract: PASS');

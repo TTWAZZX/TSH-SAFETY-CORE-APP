@@ -43,6 +43,6 @@ assert(ui.includes("paged:'1'"), 'frontend list requests must explicitly opt int
 assert(ui.includes('min-h-11'), 'mobile pager controls must retain a 44px touch target');
 
 const main = read('public/js/main.js');
-assert.match(main, /20260901-bbs-phase10d[345]/, 'BBS cache-bust was not updated');
+require('./bbs-runtime-assets').assertBbsRuntimeAssets();
 
 console.log('BBS Phase 10D-3 scalable list contract tests passed.');

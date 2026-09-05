@@ -1,5 +1,9 @@
 # TSH Safety Core Activity - AI Quick Start
 
+## Current handoff: BBS integration review (2026-09-05)
+
+Work now lives on `integration/production-bbs-20260905` after merge `126f5be`; the earlier unmerged status below is historical. BBS regression passes 49/49. See `docs/bbs-integration-review-20260905.md` for changed files, exact remaining UAT, rollback and the eight-file Admin-only review package. No push/deploy/Production flag change. Do not repeat discovery; continue from the report.
+
 ## Current project review and local MySQL recovery (2026-09-05)
 
 - See `docs/project-review-and-mysql-recovery-20260905.md` for verified Git/Production state, findings, test results and recovery evidence. Main is `82f7416`; the unmerged `wip/bbs-card-designer-10f2` branch is `4805291` and also contains Patrol/CCCF work.

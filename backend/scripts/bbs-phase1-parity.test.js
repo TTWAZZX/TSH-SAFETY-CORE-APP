@@ -79,7 +79,8 @@ assert.ok(server.includes("app.use('/api/bbs',"), 'Node BBS route is not mounted
 assert.ok(apiIndex.includes('handle_bbs_smart_card_routes($method, $path);'), 'PHP BBS handler is not dispatched.');
 assert.ok(admin.includes("key: 'bbs-foundation'"), 'Admin BBS Foundation tab is missing.');
 assert.ok(admin.includes("API.get('/bbs/admin/foundation')"), 'Admin BBS Foundation API load is missing.');
-assert.ok(!admin.includes("window.location.hash = '#bbs-smart-card'"), 'Phase 1 must not expose the main BBS module.');
+// Phase 3 introduced workspace navigation. The Phase 1 migration must still default it off;
+// current runtime authorization is covered by the Phase 10E staged/Pilot gate tests.
 assert.ok(migration.includes("('main_menu_enabled', '0'"), 'Migration must keep main menu disabled.');
 assert.ok(migration.includes("d.Name = 'MAINTENANCE SEC.'"));
 assert.ok(migration.includes("u.name = 'Tube Cutting'"));
