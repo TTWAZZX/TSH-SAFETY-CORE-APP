@@ -1,18 +1,18 @@
 # TSH Safety Core Activity - Changelog And Handoff History
 
-## Hiyari Assignment-scoped reporting (2026-09-07, local)
+## Hiyari Assignment-scoped reporting (2026-09-07, deployed)
 
 - Hiyari Dashboard, Rank, SLA/action intelligence, Admin review totals and yearly management export now include only reports whose accountable reporter has a current Hiyari Assignment.
 - History defaults to Assignment-scoped reports and exposes preserved outside-Assignment records through a warning, explicit scope filter and `นอก Assignment` label. Search and existing filters remain available in every scope.
 - Node and PHP list APIs add the same opt-in `assignmentScope` contract and server-computed `HasAssignment` projection. Legacy callers that omit the scope retain their existing all-visible response.
-- No MySQL schema, Hiyari report, Assignment, upload path, GitHub push or Production deployment changed.
+- Source commit `17e53ee` is pushed on `main` and the shared PHP/frontend runtime is deployed. Fresh database/application backup, FTPS hashes `5/5`, HTTPS hashes `4/4`, cache markers and anonymous authorization checks passed; no schema, Hiyari record, Assignment or upload path changed.
 
-## CCCF Permanent Assignment-scoped dashboard (2026-09-07, local)
+## CCCF Permanent Assignment-scoped dashboard (2026-09-07, deployed)
 
 - Permanent hero, Rank, Executive Dashboard and Admin review totals now use only documents whose accountable owner has a current CCCF Assignment; completion remains one latest submission per assigned owner.
 - The tracking table defaults to Assignment-scoped rows. Documents without a current Assignment remain preserved and accessible through a dedicated warning, scope filter and explicit `นอก Assignment` label, but are excluded from KPI, Rank and Permanent progress.
 - Older documents for an owner who still has an Assignment are distinguished as `ประวัติ Assignment` instead of being misclassified as outside Assignment.
-- Frontend-only change with cache bust and focused regression coverage. No schema, CCCF record, Assignment, delegation, upload path, GitHub push or Production deployment changed.
+- Frontend behavior is deployed from source commit `17e53ee` with cache bust and focused regression coverage. No schema, CCCF record, Assignment, delegation or upload path changed.
 
 ## CCCF delegated Direct PDF permission (2026-09-07, deployed)
 

@@ -1,5 +1,16 @@
 # TSH Safety Core Activity - Deployment
 
+## CCCF and Hiyari Assignment-scoped reporting release (2026-09-07)
+
+Source commit `17e53ee` is pushed on `main` and deployed to `https://dev.tshpcl.com/safety/tsh-safety-core`. The PHP/shared-hosting runtime scope is `index.html`, `public/js/main.js`, `public/js/pages/cccf.js`, `public/js/pages/hiyari.js` and `api/handlers/workflow_phase6.php`; Node remains the local/API-parity implementation. No schema, upload-path, rollout-setting or existing business-data change was made.
+
+- Fresh consistent database backup: `backups/production/cccf-hiyari-assignment-scope-predeploy-20260907-150540/production-before.sql.gz` (191 tables; 1,586,149 compressed bytes; 18,083,466 expanded bytes; SHA-256 `05ED8DF88AE81B00008FCC4FFD0C57C103689DC6EA91DD0F306DB2A5BE702FC7`; gzip validation and final `COMMIT` marker passed).
+- Exact application rollback copies are in `application-before/`. FTPS upload/download-back SHA-256 matched release source **5/5**.
+- HTTPS download hashes matched **4/4** public assets and served `cccf-hiyari-assignment-scope-r1`, `cccf-assignment-scope-r1`, `hiyari-assignment-scope-r1` and both Assignment/outside-Assignment UI contracts. Anonymous Hiyari assigned stats, Hiyari outside list and CCCF Permanent reads remain `401`.
+- The protected backup helper was deleted with FTPS residue `0`; `api/index.php` was restored to SHA-256 `58CC22F795B87CFEBE701CEA2A27E20C170E0A30A0E378D798118FF23495A487`. No temporary business row or private upload was created.
+- Local verification passed focused CCCF/Hiyari scope contracts, read-only API UAT, full Backend regression, read/permission preflight **133/133** and BBS regression **49/49**. Production Admin UAT credentials still return `401`, so authenticated Production read/browser smoke could not be performed.
+- Normal code rollback restores the five runtime paths from `application-before/`; database restore is reserved for an authorized data incident.
+
 ## CCCF delegated Direct PDF release (2026-09-07)
 
 Source commit `f164dd7` is pushed on `main` and deployed to `https://dev.tshpcl.com/safety/tsh-safety-core`. The release contains only `index.html`, `public/js/main.js`, `public/js/pages/cccf.js` and `api/handlers/workflow_phase6.php`; Node remains the local/API-parity implementation. No schema, upload-path, rollout-setting or existing business-data change was made.
