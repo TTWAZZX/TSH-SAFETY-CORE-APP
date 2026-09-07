@@ -1,5 +1,15 @@
 # TSH Safety Core Activity - Deployment
 
+## CCCF Permanent and Hiyari PDF export reconciliation (2026-09-07)
+
+Source commit `c5a9636` is pushed on `main` and deployed to `https://dev.tshpcl.com/safety/tsh-safety-core`. The PHP/shared-hosting runtime release contains only `index.html`, `public/js/main.js`, `public/js/pages/cccf.js` and `public/js/pages/hiyari.js`; no API, schema, upload path, Assignment, submission, review or business-data change was made.
+
+- Fresh consistent database backup: `backups/production/cccf-hiyari-pdf-layout-predeploy-20260907-163818/production-before.sql.gz` (191 tables; 1,506,259 compressed bytes; 15,243,818 expanded bytes; SHA-256 `7EEB3086A68D27DF138426D098964467B3B2FD1856FF342B2D0B5A92759BA24E`; gzip validation and final completion marker passed).
+- Exact application rollback files are in `application-before/`; Production matched the preceding deployed commit `f0b5592` for all four paths before upload. FTPS download-back SHA-256 matched source **4/4** after deployment.
+- HTTPS SHA-256 matched source **4/4** and served cache keys `20260907-cccf-hiyari-pdf-layout-r3`, `20260907-cccf-permanent-pdf-layout-r2` and `20260907-hiyari-pdf-summary-r2`, plus the CCCF one-owner-per-Assignment/18-row pagination and Hiyari scoped-report contracts.
+- Anonymous Hiyari assigned stats, Hiyari outside list and CCCF Permanent reads remain `401`. The protected backup helper was removed with FTPS residue `0` and HTTPS `404`; no temporary business row or private upload was created.
+- Local full Backend verification passed read/permission preflight **133/133**, BBS regression **49/49**, CCCF Permanent/Worker regression, Hiyari Assignment regression, JavaScript syntax, diff and encoding checks. Normal rollback restores the four runtime files from `application-before/`; the database backup is reserved for an authorized data incident.
+
 ## CCCF and Hiyari Assignment-scoped reporting release (2026-09-07)
 
 Source commit `17e53ee` is pushed on `main` and deployed to `https://dev.tshpcl.com/safety/tsh-safety-core`. The PHP/shared-hosting runtime scope is `index.html`, `public/js/main.js`, `public/js/pages/cccf.js`, `public/js/pages/hiyari.js` and `api/handlers/workflow_phase6.php`; Node remains the local/API-parity implementation. No schema, upload-path, rollout-setting or existing business-data change was made.
