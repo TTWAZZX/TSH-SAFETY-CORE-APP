@@ -1522,7 +1522,10 @@ function buildPermanentTrackingRows() {
         if (dateDelta !== 0) return dateDelta;
         const deptDelta = String(a.Department || '').localeCompare(String(b.Department || ''));
         if (deptDelta !== 0) return deptDelta;
-        return String(a.displayName || '').localeCompare(String(b.displayName || ''));
+        const nameDelta = String(a.displayName || '').localeCompare(String(b.displayName || ''), 'th');
+        if (nameDelta !== 0) return nameDelta;
+        return String(a.assignment?.EmployeeID || a.submission?.AssigneeID || '')
+            .localeCompare(String(b.assignment?.EmployeeID || b.submission?.AssigneeID || ''));
     });
 }
 
@@ -1546,6 +1549,16 @@ function getFilteredPermanent() {
         }
         return true;
     });
+}
+
+function getPermanentPdfRows() {
+    const rows = getFilteredPermanent();
+    // The Assignment report is a person roster: one current row per assigned
+    // owner. Historical submissions stay available in the on-screen audit
+    // views and in All scope, but must not create a second person/count here.
+    return _pFilterScope === 'assigned'
+        ? rows.filter(row => row.rowType === 'assigned')
+        : rows;
 }
 
 function renderPermanentStatusFilterChips() {
@@ -3169,7 +3182,7 @@ window.exportCccfPermanentPDF = async function() {
         return;
     }
 
-    const filtered = getFilteredPermanent();
+    const filtered = getPermanentPdfRows();
     if (!filtered.length) {
         showToast('ไม่มีข้อมูลสำหรับส่งออก PDF', 'warning');
         return;
@@ -3198,15 +3211,18 @@ window.exportCccfPermanentPDF = async function() {
         ? Math.round((completeRows.filter(r => r.rowType === 'assigned').length / assignedRows.length) * 100)
         : 0;
     const deptProgress  = buildPermanentDepartmentProgress();
-    const criticalRows  = filtered
+    const criticalSummaryLimit = 3;
+    const criticalRecords = filtered
         .filter(r => r.id && (r.Rank === 'A' || r.Rank === 'B'))
         .sort((a, b) => {
             const o = { A: 0, B: 1, C: 2 };
             return (o[a.Rank] ?? 9) - (o[b.Rank] ?? 9) || new Date(b.SubmitDate || 0) - new Date(a.SubmitDate || 0);
-        })
-        .slice(0, 8);
+        });
+    const criticalRows = criticalRecords.slice(0, criticalSummaryLimit);
+    const criticalOverflowCount = Math.max(criticalRecords.length - criticalRows.length, 0);
 
     const activeFilters = [
+        `ขอบเขต: ${{ assigned: 'ผู้ได้รับ Assignment (คนละ 1 แถว)', outside: 'นอก Assignment', all: 'ทั้งหมดรวมประวัติ' }[_pFilterScope] || _pFilterScope}`,
         _pSearch      ? `ค้นหา: ${_pSearch}` : '',
         _pFilterDept  ? `ส่วนงาน: ${_pFilterDept}` : '',
         _pFilterStatus ? `สถานะ: ${{ complete: 'สำเร็จ', onprocess: 'กำลังดำเนินการ', must_send: 'ต้องส่ง' }[_pFilterStatus] || _pFilterStatus}` : '',
@@ -3272,11 +3288,11 @@ window.exportCccfPermanentPDF = async function() {
             : `<div style="${K}font-size:9px;color:#94a3b8">ยังไม่มีข้อมูล Department Progress</div>`;
 
         const criticalTable = criticalRows.length
-            ? `<table style="width:100%;border-collapse:collapse">
+            ? `<table style="width:100%;border-collapse:collapse;table-layout:fixed">
                 <thead>
                   <tr style="background:#fff7ed">
-                    <th style="${K}padding:7px 8px;font-size:8.5px;color:#7c2d12;text-align:left;border-bottom:1px solid #fed7aa">วันที่</th>
-                    <th style="${K}padding:7px 8px;font-size:8.5px;color:#7c2d12;text-align:left;border-bottom:1px solid #fed7aa">ผู้รับผิดชอบ / ส่วนงาน</th>
+                    <th style="${K}padding:7px 8px;font-size:8.5px;color:#7c2d12;text-align:left;border-bottom:1px solid #fed7aa;width:76px">วันที่</th>
+                    <th style="${K}padding:7px 8px;font-size:8.5px;color:#7c2d12;text-align:left;border-bottom:1px solid #fed7aa;width:190px">ผู้รับผิดชอบ / ส่วนงาน</th>
                     <th style="${K}padding:7px 8px;font-size:8.5px;color:#7c2d12;text-align:left;border-bottom:1px solid #fed7aa">Job Area / Stop</th>
                     <th style="${K}padding:7px 8px;font-size:8.5px;color:#7c2d12;text-align:center;border-bottom:1px solid #fed7aa;width:42px">Rank</th>
                     <th style="${K}padding:7px 8px;font-size:8.5px;color:#7c2d12;text-align:center;border-bottom:1px solid #fed7aa;width:48px">File</th>
@@ -3286,15 +3302,16 @@ window.exportCccfPermanentPDF = async function() {
                   ${criticalRows.map(r => {
                       const stop = STOP_TYPES.find(s => +s.id === +r.StopType) || STOP_TYPES[5];
                       return `<tr>
-                        <td style="${K}padding:7px 8px;font-size:8.7px;color:#475569;border-bottom:1px solid #ffedd5">${escapeHtml(formatThaiDate(r.SubmitDate))}</td>
-                        <td style="${K}padding:7px 8px;font-size:8.7px;color:#1e293b;border-bottom:1px solid #ffedd5"><div style="${K}font-size:7.8px;font-weight:800;color:#047857">${escapeHtml(getPermanentNumber(r))}</div>${escapeHtml(r.displayName || '—')}<div style="${K}font-size:8px;color:#94a3b8">${escapeHtml(r.Department || '—')}</div></td>
-                        <td style="${K}padding:7px 8px;font-size:8.7px;color:#475569;border-bottom:1px solid #ffedd5">${escapeHtml((r.JobArea || '—').slice(0, 55))}${(r.JobArea || '').length > 55 ? '...' : ''}<div style="${K}font-size:8px;color:#94a3b8">${escapeHtml(stop.code)}</div></td>
-                        <td style="${K}padding:7px 8px;font-size:8.7px;font-weight:700;text-align:center;border-bottom:1px solid #ffedd5;color:${r.Rank === 'A' ? '#dc2626' : '#ea580c'}">${escapeHtml(r.Rank)}</td>
-                        <td style="${K}padding:7px 8px;font-size:8.5px;text-align:center;border-bottom:1px solid #ffedd5;color:${r.FileUrl ? '#059669' : '#94a3b8'}">${r.FileUrl ? 'มีไฟล์' : '—'}</td>
+                        <td style="${K}padding:7px 8px;font-size:8.7px;line-height:1.35;vertical-align:top;color:#475569;border-bottom:1px solid #ffedd5">${escapeHtml(formatThaiDate(r.SubmitDate))}</td>
+                        <td style="${K}padding:7px 8px;font-size:8.7px;line-height:1.35;vertical-align:top;overflow-wrap:anywhere;color:#1e293b;border-bottom:1px solid #ffedd5"><div style="${K}font-size:7.8px;font-weight:800;color:#047857">${escapeHtml(getPermanentNumber(r))}</div>${escapeHtml(r.displayName || '—')}<div style="${K}font-size:8px;color:#94a3b8">${escapeHtml(r.Department || '—')}</div></td>
+                        <td style="${K}padding:7px 8px;font-size:8.7px;line-height:1.35;vertical-align:top;overflow-wrap:anywhere;color:#475569;border-bottom:1px solid #ffedd5">${escapeHtml((r.JobArea || '—').slice(0, 55))}${(r.JobArea || '').length > 55 ? '...' : ''}<div style="${K}font-size:8px;color:#94a3b8">${escapeHtml(stop.code)}</div></td>
+                        <td style="${K}padding:7px 8px;font-size:8.7px;line-height:1.35;vertical-align:top;font-weight:700;text-align:center;border-bottom:1px solid #ffedd5;color:${r.Rank === 'A' ? '#dc2626' : '#ea580c'}">${escapeHtml(r.Rank)}</td>
+                        <td style="${K}padding:7px 8px;font-size:8.5px;line-height:1.35;vertical-align:top;text-align:center;border-bottom:1px solid #ffedd5;color:${r.FileUrl ? '#059669' : '#94a3b8'}">${r.FileUrl ? 'มีไฟล์' : '—'}</td>
                       </tr>`;
                   }).join('')}
                 </tbody>
-              </table>`
+              </table>
+              ${criticalOverflowCount ? `<div style="${K}margin-top:7px;font-size:8.2px;color:#64748b;text-align:right">แสดง ${criticalRows.length} จาก ${criticalRecords.length} รายการ · ดูรายการที่เหลือในหน้ารายละเอียด</div>` : ''}`
             : `<div style="${K}font-size:9px;color:#94a3b8">ไม่มีรายการ Rank A/B ตามตัวกรองปัจจุบัน</div>`;
 
         return `<div style="${PAGE_STYLE}">
@@ -3322,11 +3339,11 @@ window.exportCccfPermanentPDF = async function() {
                 <div style="display:grid;grid-template-columns:repeat(2,1fr);gap:8px">${stopCards}</div>
               </div>
             </div>
-            <div style="border:1px solid #e2e8f0;border-radius:14px;padding:14px;background:#ffffff;flex:1;min-height:0">
+            <div style="border:1px solid #e2e8f0;border-radius:14px;padding:14px;background:#ffffff;flex:1 1 0;min-height:0;overflow:hidden">
               <div style="${K}font-size:10px;font-weight:700;color:#334155;margin-bottom:10px">Priority Issues for Management Attention / Rank A &amp; B</div>
               ${criticalTable}
             </div>
-            <div style="display:flex;justify-content:space-between;gap:24px;padding-top:6px">
+            <div style="display:flex;justify-content:space-between;gap:24px;padding-top:6px;min-height:38px;flex-shrink:0;background:#ffffff;position:relative;z-index:1">
               <div style="flex:1;border-top:1px solid #cbd5e1;padding-top:6px;text-align:center">
                 <div style="${K}font-size:8px;color:#94a3b8">Prepared By / ผู้จัดทำรายงาน</div>
                 <div style="${K}font-size:9px;color:#334155;font-weight:600;margin-top:2px">${escapeHtml(currentUser.name || '................................')}</div>
@@ -3342,19 +3359,21 @@ window.exportCccfPermanentPDF = async function() {
     })();
 
     // ── Detail pages
-    const rowsPerPage = 24;
+    const permanentRowsPerPage = 18;
     const detailPages = [];
-    for (let start = 0; start < filtered.length; start += rowsPerPage) {
-        const rows = filtered.slice(start, start + rowsPerPage);
+    for (let start = 0; start < filtered.length; start += permanentRowsPerPage) {
+        const rows = filtered.slice(start, start + permanentRowsPerPage);
         const rowsHtml = rows.map((r, idx) => {
             const stop        = STOP_TYPES.find(s => +s.id === +r.StopType) || STOP_TYPES[5];
             const rankColor   = r.Rank === 'A' ? '#dc2626' : r.Rank === 'B' ? '#ea580c' : r.Rank === 'C' ? '#059669' : '#94a3b8';
             const statusLabel = r.status.key === 'complete' ? 'สำเร็จ' : r.status.key === 'onprocess' ? 'กำลังดำเนินการ' : 'ต้องส่ง';
             const statusColor = r.status.key === 'complete' ? '#059669' : r.status.key === 'onprocess' ? '#d97706' : '#dc2626';
+            const employeeId  = r.assignment?.EmployeeID || r.submission?.AssigneeID || '—';
+            const documentNo  = getPermanentNumber(r);
             return `<tr style="background:${(start + idx) % 2 === 0 ? '#ffffff' : '#f8fafc'}">
               <td style="${K}padding:6px 6px;font-size:8.3px;color:#94a3b8;text-align:center;border-bottom:1px solid #eef2f7">${start + idx + 1}</td>
               <td style="${K}padding:6px 8px;font-size:8.3px;color:#475569;border-bottom:1px solid #eef2f7">${escapeHtml(formatThaiDate(r.SubmitDate))}</td>
-              <td style="${K}padding:6px 8px;font-size:8.4px;color:#1e293b;border-bottom:1px solid #eef2f7"><div style="${K}font-size:7.5px;font-weight:800;color:#047857">${escapeHtml(getPermanentNumber(r))}</div>${escapeHtml(r.displayName || '—')}<div style="${K}font-size:7.6px;color:#94a3b8">${escapeHtml(r.Department || '—')}</div></td>
+              <td style="${K}padding:6px 8px;font-size:8.4px;color:#1e293b;border-bottom:1px solid #eef2f7"><div style="${K}font-size:7.5px;font-weight:800;color:#047857">ID: ${escapeHtml(employeeId)}${documentNo !== '—' ? ` · ${escapeHtml(documentNo)}` : ''}</div>${escapeHtml(r.displayName || '—')}<div style="${K}font-size:7.6px;color:#94a3b8">${escapeHtml(r.Department || '—')}</div></td>
               <td style="${K}padding:6px 8px;font-size:8.2px;font-weight:700;color:${statusColor};border-bottom:1px solid #eef2f7">${statusLabel}</td>
               <td style="${K}padding:6px 8px;font-size:8.2px;color:#475569;border-bottom:1px solid #eef2f7">${escapeHtml(stop.code)}<div style="${K}font-size:7.6px;font-weight:700;color:${rankColor}">${r.Rank ? `Rank ${escapeHtml(r.Rank)}` : '—'}</div></td>
               <td style="${K}padding:6px 8px;font-size:8.2px;color:#475569;border-bottom:1px solid #eef2f7">${escapeHtml((r.JobArea || '—').slice(0, 60))}${(r.JobArea || '').length > 60 ? '...' : ''}${r.Summary ? `<div style="${K}font-size:7.6px;color:#94a3b8">${escapeHtml(r.Summary.slice(0, 60))}${r.Summary.length > 60 ? '...' : ''}</div>` : ''}</td>
@@ -3363,9 +3382,9 @@ window.exportCccfPermanentPDF = async function() {
         }).join('');
 
         detailPages.push(`<div style="${PAGE_STYLE}">
-          ${cccfHeader('CCCF Form A Permanent Detail', `รายงานรายละเอียดตารางติดตาม · Records ${start + 1}-${Math.min(start + rowsPerPage, filtered.length)} / ${filtered.length}`, 'For Management Review')}
+          ${cccfHeader('CCCF Form A Permanent Detail', `รายงานรายละเอียดตารางติดตาม · Records ${start + 1}-${Math.min(start + permanentRowsPerPage, filtered.length)} / ${filtered.length}`, 'For Management Review')}
           <div style="flex:1;padding:18px 24px 12px;min-height:0">
-            ${sectionTitle('2. Tracking Register / ตารางติดตาม', `Records ${start + 1}-${Math.min(start + rowsPerPage, filtered.length)} ตามเงื่อนไขที่เลือก`)}
+            ${sectionTitle('2. Tracking Register / ตารางติดตาม', `Records ${start + 1}-${Math.min(start + permanentRowsPerPage, filtered.length)} จากทั้งหมด ${filtered.length} รายการ · เลขลำดับต่อเนื่องทุกหน้า`)}
             <table style="width:100%;border-collapse:collapse;table-layout:fixed">
               <thead>
                 <tr style="background:#065f46">
@@ -3388,7 +3407,7 @@ window.exportCccfPermanentPDF = async function() {
     const totalPages = 1 + detailPages.length;
     const pageHTMLs  = [
         summaryHtml.replace('__FOOTER_SUMMARY__', buildFooter(1, totalPages)),
-        ...detailPages.map((html, idx) => html.replace(`__FOOTER_DETAIL_${idx * rowsPerPage}__`, buildFooter(idx + 2, totalPages))),
+        ...detailPages.map((html, idx) => html.replace(`__FOOTER_DETAIL_${idx * permanentRowsPerPage}__`, buildFooter(idx + 2, totalPages))),
     ];
 
     showLoading('กำลังสร้าง PDF...');

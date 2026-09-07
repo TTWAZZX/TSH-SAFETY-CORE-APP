@@ -1,5 +1,18 @@
 # TSH Safety Core Activity - Changelog And Handoff History
 
+## CCCF Permanent PDF summary layout guard (2026-09-07, local)
+
+- The management-summary page now reserves its approval/signature area and clips the Priority panel within the remaining page space, preventing Rank A/B rows from overlapping approval text or the footer.
+- The summary shows up to three highest-priority Rank A/B records and states when more records remain; every record continues to appear in the existing detail pages. Fixed column sizing and safe wrapping improve long Thai names, Departments and Job Areas.
+- In Assignment scope, the PDF register now exports exactly one current row per assigned owner; assigned-history and outside-Assignment documents no longer create duplicate people. Detail pages include EmployeeID for reconciliation and use 18 rows with absolute numbering, producing continuous ranges 1-18, 19-36, 37-54 and 55-64 for a 64-person roster.
+- Frontend PDF layout and cache keys only. No CCCF API, schema, Assignment, upload, submission or review behavior changed.
+
+## Hiyari PDF overview reconciliation (2026-09-07, local)
+
+- The first PDF page now derives Total, Open, Closed, SLA, Rank, STOP matrix, monthly trend and Department risk from the same server-returned Assignment/filter-scoped report rows, removing contradictions such as 43 total versus 44 closed.
+- The summary cards distinguish report volume from unique Assignment participation: reports in Assignment, submitted people, people still pending, open, closed and overdue. The annual Assignment register retains its existing full-year roster dataset.
+- Only the Hiyari PDF overview and cache keys changed. No API, schema, report, Assignment, upload path, GitHub push or Production deployment changed.
+
 ## Hiyari Assignment-scoped reporting (2026-09-07, deployed)
 
 - Hiyari Dashboard, Rank, SLA/action intelligence, Admin review totals and yearly management export now include only reports whose accountable reporter has a current Hiyari Assignment.

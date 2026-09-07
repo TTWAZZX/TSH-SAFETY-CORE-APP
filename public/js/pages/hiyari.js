@@ -2222,7 +2222,11 @@ async function exportHiyariPDF() {
         ]);
         const data = statsRes?.data || {};
         const reportKpi = data.kpi || {};
-        const reports = assignmentKpi?.reports || [];
+        // Page 1-2 must use the exact same Assignment/filter-scoped rows as
+        // the KPI and distribution payload. Assignment progress intentionally
+        // keeps its separate annual roster projection below.
+        const reports = normalizeApiArray(data.reports || []);
+        const assignmentReports = normalizeApiArray(assignmentKpi?.reports || []);
         const rankMap = Object.fromEntries((data.rankDist || []).map(d => [d.Rank, Number(d.count) || 0]));
         const stopMap = Object.fromEntries((data.stopDist || []).map(d => [Number(d.StopType), Number(d.count) || 0]));
         const monthCounts = Array(12).fill(0);
@@ -2313,7 +2317,7 @@ async function exportHiyariPDF() {
         const safe = (v) => escHtml(String(v ?? '-'));
         const reportTotal = Number(reportKpi.total) || reports.length || 0;
         const generatedDate = new Date().toLocaleDateString('th-TH', { day:'numeric', month:'long', year:'numeric' });
-        const assignmentRoster = _buildAssignmentRoster(assignmentKpi?.assignments || [], reports, _statsYear);
+        const assignmentRoster = _buildAssignmentRoster(assignmentKpi?.assignments || [], assignmentReports, _statsYear);
         const assignmentRowsPerPage = 16;
         const assignmentChunks = assignmentRoster.length
             ? Array.from(
@@ -2399,23 +2403,23 @@ async function exportHiyariPDF() {
         const p1 = buildPage(`
             ${headerHtml}
             <div style="padding:18px 28px 14px;flex:1">
-                ${sectionTitle('1. ภาพรวมรายงาน / Report Summary', 'สรุปจำนวนรายงาน สถานะติดตาม SLA และความรุนแรงตาม Rank')}
+                ${sectionTitle('1. ภาพรวมรายงาน / Report Summary', 'สรุปรายงานเฉพาะผู้ที่มี Assignment และสถานะการส่งของผู้ได้รับมอบหมาย')}
                 <div style="display:grid;grid-template-columns:repeat(6,1fr);gap:8px;margin-bottom:12px">
-                    ${metricCard('รายงานทั้งหมด', reportTotal, '#0f766e', 'Total Reports')}
-                    ${metricCard('ส่งตาม Assignment', `${submitted}/${assignedTotal}`, '#0284c7', `${submitPct}% Coverage`)}
+                    ${metricCard('รายงานใน Assignment', reportTotal, '#0f766e', 'Assigned Reports')}
+                    ${metricCard('ผู้ส่งแล้ว', `${submitted}/${assignedTotal}`, '#0284c7', `${submitPct}% ของผู้ได้รับมอบหมาย`)}
+                    ${metricCard('ยังไม่ส่ง', Math.max(assignedTotal - submitted, 0), '#b45309', 'คนที่ต้องติดตาม')}
                     ${metricCard('เปิดติดตาม', active.length, active.length ? '#d97706' : '#64748b', 'Open')}
                     ${metricCard('ปิดแล้ว', closed.length, '#059669', 'Closed')}
                     ${metricCard('เกิน SLA', overdue.length, overdue.length ? '#dc2626' : '#059669', 'Overdue')}
-                    ${metricCard('Rank A', rankMap.A || 0, (rankMap.A || 0) ? '#dc2626' : '#64748b', 'Critical')}
                 </div>
                 <div style="display:grid;grid-template-columns:1.1fr .9fr;gap:12px;margin-bottom:12px">
                     <div style="border:1px solid #e2e8f0;border-radius:12px;padding:12px">
                         <div style="font-size:12px;font-weight:900;color:#065f46;margin-bottom:8px">Key Notes / ประเด็นสำคัญ</div>
                         ${[
-                            `Submission coverage ${submitted}/${assignedTotal} (${submitPct}%)`,
+                            `ผู้ได้รับ Assignment ${assignedTotal} คน · ส่งแล้ว ${submitted} คน · ยังไม่ส่ง ${Math.max(assignedTotal - submitted, 0)} คน`,
+                            `รายงานในขอบเขต Assignment ${reportTotal} รายการ จากผู้ส่ง ${submitted} คน`,
                             `SLA compliance ${slaPct}% · ใกล้ครบกำหนด ${nearDue.length} · เกินกำหนด ${overdue.length}`,
                             `Rank A ${rankMap.A || 0} รายการ · Rank B ${rankMap.B || 0} รายการ · Rank C ${rankMap.C || 0} รายการ`,
-                            deptRiskRows[0] ? `แผนกที่ควรติดตามสูงสุด: ${deptRiskRows[0].dept} (${deptRiskRows[0].score} คะแนน)` : 'ยังไม่พบแผนกที่มีความเสี่ยงสะสมเด่นชัด',
                         ].map(t => `<div style="font-size:10.2px;color:#334155;margin-bottom:6px;display:flex;gap:6px"><span style="color:#f97316;font-weight:900">•</span><span>${safe(t)}</span></div>`).join('')}
                     </div>
                     <div style="border:1px solid #e2e8f0;border-radius:12px;padding:12px;text-align:center">

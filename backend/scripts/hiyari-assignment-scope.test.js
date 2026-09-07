@@ -26,5 +26,10 @@ assert.ok(frontend.includes("params.set('assignmentScope', _filterAssignmentScop
 assert.ok(frontend.includes("outsideParams.set('assignmentScope', 'outside')"), 'History must retain a dedicated outside-Assignment audit query');
 assert.ok(frontend.includes("${hasAssignment ? 'มี Assignment' : 'นอก Assignment'}"), 'History rows must show their Assignment status');
 assert.ok(frontend.includes('ไม่นำไปรวมใน Dashboard, Rank และ KPI ของ Assignment'), 'Outside warning must explain metric exclusion');
+assert.ok(frontend.includes('const reports = normalizeApiArray(data.reports || [])'), 'PDF overview must use the same scoped reports as its KPI payload');
+assert.ok(frontend.includes('const assignmentReports = normalizeApiArray(assignmentKpi?.reports || [])'), 'PDF Assignment roster must retain its annual progress dataset');
+assert.ok(frontend.includes("_buildAssignmentRoster(assignmentKpi?.assignments || [], assignmentReports, _statsYear)"), 'PDF roster must not replace scoped dashboard reports');
+assert.ok(frontend.includes("metricCard('รายงานใน Assignment'"), 'PDF overview must label its report scope explicitly');
+assert.ok(frontend.includes("metricCard('ยังไม่ส่ง'"), 'PDF overview must expose the remaining Assignment follow-up count');
 
 console.log('Hiyari Assignment scope regression passed.');

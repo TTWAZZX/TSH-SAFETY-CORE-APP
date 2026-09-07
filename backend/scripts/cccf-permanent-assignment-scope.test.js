@@ -57,6 +57,7 @@ vm.runInContext(`
     ${extractFunction('getAssignmentForPermanentSubmission')}
     ${extractFunction('buildPermanentTrackingRows')}
     ${extractFunction('getFilteredPermanent')}
+    ${extractFunction('getPermanentPdfRows')}
     ${extractFunction('getPermanentProgressStats')}
     ${extractFunction('getPermanentDashboardStats')}
 `, context);
@@ -67,6 +68,8 @@ assert.strictEqual(vm.runInContext("buildPermanentTrackingRows().filter(row => r
 assert.strictEqual(vm.runInContext('getFilteredPermanent().length', context), 3, 'Default table scope must exclude outside-Assignment documents');
 assert.strictEqual(vm.runInContext("_pFilterScope='outside'; getFilteredPermanent().length", context), 1, 'Outside scope must expose only outside-Assignment documents');
 assert.strictEqual(vm.runInContext("_pFilterScope='all'; getFilteredPermanent().length", context), 4, 'All scope must retain audit/history visibility');
+assert.strictEqual(vm.runInContext("_pFilterScope='assigned'; getPermanentPdfRows().length", context), 2, 'Assigned PDF must contain exactly one current row per Assignment owner');
+assert.strictEqual(vm.runInContext("getPermanentPdfRows().filter(row => row.rowType !== 'assigned').length", context), 0, 'Assigned PDF must exclude history and outside-Assignment rows');
 assert.deepStrictEqual(JSON.parse(vm.runInContext('JSON.stringify(getPermanentProgressStats())', context)), {
     totalAssigned: 2,
     completedCount: 1,
@@ -79,5 +82,16 @@ assert.ok(source.includes("let _pFilterScope  = 'assigned';"), 'Assignment scope
 assert.ok(source.includes('พบเอกสารนอก Assignment ${outsideAssignmentCount} รายการ'), 'Outside-Assignment warning must remain visible');
 assert.ok(source.includes('ไม่นำไปรวมใน KPI และความคืบหน้า Permanent'), 'Outside rows must explain KPI exclusion');
 assert.ok(source.includes("{ label: 'ผู้ได้รับ Assignment', val: totalAssigned"), 'Hero total must use assigned owners');
+assert.ok(source.includes('const criticalSummaryLimit = 3;'), 'Permanent PDF summary must bound Rank A/B rows to its reserved page area');
+assert.ok(source.includes('ดูรายการที่เหลือในหน้ารายละเอียด'), 'Permanent PDF must direct readers to overflow Rank A/B detail rows');
+assert.ok(source.includes('flex:1 1 0;min-height:0;overflow:hidden'), 'Permanent PDF priority panel must not overlap its signature area');
+assert.ok(source.includes('min-height:38px;flex-shrink:0;background:#ffffff;position:relative;z-index:1'), 'Permanent PDF signature area must retain reserved space');
+assert.ok(source.includes('const permanentRowsPerPage = 18;'), 'Permanent PDF must use a row count that safely fits multi-line person details');
+assert.ok(source.includes('${start + idx + 1}'), 'Permanent PDF row numbering must use the absolute dataset offset');
+assert.ok(source.includes("assigned: 'ผู้ได้รับ Assignment (คนละ 1 แถว)'"), 'Permanent PDF scope must explain its one-row-per-owner roster');
+assert.ok(source.includes('ID: ${escapeHtml(employeeId)}'), 'Permanent PDF detail must expose EmployeeID for roster reconciliation');
+const sequence = Array.from({ length: 64 }, (_, index) => index + 1);
+const pages = Array.from({ length: Math.ceil(sequence.length / 18) }, (_, index) => sequence.slice(index * 18, (index + 1) * 18));
+assert.deepStrictEqual(pages.map(page => [page[0], page[page.length - 1]]), [[1, 18], [19, 36], [37, 54], [55, 64]], 'A 64-person Assignment PDF must remain continuous across every page');
 
 console.log('CCCF Permanent Assignment scope regression passed.');
