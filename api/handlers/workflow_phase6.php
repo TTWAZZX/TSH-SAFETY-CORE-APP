@@ -1285,12 +1285,14 @@ function handle_hiyari_routes(string $method, string $path): bool
     if (strpos($path, '/hiyari') !== 0) return false;
     $user=require_user(); wf_ensure_hiyari_tables(); $admin=wf_is_admin($user); $actor=wf_user_name($user);
     if($method==='GET'&&$path==='/hiyari/stats'){
-        $year=(int)($_GET['year']??date('Y'));$month=max(0,min(12,(int)($_GET['month']??0)));$dept=trim((string)($_GET['department']??''));$status=trim((string)($_GET['status']??''));$rank=strtoupper(trim((string)($_GET['rank']??'')));
+        $year=(int)($_GET['year']??date('Y'));$month=max(0,min(12,(int)($_GET['month']??0)));$dept=trim((string)($_GET['department']??''));$status=trim((string)($_GET['status']??''));$rank=strtoupper(trim((string)($_GET['rank']??'')));$assignmentScope=strtolower(trim((string)($_GET['assignmentScope']??'all')));
         $where='DeletedAt IS NULL AND YEAR(ReportDate)=?';$params=[$year];
         if($month){$where.=' AND MONTH(ReportDate)=?';$params[]=$month;}
         if($dept!==''&&$dept!=='all'){$where.=' AND Department=?';$params[]=$dept;}
         if($status!==''&&$status!=='all'){$where.=' AND Status=?';$params[]=$status;}
         if(in_array($rank,['A','B','C'],true)){$where.=' AND RiskRank=?';$params[]=$rank;}
+        if($assignmentScope==='assigned'){$where.=' AND EXISTS (SELECT 1 FROM hiyari_assignments scope_assignment WHERE scope_assignment.EmployeeID=hiyarireports.ReporterID)';}
+        elseif($assignmentScope==='outside'){$where.=' AND NOT EXISTS (SELECT 1 FROM hiyari_assignments scope_assignment WHERE scope_assignment.EmployeeID=hiyarireports.ReporterID)';}
         if(!$admin){$where.=" AND (ReporterID=? OR SubmittedByID=? OR Status='Closed')";$requester=wf_user_id($user);$params[]=$requester;$params[]=$requester;}
         $reports=db_rows("SELECT *,RiskRank AS `Rank` FROM hiyarireports WHERE $where ORDER BY ReportDate DESC",$params);
         $today=new DateTimeImmutable('today');$enriched=[];$kpi=['total'=>count($reports),'open'=>0,'inProgress'=>0,'closed'=>0,'overdueCount'=>0,'nearDueCount'=>0,'pendingReview'=>0,'pendingSignedPdf'=>0,'rejectedWaitingResubmit'=>0];
@@ -1307,7 +1309,7 @@ function handle_hiyari_routes(string $method, string $path): bool
         $scopedCompleted=0;foreach($scopedAssignmentRows as $row){$employeeKey=strtolower(trim((string)($row['EmployeeID']??'')));if($employeeKey!==''&&isset($annualSubmitted[$employeeKey]))$scopedCompleted++;}
         $assignmentCompletion=['total'=>count($scopedAssignmentRows),'completed'=>$scopedCompleted,'pending'=>max(0,count($scopedAssignmentRows)-$scopedCompleted),'rate'=>count($scopedAssignmentRows)?(int)round($scopedCompleted*100/count($scopedAssignmentRows)):0,'byDepartment'=>$assignmentByDept];
         $base="FROM hiyarireports WHERE $where"; json_response(['success'=>true,'data'=>[
-        'phase'=>'dashboard_sla_intelligence','filters'=>['year'=>$year,'month'=>$month,'department'=>$dept?:'all','status'=>$status?:'all','rank'=>$rank?:'all'],
+        'phase'=>'dashboard_sla_intelligence','filters'=>['year'=>$year,'month'=>$month,'department'=>$dept?:'all','status'=>$status?:'all','rank'=>$rank?:'all','assignmentScope'=>in_array($assignmentScope,['assigned','outside'],true)?$assignmentScope:'all'],
         'kpi'=>$kpi,
         'monthly'=>safe_rows("SELECT MONTH(ReportDate) AS month,COUNT(*) AS count $base GROUP BY MONTH(ReportDate) ORDER BY month",$params),
         'consequence'=>safe_rows("SELECT COALESCE(PotentialConsequence,'Unspecified') AS label,COUNT(*) AS count $base GROUP BY PotentialConsequence ORDER BY count DESC",$params),
@@ -1334,7 +1336,8 @@ function handle_hiyari_routes(string $method, string $path): bool
     $p=route_params($path,'/hiyari/email-outbox/:id/retry'); if($p!==null&&$method==='POST'){require_admin();try{$r=mailer_outbox_send('hiyari_emailoutbox',(int)$p['id'],'Recipients','HtmlBody');json_response(['success'=>true,'message'=>'Email sent.','data'=>$r]);}catch(Throwable $e){json_response(['success'=>false,'message'=>'Email send failed.','error'=>$e->getMessage()],500);}}
     if($method==='POST'&&$path==='/hiyari/email-outbox/retry-queued'){require_admin();if(!mailer_smtp_configured())json_response(['success'=>false,'message'=>'SMTP is not configured.'],400);$b=json_body();$r=mailer_outbox_retry_queued('hiyari_emailoutbox','Recipients','HtmlBody',(int)($b['limit']??20));json_response(['success'=>true,'message'=>"Retry email queue completed: sent {$r['sent']}, failed {$r['failed']}",'processed'=>$r['processed'],'sent'=>$r['sent'],'failed'=>$r['failed'],'data'=>$r]);}
     if($method==='GET'&&$path==='/hiyari'){
-        $sql='SELECT * FROM hiyarireports WHERE DeletedAt IS NULL';
+        $assignmentScope=strtolower(trim((string)($_GET['assignmentScope']??'all')));
+        $sql='SELECT hiyarireports.*,EXISTS (SELECT 1 FROM hiyari_assignments scope_assignment WHERE scope_assignment.EmployeeID=hiyarireports.ReporterID) AS HasAssignment FROM hiyarireports WHERE DeletedAt IS NULL';
         $pa=[];
         $department=$_GET['dept']??($_GET['department']??null);
         $review=$_GET['review']??($_GET['reviewStatus']??null);
@@ -1357,6 +1360,8 @@ function handle_hiyari_routes(string $method, string $path): bool
         if($year>0){$sql.=' AND YEAR(ReportDate)=?';$pa[]=$year;}
         $query=trim((string)($_GET['q']??''));
         if($query!==''){$sql.=' AND (ReporterName LIKE ? OR Description LIKE ? OR Location LIKE ?)';$like='%'.$query.'%';array_push($pa,$like,$like,$like);}
+        if($assignmentScope==='assigned'){$sql.=' AND EXISTS (SELECT 1 FROM hiyari_assignments scope_assignment WHERE scope_assignment.EmployeeID=hiyarireports.ReporterID)';}
+        elseif($assignmentScope==='outside'){$sql.=' AND NOT EXISTS (SELECT 1 FROM hiyari_assignments scope_assignment WHERE scope_assignment.EmployeeID=hiyarireports.ReporterID)';}
         [$visibleSql,$visibleParams]=wf_hiyari_visibility_clause($user);
         $sql.=$visibleSql;
         $pa=array_merge($pa,$visibleParams);

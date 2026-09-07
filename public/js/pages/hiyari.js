@@ -270,6 +270,8 @@ let _filterRank     = 'all';
 let _filterMonth    = 'all';
 let _filterArea     = 'all';
 let _historyYear    = '';
+let _filterAssignmentScope = 'assigned';
+let _historyOutsideAssignmentCount = 0;
 let _wizardStep     = 1;
 let _searchQ        = '';
 let _departments    = [];
@@ -305,6 +307,8 @@ function _resetHistoryFilters({ keepYear = false } = {}) {
     _filterRank = 'all';
     _filterMonth = 'all';
     _filterArea = 'all';
+    _filterAssignmentScope = 'assigned';
+    _historyOutsideAssignmentCount = 0;
     _searchQ = '';
     if (!keepYear) _historyYear = '';
 }
@@ -1151,7 +1155,7 @@ async function renderDashboard(container) {
 
     try {
         const [statsRes, cfgRes, assignmentKpi] = await Promise.all([
-            API.get(`/hiyari/stats?${new URLSearchParams({year:String(_statsYear),month:_statsMonth,department:_statsDept,status:_statsStatus,rank:_statsRank})}`),
+            API.get(`/hiyari/stats?${new URLSearchParams({year:String(_statsYear),month:_statsMonth,department:_statsDept,status:_statsStatus,rank:_statsRank,assignmentScope:'assigned'})}`),
             API.get('/hiyari/dashboard-config').catch(() => ({ data: {} })),
             _loadAssignmentKpi(_statsYear),
         ]);
@@ -2174,7 +2178,7 @@ function openDashConfigModal() {
             closeModal();
             showToast('บันทึกการตั้งค่าสำเร็จ', 'success');
             // Refresh assignment progress without reloading the full dashboard.
-            const statsRes = await API.get(`/hiyari/stats?year=${_statsYear}`);
+            const statsRes = await API.get(`/hiyari/stats?year=${_statsYear}&assignmentScope=assigned`);
             renderDeptAssignmentProgress({
                 period: _getAssignmentPeriod(_statsYear),
                 depts: (statsRes?.data?.assignmentCompletion?.byDepartment || []).map(row => ({
@@ -2213,7 +2217,7 @@ async function exportHiyariPDF() {
         window.scrollTo(0, 0);
         await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
         const [statsRes, assignmentKpi] = await Promise.all([
-            API.get(`/hiyari/stats?${new URLSearchParams({ year: String(_statsYear), month: _statsMonth, department: _statsDept, status: _statsStatus, rank: _statsRank })}`),
+            API.get(`/hiyari/stats?${new URLSearchParams({ year: String(_statsYear), month: _statsMonth, department: _statsDept, status: _statsStatus, rank: _statsRank, assignmentScope: 'assigned' })}`),
             _loadAssignmentKpi(_statsYear),
         ]);
         const data = statsRes?.data || {};
@@ -3259,9 +3263,15 @@ function renderSubmitForm(container) {
 async function renderHistory(container) {
     container.innerHTML = `
         <div class="space-y-4">
+            <div id="hiyari-outside-assignment-alert"></div>
             <!-- Filter bar -->
             <div class="ds-filter-bar">
                 <div class="flex flex-wrap gap-2 items-center">
+                    ${buildFilterSelect('filter-assignment-scope', 'ขอบเขต Assignment', [
+                        { v:'assigned', l:'เฉพาะ Assignment' },
+                        { v:'outside', l:'นอก Assignment' },
+                        { v:'all', l:'ทั้งหมด' },
+                    ], _filterAssignmentScope)}
                     ${buildFilterSelect('filter-status', 'สถานะ', [
                         { v:'all', l:'ทุกสถานะ' },
                         ...STATUSES.map(s => ({ v:s, l: STATUS_LABEL[s] || s }))
@@ -3372,14 +3382,47 @@ async function fetchAndRenderTable() {
         if (_filterArea     !== 'all') params.set('area',     _filterArea);
         if (_historyYear)            params.set('year',   _historyYear);
         if (_searchQ.trim())         params.set('q',      _searchQ.trim());
-
-        const res = await API.get(`/hiyari?${params}`);
-        _reports  = normalizeApiArray(res?.data ?? res);
+        params.set('assignmentScope', _filterAssignmentScope);
+        const outsideParams = new URLSearchParams(params);
+        outsideParams.set('assignmentScope', 'outside');
+        const [res, outsideRes] = await Promise.all([
+            API.get(`/hiyari?${params}`),
+            _filterAssignmentScope === 'outside'
+                ? Promise.resolve(null)
+                : API.get(`/hiyari?${outsideParams}`).catch(() => ({ data: [] })),
+        ]);
+        _reports = normalizeApiArray(res?.data ?? res);
+        const outsideReports = outsideRes === null
+            ? _reports
+            : normalizeApiArray(outsideRes?.data ?? outsideRes);
+        _historyOutsideAssignmentCount = outsideReports.length;
+        renderHistoryAssignmentScopeAlert();
         renderTable();
     } catch (err) {
         console.error('History error:', err);
         if (tbody) tbody.innerHTML = `<tr><td colspan="8" class="text-center py-6 text-red-500 text-sm">เกิดข้อผิดพลาด: ${escHtml(err.message)}</td></tr>`;
     }
+}
+
+function renderHistoryAssignmentScopeAlert() {
+    const target = document.getElementById('hiyari-outside-assignment-alert');
+    if (!target) return;
+    if (_historyOutsideAssignmentCount <= 0) {
+        target.innerHTML = '';
+        return;
+    }
+    target.innerHTML = `
+        <div class="flex flex-col gap-3 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900 sm:flex-row sm:items-center sm:justify-between" role="status">
+            <div>
+                <div class="font-bold">พบ ${_historyOutsideAssignmentCount.toLocaleString('th-TH')} รายการนอก Assignment</div>
+                <div class="mt-0.5 text-xs text-amber-700">รายการเหล่านี้เก็บไว้เป็นประวัติ แต่ไม่นำไปรวมใน Dashboard, Rank และ KPI ของ Assignment</div>
+            </div>
+            ${_filterAssignmentScope === 'outside' ? '' : `
+                <button id="hiyari-show-outside-assignment" type="button"
+                    class="min-h-[40px] shrink-0 rounded-xl border border-amber-300 bg-white px-3 py-2 text-xs font-bold text-amber-800 hover:bg-amber-100">
+                    ดูรายการนอก Assignment
+                </button>`}
+        </div>`;
 }
 
 function renderTable() {
@@ -3397,10 +3440,16 @@ function renderTable() {
         const rankR = RANKS.find(x => x.rank === r.Rank);
         const sla   = _getSLA(r);
         const rowStyle = _getSLARowStyle(sla);
+        const hasAssignment = Number(r.HasAssignment) === 1;
         return `
-        <tr class="transition-colors group" style="${rowStyle}">
+        <tr class="transition-colors group ${hasAssignment ? '' : 'bg-amber-50/60'}" style="${rowStyle}">
             <td class="px-4 py-3 text-slate-600 whitespace-nowrap text-xs">${date}</td>
-            <td class="px-4 py-3 font-medium text-slate-800 whitespace-nowrap">${escHtml(r.ReporterName || '-')}</td>
+            <td class="px-4 py-3 font-medium text-slate-800 whitespace-nowrap">
+                <div>${escHtml(r.ReporterName || '-')}</div>
+                <span class="mt-1 inline-flex rounded-full px-2 py-0.5 text-[10px] font-bold ${hasAssignment ? 'bg-emerald-100 text-emerald-700' : 'bg-amber-100 text-amber-800'}">
+                    ${hasAssignment ? 'มี Assignment' : 'นอก Assignment'}
+                </span>
+            </td>
             <td class="px-4 py-3 text-slate-600 whitespace-nowrap text-xs">${escHtml(r.Department || '-')}</td>
             <td class="px-4 py-3">
                 ${st
@@ -3986,7 +4035,7 @@ function _setManageSubtab(subtab) {
 async function _refreshManageReviewNotice({ toast = true } = {}) {
     if (!_isAdmin) return 0;
     try {
-        const res = await API.get('/hiyari');
+        const res = await API.get('/hiyari?assignmentScope=assigned');
         const reports = normalizeApiArray(res?.data ?? res);
         const pending = reports.filter(r => (r.ReviewStatus || 'PendingReview') === 'PendingReview').length;
         const badge = document.getElementById('hiyari-review-pending-badge');
@@ -4738,6 +4787,7 @@ async function fetchAndRenderManage(reviewFilter) {
     if (!tbody) return;
     try {
         const params = new URLSearchParams();
+        params.set('assignmentScope', 'assigned');
         if (reviewFilter && !['all', 'DirectSigned'].includes(reviewFilter)) params.set('review', reviewFilter);
         const res    = await API.get(`/hiyari?${params}`);
         const reports = normalizeApiArray(res?.data ?? res)
@@ -5516,6 +5566,14 @@ function setupEventListeners() {
         // Export Excel
         if (e.target.closest('#hiyari-export-btn')) { exportHiyariExcel(); return; }
 
+        if (e.target.closest('#hiyari-show-outside-assignment')) {
+            _filterAssignmentScope = 'outside';
+            const scopeSelect = document.getElementById('filter-assignment-scope');
+            if (scopeSelect) scopeSelect.value = 'outside';
+            await fetchAndRenderTable();
+            return;
+        }
+
         // Clear history filters
         if (e.target.closest('#hiyari-clear-filters-btn')) {
             _resetHistoryFilters();
@@ -5576,6 +5634,7 @@ function setupEventListeners() {
         if (!e.target.closest('#hiyari-page')) return;
 
         if (e.target.id === 'filter-status') { _filterStatus = e.target.value; await fetchAndRenderTable(); return; }
+        if (e.target.id === 'filter-assignment-scope') { _filterAssignmentScope = e.target.value; await fetchAndRenderTable(); return; }
         if (e.target.id === 'filter-risk')   { _filterRisk   = e.target.value; await fetchAndRenderTable(); return; }
         if (e.target.id === 'filter-rank-code') { _filterRank = e.target.value; await fetchAndRenderTable(); return; }
         if (e.target.id === 'filter-stop-type') { _filterStopType = e.target.value; await fetchAndRenderTable(); return; }
@@ -5760,7 +5819,7 @@ async function exportHiyariExcel(filename = '') {
         API.get('/hiyari/assignments').catch(()=>({data:[]})),
         _isAdmin?API.get('/hiyari/email-outbox?limit=200').catch(()=>({data:[]})):Promise.resolve({data:[]}),
         _isAdmin?API.get('/hiyari/file-health').catch(()=>({data:{files:[]}})):Promise.resolve({data:{files:[]}}),
-        API.get(`/hiyari/stats?year=${_statsYear}`).catch(()=>({data:{}})),
+        API.get(`/hiyari/stats?year=${_statsYear}&assignmentScope=assigned`).catch(()=>({data:{}})),
     ]);
     const assignments=normalizeApiArray(assignRes?.data??assignRes),outbox=normalizeApiArray(outboxRes?.data??outboxRes),fileRows=normalizeApiArray(fileRes?.data?.files??[]),stats=statsRes?.data||{};
     const fileByReport=new Map();fileRows.forEach(f=>{if(!fileByReport.has(String(f.reportId)))fileByReport.set(String(f.reportId),[]);fileByReport.get(String(f.reportId)).push(f);});
@@ -5790,6 +5849,7 @@ async function exportHiyariYearExcel() {
         showLoading('กำลัง Export ข้อมูลรายปี...');
         const params = new URLSearchParams();
         params.set('year', String(_statsYear));
+        params.set('assignmentScope', 'assigned');
         const res = await API.get(`/hiyari?${params}`);
         _reports = normalizeApiArray(res?.data ?? res);
         await exportHiyariExcel(`Hiyari_${_statsYear}.xlsx`);

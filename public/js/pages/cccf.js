@@ -96,6 +96,7 @@ let _pFilterRank   = '';
 let _pFilterStop   = 0;
 let _pFilterStatus = '';
 let _pFilterDue    = '';
+let _pFilterScope  = 'assigned';
 let _pSearch       = '';
 let _pPage         = 0;    // pagination current page (0-indexed)
 const P_PAGE_SIZE  = 20;
@@ -1441,6 +1442,18 @@ function getLatestPermanentForAssignment(assignment) {
         .sort((a, b) => new Date(b.SubmitDate || b.CreatedAt || 0) - new Date(a.SubmitDate || a.CreatedAt || 0))[0] || null;
 }
 
+function getAssignmentForPermanentSubmission(submission) {
+    const rowAssigneeId = String(submission?.AssigneeID || '').trim();
+    const submitterName = normalizeText(submission?.SubmitterName);
+    const department = normalizeText(submission?.Department);
+    return _assignments.find(assignment => {
+        const employeeId = String(assignment?.EmployeeID || '').trim();
+        if (employeeId && rowAssigneeId) return employeeId === rowAssigneeId;
+        return normalizeText(assignment?.AssigneeName) === submitterName
+            && normalizeText(assignment?.Department) === department;
+    }) || null;
+}
+
 function buildPermanentTrackingRows() {
     const rows = [];
     const matchedSubmissionIds = new Set();
@@ -1475,9 +1488,10 @@ function buildPermanentTrackingRows() {
 
     _permanentData.forEach(submission => {
         if (matchedSubmissionIds.has(submission.id)) return;
+        const currentAssignment = getAssignmentForPermanentSubmission(submission);
         rows.push({
-            rowType: 'submitted',
-            assignment: null,
+            rowType: currentAssignment ? 'assigned_history' : 'outside_assignment',
+            assignment: currentAssignment,
             submission,
             id: submission.id,
             PermanentYear: submission?.PermanentYear || null,
@@ -1514,6 +1528,8 @@ function buildPermanentTrackingRows() {
 
 function getFilteredPermanent() {
     return buildPermanentTrackingRows().filter(r => {
+        if (_pFilterScope === 'assigned' && r.rowType === 'outside_assignment') return false;
+        if (_pFilterScope === 'outside' && r.rowType !== 'outside_assignment') return false;
         if (_pFilterDept && r.Department !== _pFilterDept) return false;
         if (_pFilterStatus && r.status.key !== _pFilterStatus) return false;
         if (_pFilterDue && r.due?.key !== _pFilterDue) return false;
@@ -1533,7 +1549,11 @@ function getFilteredPermanent() {
 }
 
 function renderPermanentStatusFilterChips() {
-    const rows = buildPermanentTrackingRows();
+    const rows = buildPermanentTrackingRows().filter(row => {
+        if (_pFilterScope === 'assigned') return row.rowType !== 'outside_assignment';
+        if (_pFilterScope === 'outside') return row.rowType === 'outside_assignment';
+        return true;
+    });
     const counts = rows.reduce((acc, row) => {
         acc[row.status.key] = (acc[row.status.key] || 0) + 1;
         return acc;
@@ -1557,10 +1577,11 @@ function renderPermanentStatusFilterChips() {
 
 function renderPermanentAdminReviewPanel() {
     if (!isAdmin) return '';
-    const pendingRows = _permanentData
+    const assignedPermanentData = _permanentData.filter(row => getAssignmentForPermanentSubmission(row));
+    const pendingRows = assignedPermanentData
         .filter(row => String(row.ReviewStatus || '') === 'PendingReview')
         .sort((a, b) => new Date(a.SubmitDate || a.CreatedAt || 0) - new Date(b.SubmitDate || b.CreatedAt || 0));
-    const approvedRows = _permanentData
+    const approvedRows = assignedPermanentData
         .filter(row => String(row.ReviewStatus || '') === 'Approved')
         .sort((a, b) => new Date(a.SubmitDate || a.CreatedAt || 0) - new Date(b.SubmitDate || b.CreatedAt || 0));
     const directPdfRows = _assignments.filter(a => Number(a.AllowDirectSignedPdf || 0) === 1);
@@ -2370,17 +2391,21 @@ function renderPermanentRows(data) {
         const rank = RANKS.find(x => x.rank === r.Rank) || null;
         const displayFileUrl = getPermanentDisplayFileUrl(r);
         const canUploadSignedPdf = r.id && r.status.key === 'approved' && (isAdmin || String(r.submission?.AssigneeID || r.assignment?.EmployeeID || '') === String(currentUser.id || ''));
-        return `<tr class="border-b border-slate-50 transition-colors ${canOpenDetail ? 'hover:bg-emerald-50/40 cursor-pointer' : 'bg-white'}" ${canOpenDetail ? `onclick="window._cccfShowPermanentDetail(${r.id})"` : ''}>
+        const isOutsideAssignment = r.rowType === 'outside_assignment';
+        return `<tr class="border-b transition-colors ${isOutsideAssignment ? 'border-amber-100 bg-amber-50/60 hover:bg-amber-100/60' : 'border-slate-50 hover:bg-emerald-50/40'} ${canOpenDetail ? 'cursor-pointer' : 'bg-white'}" ${canOpenDetail ? `onclick="window._cccfShowPermanentDetail(${r.id})"` : ''}>
           <td class="px-4 py-3">
             ${r.id ? `<p class="mb-1 text-[10px] font-black text-emerald-700">${escapeHtml(getPermanentNumber(r))}</p>` : ''}
             <div class="flex items-center gap-2">
               <p class="font-semibold text-slate-800 text-xs">${escapeHtml(r.displayName || '—')}</p>
               ${r.rowType === 'assigned'
-                ? `<span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[9px] font-bold bg-slate-100 text-slate-500 border border-slate-200">Assigned</span>`
-                : `<span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[9px] font-bold bg-sky-50 text-sky-700 border border-sky-100">Ad hoc</span>`}
+                ? `<span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[9px] font-bold bg-emerald-50 text-emerald-700 border border-emerald-100">มี Assignment</span>`
+                : r.rowType === 'assigned_history'
+                    ? `<span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[9px] font-bold bg-sky-50 text-sky-700 border border-sky-100">ประวัติ Assignment</span>`
+                    : `<span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[9px] font-black bg-amber-100 text-amber-800 border border-amber-300" title="เอกสารนี้ไม่อยู่ในรายชื่อ Assignment ปัจจุบัน">นอก Assignment</span>`}
             </div>
             <p class="text-[10px] text-slate-400 mt-0.5">${escapeHtml(r.Department || '—')}</p>
             ${r.rowType === 'assigned' ? `<span class="mt-1 inline-flex rounded-full border px-2 py-0.5 text-[9px] font-bold ${r.due?.className || 'bg-slate-50 text-slate-500 border-slate-200'}">${escapeHtml(r.due?.label || 'No Due Date')}</span>` : ''}
+            ${isOutsideAssignment ? `<p class="mt-1 text-[10px] font-semibold text-amber-700">ไม่นำไปรวมใน KPI และความคืบหน้า Permanent</p>` : ''}
           </td>
           <td class="px-4 py-3 text-center">
             <span class="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-bold ${r.status.className}">
@@ -2447,7 +2472,7 @@ function renderPermanentRows(data) {
 }
 
 function renderPermanentDashboard() {
-    const { byRank, byStop, latestRows, submittedDeptCount, withFileCount } = getPermanentDashboardStats();
+    const { byRank, byStop, latestRows, submittedDeptCount, withFileCount, submittedCount } = getPermanentDashboardStats();
     const latestHtml = latestRows.length
         ? latestRows.map(r => {
             const stop = STOP_TYPES.find(s => +s.id === +r.StopType) || STOP_TYPES[5];
@@ -2477,7 +2502,7 @@ function renderPermanentDashboard() {
             <h3 class="text-sm font-bold text-slate-700">Permanent Dashboard</h3>
             <p class="text-[10px] text-slate-400 mt-0.5">ภาพรวมการส่งแบบฟอร์มแก้ไขถาวร</p>
           </div>
-          <span class="text-[10px] font-bold px-2.5 py-1 rounded-full bg-emerald-50 text-emerald-700">${_permanentData.length} รายการ</span>
+          <span class="text-[10px] font-bold px-2.5 py-1 rounded-full bg-emerald-50 text-emerald-700">${submittedCount} รายการ</span>
         </div>
         <div class="grid grid-cols-2 md:grid-cols-4 gap-3 mb-4">
           <div class="rounded-xl border border-slate-200 bg-slate-50 p-4">
@@ -2515,10 +2540,10 @@ function renderPermanentDashboard() {
 }
 
 function renderPermanentDashboardExecutive() {
-    const { byRank, byStop, latestRows, submittedDeptCount, withFileCount } = getPermanentDashboardStats();
+    const { byRank, byStop, latestRows, submittedDeptCount, withFileCount, submittedCount } = getPermanentDashboardStats();
     const { totalAssigned, completedCount, submitPct } = getPermanentProgressStats();
     const pendingCount = Math.max(0, totalAssigned - completedCount);
-    const totalRows = _permanentData.length;
+    const totalRows = submittedCount;
     const criticalShare = totalRows ? Math.round(((byRank.A + byRank.B) / totalRows) * 100) : 0;
     const leadingStop = [...byStop].sort((a, b) => b.count - a.count)[0] || null;
     const completionTone = submitPct >= 100 ? '#059669' : submitPct >= 60 ? '#d97706' : '#dc2626';
@@ -2726,13 +2751,16 @@ function renderPermanentDepartmentProgress() {
 }
 
 function getPermanentDashboardStats() {
-    const latestRows = [..._permanentData]
+    const assignedSubmissions = buildPermanentTrackingRows()
+        .filter(row => row.rowType === 'assigned' && row.submission)
+        .map(row => row.submission);
+    const latestRows = [...assignedSubmissions]
         .sort((a, b) => new Date(b.SubmitDate || b.CreatedAt || 0) - new Date(a.SubmitDate || a.CreatedAt || 0))
         .slice(0, 5);
     const byRank = { A: 0, B: 0, C: 0 };
     const byStop = STOP_TYPES.map(s => ({ ...s, count: 0 }));
-    const submittedDeptCount = new Set(_permanentData.map(r => (r.Department || '').trim()).filter(Boolean)).size;
-    _permanentData.forEach(r => {
+    const submittedDeptCount = new Set(assignedSubmissions.map(r => (r.Department || '').trim()).filter(Boolean)).size;
+    assignedSubmissions.forEach(r => {
         if (byRank[r.Rank] !== undefined) byRank[r.Rank]++;
         const stop = byStop.find(s => +s.id === +r.StopType);
         if (stop) stop.count++;
@@ -2742,7 +2770,8 @@ function getPermanentDashboardStats() {
         byRank,
         byStop,
         submittedDeptCount,
-        withFileCount: _permanentData.filter(r => !!r.FileUrl).length,
+        withFileCount: assignedSubmissions.filter(r => !!r.FileUrl).length,
+        submittedCount: assignedSubmissions.length,
     };
 }
 
@@ -3403,13 +3432,14 @@ function renderCccfHeroKpis() {
     let items;
     if (_activeCccfTab === 'permanent') {
         const trackingRows = buildPermanentTrackingRows();
+        const assignedRows = trackingRows.filter(row => row.rowType === 'assigned');
         const byRank = { A: 0, B: 0, C: 0 };
-        _permanentData.forEach(row => {
+        assignedRows.filter(row => row.submission).forEach(row => {
             if (byRank[row.Rank] !== undefined) byRank[row.Rank] += 1;
         });
         const { totalAssigned, completedCount, submitPct } = getPermanentProgressStats();
         items = [
-            { label: 'รายการติดตามทั้งหมด', val: trackingRows.length, color: '#fff' },
+            { label: 'ผู้ได้รับ Assignment', val: totalAssigned, color: '#fff' },
             { label: 'Rank A (วิกฤต)', val: byRank.A, color: '#fca5a5' },
             { label: 'Rank B (หยุดงาน)', val: byRank.B, color: '#fdba74' },
             { label: 'Rank C (เล็กน้อย)', val: byRank.C, color: '#6ee7b7' },
@@ -3465,6 +3495,9 @@ function refreshCccfHeroKpis() {
 function renderPage(container) {
     const { totalAssigned, completedCount, submitPct } = getPermanentProgressStats();
     const totalTracked = getFilteredPermanent().length;
+    const permanentTrackingRows = buildPermanentTrackingRows();
+    const outsideAssignmentCount = permanentTrackingRows.filter(row => row.rowType === 'outside_assignment').length;
+    const assignedTrackingCount = permanentTrackingRows.length - outsideAssignmentCount;
     const isActualWorkerMode = _cccfWorkerSource === 'actual_department_worker';
     const manualLegacyCount = getCccfWorkerRecordsForYear(_unitYear).length;
 
@@ -3762,6 +3795,13 @@ function renderPage(container) {
 
         <!-- Permanent submission table -->
         <div class="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden" data-cccf-card-image="cccf-permanent-tracking-table" style="box-shadow:0 4px 16px rgba(5,150,105,0.08)">
+          ${outsideAssignmentCount ? `<div class="flex flex-col gap-3 border-b border-amber-200 bg-amber-50 px-5 py-4 sm:flex-row sm:items-center sm:justify-between" data-cccf-card-ignore role="status">
+            <div>
+              <p class="text-sm font-black text-amber-900">พบเอกสารนอก Assignment ${outsideAssignmentCount} รายการ</p>
+              <p class="mt-0.5 text-xs text-amber-700">เอกสารกลุ่มนี้เก็บไว้เป็นประวัติ แต่ไม่นำไปรวมใน KPI, Rank และความคืบหน้า Permanent</p>
+            </div>
+            <button id="btn-show-outside-assignment" type="button" class="shrink-0 rounded-xl border border-amber-300 bg-white px-4 py-2 text-xs font-bold text-amber-800 hover:bg-amber-100">ดูเอกสารนอก Assignment</button>
+          </div>` : ''}
           <div class="px-5 py-4 border-b border-slate-100 bg-slate-50/60 flex flex-wrap gap-2 items-center" data-cccf-card-ignore>
             <h3 class="text-sm font-bold text-slate-700 mr-2">ตารางติดตาม Form A Permanent</h3>
             <div class="flex flex-wrap gap-1.5 w-full sm:w-auto">
@@ -3774,6 +3814,11 @@ function renderPage(container) {
             </div>
             <select id="p-filter-dept" class="text-xs py-2 px-3 rounded-xl border border-slate-200 bg-white focus:outline-none focus:border-emerald-400 text-slate-600">
               ${permDeptOpts}
+            </select>
+            <select id="p-filter-scope" aria-label="ขอบเขต Assignment" class="text-xs py-2 px-3 rounded-xl border border-slate-200 bg-white focus:outline-none focus:border-emerald-400 text-slate-600">
+              <option value="assigned" ${_pFilterScope === 'assigned' ? 'selected' : ''}>รายการใน Assignment (${assignedTrackingCount})</option>
+              <option value="outside" ${_pFilterScope === 'outside' ? 'selected' : ''}>นอก Assignment (${outsideAssignmentCount})</option>
+              <option value="all" ${_pFilterScope === 'all' ? 'selected' : ''}>แสดงทั้งหมด (${permanentTrackingRows.length})</option>
             </select>
             <select id="p-filter-status" class="text-xs py-2 px-3 rounded-xl border border-slate-200 bg-white focus:outline-none focus:border-emerald-400 text-slate-600">
               <option value="">ทุก Status</option>
@@ -3960,6 +4005,7 @@ function renderPage(container) {
     const refreshPermanent = () => {
         _pSearch = document.getElementById('p-search')?.value || '';
         _pFilterDept = document.getElementById('p-filter-dept')?.value || '';
+        _pFilterScope = document.getElementById('p-filter-scope')?.value || 'assigned';
         _pFilterStatus = document.getElementById('p-filter-status')?.value || '';
         _pFilterDue = document.getElementById('p-filter-due')?.value || '';
         _pFilterRank = document.getElementById('p-filter-rank')?.value || '';
@@ -3969,15 +4015,27 @@ function renderPage(container) {
         updatePermanentStatusChips();
     };
     const updatePermanentStatusChips = () => {
+        const scopedRows = buildPermanentTrackingRows().filter(row => {
+            if (_pFilterScope === 'assigned') return row.rowType !== 'outside_assignment';
+            if (_pFilterScope === 'outside') return row.rowType === 'outside_assignment';
+            return true;
+        });
         document.querySelectorAll('.p-status-chip').forEach(chip => {
-            const active = (chip.dataset.status || '') === _pFilterStatus;
+            const statusKey = chip.dataset.status || '';
+            const active = statusKey === _pFilterStatus;
             chip.className = `p-status-chip px-3 py-1.5 rounded-xl text-[11px] font-bold border transition-colors ${active ? 'bg-emerald-600 text-white border-emerald-600' : 'bg-white text-slate-500 border-slate-200 hover:border-emerald-200 hover:text-emerald-700'}`;
             const count = chip.querySelector('span');
-            if (count) count.className = active ? 'text-emerald-100' : 'text-slate-400';
+            if (count) {
+                count.textContent = statusKey
+                    ? scopedRows.filter(row => row.status.key === statusKey).length
+                    : scopedRows.length;
+                count.className = active ? 'text-emerald-100' : 'text-slate-400';
+            }
         });
     };
     document.getElementById('p-search')?.addEventListener('input', refreshPermanent);
     document.getElementById('p-filter-dept')?.addEventListener('change', refreshPermanent);
+    document.getElementById('p-filter-scope')?.addEventListener('change', refreshPermanent);
     document.getElementById('p-filter-status')?.addEventListener('change', refreshPermanent);
     document.getElementById('p-filter-due')?.addEventListener('change', refreshPermanent);
     document.getElementById('p-filter-rank')?.addEventListener('change', refreshPermanent);
@@ -3993,21 +4051,44 @@ function renderPage(container) {
     document.getElementById('p-prev-page')?.addEventListener('click', () => { _pPage--; applyPermanentRender(); });
     document.getElementById('p-next-page')?.addEventListener('click', () => { _pPage++; applyPermanentRender(); });
     document.getElementById('p-clear-filter')?.addEventListener('click', () => {
-        _pSearch = ''; _pFilterDept = ''; _pFilterStatus = ''; _pFilterDue = ''; _pFilterRank = ''; _pFilterStop = 0; _pPage = 0;
+        _pSearch = ''; _pFilterDept = ''; _pFilterScope = 'assigned'; _pFilterStatus = ''; _pFilterDue = ''; _pFilterRank = ''; _pFilterStop = 0; _pPage = 0;
         const searchEl = document.getElementById('p-search');
         const deptEl   = document.getElementById('p-filter-dept');
+        const scopeEl  = document.getElementById('p-filter-scope');
         const statusEl = document.getElementById('p-filter-status');
         const dueEl    = document.getElementById('p-filter-due');
         const rankEl   = document.getElementById('p-filter-rank');
         const stopEl   = document.getElementById('p-filter-stop');
         if (searchEl) searchEl.value = '';
         if (deptEl)   deptEl.value = '';
+        if (scopeEl)  scopeEl.value = 'assigned';
         if (statusEl) statusEl.value = '';
         if (dueEl)    dueEl.value = '';
         if (rankEl)   rankEl.value = '';
         if (stopEl)   stopEl.value = '0';
         applyPermanentRender();
         updatePermanentStatusChips();
+    });
+    document.getElementById('btn-show-outside-assignment')?.addEventListener('click', () => {
+        _pFilterScope = 'outside';
+        _pFilterStatus = '';
+        _pFilterDue = '';
+        _pFilterRank = '';
+        _pFilterStop = 0;
+        _pPage = 0;
+        const scopeEl = document.getElementById('p-filter-scope');
+        if (scopeEl) scopeEl.value = 'outside';
+        const statusEl = document.getElementById('p-filter-status');
+        if (statusEl) statusEl.value = '';
+        const dueEl = document.getElementById('p-filter-due');
+        if (dueEl) dueEl.value = '';
+        const rankEl = document.getElementById('p-filter-rank');
+        if (rankEl) rankEl.value = '';
+        const stopEl = document.getElementById('p-filter-stop');
+        if (stopEl) stopEl.value = '0';
+        applyPermanentRender();
+        updatePermanentStatusChips();
+        document.getElementById('permanent-table-body')?.closest('table')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
     });
 
     // ── Stop cards click to filter
@@ -4077,7 +4158,10 @@ function renderPage(container) {
     container.querySelectorAll('[data-form-open]').forEach(btn => btn.addEventListener('click', () => openCccfRelatedForm(btn.dataset.formOpen, btn.dataset.formTitle)));
     container.querySelectorAll('[data-form-download]').forEach(btn => btn.addEventListener('click', () => downloadCccfRelatedForm(btn.dataset.formDownload, btn.dataset.formTitle)));
     window._cccfSetPermanentStatus = (status) => {
+        _pFilterScope = 'assigned';
         _pFilterStatus = status || '';
+        const scopeEl = document.getElementById('p-filter-scope');
+        if (scopeEl) scopeEl.value = 'assigned';
         const statusEl = document.getElementById('p-filter-status');
         if (statusEl) statusEl.value = _pFilterStatus;
         _pPage = 0;

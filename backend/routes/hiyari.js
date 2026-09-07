@@ -604,12 +604,18 @@ router.get('/stats', async (req, res) => {
         const department = String(req.query.department || '').trim();
         const status = String(req.query.status || '').trim();
         const rank = String(req.query.rank || '').trim().toUpperCase();
+        const assignmentScope = String(req.query.assignmentScope || 'all').trim().toLowerCase();
         let where = 'DeletedAt IS NULL AND YEAR(ReportDate) = ?';
         const params = [year];
         if (month) { where += ' AND MONTH(ReportDate) = ?'; params.push(month); }
         if (department && department !== 'all') { where += ' AND Department = ?'; params.push(department); }
         if (status && status !== 'all') { where += ' AND Status = ?'; params.push(status); }
         if (['A','B','C'].includes(rank)) { where += ' AND RiskRank = ?'; params.push(rank); }
+        if (assignmentScope === 'assigned') {
+            where += ' AND EXISTS (SELECT 1 FROM Hiyari_Assignments scope_assignment WHERE scope_assignment.EmployeeID = HiyariReports.ReporterID)';
+        } else if (assignmentScope === 'outside') {
+            where += ' AND NOT EXISTS (SELECT 1 FROM Hiyari_Assignments scope_assignment WHERE scope_assignment.EmployeeID = HiyariReports.ReporterID)';
+        }
         if (!isRequestAdmin(req)) {
             where += " AND (ReporterID = ? OR SubmittedByID = ? OR Status = 'Closed')";
             const requester = String(userId(req));
@@ -651,7 +657,7 @@ router.get('/stats', async (req, res) => {
         const assignmentCompletion={total:scopedAssignments.length,completed:scopedAssignments.filter(a=>submittedIds.has(String(a.EmployeeID||'').trim().toLowerCase())).length,byDepartment:assignmentByDepartment};
         assignmentCompletion.pending=Math.max(0,assignmentCompletion.total-assignmentCompletion.completed); assignmentCompletion.rate=assignmentCompletion.total?Math.round(assignmentCompletion.completed*100/assignmentCompletion.total):0;
         const kpi={total:reports.length,open:countBy('Status','Open'),inProgress:countBy('Status','In Progress'),closed:countBy('Status','Closed'),overdueCount:active.map(enrich).filter(r=>r.slaStatus==='overdue').length,nearDueCount:active.map(enrich).filter(r=>r.slaStatus==='near_due').length,pendingReview:countBy('ReviewStatus','PendingReview'),pendingSignedPdf:reports.filter(r=>r.ReviewStatus==='Approved'&&!r.SignedFileUrl).length,rejectedWaitingResubmit:countBy('ReviewStatus','Rejected')};
-        res.json({success:true,data:{phase:'dashboard_sla_intelligence',filters:{year,month,department:department||'all',status:status||'all',rank:rank||'all'},kpi,monthly,consequence:group('PotentialConsequence','label'),riskDist:group('RiskLevel','level'),stopDist:group('StopType','StopType'),rankDist:group('Rank','Rank'),deptRank:group('Department','Department').sort((a,b)=>b.count-a.count),areaRank:group('Location','Location').sort((a,b)=>b.count-a.count).slice(0,12),monthlyRank:reports.map(r=>({month:new Date(r.ReportDate).getMonth()+1,Rank:r.Rank})).reduce((a,r)=>{const x=a.find(v=>v.month===r.month&&v.Rank===r.Rank);x?x.count++:a.push({...r,count:1});return a;},[]),monthlyStatus:reports.map(r=>({month:new Date(r.ReportDate).getMonth()+1,Status:r.Status})).reduce((a,r)=>{const x=a.find(v=>v.month===r.month&&v.Status===r.Status);x?x.count++:a.push({...r,count:1});return a;},[]),stopRankMatrix,departmentRiskRanking:deptRisk,assignmentCompletion,actionList:actionList.map(r=>sanitizeHiyariReportForViewer(req,r)),reports:reports.map(r=>sanitizeHiyariReportForViewer(req,r))}});
+        res.json({success:true,data:{phase:'dashboard_sla_intelligence',filters:{year,month,department:department||'all',status:status||'all',rank:rank||'all',assignmentScope:['assigned','outside'].includes(assignmentScope)?assignmentScope:'all'},kpi,monthly,consequence:group('PotentialConsequence','label'),riskDist:group('RiskLevel','level'),stopDist:group('StopType','StopType'),rankDist:group('Rank','Rank'),deptRank:group('Department','Department').sort((a,b)=>b.count-a.count),areaRank:group('Location','Location').sort((a,b)=>b.count-a.count).slice(0,12),monthlyRank:reports.map(r=>({month:new Date(r.ReportDate).getMonth()+1,Rank:r.Rank})).reduce((a,r)=>{const x=a.find(v=>v.month===r.month&&v.Rank===r.Rank);x?x.count++:a.push({...r,count:1});return a;},[]),monthlyStatus:reports.map(r=>({month:new Date(r.ReportDate).getMonth()+1,Status:r.Status})).reduce((a,r)=>{const x=a.find(v=>v.month===r.month&&v.Status===r.Status);x?x.count++:a.push({...r,count:1});return a;},[]),stopRankMatrix,departmentRiskRanking:deptRisk,assignmentCompletion,actionList:actionList.map(r=>sanitizeHiyariReportForViewer(req,r)),reports:reports.map(r=>sanitizeHiyariReportForViewer(req,r))}});
     } catch (err) { console.error('[hiyari/stats-v2]',err); res.status(500).json({success:false,message:err.message}); }
 });
 
@@ -1038,9 +1044,12 @@ router.get('/', async (req, res) => {
     try {
         await ensureTables();
         const { status, year, q, risk, stopType, rank, month, area } = req.query;
+        const assignmentScope = String(req.query.assignmentScope || 'all').trim().toLowerCase();
         const review = req.query.review ?? req.query.reviewStatus;
         const dept = req.query.dept ?? req.query.department;
-        let sql = 'SELECT *, RiskRank AS `Rank` FROM HiyariReports WHERE DeletedAt IS NULL';
+        let sql = `SELECT *, RiskRank AS \`Rank\`,
+            EXISTS (SELECT 1 FROM Hiyari_Assignments scope_assignment WHERE scope_assignment.EmployeeID = HiyariReports.ReporterID) AS HasAssignment
+            FROM HiyariReports WHERE DeletedAt IS NULL`;
         let params = [];
         if (status && status !== 'all') { sql += ' AND Status = ?';     params.push(status); }
         if (review && review !== 'all') { sql += ' AND ReviewStatus = ?'; params.push(review); }
@@ -1067,6 +1076,11 @@ router.get('/', async (req, res) => {
             sql += ' AND (ReporterName LIKE ? OR Description LIKE ? OR Location LIKE ?)';
             const like = `%${q.trim()}%`;
             params.push(like, like, like);
+        }
+        if (assignmentScope === 'assigned') {
+            sql += ' AND EXISTS (SELECT 1 FROM Hiyari_Assignments scope_assignment WHERE scope_assignment.EmployeeID = HiyariReports.ReporterID)';
+        } else if (assignmentScope === 'outside') {
+            sql += ' AND NOT EXISTS (SELECT 1 FROM Hiyari_Assignments scope_assignment WHERE scope_assignment.EmployeeID = HiyariReports.ReporterID)';
         }
         ({ sql, params } = appendHiyariVisibility(sql, params, req));
         sql += ' ORDER BY CreatedAt DESC';
