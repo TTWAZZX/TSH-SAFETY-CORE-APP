@@ -1,5 +1,12 @@
 # TSH Safety Core Activity - Changelog And Handoff History
 
+## CCCF delegated Direct PDF permission (2026-09-07, local)
+
+- An authenticated non-Admin delegate may submit a directly signed PDF for a selected owner only when the exact owner/delegate grant is Active and that owner's Assignment has `AllowDirectSignedPdf=1`.
+- The server rechecks both conditions for every Direct PDF submission in Node and PHP. Turning off either the owner flag or the delegation immediately blocks submission; Admin behavior remains unchanged.
+- `AssigneeID` remains the KPI/tracking owner while `SubmittedByEmployeeID` / `SubmittedByName` retain the actual delegate. Existing notification, completed-status and signed-file behavior are reused; no schema or upload-path change.
+- The owner picker and document-mode card now explain and reflect the combined permission instead of limiting delegated Direct PDF to self-submission.
+
 ## CCCF Permanent multi-owner delegation (2026-09-07, deployed)
 
 - Admin may grant one delegate submission authority for multiple individually selected form owners, every currently assigned owner in a selected Department, or every currently assigned owner in a selected Unit after choosing its Department. The delegate may be any current Employee Master employee and does not need a CCCF Assignment.

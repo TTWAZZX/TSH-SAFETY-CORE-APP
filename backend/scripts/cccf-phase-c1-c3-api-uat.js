@@ -57,6 +57,19 @@ function excelForm(assigneeId, marker) {
     return form;
 }
 
+function directSignedForm(assigneeId, marker) {
+    const form = new FormData();
+    form.set('AssigneeID', assigneeId);
+    form.set('DocumentMode', 'direct_signed');
+    form.set('JobArea', marker);
+    form.set('SubmitDate', new Date().toISOString().slice(0, 10));
+    form.set('Summary', marker);
+    form.set('StopType', '6');
+    form.set('Rank', 'C');
+    form.set('FormFile', new Blob(['%PDF-1.4\n% CCCF delegated direct signed UAT\n%%EOF\n'], { type:'application/pdf' }), `${marker}.pdf`);
+    return form;
+}
+
 async function cleanup() {
     if (created.length) {
         const placeholders = created.map(() => '?').join(',');
@@ -118,6 +131,20 @@ async function cleanup() {
     assignmentId = Number(assignment.id);
     const delegation = await api(base, '/cccf/delegations', { method:'POST', auth:adminToken, body:{ OwnerEmployeeID:otherId, DelegateEmployeeID:userId } , expect:201 });
     delegationId = Number(delegation.data.id);
+    await api(base,'/cccf/form-a-permanent',{method:'POST',auth:userToken,form:directSignedForm(otherId,`C1-DIRECT-CLOSED-${run}`),expect:403});
+    await api(base,`/cccf/assignments/${assignmentId}`,{method:'PUT',auth:adminToken,body:{EmployeeID:otherId,AllowDirectSignedPdf:1,DueDate:null,Note:'C1-C4 delegated Direct PDF UAT'}});
+    const delegatedDirect=await api(base,'/cccf/form-a-permanent',{method:'POST',auth:userToken,form:directSignedForm(otherId,`C1-DIRECT-OPEN-${run}`)});
+    created.push(Number(delegatedDirect.id));
+    let directRows=await api(base,'/cccf/form-a-permanent',{auth:adminToken});
+    const directRow=(Array.isArray(directRows)?directRows:directRows.data||[]).find(row=>Number(row.id)===Number(delegatedDirect.id));
+    assert.strictEqual(String(directRow.AssigneeID),otherId,'Delegated Direct PDF must retain the selected owner');
+    assert.strictEqual(String(directRow.SubmittedByEmployeeID),userId,'Delegated Direct PDF must retain the authenticated actor');
+    assert.strictEqual(String(directRow.DocumentMode),'direct_signed');
+    assert.strictEqual(String(directRow.ReviewStatus),'Completed');
+    assert.ok(directRow.SignedFileUrl,'Delegated Direct PDF must persist the signed file');
+    await api(base,`/cccf/assignments/${assignmentId}`,{method:'PUT',auth:adminToken,body:{EmployeeID:otherId,AllowDirectSignedPdf:0,DueDate:null,Note:'C1-C4 delegated Direct PDF UAT'}});
+    await api(base,'/cccf/form-a-permanent',{method:'POST',auth:userToken,form:directSignedForm(otherId,`C1-DIRECT-REVOKED-${run}`),expect:403});
+    await api(base,`/cccf/assignments/${assignmentId}`,{method:'PUT',auth:adminToken,body:{EmployeeID:otherId,AllowDirectSignedPdf:1,DueDate:null,Note:'C1-C4 delegated Direct PDF UAT'}});
     // Submission endpoint repeats the authorization check server-side; route-level
     // list filtering is covered by the static parity contract and browser UAT.
     const forged=await api(base,'/cccf/form-a-permanent',{method:'POST',auth:userToken,form:excelForm(otherId,forgedMarker)});
@@ -155,6 +182,7 @@ async function cleanup() {
     assert.strictEqual(delegateEvents.length,1,'Delegated owner notification must reuse the existing outbox event/template');
     await api(base, `/cccf/delegations/${delegationId}`, { method:'PUT', auth:adminToken, body:{ IsActive:false } });
     await api(base,'/cccf/form-a-permanent',{method:'POST',auth:userToken,form:excelForm(otherId,`C1-DISABLED-${run}`),expect:403});
+    await api(base,'/cccf/form-a-permanent',{method:'POST',auth:userToken,form:directSignedForm(otherId,`C1-DIRECT-DELEGATION-DISABLED-${run}`),expect:403});
     console.log('CCCF Phase C1-C3 API authorization/review lifecycle UAT: PASS');
 })().catch(error=>{console.error(error.stack||error);process.exitCode=1;}).finally(async()=>{
     if(server)await new Promise(resolve=>server.close(resolve));

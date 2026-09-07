@@ -26,9 +26,14 @@ check('Normal user authorization is server enforced and assignment-bound',
 check('New records persist owner separately from the authenticated submitter',
     node.includes('SubmittedByEmployeeID, SubmittedByName')
     && php.includes('SubmittedByEmployeeID,SubmittedByName,DocumentMode'));
-check('KPI ownership remains AssigneeID and delegate cannot use owner direct-PDF privilege',
+check('Delegated Direct PDF requires both owner permission and an active exact delegation',
     node.includes('assertDirectSignedAllowed(req, AssigneeID)')
-    && php.includes('wf_cccf_direct_signed_allowed($user,$assignee)'));
+    && node.includes('a.AllowDirectSignedPdf = 1') && node.includes('d.DelegateEmployeeID = ?')
+    && php.includes('wf_cccf_direct_signed_allowed($user,$assignee)')
+    && php.includes('a.AllowDirectSignedPdf=1') && php.includes('d.DelegateEmployeeID=?'));
+check('UI enables Direct PDF from the selected owner permission and active delegation',
+    ui.includes('canSubmitDirectSignedForOwner')
+    && ui.includes('เจ้าของเปิด Direct PDF และสิทธิ์ยื่นแทนใช้งานอยู่'));
 check('UI labels owner, submitter, and authorized delegated owner selector clearly',
     ui.includes('ยื่นแบบฟอร์มแทนใคร') && ui.includes('เจ้าของแบบฟอร์ม') && ui.includes('ผู้ส่งรายการ'));
 check('UI selector uses delegation-limited source and validates the selected owner',

@@ -612,17 +612,30 @@ async function resolvePermanentSubmitter(req, payload = {}) {
 async function assertDirectSignedAllowed(req, assigneeId) {
     if (isAdminUser(req)) return true;
     const requesterId = String(req.user?.id || req.user?.EmployeeID || '').trim();
-    if (!assigneeId || requesterId !== String(assigneeId)) {
-        const err = new Error('ไม่มีสิทธิ์ส่ง PDF ลงนามโดยตรงแทนผู้รับผิดชอบรายนี้');
+    const ownerId = String(assigneeId || '').trim();
+    if (!requesterId || !ownerId) {
+        const err = new Error('ไม่พบข้อมูลผู้ยื่นหรือเจ้าของแบบฟอร์มสำหรับตรวจสิทธิ์ Direct PDF');
         err.statusCode = 403;
         throw err;
     }
-    const [[assignment]] = await db.query(
-        'SELECT AllowDirectSignedPdf FROM CCCF_Assignments WHERE EmployeeID = ? LIMIT 1',
-        [assigneeId]
-    );
-    if (!assignment?.AllowDirectSignedPdf) {
-        const err = new Error('บัญชีนี้ยังไม่ได้รับสิทธิ์ส่ง PDF ลงนามโดยตรง');
+    const [[authorization]] = await db.query(`
+        SELECT a.EmployeeID
+        FROM CCCF_Assignments a
+        WHERE a.EmployeeID = ?
+          AND a.AllowDirectSignedPdf = 1
+          AND (
+                a.EmployeeID = ?
+                OR EXISTS (
+                    SELECT 1
+                    FROM CCCF_Submit_Delegations d
+                    WHERE d.OwnerEmployeeID = a.EmployeeID
+                      AND d.DelegateEmployeeID = ?
+                      AND d.IsActive = 1
+                )
+          )
+        LIMIT 1`, [ownerId, requesterId, requesterId]);
+    if (!authorization) {
+        const err = new Error('เจ้าของแบบฟอร์มยังไม่ได้เปิดสิทธิ์ Direct PDF หรือสิทธิ์ยื่นแทนไม่พร้อมใช้งาน');
         err.statusCode = 403;
         throw err;
     }
@@ -1965,7 +1978,7 @@ router.post('/assignments', isAdmin, async (req, res) => {
                 html: assignmentMail.html,
             });
         }
-        res.json({ success: true, message: 'เพิ่มรายการมอบหมายสำเร็จ' });
+        res.json({ success: true, id: result.insertId, message: 'เพิ่มรายการมอบหมายสำเร็จ' });
     } catch (err) {
         if (err.code === 'ER_NO_SUCH_TABLE') {
             return res.status(500).json({ success: false, message: 'ยังไม่มีตาราง CCCF_Assignments' });

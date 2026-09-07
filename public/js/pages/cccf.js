@@ -1407,6 +1407,17 @@ function canDirectSignedPdf(employeeId) {
     return _assignments.some(a => String(a.EmployeeID || '').trim() === target && Number(a.AllowDirectSignedPdf || 0) === 1);
 }
 
+function canSubmitDirectSignedForOwner(employeeId) {
+    const ownerId = String(employeeId || '').trim();
+    if (!ownerId || !canDirectSignedPdf(ownerId)) return isAdmin;
+    if (isAdmin || ownerId === String(currentUser?.id || '').trim()) return true;
+    return _delegations.some(row =>
+        String(row.OwnerEmployeeID || '').trim() === ownerId
+        && Number(row.IsActive) === 1
+        && Number(row.HasAssignment) === 1
+    );
+}
+
 function getApprovedPermanentRecordsForOwner(employeeId) {
     const target = String(employeeId || '').trim();
     return [..._permanentData]
@@ -4380,7 +4391,7 @@ function openPermanentForm(record = null, forcedAssigneeId = '') {
     const ownerDept = selectedOwner?.Department || record?.Department || currentUser.department || '';
     const ownerEmail = getPermanentOwnerEmail(selectedOwnerId);
     const defaultMode = isEdit ? (record?.DocumentMode || 'legacy') : 'excel_review';
-    const directAllowed = isAdmin || (selectedOwnerId === String(currentUser.id || '') && canDirectSignedPdf(selectedOwnerId));
+    const directAllowed = canSubmitDirectSignedForOwner(selectedOwnerId);
     let approvedRecords = getApprovedPermanentRecordsForOwner(selectedOwnerId);
 
     openModal(`CCCF Form A - Permanent${isEdit ? ' (แก้ไข)' : ''}`, `
@@ -4428,7 +4439,7 @@ function openPermanentForm(record = null, forcedAssigneeId = '') {
               <input id="permanent-direct-signed-radio" type="radio" name="PermanentDocumentModeChoice" value="direct_signed" class="peer hidden" ${directAllowed ? '' : 'disabled'}>
               <div class="h-full rounded-xl border border-emerald-200 bg-emerald-50 p-3 peer-checked:ring-2 peer-checked:ring-emerald-300">
                 <p class="text-sm font-black text-emerald-800">ส่ง PDF ลงนามโดยตรง</p>
-                <p class="mt-1 text-[11px] leading-relaxed text-emerald-700">${directAllowed ? 'แนบ PDF ที่ลงนามแล้วได้ทันที' : 'ต้องให้ Admin เปิดสิทธิ์ในรายการมอบหมายก่อน'}</p>
+                <p id="permanent-direct-signed-help" class="mt-1 text-[11px] leading-relaxed text-emerald-700">${directAllowed ? (selectedOwnerId === String(currentUser.id || '') || isAdmin ? 'แนบ PDF ที่ลงนามแล้วได้ทันที' : 'เจ้าของเปิด Direct PDF และสิทธิ์ยื่นแทนใช้งานอยู่') : 'ต้องให้ Admin เปิด Direct PDF ให้เจ้าของ และมีสิทธิ์ยื่นแทนที่ใช้งานอยู่'}</p>
               </div>
             </label>
           </div>
@@ -4710,10 +4721,12 @@ function openPermanentForm(record = null, forcedAssigneeId = '') {
             if (excelRadio) excelRadio.checked = true;
         }
         const directRadio = document.getElementById('permanent-direct-signed-radio');
-        const directAllowedForSelected = isAdmin || (
-            String(assigneeInput?.value || '') === String(currentUser.id || '')
-            && canDirectSignedPdf(assigneeInput?.value || '')
-        );
+        const directOwnerId = String(assigneeInput?.value || '').trim();
+        const directAllowedForSelected = canSubmitDirectSignedForOwner(directOwnerId);
+        const directHelp = document.getElementById('permanent-direct-signed-help');
+        if (directHelp) directHelp.textContent = directAllowedForSelected
+            ? (directOwnerId === String(currentUser.id || '') || isAdmin ? 'แนบ PDF ที่ลงนามแล้วได้ทันที' : 'เจ้าของเปิด Direct PDF และสิทธิ์ยื่นแทนใช้งานอยู่')
+            : 'ต้องให้ Admin เปิด Direct PDF ให้เจ้าของ และมีสิทธิ์ยื่นแทนที่ใช้งานอยู่';
         if (directRadio) {
             directRadio.disabled = !directAllowedForSelected;
             directRadio.closest('label')?.classList.toggle('cursor-pointer', directAllowedForSelected);

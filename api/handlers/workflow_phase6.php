@@ -365,9 +365,19 @@ function wf_cccf_direct_signed_allowed(array $user, ?string $assigneeId): bool
 {
     if (wf_is_admin($user)) return true;
     $requesterId = wf_user_id($user);
-    if ($assigneeId === null || $assigneeId === '' || $requesterId !== $assigneeId) return false;
-    $assignment = db_row('SELECT AllowDirectSignedPdf FROM cccf_assignments WHERE EmployeeID=? LIMIT 1', [$assigneeId]);
-    return (int)($assignment['AllowDirectSignedPdf'] ?? 0) === 1;
+    $ownerId = trim((string)$assigneeId);
+    if ($ownerId === '' || $requesterId === '') return false;
+    $authorization = db_row(
+        'SELECT a.EmployeeID FROM cccf_assignments a
+         WHERE a.EmployeeID=? AND a.AllowDirectSignedPdf=1
+           AND (a.EmployeeID=? OR EXISTS(
+               SELECT 1 FROM cccf_submit_delegations d
+                WHERE d.OwnerEmployeeID=a.EmployeeID
+                  AND d.DelegateEmployeeID=? AND d.IsActive=1
+           )) LIMIT 1',
+        [$ownerId,$requesterId,$requesterId]
+    );
+    return (bool)$authorization;
 }
 
 function wf_cccf_owner_recipient(array $record): array
