@@ -5279,31 +5279,63 @@ async function openSubmitDelegationManager() {
         id: String(row.EmployeeID), name: row.EmployeeName || row.name || '', dept: row.Department || '',
     }));
     const selectorOptions = list => list.map(row => `<option value="${escapeAttr(row.id)}">${escapeHtml(row.name)} — ${escapeHtml(row.dept || 'No Department')}</option>`).join('');
-    const renderRows = () => _delegations.length ? _delegations.map(row => `
-        <div class="flex flex-col gap-2 rounded-xl border border-slate-200 bg-white p-3 sm:flex-row sm:items-center sm:justify-between">
-        <div class="min-w-0 text-xs"><p class="font-bold text-slate-800">${escapeHtml(row.DelegateName || getEmployeeById(row.DelegateEmployeeID)?.EmployeeName || row.DelegateEmployeeID)} <span class="font-normal text-slate-400">ยื่นแทน</span> ${escapeHtml(row.OwnerName || getEmployeeById(row.OwnerEmployeeID)?.EmployeeName || row.OwnerEmployeeID)}</p><p class="mt-0.5 text-slate-400">${escapeHtml(row.OwnerDepartment || getEmployeeById(row.OwnerEmployeeID)?.Department || '—')} · ${Number(row.IsActive) === 1 ? 'ใช้งานอยู่' : 'ปิดแล้ว'}</p></div>
+    const ownerSelectOptions = list => list.map(row => `<option value="${escapeAttr(row.id)}">${escapeHtml(row.name)} (${escapeHtml(row.id)}) — ${escapeHtml(row.dept || 'ไม่ระบุแผนก')}</option>`).join('');
+    const departments = [...new Set(ownerOptions.map(row => String(row.dept || '').trim()).filter(Boolean))].sort((a,b)=>a.localeCompare(b,'th'));
+    const hasOwnerAssignment = row => Number(row.HasAssignment) === 1 || ownerOptions.some(owner=>owner.id===String(row.OwnerEmployeeID));
+    const activeCount = _delegations.filter(row => Number(row.IsActive) === 1 && hasOwnerAssignment(row)).length;
+    const renderRows = () => _delegations.length ? _delegations.map(row => { const assigned=hasOwnerAssignment(row);return `
+        <div data-delegation-row data-delegation-search="${escapeAttr(`${row.DelegateName || getEmployeeById(row.DelegateEmployeeID)?.EmployeeName || row.DelegateEmployeeID} ${row.DelegateEmployeeID} ${row.OwnerName || getEmployeeById(row.OwnerEmployeeID)?.EmployeeName || row.OwnerEmployeeID} ${row.OwnerEmployeeID} ${row.OwnerDepartment || getEmployeeById(row.OwnerEmployeeID)?.Department || ''}`.toLowerCase())}" class="flex flex-col gap-2 rounded-xl border border-slate-200 bg-white p-3 sm:flex-row sm:items-center sm:justify-between">
+        <div class="min-w-0 text-xs"><p class="font-bold text-slate-800">${escapeHtml(row.DelegateName || getEmployeeById(row.DelegateEmployeeID)?.EmployeeName || row.DelegateEmployeeID)} <span class="font-normal text-slate-400">ยื่นแทน</span> ${escapeHtml(row.OwnerName || getEmployeeById(row.OwnerEmployeeID)?.EmployeeName || row.OwnerEmployeeID)}</p><p class="mt-0.5 ${assigned?'text-slate-400':'font-bold text-amber-700'}">${escapeHtml(row.OwnerDepartment || getEmployeeById(row.OwnerEmployeeID)?.Department || '—')} · ${assigned?(Number(row.IsActive) === 1 ? 'ใช้งานอยู่' : 'ปิดแล้ว'):'ไม่มี Assignment — ใช้สิทธิ์ไม่ได้'}</p></div>
         <button type="button" data-delegation-id="${escapeAttr(row.id)}" data-delegation-active="${Number(row.IsActive) === 1 ? '0' : '1'}" class="btn-toggle-submit-delegation min-h-11 rounded-lg border px-3 text-xs font-bold ${Number(row.IsActive) === 1 ? 'border-rose-100 bg-rose-50 text-rose-700' : 'border-emerald-100 bg-emerald-50 text-emerald-700'}">${Number(row.IsActive) === 1 ? 'ปิดสิทธิ์' : 'เปิดสิทธิ์'}</button>
-      </div>`).join('') : '<div class="rounded-xl border border-dashed border-slate-200 p-5 text-center text-sm text-slate-400">ยังไม่มีสิทธิ์ยื่นแทน</div>';
+      </div>`;}).join('') : '<div class="rounded-xl border border-dashed border-slate-200 p-5 text-center text-sm text-slate-400">ยังไม่มีสิทธิ์ยื่นแทน</div>';
     openModal('จัดการสิทธิ์ยื่น CCCF แทนเจ้าของแบบฟอร์ม', `
       <div class="space-y-4">
         <div class="rounded-xl border border-indigo-100 bg-indigo-50 px-4 py-3 text-xs leading-relaxed text-indigo-800">สิทธิ์นี้อนุญาตเฉพาะการยื่นเอกสารแทนเท่านั้น สถิติและ KPI ยังคงนับที่เจ้าของแบบฟอร์มซึ่งต้องอยู่ในรายการมอบหมายของ Admin</div>
-        <div class="grid gap-3 rounded-xl border border-slate-200 bg-slate-50 p-4 sm:grid-cols-2">
-          <label class="text-xs font-bold text-slate-600">เจ้าของแบบฟอร์ม (มี Assignment แล้ว)<input id="cccf-delegation-owner" list="cccf-delegation-owner-list" class="form-input mt-1 w-full rounded-xl text-sm" placeholder="ค้นหารหัสหรือชื่อ"><datalist id="cccf-delegation-owner-list">${selectorOptions(ownerOptions)}</datalist></label>
-          <label class="text-xs font-bold text-slate-600">ผู้ได้รับสิทธิ์ยื่นแทน<input id="cccf-delegation-delegate" list="cccf-delegation-employee-list" class="form-input mt-1 w-full rounded-xl text-sm" placeholder="ค้นหารหัสหรือชื่อ"><datalist id="cccf-delegation-employee-list">${selectorOptions(employeeOptions)}</datalist></label>
-          <div class="sm:col-span-2"><button type="button" id="btn-save-submit-delegation" class="min-h-11 rounded-xl bg-indigo-600 px-4 text-sm font-bold text-white hover:bg-indigo-700">เพิ่ม / เปิดสิทธิ์ยื่นแทน</button></div>
+        <div class="rounded-xl border border-slate-200 bg-slate-50 p-4 space-y-4">
+          <fieldset><legend class="text-xs font-bold text-slate-700">รูปแบบการให้สิทธิ์</legend><div class="mt-2 grid grid-cols-2 gap-2"><label class="flex min-h-11 cursor-pointer items-center gap-2 rounded-xl border bg-white px-3 text-sm font-bold text-slate-700"><input type="radio" name="cccf-delegation-scope" value="individual" checked> รายบุคคล</label><label class="flex min-h-11 cursor-pointer items-center gap-2 rounded-xl border bg-white px-3 text-sm font-bold text-slate-700"><input type="radio" name="cccf-delegation-scope" value="department"> ทั้งแผนก</label></div></fieldset>
+          <label class="block text-xs font-bold text-slate-600">ผู้ได้รับสิทธิ์ยื่นแทน<input id="cccf-delegation-delegate" list="cccf-delegation-employee-list" class="form-input mt-1 w-full rounded-xl text-sm" placeholder="ค้นหารหัสหรือชื่อ"><datalist id="cccf-delegation-employee-list">${selectorOptions(employeeOptions)}</datalist></label>
+          <div id="cccf-delegation-individual-fields" class="space-y-2"><label for="cccf-delegation-owner-search" class="text-xs font-bold text-slate-600">เจ้าของแบบฟอร์มรายบุคคล</label><input id="cccf-delegation-owner-search" type="search" class="form-input w-full rounded-xl text-sm" placeholder="ค้นหารหัส ชื่อ หรือแผนก"><select id="cccf-delegation-owner" multiple size="7" class="form-select min-h-[190px] w-full rounded-xl text-sm">${ownerSelectOptions(ownerOptions)}</select><p class="text-[11px] text-slate-500">เลือกได้หลายคนด้วย Ctrl หรือ Shift ระบบรับเฉพาะผู้ที่มี Assignment อยู่แล้ว</p></div>
+          <div id="cccf-delegation-department-fields" class="hidden space-y-2"><label for="cccf-delegation-department" class="text-xs font-bold text-slate-600">แผนกของเจ้าของแบบฟอร์ม</label><select id="cccf-delegation-department" class="form-select w-full rounded-xl text-sm"><option value="">เลือกแผนก</option>${departments.map(dept=>`<option value="${escapeAttr(dept)}">${escapeHtml(dept)} — ${ownerOptions.filter(row=>String(row.dept||'').trim()===dept).length} คนที่มี Assignment</option>`).join('')}</select><p class="text-[11px] text-slate-500">ระบบจะสร้างหรือเปิดสิทธิ์รายเจ้าของให้ทุกคนที่มี Assignment ในแผนก ณ เวลาที่บันทึก และข้ามผู้รับสิทธิ์หากเป็นเจ้าของคนหนึ่งในแผนกนั้น</p></div>
+          <button type="button" id="btn-save-submit-delegation" class="min-h-11 rounded-xl bg-indigo-600 px-4 text-sm font-bold text-white hover:bg-indigo-700">เพิ่ม / เปิดสิทธิ์ยื่นแทน</button>
         </div>
-        <div class="space-y-2" id="cccf-delegation-list">${renderRows()}</div>
+        <div class="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between"><div><p class="text-sm font-bold text-slate-800">สิทธิ์ที่บันทึกไว้</p><p class="text-xs text-slate-500">ทั้งหมด ${_delegations.length} คู่ · ใช้งานอยู่ ${activeCount} คู่</p></div><label class="text-xs font-bold text-slate-600">ค้นหาสิทธิ์<input id="cccf-delegation-list-search" type="search" class="form-input mt-1 w-full rounded-xl text-sm sm:w-72" placeholder="ผู้ยื่นแทน เจ้าของ หรือแผนก"></label></div>
+        <div class="max-h-80 space-y-2 overflow-y-auto pr-1" id="cccf-delegation-list">${renderRows()}<div id="cccf-delegation-no-results" class="hidden rounded-xl border border-dashed p-5 text-center text-sm text-slate-400">ไม่พบสิทธิ์ตามคำค้นหา</div></div>
       </div>`, 'max-w-3xl');
+    const updateScopeFields = () => {
+        const scope = document.querySelector('input[name="cccf-delegation-scope"]:checked')?.value || 'individual';
+        document.getElementById('cccf-delegation-individual-fields')?.classList.toggle('hidden', scope !== 'individual');
+        document.getElementById('cccf-delegation-department-fields')?.classList.toggle('hidden', scope !== 'department');
+    };
+    document.querySelectorAll('input[name="cccf-delegation-scope"]').forEach(input=>input.addEventListener('change',updateScopeFields));
+    const selectedOwnerIds=new Set();
+    document.getElementById('cccf-delegation-owner')?.addEventListener('change',event=>{
+        [...event.currentTarget.options].forEach(option=>{if(option.selected)selectedOwnerIds.add(option.value);else selectedOwnerIds.delete(option.value);});
+    });
+    document.getElementById('cccf-delegation-owner-search')?.addEventListener('input', event => {
+        const select=document.getElementById('cccf-delegation-owner');
+        const query=String(event.target.value||'').trim().toLowerCase();
+        const filtered=ownerOptions.filter(row=>!query||`${row.id} ${row.name} ${row.dept}`.toLowerCase().includes(query));
+        select.innerHTML=ownerSelectOptions(filtered);
+        [...select.options].forEach(option=>{option.selected=selectedOwnerIds.has(option.value);});
+    });
+    document.getElementById('cccf-delegation-list-search')?.addEventListener('input', event => {
+        const query=String(event.target.value||'').trim().toLowerCase();let visible=0;
+        document.querySelectorAll('[data-delegation-row]').forEach(row=>{const show=!query||String(row.dataset.delegationSearch||'').includes(query);row.classList.toggle('hidden',!show);if(show)visible++;});
+        document.getElementById('cccf-delegation-no-results')?.classList.toggle('hidden',visible!==0||!_delegations.length);
+    });
     document.getElementById('btn-save-submit-delegation')?.addEventListener('click', guardActionHandler(async event => {
-        const ownerId = String(document.getElementById('cccf-delegation-owner')?.value || '').trim();
         const delegateId = String(document.getElementById('cccf-delegation-delegate')?.value || '').trim();
-        if (!ownerOptions.some(row => row.id === ownerId) || !employeeOptions.some(row => row.id === delegateId) || ownerId === delegateId) {
-            showToast('กรุณาเลือกเจ้าของที่ได้รับมอบหมายและผู้ยื่นแทนเป็นคนละคนจาก Employee Master', 'error'); return;
-        }
+        const scopeType = document.querySelector('input[name="cccf-delegation-scope"]:checked')?.value || 'individual';
+        const ownerIds = [...selectedOwnerIds];
+        const ownerDepartment = String(document.getElementById('cccf-delegation-department')?.value || '').trim();
+        if (!employeeOptions.some(row => row.id === delegateId)) { showToast('กรุณาเลือกผู้ได้รับสิทธิ์จาก Employee Master', 'error'); return; }
+        if(scopeType==='individual'&&(!ownerIds.length||ownerIds.includes(delegateId))){showToast('กรุณาเลือกเจ้าของอย่างน้อย 1 คน และต้องไม่ใช่ผู้ได้รับสิทธิ์เอง', 'error');return;}
+        if(scopeType==='department'&&!departments.includes(ownerDepartment)){showToast('กรุณาเลือกแผนกของเจ้าของแบบฟอร์ม', 'error');return;}
         event.currentTarget.disabled = true;
         try {
-            await API.post('/cccf/delegations', { OwnerEmployeeID: ownerId, DelegateEmployeeID: delegateId });
-            showToast('บันทึกสิทธิ์ยื่นแทนสำเร็จ', 'success');
+            const result=await API.post('/cccf/delegations', scopeType==='department'?{ScopeType:'department',OwnerDepartment:ownerDepartment,DelegateEmployeeID:delegateId}:{ScopeType:'individual',OwnerEmployeeIDs:ownerIds,DelegateEmployeeID:delegateId});
+            const count=Number(result?.data?.OwnerCount||ownerIds.length||0);
+            showToast(`บันทึกสิทธิ์ยื่นแทนสำเร็จ ${count} คน`, 'success');
             await loadCccfPage(); closeModal(); openSubmitDelegationManager();
         } catch (error) { showError(error); } finally { event.currentTarget.disabled = false; }
     }, { render: false }));

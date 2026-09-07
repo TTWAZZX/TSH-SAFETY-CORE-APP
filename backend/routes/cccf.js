@@ -544,7 +544,9 @@ async function readCccfDelegationRows() {
     const connection = await db.getConnection();
     try {
         await connection.query('ROLLBACK').catch(() => {});
-        const [rows] = await connection.query('SELECT id, OwnerEmployeeID, DelegateEmployeeID, IsActive, CreatedBy, CreatedAt, UpdatedAt FROM CCCF_Submit_Delegations ORDER BY UpdatedAt DESC, id DESC');
+        const [rows] = await connection.query(`SELECT d.id, d.OwnerEmployeeID, d.DelegateEmployeeID, d.IsActive, d.CreatedBy, d.CreatedAt, d.UpdatedAt,
+            EXISTS(SELECT 1 FROM CCCF_Assignments a WHERE a.EmployeeID = d.OwnerEmployeeID) AS HasAssignment
+            FROM CCCF_Submit_Delegations d ORDER BY d.UpdatedAt DESC, d.id DESC`);
         return rows;
     } finally {
         connection.release();
@@ -1769,7 +1771,7 @@ router.get('/delegations', async (req, res) => {
         if (!requesterId) return res.status(403).json({ success: false, message: 'Missing authenticated employee identity.' });
         const admin = isAdminUser(req);
         const allRows = await readCccfDelegationRows();
-        const rows = admin ? allRows : allRows.filter(row => String(row.DelegateEmployeeID) === requesterId && Number(row.IsActive) === 1);
+        const rows = admin ? allRows : allRows.filter(row => String(row.DelegateEmployeeID) === requesterId && Number(row.IsActive) === 1 && Number(row.HasAssignment) === 1);
         res.json({ success: true, data: rows });
     } catch (err) {
         if (err.code === 'ER_NO_SUCH_TABLE') return res.json({ success: true, data: [] });
@@ -1781,35 +1783,63 @@ router.post('/delegations', isAdmin, async (req, res) => {
     let connection;
     try {
         await cccfEnhancementReady;
-        const ownerId = String(req.body?.OwnerEmployeeID || '').trim();
         const delegateId = String(req.body?.DelegateEmployeeID || '').trim();
-        if (!ownerId || !delegateId || ownerId === delegateId) {
-            return res.status(400).json({ success: false, message: 'Owner and delegate must be two different employees.' });
-        }
+        const legacySingle = !req.body?.ScopeType && !Array.isArray(req.body?.OwnerEmployeeIDs) && Boolean(req.body?.OwnerEmployeeID);
+        const scopeType = String(req.body?.ScopeType || 'individual').trim().toLowerCase();
+        if (!delegateId || !['individual', 'department'].includes(scopeType)) return res.status(400).json({ success: false, message: 'กรุณาเลือกผู้ได้รับสิทธิ์และรูปแบบสิทธิ์ให้ถูกต้อง' });
         connection = await db.getConnection();
         await connection.beginTransaction();
-        const [[owner]] = await connection.query('SELECT EmployeeID FROM Employees WHERE EmployeeID = ? LIMIT 1', [ownerId]);
         const [[delegate]] = await connection.query('SELECT EmployeeID FROM Employees WHERE EmployeeID = ? LIMIT 1', [delegateId]);
-        const [[assignment]] = await connection.query('SELECT id FROM CCCF_Assignments WHERE EmployeeID = ? LIMIT 1', [ownerId]);
-        if (!owner || !delegate) { const err = new Error('Employee Master record was not found.'); err.statusCode = 404; throw err; }
-        if (!assignment) { const err = new Error('The form owner must be assigned by Admin before delegation can be enabled.'); err.statusCode = 400; throw err; }
-        await connection.query(`
-            INSERT INTO CCCF_Submit_Delegations (OwnerEmployeeID, DelegateEmployeeID, IsActive, CreatedBy)
-            VALUES (?, ?, 1, ?)
-            ON DUPLICATE KEY UPDATE IsActive = 1, CreatedBy = VALUES(CreatedBy), UpdatedAt = CURRENT_TIMESTAMP`,
-            [ownerId, delegateId, req.user?.name || 'Safety Admin']);
-        const [[row]] = await connection.query(
-            'SELECT id, OwnerEmployeeID, DelegateEmployeeID, IsActive FROM CCCF_Submit_Delegations WHERE OwnerEmployeeID = ? AND DelegateEmployeeID = ? LIMIT 1',
-            [ownerId, delegateId]
+        if (!delegate) { const err = new Error('ไม่พบผู้ได้รับสิทธิ์ใน Employee Master'); err.statusCode = 404; throw err; }
+        let ownerIds = [];
+        let ownerDepartment = null;
+        if (scopeType === 'department') {
+            ownerDepartment = String(req.body?.OwnerDepartment || '').trim();
+            if (!ownerDepartment || ownerDepartment.length > 100) { const err = new Error('กรุณาเลือกแผนกเจ้าของแบบฟอร์ม'); err.statusCode = 400; throw err; }
+            const [owners] = await connection.query(`
+                SELECT DISTINCT a.EmployeeID
+                FROM CCCF_Assignments a
+                INNER JOIN Employees e ON e.EmployeeID = a.EmployeeID
+                WHERE TRIM(e.Department) = ? AND a.EmployeeID <> ?
+                ORDER BY a.EmployeeID`, [ownerDepartment, delegateId]);
+            ownerIds = owners.map(row => String(row.EmployeeID));
+        } else {
+            const requested = Array.isArray(req.body?.OwnerEmployeeIDs) ? req.body.OwnerEmployeeIDs : [req.body?.OwnerEmployeeID];
+            ownerIds = [...new Set(requested.map(value => String(value || '').trim()).filter(Boolean))];
+            if (!ownerIds.length || ownerIds.length > 500 || ownerIds.includes(delegateId)) { const err = new Error('กรุณาเลือกเจ้าของแบบฟอร์ม 1-500 คน และต้องไม่ใช่ผู้ยื่นแทน'); err.statusCode = 400; throw err; }
+            const placeholders = ownerIds.map(() => '?').join(',');
+            const [assignedOwners] = await connection.query(`
+                SELECT DISTINCT a.EmployeeID
+                FROM CCCF_Assignments a
+                INNER JOIN Employees e ON e.EmployeeID = a.EmployeeID
+                WHERE a.EmployeeID IN (${placeholders})`, ownerIds);
+            const assigned = new Set(assignedOwners.map(row => String(row.EmployeeID)));
+            if (assigned.size !== ownerIds.length) { const err = new Error('เจ้าของแบบฟอร์มบางรายไม่มี Assignment หรือไม่อยู่ใน Employee Master'); err.statusCode = 400; throw err; }
+        }
+        if (!ownerIds.length) { const err = new Error('ไม่พบเจ้าของแบบฟอร์มที่มี Assignment ในแผนกนี้'); err.statusCode = 400; throw err; }
+        const createdBy = req.user?.name || 'Safety Admin';
+        for (let start = 0; start < ownerIds.length; start += 250) {
+            const chunk = ownerIds.slice(start, start + 250);
+            const values = chunk.map(() => '(?, ?, 1, ?)').join(',');
+            const params = chunk.flatMap(ownerId => [ownerId, delegateId, createdBy]);
+            await connection.query(`
+                INSERT INTO CCCF_Submit_Delegations (OwnerEmployeeID, DelegateEmployeeID, IsActive, CreatedBy)
+                VALUES ${values}
+                ON DUPLICATE KEY UPDATE IsActive = 1, CreatedBy = VALUES(CreatedBy), UpdatedAt = CURRENT_TIMESTAMP`, params);
+        }
+        const placeholders = ownerIds.map(() => '?').join(',');
+        const [rows] = await connection.query(
+            `SELECT id, OwnerEmployeeID, DelegateEmployeeID, IsActive FROM CCCF_Submit_Delegations WHERE DelegateEmployeeID = ? AND OwnerEmployeeID IN (${placeholders}) ORDER BY OwnerEmployeeID`,
+            [delegateId, ...ownerIds]
         );
         await connection.commit();
         connection.release(); connection = null;
         await logAudit(req, {
-            action: 'ENABLE_CCCF_SUBMISSION_DELEGATION', module: 'cccf', targetType: 'CCCF_Submit_Delegations', targetId: row.id,
-            detail: `Enabled CCCF submission delegation ${delegateId} -> ${ownerId}`,
-            metadata: { OwnerEmployeeID: ownerId, DelegateEmployeeID: delegateId, IsActive: 1 }
+            action: ownerIds.length > 1 ? 'ENABLE_CCCF_SUBMISSION_DELEGATION_BULK' : 'ENABLE_CCCF_SUBMISSION_DELEGATION', module: 'cccf', targetType: 'CCCF_Submit_Delegations', targetId: rows[0]?.id,
+            detail: `Enabled CCCF submission delegation ${delegateId} for ${ownerIds.length} owner(s)`,
+            metadata: { ScopeType: scopeType, OwnerDepartment: ownerDepartment, OwnerEmployeeIDs: ownerIds, DelegateEmployeeID: delegateId, OwnerCount: ownerIds.length, IsActive: 1 }
         });
-        res.status(201).json({ success: true, data: row });
+        res.status(201).json({ success: true, data: legacySingle ? rows[0] : { ScopeType: scopeType, OwnerDepartment: ownerDepartment, DelegateEmployeeID: delegateId, OwnerCount: rows.length, rows } });
     } catch (err) {
         if (connection) { await connection.rollback().catch(() => {}); connection.release(); }
         if (err.statusCode) return res.status(err.statusCode).json({ success: false, message: err.message });

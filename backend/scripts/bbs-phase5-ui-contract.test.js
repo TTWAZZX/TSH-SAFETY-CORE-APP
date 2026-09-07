@@ -4,6 +4,13 @@ const file=fs.readFileSync(path.join(__dirname,'..','..','public','js','pages','
 for(const pattern of [
     /\['actions','Corrective Action'\]/,
     /function actionsView\(/,
+    /data-action-workspace/,
+    /function actionQueueButton\(/,
+    /data-action-queue=/,
+    /data-action-queue-list/,
+    /async function selectActionQueue\(/,
+    /async function resetActionWorkspace\(/,
+    /data-action-admin-tools/,
     /data-action-filter=/,
     /\/bbs\/actions\/summary/,
     /\/bbs\/actions\/\$\{id\}\/transition/,

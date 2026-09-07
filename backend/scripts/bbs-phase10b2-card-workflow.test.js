@@ -8,6 +8,10 @@ const root = path.join(__dirname, '..', '..');
 const ui = fs.readFileSync(path.join(root, 'public', 'js', 'pages', 'bbs-smart-card.js'), 'utf8');
 const main = fs.readFileSync(path.join(root, 'public', 'js', 'main.js'), 'utf8');
 const html = fs.readFileSync(path.join(root, 'index.html'), 'utf8');
+const personalNode = fs.readFileSync(path.join(root, 'backend', 'routes', 'bbs-cards.js'), 'utf8');
+const personalPhp = fs.readFileSync(path.join(root, 'api', 'handlers', 'bbs_cards.php'), 'utf8');
+const departmentNode = fs.readFileSync(path.join(root, 'backend', 'routes', 'bbs-community.js'), 'utf8');
+const departmentPhp = fs.readFileSync(path.join(root, 'api', 'handlers', 'bbs_community.php'), 'utf8');
 
 for (const marker of [
     "cardWorkspace:'overview'",
@@ -24,6 +28,12 @@ for (const marker of [
     'Department Card',
     'PERSONAL CARD WORKFLOW',
     'DEPARTMENT CARD WORKFLOW',
+    'function cardSizeEditor(',
+    'data-card-orientation="portrait"',
+    'data-card-orientation="landscape"',
+    'ค่าเริ่มต้นมาตรฐาน BBS 60 × 85 mm แนวตั้ง',
+    'name="widthMM"',
+    'name="heightMM"',
     'สร้าง Template',
     'ออก QR กลางรายแผนก',
     'กำหนด Owner และ Verifier',
@@ -34,6 +44,18 @@ for (const marker of [
 
 assert.match(ui, /state\.cardWorkspace === 'personal' \? personalCardsView\(\) : state\.cardWorkspace === 'department' \? departmentCardsAdminView\(\) : cardOverviewView\(\)/);
 assert.match(ui, /if \(nextTab === 'cards' && state\.tab === 'community'\) state\.cardWorkspace = 'department'/);
+assert.match(ui, /name="widthMM"[^>]+value="60"/);
+assert.match(ui, /name="heightMM"[^>]+value="85"/);
+for (const source of [personalNode, personalPhp]) {
+    assert.match(source, /WidthMM,HeightMM,IncludeEmployeeID/);
+    assert.match(source, /widthMM[^\n]+60/);
+    assert.match(source, /heightMM[^\n]+85/);
+}
+for (const source of [departmentNode, departmentPhp]) {
+    assert.match(source, /WidthMM,HeightMM,DisplayOrder/);
+    assert.match(source, /widthMM[^\n]+60/);
+    assert.match(source, /heightMM[^\n]+85/);
+}
 require('./bbs-runtime-assets').assertBbsRuntimeAssets();
 
 

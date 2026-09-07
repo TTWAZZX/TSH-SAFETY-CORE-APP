@@ -1,5 +1,26 @@
 # TSH Safety Core Activity - Changelog And Handoff History
 
+## CCCF Permanent multi-owner delegation (2026-09-07, local)
+
+- Admin may grant one delegate submission authority for multiple individually selected form owners or every currently assigned owner in a selected Department.
+- Node and PHP resolve owners from Employee Master intersected with `CCCF_Assignments`, exclude self-delegation, validate the complete selection and create/reactivate exact owner-delegate grants transactionally.
+- Existing KPI/tracking ownership, authenticated submitter audit, self-only direct-signed PDF rule and owner notification workflow remain unchanged. Department grants are a snapshot of current assignments and can be re-run safely after Assignment changes.
+- The delegation manager now includes scope selection, searchable multi-owner selection, Department counts, saved-grant search and clear active totals. No MySQL schema or upload-path change; not pushed or deployed.
+- Node/PHP syntax, 13/13 delegation contracts, legacy submission lifecycle UAT, new multi-owner/Department API UAT with zero residue, full Backend regression, 133/133 read/permission preflight and BBS regression 49/49 pass locally.
+
+## BBS unified card size and Designer editing UX (2026-09-07, local)
+
+- Personal and Department template creation now share labelled physical-size/orientation controls and default new cards to 60 × 85 mm portrait; existing templates remain unchanged.
+- Node and PHP creation routes persist and validate Personal dimensions and use the same 60 × 85 mm fallback for both card domains.
+- The existing Admin-only Visual Designer now exposes card-size presets/custom dimensions, grouped type-specific properties and expanded readiness detail while preserving Draft-only edits and preview-only QR behavior.
+- BBS navigation now groups the existing tabs into five task-oriented areas plus a permission-scoped Admin tools area. A compact sticky header and contextual secondary tablist reduce horizontal crowding without changing tab state, routes or API authorization.
+- “ภาพรวมของฉัน” now starts with a task-first dashboard for beginning an Observation, resuming the latest Draft and opening overdue/pending-verification Corrective Actions. Server-computed KPI semantics remain prominent, followed by clearer monthly results, team readiness and recent activity.
+- Single Observation now follows Checklist-category wizard steps with progress, per-step validation and a review summary before submit. Single and Batch flows share a mobile-safe sticky action pattern, while hidden-step answers remain preserved in the existing server-backed Draft.
+- Corrective Action now opens as a task-oriented workspace with urgent, Owner, Verifier and all-visible queues; honest server summary counts; clearer SLA, evidence and responsibility context per row; resettable advanced filters; and collapsed Admin-only Outbox/SLA operations.
+- Analytics now presents permission-scoped filters, exports, server KPI metrics and actionable signals in a clearer decision order. History now uses relationship-based views, resettable filters and an accessible timeline with explicit Draft-resume and detail actions.
+- Final BBS UX polish standardizes Thai-first guidance and semantic status labels, adds contextual empty states, labels previously implicit form controls, supports skip-to-content, forced-colors and reduced-motion preferences, and keeps busy controls announced and locked without relying on color alone.
+- No MySQL schema, private-upload path, issue/replace/revoke, QR lifecycle or rollout flag changed. PHP/JavaScript syntax, full backend tests, 133/133 read/permission preflight and BBS regression 49/49 passed locally.
+
 ## BBS Visual Designer and printing enabled for Admin-only UAT (2026-09-05)
 
 Committed and pushed `eefa68b` on `main`. Production now exposes the Admin-only Designer runtime control, retains the BBS staged gate, opens Admin team/schedule data in an accessible modal, and serves the Thai Designer UI. Both Designer flags are enabled after authenticated smoke; Admin requests pass while ordinary user and anonymous requests remain blocked. FTPS/HTTPS hashes and Patrol/CCCF unchanged checks pass. Rollback disables both flags without deleting history; exact backup evidence is in `docs/bbs-integration-review-20260905.md`.

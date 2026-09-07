@@ -31,7 +31,12 @@ for (const marker of [
     "trackSectionLoad('core', loadCoreData)",
     "trackSectionLoad('cards', loadCardAdmin)",
     'data-bbs-page-reload',
-    'ลองเชื่อมต่อใหม่'
+    'ลองเชื่อมต่อใหม่',
+    'data-bbs-overview-priorities',
+    'data-overview-open="start"',
+    'data-action-scope="${overdue?',
+    'const kpiView = kpiSemantic(kpi)',
+    'ไม่มีงานค้างที่ระบบพบ'
 ]) {
     assert.ok(ui.includes(marker), `Phase 10C-3 UI missing ${marker}`);
 }

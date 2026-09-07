@@ -2318,7 +2318,7 @@ function _decodeMojibakeText(text = '') {
 }
 
 function _repairHealthMojibakeDom(root) {
-    if (!root || !document.createTreeWalker) return;
+    if (!root || typeof root.nodeType !== 'number' || !document.createTreeWalker) return;
     const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
     const nodes = [];
     while (walker.nextNode()) nodes.push(walker.currentNode);
@@ -6944,7 +6944,9 @@ async function renderSystemHealth(container) {
         window._adminHealthExportExcel = _adminHealthExportExcel;
         window._adminHealthExportPdf = _adminHealthExportPdf;
         window._adminHealthSaveSnapshot = _adminHealthSaveSnapshot;
-        _repairHealthMojibakeDom(container);
+        if (_currentTab === 'health') {
+            _repairHealthMojibakeDom(document.getElementById('admin-content-area'));
+        }
     } catch (err) {
         container.innerHTML = `<div class="text-center py-20 text-red-500 text-sm">โหลดข้อมูลไม่ได้: ${escHtml(err.message)}</div>`;
     }

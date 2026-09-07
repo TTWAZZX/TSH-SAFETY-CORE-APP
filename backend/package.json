@@ -25,6 +25,7 @@
     "smoke:cccf": "node scripts/cccf-permanent-workflow-smoke.js",
     "test:cccf-phase-c1-c3": "node scripts/cccf-phase-c1-c3.test.js",
     "test:cccf-phase-c4": "node scripts/cccf-phase-c4-delegation.test.js",
+    "uat:cccf-delegation-bulk": "node scripts/cccf-delegation-bulk-api-uat.js",
     "uat:cccf-phase-c1-c3-api": "node scripts/cccf-phase-c1-c3-api-uat.js",
     "uat:cccf-phase-c1-c3-browser": "node scripts/cccf-phase-c1-c3-browser-uat.js",
     "smoke:cccf-permanent-owner-complete": "node scripts/cccf-permanent-owner-complete-smoke.js",

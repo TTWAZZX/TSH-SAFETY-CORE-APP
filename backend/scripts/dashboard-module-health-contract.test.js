@@ -7,6 +7,7 @@ const path = require('path');
 const root = path.resolve(__dirname, '..', '..');
 const contractPath = path.join(root, 'config', 'dashboard-module-health-contract.json');
 const frontendPath = path.join(root, 'public', 'js', 'pages', 'dashboard.js');
+const adminFrontendPath = path.join(root, 'public', 'js', 'pages', 'admin.js');
 const nodePath = path.join(root, 'backend', 'routes', 'dashboard.js');
 const phpPath = path.join(root, 'api', 'index.php');
 const targetNodePath = path.join(root, 'backend', 'routes', 'activity-targets.js');
@@ -15,6 +16,7 @@ const targetPhpPath = path.join(root, 'api', 'handlers', 'targets.php');
 const read = file => fs.readFileSync(file, 'utf8');
 const contract = JSON.parse(read(contractPath));
 const frontend = read(frontendPath);
+const adminFrontend = read(adminFrontendPath);
 const nodeSource = read(nodePath);
 const phpSource = read(phpPath);
 const targetNode = read(targetNodePath);
@@ -152,12 +154,24 @@ function assertD4FrontendConsumption() {
     return checks.map(([label]) => label);
 }
 
+function assertAdminSystemHealthDomRepair() {
+    assert.ok(
+        adminFrontend.includes("typeof root.nodeType !== 'number'"),
+        'System Health mojibake repair must reject non-DOM render wrappers'
+    );
+    assert.ok(
+        adminFrontend.includes("_repairHealthMojibakeDom(document.getElementById('admin-content-area'))"),
+        'System Health mojibake repair must receive the actual DOM element'
+    );
+}
+
 function main() {
     assertContractShape();
     assertRuntimeSurfaceMapping();
     const correctionChecks = assertD2BackendCorrections();
     const eligibilityChecks = assertD3PersonalTargetEligibility();
     const frontendChecks = assertD4FrontendConsumption();
+    assertAdminSystemHealthDomRepair();
 
     console.log(`Dashboard Module Health D1-D4 contract passed (${contract.contractVersion})`);
     console.log(`PASS ${contract.modules.length}/${EXPECTED_MODULES.length} module source mappings`);

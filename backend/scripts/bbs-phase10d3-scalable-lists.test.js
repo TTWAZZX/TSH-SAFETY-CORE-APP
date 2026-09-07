@@ -38,7 +38,7 @@ const community = read('backend/routes/bbs-community.js');
 for (const token of ['goodPage','riskyPage','actionStatus','priority','viewRisky']) assert(community.includes(token));
 
 const ui = read('public/js/pages/bbs-smart-card.js');
-for (const token of ['data-list-page','data-list-search','data-history-filter','data-action-list-filter','data-card-filter','data-card-employee-filter','community-good','community-risky']) assert(ui.includes(token), `UI missing ${token}`);
+for (const token of ['data-list-page','data-list-search','data-history-filter','data-history-workspace','data-history-timeline','data-history-reset','resetHistoryWorkspace','data-action-list-filter','data-card-filter','data-card-employee-filter','community-good','community-risky']) assert(ui.includes(token), `UI missing ${token}`);
 assert(ui.includes("paged:'1'"), 'frontend list requests must explicitly opt into the paged contract');
 assert(ui.includes('min-h-11'), 'mobile pager controls must retain a 44px touch target');
 

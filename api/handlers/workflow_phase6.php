@@ -734,19 +734,42 @@ function handle_cccf_routes(string $method, string $path): bool
     if($method==='GET'&&$path==='/cccf/delegations'){
         $requester=wf_user_id($user);
         if(!$requester)json_response(['success'=>false,'message'=>'Missing authenticated employee identity.'],403);
-        $sql='SELECT d.id,d.OwnerEmployeeID,d.DelegateEmployeeID,d.IsActive,d.CreatedBy,d.CreatedAt,d.UpdatedAt,owner.EmployeeName AS OwnerName,owner.Department AS OwnerDepartment,owner.CompanyEmail AS OwnerCompanyEmail,delegate.EmployeeName AS DelegateName,delegate.Department AS DelegateDepartment FROM cccf_submit_delegations d INNER JOIN cccf_assignments a ON a.EmployeeID=d.OwnerEmployeeID LEFT JOIN employees owner ON owner.EmployeeID=d.OwnerEmployeeID LEFT JOIN employees delegate ON delegate.EmployeeID=d.DelegateEmployeeID';
+        $sql='SELECT d.id,d.OwnerEmployeeID,d.DelegateEmployeeID,d.IsActive,d.CreatedBy,d.CreatedAt,d.UpdatedAt,EXISTS(SELECT 1 FROM cccf_assignments a WHERE a.EmployeeID=d.OwnerEmployeeID) AS HasAssignment,owner.EmployeeName AS OwnerName,owner.Department AS OwnerDepartment,owner.CompanyEmail AS OwnerCompanyEmail,delegate.EmployeeName AS DelegateName,delegate.Department AS DelegateDepartment FROM cccf_submit_delegations d LEFT JOIN employees owner ON owner.EmployeeID=d.OwnerEmployeeID LEFT JOIN employees delegate ON delegate.EmployeeID=d.DelegateEmployeeID';
         $params=[];
-        if(!$admin){$sql.=' WHERE d.DelegateEmployeeID=? AND d.IsActive=1';$params[]=$requester;}
+        if(!$admin){$sql.=' WHERE d.DelegateEmployeeID=? AND d.IsActive=1 AND EXISTS(SELECT 1 FROM cccf_assignments a2 WHERE a2.EmployeeID=d.OwnerEmployeeID)';$params[]=$requester;}
         json_response(['success'=>true,'data'=>db_rows($sql.' ORDER BY owner.Department,owner.EmployeeName,delegate.EmployeeName',$params)]);
     }
     if($method==='POST'&&$path==='/cccf/delegations'){
-        require_admin();$b=json_body();$owner=trim((string)($b['OwnerEmployeeID']??''));$delegate=trim((string)($b['DelegateEmployeeID']??''));
-        if($owner===''||$delegate===''||$owner===$delegate)json_response(['success'=>false,'message'=>'Owner and delegate must be two different employees.'],400);
-        if(!db_row('SELECT EmployeeID FROM employees WHERE EmployeeID=? LIMIT 1',[$owner])||!db_row('SELECT EmployeeID FROM employees WHERE EmployeeID=? LIMIT 1',[$delegate]))json_response(['success'=>false,'message'=>'Employee not found.'],404);
-        if(!db_row('SELECT id FROM cccf_assignments WHERE EmployeeID=? LIMIT 1',[$owner]))json_response(['success'=>false,'message'=>'The form owner must be assigned by Admin before delegation can be enabled.'],400);
-        db_execute('INSERT INTO cccf_submit_delegations (OwnerEmployeeID,DelegateEmployeeID,IsActive,CreatedBy) VALUES (?,?,1,?) ON DUPLICATE KEY UPDATE IsActive=1,CreatedBy=VALUES(CreatedBy),UpdatedAt=CURRENT_TIMESTAMP',[$owner,$delegate,$actor]);
-        $row=db_row('SELECT id,OwnerEmployeeID,DelegateEmployeeID,IsActive FROM cccf_submit_delegations WHERE OwnerEmployeeID=? AND DelegateEmployeeID=? LIMIT 1',[$owner,$delegate]);
-        json_response(['success'=>true,'data'=>$row],201);
+        require_admin();$b=json_body();$delegate=trim((string)($b['DelegateEmployeeID']??''));$scope=strtolower(trim((string)($b['ScopeType']??'individual')));$legacySingle=!isset($b['ScopeType'])&&!isset($b['OwnerEmployeeIDs'])&&!empty($b['OwnerEmployeeID']);
+        if($delegate===''||!in_array($scope,['individual','department'],true))json_response(['success'=>false,'message'=>'กรุณาเลือกผู้ได้รับสิทธิ์และรูปแบบสิทธิ์ให้ถูกต้อง'],400);
+        if(!db_row('SELECT EmployeeID FROM employees WHERE EmployeeID=? LIMIT 1',[$delegate]))json_response(['success'=>false,'message'=>'ไม่พบผู้ได้รับสิทธิ์ใน Employee Master'],404);
+        $owners=[];$ownerDepartment=null;
+        if($scope==='department'){
+            $ownerDepartment=trim((string)($b['OwnerDepartment']??''));
+            if($ownerDepartment===''||strlen($ownerDepartment)>100)json_response(['success'=>false,'message'=>'กรุณาเลือกแผนกเจ้าของแบบฟอร์ม'],400);
+            $ownerRows=db_rows('SELECT DISTINCT a.EmployeeID FROM cccf_assignments a INNER JOIN employees e ON e.EmployeeID=a.EmployeeID WHERE TRIM(e.Department)=? AND a.EmployeeID<>? ORDER BY a.EmployeeID',[$ownerDepartment,$delegate]);
+            $owners=array_values(array_map(fn($row)=>(string)$row['EmployeeID'],$ownerRows));
+        }else{
+            $requested=is_array($b['OwnerEmployeeIDs']??null)?$b['OwnerEmployeeIDs']:[$b['OwnerEmployeeID']??null];
+            $owners=array_values(array_unique(array_filter(array_map(fn($value)=>trim((string)$value),$requested),fn($value)=>$value!=='')));
+            if(!$owners||count($owners)>500||in_array($delegate,$owners,true))json_response(['success'=>false,'message'=>'กรุณาเลือกเจ้าของแบบฟอร์ม 1-500 คน และต้องไม่ใช่ผู้ยื่นแทน'],400);
+            $placeholders=implode(',',array_fill(0,count($owners),'?'));
+            $assignedRows=db_rows("SELECT DISTINCT a.EmployeeID FROM cccf_assignments a INNER JOIN employees e ON e.EmployeeID=a.EmployeeID WHERE a.EmployeeID IN ($placeholders)",$owners);
+            $assigned=array_fill_keys(array_map(fn($row)=>(string)$row['EmployeeID'],$assignedRows),true);
+            if(count($assigned)!==count($owners))json_response(['success'=>false,'message'=>'เจ้าของแบบฟอร์มบางรายไม่มี Assignment หรือไม่อยู่ใน Employee Master'],400);
+        }
+        if(!$owners)json_response(['success'=>false,'message'=>'ไม่พบเจ้าของแบบฟอร์มที่มี Assignment ในแผนกนี้'],400);
+        $pdo=db();
+        try{
+            $pdo->beginTransaction();
+            $stmt=$pdo->prepare('INSERT INTO cccf_submit_delegations (OwnerEmployeeID,DelegateEmployeeID,IsActive,CreatedBy) VALUES (?,?,1,?) ON DUPLICATE KEY UPDATE IsActive=1,CreatedBy=VALUES(CreatedBy),UpdatedAt=CURRENT_TIMESTAMP');
+            foreach($owners as $owner)$stmt->execute([$owner,$delegate,$actor]);
+            $pdo->commit();
+        }catch(Throwable $e){if($pdo->inTransaction())$pdo->rollBack();throw $e;}
+        $placeholders=implode(',',array_fill(0,count($owners),'?'));
+        $rows=db_rows("SELECT id,OwnerEmployeeID,DelegateEmployeeID,IsActive FROM cccf_submit_delegations WHERE DelegateEmployeeID=? AND OwnerEmployeeID IN ($placeholders) ORDER BY OwnerEmployeeID",array_merge([$delegate],$owners));
+        $data=$legacySingle?($rows[0]??null):['ScopeType'=>$scope,'OwnerDepartment'=>$ownerDepartment,'DelegateEmployeeID'=>$delegate,'OwnerCount'=>count($rows),'rows'=>$rows];
+        json_response(['success'=>true,'data'=>$data],201);
     }
     $p=route_params($path,'/cccf/delegations/:id'); if($p!==null&&$method==='PUT'){
         require_admin();$b=json_body();$active=wf_bool($b['IsActive']??0);$count=db_execute('UPDATE cccf_submit_delegations SET IsActive=?,CreatedBy=? WHERE id=?',[$active,$actor,$p['id']]);if(!$count)json_response(['success'=>false,'message'=>'Delegation was not found.'],404);json_response(['success'=>true,'id'=>(int)$p['id'],'IsActive'=>$active]);

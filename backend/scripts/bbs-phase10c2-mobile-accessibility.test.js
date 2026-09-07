@@ -11,14 +11,28 @@ const html = fs.readFileSync(path.join(root, 'index.html'), 'utf8');
 
 for (const marker of [
     'function accessibilityStyles()',
+    '@media(prefers-reduced-motion:reduce)',
+    '@media(forced-colors:active)',
+    'data-bbs-skip-link',
+    'data-bbs-empty-state',
+    'data-bbs-status-tone',
     'min-height:44px',
     'font-size:16px',
     'function enhanceAccessibility()',
+    'function bbsNavigationGroups()',
+    'function bbsNavigation()',
+    'data-bbs-compact-header',
+    'data-bbs-primary-nav',
+    'data-bbs-secondary-nav',
+    'data-bbs-group-target',
+    "label:'รายงานและประวัติ'",
+    "label:'เครื่องมือผู้ดูแล'",
     "tab.setAttribute('role', 'tab')",
     "tab.setAttribute('aria-selected'",
     "panel.setAttribute('role', 'tabpanel')",
     "['ArrowLeft','ArrowRight','Home','End']",
     "region.classList.add('bbs-scroll-region')",
+    "control.setAttribute('aria-label',label)",
     "th.setAttribute('scope', 'col')",
     'function mountBbsDialog(overlay, label, returnFocus',
     "panel?.setAttribute('aria-modal', 'true')",
@@ -34,6 +48,13 @@ for (const marker of [
     'aria-pressed=',
     '<fieldset class=',
     'data-bbs-sticky-actions',
+    'data-observation-wizard="single"',
+    'data-observation-wizard="batch"',
+    'function wizardStepPill(',
+    'function singleWizardNext()',
+    'function singleObservationReview(',
+    'function validateBatchStep(',
+    'responseInput?responseInput.value:(a.Response||null)',
     'role="status" aria-live="polite"'
 ]) {
     assert.ok(ui.includes(marker), `Phase 10C-2 UI missing ${marker}`);
@@ -43,6 +64,7 @@ require('./bbs-runtime-assets').assertBbsRuntimeAssets();
 
 assert.ok(main.includes("document.querySelector('[data-mobile-overlay-dialog=\"true\"]')"), 'Shared mobile viewport logic must recognize BBS dialogs');
 assert.doesNotMatch(ui, /window\.scrollTo\(\{top:0,behavior:'smooth'\}\)/, 'BBS step navigation must scroll the real app container');
+assert.doesNotMatch(ui, /Resume an unfinished Observation|Unable to (save|resume) Draft|SERVER CALCULATED|NEXT BEST ACTION/, 'User guidance must not fall back to untranslated English sentences');
 
 const mountStart = ui.indexOf('function mountBbsDialog(overlay, label, returnFocus');
 const mountEnd = ui.indexOf('function shell()', mountStart);

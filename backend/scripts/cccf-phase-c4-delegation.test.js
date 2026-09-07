@@ -35,6 +35,21 @@ check('UI selector uses delegation-limited source and validates the selected own
     ui.includes('_delegations.map') && ui.includes('ownerOptions.some(option => String(option.EmployeeID) === selectedOwnerIdForSubmit)'));
 check('Admin can manage delegation with searchable Employee Master selectors',
     ui.includes('openSubmitDelegationManager') && ui.includes('cccf-delegation-owner') && ui.includes('cccf-delegation-delegate'));
+check('Admin can grant one delegate access to multiple individually selected owners',
+    node.includes("Array.isArray(req.body?.OwnerEmployeeIDs)") && node.includes('ownerIds.length > 500')
+    && php.includes("is_array($b['OwnerEmployeeIDs']??null)") && ui.includes("ScopeType:'individual'")
+    && ui.includes('multiple size="7"'));
+check('Department grant resolves only current assigned owners on the server',
+    node.includes("scopeType === 'department'") && node.includes('TRIM(e.Department) = ?')
+    && php.includes("$scope==='department'") && php.includes('TRIM(e.Department)=?')
+    && ui.includes("ScopeType:'department'") && ui.includes('cccf-delegation-department'));
+check('Bulk grants remain exact owner-delegate rows and are transactional',
+    node.includes('await connection.beginTransaction()') && node.includes('VALUES ${values}')
+    && php.includes("$pdo->beginTransaction()") && php.includes('foreach($owners as $owner)')
+    && node.includes('ON DUPLICATE KEY UPDATE IsActive = 1') && php.includes('ON DUPLICATE KEY UPDATE IsActive=1'));
+check('Inactive or unassigned historical grants remain Admin-visible but cannot authorize users',
+    node.includes('Number(row.HasAssignment) === 1')
+    && php.includes('AS HasAssignment') && php.includes('a2.EmployeeID=d.OwnerEmployeeID'));
 check('Existing outbox/template is reused for owner notification',
     node.includes("eventType: 'SubmittedByAdmin'") && php.includes("'EventType'=>'SubmittedByAdmin'"));
 
