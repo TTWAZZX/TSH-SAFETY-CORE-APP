@@ -741,13 +741,17 @@ function handle_cccf_routes(string $method, string $path): bool
     }
     if($method==='POST'&&$path==='/cccf/delegations'){
         require_admin();$b=json_body();$delegate=trim((string)($b['DelegateEmployeeID']??''));$scope=strtolower(trim((string)($b['ScopeType']??'individual')));$legacySingle=!isset($b['ScopeType'])&&!isset($b['OwnerEmployeeIDs'])&&!empty($b['OwnerEmployeeID']);
-        if($delegate===''||!in_array($scope,['individual','department'],true))json_response(['success'=>false,'message'=>'กรุณาเลือกผู้ได้รับสิทธิ์และรูปแบบสิทธิ์ให้ถูกต้อง'],400);
+        if($delegate===''||!in_array($scope,['individual','department','unit'],true))json_response(['success'=>false,'message'=>'กรุณาเลือกผู้ได้รับสิทธิ์และรูปแบบสิทธิ์ให้ถูกต้อง'],400);
         if(!db_row('SELECT EmployeeID FROM employees WHERE EmployeeID=? LIMIT 1',[$delegate]))json_response(['success'=>false,'message'=>'ไม่พบผู้ได้รับสิทธิ์ใน Employee Master'],404);
-        $owners=[];$ownerDepartment=null;
-        if($scope==='department'){
+        $owners=[];$ownerDepartment=null;$ownerUnit=null;
+        if(in_array($scope,['department','unit'],true)){
             $ownerDepartment=trim((string)($b['OwnerDepartment']??''));
             if($ownerDepartment===''||strlen($ownerDepartment)>100)json_response(['success'=>false,'message'=>'กรุณาเลือกแผนกเจ้าของแบบฟอร์ม'],400);
-            $ownerRows=db_rows('SELECT DISTINCT a.EmployeeID FROM cccf_assignments a INNER JOIN employees e ON e.EmployeeID=a.EmployeeID WHERE TRIM(e.Department)=? AND a.EmployeeID<>? ORDER BY a.EmployeeID',[$ownerDepartment,$delegate]);
+            $ownerUnit=$scope==='unit'?trim((string)($b['OwnerUnit']??'')):null;
+            if($scope==='unit'&&($ownerUnit===''||strlen($ownerUnit)>100))json_response(['success'=>false,'message'=>'กรุณาเลือก Unit ของเจ้าของแบบฟอร์ม'],400);
+            $unitClause=$scope==='unit'?' AND TRIM(e.Unit)=?':'';
+            $params=$scope==='unit'?[$ownerDepartment,$ownerUnit,$delegate]:[$ownerDepartment,$delegate];
+            $ownerRows=db_rows('SELECT DISTINCT a.EmployeeID FROM cccf_assignments a INNER JOIN employees e ON e.EmployeeID=a.EmployeeID WHERE TRIM(e.Department)=?'.$unitClause.' AND a.EmployeeID<>? ORDER BY a.EmployeeID',$params);
             $owners=array_values(array_map(fn($row)=>(string)$row['EmployeeID'],$ownerRows));
         }else{
             $requested=is_array($b['OwnerEmployeeIDs']??null)?$b['OwnerEmployeeIDs']:[$b['OwnerEmployeeID']??null];
@@ -758,7 +762,7 @@ function handle_cccf_routes(string $method, string $path): bool
             $assigned=array_fill_keys(array_map(fn($row)=>(string)$row['EmployeeID'],$assignedRows),true);
             if(count($assigned)!==count($owners))json_response(['success'=>false,'message'=>'เจ้าของแบบฟอร์มบางรายไม่มี Assignment หรือไม่อยู่ใน Employee Master'],400);
         }
-        if(!$owners)json_response(['success'=>false,'message'=>'ไม่พบเจ้าของแบบฟอร์มที่มี Assignment ในแผนกนี้'],400);
+        if(!$owners)json_response(['success'=>false,'message'=>$scope==='unit'?'ไม่พบเจ้าของแบบฟอร์มที่มี Assignment ใน Unit นี้':'ไม่พบเจ้าของแบบฟอร์มที่มี Assignment ในแผนกนี้'],400);
         $pdo=db();
         try{
             $pdo->beginTransaction();
@@ -768,7 +772,7 @@ function handle_cccf_routes(string $method, string $path): bool
         }catch(Throwable $e){if($pdo->inTransaction())$pdo->rollBack();throw $e;}
         $placeholders=implode(',',array_fill(0,count($owners),'?'));
         $rows=db_rows("SELECT id,OwnerEmployeeID,DelegateEmployeeID,IsActive FROM cccf_submit_delegations WHERE DelegateEmployeeID=? AND OwnerEmployeeID IN ($placeholders) ORDER BY OwnerEmployeeID",array_merge([$delegate],$owners));
-        $data=$legacySingle?($rows[0]??null):['ScopeType'=>$scope,'OwnerDepartment'=>$ownerDepartment,'DelegateEmployeeID'=>$delegate,'OwnerCount'=>count($rows),'rows'=>$rows];
+        $data=$legacySingle?($rows[0]??null):['ScopeType'=>$scope,'OwnerDepartment'=>$ownerDepartment,'OwnerUnit'=>$ownerUnit,'DelegateEmployeeID'=>$delegate,'OwnerCount'=>count($rows),'rows'=>$rows];
         json_response(['success'=>true,'data'=>$data],201);
     }
     $p=route_params($path,'/cccf/delegations/:id'); if($p!==null&&$method==='PUT'){

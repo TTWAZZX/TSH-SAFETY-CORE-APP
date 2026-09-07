@@ -17,6 +17,8 @@ const assignmentIds=[];
 const delegationIds=[];
 const deptA='SAFETY HEALTH & ENVIRONMENT SEC.';
 const deptB='MAINTENANCE SEC.';
+const unitA=`CCCF UNIT A ${run}`;
+const unitB=`CCCF UNIT B ${run}`;
 let server;
 
 const token=(id,name,role,department)=>jwt.sign({id,EmployeeID:id,name,EmployeeName:name,role,department},process.env.JWT_SECRET,{expiresIn:'15m'});
@@ -46,11 +48,11 @@ async function cleanup(){
     assert.ok(process.env.JWT_SECRET,'JWT_SECRET is required');
     const password=await bcrypt.hash(`CD-${run}`,4);
     const rows=[
-        [ids.admin,'CODX Delegation Admin',deptA,'Admin'],[ids.delegate,'CODX Delegation Delegate',deptA,'User'],
-        [ids.ownerA,'CODX Delegation Owner A',deptA,'User'],[ids.ownerB,'CODX Delegation Owner B',deptA,'User'],
-        [ids.ownerC,'CODX Delegation Owner C',deptB,'User'],[ids.unassigned,'CODX Delegation Unassigned',deptA,'User'],
+        [ids.admin,'CODX Delegation Admin',deptA,unitA,'Admin'],[ids.delegate,'CODX Delegation Delegate',deptA,unitA,'User'],
+        [ids.ownerA,'CODX Delegation Owner A',deptA,unitA,'User'],[ids.ownerB,'CODX Delegation Owner B',deptA,unitB,'User'],
+        [ids.ownerC,'CODX Delegation Owner C',deptB,unitA,'User'],[ids.unassigned,'CODX Delegation Unassigned',deptA,unitA,'User'],
     ];
-    for(const [id,name,department,role] of rows)await db.query('INSERT INTO Employees(EmployeeID,EmployeeName,Department,Unit,Position,Role,CompanyEmail,Password,MustChangePassword) VALUES(?,?,?,?,?,?,?,?,0)',[id,name,department,'CCCF UAT','Tester',role,`${id.toLowerCase()}@example.invalid`,password]);
+    for(const [id,name,department,unit,role] of rows)await db.query('INSERT INTO Employees(EmployeeID,EmployeeName,Department,Unit,Position,Role,CompanyEmail,Password,MustChangePassword) VALUES(?,?,?,?,?,?,?,?,0)',[id,name,department,unit,'Tester',role,`${id.toLowerCase()}@example.invalid`,password]);
     for(const ownerId of [ids.ownerA,ids.ownerB,ids.ownerC]){const [result]=await db.query('INSERT INTO CCCF_Assignments(EmployeeID,AssigneeName,Department,AllowDirectSignedPdf,CreatedBy) SELECT EmployeeID,EmployeeName,Department,0,? FROM Employees WHERE EmployeeID=?',['CCCF bulk delegation UAT',ownerId]);assignmentIds.push(Number(result.insertId));}
 
     server=app.listen(0,'127.0.0.1');await new Promise(resolve=>server.once('listening',resolve));
@@ -74,8 +76,19 @@ async function cleanup(){
     assert.ok(!visibleOwners.has(ids.ownerC)&&!visibleOwners.has(ids.unassigned)&&!visibleOwners.has(ids.delegate),'Department scope must exclude other Departments, unassigned employees and delegate self');
     const [wrongScope]=await db.query(`SELECT d.OwnerEmployeeID FROM CCCF_Submit_Delegations d INNER JOIN Employees e ON e.EmployeeID=d.OwnerEmployeeID LEFT JOIN CCCF_Assignments a ON a.EmployeeID=d.OwnerEmployeeID WHERE d.DelegateEmployeeID=? AND d.IsActive=1 AND (TRIM(e.Department)<>? OR a.id IS NULL OR d.OwnerEmployeeID=?)`,[ids.delegate,deptA,ids.delegate]);
     assert.strictEqual(wrongScope.length,0,'Every Department grant must remain assignment-bound and Department-scoped');
+    for(const row of department.data.rows)await api(base,`/cccf/delegations/${row.id}`,{method:'PUT',auth:adminToken,body:{IsActive:false}});
+
+    const unit=await api(base,'/cccf/delegations',{method:'POST',auth:adminToken,body:{ScopeType:'unit',OwnerDepartment:deptA,OwnerUnit:unitA,DelegateEmployeeID:ids.delegate},expect:201});
+    assert.strictEqual(Number(unit.data.OwnerCount),1,'Unit scope must include only the assigned owner in the selected Department and Unit');
+    assert.strictEqual(unit.data.OwnerDepartment,deptA);
+    assert.strictEqual(unit.data.OwnerUnit,unitA);
+    delegationIds.push(...unit.data.rows.map(row=>Number(row.id)));
+    visible=await api(base,'/cccf/delegations',{auth:delegateToken});
+    assert.deepStrictEqual(new Set(visible.data.map(row=>String(row.OwnerEmployeeID))),new Set([ids.ownerA]));
+    const [wrongUnitScope]=await db.query(`SELECT d.OwnerEmployeeID FROM CCCF_Submit_Delegations d INNER JOIN Employees e ON e.EmployeeID=d.OwnerEmployeeID LEFT JOIN CCCF_Assignments a ON a.EmployeeID=d.OwnerEmployeeID WHERE d.DelegateEmployeeID=? AND d.IsActive=1 AND (TRIM(e.Department)<>? OR TRIM(e.Unit)<>? OR a.id IS NULL OR d.OwnerEmployeeID=?)`,[ids.delegate,deptA,unitA,ids.delegate]);
+    assert.strictEqual(wrongUnitScope.length,0,'Every Unit grant must remain assignment-bound and match both Department and Unit');
     await api(base,'/cccf/delegations',{method:'POST',auth:adminToken,body:{ScopeType:'individual',OwnerEmployeeIDs:[ids.unassigned],DelegateEmployeeID:ids.delegate},expect:400});
-    console.log('CCCF multi-owner/Department delegation API UAT: PASS');
+    console.log('CCCF multi-owner/Department/Unit delegation API UAT: PASS');
 })().catch(error=>{console.error(error.stack||error);process.exitCode=1;}).finally(async()=>{
     if(server)await new Promise(resolve=>server.close(resolve));
     try{await cleanup();}catch(error){console.error(error.stack||error);process.exitCode=1;}

@@ -1,12 +1,12 @@
 # TSH Safety Core Activity - Changelog And Handoff History
 
-## CCCF Permanent multi-owner delegation (2026-09-07, local)
+## CCCF Permanent multi-owner delegation (2026-09-07, Production pending)
 
-- Admin may grant one delegate submission authority for multiple individually selected form owners or every currently assigned owner in a selected Department.
+- Admin may grant one delegate submission authority for multiple individually selected form owners, every currently assigned owner in a selected Department, or every currently assigned owner in a selected Unit after choosing its Department. The delegate may be any current Employee Master employee and does not need a CCCF Assignment.
 - Node and PHP resolve owners from Employee Master intersected with `CCCF_Assignments`, exclude self-delegation, validate the complete selection and create/reactivate exact owner-delegate grants transactionally.
-- Existing KPI/tracking ownership, authenticated submitter audit, self-only direct-signed PDF rule and owner notification workflow remain unchanged. Department grants are a snapshot of current assignments and can be re-run safely after Assignment changes.
-- The delegation manager now includes scope selection, searchable multi-owner selection, Department counts, saved-grant search and clear active totals. No MySQL schema or upload-path change; not pushed or deployed.
-- Node/PHP syntax, 13/13 delegation contracts, legacy submission lifecycle UAT, new multi-owner/Department API UAT with zero residue, full Backend regression, 133/133 read/permission preflight and BBS regression 49/49 pass locally.
+- Existing KPI/tracking ownership, authenticated submitter audit, self-only direct-signed PDF rule and owner notification workflow remain unchanged. Department/Unit grants are snapshots of current assignments and can be re-run safely after Assignment changes.
+- The delegation manager now includes three scope choices, searchable multi-owner selection, dependent Department/Unit selectors with assigned-owner counts, saved-grant search and clear active totals. No MySQL schema or upload-path change; the first multi-owner release was pushed in `2ba5628` and Production deployment remains pending.
+- Node/PHP syntax, delegation contracts, legacy submission lifecycle UAT, multi-owner/Department/Unit API UAT with zero residue, full Backend regression, read/permission preflight and BBS regression are verified locally for this release.
 
 ## BBS unified card size and Designer editing UX (2026-09-07, local)
 

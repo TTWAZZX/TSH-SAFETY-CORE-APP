@@ -1786,22 +1786,27 @@ router.post('/delegations', isAdmin, async (req, res) => {
         const delegateId = String(req.body?.DelegateEmployeeID || '').trim();
         const legacySingle = !req.body?.ScopeType && !Array.isArray(req.body?.OwnerEmployeeIDs) && Boolean(req.body?.OwnerEmployeeID);
         const scopeType = String(req.body?.ScopeType || 'individual').trim().toLowerCase();
-        if (!delegateId || !['individual', 'department'].includes(scopeType)) return res.status(400).json({ success: false, message: 'กรุณาเลือกผู้ได้รับสิทธิ์และรูปแบบสิทธิ์ให้ถูกต้อง' });
+        if (!delegateId || !['individual', 'department', 'unit'].includes(scopeType)) return res.status(400).json({ success: false, message: 'กรุณาเลือกผู้ได้รับสิทธิ์และรูปแบบสิทธิ์ให้ถูกต้อง' });
         connection = await db.getConnection();
         await connection.beginTransaction();
         const [[delegate]] = await connection.query('SELECT EmployeeID FROM Employees WHERE EmployeeID = ? LIMIT 1', [delegateId]);
         if (!delegate) { const err = new Error('ไม่พบผู้ได้รับสิทธิ์ใน Employee Master'); err.statusCode = 404; throw err; }
         let ownerIds = [];
         let ownerDepartment = null;
-        if (scopeType === 'department') {
+        let ownerUnit = null;
+        if (scopeType === 'department' || scopeType === 'unit') {
             ownerDepartment = String(req.body?.OwnerDepartment || '').trim();
             if (!ownerDepartment || ownerDepartment.length > 100) { const err = new Error('กรุณาเลือกแผนกเจ้าของแบบฟอร์ม'); err.statusCode = 400; throw err; }
+            ownerUnit = scopeType === 'unit' ? String(req.body?.OwnerUnit || '').trim() : null;
+            if (scopeType === 'unit' && (!ownerUnit || ownerUnit.length > 100)) { const err = new Error('กรุณาเลือก Unit ของเจ้าของแบบฟอร์ม'); err.statusCode = 400; throw err; }
+            const unitClause = scopeType === 'unit' ? ' AND TRIM(e.Unit) = ?' : '';
+            const params = scopeType === 'unit' ? [ownerDepartment, ownerUnit, delegateId] : [ownerDepartment, delegateId];
             const [owners] = await connection.query(`
                 SELECT DISTINCT a.EmployeeID
                 FROM CCCF_Assignments a
                 INNER JOIN Employees e ON e.EmployeeID = a.EmployeeID
-                WHERE TRIM(e.Department) = ? AND a.EmployeeID <> ?
-                ORDER BY a.EmployeeID`, [ownerDepartment, delegateId]);
+                WHERE TRIM(e.Department) = ?${unitClause} AND a.EmployeeID <> ?
+                ORDER BY a.EmployeeID`, params);
             ownerIds = owners.map(row => String(row.EmployeeID));
         } else {
             const requested = Array.isArray(req.body?.OwnerEmployeeIDs) ? req.body.OwnerEmployeeIDs : [req.body?.OwnerEmployeeID];
@@ -1816,7 +1821,7 @@ router.post('/delegations', isAdmin, async (req, res) => {
             const assigned = new Set(assignedOwners.map(row => String(row.EmployeeID)));
             if (assigned.size !== ownerIds.length) { const err = new Error('เจ้าของแบบฟอร์มบางรายไม่มี Assignment หรือไม่อยู่ใน Employee Master'); err.statusCode = 400; throw err; }
         }
-        if (!ownerIds.length) { const err = new Error('ไม่พบเจ้าของแบบฟอร์มที่มี Assignment ในแผนกนี้'); err.statusCode = 400; throw err; }
+        if (!ownerIds.length) { const err = new Error(scopeType === 'unit' ? 'ไม่พบเจ้าของแบบฟอร์มที่มี Assignment ใน Unit นี้' : 'ไม่พบเจ้าของแบบฟอร์มที่มี Assignment ในแผนกนี้'); err.statusCode = 400; throw err; }
         const createdBy = req.user?.name || 'Safety Admin';
         for (let start = 0; start < ownerIds.length; start += 250) {
             const chunk = ownerIds.slice(start, start + 250);
@@ -1837,9 +1842,9 @@ router.post('/delegations', isAdmin, async (req, res) => {
         await logAudit(req, {
             action: ownerIds.length > 1 ? 'ENABLE_CCCF_SUBMISSION_DELEGATION_BULK' : 'ENABLE_CCCF_SUBMISSION_DELEGATION', module: 'cccf', targetType: 'CCCF_Submit_Delegations', targetId: rows[0]?.id,
             detail: `Enabled CCCF submission delegation ${delegateId} for ${ownerIds.length} owner(s)`,
-            metadata: { ScopeType: scopeType, OwnerDepartment: ownerDepartment, OwnerEmployeeIDs: ownerIds, DelegateEmployeeID: delegateId, OwnerCount: ownerIds.length, IsActive: 1 }
+            metadata: { ScopeType: scopeType, OwnerDepartment: ownerDepartment, OwnerUnit: ownerUnit, OwnerEmployeeIDs: ownerIds, DelegateEmployeeID: delegateId, OwnerCount: ownerIds.length, IsActive: 1 }
         });
-        res.status(201).json({ success: true, data: legacySingle ? rows[0] : { ScopeType: scopeType, OwnerDepartment: ownerDepartment, DelegateEmployeeID: delegateId, OwnerCount: rows.length, rows } });
+        res.status(201).json({ success: true, data: legacySingle ? rows[0] : { ScopeType: scopeType, OwnerDepartment: ownerDepartment, OwnerUnit: ownerUnit, DelegateEmployeeID: delegateId, OwnerCount: rows.length, rows } });
     } catch (err) {
         if (connection) { await connection.rollback().catch(() => {}); connection.release(); }
         if (err.statusCode) return res.status(err.statusCode).json({ success: false, message: err.message });

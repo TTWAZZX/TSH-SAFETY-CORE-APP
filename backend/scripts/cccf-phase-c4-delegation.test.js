@@ -40,9 +40,13 @@ check('Admin can grant one delegate access to multiple individually selected own
     && php.includes("is_array($b['OwnerEmployeeIDs']??null)") && ui.includes("ScopeType:'individual'")
     && ui.includes('multiple size="7"'));
 check('Department grant resolves only current assigned owners on the server',
-    node.includes("scopeType === 'department'") && node.includes('TRIM(e.Department) = ?')
-    && php.includes("$scope==='department'") && php.includes('TRIM(e.Department)=?')
-    && ui.includes("ScopeType:'department'") && ui.includes('cccf-delegation-department'));
+    node.includes("scopeType === 'department' || scopeType === 'unit'") && node.includes('TRIM(e.Department) = ?')
+    && php.includes("in_array($scope,['department','unit'],true)") && php.includes('TRIM(e.Department)=?')
+    && ui.includes('value="department"') && ui.includes('cccf-delegation-department'));
+check('Unit grant resolves assigned owners by exact Department and Unit on the server',
+    node.includes("scopeType === 'unit'") && node.includes('TRIM(e.Unit) = ?')
+    && php.includes("$scope==='unit'") && php.includes('TRIM(e.Unit)=?')
+    && ui.includes("value=\"unit\"") && ui.includes('cccf-delegation-unit') && ui.includes('OwnerUnit:ownerUnit'));
 check('Bulk grants remain exact owner-delegate rows and are transactional',
     node.includes('await connection.beginTransaction()') && node.includes('VALUES ${values}')
     && php.includes("$pdo->beginTransaction()") && php.includes('foreach($owners as $owner)')
