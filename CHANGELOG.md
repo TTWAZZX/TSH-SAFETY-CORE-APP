@@ -1,14 +1,15 @@
 # TSH Safety Core Activity - Changelog And Handoff History
 
-## CCCF Permanent multi-owner delegation (2026-09-07, Production pending)
+## CCCF Permanent multi-owner delegation (2026-09-07, deployed)
 
 - Admin may grant one delegate submission authority for multiple individually selected form owners, every currently assigned owner in a selected Department, or every currently assigned owner in a selected Unit after choosing its Department. The delegate may be any current Employee Master employee and does not need a CCCF Assignment.
 - Node and PHP resolve owners from Employee Master intersected with `CCCF_Assignments`, exclude self-delegation, validate the complete selection and create/reactivate exact owner-delegate grants transactionally.
 - Existing KPI/tracking ownership, authenticated submitter audit, self-only direct-signed PDF rule and owner notification workflow remain unchanged. Department/Unit grants are snapshots of current assignments and can be re-run safely after Assignment changes.
-- The delegation manager now includes three scope choices, searchable multi-owner selection, dependent Department/Unit selectors with assigned-owner counts, saved-grant search and clear active totals. No MySQL schema or upload-path change; the first multi-owner release was pushed in `2ba5628` and Production deployment remains pending.
+- The delegation manager now includes three scope choices, searchable multi-owner selection, dependent Department/Unit selectors with assigned-owner counts, saved-grant search and clear active totals. No MySQL schema or upload-path change; the completed source is pushed in `2ba5628` and `ea6fa04` and deployed to the PHP Production target.
 - Node/PHP syntax, delegation contracts, legacy submission lifecycle UAT, multi-owner/Department/Unit API UAT with zero residue, full Backend regression, read/permission preflight and BBS regression are verified locally for this release.
+- Production was backed up and the 10-file BBS/CCCF release passed FTPS hashes `10/10`, HTTPS cache/feature smoke and anonymous authorization checks. See `DEPLOYMENT.md` and `backups/production/bbs-cccf-ux-predeploy-20260907-113722/` for rollback and verification evidence.
 
-## BBS unified card size and Designer editing UX (2026-09-07, local)
+## BBS unified card size and Designer editing UX (2026-09-07, deployed)
 
 - Personal and Department template creation now share labelled physical-size/orientation controls and default new cards to 60 × 85 mm portrait; existing templates remain unchanged.
 - Node and PHP creation routes persist and validate Personal dimensions and use the same 60 × 85 mm fallback for both card domains.

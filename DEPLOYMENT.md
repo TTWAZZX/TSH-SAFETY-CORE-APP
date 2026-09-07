@@ -1,5 +1,16 @@
 # TSH Safety Core Activity - Deployment
 
+## BBS UX and CCCF Department/Unit delegation release (2026-09-07)
+
+Source commits `2ba5628` and `ea6fa04` are pushed on `main` and deployed to `https://dev.tshpcl.com/safety/tsh-safety-core`. The scoped PHP/shared-hosting release contains `index.html`, `public/js/main.js`, four BBS/Admin page files, `public/js/pages/cccf.js`, three existing PHP handlers and `api/lib/bbs_card_designer.php` (10 files total). It adds no schema, upload-path, rollout-flag or existing business-data change.
+
+- Fresh consistent database backup: `backups/production/bbs-cccf-ux-predeploy-20260907-113722/__codex_bbs_cccf_ux_20260907_060100_11d6dbb9.sql.gz` (191 tables; 1,523,262 compressed bytes; 17,839,795 expanded bytes; SHA-256 `9c51ad70c2a41a1e945266efc4e565d9aa3517a239e7c8f23121ab9228285612`; gzip validation passed).
+- Exact application rollback files are in `application-before/`. Production matched `43aac33` for all 10 paths after ignoring line-ending conversion, so no unreviewed Production drift was overwritten.
+- FTPS download-back SHA-256 matched release source **10/10**. HTTPS served the new `bbs-cccf-release-r8` shell, `cccf-delegation-unit-r2`, the CCCF Unit payload/UI and BBS polish markers; anonymous CCCF delegation and BBS Designer reads remain `401`.
+- The protected helper and remote SQL were removed with FTPS residue `0`; original `api/index.php` was restored at SHA-256 `58CC22F795B87CFEBE701CEA2A27E20C170E0A30A0E378D798118FF23495A487`. The original router returns its generic `501` for the former unsupported helper route.
+- No temporary business record or private upload was created. Production Admin credentials available locally returned `401`, so authenticated browser/write smoke was not performed; the release was instead gated by local API UAT/full regression, exact FTPS hashes, HTTPS asset markers and anonymous authorization checks. Evidence is retained in `deployment-verification.json` and the before/after hash manifests inside the backup directory.
+- Normal code rollback restores these 10 paths from `application-before/`. Database restoration is reserved for an authorized data incident because this release has no migration or intended data mutation.
+
 ## BBS Visual Designer and Designer printing Admin-only activation (2026-09-05)
 
 Production source `eefa68b` deployed `index.html`, `public/js/main.js`, `public/js/pages/bbs-smart-card.js`, and `api/handlers/bbs_card_designer.php`. FTPS download-back SHA-256 passed `4/4`; protected Patrol/CCCF paths remained unchanged `4/4`; HTTPS hashes passed `3/3`. The Production Admin API then enabled both `visual_card_designer_enabled=1` and `visual_card_designer_rendering_enabled=1`, while retaining `staged_admin_only=1` and `pilot_scope_only=0`. Admin catalog smoke passed; ordinary user/anonymous requests remain `403`/`401`; no business test records were created.
