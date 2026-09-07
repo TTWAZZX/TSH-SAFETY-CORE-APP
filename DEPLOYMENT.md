@@ -1,5 +1,16 @@
 # TSH Safety Core Activity - Deployment
 
+## CCCF delegated Direct PDF release (2026-09-07)
+
+Source commit `f164dd7` is pushed on `main` and deployed to `https://dev.tshpcl.com/safety/tsh-safety-core`. The release contains only `index.html`, `public/js/main.js`, `public/js/pages/cccf.js` and `api/handlers/workflow_phase6.php`; Node remains the local/API-parity implementation. No schema, upload-path, rollout-setting or existing business-data change was made.
+
+- Fresh consistent database backup: `backups/production/cccf-delegated-direct-predeploy-20260907-132915/__codex_cccf_delegated_direct_20260907_063113_7ae6f6b3.sql.gz` (191 tables; 1,523,397 compressed bytes; 17,844,211 expanded bytes; SHA-256 `06754e5582c726fd7c2d182ed27ea4f87986c34296040de111791c4a0886b455`; gzip validation passed).
+- Exact application rollback copies are in `application-before/`. FTPS download-back SHA-256 matched release source **4/4** after deployment.
+- HTTPS served `cccf-direct-pdf-r9`, `cccf-delegated-direct-pdf-r3` and the combined owner-flag/delegation UI logic. Anonymous Permanent and delegation reads remain `401`, confirming the PHP stack loads while preserving authentication.
+- The protected helper and remote SQL were removed with FTPS residue `0`; original `api/index.php` was restored at SHA-256 `58CC22F795B87CFEBE701CEA2A27E20C170E0A30A0E378D798118FF23495A487`. No temporary business row or private upload was created.
+- Local UAT covered owner flag closed `403`, combined permission success with correct owner/actor/signed-file state, owner flag revocation `403`, delegation revocation `403`, and cleanup `0`. Production Admin credentials stored locally returned `401`, so authenticated Production write/browser smoke was not performed.
+- Normal code rollback restores the four runtime paths from `application-before/`; database restore is reserved for an authorized data incident.
+
 ## BBS UX and CCCF Department/Unit delegation release (2026-09-07)
 
 Source commits `2ba5628` and `ea6fa04` are pushed on `main` and deployed to `https://dev.tshpcl.com/safety/tsh-safety-core`. The scoped PHP/shared-hosting release contains `index.html`, `public/js/main.js`, four BBS/Admin page files, `public/js/pages/cccf.js`, three existing PHP handlers and `api/lib/bbs_card_designer.php` (10 files total). It adds no schema, upload-path, rollout-flag or existing business-data change.

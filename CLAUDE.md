@@ -1,5 +1,9 @@
 # TSH Safety Core Activity - AI Quick Start
 
+## Current CCCF delegated Direct PDF Production state (2026-09-07)
+
+`main` commit `f164dd7` is deployed to the PHP Production target. A non-Admin delegate may submit Direct PDF for a selected owner only while the exact delegation is Active and that owner's Assignment has `AllowDirectSignedPdf=1`; KPI ownership and authenticated actor identity remain separate. No schema/upload-path change. Fresh rollback/evidence is `backups/production/cccf-delegated-direct-predeploy-20260907-132915/`; FTPS hashes passed 4/4, HTTPS assets/markers passed and temporary Production helper/SQL residue is zero. Production Admin credentials available locally remain stale, so no authenticated Production write smoke was performed.
+
 ## Current BBS UX and CCCF delegation Production state (2026-09-07)
 
 `main` commits `2ba5628` and `ea6fa04` are deployed to the PHP Production target. CCCF Admin delegation supports multiple individual owners, a whole Department, or a Unit selected under its Department; the delegate may be any Employee Master employee, while every owner still requires an Assignment. The same release contains today's BBS card/designer, navigation, Overview, Observation wizard, Corrective Action, Analytics/History and accessibility polish. No schema, upload path, rollout flag or existing business data changed. Fresh backup/evidence is `backups/production/bbs-cccf-ux-predeploy-20260907-113722/`; FTPS hashes passed 10/10 and the temporary helper/remote SQL residue is zero. Authenticated Production smoke remains unperformed because the locally configured Admin credentials returned 401; do not infer a business write acceptance test from the static/security smoke.
