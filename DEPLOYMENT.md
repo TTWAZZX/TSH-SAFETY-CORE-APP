@@ -1,5 +1,16 @@
 # TSH Safety Core Activity - Deployment
 
+## BBS card workflow release (2026-09-08)
+
+Source commit `4ae2fe1` is pushed on `main` and deployed to `https://dev.tshpcl.com/safety/tsh-safety-core`. The PHP/shared-hosting release contains 12 runtime files covering BBS navigation/loading persistence, Personal Front QR plus Department Back QR, Master Artwork, strict Personal/Department boundaries, Layout Presets, Draft-only Apply and recoverable Trash.
+
+- Fresh consistent database backup: `backups/production/bbs-card-workflow-predeploy-20260908-153658/production-before.sql.gz` (191 tables; 1,498,126 compressed bytes; 15,354,227 expanded bytes; SHA-256 `C57AA5E4535C4F3B5A9DB03107E9CB265C0CBE9DAA54430488A680E4DEBC923D`; gzip and completion marker verified).
+- Applied `20260908_bbs_card_master_artwork.sql` and `20260908_bbs_layout_presets_safe_trash.sql`. Verification found both new tables and all three soft-trash boundaries. No existing BBS row/file was deleted or rewritten.
+- Exact rollback files are in `application-before/`. FTPS upload/download-back matched source **12/12**; HTTPS matched **7/7** public files.
+- Anonymous reads of four new/protected Admin surfaces return `401`. Normal Production Admin login succeeded; five read-only Master/Preset/Trash API checks returned `200`. Chrome passed six navigation groups, eight tabs, three viewports (320x568, 390x844 and 844x390), Card Admin workspaces, zero console errors and zero business-data writes.
+- Final settings remain `staged_admin_only=1`, `pilot_scope_only=0`, `visual_card_designer_enabled=1`, `visual_card_designer_rendering_enabled=1`. The protected helper, two remote migration files and remote SQL archive were deleted; FTPS residue is `0`. The restored original router returns its expected generic `501` for the removed helper URL.
+- Operational rollback restores the 12 runtime paths from `application-before/` while preserving additive schema and all BBS history. Database restoration is reserved for an explicitly authorized data incident.
+
 ## CCCF Permanent and Hiyari PDF export reconciliation (2026-09-07)
 
 Source commit `c5a9636` is pushed on `main` and deployed to `https://dev.tshpcl.com/safety/tsh-safety-core`. The PHP/shared-hosting runtime release contains only `index.html`, `public/js/main.js`, `public/js/pages/cccf.js` and `public/js/pages/hiyari.js`; no API, schema, upload path, Assignment, submission, review or business-data change was made.

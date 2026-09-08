@@ -1,25 +1,31 @@
 # TSH Safety Core Activity - AI Quick Start
 
-## Current BBS Layout Preset and recoverable Trash handoff (2026-09-08, local only)
+## Current BBS card workflow Production state (2026-09-08)
+
+`main` commit `4ae2fe1` is pushed and deployed to the PHP Production target. The four planned sets are live: navigation/loading persistence, Personal Front QR plus Department Back QR, isolated/versioned Master Artwork with strict Personal/Department boundaries, and Layout Preset/Apply to Draft/recoverable Trash. The two additive migrations are applied; no existing template, card, QR, print record, private file or rollout setting was deleted or rewritten.
+
+Fresh Production backup/evidence is `backups/production/bbs-card-workflow-predeploy-20260908-153658/`. SQL contains 191 tables, expands to 15,354,227 bytes and has SHA-256 `C57AA5E4535C4F3B5A9DB03107E9CB265C0CBE9DAA54430488A680E4DEBC923D`. FTPS runtime hashes pass 12/12, HTTPS passes 7/7, authenticated Admin reads pass 5/5, Chrome passes 6 groups/8 tabs/3 viewports with zero console errors, and helper/SQL residue is zero. Production flags remain staged Admin-only=1, pilot=0, Designer=1 and rendering=1.
+
+## Current BBS Layout Preset and recoverable Trash handoff (2026-09-08, deployed)
 
 - Admin can save a Personal or Department Designer Draft as a same-kind Layout Preset and Apply it to another unchanged Draft. Presets reuse size, duplex settings, side fit/position and non-file elements; the destination Draft keeps its own exact Front/Back Master Artwork snapshots.
 - Personal and Department Presets are isolated. Cross-kind Apply fails closed, static private assets are rejected from Presets, and Apply is transactional plus `RowVersion` protected.
 - Personal/Department parent templates, Designer Drafts and Presets now use recoverable soft Trash. Active templates must be Archived first and only Draft layout versions can be trashed. No files, cards, QR rows, print logs, snapshots or history are deleted.
-- Local additive migration `20260908_bbs_layout_presets_safe_trash.sql` is applied after backup `backups/local-bbs-layout-preset-trash-20260908-142807/`. Source is local only; do not infer GitHub push or Production deployment.
+- Additive migration `20260908_bbs_layout_presets_safe_trash.sql` is applied locally and on Production; retain the local and Production backups recorded above.
 
-## Current BBS Personal duplex QR handoff (2026-09-08, local only)
+## Current BBS Personal duplex QR handoff (2026-09-08, deployed)
 
 - Personal Card Front uses its one-time Issue/Replace Personal QR; Back uses the current Active shared Department QR resolved from the owner's Employee Master Department. Personal and Department templates remain separate.
 - New Personal Designer Drafts contain both sides and both approved QR sources. An Active Designer layout missing the correct QR on either side blocks Issue/Replace and must be superseded by a compliant Draft; immutable versions are not edited.
 - Node/PHP Issue/Replace and signed print receipts enforce the same contract. Missing/invalid Department QR rolls the card transaction back; raw QR values are absent from stored snapshots. No schema, QR rotation rule, upload path or rollout flag changed.
-- Source is local only. Do not infer GitHub push or Production deployment.
+- Node/PHP source is pushed and the PHP/shared-hosting runtime is deployed.
 
-## Current BBS navigation/loading handoff (2026-09-08, local only)
+## Current BBS navigation/loading handoff (2026-09-08, deployed)
 
 - The BBS frontend restores each authenticated employee's last permitted tab, Card Admin workspace, safe non-text filters/pages, schedule mode and scroll position from session-scoped browser state. Restored navigation is revalidated after server context/data loads; QR/Admin entry intents still override it.
 - Observation, Batch, Action, Community, Personal/Department template and Designer artwork uploads now expose actual transfer percentage plus server-processing state through one accessible BBS operation indicator. BBS Checklist Excel preview/import in System Console uses the same indicator for read, validation and transactional Draft replacement. Initiating controls are locked against repeat activation.
 - The Designer can reopen the same authorized template/layout version, Front/Back and zoom after refresh; explicit close clears recovery. Layout data, raw QR, file bytes and tokens are not stored in browser navigation state.
-- No API payload, schema, authorization, private-upload path, QR/card lifecycle or rollout flag changed. Source is local only; do not infer GitHub push or Production deployment.
+- No API payload, authorization, QR/card lifecycle or rollout flag changed. Source is pushed and the frontend/PHP runtime is deployed.
 
 ## Current CCCF delegated Direct PDF Production state (2026-09-07)
 

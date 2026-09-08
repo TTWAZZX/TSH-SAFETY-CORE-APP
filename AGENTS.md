@@ -1,11 +1,17 @@
 # TSH Safety Core Activity - AGENTS.md
 
+## BBS card workflow Production release (2026-09-08)
+
+- `main` commit `4ae2fe1` is deployed to the PHP Production target with navigation/loading persistence, Personal Front QR plus Department Back QR, four isolated Master Artwork slots, separate Personal/Department templates, same-kind Layout Presets, Draft-only Apply and recoverable Trash.
+- Production additive schema contains `BBS_Card_Master_Artwork`, `BBS_Card_Layout_Presets` and soft-trash columns on both parent-template tables plus layout versions. Preserve all rows/files on rollback; restore runtime first and use the database backup only for an authorized data incident.
+- Production remains `staged_admin_only=1`, `pilot_scope_only=0`, `visual_card_designer_enabled=1`, `visual_card_designer_rendering_enabled=1`. Backup and verification evidence is under `backups/production/bbs-card-workflow-predeploy-20260908-153658/`; helper/SQL residue is zero.
+
 ## BBS Layout Preset and recoverable Trash constraints (2026-09-08)
 
 - Layout Presets are strictly scoped to Personal or Department. They contain reusable geometry, side settings and non-file elements only; they never carry Master Artwork files, stored filenames, Draft assets, raw QR values or cross-domain data.
 - Apply is Admin-only, same-kind and Draft-only, uses optimistic `RowVersion`, and transactionally preserves the destination Draft's exact Front/Back Master Artwork snapshots while replacing reusable layout content.
 - Template, Designer Draft and Preset removal is soft Trash. Never delete private files, cards, QR rows, print logs, snapshots or audit history. Active templates must be Archived first; only Draft layout versions may enter Trash. Restore increments `RowVersion` and never activates an item implicitly.
-- Normal catalogs and issuance/printing surfaces exclude trashed records. Node and PHP must remain behaviorally aligned. This local phase does not authorize Production deployment or GitHub push.
+- Normal catalogs and issuance/printing surfaces exclude trashed records. Node and PHP must remain behaviorally aligned.
 
 ## BBS Admin-only Production backup (2026-09-05)
 

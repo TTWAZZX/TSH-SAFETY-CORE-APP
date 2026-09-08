@@ -1,11 +1,18 @@
 # TSH Safety Core Activity - Changelog And Handoff History
 
-## 2026-09-08 — BBS Layout Preset, Apply to Draft and safe Trash (local)
+## 2026-09-08 — BBS card workflow Production release
+
+- Pushed source commit `4ae2fe1` and deployed the four planned BBS sets: navigation/loading persistence, Personal Front QR plus Department Back QR, isolated/versioned Master Artwork, strict Personal/Department template separation, and Layout Preset/Apply to Draft/recoverable Trash.
+- Applied the two additive migrations after a consistent 191-table Production backup. Existing templates, cards, QR rows, print history, private files and settings were preserved; final flags remain staged Admin-only=1, pilot=0, Designer=1 and rendering=1.
+- FTPS download-back SHA-256 passed 12/12 and HTTPS passed 7/7. Anonymous Admin endpoints remain 401, authenticated Admin read smoke passed 5/5, and Chrome passed 6 navigation groups, 8 tabs and three responsive viewports with zero console errors or business-data writes.
+- Evidence and rollback files are under `backups/production/bbs-card-workflow-predeploy-20260908-153658/`. The protected helper, remote migrations and remote backup were removed; FTPS residue is zero and the original router returns its generic 501 for the removed helper path.
+
+## 2026-09-08 — BBS Layout Preset, Apply to Draft and safe Trash (deployed)
 
 - Added separate Personal/Department Layout Presets with Draft-only creation and same-kind, optimistic, transactional Apply.
 - Preset Apply preserves the destination Draft's Master Artwork snapshots and rejects static private assets or cross-card-type reuse.
 - Added recoverable Trash/restore for Personal templates, Department templates, Designer Drafts and Presets; Active template deletion and non-Draft layout deletion fail closed.
-- Added Card Admin/Designer controls, loading feedback, additive migration, Node/PHP parity, contract coverage and local API lifecycle UAT. No Production deployment or GitHub push.
+- Added Card Admin/Designer controls, loading feedback, additive migration, Node/PHP parity, contract coverage and local API lifecycle UAT. Production deployment and GitHub push are recorded above.
 
 ## BBS Personal duplex QR contract (2026-09-08, local)
 

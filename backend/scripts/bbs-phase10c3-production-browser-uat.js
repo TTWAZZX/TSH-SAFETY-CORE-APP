@@ -107,23 +107,35 @@ async function connectChrome() {
     await waitFor(`document.readyState==='complete'`);
     await evaluate(`(()=>{localStorage.setItem('tsh_token',${JSON.stringify(session.token)});localStorage.setItem('tsh_user',${JSON.stringify(JSON.stringify(session.user))});location.hash='#bbs-smart-card';location.reload();return true;})()`);
     await waitFor(`Boolean(document.querySelector('[data-bbs-shell]'))`);
-    const tabs = await evaluate(`[...document.querySelectorAll('[data-bbs-tab]')].map(tab=>tab.dataset.bbsTab)`);
-    assert.ok(tabs.length >= 8, `Expected 8 BBS tabs, got ${tabs.length}`);
+    const groups = await evaluate(`[...document.querySelectorAll('[data-bbs-group]')].map(group=>({key:group.dataset.bbsGroup,target:group.dataset.bbsGroupTarget}))`);
+    assert.ok(groups.length >= 6, `Expected 6 BBS navigation groups, got ${groups.length}`);
     const viewports = [{ width: 320, height: 568 }, { width: 390, height: 844 }, { width: 844, height: 390 }];
-    for (const tab of tabs) {
-        await evaluate(`document.querySelector('[data-bbs-tab=${JSON.stringify(tab)}]').click()`);
-        await waitFor(`document.querySelector('[data-bbs-tab=${JSON.stringify(tab)}]')?.getAttribute('aria-selected')==='true'`);
-        for (const viewport of viewports) {
-            await command('Emulation.setDeviceMetricsOverride', { ...viewport, deviceScaleFactor: 1, mobile: true });
-            await sleep(200);
-            const audit = await evaluate(`(()=>({overflow:document.documentElement.scrollWidth>document.documentElement.clientWidth+2,selected:document.querySelectorAll('[data-bbs-tab][aria-selected="true"]').length,panel:document.getElementById('bbs-smart-card-body')?.getAttribute('role')}))()`);
-            assert.strictEqual(audit.overflow, false, `${tab} ${viewport.width}x${viewport.height} overflow`);
-            assert.strictEqual(audit.selected, 1, `${tab} selected tab count`);
-            assert.strictEqual(audit.panel, 'tabpanel', `${tab} tabpanel semantics`);
+    let tabCount = 0;
+    for (const group of groups) {
+        await evaluate(`document.querySelector('[data-bbs-group=${JSON.stringify(group.key)}]').click()`);
+        await waitFor(`document.querySelector('[data-bbs-group=${JSON.stringify(group.key)}]')?.getAttribute('aria-current')==='page'`);
+        const tabs = await evaluate(`[...document.querySelectorAll('[data-bbs-tab]')].map(tab=>tab.dataset.bbsTab)`);
+        tabCount += tabs.length;
+        for (const tab of tabs) {
+            await evaluate(`document.querySelector('[data-bbs-tab=${JSON.stringify(tab)}]').click()`);
+            await waitFor(`document.querySelector('[data-bbs-tab=${JSON.stringify(tab)}]')?.getAttribute('aria-selected')==='true'`);
+            for (const viewport of viewports) {
+                await command('Emulation.setDeviceMetricsOverride', { ...viewport, deviceScaleFactor: 1, mobile: true });
+                await sleep(200);
+                const audit = await evaluate(`(()=>({overflow:document.documentElement.scrollWidth>document.documentElement.clientWidth+2,selected:document.querySelectorAll('[data-bbs-tab][aria-selected="true"]').length,panel:document.getElementById('bbs-smart-card-body')?.getAttribute('role')}))()`);
+                assert.strictEqual(audit.overflow, false, `${tab} ${viewport.width}x${viewport.height} overflow`);
+                assert.strictEqual(audit.selected, 1, `${tab} selected tab count`);
+                assert.strictEqual(audit.panel, 'tabpanel', `${tab} tabpanel semantics`);
+            }
         }
     }
+    assert.ok(tabCount >= 8, `Expected at least 8 BBS tabs across groups, got ${tabCount}`);
+    await evaluate(`document.querySelector('[data-bbs-group="admin"]').click()`);
+    await waitFor(`Boolean(document.querySelector('[data-card-workspace-navigation]'))`);
+    const cards = await evaluate(`(()=>({workspaces:document.querySelectorAll('[data-card-workspace]').length,personal:Boolean(document.querySelector('[data-card-workspace="personal"]')),department:Boolean(document.querySelector('[data-card-workspace="department"]'))}))()`);
+    assert.ok(cards.workspaces >= 3 && cards.personal && cards.department, 'Card Admin workspaces are incomplete');
     assert.deepStrictEqual(errors, [], `Browser errors: ${errors.join(' | ')}`);
-    console.log(JSON.stringify({ success: true, authentication: 'normal-production-login', tabs: tabs.length, viewports, consoleErrors: errors.length, businessDataChanged: false, temporaryRowsRemaining: 0 }, null, 2));
+    console.log(JSON.stringify({ success: true, authentication: 'normal-production-login', groups: groups.length, tabs: tabCount, cardWorkspaces: cards.workspaces, viewports, consoleErrors: errors.length, businessDataChanged: false, temporaryRowsRemaining: 0 }, null, 2));
 })().catch(error => {
     console.error(error.stack || error.message);
     process.exitCode = 1;
