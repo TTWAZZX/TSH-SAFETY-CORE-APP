@@ -76,6 +76,51 @@ export async function apiFetch(endpoint, options = {}) {
     }
 }
 
+// Multipart upload helper with progress reporting. Keep normal reads and JSON
+// writes on fetch; XHR is used only when the caller needs upload progress.
+export function apiUpload(endpoint, body, { method = 'POST', onProgress = null, suppressErrorLog = false } = {}) {
+    return new Promise((resolve, reject) => {
+        const xhr = new XMLHttpRequest();
+        xhr.open(method, `${API_BASE}${endpoint}`);
+        xhr.responseType = 'text';
+        const token = TSHSession.getToken();
+        if (token) xhr.setRequestHeader('Authorization', `Bearer ${token}`);
+        xhr.setRequestHeader('Accept', 'application/json');
+        xhr.upload.addEventListener('progress', event => {
+            if (!event.lengthComputable || typeof onProgress !== 'function') return;
+            onProgress(Math.max(0, Math.min(100, Math.round(event.loaded / event.total * 100))), event);
+        });
+        xhr.addEventListener('load', () => {
+            let data = null;
+            try { data = xhr.responseText ? JSON.parse(xhr.responseText) : null; } catch (_) {}
+            if (xhr.status === 401 || (xhr.status === 403 && data?.message === 'Token is not valid')) {
+                console.warn('Session expired. Logging out...');
+                TSHSession.logout();
+            }
+            if (xhr.status >= 200 && xhr.status < 300) {
+                if (data === null) {
+                    const error = new Error('รูปแบบข้อมูลตอบกลับจากระบบอัปโหลดไม่ถูกต้อง');
+                    if (!suppressErrorLog) console.error('API Upload Error:', error);
+                    reject(error);
+                    return;
+                }
+                resolve(data);
+                return;
+            }
+            const error = data || new Error(`Upload failed (${xhr.status || 'network'})`);
+            if (!suppressErrorLog) console.error('API Upload Error:', error);
+            reject(error);
+        });
+        xhr.addEventListener('error', () => {
+            const error = new Error('ไม่สามารถเชื่อมต่อเพื่ออัปโหลดไฟล์ได้');
+            if (!suppressErrorLog) console.error('API Upload Error:', error);
+            reject(error);
+        });
+        xhr.addEventListener('abort', () => reject(new DOMException('Upload cancelled', 'AbortError')));
+        xhr.send(body);
+    });
+}
+
 export const API = {
     get: (url, options = {}) => apiFetch(url, options),
     post: (url, body, options = {}) =>
@@ -100,5 +145,6 @@ export const API = {
             ...options,
             method: 'PATCH',
             body: body instanceof FormData ? body : (body !== undefined ? JSON.stringify(body) : undefined)
-        })
+        }),
+    upload: (url, body, options = {}) => apiUpload(url, body, options)
 };

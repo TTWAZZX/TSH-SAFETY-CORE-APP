@@ -5,7 +5,7 @@ const SIDES = Object.freeze(['Front', 'Back']);
 const ELEMENT_TYPES = Object.freeze(['DynamicText', 'StaticText', 'DynamicImage', 'StaticImage', 'QR', 'Shape']);
 const PERSONAL_FIELDS = Object.freeze([
     'employee.full_name','employee.id','employee.department','employee.safety_unit','employee.position',
-    'employee.bbs_level','employee.photo','card.personal_qr','card.issue_date','template.name',
+    'employee.bbs_level','employee.photo','card.personal_qr','department.community_qr','card.issue_date','template.name',
     'organization.name','organization.logo',
 ]);
 const DEPARTMENT_FIELDS = Object.freeze([
@@ -72,7 +72,11 @@ function normalizeSide(value) {
     const fit = clean(value?.backgroundFit || 'Cover', 20);
     if (!['Contain','Cover','Stretch'].includes(fit)) throw new DesignerValidationError(`Background fit is invalid for ${side}.`);
     return {
-        side, storageClass, backgroundAssetId:value?.backgroundAssetId == null ? null : integer(value.backgroundAssetId,1,Number.MAX_SAFE_INTEGER,'Background asset'), backgroundStoredName:storedName, backgroundOriginalName:originalName || storedName,
+        side, storageClass, backgroundAssetId:value?.backgroundAssetId == null ? null : integer(value.backgroundAssetId,1,Number.MAX_SAFE_INTEGER,'Background asset'),
+        masterArtworkId:value?.masterArtworkId == null ? null : integer(value.masterArtworkId,1,Number.MAX_SAFE_INTEGER,'Master artwork'),
+        masterArtworkKind:value?.masterArtworkKind == null ? null : normalizeKind(value.masterArtworkKind),
+        masterArtworkSide:value?.masterArtworkSide == null ? null : clean(value.masterArtworkSide,10),
+        backgroundStoredName:storedName, backgroundOriginalName:originalName || storedName,
         backgroundMimeType:mimeType, backgroundFileSize:integer(value?.backgroundFileSize || 0,0,100*1024*1024,'Background file size'),
         pixelWidth:value?.pixelWidth == null ? null : integer(value.pixelWidth,1,100000,'Pixel width'),
         pixelHeight:value?.pixelHeight == null ? null : integer(value.pixelHeight,1,100000,'Pixel height'),
@@ -122,17 +126,20 @@ function normalizeLayoutPayload(payload, expectedKind) {
 }
 function assessLayout(layout) {
     const items=[];
-    if (!layout.sides.some(side=>side.side==='Back')) items.push({severity:'Warning',code:'BACK_SIDE_MISSING',message:'Back side is not configured.'});
+    if (!layout.sides.some(side=>side.side==='Back')) items.push({severity:'Blocked',code:'BACK_SIDE_MISSING',message:'Front and Back Master Artwork are required.'});
     if (Number(layout.dpi)<200) items.push({severity:'Warning',code:'DPI_LOW',message:'Print DPI is below the recommended 200 DPI.'});
     for (const side of layout.sides) {
+        if (side.storageClass!=='DesignerAsset'||!side.masterArtworkId||side.masterArtworkKind!==layout.templateKind||side.masterArtworkSide!==side.side) items.push({severity:'Blocked',code:`MASTER_ARTWORK_${side.side.toUpperCase()}_REQUIRED`,message:`${layout.templateKind} ${side.side} must use its matching active Master Artwork snapshot.`});
         if (Number(side.bleedMM||0)<1) items.push({severity:'Warning',code:`BLEED_LOW_${side.side.toUpperCase()}`,message:`${side.side} bleed is below the recommended 1 mm.`});
         if (Number(side.safeMarginMM||0)<2) items.push({severity:'Warning',code:`SAFE_MARGIN_LOW_${side.side.toUpperCase()}`,message:`${side.side} safe margin is below the recommended 2 mm.`});
         if (side.pixelWidth&&side.pixelHeight) { const requiredWidth=(Number(layout.widthMM)/25.4)*Number(layout.dpi),requiredHeight=(Number(layout.heightMM)/25.4)*Number(layout.dpi); if(Number(side.pixelWidth)<requiredWidth||Number(side.pixelHeight)<requiredHeight)items.push({severity:'Warning',code:`BACKGROUND_RESOLUTION_LOW_${side.side.toUpperCase()}`,message:`${side.side} background may be below the selected print DPI.`}); }
     }
-    const expectedQr=layout.templateKind==='Personal'?'card.personal_qr':'department.community_qr';
-    const qr=layout.elements.filter(element=>element.visible && element.elementType==='QR' && element.dataSourceKey===expectedQr);
-    if (!qr.length) items.push({severity:'Blocked',code:'QR_MISSING',message:'An approved BBS QR element is required.'});
-    if (qr.some(element=>Math.min(element.widthBP,element.heightBP)<1200)) items.push({severity:'Blocked',code:'QR_TOO_SMALL',message:'QR size must be at least 12% of the card on both axes.'});
+    const requiredQr=layout.templateKind==='Personal'?[['card.personal_qr','Front','Personal'],['department.community_qr','Back','Department']]:[['department.community_qr','Front','Department']];
+    for (const [source,side,label] of requiredQr) {
+        const qr=layout.elements.filter(element=>element.visible && element.elementType==='QR' && element.dataSourceKey===source && element.side===side);
+        if (!qr.length) items.push({severity:'Blocked',code:`${label.toUpperCase()}_QR_${side.toUpperCase()}_MISSING`,message:`${label} QR is required on the ${side} side.`});
+        else if (qr.some(element=>Math.min(element.widthBP,element.heightBP)<1200)) items.push({severity:'Blocked',code:`${label.toUpperCase()}_QR_TOO_SMALL`,message:`${label} QR size must be at least 12% of the card on both axes.`});
+    }
     return { status:items.some(i=>i.severity==='Blocked')?'Blocked':items.some(i=>i.severity==='Warning')?'Warning':'Ready',items };
 }
 
@@ -143,9 +150,11 @@ function legacyLayout(parent, kindValue) {
         {elementKey:'employee-department',side:'Front',elementType:'DynamicText',dataSourceKey:'employee.department',xBP:700,yBP:7450,widthBP:5200,heightBP:650,zIndex:11,required:true,style:{fontSizePt:9}},
         {elementKey:'employee-position',side:'Front',elementType:'DynamicText',dataSourceKey:'employee.position',xBP:700,yBP:8150,widthBP:5200,heightBP:650,zIndex:12,style:{fontSizePt:9}},
         {elementKey:'personal-qr',side:'Front',elementType:'QR',dataSourceKey:'card.personal_qr',xBP:6800,yBP:6100,widthBP:2500,heightBP:2500,zIndex:20,required:true,style:{objectFit:'Contain'}},
+        {elementKey:'department-qr',side:'Back',elementType:'QR',dataSourceKey:'department.community_qr',xBP:6800,yBP:6100,widthBP:2500,heightBP:2500,zIndex:20,required:true,style:{objectFit:'Contain'}},
     ]:[{elementKey:'department-qr',side:'Front',elementType:'QR',dataSourceKey:'department.community_qr',xBP:6900,yBP:6900,widthBP:2400,heightBP:2400,zIndex:20,required:true,style:{objectFit:'Contain'}}];
     if(personal&&Number(parent.IncludeEmployeeID)!==0)elements.push({elementKey:'employee-id',side:'Front',elementType:'DynamicText',dataSourceKey:'employee.id',xBP:700,yBP:8850,widthBP:5200,heightBP:550,zIndex:13,style:{fontSizePt:8}});
-    return normalizeLayoutPayload({templateKind:kind,widthMM:Number(parent.WidthMM),heightMM:Number(parent.HeightMM),dpi:300,duplexFlip:'LongEdge',backRotation:0,sides:[{side:'Front',storageClass:personal?'PersonalTemplate':'DepartmentTemplate',backgroundStoredName:parent.BackgroundStoredName,backgroundOriginalName:parent.OriginalName,backgroundMimeType:parent.MimeType,backgroundFileSize:Number(parent.FileSize||0),backgroundFit:'Cover',backgroundPositionXBP:5000,backgroundPositionYBP:5000,bleedMM:0,safeMarginMM:3}],elements},kind);
+    const baseSide={storageClass:personal?'PersonalTemplate':'DepartmentTemplate',backgroundStoredName:parent.BackgroundStoredName,backgroundOriginalName:parent.OriginalName,backgroundMimeType:parent.MimeType,backgroundFileSize:Number(parent.FileSize||0),backgroundFit:'Cover',backgroundPositionXBP:5000,backgroundPositionYBP:5000,bleedMM:0,safeMarginMM:3};
+    return normalizeLayoutPayload({templateKind:kind,widthMM:Number(parent.WidthMM),heightMM:Number(parent.HeightMM),dpi:300,duplexFlip:'LongEdge',backRotation:0,sides:[{side:'Front',...baseSide},{side:'Back',...baseSide}],elements},kind);
 }
 
 module.exports={ DesignerValidationError, catalog, normalizeKind, normalizeLayoutPayload, assessLayout, legacyLayout };

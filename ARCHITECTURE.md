@@ -1,5 +1,27 @@
 # TSH Safety Core Activity - Architecture
 
+## BBS Layout Presets and recoverable Trash (2026-09-08)
+
+`BBS_Card_Layout_Presets` stores Admin-authored, kind-scoped reusable layout JSON. The payload deliberately excludes private background provenance and file-bound elements. Applying a Preset locks the active Preset and destination Draft, verifies the card kind and Draft `RowVersion`, merges only reusable content onto the destination's current Master Artwork-backed sides, revalidates the complete layout, and replaces sides/elements in one transaction.
+
+Recoverable Trash uses `IsDeleted`, `DeletedAt` and `DeletedBy` on Personal templates, Department templates and layout versions; Presets use `Status=Trashed`. Normal catalogs filter these records, while dedicated `trash=1` reads expose Admin restore controls. Trash never cascades to cards, QR records, layout assets, private files, print logs or immutable render snapshots.
+
+## BBS Personal Card duplex QR boundary (2026-09-08)
+
+A Personal Card print contract has two QR sources without sharing template ownership. `card.personal_qr` is the per-card token created only by the established Issue/Replace transaction and renders on `Front`. `department.community_qr` is reconstructed server-side from the current Active `BBS_Department_QR_Cards` generation for the card owner's Employee Master Department and renders on `Back`. Department Card templates remain their own `Department` layout domain and continue to use their existing shared QR workflow.
+
+Node and PHP resolve and verify the Department QR before inserting a Personal card. When Designer rendering is active, the server also requires an Active Personal layout with the Personal QR on Front and Department QR on Back; immutable legacy Active layouts are not rewritten. The signed Personal print snapshot replaces both raw URLs with typed fingerprints. Print-log verification remains bound to the Personal fingerprint and additionally rejects a Designer receipt after the Department QR has rotated.
+
+The legacy client renderer produces paired A4 Front/Back sheets and mirrors Back placement for long-edge duplex output. This is a rendering/API projection change only: no QR row, template row, layout version, print history, schema or private file is migrated automatically.
+
+## BBS session navigation and asynchronous UI boundary (2026-09-08)
+
+The BBS SPA stores only presentation state in `sessionStorage`, keyed by authenticated EmployeeID: the current permitted tab, Card Admin workspace, allowlisted non-text filters/pages, schedule presentation and main-content scroll position. It never stores free-text searches, raw QR values, uploaded file bytes, tokens or Employee payloads. On page load the client restores preferences before permission-scoped reads, then intersects the requested tab with the navigation that the newly authorized server context exposes. QR and Admin deep-link intents retain precedence over the saved preference.
+
+The Visual Card Designer stores a short-lived pointer to its template/layout ID plus Front/Back and zoom. Refresh re-fetches catalog, template and version through the existing Admin-only endpoints; explicit close clears the pointer. Browser storage is not a Draft persistence authority and never contains layout content or private asset references beyond authorized numeric IDs.
+
+`public/js/utils/bbs-async-ui.js` owns the module-wide accessible operation indicator. Normal reads remain on `fetch`; multipart uploads use the central `apiUpload()` XHR transport only to expose transfer percentage while retaining the same bearer authentication and JSON error contract. Observation, Action, Community, card-template and Designer asset uploads show prepare/upload/server-processing stages and lock their initiating control. The BBS Checklist Excel flow in System Console joins the same indicator for local workbook reading, server validation and transactional Draft replacement, but continues to submit the established JSON payload. This layer changes no route, payload, schema, authorization, private storage path or business workflow.
+
 ## BBS Designer runtime control (2026-09-05)
 
 `POST /api/bbs/admin/card-designer/runtime` is Admin-only in the Node and PHP routes. `enable` locks the four BBS gate settings and succeeds only while BBS is staged Admin-only (`staged_admin_only=1`, `pilot_scope_only=0`), then updates both Designer flags together and writes an audit entry. `disable` turns both flags off as the operational rollback without deleting layouts, cards, QR records, print snapshots or private assets. The endpoint returns the effective gate state; the browser cannot enable Designer rendering by itself.
@@ -2919,3 +2941,10 @@ let _chartManDonut = null; // Man Record pass/fail donut chart
 - Existing `forklift_card_templates.LicenseTypeID` remains as the legacy primary type and is backfilled into the map.
 - Card rendering ranks templates by exact type set first, then single matching type, then all-license templates.
 - This allows a `Forklift + Stacker` license to use a combined template instead of falling back to the `Forklift` template.
+
+## BBS Card Master Artwork
+
+- `BBS_Card_Master_Artwork` is the versioned source for exactly four isolated slots: Personal Front, Personal Back, Department Front and Department Back. One Active version is allowed per slot; replacing a slot archives its previous version without deleting its private file.
+- Admin APIs are `GET /api/bbs/admin/card-master-artwork`, `POST /api/bbs/admin/card-master-artwork/:kind/:side`, and the object-authorized file read `GET /api/bbs/admin/card-master-artwork/:id/file`. Uploads are signature-validated JPG/PNG/WebP up to 10 MB in `backend/private-uploads/bbs-card-master-artwork`.
+- Creating a Designer Draft requires both Active slots for the requested kind. The server copies each master file into Draft-owned private Designer storage and records `BBS_Card_Layout_Assets.MasterArtworkID`; this immutable snapshot prevents a later master replacement from changing existing Draft, Active or Archived layouts.
+- Save and activation fail closed unless each side's provenance matches both the layout `TemplateKind` and exact `Side`. Personal and Department parent tables, APIs, templates, QR lifecycles and render contexts remain separate.

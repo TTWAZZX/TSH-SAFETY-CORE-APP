@@ -1,6 +1,7 @@
 import { showToast, showError, openModal, openDetailModal, closeModal, escHtml, metricCard, emptyState, statusBadge as dsStatusBadge } from '../ui.js?v=20260602-mobile-nav-m53';
-import { API } from '../api.js?v=20260723-onboarding-release';
+import { API } from '../api.js?v=20260908-bbs-navigation-loading-r1';
 import { createLatestRenderTarget, guardActionHandler, guardSubmitHandler, sectionSkeleton, withActionLock } from '../utils/async-ui.js?v=20260715-phase32c-residual-async';
+import { beginBbsOperation } from '../utils/bbs-async-ui.js?v=20260908-bbs-navigation-loading-r1';
 
 // â”€â”€â”€ Button loading helper (disable + spinner, returns original HTML) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 const _SPIN_HTML = `<svg class="w-3.5 h-3.5 animate-spin inline-block" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"/><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"/></svg>`;
@@ -9409,25 +9410,52 @@ async function _bbsPreviewImportFile(file) {
     if (!file) return;
     if (!/\.xlsx?$/i.test(file.name || '') || file.size > 5 * 1024 * 1024) { if (target) target.innerHTML = '<p class="font-bold text-rose-700">รองรับเฉพาะ .xlsx/.xls ขนาดไม่เกิน 5 MB</p>'; return; }
     if (typeof XLSX === 'undefined') { if (target) target.innerHTML = '<p class="font-bold text-rose-700">ไม่พบไลบรารี Excel</p>'; return; }
+    const fileInput = document.getElementById('bbs-checklist-import-file');
+    const operation = beginBbsOperation('กำลังตรวจสอบไฟล์ Checklist', 'กำลังอ่านไฟล์ Excel ในเครื่อง');
+    if (fileInput) { fileInput.disabled = true; fileInput.setAttribute('aria-busy', 'true'); }
+    target?.setAttribute('aria-busy', 'true');
     if (target) target.innerHTML = '<p class="animate-pulse font-bold text-indigo-600">กำลังอ่านและตรวจสอบไฟล์...</p>';
     try {
         const workbook = XLSX.read(await file.arrayBuffer(), { type: 'array', raw: false });
         const payload = _bbsImportPayloadFromWorkbook(workbook);
+        operation.update({ detail: 'กำลังตรวจสอบข้อมูลกับ Master Data และ Scope' });
         const response = await API.post(`/bbs/admin/checklist-versions/${_bbsEditor.id}/import-preview`, payload);
         _bbsImportPreview = { ...response.data.normalized, rowVersion: response.data.rowVersion };
         const summary = response.data.summary || {};
-        if (target) target.innerHTML = `<div class="text-left"><div class="flex items-center justify-between gap-3"><div><p class="text-sm font-black text-emerald-700">Validation ผ่าน — ยังไม่มีการเปลี่ยนข้อมูล</p><p class="mt-1 text-[10px] text-slate-500">${escHtml(file.name)}</p></div><span class="rounded-full bg-emerald-50 px-3 py-1 text-[10px] font-black text-emerald-700">Ready</span></div><div class="mt-4 grid grid-cols-3 gap-2">${[['หมวดหมู่',summary.categoryCount],['รายการ',summary.itemCount],['Scope',summary.scopeCount]].map(([label,value])=>`<div class="rounded-lg bg-slate-50 p-3 text-center"><p class="text-lg font-black text-slate-800">${Number(value||0)}</p><p class="text-[10px] text-slate-500">${label}</p></div>`).join('')}</div><p class="mt-3 text-[10px] text-slate-500">Effective: ${escHtml(summary.effectiveFrom||'')} → ${escHtml(summary.effectiveTo||'ไม่มีกำหนด')}</p><button type="button" onclick="window._bbsConfirmChecklistImport()" class="mt-4 w-full rounded-lg bg-indigo-600 px-4 py-3 text-xs font-black text-white">ยืนยัน Import และแทนที่ Draft</button></div>`;
+        if (target) target.innerHTML = `<div class="text-left"><div class="flex items-center justify-between gap-3"><div><p class="text-sm font-black text-emerald-700">Validation ผ่าน — ยังไม่มีการเปลี่ยนข้อมูล</p><p class="mt-1 text-[10px] text-slate-500">${escHtml(file.name)}</p></div><span class="rounded-full bg-emerald-50 px-3 py-1 text-[10px] font-black text-emerald-700">Ready</span></div><div class="mt-4 grid grid-cols-3 gap-2">${[['หมวดหมู่',summary.categoryCount],['รายการ',summary.itemCount],['Scope',summary.scopeCount]].map(([label,value])=>`<div class="rounded-lg bg-slate-50 p-3 text-center"><p class="text-lg font-black text-slate-800">${Number(value||0)}</p><p class="text-[10px] text-slate-500">${label}</p></div>`).join('')}</div><p class="mt-3 text-[10px] text-slate-500">Effective: ${escHtml(summary.effectiveFrom||'')} → ${escHtml(summary.effectiveTo||'ไม่มีกำหนด')}</p><button id="bbs-confirm-checklist-import" type="button" onclick="window._bbsConfirmChecklistImport()" class="mt-4 w-full rounded-lg bg-indigo-600 px-4 py-3 text-xs font-black text-white disabled:cursor-wait disabled:opacity-60">ยืนยัน Import และแทนที่ Draft</button></div>`;
     } catch (error) {
         if (target) target.innerHTML = `<div class="text-left rounded-lg border border-rose-200 bg-rose-50 p-4"><p class="font-black text-rose-700">ไฟล์ไม่ผ่าน Validation</p><p class="mt-1 text-xs text-rose-600">${escHtml(error.message || 'Unknown error')}</p><p class="mt-2 text-[10px] text-slate-500">Draft เดิมยังไม่ถูกเปลี่ยนแปลง</p></div>`;
+    } finally {
+        if (fileInput?.isConnected) { fileInput.disabled = false; fileInput.removeAttribute('aria-busy'); }
+        target?.removeAttribute('aria-busy');
+        operation.finish();
     }
 }
 
 async function _bbsConfirmChecklistImport() {
     if (!_bbsImportPreview || !_bbsEditor) return showToast('กรุณา Preview ไฟล์ให้ผ่านก่อน', 'warning');
     const versionId = _bbsEditor.id; const templateId = _bbsEditor.templateId;
-    const response = await API.post(`/bbs/admin/checklist-versions/${versionId}/import`, { ..._bbsImportPreview, confirmed: true });
-    _bbsImportPreview = null; showToast(response.message || 'Import Checklist แล้ว', 'success');
-    await _bbsReload(); await _bbsOpenChecklist(templateId, versionId);
+    const button = document.getElementById('bbs-confirm-checklist-import');
+    const originalLabel = button?.innerHTML || '';
+    const operation = beginBbsOperation('กำลัง Import Checklist', 'กำลังแทนที่ข้อมูลใน Draft แบบ Transaction');
+    if (button) {
+        button.disabled = true;
+        button.setAttribute('aria-busy', 'true');
+        button.innerHTML = `${_SPIN_HTML} กำลัง Import...`;
+    }
+    try {
+        const response = await API.post(`/bbs/admin/checklist-versions/${versionId}/import`, { ..._bbsImportPreview, confirmed: true });
+        _bbsImportPreview = null; showToast(response.message || 'Import Checklist แล้ว', 'success');
+        operation.update({ detail: 'Import สำเร็จ กำลังโหลด Checklist ล่าสุด' });
+        await _bbsReload(); await _bbsOpenChecklist(templateId, versionId);
+    } finally {
+        if (button?.isConnected) {
+            button.disabled = false;
+            button.removeAttribute('aria-busy');
+            button.innerHTML = originalLabel;
+        }
+        operation.finish();
+    }
 }
 
 function _bbsOpenResolverPreview(){openModal('ทดสอบ Checklist Resolver',`<div class="space-y-4"><div class="rounded-lg border border-sky-200 bg-sky-50 p-3 text-xs text-sky-800">Preview นี้เรียก resolver ตัวเดียวกับ observation flow: specificity → priority → effective date และจะ Fail closed เมื่อไม่พบหรือมี conflict</div><div class="grid grid-cols-1 gap-3 sm:grid-cols-[1fr_180px_auto]"><label class="text-xs font-bold">พนักงาน<input id="bbs-resolve-employee" list="bbs-resolve-employees" placeholder="รหัสพนักงาน" class="mt-1 w-full rounded-lg border px-3 py-2.5"><datalist id="bbs-resolve-employees">${(_bbsFoundation?.employees||[]).map(e=>`<option value="${escHtml(e.EmployeeID)}">${escHtml(e.EmployeeName)} · ${escHtml(e.Department||'')} / ${escHtml(e.Unit||'')}</option>`).join('')}</datalist></label><label class="text-xs font-bold">วันที่<input id="bbs-resolve-date" type="date" value="${_bbsBangkokToday()}" class="mt-1 w-full rounded-lg border px-3 py-2.5"></label><button type="button" onclick="window._bbsRunResolverPreview()" class="self-end rounded-lg bg-indigo-600 px-4 py-2.5 text-xs font-black text-white">Resolve</button></div><div id="bbs-resolve-result" class="rounded-xl border border-dashed border-slate-200 p-6 text-center text-xs text-slate-400">เลือกพนักงานและวันที่เพื่อดู Checklist ที่ระบบจะใช้จริง</div></div>`,'max-w-4xl');}

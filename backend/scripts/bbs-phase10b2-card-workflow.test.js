@@ -66,11 +66,12 @@ for (const preserved of [
     'data-bbs-card-replace',
     'data-bbs-card-revoke',
     'data-dept-qr-issue',
-    'data-community-handler',
-    "API.post('/bbs/admin/card-templates'",
-    "API.post('/bbs/admin/department-card-templates'"
+    'data-community-handler'
 ]) {
     assert.ok(ui.includes(preserved), `Existing card behavior marker missing ${preserved}`);
+}
+for (const endpoint of ['/bbs/admin/card-templates','/bbs/admin/department-card-templates']) {
+    assert.ok(ui.includes(`API.post('${endpoint}'`) || ui.includes(`API.upload('${endpoint}'`), `Existing card behavior marker missing ${endpoint}`);
 }
 
 console.log('BBS Phase 10B-2 Card Management IA/guided workflow contract: PASS');

@@ -8,12 +8,15 @@ require('dotenv').config({path:path.join(__dirname,'..','.env')});
 const app=require('../server');
 const db=require('../db');
 const {loadReadyTestUsers}=require('./ready-test-users');
+const {departmentTokenRecord}=require('../services/bbs-community');
 
 const marker=`UAT-BBS10F5-${Date.now()}`;
 const png=Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Y9Zl1sAAAAASUVORK5CYII=','base64');
 const templateDir=path.join(__dirname,'..','private-uploads','bbs-card-templates');
-let server, personalTemplateId, departmentTemplateId, personalLayoutId, departmentLayoutId, personalCardId, personalPrintLogId, departmentPrintLogId;
+const masterArtworkDir=path.join(__dirname,'..','private-uploads','bbs-card-master-artwork');
+let server, personalTemplateId, departmentTemplateId, personalLayoutId, departmentLayoutId, personalCardId, personalPrintLogId, departmentPrintLogId, temporaryDepartmentQrId;
 let originalSettings=[];
+let masterArtworkIds=[],priorMasterArtworkIds=[];
 let departmentBlocked=false;
 
 const tokenFor=payload=>jwt.sign(payload,process.env.JWT_SECRET,{expiresIn:'15m'});
@@ -26,14 +29,18 @@ async function cleanup(){
     if(personalPrintLogId)await db.query('DELETE FROM BBS_Card_Print_Logs WHERE id=?',[personalPrintLogId]);
     if(departmentPrintLogId)await db.query('DELETE FROM BBS_Department_Card_Print_Logs WHERE id=?',[departmentPrintLogId]);
     if(personalCardId)await db.query('DELETE FROM BBS_Cards WHERE id=?',[personalCardId]);
-    for(const id of [personalLayoutId,departmentLayoutId].filter(Boolean)){await db.query('DELETE FROM BBS_Card_Layout_Elements WHERE LayoutVersionID=?',[id]);await db.query('DELETE FROM BBS_Card_Layout_Sides WHERE LayoutVersionID=?',[id]);await db.query('DELETE FROM BBS_Card_Layout_Assets WHERE LayoutVersionID=?',[id]);await db.query('DELETE FROM BBS_Card_Layout_Versions WHERE id=?',[id]);}
+    if(temporaryDepartmentQrId)await db.query('DELETE FROM BBS_Department_QR_Cards WHERE id=?',[temporaryDepartmentQrId]);
+    for(const id of [personalLayoutId,departmentLayoutId].filter(Boolean)){const[assets]=await db.query('SELECT StoredName FROM BBS_Card_Layout_Assets WHERE LayoutVersionID=?',[id]);for(const asset of assets)await fs.promises.rm(path.join(__dirname,'..','private-uploads','bbs-card-designer',path.basename(asset.StoredName)),{force:true});await db.query('DELETE FROM BBS_Card_Layout_Elements WHERE LayoutVersionID=?',[id]);await db.query('DELETE FROM BBS_Card_Layout_Sides WHERE LayoutVersionID=?',[id]);await db.query('DELETE FROM BBS_Card_Layout_Assets WHERE LayoutVersionID=?',[id]);await db.query('DELETE FROM BBS_Card_Layout_Versions WHERE id=?',[id]);}
     if(personalTemplateId)await db.query('DELETE FROM BBS_Card_Templates WHERE id=?',[personalTemplateId]);
     if(departmentTemplateId)await db.query('DELETE FROM BBS_Department_Card_Templates WHERE id=?',[departmentTemplateId]);
+    if(masterArtworkIds.length)await db.query(`DELETE FROM BBS_Card_Master_Artwork WHERE id IN (${masterArtworkIds.map(()=>'?').join(',')})`,masterArtworkIds);
+    if(priorMasterArtworkIds.length)await db.query(`UPDATE BBS_Card_Master_Artwork SET Status='Active',ArchivedAt=NULL WHERE id IN (${priorMasterArtworkIds.map(()=>'?').join(',')})`,priorMasterArtworkIds);
     for(const row of originalSettings)await db.query('UPDATE BBS_Settings SET SettingValue=? WHERE SettingKey=?',[row.SettingValue,row.SettingKey]);
     await fs.promises.rm(path.join(templateDir,`${marker}-personal.png`),{force:true});
     await fs.promises.rm(path.join(templateDir,`${marker}-department.png`),{force:true});
-    const [[left]]=await db.query(`SELECT (SELECT COUNT(*) FROM BBS_Card_Templates WHERE TemplateName=?) personalTemplates,(SELECT COUNT(*) FROM BBS_Department_Card_Templates WHERE TemplateName=?) departmentTemplates,(SELECT COUNT(*) FROM BBS_Cards WHERE id=?) personalCards`,[`${marker}-Personal`,`${marker}-Department`,personalCardId||0]);
-    assert.deepStrictEqual([Number(left.personalTemplates),Number(left.departmentTemplates),Number(left.personalCards)],[0,0,0]);
+    for(const kind of ['Personal','Department'])for(const side of ['Front','Back'])await fs.promises.rm(path.join(masterArtworkDir,`${marker}-${kind}-${side}.png`),{force:true});
+    const [[left]]=await db.query(`SELECT (SELECT COUNT(*) FROM BBS_Card_Templates WHERE TemplateName=?) personalTemplates,(SELECT COUNT(*) FROM BBS_Department_Card_Templates WHERE TemplateName=?) departmentTemplates,(SELECT COUNT(*) FROM BBS_Cards WHERE id=?) personalCards,(SELECT COUNT(*) FROM BBS_Department_QR_Cards WHERE id=?) temporaryDepartmentQrs`,[`${marker}-Personal`,`${marker}-Department`,personalCardId||0,temporaryDepartmentQrId||0]);
+    assert.deepStrictEqual([Number(left.personalTemplates),Number(left.departmentTemplates),Number(left.personalCards),Number(left.temporaryDepartmentQrs)],[0,0,0,0]);
     const [settings]=await db.query("SELECT SettingKey,SettingValue FROM BBS_Settings WHERE SettingKey IN ('visual_card_designer_enabled','visual_card_designer_rendering_enabled') ORDER BY SettingKey");
     assert.strictEqual(String(settings.find(row=>row.SettingKey==='visual_card_designer_rendering_enabled')?.SettingValue),'0','Renderer must be OFF after UAT cleanup');
     console.log('BBS Phase 10F-5 controlled runtime UAT cleanup: no test templates/cards remain; renderer=0.');
@@ -48,6 +55,9 @@ async function cleanup(){
   await db.query("UPDATE BBS_Settings SET SettingValue='1' WHERE SettingKey='visual_card_designer_enabled'");
   await db.query("UPDATE BBS_Settings SET SettingValue='1' WHERE SettingKey='visual_card_designer_rendering_enabled'");
   fs.mkdirSync(templateDir,{recursive:true});
+  fs.mkdirSync(masterArtworkDir,{recursive:true});
+  const[priorMasters]=await db.query("SELECT id FROM BBS_Card_Master_Artwork WHERE Status='Active'");priorMasterArtworkIds=priorMasters.map(row=>Number(row.id));if(priorMasterArtworkIds.length)await db.query("UPDATE BBS_Card_Master_Artwork SET Status='Archived',ArchivedAt=NOW() WHERE Status='Active'");
+  for(const kind of ['Personal','Department'])for(const side of ['Front','Back']){const stored=`${marker}-${kind}-${side}.png`;await fs.promises.writeFile(path.join(masterArtworkDir,stored),png);const[result]=await db.query("INSERT INTO BBS_Card_Master_Artwork(TemplateKind,Side,VersionNo,StoredName,OriginalName,MimeType,FileSize,PixelWidth,PixelHeight,Status,CreatedBy,ActivatedAt) VALUES(?,?,1,?,?,?,?,1,1,'Active',?,NOW())",[kind,side,stored,stored,'image/png',png.length,users.admin.id]);masterArtworkIds.push(Number(result.insertId));}
   await fs.promises.writeFile(path.join(templateDir,`${marker}-personal.png`),png);
   await fs.promises.writeFile(path.join(templateDir,`${marker}-department.png`),png);
   const [personalTemplate]=await db.query("INSERT INTO BBS_Card_Templates(TemplateName,BackgroundStoredName,OriginalName,MimeType,FileSize,WidthMM,HeightMM,IncludeEmployeeID,Status,CreatedBy,UpdatedBy) VALUES(?,?,?,?,?,85.6,53.98,1,'Active',?,?)",[`${marker}-Personal`,`${marker}-personal.png`,`${marker}-personal.png`,'image/png',png.length,users.admin.id,users.admin.id]);
@@ -63,16 +73,20 @@ async function cleanup(){
   server=app.listen(0,'127.0.0.1');await new Promise(resolve=>server.once('listening',resolve));const base=`http://127.0.0.1:${server.address().port}/api/bbs`;
   personalLayoutId=await createAndActivate(base,adminToken,'personal',personalTemplateId);
   if(departmentTemplateId)departmentLayoutId=await createAndActivate(base,adminToken,'department',departmentTemplateId);
-  const [[eligible]]=await db.query("SELECT e.EmployeeID FROM Employees e JOIN Master_Positions p ON LOWER(TRIM(p.Name))=LOWER(TRIM(e.Position)) JOIN BBS_Position_Level_Mappings m ON m.PositionID=p.id AND m.IsActive=1 WHERE FIELD(m.BBSLevel,'Operator','Group Leader','Department Head','Section Head','Manager')>=2 AND NOT EXISTS(SELECT 1 FROM BBS_Cards c WHERE c.EmployeeID=e.EmployeeID AND c.Status='Active') LIMIT 1");
+  const [[eligible]]=await db.query("SELECT e.EmployeeID,d.id DepartmentID FROM Employees e JOIN Master_Positions p ON LOWER(TRIM(p.Name))=LOWER(TRIM(e.Position)) JOIN BBS_Position_Level_Mappings m ON m.PositionID=p.id AND m.IsActive=1 JOIN Master_Departments d ON LOWER(TRIM(d.Name))=LOWER(TRIM(e.Department)) WHERE FIELD(m.BBSLevel,'Operator','Group Leader','Department Head','Section Head','Manager')>=2 AND NOT EXISTS(SELECT 1 FROM BBS_Cards c WHERE c.EmployeeID=e.EmployeeID AND c.Status='Active') LIMIT 1");
   assert.ok(eligible,'Controlled UAT requires one eligible employee without an Active Personal Card.');
+  const [[activePersonalDepartmentQr]]=await db.query("SELECT id FROM BBS_Department_QR_Cards WHERE DepartmentID=? AND Status='Active' LIMIT 1",[eligible.DepartmentID]);
+  if(!activePersonalDepartmentQr){const[[generationRow]]=await db.query('SELECT COALESCE(MAX(Generation),0)+1 generation FROM BBS_Department_QR_Cards WHERE DepartmentID=?',[eligible.DepartmentID]),token=departmentTokenRecord(eligible.DepartmentID,Number(generationRow.generation));const[insert]=await db.query("INSERT INTO BBS_Department_QR_Cards(DepartmentID,Generation,TokenHash,TokenFingerprint,Status,IssuedBy) VALUES(?,?,?,?,'Active',?)",[eligible.DepartmentID,Number(generationRow.generation),token.tokenHash,token.fingerprint,users.admin.id]);temporaryDepartmentQrId=Number(insert.insertId);}
   let response=await call(base,'/admin/cards/issue',{method:'POST',token:adminToken,body:{employeeIds:[eligible.EmployeeID],templateId:personalTemplateId,reason:marker}});
   assert.strictEqual(response.status,201,JSON.stringify(response.json));const issued=response.json.data[0];personalCardId=Number(issued.cardId);
-  assert.ok(issued.rawToken&&issued.designerRender?.layout,'Personal issue must provide real QR only in the Issue response plus a server-selected layout.');
+  assert.ok(issued.rawToken&&issued.departmentQr?.qrUrl&&issued.designerRender?.layout,'Personal issue must provide Personal QR, Active Department QR and a server-selected layout only in the Issue response.');
+  assert.ok(issued.designerRender.layout.elements.some(item=>item.side==='Front'&&item.dataSourceKey==='card.personal_qr'));
+  assert.ok(issued.designerRender.layout.elements.some(item=>item.side==='Back'&&item.dataSourceKey==='department.community_qr'));
   assert.strictEqual(JSON.stringify(issued.designerRender.layout).includes(`${marker}-personal.png`),false,'Personal render contract must not expose stored filenames.');
-  response=await call(base,'/admin/cards/print-log',{method:'POST',token:adminToken,body:{cardIds:[personalCardId],reason:marker}});
+  response=await call(base,'/admin/cards/print-log',{method:'POST',token:adminToken,body:{cardIds:[personalCardId],reason:marker,designerReceipts:[{cardId:personalCardId,receipt:issued.designerRender.printSnapshot.receipt}]}});
   assert.strictEqual(response.status,201,JSON.stringify(response.json));personalPrintLogId=Number(response.json.data.printLogIds[0]);
   const [[personalSnapshot]]=await db.query('SELECT SnapshotJSON FROM BBS_Card_Designer_Print_Snapshots WHERE PersonalPrintLogID=?',[personalPrintLogId]);
-  assert.ok(personalSnapshot,'Personal print must create a visual snapshot.');assert.strictEqual(String(personalSnapshot.SnapshotJSON).includes(issued.rawToken),false,'Personal snapshot must not retain the raw QR.');assert.match(String(personalSnapshot.SnapshotJSON),/PersonalQr/);
+  assert.ok(personalSnapshot,'Personal print must create a visual snapshot.');assert.strictEqual(String(personalSnapshot.SnapshotJSON).includes(issued.rawToken),false,'Personal snapshot must not retain the raw QR.');assert.strictEqual(String(personalSnapshot.SnapshotJSON).includes(issued.departmentQr.qrUrl),false,'Personal snapshot must not retain the raw Department QR.');assert.match(String(personalSnapshot.SnapshotJSON),/PersonalQr/);assert.match(String(personalSnapshot.SnapshotJSON),/DepartmentQr/);
   if(departmentTemplateId){
     response=await call(base,`/department-cards/me?departmentId=${departmentQr.DepartmentID}`,{token:adminToken});
     assert.strictEqual(response.status,200,JSON.stringify(response.json));const departmentRender=response.json.data.designerLayouts?.[departmentTemplateId];

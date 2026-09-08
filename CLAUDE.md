@@ -1,5 +1,26 @@
 # TSH Safety Core Activity - AI Quick Start
 
+## Current BBS Layout Preset and recoverable Trash handoff (2026-09-08, local only)
+
+- Admin can save a Personal or Department Designer Draft as a same-kind Layout Preset and Apply it to another unchanged Draft. Presets reuse size, duplex settings, side fit/position and non-file elements; the destination Draft keeps its own exact Front/Back Master Artwork snapshots.
+- Personal and Department Presets are isolated. Cross-kind Apply fails closed, static private assets are rejected from Presets, and Apply is transactional plus `RowVersion` protected.
+- Personal/Department parent templates, Designer Drafts and Presets now use recoverable soft Trash. Active templates must be Archived first and only Draft layout versions can be trashed. No files, cards, QR rows, print logs, snapshots or history are deleted.
+- Local additive migration `20260908_bbs_layout_presets_safe_trash.sql` is applied after backup `backups/local-bbs-layout-preset-trash-20260908-142807/`. Source is local only; do not infer GitHub push or Production deployment.
+
+## Current BBS Personal duplex QR handoff (2026-09-08, local only)
+
+- Personal Card Front uses its one-time Issue/Replace Personal QR; Back uses the current Active shared Department QR resolved from the owner's Employee Master Department. Personal and Department templates remain separate.
+- New Personal Designer Drafts contain both sides and both approved QR sources. An Active Designer layout missing the correct QR on either side blocks Issue/Replace and must be superseded by a compliant Draft; immutable versions are not edited.
+- Node/PHP Issue/Replace and signed print receipts enforce the same contract. Missing/invalid Department QR rolls the card transaction back; raw QR values are absent from stored snapshots. No schema, QR rotation rule, upload path or rollout flag changed.
+- Source is local only. Do not infer GitHub push or Production deployment.
+
+## Current BBS navigation/loading handoff (2026-09-08, local only)
+
+- The BBS frontend restores each authenticated employee's last permitted tab, Card Admin workspace, safe non-text filters/pages, schedule mode and scroll position from session-scoped browser state. Restored navigation is revalidated after server context/data loads; QR/Admin entry intents still override it.
+- Observation, Batch, Action, Community, Personal/Department template and Designer artwork uploads now expose actual transfer percentage plus server-processing state through one accessible BBS operation indicator. BBS Checklist Excel preview/import in System Console uses the same indicator for read, validation and transactional Draft replacement. Initiating controls are locked against repeat activation.
+- The Designer can reopen the same authorized template/layout version, Front/Back and zoom after refresh; explicit close clears recovery. Layout data, raw QR, file bytes and tokens are not stored in browser navigation state.
+- No API payload, schema, authorization, private-upload path, QR/card lifecycle or rollout flag changed. Source is local only; do not infer GitHub push or Production deployment.
+
 ## Current CCCF delegated Direct PDF Production state (2026-09-07)
 
 `main` commit `f164dd7` is deployed to the PHP Production target. A non-Admin delegate may submit Direct PDF for a selected owner only while the exact delegation is Active and that owner's Assignment has `AllowDirectSignedPdf=1`; KPI ownership and authenticated actor identity remain separate. No schema/upload-path change. Fresh rollback/evidence is `backups/production/cccf-delegated-direct-predeploy-20260907-132915/`; FTPS hashes passed 4/4, HTTPS assets/markers passed and temporary Production helper/SQL residue is zero. Production Admin credentials available locally remain stale, so no authenticated Production write smoke was performed.
@@ -4354,3 +4375,4 @@ Hotfix smoke passed 9 checks and left temporary template rows at `0`.
 77. **Dropdown + filter pattern — ห้ามสร้าง abstraction ใหม่** — เมื่อต้องการ department filter บน tab: (1) ใช้ `<select onchange="window._xxxSetDeptFilter(this.value)">` inline ใน HTML template, (2) register `window._xxxSetDeptFilter = (val) => { _filterXxx = val; renderPanel(id); }` ใน `setupEventListeners()`, (3) filter ใน render function ก่อน compute stats — ไม่ต้องสร้าง helper class, factory, หรือ shared filter component; pattern นี้เหมือนกับ `_msdSetAuditFilter` ใน machine-safety.js
 78. **Backend numeric range validation — `parseScore()` pattern** — ทุก route ที่รับคะแนน/score จาก user input ต้องมี helper validate: `if (val === '' || val == null) return null; const n = parseFloat(val); if (isNaN(n) || n < MIN || n > MAX) throw new Error('...')` แล้ว return rounded value; throw ใน try/catch → `res.status(400).json(...)` ก่อน INSERT/UPDATE; ห้าม insert raw `req.body` score โดยไม่ validate range
 79. **SQL NULL-aware average — ห้ามใช้ `COALESCE(col, 0) / totalCount`** — เมื่อบางคอลัมน์ nullable ใน average calculation: `COALESCE(col,0)` จะนับ NULL เป็น 0 ทำให้ค่าเฉลี่ยต่ำกว่าความเป็นจริง; ต้องหารด้วย `NULLIF((col1 IS NOT NULL)+(col2 IS NOT NULL)+..., 0)` เพื่อหารเฉพาะจำนวนคอลัมน์ที่มีค่า; pattern นี้ใช้ใน `safety-culture.js` route `yearTrend` query สำหรับ T1–T5,T7 scores
+80. **BBS Master Artwork มี 4 slot แยกขาด** — Personal Front, Personal Back, Department Front และ Department Back ใช้ `BBS_Card_Master_Artwork` คนละ version chain; Designer Draft ใหม่ต้อง snapshot Active artwork ครบสองด้านลง Draft-owned asset พร้อม `MasterArtworkID`. ห้ามอ้างข้าม `TemplateKind` หรือ `Side`, ห้ามเปลี่ยน master แล้วแก้ Draft/Active/Archived เดิมย้อนหลัง และห้ามรวม Personal/Department template หรือ QR lifecycle เข้าด้วยกัน

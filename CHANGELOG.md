@@ -1,5 +1,27 @@
 # TSH Safety Core Activity - Changelog And Handoff History
 
+## 2026-09-08 — BBS Layout Preset, Apply to Draft and safe Trash (local)
+
+- Added separate Personal/Department Layout Presets with Draft-only creation and same-kind, optimistic, transactional Apply.
+- Preset Apply preserves the destination Draft's Master Artwork snapshots and rejects static private assets or cross-card-type reuse.
+- Added recoverable Trash/restore for Personal templates, Department templates, Designer Drafts and Presets; Active template deletion and non-Draft layout deletion fail closed.
+- Added Card Admin/Designer controls, loading feedback, additive migration, Node/PHP parity, contract coverage and local API lifecycle UAT. No Production deployment or GitHub push.
+
+## BBS Personal duplex QR contract (2026-09-08, local)
+
+- Personal Card printing now uses two independently authorized QR destinations: the newly issued/replaced Personal QR on the Front, and the employee Department's current Active shared Department QR on the Back. Personal and Department templates remain separate domains and no QR record is copied or merged.
+- Issue/Replace resolves Employee Master Department membership and the Active Department QR inside the existing transaction. A missing/unverifiable Department QR or an Active Personal Designer layout without `card.personal_qr` on Front and `department.community_qr` on Back fails closed before the transaction can leave a new card behind.
+- New Personal Designer Drafts start with Front and Back sides plus the correct QR source on each side. Readiness blocks wrong-side/missing/small QR elements, while existing immutable layouts remain unchanged and must be replaced by a compliant Draft before Designer-backed issue.
+- Composite preview and legacy output show both sides. Designer print receipts redact both raw QR values and bind the Personal card fingerprint plus the current Department QR fingerprint so a rotated Department QR requires the card to be prepared again.
+- Frontend/API projection, validation and print-contract changes only. No schema, QR generation/rotation rule, private-upload path, Personal/Department template ownership, rollout flag, Production deployment or GitHub push changed.
+
+## BBS navigation persistence and loading standard (2026-09-08, local)
+
+- BBS now restores the signed-in employee's last permitted task tab, Card Admin Personal/Department workspace, non-text filters, list page, schedule view and scroll position for the current browser session. Server authorization is re-evaluated before a restored tab is shown, and free-text employee/report searches are not persisted.
+- An open Visual Card Designer can recover the same template, saved layout version, Front/Back side and zoom after refresh. Explicitly closing the Designer clears that recovery pointer; unsaved canvas changes remain protected by the existing leave-page warning and are not copied into browser storage.
+- BBS reads and mutations now share one accessible busy indicator. Multipart uploads for Observation, Batch, Corrective Action, Community, Personal/Department templates and Designer artwork report actual transfer percentage, then distinguish server processing before success or retryable failure. BBS Checklist Excel preview/import in System Console uses the same operation status and locks its initiating control while validation or the transactional Draft replacement is pending.
+- Frontend/runtime helper and cache keys only. No BBS API payload, database schema, authorization, QR/card lifecycle, private-upload path, rollout flag or stored business record changed. This local work is not pushed or deployed.
+
 ## CCCF Permanent PDF summary layout guard (2026-09-07, deployed)
 
 - The management-summary page now reserves its approval/signature area and clips the Priority panel within the remaining page space, preventing Rank A/B rows from overlapping approval text or the footer.
@@ -2638,3 +2660,11 @@ Safety Culture handoff notes:
 - Safety Culture first tab was renamed from "วัฒนธรรมความปลอดภัย" to "สื่อรณรงค์และกิจกรรม" because it is the poster/campaign/document library surface, not the analytics dashboard.
 - Safety Culture campaign tab now has a Featured Campaign panel, Campaign Library filters (type/status/search), and a formal preview modal. Featured is controlled by `SC_Principles.IsFeatured`; the edit-card form has "ตั้งเป็น Featured Campaign / Set as Featured", and the backend keeps only one featured card at a time.
 - Safety Culture campaign library now seeds card 8 (`sc-p-08`) for "ภาพรวม 7 วัฒนธรรมความปลอดภัยและสิ่งแวดล้อม" so the poster grid can display 4 cards on top and 4 cards below. Admin should upload the overview image through the existing edit-card form.
+
+## 2026-09-08 — BBS Master Artwork and strict card-domain separation
+
+- Added four versioned Master Artwork slots for Personal/Department Front/Back, with private authenticated reads, upload progress, archived-version history and no stored filename/path exposure.
+- New Designer Drafts now require two matching Active master slots and snapshot their artwork into Draft-owned files. Existing layouts never change when a master slot is replaced.
+- Enforced server-side Personal/Department and Front/Back provenance in both Node and PHP; cross-kind and cross-side background references return `MASTER_ARTWORK_REQUIRED`.
+- Department Designer Drafts are now duplex like Personal Drafts while retaining their separate Department template and shared-QR domain. Legacy template artwork remains as renderer fallback and is not reused as Designer master artwork.
+- Added migration/local migration command, contract regression and controlled Local API UAT with residue cleanup. Local migration was applied only after a 15,260,213-byte SQL backup at `backups/local-bbs-master-artwork-20260908-134808/` (SHA-256 `2516747390c36b5b7a3f27c1c48c3f1f56159e0822c5fa68f03fcac40b18eeec`). No Production deployment or GitHub push was performed.

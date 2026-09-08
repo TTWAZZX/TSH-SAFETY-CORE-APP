@@ -11,6 +11,7 @@ const { isAdmin } = require('../middleware/auth');
 const { logAudit } = require('../utils/audit');
 const { BBS_LEVELS, bangkokIsoDate, levelRank } = require('../services/bbs-phase1');
 const { clean, createRawToken, hashToken, tokenFingerprint, validRawToken, normalizeInternalRoute, cardPayload } = require('../services/bbs-card');
+const { departmentRawToken } = require('../services/bbs-community');
 const { listQuery, pagination, searchText } = require('../services/bbs-list-query');
 
 const publicRouter = express.Router();
@@ -27,6 +28,10 @@ const templateUpload = multer({
     fileFilter: (_req, file, cb) => cb(null, ['image/jpeg','image/png','image/webp'].includes(file.mimetype)),
 });
 
+class CardReadinessError extends Error {
+    constructor(message, code = 'PERSONAL_CARD_NOT_READY') { super(message); this.code = code; this.status = 409; }
+}
+
 function actorId(req) { return String(req.user?.id || req.user?.EmployeeID || '').trim(); }
 function admin(req) { return String(req.user?.role || req.user?.Role || '').toLowerCase() === 'admin'; }
 function positiveInt(value) { return Number.isInteger(Number(value)) && Number(value) > 0 ? Number(value) : null; }
@@ -40,6 +45,7 @@ function verifiedImageMime(filePath) {
 }
 function phase4Error(res, error, label) {
     if (error instanceof PrintReceiptError) return res.status(error.status).json({success:false,code:error.code,message:error.message});
+    if (error instanceof CardReadinessError) return res.status(error.status).json({success:false,code:error.code,message:error.message});
     console.error(`[bbs-phase4] ${label}:`, error?.message || error);
     if (error?.code === 'ER_NO_SUCH_TABLE') return res.status(503).json({ success:false, code:'BBS_CARD_SETUP_REQUIRED', message:'BBS Phase 4 database migration is required.' });
     if (error?.code === 'ER_DUP_ENTRY') return res.status(409).json({ success:false, code:'ACTIVE_CARD_EXISTS', message:'This employee already has an Active card. Use Replace.' });
@@ -59,7 +65,7 @@ async function recordResolve(limitState, successful) {
     if (Math.random() < 0.02) await db.query('DELETE FROM BBS_QR_Resolve_Attempts WHERE AttemptedAt<DATE_SUB(NOW(),INTERVAL 7 DAY)').catch(() => {});
 }
 async function activeCardForToken(rawToken, queryable = db) {
-    const [[row]] = await queryable.query(`SELECT c.*,t.Status TemplateStatus FROM BBS_Cards c JOIN BBS_Card_Templates t ON t.id=c.TemplateID WHERE c.TokenHash=? AND c.Status='Active' AND t.Status='Active' LIMIT 1`, [hashToken(rawToken)]);
+    const [[row]] = await queryable.query(`SELECT c.*,t.Status TemplateStatus FROM BBS_Cards c JOIN BBS_Card_Templates t ON t.id=c.TemplateID WHERE c.TokenHash=? AND c.Status='Active' AND t.Status='Active' AND t.IsDeleted=0 LIMIT 1`, [hashToken(rawToken)]);
     return row || null;
 }
 async function activeDepartmentCardForToken(rawToken, queryable = db) {
@@ -92,11 +98,22 @@ function appBase(req) {
 }
 async function designerRenderingEnabled(queryable=db){const [[row]]=await queryable.query("SELECT SettingValue FROM BBS_Settings WHERE SettingKey='visual_card_designer_rendering_enabled' LIMIT 1");return String(row?.SettingValue||'0')==='1';}
 async function issueWithin(connection, req, employee, template, reason) {
+    const departmentQr = await personalDepartmentQr(connection, req, employee);
     const rawToken = createRawToken();
     const [result] = await connection.query(`INSERT INTO BBS_Cards(EmployeeID,TemplateID,TokenHash,TokenFingerprint,Status,IssueReason,IssuedBy) VALUES(?,?,?,?,'Active',?,?)`, [employee.EmployeeID, template.id, hashToken(rawToken), tokenFingerprint(rawToken), reason || null, actorId(req)]);
-    const payload={ cardId:Number(result.insertId), rawToken, ...cardPayload(employee, template, rawToken, appBase(req)) };
-    const designerRender=await personalDesignerRender(connection, employee, template, payload, rawToken, actorId(req));
+    const payload={ cardId:Number(result.insertId), rawToken, ...cardPayload(employee, template, rawToken, appBase(req)), departmentQr };
+    const designerRender=await personalDesignerRender(connection, employee, template, payload, rawToken, departmentQr, actorId(req));
     return designerRender ? { ...payload, designerRender } : payload;
+}
+
+async function personalDepartmentQr(queryable,req,employee){
+    const departmentId=positiveInt(employee?.DepartmentID);
+    if(!departmentId)throw new CardReadinessError(`Employee ${employee?.EmployeeID||''} is not linked to a Department in Master Data.`,'PERSONAL_CARD_DEPARTMENT_REQUIRED');
+    const[[row]]=await queryable.query("SELECT q.id,q.DepartmentID,q.Generation,q.TokenHash,q.TokenFingerprint,d.Name DepartmentName FROM BBS_Department_QR_Cards q JOIN Master_Departments d ON d.id=q.DepartmentID WHERE q.DepartmentID=? AND q.Status='Active' LIMIT 1",[departmentId]);
+    if(!row)throw new CardReadinessError(`Department ${employee.Department||departmentId} does not have an Active Department QR.`,'PERSONAL_CARD_DEPARTMENT_QR_REQUIRED');
+    const rawToken=departmentRawToken(row.DepartmentID,row.Generation);
+    if(hashToken(rawToken)!==String(row.TokenHash))throw new CardReadinessError('The Active Department QR could not be verified. Rotate it before issuing Personal cards.','PERSONAL_CARD_DEPARTMENT_QR_INVALID');
+    return{departmentId:Number(row.DepartmentID),departmentName:String(row.DepartmentName||employee.Department||''),generation:Number(row.Generation),fingerprint:String(row.TokenFingerprint),qrUrl:`${appBase(req).replace(/#.*$/,'').replace(/\/+$/,'')}#bbs-qr=${rawToken}`};
 }
 
 function safeDesignerLayout(version,sides,elements,assets){
@@ -106,11 +123,13 @@ function safeDesignerLayout(version,sides,elements,assets){
 async function activePersonalDesignerLayout(queryable,templateId){
     try{const [[version]]=await queryable.query("SELECT * FROM BBS_Card_Layout_Versions WHERE PersonalTemplateID=? AND TemplateKind='Personal' AND Status='Active' LIMIT 1",[templateId]);if(!version)return null;const[sides]=await queryable.query("SELECT * FROM BBS_Card_Layout_Sides WHERE LayoutVersionID=? ORDER BY FIELD(Side,'Front','Back')",[version.id]);const[elements]=await queryable.query("SELECT * FROM BBS_Card_Layout_Elements WHERE LayoutVersionID=? ORDER BY FIELD(Side,'Front','Back'),ZIndex,id",[version.id]);const[assets]=await queryable.query("SELECT * FROM BBS_Card_Layout_Assets WHERE LayoutVersionID=? AND Status='Active' ORDER BY id",[version.id]);return safeDesignerLayout(version,sides,elements,assets);}catch(error){if(error?.code==='ER_NO_SUCH_TABLE')return null;throw error;}
 }
-async function personalDesignerRender(queryable,employee,template,card,rawToken,actor){
+async function personalDesignerRender(queryable,employee,template,card,rawToken,departmentQr,actor){
     if(!await designerRenderingEnabled(queryable))return null;
     const layout=await activePersonalDesignerLayout(queryable,template.id);if(!layout)return null;
-    const values={'employee.full_name':String(employee.EmployeeName||''),'employee.id':String(employee.EmployeeID||''),'employee.department':String(employee.Department||''),'employee.safety_unit':String(employee.Unit||''),'employee.position':String(employee.Position||''),'employee.bbs_level':String(employee.BBSLevel||''),'employee.photo':'','card.personal_qr':String(card.qrUrl||''),'card.issue_date':bangkokIsoDate(),'template.name':String(template.TemplateName||''),'organization.name':'Thai Summit Harness Co., Ltd.','organization.logo':''};
-    const safeSnapshot={layout,values:{...values,'card.personal_qr':{kind:'PersonalQr',fingerprint:tokenFingerprint(rawToken)}}};
+    const hasPersonalFront=layout.elements.some(item=>item.visible&&item.elementType==='QR'&&item.side==='Front'&&item.dataSourceKey==='card.personal_qr'),hasDepartmentBack=layout.sides.some(item=>item.side==='Back')&&layout.elements.some(item=>item.visible&&item.elementType==='QR'&&item.side==='Back'&&item.dataSourceKey==='department.community_qr');
+    if(!hasPersonalFront||!hasDepartmentBack)throw new CardReadinessError('The Active Personal layout must contain Personal QR on Front and Department QR on Back. Create and activate a compliant Draft first.','PERSONAL_CARD_LAYOUT_QR_REQUIRED');
+    const values={'employee.full_name':String(employee.EmployeeName||''),'employee.id':String(employee.EmployeeID||''),'employee.department':String(employee.Department||''),'employee.safety_unit':String(employee.Unit||''),'employee.position':String(employee.Position||''),'employee.bbs_level':String(employee.BBSLevel||''),'employee.photo':'','card.personal_qr':String(card.qrUrl||''),'department.community_qr':String(departmentQr.qrUrl||''),'card.issue_date':bangkokIsoDate(),'template.name':String(template.TemplateName||''),'organization.name':'Thai Summit Harness Co., Ltd.','organization.logo':''};
+    const safeSnapshot={layout,values:{...values,'card.personal_qr':{kind:'PersonalQr',fingerprint:tokenFingerprint(rawToken)},'department.community_qr':{kind:'DepartmentQr',fingerprint:String(departmentQr.fingerprint||'')}}};
     return {layout,values,printSnapshot:{layoutVersionId:layout.layoutVersionId,renderContractHash:crypto.createHash('sha256').update(JSON.stringify(safeSnapshot)).digest('hex'),snapshot:safeSnapshot,receipt:createPrintReceipt({kind:'Personal',subjectId:card.cardId,actorId:actor,snapshot:safeSnapshot})}};
 }
 publicRouter.post('/qr/resolve', async (req, res) => {
@@ -149,8 +168,8 @@ router.post('/qr/claim', async (req, res) => {
     } catch (error) { return phase4Error(res, error, 'QR claim'); }
 });
 
-router.get('/admin/card-templates', isAdmin, async (_req, res) => {
-    try { const [rows] = await db.query(`SELECT t.*,d.Name DepartmentName FROM BBS_Card_Templates t LEFT JOIN Master_Departments d ON d.id=t.DepartmentID ORDER BY FIELD(t.Status,'Active','Draft','Archived'),t.UpdatedAt DESC,t.id DESC`); return res.json({ success:true, data:rows }); }
+router.get('/admin/card-templates', isAdmin, async (req, res) => {
+    try { const deleted=String(req.query.trash||'0')==='1'?1:0;const [rows] = await db.query(`SELECT t.*,d.Name DepartmentName FROM BBS_Card_Templates t LEFT JOIN Master_Departments d ON d.id=t.DepartmentID WHERE t.IsDeleted=? ORDER BY FIELD(t.Status,'Active','Draft','Archived'),t.UpdatedAt DESC,t.id DESC`,[deleted]); return res.json({ success:true, data:rows }); }
     catch (error) { return phase4Error(res, error, 'template list'); }
 });
 
@@ -186,6 +205,9 @@ router.put('/admin/card-templates/:id', isAdmin, async (req,res) => {
         await connection.commit(); await logAudit(req,{action:action==='activate'?'BBS_CARD_TEMPLATE_ACTIVATE':'BBS_CARD_TEMPLATE_ARCHIVE',module:'bbs',targetType:'BBS_Card_Template',targetId:id,detail:`${action} card template.`}); const[[updated]]=await db.query('SELECT * FROM BBS_Card_Templates WHERE id=?',[id]);return res.json({success:true,data:updated});
     } catch(error){await connection.rollback().catch(()=>{});return phase4Error(res,error,'template transition');} finally{connection.release();}
 });
+
+router.delete('/admin/card-templates/:id',isAdmin,async(req,res)=>{try{const id=positiveInt(req.params.id),version=positiveInt(req.body?.rowVersion);if(!id||!version)return res.status(400).json({success:false,message:'Valid template ID and RowVersion are required.'});const[result]=await db.query("UPDATE BBS_Card_Templates SET IsDeleted=1,DeletedAt=NOW(),DeletedBy=?,UpdatedBy=?,RowVersion=RowVersion+1 WHERE id=? AND RowVersion=? AND IsDeleted=0 AND Status<>'Active'",[actorId(req),actorId(req),id,version]);if(!result.affectedRows)return res.status(409).json({success:false,code:'SAFE_TRASH_REJECTED',message:'Archive an Active template first, or reload because it changed.'});await logAudit(req,{action:'BBS_CARD_TEMPLATE_TRASH',module:'bbs',targetType:'BBS_Card_Template',targetId:id,detail:'Moved Personal template to recoverable Trash; cards, layouts, files, and history were retained.'});return res.json({success:true});}catch(error){return phase4Error(res,error,'template trash');}});
+router.post('/admin/card-templates/:id/restore',isAdmin,async(req,res)=>{try{const id=positiveInt(req.params.id),version=positiveInt(req.body?.rowVersion);if(!id||!version)return res.status(400).json({success:false,message:'Valid template ID and RowVersion are required.'});const[result]=await db.query('UPDATE BBS_Card_Templates SET IsDeleted=0,DeletedAt=NULL,DeletedBy=NULL,UpdatedBy=?,RowVersion=RowVersion+1 WHERE id=? AND RowVersion=? AND IsDeleted=1',[actorId(req),id,version]);if(!result.affectedRows)return res.status(409).json({success:false,code:'VERSION_CONFLICT',message:'Template changed or is no longer in Trash.'});await logAudit(req,{action:'BBS_CARD_TEMPLATE_RESTORE',module:'bbs',targetType:'BBS_Card_Template',targetId:id,detail:'Restored Personal template from Trash.'});return res.json({success:true});}catch(error){return phase4Error(res,error,'template restore');}});
 
 router.get('/admin/card-employees', isAdmin, async (req,res) => {
     try {const paging=listQuery(req.query,{defaultPageSize:24}),q=searchText(req.query.q),departmentId=positiveInt(req.query.departmentId),where=["FIELD(m.BBSLevel,'Operator','Group Leader','Department Head','Section Head','Manager')>=2"],params=[];if(departmentId){where.push('md.id=?');params.push(departmentId);}if(q){where.push('(e.EmployeeID LIKE ? OR e.EmployeeName LIKE ? OR e.Department LIKE ? OR e.Unit LIKE ? OR e.Position LIKE ?)');params.push(...Array(5).fill(`%${q}%`));}const from=`FROM Employees e JOIN Master_Positions p ON LOWER(TRIM(p.Name))=LOWER(TRIM(e.Position)) JOIN BBS_Position_Level_Mappings m ON m.PositionID=p.id AND m.IsActive=1 LEFT JOIN Master_Departments md ON LOWER(TRIM(md.Name))=LOWER(TRIM(e.Department)) LEFT JOIN BBS_Cards c ON c.id=(SELECT x.id FROM BBS_Cards x WHERE x.EmployeeID=e.EmployeeID AND x.Status='Active' ORDER BY x.id DESC LIMIT 1) WHERE ${where.join(' AND ')}`;const select=`SELECT e.EmployeeID,e.EmployeeName,e.Department,e.Unit,e.Position,m.BBSLevel,md.id DepartmentID,c.id ActiveCardID,c.TokenFingerprint,c.IssuedAt ${from}`;if(!paging.paged){const[rows]=await db.query(`${select} ORDER BY e.Department,e.Unit,e.EmployeeName`,params);return res.json({success:true,data:rows});}const[[countRow]]=await db.query(`SELECT COUNT(*) total ${from}`,params),meta=pagination(countRow?.total,paging.page,paging.pageSize),offset=(meta.page-1)*meta.pageSize;const[rows]=await db.query(`${select} ORDER BY e.Department,e.Unit,e.EmployeeName LIMIT ? OFFSET ?`,[...params,meta.pageSize,offset]);return res.json({success:true,data:{rows,pagination:meta}});}
@@ -226,13 +248,13 @@ router.post('/admin/cards/print-log', isAdmin, async (req, res) => {
     const connection=await db.getConnection();
     try {
         await connection.beginTransaction();
-        const [rows]=await connection.query('SELECT id,TokenFingerprint FROM BBS_Cards WHERE id IN ('+ids.map(()=>'?').join(',')+') FOR UPDATE',ids);
+        const [rows]=await connection.query("SELECT c.id,c.TokenFingerprint,q.TokenFingerprint DepartmentQrFingerprint FROM BBS_Cards c JOIN Employees e ON e.EmployeeID=c.EmployeeID JOIN Master_Departments d ON LOWER(TRIM(d.Name))=LOWER(TRIM(e.Department)) JOIN BBS_Department_QR_Cards q ON q.DepartmentID=d.id AND q.Status='Active' WHERE c.id IN ("+ids.map(()=>'?').join(',')+") FOR UPDATE",ids);
         if(rows.length!==ids.length){await connection.rollback();return res.status(400).json({success:false,message:'One or more cards were not found.'});}
         const printLogIds=[];let snapshotCount=0;
         for(const id of ids){
             const card=rows.find(row=>Number(row.id)===id);
             // A legacy caller has no signed render contract. Do not fabricate a snapshot from current Master/layout data.
-            const snapshot=receipts.has(id)?readPrintReceipt(receipts.get(id),{kind:'Personal',subjectId:id,actorId:actorId(req),fingerprint:card.TokenFingerprint}):null;
+            const snapshot=receipts.has(id)?readPrintReceipt(receipts.get(id),{kind:'Personal',subjectId:id,actorId:actorId(req),fingerprint:card.TokenFingerprint,departmentFingerprint:card.DepartmentQrFingerprint||''}):null;
             const [result]=await connection.query('INSERT INTO BBS_Card_Print_Logs(CardID,PrintMode,PrintedBy,Reason) VALUES(?,?,?,?)',[id,mode,actorId(req),reason||null]);
             printLogIds.push(Number(result.insertId));
             if(snapshot){await connection.query('INSERT INTO BBS_Card_Designer_Print_Snapshots(LayoutVersionID,PersonalPrintLogID,RenderContractHash,SnapshotJSON,RenderMetadata) VALUES(?,?,?,?,?)',[snapshot.layoutVersionId,result.insertId,snapshot.renderContractHash,snapshot.snapshotJson,JSON.stringify({renderer:'visual-card-designer',rawQrStored:false})]);snapshotCount++;}

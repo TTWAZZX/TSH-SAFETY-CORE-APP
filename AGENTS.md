@@ -1,5 +1,12 @@
 # TSH Safety Core Activity - AGENTS.md
 
+## BBS Layout Preset and recoverable Trash constraints (2026-09-08)
+
+- Layout Presets are strictly scoped to Personal or Department. They contain reusable geometry, side settings and non-file elements only; they never carry Master Artwork files, stored filenames, Draft assets, raw QR values or cross-domain data.
+- Apply is Admin-only, same-kind and Draft-only, uses optimistic `RowVersion`, and transactionally preserves the destination Draft's exact Front/Back Master Artwork snapshots while replacing reusable layout content.
+- Template, Designer Draft and Preset removal is soft Trash. Never delete private files, cards, QR rows, print logs, snapshots or audit history. Active templates must be Archived first; only Draft layout versions may enter Trash. Restore increments `RowVersion` and never activates an item implicitly.
+- Normal catalogs and issuance/printing surfaces exclude trashed records. Node and PHP must remain behaviorally aligned. This local phase does not authorize Production deployment or GitHub push.
+
 ## BBS Admin-only Production backup (2026-09-05)
 
 - User explicitly authorized push/deploy and the temporary protected backup helper. Fresh backup ID: `bbs-admin-deploy-20260905T083722Z` under `backups/production/`. SQL: 191 tables, 15,385,425 bytes, SHA-256 `91a9cc729a54242d76c50a44d477b1bf81b4f567f0b0698139bd2a96338f3672`; SQL archive and all 1,037 application/upload files verified against remote SHA-256. Helper removed; FTPS absence and HTTP 404 verified.

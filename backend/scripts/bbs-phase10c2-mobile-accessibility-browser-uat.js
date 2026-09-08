@@ -90,10 +90,11 @@ const pageAuditExpression = `(()=>{
     const textFields=[...document.querySelectorAll('#bbs-smart-card-page input:not([type=checkbox]):not([type=radio]):not([type=file]),#bbs-smart-card-page select,#bbs-smart-card-page textarea')].filter(visible);
     const zoomRisk=textFields.filter(element=>parseFloat(getComputedStyle(element).fontSize)<16).map(element=>element.name||element.id||element.placeholder||element.tagName);
     const tabs=[...document.querySelectorAll('[data-bbs-tab]')];
+    const groups=[...document.querySelectorAll('[data-bbs-group]')];
     const panel=document.getElementById('bbs-smart-card-body');
     const tables=[...document.querySelectorAll('#bbs-smart-card-page table')];
     const badTables=tables.filter(table=>{const region=table.closest('[role=region]');return !region||region.tabIndex!==0||!region.getAttribute('aria-label')||[...table.querySelectorAll('th')].some(th=>th.getAttribute('scope')!=='col');}).length;
-    return{overflow:document.documentElement.scrollWidth>document.documentElement.clientWidth+2,tabs:tabs.length,tabRoles:tabs.every(tab=>tab.getAttribute('role')==='tab'),selected:tabs.filter(tab=>tab.getAttribute('aria-selected')==='true').length,tabStop:tabs.filter(tab=>tab.tabIndex===0).length,panelRole:panel?.getAttribute('role'),panelLabel:panel?.getAttribute('aria-labelledby'),small,zoomRisk,badTables};
+    return{overflow:document.documentElement.scrollWidth>document.documentElement.clientWidth+2,tabs:tabs.length,groups:groups.length,selectedGroups:groups.filter(group=>group.getAttribute('aria-current')==='page').length,tabRoles:tabs.every(tab=>tab.getAttribute('role')==='tab'),selected:tabs.filter(tab=>tab.getAttribute('aria-selected')==='true').length,tabStop:tabs.filter(tab=>tab.tabIndex===0).length,panelRole:panel?.getAttribute('role'),panelLabel:panel?.getAttribute('aria-labelledby'),small,zoomRisk,badTables};
 })()`;
 
 (async () => {
@@ -112,7 +113,9 @@ const pageAuditExpression = `(()=>{
     await waitFor(`document.querySelector('[data-bbs-shell]')`);
 
     const initial = await evaluate(pageAuditExpression);
-    assert.ok(initial.tabs >= 6, `Expected BBS tabs, got ${initial.tabs}`);
+    assert.ok(initial.tabs >= 1, `Expected active BBS subtab, got ${initial.tabs}`);
+    assert.ok(initial.groups >= 5, `Expected grouped BBS navigation, got ${initial.groups}`);
+    assert.strictEqual(initial.selectedGroups, 1);
     assert.strictEqual(initial.tabRoles, true);
     assert.strictEqual(initial.selected, 1);
     assert.strictEqual(initial.tabStop, 1);
@@ -122,23 +125,49 @@ const pageAuditExpression = `(()=>{
     assert.deepStrictEqual(initial.zoomRisk, [], `iOS zoom-risk fields: ${initial.zoomRisk.join(', ')}`);
     assert.strictEqual(initial.badTables, 0);
 
-    const firstTab = await evaluate(`document.querySelector('[data-bbs-tab][aria-selected="true"]').dataset.bbsTab`);
-    await evaluate(`(()=>{const tab=document.querySelector('[data-bbs-tab][aria-selected="true"]');tab.focus();tab.dispatchEvent(new KeyboardEvent('keydown',{key:'ArrowRight',bubbles:true}));return true;})()`);
-    await waitFor(`document.querySelector('[data-bbs-tab][aria-selected="true"]')?.dataset.bbsTab!==${JSON.stringify(firstTab)}`);
-    assert.strictEqual(await evaluate(`document.activeElement?.getAttribute('aria-selected')`), 'true', 'Arrow navigation must retain focus on the active tab');
+    const groupTargets = await evaluate(`[...document.querySelectorAll('[data-bbs-group-target]')].map(group=>group.dataset.bbsGroupTarget)`);
+    const tabs=[];
+    for (const target of groupTargets) {
+        await evaluate(`document.querySelector('[data-bbs-group-target=${JSON.stringify(target)}]').click()`);
+        await waitFor(`document.querySelector('[data-bbs-tab=${JSON.stringify(target)}]')?.getAttribute('aria-selected')==='true'`);
+        const groupTabs=await evaluate(`[...document.querySelectorAll('[data-bbs-tab]')].map(tab=>tab.dataset.bbsTab)`);
+        for(const tab of groupTabs){
+            if(!tabs.includes(tab))tabs.push(tab);
+            await evaluate(`document.querySelector('[data-bbs-tab=${JSON.stringify(tab)}]').click()`);
+            await waitFor(`document.querySelector('[data-bbs-tab=${JSON.stringify(tab)}]')?.getAttribute('aria-selected')==='true'`);
+            const audit = await evaluate(pageAuditExpression);
+            assert.strictEqual(audit.overflow, false, `${tab} overflow`);
+            assert.strictEqual(audit.selectedGroups, 1, `${tab} selected-group count`);
+            assert.strictEqual(audit.selected, 1, `${tab} selected-tab count`);
+            assert.strictEqual(audit.tabStop, 1, `${tab} tab-stop count`);
+            assert.strictEqual(audit.panelRole, 'tabpanel', `${tab} panel semantics`);
+            assert.deepStrictEqual(audit.small, [], `${tab} small touch targets: ${audit.small.join(', ')}`);
+            assert.deepStrictEqual(audit.zoomRisk, [], `${tab} iOS zoom-risk fields: ${audit.zoomRisk.join(', ')}`);
+            assert.strictEqual(audit.badTables, 0, `${tab} inaccessible table regions`);
+        }
+    }
+    if(tabs.includes('analytics')&&tabs.includes('history')){
+        await evaluate(`document.querySelector('[data-bbs-group-target="analytics"]').click()`);
+        await waitFor(`document.querySelector('[data-bbs-tab="analytics"][aria-selected="true"]')`);
+        await evaluate(`(()=>{const tab=document.querySelector('[data-bbs-tab][aria-selected="true"]');tab.focus();tab.dispatchEvent(new KeyboardEvent('keydown',{key:'ArrowRight',bubbles:true}));return true;})()`);
+        await waitFor(`document.querySelector('[data-bbs-tab="history"][aria-selected="true"]')`);
+        assert.strictEqual(await evaluate(`document.activeElement?.getAttribute('aria-selected')`),'true','Arrow navigation must retain focus on the active tab');
+    }
 
-    const tabs = await evaluate(`[...document.querySelectorAll('[data-bbs-tab]')].map(tab=>tab.dataset.bbsTab)`);
-    for (const tab of tabs) {
-        await evaluate(`document.querySelector('[data-bbs-tab=${JSON.stringify(tab)}]').click()`);
-        await waitFor(`document.querySelector('[data-bbs-tab=${JSON.stringify(tab)}]')?.getAttribute('aria-selected')==='true'`);
-        const audit = await evaluate(pageAuditExpression);
-        assert.strictEqual(audit.overflow, false, `${tab} overflow`);
-        assert.strictEqual(audit.selected, 1, `${tab} selected-tab count`);
-        assert.strictEqual(audit.tabStop, 1, `${tab} tab-stop count`);
-        assert.strictEqual(audit.panelRole, 'tabpanel', `${tab} panel semantics`);
-        assert.deepStrictEqual(audit.small, [], `${tab} small touch targets: ${audit.small.join(', ')}`);
-        assert.deepStrictEqual(audit.zoomRisk, [], `${tab} iOS zoom-risk fields: ${audit.zoomRisk.join(', ')}`);
-        assert.strictEqual(audit.badTables, 0, `${tab} inaccessible table regions`);
+    if(tabs.includes('cards')){
+        await evaluate(`document.querySelector('[data-bbs-group-target="cards"]').click()`);
+        await waitFor(`document.querySelector('[data-bbs-tab="cards"][aria-selected="true"]')`);
+        await evaluate(`document.querySelector('[data-card-workspace="personal"]')?.click()`);
+        await waitFor(`document.querySelector('[data-card-workspace="personal"]')?.getAttribute('aria-pressed')==='true'`);
+        const storedBeforeReload=await evaluate(`(()=>{const main=document.getElementById('main-content'),top=Math.min(180,Math.max(0,main.scrollHeight-main.clientHeight));main.scrollTop=top;main.dispatchEvent(new Event('scroll'));return top;})()`);
+        await sleep(300);
+        const savedState=await evaluate(`(()=>{const key=Object.keys(sessionStorage).find(item=>item.startsWith('tsh_bbs_ui_v1_'));return key?JSON.parse(sessionStorage.getItem(key)):null;})()`);
+        assert.strictEqual(savedState?.tab,'cards','BBS tab must be saved before refresh');
+        assert.strictEqual(savedState?.cardWorkspace,'personal','Card workspace must be saved before refresh');
+        await command('Page.reload',{ignoreCache:true});
+        await waitFor(`document.querySelector('[data-bbs-tab="cards"][aria-selected="true"]')`);
+        await waitFor(`document.querySelector('[data-card-workspace="personal"]')?.getAttribute('aria-pressed')==='true'`);
+        if(storedBeforeReload>0)assert.ok(await evaluate(`document.getElementById('main-content').scrollTop>0`),'BBS scroll position must return after refresh');
     }
 
     for (const viewport of [{width:320,height:568},{width:360,height:800},{width:390,height:844},{width:430,height:932},{width:844,height:390}]) {
@@ -153,9 +182,9 @@ const pageAuditExpression = `(()=>{
 
     if (process.env.BBS_PHASE10C3_TEST_RECOVERY === '1' && tabs.includes('analytics')) {
         await evaluate(`(()=>{window.__bbsPhase10c3Fetch=window.fetch.bind(window);window.__bbsPhase10c3Failed=false;window.fetch=async(...args)=>{const url=String(args[0]||'');if(!window.__bbsPhase10c3Failed&&url.includes('/bbs/analytics?')){window.__bbsPhase10c3Failed=true;throw new TypeError('Phase 10C-3 simulated temporary connection failure');}return window.__bbsPhase10c3Fetch(...args);};return true;})()`);
-        await evaluate(`document.querySelector('[data-bbs-tab="workspace"]').click()`);
+        await evaluate(`document.querySelector('[data-bbs-group-target="workspace"]').click()`);
         await waitFor(`document.querySelector('[data-bbs-tab="workspace"][aria-selected="true"]')`);
-        await evaluate(`document.querySelector('[data-bbs-tab="analytics"]').click()`);
+        await evaluate(`document.querySelector('[data-bbs-group-target="analytics"]').click()`);
         await waitFor(`document.querySelector('[data-bbs-retry="analytics"]')`);
         assert.strictEqual(await evaluate(`document.querySelector('[data-bbs-retry="analytics"]')?.closest('[role="alert"]')!==null`), true, 'Analytics failure must render an actionable alert');
         await evaluate(`document.querySelector('[data-bbs-retry="analytics"]').click()`);
@@ -164,6 +193,8 @@ const pageAuditExpression = `(()=>{
         await evaluate(`(()=>{window.fetch=window.__bbsPhase10c3Fetch;delete window.__bbsPhase10c3Fetch;return true;})()`);
     }
 
+    await evaluate(`document.querySelector('[data-bbs-group-target="analytics"]').click()`);
+    await waitFor(`document.querySelector('[data-bbs-tab="history"]')`);
     await evaluate(`document.querySelector('[data-bbs-tab="history"]').click()`);
     await waitFor(`document.querySelector('[data-bbs-tab="history"][aria-selected="true"]')`);
     const hasDetail = await evaluate(`Boolean(document.querySelector('[data-bbs-detail]'))`);

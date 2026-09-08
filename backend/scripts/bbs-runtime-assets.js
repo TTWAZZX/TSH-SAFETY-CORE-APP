@@ -20,7 +20,7 @@ function assertBbsRuntimeAssets(){
     const bbs=main.match(/from\s+["']([^"']*pages\/bbs-smart-card\.js\?[^"']+)["']/);
     assert.ok(bbs,'Main must load the BBS module through a versioned import.');
     const client=verify(bbs[1],'public/js/main.js');
-    for(const target of ['bbs-card-designer.js','bbs-card-print.js']){
+    for(const target of ['bbs-card-designer.js','bbs-card-print.js','bbs-async-ui.js']){
         const imports=[...client.matchAll(/from\s+["']([^"']+)["']/g)];
         const item=imports.find(match=>match[1].split('?')[0].endsWith(target));
         assert.ok(item,'BBS must load '+target);verify(item[1],'public/js/pages/bbs-smart-card.js');

@@ -32,6 +32,7 @@ function bbs_print_receipt_read($receipt,array $expected,?int $now=null): array 
     if(!is_int($payload['expiresAt']??null)||$payload['expiresAt']<($now??time()))throw new BbsPrintReceiptException('The prepared card expired. Prepare it again.','BBS_PRINT_RECEIPT_EXPIRED',409);
     $qr=$snapshot['values'][$expected['kind']==='Personal'?'card.personal_qr':'department.community_qr']??null;
     if(($qr['kind']??null)!==$expected['kind'].'Qr'||($qr['fingerprint']??null)!==(string)$expected['fingerprint']||!is_int($snapshot['layout']['layoutVersionId']??null))throw new BbsPrintReceiptException('The prepared card no longer matches its QR.','BBS_PRINT_RECEIPT_QR_CHANGED',409);
+    if($expected['kind']==='Personal'&&array_key_exists('departmentFingerprint',$expected)){$departmentQr=$snapshot['values']['department.community_qr']??null;if(($departmentQr['kind']??null)!=='DepartmentQr'||($departmentQr['fingerprint']??null)!==(string)$expected['departmentFingerprint'])throw new BbsPrintReceiptException('The Department QR on this Personal card is no longer active. Prepare the card again.','BBS_PRINT_RECEIPT_DEPARTMENT_QR_CHANGED',409);}
     return ['layoutVersionId'=>$snapshot['layout']['layoutVersionId'],'snapshot'=>$snapshot,'snapshotJson'=>$payload['snapshotJson'],'renderContractHash'=>hash('sha256',$payload['snapshotJson'])];
 }
 function bbs_print_receipt_respond(Throwable $error): void {

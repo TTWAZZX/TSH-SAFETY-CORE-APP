@@ -41,6 +41,12 @@ function readPrintReceipt(receipt, expected, now = Math.floor(Date.now() / 1000)
     if (qr?.kind !== `${expected.kind}Qr` || qr.fingerprint !== String(expected.fingerprint) || !Number.isInteger(snapshot?.layout?.layoutVersionId)) {
         throw new PrintReceiptError('The prepared card no longer matches its QR.', 'BBS_PRINT_RECEIPT_QR_CHANGED', 409);
     }
+    if (expected.kind === 'Personal' && expected.departmentFingerprint !== undefined) {
+        const departmentQr = snapshot?.values?.['department.community_qr'];
+        if (departmentQr?.kind !== 'DepartmentQr' || departmentQr.fingerprint !== String(expected.departmentFingerprint)) {
+            throw new PrintReceiptError('The Department QR on this Personal card is no longer active. Prepare the card again.', 'BBS_PRINT_RECEIPT_DEPARTMENT_QR_CHANGED', 409);
+        }
+    }
     return { layoutVersionId: snapshot.layout.layoutVersionId, snapshot,
         snapshotJson: payload.snapshotJson, renderContractHash: crypto.createHash('sha256').update(payload.snapshotJson).digest('hex') };
 }

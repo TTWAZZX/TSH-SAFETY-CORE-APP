@@ -40,7 +40,6 @@ require('./bbs-runtime-assets').assertBbsRuntimeAssets();
 
 for (const preserved of [
     "API.get('/bbs/admin/department-cards')",
-    "API.post('/bbs/admin/department-card-templates'",
     "API.put(`/bbs/admin/community-handlers/${event.currentTarget.dataset.communityHandler}`",
     'data-dept-qr-issue',
     'data-dept-template-preview',
@@ -48,5 +47,6 @@ for (const preserved of [
 ]) {
     assert.ok(ui.includes(preserved), `Existing Department Card behavior missing ${preserved}`);
 }
+assert.ok(ui.includes("API.post('/bbs/admin/department-card-templates'") || ui.includes("API.upload('/bbs/admin/department-card-templates'"), 'Existing Department Card upload behavior missing');
 
 console.log('BBS Phase 10B-3 searchable Master pickers/Department workspace contract: PASS');
