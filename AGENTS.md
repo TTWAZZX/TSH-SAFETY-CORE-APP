@@ -1,5 +1,11 @@
 # TSH Safety Core Activity - AGENTS.md
 
+## BBS performance Production release (2026-09-09)
+
+- `main` commits `a266f21` and PHP 7.4 compatibility follow-up `c5ef4f4` are deployed to the PHP Production target. The release adds lazy tab/workspace reads, scoped mutation refresh, standardized Busy state, active-side Designer image loading with editing previews, and the evidence-backed Admin eligible-employee projection optimization.
+- No schema, rollout flag, private-upload path or business record changed. Production remains `staged_admin_only=1`, `pilot_scope_only=0`, `visual_card_designer_enabled=1`, `visual_card_designer_rendering_enabled=1`; Pilot/ordinary-user rollout remains blocked pending acceptance.
+- Fresh backup and verification evidence is under `backups/production/bbs-performance-predeploy-20260909-170834/`. Preserve its 193-table SQL archive, six exact runtime rollback files and eight checksum-verified BBS private uploads. Both temporary Admin-protected helpers were removed and the original `.htaccess` was restored.
+
 ## BBS card workflow Production release (2026-09-08)
 
 - `main` commit `4ae2fe1` is deployed to the PHP Production target with navigation/loading persistence, Personal Front QR plus Department Back QR, four isolated Master Artwork slots, separate Personal/Department templates, same-kind Layout Presets, Draft-only Apply and recoverable Trash.

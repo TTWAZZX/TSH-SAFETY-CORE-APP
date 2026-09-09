@@ -1,5 +1,11 @@
 # TSH Safety Core Activity - AI Quick Start
 
+## Current BBS performance Production state (2026-09-09)
+
+`main` commits `a266f21` and `c5ef4f4` are pushed and deployed. BBS active-tab/workspace lazy loading, scoped mutation refresh, shared accessible Busy feedback, active-side-first Designer images/editing previews and the optimized Admin eligible-employee projection are live on the PHP 7.4 shared-hosting target. The PHP follow-up removes only an unsupported `mixed` type hint found by Production smoke; Node/PHP behavior remains aligned.
+
+Backup/evidence is `backups/production/bbs-performance-predeploy-20260909-170834/`. It contains a verified 193-table SQL gzip, six exact runtime rollback files, and all eight BBS private-upload files reported by the protected manifest. Smoke passed anonymous 401 protection, five authenticated reads, HTTPS/FTPS hashes and responsive browser coverage with zero console errors or writes. No migration or data mutation occurred. Production remains staged Admin-only=1, pilot=0 and Designer/rendering=1/1; do not infer Pilot rollout approval from this release.
+
 ## Current BBS card workflow Production state (2026-09-08)
 
 `main` commit `4ae2fe1` is pushed and deployed to the PHP Production target. The four planned sets are live: navigation/loading persistence, Personal Front QR plus Department Back QR, isolated/versioned Master Artwork with strict Personal/Department boundaries, and Layout Preset/Apply to Draft/recoverable Trash. The two additive migrations are applied; no existing template, card, QR, print record, private file or rollout setting was deleted or rewritten.

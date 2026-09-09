@@ -1,5 +1,12 @@
 # TSH Safety Core Activity - Changelog And Handoff History
 
+## 2026-09-09 — BBS performance release deployed
+
+- Pushed and deployed `a266f21`, with compatibility correction `c5ef4f4` after Production smoke identified PHP 7.4 rejecting the PHP 8-only `mixed` type hint. The corrected eligible-employee endpoint then passed normally without changing its response contract.
+- BBS now lazy-loads only the active tab/workspace, refreshes only changed state after Save/Upload/Apply/Trash, standardizes accessible Busy feedback, and loads the active Designer side first while retaining original authorized images for print.
+- Fresh backup contains 193 tables (1,613,545 compressed bytes; 18,702,810 expanded UTF-8 bytes; SHA-256 `88319a28ce37b081b0913a4a4a0471880e2cd959d99bffc7ca1774596dcaaee6`), six runtime rollback files and eight private BBS files totaling 21,325,055 bytes with verified hashes.
+- Production verification passed FTPS 6/6, HTTPS 5/5, anonymous protection 4/4, authenticated Admin reads 5/5, and Chrome 6 groups/8 tabs/5 Card workspaces/3 viewports with zero console errors or business-data changes. Both temporary helpers return the normal router `501` after removal; rollout flags remain Admin-only=1, Pilot=0, Designer=1/1.
+
 ## 2026-09-08 — BBS card workflow Production release
 
 - Pushed source commit `4ae2fe1` and deployed the four planned BBS sets: navigation/loading persistence, Personal Front QR plus Department Back QR, isolated/versioned Master Artwork, strict Personal/Department template separation, and Layout Preset/Apply to Draft/recoverable Trash.

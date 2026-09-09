@@ -1,5 +1,17 @@
 # TSH Safety Core Activity - Deployment
 
+## BBS performance release (2026-09-09)
+
+Source commits `a266f21` and `c5ef4f4` are pushed on `main` and deployed to `https://dev.tshpcl.com/safety/tsh-safety-core`. Runtime scope is `index.html`, `public/js/main.js`, `public/js/pages/bbs-smart-card.js`, `public/js/pages/bbs-card-designer.js`, `public/js/utils/bbs-async-ui.js` and `api/handlers/bbs_smart_card.php`; Node changes remain API parity/test source. No migration was required.
+
+- Fresh database backup: `backups/production/bbs-performance-predeploy-20260909-170834/production-before.sql.gz` (193 tables; 1,613,545 compressed bytes; 18,702,810 expanded UTF-8 bytes; SHA-256 `88319a28ce37b081b0913a4a4a0471880e2cd959d99bffc7ca1774596dcaaee6`; gzip and completion marker verified).
+- `runtime-before/` holds all six rollback files plus the original `.htaccess`. The protected manifest identified eight BBS private-upload files totaling 21,325,055 bytes; every downloaded size and SHA-256 matched Production.
+- FTPS download-back matched source **6/6** and HTTPS matched **5/5** public assets. Anonymous protected endpoints returned `401` **4/4** and normal Admin login/read smoke returned `200` **5/5**. Five external eligible-employee reads returned 2,281 rows with a median observed round-trip of 828 ms.
+- Headless Chrome passed six navigation groups, eight tabs, five Card Admin workspaces and 320x568, 390x844 and 844x390 viewports with zero console errors, business-data writes or temporary rows.
+- Initial smoke exposed the PHP 8-only `mixed` type hint on the PHP 7.4.33 host. Commit `c5ef4f4` removed that type hint only; regression remained 53/53 and the failed endpoint passed after redeployment.
+- Final settings remain `staged_admin_only=1`, `pilot_scope_only=0`, `visual_card_designer_enabled=1`, `visual_card_designer_rendering_enabled=1`. Backup and diagnostic helpers were deleted, the original `.htaccess` checksum was restored, and both helper URLs return the router's generic `501`.
+- Normal rollback restores the six paths from `runtime-before/`. Preserve all schema, BBS records, history and private files; database restore is reserved for an explicitly authorized data incident.
+
 ## BBS card workflow release (2026-09-08)
 
 Source commit `4ae2fe1` is pushed on `main` and deployed to `https://dev.tshpcl.com/safety/tsh-safety-core`. The PHP/shared-hosting release contains 12 runtime files covering BBS navigation/loading persistence, Personal Front QR plus Department Back QR, Master Artwork, strict Personal/Department boundaries, Layout Presets, Draft-only Apply and recoverable Trash.
