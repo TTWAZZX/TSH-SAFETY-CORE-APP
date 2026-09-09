@@ -37,13 +37,14 @@ for (const marker of [
     'สร้าง Template',
     'ออก QR กลางรายแผนก',
     'กำหนด Owner และ Verifier',
-    "state.cardWorkspace = btn.dataset.cardWorkspace"
+    "switchCardWorkspace(btn.dataset.cardWorkspace)"
 ]) {
     assert.ok(ui.includes(marker), `Phase 10B-2 UI missing ${marker}`);
 }
 
 assert.match(ui, /state\.cardWorkspace === 'personal' \? personalCardsView\(\) : state\.cardWorkspace === 'department' \? departmentCardsAdminView\(\) : cardOverviewView\(\)/);
 assert.match(ui, /if \(nextTab === 'cards' && state\.tab === 'community'\) state\.cardWorkspace = 'department'/);
+assert.match(ui, /async function switchCardWorkspace\(nextWorkspace\)[\s\S]+loadCardWorkspace\(nextWorkspace\)/);
 assert.match(ui, /name="widthMM"[^>]+value="60"/);
 assert.match(ui, /name="heightMM"[^>]+value="85"/);
 for (const source of [personalNode, personalPhp]) {

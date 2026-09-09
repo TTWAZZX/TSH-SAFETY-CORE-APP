@@ -22,6 +22,6 @@ for (const marker of [
     assert.ok(ui.includes(marker), `UI missing ${marker}`);
 }
 
-assert.match(ui, /state\.inspectorSelf\?\.enabled&&\(state\.context\?\.permissions\?\.configure\|\|state\.inspectorSelf\?\.enrollment\)/);
+assert.match(ui, /state\.context\?\.permissions\?\.configure\|\|state\.context\?\.inspectorEnrollment\|\|state\.inspectorSelf\?\.enrollment/);
 assert.match(ui, /inspector team management is unavailable/);
 console.log('BBS Phase 9 Admin/self-service team UI contract: PASS');

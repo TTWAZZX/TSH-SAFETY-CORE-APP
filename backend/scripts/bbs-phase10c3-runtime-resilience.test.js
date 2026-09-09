@@ -26,10 +26,10 @@ for (const marker of [
     'กำลังแสดงข้อมูลล่าสุดที่โหลดสำเร็จ',
     'ยังไม่มีข้อมูลที่ยืนยันได้',
     'async function loadCoreData()',
-    "trackSectionLoad('community', loadCommunity)",
-    "trackSectionLoad('inspectors', loadInspectorData)",
-    "trackSectionLoad('core', loadCoreData)",
-    "trackSectionLoad('cards', loadCardAdmin)",
+    "trackSectionLoad('community',()=>loadTabWithReference(loadCommunity,{force}))",
+    "trackSectionLoad('inspectors',loadInspectorData)",
+    "trackSectionLoad('core',loadCoreData)",
+    "trackSectionLoad('cards',()=>loadCardWorkspace(state.cardWorkspace,{force}))",
     'data-bbs-page-reload',
     'ลองเชื่อมต่อใหม่',
     'data-bbs-overview-priorities',
@@ -61,8 +61,10 @@ assert.ok(!inspectorSource.includes("state.tab='workspace'"), 'Inspector failure
 const loadDataStart = ui.indexOf('async function loadData()');
 const loadDataEnd = ui.indexOf('async function uploadCardTemplate', loadDataStart);
 const loadDataSource = ui.slice(loadDataStart, loadDataEnd);
-assert.ok(loadDataSource.includes('Promise.all(['), 'Independent section loads should run without serial page blocking');
-assert.ok(!loadDataSource.includes('await loadCommunity();'), 'Community failure must not reject the whole page load');
+assert.ok(loadDataSource.includes('loadActiveBbsTab({force:true})'), 'Initial load must delegate to the active-tab loader');
+assert.ok(!loadDataSource.includes('loadCommunity()'), 'Inactive Community data must not be loaded eagerly');
+assert.ok(!loadDataSource.includes('loadInspectorData()'), 'Inactive Inspector data must not be loaded eagerly');
+assert.ok(!loadDataSource.includes('loadCardAdmin()'), 'Inactive Card Admin data must not be loaded eagerly');
 
 for (const forbidden of ['fetch(', 'XMLHttpRequest', 'localStorage.clear()', 'sessionStorage.clear()']) {
     assert.ok(!ui.slice(ui.indexOf('async function trackSectionLoad'), ui.indexOf('function workspaceView')).includes(forbidden), `Recovery layer must not introduce ${forbidden}`);

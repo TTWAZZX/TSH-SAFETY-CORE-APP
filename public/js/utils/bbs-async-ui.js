@@ -1,5 +1,64 @@
 const activeOperations = new Map();
 let operationSequence = 0;
+const performanceEntries = [];
+const PERFORMANCE_ENTRY_LIMIT = 200;
+
+function performanceNow() {
+    return globalThis.performance?.now?.() ?? Date.now();
+}
+
+function percentile(values, ratio) {
+    if (!values.length) return 0;
+    const sorted = [...values].sort((left, right) => left - right);
+    return sorted[Math.min(sorted.length - 1, Math.ceil(sorted.length * ratio) - 1)];
+}
+
+function performanceSummary() {
+    const groups = new Map();
+    for (const entry of performanceEntries) {
+        const durations = groups.get(entry.name) || [];
+        durations.push(entry.durationMs);
+        groups.set(entry.name, durations);
+    }
+    return [...groups.entries()].map(([name, durations]) => ({
+        name,
+        count: durations.length,
+        averageMs: Math.round(durations.reduce((sum, value) => sum + value, 0) / durations.length),
+        p50Ms: Math.round(percentile(durations, .5)),
+        p95Ms: Math.round(percentile(durations, .95)),
+        maximumMs: Math.round(Math.max(...durations))
+    }));
+}
+
+export function beginBbsPerformance(name, detail = {}) {
+    const startedAt = performanceNow();
+    let finished = false;
+    return {
+        finish(outcome = 'completed') {
+            if (finished) return null;
+            finished = true;
+            const entry = Object.freeze({
+                name: String(name || 'bbs-operation'),
+                durationMs: Math.max(0, performanceNow() - startedAt),
+                outcome: String(outcome),
+                detail: { ...detail },
+                recordedAt: new Date().toISOString()
+            });
+            performanceEntries.push(entry);
+            if (performanceEntries.length > PERFORMANCE_ENTRY_LIMIT) performanceEntries.splice(0, performanceEntries.length - PERFORMANCE_ENTRY_LIMIT);
+            globalThis.dispatchEvent?.(new CustomEvent('bbs:performance', { detail:entry }));
+            return entry;
+        }
+    };
+}
+
+if (typeof window !== 'undefined') {
+    window.BBSPerformance = Object.freeze({
+        entries: () => performanceEntries.map(entry => ({ ...entry, detail:{ ...entry.detail } })),
+        summary: () => performanceSummary().map(row => ({ ...row })),
+        clear: () => { performanceEntries.length = 0; }
+    });
+}
 
 function operationHost() {
     let host = document.getElementById('bbs-operation-status');
@@ -42,10 +101,12 @@ function escapeText(value) {
     return node.innerHTML;
 }
 
-export function beginBbsOperation(label = 'กำลังดำเนินการ...', detail = '') {
+export function beginBbsOperation(label = 'กำลังดำเนินการ...', detail = '', metricName = '') {
     const id = ++operationSequence;
+    const measurement = beginBbsPerformance(metricName || `operation:${String(label)}`, { detail:String(detail) });
     activeOperations.set(id, { label:String(label), detail:String(detail), progress:null });
     renderOperationStatus();
+    let finished = false;
     return {
         update(next = {}) {
             const current = activeOperations.get(id);
@@ -56,19 +117,24 @@ export function beginBbsOperation(label = 'กำลังดำเนินก�
             renderOperationStatus();
         },
         finish() {
+            if (finished) return;
+            finished = true;
             activeOperations.delete(id);
             renderOperationStatus();
+            measurement.finish();
         }
     };
 }
 
 export async function runBbsBusy(control, task, label = 'กำลังดำเนินการ...') {
+    control = control?.currentTarget || control;
     const operation = beginBbsOperation(label);
-    if (control) control.setAttribute('aria-busy', 'true');
+    const actionable = control && typeof control.setAttribute === 'function' ? control : null;
+    if (actionable) actionable.setAttribute('aria-busy', 'true');
     try {
         return await task(operation);
     } finally {
-        if (control?.isConnected) control.removeAttribute('aria-busy');
+        if (actionable?.isConnected) actionable.removeAttribute('aria-busy');
         operation.finish();
     }
 }

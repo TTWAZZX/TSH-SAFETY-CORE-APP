@@ -75,6 +75,12 @@ for (const endpoint of ['/me/context', '/me/team', '/eligible-employees', '/admi
 for (const endpoint of ['/bbs/me/context', '/bbs/me/team', '/bbs/eligible-employees', '/bbs/admin/foundation', '/bbs/admin/position-mappings/:positionId', '/bbs/admin/hierarchy-assignments']) {
     assert.ok(phpHandler.includes(endpoint), `PHP route missing ${endpoint}`);
 }
+for (const marker of ['loadAdminEligibleEmployees', 'normalizedMasterKey', 'effectiveEligibilityByEmployee']) {
+    assert.ok(route.includes(marker), `Node optimized Admin eligibility projection missing ${marker}`);
+}
+for (const marker of ['bbs_phase1_admin_eligible_employees', 'bbs_phase1_master_key', '$effectiveEligibilityByEmployee']) {
+    assert.ok(phpHandler.includes(marker), `PHP optimized Admin eligibility projection missing ${marker}`);
+}
 assert.ok(server.includes("app.use('/api/bbs',"), 'Node BBS route is not mounted.');
 assert.ok(apiIndex.includes('handle_bbs_smart_card_routes($method, $path);'), 'PHP BBS handler is not dispatched.');
 assert.ok(admin.includes("key: 'bbs-foundation'"), 'Admin BBS Foundation tab is missing.');

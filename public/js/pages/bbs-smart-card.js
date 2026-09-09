@@ -1,13 +1,14 @@
 import { API, apiFetch } from '../api.js?v=20260908-bbs-navigation-loading-r1';
 import { escHtml, showToast } from '../ui.js?v=20260714-phase21-platform-shell';
 import { designerPrintDocument } from '../utils/bbs-card-print.js?v=20260905-bbs-integration-r1';
-import { openBbsCardDesigner } from './bbs-card-designer.js?v=20260908-bbs-layout-preset-trash-r1';
-import { beginBbsOperation, uploadProgress } from '../utils/bbs-async-ui.js?v=20260908-bbs-navigation-loading-r1';
+import { openBbsCardDesigner } from './bbs-card-designer.js?v=20260909-bbs-side-preview-r1';
+import { beginBbsOperation, beginBbsPerformance, uploadProgress } from '../utils/bbs-async-ui.js?v=20260909-bbs-performance-baseline-r1';
 
 const state = { context: null, workspace: null, eligible: [], history: [], ownDrafts: [], tab: 'workspace', view: 'observer', draft: null, singleStep:1, batchDraft:null, batchSelected:[], batchStep:1, masterReference:{levels:[],positions:[],departments:[],units:[],employees:[],summary:{}}, masterArtwork:{slots:{Personal:{Front:null,Back:null},Department:{Front:null,Back:null}},records:[]}, cardWorkspace:'overview', departmentConfigQuery:'', departmentConfigStatus:'all', departmentConfigSelectedId:null, cardTemplates: [], cardEmployees: [], cards: [], historyYear: new Date().getFullYear(), actionSummary: {}, actions: [], actionScope: 'all', actionStatus: '', actionPriority: '', slaRules: [], analytics: null, analyticsFilters: { scope:'', year:new Date().getFullYear(), month:0, departmentId:'', safetyUnitId:'', risk:'' }, departmentCards:null, community:null, communityEmployees:{rows:[],units:[]}, communityAdmin:{templates:[],qrCards:[],handlers:[],admins:[],departments:[]}, communityFilters:{year:new Date().getFullYear(),month:0}, inspectorSelf:{enabled:false,enrollment:null,team:[],available:[],coverage:{}}, inspectorAdmin:{enrollments:[],candidates:[],departments:[],units:[]}, inspectorTeam:null, inspectorSelectedId:null, inspectorCompliance:null, inspectorScheduleDetail:null, inspectorScheduleMode:'agenda', inspectorScheduleFilters:{year:new Date().getFullYear(),month:new Date().getMonth()+1}, inspectorModalReturnFocus:null, loadErrors:{}, loadedAt:{}, loadingSections:new Set(), retryingSection:'', restoredScrollTop:0 };
 state.trashedCardTemplates=[];
 state.trashedDepartmentTemplates=[];
 state.listMeta={history:null,actions:null,actionOutbox:null,cardEmployees:null,cards:null};
+state.cardDataLoaded={reference:false,artwork:false,personal:false,department:false};
 state.historyFilters={status:'',departmentId:'',safetyUnitId:'',q:'',page:1,pageSize:20};
 state.actionFilters={year:'',departmentId:'',safetyUnitId:'',q:'',page:1,pageSize:20};
 state.actionOutbox={rows:[],meta:{deliveryEnabled:false,smtpConfigured:false,summary:{},eventTypes:[]},error:''};
@@ -98,10 +99,15 @@ function sanitizeBbsRestoredTab() {
     if(state.tab!=='cards')state.cardWorkspace=CARD_WORKSPACES.has(state.cardWorkspace)?state.cardWorkspace:'overview';
 }
 
-async function loadRestoredBbsTab() {
-    if(state.tab==='history')await trackSectionLoad('history',loadHistory);
-    if(state.tab==='actions')await trackSectionLoad('actions',loadActions);
-    if(state.tab==='analytics')await trackSectionLoad('analytics',loadAnalytics);
+function consumeBbsEntryIntent() {
+    const qrEmployee=sessionStorage.getItem('bbs_qr_observed_employee');
+    const communityDepartment=sessionStorage.getItem('bbs_community_department_id');
+    const adminWorkspace=sessionStorage.getItem('bbs_admin_workspace');
+    if(qrEmployee){sessionStorage.removeItem('bbs_qr_observed_employee');state.tab='start';state.restoredScrollTop=0;}
+    else if(communityDepartment){sessionStorage.removeItem('bbs_community_department_id');state.tab='community';state.restoredScrollTop=0;}
+    else if(adminWorkspace&&state.context?.permissions?.configure){const allowed=new Set(['workspace','team-management','cards']);sessionStorage.removeItem('bbs_admin_workspace');if(allowed.has(adminWorkspace)){state.tab=adminWorkspace;state.restoredScrollTop=0;}}
+    if(state.tab==='cards'){try{const saved=JSON.parse(sessionStorage.getItem('tsh_bbs_designer_session_v1')||'null');if(saved?.kind==='Department')state.cardWorkspace='department';else if(saved?.kind==='Personal')state.cardWorkspace='personal';}catch(_){}}
+    return {qrEmployee};
 }
 
 function reopenStoredDesignerIfNeeded() {
@@ -268,7 +274,7 @@ function bbsNavigationGroups() {
     const groups = [
         { key:'overview', label:'ภาพรวม', description:'งานและ KPI', tabs:[['workspace','ภาพรวมของฉัน']] },
         { key:'observe', label:'สังเกตการณ์', description:'สร้างรายการ', tabs:[['start','เริ่ม Observation']] },
-        { key:'people', label:'ทีมและชุมชน', description:'คนและพื้นที่', tabs:[['community','Community / บัตรแผนก'],...(state.inspectorSelf?.enabled&&(state.context?.permissions?.configure||state.inspectorSelf?.enrollment)?[['team-management','ผู้ตรวจ / ทีม']]:[])] },
+        { key:'people', label:'ทีมและชุมชน', description:'คนและพื้นที่', tabs:[['community','Community / บัตรแผนก'],...((state.context?.permissions?.configure||state.context?.inspectorEnrollment||state.inspectorSelf?.enrollment)?[['team-management','ผู้ตรวจ / ทีม']]:[])] },
         { key:'actions', label:'ติดตามผล', description:'Corrective Action', tabs:[['actions','Corrective Action']] },
         { key:'reports', label:'รายงานและประวัติ', description:'ผลลัพธ์ย้อนหลัง', tabs:[...(state.context?.analyticsEnabled?[['analytics','Analytics / รายงาน']]:[]),['history','ประวัติ']] },
     ];
@@ -338,7 +344,7 @@ function kpiStatusBadge(value = {}) {
 
 async function trackSectionLoad(section, loader) {
     const sectionLabel={core:'ภาพรวมและ Observation',history:'ประวัติ',community:'Community และบัตรแผนก',inspectors:'ผู้ตรวจและทีม',actions:'Corrective Action',analytics:'Analytics',cards:'จัดการบัตรและ QR'}[section]||'ข้อมูล BBS';
-    const operation=beginBbsOperation('กำลังโหลดข้อมูล BBS...', `กำลังอัปเดต ${sectionLabel}`);
+    const operation=beginBbsOperation('กำลังโหลดข้อมูล BBS...', `กำลังอัปเดต ${sectionLabel}`, `section:${section}`);
     state.loadingSections.add(section);
     document.querySelector('#bbs-smart-card-body')?.setAttribute('aria-busy','true');
     try {
@@ -1057,7 +1063,12 @@ function applyDepartmentConfigFilters() {
     document.querySelector('[data-department-config-empty]')?.classList.toggle('hidden', visible !== 0);
 }
 
-function installTemplateTrashControls(){const addTrash=(selector,records,kind)=>document.querySelectorAll(selector).forEach(anchor=>{const id=n(kind==='personal'?anchor.dataset.cardDesignerPersonal:anchor.dataset.cardDesignerDepartment),record=records.find(row=>n(row.id)===id);if(!record||record.Status==='Active')return;const actions=anchor.parentElement,button=document.createElement('button');button.type='button';button.className='rounded-lg border border-rose-300 px-3 py-2 text-xs font-bold text-rose-700';button.textContent='ย้ายลงถังขยะ';button.onclick=()=>withBusy(button,async()=>{if(!window.confirm(`ย้าย Template “${record.TemplateName}” ลงถังขยะ? ข้อมูล ไฟล์ Layout และประวัติจะยังอยู่`))return;try{await apiFetch(kind==='personal'?`/bbs/admin/card-templates/${id}`:`/bbs/admin/department-card-templates/${id}`,{method:'DELETE',body:JSON.stringify({rowVersion:n(record.RowVersion)})});if(kind==='personal')await loadCardAdmin();else await loadCommunity();render();showToast('ย้าย Template ลงถังขยะแล้ว','success');}catch(error){showToast(error?.message||'ย้าย Template ไม่สำเร็จ','error');}},'กำลังย้ายลงถังขยะ...');actions.appendChild(button);});addTrash('[data-card-designer-personal]',state.cardTemplates,'personal');addTrash('[data-card-designer-department]',state.communityAdmin?.templates||[],'department');const items=state.cardWorkspace==='personal'?state.trashedCardTemplates:state.cardWorkspace==='department'?state.trashedDepartmentTemplates:[];if(!items.length)return;const host=document.querySelector('[data-card-guided-workflow]');if(!host)return;const kind=state.cardWorkspace;const box=document.createElement('details');box.className='rounded-2xl border border-slate-200 bg-white p-4';box.innerHTML=`<summary class="cursor-pointer font-black text-slate-700">ถังขยะ ${kind==='personal'?'Personal':'Department'} Template (${items.length})</summary><div class="mt-3 grid gap-2">${items.map(item=>`<div class="flex items-center justify-between rounded-xl bg-slate-50 p-3 text-sm"><span>${escHtml(item.TemplateName)} · ${escHtml(item.Status)}</span><button type="button" data-template-restore="${item.id}" data-row-version="${item.RowVersion}" class="rounded-lg border px-3 py-2 text-xs font-bold text-emerald-700">กู้คืน</button></div>`).join('')}</div>`;host.after(box);box.querySelectorAll('[data-template-restore]').forEach(button=>button.onclick=()=>withBusy(button,async()=>{try{const url=kind==='personal'?`/bbs/admin/card-templates/${button.dataset.templateRestore}/restore`:`/bbs/admin/department-card-templates/${button.dataset.templateRestore}/restore`;await API.post(url,{rowVersion:n(button.dataset.rowVersion)});if(kind==='personal')await loadCardAdmin();else await loadCommunity();render();showToast('กู้คืน Template แล้ว','success');}catch(error){showToast(error?.message||'กู้คืน Template ไม่สำเร็จ','error');}},'กำลังกู้คืน...'));}
+async function refreshTemplateTrash(kind){
+    if(kind==='personal')await loadPersonalTemplateCatalog();
+    else await loadDepartmentCardCatalog();
+}
+
+function installTemplateTrashControls(){const addTrash=(selector,records,kind)=>document.querySelectorAll(selector).forEach(anchor=>{const id=n(kind==='personal'?anchor.dataset.cardDesignerPersonal:anchor.dataset.cardDesignerDepartment),record=records.find(row=>n(row.id)===id);if(!record||record.Status==='Active')return;const actions=anchor.parentElement,button=document.createElement('button');button.type='button';button.className='rounded-lg border border-rose-300 px-3 py-2 text-xs font-bold text-rose-700';button.textContent='ย้ายลงถังขยะ';button.onclick=()=>withBusy(button,async()=>{if(!window.confirm(`ย้าย Template “${record.TemplateName}” ลงถังขยะ? ข้อมูล ไฟล์ Layout และประวัติจะยังอยู่`))return;try{await apiFetch(kind==='personal'?`/bbs/admin/card-templates/${id}`:`/bbs/admin/department-card-templates/${id}`,{method:'DELETE',body:JSON.stringify({rowVersion:n(record.RowVersion)})});await refreshTemplateTrash(kind);render();showToast('ย้าย Template ลงถังขยะแล้ว','success');}catch(error){showToast(error?.message||'ย้าย Template ไม่สำเร็จ','error');}},'กำลังย้ายลงถังขยะ...');actions.appendChild(button);});addTrash('[data-card-designer-personal]',state.cardTemplates,'personal');addTrash('[data-card-designer-department]',state.communityAdmin?.templates||[],'department');const items=state.cardWorkspace==='personal'?state.trashedCardTemplates:state.cardWorkspace==='department'?state.trashedDepartmentTemplates:[];if(!items.length)return;const host=document.querySelector('[data-card-guided-workflow]');if(!host)return;const kind=state.cardWorkspace;const box=document.createElement('details');box.className='rounded-2xl border border-slate-200 bg-white p-4';box.innerHTML=`<summary class="cursor-pointer font-black text-slate-700">ถังขยะ ${kind==='personal'?'Personal':'Department'} Template (${items.length})</summary><div class="mt-3 grid gap-2">${items.map(item=>`<div class="flex items-center justify-between rounded-xl bg-slate-50 p-3 text-sm"><span>${escHtml(item.TemplateName)} · ${escHtml(item.Status)}</span><button type="button" data-template-restore="${item.id}" data-row-version="${item.RowVersion}" class="rounded-lg border px-3 py-2 text-xs font-bold text-emerald-700">กู้คืน</button></div>`).join('')}</div>`;host.after(box);box.querySelectorAll('[data-template-restore]').forEach(button=>button.onclick=()=>withBusy(button,async()=>{try{const url=kind==='personal'?`/bbs/admin/card-templates/${button.dataset.templateRestore}/restore`:`/bbs/admin/department-card-templates/${button.dataset.templateRestore}/restore`;await API.post(url,{rowVersion:n(button.dataset.rowVersion)});await refreshTemplateTrash(kind);render();showToast('กู้คืน Template แล้ว','success');}catch(error){showToast(error?.message||'กู้คืน Template ไม่สำเร็จ','error');}},'กำลังกู้คืน...'));}
 
 function bind() {
     installTemplateTrashControls();
@@ -1075,7 +1086,7 @@ function bind() {
             tabs[next]?.click();
         };
     });
-    document.querySelectorAll('[data-card-workspace]').forEach(btn => btn.onclick = () => { state.cardWorkspace = btn.dataset.cardWorkspace; render(); document.querySelector('[data-card-workspace-navigation]')?.scrollIntoView({behavior:'smooth',block:'start'}); });
+    document.querySelectorAll('[data-card-workspace]').forEach(btn => btn.onclick = () => switchCardWorkspace(btn.dataset.cardWorkspace));
     document.querySelector('[data-department-config-search]')?.addEventListener('input', event => { state.departmentConfigQuery=event.target.value;applyDepartmentConfigFilters(); });
     document.querySelector('[data-department-config-status]')?.addEventListener('change', event => { state.departmentConfigStatus=event.target.value;applyDepartmentConfigFilters(); });
     document.querySelectorAll('[data-department-config-row]').forEach(btn => btn.onclick = () => { state.departmentConfigSelectedId=n(btn.dataset.departmentId);render();document.querySelector('[data-department-config-detail]')?.scrollIntoView({behavior:'smooth',block:'start'}); });
@@ -1204,17 +1215,22 @@ async function switchBbsTab(nextTab) {
     }
     if (nextTab === 'cards' && state.tab === 'community') state.cardWorkspace = 'department';
     state.tab = nextTab;
-    if(state.tab==='actions')await trackSectionLoad('actions',loadActions);
-    if(state.tab==='analytics')await trackSectionLoad('analytics',loadAnalytics);
-    if(state.tab==='community')await trackSectionLoad('community',loadCommunity);
-    if(state.tab==='team-management')await trackSectionLoad('inspectors',loadInspectorData);
+    await loadActiveBbsTab({force:true});
     render({ preserveScroll:false, focusSelector:`#${activeTabId()}` });
     scrollBbsContentStart();
 }
 
+async function switchCardWorkspace(nextWorkspace) {
+    if(!CARD_WORKSPACES.has(nextWorkspace)||nextWorkspace===state.cardWorkspace)return;
+    state.cardWorkspace=nextWorkspace;
+    await trackSectionLoad('cards',()=>loadCardWorkspace(nextWorkspace));
+    render({preserveScroll:false,focusSelector:`[data-card-workspace="${nextWorkspace}"]`});
+    document.querySelector('[data-card-workspace-navigation]')?.scrollIntoView({behavior:'smooth',block:'start'});
+}
+
 async function retrySection(section) {
     if (!section || state.retryingSection) return;
-    const loaders = { core:loadCoreData, history:loadHistory, community:loadCommunity, inspectors:loadInspectorData, actions:loadActions, analytics:loadAnalytics, cards:loadCardAdmin };
+    const loaders = { core:loadCoreData, history:loadHistory, community:loadCommunity, inspectors:loadInspectorData, actions:loadActions, analytics:loadAnalytics, cards:()=>loadCardWorkspace(state.cardWorkspace,{force:true}) };
     const loader = loaders[section];
     if (!loader) return;
     state.retryingSection = section;
@@ -1611,11 +1627,11 @@ async function executeDepartmentPrint(id,previewContext=null){const template=pre
     popup.document.open();popup.document.write(documentHtml);popup.document.close();
     showToast('เตรียมพิมพ์ '+copies+' ใบแล้ว','success');return;
 }else{const background=previewContext?.asset?.dataUrl||(await loadCardTemplateAsset('department',id)).dataUrl;pages=Array.from({length:copies},()=>`<article class="card" style="width:${n(template.WidthMM)}mm;height:${n(template.HeightMM)}mm;background-image:url('${background}')"><div class="safe"></div><div class="qr"><img src="${qrDataUrl(qr.qrUrl)}"><strong>แจ้งพฤติกรรมดี / เสี่ยง</strong></div></article>`).join('');}popup.document.open();popup.document.write(`<!doctype html><html lang="th"><head><meta charset="utf-8"><title>${escHtml(template.TemplateName)}</title><style>@page{size:${paper};margin:8mm}*{box-sizing:border-box}body{margin:0;font-family:Kanit,Arial,sans-serif}.sheet{display:flex;flex-wrap:wrap;gap:5mm;align-content:start}.card,.designer-card{position:relative;overflow:hidden;background-size:cover;background-position:center;border:.2mm dashed #f97316;break-inside:avoid}.safe,.designer-safe{position:absolute;border:.2mm dashed #0891b2;pointer-events:none}.safe{inset:4%}.designer-bleed{position:absolute;inset:0;border:.2mm dashed #f97316;pointer-events:none}.designer-element{position:absolute;object-fit:contain}.designer-text{overflow:hidden;white-space:pre-wrap}.designer-qr{background:#fff}.qr{position:absolute;right:4%;bottom:4%;width:25%;max-width:34mm;text-align:center;background:#fff;padding:2mm;border-radius:2mm;box-shadow:0 1mm 4mm #0003}.qr img{width:100%;display:block}.qr strong{display:block;font-size:2.4mm;margin-top:1mm}@media print{body{-webkit-print-color-adjust:exact;print-color-adjust:exact}.safe,.designer-safe,.designer-bleed{display:none}}</style></head><body><main class="sheet">${pages}</main><script>window.onload=()=>setTimeout(()=>window.print(),250)<\/script></body></html>`);popup.document.close();await API.post('/bbs/department-cards/print-log',{templateId:id,copies,paperSize:paper});showToast(`เตรียมพิมพ์ ${copies} ใบแล้ว`,'success');}catch(error){popup.close();showToast(error?.message||'สร้างงานพิมพ์ไม่สำเร็จ','error');}}
-async function uploadDepartmentTemplate(event,operation){event.preventDefault();try{await API.upload('/bbs/admin/department-card-templates',new FormData(event.currentTarget),{onProgress:uploadProgress(operation,'กำลังอัปโหลด Department Template...')});operation?.update({label:'กำลังสร้าง Department Template...',detail:'อัปโหลดครบแล้ว กำลังโหลดข้อมูลล่าสุด',progress:100});showToast('อัปโหลด Template รายแผนกเป็น Draft แล้ว','success');await loadCommunity();render();}catch(error){showToast(error?.message||'อัปโหลด Template ไม่สำเร็จ','error');}}
+async function uploadDepartmentTemplate(event,operation){event.preventDefault();try{await API.upload('/bbs/admin/department-card-templates',new FormData(event.currentTarget),{onProgress:uploadProgress(operation,'กำลังอัปโหลด Department Template...')});operation?.update({label:'กำลังสร้าง Department Template...',detail:'อัปโหลดครบแล้ว กำลังโหลดรายการ Template ล่าสุด',progress:100});showToast('อัปโหลด Template รายแผนกเป็น Draft แล้ว','success');await loadDepartmentCardCatalog({trash:false});render();}catch(error){showToast(error?.message||'อัปโหลด Template ไม่สำเร็จ','error');}}
 async function transitionDepartmentTemplate(id,rowVersion,action){if(action==='activate')return openCardTemplatePreview('department',id,{intent:'activate',onConfirm:()=>performDepartmentTemplateTransition(id,rowVersion,action)});return performDepartmentTemplateTransition(id,rowVersion,action);}
-async function performDepartmentTemplateTransition(id,rowVersion,action){try{await API.put(`/bbs/admin/department-card-templates/${id}`,{rowVersion,action});showToast(action==='activate'?'เปิดใช้ Template แล้ว':'Archive Template แล้ว','success');await loadCommunity();render();}catch(error){showToast(error?.message||'เปลี่ยนสถานะ Template ไม่สำเร็จ','error');}}
-async function issueDepartmentQr(departmentId){if(!window.confirm('ยืนยันออกหรือ Rotate QR กลางของแผนกนี้? QR เดิมจะใช้ไม่ได้ทันที'))return;try{await API.post(`/bbs/admin/department-qr/${departmentId}/issue`,{reason:'Issue / rotate from BBS Admin UI'});showToast('ออก QR กลางของแผนกแล้ว','success');await loadCommunity();render();}catch(error){showToast(error?.message||'ออก QR ไม่สำเร็จ','error');}}
-async function saveCommunityHandler(event){event.preventDefault();const form=new FormData(event.currentTarget);try{await API.put(`/bbs/admin/community-handlers/${event.currentTarget.dataset.communityHandler}`,{ownerEmployeeId:form.get('ownerEmployeeId'),verifierEmployeeId:form.get('verifierEmployeeId')});showToast('บันทึก Community Risk Handler แล้ว','success');await loadCommunity();render();}catch(error){showToast(error?.message||'บันทึก Handler ไม่สำเร็จ','error');}}
+async function performDepartmentTemplateTransition(id,rowVersion,action){try{await API.put(`/bbs/admin/department-card-templates/${id}`,{rowVersion,action});showToast(action==='activate'?'เปิดใช้ Template แล้ว':'Archive Template แล้ว','success');await loadDepartmentCardCatalog({trash:false});render();}catch(error){showToast(error?.message||'เปลี่ยนสถานะ Template ไม่สำเร็จ','error');}}
+async function issueDepartmentQr(departmentId){if(!window.confirm('ยืนยันออกหรือ Rotate QR กลางของแผนกนี้? QR เดิมจะใช้ไม่ได้ทันที'))return;try{await API.post(`/bbs/admin/department-qr/${departmentId}/issue`,{reason:'Issue / rotate from BBS Admin UI'});showToast('ออก QR กลางของแผนกแล้ว','success');await loadDepartmentCardCatalog({trash:false});render();}catch(error){showToast(error?.message||'ออก QR ไม่สำเร็จ','error');}}
+async function saveCommunityHandler(event){event.preventDefault();const form=new FormData(event.currentTarget);try{await API.put(`/bbs/admin/community-handlers/${event.currentTarget.dataset.communityHandler}`,{ownerEmployeeId:form.get('ownerEmployeeId'),verifierEmployeeId:form.get('verifierEmployeeId')});showToast('บันทึก Community Risk Handler แล้ว','success');await loadDepartmentCardCatalog({trash:false});render();}catch(error){showToast(error?.message||'บันทึก Handler ไม่สำเร็จ','error');}}
 async function transitionCommunityAction(id,rowVersion,status){const requiresNote=['Closed','Reopened'].includes(status),note=requiresNote?window.prompt(status==='Closed'?'สรุปผลการแก้ไขก่อนปิดงาน':'เหตุผลที่เปิดงานใหม่',''):'';if(requiresNote&&(note===null||!note.trim()))return;try{await API.put(`/bbs/admin/community-actions/${id}`,{rowVersion,status,note:note?.trim()||''});showToast('เปลี่ยนสถานะ Community Action แล้ว','success');await loadCommunityDashboard();render();}catch(error){showToast(error?.message||'เปลี่ยนสถานะ Action ไม่สำเร็จ','error');}}
 
 function communityActionButtons(action){if(!action)return'';return`${action.Status==='Open'?`<button type="button" data-risk-action="In Progress" class="min-h-11 rounded-xl bg-amber-500 px-4 py-2 text-sm font-black text-white">เริ่มดำเนินการ</button>`:''}${action.Status!=='Closed'?`<button type="button" data-risk-action="Closed" class="min-h-11 rounded-xl bg-emerald-600 px-4 py-2 text-sm font-black text-white">ปิดงาน</button>`:`<button type="button" data-risk-action="Reopened" class="min-h-11 rounded-xl border border-rose-300 px-4 py-2 text-sm font-black text-rose-700">เปิดใหม่</button>`}`;}
@@ -1655,7 +1671,69 @@ async function removeInspectorOverride(id,date){if(!window.confirm(`ยกเล
 
 async function loadHistory() { const f=state.historyFilters,q=new URLSearchParams({paged:'1',page:String(f.page),pageSize:String(f.pageSize),view:state.view,year:String(state.historyYear||yearNow)});for(const key of ['status','departmentId','safetyUnitId','q'])if(f[key]!==''&&f[key]!==null)q.set(key,String(f[key]));const payload=(await API.get(`/bbs/observations?${q}`)).data;state.history=listRows(payload);state.listMeta.history=listPagination(payload); }
 async function resetHistoryWorkspace(){clearTimeout(listSearchTimers.get('history'));state.historyFilters={...state.historyFilters,status:'',departmentId:'',safetyUnitId:'',q:'',page:1};await trackSectionLoad('history',loadHistory);render({preserveScroll:false,focusSelector:`[data-bbs-view="${state.view}"]`});}
-async function loadCardAdmin() { if(!state.context?.permissions?.configure)return;const ef=state.cardEmployeeFilters,cf=state.cardFilters,employeeQuery=new URLSearchParams({paged:'1',page:String(ef.page),pageSize:String(ef.pageSize)}),cardQuery=new URLSearchParams({paged:'1',page:String(cf.page),pageSize:String(cf.pageSize)});for(const key of ['q','departmentId'])if(ef[key]!==''&&ef[key]!==null)employeeQuery.set(key,String(ef[key]));for(const key of ['q','status','departmentId'])if(cf[key]!==''&&cf[key]!==null)cardQuery.set(key,String(cf[key]));const[foundation,templates,trashTemplates,employees,cards,masterArtwork]=await Promise.all([API.get('/bbs/admin/foundation').catch(()=>({data:null})),API.get('/bbs/admin/card-templates'),API.get('/bbs/admin/card-templates?trash=1'),API.get(`/bbs/admin/card-employees?${employeeQuery}`),API.get(`/bbs/admin/cards?${cardQuery}`),API.get('/bbs/admin/card-master-artwork').catch(error=>({data:{slots:{Personal:{Front:null,Back:null},Department:{Front:null,Back:null}},records:[],error:error?.message||'โหลด Master Artwork ไม่สำเร็จ'}}))]);if(foundation.data){state.masterReference=foundation.data;state.communityAdmin={...state.communityAdmin,departments:foundation.data.departments||state.communityAdmin.departments};}state.masterArtwork=masterArtwork.data||state.masterArtwork;state.cardTemplates=templates.data||[];state.trashedCardTemplates=trashTemplates.data||[];state.cardEmployees=listRows(employees.data);state.listMeta.cardEmployees=listPagination(employees.data);state.cards=listRows(cards.data);state.listMeta.cards=listPagination(cards.data); }
+async function loadMasterReference({force=false}={}) {
+    if(!state.context?.permissions?.configure||(state.cardDataLoaded.reference&&!force))return;
+    const foundation=await API.get('/bbs/admin/foundation').catch(()=>({data:null}));
+    if(foundation.data){state.masterReference=foundation.data;state.communityAdmin={...state.communityAdmin,departments:foundation.data.departments||state.communityAdmin.departments};state.cardDataLoaded.reference=true;}
+}
+
+async function loadMasterArtwork({force=false}={}) {
+    if(state.cardDataLoaded.artwork&&!force)return;
+    const masterArtwork=await API.get('/bbs/admin/card-master-artwork').catch(error=>({data:{slots:{Personal:{Front:null,Back:null},Department:{Front:null,Back:null}},records:[],error:error?.message||'โหลด Master Artwork ไม่สำเร็จ'}}));
+    state.masterArtwork=masterArtwork.data||state.masterArtwork;
+    state.cardDataLoaded.artwork=true;
+}
+
+async function loadCardFoundation({force=false}={}) {
+    await Promise.all([loadMasterReference({force}),loadMasterArtwork({force})]);
+}
+
+async function loadPersonalTemplateCatalog({active=true,trash=true}={}) {
+    const tasks=[];
+    if(active)tasks.push(API.get('/bbs/admin/card-templates').then(result=>{state.cardTemplates=result.data||[];}));
+    if(trash)tasks.push(API.get('/bbs/admin/card-templates?trash=1').then(result=>{state.trashedCardTemplates=result.data||[];}));
+    await Promise.all(tasks);
+}
+
+async function loadPersonalCardRows() {
+    const ef=state.cardEmployeeFilters,cf=state.cardFilters;
+    const employeeQuery=new URLSearchParams({paged:'1',page:String(ef.page),pageSize:String(ef.pageSize)});
+    const cardQuery=new URLSearchParams({paged:'1',page:String(cf.page),pageSize:String(cf.pageSize)});
+    for(const key of ['q','departmentId'])if(ef[key]!==''&&ef[key]!==null)employeeQuery.set(key,String(ef[key]));
+    for(const key of ['q','status','departmentId'])if(cf[key]!==''&&cf[key]!==null)cardQuery.set(key,String(cf[key]));
+    const[employees,cards]=await Promise.all([API.get(`/bbs/admin/card-employees?${employeeQuery}`),API.get(`/bbs/admin/cards?${cardQuery}`)]);
+    state.cardEmployees=listRows(employees.data);state.listMeta.cardEmployees=listPagination(employees.data);
+    state.cards=listRows(cards.data);state.listMeta.cards=listPagination(cards.data);
+}
+
+async function loadPersonalCardAdmin({force=false}={}) {
+    if(state.cardDataLoaded.personal&&!force)return;
+    await Promise.all([loadPersonalTemplateCatalog(),loadPersonalCardRows()]);
+    state.cardDataLoaded.personal=true;
+}
+
+async function loadDepartmentCardCatalog({active=true,trash=true}={}) {
+    const tasks=[];
+    if(active)tasks.push(API.get('/bbs/admin/department-cards').then(result=>{state.communityAdmin=result.data||state.communityAdmin;}));
+    if(trash)tasks.push(API.get('/bbs/admin/department-cards?trash=1').then(result=>{state.trashedDepartmentTemplates=result.data?.templates||[];}));
+    await Promise.all(tasks);
+}
+
+async function loadDepartmentCardAdmin({force=false}={}) {
+    if(state.cardDataLoaded.department&&!force)return;
+    await loadDepartmentCardCatalog();
+    state.cardDataLoaded.department=true;
+}
+
+async function loadCardWorkspace(workspace=state.cardWorkspace,{force=false}={}) {
+    if(!state.context?.permissions?.configure)return;
+    const tasks=[loadCardFoundation({force})];
+    if(workspace==='personal'||workspace==='overview')tasks.push(loadPersonalCardAdmin({force}));
+    if(workspace==='department'||workspace==='overview')tasks.push(loadDepartmentCardAdmin({force}));
+    await Promise.all(tasks);
+}
+
+async function loadCardAdmin() { return loadPersonalCardRows(); }
 async function loadCoreData() {
     const ownDraftRequest = state.context?.permissions?.observe
         ? API.get('/bbs/observations?view=observer&status=Draft')
@@ -1690,23 +1768,30 @@ async function loadCoreData() {
         }
     }
 }
-async function loadData() {
-    await Promise.all([
-        trackSectionLoad('community', loadCommunity),
-        trackSectionLoad('inspectors', loadInspectorData)
-    ]);
-    if (!state.context?.configurationReady && !state.context?.permissions?.companyRead) return;
-    await Promise.all([
-        trackSectionLoad('core', loadCoreData),
-        state.context?.permissions?.configure ? trackSectionLoad('cards', loadCardAdmin) : Promise.resolve(null)
-    ]);
+async function loadTabWithReference(loader,{force=false}={}) {
+    await Promise.all([loader(),loadMasterReference({force})]);
 }
 
-async function uploadCardTemplate(event,operation){event.preventDefault();try{const form=new FormData(event.currentTarget);form.set('includeEmployeeId',event.currentTarget.elements.includeEmployeeId.checked?'1':'0');await API.upload('/bbs/admin/card-templates',form,{onProgress:uploadProgress(operation,'กำลังอัปโหลด Personal Template...')});operation?.update({label:'กำลังสร้าง Personal Template...',detail:'อัปโหลดครบแล้ว กำลังโหลดข้อมูลล่าสุด',progress:100});showToast('อัปโหลด Card Template เป็น Draft แล้ว','success');await loadCardAdmin();render();}catch(error){showToast(error?.message||'อัปโหลด Template ไม่สำเร็จ','error');}}
-async function uploadMasterArtwork(event,operation){event.preventDefault();const formElement=event.currentTarget,kind=formElement.dataset.kind,side=formElement.dataset.side,form=new FormData(formElement);try{await API.upload(`/bbs/admin/card-master-artwork/${kind.toLowerCase()}/${side.toLowerCase()}`,form,{onProgress:uploadProgress(operation,`กำลังอัปโหลด ${kind} ${side} Master Artwork...`)});operation?.update({label:'กำลังเปิดใช้ Master Artwork เวอร์ชันใหม่...',detail:'Draft และ Active เดิมจะไม่ถูกแก้ไขย้อนหลัง',progress:100});showToast(`ตั้งค่า ${kind} ${side} Master Artwork แล้ว`,'success');await loadCardAdmin();render();}catch(error){showToast(error?.message||'อัปโหลด Master Artwork ไม่สำเร็จ','error');}}
+async function loadActiveBbsTab({force=false}={}) {
+    if(state.tab==='community')return trackSectionLoad('community',()=>loadTabWithReference(loadCommunity,{force}));
+    if(state.tab==='team-management')return trackSectionLoad('inspectors',loadInspectorData);
+    if(state.tab==='actions')return trackSectionLoad('actions',()=>loadTabWithReference(loadActions,{force}));
+    if(state.tab==='analytics')return trackSectionLoad('analytics',()=>loadTabWithReference(loadAnalytics,{force}));
+    if(state.tab==='history')return trackSectionLoad('history',()=>loadTabWithReference(loadHistory,{force}));
+    if(state.tab==='cards')return trackSectionLoad('cards',()=>loadCardWorkspace(state.cardWorkspace,{force}));
+    if(!state.context?.configurationReady&&!state.context?.permissions?.companyRead)return null;
+    return trackSectionLoad('core',loadCoreData);
+}
+
+async function loadData() {
+    return loadActiveBbsTab({force:true});
+}
+
+async function uploadCardTemplate(event,operation){event.preventDefault();try{const form=new FormData(event.currentTarget);form.set('includeEmployeeId',event.currentTarget.elements.includeEmployeeId.checked?'1':'0');await API.upload('/bbs/admin/card-templates',form,{onProgress:uploadProgress(operation,'กำลังอัปโหลด Personal Template...')});operation?.update({label:'กำลังสร้าง Personal Template...',detail:'อัปโหลดครบแล้ว กำลังโหลดรายการ Template ล่าสุด',progress:100});showToast('อัปโหลด Card Template เป็น Draft แล้ว','success');await loadPersonalTemplateCatalog({trash:false});render();}catch(error){showToast(error?.message||'อัปโหลด Template ไม่สำเร็จ','error');}}
+async function uploadMasterArtwork(event,operation){event.preventDefault();const formElement=event.currentTarget,kind=formElement.dataset.kind,side=formElement.dataset.side,form=new FormData(formElement);try{await API.upload(`/bbs/admin/card-master-artwork/${kind.toLowerCase()}/${side.toLowerCase()}`,form,{onProgress:uploadProgress(operation,`กำลังอัปโหลด ${kind} ${side} Master Artwork...`)});operation?.update({label:'กำลังเปิดใช้ Master Artwork เวอร์ชันใหม่...',detail:'Draft และ Active เดิมจะไม่ถูกแก้ไขย้อนหลัง',progress:100});showToast(`ตั้งค่า ${kind} ${side} Master Artwork แล้ว`,'success');await loadMasterArtwork({force:true});render();}catch(error){showToast(error?.message||'อัปโหลด Master Artwork ไม่สำเร็จ','error');}}
 async function previewMasterArtwork(id){const popup=window.open('','_blank');if(!popup)return showToast('Browser ปิดกั้นหน้าต่าง Preview','error');try{const response=await apiFetch(`/bbs/admin/card-master-artwork/${id}/file`),blob=await response.blob(),url=URL.createObjectURL(blob);popup.location.href=url;setTimeout(()=>URL.revokeObjectURL(url),60000);}catch(error){popup.close();showToast(error?.message||'เปิด Master Artwork ไม่สำเร็จ','error');}}
 async function transitionTemplate(id,rowVersion,action){if(action==='activate')return openCardTemplatePreview('personal',id,{intent:'activate',onConfirm:()=>performTemplateTransition(id,rowVersion,action)});return performTemplateTransition(id,rowVersion,action);}
-async function performTemplateTransition(id,rowVersion,action){try{await API.put(`/bbs/admin/card-templates/${id}`,{rowVersion,action});showToast(action==='activate'?'เปิดใช้ Template แล้ว':'Archive Template แล้ว','success');await loadCardAdmin();render();}catch(error){showToast(error?.message||'เปลี่ยนสถานะ Template ไม่สำเร็จ','error');}}
+async function performTemplateTransition(id,rowVersion,action){try{await API.put(`/bbs/admin/card-templates/${id}`,{rowVersion,action});showToast(action==='activate'?'เปิดใช้ Template แล้ว':'Archive Template แล้ว','success');await loadPersonalTemplateCatalog({trash:false});render();}catch(error){showToast(error?.message||'เปลี่ยนสถานะ Template ไม่สำเร็จ','error');}}
 async function previewTemplate(id){return openCardTemplatePreview('personal',id);}
 function openCardPrintPopup(){const popup=window.open('','_blank');if(!popup){showToast('Popup is blocked. Allow popups before issuing or replacing a card. No card was changed.','error');return null;}popup.document.open();popup.document.write('<!doctype html><html><head><meta charset="utf-8"><title>Preparing BBS cards</title></head><body style="font-family:Arial,sans-serif;padding:32px"><h2>Preparing BBS Smart Card...</h2><p>Keep this window open while the secure QR is generated.</p></body></html>');popup.document.close();return popup;}
 async function preloadCardBackgrounds(templateIds){const backgrounds=new Map();for(const templateId of [...new Set(templateIds.map(n).filter(Boolean))]){const response=await apiFetch(`/bbs/admin/card-templates/${templateId}/file`);backgrounds.set(templateId,await blobDataUrl(await response.blob()));}return backgrounds;}
@@ -1732,6 +1817,7 @@ async function printIssuedCards(cards,reason,popup,backgrounds=new Map()){if(!ca
 
 export async function loadBbsSmartCardPage() {
     const page = document.getElementById('bbs-smart-card-page'); if (!page) return;
+    const measurement = beginBbsPerformance('page:initial-load');
     page.innerHTML = `<section role="status" aria-live="polite" aria-busy="true" class="flex min-h-64 items-center justify-center rounded-2xl border border-emerald-100 bg-white"><div class="text-center"><span aria-hidden="true" class="mx-auto block h-9 w-9 animate-spin rounded-full border-4 border-emerald-100 border-t-emerald-600"></span><h2 class="mt-4 font-black text-emerald-800">กำลังโหลด BBS Smart Card...</h2><p class="mt-1 text-xs text-slate-500">กำลังตรวจสอบสิทธิ์และเตรียมพื้นที่ทำงานล่าสุดของคุณ</p></div></section>`;
-    try { state.context = (await API.get('/bbs/me/context')).data;restoreBbsUiState();ensureBbsPersistenceListeners();await loadData();sanitizeBbsRestoredTab();await loadRestoredBbsTab();const qrEmployee=sessionStorage.getItem('bbs_qr_observed_employee'),communityDepartment=sessionStorage.getItem('bbs_community_department_id'),adminWorkspace=sessionStorage.getItem('bbs_admin_workspace');if(qrEmployee){sessionStorage.removeItem('bbs_qr_observed_employee');state.restoredScrollTop=0;await startObservation(qrEmployee);}else{if(communityDepartment){sessionStorage.removeItem('bbs_community_department_id');state.tab='community';state.restoredScrollTop=0;}else if(adminWorkspace&&state.context?.permissions?.configure){const allowed=new Set(['workspace','team-management','cards']);sessionStorage.removeItem('bbs_admin_workspace');if(allowed.has(adminWorkspace)){state.tab=adminWorkspace;state.restoredScrollTop=0;}}render({restoreScroll:true});reopenStoredDesignerIfNeeded();} } catch (error) { page.innerHTML = `<section role="alert" class="rounded-2xl border border-rose-200 bg-white p-10 text-center"><h3 class="font-black text-slate-800">ไม่สามารถเปิด BBS Smart Card</h3><p class="text-sm text-slate-500 mt-2">${escHtml(errorText(error))}</p><button type="button" data-bbs-page-reload class="mt-5 rounded-xl bg-emerald-700 px-5 py-3 text-sm font-black text-white">ลองเชื่อมต่อใหม่</button></section>`;page.querySelector('[data-bbs-page-reload]')?.addEventListener('click',()=>loadBbsSmartCardPage()); }
+    try { state.context=(await API.get('/bbs/me/context')).data;restoreBbsUiState();ensureBbsPersistenceListeners();const entry=consumeBbsEntryIntent();sanitizeBbsRestoredTab();await loadData();if(entry.qrEmployee&&state.tab==='start')await startObservation(entry.qrEmployee);else{render({restoreScroll:true});reopenStoredDesignerIfNeeded();}measurement.finish('completed'); } catch (error) { measurement.finish('failed');page.innerHTML = `<section role="alert" class="rounded-2xl border border-rose-200 bg-white p-10 text-center"><h3 class="font-black text-slate-800">ไม่สามารถเปิด BBS Smart Card</h3><p class="text-sm text-slate-500 mt-2">${escHtml(errorText(error))}</p><button type="button" data-bbs-page-reload class="mt-5 rounded-xl bg-emerald-700 px-5 py-3 text-sm font-black text-white">ลองเชื่อมต่อใหม่</button></section>`;page.querySelector('[data-bbs-page-reload]')?.addEventListener('click',()=>loadBbsSmartCardPage()); }
 }

@@ -61,6 +61,49 @@ function withChecklistReadiness(rows, candidates, asOf) {
     }));
 }
 
+const normalizedMasterKey = value => String(value || '').trim().toLowerCase();
+const employeeEligibilityKey = value => String(value || '').toLowerCase();
+
+async function loadAdminEligibleEmployees(asOf, queryable = db) {
+    const [employees, mappedPositions, departments, units, eligibilityRows] = await Promise.all([
+        queryable.query('SELECT EmployeeID,EmployeeName,Department,Unit,Position FROM Employees ORDER BY Department,Unit,EmployeeName').then(([rows]) => rows),
+        queryable.query(`SELECT p.id,p.Name,m.BBSLevel
+                           FROM Master_Positions p
+                           JOIN BBS_Position_Level_Mappings m ON m.PositionID=p.id AND m.IsActive=1`).then(([rows]) => rows),
+        queryable.query('SELECT id,Name FROM Master_Departments').then(([rows]) => rows),
+        queryable.query('SELECT id,name,department_id FROM Master_SafetyUnits').then(([rows]) => rows),
+        queryable.query(`SELECT EmployeeID,Eligibility
+                           FROM BBS_Employee_Eligibility
+                          WHERE IsActive=1 AND EffectiveFrom<=?
+                            AND (EffectiveTo IS NULL OR EffectiveTo>=?)
+                          ORDER BY EmployeeID,EffectiveFrom DESC,id DESC`, [asOf, asOf]).then(([rows]) => rows),
+    ]);
+    const positionsByName = new Map(mappedPositions.map(row => [normalizedMasterKey(row.Name), row]));
+    const departmentsByName = new Map(departments.map(row => [normalizedMasterKey(row.Name), row]));
+    const unitsByDepartmentAndName = new Map(units.map(row => [`${Number(row.department_id)}\u0000${normalizedMasterKey(row.name)}`, row]));
+    const effectiveEligibilityByEmployee = new Map();
+    for (const row of eligibilityRows) {
+        const key = employeeEligibilityKey(row.EmployeeID);
+        if (!effectiveEligibilityByEmployee.has(key)) effectiveEligibilityByEmployee.set(key, row.Eligibility);
+    }
+    const rows = [];
+    for (const employee of employees) {
+        const position = positionsByName.get(normalizedMasterKey(employee.Position));
+        const eligibility = effectiveEligibilityByEmployee.get(employeeEligibilityKey(employee.EmployeeID));
+        if (!position || (eligibility !== undefined && String(eligibility).toLowerCase() !== 'active')) continue;
+        const department = departmentsByName.get(normalizedMasterKey(employee.Department));
+        const unit = department ? unitsByDepartmentAndName.get(`${Number(department.id)}\u0000${normalizedMasterKey(employee.Unit)}`) : null;
+        rows.push({
+            ...employee,
+            BBSLevel: position.BBSLevel,
+            PositionID: Number(position.id),
+            DepartmentID: department ? Number(department.id) : null,
+            SafetyUnitID: unit ? Number(unit.id) : null,
+        });
+    }
+    return rows;
+}
+
 async function loadEmployeeContext(employeeId, asOf = bangkokIsoDate(), queryable = db) {
     const [rows] = await queryable.query(
         `SELECT e.EmployeeID,e.EmployeeName,e.Department,e.Unit,e.Position,e.Role,
@@ -197,34 +240,23 @@ router.get('/me/team', async (req, res) => {
 
 router.get('/eligible-employees', async (req, res) => {
     try {
-        const context = await loadContextPayload(req);
-        if (context.error) return res.status(context.error.status).json({ success: false, message: context.error.message });
         const role = String(req.user?.role || req.user?.Role || '').toLowerCase();
-        if (role !== 'admin' && (!context.data.configurationReady || !context.data.permissions.observe)) {
+        const asOf = normalizeIsoDate(req.query.asOf || bangkokIsoDate(), { required: true });
+        if (!asOf) return res.status(400).json({ success: false, message: 'asOf must be a valid YYYY-MM-DD date.' });
+        const context = role === 'admin' ? null : await loadContextPayload(req);
+        if (context?.error) return res.status(context.error.status).json({ success: false, message: context.error.message });
+        if (role === 'admin') {
+            const employee = await loadEmployeeContext(employeeIdFromUser(req.user), asOf);
+            if (!employee) return res.status(404).json({ success: false, message: 'Employee is not available in Employee Master.' });
+        } else if (!context.data.configurationReady || !context.data.permissions.observe) {
             return res.json({ success: true, data: { asOf: context.data.asOf, rows: [], denyReason: context.data.denyReason || 'OBSERVATION_SCOPE_NOT_GRANTED' } });
         }
         const employeeId = employeeIdFromUser(req.user);
-        let rows;
+        let rowsPromise;
         if (role === 'admin') {
-            [rows] = await db.query(
-                `SELECT e.EmployeeID,e.EmployeeName,e.Department,e.Unit,e.Position,m.BBSLevel,
-                        p.id PositionID,md.id DepartmentID,su.id SafetyUnitID
-                   FROM Employees e
-                   JOIN Master_Positions p ON LOWER(TRIM(p.Name))=LOWER(TRIM(e.Position))
-                   JOIN BBS_Position_Level_Mappings m ON m.PositionID=p.id AND m.IsActive=1
-                   LEFT JOIN Master_Departments md ON LOWER(TRIM(md.Name))=LOWER(TRIM(e.Department))
-                   LEFT JOIN Master_SafetyUnits su ON su.department_id=md.id AND LOWER(TRIM(su.name))=LOWER(TRIM(e.Unit))
-                   LEFT JOIN BBS_Employee_Eligibility elig ON elig.id=(
-                        SELECT ee.id FROM BBS_Employee_Eligibility ee
-                         WHERE ee.EmployeeID=e.EmployeeID AND ee.IsActive=1
-                           AND ee.EffectiveFrom<=? AND (ee.EffectiveTo IS NULL OR ee.EffectiveTo>=?)
-                         ORDER BY ee.EffectiveFrom DESC,ee.id DESC LIMIT 1)
-                  WHERE COALESCE(elig.Eligibility,'active')='active'
-                  ORDER BY e.Department,e.Unit,e.EmployeeName`,
-                [context.data.asOf, context.data.asOf]
-            );
+            rowsPromise = loadAdminEligibleEmployees(asOf);
         } else {
-            [rows] = await db.query(
+            rowsPromise = db.query(
                 `SELECT DISTINCT e.EmployeeID,e.EmployeeName,e.Department,e.Unit,e.Position,mapping.BBSLevel,
                         md.id DepartmentID,su.id SafetyUnitID,p.id PositionID
                    FROM BBS_Hierarchy_Assignments a
@@ -243,11 +275,12 @@ router.get('/eligible-employees', async (req, res) => {
                     AND COALESCE(elig.Eligibility,'active')='active'
                   ORDER BY e.EmployeeName`,
                 [context.data.asOf, context.data.asOf, employeeId, context.data.asOf, context.data.asOf]
-            );
+            ).then(([rows]) => rows);
         }
-        const candidates = await loadChecklistReadinessCandidates();
-        rows = withChecklistReadiness(rows, candidates, context.data.asOf);
-        return res.json({ success: true, data: { asOf: context.data.asOf, rows, denyReason: null } });
+        let rows, candidates;
+        [rows, candidates] = await Promise.all([rowsPromise, loadChecklistReadinessCandidates()]);
+        rows = withChecklistReadiness(rows, candidates, asOf);
+        return res.json({ success: true, data: { asOf, rows, denyReason: null } });
     } catch (error) {
         return phase1Error(res, error, 'eligible employees');
     }

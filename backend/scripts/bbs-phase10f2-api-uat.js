@@ -13,7 +13,10 @@ const marker = `UAT-BBS10F2-${Date.now()}`;
 const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Y9Zl1sAAAAASUVORK5CYII=', 'base64');
 const templateDir = path.join(__dirname, '..', 'private-uploads', 'bbs-card-templates');
 const assetDir = path.join(__dirname, '..', 'private-uploads', 'bbs-card-designer');
+const masterDir = path.join(__dirname, '..', 'private-uploads', 'bbs-card-master-artwork');
 const createdFiles = new Set();
+const masterIds = [];
+let priorMasterIds = [];
 let server;
 let templateId = null;
 let layoutId = null;
@@ -48,17 +51,20 @@ async function cleanup() {
         await db.query('DELETE FROM BBS_Card_Layout_Versions WHERE id=?', [layoutId]).catch(() => {});
     }
     if (templateId) await db.query('DELETE FROM BBS_Card_Templates WHERE id=?', [templateId]).catch(() => {});
+    if (masterIds.length) await db.query(`DELETE FROM BBS_Card_Master_Artwork WHERE id IN (${masterIds.map(() => '?').join(',')})`, masterIds).catch(() => {});
+    if (priorMasterIds.length) await db.query(`UPDATE BBS_Card_Master_Artwork SET Status='Active',ArchivedAt=NULL WHERE id IN (${priorMasterIds.map(() => '?').join(',')})`, priorMasterIds).catch(() => {});
     if (auditBaseline) await db.query("DELETE FROM Admin_AuditLogs WHERE id>? AND Module='bbs' AND TargetType IN ('BBS_Card_Layout_Version','BBS_Card_Layout_Asset')", [auditBaseline]).catch(() => {});
     for (const file of createdFiles) await fs.promises.rm(file, { force:true }).catch(() => {});
     const [[remaining]] = await db.query(
         `SELECT
             (SELECT COUNT(*) FROM BBS_Card_Templates WHERE TemplateName=?) templates,
             (SELECT COUNT(*) FROM BBS_Card_Layout_Versions WHERE id=?) versions,
-            (SELECT COUNT(*) FROM BBS_Card_Layout_Assets WHERE LayoutVersionID=?) assets`,
-        [marker, layoutId || 0, layoutId || 0]
-    ).catch(() => [[{ templates:-1, versions:-1, assets:-1 }]]);
-    console.log(`BBS Phase 10F-2 UAT cleanup: templates=${remaining.templates}, versions=${remaining.versions}, assets=${remaining.assets}`);
-    assert.deepStrictEqual([Number(remaining.templates), Number(remaining.versions), Number(remaining.assets)], [0,0,0]);
+            (SELECT COUNT(*) FROM BBS_Card_Layout_Assets WHERE LayoutVersionID=?) assets,
+            (SELECT COUNT(*) FROM BBS_Card_Master_Artwork WHERE OriginalName LIKE ?) masters`,
+        [marker, layoutId || 0, layoutId || 0, `${marker}%`]
+    ).catch(() => [[{ templates:-1, versions:-1, assets:-1, masters:-1 }]]);
+    console.log(`BBS Phase 10F-2 UAT cleanup: templates=${remaining.templates}, versions=${remaining.versions}, assets=${remaining.assets}, masters=${remaining.masters}`);
+    assert.deepStrictEqual([Number(remaining.templates), Number(remaining.versions), Number(remaining.assets), Number(remaining.masters)], [0,0,0,0]);
 }
 
 (async () => {
@@ -68,11 +74,25 @@ async function cleanup() {
     const userToken = tokenFor(readyUsers.user);
     const [[audit]] = await db.query('SELECT COALESCE(MAX(id),0) id FROM Admin_AuditLogs');
     auditBaseline = Number(audit.id);
+    const [[renderingBefore]] = await db.query("SELECT SettingValue FROM BBS_Settings WHERE SettingKey='visual_card_designer_rendering_enabled'");
 
     const templateName = `${marker}.png`;
     fs.mkdirSync(templateDir, { recursive:true });
+    fs.mkdirSync(masterDir, { recursive:true });
     await fs.promises.writeFile(path.join(templateDir, templateName), png);
     createdFiles.add(path.join(templateDir, templateName));
+    const [priorMasters] = await db.query("SELECT id FROM BBS_Card_Master_Artwork WHERE TemplateKind='Personal' AND Status='Active'");
+    priorMasterIds = priorMasters.map(row => Number(row.id));
+    if (priorMasterIds.length) await db.query("UPDATE BBS_Card_Master_Artwork SET Status='Archived',ArchivedAt=NOW() WHERE TemplateKind='Personal' AND Status='Active'");
+    for (const side of ['Front','Back']) {
+        const stored = `${marker}-${side}.png`;
+        const file = path.join(masterDir, stored);
+        await fs.promises.writeFile(file, png);
+        createdFiles.add(file);
+        const [[next]] = await db.query("SELECT COALESCE(MAX(VersionNo),0)+1 nextNo FROM BBS_Card_Master_Artwork WHERE TemplateKind='Personal' AND Side=?", [side]);
+        const [master] = await db.query("INSERT INTO BBS_Card_Master_Artwork(TemplateKind,Side,VersionNo,StoredName,OriginalName,MimeType,FileSize,PixelWidth,PixelHeight,Status,CreatedBy,ActivatedAt) VALUES('Personal',?,?,?,?, 'image/png',?,1,1,'Active',?,NOW())", [side, Number(next.nextNo), stored, stored, png.length, readyUsers.admin.id]);
+        masterIds.push(Number(master.insertId));
+    }
     const [createdTemplate] = await db.query(
         `INSERT INTO BBS_Card_Templates
          (TemplateName,BackgroundStoredName,OriginalName,MimeType,FileSize,WidthMM,HeightMM,IncludeEmployeeID,Status,CreatedBy,UpdatedBy)
@@ -92,7 +112,7 @@ async function cleanup() {
     assert.strictEqual(response.status, 201, JSON.stringify(response.json));
     layoutId = Number(response.json.data.id);
     assert.strictEqual(response.json.data.Status, 'Draft');
-    assert.strictEqual(response.json.data.layout.sides.length, 1);
+    assert.strictEqual(response.json.data.layout.sides.length, 2);
 
     response = await call(base, `/admin/card-designer/versions/${layoutId}/sides/front/background`, { token:adminToken });
     assert.strictEqual(response.status, 200);
@@ -118,11 +138,13 @@ async function cleanup() {
     response = await call(base, `/admin/card-designer/versions/${layoutId}`, { token:adminToken });
     assert.strictEqual(response.status, 200);
     const detail = response.json.data;
-    const back = {
-        ...detail.layout.sides[0], side:'Back', storageClass:'DesignerAsset', backgroundAssetId:assetId,
-        backgroundStoredName:'asset-reference', backgroundOriginalName:'uat-back.png', backgroundMimeType:'image/png', backgroundFileSize:png.length,
-    };
-    detail.layout.sides.push(back);
+    const back = detail.layout.sides.find(side => side.side === 'Back');
+    assert.ok(back?.masterArtworkId, 'Back must retain its Personal Back Master Artwork snapshot');
+    detail.layout.elements.push({
+        elementKey:'uat-static-image', side:'Back', elementType:'StaticImage', dataSourceKey:null, staticText:null, assetId,
+        xBP:6500, yBP:6500, widthBP:2000, heightBP:2000, rotationDeg:0, zIndex:1,
+        visible:true, locked:false, required:false, style:{ objectFit:'contain' },
+    });
     detail.layout.elements.push({
         elementKey:'uat-static-text', side:'Back', elementType:'StaticText', dataSourceKey:null, staticText:'Preview only', assetId:null,
         xBP:1000, yBP:1000, widthBP:5000, heightBP:1000, rotationDeg:0, zIndex:1,
@@ -131,7 +153,8 @@ async function cleanup() {
     response = await call(base, `/admin/card-designer/versions/${layoutId}`, { method:'PUT', token:adminToken, body:{ rowVersion:detail.RowVersion, layout:detail.layout } });
     assert.strictEqual(response.status, 200, JSON.stringify(response.json));
     assert.strictEqual(response.json.data.layout.sides.length, 2);
-    assert.strictEqual(response.json.data.layout.sides[1].backgroundAssetId, assetId);
+    assert.strictEqual(Number(response.json.data.layout.sides.find(side => side.side === 'Back').masterArtworkId), Number(back.masterArtworkId));
+    assert.strictEqual(response.json.data.layout.elements.some(row => row.elementKey === 'uat-static-image' && Number(row.assetId) === assetId), true);
     assert.strictEqual(response.json.data.layout.elements.some(row => row.elementKey === 'uat-static-text'), true);
     assert.strictEqual(JSON.stringify(response.json.data).includes(privateStoredName), false, 'Layout detail must not expose a stored file name');
 
@@ -144,7 +167,7 @@ async function cleanup() {
     assert.deepStrictEqual(response.bytes, png);
 
     const [[rendering]] = await db.query("SELECT SettingValue FROM BBS_Settings WHERE SettingKey='visual_card_designer_rendering_enabled'");
-    assert.strictEqual(String(rendering.SettingValue), '0', 'Phase 10F-2 must keep live designer rendering disabled');
+    assert.strictEqual(String(rendering.SettingValue), String(renderingBefore.SettingValue), 'Designer API UAT must not change the rendering gate');
 
     await db.query("UPDATE BBS_Card_Layout_Versions SET Status='Active' WHERE id=?", [layoutId]);
     response = await call(base, `/admin/card-designer/versions/${layoutId}`, { method:'PUT', token:adminToken, body:{ rowVersion:response.json?.data?.RowVersion || detail.RowVersion + 1, layout:detail.layout } });

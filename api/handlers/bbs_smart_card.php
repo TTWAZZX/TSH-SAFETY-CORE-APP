@@ -67,6 +67,55 @@ function bbs_phase1_with_checklist_readiness(array $rows, array $candidates, str
     return $rows;
 }
 
+function bbs_phase1_master_key(mixed $value): string
+{
+    return mb_strtolower(trim((string) $value), 'UTF-8');
+}
+
+function bbs_phase1_admin_eligible_employees(string $asOf): array
+{
+    $employees = db_rows('SELECT EmployeeID,EmployeeName,Department,Unit,Position FROM employees ORDER BY Department,Unit,EmployeeName');
+    $mappedPositions = db_rows("SELECT p.id,p.Name,m.BBSLevel
+                                  FROM master_positions p
+                                  JOIN BBS_Position_Level_Mappings m ON m.PositionID=p.id AND m.IsActive=1");
+    $departments = db_rows('SELECT id,Name FROM master_departments');
+    $units = db_rows('SELECT id,name,department_id FROM master_safetyunits');
+    $eligibilityRows = db_rows(
+        "SELECT EmployeeID,Eligibility FROM BBS_Employee_Eligibility
+          WHERE IsActive=1 AND EffectiveFrom<=? AND (EffectiveTo IS NULL OR EffectiveTo>=?)
+          ORDER BY EmployeeID,EffectiveFrom DESC,id DESC",
+        [$asOf, $asOf]
+    );
+    $positionsByName = [];
+    foreach ($mappedPositions as $row) $positionsByName[bbs_phase1_master_key($row['Name'])] = $row;
+    $departmentsByName = [];
+    foreach ($departments as $row) $departmentsByName[bbs_phase1_master_key($row['Name'])] = $row;
+    $unitsByDepartmentAndName = [];
+    foreach ($units as $row) $unitsByDepartmentAndName[(int) $row['department_id'] . "\0" . bbs_phase1_master_key($row['name'])] = $row;
+    $effectiveEligibilityByEmployee = [];
+    foreach ($eligibilityRows as $row) {
+        $key = mb_strtolower((string) $row['EmployeeID'], 'UTF-8');
+        if (!array_key_exists($key, $effectiveEligibilityByEmployee)) $effectiveEligibilityByEmployee[$key] = $row['Eligibility'];
+    }
+    $rows = [];
+    foreach ($employees as $employee) {
+        $position = $positionsByName[bbs_phase1_master_key($employee['Position'])] ?? null;
+        $employeeKey = mb_strtolower((string) $employee['EmployeeID'], 'UTF-8');
+        $eligibility = $effectiveEligibilityByEmployee[$employeeKey] ?? null;
+        if (!$position || ($eligibility !== null && strcasecmp((string) $eligibility, 'active') !== 0)) continue;
+        $department = $departmentsByName[bbs_phase1_master_key($employee['Department'])] ?? null;
+        $unitKey = $department ? (int) $department['id'] . "\0" . bbs_phase1_master_key($employee['Unit']) : '';
+        $unit = $department ? ($unitsByDepartmentAndName[$unitKey] ?? null) : null;
+        $rows[] = $employee + [
+            'BBSLevel' => $position['BBSLevel'],
+            'PositionID' => (int) $position['id'],
+            'DepartmentID' => $department ? (int) $department['id'] : null,
+            'SafetyUnitID' => $unit ? (int) $unit['id'] : null,
+        ];
+    }
+    return $rows;
+}
+
 function bbs_phase1_current_assignments(string $employeeId, string $asOf): array
 {
     return db_rows(
@@ -266,26 +315,17 @@ function handle_bbs_smart_card_routes(string $method, string $path): bool
     if ($method === 'GET' && $path === '/bbs/eligible-employees') {
         $asOf = bbs_phase1_iso_date($_GET['asOf'] ?? (new DateTimeImmutable('now', new DateTimeZone('Asia/Bangkok')))->format('Y-m-d'), true);
         if (!$asOf) json_response(['success' => false, 'message' => 'asOf must be a valid YYYY-MM-DD date.'], 400);
-        $payload = bbs_phase1_context_payload($user, $asOf);
-        if (isset($payload['error'])) json_response(['success' => false, 'message' => $payload['error']['message']], $payload['error']['status']);
         $isAdmin = strcasecmp((string) ($user['role'] ?? ''), 'Admin') === 0;
+        $payload = $isAdmin ? null : bbs_phase1_context_payload($user, $asOf);
+        if ($payload !== null && isset($payload['error'])) json_response(['success' => false, 'message' => $payload['error']['message']], $payload['error']['status']);
+        if ($isAdmin && !bbs_phase1_employee_context((string) ($user['id'] ?? ''), $asOf)) {
+            json_response(['success' => false, 'message' => 'Employee is not available in Employee Master.'], 404);
+        }
         if (!$isAdmin && (empty($payload['data']['configurationReady']) || empty($payload['data']['permissions']['observe']))) {
             json_response(['success' => true, 'data' => ['asOf' => $asOf, 'rows' => [], 'denyReason' => $payload['data']['denyReason'] ?: 'OBSERVATION_SCOPE_NOT_GRANTED']]);
         }
         if ($isAdmin) {
-            $rows = db_rows(
-                "SELECT e.EmployeeID,e.EmployeeName,e.Department,e.Unit,e.Position,m.BBSLevel,
-                        p.id PositionID,md.id DepartmentID,su.id SafetyUnitID
-                   FROM employees e JOIN master_positions p ON LOWER(TRIM(p.Name))=LOWER(TRIM(e.Position))
-                   JOIN BBS_Position_Level_Mappings m ON m.PositionID=p.id AND m.IsActive=1
-                   LEFT JOIN master_departments md ON LOWER(TRIM(md.Name))=LOWER(TRIM(e.Department))
-                   LEFT JOIN master_safetyunits su ON su.department_id=md.id AND LOWER(TRIM(su.name))=LOWER(TRIM(e.Unit))
-                   LEFT JOIN BBS_Employee_Eligibility elig ON elig.id=(SELECT ee.id FROM BBS_Employee_Eligibility ee
-                    WHERE ee.EmployeeID=e.EmployeeID AND ee.IsActive=1 AND ee.EffectiveFrom<=?
-                      AND (ee.EffectiveTo IS NULL OR ee.EffectiveTo>=?) ORDER BY ee.EffectiveFrom DESC,ee.id DESC LIMIT 1)
-                  WHERE COALESCE(elig.Eligibility,'active')='active' ORDER BY e.Department,e.Unit,e.EmployeeName",
-                [$asOf, $asOf]
-            );
+            $rows = bbs_phase1_admin_eligible_employees($asOf);
         } else {
             $rows = db_rows(
                 "SELECT DISTINCT e.EmployeeID,e.EmployeeName,e.Department,e.Unit,e.Position,mapping.BBSLevel,md.id DepartmentID,su.id SafetyUnitID,p.id PositionID

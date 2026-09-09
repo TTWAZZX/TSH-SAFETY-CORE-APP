@@ -229,6 +229,7 @@
     "uat:production-yokoten-dashboard-readonly": "node scripts/production-yokoten-dashboard-readonly-uat.js",
     "uat:production-yokoten-dashboard-browser": "node scripts/production-yokoten-dashboard-browser-uat.js",
     "test:bbs": "node scripts/bbs-regression.js",
+    "audit:bbs-query-performance": "node scripts/bbs-query-performance-audit.js",
     "test:bbs-integration-print": "node scripts/bbs-integration-print.test.js",
     "setup:bbs-integration-local": "node scripts/bbs-integration-local-setup.js"
   },
