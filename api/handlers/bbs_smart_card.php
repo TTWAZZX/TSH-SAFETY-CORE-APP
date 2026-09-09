@@ -67,7 +67,7 @@ function bbs_phase1_with_checklist_readiness(array $rows, array $candidates, str
     return $rows;
 }
 
-function bbs_phase1_master_key(mixed $value): string
+function bbs_phase1_master_key($value): string
 {
     return mb_strtolower(trim((string) $value), 'UTF-8');
 }
