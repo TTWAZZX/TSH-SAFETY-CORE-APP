@@ -1,5 +1,11 @@
 # TSH Safety Core Activity - AGENTS.md
 
+## BBS legacy Designer Draft repair Production release (2026-09-11)
+
+- `main` commit `a0966a3` is deployed to the PHP Production target. Personal template 2 / Tube cutting / Designer V1 remains an intentionally unrepaired legacy Draft until an Admin explicitly uses “ซ่อม Master Artwork ของ Draft”; normal Save remains blocked beforehand.
+- The deployment changed no schema, BBS business record, private-upload path or rollout flag. Production verification passed FTPS 5/5, HTTPS 4/4, authenticated read-only inventory, focused Designer smoke and full responsive BBS smoke with zero mutation requests or console errors.
+- Fresh rollback evidence is under `backups/production/bbs-master-rebase-predeploy-20260911-160219/`: verified 193-table SQL gzip, exact runtime-before files and eight BBS private uploads. The temporary protected helper was removed and the original `.htaccess` restored.
+
 ## BBS legacy Designer Draft Master Artwork repair constraints (2026-09-11)
 
 - A pre-Master-Artwork Designer Draft may be repaired only by an Admin-explicit rebase. Rebase is Draft-only, requires optimistic `RowVersion`, uses the current Active same-kind Front and Back Master Artwork, and snapshots both files inside the transaction.
