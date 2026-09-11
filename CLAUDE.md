@@ -1,5 +1,13 @@
 # TSH Safety Core Activity - AI Quick Start
 
+## Current BBS legacy Draft Master Artwork repair handoff (2026-09-11, local)
+
+Production read-only inspection confirmed Personal template 2 / Designer V1 points Front to asset 4 and Back to asset 5; both assets have no `MasterArtworkID`, so the server correctly rejects normal Save with `409 MASTER_ARTWORK_REQUIRED`. This is legacy Draft provenance, not a KY deployment or cache regression.
+
+The reusable Production inventory (`npm run audit:bbs-master-artwork-production`) found 2 card templates, 1 Designer layout version, 0 compliant versions and exactly 1 repairable Draft: Personal template 2 / Tube cutting / V1, affecting Front and Back. It found no immutable legacy versions and performed zero writes.
+
+Local source now exposes an Admin-explicit, Draft-only “ซ่อม Master Artwork ของ Draft” action. It snapshots the current Active same-kind Front/Back Master Artwork while preserving the submitted size, positions, QR/text layers and authorized static assets. It is transactional and `RowVersion` protected; old assets/files remain retained. The UI states the exact impact before confirmation and blocks normal Save until the repair succeeds. Node/PHP contracts, local API UAT, desktop/browser repair plus subsequent normal Save, responsive Designer coverage, cleanup and BBS regression 53/53 pass. This repair is not pushed or deployed yet.
+
 ## Current KY History filter Production release (2026-09-11)
 
 `main` commit `507b615` is pushed and deployed. KY History now supports the complete combined filter/search set in frontend, Node and PHP: year/date range, Department/program Departments, Status, Risk Category, self/Admin submission source, Evidence and free text. The UI rejects reversed date ranges, ignores stale responses, shows result totals and can clear all filters.

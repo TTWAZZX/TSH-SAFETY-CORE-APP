@@ -1,5 +1,13 @@
 # TSH Safety Core Activity - Changelog And Handoff History
 
+## 2026-09-11 — BBS legacy Designer Draft Master Artwork repair (local)
+
+- Confirmed Production Personal template 2 / V1 was created before Master Artwork provenance: its Front/Back background assets have no `MasterArtworkID`, causing the correct `409 MASTER_ARTWORK_REQUIRED` response on Save.
+- Added an explicit Draft-only Master Artwork rebase in Node, PHP and the Designer UI. The repair uses current Active same-kind Front/Back masters, preserves current layout geometry/elements, validates static-asset ownership, increments `RowVersion` and retains all superseded assets/files.
+- Added a SELECT-only Production inventory command. It found 2 templates, 1 layout version, exactly 1 repairable Personal Draft (template 2 / Tube cutting / V1, Front and Back), no immutable legacy versions and made zero writes.
+- The Designer now explains before confirmation that repair replaces only Front/Back backgrounds while retaining card size, QR positions, text and layers; normal Save remains blocked until repair completes.
+- Local API and real-browser UAT passed unsaved-element preservation, correct Personal/side provenance, retained legacy assets, stale-version rejection, post-repair normal Save, responsive behavior and zero test residue. BBS regression passed 53/53. Cache keys are prepared, but this change is not pushed or deployed.
+
 ## 2026-09-11 — KY History complete filtering deployed
 
 - Pushed `507b615` and deployed the four PHP runtime paths. FTPS hashes passed 4/4, HTTPS hashes passed 3/3, and Production read-only API smoke passed every filter over 100 records with zero writes.

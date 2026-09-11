@@ -211,6 +211,7 @@
     "enable:bbs-phase10f2-local": "node scripts/bbs-phase10f2-enable-local.js",
     "migrate:bbs-phase10f1-local": "node scripts/bbs-phase10f1-migrate-local.js",
     "audit:bbs-phase10f1-inventory": "node scripts/bbs-phase10f1-card-designer-inventory.js",
+    "audit:bbs-master-artwork-production": "node scripts/bbs-master-artwork-production-inventory.js",
     "bootstrap:bbs-phase10f1-legacy": "node scripts/bbs-phase10f1-legacy-bootstrap.js",
     "audit:yokoten-admin-selection": "node scripts/yokoten-admin-selection-audit.js",
     "smoke:dashboard-coverage-source": "node scripts/dashboard-coverage-source-smoke.js",

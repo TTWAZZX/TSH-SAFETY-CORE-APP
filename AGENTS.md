@@ -1,5 +1,11 @@
 # TSH Safety Core Activity - AGENTS.md
 
+## BBS legacy Designer Draft Master Artwork repair constraints (2026-09-11)
+
+- A pre-Master-Artwork Designer Draft may be repaired only by an Admin-explicit rebase. Rebase is Draft-only, requires optimistic `RowVersion`, uses the current Active same-kind Front and Back Master Artwork, and snapshots both files inside the transaction.
+- Rebase may accept the Admin's current unsaved normalized layout so size, orientation, side settings, elements and authorized static-asset references survive the repair. Background asset references from the client are ignored and replaced server-side; foreign static assets fail closed.
+- Never auto-repair on read, mutate Active/Archived layouts, delete superseded Designer assets/files, or merge Personal and Department provenance. Node and PHP must remain behaviorally aligned.
+
 ## KY History filter Production release (2026-09-11)
 
 - `main` commit `507b615` is deployed to the PHP Production target. KY History supports combined year/date, Department/program Department, Status, Risk Category, submit-source, Evidence and free-text filters; reversed date ranges fail closed and stale browser responses cannot replace newer results.
