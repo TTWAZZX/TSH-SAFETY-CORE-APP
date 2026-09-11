@@ -1,8 +1,10 @@
 # TSH Safety Core Activity - AI Quick Start
 
-## Current KY History filter handoff (2026-09-11, local)
+## Current KY History filter Production release (2026-09-11)
 
-KY History now supports the complete combined filter/search set in frontend, Node and PHP: year/date range, Department/program Departments, Status, Risk Category, self/Admin submission source, Evidence and free text. The UI rejects reversed date ranges, ignores stale responses, shows result totals and can clear all filters. Contract tests and read-only Node/PHP API UAT pass against 88 local 2026 records with identical result IDs and zero writes. This work is not pushed or deployed.
+`main` commit `507b615` is pushed and deployed. KY History now supports the complete combined filter/search set in frontend, Node and PHP: year/date range, Department/program Departments, Status, Risk Category, self/Admin submission source, Evidence and free text. The UI rejects reversed date ranges, ignores stale responses, shows result totals and can clear all filters.
+
+Production evidence is under `backups/production/ky-history-filter-predeploy-20260911-132847/`. Exact before/after runtime files and SHA-256 checks passed 4/4 over FTPS and 3/3 public assets over HTTPS. Read-only API smoke passed all filters over 100 records with zero writes; Chrome passed live search/reset/reversed-date/mobile checks with zero console errors or mutation requests. No schema, KY data, upload path or rollout setting changed. A full Production database export was not retained because the environment safety control rejected downloading sensitive data; rollback uses the exact four-file runtime snapshot.
 
 ## Current BBS performance Production state (2026-09-09)
 

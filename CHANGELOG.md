@@ -1,10 +1,9 @@
 # TSH Safety Core Activity - Changelog And Handoff History
 
-## 2026-09-11 — KY History complete filtering (local)
+## 2026-09-11 — KY History complete filtering deployed
 
-- Fixed the PHP Production-parity KY list route so History filters no longer stop at Status: Department/configured Departments, Risk Category, submit source, date range, Evidence and free-text search now match the existing Node contract.
-- History now sends canonical Department/Risk parameters, filters Evidence server-side, ignores stale search responses, announces result counts, validates reversed dates and provides a one-action filter reset.
-- Read-only UAT against the 88 local 2026 KY records passed every filter with identical Node/PHP IDs and zero writes. No schema, upload path, KY record, GitHub push or Production deployment changed.
+- Pushed `507b615` and deployed the four PHP runtime paths. FTPS hashes passed 4/4, HTTPS hashes passed 3/3, and Production read-only API smoke passed every filter over 100 records with zero writes.
+- Headless Chrome verified live search, reset, reversed-date validation and mobile layout with zero console errors or mutation requests. No schema, upload path, KY record or rollout setting changed; exact runtime rollback files and verification evidence are retained under `backups/production/ky-history-filter-predeploy-20260911-132847/`.
 
 ## 2026-09-09 — BBS performance release deployed
 

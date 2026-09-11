@@ -1,5 +1,15 @@
 # TSH Safety Core Activity - Deployment
 
+## KY History complete filtering release (2026-09-11)
+
+Source commit `507b615` is pushed on `main` and deployed to `https://dev.tshpcl.com/safety/tsh-safety-core`. Runtime scope is `index.html`, `public/js/main.js`, `public/js/pages/ky.js` and `api/handlers/workflow_phase6.php`; Node changes remain API parity/test source. No schema, KY record, private-upload path or rollout-setting change was required.
+
+- Exact Production rollback files and the original `.htaccess` are under `backups/production/ky-history-filter-predeploy-20260911-132847/runtime-before/`. A full database export was not retained because the environment safety control rejected downloading the potentially sensitive Production dataset; this code-only release performs no database mutation.
+- FTPS upload/download-back SHA-256 matched source **4/4**. HTTPS SHA-256 matched all public assets **3/3**. The restored `.htaccess` matches its original SHA-256 `4088e920886567c344ae7a7a88aeb010dd7f2e42f7afd2af9d94f8de4a1265db`.
+- Authenticated Production API smoke covered Department plus alias, Risk plus alias, exact date range, free-text search, configured Departments, four Evidence states and self/Admin submit source over 100 records. Anonymous access returned `401`, reversed date range returned `400`, and writes were `0`.
+- Headless Chrome matched the initial 100 rows and 10-row search to API results, verified one-click reset and reversed-date browser validation, and passed a 390x844 viewport with zero page overflow, console errors or mutation requests.
+- The temporary Admin-protected backup helper was deleted and FTPS residue is `0`; the original router configuration was restored before deployment. Normal rollback restores the four runtime paths from `runtime-before/` and preserves all KY records/uploads.
+
 ## BBS performance release (2026-09-09)
 
 Source commits `a266f21` and `c5ef4f4` are pushed on `main` and deployed to `https://dev.tshpcl.com/safety/tsh-safety-core`. Runtime scope is `index.html`, `public/js/main.js`, `public/js/pages/bbs-smart-card.js`, `public/js/pages/bbs-card-designer.js`, `public/js/utils/bbs-async-ui.js` and `api/handlers/bbs_smart_card.php`; Node changes remain API parity/test source. No migration was required.

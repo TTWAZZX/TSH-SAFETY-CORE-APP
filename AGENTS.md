@@ -1,5 +1,11 @@
 # TSH Safety Core Activity - AGENTS.md
 
+## KY History filter Production release (2026-09-11)
+
+- `main` commit `507b615` is deployed to the PHP Production target. KY History supports combined year/date, Department/program Department, Status, Risk Category, submit-source, Evidence and free-text filters; reversed date ranges fail closed and stale browser responses cannot replace newer results.
+- This release changed no schema, KY record, private upload or rollout setting. Production database export was intentionally not retained after the environment safety control rejected a full sensitive-data download; exact rollback copies of the four changed runtime files are under `backups/production/ky-history-filter-predeploy-20260911-132847/runtime-before/`.
+- FTPS and HTTPS checksums passed, authenticated read-only API smoke covered every filter against 100 records with zero writes, and Chrome passed search/reset/date validation/mobile coverage with zero console errors or mutation requests. The temporary Admin-protected helper was removed and the original `.htaccess` checksum was restored.
+
 ## BBS performance Production release (2026-09-09)
 
 - `main` commits `a266f21` and PHP 7.4 compatibility follow-up `c5ef4f4` are deployed to the PHP Production target. The release adds lazy tab/workspace reads, scoped mutation refresh, standardized Busy state, active-side Designer image loading with editing previews, and the evidence-backed Admin eligible-employee projection optimization.
