@@ -1,5 +1,9 @@
 # TSH Safety Core Activity - AI Quick Start
 
+## Current KY History filter handoff (2026-09-11, local)
+
+KY History now supports the complete combined filter/search set in frontend, Node and PHP: year/date range, Department/program Departments, Status, Risk Category, self/Admin submission source, Evidence and free text. The UI rejects reversed date ranges, ignores stale responses, shows result totals and can clear all filters. Contract tests and read-only Node/PHP API UAT pass against 88 local 2026 records with identical result IDs and zero writes. This work is not pushed or deployed.
+
 ## Current BBS performance Production state (2026-09-09)
 
 `main` commits `a266f21` and `c5ef4f4` are pushed and deployed. BBS active-tab/workspace lazy loading, scoped mutation refresh, shared accessible Busy feedback, active-side-first Designer images/editing previews and the optimized Admin eligible-employee projection are live on the PHP 7.4 shared-hosting target. The PHP follow-up removes only an unsupported `mixed` type hint found by Production smoke; Node/PHP behavior remains aligned.

@@ -33,7 +33,7 @@ assert.match(frontend, /uploadKyVideoInChunks\(record\.id, file/, 'follow-up vid
 assert.match(frontend, /uploadKyVideoInChunks\(r\.id, videoFile/, 'Admin video replacement must use chunk upload');
 assert.match(frontend, /บันทึกกิจกรรม KY แล้ว แต่วิดีโออัปโหลดไม่สำเร็จ/, 'partial-success guidance must prevent duplicate KY resubmission');
 
-assert.match(main, /ky\.js\?v=20260831-ky-chunk-upload-r1/, 'KY page cache key must be updated');
-assert.match(html, /main\.js\?v=20260831-bbs-phase10c1-forklift-renewal-ky-chunk-r1/, 'SPA cache key must be updated');
+assert.match(main, /ky\.js\?v=20260911-ky-history-filter-r1/, 'KY page cache key must preserve the chunk workflow while serving the latest KY History release');
+assert.match(html, /main\.js\?v=20260911-ky-history-filter-r1/, 'SPA cache key must serve the latest KY History release');
 
 console.log('KY chunked video upload contract: PASS');

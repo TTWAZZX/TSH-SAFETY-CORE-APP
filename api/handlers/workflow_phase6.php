@@ -2175,7 +2175,35 @@ function handle_ky_routes(string $method, string $path): bool
     $p=route_params($path,'/ky/:id/reaction'); if($p!==null&&$method==='POST'){ $b=json_body();$reaction=$b['reaction']??'useful';if(!in_array($reaction,['useful','practice','awareness','attention'],true))json_response(['success'=>false,'message'=>'Invalid reaction.'],400);db_execute('INSERT INTO ky_video_reactions (ActivityID,EmployeeID,Reaction) VALUES (?,?,?) ON DUPLICATE KEY UPDATE Reaction=VALUES(Reaction)',[$p['id'],wf_user_id($user),$reaction]);json_response(['success'=>true]);}
     if($p!==null&&$method==='DELETE'){db_execute('DELETE FROM ky_video_reactions WHERE ActivityID=? AND EmployeeID=?',[$p['id'],wf_user_id($user)]);json_response(['success'=>true]);}
     $p=route_params($path,'/ky/:id/video-dashboard'); if($p!==null&&$method==='PUT'){require_admin();$b=json_body();db_execute('UPDATE ky_activities SET ShowVideoOnDashboard=COALESCE(?,ShowVideoOnDashboard),IsVideoPinned=COALESCE(?,IsVideoPinned) WHERE id=?',[array_key_exists('show',$b)?wf_bool($b['show']):null,array_key_exists('pinned',$b)?wf_bool($b['pinned']):null,$p['id']]);json_response(['success'=>true]);}
-    if($method==='GET'&&$path==='/ky'){ $sql='SELECT * FROM ky_activities WHERE 1=1';$pa=[];foreach(['status'=>'Status','department'=>'Department','safetyUnit'=>'SafetyUnit','riskCategory'=>'RiskCategory'] as $q=>$c){if(!empty($_GET[$q])&&$_GET[$q]!=='all'){$sql.=" AND $c=?";$pa[]=$_GET[$q];}} if(!empty($_GET['year'])){$sql.=' AND YEAR(ActivityDate)=?';$pa[]=(int)$_GET['year'];} if(!empty($_GET['month'])){$sql.=' AND MONTH(ActivityDate)=?';$pa[]=(int)$_GET['month'];} json_response(['success'=>true,'data'=>db_rows($sql.' ORDER BY ActivityDate DESC,CreatedAt DESC',$pa)]);}
+    if($method==='GET'&&$path==='/ky'){
+        $sql='SELECT * FROM ky_activities WHERE 1=1';$pa=[];
+        $status=trim((string)($_GET['status']??''));
+        $department=trim((string)($_GET['department']??($_GET['dept']??'')));
+        $safetyUnit=trim((string)($_GET['safetyUnit']??''));
+        $risk=trim((string)($_GET['riskCategory']??($_GET['risk']??'')));
+        $source=trim((string)($_GET['source']??''));
+        $evidence=trim((string)($_GET['evidence']??''));
+        $dateFrom=trim((string)($_GET['dateFrom']??''));$dateTo=trim((string)($_GET['dateTo']??''));
+        $validDate=static function(string $value): bool { if($value==='')return true;$date=DateTimeImmutable::createFromFormat('!Y-m-d',$value);return $date!==false&&$date->format('Y-m-d')===$value; };
+        if(!$validDate($dateFrom)||!$validDate($dateTo)||($dateFrom!==''&&$dateTo!==''&&strcmp($dateFrom,$dateTo)>0))json_response(['success'=>false,'message'=>'Invalid KY history date range.'],400);
+        if($status!==''&&$status!=='all'){$sql.=' AND Status=?';$pa[]=$status;}
+        if($department!==''&&$department!=='all'){$sql.=' AND Department=?';$pa[]=$department;}
+        elseif(!empty($_GET['depts'])){$departments=array_values(array_filter(array_map('trim',explode(',',(string)$_GET['depts'])),static fn($value)=>$value!==''));$departments=array_slice($departments,0,100);if($departments){$sql.=' AND Department IN ('.implode(',',array_fill(0,count($departments),'?')).')';array_push($pa,...$departments);}}
+        if($safetyUnit!==''&&$safetyUnit!=='all'){$sql.=' AND SafetyUnit=?';$pa[]=$safetyUnit;}
+        if($risk!==''&&$risk!=='all'){$sql.=' AND RiskCategory=?';$pa[]=$risk;}
+        if($source==='admin')$sql.=' AND SubmittedByID IS NOT NULL AND SubmittedByID<>ReporterID';
+        elseif($source==='self')$sql.=' AND (SubmittedByID IS NULL OR SubmittedByID=ReporterID)';
+        if($evidence==='complete')$sql.=" AND COALESCE(TRIM(AttachmentUrl),'')<>'' AND COALESCE(TRIM(VideoUrl),'')<>''";
+        elseif($evidence==='waiting_video')$sql.=" AND COALESCE(TRIM(AttachmentUrl),'')<>'' AND COALESCE(TRIM(VideoUrl),'')=''";
+        elseif($evidence==='no_video')$sql.=" AND COALESCE(TRIM(VideoUrl),'')=''";
+        elseif($evidence==='missing_file')$sql.=" AND COALESCE(TRIM(AttachmentUrl),'')=''";
+        if($dateFrom!==''&&$dateTo!==''){$sql.=' AND ActivityDate BETWEEN ? AND ?';array_push($pa,$dateFrom,$dateTo);}
+        elseif($dateFrom!==''){$sql.=' AND ActivityDate>=?';$pa[]=$dateFrom;}
+        elseif($dateTo!==''){$sql.=' AND ActivityDate<=?';$pa[]=$dateTo;}
+        else{if(!empty($_GET['year'])){$sql.=' AND YEAR(ActivityDate)=?';$pa[]=(int)$_GET['year'];}if(!empty($_GET['month'])){$sql.=' AND MONTH(ActivityDate)=?';$pa[]=(int)$_GET['month'];}}
+        $search=mb_substr(trim((string)($_GET['q']??'')),0,200,'UTF-8');if($search!==''){$sql.=' AND (ReporterName LIKE ? OR SubmittedByName LIKE ? OR Department LIKE ? OR SafetyUnit LIKE ? OR TeamName LIKE ? OR KYTKeyword LIKE ? OR HazardDescription LIKE ? OR Countermeasure LIKE ?)';$like='%'.$search.'%';array_push($pa,$like,$like,$like,$like,$like,$like,$like,$like);}
+        json_response(['success'=>true,'data'=>db_rows($sql.' ORDER BY ActivityDate DESC,CreatedAt DESC',$pa)]);
+    }
     if($method==='GET'&&$path==='/ky/email-outbox'){require_admin();$limit=min(max((int)($_GET['limit']??50),1),200);$sql='SELECT * FROM ky_emailoutbox';$pa=[];if(!empty($_GET['status'])&&$_GET['status']!=='all'){$sql.=' WHERE Status=?';$pa[]=$_GET['status'];}$pa[]=$limit;json_response(['success'=>true,'data'=>db_rows($sql.' ORDER BY CreatedAt DESC LIMIT ?',$pa),'smtpConfigured'=>mailer_smtp_configured()]);}
     if($method==='POST'&&$path==='/ky/email-outbox/retry-queued'){require_admin();if(!mailer_smtp_configured())json_response(['success'=>false,'message'=>'SMTP is not configured.'],400);$b=json_body();$r=mailer_outbox_retry_queued('ky_emailoutbox','Recipient','HtmlBody',(int)($b['limit']??20));json_response(['success'=>true,'message'=>"Retried {$r['processed']} KY email queue item(s)",'processed'=>$r['processed'],'sent'=>$r['sent'],'failed'=>$r['failed'],'data'=>$r]);}
     $p=route_params($path,'/ky/email-outbox/:id/retry'); if($p!==null&&$method==='POST'){require_admin();try{$r=mailer_outbox_send('ky_emailoutbox',(int)$p['id'],'Recipient','HtmlBody');json_response(['success'=>true,'message'=>'Email sent.','data'=>$r]);}catch(Throwable $e){json_response(['success'=>false,'message'=>'Email send failed.','error'=>$e->getMessage()],500);}}

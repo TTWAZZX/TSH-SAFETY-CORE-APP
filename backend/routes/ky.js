@@ -2238,7 +2238,21 @@ router.put('/:id/video-dashboard', isAdmin, async (req, res) => {
 router.get('/', async (req, res) => {
     try {
         await ensureTables();
-        const { status, dept, risk, source, year, month, q, depts, dateFrom, dateTo } = req.query;
+        const { status, source, year, month, q, depts, dateFrom, dateTo, evidence } = req.query;
+        const dept = req.query.department || req.query.dept;
+        const risk = req.query.riskCategory || req.query.risk;
+        const validDate = value => {
+            if (!value) return true;
+            const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(value));
+            if (!match) return false;
+            const date = new Date(Date.UTC(Number(match[1]), Number(match[2]) - 1, Number(match[3])));
+            return date.getUTCFullYear() === Number(match[1])
+                && date.getUTCMonth() + 1 === Number(match[2])
+                && date.getUTCDate() === Number(match[3]);
+        };
+        if (!validDate(dateFrom) || !validDate(dateTo) || (dateFrom && dateTo && dateFrom > dateTo)) {
+            return res.status(400).json({ success: false, message: 'Invalid KY history date range.' });
+        }
 
         let sql = 'SELECT * FROM KY_Activities WHERE 1=1';
         const params = [];
@@ -2249,7 +2263,7 @@ router.get('/', async (req, res) => {
         if (dept && dept !== 'all') {
             sql += ' AND Department = ?'; params.push(dept);
         } else if (depts) {
-            const deptList = depts.split(',').map(d => d.trim()).filter(Boolean);
+            const deptList = depts.split(',').map(d => d.trim()).filter(Boolean).slice(0, 100);
             if (deptList.length) {
                 sql += ` AND Department IN (${deptList.map(() => '?').join(',')})`;
                 params.push(...deptList);
@@ -2261,6 +2275,15 @@ router.get('/', async (req, res) => {
             sql += ' AND SubmittedByID IS NOT NULL AND SubmittedByID <> ReporterID';
         } else if (source === 'self') {
             sql += ' AND (SubmittedByID IS NULL OR SubmittedByID = ReporterID)';
+        }
+        if (evidence === 'complete') {
+            sql += " AND COALESCE(TRIM(AttachmentUrl),'') <> '' AND COALESCE(TRIM(VideoUrl),'') <> ''";
+        } else if (evidence === 'waiting_video') {
+            sql += " AND COALESCE(TRIM(AttachmentUrl),'') <> '' AND COALESCE(TRIM(VideoUrl),'') = ''";
+        } else if (evidence === 'no_video') {
+            sql += " AND COALESCE(TRIM(VideoUrl),'') = ''";
+        } else if (evidence === 'missing_file') {
+            sql += " AND COALESCE(TRIM(AttachmentUrl),'') = ''";
         }
         // Date range overrides year/month when provided
         if (dateFrom && dateTo) {
@@ -2275,11 +2298,11 @@ router.get('/', async (req, res) => {
         }
         if (q && q.trim()) {
             sql += ' AND (ReporterName LIKE ? OR SubmittedByName LIKE ? OR Department LIKE ? OR SafetyUnit LIKE ? OR TeamName LIKE ? OR KYTKeyword LIKE ? OR HazardDescription LIKE ? OR Countermeasure LIKE ?)';
-            const like = `%${q.trim()}%`;
+            const like = `%${q.trim().slice(0, 200)}%`;
             params.push(like, like, like, like, like, like, like, like);
         }
 
-        sql += ' ORDER BY CreatedAt DESC';
+        sql += ' ORDER BY ActivityDate DESC, CreatedAt DESC';
 
         const [rows] = await db.query(sql, params);
         res.json({ success: true, data: rows });

@@ -401,6 +401,7 @@ let _filterMgmtDept = 'all';
 let _filterMgmtRisk = 'all';
 let _filterDateFrom = '';
 let _filterDateTo   = '';
+let _historyRequestSeq = 0;
 let _departments    = [];
 let _lastStatsData   = null;
 let _kyProgConfig   = [];                          // KY_Program_Config for current year
@@ -3391,6 +3392,10 @@ async function renderHistory(container) {
                         <input id="ky-history-search" type="text" placeholder="ค้นหารายงาน..."
                                value="${_searchQ}" class="form-input w-full pl-9 text-sm py-2">
                     </div>
+                    <button id="ky-history-clear" type="button"
+                        class="flex items-center justify-center px-3 py-2 rounded-xl text-sm font-semibold border border-slate-200 text-slate-600 bg-white hover:bg-slate-50 transition-all flex-shrink-0">
+                        ล้างตัวกรอง
+                    </button>
                     <button id="ky-export-btn"
                         class="flex items-center justify-center gap-1.5 px-3 py-2 rounded-xl text-sm font-semibold border border-indigo-200 text-indigo-700 bg-white hover:bg-indigo-50 transition-all flex-shrink-0">
                         <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -3400,6 +3405,7 @@ async function renderHistory(container) {
                         Export Excel
                     </button>
                 </div>
+                <div id="ky-history-filter-result" class="mt-3 text-xs text-slate-500" role="status" aria-live="polite"></div>
             </div>
 
             <div class="ds-table-wrap">
@@ -3431,6 +3437,10 @@ async function renderHistory(container) {
 async function fetchAndRenderHistory() {
     const tbody = document.getElementById('ky-history-tbody');
     if (!tbody) return;
+    const requestId = ++_historyRequestSeq;
+    const resultStatus = document.getElementById('ky-history-filter-result');
+    tbody.setAttribute('aria-busy', 'true');
+    if (resultStatus) resultStatus.textContent = 'กำลังกรองข้อมูล...';
     try {
         const params = new URLSearchParams();
         if (_filterStatus !== 'all') params.set('status', _filterStatus);
@@ -3439,18 +3449,21 @@ async function fetchAndRenderHistory() {
         if (_filterDateTo)   params.set('dateTo',   _filterDateTo);
         if (!_filterDateFrom && !_filterDateTo && _filterHistYear) params.set('year', _filterHistYear);
         if (_filterHistDept !== 'all') {
-            params.set('dept', _filterHistDept);
+            params.set('department', _filterHistDept);
         } else {
             // Scope to configured depts when "all" is selected and config exists
             const configDepts = _kyProgConfig.filter(c => c.IsActive).map(c => c.Department);
             if (configDepts.length) params.set('depts', configDepts.join(','));
         }
-        if (_filterHistRisk !== 'all') params.set('risk', _filterHistRisk);
+        if (_filterHistRisk !== 'all') params.set('riskCategory', _filterHistRisk);
         if (_filterHistSource !== 'all') params.set('source', _filterHistSource);
+        if (_filterHistEvidence !== 'all') params.set('evidence', _filterHistEvidence);
         if (_searchQ.trim())           params.set('q', _searchQ.trim());
         const res     = await API.get(`/ky?${params}`);
+        if (requestId !== _historyRequestSeq) return;
         const records = filterKyEvidenceRecords(normalizeApiArray(res?.data ?? res), _filterHistEvidence);
         _historyRecords = records;
+        if (resultStatus) resultStatus.textContent = `พบ ${records.length.toLocaleString('th-TH')} รายการตามตัวกรอง`;
 
         if (!records.length) {
             tbody.innerHTML = `<tr><td colspan="8" class="text-center py-10 text-slate-400 text-sm">ไม่พบกิจกรรม KY</td></tr>`;
@@ -3500,7 +3513,11 @@ async function fetchAndRenderHistory() {
             </tr>`;
         }).join('');
     } catch (err) {
+        if (requestId !== _historyRequestSeq) return;
         if (tbody) tbody.innerHTML = `<tr><td colspan="8" class="text-center py-6 text-red-500 text-sm">${escHtml(err.message)}</td></tr>`;
+        if (resultStatus) resultStatus.textContent = 'กรองข้อมูลไม่สำเร็จ กรุณาลองใหม่';
+    } finally {
+        if (requestId === _historyRequestSeq) tbody.removeAttribute('aria-busy');
     }
 }
 
@@ -5319,6 +5336,20 @@ function setupEventListeners() {
             return;
         }
 
+        if (e.target.closest('#ky-history-clear')) {
+            _filterStatus = 'all';
+            _filterHistDept = 'all';
+            _filterHistRisk = 'all';
+            _filterHistSource = 'all';
+            _filterHistEvidence = 'all';
+            _filterDateFrom = '';
+            _filterDateTo = '';
+            _searchQ = '';
+            const content = document.getElementById('ky-tab-content');
+            if (content) await renderHistory(content);
+            return;
+        }
+
         if (e.target.closest('[data-ky-open-history]')) {
             _filterHistYear = _filterMgmtYear;
             _filterHistDept = _filterMgmtDept;
@@ -5355,8 +5386,18 @@ function setupEventListeners() {
     document.addEventListener('change', async (e) => {
         if (!e.target.closest('#ky-page') && !e.target.closest('#ky-video-library-modal')) return;
         if (e.target.id === 'ky-filter-status') { _filterStatus = e.target.value; await fetchAndRenderHistory(); return; }
-        if (e.target.id === 'ky-hist-date-from') { _filterDateFrom = e.target.value; await fetchAndRenderHistory(); return; }
-        if (e.target.id === 'ky-hist-date-to')   { _filterDateTo   = e.target.value; await fetchAndRenderHistory(); return; }
+        if (e.target.id === 'ky-hist-date-from' || e.target.id === 'ky-hist-date-to') {
+            if (e.target.id === 'ky-hist-date-from') _filterDateFrom = e.target.value;
+            else _filterDateTo = e.target.value;
+            const from = document.getElementById('ky-hist-date-from');
+            const to = document.getElementById('ky-hist-date-to');
+            const invalid = Boolean(_filterDateFrom && _filterDateTo && _filterDateFrom > _filterDateTo);
+            from?.setCustomValidity(invalid ? 'วันที่เริ่มต้นต้องไม่อยู่หลังวันที่สิ้นสุด' : '');
+            to?.setCustomValidity(invalid ? 'วันที่สิ้นสุดต้องไม่อยู่ก่อนวันที่เริ่มต้น' : '');
+            if (invalid) { e.target.reportValidity(); return; }
+            await fetchAndRenderHistory();
+            return;
+        }
         if (e.target.id === 'ky-hist-year') {
             _filterHistYear = parseInt(e.target.value);
             _kyProgConfig = []; // clear so renderHistory fetches fresh config for new year
