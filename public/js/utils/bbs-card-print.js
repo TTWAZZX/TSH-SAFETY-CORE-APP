@@ -11,6 +11,7 @@ export function designerElementCss(element,{pixelsPerMM=null}={}){
     const unit=points=>pixelsPerMM===null?`${points}pt`:`${points*25.4/72*pixelsPerMM}px`;
     const weight=String(s.fontWeight||'700'),font=/^[a-z0-9 ,_-]{1,100}$/i.test(String(s.fontFamily||''))?s.fontFamily:'Kanit, Tahoma, Arial, sans-serif';
     const vertical=pick(s.verticalAlign,['top','middle','center','bottom'],'middle');
+    const textElement=['StaticText','DynamicText'].includes(element.elementType);
     const border=bounded(s.borderWidthPt,0,20,shape?1:0);
     return `position:absolute;box-sizing:border-box;left:${number(element.xBP)/100}%;top:${number(element.yBP)/100}%;width:${number(element.widthBP)/100}%;height:${number(element.heightBP)/100}%;z-index:${number(element.zIndex)};transform:rotate(${number(element.rotationDeg)}deg);`+
         `font-family:${font};font-size:${unit(bounded(s.fontSizePt,1,144,12))};font-weight:${/^(normal|bold|[1-9]00)$/.test(weight)?weight:'700'};font-style:${pick(s.fontStyle,['normal','italic','oblique'],'normal')};`+
@@ -18,7 +19,7 @@ export function designerElementCss(element,{pixelsPerMM=null}={}){
         `border:${unit(type==='line'?0:border)} solid ${color(s.borderColor,'#0f172a')};${type==='line'?`border-top:${unit(border||1)} solid ${color(s.borderColor,'#0f172a')};`:''}`+
         `border-radius:${type==='ellipse'?50:bounded(s.borderRadiusBP,0,5000)/100}%;line-height:${bounded(s.lineHeight,.5,5,1.2)};letter-spacing:${unit(bounded(s.letterSpacingPt,-10,30,0))};opacity:${bounded(s.opacity,0,1,1)};`+
         `object-fit:${pick(s.objectFit,['contain','cover','fill','none','scale-down'],'contain')};object-position:${bounded(s.objectPositionXBP,0,10000,5000)/100}% ${bounded(s.objectPositionYBP,0,10000,5000)/100}%;`+
-        `display:flex;flex-direction:column;justify-content:${vertical==='top'?'flex-start':vertical==='bottom'?'flex-end':'center'};overflow:hidden;white-space:pre-wrap;overflow-wrap:anywhere;`;
+        `display:flex;flex-direction:column;align-items:${textElement?'stretch':'center'};justify-content:${vertical==='top'?'flex-start':vertical==='bottom'?'flex-end':'center'};overflow:hidden;white-space:pre-wrap;overflow-wrap:anywhere;`;
 }
 
 export function renderDesignerElement(element,values,resources,qrDataUrl){

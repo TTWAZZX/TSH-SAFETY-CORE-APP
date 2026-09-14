@@ -14,6 +14,7 @@ const nodeCommunity=read('backend/routes/bbs-community.js');
 const phpDesigner=read('api/handlers/bbs_card_designer.php');
 const phpCards=read('api/handlers/bbs_cards.php');
 const phpCommunity=read('api/handlers/bbs_community.php');
+const ui=read('public/js/pages/bbs-smart-card.js');
 
 for(const marker of ['BBS_Card_Artwork_Slots','BBS_Card_Artwork_Versions','ArtworkVersionID','ArtworkRole','PreviewDepartmentID','PreviewSafetyUnitID','SafetyUnitID'])assert.ok(migration.includes(marker),`Scoped Artwork migration missing ${marker}`);
 for(const marker of ['GlobalBack','ScopedFront','BACK:GLOBAL','FRONT:','Safety Unit does not belong'])assert.ok(php.includes(marker),`PHP Artwork resolver missing ${marker}`);
@@ -40,4 +41,5 @@ assert.equal(selected.front.id,1,'Department Front must be the fallback when Uni
 selected=resolver.selectResolvedArtwork(rows,{kind:'Department',departmentId:7,safetyUnitId:12});
 assert.equal(selected.front,null,'Artwork must never cross Personal/Department kinds');assert.deepEqual(selected.missing,['Front']);
 assert.throws(()=>resolver.artworkCandidateKeys({kind:'Personal'}),/Department/);
+for(const marker of ['function resolveTemplateArtwork(','function updateTemplateArtworkMatch(','data-template-artwork-match','data-template-kind="Personal"','data-template-kind="Department"','data-template-artwork-preview','Artwork พร้อมสำหรับ Designer Draft','ใช้ภาพค่าเริ่มต้นระดับแผนก'])assert.ok(ui.includes(marker),`Template Artwork match UI missing ${marker}`);
 console.log('BBS Scoped Front and Global Back foundation contract: PASS');

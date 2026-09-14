@@ -1,5 +1,9 @@
 'use strict';
 
+const fs=require('fs');
+const path=require('path');
+const crypto=require('crypto');
+
 const ROLES=Object.freeze({GLOBAL_BACK:'GlobalBack',SCOPED_FRONT:'ScopedFront'});
 const KINDS=Object.freeze(['Personal','Department']);
 
@@ -13,4 +17,7 @@ function selectResolvedArtwork(rows,context){const candidates=artworkCandidateKe
 async function validateUnitDepartment(queryable,departmentValue,unitValue){const departmentId=positiveInt(departmentValue),safetyUnitId=positiveInt(unitValue);if(!departmentId)throw validationError('Department is required.');const[[department]]=await queryable.query("SELECT id FROM master_departments WHERE id=? AND Status='Active'",[departmentId]);if(!department)throw validationError('Selected Department is not active.');if(!safetyUnitId)return{departmentId,safetyUnitId:null};const[[row]]=await queryable.query('SELECT id FROM master_safetyunits WHERE id=? AND department_id=?',[safetyUnitId,departmentId]);if(!row)throw validationError('Safety Unit does not belong to the selected Department.');return{departmentId,safetyUnitId};}
 async function resolveActiveArtwork(queryable,context,{lock=false}={}){const keys=artworkCandidateKeys(context),all=[...keys.front,...keys.back];const[rows]=await queryable.query(`SELECT s.id ArtworkSlotID,s.SlotKey,s.ArtworkRole,s.TemplateKind,s.DepartmentID,s.SafetyUnitID,v.id ArtworkVersionID,v.VersionNo,v.StoredName,v.OriginalName,v.MimeType,v.FileSize,v.PixelWidth,v.PixelHeight,v.Status FROM BBS_Card_Artwork_Slots s JOIN BBS_Card_Artwork_Versions v ON v.ArtworkSlotID=s.id AND v.Status='Active' WHERE s.IsActive=1 AND s.SlotKey IN (?)${lock?' FOR UPDATE':''}`,[all]);return selectResolvedArtwork(rows,context);}
 
-module.exports={ROLES,KINDS,positiveInt,normalizeKind,globalBackSlotKey,scopedFrontSlotKey,artworkCandidateKeys,selectResolvedArtwork,validateUnitDepartment,resolveActiveArtwork};
+function verifiedImageMime(filePath){const head=fs.readFileSync(filePath).subarray(0,16);if(head[0]===0xff&&head[1]===0xd8&&head[2]===0xff)return'image/jpeg';if(head.length>=8&&head.subarray(0,8).equals(Buffer.from([0x89,0x50,0x4e,0x47,0x0d,0x0a,0x1a,0x0a])))return'image/png';if(head.subarray(0,4).toString('ascii')==='RIFF'&&head.subarray(8,12).toString('ascii')==='WEBP')return'image/webp';return null;}
+async function materializeLegacyFallback(queryable,context,{artworkDir,targetDir}){const resolved=await resolveActiveArtwork(queryable,context);if(!resolved.front)throw validationError(`Active ${normalizeKind(context.kind)} Scoped Front Artwork is required when no Legacy fallback file is uploaded.`);const artwork=resolved.front,mime=String(artwork.MimeType||''),extension=({'image/jpeg':'.jpg','image/png':'.png','image/webp':'.webp'})[mime];if(!extension)throw validationError('Resolved Scoped Front Artwork is not a supported image.');const source=path.join(artworkDir,path.basename(String(artwork.StoredName||'')));if(!source.startsWith(artworkDir)||!fs.existsSync(source)||verifiedImageMime(source)!==mime)throw validationError('Resolved Scoped Front Artwork file is unavailable or invalid.');fs.mkdirSync(targetDir,{recursive:true});const stored=`${Date.now()}-${crypto.randomBytes(18).toString('hex')}${extension}`,target=path.join(targetDir,stored);await fs.promises.copyFile(source,target,fs.constants.COPYFILE_EXCL);return{stored,target,name:String(artwork.OriginalName||'Scoped Front Artwork').slice(0,255),mime,size:Number(artwork.FileSize)||fs.statSync(target).size,source:'CardArtwork',artworkVersionId:Number(artwork.ArtworkVersionID)};}
+
+module.exports={ROLES,KINDS,positiveInt,normalizeKind,globalBackSlotKey,scopedFrontSlotKey,artworkCandidateKeys,selectResolvedArtwork,validateUnitDepartment,resolveActiveArtwork,materializeLegacyFallback};

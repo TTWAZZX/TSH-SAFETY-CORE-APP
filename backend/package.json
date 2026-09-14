@@ -106,6 +106,7 @@
     "test:bbs-phase1": "node scripts/bbs-phase1-parity.test.js",
     "migrate:bbs-master-artwork-local": "node scripts/bbs-master-artwork-migrate-local.js",
     "uat:bbs-master-artwork-local": "node scripts/bbs-master-artwork-local-uat.js",
+    "uat:bbs-artwork-template-e2e-local": "node scripts/bbs-artwork-template-e2e-local.js",
     "migrate:bbs-layout-preset-trash-local": "node scripts/bbs-layout-preset-trash-migrate-local.js",
     "test:bbs-layout-preset-trash": "node scripts/bbs-layout-preset-trash.test.js",
     "uat:bbs-layout-preset-trash-local": "node scripts/bbs-layout-preset-trash-local-uat.js",

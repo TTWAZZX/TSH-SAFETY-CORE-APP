@@ -13,11 +13,12 @@ const { BBS_LEVELS, bangkokIsoDate, levelRank } = require('../services/bbs-phase
 const { clean, createRawToken, hashToken, tokenFingerprint, validRawToken, normalizeInternalRoute, cardPayload } = require('../services/bbs-card');
 const { departmentRawToken } = require('../services/bbs-community');
 const { listQuery, pagination, searchText } = require('../services/bbs-list-query');
-const { resolveActiveArtwork, ROLES: ARTWORK_ROLES } = require('../services/bbs-card-artwork');
+const { resolveActiveArtwork, materializeLegacyFallback, ROLES: ARTWORK_ROLES } = require('../services/bbs-card-artwork');
 
 const publicRouter = express.Router();
 const router = express.Router();
 const templateDir = path.join(__dirname, '..', 'private-uploads', 'bbs-card-templates');
+const cardArtworkDir = path.join(__dirname, '..', 'private-uploads', 'bbs-card-master-artwork');
 fs.mkdirSync(templateDir, { recursive: true });
 
 const templateUpload = multer({
@@ -47,6 +48,7 @@ function verifiedImageMime(filePath) {
 function phase4Error(res, error, label) {
     if (error instanceof PrintReceiptError) return res.status(error.status).json({success:false,code:error.code,message:error.message});
     if (error instanceof CardReadinessError) return res.status(error.status).json({success:false,code:error.code,message:error.message});
+    if (error?.status) return res.status(error.status).json({success:false,code:error.code||'BBS_CARD_ERROR',message:error.message});
     console.error(`[bbs-phase4] ${label}:`, error?.message || error);
     if (error?.code === 'ER_NO_SUCH_TABLE') return res.status(503).json({ success:false, code:'BBS_CARD_SETUP_REQUIRED', message:'BBS Phase 4 database migration is required.' });
     if (error?.code === 'ER_DUP_ENTRY') return res.status(409).json({ success:false, code:'ACTIVE_CARD_EXISTS', message:'This employee already has an Active card. Use Replace.' });
@@ -180,22 +182,24 @@ router.get('/admin/card-templates', isAdmin, async (req, res) => {
 });
 
 router.post('/admin/card-templates', isAdmin, templateUpload.single('template'), async (req, res) => {
-    let persisted = false;
+    let persisted = false, fallback = null;
     try {
-        if (!req.file) return res.status(400).json({ success:false, message:'A JPG, PNG, or WebP card template is required.' });
-        const actualMime = verifiedImageMime(req.file.path);
-        if (!actualMime || actualMime !== req.file.mimetype) { unlinkStored(req.file.filename); return res.status(400).json({ success:false, message:'Template file content does not match its image type.' }); }
+        const reject=message=>{unlinkStored(req.file?.filename);return res.status(400).json({success:false,message});};
+        const actualMime = req.file ? verifiedImageMime(req.file.path) : null;
+        if (req.file && (!actualMime || actualMime !== req.file.mimetype)) { unlinkStored(req.file.filename); return res.status(400).json({ success:false, message:'Template file content does not match its image type.' }); }
         const name = clean(req.body?.templateName, 160); const departmentId = positiveInt(req.body?.departmentId); const safetyUnitId = positiveInt(req.body?.safetyUnitId); const level = clean(req.body?.bbsLevel, 40) || null;
         const width = Number(req.body?.widthMM || 60); const height = Number(req.body?.heightMM || 85);
-        if (!name) { unlinkStored(req.file.filename); return res.status(400).json({ success:false, message:'Template name is required.' }); }
-        if (!Number.isFinite(width) || width < 40 || width > 500 || !Number.isFinite(height) || height < 40 || height > 500) { unlinkStored(req.file.filename); return res.status(400).json({ success:false, message:'Card dimensions must be between 40 and 500 mm.' }); }
-        if (level && !BBS_LEVELS.includes(level)) { unlinkStored(req.file.filename); return res.status(400).json({ success:false, message:'BBS level is invalid.' }); }
-        if (departmentId) { const [[dept]] = await db.query('SELECT id FROM Master_Departments WHERE id=? LIMIT 1',[departmentId]); if (!dept) { unlinkStored(req.file.filename); return res.status(400).json({success:false,message:'Department is invalid.'}); } }
-        if (safetyUnitId) { if (!departmentId) { unlinkStored(req.file.filename); return res.status(400).json({success:false,message:'Select a Department before selecting a Safety Unit.'}); } const [[unit]]=await db.query('SELECT id FROM Master_SafetyUnits WHERE id=? AND department_id=? LIMIT 1',[safetyUnitId,departmentId]); if(!unit){unlinkStored(req.file.filename);return res.status(400).json({success:false,message:'Safety Unit does not belong to the selected Department.'});} }
-        const [result] = await db.query(`INSERT INTO BBS_Card_Templates(TemplateName,DepartmentID,SafetyUnitID,BBSLevel,BackgroundStoredName,OriginalName,MimeType,FileSize,WidthMM,HeightMM,IncludeEmployeeID,CreatedBy,UpdatedBy) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)`, [name,departmentId,safetyUnitId,level,req.file.filename,clean(req.file.originalname),actualMime,req.file.size,width,height,String(req.body?.includeEmployeeId) === '0' ? 0 : 1,actorId(req),actorId(req)]);
-        persisted = true; await logAudit(req,{action:'BBS_CARD_TEMPLATE_CREATE',module:'bbs',targetType:'BBS_Card_Template',targetId:result.insertId,detail:'Created Draft BBS card template.'});
+        if (!name) return reject('Template name is required.');
+        if (!departmentId) return reject('Department is required.');
+        if (!Number.isFinite(width) || width < 40 || width > 500 || !Number.isFinite(height) || height < 40 || height > 500) return reject('Card dimensions must be between 40 and 500 mm.');
+        if (level && !BBS_LEVELS.includes(level)) return reject('BBS level is invalid.');
+        const [[dept]] = await db.query('SELECT id FROM Master_Departments WHERE id=? LIMIT 1',[departmentId]); if (!dept) return reject('Department is invalid.');
+        if (safetyUnitId) { const [[unit]]=await db.query('SELECT id FROM Master_SafetyUnits WHERE id=? AND department_id=? LIMIT 1',[safetyUnitId,departmentId]); if(!unit)return reject('Safety Unit does not belong to the selected Department.'); }
+        fallback=req.file?{stored:req.file.filename,target:req.file.path,name:clean(req.file.originalname),mime:actualMime,size:req.file.size,source:'Upload',artworkVersionId:null}:await materializeLegacyFallback(db,{kind:'Personal',departmentId,safetyUnitId},{artworkDir:cardArtworkDir,targetDir:templateDir});
+        const [result] = await db.query(`INSERT INTO BBS_Card_Templates(TemplateName,DepartmentID,SafetyUnitID,BBSLevel,BackgroundStoredName,OriginalName,MimeType,FileSize,WidthMM,HeightMM,IncludeEmployeeID,CreatedBy,UpdatedBy) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)`, [name,departmentId,safetyUnitId,level,fallback.stored,fallback.name,fallback.mime,fallback.size,width,height,String(req.body?.includeEmployeeId) === '0' ? 0 : 1,actorId(req),actorId(req)]);
+        persisted = true; await logAudit(req,{action:'BBS_CARD_TEMPLATE_CREATE',module:'bbs',targetType:'BBS_Card_Template',targetId:result.insertId,detail:`Created Draft Personal card template; legacyFallback=${fallback.source}; artworkVersion=${fallback.artworkVersionId||'manual'}.`});
         const [[row]] = await db.query('SELECT * FROM BBS_Card_Templates WHERE id=?',[result.insertId]); return res.status(201).json({success:true,data:row});
-    } catch (error) { if (req.file && !persisted) unlinkStored(req.file.filename); return phase4Error(res,error,'template create'); }
+    } catch (error) { if (!persisted) unlinkStored(fallback?.stored||req.file?.filename); return phase4Error(res,error,'template create'); }
 });
 
 router.get('/admin/card-templates/:id/file', isAdmin, async (req,res) => {
