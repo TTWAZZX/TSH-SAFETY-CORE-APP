@@ -1,5 +1,11 @@
 # TSH Safety Core Activity - AGENTS.md
 
+## BBS artwork-first Template workflow Production release (2026-09-14)
+
+- `main` commit `1f7ac9a` is deployed to the PHP Production target. Active kind-specific Scoped Front artwork can now open a preselected Personal or Department Template form, fileless Template creation materializes the resolved Scoped Front as the isolated legacy fallback, and Template Lifecycle shows explicit Scoped Front / Global Back readiness before Designer work.
+- Personal and Department remain separate domains; only Global Back is shared. This release changed no schema, BBS business record, rollout setting or existing private file. Production remains `staged_admin_only=1`, `pilot_scope_only=0`, `visual_card_designer_enabled=1`, `visual_card_designer_rendering_enabled=1`.
+- Fresh rollback evidence is under `backups/production/bbs-artwork-template-predeploy-20260914-154716/`: verified 195-table SQL gzip, exact runtime-before files and 14 BBS private uploads. FTPS hashes passed `8/8`, HTTPS hashes passed `5/5`, authenticated read-only API smoke and responsive browser smoke passed with zero mutation requests or console errors. The protected backup helper was removed and the original `.htaccess` checksum was restored.
+
 ## BBS Scoped Artwork and 4M Audit Log Production release (2026-09-14)
 
 - `main` commit `f385461` is deployed to the PHP Production target. BBS now resolves kind-specific Unit/Department Scoped Front artwork plus one versioned Global Back; 4M Training Matrix exposes immutable, paged and filterable Audit Log details with canonical before/after snapshots for new events.
