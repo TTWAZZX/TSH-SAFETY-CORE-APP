@@ -1,5 +1,11 @@
 # TSH Safety Core Activity - AGENTS.md
 
+## BBS Scoped Artwork and 4M Audit Log Production release (2026-09-14)
+
+- `main` commit `f385461` is deployed to the PHP Production target. BBS now resolves kind-specific Unit/Department Scoped Front artwork plus one versioned Global Back; 4M Training Matrix exposes immutable, paged and filterable Audit Log details with canonical before/after snapshots for new events.
+- The additive Production migration created `BBS_Card_Artwork_Slots` and `BBS_Card_Artwork_Versions` plus six scoped-artwork columns. It preserved the two legacy Master Artwork rows, one Designer layout version, all private files and rollout settings (`staged_admin_only=1`, `pilot_scope_only=0`, Designer flags `1/1`). No existing artwork slot/version was fabricated automatically.
+- Fresh rollback evidence is under `backups/production/bbs-fourm-release-predeploy-20260914-101911/`: verified 193-table SQL gzip, exact runtime-before files and eight BBS private uploads. FTPS hashes passed 12/12, HTTPS hashes passed 5/5, and authenticated read-only BBS/4M smoke passed with zero mutation requests. The checksum-locked helper and SQL were removed and the original `.htaccess` was restored.
+
 ## 4M Training Matrix audit snapshot constraints (2026-09-14)
 
 - New Training Matrix audit rows preserve the existing raw fields and add the same versioned canonical before/after snapshot keys in Node and PHP: affected employee, employee Department/Unit/position, curriculum, curriculum Department/year, course, assignment, status, notes and reactivation state.
