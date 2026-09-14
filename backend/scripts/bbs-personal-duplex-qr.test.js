@@ -16,7 +16,7 @@ assert.ok(!catalog.dataSources.Department.includes('card.personal_qr'),'Departme
 
 const parent={WidthMM:60,HeightMM:85,BackgroundStoredName:'personal.png',OriginalName:'personal.png',MimeType:'image/png',FileSize:100,IncludeEmployeeID:1};
 const legacy=designer.legacyLayout(parent,'Personal');
-const layout={...legacy,sides:legacy.sides.map((side,index)=>({...side,storageClass:'DesignerAsset',backgroundAssetId:index+1,masterArtworkId:index+101,masterArtworkKind:'Personal',masterArtworkSide:side.side}))};
+const layout={...legacy,sides:legacy.sides.map(side=>({...side,storageClass:'CardArtwork',backgroundAssetId:null,artworkRole:side.side==='Front'?'ScopedFront':'GlobalBack',backgroundStoredName:`logical:${side.side==='Front'?'ScopedFront':'GlobalBack'}`,backgroundMimeType:'application/x-bbs-card-artwork'}))};
 assert.deepEqual(layout.sides.map(side=>side.side),['Front','Back']);
 assert.ok(layout.elements.some(element=>element.side==='Front'&&element.elementType==='QR'&&element.dataSourceKey==='card.personal_qr'));
 assert.ok(layout.elements.some(element=>element.side==='Back'&&element.elementType==='QR'&&element.dataSourceKey==='department.community_qr'));

@@ -145,6 +145,8 @@ let _tmShowEmployeeMaster = false;
 let _tmSearch       = { curriculum:'', course:'', employee:'', inlineEmployee:'' };
 let _tmMobileDetailOpen = false;
 let _tmCurriculumScrollTop = 0;
+let _tmLoadingCurriculumId = null;
+let _tmCurriculumRequestId = 0;
 let _fourmCardSaveMenu = null;
 let _fourmCardSaveHold = null;
 
@@ -3933,7 +3935,7 @@ async function fetchTrainingPermissions({ force = false } = {}) {
         _tmPermissions = {
             canManageTraining: _isAdmin,
             canManageAll: _isAdmin,
-            canDeleteHistory: _isAdmin,
+            canDeleteHistory: false,
             department: _currentUser.department || _currentUser.Department || '',
             permissionKey: 'FOURM_TRAINING_MANAGE',
             _loaded: true,
@@ -3949,7 +3951,7 @@ async function fetchTrainingCourseMaster({ force = false } = {}) {
     return _tmCourseMaster;
 }
 
-async function fetchTrainingEmployeeMaster({ force = false } = {}) {
+async function fetchTrainingEmployeeMaster({ force = false, requestId = null } = {}) {
     if (!_tmEmployees.length || force) {
         const res = await API.get('/employees');
         _tmEmployees = normalizeApiArray(res?.data ?? res);
@@ -3960,7 +3962,9 @@ async function fetchTrainingEmployeeMaster({ force = false } = {}) {
         scopeParams.set('year', _tmFilter.year);
         if (curriculum.Department) scopeParams.set('dept', curriculum.Department);
         const scopeRes = await API.get(`/fourm/training-employee-scopes?${scopeParams}`).catch(() => ({ data: [] }));
-        _tmEmployeeScopes = normalizeApiArray(scopeRes?.data ?? scopeRes);
+        if (requestId === null || requestId === _tmCurriculumRequestId) {
+            _tmEmployeeScopes = normalizeApiArray(scopeRes?.data ?? scopeRes);
+        }
     }
     return _tmEmployees;
 }
@@ -3984,27 +3988,37 @@ async function renderTrainingCurriculums() {
         return;
     }
     el.innerHTML = rows.map(c => {
-        const active = c.id === _tmSelectedCurriculumId;
+        const active = String(c.id) === String(_tmSelectedCurriculumId);
+        const loading = String(c.id) === String(_tmLoadingCurriculumId);
         return `
-        <button type="button" class="tm-curriculum-item w-full text-left rounded-xl border p-3 transition-all ${active ? 'border-indigo-300 bg-indigo-50' : 'border-slate-100 hover:border-slate-200 hover:bg-slate-50'}"
-                data-id="${c.id}" aria-current="${active ? 'true' : 'false'}">
-            <div class="flex items-start justify-between gap-2">
-                <div class="min-w-0">
-                    <p class="text-xs font-mono text-slate-400">${escHtml(c.CurriculumCode || '-')}</p>
-                    <p class="text-sm font-black text-slate-800 truncate" title="${escHtml(c.CurriculumTitle || '-')}">${escHtml(c.CurriculumTitle || '-')}</p>
-                    <p class="text-xs text-slate-500 mt-1 truncate">${escHtml(c.Department || '-')}</p>
+        <article class="rounded-xl border transition-all ${active ? 'border-indigo-400 bg-indigo-50 shadow-sm ring-1 ring-indigo-100' : 'border-slate-200 bg-white hover:border-indigo-200'}">
+            <button type="button"
+                    class="tm-curriculum-item group w-full min-h-[88px] cursor-pointer rounded-xl px-3 py-3 text-left outline-none transition-colors hover:bg-indigo-50/70 focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:ring-offset-2"
+                    data-id="${c.id}" aria-pressed="${active ? 'true' : 'false'}"
+                    aria-label="เลือกหลักสูตร ${escHtml(c.CurriculumCode || '')} ${escHtml(c.CurriculumTitle || '')}"
+                    ${loading ? 'disabled aria-busy="true"' : ''}>
+                <div class="flex items-start justify-between gap-3">
+                    <div class="min-w-0">
+                        <div class="flex flex-wrap items-center gap-2">
+                            <span class="text-xs font-mono font-bold ${active ? 'text-indigo-700' : 'text-slate-500'}">${escHtml(c.CurriculumCode || '-')}</span>
+                            ${active ? '<span class="rounded-full bg-indigo-600 px-2 py-0.5 text-[10px] font-black text-white">กำลังดู / Selected</span>' : ''}
+                            ${loading ? '<span class="inline-flex items-center gap-1 text-[10px] font-bold text-indigo-700"><span class="h-3 w-3 animate-spin rounded-full border-2 border-indigo-200 border-t-indigo-600"></span>กำลังเปิด...</span>' : ''}
+                        </div>
+                        <p class="mt-1 text-sm font-black text-slate-800" title="${escHtml(c.CurriculumTitle || '-')}">${escHtml(c.CurriculumTitle || '-')}</p>
+                        <p class="mt-1 text-xs text-slate-500">${escHtml(c.Department || '-')}</p>
+                    </div>
+                    <span class="shrink-0 rounded-full bg-white px-2 py-1 text-xs font-bold text-indigo-700 shadow-sm">${parseInt(c.AssignedCount) || 0} คน</span>
                 </div>
-                <span class="text-xs font-bold text-indigo-700 bg-white/70 rounded-full px-2 py-1">${parseInt(c.AssignedCount) || 0}</span>
-            </div>
-            <div class="flex items-center justify-between mt-2 text-[11px] text-slate-400">
-                <span>${parseInt(c.CourseCount) || 0} วิชา / courses</span>
-                <span>${c.IsActive ? 'ใช้งาน / Active' : 'ปิด / Inactive'}</span>
-            </div>
-            ${_isAdmin ? `<div class="flex justify-end gap-1.5 mt-2">
-                <span class="btn-tm-edit-curriculum px-2 py-1 rounded-lg text-[11px] font-bold text-indigo-700 hover:bg-white" data-id="${c.id}">แก้ไข / Edit</span>
-                <span class="btn-tm-disable-curriculum px-2 py-1 rounded-lg text-[11px] font-bold text-rose-600 hover:bg-white" data-id="${c.id}" data-title="${escHtml(c.CurriculumTitle || '')}">ปิด / Disable</span>
+                <div class="mt-3 flex items-center justify-between border-t border-slate-200/70 pt-2 text-[11px] text-slate-500">
+                    <span>${parseInt(c.CourseCount) || 0} วิชา / courses</span>
+                    <span class="font-bold ${active ? 'text-indigo-700' : 'text-slate-500'}">${active ? 'เปิดรายละเอียดแล้ว' : 'คลิกเพื่อเปิดรายละเอียด →'}</span>
+                </div>
+            </button>
+            ${_isAdmin ? `<div class="flex justify-end gap-2 border-t border-slate-200/70 px-2 py-2">
+                <button type="button" class="btn-tm-edit-curriculum min-h-[44px] rounded-lg px-3 text-xs font-bold text-indigo-700 hover:bg-white focus-visible:ring-2 focus-visible:ring-indigo-500" data-id="${c.id}">แก้ไข / Edit</button>
+                <button type="button" class="btn-tm-disable-curriculum min-h-[44px] rounded-lg px-3 text-xs font-bold text-rose-600 hover:bg-rose-50 focus-visible:ring-2 focus-visible:ring-rose-500" data-id="${c.id}" data-title="${escHtml(c.CurriculumTitle || '')}">ปิด / Disable</button>
             </div>` : ''}
-        </button>`;
+        </article>`;
     }).join('');
     el.onscroll = () => {
         _tmCurriculumScrollTop = el.scrollTop;
@@ -4015,24 +4029,35 @@ async function renderTrainingCurriculums() {
 }
 
 async function fetchTrainingCourses(curriculumId) {
+    const requestId = ++_tmCurriculumRequestId;
+    _tmLoadingCurriculumId = curriculumId;
+    await renderTrainingCurriculums();
     const el = document.getElementById('tm-course-list');
     if (el) el.innerHTML = `<div class="text-center py-8 text-slate-400 text-sm">กำลังโหลด... / Loading...</div>`;
     const btn = document.getElementById('btn-tm-add-course');
     if (btn) btn.disabled = !curriculumId;
     try {
-        const [res] = await Promise.all([
+        const [res, , , assignmentRes] = await Promise.all([
             API.get(`/fourm/training-curriculums/${curriculumId}/courses`),
-            fetchTrainingCourseMaster({ force: true }),
-            canManageTrainingMatrix() ? fetchTrainingEmployeeMaster({ force: true }) : Promise.resolve([]),
+            fetchTrainingCourseMaster(),
+            canManageTrainingMatrix() ? fetchTrainingEmployeeMaster({ requestId }) : Promise.resolve([]),
+            API.get(`/fourm/training-curriculums/${curriculumId}/assignments?status=all`),
         ]);
+        if (requestId !== _tmCurriculumRequestId) return;
         _tmCourses = normalizeApiArray(res?.data ?? res);
+        _tmAssignments = normalizeApiArray(assignmentRes?.data ?? assignmentRes);
         _tmSelectedCourseId = null;
         renderTrainingMatrixKpis();
         renderTrainingMatrixBreadcrumb();
-        await fetchTrainingAssignments(curriculumId);
         renderTrainingDetailShell();
     } catch (err) {
+        if (requestId !== _tmCurriculumRequestId) return;
         if (el) el.innerHTML = `<div class="p-4 text-sm text-rose-600">${escHtml(err.message || 'โหลดรายวิชาไม่สำเร็จ / Cannot load courses')}</div>`;
+    } finally {
+        if (requestId === _tmCurriculumRequestId) {
+            _tmLoadingCurriculumId = null;
+            await renderTrainingCurriculums();
+        }
     }
 }
 
@@ -5409,11 +5434,6 @@ async function showTrainingEmployeeHistoryModal(employeeId, employeeName = '') {
                     <div class="text-right shrink-0">
                         <p class="text-xs font-bold text-slate-600">${escHtml(row.PerformedBy || '-')}</p>
                         <p class="text-[11px] text-slate-400 mt-1">${escHtml(when)}</p>
-                        ${_isAdmin ? `<button type="button"
-                                class="mt-2 text-[11px] font-bold text-rose-600 hover:text-rose-700 hover:underline"
-                                onclick="window._tmDeleteTrainingLog&&window._tmDeleteTrainingLog('${escHtml(String(row.id || ''))}')">
-                            ลบ / Delete
-                        </button>` : ''}
                     </div>
                 </div>
             </div>`;
@@ -5442,10 +5462,12 @@ function _tmLogSummary(row) {
     const oldValue = _tmParseJson(row.OldValue) || {};
     const newValue = _tmParseJson(row.NewValue) || {};
     if ((row.Action || '').includes('TRANSFER')) {
-        return `From ${oldValue.courseCode || row.CourseCode || '-'} to ${newValue.courseCode || '-'}`;
+        const oldScope = _tmAuditValue(oldValue, ['courseCode', 'CourseCode', 'curriculumCode', 'CurriculumCode']) || row.CourseCode || row.CurriculumCode || '-';
+        const newScope = _tmAuditValue(newValue, ['courseCode', 'CourseCode', 'curriculumCode', 'CurriculumCode']) || '-';
+        return `ย้าย / Transfer: ${oldScope} → ${newScope}`;
     }
     if ((row.Action || '').includes('ASSIGNMENT')) {
-        return `${row.EmployeeID || '-'} · ${newValue.EmployeeName || oldValue.EmployeeName || ''}`;
+        return `${row.EmployeeID || '-'} · ${_tmAuditValue(newValue, ['employeeName', 'EmployeeName']) || _tmAuditValue(oldValue, ['employeeName', 'EmployeeName']) || row.EmployeeName || ''}`;
     }
     if ((row.Action || '').includes('COURSE')) {
         return `${row.CourseCode || newValue.CourseCode || oldValue.CourseCode || '-'} · ${row.CourseTitle || newValue.CourseTitle || oldValue.CourseTitle || ''}`;
@@ -5456,27 +5478,98 @@ function _tmLogSummary(row) {
     return row.EmployeeID || row.CourseCode || row.CurriculumCode || '-';
 }
 
-async function deleteTrainingLog(logId) {
-    const id = String(logId || '').trim();
-    if (!id || !_isAdmin) return;
-    const ok = await showConfirmationModal(
-        'ลบประวัติรายการนี้? / Delete history?',
-        'รายการประวัติจะถูกลบออกจาก Training Matrix audit log ต้องการดำเนินการต่อไหม? / Delete this Training Matrix history item?'
-    );
-    if (!ok) return;
-    try {
-        showLoading('กำลังลบประวัติ... / Deleting history...');
-        await API.delete(`/fourm/training-logs/${encodeURIComponent(id)}`);
-        document.querySelectorAll(`[data-tm-log-row="${id}"]`).forEach(el => el.remove());
-        showToast('ลบประวัติสำเร็จ / History deleted', 'success');
-    } catch (err) {
-        showError(err);
-    } finally {
-        hideLoading();
+function _tmAuditValue(snapshot, keys) {
+    if (!snapshot || typeof snapshot !== 'object') return null;
+    for (const key of keys) {
+        const value = snapshot[key];
+        if (value !== undefined && value !== null && value !== '') return value;
     }
+    return null;
 }
 
-window._tmDeleteTrainingLog = deleteTrainingLog;
+function _tmAuditText(value) {
+    if (value === null || value === undefined || value === '') return '—';
+    if (typeof value === 'boolean') return value ? 'ใช่ / Yes' : 'ไม่ / No';
+    if (typeof value === 'object') return JSON.stringify(value);
+    return String(value);
+}
+
+const _tmAuditFields = [
+    ['employeeId', 'รหัสพนักงาน / Employee ID', ['employeeId', 'EmployeeID']],
+    ['employeeName', 'พนักงาน / Employee', ['employeeName', 'EmployeeName']],
+    ['employeeDepartment', 'แผนกพนักงาน / Employee Dept.', ['employeeDepartment', 'EmployeeDepartment']],
+    ['employeeUnit', 'Unit', ['employeeUnit', 'EmployeeUnit', 'Unit']],
+    ['employeePosition', 'ตำแหน่ง / Position', ['employeePosition', 'EmployeePosition', 'Position']],
+    ['curriculumId', 'Curriculum ID', ['curriculumId', 'CurriculumID', 'TargetCurriculumID']],
+    ['curriculumCode', 'รหัสหลักสูตร / Curriculum Code', ['curriculumCode', 'CurriculumCode']],
+    ['curriculumTitle', 'หลักสูตร / Curriculum', ['curriculumTitle', 'CurriculumTitle']],
+    ['curriculumDepartment', 'แผนกหลักสูตร / Curriculum Dept.', ['curriculumDepartment', 'CurriculumDepartment']],
+    ['legacyDepartment', 'แผนก (Log เดิม) / Legacy Department', ['Department']],
+    ['year', 'ปี / Year', ['year', 'Year']],
+    ['courseId', 'Course ID', ['courseId', 'CourseID', 'TargetCourseID']],
+    ['courseCode', 'รหัสรายวิชา / Course Code', ['courseCode', 'CourseCode']],
+    ['courseTitle', 'รายวิชา / Course', ['courseTitle', 'CourseTitle']],
+    ['status', 'สถานะ / Status', ['status', 'Status', 'IsActive']],
+    ['notes', 'หมายเหตุ / Notes', ['notes', 'Notes']],
+    ['reactivated', 'นำ Assignment เดิมกลับมาใช้ / Reactivated', ['reactivated', 'Reactivated']],
+];
+
+function _tmRenderAuditChanges(row) {
+    const before = _tmParseJson(row.OldValue);
+    const after = _tmParseJson(row.NewValue);
+    const visible = _tmAuditFields.map(([key, label, keys]) => {
+        const oldValue = _tmAuditValue(before, keys);
+        const newValue = _tmAuditValue(after, keys);
+        return { key, label, oldValue, newValue, changed: _tmAuditText(oldValue) !== _tmAuditText(newValue) };
+    }).filter(field => (field.oldValue !== null || field.newValue !== null)
+        && (field.key !== 'reactivated' || field.oldValue === true || field.newValue === true || field.oldValue === 1 || field.newValue === 1));
+    if (!visible.length) {
+        return `<div class="rounded-xl border border-dashed border-slate-200 bg-slate-50 p-4 text-center text-xs text-slate-500">Log เดิมไม่มีรายละเอียดก่อน–หลัง / Legacy log has no before-after snapshot</div>`;
+    }
+    return `
+        <div class="overflow-x-auto rounded-xl border border-slate-200" tabindex="0" aria-label="รายละเอียดก่อนและหลังการเปลี่ยนแปลง">
+            <table class="min-w-[720px] w-full text-left text-xs">
+                <thead class="bg-slate-50 text-slate-500">
+                    <tr><th class="px-3 py-2 font-black">ข้อมูล / Field</th><th class="px-3 py-2 font-black">ก่อน / Before</th><th class="px-3 py-2 font-black">หลัง / After</th></tr>
+                </thead>
+                <tbody class="divide-y divide-slate-100">
+                    ${visible.map(field => `<tr class="${field.changed ? 'bg-amber-50/60' : 'bg-white'}">
+                        <th class="px-3 py-2 font-bold text-slate-600">${escHtml(field.label)}</th>
+                        <td class="px-3 py-2 text-slate-600 break-words">${escHtml(_tmAuditText(field.oldValue))}</td>
+                        <td class="px-3 py-2 font-semibold ${field.changed ? 'text-indigo-700' : 'text-slate-600'} break-words">${escHtml(_tmAuditText(field.newValue))}</td>
+                    </tr>`).join('')}
+                </tbody>
+            </table>
+        </div>`;
+}
+
+function _tmRenderAuditRow(row) {
+    const when = row.PerformedAt ? new Date(row.PerformedAt).toLocaleString('th-TH', { dateStyle:'medium', timeStyle:'short' }) : '-';
+    const oldValue = _tmParseJson(row.OldValue) || {};
+    const newValue = _tmParseJson(row.NewValue) || {};
+    const employeeName = _tmAuditValue(newValue, ['employeeName', 'EmployeeName']) || _tmAuditValue(oldValue, ['employeeName', 'EmployeeName']) || row.EmployeeName || '';
+    const employeeId = row.EmployeeID || _tmAuditValue(newValue, ['employeeId', 'EmployeeID']) || _tmAuditValue(oldValue, ['employeeId', 'EmployeeID']) || '-';
+    const unit = row.Unit || row.SourceUnit || row.DestinationUnit || '-';
+    return `<article class="p-4 sm:p-5" data-tm-log-row="${escHtml(String(row.id || ''))}">
+        <div class="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+            <div class="min-w-0">
+                <div class="flex flex-wrap items-center gap-2">
+                    ${_tmLogActionBadge(row.Action)}
+                    <span class="text-xs text-slate-500">${escHtml(row.Department || '-')} · ${escHtml(unit)} · ${escHtml(String(row.Year || '-'))}</span>
+                </div>
+                <p class="mt-2 text-sm font-black text-slate-800">${escHtml(_tmLogSummary(row))}</p>
+                <p class="mt-1 text-xs text-slate-500">${escHtml(employeeId)}${employeeName ? ` · ${escHtml(employeeName)}` : ''} · ${escHtml(row.CurriculumCode || '-')} · ${escHtml(row.CourseCode || '-')}</p>
+            </div>
+            <div class="flex shrink-0 items-start justify-between gap-4 lg:text-right">
+                <div><p class="text-xs font-bold text-slate-700">${escHtml(row.PerformedBy || '-')}</p><p class="mt-1 text-[11px] text-slate-400">${escHtml(row.PerformedByID || '-')} · ${escHtml(when)}</p></div>
+            </div>
+        </div>
+        <details class="mt-3 rounded-xl border border-slate-200 bg-white">
+            <summary class="min-h-11 cursor-pointer select-none px-4 py-3 text-xs font-black text-indigo-700">ดูรายละเอียดก่อน–หลัง / View before-after</summary>
+            <div class="border-t border-slate-100 p-3">${_tmRenderAuditChanges(row)}</div>
+        </details>
+    </article>`;
+}
 
 async function showTrainingAuditLogModal(scope = 'current') {
     const actionOptions = [
@@ -5485,98 +5578,122 @@ async function showTrainingAuditLogModal(scope = 'current') {
         ['CURRICULUM_CODE_BULK_UPDATE', 'เปลี่ยนรหัสหลักสูตรแบบกลุ่ม / Bulk Code Update'],
         ['CURRICULUM_UPDATE', 'แก้ไขหลักสูตร / Curriculum Update'],
         ['CURRICULUM_DISABLE', 'ปิดหลักสูตร / Curriculum Disable'],
+        ['COURSE_MASTER_CREATE', 'สร้างข้อมูลรายวิชากลาง / Course Master Create'],
+        ['COURSE_MASTER_UPDATE', 'แก้ไขข้อมูลรายวิชากลาง / Course Master Update'],
+        ['COURSE_MASTER_DISABLE', 'ปิดข้อมูลรายวิชากลาง / Course Master Disable'],
+        ['COURSE_MASTER_DELETE', 'ลบข้อมูลรายวิชากลาง / Course Master Delete'],
         ['COURSE_CREATE', 'สร้างรายวิชา / Course Create'],
+        ['COURSE_LINK', 'เชื่อมรายวิชา (Log เดิม) / Course Link (Legacy)'],
+        ['COURSE_RESTORE', 'เปิดรายวิชาเดิม / Course Restore'],
         ['COURSE_UPDATE', 'แก้ไขรายวิชา / Course Update'],
         ['COURSE_DISABLE', 'ปิดรายวิชา / Course Disable'],
+        ['CURRICULUM_ASSIGNMENT_CREATE', 'เพิ่มพนักงานเข้าหลักสูตร / Curriculum Assignment Create'],
+        ['CURRICULUM_ASSIGNMENT_REASSIGN', 'นำพนักงานกลับเข้าหลักสูตร / Curriculum Assignment Reassign'],
+        ['CURRICULUM_ASSIGNMENT_REMOVE', 'นำพนักงานออกจากหลักสูตร / Curriculum Assignment Remove'],
+        ['CURRICULUM_ASSIGNMENT_TRANSFER', 'ย้ายพนักงานระหว่างหลักสูตร / Curriculum Assignment Transfer'],
         ['ASSIGNMENT_CREATE', 'เพิ่มพนักงาน / Assignment Create'],
         ['ASSIGNMENT_REASSIGN', 'เพิ่มซ้ำกลับเข้า Scope / Assignment Reassign'],
         ['ASSIGNMENT_UPDATE', 'แก้ไข Assignment / Assignment Update'],
         ['ASSIGNMENT_REMOVE', 'ลบพนักงานออก / Assignment Remove'],
         ['ASSIGNMENT_TRANSFER', 'ย้ายพนักงาน / Assignment Transfer'],
     ];
+    const department = _isAdmin ? (_tmFilter.dept || 'all') : (_currentUser.department || _currentUser.Department || _tmPermissions.department || '');
+    const unitOptions = [...new Set([..._tmEmployees, ..._tmAssignments].map(row => String(row.Unit || row.EmployeeUnit || '').trim()).filter(Boolean))].sort((a, b) => a.localeCompare(b));
     const html = `
         <div class="space-y-4">
-            <div class="flex flex-wrap gap-2 items-center">
-                <select id="tm-log-scope" class="form-input py-2 text-sm">
+            <form id="tm-log-filter-form" class="rounded-2xl border border-slate-200 bg-slate-50 p-3 sm:p-4" aria-label="ตัวกรองประวัติ Training Matrix">
+                <div class="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+                <label class="text-xs font-bold text-slate-600">ขอบเขต / Scope<select id="tm-log-scope" class="form-input mt-1 w-full py-2 text-sm">
                     <option value="current" ${scope === 'current' ? 'selected' : ''}>รายการที่เลือก / Current Selection</option>
                     <option value="year" ${scope === 'year' ? 'selected' : ''}>ทั้งปี / แผนก / Whole Year / Department</option>
-                </select>
-                <select id="tm-log-action" class="form-input py-2 text-sm">
+                </select></label>
+                <label class="text-xs font-bold text-slate-600">ปี / Year<input id="tm-log-year" type="number" min="2000" max="2100" value="${escHtml(String(_tmFilter.year || ''))}" placeholder="ทุกปี / All" class="form-input mt-1 w-full py-2 text-sm"></label>
+                <label class="text-xs font-bold text-slate-600">แผนก / Department<select id="tm-log-department" class="form-input mt-1 w-full py-2 text-sm" ${_isAdmin ? '' : 'disabled'}>
+                    ${_isAdmin ? `<option value="all">ทุกแผนก / All Departments</option>${_departments.map(value => `<option value="${escHtml(value)}" ${value === department ? 'selected' : ''}>${escHtml(value)}</option>`).join('')}` : `<option value="${escHtml(department)}">${escHtml(department || 'แผนกของฉัน')}</option>`}
+                </select></label>
+                <label class="text-xs font-bold text-slate-600">Unit<input id="tm-log-unit" list="tm-log-unit-options" class="form-input mt-1 w-full py-2 text-sm" placeholder="ทุก Unit / All Units"><datalist id="tm-log-unit-options">${unitOptions.map(value => `<option value="${escHtml(value)}"></option>`).join('')}</datalist></label>
+                <label class="text-xs font-bold text-slate-600">Action<select id="tm-log-action" class="form-input mt-1 w-full py-2 text-sm">
                     ${actionOptions.map(([value, label]) => `<option value="${value}">${label}</option>`).join('')}
-                </select>
-                <button type="button" id="tm-log-refresh" class="px-3 py-2 rounded-lg text-sm font-bold text-slate-600 border border-slate-200 hover:bg-slate-50">รีเฟรช / Refresh</button>
-            </div>
-            <div id="tm-log-list" class="max-h-[520px] overflow-y-auto rounded-xl border border-slate-200 divide-y divide-slate-100">
+                </select></label>
+                <label class="text-xs font-bold text-slate-600">ผู้ดำเนินการ / Actor ID<input id="tm-log-actor" class="form-input mt-1 w-full py-2 text-sm" placeholder="รหัสผู้ดำเนินการ"></label>
+                <label class="text-xs font-bold text-slate-600">พนักงาน / Employee ID<input id="tm-log-employee" class="form-input mt-1 w-full py-2 text-sm" placeholder="รหัสพนักงาน"></label>
+                <label class="text-xs font-bold text-slate-600">ค้นหา / Search<input id="tm-log-search" class="form-input mt-1 w-full py-2 text-sm" placeholder="ชื่อ รหัส หลักสูตร รายวิชา..."></label>
+                <label class="text-xs font-bold text-slate-600">ตั้งแต่ / Date from<input id="tm-log-date-from" type="date" class="form-input mt-1 w-full py-2 text-sm"></label>
+                <label class="text-xs font-bold text-slate-600">ถึง / Date to<input id="tm-log-date-to" type="date" class="form-input mt-1 w-full py-2 text-sm"></label>
+                </div>
+                <div class="mt-3 flex flex-wrap justify-end gap-2"><button type="button" id="tm-log-reset" class="min-h-11 rounded-xl border border-slate-300 bg-white px-4 text-sm font-bold text-slate-600">ล้างตัวกรอง / Reset</button><button type="submit" id="tm-log-refresh" class="min-h-11 rounded-xl bg-indigo-600 px-5 text-sm font-black text-white">ค้นหา / Search</button></div>
+            </form>
+            <div id="tm-log-result-summary" class="text-xs font-semibold text-slate-500" aria-live="polite"></div>
+            <div id="tm-log-list" class="max-h-[500px] overflow-y-auto rounded-xl border border-slate-200 divide-y divide-slate-100" aria-live="polite">
                 <div class="p-6 text-center text-sm text-slate-400">กำลังโหลด... / Loading...</div>
             </div>
+            <nav id="tm-log-pagination" class="flex flex-wrap items-center justify-between gap-3" aria-label="หน้าประวัติ Training Matrix"></nav>
         </div>`;
-    openModal('ประวัติ Training Matrix / Training Matrix Audit Log', html, 'max-w-4xl');
+    openModal('ประวัติ Training Matrix / Training Matrix Audit Log', html, 'max-w-6xl');
 
-    const loadLogs = async () => {
+    let currentPage = 1;
+    let requestVersion = 0;
+    const loadLogs = async (requestedPage = currentPage) => {
         const list = document.getElementById('tm-log-list');
         if (!list) return;
+        const requestId = ++requestVersion;
         list.innerHTML = `<div class="p-6 text-center text-sm text-slate-400">กำลังโหลด... / Loading...</div>`;
         try {
             const p = new URLSearchParams();
-            p.set('year', _tmFilter.year);
-            p.set('limit', '120');
+            p.set('paged', '1'); p.set('page', String(requestedPage)); p.set('pageSize', '20');
             const selectedScope = document.getElementById('tm-log-scope')?.value || 'current';
             const action = document.getElementById('tm-log-action')?.value || 'all';
+            const year = document.getElementById('tm-log-year')?.value || '';
+            const dept = document.getElementById('tm-log-department')?.value || '';
+            const unit = document.getElementById('tm-log-unit')?.value.trim() || '';
+            const actorId = document.getElementById('tm-log-actor')?.value.trim() || '';
+            const employeeId = document.getElementById('tm-log-employee')?.value.trim() || '';
+            const q = document.getElementById('tm-log-search')?.value.trim() || '';
+            const dateFrom = document.getElementById('tm-log-date-from')?.value || '';
+            const dateTo = document.getElementById('tm-log-date-to')?.value || '';
+            if (year) p.set('year', year);
             if (action !== 'all') p.set('action', action);
-            if (_isAdmin && _tmFilter.dept !== 'all') p.set('dept', _tmFilter.dept);
+            if (_isAdmin && dept && dept !== 'all') p.set('department', dept);
+            if (unit) p.set('unit', unit);
+            if (actorId) p.set('actorId', actorId);
+            if (employeeId) p.set('employeeId', employeeId);
+            if (q) p.set('q', q);
+            if (dateFrom) p.set('dateFrom', dateFrom);
+            if (dateTo) p.set('dateTo', dateTo);
             if (selectedScope === 'current') {
                 if (_tmSelectedCourseId) p.set('courseId', _tmSelectedCourseId);
                 else if (_tmSelectedCurriculumId) p.set('curriculumId', _tmSelectedCurriculumId);
             }
             const res = await API.get(`/fourm/training-logs?${p}`);
-            const rows = normalizeApiArray(res?.data ?? res);
+            if (requestId !== requestVersion) return;
+            const payload = res?.data || {};
+            const rows = Array.isArray(payload.rows) ? payload.rows : [];
+            const meta = payload.pagination || { page:1, pageSize:20, total:rows.length, totalPages:1, hasPrevious:false, hasNext:false };
+            currentPage = Number(meta.page) || 1;
+            const summary = document.getElementById('tm-log-result-summary');
+            if (summary) summary.textContent = `พบ ${Number(meta.total || 0).toLocaleString('th-TH')} รายการ · หน้า ${currentPage} / ${Number(meta.totalPages || 1)}`;
             if (!rows.length) {
                 list.innerHTML = `<div class="p-6 text-center text-sm text-slate-400">ยังไม่มีประวัติใน Scope นี้ / No audit log in this scope</div>`;
-                return;
-            }
-            list.innerHTML = rows.map(row => {
-                const when = row.PerformedAt ? new Date(row.PerformedAt).toLocaleString('th-TH', { dateStyle:'medium', timeStyle:'short' }) : '-';
-                const oldValue = _tmParseJson(row.OldValue) || {};
-                const newValue = _tmParseJson(row.NewValue) || {};
-                const transferMeta = row.Action === 'ASSIGNMENT_TRANSFER'
-                    ? `<div class="mt-2 rounded-lg bg-sky-50 border border-sky-100 px-3 py-2 text-xs text-sky-800">
-                        <span class="font-bold">เดิม / Old:</span> ${escHtml(oldValue.curriculumCode || '')} / ${escHtml(oldValue.courseCode || '-')}
-                        <span class="mx-2 text-sky-300">→</span>
-                        <span class="font-bold">ใหม่ / New:</span> ${escHtml(newValue.curriculumCode || '')} / ${escHtml(newValue.courseCode || '-')}
-                    </div>` : '';
-                return `
-                <div class="p-4" data-tm-log-row="${escHtml(String(row.id || ''))}">
-                    <div class="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-2">
-                        <div class="min-w-0">
-                            <div class="flex flex-wrap items-center gap-2">
-                                ${_tmLogActionBadge(row.Action)}
-                                <span class="text-xs text-slate-400">${escHtml(row.Department || '-')} · ${escHtml(String(row.Year || _tmFilter.year))}</span>
-                            </div>
-                            <p class="mt-2 text-sm font-bold text-slate-800">${escHtml(_tmLogSummary(row))}</p>
-                            <p class="mt-1 text-xs text-slate-500">
-                                หลักสูตร / Curriculum: ${escHtml(row.CurriculumCode || '-')} · รายวิชา / Course: ${escHtml(row.CourseCode || '-')} · พนักงาน / Employee: ${escHtml(row.EmployeeID || '-')}
-                            </p>
-                            ${transferMeta}
-                        </div>
-                        <div class="text-right shrink-0">
-                            <p class="text-xs font-bold text-slate-600">${escHtml(row.PerformedBy || '-')}</p>
-                            <p class="text-[11px] text-slate-400 mt-1">${escHtml(when)}</p>
-                            ${_isAdmin ? `<button type="button"
-                                    class="mt-2 text-[11px] font-bold text-rose-600 hover:text-rose-700 hover:underline"
-                                    onclick="window._tmDeleteTrainingLog&&window._tmDeleteTrainingLog('${escHtml(String(row.id || ''))}')">
-                                ลบ / Delete
-                            </button>` : ''}
-                        </div>
-                    </div>
-                </div>`;
-            }).join('');
+            } else list.innerHTML = rows.map(_tmRenderAuditRow).join('');
+            const pager = document.getElementById('tm-log-pagination');
+            if (pager) pager.innerHTML = `<button type="button" id="tm-log-prev" ${meta.hasPrevious ? '' : 'disabled'} class="min-h-11 rounded-xl border border-slate-300 px-4 text-sm font-bold disabled:cursor-not-allowed disabled:opacity-40">← ก่อนหน้า / Previous</button><span class="text-sm font-bold text-slate-600">หน้า ${currentPage} จาก ${Number(meta.totalPages || 1)}</span><button type="button" id="tm-log-next" ${meta.hasNext ? '' : 'disabled'} class="min-h-11 rounded-xl border border-slate-300 px-4 text-sm font-bold disabled:cursor-not-allowed disabled:opacity-40">ถัดไป / Next →</button>`;
+            document.getElementById('tm-log-prev')?.addEventListener('click', () => loadLogs(currentPage - 1));
+            document.getElementById('tm-log-next')?.addEventListener('click', () => loadLogs(currentPage + 1));
         } catch (err) {
+            if (requestId !== requestVersion) return;
             list.innerHTML = `<div class="p-6 text-center text-sm text-rose-600">${escHtml(err.message || 'โหลดประวัติไม่สำเร็จ / Cannot load audit log')}</div>`;
         }
     };
-    document.getElementById('tm-log-refresh')?.addEventListener('click', loadLogs);
-    document.getElementById('tm-log-scope')?.addEventListener('change', loadLogs);
-    document.getElementById('tm-log-action')?.addEventListener('change', loadLogs);
+    document.getElementById('tm-log-filter-form')?.addEventListener('submit', event => { event.preventDefault(); loadLogs(1); });
+    document.getElementById('tm-log-scope')?.addEventListener('change', () => loadLogs(1));
+    document.getElementById('tm-log-action')?.addEventListener('change', () => loadLogs(1));
+    document.getElementById('tm-log-department')?.addEventListener('change', () => loadLogs(1));
+    document.getElementById('tm-log-reset')?.addEventListener('click', () => {
+        const set = (id, value) => { const element = document.getElementById(id); if (element) element.value = value; };
+        set('tm-log-scope', 'year'); set('tm-log-year', String(_tmFilter.year || '')); set('tm-log-department', _isAdmin ? 'all' : department);
+        ['tm-log-unit','tm-log-actor','tm-log-employee','tm-log-search','tm-log-date-from','tm-log-date-to'].forEach(id => set(id, ''));
+        set('tm-log-action', 'all'); loadLogs(1);
+    });
     await loadLogs();
 }
 
@@ -8264,7 +8381,13 @@ function setupEventListeners() {
             return;
         }
         if (e.target.closest('#btn-add-man')) { showManForm(); return; }
-        if (e.target.closest('#btn-tm-refresh')) { await fetchTrainingMatrix(); return; }
+        if (e.target.closest('#btn-tm-refresh')) {
+            _tmCourseMaster = [];
+            _tmEmployees = [];
+            _tmEmployeeScopes = [];
+            await fetchTrainingMatrix();
+            return;
+        }
         if (e.target.closest('#btn-tm-audit-log')) { await showTrainingAuditLogModal(); return; }
         if (e.target.closest('#btn-tm-export-excel')) { showTrainingMatrixExcelExportModal(); return; }
         if (e.target.closest('#btn-tm-export-current-curriculum')) {
@@ -8310,7 +8433,7 @@ function setupEventListeners() {
         }
         const tmCurriculumEdit = e.target.closest('.btn-tm-edit-curriculum');
         if (tmCurriculumEdit) {
-            const rec = _tmCurriculums.find(c => c.id === tmCurriculumEdit.dataset.id);
+            const rec = _tmCurriculums.find(c => String(c.id) === String(tmCurriculumEdit.dataset.id));
             if (rec) showTrainingCurriculumForm(rec);
             return;
         }
@@ -8331,7 +8454,7 @@ function setupEventListeners() {
         }
         const tmCourseEdit = e.target.closest('.btn-tm-edit-course');
         if (tmCourseEdit) {
-            const rec = _tmCourses.find(c => c.id === tmCourseEdit.dataset.id);
+            const rec = _tmCourses.find(c => String(c.id) === String(tmCourseEdit.dataset.id));
             if (rec) showTrainingCourseForm(rec);
             return;
         }
@@ -8353,7 +8476,9 @@ function setupEventListeners() {
         const tmCurriculum = e.target.closest('.tm-curriculum-item');
         if (tmCurriculum) {
             _tmCurriculumScrollTop = document.getElementById('tm-curriculum-list')?.scrollTop || 0;
-            _tmSelectedCurriculumId = tmCurriculum.dataset.id;
+            const selectedCurriculum = _tmCurriculums.find(c => String(c.id) === String(tmCurriculum.dataset.id));
+            if (!selectedCurriculum) return;
+            _tmSelectedCurriculumId = selectedCurriculum.id;
             _tmSelectedCourseId = null;
             _tmAssignments = [];
             _tmInlineSelectedEmployees.clear();
@@ -8376,7 +8501,9 @@ function setupEventListeners() {
         }
         const tmCourse = e.target.closest('.tm-course-item');
         if (tmCourse) {
-            _tmSelectedCourseId = tmCourse.dataset.id;
+            const selectedCourse = _tmCourses.find(c => String(c.id) === String(tmCourse.dataset.id));
+            if (!selectedCourse) return;
+            _tmSelectedCourseId = selectedCourse.id;
             renderTrainingMatrixBreadcrumb();
             renderTrainingCourses();
             return;

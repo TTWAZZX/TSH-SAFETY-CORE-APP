@@ -1,5 +1,22 @@
 # TSH Safety Core Activity - AGENTS.md
 
+## 4M Training Matrix audit snapshot constraints (2026-09-14)
+
+- New Training Matrix audit rows preserve the existing raw fields and add the same versioned canonical before/after snapshot keys in Node and PHP: affected employee, employee Department/Unit/position, curriculum, curriculum Department/year, course, assignment, status, notes and reactivation state.
+- Transfer is one canonical transfer event per affected employee. Its before snapshot resolves the source and its after snapshot resolves the destination; PHP transfer must not emit an additional implicit create/reassign log for the destination.
+- Actor identity remains server-derived in `PerformedByID` and `PerformedBy`. Do not rewrite legacy audit rows or invent missing historical snapshot values.
+- Training-log pagination is opt-in with `paged=1`; requests without it retain the legacy array response. Paged responses contain server-computed `rows` and `pagination`, default to 20 rows and cap page size at 100.
+- Training-log Department/Unit/year/search filters resolve canonical before/after snapshots before current Master joins so historical context survives later Master changes. Non-Admin Department scope always comes from the authenticated server context, never the query string; invalid or reversed date filters fail closed.
+- The Audit Log UI consumes only paged results (20 rows per page), preserves combined filters across navigation and exposes accessible expandable before/after details. Legacy rows show only fields actually present and must not fabricate missing historical context.
+- Training Matrix Audit Log rows are immutable. The UI exposes no delete control, permission metadata always returns `canDeleteHistory=false`, and both Node/PHP DELETE routes fail closed with `405 AUDIT_LOG_IMMUTABLE` without reading or mutating the target row.
+
+## BBS Scoped Front / Global Back constraints (2026-09-11, local development)
+
+- Personal and Department layouts/templates remain separate. Only the versioned `GlobalBack` artwork is shared; `ScopedFront` is kind-specific and resolves exact Unit before Department default. Never fall back across card kinds or to another Department.
+- Artwork resolution is server-authoritative. Personal issue/print uses the employee's current Master Department/Unit; Department output uses its template Department and optional Unit. A Unit-scoped Department template still uses the shared Department QR and does not create a Unit card.
+- Layout geometry stores logical artwork bindings. Designer preview context is not issuance authority. Issue/print resolves again and freezes resolved artwork version IDs in the existing print snapshot JSON.
+- Migration and legacy adoption are additive. Do not rewrite/delete existing Master Artwork, layout assets, cards, QR rows, print snapshots or files. Promoting a legacy image requires an explicit Admin action and retains its source.
+
 ## BBS legacy Designer Draft repair Production release (2026-09-11)
 
 - `main` commit `a0966a3` is deployed to the PHP Production target. Personal template 2 / Tube cutting / Designer V1 remains an intentionally unrepaired legacy Draft until an Admin explicitly uses “ซ่อม Master Artwork ของ Draft”; normal Save remains blocked beforehand.

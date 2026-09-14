@@ -14,6 +14,8 @@ const { logAudit } = require('../utils/audit');
 const { sendMail, smtpConfigured } = require('../utils/email');
 const { buildHiyariEmail } = require('../utils/hiyari-email-template');
 const { normalizeBulkCodeOptions, buildBulkCodePreview, canonicalBulkCodeChanges } = require('../utils/fourmCurriculumBulkCode');
+const { standardizeTrainingLogSnapshot } = require('../utils/fourmTrainingLog');
+const { parseTrainingLogQuery, trainingLogPagination } = require('../utils/fourmTrainingLogQuery');
 const {
     normalizeCompanyEmail,
     selectResponsibleEmployeeId,
@@ -250,9 +252,84 @@ function denyDept(res) {
     return res.status(403).json({ success: false, message: 'คุณไม่มีสิทธิ์จัดการข้อมูลของแผนกนี้' });
 }
 
+function trainingLogValue(value, keys, fallback = null) {
+    if (!value || typeof value !== 'object') return fallback;
+    for (const key of keys) {
+        if (value[key] !== undefined && value[key] !== null && value[key] !== '') return value[key];
+    }
+    return fallback;
+}
+
+async function resolveTrainingLogContext(client, { curriculumId, courseId, employeeId, value, side }) {
+    const useTarget = side === 'after';
+    let resolvedCourseId = useTarget
+        ? trainingLogValue(value, ['targetCourseId', 'TargetCourseID'], courseId)
+        : courseId;
+    let resolvedCurriculumId = useTarget
+        ? trainingLogValue(value, ['targetCurriculumId', 'TargetCurriculumID'], curriculumId)
+        : curriculumId;
+    let course = null;
+    let curriculum = null;
+    let employee = null;
+
+    if (resolvedCourseId) {
+        const [rows] = await client.query(
+            `SELECT co.id AS courseId, co.CourseCode AS courseCode, co.CourseTitle AS courseTitle,
+                    cur.id AS curriculumId, cur.CurriculumCode AS curriculumCode,
+                    cur.CurriculumTitle AS curriculumTitle, cur.Department AS curriculumDepartment,
+                    cur.\`Year\` AS year
+             FROM FourM_Courses co
+             LEFT JOIN FourM_Curriculums cur ON cur.id = co.CurriculumID
+             WHERE co.id = ? LIMIT 1`,
+            [resolvedCourseId]
+        );
+        course = rows[0] || null;
+        if (course?.curriculumId) resolvedCurriculumId = course.curriculumId;
+    }
+    if (resolvedCurriculumId && !course?.curriculumId) {
+        const [rows] = await client.query(
+            `SELECT id AS curriculumId, CurriculumCode AS curriculumCode,
+                    CurriculumTitle AS curriculumTitle, Department AS curriculumDepartment,
+                    \`Year\` AS year
+             FROM FourM_Curriculums WHERE id = ? LIMIT 1`,
+            [resolvedCurriculumId]
+        );
+        curriculum = rows[0] || null;
+    }
+    if (employeeId) {
+        const [rows] = await client.query(
+            `SELECT EmployeeID AS employeeId, EmployeeName AS employeeName,
+                    Department AS employeeDepartment, Unit AS employeeUnit,
+                    Position AS employeePosition
+             FROM Employees WHERE EmployeeID = ? LIMIT 1`,
+            [employeeId]
+        );
+        employee = rows[0] || null;
+    }
+    return {
+        employeeId: employeeId || null,
+        ...(employee || {}),
+        curriculumId: resolvedCurriculumId || null,
+        ...(curriculum || {}),
+        ...(course || {}),
+    };
+}
+
 async function insertTrainingMatrixLog(client, req, { action, curriculumId, courseId, employeeId, oldValue, newValue }) {
     const actorId = req.user?.id || req.user?.EmployeeID || null;
     const actorName = getActorName(req);
+    const oldContext = oldValue == null ? null : await resolveTrainingLogContext(client, {
+        curriculumId, courseId, employeeId, value: oldValue, side: 'before',
+    });
+    const newContext = await resolveTrainingLogContext(client, {
+        curriculumId, courseId, employeeId, value: newValue, side: 'after',
+    });
+    const oldSnapshot = oldValue == null ? null : standardizeTrainingLogSnapshot({
+        action, side: 'before', value: oldValue, context: oldContext,
+    });
+    const newSnapshot = standardizeTrainingLogSnapshot({
+        action, side: 'after', value: newValue, context: newContext,
+    });
     await client.query(
         `INSERT INTO FourM_CurriculumLogs
          (Action, CurriculumID, CourseID, EmployeeID, OldValue, NewValue, PerformedByID, PerformedBy)
@@ -262,8 +339,8 @@ async function insertTrainingMatrixLog(client, req, { action, curriculumId, cour
             curriculumId || null,
             courseId || null,
             employeeId || null,
-            oldValue ? JSON.stringify(oldValue) : null,
-            newValue ? JSON.stringify(newValue) : null,
+            oldSnapshot ? JSON.stringify(oldSnapshot) : null,
+            JSON.stringify(newSnapshot),
             actorId,
             actorName,
         ]
@@ -1451,7 +1528,7 @@ router.get('/training-permissions', async (req, res) => {
                 permissionKey: FOURM_TRAINING_MANAGE_PERMISSION,
                 canManageTraining: canManageAll || (Boolean(department) && hasManagePermission),
                 canManageAll,
-                canDeleteHistory: canManageAll,
+                canDeleteHistory: false,
                 department,
             },
         });
@@ -1913,6 +1990,7 @@ router.post('/training-curriculums/:id/courses', async (req, res) => {
                     [req.params.id, master.CourseCode]
                 );
                 if (existing?.IsActive) { skipped.push(master.CourseCode); continue; }
+                let linkedCourseId;
                 if (existing) {
                     await db.query(
                         `UPDATE FourM_Courses
@@ -1920,7 +1998,8 @@ router.post('/training-curriculums/:id/courses', async (req, res) => {
                          WHERE id = ?`,
                         [master.id, master.CourseTitle, SortOrder, existing.id]
                     );
-                    created.push(existing.id);
+                    linkedCourseId = existing.id;
+                    created.push(linkedCourseId);
                 } else {
                     const id = randomUUID();
                     await db.query(
@@ -1929,11 +2008,14 @@ router.post('/training-curriculums/:id/courses', async (req, res) => {
                          VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
                         [id, req.params.id, master.id, master.CourseCode, master.CourseTitle, SortOrder, req.user?.id || req.user?.EmployeeID || null, actorName]
                     );
-                    created.push(id);
+                    linkedCourseId = id;
+                    created.push(linkedCourseId);
                 }
                 await logTrainingMatrix(req, {
-                    action: 'COURSE_LINK',
+                    action: existing ? 'COURSE_RESTORE' : 'COURSE_CREATE',
                     curriculumId: req.params.id,
+                    courseId: linkedCourseId,
+                    oldValue: existing || null,
                     newValue: { CourseMasterID: master.id, CourseCode: master.CourseCode, CourseTitle: master.CourseTitle, SortOrder },
                     detail: `Link 4M course ${master.CourseCode}`,
                 });
@@ -2265,6 +2347,7 @@ router.post('/training-curriculum-assignments/:id/transfer', async (req, res) =>
         };
         const newValue = {
             assignmentId: targetAssignmentId,
+            targetCurriculumId: target.id,
             curriculumId: target.id,
             curriculumCode: target.CurriculumCode,
             curriculumTitle: target.CurriculumTitle,
@@ -2616,8 +2699,10 @@ router.post('/training-assignments/:id/transfer', async (req, res) => {
         };
         const logNewValue = {
             assignmentId: targetAssignmentId,
+            targetCurriculumId: targetCourse.CurriculumID,
             curriculumId: targetCourse.CurriculumID,
             curriculumCode: targetCourse.CurriculumCode,
+            targetCourseId: targetCourse.id,
             courseId: targetCourse.id,
             courseCode: targetCourse.CourseCode,
             courseTitle: targetCourse.CourseTitle,
@@ -2697,73 +2782,125 @@ router.delete('/training-assignments/:id', async (req, res) => {
 router.get('/training-logs', async (req, res) => {
     try {
         await ensureTables();
-        const curriculumId = cleanText(req.query.curriculumId, 36);
-        const courseId = cleanText(req.query.courseId, 36);
-        const employeeId = cleanText(req.query.employeeId, 50);
-        const action = cleanText(req.query.action, 50);
-        const dept = cleanText(req.query.dept, 100);
-        const year = parseInt(req.query.year, 10);
-        const limit = Math.min(parseInt(req.query.limit, 10) || 100, 300);
+        const filters = parseTrainingLogQuery(req.query, {
+            admin: isFourmAdmin(req),
+            ownDepartment: currentUserDept(req),
+        });
+        if (!isFourmAdmin(req) && !filters.department) {
+            const emptyPagination = trainingLogPagination(0, filters.page, filters.pageSize);
+            return res.json({
+                success: true,
+                data: filters.paged ? { rows: [], pagination: emptyPagination, filters } : [],
+            });
+        }
+        const jsonValue = (column, key) =>
+            `NULLIF(JSON_UNQUOTE(JSON_EXTRACT(CASE WHEN JSON_VALID(${column}) THEN ${column} ELSE '{}' END, '$.${key}')), 'null')`;
+        const newDepartment = jsonValue('l.NewValue', 'curriculumDepartment');
+        const oldDepartment = jsonValue('l.OldValue', 'curriculumDepartment');
+        const newUnit = jsonValue('l.NewValue', 'employeeUnit');
+        const oldUnit = jsonValue('l.OldValue', 'employeeUnit');
+        const newYear = jsonValue('l.NewValue', 'year');
+        const oldYear = jsonValue('l.OldValue', 'year');
+        const newEmployeeName = jsonValue('l.NewValue', 'employeeName');
+        const oldEmployeeName = jsonValue('l.OldValue', 'employeeName');
+        const newCurriculumCode = jsonValue('l.NewValue', 'curriculumCode');
+        const oldCurriculumCode = jsonValue('l.OldValue', 'curriculumCode');
+        const newCurriculumTitle = jsonValue('l.NewValue', 'curriculumTitle');
+        const oldCurriculumTitle = jsonValue('l.OldValue', 'curriculumTitle');
+        const newCourseCode = jsonValue('l.NewValue', 'courseCode');
+        const oldCourseCode = jsonValue('l.OldValue', 'courseCode');
+        const newCourseTitle = jsonValue('l.NewValue', 'courseTitle');
+        const oldCourseTitle = jsonValue('l.OldValue', 'courseTitle');
+        const newCurriculumId = jsonValue('l.NewValue', 'curriculumId');
+        const oldCurriculumId = jsonValue('l.OldValue', 'curriculumId');
+        const newCourseId = jsonValue('l.NewValue', 'courseId');
+        const oldCourseId = jsonValue('l.OldValue', 'courseId');
+        const scopeDepartment = `COALESCE(${newDepartment}, ${oldDepartment}, cur.Department)`;
+        const logUnit = `COALESCE(${newUnit}, ${oldUnit}, emp.Unit)`;
+        const logYear = `COALESCE(${newYear}, ${oldYear}, cur.\`Year\`)`;
         const params = [];
         const where = [];
-        if (curriculumId) { where.push('l.CurriculumID = ?'); params.push(curriculumId); }
-        if (courseId) { where.push('l.CourseID = ?'); params.push(courseId); }
-        if (employeeId) { where.push('l.EmployeeID = ?'); params.push(employeeId); }
-        if (action && action !== 'all') { where.push('l.Action = ?'); params.push(action); }
-        if (Number.isInteger(year) && year > 2000) { where.push('cur.`Year` = ?'); params.push(year); }
-        if (isFourmAdmin(req) && dept && dept !== 'all') { where.push('cur.Department = ?'); params.push(dept); }
-        if (!isFourmAdmin(req)) {
-            const ownDept = currentUserDept(req);
-            if (!ownDept) return res.json({ success: true, data: [] });
-            where.push('cur.Department = ?');
-            params.push(ownDept);
+        if (filters.curriculumId) {
+            where.push(`(l.CurriculumID = ? OR ${newCurriculumId} = ? OR ${oldCurriculumId} = ?)`);
+            params.push(filters.curriculumId, filters.curriculumId, filters.curriculumId);
         }
-        params.push(limit);
-        const [rows] = await db.query(
-            `SELECT l.*, cur.Department, cur.\`Year\`, cur.CurriculumCode, cur.CurriculumTitle,
-                    co.CourseCode, co.CourseTitle
-             FROM FourM_CurriculumLogs l
+        if (filters.courseId) {
+            where.push(`(l.CourseID = ? OR ${newCourseId} = ? OR ${oldCourseId} = ?)`);
+            params.push(filters.courseId, filters.courseId, filters.courseId);
+        }
+        if (filters.employeeId) { where.push('l.EmployeeID = ?'); params.push(filters.employeeId); }
+        if (filters.action && filters.action !== 'ALL') { where.push('l.Action = ?'); params.push(filters.action); }
+        if (filters.actorId) { where.push('l.PerformedByID = ?'); params.push(filters.actorId); }
+        if (filters.year) {
+            where.push(`(${newYear} = ? OR ${oldYear} = ? OR (${newYear} IS NULL AND ${oldYear} IS NULL AND cur.\`Year\` = ?))`);
+            params.push(filters.year, filters.year, filters.year);
+        }
+        if (filters.department) {
+            where.push(`(${newDepartment} = ? OR ${oldDepartment} = ? OR (${newDepartment} IS NULL AND ${oldDepartment} IS NULL AND cur.Department = ?))`);
+            params.push(filters.department, filters.department, filters.department);
+        }
+        if (filters.unit) {
+            where.push(`(${newUnit} = ? OR ${oldUnit} = ? OR (${newUnit} IS NULL AND ${oldUnit} IS NULL AND emp.Unit = ?))`);
+            params.push(filters.unit, filters.unit, filters.unit);
+        }
+        if (filters.dateFrom) { where.push('l.PerformedAt >= ?'); params.push(`${filters.dateFrom} 00:00:00`); }
+        if (filters.dateTo) { where.push('l.PerformedAt < DATE_ADD(?, INTERVAL 1 DAY)'); params.push(`${filters.dateTo} 00:00:00`); }
+        if (filters.q) {
+            const like = `%${filters.q}%`;
+            where.push(`(l.Action LIKE ? OR l.EmployeeID LIKE ? OR l.PerformedByID LIKE ? OR l.PerformedBy LIKE ?
+                OR cur.CurriculumCode LIKE ? OR cur.CurriculumTitle LIKE ? OR co.CourseCode LIKE ? OR co.CourseTitle LIKE ?
+                OR emp.EmployeeName LIKE ? OR ${newEmployeeName} LIKE ? OR ${oldEmployeeName} LIKE ?
+                OR ${newCurriculumCode} LIKE ? OR ${oldCurriculumCode} LIKE ? OR ${newCurriculumTitle} LIKE ? OR ${oldCurriculumTitle} LIKE ?
+                OR ${newCourseCode} LIKE ? OR ${oldCourseCode} LIKE ? OR ${newCourseTitle} LIKE ? OR ${oldCourseTitle} LIKE ?
+                OR ${scopeDepartment} LIKE ? OR ${logUnit} LIKE ?)`);
+            params.push(...Array(21).fill(like));
+        }
+        const joins = `FROM FourM_CurriculumLogs l
              LEFT JOIN FourM_Curriculums cur ON cur.id = l.CurriculumID
              LEFT JOIN FourM_Courses co ON co.id = l.CourseID
-             ${where.length ? `WHERE ${where.join(' AND ')}` : ''}
-             ORDER BY l.PerformedAt DESC, l.id DESC
-             LIMIT ?`,
-            params
+             LEFT JOIN Employees emp ON emp.EmployeeID = l.EmployeeID`;
+        const sqlWhere = where.length ? `WHERE ${where.join(' AND ')}` : '';
+        const select = `SELECT l.*, ${scopeDepartment} AS Department, ${logYear} AS \`Year\`,
+                    COALESCE(${newCurriculumCode}, ${oldCurriculumCode}, cur.CurriculumCode) AS CurriculumCode,
+                    COALESCE(${newCurriculumTitle}, ${oldCurriculumTitle}, cur.CurriculumTitle) AS CurriculumTitle,
+                    COALESCE(${newCourseCode}, ${oldCourseCode}, co.CourseCode) AS CourseCode,
+                    COALESCE(${newCourseTitle}, ${oldCourseTitle}, co.CourseTitle) AS CourseTitle,
+                    COALESCE(${newEmployeeName}, ${oldEmployeeName}, emp.EmployeeName) AS EmployeeName,
+                    COALESCE(${jsonValue('l.NewValue', 'employeeDepartment')}, ${jsonValue('l.OldValue', 'employeeDepartment')}, emp.Department) AS EmployeeDepartment,
+                    ${logUnit} AS Unit, emp.Position,
+                    ${oldDepartment} AS SourceDepartment, ${newDepartment} AS DestinationDepartment,
+                    ${oldUnit} AS SourceUnit, ${newUnit} AS DestinationUnit`;
+        if (!filters.paged) {
+            const [rows] = await db.query(
+                `${select} ${joins} ${sqlWhere} ORDER BY l.PerformedAt DESC, l.id DESC LIMIT ?`,
+                [...params, filters.pageSize]
+            );
+            return res.json({ success: true, data: rows });
+        }
+        const [[countRow]] = await db.query(`SELECT COUNT(*) AS total ${joins} ${sqlWhere}`, params);
+        const pagination = trainingLogPagination(countRow?.total, filters.page, filters.pageSize);
+        filters.page = pagination.page;
+        const offset = (pagination.page - 1) * pagination.pageSize;
+        const [rows] = await db.query(
+            `${select} ${joins} ${sqlWhere} ORDER BY l.PerformedAt DESC, l.id DESC LIMIT ? OFFSET ?`,
+            [...params, pagination.pageSize, offset]
         );
-        res.json({ success: true, data: rows });
+        return res.json({ success: true, data: { rows, pagination, filters } });
     } catch (error) {
         console.error('4M training log list error:', error);
-        res.status(500).json({ success: false, message: 'ไม่สามารถดึงประวัติ Training Matrix ได้' });
+        res.status(error.statusCode || 500).json({
+            success: false,
+            message: error.statusCode === 400 ? error.message : 'ไม่สามารถดึงประวัติ Training Matrix ได้',
+        });
     }
 });
 
-router.delete('/training-logs/:id', isAdmin, async (req, res) => {
-    try {
-        await ensureTables();
-        const id = Number.parseInt(req.params.id, 10);
-        if (!Number.isInteger(id) || id <= 0) {
-            return res.status(400).json({ success: false, message: 'Invalid training log id.' });
-        }
-        const [rows] = await db.query('SELECT * FROM FourM_CurriculumLogs WHERE id = ?', [id]);
-        if (!rows.length) {
-            return res.status(404).json({ success: false, message: 'Training log not found.' });
-        }
-        const oldValue = rows[0];
-        await db.query('DELETE FROM FourM_CurriculumLogs WHERE id = ?', [id]);
-        await logAudit(req, {
-            action: 'FOURM_TRAINING_LOG_DELETE',
-            module: 'fourm',
-            targetType: 'FourM_CurriculumLog',
-            targetId: id,
-            detail: `Delete 4M Training Matrix history log ${id}`,
-            metadata: { oldValue },
-            statusCode: 200,
-        });
-        res.json({ success: true });
-    } catch (error) {
-        console.error('4M training log delete error:', error);
-        res.status(500).json({ success: false, message: 'Cannot delete Training Matrix history.' });
-    }
+router.delete('/training-logs/:id', (req, res) => {
+    res.status(405).json({
+        success: false,
+        code: 'AUDIT_LOG_IMMUTABLE',
+        message: 'Training Matrix Audit Log is immutable and cannot be deleted.',
+    });
 });
 
 router.get('/responsible-employees', isAdmin, async (req, res) => {

@@ -63,12 +63,13 @@ function normalizeSide(value) {
     const side = clean(value?.side, 10);
     if (!SIDES.includes(side)) throw new DesignerValidationError('Side must be Front or Back.');
     const storageClass = clean(value?.storageClass, 40);
-    if (!['PersonalTemplate','DepartmentTemplate','DesignerAsset'].includes(storageClass)) throw new DesignerValidationError(`Storage class is invalid for ${side}.`);
+    if (!['PersonalTemplate','DepartmentTemplate','DesignerAsset','CardArtwork'].includes(storageClass)) throw new DesignerValidationError(`Storage class is invalid for ${side}.`);
     const storedName = clean(value?.backgroundStoredName, 255);
     if (!storedName || storedName !== storedName.split(/[\\/]/).pop()) throw new DesignerValidationError(`Background stored name is invalid for ${side}.`);
     const originalName = clean(value?.backgroundOriginalName, 255);
     const mimeType = clean(value?.backgroundMimeType, 80).toLowerCase();
-    if (!['image/jpeg','image/png','image/webp'].includes(mimeType)) throw new DesignerValidationError(`Background MIME type is invalid for ${side}.`);
+    const logicalArtwork=storageClass==='CardArtwork';
+    if (!(logicalArtwork&&mimeType==='application/x-bbs-card-artwork')&&!['image/jpeg','image/png','image/webp'].includes(mimeType)) throw new DesignerValidationError(`Background MIME type is invalid for ${side}.`);
     const fit = clean(value?.backgroundFit || 'Cover', 20);
     if (!['Contain','Cover','Stretch'].includes(fit)) throw new DesignerValidationError(`Background fit is invalid for ${side}.`);
     return {
@@ -76,6 +77,8 @@ function normalizeSide(value) {
         masterArtworkId:value?.masterArtworkId == null ? null : integer(value.masterArtworkId,1,Number.MAX_SAFE_INTEGER,'Master artwork'),
         masterArtworkKind:value?.masterArtworkKind == null ? null : normalizeKind(value.masterArtworkKind),
         masterArtworkSide:value?.masterArtworkSide == null ? null : clean(value.masterArtworkSide,10),
+        artworkVersionId:value?.artworkVersionId == null ? null : integer(value.artworkVersionId,1,Number.MAX_SAFE_INTEGER,'Artwork version'),
+        artworkRole:value?.artworkRole == null ? null : clean(value.artworkRole,20),
         backgroundStoredName:storedName, backgroundOriginalName:originalName || storedName,
         backgroundMimeType:mimeType, backgroundFileSize:integer(value?.backgroundFileSize || 0,0,100*1024*1024,'Background file size'),
         pixelWidth:value?.pixelWidth == null ? null : integer(value.pixelWidth,1,100000,'Pixel width'),
@@ -129,7 +132,8 @@ function assessLayout(layout) {
     if (!layout.sides.some(side=>side.side==='Back')) items.push({severity:'Blocked',code:'BACK_SIDE_MISSING',message:'Front and Back Master Artwork are required.'});
     if (Number(layout.dpi)<200) items.push({severity:'Warning',code:'DPI_LOW',message:'Print DPI is below the recommended 200 DPI.'});
     for (const side of layout.sides) {
-        if (side.storageClass!=='DesignerAsset'||!side.masterArtworkId||side.masterArtworkKind!==layout.templateKind||side.masterArtworkSide!==side.side) items.push({severity:'Blocked',code:`MASTER_ARTWORK_${side.side.toUpperCase()}_REQUIRED`,message:`${layout.templateKind} ${side.side} must use its matching active Master Artwork snapshot.`});
+        const expectedRole=side.side==='Front'?'ScopedFront':'GlobalBack';
+        if (side.storageClass!=='CardArtwork'||side.artworkRole!==expectedRole) items.push({severity:'Blocked',code:`CARD_ARTWORK_${side.side.toUpperCase()}_REQUIRED`,message:`${side.side} must use its logical ${expectedRole} Artwork binding.`});
         if (Number(side.bleedMM||0)<1) items.push({severity:'Warning',code:`BLEED_LOW_${side.side.toUpperCase()}`,message:`${side.side} bleed is below the recommended 1 mm.`});
         if (Number(side.safeMarginMM||0)<2) items.push({severity:'Warning',code:`SAFE_MARGIN_LOW_${side.side.toUpperCase()}`,message:`${side.side} safe margin is below the recommended 2 mm.`});
         if (side.pixelWidth&&side.pixelHeight) { const requiredWidth=(Number(layout.widthMM)/25.4)*Number(layout.dpi),requiredHeight=(Number(layout.heightMM)/25.4)*Number(layout.dpi); if(Number(side.pixelWidth)<requiredWidth||Number(side.pixelHeight)<requiredHeight)items.push({severity:'Warning',code:`BACKGROUND_RESOLUTION_LOW_${side.side.toUpperCase()}`,message:`${side.side} background may be below the selected print DPI.`}); }
