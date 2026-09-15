@@ -1,6 +1,13 @@
 # TSH Safety Core Activity - AGENTS.md
 
-## Accident Recordable classification constraints (2026-09-15, local development)
+## Accident explicit Recordable classification Production release (2026-09-15)
+
+- `main` commit `e2a215f` is deployed to the PHP Production target. Accident Recordable totals, counted Lost Days, Lost Time frequency/severity rates, last-counted-case date, Dashboard, Analytics, report filters and exports now use the explicit `IsRecordable=1` flag and exclude Near Miss / First Aid; type, severity and lost days no longer infer Recordable status.
+- Historical Accident row 14 remains an unchanged Lost Time report with three factual lost days and `IsRecordable=0`; Production read-only API and browser smokes confirm it is visibly Non-recordable and contributes zero to Recordable, LTIFR and ISR. No Accident business mutation was sent during verification.
+- This release changed no schema, Accident business row or upload path. Near Miss / First Aid now fail closed if submitted as Recordable, while Fatal remains required to be Recordable. Node, PHP and central Dashboard projections are aligned.
+- Rollback evidence is under `backups/production/accident-recordable-predeploy-20260915-151114/`: verified 195-table SQL gzip and six exact runtime-before files. The unchanged Production `uploads/` inventory contained 895 entries; a broad download was intentionally blocked because this release does not modify uploads and the host could not provide a fully protected data channel. FTPES control-channel hashes passed `5/5`, HTTPS hashes passed `3/3`, `.htaccess` was restored to SHA-256 `4088E920886567C344AE7A7A88AEB010DD7F2E42F7AFD2AF9D94F8DE4A1265DB`, and helper residue is zero.
+
+## Accident Recordable classification constraints (2026-09-15)
 
 - `IsRecordable=1` is the explicit and sole gate for official Accident Recordable totals, KPI/rates, counted lost days, counted Lost Time cases and last-counted-case date. Accident type, severity and `LostDays` must never infer Recordable status.
 - Near Miss and First Aid cannot be Recordable. Fatal must be Recordable. Enforce the same validation and projection in Node, PHP, dashboard, UI, exports and read-only audits.
