@@ -14,6 +14,21 @@ for (const marker of [
     'const CARD_PREVIEW_DPI = 150',
     'function assessCardTemplate(',
     'function compositeCardPreview(',
+    'async function loadActiveDesignerPreview(',
+    'function assessDesignerPreview(',
+    'function designerCompositeCardPreview(',
+    'renderDesignerElement(element,values,designer.resources,qrDataUrl,{pixelsPerMM})',
+    'saveDesignerPrintPdf',
+    'saveDesignerPrintImages',
+    'function mountDesignerOutputActions(',
+    'data-card-output-pdf',
+    'data-card-output-image="png"',
+    'data-card-output-image="jpg"',
+    'บันทึก PDF',
+    'บันทึก PNG',
+    'บันทึก JPG',
+    'ACTIVE DESIGNER · V',
+    'Legacy Preview · ยังไม่มี Active Designer',
     'function previewReadinessPanel(',
     'async function openCardTemplatePreview(',
     'COMPOSITE CARD PREVIEW',
@@ -56,6 +71,13 @@ assert.ok(issue.indexOf('openCardPrintPopup()') < issue.indexOf("API.post('/bbs/
 const replace = ui.slice(ui.indexOf('async function replaceCard('), ui.indexOf('async function revokeCard('));
 assert.ok(replace.indexOf("intent:'replace'") < replace.indexOf('openCardPrintPopup()'), 'Personal replacement must show preview before print');
 assert.ok(replace.indexOf('openCardPrintPopup()') < replace.indexOf("API.post(`/bbs/admin/cards/${id}/replace`"), 'Replacement popup safety must remain before QR rotation');
+
+const compositeFlow = ui.slice(ui.indexOf('async function openCardTemplatePreview('), ui.indexOf('async function previewDepartmentTemplate('));
+assert.ok(compositeFlow.indexOf('loadActiveDesignerPreview(kind,id)') < compositeFlow.indexOf('loadCardTemplateAsset(kind,id)'), 'Composite Preview must resolve Active Designer before Legacy fallback');
+assert.ok(compositeFlow.includes('designerCompositeCardPreview(kind,template,designer'), 'Active Designer must drive Composite Preview geometry');
+assert.ok(compositeFlow.includes("designer?null:await loadCardTemplateAsset(kind,id)"), 'Legacy image must load only when no Active Designer exists');
+assert.ok(ui.includes('mountDesignerOutputActions(popup,{filename:cardOutputFilename(`BBS_Department_'), 'Department Designer output must offer direct PDF save');
+assert.ok(ui.includes('mountDesignerOutputActions(popup,{filename:cardOutputFilename(cards.length===1?`BBS_Personal_'), 'Personal Designer output must offer direct PDF save while its issued QR remains available');
 
 assert.ok(ui.includes("border:.2mm dashed #f97316"), 'Print output must expose the cut boundary');
 assert.ok(ui.includes('.safe,.designer-safe{position:absolute;border:.2mm dashed #0891b2') && ui.includes('.safe{inset:4%}') && ui.includes('.safe,.designer-safe,.designer-bleed{display:none}'), 'Print output must retain a safe-area guide and hide it when printing');
