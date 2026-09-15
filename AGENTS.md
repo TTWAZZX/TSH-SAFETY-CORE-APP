@@ -1,5 +1,12 @@
 # TSH Safety Core Activity - AGENTS.md
 
+## BBS Composite Preview and exact card output Production release (2026-09-15)
+
+- `main` commit `60cc095` is deployed to the PHP Production target. Composite Card Preview now prefers the Active same-kind Designer layout and its server-resolved Scoped Front / Global Back artwork, geometry, layers and typography instead of reconstructing a separate legacy approximation.
+- Issued Personal and printable Department card windows now provide Print, PDF, PNG and JPG from the same server-issued Designer Print Snapshot. Personal raw QR remains available only after the existing issue/replace mutation; Department output continues to use its current Active Department QR. Image export emits separate physical front/back print sheets and hides safe/bleed guides while retaining the cut line.
+- This release changed no schema, BBS business record, private-upload path or rollout setting. Production remains `staged_admin_only=1`, `pilot_scope_only=0`, `visual_card_designer_enabled=1`, `visual_card_designer_rendering_enabled=1`.
+- Fresh rollback evidence is under `backups/production/bbs-card-output-predeploy-20260915-103829/`: verified 195-table SQL gzip, five runtime-before files and all 14 BBS private uploads. FTPS and HTTPS hashes passed `4/4`; authenticated read-only API, responsive BBS and focused Active Designer Composite Preview smokes passed with zero mutation requests or console errors. The protected backup helper was removed and the original `.htaccess` checksum was restored.
+
 ## BBS artwork-first Template workflow Production release (2026-09-14)
 
 - `main` commit `1f7ac9a` is deployed to the PHP Production target. Active kind-specific Scoped Front artwork can now open a preselected Personal or Department Template form, fileless Template creation materializes the resolved Scoped Front as the isolated legacy fallback, and Template Lifecycle shows explicit Scoped Front / Global Back readiness before Designer work.
