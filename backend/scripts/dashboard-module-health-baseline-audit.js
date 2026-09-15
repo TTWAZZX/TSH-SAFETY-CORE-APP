@@ -95,7 +95,7 @@ async function snapshot() {
         `, [year]).then(value => ['training', value]),
         selectOne(`
             SELECT COUNT(*) AS reports,
-                   SUM(IsRecordable=1) AS recordable
+                   SUM(IsRecordable=1 AND AccidentType NOT IN ('Near Miss','First Aid')) AS recordable
             FROM Accident_Reports
             WHERE YEAR(AccidentDate)=?
               AND (IsDeleted IS NULL OR IsDeleted=0)

@@ -370,6 +370,7 @@ function p5_accident_business_rule_error(array $body): ?string
     $needsRootCause = $recordable || in_array($type, ['Medical Treatment', 'Lost Time', 'Fatal'], true);
     if ($type === 'Near Miss' && trim((string)($body['NearMissEvent'] ?? '')) === '') return 'Near Miss event is required.';
     if ($type === 'Near Miss' && !in_array(trim((string)($body['PotentialSeverity'] ?? '')), ['Low', 'Medium', 'High', 'Critical'], true)) return 'Potential severity is required.';
+    if (in_array($type, ['Near Miss', 'First Aid'], true) && $recordable) return $type . ' cannot be a Recordable Case.';
     if ($type === 'Lost Time' && $lostDays < 1) return 'Lost Time requires at least one lost day.';
     if ($type === 'Medical Treatment' && trim((string)($body['MedicalTreatment'] ?? '')) === '') return 'Medical treatment detail is required.';
     if ($type === 'Fatal' && !$recordable) return 'Fatal must be recordable.';
@@ -391,7 +392,7 @@ function handle_accident_routes(string $method, string $path): bool
         require_admin();
         ensure_accident_tables();
     }
-    $statCond = "AccidentType NOT IN ('Near Miss','First Aid') AND (AccidentType IN ('Medical Treatment','Lost Time','Fatal') OR Severity='Critical' OR IsRecordable=1 OR LostDays>0)";
+    $statCond = "IsRecordable=1 AND AccidentType NOT IN ('Near Miss','First Aid')";
     if ($method === 'GET' && $path === '/accident/reports') {
         $sql = "SELECT r.*,e.EmployeeName,e.Team,(SELECT COUNT(*) FROM accident_attachments a WHERE a.AccidentID=r.id) AS AttachmentCount FROM accident_reports r LEFT JOIN employees e ON e.EmployeeID=r.EmployeeID WHERE (r.IsDeleted IS NULL OR r.IsDeleted=0)";
         $p = [];
@@ -423,7 +424,7 @@ function handle_accident_routes(string $method, string $path): bool
     if ($method === 'GET' && $path === '/accident/analytics') {
         $year = p5_accident_year($_GET['year'] ?? null); $yp = [$year];
         json_response(['success' => true, 'data' => [
-            'deptRank' => db_rows("SELECT Department,COUNT(*) AS total,SUM($statCond) AS recordable,SUM(CASE WHEN $statCond THEN LostDays ELSE 0 END) AS lostDays,SUM(AccidentType='Near Miss') AS nearMiss,SUM(AccidentType='Fatal') AS fatal,SUM(Severity='Critical') AS critical FROM accident_reports WHERE (IsDeleted IS NULL OR IsDeleted=0) AND YEAR(AccidentDate)=? GROUP BY Department ORDER BY total DESC LIMIT 10", $yp),
+            'deptRank' => db_rows("SELECT Department,COUNT(*) AS total,SUM($statCond) AS recordable,SUM(CASE WHEN $statCond THEN LostDays ELSE 0 END) AS lostDays,SUM(AccidentType='Near Miss') AS nearMiss,SUM(AccidentType='Fatal') AS fatal,SUM(Severity='Critical') AS critical FROM accident_reports WHERE (IsDeleted IS NULL OR IsDeleted=0) AND YEAR(AccidentDate)=? GROUP BY Department ORDER BY (SUM($statCond)*3 + SUM(CASE WHEN $statCond THEN LostDays ELSE 0 END)*2 + COUNT(*)) DESC LIMIT 10", $yp),
             'hotspot' => db_rows("SELECT COALESCE(Area,'(Unspecified)') AS area,COUNT(*) AS cnt,SUM($statCond) AS recordable,SUM(CASE WHEN $statCond THEN LostDays ELSE 0 END) AS lostDays FROM accident_reports WHERE (IsDeleted IS NULL OR IsDeleted=0) AND YEAR(AccidentDate)=? GROUP BY Area ORDER BY cnt DESC LIMIT 8", $yp),
             'rootCauses' => db_rows("SELECT COALESCE(RootCause,'(Unspecified)') AS cause,COUNT(*) AS cnt FROM accident_reports WHERE (IsDeleted IS NULL OR IsDeleted=0) AND YEAR(AccidentDate)=? GROUP BY RootCause ORDER BY cnt DESC LIMIT 8", $yp),
             'nearMissTrend' => db_rows("SELECT MONTH(AccidentDate) AS mo,COUNT(*) AS cnt FROM accident_reports WHERE (IsDeleted IS NULL OR IsDeleted=0) AND AccidentType='Near Miss' AND YEAR(AccidentDate)=? GROUP BY MONTH(AccidentDate) ORDER BY mo", $yp),
@@ -550,7 +551,7 @@ function handle_accident_routes(string $method, string $path): bool
     if ($method === 'GET' && $path === '/accident/performance') {
         $year = p5_accident_year($_GET['year'] ?? null);
         $row = db_row('SELECT * FROM accident_performance WHERE Year=?', [$year]) ?: ['Year' => $year, 'TotalHours' => 0, 'TotalDays' => 0, 'TargetHours' => 1000000, 'TargetDays' => 365, 'MonthlyStatus' => null, 'MonthlyManHours' => null, 'AnnualManHours' => 0, 'CumulativeManHours' => 0];
-        $stats = db_row("SELECT COALESCE(SUM($statCond),0) AS statsTotal,COALESCE(SUM(CASE WHEN $statCond THEN LostDays ELSE 0 END),0) AS lostDays,COALESCE(SUM(AccidentType='First Aid'),0) AS firstAid,COALESCE(SUM(AccidentType='Lost Time'),0) AS lostTime,COALESCE(SUM(AccidentType='Near Miss'),0) AS nearMiss,COALESCE(SUM(($statCond) AND (AccidentType='Fatal' OR Severity='Critical')),0) AS severe,COALESCE(SUM(($statCond) AND LostDays>3),0) AS lostOver3,COALESCE(SUM(($statCond) AND LostDays BETWEEN 1 AND 3),0) AS lostUnderEqual3,COALESCE(SUM(($statCond) AND COALESCE(LostDays,0)=0 AND AccidentType<>'Fatal' AND Severity<>'Critical'),0) AS nonLostRecordable FROM accident_reports WHERE (IsDeleted IS NULL OR IsDeleted=0) AND YEAR(AccidentDate)=?", [$year]) ?: [];
+        $stats = db_row("SELECT COALESCE(SUM($statCond),0) AS statsTotal,COALESCE(SUM(CASE WHEN $statCond THEN LostDays ELSE 0 END),0) AS lostDays,COALESCE(SUM(AccidentType='First Aid'),0) AS firstAid,COALESCE(SUM(($statCond) AND AccidentType='Lost Time'),0) AS lostTime,COALESCE(SUM(AccidentType='Near Miss'),0) AS nearMiss,COALESCE(SUM(($statCond) AND (AccidentType='Fatal' OR Severity='Critical')),0) AS severe,COALESCE(SUM(($statCond) AND LostDays>3),0) AS lostOver3,COALESCE(SUM(($statCond) AND LostDays BETWEEN 1 AND 3),0) AS lostUnderEqual3,COALESCE(SUM(($statCond) AND COALESCE(LostDays,0)=0 AND AccidentType<>'Fatal' AND Severity<>'Critical'),0) AS nonLostRecordable FROM accident_reports WHERE (IsDeleted IS NULL OR IsDeleted=0) AND YEAR(AccidentDate)=?", [$year]) ?: [];
         $lastStat = db_row("SELECT AccidentDate FROM accident_reports WHERE (IsDeleted IS NULL OR IsDeleted=0) AND YEAR(AccidentDate)=? AND $statCond ORDER BY AccidentDate DESC,id DESC LIMIT 1", [$year]);
         $monthlyManHours = p5_accident_monthly_numbers($row['MonthlyManHours'] ?? null);
         $monthlyTotal = array_sum($monthlyManHours);
@@ -564,7 +565,9 @@ function handle_accident_routes(string $method, string $path): bool
         $rate = function (int $countValue, int $base = 1000000) use ($annual): float {
             return $annual > 0 ? round($countValue * $base / $annual, 3) : 0.0;
         };
-        $effectiveLast = $lastStat['AccidentDate'] ?? ($row['LastAccidentDate'] ?? null);
+        // This is derived from explicit Recordable cases. A stored legacy/manual
+        // date must not make a year look non-zero after the classification is fixed.
+        $effectiveLast = $lastStat['AccidentDate'] ?? null;
         $row['MonthlyManHours'] = json_encode($monthlyManHours, JSON_UNESCAPED_UNICODE);
         $row['LastAccidentDate'] = $effectiveLast;
         $row['recordableCount'] = $count;

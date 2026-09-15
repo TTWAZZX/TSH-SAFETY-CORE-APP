@@ -72,13 +72,8 @@ const EXCLUDED_STATS_TYPES = ["Near Miss", "First Aid"];
 const INVESTIGATION_STATUSES = new Set(['Reported', 'Under Investigation', 'CAPA Assigned', 'Verified', 'Closed']);
 const POTENTIAL_SEVERITIES = new Set(['Low', 'Medium', 'High', 'Critical']);
 const STATS_ACCIDENT_CONDITION = `
-    AccidentType NOT IN ('Near Miss', 'First Aid')
-    AND (
-        AccidentType IN ('Medical Treatment', 'Lost Time', 'Fatal')
-        OR Severity = 'Critical'
-        OR IsRecordable = 1
-        OR LostDays > 0
-    )
+    IsRecordable = 1
+    AND AccidentType NOT IN ('Near Miss', 'First Aid')
 `;
 
 function userName(req) {
@@ -267,6 +262,7 @@ function accidentBusinessRuleError(body) {
     if (!ACCIDENT_TYPES.has(type)) return 'ประเภทอุบัติเหตุไม่ถูกต้อง / Invalid accident type';
     if (type === 'Near Miss' && !s(body.NearMissEvent)) return 'กรุณาระบุเหตุการณ์ Near Miss / Please describe the Near Miss event';
     if (type === 'Near Miss' && !normalizePotentialSeverity(body.PotentialSeverity)) return 'กรุณาระบุระดับความรุนแรงที่อาจเกิดขึ้น / Please select potential severity';
+    if (EXCLUDED_STATS_TYPES.includes(type) && isRecordable) return `${type} ไม่สามารถกำหนดเป็น Recordable Case ได้`;
     if (type === 'Lost Time' && lostDays < 1) return 'Lost Time ต้องระบุจำนวนวันหยุดงานมากกว่า 0';
     if (type === 'Medical Treatment' && !s(body.MedicalTreatment)) return 'Medical Treatment ต้องระบุรายละเอียดการรักษา';
     if (type === 'Fatal' && !isRecordable) return 'Fatal ต้องกำหนดเป็น Recordable';
@@ -638,7 +634,9 @@ router.get('/analytics', async (req, res) => {
             WHERE (IsDeleted IS NULL OR IsDeleted = 0)
               AND Department IS NOT NULL AND Department <> '' ${yf}
             GROUP BY Department
-            ORDER BY (SUM(IsRecordable)*3 + SUM(LostDays)*2 + COUNT(*)) DESC
+            ORDER BY (SUM(${STATS_ACCIDENT_CONDITION})*3
+                + SUM(CASE WHEN ${STATS_ACCIDENT_CONDITION} THEN LostDays ELSE 0 END)*2
+                + COUNT(*)) DESC
             LIMIT 10
         `, yp);
 
@@ -1020,7 +1018,7 @@ router.get('/performance', async (req, res) => {
                 COALESCE(SUM(CASE WHEN ${STATS_ACCIDENT_CONDITION} THEN LostDays ELSE 0 END), 0) AS lostDays,
                 COALESCE(SUM(AccidentType = 'First Aid'), 0) AS firstAid,
                 COALESCE(SUM(AccidentType = 'Medical Treatment'), 0) AS medicalTreatment,
-                COALESCE(SUM(AccidentType = 'Lost Time'), 0) AS lostTime,
+                COALESCE(SUM((${STATS_ACCIDENT_CONDITION}) AND AccidentType = 'Lost Time'), 0) AS lostTime,
                 COALESCE(SUM(AccidentType = 'Fatal'), 0) AS fatal,
                 COALESCE(SUM(AccidentType = 'Near Miss'), 0) AS nearMiss,
                 COALESCE(SUM((${STATS_ACCIDENT_CONDITION}) AND (AccidentType = 'Fatal' OR Severity = 'Critical')), 0) AS severe,
@@ -1064,7 +1062,9 @@ router.get('/performance', async (req, res) => {
         const statsCount = parseInt(kpi.statsTotal) || 0;
         const lostTimeCount = parseInt(kpi.lostTime) || 0;
         const statsLostDays = parseInt(kpi.lostDays) || 0;
-        const effectiveLastAccidentDate = lastStat?.AccidentDate || record.LastAccidentDate || null;
+        // LastAccidentDate is a derived Recordable statistic. Do not revive a stale
+        // legacy/manual date when the selected year has no explicitly flagged case.
+        const effectiveLastAccidentDate = lastStat?.AccidentDate || null;
         const rate = (count, base = 1000000) => annualManHours > 0
             ? Number(((Number(count) || 0) * base / annualManHours).toFixed(3))
             : 0;

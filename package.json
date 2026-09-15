@@ -30,6 +30,8 @@
     "test:dashboard-hiyari-coverage": "npm --prefix backend run test:dashboard-hiyari-coverage",
     "test:dashboard-module-health-d2": "npm --prefix backend run test:dashboard-module-health-d2",
     "test:dashboard-module-health-php": "npm --prefix backend run test:dashboard-module-health-php",
+    "test:accident-recordable": "npm --prefix backend run test:accident-recordable",
+    "audit:accident-recordable": "npm --prefix backend run audit:accident-recordable --",
     "test:personal-target-eligibility": "npm --prefix backend run test:personal-target-eligibility",
     "test:personal-target-runtime": "npm --prefix backend run test:personal-target-runtime",
     "test:personal-target-variants": "npm --prefix backend run test:personal-target-variants",

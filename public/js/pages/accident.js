@@ -544,7 +544,7 @@ async function _loadHeroKpiSummary() {
                             Safety KPI Board
                         </div>
                         <h2 class="text-xl md:text-2xl font-black text-white leading-tight">บอร์ดสถิติความปลอดภัยประจำปี ${year}</h2>
-                        <p class="text-sm mt-1" style="color:rgba(209,250,229,0.92)">คำนวณจาก Accident Report + Man-hour · ไม่รวม First Aid / Near Miss</p>
+                        <p class="text-sm mt-1" style="color:rgba(209,250,229,0.92)">คำนวณจากเคสที่ Admin เลือก Recordable Case + Man-hour</p>
                     </div>
                     <div class="mt-3 grid grid-cols-1 sm:grid-cols-2 gap-2 text-[11px] font-bold text-white">
                         <div class="rounded-xl bg-black/10 border border-white/15 px-3 py-2">
@@ -2002,7 +2002,8 @@ function _visibleReports() {
         const state = _followupState(r).key;
         if (_filter.quick === 'counted') return _accIsCountedStatReport(r);
         if (_filter.quick === 'notCounted') return !_accIsCountedStatReport(r);
-        if (_filter.quick === 'recordable') return Number(r.IsRecordable) === 1;
+        // Keep the legacy deep-link/filter key, but project the same official rule.
+        if (_filter.quick === 'recordable') return _accIsCountedStatReport(r);
         return state === _filter.quick;
     });
 }
@@ -2010,10 +2011,7 @@ function _visibleReports() {
 function _accIsCountedStatReport(r) {
     const type = String(r?.AccidentType || '');
     if (type === 'Near Miss' || type === 'First Aid') return false;
-    return ['Medical Treatment', 'Lost Time', 'Fatal'].includes(type)
-        || String(r?.Severity || '') === 'Critical'
-        || Number(r?.IsRecordable) === 1
-        || Number(r?.LostDays) > 0;
+    return Number(r?.IsRecordable) === 1;
 }
 
 function _buildReportsTable(reports = _reports) {
@@ -2045,11 +2043,8 @@ function _buildReportsTable(reports = _reports) {
         const investigationBadge = _accInvestigationBadge(r.InvestigationStatus || (r.Status === 'Closed' ? 'Closed' : 'Reported'));
         const aging = _accAgingInfo(r);
         const countedBadge = _accIsCountedStatReport(r)
-            ? `<span class="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-black bg-red-50 text-red-700 border border-red-100">นับสถิติ</span>`
-            : `<span class="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-black bg-slate-50 text-slate-500 border border-slate-100">ไม่นับสถิติ</span>`;
-        const recordableBadge = Number(r.IsRecordable) === 1
-            ? `<span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-semibold bg-red-100 text-red-700">Recordable</span>`
-            : '';
+            ? `<span class="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-black bg-red-100 text-red-700 border border-red-200">Recordable · นับ KPI</span>`
+            : `<span class="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-black bg-slate-50 text-slate-500 border border-slate-100">Non-recordable · ไม่นับ KPI</span>`;
         const attCount   = parseInt(r.AttachmentCount) || 0;
         const attBadge   = attCount > 0
             ? `<span class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-semibold bg-slate-100 text-slate-500 ml-1" title="${attCount} ไฟล์แนบ">
@@ -2099,7 +2094,7 @@ function _buildReportsTable(reports = _reports) {
             <td class="px-4 py-3 whitespace-nowrap">
                 <span class="inline-flex rounded-lg border px-2 py-1 text-[11px] font-black ${aging.cls}">${aging.label}</span>
             </td>
-            <td class="px-4 py-3"><div class="flex flex-col gap-1">${statusBadge}${investigationBadge}${followBadge}${countedBadge}${recordableBadge}</div></td>
+            <td class="px-4 py-3"><div class="flex flex-col gap-1">${statusBadge}${investigationBadge}${followBadge}${countedBadge}</div></td>
             <td class="px-4 py-3">
                 <div class="flex items-center gap-1">
                     ${pdfBtn}${adminBtns}
@@ -2139,7 +2134,7 @@ window._accExportReportsExcel = () => {
     }
     const headers = [
         'Incident Date', 'Report Date', 'Employee ID', 'Employee Name', 'Department', 'Area',
-        'Type', 'Severity', 'Potential Severity', 'Counted KPI', 'Recordable',
+        'Type', 'Severity', 'Potential Severity', 'Recordable KPI',
         'Lost Days', 'Status', 'Investigation Status', 'Responsible Person', 'Due Date',
         'Aging Days', 'Overdue Days', 'Verified By', 'Verified Date',
     ];
@@ -2155,7 +2150,6 @@ window._accExportReportsExcel = () => {
             dateText(r.AccidentDate), dateText(r.ReportDate), r.EmployeeID, r.EmployeeName, r.Department, r.Area,
             r.AccidentType, r.Severity, r.PotentialSeverity,
             _accIsCountedStatReport(r) ? 'YES' : 'NO',
-            Number(r.IsRecordable) === 1 ? 'YES' : 'NO',
             r.LostDays || 0, r.Status, r.InvestigationStatus || 'Reported', r.ResponsiblePerson, dateText(r.DueDate),
             aging.age ?? '', aging.overdue || 0, r.VerifiedBy, dateText(r.VerifiedAt),
         ].map(esc).join(',');
@@ -2500,12 +2494,13 @@ function openAccidentForm(r, existingAttachments = []) {
                 <label class="block text-sm font-semibold text-slate-700 mb-1.5">วันหยุดงาน / Lost Time Days</label>
                 <input type="number" name="LostDays" min="0" value="${d(r?.LostDays) || 0}" class="form-input w-full">
             </div>
-            <div class="bg-slate-50 rounded-xl px-3 flex items-center border border-slate-100">
+            <div class="bg-slate-50 rounded-xl px-3 py-3 border border-slate-100">
                 <label class="flex items-center gap-3 cursor-pointer w-full">
                     <input type="checkbox" name="IsRecordable" ${r?.IsRecordable ? 'checked' : ''}
                         class="w-4 h-4 rounded accent-red-500 flex-shrink-0">
                     <span class="text-sm text-slate-700">เป็น <span class="font-semibold text-red-600">Recordable Case</span></span>
                 </label>
+                <p id="acc-recordable-help" class="mt-1 text-xs text-slate-500"></p>
             </div>
         </div>
         <div>
@@ -2669,6 +2664,8 @@ function openAccidentForm(r, existingAttachments = []) {
     const investigationSelect = document.querySelector('#acc-form [name="InvestigationStatus"]');
     const syncNearMissSection = () => {
         const isNear = typeSelect?.value === 'Near Miss';
+        const isFirstAid = typeSelect?.value === 'First Aid';
+        const isFatal = typeSelect?.value === 'Fatal';
         const hasType = !!typeSelect?.value;
         document.getElementById('acc-nearmiss-section')?.classList.toggle('hidden', !isNear);
         document.querySelectorAll('#acc-form .acc-standard-section')
@@ -2685,8 +2682,27 @@ function openAccidentForm(r, existingAttachments = []) {
             if (injury) injury.value = '';
             if (bodyPart) bodyPart.value = '';
         }
+        if (recordable) {
+            if (isFirstAid) recordable.checked = false;
+            if (isFatal) recordable.checked = true;
+            recordable.disabled = isNear || isFirstAid;
+        }
+        const help = document.getElementById('acc-recordable-help');
+        if (help) {
+            if (isNear || isFirstAid) {
+                help.textContent = `${typeSelect.value} จะเก็บในทะเบียนรายงาน แต่ไม่นำไปคำนวณสถิติ Recordable`;
+                help.className = 'mt-1 text-xs font-semibold text-slate-500';
+            } else if (recordable?.checked) {
+                help.textContent = 'เคสนี้จะถูกนำไปคำนวณ Recordable, KPI, อัตราอุบัติเหตุ และวันปลอดอุบัติเหตุ';
+                help.className = 'mt-1 text-xs font-semibold text-red-600';
+            } else {
+                help.textContent = 'เคสยังถูกเก็บในทะเบียนพร้อม Lost Days ตามจริง แต่จะไม่ถูกนำไปคำนวณสถิติ Recordable';
+                help.className = 'mt-1 text-xs font-semibold text-emerald-700';
+            }
+        }
     };
     typeSelect?.addEventListener('change', syncNearMissSection);
+    document.querySelector('#acc-form [name="IsRecordable"]')?.addEventListener('change', syncNearMissSection);
     statusSelect?.addEventListener('change', () => {
         if (statusSelect.value === 'Closed' && investigationSelect) investigationSelect.value = 'Closed';
     });
@@ -2977,7 +2993,7 @@ async function _renderPerformancePanel(targetId = 'acc-panel-performance') {
                             Safety KPI Board
                         </div>
                         <h2 class="text-xl md:text-2xl font-black leading-tight">บอร์ดสถิติความปลอดภัยประจำปี ${_statsYear}</h2>
-                        <p class="text-sm mt-1" style="color:rgba(209,250,229,0.9)">คำนวณจาก Accident Report + Man-hour · ไม่รวม First Aid / Near Miss</p>
+                        <p class="text-sm mt-1" style="color:rgba(209,250,229,0.9)">คำนวณจากเคสที่ Admin เลือก Recordable Case + Man-hour</p>
                         <div class="mt-2 flex flex-wrap items-center gap-2 text-[11px] font-bold">
                             <span class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-white/15 border border-white/20">
                                 <span class="w-1.5 h-1.5 rounded-full bg-red-300"></span>Accident cases: รายงานอุบัติเหตุ
@@ -3186,7 +3202,7 @@ async function _renderPerformancePanel(targetId = 'acc-panel-performance') {
                     <div class="flex flex-col lg:flex-row lg:items-center justify-between gap-2 px-4 py-3 border-b border-slate-100">
                         <div>
                             <h3 class="text-sm font-black text-slate-700">Man-hour & Incident Rates</h3>
-                            <p class="text-xs text-slate-400">คำนวณเฉพาะเคสนับสถิติของปี ${_statsYear} ไม่รวม First Aid และ Near Miss</p>
+                            <p class="text-xs text-slate-400">คำนวณเฉพาะเคสที่เลือก Recordable Case ของปี ${_statsYear}</p>
                         </div>
                         <div class="text-xs text-slate-500">
                             สะสมทั้งหมด ${Math.round(cumulativeManHours || manHourTotal).toLocaleString()} ชั่วโมง
@@ -4373,7 +4389,7 @@ window._accEditPerformance = () => {
                 <input type="text" id="perf-last-date" name="LastAccidentDate"
                     value="${lastDateVal}" class="form-input w-full bg-white"
                     placeholder="ระบบจะใช้เคสล่าสุดของปีนี้ถ้ามีรายงาน">
-                <p class="mt-1 text-xs text-slate-400">นับเฉพาะ Severe / Lost Time / Medical Treatment ไม่รวม First Aid และ Near Miss</p>
+                <p class="mt-1 text-xs text-slate-400">ระบบใช้วันที่ล่าสุดของเคสที่ Admin เลือก Recordable Case เท่านั้น</p>
             </div>
         </div>
         <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
@@ -4751,6 +4767,7 @@ function _validateAccidentForm(form) {
     const needsRootCause = isRecordable || ['Medical Treatment', 'Lost Time', 'Fatal'].includes(type);
     if (type === 'Near Miss' && !String(fd.get('NearMissEvent') || '').trim()) return 'กรุณาระบุเหตุการณ์ Near Miss / Please describe the Near Miss event';
     if (type === 'Near Miss' && !String(fd.get('PotentialSeverity') || '').trim()) return 'กรุณาระบุระดับความรุนแรงที่อาจเกิดขึ้น / Please select potential severity';
+    if (['Near Miss', 'First Aid'].includes(type) && isRecordable) return `${type} ไม่สามารถกำหนดเป็น Recordable Case ได้`;
     if (type === 'Lost Time' && lostDays < 1) return 'Lost Time ต้องระบุจำนวนวันหยุดงานมากกว่า 0';
     if (type === 'Medical Treatment' && !String(fd.get('MedicalTreatment') || '').trim()) return 'Medical Treatment ต้องระบุรายละเอียดการรักษา';
     if (type === 'Fatal' && !isRecordable) return 'Fatal ต้องกำหนดเป็น Recordable';

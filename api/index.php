@@ -917,8 +917,10 @@ try {
             [$year]
         );
         $recordable = safe_scalar(
-            'SELECT COUNT(*) FROM accident_reports
-              WHERE YEAR(AccidentDate)=? AND IsRecordable=1 AND (IsDeleted IS NULL OR IsDeleted=0)',
+            "SELECT COUNT(*) FROM accident_reports
+              WHERE YEAR(AccidentDate)=? AND IsRecordable=1
+                AND AccidentType NOT IN ('Near Miss','First Aid')
+                AND (IsDeleted IS NULL OR IsDeleted=0)",
             [$year]
         );
         $fourmTotal = safe_scalar('SELECT COUNT(*) FROM fourm_changenotices WHERE YEAR(RequestDate)=?', [$year]);

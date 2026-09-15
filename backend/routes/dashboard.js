@@ -960,6 +960,7 @@ router.get('/overview', async (_req, res) => {
                   WHERE YEAR(AccidentDate)=? AND (IsDeleted IS NULL OR IsDeleted=0)`, [year]),
             safe(`SELECT COUNT(*) AS cnt FROM Accident_Reports
                   WHERE YEAR(AccidentDate)=? AND IsRecordable=1
+                    AND AccidentType NOT IN ('Near Miss','First Aid')
                     AND (IsDeleted IS NULL OR IsDeleted=0)`, [year]),
 
             // Safety Culture

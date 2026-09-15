@@ -1,5 +1,12 @@
 # TSH Safety Core Activity - AGENTS.md
 
+## Accident Recordable classification constraints (2026-09-15, local development)
+
+- `IsRecordable=1` is the explicit and sole gate for official Accident Recordable totals, KPI/rates, counted lost days, counted Lost Time cases and last-counted-case date. Accident type, severity and `LostDays` must never infer Recordable status.
+- Near Miss and First Aid cannot be Recordable. Fatal must be Recordable. Enforce the same validation and projection in Node, PHP, dashboard, UI, exports and read-only audits.
+- Preserve factual report fields such as Accident Type, Severity, Lost Days and treatment even when a case is Non-recordable. Do not rewrite historical report rows merely to correct aggregate projections.
+- `Accident_Performance.LastAccidentDate` is a derived cache, not classification authority. Read and save paths resolve the latest explicit Recordable report for the selected year and must not revive a stale stored date.
+
 ## BBS Composite Preview and exact card output Production release (2026-09-15)
 
 - `main` commit `60cc095` is deployed to the PHP Production target. Composite Card Preview now prefers the Active same-kind Designer layout and its server-resolved Scoped Front / Global Back artwork, geometry, layers and typography instead of reconstructing a separate legacy approximation.

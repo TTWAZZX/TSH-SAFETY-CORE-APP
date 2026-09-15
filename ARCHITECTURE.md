@@ -1041,8 +1041,15 @@ Query หลักใช้ correlated subqueries ส่งคืน computed co
 - DELETE routes verify existence ก่อน destroy (404 ถ้าไม่พบ)
 
 ### Safety Performance (KPI Board)
+
+Recordable rule update (2026-09-15; supersedes the older manual/fallback description below):
+
+- Official Recordable statistics use the explicit report flag only: `IsRecordable=1`, excluding `Near Miss` and `First Aid`. Accident type, severity, treatment and `LostDays` remain factual fields and never implicitly classify a case.
+- Counted lost days, Lost Time cases, IFR/TCIR/LTIFR/ISR/TRIR and the last-counted-case date all use that same explicit rule in Node, PHP, dashboard, UI and exports.
+- Near Miss and First Aid cannot be saved as Recordable; Fatal must be Recordable. Existing report rows are preserved and aggregate projections are recalculated without a data rewrite.
+- `Accident_Performance.LastAccidentDate` is a derived cache. Runtime reads do not use a stale stored/manual date as Recordable classification authority.
 - `GET /accident/performance?year=` คืน record + `recordableCount` จาก `Accident_Reports` (Zero Accident = recordableCount === 0)
-- `daysWithoutAccident`: ถ้ามี `LastAccidentDate` → คำนวณ `today - lastDate`; ถ้าไม่มี → ใช้ `TotalDays` (manual)
+- `daysWithoutAccident`: คำนวณจากวันที่ล่าสุดของเคสที่ติ๊ก `IsRecordable=1`; ถ้าไม่มีเคสที่นับในปีนั้นให้ใช้จุดเริ่มต้นของปีจนถึงวันนี้ (หรือวันสิ้นปีสำหรับปีก่อน)
 - `MonthlyStatus` เป็น JSON object `{ "1": "green", "2": "red", ... }` — admin คลิก cell เพื่อ cycle: pending → green → red → pending (auto-save ทันที)
 - `PUT /accident/performance` ใช้ `ON DUPLICATE KEY UPDATE` — upsert ต่อ Year
 
