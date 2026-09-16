@@ -20,7 +20,7 @@ for (const marker of [
     'function masterDepartments()',
     'function masterBbsLevels()',
     '${masterDepartmentOptions()}',
-    '${masterBbsLevelOptions()}',
+    '${personalCardBbsLevelOptions()}',
     'data-master-source="departments"',
     'data-bbs-master-readiness',
     'Master Data &amp; Card Readiness',
