@@ -38,6 +38,7 @@ assert.match(node, /ScheduledSessionID IN \(\$\{placeholders\}\)/);
 assert.match(php, /ScheduledSessionID IN \(' \. \$placeholders/);
 
 assert.match(ui, /function patrolSelfScheduleChoiceItems/);
+assert.match(ui, /filter\(item => patrolScheduleDate\(item\)\.startsWith\(currentMonth\)\)/);
 assert.match(ui, /checkinType: date < today \? 'compensation' : \(date === today \? 'normal' : 'future'\)/);
 assert.match(ui, /รอบค้าง \/ เดินซ่อม/);
 assert.match(ui, /data-type=/);
