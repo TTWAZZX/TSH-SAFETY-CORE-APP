@@ -37,8 +37,12 @@ assert.match(php, /patrol_supervisor_occurrence_count\(\$scheduleByMonth\[\$m\]/
 assert.match(node, /ScheduledSessionID IN \(\$\{placeholders\}\)/);
 assert.match(php, /ScheduledSessionID IN \(' \. \$placeholders/);
 
-assert.match(ui, /patrolSelfScheduledMonthOpenItems\(\)\.filter\(item => patrolScheduleDate\(item\) === today\)/);
-assert.match(ui, /preferredDate < today : preferredDate === today/);
+assert.match(ui, /function patrolSelfScheduleChoiceItems/);
+assert.match(ui, /checkinType: date < today \? 'compensation' : \(date === today \? 'normal' : 'future'\)/);
+assert.match(ui, /รอบค้าง \/ เดินซ่อม/);
+assert.match(ui, /data-type=/);
+assert.match(ui, /optionType === 'compensation'/);
+assert.match(ui, /max-height:\$\{isSupervisorPersonal \? '315px' : '200px'\}/);
 assert.match(ui, /รอบนี้ยังไม่ถึงกำหนด/);
 
 const fixture = [

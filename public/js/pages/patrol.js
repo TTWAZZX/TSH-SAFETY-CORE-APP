@@ -646,6 +646,63 @@ function patrolSelfScheduleOptionItems(type = 'normal', preferredId = '') {
     return preferred && preferredMatchesType && !patrolSessionCompleted(preferred) ? [preferred, ...items] : items;
 }
 
+function patrolSelfScheduleChoiceItems(preferredId = '') {
+    const today = patrolDateOnly(new Date());
+    const currentMonth = today.slice(0, 7);
+    const items = [
+        ...patrolSelfScheduledMonthOpenItems().filter(item => patrolScheduleDate(item).startsWith(currentMonth)),
+        ...patrolSelfMakeupScheduleItems(),
+    ];
+    const unique = [];
+    const seen = new Set();
+    for (const item of items) {
+        const id = String(item?.ScheduledSessionID || patrolSessionId(item) || '');
+        if (!id || seen.has(id) || patrolSessionCompleted(item) || patrolSessionLeaveBlocking(item)) continue;
+        seen.add(id);
+        const date = patrolScheduleDate(item);
+        unique.push({ ...item, checkinType: date < today ? 'compensation' : (date === today ? 'normal' : 'future') });
+    }
+    const priority = { normal: 0, compensation: 1, future: 2 };
+    unique.sort((a, b) => {
+        const typeDiff = priority[a.checkinType] - priority[b.checkinType];
+        if (typeDiff) return typeDiff;
+        const aDate = patrolScheduleDate(a);
+        const bDate = patrolScheduleDate(b);
+        const dateDiff = a.checkinType === 'compensation' ? bDate.localeCompare(aDate) : aDate.localeCompare(bDate);
+        if (dateDiff) return dateDiff;
+        return String(patrolScheduleRound(a)).localeCompare(String(patrolScheduleRound(b)), undefined, { numeric: true })
+            || patrolScheduleArea(a).localeCompare(patrolScheduleArea(b), 'th');
+    });
+    if (!preferredId) return unique;
+    const preferredIndex = unique.findIndex(item => String(item.ScheduledSessionID || patrolSessionId(item)) === String(preferredId));
+    if (preferredIndex > 0) unique.unshift(unique.splice(preferredIndex, 1)[0]);
+    return unique;
+}
+
+function patrolSelfScheduleChoicesHTML(items = [], selectedId = '') {
+    const groups = [
+        { type: 'normal', label: 'รอบวันนี้' },
+        { type: 'compensation', label: 'รอบค้าง / เดินซ่อม' },
+        { type: 'future', label: 'รอบถัดไป (ยังบันทึกไม่ได้)' },
+    ];
+    const selectedItem = items.find(item => String(item.ScheduledSessionID || patrolSessionId(item)) === String(selectedId))
+        || items.find(item => item.checkinType !== 'future')
+        || null;
+    const selectedSid = selectedItem ? String(selectedItem.ScheduledSessionID || patrolSessionId(selectedItem)) : '';
+    return groups.map(group => {
+        const rows = items.filter(item => item.checkinType === group.type);
+        if (!rows.length) return '';
+        const options = rows.map(item => {
+            const sid = item.ScheduledSessionID || patrolSessionId(item);
+            const date = patrolScheduleDate(item);
+            const area = patrolScheduleArea(item);
+            const round = patrolScheduleRound(item);
+            return `<option value="${escHtml(sid)}" data-date="${escHtml(date)}" data-area="${escHtml(area)}" data-type="${escHtml(group.type)}" ${group.type === 'future' ? 'disabled' : ''} ${String(sid) === selectedSid ? 'selected' : ''}>${escHtml(date)}${round ? ' · R' + escHtml(round) : ''}${area ? ' · ' + escHtml(area) : ''}</option>`;
+        }).join('');
+        return `<optgroup label="${escHtml(group.label)}">${options}</optgroup>`;
+    }).join('');
+}
+
 function patrolSelfScheduleOptionsHTML(items = [], selectedId = '') {
     return items.map((item, idx) => {
         const id = patrolSessionId(item);
@@ -1553,7 +1610,7 @@ function renderDashboard(container, data) {
                   <h3 class="font-bold text-slate-700 text-sm">ตารางงาน (My Schedule)</h3>
                   <span class="text-[10px] text-slate-400">${today.toLocaleString('th-TH',{month:'long',year:'numeric'})}${upcomingTopScheduleRows.length ? ` · รอบถัดไป ${upcomingTopScheduleRows.length}` : ''}</span>
                 </div>
-                <div class="flex-1 ${isSupervisorPersonal ? 'flex flex-col' : 'overflow-y-auto custom-scrollbar'} divide-y divide-slate-50" style="${isSupervisorPersonal ? '' : 'max-height:200px'}">
+                <div class="flex-1 overflow-y-auto custom-scrollbar divide-y divide-slate-50" style="max-height:${isSupervisorPersonal ? '315px' : '200px'}">
                   ${normalScheduleRows.length > 0 ? normalScheduleRows.map(item => {
                     const d     = new Date(item.PatrolDate || item.ScheduledDate);
                     const isTd  = d.toDateString() === today.toDateString();
@@ -1608,7 +1665,7 @@ function renderDashboard(container, data) {
                     const statusText = isLeave ? 'Leave' : isLeavePending ? 'Pending Leave' : completed ? (makeup ? 'Makeup' : 'Completed') : locked ? 'Locked' : 'Open';
                     const sc = isLeave ? 'bg-sky-100 text-sky-700' : isLeavePending ? 'bg-indigo-100 text-indigo-700' : completed ? 'bg-emerald-100 text-emerald-700' : locked ? 'bg-slate-100 text-slate-400' : 'bg-amber-100 text-amber-700';
                     const id = item.ScheduledSessionID || patrolSessionId(item);
-                    return `<button type="button" ${locked ? 'disabled' : `onclick="openPersonalPatrolCheckin(${_patrolJsArg(id)}, 'self')"`} class="w-full flex ${isSupervisorPersonal ? 'flex-1 min-h-[62px]' : ''} items-center text-left px-4 py-3 hover:bg-emerald-50/40 transition-colors ${isTd ? 'bg-emerald-50/40' : ''} disabled:cursor-not-allowed disabled:hover:bg-transparent">
+                    return `<button type="button" ${locked ? 'disabled' : `onclick="openPersonalPatrolCheckin(${_patrolJsArg(id)}, 'self')"`} class="w-full flex min-h-[62px] items-center text-left px-4 py-3 hover:bg-emerald-50/40 transition-colors ${isTd ? 'bg-emerald-50/40' : ''} disabled:cursor-not-allowed disabled:hover:bg-transparent">
                       <div class="w-10 text-center border-r border-slate-100 pr-3 mr-3 flex-shrink-0">
                         <div class="text-lg font-bold ${isTd ? 'text-emerald-600' : 'text-slate-700'}">${date ? d.getDate() : '-'}</div>
                         <div class="text-[9px] font-bold text-slate-400 uppercase">${date ? d.toLocaleString('en-US',{month:'short'}) : ''}</div>
@@ -7840,7 +7897,12 @@ window._scOnScheduleChange = function() {
     const select = document.getElementById('sc-session');
     const opt = select?.selectedOptions?.[0];
     const dateInput = document.getElementById('sc-date');
-    const type = document.querySelector('input[name="sc-type"]:checked')?.value || 'normal';
+    const optionType = opt?.dataset?.type;
+    if (optionType === 'normal' || optionType === 'compensation') {
+        const radio = document.querySelector(`input[name="sc-type"][value="${optionType}"]`);
+        if (radio) radio.checked = true;
+    }
+    const type = optionType === 'compensation' ? 'compensation' : 'normal';
     if (dateInput && opt?.dataset?.date) dateInput.value = type === 'compensation' ? patrolDateOnly(new Date()) : opt.dataset.date;
     const area = opt?.dataset?.area || '';
     const areaValue = document.getElementById('sc-area-value');
@@ -7859,12 +7921,10 @@ window._scOnTypeChange = function() {
     const select = document.getElementById('sc-session');
     if (select && !patrolIsFlexibleSelfPatrol()) {
         const type = document.querySelector('input[name="sc-type"]:checked')?.value || 'normal';
-        const currentId = '';
-        const items = patrolSelfScheduleOptionItems(type, currentId);
-        select.innerHTML = patrolSelfScheduleOptionsHTML(items, currentId);
-        select.disabled = items.length === 0;
+        const option = [...select.options].find(item => item.dataset.type === type && !item.disabled);
+        if (option) select.value = option.value;
         const submitBtn = document.querySelector('#self-checkin-form button[type="submit"]');
-        if (submitBtn) submitBtn.disabled = items.length === 0;
+        if (submitBtn) submitBtn.disabled = !option;
     }
     window._scOnScheduleChange?.();
 };
@@ -7911,16 +7971,18 @@ function openSelfCheckinModal(selectedSessionId = '') {
         return;
     }
     const selectedId = selectedItem ? (selectedItem.ScheduledSessionID || patrolSessionId(selectedItem)) : '';
-    const openSchedule = patrolSelfScheduleOptionItems('normal', selectedId);
-    const makeupSchedule = patrolSelfScheduleOptionItems('compensation', selectedId);
-    const hasOpenSchedule = isFlexible ? openSchedule.length > 0 : (openSchedule.length > 0 || makeupSchedule.length > 0);
-    const initialPatrolType = !isFlexible && selectedItem && patrolScheduleDate(selectedItem) < today
-        ? 'compensation'
-        : (!isFlexible && !openSchedule.length && makeupSchedule.length ? 'compensation' : 'normal');
-    const initialScheduleOptions = initialPatrolType === 'compensation' ? makeupSchedule : openSchedule;
+    const openSchedule = isFlexible
+        ? patrolSelfScheduleOptionItems('normal', selectedId)
+        : patrolSelfScheduleChoiceItems(selectedId);
+    const actionableSchedule = openSchedule.filter(item => item.checkinType !== 'future');
+    const hasScheduleChoices = openSchedule.length > 0;
+    const hasOpenSchedule = actionableSchedule.length > 0;
+    const firstActionable = actionableSchedule[0] || null;
+    const initialPatrolType = !isFlexible && firstActionable?.checkinType === 'compensation' ? 'compensation' : 'normal';
+    const initialScheduleOptions = openSchedule;
     const firstSchedule = (selectedItem && !patrolSessionCompleted(selectedItem))
         ? selectedItem
-        : (initialScheduleOptions[0] || null);
+        : firstActionable;
     const firstDate = firstSchedule ? patrolScheduleDate(firstSchedule) : today;
     const flexibleAreaList = patrolFlexibleAllowedAreas();
     const firstScheduleId = firstSchedule ? (firstSchedule.ScheduledSessionID || patrolSessionId(firstSchedule)) : '';
@@ -7945,12 +8007,12 @@ function openSelfCheckinModal(selectedSessionId = '') {
             <div class="rounded-xl border border-amber-100 bg-amber-50 px-3 py-3">
               <p class="text-xs font-black text-amber-800">${escHtml(firstDate || '-')}</p>
               <p class="mt-0.5 text-[10px] font-semibold text-amber-600/80">งานตรวจแบบยืดหยุ่น</p>
-            </div>` : hasOpenSchedule ? `
+            </div>` : hasScheduleChoices ? `
             <select id="sc-session" data-preferred-session="${escHtml(firstScheduleId)}" onchange="window._scOnScheduleChange()"
               class="w-full rounded-xl border border-amber-200 bg-white px-3 py-2.5 text-sm text-slate-700 focus:outline-none focus:ring-2 focus:ring-amber-400 transition-all">
-              ${patrolSelfScheduleOptionsHTML(initialScheduleOptions, firstScheduleId)}
+              ${patrolSelfScheduleChoicesHTML(initialScheduleOptions, firstScheduleId)}
             </select>
-            <p class="mt-1 text-[10px] text-amber-600/70">รอบที่เดินแล้วจะไม่แสดงในรายการ</p>` : `
+            <p class="mt-1 text-[10px] text-amber-600/70">แสดงรอบที่ยังต้องดำเนินการทั้งหมดของเดือน: รอบวันนี้บันทึกแบบปกติ · รอบ R1/R2 ที่ผ่านมาเลือกแล้วจะเป็นเดินซ่อมอัตโนมัติ · รอบอนาคตดูได้แต่ยังบันทึกไม่ได้</p>` : `
             <div class="rounded-xl border border-slate-100 bg-slate-50 px-3 py-4 text-center text-xs text-slate-400">
               ไม่มีรอบตามกำหนดการที่เปิดให้เช็คอิน
             </div>`}
