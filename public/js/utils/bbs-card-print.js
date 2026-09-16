@@ -58,23 +58,33 @@ export async function saveDesignerPrintPdf(outputDocument,{filename='BBS_Cards.p
     pdf.save(String(filename||'BBS_Cards.pdf').replace(/[\\/:*?"<>|]+/g,'_'));
 }
 
-export async function saveDesignerPrintImages(outputDocument,{filename='BBS_Cards',format='png',scale=3.125,quality=.95}={}){
+export async function saveDesignerPrintImages(outputDocument,{filename='BBS_Cards',format='png',scale=3.125,dpi=null,quality=.95}={}){
     const renderer=globalThis.html2canvas,type=String(format).toLowerCase()==='jpg'?'jpg':'png',mime=type==='jpg'?'image/jpeg':'image/png';
     if(typeof renderer!=='function')throw new Error('Image renderer is unavailable. Reload the page and try again.');
-    const sheets=[...outputDocument.querySelectorAll('.bbs-print-sheet')];
-    if(!sheets.length)throw new Error('Designer print sheets are unavailable. Prepare the cards again.');
+    const cards=[...outputDocument.querySelectorAll('.designer-card[data-card-side]')];
+    if(!cards.length)throw new Error('Designer card faces are unavailable. Prepare the cards again.');
     if(outputDocument.fonts)await outputDocument.fonts.ready;
     await Promise.all([...outputDocument.images].map(image=>image.complete?image.decode?.().catch(()=>{}):new Promise(resolve=>{image.addEventListener('load',resolve,{once:true});image.addEventListener('error',resolve,{once:true});})));
     const base=String(filename||'BBS_Cards').replace(/\.pdf$/i,'').replace(/[\\/:*?"<>|]+/g,'_'),downloadDocument=globalThis.document;
     if(!downloadDocument?.createElement)throw new Error('Download is unavailable in this browser.');
-    for(let index=0;index<sheets.length;index+=1){
-        const sheet=sheets[index],side=String(sheet.dataset.printSide||`Page${index+1}`).replace(/[^a-z0-9_-]+/gi,'_');
-        const canvas=await renderer(sheet,{scale,useCORS:true,backgroundColor:'#ffffff',logging:false,width:sheet.scrollWidth,height:sheet.scrollHeight,windowWidth:sheet.scrollWidth,windowHeight:sheet.scrollHeight,onclone:clone=>clone.querySelectorAll('.designer-safe,.designer-bleed').forEach(node=>node.style.display='none')});
+    for(let index=0;index<cards.length;index+=1){
+        const card=cards[index],side=String(card.dataset.cardSide||`Side${index+1}`).replace(/[^a-z0-9_-]+/gi,'_');
+        const widthMM=bounded(card.dataset.cardWidthMm,1,1000,85.6),heightMM=bounded(card.dataset.cardHeightMm,1,1000,54);
+        const outputDpi=Math.round(bounded(dpi??card.dataset.cardDpi,72,1200,Math.round(scale*96)));
+        const prior={position:card.style.position,left:card.style.left,top:card.style.top,transform:card.style.transform};
+        Object.assign(card.style,{position:'relative',left:'0',top:'0',transform:'none'});
+        let canvas;
+        try{
+            const rect=card.getBoundingClientRect(),targetWidth=Math.max(1,Math.round(widthMM/25.4*outputDpi)),targetHeight=Math.max(1,Math.round(heightMM/25.4*outputDpi));
+            const renderScale=outputDpi/96;
+            canvas=await renderer(card,{scale:renderScale,useCORS:true,backgroundColor:'#ffffff',logging:false,width:rect.width,height:rect.height,windowWidth:Math.max(card.scrollWidth,Math.ceil(rect.width)),windowHeight:Math.max(card.scrollHeight,Math.ceil(rect.height)),onclone:clone=>clone.querySelectorAll('.designer-safe,.designer-bleed').forEach(node=>node.style.display='none')});
+            if(Math.abs(canvas.width-targetWidth)>1||Math.abs(canvas.height-targetHeight)>1)throw new Error(`Image size mismatch: expected ${targetWidth}×${targetHeight}px at ${outputDpi} DPI.`);
+        }finally{Object.assign(card.style,prior);}
         const blob=await new Promise((resolve,reject)=>canvas.toBlob(value=>value?resolve(value):reject(new Error(`สร้างไฟล์ ${type.toUpperCase()} ไม่สำเร็จ`)),mime,type==='jpg'?quality:undefined));
-        const url=URL.createObjectURL(blob),link=downloadDocument.createElement('a');link.href=url;link.download=`${base}_${String(index+1).padStart(2,'0')}_${side}.${type}`;link.style.display='none';downloadDocument.body.appendChild(link);link.click();link.remove();setTimeout(()=>URL.revokeObjectURL(url),30000);
-        canvas.width=1;canvas.height=1;
+        const cardNo=String(number(card.dataset.cardIndex,index)+1).padStart(2,'0'),size=`${widthMM}x${heightMM}mm_${outputDpi}dpi`;
+        const url=URL.createObjectURL(blob),link=downloadDocument.createElement('a');link.href=url;link.download=`${base}_Card${cardNo}_${side}_${size}.${type}`;link.style.display='none';downloadDocument.body.appendChild(link);link.click();link.remove();setTimeout(()=>URL.revokeObjectURL(url),30000);
     }
-    return sheets.length;
+    return cards.length;
 }
 
 const PAPERS={A4:[210,297],A5:[148,210],A6:[105,148]};
@@ -119,7 +129,7 @@ function slotHtml(slot,cards,resources,qrDataUrl){
     const fit=side.backgroundFit==='Stretch'?'100% 100%':pick(side.backgroundFit,['cover','contain'],'cover');
     const rotation=slot.side==='Back'?number(layout.backRotation):0;
     const elements=layout.elements.filter(e=>e.side===slot.side).map(e=>renderDesignerElement(e,render.values||{},resources,qrDataUrl)).join('');
-    return `<div class="bbs-print-slot" data-card-index="${slot.cardIndex}" style="left:${slot.x}mm;top:${slot.y}mm;width:${slot.cellWidth}mm;height:${slot.cellHeight}mm"><article class="designer-card" data-card-side="${slot.side}" style="left:${slot.bleed}mm;top:${slot.bleed}mm;width:${slot.width}mm;height:${slot.height}mm;transform:rotate(${rotation}deg)"><div class="designer-background" style="inset:-${slot.bleed}mm;background-image:url('${background}');background-size:${fit};background-position:${bounded(side.backgroundPositionXBP,0,10000,5000)/100}% ${bounded(side.backgroundPositionYBP,0,10000,5000)/100}%"></div><div class="designer-content">${elements}</div><div class="designer-cut"></div><div class="designer-safe" style="inset:${bounded(side.safeMarginMM,0,50,3)}mm"></div><div class="designer-bleed" style="inset:-${slot.bleed}mm"></div></article></div>`;
+    return `<div class="bbs-print-slot" data-card-index="${slot.cardIndex}" style="left:${slot.x}mm;top:${slot.y}mm;width:${slot.cellWidth}mm;height:${slot.cellHeight}mm"><article class="designer-card" data-card-index="${slot.cardIndex}" data-card-side="${slot.side}" data-card-width-mm="${slot.width}" data-card-height-mm="${slot.height}" data-card-dpi="${bounded(layout.dpi,72,1200,300)}" style="left:${slot.bleed}mm;top:${slot.bleed}mm;width:${slot.width}mm;height:${slot.height}mm;transform:rotate(${rotation}deg)"><div class="designer-background" style="inset:-${slot.bleed}mm;background-image:url('${background}');background-size:${fit};background-position:${bounded(side.backgroundPositionXBP,0,10000,5000)/100}% ${bounded(side.backgroundPositionYBP,0,10000,5000)/100}%"></div><div class="designer-content">${elements}</div><div class="designer-cut"></div><div class="designer-safe" style="inset:${bounded(side.safeMarginMM,0,50,3)}mm"></div><div class="designer-bleed" style="inset:-${slot.bleed}mm"></div></article></div>`;
 }
 
 export function designerPrintDocument(cards,resources,qrDataUrl,{paperSize='A4',title='BBS Smart Card Print',autoPrint=true}={}){

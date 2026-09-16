@@ -1,6 +1,6 @@
 import { API, apiFetch } from '../api.js?v=20260908-bbs-navigation-loading-r1';
 import { escHtml, showToast } from '../ui.js?v=20260714-phase21-platform-shell';
-import { designerElementCss } from '../utils/bbs-card-print.js?v=20260914-bbs-typography-align-r1';
+import { designerElementCss } from '../utils/bbs-card-print.js?v=20260916-bbs-exact-image-export-r1';
 import { beginBbsOperation, uploadProgress } from '../utils/bbs-async-ui.js?v=20260909-bbs-performance-baseline-r1';
 
 const runtime={ overlay:null, close:null, kind:'', template:null, catalog:null, versions:[], trashedVersions:[], presets:[], trashedPresets:[], loadedPresetKind:'', record:null, side:'Front', selectedKey:'', zoom:1, history:[], future:[], dirty:false, urls:new Map(), loadingSides:new Map(), previewStats:[], resourceGeneration:0, returnFocus:null, onSaved:null };
@@ -32,6 +32,25 @@ window.BBSDesignerPreview=Object.freeze({stats:()=>clone(runtime.previewStats)})
 function savedDesignerSession(){try{const value=JSON.parse(sessionStorage.getItem(DESIGNER_SESSION_KEY)||'null');return value&&typeof value==='object'?value:null;}catch(_){return null;}}
 function persistDesignerSession(versionId=runtime.record?.id||null){try{sessionStorage.setItem(DESIGNER_SESSION_KEY,JSON.stringify({kind:runtime.kind,templateId:Number(runtime.template?.id),versionId:versionId?Number(versionId):null,side:runtime.side,zoom:runtime.zoom,savedAt:new Date().toISOString()}));}catch(_){}}
 function clearDesignerSession(){try{sessionStorage.removeItem(DESIGNER_SESSION_KEY);}catch(_){}}
+function versionReadinessHtml(row){
+  const readiness=row.readiness||{status:'Blocked',items:[{severity:'Blocked',code:'READINESS_UNAVAILABLE',message:'Readiness information is unavailable.'}]};
+  const blocked=(readiness.items||[]).filter(item=>item.severity==='Blocked'),warnings=(readiness.items||[]).filter(item=>item.severity==='Warning');
+  const tone=blocked.length?'border-rose-200 bg-rose-50 text-rose-800':warnings.length?'border-amber-200 bg-amber-50 text-amber-800':'border-emerald-200 bg-emerald-50 text-emerald-800';
+  const label=blocked.length?`Blocked ${blocked.length} จุด`:warnings.length?`Warning ${warnings.length} จุด`:'พร้อม Activate';
+  const items=[...blocked,...warnings];
+  return `<div class="mt-2 rounded-lg border ${tone} px-2.5 py-2 text-[11px]"><div class="font-black">${label}</div>${items.length?`<ul class="mt-1 space-y-1">${items.map(item=>`<li><span class="font-black">${escHtml(item.code||item.severity)}</span> · ${escHtml(item.message||'')}</li>`).join('')}</ul>`:''}</div>`;
+}
+function installChooserReadiness(root){
+  if(!root?.querySelector('[data-designer-activate]'))return;
+  for(const row of runtime.versions){
+    const open=root.querySelector(`[data-designer-open="${Number(row.id)}"]`),container=open?.closest('.p-4'),summary=container?.firstElementChild;
+    if(!summary||summary.querySelector('[data-layout-readiness-summary]'))continue;
+    const holder=document.createElement('div');holder.dataset.layoutReadinessSummary='1';holder.innerHTML=versionReadinessHtml(row);summary.appendChild(holder.firstElementChild);
+    const blocked=(row.readiness?.items||[]).filter(item=>item.severity==='Blocked');
+    const activate=root.querySelector(`[data-designer-activate="${Number(row.id)}"]`);
+    if(activate&&blocked.length){activate.disabled=true;activate.classList.remove('bg-emerald-600','text-white');activate.classList.add('border-rose-300','bg-rose-50','text-rose-700');activate.textContent=`แก้ไข ${blocked.length} จุดก่อน Activate`;activate.title=blocked.map(item=>item.message).join('\n');}
+  }
+}
 async function designerBusy(control,label,task){control=control?.currentTarget||control;const actionable=control&&typeof control.setAttribute==='function'?control:null;if(actionable?.disabled)return null;const html=actionable?.innerHTML,operation=beginBbsOperation(label,'',`designer:${label}`);if(actionable){actionable.disabled=true;actionable.setAttribute('aria-busy','true');actionable.textContent=label;}try{return await task(operation);}finally{operation.finish();if(actionable?.isConnected){actionable.disabled=false;actionable.removeAttribute('aria-busy');if(html!==undefined)actionable.innerHTML=html;}}}
 async function loadPresetLists({active=true,trash=true}={}){const kind=kindPath(runtime.kind),tasks=[];if(active)tasks.push(API.get(`/bbs/admin/card-layout-presets?kind=${kind}`).then(result=>{runtime.presets=result.data||[];}));if(trash)tasks.push(API.get(`/bbs/admin/card-layout-presets?kind=${kind}&trash=1`).then(result=>{runtime.trashedPresets=result.data||[];}));await Promise.all(tasks);runtime.loadedPresetKind=runtime.kind;}
 function addActivePreset(item){runtime.presets=[item,...runtime.presets.filter(row=>Number(row.id)!==Number(item.id))];}
@@ -108,7 +127,7 @@ function mount(content,label){
   const close=force=>{if(!force&&runtime.dirty&&!window.confirm('ยังมีการแก้ไขแบบบัตรที่ไม่ได้บันทึก ต้องการปิดโดยไม่บันทึกหรือไม่?'))return false;if(!force)clearDesignerSession();window.removeEventListener('beforeunload',beforeUnload);revokeUrls(true);overlay.remove();document.body.style.overflow=previousOverflow;runtime.returnFocus?.focus?.({preventScroll:true});runtime.overlay=null;return true;};
   const beforeUnload=event=>{if(!runtime.dirty)return;event.preventDefault();event.returnValue='';};window.addEventListener('beforeunload',beforeUnload);overlay.addEventListener('click',event=>{if(event.target===overlay)close(false);});
   overlay.addEventListener('keydown',event=>{if(event.key==='Escape'){event.preventDefault();close(false);return;}if(event.key!=='Tab')return;const panel=currentPanel(),items=[...panel.querySelectorAll('button:not([disabled]),input:not([disabled]),select:not([disabled]),textarea:not([disabled]),[tabindex]:not([tabindex="-1"])')];if(!items.length)return;const first=items[0],last=items.at(-1);if(event.shiftKey&&document.activeElement===first){event.preventDefault();last.focus();}else if(!event.shiftKey&&document.activeElement===last){event.preventDefault();first.focus();}});
-  overlay.querySelectorAll('[data-designer-close]').forEach(button=>button.onclick=()=>close(false));runtime.close=close;requestAnimationFrame(()=>currentPanel()?.focus());return overlay;
+  installChooserReadiness(overlay);overlay.querySelectorAll('[data-designer-close]').forEach(button=>button.onclick=()=>close(false));runtime.close=close;requestAnimationFrame(()=>currentPanel()?.focus());return overlay;
 }
 
 function templateArtworkReadiness(){const rows=runtime.catalog?.cardArtwork||[],departmentId=Number(runtime.template?.DepartmentID||runtime.template?.departmentId||0),safetyUnitId=Number(runtime.template?.SafetyUnitID||runtime.template?.safetyUnitId||0),back=rows.find(row=>row.artworkRole==='GlobalBack')||null,fronts=rows.filter(row=>row.artworkRole==='ScopedFront'&&row.templateKind===runtime.kind&&Number(row.departmentId)===departmentId),front=fronts.find(row=>safetyUnitId&&Number(row.safetyUnitId)===safetyUnitId)||fronts.find(row=>!row.safetyUnitId)||null,missing=[];if(!departmentId)missing.push('Template ยังไม่ได้เลือกแผนก');if(!front)missing.push(`Scoped Front ของ ${runtime.kind} ในขอบเขตนี้`);if(!back)missing.push('Global Back');return{departmentId,safetyUnitId,front,back,missing,ready:missing.length===0};}

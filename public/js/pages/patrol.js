@@ -627,7 +627,10 @@ function patrolSelfMakeupScheduleItems() {
 }
 
 function patrolSelfScheduleOptionItems(type = 'normal', preferredId = '') {
-    const items = type === 'compensation' ? patrolSelfMakeupScheduleItems() : patrolSelfScheduledMonthOpenItems();
+    const today = patrolDateOnly(new Date());
+    const items = type === 'compensation'
+        ? patrolSelfMakeupScheduleItems()
+        : patrolSelfScheduledMonthOpenItems().filter(item => patrolScheduleDate(item) === today);
     if (!preferredId) return items;
     const exists = items.some(item => {
         const id = patrolSessionId(item);
@@ -638,7 +641,9 @@ function patrolSelfScheduleOptionItems(type = 'normal', preferredId = '') {
         const id = patrolSessionId(item);
         return id === String(preferredId) || String(item.ScheduledSessionID || '') === String(preferredId);
     });
-    return preferred && !patrolSessionCompleted(preferred) ? [preferred, ...items] : items;
+    const preferredDate = preferred ? patrolScheduleDate(preferred) : '';
+    const preferredMatchesType = type === 'compensation' ? preferredDate < today : preferredDate === today;
+    return preferred && preferredMatchesType && !patrolSessionCompleted(preferred) ? [preferred, ...items] : items;
 }
 
 function patrolSelfScheduleOptionsHTML(items = [], selectedId = '') {
@@ -7901,13 +7906,21 @@ function openSelfCheckinModal(selectedSessionId = '') {
         openSelfPatrolScheduleDetail(selectedItem);
         return;
     }
+    if (selectedItem && patrolScheduleDate(selectedItem) > today) {
+        showToast('รอบนี้ยังไม่ถึงกำหนด จึงยังไม่สามารถบันทึกล่วงหน้าได้', 'warning');
+        return;
+    }
     const selectedId = selectedItem ? (selectedItem.ScheduledSessionID || patrolSessionId(selectedItem)) : '';
     const openSchedule = patrolSelfScheduleOptionItems('normal', selectedId);
     const makeupSchedule = patrolSelfScheduleOptionItems('compensation', selectedId);
     const hasOpenSchedule = isFlexible ? openSchedule.length > 0 : (openSchedule.length > 0 || makeupSchedule.length > 0);
-    const initialPatrolType = !isFlexible && !openSchedule.length && makeupSchedule.length ? 'compensation' : 'normal';
+    const initialPatrolType = !isFlexible && selectedItem && patrolScheduleDate(selectedItem) < today
+        ? 'compensation'
+        : (!isFlexible && !openSchedule.length && makeupSchedule.length ? 'compensation' : 'normal');
     const initialScheduleOptions = initialPatrolType === 'compensation' ? makeupSchedule : openSchedule;
-    const firstSchedule = (selectedItem && !patrolSessionCompleted(selectedItem)) ? selectedItem : (openSchedule[0] || makeupSchedule[0] || null);
+    const firstSchedule = (selectedItem && !patrolSessionCompleted(selectedItem))
+        ? selectedItem
+        : (initialScheduleOptions[0] || null);
     const firstDate = firstSchedule ? patrolScheduleDate(firstSchedule) : today;
     const flexibleAreaList = patrolFlexibleAllowedAreas();
     const firstScheduleId = firstSchedule ? (firstSchedule.ScheduledSessionID || patrolSessionId(firstSchedule)) : '';

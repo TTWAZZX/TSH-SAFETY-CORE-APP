@@ -68,7 +68,7 @@ async function recordResolve(limitState, successful) {
     if (Math.random() < 0.02) await db.query('DELETE FROM BBS_QR_Resolve_Attempts WHERE AttemptedAt<DATE_SUB(NOW(),INTERVAL 7 DAY)').catch(() => {});
 }
 async function activeCardForToken(rawToken, queryable = db) {
-    const [[row]] = await queryable.query(`SELECT c.*,t.Status TemplateStatus FROM BBS_Cards c JOIN BBS_Card_Templates t ON t.id=c.TemplateID WHERE c.TokenHash=? AND c.Status='Active' AND t.Status='Active' AND t.IsDeleted=0 LIMIT 1`, [hashToken(rawToken)]);
+    const [[row]] = await queryable.query(`SELECT c.*,t.Status TemplateStatus,t.TemplateName FROM BBS_Cards c JOIN BBS_Card_Templates t ON t.id=c.TemplateID WHERE c.TokenHash=? AND c.Status='Active' AND t.Status='Active' AND t.IsDeleted=0 LIMIT 1`, [hashToken(rawToken)]);
     return row || null;
 }
 async function activeDepartmentCardForToken(rawToken, queryable = db) {
@@ -162,7 +162,7 @@ publicRouter.post('/qr/resolve', async (req, res) => {
         if (!card && !departmentCard) return res.status(404).json({ success:false, code:'QR_NOT_ACTIVE', message:'This BBS QR is not active.' });
         if (card) await db.query('UPDATE BBS_Cards SET LastResolvedAt=NOW(),ResolveCount=ResolveCount+1 WHERE id=?', [card.id]);
         else await db.query('UPDATE BBS_Department_QR_Cards SET LastResolvedAt=NOW(),ResolveCount=ResolveCount+1 WHERE id=?', [departmentCard.id]);
-        return res.json({ success:true, data:{ active:true, route:'#bbs-smart-card', requiresLogin:true } });
+        return res.json({ success:true, data:{ active:true, kind:card?'Personal':'Department', route:'#bbs-smart-card', requiresLogin:true } });
     } catch (error) { return phase4Error(res, error, 'public QR resolve'); }
 });
 
@@ -182,7 +182,8 @@ router.post('/qr/claim', async (req, res) => {
         const [employee] = await employeeCardData([card.EmployeeID]);
         if (!employee) return res.status(404).json({ success:false, message:'Card owner is no longer available.' });
         const self = String(card.EmployeeID).toLowerCase() === actorId(req).toLowerCase();
-        return res.json({ success:true, data:{ mode:self ? 'workspace' : 'observation', route:normalizeInternalRoute(req.body?.returnRoute), employee:self ? null : employee } });
+        const verification={kind:'Personal',active:true,cardId:Number(card.id),status:'Active',employeeId:String(employee.EmployeeID),employeeName:String(employee.EmployeeName||''),department:String(employee.Department||''),unit:String(employee.Unit||''),position:String(employee.Position||''),bbsLevel:String(employee.BBSLevel||''),templateId:Number(card.TemplateID),templateName:String(card.TemplateName||''),issuedAt:card.IssuedAt||null,verifiedAt:new Date().toISOString()};
+        return res.json({ success:true, data:{ mode:self ? 'workspace' : 'observation', route:normalizeInternalRoute(req.body?.returnRoute), employee:self ? null : employee, verification } });
     } catch (error) { return phase4Error(res, error, 'QR claim'); }
 });
 
@@ -261,8 +262,19 @@ router.get('/admin/card-employees', isAdmin, async (req,res) => {
 });
 
 router.get('/admin/cards', isAdmin, async (req,res) => {
-    try {const paging=listQuery(req.query),q=searchText(req.query.q),departmentId=positiveInt(req.query.departmentId),status=['Active','Revoked','Replaced'].includes(String(req.query.status))?String(req.query.status):null,where=['1=1'],params=[];if(status){where.push('c.Status=?');params.push(status);}if(departmentId){where.push('md.id=?');params.push(departmentId);}if(q){where.push('(c.EmployeeID LIKE ? OR e.EmployeeName LIKE ? OR e.Department LIKE ? OR e.Unit LIKE ? OR e.Position LIKE ? OR t.TemplateName LIKE ? OR c.TokenFingerprint LIKE ?)');params.push(...Array(7).fill(`%${q}%`));}const from=`FROM BBS_Cards c JOIN Employees e ON e.EmployeeID=c.EmployeeID JOIN BBS_Card_Templates t ON t.id=c.TemplateID LEFT JOIN Master_Departments md ON LOWER(TRIM(md.Name))=LOWER(TRIM(e.Department)) WHERE ${where.join(' AND ')}`,select=`SELECT c.id,c.EmployeeID,c.TemplateID,c.TokenFingerprint,c.Status,c.IssueReason,c.IssuedAt,c.IssuedBy,c.RevokedAt,c.RevokedBy,c.RevokeReason,c.ReplacedByCardID,c.ResolveCount,e.EmployeeName,e.Department,e.Unit,e.Position,t.TemplateName ${from}`;if(!paging.paged){const[rows]=await db.query(`${select} ORDER BY c.IssuedAt DESC,c.id DESC LIMIT 500`,params);return res.json({success:true,data:rows});}const[[countRow]]=await db.query(`SELECT COUNT(*) total ${from}`,params),meta=pagination(countRow?.total,paging.page,paging.pageSize),offset=(meta.page-1)*meta.pageSize;const[rows]=await db.query(`${select} ORDER BY c.IssuedAt DESC,c.id DESC LIMIT ? OFFSET ?`,[...params,meta.pageSize,offset]);return res.json({success:true,data:{rows,pagination:meta}});}
+    try {const paging=listQuery(req.query),q=searchText(req.query.q),departmentId=positiveInt(req.query.departmentId),status=['Active','Revoked','Replaced'].includes(String(req.query.status))?String(req.query.status):null,where=['1=1'],params=[];if(status){where.push('c.Status=?');params.push(status);}if(departmentId){where.push('md.id=?');params.push(departmentId);}if(q){where.push('(c.EmployeeID LIKE ? OR e.EmployeeName LIKE ? OR e.Department LIKE ? OR e.Unit LIKE ? OR e.Position LIKE ? OR t.TemplateName LIKE ? OR c.TokenFingerprint LIKE ?)');params.push(...Array(7).fill(`%${q}%`));}const from=`FROM BBS_Cards c JOIN Employees e ON e.EmployeeID=c.EmployeeID JOIN BBS_Card_Templates t ON t.id=c.TemplateID LEFT JOIN Master_Departments md ON LOWER(TRIM(md.Name))=LOWER(TRIM(e.Department)) LEFT JOIN Master_SafetyUnits mu ON mu.department_id=md.id AND LOWER(TRIM(mu.name))=LOWER(TRIM(e.Unit)) WHERE ${where.join(' AND ')}`,select=`SELECT c.id,c.EmployeeID,c.TemplateID,c.TokenFingerprint,c.Status,c.IssueReason,c.IssuedAt,c.IssuedBy,c.RevokedAt,c.RevokedBy,c.RevokeReason,c.ReplacedByCardID,c.ResolveCount,e.EmployeeName,e.Department,e.Unit,e.Position,md.id DepartmentID,mu.id SafetyUnitID,(SELECT m.BBSLevel FROM Master_Positions p JOIN BBS_Position_Level_Mappings m ON m.PositionID=p.id AND m.IsActive=1 WHERE LOWER(TRIM(p.Name))=LOWER(TRIM(e.Position)) LIMIT 1) BBSLevel,t.TemplateName,(SELECT COUNT(*) FROM BBS_Card_Print_Logs pl WHERE pl.CardID=c.id) PrintCount,(SELECT MAX(pl.PrintedAt) FROM BBS_Card_Print_Logs pl WHERE pl.CardID=c.id) LastPrintedAt,(SELECT previous.id FROM BBS_Cards previous WHERE previous.ReplacedByCardID=c.id ORDER BY previous.id DESC LIMIT 1) PreviousCardID ${from}`;if(!paging.paged){const[rows]=await db.query(`${select} ORDER BY c.IssuedAt DESC,c.id DESC LIMIT 500`,params);return res.json({success:true,data:rows});}const[[countRow]]=await db.query(`SELECT COUNT(*) total ${from}`,params),meta=pagination(countRow?.total,paging.page,paging.pageSize),offset=(meta.page-1)*meta.pageSize;const[rows]=await db.query(`${select} ORDER BY c.IssuedAt DESC,c.id DESC LIMIT ? OFFSET ?`,[...params,meta.pageSize,offset]);return res.json({success:true,data:{rows,pagination:meta}});}
     catch(error){return phase4Error(res,error,'card list');}
+});
+
+router.get('/admin/cards/:id', isAdmin, async (req,res) => {
+    try {
+        const id=positiveInt(req.params.id);if(!id)return res.status(400).json({success:false,message:'Valid card ID is required.'});
+        const [[card]]=await db.query(`SELECT c.id,c.EmployeeID,c.TemplateID,c.TokenFingerprint,c.Status,c.IssueReason,c.IssuedAt,c.IssuedBy,c.RevokedAt,c.RevokedBy,c.RevokeReason,c.ReplacedByCardID,c.ResolveCount,c.LastResolvedAt,e.EmployeeName,e.Department,e.Unit,e.Position,t.TemplateName,t.Status TemplateStatus,t.IsDeleted TemplateDeleted,(SELECT previous.id FROM BBS_Cards previous WHERE previous.ReplacedByCardID=c.id ORDER BY previous.id DESC LIMIT 1) PreviousCardID FROM BBS_Cards c JOIN Employees e ON e.EmployeeID=c.EmployeeID JOIN BBS_Card_Templates t ON t.id=c.TemplateID WHERE c.id=? LIMIT 1`,[id]);
+        if(!card)return res.status(404).json({success:false,message:'Personal card was not found.'});
+        const [printLogs]=await db.query(`SELECT pl.id,pl.PrintMode,pl.PrintedAt,pl.PrintedBy,actor.EmployeeName PrintedByName,pl.Reason,s.id SnapshotID,s.LayoutVersionID,s.RenderContractHash,s.CreatedAt SnapshotCreatedAt FROM BBS_Card_Print_Logs pl LEFT JOIN Employees actor ON actor.EmployeeID=pl.PrintedBy LEFT JOIN BBS_Card_Designer_Print_Snapshots s ON s.PersonalPrintLogID=pl.id WHERE pl.CardID=? ORDER BY pl.PrintedAt DESC,pl.id DESC`,[id]);
+        const [lifecycle]=await db.query(`SELECT id,TokenFingerprint,Status,IssueReason,IssuedAt,RevokedAt,RevokeReason,ReplacedByCardID FROM BBS_Cards WHERE EmployeeID=? ORDER BY IssuedAt DESC,id DESC LIMIT 100`,[card.EmployeeID]);
+        return res.json({success:true,data:{card,printLogs,lifecycle,security:{rawQrAvailable:false,reprintRequiresReplace:true}}});
+    } catch(error){return phase4Error(res,error,'card detail');}
 });
 
 router.post('/admin/cards/issue', isAdmin, async (req,res) => {

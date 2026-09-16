@@ -21,7 +21,7 @@ import { loadOjtPage } from './pages/ojt.js?v=20260820-card-image-phase2d';
 import { loadTrainingPage } from './pages/training.js?v=20260820-card-image-phase2d-rollout-r2';
 import { loadAccidentPage } from './pages/accident.js?v=20260915-accident-recordable-r1';
 import { loadSafetyCulturePage } from './pages/safety-culture.js?v=20260824-safety-culture-ppe-form-r1';
-import { loadBbsSmartCardPage } from './pages/bbs-smart-card.js?v=20260916-bbs-personal-scope-r1';
+import { loadBbsSmartCardPage } from './pages/bbs-smart-card.js?v=20260916-bbs-card-output-catalog-r1';
 import { loadContractorPage } from './pages/contractor.js?v=20260715-phase32d-remaining-async-ux';
 import { loadHiyariPage } from './pages/hiyari.js?v=20260907-hiyari-pdf-summary-r2';
 import { loadKyPage } from './pages/ky.js?v=20260911-ky-history-filter-r1';
@@ -258,6 +258,9 @@ async function captureBbsQrIntent() {
     const match = String(window.location.hash || '').match(/^#bbs-qr=([A-Za-z0-9_-]{43})$/);
     if (!match) return false;
     const token = match[1];
+    sessionStorage.removeItem('bbs_qr_verification');
+    sessionStorage.removeItem('bbs_qr_observed_employee');
+    sessionStorage.removeItem('bbs_community_department_id');
     history.replaceState(null, '', `${window.location.pathname}${window.location.search}`);
     try {
         await API.post('/bbs/qr/resolve', { token });
@@ -284,6 +287,11 @@ async function consumeBbsQrIntent() {
         }
         if (result.data?.mode === 'community' && result.data?.departmentId) {
             sessionStorage.setItem('bbs_community_department_id', String(result.data.departmentId));
+        }
+        if (result.data?.verification?.kind === 'Personal' && result.data?.verification?.active === true) {
+            sessionStorage.setItem('bbs_qr_verification', JSON.stringify(result.data.verification));
+        } else {
+            sessionStorage.removeItem('bbs_qr_verification');
         }
         window.location.hash = 'bbs-smart-card';
         handleRouting();

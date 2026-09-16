@@ -42,6 +42,8 @@
     "audit:patrol-checkin-v2": "node scripts/patrol-checkin-v2-audit.js",
     "migrate:patrol-checkin-v2-local": "node scripts/patrol-checkin-v2-migrate-local.js",
     "test:patrol-checkin-v2": "node scripts/patrol-checkin-v2.test.js",
+    "test:patrol-supervisor-shared-schedule": "node scripts/patrol-supervisor-shared-schedule.test.js",
+    "uat:patrol-supervisor-shared-schedule-local": "node scripts/patrol-supervisor-shared-schedule-local-uat.js",
     "uat:patrol-checkin-v2-local": "node scripts/patrol-checkin-v2-local-uat.js",
     "uat:patrol-checkin-v2-php-local": "set PATROL_UAT_STACK=php&& node scripts/patrol-checkin-v2-local-uat.js",
     "uat:patrol-checkin-v2-browser": "node scripts/patrol-checkin-v2-browser-uat.js",

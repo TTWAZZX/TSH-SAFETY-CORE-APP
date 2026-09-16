@@ -2551,17 +2551,27 @@ async function patrolLeaveRows(employeeId, group, year, filters = {}) {
 
 function attachLeaveToScheduledItems(items, leaveRows = []) {
     const bySession = new Map();
+    const occurrenceBySession = new Map(items.map(item => [
+        String(item.ScheduledSessionID || item.sessionId || item.id || ''),
+        item.ScheduleOccurrenceKey || patrolSupervisorOccurrenceKey(item),
+    ]));
+    const byOccurrence = new Map();
     const byDate = new Map();
     for (const row of leaveRows) {
         const sid = String(row.ScheduledSessionID || '');
-        if (sid) bySession.set(sid, row);
+        if (sid) {
+            bySession.set(sid, row);
+            const occurrenceKey = occurrenceBySession.get(sid);
+            if (occurrenceKey) byOccurrence.set(occurrenceKey, row);
+        }
         const date = dateOnly(row.ScheduledDate);
         if (date && !byDate.has(date)) byDate.set(date, row);
     }
     return items.map(item => {
         const sid = String(item.ScheduledSessionID || item.sessionId || item.id || '');
         const date = dateOnly(item.ScheduledDate || item.PatrolDate || item.date);
-        const leave = bySession.get(sid) || byDate.get(date) || null;
+        const occurrenceKey = item.ScheduleOccurrenceKey || patrolSupervisorOccurrenceKey(item);
+        const leave = bySession.get(sid) || byOccurrence.get(occurrenceKey) || byDate.get(date) || null;
         if (!leave || item.isCompleted) return { ...item, leave };
         const accepted = isPatrolLeaveAccepted(leave);
         const pending = String(leave.Status || '') === 'Pending';
@@ -2699,6 +2709,16 @@ function patrolCurrentMonthlyRequirement(year, yearlyTarget) {
 function patrolSupervisorRequirementFromScheduleCount(count) {
     const total = Number(count || 0);
     return total > 0 ? Math.ceil(total / 2) : 0;
+}
+
+function patrolSupervisorOccurrenceKey(item = {}) {
+    const scheduledDate = dateOnly(item.ScheduledDate || item.PatrolDate || item.date);
+    const round = Number(item.PatrolRound ?? item.patrolRound ?? 0);
+    return scheduledDate && round > 0 ? `${scheduledDate}:${round}` : '';
+}
+
+function patrolSupervisorOccurrenceCount(items = []) {
+    return new Set(items.map(patrolSupervisorOccurrenceKey).filter(Boolean)).size;
 }
 
 function daysInMonth(year, month) {
@@ -2874,15 +2894,10 @@ async function supervisorScheduleSlotsForYear(year) {
          ORDER BY s.PatrolDate,s.PatrolRound,s.TeamID`,
         [year]
     );
-    const slots = [];
-    const seen = new Set();
-    rows.forEach(row => {
+    return rows.map(row => {
         const scheduledDate = dateOnly(row.PatrolDate);
         const round = Number(row.PatrolRound || 0);
-        const key = `${scheduledDate}:${round}`;
-        if (seen.has(key)) return;
-        seen.add(key);
-        slots.push({
+        return {
             ...row,
             id: row.id,
             SessionID: row.id,
@@ -2891,33 +2906,49 @@ async function supervisorScheduleSlotsForYear(year) {
             ScheduledDate: scheduledDate,
             date: scheduledDate,
             PatrolRound: round,
-        });
+            ScheduleOccurrenceKey: `${scheduledDate}:${round}`,
+        };
     });
-    return slots;
 }
 
 function attachSupervisorRecordsToSchedule(records, slots) {
-    const bySession = {};
-    const byDate = {};
+    const slotBySession = new Map(slots.map(slot => [String(slot.id), slot]));
+    const occurrenceRecords = new Map();
+    const unlinkedByDate = new Map();
+    const pushOccurrenceRecord = (key, record) => {
+        if (!key) return;
+        if (!occurrenceRecords.has(key)) occurrenceRecords.set(key, []);
+        occurrenceRecords.get(key).push(record);
+    };
     records.forEach(record => {
         if (record.ScheduledSessionID) {
             const sid = String(record.ScheduledSessionID);
-            if (!bySession[sid]) bySession[sid] = [];
-            bySession[sid].push(record);
+            const slot = slotBySession.get(sid);
+            pushOccurrenceRecord(slot ? patrolSupervisorOccurrenceKey(slot) : '', record);
         } else {
             const date = dateOnly(record.CheckinDate);
-            if (!byDate[date]) byDate[date] = [];
-            byDate[date].push(record);
+            if (!unlinkedByDate.has(date)) unlinkedByDate.set(date, []);
+            unlinkedByDate.get(date).push(record);
         }
     });
-    const usedUnlinked = new Set();
+
+    for (const [date, unlinked] of unlinkedByDate.entries()) {
+        const occurrenceKeys = [...new Set(
+            slots
+                .filter(slot => dateOnly(slot.PatrolDate || slot.date) === date)
+                .map(patrolSupervisorOccurrenceKey)
+                .filter(Boolean)
+        )];
+        unlinked.forEach((record, index) => {
+            const key = occurrenceKeys[Math.min(index, Math.max(0, occurrenceKeys.length - 1))];
+            pushOccurrenceRecord(key, record);
+        });
+    }
+
     return slots.map(slot => {
         const scheduledDate = dateOnly(slot.PatrolDate || slot.date);
-        const linked = bySession[String(slot.id)] || [];
-        const unlinked = (byDate[scheduledDate] || []).filter(r => !usedUnlinked.has(r.id));
-        const fallback = linked.length ? [] : unlinked.slice(0, 1);
-        fallback.forEach(r => usedUnlinked.add(r.id));
-        const itemRecords = [...linked, ...fallback].map(r => ({
+        const occurrenceKey = patrolSupervisorOccurrenceKey(slot);
+        const itemRecords = (occurrenceRecords.get(occurrenceKey) || []).map(r => ({
             ...r,
             PatrolType: r.PatrolType || 'normal',
             scheduledDate,
@@ -2928,6 +2959,7 @@ function attachSupervisorRecordsToSchedule(records, slots) {
         const status = itemRecords.length ? (hasMakeup ? 'makeup' : 'checked') : scheduledDate <= dateOnly(new Date()) ? 'missed' : 'upcoming';
         return {
             ...slot,
+            ScheduleOccurrenceKey: occurrenceKey,
             status,
             checkinStatus: status,
             isOpen: itemRecords.length === 0,
@@ -2971,16 +3003,42 @@ async function resolveSupervisorScheduledSession(employeeId, date, requestedSess
         session = slots.find(s => dateOnly(s.date || s.PatrolDate) === date && !s.isCompleted) || null;
     }
     if (session) {
+        const scheduledDate = dateOnly(session.date || session.PatrolDate);
+        const today = patrolTodayBangkok();
+        const patrolType = patrolSelfCheckinType(options.patrolType || 'normal');
+        if (scheduledDate > today) {
+            const err = new Error('Future scheduled rounds cannot be checked in early.');
+            err.statusCode = 409;
+            err.code = 'PATROL_FUTURE_SUPERVISOR_CHECKIN_NOT_ALLOWED';
+            throw err;
+        }
+        if (patrolType === 'normal' && scheduledDate < today) {
+            const err = new Error('A past scheduled round must be recorded as a makeup patrol.');
+            err.statusCode = 409;
+            err.code = 'PATROL_SUPERVISOR_MAKEUP_REQUIRED';
+            throw err;
+        }
+        if (patrolType === 'compensation' && scheduledDate >= today) {
+            const err = new Error('Makeup patrol is available only for a missed earlier round.');
+            err.statusCode = 409;
+            err.code = 'PATROL_SUPERVISOR_MAKEUP_NOT_DUE';
+            throw err;
+        }
+        const occurrenceKey = session.ScheduleOccurrenceKey || patrolSupervisorOccurrenceKey(session);
+        const occurrenceSessionIds = slots
+            .filter(slot => (slot.ScheduleOccurrenceKey || patrolSupervisorOccurrenceKey(slot)) === occurrenceKey)
+            .map(slot => String(slot.id));
+        const placeholders = occurrenceSessionIds.map(() => '?').join(',');
         const [[existingLinked]] = await db.query(
-            'SELECT id FROM Patrol_Self_Checkin WHERE EmployeeID=? AND ScheduledSessionID=? LIMIT 1',
-            [employeeId, session.id]
+            `SELECT id FROM Patrol_Self_Checkin WHERE EmployeeID=? AND ScheduledSessionID IN (${placeholders}) LIMIT 1`,
+            [employeeId, ...occurrenceSessionIds]
         );
         const [[existingDate]] = await db.query(
             `SELECT id FROM Patrol_Self_Checkin
              WHERE EmployeeID=? AND DATE(CheckinDate)=?
                AND (ScheduledSessionID IS NULL OR ScheduledSessionID='')
              LIMIT 1`,
-            [employeeId, dateOnly(session.date || session.PatrolDate)]
+            [employeeId, scheduledDate]
         );
         if (existingLinked || existingDate) {
             const err = new Error('Selected schedule is already completed.');
@@ -2988,8 +3046,8 @@ async function resolveSupervisorScheduledSession(employeeId, date, requestedSess
             throw err;
         }
         const [[leave]] = await db.query(
-            "SELECT id FROM Patrol_Leave_Requests WHERE EmployeeID=? AND RosterGroup='supervisor' AND ScheduledSessionID=? AND Status IN ('Pending','Approved') LIMIT 1",
-            [employeeId, session.id]
+            `SELECT id FROM Patrol_Leave_Requests WHERE EmployeeID=? AND RosterGroup='supervisor' AND ScheduledSessionID IN (${placeholders}) AND Status IN ('Pending','Approved') LIMIT 1`,
+            [employeeId, ...occurrenceSessionIds]
         );
         if (leave) {
             const err = new Error('Selected schedule already has approved leave.');
@@ -3737,7 +3795,9 @@ async function buildSupervisorAttendanceDetail(employeeId, year, options = {}) {
     const scheduledRequirementByMonth = {};
     let scheduledYearlyTarget = 0;
     for (let month = 1; month <= 12; month++) {
-        const monthRequirement = patrolSupervisorRequirementFromScheduleCount((scheduleByMonth[month] || []).length);
+        const monthRequirement = patrolSupervisorRequirementFromScheduleCount(
+            patrolSupervisorOccurrenceCount(scheduleByMonth[month] || [])
+        );
         scheduledRequirementByMonth[month] = monthRequirement;
         scheduledYearlyTarget += monthRequirement;
     }
@@ -3747,8 +3807,17 @@ async function buildSupervisorAttendanceDetail(employeeId, year, options = {}) {
     const periods = Array.from({ length: 12 }, (_, idx) => {
         const month = idx + 1;
         const monthItems = scheduleByMonth[month] || [];
-        const monthRecords = monthItems.flatMap(item => Array.isArray(item.records) ? item.records : []);
-        const completed = monthItems.filter(item => item.isCompleted).length;
+        const monthRecords = [...new Map(
+            monthItems
+                .flatMap(item => Array.isArray(item.records) ? item.records : [])
+                .map(record => [String(record.id), record])
+        ).values()];
+        const completed = new Set(
+            monthItems
+                .filter(item => item.isCompleted)
+                .map(patrolSupervisorOccurrenceKey)
+                .filter(Boolean)
+        ).size;
         const isDue = month <= dueMonth;
         const monthRequirement = scheduledRequirementByMonth[month] || 0;
         const required = isDue ? monthRequirement : 0;
@@ -3810,7 +3879,7 @@ async function buildSupervisorAttendanceDetail(employeeId, year, options = {}) {
             passPct,
             leave: leaveStats,
             targetSource,
-            scheduledTotal: schedule.length,
+            scheduledTotal: patrolSupervisorOccurrenceCount(schedule),
             missingToDate: Math.max(0, requiredToDate - completedToDate),
             upcomingMonths: Math.max(0, 12 - dueMonth),
             progressToDatePct: patrolPct(completedToDate, requiredToDate),
@@ -4520,12 +4589,13 @@ router.post('/self-checkin', async (req, res) => {
             : await resolveSupervisorScheduledSession(empId, inputDate, sid, {
                 requireSession: true,
                 preserveActualDate: PatrolType === 'compensation',
+                patrolType: PatrolType,
             });
         const effectiveDate = resolved.date;
         const effective = new Date(effectiveDate);
         const effectiveLocation = sid.startsWith('FLEX:')
             ? (resolved.session?.AreaName || resolved.session?.AreaCode || Location || null)
-            : (Location || resolved.session?.AreaName || resolved.session?.AreaCode || null);
+            : (resolved.session?.AreaName || resolved.session?.AreaCode || null);
         const [result] = await db.query(
             `INSERT INTO Patrol_Self_Checkin (EmployeeID, CheckinDate, Location, Notes, Year, Month, PatrolType, RecordedBy, ScheduledSessionID) VALUES (?,?,?,?,?,?,?,?,?)`,
             [empId, effectiveDate, effectiveLocation, Notes || null, effective.getFullYear(), effective.getMonth() + 1, PatrolType, empId, resolved.session?.id || null]);
@@ -4560,7 +4630,6 @@ router.post('/self-checkin', async (req, res) => {
             email,
         } });
     } catch (err) {
-        if (err.statusCode) return res.status(err.statusCode).json({ success: false, message: err.message });
         sendPatrolError(res, err);
     }
 });
@@ -4881,12 +4950,13 @@ router.post('/admin-record/supervisor', isAdmin, async (req, res) => {
             : await resolveSupervisorScheduledSession(EmployeeID, inputDate, sid, {
                 requireSession: true,
                 preserveActualDate: PatrolType === 'compensation',
+                patrolType: PatrolType,
             });
         const effectiveDate = resolved.date;
         const effective = new Date(effectiveDate);
         const location = sid.startsWith('FLEX:')
             ? (resolved.session?.AreaName || resolved.session?.AreaCode || Location || null)
-            : (Location || resolved.session?.AreaName || resolved.session?.AreaCode || null);
+            : (resolved.session?.AreaName || resolved.session?.AreaCode || null);
         const [result] = await db.query(
             `INSERT INTO Patrol_Self_Checkin (EmployeeID, CheckinDate, Location, Notes, Year, Month, PatrolType, RecordedBy, ScheduledSessionID)
              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
