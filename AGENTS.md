@@ -1,5 +1,12 @@
 # TSH Safety Core Activity - AGENTS.md
 
+## BBS Personal Template scope Production release (2026-09-16)
+
+- `main` commit `4404c1a` is deployed to the PHP Production target. Personal Card Template creation/activation now permits only Group Leader level or higher (or all eligible Personal levels), employee projections include canonical Safety Unit identity, and issuance compatibility checks Department, Unit and BBS level consistently in Node, PHP and the Admin UI.
+- Existing invalid Personal Templates are not silently rewritten. Admin receives an explicit guarded repair action that preserves status, Designer Layout and Artwork, requires optimistic `RowVersion`, blocks any Template with card history and rejects an Active-scope conflict. Production Template 3 remains Active/Operator and unchanged until Admin explicitly repairs it to Group Leader.
+- This release changed no schema, BBS business row, card/QR record, rollout setting or private upload. Production smoke confirmed the deployed repair UI and compatibility filter, exact Template 3 versus employee 002671 mismatch, canonical Department 18 / Safety Unit 2, responsive BBS at three viewports, zero console errors and zero business writes.
+- Exact runtime rollback evidence is under `backups/production/bbs-personal-template-scope-predeploy-20260916-110810/`: six before files and five checksum-verified deployed files (`FTPES 5/5`, `HTTPS 3/3`). A fresh full database/private-upload export was intentionally blocked by the safety control because this approval did not explicitly cover those sensitive payloads; no helper was uploaded and Production `.htaccess`, database and private uploads were untouched.
+
 ## Accident explicit Recordable classification Production release (2026-09-15)
 
 - `main` commit `e2a215f` is deployed to the PHP Production target. Accident Recordable totals, counted Lost Days, Lost Time frequency/severity rates, last-counted-case date, Dashboard, Analytics, report filters and exports now use the explicit `IsRecordable=1` flag and exclude Near Miss / First Aid; type, severity and lost days no longer infer Recordable status.
