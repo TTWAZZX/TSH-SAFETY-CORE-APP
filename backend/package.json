@@ -248,6 +248,7 @@
     "migrate:bbs-scoped-artwork-local": "node scripts/bbs-scoped-card-artwork-migrate-local.js",
     "audit:bbs-query-performance": "node scripts/bbs-query-performance-audit.js",
     "test:bbs-integration-print": "node scripts/bbs-integration-print.test.js",
+    "uat:bbs-batch-duplex-browser": "node scripts/bbs-batch-duplex-browser-uat.js",
     "setup:bbs-integration-local": "node scripts/bbs-integration-local-setup.js"
   },
   "keywords": [],

@@ -41,6 +41,22 @@ export function renderDesignerElement(element,values,resources,qrDataUrl,styleOp
 }
 
 export const DESIGNER_CARD_FACE_CONTRACT='bbs-designer-card-face-v2';
+// Golden browser-print contract. Export pipelines may reuse this document, but
+// must not replace its physical-mm card faces with preview-sized raster images.
+export const DESIGNER_PRINT_CONTRACT='bbs-designer-physical-print-v1';
+
+function drawPdfCropMarks(pdf,x,y,width,height){
+    if(typeof pdf?.line!=='function')return;
+    const mark=2;
+    pdf.setDrawColor?.(17,17,17);
+    pdf.setLineWidth?.(.15);
+    for(const [x1,y1,x2,y2] of [
+        [x-mark,y,x,y],[x,y-mark,x,y],
+        [x+width,y,x+width+mark,y],[x+width,y-mark,x+width,y],
+        [x-mark,y+height,x,y+height],[x,y+height,x,y+height+mark],
+        [x+width,y+height,x+width+mark,y+height],[x+width,y+height,x+width,y+height+mark],
+    ])pdf.line(x1,y1,x2,y2);
+}
 
 // Canonical card-face projection shared by Composite Preview, Print, PDF and
 // PNG/JPG. Consumers may change only the display scale and outer placement;
@@ -73,18 +89,27 @@ export async function saveDesignerPrintPdf(outputDocument,{filename='BBS_Cards.p
     let pdf=null;
     for(let index=0;index<sheets.length;index+=1){
         const sheet=sheets[index],width=number(sheet.dataset.pageWidthMm,210),height=number(sheet.dataset.pageHeightMm,297),orientation=width>height?'landscape':'portrait';
-        const cardDpis=[...(sheet.querySelectorAll?.('.designer-card[data-card-dpi]')||[])].map(card=>number(card.dataset.cardDpi)).filter(value=>value>=72);
-        const outputDpi=Math.round(bounded(Math.max(450,number(dpi??Math.max(450,...cardDpis),450)),72,1200,450)),targetWidth=Math.max(1,Math.round(width/25.4*outputDpi)),targetHeight=Math.max(1,Math.round(height/25.4*outputDpi));
-        let canvas,pdfCanvas;
-        try{
-            const rect=sheet.getBoundingClientRect?.()||{width:sheet.scrollWidth,height:sheet.scrollHeight},renderScale=targetWidth/rect.width;
-            canvas=await renderer(sheet,{scale:renderScale,useCORS:true,backgroundColor:'#ffffff',logging:false,width:rect.width,height:rect.height,windowWidth:Math.max(sheet.scrollWidth,Math.ceil(rect.width)),windowHeight:Math.max(sheet.scrollHeight,Math.ceil(rect.height)),onclone:clone=>clone.querySelectorAll('.designer-safe,.designer-bleed,.bbs-output-toolbar,[data-print-exclude]').forEach(node=>node.style.display='none')});
-            pdfCanvas=exactSizeCanvas(canvas,targetWidth,targetHeight,outputDocument);
-            if(!pdf)pdf=new JsPdf({orientation,unit:'mm',format:[width,height],compress:false,precision:12});else pdf.addPage([width,height],orientation);
-            pdf.addImage(pdfCanvas.toDataURL('image/png'),'PNG',0,0,width,height,undefined,'NONE',0);
-        }finally{
-            if(pdfCanvas&&pdfCanvas!==canvas){pdfCanvas.width=1;pdfCanvas.height=1;}
-            if(canvas){canvas.width=1;canvas.height=1;}
+        const cards=[...(sheet.querySelectorAll?.('.designer-card[data-card-dpi]')||[])],cardDpis=cards.map(card=>number(card.dataset.cardDpi)).filter(value=>value>=72);
+        const outputDpi=Math.round(bounded(Math.max(600,number(dpi??Math.max(600,...cardDpis),600)),72,1200,600));
+        if(!pdf)pdf=new JsPdf({orientation,unit:'mm',format:[width,height],compress:false,precision:12});else pdf.addPage([width,height],orientation);
+        const sheetRect=sheet.getBoundingClientRect?.()||{left:0,top:0,width:sheet.scrollWidth,height:sheet.scrollHeight};
+        for(const card of cards){
+            const widthMM=bounded(card.dataset.cardWidthMm,1,1000,85.6),heightMM=bounded(card.dataset.cardHeightMm,1,1000,54),cardRect=card.getBoundingClientRect(),slot=card.closest?.('.bbs-print-slot');
+            const slotLeft=cssMM(slot?.style?.left),slotTop=cssMM(slot?.style?.top),cardLeft=cssMM(card.style.left),cardTop=cssMM(card.style.top);
+            const x=slotLeft!==null&&cardLeft!==null?slotLeft+cardLeft:(cardRect.left-sheetRect.left)/sheetRect.width*width;
+            const y=slotTop!==null&&cardTop!==null?slotTop+cardTop:(cardRect.top-sheetRect.top)/sheetRect.height*height;
+            const rotation=/rotate\(\s*180deg\s*\)/i.test(String(card.style.transform||''))?180:0,prior={position:card.style.position,left:card.style.left,top:card.style.top,transform:card.style.transform};
+            Object.assign(card.style,{position:'relative',left:'0',top:'0',transform:'none'});
+            let rendered,cardCanvas;
+            try{
+                const targetWidth=Math.max(1,Math.round(widthMM/25.4*outputDpi)),targetHeight=Math.max(1,Math.round(heightMM/25.4*outputDpi));
+                rendered=await renderDesignerCardImage(card,{renderer,targetWidth,targetHeight,document:outputDocument});cardCanvas=rotation===180?rotateRaster180(rendered.canvas,outputDocument):rendered.canvas;
+                pdf.addImage(cardCanvas.toDataURL('image/png'),'PNG',x,y,widthMM,heightMM,undefined,'NONE',0);
+                drawPdfCropMarks(pdf,x,y,widthMM,heightMM);
+            }finally{
+                Object.assign(card.style,prior);
+                for(const canvas of new Set([...(rendered?.temporary||[]),rendered?.canvas,cardCanvas].filter(Boolean))){canvas.width=1;canvas.height=1;}
+            }
         }
     }
     pdf.save(String(filename||'BBS_Cards.pdf').replace(/[\\/:*?"<>|]+/g,'_'));
@@ -123,11 +148,56 @@ export async function embedRasterDpi(blob,format,dpi){
     if(!metadata||Math.abs(metadata.dpiX-dpi)>.6||Math.abs(metadata.dpiY-dpi)>.6)throw new Error(`Could not embed ${dpi} DPI metadata in the ${type.toUpperCase()} file.`);
     return new Blob([bytes],{type:type==='jpg'?'image/jpeg':'image/png'});
 }
-function exactSizeCanvas(canvas,width,height,doc){
+function exactSizeCanvas(canvas,width,height,doc,{alpha=false}={}){
     if(canvas.width===width&&canvas.height===height)return canvas;
     const widthGap=Math.abs(canvas.width-width)/width,heightGap=Math.abs(canvas.height-height)/height;
     if(widthGap>.02||heightGap>.02)throw new Error(`Image size mismatch: expected ${width}×${height}px, received ${canvas.width}×${canvas.height}px.`);
-    const output=doc.createElement('canvas');output.width=width;output.height=height;const context=output.getContext?.('2d',{alpha:false});if(!context)throw new Error('High-resolution image canvas is unavailable.');context.imageSmoothingEnabled=true;context.imageSmoothingQuality='high';context.drawImage(canvas,0,0,width,height);return output;
+    const output=doc.createElement('canvas');output.width=width;output.height=height;const context=output.getContext?.('2d',{alpha});if(!context)throw new Error('High-resolution image canvas is unavailable.');context.imageSmoothingEnabled=true;context.imageSmoothingQuality='high';context.drawImage(canvas,0,0,width,height);return output;
+}
+function cssMM(value){const match=String(value||'').trim().match(/^(-?[\d.]+)mm$/i);return match?number(match[1]):null;}
+function rotateRaster180(canvas,doc){
+    const output=doc.createElement('canvas');output.width=canvas.width;output.height=canvas.height;const context=output.getContext?.('2d',{alpha:false});if(!context)throw new Error('High-resolution PDF rotation canvas is unavailable.');context.translate(output.width,output.height);context.rotate(Math.PI);context.drawImage(canvas,0,0);return output;
+}
+
+function cssImageSource(value){
+    const match=String(value||'').trim().match(/^url\((['"]?)([\s\S]*)\1\)$/i);
+    return match&&imageUrl(match[2])?match[2]:'';
+}
+function loadRasterSource(source){
+    const ImageCtor=globalThis.Image;
+    if(typeof ImageCtor!=='function')return Promise.reject(new Error('High-resolution image decoder is unavailable.'));
+    return new Promise((resolve,reject)=>{const image=new ImageCtor();image.decoding='async';image.onload=()=>resolve(image);image.onerror=()=>reject(new Error('The original Designer artwork could not be decoded.'));image.src=source;});
+}
+async function paintNativeDesignerBackground(card,canvas){
+    const background=card.querySelector?.('.designer-background'),source=cssImageSource(background?.style?.backgroundImage);
+    if(!background||!source)return false;
+    const context=canvas.getContext?.('2d',{alpha:false});if(!context)return false;
+    const cardRect=card.getBoundingClientRect(),backgroundRect=background.getBoundingClientRect(),scaleX=canvas.width/cardRect.width,scaleY=canvas.height/cardRect.height;
+    if(!cardRect.width||!cardRect.height||!backgroundRect.width||!backgroundRect.height)return false;
+    const image=await loadRasterSource(source),boxX=(backgroundRect.left-cardRect.left)*scaleX,boxY=(backgroundRect.top-cardRect.top)*scaleY,boxWidth=backgroundRect.width*scaleX,boxHeight=backgroundRect.height*scaleY;
+    const fit=String(background.style.backgroundSize||'cover').toLowerCase(),position=String(background.style.backgroundPosition||'50% 50%').match(/(-?[\d.]+)%\s+(-?[\d.]+)%/),positionX=bounded(position?.[1],0,100,50)/100,positionY=bounded(position?.[2],0,100,50)/100;
+    let drawWidth=boxWidth,drawHeight=boxHeight;
+    if(fit!=='100% 100%'&&fit!=='100%'){
+        const ratio=fit==='contain'?Math.min(boxWidth/image.naturalWidth,boxHeight/image.naturalHeight):Math.max(boxWidth/image.naturalWidth,boxHeight/image.naturalHeight);
+        drawWidth=image.naturalWidth*ratio;drawHeight=image.naturalHeight*ratio;
+    }
+    context.fillStyle='#ffffff';context.fillRect(0,0,canvas.width,canvas.height);context.imageSmoothingEnabled=true;context.imageSmoothingQuality='high';
+    context.drawImage(image,boxX+(boxWidth-drawWidth)*positionX,boxY+(boxHeight-drawHeight)*positionY,drawWidth,drawHeight);
+    return true;
+}
+async function renderDesignerCardImage(card,{renderer,targetWidth,targetHeight,document}){
+    const output=document.createElement('canvas');output.width=targetWidth;output.height=targetHeight;
+    const nativeBackground=await paintNativeDesignerBackground(card,output);
+    if(!nativeBackground){output.width=1;output.height=1;}
+    const rect=card.getBoundingClientRect(),renderScale=targetWidth/rect.width;
+    const canvas=await renderer(card,{scale:renderScale,useCORS:true,backgroundColor:nativeBackground?null:'#ffffff',logging:false,width:rect.width,height:rect.height,windowWidth:Math.max(card.scrollWidth,Math.ceil(rect.width)),windowHeight:Math.max(card.scrollHeight,Math.ceil(rect.height)),onclone:clone=>{
+        clone.querySelectorAll('.designer-safe,.designer-bleed').forEach(node=>node.style.display='none');
+        if(nativeBackground){clone.querySelectorAll('.designer-background').forEach(node=>node.style.display='none');clone.querySelectorAll('.designer-card').forEach(node=>node.style.background='transparent');}
+    }});
+    const overlay=exactSizeCanvas(canvas,targetWidth,targetHeight,document,{alpha:nativeBackground});
+    if(!nativeBackground)return{canvas:overlay,temporary:overlay===canvas?[]:[canvas]};
+    const context=output.getContext('2d',{alpha:false});context.drawImage(overlay,0,0,targetWidth,targetHeight);
+    return{canvas:output,temporary:overlay===canvas?[canvas]:[canvas,overlay]};
 }
 
 export async function saveDesignerPrintImages(outputDocument,{filename='BBS_Cards',format='png',scale=3.125,dpi=null,quality=.98}={}){
@@ -145,16 +215,14 @@ export async function saveDesignerPrintImages(outputDocument,{filename='BBS_Card
         const outputDpi=Math.round(bounded(Math.max(600,number(dpi??card.dataset.cardDpi,Math.round(scale*96))),72,1200,600));
         const prior={position:card.style.position,left:card.style.left,top:card.style.top,transform:card.style.transform};
         Object.assign(card.style,{position:'relative',left:'0',top:'0',transform:'none'});
-        let canvas,encodedCanvas;
+        let encodedCanvas,temporary=[];
         try{
             const rect=card.getBoundingClientRect(),targetWidth=Math.max(1,Math.round(widthMM/25.4*outputDpi)),targetHeight=Math.max(1,Math.round(heightMM/25.4*outputDpi));
-            const renderScale=targetWidth/rect.width;
-            canvas=await renderer(card,{scale:renderScale,useCORS:true,backgroundColor:'#ffffff',logging:false,width:rect.width,height:rect.height,windowWidth:Math.max(card.scrollWidth,Math.ceil(rect.width)),windowHeight:Math.max(card.scrollHeight,Math.ceil(rect.height)),onclone:clone=>clone.querySelectorAll('.designer-safe,.designer-bleed').forEach(node=>node.style.display='none')});
-            encodedCanvas=exactSizeCanvas(canvas,targetWidth,targetHeight,downloadDocument);
+            const rendered=await renderDesignerCardImage(card,{renderer,targetWidth,targetHeight,document:downloadDocument});encodedCanvas=rendered.canvas;temporary=rendered.temporary;
         }finally{Object.assign(card.style,prior);}
         const rawBlob=await new Promise((resolve,reject)=>encodedCanvas.toBlob(value=>value?resolve(value):reject(new Error(`สร้างไฟล์ ${type.toUpperCase()} ไม่สำเร็จ`)),mime,type==='jpg'?quality:undefined));
         const blob=await embedRasterDpi(rawBlob,type,outputDpi);
-        if(encodedCanvas!==canvas){encodedCanvas.width=1;encodedCanvas.height=1;}canvas.width=1;canvas.height=1;
+        for(const canvas of new Set([...temporary,encodedCanvas])){canvas.width=1;canvas.height=1;}
         const cardNo=String(number(card.dataset.cardIndex,index)+1).padStart(2,'0'),size=`${widthMM}x${heightMM}mm_${outputDpi}dpi`;
         const url=URL.createObjectURL(blob),link=downloadDocument.createElement('a');link.href=url;link.download=`${base}_Card${cardNo}_${side}_${size}.${type}`;link.style.display='none';downloadDocument.body.appendChild(link);link.click();link.remove();setTimeout(()=>URL.revokeObjectURL(url),30000);
     }
@@ -162,32 +230,41 @@ export async function saveDesignerPrintImages(outputDocument,{filename='BBS_Card
 }
 
 const PAPERS={A4:[210,297],A5:[148,210],A6:[105,148]};
-export function planDesignerSheets(cards,paperSize='A4'){
+const SHEET_PRESETS={safe:{margin:8,gap:5},compact:{margin:7,gap:3}};
+function sheetOptions(options={}){const preset=Object.hasOwn(SHEET_PRESETS,options.preset)?options.preset:'safe',base=SHEET_PRESETS[preset];return{preset,margin:base.margin,gap:base.gap,backOffsetXMM:bounded(options.backOffsetXMM,-5,5,0),backOffsetYMM:bounded(options.backOffsetYMM,-5,5,0)};}
+export function designerSheetMetrics(layout,paperSize='A4',options={}){
     const paper=PAPERS[paperSize];if(!paper)throw new Error('Choose A4, A5 or A6 paper.');
-    const margin=8,gap=5,sheets=[];
+    const config=sheetOptions(options),width=number(layout?.widthMM),height=number(layout?.heightMM),sides=Array.isArray(layout?.sides)?layout.sides:[],bleed=Math.max(0,...sides.map(s=>bounded(s.bleedMM,0,20))),cellWidth=width+2*bleed,cellHeight=height+2*bleed;
+    const columns=Math.floor((paper[0]-config.margin*2+config.gap)/(cellWidth+config.gap)),rows=Math.floor((paper[1]-config.margin*2+config.gap)/(cellHeight+config.gap));
+    if(width<=0||height<=0||columns<1||rows<1)throw new Error(`The card including bleed does not fit ${paperSize}. Choose larger paper or smaller card dimensions.`);
+    const gridWidth=columns*cellWidth+(columns-1)*config.gap,gridHeight=rows*cellHeight+(rows-1)*config.gap;
+    return{...config,paperSize,paperWidth:paper[0],paperHeight:paper[1],width,height,bleed,cellWidth,cellHeight,columns,rows,capacity:columns*rows,originX:(paper[0]-gridWidth)/2,originY:(paper[1]-gridHeight)/2};
+}
+export function planDesignerSheets(cards,paperSize='A4',options={}){
+    const paper=PAPERS[paperSize];if(!paper)throw new Error('Choose A4, A5 or A6 paper.');
+    const config=sheetOptions(options),sheets=[];
     let offset=0;
     while(offset<cards.length){
         const layout=cards[offset]?.designerRender?.layout;
         if(!layout)throw new Error('Prepare Designer and legacy cards in separate print jobs.');
-        const width=number(layout.widthMM),height=number(layout.heightMM),bleed=Math.max(0,...layout.sides.map(s=>bounded(s.bleedMM,0,20)));
+        const metrics=designerSheetMetrics(layout,paperSize,config),{width,height,bleed,cellWidth,cellHeight,columns,rows,capacity,originX,originY}=metrics;
         const key=l=>JSON.stringify([number(l.widthMM),number(l.heightMM),l.duplexFlip,Math.max(0,...l.sides.map(s=>bounded(s.bleedMM,0,20)))]);
         let end=offset+1;while(end<cards.length&&cards[end]?.designerRender?.layout&&key(cards[end].designerRender.layout)===key(layout))end++;
-        const cellWidth=width+2*bleed,cellHeight=height+2*bleed;
-        const columns=Math.floor((paper[0]-margin*2+gap)/(cellWidth+gap)),rows=Math.floor((paper[1]-margin*2+gap)/(cellHeight+gap));
-        if(width<=0||height<=0||columns<1||rows<1)throw new Error(`The card including bleed does not fit ${paperSize}. Choose larger paper or smaller card dimensions.`);
-        const capacity=columns*rows,flip=layout.duplexFlip||'LongEdge';
+        const flip=layout.duplexFlip||'LongEdge';
         for(let first=offset;first<end;first+=capacity){
             const indices=Array.from({length:Math.min(capacity,end-first)},(_,i)=>first+i);
             const hasBack=indices.some(i=>cards[i].designerRender.layout.sides.some(s=>s.side==='Back'));
             for(const side of hasBack?['Front','Back']:['Front']){
                 const slots=indices.map((cardIndex,i)=>{
-                    const x=margin+(i%columns)*(cellWidth+gap),y=margin+Math.floor(i/columns)*(cellHeight+gap);
+                    const x=originX+(i%columns)*(cellWidth+config.gap),y=originY+Math.floor(i/columns)*(cellHeight+config.gap),back=side==='Back';
                     return {cardIndex,side,blank:!cards[cardIndex].designerRender.layout.sides.some(s=>s.side===side),
-                        x:side==='Back'&&flip==='LongEdge'?paper[0]-x-cellWidth:x,
-                        y:side==='Back'&&flip==='ShortEdge'?paper[1]-y-cellHeight:y,
+                        pairId:`card-${cardIndex+1}`,
+                        x:(back&&flip==='LongEdge'?paper[0]-x-cellWidth:x)+(back?config.backOffsetXMM:0),
+                        y:(back&&flip==='ShortEdge'?paper[1]-y-cellHeight:y)+(back?config.backOffsetYMM:0),
                         width,height,bleed,cellWidth,cellHeight};
                 });
-                sheets.push({side,flip,paperSize,width:paper[0],height:paper[1],slots});
+                if(slots.some(slot=>slot.x<0||slot.y<0||slot.x+slot.cellWidth>paper[0]||slot.y+slot.cellHeight>paper[1]))throw new Error('Back-side calibration moves a card outside the paper. Reduce the X/Y offset.');
+                sheets.push({side,flip,paperSize,width:paper[0],height:paper[1],preset:config.preset,columns,rows,capacity,backOffsetXMM:config.backOffsetXMM,backOffsetYMM:config.backOffsetYMM,slots});
             }
         }
         offset=end;
@@ -196,18 +273,21 @@ export function planDesignerSheets(cards,paperSize='A4'){
 }
 
 function slotHtml(slot,cards,resources,qrDataUrl){
-    if(slot.blank)return '';
+    if(slot.blank)return `<div class="bbs-print-slot" data-card-index="${slot.cardIndex}" data-pair-id="${slot.pairId}" data-blank="true" style="left:${slot.x}mm;top:${slot.y}mm;width:${slot.cellWidth}mm;height:${slot.cellHeight}mm"></div>`;
     const render=cards[slot.cardIndex].designerRender,layout=render.layout,side=layout.sides.find(s=>s.side===slot.side);
     if(!side)throw new Error(`Designer ${slot.side} side is unavailable. Prepare the card again.`);
     const face=designerCardFaceHtml(render,slot.side,resources,qrDataUrl,{cardIndex:slot.cardIndex,cardStyle:`left:${slot.bleed}mm;top:${slot.bleed}mm;`});
-    return `<div class="bbs-print-slot" data-card-index="${slot.cardIndex}" style="left:${slot.x}mm;top:${slot.y}mm;width:${slot.cellWidth}mm;height:${slot.cellHeight}mm">${face}</div>`;
+    const b=slot.bleed,w=slot.width,h=slot.height,m=2;
+    const crops=`<i class="bbs-crop bbs-crop-h" style="left:${b-m}mm;top:${b}mm;width:${m}mm"></i><i class="bbs-crop bbs-crop-v" style="left:${b}mm;top:${b-m}mm;height:${m}mm"></i><i class="bbs-crop bbs-crop-h" style="left:${b+w}mm;top:${b}mm;width:${m}mm"></i><i class="bbs-crop bbs-crop-v" style="left:${b+w}mm;top:${b-m}mm;height:${m}mm"></i><i class="bbs-crop bbs-crop-h" style="left:${b-m}mm;top:${b+h}mm;width:${m}mm"></i><i class="bbs-crop bbs-crop-v" style="left:${b}mm;top:${b+h}mm;height:${m}mm"></i><i class="bbs-crop bbs-crop-h" style="left:${b+w}mm;top:${b+h}mm;width:${m}mm"></i><i class="bbs-crop bbs-crop-v" style="left:${b+w}mm;top:${b+h}mm;height:${m}mm"></i>`;
+    return `<div class="bbs-print-slot" data-card-index="${slot.cardIndex}" data-pair-id="${slot.pairId}" style="left:${slot.x}mm;top:${slot.y}mm;width:${slot.cellWidth}mm;height:${slot.cellHeight}mm">${face}${crops}</div>`;
 }
 
-export function designerPrintDocument(cards,resources,qrDataUrl,{paperSize='A4',title='BBS Smart Card Print',autoPrint=true}={}){
-    const sheets=planDesignerSheets(cards,paperSize),flips=[...new Set(sheets.filter(s=>s.side==='Back').map(s=>s.flip))];
+export function designerPrintDocument(cards,resources,qrDataUrl,{paperSize='A4',title='BBS Smart Card Print',autoPrint=true,preset='safe',backOffsetXMM=0,backOffsetYMM=0}={}){
+    const sheets=planDesignerSheets(cards,paperSize,{preset,backOffsetXMM,backOffsetYMM}),flips=[...new Set(sheets.filter(s=>s.side==='Back').map(s=>s.flip))];
     if(flips.length>1)throw new Error('Print cards with different duplex flip settings in separate jobs.');
-    const pages=sheets.map(sheet=>`<section class="bbs-print-sheet" data-print-side="${sheet.side}" data-duplex-flip="${sheet.flip}" data-page-width-mm="${sheet.width}" data-page-height-mm="${sheet.height}" style="width:${sheet.width}mm;height:${sheet.height}mm">${sheet.slots.map(slot=>slotHtml(slot,cards,resources,qrDataUrl)).join('')}</section>`).join('');
-    const note=flips.length?`Print double-sided at 100% scale. Flip on the ${flips[0]==='ShortEdge'?'short':'long'} edge.`:'Print at 100% scale. Single-sided cards.';
+    const pages=sheets.map(sheet=>`<section class="bbs-print-sheet" data-print-side="${sheet.side}" data-duplex-flip="${sheet.flip}" data-sheet-preset="${sheet.preset}" data-sheet-capacity="${sheet.capacity}" data-grid-columns="${sheet.columns}" data-grid-rows="${sheet.rows}" data-back-offset-x-mm="${sheet.backOffsetXMM}" data-back-offset-y-mm="${sheet.backOffsetYMM}" data-page-width-mm="${sheet.width}" data-page-height-mm="${sheet.height}" style="width:${sheet.width}mm;height:${sheet.height}mm">${sheet.slots.map(slot=>slotHtml(slot,cards,resources,qrDataUrl)).join('')}</section>`).join('');
+    const capacities=[...new Set(sheets.map(sheet=>sheet.capacity))].join('/'),offsetNote=(number(backOffsetXMM)||number(backOffsetYMM))?` Back calibration X ${number(backOffsetXMM)} mm / Y ${number(backOffsetYMM)} mm.`:'';
+    const note=flips.length?`${paperSize} · ${capacities} card(s) per sheet · Print double-sided at 100% / Actual size. Flip on the ${flips[0]==='ShortEdge'?'short':'long'} edge.${offsetNote}`:`${paperSize} · ${capacities} card(s) per sheet · Print at 100% / Actual size. Single-sided cards.`;
     const script=autoPrint?`<script>window.addEventListener('load',async()=>{try{if(document.fonts)await document.fonts.ready;await Promise.all(Array.from(document.images,img=>img.decode()));window.print();}catch(error){document.getElementById('print-status').textContent='An image could not be loaded. Keep this window open and prepare the print again.';}});<\/script>`:'';
-    return `<!doctype html><html lang="th"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${html(title)}</title><link href="https://fonts.googleapis.com/css2?family=Kanit:wght@300;400;500;600;700;800&display=swap" rel="stylesheet"><style>@page{size:${paperSize};margin:0}*{box-sizing:border-box}html,body{margin:0;padding:0}body{font-family:Kanit,Tahoma,Arial,sans-serif;background:#e2e8f0}#print-status{padding:12px;background:#fff}.bbs-print-sheet{position:relative;background:#fff;overflow:hidden;break-after:page;page-break-after:always}.bbs-print-sheet:last-child{break-after:auto;page-break-after:auto}.bbs-print-slot,.designer-card,.designer-background,.designer-content,.designer-cut,.designer-safe,.designer-bleed{position:absolute}.designer-content{inset:0;overflow:hidden}.designer-cut{inset:0;outline:.15mm dashed #64748b;pointer-events:none;z-index:10002}.designer-safe{border:.15mm dashed #0891b2;pointer-events:none;z-index:10001}.designer-bleed{border:.15mm dashed #f97316;pointer-events:none}.designer-qr{object-fit:contain!important}@media print{html,body{margin:0!important;padding:0!important;background:#fff!important;-webkit-print-color-adjust:exact!important;print-color-adjust:exact!important}#print-status,.bbs-output-toolbar,[data-print-exclude],.designer-safe,.designer-bleed{display:none!important}.bbs-print-sheet{margin:0!important;box-shadow:none!important}.designer-card{break-inside:avoid!important;page-break-inside:avoid!important}}</style></head><body><div id="print-status" data-print-exclude>${note}</div>${pages}${script}</body></html>`;
+    return `<!doctype html><html lang="th"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${html(title)}</title><link href="https://fonts.googleapis.com/css2?family=Kanit:wght@300;400;500;600;700;800&display=swap" rel="stylesheet"><style>@page{size:${paperSize};margin:0}*{box-sizing:border-box}html,body{margin:0;padding:0}body{font-family:Kanit,Tahoma,Arial,sans-serif;background:#e2e8f0}#print-status{padding:12px;background:#fff}.bbs-print-sheet{position:relative;background:#fff;overflow:hidden;break-after:page;page-break-after:always}.bbs-print-sheet:last-child{break-after:auto;page-break-after:auto}.bbs-print-slot,.designer-card,.designer-background,.designer-content,.designer-cut,.designer-safe,.designer-bleed,.bbs-crop{position:absolute}.designer-content{inset:0;overflow:hidden}.designer-cut{inset:0;outline:.15mm dashed #64748b;pointer-events:none;z-index:10002}.designer-safe{border:.15mm dashed #0891b2;pointer-events:none;z-index:10001}.designer-bleed{border:.15mm dashed #f97316;pointer-events:none}.designer-qr{object-fit:contain!important}.bbs-crop{display:block;background:#111;z-index:10003;pointer-events:none}.bbs-crop-h{height:.15mm}.bbs-crop-v{width:.15mm}@media print{html,body{margin:0!important;padding:0!important;background:#fff!important;-webkit-print-color-adjust:exact!important;print-color-adjust:exact!important}#print-status,.bbs-output-toolbar,[data-print-exclude],.designer-safe,.designer-bleed{display:none!important}.bbs-print-sheet{margin:0!important;box-shadow:none!important}.designer-card{break-inside:avoid!important;page-break-inside:avoid!important}}</style></head><body data-print-contract="${DESIGNER_PRINT_CONTRACT}"><div id="print-status" data-print-exclude>${note}</div>${pages}${script}</body></html>`;
 }

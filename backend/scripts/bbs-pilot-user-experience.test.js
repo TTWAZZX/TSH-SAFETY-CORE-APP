@@ -31,7 +31,8 @@ assert.ok(ui.includes('data-community-qr-entry'), 'Department QR entry must rema
 assert.ok(ui.includes("if(entry.qrVerification&&!entry.qrEmployee)showPersonalQrVerification"), 'Personal observation QR must enter the inspection flow directly.');
 
 assert.ok(print.includes('Math.max(600'), 'Direct PNG/JPG output must render at no less than 600 DPI.');
-assert.ok(print.includes('Math.max(450'), 'Direct PDF output must render at no less than 450 DPI.');
+assert.ok(print.includes("pdf.addImage(cardCanvas.toDataURL('image/png'),'PNG',x,y,widthMM,heightMM"), 'Direct PDF output must place source-native card faces at exact physical positions.');
+assert.ok((print.match(/Math\.max\(600/g)||[]).length>=2, 'Direct PDF and PNG/JPG output must render at no less than 600 DPI.');
 assert.ok(print.includes('targetWidth/rect.width'), 'Raster output must render directly to its target pixel grid.');
 
 console.log('BBS controlled-pilot user experience, QR routing and high-resolution output contract: PASS');
