@@ -138,11 +138,16 @@ function assessLayout(layout) {
         if (Number(side.safeMarginMM||0)<2) items.push({severity:'Warning',code:`SAFE_MARGIN_LOW_${side.side.toUpperCase()}`,message:`${side.side} safe margin is below the recommended 2 mm.`});
         if (side.pixelWidth&&side.pixelHeight) { const requiredWidth=(Number(layout.widthMM)/25.4)*Number(layout.dpi),requiredHeight=(Number(layout.heightMM)/25.4)*Number(layout.dpi); if(Number(side.pixelWidth)<requiredWidth||Number(side.pixelHeight)<requiredHeight)items.push({severity:'Warning',code:`BACKGROUND_RESOLUTION_LOW_${side.side.toUpperCase()}`,message:`${side.side} background may be below the selected print DPI.`}); }
     }
-    const requiredQr=layout.templateKind==='Personal'?[['card.personal_qr','Front','Personal'],['department.community_qr','Back','Department']]:[['department.community_qr','Front','Department']];
+    const requiredQr=layout.templateKind==='Personal'?[['card.personal_qr','Front','Personal'],['department.community_qr','Back','Department']]:[];
     for (const [source,side,label] of requiredQr) {
         const qr=layout.elements.filter(element=>element.visible && element.elementType==='QR' && element.dataSourceKey===source && element.side===side);
         if (!qr.length) items.push({severity:'Blocked',code:`${label.toUpperCase()}_QR_${side.toUpperCase()}_MISSING`,message:`${label} QR is required on the ${side} side.`});
         else if (qr.some(element=>Math.min(element.widthBP,element.heightBP)<1200)) items.push({severity:'Blocked',code:`${label.toUpperCase()}_QR_TOO_SMALL`,message:`${label} QR size must be at least 12% of the card on both axes.`});
+    }
+    if (layout.templateKind==='Department') {
+        const qr=layout.elements.filter(element=>element.visible && element.elementType==='QR' && element.dataSourceKey==='department.community_qr' && ['Front','Back'].includes(element.side));
+        if (!qr.length) items.push({severity:'Blocked',code:'DEPARTMENT_QR_MISSING',message:'Department QR is required on the Front or Back side.'});
+        else if (qr.some(element=>Math.min(element.widthBP,element.heightBP)<1200)) items.push({severity:'Blocked',code:'DEPARTMENT_QR_TOO_SMALL',message:'Department QR size must be at least 12% of the card on both axes.'});
     }
     return { status:items.some(i=>i.severity==='Blocked')?'Blocked':items.some(i=>i.severity==='Warning')?'Warning':'Ready',items };
 }
