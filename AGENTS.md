@@ -1,5 +1,13 @@
 # TSH Safety Core Activity - AGENTS.md
 
+## BBS Controlled Pilot mobile, QR and 600 DPI output Production release (2026-09-17)
+
+- `main` commit `3c424ba` is deployed to the PHP Production target. The inner BBS header now remains in normal document flow instead of covering phone content, mobile sticky actions clear the application bottom navigation, and ordinary users render the permission-scoped Department Designer snapshot without calling Admin card-designer APIs.
+- Department QR intent opens and focuses the Community Good/Risky report form. A Personal QR for another employee enters the authorized single-observation flow directly without an overlapping verification dialog; the existing authenticated claim, scope checks and server-selected employee remain authoritative.
+- Direct PNG/JPG output now renders the canonical Designer card face to its exact 600 DPI pixel grid (60 x 85 mm = 1417 x 2008 px) with embedded density metadata. Direct PDF enforces at least 450 DPI, physical dimensions are unchanged, and toolbar/status/safe/bleed controls remain excluded from print/export.
+- This release changed no schema, BBS business row, private upload, QR/card record or rollout setting. Production remains Controlled Pilot with `staged_admin_only=0`, `pilot_scope_only=1` and both Designer flags `1`. Authenticated Admin browser smoke passed six groups, eight tabs, five card workspaces and three responsive viewports with zero console errors or writes; Department 18 returned one Active template and one permission-scoped Designer layout.
+- Fresh rollback evidence is under `backups/production/bbs-pilot-ux-predeploy-20260917-120418/`: verified 195-table SQL gzip (SHA-256 `76A47BBA7C161F71E24CCBEE17D2BBC006C342100770E33714EF13678C086C50`), all 16 BBS private uploads, six runtime-before files, and checksum-matched FTPS/HTTPS deployment `5/5`. The protected helper was removed, FTPS residue is zero and `.htaccess` was restored to SHA-256 `4088E920886567C344AE7A7A88AEB010DD7F2E42F7AFD2AF9D94F8DE4A1265DB`.
+
 ## BBS exact output and QR login continuation Production release (2026-09-17)
 
 - `main` commit `3cd2a32` is deployed to the PHP Production target. Composite Preview, print, PDF, PNG and JPG now use the same canonical Designer card-face contract; 60 x 85 mm raster output is exactly 709 x 1004 pixels at 300 DPI with embedded PNG/JPEG density metadata, PDF uses lossless page capture, and print-only CSS excludes the toolbar/status/safe/bleed controls.

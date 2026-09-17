@@ -1,5 +1,16 @@
 # TSH Safety Core Activity - Deployment
 
+## BBS Controlled Pilot mobile, QR and high-resolution output (2026-09-17)
+
+Source commit `3c424ba` is pushed on `main` and deployed to `https://dev.tshpcl.com/safety/tsh-safety-core`. Runtime scope is `index.html`, `public/js/main.js`, `public/js/pages/bbs-smart-card.js`, `public/js/pages/bbs-card-designer.js` and `public/js/utils/bbs-card-print.js`; no API, schema, private-upload or rollout-setting change was required.
+
+- Ordinary Pilot users now use the permission-scoped Department Designer projection rather than Admin APIs. The BBS header no longer overlays phone content, fixed actions clear the application bottom navigation, Department QR focuses Community reporting and Personal QR enters the authorized observation flow directly.
+- PNG/JPG exports render the canonical Designer card face at a minimum 600 DPI with exact physical pixel dimensions and embedded density metadata. PDF uses a minimum 450 DPI page capture. Browser Print and every direct format continue to exclude toolbar/status and safe/bleed controls.
+- Fresh backup is `backups/production/bbs-pilot-ux-predeploy-20260917-120418/`: 195-table SQL gzip, 1,694,864 compressed bytes, SHA-256 `76A47BBA7C161F71E24CCBEE17D2BBC006C342100770E33714EF13678C086C50`, valid completion marker; all 16 BBS private uploads total 39,312,073 bytes with a SHA-256 manifest; six exact runtime-before files include the original `.htaccess`.
+- FTPS upload/download-back and public HTTPS hashes matched source `5/5`. Normal Admin login/read smoke returned `200`; Department 18 projected one template and one Designer layout; anonymous BBS context returned `401`. Chrome passed six groups, eight tabs, five Card workspaces and 320x568, 390x844 and 844x390 with zero console errors, business writes or test residue.
+- Production remains Controlled Pilot: `staged_admin_only=0`, `pilot_scope_only=1`, `visual_card_designer_enabled=1`, `visual_card_designer_rendering_enabled=1`. The protected backup helper was deleted, FTPS absence was verified, and the original `.htaccess` SHA-256 `4088E920886567C344AE7A7A88AEB010DD7F2E42F7AFD2AF9D94F8DE4A1265DB` was restored before runtime deployment.
+- Normal rollback restores only the five runtime paths from `runtime-before/`; preserve all BBS data, cards, QR history and private uploads. Database restoration is reserved for an explicitly authorized data incident.
+
 ## BBS exact output and QR login continuation (2026-09-17)
 
 Source commit `3cd2a32` is pushed on `main` and deployed to `https://dev.tshpcl.com/safety/tsh-safety-core`. Runtime scope is `index.html`, `api/lib/bbs_rollout_access.php`, `public/js/api.js`, `public/js/main.js`, `public/js/pages/bbs-card-designer.js`, `public/js/pages/bbs-smart-card.js`, `public/js/utils/bbs-card-print.js` and the new `public/js/utils/bbs-qr-intent.js`. Node changes remain parity/test source.
