@@ -1,6 +1,6 @@
 import { API, apiFetch } from '../api.js?v=20260908-bbs-navigation-loading-r1';
 import { escHtml, showToast } from '../ui.js?v=20260714-phase21-platform-shell';
-import { designerPrintDocument, designerCardFaceHtml, saveDesignerPrintPdf, saveDesignerPrintImages } from '../utils/bbs-card-print.js?v=20260917-bbs-pdf-print-fidelity-r1';
+import { designerPrintDocument, designerCardFaceHtml, saveDesignerPrintPdf, saveDesignerPrintImages } from '../utils/bbs-card-print.js?v=20260917-bbs-mobile-qr-output-r2';
 import { openBbsCardDesigner } from './bbs-card-designer.js?v=20260914-bbs-typography-align-r1';
 import { beginBbsOperation, beginBbsPerformance, uploadProgress } from '../utils/bbs-async-ui.js?v=20260909-bbs-performance-baseline-r1';
 
@@ -114,7 +114,7 @@ function consumeBbsEntryIntent() {
     else if(qrVerification?.kind==='Personal'){state.tab='workspace';state.restoredScrollTop=0;}
     else if(adminWorkspace&&state.context?.permissions?.configure){const allowed=new Set(['workspace','team-management','cards']);sessionStorage.removeItem('bbs_admin_workspace');if(allowed.has(adminWorkspace)){state.tab=adminWorkspace;state.restoredScrollTop=0;}}
     if(state.tab==='cards'){try{const saved=JSON.parse(sessionStorage.getItem('tsh_bbs_designer_session_v1')||'null');if(saved?.kind==='Department')state.cardWorkspace='department';else if(saved?.kind==='Personal')state.cardWorkspace='personal';}catch(_){}}
-    return {qrEmployee,qrVerification};
+    return {qrEmployee,communityDepartment,qrVerification};
 }
 
 function showPersonalQrVerification(verification){
@@ -154,7 +154,7 @@ function accessibilityStyles() {
       #bbs-smart-card-page :where(button,a[href],summary,label,input,select,textarea){touch-action:manipulation}
       #bbs-smart-card-page :where(button,a[href],summary,input,select,textarea):focus-visible{outline:3px solid #38bdf8;outline-offset:2px}
       #bbs-smart-card-page [role="tab"]:focus-visible{outline-color:#fbbf24}
-      #bbs-smart-card-page [data-bbs-compact-header]{backdrop-filter:blur(14px);box-shadow:0 10px 30px rgba(15,23,42,.12)}
+      #bbs-smart-card-page [data-bbs-compact-header]{box-shadow:0 10px 30px rgba(15,23,42,.12)}
       #bbs-smart-card-page [data-bbs-primary-nav],#bbs-smart-card-page [data-bbs-secondary-nav]{scrollbar-width:thin}
       #bbs-smart-card-body{scroll-margin-top:11rem}
       #bbs-smart-card-page [data-bbs-sticky-actions]{box-shadow:0 -10px 30px rgba(15,23,42,.12)}
@@ -173,6 +173,7 @@ function accessibilityStyles() {
         #bbs-smart-card-page :where(button,a[href],summary){min-height:44px}
         #bbs-smart-card-page :where(input:not([type="checkbox"]):not([type="radio"]):not([type="file"]),select,textarea){min-height:44px;font-size:16px}
         #bbs-smart-card-page [data-bbs-sticky-actions]>div{width:100%}
+        #bbs-smart-card-page [data-bbs-sticky-actions]{bottom:calc(4.75rem + env(safe-area-inset-bottom))!important}
         .bbs-dialog-overlay{align-items:flex-end!important;padding:0!important}
         .bbs-dialog-panel{width:100%;max-width:none;border-radius:1.5rem 1.5rem 0 0;max-height:calc(var(--app-visual-viewport-height,100dvh) - max(.75rem,env(safe-area-inset-top)))}
         .bbs-dialog-panel :where(button,a[href]){min-height:44px}
@@ -312,7 +313,7 @@ function shell() {
       <div data-bbs-shell class="w-full space-y-4 animate-fade-in pb-10 min-w-0">
         ${accessibilityStyles()}
         <a data-bbs-skip-link href="#bbs-smart-card-body" class="rounded-xl bg-slate-950 px-4 py-3 text-sm font-black text-white shadow-xl">ข้ามไปยังเนื้อหา BBS</a>
-        <section data-bbs-compact-header class="sticky top-0 z-30 overflow-hidden rounded-2xl text-white" style="background:linear-gradient(135deg,rgba(6,78,59,.98),rgba(4,120,87,.98) 58%,rgba(13,148,136,.98))">
+        <section data-bbs-compact-header class="relative overflow-hidden rounded-2xl text-white" style="background:linear-gradient(135deg,rgba(6,78,59,.98),rgba(4,120,87,.98) 58%,rgba(13,148,136,.98))">
           <div class="flex items-center justify-between gap-3 px-4 py-3 sm:px-5">
             <div class="min-w-0"><div class="flex items-center gap-2"><span class="rounded-lg bg-white/15 px-2 py-1 text-[9px] font-black tracking-widest text-emerald-100">BBS</span><h2 class="truncate text-lg font-black sm:text-xl">BBS Smart Card</h2></div><p data-bbs-tagline class="mt-1 truncate text-xs text-emerald-100">สังเกตพฤติกรรมอย่างสร้างสรรค์ เรียนรู้ และป้องกันก่อนเกิดเหตุ</p></div>
             <div class="flex shrink-0 items-center gap-2 text-xs"><div class="rounded-xl border border-white/15 bg-white/10 px-3 py-2"><span class="hidden text-emerald-200 sm:inline">ระดับ </span><b>${escHtml(state.context?.bbsLevel||'ยังไม่กำหนด')}</b></div><div class="rounded-xl border border-white/15 bg-white/10 px-3 py-2"><span class="hidden text-emerald-200 sm:inline">ขอบเขต </span><b>${state.context?.pilot?.inPilot?'Pilot Unit':(state.context?.permissions?.companyRead?'Admin':'ส่วนตัว')}</b></div></div>
@@ -1414,6 +1415,15 @@ async function switchBbsTab(nextTab) {
     scrollBbsContentStart();
 }
 
+function focusCommunityReportFromQr() {
+    requestAnimationFrame(()=>{
+        const form=document.getElementById('bbs-community-form');
+        if(!form)return;
+        form.scrollIntoView({behavior:'smooth',block:'start'});
+        (form.querySelector('input[name="reportType"]')||form.querySelector('textarea,select,input,button'))?.focus?.({preventScroll:true});
+    });
+}
+
 async function switchCardWorkspace(nextWorkspace) {
     if(!CARD_WORKSPACES.has(nextWorkspace)||nextWorkspace===state.cardWorkspace)return;
     state.cardWorkspace=nextWorkspace;
@@ -1770,6 +1780,22 @@ async function loadActiveDesignerPreview(kind,id){
     await Promise.all(jobs);
     return{record,layout,resources};
 }
+async function loadScopedDepartmentDesignerPreview(render){
+    if(!render?.layout?.sides?.length)return null;
+    const layout=JSON.parse(JSON.stringify(render.layout)),resources=new Map(),pendingUrls=new Set(),jobs=[];
+    for(const side of layout.sides){
+        if(!side.backgroundUrl)throw new Error(`${side.side} Designer background ไม่พร้อมใช้งาน`);
+        pendingUrls.add(side.backgroundUrl);
+        jobs.push(apiFetch(side.backgroundUrl).then(response=>response.blob()).then(async blob=>{if(!blob.size)throw new Error(`${side.side} Designer background ว่างเปล่า`);resources.set(side.backgroundUrl,await blobDataUrl(blob));}));
+    }
+    for(const element of layout.elements||[]){
+        if(!element.assetUrl||resources.has(element.assetUrl)||pendingUrls.has(element.assetUrl))continue;
+        pendingUrls.add(element.assetUrl);
+        jobs.push(apiFetch(element.assetUrl).then(response=>response.blob()).then(async blob=>{if(!blob.size)throw new Error(`Designer asset ${n(element.assetId)} ว่างเปล่า`);resources.set(element.assetUrl,await blobDataUrl(blob));}));
+    }
+    await Promise.all(jobs);
+    return{record:{id:layout.layoutVersionId,VersionNo:layout.versionNo,Status:'Active'},layout,resources,serverRender:render};
+}
 async function departmentPrintContext(template){try{const result=await API.get(`/bbs/department-cards/me?departmentId=${n(template.DepartmentID)}`);return result.data||null;}catch(error){return {loadError:error?.message||'โหลด QR ของแผนกไม่สำเร็จ',department:null,templates:[],qr:null};}}
 function personalTemplateScopeMismatch(template,employee){
     if(!employee)return['ไม่พบข้อมูลพนักงาน'];
@@ -1862,9 +1888,9 @@ function assessDesignerPreview(kind,template,designer,{intent='',employee=null,d
     add(designer.record.Status==='Active'?'ready':'blocked','Designer Layout',`Version ${n(designer.record.VersionNo)} · ${designer.record.Status||'-'}`);
     add(front&&designer.resources.get(front.backgroundUrl)?'ready':'blocked','ภาพด้านหน้า',front?.artworkRole==='ScopedFront'?`Scoped Front · Artwork V${n(front.artworkVersionId)}`:'Designer background');
     add(back&&designer.resources.get(back.backgroundUrl)?'ready':'blocked','ภาพด้านหลัง',back?.artworkRole==='GlobalBack'?`Global Back · Artwork V${n(back.artworkVersionId)}`:'Designer background');
-    const elements=layout.elements||[],hasPersonalFront=elements.some(item=>item.visible&&item.side==='Front'&&item.elementType==='QR'&&item.dataSourceKey==='card.personal_qr'),hasDepartmentQr=elements.some(item=>item.visible&&item.side==='Back'&&item.elementType==='QR'&&item.dataSourceKey==='department.community_qr');
-    if(kind==='personal')add(hasPersonalFront&&hasDepartmentQr?'ready':'blocked','ตำแหน่ง QR ใน Designer',hasPersonalFront&&hasDepartmentQr?'Personal QR ด้านหน้า · Department QR ด้านหลัง':'ต้องมี Personal QR ด้านหน้าและ Department QR ด้านหลัง');
-    else add(hasDepartmentQr?'ready':'blocked','ตำแหน่ง QR ใน Designer',hasDepartmentQr?'Department QR ด้านหลังพร้อม':'ต้องมี Department QR ด้านหลัง');
+    const elements=layout.elements||[],hasPersonalFront=elements.some(item=>item.visible&&item.side==='Front'&&item.elementType==='QR'&&item.dataSourceKey==='card.personal_qr'),hasDepartmentBack=elements.some(item=>item.visible&&item.side==='Back'&&item.elementType==='QR'&&item.dataSourceKey==='department.community_qr'),hasDepartmentFront=elements.some(item=>item.visible&&item.side==='Front'&&item.elementType==='QR'&&item.dataSourceKey==='department.community_qr');
+    if(kind==='personal')add(hasPersonalFront&&hasDepartmentBack?'ready':'blocked','ตำแหน่ง QR ใน Designer',hasPersonalFront&&hasDepartmentBack?'Personal QR ด้านหน้า · Department QR ด้านหลัง':'ต้องมี Personal QR ด้านหน้าและ Department QR ด้านหลัง');
+    else add(hasDepartmentFront?'ready':'blocked','ตำแหน่ง QR ใน Designer',hasDepartmentFront?'Department QR ด้านหน้าพร้อม':'ต้องมี Department QR ด้านหน้า');
     const qrAvailable=Boolean(departmentContext?.qr?.qrUrl),qrLevel=qrAvailable?'ready':['print','issue','replace'].includes(intent)?'blocked':'warning';
     add(qrLevel,'Department QR',qrAvailable?`Active รุ่น ${n(departmentContext.qr.Generation)}`:'ยังไม่มี Active Department QR; Preview จะแสดง QR ตัวอย่าง');
     add(template.Status==='Active'?'ready':'warning','สถานะ Template',`${template.Status||'-'} · แยกจาก Designer Layout ${designer.record.Status||'-'}`);
@@ -1886,7 +1912,9 @@ async function openCardTemplatePreview(kind,id,options={}){
     try{
         const employee=kind==='personal'?personalPreviewEmployee(template,options.employee):null;
         const contextTemplate=kind==='department'?template:employee?.DepartmentID?{DepartmentID:employee.DepartmentID}:null;
-        const [designer,departmentContext]=await Promise.all([loadActiveDesignerPreview(kind,id),contextTemplate?departmentPrintContext(contextTemplate):Promise.resolve(null)]);
+        const departmentContext=contextTemplate?await departmentPrintContext(contextTemplate):null;
+        const scopedDepartmentRender=kind==='department'&&!state.context?.permissions?.configure?departmentContext?.designerLayouts?.[id]:null;
+        const designer=scopedDepartmentRender?await loadScopedDepartmentDesignerPreview(scopedDepartmentRender):await loadActiveDesignerPreview(kind,id);
         const asset=designer?null:await loadCardTemplateAsset(kind,id),previewContext={intent:options.intent||'',employee,departmentContext};
         const assessment=designer?assessDesignerPreview(kind,template,designer,previewContext):assessCardTemplate(kind,template,asset,previewContext);
         const preview=designer?designerCompositeCardPreview(kind,template,designer,assessment,{employee,departmentContext}):compositeCardPreview(kind,template,asset,assessment,{employee,departmentContext});
@@ -2104,7 +2132,7 @@ function cardOutputFilename(label='BBS_Cards'){const stamp=new Date().toISOStrin
 function mountDesignerOutputActions(popup,{filename='BBS_Cards.pdf'}={}){
     const doc=popup?.document;if(!doc?.body||!doc.querySelector('.bbs-print-sheet'))return;
     const toolbar=doc.createElement('div');toolbar.className='bbs-output-toolbar';toolbar.setAttribute('data-print-exclude','');toolbar.setAttribute('role','toolbar');toolbar.setAttribute('aria-label','พิมพ์หรือบันทึกบัตร');toolbar.style.cssText='position:fixed;right:16px;top:16px;z-index:20000;display:flex;flex-wrap:wrap;gap:8px;align-items:center;max-width:calc(100vw - 32px);padding:10px;border:1px solid #cbd5e1;border-radius:14px;background:#fff;box-shadow:0 12px 35px #0f172a33;font:700 14px Kanit,Tahoma,Arial,sans-serif';
-    toolbar.innerHTML='<button type="button" data-card-output-print style="border:0;border-radius:10px;background:#047857;color:#fff;padding:10px 16px;font:inherit;cursor:pointer">พิมพ์</button><button type="button" data-card-output-pdf style="border:0;border-radius:10px;background:#7c3aed;color:#fff;padding:10px 16px;font:inherit;cursor:pointer">บันทึก PDF</button><button type="button" data-card-output-image="png" style="border:0;border-radius:10px;background:#0284c7;color:#fff;padding:10px 16px;font:inherit;cursor:pointer">บันทึก PNG</button><button type="button" data-card-output-image="jpg" style="border:0;border-radius:10px;background:#475569;color:#fff;padding:10px 16px;font:inherit;cursor:pointer">บันทึก JPG</button><span data-card-output-status role="status" aria-live="polite" style="max-width:260px;color:#475569;font-size:11px">PDF เป็นหน้ากระดาษพิมพ์ · PNG/JPG เป็นหน้าบัตรจริงแยก Front/Back พร้อมฝัง DPI ของ Designer</span>';
+    toolbar.innerHTML='<button type="button" data-card-output-print style="border:0;border-radius:10px;background:#047857;color:#fff;padding:10px 16px;font:inherit;cursor:pointer">พิมพ์</button><button type="button" data-card-output-pdf style="border:0;border-radius:10px;background:#7c3aed;color:#fff;padding:10px 16px;font:inherit;cursor:pointer">บันทึก PDF</button><button type="button" data-card-output-image="png" style="border:0;border-radius:10px;background:#0284c7;color:#fff;padding:10px 16px;font:inherit;cursor:pointer">บันทึก PNG</button><button type="button" data-card-output-image="jpg" style="border:0;border-radius:10px;background:#475569;color:#fff;padding:10px 16px;font:inherit;cursor:pointer">บันทึก JPG</button><span data-card-output-status role="status" aria-live="polite" style="max-width:280px;color:#475569;font-size:11px">PDF ความละเอียดอย่างน้อย 450 DPI · PNG/JPG แยก Front/Back ที่ 600 DPI และคงขนาดบัตรจริง</span>';
     doc.body.prepend(toolbar);
     toolbar.querySelector('[data-card-output-print]').onclick=()=>popup.print();
     const run=async(button,label,task)=>{const buttons=[...toolbar.querySelectorAll('button')],status=toolbar.querySelector('[data-card-output-status]');buttons.forEach(item=>item.disabled=true);button.setAttribute('aria-busy','true');status.textContent=`กำลังสร้าง ${label} ความละเอียดสูง...`;try{const count=await task();status.textContent=count>1?`บันทึก ${label} ${count} ไฟล์สำเร็จ`:`บันทึก ${label} สำเร็จ`;}catch(error){status.textContent=error?.message||`บันทึก ${label} ไม่สำเร็จ`;}finally{buttons.forEach(item=>item.disabled=false);button.removeAttribute('aria-busy');}};
@@ -2131,5 +2159,5 @@ export async function loadBbsSmartCardPage() {
     const page = document.getElementById('bbs-smart-card-page'); if (!page) return;
     const measurement = beginBbsPerformance('page:initial-load');
     page.innerHTML = `<section role="status" aria-live="polite" aria-busy="true" class="flex min-h-64 items-center justify-center rounded-2xl border border-emerald-100 bg-white"><div class="text-center"><span aria-hidden="true" class="mx-auto block h-9 w-9 animate-spin rounded-full border-4 border-emerald-100 border-t-emerald-600"></span><h2 class="mt-4 font-black text-emerald-800">กำลังโหลด BBS Smart Card...</h2><p class="mt-1 text-xs text-slate-500">กำลังตรวจสอบสิทธิ์และเตรียมพื้นที่ทำงานล่าสุดของคุณ</p></div></section>`;
-    try { state.context=(await API.get('/bbs/me/context')).data;restoreBbsUiState();ensureBbsPersistenceListeners();const entry=consumeBbsEntryIntent();sanitizeBbsRestoredTab();await loadData();if(entry.qrEmployee&&state.tab==='start')await startObservation(entry.qrEmployee);else{render({restoreScroll:true});reopenStoredDesignerIfNeeded();}if(entry.qrVerification)showPersonalQrVerification(entry.qrVerification);measurement.finish('completed'); } catch (error) { measurement.finish('failed');page.innerHTML = `<section role="alert" class="rounded-2xl border border-rose-200 bg-white p-10 text-center"><h3 class="font-black text-slate-800">ไม่สามารถเปิด BBS Smart Card</h3><p class="text-sm text-slate-500 mt-2">${escHtml(errorText(error))}</p><button type="button" data-bbs-page-reload class="mt-5 rounded-xl bg-emerald-700 px-5 py-3 text-sm font-black text-white">ลองเชื่อมต่อใหม่</button></section>`;page.querySelector('[data-bbs-page-reload]')?.addEventListener('click',()=>loadBbsSmartCardPage()); }
+    try { state.context=(await API.get('/bbs/me/context')).data;restoreBbsUiState();ensureBbsPersistenceListeners();const entry=consumeBbsEntryIntent();sanitizeBbsRestoredTab();await loadData();if(entry.qrEmployee&&state.tab==='start')await startObservation(entry.qrEmployee);else{render({restoreScroll:true});reopenStoredDesignerIfNeeded();}if(entry.communityDepartment&&state.tab==='community')focusCommunityReportFromQr();if(entry.qrVerification&&!entry.qrEmployee)showPersonalQrVerification(entry.qrVerification);measurement.finish('completed'); } catch (error) { measurement.finish('failed');page.innerHTML = `<section role="alert" class="rounded-2xl border border-rose-200 bg-white p-10 text-center"><h3 class="font-black text-slate-800">ไม่สามารถเปิด BBS Smart Card</h3><p class="text-sm text-slate-500 mt-2">${escHtml(errorText(error))}</p><button type="button" data-bbs-page-reload class="mt-5 rounded-xl bg-emerald-700 px-5 py-3 text-sm font-black text-white">ลองเชื่อมต่อใหม่</button></section>`;page.querySelector('[data-bbs-page-reload]')?.addEventListener('click',()=>loadBbsSmartCardPage()); }
 }

@@ -74,10 +74,11 @@ export async function saveDesignerPrintPdf(outputDocument,{filename='BBS_Cards.p
     for(let index=0;index<sheets.length;index+=1){
         const sheet=sheets[index],width=number(sheet.dataset.pageWidthMm,210),height=number(sheet.dataset.pageHeightMm,297),orientation=width>height?'landscape':'portrait';
         const cardDpis=[...(sheet.querySelectorAll?.('.designer-card[data-card-dpi]')||[])].map(card=>number(card.dataset.cardDpi)).filter(value=>value>=72);
-        const outputDpi=Math.round(bounded(dpi??Math.max(300,...cardDpis),72,1200,300)),targetWidth=Math.max(1,Math.round(width/25.4*outputDpi)),targetHeight=Math.max(1,Math.round(height/25.4*outputDpi));
+        const outputDpi=Math.round(bounded(Math.max(450,number(dpi??Math.max(450,...cardDpis),450)),72,1200,450)),targetWidth=Math.max(1,Math.round(width/25.4*outputDpi)),targetHeight=Math.max(1,Math.round(height/25.4*outputDpi));
         let canvas,pdfCanvas;
         try{
-            canvas=await renderer(sheet,{scale:outputDpi/96,useCORS:true,backgroundColor:'#ffffff',logging:false,width:sheet.scrollWidth,height:sheet.scrollHeight,windowWidth:sheet.scrollWidth,windowHeight:sheet.scrollHeight,onclone:clone=>clone.querySelectorAll('.designer-safe,.designer-bleed,.bbs-output-toolbar,[data-print-exclude]').forEach(node=>node.style.display='none')});
+            const rect=sheet.getBoundingClientRect?.()||{width:sheet.scrollWidth,height:sheet.scrollHeight},renderScale=targetWidth/rect.width;
+            canvas=await renderer(sheet,{scale:renderScale,useCORS:true,backgroundColor:'#ffffff',logging:false,width:rect.width,height:rect.height,windowWidth:Math.max(sheet.scrollWidth,Math.ceil(rect.width)),windowHeight:Math.max(sheet.scrollHeight,Math.ceil(rect.height)),onclone:clone=>clone.querySelectorAll('.designer-safe,.designer-bleed,.bbs-output-toolbar,[data-print-exclude]').forEach(node=>node.style.display='none')});
             pdfCanvas=exactSizeCanvas(canvas,targetWidth,targetHeight,outputDocument);
             if(!pdf)pdf=new JsPdf({orientation,unit:'mm',format:[width,height],compress:false,precision:12});else pdf.addPage([width,height],orientation);
             pdf.addImage(pdfCanvas.toDataURL('image/png'),'PNG',0,0,width,height,undefined,'NONE',0);
@@ -141,13 +142,13 @@ export async function saveDesignerPrintImages(outputDocument,{filename='BBS_Card
     for(let index=0;index<cards.length;index+=1){
         const card=cards[index],side=String(card.dataset.cardSide||`Side${index+1}`).replace(/[^a-z0-9_-]+/gi,'_');
         const widthMM=bounded(card.dataset.cardWidthMm,1,1000,85.6),heightMM=bounded(card.dataset.cardHeightMm,1,1000,54);
-        const outputDpi=Math.round(bounded(dpi??card.dataset.cardDpi,72,1200,Math.round(scale*96)));
+        const outputDpi=Math.round(bounded(Math.max(600,number(dpi??card.dataset.cardDpi,Math.round(scale*96))),72,1200,600));
         const prior={position:card.style.position,left:card.style.left,top:card.style.top,transform:card.style.transform};
         Object.assign(card.style,{position:'relative',left:'0',top:'0',transform:'none'});
         let canvas,encodedCanvas;
         try{
             const rect=card.getBoundingClientRect(),targetWidth=Math.max(1,Math.round(widthMM/25.4*outputDpi)),targetHeight=Math.max(1,Math.round(heightMM/25.4*outputDpi));
-            const renderScale=outputDpi/96;
+            const renderScale=targetWidth/rect.width;
             canvas=await renderer(card,{scale:renderScale,useCORS:true,backgroundColor:'#ffffff',logging:false,width:rect.width,height:rect.height,windowWidth:Math.max(card.scrollWidth,Math.ceil(rect.width)),windowHeight:Math.max(card.scrollHeight,Math.ceil(rect.height)),onclone:clone=>clone.querySelectorAll('.designer-safe,.designer-bleed').forEach(node=>node.style.display='none')});
             encodedCanvas=exactSizeCanvas(canvas,targetWidth,targetHeight,downloadDocument);
         }finally{Object.assign(card.style,prior);}

@@ -21,7 +21,7 @@ import { loadOjtPage } from './pages/ojt.js?v=20260820-card-image-phase2d';
 import { loadTrainingPage } from './pages/training.js?v=20260820-card-image-phase2d-rollout-r2';
 import { loadAccidentPage } from './pages/accident.js?v=20260915-accident-recordable-r1';
 import { loadSafetyCulturePage } from './pages/safety-culture.js?v=20260824-safety-culture-ppe-form-r1';
-import { loadBbsSmartCardPage } from './pages/bbs-smart-card.js?v=20260917-bbs-pdf-print-fidelity-r1';
+import { loadBbsSmartCardPage } from './pages/bbs-smart-card.js?v=20260917-bbs-mobile-qr-output-r2';
 import { loadContractorPage } from './pages/contractor.js?v=20260715-phase32d-remaining-async-ux';
 import { loadHiyariPage } from './pages/hiyari.js?v=20260907-hiyari-pdf-summary-r2';
 import { loadKyPage } from './pages/ky.js?v=20260911-ky-history-filter-r1';
@@ -295,7 +295,7 @@ async function consumeBbsQrIntent() {
         if (result.data?.mode === 'community' && result.data?.departmentId) {
             sessionStorage.setItem('bbs_community_department_id', String(result.data.departmentId));
         }
-        if (result.data?.verification?.kind === 'Personal' && result.data?.verification?.active === true) {
+        if (result.data?.mode !== 'observation' && result.data?.verification?.kind === 'Personal' && result.data?.verification?.active === true) {
             sessionStorage.setItem('bbs_qr_verification', JSON.stringify(result.data.verification));
         } else {
             sessionStorage.removeItem('bbs_qr_verification');
