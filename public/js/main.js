@@ -306,8 +306,7 @@ async function consumeBbsQrIntent() {
         } else {
             sessionStorage.removeItem('bbs_qr_verification');
         }
-        window.location.hash = normalizeBbsQrRoute(result.data?.route);
-        handleRouting();
+        await openBbsQrDestination(result.data?.route);
         return true;
     } catch (error) {
         if(!shouldDiscardBbsQrIntent(error)){
@@ -319,10 +318,15 @@ async function consumeBbsQrIntent() {
         sessionStorage.removeItem(BBS_QR_INTENT_KEY);
         sessionStorage.removeItem(BBS_QR_PENDING_KEY);
         UI.showToast(error?.message || 'ไม่สามารถเปิด BBS Workspace จาก QR นี้ได้', 'error');
-        window.location.hash = 'bbs-smart-card';
-        handleRouting();
+        await openBbsQrDestination('#bbs-smart-card');
         return true;
     }
+}
+
+async function openBbsQrDestination(route) {
+    const safeRoute = normalizeBbsQrRoute(route);
+    history.replaceState(null, '', `${window.location.pathname}${window.location.search}${safeRoute}`);
+    await handleRouting();
 }
 
 function consumePendingGuideRoute() {
