@@ -1,5 +1,13 @@
 # TSH Safety Core Activity - AGENTS.md
 
+## BBS high-fidelity batch output Production release (2026-09-17)
+
+- `main` commit `2963031` is deployed to the PHP Production target. Direct PNG/JPG/PDF renders the canonical Designer card face at the exact 600 DPI physical grid; browser Print remains physical HTML backed by the original Designer resources.
+- Admin Personal issuance supports cross-page selection up to 100 employees, server-compatible Template preflight, A4/A5/A6 Batch Sheet layout, Compact/Safe spacing, crop marks and Back-only X/Y calibration. A 60 x 85 mm card with 1 mm bleed fits 3 x 3 (nine cards per A4 side); Front/Back pair IDs, incomplete-sheet placeholders and Designer LongEdge/ShortEdge mirroring preserve exact duplex order. Personal and Department workflows remain separate.
+- Automated Browser E2E produced exactly two A4 pages for nine cards, measured exact CSS physical dimensions and passed with zero console errors. Physical Canon A4 Duplex/Long-edge output was accepted by the operator with X/Y calibration at zero. Full BBS regression passed 61/61.
+- This release changed no schema, BBS business row, private upload, QR/card record or rollout setting. Production remains Controlled Pilot with `staged_admin_only=0`, `pilot_scope_only=1` and both Designer flags `1`. Authenticated Production browser smoke passed six groups, eight tabs, five card workspaces and three responsive viewports with zero console errors or writes.
+- Fresh rollback evidence is under `backups/production/bbs-batch-output-predeploy-20260917-172947/`: verified 195-table SQL gzip (SHA-256 `9E62AB4084AF2D525B6F1B695A09CD98C45097812F286FA0DEDEF38685F39663`), all 18 current BBS private uploads (40,056,549 bytes), six runtime-before files and checksum-matched FTPS/HTTPS deployment `5/5`. The protected helper was removed, FTPS residue is zero and `.htaccess` was restored to SHA-256 `4088E920886567C344AE7A7A88AEB010DD7F2E42F7AFD2AF9D94F8DE4A1265DB`.
+
 ## BBS Controlled Pilot mobile, QR and 600 DPI output Production release (2026-09-17)
 
 - `main` commit `3c424ba` is deployed to the PHP Production target. The inner BBS header now remains in normal document flow instead of covering phone content, mobile sticky actions clear the application bottom navigation, and ordinary users render the permission-scoped Department Designer snapshot without calling Admin card-designer APIs.
