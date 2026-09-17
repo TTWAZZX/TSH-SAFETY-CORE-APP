@@ -1,5 +1,15 @@
 # TSH Safety Core Activity - Deployment
 
+## BBS exact output and QR login continuation (2026-09-17)
+
+Source commit `3cd2a32` is pushed on `main` and deployed to `https://dev.tshpcl.com/safety/tsh-safety-core`. Runtime scope is `index.html`, `api/lib/bbs_rollout_access.php`, `public/js/api.js`, `public/js/main.js`, `public/js/pages/bbs-card-designer.js`, `public/js/pages/bbs-smart-card.js`, `public/js/utils/bbs-card-print.js` and the new `public/js/utils/bbs-qr-intent.js`. Node changes remain parity/test source.
+
+- Local contracts passed exact 300 DPI PNG/JPG output, embedded density metadata, lossless PDF, print-control exclusion, canonical Preview/output rendering, QR login continuation, rollout denial handling, Personal/Department Designer integration and QR security. Reversible Local E2E passed both Personal and Department lifecycles and restored all database rows, settings, Artwork state and private files.
+- Production rollback copies are under `backups/production/bbs-output-qr-predeploy-20260917-092827/runtime-before/`. FTPS upload/download-back SHA-256 matched `8/8`; HTTPS SHA-256 matched all seven public files. Anonymous checks returned `401` on four protected BBS surfaces, all new cache/renderer/QR intent markers were served and verification sent zero writes.
+- The release made no schema, business-row, private-upload or rollout-setting change. The read-only Pilot gate remains `CONFIGURATION_REQUIRED`, so the existing Admin-only gate was retained and neither Controlled Pilot nor Company-wide access was enabled.
+- A full Production SQL export was not performed because the execution safety reviewer required separate explicit consent for downloading that sensitive payload. No helper or temporary routing file reached Production; `.htaccess` stayed at SHA-256 `4088E920886567C344AE7A7A88AEB010DD7F2E42F7AFD2AF9D94F8DE4A1265DB`, and the helper path returned the normal router `501`.
+- Stored Production Admin UAT credentials returned `401`; therefore authenticated browser/Card output smoke is pending a valid Production test credential. Normal code rollback restores only the eight runtime files from `runtime-before/` and preserves all BBS data/files.
+
 ## KY History complete filtering release (2026-09-11)
 
 Source commit `507b615` is pushed on `main` and deployed to `https://dev.tshpcl.com/safety/tsh-safety-core`. Runtime scope is `index.html`, `public/js/main.js`, `public/js/pages/ky.js` and `api/handlers/workflow_phase6.php`; Node changes remain API parity/test source. No schema, KY record, private-upload path or rollout-setting change was required.

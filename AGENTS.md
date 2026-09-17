@@ -1,5 +1,13 @@
 # TSH Safety Core Activity - AGENTS.md
 
+## BBS exact output and QR login continuation Production release (2026-09-17)
+
+- `main` commit `3cd2a32` is deployed to the PHP Production target. Composite Preview, print, PDF, PNG and JPG now use the same canonical Designer card-face contract; 60 x 85 mm raster output is exactly 709 x 1004 pixels at 300 DPI with embedded PNG/JPEG density metadata, PDF uses lossless page capture, and print-only CSS excludes the toolbar/status/safe/bleed controls.
+- A scanned Personal or Department QR is now retained across authentication. Resolve/claim distinguishes temporary authentication or rollout denial from terminal inactive/scope errors, returns only the safe BBS route, and Node/PHP expose the same explicit `BBS_ADMIN_ONLY` code.
+- Local reversible E2E passed Personal Issue/Resolve/Claim/Print/Replace/Reprint/Revoke plus Department QR/Resolve/Claim/Designer Output/Print/History, with Node/PHP parity and exact database/file/settings rollback. Production FTPS download-back passed `8/8`; public HTTPS hashes passed `7/7`; anonymous protected surfaces remained `401` with zero writes.
+- This release changed no schema, BBS business row, private upload or rollout setting. Production remains behind its existing Admin-only gate because the read-only Pilot audit returned `CONFIGURATION_REQUIRED` (inactive Pilot scope, one unmapped employee, and missing active schedule/checklist/templates/Department QR/community handler plus acceptance evidence). Do not switch to Controlled Pilot or Company-wide until those blockers are closed and the gate is rerun.
+- Runtime rollback files are under `backups/production/bbs-output-qr-predeploy-20260917-092827/`. A full Production database export was intentionally not taken because the safety reviewer rejected exporting the sensitive payload without a separate explicit approval; the helper and temporary `.htaccess` were never uploaded, Production `.htaccess` remained SHA-256 `4088E920886567C344AE7A7A88AEB010DD7F2E42F7AFD2AF9D94F8DE4A1265DB`, and the helper URL returned the normal router `501`. Stored Production Admin UAT credentials returned `401`, so authenticated browser smoke remains pending a valid test credential.
+
 ## BBS Personal Template scope Production release (2026-09-16)
 
 - `main` commit `4404c1a` is deployed to the PHP Production target. Personal Card Template creation/activation now permits only Group Leader level or higher (or all eligible Personal levels), employee projections include canonical Safety Unit identity, and issuance compatibility checks Department, Unit and BBS level consistently in Node, PHP and the Admin UI.
