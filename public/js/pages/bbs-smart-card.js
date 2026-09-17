@@ -4,7 +4,7 @@ import { designerPrintDocument, designerCardFaceHtml, saveDesignerPrintPdf, save
 import { openBbsCardDesigner } from './bbs-card-designer.js?v=20260914-bbs-typography-align-r1';
 import { beginBbsOperation, beginBbsPerformance, uploadProgress } from '../utils/bbs-async-ui.js?v=20260909-bbs-performance-baseline-r1';
 
-const state = { context: null, workspace: null, eligible: [], history: [], ownDrafts: [], tab: 'workspace', view: 'observer', draft: null, singleStep:1, batchDraft:null, batchSelected:[], batchStep:1, masterReference:{levels:[],positions:[],departments:[],units:[],employees:[],summary:{}}, masterArtwork:{globalBack:null,scopedFronts:[],records:[]}, cardWorkspace:'overview', departmentConfigQuery:'', departmentConfigStatus:'all', departmentConfigSelectedId:null, cardTemplates: [], cardEmployees: [], cards: [], departmentPrints:[], historyYear: new Date().getFullYear(), actionSummary: {}, actions: [], actionScope: 'all', actionStatus: '', actionPriority: '', slaRules: [], analytics: null, analyticsFilters: { scope:'', year:new Date().getFullYear(), month:0, departmentId:'', safetyUnitId:'', risk:'' }, departmentCards:null, community:null, communityEmployees:{rows:[],units:[]}, communityAdmin:{templates:[],qrCards:[],handlers:[],admins:[],departments:[]}, communityFilters:{year:new Date().getFullYear(),month:0}, inspectorSelf:{enabled:false,enrollment:null,team:[],available:[],coverage:{}}, inspectorAdmin:{enrollments:[],candidates:[],departments:[],units:[]}, inspectorTeam:null, inspectorSelectedId:null, inspectorCompliance:null, inspectorScheduleDetail:null, inspectorScheduleMode:'agenda', inspectorScheduleFilters:{year:new Date().getFullYear(),month:new Date().getMonth()+1}, inspectorModalReturnFocus:null, loadErrors:{}, loadedAt:{}, loadingSections:new Set(), retryingSection:'', restoredScrollTop:0 };
+const state = { context: null, workspace: null, eligible: [], history: [], ownDrafts: [], tab: 'workspace', view: 'observer', draft: null, singleStep:1, batchDraft:null, batchSelected:[], batchStep:1, masterReference:{levels:[],positions:[],departments:[],units:[],employees:[],summary:{}}, masterArtwork:{globalBack:null,scopedFronts:[],records:[]}, cardWorkspace:'overview', departmentConfigQuery:'', departmentConfigStatus:'all', departmentConfigSelectedId:null, cardTemplates: [], cardEmployees: [], cards: [], departmentPrints:[], historyYear: new Date().getFullYear(), actionSummary: {}, actions: [], actionScope: 'all', actionStatus: '', actionPriority: '', slaRules: [], analytics: null, analyticsFilters: { scope:'', year:new Date().getFullYear(), month:0, departmentId:'', safetyUnitId:'', risk:'' }, departmentCards:null, community:null, communityEmployees:{rows:[],units:[]}, communityQrEntry:null, communityAdmin:{templates:[],qrCards:[],handlers:[],admins:[],departments:[]}, communityFilters:{year:new Date().getFullYear(),month:0}, inspectorSelf:{enabled:false,enrollment:null,team:[],available:[],coverage:{}}, inspectorAdmin:{enrollments:[],candidates:[],departments:[],units:[]}, inspectorTeam:null, inspectorSelectedId:null, inspectorCompliance:null, inspectorScheduleDetail:null, inspectorScheduleMode:'agenda', inspectorScheduleFilters:{year:new Date().getFullYear(),month:new Date().getMonth()+1}, inspectorModalReturnFocus:null, loadErrors:{}, loadedAt:{}, loadingSections:new Set(), retryingSection:'', restoredScrollTop:0 };
 state.trashedCardTemplates=[];
 state.trashedDepartmentTemplates=[];
 state.listMeta={history:null,actions:null,actionOutbox:null,cardEmployees:null,cards:null,departmentPrints:null};
@@ -104,17 +104,20 @@ function sanitizeBbsRestoredTab() {
 
 function consumeBbsEntryIntent() {
     const qrEmployee=sessionStorage.getItem('bbs_qr_observed_employee');
+    const openInspection=sessionStorage.getItem('bbs_qr_open_inspection')==='1';
     const communityDepartment=sessionStorage.getItem('bbs_community_department_id');
+    const communityDepartmentName=sessionStorage.getItem('bbs_community_department_name')||'';
     let qrVerification=null;
     try{qrVerification=JSON.parse(sessionStorage.getItem('bbs_qr_verification')||'null');}catch(_){qrVerification=null;}
     sessionStorage.removeItem('bbs_qr_verification');
     const adminWorkspace=sessionStorage.getItem('bbs_admin_workspace');
     if(qrEmployee){sessionStorage.removeItem('bbs_qr_observed_employee');state.tab='start';state.restoredScrollTop=0;}
-    else if(communityDepartment){sessionStorage.removeItem('bbs_community_department_id');state.tab='community';state.restoredScrollTop=0;}
+    else if(openInspection){sessionStorage.removeItem('bbs_qr_open_inspection');state.tab='start';state.restoredScrollTop=0;}
+    else if(communityDepartment){sessionStorage.removeItem('bbs_community_department_id');sessionStorage.removeItem('bbs_community_department_name');state.communityQrEntry={departmentId:n(communityDepartment),departmentName:communityDepartmentName};state.tab='community';state.restoredScrollTop=0;}
     else if(qrVerification?.kind==='Personal'){state.tab='workspace';state.restoredScrollTop=0;}
     else if(adminWorkspace&&state.context?.permissions?.configure){const allowed=new Set(['workspace','team-management','cards']);sessionStorage.removeItem('bbs_admin_workspace');if(allowed.has(adminWorkspace)){state.tab=adminWorkspace;state.restoredScrollTop=0;}}
     if(state.tab==='cards'){try{const saved=JSON.parse(sessionStorage.getItem('tsh_bbs_designer_session_v1')||'null');if(saved?.kind==='Department')state.cardWorkspace='department';else if(saved?.kind==='Personal')state.cardWorkspace='personal';}catch(_){}}
-    return {qrEmployee,communityDepartment,qrVerification};
+    return {qrEmployee,openInspection,communityDepartment,communityDepartmentName,qrVerification};
 }
 
 function showPersonalQrVerification(verification){
@@ -521,7 +524,9 @@ function inspectorTeamPanel(data,isAdmin){const e=data.enrollment||{},coverage=d
 function communityView() {
     const dashboard=state.community||{},cards=state.departmentCards||{},summary=dashboard.summary||{},canRisk=Boolean(dashboard.permissions?.viewRisky);
     if(dashboard.enabled===false)return empty('Community Report ปิดใช้งานชั่วคราว','Admin สามารถเปิดใช้งานได้เมื่อการตั้งค่าพร้อม');
+    const qrEntry=state.communityQrEntry&&n(state.communityQrEntry.departmentId)===n(cards.department?.id)?state.communityQrEntry:null;
     return `<div class="space-y-5">
+      ${qrEntry?`<section data-community-qr-entry role="status" class="rounded-2xl border border-emerald-300 bg-emerald-50 px-4 py-3 text-sm text-emerald-900"><div class="font-black">Department QR ยืนยันแล้ว · ${escHtml(qrEntry.departmentName||cards.department?.Name||'แผนกนี้')}</div><div class="mt-1 text-xs">กรอกแบบฟอร์มพฤติกรรมดีหรือพฤติกรรมเสี่ยงด้านล่าง รายงานจะผูกกับ QR และแผนกนี้โดย Server</div></section>`:''}
       <section class="grid grid-cols-2 ${canRisk?'xl:grid-cols-4':'xl:grid-cols-2'} gap-3">
         ${metric('พฤติกรรมดี',n(summary.good),'เปิดให้พนักงานทุกคนเห็น','emerald')}
         ${metric('แบบบัตรแผนก',n(cards.templates?.length),escHtml(cards.department?.Name||'ยังไม่ผูกแผนก'),'sky')}
@@ -1913,8 +1918,13 @@ async function openCardTemplatePreview(kind,id,options={}){
         const employee=kind==='personal'?personalPreviewEmployee(template,options.employee):null;
         const contextTemplate=kind==='department'?template:employee?.DepartmentID?{DepartmentID:employee.DepartmentID}:null;
         const departmentContext=contextTemplate?await departmentPrintContext(contextTemplate):null;
-        const scopedDepartmentRender=kind==='department'&&!state.context?.permissions?.configure?departmentContext?.designerLayouts?.[id]:null;
-        const designer=scopedDepartmentRender?await loadScopedDepartmentDesignerPreview(scopedDepartmentRender):await loadActiveDesignerPreview(kind,id);
+        // Department Preview is an output preview, so it must use the exact
+        // server-resolved Department render contract used by print/PDF.  The
+        // Admin Designer APIs are editing APIs and are intentionally never a
+        // fallback for this path.
+        const scopedDepartmentRender=kind==='department'?departmentContext?.designerLayouts?.[id]:null;
+        if(kind==='department'&&!scopedDepartmentRender)throw new Error('Active Department Designer Layout ยังไม่พร้อมสำหรับ Template และขอบเขตแผนกนี้');
+        const designer=kind==='department'?await loadScopedDepartmentDesignerPreview(scopedDepartmentRender):await loadActiveDesignerPreview(kind,id);
         const asset=designer?null:await loadCardTemplateAsset(kind,id),previewContext={intent:options.intent||'',employee,departmentContext};
         const assessment=designer?assessDesignerPreview(kind,template,designer,previewContext):assessCardTemplate(kind,template,asset,previewContext);
         const preview=designer?designerCompositeCardPreview(kind,template,designer,assessment,{employee,departmentContext}):compositeCardPreview(kind,template,asset,assessment,{employee,departmentContext});

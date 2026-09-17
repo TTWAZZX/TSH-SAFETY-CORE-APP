@@ -21,7 +21,7 @@ import { loadOjtPage } from './pages/ojt.js?v=20260820-card-image-phase2d';
 import { loadTrainingPage } from './pages/training.js?v=20260820-card-image-phase2d-rollout-r2';
 import { loadAccidentPage } from './pages/accident.js?v=20260915-accident-recordable-r1';
 import { loadSafetyCulturePage } from './pages/safety-culture.js?v=20260824-safety-culture-ppe-form-r1';
-import { loadBbsSmartCardPage } from './pages/bbs-smart-card.js?v=20260917-bbs-mobile-qr-output-r2';
+import { loadBbsSmartCardPage } from './pages/bbs-smart-card.js?v=20260917-bbs-qr-department-contract-r3';
 import { loadContractorPage } from './pages/contractor.js?v=20260715-phase32d-remaining-async-ux';
 import { loadHiyariPage } from './pages/hiyari.js?v=20260907-hiyari-pdf-summary-r2';
 import { loadKyPage } from './pages/ky.js?v=20260911-ky-history-filter-r1';
@@ -261,7 +261,9 @@ async function captureBbsQrIntent() {
     const token = match[1];
     sessionStorage.removeItem('bbs_qr_verification');
     sessionStorage.removeItem('bbs_qr_observed_employee');
+    sessionStorage.removeItem('bbs_qr_open_inspection');
     sessionStorage.removeItem('bbs_community_department_id');
+    sessionStorage.removeItem('bbs_community_department_name');
     sessionStorage.removeItem(BBS_QR_PENDING_KEY);
     sessionStorage.setItem(BBS_QR_INTENT_KEY, token);
     history.replaceState(null, '', `${window.location.pathname}${window.location.search}`);
@@ -292,10 +294,14 @@ async function consumeBbsQrIntent() {
         if (result.data?.mode === 'observation' && result.data?.employee?.EmployeeID) {
             sessionStorage.setItem('bbs_qr_observed_employee', String(result.data.employee.EmployeeID));
         }
+        if (result.data?.mode === 'inspection') {
+            sessionStorage.setItem('bbs_qr_open_inspection', '1');
+        }
         if (result.data?.mode === 'community' && result.data?.departmentId) {
             sessionStorage.setItem('bbs_community_department_id', String(result.data.departmentId));
+            sessionStorage.setItem('bbs_community_department_name', String(result.data.departmentName || ''));
         }
-        if (result.data?.mode !== 'observation' && result.data?.verification?.kind === 'Personal' && result.data?.verification?.active === true) {
+        if (!['observation','inspection'].includes(result.data?.mode) && result.data?.verification?.kind === 'Personal' && result.data?.verification?.active === true) {
             sessionStorage.setItem('bbs_qr_verification', JSON.stringify(result.data.verification));
         } else {
             sessionStorage.removeItem('bbs_qr_verification');

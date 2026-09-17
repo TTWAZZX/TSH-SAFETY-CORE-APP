@@ -183,7 +183,7 @@ router.post('/qr/claim', async (req, res) => {
         if (!employee) return res.status(404).json({ success:false, message:'Card owner is no longer available.' });
         const self = String(card.EmployeeID).toLowerCase() === actorId(req).toLowerCase();
         const verification={kind:'Personal',active:true,cardId:Number(card.id),status:'Active',employeeId:String(employee.EmployeeID),employeeName:String(employee.EmployeeName||''),department:String(employee.Department||''),unit:String(employee.Unit||''),position:String(employee.Position||''),bbsLevel:String(employee.BBSLevel||''),templateId:Number(card.TemplateID),templateName:String(card.TemplateName||''),issuedAt:card.IssuedAt||null,verifiedAt:new Date().toISOString()};
-        return res.json({ success:true, data:{ mode:self ? 'workspace' : 'observation', route:normalizeInternalRoute(req.body?.returnRoute), employee:self ? null : employee, verification } });
+        return res.json({ success:true, data:{ mode:self ? 'inspection' : 'observation', route:normalizeInternalRoute(req.body?.returnRoute), employee:self ? null : employee, verification } });
     } catch (error) { return phase4Error(res, error, 'QR claim'); }
 });
 

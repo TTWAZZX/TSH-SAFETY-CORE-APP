@@ -18,11 +18,16 @@ const scopedPreview=ui.slice(ui.indexOf('async function loadScopedDepartmentDesi
 assert.ok(scopedPreview.includes('side.backgroundUrl'));
 assert.ok(!scopedPreview.includes('/bbs/admin/'), 'Ordinary Department preview must use server-authorized resource URLs.');
 const previewFlow=ui.slice(ui.indexOf('async function openCardTemplatePreview'),ui.indexOf('async function previewDepartmentTemplate'));
-assert.ok(previewFlow.includes("kind==='department'&&!state.context?.permissions?.configure"), 'Non-Admin Department preview must select the scoped server snapshot.');
+assert.ok(previewFlow.includes("kind==='department'?departmentContext?.designerLayouts?.[id]:null"), 'Every Department output preview must select the scoped server snapshot.');
 assert.ok(previewFlow.includes('departmentContext?.designerLayouts?.[id]'));
+assert.ok(previewFlow.includes("kind==='department'?await loadScopedDepartmentDesignerPreview"), 'Department preview must never fall back to the Admin Designer read contract.');
+assert.ok(previewFlow.includes(":await loadActiveDesignerPreview(kind,id)"), 'Personal preview must retain its separate Admin Designer read contract.');
 
-assert.ok(main.includes("result.data?.mode !== 'observation'"), 'Personal QR observation intent must not be covered by the verification dialog.');
+assert.ok(main.includes("!['observation','inspection'].includes(result.data?.mode)"), 'Personal QR inspection intents must not be covered by the verification dialog.');
+assert.ok(main.includes("result.data?.mode === 'inspection'"), 'Scanning your own Personal Card must open the inspection workspace without creating self-observation.');
+assert.ok(ui.includes("else if(openInspection)"), 'The Personal Card inspection intent must select the inspection tab.');
 assert.ok(ui.includes("if(entry.communityDepartment&&state.tab==='community')focusCommunityReportFromQr()"), 'Department QR must focus the Community report form.');
+assert.ok(ui.includes('data-community-qr-entry'), 'Department QR entry must remain visible as a server-scoped Community form intent.');
 assert.ok(ui.includes("if(entry.qrVerification&&!entry.qrEmployee)showPersonalQrVerification"), 'Personal observation QR must enter the inspection flow directly.');
 
 assert.ok(print.includes('Math.max(600'), 'Direct PNG/JPG output must render at no less than 600 DPI.');

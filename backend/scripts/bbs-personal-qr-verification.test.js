@@ -16,6 +16,8 @@ for(const source of [node,php]){
   assert.match(source,/templateName/,'verification result must identify the server-resolved Active template');
   assert.match(source,/issuedAt/,'verification result must expose the factual issue time');
   assert.match(source,/QR_SCOPE_DENIED/,'verification must retain the existing permission boundary');
+  assert.match(source,/inspection/,'the card owner must enter the inspection workspace instead of the generic workspace');
+  assert.match(source,/observation/,'an authorized scanner must enter the card owner observation directly');
 }
 
 const nodeVerification=node.match(/const verification=\{[^\n]+/i)?.[0]||'';
