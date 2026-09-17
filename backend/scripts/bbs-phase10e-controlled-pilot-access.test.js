@@ -39,6 +39,8 @@ assert.match(migration, /'pilot_scope_only'\s*,\s*'0'/);
 assert.doesNotMatch(migration, /\b(?:DELETE|DROP|TRUNCATE|ALTER)\b/i);
 assert.match(nodeService, /BBS_PILOT_ACCESS_REQUIRED/);
 assert.match(phpService, /BBS_PILOT_ACCESS_REQUIRED/);
+assert.match(nodeService, /BBS_ADMIN_ONLY/);
+assert.match(phpService, /BBS_ADMIN_ONLY/);
 assert.match(nodeService, /BBS_Inspector_Enrollments/);
 assert.match(nodeService, /BBS_Hierarchy_Assignments/);
 assert.match(nodeService, /BBS_Pilot_Scopes/);
@@ -98,6 +100,20 @@ assert.match(phpIndex, /bbs_enforce_rollout_access\(\)/);
         assert.strictEqual(res.statusCode, fixture[3]);
         assert.strictEqual(res.headers['X-BBS-Rollout-Mode'], 'controlled-pilot');
         if (!fixture[2]) assert.strictEqual(res.payload.code, 'BBS_PILOT_ACCESS_REQUIRED');
+    }
+    const adminOnlyDb = {
+        async query(sql) {
+            if (sql.includes('BBS_Settings')) return [[{ SettingKey:'staged_admin_only',SettingValue:'1' },{ SettingKey:'pilot_scope_only',SettingValue:'0' }]];
+            throw new Error('Unexpected query');
+        },
+    };
+    for(const [fixtureUser,permitted] of [[{id:'ADMIN',role:'Admin'},true],[{id:'002671',role:'User'},false]]){
+        let nextCalled=false;const req={fixtureUser},res=response();
+        const middleware=createBbsRolloutAccessMiddleware(adminOnlyDb,{authenticateToken:authenticate,isAdmin:requireAdmin});
+        await middleware(req,res,error=>{if(error)throw error;nextCalled=true;});
+        assert.strictEqual(nextCalled,permitted);
+        assert.strictEqual(res.headers['X-BBS-Rollout-Mode'],'staged-admin-only');
+        if(!permitted){assert.strictEqual(res.statusCode,403);assert.strictEqual(res.payload.code,'BBS_ADMIN_ONLY');}
     }
     console.log('BBS Phase 10E controlled Pilot access parity/security contract: PASS');
     process.exit(0);

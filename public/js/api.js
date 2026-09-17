@@ -20,7 +20,7 @@ function resolveApiBase() {
 const API_BASE = resolveApiBase();
 
 export async function apiFetch(endpoint, options = {}) {
-    const { suppressErrorLog = false, ...fetchOptions } = options;
+    const { suppressErrorLog = false, preserveSessionOnAuthError = false, ...fetchOptions } = options;
     const token = TSHSession.getToken();
     const body = fetchOptions.body;
 
@@ -49,9 +49,12 @@ export async function apiFetch(endpoint, options = {}) {
         const contentType = res.headers.get('content-type');
         if (!contentType || !contentType.includes('application/json')) {
             if (res.status === 401) {
-                console.warn('Session expired. Logging out...');
-                TSHSession.logout();
-                throw new Error('Session expired');
+                if(!preserveSessionOnAuthError){
+                    console.warn('Session expired. Logging out...');
+                    TSHSession.logout();
+                    throw new Error('Session expired');
+                }
+                const error=new Error('Authentication is required');error.status=401;throw error;
             }
             return res;
         }
@@ -60,8 +63,8 @@ export async function apiFetch(endpoint, options = {}) {
         const isCurrentPasswordFailure = endpoint === '/change-password'
             && res.status === 401
             && data?.code === 'CURRENT_PASSWORD_INVALID';
-        if ((res.status === 401 && !isCurrentPasswordFailure)
-            || (res.status === 403 && data?.message === 'Token is not valid')) {
+        if (!preserveSessionOnAuthError && ((res.status === 401 && !isCurrentPasswordFailure)
+            || (res.status === 403 && data?.message === 'Token is not valid'))) {
             console.warn('Session expired. Logging out...');
             TSHSession.logout();
             throw new Error('Session expired');

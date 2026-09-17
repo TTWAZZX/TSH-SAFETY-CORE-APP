@@ -4,7 +4,7 @@
 // ======================================================
 
 import * as UI from './ui.js?v=20260714-phase21-platform-shell';
-import { API, apiFetch } from './api.js?v=20260902-patrol-checkin-v2-r1';
+import { API, apiFetch } from './api.js?v=20260917-bbs-qr-login-intent-r1';
 import { guardSubmitHandler } from './utils/async-ui.js?v=20260715-phase32d-remaining-async-ux';
 
 // --- Page Loaders ---
@@ -21,7 +21,7 @@ import { loadOjtPage } from './pages/ojt.js?v=20260820-card-image-phase2d';
 import { loadTrainingPage } from './pages/training.js?v=20260820-card-image-phase2d-rollout-r2';
 import { loadAccidentPage } from './pages/accident.js?v=20260915-accident-recordable-r1';
 import { loadSafetyCulturePage } from './pages/safety-culture.js?v=20260824-safety-culture-ppe-form-r1';
-import { loadBbsSmartCardPage } from './pages/bbs-smart-card.js?v=20260916-bbs-card-output-catalog-r1';
+import { loadBbsSmartCardPage } from './pages/bbs-smart-card.js?v=20260917-bbs-pdf-print-fidelity-r1';
 import { loadContractorPage } from './pages/contractor.js?v=20260715-phase32d-remaining-async-ux';
 import { loadHiyariPage } from './pages/hiyari.js?v=20260907-hiyari-pdf-summary-r2';
 import { loadKyPage } from './pages/ky.js?v=20260911-ky-history-filter-r1';
@@ -32,6 +32,7 @@ import { loadDashboardPage } from './pages/dashboard.js?v=20260822-cccf-shared-t
 import { loadSearchPage } from './pages/search.js?v=20260715-phase32d-remaining-async-ux';
 import { initLoginModuleGuides } from './login-guides.js?v=20260825-bbs-phase4-r1';
 import { MODULE_ORDER, moduleTitleMap } from './module-meta.js?v=20260825-bbs-phase4-r1';
+import { BBS_QR_INTENT_KEY, BBS_QR_PENDING_KEY, shouldDiscardBbsQrIntent, isBbsRolloutBlockedError, normalizeBbsQrRoute } from './utils/bbs-qr-intent.js?v=20260917-bbs-qr-login-intent-r1';
 
 const CARD_IMAGE_EXPORT_V2_MODULES = Object.freeze([
     'dashboard',
@@ -261,27 +262,33 @@ async function captureBbsQrIntent() {
     sessionStorage.removeItem('bbs_qr_verification');
     sessionStorage.removeItem('bbs_qr_observed_employee');
     sessionStorage.removeItem('bbs_community_department_id');
+    sessionStorage.removeItem(BBS_QR_PENDING_KEY);
+    sessionStorage.setItem(BBS_QR_INTENT_KEY, token);
     history.replaceState(null, '', `${window.location.pathname}${window.location.search}`);
     try {
-        await API.post('/bbs/qr/resolve', { token });
-        sessionStorage.setItem('bbs_qr_intent', token);
+        await API.post('/bbs/qr/resolve', { token }, { suppressErrorLog:true, preserveSessionOnAuthError:true });
         return true;
     } catch (error) {
-        sessionStorage.removeItem('bbs_qr_intent');
+        if(!shouldDiscardBbsQrIntent(error)){
+            sessionStorage.setItem(BBS_QR_PENDING_KEY,JSON.stringify({stage:'resolve',code:error?.code||null,savedAt:new Date().toISOString()}));
+            return true;
+        }
+        sessionStorage.removeItem(BBS_QR_INTENT_KEY);
         window.__bbsQrError = error?.message || 'QR นี้ไม่พร้อมใช้งาน';
         return false;
     }
 }
 
 async function consumeBbsQrIntent() {
-    const token = sessionStorage.getItem('bbs_qr_intent');
+    const token = sessionStorage.getItem(BBS_QR_INTENT_KEY);
     if (!token || !AppState.currentUser) {
         if (window.__bbsQrError) { UI.showToast(window.__bbsQrError, 'error'); delete window.__bbsQrError; }
         return false;
     }
     try {
         const result = await API.post('/bbs/qr/claim', { token, returnRoute:'#bbs-smart-card' });
-        sessionStorage.removeItem('bbs_qr_intent');
+        sessionStorage.removeItem(BBS_QR_INTENT_KEY);
+        sessionStorage.removeItem(BBS_QR_PENDING_KEY);
         if (result.data?.mode === 'observation' && result.data?.employee?.EmployeeID) {
             sessionStorage.setItem('bbs_qr_observed_employee', String(result.data.employee.EmployeeID));
         }
@@ -293,11 +300,18 @@ async function consumeBbsQrIntent() {
         } else {
             sessionStorage.removeItem('bbs_qr_verification');
         }
-        window.location.hash = 'bbs-smart-card';
+        window.location.hash = normalizeBbsQrRoute(result.data?.route);
         handleRouting();
         return true;
     } catch (error) {
-        sessionStorage.removeItem('bbs_qr_intent');
+        if(!shouldDiscardBbsQrIntent(error)){
+            const rolloutBlocked=isBbsRolloutBlockedError(error);
+            sessionStorage.setItem(BBS_QR_PENDING_KEY,JSON.stringify({stage:'claim',code:error?.code||null,savedAt:new Date().toISOString()}));
+            UI.showToast(rolloutBlocked?'บันทึก QR ไว้แล้ว แต่บัญชีนี้ยังไม่อยู่ในขอบเขตเปิดใช้ BBS':'บันทึก QR ไว้แล้ว ระบบจะตรวจสอบอีกครั้งหลังเข้าสู่ระบบสำเร็จ',rolloutBlocked?'warning':'info');
+            return false;
+        }
+        sessionStorage.removeItem(BBS_QR_INTENT_KEY);
+        sessionStorage.removeItem(BBS_QR_PENDING_KEY);
         UI.showToast(error?.message || 'ไม่สามารถเปิด BBS Workspace จาก QR นี้ได้', 'error');
         window.location.hash = 'bbs-smart-card';
         handleRouting();

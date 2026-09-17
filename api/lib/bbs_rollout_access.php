@@ -75,8 +75,13 @@ function bbs_enforce_rollout_access(): void
 
     header('X-BBS-Rollout-Mode: ' . ($mode === 'admin_only' ? 'staged-admin-only' : 'controlled-pilot'));
     if ($mode === 'admin_only') {
-        require_admin();
-        return;
+        $user = require_user();
+        if (bbs_rollout_is_admin($user)) return;
+        json_response([
+            'success' => false,
+            'code' => 'BBS_ADMIN_ONLY',
+            'message' => 'BBS Smart Card is currently available only to Admin.',
+        ], 403);
     }
 
     $user = require_user();

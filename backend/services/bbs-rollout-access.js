@@ -96,7 +96,12 @@ function createBbsRolloutAccessMiddleware(db, dependencies = {}) {
 
             return authenticate(req, res, () => {
                 if (rollout.mode === BBS_ROLLOUT_MODE.ADMIN_ONLY) {
-                    return requireAdmin(req, res, next);
+                    if (isAdminUser(req.user)) return next();
+                    return res.status(403).json({
+                        success: false,
+                        code: 'BBS_ADMIN_ONLY',
+                        message: 'BBS Smart Card is currently available only to Admin.',
+                    });
                 }
                 if (isAdminUser(req.user)) return next();
                 return participantCheck(db, employeeIdFromUser(req.user))
