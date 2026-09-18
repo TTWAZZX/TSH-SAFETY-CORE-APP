@@ -1,7 +1,7 @@
 import { API, apiFetch } from '../api.js?v=20260908-bbs-navigation-loading-r1';
 import { escHtml, showToast } from '../ui.js?v=20260714-phase21-platform-shell';
 import { designerPrintDocument, designerCardFaceHtml, designerSheetMetrics, saveDesignerPrintPdf, saveDesignerPrintImages } from '../utils/bbs-card-print.js?v=20260917-bbs-sheet-layout-r3';
-import { openBbsCardDesigner } from './bbs-card-designer.js?v=20260917-bbs-batch-duplex-r1';
+import { openBbsCardDesigner } from './bbs-card-designer.js?v=20260918-bbs-designer-real-preview-r1';
 import { beginBbsOperation, beginBbsPerformance, uploadProgress } from '../utils/bbs-async-ui.js?v=20260909-bbs-performance-baseline-r1';
 
 const state = { context: null, workspace: null, eligible: [], history: [], ownDrafts: [], tab: 'workspace', view: 'observer', draft: null, singleStep:1, batchDraft:null, batchSelected:[], batchStep:1, masterReference:{levels:[],positions:[],departments:[],units:[],employees:[],summary:{}}, masterArtwork:{globalBack:null,scopedFronts:[],records:[]}, cardWorkspace:'overview', departmentConfigQuery:'', departmentConfigStatus:'all', departmentConfigSelectedId:null, cardTemplates: [], cardEmployees: [], cards: [], departmentPrints:[], historyYear: new Date().getFullYear(), actionSummary: {}, actions: [], actionScope: 'all', actionStatus: '', actionPriority: '', slaRules: [], analytics: null, analyticsFilters: { scope:'', year:new Date().getFullYear(), month:0, departmentId:'', safetyUnitId:'', risk:'' }, departmentCards:null, community:null, communityEmployees:{rows:[],units:[]}, communityQrEntry:null, communityAdmin:{templates:[],qrCards:[],handlers:[],admins:[],departments:[]}, communityFilters:{year:new Date().getFullYear(),month:0}, inspectorSelf:{enabled:false,enrollment:null,team:[],available:[],coverage:{}}, inspectorAdmin:{enrollments:[],candidates:[],departments:[],units:[]}, inspectorTeam:null, inspectorSelectedId:null, inspectorCompliance:null, inspectorScheduleDetail:null, inspectorScheduleMode:'agenda', inspectorScheduleFilters:{year:new Date().getFullYear(),month:new Date().getMonth()+1}, inspectorModalReturnFocus:null, loadErrors:{}, loadedAt:{}, loadingSections:new Set(), retryingSection:'', restoredScrollTop:0 };
@@ -140,7 +140,7 @@ function reopenStoredDesignerIfNeeded() {
         const templates=kind==='Department'?(state.communityAdmin?.templates||[]):state.cardTemplates;
         const template=templates.find(row=>n(row.id)===n(saved.templateId));
         if(!template){sessionStorage.removeItem('tsh_bbs_designer_session_v1');return;}
-        requestAnimationFrame(()=>openBbsCardDesigner({kind,template}));
+        requestAnimationFrame(()=>openBbsCardDesigner({kind,template,previewEmployees:String(kind).toLowerCase()==='personal'?state.cardEmployees.filter(row=>personalTemplateMatchesEmployee(template,row)):[]}));
     }catch(_){try{sessionStorage.removeItem('tsh_bbs_designer_session_v1');}catch(__){}}
 }
 
@@ -1333,7 +1333,7 @@ function bind() {
     document.querySelectorAll('[data-master-artwork-upload]').forEach(form=>{const department=form.elements.departmentId,unit=form.elements.safetyUnitId;if(department&&unit){const refreshUnits=()=>{const selected=n(unit.value),departmentId=n(department.value),rows=(state.masterReference?.units||[]).filter(row=>departmentId&&n(row.department_id||row.DepartmentID)===departmentId);unit.innerHTML=`<option value="">ค่าเริ่มต้นทั้งแผนก</option>${rows.map(row=>`<option value="${n(row.id)}" ${selected===n(row.id)?'selected':''}>${escHtml(row.name||row.Name)}</option>`).join('')}`;unit.disabled=!departmentId;};department.onchange=refreshUnits;refreshUnits();}bindBusy(form,'onsubmit',uploadMasterArtwork,'กำลังอัปโหลด Card Artwork...');});
     document.querySelectorAll('[data-master-artwork-preview]').forEach(button=>bindBusy(button,'onclick',()=>previewMasterArtwork(n(button.dataset.masterArtworkPreview)),'กำลังเปิดภาพมาสเตอร์...'));
     installArtworkTemplateCtas();
-    document.querySelectorAll('[data-card-designer-personal]').forEach(btn => bindBusy(btn,'onclick',()=>{const template=state.cardTemplates.find(row=>n(row.id)===n(btn.dataset.cardDesignerPersonal));if(template)return openBbsCardDesigner({kind:'Personal',template});},'กำลังเปิด Designer...'));
+    document.querySelectorAll('[data-card-designer-personal]').forEach(btn => bindBusy(btn,'onclick',()=>{const template=state.cardTemplates.find(row=>n(row.id)===n(btn.dataset.cardDesignerPersonal));if(template)return openBbsCardDesigner({kind:'Personal',template,previewEmployees:state.cardEmployees.filter(row=>personalTemplateMatchesEmployee(template,row))});},'กำลังเปิด Designer...'));
     document.querySelectorAll('[data-bbs-template-preview]').forEach(btn => bindBusy(btn,'onclick',()=>previewTemplate(n(btn.dataset.bbsTemplatePreview)),'กำลังสร้าง Preview...'));
     document.querySelectorAll('[data-bbs-template-action]').forEach(btn => bindBusy(btn, 'onclick', () => transitionTemplate(n(btn.dataset.templateId), n(btn.dataset.rowVersion), btn.dataset.bbsTemplateAction), 'กำลังบันทึก...'));
     document.querySelectorAll('[data-bbs-template-level-repair]').forEach(btn=>bindBusy(btn,'onclick',()=>repairPersonalTemplateLevel(n(btn.dataset.bbsTemplateLevelRepair),n(btn.dataset.rowVersion)),'กำลังแก้ขอบเขต...'));
