@@ -9,6 +9,7 @@ const read=file=>fs.readFileSync(path.join(root,file),'utf8');
 const designer=read('public/js/pages/bbs-card-designer.js');
 const page=read('public/js/pages/bbs-smart-card.js');
 const main=read('public/js/main.js');
+const index=read('index.html');
 
 assert.match(designer,/previewEmployees:\[\]/,'Designer runtime must isolate employee preview rows from saved layout data.');
 assert.match(designer,/function previewValues\(\)/,'Designer must resolve real employee preview values.');
@@ -28,5 +29,6 @@ assert.match(page,/previewEmployees:state\.cardEmployees\.filter/,'Admin Persona
 assert.match(page,/previewEmployees:String\(kind\)\.toLowerCase\(\)==='personal'/,'Restored Personal Designer sessions must retain real preview rows.');
 assert.match(main,/20260918-bbs-designer-real-preview-r1/,'Main module must cache-bust the updated BBS page.');
 assert.match(page,/20260918-bbs-designer-real-preview-r1/,'BBS page must cache-bust the updated Designer module.');
+assert.match(index,/public\/js\/main\.js\?v=20260918-bbs-designer-real-preview-r1/,'HTML entry point must cache-bust the updated main module.');
 
 console.log('BBS Card Designer real preview and 70% group scale contract passed.');
