@@ -1806,7 +1806,8 @@ function wf_ky_video_upload_config(): array
 function wf_ky_video_chunk_root(): string
 {
     $dir = dirname(__DIR__, 2) . DIRECTORY_SEPARATOR . 'backend' . DIRECTORY_SEPARATOR . 'private-uploads' . DIRECTORY_SEPARATOR . 'ky-video-chunks';
-    if (!is_dir($dir) && !mkdir($dir, 0750, true) && !is_dir($dir)) throw new RuntimeException('Cannot create KY video chunk directory');
+    if (!is_dir($dir) && !mkdir($dir, 0770, true) && !is_dir($dir)) throw new RuntimeException('Cannot create KY video chunk directory');
+    @chmod($dir, 0770);
     return $dir;
 }
 
@@ -2357,6 +2358,7 @@ function handle_ky_routes(string $method, string $path): bool
         $uploadId=bin2hex(random_bytes(16));
         $dir=wf_ky_video_upload_dir($uploadId);
         if(!$dir||!mkdir($dir,0750))json_response(['success'=>false,'message'=>'ไม่สามารถเริ่มอัปโหลดวิดีโอ KY ได้'],500);
+        @chmod($dir,0770);
         $chunkSize=(int)$config['chunkSize'];
         $manifest=['uploadId'=>$uploadId,'activityId'=>$row['id'],'initiatedBy'=>$access['userId'],'fileName'=>$fileName,'fileSize'=>$fileSize,'mimeType'=>$mimeType,'extension'=>$extension,'chunkSize'=>$chunkSize,'totalChunks'=>(int)ceil($fileSize/$chunkSize),'maxFileSize'=>$config['maxFileSize'],'requiresChunkSha256'=>true,'createdAt'=>date(DATE_ATOM),'expiresAt'=>date(DATE_ATOM,time()+86400)];
         if(file_put_contents($dir.DIRECTORY_SEPARATOR.'manifest.json',json_encode($manifest,JSON_UNESCAPED_UNICODE),LOCK_EX)===false){wf_ky_video_remove_tree($uploadId);json_response(['success'=>false,'message'=>'ไม่สามารถเริ่มอัปโหลดวิดีโอ KY ได้'],500);}
