@@ -1,5 +1,12 @@
 # TSH Safety Core Activity - AGENTS.md
 
+## BBS PNG/JPG/PDF physical export parity Production release (2026-09-18)
+
+- `main` commit `5e710f1` is deployed to the PHP Production target. Canonical Designer element typography, letter spacing and borders now use the same physical millimetre grid as the card for browser Print and rasterized PNG/JPG/PDF output, avoiding CSS point interpretation differences while preserving the accepted Print geometry.
+- Canvas zoom remains view-only. Saved output remains server-snapshot authoritative: a new Draft such as V3 must be saved, activated and used by a newly issued or explicitly replaced Personal card before its layout can appear in that card's PNG/JPG/PDF; existing issued cards retain their frozen Active-layout snapshot and QR history.
+- Full BBS regression passed `62/62`, the focused print/export contract passed `36/36`, and Batch Duplex Browser E2E passed. Production FTPS download-back and HTTPS hashes passed `5/5`; authenticated read-only browser smoke passed six groups, eight tabs, five card workspaces and three responsive viewports with zero console errors, zero business writes and zero temporary rows.
+- Scoped rollback evidence is under `backups/production/bbs-export-parity-predeploy-20260918-132916/` with exact before/after copies of all five deployed runtime files. This release changed no schema, BBS business row, private upload or rollout setting; unrelated worktree changes in `backend/scripts/patrol-checkin-v2.test.js` and `output/` were preserved.
+
 ## BBS anchored Personal layer scaling Production follow-up (2026-09-18)
 
 - `main` commits `6f4d8f9` and cache-chain follow-up `e9d44cb` are deployed to the PHP Production target. Personal Draft `Scale to 70%` now scales each selected layer around its own visual anchor instead of collapsing the four layers toward one shared center: employee name stays left anchored, position right anchored, Department center anchored and Personal QR bottom-right anchored.
