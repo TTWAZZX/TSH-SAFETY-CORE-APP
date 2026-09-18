@@ -1,6 +1,6 @@
 import { API, apiFetch } from '../api.js?v=20260908-bbs-navigation-loading-r1';
 import { escHtml, showToast } from '../ui.js?v=20260714-phase21-platform-shell';
-import { designerElementCss } from '../utils/bbs-card-print.js?v=20260918-bbs-export-parity-r3';
+import { designerElementCss } from '../utils/bbs-card-print.js?v=20260918-bbs-native-raster-r1';
 import { beginBbsOperation, uploadProgress } from '../utils/bbs-async-ui.js?v=20260909-bbs-performance-baseline-r1';
 
 const runtime={ overlay:null, close:null, kind:'', template:null, catalog:null, versions:[], trashedVersions:[], presets:[], trashedPresets:[], loadedPresetKind:'', record:null, side:'Front', selectedKey:'', selectedKeys:new Set(), zoom:1, previewEmployees:[], previewEmployeeId:'', history:[], future:[], dirty:false, urls:new Map(), loadingSides:new Map(), previewStats:[], resourceGeneration:0, returnFocus:null, onSaved:null };

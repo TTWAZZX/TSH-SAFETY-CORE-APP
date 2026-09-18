@@ -47,6 +47,7 @@ export const DESIGNER_CARD_FACE_CONTRACT='bbs-designer-card-face-v2';
 // Golden browser-print contract. Export pipelines may reuse this document, but
 // must not replace its physical-mm card faces with preview-sized raster images.
 export const DESIGNER_PRINT_CONTRACT='bbs-designer-physical-print-v1';
+export const DESIGNER_RASTER_EXPORT_CONTRACT='bbs-designer-native-raster-v1';
 
 function drawPdfCropMarks(pdf,x,y,width,height){
     if(typeof pdf?.line!=='function')return;
@@ -106,7 +107,7 @@ export async function saveDesignerPrintPdf(outputDocument,{filename='BBS_Cards.p
             let rendered,cardCanvas;
             try{
                 const targetWidth=Math.max(1,Math.round(widthMM/25.4*outputDpi)),targetHeight=Math.max(1,Math.round(heightMM/25.4*outputDpi));
-                rendered=await renderDesignerCardImage(card,{renderer,targetWidth,targetHeight,document:outputDocument});cardCanvas=rotation===180?rotateRaster180(rendered.canvas,outputDocument):rendered.canvas;
+                rendered=await renderDesignerCardImage(card,{renderer,targetWidth,targetHeight,widthMM,heightMM,outputDpi,document:outputDocument,renderDocument:outputDocument});cardCanvas=rotation===180?rotateRaster180(rendered.canvas,outputDocument):rendered.canvas;
                 pdf.addImage(cardCanvas.toDataURL('image/png'),'PNG',x,y,widthMM,heightMM,undefined,'NONE',0);
                 drawPdfCropMarks(pdf,x,y,widthMM,heightMM);
             }finally{
@@ -188,19 +189,47 @@ async function paintNativeDesignerBackground(card,canvas){
     context.drawImage(image,boxX+(boxWidth-drawWidth)*positionX,boxY+(boxHeight-drawHeight)*positionY,drawWidth,drawHeight);
     return true;
 }
-async function renderDesignerCardImage(card,{renderer,targetWidth,targetHeight,document}){
+function nativePixelCss(value,pixelsPerMM){
+    return String(value||'').replace(/(-?(?:\d+(?:\.\d*)?|\.\d+))mm\b/gi,(_match,amount)=>`${number(amount)*pixelsPerMM}px`);
+}
+function createNativeDesignerCard(card,{targetWidth,targetHeight,widthMM,heightMM,outputDpi,renderDocument}){
+    if(Math.abs(targetWidth-widthMM/25.4*outputDpi)>.51||Math.abs(targetHeight-heightMM/25.4*outputDpi)>.51)throw new Error('Native Designer export dimensions do not match the physical card size.');
+    // Element.cloneNode/body are always available in supported browsers. The
+    // narrow fallback keeps non-browser contract probes usable without
+    // changing the browser path or silently reintroducing CSS upscaling.
+    if(typeof card?.cloneNode!=='function'||!renderDocument?.createElement||!renderDocument?.body)return{host:{remove(){}},card};
+    const pixelsPerMM=outputDpi/25.4,host=renderDocument.createElement('div'),nativeCard=card.cloneNode(true);
+    host.dataset.nativeDesignerExport=DESIGNER_RASTER_EXPORT_CONTRACT;
+    Object.assign(host.style,{position:'fixed',left:`-${Math.max(targetWidth+100,10000)}px`,top:'0',width:`${targetWidth}px`,height:`${targetHeight}px`,overflow:'hidden',pointerEvents:'none',opacity:'1',zIndex:'-2147483647'});
+    for(const node of [nativeCard,...nativeCard.querySelectorAll('[style]')]){
+        const current=node.getAttribute?.('style');
+        if(current!==null&&current!==undefined)node.setAttribute('style',nativePixelCss(current,pixelsPerMM));
+    }
+    nativeCard.dataset.nativeExportContract=DESIGNER_RASTER_EXPORT_CONTRACT;
+    nativeCard.dataset.nativeExportDpi=String(outputDpi);
+    Object.assign(nativeCard.style,{position:'relative',left:'0px',top:'0px',width:`${targetWidth}px`,height:`${targetHeight}px`,transform:'none',margin:'0'});
+    host.appendChild(nativeCard);renderDocument.body.appendChild(host);
+    return{host,card:nativeCard};
+}
+async function waitForNativeImages(card){
+    await Promise.all([...(card.querySelectorAll?.('img')||[])].map(image=>image.complete?image.decode?.().catch(()=>{}):new Promise(resolve=>{image.addEventListener('load',resolve,{once:true});image.addEventListener('error',resolve,{once:true});})));
+}
+async function renderDesignerCardImage(card,{renderer,targetWidth,targetHeight,widthMM,heightMM,outputDpi,document,renderDocument=document}){
+    const native=createNativeDesignerCard(card,{targetWidth,targetHeight,widthMM,heightMM,outputDpi,renderDocument});
     const output=document.createElement('canvas');output.width=targetWidth;output.height=targetHeight;
-    const nativeBackground=await paintNativeDesignerBackground(card,output);
-    if(!nativeBackground){output.width=1;output.height=1;}
-    const rect=card.getBoundingClientRect(),renderScale=targetWidth/rect.width;
-    const canvas=await renderer(card,{scale:renderScale,useCORS:true,backgroundColor:nativeBackground?null:'#ffffff',logging:false,width:rect.width,height:rect.height,windowWidth:Math.max(card.scrollWidth,Math.ceil(rect.width)),windowHeight:Math.max(card.scrollHeight,Math.ceil(rect.height)),onclone:clone=>{
-        clone.querySelectorAll('.designer-safe,.designer-bleed').forEach(node=>node.style.display='none');
-        if(nativeBackground){clone.querySelectorAll('.designer-background').forEach(node=>node.style.display='none');clone.querySelectorAll('.designer-card').forEach(node=>node.style.background='transparent');}
-    }});
-    const overlay=exactSizeCanvas(canvas,targetWidth,targetHeight,document,{alpha:nativeBackground});
-    if(!nativeBackground)return{canvas:overlay,temporary:overlay===canvas?[]:[canvas]};
-    const context=output.getContext('2d',{alpha:false});context.drawImage(overlay,0,0,targetWidth,targetHeight);
-    return{canvas:output,temporary:overlay===canvas?[canvas]:[canvas,overlay]};
+    try{
+        await waitForNativeImages(native.card);
+        const nativeBackground=await paintNativeDesignerBackground(native.card,output);
+        if(!nativeBackground){output.width=1;output.height=1;}
+        const canvas=await renderer(native.card,{scale:1,useCORS:true,backgroundColor:nativeBackground?null:'#ffffff',logging:false,width:targetWidth,height:targetHeight,windowWidth:targetWidth,windowHeight:targetHeight,onclone:clone=>{
+            clone.querySelectorAll('.designer-safe,.designer-bleed').forEach(node=>node.style.display='none');
+            if(nativeBackground){clone.querySelectorAll('.designer-background').forEach(node=>node.style.display='none');clone.querySelectorAll('.designer-card').forEach(node=>node.style.background='transparent');}
+        }});
+        const overlay=exactSizeCanvas(canvas,targetWidth,targetHeight,document,{alpha:nativeBackground});
+        if(!nativeBackground)return{canvas:overlay,temporary:overlay===canvas?[]:[canvas]};
+        const context=output.getContext('2d',{alpha:false});context.drawImage(overlay,0,0,targetWidth,targetHeight);
+        return{canvas:output,temporary:overlay===canvas?[canvas]:[canvas,overlay]};
+    }finally{native.host.remove();}
 }
 
 export async function saveDesignerPrintImages(outputDocument,{filename='BBS_Cards',format='png',scale=3.125,dpi=null,quality=.98}={}){
@@ -220,8 +249,8 @@ export async function saveDesignerPrintImages(outputDocument,{filename='BBS_Card
         Object.assign(card.style,{position:'relative',left:'0',top:'0',transform:'none'});
         let encodedCanvas,temporary=[];
         try{
-            const rect=card.getBoundingClientRect(),targetWidth=Math.max(1,Math.round(widthMM/25.4*outputDpi)),targetHeight=Math.max(1,Math.round(heightMM/25.4*outputDpi));
-            const rendered=await renderDesignerCardImage(card,{renderer,targetWidth,targetHeight,document:downloadDocument});encodedCanvas=rendered.canvas;temporary=rendered.temporary;
+            const targetWidth=Math.max(1,Math.round(widthMM/25.4*outputDpi)),targetHeight=Math.max(1,Math.round(heightMM/25.4*outputDpi));
+            const rendered=await renderDesignerCardImage(card,{renderer,targetWidth,targetHeight,widthMM,heightMM,outputDpi,document:downloadDocument,renderDocument:outputDocument});encodedCanvas=rendered.canvas;temporary=rendered.temporary;
         }finally{Object.assign(card.style,prior);}
         const rawBlob=await new Promise((resolve,reject)=>encodedCanvas.toBlob(value=>value?resolve(value):reject(new Error(`สร้างไฟล์ ${type.toUpperCase()} ไม่สำเร็จ`)),mime,type==='jpg'?quality:undefined));
         const blob=await embedRasterDpi(rawBlob,type,outputDpi);

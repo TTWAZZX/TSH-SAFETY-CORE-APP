@@ -33,6 +33,9 @@ assert.ok(ui.includes("if(entry.qrVerification&&!entry.qrEmployee)showPersonalQr
 assert.ok(print.includes('Math.max(600'), 'Direct PNG/JPG output must render at no less than 600 DPI.');
 assert.ok(print.includes("pdf.addImage(cardCanvas.toDataURL('image/png'),'PNG',x,y,widthMM,heightMM"), 'Direct PDF output must place source-native card faces at exact physical positions.');
 assert.ok((print.match(/Math\.max\(600/g)||[]).length>=2, 'Direct PDF and PNG/JPG output must render at no less than 600 DPI.');
-assert.ok(print.includes('targetWidth/rect.width'), 'Raster output must render directly to its target pixel grid.');
+assert.ok(print.includes("DESIGNER_RASTER_EXPORT_CONTRACT='bbs-designer-native-raster-v1'"), 'Raster output must identify the Native pixel export contract.');
+assert.ok(print.includes('outputDpi/25.4'), 'Designer millimetres must be projected to pixels before rasterization.');
+assert.ok(print.includes('scale:1,useCORS:true'), 'Raster output must render the Native target grid without browser-scale enlargement.');
+assert.ok(!print.includes('targetWidth/rect.width'), 'Raster output must not upscale a preview-sized DOM card.');
 
 console.log('BBS controlled-pilot user experience, QR routing and high-resolution output contract: PASS');
