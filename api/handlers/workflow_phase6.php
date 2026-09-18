@@ -1779,7 +1779,9 @@ function wf_ky_reject_oversized_legacy_upload(): void
 
 function wf_ky_video_upload_config(): array
 {
-    $maximum = 1024 * 1024;
+    // Production PHP can reliably persist multipart temporary files at 512 KiB.
+    // Keep this server-owned ceiling below the public 1 MiB contract.
+    $maximum = 512 * 1024;
     $reserve = 128 * 1024;
     $limits = [];
     foreach (['upload_max_filesize', 'post_max_size'] as $setting) {
@@ -1848,6 +1850,33 @@ function wf_ky_video_manifest(string $uploadId): ?array
 function wf_ky_video_part_path(array $manifest, int $index): string
 {
     return (string)wf_ky_video_upload_dir((string)$manifest['uploadId']) . DIRECTORY_SEPARATOR . str_pad((string)$index, 6, '0', STR_PAD_LEFT) . '.part';
+}
+
+function wf_ky_video_store_uploaded_chunk(string $source, string $target, int $expectedSize): bool
+{
+    if ($source === '' || !is_uploaded_file($source) || $expectedSize <= 0) return false;
+    if (@move_uploaded_file($source, $target)) return (int)filesize($target) === $expectedSize;
+
+    // Some managed PHP hosts accept the multipart body but reject moving the
+    // temporary file across their storage boundary. Stream it into a unique
+    // file in our writable private directory, then the caller atomically renames it.
+    $input = @fopen($source, 'rb');
+    $output = @fopen($target, 'xb');
+    if (!$input || !$output) {
+        if (is_resource($input)) fclose($input);
+        if (is_resource($output)) fclose($output);
+        @unlink($target);
+        return false;
+    }
+    $written = stream_copy_to_stream($input, $output);
+    $flushed = fflush($output);
+    fclose($input);
+    fclose($output);
+    if ($written !== $expectedSize || !$flushed || !is_file($target) || (int)filesize($target) !== $expectedSize) {
+        @unlink($target);
+        return false;
+    }
+    return true;
 }
 
 function wf_ky_video_expected_chunk_size(array $manifest, int $index): int
@@ -2345,7 +2374,7 @@ function handle_ky_routes(string $method, string $path): bool
         if(!is_string($actualHash)||!hash_equals($actualHash,$suppliedHash))json_response(['success'=>false,'code'=>'KY_VIDEO_CHUNK_HASH_MISMATCH','message'=>'SHA-256 ของส่วนวิดีโอไม่ตรงกัน กรุณาอัปโหลดส่วนนี้ใหม่'],409);
         $target=wf_ky_video_part_path($manifest,(int)$index);
         $temporary=$target.'.'.bin2hex(random_bytes(4)).'.upload';
-        if(!move_uploaded_file((string)$file['tmp_name'],$temporary)){@unlink($temporary);json_response(['success'=>false,'message'=>'ไม่สามารถบันทึกส่วนวิดีโอ KY ได้'],500);}
+        if(!wf_ky_video_store_uploaded_chunk((string)$file['tmp_name'],$temporary,$expected)){@unlink($temporary);json_response(['success'=>false,'code'=>'KY_VIDEO_SERVER_WRITE_FAILED','message'=>'ไม่สามารถบันทึกส่วนวิดีโอ KY ได้'],500);}
         if(is_file($target))@unlink($target);
         if(!rename($temporary,$target)){@unlink($temporary);json_response(['success'=>false,'message'=>'ไม่สามารถบันทึกส่วนวิดีโอ KY ได้'],500);}
         @chmod($target,0640);

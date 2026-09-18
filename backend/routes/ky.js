@@ -66,7 +66,7 @@ const uploadCombined = multer({
 
 const KY_ATTACHMENT_LIMIT = 20 * 1024 * 1024;
 const KY_VIDEO_LIMIT = 200 * 1024 * 1024;
-const KY_VIDEO_CHUNK_SIZE = 1 * 1024 * 1024;
+const KY_VIDEO_CHUNK_SIZE = 512 * 1024;
 const KY_VIDEO_CHUNK_MAX_ATTEMPTS = 3;
 const KY_VIDEO_CHUNK_MAX_AGE_MS = 24 * 60 * 60 * 1000;
 const KY_VIDEO_CHUNK_ROOT = path.join(__dirname, '..', 'private-uploads', 'ky-video-chunks');
