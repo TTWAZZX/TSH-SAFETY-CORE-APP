@@ -9,7 +9,7 @@ const db      = require('../db');
 const multer  = require('multer');
 const fs      = require('fs');
 const path    = require('path');
-const { randomUUID } = require('crypto');
+const { createHash, randomUUID } = require('crypto');
 const { isAdmin } = require('../middleware/auth');
 const { storage: uploadStorage, fileFilter, deleteLocalUpload, uploadsDir, cleanOriginalFilename } = require('../storage');
 const { logAudit } = require('../utils/audit');
@@ -66,7 +66,8 @@ const uploadCombined = multer({
 
 const KY_ATTACHMENT_LIMIT = 20 * 1024 * 1024;
 const KY_VIDEO_LIMIT = 200 * 1024 * 1024;
-const KY_VIDEO_CHUNK_SIZE = 5 * 1024 * 1024;
+const KY_VIDEO_CHUNK_SIZE = 1 * 1024 * 1024;
+const KY_VIDEO_CHUNK_MAX_ATTEMPTS = 3;
 const KY_VIDEO_CHUNK_MAX_AGE_MS = 24 * 60 * 60 * 1000;
 const KY_VIDEO_CHUNK_ROOT = path.join(__dirname, '..', 'private-uploads', 'ky-video-chunks');
 const KY_VIDEO_EXTENSIONS = new Set(['mp4', 'mov', 'webm', 'avi', 'mkv', 'mpeg', 'mpg']);
@@ -78,7 +79,7 @@ const uploadKyVideoChunk = multer({
     storage: multer.memoryStorage(),
     // Busboy marks a file as limited when it reaches the exact configured cap.
     // Keep a tiny parser margin; the route still requires the exact expected bytes.
-    limits: { files: 1, fileSize: KY_VIDEO_CHUNK_SIZE + (1024 * 1024) },
+    limits: { files: 1, fileSize: KY_VIDEO_CHUNK_SIZE + (64 * 1024) },
 });
 fs.mkdirSync(KY_VIDEO_CHUNK_ROOT, { recursive: true });
 const KY_REACTIONS = ['useful', 'practice', 'awareness', 'attention'];
@@ -419,6 +420,17 @@ function kyVideoPartPath(manifest, index) {
 function kyVideoExpectedChunkSize(manifest, index) {
     const offset = index * manifest.chunkSize;
     return Math.min(manifest.chunkSize, manifest.fileSize - offset);
+}
+
+function kyVideoUploadConfig() {
+    return {
+        maxFileSize: KY_VIDEO_LIMIT,
+        chunkSize: KY_VIDEO_CHUNK_SIZE,
+        acceptedExtensions: [...KY_VIDEO_EXTENSIONS],
+        acceptedMimeTypes: [...KY_VIDEO_MIME_TYPES],
+        maxAttempts: KY_VIDEO_CHUNK_MAX_ATTEMPTS,
+        requiresChunkSha256: true,
+    };
 }
 
 function kyVideoFileHeaderIsValid(filePath, extension) {
@@ -1958,6 +1970,10 @@ router.post('/:id/reaction', async (req, res) => {
     }
 });
 
+router.get('/video-upload/config', (req, res) => {
+    res.json({ success: true, data: kyVideoUploadConfig() });
+});
+
 router.post('/:id/video-upload/init', async (req, res) => {
     try {
         await ensureTables();
@@ -1990,10 +2006,16 @@ router.post('/:id/video-upload/init', async (req, res) => {
             extension,
             chunkSize: KY_VIDEO_CHUNK_SIZE,
             totalChunks: Math.ceil(fileSize / KY_VIDEO_CHUNK_SIZE),
+            maxFileSize: KY_VIDEO_LIMIT,
+            requiresChunkSha256: true,
             createdAt: new Date().toISOString(),
+            expiresAt: new Date(Date.now() + KY_VIDEO_CHUNK_MAX_AGE_MS).toISOString(),
         };
         fs.writeFileSync(kyVideoManifestPath(uploadId), JSON.stringify(manifest), { encoding: 'utf8', flag: 'wx' });
-        res.status(201).json({ success: true, data: { uploadId, chunkSize: manifest.chunkSize, totalChunks: manifest.totalChunks } });
+        res.status(201).json({
+            success: true,
+            data: { ...kyVideoUploadConfig(), uploadId, totalChunks: manifest.totalChunks, expiresAt: manifest.expiresAt },
+        });
     } catch (error) {
         console.error('KY video chunk init error:', error);
         res.status(500).json({ success: false, message: 'ไม่สามารถเริ่มอัปโหลดวิดีโอ KY ได้' });
@@ -2003,8 +2025,10 @@ router.post('/:id/video-upload/init', async (req, res) => {
 router.post('/:id/video-upload/:uploadId/chunk/:index', (req, res) => {
     uploadKyVideoChunk.single('chunk')(req, res, async uploadError => {
         if (uploadError) {
-            const message = uploadError.code === 'LIMIT_FILE_SIZE' ? 'ส่วนวิดีโอมีขนาดเกิน 5 MB' : (uploadError.message || 'อัปโหลดส่วนวิดีโอไม่สำเร็จ');
-            return res.status(400).json({ success: false, code: 'KY_VIDEO_CHUNK_INVALID', message });
+            if (uploadError.code === 'LIMIT_FILE_SIZE') {
+                return res.status(413).json({ success: false, code: 'KY_VIDEO_CHUNK_TOO_LARGE', message: 'ส่วนวิดีโอมีขนาดเกินขีดจำกัดที่เซิร์ฟเวอร์กำหนด', maxChunkSize: KY_VIDEO_CHUNK_SIZE });
+            }
+            return res.status(400).json({ success: false, code: 'KY_VIDEO_CHUNK_INVALID', message: uploadError.message || 'อัปโหลดส่วนวิดีโอไม่สำเร็จ' });
         }
         try {
             await ensureTables();
@@ -2022,9 +2046,17 @@ router.post('/:id/video-upload/:uploadId/chunk/:index', (req, res) => {
             if (req.file.buffer.length !== expectedSize) {
                 return res.status(400).json({ success: false, code: 'KY_VIDEO_CHUNK_SIZE_MISMATCH', message: 'ขนาดส่วนวิดีโอไม่ตรงกับที่ระบบกำหนด' });
             }
+            const suppliedHash = String(req.get('X-KY-Chunk-SHA256') || '').trim().toLowerCase();
+            if (!/^[a-f0-9]{64}$/.test(suppliedHash)) {
+                return res.status(400).json({ success: false, code: 'KY_VIDEO_CHUNK_HASH_REQUIRED', message: 'ไม่พบ SHA-256 ของส่วนวิดีโอหรือรูปแบบไม่ถูกต้อง' });
+            }
+            const actualHash = createHash('sha256').update(req.file.buffer).digest('hex');
+            if (actualHash !== suppliedHash) {
+                return res.status(409).json({ success: false, code: 'KY_VIDEO_CHUNK_HASH_MISMATCH', message: 'SHA-256 ของส่วนวิดีโอไม่ตรงกัน กรุณาอัปโหลดส่วนนี้ใหม่' });
+            }
             const partPath = kyVideoPartPath(manifest, index);
             fs.writeFileSync(partPath, req.file.buffer);
-            res.json({ success: true, data: { uploadId: manifest.uploadId, index, receivedBytes: expectedSize } });
+            res.json({ success: true, data: { uploadId: manifest.uploadId, index, receivedBytes: expectedSize, sha256: actualHash } });
         } catch (error) {
             console.error('KY video chunk upload error:', error);
             res.status(500).json({ success: false, message: 'ไม่สามารถอัปโหลดส่วนวิดีโอ KY ได้' });
@@ -2069,9 +2101,12 @@ router.post('/:id/video-upload/:uploadId/complete', async (req, res) => {
         const storedName = `${Date.now()}-${randomUUID().replace(/-/g, '').slice(0, 16)}.${manifest.extension}`;
         finalPath = path.join(uploadsDir, storedName);
         const finalHandle = fs.openSync(finalPath, 'wx');
+        const finalHash = createHash('sha256');
         try {
             for (let index = 0; index < manifest.totalChunks; index += 1) {
-                fs.writeSync(finalHandle, fs.readFileSync(kyVideoPartPath(manifest, index)));
+                const part = fs.readFileSync(kyVideoPartPath(manifest, index));
+                finalHash.update(part);
+                fs.writeSync(finalHandle, part);
             }
         } finally {
             fs.closeSync(finalHandle);
@@ -2081,6 +2116,7 @@ router.post('/:id/video-upload/:uploadId/complete', async (req, res) => {
             finalPath = null;
             return res.status(400).json({ success: false, code: 'KY_VIDEO_CONTENT_INVALID', message: 'เนื้อหาไฟล์ไม่ใช่วิดีโอชนิดที่รองรับ' });
         }
+        const sha256 = finalHash.digest('hex');
 
         const videoUrl = kyVideoPublicUrl(req, storedName, manifest.fileName);
         connection = await db.getConnection();
@@ -2112,12 +2148,12 @@ router.post('/:id/video-upload/:uploadId/complete', async (req, res) => {
                 targetType: 'KY_Activities',
                 targetId: req.params.id,
                 detail: access.admin && previousUrl ? 'Admin replaced KY video with chunk upload' : 'Uploaded KY video in chunks',
-                metadata: { chunks: manifest.totalChunks, bytes: manifest.fileSize, replacedExisting: Boolean(previousUrl) },
+                metadata: { chunks: manifest.totalChunks, bytes: manifest.fileSize, sha256, replacedExisting: Boolean(previousUrl) },
             });
         } catch (auditError) {
             console.error('KY video chunk audit error:', auditError);
         }
-        res.json({ success: true, data: { id: req.params.id, videoUrl } });
+        res.json({ success: true, data: { id: req.params.id, videoUrl, sha256 } });
     } catch (error) {
         if (connection) {
             await connection.rollback().catch(() => {});

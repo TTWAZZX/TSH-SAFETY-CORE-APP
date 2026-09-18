@@ -48,14 +48,25 @@ const CHART_COLORS = ['#6366f1','#f97316','#10b981','#0284c7','#a855f7','#f59e0b
 const MONTHS_TH    = ['ม.ค.','ก.พ.','มี.ค.','เม.ย.','พ.ค.','มิ.ย.','ก.ค.','ส.ค.','ก.ย.','ต.ค.','พ.ย.','ธ.ค.'];
 const KY_ATTACHMENT_LIMIT = 20 * 1024 * 1024;
 const KY_VIDEO_LIMIT = 200 * 1024 * 1024;
-const KY_VIDEO_CHUNK_SIZE = 5 * 1024 * 1024;
+const KY_VIDEO_CHUNK_SIZE = 1 * 1024 * 1024;
+const KY_VIDEO_EXTENSIONS = ['mp4', 'mov', 'webm', 'avi', 'mkv', 'mpeg', 'mpg'];
+const KY_VIDEO_MIME_TYPES = ['video/mp4', 'video/quicktime', 'video/webm', 'video/avi', 'video/x-msvideo', 'video/x-matroska', 'video/mpeg'];
+let _kyVideoUploadConfig = {
+    maxFileSize: KY_VIDEO_LIMIT,
+    chunkSize: KY_VIDEO_CHUNK_SIZE,
+    acceptedExtensions: KY_VIDEO_EXTENSIONS,
+    acceptedMimeTypes: KY_VIDEO_MIME_TYPES,
+    maxAttempts: 3,
+    requiresChunkSha256: true,
+};
 const KY_VIDEO_SHOWCASE_LIMIT = 6;
 const KY_COMPANY_EMAIL_DOMAIN = '@thaisummit-harness.co.th';
 const JOHNNY_IMAGE_RISK_DRAFT_KEY = 'johnny_image_risk_draft';
 
 async function uploadKyVideoInChunks(activityId, file, onProgress = () => {}) {
     if (!activityId) throw new Error('ไม่พบรหัสกิจกรรม KY สำหรับอัปโหลดวิดีโอ');
-    if (!file || file.size <= 0 || file.size > KY_VIDEO_LIMIT) throw new Error('วิดีโอต้องมีขนาดไม่เกิน 200 MB');
+    const configuredLimit = Number(_kyVideoUploadConfig.maxFileSize || KY_VIDEO_LIMIT);
+    if (!file || file.size <= 0 || file.size > configuredLimit) throw new Error(`วิดีโอต้องมีขนาดไม่เกิน ${formatFileSize(configuredLimit)}`);
 
     const initialized = await API.post(`/ky/${encodeURIComponent(activityId)}/video-upload/init`, {
         fileName: file.name,
@@ -65,39 +76,96 @@ async function uploadKyVideoInChunks(activityId, file, onProgress = () => {}) {
     const uploadId = initialized?.data?.uploadId;
     const chunkSize = Number(initialized?.data?.chunkSize || KY_VIDEO_CHUNK_SIZE);
     const totalChunks = Number(initialized?.data?.totalChunks || Math.ceil(file.size / chunkSize));
-    if (!uploadId || !Number.isSafeInteger(chunkSize) || chunkSize <= 0 || !Number.isSafeInteger(totalChunks) || totalChunks <= 0) {
+    const maxAttempts = Math.max(1, Math.min(5, Number(initialized?.data?.maxAttempts || _kyVideoUploadConfig.maxAttempts || 3)));
+    if (!uploadId || !Number.isSafeInteger(chunkSize) || chunkSize <= 0 || chunkSize > KY_VIDEO_CHUNK_SIZE
+        || !Number.isSafeInteger(totalChunks) || totalChunks <= 0 || totalChunks !== Math.ceil(file.size / chunkSize)) {
+        if (uploadId) {
+            await API.delete(`/ky/${encodeURIComponent(activityId)}/video-upload/${uploadId}`, { suppressErrorLog: true }).catch(() => {});
+        }
         throw new Error('เซิร์ฟเวอร์ไม่สามารถเริ่มชุดอัปโหลดวิดีโอได้');
     }
+    _kyVideoUploadConfig = { ..._kyVideoUploadConfig, ...initialized.data, maxAttempts };
 
-    onProgress(0, totalChunks);
-    for (let index = 0; index < totalChunks; index += 1) {
-        const start = index * chunkSize;
-        const chunk = file.slice(start, Math.min(file.size, start + chunkSize));
-        let lastError = null;
-        for (let attempt = 1; attempt <= 3; attempt += 1) {
-            try {
-                const form = new FormData();
-                form.append('chunk', chunk, `${file.name}.part-${index}`);
-                await API.post(`/ky/${encodeURIComponent(activityId)}/video-upload/${uploadId}/chunk/${index}`, form);
-                lastError = null;
-                break;
-            } catch (error) {
-                lastError = error;
-                if (attempt < 3) await new Promise(resolve => setTimeout(resolve, attempt * 500));
+    let uploadCompleted = false;
+    try {
+        onProgress(0, totalChunks, false, { phase: 'uploading', attempt: 1, index: 0 });
+        for (let index = 0; index < totalChunks; index += 1) {
+            const start = index * chunkSize;
+            const chunk = file.slice(start, Math.min(file.size, start + chunkSize));
+            const chunkSha256 = await sha256Blob(chunk);
+            let lastError = null;
+            for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+                try {
+                    onProgress(index, totalChunks, false, { phase: attempt > 1 ? 'retrying' : 'uploading', attempt, index });
+                    const form = new FormData();
+                    form.append('chunk', chunk, `${file.name}.part-${index}`);
+                    await API.post(`/ky/${encodeURIComponent(activityId)}/video-upload/${uploadId}/chunk/${index}`, form, {
+                        headers: { 'X-KY-Chunk-SHA256': chunkSha256 },
+                    });
+                    lastError = null;
+                    break;
+                } catch (error) {
+                    lastError = error;
+                    if (!isRetryableKyVideoChunkError(error) || attempt >= maxAttempts) break;
+                    await new Promise(resolve => setTimeout(resolve, attempt * 500));
+                }
             }
+            if (lastError) throw lastError;
+            onProgress(index + 1, totalChunks, false, { phase: 'uploading', attempt: 1, index });
         }
-        if (lastError) throw lastError;
-        onProgress(index + 1, totalChunks);
+        onProgress(totalChunks, totalChunks, false, { phase: 'assembling', attempt: 1, index: totalChunks - 1 });
+        const completed = await API.post(`/ky/${encodeURIComponent(activityId)}/video-upload/${uploadId}/complete`, {});
+        uploadCompleted = true;
+        onProgress(totalChunks, totalChunks, true, { phase: 'complete', attempt: 1, index: totalChunks - 1 });
+        return completed;
+    } catch (error) {
+        if (!uploadCompleted) {
+            await API.delete(`/ky/${encodeURIComponent(activityId)}/video-upload/${uploadId}`, { suppressErrorLog: true }).catch(() => {});
+        }
+        throw error;
     }
-    const completed = await API.post(`/ky/${encodeURIComponent(activityId)}/video-upload/${uploadId}/complete`, {});
-    onProgress(totalChunks, totalChunks, true);
-    return completed;
 }
 
-function setKyVideoUploadProgress(button, completed, total, done = false, label = 'กำลังอัปโหลดวิดีโอ') {
+async function sha256Blob(blob) {
+    if (!globalThis.crypto?.subtle) throw new Error('เบราว์เซอร์นี้ไม่รองรับการตรวจสอบ SHA-256 สำหรับอัปโหลดวิดีโอ');
+    const digest = await globalThis.crypto.subtle.digest('SHA-256', await blob.arrayBuffer());
+    return Array.from(new Uint8Array(digest), byte => byte.toString(16).padStart(2, '0')).join('');
+}
+
+function isRetryableKyVideoChunkError(error) {
+    return !['KY_VIDEO_CHUNK_TOO_LARGE', 'KY_VIDEO_CHUNK_SIZE_MISMATCH', 'KY_VIDEO_CHUNK_HASH_REQUIRED', 'KY_VIDEO_CHUNK_INVALID'].includes(String(error?.code || ''));
+}
+
+async function loadKyVideoUploadConfig() {
+    try {
+        const response = await API.get('/ky/video-upload/config', { suppressErrorLog: true });
+        const config = response?.data || {};
+        if (Number.isSafeInteger(Number(config.maxFileSize)) && Number(config.maxFileSize) > 0
+            && Number.isSafeInteger(Number(config.chunkSize)) && Number(config.chunkSize) > 0 && Number(config.chunkSize) <= KY_VIDEO_CHUNK_SIZE) {
+            _kyVideoUploadConfig = { ..._kyVideoUploadConfig, ...config };
+        }
+    } catch (_) {
+        // Safe defaults remain usable when an older backend is temporarily serving the page.
+    }
+}
+
+function kyVideoAcceptValue() {
+    const mimeTypes = Array.isArray(_kyVideoUploadConfig.acceptedMimeTypes) ? _kyVideoUploadConfig.acceptedMimeTypes : KY_VIDEO_MIME_TYPES;
+    const extensions = Array.isArray(_kyVideoUploadConfig.acceptedExtensions) ? _kyVideoUploadConfig.acceptedExtensions : KY_VIDEO_EXTENSIONS;
+    return [...new Set([...mimeTypes, ...extensions.map(extension => `.${extension}`)])].join(',');
+}
+
+function kyVideoLimitText() {
+    return `MP4, MOV, WebM, AVI, MKV, MPEG · ≤ ${formatFileSize(Number(_kyVideoUploadConfig.maxFileSize || KY_VIDEO_LIMIT))} · Adaptive chunk ≤ ${formatFileSize(Number(_kyVideoUploadConfig.chunkSize || KY_VIDEO_CHUNK_SIZE))}`;
+}
+
+function setKyVideoUploadProgress(button, completed, total, done = false, meta = {}, label = 'กำลังอัปโหลดวิดีโอ') {
     if (!button) return;
     const percent = done ? 100 : (total > 0 ? Math.min(95, Math.round((completed / total) * 95)) : 0);
-    button.textContent = `${label} ${percent}%`;
+    const prefix = meta.phase === 'retrying'
+        ? `กำลังลองใหม่ส่วนที่ ${Number(meta.index || 0) + 1} (${meta.attempt}/${_kyVideoUploadConfig.maxAttempts || 3})`
+        : (meta.phase === 'assembling' ? 'กำลังตรวจสอบและรวมวิดีโอ' : label);
+    button.textContent = `${prefix} ${percent}%`;
 }
 
 function kyMediaUrl(url) {
@@ -447,6 +515,7 @@ export async function loadKyPage() {
 
     window.closeModal = closeModal;
 
+    await loadKyVideoUploadConfig();
     container.innerHTML = buildShell();
 
     if (!_listenersReady) {
@@ -1371,8 +1440,8 @@ function openKyFollowupVideoModal(record) {
             </div>
             <div>
                 <label class="block text-sm font-semibold text-slate-700 mb-1.5" for="ky-followup-video-file">ไฟล์วิดีโอ</label>
-                <input id="ky-followup-video-file" name="video" type="file" accept="video/*" required class="form-input w-full">
-                <p class="text-xs text-slate-400 mt-1">รองรับ MP4, MOV, WebM, AVI, MKV และ MPEG · สูงสุด 200 MB · ระบบอัปโหลดแบบแบ่งส่วน</p>
+                <input id="ky-followup-video-file" name="video" type="file" accept="${escHtml(kyVideoAcceptValue())}" required class="form-input w-full">
+                <p class="text-xs text-slate-400 mt-1">${escHtml(kyVideoLimitText())}</p>
             </div>
             <div class="flex justify-end gap-2">
                 <button type="button" id="ky-followup-video-cancel" class="px-3 py-2 rounded-lg border border-slate-200 text-sm font-bold text-slate-600">ยกเลิก</button>
@@ -1389,7 +1458,7 @@ function openKyFollowupVideoModal(record) {
             showLoading('กำลังอัปโหลดวิดีโอ...');
             const file = document.getElementById('ky-followup-video-file')?.files?.[0];
             if (!file || !validateKySelectedFile(document.getElementById('ky-followup-video-file'), 'video')) return;
-            await uploadKyVideoInChunks(record.id, file, (completed, total, done) => setKyVideoUploadProgress(save, completed, total, done));
+            await uploadKyVideoInChunks(record.id, file, (completed, total, done, meta) => setKyVideoUploadProgress(save, completed, total, done, meta));
             closeModal();
             showToast('แนบวิดีโอ KY สำเร็จ', 'success');
             await loadAndRenderKyEvidenceCompletion();
@@ -2591,9 +2660,9 @@ async function renderSubmitForm(container) {
                                     <svg class="w-6 h-6 text-slate-300 group-hover:text-purple-400 transition-colors mb-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 10l4.553-2.069A1 1 0 0121 8.82v6.361a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z"/>
                                     </svg>
-                                    <span class="text-xs text-slate-500">MP4, MOV, WebM, AVI, MKV, MPEG · ≤ 200 MB · อัปโหลดแบบแบ่งส่วน</span>
+                                    <span class="text-xs text-slate-500">${escHtml(kyVideoLimitText())}</span>
                                     <input type="file" name="video" id="ky-video" class="hidden"
-                                           accept="video/mp4,video/quicktime,video/avi,video/webm,video/x-msvideo,video/mpeg">
+                                           accept="${escHtml(kyVideoAcceptValue())}">
                                 </label>
                                 <p id="ky-video-name" class="text-xs text-purple-600 mt-1 truncate"></p>
                                 <div id="ky-video-preview" class="hidden mt-3 rounded-xl border border-purple-100 bg-purple-50/50 p-3"></div>
@@ -2770,7 +2839,7 @@ function setupFormListeners() {
             let videoUploadFailed = false;
             if (videoFile) {
                 try {
-                    await uploadKyVideoInChunks(activityId, videoFile, (completed, total, done) => setKyVideoUploadProgress(btn, completed, total, done));
+                    await uploadKyVideoInChunks(activityId, videoFile, (completed, total, done, meta) => setKyVideoUploadProgress(btn, completed, total, done, meta));
                 } catch (videoError) {
                     videoUploadFailed = true;
                     console.error('KY video upload after submit failed:', videoError);
@@ -3268,13 +3337,23 @@ function validateKySelectedFile(input, type) {
     const file = input?.files?.[0];
     if (!file) return true;
 
-    const maxSize = type === 'video' ? KY_VIDEO_LIMIT : KY_ATTACHMENT_LIMIT;
+    const maxSize = type === 'video' ? Number(_kyVideoUploadConfig.maxFileSize || KY_VIDEO_LIMIT) : KY_ATTACHMENT_LIMIT;
+    if (type === 'video') {
+        const extension = String(file.name || '').split('.').pop().toLowerCase();
+        const acceptedExtensions = Array.isArray(_kyVideoUploadConfig.acceptedExtensions) ? _kyVideoUploadConfig.acceptedExtensions : KY_VIDEO_EXTENSIONS;
+        const acceptedMimeTypes = Array.isArray(_kyVideoUploadConfig.acceptedMimeTypes) ? _kyVideoUploadConfig.acceptedMimeTypes : KY_VIDEO_MIME_TYPES;
+        if (!acceptedExtensions.includes(extension) || (file.type && !acceptedMimeTypes.includes(file.type.toLowerCase()))) {
+            input.value = '';
+            showToast('รองรับเฉพาะวิดีโอ MP4, MOV, WebM, AVI, MKV และ MPEG', 'warning');
+            return false;
+        }
+    }
     if (file.size <= maxSize) return true;
 
     input.value = '';
     showToast(
         type === 'video'
-            ? 'วิดีโอหลักฐานมีขนาดเกิน 200 MB'
+            ? `วิดีโอหลักฐานมีขนาดเกิน ${formatFileSize(maxSize)}`
             : 'ไฟล์แนบภาพหรือเอกสารมีขนาดเกิน 20 MB',
         'warning'
     );
@@ -5016,7 +5095,7 @@ async function showManageModal(id) {
                             <label class="block text-sm font-semibold text-slate-700 mb-1.5">อัปโหลดวิดีโอใหม่</label>
                             ${r.VideoUrl ? `<a href="${escHtml(kyMediaUrl(r.VideoUrl))}" target="_blank" rel="noopener noreferrer" class="inline-flex items-center gap-1 text-xs font-semibold text-purple-600 hover:text-purple-800 mb-2">ดูวิดีโอปัจจุบัน</a>` : ''}
                             <input type="file" name="video" id="ky-manage-video"
-                                   accept="video/mp4,video/quicktime,video/avi,video/webm,video/x-msvideo,video/mpeg"
+                                   accept="${escHtml(kyVideoAcceptValue())}"
                                    class="block w-full text-xs text-slate-500 file:mr-3 file:py-2 file:px-3 file:rounded-lg file:border-0 file:text-xs file:font-semibold file:bg-purple-50 file:text-purple-700 hover:file:bg-purple-100">
                         </div>
                     </div>
@@ -5065,7 +5144,7 @@ async function showManageModal(id) {
                 let videoUploadFailed = false;
                 if (videoFile) {
                     try {
-                        await uploadKyVideoInChunks(r.id, videoFile, (completed, total, done) => setKyVideoUploadProgress(saveBtn, completed, total, done));
+                        await uploadKyVideoInChunks(r.id, videoFile, (completed, total, done, meta) => setKyVideoUploadProgress(saveBtn, completed, total, done, meta));
                     } catch (videoError) {
                         videoUploadFailed = true;
                         console.error('KY admin video replacement failed:', videoError);
