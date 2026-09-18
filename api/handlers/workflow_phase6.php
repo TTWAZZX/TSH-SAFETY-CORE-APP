@@ -1779,9 +1779,9 @@ function wf_ky_reject_oversized_legacy_upload(): void
 
 function wf_ky_video_upload_config(): array
 {
-    // Production PHP can reliably persist multipart temporary files at 512 KiB.
+    // Production PHP can reliably persist multipart temporary files at 256 KiB.
     // Keep this server-owned ceiling below the public 1 MiB contract.
-    $maximum = 512 * 1024;
+    $maximum = 256 * 1024;
     $reserve = 128 * 1024;
     $limits = [];
     foreach (['upload_max_filesize', 'post_max_size'] as $setting) {

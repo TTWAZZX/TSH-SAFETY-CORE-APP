@@ -31,8 +31,8 @@ assert.match(phpRoute, /wf_ky_video_header_valid/, 'PHP must validate assembled 
 assert.match(phpRoute, /KY_UPLOAD_REQUEST_TOO_LARGE/, 'PHP legacy multipart overflow must return an explanatory code');
 assert.match(phpRoute, /upload_max_filesize/, 'PHP chunk size must account for upload_max_filesize');
 assert.match(phpRoute, /post_max_size/, 'PHP chunk size must account for post_max_size');
-assert.match(phpRoute, /\$maximum\s*=\s*512\s*\*\s*1024/, 'PHP adaptive chunk ceiling must be the Production-safe 512 KiB');
-assert.match(nodeRoute, /KY_VIDEO_CHUNK_SIZE\s*=\s*512\s*\*\s*1024/, 'Node chunk ceiling must be the Production-safe 512 KiB');
+assert.match(phpRoute, /\$maximum\s*=\s*256\s*\*\s*1024/, 'PHP adaptive chunk ceiling must be the Production-safe 256 KiB');
+assert.match(nodeRoute, /KY_VIDEO_CHUNK_SIZE\s*=\s*256\s*\*\s*1024/, 'Node chunk ceiling must be the Production-safe 256 KiB');
 
 assert.match(frontend, /async function uploadKyVideoInChunks/, 'frontend chunk orchestrator must exist');
 assert.match(frontend, /loadKyVideoUploadConfig/, 'frontend must consume server-driven upload limits');
