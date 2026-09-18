@@ -1,5 +1,12 @@
 # TSH Safety Core Activity - AGENTS.md
 
+## BBS Native 600 DPI Export Engine Production release (2026-09-18)
+
+- `main` commit `d68c519` is deployed to the PHP Production target. PNG/JPG/PDF now clone the canonical Designer card face into an off-screen native `1417 x 2008` pixel surface for a 60 x 85 mm card at 600 DPI, convert physical millimetre typography/borders/spacing to the native pixel grid before layout, and call the rasterizer at `scale: 1`. PNG/JPG and PDF share this renderer; the accepted physical browser Print contract remains unchanged.
+- Browser layout regression with Thai text verified the same normalized geometry and baseline from the 226.77 x 321.25 CSS-pixel Print face to the native surface, the exact 6.25 typography ratio (16 px to 100 px), zero temporary export-host residue and unchanged two-page A4 duplex output. Full BBS regression passed `62/62`; the KY upload contract also remained green.
+- Production FTPS download-back and HTTPS hashes passed `5/5`. Authenticated read-only browser smoke passed six groups, eight tabs, five card workspaces and three responsive viewports with zero console errors, zero business writes and zero temporary rows. The deployed cache chain is `20260918-bbs-native-raster-r1`.
+- Scoped rollback evidence is under `backups/production/bbs-native-raster-predeploy-20260918-172530/` with exact before/after/HTTPS copies and hashes of all five deployed runtime files. This release changed no schema, BBS business row, private upload, rollout setting or Print contract; unrelated worktree changes in `backend/scripts/patrol-checkin-v2.test.js` and `output/` were preserved.
+
 ## KY Adaptive Video Upload Production deployment (2026-09-18)
 
 - `main` commit `94c9357` is deployed to the PHP Production target. KY advertises a 200 MB aggregate limit with a Production-probed 256 KiB server-driven chunk size, per-chunk and final SHA-256 validation, retry/abort cleanup, explicit upload/storage error codes, and Node/PHP parity. Automatic video compression remains disabled.
