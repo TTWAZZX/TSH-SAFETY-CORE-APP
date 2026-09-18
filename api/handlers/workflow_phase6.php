@@ -1854,7 +1854,11 @@ function wf_ky_video_part_path(array $manifest, int $index): string
 
 function wf_ky_video_store_uploaded_chunk(string $source, string $target, int $expectedSize): bool
 {
-    if ($source === '' || !is_uploaded_file($source) || $expectedSize <= 0) return false;
+    // $source is taken only from PHP's server-populated $_FILES entry after
+    // UPLOAD_ERR_OK, exact-size and SHA-256 validation. Some managed SAPIs do
+    // not preserve is_uploaded_file() state, so require a real readable file
+    // instead of rejecting their otherwise valid temporary upload.
+    if ($source === '' || !is_file($source) || !is_readable($source) || $expectedSize <= 0) return false;
     if (@move_uploaded_file($source, $target)) return (int)filesize($target) === $expectedSize;
 
     // Some managed PHP hosts accept the multipart body but reject moving the
