@@ -1,5 +1,11 @@
 # TSH Safety Core Activity - AGENTS.md
 
+## KY Adaptive Video Upload Production deployment (2026-09-18)
+
+- `main` commit `94c9357` is deployed to the PHP Production target. KY advertises a 200 MB aggregate limit with a Production-probed 256 KiB server-driven chunk size, per-chunk and final SHA-256 validation, retry/abort cleanup, explicit upload/storage error codes, and Node/PHP parity. Automatic video compression remains disabled.
+- Local PHP and Node lifecycle tests passed real-size 2.5 MB and greater-than-5 MB payloads, retry, incomplete completion rejection, final hash, abort and zero residue. Production accepted a real MP4 256 KiB probe, including retry/hash/abort/post-abort 404, but a 2,826,128-byte full-file transport test was blocked on its second chunk with `KY_VIDEO_CHUNK_COPY_INCOMPLETE`. A follow-up probe passed, proving cleanup; the remaining blocker is Production hosting storage/quota with less than approximately 512 KiB available for cumulative new files. Do not represent Production video upload as fully operational until hosting storage is increased or safely freed and the full-file UAT passes.
+- Production remained at 105 KY rows / 96 rows with video before and after UAT; no schema, KY business row, existing upload or compression setting changed. Runtime rollback and verification evidence is under `backups/production/ky-adaptive-video-predeploy-20260918-155044/`. A broad sensitive database export was not retained because the safety control rejected the executable export helper; that helper was never uploaded.
+
 ## BBS PNG/JPG/PDF physical export parity Production release (2026-09-18)
 
 - `main` commit `5e710f1` is deployed to the PHP Production target. Canonical Designer element typography, letter spacing and borders now use the same physical millimetre grid as the card for browser Print and rasterized PNG/JPG/PDF output, avoiding CSS point interpretation differences while preserving the accepted Print geometry.
