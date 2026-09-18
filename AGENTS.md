@@ -1,5 +1,12 @@
 # TSH Safety Core Activity - AGENTS.md
 
+## BBS anchored Personal layer scaling Production follow-up (2026-09-18)
+
+- `main` commits `6f4d8f9` and cache-chain follow-up `e9d44cb` are deployed to the PHP Production target. Personal Draft `Scale to 70%` now scales each selected layer around its own visual anchor instead of collapsing the four layers toward one shared center: employee name stays left anchored, position right anchored, Department center anchored and Personal QR bottom-right anchored.
+- The transform remains Draft-only, scales geometry, typography and border dimensions, remains undoable before save, and changes neither canvas zoom nor Active/Archived layouts automatically. This release changed no schema, BBS business row, card/QR record, private upload or rollout setting.
+- Full BBS regression passed `62/62`. Production FTPS download-back and HTTPS hashes passed `4/4`; the `anchor-r2` cache chain and removal of the shared-center formula were verified over HTTPS. Authenticated read-only browser smoke passed six groups, eight tabs, five card workspaces and three responsive viewports with zero console errors, zero business writes and zero temporary rows.
+- Scoped rollback evidence is under `backups/production/bbs-designer-anchor-predeploy-20260918-130029/` with exact before/after copies of all four deployed runtime files. Existing unrelated worktree changes in `backend/scripts/patrol-checkin-v2.test.js` and `output/` were preserved.
+
 ## BBS real employee Designer preview and persisted layer scale Production release (2026-09-18)
 
 - `main` commits `5dd5fbb` and cache-entry follow-up `3ab2fdd` are deployed to the PHP Production target. Personal Card Designer can preview permission-scoped real employee values, explicitly labels canvas zoom as view-only, and provides a Draft-only multi-layer transform for Personal QR, employee name, Department and position. The 70% transform persists geometry, typography and border dimensions around the shared group center.
