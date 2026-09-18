@@ -8,7 +8,10 @@ const imageUrl=value=>/^data:image\/(png|jpeg|webp|gif);base64,[a-z0-9+/=\s]+$/i
 
 export function designerElementCss(element,{pixelsPerMM=null}={}){
     const s=element.style||{},shape=element.elementType==='Shape',type=String(s.shapeType||'Rectangle').toLowerCase();
-    const unit=points=>pixelsPerMM===null?`${points}pt`:`${points*25.4/72*pixelsPerMM}px`;
+    // Keep the physical print/export projection on the same millimetre grid as
+    // the card. Some rasterizers resolve CSS pt differently from the browser's
+    // printed mm box, while the equivalent mm value remains stable in both.
+    const unit=points=>pixelsPerMM===null?`${points*25.4/72}mm`:`${points*25.4/72*pixelsPerMM}px`;
     const weight=String(s.fontWeight||'700'),font=/^[a-z0-9 ,_-]{1,100}$/i.test(String(s.fontFamily||''))?s.fontFamily:'Kanit, Tahoma, Arial, sans-serif';
     const vertical=pick(s.verticalAlign,['top','middle','center','bottom'],'middle');
     const textElement=['StaticText','DynamicText'].includes(element.elementType);
