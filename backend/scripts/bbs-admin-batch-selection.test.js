@@ -10,8 +10,8 @@ const node = fs.readFileSync(path.join(root, 'backend/routes/bbs-cards.js'), 'ut
 const php = fs.readFileSync(path.join(root, 'api/handlers/bbs_cards.php'), 'utf8');
 
 for (const token of [
-    "state.personalIssue={templateId:'',selected:new Map(),paperSize:'A4',preset:'compact'",
-    'เลือกพนักงานได้ข้ามหน้า สูงสุด 100 คน',
+    "state.personalIssue={templateId:'',selected:new Map()}",
+    'เลือกออกบัตรใหม่ ${issueCount} / 100 คน',
     'data-card-select-page',
     'data-card-selection-clear',
     'function selectedPersonalIssueRows()',

@@ -286,6 +286,28 @@ router.post('/admin/cards/issue', isAdmin, async (req,res) => {
     }catch(error){await connection.rollback().catch(()=>{});return phase4Error(res,error,'card issue');}finally{connection.release();}
 });
 
+router.post('/admin/cards/replace-batch', isAdmin, async (req,res) => {
+    const ids=[...new Set((Array.isArray(req.body?.cardIds)?req.body.cardIds:[]).map(positiveInt).filter(Boolean))];
+    const reason=clean(req.body?.reason,255)||'Batch replace / reprint';
+    if(!ids.length||ids.length>100)return res.status(400).json({success:false,message:'Choose 1-100 Active cards.'});
+    const connection=await db.getConnection();
+    try{
+        await connection.beginTransaction();
+        const placeholders=ids.map(()=>'?').join(',');
+        const[locked]=await connection.query(`SELECT c.id CardID,c.EmployeeID,c.TemplateID,t.* FROM BBS_Cards c JOIN BBS_Card_Templates t ON t.id=c.TemplateID WHERE c.id IN (${placeholders}) AND c.Status='Active' AND t.Status='Active' AND t.IsDeleted=0 FOR UPDATE`,ids);
+        if(locked.length!==ids.length){await connection.rollback();return res.status(409).json({success:false,code:'BATCH_CARD_STATE_CHANGED',message:'One or more selected cards are no longer Active or their template is unavailable. Reload the list and try again.'});}
+        const oldById=new Map(locked.map(row=>[Number(row.CardID),row]));
+        const employees=await employeeCardData(locked.map(row=>String(row.EmployeeID)),connection);
+        const employeeById=new Map(employees.map(row=>[String(row.EmployeeID),row]));
+        for(const id of ids){const old=oldById.get(id),employee=old&&employeeById.get(String(old.EmployeeID));if(!old||!employee){await connection.rollback();return res.status(409).json({success:false,code:'BATCH_EMPLOYEE_NOT_FOUND',message:'One or more employees could not be resolved. No card was changed.'});}if(levelRank(employee.BBSLevel)<levelRank('Group Leader')){await connection.rollback();return res.status(409).json({success:false,code:'BATCH_CARD_NOT_ELIGIBLE',message:`Employee ${employee.EmployeeID} is no longer eligible for a Personal BBS card. No card was changed.`});}if(!templateMatches(old,employee)){await connection.rollback();return res.status(409).json({success:false,code:'CARD_TEMPLATE_SCOPE_CHANGED',message:`The current template no longer matches employee ${employee.EmployeeID}. No card was changed.`});}}
+        const replacements=[];
+        for(const id of ids){const old=oldById.get(id),employee=employeeById.get(String(old.EmployeeID));const[result]=await connection.query("UPDATE BBS_Cards SET Status='Replaced',RevokedAt=NOW(),RevokedBy=?,RevokeReason=? WHERE id=? AND Status='Active'",[actorId(req),reason,id]);if(result.affectedRows!==1)throw Object.assign(new Error('A selected card changed while the batch was being prepared.'),{status:409,code:'BATCH_CARD_STATE_CHANGED'});const replacement=await issueWithin(connection,req,employee,old,reason);await connection.query('UPDATE BBS_Cards SET ReplacedByCardID=? WHERE id=?',[replacement.cardId,id]);replacements.push(replacement);}
+        await connection.commit();
+        await logAudit(req,{action:'BBS_CARD_BATCH_REPLACE',module:'bbs',targetType:'BBS_Card_Batch',targetId:ids.join(','),detail:`Replaced ${replacements.length} BBS cards and rotated all Personal QR tokens.`,metadata:{count:replacements.length,replacementCardIds:replacements.map(card=>card.cardId),reason}});
+        return res.status(201).json({success:true,data:replacements});
+    }catch(error){await connection.rollback().catch(()=>{});return phase4Error(res,error,'card batch replace');}finally{connection.release();}
+});
+
 router.post('/admin/cards/:id/revoke', isAdmin, async (req,res) => {
     try {const id=positiveInt(req.params.id),reason=clean(req.body?.reason,255);if(!id||!reason)return res.status(400).json({success:false,message:'Card ID and revoke reason are required.'});const[result]=await db.query("UPDATE BBS_Cards SET Status='Revoked',RevokedAt=NOW(),RevokedBy=?,RevokeReason=? WHERE id=? AND Status='Active'",[actorId(req),reason,id]);if(!result.affectedRows)return res.status(409).json({success:false,message:'Only an Active card can be revoked.'});await logAudit(req,{action:'BBS_CARD_REVOKE',module:'bbs',targetType:'BBS_Card',targetId:id,detail:'Revoked BBS card.',metadata:{reason}});return res.json({success:true});}catch(error){return phase4Error(res,error,'card revoke');}
 });
