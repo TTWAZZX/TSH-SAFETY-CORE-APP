@@ -47,7 +47,7 @@ export const DESIGNER_CARD_FACE_CONTRACT='bbs-designer-card-face-v2';
 // Golden browser-print contract. Export pipelines may reuse this document, but
 // must not replace its physical-mm card faces with preview-sized raster images.
 export const DESIGNER_PRINT_CONTRACT='bbs-designer-physical-print-v1';
-export const DESIGNER_RASTER_EXPORT_CONTRACT='bbs-designer-native-raster-v1';
+export const DESIGNER_RASTER_EXPORT_CONTRACT='bbs-designer-dom-capture-v1';
 
 function drawPdfCropMarks(pdf,x,y,width,height){
     if(typeof pdf?.line!=='function')return;
@@ -163,73 +163,22 @@ function rotateRaster180(canvas,doc){
     const output=doc.createElement('canvas');output.width=canvas.width;output.height=canvas.height;const context=output.getContext?.('2d',{alpha:false});if(!context)throw new Error('High-resolution PDF rotation canvas is unavailable.');context.translate(output.width,output.height);context.rotate(Math.PI);context.drawImage(canvas,0,0);return output;
 }
 
-function cssImageSource(value){
-    const match=String(value||'').trim().match(/^url\((['"]?)([\s\S]*)\1\)$/i);
-    return match&&imageUrl(match[2])?match[2]:'';
-}
-function loadRasterSource(source){
-    const ImageCtor=globalThis.Image;
-    if(typeof ImageCtor!=='function')return Promise.reject(new Error('High-resolution image decoder is unavailable.'));
-    return new Promise((resolve,reject)=>{const image=new ImageCtor();image.decoding='async';image.onload=()=>resolve(image);image.onerror=()=>reject(new Error('The original Designer artwork could not be decoded.'));image.src=source;});
-}
-async function paintNativeDesignerBackground(card,canvas){
-    const background=card.querySelector?.('.designer-background'),source=cssImageSource(background?.style?.backgroundImage);
-    if(!background||!source)return false;
-    const context=canvas.getContext?.('2d',{alpha:false});if(!context)return false;
-    const cardRect=card.getBoundingClientRect(),backgroundRect=background.getBoundingClientRect(),scaleX=canvas.width/cardRect.width,scaleY=canvas.height/cardRect.height;
-    if(!cardRect.width||!cardRect.height||!backgroundRect.width||!backgroundRect.height)return false;
-    const image=await loadRasterSource(source),boxX=(backgroundRect.left-cardRect.left)*scaleX,boxY=(backgroundRect.top-cardRect.top)*scaleY,boxWidth=backgroundRect.width*scaleX,boxHeight=backgroundRect.height*scaleY;
-    const fit=String(background.style.backgroundSize||'cover').toLowerCase(),position=String(background.style.backgroundPosition||'50% 50%').match(/(-?[\d.]+)%\s+(-?[\d.]+)%/),positionX=bounded(position?.[1],0,100,50)/100,positionY=bounded(position?.[2],0,100,50)/100;
-    let drawWidth=boxWidth,drawHeight=boxHeight;
-    if(fit!=='100% 100%'&&fit!=='100%'){
-        const ratio=fit==='contain'?Math.min(boxWidth/image.naturalWidth,boxHeight/image.naturalHeight):Math.max(boxWidth/image.naturalWidth,boxHeight/image.naturalHeight);
-        drawWidth=image.naturalWidth*ratio;drawHeight=image.naturalHeight*ratio;
-    }
-    context.fillStyle='#ffffff';context.fillRect(0,0,canvas.width,canvas.height);context.imageSmoothingEnabled=true;context.imageSmoothingQuality='high';
-    context.drawImage(image,boxX+(boxWidth-drawWidth)*positionX,boxY+(boxHeight-drawHeight)*positionY,drawWidth,drawHeight);
-    return true;
-}
-function nativePixelCss(value,pixelsPerMM){
-    return String(value||'').replace(/(-?(?:\d+(?:\.\d*)?|\.\d+))mm\b/gi,(_match,amount)=>`${number(amount)*pixelsPerMM}px`);
-}
-function createNativeDesignerCard(card,{targetWidth,targetHeight,widthMM,heightMM,outputDpi,renderDocument}){
-    if(Math.abs(targetWidth-widthMM/25.4*outputDpi)>.51||Math.abs(targetHeight-heightMM/25.4*outputDpi)>.51)throw new Error('Native Designer export dimensions do not match the physical card size.');
-    // Element.cloneNode/body are always available in supported browsers. The
-    // narrow fallback keeps non-browser contract probes usable without
-    // changing the browser path or silently reintroducing CSS upscaling.
-    if(typeof card?.cloneNode!=='function'||!renderDocument?.createElement||!renderDocument?.body)return{host:{remove(){}},card};
-    const pixelsPerMM=outputDpi/25.4,host=renderDocument.createElement('div'),nativeCard=card.cloneNode(true);
-    host.dataset.nativeDesignerExport=DESIGNER_RASTER_EXPORT_CONTRACT;
-    Object.assign(host.style,{position:'fixed',left:`-${Math.max(targetWidth+100,10000)}px`,top:'0',width:`${targetWidth}px`,height:`${targetHeight}px`,overflow:'hidden',pointerEvents:'none',opacity:'1',zIndex:'-2147483647'});
-    for(const node of [nativeCard,...nativeCard.querySelectorAll('[style]')]){
-        const current=node.getAttribute?.('style');
-        if(current!==null&&current!==undefined)node.setAttribute('style',nativePixelCss(current,pixelsPerMM));
-    }
-    nativeCard.dataset.nativeExportContract=DESIGNER_RASTER_EXPORT_CONTRACT;
-    nativeCard.dataset.nativeExportDpi=String(outputDpi);
-    Object.assign(nativeCard.style,{position:'relative',left:'0px',top:'0px',width:`${targetWidth}px`,height:`${targetHeight}px`,transform:'none',margin:'0'});
-    host.appendChild(nativeCard);renderDocument.body.appendChild(host);
-    return{host,card:nativeCard};
-}
-async function waitForNativeImages(card){
-    await Promise.all([...(card.querySelectorAll?.('img')||[])].map(image=>image.complete?image.decode?.().catch(()=>{}):new Promise(resolve=>{image.addEventListener('load',resolve,{once:true});image.addEventListener('error',resolve,{once:true});})));
-}
-async function renderDesignerCardImage(card,{renderer,targetWidth,targetHeight,widthMM,heightMM,outputDpi,document,renderDocument=document}){
-    const native=createNativeDesignerCard(card,{targetWidth,targetHeight,widthMM,heightMM,outputDpi,renderDocument});
-    const output=document.createElement('canvas');output.width=targetWidth;output.height=targetHeight;
-    try{
-        await waitForNativeImages(native.card);
-        const nativeBackground=await paintNativeDesignerBackground(native.card,output);
-        if(!nativeBackground){output.width=1;output.height=1;}
-        const canvas=await renderer(native.card,{scale:1,useCORS:true,backgroundColor:nativeBackground?null:'#ffffff',logging:false,width:targetWidth,height:targetHeight,windowWidth:targetWidth,windowHeight:targetHeight,onclone:clone=>{
-            clone.querySelectorAll('.designer-safe,.designer-bleed').forEach(node=>node.style.display='none');
-            if(nativeBackground){clone.querySelectorAll('.designer-background').forEach(node=>node.style.display='none');clone.querySelectorAll('.designer-card').forEach(node=>node.style.background='transparent');}
-        }});
-        const overlay=exactSizeCanvas(canvas,targetWidth,targetHeight,document,{alpha:nativeBackground});
-        if(!nativeBackground)return{canvas:overlay,temporary:overlay===canvas?[]:[canvas]};
-        const context=output.getContext('2d',{alpha:false});context.drawImage(overlay,0,0,targetWidth,targetHeight);
-        return{canvas:output,temporary:overlay===canvas?[canvas]:[canvas,overlay]};
-    }finally{native.host.remove();}
+async function renderDesignerCardImage(card,{renderer,targetWidth,targetHeight,document}){
+    const rect=card.getBoundingClientRect?.();
+    if(!rect?.width||!rect?.height)throw new Error('The visible Designer card has no measurable size. Open Preview again and retry.');
+    const renderScale=targetWidth/rect.width;
+    const expectedHeight=rect.height*renderScale;
+    if(Math.abs(expectedHeight-targetHeight)>2)throw new Error('Designer card proportions do not match the requested export size.');
+    // Capture the exact physical-mm DOM that browser Print already renders
+    // correctly. Do not rebuild the card, rewrite inline styles, parse its
+    // Base64 artwork, or separately composite text/background layers. This is
+    // the same proven capture model used by the Forklift card exporter; only
+    // the output scale is raised to the requested BBS DPI.
+    const canvas=await renderer(card,{scale:renderScale,useCORS:true,backgroundColor:'#ffffff',logging:false,width:rect.width,height:rect.height,windowWidth:Math.max(card.scrollWidth||0,Math.ceil(rect.width)),windowHeight:Math.max(card.scrollHeight||0,Math.ceil(rect.height)),onclone:clone=>{
+        clone.querySelectorAll('.designer-safe,.designer-bleed').forEach(node=>node.style.display='none');
+    }});
+    const output=exactSizeCanvas(canvas,targetWidth,targetHeight,document);
+    return{canvas:output,temporary:output===canvas?[]:[canvas]};
 }
 
 export async function saveDesignerPrintImages(outputDocument,{filename='BBS_Cards',format='png',scale=3.125,dpi=null,quality=.98}={}){

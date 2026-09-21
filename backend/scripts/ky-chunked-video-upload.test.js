@@ -45,6 +45,6 @@ assert.match(frontend, /uploadKyVideoInChunks\(r\.id, videoFile/, 'Admin video r
 assert.match(frontend, /บันทึกกิจกรรม KY แล้ว แต่วิดีโออัปโหลดไม่สำเร็จ/, 'partial-success guidance must prevent duplicate KY resubmission');
 
 assert.match(main, /ky\.js\?v=20260918-ky-video-adaptive-r1/, 'KY page cache key must serve adaptive chunk upload');
-assert.match(html, /main\.js\?v=20260918-bbs-native-raster-r1/, 'SPA cache key must serve the latest BBS export and adaptive KY upload bundle');
+assert.match(html, /main\.js\?v=20260921-bbs-dom-capture-r1/, 'SPA cache key must serve the latest BBS export and adaptive KY upload bundle');
 
 console.log('KY chunked video upload contract: PASS');
