@@ -47,7 +47,7 @@ export const DESIGNER_CARD_FACE_CONTRACT='bbs-designer-card-face-v2';
 // Golden browser-print contract. Export pipelines may reuse this document, but
 // must not replace its physical-mm card faces with preview-sized raster images.
 export const DESIGNER_PRINT_CONTRACT='bbs-designer-physical-print-v1';
-export const DESIGNER_RASTER_EXPORT_CONTRACT='bbs-designer-dom-capture-v1';
+export const DESIGNER_RASTER_EXPORT_CONTRACT='bbs-designer-dom-capture-v2';
 
 function drawPdfCropMarks(pdf,x,y,width,height){
     if(typeof pdf?.line!=='function')return;
@@ -176,6 +176,11 @@ async function renderDesignerCardImage(card,{renderer,targetWidth,targetHeight,d
     // the output scale is raised to the requested BBS DPI.
     const canvas=await renderer(card,{scale:renderScale,useCORS:true,backgroundColor:'#ffffff',logging:false,width:rect.width,height:rect.height,windowWidth:Math.max(card.scrollWidth||0,Math.ceil(rect.width)),windowHeight:Math.max(card.scrollHeight||0,Math.ceil(rect.height)),onclone:clone=>{
         clone.querySelectorAll('.designer-safe,.designer-bleed').forEach(node=>node.style.display='none');
+        // html2canvas places the Kanit/Thai glyph ink roughly half an em below
+        // Chromium's flex-line box even though the live Print DOM is correct.
+        // Compensate only inside the rasterizer clone; Print and Designer
+        // geometry remain untouched and overflow clipping stays authoritative.
+        clone.querySelectorAll('.designer-text>span').forEach(node=>node.style.transform='translateY(-.5em)');
     }});
     const output=exactSizeCanvas(canvas,targetWidth,targetHeight,document);
     return{canvas:output,temporary:output===canvas?[]:[canvas]};
