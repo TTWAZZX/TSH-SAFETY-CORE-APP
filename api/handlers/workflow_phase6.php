@@ -1820,6 +1820,32 @@ function wf_ky_annual_public(array $row): array
     return $row;
 }
 
+function wf_ky_production_video_sql(string $alias = 'a'): string
+{
+    return "COALESCE(TRIM({$alias}.VideoUrl),'')<>''";
+}
+
+function wf_ky_verified_external_video_sql(string $alias = 'a'): string
+{
+    return "EXISTS (SELECT 1 FROM ky_annual_video_evidence ave WHERE ave.ActivityID={$alias}.id AND ave.StorageMode='CentralMachine' AND ave.Status='Verified' AND ave.ExternalBackupConfirmed=1 AND COALESCE(TRIM(ave.ExternalReference),'')<>'' AND ave.SHA256 REGEXP '^[0-9a-fA-F]{64}$')";
+}
+
+function wf_ky_pending_external_video_sql(string $alias = 'a'): string
+{
+    return "EXISTS (SELECT 1 FROM ky_annual_video_evidence ave WHERE ave.ActivityID={$alias}.id AND ave.StorageMode='CentralMachine' AND ave.Status IN ('Pending','NeedsCorrection') AND ave.ExternalBackupConfirmed=1 AND COALESCE(TRIM(ave.ExternalReference),'')<>'' AND ave.SHA256 REGEXP '^[0-9a-fA-F]{64}$')";
+}
+
+function wf_ky_video_evidence_sql(string $alias = 'a'): string
+{
+    return '(' . wf_ky_production_video_sql($alias) . ' OR ' . wf_ky_verified_external_video_sql($alias) . ')';
+}
+
+function wf_ky_video_evidence_select_sql(string $alias = 'a'): string
+{
+    $production=wf_ky_production_video_sql($alias);$verified=wf_ky_verified_external_video_sql($alias);$pending=wf_ky_pending_external_video_sql($alias);
+    return "({$production}) AS HasProductionVideo,({$verified}) AS HasVerifiedExternalVideo,({$pending}) AS HasPendingExternalVideo,({$production} OR {$verified}) AS HasVideoEvidence,CASE WHEN {$production} THEN 'Production' WHEN {$verified} THEN 'ExternalVerified' WHEN {$pending} THEN 'ExternalPending' ELSE 'Missing' END AS VideoEvidenceStorage";
+}
+
 function wf_ky_annual_audit(array $user,string $action,?array $before,?array $after,string $detail=''): void
 {
     $evidence=$after?:($before?:[]);
@@ -2103,9 +2129,14 @@ function wf_ky_stats(int $year): array
         $targetDepts = array_values(array_filter($targetDepts));
     }
     $deptFilter = $usingConfig && $targetDepts ? ' AND Department IN (' . implode(',', array_fill(0, count($targetDepts), '?')) . ')' : '';
+    $evidenceDeptFilter = $usingConfig && $targetDepts ? ' AND a.Department IN (' . implode(',', array_fill(0, count($targetDepts), '?')) . ')' : '';
     $deptParams = $usingConfig && $targetDepts ? $targetDepts : [];
 
     $kpi = db_row("SELECT COUNT(*) AS total,COUNT(DISTINCT Department) AS rawDeptSubmitted,SUM(Status='Open') AS open,SUM(Status='Reviewed') AS reviewed,SUM(Status='Closed') AS closed FROM ky_activities WHERE YEAR(ActivityDate)=?{$deptFilter}", array_merge([$year], $deptParams)) ?: [];
+    $productionVideo=wf_ky_production_video_sql('a');$verifiedExternal=wf_ky_verified_external_video_sql('a');$pendingExternal=wf_ky_pending_external_video_sql('a');
+    $videoEvidenceRow=db_row("SELECT SUM({$productionVideo}) AS productionVideo,SUM(NOT ({$productionVideo}) AND {$verifiedExternal}) AS verifiedExternalVideo,SUM({$productionVideo} OR {$verifiedExternal}) AS videoEvidenceTotal,SUM(NOT ({$productionVideo}) AND {$pendingExternal}) AS pendingExternalVideo FROM ky_activities a WHERE YEAR(a.ActivityDate)=?{$evidenceDeptFilter}",array_merge([$year],$deptParams))?:[];
+    $videoEvidenceTotal=(int)($videoEvidenceRow['videoEvidenceTotal']??0);$activityTotal=(int)($kpi['total']??0);
+    $videoEvidence=['productionVideo'=>(int)($videoEvidenceRow['productionVideo']??0),'verifiedExternalVideo'=>(int)($videoEvidenceRow['verifiedExternalVideo']??0),'pendingExternalVideo'=>(int)($videoEvidenceRow['pendingExternalVideo']??0),'videoEvidenceTotal'=>$videoEvidenceTotal,'missingVideoEvidence'=>max(0,$activityTotal-$videoEvidenceTotal),'videoEvidenceRate'=>$activityTotal>0?(int)round($videoEvidenceTotal/$activityTotal*100):0];
     $monthly = safe_rows("SELECT MONTH(ActivityDate) AS month,COUNT(*) AS count FROM ky_activities WHERE YEAR(ActivityDate)=?{$deptFilter} GROUP BY MONTH(ActivityDate) ORDER BY month", array_merge([$year], $deptParams));
     $byDept = safe_rows("SELECT Department,COUNT(*) AS count FROM ky_activities WHERE YEAR(ActivityDate)=?{$deptFilter} GROUP BY Department ORDER BY count DESC LIMIT 20", array_merge([$year], $deptParams));
     $deptMonthly = safe_rows("SELECT Department,MONTH(ActivityDate) AS month,COUNT(*) AS count FROM ky_activities WHERE YEAR(ActivityDate)=?{$deptFilter} GROUP BY Department,MONTH(ActivityDate) ORDER BY Department,month", array_merge([$year], $deptParams));
@@ -2194,6 +2225,7 @@ function wf_ky_stats(int $year): array
         'deptRank'=>$byDept,
         'topKeywords'=>$topKeywords,
         'keywordRank'=>$topKeywords,
+        'videoEvidence'=>$videoEvidence,
         'pendingDepts'=>array_values(array_unique($pendingDepts)),
         'pendingUnits'=>$pendingUnits,
         'programProgress'=>$programProgress,
@@ -2264,7 +2296,7 @@ function handle_ky_routes(string $method, string $path): bool
         $byScope=[];foreach($evidence as $item)$byScope[$item['ScopeKey']]=$item;
         $scopes=[];foreach(db_rows('SELECT Department,SafetyUnits FROM ky_program_config WHERE Year=? AND IsActive=1 ORDER BY Department',[$year]) as $cfg){$units=wf_ky_units($cfg['SafetyUnits']??null);if(!$units)$units=[''];foreach($units as $unit){$key=wf_ky_annual_scope_key($cfg['Department'],$unit);$item=$byScope[$key]??null;$scopes[]=['scopeKey'=>$key,'department'=>$cfg['Department'],'safetyUnit'=>$unit?:null,'compliant'=>($item['Status']??'')==='Verified','evidence'=>$item];}}
         $verified=count(array_filter($scopes,fn($row)=>!empty($row['compliant'])));$pending=count(array_filter($scopes,fn($row)=>!empty($row['evidence'])&&empty($row['compliant'])));$missing=count(array_filter($scopes,fn($row)=>empty($row['evidence'])));$reclaimable=array_filter($evidence,fn($row)=>!empty($row['canDeleteProductionFile']));
-        $candidates=db_rows('SELECT a.id,a.ActivityDate,a.Department,a.SafetyUnit,a.TeamName,a.KYTKeyword,a.ReporterName,a.VideoUrl FROM ky_activities a LEFT JOIN ky_annual_video_evidence e ON e.ActivityID=a.id WHERE YEAR(a.ActivityDate)=? AND COALESCE(TRIM(a.VideoUrl),\'\')<>\'\' AND e.id IS NULL ORDER BY a.ActivityDate DESC,a.CreatedAt DESC LIMIT 300',[$year]);
+        $candidates=array_map(static function($row)use($byScope){$scopeKey=wf_ky_annual_scope_key($row['Department']??'', $row['SafetyUnit']??'');$scopeEvidence=$byScope[$scopeKey]??null;$row['ScopeKey']=$scopeKey;$row['ScopeEvidenceID']=$scopeEvidence['id']??null;$row['ScopeEvidenceStatus']=$scopeEvidence['Status']??null;$row['ScopeEvidenceActivityID']=$scopeEvidence['ActivityID']??null;$row['ScopeAlreadyRegistered']=$scopeEvidence!==null;return $row;},db_rows('SELECT a.id,a.ActivityDate,a.Department,a.SafetyUnit,a.TeamName,a.KYTKeyword,a.ReporterName,a.VideoUrl FROM ky_activities a LEFT JOIN ky_annual_video_evidence e ON e.ActivityID=a.id WHERE YEAR(a.ActivityDate)=? AND COALESCE(TRIM(a.VideoUrl),\'\')<>\'\' AND e.id IS NULL ORDER BY a.ActivityDate DESC,a.CreatedAt DESC LIMIT 300',[$year]));
         json_response(['success'=>true,'data'=>['year'=>$year,'summary'=>['requiredScopes'=>count($scopes),'verifiedScopes'=>$verified,'pendingScopes'=>$pending,'missingScopes'=>$missing,'compliancePct'=>count($scopes)?(int)round($verified/count($scopes)*100):0,'productionFiles'=>count(array_filter($evidence,fn($row)=>!empty($row['ProductionVideoUrl'])&&empty($row['ProductionDeletedAt']))),'reclaimableFiles'=>count($reclaimable),'reclaimableBytes'=>array_sum(array_map(fn($row)=>(int)($row['FileSize']??0),$reclaimable))],'scopes'=>$scopes,'evidence'=>$evidence,'candidates'=>$candidates]]);
     }
     $p=route_params($path,'/ky/annual-video-evidence/:evidenceId/audit');if($p!==null&&$method==='GET'){require_admin();json_response(['success'=>true,'data'=>db_rows('SELECT id,EvidenceID,ActivityID,Action,ActorID,ActorName,BeforeJson,AfterJson,Detail,CreatedAt FROM ky_annual_video_evidence_audit WHERE EvidenceID=? ORDER BY id DESC LIMIT 200',[$p['evidenceId']])]);}
@@ -2291,13 +2323,13 @@ function handle_ky_routes(string $method, string $path): bool
         $year=(int)($_GET['year']??date('Y'));
         $configs=db_rows('SELECT Department,SafetyUnits,YearlyTarget FROM ky_program_config WHERE Year=? AND IsActive=1 ORDER BY Department',[$year]);
         $rows=[];$rowMap=[];$deptKeys=[];
-        foreach($configs as $deptIndex=>$cfg){$dept=trim((string)($cfg['Department']??''));if($dept==='')continue;$deptKeys[wf_ky_norm_key($dept)]=true;$units=wf_ky_units($cfg['SafetyUnits']??[]);foreach($units?:[''] as $unitIndex=>$unit){$key=wf_ky_norm_key($dept).'||'.wf_ky_norm_key($unit);if(isset($rowMap[$key]))continue;$row=['key'=>$key,'department'=>$dept,'safetyUnit'=>$unit,'yearlyTarget'=>(int)($cfg['YearlyTarget']??12),'submitted'=>0,'progressPct'=>0,'complete'=>0,'waitingVideo'=>0,'missingFile'=>0,'records'=>[],'order'=>$deptIndex*1000+$unitIndex];$rowMap[$key]=count($rows);$rows[]=$row;}}
-        if(!$rows)json_response(['success'=>true,'data'=>['phase'=>'ky_evidence_overview_phase6','year'=>$year,'sourceOfTruth'=>'KY_Program_Config','rows'=>[],'summary'=>['departments'=>0,'safetyUnits'=>0,'submitted'=>0,'complete'=>0,'waitingVideo'=>0,'missingFile'=>0],'unmatchedActivities'=>[]]]);
-        $activities=db_rows('SELECT id,ActivityDate,ReporterID,ReporterName,SubmittedByID,SubmittedByName,Department,SafetyUnit,TeamName,KYTKeyword,RiskCategory,HazardDescription,AttachmentUrl,VideoUrl,Status,Participants,CreatedAt FROM ky_activities WHERE YEAR(ActivityDate)=? ORDER BY ActivityDate DESC,CreatedAt DESC',[$year]);
+        foreach($configs as $deptIndex=>$cfg){$dept=trim((string)($cfg['Department']??''));if($dept==='')continue;$deptKeys[wf_ky_norm_key($dept)]=true;$units=wf_ky_units($cfg['SafetyUnits']??[]);foreach($units?:[''] as $unitIndex=>$unit){$key=wf_ky_norm_key($dept).'||'.wf_ky_norm_key($unit);if(isset($rowMap[$key]))continue;$row=['key'=>$key,'department'=>$dept,'safetyUnit'=>$unit,'yearlyTarget'=>(int)($cfg['YearlyTarget']??12),'submitted'=>0,'progressPct'=>0,'complete'=>0,'waitingVideo'=>0,'missingFile'=>0,'productionVideo'=>0,'verifiedExternalVideo'=>0,'pendingExternalVideo'=>0,'records'=>[],'order'=>$deptIndex*1000+$unitIndex];$rowMap[$key]=count($rows);$rows[]=$row;}}
+        if(!$rows)json_response(['success'=>true,'data'=>['phase'=>'ky_evidence_overview_phase6','year'=>$year,'sourceOfTruth'=>'KY_Program_Config','rows'=>[],'summary'=>['departments'=>0,'safetyUnits'=>0,'submitted'=>0,'complete'=>0,'waitingVideo'=>0,'missingFile'=>0,'productionVideo'=>0,'verifiedExternalVideo'=>0,'pendingExternalVideo'=>0],'unmatchedActivities'=>[]]]);
+        $activities=db_rows('SELECT a.id,a.ActivityDate,a.ReporterID,a.ReporterName,a.SubmittedByID,a.SubmittedByName,a.Department,a.SafetyUnit,a.TeamName,a.KYTKeyword,a.RiskCategory,a.HazardDescription,a.AttachmentUrl,a.VideoUrl,a.Status,a.Participants,a.CreatedAt,'.wf_ky_video_evidence_select_sql('a').' FROM ky_activities a WHERE YEAR(a.ActivityDate)=? ORDER BY a.ActivityDate DESC,a.CreatedAt DESC',[$year]);
         $unmatched=[];
-        foreach($activities as $a){$deptKey=wf_ky_norm_key($a['Department']??'');if(empty($deptKeys[$deptKey]))continue;$key=$deptKey.'||'.wf_ky_norm_key($a['SafetyUnit']??'');if(!isset($rowMap[$key])){$unmatched[]=['id'=>$a['id']??null,'department'=>$a['Department']??null,'safetyUnit'=>$a['SafetyUnit']??null,'reason'=>'Safety Unit not active in Program Config'];continue;}$idx=$rowMap[$key];$hasFile=trim((string)($a['AttachmentUrl']??''))!=='';$hasVideo=trim((string)($a['VideoUrl']??''))!=='';$status=$hasFile&&$hasVideo?'complete':($hasFile?'waiting_video':'missing_file');$rows[$idx]['submitted']++;if($status==='complete')$rows[$idx]['complete']++;elseif($status==='waiting_video')$rows[$idx]['waitingVideo']++;else$rows[$idx]['missingFile']++;$rows[$idx]['records'][]=['id'=>$a['id']??null,'activityDate'=>$a['ActivityDate']??null,'reporterId'=>$a['ReporterID']??null,'reporterName'=>$a['ReporterName']??null,'submittedById'=>$a['SubmittedByID']??null,'submittedByName'=>$a['SubmittedByName']??null,'department'=>$rows[$idx]['department'],'safetyUnit'=>$rows[$idx]['safetyUnit'],'teamName'=>$a['TeamName']??null,'kytKeyword'=>$a['KYTKeyword']??null,'riskCategory'=>$a['RiskCategory']??null,'hazard'=>$a['HazardDescription']??null,'status'=>$a['Status']??null,'evidenceStatus'=>$status,'hasFile'=>$hasFile,'hasVideo'=>$hasVideo,'canUploadVideo'=>wf_ky_can_upload_followup_video($a,$user)&&(!$hasVideo||wf_is_admin($user))];}
-        $summary=['departments'=>count(array_unique(array_map(fn($r)=>$r['department'],$rows))),'safetyUnits'=>count($rows),'submitted'=>0,'complete'=>0,'waitingVideo'=>0,'missingFile'=>0];
-        $deptProgress=[];foreach($rows as &$r){$r['progressPct']=$r['yearlyTarget']>0?min(100,(int)round($r['submitted']/$r['yearlyTarget']*100)):0;$dk=wf_ky_norm_key($r['department']);if(!isset($deptProgress[$dk]))$deptProgress[$dk]=['submitted'=>0,'target'=>0,'pct'=>0];$deptProgress[$dk]['submitted']+=$r['submitted'];$deptProgress[$dk]['target']+=$r['yearlyTarget'];$deptProgress[$dk]['pct']=$deptProgress[$dk]['target']>0?min(100,(int)round($deptProgress[$dk]['submitted']/$deptProgress[$dk]['target']*100)):0;$summary['submitted']+=$r['submitted'];$summary['complete']+=$r['complete'];$summary['waitingVideo']+=$r['waitingVideo'];$summary['missingFile']+=$r['missingFile'];}unset($r);usort($rows,function($a,$b)use($deptProgress){$ap=$deptProgress[wf_ky_norm_key($a['department'])]['pct']??0;$bp=$deptProgress[wf_ky_norm_key($b['department'])]['pct']??0;return ($ap<=>$bp)?:strcmp((string)$a['department'],(string)$b['department'])?:((int)($a['order']??0)<=>(int)($b['order']??0));});foreach($rows as &$r){unset($r['order']);}unset($r);
+        foreach($activities as $a){$deptKey=wf_ky_norm_key($a['Department']??'');if(empty($deptKeys[$deptKey]))continue;$key=$deptKey.'||'.wf_ky_norm_key($a['SafetyUnit']??'');if(!isset($rowMap[$key])){$unmatched[]=['id'=>$a['id']??null,'department'=>$a['Department']??null,'safetyUnit'=>$a['SafetyUnit']??null,'reason'=>'Safety Unit not active in Program Config'];continue;}$idx=$rowMap[$key];$hasFile=trim((string)($a['AttachmentUrl']??''))!=='';$hasProduction=!empty($a['HasProductionVideo']);$hasVerifiedExternal=!empty($a['HasVerifiedExternalVideo']);$hasPendingExternal=!empty($a['HasPendingExternalVideo']);$hasVideo=!empty($a['HasVideoEvidence']);$status=$hasFile&&$hasVideo?'complete':($hasFile?'waiting_video':'missing_file');$rows[$idx]['submitted']++;if($status==='complete')$rows[$idx]['complete']++;elseif($status==='waiting_video')$rows[$idx]['waitingVideo']++;else$rows[$idx]['missingFile']++;if($hasProduction)$rows[$idx]['productionVideo']++;elseif($hasVerifiedExternal)$rows[$idx]['verifiedExternalVideo']++;elseif($hasPendingExternal)$rows[$idx]['pendingExternalVideo']++;$rows[$idx]['records'][]=['id'=>$a['id']??null,'activityDate'=>$a['ActivityDate']??null,'reporterId'=>$a['ReporterID']??null,'reporterName'=>$a['ReporterName']??null,'submittedById'=>$a['SubmittedByID']??null,'submittedByName'=>$a['SubmittedByName']??null,'department'=>$rows[$idx]['department'],'safetyUnit'=>$rows[$idx]['safetyUnit'],'teamName'=>$a['TeamName']??null,'kytKeyword'=>$a['KYTKeyword']??null,'riskCategory'=>$a['RiskCategory']??null,'hazard'=>$a['HazardDescription']??null,'status'=>$a['Status']??null,'evidenceStatus'=>$status,'hasFile'=>$hasFile,'hasVideo'=>$hasVideo,'hasProductionVideo'=>$hasProduction,'hasVerifiedExternalVideo'=>$hasVerifiedExternal,'hasPendingExternalVideo'=>$hasPendingExternal,'videoEvidenceStorage'=>$a['VideoEvidenceStorage']??'Missing','canUploadVideo'=>wf_ky_can_upload_followup_video($a,$user)&&(!$hasVideo||wf_is_admin($user)),'canRegisterExternalVideo'=>wf_is_admin($user)];}
+        $summary=['departments'=>count(array_unique(array_map(fn($r)=>$r['department'],$rows))),'safetyUnits'=>count($rows),'submitted'=>0,'complete'=>0,'waitingVideo'=>0,'missingFile'=>0,'productionVideo'=>0,'verifiedExternalVideo'=>0,'pendingExternalVideo'=>0];
+        $deptProgress=[];foreach($rows as &$r){$r['progressPct']=$r['yearlyTarget']>0?min(100,(int)round($r['submitted']/$r['yearlyTarget']*100)):0;$dk=wf_ky_norm_key($r['department']);if(!isset($deptProgress[$dk]))$deptProgress[$dk]=['submitted'=>0,'target'=>0,'pct'=>0];$deptProgress[$dk]['submitted']+=$r['submitted'];$deptProgress[$dk]['target']+=$r['yearlyTarget'];$deptProgress[$dk]['pct']=$deptProgress[$dk]['target']>0?min(100,(int)round($deptProgress[$dk]['submitted']/$deptProgress[$dk]['target']*100)):0;$summary['submitted']+=$r['submitted'];$summary['complete']+=$r['complete'];$summary['waitingVideo']+=$r['waitingVideo'];$summary['missingFile']+=$r['missingFile'];$summary['productionVideo']+=$r['productionVideo'];$summary['verifiedExternalVideo']+=$r['verifiedExternalVideo'];$summary['pendingExternalVideo']+=$r['pendingExternalVideo'];}unset($r);usort($rows,function($a,$b)use($deptProgress){$ap=$deptProgress[wf_ky_norm_key($a['department'])]['pct']??0;$bp=$deptProgress[wf_ky_norm_key($b['department'])]['pct']??0;return ($ap<=>$bp)?:strcmp((string)$a['department'],(string)$b['department'])?:((int)($a['order']??0)<=>(int)($b['order']??0));});foreach($rows as &$r){unset($r['order']);}unset($r);
         json_response(['success'=>true,'data'=>['phase'=>'ky_evidence_overview_phase6','year'=>$year,'sourceOfTruth'=>'KY_Program_Config','rows'=>$rows,'summary'=>$summary,'unmatchedActivities'=>$unmatched]]);
     }
     if($method==='POST'&&$path==='/ky/file-health/repair-legacy'){
@@ -2336,7 +2368,8 @@ function handle_ky_routes(string $method, string $path): bool
     if($p!==null&&$method==='DELETE'){db_execute('DELETE FROM ky_video_reactions WHERE ActivityID=? AND EmployeeID=?',[$p['id'],wf_user_id($user)]);json_response(['success'=>true]);}
     $p=route_params($path,'/ky/:id/video-dashboard'); if($p!==null&&$method==='PUT'){require_admin();$b=json_body();db_execute('UPDATE ky_activities SET ShowVideoOnDashboard=COALESCE(?,ShowVideoOnDashboard),IsVideoPinned=COALESCE(?,IsVideoPinned) WHERE id=?',[array_key_exists('show',$b)?wf_bool($b['show']):null,array_key_exists('pinned',$b)?wf_bool($b['pinned']):null,$p['id']]);json_response(['success'=>true]);}
     if($method==='GET'&&$path==='/ky'){
-        $sql='SELECT * FROM ky_activities WHERE 1=1';$pa=[];
+        $productionVideo=wf_ky_production_video_sql('a');$verifiedExternal=wf_ky_verified_external_video_sql('a');$pendingExternal=wf_ky_pending_external_video_sql('a');$videoEvidence=wf_ky_video_evidence_sql('a');
+        $sql='SELECT a.*,'.wf_ky_video_evidence_select_sql('a').' FROM ky_activities a WHERE 1=1';$pa=[];
         $status=trim((string)($_GET['status']??''));
         $department=trim((string)($_GET['department']??($_GET['dept']??'')));
         $safetyUnit=trim((string)($_GET['safetyUnit']??''));
@@ -2346,23 +2379,26 @@ function handle_ky_routes(string $method, string $path): bool
         $dateFrom=trim((string)($_GET['dateFrom']??''));$dateTo=trim((string)($_GET['dateTo']??''));
         $validDate=static function(string $value): bool { if($value==='')return true;$date=DateTimeImmutable::createFromFormat('!Y-m-d',$value);return $date!==false&&$date->format('Y-m-d')===$value; };
         if(!$validDate($dateFrom)||!$validDate($dateTo)||($dateFrom!==''&&$dateTo!==''&&strcmp($dateFrom,$dateTo)>0))json_response(['success'=>false,'message'=>'Invalid KY history date range.'],400);
-        if($status!==''&&$status!=='all'){$sql.=' AND Status=?';$pa[]=$status;}
-        if($department!==''&&$department!=='all'){$sql.=' AND Department=?';$pa[]=$department;}
-        elseif(!empty($_GET['depts'])){$departments=array_values(array_filter(array_map('trim',explode(',',(string)$_GET['depts'])),static fn($value)=>$value!==''));$departments=array_slice($departments,0,100);if($departments){$sql.=' AND Department IN ('.implode(',',array_fill(0,count($departments),'?')).')';array_push($pa,...$departments);}}
-        if($safetyUnit!==''&&$safetyUnit!=='all'){$sql.=' AND SafetyUnit=?';$pa[]=$safetyUnit;}
-        if($risk!==''&&$risk!=='all'){$sql.=' AND RiskCategory=?';$pa[]=$risk;}
-        if($source==='admin')$sql.=' AND SubmittedByID IS NOT NULL AND SubmittedByID<>ReporterID';
-        elseif($source==='self')$sql.=' AND (SubmittedByID IS NULL OR SubmittedByID=ReporterID)';
-        if($evidence==='complete')$sql.=" AND COALESCE(TRIM(AttachmentUrl),'')<>'' AND COALESCE(TRIM(VideoUrl),'')<>''";
-        elseif($evidence==='waiting_video')$sql.=" AND COALESCE(TRIM(AttachmentUrl),'')<>'' AND COALESCE(TRIM(VideoUrl),'')=''";
-        elseif($evidence==='no_video')$sql.=" AND COALESCE(TRIM(VideoUrl),'')=''";
-        elseif($evidence==='missing_file')$sql.=" AND COALESCE(TRIM(AttachmentUrl),'')=''";
-        if($dateFrom!==''&&$dateTo!==''){$sql.=' AND ActivityDate BETWEEN ? AND ?';array_push($pa,$dateFrom,$dateTo);}
-        elseif($dateFrom!==''){$sql.=' AND ActivityDate>=?';$pa[]=$dateFrom;}
-        elseif($dateTo!==''){$sql.=' AND ActivityDate<=?';$pa[]=$dateTo;}
-        else{if(!empty($_GET['year'])){$sql.=' AND YEAR(ActivityDate)=?';$pa[]=(int)$_GET['year'];}if(!empty($_GET['month'])){$sql.=' AND MONTH(ActivityDate)=?';$pa[]=(int)$_GET['month'];}}
-        $search=mb_substr(trim((string)($_GET['q']??'')),0,200,'UTF-8');if($search!==''){$sql.=' AND (ReporterName LIKE ? OR SubmittedByName LIKE ? OR Department LIKE ? OR SafetyUnit LIKE ? OR TeamName LIKE ? OR KYTKeyword LIKE ? OR HazardDescription LIKE ? OR Countermeasure LIKE ?)';$like='%'.$search.'%';array_push($pa,$like,$like,$like,$like,$like,$like,$like,$like);}
-        json_response(['success'=>true,'data'=>db_rows($sql.' ORDER BY ActivityDate DESC,CreatedAt DESC',$pa)]);
+        if($status!==''&&$status!=='all'){$sql.=' AND a.Status=?';$pa[]=$status;}
+        if($department!==''&&$department!=='all'){$sql.=' AND a.Department=?';$pa[]=$department;}
+        elseif(!empty($_GET['depts'])){$departments=array_values(array_filter(array_map('trim',explode(',',(string)$_GET['depts'])),static fn($value)=>$value!==''));$departments=array_slice($departments,0,100);if($departments){$sql.=' AND a.Department IN ('.implode(',',array_fill(0,count($departments),'?')).')';array_push($pa,...$departments);}}
+        if($safetyUnit!==''&&$safetyUnit!=='all'){$sql.=' AND a.SafetyUnit=?';$pa[]=$safetyUnit;}
+        if($risk!==''&&$risk!=='all'){$sql.=' AND a.RiskCategory=?';$pa[]=$risk;}
+        if($source==='admin')$sql.=' AND a.SubmittedByID IS NOT NULL AND a.SubmittedByID<>a.ReporterID';
+        elseif($source==='self')$sql.=' AND (a.SubmittedByID IS NULL OR a.SubmittedByID=a.ReporterID)';
+        if($evidence==='complete')$sql.=" AND COALESCE(TRIM(a.AttachmentUrl),'')<>'' AND {$videoEvidence}";
+        elseif($evidence==='waiting_video')$sql.=" AND COALESCE(TRIM(a.AttachmentUrl),'')<>'' AND NOT ({$videoEvidence})";
+        elseif($evidence==='no_video')$sql.=" AND NOT ({$videoEvidence})";
+        elseif($evidence==='production_video')$sql.=" AND {$productionVideo}";
+        elseif($evidence==='external_verified')$sql.=" AND NOT ({$productionVideo}) AND {$verifiedExternal}";
+        elseif($evidence==='external_pending')$sql.=" AND NOT ({$productionVideo}) AND NOT ({$verifiedExternal}) AND {$pendingExternal}";
+        elseif($evidence==='missing_file')$sql.=" AND COALESCE(TRIM(a.AttachmentUrl),'')=''";
+        if($dateFrom!==''&&$dateTo!==''){$sql.=' AND a.ActivityDate BETWEEN ? AND ?';array_push($pa,$dateFrom,$dateTo);}
+        elseif($dateFrom!==''){$sql.=' AND a.ActivityDate>=?';$pa[]=$dateFrom;}
+        elseif($dateTo!==''){$sql.=' AND a.ActivityDate<=?';$pa[]=$dateTo;}
+        else{if(!empty($_GET['year'])){$sql.=' AND YEAR(a.ActivityDate)=?';$pa[]=(int)$_GET['year'];}if(!empty($_GET['month'])){$sql.=' AND MONTH(a.ActivityDate)=?';$pa[]=(int)$_GET['month'];}}
+        $search=mb_substr(trim((string)($_GET['q']??'')),0,200,'UTF-8');if($search!==''){$sql.=' AND (a.ReporterName LIKE ? OR a.SubmittedByName LIKE ? OR a.Department LIKE ? OR a.SafetyUnit LIKE ? OR a.TeamName LIKE ? OR a.KYTKeyword LIKE ? OR a.HazardDescription LIKE ? OR a.Countermeasure LIKE ?)';$like='%'.$search.'%';array_push($pa,$like,$like,$like,$like,$like,$like,$like,$like);}
+        json_response(['success'=>true,'data'=>db_rows($sql.' ORDER BY a.ActivityDate DESC,a.CreatedAt DESC',$pa)]);
     }
     if($method==='GET'&&$path==='/ky/email-outbox'){require_admin();$limit=min(max((int)($_GET['limit']??50),1),200);$sql='SELECT * FROM ky_emailoutbox';$pa=[];if(!empty($_GET['status'])&&$_GET['status']!=='all'){$sql.=' WHERE Status=?';$pa[]=$_GET['status'];}$pa[]=$limit;json_response(['success'=>true,'data'=>db_rows($sql.' ORDER BY CreatedAt DESC LIMIT ?',$pa),'smtpConfigured'=>mailer_smtp_configured()]);}
     if($method==='POST'&&$path==='/ky/email-outbox/retry-queued'){require_admin();if(!mailer_smtp_configured())json_response(['success'=>false,'message'=>'SMTP is not configured.'],400);$b=json_body();$r=mailer_outbox_retry_queued('ky_emailoutbox','Recipient','HtmlBody',(int)($b['limit']??20));json_response(['success'=>true,'message'=>"Retried {$r['processed']} KY email queue item(s)",'processed'=>$r['processed'],'sent'=>$r['sent'],'failed'=>$r['failed'],'data'=>$r]);}

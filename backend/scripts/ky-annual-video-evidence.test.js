@@ -26,6 +26,14 @@ for (const source of [nodeRoute, phpRoute]) {
     assert.match(source, /KY_VIDEO_PROTECTED_BY_RETENTION/, 'legacy replacement and activity deletion paths must fail closed');
     assert.match(source, /ProductionDeletedAt=NULL/, 'a corrected replacement must reset the previous physical-deletion marker');
     assert.match(source, /activity video reference changed|Activity.*VideoUrl.*FOR UPDATE/is, 'deletion must lock and revalidate the current activity video reference');
+    assert.match(source, /HasProductionVideo/, 'activity projections must identify Production video evidence');
+    assert.match(source, /HasVerifiedExternalVideo/, 'activity projections must identify verified external video evidence');
+    assert.match(source, /HasPendingExternalVideo/, 'activity projections must keep pending external video separate');
+    assert.match(source, /videoEvidenceRate/, 'KY stats must expose the combined verified video-evidence rate');
+    assert.match(source, /external_verified/, 'KY history must filter verified external evidence');
+    assert.match(source, /external_pending/, 'KY history must filter pending external evidence');
+    assert.match(source, /ScopeAlreadyRegistered/, 'annual candidate projection must identify an existing scope registration');
+    assert.match(source, /ScopeEvidenceID/, 'annual candidate projection must link to its existing scope evidence');
 }
 
 assert.match(nodeRoute, /fs\.renameSync\(entry\.localPath, quarantine\)/, 'Node must quarantine files before committing deletion metadata');
@@ -44,8 +52,14 @@ assert.match(frontend, /ky-video-central-machine/, 'submit form must support cen
 assert.match(frontend, /sha256Blob\(videoFile\)/, 'central-machine declaration must fingerprint the selected file');
 assert.match(frontend, /storageMode:\s*'CentralMachine'/, 'central-machine mode must be sent explicitly');
 assert.match(frontend, /storageMode:\s*'Production'/, 'Production mode must be registered explicitly');
+assert.match(frontend, /ky-manage-video-central-machine/, 'Admin activity management must support central-machine evidence for closed activities');
+assert.match(frontend, /selectedStatus !== 'Closed'/, 'Admin central-machine registration must be restricted to closed activities');
+assert.match(frontend, /HasVerifiedExternalVideo/, 'History badges must consume verified external evidence state');
+assert.match(frontend, /External video pending Admin verify/, 'pending external evidence must remain visibly uncounted');
+assert.match(frontend, /data-ky-annual-focus-evidence/, 'already-registered candidates must navigate to their existing evidence row');
+assert.match(frontend, /KY_ANNUAL_VIDEO_ALREADY_VERIFIED/, 'a concurrent verified-scope conflict must be handled without an unhandled rejection');
 assert.match(frontend, /External Backup.*SHA-256|External Backup.*SHA/, 'UI must explain protected deletion eligibility');
-assert.match(main, /ky\.js\?v=20260921-ky-annual-video-r1/, 'cache chain must expose the new KY bundle');
-assert.match(index, /main\.js\?v=20260921-ky-annual-video-r1/, 'HTML entry point must invalidate the cached main module');
+assert.match(main, /ky\.js\?v=20260921-ky-video-evidence-stats-r3/, 'cache chain must expose the new KY bundle');
+assert.match(index, /main\.js\?v=20260921-ky-video-evidence-stats-r3/, 'HTML entry point must invalidate the cached main module');
 
 console.log('KY annual video evidence contract: PASS');

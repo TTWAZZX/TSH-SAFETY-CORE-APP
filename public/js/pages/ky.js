@@ -177,18 +177,49 @@ function kyHasEvidenceFile(row) {
 }
 
 function kyHasEvidenceVideo(row) {
-    return kyHasText(row?.VideoUrl);
+    if (row && Object.prototype.hasOwnProperty.call(row, 'HasVideoEvidence')) {
+        return Boolean(Number(row.HasVideoEvidence));
+    }
+    return kyHasText(row?.VideoUrl) || Boolean(row?.hasVideo);
+}
+
+function kyHasProductionVideo(row) {
+    if (row && Object.prototype.hasOwnProperty.call(row, 'HasProductionVideo')) {
+        return Boolean(Number(row.HasProductionVideo));
+    }
+    return Boolean(row?.hasProductionVideo) || kyHasText(row?.VideoUrl);
+}
+
+function kyHasVerifiedExternalVideo(row) {
+    return row && Object.prototype.hasOwnProperty.call(row, 'HasVerifiedExternalVideo')
+        ? Boolean(Number(row.HasVerifiedExternalVideo))
+        : Boolean(row?.hasVerifiedExternalVideo);
+}
+
+function kyHasPendingExternalVideo(row) {
+    return row && Object.prototype.hasOwnProperty.call(row, 'HasPendingExternalVideo')
+        ? Boolean(Number(row.HasPendingExternalVideo))
+        : Boolean(row?.hasPendingExternalVideo);
 }
 
 function kyEvidenceStatus(row) {
     const hasFile = kyHasEvidenceFile(row);
     const hasVideo = kyHasEvidenceVideo(row);
     if (hasFile && hasVideo) {
+        const external = !kyHasProductionVideo(row) && kyHasVerifiedExternalVideo(row);
         return {
             id: 'complete',
-            label: 'File + video complete',
-            shortLabel: 'Complete',
+            label: external ? 'File + verified external video' : 'File + Production video',
+            shortLabel: external ? 'External verified' : 'Production video',
             className: 'bg-emerald-50 text-emerald-700 border-emerald-100',
+        };
+    }
+    if (hasFile && kyHasPendingExternalVideo(row)) {
+        return {
+            id: 'external_pending',
+            label: 'External video pending Admin verify',
+            shortLabel: 'External pending',
+            className: 'bg-amber-50 text-amber-700 border-amber-100',
         };
     }
     if (hasFile && !hasVideo) {
@@ -220,6 +251,9 @@ function summarizeKyEvidence(records) {
         complete: 0,
         waitingVideo: 0,
         noVideo: 0,
+        productionVideo: 0,
+        verifiedExternalVideo: 0,
+        pendingExternalVideo: 0,
         missingFile: 0,
         completionPct: 0,
         waitingVideoItems: [],
@@ -228,8 +262,11 @@ function summarizeKyEvidence(records) {
     records.forEach(row => {
         const status = kyEvidenceStatus(row).id;
         if (!kyHasEvidenceVideo(row)) summary.noVideo += 1;
+        if (kyHasProductionVideo(row)) summary.productionVideo += 1;
+        else if (kyHasVerifiedExternalVideo(row)) summary.verifiedExternalVideo += 1;
+        else if (kyHasPendingExternalVideo(row)) summary.pendingExternalVideo += 1;
         if (status === 'complete') summary.complete += 1;
-        else if (status === 'waiting_video') {
+        else if (status === 'waiting_video' || status === 'external_pending') {
             summary.waitingVideo += 1;
             summary.waitingVideoItems.push(row);
         } else {
@@ -244,6 +281,9 @@ function summarizeKyEvidence(records) {
 function filterKyEvidenceRecords(records, filter) {
     if (!filter || filter === 'all') return records;
     if (filter === 'no_video') return records.filter(row => !kyHasEvidenceVideo(row));
+    if (filter === 'production_video') return records.filter(kyHasProductionVideo);
+    if (filter === 'external_verified') return records.filter(row => !kyHasProductionVideo(row) && kyHasVerifiedExternalVideo(row));
+    if (filter === 'external_pending') return records.filter(row => !kyHasProductionVideo(row) && !kyHasVerifiedExternalVideo(row) && kyHasPendingExternalVideo(row));
     return records.filter(row => kyEvidenceStatus(row).id === filter);
 }
 
@@ -1068,8 +1108,14 @@ async function loadAndRenderKyEvidenceCompletion() {
             HazardDescription: record.hazard,
             Status: record.status,
             AttachmentUrl: record.hasFile ? 'configured-evidence-file' : '',
-            VideoUrl: record.hasVideo ? 'configured-evidence-video' : '',
+            VideoUrl: record.hasProductionVideo ? 'configured-production-video' : '',
+            HasProductionVideo: record.hasProductionVideo ? 1 : 0,
+            HasVerifiedExternalVideo: record.hasVerifiedExternalVideo ? 1 : 0,
+            HasPendingExternalVideo: record.hasPendingExternalVideo ? 1 : 0,
+            HasVideoEvidence: record.hasVideo ? 1 : 0,
+            VideoEvidenceStorage: record.videoEvidenceStorage || 'Missing',
             canUploadVideo: Boolean(record.canUploadVideo),
+            canRegisterExternalVideo: Boolean(record.canRegisterExternalVideo),
         })));
         _kyEvidenceOverviewRows = rows;
         _kyEvidenceRecords = records;
@@ -1147,14 +1193,20 @@ function renderKyEvidenceCompletionPanel(records) {
                 <div class="flex flex-wrap gap-2" data-ky-card-ignore>
                     <button type="button" data-ky-evidence-filter="all" class="px-3 py-2 rounded-xl border border-slate-200 bg-white text-xs font-bold text-slate-600 hover:bg-slate-50">All</button>
                     <button type="button" data-ky-evidence-filter="complete" class="px-3 py-2 rounded-xl border border-emerald-200 bg-emerald-50 text-xs font-bold text-emerald-700">Complete</button>
+                    <button type="button" data-ky-evidence-filter="production_video" class="px-3 py-2 rounded-xl border border-sky-200 bg-sky-50 text-xs font-bold text-sky-700">Production</button>
+                    <button type="button" data-ky-evidence-filter="external_verified" class="px-3 py-2 rounded-xl border border-teal-200 bg-teal-50 text-xs font-bold text-teal-700">External verified</button>
+                    <button type="button" data-ky-evidence-filter="external_pending" class="px-3 py-2 rounded-xl border border-amber-200 bg-amber-50 text-xs font-bold text-amber-700">External pending</button>
                     <button type="button" data-ky-evidence-filter="waiting_video" class="px-3 py-2 rounded-xl border border-purple-200 bg-purple-50 text-xs font-bold text-purple-700">Need video</button>
                     <button type="button" data-ky-evidence-filter="missing_file" class="px-3 py-2 rounded-xl border border-red-200 bg-red-50 text-xs font-bold text-red-700">Missing file</button>
                 </div>
             </div>
-            <div class="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-5">
+            <div class="grid grid-cols-2 lg:grid-cols-3 2xl:grid-cols-6 gap-3 mb-5">
                 ${metric(summary.complete, 'File + video complete', 'border-emerald-100 bg-emerald-50 text-emerald-700', 'complete')}
+                ${metric(summary.productionVideo, 'Production video', 'border-sky-100 bg-sky-50 text-sky-700', 'production_video')}
+                ${metric(summary.verifiedExternalVideo, 'Verified external video', 'border-teal-100 bg-teal-50 text-teal-700', 'external_verified')}
+                ${metric(summary.pendingExternalVideo, 'External pending verify', 'border-amber-100 bg-amber-50 text-amber-700', 'external_pending')}
                 ${metric(summary.waitingVideo, 'Waiting for video', 'border-purple-100 bg-purple-50 text-purple-700', 'waiting_video')}
-                ${metric(summary.missingFile, 'Missing file', 'border-red-100 bg-red-50 text-red-700', 'missing_file')}
+                ${metric(summary.missingFile, 'Missing required file', 'border-red-100 bg-red-50 text-red-700', 'missing_file')}
                 ${metric(`${summary.complete}/${summary.total} = ${summary.completionPct}%`, 'Video completion rate', 'border-indigo-100 bg-indigo-50 text-indigo-700', 'no_video')}
             </div>
             <div class="grid grid-cols-1 2xl:grid-cols-[minmax(0,1.45fr)_minmax(320px,0.55fr)] gap-4">
@@ -1253,7 +1305,7 @@ function buildKyEvidenceUnitRows(records) {
         row.submitted += 1;
         const status = kyEvidenceStatus(record).id;
         if (status === 'complete') row.complete += 1;
-        else if (status === 'waiting_video') row.waitingVideo += 1;
+        else if (status === 'waiting_video' || status === 'external_pending') row.waitingVideo += 1;
         else row.missingFile += 1;
         if (!kyHasEvidenceVideo(record)) row.noVideo += 1;
     });
@@ -1359,7 +1411,7 @@ function buildConfiguredKyEvidenceRows(records) {
         row.submitted += 1;
         const status = kyEvidenceStatus(record).id;
         if (status === 'complete') row.complete += 1;
-        else if (status === 'waiting_video') row.waitingVideo += 1;
+        else if (status === 'waiting_video' || status === 'external_pending') row.waitingVideo += 1;
         else row.missingFile += 1;
     });
     return Array.from(rows.values()).map(row => ({
@@ -1480,7 +1532,7 @@ function renderConfiguredKyEvidenceDrilldown(row, records) {
     const matching = records.filter(record =>
         String(record.Department || '').trim() === row.department
         && String(record.SafetyUnit || '').trim() === String(row.safetyUnit || '').trim())
-        .filter(record => _kyEvidenceChartFilter === 'all' || kyEvidenceStatus(record).id === _kyEvidenceChartFilter)
+        .filter(record => filterKyEvidenceRecords([record], _kyEvidenceChartFilter).length > 0)
         .sort((a, b) => String(b.ActivityDate || '').localeCompare(String(a.ActivityDate || '')));
     return `
         <div class="border-t-2 border-indigo-100 bg-indigo-50/40 px-1 py-4" data-ky-evidence-drilldown>
@@ -1521,7 +1573,7 @@ function openConfiguredKyEvidencePopup(row, records) {
         && (row.isDepartmentScope
             ? String(record.SafetyUnit || '').trim() === ''
             : String(record.SafetyUnit || '').trim() === String(row.safetyUnit || row.unitLabel || '').trim()))
-        .filter(record => _kyEvidenceChartFilter === 'all' || kyEvidenceStatus(record).id === _kyEvidenceChartFilter)
+        .filter(record => filterKyEvidenceRecords([record], _kyEvidenceChartFilter).length > 0)
         .sort((a, b) => String(b.ActivityDate || '').localeCompare(String(a.ActivityDate || '')));
     const display = getKyEvidenceDisplay(row);
     const title = display.secondary ? `${display.primary} - ${display.secondary}` : display.primary;
@@ -1570,11 +1622,27 @@ function renderKyEvidenceFollowupPanel(records) {
         return;
     }
     _kyEvidenceRecords = records;
+    const summary = summarizeKyEvidence(records);
     const rows = buildConfiguredKyEvidenceRows(records);
+    const belongsToScope = (record, row) => {
+        if (String(record.Department || '').trim() !== row.department) return false;
+        const recordUnit = String(record.SafetyUnit || '').trim();
+        return row.isDepartmentScope ? recordUnit === '' : recordUnit === String(row.safetyUnit || '').trim();
+    };
+    const rowHasEvidenceState = (row, filter) => records.some(record => {
+        if (!belongsToScope(record, row)) return false;
+        if (filter === 'production_video') return kyHasProductionVideo(record);
+        if (filter === 'external_verified') return !kyHasProductionVideo(record) && kyHasVerifiedExternalVideo(record);
+        if (filter === 'external_pending') return !kyHasProductionVideo(record) && !kyHasVerifiedExternalVideo(record) && kyHasPendingExternalVideo(record);
+        return true;
+    });
     const visibleRows = rows.filter(row => {
         if (_kyEvidenceChartFilter === 'complete') return row.complete > 0;
         if (_kyEvidenceChartFilter === 'waiting_video') return row.waitingVideo > 0;
         if (_kyEvidenceChartFilter === 'missing_file') return row.missingFile > 0;
+        if (['production_video', 'external_verified', 'external_pending'].includes(_kyEvidenceChartFilter)) {
+            return rowHasEvidenceState(row, _kyEvidenceChartFilter);
+        }
         return true;
     });
     if (_kyEvidenceSelectedKey && !rows.some(row => row.key === _kyEvidenceSelectedKey)) _kyEvidenceSelectedKey = '';
@@ -1601,6 +1669,14 @@ function renderKyEvidenceFollowupPanel(records) {
     const filterButton = (id, label, activeClass) => `
         <button type="button" data-ky-evidence-chart-filter="${id}"
             class="px-3 py-2 rounded-lg border text-xs font-bold transition-colors ${_kyEvidenceChartFilter === id ? activeClass : 'border-slate-200 bg-white text-slate-600 hover:bg-slate-50'}">${label}</button>`;
+    const evidenceMetric = (value, label, tone, filter) => `
+        <button type="button" data-ky-evidence-chart-filter="${filter}"
+            class="rounded-xl border px-3 py-3 text-left transition-all hover:-translate-y-0.5 hover:shadow-sm ${tone}">
+            <div class="text-xl font-black">${escHtml(String(value))}</div>
+            <div class="text-[11px] font-bold mt-1">${escHtml(label)}</div>
+        </button>`;
+    const verifiedVideoTotal = summary.productionVideo + summary.verifiedExternalVideo;
+    const verifiedVideoRate = summary.total ? Math.round((verifiedVideoTotal / summary.total) * 100) : 0;
     el.innerHTML = `
         <div class="ds-section p-5" data-ky-card-image="ky-evidence-completion" data-ky-evidence-overview>
             <div class="flex flex-col lg:flex-row lg:items-end justify-between gap-4 mb-5">
@@ -1612,9 +1688,18 @@ function renderKyEvidenceFollowupPanel(records) {
                 <div class="flex flex-wrap gap-2" data-ky-card-ignore>
                     ${filterButton('all', 'ทั้งหมด', 'border-slate-700 bg-slate-800 text-white')}
                     ${filterButton('complete', 'หลักฐานครบ', 'border-emerald-600 bg-emerald-600 text-white')}
+                    ${filterButton('production_video', 'Production', 'border-sky-600 bg-sky-600 text-white')}
+                    ${filterButton('external_verified', 'External verified', 'border-teal-600 bg-teal-600 text-white')}
+                    ${filterButton('external_pending', 'External pending', 'border-amber-500 bg-amber-500 text-white')}
                     ${filterButton('waiting_video', 'รอวิดีโอ', 'border-violet-600 bg-violet-600 text-white')}
                     ${filterButton('missing_file', 'ขาดไฟล์', 'border-rose-600 bg-rose-600 text-white')}
                 </div>
+            </div>
+            <div class="grid grid-cols-2 md:grid-cols-4 gap-3 mb-5" data-ky-video-evidence-summary>
+                ${evidenceMetric(summary.productionVideo, 'Production video', 'border-sky-100 bg-sky-50 text-sky-700', 'production_video')}
+                ${evidenceMetric(summary.verifiedExternalVideo, 'Verified external video', 'border-teal-100 bg-teal-50 text-teal-700', 'external_verified')}
+                ${evidenceMetric(summary.pendingExternalVideo, 'External pending verify', 'border-amber-100 bg-amber-50 text-amber-700', 'external_pending')}
+                ${evidenceMetric(`${verifiedVideoTotal}/${summary.total} · ${verifiedVideoRate}%`, 'Verified video evidence', 'border-indigo-100 bg-indigo-50 text-indigo-700', 'all')}
             </div>
             <div class="flex flex-wrap items-center gap-x-4 gap-y-2 border-y border-slate-100 py-3 text-[11px] font-bold">
                 <span class="inline-flex items-center gap-1.5 text-emerald-700"><span class="h-2.5 w-2.5 rounded-sm bg-emerald-500"></span>หลักฐานครบ</span>
@@ -3510,6 +3595,9 @@ async function renderHistory(container) {
                         <select id="ky-hist-evidence" class="form-input py-2 text-sm min-w-0">
                             <option value="all" ${_filterHistEvidence==='all'?'selected':''}>All evidence</option>
                             <option value="complete" ${_filterHistEvidence==='complete'?'selected':''}>File + video complete</option>
+                            <option value="production_video" ${_filterHistEvidence==='production_video'?'selected':''}>Production video</option>
+                            <option value="external_verified" ${_filterHistEvidence==='external_verified'?'selected':''}>Verified external video</option>
+                            <option value="external_pending" ${_filterHistEvidence==='external_pending'?'selected':''}>External video pending verify</option>
                             <option value="waiting_video" ${_filterHistEvidence==='waiting_video'?'selected':''}>Waiting for video</option>
                             <option value="no_video" ${_filterHistEvidence==='no_video'?'selected':''}>No video</option>
                             <option value="missing_file" ${_filterHistEvidence==='missing_file'?'selected':''}>Missing file</option>
@@ -4029,7 +4117,7 @@ async function renderKyAnnualVideoEvidence(panel = document.getElementById('ky-m
                         <button type="button" data-ky-annual-delete-selected class="px-4 py-2 rounded-xl bg-rose-600 text-white text-xs font-bold disabled:opacity-40">ลบไฟล์ Production ที่เลือก</button>
                     </div>
                     <div class="overflow-x-auto"><table class="ds-table text-sm"><thead><tr><th class="px-3 py-3"><input type="checkbox" data-ky-annual-check-all></th><th class="px-3 py-3">Scope / Activity</th><th class="px-3 py-3">Storage</th><th class="px-3 py-3">Metadata</th><th class="px-3 py-3">Status</th><th class="px-3 py-3 text-right">Action</th></tr></thead><tbody>
-                        ${evidence.length ? evidence.map(row => `<tr>
+                        ${evidence.length ? evidence.map(row => `<tr data-ky-annual-evidence-row="${escHtml(row.id)}">
                             <td class="px-3 py-3"><input type="checkbox" data-ky-annual-select value="${escHtml(row.id)}" data-version="${Number(row.RowVersion||0)}" ${row.canDeleteProductionFile?'':'disabled'}></td>
                             <td class="px-3 py-3"><p class="font-bold text-slate-800">${escHtml(row.Department||'-')}</p><p class="text-xs text-slate-500">${escHtml(row.SafetyUnit||'ระดับ Department')} · ${escHtml(row.ActivityID||'-')}</p></td>
                             <td class="px-3 py-3"><p class="text-xs font-bold ${row.StorageMode==='CentralMachine'?'text-teal-700':'text-indigo-700'}">${escHtml(row.StorageMode||'-')}</p><p class="text-[10px] text-slate-400 max-w-[220px] truncate" title="${escHtml(row.ExternalReference||'')}">${escHtml(row.ExternalReference||'Production')}</p></td>
@@ -4046,7 +4134,7 @@ async function renderKyAnnualVideoEvidence(panel = document.getElementById('ky-m
                         </tr>`).join('') : '<tr><td colspan="6" class="py-8 text-center text-sm text-slate-400">ยังไม่มีทะเบียนหลักฐานวิดีโอรายปี</td></tr>'}
                     </tbody></table></div>
                 </div>
-                ${candidates.length ? `<div class="ds-section p-5"><h3 class="font-bold text-slate-800">วิดีโอเดิมที่ยังไม่ลงทะเบียน (${candidates.length})</h3><p class="text-xs text-slate-500 mt-1 mb-3">ลงทะเบียน Metadata และ SHA-256 จากไฟล์ Production เดิมก่อน Admin Verify</p><div class="grid grid-cols-1 lg:grid-cols-2 gap-2 max-h-72 overflow-y-auto">${candidates.map(row=>`<div class="rounded-xl border border-slate-200 p-3 flex items-center justify-between gap-3"><div class="min-w-0"><p class="text-xs font-bold text-slate-800 truncate">${escHtml(row.Department||'-')} · ${escHtml(row.SafetyUnit||'Department')}</p><p class="text-[10px] text-slate-500 truncate">${escHtml(row.TeamName||row.KYTKeyword||row.id)}</p></div><button data-ky-annual-register-production="${escHtml(row.id)}" class="px-3 py-1.5 rounded-lg bg-indigo-600 text-white text-[10px] font-bold whitespace-nowrap">ลงทะเบียน</button></div>`).join('')}</div></div>`:''}
+                ${candidates.length ? `<div class="ds-section p-5"><h3 class="font-bold text-slate-800">วิดีโอ Production เดิม (${candidates.length})</h3><p class="text-xs text-slate-500 mt-1 mb-3">หนึ่ง Department / Safety Unit ใช้หลักฐานหลัก 1 รายการต่อปี รายการที่มีทะเบียนแล้วจะพาไปยังหลักฐานเดิมและไม่ลงทะเบียนซ้ำ</p><div class="grid grid-cols-1 lg:grid-cols-2 gap-2 max-h-72 overflow-y-auto">${candidates.map(row=>`<div class="rounded-xl border ${row.ScopeAlreadyRegistered?'border-emerald-200 bg-emerald-50/40':'border-slate-200'} p-3 flex items-center justify-between gap-3"><div class="min-w-0"><p class="text-xs font-bold text-slate-800 truncate">${escHtml(row.Department||'-')} · ${escHtml(row.SafetyUnit||'Department')}</p><p class="text-[10px] text-slate-500 truncate">${escHtml(row.TeamName||row.KYTKeyword||row.id)}</p>${row.ScopeAlreadyRegistered?`<p class="text-[10px] font-bold mt-1 ${row.ScopeEvidenceStatus==='Verified'?'text-emerald-700':'text-amber-700'}">Scope นี้มีหลักฐาน ${escHtml(row.ScopeEvidenceStatus||'Pending')} แล้ว</p>`:''}</div>${row.ScopeAlreadyRegistered?`<button data-ky-annual-focus-evidence="${escHtml(row.ScopeEvidenceID||'')}" class="px-3 py-1.5 rounded-lg border border-emerald-300 bg-white text-emerald-700 text-[10px] font-bold whitespace-nowrap">ดูรายการเดิม</button>`:`<button data-ky-annual-register-production="${escHtml(row.id)}" class="px-3 py-1.5 rounded-lg bg-indigo-600 text-white text-[10px] font-bold whitespace-nowrap">ลงทะเบียน</button>`}</div>`).join('')}</div></div>`:''}
             </div>`;
     } catch (err) {
         panel.innerHTML = `<div class="ds-section p-6 text-center text-sm text-red-600">${escHtml(err.message || 'โหลด Annual Video Evidence ไม่สำเร็จ')}</div>`;
@@ -4064,6 +4152,16 @@ async function showKyAnnualAudit(id) {
     const response = await API.get(`/ky/annual-video-evidence/${encodeURIComponent(id)}/audit`);
     const rows = normalizeApiArray(response?.data ?? response);
     openModal('Annual Video Evidence Audit', `<div class="space-y-2 max-h-[60vh] overflow-y-auto">${rows.length?rows.map(row=>`<div class="rounded-xl border border-slate-200 p-3"><div class="flex justify-between gap-3"><p class="text-xs font-bold text-slate-800">${escHtml(row.Action||'-')}</p><p class="text-[10px] text-slate-400">${escHtml(row.CreatedAt||'')}</p></div><p class="text-xs text-slate-500 mt-1">${escHtml(row.ActorName||row.ActorID||'-')} · ${escHtml(row.Detail||'')}</p></div>`).join(''):'<p class="text-sm text-slate-400">ยังไม่มี Audit</p>'}</div>`, 'max-w-2xl');
+}
+
+function focusKyAnnualEvidenceRow(evidenceId) {
+    const target = Array.from(document.querySelectorAll('[data-ky-annual-evidence-row]'))
+        .find(row => String(row.dataset.kyAnnualEvidenceRow || '') === String(evidenceId || ''));
+    if (!target) return false;
+    target.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    target.classList.add('ring-2', 'ring-emerald-400', 'bg-emerald-50');
+    window.setTimeout(() => target.classList.remove('ring-2', 'ring-emerald-400', 'bg-emerald-50'), 2400);
+    return true;
 }
 
 function renderManageConfig(wrap) {
@@ -5135,6 +5233,14 @@ async function showManageModal(id) {
         const manageYear = r.ActivityDate ? new Date(r.ActivityDate).getFullYear() : new Date().getFullYear();
         const activityDateValue = r.ActivityDate ? new Date(r.ActivityDate).toISOString().split('T')[0] : new Date().toISOString().split('T')[0];
         await Promise.all([_fetchDepartments(), _fetchProgramConfig(manageYear)]);
+        let existingAnnualEvidence = null;
+        try {
+            const annualResponse = await API.get(`/ky/annual-video-evidence?year=${encodeURIComponent(manageYear)}`);
+            const annualData = normalizeApiObject(annualResponse?.data ?? annualResponse);
+            existingAnnualEvidence = normalizeApiArray(annualData.evidence || []).find(item => String(item.ActivityID || '') === String(r.id)) || null;
+        } catch (annualError) {
+            console.warn('KY annual evidence lookup unavailable in manage modal:', annualError);
+        }
         const manageDeptOptions = buildKyDepartmentOptions(r.Department || '', manageYear);
         const manageUnitOptions = (department, selectedUnit, year) => {
             const units = getKySafetyUnitsForDept(department, year);
@@ -5238,6 +5344,24 @@ async function showManageModal(id) {
                         </div>
                     </div>
 
+                    <div class="rounded-xl border border-teal-200 bg-teal-50/60 p-4">
+                        <label class="flex items-start gap-3 ${existingAnnualEvidence?.Status === 'Verified' ? 'opacity-70' : 'cursor-pointer'}">
+                            <input type="checkbox" id="ky-manage-video-central-machine" class="mt-1 rounded border-teal-300 text-teal-600 focus:ring-teal-500"
+                                   ${existingAnnualEvidence?.Status === 'Verified' ? 'disabled' : ''}>
+                            <span>
+                                <span class="block text-sm font-bold text-teal-800">เก็บวิดีโอไว้ที่เครื่องกลาง (ไม่อัปโหลดขึ้น Production)</span>
+                                <span class="block text-xs text-teal-700 mt-1">ใช้ไฟล์ที่เลือกด้านบนเพื่อคำนวณ Metadata และ SHA-256 ใน Browser เท่านั้น รายการจะนับเป็นหลักฐานหลัง Admin Verify</span>
+                            </span>
+                        </label>
+                        ${existingAnnualEvidence ? `<div class="mt-3 text-xs font-semibold ${existingAnnualEvidence.Status === 'Verified' ? 'text-emerald-700' : 'text-amber-700'}">Annual evidence ปัจจุบัน: ${escHtml(existingAnnualEvidence.Status || '-')} · ${escHtml(existingAnnualEvidence.StorageMode || '-')}</div>` : ''}
+                        <div id="ky-manage-central-reference-wrap" class="hidden mt-3">
+                            <label class="block text-xs font-bold text-teal-800 mb-1">ตำแหน่งไฟล์ / เลขอ้างอิงเครื่องกลาง</label>
+                            <input type="text" id="ky-manage-video-central-reference" class="form-input w-full"
+                                   placeholder="เช่น \\FILESERVER\\KYT\\2026\\MAINTENANCE\\video.mp4">
+                            <p class="text-[11px] text-teal-700 mt-1">กิจกรรมต้องมีสถานะ “ปิดแล้ว” และไฟล์จะยังไม่ถูกนับจนกว่าจะ Verify ใน Annual Compliance Dashboard</p>
+                        </div>
+                    </div>
+
                     <div class="flex justify-end gap-3 pt-4 border-t border-slate-100">
                         <button type="button" class="btn btn-secondary px-4"
                                 onclick="document.getElementById('modal-close-btn').click()">ยกเลิก</button>
@@ -5253,6 +5377,9 @@ async function showManageModal(id) {
         });
         document.getElementById('ky-manage-video')?.addEventListener('change', (e) => {
             validateKySelectedFile(e.target, 'video');
+        });
+        document.getElementById('ky-manage-video-central-machine')?.addEventListener('change', (e) => {
+            document.getElementById('ky-manage-central-reference-wrap')?.classList.toggle('hidden', !e.target.checked);
         });
 
         const refreshManageSafetyUnit = async () => {
@@ -5276,21 +5403,54 @@ async function showManageModal(id) {
                 showLoading('กำลังบันทึก...');
                 const fd = new FormData(e.target);
                 const videoFile = document.getElementById('ky-manage-video')?.files?.[0] || null;
+                const centralMachine = Boolean(document.getElementById('ky-manage-video-central-machine')?.checked);
+                const centralReference = String(document.getElementById('ky-manage-video-central-reference')?.value || '').trim();
+                const selectedStatus = String(fd.get('Status') || r.Status || '');
+                if (centralMachine && selectedStatus !== 'Closed') {
+                    showToast('การบันทึกวิดีโอเครื่องกลางทำได้เมื่อกิจกรรมมีสถานะปิดแล้วเท่านั้น', 'warning');
+                    return;
+                }
+                if (centralMachine && (!videoFile || !centralReference)) {
+                    showToast('กรุณาเลือกไฟล์วิดีโอและระบุตำแหน่ง/เลขอ้างอิงเครื่องกลาง', 'warning');
+                    return;
+                }
                 fd.delete('id');
                 fd.delete('video');
                 await API.put(`/ky/${r.id}`, fd);
                 let videoUploadFailed = false;
+                let videoEvidenceFailureMessage = '';
                 if (videoFile) {
                     try {
-                        await uploadKyVideoInChunks(r.id, videoFile, (completed, total, done, meta) => setKyVideoUploadProgress(saveBtn, completed, total, done, meta));
+                        if (centralMachine) {
+                            saveBtn.textContent = 'กำลังคำนวณ SHA-256...';
+                            const sha256 = await sha256Blob(videoFile);
+                            await API.post('/ky/annual-video-evidence/declare', {
+                                activityId: r.id,
+                                storageMode: 'CentralMachine',
+                                externalBackupConfirmed: true,
+                                externalReference: centralReference,
+                                originalFileName: videoFile.name,
+                                mimeType: videoFile.type || 'application/octet-stream',
+                                fileSize: videoFile.size,
+                                sha256,
+                                rowVersion: Number(existingAnnualEvidence?.RowVersion || 0),
+                            });
+                        } else {
+                            await uploadKyVideoInChunks(r.id, videoFile, (completed, total, done, meta) => setKyVideoUploadProgress(saveBtn, completed, total, done, meta));
+                        }
                     } catch (videoError) {
                         videoUploadFailed = true;
+                        videoEvidenceFailureMessage = centralMachine
+                            ? 'บันทึกกิจกรรมแล้ว แต่บันทึก Metadata วิดีโอเครื่องกลางไม่สำเร็จ กรุณาเปิดรายการแล้วลองอีกครั้ง'
+                            : '';
                         console.error('KY admin video replacement failed:', videoError);
                     }
                 }
                 closeModal();
                 showToast(
-                    videoUploadFailed
+                    videoUploadFailed && videoEvidenceFailureMessage
+                        ? videoEvidenceFailureMessage
+                        : videoUploadFailed
                         ? 'บันทึกข้อมูลกิจกรรมแล้ว แต่วิดีโออัปโหลดไม่สำเร็จ กรุณาเปิดรายการแล้วลองแนบอีกครั้ง'
                         : 'อัปเดตกิจกรรม KY สำเร็จ',
                     videoUploadFailed ? 'warning' : 'success'
@@ -5347,11 +5507,31 @@ function setupEventListeners() {
 
         const annualRegisterBtn = e.target.closest('[data-ky-annual-register-production]');
         if (annualRegisterBtn) {
-            await runKyButtonAction(annualRegisterBtn, 'กำลังตรวจ SHA...', async () => {
-                await API.post('/ky/annual-video-evidence/declare', { activityId: annualRegisterBtn.dataset.kyAnnualRegisterProduction, storageMode: 'Production' });
-                showToast('ลงทะเบียนวิดีโอ Production แล้ว รอ Admin Verify', 'success');
-                await renderKyAnnualVideoEvidence();
-            });
+            const activityId = annualRegisterBtn.dataset.kyAnnualRegisterProduction;
+            try {
+                await runKyButtonAction(annualRegisterBtn, 'กำลังตรวจ SHA...', async () => {
+                    await API.post('/ky/annual-video-evidence/declare', { activityId, storageMode: 'Production' });
+                    showToast('ลงทะเบียนวิดีโอ Production แล้ว รอ Admin Verify', 'success');
+                    await renderKyAnnualVideoEvidence();
+                });
+            } catch (error) {
+                if (error?.code === 'KY_ANNUAL_VIDEO_ALREADY_VERIFIED' || error?.code === 'KY_ANNUAL_VIDEO_STALE') {
+                    await renderKyAnnualVideoEvidence();
+                    const refreshed = (_kyAnnualVideoData?.candidates || []).find(row => String(row.id) === String(activityId));
+                    if (refreshed?.ScopeEvidenceID) focusKyAnnualEvidenceRow(refreshed.ScopeEvidenceID);
+                    showToast('Scope นี้มีหลักฐานรายปีอยู่แล้ว ระบบพาไปยังรายการเดิมโดยไม่ลงทะเบียนซ้ำ', 'warning');
+                } else {
+                    showError(error);
+                }
+            }
+            return;
+        }
+
+        const annualFocusBtn = e.target.closest('[data-ky-annual-focus-evidence]');
+        if (annualFocusBtn) {
+            if (!focusKyAnnualEvidenceRow(annualFocusBtn.dataset.kyAnnualFocusEvidence)) {
+                showToast('ไม่พบรายการหลักฐานเดิม กรุณารีเฟรชหน้าแล้วลองอีกครั้ง', 'warning');
+            }
             return;
         }
 
@@ -6150,9 +6330,12 @@ function _buildKyExecutivePdfPage2(data, actionItems, evidenceData, fileHealthDa
         sum.complete += Number(row.complete || 0);
         sum.waitingVideo += Number(row.waitingVideo || 0);
         sum.missingFile += Number(row.missingFile || 0);
+        sum.productionVideo += Number(row.productionVideo || 0);
+        sum.verifiedExternalVideo += Number(row.verifiedExternalVideo || 0);
+        sum.pendingExternalVideo += Number(row.pendingExternalVideo || 0);
         if (!String(row.safetyUnit || '').trim()) sum.departmentScopes += 1;
         return sum;
-    }, { scopes: 0, submitted: 0, complete: 0, waitingVideo: 0, missingFile: 0, departmentScopes: 0 });
+    }, { scopes: 0, submitted: 0, complete: 0, waitingVideo: 0, missingFile: 0, productionVideo: 0, verifiedExternalVideo: 0, pendingExternalVideo: 0, departmentScopes: 0 });
     const fileHealthSummary = fileHealthData?.summary || null;
     const evidenceBox = (label, value, color, note = '') => `
         <div style="border:1px solid #e2e8f0;border-radius:9px;background:#fff;padding:8px;text-align:center;">
@@ -6242,8 +6425,12 @@ function _buildKyExecutivePdfPage2(data, actionItems, evidenceData, fileHealthDa
                 <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:6px;margin-top:7px;margin-bottom:8px;">
                     ${evidenceBox('Configured scopes', evidenceSummary.scopes || kpi.safetyUnitsTotal || '-', '#0f766e', `${evidenceSummary.departmentScopes || 0} dept scope`)}
                     ${evidenceBox('File+Video complete', evidenceSummary.complete || 0, '#059669')}
-                    ${evidenceBox('Waiting video', evidenceSummary.waitingVideo || 0, '#7c3aed', 'owner/submitter/participant/admin')}
+                    ${evidenceBox('Production video', evidenceSummary.productionVideo || 0, '#0284c7')}
+                    ${evidenceBox('External verified', evidenceSummary.verifiedExternalVideo || 0, '#0f766e')}
+                    ${evidenceBox('External pending', evidenceSummary.pendingExternalVideo || 0, '#d97706')}
+                    ${evidenceBox('Waiting video', evidenceSummary.waitingVideo || 0, '#7c3aed', 'includes pending verify')}
                     ${evidenceBox('Missing file', evidenceSummary.missingFile || 0, '#dc2626')}
+                    ${evidenceBox('Video rate', `${data.videoEvidence?.videoEvidenceRate || 0}%`, '#4f46e5')}
                 </div>
                 <div style="font-size:7.8px;color:#92400e;font-weight:800;margin:-2px 0 7px;">Source of truth: KY Program Config ${year}. Blank SafetyUnit rows are department scope; configured SafetyUnit rows are unit scope.</div>
                 <div style="border-top:1px solid #fde68a;margin-top:7px;padding-top:7px">

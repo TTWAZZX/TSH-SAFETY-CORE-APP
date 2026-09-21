@@ -20,9 +20,12 @@ for (const contract of [
     "evidence === 'complete'",
     "evidence === 'waiting_video'",
     "evidence === 'no_video'",
+    "evidence === 'production_video'",
+    "evidence === 'external_verified'",
+    "evidence === 'external_pending'",
     "evidence === 'missing_file'",
-    'ActivityDate BETWEEN ? AND ?',
-    'ReporterName LIKE ? OR SubmittedByName LIKE ?',
+    'a.ActivityDate BETWEEN ? AND ?',
+    'a.ReporterName LIKE ? OR a.SubmittedByName LIKE ?',
 ]) {
     assert.ok(nodeRoute.includes(contract), `Node KY list route is missing: ${contract}`);
 }
@@ -36,10 +39,10 @@ for (const contract of [
     "$_GET['source']",
     "$_GET['evidence']",
     "$_GET['q']",
-    'SubmittedByID IS NOT NULL AND SubmittedByID<>ReporterID',
-    "COALESCE(TRIM(AttachmentUrl),'')<>''",
-    'ActivityDate BETWEEN ? AND ?',
-    'ReporterName LIKE ? OR SubmittedByName LIKE ?',
+    'a.SubmittedByID IS NOT NULL AND a.SubmittedByID<>a.ReporterID',
+    "COALESCE(TRIM(a.AttachmentUrl),'')<>''",
+    'a.ActivityDate BETWEEN ? AND ?',
+    'a.ReporterName LIKE ? OR a.SubmittedByName LIKE ?',
 ]) {
     assert.ok(phpRoute.includes(contract), `PHP Production KY list route is missing: ${contract}`);
 }

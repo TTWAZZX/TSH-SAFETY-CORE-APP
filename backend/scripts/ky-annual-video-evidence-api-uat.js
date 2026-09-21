@@ -9,9 +9,11 @@ const baseUrl = String(process.env.KY_PHP_API_BASE || 'http://localhost/tsh-safe
 const testYear = 2198;
 const runId = crypto.randomUUID().replace(/-/g, '').slice(0, 12);
 const activities = [];
+const candidateActivities = [];
 const evidenceIds = [];
 const localFiles = [];
 let passed = false;
+let embeddedServer = null;
 
 function apiUrl(route) {
     if (!baseUrl.includes('?route=')) return `${baseUrl}/${route}`;
@@ -59,6 +61,10 @@ async function cleanup() {
         await db.query('DELETE FROM KY_Video_Reactions WHERE ActivityID=?', [activity.id]).catch(() => {});
         await db.query('DELETE FROM KY_Activities WHERE id=?', [activity.id]).catch(() => {});
     }
+    for (const activityId of candidateActivities) {
+        await db.query('DELETE FROM KY_Video_Reactions WHERE ActivityID=?', [activityId]).catch(() => {});
+        await db.query('DELETE FROM KY_Activities WHERE id=?', [activityId]).catch(() => {});
+    }
     for (const file of localFiles) {
         if (fs.existsSync(file)) fs.unlinkSync(file);
         const directory = path.dirname(file);
@@ -74,6 +80,13 @@ async function cleanup() {
 
 (async () => {
     try {
+        if (process.env.KY_UAT_EMBED_NODE === '1') {
+            const app = require('../server');
+            embeddedServer = await new Promise((resolve, reject) => {
+                const server = app.listen(5000, '127.0.0.1', () => resolve(server));
+                server.on('error', reject);
+            });
+        }
         const [admins] = await db.query("SELECT EmployeeID,EmployeeName,Role,Department FROM Employees WHERE LOWER(COALESCE(Role,''))='admin' LIMIT 1");
         assert.ok(admins.length, 'local Admin employee is required');
         assert.ok(process.env.JWT_SECRET, 'JWT_SECRET is required');
@@ -102,8 +115,8 @@ async function cleanup() {
             const videoUrl = `/safety/tsh-safety-core/uploads/${storedName}?filename=${encodeURIComponent(originalName)}`;
             await db.query(
                 `INSERT INTO KY_Activities
-                 (id,ActivityDate,ReporterID,ReporterName,SubmittedByID,SubmittedByName,Department,SafetyUnit,TeamName,Participants,KYTKeyword,RiskCategory,HazardDescription,Countermeasure,VideoUrl,Status)
-                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, '[]', 'annual-video-uat', 'General', 'Annual video evidence UAT', 'Temporary test row', ?, 'Open')`,
+                 (id,ActivityDate,ReporterID,ReporterName,SubmittedByID,SubmittedByName,Department,SafetyUnit,TeamName,Participants,KYTKeyword,RiskCategory,HazardDescription,Countermeasure,AttachmentUrl,VideoUrl,Status)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, '[]', 'annual-video-uat', 'General', 'Annual video evidence UAT', 'Temporary test row', '/uploads/ky-annual-uat-evidence.pdf', ?, 'Open')`,
                 [id, `${testYear}-09-${String(index + 1).padStart(2, '0')}`, admin.EmployeeID, admin.EmployeeName, admin.EmployeeID, admin.EmployeeName,
                     department, `Unit ${index + 1}`, `Annual UAT ${index + 1}`, videoUrl]
             );
@@ -143,6 +156,28 @@ async function cleanup() {
             activities[index].evidence = verified.data;
         }
 
+        const duplicateActivityId = crypto.randomUUID();
+        candidateActivities.push(duplicateActivityId);
+        const [[sourceActivity]] = await db.query('SELECT * FROM KY_Activities WHERE id=?', [activities[0].id]);
+        await db.query(
+            `INSERT INTO KY_Activities
+             (id,ActivityDate,ReporterID,ReporterName,SubmittedByID,SubmittedByName,Department,SafetyUnit,TeamName,Participants,KYTKeyword,RiskCategory,HazardDescription,Countermeasure,AttachmentUrl,VideoUrl,Status)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, '[]', 'annual-video-duplicate-scope', 'General', 'Duplicate annual scope UAT', 'Temporary test row', '/uploads/ky-annual-uat-evidence.pdf', ?, 'Closed')`,
+            [duplicateActivityId, sourceActivity.ActivityDate, admin.EmployeeID, admin.EmployeeName, admin.EmployeeID, admin.EmployeeName,
+                sourceActivity.Department, sourceActivity.SafetyUnit, 'Annual duplicate scope UAT', sourceActivity.VideoUrl]
+        );
+        const annualDashboard = (await request(`ky/annual-video-evidence?year=${testYear}`, { headers })).body.data;
+        const duplicateCandidate = annualDashboard.candidates.find(row => String(row.id) === duplicateActivityId);
+        assert.ok(duplicateCandidate, 'a second Production video in the same annual scope must remain visible for Admin review');
+        assert.strictEqual(Boolean(duplicateCandidate.ScopeAlreadyRegistered), true, 'candidate must identify its already-registered annual scope');
+        assert.strictEqual(duplicateCandidate.ScopeEvidenceStatus, 'Verified', 'candidate must expose the verified scope status');
+        assert.strictEqual(String(duplicateCandidate.ScopeEvidenceID), String(activities[0].evidence.id), 'candidate must link to the existing evidence row');
+        await assert.rejects(
+            post('ky/annual-video-evidence/declare', headers, { activityId: duplicateActivityId, storageMode: 'Production' }),
+            /409 KY_ANNUAL_VIDEO_ALREADY_VERIFIED/
+        );
+        await db.query('DELETE FROM KY_Activities WHERE id=?', [duplicateActivityId]);
+
         const deletedOne = await post('ky/annual-video-evidence/delete-production', headers, {
             items: [{ id: activities[0].evidence.id, rowVersion: activities[0].evidence.RowVersion }],
             reason: 'Local annual evidence single-file deletion UAT',
@@ -154,6 +189,27 @@ async function cleanup() {
             reason: 'Local annual evidence batch deletion UAT',
         });
         assert.strictEqual(deleted.data.deleted, 2, 'bulk deletion must remove every preflighted file');
+
+        const history = (await request(`ky?year=${testYear}`, { headers })).body.data;
+        const byId = new Map(history.map(row => [String(row.id), row]));
+        for (const activity of activities) {
+            const projected = byId.get(String(activity.id));
+            assert.ok(projected, 'deleted activity must remain visible in KY History');
+            assert.strictEqual(Number(projected.HasProductionVideo), 0, 'deleted Production video must no longer be projected');
+            assert.strictEqual(Number(projected.HasVerifiedExternalVideo), 1, 'verified external evidence must remain projected');
+            assert.strictEqual(Number(projected.HasVideoEvidence), 1, 'verified external evidence must count as video evidence');
+            assert.strictEqual(projected.VideoEvidenceStorage, 'ExternalVerified', 'history must identify the verified external storage source');
+        }
+        const externalFiltered = (await request(`ky?year=${testYear}&evidence=external_verified`, { headers })).body.data;
+        assert.deepStrictEqual(externalFiltered.map(row => String(row.id)).sort(), activities.map(row => String(row.id)).sort(), 'verified external filter must return deleted Production activities');
+        const completeFiltered = (await request(`ky?year=${testYear}&evidence=complete`, { headers })).body.data;
+        assert.deepStrictEqual(completeFiltered.map(row => String(row.id)).sort(), activities.map(row => String(row.id)).sort(), 'complete filter must accept required file plus verified external video');
+        const missingVideoFiltered = (await request(`ky?year=${testYear}&evidence=no_video`, { headers })).body.data;
+        assert.ok(activities.every(activity => !missingVideoFiltered.some(row => String(row.id) === String(activity.id))), 'no-video filter must exclude verified external evidence');
+        const stats = (await request(`ky/stats?year=${testYear}`, { headers })).body.data.videoEvidence;
+        assert.strictEqual(Number(stats.productionVideo), 0, 'stats must not retain deleted Production video copies');
+        assert.strictEqual(Number(stats.verifiedExternalVideo), 3, 'stats must count verified external evidence');
+        assert.strictEqual(Number(stats.videoEvidenceTotal), 3, 'combined stats must count every verified external activity');
 
         for (const activity of activities) {
             assert.ok(!fs.existsSync(activity.localPath), 'Production file must be removed after successful batch deletion');
@@ -180,12 +236,17 @@ async function cleanup() {
                 const [[activityResidue]] = await db.query('SELECT COUNT(*) AS count FROM KY_Activities WHERE id=?', [activity.id]);
                 assert.strictEqual(Number(activityResidue.count), 0, 'test activity cleanup must leave no row residue');
             }
+            for (const activityId of candidateActivities) {
+                const [[candidateResidue]] = await db.query('SELECT COUNT(*) AS count FROM KY_Activities WHERE id=?', [activityId]);
+                assert.strictEqual(Number(candidateResidue.count), 0, 'duplicate-scope candidate cleanup must leave no row residue');
+            }
             for (const file of localFiles) assert.ok(!fs.existsSync(file), 'test file cleanup must leave no file residue');
         }
+        if (embeddedServer) await new Promise(resolve => embeddedServer.close(resolve));
         await db.end();
-        if (passed) console.log('KY annual video evidence API UAT: PASS (declare/verify/download/hash/protected delete/single delete/bulk delete/metadata/audit/zero residue)');
+        if (passed) console.log('KY annual video evidence API UAT: PASS (declare/verify/duplicate-scope redirect contract/download/hash/protected delete/single delete/bulk delete/metadata/audit/zero residue)');
     }
 })().catch(error => {
-    console.error(`KY annual video evidence API UAT: FAIL - ${error.message}`);
+    console.error(`KY annual video evidence API UAT: FAIL - ${error.message}`, error.cause || error.stack || '');
     process.exitCode = 1;
 });

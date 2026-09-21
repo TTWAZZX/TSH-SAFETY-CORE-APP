@@ -11,10 +11,15 @@ require('dotenv').config({ path: path.join(__dirname, '..', '.env'), quiet: true
 
 const appUrl = process.env.KY_BROWSER_APP_URL || 'http://localhost/tsh-safety-core/index.html';
 const apiUrl = String(process.env.KY_BROWSER_API_URL || 'http://127.0.0.1:5000').replace(/\/+$/, '');
+const usePhpApi = process.env.KY_BROWSER_USE_PHP === '1';
+const browserApiBase = usePhpApi
+    ? String(process.env.KY_BROWSER_PHP_API_BASE || 'http://localhost/tsh-safety-core/api/index.php?route=')
+    : `${apiUrl}/api`;
 const chromePath = process.env.KY_BROWSER_PATH || 'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe';
 const port = Number(process.env.KY_BROWSER_CDP_PORT || 9851);
 const profile = fs.mkdtempSync(path.join(os.tmpdir(), 'tsh-ky-annual-browser-'));
 const consoleErrors = [];
+const failedResponses = [];
 const mutationRequests = [];
 const pending = new Map();
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
@@ -22,6 +27,8 @@ let commandId = 1;
 let chrome;
 let socket;
 let db;
+let apiServer;
+let apiServerOutput = '';
 
 function command(method, params = {}, timeout = 60000) {
     const id = commandId++;
@@ -75,6 +82,12 @@ async function connectChrome() {
             const request = message.params?.request || {};
             if (String(request.url || '').includes('/api/ky') && !['GET', 'OPTIONS'].includes(String(request.method || '').toUpperCase())) mutationRequests.push(`${request.method} ${request.url}`);
         }
+        if (message.method === 'Network.responseReceived') {
+            const response = message.params?.response || {};
+            if (Number(response.status || 0) >= 400 && String(response.url || '').includes('/api/')) {
+                failedResponses.push(`${response.status} ${response.url}`);
+            }
+        }
         const current = pending.get(message.id);
         if (!current) return;
         pending.delete(message.id);
@@ -88,17 +101,52 @@ async function connectChrome() {
     await command('Page.enable');
     await command('Runtime.enable');
     await command('Network.enable');
-    await command('Page.addScriptToEvaluateOnNewDocument', { source: `window.API_BASE=${JSON.stringify(`${apiUrl}/api`)};` });
+    const phpRouteFetchShim = usePhpApi ? `
+        const kyNativeFetch = window.fetch.bind(window);
+        window.fetch = (input, init) => {
+            const rawUrl = typeof input === 'string' ? input : input?.url;
+            if (!rawUrl || !rawUrl.startsWith(window.API_BASE)) return kyNativeFetch(input, init);
+            const queryOffset = rawUrl.indexOf('?', window.API_BASE.length);
+            if (queryOffset < 0) return kyNativeFetch(input, init);
+            const normalizedUrl = rawUrl.slice(0, queryOffset) + '&' + rawUrl.slice(queryOffset + 1);
+            return kyNativeFetch(typeof input === 'string' ? normalizedUrl : new Request(normalizedUrl, input), init);
+        };
+    ` : '';
+    await command('Page.addScriptToEvaluateOnNewDocument', { source: `window.API_BASE=${JSON.stringify(browserApiBase)};${phpRouteFetchShim}` });
 }
 
 async function apiJson(route, token) {
-    const response = await fetch(`${apiUrl}/api/${route}`, { headers: { Authorization: `Bearer ${token}` } });
+    const url = usePhpApi
+        ? `${browserApiBase}${route.replace('?', '&')}`
+        : `${apiUrl}/api/${route}`;
+    const response = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
     assert.strictEqual(response.status, 200, `${route} must be readable`);
     return response.json();
 }
 
+async function startNodeApiIfRequested() {
+    if (process.env.KY_BROWSER_START_NODE !== '1') return;
+    apiServer = spawn(process.execPath, [path.join(__dirname, '..', 'server.js')], {
+        cwd: path.join(__dirname, '..'),
+        stdio: ['ignore', 'pipe', 'pipe'],
+        windowsHide: true,
+    });
+    apiServer.stdout.on('data', chunk => { apiServerOutput += String(chunk); });
+    apiServer.stderr.on('data', chunk => { apiServerOutput += String(chunk); });
+    for (let attempt = 0; attempt < 80; attempt += 1) {
+        if (apiServer.exitCode !== null) throw new Error(`Node API exited before Browser UAT (code ${apiServer.exitCode})`);
+        try {
+            const response = await fetch(`${apiUrl}/api/ky/stats?year=2000`);
+            if (response.status > 0) return;
+        } catch (_) {}
+        await sleep(250);
+    }
+    throw new Error(`Timed out waiting for the local Node API: ${apiServerOutput.trim()}`);
+}
+
 (async () => {
     assert.ok(fs.existsSync(chromePath), 'Chrome is required');
+    await startNodeApiIfRequested();
     db = await mysql.createConnection({
         host: process.env.DB_HOST,
         user: process.env.DB_USER,
@@ -115,6 +163,7 @@ async function apiJson(route, token) {
     const user = { id: admin.EmployeeID, EmployeeID: admin.EmployeeID, name: admin.EmployeeName, EmployeeName: admin.EmployeeName, role: admin.Role, Role: admin.Role, department: admin.Department, Department: admin.Department, unit: admin.Unit, Unit: admin.Unit, position: admin.Position, Position: admin.Position };
     const year = new Date().getFullYear();
     const beforeStats = await apiJson(`ky/stats?year=${year}`, token);
+    const beforeEvidenceOverview = await apiJson(`ky/evidence-overview?year=${year}`, token);
     const beforeAnnual = await apiJson(`ky/annual-video-evidence?year=${year}`, token);
 
     await connectChrome();
@@ -122,6 +171,22 @@ async function apiJson(route, token) {
     await sleep(1200);
     await evaluate(`(()=>{localStorage.setItem('tsh_token',${JSON.stringify(token)});localStorage.setItem('tsh_user',${JSON.stringify(JSON.stringify(user))});localStorage.removeItem('tsh_active_tab_ky');location.hash='#ky';location.reload();return true;})()`);
     await waitFor(`document.querySelector('#ky-tab-btn-dashboard') && document.querySelector('#ky-kpi-row [data-ky-kpi-filter="all"]')`);
+    await waitFor(`document.querySelector('#ky-evidence-completion-panel')?.innerText && !document.querySelector('#ky-evidence-completion-panel')?.innerText.includes('Loading file / video progress')`);
+    const evidenceRecordCount = (beforeEvidenceOverview.data?.rows || []).reduce((total, row) => total + (row.records || []).length, 0);
+    if (evidenceRecordCount > 0) {
+        const splitEvidenceControls = await evaluate(`({
+            production:Boolean(document.querySelector('#ky-evidence-completion-panel [data-ky-evidence-chart-filter="production_video"]')),
+            externalVerified:Boolean(document.querySelector('#ky-evidence-completion-panel [data-ky-evidence-chart-filter="external_verified"]')),
+            externalPending:Boolean(document.querySelector('#ky-evidence-completion-panel [data-ky-evidence-chart-filter="external_pending"]'))
+        })`);
+        assert.deepStrictEqual(splitEvidenceControls, { production: true, externalVerified: true, externalPending: true }, 'Dashboard must expose split Production, verified external, and pending external evidence controls');
+    } else {
+        assert.match(await evaluate(`document.querySelector('#ky-evidence-completion-panel')?.innerText||''`), /No KY activity found/i, 'Empty evidence scope must render an explicit no-record state');
+    }
+    const videoEvidenceStats = beforeStats.data?.videoEvidence || {};
+    for (const key of ['productionVideo', 'verifiedExternalVideo', 'pendingExternalVideo', 'videoEvidenceTotal', 'missingVideoEvidence', 'videoEvidenceRate']) {
+        assert.ok(Object.prototype.hasOwnProperty.call(videoEvidenceStats, key), `KY stats must expose ${key}`);
+    }
 
     const renderedKpi = await evaluate(`[...document.querySelectorAll('#ky-kpi-row [data-ky-kpi-filter]')].reduce((out,el)=>{const key=el.dataset.kyKpiFilter;if(!(key in out))out[key]=el.querySelector('.text-2xl')?.textContent.trim();return out;},{})`);
     const kpi = beforeStats.data?.kpi || beforeStats.kpi || {};
@@ -137,10 +202,36 @@ async function apiJson(route, token) {
 
     await evaluate(`document.querySelector('#ky-tab-btn-history').click()`);
     await waitFor(`document.querySelector('#ky-history-clear')`);
+    const evidenceFilterOptions = await evaluate(`[...document.querySelectorAll('#ky-hist-evidence option')].map(option=>option.value)`);
+    assert.ok(evidenceFilterOptions.includes('production_video'), 'History must expose the Production video evidence filter');
+    assert.ok(evidenceFilterOptions.includes('external_verified'), 'History must expose the verified external video evidence filter');
+    assert.ok(evidenceFilterOptions.includes('external_pending'), 'History must expose the pending external video evidence filter');
+
+    const hasManageRecord = await evaluate(`Boolean(document.querySelector('.btn-ky-manage[data-id]'))`);
+    if (hasManageRecord) {
+        await evaluate(`document.querySelector('.btn-ky-manage[data-id]').click()`);
+        await waitFor(`document.querySelector('#ky-manage-video-central-machine') && document.querySelector('#ky-manage-video-central-reference')`);
+        const manageExternalContract = await evaluate(`(()=>({
+            hasVideoPicker:Boolean(document.querySelector('#ky-manage-video')),
+            hasCentralToggle:Boolean(document.querySelector('#ky-manage-video-central-machine')),
+            copy:document.querySelector('#ky-manage-video-central-machine')?.closest('div')?.innerText||''
+        }))()`);
+        assert.ok(manageExternalContract.hasVideoPicker && manageExternalContract.hasCentralToggle, 'Closed-activity Admin manage must expose metadata-only external video controls');
+        assert.match(manageExternalContract.copy, /SHA-256/i, 'External video control must explain browser-side SHA-256 metadata');
+        assert.match(manageExternalContract.copy, /Admin Verify/i, 'External video control must explain that evidence counts only after Admin Verify');
+        await evaluate(`document.querySelector('#modal-close-btn')?.click()`);
+        await sleep(250);
+    }
     await evaluate(`document.querySelector('#ky-tab-btn-manage').click()`);
     await waitFor(`document.querySelector('#ky-msub-annual-video')`);
     await evaluate(`document.querySelector('#ky-msub-annual-video').click()`);
     await waitFor(`document.querySelector('[data-ky-annual-delete-selected]') && document.querySelector('#ky-manage-panel')?.textContent.includes('Annual Compliance Dashboard')`);
+
+    const registeredCandidate = (beforeAnnual.data?.candidates || []).find(row => row.ScopeAlreadyRegistered && row.ScopeEvidenceID);
+    if (registeredCandidate) {
+        const focusContract = await evaluate(`(()=>{const id=${JSON.stringify(String(registeredCandidate.ScopeEvidenceID))};const button=[...document.querySelectorAll('[data-ky-annual-focus-evidence]')].find(item=>item.dataset.kyAnnualFocusEvidence===id);if(!button)return{found:false,highlighted:false};button.click();const row=[...document.querySelectorAll('[data-ky-annual-evidence-row]')].find(item=>item.dataset.kyAnnualEvidenceRow===id);return{found:true,highlighted:Boolean(row?.classList.contains('ring-2'))};})()`);
+        assert.deepStrictEqual(focusContract, { found: true, highlighted: true }, 'registered candidates must navigate to and highlight the existing annual evidence instead of posting a duplicate declaration');
+    }
 
     const annualUi = await evaluate(`(()=>({summaryCards:document.querySelector('[data-ky-annual-summary]')?.children.length||0,hasDownload:Boolean(document.querySelector('[data-ky-annual-download]'))||${JSON.stringify((beforeAnnual.data?.summary?.productionFiles || 0) === 0)},hasAudit:Boolean(document.querySelector('[data-ky-annual-audit]'))||${JSON.stringify((beforeAnnual.data?.evidence || []).length === 0)},bulk:Boolean(document.querySelector('[data-ky-annual-delete-selected]'))}))()`);
     assert.strictEqual(annualUi.summaryCards, 6, 'Annual dashboard must render six summary metrics');
@@ -159,12 +250,20 @@ async function apiJson(route, token) {
     assert.deepStrictEqual(mutationRequests, [], `Browser UAT sent mutations: ${mutationRequests.join(' | ')}`);
     assert.deepStrictEqual(consoleErrors, [], `Browser console errors: ${consoleErrors.join(' | ')}`);
     console.log('KY annual video Browser UI UAT: PASS (legacy KPI parity, submit/history/manage, annual dashboard, 3 viewports, zero writes/errors)');
-})().catch(error => {
+})().catch(async error => {
     console.error(error.stack || error);
+    if (socket) {
+        try {
+            const diagnostic = await evaluate(`({href:location.href,hash:location.hash,title:document.title,body:document.body?.innerText?.slice(0,500)||'',hasApp:Boolean(document.querySelector('#app'))})`);
+            const apiDiagnostic = await evaluate(`(async()=>{try{const response=await fetch(${JSON.stringify(`${browserApiBase}/ky/stats?year=${new Date().getFullYear()}`)},{headers:{Authorization:'Bearer '+localStorage.getItem('tsh_token')}});return{status:response.status,url:response.url,body:(await response.text()).slice(0,1000)}}catch(error){return{fetchError:String(error)}}})()`);
+            console.error('Browser diagnostic:', diagnostic, 'API:', apiDiagnostic, 'Failed responses:', failedResponses, 'Console:', consoleErrors);
+        } catch (_) {}
+    }
     process.exitCode = 1;
 }).finally(async () => {
     try { socket?.close(); } catch (_) {}
     try { chrome?.kill(); } catch (_) {}
+    try { apiServer?.kill(); } catch (_) {}
     if (db) await db.end();
     await fs.promises.rm(profile, { recursive: true, force: true }).catch(() => {});
 });

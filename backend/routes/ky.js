@@ -996,6 +996,55 @@ async function kyAnnualEvidenceRows(year) {
     return rows.map(kyAnnualEvidencePublic);
 }
 
+function kyProductionVideoSql(alias = 'a') {
+    return `COALESCE(TRIM(${alias}.VideoUrl), '') <> ''`;
+}
+
+function kyVerifiedExternalVideoSql(alias = 'a') {
+    return `EXISTS (
+        SELECT 1 FROM KY_Annual_Video_Evidence ave
+        WHERE ave.ActivityID = ${alias}.id
+          AND ave.StorageMode = 'CentralMachine'
+          AND ave.Status = 'Verified'
+          AND ave.ExternalBackupConfirmed = 1
+          AND COALESCE(TRIM(ave.ExternalReference), '') <> ''
+          AND ave.SHA256 REGEXP '^[0-9a-fA-F]{64}$'
+    )`;
+}
+
+function kyPendingExternalVideoSql(alias = 'a') {
+    return `EXISTS (
+        SELECT 1 FROM KY_Annual_Video_Evidence ave
+        WHERE ave.ActivityID = ${alias}.id
+          AND ave.StorageMode = 'CentralMachine'
+          AND ave.Status IN ('Pending', 'NeedsCorrection')
+          AND ave.ExternalBackupConfirmed = 1
+          AND COALESCE(TRIM(ave.ExternalReference), '') <> ''
+          AND ave.SHA256 REGEXP '^[0-9a-fA-F]{64}$'
+    )`;
+}
+
+function kyVideoEvidenceSql(alias = 'a') {
+    return `(${kyProductionVideoSql(alias)} OR ${kyVerifiedExternalVideoSql(alias)})`;
+}
+
+function kyVideoEvidenceSelectSql(alias = 'a') {
+    const production = kyProductionVideoSql(alias);
+    const verifiedExternal = kyVerifiedExternalVideoSql(alias);
+    const pendingExternal = kyPendingExternalVideoSql(alias);
+    return `
+        (${production}) AS HasProductionVideo,
+        (${verifiedExternal}) AS HasVerifiedExternalVideo,
+        (${pendingExternal}) AS HasPendingExternalVideo,
+        (${production} OR ${verifiedExternal}) AS HasVideoEvidence,
+        CASE
+            WHEN ${production} THEN 'Production'
+            WHEN ${verifiedExternal} THEN 'ExternalVerified'
+            WHEN ${pendingExternal} THEN 'ExternalPending'
+            ELSE 'Missing'
+        END AS VideoEvidenceStorage`;
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // EMPLOYEE SEARCH — for participant typeahead
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1069,6 +1118,9 @@ router.get('/stats', async (req, res) => {
         const deptFilter  = usingConfig && targetDepts.length > 0
             ? `AND Department IN (${targetDepts.map(() => '?').join(',')})`
             : '';
+        const evidenceDeptFilter = usingConfig && targetDepts.length > 0
+            ? `AND a.Department IN (${targetDepts.map(() => '?').join(',')})`
+            : '';
         const deptParams  = usingConfig && targetDepts.length > 0 ? targetDepts : [];
 
         // KPI
@@ -1082,6 +1134,29 @@ router.get('/stats', async (req, res) => {
             FROM KY_Activities
             WHERE YEAR(ActivityDate) = ? ${deptFilter}
         `, [year, ...deptParams]);
+
+        const productionVideo = kyProductionVideoSql('a');
+        const verifiedExternal = kyVerifiedExternalVideoSql('a');
+        const pendingExternal = kyPendingExternalVideoSql('a');
+        const [[videoEvidenceRow]] = await db.query(`
+            SELECT
+                SUM(${productionVideo}) AS productionVideo,
+                SUM(NOT (${productionVideo}) AND ${verifiedExternal}) AS verifiedExternalVideo,
+                SUM(${productionVideo} OR ${verifiedExternal}) AS videoEvidenceTotal,
+                SUM(NOT (${productionVideo}) AND ${pendingExternal}) AS pendingExternalVideo
+            FROM KY_Activities a
+            WHERE YEAR(a.ActivityDate) = ? ${evidenceDeptFilter}
+        `, [year, ...deptParams]);
+        const videoEvidenceTotal = Number(videoEvidenceRow?.videoEvidenceTotal || 0);
+        const activityTotal = Number(kpi.total || 0);
+        const videoEvidence = {
+            productionVideo: Number(videoEvidenceRow?.productionVideo || 0),
+            verifiedExternalVideo: Number(videoEvidenceRow?.verifiedExternalVideo || 0),
+            pendingExternalVideo: Number(videoEvidenceRow?.pendingExternalVideo || 0),
+            videoEvidenceTotal,
+            missingVideoEvidence: Math.max(0, activityTotal - videoEvidenceTotal),
+            videoEvidenceRate: activityTotal > 0 ? Math.round(videoEvidenceTotal / activityTotal * 100) : 0,
+        };
 
         // Monthly trend
         const [monthly] = await db.query(`
@@ -1250,6 +1325,7 @@ router.get('/stats', async (req, res) => {
                 pendingUnits,
                 programProgress,
                 topKeywords,
+                videoEvidence,
                 usingConfig,
             }
         });
@@ -1706,7 +1782,7 @@ router.get('/annual-video-evidence', isAdmin, async (req, res) => {
                 });
             }
         }
-        const [candidates] = await db.query(
+        const [candidateRows] = await db.query(
             `SELECT a.id, a.ActivityDate, a.Department, a.SafetyUnit, a.TeamName, a.KYTKeyword,
                     a.ReporterName, a.VideoUrl
              FROM KY_Activities a
@@ -1715,6 +1791,18 @@ router.get('/annual-video-evidence', isAdmin, async (req, res) => {
              ORDER BY a.ActivityDate DESC, a.CreatedAt DESC LIMIT 300`,
             [year]
         );
+        const candidates = candidateRows.map(row => {
+            const scopeKey = kyAnnualScopeKey(row.Department, row.SafetyUnit);
+            const scopeEvidence = byScope.get(scopeKey) || null;
+            return {
+                ...row,
+                ScopeKey: scopeKey,
+                ScopeEvidenceID: scopeEvidence?.id || null,
+                ScopeEvidenceStatus: scopeEvidence?.Status || null,
+                ScopeEvidenceActivityID: scopeEvidence?.ActivityID || null,
+                ScopeAlreadyRegistered: Boolean(scopeEvidence),
+            };
+        });
         const verified = scopes.filter(row => row.compliant).length;
         res.json({
             success: true,
@@ -2007,6 +2095,9 @@ router.get('/evidence-overview', async (req, res) => {
                 complete: 0,
                 waitingVideo: 0,
                 missingFile: 0,
+                productionVideo: 0,
+                verifiedExternalVideo: 0,
+                pendingExternalVideo: 0,
                 records: [],
                 order,
             };
@@ -2030,18 +2121,19 @@ router.get('/evidence-overview', async (req, res) => {
                     year,
                     sourceOfTruth: 'KY_Program_Config',
                     rows: [],
-                    summary: { departments: 0, safetyUnits: 0, submitted: 0, complete: 0, waitingVideo: 0, missingFile: 0 },
+                    summary: { departments: 0, safetyUnits: 0, submitted: 0, complete: 0, waitingVideo: 0, missingFile: 0, productionVideo: 0, verifiedExternalVideo: 0, pendingExternalVideo: 0 },
                     unmatchedActivities: [],
                 },
             });
         }
         const [activities] = await db.query(`
-            SELECT id, ActivityDate, ReporterID, ReporterName, SubmittedByID, SubmittedByName,
-                   Department, SafetyUnit, TeamName, KYTKeyword, RiskCategory, HazardDescription,
-                   AttachmentUrl, VideoUrl, Status, Participants, CreatedAt
-            FROM KY_Activities
-            WHERE YEAR(ActivityDate) = ?
-            ORDER BY ActivityDate DESC, CreatedAt DESC
+            SELECT a.id, a.ActivityDate, a.ReporterID, a.ReporterName, a.SubmittedByID, a.SubmittedByName,
+                   a.Department, a.SafetyUnit, a.TeamName, a.KYTKeyword, a.RiskCategory, a.HazardDescription,
+                   a.AttachmentUrl, a.VideoUrl, a.Status, a.Participants, a.CreatedAt,
+                   ${kyVideoEvidenceSelectSql('a')}
+            FROM KY_Activities a
+            WHERE YEAR(a.ActivityDate) = ?
+            ORDER BY a.ActivityDate DESC, a.CreatedAt DESC
         `, [year]);
         const unmatchedActivities = [];
         activities.forEach(activity => {
@@ -2059,10 +2151,16 @@ router.get('/evidence-overview', async (req, res) => {
                 return;
             }
             const hasFile = Boolean(String(activity.AttachmentUrl || '').trim());
-            const hasVideo = Boolean(String(activity.VideoUrl || '').trim());
+            const hasProductionVideo = Boolean(Number(activity.HasProductionVideo || 0));
+            const hasVerifiedExternalVideo = Boolean(Number(activity.HasVerifiedExternalVideo || 0));
+            const hasPendingExternalVideo = Boolean(Number(activity.HasPendingExternalVideo || 0));
+            const hasVideo = Boolean(Number(activity.HasVideoEvidence || 0));
             const status = hasFile && hasVideo ? 'complete' : (hasFile ? 'waiting_video' : 'missing_file');
             row.submitted += 1;
             row[status === 'complete' ? 'complete' : status === 'waiting_video' ? 'waitingVideo' : 'missingFile'] += 1;
+            if (hasProductionVideo) row.productionVideo += 1;
+            else if (hasVerifiedExternalVideo) row.verifiedExternalVideo += 1;
+            else if (hasPendingExternalVideo) row.pendingExternalVideo += 1;
             row.records.push({
                 id: activity.id,
                 activityDate: activity.ActivityDate,
@@ -2080,7 +2178,12 @@ router.get('/evidence-overview', async (req, res) => {
                 evidenceStatus: status,
                 hasFile,
                 hasVideo,
+                hasProductionVideo,
+                hasVerifiedExternalVideo,
+                hasPendingExternalVideo,
+                videoEvidenceStorage: activity.VideoEvidenceStorage,
                 canUploadVideo: kyCanUploadFollowupVideoForUser(activity, req) && (!hasVideo || isKyAdmin(req)),
+                canRegisterExternalVideo: isKyAdmin(req),
             });
         });
         rows.forEach(row => {
@@ -2110,6 +2213,9 @@ router.get('/evidence-overview', async (req, res) => {
             acc.complete += row.complete;
             acc.waitingVideo += row.waitingVideo;
             acc.missingFile += row.missingFile;
+            acc.productionVideo += row.productionVideo;
+            acc.verifiedExternalVideo += row.verifiedExternalVideo;
+            acc.pendingExternalVideo += row.pendingExternalVideo;
             return acc;
         }, {
             departments: new Set(rows.map(row => row.department)).size,
@@ -2118,6 +2224,9 @@ router.get('/evidence-overview', async (req, res) => {
             complete: 0,
             waitingVideo: 0,
             missingFile: 0,
+            productionVideo: 0,
+            verifiedExternalVideo: 0,
+            pendingExternalVideo: 0,
         });
         res.json({
             success: true,
@@ -2721,55 +2830,65 @@ router.get('/', async (req, res) => {
             return res.status(400).json({ success: false, message: 'Invalid KY history date range.' });
         }
 
-        let sql = 'SELECT * FROM KY_Activities WHERE 1=1';
+        const productionVideo = kyProductionVideoSql('a');
+        const verifiedExternal = kyVerifiedExternalVideoSql('a');
+        const pendingExternal = kyPendingExternalVideoSql('a');
+        const videoEvidence = kyVideoEvidenceSql('a');
+        let sql = `SELECT a.*, ${kyVideoEvidenceSelectSql('a')} FROM KY_Activities a WHERE 1=1`;
         const params = [];
 
-        if (status && status !== 'all') { sql += ' AND Status = ?'; params.push(status); }
+        if (status && status !== 'all') { sql += ' AND a.Status = ?'; params.push(status); }
 
         // Single dept filter OR multi-dept (comma-separated) for program-config scoping
         if (dept && dept !== 'all') {
-            sql += ' AND Department = ?'; params.push(dept);
+            sql += ' AND a.Department = ?'; params.push(dept);
         } else if (depts) {
             const deptList = depts.split(',').map(d => d.trim()).filter(Boolean).slice(0, 100);
             if (deptList.length) {
-                sql += ` AND Department IN (${deptList.map(() => '?').join(',')})`;
+                sql += ` AND a.Department IN (${deptList.map(() => '?').join(',')})`;
                 params.push(...deptList);
             }
         }
 
-        if (risk  && risk  !== 'all') { sql += ' AND RiskCategory = ?'; params.push(risk); }
+        if (risk  && risk  !== 'all') { sql += ' AND a.RiskCategory = ?'; params.push(risk); }
         if (source === 'admin') {
-            sql += ' AND SubmittedByID IS NOT NULL AND SubmittedByID <> ReporterID';
+            sql += ' AND a.SubmittedByID IS NOT NULL AND a.SubmittedByID <> a.ReporterID';
         } else if (source === 'self') {
-            sql += ' AND (SubmittedByID IS NULL OR SubmittedByID = ReporterID)';
+            sql += ' AND (a.SubmittedByID IS NULL OR a.SubmittedByID = a.ReporterID)';
         }
         if (evidence === 'complete') {
-            sql += " AND COALESCE(TRIM(AttachmentUrl),'') <> '' AND COALESCE(TRIM(VideoUrl),'') <> ''";
+            sql += ` AND COALESCE(TRIM(a.AttachmentUrl),'') <> '' AND ${videoEvidence}`;
         } else if (evidence === 'waiting_video') {
-            sql += " AND COALESCE(TRIM(AttachmentUrl),'') <> '' AND COALESCE(TRIM(VideoUrl),'') = ''";
+            sql += ` AND COALESCE(TRIM(a.AttachmentUrl),'') <> '' AND NOT (${videoEvidence})`;
         } else if (evidence === 'no_video') {
-            sql += " AND COALESCE(TRIM(VideoUrl),'') = ''";
+            sql += ` AND NOT (${videoEvidence})`;
+        } else if (evidence === 'production_video') {
+            sql += ` AND ${productionVideo}`;
+        } else if (evidence === 'external_verified') {
+            sql += ` AND NOT (${productionVideo}) AND ${verifiedExternal}`;
+        } else if (evidence === 'external_pending') {
+            sql += ` AND NOT (${productionVideo}) AND NOT (${verifiedExternal}) AND ${pendingExternal}`;
         } else if (evidence === 'missing_file') {
-            sql += " AND COALESCE(TRIM(AttachmentUrl),'') = ''";
+            sql += " AND COALESCE(TRIM(a.AttachmentUrl),'') = ''";
         }
         // Date range overrides year/month when provided
         if (dateFrom && dateTo) {
-            sql += ' AND ActivityDate BETWEEN ? AND ?'; params.push(dateFrom, dateTo);
+            sql += ' AND a.ActivityDate BETWEEN ? AND ?'; params.push(dateFrom, dateTo);
         } else if (dateFrom) {
-            sql += ' AND ActivityDate >= ?'; params.push(dateFrom);
+            sql += ' AND a.ActivityDate >= ?'; params.push(dateFrom);
         } else if (dateTo) {
-            sql += ' AND ActivityDate <= ?'; params.push(dateTo);
+            sql += ' AND a.ActivityDate <= ?'; params.push(dateTo);
         } else {
-            if (year)  { sql += ' AND YEAR(ActivityDate) = ?'; params.push(parseInt(year)); }
-            if (month) { sql += ' AND MONTH(ActivityDate) = ?'; params.push(parseInt(month)); }
+            if (year)  { sql += ' AND YEAR(a.ActivityDate) = ?'; params.push(parseInt(year)); }
+            if (month) { sql += ' AND MONTH(a.ActivityDate) = ?'; params.push(parseInt(month)); }
         }
         if (q && q.trim()) {
-            sql += ' AND (ReporterName LIKE ? OR SubmittedByName LIKE ? OR Department LIKE ? OR SafetyUnit LIKE ? OR TeamName LIKE ? OR KYTKeyword LIKE ? OR HazardDescription LIKE ? OR Countermeasure LIKE ?)';
+            sql += ' AND (a.ReporterName LIKE ? OR a.SubmittedByName LIKE ? OR a.Department LIKE ? OR a.SafetyUnit LIKE ? OR a.TeamName LIKE ? OR a.KYTKeyword LIKE ? OR a.HazardDescription LIKE ? OR a.Countermeasure LIKE ?)';
             const like = `%${q.trim().slice(0, 200)}%`;
             params.push(like, like, like, like, like, like, like, like);
         }
 
-        sql += ' ORDER BY ActivityDate DESC, CreatedAt DESC';
+        sql += ' ORDER BY a.ActivityDate DESC, a.CreatedAt DESC';
 
         const [rows] = await db.query(sql, params);
         res.json({ success: true, data: rows });
