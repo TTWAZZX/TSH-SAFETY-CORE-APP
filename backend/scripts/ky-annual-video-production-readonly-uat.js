@@ -162,7 +162,7 @@ async function connectChrome() {
     await command('Network.enable');
 }
 
-async function browserReadOnly(session, expectedKpi) {
+async function browserReadOnly(session, expectedKpi, annual) {
     if (!expectDeployed) return null;
     assert.ok(fs.existsSync(chromePath), `Chrome not found: ${chromePath}`);
     await connectChrome();
@@ -176,6 +176,12 @@ async function browserReadOnly(session, expectedKpi) {
     await waitFor(`document.querySelector('#ky-msub-annual-video')`);
     await evaluate(`document.querySelector('#ky-msub-annual-video').click()`);
     await waitFor(`document.querySelector('[data-ky-annual-delete-selected]') && document.querySelector('#ky-manage-panel')?.textContent.includes('Annual Compliance Dashboard')`);
+    const linkedCandidate = (annual?.candidates || []).find(row => row.ScopeAlreadyRegistered && row.ScopeEvidenceID);
+    let linkedCandidateFocus = null;
+    if (linkedCandidate) {
+        linkedCandidateFocus = await evaluate(`(()=>{const id=${JSON.stringify(String(linkedCandidate.ScopeEvidenceID))};const button=[...document.querySelectorAll('[data-ky-annual-focus-evidence]')].find(item=>item.dataset.kyAnnualFocusEvidence===id);if(!button)return{found:false,highlighted:false};button.click();const row=[...document.querySelectorAll('[data-ky-annual-evidence-row]')].find(item=>item.dataset.kyAnnualEvidenceRow===id);return{found:true,highlighted:Boolean(row?.classList.contains('ring-2'))};})()`);
+        assert.deepStrictEqual(linkedCandidateFocus, { found: true, highlighted: true }, 'Registered annual scope did not focus its existing evidence row');
+    }
     for (const viewport of [{ width: 1440, height: 1000 }, { width: 1024, height: 900 }, { width: 390, height: 844 }]) {
         await command('Emulation.setDeviceMetricsOverride', { width: viewport.width, height: viewport.height, deviceScaleFactor: 1, mobile: viewport.width < 600 });
         await sleep(300);
@@ -185,7 +191,7 @@ async function browserReadOnly(session, expectedKpi) {
     }
     assert.deepStrictEqual(mutationRequests, [], `Production Browser UAT sent KY mutations: ${mutationRequests.join(' | ')}`);
     assert.deepStrictEqual(consoleErrors, [], `Production Browser console errors: ${consoleErrors.join(' | ')}`);
-    return { viewports: 3, mutationRequests: 0, consoleErrors: 0 };
+    return { viewports: 3, mutationRequests: 0, consoleErrors: 0, linkedCandidateFocus };
 }
 
 (async () => {
@@ -197,9 +203,16 @@ async function browserReadOnly(session, expectedKpi) {
     const rows = rowsPayload?.data || [];
     const stats = statsPayload?.data || statsPayload || {};
     let annual = null;
-    if (expectDeployed) annual = (await getJson(`/ky/annual-video-evidence?year=${year}`, session.token))?.data || null;
+    if (expectDeployed) {
+        annual = (await getJson(`/ky/annual-video-evidence?year=${year}`, session.token))?.data || null;
+        const linkedCandidates = (annual?.candidates || []).filter(row => row.ScopeAlreadyRegistered);
+        linkedCandidates.forEach(row => {
+            assert.ok(row.ScopeEvidenceID, `Registered annual scope ${row.id} has no linked evidence ID`);
+            assert.ok(row.ScopeEvidenceStatus, `Registered annual scope ${row.id} has no linked evidence status`);
+        });
+    }
     const manifest = await saveSnapshot(rows, stats, annual, session.token);
-    const browser = await browserReadOnly(session, stats.kpi || {});
+    const browser = await browserReadOnly(session, stats.kpi || {}, annual);
     const afterRows = (await getJson('/ky', session.token))?.data || [];
     const afterStats = (await getJson(`/ky/stats?year=${year}`, session.token))?.data || {};
     assert.deepStrictEqual(afterRows.map(row => [row.id, row.VideoUrl, row.Status]), rows.map(row => [row.id, row.VideoUrl, row.Status]), 'Read-only UAT changed KY rows');

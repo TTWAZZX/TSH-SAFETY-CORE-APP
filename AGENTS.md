@@ -1,5 +1,12 @@
 # TSH Safety Core Activity - AGENTS.md
 
+## KY annual video duplicate-scope reconciliation Production release (2026-09-21)
+
+- `main` commit `b525eff` is deployed to the PHP Production target. Annual Video Evidence candidates now carry the server-resolved existing evidence for the same year / Department / Safety Unit scope. An already registered scope shows “ดูรายการเดิม”, focuses and highlights that evidence, and never sends a duplicate declare request. A concurrent `KY_ANNUAL_VIDEO_ALREADY_VERIFIED` or stale-scope response is caught, refreshed and redirected without an unhandled promise rejection.
+- Node and PHP retain the one-evidence-per-annual-scope invariant and remain behaviorally aligned. Local API lifecycle, focused contracts, KY regression and Browser UAT passed, including the duplicate-scope `409` contract and three responsive viewports.
+- Production FTPS download-back matched `4/4`; public HTTPS hashes matched `3/3`. Authenticated read-only Production UAT preserved 105 KY rows / 97 rows with video, passed three viewports with zero console errors and zero mutations, and confirmed the linked candidate control found and highlighted its existing evidence row.
+- Scoped runtime and read-only before/after evidence is under `backups/production/ky-video-scope-conflict-predeploy-20260921-175551/`. The existing same-day full 98-video backup under `backups/production/ky-annual-video-predeploy-20260921-155650/` remains the media rollback reference. This follow-up changed no schema, business row or upload and deleted no Production video.
+
 ## KYT Annual Video Evidence Production release (2026-09-21)
 
 - `main` commit `f2a4ddf` is deployed to the PHP Production target. KY Activity keeps its existing submission, History, Dashboard KPI and statistics behavior, while adding one annual video-evidence requirement per configured Department/Safety Unit, Central Machine references, SHA-256 metadata, Admin verification, an Annual Compliance Dashboard and guarded single/bulk Production-file cleanup.
