@@ -1647,6 +1647,21 @@ function wf_ensure_ky_tables(): void
     db()->exec("CREATE TABLE IF NOT EXISTS ky_program_config (id INT AUTO_INCREMENT PRIMARY KEY,Year INT NOT NULL,Department VARCHAR(100) NOT NULL,SafetyUnits TEXT,YearlyTarget INT NOT NULL DEFAULT 12,DeadlineDay TINYINT DEFAULT 15,DeadlineNote VARCHAR(255),IsActive TINYINT(1) NOT NULL DEFAULT 1,CreatedBy VARCHAR(50),CreatedAt DATETIME DEFAULT CURRENT_TIMESTAMP,UpdatedAt TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,UNIQUE KEY uq_year_dept(Year,Department)) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
     db()->exec("CREATE TABLE IF NOT EXISTS ky_video_reactions (id INT AUTO_INCREMENT PRIMARY KEY,ActivityID VARCHAR(36) NOT NULL,EmployeeID VARCHAR(50) NOT NULL,Reaction VARCHAR(30) NOT NULL,CreatedAt DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,UpdatedAt DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,UNIQUE KEY uq_react(ActivityID,EmployeeID),KEY idx_activity(ActivityID)) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
     db()->exec("CREATE TABLE IF NOT EXISTS ky_emailoutbox (id INT AUTO_INCREMENT PRIMARY KEY,ActivityID VARCHAR(36),EventType VARCHAR(60) NOT NULL,Recipient VARCHAR(180) NOT NULL,Subject VARCHAR(255) NOT NULL,Body MEDIUMTEXT,HtmlBody MEDIUMTEXT,Status VARCHAR(20) NOT NULL DEFAULT 'Queued',Error TEXT,CreatedAt DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,SentAt DATETIME NULL,KEY idx_activity(ActivityID),KEY idx_status(Status)) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
+    db()->exec("CREATE TABLE IF NOT EXISTS ky_annual_video_evidence (
+        id VARCHAR(36) NOT NULL PRIMARY KEY,EvidenceYear SMALLINT NOT NULL,ScopeKey VARCHAR(220) NOT NULL,Department VARCHAR(100) NOT NULL,SafetyUnit VARCHAR(100),
+        ActivityID VARCHAR(36),StorageMode VARCHAR(30) NOT NULL,ExternalBackupConfirmed TINYINT(1) NOT NULL DEFAULT 0,ExternalReference TEXT,
+        OriginalFileName VARCHAR(255) NOT NULL,MimeType VARCHAR(120),FileSize BIGINT UNSIGNED NOT NULL DEFAULT 0,SHA256 CHAR(64) NOT NULL,
+        ProductionVideoUrl TEXT,ProductionStoredName VARCHAR(255),Status VARCHAR(30) NOT NULL DEFAULT 'Pending',DeclaredByID VARCHAR(50),DeclaredByName VARCHAR(100),
+        DeclaredAt DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,VerifiedByID VARCHAR(50),VerifiedByName VARCHAR(100),VerifiedAt DATETIME,VerificationNote TEXT,
+        ProductionDeletedByID VARCHAR(50),ProductionDeletedByName VARCHAR(100),ProductionDeletedAt DATETIME,ProductionDeletionReason TEXT,
+        RowVersion INT UNSIGNED NOT NULL DEFAULT 1,CreatedAt DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,UpdatedAt TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+        UNIQUE KEY uq_ky_annual_video_scope(EvidenceYear,ScopeKey),KEY idx_ky_annual_video_activity(ActivityID),KEY idx_ky_annual_video_status(EvidenceYear,Status)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
+    db()->exec("CREATE TABLE IF NOT EXISTS ky_annual_video_evidence_audit (
+        id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,EvidenceID VARCHAR(36) NOT NULL,ActivityID VARCHAR(36),Action VARCHAR(80) NOT NULL,
+        ActorID VARCHAR(50),ActorName VARCHAR(100),BeforeJson LONGTEXT,AfterJson LONGTEXT,Detail TEXT,CreatedAt DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        KEY idx_ky_annual_video_audit_evidence(EvidenceID,CreatedAt),KEY idx_ky_annual_video_audit_action(Action,CreatedAt)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
     foreach ([
         "ALTER TABLE ky_activities ADD COLUMN ReporterEmail VARCHAR(150)",
         "ALTER TABLE ky_activities ADD COLUMN SubmittedByID VARCHAR(50)",
@@ -1775,6 +1790,44 @@ function wf_ky_reject_oversized_legacy_upload(): void
             'message' => 'ขนาดข้อมูลอัปโหลดรวมเกินข้อจำกัดของเซิร์ฟเวอร์ กรุณาอัปโหลดวิดีโอด้วยระบบแบ่งส่วน',
         ], 413);
     }
+}
+
+function wf_ky_annual_scope_key($department, $safetyUnit): string
+{
+    return substr(wf_ky_norm_key($department).'||'.(wf_ky_norm_key($safetyUnit) ?: '__department__'), 0, 220);
+}
+
+function wf_ky_annual_local_video($url): ?string
+{
+    $raw=trim((string)$url);if($raw==='')return null;
+    $pathPart=(string)parse_url($raw,PHP_URL_PATH);
+    if(strpos($pathPart,'/uploads/')===false)return null;
+    $stored=basename(rawurldecode($pathPart));if($stored==='')return null;
+    foreach([upload_dir(),dirname(__DIR__,2).DIRECTORY_SEPARATOR.'backend'.DIRECTORY_SEPARATOR.'uploads'] as $root){
+        $candidate=$root.DIRECTORY_SEPARATOR.$stored;
+        if(is_file($candidate))return $candidate;
+    }
+    return null;
+}
+
+function wf_ky_annual_public(array $row): array
+{
+    $row['ExternalBackupConfirmed']=!empty($row['ExternalBackupConfirmed']);
+    $row['fileDeleted']=!empty($row['ProductionDeletedAt']);
+    $row['canDeleteProductionFile']=($row['Status']??'')==='Verified'&&($row['StorageMode']??'')==='CentralMachine'&&!empty($row['ExternalBackupConfirmed'])
+        &&trim((string)($row['ExternalReference']??''))!==''&&preg_match('/^[a-f0-9]{64}$/i',(string)($row['SHA256']??''))
+        &&trim((string)($row['ProductionVideoUrl']??''))!==''&&empty($row['ProductionDeletedAt']);
+    return $row;
+}
+
+function wf_ky_annual_audit(array $user,string $action,?array $before,?array $after,string $detail=''): void
+{
+    $evidence=$after?:($before?:[]);
+    db_execute('INSERT INTO ky_annual_video_evidence_audit (EvidenceID,ActivityID,Action,ActorID,ActorName,BeforeJson,AfterJson,Detail) VALUES (?,?,?,?,?,?,?,?)',[
+        $evidence['id']??'', $evidence['ActivityID']??null, $action, wf_user_id($user), wf_user_name($user),
+        $before?json_encode($before,JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES):null,
+        $after?json_encode($after,JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES):null,$detail?:null
+    ]);
 }
 
 function wf_ky_video_upload_config(): array
@@ -1933,7 +1986,7 @@ function wf_ky_video_chunk_access(?array $row, array $user, ?array $manifest = n
         return ['status' => 403, 'message' => 'ไม่สามารถใช้งานชุดอัปโหลดนี้ได้'];
     }
     $admin = wf_is_admin($user);
-    if (!$admin && !empty($row['VideoUrl'])) return ['status' => 409, 'message' => 'รายการนี้มีวิดีโอแล้ว กรุณาติดต่อ Admin หากต้องการเปลี่ยนไฟล์'];
+    if (!empty($row['VideoUrl'])) return ['status' => 409, 'code' => 'KY_VIDEO_PROTECTED_BY_RETENTION', 'message' => 'Confirm External Backup and remove the Production copy through Annual Video Evidence before replacing it.'];
     return ['status' => 0, 'userId' => $userId, 'admin' => $admin];
 }
 
@@ -2205,6 +2258,35 @@ function handle_ky_routes(string $method, string $path): bool
     }
     if($method==='GET'&&$path==='/ky/video-showcase'){ $year=(int)($_GET['year']??date('Y'));$limit=min(max((int)($_GET['limit']??6),1),50);$userId=wf_user_id(require_user())?:'__anonymous__'; json_response(['success'=>true,'data'=>db_rows("SELECT a.*,COALESCE(rc.UsefulCount,0) AS UsefulCount,COALESCE(rc.PracticeCount,0) AS PracticeCount,COALESCE(rc.AwarenessCount,0) AS AwarenessCount,COALESCE(rc.AttentionCount,0) AS AttentionCount,COALESCE(rc.ReactionTotal,0) AS ReactionTotal,COALESCE(rc.ReactionTotal,0) AS ReactionCount,ur.Reaction AS MyReaction FROM ky_activities a LEFT JOIN (SELECT ActivityID,SUM(Reaction='useful') AS UsefulCount,SUM(Reaction='practice') AS PracticeCount,SUM(Reaction='awareness') AS AwarenessCount,SUM(Reaction='attention') AS AttentionCount,COUNT(*) AS ReactionTotal FROM ky_video_reactions GROUP BY ActivityID) rc ON rc.ActivityID=a.id LEFT JOIN ky_video_reactions ur ON ur.ActivityID=a.id AND ur.EmployeeID=? WHERE a.VideoUrl IS NOT NULL AND a.VideoUrl<>'' AND COALESCE(a.ShowVideoOnDashboard,1)=1 AND YEAR(a.ActivityDate)=? ORDER BY COALESCE(a.IsVideoPinned,0) DESC,COALESCE(rc.ReactionTotal,0) DESC,a.CreatedAt DESC LIMIT ?",[$userId,$year,$limit])]);}
     if($method==='GET'&&$path==='/ky/file-health'){require_admin();$year=(int)($_GET['year']??date('Y'));$records=db_rows('SELECT id,ActivityDate,ReporterID,ReporterName,Department,SafetyUnit,TeamName,KYTKeyword,AttachmentUrl,VideoUrl,Status,CreatedAt FROM ky_activities WHERE YEAR(ActivityDate)=? ORDER BY ActivityDate DESC,CreatedAt DESC',[$year]);$roots=[upload_dir(),dirname(__DIR__,2).DIRECTORY_SEPARATOR.'backend'.DIRECTORY_SEPARATOR.'uploads'];$files=[];$fields=[['AttachmentUrl','Attachment'],['VideoUrl','Video']];foreach($records as $r)foreach($fields as [$field,$label]){$url=trim((string)($r[$field]??''));$health=['field'=>$field,'url'=>$url,'scope'=>'empty','status'=>'empty','storedName'=>'','originalName'=>'','extension'=>'','size'=>null,'modifiedAt'=>null,'diskPath'=>null];if($url!==''){$pathPart=(string)parse_url($url,PHP_URL_PATH);$host=strtolower((string)parse_url($url,PHP_URL_HOST));$isLegacy=in_array($host,['localhost','127.0.0.1','::1'],true);$isUpload=strpos($pathPart,'/uploads/')!==false;$stored=$isUpload?basename(rawurldecode($pathPart)):'';parse_str((string)parse_url($url,PHP_URL_QUERY),$query);$disk=null;if($isUpload&&$stored!=='')foreach($roots as $root){$candidate=$root.DIRECTORY_SEPARATOR.$stored;if(is_file($candidate)){$disk=$candidate;break;}}$health=['field'=>$field,'url'=>$url,'scope'=>$isUpload?($isLegacy?'legacy-localhost':'local'):'external','status'=>$isLegacy?($disk?'legacy-localhost':'missing'):($isUpload?($disk?'ok':'missing'):'external'),'storedName'=>$stored,'originalName'=>$query['filename']??$stored,'extension'=>strtolower(pathinfo($stored,PATHINFO_EXTENSION)),'size'=>$disk?filesize($disk):null,'modifiedAt'=>$disk?date('c',filemtime($disk)):null,'diskPath'=>$disk?basename($disk):null];}$files[]=array_merge(['activityId'=>$r['id'],'activityDate'=>$r['ActivityDate'],'reporterId'=>$r['ReporterID'],'reporterName'=>$r['ReporterName'],'department'=>$r['Department'],'safetyUnit'=>$r['SafetyUnit'],'teamName'=>$r['TeamName'],'kytKeyword'=>$r['KYTKeyword'],'recordStatus'=>$r['Status'],'label'=>$label],$health);}$count=fn($s)=>count(array_filter($files,fn($f)=>$f['status']===$s));$missing=array_values(array_filter($files,fn($f)=>$f['status']==='missing'));$legacy=array_values(array_filter($files,fn($f)=>$f['scope']==='legacy-localhost'));json_response(['success'=>true,'data'=>['phase'=>'ky_media_file_health','readOnly'=>true,'year'=>$year,'summary'=>['activities'=>count($records),'references'=>count($files),'ok'=>$count('ok'),'missing'=>$count('missing'),'legacyLocalhost'=>count($legacy),'external'=>$count('external'),'empty'=>$count('empty')],'files'=>$files,'missingFiles'=>$missing,'legacyLocalhostFiles'=>$legacy,'note'=>'Read-only KY media health report. No files or database rows are changed automatically.']]);}
+    if($method==='GET'&&$path==='/ky/annual-video-evidence'){
+        require_admin();$year=(int)($_GET['year']??date('Y'));if($year<2000||$year>2200)json_response(['success'=>false,'message'=>'Evidence year is invalid.'],400);
+        $evidence=array_map('wf_ky_annual_public',db_rows('SELECT e.*,a.ActivityDate,a.TeamName,a.KYTKeyword,a.ReporterName FROM ky_annual_video_evidence e LEFT JOIN ky_activities a ON a.id=e.ActivityID WHERE e.EvidenceYear=? ORDER BY e.Department,COALESCE(e.SafetyUnit,\'\'),e.UpdatedAt DESC',[$year]));
+        $byScope=[];foreach($evidence as $item)$byScope[$item['ScopeKey']]=$item;
+        $scopes=[];foreach(db_rows('SELECT Department,SafetyUnits FROM ky_program_config WHERE Year=? AND IsActive=1 ORDER BY Department',[$year]) as $cfg){$units=wf_ky_units($cfg['SafetyUnits']??null);if(!$units)$units=[''];foreach($units as $unit){$key=wf_ky_annual_scope_key($cfg['Department'],$unit);$item=$byScope[$key]??null;$scopes[]=['scopeKey'=>$key,'department'=>$cfg['Department'],'safetyUnit'=>$unit?:null,'compliant'=>($item['Status']??'')==='Verified','evidence'=>$item];}}
+        $verified=count(array_filter($scopes,fn($row)=>!empty($row['compliant'])));$pending=count(array_filter($scopes,fn($row)=>!empty($row['evidence'])&&empty($row['compliant'])));$missing=count(array_filter($scopes,fn($row)=>empty($row['evidence'])));$reclaimable=array_filter($evidence,fn($row)=>!empty($row['canDeleteProductionFile']));
+        $candidates=db_rows('SELECT a.id,a.ActivityDate,a.Department,a.SafetyUnit,a.TeamName,a.KYTKeyword,a.ReporterName,a.VideoUrl FROM ky_activities a LEFT JOIN ky_annual_video_evidence e ON e.ActivityID=a.id WHERE YEAR(a.ActivityDate)=? AND COALESCE(TRIM(a.VideoUrl),\'\')<>\'\' AND e.id IS NULL ORDER BY a.ActivityDate DESC,a.CreatedAt DESC LIMIT 300',[$year]);
+        json_response(['success'=>true,'data'=>['year'=>$year,'summary'=>['requiredScopes'=>count($scopes),'verifiedScopes'=>$verified,'pendingScopes'=>$pending,'missingScopes'=>$missing,'compliancePct'=>count($scopes)?(int)round($verified/count($scopes)*100):0,'productionFiles'=>count(array_filter($evidence,fn($row)=>!empty($row['ProductionVideoUrl'])&&empty($row['ProductionDeletedAt']))),'reclaimableFiles'=>count($reclaimable),'reclaimableBytes'=>array_sum(array_map(fn($row)=>(int)($row['FileSize']??0),$reclaimable))],'scopes'=>$scopes,'evidence'=>$evidence,'candidates'=>$candidates]]);
+    }
+    $p=route_params($path,'/ky/annual-video-evidence/:evidenceId/audit');if($p!==null&&$method==='GET'){require_admin();json_response(['success'=>true,'data'=>db_rows('SELECT id,EvidenceID,ActivityID,Action,ActorID,ActorName,BeforeJson,AfterJson,Detail,CreatedAt FROM ky_annual_video_evidence_audit WHERE EvidenceID=? ORDER BY id DESC LIMIT 200',[$p['evidenceId']])]);}
+    $p=route_params($path,'/ky/annual-video-evidence/:evidenceId/download');if($p!==null&&$method==='GET'){
+        require_admin();$row=db_row('SELECT * FROM ky_annual_video_evidence WHERE id=?',[$p['evidenceId']]);if(!$row)json_response(['success'=>false,'message'=>'Annual video evidence not found.'],404);if(!empty($row['ProductionDeletedAt']))json_response(['success'=>false,'message'=>'Production copy has already been removed.'],410);$local=wf_ky_annual_local_video($row['ProductionVideoUrl']??null);if(!$local)json_response(['success'=>false,'message'=>'Production video file is unavailable.'],404);$hash=hash_file('sha256',$local);if(!is_string($hash)||!hash_equals(strtolower((string)$row['SHA256']),strtolower($hash)))json_response(['success'=>false,'code'=>'KY_ANNUAL_VIDEO_HASH_MISMATCH','message'=>'Production file SHA-256 no longer matches its evidence record.'],409);
+        header('Content-Type: application/octet-stream');header('Content-Length: '.filesize($local));header('Content-Disposition: attachment; filename="'.str_replace(['"','\r','\n'],'_',basename((string)($row['OriginalFileName']?:$local))).'"');readfile($local);exit;
+    }
+    if($method==='POST'&&$path==='/ky/annual-video-evidence/declare'){
+        $b=json_body();$activityId=trim((string)($b['activityId']??''));$mode=trim((string)($b['storageMode']??''));if($activityId===''||!in_array($mode,['Production','CentralMachine'],true))json_response(['success'=>false,'message'=>'Activity and storage mode are required.'],400);
+        $activity=db_row('SELECT * FROM ky_activities WHERE id=?',[$activityId]);if(!$activity)json_response(['success'=>false,'message'=>'KY activity not found.'],404);if(!wf_ky_can_upload_followup_video($activity,$user))json_response(['success'=>false,'message'=>'You cannot declare evidence for this activity.'],403);
+        $year=(int)substr((string)$activity['ActivityDate'],0,4);$dept=trim((string)$activity['Department']);$unit=trim((string)($activity['SafetyUnit']??''));$requestedVersion=(int)($b['rowVersion']??0);if($year<2000||$year>2200||$dept==='')json_response(['success'=>false,'message'=>'The KY activity needs a valid activity date and Department.'],400);$scopeKey=wf_ky_annual_scope_key($dept,$unit);
+        $name=substr(trim((string)($b['originalFileName']??'')),0,255);$mime=substr(trim((string)($b['mimeType']??'')),0,120)?:null;$size=(int)($b['fileSize']??0);$sha=strtolower(trim((string)($b['sha256']??'')));$external=trim((string)($b['externalReference']??''));$confirmed=wf_bool($b['externalBackupConfirmed']??false);$productionUrl=null;$stored=null;
+        if($mode==='Production'){$productionUrl=trim((string)($activity['VideoUrl']??''));$local=wf_ky_annual_local_video($productionUrl);if(!$local)json_response(['success'=>false,'message'=>'This activity has no readable Production video.'],400);$stored=basename($local);parse_str((string)parse_url($productionUrl,PHP_URL_QUERY),$query);$name=$name?:($query['filename']??$stored);$size=(int)filesize($local);$sha=(string)hash_file('sha256',$local);}
+        else{if(!$confirmed||$external==='')json_response(['success'=>false,'code'=>'KY_EXTERNAL_BACKUP_REQUIRED','message'=>'Confirm the central-machine copy and provide its reference/path.'],400);if($name===''||$size<=0||!preg_match('/^[a-f0-9]{64}$/',$sha))json_response(['success'=>false,'message'=>'External evidence requires filename, size and SHA-256.'],400);$productionUrl=trim((string)($activity['VideoUrl']??''))?:null;$local=$productionUrl?wf_ky_annual_local_video($productionUrl):null;$stored=$local?basename($local):null;}
+        $pdo=db();$pdo->beginTransaction();try{$before=db_row('SELECT * FROM ky_annual_video_evidence WHERE EvidenceYear=? AND ScopeKey=? FOR UPDATE',[$year,$scopeKey]);if(($before['Status']??'')==='Verified')json_response(['success'=>false,'code'=>'KY_ANNUAL_VIDEO_ALREADY_VERIFIED','message'=>'This annual scope is already verified. Mark it for correction before replacing it.'],409);if($before&&$requestedVersion!==(int)$before['RowVersion'])json_response(['success'=>false,'code'=>'KY_ANNUAL_VIDEO_STALE','message'=>'Evidence was changed by another user. Refresh and retry.'],409);$id=$before['id']??wf_uuid();if($before){db_execute("UPDATE ky_annual_video_evidence SET ActivityID=?,StorageMode=?,ExternalBackupConfirmed=?,ExternalReference=?,OriginalFileName=?,MimeType=?,FileSize=?,SHA256=?,ProductionVideoUrl=?,ProductionStoredName=?,Status='Pending',DeclaredByID=?,DeclaredByName=?,DeclaredAt=NOW(),VerifiedByID=NULL,VerifiedByName=NULL,VerifiedAt=NULL,VerificationNote=NULL,ProductionDeletedByID=NULL,ProductionDeletedByName=NULL,ProductionDeletedAt=NULL,ProductionDeletionReason=NULL,RowVersion=RowVersion+1 WHERE id=?",[$activityId,$mode,$confirmed?1:0,$external?:null,$name,$mime,$size,$sha,$productionUrl,$stored,wf_user_id($user),$actor,$id]);}else{db_execute('INSERT INTO ky_annual_video_evidence (id,EvidenceYear,ScopeKey,Department,SafetyUnit,ActivityID,StorageMode,ExternalBackupConfirmed,ExternalReference,OriginalFileName,MimeType,FileSize,SHA256,ProductionVideoUrl,ProductionStoredName,Status,DeclaredByID,DeclaredByName) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)',[$id,$year,$scopeKey,$dept,$unit?:null,$activityId,$mode,$confirmed?1:0,$external?:null,$name,$mime,$size,$sha,$productionUrl,$stored,'Pending',wf_user_id($user),$actor]);}$after=db_row('SELECT * FROM ky_annual_video_evidence WHERE id=?',[$id]);wf_ky_annual_audit($user,$before?'DECLARATION_UPDATED':'DECLARED',$before?:null,$after,'Annual KY video evidence declared.');$pdo->commit();json_response(['success'=>true,'data'=>wf_ky_annual_public($after)],$before?200:201);}catch(Throwable $e){if($pdo->inTransaction())$pdo->rollBack();throw $e;}
+    }
+    $p=route_params($path,'/ky/annual-video-evidence/:evidenceId/verify');if($p!==null&&$method==='POST'){
+        require_admin();$b=json_body();$status=(string)($b['status']??'Verified');$version=(int)($b['rowVersion']??0);$note=trim((string)($b['note']??''));if(!in_array($status,['Verified','NeedsCorrection'],true)||$version<1)json_response(['success'=>false,'message'=>'Status and row version are required.'],400);$pdo=db();$pdo->beginTransaction();try{$before=db_row('SELECT * FROM ky_annual_video_evidence WHERE id=? FOR UPDATE',[$p['evidenceId']]);if(!$before)json_response(['success'=>false,'message'=>'Annual video evidence not found.'],404);if((int)$before['RowVersion']!==$version)json_response(['success'=>false,'code'=>'KY_ANNUAL_VIDEO_STALE','message'=>'Evidence was changed by another user. Refresh and retry.'],409);if($status==='Verified'&&$before['StorageMode']==='CentralMachine'&&(empty($before['ExternalBackupConfirmed'])||trim((string)$before['ExternalReference'])===''))json_response(['success'=>false,'code'=>'KY_EXTERNAL_BACKUP_REQUIRED','message'=>'External backup must be confirmed before verification.'],400);db_execute('UPDATE ky_annual_video_evidence SET Status=?,VerificationNote=?,VerifiedByID=?,VerifiedByName=?,VerifiedAt=?,RowVersion=RowVersion+1 WHERE id=? AND RowVersion=?',[$status,$note?:null,wf_user_id($user),$actor,$status==='Verified'?date('Y-m-d H:i:s'):null,$before['id'],$version]);$after=db_row('SELECT * FROM ky_annual_video_evidence WHERE id=?',[$before['id']]);wf_ky_annual_audit($user,$status==='Verified'?'ADMIN_VERIFIED':'NEEDS_CORRECTION',$before,$after,$note);$pdo->commit();json_response(['success'=>true,'data'=>wf_ky_annual_public($after)]);}catch(Throwable $e){if($pdo->inTransaction())$pdo->rollBack();throw $e;}
+    }
+    if($method==='POST'&&$path==='/ky/annual-video-evidence/delete-production'){
+        require_admin();$b=json_body();$items=array_slice(is_array($b['items']??null)?$b['items']:[],0,100);$reason=trim((string)($b['reason']??''));if(!$items||$reason==='')json_response(['success'=>false,'message'=>'Select evidence and provide a deletion reason.'],400);$pdo=db();$quarantined=[];$pdo->beginTransaction();try{$rows=[];foreach($items as $item){$row=db_row('SELECT * FROM ky_annual_video_evidence WHERE id=? FOR UPDATE',[(string)($item['id']??'')]);if(!$row||(int)$row['RowVersion']!==(int)($item['rowVersion']??0))throw new RuntimeException('Evidence is missing or stale.',409);$safe=wf_ky_annual_public($row);if(empty($safe['canDeleteProductionFile']))throw new RuntimeException('Every selected file must be Admin verified with a confirmed external backup.',409);$activity=db_row('SELECT id,VideoUrl FROM ky_activities WHERE id=? FOR UPDATE',[$row['ActivityID']]);if(!$activity||(string)($activity['VideoUrl']??'')!==(string)($row['ProductionVideoUrl']??''))throw new RuntimeException('The activity video reference changed. Refresh and register the current file before deleting.',409);$local=wf_ky_annual_local_video($row['ProductionVideoUrl']);if(!$local)throw new RuntimeException('A selected Production file is unavailable.',404);$hash=hash_file('sha256',$local);if(!is_string($hash)||!hash_equals(strtolower((string)$row['SHA256']),strtolower($hash)))throw new RuntimeException('A selected Production file failed SHA-256 verification.',409);$rows[]=['row'=>$row,'local'=>$local];}foreach($rows as $entry){$quarantine=$entry['local'].'.ky-delete-'.bin2hex(random_bytes(8)).'.tmp';if(!rename($entry['local'],$quarantine))throw new RuntimeException('Unable to quarantine a selected Production file.');$entry['quarantine']=$quarantine;$quarantined[]=$entry;}foreach($quarantined as $entry){$row=$entry['row'];db_execute('UPDATE ky_activities SET VideoUrl=NULL WHERE id=? AND VideoUrl=?',[$row['ActivityID'],$row['ProductionVideoUrl']]);db_execute('UPDATE ky_annual_video_evidence SET ProductionDeletedByID=?,ProductionDeletedByName=?,ProductionDeletedAt=NOW(),ProductionDeletionReason=?,RowVersion=RowVersion+1 WHERE id=?',[wf_user_id($user),$actor,$reason,$row['id']]);$after=db_row('SELECT * FROM ky_annual_video_evidence WHERE id=?',[$row['id']]);wf_ky_annual_audit($user,'PRODUCTION_FILE_DELETED',$row,$after,$reason);}$pdo->commit();foreach($quarantined as $entry)@unlink($entry['quarantine']);json_response(['success'=>true,'data'=>['deleted'=>count($quarantined)]]);}catch(Throwable $e){if($pdo->inTransaction())$pdo->rollBack();foreach(array_reverse($quarantined) as $entry)if(is_file($entry['quarantine'])&&!is_file($entry['local']))@rename($entry['quarantine'],$entry['local']);$code=(int)$e->getCode();json_response(['success'=>false,'message'=>$e->getMessage()],$code>=400&&$code<600?$code:500);}
+    }
     if($method==='GET'&&$path==='/ky/evidence-overview'){
         $year=(int)($_GET['year']??date('Y'));
         $configs=db_rows('SELECT Department,SafetyUnits,YearlyTarget FROM ky_program_config WHERE Year=? AND IsActive=1 ORDER BY Department',[$year]);
@@ -2352,7 +2434,7 @@ function handle_ky_routes(string $method, string $path): bool
         wf_ky_video_cleanup_stale_uploads();
         $row=db_row('SELECT id,ReporterID,SubmittedByID,Participants,VideoUrl,Status FROM ky_activities WHERE id=?',[$p['id']]);
         $access=wf_ky_video_chunk_access($row,$user);
-        if(!empty($access['status']))json_response(['success'=>false,'message'=>$access['message']],(int)$access['status']);
+        if(!empty($access['status']))json_response(['success'=>false,'code'=>$access['code']??null,'message'=>$access['message']],(int)$access['status']);
         $b=json_body();
         $fileName=clean_upload_name($b['fileName']??'video');
         $fileSize=(int)($b['fileSize']??0);
@@ -2379,7 +2461,7 @@ function handle_ky_routes(string $method, string $path): bool
         if(!$manifest)json_response(['success'=>false,'message'=>'ไม่พบชุดอัปโหลดหรือชุดอัปโหลดหมดอายุแล้ว'],404);
         $row=db_row('SELECT id,ReporterID,SubmittedByID,Participants,VideoUrl,Status FROM ky_activities WHERE id=?',[$p['id']]);
         $access=wf_ky_video_chunk_access($row,$user,$manifest);
-        if(!empty($access['status']))json_response(['success'=>false,'message'=>$access['message']],(int)$access['status']);
+        if(!empty($access['status']))json_response(['success'=>false,'code'=>$access['code']??null,'message'=>$access['message']],(int)$access['status']);
         $index=filter_var($p['index'],FILTER_VALIDATE_INT,['options'=>['min_range'=>0]]);
         $file=$_FILES['chunk']??null;
         if($index===false||$index>=(int)$manifest['totalChunks'])json_response(['success'=>false,'code'=>'KY_VIDEO_CHUNK_INVALID','message'=>'ลำดับส่วนวิดีโอไม่ถูกต้อง'],400);
@@ -2409,7 +2491,7 @@ function handle_ky_routes(string $method, string $path): bool
         if(!$manifest)json_response(['success'=>false,'message'=>'ไม่พบชุดอัปโหลดหรือชุดอัปโหลดหมดอายุแล้ว'],404);
         $row=db_row('SELECT id,ReporterID,SubmittedByID,Participants,VideoUrl,Status FROM ky_activities WHERE id=?',[$p['id']]);
         $access=wf_ky_video_chunk_access($row,$user,$manifest);
-        if(!empty($access['status']))json_response(['success'=>false,'message'=>$access['message']],(int)$access['status']);
+        if(!empty($access['status']))json_response(['success'=>false,'code'=>$access['code']??null,'message'=>$access['message']],(int)$access['status']);
         $assembledSize=0;
         for($index=0;$index<(int)$manifest['totalChunks'];$index++){
             $part=wf_ky_video_part_path($manifest,$index);$expected=wf_ky_video_expected_chunk_size($manifest,$index);
@@ -2461,7 +2543,7 @@ function handle_ky_routes(string $method, string $path): bool
         if(!$row)json_response(['success'=>false,'message'=>'ไม่พบกิจกรรม KY'],404);
         $isOwner=wf_ky_can_upload_followup_video($row,$user);$isAdmin=wf_is_admin($user);
         if(!$isAdmin&&!$isOwner)json_response(['success'=>false,'message'=>'แนบวิดีโอได้เฉพาะเจ้าของรายการหรือ Admin'],403);
-        if(!$isAdmin&&!empty($row['VideoUrl']))json_response(['success'=>false,'message'=>'รายการนี้มีวิดีโอแล้ว กรุณาติดต่อ Admin หากต้องการเปลี่ยนไฟล์'],409);
+        if(!empty($row['VideoUrl']))json_response(['success'=>false,'code'=>'KY_VIDEO_PROTECTED_BY_RETENTION','message'=>'Confirm External Backup and remove the Production copy through Annual Video Evidence before replacing it.'],409);
         $videos=wf_store_files('video',1,200*1024*1024);
         if(!$videos)json_response(['success'=>false,'message'=>'กรุณาเลือกไฟล์วิดีโอ'],400);
         $video=$videos[0];$mime=strtolower((string)($video['type']??''));$ext=strtolower(pathinfo((string)($video['name']??$video['url']??''),PATHINFO_EXTENSION));
@@ -2481,6 +2563,7 @@ function handle_ky_routes(string $method, string $path): bool
         try{
             $row=db_row('SELECT * FROM ky_activities WHERE id=?',[$p['id']]);
             if(!$row){wf_cleanup_files($files);wf_cleanup_files($videos);json_response(['success'=>false,'message'=>'Not found.'],404);}
+            if($videos&&!empty($row['VideoUrl'])){wf_cleanup_files($files);wf_cleanup_files($videos);json_response(['success'=>false,'code'=>'KY_VIDEO_PROTECTED_BY_RETENTION','message'=>'Confirm External Backup and remove the Production copy through Annual Video Evidence before replacing it.'],409);}
             $b=wf_body();
             $attachment=$files?$files[0]['url']:($row['AttachmentUrl']??null);
             $video=$videos?$videos[0]['url']:($row['VideoUrl']??null);
@@ -2501,6 +2584,7 @@ function handle_ky_routes(string $method, string $path): bool
     $p=route_params($path,'/ky/:id'); if($p!==null&&$method==='DELETE'){
         require_admin();
         $row=db_row('SELECT AttachmentUrl,VideoUrl FROM ky_activities WHERE id=?',[$p['id']]);
+        if($row&&!empty($row['VideoUrl']))json_response(['success'=>false,'code'=>'KY_VIDEO_PROTECTED_BY_RETENTION','message'=>'Confirm External Backup and remove the Production copy through Annual Video Evidence before deleting the activity.'],409);
         $pdo=db();
         try{
             $pdo->beginTransaction();

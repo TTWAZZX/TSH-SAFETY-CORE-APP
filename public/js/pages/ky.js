@@ -1,7 +1,7 @@
 import { delegatedActionOptions, guardActionHandler, guardSubmitHandler } from '../utils/async-ui.js?v=20260715-phase32d-remaining-async-ux';
 // public/js/pages/ky.js
 // KY Ability (Kiken Yochi - Hazard Prediction)
-import { API } from '../api.js';
+import { API, apiFetch } from '../api.js';
 import {
     hideLoading, showError, showLoading,
     openModal, openDetailModal, closeModal, showToast, showConfirmationModal, showDocumentModal, escHtml,
@@ -473,7 +473,8 @@ let _historyRequestSeq = 0;
 let _departments    = [];
 let _lastStatsData   = null;
 let _kyProgConfig   = [];                          // KY_Program_Config for current year
-let _manageSub      = 'coverage';                  // 'coverage' | 'config' | 'forms'
+let _manageSub      = 'coverage';                  // 'coverage' | 'annual-video' | 'config' | 'forms'
+let _kyAnnualVideoData = null;
 let _configYear     = new Date().getFullYear();
 let _safetyUnits    = [];                          // Master_SafetyUnits
 let _empSearchTimer = null;
@@ -2666,6 +2667,14 @@ async function renderSubmitForm(container) {
                                 </label>
                                 <p id="ky-video-name" class="text-xs text-purple-600 mt-1 truncate"></p>
                                 <div id="ky-video-preview" class="hidden mt-3 rounded-xl border border-purple-100 bg-purple-50/50 p-3"></div>
+                                <label class="mt-3 flex items-start gap-2 rounded-xl border border-teal-200 bg-teal-50 p-3 cursor-pointer">
+                                    <input type="checkbox" id="ky-video-central-machine" class="mt-0.5 rounded text-teal-600">
+                                    <span><strong class="block text-xs text-teal-800">เก็บวิดีโอไว้ที่เครื่องกลาง</strong><span class="block text-[10px] text-teal-700 mt-0.5">เลือกไฟล์เพื่อบันทึก Metadata และ SHA-256 เท่านั้น ระบบจะไม่อัปโหลดไฟล์นี้ขึ้น Production</span></span>
+                                </label>
+                                <div id="ky-video-central-reference-wrap" class="hidden mt-2">
+                                    <label class="block text-xs font-bold text-slate-700 mb-1">พาธ / เลขอ้างอิงในเครื่องกลาง <span class="text-red-500">*</span></label>
+                                    <input type="text" id="ky-video-central-reference" class="form-input w-full text-xs" maxlength="500" placeholder="เช่น \\\\FILE-SERVER\\KYT\\2026\\MAINTENANCE\\video.mp4">
+                                </div>
                             </div>
                         </div>
 
@@ -2712,6 +2721,12 @@ function setupFormListeners() {
     });
     document.getElementById('ky-video')?.addEventListener('change', (e) => {
         renderKyFilePreview(e.target, 'ky-video-name', 'ky-video-preview', 'video');
+    });
+    document.getElementById('ky-video-central-machine')?.addEventListener('change', (e) => {
+        document.getElementById('ky-video-central-reference-wrap')?.classList.toggle('hidden', !e.target.checked);
+        const reference = document.getElementById('ky-video-central-reference');
+        if (reference) reference.required = Boolean(e.target.checked);
+        renderKySubmitSummary();
     });
 
     document.getElementById('ky-attachment-preview')?.addEventListener('click', (e) => {
@@ -2814,6 +2829,12 @@ function setupFormListeners() {
             showLoading('กำลังส่งกิจกรรม KY...');
             const fd = new FormData(e.target);
             const videoFile = document.getElementById('ky-video')?.files?.[0] || null;
+            const centralMachine = Boolean(document.getElementById('ky-video-central-machine')?.checked);
+            const centralReference = String(document.getElementById('ky-video-central-reference')?.value || '').trim();
+            if (centralMachine && (!videoFile || !centralReference)) {
+                showToast('โหมดเครื่องกลางต้องเลือกไฟล์วิดีโอและระบุพาธ/เลขอ้างอิง', 'warning');
+                return;
+            }
             fd.delete('video');
             const reporterEmail = String(fd.get('ReporterEmail') || '').trim().toLowerCase();
             if (reporterEmail && !/^[^\s@]+@thaisummit-harness\.co\.th$/i.test(reporterEmail)) {
@@ -2837,9 +2858,34 @@ function setupFormListeners() {
             const created = await API.post('/ky', fd);
             const activityId = created?.id || created?.data?.id;
             let videoUploadFailed = false;
-            if (videoFile) {
+            let annualEvidenceFailed = false;
+            if (videoFile && centralMachine) {
+                try {
+                    btn.innerHTML = `<span class="animate-spin inline-block w-4 h-4 border-2 border-white border-t-transparent rounded-full mr-2"></span> กำลังคำนวณ SHA-256...`;
+                    const sha256 = await sha256Blob(videoFile);
+                    await API.post('/ky/annual-video-evidence/declare', {
+                        activityId,
+                        storageMode: 'CentralMachine',
+                        externalBackupConfirmed: true,
+                        externalReference: centralReference,
+                        originalFileName: videoFile.name,
+                        mimeType: videoFile.type || '',
+                        fileSize: videoFile.size,
+                        sha256,
+                    });
+                } catch (videoError) {
+                    annualEvidenceFailed = true;
+                    console.error('KY central-machine video declaration failed:', videoError);
+                }
+            } else if (videoFile) {
                 try {
                     await uploadKyVideoInChunks(activityId, videoFile, (completed, total, done, meta) => setKyVideoUploadProgress(btn, completed, total, done, meta));
+                    try {
+                        await API.post('/ky/annual-video-evidence/declare', { activityId, storageMode: 'Production' });
+                    } catch (evidenceError) {
+                        annualEvidenceFailed = true;
+                        console.error('KY annual Production evidence registration skipped:', evidenceError);
+                    }
                 } catch (videoError) {
                     videoUploadFailed = true;
                     console.error('KY video upload after submit failed:', videoError);
@@ -2848,8 +2894,10 @@ function setupFormListeners() {
             showToast(
                 videoUploadFailed
                     ? 'บันทึกกิจกรรม KY แล้ว แต่วิดีโออัปโหลดไม่สำเร็จ กรุณาแนบย้อนหลังจากประวัติ'
-                    : 'ส่งกิจกรรม KY สำเร็จ',
-                videoUploadFailed ? 'warning' : 'success'
+                    : annualEvidenceFailed
+                        ? 'บันทึกกิจกรรมและวิดีโอแล้ว แต่ Annual Evidence ของหน่วยงานมีรายการอยู่แล้ว Admin สามารถจัดการจากหน้า Annual Video Evidence'
+                        : 'ส่งกิจกรรม KY สำเร็จ',
+                videoUploadFailed || annualEvidenceFailed ? 'warning' : 'success'
             );
             _participants = [];
             e.target.reset();
@@ -2858,6 +2906,11 @@ function setupFormListeners() {
             document.getElementById('ky-video-name').textContent = '';
             clearKyFile('ky-attachment', 'ky-attachment-name', 'ky-attachment-preview');
             clearKyFile('ky-video', 'ky-video-name', 'ky-video-preview');
+            const centralToggle = document.getElementById('ky-video-central-machine');
+            if (centralToggle) centralToggle.checked = false;
+            const centralRef = document.getElementById('ky-video-central-reference');
+            if (centralRef) centralRef.value = '';
+            document.getElementById('ky-video-central-reference-wrap')?.classList.add('hidden');
             _submitReporter = null;
             renderKySubmitReporter();
             renderKySubmitSummary();
@@ -3811,7 +3864,7 @@ async function renderManage(container) {
 
     const subActive   = 'px-4 py-2 text-xs font-bold rounded-lg text-white transition-all';
     const subInactive = 'px-4 py-2 text-xs font-semibold rounded-lg text-slate-500 bg-white border border-slate-200 hover:bg-slate-50 transition-all';
-    if (!['coverage', 'config', 'forms'].includes(_manageSub)) _manageSub = 'coverage';
+    if (!['coverage', 'annual-video', 'config', 'forms'].includes(_manageSub)) _manageSub = 'coverage';
 
     container.innerHTML = `
         <div class="space-y-4">
@@ -3835,6 +3888,9 @@ async function renderManage(container) {
                     <button id="ky-msub-coverage" class="${_manageSub==='coverage' ? subActive : subInactive}"
                             style="${_manageSub==='coverage' ? 'background:linear-gradient(135deg,#6366f1,#8b5cf6)' : ''}"
                             data-msub="coverage">Coverage & Follow-up</button>
+                    ${_isAdmin ? `<button id="ky-msub-annual-video" class="${_manageSub==='annual-video' ? subActive : subInactive}"
+                            style="${_manageSub==='annual-video' ? 'background:linear-gradient(135deg,#059669,#0f766e)' : ''}"
+                            data-msub="annual-video">Annual Video Evidence</button>` : ''}
                     <button id="ky-msub-config" class="${_manageSub==='config' ? subActive : subInactive}"
                             style="${_manageSub==='config' ? 'background:linear-gradient(135deg,#6366f1,#8b5cf6)' : ''}"
                             data-msub="config">ตั้งค่าโปรแกรม KY</button>
@@ -3880,6 +3936,8 @@ async function _renderManagePanel() {
     if (!panel) return;
     if (_manageSub === 'config') {
         renderManageConfig(panel);
+    } else if (_manageSub === 'annual-video') {
+        await renderKyAnnualVideoEvidence(panel);
     } else if (_manageSub === 'forms') {
         renderManageForms(panel);
         await _loadKyForms(_isAdmin);
@@ -3926,6 +3984,86 @@ function wireKyFormsManageEvents() {
             });
         }
     }, { render: false, target: event => event?.target?.closest?.('.ky-form-toggle, .ky-form-delete') || null, actionKey: (_event, button) => `ky:forms:${button.classList.contains('ky-form-delete') ? 'delete' : 'toggle'}:${button.dataset.id}` }));
+}
+
+async function renderKyAnnualVideoEvidence(panel = document.getElementById('ky-manage-panel')) {
+    if (!panel) return;
+    panel.innerHTML = `<div class="ds-section p-8 text-center text-sm text-slate-500">กำลังโหลด Annual Video Evidence...</div>`;
+    try {
+        const response = await API.get(`/ky/annual-video-evidence?year=${encodeURIComponent(_filterMgmtYear)}`);
+        _kyAnnualVideoData = normalizeApiObject(response?.data ?? response) || {};
+        const data = _kyAnnualVideoData;
+        const summary = data.summary || {};
+        const evidence = data.evidence || [];
+        const scopes = data.scopes || [];
+        const candidates = data.candidates || [];
+        const statusBadge = row => row.Status === 'Verified'
+            ? '<span class="rounded-full bg-emerald-100 px-2 py-1 text-[10px] font-bold text-emerald-700">Verified</span>'
+            : row.Status === 'NeedsCorrection'
+                ? '<span class="rounded-full bg-rose-100 px-2 py-1 text-[10px] font-bold text-rose-700">Needs correction</span>'
+                : '<span class="rounded-full bg-amber-100 px-2 py-1 text-[10px] font-bold text-amber-700">Pending</span>';
+        panel.innerHTML = `
+            <div class="space-y-5">
+                <div class="grid grid-cols-2 lg:grid-cols-6 gap-3" data-ky-annual-summary>
+                    ${[
+                        ['Required scopes', summary.requiredScopes || 0, 'text-slate-800'],
+                        ['Verified', summary.verifiedScopes || 0, 'text-emerald-700'],
+                        ['Pending', summary.pendingScopes || 0, 'text-amber-700'],
+                        ['Missing', summary.missingScopes || 0, 'text-rose-700'],
+                        ['Compliance', `${summary.compliancePct || 0}%`, 'text-indigo-700'],
+                        ['Reclaimable', `${summary.reclaimableFiles || 0} · ${formatFileSize(summary.reclaimableBytes || 0)}`, 'text-teal-700'],
+                    ].map(([label,value,color]) => `<div class="ds-section p-4"><p class="text-[10px] font-bold uppercase text-slate-400">${label}</p><p class="mt-1 text-xl font-bold ${color}">${value}</p></div>`).join('')}
+                </div>
+                <div class="ds-section p-5">
+                    <div class="flex flex-col lg:flex-row lg:items-center justify-between gap-3 mb-4">
+                        <div><h3 class="font-bold text-slate-800">Annual Compliance Dashboard · ${escHtml(String(data.year || _filterMgmtYear))}</h3><p class="text-xs text-slate-500 mt-1">แต่ละ Department / Safety Unit ต้องมีหลักฐานวิดีโอที่ Admin ตรวจยืนยันอย่างน้อย 1 รายการต่อปี</p></div>
+                        <div class="h-2.5 w-full lg:w-64 rounded-full bg-slate-100 overflow-hidden"><div class="h-full bg-emerald-500" style="width:${Math.max(0,Math.min(100,Number(summary.compliancePct||0)))}%"></div></div>
+                    </div>
+                    <div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-2 max-h-80 overflow-y-auto">
+                        ${scopes.length ? scopes.map(scope => `<div class="rounded-xl border ${scope.compliant?'border-emerald-200 bg-emerald-50':'border-slate-200 bg-white'} p-3"><div class="flex items-center justify-between gap-2"><div><p class="text-xs font-bold text-slate-800">${escHtml(scope.department||'-')}</p><p class="text-[10px] text-slate-500">${escHtml(scope.safetyUnit||'ระดับ Department')}</p></div><span class="text-[10px] font-bold ${scope.compliant?'text-emerald-700':'text-rose-600'}">${scope.compliant?'ครบแล้ว':scope.evidence?'รอตรวจ':'ยังไม่มี'}</span></div></div>`).join('') : '<p class="text-sm text-slate-400">ยังไม่มี Program Config สำหรับปีนี้</p>'}
+                    </div>
+                </div>
+                <div class="ds-section overflow-hidden">
+                    <div class="p-5 border-b border-slate-100 flex flex-col lg:flex-row lg:items-center justify-between gap-3">
+                        <div><h3 class="font-bold text-slate-800">ทะเบียนหลักฐานและพื้นที่ Production</h3><p class="text-xs text-slate-500 mt-1">Metadata และ Audit จะคงอยู่หลังลบไฟล์ การลบทำได้เฉพาะรายการ Verified ที่ยืนยัน External Backup และ SHA-256 ตรงกัน</p></div>
+                        <button type="button" data-ky-annual-delete-selected class="px-4 py-2 rounded-xl bg-rose-600 text-white text-xs font-bold disabled:opacity-40">ลบไฟล์ Production ที่เลือก</button>
+                    </div>
+                    <div class="overflow-x-auto"><table class="ds-table text-sm"><thead><tr><th class="px-3 py-3"><input type="checkbox" data-ky-annual-check-all></th><th class="px-3 py-3">Scope / Activity</th><th class="px-3 py-3">Storage</th><th class="px-3 py-3">Metadata</th><th class="px-3 py-3">Status</th><th class="px-3 py-3 text-right">Action</th></tr></thead><tbody>
+                        ${evidence.length ? evidence.map(row => `<tr>
+                            <td class="px-3 py-3"><input type="checkbox" data-ky-annual-select value="${escHtml(row.id)}" data-version="${Number(row.RowVersion||0)}" ${row.canDeleteProductionFile?'':'disabled'}></td>
+                            <td class="px-3 py-3"><p class="font-bold text-slate-800">${escHtml(row.Department||'-')}</p><p class="text-xs text-slate-500">${escHtml(row.SafetyUnit||'ระดับ Department')} · ${escHtml(row.ActivityID||'-')}</p></td>
+                            <td class="px-3 py-3"><p class="text-xs font-bold ${row.StorageMode==='CentralMachine'?'text-teal-700':'text-indigo-700'}">${escHtml(row.StorageMode||'-')}</p><p class="text-[10px] text-slate-400 max-w-[220px] truncate" title="${escHtml(row.ExternalReference||'')}">${escHtml(row.ExternalReference||'Production')}</p></td>
+                            <td class="px-3 py-3"><p class="text-xs font-semibold text-slate-700 max-w-[220px] truncate">${escHtml(row.OriginalFileName||'-')}</p><p class="text-[10px] text-slate-400">${formatFileSize(row.FileSize||0)} · SHA ${escHtml(String(row.SHA256||'').slice(0,12))}…</p></td>
+                            <td class="px-3 py-3">${statusBadge(row)}${row.fileDeleted?'<p class="text-[10px] text-rose-600 mt-1">Production file removed</p>':''}</td>
+                            <td class="px-3 py-3"><div class="flex justify-end gap-1 flex-wrap">
+                                ${row.ProductionVideoUrl&&!row.fileDeleted?`<button data-ky-annual-download="${escHtml(row.id)}" data-name="${escHtml(row.OriginalFileName||'video')}" class="px-2 py-1 rounded-lg border text-[10px] font-bold text-indigo-700">ดาวน์โหลด</button>`:''}
+                                ${row.ProductionVideoUrl&&!row.fileDeleted&&row.StorageMode!=='CentralMachine'&&row.Status!=='Verified'?`<button data-ky-annual-confirm-external="${escHtml(row.id)}" class="px-2 py-1 rounded-lg border border-teal-200 text-[10px] font-bold text-teal-700">ยืนยันเครื่องกลาง</button>`:''}
+                                <button data-ky-annual-audit="${escHtml(row.id)}" class="px-2 py-1 rounded-lg border text-[10px] font-bold text-slate-600">Audit</button>
+                                ${row.Status!=='Verified'?`<button data-ky-annual-verify="${escHtml(row.id)}" data-version="${Number(row.RowVersion||0)}" class="px-2 py-1 rounded-lg bg-emerald-600 text-white text-[10px] font-bold">Verify</button>`:''}
+                                ${row.Status!=='NeedsCorrection'?`<button data-ky-annual-correction="${escHtml(row.id)}" data-version="${Number(row.RowVersion||0)}" class="px-2 py-1 rounded-lg bg-amber-500 text-white text-[10px] font-bold">แก้ไข</button>`:''}
+                                ${row.canDeleteProductionFile?`<button data-ky-annual-delete-one="${escHtml(row.id)}" data-version="${Number(row.RowVersion||0)}" class="px-2 py-1 rounded-lg bg-rose-600 text-white text-[10px] font-bold">ลบไฟล์</button>`:''}
+                            </div></td>
+                        </tr>`).join('') : '<tr><td colspan="6" class="py-8 text-center text-sm text-slate-400">ยังไม่มีทะเบียนหลักฐานวิดีโอรายปี</td></tr>'}
+                    </tbody></table></div>
+                </div>
+                ${candidates.length ? `<div class="ds-section p-5"><h3 class="font-bold text-slate-800">วิดีโอเดิมที่ยังไม่ลงทะเบียน (${candidates.length})</h3><p class="text-xs text-slate-500 mt-1 mb-3">ลงทะเบียน Metadata และ SHA-256 จากไฟล์ Production เดิมก่อน Admin Verify</p><div class="grid grid-cols-1 lg:grid-cols-2 gap-2 max-h-72 overflow-y-auto">${candidates.map(row=>`<div class="rounded-xl border border-slate-200 p-3 flex items-center justify-between gap-3"><div class="min-w-0"><p class="text-xs font-bold text-slate-800 truncate">${escHtml(row.Department||'-')} · ${escHtml(row.SafetyUnit||'Department')}</p><p class="text-[10px] text-slate-500 truncate">${escHtml(row.TeamName||row.KYTKeyword||row.id)}</p></div><button data-ky-annual-register-production="${escHtml(row.id)}" class="px-3 py-1.5 rounded-lg bg-indigo-600 text-white text-[10px] font-bold whitespace-nowrap">ลงทะเบียน</button></div>`).join('')}</div></div>`:''}
+            </div>`;
+    } catch (err) {
+        panel.innerHTML = `<div class="ds-section p-6 text-center text-sm text-red-600">${escHtml(err.message || 'โหลด Annual Video Evidence ไม่สำเร็จ')}</div>`;
+    }
+}
+
+async function downloadKyAnnualVideo(id, filename) {
+    const response = await apiFetch(`/ky/annual-video-evidence/${encodeURIComponent(id)}/download`);
+    if (!(response instanceof Response) || !response.ok) throw new Error('ดาวน์โหลดวิดีโอไม่สำเร็จ');
+    const url = URL.createObjectURL(await response.blob());
+    const link = document.createElement('a');link.href=url;link.download=filename||'ky-video';document.body.appendChild(link);link.click();link.remove();setTimeout(()=>URL.revokeObjectURL(url),1000);
+}
+
+async function showKyAnnualAudit(id) {
+    const response = await API.get(`/ky/annual-video-evidence/${encodeURIComponent(id)}/audit`);
+    const rows = normalizeApiArray(response?.data ?? response);
+    openModal('Annual Video Evidence Audit', `<div class="space-y-2 max-h-[60vh] overflow-y-auto">${rows.length?rows.map(row=>`<div class="rounded-xl border border-slate-200 p-3"><div class="flex justify-between gap-3"><p class="text-xs font-bold text-slate-800">${escHtml(row.Action||'-')}</p><p class="text-[10px] text-slate-400">${escHtml(row.CreatedAt||'')}</p></div><p class="text-xs text-slate-500 mt-1">${escHtml(row.ActorName||row.ActorID||'-')} · ${escHtml(row.Detail||'')}</p></div>`).join(''):'<p class="text-sm text-slate-400">ยังไม่มี Audit</p>'}</div>`, 'max-w-2xl');
 }
 
 function renderManageConfig(wrap) {
@@ -5204,6 +5342,97 @@ function setupEventListeners() {
             _manageSub = msubBtn.dataset.msub;
             const c = document.getElementById('ky-tab-content');
             if (c) await renderManage(c);
+            return;
+        }
+
+        const annualRegisterBtn = e.target.closest('[data-ky-annual-register-production]');
+        if (annualRegisterBtn) {
+            await runKyButtonAction(annualRegisterBtn, 'กำลังตรวจ SHA...', async () => {
+                await API.post('/ky/annual-video-evidence/declare', { activityId: annualRegisterBtn.dataset.kyAnnualRegisterProduction, storageMode: 'Production' });
+                showToast('ลงทะเบียนวิดีโอ Production แล้ว รอ Admin Verify', 'success');
+                await renderKyAnnualVideoEvidence();
+            });
+            return;
+        }
+
+        const annualExternalBtn = e.target.closest('[data-ky-annual-confirm-external]');
+        if (annualExternalBtn) {
+            const row = (_kyAnnualVideoData?.evidence || []).find(item => String(item.id) === String(annualExternalBtn.dataset.kyAnnualConfirmExternal));
+            if (!row) return;
+            const reference = window.prompt('ระบุพาธ / เลขอ้างอิงของไฟล์ที่สำรองไว้ในเครื่องกลาง', row.ExternalReference || '') ?? null;
+            if (!reference?.trim()) return;
+            await API.post('/ky/annual-video-evidence/declare', {
+                activityId: row.ActivityID,
+                storageMode: 'CentralMachine',
+                externalBackupConfirmed: true,
+                externalReference: reference.trim(),
+                originalFileName: row.OriginalFileName,
+                mimeType: row.MimeType || '',
+                fileSize: Number(row.FileSize || 0),
+                sha256: row.SHA256,
+                rowVersion: Number(row.RowVersion || 0),
+            });
+            showToast('บันทึก External Backup แล้ว กรุณา Verify อีกครั้งก่อนลบไฟล์ Production', 'success');
+            await renderKyAnnualVideoEvidence();
+            return;
+        }
+
+        const annualVerifyBtn = e.target.closest('[data-ky-annual-verify], [data-ky-annual-correction]');
+        if (annualVerifyBtn) {
+            const isCorrection = annualVerifyBtn.hasAttribute('data-ky-annual-correction');
+            const id = isCorrection ? annualVerifyBtn.dataset.kyAnnualCorrection : annualVerifyBtn.dataset.kyAnnualVerify;
+            const note = window.prompt(isCorrection ? 'ระบุสิ่งที่ต้องแก้ไข' : 'หมายเหตุการตรวจสอบ (เว้นว่างได้)', '') ?? null;
+            if (note === null || (isCorrection && !note.trim())) return;
+            await API.post(`/ky/annual-video-evidence/${encodeURIComponent(id)}/verify`, {
+                status: isCorrection ? 'NeedsCorrection' : 'Verified',
+                rowVersion: Number(annualVerifyBtn.dataset.version || 0),
+                note: note.trim(),
+            });
+            showToast(isCorrection ? 'ส่งกลับเพื่อแก้ไขแล้ว' : 'Admin Verify สำเร็จ', 'success');
+            await renderKyAnnualVideoEvidence();
+            return;
+        }
+
+        const annualDownloadBtn = e.target.closest('[data-ky-annual-download]');
+        if (annualDownloadBtn) {
+            await runKyButtonAction(annualDownloadBtn, 'กำลังดาวน์โหลด...', () => downloadKyAnnualVideo(annualDownloadBtn.dataset.kyAnnualDownload, annualDownloadBtn.dataset.name));
+            return;
+        }
+
+        const annualAuditBtn = e.target.closest('[data-ky-annual-audit]');
+        if (annualAuditBtn) { await showKyAnnualAudit(annualAuditBtn.dataset.kyAnnualAudit); return; }
+
+        const annualDeleteOneBtn = e.target.closest('[data-ky-annual-delete-one]');
+        if (annualDeleteOneBtn) {
+            const reason = window.prompt('ระบุเหตุผลการลบไฟล์จาก Production (Metadata, SHA-256 และ Audit จะยังอยู่)', '') ?? null;
+            if (!reason?.trim()) return;
+            const confirmed = await showConfirmationModal('ยืนยันลบไฟล์ Production', 'ลบไฟล์วิดีโอรายการนี้จาก Production ใช่หรือไม่? ระบบจะเก็บ Metadata, SHA-256 และ Audit ไว้');
+            if (!confirmed) return;
+            await API.post('/ky/annual-video-evidence/delete-production', {
+                items: [{ id: annualDeleteOneBtn.dataset.kyAnnualDeleteOne, rowVersion: Number(annualDeleteOneBtn.dataset.version || 0) }],
+                reason: reason.trim(),
+            });
+            showToast('ลบไฟล์ Production แล้ว โดยเก็บ Metadata และ Audit ไว้ครบ', 'success');
+            await renderKyAnnualVideoEvidence();
+            return;
+        }
+
+        if (e.target.closest('[data-ky-annual-check-all]')) {
+            const checked = Boolean(e.target.closest('[data-ky-annual-check-all]').checked);
+            document.querySelectorAll('[data-ky-annual-select]:not(:disabled)').forEach(input => { input.checked = checked; });
+            return;
+        }
+
+        if (e.target.closest('[data-ky-annual-delete-selected]')) {
+            const selected = Array.from(document.querySelectorAll('[data-ky-annual-select]:checked:not(:disabled)')).map(input => ({ id: input.value, rowVersion: Number(input.dataset.version || 0) }));
+            if (!selected.length) { showToast('เลือกรายการที่ Verified และยืนยัน External Backup ก่อน', 'warning'); return; }
+            const reason = window.prompt('ระบุเหตุผลการลบไฟล์จาก Production (Metadata, SHA-256 และ Audit จะยังอยู่)', '') ?? null;
+            if (!reason?.trim()) return;
+            const confirmed = await showConfirmationModal('ยืนยันลบไฟล์ Production', `ลบไฟล์วิดีโอ ${selected.length} รายการจาก Production ใช่หรือไม่? การดำเนินการนี้ย้อนกลับไม่ได้ แต่ Metadata และ Audit จะถูกเก็บไว้`);
+            if (!confirmed) return;
+            await API.post('/ky/annual-video-evidence/delete-production', { items: selected, reason: reason.trim() });
+            showToast(`ลบไฟล์ Production แล้ว ${selected.length} รายการ`, 'success');
+            await renderKyAnnualVideoEvidence();
             return;
         }
 

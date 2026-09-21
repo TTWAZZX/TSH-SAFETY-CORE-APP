@@ -6,7 +6,7 @@ const jwt = require('jsonwebtoken');
 const db = require('../db');
 
 const baseUrl = String(process.env.KY_PHP_API_BASE || 'http://localhost/tsh-safety-core/api/index.php?route=').replace(/\/+$/, '');
-const activityId = crypto.randomUUID();
+const activityIds = new Set();
 const storedNames = new Set();
 const uploadIds = new Set();
 let passed = false;
@@ -38,9 +38,11 @@ function makeSyntheticMp4(size) {
 }
 
 async function cleanup() {
-    await db.query('DELETE FROM KY_Video_Reactions WHERE ActivityID=?', [activityId]).catch(() => {});
-    await db.query("DELETE FROM Admin_AuditLogs WHERE Module='ky' AND TargetID=?", [activityId]).catch(() => {});
-    await db.query('DELETE FROM KY_Activities WHERE id=?', [activityId]).catch(() => {});
+    for (const activityId of activityIds) {
+        await db.query('DELETE FROM KY_Video_Reactions WHERE ActivityID=?', [activityId]).catch(() => {});
+        await db.query("DELETE FROM Admin_AuditLogs WHERE Module='ky' AND TargetID=?", [activityId]).catch(() => {});
+        await db.query('DELETE FROM KY_Activities WHERE id=?', [activityId]).catch(() => {});
+    }
     for (const storedName of storedNames) {
         for (const dir of [path.join(__dirname, '..', 'uploads'), path.join(__dirname, '..', '..', 'uploads')]) {
             const target = path.resolve(dir, storedName);
@@ -55,13 +57,13 @@ async function cleanup() {
         if (target.startsWith(`${root}${path.sep}`) && fs.existsSync(manifestPath)) {
             try {
                 const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
-                if (manifest.activityId === activityId) fs.rmSync(target, { recursive: true, force: true });
+                if (activityIds.has(manifest.activityId)) fs.rmSync(target, { recursive: true, force: true });
             } catch (_) {}
         }
     }
 }
 
-async function uploadCase(headers, size, label, exerciseRecovery = false) {
+async function uploadCase(headers, activityId, size, label, exerciseRecovery = false) {
     const video = makeSyntheticMp4(size);
     const sourceSha256 = crypto.createHash('sha256').update(video).digest('hex');
     const initialized = await jsonFetch(apiUrl(`ky/${activityId}/video-upload/init`), {
@@ -132,15 +134,21 @@ async function uploadCase(headers, size, label, exerciseRecovery = false) {
         assert.ok(configResponse.data.chunkSize <= 1024 * 1024);
         assert.strictEqual(configResponse.data.maxFileSize, 200 * 1024 * 1024);
 
-        await db.query(
-            `INSERT INTO KY_Activities
-             (id,ActivityDate,ReporterID,ReporterName,SubmittedByID,SubmittedByName,Department,TeamName,Participants,KYTKeyword,RiskCategory,HazardDescription,Countermeasure,Status)
-             VALUES (?,CURDATE(),?,?,?,?,?,?,?,?,?,?,?,'Open')`,
-            [activityId, admin.EmployeeID, admin.EmployeeName, admin.EmployeeID, admin.EmployeeName, admin.Department || 'TEST', 'KY chunk smoke', '[]', 'chunk-smoke', 'General', 'KY chunk upload smoke test', 'Remove test row after verification']
-        );
+        const createActivity = async label => {
+            const activityId = crypto.randomUUID();
+            activityIds.add(activityId);
+            await db.query(
+                `INSERT INTO KY_Activities
+                 (id,ActivityDate,ReporterID,ReporterName,SubmittedByID,SubmittedByName,Department,TeamName,Participants,KYTKeyword,RiskCategory,HazardDescription,Countermeasure,Status)
+                 VALUES (?,CURDATE(),?,?,?,?,?,?,?,?,?,?,?,'Open')`,
+                [activityId, admin.EmployeeID, admin.EmployeeName, admin.EmployeeID, admin.EmployeeName, admin.Department || 'TEST', `KY chunk smoke ${label}`, '[]', 'chunk-smoke', 'General', 'KY chunk upload smoke test', 'Remove test row after verification']
+            );
+            return activityId;
+        };
+        const firstActivityId = await createActivity('2.5MB');
 
         await assert.rejects(
-            jsonFetch(apiUrl(`ky/${activityId}/video-upload/init`), {
+            jsonFetch(apiUrl(`ky/${firstActivityId}/video-upload/init`), {
                 method: 'POST',
                 headers: { ...headers, 'Content-Type': 'application/json' },
                 body: JSON.stringify({ fileName: 'too-large.mp4', fileSize: (200 * 1024 * 1024) + 1, mimeType: 'video/mp4' }),
@@ -148,7 +156,7 @@ async function uploadCase(headers, size, label, exerciseRecovery = false) {
             /400 KY_VIDEO_SIZE_INVALID/
         );
         await assert.rejects(
-            jsonFetch(apiUrl(`ky/${activityId}/video-upload/init`), {
+            jsonFetch(apiUrl(`ky/${firstActivityId}/video-upload/init`), {
                 method: 'POST',
                 headers: { ...headers, 'Content-Type': 'application/json' },
                 body: JSON.stringify({ fileName: 'not-video.txt', fileSize: 1024, mimeType: 'text\/plain' }),
@@ -156,18 +164,28 @@ async function uploadCase(headers, size, label, exerciseRecovery = false) {
             /400 KY_VIDEO_TYPE_INVALID/
         );
 
-        await uploadCase(headers, 2547455, 'ky-chunk-2_5mb', true);
-        const finalVideoUrl = await uploadCase(headers, (5 * 1024 * 1024) + 37, 'ky-chunk-over-5mb');
-        const [[saved]] = await db.query('SELECT VideoUrl FROM KY_Activities WHERE id=?', [activityId]);
+        await uploadCase(headers, firstActivityId, 2547455, 'ky-chunk-2_5mb', true);
+        await assert.rejects(
+            jsonFetch(apiUrl(`ky/${firstActivityId}/video-upload/init`), {
+                method: 'POST',
+                headers: { ...headers, 'Content-Type': 'application/json' },
+                body: JSON.stringify({ fileName: 'replacement-blocked.mp4', fileSize: 1024, mimeType: 'video/mp4' }),
+            }),
+            /409 KY_VIDEO_PROTECTED_BY_RETENTION/
+        );
+        const secondActivityId = await createActivity('over-5MB');
+        const finalVideoUrl = await uploadCase(headers, secondActivityId, (5 * 1024 * 1024) + 37, 'ky-chunk-over-5mb');
+        const [[saved]] = await db.query('SELECT VideoUrl FROM KY_Activities WHERE id=?', [secondActivityId]);
         assert.strictEqual(saved.VideoUrl, finalVideoUrl);
 
-        const abortInit = await jsonFetch(apiUrl(`ky/${activityId}/video-upload/init`), {
+        const abortActivityId = await createActivity('abort');
+        const abortInit = await jsonFetch(apiUrl(`ky/${abortActivityId}/video-upload/init`), {
             method: 'POST',
             headers: { ...headers, 'Content-Type': 'application/json' },
             body: JSON.stringify({ fileName: 'ky-abort-at-200mb-limit.mp4', fileSize: 200 * 1024 * 1024, mimeType: 'video/mp4' }),
         });
         uploadIds.add(abortInit.data.uploadId);
-        await jsonFetch(apiUrl(`ky/${activityId}/video-upload/${abortInit.data.uploadId}`), { method: 'DELETE', headers });
+        await jsonFetch(apiUrl(`ky/${abortActivityId}/video-upload/${abortInit.data.uploadId}`), { method: 'DELETE', headers });
         assert.ok(!fs.existsSync(path.join(__dirname, '..', 'private-uploads', 'ky-video-chunks', abortInit.data.uploadId)), 'abort must remove temporary upload');
         passed = true;
     } finally {

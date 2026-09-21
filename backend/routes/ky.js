@@ -75,6 +75,8 @@ const KY_VIDEO_MIME_TYPES = new Set([
     'video/mp4', 'video/quicktime', 'video/webm', 'video/avi',
     'video/x-msvideo', 'video/x-matroska', 'video/mpeg',
 ]);
+const KY_ANNUAL_VIDEO_STORAGE_MODES = new Set(['Production', 'CentralMachine']);
+const KY_ANNUAL_VIDEO_STATUSES = new Set(['Pending', 'Verified', 'NeedsCorrection']);
 const uploadKyVideoChunk = multer({
     storage: multer.memoryStorage(),
     // Busboy marks a file as limited when it reaches the exact configured cap.
@@ -468,12 +470,12 @@ async function kyLoadVideoUploadActivity(activityId) {
 function kyCheckVideoUploadAccess(row, req, manifest = null) {
     const userId = currentUserId(req);
     const admin = isKyAdmin(req);
+    if (row?.VideoUrl) return { status: 409, code: 'KY_VIDEO_PROTECTED_BY_RETENTION', message: 'Confirm External Backup and remove the Production copy through Annual Video Evidence before replacing it.' };
     if (!row) return { status: 404, message: 'ไม่พบกิจกรรม KY' };
     if (!kyCanUploadFollowupVideoForUser(row, req)) return { status: 403, message: 'แนบวิดีโอได้เฉพาะเจ้าของรายการหรือ Admin' };
     if (manifest && (manifest.activityId !== row.id || manifest.initiatedBy !== userId)) {
         return { status: 403, message: 'ไม่สามารถใช้งานชุดอัปโหลดนี้ได้' };
     }
-    if (!admin && row.VideoUrl) return { status: 409, message: 'รายการนี้มีวิดีโอแล้ว กรุณาติดต่อ Admin หากต้องการเปลี่ยนไฟล์' };
     return { userId, admin };
 }
 
@@ -869,7 +871,129 @@ async function ensureTables() {
     `);
     await db.query('ALTER TABLE KY_EmailOutbox ADD COLUMN HtmlBody MEDIUMTEXT AFTER Body').catch(() => {});
 
+    await db.query(`
+        CREATE TABLE IF NOT EXISTS KY_Annual_Video_Evidence (
+            id                         VARCHAR(36) NOT NULL PRIMARY KEY,
+            EvidenceYear               SMALLINT NOT NULL,
+            ScopeKey                   VARCHAR(220) NOT NULL,
+            Department                 VARCHAR(100) NOT NULL,
+            SafetyUnit                 VARCHAR(100) NULL,
+            ActivityID                 VARCHAR(36) NULL,
+            StorageMode                VARCHAR(30) NOT NULL,
+            ExternalBackupConfirmed    TINYINT(1) NOT NULL DEFAULT 0,
+            ExternalReference          TEXT NULL,
+            OriginalFileName           VARCHAR(255) NOT NULL,
+            MimeType                   VARCHAR(120) NULL,
+            FileSize                   BIGINT UNSIGNED NOT NULL DEFAULT 0,
+            SHA256                     CHAR(64) NOT NULL,
+            ProductionVideoUrl         TEXT NULL,
+            ProductionStoredName       VARCHAR(255) NULL,
+            Status                     VARCHAR(30) NOT NULL DEFAULT 'Pending',
+            DeclaredByID               VARCHAR(50) NULL,
+            DeclaredByName             VARCHAR(100) NULL,
+            DeclaredAt                 DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            VerifiedByID               VARCHAR(50) NULL,
+            VerifiedByName             VARCHAR(100) NULL,
+            VerifiedAt                 DATETIME NULL,
+            VerificationNote           TEXT NULL,
+            ProductionDeletedByID      VARCHAR(50) NULL,
+            ProductionDeletedByName    VARCHAR(100) NULL,
+            ProductionDeletedAt        DATETIME NULL,
+            ProductionDeletionReason   TEXT NULL,
+            RowVersion                 INT UNSIGNED NOT NULL DEFAULT 1,
+            CreatedAt                  DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            UpdatedAt                  TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+            UNIQUE KEY uq_ky_annual_video_scope (EvidenceYear, ScopeKey),
+            KEY idx_ky_annual_video_activity (ActivityID),
+            KEY idx_ky_annual_video_status (EvidenceYear, Status)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+    `);
+    await db.query(`
+        CREATE TABLE IF NOT EXISTS KY_Annual_Video_Evidence_Audit (
+            id             BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+            EvidenceID     VARCHAR(36) NOT NULL,
+            ActivityID     VARCHAR(36) NULL,
+            Action         VARCHAR(80) NOT NULL,
+            ActorID        VARCHAR(50) NULL,
+            ActorName      VARCHAR(100) NULL,
+            BeforeJson     LONGTEXT NULL,
+            AfterJson      LONGTEXT NULL,
+            Detail         TEXT NULL,
+            CreatedAt      DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            KEY idx_ky_annual_video_audit_evidence (EvidenceID, CreatedAt),
+            KEY idx_ky_annual_video_audit_action (Action, CreatedAt)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+    `);
+
     tablesReady = true;
+}
+
+function kyAnnualScopeKey(department, safetyUnit) {
+    return `${kyNormKey(department)}||${kyNormKey(safetyUnit) || '__department__'}`.slice(0, 220);
+}
+
+function kyAnnualEvidencePublic(row) {
+    return {
+        ...row,
+        ExternalBackupConfirmed: Boolean(Number(row.ExternalBackupConfirmed || 0)),
+        fileDeleted: Boolean(row.ProductionDeletedAt),
+        canDeleteProductionFile: row.Status === 'Verified'
+            && row.StorageMode === 'CentralMachine'
+            && Boolean(Number(row.ExternalBackupConfirmed || 0))
+            && Boolean(String(row.ExternalReference || '').trim())
+            && /^[a-f0-9]{64}$/i.test(String(row.SHA256 || ''))
+            && Boolean(String(row.ProductionVideoUrl || '').trim())
+            && !row.ProductionDeletedAt,
+    };
+}
+
+function kyAnnualLocalVideo(rawUrl) {
+    const health = kyMediaHealthStatus(rawUrl, 'VideoUrl');
+    if (health.status !== 'ok' || !health.storedName) return null;
+    const target = path.resolve(uploadsDir, health.storedName);
+    const root = `${path.resolve(uploadsDir)}${path.sep}`;
+    return target.startsWith(root) && fs.existsSync(target) ? target : null;
+}
+
+function kyFileSha256(filePath) {
+    return new Promise((resolve, reject) => {
+        const hash = createHash('sha256');
+        const stream = fs.createReadStream(filePath);
+        stream.on('data', chunk => hash.update(chunk));
+        stream.on('error', reject);
+        stream.on('end', () => resolve(hash.digest('hex')));
+    });
+}
+
+async function kyAnnualAudit(connection, req, action, before, after, detail = '') {
+    const evidence = after || before || {};
+    await connection.query(
+        `INSERT INTO KY_Annual_Video_Evidence_Audit
+         (EvidenceID, ActivityID, Action, ActorID, ActorName, BeforeJson, AfterJson, Detail)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+        [
+            evidence.id,
+            evidence.ActivityID || null,
+            action,
+            currentUserId(req) || null,
+            req.user?.name || req.user?.EmployeeName || req.user?.username || 'Admin',
+            before ? JSON.stringify(before) : null,
+            after ? JSON.stringify(after) : null,
+            detail || null,
+        ]
+    );
+}
+
+async function kyAnnualEvidenceRows(year) {
+    const [rows] = await db.query(
+        `SELECT e.*, a.ActivityDate, a.TeamName, a.KYTKeyword, a.ReporterName
+         FROM KY_Annual_Video_Evidence e
+         LEFT JOIN KY_Activities a ON a.id = e.ActivityID
+         WHERE e.EvidenceYear = ?
+         ORDER BY e.Department, COALESCE(e.SafetyUnit, ''), e.UpdatedAt DESC`,
+        [year]
+    );
+    return rows.map(kyAnnualEvidencePublic);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1554,6 +1678,308 @@ router.get('/file-health', isAdmin, async (req, res) => {
     }
 });
 
+router.get('/annual-video-evidence', isAdmin, async (req, res) => {
+    try {
+        await ensureTables();
+        const year = parseInt(req.query.year, 10) || new Date().getFullYear();
+        if (year < 2000 || year > 2200) return res.status(400).json({ success: false, message: 'Evidence year is invalid.' });
+        const [configs] = await db.query(
+            `SELECT Department, SafetyUnits FROM KY_Program_Config
+             WHERE Year = ? AND IsActive = 1 ORDER BY Department`,
+            [year]
+        );
+        const evidence = await kyAnnualEvidenceRows(year);
+        const byScope = new Map(evidence.map(row => [row.ScopeKey, row]));
+        const scopes = [];
+        for (const config of configs) {
+            const units = parseSafetyUnits(config.SafetyUnits);
+            const scopedUnits = units.length ? units : [''];
+            for (const safetyUnit of scopedUnits) {
+                const scopeKey = kyAnnualScopeKey(config.Department, safetyUnit);
+                const item = byScope.get(scopeKey) || null;
+                scopes.push({
+                    scopeKey,
+                    department: config.Department,
+                    safetyUnit: safetyUnit || null,
+                    compliant: item?.Status === 'Verified',
+                    evidence: item,
+                });
+            }
+        }
+        const [candidates] = await db.query(
+            `SELECT a.id, a.ActivityDate, a.Department, a.SafetyUnit, a.TeamName, a.KYTKeyword,
+                    a.ReporterName, a.VideoUrl
+             FROM KY_Activities a
+             LEFT JOIN KY_Annual_Video_Evidence e ON e.ActivityID = a.id
+             WHERE YEAR(a.ActivityDate) = ? AND COALESCE(TRIM(a.VideoUrl), '') <> '' AND e.id IS NULL
+             ORDER BY a.ActivityDate DESC, a.CreatedAt DESC LIMIT 300`,
+            [year]
+        );
+        const verified = scopes.filter(row => row.compliant).length;
+        res.json({
+            success: true,
+            data: {
+                year,
+                summary: {
+                    requiredScopes: scopes.length,
+                    verifiedScopes: verified,
+                    pendingScopes: scopes.filter(row => row.evidence && !row.compliant).length,
+                    missingScopes: scopes.filter(row => !row.evidence).length,
+                    compliancePct: scopes.length ? Math.round((verified / scopes.length) * 100) : 0,
+                    productionFiles: evidence.filter(row => row.ProductionVideoUrl && !row.ProductionDeletedAt).length,
+                    reclaimableFiles: evidence.filter(row => row.canDeleteProductionFile).length,
+                    reclaimableBytes: evidence.filter(row => row.canDeleteProductionFile).reduce((sum, row) => sum + Number(row.FileSize || 0), 0),
+                },
+                scopes,
+                evidence,
+                candidates,
+            },
+        });
+    } catch (error) {
+        console.error('KY annual video evidence dashboard error:', error);
+        res.status(500).json({ success: false, message: 'Unable to load annual KY video evidence.' });
+    }
+});
+
+router.get('/annual-video-evidence/:evidenceId/audit', isAdmin, async (req, res) => {
+    try {
+        await ensureTables();
+        const [rows] = await db.query(
+            `SELECT id, EvidenceID, ActivityID, Action, ActorID, ActorName, BeforeJson, AfterJson, Detail, CreatedAt
+             FROM KY_Annual_Video_Evidence_Audit WHERE EvidenceID = ? ORDER BY id DESC LIMIT 200`,
+            [req.params.evidenceId]
+        );
+        res.json({ success: true, data: rows });
+    } catch (error) {
+        res.status(500).json({ success: false, message: 'Unable to load annual video audit.' });
+    }
+});
+
+router.get('/annual-video-evidence/:evidenceId/download', isAdmin, async (req, res) => {
+    try {
+        await ensureTables();
+        const [rows] = await db.query('SELECT * FROM KY_Annual_Video_Evidence WHERE id = ? LIMIT 1', [req.params.evidenceId]);
+        const row = rows[0];
+        if (!row) return res.status(404).json({ success: false, message: 'Annual video evidence not found.' });
+        if (row.ProductionDeletedAt) return res.status(410).json({ success: false, message: 'Production copy has already been removed.' });
+        const localPath = kyAnnualLocalVideo(row.ProductionVideoUrl);
+        if (!localPath) return res.status(404).json({ success: false, message: 'Production video file is unavailable.' });
+        const actualHash = await kyFileSha256(localPath);
+        if (actualHash !== String(row.SHA256 || '').toLowerCase()) {
+            return res.status(409).json({ success: false, code: 'KY_ANNUAL_VIDEO_HASH_MISMATCH', message: 'Production file SHA-256 no longer matches its evidence record.' });
+        }
+        res.download(localPath, row.OriginalFileName || path.basename(localPath));
+    } catch (error) {
+        console.error('KY annual video download error:', error);
+        res.status(500).json({ success: false, message: 'Unable to download annual video evidence.' });
+    }
+});
+
+router.post('/annual-video-evidence/declare', async (req, res) => {
+    let connection;
+    try {
+        await ensureTables();
+        const activityId = String(req.body?.activityId || '').trim();
+        const storageMode = String(req.body?.storageMode || '').trim();
+        if (!activityId || !KY_ANNUAL_VIDEO_STORAGE_MODES.has(storageMode)) {
+            return res.status(400).json({ success: false, message: 'Activity and storage mode are required.' });
+        }
+        const [activityRows] = await db.query('SELECT * FROM KY_Activities WHERE id = ? LIMIT 1', [activityId]);
+        const activity = activityRows[0];
+        if (!activity) return res.status(404).json({ success: false, message: 'KY activity not found.' });
+        if (!kyCanUploadFollowupVideoForUser(activity, req)) return res.status(403).json({ success: false, message: 'You cannot declare evidence for this activity.' });
+        const evidenceYear = new Date(activity.ActivityDate).getFullYear();
+        const department = String(activity.Department || '').trim();
+        const safetyUnit = String(activity.SafetyUnit || '').trim();
+        const requestedRowVersion = Number(req.body?.rowVersion || 0);
+        if (!Number.isInteger(evidenceYear) || evidenceYear < 2000 || evidenceYear > 2200 || !department) {
+            return res.status(400).json({ success: false, message: 'The KY activity needs a valid activity date and Department.' });
+        }
+        const scopeKey = kyAnnualScopeKey(department, safetyUnit);
+        let originalFileName = String(req.body?.originalFileName || '').trim().slice(0, 255);
+        let mimeType = String(req.body?.mimeType || '').trim().slice(0, 120) || null;
+        let fileSize = Number(req.body?.fileSize || 0);
+        let sha256 = String(req.body?.sha256 || '').trim().toLowerCase();
+        let productionVideoUrl = null;
+        let productionStoredName = null;
+        let externalReference = String(req.body?.externalReference || '').trim();
+        const externalBackupConfirmed = req.body?.externalBackupConfirmed === true || Number(req.body?.externalBackupConfirmed) === 1;
+        if (storageMode === 'Production') {
+            productionVideoUrl = String(activity.VideoUrl || '').trim();
+            const localPath = kyAnnualLocalVideo(productionVideoUrl);
+            if (!localPath) return res.status(400).json({ success: false, message: 'This activity has no readable Production video.' });
+            productionStoredName = path.basename(localPath);
+            originalFileName = originalFileName || kyMediaHealthStatus(productionVideoUrl, 'VideoUrl').originalName || productionStoredName;
+            fileSize = fs.statSync(localPath).size;
+            sha256 = await kyFileSha256(localPath);
+        } else {
+            if (!externalBackupConfirmed || !externalReference) {
+                return res.status(400).json({ success: false, code: 'KY_EXTERNAL_BACKUP_REQUIRED', message: 'Confirm the central-machine copy and provide its reference/path.' });
+            }
+            if (!originalFileName || !Number.isSafeInteger(fileSize) || fileSize <= 0 || !/^[a-f0-9]{64}$/.test(sha256)) {
+                return res.status(400).json({ success: false, message: 'External evidence requires filename, size and SHA-256.' });
+            }
+            productionVideoUrl = String(activity.VideoUrl || '').trim() || null;
+            if (productionVideoUrl) productionStoredName = kyMediaHealthStatus(productionVideoUrl, 'VideoUrl').storedName || null;
+        }
+        connection = await db.getConnection();
+        await connection.beginTransaction();
+        const [currentRows] = await connection.query(
+            'SELECT * FROM KY_Annual_Video_Evidence WHERE EvidenceYear = ? AND ScopeKey = ? FOR UPDATE',
+            [evidenceYear, scopeKey]
+        );
+        const before = currentRows[0] || null;
+        if (before?.Status === 'Verified') {
+            await connection.rollback();
+            return res.status(409).json({ success: false, code: 'KY_ANNUAL_VIDEO_ALREADY_VERIFIED', message: 'This annual scope is already verified. Mark it for correction before replacing it.' });
+        }
+        if (before && (!Number.isInteger(requestedRowVersion) || requestedRowVersion !== Number(before.RowVersion))) {
+            await connection.rollback();
+            return res.status(409).json({ success: false, code: 'KY_ANNUAL_VIDEO_STALE', message: 'Evidence was changed by another user. Refresh and retry.' });
+        }
+        const id = before?.id || randomUUID();
+        const actorId = currentUserId(req) || null;
+        const actorName = req.user?.name || req.user?.EmployeeName || req.user?.username || 'User';
+        if (before) {
+            await connection.query(
+                `UPDATE KY_Annual_Video_Evidence SET ActivityID=?, StorageMode=?, ExternalBackupConfirmed=?, ExternalReference=?,
+                 OriginalFileName=?, MimeType=?, FileSize=?, SHA256=?, ProductionVideoUrl=?, ProductionStoredName=?, Status='Pending',
+                 DeclaredByID=?, DeclaredByName=?, DeclaredAt=NOW(), VerifiedByID=NULL, VerifiedByName=NULL, VerifiedAt=NULL,
+                 VerificationNote=NULL, ProductionDeletedByID=NULL, ProductionDeletedByName=NULL, ProductionDeletedAt=NULL,
+                 ProductionDeletionReason=NULL, RowVersion=RowVersion+1 WHERE id=?`,
+                [activityId, storageMode, externalBackupConfirmed ? 1 : 0, externalReference || null, originalFileName, mimeType,
+                    fileSize, sha256, productionVideoUrl, productionStoredName, actorId, actorName, id]
+            );
+        } else {
+            await connection.query(
+                `INSERT INTO KY_Annual_Video_Evidence
+                 (id,EvidenceYear,ScopeKey,Department,SafetyUnit,ActivityID,StorageMode,ExternalBackupConfirmed,ExternalReference,
+                  OriginalFileName,MimeType,FileSize,SHA256,ProductionVideoUrl,ProductionStoredName,Status,DeclaredByID,DeclaredByName)
+                 VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+                [id, evidenceYear, scopeKey, department, safetyUnit || null, activityId, storageMode, externalBackupConfirmed ? 1 : 0,
+                    externalReference || null, originalFileName, mimeType, fileSize, sha256, productionVideoUrl, productionStoredName,
+                    'Pending', actorId, actorName]
+            );
+        }
+        const [afterRows] = await connection.query('SELECT * FROM KY_Annual_Video_Evidence WHERE id = ?', [id]);
+        await kyAnnualAudit(connection, req, before ? 'DECLARATION_UPDATED' : 'DECLARED', before, afterRows[0], 'Annual KY video evidence declared.');
+        await connection.commit();
+        res.status(before ? 200 : 201).json({ success: true, data: kyAnnualEvidencePublic(afterRows[0]) });
+    } catch (error) {
+        if (connection) { try { await connection.rollback(); } catch (_) {} }
+        console.error('KY annual video declaration error:', error);
+        res.status(500).json({ success: false, message: 'Unable to declare annual video evidence.' });
+    } finally {
+        if (connection) connection.release();
+    }
+});
+
+router.post('/annual-video-evidence/:evidenceId/verify', isAdmin, async (req, res) => {
+    let connection;
+    try {
+        await ensureTables();
+        const status = String(req.body?.status || 'Verified');
+        const rowVersion = Number(req.body?.rowVersion || 0);
+        const note = String(req.body?.note || '').trim();
+        if (!['Verified', 'NeedsCorrection'].includes(status) || !Number.isInteger(rowVersion) || rowVersion < 1) {
+            return res.status(400).json({ success: false, message: 'Status and row version are required.' });
+        }
+        connection = await db.getConnection();
+        await connection.beginTransaction();
+        const [rows] = await connection.query('SELECT * FROM KY_Annual_Video_Evidence WHERE id = ? FOR UPDATE', [req.params.evidenceId]);
+        const before = rows[0];
+        if (!before) {
+            await connection.rollback();
+            return res.status(404).json({ success: false, message: 'Annual video evidence not found.' });
+        }
+        if (Number(before.RowVersion) !== rowVersion) {
+            await connection.rollback();
+            return res.status(409).json({ success: false, code: 'KY_ANNUAL_VIDEO_STALE', message: 'Evidence was changed by another user. Refresh and retry.' });
+        }
+        if (status === 'Verified' && before.StorageMode === 'CentralMachine' && (!Number(before.ExternalBackupConfirmed) || !String(before.ExternalReference || '').trim())) {
+            await connection.rollback();
+            return res.status(400).json({ success: false, code: 'KY_EXTERNAL_BACKUP_REQUIRED', message: 'External backup must be confirmed before verification.' });
+        }
+        const actorId = currentUserId(req) || null;
+        const actorName = req.user?.name || req.user?.EmployeeName || req.user?.username || 'Admin';
+        await connection.query(
+            `UPDATE KY_Annual_Video_Evidence SET Status=?, VerificationNote=?, VerifiedByID=?, VerifiedByName=?,
+             VerifiedAt=?, RowVersion=RowVersion+1 WHERE id=? AND RowVersion=?`,
+            [status, note || null, actorId, actorName, status === 'Verified' ? new Date() : null, before.id, rowVersion]
+        );
+        const [afterRows] = await connection.query('SELECT * FROM KY_Annual_Video_Evidence WHERE id = ?', [before.id]);
+        await kyAnnualAudit(connection, req, status === 'Verified' ? 'ADMIN_VERIFIED' : 'NEEDS_CORRECTION', before, afterRows[0], note);
+        await connection.commit();
+        res.json({ success: true, data: kyAnnualEvidencePublic(afterRows[0]) });
+    } catch (error) {
+        if (connection) { try { await connection.rollback(); } catch (_) {} }
+        console.error('KY annual video verification error:', error);
+        res.status(500).json({ success: false, message: 'Unable to verify annual video evidence.' });
+    } finally { if (connection) connection.release(); }
+});
+
+router.post('/annual-video-evidence/delete-production', isAdmin, async (req, res) => {
+    const items = Array.isArray(req.body?.items) ? req.body.items.slice(0, 100) : [];
+    const reason = String(req.body?.reason || '').trim();
+    if (!items.length || !reason) return res.status(400).json({ success: false, message: 'Select evidence and provide a deletion reason.' });
+    const quarantined = [];
+    let connection;
+    let committed = false;
+    try {
+        await ensureTables();
+        connection = await db.getConnection();
+        await connection.beginTransaction();
+        const rows = [];
+        for (const item of items) {
+            const [found] = await connection.query('SELECT * FROM KY_Annual_Video_Evidence WHERE id = ? FOR UPDATE', [String(item.id || '')]);
+            const row = found[0];
+            if (!row || Number(row.RowVersion) !== Number(item.rowVersion)) throw Object.assign(new Error('Evidence is missing or stale.'), { status: 409, code: 'KY_ANNUAL_VIDEO_STALE' });
+            const safe = kyAnnualEvidencePublic(row);
+            if (!safe.canDeleteProductionFile) throw Object.assign(new Error('Every selected file must be Admin verified with a confirmed external backup.'), { status: 409, code: 'KY_EXTERNAL_BACKUP_NOT_VERIFIED' });
+            const [activityRows] = await connection.query('SELECT id, VideoUrl FROM KY_Activities WHERE id = ? FOR UPDATE', [row.ActivityID]);
+            if (!activityRows[0] || String(activityRows[0].VideoUrl || '') !== String(row.ProductionVideoUrl || '')) {
+                throw Object.assign(new Error('The activity video reference changed. Refresh and register the current file before deleting.'), { status: 409, code: 'KY_ANNUAL_VIDEO_ACTIVITY_STALE' });
+            }
+            const localPath = kyAnnualLocalVideo(row.ProductionVideoUrl);
+            if (!localPath) throw Object.assign(new Error('A selected Production file is unavailable.'), { status: 404 });
+            const hash = await kyFileSha256(localPath);
+            if (hash !== String(row.SHA256).toLowerCase()) throw Object.assign(new Error('A selected Production file failed SHA-256 verification.'), { status: 409, code: 'KY_ANNUAL_VIDEO_HASH_MISMATCH' });
+            rows.push({ row, localPath });
+        }
+        for (const entry of rows) {
+            const quarantine = `${entry.localPath}.ky-delete-${randomUUID()}.tmp`;
+            fs.renameSync(entry.localPath, quarantine);
+            quarantined.push({ ...entry, quarantine });
+        }
+        const actorId = currentUserId(req) || null;
+        const actorName = req.user?.name || req.user?.EmployeeName || req.user?.username || 'Admin';
+        for (const entry of quarantined) {
+            await connection.query('UPDATE KY_Activities SET VideoUrl=NULL WHERE id=? AND VideoUrl=?', [entry.row.ActivityID, entry.row.ProductionVideoUrl]);
+            await connection.query(
+                `UPDATE KY_Annual_Video_Evidence SET ProductionDeletedByID=?, ProductionDeletedByName=?, ProductionDeletedAt=NOW(),
+                 ProductionDeletionReason=?, RowVersion=RowVersion+1 WHERE id=?`,
+                [actorId, actorName, reason, entry.row.id]
+            );
+            const [afterRows] = await connection.query('SELECT * FROM KY_Annual_Video_Evidence WHERE id=?', [entry.row.id]);
+            await kyAnnualAudit(connection, req, 'PRODUCTION_FILE_DELETED', entry.row, afterRows[0], reason);
+        }
+        await connection.commit();
+        committed = true;
+        for (const entry of quarantined) {
+            try { fs.unlinkSync(entry.quarantine); } catch (cleanupError) { console.error('KY annual video quarantine cleanup error:', cleanupError); }
+        }
+        res.json({ success: true, data: { deleted: quarantined.length } });
+    } catch (error) {
+        if (connection && !committed) { try { await connection.rollback(); } catch (_) {} }
+        if (!committed) {
+            for (const entry of quarantined.reverse()) {
+                try { if (fs.existsSync(entry.quarantine) && !fs.existsSync(entry.localPath)) fs.renameSync(entry.quarantine, entry.localPath); } catch (_) {}
+            }
+        }
+        res.status(error.status || 500).json({ success: false, code: error.code, message: error.message || 'Unable to delete Production video files.' });
+    } finally { if (connection) connection.release(); }
+});
+
 router.get('/evidence-overview', async (req, res) => {
     try {
         await ensureTables();
@@ -1980,7 +2406,7 @@ router.post('/:id/video-upload/init', async (req, res) => {
         kyCleanupStaleVideoUploads();
         const row = await kyLoadVideoUploadActivity(req.params.id);
         const access = kyCheckVideoUploadAccess(row, req);
-        if (access.status) return res.status(access.status).json({ success: false, message: access.message });
+        if (access.status) return res.status(access.status).json({ success: false, code: access.code, message: access.message });
 
         const fileName = cleanOriginalFilename(req.body?.fileName || 'video');
         const fileSize = Number(req.body?.fileSize || 0);
@@ -2036,7 +2462,7 @@ router.post('/:id/video-upload/:uploadId/chunk/:index', (req, res) => {
             if (!manifest) return res.status(404).json({ success: false, message: 'ไม่พบชุดอัปโหลดหรือชุดอัปโหลดหมดอายุแล้ว' });
             const row = await kyLoadVideoUploadActivity(req.params.id);
             const access = kyCheckVideoUploadAccess(row, req, manifest);
-            if (access.status) return res.status(access.status).json({ success: false, message: access.message });
+            if (access.status) return res.status(access.status).json({ success: false, code: access.code, message: access.message });
 
             const index = Number(req.params.index);
             if (!Number.isInteger(index) || index < 0 || index >= manifest.totalChunks || !req.file?.buffer) {
@@ -2130,6 +2556,7 @@ router.post('/:id/video-upload/:uploadId/complete', async (req, res) => {
         if (access.status) {
             const err = new Error(access.message);
             err.status = access.status;
+            err.code = access.code;
             throw err;
         }
         const previousUrl = lockedRow.VideoUrl || null;
@@ -2161,7 +2588,7 @@ router.post('/:id/video-upload/:uploadId/complete', async (req, res) => {
         }
         if (finalPath && fs.existsSync(finalPath)) fs.unlinkSync(finalPath);
         console.error('KY video chunk complete error:', error);
-        res.status(error.status || 500).json({ success: false, message: error.message || 'ไม่สามารถรวมวิดีโอ KY ได้' });
+        res.status(error.status || 500).json({ success: false, code: error.code, message: error.message || 'ไม่สามารถรวมวิดีโอ KY ได้' });
     } finally {
         if (lockHandle !== null) fs.closeSync(lockHandle);
         if (lockPath && fs.existsSync(lockPath)) fs.unlinkSync(lockPath);
@@ -2197,6 +2624,10 @@ router.post('/:id/video', uploadVideo.single('video'), async (req, res) => {
         const row = rows[0];
         const admin = isKyAdmin(req);
         const canUpload = kyCanUploadFollowupVideoForUser(row, req);
+        if (row.VideoUrl) {
+            if (req.file?.path) deleteLocalUpload(req.file.path);
+            return res.status(409).json({ success: false, code: 'KY_VIDEO_PROTECTED_BY_RETENTION', message: 'Confirm External Backup and remove the Production copy through Annual Video Evidence before replacing it.' });
+        }
         if (!canUpload) {
             if (req.file?.path) deleteLocalUpload(req.file.path);
             return res.status(403).json({ success: false, message: 'แนบวิดีโอได้เฉพาะเจ้าของรายการหรือ Admin' });
@@ -2882,6 +3313,10 @@ router.put('/:id', isAdmin, handleKyUpload, async (req, res) => {
 
         const newAttachment = req.files?.attachment?.[0]?.path;
         const newVideo      = req.files?.video?.[0]?.path;
+        if (newVideo && currentRow.VideoUrl) {
+            deleteUploadedKyFiles(req);
+            return res.status(409).json({ success: false, code: 'KY_VIDEO_PROTECTED_BY_RETENTION', message: 'Confirm External Backup and remove the Production copy through Annual Video Evidence before replacing it.' });
+        }
 
         const fields = [];
         const vals   = [];
@@ -2972,6 +3407,7 @@ router.delete('/:id', isAdmin, async (req, res) => {
         connection = await db.getConnection();
         const [rows] = await connection.query('SELECT id, AttachmentUrl, VideoUrl FROM KY_Activities WHERE id = ?', [req.params.id]);
         if (!rows.length) return res.status(404).json({ success: false, message: 'ไม่พบกิจกรรม KY' });
+        if (rows[0]?.VideoUrl) return res.status(409).json({ success: false, code: 'KY_VIDEO_PROTECTED_BY_RETENTION', message: 'Confirm External Backup and remove the Production copy through Annual Video Evidence before deleting the activity.' });
         await connection.beginTransaction();
         await connection.query('DELETE FROM KY_Video_Reactions WHERE ActivityID = ?', [req.params.id]);
         await connection.query('DELETE FROM KY_Activities WHERE id = ?', [req.params.id]);
