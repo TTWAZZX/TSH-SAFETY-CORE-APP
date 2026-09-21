@@ -169,7 +169,7 @@ async function browserReadOnly(session, expectedKpi) {
     await command('Page.navigate', { url: `${baseUrl}/index.html?ky_annual_readonly=${Date.now()}` });
     await waitFor(`document.readyState==='complete'`);
     await evaluate(`(()=>{localStorage.setItem('tsh_token',${JSON.stringify(session.token)});localStorage.setItem('tsh_user',${JSON.stringify(JSON.stringify(session.user))});location.hash='#ky';location.reload();return true;})()`);
-    await waitFor(`document.querySelector('#ky-tab-btn-dashboard') && document.querySelector('#ky-kpi-row')`);
+    await waitFor(`document.querySelector('#ky-tab-btn-dashboard') && document.querySelector('#ky-kpi-row [data-ky-kpi-filter="all"] .text-2xl')`);
     const rendered = await evaluate(`[...document.querySelectorAll('#ky-kpi-row [data-ky-kpi-filter]')].reduce((out,el)=>{const key=el.dataset.kyKpiFilter;if(!(key in out))out[key]=Number(el.querySelector('.text-2xl')?.textContent.trim()||0);return out;},{})`);
     assert.strictEqual(rendered.all, Number(expectedKpi.total || 0), 'Production dashboard total changed');
     await evaluate(`document.querySelector('#ky-tab-btn-manage').click()`);

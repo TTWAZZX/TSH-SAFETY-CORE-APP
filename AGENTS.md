@@ -1,5 +1,12 @@
 # TSH Safety Core Activity - AGENTS.md
 
+## KYT Annual Video Evidence Production release (2026-09-21)
+
+- `main` commit `f2a4ddf` is deployed to the PHP Production target. KY Activity keeps its existing submission, History, Dashboard KPI and statistics behavior, while adding one annual video-evidence requirement per configured Department/Safety Unit, Central Machine references, SHA-256 metadata, Admin verification, an Annual Compliance Dashboard and guarded single/bulk Production-file cleanup.
+- The Production cleanup contract is fail-closed: a file is eligible only after the evidence is Verified, marked `CentralMachine`, has an explicit confirmed external reference and valid SHA-256, and still matches the Activity's current Production video. The existing Activity, annual metadata and immutable audit survive physical cleanup. Existing direct replacement/activity deletion paths reject videos protected by this retention flow.
+- The additive Production schema created `ky_annual_video_evidence` and `ky_annual_video_evidence_audit`. Read-only Production UAT retained 105 KY rows and all 98 video references, found 18 configured annual scopes with no evidence declarations yet, passed API/KPI parity and the Annual UI at 1440/1024/390 px with zero KY mutation requests and zero console errors. No evidence was declared or verified, the delete endpoint was never called and no real video was changed or removed.
+- Scoped rollback evidence is under `backups/production/ky-annual-video-predeploy-20260921-155650/`: exact predeploy Runtime, all 105 KY row snapshots and all 98 referenced KY videos (923,334,576 bytes) with per-file SHA-256. FTPS download-back matched `4/4`; public HTTPS hashes matched `3/3`. A full sensitive database export was not retained because the safety control rejected the temporary web-accessible export helper; it was never uploaded.
+
 ## BBS issued Personal Batch Replace + Print Production release (2026-09-21)
 
 - `main` commit `1457584` is deployed to the PHP Production target. Admin Batch Sheet / Duplex controls now live under “บัตร Personal ที่ออกแล้ว”, support cross-page selection of up to 100 Active Personal cards and remain separate from new-card issuance and Department cards.
