@@ -1,5 +1,15 @@
 # TSH Safety Core Activity - Deployment
 
+## BBS issued Personal Batch Replace + Print (2026-09-21)
+
+Source commit `1457584` is pushed on `main` and deployed to `https://dev.tshpcl.com/safety/tsh-safety-core`. Runtime scope is `index.html`, `public/js/main.js`, `public/js/pages/bbs-smart-card.js` and `api/handlers/bbs_cards.php`; Node remains parity/test source.
+
+- Batch layout, duplex alignment and selection now belong to issued Personal cards. Selection persists across pages up to 100 Active cards. New-card issuance and Department cards remain separate.
+- Since raw Personal QR tokens are not stored, the action is explicitly “Replace + Print”: one database transaction locks and validates all selected cards, revokes old QR values, issues fresh secure cards and links `ReplacedByCardID`; any failure rolls back the entire batch.
+- Production-before files matched parent commit `11f579a` by Git blob `4/4`. FTPS download-back matched release source `4/4`; public HTTPS SHA-256 matched `3/3`. Cache chain is `20260921-bbs-issued-batch-r1`.
+- Authenticated read-only Chrome smoke passed 6 groups, 8 tabs, 5 Card workspaces, 320×568, 390×844 and 844×390, with zero console errors. The focused UI check confirmed Batch controls only under issued Personal cards and found one selectable Active card. An authenticated empty-batch probe returned `400`, with Active-card count and every ID/status/fingerprint unchanged.
+- Exact rollback files and verification downloads are under `backups/production/bbs-issued-batch-predeploy-20260921-125706/`. No schema, business row, private upload or rollout setting changed. No valid Production batch replacement was executed because doing so would revoke a real Personal QR; operator acceptance should use explicitly selected cards.
+
 ## BBS Controlled Pilot mobile, QR and high-resolution output (2026-09-17)
 
 Source commit `3c424ba` is pushed on `main` and deployed to `https://dev.tshpcl.com/safety/tsh-safety-core`. Runtime scope is `index.html`, `public/js/main.js`, `public/js/pages/bbs-smart-card.js`, `public/js/pages/bbs-card-designer.js` and `public/js/utils/bbs-card-print.js`; no API, schema, private-upload or rollout-setting change was required.

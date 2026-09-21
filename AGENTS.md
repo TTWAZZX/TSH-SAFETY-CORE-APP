@@ -1,5 +1,12 @@
 # TSH Safety Core Activity - AGENTS.md
 
+## BBS issued Personal Batch Replace + Print Production release (2026-09-21)
+
+- `main` commit `1457584` is deployed to the PHP Production target. Admin Batch Sheet / Duplex controls now live under “บัตร Personal ที่ออกแล้ว”, support cross-page selection of up to 100 Active Personal cards and remain separate from new-card issuance and Department cards.
+- Reprinting an issued Personal card remains security-preserving: raw QR tokens are not stored, so a confirmed batch atomically replaces every selected card, revokes every old QR, issues fresh QR tokens through the canonical Designer snapshot path and links each old/new lifecycle. Node and PHP expose the same Admin-only `/cards/replace-batch` contract and fail the whole transaction if any selected card is stale, ineligible or out of Template scope.
+- Production FTPS download-back matched `4/4`; public HTTPS hashes matched `3/3`. Normal-login browser smoke passed six groups, eight tabs, five Card workspaces and three responsive viewports with zero console errors. Focused Production verification found the controls only under issued Personal cards and one selectable Active card. An empty-batch `400` route probe preserved the Active-card count and every ID/status/QR fingerprint; no valid replacement was submitted because that would revoke a real QR.
+- Scoped rollback evidence is under `backups/production/bbs-issued-batch-predeploy-20260921-125706/`. This release changed no schema, existing business row, private upload or rollout setting; no database backup/helper was required because deployment touched only four runtime files. The deployed cache chain is `20260921-bbs-issued-batch-r1`.
+
 ## BBS Native 600 DPI Export Engine Production release (2026-09-18)
 
 - `main` commit `d68c519` is deployed to the PHP Production target. PNG/JPG/PDF now clone the canonical Designer card face into an off-screen native `1417 x 2008` pixel surface for a 60 x 85 mm card at 600 DPI, convert physical millimetre typography/borders/spacing to the native pixel grid before layout, and call the rasterizer at `scale: 1`. PNG/JPG and PDF share this renderer; the accepted physical browser Print contract remains unchanged.

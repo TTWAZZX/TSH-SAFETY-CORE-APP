@@ -1,5 +1,12 @@
 # TSH Safety Core Activity - Changelog And Handoff History
 
+## 2026-09-21 — BBS issued Personal Batch Replace + Print deployed
+
+- Moved Batch Sheet / Duplex controls from new-card issuance to “บัตร Personal ที่ออกแล้ว”, with cross-page selection of up to 100 Active cards and clear separation from Department cards.
+- Added transactional Node/PHP batch replacement. Because raw Personal QR values are intentionally not retained, printing an issued card rotates its QR, links the old/new lifecycle and aborts the entire batch if any selected item fails readiness checks.
+- Pushed and deployed commit `1457584`. FTPS hashes passed `4/4`, HTTPS hashes passed `3/3`, and authenticated browser smoke passed 6 groups, 8 tabs, 5 Card workspaces and 3 responsive viewports with zero console errors.
+- The focused Production empty-batch route probe returned the expected `400`; Active-card count and ID/status/fingerprint snapshots were identical before/after. No real card was replaced during automated verification. Rollback evidence is under `backups/production/bbs-issued-batch-predeploy-20260921-125706/`.
+
 ## 2026-09-11 — BBS legacy Designer Draft Master Artwork repair deployed
 
 - Confirmed Production Personal template 2 / V1 was created before Master Artwork provenance: its Front/Back background assets have no `MasterArtworkID`, causing the correct `409 MASTER_ARTWORK_REQUIRED` response on Save.

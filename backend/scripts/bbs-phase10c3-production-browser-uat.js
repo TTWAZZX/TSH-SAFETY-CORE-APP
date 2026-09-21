@@ -134,8 +134,12 @@ async function connectChrome() {
     await waitFor(`Boolean(document.querySelector('[data-card-workspace-navigation]'))`);
     const cards = await evaluate(`(()=>({workspaces:document.querySelectorAll('[data-card-workspace]').length,personal:Boolean(document.querySelector('[data-card-workspace="personal"]')),department:Boolean(document.querySelector('[data-card-workspace="department"]'))}))()`);
     assert.ok(cards.workspaces >= 3 && cards.personal && cards.department, 'Card Admin workspaces are incomplete');
+    await evaluate(`document.querySelector('[data-card-workspace="personal"]').click()`);
+    await waitFor(`Boolean(document.querySelector('[data-bbs-card-batch-replace-print]'))`);
+    const issuedBatch = await evaluate(`(()=>{const headings=[...document.querySelectorAll('h3')],issued=headings.find(item=>item.textContent.includes('บัตร Personal ที่ออกแล้ว')),fresh=headings.find(item=>item.textContent.includes('ออกบัตร Personal ใหม่')),issuedSection=issued?.closest('section'),freshSection=fresh?.closest('section');return{issuedHeading:Boolean(issued),freshHeading:Boolean(fresh),batchButton:Boolean(issuedSection?.querySelector('[data-bbs-card-batch-replace-print]')),sheetControls:Boolean(issuedSection?.querySelector('[data-personal-print-option]')),freshHasBatch:Boolean(freshSection?.querySelector('[data-bbs-card-batch-replace-print],[data-personal-print-option]')),selectableCards:issuedSection?.querySelectorAll('[data-card-print-select]').length||0};})()`);
+    assert.deepStrictEqual({issuedHeading:issuedBatch.issuedHeading,freshHeading:issuedBatch.freshHeading,batchButton:issuedBatch.batchButton,sheetControls:issuedBatch.sheetControls,freshHasBatch:issuedBatch.freshHasBatch},{issuedHeading:true,freshHeading:true,batchButton:true,sheetControls:true,freshHasBatch:false},'Issued Personal Batch controls are not isolated under the issued-card section');
     assert.deepStrictEqual(errors, [], `Browser errors: ${errors.join(' | ')}`);
-    console.log(JSON.stringify({ success: true, authentication: 'normal-production-login', groups: groups.length, tabs: tabCount, cardWorkspaces: cards.workspaces, viewports, consoleErrors: errors.length, businessDataChanged: false, temporaryRowsRemaining: 0 }, null, 2));
+    console.log(JSON.stringify({ success: true, authentication: 'normal-production-login', groups: groups.length, tabs: tabCount, cardWorkspaces: cards.workspaces, issuedBatch, viewports, consoleErrors: errors.length, businessDataChanged: false, temporaryRowsRemaining: 0 }, null, 2));
 })().catch(error => {
     console.error(error.stack || error.message);
     process.exitCode = 1;
