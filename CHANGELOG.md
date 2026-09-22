@@ -1,5 +1,12 @@
 # TSH Safety Core Activity - Changelog And Handoff History
 
+## 2026-09-22 — KY Production Inventory picker/date deployed
+
+- Deployed `main` commit `50dcf0f`. Production Inventory cards now expose the Activity month/year and exact Thai Activity date from `ActivityDate`, carry the date into Detail Drawer and show an inline four-step External Backup/SHA-256 workflow guide.
+- Fixed the registration picker lock: cancelling or closing the picker resolves cleanly, removes its temporary input and permits another Activity-scoped Inventory action immediately.
+- Local KY Annual Evidence and adaptive-upload contracts passed. Production FTPS/HTTPS hashes matched `3/3`; authenticated read-only UAT preserved 105 KY rows and 83 Production videos, verified every Inventory date/month, picker cancel/reopen, 3 viewports, zero mutations and zero console errors.
+- Rollback evidence is under `backups/production/ky-inventory-picker-date-predeploy-20260922-111755/`. No schema, API, upload path, business row or media file changed.
+
 ## 2026-09-21 — BBS issued Personal Batch Replace + Print deployed
 
 - Moved Batch Sheet / Duplex controls from new-card issuance to “บัตร Personal ที่ออกแล้ว”, with cross-page selection of up to 100 Active cards and clear separation from Department cards.

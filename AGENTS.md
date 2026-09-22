@@ -1,5 +1,12 @@
 # TSH Safety Core Activity - AGENTS.md
 
+## KY Production Inventory picker/date Production release (2026-09-22)
+
+- `main` commit `50dcf0f` is deployed to the PHP Production target. Production Inventory cards now show the authoritative KY Activity month/year badge and exact Thai Activity date, include the same date in Detail Drawer, and explain that External Backup selection computes metadata/SHA-256 locally without uploading the selected central-machine copy.
+- External Backup registration file pickers now resolve on both selection and cancellation (with a browser-focus fallback), leave no hidden-input residue and use an Activity-scoped action lock, so cancelling one picker no longer blocks another Inventory card. No API, schema, upload path or cleanup rule changed.
+- Annual Evidence and Adaptive Video Upload contracts passed locally. Production FTPS and HTTPS hashes matched `3/3`. Authenticated read-only Production UAT retained 105 KY rows / 83 Production videos, verified date/month labels on all 83 Inventory cards, cancel/reopen behavior, registration guidance, 60vh Inventory height and three responsive viewports with zero KY mutations and zero console errors.
+- Runtime rollback and before/after read-only evidence is under `backups/production/ky-inventory-picker-date-predeploy-20260922-111755/`. No evidence was declared or verified and no Production video or business row was changed or deleted.
+
 ## KY Annual Video Admin UX and Department dashboard Production release (2026-09-22)
 
 - `main` commit `817fc96` is deployed to the PHP Production target. Annual Video Evidence now separates Overview, Annual Compliance, Production Inventory, and Cleanup Queue & Audit, with sticky/action-required filters, clickable summaries, a metadata/SHA-256 detail drawer, cleanup history, and guarded single/bulk cleanup isolated from ordinary evidence views.
