@@ -1,5 +1,12 @@
 # TSH Safety Core Activity - AGENTS.md
 
+## KY simplified External Backup registration Production release (2026-09-22)
+
+- `main` commit `418e8f2` is deployed to the PHP Production target. Production Inventory External Backup registration now asks only for the central-machine filename, defaulted from the current Production filename, and records the item as Pending for a separate Admin Verify step; the browser no longer opens or hashes a local backup file.
+- Node and PHP derive file size and SHA-256 from the authoritative current Production video and preserve the existing fail-closed cleanup rule: no Production file can be removed until an Admin verifies the external copy, and cleanup still rejects a changed Production fingerprint. The audit explicitly distinguishes filename registration from external-copy verification.
+- Local KY statistics, History, Annual Evidence, Adaptive Upload, Node/PHP lifecycle and three-viewport Browser UAT passed with zero fixture residue. Production FTPS download-back matched `4/4`; HTTPS hashes matched `3/3`. Authenticated read-only Production UAT retained 105 KY rows / 83 Production videos, rendered all 83 Inventory cards, passed three viewports with zero mutations and zero console errors, and changed no business data or media.
+- Runtime rollback and before/after read-only evidence is under `backups/production/ky-inventory-simple-predeploy-20260922-154838/`. No evidence was declared or verified and no Production video was changed or deleted during deployment verification.
+
 ## KY Production Inventory picker/date Production release (2026-09-22)
 
 - `main` commit `50dcf0f` is deployed to the PHP Production target. Production Inventory cards now show the authoritative KY Activity month/year badge and exact Thai Activity date, include the same date in Detail Drawer, and explain that External Backup selection computes metadata/SHA-256 locally without uploading the selected central-machine copy.
