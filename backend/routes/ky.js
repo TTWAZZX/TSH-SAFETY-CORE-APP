@@ -2051,12 +2051,13 @@ router.post('/video-inventory/declare', isAdmin, async (req, res) => {
         await ensureTables();
         const activityId = String(req.body?.activityId || '').trim();
         const externalReference = String(req.body?.externalReference || '').trim();
-        const originalFileName = String(req.body?.originalFileName || '').trim().slice(0, 255);
+        const originalFileName = String(req.body?.originalFileName || '').trim().replace(/[\\/]+/g, '_').slice(0, 255);
         const mimeType = String(req.body?.mimeType || '').trim().slice(0, 120) || null;
         const fileSize = Number(req.body?.fileSize || 0);
         const sha256 = String(req.body?.sha256 || '').trim().toLowerCase();
+        const adminAttested = String(req.body?.registrationMode || '') === 'AdminAttested';
         const requestedRowVersion = Number(req.body?.rowVersion || 0);
-        if (!activityId || !externalReference || !originalFileName || !Number.isSafeInteger(fileSize) || fileSize <= 0 || !/^[a-f0-9]{64}$/.test(sha256)) {
+        if (!activityId || !externalReference || !originalFileName || (!adminAttested && (!Number.isSafeInteger(fileSize) || fileSize <= 0 || !/^[a-f0-9]{64}$/.test(sha256)))) {
             return res.status(400).json({ success: false, code: 'KY_VIDEO_INVENTORY_METADATA_REQUIRED', message: 'Activity, external reference, filename, size and SHA-256 are required.' });
         }
         const [activityRows] = await db.query('SELECT * FROM KY_Activities WHERE id=? LIMIT 1', [activityId]);
@@ -2067,9 +2068,11 @@ router.post('/video-inventory/declare', isAdmin, async (req, res) => {
         if (!localPath) return res.status(400).json({ success: false, code: 'KY_VIDEO_INVENTORY_PRODUCTION_REQUIRED', message: 'This activity has no readable Production video.' });
         const productionSize = fs.statSync(localPath).size;
         const productionHash = await kyFileSha256(localPath);
-        if (productionSize !== fileSize || productionHash !== sha256) {
+        if (!adminAttested && (productionSize !== fileSize || productionHash !== sha256)) {
             return res.status(409).json({ success: false, code: 'KY_VIDEO_INVENTORY_BACKUP_MISMATCH', message: 'The selected external backup does not match the current Production video.' });
         }
+        const recordedSize = adminAttested ? productionSize : fileSize;
+        const recordedHash = adminAttested ? productionHash : sha256;
         const evidenceYear = new Date(activity.ActivityDate).getFullYear();
         connection = await db.getConnection();
         await connection.beginTransaction();
@@ -2094,7 +2097,7 @@ router.post('/video-inventory/declare', isAdmin, async (req, res) => {
                  VerificationNote=NULL,ProductionDeletedByID=NULL,ProductionDeletedByName=NULL,ProductionDeletedAt=NULL,
                  ProductionDeletionReason=NULL,RowVersion=RowVersion+1 WHERE id=?`,
                 [evidenceYear, activity.Department, activity.SafetyUnit || null, externalReference, originalFileName, mimeType,
-                    fileSize, sha256, productionVideoUrl, path.basename(localPath), actorId, actorName, id]
+                    recordedSize, recordedHash, productionVideoUrl, path.basename(localPath), actorId, actorName, id]
             );
         } else {
             await connection.query(
@@ -2103,11 +2106,13 @@ router.post('/video-inventory/declare', isAdmin, async (req, res) => {
                   FileSize,SHA256,ProductionVideoUrl,ProductionStoredName,Status,DeclaredByID,DeclaredByName)
                  VALUES (?,?,?,?,?,1,?,?,?,?,?,?,?,'Pending',?,?)`,
                 [id, evidenceYear, activityId, activity.Department, activity.SafetyUnit || null, externalReference, originalFileName,
-                    mimeType, fileSize, sha256, productionVideoUrl, path.basename(localPath), actorId, actorName]
+                    mimeType, recordedSize, recordedHash, productionVideoUrl, path.basename(localPath), actorId, actorName]
             );
         }
         const [afterRows] = await connection.query('SELECT * FROM KY_Video_File_Inventory WHERE id=?', [id]);
-        await kyVideoInventoryAudit(connection, req, before ? 'BACKUP_METADATA_UPDATED' : 'BACKUP_DECLARED', before, afterRows[0], 'External backup metadata matched the Production video.');
+        await kyVideoInventoryAudit(connection, req, before ? 'BACKUP_METADATA_UPDATED' : 'BACKUP_DECLARED', before, afterRows[0], adminAttested
+            ? 'Admin registered the external filename; Production size and SHA-256 were captured server-side. External copy awaits Admin verification.'
+            : 'External backup metadata matched the Production video.');
         await connection.commit();
         res.status(before ? 200 : 201).json({ success: true, data: kyVideoInventoryPublic(afterRows[0]) });
     } catch (error) {

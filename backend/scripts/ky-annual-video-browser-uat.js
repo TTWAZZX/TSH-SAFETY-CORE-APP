@@ -260,34 +260,21 @@ async function startNodeApiIfRequested() {
     assert.ok(inventoryFeedback.registeredVisible, 'Registered Inventory cards must show their persisted registration state');
     assert.ok(inventoryFeedback.unregisteredCorrect, 'Unregistered Inventory cards must not claim registration success');
 
-    const pickerRecovery = await evaluate(`(async()=>{
+    const simpleRegistration = await evaluate(`(()=>{
         const buttons=[...document.querySelectorAll('[data-ky-inventory-register]')];
         if(!buttons.length)return{skipped:true};
-        const nativeClick=HTMLInputElement.prototype.click;
-        HTMLInputElement.prototype.click=function(){if(this.dataset?.kyInventoryFilePicker==='1')return;return nativeClick.call(this);};
+        const nativePrompt=window.prompt;
+        let promptMessage='';let promptDefault='';
+        window.prompt=(message,defaultValue)=>{promptMessage=String(message||'');promptDefault=String(defaultValue||'');return null;};
         try{
             buttons[0].click();
-            await new Promise(resolve=>setTimeout(resolve,30));
-            const first=document.querySelector('[data-ky-inventory-file-picker]');
-            if(!first)return{firstOpened:false};
-            const progress=(buttons[0].closest('[data-ky-inventory-row]')?.querySelector('[data-ky-inventory-registration-status]')?.textContent||'').trim();
-            first.dispatchEvent(new Event('cancel'));
-            await new Promise(resolve=>setTimeout(resolve,30));
-            const cancelled=(buttons[0].closest('[data-ky-inventory-row]')?.querySelector('[data-ky-inventory-registration-status]')?.textContent||'').trim();
-            const next=buttons[1]||buttons[0];
-            next.click();
-            await new Promise(resolve=>setTimeout(resolve,30));
-            const second=document.querySelector('[data-ky-inventory-file-picker]');
-            if(second)second.dispatchEvent(new Event('cancel'));
-            await new Promise(resolve=>setTimeout(resolve,30));
-            return{firstOpened:true,secondOpened:Boolean(second),residue:document.querySelectorAll('[data-ky-inventory-file-picker]').length,progress,cancelled};
-        }finally{HTMLInputElement.prototype.click=nativeClick;}
+            return{promptMessage,promptDefault,productionName:buttons[0].dataset.productionName||'',filePickers:document.querySelectorAll('[data-ky-inventory-file-picker]').length};
+        }finally{window.prompt=nativePrompt;}
     })()`);
-    if (!pickerRecovery.skipped) {
-        assert.ok(pickerRecovery.firstOpened && pickerRecovery.secondOpened, 'Inventory picker must reopen after the previous picker is cancelled');
-        assert.strictEqual(pickerRecovery.residue, 0, 'Cancelled Inventory pickers must leave no hidden input residue');
-        assert.match(pickerRecovery.progress, /กำลังเลือกไฟล์สำรอง/, 'Inventory card must show progress while its file picker is open');
-        assert.match(pickerRecovery.cancelled, /ยกเลิกการเลือกไฟล์/, 'Inventory card must show a clear cancellation result');
+    if (!simpleRegistration.skipped) {
+        assert.match(simpleRegistration.promptMessage, /ระบุชื่อไฟล์วิดีโอ/, 'Inventory registration must ask only for the central-machine filename');
+        assert.ok(simpleRegistration.productionName && simpleRegistration.promptDefault === simpleRegistration.productionName, 'Inventory filename prompt must start with the Production filename');
+        assert.strictEqual(simpleRegistration.filePickers, 0, 'Simplified Inventory registration must not open a browser file picker');
     }
 
     if (annualUi.detail) {

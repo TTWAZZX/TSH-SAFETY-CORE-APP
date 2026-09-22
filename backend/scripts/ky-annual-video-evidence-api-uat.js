@@ -234,9 +234,10 @@ async function cleanup() {
         );
         const inventoryDeclared = await post('ky/video-inventory/declare', headers, {
             activityId: inventoryActivityId, externalReference: `CENTRAL-UAT/${testYear}/${runId}/${inventoryOriginalName}`,
-            originalFileName: inventoryOriginalName, mimeType: 'video/mp4', fileSize: inventoryPayload.length,
-            sha256: inventorySha, externalBackupConfirmed: true,
+            originalFileName: inventoryOriginalName, registrationMode: 'AdminAttested', externalBackupConfirmed: true,
         });
+        assert.strictEqual(Number(inventoryDeclared.data.FileSize), inventoryPayload.length, 'Admin-attested registration must capture Production size server-side');
+        assert.strictEqual(inventoryDeclared.data.SHA256, inventorySha, 'Admin-attested registration must capture Production SHA-256 server-side');
         inventoryIds.push(inventoryDeclared.data.id);
         await assert.rejects(
             post('ky/video-inventory/delete-production', headers, {

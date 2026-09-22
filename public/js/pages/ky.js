@@ -4197,7 +4197,7 @@ async function renderKyAnnualVideoEvidence(panel = document.getElementById('ky-m
                 ${annualCandidates.length ? `<div class="ds-section p-5"><h3 class="font-bold text-slate-800">กิจกรรมที่เลือกเป็นหลักฐาน Annual ได้ (${annualCandidates.length})</h3><p class="text-xs text-slate-500 mt-1 mb-3">แสดงเฉพาะ Scope ที่ยังไม่มีหลักฐานหลักประจำปี</p><div class="grid grid-cols-1 lg:grid-cols-2 gap-2 max-h-80 overflow-y-auto">${annualCandidates.map(row=>`<div class="rounded-xl border border-slate-200 p-3 flex items-center justify-between gap-3"><div class="min-w-0"><p class="text-xs font-bold text-slate-800 truncate">${escHtml(row.Department||'-')} · ${escHtml(row.SafetyUnit||'Department')}</p><p class="text-[10px] text-slate-500 truncate">${escHtml(row.TeamName||row.KYTKeyword||row.id)}</p></div><button data-ky-annual-register-production="${escHtml(row.id)}" class="px-3 py-1.5 rounded-lg bg-indigo-600 text-white text-[10px] font-bold whitespace-nowrap">ลงทะเบียน Annual</button></div>`).join('')}</div></div>`:''}
                 <div class="ds-section p-5" data-ky-video-inventory>
                     <div class="flex flex-col xl:flex-row xl:items-end justify-between gap-3 mb-4">
-                        <div><h3 class="font-bold text-slate-800">Production Video Inventory (${Number(inventorySummary.total||inventory.length)})</h3><p class="text-xs text-slate-500 mt-1">แยกจาก Annual Compliance · ทุกไฟล์ต้องมี External Backup ที่ SHA-256 ตรงกันและ Admin Verify ก่อนลบ Production</p></div>
+                        <div><h3 class="font-bold text-slate-800">Production Video Inventory (${Number(inventorySummary.total||inventory.length)})</h3><p class="text-xs text-slate-500 mt-1">แยกจาก Annual Compliance · ระบบเก็บ SHA-256 ของไฟล์ Production และต้อง Admin Verify ว่ามี External Backup จริงก่อนลบ Production</p></div>
                         <button type="button" data-ky-inventory-delete-selected class="px-4 py-2 rounded-xl bg-rose-600 text-white text-xs font-bold disabled:opacity-40">ลบไฟล์ Inventory ที่เลือก</button>
                     </div>
                     <div class="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-6 gap-2 mb-4">
@@ -4212,7 +4212,7 @@ async function renderKyAnnualVideoEvidence(panel = document.getElementById('ky-m
                     </div>
                     <div class="mb-4 rounded-xl border border-indigo-100 bg-indigo-50/60 p-3 text-[11px] text-indigo-800" data-ky-inventory-help>
                         <p class="font-bold">วิธีลงทะเบียน External Backup</p>
-                        <p class="mt-1">1) เก็บไฟล์วิดีโอเดียวกับ Production ไว้ใต้ ${escHtml(KY_EXTERNAL_BACKUP_ROOT)} 2) กดลงทะเบียนแล้วเลือกไฟล์สำเนานั้น 3) ระบบบันทึกเลขอ้างอิงให้อัตโนมัติ 4) รอ Admin Verify · Browser ใช้ไฟล์เพื่อเทียบขนาดและ SHA-256 เท่านั้น ไม่อัปโหลดไฟล์กลับขึ้น Production</p>
+                        <p class="mt-1">1) เก็บวิดีโอไว้ใต้ ${escHtml(KY_EXTERNAL_BACKUP_ROOT)} 2) กดลงทะเบียนและกรอกชื่อไฟล์ 3) ระบบเก็บขนาด/SHA-256 ของต้นฉบับ Production ให้อัตโนมัติ 4) Admin Verify ว่าไฟล์เครื่องกลางมีอยู่จริง · ไม่ต้องเลือกหรืออัปโหลดไฟล์สำรองผ่าน Browser</p>
                     </div>
                     <div class="mb-3 grid grid-cols-1 lg:grid-cols-[1fr_auto] gap-2">
                         <input type="search" data-ky-inventory-search class="ds-input" placeholder="ค้นหา Department, Safety Unit, ชื่อทีม หรือ Activity ID">
@@ -4223,7 +4223,7 @@ async function renderKyAnnualVideoEvidence(panel = document.getElementById('ky-m
                             <div class="flex items-start gap-3"><input type="checkbox" data-ky-inventory-select value="${escHtml(row.id||'')}" data-version="${Number(row.RowVersion||0)}" ${row.canDeleteProductionFile?'':'disabled'} class="mt-1"><div class="min-w-0 flex-1"><div class="flex flex-wrap items-center gap-2"><p class="text-xs font-bold text-slate-800">${escHtml(row.Department||'-')} · ${escHtml(row.SafetyUnit||'Department')}</p>${statusBadge(row)}<span class="rounded-full bg-sky-50 px-2 py-1 text-[9px] font-bold text-sky-700">${escHtml(formatKyActivityMonth(row.ActivityDate))}</span>${row.AnnualEvidenceID?'<span class="rounded-full bg-indigo-50 px-2 py-1 text-[9px] font-bold text-indigo-700">Annual primary</span>':''}</div><p class="mt-1 text-[10px] text-slate-500 truncate">${escHtml(formatKyActivityDate(row.ActivityDate))} · ${escHtml(row.TeamName||row.KYTKeyword||row.ActivityID)}</p><p class="mt-1 text-[10px] font-semibold text-slate-600 truncate" title="${escHtml(row.ProductionOriginalFileName||row.OriginalFileName||'')}">ไฟล์ Production: ${escHtml(row.ProductionOriginalFileName||row.OriginalFileName||'ไม่พบชื่อไฟล์')}</p>${row.registered?`<p class="mt-1 text-[10px] text-slate-400 truncate">ไฟล์ Backup ที่ตรวจ: ${escHtml(row.OriginalFileName||'-')}</p>`:''}${row.SHA256?`<p class="mt-1 text-[10px] text-slate-400">${formatFileSize(row.FileSize||0)} · SHA ${escHtml(String(row.SHA256).slice(0,12))}…</p>`:''}${row.fileDeleted?'<p class="mt-1 text-[10px] font-bold text-rose-600">Production file removed · metadata retained</p>':''}<p aria-live="polite" data-ky-inventory-registration-status="${escHtml(row.ActivityID)}" class="mt-2 rounded-lg border px-2 py-1.5 text-[10px] font-semibold ${row.registered?(row.Status==='Verified'?'text-emerald-700 bg-emerald-50 border-emerald-100':row.Status==='NeedsCorrection'?'text-rose-700 bg-rose-50 border-rose-100':'text-amber-700 bg-amber-50 border-amber-100'):'text-slate-600 bg-slate-50 border-slate-100'}">${row.registered?(row.Status==='Verified'?'ลงทะเบียนและ Admin Verify แล้ว':row.Status==='NeedsCorrection'?'ข้อมูล Backup ต้องแก้ไข':'ลงทะเบียนสำเร็จ · รอ Admin Verify'):'ยังไม่ได้ลงทะเบียน External Backup'}</p></div></div>
                             <div class="mt-3 flex flex-wrap justify-end gap-1">
                                 <button type="button" data-ky-inventory-detail="${escHtml(row.id||row.ActivityID)}" class="rounded-lg border px-2 py-1 text-[10px] font-bold text-slate-600">Detail</button>
-                                ${!row.registered&&row.CurrentVideoUrl?`<button type="button" data-id="${escHtml(row.ActivityID)}" data-ky-inventory-register="${escHtml(row.ActivityID)}" title="เลือกไฟล์วิดีโอสำเนาที่เก็บในเครื่องกลางเพื่อเทียบ SHA-256" class="px-2 py-1 rounded-lg bg-indigo-600 text-white text-[10px] font-bold">ลงทะเบียน External Backup</button>`:''}
+                                ${!row.registered&&row.CurrentVideoUrl?`<button type="button" data-id="${escHtml(row.ActivityID)}" data-production-name="${escHtml(row.ProductionOriginalFileName||row.OriginalFileName||'')}" data-ky-inventory-register="${escHtml(row.ActivityID)}" title="กรอกชื่อไฟล์ที่เก็บไว้ในเครื่องกลาง" class="px-2 py-1 rounded-lg bg-indigo-600 text-white text-[10px] font-bold">ลงทะเบียน External Backup</button>`:''}
                                 ${row.registered&&row.CurrentVideoUrl&&!row.fileDeleted?`<button data-ky-inventory-download="${escHtml(row.id)}" data-name="${escHtml(row.OriginalFileName||'video')}" class="px-2 py-1 rounded-lg border text-[10px] font-bold text-indigo-700">ดาวน์โหลด</button>`:''}
                                 ${row.registered?`<button data-ky-inventory-audit="${escHtml(row.id)}" class="px-2 py-1 rounded-lg border text-[10px] font-bold text-slate-600">Audit</button>`:''}
                                 ${row.registered&&row.Status!=='Verified'?`<button data-ky-inventory-verify="${escHtml(row.id)}" data-version="${Number(row.RowVersion||0)}" class="px-2 py-1 rounded-lg bg-emerald-600 text-white text-[10px] font-bold">Verify</button>`:''}
@@ -4480,39 +4480,6 @@ async function showKyInventoryAudit(id) {
     const response = await API.get(`/ky/video-inventory/${encodeURIComponent(id)}/audit`);
     const rows = normalizeApiArray(response?.data ?? response);
     openModal('Production Video Inventory Audit', `<div class="space-y-2 max-h-[60vh] overflow-y-auto">${rows.length?rows.map(row=>`<div class="rounded-xl border border-slate-200 p-3"><div class="flex justify-between gap-3"><p class="text-xs font-bold text-slate-800">${escHtml(row.Action||'-')}</p><p class="text-[10px] text-slate-400">${escHtml(row.CreatedAt||'')}</p></div><p class="text-xs text-slate-500 mt-1">${escHtml(row.ActorName||row.ActorID||'-')} · ${escHtml(row.Detail||'')}</p></div>`).join(''):'<p class="text-sm text-slate-400">ยังไม่มี Audit</p>'}</div>`, 'max-w-2xl');
-}
-
-function chooseKyInventoryBackupFile() {
-    return new Promise(resolve => {
-        const input = document.createElement('input');
-        let settled = false;
-        let focusTimer = null;
-        input.type = 'file';
-        input.accept = 'video/mp4,video/quicktime,video/webm,video/x-msvideo,video/x-matroska,video/mpeg,.mp4,.mov,.webm,.avi,.mkv,.mpeg,.mpg';
-        input.hidden = true;
-        input.dataset.kyInventoryFilePicker = '1';
-
-        const cleanup = () => {
-            if (focusTimer) window.clearTimeout(focusTimer);
-            window.removeEventListener('focus', handleWindowFocus, true);
-            input.remove();
-        };
-        const finish = file => {
-            if (settled) return;
-            settled = true;
-            cleanup();
-            resolve(file || null);
-        };
-        const handleWindowFocus = () => {
-            focusTimer = window.setTimeout(() => finish(input.files?.[0] || null), 250);
-        };
-
-        input.addEventListener('change', () => finish(input.files?.[0] || null), { once: true });
-        input.addEventListener('cancel', () => finish(null), { once: true });
-        window.addEventListener('focus', handleWindowFocus, true);
-        document.body.appendChild(input);
-        input.click();
-    });
 }
 
 function buildKyInventoryBackupReference(file) {
@@ -6034,28 +6001,22 @@ function setupEventListeners() {
         const inventoryRegisterBtn = e.target.closest('[data-ky-inventory-register]');
         if (inventoryRegisterBtn) {
             const activityId = inventoryRegisterBtn.dataset.kyInventoryRegister;
-            setKyInventoryRegistrationStatus(activityId, 'progress', 'กำลังเลือกไฟล์สำรองจากเครื่องกลาง...');
-            const file = await chooseKyInventoryBackupFile();
-            if (!file) {
-                setKyInventoryRegistrationStatus(activityId, 'neutral', 'ยกเลิกการเลือกไฟล์ · ยังไม่ได้ลงทะเบียน');
-                return;
-            }
-            const reference = buildKyInventoryBackupReference(file);
+            const defaultName = String(inventoryRegisterBtn.dataset.productionName || '').trim();
+            const enteredName = window.prompt('ระบุชื่อไฟล์วิดีโอที่เก็บไว้ในเครื่องกลาง', defaultName) ?? null;
+            const fileName = String(enteredName || '').trim().replace(/[\\/]+/g, '_').slice(0, 255);
+            if (!fileName) return;
+            const reference = buildKyInventoryBackupReference({ name: fileName });
             try {
                 await runKyButtonAction(inventoryRegisterBtn, 'กำลังลงทะเบียน...', async () => {
-                    setKyInventoryRegistrationStatus(activityId, 'progress', `กำลังคำนวณ SHA-256: ${file.name}`);
-                    const sha256 = await sha256Blob(file);
-                    setKyInventoryRegistrationStatus(activityId, 'progress', `กำลังเทียบกับไฟล์ Production และลงทะเบียน: ${file.name}`);
+                    setKyInventoryRegistrationStatus(activityId, 'progress', `กำลังลงทะเบียน: ${fileName}`);
                     await API.post('/ky/video-inventory/declare', {
                         activityId,
                         externalReference: reference,
                         externalBackupConfirmed: true,
-                        originalFileName: file.name,
-                        mimeType: file.type || 'application/octet-stream',
-                        fileSize: file.size,
-                        sha256,
+                        originalFileName: fileName,
+                        registrationMode: 'AdminAttested',
                     });
-                    setKyInventoryRegistrationStatus(activityId, 'success', `ลงทะเบียนสำเร็จ: ${file.name} · รอ Admin Verify`);
+                    setKyInventoryRegistrationStatus(activityId, 'success', `ลงทะเบียนสำเร็จ: ${fileName} · รอ Admin Verify`);
                     showToast(`ลงทะเบียนสำเร็จ · ${reference} · รอ Admin Verify`, 'success');
                     await renderKyAnnualVideoEvidence();
                 });
@@ -6101,7 +6062,7 @@ function setupEventListeners() {
             const selectedBytes = selectedRows.reduce((total, row) => total + Number(row.FileSize || 0), 0);
             const reason = window.prompt('ระบุเหตุผลการลบไฟล์ Production (Metadata, SHA-256 และ Audit จะยังอยู่)', '') ?? null;
             if (!reason?.trim()) return;
-            const confirmed = await showConfirmationModal('ยืนยันลบไฟล์ Production', `ลบวิดีโอ ${items.length} รายการ (${formatFileSize(selectedBytes)}) จาก Production ใช่หรือไม่? ระบบตรวจแล้วว่าทุกรายการมี External Backup ที่ Admin Verify และ SHA-256 ตรงกัน โดยจะคง Metadata และ Audit ไว้`);
+            const confirmed = await showConfirmationModal('ยืนยันลบไฟล์ Production', `ลบวิดีโอ ${items.length} รายการ (${formatFileSize(selectedBytes)}) จาก Production ใช่หรือไม่? ระบบตรวจแล้วว่าทุกรายการมี External Backup ที่ Admin Verify และ fingerprint ของไฟล์ Production ยังไม่เปลี่ยน โดยจะคง Metadata, SHA-256 และ Audit ไว้`);
             if (!confirmed) return;
             await API.post('/ky/video-inventory/delete-production', { items, reason: reason.trim() });
             showToast(`ลบไฟล์ Production แล้ว ${items.length} รายการ และเปลี่ยน Dashboard เป็น External verified`, 'success');
