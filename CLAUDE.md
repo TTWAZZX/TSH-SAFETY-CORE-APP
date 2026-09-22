@@ -1,5 +1,9 @@
 # TSH Safety Core Activity - AI Quick Start
 
+## Current KY Activity External Video Evidence Production release (2026-09-22)
+
+`main` commits `dee0898` and `f68fca8` are deployed. Central-machine evidence is registered per KY Activity as Pending, suppresses Need video, and counts as External verified/Annual compliant only after Admin Verify. Node/PHP lifecycle and three-viewport Browser UAT passed with zero residue. Production retained 106 KY rows / 83 Production videos, FTPS matched 4/4, HTTPS matched 3/3 and the new empty Activity External registry reads successfully. Rollback evidence is under `backups/production/ky-activity-external-predeploy-20260922-174153/`; no video or existing business record was changed or deleted.
+
 ## Current BBS legacy Draft Master Artwork repair Production release (2026-09-11)
 
 Production read-only inspection confirmed Personal template 2 / Designer V1 points Front to asset 4 and Back to asset 5; both assets have no `MasterArtworkID`, so the server correctly rejects normal Save with `409 MASTER_ARTWORK_REQUIRED`. This is legacy Draft provenance, not a KY deployment or cache regression.

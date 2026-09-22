@@ -1,5 +1,12 @@
 # TSH Safety Core Activity - AGENTS.md
 
+## KY Activity External Video Evidence Production release (2026-09-22)
+
+- `main` commits `dee0898` and `f68fca8` are deployed to the PHP Production target. Central-machine video metadata is now owned per KY Activity, remains `Pending` until a separate Admin Verify, and becomes the shared `External verified` source for History, Evidence filters, Dashboard/follow-up statistics and Annual Compliance. Multiple Activities in one annual Department/Safety Unit scope no longer collide with the legacy annual registry.
+- The additive Production schema created empty `ky_activity_external_video_evidence` and `ky_activity_external_video_evidence_audit` tables. Existing Annual Evidence and Production Inventory remain available for legacy retention/cleanup; no existing KY row, video, annual evidence, inventory row or audit row was rewritten or deleted.
+- Node/PHP lifecycle UAT passed Pending, Verify, Needs Correction, same-scope multi-Activity registration, Dashboard/History/Annual projections and zero fixture residue. Production FTPS download-back matched `4/4`, HTTPS matched `3/3`, the new Admin read returned `0` existing Activity External rows, and authenticated read-only Production UAT retained 106 KY rows / 83 Production videos across three viewports with zero mutations and zero console errors.
+- Runtime rollback and before/after read-only evidence is under `backups/production/ky-activity-external-predeploy-20260922-174153/`. A broad sensitive database export was rejected by the safety control; it was not created or uploaded. The backup instead retains exact runtime files plus complete KY read-only snapshots, and no temporary helper exists on Production.
+
 ## KY simplified External Backup registration Production release (2026-09-22)
 
 - `main` commit `418e8f2` is deployed to the PHP Production target. Production Inventory External Backup registration now asks only for the central-machine filename, defaulted from the current Production filename, and records the item as Pending for a separate Admin Verify step; the browser no longer opens or hashes a local backup file.

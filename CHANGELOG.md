@@ -1,5 +1,12 @@
 # TSH Safety Core Activity - Changelog And Handoff History
 
+## 2026-09-22 - KY Activity External Video Evidence deployed
+
+- Deployed `main` commits `dee0898` and `f68fca8`. A central-machine video selected during KY submission or follow-up is registered against its exact Activity with path/reference, filename, MIME, size and SHA-256 without uploading video bytes to Production.
+- New evidence starts as `External pending`, is excluded from `Need video`, and becomes `External verified` only after Admin verification. Dashboard, History, filters, follow-up and Annual Compliance now use the same server projection. Annual Compliance accepts Production video or a verified Activity external video, while multiple Activities in one annual scope remain independently registerable.
+- Added two empty audit-preserving tables without altering existing records. Node/PHP API lifecycle, regression and three-viewport Browser UAT passed with zero fixture residue. Production FTPS hashes passed `4/4`, HTTPS passed `3/3`, and read-only UAT retained 106 KY rows / 83 Production videos with zero writes/errors.
+- Rollback evidence is under `backups/production/ky-activity-external-predeploy-20260922-174153/`. The safety control rejected a broad sensitive database export, so no export/helper was uploaded; exact runtime rollback files and before/after KY snapshots are retained instead.
+
 ## 2026-09-22 — KY Production Inventory picker/date deployed
 
 - Deployed `main` commit `50dcf0f`. Production Inventory cards now expose the Activity month/year and exact Thai Activity date from `ActivityDate`, carry the date into Detail Drawer and show an inline four-step External Backup/SHA-256 workflow guide.

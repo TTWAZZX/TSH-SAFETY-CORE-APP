@@ -2942,6 +2942,12 @@ let _chartManDonut = null; // Man Record pass/fail donut chart
 - Forms section อยู่ใน `config` sub-tab ของ Manage (ไม่ใช่ coverage)
 - `_renderKyFormsManageSection()` + `_renderKyFormsUserCard()` — ฟังก์ชันแยกเพื่อ KY accent color (indigo)
 
+## KY Activity External Video Evidence
+
+- `ky_activity_external_video_evidence` is a one-row-per-Activity registry for central-machine video metadata. It stores the external reference, original filename, MIME, size, SHA-256, verification lifecycle, actor identity and optimistic `RowVersion`; video bytes never enter Production through this workflow.
+- `ky_activity_external_video_evidence_audit` retains immutable declaration, metadata correction, Admin Verify and Needs Correction snapshots. Verified evidence is projected together with Production video by the shared KY evidence SQL used by Dashboard, History, filters and Annual Compliance. Pending/Needs Correction suppresses `Need video` but does not satisfy Annual Compliance until verified.
+- Annual Compliance is still scoped by active Program Config Department/Safety Unit/year, but its evidence may come from any Production-video Activity or verified Activity external evidence in that scope. The legacy annual registry and Production Inventory remain isolated retention/cleanup workflows.
+
 ## Forklift Card Template Type Matching
 
 - `forklift_card_template_type_map` maps card templates to one or two license types.

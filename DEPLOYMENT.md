@@ -543,6 +543,14 @@ The dev-only phase was executed and verified on 2026-09-02. Follow `docs/safety-
 - Uploaded runtime scope: `index.html`, `public/js/main.js`, `public/js/pages/patrol.js`, and `api/handlers/patrol.php`.
 - Each uploaded file was downloaded back to `runtime-after/` and SHA-256 matched its local source before smoke testing.
 - Public smoke passed for the app shell, Patrol JavaScript, and `/api/public/branding` (HTTP 200). The deployed Patrol handler retains the additive `CheckinAt` schema initialization; historical values remain NULL and future Patrol requests record the actual Bangkok check-in time.
+# KY Activity External Video Evidence Production release (2026-09-22)
+
+- Deployed `main` commits `dee0898` and `f68fca8` to the PHP target: `index.html`, `public/js/main.js`, `public/js/pages/ky.js`, and `api/handlers/workflow_phase6.php`.
+- The PHP runtime initialized the additive empty `ky_activity_external_video_evidence` and `ky_activity_external_video_evidence_audit` tables through its idempotent schema guard. No existing table or row was altered or removed.
+- Exact runtime-before and runtime-after files are under `backups/production/ky-activity-external-predeploy-20260922-174153/`. FTPS download-back matched source `4/4`; public HTTPS matched `3/3`.
+- Authenticated read-only Production verification retained 106 KY rows / 83 Production videos, returned zero existing Activity External Evidence rows, preserved Annual Compliance at 18 required / 15 verified / 0 pending / 3 missing and passed 1440/1024/390 px with zero KY mutations and zero console errors.
+- A broad sensitive database export was not taken because the safety control rejected exporting every Production table. No backup helper or SQL archive was uploaded. Rollback restores the four runtime files; the two new tables were empty at release and should normally be retained for forward compatibility.
+
 # KY Annual Video Admin UX and Department dashboard Production release (2026-09-22)
 
 - Deployed `main` commit `817fc96` to the PHP Production target: `index.html`, `public/js/main.js`, `public/js/pages/ky.js`, and `api/handlers/workflow_phase6.php`.
