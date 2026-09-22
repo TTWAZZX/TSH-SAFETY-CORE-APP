@@ -62,6 +62,7 @@ let _kyVideoUploadConfig = {
 const KY_VIDEO_SHOWCASE_LIMIT = 6;
 const KY_COMPANY_EMAIL_DOMAIN = '@thaisummit-harness.co.th';
 const JOHNNY_IMAGE_RISK_DRAFT_KEY = 'johnny_image_risk_draft';
+const KY_EXTERNAL_BACKUP_ROOT = '\\\\192.168.124.87';
 
 async function uploadKyVideoInChunks(activityId, file, onProgress = () => {}) {
     if (!activityId) throw new Error('ไม่พบรหัสกิจกรรม KY สำหรับอัปโหลดวิดีโอ');
@@ -4211,15 +4212,15 @@ async function renderKyAnnualVideoEvidence(panel = document.getElementById('ky-m
                     </div>
                     <div class="mb-4 rounded-xl border border-indigo-100 bg-indigo-50/60 p-3 text-[11px] text-indigo-800" data-ky-inventory-help>
                         <p class="font-bold">วิธีลงทะเบียน External Backup</p>
-                        <p class="mt-1">1) เก็บไฟล์วิดีโอเดียวกับ Production ไว้ในเครื่องกลาง 2) กดลงทะเบียนแล้วเลือกไฟล์สำเนานั้น 3) ระบุพาธ/เลขอ้างอิง 4) รอ Admin Verify · Browser ใช้ไฟล์เพื่อเทียบขนาดและ SHA-256 เท่านั้น ไม่อัปโหลดไฟล์กลับขึ้น Production</p>
+                        <p class="mt-1">1) เก็บไฟล์วิดีโอเดียวกับ Production ไว้ใต้ ${escHtml(KY_EXTERNAL_BACKUP_ROOT)} 2) กดลงทะเบียนแล้วเลือกไฟล์สำเนานั้น 3) ระบบบันทึกเลขอ้างอิงให้อัตโนมัติ 4) รอ Admin Verify · Browser ใช้ไฟล์เพื่อเทียบขนาดและ SHA-256 เท่านั้น ไม่อัปโหลดไฟล์กลับขึ้น Production</p>
                     </div>
                     <div class="mb-3 grid grid-cols-1 lg:grid-cols-[1fr_auto] gap-2">
                         <input type="search" data-ky-inventory-search class="ds-input" placeholder="ค้นหา Department, Safety Unit, ชื่อทีม หรือ Activity ID">
                         <select data-ky-inventory-filter class="ds-select"><option value="all">ทุกสถานะ</option><option value="unregistered">ยังไม่ลงทะเบียน Backup</option><option value="pending">รอ Verify</option><option value="verified">External verified</option><option value="reclaimable">พร้อมลบ Production</option><option value="deleted">ลบ Production แล้ว</option></select>
                     </div>
                     <div class="grid grid-cols-1 lg:grid-cols-2 gap-2 max-h-[60vh] overflow-y-auto pr-1" data-ky-inventory-list>
-                        ${inventory.length ? inventory.map(row=>`<div class="rounded-xl border ${row.canDeleteProductionFile?'border-teal-300 bg-teal-50/40':'border-slate-200 bg-white'} p-3" data-ky-inventory-row data-activity-date="${escHtml(String(row.ActivityDate||'').slice(0,10))}" data-search="${escHtml([row.Department,row.SafetyUnit,row.TeamName,row.KYTKeyword,row.ActivityID,row.ActivityDate,row.OriginalFileName].filter(Boolean).join(' ').toLowerCase())}" data-status="${row.fileDeleted?'deleted':row.canDeleteProductionFile?'reclaimable':row.Status==='Verified'?'verified':['Pending','NeedsCorrection'].includes(row.Status)?'pending':'unregistered'}">
-                            <div class="flex items-start gap-3"><input type="checkbox" data-ky-inventory-select value="${escHtml(row.id||'')}" data-version="${Number(row.RowVersion||0)}" ${row.canDeleteProductionFile?'':'disabled'} class="mt-1"><div class="min-w-0 flex-1"><div class="flex flex-wrap items-center gap-2"><p class="text-xs font-bold text-slate-800">${escHtml(row.Department||'-')} · ${escHtml(row.SafetyUnit||'Department')}</p>${statusBadge(row)}<span class="rounded-full bg-sky-50 px-2 py-1 text-[9px] font-bold text-sky-700">${escHtml(formatKyActivityMonth(row.ActivityDate))}</span>${row.AnnualEvidenceID?'<span class="rounded-full bg-indigo-50 px-2 py-1 text-[9px] font-bold text-indigo-700">Annual primary</span>':''}</div><p class="mt-1 text-[10px] text-slate-500 truncate">${escHtml(formatKyActivityDate(row.ActivityDate))} · ${escHtml(row.TeamName||row.KYTKeyword||row.ActivityID)} · ${escHtml(row.OriginalFileName||'Production file')}</p>${row.SHA256?`<p class="mt-1 text-[10px] text-slate-400">${formatFileSize(row.FileSize||0)} · SHA ${escHtml(String(row.SHA256).slice(0,12))}…</p>`:''}${row.fileDeleted?'<p class="mt-1 text-[10px] font-bold text-rose-600">Production file removed · metadata retained</p>':''}</div></div>
+                        ${inventory.length ? inventory.map(row=>`<div class="rounded-xl border ${row.canDeleteProductionFile?'border-teal-300 bg-teal-50/40':'border-slate-200 bg-white'} p-3" data-ky-inventory-row data-activity-date="${escHtml(String(row.ActivityDate||'').slice(0,10))}" data-search="${escHtml([row.Department,row.SafetyUnit,row.TeamName,row.KYTKeyword,row.ActivityID,row.ActivityDate,row.ProductionOriginalFileName,row.OriginalFileName].filter(Boolean).join(' ').toLowerCase())}" data-status="${row.fileDeleted?'deleted':row.canDeleteProductionFile?'reclaimable':row.Status==='Verified'?'verified':['Pending','NeedsCorrection'].includes(row.Status)?'pending':'unregistered'}">
+                            <div class="flex items-start gap-3"><input type="checkbox" data-ky-inventory-select value="${escHtml(row.id||'')}" data-version="${Number(row.RowVersion||0)}" ${row.canDeleteProductionFile?'':'disabled'} class="mt-1"><div class="min-w-0 flex-1"><div class="flex flex-wrap items-center gap-2"><p class="text-xs font-bold text-slate-800">${escHtml(row.Department||'-')} · ${escHtml(row.SafetyUnit||'Department')}</p>${statusBadge(row)}<span class="rounded-full bg-sky-50 px-2 py-1 text-[9px] font-bold text-sky-700">${escHtml(formatKyActivityMonth(row.ActivityDate))}</span>${row.AnnualEvidenceID?'<span class="rounded-full bg-indigo-50 px-2 py-1 text-[9px] font-bold text-indigo-700">Annual primary</span>':''}</div><p class="mt-1 text-[10px] text-slate-500 truncate">${escHtml(formatKyActivityDate(row.ActivityDate))} · ${escHtml(row.TeamName||row.KYTKeyword||row.ActivityID)}</p><p class="mt-1 text-[10px] font-semibold text-slate-600 truncate" title="${escHtml(row.ProductionOriginalFileName||row.OriginalFileName||'')}">ไฟล์ Production: ${escHtml(row.ProductionOriginalFileName||row.OriginalFileName||'ไม่พบชื่อไฟล์')}</p>${row.registered?`<p class="mt-1 text-[10px] text-slate-400 truncate">ไฟล์ Backup ที่ตรวจ: ${escHtml(row.OriginalFileName||'-')}</p>`:''}${row.SHA256?`<p class="mt-1 text-[10px] text-slate-400">${formatFileSize(row.FileSize||0)} · SHA ${escHtml(String(row.SHA256).slice(0,12))}…</p>`:''}${row.fileDeleted?'<p class="mt-1 text-[10px] font-bold text-rose-600">Production file removed · metadata retained</p>':''}<p ${row.registered?'':'hidden'} aria-live="polite" data-ky-inventory-registration-status="${escHtml(row.ActivityID)}" class="mt-2 rounded-lg border px-2 py-1.5 text-[10px] font-semibold ${row.Status==='Verified'?'text-emerald-700 bg-emerald-50 border-emerald-100':row.Status==='NeedsCorrection'?'text-rose-700 bg-rose-50 border-rose-100':'text-amber-700 bg-amber-50 border-amber-100'}">${row.Status==='Verified'?'ลงทะเบียนและ Admin Verify แล้ว':row.Status==='NeedsCorrection'?'ข้อมูล Backup ต้องแก้ไข':'ลงทะเบียนสำเร็จ · รอ Admin Verify'}</p></div></div>
                             <div class="mt-3 flex flex-wrap justify-end gap-1">
                                 <button type="button" data-ky-inventory-detail="${escHtml(row.id||row.ActivityID)}" class="rounded-lg border px-2 py-1 text-[10px] font-bold text-slate-600">Detail</button>
                                 ${!row.registered&&row.CurrentVideoUrl?`<button type="button" data-id="${escHtml(row.ActivityID)}" data-ky-inventory-register="${escHtml(row.ActivityID)}" title="เลือกไฟล์วิดีโอสำเนาที่เก็บในเครื่องกลางเพื่อเทียบ SHA-256" class="px-2 py-1 rounded-lg bg-indigo-600 text-white text-[10px] font-bold">ลงทะเบียน External Backup</button>`:''}
@@ -4512,6 +4513,41 @@ function chooseKyInventoryBackupFile() {
         document.body.appendChild(input);
         input.click();
     });
+}
+
+function buildKyInventoryBackupReference(file) {
+    const safeName = String(file?.name || 'video')
+        .replace(/[\\/]+/g, '_')
+        .trim() || 'video';
+    return `${KY_EXTERNAL_BACKUP_ROOT}\\${safeName}`;
+}
+
+function kyInventoryRegistrationError(error) {
+    const code = String(error?.code || '');
+    if (code === 'KY_VIDEO_INVENTORY_BACKUP_MISMATCH') {
+        return new Error('ไฟล์ที่เลือกไม่ตรงกับวิดีโอ Production (ขนาดหรือ SHA-256 ไม่ตรงกัน) กรุณาเลือกไฟล์สำเนาต้นฉบับที่ยังไม่ถูกตัดต่อ บีบอัด หรือแปลงไฟล์');
+    }
+    if (code === 'KY_VIDEO_INVENTORY_PRODUCTION_REQUIRED') {
+        return new Error('ไม่พบไฟล์วิดีโอ Production ที่อ่านได้สำหรับกิจกรรมนี้ กรุณาตรวจสอบไฟล์ต้นทางก่อนลงทะเบียน');
+    }
+    return error instanceof Error
+        ? error
+        : new Error(error?.message || 'ลงทะเบียน External Backup ไม่สำเร็จ กรุณาลองใหม่อีกครั้ง');
+}
+
+function setKyInventoryRegistrationStatus(activityId, state, message) {
+    const status = Array.from(document.querySelectorAll('[data-ky-inventory-registration-status]'))
+        .find(element => String(element.dataset.kyInventoryRegistrationStatus || '') === String(activityId || ''));
+    if (!status) return;
+    const colors = {
+        progress: 'text-indigo-700 bg-indigo-50 border-indigo-100',
+        success: 'text-emerald-700 bg-emerald-50 border-emerald-100',
+        error: 'text-rose-700 bg-rose-50 border-rose-100',
+        neutral: 'text-slate-600 bg-slate-50 border-slate-100',
+    };
+    status.className = `mt-2 rounded-lg border px-2 py-1.5 text-[10px] font-semibold ${colors[state] || colors.neutral}`;
+    status.textContent = String(message || '');
+    status.hidden = !message;
 }
 
 function filterKyVideoInventory() {
@@ -5997,24 +6033,37 @@ function setupEventListeners() {
 
         const inventoryRegisterBtn = e.target.closest('[data-ky-inventory-register]');
         if (inventoryRegisterBtn) {
+            const activityId = inventoryRegisterBtn.dataset.kyInventoryRegister;
+            setKyInventoryRegistrationStatus(activityId, 'progress', 'กำลังเลือกไฟล์สำรองจากเครื่องกลาง...');
             const file = await chooseKyInventoryBackupFile();
-            if (!file) return;
-            const reference = window.prompt('ระบุพาธ / เลขอ้างอิงของไฟล์ที่เก็บไว้ในเครื่องกลาง', file.name) ?? null;
-            if (!reference?.trim()) return;
-            await runKyButtonAction(inventoryRegisterBtn, 'กำลังตรวจ SHA-256...', async () => {
-                const sha256 = await sha256Blob(file);
-                await API.post('/ky/video-inventory/declare', {
-                    activityId: inventoryRegisterBtn.dataset.kyInventoryRegister,
-                    externalReference: reference.trim(),
-                    externalBackupConfirmed: true,
-                    originalFileName: file.name,
-                    mimeType: file.type || 'application/octet-stream',
-                    fileSize: file.size,
-                    sha256,
+            if (!file) {
+                setKyInventoryRegistrationStatus(activityId, 'neutral', 'ยกเลิกการเลือกไฟล์ · ยังไม่ได้ลงทะเบียน');
+                return;
+            }
+            const reference = buildKyInventoryBackupReference(file);
+            try {
+                await runKyButtonAction(inventoryRegisterBtn, 'กำลังลงทะเบียน...', async () => {
+                    setKyInventoryRegistrationStatus(activityId, 'progress', `กำลังคำนวณ SHA-256: ${file.name}`);
+                    const sha256 = await sha256Blob(file);
+                    setKyInventoryRegistrationStatus(activityId, 'progress', `กำลังเทียบกับไฟล์ Production และลงทะเบียน: ${file.name}`);
+                    await API.post('/ky/video-inventory/declare', {
+                        activityId,
+                        externalReference: reference,
+                        externalBackupConfirmed: true,
+                        originalFileName: file.name,
+                        mimeType: file.type || 'application/octet-stream',
+                        fileSize: file.size,
+                        sha256,
+                    });
+                    setKyInventoryRegistrationStatus(activityId, 'success', `ลงทะเบียนสำเร็จ: ${file.name} · รอ Admin Verify`);
+                    showToast(`ลงทะเบียนสำเร็จ · ${reference} · รอ Admin Verify`, 'success');
+                    await renderKyAnnualVideoEvidence();
                 });
-                showToast('ไฟล์เครื่องกลางตรงกับ Production และบันทึก Metadata แล้ว รอ Admin Verify', 'success');
-                await renderKyAnnualVideoEvidence();
-            });
+            } catch (error) {
+                const registrationError = kyInventoryRegistrationError(error);
+                setKyInventoryRegistrationStatus(activityId, 'error', `ลงทะเบียนไม่สำเร็จ: ${registrationError.message}`);
+                showError(registrationError);
+            }
             return;
         }
 

@@ -1839,8 +1839,10 @@ function wf_ky_inventory_public(array $row): array
 {
     $registered=!empty($row['InventoryID']??$row['id']??null);$status=$registered?(string)($row['Status']??'Pending'):'Unregistered';
     $production=trim((string)($row['CurrentVideoUrl']??$row['ProductionVideoUrl']??''));$deleted=!empty($row['ProductionDeletedAt']);
+    $productionName=trim((string)($row['ProductionStoredName']??''));
+    if($productionName===''&&$production!==''){$path=(string)(parse_url($production,PHP_URL_PATH)??$production);$productionName=rawurldecode(basename(str_replace('\\','/',$path)));}
     $row['id']=$row['InventoryID']??$row['id']??null;$row['registered']=$registered;$row['Status']=$status;
-    $row['ProductionVideoUrl']=$production!==''?$production:($row['ProductionVideoUrl']??null);$row['ExternalBackupConfirmed']=!empty($row['ExternalBackupConfirmed']);$row['fileDeleted']=$deleted;
+    $row['ProductionVideoUrl']=$production!==''?$production:($row['ProductionVideoUrl']??null);$row['ProductionOriginalFileName']=$productionName!==''?$productionName:($row['OriginalFileName']??null);$row['ExternalBackupConfirmed']=!empty($row['ExternalBackupConfirmed']);$row['fileDeleted']=$deleted;
     $row['canDeleteProductionFile']=$registered&&$status==='Verified'&&!empty($row['ExternalBackupConfirmed'])&&trim((string)($row['ExternalReference']??''))!==''
         &&preg_match('/^[a-f0-9]{64}$/i',(string)($row['SHA256']??''))&&$production!==''&&!$deleted;
     return $row;

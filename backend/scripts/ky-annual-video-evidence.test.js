@@ -43,6 +43,7 @@ for (const source of [nodeRoute, phpRoute]) {
     assert.match(source, /departmentSource/, 'KY stats must identify the authoritative Department source');
     assert.match(source, /configuredDepartments/, 'KY stats must return every configured Department');
     assert.match(source, /unmappedDepartments/, 'KY stats must expose unmatched activity Department diagnostics');
+    assert.match(source, /ProductionOriginalFileName/, 'Inventory projection must expose the current Production video file name');
 }
 
 assert.match(nodeRoute, /fs\.renameSync\(entry\.localPath, quarantine\)/, 'Node must quarantine files before committing deletion metadata');
@@ -81,14 +82,22 @@ assert.match(frontend, /formatKyActivityMonth\(row\.ActivityDate\)/, 'Inventory 
 assert.match(frontend, /formatKyActivityDate\(row\.ActivityDate\)/, 'Inventory cards must display the exact Activity date');
 assert.match(frontend, /data-ky-inventory-help/, 'Inventory workspace must explain the external-backup registration workflow');
 assert.match(frontend, /ไม่อัปโหลดไฟล์กลับขึ้น Production/, 'Inventory help must make the metadata-only file selection explicit');
+assert.match(frontend, /KY_EXTERNAL_BACKUP_ROOT = '\\\\\\\\192\.168\.124\.87'/, 'Inventory registration must use the configured central-machine root');
+assert.match(frontend, /buildKyInventoryBackupReference\(file\)/, 'Inventory registration must create its central-machine reference automatically');
+assert.doesNotMatch(frontend, /window\.prompt\('ระบุพาธ \/ เลขอ้างอิงของไฟล์ที่เก็บไว้ในเครื่องกลาง'/, 'Inventory registration must not show a second path prompt');
+assert.match(frontend, /KY_VIDEO_INVENTORY_BACKUP_MISMATCH[\s\S]*ขนาดหรือ SHA-256 ไม่ตรงกัน/, 'Inventory registration must explain a backup hash mismatch to the Admin');
+assert.match(frontend, /ไฟล์ Production:/, 'Inventory cards must label the current Production video file name');
+assert.match(frontend, /data-ky-inventory-registration-status/, 'Inventory cards must expose live registration feedback');
+assert.match(frontend, /กำลังคำนวณ SHA-256:[\s\S]*กำลังเทียบกับไฟล์ Production และลงทะเบียน:/, 'Inventory registration must show hashing and server-registration phases');
+assert.match(frontend, /ลงทะเบียนไม่สำเร็จ:/, 'Inventory registration failure must remain visible on its card');
 assert.match(frontend, /data-ky-annual-admin-toolbar/, 'Annual Admin filters must use a sticky toolbar');
 assert.match(frontend, /data-ky-annual-detail/, 'Annual evidence must expose a Detail Drawer action');
 assert.match(frontend, /data-ky-inventory-detail/, 'Inventory evidence must expose a Detail Drawer action');
 assert.match(frontend, /data-ky-cleanup-panel/, 'destructive actions must be isolated in Cleanup Queue');
 assert.match(frontend, /data-ky-heatmap-department/, 'Heatmap must expose every canonical Department row for Browser UAT');
 assert.match(frontend, /renderDepartmentDiagnostics/, 'Dashboard must render unmapped Department diagnostics');
-assert.match(main, /ky\.js\?v=20260922-ky-inventory-date-r3/, 'cache chain must expose the Inventory date bundle');
-assert.match(index, /main\.js\?v=20260922-ky-inventory-date-r3/, 'HTML entry point must invalidate the cached main module');
+assert.match(main, /ky\.js\?v=20260922-ky-inventory-feedback-r5/, 'cache chain must expose the Inventory file-name and feedback bundle');
+assert.match(index, /main\.js\?v=20260922-ky-inventory-feedback-r5/, 'HTML entry point must invalidate the cached main module');
 
 async function verifyInventoryPickerCancelRecovery() {
     const start = frontend.indexOf('function chooseKyInventoryBackupFile()');

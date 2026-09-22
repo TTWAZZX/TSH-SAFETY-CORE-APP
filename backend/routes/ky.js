@@ -1003,6 +1003,12 @@ function kyVideoInventoryPublic(row) {
     const registered = Boolean(row?.InventoryID || row?.id);
     const status = registered ? String(row.Status || 'Pending') : 'Unregistered';
     const productionVideoUrl = String(row.CurrentVideoUrl || row.ProductionVideoUrl || '').trim();
+    let productionOriginalFileName = String(row.ProductionStoredName || '').trim();
+    if (!productionOriginalFileName && productionVideoUrl) {
+        const cleanPath = productionVideoUrl.split(/[?#]/, 1)[0].replace(/\\/g, '/');
+        try { productionOriginalFileName = decodeURIComponent(path.posix.basename(cleanPath)); }
+        catch (_) { productionOriginalFileName = path.posix.basename(cleanPath); }
+    }
     const deleted = Boolean(row.ProductionDeletedAt);
     return {
         ...row,
@@ -1010,6 +1016,7 @@ function kyVideoInventoryPublic(row) {
         registered,
         Status: status,
         ProductionVideoUrl: productionVideoUrl || row.ProductionVideoUrl || null,
+        ProductionOriginalFileName: productionOriginalFileName || row.OriginalFileName || null,
         ExternalBackupConfirmed: Boolean(Number(row.ExternalBackupConfirmed || 0)),
         fileDeleted: deleted,
         canDeleteProductionFile: registered

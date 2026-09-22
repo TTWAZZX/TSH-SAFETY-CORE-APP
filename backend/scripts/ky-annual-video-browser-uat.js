@@ -253,6 +253,11 @@ async function startNodeApiIfRequested() {
     assert.ok(annualUi.inventoryDates, 'Every Inventory card must expose its authoritative Activity Date');
     assert.notStrictEqual(annualUi.inventoryMaxHeight, '288px', 'Inventory list must be expanded beyond the legacy max-h-72 height');
     assert.strictEqual(await evaluate(`document.querySelector('[data-ky-annual-admin-status]')?.value`), 'action', 'Action-required must be the default Admin filter');
+    const inventoryFeedback = await evaluate(`(()=>{const rows=[...document.querySelectorAll('[data-ky-inventory-row]')];const registered=rows.filter(row=>!row.querySelector('[data-ky-inventory-register]'));return{productionNames:rows.every(row=>/ไฟล์ Production:\\s*\\S+/.test(row.innerText||'')),statusRegions:rows.filter(row=>row.querySelector('[data-ky-inventory-registration-status]')).length,registeredVisible:registered.every(row=>{const status=row.querySelector('[data-ky-inventory-registration-status]');return Boolean(status&&!status.hidden&&status.textContent.trim())}),registeredCount:registered.length}})()`);
+    assert.ok((beforeAnnual.data?.inventory || []).filter(row => row.CurrentVideoUrl).every(row => row.ProductionOriginalFileName), 'Inventory API must expose the current Production file name');
+    assert.ok(inventoryFeedback.productionNames, 'Every Inventory card must display its Production video file name');
+    assert.strictEqual(inventoryFeedback.statusRegions, annualUi.inventoryRows, 'Every Inventory card must include an accessible registration-status region');
+    assert.ok(inventoryFeedback.registeredVisible, 'Registered Inventory cards must show their persisted registration state');
 
     const pickerRecovery = await evaluate(`(async()=>{
         const buttons=[...document.querySelectorAll('[data-ky-inventory-register]')];
@@ -264,20 +269,24 @@ async function startNodeApiIfRequested() {
             await new Promise(resolve=>setTimeout(resolve,30));
             const first=document.querySelector('[data-ky-inventory-file-picker]');
             if(!first)return{firstOpened:false};
+            const progress=(buttons[0].closest('[data-ky-inventory-row]')?.querySelector('[data-ky-inventory-registration-status]')?.textContent||'').trim();
             first.dispatchEvent(new Event('cancel'));
             await new Promise(resolve=>setTimeout(resolve,30));
+            const cancelled=(buttons[0].closest('[data-ky-inventory-row]')?.querySelector('[data-ky-inventory-registration-status]')?.textContent||'').trim();
             const next=buttons[1]||buttons[0];
             next.click();
             await new Promise(resolve=>setTimeout(resolve,30));
             const second=document.querySelector('[data-ky-inventory-file-picker]');
             if(second)second.dispatchEvent(new Event('cancel'));
             await new Promise(resolve=>setTimeout(resolve,30));
-            return{firstOpened:true,secondOpened:Boolean(second),residue:document.querySelectorAll('[data-ky-inventory-file-picker]').length};
+            return{firstOpened:true,secondOpened:Boolean(second),residue:document.querySelectorAll('[data-ky-inventory-file-picker]').length,progress,cancelled};
         }finally{HTMLInputElement.prototype.click=nativeClick;}
     })()`);
     if (!pickerRecovery.skipped) {
         assert.ok(pickerRecovery.firstOpened && pickerRecovery.secondOpened, 'Inventory picker must reopen after the previous picker is cancelled');
         assert.strictEqual(pickerRecovery.residue, 0, 'Cancelled Inventory pickers must leave no hidden input residue');
+        assert.match(pickerRecovery.progress, /กำลังเลือกไฟล์สำรอง/, 'Inventory card must show progress while its file picker is open');
+        assert.match(pickerRecovery.cancelled, /ยกเลิกการเลือกไฟล์/, 'Inventory card must show a clear cancellation result');
     }
 
     if (annualUi.detail) {
