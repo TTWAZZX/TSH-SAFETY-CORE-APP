@@ -1,5 +1,12 @@
 # TSH Safety Core Activity - AGENTS.md
 
+## KY Annual Video Admin UX and Department dashboard Production release (2026-09-22)
+
+- `main` commit `817fc96` is deployed to the PHP Production target. Annual Video Evidence now separates Overview, Annual Compliance, Production Inventory, and Cleanup Queue & Audit, with sticky/action-required filters, clickable summaries, a metadata/SHA-256 detail drawer, cleanup history, and guarded single/bulk cleanup isolated from ordinary evidence views.
+- KY Dashboard Department charts now use Active Program Config as the canonical Department list, retain configured zero-activity Departments, render a complete Department × 12-month heatmap, normalize case/whitespace for matching, and expose unmapped Department diagnostics. Node and PHP return the same contract.
+- Local Node/PHP lifecycle and Browser UAT passed, including canonical matching, zero-activity Departments, cleanup guardrails, detail drawer, three responsive viewports and zero test residue. Production FTPS download-back matched `4/4`; HTTPS hashes matched `3/3`. Authenticated read-only Production UAT retained 105 KY rows / 83 Production videos, passed three viewports with zero mutations and zero console errors, and changed no business data or media.
+- Runtime rollback evidence is under `backups/production/ky-annual-admin-predeploy-20260922-103037/`. The legacy Production directory `backend/private-uploads/deployment-backups` was independently downloaded twice, verified `7/7` by SHA-256 and archive integrity, retained locally under `backups/production/production-deployment-backups-relocated-20260922-103037/`, then removed from Production, reclaiming 63,052,734 bytes (60.13 MiB).
+
 ## KY annual video duplicate-scope reconciliation Production release (2026-09-21)
 
 - `main` commit `b525eff` is deployed to the PHP Production target. Annual Video Evidence candidates now carry the server-resolved existing evidence for the same year / Department / Safety Unit scope. An already registered scope shows “ดูรายการเดิม”, focuses and highlights that evidence, and never sends a duplicate declare request. A concurrent `KY_ANNUAL_VIDEO_ALREADY_VERIFIED` or stale-scope response is caught, refreshed and redirected without an unhandled promise rejection.

@@ -543,3 +543,9 @@ The dev-only phase was executed and verified on 2026-09-02. Follow `docs/safety-
 - Uploaded runtime scope: `index.html`, `public/js/main.js`, `public/js/pages/patrol.js`, and `api/handlers/patrol.php`.
 - Each uploaded file was downloaded back to `runtime-after/` and SHA-256 matched its local source before smoke testing.
 - Public smoke passed for the app shell, Patrol JavaScript, and `/api/public/branding` (HTTP 200). The deployed Patrol handler retains the additive `CheckinAt` schema initialization; historical values remain NULL and future Patrol requests record the actual Bangkok check-in time.
+# KY Annual Video Admin UX and Department dashboard Production release (2026-09-22)
+
+- Deployed `main` commit `817fc96` to the PHP Production target: `index.html`, `public/js/main.js`, `public/js/pages/ky.js`, and `api/handlers/workflow_phase6.php`.
+- FTPS download-back matched source SHA-256 `4/4`; public HTTPS matched `3/3`. Authenticated read-only Production UAT preserved 105 KY rows and 83 Production-video references, passed 1440/1024/390 px with zero KY mutations, zero console errors, and no business/media changes.
+- Rollback copies are under `backups/production/ky-annual-admin-predeploy-20260922-103037/`.
+- Relocated all seven files from Production `backend/private-uploads/deployment-backups` to `backups/production/production-deployment-backups-relocated-20260922-103037/`. Two independent FTPS downloads matched SHA-256 `7/7`; two ZIP and four GZIP archives passed integrity checks. Only after verification, the seven remote files and empty directories were removed, reclaiming 63,052,734 bytes (60.13 MiB).
