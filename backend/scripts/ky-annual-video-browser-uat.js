@@ -219,6 +219,17 @@ async function startNodeApiIfRequested() {
     assert.ok(evidenceFilterOptions.includes('external_verified'), 'History must expose the verified external video evidence filter');
     assert.ok(evidenceFilterOptions.includes('external_pending'), 'History must expose the pending external video evidence filter');
 
+    const hasFollowupRecord = await evaluate(`Boolean(document.querySelector('.btn-ky-video-followup[data-id]'))`);
+    if (hasFollowupRecord) {
+        await evaluate(`document.querySelector('.btn-ky-video-followup[data-id]').click()`);
+        await waitFor(`document.querySelector('#ky-followup-video-file') && document.querySelector('#ky-followup-video-central')`);
+        const followupContract = await evaluate(`(()=>{const toggle=document.querySelector('#ky-followup-video-central');toggle.click();return{file:Boolean(document.querySelector('#ky-followup-video-file')),central:Boolean(toggle),reference:Boolean(document.querySelector('#ky-followup-video-reference')),visible:!document.querySelector('#ky-followup-video-reference-wrap')?.classList.contains('hidden'),copy:document.querySelector('#modal-body')?.innerText||''};})()`);
+        assert.ok(followupContract.file && followupContract.central && followupContract.reference && followupContract.visible, 'History follow-up must offer Production upload or central-machine metadata');
+        assert.match(followupContract.copy, /SHA-256/i, 'History central-machine mode must explain local SHA-256 calculation');
+        await evaluate(`document.querySelector('#modal-close-btn')?.click()`);
+        await sleep(250);
+    }
+
     const hasManageRecord = await evaluate(`Boolean(document.querySelector('.btn-ky-manage[data-id]'))`);
     if (hasManageRecord) {
         await evaluate(`document.querySelector('.btn-ky-manage[data-id]').click()`);
@@ -239,10 +250,12 @@ async function startNodeApiIfRequested() {
     await evaluate(`document.querySelector('#ky-msub-annual-video').click()`);
     await waitFor(`document.querySelector('[data-ky-annual-admin-toolbar]') && document.querySelector('#ky-manage-panel')?.textContent.includes('Annual Compliance Dashboard')`);
 
-    const annualUi = await evaluate(`(()=>({summaryCards:document.querySelector('[data-ky-annual-summary]')?.children.length||0,summaryClickable:[...document.querySelector('[data-ky-annual-summary]')?.children||[]].every(card=>card.getAttribute('role')==='button'),views:[...document.querySelectorAll('[data-ky-annual-view]')].map(button=>button.dataset.kyAnnualView),sticky:getComputedStyle(document.querySelector('[data-ky-annual-admin-toolbar]')).position,hasDownload:Boolean(document.querySelector('[data-ky-annual-download]'))||${JSON.stringify((beforeAnnual.data?.summary?.productionFiles || 0) === 0)},hasAudit:Boolean(document.querySelector('[data-ky-annual-audit]'))||${JSON.stringify((beforeAnnual.data?.evidence || []).length === 0)},detail:Boolean(document.querySelector('[data-ky-annual-detail],[data-ky-inventory-detail]'))||${JSON.stringify((beforeAnnual.data?.evidence || []).length === 0 && (beforeAnnual.data?.inventory || []).length === 0)},cleanup:Boolean(document.querySelector('[data-ky-cleanup-panel]')),bulk:Boolean(document.querySelector('[data-ky-cleanup-panel] [data-ky-annual-delete-selected]')),inventory:Boolean(document.querySelector('[data-ky-video-inventory]')),inventoryRows:document.querySelectorAll('[data-ky-inventory-row]').length,inventoryDates:[...document.querySelectorAll('[data-ky-inventory-row]')].every(row=>/^[0-9]{4}-[0-9]{2}-[0-9]{2}$/.test(row.dataset.activityDate||'')),inventoryBulk:Boolean(document.querySelector('[data-ky-cleanup-panel] [data-ky-inventory-delete-selected]')),inventoryMaxHeight:getComputedStyle(document.querySelector('[data-ky-inventory-list]')).maxHeight,normalAnnualDeleteVisible:[...document.querySelectorAll('[data-ky-annual-view-panel="annual"] [data-ky-annual-delete-one]')].some(el=>!el.classList.contains('hidden')),normalInventoryDeleteVisible:[...document.querySelectorAll('[data-ky-video-inventory] [data-ky-inventory-delete-one]')].some(el=>!el.classList.contains('hidden'))}))()`);
+    const annualUi = await evaluate(`(()=>({summaryCards:document.querySelector('[data-ky-annual-summary]')?.children.length||0,summaryClickable:[...document.querySelector('[data-ky-annual-summary]')?.children||[]].every(card=>card.getAttribute('role')==='button'),views:[...document.querySelectorAll('[data-ky-annual-view]')].map(button=>button.dataset.kyAnnualView),sticky:getComputedStyle(document.querySelector('[data-ky-annual-admin-toolbar]')).position,activityExternal:Boolean(document.querySelector('[data-ky-annual-view-panel="activity"]')),activityExternalRows:document.querySelectorAll('[data-ky-activity-external-detail]').length,hasDownload:Boolean(document.querySelector('[data-ky-annual-download]'))||${JSON.stringify((beforeAnnual.data?.summary?.productionFiles || 0) === 0)},hasAudit:Boolean(document.querySelector('[data-ky-annual-audit]'))||${JSON.stringify((beforeAnnual.data?.evidence || []).length === 0)},detail:Boolean(document.querySelector('[data-ky-annual-detail],[data-ky-inventory-detail],[data-ky-activity-external-detail]'))||${JSON.stringify((beforeAnnual.data?.evidence || []).length === 0 && (beforeAnnual.data?.inventory || []).length === 0 && (beforeAnnual.data?.activityExternalEvidence || []).length === 0)},cleanup:Boolean(document.querySelector('[data-ky-cleanup-panel]')),bulk:Boolean(document.querySelector('[data-ky-cleanup-panel] [data-ky-annual-delete-selected]')),inventory:Boolean(document.querySelector('[data-ky-video-inventory]')),inventoryRows:document.querySelectorAll('[data-ky-inventory-row]').length,inventoryDates:[...document.querySelectorAll('[data-ky-inventory-row]')].every(row=>/^[0-9]{4}-[0-9]{2}-[0-9]{2}$/.test(row.dataset.activityDate||'')),inventoryBulk:Boolean(document.querySelector('[data-ky-cleanup-panel] [data-ky-inventory-delete-selected]')),inventoryMaxHeight:getComputedStyle(document.querySelector('[data-ky-inventory-list]')).maxHeight,normalAnnualDeleteVisible:[...document.querySelectorAll('[data-ky-annual-view-panel="annual"] [data-ky-annual-delete-one]')].some(el=>!el.classList.contains('hidden')),normalInventoryDeleteVisible:[...document.querySelectorAll('[data-ky-video-inventory] [data-ky-inventory-delete-one]')].some(el=>!el.classList.contains('hidden'))}))()`);
     assert.strictEqual(annualUi.summaryCards, 6, 'Annual dashboard must render six summary metrics');
     assert.ok(annualUi.summaryClickable, 'Annual summary cards must be keyboard-clickable filters');
-    assert.deepStrictEqual(annualUi.views, ['overview', 'annual', 'inventory', 'cleanup'], 'Admin workspace must expose four focused views');
+    assert.deepStrictEqual(annualUi.views, ['overview', 'annual', 'activity', 'inventory', 'cleanup'], 'Admin workspace must expose the Activity External review view separately');
+    assert.ok(annualUi.activityExternal, 'Activity External Admin review panel must render');
+    assert.strictEqual(annualUi.activityExternalRows, (beforeAnnual.data?.activityExternalEvidence || []).length, 'Activity External UI must render every API evidence row');
     assert.strictEqual(annualUi.sticky, 'sticky', 'Admin filters must remain sticky');
     assert.ok(annualUi.hasDownload && annualUi.hasAudit && annualUi.detail, `Annual Admin controls must match available records: ${JSON.stringify(annualUi)}`);
     assert.ok(annualUi.cleanup && annualUi.bulk && annualUi.inventoryBulk, 'guarded Annual and Inventory bulk cleanup must live in Cleanup Queue');
@@ -286,7 +299,7 @@ async function startNodeApiIfRequested() {
         await evaluate(`document.querySelector('#modal-close-btn')?.click()`);
     }
 
-    for (const view of ['overview', 'annual', 'inventory', 'cleanup']) {
+    for (const view of ['overview', 'annual', 'activity', 'inventory', 'cleanup']) {
         const viewState = await evaluate(`(()=>{document.querySelector('[data-ky-annual-view="${view}"]').click();return{pressed:document.querySelector('[data-ky-annual-view="${view}"]').getAttribute('aria-pressed'),visible:[...document.querySelectorAll('[data-ky-annual-view-panel]')].filter(panel=>!panel.classList.contains('hidden')).map(panel=>panel.dataset.kyAnnualViewPanel)}})()`);
         assert.strictEqual(viewState.pressed, 'true', `${view} view button must become active`);
         assert.ok(viewState.visible.length > 0 && viewState.visible.every(value => value === view), `${view} view must hide unrelated workspaces`);
@@ -305,7 +318,7 @@ async function startNodeApiIfRequested() {
     assert.deepStrictEqual(afterStats.data?.kpi || afterStats.kpi, beforeStats.data?.kpi || beforeStats.kpi, 'read-only Browser UAT must not alter KY dashboard statistics');
     assert.deepStrictEqual(mutationRequests, [], `Browser UAT sent mutations: ${mutationRequests.join(' | ')}`);
     assert.deepStrictEqual(consoleErrors, [], `Browser console errors: ${consoleErrors.join(' | ')}`);
-    console.log('KY annual video Browser UI UAT: PASS (config-complete Dashboard, four Admin views, guarded cleanup, 3 viewports, zero writes/errors)');
+    console.log('KY annual video Browser UI UAT: PASS (config-complete Dashboard, Activity External Admin review, guarded cleanup, 3 viewports, zero writes/errors)');
 })().catch(async error => {
     console.error(error.stack || error);
     if (socket) {

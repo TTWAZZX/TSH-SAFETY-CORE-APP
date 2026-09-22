@@ -11,6 +11,11 @@ const main = read('public/js/main.js');
 const index = read('index.html');
 
 for (const source of [nodeRoute, phpRoute]) {
+    assert.match(source, /ky_activity_external_video_evidence/i, 'per-activity external video evidence table must exist in both runtimes');
+    assert.match(source, /ky_activity_external_video_evidence_audit/i, 'per-activity external video audit must exist in both runtimes');
+    assert.match(source, /activity-video-evidence\/declare/, 'per-activity external declaration API must exist');
+    assert.match(source, /activity-video-evidence.*verify/s, 'per-activity Admin verification API must exist');
+    assert.match(source, /KY_ACTIVITY_EXTERNAL_ALREADY_VERIFIED/, 'verified activity evidence replacement must fail closed');
     assert.match(source, /ky_annual_video_evidence/i, 'annual evidence table must exist in both runtimes');
     assert.match(source, /ky_annual_video_evidence_audit/i, 'immutable annual evidence audit must exist');
     assert.match(source, /annual-video-evidence/, 'annual evidence API must exist');
@@ -53,6 +58,11 @@ assert.match(phpRoute, /rename\(\$entry\['local'\],\$quarantine\)/, 'PHP must qu
 assert.match(phpRoute, /array_reverse\(\$quarantined\)/, 'PHP must restore quarantine on rollback');
 
 assert.match(frontend, /Annual Video Evidence/, 'Admin annual evidence workspace must exist');
+assert.match(frontend, /Activity External Video Evidence/, 'Admin must have a per-activity external evidence review queue');
+assert.match(frontend, /data-ky-activity-external-verify/, 'Admin must be able to verify per-activity evidence');
+assert.match(frontend, /data-ky-activity-external-correction/, 'Admin must be able to request correction per activity');
+assert.match(frontend, /activity-video-evidence\/declare/, 'submit, History and Manage must use per-activity evidence API');
+assert.match(frontend, /ky-followup-video-central/, 'History follow-up must offer central-machine evidence');
 assert.match(frontend, /Annual Compliance Dashboard/, 'annual compliance dashboard must exist');
 assert.match(frontend, /data-ky-annual-delete-selected/, 'bulk Production file deletion control must exist');
 assert.match(frontend, /data-ky-annual-delete-one/, 'single Production file deletion control must exist');
@@ -73,7 +83,7 @@ assert.match(frontend, /Production Video Inventory/, 'Admin must see the separat
 assert.match(frontend, /data-ky-inventory-register/, 'Inventory must support external backup registration');
 assert.match(frontend, /data-ky-inventory-delete-selected/, 'Inventory must support guarded bulk cleanup');
 assert.match(frontend, /max-h-\[60vh\]/, 'Inventory list must use the expanded 60vh viewport');
-assert.match(frontend, /Overview.*Annual Compliance.*Production Inventory.*Cleanup Queue & Audit/s, 'Admin workspace must expose four focused views');
+assert.match(frontend, /Overview.*Annual Compliance.*Activity External.*Production Inventory.*Cleanup Queue & Audit/s, 'Admin workspace must expose focused compliance, activity, inventory and cleanup views');
 assert.match(frontend, /data-id="\$\{escHtml\(row\.ActivityID\)\}"[^>]*data-ky-inventory-register=/, 'Inventory registration action lock must be scoped per Activity');
 assert.doesNotMatch(frontend, /function chooseKyInventoryBackupFile/, 'Simplified Inventory registration must not open a browser file picker');
 assert.match(frontend, /data-activity-date="\$\{escHtml\(String\(row\.ActivityDate\|\|''\)\.slice\(0,10\)\)\}"/, 'Inventory cards must retain their authoritative Activity Date');
@@ -98,7 +108,7 @@ assert.match(frontend, /data-ky-inventory-detail/, 'Inventory evidence must expo
 assert.match(frontend, /data-ky-cleanup-panel/, 'destructive actions must be isolated in Cleanup Queue');
 assert.match(frontend, /data-ky-heatmap-department/, 'Heatmap must expose every canonical Department row for Browser UAT');
 assert.match(frontend, /renderDepartmentDiagnostics/, 'Dashboard must render unmapped Department diagnostics');
-assert.match(main, /ky\.js\?v=20260922-ky-inventory-simple-r7/, 'cache chain must expose the simplified Inventory registration bundle');
-assert.match(index, /main\.js\?v=20260922-ky-inventory-simple-r7/, 'HTML entry point must invalidate the cached main module');
+assert.match(main, /ky\.js\?v=20260922-ky-activity-external-r8/, 'cache chain must expose the activity external evidence bundle');
+assert.match(index, /main\.js\?v=20260922-ky-activity-external-r8/, 'HTML entry point must invalidate the cached main module');
 
 console.log('KY annual video evidence contract: PASS');

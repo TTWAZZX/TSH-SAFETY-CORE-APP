@@ -977,6 +977,51 @@ async function ensureTables() {
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
     `);
 
+    await db.query(`
+        CREATE TABLE IF NOT EXISTS KY_Activity_External_Video_Evidence (
+            id                 VARCHAR(36) NOT NULL PRIMARY KEY,
+            EvidenceYear       SMALLINT NOT NULL,
+            ActivityID         VARCHAR(36) NOT NULL,
+            Department         VARCHAR(100) NOT NULL,
+            SafetyUnit         VARCHAR(100) NULL,
+            ExternalReference  TEXT NOT NULL,
+            OriginalFileName   VARCHAR(255) NOT NULL,
+            MimeType           VARCHAR(120) NULL,
+            FileSize           BIGINT UNSIGNED NOT NULL DEFAULT 0,
+            SHA256             CHAR(64) NOT NULL,
+            Status             VARCHAR(30) NOT NULL DEFAULT 'Pending',
+            DeclaredByID       VARCHAR(50) NULL,
+            DeclaredByName     VARCHAR(100) NULL,
+            DeclaredAt         DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            VerifiedByID       VARCHAR(50) NULL,
+            VerifiedByName     VARCHAR(100) NULL,
+            VerifiedAt         DATETIME NULL,
+            VerificationNote   TEXT NULL,
+            RowVersion         INT UNSIGNED NOT NULL DEFAULT 1,
+            CreatedAt          DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            UpdatedAt          TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+            UNIQUE KEY uq_ky_activity_external_video (ActivityID),
+            KEY idx_ky_activity_external_status (EvidenceYear, Status),
+            KEY idx_ky_activity_external_scope (EvidenceYear, Department, SafetyUnit)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+    `);
+    await db.query(`
+        CREATE TABLE IF NOT EXISTS KY_Activity_External_Video_Evidence_Audit (
+            id          BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+            EvidenceID  VARCHAR(36) NOT NULL,
+            ActivityID  VARCHAR(36) NOT NULL,
+            Action      VARCHAR(80) NOT NULL,
+            ActorID     VARCHAR(50) NULL,
+            ActorName   VARCHAR(100) NULL,
+            BeforeJson  LONGTEXT NULL,
+            AfterJson   LONGTEXT NULL,
+            Detail      TEXT NULL,
+            CreatedAt   DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            KEY idx_ky_activity_external_audit (EvidenceID, CreatedAt),
+            KEY idx_ky_activity_external_action (Action, CreatedAt)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+    `);
+
     tablesReady = true;
 }
 
@@ -1027,6 +1072,30 @@ function kyVideoInventoryPublic(row) {
             && Boolean(productionVideoUrl)
             && !deleted,
     };
+}
+
+function kyActivityExternalVideoPublic(row) {
+    return {
+        ...row,
+        id: row?.EvidenceID || row?.id || null,
+        Status: String(row?.Status || 'Pending'),
+        hasValidMetadata: Boolean(String(row?.ExternalReference || '').trim())
+            && Boolean(String(row?.OriginalFileName || '').trim())
+            && Number(row?.FileSize || 0) > 0
+            && /^[a-f0-9]{64}$/i.test(String(row?.SHA256 || '')),
+    };
+}
+
+async function kyActivityExternalVideoAudit(connection, req, action, before, after, detail = '') {
+    const row = after || before || {};
+    await connection.query(
+        `INSERT INTO KY_Activity_External_Video_Evidence_Audit
+         (EvidenceID,ActivityID,Action,ActorID,ActorName,BeforeJson,AfterJson,Detail)
+         VALUES (?,?,?,?,?,?,?,?)`,
+        [row.id, row.ActivityID, action, currentUserId(req) || null,
+            req.user?.name || req.user?.EmployeeName || req.user?.username || 'User',
+            before ? JSON.stringify(before) : null, after ? JSON.stringify(after) : null, detail || null]
+    );
 }
 
 async function kyVideoInventoryAudit(connection, req, action, before, after, detail = '') {
@@ -1096,6 +1165,12 @@ function kyProductionVideoSql(alias = 'a') {
 
 function kyVerifiedExternalVideoSql(alias = 'a') {
     return `(EXISTS (
+        SELECT 1 FROM KY_Activity_External_Video_Evidence aev
+        WHERE aev.ActivityID = ${alias}.id
+          AND aev.Status = 'Verified'
+          AND COALESCE(TRIM(aev.ExternalReference), '') <> ''
+          AND aev.SHA256 REGEXP '^[0-9a-fA-F]{64}$'
+    ) OR EXISTS (
         SELECT 1 FROM KY_Annual_Video_Evidence ave
         WHERE ave.ActivityID = ${alias}.id
           AND ave.StorageMode = 'CentralMachine'
@@ -1115,6 +1190,12 @@ function kyVerifiedExternalVideoSql(alias = 'a') {
 
 function kyPendingExternalVideoSql(alias = 'a') {
     return `(EXISTS (
+        SELECT 1 FROM KY_Activity_External_Video_Evidence aev
+        WHERE aev.ActivityID = ${alias}.id
+          AND aev.Status IN ('Pending', 'NeedsCorrection')
+          AND COALESCE(TRIM(aev.ExternalReference), '') <> ''
+          AND aev.SHA256 REGEXP '^[0-9a-fA-F]{64}$'
+    ) OR EXISTS (
         SELECT 1 FROM KY_Annual_Video_Evidence ave
         WHERE ave.ActivityID = ${alias}.id
           AND ave.StorageMode = 'CentralMachine'
@@ -1150,7 +1231,10 @@ function kyVideoEvidenceSelectSql(alias = 'a') {
             WHEN ${verifiedExternal} THEN 'ExternalVerified'
             WHEN ${pendingExternal} THEN 'ExternalPending'
             ELSE 'Missing'
-        END AS VideoEvidenceStorage`;
+        END AS VideoEvidenceStorage,
+        (SELECT aev.id FROM KY_Activity_External_Video_Evidence aev WHERE aev.ActivityID=${alias}.id LIMIT 1) AS ActivityExternalEvidenceID,
+        (SELECT aev.Status FROM KY_Activity_External_Video_Evidence aev WHERE aev.ActivityID=${alias}.id LIMIT 1) AS ActivityExternalStatus,
+        (SELECT aev.RowVersion FROM KY_Activity_External_Video_Evidence aev WHERE aev.ActivityID=${alias}.id LIMIT 1) AS ActivityExternalRowVersion`;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1251,7 +1335,7 @@ router.get('/stats', async (req, res) => {
                 SUM(${productionVideo}) AS productionVideo,
                 SUM(NOT (${productionVideo}) AND ${verifiedExternal}) AS verifiedExternalVideo,
                 SUM(${productionVideo} OR ${verifiedExternal}) AS videoEvidenceTotal,
-                SUM(NOT (${productionVideo}) AND ${pendingExternal}) AS pendingExternalVideo
+                   SUM(NOT (${productionVideo}) AND NOT (${verifiedExternal}) AND ${pendingExternal}) AS pendingExternalVideo
             FROM KY_Activities a
             WHERE YEAR(a.ActivityDate) = ? ${evidenceDeptFilter}
         `, [year, ...deptParams]);
@@ -1262,7 +1346,7 @@ router.get('/stats', async (req, res) => {
             verifiedExternalVideo: Number(videoEvidenceRow?.verifiedExternalVideo || 0),
             pendingExternalVideo: Number(videoEvidenceRow?.pendingExternalVideo || 0),
             videoEvidenceTotal,
-            missingVideoEvidence: Math.max(0, activityTotal - videoEvidenceTotal),
+            missingVideoEvidence: Math.max(0, activityTotal - videoEvidenceTotal - Number(videoEvidenceRow?.pendingExternalVideo || 0)),
             videoEvidenceRate: activityTotal > 0 ? Math.round(videoEvidenceTotal / activityTotal * 100) : 0,
         };
 
@@ -1892,6 +1976,134 @@ router.get('/file-health', isAdmin, async (req, res) => {
     }
 });
 
+router.get('/activity-video-evidence', isAdmin, async (req, res) => {
+    try {
+        await ensureTables();
+        const year = parseInt(req.query.year, 10) || new Date().getFullYear();
+        const [rows] = await db.query(
+            `SELECT e.*,a.ActivityDate,a.TeamName,a.KYTKeyword,a.ReporterName,a.Status AS ActivityStatus
+             FROM KY_Activity_External_Video_Evidence e
+             INNER JOIN KY_Activities a ON a.id=e.ActivityID
+             WHERE e.EvidenceYear=? ORDER BY a.ActivityDate DESC,e.UpdatedAt DESC`, [year]
+        );
+        res.json({ success: true, data: rows.map(kyActivityExternalVideoPublic) });
+    } catch (error) {
+        console.error('KY activity external video list error:', error);
+        res.status(500).json({ success: false, message: 'Unable to load activity external video evidence.' });
+    }
+});
+
+router.get('/activity-video-evidence/:evidenceId/audit', isAdmin, async (req, res) => {
+    try {
+        await ensureTables();
+        const [rows] = await db.query(
+            `SELECT id,EvidenceID,ActivityID,Action,ActorID,ActorName,BeforeJson,AfterJson,Detail,CreatedAt
+             FROM KY_Activity_External_Video_Evidence_Audit WHERE EvidenceID=? ORDER BY id DESC LIMIT 200`,
+            [req.params.evidenceId]
+        );
+        res.json({ success: true, data: rows });
+    } catch (_) {
+        res.status(500).json({ success: false, message: 'Unable to load activity external video audit.' });
+    }
+});
+
+router.post('/activity-video-evidence/declare', async (req, res) => {
+    let connection;
+    try {
+        await ensureTables();
+        const activityId = String(req.body?.activityId || '').trim();
+        const externalReference = String(req.body?.externalReference || '').trim();
+        const originalFileName = String(req.body?.originalFileName || '').trim().replace(/[\\/]+/g, '_').slice(0, 255);
+        const mimeType = String(req.body?.mimeType || '').trim().slice(0, 120) || null;
+        const fileSize = Number(req.body?.fileSize || 0);
+        const sha256 = String(req.body?.sha256 || '').trim().toLowerCase();
+        const requestedRowVersion = Number(req.body?.rowVersion || 0);
+        if (!activityId || !externalReference || !originalFileName || !Number.isSafeInteger(fileSize) || fileSize <= 0 || !/^[a-f0-9]{64}$/.test(sha256)) {
+            return res.status(400).json({ success: false, code: 'KY_ACTIVITY_EXTERNAL_METADATA_REQUIRED', message: 'Activity, central-machine reference, filename, size and SHA-256 are required.' });
+        }
+        const [activityRows] = await db.query('SELECT * FROM KY_Activities WHERE id=? LIMIT 1', [activityId]);
+        const activity = activityRows[0];
+        if (!activity) return res.status(404).json({ success: false, message: 'KY activity not found.' });
+        if (!kyCanUploadFollowupVideoForUser(activity, req)) return res.status(403).json({ success: false, message: 'You cannot declare evidence for this activity.' });
+        const evidenceYear = new Date(activity.ActivityDate).getFullYear();
+        connection = await db.getConnection();
+        await connection.beginTransaction();
+        const [currentRows] = await connection.query('SELECT * FROM KY_Activity_External_Video_Evidence WHERE ActivityID=? FOR UPDATE', [activityId]);
+        const before = currentRows[0] || null;
+        if (before?.Status === 'Verified') {
+            await connection.rollback();
+            return res.status(409).json({ success: false, code: 'KY_ACTIVITY_EXTERNAL_ALREADY_VERIFIED', message: 'This activity video is already verified. Mark it for correction before replacing it.' });
+        }
+        const samePending = before && before.Status === 'Pending'
+            && String(before.ExternalReference) === externalReference && String(before.OriginalFileName) === originalFileName
+            && Number(before.FileSize) === fileSize && String(before.SHA256).toLowerCase() === sha256;
+        if (samePending) {
+            await connection.commit();
+            return res.json({ success: true, data: kyActivityExternalVideoPublic(before), idempotent: true });
+        }
+        if (before && requestedRowVersion > 0 && requestedRowVersion !== Number(before.RowVersion)) {
+            await connection.rollback();
+            return res.status(409).json({ success: false, code: 'KY_ACTIVITY_EXTERNAL_STALE', message: 'Activity video metadata changed. Refresh and retry.' });
+        }
+        const id = before?.id || randomUUID();
+        const actorId = currentUserId(req) || null;
+        const actorName = req.user?.name || req.user?.EmployeeName || req.user?.username || 'User';
+        if (before) {
+            await connection.query(
+                `UPDATE KY_Activity_External_Video_Evidence SET EvidenceYear=?,Department=?,SafetyUnit=?,ExternalReference=?,OriginalFileName=?,MimeType=?,FileSize=?,SHA256=?,Status='Pending',DeclaredByID=?,DeclaredByName=?,DeclaredAt=NOW(),VerifiedByID=NULL,VerifiedByName=NULL,VerifiedAt=NULL,VerificationNote=NULL,RowVersion=RowVersion+1 WHERE id=?`,
+                [evidenceYear, activity.Department, activity.SafetyUnit || null, externalReference, originalFileName, mimeType, fileSize, sha256, actorId, actorName, id]
+            );
+        } else {
+            await connection.query(
+                `INSERT INTO KY_Activity_External_Video_Evidence (id,EvidenceYear,ActivityID,Department,SafetyUnit,ExternalReference,OriginalFileName,MimeType,FileSize,SHA256,Status,DeclaredByID,DeclaredByName) VALUES (?,?,?,?,?,?,?,?,?,?,'Pending',?,?)`,
+                [id, evidenceYear, activityId, activity.Department, activity.SafetyUnit || null, externalReference, originalFileName, mimeType, fileSize, sha256, actorId, actorName]
+            );
+        }
+        const [afterRows] = await connection.query('SELECT * FROM KY_Activity_External_Video_Evidence WHERE id=?', [id]);
+        await kyActivityExternalVideoAudit(connection, req, before ? 'METADATA_UPDATED' : 'DECLARED', before, afterRows[0], 'External activity video metadata recorded without uploading the video to Production.');
+        await connection.commit();
+        res.status(before ? 200 : 201).json({ success: true, data: kyActivityExternalVideoPublic(afterRows[0]) });
+    } catch (error) {
+        if (connection) { try { await connection.rollback(); } catch (_) {} }
+        console.error('KY activity external video declaration error:', error);
+        res.status(500).json({ success: false, message: 'Unable to declare activity external video evidence.' });
+    } finally { if (connection) connection.release(); }
+});
+
+router.post('/activity-video-evidence/:evidenceId/verify', isAdmin, async (req, res) => {
+    let connection;
+    try {
+        await ensureTables();
+        const status = String(req.body?.status || 'Verified');
+        const rowVersion = Number(req.body?.rowVersion || 0);
+        const note = String(req.body?.note || '').trim();
+        if (!['Verified', 'NeedsCorrection'].includes(status) || !Number.isInteger(rowVersion) || rowVersion < 1) return res.status(400).json({ success: false, message: 'Status and row version are required.' });
+        connection = await db.getConnection();
+        await connection.beginTransaction();
+        const [rows] = await connection.query('SELECT * FROM KY_Activity_External_Video_Evidence WHERE id=? FOR UPDATE', [req.params.evidenceId]);
+        const before = rows[0];
+        if (!before) { await connection.rollback(); return res.status(404).json({ success: false, message: 'Activity external video evidence not found.' }); }
+        if (Number(before.RowVersion) !== rowVersion) { await connection.rollback(); return res.status(409).json({ success: false, code: 'KY_ACTIVITY_EXTERNAL_STALE', message: 'Activity video metadata changed. Refresh and retry.' }); }
+        if (status === 'Verified' && (!String(before.ExternalReference || '').trim() || !/^[a-f0-9]{64}$/i.test(String(before.SHA256 || '')))) {
+            await connection.rollback();
+            return res.status(400).json({ success: false, code: 'KY_ACTIVITY_EXTERNAL_METADATA_REQUIRED', message: 'Complete external video metadata is required before verification.' });
+        }
+        const actorId = currentUserId(req) || null;
+        const actorName = req.user?.name || req.user?.EmployeeName || req.user?.username || 'Admin';
+        await connection.query(
+            `UPDATE KY_Activity_External_Video_Evidence SET Status=?,VerificationNote=?,VerifiedByID=?,VerifiedByName=?,VerifiedAt=?,RowVersion=RowVersion+1 WHERE id=? AND RowVersion=?`,
+            [status, note || null, actorId, actorName, status === 'Verified' ? new Date() : null, before.id, rowVersion]
+        );
+        const [afterRows] = await connection.query('SELECT * FROM KY_Activity_External_Video_Evidence WHERE id=?', [before.id]);
+        await kyActivityExternalVideoAudit(connection, req, status === 'Verified' ? 'ADMIN_VERIFIED' : 'NEEDS_CORRECTION', before, afterRows[0], note);
+        await connection.commit();
+        res.json({ success: true, data: kyActivityExternalVideoPublic(afterRows[0]) });
+    } catch (error) {
+        if (connection) { try { await connection.rollback(); } catch (_) {} }
+        res.status(500).json({ success: false, message: 'Unable to verify activity external video evidence.' });
+    } finally { if (connection) connection.release(); }
+});
+
 router.get('/annual-video-evidence', isAdmin, async (req, res) => {
     try {
         await ensureTables();
@@ -1904,6 +2116,28 @@ router.get('/annual-video-evidence', isAdmin, async (req, res) => {
         );
         const evidence = await kyAnnualEvidenceRows(year);
         const byScope = new Map(evidence.map(row => [row.ScopeKey, row]));
+        const [activityExternalRows] = await db.query(
+            `SELECT e.*,a.ActivityDate,a.TeamName,a.KYTKeyword,a.ReporterName,a.Status AS ActivityStatus
+             FROM KY_Activity_External_Video_Evidence e
+             INNER JOIN KY_Activities a ON a.id=e.ActivityID
+             WHERE e.EvidenceYear=? ORDER BY a.ActivityDate DESC,e.UpdatedAt DESC`, [year]
+        );
+        const activityExternalEvidence = activityExternalRows.map(kyActivityExternalVideoPublic);
+        const annualScopeVerifiedExternal = kyVerifiedExternalVideoSql('a');
+        const annualScopePendingExternal = kyPendingExternalVideoSql('a');
+        const [scopeActivityRows] = await db.query(
+            `SELECT a.Department,a.SafetyUnit,
+                    MAX(CASE WHEN COALESCE(TRIM(a.VideoUrl),'')<>'' THEN 1 ELSE 0 END) AS HasProduction,
+                    MAX(CASE WHEN ${annualScopeVerifiedExternal} THEN 1 ELSE 0 END) AS HasVerifiedExternal,
+                    MAX(CASE WHEN ${annualScopePendingExternal} THEN 1 ELSE 0 END) AS HasPendingExternal
+             FROM KY_Activities a
+             WHERE YEAR(a.ActivityDate)=? GROUP BY a.Department,a.SafetyUnit`, [year]
+        );
+        const activityScopeState = new Map(scopeActivityRows.map(row => [kyAnnualScopeKey(row.Department, row.SafetyUnit), {
+            production: Boolean(Number(row.HasProduction || 0)),
+            verifiedExternal: Boolean(Number(row.HasVerifiedExternal || 0)),
+            pendingExternal: Boolean(Number(row.HasPendingExternal || 0)),
+        }]));
         const scopes = [];
         for (const config of configs) {
             const units = parseSafetyUnits(config.SafetyUnits);
@@ -1911,11 +2145,15 @@ router.get('/annual-video-evidence', isAdmin, async (req, res) => {
             for (const safetyUnit of scopedUnits) {
                 const scopeKey = kyAnnualScopeKey(config.Department, safetyUnit);
                 const item = byScope.get(scopeKey) || null;
+                const activityState = activityScopeState.get(scopeKey) || { production: false, verifiedExternal: false, pendingExternal: false };
+                const compliant = item?.Status === 'Verified' || activityState.production || activityState.verifiedExternal;
                 scopes.push({
                     scopeKey,
                     department: config.Department,
                     safetyUnit: safetyUnit || null,
-                    compliant: item?.Status === 'Verified',
+                    compliant,
+                    complianceSource: item?.Status === 'Verified' ? 'AnnualEvidence' : activityState.production ? 'ProductionActivity' : activityState.verifiedExternal ? 'ExternalActivity' : null,
+                    pendingActivityExternal: !compliant && activityState.pendingExternal,
                     evidence: item,
                 });
             }
@@ -1978,8 +2216,8 @@ router.get('/annual-video-evidence', isAdmin, async (req, res) => {
                 summary: {
                     requiredScopes: scopes.length,
                     verifiedScopes: verified,
-                    pendingScopes: scopes.filter(row => row.evidence && !row.compliant).length,
-                    missingScopes: scopes.filter(row => !row.evidence).length,
+                    pendingScopes: scopes.filter(row => !row.compliant && (row.evidence || row.pendingActivityExternal)).length,
+                    missingScopes: scopes.filter(row => !row.compliant && !row.evidence && !row.pendingActivityExternal).length,
                     compliancePct: scopes.length ? Math.round((verified / scopes.length) * 100) : 0,
                     productionFiles: evidence.filter(row => row.ProductionVideoUrl && !row.ProductionDeletedAt).length,
                     reclaimableFiles: evidence.filter(row => row.canDeleteProductionFile).length,
@@ -1987,6 +2225,7 @@ router.get('/annual-video-evidence', isAdmin, async (req, res) => {
                 },
                 scopes,
                 evidence,
+                activityExternalEvidence,
                 candidates,
                 inventory,
                 inventorySummary,
@@ -2521,9 +2760,13 @@ router.get('/evidence-overview', async (req, res) => {
             const hasVerifiedExternalVideo = Boolean(Number(activity.HasVerifiedExternalVideo || 0));
             const hasPendingExternalVideo = Boolean(Number(activity.HasPendingExternalVideo || 0));
             const hasVideo = Boolean(Number(activity.HasVideoEvidence || 0));
-            const status = hasFile && hasVideo ? 'complete' : (hasFile ? 'waiting_video' : 'missing_file');
+            const status = hasFile && hasVideo
+                ? 'complete'
+                : (hasFile && hasPendingExternalVideo ? 'external_pending' : (hasFile ? 'waiting_video' : 'missing_file'));
             row.submitted += 1;
-            row[status === 'complete' ? 'complete' : status === 'waiting_video' ? 'waitingVideo' : 'missingFile'] += 1;
+            if (status === 'complete') row.complete += 1;
+            else if (status === 'waiting_video') row.waitingVideo += 1;
+            else if (status === 'missing_file') row.missingFile += 1;
             if (hasProductionVideo) row.productionVideo += 1;
             else if (hasVerifiedExternalVideo) row.verifiedExternalVideo += 1;
             else if (hasPendingExternalVideo) row.pendingExternalVideo += 1;
@@ -2548,6 +2791,9 @@ router.get('/evidence-overview', async (req, res) => {
                 hasVerifiedExternalVideo,
                 hasPendingExternalVideo,
                 videoEvidenceStorage: activity.VideoEvidenceStorage,
+                activityExternalEvidenceId: activity.ActivityExternalEvidenceID || null,
+                activityExternalStatus: activity.ActivityExternalStatus || null,
+                activityExternalRowVersion: Number(activity.ActivityExternalRowVersion || 0),
                 canUploadVideo: kyCanUploadFollowupVideoForUser(activity, req) && (!hasVideo || isKyAdmin(req)),
                 canRegisterExternalVideo: isKyAdmin(req),
             });
@@ -3225,9 +3471,9 @@ router.get('/', async (req, res) => {
         if (evidence === 'complete') {
             sql += ` AND COALESCE(TRIM(a.AttachmentUrl),'') <> '' AND ${videoEvidence}`;
         } else if (evidence === 'waiting_video') {
-            sql += ` AND COALESCE(TRIM(a.AttachmentUrl),'') <> '' AND NOT (${videoEvidence})`;
+            sql += ` AND COALESCE(TRIM(a.AttachmentUrl),'') <> '' AND NOT (${videoEvidence}) AND NOT (${pendingExternal})`;
         } else if (evidence === 'no_video') {
-            sql += ` AND NOT (${videoEvidence})`;
+            sql += ` AND NOT (${videoEvidence}) AND NOT (${pendingExternal})`;
         } else if (evidence === 'production_video') {
             sql += ` AND ${productionVideo}`;
         } else if (evidence === 'external_verified') {

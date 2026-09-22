@@ -48,6 +48,9 @@ const USER_WORKFLOW_ALLOWLIST = new Set([
     // Rejected-report resubmission checks report owner/submission scope or Admin in route.
     'POST /api/hiyari/:id/replacement-excel',
     'POST /api/ky',
+    // Central-machine activity evidence is authenticated and resolves the target
+    // activity through the same reporter/submitter/Department scope as follow-up video.
+    'POST /api/ky/activity-video-evidence/declare',
     // KY video reactions are an authenticated user engagement workflow.
     'POST /api/ky/:id/reaction',
     'DELETE /api/ky/:id/reaction',
