@@ -239,7 +239,7 @@ async function startNodeApiIfRequested() {
     await evaluate(`document.querySelector('#ky-msub-annual-video').click()`);
     await waitFor(`document.querySelector('[data-ky-annual-admin-toolbar]') && document.querySelector('#ky-manage-panel')?.textContent.includes('Annual Compliance Dashboard')`);
 
-    const annualUi = await evaluate(`(()=>({summaryCards:document.querySelector('[data-ky-annual-summary]')?.children.length||0,summaryClickable:[...document.querySelector('[data-ky-annual-summary]')?.children||[]].every(card=>card.getAttribute('role')==='button'),views:[...document.querySelectorAll('[data-ky-annual-view]')].map(button=>button.dataset.kyAnnualView),sticky:getComputedStyle(document.querySelector('[data-ky-annual-admin-toolbar]')).position,hasDownload:Boolean(document.querySelector('[data-ky-annual-download]'))||${JSON.stringify((beforeAnnual.data?.summary?.productionFiles || 0) === 0)},hasAudit:Boolean(document.querySelector('[data-ky-annual-audit]'))||${JSON.stringify((beforeAnnual.data?.evidence || []).length === 0)},detail:Boolean(document.querySelector('[data-ky-annual-detail],[data-ky-inventory-detail]'))||${JSON.stringify((beforeAnnual.data?.evidence || []).length === 0 && (beforeAnnual.data?.inventory || []).length === 0)},cleanup:Boolean(document.querySelector('[data-ky-cleanup-panel]')),bulk:Boolean(document.querySelector('[data-ky-cleanup-panel] [data-ky-annual-delete-selected]')),inventory:Boolean(document.querySelector('[data-ky-video-inventory]')),inventoryRows:document.querySelectorAll('[data-ky-inventory-row]').length,inventoryBulk:Boolean(document.querySelector('[data-ky-cleanup-panel] [data-ky-inventory-delete-selected]')),inventoryMaxHeight:getComputedStyle(document.querySelector('[data-ky-inventory-list]')).maxHeight,normalAnnualDeleteVisible:[...document.querySelectorAll('[data-ky-annual-view-panel="annual"] [data-ky-annual-delete-one]')].some(el=>!el.classList.contains('hidden')),normalInventoryDeleteVisible:[...document.querySelectorAll('[data-ky-video-inventory] [data-ky-inventory-delete-one]')].some(el=>!el.classList.contains('hidden'))}))()`);
+    const annualUi = await evaluate(`(()=>({summaryCards:document.querySelector('[data-ky-annual-summary]')?.children.length||0,summaryClickable:[...document.querySelector('[data-ky-annual-summary]')?.children||[]].every(card=>card.getAttribute('role')==='button'),views:[...document.querySelectorAll('[data-ky-annual-view]')].map(button=>button.dataset.kyAnnualView),sticky:getComputedStyle(document.querySelector('[data-ky-annual-admin-toolbar]')).position,hasDownload:Boolean(document.querySelector('[data-ky-annual-download]'))||${JSON.stringify((beforeAnnual.data?.summary?.productionFiles || 0) === 0)},hasAudit:Boolean(document.querySelector('[data-ky-annual-audit]'))||${JSON.stringify((beforeAnnual.data?.evidence || []).length === 0)},detail:Boolean(document.querySelector('[data-ky-annual-detail],[data-ky-inventory-detail]'))||${JSON.stringify((beforeAnnual.data?.evidence || []).length === 0 && (beforeAnnual.data?.inventory || []).length === 0)},cleanup:Boolean(document.querySelector('[data-ky-cleanup-panel]')),bulk:Boolean(document.querySelector('[data-ky-cleanup-panel] [data-ky-annual-delete-selected]')),inventory:Boolean(document.querySelector('[data-ky-video-inventory]')),inventoryRows:document.querySelectorAll('[data-ky-inventory-row]').length,inventoryDates:[...document.querySelectorAll('[data-ky-inventory-row]')].every(row=>/^\d{4}-\d{2}-\d{2}$/.test(row.dataset.activityDate||'')),inventoryBulk:Boolean(document.querySelector('[data-ky-cleanup-panel] [data-ky-inventory-delete-selected]')),inventoryMaxHeight:getComputedStyle(document.querySelector('[data-ky-inventory-list]')).maxHeight,normalAnnualDeleteVisible:[...document.querySelectorAll('[data-ky-annual-view-panel="annual"] [data-ky-annual-delete-one]')].some(el=>!el.classList.contains('hidden')),normalInventoryDeleteVisible:[...document.querySelectorAll('[data-ky-video-inventory] [data-ky-inventory-delete-one]')].some(el=>!el.classList.contains('hidden'))}))()`);
     assert.strictEqual(annualUi.summaryCards, 6, 'Annual dashboard must render six summary metrics');
     assert.ok(annualUi.summaryClickable, 'Annual summary cards must be keyboard-clickable filters');
     assert.deepStrictEqual(annualUi.views, ['overview', 'annual', 'inventory', 'cleanup'], 'Admin workspace must expose four focused views');
@@ -250,8 +250,35 @@ async function startNodeApiIfRequested() {
     assert.strictEqual(annualUi.normalAnnualDeleteVisible, false, 'destructive Annual actions must be hidden outside Cleanup Queue');
     assert.strictEqual(annualUi.normalInventoryDeleteVisible, false, 'destructive Inventory actions must be hidden outside Cleanup Queue');
     assert.strictEqual(annualUi.inventoryRows, (beforeAnnual.data?.inventory || []).length, 'Inventory UI must render every API inventory row');
+    assert.ok(annualUi.inventoryDates, 'Every Inventory card must expose its authoritative Activity Date');
     assert.notStrictEqual(annualUi.inventoryMaxHeight, '288px', 'Inventory list must be expanded beyond the legacy max-h-72 height');
     assert.strictEqual(await evaluate(`document.querySelector('[data-ky-annual-admin-status]')?.value`), 'action', 'Action-required must be the default Admin filter');
+
+    const pickerRecovery = await evaluate(`(async()=>{
+        const buttons=[...document.querySelectorAll('[data-ky-inventory-register]')];
+        if(!buttons.length)return{skipped:true};
+        const nativeClick=HTMLInputElement.prototype.click;
+        HTMLInputElement.prototype.click=function(){if(this.dataset?.kyInventoryFilePicker==='1')return;return nativeClick.call(this);};
+        try{
+            buttons[0].click();
+            await new Promise(resolve=>setTimeout(resolve,30));
+            const first=document.querySelector('[data-ky-inventory-file-picker]');
+            if(!first)return{firstOpened:false};
+            first.dispatchEvent(new Event('cancel'));
+            await new Promise(resolve=>setTimeout(resolve,30));
+            const next=buttons[1]||buttons[0];
+            next.click();
+            await new Promise(resolve=>setTimeout(resolve,30));
+            const second=document.querySelector('[data-ky-inventory-file-picker]');
+            if(second)second.dispatchEvent(new Event('cancel'));
+            await new Promise(resolve=>setTimeout(resolve,30));
+            return{firstOpened:true,secondOpened:Boolean(second),residue:document.querySelectorAll('[data-ky-inventory-file-picker]').length};
+        }finally{HTMLInputElement.prototype.click=nativeClick;}
+    })()`);
+    if (!pickerRecovery.skipped) {
+        assert.ok(pickerRecovery.firstOpened && pickerRecovery.secondOpened, 'Inventory picker must reopen after the previous picker is cancelled');
+        assert.strictEqual(pickerRecovery.residue, 0, 'Cancelled Inventory pickers must leave no hidden input residue');
+    }
 
     if (annualUi.detail) {
         await evaluate(`document.querySelector('[data-ky-annual-detail],[data-ky-inventory-detail]').click()`);

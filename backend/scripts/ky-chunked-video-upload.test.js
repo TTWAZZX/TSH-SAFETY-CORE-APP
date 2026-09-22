@@ -44,7 +44,7 @@ assert.match(frontend, /uploadKyVideoInChunks\(record\.id, file/, 'follow-up vid
 assert.match(frontend, /uploadKyVideoInChunks\(r\.id, videoFile/, 'Admin video replacement must use chunk upload');
 assert.match(frontend, /บันทึกกิจกรรม KY แล้ว แต่วิดีโออัปโหลดไม่สำเร็จ/, 'partial-success guidance must prevent duplicate KY resubmission');
 
-assert.match(main, /ky\.js\?v=20260922-ky-annual-admin-ux-r1/, 'KY page cache key must serve Annual Admin UX, Production Video Inventory and adaptive chunk upload');
-assert.match(html, /main\.js\?v=20260922-ky-annual-admin-ux-r1/, 'SPA cache key must serve the latest KY Annual Admin UX and adaptive upload bundle');
+assert.match(main, /ky\.js\?v=20260922-ky-inventory-date-r3/, 'KY page cache key must serve Inventory dates, picker recovery and adaptive chunk upload');
+assert.match(html, /main\.js\?v=20260922-ky-inventory-date-r3/, 'SPA cache key must serve the latest KY Inventory and adaptive upload bundle');
 
 console.log('KY chunked video upload contract: PASS');

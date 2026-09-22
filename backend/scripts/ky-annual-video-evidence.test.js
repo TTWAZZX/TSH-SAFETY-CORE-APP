@@ -1,6 +1,7 @@
 const assert = require('assert');
 const fs = require('fs');
 const path = require('path');
+const vm = require('vm');
 
 const root = path.resolve(__dirname, '..', '..');
 const read = relative => fs.readFileSync(path.join(root, relative), 'utf8');
@@ -72,13 +73,75 @@ assert.match(frontend, /data-ky-inventory-register/, 'Inventory must support ext
 assert.match(frontend, /data-ky-inventory-delete-selected/, 'Inventory must support guarded bulk cleanup');
 assert.match(frontend, /max-h-\[60vh\]/, 'Inventory list must use the expanded 60vh viewport');
 assert.match(frontend, /Overview.*Annual Compliance.*Production Inventory.*Cleanup Queue & Audit/s, 'Admin workspace must expose four focused views');
+assert.match(frontend, /data-id="\$\{escHtml\(row\.ActivityID\)\}" data-ky-inventory-register=/, 'Inventory registration action lock must be scoped per Activity');
+assert.match(frontend, /input\.addEventListener\('cancel', \(\) => finish\(null\)/, 'Inventory file picker must release its action lock when the picker is cancelled');
+assert.match(frontend, /window\.addEventListener\('focus', handleWindowFocus, true\)/, 'Inventory file picker must recover when a browser omits the cancel event');
+assert.match(frontend, /data-activity-date="\$\{escHtml\(String\(row\.ActivityDate\|\|''\)\.slice\(0,10\)\)\}"/, 'Inventory cards must retain their authoritative Activity Date');
+assert.match(frontend, /formatKyActivityMonth\(row\.ActivityDate\)/, 'Inventory cards must display the Activity month');
+assert.match(frontend, /formatKyActivityDate\(row\.ActivityDate\)/, 'Inventory cards must display the exact Activity date');
+assert.match(frontend, /data-ky-inventory-help/, 'Inventory workspace must explain the external-backup registration workflow');
+assert.match(frontend, /ไม่อัปโหลดไฟล์กลับขึ้น Production/, 'Inventory help must make the metadata-only file selection explicit');
 assert.match(frontend, /data-ky-annual-admin-toolbar/, 'Annual Admin filters must use a sticky toolbar');
 assert.match(frontend, /data-ky-annual-detail/, 'Annual evidence must expose a Detail Drawer action');
 assert.match(frontend, /data-ky-inventory-detail/, 'Inventory evidence must expose a Detail Drawer action');
 assert.match(frontend, /data-ky-cleanup-panel/, 'destructive actions must be isolated in Cleanup Queue');
 assert.match(frontend, /data-ky-heatmap-department/, 'Heatmap must expose every canonical Department row for Browser UAT');
 assert.match(frontend, /renderDepartmentDiagnostics/, 'Dashboard must render unmapped Department diagnostics');
-assert.match(main, /ky\.js\?v=20260922-ky-annual-admin-ux-r1/, 'cache chain must expose the Annual Admin UX bundle');
-assert.match(index, /main\.js\?v=20260922-ky-annual-admin-ux-r1/, 'HTML entry point must invalidate the cached main module');
+assert.match(main, /ky\.js\?v=20260922-ky-inventory-date-r3/, 'cache chain must expose the Inventory date bundle');
+assert.match(index, /main\.js\?v=20260922-ky-inventory-date-r3/, 'HTML entry point must invalidate the cached main module');
 
-console.log('KY annual video evidence contract: PASS');
+async function verifyInventoryPickerCancelRecovery() {
+    const start = frontend.indexOf('function chooseKyInventoryBackupFile()');
+    const end = frontend.indexOf('\nfunction filterKyVideoInventory()', start);
+    assert.ok(start >= 0 && end > start, 'Inventory picker implementation must be extractable for behavior testing');
+    const pickerSource = frontend.slice(start, end);
+    const created = [];
+    const windowListeners = new Map();
+    const context = {
+        document: {
+            createElement: () => {
+                const listeners = new Map();
+                const input = {
+                    dataset: {},
+                    files: [],
+                    removed: false,
+                    addEventListener: (name, handler) => listeners.set(name, handler),
+                    click: () => {},
+                    remove: () => { input.removed = true; },
+                    dispatch: name => listeners.get(name)?.(),
+                };
+                created.push(input);
+                return input;
+            },
+            body: { appendChild: () => {} },
+        },
+        window: {
+            setTimeout,
+            clearTimeout,
+            addEventListener: (name, handler) => windowListeners.set(name, handler),
+            removeEventListener: (name, handler) => {
+                if (windowListeners.get(name) === handler) windowListeners.delete(name);
+            },
+        },
+    };
+    const chooseFile = vm.runInNewContext(`${pickerSource}; chooseKyInventoryBackupFile`, context);
+
+    const firstChoice = chooseFile();
+    assert.strictEqual(created.length, 1, 'first registration click must create a file picker');
+    created[0].dispatch('cancel');
+    assert.strictEqual(await firstChoice, null, 'cancelling the first picker must resolve without a file');
+    assert.ok(created[0].removed, 'cancelled picker must be removed from the DOM');
+
+    const secondChoice = chooseFile();
+    assert.strictEqual(created.length, 2, 'a second registration click must create a fresh picker');
+    created[1].dispatch('cancel');
+    assert.strictEqual(await secondChoice, null, 'cancelling the second picker must also resolve');
+    assert.ok(created[1].removed, 'second cancelled picker must leave no DOM residue');
+}
+
+verifyInventoryPickerCancelRecovery()
+    .then(() => console.log('KY annual video evidence contract: PASS'))
+    .catch(error => {
+        console.error(error.stack || error);
+        process.exitCode = 1;
+    });

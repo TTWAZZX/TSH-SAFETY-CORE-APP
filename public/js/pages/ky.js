@@ -771,6 +771,25 @@ function formatKyDateTime(value) {
     return date.toLocaleString('th-TH', { dateStyle: 'short', timeStyle: 'short' });
 }
 
+function kyActivityDate(value) {
+    if (!value) return null;
+    const match = String(value).slice(0, 10).match(/^(\d{4})-(\d{2})-(\d{2})$/);
+    const date = match
+        ? new Date(Number(match[1]), Number(match[2]) - 1, Number(match[3]), 12)
+        : new Date(value);
+    return Number.isNaN(date.getTime()) ? null : date;
+}
+
+function formatKyActivityDate(value) {
+    const date = kyActivityDate(value);
+    return date ? date.toLocaleDateString('th-TH', { day: 'numeric', month: 'short', year: 'numeric' }) : '-';
+}
+
+function formatKyActivityMonth(value) {
+    const date = kyActivityDate(value);
+    return date ? date.toLocaleDateString('th-TH', { month: 'short', year: 'numeric' }) : '-';
+}
+
 function getKyConfigForDept(department, year = _statsYear) {
     const dept = String(department || '').trim();
     return _kyProgConfig.find(c => String(c.Department || '').trim() === dept && (!year || Number(c.Year || year) === Number(year))) || null;
@@ -4190,16 +4209,20 @@ async function renderKyAnnualVideoEvidence(panel = document.getElementById('ky-m
                             ['Removed', inventorySummary.deletedFiles||0, 'text-rose-700'],
                         ].map(([label,value,color])=>`<div class="rounded-xl border border-slate-100 bg-slate-50 p-3"><p class="text-[10px] font-bold uppercase text-slate-400">${label}</p><p class="text-lg font-black ${color}">${value}</p></div>`).join('')}
                     </div>
+                    <div class="mb-4 rounded-xl border border-indigo-100 bg-indigo-50/60 p-3 text-[11px] text-indigo-800" data-ky-inventory-help>
+                        <p class="font-bold">วิธีลงทะเบียน External Backup</p>
+                        <p class="mt-1">1) เก็บไฟล์วิดีโอเดียวกับ Production ไว้ในเครื่องกลาง 2) กดลงทะเบียนแล้วเลือกไฟล์สำเนานั้น 3) ระบุพาธ/เลขอ้างอิง 4) รอ Admin Verify · Browser ใช้ไฟล์เพื่อเทียบขนาดและ SHA-256 เท่านั้น ไม่อัปโหลดไฟล์กลับขึ้น Production</p>
+                    </div>
                     <div class="mb-3 grid grid-cols-1 lg:grid-cols-[1fr_auto] gap-2">
                         <input type="search" data-ky-inventory-search class="ds-input" placeholder="ค้นหา Department, Safety Unit, ชื่อทีม หรือ Activity ID">
                         <select data-ky-inventory-filter class="ds-select"><option value="all">ทุกสถานะ</option><option value="unregistered">ยังไม่ลงทะเบียน Backup</option><option value="pending">รอ Verify</option><option value="verified">External verified</option><option value="reclaimable">พร้อมลบ Production</option><option value="deleted">ลบ Production แล้ว</option></select>
                     </div>
                     <div class="grid grid-cols-1 lg:grid-cols-2 gap-2 max-h-[60vh] overflow-y-auto pr-1" data-ky-inventory-list>
-                        ${inventory.length ? inventory.map(row=>`<div class="rounded-xl border ${row.canDeleteProductionFile?'border-teal-300 bg-teal-50/40':'border-slate-200 bg-white'} p-3" data-ky-inventory-row data-search="${escHtml([row.Department,row.SafetyUnit,row.TeamName,row.KYTKeyword,row.ActivityID,row.OriginalFileName].filter(Boolean).join(' ').toLowerCase())}" data-status="${row.fileDeleted?'deleted':row.canDeleteProductionFile?'reclaimable':row.Status==='Verified'?'verified':['Pending','NeedsCorrection'].includes(row.Status)?'pending':'unregistered'}">
-                            <div class="flex items-start gap-3"><input type="checkbox" data-ky-inventory-select value="${escHtml(row.id||'')}" data-version="${Number(row.RowVersion||0)}" ${row.canDeleteProductionFile?'':'disabled'} class="mt-1"><div class="min-w-0 flex-1"><div class="flex flex-wrap items-center gap-2"><p class="text-xs font-bold text-slate-800">${escHtml(row.Department||'-')} · ${escHtml(row.SafetyUnit||'Department')}</p>${statusBadge(row)}${row.AnnualEvidenceID?'<span class="rounded-full bg-indigo-50 px-2 py-1 text-[9px] font-bold text-indigo-700">Annual primary</span>':''}</div><p class="mt-1 text-[10px] text-slate-500 truncate">${escHtml(row.TeamName||row.KYTKeyword||row.ActivityID)} · ${escHtml(row.OriginalFileName||'Production file')}</p>${row.SHA256?`<p class="mt-1 text-[10px] text-slate-400">${formatFileSize(row.FileSize||0)} · SHA ${escHtml(String(row.SHA256).slice(0,12))}…</p>`:''}${row.fileDeleted?'<p class="mt-1 text-[10px] font-bold text-rose-600">Production file removed · metadata retained</p>':''}</div></div>
+                        ${inventory.length ? inventory.map(row=>`<div class="rounded-xl border ${row.canDeleteProductionFile?'border-teal-300 bg-teal-50/40':'border-slate-200 bg-white'} p-3" data-ky-inventory-row data-activity-date="${escHtml(String(row.ActivityDate||'').slice(0,10))}" data-search="${escHtml([row.Department,row.SafetyUnit,row.TeamName,row.KYTKeyword,row.ActivityID,row.ActivityDate,row.OriginalFileName].filter(Boolean).join(' ').toLowerCase())}" data-status="${row.fileDeleted?'deleted':row.canDeleteProductionFile?'reclaimable':row.Status==='Verified'?'verified':['Pending','NeedsCorrection'].includes(row.Status)?'pending':'unregistered'}">
+                            <div class="flex items-start gap-3"><input type="checkbox" data-ky-inventory-select value="${escHtml(row.id||'')}" data-version="${Number(row.RowVersion||0)}" ${row.canDeleteProductionFile?'':'disabled'} class="mt-1"><div class="min-w-0 flex-1"><div class="flex flex-wrap items-center gap-2"><p class="text-xs font-bold text-slate-800">${escHtml(row.Department||'-')} · ${escHtml(row.SafetyUnit||'Department')}</p>${statusBadge(row)}<span class="rounded-full bg-sky-50 px-2 py-1 text-[9px] font-bold text-sky-700">${escHtml(formatKyActivityMonth(row.ActivityDate))}</span>${row.AnnualEvidenceID?'<span class="rounded-full bg-indigo-50 px-2 py-1 text-[9px] font-bold text-indigo-700">Annual primary</span>':''}</div><p class="mt-1 text-[10px] text-slate-500 truncate">${escHtml(formatKyActivityDate(row.ActivityDate))} · ${escHtml(row.TeamName||row.KYTKeyword||row.ActivityID)} · ${escHtml(row.OriginalFileName||'Production file')}</p>${row.SHA256?`<p class="mt-1 text-[10px] text-slate-400">${formatFileSize(row.FileSize||0)} · SHA ${escHtml(String(row.SHA256).slice(0,12))}…</p>`:''}${row.fileDeleted?'<p class="mt-1 text-[10px] font-bold text-rose-600">Production file removed · metadata retained</p>':''}</div></div>
                             <div class="mt-3 flex flex-wrap justify-end gap-1">
                                 <button type="button" data-ky-inventory-detail="${escHtml(row.id||row.ActivityID)}" class="rounded-lg border px-2 py-1 text-[10px] font-bold text-slate-600">Detail</button>
-                                ${!row.registered&&row.CurrentVideoUrl?`<button data-ky-inventory-register="${escHtml(row.ActivityID)}" class="px-2 py-1 rounded-lg bg-indigo-600 text-white text-[10px] font-bold">ลงทะเบียน External Backup</button>`:''}
+                                ${!row.registered&&row.CurrentVideoUrl?`<button type="button" data-id="${escHtml(row.ActivityID)}" data-ky-inventory-register="${escHtml(row.ActivityID)}" title="เลือกไฟล์วิดีโอสำเนาที่เก็บในเครื่องกลางเพื่อเทียบ SHA-256" class="px-2 py-1 rounded-lg bg-indigo-600 text-white text-[10px] font-bold">ลงทะเบียน External Backup</button>`:''}
                                 ${row.registered&&row.CurrentVideoUrl&&!row.fileDeleted?`<button data-ky-inventory-download="${escHtml(row.id)}" data-name="${escHtml(row.OriginalFileName||'video')}" class="px-2 py-1 rounded-lg border text-[10px] font-bold text-indigo-700">ดาวน์โหลด</button>`:''}
                                 ${row.registered?`<button data-ky-inventory-audit="${escHtml(row.id)}" class="px-2 py-1 rounded-lg border text-[10px] font-bold text-slate-600">Audit</button>`:''}
                                 ${row.registered&&row.Status!=='Verified'?`<button data-ky-inventory-verify="${escHtml(row.id)}" data-version="${Number(row.RowVersion||0)}" class="px-2 py-1 rounded-lg bg-emerald-600 text-white text-[10px] font-bold">Verify</button>`:''}
@@ -4424,7 +4447,7 @@ function showKyVideoEvidenceDetail(kind, id) {
     if (!row) return;
     const field = (label, value, mono = false) => `<div class="rounded-xl border border-slate-200 p-3"><p class="text-[10px] font-bold uppercase text-slate-400">${label}</p><p class="mt-1 break-all text-xs font-semibold text-slate-700 ${mono ? 'font-mono' : ''}">${escHtml(value == null || value === '' ? '-' : String(value))}</p></div>`;
     openModal(kind === 'annual' ? 'Annual Evidence Detail Drawer' : 'Production Inventory Detail Drawer', `<div class="grid grid-cols-1 gap-2 sm:grid-cols-2">
-        ${field('Department', row.Department)}${field('Safety Unit', row.SafetyUnit || 'Department')}${field('Activity ID', row.ActivityID, true)}${field('Status', row.Status)}
+        ${field('Department', row.Department)}${field('Safety Unit', row.SafetyUnit || 'Department')}${field('Activity date', formatKyActivityDate(row.ActivityDate))}${field('Activity month', formatKyActivityMonth(row.ActivityDate))}${field('Activity ID', row.ActivityID, true)}${field('Status', row.Status)}
         ${field('Storage mode', row.StorageMode || (row.registered ? 'CentralMachine' : 'Production'))}${field('Production state', row.fileDeleted ? 'Removed' : 'Present')}
         ${field('File name', row.OriginalFileName)}${field('File size', formatFileSize(row.FileSize || 0))}
         <div class="sm:col-span-2">${field('External reference', row.ExternalReference)}</div><div class="sm:col-span-2">${field('SHA-256', row.SHA256, true)}</div>
@@ -4461,10 +4484,31 @@ async function showKyInventoryAudit(id) {
 function chooseKyInventoryBackupFile() {
     return new Promise(resolve => {
         const input = document.createElement('input');
+        let settled = false;
+        let focusTimer = null;
         input.type = 'file';
         input.accept = 'video/mp4,video/quicktime,video/webm,video/x-msvideo,video/x-matroska,video/mpeg,.mp4,.mov,.webm,.avi,.mkv,.mpeg,.mpg';
         input.hidden = true;
-        input.addEventListener('change', () => { const file = input.files?.[0] || null; input.remove(); resolve(file); }, { once: true });
+        input.dataset.kyInventoryFilePicker = '1';
+
+        const cleanup = () => {
+            if (focusTimer) window.clearTimeout(focusTimer);
+            window.removeEventListener('focus', handleWindowFocus, true);
+            input.remove();
+        };
+        const finish = file => {
+            if (settled) return;
+            settled = true;
+            cleanup();
+            resolve(file || null);
+        };
+        const handleWindowFocus = () => {
+            focusTimer = window.setTimeout(() => finish(input.files?.[0] || null), 250);
+        };
+
+        input.addEventListener('change', () => finish(input.files?.[0] || null), { once: true });
+        input.addEventListener('cancel', () => finish(null), { once: true });
+        window.addEventListener('focus', handleWindowFocus, true);
         document.body.appendChild(input);
         input.click();
     });
