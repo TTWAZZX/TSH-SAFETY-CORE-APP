@@ -1,7 +1,7 @@
 -- Additive KY Activity External Video Evidence storage.
 -- Existing KY activities, annual evidence, inventory, uploads and audit rows are untouched.
 
-CREATE TABLE IF NOT EXISTS KY_Activity_External_Video_Evidence (
+CREATE TABLE IF NOT EXISTS ky_activity_external_video_evidence (
     id                 VARCHAR(36) NOT NULL PRIMARY KEY,
     EvidenceYear       SMALLINT NOT NULL,
     ActivityID         VARCHAR(36) NOT NULL,
@@ -28,7 +28,7 @@ CREATE TABLE IF NOT EXISTS KY_Activity_External_Video_Evidence (
     KEY idx_ky_activity_external_scope (EvidenceYear, Department, SafetyUnit)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
-CREATE TABLE IF NOT EXISTS KY_Activity_External_Video_Evidence_Audit (
+CREATE TABLE IF NOT EXISTS ky_activity_external_video_evidence_audit (
     id          BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
     EvidenceID  VARCHAR(36) NOT NULL,
     ActivityID  VARCHAR(36) NOT NULL,
