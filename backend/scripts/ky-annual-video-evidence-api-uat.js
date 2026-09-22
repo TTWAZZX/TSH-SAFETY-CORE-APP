@@ -11,6 +11,9 @@ const runId = crypto.randomUUID().replace(/-/g, '').slice(0, 12);
 const activities = [];
 const candidateActivities = [];
 const evidenceIds = [];
+const inventoryIds = [];
+const inventoryActivities = [];
+const configDepartments = [];
 const localFiles = [];
 let passed = false;
 let embeddedServer = null;
@@ -57,6 +60,13 @@ async function cleanup() {
         await db.query('DELETE FROM KY_Annual_Video_Evidence_Audit WHERE EvidenceID=?', [evidenceId]).catch(() => {});
         await db.query('DELETE FROM KY_Annual_Video_Evidence WHERE id=?', [evidenceId]).catch(() => {});
     }
+    for (const inventoryId of inventoryIds) {
+        await db.query('DELETE FROM KY_Video_File_Inventory_Audit WHERE InventoryID=?', [inventoryId]).catch(() => {});
+        await db.query('DELETE FROM KY_Video_File_Inventory WHERE id=?', [inventoryId]).catch(() => {});
+    }
+    for (const activity of inventoryActivities) {
+        await db.query('DELETE FROM KY_Activities WHERE id=?', [activity.id]).catch(() => {});
+    }
     for (const activity of activities) {
         await db.query('DELETE FROM KY_Video_Reactions WHERE ActivityID=?', [activity.id]).catch(() => {});
         await db.query('DELETE FROM KY_Activities WHERE id=?', [activity.id]).catch(() => {});
@@ -65,14 +75,17 @@ async function cleanup() {
         await db.query('DELETE FROM KY_Video_Reactions WHERE ActivityID=?', [activityId]).catch(() => {});
         await db.query('DELETE FROM KY_Activities WHERE id=?', [activityId]).catch(() => {});
     }
+    for (const department of configDepartments) {
+        await db.query('DELETE FROM KY_Program_Config WHERE Year=? AND Department=?', [testYear, department]).catch(() => {});
+    }
     for (const file of localFiles) {
         if (fs.existsSync(file)) fs.unlinkSync(file);
         const directory = path.dirname(file);
-        const prefix = `${file}.ky-delete-`;
+        const prefixes = [`${file}.ky-delete-`, `${file}.ky-inventory-delete-`];
         if (fs.existsSync(directory)) {
             for (const name of fs.readdirSync(directory)) {
                 const candidate = path.join(directory, name);
-                if (candidate.startsWith(prefix)) fs.unlinkSync(candidate);
+                if (prefixes.some(prefix => candidate.startsWith(prefix))) fs.unlinkSync(candidate);
             }
         }
     }
@@ -93,6 +106,19 @@ async function cleanup() {
         const admin = admins[0];
         const token = jwt.sign({ id: admin.EmployeeID, name: admin.EmployeeName, role: admin.Role, department: admin.Department }, process.env.JWT_SECRET, { expiresIn: '10m' });
         const headers = { Authorization: `Bearer ${token}` };
+
+        configDepartments.push(
+            ...Array.from({ length: 3 }, (_, index) => `__KY_ANNUAL_UAT_${runId}_${index}`),
+            `__KY_INVENTORY_UAT_${runId}`,
+            `__KY_CANONICAL_UAT_${runId}`,
+            `__KY_ZERO_UAT_${runId}`
+        );
+        for (const department of configDepartments) {
+            await db.query(
+                'INSERT INTO KY_Program_Config (Year,Department,SafetyUnits,YearlyTarget,DeadlineDay,IsActive,CreatedBy) VALUES (?,?,NULL,12,15,1,?)',
+                [testYear, department, admin.EmployeeID]
+            );
+        }
 
         await request(`ky/annual-video-evidence?year=${testYear}`, { headers });
         const uploadRoot = process.env.KY_UAT_UPLOAD_ROOT
@@ -178,6 +204,56 @@ async function cleanup() {
         );
         await db.query('DELETE FROM KY_Activities WHERE id=?', [duplicateActivityId]);
 
+        const inventoryActivityId = crypto.randomUUID();
+        const inventoryStoredName = `ky-inventory-uat-${runId}.mp4`;
+        const inventoryOriginalName = 'inventory-external-backup.mp4';
+        const inventoryPath = path.join(uploadRoot, inventoryStoredName);
+        const inventoryPayload = syntheticMp4(77);
+        fs.writeFileSync(inventoryPath, inventoryPayload);
+        localFiles.push(inventoryPath);
+        const inventorySha = crypto.createHash('sha256').update(inventoryPayload).digest('hex');
+        const inventoryVideoUrl = `/safety/tsh-safety-core/uploads/${inventoryStoredName}?filename=${encodeURIComponent(inventoryOriginalName)}`;
+        await db.query(
+            `INSERT INTO KY_Activities
+             (id,ActivityDate,ReporterID,ReporterName,SubmittedByID,SubmittedByName,Department,SafetyUnit,TeamName,Participants,KYTKeyword,RiskCategory,HazardDescription,Countermeasure,AttachmentUrl,VideoUrl,Status)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, '[]', 'video-inventory-uat', 'General', 'Production inventory UAT', 'Temporary test row', '/uploads/ky-inventory-uat-evidence.pdf', ?, 'Closed')`,
+            [inventoryActivityId, `${testYear}-10-10`, admin.EmployeeID, admin.EmployeeName, admin.EmployeeID, admin.EmployeeName,
+                `__KY_INVENTORY_UAT_${runId}`, 'Inventory Unit', 'Inventory UAT', inventoryVideoUrl]
+        );
+        inventoryActivities.push({ id: inventoryActivityId, localPath: inventoryPath, sha256: inventorySha });
+        const inventoryDashboard = (await request(`ky/annual-video-evidence?year=${testYear}`, { headers })).body.data;
+        const unregisteredInventory = inventoryDashboard.inventory.find(row => String(row.ActivityID) === inventoryActivityId);
+        assert.ok(unregisteredInventory && !unregisteredInventory.registered, 'every Production video must appear in Inventory before registration');
+        await assert.rejects(
+            post('ky/video-inventory/declare', headers, {
+                activityId: inventoryActivityId, externalReference: `CENTRAL-UAT/${testYear}/${runId}/mismatch.mp4`,
+                originalFileName: inventoryOriginalName, mimeType: 'video/mp4', fileSize: inventoryPayload.length,
+                sha256: '0'.repeat(64), externalBackupConfirmed: true,
+            }),
+            /409 KY_VIDEO_INVENTORY_BACKUP_MISMATCH/
+        );
+        const inventoryDeclared = await post('ky/video-inventory/declare', headers, {
+            activityId: inventoryActivityId, externalReference: `CENTRAL-UAT/${testYear}/${runId}/${inventoryOriginalName}`,
+            originalFileName: inventoryOriginalName, mimeType: 'video/mp4', fileSize: inventoryPayload.length,
+            sha256: inventorySha, externalBackupConfirmed: true,
+        });
+        inventoryIds.push(inventoryDeclared.data.id);
+        await assert.rejects(
+            post('ky/video-inventory/delete-production', headers, {
+                items: [{ id: inventoryDeclared.data.id, rowVersion: inventoryDeclared.data.RowVersion }], reason: 'must fail before verify',
+            }),
+            /409 KY_VIDEO_INVENTORY_NOT_VERIFIED|409.*verified matching external backup/i
+        );
+        const inventoryVerified = await post(`ky/video-inventory/${inventoryDeclared.data.id}/verify`, headers, {
+            status: 'Verified', rowVersion: inventoryDeclared.data.RowVersion, note: 'Inventory hash verified during UAT',
+        });
+        const inventoryDownload = await request(`ky/video-inventory/${inventoryDeclared.data.id}/download`, { headers });
+        assert.strictEqual(crypto.createHash('sha256').update(Buffer.from(inventoryDownload.body)).digest('hex'), inventorySha, 'Inventory download must preserve SHA-256');
+        const inventoryDeleted = await post('ky/video-inventory/delete-production', headers, {
+            items: [{ id: inventoryDeclared.data.id, rowVersion: inventoryVerified.data.RowVersion }], reason: 'Local Production inventory deletion UAT',
+        });
+        assert.strictEqual(inventoryDeleted.data.deleted, 1, 'Inventory cleanup must remove exactly one verified file');
+
         const deletedOne = await post('ky/annual-video-evidence/delete-production', headers, {
             items: [{ id: activities[0].evidence.id, rowVersion: activities[0].evidence.RowVersion }],
             reason: 'Local annual evidence single-file deletion UAT',
@@ -190,6 +266,16 @@ async function cleanup() {
         });
         assert.strictEqual(deleted.data.deleted, 2, 'bulk deletion must remove every preflighted file');
 
+        const canonicalActivityId = crypto.randomUUID();
+        candidateActivities.push(canonicalActivityId);
+        await db.query(
+            `INSERT INTO KY_Activities
+             (id,ActivityDate,ReporterID,ReporterName,SubmittedByID,SubmittedByName,Department,SafetyUnit,TeamName,Participants,KYTKeyword,RiskCategory,HazardDescription,Countermeasure,AttachmentUrl,VideoUrl,Status)
+             VALUES (?, ?, ?, ?, ?, ?, ?, NULL, ?, '[]', 'canonical-department-uat', 'General', 'Canonical Department matching UAT', 'Temporary test row', '/uploads/ky-canonical-uat-evidence.pdf', NULL, 'Closed')`,
+            [canonicalActivityId, `${testYear}-11-11`, admin.EmployeeID, admin.EmployeeName, admin.EmployeeID, admin.EmployeeName,
+                `  __ky_canonical_uat_${runId}  `, 'Canonical Department UAT']
+        );
+
         const history = (await request(`ky?year=${testYear}`, { headers })).body.data;
         const byId = new Map(history.map(row => [String(row.id), row]));
         for (const activity of activities) {
@@ -200,16 +286,30 @@ async function cleanup() {
             assert.strictEqual(Number(projected.HasVideoEvidence), 1, 'verified external evidence must count as video evidence');
             assert.strictEqual(projected.VideoEvidenceStorage, 'ExternalVerified', 'history must identify the verified external storage source');
         }
+        const inventoryProjected = byId.get(inventoryActivityId);
+        assert.ok(inventoryProjected, 'Inventory activity must remain in KY History after cleanup');
+        assert.strictEqual(Number(inventoryProjected.HasProductionVideo), 0, 'Inventory cleanup must clear Production projection');
+        assert.strictEqual(Number(inventoryProjected.HasVerifiedExternalVideo), 1, 'Verified Inventory backup must become External verified');
+        assert.strictEqual(inventoryProjected.VideoEvidenceStorage, 'ExternalVerified', 'Inventory cleanup must preserve video evidence classification');
         const externalFiltered = (await request(`ky?year=${testYear}&evidence=external_verified`, { headers })).body.data;
-        assert.deepStrictEqual(externalFiltered.map(row => String(row.id)).sort(), activities.map(row => String(row.id)).sort(), 'verified external filter must return deleted Production activities');
+        const expectedExternalIds = [...activities.map(row => String(row.id)), inventoryActivityId].sort();
+        assert.deepStrictEqual(externalFiltered.map(row => String(row.id)).sort(), expectedExternalIds, 'verified external filter must return Annual and Inventory cleaned activities');
         const completeFiltered = (await request(`ky?year=${testYear}&evidence=complete`, { headers })).body.data;
-        assert.deepStrictEqual(completeFiltered.map(row => String(row.id)).sort(), activities.map(row => String(row.id)).sort(), 'complete filter must accept required file plus verified external video');
+        assert.deepStrictEqual(completeFiltered.map(row => String(row.id)).sort(), expectedExternalIds, 'complete filter must accept required file plus Annual or Inventory verified external video');
         const missingVideoFiltered = (await request(`ky?year=${testYear}&evidence=no_video`, { headers })).body.data;
-        assert.ok(activities.every(activity => !missingVideoFiltered.some(row => String(row.id) === String(activity.id))), 'no-video filter must exclude verified external evidence');
-        const stats = (await request(`ky/stats?year=${testYear}`, { headers })).body.data.videoEvidence;
+        assert.ok(expectedExternalIds.every(id => !missingVideoFiltered.some(row => String(row.id) === id)), 'no-video filter must exclude Annual and Inventory verified external evidence');
+        const statsResponse = (await request(`ky/stats?year=${testYear}`, { headers })).body.data;
+        const stats = statsResponse.videoEvidence;
         assert.strictEqual(Number(stats.productionVideo), 0, 'stats must not retain deleted Production video copies');
-        assert.strictEqual(Number(stats.verifiedExternalVideo), 3, 'stats must count verified external evidence');
-        assert.strictEqual(Number(stats.videoEvidenceTotal), 3, 'combined stats must count every verified external activity');
+        assert.strictEqual(Number(stats.verifiedExternalVideo), 4, 'stats must count Annual and Inventory verified external evidence');
+        assert.strictEqual(Number(stats.videoEvidenceTotal), 4, 'combined stats must count every verified external activity');
+        assert.strictEqual(statsResponse.departmentSource, 'ProgramConfig', 'Active Program Config must be the Department dashboard authority');
+        assert.deepStrictEqual(statsResponse.configuredDepartments, [...configDepartments].sort(), 'stats must return every configured Department in canonical order');
+        assert.strictEqual(statsResponse.byDept.length, configDepartments.length, 'Department chart must retain configured zero-activity Departments');
+        assert.strictEqual(statsResponse.deptMonthly.length, configDepartments.length * 12, 'Heatmap must contain 12 months for every configured Department');
+        assert.strictEqual(Number(statsResponse.byDept.find(row => row.Department === `__KY_ZERO_UAT_${runId}`)?.count), 0, 'configured zero-activity Department must remain visible');
+        assert.strictEqual(Number(statsResponse.byDept.find(row => row.Department === `__KY_CANONICAL_UAT_${runId}`)?.count), 1, 'case and surrounding whitespace must resolve to the canonical configured Department');
+        assert.ok(!statsResponse.unmappedDepartments.some(row => String(row.Department).toLowerCase().includes('__ky_canonical_uat_')), 'canonical Department variant must not be reported as unmapped');
 
         for (const activity of activities) {
             assert.ok(!fs.existsSync(activity.localPath), 'Production file must be removed after successful batch deletion');
@@ -221,6 +321,19 @@ async function cleanup() {
             const [[audit]] = await db.query("SELECT COUNT(*) AS count FROM KY_Annual_Video_Evidence_Audit WHERE EvidenceID=? AND Action='PRODUCTION_FILE_DELETED'", [activity.evidence.id]);
             assert.strictEqual(Number(audit.count), 1, 'each deleted file must have an immutable deletion audit event');
         }
+        assert.ok(!fs.existsSync(inventoryPath), 'Inventory Production file must be removed after verified cleanup');
+        const [[savedInventoryActivity]] = await db.query('SELECT VideoUrl FROM KY_Activities WHERE id=?', [inventoryActivityId]);
+        assert.strictEqual(savedInventoryActivity.VideoUrl, null, 'Inventory activity must no longer point at a deleted Production file');
+        const [[inventoryEvidence]] = await db.query('SELECT SHA256,ExternalReference,ProductionDeletedAt,ProductionDeletionReason FROM KY_Video_File_Inventory WHERE id=?', [inventoryDeclared.data.id]);
+        assert.strictEqual(inventoryEvidence.SHA256, inventorySha, 'Inventory SHA-256 must remain after deletion');
+        assert.ok(inventoryEvidence.ExternalReference && inventoryEvidence.ProductionDeletedAt && inventoryEvidence.ProductionDeletionReason, 'Inventory metadata must remain after deletion');
+        const [[inventoryAudit]] = await db.query("SELECT COUNT(*) AS count FROM KY_Video_File_Inventory_Audit WHERE InventoryID=? AND Action='PRODUCTION_FILE_DELETED'", [inventoryDeclared.data.id]);
+        assert.strictEqual(Number(inventoryAudit.count), 1, 'Inventory deletion must create an immutable audit event');
+        await assert.rejects(
+            request(`ky/${inventoryActivityId}`, { method: 'DELETE', headers }),
+            /409 KY_VIDEO_PROTECTED_BY_RETENTION|409.*retention record/i,
+            'an activity retained by Inventory metadata must not be deletable after its Production file is removed'
+        );
 
         passed = true;
     } finally {
@@ -231,6 +344,12 @@ async function cleanup() {
                 const [[auditResidue]] = await db.query('SELECT COUNT(*) AS count FROM KY_Annual_Video_Evidence_Audit WHERE EvidenceID=?', [evidenceId]);
                 assert.strictEqual(Number(evidenceResidue.count), 0, 'test evidence cleanup must leave no row residue');
                 assert.strictEqual(Number(auditResidue.count), 0, 'test audit cleanup must leave no row residue');
+            }
+            for (const inventoryId of inventoryIds) {
+                const [[inventoryResidue]] = await db.query('SELECT COUNT(*) AS count FROM KY_Video_File_Inventory WHERE id=?', [inventoryId]);
+                const [[inventoryAuditResidue]] = await db.query('SELECT COUNT(*) AS count FROM KY_Video_File_Inventory_Audit WHERE InventoryID=?', [inventoryId]);
+                assert.strictEqual(Number(inventoryResidue.count), 0, 'test Inventory cleanup must leave no row residue');
+                assert.strictEqual(Number(inventoryAuditResidue.count), 0, 'test Inventory audit cleanup must leave no row residue');
             }
             for (const activity of activities) {
                 const [[activityResidue]] = await db.query('SELECT COUNT(*) AS count FROM KY_Activities WHERE id=?', [activity.id]);
@@ -244,7 +363,7 @@ async function cleanup() {
         }
         if (embeddedServer) await new Promise(resolve => embeddedServer.close(resolve));
         await db.end();
-        if (passed) console.log('KY annual video evidence API UAT: PASS (declare/verify/duplicate-scope redirect contract/download/hash/protected delete/single delete/bulk delete/metadata/audit/zero residue)');
+        if (passed) console.log('KY annual video evidence API UAT: PASS (Annual + Production Inventory lifecycle, config-complete Department charts/heatmap, canonical matching, zero residue)');
     }
 })().catch(error => {
     console.error(`KY annual video evidence API UAT: FAIL - ${error.message}`, error.cause || error.stack || '');

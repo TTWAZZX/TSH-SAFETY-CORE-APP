@@ -34,6 +34,14 @@ for (const source of [nodeRoute, phpRoute]) {
     assert.match(source, /external_pending/, 'KY history must filter pending external evidence');
     assert.match(source, /ScopeAlreadyRegistered/, 'annual candidate projection must identify an existing scope registration');
     assert.match(source, /ScopeEvidenceID/, 'annual candidate projection must link to its existing scope evidence');
+    assert.match(source, /ky_video_file_inventory/i, 'Production video inventory table must exist in both runtimes');
+    assert.match(source, /ky_video_file_inventory_audit/i, 'immutable Production video inventory audit must exist');
+    assert.match(source, /video-inventory\/declare/, 'Production video inventory declaration API must exist');
+    assert.match(source, /KY_VIDEO_INVENTORY_BACKUP_MISMATCH/, 'external backup hash mismatch must fail closed');
+    assert.match(source, /KY_VIDEO_INVENTORY_NOT_VERIFIED|verified matching external backup/i, 'unverified Inventory cleanup must fail closed');
+    assert.match(source, /departmentSource/, 'KY stats must identify the authoritative Department source');
+    assert.match(source, /configuredDepartments/, 'KY stats must return every configured Department');
+    assert.match(source, /unmappedDepartments/, 'KY stats must expose unmatched activity Department diagnostics');
 }
 
 assert.match(nodeRoute, /fs\.renameSync\(entry\.localPath, quarantine\)/, 'Node must quarantine files before committing deletion metadata');
@@ -59,7 +67,18 @@ assert.match(frontend, /External video pending Admin verify/, 'pending external 
 assert.match(frontend, /data-ky-annual-focus-evidence/, 'already-registered candidates must navigate to their existing evidence row');
 assert.match(frontend, /KY_ANNUAL_VIDEO_ALREADY_VERIFIED/, 'a concurrent verified-scope conflict must be handled without an unhandled rejection');
 assert.match(frontend, /External Backup.*SHA-256|External Backup.*SHA/, 'UI must explain protected deletion eligibility');
-assert.match(main, /ky\.js\?v=20260921-ky-video-evidence-stats-r3/, 'cache chain must expose the new KY bundle');
-assert.match(index, /main\.js\?v=20260921-ky-video-evidence-stats-r3/, 'HTML entry point must invalidate the cached main module');
+assert.match(frontend, /Production Video Inventory/, 'Admin must see the separate Production Video Inventory workspace');
+assert.match(frontend, /data-ky-inventory-register/, 'Inventory must support external backup registration');
+assert.match(frontend, /data-ky-inventory-delete-selected/, 'Inventory must support guarded bulk cleanup');
+assert.match(frontend, /max-h-\[60vh\]/, 'Inventory list must use the expanded 60vh viewport');
+assert.match(frontend, /Overview.*Annual Compliance.*Production Inventory.*Cleanup Queue & Audit/s, 'Admin workspace must expose four focused views');
+assert.match(frontend, /data-ky-annual-admin-toolbar/, 'Annual Admin filters must use a sticky toolbar');
+assert.match(frontend, /data-ky-annual-detail/, 'Annual evidence must expose a Detail Drawer action');
+assert.match(frontend, /data-ky-inventory-detail/, 'Inventory evidence must expose a Detail Drawer action');
+assert.match(frontend, /data-ky-cleanup-panel/, 'destructive actions must be isolated in Cleanup Queue');
+assert.match(frontend, /data-ky-heatmap-department/, 'Heatmap must expose every canonical Department row for Browser UAT');
+assert.match(frontend, /renderDepartmentDiagnostics/, 'Dashboard must render unmapped Department diagnostics');
+assert.match(main, /ky\.js\?v=20260922-ky-annual-admin-ux-r1/, 'cache chain must expose the Annual Admin UX bundle');
+assert.match(index, /main\.js\?v=20260922-ky-annual-admin-ux-r1/, 'HTML entry point must invalidate the cached main module');
 
 console.log('KY annual video evidence contract: PASS');

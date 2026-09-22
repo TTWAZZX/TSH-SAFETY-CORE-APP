@@ -194,6 +194,18 @@ async function startNodeApiIfRequested() {
     assert.strictEqual(Number(renderedKpi.Open), Number(kpi.open || 0), 'Dashboard Open count must still match the KY stats API');
     assert.strictEqual(Number(renderedKpi.Reviewed), Number(kpi.reviewed || 0), 'Dashboard Reviewed count must still match the KY stats API');
     assert.strictEqual(Number(renderedKpi.Closed), Number(kpi.closed || 0), 'Dashboard Closed count must still match the KY stats API');
+    const configuredDepartments = beforeStats.data?.configuredDepartments || [];
+    assert.ok(configuredDepartments.length > 0, 'Local Browser UAT requires Active Program Config departments');
+    const departmentDashboard = await evaluate(`({
+        barLabels:[...(Chart.getChart('ky-chart-bar')?.data?.labels||[])],
+        heatmapLabels:[...document.querySelectorAll('[data-ky-heatmap-department]')].map(row=>row.dataset.kyHeatmapDepartment),
+        heatmapCells:document.querySelectorAll('[data-ky-heatmap-department]').length*12,
+        diagnostics:document.querySelector('[data-ky-department-diagnostics]')?.innerText||''
+    })`);
+    assert.deepStrictEqual(departmentDashboard.barLabels, configuredDepartments, 'Department bar chart must render every configured department, including zero activity');
+    assert.deepStrictEqual(departmentDashboard.heatmapLabels, configuredDepartments, 'Heatmap must render every configured department');
+    assert.strictEqual(departmentDashboard.heatmapCells, configuredDepartments.length * 12, 'Heatmap must cover 12 months for every configured department');
+    assert.ok(departmentDashboard.diagnostics, 'Dashboard must expose canonical Department mapping diagnostics');
 
     await evaluate(`document.querySelector('#ky-tab-btn-submit').click()`);
     await waitFor(`document.querySelector('#ky-video-central-machine') && document.querySelector('#ky-video-central-reference')`);
@@ -225,23 +237,43 @@ async function startNodeApiIfRequested() {
     await evaluate(`document.querySelector('#ky-tab-btn-manage').click()`);
     await waitFor(`document.querySelector('#ky-msub-annual-video')`);
     await evaluate(`document.querySelector('#ky-msub-annual-video').click()`);
-    await waitFor(`document.querySelector('[data-ky-annual-delete-selected]') && document.querySelector('#ky-manage-panel')?.textContent.includes('Annual Compliance Dashboard')`);
+    await waitFor(`document.querySelector('[data-ky-annual-admin-toolbar]') && document.querySelector('#ky-manage-panel')?.textContent.includes('Annual Compliance Dashboard')`);
 
-    const registeredCandidate = (beforeAnnual.data?.candidates || []).find(row => row.ScopeAlreadyRegistered && row.ScopeEvidenceID);
-    if (registeredCandidate) {
-        const focusContract = await evaluate(`(()=>{const id=${JSON.stringify(String(registeredCandidate.ScopeEvidenceID))};const button=[...document.querySelectorAll('[data-ky-annual-focus-evidence]')].find(item=>item.dataset.kyAnnualFocusEvidence===id);if(!button)return{found:false,highlighted:false};button.click();const row=[...document.querySelectorAll('[data-ky-annual-evidence-row]')].find(item=>item.dataset.kyAnnualEvidenceRow===id);return{found:true,highlighted:Boolean(row?.classList.contains('ring-2'))};})()`);
-        assert.deepStrictEqual(focusContract, { found: true, highlighted: true }, 'registered candidates must navigate to and highlight the existing annual evidence instead of posting a duplicate declaration');
+    const annualUi = await evaluate(`(()=>({summaryCards:document.querySelector('[data-ky-annual-summary]')?.children.length||0,summaryClickable:[...document.querySelector('[data-ky-annual-summary]')?.children||[]].every(card=>card.getAttribute('role')==='button'),views:[...document.querySelectorAll('[data-ky-annual-view]')].map(button=>button.dataset.kyAnnualView),sticky:getComputedStyle(document.querySelector('[data-ky-annual-admin-toolbar]')).position,hasDownload:Boolean(document.querySelector('[data-ky-annual-download]'))||${JSON.stringify((beforeAnnual.data?.summary?.productionFiles || 0) === 0)},hasAudit:Boolean(document.querySelector('[data-ky-annual-audit]'))||${JSON.stringify((beforeAnnual.data?.evidence || []).length === 0)},detail:Boolean(document.querySelector('[data-ky-annual-detail],[data-ky-inventory-detail]'))||${JSON.stringify((beforeAnnual.data?.evidence || []).length === 0 && (beforeAnnual.data?.inventory || []).length === 0)},cleanup:Boolean(document.querySelector('[data-ky-cleanup-panel]')),bulk:Boolean(document.querySelector('[data-ky-cleanup-panel] [data-ky-annual-delete-selected]')),inventory:Boolean(document.querySelector('[data-ky-video-inventory]')),inventoryRows:document.querySelectorAll('[data-ky-inventory-row]').length,inventoryBulk:Boolean(document.querySelector('[data-ky-cleanup-panel] [data-ky-inventory-delete-selected]')),inventoryMaxHeight:getComputedStyle(document.querySelector('[data-ky-inventory-list]')).maxHeight,normalAnnualDeleteVisible:[...document.querySelectorAll('[data-ky-annual-view-panel="annual"] [data-ky-annual-delete-one]')].some(el=>!el.classList.contains('hidden')),normalInventoryDeleteVisible:[...document.querySelectorAll('[data-ky-video-inventory] [data-ky-inventory-delete-one]')].some(el=>!el.classList.contains('hidden'))}))()`);
+    assert.strictEqual(annualUi.summaryCards, 6, 'Annual dashboard must render six summary metrics');
+    assert.ok(annualUi.summaryClickable, 'Annual summary cards must be keyboard-clickable filters');
+    assert.deepStrictEqual(annualUi.views, ['overview', 'annual', 'inventory', 'cleanup'], 'Admin workspace must expose four focused views');
+    assert.strictEqual(annualUi.sticky, 'sticky', 'Admin filters must remain sticky');
+    assert.ok(annualUi.hasDownload && annualUi.hasAudit && annualUi.detail, `Annual Admin controls must match available records: ${JSON.stringify(annualUi)}`);
+    assert.ok(annualUi.cleanup && annualUi.bulk && annualUi.inventoryBulk, 'guarded Annual and Inventory bulk cleanup must live in Cleanup Queue');
+    assert.ok(annualUi.inventory, 'separate Production Video Inventory controls must render');
+    assert.strictEqual(annualUi.normalAnnualDeleteVisible, false, 'destructive Annual actions must be hidden outside Cleanup Queue');
+    assert.strictEqual(annualUi.normalInventoryDeleteVisible, false, 'destructive Inventory actions must be hidden outside Cleanup Queue');
+    assert.strictEqual(annualUi.inventoryRows, (beforeAnnual.data?.inventory || []).length, 'Inventory UI must render every API inventory row');
+    assert.notStrictEqual(annualUi.inventoryMaxHeight, '288px', 'Inventory list must be expanded beyond the legacy max-h-72 height');
+    assert.strictEqual(await evaluate(`document.querySelector('[data-ky-annual-admin-status]')?.value`), 'action', 'Action-required must be the default Admin filter');
+
+    if (annualUi.detail) {
+        await evaluate(`document.querySelector('[data-ky-annual-detail],[data-ky-inventory-detail]').click()`);
+        await waitFor(`!document.querySelector('#modal-wrapper')?.classList.contains('hidden') && /Detail Drawer/.test(document.querySelector('#modal-title')?.textContent||'')`);
+        const drawer = await evaluate(`({title:document.querySelector('#modal-title')?.textContent||'',body:document.querySelector('#modal-body')?.innerText||''})`);
+        assert.match(drawer.title, /Detail Drawer/, 'Detail action must open the evidence drawer');
+        assert.match(drawer.body, /SHA-256/, 'Detail drawer must expose full SHA-256 metadata');
+        await evaluate(`document.querySelector('#modal-close-btn')?.click()`);
     }
 
-    const annualUi = await evaluate(`(()=>({summaryCards:document.querySelector('[data-ky-annual-summary]')?.children.length||0,hasDownload:Boolean(document.querySelector('[data-ky-annual-download]'))||${JSON.stringify((beforeAnnual.data?.summary?.productionFiles || 0) === 0)},hasAudit:Boolean(document.querySelector('[data-ky-annual-audit]'))||${JSON.stringify((beforeAnnual.data?.evidence || []).length === 0)},bulk:Boolean(document.querySelector('[data-ky-annual-delete-selected]'))}))()`);
-    assert.strictEqual(annualUi.summaryCards, 6, 'Annual dashboard must render six summary metrics');
-    assert.ok(annualUi.hasDownload && annualUi.hasAudit && annualUi.bulk, 'Annual Admin controls must match available records');
+    for (const view of ['overview', 'annual', 'inventory', 'cleanup']) {
+        const viewState = await evaluate(`(()=>{document.querySelector('[data-ky-annual-view="${view}"]').click();return{pressed:document.querySelector('[data-ky-annual-view="${view}"]').getAttribute('aria-pressed'),visible:[...document.querySelectorAll('[data-ky-annual-view-panel]')].filter(panel=>!panel.classList.contains('hidden')).map(panel=>panel.dataset.kyAnnualViewPanel)}})()`);
+        assert.strictEqual(viewState.pressed, 'true', `${view} view button must become active`);
+        assert.ok(viewState.visible.length > 0 && viewState.visible.every(value => value === view), `${view} view must hide unrelated workspaces`);
+    }
 
     for (const viewport of [{ width: 1440, height: 1000 }, { width: 1024, height: 900 }, { width: 390, height: 844 }]) {
         await command('Emulation.setDeviceMetricsOverride', { width: viewport.width, height: viewport.height, deviceScaleFactor: 1, mobile: viewport.width < 600 });
         await sleep(300);
-        const layout = await evaluate(`(()=>({client:document.documentElement.clientWidth,scroll:document.documentElement.scrollWidth,panel:Boolean(document.querySelector('#ky-manage-panel')),annual:Boolean(document.querySelector('[data-ky-annual-delete-selected]'))}))()`);
+        const layout = await evaluate(`(()=>({client:document.documentElement.clientWidth,scroll:document.documentElement.scrollWidth,panel:Boolean(document.querySelector('#ky-manage-panel')),annual:Boolean(document.querySelector('[data-ky-cleanup-panel]')),toolbar:Boolean(document.querySelector('[data-ky-annual-admin-toolbar]'))}))()`);
         assert.ok(layout.panel && layout.annual, `Annual workspace must remain mounted at ${viewport.width}px`);
+        assert.ok(layout.toolbar, `Sticky Admin filters must remain mounted at ${viewport.width}px`);
         assert.ok(layout.scroll <= layout.client + 24, `Annual workspace must not create material page overflow at ${viewport.width}px`);
     }
 
@@ -249,7 +281,7 @@ async function startNodeApiIfRequested() {
     assert.deepStrictEqual(afterStats.data?.kpi || afterStats.kpi, beforeStats.data?.kpi || beforeStats.kpi, 'read-only Browser UAT must not alter KY dashboard statistics');
     assert.deepStrictEqual(mutationRequests, [], `Browser UAT sent mutations: ${mutationRequests.join(' | ')}`);
     assert.deepStrictEqual(consoleErrors, [], `Browser console errors: ${consoleErrors.join(' | ')}`);
-    console.log('KY annual video Browser UI UAT: PASS (legacy KPI parity, submit/history/manage, annual dashboard, 3 viewports, zero writes/errors)');
+    console.log('KY annual video Browser UI UAT: PASS (config-complete Dashboard, four Admin views, guarded cleanup, 3 viewports, zero writes/errors)');
 })().catch(async error => {
     console.error(error.stack || error);
     if (socket) {

@@ -925,6 +925,58 @@ async function ensureTables() {
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
     `);
 
+    await db.query(`
+        CREATE TABLE IF NOT EXISTS KY_Video_File_Inventory (
+            id                         VARCHAR(36) NOT NULL PRIMARY KEY,
+            EvidenceYear               SMALLINT NOT NULL,
+            ActivityID                 VARCHAR(36) NOT NULL,
+            Department                 VARCHAR(100) NOT NULL,
+            SafetyUnit                 VARCHAR(100) NULL,
+            ExternalBackupConfirmed    TINYINT(1) NOT NULL DEFAULT 0,
+            ExternalReference          TEXT NULL,
+            OriginalFileName           VARCHAR(255) NOT NULL,
+            MimeType                   VARCHAR(120) NULL,
+            FileSize                   BIGINT UNSIGNED NOT NULL DEFAULT 0,
+            SHA256                     CHAR(64) NOT NULL,
+            ProductionVideoUrl         TEXT NULL,
+            ProductionStoredName       VARCHAR(255) NULL,
+            Status                     VARCHAR(30) NOT NULL DEFAULT 'Pending',
+            DeclaredByID               VARCHAR(50) NULL,
+            DeclaredByName             VARCHAR(100) NULL,
+            DeclaredAt                 DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            VerifiedByID               VARCHAR(50) NULL,
+            VerifiedByName             VARCHAR(100) NULL,
+            VerifiedAt                 DATETIME NULL,
+            VerificationNote           TEXT NULL,
+            ProductionDeletedByID      VARCHAR(50) NULL,
+            ProductionDeletedByName    VARCHAR(100) NULL,
+            ProductionDeletedAt        DATETIME NULL,
+            ProductionDeletionReason   TEXT NULL,
+            RowVersion                 INT UNSIGNED NOT NULL DEFAULT 1,
+            CreatedAt                  DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            UpdatedAt                  TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+            UNIQUE KEY uq_ky_video_inventory_activity (ActivityID),
+            KEY idx_ky_video_inventory_status (EvidenceYear, Status),
+            KEY idx_ky_video_inventory_department (EvidenceYear, Department, SafetyUnit)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+    `);
+    await db.query(`
+        CREATE TABLE IF NOT EXISTS KY_Video_File_Inventory_Audit (
+            id             BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+            InventoryID    VARCHAR(36) NOT NULL,
+            ActivityID     VARCHAR(36) NOT NULL,
+            Action         VARCHAR(80) NOT NULL,
+            ActorID        VARCHAR(50) NULL,
+            ActorName      VARCHAR(100) NULL,
+            BeforeJson     LONGTEXT NULL,
+            AfterJson      LONGTEXT NULL,
+            Detail         TEXT NULL,
+            CreatedAt      DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            KEY idx_ky_video_inventory_audit (InventoryID, CreatedAt),
+            KEY idx_ky_video_inventory_audit_action (Action, CreatedAt)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+    `);
+
     tablesReady = true;
 }
 
@@ -945,6 +997,41 @@ function kyAnnualEvidencePublic(row) {
             && Boolean(String(row.ProductionVideoUrl || '').trim())
             && !row.ProductionDeletedAt,
     };
+}
+
+function kyVideoInventoryPublic(row) {
+    const registered = Boolean(row?.InventoryID || row?.id);
+    const status = registered ? String(row.Status || 'Pending') : 'Unregistered';
+    const productionVideoUrl = String(row.CurrentVideoUrl || row.ProductionVideoUrl || '').trim();
+    const deleted = Boolean(row.ProductionDeletedAt);
+    return {
+        ...row,
+        id: row.InventoryID || row.id || null,
+        registered,
+        Status: status,
+        ProductionVideoUrl: productionVideoUrl || row.ProductionVideoUrl || null,
+        ExternalBackupConfirmed: Boolean(Number(row.ExternalBackupConfirmed || 0)),
+        fileDeleted: deleted,
+        canDeleteProductionFile: registered
+            && status === 'Verified'
+            && Boolean(Number(row.ExternalBackupConfirmed || 0))
+            && Boolean(String(row.ExternalReference || '').trim())
+            && /^[a-f0-9]{64}$/i.test(String(row.SHA256 || ''))
+            && Boolean(productionVideoUrl)
+            && !deleted,
+    };
+}
+
+async function kyVideoInventoryAudit(connection, req, action, before, after, detail = '') {
+    const row = after || before || {};
+    await connection.query(
+        `INSERT INTO KY_Video_File_Inventory_Audit
+         (InventoryID, ActivityID, Action, ActorID, ActorName, BeforeJson, AfterJson, Detail)
+         VALUES (?,?,?,?,?,?,?,?)`,
+        [row.id, row.ActivityID, action, currentUserId(req) || null,
+            req.user?.name || req.user?.EmployeeName || req.user?.username || 'Admin',
+            before ? JSON.stringify(before) : null, after ? JSON.stringify(after) : null, detail || null]
+    );
 }
 
 function kyAnnualLocalVideo(rawUrl) {
@@ -1001,7 +1088,7 @@ function kyProductionVideoSql(alias = 'a') {
 }
 
 function kyVerifiedExternalVideoSql(alias = 'a') {
-    return `EXISTS (
+    return `(EXISTS (
         SELECT 1 FROM KY_Annual_Video_Evidence ave
         WHERE ave.ActivityID = ${alias}.id
           AND ave.StorageMode = 'CentralMachine'
@@ -1009,11 +1096,18 @@ function kyVerifiedExternalVideoSql(alias = 'a') {
           AND ave.ExternalBackupConfirmed = 1
           AND COALESCE(TRIM(ave.ExternalReference), '') <> ''
           AND ave.SHA256 REGEXP '^[0-9a-fA-F]{64}$'
-    )`;
+    ) OR EXISTS (
+        SELECT 1 FROM KY_Video_File_Inventory inv
+        WHERE inv.ActivityID = ${alias}.id
+          AND inv.Status = 'Verified'
+          AND inv.ExternalBackupConfirmed = 1
+          AND COALESCE(TRIM(inv.ExternalReference), '') <> ''
+          AND inv.SHA256 REGEXP '^[0-9a-fA-F]{64}$'
+    ))`;
 }
 
 function kyPendingExternalVideoSql(alias = 'a') {
-    return `EXISTS (
+    return `(EXISTS (
         SELECT 1 FROM KY_Annual_Video_Evidence ave
         WHERE ave.ActivityID = ${alias}.id
           AND ave.StorageMode = 'CentralMachine'
@@ -1021,7 +1115,14 @@ function kyPendingExternalVideoSql(alias = 'a') {
           AND ave.ExternalBackupConfirmed = 1
           AND COALESCE(TRIM(ave.ExternalReference), '') <> ''
           AND ave.SHA256 REGEXP '^[0-9a-fA-F]{64}$'
-    )`;
+    ) OR EXISTS (
+        SELECT 1 FROM KY_Video_File_Inventory inv
+        WHERE inv.ActivityID = ${alias}.id
+          AND inv.Status IN ('Pending', 'NeedsCorrection')
+          AND inv.ExternalBackupConfirmed = 1
+          AND COALESCE(TRIM(inv.ExternalReference), '') <> ''
+          AND inv.SHA256 REGEXP '^[0-9a-fA-F]{64}$'
+    ))`;
 }
 
 function kyVideoEvidenceSql(alias = 'a') {
@@ -1167,24 +1268,51 @@ router.get('/stats', async (req, res) => {
             ORDER BY month
         `, [year, ...deptParams]);
 
-        // By department
-        const [byDept] = await db.query(`
+        // Department charts are config-authoritative. Query raw activity labels first,
+        // then resolve them through the same whitespace/case-normalized key so a
+        // configured department with zero activity is still represented.
+        const [rawByDept] = await db.query(`
             SELECT Department, COUNT(*) AS count
             FROM KY_Activities
-            WHERE YEAR(ActivityDate) = ? ${deptFilter}
+            WHERE YEAR(ActivityDate) = ?
             GROUP BY Department
-            ORDER BY count DESC
-            LIMIT 15
-        `, [year, ...deptParams]);
+            ORDER BY count DESC`, [year]);
 
-        // Monthly by department (for heatmap)
-        const [deptMonthly] = await db.query(`
+        const [rawDeptMonthly] = await db.query(`
             SELECT Department, MONTH(ActivityDate) AS month, COUNT(*) AS count
             FROM KY_Activities
-            WHERE YEAR(ActivityDate) = ? ${deptFilter}
+            WHERE YEAR(ActivityDate) = ?
             GROUP BY Department, MONTH(ActivityDate)
-            ORDER BY Department, month
-        `, [year, ...deptParams]);
+            ORDER BY Department, month`, [year]);
+        const canonicalDeptByKey = new Map(targetDepts.map(dept => [kyNormKey(dept), dept]));
+        const departmentCounts = new Map(targetDepts.map(dept => [dept, 0]));
+        const departmentMonthCounts = new Map();
+        const unmappedMap = new Map();
+        rawByDept.forEach(row => {
+            const rawDepartment = String(row.Department || '').trim();
+            const canonical = canonicalDeptByKey.get(kyNormKey(rawDepartment));
+            const count = Number(row.count || 0);
+            if (canonical) departmentCounts.set(canonical, Number(departmentCounts.get(canonical) || 0) + count);
+            else if (rawDepartment) unmappedMap.set(rawDepartment, Number(unmappedMap.get(rawDepartment) || 0) + count);
+        });
+        rawDeptMonthly.forEach(row => {
+            const canonical = canonicalDeptByKey.get(kyNormKey(row.Department));
+            if (!canonical) return;
+            const key = `${canonical}||${Number(row.month)}`;
+            departmentMonthCounts.set(key, Number(departmentMonthCounts.get(key) || 0) + Number(row.count || 0));
+        });
+        const byDept = targetDepts.length
+            ? targetDepts.map(Department => ({ Department, count: Number(departmentCounts.get(Department) || 0), configured: usingConfig, hasActivity: Number(departmentCounts.get(Department) || 0) > 0 }))
+            : rawByDept.map(row => ({ ...row, count: Number(row.count || 0), configured: false, hasActivity: Number(row.count || 0) > 0 }));
+        const deptMonthly = targetDepts.flatMap(Department => Array.from({ length: 12 }, (_, index) => ({
+            Department,
+            month: index + 1,
+            count: Number(departmentMonthCounts.get(`${Department}||${index + 1}`) || 0),
+            configured: usingConfig,
+        })));
+        const unmappedDepartments = [...unmappedMap.entries()]
+            .map(([Department, count]) => ({ Department, count }))
+            .sort((a, b) => b.count - a.count || a.Department.localeCompare(b.Department));
 
         // Status distribution
         const [statusDist] = await db.query(`
@@ -1319,6 +1447,9 @@ router.get('/stats', async (req, res) => {
                 monthly,
                 byDept,
                 deptMonthly,
+                departmentSource: usingConfig ? 'ProgramConfig' : 'MasterDepartments',
+                configuredDepartments: targetDepts,
+                unmappedDepartments,
                 statusDist,
                 riskCat,
                 pendingDepts,
@@ -1803,6 +1934,35 @@ router.get('/annual-video-evidence', isAdmin, async (req, res) => {
                 ScopeAlreadyRegistered: Boolean(scopeEvidence),
             };
         });
+        const [inventoryRows] = await db.query(
+            `SELECT a.id AS ActivityID, a.ActivityDate, a.Department, a.SafetyUnit, a.TeamName, a.KYTKeyword,
+                    a.ReporterName, a.VideoUrl AS CurrentVideoUrl,
+                    inv.id AS InventoryID, inv.EvidenceYear, inv.ExternalBackupConfirmed, inv.ExternalReference,
+                    inv.OriginalFileName, inv.MimeType, inv.FileSize, inv.SHA256, inv.ProductionVideoUrl,
+                    inv.ProductionStoredName, inv.Status, inv.DeclaredByID, inv.DeclaredByName, inv.DeclaredAt,
+                    inv.VerifiedByID, inv.VerifiedByName, inv.VerifiedAt, inv.VerificationNote,
+                    inv.ProductionDeletedByID, inv.ProductionDeletedByName, inv.ProductionDeletedAt,
+                    inv.ProductionDeletionReason, inv.RowVersion, inv.CreatedAt, inv.UpdatedAt,
+                    ave.id AS AnnualEvidenceID, ave.Status AS AnnualEvidenceStatus
+             FROM KY_Activities a
+             LEFT JOIN KY_Video_File_Inventory inv ON inv.ActivityID = a.id
+             LEFT JOIN KY_Annual_Video_Evidence ave ON ave.ActivityID = a.id
+             WHERE YEAR(a.ActivityDate) = ?
+               AND (COALESCE(TRIM(a.VideoUrl), '') <> '' OR inv.id IS NOT NULL)
+             ORDER BY a.ActivityDate DESC, a.CreatedAt DESC`,
+            [year]
+        );
+        const inventory = inventoryRows.map(kyVideoInventoryPublic);
+        const inventorySummary = {
+            total: inventory.length,
+            productionFiles: inventory.filter(row => String(row.CurrentVideoUrl || '').trim()).length,
+            unregistered: inventory.filter(row => !row.registered && String(row.CurrentVideoUrl || '').trim()).length,
+            pending: inventory.filter(row => ['Pending', 'NeedsCorrection'].includes(row.Status)).length,
+            verifiedExternal: inventory.filter(row => row.Status === 'Verified').length,
+            reclaimableFiles: inventory.filter(row => row.canDeleteProductionFile).length,
+            reclaimableBytes: inventory.filter(row => row.canDeleteProductionFile).reduce((sum, row) => sum + Number(row.FileSize || 0), 0),
+            deletedFiles: inventory.filter(row => row.fileDeleted).length,
+        };
         const verified = scopes.filter(row => row.compliant).length;
         res.json({
             success: true,
@@ -1821,6 +1981,8 @@ router.get('/annual-video-evidence', isAdmin, async (req, res) => {
                 scopes,
                 evidence,
                 candidates,
+                inventory,
+                inventorySummary,
             },
         });
     } catch (error) {
@@ -1841,6 +2003,198 @@ router.get('/annual-video-evidence/:evidenceId/audit', isAdmin, async (req, res)
     } catch (error) {
         res.status(500).json({ success: false, message: 'Unable to load annual video audit.' });
     }
+});
+
+router.get('/video-inventory/:inventoryId/audit', isAdmin, async (req, res) => {
+    try {
+        await ensureTables();
+        const [rows] = await db.query(
+            `SELECT id, InventoryID, ActivityID, Action, ActorID, ActorName, BeforeJson, AfterJson, Detail, CreatedAt
+             FROM KY_Video_File_Inventory_Audit WHERE InventoryID=? ORDER BY id DESC LIMIT 200`,
+            [req.params.inventoryId]
+        );
+        res.json({ success: true, data: rows });
+    } catch (error) {
+        res.status(500).json({ success: false, message: 'Unable to load Production video inventory audit.' });
+    }
+});
+
+router.get('/video-inventory/:inventoryId/download', isAdmin, async (req, res) => {
+    try {
+        await ensureTables();
+        const [rows] = await db.query('SELECT * FROM KY_Video_File_Inventory WHERE id=? LIMIT 1', [req.params.inventoryId]);
+        const row = rows[0];
+        if (!row) return res.status(404).json({ success: false, message: 'Production video inventory record not found.' });
+        if (row.ProductionDeletedAt) return res.status(410).json({ success: false, message: 'Production copy has already been removed.' });
+        const localPath = kyAnnualLocalVideo(row.ProductionVideoUrl);
+        if (!localPath) return res.status(404).json({ success: false, message: 'Production video file is unavailable.' });
+        const actualHash = await kyFileSha256(localPath);
+        if (actualHash !== String(row.SHA256 || '').toLowerCase()) {
+            return res.status(409).json({ success: false, code: 'KY_VIDEO_INVENTORY_HASH_MISMATCH', message: 'Production file SHA-256 no longer matches its inventory record.' });
+        }
+        res.download(localPath, row.OriginalFileName || path.basename(localPath));
+    } catch (error) {
+        res.status(500).json({ success: false, message: 'Unable to download Production video inventory file.' });
+    }
+});
+
+router.post('/video-inventory/declare', isAdmin, async (req, res) => {
+    let connection;
+    try {
+        await ensureTables();
+        const activityId = String(req.body?.activityId || '').trim();
+        const externalReference = String(req.body?.externalReference || '').trim();
+        const originalFileName = String(req.body?.originalFileName || '').trim().slice(0, 255);
+        const mimeType = String(req.body?.mimeType || '').trim().slice(0, 120) || null;
+        const fileSize = Number(req.body?.fileSize || 0);
+        const sha256 = String(req.body?.sha256 || '').trim().toLowerCase();
+        const requestedRowVersion = Number(req.body?.rowVersion || 0);
+        if (!activityId || !externalReference || !originalFileName || !Number.isSafeInteger(fileSize) || fileSize <= 0 || !/^[a-f0-9]{64}$/.test(sha256)) {
+            return res.status(400).json({ success: false, code: 'KY_VIDEO_INVENTORY_METADATA_REQUIRED', message: 'Activity, external reference, filename, size and SHA-256 are required.' });
+        }
+        const [activityRows] = await db.query('SELECT * FROM KY_Activities WHERE id=? LIMIT 1', [activityId]);
+        const activity = activityRows[0];
+        if (!activity) return res.status(404).json({ success: false, message: 'KY activity not found.' });
+        const productionVideoUrl = String(activity.VideoUrl || '').trim();
+        const localPath = kyAnnualLocalVideo(productionVideoUrl);
+        if (!localPath) return res.status(400).json({ success: false, code: 'KY_VIDEO_INVENTORY_PRODUCTION_REQUIRED', message: 'This activity has no readable Production video.' });
+        const productionSize = fs.statSync(localPath).size;
+        const productionHash = await kyFileSha256(localPath);
+        if (productionSize !== fileSize || productionHash !== sha256) {
+            return res.status(409).json({ success: false, code: 'KY_VIDEO_INVENTORY_BACKUP_MISMATCH', message: 'The selected external backup does not match the current Production video.' });
+        }
+        const evidenceYear = new Date(activity.ActivityDate).getFullYear();
+        connection = await db.getConnection();
+        await connection.beginTransaction();
+        const [currentRows] = await connection.query('SELECT * FROM KY_Video_File_Inventory WHERE ActivityID=? FOR UPDATE', [activityId]);
+        const before = currentRows[0] || null;
+        if (before?.Status === 'Verified') {
+            await connection.rollback();
+            return res.status(409).json({ success: false, code: 'KY_VIDEO_INVENTORY_ALREADY_VERIFIED', message: 'This file is already verified. Mark it for correction before replacing its backup metadata.' });
+        }
+        if (before && requestedRowVersion !== Number(before.RowVersion)) {
+            await connection.rollback();
+            return res.status(409).json({ success: false, code: 'KY_VIDEO_INVENTORY_STALE', message: 'Inventory metadata changed. Refresh and retry.' });
+        }
+        const id = before?.id || randomUUID();
+        const actorId = currentUserId(req) || null;
+        const actorName = req.user?.name || req.user?.EmployeeName || req.user?.username || 'Admin';
+        if (before) {
+            await connection.query(
+                `UPDATE KY_Video_File_Inventory SET EvidenceYear=?,Department=?,SafetyUnit=?,ExternalBackupConfirmed=1,ExternalReference=?,
+                 OriginalFileName=?,MimeType=?,FileSize=?,SHA256=?,ProductionVideoUrl=?,ProductionStoredName=?,Status='Pending',
+                 DeclaredByID=?,DeclaredByName=?,DeclaredAt=NOW(),VerifiedByID=NULL,VerifiedByName=NULL,VerifiedAt=NULL,
+                 VerificationNote=NULL,ProductionDeletedByID=NULL,ProductionDeletedByName=NULL,ProductionDeletedAt=NULL,
+                 ProductionDeletionReason=NULL,RowVersion=RowVersion+1 WHERE id=?`,
+                [evidenceYear, activity.Department, activity.SafetyUnit || null, externalReference, originalFileName, mimeType,
+                    fileSize, sha256, productionVideoUrl, path.basename(localPath), actorId, actorName, id]
+            );
+        } else {
+            await connection.query(
+                `INSERT INTO KY_Video_File_Inventory
+                 (id,EvidenceYear,ActivityID,Department,SafetyUnit,ExternalBackupConfirmed,ExternalReference,OriginalFileName,MimeType,
+                  FileSize,SHA256,ProductionVideoUrl,ProductionStoredName,Status,DeclaredByID,DeclaredByName)
+                 VALUES (?,?,?,?,?,1,?,?,?,?,?,?,?,'Pending',?,?)`,
+                [id, evidenceYear, activityId, activity.Department, activity.SafetyUnit || null, externalReference, originalFileName,
+                    mimeType, fileSize, sha256, productionVideoUrl, path.basename(localPath), actorId, actorName]
+            );
+        }
+        const [afterRows] = await connection.query('SELECT * FROM KY_Video_File_Inventory WHERE id=?', [id]);
+        await kyVideoInventoryAudit(connection, req, before ? 'BACKUP_METADATA_UPDATED' : 'BACKUP_DECLARED', before, afterRows[0], 'External backup metadata matched the Production video.');
+        await connection.commit();
+        res.status(before ? 200 : 201).json({ success: true, data: kyVideoInventoryPublic(afterRows[0]) });
+    } catch (error) {
+        if (connection) { try { await connection.rollback(); } catch (_) {} }
+        console.error('KY Production video inventory declaration error:', error);
+        res.status(error.status || 500).json({ success: false, code: error.code, message: error.message || 'Unable to register Production video inventory.' });
+    } finally { if (connection) connection.release(); }
+});
+
+router.post('/video-inventory/:inventoryId/verify', isAdmin, async (req, res) => {
+    let connection;
+    try {
+        await ensureTables();
+        const status = String(req.body?.status || 'Verified');
+        const rowVersion = Number(req.body?.rowVersion || 0);
+        const note = String(req.body?.note || '').trim();
+        if (!['Verified', 'NeedsCorrection'].includes(status) || !Number.isInteger(rowVersion) || rowVersion < 1) {
+            return res.status(400).json({ success: false, message: 'Status and row version are required.' });
+        }
+        connection = await db.getConnection();
+        await connection.beginTransaction();
+        const [rows] = await connection.query('SELECT * FROM KY_Video_File_Inventory WHERE id=? FOR UPDATE', [req.params.inventoryId]);
+        const before = rows[0];
+        if (!before) { await connection.rollback(); return res.status(404).json({ success: false, message: 'Production video inventory record not found.' }); }
+        if (Number(before.RowVersion) !== rowVersion) { await connection.rollback(); return res.status(409).json({ success: false, code: 'KY_VIDEO_INVENTORY_STALE', message: 'Inventory metadata changed. Refresh and retry.' }); }
+        if (status === 'Verified' && (!Number(before.ExternalBackupConfirmed) || !String(before.ExternalReference || '').trim() || !/^[a-f0-9]{64}$/i.test(String(before.SHA256 || '')))) {
+            await connection.rollback();
+            return res.status(400).json({ success: false, code: 'KY_EXTERNAL_BACKUP_REQUIRED', message: 'Complete external backup metadata is required before verification.' });
+        }
+        const actorId = currentUserId(req) || null;
+        const actorName = req.user?.name || req.user?.EmployeeName || req.user?.username || 'Admin';
+        await connection.query(
+            `UPDATE KY_Video_File_Inventory SET Status=?,VerificationNote=?,VerifiedByID=?,VerifiedByName=?,VerifiedAt=?,RowVersion=RowVersion+1 WHERE id=? AND RowVersion=?`,
+            [status, note || null, actorId, actorName, status === 'Verified' ? new Date() : null, before.id, rowVersion]
+        );
+        const [afterRows] = await connection.query('SELECT * FROM KY_Video_File_Inventory WHERE id=?', [before.id]);
+        await kyVideoInventoryAudit(connection, req, status === 'Verified' ? 'ADMIN_VERIFIED' : 'NEEDS_CORRECTION', before, afterRows[0], note);
+        await connection.commit();
+        res.json({ success: true, data: kyVideoInventoryPublic(afterRows[0]) });
+    } catch (error) {
+        if (connection) { try { await connection.rollback(); } catch (_) {} }
+        res.status(error.status || 500).json({ success: false, code: error.code, message: error.message || 'Unable to verify Production video inventory.' });
+    } finally { if (connection) connection.release(); }
+});
+
+router.post('/video-inventory/delete-production', isAdmin, async (req, res) => {
+    const items = Array.isArray(req.body?.items) ? req.body.items.slice(0, 100) : [];
+    const reason = String(req.body?.reason || '').trim();
+    if (!items.length || !reason) return res.status(400).json({ success: false, message: 'Select inventory records and provide a deletion reason.' });
+    const quarantined = [];
+    let connection;
+    let committed = false;
+    try {
+        await ensureTables();
+        connection = await db.getConnection();
+        await connection.beginTransaction();
+        const rows = [];
+        for (const item of items) {
+            const [found] = await connection.query('SELECT * FROM KY_Video_File_Inventory WHERE id=? FOR UPDATE', [String(item.id || '')]);
+            const row = found[0];
+            if (!row || Number(row.RowVersion) !== Number(item.rowVersion)) throw Object.assign(new Error('Inventory record is missing or stale.'), { status: 409, code: 'KY_VIDEO_INVENTORY_STALE' });
+            if (!kyVideoInventoryPublic(row).canDeleteProductionFile) throw Object.assign(new Error('Every selected file must have a verified matching external backup.'), { status: 409, code: 'KY_VIDEO_INVENTORY_NOT_VERIFIED' });
+            const [activityRows] = await connection.query('SELECT id,VideoUrl FROM KY_Activities WHERE id=? FOR UPDATE', [row.ActivityID]);
+            if (!activityRows[0] || String(activityRows[0].VideoUrl || '') !== String(row.ProductionVideoUrl || '')) throw Object.assign(new Error('The activity video reference changed. Refresh and register the current file again.'), { status: 409, code: 'KY_VIDEO_INVENTORY_ACTIVITY_STALE' });
+            const localPath = kyAnnualLocalVideo(row.ProductionVideoUrl);
+            if (!localPath) throw Object.assign(new Error('A selected Production file is unavailable.'), { status: 404 });
+            if ((await kyFileSha256(localPath)) !== String(row.SHA256 || '').toLowerCase()) throw Object.assign(new Error('A selected Production file failed SHA-256 verification.'), { status: 409, code: 'KY_VIDEO_INVENTORY_HASH_MISMATCH' });
+            rows.push({ row, localPath });
+        }
+        for (const entry of rows) {
+            const quarantine = `${entry.localPath}.ky-inventory-delete-${randomUUID()}.tmp`;
+            fs.renameSync(entry.localPath, quarantine);
+            quarantined.push({ ...entry, quarantine });
+        }
+        const actorId = currentUserId(req) || null;
+        const actorName = req.user?.name || req.user?.EmployeeName || req.user?.username || 'Admin';
+        for (const entry of quarantined) {
+            await connection.query('UPDATE KY_Activities SET VideoUrl=NULL WHERE id=? AND VideoUrl=?', [entry.row.ActivityID, entry.row.ProductionVideoUrl]);
+            await connection.query(
+                `UPDATE KY_Video_File_Inventory SET ProductionDeletedByID=?,ProductionDeletedByName=?,ProductionDeletedAt=NOW(),ProductionDeletionReason=?,RowVersion=RowVersion+1 WHERE id=?`,
+                [actorId, actorName, reason, entry.row.id]
+            );
+            const [afterRows] = await connection.query('SELECT * FROM KY_Video_File_Inventory WHERE id=?', [entry.row.id]);
+            await kyVideoInventoryAudit(connection, req, 'PRODUCTION_FILE_DELETED', entry.row, afterRows[0], reason);
+        }
+        await connection.commit();
+        committed = true;
+        for (const entry of quarantined) { try { fs.unlinkSync(entry.quarantine); } catch (error) { console.error('KY inventory quarantine cleanup error:', error); } }
+        res.json({ success: true, data: { deleted: quarantined.length } });
+    } catch (error) {
+        if (connection && !committed) { try { await connection.rollback(); } catch (_) {} }
+        if (!committed) for (const entry of quarantined.reverse()) { try { if (fs.existsSync(entry.quarantine) && !fs.existsSync(entry.localPath)) fs.renameSync(entry.quarantine, entry.localPath); } catch (_) {} }
+        res.status(error.status || 500).json({ success: false, code: error.code, message: error.message || 'Unable to delete Production video inventory files.' });
+    } finally { if (connection) connection.release(); }
 });
 
 router.get('/annual-video-evidence/:evidenceId/download', isAdmin, async (req, res) => {
@@ -3524,9 +3878,17 @@ router.delete('/:id', isAdmin, async (req, res) => {
     try {
         await ensureTables();
         connection = await db.getConnection();
-        const [rows] = await connection.query('SELECT id, AttachmentUrl, VideoUrl FROM KY_Activities WHERE id = ?', [req.params.id]);
+        const [rows] = await connection.query(
+            `SELECT a.id, a.AttachmentUrl, a.VideoUrl,
+                    EXISTS(SELECT 1 FROM KY_Annual_Video_Evidence ave WHERE ave.ActivityID = a.id) AS HasAnnualVideoEvidence,
+                    EXISTS(SELECT 1 FROM KY_Video_File_Inventory inv WHERE inv.ActivityID = a.id) AS HasVideoInventory
+             FROM KY_Activities a WHERE a.id = ?`,
+            [req.params.id]
+        );
         if (!rows.length) return res.status(404).json({ success: false, message: 'ไม่พบกิจกรรม KY' });
-        if (rows[0]?.VideoUrl) return res.status(409).json({ success: false, code: 'KY_VIDEO_PROTECTED_BY_RETENTION', message: 'Confirm External Backup and remove the Production copy through Annual Video Evidence before deleting the activity.' });
+        if (rows[0]?.VideoUrl || Number(rows[0]?.HasAnnualVideoEvidence || 0) || Number(rows[0]?.HasVideoInventory || 0)) {
+            return res.status(409).json({ success: false, code: 'KY_VIDEO_PROTECTED_BY_RETENTION', message: 'This activity is protected by its video evidence retention record and cannot be deleted.' });
+        }
         await connection.beginTransaction();
         await connection.query('DELETE FROM KY_Video_Reactions WHERE ActivityID = ?', [req.params.id]);
         await connection.query('DELETE FROM KY_Activities WHERE id = ?', [req.params.id]);

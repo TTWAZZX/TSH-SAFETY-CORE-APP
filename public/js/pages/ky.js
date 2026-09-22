@@ -515,6 +515,8 @@ let _lastStatsData   = null;
 let _kyProgConfig   = [];                          // KY_Program_Config for current year
 let _manageSub      = 'coverage';                  // 'coverage' | 'annual-video' | 'config' | 'forms'
 let _kyAnnualVideoData = null;
+let _kyAnnualAdminView = 'overview';               // overview | annual | inventory | cleanup
+let _kyAnnualAdminFilters = { search: '', department: 'all', status: 'action' };
 let _configYear     = new Date().getFullYear();
 let _safetyUnits    = [];                          // Master_SafetyUnits
 let _empSearchTimer = null;
@@ -944,6 +946,7 @@ async function renderDashboard(container) {
             </div>
 
             <div id="ky-heatmap-panel"></div>
+            <div id="ky-department-diagnostics"></div>
         </div>`;
 
     try {
@@ -961,6 +964,7 @@ async function renderDashboard(container) {
         renderBarChart(data.byDept || []);
         renderHazardPattern(data.topKeywords || []);
         renderDepartmentHeatmap(data.deptMonthly || [], data.byDept || []);
+        renderDepartmentDiagnostics(data.unmappedDepartments || [], data.departmentSource);
         await loadAndRenderKyEvidenceCompletion();
         await renderVideoShowcase();
     } catch (err) {
@@ -1857,7 +1861,7 @@ function renderDepartmentHeatmap(deptMonthly, byDept) {
     const el = document.getElementById('ky-heatmap-panel');
     if (!el) return;
 
-    const depts = byDept.slice(0, 10).map(d => d.Department).filter(Boolean);
+    const depts = byDept.map(d => d.Department).filter(Boolean);
     const maxCount = Math.max(...deptMonthly.map(r => r.count || 0), 1);
     const countFor = (dept, month) => {
         const row = deptMonthly.find(r => r.Department === dept && Number(r.month) === month);
@@ -1890,12 +1894,12 @@ function renderDepartmentHeatmap(deptMonthly, byDept) {
                         <div></div>
                         ${MONTHS_TH.map(m => `<div class="text-[10px] text-center font-semibold text-slate-400">${m}</div>`).join('')}
                         ${depts.map(dept => `
-                            <div class="text-xs font-semibold text-slate-600 truncate pr-2">${escHtml(dept)}</div>
+                            <div class="text-xs font-semibold text-slate-600 truncate pr-2" data-ky-heatmap-department="${escHtml(dept)}">${escHtml(dept)}</div>
                             ${Array.from({ length: 12 }, (_, i) => {
                                 const month = i + 1;
                                 const count = countFor(dept, month);
                                 return `<div class="h-7 rounded-md border border-white flex items-center justify-center text-[10px] font-bold ${count ? 'text-white' : 'text-slate-300'}"
-                                             style="background:${colorFor(count)}" title="${escHtml(dept)} ${MONTHS_TH[i]}: ${count}">${count || ''}</div>`;
+                                             style="background:${colorFor(count)}" title="${escHtml(dept)} ${MONTHS_TH[i]}: ${count}">${count}</div>`;
                             }).join('')}
                         `).join('')}
                     </div>
@@ -3741,6 +3745,20 @@ async function fetchAndRenderHistory() {
     }
 }
 
+function renderDepartmentDiagnostics(unmappedDepartments = [], source = 'ProgramConfig') {
+    const el = document.getElementById('ky-department-diagnostics');
+    if (!el) return;
+    if (!unmappedDepartments.length) {
+        el.innerHTML = `<div class="rounded-xl border border-emerald-100 bg-emerald-50 px-4 py-3 text-xs text-emerald-700" data-ky-department-diagnostics>Department mapping complete · dashboard source: ${escHtml(source)}</div>`;
+        return;
+    }
+    el.innerHTML = `<div class="rounded-xl border border-amber-200 bg-amber-50 p-4" data-ky-department-diagnostics>
+        <p class="text-sm font-bold text-amber-800">Unmapped Department (${unmappedDepartments.length})</p>
+        <p class="mt-1 text-xs text-amber-700">พบกิจกรรมที่ชื่อ Department ไม่ตรงกับ Program Config จึงไม่รวมในกราฟหลัก กรุณาตรวจสอบชื่อก่อนแก้ข้อมูล</p>
+        <div class="mt-3 flex flex-wrap gap-2">${unmappedDepartments.map(row => `<span class="rounded-full border border-amber-200 bg-white px-3 py-1 text-xs font-semibold text-amber-800">${escHtml(row.Department || '-')} · ${Number(row.count || 0)}</span>`).join('')}</div>
+    </div>`;
+}
+
 function isKySubmittedOnBehalf(record) {
     return Boolean(record?.SubmittedByID && record?.ReporterID && record.SubmittedByID !== record.ReporterID);
 }
@@ -4085,21 +4103,43 @@ async function renderKyAnnualVideoEvidence(panel = document.getElementById('ky-m
         const evidence = data.evidence || [];
         const scopes = data.scopes || [];
         const candidates = data.candidates || [];
+        const inventory = data.inventory || [];
+        const inventorySummary = data.inventorySummary || {};
+        const annualCandidates = candidates.filter(row => !row.ScopeAlreadyRegistered);
+        const annualCleanup = evidence.filter(row => row.canDeleteProductionFile);
+        const inventoryCleanup = inventory.filter(row => row.canDeleteProductionFile);
+        const adminDepartments = [...new Set([...scopes, ...inventory].map(row => String(row.department || row.Department || '').trim()).filter(Boolean))].sort();
+        const actionRequired = Number(summary.pendingScopes || 0) + Number(summary.missingScopes || 0)
+            + Number(inventorySummary.unregistered || 0) + Number(inventorySummary.pending || 0);
         const statusBadge = row => row.Status === 'Verified'
             ? '<span class="rounded-full bg-emerald-100 px-2 py-1 text-[10px] font-bold text-emerald-700">Verified</span>'
             : row.Status === 'NeedsCorrection'
                 ? '<span class="rounded-full bg-rose-100 px-2 py-1 text-[10px] font-bold text-rose-700">Needs correction</span>'
-                : '<span class="rounded-full bg-amber-100 px-2 py-1 text-[10px] font-bold text-amber-700">Pending</span>';
+                : row.Status === 'Unregistered'
+                    ? '<span class="rounded-full bg-slate-100 px-2 py-1 text-[10px] font-bold text-slate-600">Unregistered</span>'
+                    : '<span class="rounded-full bg-amber-100 px-2 py-1 text-[10px] font-bold text-amber-700">Pending</span>';
         panel.innerHTML = `
             <div class="space-y-5">
+                <div class="sticky top-0 z-20 ds-section p-3 shadow-sm" data-ky-annual-admin-toolbar>
+                    <div class="flex flex-col xl:flex-row xl:items-center justify-between gap-3">
+                        <div class="flex gap-2 overflow-x-auto pb-1 xl:pb-0">
+                            ${[['overview','Overview'],['annual','Annual Compliance'],['inventory','Production Inventory'],['cleanup','Cleanup Queue & Audit']].map(([value,label])=>`<button type="button" data-ky-annual-view="${value}" class="whitespace-nowrap rounded-xl px-3 py-2 text-xs font-bold ${_kyAnnualAdminView===value?'bg-emerald-700 text-white':'border border-slate-200 bg-white text-slate-600'}">${label}</button>`).join('')}
+                        </div>
+                        <div class="grid grid-cols-1 sm:grid-cols-3 gap-2 flex-1 xl:max-w-3xl">
+                            <input type="search" data-ky-annual-admin-search class="ds-input" value="${escHtml(_kyAnnualAdminFilters.search)}" placeholder="ค้นหา Scope, Unit, Activity หรือชื่อไฟล์">
+                            <select data-ky-annual-admin-department class="ds-select"><option value="all">ทุก Department</option>${adminDepartments.map(dept=>`<option value="${escHtml(dept)}" ${_kyAnnualAdminFilters.department===dept?'selected':''}>${escHtml(dept)}</option>`).join('')}</select>
+                            <select data-ky-annual-admin-status class="ds-select"><option value="action" ${_kyAnnualAdminFilters.status==='action'?'selected':''}>ต้องดำเนินการ (${actionRequired})</option><option value="all" ${_kyAnnualAdminFilters.status==='all'?'selected':''}>ทุกสถานะ</option><option value="missing">ยังไม่มี / Unregistered</option><option value="pending">รอ Verify / Needs correction</option><option value="verified">Verified</option><option value="ready">พร้อม Cleanup</option><option value="deleted">ลบ Production แล้ว</option></select>
+                        </div>
+                    </div>
+                </div>
                 <div class="grid grid-cols-2 lg:grid-cols-6 gap-3" data-ky-annual-summary>
                     ${[
                         ['Required scopes', summary.requiredScopes || 0, 'text-slate-800'],
                         ['Verified', summary.verifiedScopes || 0, 'text-emerald-700'],
                         ['Pending', summary.pendingScopes || 0, 'text-amber-700'],
                         ['Missing', summary.missingScopes || 0, 'text-rose-700'],
-                        ['Compliance', `${summary.compliancePct || 0}%`, 'text-indigo-700'],
-                        ['Reclaimable', `${summary.reclaimableFiles || 0} · ${formatFileSize(summary.reclaimableBytes || 0)}`, 'text-teal-700'],
+                        ['Action required', actionRequired, 'text-indigo-700'],
+                        ['Cleanup ready', `${annualCleanup.length + inventoryCleanup.length} · ${formatFileSize([...annualCleanup, ...inventoryCleanup].reduce((total,row)=>total+Number(row.FileSize||0),0))}`, 'text-teal-700'],
                     ].map(([label,value,color]) => `<div class="ds-section p-4"><p class="text-[10px] font-bold uppercase text-slate-400">${label}</p><p class="mt-1 text-xl font-bold ${color}">${value}</p></div>`).join('')}
                 </div>
                 <div class="ds-section p-5">
@@ -4134,11 +4174,262 @@ async function renderKyAnnualVideoEvidence(panel = document.getElementById('ky-m
                         </tr>`).join('') : '<tr><td colspan="6" class="py-8 text-center text-sm text-slate-400">ยังไม่มีทะเบียนหลักฐานวิดีโอรายปี</td></tr>'}
                     </tbody></table></div>
                 </div>
-                ${candidates.length ? `<div class="ds-section p-5"><h3 class="font-bold text-slate-800">วิดีโอ Production เดิม (${candidates.length})</h3><p class="text-xs text-slate-500 mt-1 mb-3">หนึ่ง Department / Safety Unit ใช้หลักฐานหลัก 1 รายการต่อปี รายการที่มีทะเบียนแล้วจะพาไปยังหลักฐานเดิมและไม่ลงทะเบียนซ้ำ</p><div class="grid grid-cols-1 lg:grid-cols-2 gap-2 max-h-72 overflow-y-auto">${candidates.map(row=>`<div class="rounded-xl border ${row.ScopeAlreadyRegistered?'border-emerald-200 bg-emerald-50/40':'border-slate-200'} p-3 flex items-center justify-between gap-3"><div class="min-w-0"><p class="text-xs font-bold text-slate-800 truncate">${escHtml(row.Department||'-')} · ${escHtml(row.SafetyUnit||'Department')}</p><p class="text-[10px] text-slate-500 truncate">${escHtml(row.TeamName||row.KYTKeyword||row.id)}</p>${row.ScopeAlreadyRegistered?`<p class="text-[10px] font-bold mt-1 ${row.ScopeEvidenceStatus==='Verified'?'text-emerald-700':'text-amber-700'}">Scope นี้มีหลักฐาน ${escHtml(row.ScopeEvidenceStatus||'Pending')} แล้ว</p>`:''}</div>${row.ScopeAlreadyRegistered?`<button data-ky-annual-focus-evidence="${escHtml(row.ScopeEvidenceID||'')}" class="px-3 py-1.5 rounded-lg border border-emerald-300 bg-white text-emerald-700 text-[10px] font-bold whitespace-nowrap">ดูรายการเดิม</button>`:`<button data-ky-annual-register-production="${escHtml(row.id)}" class="px-3 py-1.5 rounded-lg bg-indigo-600 text-white text-[10px] font-bold whitespace-nowrap">ลงทะเบียน</button>`}</div>`).join('')}</div></div>`:''}
+                ${annualCandidates.length ? `<div class="ds-section p-5"><h3 class="font-bold text-slate-800">กิจกรรมที่เลือกเป็นหลักฐาน Annual ได้ (${annualCandidates.length})</h3><p class="text-xs text-slate-500 mt-1 mb-3">แสดงเฉพาะ Scope ที่ยังไม่มีหลักฐานหลักประจำปี</p><div class="grid grid-cols-1 lg:grid-cols-2 gap-2 max-h-80 overflow-y-auto">${annualCandidates.map(row=>`<div class="rounded-xl border border-slate-200 p-3 flex items-center justify-between gap-3"><div class="min-w-0"><p class="text-xs font-bold text-slate-800 truncate">${escHtml(row.Department||'-')} · ${escHtml(row.SafetyUnit||'Department')}</p><p class="text-[10px] text-slate-500 truncate">${escHtml(row.TeamName||row.KYTKeyword||row.id)}</p></div><button data-ky-annual-register-production="${escHtml(row.id)}" class="px-3 py-1.5 rounded-lg bg-indigo-600 text-white text-[10px] font-bold whitespace-nowrap">ลงทะเบียน Annual</button></div>`).join('')}</div></div>`:''}
+                <div class="ds-section p-5" data-ky-video-inventory>
+                    <div class="flex flex-col xl:flex-row xl:items-end justify-between gap-3 mb-4">
+                        <div><h3 class="font-bold text-slate-800">Production Video Inventory (${Number(inventorySummary.total||inventory.length)})</h3><p class="text-xs text-slate-500 mt-1">แยกจาก Annual Compliance · ทุกไฟล์ต้องมี External Backup ที่ SHA-256 ตรงกันและ Admin Verify ก่อนลบ Production</p></div>
+                        <button type="button" data-ky-inventory-delete-selected class="px-4 py-2 rounded-xl bg-rose-600 text-white text-xs font-bold disabled:opacity-40">ลบไฟล์ Inventory ที่เลือก</button>
+                    </div>
+                    <div class="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-6 gap-2 mb-4">
+                        ${[
+                            ['Production', inventorySummary.productionFiles||0, 'text-sky-700'],
+                            ['Unregistered', inventorySummary.unregistered||0, 'text-slate-700'],
+                            ['Pending', inventorySummary.pending||0, 'text-amber-700'],
+                            ['External verified', inventorySummary.verifiedExternal||0, 'text-emerald-700'],
+                            ['Ready to clean', inventorySummary.reclaimableFiles||0, 'text-teal-700'],
+                            ['Removed', inventorySummary.deletedFiles||0, 'text-rose-700'],
+                        ].map(([label,value,color])=>`<div class="rounded-xl border border-slate-100 bg-slate-50 p-3"><p class="text-[10px] font-bold uppercase text-slate-400">${label}</p><p class="text-lg font-black ${color}">${value}</p></div>`).join('')}
+                    </div>
+                    <div class="mb-3 grid grid-cols-1 lg:grid-cols-[1fr_auto] gap-2">
+                        <input type="search" data-ky-inventory-search class="ds-input" placeholder="ค้นหา Department, Safety Unit, ชื่อทีม หรือ Activity ID">
+                        <select data-ky-inventory-filter class="ds-select"><option value="all">ทุกสถานะ</option><option value="unregistered">ยังไม่ลงทะเบียน Backup</option><option value="pending">รอ Verify</option><option value="verified">External verified</option><option value="reclaimable">พร้อมลบ Production</option><option value="deleted">ลบ Production แล้ว</option></select>
+                    </div>
+                    <div class="grid grid-cols-1 lg:grid-cols-2 gap-2 max-h-[60vh] overflow-y-auto pr-1" data-ky-inventory-list>
+                        ${inventory.length ? inventory.map(row=>`<div class="rounded-xl border ${row.canDeleteProductionFile?'border-teal-300 bg-teal-50/40':'border-slate-200 bg-white'} p-3" data-ky-inventory-row data-search="${escHtml([row.Department,row.SafetyUnit,row.TeamName,row.KYTKeyword,row.ActivityID,row.OriginalFileName].filter(Boolean).join(' ').toLowerCase())}" data-status="${row.fileDeleted?'deleted':row.canDeleteProductionFile?'reclaimable':row.Status==='Verified'?'verified':['Pending','NeedsCorrection'].includes(row.Status)?'pending':'unregistered'}">
+                            <div class="flex items-start gap-3"><input type="checkbox" data-ky-inventory-select value="${escHtml(row.id||'')}" data-version="${Number(row.RowVersion||0)}" ${row.canDeleteProductionFile?'':'disabled'} class="mt-1"><div class="min-w-0 flex-1"><div class="flex flex-wrap items-center gap-2"><p class="text-xs font-bold text-slate-800">${escHtml(row.Department||'-')} · ${escHtml(row.SafetyUnit||'Department')}</p>${statusBadge(row)}${row.AnnualEvidenceID?'<span class="rounded-full bg-indigo-50 px-2 py-1 text-[9px] font-bold text-indigo-700">Annual primary</span>':''}</div><p class="mt-1 text-[10px] text-slate-500 truncate">${escHtml(row.TeamName||row.KYTKeyword||row.ActivityID)} · ${escHtml(row.OriginalFileName||'Production file')}</p>${row.SHA256?`<p class="mt-1 text-[10px] text-slate-400">${formatFileSize(row.FileSize||0)} · SHA ${escHtml(String(row.SHA256).slice(0,12))}…</p>`:''}${row.fileDeleted?'<p class="mt-1 text-[10px] font-bold text-rose-600">Production file removed · metadata retained</p>':''}</div></div>
+                            <div class="mt-3 flex flex-wrap justify-end gap-1">
+                                <button type="button" data-ky-inventory-detail="${escHtml(row.id||row.ActivityID)}" class="rounded-lg border px-2 py-1 text-[10px] font-bold text-slate-600">Detail</button>
+                                ${!row.registered&&row.CurrentVideoUrl?`<button data-ky-inventory-register="${escHtml(row.ActivityID)}" class="px-2 py-1 rounded-lg bg-indigo-600 text-white text-[10px] font-bold">ลงทะเบียน External Backup</button>`:''}
+                                ${row.registered&&row.CurrentVideoUrl&&!row.fileDeleted?`<button data-ky-inventory-download="${escHtml(row.id)}" data-name="${escHtml(row.OriginalFileName||'video')}" class="px-2 py-1 rounded-lg border text-[10px] font-bold text-indigo-700">ดาวน์โหลด</button>`:''}
+                                ${row.registered?`<button data-ky-inventory-audit="${escHtml(row.id)}" class="px-2 py-1 rounded-lg border text-[10px] font-bold text-slate-600">Audit</button>`:''}
+                                ${row.registered&&row.Status!=='Verified'?`<button data-ky-inventory-verify="${escHtml(row.id)}" data-version="${Number(row.RowVersion||0)}" class="px-2 py-1 rounded-lg bg-emerald-600 text-white text-[10px] font-bold">Verify</button>`:''}
+                                ${row.registered&&row.Status!=='NeedsCorrection'?`<button data-ky-inventory-correction="${escHtml(row.id)}" data-version="${Number(row.RowVersion||0)}" class="px-2 py-1 rounded-lg bg-amber-500 text-white text-[10px] font-bold">แก้ไข</button>`:''}
+                                ${row.canDeleteProductionFile?`<button data-ky-inventory-delete-one="${escHtml(row.id)}" data-version="${Number(row.RowVersion||0)}" class="px-2 py-1 rounded-lg bg-rose-600 text-white text-[10px] font-bold">ลบไฟล์</button>`:''}
+                            </div>
+                        </div>`).join(''):'<p class="col-span-full py-8 text-center text-sm text-slate-400">ไม่พบวิดีโอใน Inventory ปีนี้</p>'}
+                    </div>
+                </div>
             </div>`;
+        panel.querySelector('.space-y-5')?.insertAdjacentHTML('beforeend', buildKyCleanupQueue(evidence, inventory));
+        configureKyAnnualAdminWorkspace(panel, { scopes, evidence, inventory, annualCandidates });
+        panel.querySelector('[data-ky-inventory-search]')?.addEventListener('input', filterKyVideoInventory);
+        panel.querySelector('[data-ky-inventory-filter]')?.addEventListener('change', filterKyVideoInventory);
+        panel.querySelector('[data-ky-annual-admin-search]')?.addEventListener('input', event => {
+            _kyAnnualAdminFilters.search = event.target.value || '';
+            filterKyAnnualAdminWorkspace(panel);
+        });
+        panel.querySelector('[data-ky-annual-admin-department]')?.addEventListener('change', event => {
+            _kyAnnualAdminFilters.department = event.target.value || 'all';
+            filterKyAnnualAdminWorkspace(panel);
+        });
+        panel.querySelector('[data-ky-annual-admin-status]')?.addEventListener('change', event => {
+            _kyAnnualAdminFilters.status = event.target.value || 'all';
+            filterKyAnnualAdminWorkspace(panel);
+        });
     } catch (err) {
         panel.innerHTML = `<div class="ds-section p-6 text-center text-sm text-red-600">${escHtml(err.message || 'โหลด Annual Video Evidence ไม่สำเร็จ')}</div>`;
     }
+}
+
+function buildKyCleanupQueue(annualEvidence = [], inventoryEvidence = []) {
+    const annualRows = annualEvidence.filter(row => row.canDeleteProductionFile);
+    const inventoryRows = inventoryEvidence.filter(row => row.canDeleteProductionFile);
+    const auditHistory = [
+        ...annualEvidence.filter(row => row.fileDeleted).map(row => ({ ...row, evidenceKind: 'annual' })),
+        ...inventoryEvidence.filter(row => row.fileDeleted).map(row => ({ ...row, evidenceKind: 'inventory' })),
+    ];
+    const allRows = [...annualRows, ...inventoryRows];
+    const reclaimableBytes = allRows.reduce((total, row) => total + Number(row.FileSize || 0), 0);
+    const rowMarkup = (row, kind) => {
+        const isAnnual = kind === 'annual';
+        const id = String(row.id || '');
+        const department = String(row.Department || row.department || '-');
+        const safetyUnit = String(row.SafetyUnit || row.safetyUnit || 'Department');
+        const search = [department, safetyUnit, row.TeamName, row.KYTKeyword, row.ActivityID, row.OriginalFileName, row.ExternalReference]
+            .filter(Boolean).join(' ').toLowerCase();
+        return `<div class="rounded-xl border border-teal-200 bg-teal-50/40 p-3" data-ky-admin-filter-row data-department="${escHtml(department)}" data-status="ready" data-search="${escHtml(search)}">
+            <div class="flex items-start gap-3">
+                <input type="checkbox" ${isAnnual ? 'data-ky-annual-select' : 'data-ky-inventory-select'} value="${escHtml(id)}" data-version="${Number(row.RowVersion || 0)}" class="mt-1">
+                <div class="min-w-0 flex-1">
+                    <div class="flex flex-wrap items-center gap-2"><p class="text-xs font-bold text-slate-800">${escHtml(department)} · ${escHtml(safetyUnit)}</p><span class="rounded-full bg-teal-100 px-2 py-1 text-[9px] font-bold text-teal-700">Guard passed</span></div>
+                    <p class="mt-1 truncate text-[10px] text-slate-500">${escHtml(row.OriginalFileName || row.ActivityID || id)} · ${formatFileSize(row.FileSize || 0)}</p>
+                    <p class="mt-1 truncate text-[10px] text-slate-400" title="${escHtml(row.ExternalReference || '')}">External: ${escHtml(row.ExternalReference || '-')} · SHA ${escHtml(String(row.SHA256 || '').slice(0, 16))}…</p>
+                </div>
+                <div class="flex flex-wrap justify-end gap-1">
+                    <button type="button" ${isAnnual ? `data-ky-annual-detail="${escHtml(id)}"` : `data-ky-inventory-detail="${escHtml(id)}"`} class="rounded-lg border px-2 py-1 text-[10px] font-bold text-slate-600">Detail</button>
+                    <button type="button" ${isAnnual ? `data-ky-annual-audit="${escHtml(id)}"` : `data-ky-inventory-audit="${escHtml(id)}"`} class="rounded-lg border px-2 py-1 text-[10px] font-bold text-slate-600">Audit</button>
+                    <button type="button" ${isAnnual ? `data-ky-annual-delete-one="${escHtml(id)}"` : `data-ky-inventory-delete-one="${escHtml(id)}"`} data-version="${Number(row.RowVersion || 0)}" class="rounded-lg bg-rose-600 px-2 py-1 text-[10px] font-bold text-white">ลบไฟล์</button>
+                </div>
+            </div>
+        </div>`;
+    };
+    return `<div class="ds-section p-5 ${_kyAnnualAdminView === 'cleanup' ? '' : 'hidden'}" data-ky-cleanup-panel data-ky-annual-view-panel="cleanup">
+        <div class="flex flex-col gap-3 border-b border-slate-100 pb-4 lg:flex-row lg:items-center lg:justify-between">
+            <div><h3 class="font-bold text-slate-800">Cleanup Queue & Audit</h3><p class="mt-1 text-xs text-slate-500">แสดงเฉพาะไฟล์ที่ผ่าน Admin Verify, ยืนยัน External Backup, มี SHA-256 ตรงกัน และยังผูกกับไฟล์ Production ปัจจุบัน</p></div>
+            <div class="rounded-xl bg-teal-50 px-4 py-2 text-right"><p class="text-[10px] font-bold uppercase text-teal-600">Ready for guarded cleanup</p><p class="font-black text-teal-800">${allRows.length} files · ${formatFileSize(reclaimableBytes)}</p></div>
+        </div>
+        <div class="mt-4 grid grid-cols-1 gap-4 xl:grid-cols-2">
+            <section class="rounded-2xl border border-slate-200 p-4" data-ky-cleanup-group="annual">
+                <div class="mb-3 flex items-center justify-between gap-2"><div><h4 class="text-sm font-bold text-slate-800">Annual primary evidence</h4><p class="text-[10px] text-slate-500">${annualRows.length} รายการ</p></div><div class="flex items-center gap-2"><label class="text-[10px] font-bold text-slate-500"><input type="checkbox" data-ky-annual-check-all> เลือกทั้งหมด</label><button type="button" data-ky-annual-delete-selected class="rounded-lg bg-rose-600 px-3 py-1.5 text-[10px] font-bold text-white disabled:opacity-40">Bulk cleanup</button></div></div>
+                <div class="space-y-2 max-h-[52vh] overflow-y-auto pr-1">${annualRows.length ? annualRows.map(row => rowMarkup(row, 'annual')).join('') : '<p class="py-8 text-center text-xs text-slate-400">ไม่มี Annual file ที่ผ่านเงื่อนไขการลบ</p>'}</div>
+            </section>
+            <section class="rounded-2xl border border-slate-200 p-4" data-ky-cleanup-group="inventory">
+                <div class="mb-3 flex items-center justify-between gap-2"><div><h4 class="text-sm font-bold text-slate-800">Production inventory</h4><p class="text-[10px] text-slate-500">${inventoryRows.length} รายการ</p></div><div class="flex items-center gap-2"><label class="text-[10px] font-bold text-slate-500"><input type="checkbox" data-ky-inventory-check-all> เลือกทั้งหมด</label><button type="button" data-ky-inventory-delete-selected class="rounded-lg bg-rose-600 px-3 py-1.5 text-[10px] font-bold text-white disabled:opacity-40">Bulk cleanup</button></div></div>
+                <div class="space-y-2 max-h-[52vh] overflow-y-auto pr-1">${inventoryRows.length ? inventoryRows.map(row => rowMarkup(row, 'inventory')).join('') : '<p class="py-8 text-center text-xs text-slate-400">ไม่มี Inventory file ที่ผ่านเงื่อนไขการลบ</p>'}</div>
+            </section>
+        </div>
+        <section class="mt-4 rounded-2xl border border-slate-200 p-4">
+            <div class="mb-3"><h4 class="text-sm font-bold text-slate-800">Cleanup audit history</h4><p class="text-[10px] text-slate-500">ไฟล์ Production ที่ลบแล้ว โดย Metadata, SHA-256 และ Audit ยังคงอยู่ (${auditHistory.length})</p></div>
+            <div class="grid max-h-[40vh] grid-cols-1 gap-2 overflow-y-auto pr-1 lg:grid-cols-2">${auditHistory.length ? auditHistory.map(row => {
+                const department = String(row.Department || '-');
+                const id = String(row.id || '');
+                const isAnnual = row.evidenceKind === 'annual';
+                return `<div class="rounded-xl border border-rose-100 bg-rose-50/40 p-3" data-ky-admin-filter-row data-department="${escHtml(department)}" data-status="deleted" data-search="${escHtml([department,row.SafetyUnit,row.ActivityID,row.OriginalFileName,row.ExternalReference].filter(Boolean).join(' ').toLowerCase())}"><div class="flex items-start justify-between gap-3"><div class="min-w-0"><div class="flex flex-wrap items-center gap-2"><p class="text-xs font-bold text-slate-800">${escHtml(department)} · ${escHtml(row.SafetyUnit||'Department')}</p><span class="rounded-full bg-rose-100 px-2 py-1 text-[9px] font-bold text-rose-700">Production removed</span></div><p class="mt-1 truncate text-[10px] text-slate-500">${escHtml(row.OriginalFileName||row.ActivityID||id)} · ${formatFileSize(row.FileSize||0)}</p><p class="mt-1 text-[10px] text-slate-400">Removed ${escHtml(row.ProductionDeletedAt||'-')} · SHA ${escHtml(String(row.SHA256||'').slice(0,16))}…</p></div><div class="flex gap-1"><button type="button" ${isAnnual?`data-ky-annual-detail="${escHtml(id)}"`:`data-ky-inventory-detail="${escHtml(id)}"`} class="rounded-lg border px-2 py-1 text-[10px] font-bold text-slate-600">Detail</button><button type="button" ${isAnnual?`data-ky-annual-audit="${escHtml(id)}"`:`data-ky-inventory-audit="${escHtml(id)}"`} class="rounded-lg border px-2 py-1 text-[10px] font-bold text-slate-600">Audit</button></div></div></div>`;
+            }).join('') : '<p class="col-span-full py-6 text-center text-xs text-slate-400">ยังไม่มีประวัติการลบไฟล์ Production</p>'}</div>
+        </section>
+    </div>`;
+}
+
+function kyAnnualRowStatus(row, kind = 'annual') {
+    if (row.fileDeleted) return 'deleted';
+    if (row.canDeleteProductionFile) return 'ready';
+    if (kind === 'inventory' && !row.registered) return 'missing';
+    if (row.Status === 'Verified' || row.compliant) return 'verified';
+    if (row.Status === 'Pending' || row.Status === 'NeedsCorrection' || row.evidence) return 'pending';
+    return 'missing';
+}
+
+function applyKyAnnualAdminView(panel) {
+    panel.querySelectorAll('[data-ky-annual-view-panel]').forEach(section => {
+        section.classList.toggle('hidden', section.dataset.kyAnnualViewPanel !== _kyAnnualAdminView);
+    });
+    panel.querySelectorAll('[data-ky-annual-view]').forEach(button => {
+        const active = button.dataset.kyAnnualView === _kyAnnualAdminView;
+        button.classList.toggle('bg-emerald-700', active);
+        button.classList.toggle('text-white', active);
+        button.classList.toggle('border', !active);
+        button.classList.toggle('border-slate-200', !active);
+        button.classList.toggle('bg-white', !active);
+        button.classList.toggle('text-slate-600', !active);
+        button.setAttribute('aria-pressed', active ? 'true' : 'false');
+    });
+}
+
+function filterKyAnnualAdminWorkspace(panel = document.getElementById('ky-manage-panel')) {
+    if (!panel) return;
+    const search = String(_kyAnnualAdminFilters.search || '').trim().toLowerCase();
+    const department = String(_kyAnnualAdminFilters.department || 'all');
+    const status = String(_kyAnnualAdminFilters.status || 'all');
+    let visible = 0;
+    panel.querySelectorAll('[data-ky-admin-filter-row]').forEach(row => {
+        const rowStatus = String(row.dataset.status || '');
+        const statusMatch = status === 'all'
+            || (status === 'action' && ['missing', 'pending', 'ready'].includes(rowStatus))
+            || (status === 'missing' && ['missing', 'unregistered'].includes(rowStatus))
+            || status === rowStatus;
+        const departmentMatch = department === 'all' || row.dataset.department === department;
+        const searchMatch = !search || String(row.dataset.search || row.textContent || '').toLowerCase().includes(search);
+        const show = statusMatch && departmentMatch && searchMatch;
+        row.classList.toggle('hidden', !show);
+        if (show) visible += 1;
+    });
+    const result = panel.querySelector('[data-ky-filter-result]');
+    if (result) result.textContent = `${visible} รายการที่ตรงตัวกรอง`;
+}
+
+function configureKyAnnualAdminWorkspace(panel, { scopes = [], evidence = [], inventory = [], annualCandidates = [] } = {}) {
+    const summary = panel.querySelector('[data-ky-annual-summary]');
+    const overviewPanel = summary?.nextElementSibling;
+    const annualTable = panel.querySelector('[data-ky-annual-evidence-row], [data-ky-annual-check-all]')?.closest('.ds-section');
+    const candidatePanel = panel.querySelector('[data-ky-annual-register-production]')?.closest('.ds-section');
+    const inventoryPanel = panel.querySelector('[data-ky-video-inventory]');
+    if (overviewPanel) overviewPanel.dataset.kyAnnualViewPanel = 'overview';
+    if (annualTable) annualTable.dataset.kyAnnualViewPanel = 'annual';
+    if (candidatePanel) candidatePanel.dataset.kyAnnualViewPanel = 'annual';
+    if (inventoryPanel) inventoryPanel.dataset.kyAnnualViewPanel = 'inventory';
+
+    const scopeCards = overviewPanel ? Array.from(overviewPanel.querySelectorAll('.grid > div')) : [];
+    scopeCards.forEach((card, index) => {
+        const row = scopes[index];
+        if (!row) return;
+        const department = String(row.department || '');
+        card.dataset.kyAdminFilterRow = '';
+        card.dataset.department = department;
+        card.dataset.status = kyAnnualRowStatus(row);
+        card.dataset.search = [department, row.safetyUnit].filter(Boolean).join(' ').toLowerCase();
+    });
+    annualTable?.querySelectorAll('[data-ky-annual-evidence-row]').forEach(rowElement => {
+        const row = evidence.find(item => String(item.id) === rowElement.dataset.kyAnnualEvidenceRow);
+        if (!row) return;
+        rowElement.dataset.kyAdminFilterRow = '';
+        rowElement.dataset.department = String(row.Department || '');
+        rowElement.dataset.status = kyAnnualRowStatus(row);
+        rowElement.dataset.search = [row.Department, row.SafetyUnit, row.ActivityID, row.OriginalFileName, row.ExternalReference].filter(Boolean).join(' ').toLowerCase();
+        const actions = rowElement.querySelector('td:last-child > div');
+        if (actions && !actions.querySelector('[data-ky-annual-detail]')) actions.insertAdjacentHTML('afterbegin', `<button type="button" data-ky-annual-detail="${escHtml(row.id)}" class="rounded-lg border px-2 py-1 text-[10px] font-bold text-slate-600">Detail</button>`);
+    });
+    candidatePanel?.querySelectorAll('[data-ky-annual-register-production]').forEach(button => {
+        const row = annualCandidates.find(item => String(item.id) === button.dataset.kyAnnualRegisterProduction);
+        const card = button.closest('.rounded-xl');
+        if (!row || !card) return;
+        card.dataset.kyAdminFilterRow = '';
+        card.dataset.department = String(row.Department || '');
+        card.dataset.status = 'missing';
+        card.dataset.search = [row.Department, row.SafetyUnit, row.TeamName, row.KYTKeyword, row.id].filter(Boolean).join(' ').toLowerCase();
+    });
+    inventoryPanel?.querySelectorAll('[data-ky-inventory-row]').forEach(rowElement => {
+        const row = inventory.find(item => String(item.id) === String(rowElement.querySelector('[data-ky-inventory-select]')?.value || ''))
+            || inventory.find(item => String(item.ActivityID) === String(rowElement.querySelector('[data-ky-inventory-register]')?.dataset.kyInventoryRegister || ''));
+        if (!row) return;
+        rowElement.dataset.kyAdminFilterRow = '';
+        rowElement.dataset.department = String(row.Department || '');
+        rowElement.dataset.status = kyAnnualRowStatus(row, 'inventory');
+        const actions = rowElement.querySelector('.flex.flex-wrap.justify-end');
+        const detailId = row.id || row.ActivityID;
+        if (actions && detailId && !actions.querySelector('[data-ky-inventory-detail]')) actions.insertAdjacentHTML('afterbegin', `<button type="button" data-ky-inventory-detail="${escHtml(detailId)}" class="rounded-lg border px-2 py-1 text-[10px] font-bold text-slate-600">Detail</button>`);
+    });
+
+    // Destructive controls live only in the guarded Cleanup workspace.
+    annualTable?.querySelectorAll('[data-ky-annual-select], [data-ky-annual-check-all], [data-ky-annual-delete-selected], [data-ky-annual-delete-one]').forEach(control => (control.closest('th,td') || control).classList.add('hidden'));
+    inventoryPanel?.querySelectorAll('[data-ky-inventory-select], [data-ky-inventory-delete-selected], [data-ky-inventory-delete-one]').forEach(control => control.classList.add('hidden'));
+
+    const summaryActions = [
+        { view: 'annual', status: 'all' }, { view: 'annual', status: 'verified' }, { view: 'annual', status: 'pending' },
+        { view: 'annual', status: 'missing' }, { view: 'overview', status: 'action' }, { view: 'cleanup', status: 'ready' },
+    ];
+    Array.from(summary?.children || []).forEach((card, index) => {
+        const action = summaryActions[index];
+        if (!action) return;
+        card.classList.add('cursor-pointer', 'transition', 'hover:ring-2', 'hover:ring-emerald-200');
+        card.setAttribute('role', 'button'); card.setAttribute('tabindex', '0');
+        const activate = () => {
+            _kyAnnualAdminView = action.view; _kyAnnualAdminFilters.status = action.status;
+            const select = panel.querySelector('[data-ky-annual-admin-status]'); if (select) select.value = action.status;
+            applyKyAnnualAdminView(panel); filterKyAnnualAdminWorkspace(panel);
+        };
+        card.addEventListener('click', activate);
+        card.addEventListener('keydown', event => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); activate(); } });
+    });
+    panel.querySelectorAll('[data-ky-annual-view]').forEach(button => button.addEventListener('click', () => {
+        _kyAnnualAdminView = button.dataset.kyAnnualView || 'overview';
+        applyKyAnnualAdminView(panel); filterKyAnnualAdminWorkspace(panel);
+    }));
+    applyKyAnnualAdminView(panel);
+    filterKyAnnualAdminWorkspace(panel);
+}
+
+function showKyVideoEvidenceDetail(kind, id) {
+    const rows = kind === 'annual' ? (_kyAnnualVideoData?.evidence || []) : (_kyAnnualVideoData?.inventory || []);
+    const row = rows.find(item => String(item.id) === String(id) || String(item.ActivityID) === String(id));
+    if (!row) return;
+    const field = (label, value, mono = false) => `<div class="rounded-xl border border-slate-200 p-3"><p class="text-[10px] font-bold uppercase text-slate-400">${label}</p><p class="mt-1 break-all text-xs font-semibold text-slate-700 ${mono ? 'font-mono' : ''}">${escHtml(value == null || value === '' ? '-' : String(value))}</p></div>`;
+    openModal(kind === 'annual' ? 'Annual Evidence Detail Drawer' : 'Production Inventory Detail Drawer', `<div class="grid grid-cols-1 gap-2 sm:grid-cols-2">
+        ${field('Department', row.Department)}${field('Safety Unit', row.SafetyUnit || 'Department')}${field('Activity ID', row.ActivityID, true)}${field('Status', row.Status)}
+        ${field('Storage mode', row.StorageMode || (row.registered ? 'CentralMachine' : 'Production'))}${field('Production state', row.fileDeleted ? 'Removed' : 'Present')}
+        ${field('File name', row.OriginalFileName)}${field('File size', formatFileSize(row.FileSize || 0))}
+        <div class="sm:col-span-2">${field('External reference', row.ExternalReference)}</div><div class="sm:col-span-2">${field('SHA-256', row.SHA256, true)}</div>
+        ${field('Verified by', row.VerifiedByName || row.VerifiedBy)}${field('Verified at', row.VerifiedAt)}${field('Removed by', row.FileDeletedByName || row.FileDeletedBy)}${field('Removed at', row.FileDeletedAt)}
+    </div>`, 'max-w-xl ml-auto mr-0 h-full !max-h-screen !rounded-none');
 }
 
 async function downloadKyAnnualVideo(id, filename) {
@@ -4152,6 +4443,41 @@ async function showKyAnnualAudit(id) {
     const response = await API.get(`/ky/annual-video-evidence/${encodeURIComponent(id)}/audit`);
     const rows = normalizeApiArray(response?.data ?? response);
     openModal('Annual Video Evidence Audit', `<div class="space-y-2 max-h-[60vh] overflow-y-auto">${rows.length?rows.map(row=>`<div class="rounded-xl border border-slate-200 p-3"><div class="flex justify-between gap-3"><p class="text-xs font-bold text-slate-800">${escHtml(row.Action||'-')}</p><p class="text-[10px] text-slate-400">${escHtml(row.CreatedAt||'')}</p></div><p class="text-xs text-slate-500 mt-1">${escHtml(row.ActorName||row.ActorID||'-')} · ${escHtml(row.Detail||'')}</p></div>`).join(''):'<p class="text-sm text-slate-400">ยังไม่มี Audit</p>'}</div>`, 'max-w-2xl');
+}
+
+async function downloadKyInventoryVideo(id, filename) {
+    const response = await apiFetch(`/ky/video-inventory/${encodeURIComponent(id)}/download`);
+    if (!(response instanceof Response) || !response.ok) throw new Error('ดาวน์โหลดวิดีโอ Inventory ไม่สำเร็จ');
+    const url = URL.createObjectURL(await response.blob());
+    const link = document.createElement('a');link.href=url;link.download=filename||'ky-video';document.body.appendChild(link);link.click();link.remove();setTimeout(()=>URL.revokeObjectURL(url),1000);
+}
+
+async function showKyInventoryAudit(id) {
+    const response = await API.get(`/ky/video-inventory/${encodeURIComponent(id)}/audit`);
+    const rows = normalizeApiArray(response?.data ?? response);
+    openModal('Production Video Inventory Audit', `<div class="space-y-2 max-h-[60vh] overflow-y-auto">${rows.length?rows.map(row=>`<div class="rounded-xl border border-slate-200 p-3"><div class="flex justify-between gap-3"><p class="text-xs font-bold text-slate-800">${escHtml(row.Action||'-')}</p><p class="text-[10px] text-slate-400">${escHtml(row.CreatedAt||'')}</p></div><p class="text-xs text-slate-500 mt-1">${escHtml(row.ActorName||row.ActorID||'-')} · ${escHtml(row.Detail||'')}</p></div>`).join(''):'<p class="text-sm text-slate-400">ยังไม่มี Audit</p>'}</div>`, 'max-w-2xl');
+}
+
+function chooseKyInventoryBackupFile() {
+    return new Promise(resolve => {
+        const input = document.createElement('input');
+        input.type = 'file';
+        input.accept = 'video/mp4,video/quicktime,video/webm,video/x-msvideo,video/x-matroska,video/mpeg,.mp4,.mov,.webm,.avi,.mkv,.mpeg,.mpg';
+        input.hidden = true;
+        input.addEventListener('change', () => { const file = input.files?.[0] || null; input.remove(); resolve(file); }, { once: true });
+        document.body.appendChild(input);
+        input.click();
+    });
+}
+
+function filterKyVideoInventory() {
+    const search = String(document.querySelector('[data-ky-inventory-search]')?.value || '').trim().toLowerCase();
+    const status = String(document.querySelector('[data-ky-inventory-filter]')?.value || 'all');
+    document.querySelectorAll('[data-ky-inventory-row]').forEach(row => {
+        const matchesSearch = !search || String(row.dataset.search || '').includes(search);
+        const matchesStatus = status === 'all' || row.dataset.status === status;
+        row.classList.toggle('hidden', !(matchesSearch && matchesStatus));
+    });
 }
 
 function focusKyAnnualEvidenceRow(evidenceId) {
@@ -5582,6 +5908,9 @@ function setupEventListeners() {
         const annualAuditBtn = e.target.closest('[data-ky-annual-audit]');
         if (annualAuditBtn) { await showKyAnnualAudit(annualAuditBtn.dataset.kyAnnualAudit); return; }
 
+        const annualDetailBtn = e.target.closest('[data-ky-annual-detail]');
+        if (annualDetailBtn) { showKyVideoEvidenceDetail('annual', annualDetailBtn.dataset.kyAnnualDetail); return; }
+
         const annualDeleteOneBtn = e.target.closest('[data-ky-annual-delete-one]');
         if (annualDeleteOneBtn) {
             const reason = window.prompt('ระบุเหตุผลการลบไฟล์จาก Production (Metadata, SHA-256 และ Audit จะยังอยู่)', '') ?? null;
@@ -5598,21 +5927,112 @@ function setupEventListeners() {
         }
 
         if (e.target.closest('[data-ky-annual-check-all]')) {
-            const checked = Boolean(e.target.closest('[data-ky-annual-check-all]').checked);
-            document.querySelectorAll('[data-ky-annual-select]:not(:disabled)').forEach(input => { input.checked = checked; });
+            const checkAll = e.target.closest('[data-ky-annual-check-all]');
+            const checked = Boolean(checkAll.checked);
+            const scope = checkAll.closest('[data-ky-cleanup-group]') || checkAll.closest('[data-ky-annual-view-panel]') || document;
+            scope.querySelectorAll('[data-ky-annual-select]:not(:disabled)').forEach(input => { input.checked = checked; });
             return;
         }
 
         if (e.target.closest('[data-ky-annual-delete-selected]')) {
-            const selected = Array.from(document.querySelectorAll('[data-ky-annual-select]:checked:not(:disabled)')).map(input => ({ id: input.value, rowVersion: Number(input.dataset.version || 0) }));
+            const trigger = e.target.closest('[data-ky-annual-delete-selected]');
+            const scope = trigger.closest('[data-ky-cleanup-group]') || trigger.closest('[data-ky-annual-view-panel]') || document;
+            const selected = Array.from(scope.querySelectorAll('[data-ky-annual-select]:checked:not(:disabled)')).map(input => ({ id: input.value, rowVersion: Number(input.dataset.version || 0) }));
             if (!selected.length) { showToast('เลือกรายการที่ Verified และยืนยัน External Backup ก่อน', 'warning'); return; }
+            const selectedRows = (_kyAnnualVideoData?.evidence || []).filter(row => selected.some(item => String(item.id) === String(row.id)));
+            const selectedBytes = selectedRows.reduce((total, row) => total + Number(row.FileSize || 0), 0);
             const reason = window.prompt('ระบุเหตุผลการลบไฟล์จาก Production (Metadata, SHA-256 และ Audit จะยังอยู่)', '') ?? null;
             if (!reason?.trim()) return;
-            const confirmed = await showConfirmationModal('ยืนยันลบไฟล์ Production', `ลบไฟล์วิดีโอ ${selected.length} รายการจาก Production ใช่หรือไม่? การดำเนินการนี้ย้อนกลับไม่ได้ แต่ Metadata และ Audit จะถูกเก็บไว้`);
+            const confirmed = await showConfirmationModal('ยืนยันลบไฟล์ Production', `ลบวิดีโอ ${selected.length} รายการ (${formatFileSize(selectedBytes)}) จาก Production ใช่หรือไม่? ระบบตรวจแล้วว่าทุกรายการมี External Backup ที่ Admin Verify และ SHA-256 ตรงกัน การลบย้อนกลับไม่ได้ แต่ Metadata และ Audit จะคงอยู่`);
             if (!confirmed) return;
             await API.post('/ky/annual-video-evidence/delete-production', { items: selected, reason: reason.trim() });
             showToast(`ลบไฟล์ Production แล้ว ${selected.length} รายการ`, 'success');
             await renderKyAnnualVideoEvidence();
+            return;
+        }
+
+        const inventoryRegisterBtn = e.target.closest('[data-ky-inventory-register]');
+        if (inventoryRegisterBtn) {
+            const file = await chooseKyInventoryBackupFile();
+            if (!file) return;
+            const reference = window.prompt('ระบุพาธ / เลขอ้างอิงของไฟล์ที่เก็บไว้ในเครื่องกลาง', file.name) ?? null;
+            if (!reference?.trim()) return;
+            await runKyButtonAction(inventoryRegisterBtn, 'กำลังตรวจ SHA-256...', async () => {
+                const sha256 = await sha256Blob(file);
+                await API.post('/ky/video-inventory/declare', {
+                    activityId: inventoryRegisterBtn.dataset.kyInventoryRegister,
+                    externalReference: reference.trim(),
+                    externalBackupConfirmed: true,
+                    originalFileName: file.name,
+                    mimeType: file.type || 'application/octet-stream',
+                    fileSize: file.size,
+                    sha256,
+                });
+                showToast('ไฟล์เครื่องกลางตรงกับ Production และบันทึก Metadata แล้ว รอ Admin Verify', 'success');
+                await renderKyAnnualVideoEvidence();
+            });
+            return;
+        }
+
+        const inventoryVerifyBtn = e.target.closest('[data-ky-inventory-verify], [data-ky-inventory-correction]');
+        if (inventoryVerifyBtn) {
+            const isCorrection = inventoryVerifyBtn.hasAttribute('data-ky-inventory-correction');
+            const id = isCorrection ? inventoryVerifyBtn.dataset.kyInventoryCorrection : inventoryVerifyBtn.dataset.kyInventoryVerify;
+            const note = window.prompt(isCorrection ? 'ระบุสิ่งที่ต้องแก้ไข' : 'หมายเหตุการตรวจสอบ (เว้นว่างได้)', '') ?? null;
+            if (note === null || (isCorrection && !note.trim())) return;
+            await API.post(`/ky/video-inventory/${encodeURIComponent(id)}/verify`, {
+                status: isCorrection ? 'NeedsCorrection' : 'Verified',
+                rowVersion: Number(inventoryVerifyBtn.dataset.version || 0),
+                note: note.trim(),
+            });
+            showToast(isCorrection ? 'ส่ง Inventory กลับเพื่อแก้ไขแล้ว' : 'Admin Verify Inventory สำเร็จ', 'success');
+            await renderKyAnnualVideoEvidence();
+            return;
+        }
+
+        const inventoryDownloadBtn = e.target.closest('[data-ky-inventory-download]');
+        if (inventoryDownloadBtn) {
+            await runKyButtonAction(inventoryDownloadBtn, 'กำลังดาวน์โหลด...', () => downloadKyInventoryVideo(inventoryDownloadBtn.dataset.kyInventoryDownload, inventoryDownloadBtn.dataset.name));
+            return;
+        }
+
+        const inventoryAuditBtn = e.target.closest('[data-ky-inventory-audit]');
+        if (inventoryAuditBtn) { await showKyInventoryAudit(inventoryAuditBtn.dataset.kyInventoryAudit); return; }
+
+        const inventoryDetailBtn = e.target.closest('[data-ky-inventory-detail]');
+        if (inventoryDetailBtn) { showKyVideoEvidenceDetail('inventory', inventoryDetailBtn.dataset.kyInventoryDetail); return; }
+
+        const deleteInventoryItems = async items => {
+            if (!items.length) { showToast('เลือกรายการ Inventory ที่ Verified และ SHA-256 ตรงกันก่อน', 'warning'); return; }
+            const selectedRows = (_kyAnnualVideoData?.inventory || []).filter(row => items.some(item => String(item.id) === String(row.id)));
+            const selectedBytes = selectedRows.reduce((total, row) => total + Number(row.FileSize || 0), 0);
+            const reason = window.prompt('ระบุเหตุผลการลบไฟล์ Production (Metadata, SHA-256 และ Audit จะยังอยู่)', '') ?? null;
+            if (!reason?.trim()) return;
+            const confirmed = await showConfirmationModal('ยืนยันลบไฟล์ Production', `ลบวิดีโอ ${items.length} รายการ (${formatFileSize(selectedBytes)}) จาก Production ใช่หรือไม่? ระบบตรวจแล้วว่าทุกรายการมี External Backup ที่ Admin Verify และ SHA-256 ตรงกัน โดยจะคง Metadata และ Audit ไว้`);
+            if (!confirmed) return;
+            await API.post('/ky/video-inventory/delete-production', { items, reason: reason.trim() });
+            showToast(`ลบไฟล์ Production แล้ว ${items.length} รายการ และเปลี่ยน Dashboard เป็น External verified`, 'success');
+            await renderKyAnnualVideoEvidence();
+        };
+
+        const inventoryDeleteOneBtn = e.target.closest('[data-ky-inventory-delete-one]');
+        if (inventoryDeleteOneBtn) {
+            await deleteInventoryItems([{ id: inventoryDeleteOneBtn.dataset.kyInventoryDeleteOne, rowVersion: Number(inventoryDeleteOneBtn.dataset.version || 0) }]);
+            return;
+        }
+
+        if (e.target.closest('[data-ky-inventory-delete-selected]')) {
+            const trigger = e.target.closest('[data-ky-inventory-delete-selected]');
+            const scope = trigger.closest('[data-ky-cleanup-group]') || trigger.closest('[data-ky-annual-view-panel]') || document;
+            const selected = Array.from(scope.querySelectorAll('[data-ky-inventory-select]:checked:not(:disabled)')).map(input => ({ id: input.value, rowVersion: Number(input.dataset.version || 0) }));
+            await deleteInventoryItems(selected);
+            return;
+        }
+
+        if (e.target.closest('[data-ky-inventory-check-all]')) {
+            const checkAll = e.target.closest('[data-ky-inventory-check-all]');
+            const scope = checkAll.closest('[data-ky-cleanup-group]') || document;
+            scope.querySelectorAll('[data-ky-inventory-select]:not(:disabled)').forEach(input => { input.checked = Boolean(checkAll.checked); });
             return;
         }
 

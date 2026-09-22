@@ -176,12 +176,10 @@ async function browserReadOnly(session, expectedKpi, annual) {
     await waitFor(`document.querySelector('#ky-msub-annual-video')`);
     await evaluate(`document.querySelector('#ky-msub-annual-video').click()`);
     await waitFor(`document.querySelector('[data-ky-annual-delete-selected]') && document.querySelector('#ky-manage-panel')?.textContent.includes('Annual Compliance Dashboard')`);
-    const linkedCandidate = (annual?.candidates || []).find(row => row.ScopeAlreadyRegistered && row.ScopeEvidenceID);
-    let linkedCandidateFocus = null;
-    if (linkedCandidate) {
-        linkedCandidateFocus = await evaluate(`(()=>{const id=${JSON.stringify(String(linkedCandidate.ScopeEvidenceID))};const button=[...document.querySelectorAll('[data-ky-annual-focus-evidence]')].find(item=>item.dataset.kyAnnualFocusEvidence===id);if(!button)return{found:false,highlighted:false};button.click();const row=[...document.querySelectorAll('[data-ky-annual-evidence-row]')].find(item=>item.dataset.kyAnnualEvidenceRow===id);return{found:true,highlighted:Boolean(row?.classList.contains('ring-2'))};})()`);
-        assert.deepStrictEqual(linkedCandidateFocus, { found: true, highlighted: true }, 'Registered annual scope did not focus its existing evidence row');
-    }
+    const inventoryContract = await evaluate(`(()=>({workspace:Boolean(document.querySelector('[data-ky-video-inventory]')),rows:document.querySelectorAll('[data-ky-inventory-row]').length,bulk:Boolean(document.querySelector('[data-ky-inventory-delete-selected]')),maxHeight:getComputedStyle(document.querySelector('[data-ky-inventory-list]')).maxHeight}))()`);
+    assert.ok(inventoryContract.workspace && inventoryContract.bulk, 'Production Video Inventory workspace is unavailable');
+    assert.strictEqual(inventoryContract.rows, (annual?.inventory || []).length, 'Production Video Inventory UI does not match the API inventory');
+    assert.notStrictEqual(inventoryContract.maxHeight, '288px', 'Production Video Inventory still uses the legacy short height');
     for (const viewport of [{ width: 1440, height: 1000 }, { width: 1024, height: 900 }, { width: 390, height: 844 }]) {
         await command('Emulation.setDeviceMetricsOverride', { width: viewport.width, height: viewport.height, deviceScaleFactor: 1, mobile: viewport.width < 600 });
         await sleep(300);
@@ -191,7 +189,7 @@ async function browserReadOnly(session, expectedKpi, annual) {
     }
     assert.deepStrictEqual(mutationRequests, [], `Production Browser UAT sent KY mutations: ${mutationRequests.join(' | ')}`);
     assert.deepStrictEqual(consoleErrors, [], `Production Browser console errors: ${consoleErrors.join(' | ')}`);
-    return { viewports: 3, mutationRequests: 0, consoleErrors: 0, linkedCandidateFocus };
+    return { viewports: 3, mutationRequests: 0, consoleErrors: 0, inventoryContract };
 }
 
 (async () => {
