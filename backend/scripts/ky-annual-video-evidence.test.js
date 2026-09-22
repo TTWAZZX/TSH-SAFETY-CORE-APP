@@ -88,6 +88,7 @@ assert.doesNotMatch(frontend, /window\.prompt\('ระบุพาธ \/ เล�
 assert.match(frontend, /KY_VIDEO_INVENTORY_BACKUP_MISMATCH[\s\S]*ขนาดหรือ SHA-256 ไม่ตรงกัน/, 'Inventory registration must explain a backup hash mismatch to the Admin');
 assert.match(frontend, /ไฟล์ Production:/, 'Inventory cards must label the current Production video file name');
 assert.match(frontend, /data-ky-inventory-registration-status/, 'Inventory cards must expose live registration feedback');
+assert.match(frontend, /ยังไม่ได้ลงทะเบียน External Backup/, 'Unregistered Inventory cards must show a truthful initial state');
 assert.match(frontend, /กำลังคำนวณ SHA-256:[\s\S]*กำลังเทียบกับไฟล์ Production และลงทะเบียน:/, 'Inventory registration must show hashing and server-registration phases');
 assert.match(frontend, /ลงทะเบียนไม่สำเร็จ:/, 'Inventory registration failure must remain visible on its card');
 assert.match(frontend, /data-ky-annual-admin-toolbar/, 'Annual Admin filters must use a sticky toolbar');
@@ -96,8 +97,8 @@ assert.match(frontend, /data-ky-inventory-detail/, 'Inventory evidence must expo
 assert.match(frontend, /data-ky-cleanup-panel/, 'destructive actions must be isolated in Cleanup Queue');
 assert.match(frontend, /data-ky-heatmap-department/, 'Heatmap must expose every canonical Department row for Browser UAT');
 assert.match(frontend, /renderDepartmentDiagnostics/, 'Dashboard must render unmapped Department diagnostics');
-assert.match(main, /ky\.js\?v=20260922-ky-inventory-feedback-r5/, 'cache chain must expose the Inventory file-name and feedback bundle');
-assert.match(index, /main\.js\?v=20260922-ky-inventory-feedback-r5/, 'HTML entry point must invalidate the cached main module');
+assert.match(main, /ky\.js\?v=20260922-ky-inventory-feedback-r6/, 'cache chain must expose the truthful Inventory feedback bundle');
+assert.match(index, /main\.js\?v=20260922-ky-inventory-feedback-r6/, 'HTML entry point must invalidate the cached main module');
 
 async function verifyInventoryPickerCancelRecovery() {
     const start = frontend.indexOf('function chooseKyInventoryBackupFile()');
