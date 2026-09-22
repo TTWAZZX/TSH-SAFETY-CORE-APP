@@ -35,6 +35,6 @@ assert.match(page,/previewEmployees:state\.cardEmployees\.filter/,'Admin Persona
 assert.match(page,/previewEmployees:String\(kind\)\.toLowerCase\(\)==='personal'/,'Restored Personal Designer sessions must retain real preview rows.');
 assert.match(main,/20260921-bbs-issued-batch-r1/,'Main module must cache-bust the updated BBS page.');
 assert.match(page,/20260921-bbs-artwork-fidelity-r3/,'BBS page must cache-bust the updated Designer and output modules.');
-assert.match(index,/public\/js\/main\.js\?v=20260921-bbs-issued-batch-r1/,'HTML entry point must cache-bust the updated main module.');
+assert.match(index,/public\/js\/main\.js\?v=20260922-ky-activity-external-r8/,'HTML entry point must use the current application cache chain.');
 
 console.log('BBS Card Designer real preview and 70% group scale contract passed.');
