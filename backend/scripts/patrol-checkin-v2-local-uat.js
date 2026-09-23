@@ -131,10 +131,12 @@ async function cleanup() {
     const makeupKey = `${marker}:MAKEUP:001`;
     const makeup = await request('POST', '/patrol/checkin', userToken, { CheckinMode:'makeup', PatrolType:'compensation', ScheduledSessionID:`${marker}_PY`, IdempotencyKey:makeupKey });
     assert.strictEqual(makeup.status, 200, JSON.stringify(makeup.json));
+    assert.match(String(makeup.json.data.checkin.checkinAt || ''), /^\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}:\d{2}(?:\.\d{3}Z)?$/, 'new check-in must return authoritative server CheckinAt');
     const replay = await request('POST', '/patrol/checkin', userToken, { CheckinMode:'makeup', PatrolType:'compensation', ScheduledSessionID:`${marker}_PY`, IdempotencyKey:makeupKey });
     assert.strictEqual(replay.status, 200);
     assert.strictEqual(replay.json.data.idempotentReplay, true);
     assert.strictEqual(replay.json.data.checkin.id, makeup.json.data.checkin.id);
+    assert.strictEqual(replay.json.data.checkin.checkinAt, makeup.json.data.checkin.checkinAt, 'idempotent replay must preserve original CheckinAt');
     const crossMonthMakeup = await request('POST', '/patrol/checkin', userToken, { CheckinMode:'makeup', PatrolType:'compensation', ScheduledSessionID:`${marker}_PM`, IdempotencyKey:`${marker}:MAKEUP:CROSSMONTH` });
     assert.strictEqual(crossMonthMakeup.status, 200, JSON.stringify(crossMonthMakeup.json));
 
@@ -211,6 +213,8 @@ async function cleanup() {
 
     const [[count]] = await db.query('SELECT COUNT(*) count FROM Patrol_Attendance WHERE UserID=?', [employeeId]);
     assert.strictEqual(Number(count.count), 10, 'idempotent retries must not add rows');
+    const [[missingCheckinAt]] = await db.query('SELECT COUNT(*) count FROM Patrol_Attendance WHERE UserID=? AND IdempotencyKey IS NOT NULL AND CheckinAt IS NULL', [employeeId]);
+    assert.strictEqual(Number(missingCheckinAt.count), 0, 'every v2 attendance row must persist CheckinAt');
     console.log(`Patrol check-in v2 ${stack.toUpperCase()} Local API UAT: PASS (makeup cross-month/year, multi-round, extra, idempotency, legacy, rotation, team conflict)`);
     if (serverError) console.log(`Server warnings captured: ${serverError.trim().split(/\r?\n/).length}`);
 })().catch(error => {
