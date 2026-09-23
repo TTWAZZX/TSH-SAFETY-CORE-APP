@@ -1,5 +1,12 @@
 # TSH Safety Core Activity - AGENTS.md
 
+## Patrol authoritative CheckinAt Production release (2026-09-23)
+
+- `main` commit `07ee24b` is deployed to the PHP Production target. New top-management Patrol attendance and Admin on-behalf records now persist a separate Bangkok-time `CheckinAt`; `PatrolDate` remains the activity date. Idempotent retries return the original saved timestamp, and recent/stat/detail projections expose `CheckinAt` / `LastCheckinAt` consistently with Node/PHP parity.
+- The Production schema change is additive and nullable. Historical attendance was intentionally left unchanged with `CheckinAt = NULL`; no existing Patrol row was rewritten or deleted. The existing five legacy orphan session links were observed read-only and are unrelated to this release.
+- Local contract, Node/PHP API lifecycle, Supervisor shared-schedule regression and Browser UAT passed with zero fixture residue. Production FTPS download-back matched the committed handler, authenticated read-only API checks returned `200` with `LastCheckinAt` on all 20 statistics rows, and before/after Browser smoke retained 12 schedule rows / six selectable rounds with zero mutation requests and zero console errors.
+- Runtime rollback evidence is under `backups/production/patrol-checkinat-predeploy-20260923-114533/`. Only `api/handlers/patrol.php` was deployed to the PHP runtime; no frontend cache key, upload, business row or rollout flag changed.
+
 ## KY Annual Compliance and Unit Contest Production release (2026-09-23)
 
 - `main` commits `eb6bf7a` and `7c089b6` are deployed to the PHP Production target. Annual Compliance now counts distinct KY Activity IDs and, for a YearlyTarget of 12, requires at least one Production-video Activity plus eleven Admin-verified External-video Activities; Pending evidence does not count and a Production Activity cannot also count as External.
