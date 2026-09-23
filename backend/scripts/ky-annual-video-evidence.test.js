@@ -49,6 +49,14 @@ for (const source of [nodeRoute, phpRoute]) {
     assert.match(source, /configuredDepartments/, 'KY stats must return every configured Department');
     assert.match(source, /unmappedDepartments/, 'KY stats must expose unmatched activity Department diagnostics');
     assert.match(source, /ProductionOriginalFileName/, 'Inventory projection must expose the current Production video file name');
+    assert.match(source, /ky_annual_unit_contest_entries/i, 'annual Unit contest entry table must exist in both runtimes');
+    assert.match(source, /unit-contest-entries/, 'annual Unit contest entry API must exist in both runtimes');
+    assert.match(source, /KY_CONTEST_PRODUCTION_VIDEO_REQUIRED/, 'contest entry must require a Production video');
+    assert.match(source, /KY_CONTEST_ENTRY_ADMIN_REPLACE_REQUIRED/, 'only Admin may replace an existing Unit contest entry');
+    assert.match(source, /KY_CONTEST_ENTRY_RETENTION_HOLD|active annual Unit contest entry/i, 'contest Production video cleanup must fail closed');
+    assert.match(source, /productionRequired/, 'annual compliance must expose its Production requirement');
+    assert.match(source, /externalRequired/, 'annual compliance must expose its verified External requirement');
+    assert.match(source, /missingEvidenceTotal/, 'annual compliance must expose the remaining distinct-activity count');
 }
 
 assert.match(nodeRoute, /fs\.renameSync\(entry\.localPath, quarantine\)/, 'Node must quarantine files before committing deletion metadata');
@@ -108,7 +116,11 @@ assert.match(frontend, /data-ky-inventory-detail/, 'Inventory evidence must expo
 assert.match(frontend, /data-ky-cleanup-panel/, 'destructive actions must be isolated in Cleanup Queue');
 assert.match(frontend, /data-ky-heatmap-department/, 'Heatmap must expose every canonical Department row for Browser UAT');
 assert.match(frontend, /renderDepartmentDiagnostics/, 'Dashboard must render unmapped Department diagnostics');
-assert.match(main, /ky\.js\?v=20260922-ky-activity-external-r8/, 'cache chain must expose the activity external evidence bundle');
-assert.match(index, /main\.js\?v=20260922-ky-activity-external-r8/, 'HTML entry point must invalidate the cached main module');
+assert.match(frontend, /Production \$\{row\.productionVideo\}\/\$\{row\.productionRequired\}/, 'follow-up must show Production requirement progress');
+assert.match(frontend, /External verified \$\{row\.verifiedExternalVideo\}\/\$\{row\.externalRequired\}/, 'follow-up must show verified External requirement progress');
+assert.match(frontend, /btn-ky-contest-entry/, 'eligible Unit activities must expose contest submission');
+assert.match(frontend, /Unit contest entry/, 'Showcase cards must identify annual Unit representatives');
+assert.match(main, /ky\.js\?v=20260923-ky-annual-contest-r9/, 'cache chain must expose the annual compliance and contest bundle');
+assert.match(index, /main\.js\?v=20260923-ky-annual-contest-r9/, 'HTML entry point must invalidate the cached main module');
 
 console.log('KY annual video evidence contract: PASS');

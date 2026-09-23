@@ -1143,6 +1143,9 @@ async function loadAndRenderKyEvidenceCompletion() {
             ActivityExternalRowVersion: Number(record.activityExternalRowVersion || 0),
             canUploadVideo: Boolean(record.canUploadVideo),
             canRegisterExternalVideo: Boolean(record.canRegisterExternalVideo),
+            isContestEntry: Boolean(record.isContestEntry),
+            contestEntryId: record.contestEntryId || null,
+            canSubmitContestEntry: Boolean(record.canSubmitContestEntry),
         })));
         _kyEvidenceOverviewRows = rows;
         _kyEvidenceRecords = records;
@@ -1406,6 +1409,17 @@ function buildConfiguredKyEvidenceRows(records) {
             waitingVideo: Number(row.waitingVideo || 0),
             missingFile: Number(row.missingFile || 0),
             progressPct: Number(row.progressPct || 0),
+            productionVideo: Number(row.productionVideo || 0),
+            verifiedExternalVideo: Number(row.verifiedExternalVideo || 0),
+            pendingExternalVideo: Number(row.pendingExternalVideo || 0),
+            productionRequired: Number(row.productionRequired || 0),
+            externalRequired: Number(row.externalRequired || 0),
+            evidenceTotal: Number(row.evidenceTotal || 0),
+            missingEvidenceTotal: Number(row.missingEvidenceTotal || 0),
+            annualCompliant: Boolean(row.annualCompliant),
+            evidenceProgressPct: Number(row.evidenceProgressPct || 0),
+            contestEntry: row.contestEntry || null,
+            hasContestEntry: Boolean(row.hasContestEntry),
             records: normalizeApiArray(row.records || []),
         }));
     }
@@ -1464,7 +1478,7 @@ function getKyEvidenceDisplay(row) {
     };
 }
 
-function renderConfiguredKyEvidenceBar(row, selected = false) {
+function renderLegacyConfiguredKyEvidenceBar(row, selected = false) {
     const total = Math.max(row.submitted, 1);
     const completePct = row.complete / total * 100;
     const waitingPct = row.waitingVideo / total * 100;
@@ -1498,6 +1512,42 @@ function renderConfiguredKyEvidenceBar(row, selected = false) {
                 </div>
             </div>
         </button>`;
+}
+
+function renderConfiguredKyEvidenceBar(row, selected = false) {
+    const display = getKyEvidenceDisplay(row);
+    const compliant = Boolean(row.annualCompliant);
+    return `
+        <button type="button" data-ky-evidence-unit="${escHtml(row.key)}"
+            data-ky-evidence-submitted="${Number(row.submitted || 0)}"
+            data-ky-evidence-department-scope="${display.departmentScope ? '1' : '0'}"
+            class="w-full px-3.5 py-3 text-left transition-colors ${selected ? 'bg-indigo-50/80' : 'hover:bg-emerald-50/50 odd:bg-white even:bg-slate-50/70'}">
+            <div class="grid grid-cols-1 lg:grid-cols-[minmax(220px,0.34fr)_minmax(420px,1fr)_minmax(110px,0.12fr)] gap-3 lg:items-center">
+                <div class="min-w-0">
+                    <p class="text-sm font-black text-slate-800 leading-tight break-words">${escHtml(display.primary)}</p>
+                    ${display.secondary ? `<p class="text-[10px] font-semibold uppercase text-slate-400 mt-0.5">${escHtml(display.secondary)}</p>` : ''}
+                    <span class="inline-flex mt-1 rounded-full border px-2 py-0.5 text-[10px] font-bold ${row.hasContestEntry ? 'border-indigo-200 bg-indigo-50 text-indigo-700' : 'border-slate-200 bg-slate-50 text-slate-500'}">${row.hasContestEntry ? 'Contest entry selected' : 'Contest entry not selected'}</span>
+                </div>
+                <div class="min-w-0">
+                    <div class="flex flex-wrap justify-between gap-2 text-[11px] mb-1.5">
+                        <span class="font-bold text-slate-700">Production ${row.productionVideo}/${row.productionRequired} · External verified ${row.verifiedExternalVideo}/${row.externalRequired} · Total ${row.evidenceTotal}/${row.target}</span>
+                        <span class="font-black ${compliant ? 'text-emerald-700' : 'text-amber-700'}">${compliant ? 'Annual Compliance complete' : `Missing ${row.missingEvidenceTotal}`}</span>
+                    </div>
+                    <div class="h-2.5 rounded-full bg-slate-100 overflow-hidden"><div class="h-full ${compliant ? 'bg-emerald-500' : 'bg-amber-400'}" style="width:${Math.min(100, Number(row.evidenceProgressPct || 0))}%"></div></div>
+                    ${row.pendingExternalVideo ? `<p class="mt-1 text-[10px] font-bold text-amber-600">External pending ${row.pendingExternalVideo} (not counted until Admin Verify)</p>` : ''}
+                </div>
+                <div class="flex items-center justify-between lg:justify-end gap-2">
+                    <span class="rounded-full px-2.5 py-1 text-[10px] font-black ${compliant ? 'bg-emerald-100 text-emerald-800' : 'bg-amber-100 text-amber-800'}">${compliant ? 'COMPLIANT' : 'INCOMPLETE'}</span>
+                    <i class="fas fa-chevron-${selected ? 'up' : 'down'} text-[10px] text-slate-400"></i>
+                </div>
+            </div>
+        </button>`;
+}
+
+function renderKyContestEntryAction(record) {
+    if (record?.isContestEntry) return '<span class="rounded-lg bg-indigo-100 px-3 py-2 text-xs font-black text-indigo-700">Active contest entry</span>';
+    if (!record?.canSubmitContestEntry || (record?.contestEntryId && !_isAdmin)) return '';
+    return `<button type="button" class="btn-ky-contest-entry rounded-lg bg-indigo-600 px-3 py-2 text-xs font-bold text-white hover:bg-indigo-700" data-id="${escHtml(record.id || '')}">${record?.contestEntryId ? 'Replace contest entry' : 'Submit contest entry'}</button>`;
 }
 
 function canUploadKyFollowupVideo(record) {
@@ -1606,6 +1656,7 @@ function renderConfiguredKyEvidenceDrilldown(row, records) {
                             </div>
                             <div class="flex items-center gap-2">
                                 <button type="button" class="btn-ky-view px-3 py-2 rounded-lg border border-slate-200 bg-white text-xs font-bold text-slate-700" data-id="${escHtml(record.id || '')}">View</button>
+                                ${renderKyContestEntryAction(record)}
                                 ${['waiting_video','external_pending'].includes(status.id) && canUploadKyFollowupVideo(record) ? `<button type="button" class="btn-ky-video-followup px-3 py-2 rounded-lg text-xs font-bold text-white" style="background:#7c3aed" data-id="${escHtml(record.id || '')}">${status.id === 'external_pending' ? 'แก้หลักฐาน' : 'เพิ่มวิดีโอ'}</button>` : ''}
                                 ${_isAdmin && status.id === 'missing_file' ? `<button type="button" class="btn-ky-manage px-3 py-2 rounded-lg text-xs font-bold text-white" style="background:#4f46e5" data-id="${escHtml(record.id || '')}">แนบไฟล์</button>` : ''}
                             </div>
@@ -1627,6 +1678,12 @@ function openConfiguredKyEvidencePopup(row, records) {
     const title = display.secondary ? `${display.primary} - ${display.secondary}` : display.primary;
     const body = `
         <div id="ky-evidence-popup" class="space-y-4">
+            <div class="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                <div class="rounded-xl border border-sky-100 bg-sky-50 p-3"><p class="text-[10px] font-bold text-sky-700">Production</p><p class="text-lg font-black text-sky-900">${row.productionVideo}/${row.productionRequired}</p></div>
+                <div class="rounded-xl border border-emerald-100 bg-emerald-50 p-3"><p class="text-[10px] font-bold text-emerald-700">External verified</p><p class="text-lg font-black text-emerald-900">${row.verifiedExternalVideo}/${row.externalRequired}</p></div>
+                <div class="rounded-xl border border-indigo-100 bg-indigo-50 p-3"><p class="text-[10px] font-bold text-indigo-700">Evidence total</p><p class="text-lg font-black text-indigo-900">${row.evidenceTotal}/${row.target}</p></div>
+                <div class="rounded-xl border ${row.annualCompliant ? 'border-emerald-100 bg-emerald-50' : 'border-amber-100 bg-amber-50'} p-3"><p class="text-[10px] font-bold ${row.annualCompliant ? 'text-emerald-700' : 'text-amber-700'}">Annual Compliance</p><p class="text-sm font-black">${row.annualCompliant ? 'Complete' : `Missing ${row.missingEvidenceTotal}`}</p></div>
+            </div>
             <div class="rounded-xl border border-slate-100 bg-slate-50 px-4 py-3">
                 <p class="text-sm font-bold text-slate-800 break-words">${escHtml(display.primary)}</p>
                 <p class="text-xs text-slate-500 mt-1 break-words">${display.secondary ? `${escHtml(display.secondary)} / ` : ''}${escHtml(display.scopeLabel)} / ${matching.length} item(s)</p>
@@ -1652,6 +1709,7 @@ function openConfiguredKyEvidencePopup(row, records) {
                             </div>
                             <div class="flex flex-wrap md:flex-nowrap items-center gap-2">
                                 <button type="button" class="btn-ky-view px-3 py-2 rounded-lg border border-slate-200 bg-white text-xs font-bold text-slate-700" data-id="${escHtml(record.id || '')}">View</button>
+                                ${renderKyContestEntryAction(record)}
                                 ${['waiting_video','external_pending'].includes(status.id) && canUploadKyFollowupVideo(record) ? `<button type="button" class="btn-ky-video-followup px-3 py-2 rounded-lg text-xs font-bold text-white" style="background:#7c3aed" data-id="${escHtml(record.id || '')}">${status.id === 'external_pending' ? 'แก้หลักฐาน' : 'เพิ่มวิดีโอ'}</button>` : ''}
                                 ${_isAdmin && status.id === 'missing_file' ? `<button type="button" class="btn-ky-manage px-3 py-2 rounded-lg text-xs font-bold text-white" style="background:#4f46e5" data-id="${escHtml(record.id || '')}">แนบไฟล์</button>` : ''}
                             </div>
@@ -2175,6 +2233,7 @@ function buildKyVideoCard(v) {
         <div class="rounded-2xl border border-slate-200 bg-white overflow-hidden shadow-sm" data-ky-video-card-id="${escHtml(v.id)}">
             <div class="relative bg-slate-900">
                 ${buildKyVideoLazyShell(videoUrl, v)}
+                <span class="absolute left-3 bottom-3 px-2.5 py-1 rounded-full bg-indigo-600/95 text-white text-[10px] font-black shadow">Unit contest entry · ${escHtml(v.ContestEntryYear || _statsYear)}</span>
                 ${isPinned ? `<span class="absolute left-3 top-3 px-2.5 py-1 rounded-full bg-white/90 text-indigo-700 text-[10px] font-bold shadow">Pinned</span>` : ''}
                 ${isHidden ? `<span class="absolute right-3 top-3 px-2.5 py-1 rounded-full bg-red-50/95 text-red-700 text-[10px] font-bold shadow">Hidden</span>` : ''}
             </div>
@@ -4128,6 +4187,31 @@ function wireKyFormsManageEvents() {
     }, { render: false, target: event => event?.target?.closest?.('.ky-form-toggle, .ky-form-delete') || null, actionKey: (_event, button) => `ky:forms:${button.classList.contains('ky-form-delete') ? 'delete' : 'toggle'}:${button.dataset.id}` }));
 }
 
+function renderKyAnnualComplianceScope(scope = {}) {
+    const target = Number(scope.yearlyTarget || 0);
+    const production = Number(scope.productionVideo || 0);
+    const productionRequired = Number(scope.productionRequired ?? (target > 0 ? 1 : 0));
+    const external = Number(scope.verifiedExternalVideo || 0);
+    const externalRequired = Number(scope.externalRequired ?? Math.max(0, target - productionRequired));
+    const total = Number(scope.evidenceTotal ?? (production + external));
+    const pending = Number(scope.externalPending || 0);
+    const missing = Number(scope.missingEvidenceTotal ?? Math.max(0, target - total));
+    const compliant = Boolean(scope.compliant ?? scope.annualCompliant);
+    const metric = (label, value, required, complete) => `<div class="rounded-lg border ${complete ? 'border-emerald-200 bg-emerald-50' : 'border-slate-200 bg-slate-50'} px-2 py-1.5"><p class="text-[9px] font-bold uppercase text-slate-400">${label}</p><p class="text-xs font-black ${complete ? 'text-emerald-700' : 'text-slate-700'}">${value}/${required}</p></div>`;
+    return `<article class="rounded-xl border ${compliant ? 'border-emerald-200 bg-emerald-50/50' : 'border-amber-200 bg-white'} p-3" data-ky-annual-compliance-scope data-production="${production}" data-production-required="${productionRequired}" data-external-verified="${external}" data-external-required="${externalRequired}" data-evidence-total="${total}" data-yearly-target="${target}" data-external-pending="${pending}" data-missing="${missing}" data-compliant="${compliant ? '1' : '0'}">
+        <div class="flex items-start justify-between gap-2">
+            <div class="min-w-0"><p class="truncate text-xs font-bold text-slate-800">${escHtml(scope.department || '-')}</p><p class="truncate text-[10px] text-slate-500">${escHtml(scope.safetyUnit || 'Department level')}</p></div>
+            <span class="shrink-0 rounded-full px-2 py-1 text-[10px] font-bold ${compliant ? 'bg-emerald-100 text-emerald-700' : 'bg-amber-100 text-amber-700'}">${compliant ? 'Annual compliant' : `Missing ${missing}`}</span>
+        </div>
+        <div class="mt-3 grid grid-cols-3 gap-1.5">
+            ${metric('Production', production, productionRequired, production >= productionRequired)}
+            ${metric('External verified', external, externalRequired, external >= externalRequired)}
+            ${metric('Evidence total', total, target, total >= target)}
+        </div>
+        ${pending > 0 ? `<p class="mt-2 text-[10px] font-semibold text-amber-700">External pending ${pending} — not counted until Admin Verify</p>` : ''}
+    </article>`;
+}
+
 async function renderKyAnnualVideoEvidence(panel = document.getElementById('ky-manage-panel')) {
     if (!panel) return;
     panel.innerHTML = `<div class="ds-section p-8 text-center text-sm text-slate-500">กำลังโหลด Annual Video Evidence...</div>`;
@@ -4183,11 +4267,11 @@ async function renderKyAnnualVideoEvidence(panel = document.getElementById('ky-m
                 </div>
                 <div class="ds-section p-5">
                     <div class="flex flex-col lg:flex-row lg:items-center justify-between gap-3 mb-4">
-                        <div><h3 class="font-bold text-slate-800">Annual Compliance Dashboard · ${escHtml(String(data.year || _filterMgmtYear))}</h3><p class="text-xs text-slate-500 mt-1">แต่ละ Department / Safety Unit ต้องมีหลักฐานวิดีโอที่ Admin ตรวจยืนยันอย่างน้อย 1 รายการต่อปี</p></div>
+                        <div><h3 class="font-bold text-slate-800">Annual Compliance Dashboard · ${escHtml(String(data.year || _filterMgmtYear))}</h3><p class="text-xs text-slate-500 mt-1">นับกิจกรรมไม่ซ้ำตาม YearlyTarget: ต้องมี Production อย่างน้อย 1 กิจกรรม และ External verified ครบส่วนที่เหลือ โดย Pending ยังไม่นับ</p></div>
                         <div class="h-2.5 w-full lg:w-64 rounded-full bg-slate-100 overflow-hidden"><div class="h-full bg-emerald-500" style="width:${Math.max(0,Math.min(100,Number(summary.compliancePct||0)))}%"></div></div>
                     </div>
                     <div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-2 max-h-80 overflow-y-auto">
-                        ${scopes.length ? scopes.map(scope => `<div class="rounded-xl border ${scope.compliant?'border-emerald-200 bg-emerald-50':'border-slate-200 bg-white'} p-3"><div class="flex items-center justify-between gap-2"><div><p class="text-xs font-bold text-slate-800">${escHtml(scope.department||'-')}</p><p class="text-[10px] text-slate-500">${escHtml(scope.safetyUnit||'ระดับ Department')}</p></div><span class="text-[10px] font-bold ${scope.compliant?'text-emerald-700':'text-rose-600'}">${scope.compliant?'ครบแล้ว':scope.evidence?'รอตรวจ':'ยังไม่มี'}</span></div></div>`).join('') : '<p class="text-sm text-slate-400">ยังไม่มี Program Config สำหรับปีนี้</p>'}
+                        ${scopes.length ? scopes.map(renderKyAnnualComplianceScope).join('') : '<p class="text-sm text-slate-400">ยังไม่มี Program Config สำหรับปีนี้</p>'}
                     </div>
                 </div>
                 <div class="ds-section overflow-hidden" data-ky-annual-view-panel="activity">
@@ -6365,6 +6449,25 @@ function setupEventListeners() {
             _filterStatus = kpiFilterBtn.dataset.kyKpiFilter || 'all';
             _filterHistYear = _statsYear;
             await switchTab('history');
+            return;
+        }
+
+        const contestEntryBtn = e.target.closest('.btn-ky-contest-entry');
+        if (contestEntryBtn) {
+            const record = _kyEvidenceRecords.find(item => String(item.id) === String(contestEntryBtn.dataset.id));
+            if (!record) return;
+            const replacing = Boolean(record.contestEntryId);
+            if (replacing && _isAdmin) {
+                const confirmed = await showConfirmationModal('Replace annual contest entry', 'This will replace the current representative clip for this Unit and year. Continue?');
+                if (!confirmed) return;
+            }
+            await runKyButtonAction(contestEntryBtn, 'Saving...', async () => {
+                await API.post('/ky/unit-contest-entries', { activityId: record.id });
+                showToast(replacing ? 'Contest entry replaced' : 'Contest entry submitted', 'success');
+                closeModal();
+                await loadAndRenderKyEvidenceCompletion();
+                await renderVideoShowcase();
+            });
             return;
         }
 

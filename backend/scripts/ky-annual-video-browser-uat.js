@@ -265,6 +265,23 @@ async function startNodeApiIfRequested() {
     assert.strictEqual(annualUi.inventoryRows, (beforeAnnual.data?.inventory || []).length, 'Inventory UI must render every API inventory row');
     assert.ok(annualUi.inventoryDates, 'Every Inventory card must expose its authoritative Activity Date');
     assert.notStrictEqual(annualUi.inventoryMaxHeight, '288px', 'Inventory list must be expanded beyond the legacy max-h-72 height');
+    const complianceCards = await evaluate(`[...document.querySelectorAll('[data-ky-annual-compliance-scope]')].map(card=>({production:Number(card.dataset.production),productionRequired:Number(card.dataset.productionRequired),externalVerified:Number(card.dataset.externalVerified),externalRequired:Number(card.dataset.externalRequired),evidenceTotal:Number(card.dataset.evidenceTotal),yearlyTarget:Number(card.dataset.yearlyTarget),externalPending:Number(card.dataset.externalPending),missing:Number(card.dataset.missing),compliant:card.dataset.compliant==='1',text:card.innerText}))`);
+    const complianceScopes = beforeAnnual.data?.scopes || [];
+    assert.strictEqual(complianceCards.length, complianceScopes.length, 'Annual Admin UI must render every configured compliance scope');
+    complianceCards.forEach((card, index) => {
+        const scope = complianceScopes[index];
+        assert.strictEqual(card.production, Number(scope.productionVideo || 0), 'Annual UI Production count must match API');
+        assert.strictEqual(card.productionRequired, Number(scope.productionRequired || 0), 'Annual UI Production requirement must match API');
+        assert.strictEqual(card.externalVerified, Number(scope.verifiedExternalVideo || 0), 'Annual UI External verified count must match API');
+        assert.strictEqual(card.externalRequired, Number(scope.externalRequired || 0), 'Annual UI External requirement must match API');
+        assert.strictEqual(card.evidenceTotal, Number(scope.evidenceTotal || 0), 'Annual UI distinct evidence total must match API');
+        assert.strictEqual(card.yearlyTarget, Number(scope.yearlyTarget || 0), 'Annual UI YearlyTarget must match API');
+        assert.strictEqual(card.missing, Number(scope.missingEvidenceTotal || 0), 'Annual UI missing count must match API');
+        assert.strictEqual(card.compliant, Boolean(scope.compliant), 'Annual UI compliance state must match API');
+        assert.match(card.text, /Production/i, 'Annual UI must label the Production requirement');
+        assert.match(card.text, /External verified/i, 'Annual UI must label the verified external requirement');
+        assert.match(card.text, /Evidence total/i, 'Annual UI must label the distinct evidence total');
+    });
     assert.strictEqual(await evaluate(`document.querySelector('[data-ky-annual-admin-status]')?.value`), 'action', 'Action-required must be the default Admin filter');
     const inventoryFeedback = await evaluate(`(()=>{const rows=[...document.querySelectorAll('[data-ky-inventory-row]')];const registered=rows.filter(row=>!row.querySelector('[data-ky-inventory-register]'));const unregistered=rows.filter(row=>row.querySelector('[data-ky-inventory-register]'));return{productionNames:rows.every(row=>/ไฟล์ Production:\\s*\\S+/.test(row.innerText||'')),statusRegions:rows.filter(row=>row.querySelector('[data-ky-inventory-registration-status]')).length,registeredVisible:registered.every(row=>{const status=row.querySelector('[data-ky-inventory-registration-status]');return Boolean(status&&!status.hidden&&status.textContent.trim())}),unregisteredCorrect:unregistered.every(row=>/ยังไม่ได้ลงทะเบียน External Backup/.test(row.querySelector('[data-ky-inventory-registration-status]')?.textContent||'')),registeredCount:registered.length}})()`);
     assert.ok((beforeAnnual.data?.inventory || []).filter(row => row.CurrentVideoUrl).every(row => row.ProductionOriginalFileName), 'Inventory API must expose the current Production file name');

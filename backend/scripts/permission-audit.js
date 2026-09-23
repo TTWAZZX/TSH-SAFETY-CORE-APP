@@ -51,6 +51,12 @@ const USER_WORKFLOW_ALLOWLIST = new Set([
     // Central-machine activity evidence is authenticated and resolves the target
     // activity through the same reporter/submitter/Department scope as follow-up video.
     'POST /api/ky/activity-video-evidence/declare',
+    // Legacy Annual evidence declaration remains a user workflow and enforces the
+    // same activity owner/participant/Department scope before creating metadata.
+    'POST /api/ky/annual-video-evidence/declare',
+    // Annual Unit contest submission requires a Production-video Activity, active
+    // Program Config scope and reporter/participant/Department/Safety Unit access.
+    'POST /api/ky/unit-contest-entries',
     // KY video reactions are an authenticated user engagement workflow.
     'POST /api/ky/:id/reaction',
     'DELETE /api/ky/:id/reaction',

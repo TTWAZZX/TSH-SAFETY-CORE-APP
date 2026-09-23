@@ -37,6 +37,7 @@
     "test:ky-annual-video-evidence": "node scripts/ky-annual-video-evidence.test.js",
     "uat:ky-annual-video-evidence": "node scripts/ky-annual-video-evidence-api-uat.js",
     "uat:ky-activity-external-video": "node scripts/ky-activity-external-video-api-uat.js",
+    "uat:ky-annual-compliance-contest": "node scripts/ky-annual-compliance-contest-api-uat.js",
     "uat:ky-annual-video-browser": "node scripts/ky-annual-video-browser-uat.js",
     "uat:ky-annual-video-production-readonly": "node scripts/ky-annual-video-production-readonly-uat.js",
     "uat:ky-history-filter": "node scripts/ky-history-filter-api-uat.js",

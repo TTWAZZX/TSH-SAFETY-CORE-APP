@@ -100,8 +100,9 @@ async function cleanup() {
         assert.strictEqual(firstVerified.data.Status, 'Verified', 'Admin verification must produce Verified status');
         const annualAfterFirst = (await request(`ky/annual-video-evidence?year=${testYear}`, { headers })).data;
         const annualScope = annualAfterFirst.scopes.find(row => row.department === department);
-        assert.ok(annualScope?.compliant, 'one verified external activity must satisfy Annual Compliance');
-        assert.strictEqual(annualScope.complianceSource, 'ExternalActivity', 'Annual Compliance must identify the activity source');
+        assert.strictEqual(Boolean(annualScope?.compliant), false, 'one verified external activity must not satisfy a 12-activity Annual Compliance target');
+        assert.strictEqual(Number(annualScope.externalRequired), 11, 'a YearlyTarget of 12 must require eleven verified External activities');
+        assert.strictEqual(Number(annualScope.missingProduction), 1, 'Annual Compliance must still require one Production activity');
 
         const second = await post('ky/activity-video-evidence/declare', headers, metadata(1));
         evidenceIds.push(second.data.id);

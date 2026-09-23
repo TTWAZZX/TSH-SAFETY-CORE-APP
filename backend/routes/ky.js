@@ -374,6 +374,14 @@ function kyCanUploadFollowupVideoForUser(row, req) {
     return kyParticipantEmployeeIds(row.Participants).some(id => String(id || '').trim() === userId);
 }
 
+function kyCanManageContestForScope(row, req) {
+    if (kyCanUploadFollowupVideoForUser(row, req)) return true;
+    const userDepartment = req.user?.department || req.user?.Department || '';
+    const userUnit = req.user?.unit || req.user?.Unit || req.user?.safetyUnit || req.user?.SafetyUnit || '';
+    if (!kyNormKey(userDepartment) || kyNormKey(userDepartment) !== kyNormKey(row.Department)) return false;
+    return !kyNormKey(row.SafetyUnit) || kyNormKey(userUnit) === kyNormKey(row.SafetyUnit);
+}
+
 function kyVideoUploadDirectory(uploadId) {
     if (!/^[a-f0-9]{32}$/i.test(String(uploadId || ''))) return null;
     const target = path.resolve(KY_VIDEO_CHUNK_ROOT, uploadId);
@@ -1022,11 +1030,98 @@ async function ensureTables() {
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
     `);
 
+    await db.query(`
+        CREATE TABLE IF NOT EXISTS KY_Annual_Unit_Contest_Entries (
+            id              VARCHAR(36) NOT NULL PRIMARY KEY,
+            EntryYear       SMALLINT NOT NULL,
+            ScopeKey        VARCHAR(220) NOT NULL,
+            Department      VARCHAR(100) NOT NULL,
+            SafetyUnit      VARCHAR(100) NULL,
+            ActivityID      VARCHAR(36) NOT NULL,
+            Status          VARCHAR(30) NOT NULL DEFAULT 'Submitted',
+            SubmittedByID   VARCHAR(50) NULL,
+            SubmittedByName VARCHAR(100) NULL,
+            SubmittedAt     DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            UpdatedByID     VARCHAR(50) NULL,
+            UpdatedByName   VARCHAR(100) NULL,
+            RowVersion      INT UNSIGNED NOT NULL DEFAULT 1,
+            CreatedAt       DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            UpdatedAt       TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+            UNIQUE KEY uq_ky_contest_year_scope (EntryYear, ScopeKey),
+            KEY idx_ky_contest_activity (ActivityID),
+            KEY idx_ky_contest_status (EntryYear, Status)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+    `);
+    await db.query(`
+        CREATE TABLE IF NOT EXISTS KY_Annual_Unit_Contest_Entry_Audit (
+            id          BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+            EntryID     VARCHAR(36) NOT NULL,
+            ActivityID  VARCHAR(36) NULL,
+            Action      VARCHAR(80) NOT NULL,
+            ActorID     VARCHAR(50) NULL,
+            ActorName   VARCHAR(100) NULL,
+            BeforeJson  LONGTEXT NULL,
+            AfterJson   LONGTEXT NULL,
+            Detail      TEXT NULL,
+            CreatedAt   DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            KEY idx_ky_contest_audit_entry (EntryID, CreatedAt),
+            KEY idx_ky_contest_audit_activity (ActivityID, CreatedAt)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+    `);
+
     tablesReady = true;
 }
 
 function kyAnnualScopeKey(department, safetyUnit) {
     return `${kyNormKey(department)}||${kyNormKey(safetyUnit) || '__department__'}`.slice(0, 220);
+}
+
+function kyAnnualComplianceState(yearlyTarget, productionVideo, verifiedExternalVideo, pendingExternalVideo = 0) {
+    const target = Math.max(0, Number(yearlyTarget || 0));
+    const production = Math.max(0, Number(productionVideo || 0));
+    const externalVerified = Math.max(0, Number(verifiedExternalVideo || 0));
+    const externalPending = Math.max(0, Number(pendingExternalVideo || 0));
+    const productionRequired = target > 0 ? 1 : 0;
+    const externalRequired = Math.max(0, target - productionRequired);
+    const evidenceTotal = production + externalVerified;
+    const missingProduction = Math.max(0, productionRequired - production);
+    const missingExternal = Math.max(0, externalRequired - externalVerified);
+    // A surplus of one evidence type cannot replace the other requirement.
+    // This is the number of additional distinct Activities still needed for compliance.
+    const missingEvidenceTotal = missingProduction + missingExternal;
+    return {
+        yearlyTarget: target,
+        productionRequired,
+        externalRequired,
+        evidenceTotal,
+        pendingExternalVideo: externalPending,
+        missingProduction,
+        missingExternal,
+        missingEvidenceTotal,
+        annualCompliant: missingProduction === 0 && missingExternal === 0 && missingEvidenceTotal === 0,
+        evidenceProgressPct: target > 0 ? Math.min(100, Math.round((evidenceTotal / target) * 100)) : 100,
+    };
+}
+
+async function kyContestAudit(connection, req, action, before, after, detail = '') {
+    const row = after || before || {};
+    await connection.query(
+        `INSERT INTO KY_Annual_Unit_Contest_Entry_Audit
+         (EntryID,ActivityID,Action,ActorID,ActorName,BeforeJson,AfterJson,Detail)
+         VALUES (?,?,?,?,?,?,?,?)`,
+        [row.id, row.ActivityID || null, action, currentUserId(req) || null,
+            req.user?.name || req.user?.EmployeeName || req.user?.username || 'User',
+            before ? JSON.stringify(before) : null, after ? JSON.stringify(after) : null, detail || null]
+    );
+}
+
+async function kyActiveContestEntry(connection, activityId, lock = false) {
+    const [rows] = await connection.query(
+        `SELECT * FROM KY_Annual_Unit_Contest_Entries
+         WHERE ActivityID=? AND Status='Submitted' LIMIT 1${lock ? ' FOR UPDATE' : ''}`,
+        [activityId]
+    );
+    return rows[0] || null;
 }
 
 function kyAnnualEvidencePublic(row) {
@@ -1040,7 +1135,9 @@ function kyAnnualEvidencePublic(row) {
             && Boolean(String(row.ExternalReference || '').trim())
             && /^[a-f0-9]{64}$/i.test(String(row.SHA256 || ''))
             && Boolean(String(row.ProductionVideoUrl || '').trim())
-            && !row.ProductionDeletedAt,
+            && !row.ProductionDeletedAt
+            && !row.ContestEntryID,
+        contestRetentionHold: Boolean(row.ContestEntryID),
     };
 }
 
@@ -1064,13 +1161,15 @@ function kyVideoInventoryPublic(row) {
         ProductionOriginalFileName: productionOriginalFileName || row.OriginalFileName || null,
         ExternalBackupConfirmed: Boolean(Number(row.ExternalBackupConfirmed || 0)),
         fileDeleted: deleted,
+        contestRetentionHold: Boolean(row.ContestEntryID),
         canDeleteProductionFile: registered
             && status === 'Verified'
             && Boolean(Number(row.ExternalBackupConfirmed || 0))
             && Boolean(String(row.ExternalReference || '').trim())
             && /^[a-f0-9]{64}$/i.test(String(row.SHA256 || ''))
             && Boolean(productionVideoUrl)
-            && !deleted,
+            && !deleted
+            && !row.ContestEntryID,
     };
 }
 
@@ -1149,9 +1248,10 @@ async function kyAnnualAudit(connection, req, action, before, after, detail = ''
 
 async function kyAnnualEvidenceRows(year) {
     const [rows] = await db.query(
-        `SELECT e.*, a.ActivityDate, a.TeamName, a.KYTKeyword, a.ReporterName
+        `SELECT e.*, a.ActivityDate, a.TeamName, a.KYTKeyword, a.ReporterName, ce.id AS ContestEntryID
          FROM KY_Annual_Video_Evidence e
          LEFT JOIN KY_Activities a ON a.id = e.ActivityID
+         LEFT JOIN KY_Annual_Unit_Contest_Entries ce ON ce.ActivityID=e.ActivityID AND ce.Status='Submitted'
          WHERE e.EvidenceYear = ?
          ORDER BY e.Department, COALESCE(e.SafetyUnit, ''), e.UpdatedAt DESC`,
         [year]
@@ -1871,6 +1971,112 @@ router.post('/reminders/send', isAdmin, async (req, res) => {
     }
 });
 
+router.get('/unit-contest-entries', async (req, res) => {
+    try {
+        await ensureTables();
+        const year = parseInt(req.query.year, 10) || new Date().getFullYear();
+        const [rows] = await db.query(
+            `SELECT ce.*,a.ActivityDate,a.TeamName,a.KYTKeyword,a.ReporterID,a.ReporterName,
+                    a.SubmittedByID,a.SubmittedByName,a.Participants,a.VideoUrl,a.Status AS ActivityStatus
+             FROM KY_Annual_Unit_Contest_Entries ce
+             INNER JOIN KY_Activities a ON a.id=ce.ActivityID
+             WHERE ce.EntryYear=? AND ce.Status='Submitted'
+             ORDER BY ce.Department,ce.SafetyUnit`, [year]
+        );
+        res.json({ success: true, data: rows });
+    } catch (error) {
+        console.error('KY contest entries error:', error);
+        res.status(500).json({ success: false, message: 'Unable to load annual unit contest entries.' });
+    }
+});
+
+router.post('/unit-contest-entries', async (req, res) => {
+    const activityId = String(req.body?.activityId || '').trim();
+    if (!activityId) return res.status(400).json({ success: false, message: 'Activity is required.' });
+    let connection;
+    try {
+        await ensureTables();
+        connection = await db.getConnection();
+        await connection.beginTransaction();
+        const [activityRows] = await connection.query('SELECT * FROM KY_Activities WHERE id=? FOR UPDATE', [activityId]);
+        const activity = activityRows[0];
+        if (!activity) { await connection.rollback(); return res.status(404).json({ success: false, message: 'KY Activity not found.' }); }
+        if (!String(activity.VideoUrl || '').trim()) { await connection.rollback(); return res.status(409).json({ success: false, code: 'KY_CONTEST_PRODUCTION_VIDEO_REQUIRED', message: 'Contest entry requires an existing Production video.' }); }
+        if (!kyCanManageContestForScope(activity, req)) { await connection.rollback(); return res.status(403).json({ success: false, message: 'Only a user in this Unit or Admin can submit its contest entry.' }); }
+        const year = new Date(activity.ActivityDate).getFullYear();
+        const [configRows] = await connection.query('SELECT Department,SafetyUnits FROM KY_Program_Config WHERE Year=? AND IsActive=1', [year]);
+        const config = configRows.find(row => kyNormKey(row.Department) === kyNormKey(activity.Department));
+        const configuredUnits = parseSafetyUnits(config?.SafetyUnits);
+        const unitValid = config && (configuredUnits.length === 0
+            ? !kyNormKey(activity.SafetyUnit)
+            : configuredUnits.some(unit => kyNormKey(unit) === kyNormKey(activity.SafetyUnit)));
+        if (!unitValid) { await connection.rollback(); return res.status(409).json({ success: false, code: 'KY_CONTEST_SCOPE_NOT_CONFIGURED', message: 'Activity Department/Safety Unit is not active in the selected year Program Config.' }); }
+        const scopeKey = kyAnnualScopeKey(activity.Department, activity.SafetyUnit);
+        const [entryRows] = await connection.query('SELECT * FROM KY_Annual_Unit_Contest_Entries WHERE EntryYear=? AND ScopeKey=? FOR UPDATE', [year, scopeKey]);
+        const before = entryRows[0] || null;
+        if (before && before.Status === 'Submitted' && before.ActivityID === activity.id) {
+            await connection.commit();
+            return res.json({ success: true, data: before, idempotent: true });
+        }
+        if (before && before.Status === 'Submitted' && !isKyAdmin(req)) {
+            await connection.rollback();
+            return res.status(409).json({ success: false, code: 'KY_CONTEST_ENTRY_ADMIN_REPLACE_REQUIRED', message: 'This Unit already has a contest entry. Ask Admin to replace it.' });
+        }
+        const actorId = currentUserId(req) || null;
+        const actorName = req.user?.name || req.user?.EmployeeName || req.user?.username || 'User';
+        if (before) {
+            await connection.query(
+                `UPDATE KY_Annual_Unit_Contest_Entries SET ActivityID=?,Status='Submitted',SubmittedByID=?,SubmittedByName=?,SubmittedAt=NOW(),UpdatedByID=?,UpdatedByName=?,RowVersion=RowVersion+1 WHERE id=?`,
+                [activity.id, actorId, actorName, actorId, actorName, before.id]
+            );
+        } else {
+            await connection.query(
+                `INSERT INTO KY_Annual_Unit_Contest_Entries
+                 (id,EntryYear,ScopeKey,Department,SafetyUnit,ActivityID,Status,SubmittedByID,SubmittedByName,UpdatedByID,UpdatedByName)
+                 VALUES (?,?,?,?,?,?,'Submitted',?,?,?,?)`,
+                [randomUUID(), year, scopeKey, activity.Department, activity.SafetyUnit || null, activity.id, actorId, actorName, actorId, actorName]
+            );
+        }
+        const [afterRows] = await connection.query('SELECT * FROM KY_Annual_Unit_Contest_Entries WHERE EntryYear=? AND ScopeKey=?', [year, scopeKey]);
+        const after = afterRows[0];
+        await kyContestAudit(connection, req, before ? 'ENTRY_REPLACED' : 'ENTRY_SUBMITTED', before, after, before ? `Replaced ${before.ActivityID} with ${activity.id}` : 'Annual Unit contest entry submitted');
+        await connection.commit();
+        res.json({ success: true, data: after });
+    } catch (error) {
+        if (connection) { try { await connection.rollback(); } catch (_) {} }
+        console.error('KY contest submit error:', error);
+        res.status(500).json({ success: false, message: 'Unable to submit annual Unit contest entry.' });
+    } finally { if (connection) connection.release(); }
+});
+
+router.delete('/unit-contest-entries/:entryId', isAdmin, async (req, res) => {
+    let connection;
+    try {
+        await ensureTables();
+        connection = await db.getConnection();
+        await connection.beginTransaction();
+        const [rows] = await connection.query('SELECT * FROM KY_Annual_Unit_Contest_Entries WHERE id=? FOR UPDATE', [req.params.entryId]);
+        const before = rows[0];
+        if (!before) { await connection.rollback(); return res.status(404).json({ success: false, message: 'Contest entry not found.' }); }
+        await connection.query(`UPDATE KY_Annual_Unit_Contest_Entries SET Status='Withdrawn',UpdatedByID=?,UpdatedByName=?,RowVersion=RowVersion+1 WHERE id=?`, [currentUserId(req) || null, req.user?.name || req.user?.EmployeeName || 'Admin', before.id]);
+        const [afterRows] = await connection.query('SELECT * FROM KY_Annual_Unit_Contest_Entries WHERE id=?', [before.id]);
+        await kyContestAudit(connection, req, 'ENTRY_WITHDRAWN', before, afterRows[0], String(req.body?.reason || '').trim());
+        await connection.commit();
+        res.json({ success: true, data: afterRows[0] });
+    } catch (error) {
+        if (connection) { try { await connection.rollback(); } catch (_) {} }
+        res.status(500).json({ success: false, message: 'Unable to withdraw contest entry.' });
+    } finally { if (connection) connection.release(); }
+});
+
+router.get('/unit-contest-entries/:entryId/audit', isAdmin, async (req, res) => {
+    try {
+        await ensureTables();
+        const [rows] = await db.query('SELECT * FROM KY_Annual_Unit_Contest_Entry_Audit WHERE EntryID=? ORDER BY id DESC LIMIT 200', [req.params.entryId]);
+        res.json({ success: true, data: rows });
+    } catch (_) { res.status(500).json({ success: false, message: 'Unable to load contest entry audit.' }); }
+});
+
 router.get('/video-showcase', async (req, res) => {
     try {
         await ensureTables();
@@ -1883,13 +2089,15 @@ router.get('/video-showcase', async (req, res) => {
                 a.id, a.ActivityDate, a.ReporterID, a.ReporterName, a.SubmittedByID, a.SubmittedByName,
                 a.Department, a.SafetyUnit, a.TeamName, a.KYTKeyword, a.RiskCategory, a.HazardDescription,
                 a.Countermeasure, a.VideoUrl, a.Status, a.IsVideoPinned, a.ShowVideoOnDashboard,
+                ce.id AS ContestEntryID,ce.EntryYear AS ContestEntryYear,ce.SubmittedAt AS ContestSubmittedAt,
                 COALESCE(rc.UsefulCount, 0)    AS UsefulCount,
                 COALESCE(rc.PracticeCount, 0)  AS PracticeCount,
                 COALESCE(rc.AwarenessCount, 0) AS AwarenessCount,
                 COALESCE(rc.AttentionCount, 0) AS AttentionCount,
                 COALESCE(rc.ReactionTotal, 0)  AS ReactionTotal,
                 ur.Reaction AS MyReaction
-            FROM KY_Activities a
+            FROM KY_Annual_Unit_Contest_Entries ce
+            INNER JOIN KY_Activities a ON a.id=ce.ActivityID
             LEFT JOIN (
                 SELECT
                     ActivityID,
@@ -1902,7 +2110,7 @@ router.get('/video-showcase', async (req, res) => {
                 GROUP BY ActivityID
             ) rc ON rc.ActivityID = a.id
             LEFT JOIN KY_Video_Reactions ur ON ur.ActivityID = a.id AND ur.EmployeeID = ?
-            WHERE YEAR(a.ActivityDate) = ?
+            WHERE ce.EntryYear = ? AND ce.Status='Submitted'
               AND a.VideoUrl IS NOT NULL AND a.VideoUrl <> ''
               AND COALESCE(a.ShowVideoOnDashboard, 1) = 1
             ORDER BY COALESCE(a.IsVideoPinned, 0) DESC, COALESCE(rc.ReactionTotal, 0) DESC, a.CreatedAt DESC
@@ -2110,7 +2318,7 @@ router.get('/annual-video-evidence', isAdmin, async (req, res) => {
         const year = parseInt(req.query.year, 10) || new Date().getFullYear();
         if (year < 2000 || year > 2200) return res.status(400).json({ success: false, message: 'Evidence year is invalid.' });
         const [configs] = await db.query(
-            `SELECT Department, SafetyUnits FROM KY_Program_Config
+            `SELECT Department, SafetyUnits, YearlyTarget FROM KY_Program_Config
              WHERE Year = ? AND IsActive = 1 ORDER BY Department`,
             [year]
         );
@@ -2127,16 +2335,16 @@ router.get('/annual-video-evidence', isAdmin, async (req, res) => {
         const annualScopePendingExternal = kyPendingExternalVideoSql('a');
         const [scopeActivityRows] = await db.query(
             `SELECT a.Department,a.SafetyUnit,
-                    MAX(CASE WHEN COALESCE(TRIM(a.VideoUrl),'')<>'' THEN 1 ELSE 0 END) AS HasProduction,
-                    MAX(CASE WHEN ${annualScopeVerifiedExternal} THEN 1 ELSE 0 END) AS HasVerifiedExternal,
-                    MAX(CASE WHEN ${annualScopePendingExternal} THEN 1 ELSE 0 END) AS HasPendingExternal
+                    SUM(CASE WHEN COALESCE(TRIM(a.VideoUrl),'')<>'' THEN 1 ELSE 0 END) AS ProductionVideo,
+                    SUM(CASE WHEN COALESCE(TRIM(a.VideoUrl),'')='' AND ${annualScopeVerifiedExternal} THEN 1 ELSE 0 END) AS VerifiedExternalVideo,
+                    SUM(CASE WHEN COALESCE(TRIM(a.VideoUrl),'')='' AND NOT (${annualScopeVerifiedExternal}) AND ${annualScopePendingExternal} THEN 1 ELSE 0 END) AS PendingExternalVideo
              FROM KY_Activities a
              WHERE YEAR(a.ActivityDate)=? GROUP BY a.Department,a.SafetyUnit`, [year]
         );
         const activityScopeState = new Map(scopeActivityRows.map(row => [kyAnnualScopeKey(row.Department, row.SafetyUnit), {
-            production: Boolean(Number(row.HasProduction || 0)),
-            verifiedExternal: Boolean(Number(row.HasVerifiedExternal || 0)),
-            pendingExternal: Boolean(Number(row.HasPendingExternal || 0)),
+            productionVideo: Number(row.ProductionVideo || 0),
+            verifiedExternalVideo: Number(row.VerifiedExternalVideo || 0),
+            pendingExternalVideo: Number(row.PendingExternalVideo || 0),
         }]));
         const scopes = [];
         for (const config of configs) {
@@ -2145,15 +2353,19 @@ router.get('/annual-video-evidence', isAdmin, async (req, res) => {
             for (const safetyUnit of scopedUnits) {
                 const scopeKey = kyAnnualScopeKey(config.Department, safetyUnit);
                 const item = byScope.get(scopeKey) || null;
-                const activityState = activityScopeState.get(scopeKey) || { production: false, verifiedExternal: false, pendingExternal: false };
-                const compliant = item?.Status === 'Verified' || activityState.production || activityState.verifiedExternal;
+                const activityState = activityScopeState.get(scopeKey) || { productionVideo: 0, verifiedExternalVideo: 0, pendingExternalVideo: 0 };
+                const compliance = kyAnnualComplianceState(config.YearlyTarget || 12, activityState.productionVideo, activityState.verifiedExternalVideo, activityState.pendingExternalVideo);
                 scopes.push({
                     scopeKey,
                     department: config.Department,
                     safetyUnit: safetyUnit || null,
-                    compliant,
-                    complianceSource: item?.Status === 'Verified' ? 'AnnualEvidence' : activityState.production ? 'ProductionActivity' : activityState.verifiedExternal ? 'ExternalActivity' : null,
-                    pendingActivityExternal: !compliant && activityState.pendingExternal,
+                    compliant: compliance.annualCompliant,
+                    annualCompliant: compliance.annualCompliant,
+                    productionVideo: activityState.productionVideo,
+                    verifiedExternalVideo: activityState.verifiedExternalVideo,
+                    ...compliance,
+                    complianceSource: compliance.annualCompliant ? 'DistinctActivities' : null,
+                    pendingActivityExternal: !compliance.annualCompliant && activityState.pendingExternalVideo > 0,
                     evidence: item,
                 });
             }
@@ -2188,10 +2400,12 @@ router.get('/annual-video-evidence', isAdmin, async (req, res) => {
                     inv.VerifiedByID, inv.VerifiedByName, inv.VerifiedAt, inv.VerificationNote,
                     inv.ProductionDeletedByID, inv.ProductionDeletedByName, inv.ProductionDeletedAt,
                     inv.ProductionDeletionReason, inv.RowVersion, inv.CreatedAt, inv.UpdatedAt,
-                    ave.id AS AnnualEvidenceID, ave.Status AS AnnualEvidenceStatus
+                    ave.id AS AnnualEvidenceID, ave.Status AS AnnualEvidenceStatus,
+                    ce.id AS ContestEntryID
              FROM KY_Activities a
              LEFT JOIN KY_Video_File_Inventory inv ON inv.ActivityID = a.id
              LEFT JOIN KY_Annual_Video_Evidence ave ON ave.ActivityID = a.id
+             LEFT JOIN KY_Annual_Unit_Contest_Entries ce ON ce.ActivityID=a.id AND ce.Status='Submitted'
              WHERE YEAR(a.ActivityDate) = ?
                AND (COALESCE(TRIM(a.VideoUrl), '') <> '' OR inv.id IS NOT NULL)
              ORDER BY a.ActivityDate DESC, a.CreatedAt DESC`,
@@ -2413,6 +2627,7 @@ router.post('/video-inventory/delete-production', isAdmin, async (req, res) => {
             const [found] = await connection.query('SELECT * FROM KY_Video_File_Inventory WHERE id=? FOR UPDATE', [String(item.id || '')]);
             const row = found[0];
             if (!row || Number(row.RowVersion) !== Number(item.rowVersion)) throw Object.assign(new Error('Inventory record is missing or stale.'), { status: 409, code: 'KY_VIDEO_INVENTORY_STALE' });
+            if (await kyActiveContestEntry(connection, row.ActivityID, true)) throw Object.assign(new Error('This Production video is the active annual Unit contest entry and cannot be deleted.'), { status: 409, code: 'KY_CONTEST_ENTRY_RETENTION_HOLD' });
             if (!kyVideoInventoryPublic(row).canDeleteProductionFile) throw Object.assign(new Error('Every selected file must have a verified matching external backup.'), { status: 409, code: 'KY_VIDEO_INVENTORY_NOT_VERIFIED' });
             const [activityRows] = await connection.query('SELECT id,VideoUrl FROM KY_Activities WHERE id=? FOR UPDATE', [row.ActivityID]);
             if (!activityRows[0] || String(activityRows[0].VideoUrl || '') !== String(row.ProductionVideoUrl || '')) throw Object.assign(new Error('The activity video reference changed. Refresh and register the current file again.'), { status: 409, code: 'KY_VIDEO_INVENTORY_ACTIVITY_STALE' });
@@ -2627,6 +2842,7 @@ router.post('/annual-video-evidence/delete-production', isAdmin, async (req, res
             const [found] = await connection.query('SELECT * FROM KY_Annual_Video_Evidence WHERE id = ? FOR UPDATE', [String(item.id || '')]);
             const row = found[0];
             if (!row || Number(row.RowVersion) !== Number(item.rowVersion)) throw Object.assign(new Error('Evidence is missing or stale.'), { status: 409, code: 'KY_ANNUAL_VIDEO_STALE' });
+            if (await kyActiveContestEntry(connection, row.ActivityID, true)) throw Object.assign(new Error('This Production video is the active annual Unit contest entry and cannot be deleted.'), { status: 409, code: 'KY_CONTEST_ENTRY_RETENTION_HOLD' });
             const safe = kyAnnualEvidencePublic(row);
             if (!safe.canDeleteProductionFile) throw Object.assign(new Error('Every selected file must be Admin verified with a confirmed external backup.'), { status: 409, code: 'KY_EXTERNAL_BACKUP_NOT_VERIFIED' });
             const [activityRows] = await connection.query('SELECT id, VideoUrl FROM KY_Activities WHERE id = ? FOR UPDATE', [row.ActivityID]);
@@ -2731,6 +2947,11 @@ router.get('/evidence-overview', async (req, res) => {
                 },
             });
         }
+        const [contestRows] = await db.query(
+            `SELECT * FROM KY_Annual_Unit_Contest_Entries WHERE EntryYear=? AND Status='Submitted'`,
+            [year]
+        );
+        const contestByScope = new Map(contestRows.map(entry => [entry.ScopeKey, entry]));
         const [activities] = await db.query(`
             SELECT a.id, a.ActivityDate, a.ReporterID, a.ReporterName, a.SubmittedByID, a.SubmittedByName,
                    a.Department, a.SafetyUnit, a.TeamName, a.KYTKeyword, a.RiskCategory, a.HazardDescription,
@@ -2760,6 +2981,7 @@ router.get('/evidence-overview', async (req, res) => {
             const hasVerifiedExternalVideo = Boolean(Number(activity.HasVerifiedExternalVideo || 0));
             const hasPendingExternalVideo = Boolean(Number(activity.HasPendingExternalVideo || 0));
             const hasVideo = Boolean(Number(activity.HasVideoEvidence || 0));
+            const contestEntry = contestByScope.get(kyAnnualScopeKey(activity.Department, activity.SafetyUnit)) || null;
             const status = hasFile && hasVideo
                 ? 'complete'
                 : (hasFile && hasPendingExternalVideo ? 'external_pending' : (hasFile ? 'waiting_video' : 'missing_file'));
@@ -2796,10 +3018,16 @@ router.get('/evidence-overview', async (req, res) => {
                 activityExternalRowVersion: Number(activity.ActivityExternalRowVersion || 0),
                 canUploadVideo: kyCanUploadFollowupVideoForUser(activity, req) && (!hasVideo || isKyAdmin(req)),
                 canRegisterExternalVideo: isKyAdmin(req),
+                isContestEntry: contestEntry?.ActivityID === activity.id,
+                contestEntryId: contestEntry?.id || null,
+                canSubmitContestEntry: hasProductionVideo && kyCanManageContestForScope(activity, req),
             });
         });
         rows.forEach(row => {
             row.progressPct = row.yearlyTarget > 0 ? Math.min(100, Math.round(row.submitted / row.yearlyTarget * 100)) : 0;
+            Object.assign(row, kyAnnualComplianceState(row.yearlyTarget, row.productionVideo, row.verifiedExternalVideo, row.pendingExternalVideo));
+            row.contestEntry = contestByScope.get(kyAnnualScopeKey(row.department, row.safetyUnit)) || null;
+            row.hasContestEntry = Boolean(row.contestEntry);
         });
         const deptProgress = new Map();
         rows.forEach(row => {
@@ -2828,6 +3056,9 @@ router.get('/evidence-overview', async (req, res) => {
             acc.productionVideo += row.productionVideo;
             acc.verifiedExternalVideo += row.verifiedExternalVideo;
             acc.pendingExternalVideo += row.pendingExternalVideo;
+            acc.evidenceTotal += row.evidenceTotal;
+            if (row.annualCompliant) acc.annualCompliantScopes += 1;
+            if (row.hasContestEntry) acc.contestEntries += 1;
             return acc;
         }, {
             departments: new Set(rows.map(row => row.department)).size,
@@ -2839,6 +3070,9 @@ router.get('/evidence-overview', async (req, res) => {
             productionVideo: 0,
             verifiedExternalVideo: 0,
             pendingExternalVideo: 0,
+            evidenceTotal: 0,
+            annualCompliantScopes: 0,
+            contestEntries: 0,
         });
         res.json({
             success: true,
