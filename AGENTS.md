@@ -1,5 +1,13 @@
 # TSH Safety Core Activity - AGENTS.md
 
+## KY Annual Compliance and Unit Contest Production release (2026-09-23)
+
+- `main` commits `eb6bf7a` and `7c089b6` are deployed to the PHP Production target. Annual Compliance now counts distinct KY Activity IDs and, for a YearlyTarget of 12, requires at least one Production-video Activity plus eleven Admin-verified External-video Activities; Pending evidence does not count and a Production Activity cannot also count as External.
+- KY file/video follow-up and Annual Admin expose the shared Production, verified External, total, missing and compliance projections. The additive Contest registry permits one Active representative Production clip per Department/Safety Unit/year, lets an in-scope Unit user submit and Admin replace/withdraw, retains immutable audit history, restricts Showcase to representatives while preserving reactions, and blocks Production cleanup with `KY_CONTEST_ENTRY_RETENTION_HOLD`.
+- Local PHP/Node lifecycle UAT passed distinct-Activity 1+11 composition, Pending exclusion, surplus-Production edge cases, submit/replace, Showcase/Reaction, cleanup guard, API projections and zero fixture residue. Dashboard source mapping passed `15/15`, Node/PHP central Dashboard parity passed, and Local Browser UAT passed three viewports with zero writes/errors.
+- Production FTPS download-back matched `4/4` and public HTTPS hashes matched `3/3`. Authenticated read-only Production UAT retained 107 KY rows / 83 Production videos, rendered 18 matching Annual cards and all 83 Inventory rows at three viewports with zero mutations and zero console errors. The new Contest registry contains zero entries; no real video or business row was changed or deleted.
+- Runtime rollback and before/after read-only evidence is under `backups/production/ky-annual-contest-predeploy-20260923-095756/`. Production currently reports 0/18 Annual-compliant scopes under the stricter composition rule; this is expected until each configured scope has the required distinct Production and verified External Activities.
+
 ## KY Activity External Video Evidence Production release (2026-09-22)
 
 - `main` commits `dee0898` and `f68fca8` are deployed to the PHP Production target. Central-machine video metadata is now owned per KY Activity, remains `Pending` until a separate Admin Verify, and becomes the shared `External verified` source for History, Evidence filters, Dashboard/follow-up statistics and Annual Compliance. Multiple Activities in one annual Department/Safety Unit scope no longer collide with the legacy annual registry.
