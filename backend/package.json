@@ -70,6 +70,7 @@
     "uat:fourm-curriculum-edit-local": "node scripts/fourm-curriculum-edit-local-uat.js",
     "uat:fourm-curriculum-edit-php-local": "set FOURM_UAT_STACK=php&& node scripts/fourm-curriculum-edit-local-uat.js",
     "uat:fourm-curriculum-soft-disable-browser": "node scripts/fourm-curriculum-soft-disable-browser-uat.js",
+    "uat:fourm-curriculum-soft-disable-production-readonly": "node scripts/fourm-curriculum-soft-disable-production-readonly-uat.js",
     "test:fourm-training-log-immutable": "node scripts/fourm-training-log-immutability.test.js",
     "audit:fourm-training-log-legacy": "node scripts/fourm-training-log-legacy-readonly-audit.js",
     "uat:card-image-export-phase2a": "node scripts/card-image-export-phase2a-uat.js",

@@ -1,5 +1,14 @@
 # TSH Safety Core Activity - Deployment
 
+## 4M Training Curriculum Soft Disable (2026-09-23)
+
+Source commit `1e938de` is pushed on `main` and deployed to `https://dev.tshpcl.com/safety/tsh-safety-core`. Runtime scope is `index.html`, `public/js/main.js`, `public/js/pages/fourm.js` and `api/handlers/fourm_phase7.php`; Node remains parity/test source.
+
+- Admin can include Disabled curricula in Training Matrix search, inspect their archived courses/counts and retained history, and Reactivate the same Curriculum ID. Active curricula may reuse a code held only by Disabled history; create/edit/Reactivate still rejects a normalized Active conflict for the same Year and Department.
+- The additive migration introduced nullable `ActiveScopeKey`, populated it only for Active curricula, installed `uq_fourm_curriculum_active`, and removed the two legacy all-row unique indexes. Production retained all 143 curricula for 2026: 121 Active and 22 Disabled. No curriculum, course, assignment, training history or audit row was deleted.
+- Local Node/PHP lifecycle and three-viewport Browser UAT passed with zero fixture residue. Production FTPS download-back matched source `4/4`; public HTTPS SHA-256 matched `3/3`. Authenticated Production Browser UAT passed 1440x1000, 1024x768 and 390x844 with all 22 Disabled curricula available, zero 4M mutation requests, zero failed API responses and zero console errors.
+- Rollback evidence is under `backups/production/fourm-curriculum-soft-disable-predeploy-20260923-171422/`. The safety control rejected a broad sensitive database export, so no backup helper or SQL archive was uploaded; exact predeploy Runtime plus aggregate curriculum counts were retained instead. Normal rollback restores the four Runtime files and preserves the additive schema/data.
+
 ## BBS issued Personal Batch Replace + Print (2026-09-21)
 
 Source commit `1457584` is pushed on `main` and deployed to `https://dev.tshpcl.com/safety/tsh-safety-core`. Runtime scope is `index.html`, `public/js/main.js`, `public/js/pages/bbs-smart-card.js` and `api/handlers/bbs_cards.php`; Node remains parity/test source.

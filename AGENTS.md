@@ -1,5 +1,12 @@
 # TSH Safety Core Activity - AGENTS.md
 
+## 4M Training Curriculum Soft Disable Production release (2026-09-23)
+
+- `main` commit `1e938de` is deployed to the PHP Production target. Training Matrix now lets Admin search/view Disabled curricula, create or edit an Active curriculum with a code used only by Disabled history, and Reactivate the original Curriculum ID only when no Active conflict exists.
+- The Production schema change is additive: nullable `ActiveScopeKey` enforces normalized Year + Department + Curriculum Code uniqueness only for Active rows. The former all-row unique indexes were removed after the new key was populated. No curriculum, linked course, employee assignment, training history or audit row was deleted.
+- Local Node/PHP lifecycle UAT passed edit, Active conflict, Disable, archived view, code reuse, Bulk Code, Reactivate conflict/success, identity/history preservation and zero fixture residue. Local Browser UAT and authenticated Production Browser UAT passed 1440x1000, 1024x768 and 390x844 with zero mutation requests, failed API responses or console errors.
+- Production retained 143 curricula for 2026: 121 Active and 22 Disabled. FTPS download-back matched all four deployed runtime files and public HTTPS SHA-256 matched all three static assets. Full database export was rejected by the safety control; no export helper reached Production. Exact runtime rollback files and aggregate before evidence are under `backups/production/fourm-curriculum-soft-disable-predeploy-20260923-171422/`.
+
 ## Patrol authoritative CheckinAt Production release (2026-09-23)
 
 - `main` commit `07ee24b` is deployed to the PHP Production target. New top-management Patrol attendance and Admin on-behalf records now persist a separate Bangkok-time `CheckinAt`; `PatrolDate` remains the activity date. Idempotent retries return the original saved timestamp, and recent/stat/detail projections expose `CheckinAt` / `LastCheckinAt` consistently with Node/PHP parity.
