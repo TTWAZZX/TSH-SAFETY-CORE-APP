@@ -168,6 +168,9 @@ async function browserReadOnly(session, expectedKpi, annual) {
     await connectChrome();
     await command('Page.navigate', { url: `${baseUrl}/index.html?ky_annual_readonly=${Date.now()}` });
     await waitFor(`document.readyState==='complete'`);
+    // Let the anonymous bootstrap finish before injecting the authenticated UAT session;
+    // otherwise its delayed login cleanup can race and remove the freshly stored token.
+    await sleep(1200);
     await evaluate(`(()=>{localStorage.setItem('tsh_token',${JSON.stringify(session.token)});localStorage.setItem('tsh_user',${JSON.stringify(JSON.stringify(session.user))});location.hash='#ky';location.reload();return true;})()`);
     await waitFor(`document.querySelector('#ky-tab-btn-dashboard') && document.querySelector('#ky-kpi-row [data-ky-kpi-filter="all"] .text-2xl')`);
     const rendered = await evaluate(`[...document.querySelectorAll('#ky-kpi-row [data-ky-kpi-filter]')].reduce((out,el)=>{const key=el.dataset.kyKpiFilter;if(!(key in out))out[key]=Number(el.querySelector('.text-2xl')?.textContent.trim()||0);return out;},{})`);
@@ -176,6 +179,21 @@ async function browserReadOnly(session, expectedKpi, annual) {
     await waitFor(`document.querySelector('#ky-msub-annual-video')`);
     await evaluate(`document.querySelector('#ky-msub-annual-video').click()`);
     await waitFor(`document.querySelector('[data-ky-annual-delete-selected]') && document.querySelector('#ky-manage-panel')?.textContent.includes('Annual Compliance Dashboard')`);
+    const complianceCards = await evaluate(`[...document.querySelectorAll('[data-ky-annual-compliance-scope]')].map(card=>({production:Number(card.dataset.production),productionRequired:Number(card.dataset.productionRequired),externalVerified:Number(card.dataset.externalVerified),externalRequired:Number(card.dataset.externalRequired),evidenceTotal:Number(card.dataset.evidenceTotal),yearlyTarget:Number(card.dataset.yearlyTarget),missing:Number(card.dataset.missing),compliant:card.dataset.compliant==='1'}))`);
+    assert.strictEqual(complianceCards.length, (annual?.scopes || []).length, 'Production Annual UI scope count does not match the API');
+    complianceCards.forEach((card, index) => {
+        const scope = annual.scopes[index];
+        assert.deepStrictEqual(card, {
+            production: Number(scope.productionVideo || 0),
+            productionRequired: Number(scope.productionRequired || 0),
+            externalVerified: Number(scope.verifiedExternalVideo || 0),
+            externalRequired: Number(scope.externalRequired || 0),
+            evidenceTotal: Number(scope.evidenceTotal || 0),
+            yearlyTarget: Number(scope.yearlyTarget || 0),
+            missing: Number(scope.missingEvidenceTotal || 0),
+            compliant: Boolean(scope.compliant),
+        }, 'Production Annual UI metrics do not match the API');
+    });
     const inventoryContract = await evaluate(`(()=>{const rows=[...document.querySelectorAll('[data-ky-inventory-row]')];const datePattern=/^[0-9]{4}-[0-9]{2}-[0-9]{2}$/;const monthPattern=/(ม[.]ค[.]|ก[.]พ[.]|มี[.]ค[.]|เม[.]ย[.]|พ[.]ค[.]|มิ[.]ย[.]|ก[.]ค[.]|ส[.]ค[.]|ก[.]ย[.]|ต[.]ค[.]|พ[.]ย[.]|ธ[.]ค[.])[ ]*25[0-9]{2}/;return{workspace:Boolean(document.querySelector('[data-ky-video-inventory]')),rows:rows.length,dates:rows.every(row=>datePattern.test(row.dataset.activityDate||'')),monthLabels:rows.every(row=>monthPattern.test(row.textContent||'')),dateSamples:rows.slice(0,3).map(row=>({date:row.dataset.activityDate,text:(row.textContent||'').replace(/[ ]+/g,' ').trim().slice(0,180)})),invalidDates:rows.filter(row=>!datePattern.test(row.dataset.activityDate||'')).slice(0,5).map(row=>row.dataset.activityDate||''),invalidMonths:rows.filter(row=>!monthPattern.test(row.textContent||'')).slice(0,5).map(row=>({date:row.dataset.activityDate,text:(row.textContent||'').replace(/[ ]+/g,' ').trim().slice(0,180)})),help:/SHA-256/.test(document.querySelector('[data-ky-inventory-help]')?.textContent||''),bulk:Boolean(document.querySelector('[data-ky-inventory-delete-selected]')),maxHeight:getComputedStyle(document.querySelector('[data-ky-inventory-list]')).maxHeight}})()`);
     assert.ok(inventoryContract.workspace && inventoryContract.bulk, 'Production Video Inventory workspace is unavailable');
     assert.strictEqual(inventoryContract.rows, (annual?.inventory || []).length, 'Production Video Inventory UI does not match the API inventory');
@@ -197,7 +215,7 @@ async function browserReadOnly(session, expectedKpi, annual) {
     }
     assert.deepStrictEqual(mutationRequests, [], `Production Browser UAT sent KY mutations: ${mutationRequests.join(' | ')}`);
     assert.deepStrictEqual(consoleErrors, [], `Production Browser console errors: ${consoleErrors.join(' | ')}`);
-    return { viewports: 3, mutationRequests: 0, consoleErrors: 0, inventoryContract };
+    return { viewports: 3, mutationRequests: 0, consoleErrors: 0, annualComplianceCards: complianceCards.length, inventoryContract };
 }
 
 (async () => {
@@ -209,8 +227,15 @@ async function browserReadOnly(session, expectedKpi, annual) {
     const rows = rowsPayload?.data || [];
     const stats = statsPayload?.data || statsPayload || {};
     let annual = null;
+    let contestEntries = null;
     if (expectDeployed) {
         annual = (await getJson(`/ky/annual-video-evidence?year=${year}`, session.token))?.data || null;
+        contestEntries = (await getJson(`/ky/unit-contest-entries?year=${year}`, session.token))?.data || [];
+        (annual?.scopes || []).forEach(scope => {
+            assert.strictEqual(Number(scope.productionRequired || 0), Number(scope.yearlyTarget || 0) > 0 ? 1 : 0, 'Production requirement mismatch');
+            assert.strictEqual(Number(scope.externalRequired || 0), Math.max(0, Number(scope.yearlyTarget || 0) - Number(scope.productionRequired || 0)), 'External requirement mismatch');
+            assert.strictEqual(Number(scope.evidenceTotal || 0), Number(scope.productionVideo || 0) + Number(scope.verifiedExternalVideo || 0), 'Distinct evidence total mismatch');
+        });
         const linkedCandidates = (annual?.candidates || []).filter(row => row.ScopeAlreadyRegistered);
         linkedCandidates.forEach(row => {
             assert.ok(row.ScopeEvidenceID, `Registered annual scope ${row.id} has no linked evidence ID`);
@@ -223,9 +248,15 @@ async function browserReadOnly(session, expectedKpi, annual) {
     const afterStats = (await getJson(`/ky/stats?year=${year}`, session.token))?.data || {};
     assert.deepStrictEqual(afterRows.map(row => [row.id, row.VideoUrl, row.Status]), rows.map(row => [row.id, row.VideoUrl, row.Status]), 'Read-only UAT changed KY rows');
     assert.deepStrictEqual(afterStats.kpi || {}, stats.kpi || {}, 'Read-only UAT changed KY KPI');
-    console.log(JSON.stringify({ success: true, readOnly: true, kyRows: rows.length, kyRowsWithVideo: rows.filter(row => String(row.VideoUrl || '').trim()).length, annualEnabled: expectDeployed, annualSummary: annual?.summary || null, browser, snapshot: manifest ? snapshotDir : null, videoBackupFiles: manifest?.videos.filter(item => item.backupPath).length || 0, businessDataChanged: false, realVideoDeleted: false }, null, 2));
-})().catch(error => {
+    console.log(JSON.stringify({ success: true, readOnly: true, kyRows: rows.length, kyRowsWithVideo: rows.filter(row => String(row.VideoUrl || '').trim()).length, annualEnabled: expectDeployed, annualSummary: annual?.summary || null, contestEntries: contestEntries?.length ?? null, browser, snapshot: manifest ? snapshotDir : null, videoBackupFiles: manifest?.videos.filter(item => item.backupPath).length || 0, businessDataChanged: false, realVideoDeleted: false }, null, 2));
+})().catch(async error => {
     console.error(error.stack || error.message);
+    if (socket) {
+        try {
+            const diagnostic = await evaluate(`({href:location.href,hash:location.hash,title:document.title,body:(document.body?.innerText||'').slice(0,1200),hasKyButton:Boolean(document.querySelector('#ky-tab-btn-dashboard')),hasKpi:Boolean(document.querySelector('#ky-kpi-row')),storedToken:Boolean(localStorage.getItem('tsh_token')),storedUser:Boolean(localStorage.getItem('tsh_user'))})`);
+            console.error('Production browser diagnostic:', JSON.stringify({ diagnostic, consoleErrors, mutationRequests }, null, 2));
+        } catch (_) {}
+    }
     process.exitCode = 1;
 }).finally(async () => {
     try { socket?.close(); } catch (_) {}
