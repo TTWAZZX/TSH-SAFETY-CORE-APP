@@ -32,6 +32,9 @@ assert.strictEqual(conflict.rows.find(row => row.id === 'a').status, 'conflict')
 
 const includeInactive = buildBulkCodePreview(rows, { year: 2026, department: 'PD2', find: 'INACTIVE', replace: 'ACTIVE', activeOnly: false });
 assert.strictEqual(includeInactive.readyCount, 1);
+const inactiveMayReuseActive = buildBulkCodePreview(rows.concat({ id: 'h', Year: 2026, Department: 'PD2', CurriculumCode: 'ACTIVE-CU68', CurriculumTitle: 'H', IsActive: 1 }), { year: 2026, department: 'PD2', find: 'INACTIVE', replace: 'ACTIVE', activeOnly: false });
+assert.strictEqual(inactiveMayReuseActive.readyCount, 1, 'inactive curriculum codes may duplicate an active code');
+assert.strictEqual(inactiveMayReuseActive.conflictCount, 0);
 
 assert.throws(() => normalizeBulkCodeOptions({ year: 2026, find: 'CU68', replace: 'CU68' }), /different/);
 assert.deepStrictEqual(canonicalBulkCodeChanges([all.rows[1], all.rows[0]]).map(row => row.id), ['a', 'b']);
@@ -40,6 +43,7 @@ const root = path.resolve(__dirname, '..', '..');
 const nodeRoute = fs.readFileSync(path.join(root, 'backend', 'routes', 'fourm.js'), 'utf8');
 const phpRoute = fs.readFileSync(path.join(root, 'api', 'handlers', 'fourm_phase7.php'), 'utf8');
 const frontend = fs.readFileSync(path.join(root, 'public', 'js', 'pages', 'fourm.js'), 'utf8');
+const migration = fs.readFileSync(path.join(root, 'backend', 'migrations', '20260923_fourm_curriculum_soft_disable.sql'), 'utf8');
 assert(nodeRoute.indexOf("router.put('/training-curriculums/bulk-code'") < nodeRoute.indexOf("router.put('/training-curriculums/:id'"), 'Node bulk route must precede parameter route');
 assert(phpRoute.indexOf("$path==='/fourm/training-curriculums/bulk-code'") < phpRoute.indexOf("route_params($path,'/fourm/training-curriculums/:id')"), 'PHP bulk route must precede parameter route');
 assert.match(nodeRoute, /FOR UPDATE/);
@@ -49,6 +53,14 @@ assert.match(phpRoute, /CURRICULUM_CODE_BULK_UPDATE/);
 assert.match(phpRoute, /Curriculum data changed after preview/);
 assert.match(frontend, /id="btn-tm-bulk-code"/);
 assert.match(frontend, /bulk-code-preview/);
+assert.match(frontend, /btn-tm-toggle-inactive/);
+assert.match(frontend, /btn-tm-reactivate-curriculum/);
+assert.match(nodeRoute, /CURRICULUM_REACTIVATE/);
+assert.match(phpRoute, /CURRICULUM_REACTIVATE/);
+assert.match(migration, /ActiveScopeKey/);
+assert.match(migration, /uq_fourm_curriculum_active/);
+assert.match(migration, /DROP INDEX uq_fourm_curriculum/);
+assert.match(migration, /DROP INDEX uq_cur/);
 
 const php = process.env.PHP_BIN || 'C:\\xampp\\php\\php.exe';
 const phpResult = spawnSync(php, [path.join(root, 'api', 'tests', 'fourm_bulk_code_runner.php')], {

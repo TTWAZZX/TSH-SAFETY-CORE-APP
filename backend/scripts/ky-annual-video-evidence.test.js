@@ -121,6 +121,6 @@ assert.match(frontend, /External verified \$\{row\.verifiedExternalVideo\}\/\$\{
 assert.match(frontend, /btn-ky-contest-entry/, 'eligible Unit activities must expose contest submission');
 assert.match(frontend, /Unit contest entry/, 'Showcase cards must identify annual Unit representatives');
 assert.match(main, /ky\.js\?v=20260923-ky-annual-contest-r9/, 'cache chain must expose the annual compliance and contest bundle');
-assert.match(index, /main\.js\?v=20260923-ky-annual-contest-r9/, 'HTML entry point must invalidate the cached main module');
+assert.match(index, /main\.js\?v=20260923-fourm-curriculum-soft-disable-r1/, 'HTML entry point must invalidate the cached main module');
 
 console.log('KY annual video evidence contract: PASS');

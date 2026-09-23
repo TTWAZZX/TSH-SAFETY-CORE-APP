@@ -147,6 +147,7 @@ let _tmMobileDetailOpen = false;
 let _tmCurriculumScrollTop = 0;
 let _tmLoadingCurriculumId = null;
 let _tmCurriculumRequestId = 0;
+let _tmIncludeInactive = false;
 let _fourmCardSaveMenu = null;
 let _fourmCardSaveHold = null;
 
@@ -3494,6 +3495,10 @@ async function renderTrainingMatrix(container) {
                                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/>
                             </svg>
                         </div>
+                        ${_isAdmin ? `<button id="btn-tm-toggle-inactive" type="button" aria-pressed="${_tmIncludeInactive ? 'true' : 'false'}"
+                            class="mt-2 min-h-[40px] w-full rounded-lg border px-3 text-xs font-bold transition-colors ${_tmIncludeInactive ? 'border-amber-300 bg-amber-50 text-amber-800' : 'border-slate-200 bg-white text-slate-600 hover:bg-slate-50'}">
+                            ${_tmIncludeInactive ? 'ซ่อนหลักสูตรที่ปิด / Hide disabled' : 'แสดงหลักสูตรที่ปิด / Show disabled'}
+                        </button>` : ''}
                     </div>
                     <div id="tm-curriculum-list" class="p-3 space-y-2 flex-1 min-h-0 overflow-y-auto overscroll-contain">
                         <div class="text-center py-8 text-slate-400 text-sm">กำลังโหลด... / Loading...</div>
@@ -3629,7 +3634,9 @@ function renderTrainingMatrixBreadcrumb() {
     const dept = curriculum?.Department
         || (_isAdmin ? (_tmFilter.dept === 'all' ? 'All Departments' : _tmFilter.dept) : (_currentUser.department || _currentUser.Department || 'My Department'));
     const activeCount = _tmAssignments.filter(a => a.Status === 'Assigned').length;
-    const courseCount = _tmCourses.filter(c => Number(c.IsActive) !== 0).length;
+    const courseCount = Number(curriculum?.IsActive) === 1
+        ? _tmCourses.filter(c => Number(c.IsActive) !== 0).length
+        : _tmCourses.length;
     const roleLabel = _isAdmin ? 'Admin' : (canManageTrainingMatrix() ? '4M Training PIC' : 'Read only');
     const curriculumLabel = curriculum
         ? `${curriculum.CurriculumCode || '-'} ${curriculum.CurriculumTitle || ''}`.trim()
@@ -3665,7 +3672,9 @@ function renderTrainingDetailShell() {
         el.innerHTML = `<div class="p-6 text-center text-sm text-slate-400">เลือกหลักสูตร / Select a curriculum</div>`;
         return;
     }
-    const courseCount = _tmCourses.filter(c => Number(c.IsActive) !== 0).length;
+    const courseCount = Number(curriculum.IsActive) === 1
+        ? _tmCourses.filter(c => Number(c.IsActive) !== 0).length
+        : _tmCourses.length;
     const assignedCount = _tmAssignments.filter(a => a.Status === 'Assigned').length;
     const historyCount = _tmAssignments.filter(a => a.Status && a.Status !== 'Assigned').length;
     const tabBtn = (tab, label) => `
@@ -3691,6 +3700,7 @@ function renderTrainingDetailShell() {
                         ${escHtml(curriculum.CurriculumCode || '-')} - ${escHtml(curriculum.CurriculumTitle || '-')}
                     </h3>
                     <p class="mt-1 text-xs font-semibold text-slate-500">${escHtml(curriculum.Department || '-')} · ${escHtml(String(curriculum.Year || _tmFilter.year))}</p>
+                    ${Number(curriculum.IsActive) === 1 ? '' : '<p class="mt-2 inline-flex rounded-full bg-amber-100 px-2 py-1 text-[11px] font-black text-amber-800">Disabled · เปิดดูประวัติได้ แต่ต้อง Reactivate ก่อนจัดการ</p>'}
                 </div>
                 <div class="flex flex-wrap gap-2">
                     <button id="btn-tm-export-current-curriculum" type="button"
@@ -3720,13 +3730,17 @@ function renderTrainingDetailShell() {
 function renderTrainingDetailBody() {
     const body = document.getElementById('tm-detail-body');
     if (!body) return;
-    const courseCount = _tmCourses.filter(c => Number(c.IsActive) !== 0).length;
+    const selectedCurriculum = _tmCurriculums.find(c => String(c.id) === String(_tmSelectedCurriculumId));
+    const curriculumEnabled = Number(selectedCurriculum?.IsActive) === 1;
+    const courseCount = curriculumEnabled
+        ? _tmCourses.filter(c => Number(c.IsActive) !== 0).length
+        : _tmCourses.length;
     if (_tmDetailTab === 'history') {
         renderTrainingHistoryTab(body);
         return;
     }
     if (_tmDetailTab === 'employees') {
-        const canManageMatrix = canManageTrainingMatrix();
+        const canManageMatrix = canManageTrainingMatrix() && curriculumEnabled;
         const readyToAssign = _tmSelectedCurriculumId && courseCount && canManageMatrix;
         const showEmployeeMaster = _tmShowEmployeeMaster && canManageMatrix;
         const employeeGridClass = showEmployeeMaster
@@ -3809,7 +3823,7 @@ function renderTrainingDetailBody() {
             </div>
             ${_isAdmin ? `<button id="btn-tm-add-course" type="button"
                     class="px-3 py-2 rounded-lg text-sm font-bold text-indigo-700 border border-indigo-200 hover:bg-indigo-50 disabled:opacity-40"
-                    ${_tmSelectedCurriculumId ? '' : 'disabled'}>
+                    ${_tmSelectedCurriculumId && curriculumEnabled ? '' : 'disabled'}>
                 เลือกจากคลังรายวิชา / Add
             </button>` : `<span class="px-3 py-2 rounded-lg text-xs font-bold text-slate-500 bg-slate-50 border border-slate-200">อ่านอย่างเดียว / Read only</span>`}
         </div>
@@ -3890,6 +3904,7 @@ async function fetchTrainingMatrix() {
         const p = new URLSearchParams();
         p.set('year', _tmFilter.year);
         if (_tmFilter.dept !== 'all') p.set('dept', _tmFilter.dept);
+        if (_isAdmin && _tmIncludeInactive) p.set('includeInactive', '1');
         const [res, summaryRes] = await Promise.all([
             API.get(`/fourm/training-curriculums?${p}`),
             API.get(`/fourm/training-matrix-summary?${p}`),
@@ -3988,20 +4003,22 @@ async function renderTrainingCurriculums() {
         return;
     }
     el.innerHTML = rows.map(c => {
-        const active = String(c.id) === String(_tmSelectedCurriculumId);
+        const selected = String(c.id) === String(_tmSelectedCurriculumId);
+        const enabled = Number(c.IsActive) === 1;
         const loading = String(c.id) === String(_tmLoadingCurriculumId);
         return `
-        <article class="rounded-xl border transition-all ${active ? 'border-indigo-400 bg-indigo-50 shadow-sm ring-1 ring-indigo-100' : 'border-slate-200 bg-white hover:border-indigo-200'}">
+        <article class="rounded-xl border transition-all ${selected ? 'border-indigo-400 bg-indigo-50 shadow-sm ring-1 ring-indigo-100' : enabled ? 'border-slate-200 bg-white hover:border-indigo-200' : 'border-amber-200 bg-amber-50/50'}">
             <button type="button"
                     class="tm-curriculum-item group w-full min-h-[88px] cursor-pointer rounded-xl px-3 py-3 text-left outline-none transition-colors hover:bg-indigo-50/70 focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:ring-offset-2"
-                    data-id="${c.id}" aria-pressed="${active ? 'true' : 'false'}"
+                    data-id="${c.id}" aria-pressed="${selected ? 'true' : 'false'}"
                     aria-label="เลือกหลักสูตร ${escHtml(c.CurriculumCode || '')} ${escHtml(c.CurriculumTitle || '')}"
                     ${loading ? 'disabled aria-busy="true"' : ''}>
                 <div class="flex items-start justify-between gap-3">
                     <div class="min-w-0">
                         <div class="flex flex-wrap items-center gap-2">
-                            <span class="text-xs font-mono font-bold ${active ? 'text-indigo-700' : 'text-slate-500'}">${escHtml(c.CurriculumCode || '-')}</span>
-                            ${active ? '<span class="rounded-full bg-indigo-600 px-2 py-0.5 text-[10px] font-black text-white">กำลังดู / Selected</span>' : ''}
+                            <span class="text-xs font-mono font-bold ${selected ? 'text-indigo-700' : 'text-slate-500'}">${escHtml(c.CurriculumCode || '-')}</span>
+                            ${selected ? '<span class="rounded-full bg-indigo-600 px-2 py-0.5 text-[10px] font-black text-white">กำลังดู / Selected</span>' : ''}
+                            ${enabled ? '<span class="rounded-full bg-emerald-100 px-2 py-0.5 text-[10px] font-black text-emerald-700">Active</span>' : '<span class="rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-black text-amber-800">Disabled</span>'}
                             ${loading ? '<span class="inline-flex items-center gap-1 text-[10px] font-bold text-indigo-700"><span class="h-3 w-3 animate-spin rounded-full border-2 border-indigo-200 border-t-indigo-600"></span>กำลังเปิด...</span>' : ''}
                         </div>
                         <p class="mt-1 text-sm font-black text-slate-800" title="${escHtml(c.CurriculumTitle || '-')}">${escHtml(c.CurriculumTitle || '-')}</p>
@@ -4010,13 +4027,15 @@ async function renderTrainingCurriculums() {
                     <span class="shrink-0 rounded-full bg-white px-2 py-1 text-xs font-bold text-indigo-700 shadow-sm">${parseInt(c.AssignedCount) || 0} คน</span>
                 </div>
                 <div class="mt-3 flex items-center justify-between border-t border-slate-200/70 pt-2 text-[11px] text-slate-500">
-                    <span>${parseInt(c.CourseCount) || 0} วิชา / courses</span>
-                    <span class="font-bold ${active ? 'text-indigo-700' : 'text-slate-500'}">${active ? 'เปิดรายละเอียดแล้ว' : 'คลิกเพื่อเปิดรายละเอียด →'}</span>
+                    <span>${parseInt(enabled ? c.CourseCount : c.TotalCourseCount) || 0} วิชา / courses</span>
+                    <span class="font-bold ${selected ? 'text-indigo-700' : 'text-slate-500'}">${selected ? 'เปิดรายละเอียดแล้ว' : 'คลิกเพื่อเปิดรายละเอียด →'}</span>
                 </div>
             </button>
             ${_isAdmin ? `<div class="flex justify-end gap-2 border-t border-slate-200/70 px-2 py-2">
                 <button type="button" class="btn-tm-edit-curriculum min-h-[44px] rounded-lg px-3 text-xs font-bold text-indigo-700 hover:bg-white focus-visible:ring-2 focus-visible:ring-indigo-500" data-id="${c.id}">แก้ไข / Edit</button>
-                <button type="button" class="btn-tm-disable-curriculum min-h-[44px] rounded-lg px-3 text-xs font-bold text-rose-600 hover:bg-rose-50 focus-visible:ring-2 focus-visible:ring-rose-500" data-id="${c.id}" data-title="${escHtml(c.CurriculumTitle || '')}">ปิด / Disable</button>
+                ${enabled
+                    ? `<button type="button" class="btn-tm-disable-curriculum min-h-[44px] rounded-lg px-3 text-xs font-bold text-rose-600 hover:bg-rose-50 focus-visible:ring-2 focus-visible:ring-rose-500" data-id="${c.id}" data-title="${escHtml(c.CurriculumTitle || '')}">ปิด / Disable</button>`
+                    : `<button type="button" class="btn-tm-reactivate-curriculum min-h-[44px] rounded-lg px-3 text-xs font-bold text-emerald-700 hover:bg-emerald-50 focus-visible:ring-2 focus-visible:ring-emerald-500" data-id="${c.id}" data-title="${escHtml(c.CurriculumTitle || '')}">เปิดใช้งาน / Reactivate</button>`}
             </div>` : ''}
         </article>`;
     }).join('');
@@ -4037,8 +4056,10 @@ async function fetchTrainingCourses(curriculumId) {
     const btn = document.getElementById('btn-tm-add-course');
     if (btn) btn.disabled = !curriculumId;
     try {
+        const selectedCurriculum = _tmCurriculums.find(c => String(c.id) === String(curriculumId));
+        const includeInactiveCourses = Number(selectedCurriculum?.IsActive) !== 1;
         const [res, , , assignmentRes] = await Promise.all([
-            API.get(`/fourm/training-curriculums/${curriculumId}/courses`),
+            API.get(`/fourm/training-curriculums/${curriculumId}/courses${includeInactiveCourses ? '?includeInactive=1' : ''}`),
             fetchTrainingCourseMaster(),
             canManageTrainingMatrix() ? fetchTrainingEmployeeMaster({ requestId }) : Promise.resolve([]),
             API.get(`/fourm/training-curriculums/${curriculumId}/assignments?status=all`),
@@ -4070,6 +4091,8 @@ function renderTrainingCourses() {
         el.innerHTML = `<div class="text-center py-8 text-slate-400 text-sm">เลือกหลักสูตรก่อน / Select a curriculum</div>`;
         return;
     }
+    const selectedCurriculum = _tmCurriculums.find(c => String(c.id) === String(_tmSelectedCurriculumId));
+    const curriculumEnabled = Number(selectedCurriculum?.IsActive) === 1;
     const rows = _tmCourses.filter(c => _tmTextMatches(c, ['CourseCode', 'CourseTitle'], _tmSearch.course));
     const linkedHtml = rows.length ? rows.map(c => {
         const active = c.id === _tmSelectedCourseId;
@@ -4078,13 +4101,16 @@ function renderTrainingCourses() {
                 data-id="${c.id}">
             <div class="flex items-start justify-between gap-2">
                 <div class="min-w-0">
-                    <p class="text-xs font-mono text-slate-400">${escHtml(c.CourseCode || '-')}</p>
+                    <div class="flex flex-wrap items-center gap-2">
+                        <p class="text-xs font-mono text-slate-400">${escHtml(c.CourseCode || '-')}</p>
+                        ${Number(c.IsActive) === 1 ? '' : '<span class="rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-black text-amber-800">Archived</span>'}
+                    </div>
                     <p class="text-sm font-black text-slate-800 truncate" title="${escHtml(c.CourseTitle || '-')}">${escHtml(c.CourseTitle || '-')}</p>
                 </div>
                 <span class="text-xs font-bold text-sky-700 bg-white/70 rounded-full px-2 py-1">${parseInt(c.AssignedCount) || 0}</span>
             </div>
             <div class="flex justify-end gap-1.5 mt-2">
-                ${_isAdmin ? `<span class="btn-tm-edit-course px-2 py-1 rounded-lg text-[11px] font-bold text-indigo-700 hover:bg-white" data-id="${c.id}">แก้ไข / Edit</span>
+                ${_isAdmin && curriculumEnabled ? `<span class="btn-tm-edit-course px-2 py-1 rounded-lg text-[11px] font-bold text-indigo-700 hover:bg-white" data-id="${c.id}">แก้ไข / Edit</span>
                 <span class="btn-tm-disable-course px-2 py-1 rounded-lg text-[11px] font-bold text-rose-600 hover:bg-white" data-id="${c.id}" data-title="${escHtml(c.CourseTitle || '')}">ลบออก / Remove</span>` : ''}
             </div>
         </button>`;
@@ -5578,6 +5604,7 @@ async function showTrainingAuditLogModal(scope = 'current') {
         ['CURRICULUM_CODE_BULK_UPDATE', 'เปลี่ยนรหัสหลักสูตรแบบกลุ่ม / Bulk Code Update'],
         ['CURRICULUM_UPDATE', 'แก้ไขหลักสูตร / Curriculum Update'],
         ['CURRICULUM_DISABLE', 'ปิดหลักสูตร / Curriculum Disable'],
+        ['CURRICULUM_REACTIVATE', 'เปิดหลักสูตรอีกครั้ง / Curriculum Reactivate'],
         ['COURSE_MASTER_CREATE', 'สร้างข้อมูลรายวิชากลาง / Course Master Create'],
         ['COURSE_MASTER_UPDATE', 'แก้ไขข้อมูลรายวิชากลาง / Course Master Update'],
         ['COURSE_MASTER_DISABLE', 'ปิดข้อมูลรายวิชากลาง / Course Master Disable'],
@@ -5953,6 +5980,8 @@ function renderTrainingDetailBody() {
     const body = document.getElementById('tm-detail-body');
     if (!body) return;
     const courseCount = _tmCourses.filter(c => Number(c.IsActive) !== 0).length;
+    const selectedCurriculum = _tmCurriculums.find(c => String(c.id) === String(_tmSelectedCurriculumId));
+    const curriculumEnabled = Number(selectedCurriculum?.IsActive) === 1;
     if (_tmDetailTab === 'employees') {
         const readyToAssign = _tmSelectedCurriculumId && courseCount;
         body.innerHTML = `
@@ -6022,7 +6051,7 @@ function renderTrainingDetailBody() {
             </div>
             ${_isAdmin ? `<button id="btn-tm-add-course" type="button"
                     class="px-3 py-2 rounded-lg text-sm font-bold text-indigo-700 border border-indigo-200 hover:bg-indigo-50 disabled:opacity-40"
-                    ${_tmSelectedCurriculumId ? '' : 'disabled'}>
+                    ${_tmSelectedCurriculumId && curriculumEnabled ? '' : 'disabled'}>
                 เลือกจากคลังรายวิชา / Add
             </button>` : `<span class="px-3 py-2 rounded-lg text-xs font-bold text-slate-500 bg-slate-50 border border-slate-200">อ่านอย่างเดียว / Read only</span>`}
         </div>
@@ -8431,6 +8460,14 @@ function setupEventListeners() {
             renderTrainingDetailShell();
             return;
         }
+        if (e.target.closest('#btn-tm-toggle-inactive')) {
+            if (!_isAdmin) return;
+            _tmIncludeInactive = !_tmIncludeInactive;
+            _tmSelectedCurriculumId = null;
+            _tmSelectedCourseId = null;
+            await renderTrainingMatrix(document.getElementById('fourm-man-subtab-content'));
+            return;
+        }
         const tmCurriculumEdit = e.target.closest('.btn-tm-edit-curriculum');
         if (tmCurriculumEdit) {
             const rec = _tmCurriculums.find(c => String(c.id) === String(tmCurriculumEdit.dataset.id));
@@ -8447,6 +8484,21 @@ function setupEventListeners() {
                 showToast('ปิดหลักสูตรสำเร็จ / Curriculum disabled', 'success');
                 _tmSelectedCurriculumId = null;
                 _tmSelectedCourseId = null;
+                await fetchTrainingMatrix();
+            } catch (err) { showError(err); }
+            finally { hideLoading(); }
+            return;
+        }
+        const tmCurriculumReactivate = e.target.closest('.btn-tm-reactivate-curriculum');
+        if (tmCurriculumReactivate) {
+            const ok = await showConfirmationModal('เปิดใช้งานหลักสูตร? / Reactivate curriculum?', `เปิด "${tmCurriculumReactivate.dataset.title || 'curriculum'}" และรายวิชาเดิมกลับมาใช้งานใช่ไหม? / Reactivate this curriculum and its existing courses?`);
+            if (!ok) return;
+            try {
+                showLoading('กำลังเปิดใช้งานหลักสูตร... / Reactivating curriculum...');
+                const response = await API.post(`/fourm/training-curriculums/${tmCurriculumReactivate.dataset.id}/reactivate`, {});
+                const restored = Number(response?.data?.restoredCourseCount || 0);
+                showToast(`เปิดใช้งานหลักสูตรสำเร็จ / Curriculum reactivated (${restored} course${restored === 1 ? '' : 's'})`, 'success');
+                _tmSelectedCurriculumId = tmCurriculumReactivate.dataset.id;
                 await fetchTrainingMatrix();
             } catch (err) { showError(err); }
             finally { hideLoading(); }

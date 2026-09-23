@@ -45,6 +45,6 @@ assert.match(frontend, /uploadKyVideoInChunks\(r\.id, videoFile/, 'Admin video r
 assert.match(frontend, /บันทึกกิจกรรม KY แล้ว แต่วิดีโออัปโหลดไม่สำเร็จ/, 'partial-success guidance must prevent duplicate KY resubmission');
 
 assert.match(main, /ky\.js\?v=20260923-ky-annual-contest-r9/, 'KY page cache key must serve annual compliance, contest, and adaptive chunk upload');
-assert.match(html, /main\.js\?v=20260923-ky-annual-contest-r9/, 'SPA cache key must serve the latest KY evidence and adaptive upload bundle');
+assert.match(html, /main\.js\?v=20260923-fourm-curriculum-soft-disable-r1/, 'SPA cache key must serve the latest KY evidence and adaptive upload bundle');
 
 console.log('KY chunked video upload contract: PASS');

@@ -27,7 +27,7 @@ assert.match(source, /function _tmRenderAuditChanges/);
 
 const main = fs.readFileSync(path.join(__dirname, '..', '..', 'public', 'js', 'main.js'), 'utf8');
 const index = fs.readFileSync(path.join(__dirname, '..', '..', 'index.html'), 'utf8');
-assert.match(main, /fourm\.js\?v=20260914-fourm-audit-log-immutable-r1/);
-assert.match(index, /main\.js\?v=20260914-fourm-audit-log-immutable-r1/);
+assert.match(main, /fourm\.js\?v=20260923-fourm-curriculum-soft-disable-r1/);
+assert.match(index, /main\.js\?v=20260923-fourm-curriculum-soft-disable-r1/, 'index must load the current 4M cache chain');
 
 console.log('4M Training Matrix Audit Log UI tests passed.');

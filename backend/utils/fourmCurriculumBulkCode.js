@@ -91,6 +91,7 @@ function buildBulkCodePreview(allYearRows, rawOptions = {}) {
     const finalGroups = new Map();
     for (const row of rows) {
         if (Number.parseInt(row.Year, 10) !== options.year) continue;
+        if (Number(row.IsActive) !== 1) continue;
         const proposal = proposedById.get(String(row.id));
         const key = curriculumKey(row, proposal ? proposal.newCode : row.CurriculumCode);
         if (!finalGroups.has(key)) finalGroups.set(key, []);
@@ -98,6 +99,7 @@ function buildBulkCodePreview(allYearRows, rawOptions = {}) {
     }
     for (const item of previewRows) {
         if (item.status !== 'ready') continue;
+        if (Number(item.IsActive) !== 1) continue;
         if ((finalGroups.get(curriculumKey(item, item.newCode)) || []).length > 1) {
             item.status = 'conflict';
             item.reason = 'Resulting code already exists in the same year and department.';

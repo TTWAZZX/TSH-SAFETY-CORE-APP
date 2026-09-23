@@ -7,7 +7,7 @@ const express = require('express');
 const router  = express.Router();
 const db      = require('../db');
 const multer  = require('multer');
-const { randomUUID } = require('crypto');
+const { createHash, randomUUID } = require('crypto');
 const { isAdmin } = require('../middleware/auth');
 const { storage: uploadStorage, fileFilter, deleteLocalUpload } = require('../storage');
 const { logAudit } = require('../utils/audit');
@@ -258,6 +258,12 @@ function trainingLogValue(value, keys, fallback = null) {
         if (value[key] !== undefined && value[key] !== null && value[key] !== '') return value[key];
     }
     return fallback;
+}
+
+function curriculumActiveScopeKey(year, department, code, isActive = 1) {
+    if (Number(isActive) !== 1) return null;
+    const normalized = `${Number.parseInt(year, 10)}|${String(department || '').trim().toLocaleLowerCase()}|${String(code || '').trim().toLocaleLowerCase()}`;
+    return createHash('sha256').update(normalized, 'utf8').digest('hex');
 }
 
 async function resolveTrainingLogContext(client, { curriculumId, courseId, employeeId, value, side }) {
@@ -688,15 +694,45 @@ async function ensureTables() {
             CurriculumTitle  VARCHAR(255) NOT NULL,
             Notes            TEXT,
             IsActive         TINYINT(1)   NOT NULL DEFAULT 1,
+            ActiveScopeKey   CHAR(64)     NULL,
             CreatedByID      VARCHAR(50),
             CreatedBy        VARCHAR(100),
             CreatedAt        DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
             UpdatedAt        TIMESTAMP    DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
             KEY idx_year_dept (\`Year\`, Department),
             KEY idx_code (CurriculumCode),
-            UNIQUE KEY uq_fourm_curriculum (\`Year\`, Department, CurriculumCode)
+            UNIQUE KEY uq_fourm_curriculum_active (ActiveScopeKey)
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
     `);
+
+    try { await db.query('ALTER TABLE FourM_Curriculums ADD COLUMN ActiveScopeKey CHAR(64) NULL AFTER IsActive'); } catch (error) {
+        if (error?.code !== 'ER_DUP_FIELDNAME') throw error;
+    }
+    await db.query(`
+        UPDATE FourM_Curriculums
+           SET ActiveScopeKey = CASE
+               WHEN IsActive = 1 THEN SHA2(CONCAT(CAST(\`Year\` AS CHAR), '|', LOWER(TRIM(Department)), '|', LOWER(TRIM(CurriculumCode))), 256)
+               ELSE NULL
+           END
+         WHERE (IsActive = 1 AND (ActiveScopeKey IS NULL OR ActiveScopeKey <> SHA2(CONCAT(CAST(\`Year\` AS CHAR), '|', LOWER(TRIM(Department)), '|', LOWER(TRIM(CurriculumCode))), 256)))
+            OR (IsActive <> 1 AND ActiveScopeKey IS NOT NULL)
+    `);
+    try { await db.query('ALTER TABLE FourM_Curriculums ADD UNIQUE KEY uq_fourm_curriculum_active (ActiveScopeKey)'); } catch (error) {
+        if (error?.code !== 'ER_DUP_KEYNAME') throw error;
+    }
+    const [legacyCurriculumIndexes] = await db.query(`
+        SELECT DISTINCT INDEX_NAME
+          FROM information_schema.STATISTICS
+         WHERE TABLE_SCHEMA = DATABASE()
+           AND LOWER(TABLE_NAME) = LOWER('FourM_Curriculums')
+           AND INDEX_NAME IN ('uq_fourm_curriculum', 'uq_cur')
+    `);
+    for (const row of legacyCurriculumIndexes) {
+        const indexName = String(row.INDEX_NAME || row.Index_name || '');
+        if (indexName === 'uq_fourm_curriculum' || indexName === 'uq_cur') {
+            await db.query(`ALTER TABLE FourM_Curriculums DROP INDEX \`${indexName}\``);
+        }
+    }
 
     await db.query(`
         CREATE TABLE IF NOT EXISTS FourM_CourseMaster (
@@ -1543,14 +1579,15 @@ router.get('/training-curriculums', async (req, res) => {
         await ensureTables();
         const year = parseInt(req.query.year, 10) || new Date().getFullYear();
         const requestedDept = cleanText(req.query.dept, 100);
-        const includeInactive = req.query.includeInactive === '1';
+        const includeInactive = isFourmAdmin(req) && req.query.includeInactive === '1';
         const params = [year];
         let sql = `
             SELECT cur.*,
-                   COUNT(DISTINCT co.id) AS CourseCount,
+                   COUNT(DISTINCT CASE WHEN co.IsActive = 1 THEN co.id END) AS CourseCount,
+                   COUNT(DISTINCT co.id) AS TotalCourseCount,
                    COUNT(DISTINCT CASE WHEN cemp.Status = 'Assigned' THEN cemp.EmployeeID END) AS AssignedCount
             FROM FourM_Curriculums cur
-            LEFT JOIN FourM_Courses co ON co.CurriculumID = cur.id AND co.IsActive = 1
+            LEFT JOIN FourM_Courses co ON co.CurriculumID = cur.id
             LEFT JOIN FourM_CurriculumEmployees cemp ON cemp.CurriculumID = cur.id AND cemp.Status = 'Assigned'
             WHERE cur.\`Year\` = ?`;
         if (!includeInactive) sql += ' AND cur.IsActive = 1';
@@ -1561,7 +1598,7 @@ router.get('/training-curriculums', async (req, res) => {
             if (!ownDept) return res.json({ success: true, data: [] });
             sql += ' AND cur.Department = ?'; params.push(ownDept);
         }
-        sql += ' GROUP BY cur.id ORDER BY cur.Department ASC, cur.CurriculumCode ASC';
+        sql += ' GROUP BY cur.id ORDER BY cur.Department ASC, cur.IsActive DESC, cur.CurriculumCode ASC';
         const [rows] = await db.query(sql, params);
         res.json({ success: true, data: rows });
     } catch (error) {
@@ -1620,13 +1657,19 @@ router.put('/training-curriculums/bulk-code', isAdmin, async (req, res) => {
 
         const sourceById = new Map(rows.map(row => [String(row.id), row]));
         for (const item of preview.rows) {
-            await client.query('UPDATE FourM_Curriculums SET CurriculumCode = ? WHERE id = ?', [
-                `__BULK__${randomUUID()}`,
+            const temporaryCode = `__BULK__${randomUUID()}`;
+            await client.query('UPDATE FourM_Curriculums SET CurriculumCode = ?, ActiveScopeKey = ? WHERE id = ?', [
+                temporaryCode,
+                curriculumActiveScopeKey(item.Year, item.Department, temporaryCode, item.IsActive),
                 item.id,
             ]);
         }
         for (const item of preview.rows) {
-            await client.query('UPDATE FourM_Curriculums SET CurriculumCode = ? WHERE id = ?', [item.newCode, item.id]);
+            await client.query('UPDATE FourM_Curriculums SET CurriculumCode = ?, ActiveScopeKey = ? WHERE id = ?', [
+                item.newCode,
+                curriculumActiveScopeKey(item.Year, item.Department, item.newCode, item.IsActive),
+                item.id,
+            ]);
             await insertTrainingMatrixLog(client, req, {
                 action: 'CURRICULUM_CODE_BULK_UPDATE',
                 curriculumId: item.id,
@@ -1857,13 +1900,24 @@ router.post('/training-curriculums', async (req, res) => {
             return res.status(400).json({ success: false, message: 'กรุณาระบุแผนก รหัสหลักสูตร และชื่อหลักสูตร' });
         }
         if (!await canManageTrainingDept(req, Department)) return denyDept(res);
+        const [[duplicate]] = await db.query(
+            `SELECT id FROM FourM_Curriculums
+              WHERE IsActive = 1 AND \`Year\` = ?
+                AND LOWER(TRIM(Department)) = LOWER(TRIM(?))
+                AND LOWER(TRIM(CurriculumCode)) = LOWER(TRIM(?))
+              LIMIT 1`,
+            [year, Department, CurriculumCode]
+        );
+        if (duplicate) {
+            return res.status(409).json({ success: false, code: 'FOURM_DUPLICATE', message: 'An active curriculum already uses this code for the selected year and department.' });
+        }
         const id = randomUUID();
         const actorName = getActorName(req);
         await db.query(
             `INSERT INTO FourM_Curriculums
-             (id, \`Year\`, Department, CurriculumCode, CurriculumTitle, Notes, CreatedByID, CreatedBy)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-            [id, year, Department, CurriculumCode, CurriculumTitle, Notes, req.user?.id || req.user?.EmployeeID || null, actorName]
+             (id, \`Year\`, Department, CurriculumCode, CurriculumTitle, Notes, IsActive, ActiveScopeKey, CreatedByID, CreatedBy)
+             VALUES (?, ?, ?, ?, ?, ?, 1, ?, ?, ?)`,
+            [id, year, Department, CurriculumCode, CurriculumTitle, Notes, curriculumActiveScopeKey(year, Department, CurriculumCode), req.user?.id || req.user?.EmployeeID || null, actorName]
         );
         await logTrainingMatrix(req, {
             action: 'CURRICULUM_CREATE',
@@ -1873,7 +1927,7 @@ router.post('/training-curriculums', async (req, res) => {
         });
         res.status(201).json({ success: true, data: { id }, message: 'สร้างหลักสูตร 4M สำเร็จ' });
     } catch (error) {
-        if (error?.code === 'ER_DUP_ENTRY') return res.status(409).json({ success: false, message: 'มีหลักสูตรนี้ในปีและแผนกนี้แล้ว' });
+        if (error?.code === 'ER_DUP_ENTRY') return res.status(409).json({ success: false, code: 'FOURM_DUPLICATE', message: 'An active curriculum already uses this code for the selected year and department.' });
         console.error('4M training curriculum create error:', error);
         res.status(500).json({ success: false, message: 'ไม่สามารถสร้างหลักสูตร 4M ได้' });
     }
@@ -1885,58 +1939,150 @@ router.put('/training-curriculums/:id', async (req, res) => {
         if (!isFourmAdmin(req)) return res.status(403).json({ success: false, message: 'Admin only' });
         const current = await getTrainingCurriculum(req.params.id);
         if (!current) return res.status(404).json({ success: false, message: 'ไม่พบหลักสูตร' });
-        const nextDept = cleanText(req.body.Department ?? req.body.department ?? current.Department, 100);
-        if (!await canManageTrainingDept(req, current.Department) || !await canManageTrainingDept(req, nextDept)) return denyDept(res);
-        const fields = []; const vals = [];
-        const updates = [
-            ['Year', '`Year`', value => parseInt(value, 10) || current.Year],
-            ['Department', 'Department', value => cleanText(value, 100)],
-            ['CurriculumCode', 'CurriculumCode', value => cleanText(value, 50)],
-            ['CurriculumTitle', 'CurriculumTitle', value => cleanText(value, 255)],
-            ['Notes', 'Notes', value => cleanText(value, 1000) || null],
-            ['IsActive', 'IsActive', value => value ? 1 : 0],
-        ];
-        for (const [key, col, normalize] of updates) {
-            const raw = req.body[key] ?? req.body[key.charAt(0).toLowerCase() + key.slice(1)];
-            if (raw !== undefined) { fields.push(`${col} = ?`); vals.push(normalize(raw)); }
+        const activeValue = req.body.IsActive ?? req.body.isActive;
+        const next = {
+            Year: parseInt(req.body.Year ?? req.body.year ?? current.Year, 10),
+            Department: cleanText(req.body.Department ?? req.body.department ?? current.Department, 100),
+            CurriculumCode: cleanText(req.body.CurriculumCode ?? req.body.curriculumCode ?? current.CurriculumCode, 50),
+            CurriculumTitle: cleanText(req.body.CurriculumTitle ?? req.body.curriculumTitle ?? current.CurriculumTitle, 255),
+            Notes: cleanText(req.body.Notes ?? req.body.notes ?? current.Notes, 1000) || null,
+            IsActive: activeValue === undefined
+                ? Number(current.IsActive)
+                : (['1', 'true', 'yes', 'on', 'required'].includes(String(activeValue).trim().toLowerCase()) ? 1 : 0),
+        };
+        if (!Number.isInteger(next.Year) || next.Year < 2000 || next.Year > 2100) {
+            return res.status(400).json({ success: false, message: 'Invalid curriculum year.' });
         }
-        if (!fields.length) return res.json({ success: true, message: 'ไม่มีข้อมูลที่ต้องอัปเดต' });
-        vals.push(req.params.id);
-        await db.query(`UPDATE FourM_Curriculums SET ${fields.join(', ')} WHERE id = ?`, vals);
+        if (!next.Department || !next.CurriculumCode || !next.CurriculumTitle) {
+            return res.status(400).json({ success: false, message: 'Department, curriculum code and curriculum title are required.' });
+        }
+        if (!await canManageTrainingDept(req, current.Department) || !await canManageTrainingDept(req, next.Department)) return denyDept(res);
+        if (Number(current.IsActive) !== next.IsActive) {
+            return res.status(400).json({ success: false, code: 'FOURM_CURRICULUM_STATUS_ACTION_REQUIRED', message: 'Use Disable or Reactivate to change curriculum status.' });
+        }
+        const unchanged = Number(current.Year) === next.Year
+            && String(current.Department || '') === next.Department
+            && String(current.CurriculumCode || '') === next.CurriculumCode
+            && String(current.CurriculumTitle || '') === next.CurriculumTitle
+            && (cleanText(current.Notes, 1000) || null) === next.Notes
+            && Number(current.IsActive) === next.IsActive;
+        if (unchanged) {
+            return res.json({ success: true, data: { unchanged: true }, message: 'ข้อมูลหลักสูตรไม่มีการเปลี่ยนแปลง' });
+        }
+        const [[duplicate]] = next.IsActive === 1 ? await db.query(
+            `SELECT id FROM FourM_Curriculums
+              WHERE id <> ? AND IsActive = 1 AND \`Year\` = ?
+                AND LOWER(TRIM(Department)) = LOWER(TRIM(?))
+                AND LOWER(TRIM(CurriculumCode)) = LOWER(TRIM(?))
+              LIMIT 1`,
+            [req.params.id, next.Year, next.Department, next.CurriculumCode]
+        ) : [[]];
+        if (duplicate) {
+            return res.status(409).json({ success: false, code: 'FOURM_DUPLICATE', message: 'Curriculum code already exists for this year and department.' });
+        }
+        await db.query(
+            `UPDATE FourM_Curriculums
+                SET \`Year\` = ?, Department = ?, CurriculumCode = ?, CurriculumTitle = ?, Notes = ?, IsActive = ?, ActiveScopeKey = ?
+              WHERE id = ?`,
+            [next.Year, next.Department, next.CurriculumCode, next.CurriculumTitle, next.Notes, next.IsActive, curriculumActiveScopeKey(next.Year, next.Department, next.CurriculumCode, next.IsActive), req.params.id]
+        );
         await logTrainingMatrix(req, {
             action: 'CURRICULUM_UPDATE',
             curriculumId: req.params.id,
             oldValue: current,
-            newValue: req.body,
+            newValue: next,
             detail: `Update 4M curriculum ${current.CurriculumCode}`,
         });
         res.json({ success: true, message: 'อัปเดตหลักสูตร 4M สำเร็จ' });
     } catch (error) {
-        if (error?.code === 'ER_DUP_ENTRY') return res.status(409).json({ success: false, message: 'รหัสหลักสูตรซ้ำในปีและแผนกนี้' });
+        if (error?.code === 'ER_DUP_ENTRY') return res.status(409).json({ success: false, code: 'FOURM_DUPLICATE', message: 'Curriculum code already exists for this year and department.' });
         console.error('4M training curriculum update error:', error);
         res.status(500).json({ success: false, message: 'ไม่สามารถอัปเดตหลักสูตร 4M ได้' });
     }
 });
 
 router.delete('/training-curriculums/:id', async (req, res) => {
+    let client;
     try {
         await ensureTables();
         if (!isFourmAdmin(req)) return res.status(403).json({ success: false, message: 'Admin only' });
         const current = await getTrainingCurriculum(req.params.id);
         if (!current) return res.status(404).json({ success: false, message: 'ไม่พบหลักสูตร' });
         if (!await canManageTrainingDept(req, current.Department)) return denyDept(res);
-        await db.query('UPDATE FourM_Curriculums SET IsActive = 0 WHERE id = ?', [req.params.id]);
-        await db.query('UPDATE FourM_Courses SET IsActive = 0 WHERE CurriculumID = ?', [req.params.id]);
-        await logTrainingMatrix(req, {
+        client = await db.getConnection();
+        await client.beginTransaction();
+        await client.query('UPDATE FourM_Curriculums SET IsActive = 0, ActiveScopeKey = NULL WHERE id = ?', [req.params.id]);
+        await client.query('UPDATE FourM_Courses SET IsActive = 0 WHERE CurriculumID = ?', [req.params.id]);
+        await insertTrainingMatrixLog(client, req, {
             action: 'CURRICULUM_DISABLE',
             curriculumId: req.params.id,
             oldValue: current,
+            newValue: { ...current, IsActive: 0 },
             detail: `Disable 4M curriculum ${current.CurriculumCode}`,
         });
+        await client.commit();
         res.json({ success: true, message: 'ปิดใช้งานหลักสูตร 4M สำเร็จ' });
     } catch (error) {
+        if (client) await client.rollback().catch(() => {});
         console.error('4M training curriculum disable error:', error);
         res.status(500).json({ success: false, message: 'ไม่สามารถปิดใช้งานหลักสูตร 4M ได้' });
+    } finally {
+        if (client) client.release();
+    }
+});
+
+router.post('/training-curriculums/:id/reactivate', async (req, res) => {
+    let client;
+    try {
+        await ensureTables();
+        if (!isFourmAdmin(req)) return res.status(403).json({ success: false, message: 'Admin only' });
+        client = await db.getConnection();
+        await client.beginTransaction();
+        const [[current]] = await client.query('SELECT * FROM FourM_Curriculums WHERE id = ? FOR UPDATE', [req.params.id]);
+        if (!current) {
+            await client.rollback();
+            return res.status(404).json({ success: false, message: 'Curriculum not found.' });
+        }
+        if (!await canManageTrainingDept(req, current.Department)) {
+            await client.rollback();
+            return denyDept(res);
+        }
+        if (Number(current.IsActive) === 1) {
+            await client.rollback();
+            return res.json({ success: true, data: { unchanged: true }, message: 'Curriculum is already active.' });
+        }
+        const [[duplicate]] = await client.query(
+            `SELECT id FROM FourM_Curriculums
+              WHERE id <> ? AND IsActive = 1 AND \`Year\` = ?
+                AND LOWER(TRIM(Department)) = LOWER(TRIM(?))
+                AND LOWER(TRIM(CurriculumCode)) = LOWER(TRIM(?))
+              LIMIT 1 FOR UPDATE`,
+            [req.params.id, current.Year, current.Department, current.CurriculumCode]
+        );
+        if (duplicate) {
+            await client.rollback();
+            return res.status(409).json({ success: false, code: 'FOURM_DUPLICATE', message: 'Cannot reactivate because an active curriculum already uses this code for the same year and department.', data: { conflictingCurriculumId: duplicate.id } });
+        }
+        await client.query('UPDATE FourM_Curriculums SET IsActive = 1, ActiveScopeKey = ? WHERE id = ?', [
+            curriculumActiveScopeKey(current.Year, current.Department, current.CurriculumCode),
+            req.params.id,
+        ]);
+        const [courseResult] = await client.query('UPDATE FourM_Courses SET IsActive = 1 WHERE CurriculumID = ?', [req.params.id]);
+        await insertTrainingMatrixLog(client, req, {
+            action: 'CURRICULUM_REACTIVATE',
+            curriculumId: req.params.id,
+            oldValue: current,
+            newValue: { ...current, IsActive: 1, RestoredCourseCount: Number(courseResult.affectedRows || 0) },
+        });
+        await client.commit();
+        res.json({ success: true, data: { restoredCourseCount: Number(courseResult.affectedRows || 0) }, message: 'Curriculum reactivated.' });
+    } catch (error) {
+        if (client) await client.rollback().catch(() => {});
+        if (error?.code === 'ER_DUP_ENTRY') return res.status(409).json({ success: false, code: 'FOURM_DUPLICATE', message: 'Cannot reactivate because an active curriculum already uses this code for the same year and department.' });
+        console.error('4M training curriculum reactivate error:', error);
+        res.status(500).json({ success: false, message: 'Cannot reactivate 4M curriculum.' });
+    } finally {
+        if (client) client.release();
     }
 });
 
@@ -1946,7 +2092,7 @@ router.get('/training-curriculums/:id/courses', async (req, res) => {
         const curriculum = await getTrainingCurriculum(req.params.id);
         if (!curriculum) return res.status(404).json({ success: false, message: 'ไม่พบหลักสูตร' });
         if (!canReadTrainingDept(req, curriculum.Department)) return denyDept(res);
-        const includeInactive = req.query.includeInactive === '1';
+        const includeInactive = isFourmAdmin(req) && req.query.includeInactive === '1';
         const [rows] = await db.query(
             `SELECT c.*, COUNT(DISTINCT CASE WHEN ce.Status = 'Assigned' THEN ce.EmployeeID END) AS AssignedCount
              FROM FourM_Courses c

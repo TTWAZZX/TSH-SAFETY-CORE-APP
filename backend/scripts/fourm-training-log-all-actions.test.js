@@ -6,7 +6,7 @@ const path = require('path');
 const { standardizeTrainingLogSnapshot } = require('../utils/fourmTrainingLog');
 const { TRAINING_LOG_ACTIONS, LEGACY_TRAINING_LOG_ACTIONS } = require('../utils/fourmTrainingLogActions');
 
-assert.strictEqual(new Set(TRAINING_LOG_ACTIONS).size, 21, 'expected 21 unique Training Matrix actions');
+assert.strictEqual(new Set(TRAINING_LOG_ACTIONS).size, 22, 'expected 22 unique Training Matrix actions');
 const context = {
     employeeId: 'E001', employeeName: 'Employee One', employeeDepartment: 'DEPT A', employeeUnit: 'UNIT A', employeePosition: 'Operator',
     curriculumId: 'CUR-1', curriculumCode: 'CUR01', curriculumTitle: 'Curriculum', curriculumDepartment: 'DEPT A', year: 2026,
