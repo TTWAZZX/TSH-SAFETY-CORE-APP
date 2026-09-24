@@ -8,6 +8,8 @@ Existing operational outboxes for CCCF, Patrol, KY, Hiyari, 4M, BBS and other bu
 
 Both account templates are multipart alternatives with branded HTML and a complete plain-text fallback link. Dynamic names, emails and URLs are escaped in HTML. SMTP and feature switches are fail-closed for local testing, and link generation requires an approved `PUBLIC_APP_URL`/`APP_BASE_URL` before external delivery is enabled.
 
+The PHP shared-hosting release may provide the four non-secret Account Recovery rollout values through optional `api/account_recovery.release.php`. That file is limited to `email_enabled`, the two feature delivery flags and `public_app_url`; it takes precedence over legacy local configuration without copying or modifying SMTP, database or JWT secrets. Removing the release file disables this explicit override during rollback.
+
 ## Password Reset by Email (Local, 2026-09-24)
 
 The login recovery boundary accepts only Employee ID and deliberately returns one fixed, minimum-duration `202` response for existing accounts, missing accounts and accounts without email. The public response contains no email mask, existence flag, delivery state or token. Internal request/audit rows distinguish the outcomes for authorized operational review without making them observable to the caller.

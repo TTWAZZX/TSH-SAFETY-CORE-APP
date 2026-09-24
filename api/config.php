@@ -23,9 +23,15 @@ $env = load_env_file(dirname(__DIR__) . '/backend/.env');
 $localConfig = is_file(__DIR__ . '/config.local.php')
     ? require __DIR__ . '/config.local.php'
     : [];
+$accountRecoveryRelease = is_file(__DIR__ . '/account_recovery.release.php')
+    ? require __DIR__ . '/account_recovery.release.php'
+    : [];
 
-$read = static function (string $key, $fallback = null) use ($env, $localConfig) {
+$read = static function (string $key, $fallback = null) use ($env, $localConfig, $accountRecoveryRelease) {
     $localKey = strtolower($key);
+    if (array_key_exists($localKey, $accountRecoveryRelease)) {
+        return $accountRecoveryRelease[$localKey];
+    }
     if (array_key_exists($localKey, $localConfig)) {
         return $localConfig[$localKey];
     }
