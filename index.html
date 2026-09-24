@@ -34,6 +34,23 @@
 
     <link rel="stylesheet" href="public/style.css?v=20260724-machine-safety-row-detail">
 
+    <style>
+        /* Employee Master is rendered from a JS template; keep phone controls independent of Tailwind CDN scanning. */
+        #emp-search-input,
+        #emp-dept-filter,
+        #emp-unit-filter,
+        #emp-safety-unit-filter,
+        #emp-sort-filter,
+        #emp-table-wrap button,
+        #emp-pagination button,
+        #admin-content-area .ds-filter-bar button {
+            min-height: 44px !important;
+        }
+        #emp-table-wrap [data-employee-desktop-table] button {
+            min-width: 44px !important;
+        }
+    </style>
+
     <script>
         // Dark mode disabled — always light
         document.documentElement.classList.remove('dark');
