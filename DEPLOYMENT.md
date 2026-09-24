@@ -1,5 +1,13 @@
 # TSH Safety Core Activity - Deployment
 
+## Logged-out Forgot Password modal layer (2026-09-24)
+
+Commit `2ac8894` is pushed on `main` and deployed. Runtime scope is only `index.html`: the modal wrapper is layer 60 above the layer-50 Login overlay, making the public Forgot Password form visible and interactive without authentication.
+
+- Local Browser lifecycle passed 1440x1000, 1024x768 and 390x844, including computed visibility, stacking order and `elementFromPoint` top-layer assertions. Node/PHP lifecycle and HTTP parity remained green with zero fixture residue and delivery disabled.
+- Production FTPS download-back and HTTPS SHA-256 matched source `1/1`. Read-only Chrome UAT passed the anonymous Forgot Password surface, Profile and Employee Master with zero business mutations, failed API responses or console errors. No reset request or email was sent.
+- Rollback evidence is under `backups/production/password-reset-modal-layer-predeploy-20260924-143714/`. Rollback restores the single saved `index.html`; no schema/data/config rollback is required.
+
 ## Account Recovery and Employee Master mobile (2026-09-24)
 
 Commits `c503dc9`, `51ddf79`, `5555edf` and `4a51b52` are pushed on `main` and deployed to `https://dev.tshpcl.com/safety/tsh-safety-core`. Runtime scope is `index.html`, `public/js/main.js`, `public/js/pages/profile.js`, `public/js/pages/admin.js`, `api/config.php`, `api/index.php`, two new PHP libraries and the non-secret `api/account_recovery.release.php`; Node remains parity/test source.

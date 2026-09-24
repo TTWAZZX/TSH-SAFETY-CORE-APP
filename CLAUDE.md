@@ -1,5 +1,10 @@
 # TSH Safety Core Activity - AI Quick Start
 
+## Current Forgot Password modal Production follow-up (2026-09-24)
+
+- `main` commit `2ac8894` is deployed. The logged-out Forgot Password modal now renders above Login and is immediately visible/interactive; regression verifies computed z-order and the real pointer-hit top layer.
+- Only `index.html` changed. FTPS/HTTPS hashes matched `1/1`, Production Browser UAT performed zero business writes and sent no email. Rollback evidence: `backups/production/password-reset-modal-layer-predeploy-20260924-143714/`.
+
 ## Current Account Recovery Production release (2026-09-24)
 
 - `main` commits `c503dc9`, `51ddf79`, `5555edf` and `4a51b52` are deployed. Company Email self-verification, email-only Forgot Password, branded mail templates and responsive Employee Master cards are active. Users without a valid stored email still require Admin reset.

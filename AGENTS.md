@@ -1,5 +1,12 @@
 # TSH Safety Core Activity - AGENTS.md
 
+## Logged-out Forgot Password modal layer Production follow-up (2026-09-24)
+
+- `main` commit `2ac8894` is deployed to the PHP Production target. The shared modal wrapper now renders at layer 60 above the Login overlay layer 50, so a logged-out user sees and can interact with Forgot Password immediately instead of the form remaining hidden until Login disappears.
+- The regression now verifies visibility, computed stacking order and the actual `elementFromPoint` interactive top layer, not only that the form exists in the DOM. Local Browser lifecycle passed 1440x1000, 1024x768 and 390x844 with Node/PHP API parity and zero fixture residue; no real mail was sent.
+- Production deployed only `index.html`. FTPS download-back and public HTTPS SHA-256 matched source `1/1`; authenticated/read-only Browser UAT passed the anonymous Forgot Password surface plus Profile at three viewports and Employee Master at four viewports with zero business mutations, failed API responses or console errors. No schema, account, email, password or delivery setting changed.
+- Exact before/after runtime and Browser evidence is under `backups/production/password-reset-modal-layer-predeploy-20260924-143714/`.
+
 ## Account Recovery and Employee Master mobile Production release (2026-09-24)
 
 - `main` commits `c503dc9`, `51ddf79`, `5555edf` and `4a51b52` are deployed to the PHP Production target. Signed-in users can view and self-manage any syntactically valid `CompanyEmail` through current-password re-authentication and a 24-hour one-time verification link; Forgot Password is enumeration-safe and works only for accounts with an existing valid email through a 30-minute one-time link. Users without email continue to require Admin assistance.

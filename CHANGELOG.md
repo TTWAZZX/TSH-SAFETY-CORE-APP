@@ -1,5 +1,11 @@
 # TSH Safety Core Activity - Changelog And Handoff History
 
+## 2026-09-24 - Logged-out Forgot Password modal layer deployed
+
+- Deployed `main` commit `2ac8894`. Forgot Password now opens above the Login overlay for logged-out users; previously the form existed at layer 40 behind the layer-50 Login and became visible only after Login was hidden.
+- Added Browser regression for visible stacking and the actual interactive top layer. Local lifecycle passed three viewports with zero residue; Production read-only Browser UAT passed with zero business writes/errors and no recovery mail sent.
+- Only `index.html` was deployed. FTPS download-back and HTTPS SHA-256 matched `1/1`. Rollback evidence is under `backups/production/password-reset-modal-layer-predeploy-20260924-143714/`.
+
 ## 2026-09-24 - Account recovery and Employee Master mobile deployed
 
 - Deployed `main` commits `c503dc9`, `51ddf79`, `5555edf` and `4a51b52`. Profile Company Email verification, email-only Forgot Password, Thai HTML/plain-text templates and responsive Employee Master cards are active in Production. Any valid email provider is accepted; users without a stored valid email remain on Admin-assisted reset.
