@@ -153,11 +153,24 @@ async function main() {
     const forgot = await evaluate(`(() => {
         const form=document.querySelector('#forgot-password-form');
         const submit=document.querySelector('#forgot-password-submit');
+        const login=document.querySelector('#login-overlay');
+        const wrapper=document.querySelector('#modal-wrapper');
+        const container=document.querySelector('#modal-container');
+        const rect=container.getBoundingClientRect();
+        const topElement=document.elementFromPoint(rect.left + rect.width / 2, rect.top + Math.min(40, rect.height / 2));
         return {form:Boolean(form),employeeId:Boolean(document.querySelector('#forgot-password-employee-id')),
+            loginVisible:Boolean(login && getComputedStyle(login).display!=='none'),
+            modalVisible:Boolean(wrapper && getComputedStyle(wrapper).display!=='none' && Number.parseFloat(getComputedStyle(wrapper).opacity)>0.9),
+            modalZ:Number.parseInt(getComputedStyle(wrapper).zIndex,10)||0,
+            loginZ:Number.parseInt(getComputedStyle(login).zIndex,10)||0,
+            topmost:Boolean(topElement && wrapper.contains(topElement)),
             submitHeight:submit?.getBoundingClientRect().height||0,
             overflow:document.documentElement.scrollWidth>document.documentElement.clientWidth+2};
     })()`);
-    assert.deepStrictEqual({ form: forgot.form, employeeId: forgot.employeeId, overflow: forgot.overflow }, { form: true, employeeId: true, overflow: false });
+    assert.deepStrictEqual({ form: forgot.form, employeeId: forgot.employeeId, loginVisible: forgot.loginVisible,
+        modalVisible: forgot.modalVisible, topmost: forgot.topmost, overflow: forgot.overflow },
+    { form: true, employeeId: true, loginVisible: true, modalVisible: true, topmost: true, overflow: false });
+    assert.ok(forgot.modalZ > forgot.loginZ, `Forgot Password modal must be above Login (${forgot.modalZ} <= ${forgot.loginZ})`);
     assert.ok(forgot.submitHeight >= 43, `Forgot Password submit touch target is too small: ${forgot.submitHeight}px`);
 
     await evaluate(`(() => {

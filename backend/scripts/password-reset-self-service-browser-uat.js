@@ -175,8 +175,40 @@ async function connectBrowser() {
         assert.equal(result.overflow, false, `${result.width}: login overflow`);
     }
 
+    const modalResults = [];
+    for (const [width, height] of viewports) {
+        await command('Emulation.setDeviceMetricsOverride', { width, height, deviceScaleFactor: 1, mobile: width < 600 });
+        await evaluate(`(()=>{document.querySelector('#forgot-password-btn').click();return true;})()`);
+        await waitFor("document.querySelector('#forgot-password-form') && Number.parseFloat(getComputedStyle(document.querySelector('#modal-wrapper')).opacity) > 0.9");
+        modalResults.push(await evaluate(`(() => {
+            const login=document.querySelector('#login-overlay');
+            const wrapper=document.querySelector('#modal-wrapper');
+            const container=document.querySelector('#modal-container');
+            const rect=container.getBoundingClientRect();
+            const topElement=document.elementFromPoint(rect.left + rect.width / 2, rect.top + Math.min(40, rect.height / 2));
+            return {
+                width:${width},
+                loginVisible:Boolean(login && getComputedStyle(login).display !== 'none'),
+                modalVisible:Boolean(wrapper && getComputedStyle(wrapper).display !== 'none' && Number.parseFloat(getComputedStyle(wrapper).opacity) > 0.9),
+                modalZ:Number.parseInt(getComputedStyle(wrapper).zIndex,10)||0,
+                loginZ:Number.parseInt(getComputedStyle(login).zIndex,10)||0,
+                topmost:Boolean(topElement && wrapper.contains(topElement)),
+                overflow:document.documentElement.scrollWidth>document.documentElement.clientWidth+3
+            };
+        })()`));
+        await evaluate("document.querySelector('#modal-close-btn').click()");
+        await waitFor("document.querySelector('#modal-wrapper').classList.contains('hidden')");
+    }
+    for (const result of modalResults) {
+        assert.equal(result.loginVisible, true, `${result.width}: Login must remain visible behind Forgot Password`);
+        assert.equal(result.modalVisible, true, `${result.width}: Forgot Password modal is not visible`);
+        assert.ok(result.modalZ > result.loginZ, `${result.width}: Forgot Password modal must be above Login (${result.modalZ} <= ${result.loginZ})`);
+        assert.equal(result.topmost, true, `${result.width}: Forgot Password modal is not the interactive top layer`);
+        assert.equal(result.overflow, false, `${result.width}: Forgot Password modal overflow`);
+    }
+
     await evaluate(`(()=>{document.querySelector('#forgot-password-btn').click();return true;})()`);
-    await waitFor("document.querySelector('#forgot-password-form')");
+    await waitFor("document.querySelector('#forgot-password-form') && Number.parseFloat(getComputedStyle(document.querySelector('#modal-wrapper')).opacity) > 0.9");
     await evaluate(`(()=>{const input=document.querySelector('#forgot-password-employee-id');input.value=${JSON.stringify(employeeId)};document.querySelector('#forgot-password-form').requestSubmit();return true;})()`);
     await waitFor("document.querySelector('#forgot-password-done')");
     assert.equal(await evaluate("document.querySelector('#modal-body').innerText.includes('ข้อความนี้เหมือนกันทุกบัญชีเพื่อความปลอดภัย')"), true, 'Generic security message missing');
@@ -207,7 +239,7 @@ async function connectBrowser() {
     assert.deepEqual(mutations, ['POST /api/password-reset/request', 'POST /api/password-reset/complete']);
     assert.deepEqual(failedResponses, [], `Password Reset API failures: ${failedResponses.join(' | ')}`);
     assert.deepEqual(consoleErrors, [], `Browser console errors: ${consoleErrors.join(' | ')}`);
-    console.log(`Password Reset Browser UAT passed: ${viewports.map(row => row.join('x')).join(', ')}, request + reset lifecycle, zero console/API errors.`);
+    console.log(`Password Reset Browser UAT passed: ${viewports.map(row => row.join('x')).join(', ')}, logged-out modal topmost, request + reset lifecycle, zero console/API errors.`);
 })().catch(error => {
     console.error(error.stack || error);
     process.exitCode = 1;
