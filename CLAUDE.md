@@ -1,6 +1,13 @@
 # TSH Safety Core Activity - AI Quick Start
 
-## Current Account Recovery Integration Handoff (2026-09-24, local)
+## Current Account Recovery Production release (2026-09-24)
+
+- `main` commits `c503dc9`, `51ddf79`, `5555edf` and `4a51b52` are deployed. Company Email self-verification, email-only Forgot Password, branded mail templates and responsive Employee Master cards are active. Users without a valid stored email still require Admin reset.
+- Production has four additive empty request/audit tables, 2,537 employees and 120 populated emails. SMTP is enabled through the existing protected settings plus a non-secret four-key release override; Production UAT sent no mail and exposed no secret.
+- Production API/Browser UAT passed Profile at three viewports and Employee Master at four viewports with zero business writes/errors. The mobile cache chain is `20260924-employee-master-mobile-r2`; static CSS enforces 44 px touch targets because Production Tailwind does not reliably discover classes created by JS templates.
+- Rollback evidence is under `backups/production/account-recovery-predeploy-20260924-130107/` and `backups/production/account-recovery-touch-target-predeploy-20260924-132712/`. FTPS/HTTPS checks passed initial `9/9` + `4/4` and follow-up `3/3` + `3/3`; temporary migration helper residue is zero.
+
+## Account Recovery Integration Handoff history (2026-09-24, local release candidate)
 
 - Controlled Gmail UAT passed Node/PHP real delivery and operator-confirmed Thai HTML rendering. The follow-up real-delivery lifecycle reached Company Email Verified and Password Reset Completed, rejected both reused links and cleaned all five fixture categories to zero. Evidence contains no SMTP address, App Password or raw token.
 - PHP lifecycle/API tests now override enabled local mail settings in isolated test processes, so ordinary regression cannot send fixture mail. Real Gmail UAT remains guarded by the explicit `CONTROLLED_MAIL_UAT=1` commands.
@@ -11,11 +18,11 @@
 - Repository-wide permission audit still exits non-zero only for the pre-existing 4M curriculum-reactivate and training-log-delete routes. No Production backup exists because nothing was deployed.
 - Hiyari outbox/email contract smoke passes `17/17`; `smoke:patrol-supervisor-email-parity` remains a pre-existing broken npm entry because its referenced script is missing.
 
-## Current Employee Master Mobile Handoff (2026-09-24, local)
+## Employee Master Mobile Handoff history (2026-09-24, local release candidate)
 
 - System Console > Employee Master keeps the existing desktop table at 768 px and wider, and renders the same current page as employee cards on smaller viewports. The cards expose Employee ID, name, Department, Position, Safety Unit, Company Email, Email Readiness, Role, created time and the established Edit/Reset/Delete actions.
 - Search, filter, toolbar, action and pagination controls now use phone-safe touch targets. The page has no global horizontal overflow at 400x724 or 390x844. No API, permission, schema, business data or upload path changed.
-- `npm --prefix backend run uat:employee-master-mobile-browser` passes 1440x1000, 1024x768, 400x724 and 390x844 with zero business mutations, failed API responses, console errors and fixture residue. Cache chain: `20260924-employee-master-mobile-r1`. The phase is not committed, pushed or deployed.
+- At phase close, `npm --prefix backend run uat:employee-master-mobile-browser` passed 1440x1000, 1024x768, 400x724 and 390x844 with zero business mutations, failed API responses, console errors and fixture residue. The later Production release and `r2` cache chain are authoritative above.
 
 ## Current KY Activity External Video Evidence Production release (2026-09-22)
 

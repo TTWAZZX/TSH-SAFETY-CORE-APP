@@ -19,6 +19,7 @@ const pending = new Map();
 const consoleErrors = [];
 const failedApiResponses = [];
 const mutationRequests = [];
+const readOnlyPostRequests = [];
 let nextId = 1;
 let browser;
 let socket;
@@ -108,8 +109,11 @@ async function connectBrowser() {
         if (message.method === 'Network.requestWillBeSent') {
             const request = message.params?.request || {};
             const method = String(request.method || '').toUpperCase();
-            if (String(request.url || '').includes('/api/') && !['GET', 'HEAD', 'OPTIONS'].includes(method)) {
-                mutationRequests.push(`${method} ${request.url}`);
+            const requestUrl = String(request.url || '');
+            if (method === 'POST' && requestUrl.includes('/api/session/verify')) {
+                readOnlyPostRequests.push(`${method} ${requestUrl}`);
+            } else if (requestUrl.includes('/api/') && !['GET', 'HEAD', 'OPTIONS'].includes(method)) {
+                mutationRequests.push(`${method} ${requestUrl}`);
             }
         }
         if (message.method === 'Network.responseReceived') {
@@ -229,6 +233,7 @@ async function main() {
         profile: profileResults,
         employeeMaster: employeeResults,
         mutationRequests,
+        readOnlyPostRequests,
         failedApiResponses,
         consoleErrors,
         expectedSideEffects: ['successful login audit/attempt record', 'normal login housekeeping'],

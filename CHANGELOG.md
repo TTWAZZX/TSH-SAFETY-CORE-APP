@@ -1,6 +1,13 @@
 # TSH Safety Core Activity - Changelog And Handoff History
 
-## 2026-09-24 - Account recovery integration closeout (local, unreleased)
+## 2026-09-24 - Account recovery and Employee Master mobile deployed
+
+- Deployed `main` commits `c503dc9`, `51ddf79`, `5555edf` and `4a51b52`. Profile Company Email verification, email-only Forgot Password, Thai HTML/plain-text templates and responsive Employee Master cards are active in Production. Any valid email provider is accepted; users without a stored valid email remain on Admin-assisted reset.
+- Added four empty audit-preserving tables without rewriting employee/password data. Production stayed at 2,537 employees / 120 populated emails. SMTP delivery flags use a non-secret release override; Production verification sent no email and did not expose or replace `.env`/`config.local.php`.
+- Local controlled Gmail lifecycle passed two authorized plus-alias deliveries, one-time completion/reuse rejection and zero fixture residue. Production API and Browser UAT passed read-only across Profile 3 viewports and Employee Master 4 viewports with zero business writes/errors.
+- FTPS/HTTPS verification passed initial `9/9` and `4/4`, then touch-target follow-up `3/3` and `3/3`. Rollback evidence: `backups/production/account-recovery-predeploy-20260924-130107/` and `backups/production/account-recovery-touch-target-predeploy-20260924-132712/`.
+
+## 2026-09-24 - Account recovery integration closeout (local release candidate history)
 
 - Completed controlled Gmail delivery: the operator confirmed the Node Company Email and PHP Password Reset messages arrived with correct Thai HTML rendering. The controlled database lifecycle then delivered two additional messages to a Gmail plus alias, reached Verified/Completed, rejected reuse of both links and cleaned employee/request/audit fixtures to zero without retaining credentials or raw tokens.
 - Made PHP lifecycle/API UAT independent of an enabled local mail configuration. Direct PHP tests force delivery off before bootstrap, and parity tests launch an isolated PHP server with delivery disabled; this prevents fixture addresses from reaching external SMTP while preserving real-delivery UAT as an explicit opt-in command.

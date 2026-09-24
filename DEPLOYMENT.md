@@ -1,5 +1,15 @@
 # TSH Safety Core Activity - Deployment
 
+## Account Recovery and Employee Master mobile (2026-09-24)
+
+Commits `c503dc9`, `51ddf79`, `5555edf` and `4a51b52` are pushed on `main` and deployed to `https://dev.tshpcl.com/safety/tsh-safety-core`. Runtime scope is `index.html`, `public/js/main.js`, `public/js/pages/profile.js`, `public/js/pages/admin.js`, `api/config.php`, `api/index.php`, two new PHP libraries and the non-secret `api/account_recovery.release.php`; Node remains parity/test source.
+
+- The additive migration created four empty request/audit tables. Employee Master stayed at 2,537 rows with 120 populated emails; no existing employee/password/business record was changed or deleted.
+- Production delivery is enabled for Company Email verification and Password Reset using the existing SMTP secrets plus a four-key non-secret release override. Production UAT remained read-only and sent no mail. The existing `.env` and `api/config.local.php` were not downloaded, logged or replaced.
+- FTPS download-back matched `9/9` and public HTTPS matched `4/4`. A follow-up fixed dynamic Tailwind touch sizing with static 44 px controls and cache chain `20260924-employee-master-mobile-r2`; its FTPS and HTTPS checks matched `3/3` each.
+- Production API UAT passed Profile state/delivery readiness and retained the 2,537/120 baseline. Chrome UAT passed Forgot Password, Profile at 1440/1024/390 px and Employee Master at 1440/1024/400/390 px with zero business mutations, failed API responses or console errors. `POST /api/session/verify` is explicitly classified as a read-only session check.
+- Rollback uses `backups/production/account-recovery-predeploy-20260924-130107/` for the initial release and `backups/production/account-recovery-touch-target-predeploy-20260924-132712/` for the UI follow-up. Both retain exact before/after runtime hashes; migration helper residue is zero. Additive audit tables should normally be preserved on rollback.
+
 ## 4M Training Curriculum Soft Disable (2026-09-23)
 
 Source commit `1e938de` is pushed on `main` and deployed to `https://dev.tshpcl.com/safety/tsh-safety-core`. Runtime scope is `index.html`, `public/js/main.js`, `public/js/pages/fourm.js` and `api/handlers/fourm_phase7.php`; Node remains parity/test source.
