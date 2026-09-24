@@ -46,6 +46,8 @@ return [
     'jwt_secret' => (string) $read('JWT_SECRET', ''),
     'jwt_ttl' => 6 * 60 * 60,
     'email_enabled' => filter_var($read('EMAIL_ENABLED', true), FILTER_VALIDATE_BOOLEAN),
+    'company_email_verification_delivery_enabled' => filter_var($read('COMPANY_EMAIL_VERIFICATION_DELIVERY_ENABLED', false), FILTER_VALIDATE_BOOLEAN),
+    'password_reset_email_delivery_enabled' => filter_var($read('PASSWORD_RESET_EMAIL_DELIVERY_ENABLED', false), FILTER_VALIDATE_BOOLEAN),
     'smtp_host' => (string) $read('SMTP_HOST', ''),
     'smtp_port' => (int) $read('SMTP_PORT', 587),
     'smtp_secure' => filter_var($read('SMTP_SECURE', false), FILTER_VALIDATE_BOOLEAN),

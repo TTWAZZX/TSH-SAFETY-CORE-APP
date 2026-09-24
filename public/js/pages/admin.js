@@ -5615,7 +5615,7 @@ async function renderEmployeesTab(container) {
     <div class="animate-fade-in space-y-5">
         <div id="emp-email-readiness"></div>
         <section class="rounded-xl border border-slate-200 bg-white overflow-hidden shadow-sm">
-            <div class="p-4 border-b border-slate-100">
+            <div class="p-3 sm:p-4 border-b border-slate-100">
                 <div class="flex flex-col gap-1 lg:flex-row lg:items-end lg:justify-between">
                     <div>
                         <p class="text-[10px] font-bold uppercase tracking-widest text-emerald-600">Employee Master</p>
@@ -5629,23 +5629,23 @@ async function renderEmployeesTab(container) {
                 </div>
                 <div class="ds-filter-bar mt-4 flex flex-col xl:flex-row gap-3 items-stretch xl:items-center justify-between">
                     <div class="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-[minmax(220px,1fr),180px,160px,190px,190px,auto] gap-2 flex-1 w-full">
-                        <input type="text" id="emp-search-input" placeholder="ค้นหาชื่อ / รหัส / หน่วยงาน..."
-                            class="form-input w-full rounded-lg text-sm border-slate-200"
+                        <input type="text" id="emp-search-input" placeholder="ค้นหาชื่อ / รหัส / หน่วยงาน / อีเมล..."
+                            class="form-input min-h-11 w-full rounded-lg text-sm border-slate-200"
                             oninput="window._empSearch(this.value)">
-                        <select id="emp-dept-filter" class="form-input w-full rounded-lg text-sm border-slate-200"
+                        <select id="emp-dept-filter" class="form-input min-h-11 w-full rounded-lg text-sm border-slate-200"
                             onchange="window._empDepartmentFilter(this.value)">
                             <option value="all">ทุกแผนก</option>
                         </select>
-                        <select id="emp-unit-filter" class="form-input w-full rounded-lg text-sm border-slate-200"
+                        <select id="emp-unit-filter" class="form-input min-h-11 w-full rounded-lg text-sm border-slate-200"
                             onchange="window._empUnitFilterChange(this.value)">
                             <option value="all">ทุก Unit</option>
                         </select>
-                        <select id="emp-safety-unit-filter" class="form-input w-full rounded-lg text-sm border-slate-200"
+                        <select id="emp-safety-unit-filter" class="form-input min-h-11 w-full rounded-lg text-sm border-slate-200"
                             onchange="window._empSafetyUnitFilterChange(this.value)">
                             <option value="all">ทุกสถานะ Safety Unit</option>
                             <option value="missing">ยังไม่ระบุ Safety Unit</option>
                         </select>
-                        <select id="emp-sort-filter" class="form-input w-full rounded-lg text-sm border-slate-200"
+                        <select id="emp-sort-filter" class="form-input min-h-11 w-full rounded-lg text-sm border-slate-200"
                             onchange="window._empSortChange(this.value)" aria-label="เรียงลำดับข้อมูลพนักงาน">
                             <option value="default">เรียงลำดับ: ค่าเริ่มต้น</option>
                             <option value="created_desc">เพิ่มล่าสุด</option>
@@ -5655,20 +5655,20 @@ async function renderEmployeesTab(container) {
                             <option value="name_asc">ชื่อ: ก → ฮ</option>
                         </select>
                         <button type="button" onclick="window._empClearFilters()"
-                            class="px-3 py-2 rounded-lg border border-slate-200 bg-white text-xs font-bold text-slate-600 hover:bg-slate-50">
+                            class="min-h-11 px-3 py-2 rounded-lg border border-slate-200 bg-white text-xs font-bold text-slate-600 hover:bg-slate-50">
                             ล้างตัวกรอง
                         </button>
                     </div>
-                    <div class="flex gap-2 flex-wrap xl:justify-end">
-                        <button onclick="window._exportEmpExcel()" class="btn bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs px-3 py-2 rounded-lg font-medium flex items-center gap-1.5 transition-colors">
+                    <div class="grid grid-cols-1 gap-2 sm:flex sm:flex-wrap xl:justify-end">
+                        <button onclick="window._exportEmpExcel()" class="btn min-h-11 justify-center bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs px-3 py-2 rounded-lg font-medium flex items-center gap-1.5 transition-colors">
                             <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/></svg>
                             Export Excel
                         </button>
-                        <button onclick="window._openImportModal()" class="btn bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs px-3 py-2 rounded-lg font-medium flex items-center gap-1.5 transition-colors">
+                        <button onclick="window._openImportModal()" class="btn min-h-11 justify-center bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs px-3 py-2 rounded-lg font-medium flex items-center gap-1.5 transition-colors">
                             <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12"/></svg>
                             Import Excel
                         </button>
-                        <button onclick="window._openAddEmpModal()" class="btn bg-emerald-600 hover:bg-emerald-700 text-white text-xs px-4 py-2 rounded-lg font-medium flex items-center gap-1.5 transition-colors shadow-sm shadow-emerald-100">
+                        <button onclick="window._openAddEmpModal()" class="btn min-h-11 justify-center bg-emerald-600 hover:bg-emerald-700 text-white text-xs px-4 py-2 rounded-lg font-medium flex items-center gap-1.5 transition-colors shadow-sm shadow-emerald-100">
                             <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/></svg>
                             เพิ่มพนักงาน
                         </button>
@@ -5681,7 +5681,7 @@ async function renderEmployeesTab(container) {
                 </div>
             </div>
         </section>
-        <div id="emp-pagination" class="flex justify-between items-center"></div>
+        <div id="emp-pagination" class="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between"></div>
     </div>`;
 
     window._empSearch = (q) => { _empSearch = q.toLowerCase(); _empPage = 1; _renderEmpTable(); };
@@ -6212,6 +6212,46 @@ function _renderEmpTable() {
     };
 
     wrap.innerHTML = `
+    <div class="space-y-3 p-3 md:hidden" data-employee-mobile-list>
+        ${paged.map(emp => {
+            const emailMeta = _empEmailStatusMeta(emp);
+            const employeeId = _adminInlineArg(emp.EmployeeID);
+            const employeeName = _adminInlineArg(emp.EmployeeName);
+            return `
+            <article class="rounded-xl border border-slate-200 bg-white p-3 shadow-sm" data-employee-card="${escHtml(emp.EmployeeID)}">
+                <div class="flex min-w-0 items-start justify-between gap-3">
+                    <div class="min-w-0">
+                        <h4 class="break-words text-sm font-bold text-slate-800">${emp.EmployeeName ? escHtml(emp.EmployeeName) : '&mdash;'}</h4>
+                        <p class="mt-1 font-mono text-xs text-slate-500">${escHtml(emp.EmployeeID)}</p>
+                    </div>
+                    <div class="shrink-0">${roleBadge(emp.Role)}</div>
+                </div>
+                <dl class="mt-3 grid grid-cols-1 gap-3 border-y border-slate-100 py-3 text-xs sm:grid-cols-2">
+                    <div class="min-w-0"><dt class="font-bold text-slate-400">หน่วยงาน</dt><dd class="mt-1 break-words text-slate-700">${emp.Department ? escHtml(emp.Department) : '&mdash;'}</dd></div>
+                    <div class="min-w-0"><dt class="font-bold text-slate-400">ตำแหน่ง</dt><dd class="mt-1 break-words text-slate-700">${emp.Position ? escHtml(emp.Position) : '&mdash;'}</dd></div>
+                    <div class="min-w-0"><dt class="font-bold text-slate-400">Safety Unit</dt><dd class="mt-1 text-slate-700">${_empUnitCellHtml(emp)}</dd></div>
+                    <div class="min-w-0"><dt class="font-bold text-slate-400">Company Email</dt><dd class="mt-1 break-all font-mono text-slate-700">${emp.CompanyEmail ? escHtml(emp.CompanyEmail) : '<span class="font-sans text-slate-400">ยังไม่มีอีเมล</span>'}</dd></div>
+                    <div class="min-w-0 sm:col-span-2"><dt class="font-bold text-slate-400">Email Readiness</dt><dd class="mt-1">${dsStatusBadge(emailMeta.label, { className: emailMeta.className })}</dd></div>
+                </dl>
+                ${emp.CreatedAt ? `<p class="mt-2 text-[10px] text-slate-400">เพิ่ม ${escHtml(_formatEmpAddedAt(emp.CreatedAt))}</p>` : ''}
+                <div class="mt-3 grid grid-cols-3 gap-2" aria-label="จัดการพนักงาน ${escHtml(emp.EmployeeName || emp.EmployeeID)}">
+                    <button type="button" onclick="window._openEditEmpModal(${employeeId})"
+                        class="min-h-11 rounded-lg border border-emerald-200 bg-emerald-50 px-2 text-xs font-bold text-emerald-700">
+                        แก้ไข
+                    </button>
+                    <button type="button" onclick="window._openResetPwModal(${employeeId},${employeeName})"
+                        class="min-h-11 rounded-lg border border-amber-200 bg-amber-50 px-2 text-xs font-bold text-amber-700">
+                        รีเซ็ตรหัส
+                    </button>
+                    <button type="button" onclick="window._deleteEmployee(${employeeId},${employeeName})"
+                        class="min-h-11 rounded-lg border border-rose-200 bg-rose-50 px-2 text-xs font-bold text-rose-700">
+                        ลบ
+                    </button>
+                </div>
+            </article>`;
+        }).join('')}
+    </div>
+    <div class="hidden overflow-x-auto md:block" data-employee-desktop-table>
     <table class="ds-table min-w-[1200px] text-sm">
         <thead>
             <tr class="bg-slate-50 border-b border-slate-200 text-left">
@@ -6241,17 +6281,17 @@ function _renderEmpTable() {
                 <td class="px-4 py-3">${dsStatusBadge(_empEmailStatusMeta(emp).label, { className: _empEmailStatusMeta(emp).className })}</td>
                 <td class="px-4 py-3">${roleBadge(emp.Role)}</td>
                 <td class="px-4 py-3 text-right">
-                    <div class="flex gap-1 justify-end opacity-0 group-hover:opacity-100 transition-opacity">
-                        <button onclick="window._openEditEmpModal(${_adminInlineArg(emp.EmployeeID)})" title="แก้ไข"
-                            class="p-1.5 text-slate-400 hover:text-emerald-600 hover:bg-emerald-50 rounded-lg transition-colors">
+                    <div class="flex gap-1 justify-end">
+                        <button onclick="window._openEditEmpModal(${_adminInlineArg(emp.EmployeeID)})" title="แก้ไข" aria-label="แก้ไข ${escHtml(emp.EmployeeName || emp.EmployeeID)}"
+                            class="flex min-h-11 min-w-11 items-center justify-center text-slate-400 hover:text-emerald-600 hover:bg-emerald-50 rounded-lg transition-colors">
                             <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"/></svg>
                         </button>
-                        <button onclick="window._openResetPwModal(${_adminInlineArg(emp.EmployeeID)},${_adminInlineArg(emp.EmployeeName)})" title="รีเซ็ตรหัสผ่าน"
-                            class="p-1.5 text-slate-400 hover:text-amber-600 hover:bg-amber-50 rounded-lg transition-colors">
+                        <button onclick="window._openResetPwModal(${_adminInlineArg(emp.EmployeeID)},${_adminInlineArg(emp.EmployeeName)})" title="รีเซ็ตรหัสผ่าน" aria-label="รีเซ็ตรหัสผ่าน ${escHtml(emp.EmployeeName || emp.EmployeeID)}"
+                            class="flex min-h-11 min-w-11 items-center justify-center text-slate-400 hover:text-amber-600 hover:bg-amber-50 rounded-lg transition-colors">
                             <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 7a2 2 0 012 2m4 0a6 6 0 01-7.743 5.743L11 17H9v2H7v2H4a1 1 0 01-1-1v-2.586a1 1 0 01.293-.707l5.964-5.964A6 6 0 1121 9z"/></svg>
                         </button>
-                        <button onclick="window._deleteEmployee(${_adminInlineArg(emp.EmployeeID)},${_adminInlineArg(emp.EmployeeName)})" title="ลบ"
-                            class="p-1.5 text-slate-400 hover:text-red-500 hover:bg-red-50 rounded-lg transition-colors">
+                        <button onclick="window._deleteEmployee(${_adminInlineArg(emp.EmployeeID)},${_adminInlineArg(emp.EmployeeName)})" title="ลบ" aria-label="ลบ ${escHtml(emp.EmployeeName || emp.EmployeeID)}"
+                            class="flex min-h-11 min-w-11 items-center justify-center text-slate-400 hover:text-red-500 hover:bg-red-50 rounded-lg transition-colors">
                             <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg>
                         </button>
                     </div>
@@ -6259,16 +6299,17 @@ function _renderEmpTable() {
             </tr>`).join('')}
         </tbody>
     </table>
+    </div>
     <div class="px-4 py-2 border-t border-slate-100 text-xs text-slate-400">
         แสดง ${start+1}–${Math.min(start+EMP_PER_PAGE,filtered.length)} จาก ${filtered.length} รายการ (ทั้งหมด ${_empCache.length})
     </div>`;
 
     if (pagEl) {
         pagEl.innerHTML = totalPages <= 1 ? '' : `
-        <div class="flex items-center gap-2 text-xs text-slate-600">
-            <button onclick="window._empChangePage(${_empPage-1})" ${_empPage<=1?'disabled':''} class="px-3 py-1.5 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 disabled:opacity-40 disabled:cursor-not-allowed transition-colors">← ก่อนหน้า</button>
-            <span class="px-3">หน้า <strong>${_empPage}</strong> / ${totalPages}</span>
-            <button onclick="window._empChangePage(${_empPage+1})" ${_empPage>=totalPages?'disabled':''} class="px-3 py-1.5 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 disabled:opacity-40 disabled:cursor-not-allowed transition-colors">ถัดไป →</button>
+        <div class="flex w-full items-center justify-between gap-2 text-xs text-slate-600 sm:w-auto sm:justify-start">
+            <button onclick="window._empChangePage(${_empPage-1})" ${_empPage<=1?'disabled':''} class="min-h-11 rounded-lg border border-slate-200 bg-white px-3 py-1.5 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40 transition-colors">← ก่อนหน้า</button>
+            <span class="shrink-0 px-1 sm:px-3">หน้า <strong>${_empPage}</strong> / ${totalPages}</span>
+            <button onclick="window._empChangePage(${_empPage+1})" ${_empPage>=totalPages?'disabled':''} class="min-h-11 rounded-lg border border-slate-200 bg-white px-3 py-1.5 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40 transition-colors">ถัดไป →</button>
         </div>`;
     }
 }

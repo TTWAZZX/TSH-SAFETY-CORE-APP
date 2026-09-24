@@ -1,5 +1,22 @@
 # TSH Safety Core Activity - AI Quick Start
 
+## Current Account Recovery Integration Handoff (2026-09-24, local)
+
+- Controlled Gmail UAT passed Node/PHP real delivery and operator-confirmed Thai HTML rendering. The follow-up real-delivery lifecycle reached Company Email Verified and Password Reset Completed, rejected both reused links and cleaned all five fixture categories to zero. Evidence contains no SMTP address, App Password or raw token.
+- PHP lifecycle/API tests now override enabled local mail settings in isolated test processes, so ordinary regression cannot send fixture mail. Real Gmail UAT remains guarded by the explicit `CONTROLLED_MAIL_UAT=1` commands.
+- Phases 1-4 are integrated as one release candidate and remain undeployed until the Production gate is recorded. Company Email request/verification, Forgot Password request/completion and Employee Master mobile presentation pass their focused Node/PHP/API/Browser suites with zero fixture residue.
+- Closeout fixed the Node Company Email SMTP recipient and added Company Email delivery audit parity. Loopback SMTP proves Node/PHP HTML+text MIME, correct recipients and temporary-failure retry without contacting Gmail or exposing credentials.
+- Account recovery does not enqueue the established module outboxes. Company Email Resend and repeated Forgot Password requests are the retry controls; each issues a fresh SHA-only token and supersedes the previous Pending link.
+- Local SMTP settings exist, but `EMAIL_ENABLED`, both feature delivery flags remain false, and `PUBLIC_APP_URL` is missing. Configure the approved Production application URL before controlled mail UAT; do not enable delivery or use real recipients implicitly.
+- Repository-wide permission audit still exits non-zero only for the pre-existing 4M curriculum-reactivate and training-log-delete routes. No Production backup exists because nothing was deployed.
+- Hiyari outbox/email contract smoke passes `17/17`; `smoke:patrol-supervisor-email-parity` remains a pre-existing broken npm entry because its referenced script is missing.
+
+## Current Employee Master Mobile Handoff (2026-09-24, local)
+
+- System Console > Employee Master keeps the existing desktop table at 768 px and wider, and renders the same current page as employee cards on smaller viewports. The cards expose Employee ID, name, Department, Position, Safety Unit, Company Email, Email Readiness, Role, created time and the established Edit/Reset/Delete actions.
+- Search, filter, toolbar, action and pagination controls now use phone-safe touch targets. The page has no global horizontal overflow at 400x724 or 390x844. No API, permission, schema, business data or upload path changed.
+- `npm --prefix backend run uat:employee-master-mobile-browser` passes 1440x1000, 1024x768, 400x724 and 390x844 with zero business mutations, failed API responses, console errors and fixture residue. Cache chain: `20260924-employee-master-mobile-r1`. The phase is not committed, pushed or deployed.
+
 ## Current KY Activity External Video Evidence Production release (2026-09-22)
 
 `main` commits `dee0898` and `f68fca8` are deployed. Central-machine evidence is registered per KY Activity as Pending, suppresses Need video, and counts as External verified/Annual compliant only after Admin Verify. Node/PHP lifecycle and three-viewport Browser UAT passed with zero residue. Production retained 106 KY rows / 83 Production videos, FTPS matched 4/4, HTTPS matched 3/3 and the new empty Activity External registry reads successfully. Rollback evidence is under `backups/production/ky-activity-external-predeploy-20260922-174153/`; no video or existing business record was changed or deleted.

@@ -217,6 +217,12 @@ function _renderForm(data, master) {
     const unitOptions = unitsForDept.map(u =>
         `<option value="${_esc(u.name)}" ${data.Unit === u.name ? 'selected' : ''}>${_esc(u.name)}</option>`
     ).join('');
+    const companyEmailPanel = _companyEmailPanel(data.CompanyEmailState || {
+        companyEmail: data.CompanyEmail || null,
+        status: data.CompanyEmail ? 'ready' : 'missing',
+        pending: null,
+        deliveryEnabled: false,
+    });
 
     wrap.innerHTML = `
     <form id="profile-info-form" class="space-y-4">
@@ -284,6 +290,8 @@ function _renderForm(data, master) {
     </form>
 
     <!-- เปลี่ยนรหัสพนักงาน (accordion) -->
+    <div class="mt-4">${companyEmailPanel}</div>
+
     <div class="mt-4 border border-slate-200 dark:border-slate-700 rounded-xl overflow-hidden">
         <button id="pf-chid-toggle"
                 class="w-full flex items-center justify-between px-4 py-3 text-sm font-semibold text-slate-600 dark:text-slate-300 bg-slate-50 dark:bg-slate-800 hover:bg-slate-100 dark:hover:bg-slate-700 transition-colors"
@@ -330,6 +338,9 @@ function _renderForm(data, master) {
     document.getElementById('profile-info-form')?.addEventListener('submit', guardSubmitHandler(_handleSaveProfile));
     document.getElementById('pf-recheck-btn')?.addEventListener('click', _recoverProfileUpdate);
     document.getElementById('pf-chid-btn')?.addEventListener('click', _handleChangeEmployeeID);
+    document.getElementById('pf-company-email-submit')?.addEventListener('click', _handleCompanyEmailRequest);
+    document.getElementById('pf-company-email-resend')?.addEventListener('click', _handleCompanyEmailResend);
+    document.getElementById('pf-company-email-cancel')?.addEventListener('click', _handleCompanyEmailCancel);
 
     // Cascading unit dropdown when dept changes
     document.getElementById('pf-dept')?.addEventListener('change', function() {
@@ -351,6 +362,157 @@ function _renderForm(data, master) {
 }
 
 // ─── Handlers ──────────────────────────────────────────────────────────────────
+function _companyEmailPanel(state) {
+    const current = state?.companyEmail || '';
+    const pending = state?.pending || null;
+    const pendingActive = pending && pending.status === 'Pending';
+    const statusHtml = current
+        ? '<span class="inline-flex items-center rounded-full bg-emerald-100 px-2 py-1 text-[11px] font-bold text-emerald-700">พร้อมใช้งาน</span>'
+        : '<span class="inline-flex items-center rounded-full bg-slate-100 px-2 py-1 text-[11px] font-bold text-slate-600">ยังไม่มีอีเมล</span>';
+    const pendingHtml = pending ? `
+        <div class="rounded-xl border ${pendingActive ? 'border-amber-200 bg-amber-50' : 'border-slate-200 bg-slate-50'} p-3">
+            <p class="text-xs font-bold ${pendingActive ? 'text-amber-700' : 'text-slate-600'}">${pendingActive ? 'รอยืนยันอีเมลใหม่' : 'คำขอยืนยันหมดอายุ'}</p>
+            <p class="mt-1 break-all text-sm font-semibold text-slate-700">${_esc(pending.email)}</p>
+            <p class="mt-1 text-[11px] text-slate-500">${pendingActive ? `หมดอายุ ${_formatProfileDate(pending.expiresAt)}` : 'กรุณาสร้างคำขอใหม่'}</p>
+            <div class="mt-3 grid grid-cols-2 gap-2">
+                <button type="button" id="pf-company-email-resend" data-request-id="${Number(pending.requestId) || 0}" data-email="${_esc(pending.email)}"
+                    class="min-h-[44px] rounded-xl border border-amber-300 bg-white px-3 py-2 text-xs font-bold text-amber-700">ส่งลิงก์ใหม่</button>
+                <button type="button" id="pf-company-email-cancel" data-request-id="${Number(pending.requestId) || 0}"
+                    class="min-h-[44px] rounded-xl border border-slate-300 bg-white px-3 py-2 text-xs font-bold text-slate-600">ยกเลิกคำขอ</button>
+            </div>
+        </div>` : '';
+    return `
+        <section class="rounded-2xl border border-emerald-100 bg-emerald-50/40 p-4 space-y-3">
+            <div class="flex items-start justify-between gap-3">
+                <div class="min-w-0">
+                    <label class="block text-xs font-bold uppercase tracking-wide text-emerald-800">Email</label>
+                    <p class="mt-1 break-all text-sm text-slate-700">${current ? _esc(current) : 'ยังไม่มีอีเมลในระบบ'}</p>
+                </div>
+                ${statusHtml}
+            </div>
+            ${pendingHtml}
+            <div class="border-t border-emerald-100 pt-3">
+                <p class="mb-3 text-xs leading-5 text-slate-500">เพิ่มหรือเปลี่ยนอีเมลได้ทุกผู้ให้บริการ เช่น Gmail หรือ Outlook ระบบจะเปลี่ยนข้อมูลหลังจากกดลิงก์ยืนยันเท่านั้น</p>
+                <div id="pf-company-email-error" class="mb-3 hidden rounded-xl bg-red-50 px-3 py-2 text-xs font-semibold text-red-600"></div>
+                <div class="space-y-3">
+                    <div>
+                        <label class="mb-1.5 block text-xs font-semibold text-slate-500">อีเมลใหม่</label>
+                        <input id="pf-company-email" type="email" maxlength="150" autocomplete="email" placeholder="name@example.com"
+                            class="w-full rounded-xl border border-slate-200 bg-white px-3.5 py-2.5 text-sm focus:border-transparent focus:outline-none focus:ring-2 focus:ring-emerald-500">
+                    </div>
+                    <div>
+                        <label class="mb-1.5 block text-xs font-semibold text-slate-500">รหัสผ่านปัจจุบัน</label>
+                        <input id="pf-company-email-password" type="password" autocomplete="current-password" placeholder="ยืนยันตัวตนก่อนส่งคำขอ"
+                            class="w-full rounded-xl border border-slate-200 bg-white px-3.5 py-2.5 text-sm focus:border-transparent focus:outline-none focus:ring-2 focus:ring-emerald-500">
+                    </div>
+                    <button type="button" id="pf-company-email-submit" class="min-h-[44px] w-full rounded-xl bg-emerald-600 px-4 py-2.5 text-sm font-bold text-white hover:bg-emerald-700">ส่งลิงก์ยืนยัน</button>
+                </div>
+                ${state?.deliveryEnabled ? '' : '<p class="mt-2 text-[11px] font-medium text-amber-600">ขณะนี้โหมดส่งอีเมลจริงยังปิดอยู่ คำขอจะถูกบันทึกเพื่อทดสอบเท่านั้น</p>'}
+            </div>
+        </section>`;
+}
+
+function _formatProfileDate(value) {
+    if (!value) return '-';
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) return _esc(value);
+    return new Intl.DateTimeFormat('th-TH', { dateStyle: 'medium', timeStyle: 'short' }).format(date);
+}
+
+function _companyEmailFields() {
+    return {
+        email: String(document.getElementById('pf-company-email')?.value || '').trim().toLowerCase(),
+        password: String(document.getElementById('pf-company-email-password')?.value || ''),
+        errorEl: document.getElementById('pf-company-email-error'),
+    };
+}
+
+function _showCompanyEmailError(errorEl, message) {
+    if (!errorEl) return;
+    errorEl.textContent = message;
+    errorEl.classList.remove('hidden');
+}
+
+async function _handleCompanyEmailRequest(event) {
+    const button = event.currentTarget;
+    const { email, password, errorEl } = _companyEmailFields();
+    errorEl?.classList.add('hidden');
+    if (email.length > 150 || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+        _showCompanyEmailError(errorEl, 'กรุณากรอกอีเมลให้ถูกต้อง เช่น name@gmail.com');
+        document.getElementById('pf-company-email')?.focus();
+        return;
+    }
+    if (!password) {
+        _showCompanyEmailError(errorEl, 'กรุณากรอกรหัสผ่านปัจจุบันเพื่อยืนยันตัวตน');
+        document.getElementById('pf-company-email-password')?.focus();
+        return;
+    }
+    button.disabled = true;
+    button.textContent = 'กำลังสร้างคำขอ...';
+    try {
+        const result = await apiFetch('/profile/company-email/request', {
+            method: 'POST', body: JSON.stringify({ companyEmail: email, currentPassword: password }),
+            preserveSessionOnAuthError: true,
+        });
+        const delivery = result?.data?.delivery;
+        showToast(delivery === 'Sent' ? 'ส่งลิงก์ยืนยันแล้ว'
+            : (delivery === 'Disabled' ? 'บันทึกคำขอทดสอบแล้ว โดยยังไม่ได้ส่งอีเมลจริง' : 'บันทึกคำขอแล้ว แต่ส่งอีเมลไม่สำเร็จ กรุณากดลองอีกครั้ง'),
+        delivery === 'Sent' || delivery === 'Disabled' ? 'success' : 'warning');
+        await _loadAndRender();
+    } catch (error) {
+        _showCompanyEmailError(errorEl, error?.message || 'ไม่สามารถสร้างคำขอยืนยันได้');
+    } finally {
+        button.disabled = false;
+        button.textContent = 'ส่งลิงก์ยืนยัน';
+    }
+}
+
+async function _handleCompanyEmailResend(event) {
+    const button = event.currentTarget;
+    const { password, errorEl } = _companyEmailFields();
+    const requestId = Number(button.dataset.requestId || 0);
+    const email = String(button.dataset.email || '');
+    errorEl?.classList.add('hidden');
+    if (!password) {
+        _showCompanyEmailError(errorEl, 'กรุณากรอกรหัสผ่านปัจจุบันก่อนส่งลิงก์ใหม่');
+        document.getElementById('pf-company-email-password')?.focus();
+        return;
+    }
+    button.disabled = true;
+    try {
+        const result = await apiFetch('/profile/company-email/resend', {
+            method: 'POST', body: JSON.stringify({ requestId, companyEmail: email, currentPassword: password }),
+            preserveSessionOnAuthError: true,
+        });
+        const delivery = result?.data?.delivery;
+        showToast(delivery === 'Sent' ? 'ส่งลิงก์ยืนยันใหม่แล้ว'
+            : (delivery === 'Disabled' ? 'สร้างลิงก์ทดสอบใหม่แล้ว โดยยังไม่ได้ส่งอีเมลจริง' : 'สร้างคำขอใหม่แล้ว แต่ส่งอีเมลไม่สำเร็จ กรุณาลองอีกครั้ง'),
+        delivery === 'Sent' || delivery === 'Disabled' ? 'success' : 'warning');
+        await _loadAndRender();
+    } catch (error) {
+        _showCompanyEmailError(errorEl, error?.message || 'ไม่สามารถส่งลิงก์ใหม่ได้');
+    } finally {
+        button.disabled = false;
+    }
+}
+
+async function _handleCompanyEmailCancel(event) {
+    const button = event.currentTarget;
+    const requestId = Number(button.dataset.requestId || 0);
+    const errorEl = document.getElementById('pf-company-email-error');
+    errorEl?.classList.add('hidden');
+    button.disabled = true;
+    try {
+        await apiFetch(`/profile/company-email/request/${requestId}`, { method: 'DELETE' });
+        showToast('ยกเลิกคำขอยืนยันแล้ว', 'success');
+        await _loadAndRender();
+    } catch (error) {
+        _showCompanyEmailError(errorEl, error?.message || 'ไม่สามารถยกเลิกคำขอได้');
+    } finally {
+        button.disabled = false;
+    }
+}
+
 async function _handleSaveProfile(e) {
     e.preventDefault();
     const errEl  = document.getElementById('pf-error');

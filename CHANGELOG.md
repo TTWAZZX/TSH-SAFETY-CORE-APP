@@ -1,5 +1,37 @@
 # TSH Safety Core Activity - Changelog And Handoff History
 
+## 2026-09-24 - Account recovery integration closeout (local, unreleased)
+
+- Completed controlled Gmail delivery: the operator confirmed the Node Company Email and PHP Password Reset messages arrived with correct Thai HTML rendering. The controlled database lifecycle then delivered two additional messages to a Gmail plus alias, reached Verified/Completed, rejected reuse of both links and cleaned employee/request/audit fixtures to zero without retaining credentials or raw tokens.
+- Made PHP lifecycle/API UAT independent of an enabled local mail configuration. Direct PHP tests force delivery off before bootstrap, and parity tests launch an isolated PHP server with delivery disabled; this prevents fixture addresses from reaching external SMTP while preserving real-delivery UAT as an explicit opt-in command.
+- Completed the combined Profile Company Email verification to Forgot Password lifecycle and verified the full audit sequence with zero employee, request or audit fixture residue.
+- Fixed the Node Company Email delivery recipient from an undefined variable to the validated requested email, and aligned Node/PHP Company Email delivery audit events for Disabled, Unavailable, Failed and Sent outcomes.
+- Added a loopback-only fake SMTP regression covering Node/PHP HTML and plain-text multipart templates, recipient routing, escaped user content, fallback links, simulated temporary failure and retry. No real email or external SMTP connection was used.
+- Confirmed that account recovery uses audited direct delivery, not the existing module outboxes. Company Email Resend and a repeated Forgot Password request each mint a new one-time token and supersede older Pending links; existing business-module outbox/retry implementations were left unchanged.
+- SMTP fields are present locally, but all three delivery switches remain off and `PUBLIC_APP_URL` is absent. Real delivery must stay disabled until an approved public origin is configured and a controlled recipient is authorized. Node/PHP lifecycle/API suites, profile regressions, read-only preflight and all three browser suites pass; the permission audit retains only two unrelated pre-existing 4M findings. No commit, push or deploy was performed.
+- Existing Hiyari outbox/email contract smoke passes `17/17`. The pre-existing Patrol email-parity npm entry remains non-runnable because its referenced script is absent; no Patrol source or test was synthesized as part of this work.
+
+## 2026-09-24 - Employee Master mobile presentation (local, unreleased)
+
+- Replaced the forced 1200 px Employee Master table on phone widths with responsive employee cards while preserving the established desktop table, data source, filters, sorting, pagination and action handlers.
+- Cards include Department, Position, Safety Unit, Company Email, Email Readiness and Role. Edit, password-reset and Delete controls are visible without hover; filters, toolbar actions, row actions and pagination provide phone-sized touch targets.
+- Read-only Edge UAT passes 1440x1000, 1024x768, 400x724 and 390x844 with no global horizontal overflow, Employee Master writes, failed API responses, console errors or fixture residue. No API/schema/data/permission/upload behavior changed. Cache key is `20260924-employee-master-mobile-r1`; this work is not committed, pushed or deployed.
+
+## 2026-09-24 - Password Reset by Email (local, unreleased)
+
+- Added a responsive `ลืมรหัสผ่าน?` Login flow and hash-link reset form. Request responses are enumeration-safe: existing, unknown and no-email Employee IDs receive the same delayed generic response with no email/delivery disclosure. Users without an email remain on the existing Admin-assisted path.
+- Added additive password-reset request/audit persistence and matching Node/PHP public request/complete APIs. SHA-256-only 30-minute tokens are one-time; newer requests supersede older links, completion bcrypt-hashes the new password, clears `MustChangePassword` and invalidates every remaining Pending link.
+- Added a Thai branded HTML/plain-text template and independent `PASSWORD_RESET_EMAIL_DELIVERY_ENABLED` switch. Real delivery remains disabled; no email was sent. Focused lifecycle, PHP UAT and Node/PHP HTTP parity pass with zero employee/request/audit residue.
+- Microsoft Edge Browser UAT passes the request and complete lifecycle at 1440x1000, 1024x768 and 390x844 with no overflow or password-reset API/console errors. Existing cross-device JWTs remain valid until the current six-hour expiry; server-side session-version revocation is documented as a follow-up. This work is not committed, pushed or deployed.
+- Permission audit marks both new mutations as reviewed `USER_WORKFLOW` routes; its overall non-zero result remains caused by two pre-existing unrelated 4M routes and was not broadened into this phase.
+
+## 2026-09-24 - Company Email profile self-service (local, unreleased)
+
+- Added email visibility and owner-managed Add/Change in the existing Profile drawer. Current-password re-authentication is mandatory, while any syntactically valid provider—including personal Gmail/Outlook addresses—is accepted; pending requests do not alter Employee Master.
+- Added additive verification-request/audit persistence and matching Node/PHP request, resend, cancel and public verification contracts. Links expire after 24 hours, are one-time, store only a SHA-256 digest, and are protected against duplicate ownership, active pending claims, concurrent claims and repeated attempts.
+- Added a responsive pending/expired UI and a Thai branded HTML/plain-text email template. Real SMTP delivery remains disabled by default behind `COMPANY_EMAIL_VERIFICATION_DELIVERY_ENABLED`; no real email was sent during this phase.
+- Focused lifecycle, Node/PHP HTTP parity, profile validation/cross-path regression and email delivery-switch tests pass with zero employee/request residue. A dedicated read-only Microsoft Edge Browser UAT passes 1440x1000, 1024x768 and 390x844 with no profile API/console error, no horizontal drawer overflow and zero fixture residue. This work is not committed, pushed or deployed; the pre-existing failed-login audit was preserved.
+
 ## 2026-09-22 - KY Activity External Video Evidence deployed
 
 - Deployed `main` commits `dee0898` and `f68fca8`. A central-machine video selected during KY submission or follow-up is registered against its exact Activity with path/reference, filename, MIME, size and SHA-256 without uploading video bytes to Production.

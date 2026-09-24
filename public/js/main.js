@@ -14,7 +14,7 @@ import { loadPatrolPage } from './pages/patrol.js?v=20260916-patrol-schedule-dro
 import { loadCccfPage } from './pages/cccf.js?v=20260907-cccf-permanent-pdf-layout-r2';
 import { loadKpiPage } from './pages/kpi.js?v=20260715-phase32d-remaining-async-ux';
 import { loadYokotenPage } from './pages/yokoten.js?v=20260825-yokoten-department-relevance-r1';
-import { loadAdminPage } from './pages/admin.js?v=20260908-bbs-navigation-loading-r1';
+import { loadAdminPage } from './pages/admin.js?v=20260924-employee-master-mobile-r1';
 import { loadMachineSafetyPage } from './pages/machine-safety.js?v=20260820-card-image-phase2b';
 import { loadForkliftPage } from './pages/forklift.js?v=20260831-forklift-renewal-retry-r1';
 import { loadOjtPage } from './pages/ojt.js?v=20260820-card-image-phase2d';
@@ -27,7 +27,7 @@ import { loadHiyariPage } from './pages/hiyari.js?v=20260907-hiyari-pdf-summary-
 import { loadKyPage } from './pages/ky.js?v=20260923-ky-annual-contest-r9';
 import { loadFourmPage } from './pages/fourm.js?v=20260923-fourm-curriculum-soft-disable-r1';
 import { loadJohnnyAiPage } from './pages/johnny-ai.js?v=20260715-phase32d-remaining-async-ux';
-import { openProfileDrawer, closeProfileDrawer } from './pages/profile.js?v=20260723-onboarding-release';
+import { openProfileDrawer, closeProfileDrawer } from './pages/profile.js?v=20260924-company-email-self-service-r1';
 import { loadDashboardPage } from './pages/dashboard.js?v=20260822-cccf-shared-target-r4';
 import { loadSearchPage } from './pages/search.js?v=20260715-phase32d-remaining-async-ux';
 import { initLoginModuleGuides } from './login-guides.js?v=20260825-bbs-phase4-r1';
@@ -72,6 +72,8 @@ const AppState = {
     isAdmin: false
 };
 let _safetyUnitGateActive = false;
+let _companyEmailVerificationResult = null;
+let _passwordResetToken = null;
 
 const DEFAULT_BRANDING = {
     appName: 'TSH Safety Core',
@@ -169,11 +171,195 @@ document.addEventListener('DOMContentLoaded', async () => {
     setupGlobalEventListeners();
     setupMobileViewportBehavior();
 
+    await captureCompanyEmailVerification();
+    capturePasswordResetLink();
     await captureBbsQrIntent();
 
     // 🔒 รอ session ให้จบก่อนทำอย่างอื่น
     await initializeSession();
+    showCompanyEmailVerificationResult();
+    showPasswordResetFromLink();
 });
+
+function capturePasswordResetLink() {
+    const match = String(window.location.hash || '').match(/^#reset-password=([A-Za-z0-9_-]{43})$/);
+    if (!match) return false;
+    _passwordResetToken = match[1];
+    history.replaceState(null, '', `${window.location.pathname}${window.location.search}`);
+    return true;
+}
+
+function passwordResetFormHtml() {
+    return `<form id="password-reset-complete-form" class="space-y-4">
+        <p class="text-sm leading-6 text-slate-600">ตั้งรหัสผ่านใหม่สำหรับบัญชีของคุณ ลิงก์นี้ใช้ได้ครั้งเดียวและมีอายุ 30 นาที</p>
+        <div>
+            <label class="mb-1.5 block text-xs font-bold text-slate-600">รหัสผ่านใหม่</label>
+            <input id="password-reset-new" type="password" required minlength="4" maxlength="128" autocomplete="new-password"
+                class="w-full rounded-xl border border-slate-200 px-3.5 py-3 text-sm outline-none focus:ring-2 focus:ring-emerald-500">
+        </div>
+        <div>
+            <label class="mb-1.5 block text-xs font-bold text-slate-600">ยืนยันรหัสผ่านใหม่</label>
+            <input id="password-reset-confirm" type="password" required minlength="4" maxlength="128" autocomplete="new-password"
+                class="w-full rounded-xl border border-slate-200 px-3.5 py-3 text-sm outline-none focus:ring-2 focus:ring-emerald-500">
+        </div>
+        <div id="password-reset-complete-error" class="hidden rounded-xl bg-red-50 px-3 py-2 text-xs font-semibold text-red-600"></div>
+        <button id="password-reset-complete-submit" type="submit" class="min-h-[44px] w-full rounded-xl bg-emerald-600 px-4 py-3 text-sm font-bold text-white">ตั้งรหัสผ่านใหม่</button>
+    </form>`;
+}
+
+function showPasswordResetFromLink() {
+    if (!_passwordResetToken) return;
+    UI.openModal('ตั้งรหัสผ่านใหม่', passwordResetFormHtml(), 'max-w-md');
+    document.getElementById('password-reset-complete-form')?.addEventListener('submit', guardSubmitHandler(handlePasswordResetComplete));
+    document.getElementById('password-reset-new')?.focus();
+}
+
+function openForgotPasswordModal() {
+    const currentEmployeeId = String(document.getElementById('login-employee-id')?.value || '').trim();
+    UI.openModal('ลืมรหัสผ่าน', `<form id="forgot-password-form" class="space-y-4">
+        <p class="text-sm leading-6 text-slate-600">กรอกรหัสพนักงาน ระบบจะส่งลิงก์ตั้งรหัสผ่านใหม่ไปยังอีเมลที่บันทึกไว้</p>
+        <div>
+            <label class="mb-1.5 block text-xs font-bold text-slate-600">รหัสพนักงาน</label>
+            <input id="forgot-password-employee-id" type="text" required maxlength="50" autocomplete="username" value="${UI.escHtml(currentEmployeeId)}"
+                class="w-full rounded-xl border border-slate-200 px-3.5 py-3 text-sm outline-none focus:ring-2 focus:ring-emerald-500">
+        </div>
+        <div id="forgot-password-error" class="hidden rounded-xl bg-red-50 px-3 py-2 text-xs font-semibold text-red-600"></div>
+        <button id="forgot-password-submit" type="submit" class="min-h-[44px] w-full rounded-xl bg-emerald-600 px-4 py-3 text-sm font-bold text-white">ส่งลิงก์ตั้งรหัสผ่านใหม่</button>
+    </form>`, 'max-w-md');
+    document.getElementById('forgot-password-form')?.addEventListener('submit', guardSubmitHandler(handleForgotPasswordRequest));
+    document.getElementById('forgot-password-employee-id')?.focus();
+}
+
+async function handleForgotPasswordRequest(event) {
+    event.preventDefault();
+    const employeeId = String(document.getElementById('forgot-password-employee-id')?.value || '').trim();
+    const errorElement = document.getElementById('forgot-password-error');
+    const button = document.getElementById('forgot-password-submit');
+    errorElement?.classList.add('hidden');
+    if (!employeeId) {
+        if (errorElement) {
+            errorElement.textContent = 'กรุณากรอกรหัสพนักงาน';
+            errorElement.classList.remove('hidden');
+        }
+        return;
+    }
+    if (button) {
+        button.disabled = true;
+        button.textContent = 'กำลังดำเนินการ...';
+    }
+    try {
+        const result = await apiFetch('/password-reset/request', {
+            method: 'POST', body: JSON.stringify({ employeeId }), suppressErrorLog: true, preserveSessionOnAuthError: true,
+        });
+        UI.openModal('ตรวจสอบอีเมลของคุณ', `<div class="space-y-4 text-center">
+            <div class="mx-auto flex h-14 w-14 items-center justify-center rounded-full bg-emerald-100 text-2xl text-emerald-700">✓</div>
+            <p class="text-sm leading-6 text-slate-600">${UI.escHtml(result?.message || 'หากบัญชีนี้มีอีเมลที่พร้อมใช้งาน ระบบจะส่งลิงก์ให้')}</p>
+            <p class="text-xs text-slate-400">ข้อความนี้เหมือนกันทุกบัญชีเพื่อความปลอดภัย</p>
+            <button type="button" id="forgot-password-done" class="min-h-[44px] w-full rounded-xl bg-emerald-600 px-4 py-3 text-sm font-bold text-white">กลับไปเข้าสู่ระบบ</button>
+        </div>`, 'max-w-md');
+        document.getElementById('forgot-password-done')?.addEventListener('click', UI.closeModal);
+    } catch (error) {
+        if (errorElement) {
+            errorElement.textContent = error?.message || 'ไม่สามารถดำเนินการได้ กรุณาลองใหม่ภายหลัง';
+            errorElement.classList.remove('hidden');
+        }
+    } finally {
+        if (button?.isConnected) {
+            button.disabled = false;
+            button.textContent = 'ส่งลิงก์ตั้งรหัสผ่านใหม่';
+        }
+    }
+}
+
+async function handlePasswordResetComplete(event) {
+    event.preventDefault();
+    const newPassword = String(document.getElementById('password-reset-new')?.value || '');
+    const confirmPassword = String(document.getElementById('password-reset-confirm')?.value || '');
+    const errorElement = document.getElementById('password-reset-complete-error');
+    const button = document.getElementById('password-reset-complete-submit');
+    errorElement?.classList.add('hidden');
+    const passwordLength = Array.from(newPassword).length;
+    if (passwordLength < 4 || passwordLength > 128) {
+        if (errorElement) {
+            errorElement.textContent = 'รหัสผ่านต้องมีอย่างน้อย 4 ตัวอักษรและไม่เกิน 128 ตัวอักษร';
+            errorElement.classList.remove('hidden');
+        }
+        return;
+    }
+    if (newPassword !== confirmPassword) {
+        if (errorElement) {
+            errorElement.textContent = 'รหัสผ่านใหม่และการยืนยันไม่ตรงกัน';
+            errorElement.classList.remove('hidden');
+        }
+        return;
+    }
+    if (button) {
+        button.disabled = true;
+        button.textContent = 'กำลังตั้งรหัสผ่าน...';
+    }
+    try {
+        await apiFetch('/password-reset/complete', {
+            method: 'POST', body: JSON.stringify({ token: _passwordResetToken, newPassword, confirmPassword }),
+            suppressErrorLog: true, preserveSessionOnAuthError: true,
+        });
+        _passwordResetToken = null;
+        localStorage.removeItem('tsh_token');
+        localStorage.removeItem('tsh_user');
+        UI.openModal('ตั้งรหัสผ่านใหม่สำเร็จ', `<div class="space-y-4 text-center">
+            <div class="mx-auto flex h-14 w-14 items-center justify-center rounded-full bg-emerald-100 text-2xl text-emerald-700">✓</div>
+            <p class="text-sm leading-6 text-slate-600">กรุณาเข้าสู่ระบบด้วยรหัสผ่านใหม่</p>
+            <button type="button" id="password-reset-login" class="min-h-[44px] w-full rounded-xl bg-emerald-600 px-4 py-3 text-sm font-bold text-white">ไปหน้าเข้าสู่ระบบ</button>
+        </div>`, 'max-w-md');
+        document.getElementById('password-reset-login')?.addEventListener('click', () => window.location.reload());
+    } catch (error) {
+        if (errorElement) {
+            errorElement.textContent = error?.message || 'ไม่สามารถตั้งรหัสผ่านใหม่ได้';
+            errorElement.classList.remove('hidden');
+        }
+    } finally {
+        if (button?.isConnected) {
+            button.disabled = false;
+            button.textContent = 'ตั้งรหัสผ่านใหม่';
+        }
+    }
+}
+
+async function captureCompanyEmailVerification() {
+    const match = String(window.location.hash || '').match(/^#verify-company-email=([A-Za-z0-9_-]{43})$/);
+    if (!match) return false;
+    history.replaceState(null, '', `${window.location.pathname}${window.location.search}`);
+    try {
+        const result = await apiFetch('/profile/company-email/verify', {
+            method: 'POST',
+            body: JSON.stringify({ token: match[1] }),
+            suppressErrorLog: true,
+            preserveSessionOnAuthError: true,
+        });
+        _companyEmailVerificationResult = { success: true, email: result?.data?.companyEmail || '' };
+    } catch (error) {
+        _companyEmailVerificationResult = {
+            success: false,
+            message: error?.message || 'ไม่สามารถยืนยันอีเมลได้',
+        };
+    }
+    return true;
+}
+
+function showCompanyEmailVerificationResult() {
+    if (!_companyEmailVerificationResult) return;
+    const result = _companyEmailVerificationResult;
+    _companyEmailVerificationResult = null;
+    const icon = result.success
+        ? '<div class="mx-auto flex h-14 w-14 items-center justify-center rounded-full bg-emerald-100 text-2xl text-emerald-700">✓</div>'
+        : '<div class="mx-auto flex h-14 w-14 items-center justify-center rounded-full bg-red-100 text-2xl text-red-600">!</div>';
+    UI.openModal(
+        result.success ? 'ยืนยันอีเมลสำเร็จ' : 'ยืนยันอีเมลไม่สำเร็จ',
+        `<div class="space-y-4 py-2 text-center">${icon}<p class="text-sm leading-6 text-slate-600">${result.success
+            ? `อีเมล <strong class="break-all text-slate-800">${UI.escHtml(result.email)}</strong> พร้อมใช้สำหรับการกู้คืนบัญชีในขั้นตอนถัดไป`
+            : UI.escHtml(result.message)}</p><button type="button" onclick="document.getElementById('modal-close-btn')?.click()" class="min-h-[44px] w-full rounded-xl bg-emerald-600 px-4 py-2.5 text-sm font-bold text-white">ตกลง</button></div>`,
+        'max-w-md'
+    );
+}
 
 // ======================================================
 // Session Handling
@@ -722,6 +908,7 @@ function setupGlobalEventListeners() {
     // Login form
     const loginForm = document.getElementById('login-form');
     if (loginForm) loginForm.addEventListener('submit', guardSubmitHandler(handleLogin));
+    document.getElementById('forgot-password-btn')?.addEventListener('click', openForgotPasswordModal);
     window.__tshLoginReady = true;
 
     // Hash change

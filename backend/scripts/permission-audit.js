@@ -19,8 +19,16 @@ const USER_WORKFLOW_ALLOWLIST = new Set([
     'POST /api/register/status',
     'POST /api/change-password',
     'POST /api/session/verify',
+    // Public password recovery is enumeration-safe, rate limited and requires a one-time token to mutate a password.
+    'POST /api/password-reset/request',
+    'POST /api/password-reset/complete',
     'PUT /api/profile',
     'PUT /api/profile/employee-id',
+    // Company Email self-service re-authenticates the owner; public verification requires the one-time token.
+    'POST /api/profile/company-email/request',
+    'POST /api/profile/company-email/resend',
+    'DELETE /api/profile/company-email/request/:id',
+    'POST /api/profile/company-email/verify',
     // First-use Safety Unit gate validates the authenticated user's department scope in route.
     'PUT /api/profile/safety-unit',
     'POST /api/policies/:id/acknowledge',

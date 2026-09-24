@@ -3,6 +3,8 @@ declare(strict_types=1);
 
 require __DIR__ . '/bootstrap.php';
 require __DIR__ . '/mailer.php';
+require __DIR__ . '/lib/company_email_change.php';
+require __DIR__ . '/lib/password_reset.php';
 require __DIR__ . '/handlers/foundation.php';
 require __DIR__ . '/handlers/platform.php';
 require __DIR__ . '/handlers/storage.php';
@@ -740,6 +742,38 @@ try {
         ]]);
     }
 
+    if ($method === 'POST' && $path === '/password-reset/request') {
+        $startedAt = microtime(true);
+        $body = json_body();
+        $employeeId = is_string($body['employeeId'] ?? null) ? $body['employeeId'] : '';
+        try {
+            password_reset_request(db(), $employeeId);
+            $remainingDelay = 0.300 - (microtime(true) - $startedAt);
+            if ($remainingDelay > 0) usleep((int)round($remainingDelay * 1000000));
+            auth_audit_log('PASSWORD_RESET_REQUESTED', $employeeId, 202, ['response'=>'generic']);
+            json_response(['success'=>true,'message'=>PASSWORD_RESET_GENERIC_MESSAGE],202);
+        } catch (PasswordResetException $error) {
+            json_response(['success'=>false,'code'=>$error->reason,'message'=>$error->getMessage()],$error->httpStatus);
+        }
+    }
+
+    if ($method === 'POST' && $path === '/password-reset/complete') {
+        $body = json_body();
+        $token = is_string($body['token'] ?? null) ? $body['token'] : '';
+        $newPassword = is_string($body['newPassword'] ?? null) ? $body['newPassword'] : '';
+        $confirmPassword = is_string($body['confirmPassword'] ?? null) ? $body['confirmPassword'] : '';
+        if (!hash_equals($newPassword, $confirmPassword)) {
+            json_response(['success'=>false,'code'=>'PASSWORD_CONFIRMATION_MISMATCH','message'=>'รหัสผ่านใหม่และการยืนยันไม่ตรงกัน'],422);
+        }
+        try {
+            $result = password_reset_complete(db(), $token, $newPassword);
+            auth_audit_log('PASSWORD_RESET_COMPLETED', (string)$result['employeeId'], 200, []);
+            json_response(['success'=>true,'message'=>'ตั้งรหัสผ่านใหม่สำเร็จ กรุณาเข้าสู่ระบบอีกครั้ง']);
+        } catch (PasswordResetException $error) {
+            json_response(['success'=>false,'code'=>$error->reason,'message'=>$error->getMessage()],$error->httpStatus);
+        }
+    }
+
     if ($method === 'POST' && $path === '/login') {
         $body = json_body();
         $employeeId = trim((string) ($body['employeeId'] ?? ''));
@@ -817,15 +851,83 @@ try {
 
     if ($method === 'GET' && $path === '/profile') {
         $user = require_user();
+        company_email_change_schema(db());
         $stmt = db()->prepare(
-            'SELECT EmployeeID, EmployeeName, Department, Unit, Team, Position, Role FROM employees WHERE EmployeeID = ? LIMIT 1'
+            'SELECT EmployeeID, EmployeeName, Department, Unit, Team, Position, Role, CompanyEmail FROM employees WHERE EmployeeID = ? LIMIT 1'
         );
         $stmt->execute([(string) ($user['id'] ?? '')]);
         $profile = $stmt->fetch();
         if (!$profile) {
             json_response(['success' => false, 'message' => 'ไม่พบข้อมูลผู้ใช้'], 404);
         }
+        $profile['CompanyEmailState'] = company_email_change_state(db(), (string)($user['id'] ?? $user['EmployeeID'] ?? ''));
         json_response(['success' => true, 'data' => $profile]);
+    }
+
+    if ($method === 'POST' && $path === '/profile/company-email/request') {
+        $user = require_user();
+        $body = json_body();
+        try {
+            $result = company_email_change_create(
+                db(), (string)($user['id'] ?? $user['EmployeeID'] ?? ''),
+                (string)($body['companyEmail'] ?? ''),
+                is_string($body['currentPassword'] ?? null) ? $body['currentPassword'] : ''
+            );
+            auth_audit_log('COMPANY_EMAIL_CHANGE_REQUESTED', (string)($user['id'] ?? ''), 202, [
+                'requestId'=>$result['requestId'],'delivery'=>$result['delivery'],
+            ], $user);
+            json_response(['success'=>true,'message'=>'สร้างคำขอยืนยัน Company Email แล้ว','data'=>$result],202);
+        } catch (CompanyEmailChangeException $error) {
+            json_response(['success'=>false,'code'=>$error->reason,'message'=>$error->getMessage()],$error->httpStatus);
+        }
+    }
+
+    if ($method === 'POST' && $path === '/profile/company-email/resend') {
+        $user = require_user();
+        $body = json_body();
+        $requestId = filter_var($body['requestId'] ?? null, FILTER_VALIDATE_INT, ['options'=>['min_range'=>1]]);
+        if ($requestId === false) json_response(['success'=>false,'code'=>'EMAIL_CHANGE_REQUEST_NOT_FOUND','message'=>'ไม่พบคำขอยืนยันที่รอดำเนินการ'],404);
+        try {
+            $result = company_email_change_create(
+                db(), (string)($user['id'] ?? $user['EmployeeID'] ?? ''),
+                (string)($body['companyEmail'] ?? ''),
+                is_string($body['currentPassword'] ?? null) ? $body['currentPassword'] : '',
+                (int)$requestId
+            );
+            auth_audit_log('COMPANY_EMAIL_CHANGE_RESENT', (string)($user['id'] ?? ''), 202, [
+                'priorRequestId'=>(int)$requestId,'requestId'=>$result['requestId'],'delivery'=>$result['delivery'],
+            ], $user);
+            json_response(['success'=>true,'message'=>'สร้างลิงก์ยืนยันใหม่แล้ว','data'=>$result],202);
+        } catch (CompanyEmailChangeException $error) {
+            json_response(['success'=>false,'code'=>$error->reason,'message'=>$error->getMessage()],$error->httpStatus);
+        }
+    }
+
+    $companyEmailCancelParams = route_params($path, '/profile/company-email/request/:id');
+    if ($method === 'DELETE' && $companyEmailCancelParams !== null) {
+        $user = require_user();
+        $requestId = filter_var($companyEmailCancelParams['id'] ?? null, FILTER_VALIDATE_INT, ['options'=>['min_range'=>1]]);
+        if ($requestId === false) json_response(['success'=>false,'code'=>'EMAIL_CHANGE_REQUEST_NOT_FOUND','message'=>'ไม่พบคำขอยืนยันที่รอดำเนินการ'],404);
+        try {
+            company_email_change_cancel(db(), (string)($user['id'] ?? $user['EmployeeID'] ?? ''), (int)$requestId);
+            auth_audit_log('COMPANY_EMAIL_CHANGE_CANCELLED', (string)($user['id'] ?? ''), 200, ['requestId'=>(int)$requestId], $user);
+            json_response(['success'=>true,'message'=>'ยกเลิกคำขอยืนยันแล้ว']);
+        } catch (CompanyEmailChangeException $error) {
+            json_response(['success'=>false,'code'=>$error->reason,'message'=>$error->getMessage()],$error->httpStatus);
+        }
+    }
+
+    if ($method === 'POST' && $path === '/profile/company-email/verify') {
+        $body = json_body();
+        try {
+            $result = company_email_change_verify(db(), is_string($body['token'] ?? null) ? $body['token'] : '');
+            auth_audit_log('COMPANY_EMAIL_VERIFIED', (string)$result['employeeId'], 200, [], [
+                'id'=>$result['employeeId'],'name'=>'Email verification','role'=>'User','department'=>null,
+            ]);
+            json_response(['success'=>true,'message'=>'ยืนยัน Company Email สำเร็จ','data'=>['companyEmail'=>$result['companyEmail']]]);
+        } catch (CompanyEmailChangeException $error) {
+            json_response(['success'=>false,'code'=>$error->reason,'message'=>$error->getMessage()],$error->httpStatus);
+        }
     }
 
     if ($method === 'GET' && $path === '/master/departments') {

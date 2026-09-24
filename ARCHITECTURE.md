@@ -1,5 +1,33 @@
 # TSH Safety Core Activity - Architecture
 
+## Account email delivery and retry boundary (Local, 2026-09-24)
+
+Company Email verification and Password Reset reuse the shared Node/PHP SMTP transport but intentionally do not enter a durable module outbox. Their tokens are short-lived security credentials: a retry must mint a fresh random token, store only its SHA-256 digest and supersede the older Pending link. Company Email exposes this as Resend; Password Reset repeats the enumeration-safe request. Delivery outcomes are retained in account audit data, and Password Reset additionally retains `DeliveryStatus` on its request row.
+
+Existing operational outboxes for CCCF, Patrol, KY, Hiyari, 4M, BBS and other business notifications remain separate and unchanged. Their queued/failed retry controls resend the same business notification; they must not be used to replay an expired account credential. The shared PHP outbox helper continues to restrict retry selection to Queued/Failed rows and validates dynamic SQL identifiers.
+
+Both account templates are multipart alternatives with branded HTML and a complete plain-text fallback link. Dynamic names, emails and URLs are escaped in HTML. SMTP and feature switches are fail-closed for local testing, and link generation requires an approved `PUBLIC_APP_URL`/`APP_BASE_URL` before external delivery is enabled.
+
+## Password Reset by Email (Local, 2026-09-24)
+
+The login recovery boundary accepts only Employee ID and deliberately returns one fixed, minimum-duration `202` response for existing accounts, missing accounts and accounts without email. The public response contains no email mask, existence flag, delivery state or token. Internal request/audit rows distinguish the outcomes for authorized operational review without making them observable to the caller.
+
+`password_reset_requests` stores Employee ID, the delivery-time email snapshot, SHA-256 token digest, delivery state and immutable lifecycle timestamps. A random 32-byte base64url token expires after 30 minutes. A new request supersedes prior Pending links; completion locks the request, verifies Pending/expiry state, bcrypt-hashes the replacement password, clears `MustChangePassword`, marks the token Completed and supersedes remaining Pending links in one transaction. `password_reset_audit` retains attempted, ignored, requested, delivery, expired and completed events. Employee/IP limits protect request and completion paths.
+
+Email delivery reuses the existing SMTP transport and an independent `PASSWORD_RESET_EMAIL_DELIVERY_ENABLED` fail-closed switch. Both Node and PHP build the link from `PUBLIC_APP_URL`/`APP_BASE_URL`; delivery-disabled tests never expose the generated token. The browser consumes `#reset-password=<token>`, removes the token from the visible URL immediately, accepts matching 4–128 character passwords under the current application policy, clears local session storage on success and returns to Login.
+
+JWT authorization is currently stateless with a six-hour TTL. Password reset removes the current browser token but cannot revoke already issued tokens on other devices. A future additive per-account session version should be embedded in every issued JWT and checked on every authenticated request before this control can claim immediate global session revocation.
+
+## Company Email profile self-service (Local, 2026-09-24)
+
+`Employees.CompanyEmail` remains the sole ready-to-use company-email value. Profile reads expose it directly plus a separate lifecycle projection from `company_email_verification_requests`; a Pending or Expired proposal never overwrites Employee Master. Existing master emails are described as Ready rather than historically Verified because legacy/Admin-maintained values may predate this verification workflow.
+
+The authenticated owner may request Add/Change only after current-password re-authentication. The profile self-service boundary accepts any syntactically valid email provider, including personal email, normalizes it to lowercase and limits it to the existing 150-character field. The server rejects an email already owned by another employee, held by a pending registration, or claimed by another active verification request. `PendingEmailKey` supplies a database uniqueness boundary for concurrent requests. Resend supersedes the previous token and Cancel retains the audit trail.
+
+The public verification endpoint accepts a 32-byte base64url token, stores/looks up only its SHA-256 digest, enforces a 24-hour expiry and one-time use, then transactionally promotes the proposed email to Employee Master. Node and PHP share the same lifecycle and rate-limit contract. `company_email_change_audit` records attempts and state transitions; no raw token or password is logged.
+
+SMTP delivery uses the existing mail configuration and a branded Thai HTML/plain-text template, but remains disabled unless `COMPANY_EMAIL_VERIFICATION_DELIVERY_ENABLED=true`. The link origin must be an explicitly approved `PUBLIC_APP_URL` or `APP_BASE_URL` before delivery testing. Delivery failure leaves the request safely Pending so the owner can retry; the API never returns the raw token.
+
 ## BBS Layout Presets and recoverable Trash (2026-09-08)
 
 `BBS_Card_Layout_Presets` stores Admin-authored, kind-scoped reusable layout JSON. The payload deliberately excludes private background provenance and file-bound elements. Applying a Preset locks the active Preset and destination Draft, verifies the card kind and Draft `RowVersion`, merges only reusable content onto the destination's current Master Artwork-backed sides, revalidates the complete layout, and replaces sides/elements in one transaction.

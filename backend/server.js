@@ -43,6 +43,20 @@ const {
 } = require('./utils/profile-validator');
 const { executeProfileUpdate } = require('./services/profile-update');
 const {
+    CompanyEmailChangeError,
+    cancelRequest: cancelCompanyEmailRequest,
+    createRequest: createCompanyEmailRequest,
+    ensureCompanyEmailChangeSchema,
+    loadState: loadCompanyEmailState,
+    verifyRequest: verifyCompanyEmailRequest,
+} = require('./services/company-email-change');
+const {
+    GENERIC_REQUEST_MESSAGE: PASSWORD_RESET_GENERIC_MESSAGE,
+    PasswordResetError,
+    completePasswordReset,
+    requestPasswordReset,
+} = require('./services/password-reset');
+const {
     CROSS_PATH_OPERATION,
     loadEmployeeProfileMasters,
     executeEmployeeProfileWrite,
@@ -314,9 +328,71 @@ const changePwdLimiter = rateLimit({
     legacyHeaders: false,
 });
 
+const companyEmailChangeLimiter = rateLimit({
+    windowMs: 15 * 60 * 1000,
+    max: 10,
+    message: { success: false, code: 'COMPANY_EMAIL_RATE_LIMITED', message: 'มีคำขอมากเกินไป กรุณาลองใหม่ภายหลัง' },
+    standardHeaders: true,
+    legacyHeaders: false,
+});
+
+const passwordResetLimiter = rateLimit({
+    windowMs: 15 * 60 * 1000,
+    max: 10,
+    message: { success: false, code: 'PASSWORD_RESET_RATE_LIMITED', message: 'มีคำขอมากเกินไป กรุณาลองใหม่ภายหลัง' },
+    standardHeaders: true,
+    legacyHeaders: false,
+});
+
+function sendPasswordResetError(res, error) {
+    if (error instanceof PasswordResetError) {
+        return res.status(error.httpStatus).json({ success: false, code: error.code, message: error.message });
+    }
+    console.error('Password Reset Error:', error?.message || error);
+    return res.status(500).json({ success: false, code: 'PASSWORD_RESET_FAILED', message: 'ไม่สามารถดำเนินการตั้งรหัสผ่านใหม่ได้' });
+}
+
+function sendCompanyEmailChangeError(res, error) {
+    if (error instanceof CompanyEmailChangeError) {
+        return res.status(error.httpStatus).json({ success: false, code: error.code, message: error.message });
+    }
+    console.error('Company Email Error:', error?.message || error);
+    return res.status(500).json({ success: false, code: 'COMPANY_EMAIL_CHANGE_FAILED', message: 'ไม่สามารถดำเนินการ Company Email ได้' });
+}
+
 // =================================================================
 // SECTION 2: AUTHENTICATION & SESSION MANAGEMENT
 // =================================================================
+
+app.post('/api/password-reset/request', passwordResetLimiter, async (req, res) => {
+    const startedAt = Date.now();
+    try {
+        const employeeId = typeof req.body?.employeeId === 'string' ? req.body.employeeId : '';
+        await requestPasswordReset({ pool, employeeId, ipAddress: authClientIp(req) });
+        const remainingDelay = 300 - (Date.now() - startedAt);
+        if (remainingDelay > 0) await new Promise(resolve => setTimeout(resolve, remainingDelay));
+        await logAuthAudit(req, 'PASSWORD_RESET_REQUESTED', employeeId, 202, { response: 'generic' });
+        return res.status(202).json({ success: true, message: PASSWORD_RESET_GENERIC_MESSAGE });
+    } catch (error) {
+        return sendPasswordResetError(res, error);
+    }
+});
+
+app.post('/api/password-reset/complete', passwordResetLimiter, async (req, res) => {
+    try {
+        const token = typeof req.body?.token === 'string' ? req.body.token : '';
+        const newPassword = typeof req.body?.newPassword === 'string' ? req.body.newPassword : '';
+        const confirmPassword = typeof req.body?.confirmPassword === 'string' ? req.body.confirmPassword : '';
+        if (newPassword !== confirmPassword) {
+            throw new PasswordResetError('PASSWORD_CONFIRMATION_MISMATCH', 'รหัสผ่านใหม่และการยืนยันไม่ตรงกัน', 422);
+        }
+        const result = await completePasswordReset({ pool, token, newPassword, ipAddress: authClientIp(req) });
+        await logAuthAudit(req, 'PASSWORD_RESET_COMPLETED', result.employeeId, 200, {});
+        return res.json({ success: true, message: 'ตั้งรหัสผ่านใหม่สำเร็จ กรุณาเข้าสู่ระบบอีกครั้ง' });
+    } catch (error) {
+        return sendPasswordResetError(res, error);
+    }
+});
 
 let authSecurityReady = false;
 async function ensureAuthSecuritySchema() {
@@ -850,14 +926,81 @@ app.post('/api/register', registerLimiter, async (req, res) => {
 // ─── Profile: Get & Update own profile ─────────────────────────────────────
 app.get('/api/profile', authenticateToken, async (req, res) => {
     try {
+        await ensureEmployeeCompanyEmailColumn(pool);
+        await ensureCompanyEmailChangeSchema(pool);
         const [rows] = await pool.query(
-            'SELECT EmployeeID, EmployeeName, Department, Unit, Team, Position, Role FROM Employees WHERE EmployeeID = ?',
+            'SELECT EmployeeID, EmployeeName, Department, Unit, Team, Position, Role, CompanyEmail FROM Employees WHERE EmployeeID = ?',
             [req.user.id]
         );
         if (!rows[0]) return res.status(404).json({ success: false, message: 'ไม่พบข้อมูลผู้ใช้' });
-        res.json({ success: true, data: rows[0] });
+        const companyEmailState = await loadCompanyEmailState(pool, String(req.user.id || req.user.EmployeeID || ''));
+        res.json({ success: true, data: { ...rows[0], CompanyEmailState: companyEmailState } });
     } catch (err) {
         res.status(500).json({ success: false, message: err.message });
+    }
+});
+
+app.post('/api/profile/company-email/request', companyEmailChangeLimiter, authenticateToken, async (req, res) => {
+    try {
+        const employeeId = String(req.user.id || req.user.EmployeeID || '');
+        const result = await createCompanyEmailRequest({
+            pool, employeeId, newEmail: req.body?.companyEmail,
+            currentPassword: req.body?.currentPassword, ipAddress: authClientIp(req),
+        });
+        await logAuthAudit(req, 'COMPANY_EMAIL_CHANGE_REQUESTED', employeeId, 202, {
+            requestId: result.requestId, delivery: result.delivery,
+        }, req.user);
+        return res.status(202).json({ success: true, message: 'สร้างคำขอยืนยัน Company Email แล้ว', data: result });
+    } catch (error) {
+        return sendCompanyEmailChangeError(res, error);
+    }
+});
+
+app.post('/api/profile/company-email/resend', companyEmailChangeLimiter, authenticateToken, async (req, res) => {
+    try {
+        const employeeId = String(req.user.id || req.user.EmployeeID || '');
+        const requestId = Number.parseInt(req.body?.requestId, 10);
+        if (!Number.isSafeInteger(requestId) || requestId <= 0) {
+            throw new CompanyEmailChangeError('EMAIL_CHANGE_REQUEST_NOT_FOUND', 'ไม่พบคำขอยืนยันที่รอดำเนินการ', 404);
+        }
+        const result = await createCompanyEmailRequest({
+            pool, employeeId, newEmail: req.body?.companyEmail,
+            currentPassword: req.body?.currentPassword, ipAddress: authClientIp(req),
+            resendRequestId: requestId,
+        });
+        await logAuthAudit(req, 'COMPANY_EMAIL_CHANGE_RESENT', employeeId, 202, {
+            priorRequestId: requestId, requestId: result.requestId, delivery: result.delivery,
+        }, req.user);
+        return res.status(202).json({ success: true, message: 'สร้างลิงก์ยืนยันใหม่แล้ว', data: result });
+    } catch (error) {
+        return sendCompanyEmailChangeError(res, error);
+    }
+});
+
+app.delete('/api/profile/company-email/request/:id', companyEmailChangeLimiter, authenticateToken, async (req, res) => {
+    try {
+        const employeeId = String(req.user.id || req.user.EmployeeID || '');
+        const requestId = Number.parseInt(req.params.id, 10);
+        if (!Number.isSafeInteger(requestId) || requestId <= 0) {
+            throw new CompanyEmailChangeError('EMAIL_CHANGE_REQUEST_NOT_FOUND', 'ไม่พบคำขอยืนยันที่รอดำเนินการ', 404);
+        }
+        await cancelCompanyEmailRequest({ pool, employeeId, requestId, ipAddress: authClientIp(req) });
+        await logAuthAudit(req, 'COMPANY_EMAIL_CHANGE_CANCELLED', employeeId, 200, { requestId }, req.user);
+        return res.json({ success: true, message: 'ยกเลิกคำขอยืนยันแล้ว' });
+    } catch (error) {
+        return sendCompanyEmailChangeError(res, error);
+    }
+});
+
+app.post('/api/profile/company-email/verify', companyEmailChangeLimiter, async (req, res) => {
+    try {
+        const result = await verifyCompanyEmailRequest({ pool, token: req.body?.token, ipAddress: authClientIp(req) });
+        await logAuthAudit(req, 'COMPANY_EMAIL_VERIFIED', result.employeeId, 200, {}, {
+            id: result.employeeId, name: 'Email verification', role: 'User', department: null,
+        });
+        return res.json({ success: true, message: 'ยืนยัน Company Email สำเร็จ', data: { companyEmail: result.companyEmail } });
+    } catch (error) {
+        return sendCompanyEmailChangeError(res, error);
     }
 });
 
