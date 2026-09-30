@@ -5671,6 +5671,15 @@ function _arsvRenderSchedulePicker(detail) {
         const round = item.patrolRound || item.PatrolRound || '';
         return `<option value="${escHtml(id)}" data-date="${escHtml(date)}" data-area="${escHtml(area)}" ${idx === 0 ? 'selected' : ''}>${escHtml(date)}${area ? ' · ' + escHtml(area) : ''}${round ? ' · R' + escHtml(round) : ''}</option>`;
     }).join('');
+    if (detail?.scheduleMode !== 'flexible') {
+        const today = patrolDateOnly(new Date());
+        const hasPastSchedule = openItems.some(item => patrolScheduleDate(item) < today);
+        document.querySelectorAll('input[name="arsv-type"]').forEach(input => {
+            input.disabled = input.value === 'compensation' && !hasPastSchedule;
+            const label = input.closest('label');
+            if (label) label.classList.toggle('opacity-45', input.disabled);
+        });
+    }
     window._arsvOnSessionChange();
 }
 
@@ -5683,8 +5692,18 @@ window._arsvOnSessionChange = function() {
     if (!opt) return;
     const date = opt.dataset.date || '';
     const area = opt.dataset.area || '';
-    const type = document.querySelector('input[name="arsv-type"]:checked')?.value || 'normal';
-    if (dateInput) dateInput.value = type === 'compensation' ? patrolDateOnly(new Date()) : date;
+    const today = patrolDateOnly(new Date());
+    let type = document.querySelector('input[name="arsv-type"]:checked')?.value || 'normal';
+    if (type === 'compensation' && date >= today) {
+        const normalRadio = document.querySelector('input[name="arsv-type"][value="normal"]');
+        if (normalRadio) normalRadio.checked = true;
+        type = 'normal';
+    }
+    if (dateInput) {
+        dateInput.readOnly = type !== 'compensation';
+        dateInput.classList.toggle('bg-slate-50', type !== 'compensation');
+        dateInput.value = type === 'compensation' ? today : date;
+    }
     if (locInput) locInput.value = area || locInput.value || '';
     if (hint) hint.textContent = date
         ? (type === 'compensation' ? `เดินซ่อมรอบวันที่ ${date} โดยบันทึกวันที่เดินจริงเป็นวันนี้` : `จะบันทึกตามกำหนดการวันที่ ${date}`)
@@ -5692,6 +5711,15 @@ window._arsvOnSessionChange = function() {
 };
 
 window._arsvOnTypeChange = function() {
+    const select = document.getElementById('arsv-session');
+    if (select && _arsvCurrentDetail?.scheduleMode !== 'flexible') {
+        const type = document.querySelector('input[name="arsv-type"]:checked')?.value || 'normal';
+        if (type === 'compensation') {
+            const today = patrolDateOnly(new Date());
+            const pastOption = [...select.options].find(item => item.dataset.date && item.dataset.date < today && !item.disabled);
+            if (pastOption) select.value = pastOption.value;
+        }
+    }
     window._arsvOnSessionChange?.();
 };
 
@@ -5981,7 +6009,8 @@ window._arsvAddRecord = async function(employeeId, name, targetPerYear) {
     const date  = document.getElementById('arsv-date')?.value;
     const loc   = document.getElementById('arsv-loc')?.value?.trim() || null;
     const notes = document.getElementById('arsv-notes')?.value?.trim() || null;
-    const scheduledSessionId = document.getElementById('arsv-session')?.value || null;
+    const sessionSelect = document.getElementById('arsv-session');
+    const scheduledSessionId = sessionSelect?.value || null;
     const PatrolType = document.querySelector('input[name="arsv-type"]:checked')?.value || 'normal';
     if (!date) { showToast('กรุณาเลือกวันที่', 'error'); return; }
     if (!scheduledSessionId) { showToast('กรุณาเลือกรอบตามกำหนดการ', 'error'); return; }

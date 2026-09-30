@@ -1,6 +1,7 @@
 const assert = require('assert');
 const fs = require('fs');
 const path = require('path');
+const vm = require('vm');
 
 const read = file => fs.readFileSync(path.join(__dirname, '..', '..', file), 'utf8');
 const node = read('backend/routes/patrol.js');
@@ -30,6 +31,7 @@ for (const source of [node, php]) {
     assert.match(source, /PATROL_SUPERVISOR_MAKEUP_REQUIRED/);
     assert.match(source, /PATROL_SUPERVISOR_MAKEUP_NOT_DUE/);
     assert.match(source, /ScheduleOccurrenceKey/);
+    assert.match(source, /allowHistoricalNormal/);
 }
 
 assert.match(node, /patrolSupervisorOccurrenceCount\(scheduleByMonth\[month\]/);
@@ -45,6 +47,51 @@ assert.match(ui, /data-type=/);
 assert.match(ui, /optionType === 'compensation'/);
 assert.match(ui, /max-height:\$\{isSupervisorPersonal \? '315px' : '200px'\}/);
 assert.match(ui, /รอบนี้ยังไม่ถึงกำหนด/);
+
+const adminSupervisorPickerStart = ui.indexOf('function _arsvRenderSchedulePicker');
+const adminSupervisorPicker = ui.slice(
+    adminSupervisorPickerStart,
+    ui.indexOf('window.openAdminRecordModal', adminSupervisorPickerStart)
+);
+assert.match(adminSupervisorPicker, /hasPastSchedule/);
+assert.match(adminSupervisorPicker, /input\.disabled = input\.value === 'compensation' && !hasPastSchedule/);
+assert.match(adminSupervisorPicker, /dateInput\.readOnly = type !== 'compensation'/);
+assert.match(adminSupervisorPicker, /dateInput\.value = type === 'compensation' \? today : date/);
+
+const adminSessionChangeSource = ui.match(/window\._arsvOnSessionChange = (function\(\) \{[\s\S]*?\n\});/)?.[1];
+assert.ok(adminSessionChangeSource, 'admin supervisor session-change handler must exist');
+const normalRadio = { checked: true, value: 'normal' };
+const compensationRadio = { checked: false, value: 'compensation' };
+const dateInput = { value: '', readOnly: false, classList: { toggle() {} } };
+const elements = {
+    'arsv-session': { selectedOptions: [{ dataset: { date: '2026-01-28', area: 'Factory 3/1' } }] },
+    'arsv-date': dateInput,
+    'arsv-loc': { value: '' },
+    'arsv-session-hint': { textContent: '' },
+};
+const adminSessionChange = vm.runInNewContext(`(${adminSessionChangeSource})`, {
+    patrolDateOnly: () => '2026-09-30',
+    document: {
+        getElementById: id => elements[id] || null,
+        querySelector: selector => selector.includes(':checked')
+            ? (compensationRadio.checked ? compensationRadio : normalRadio)
+            : normalRadio,
+    },
+});
+adminSessionChange();
+assert.strictEqual(dateInput.value, '2026-01-28', 'Admin normal backfill keeps the scheduled date.');
+assert.strictEqual(dateInput.readOnly, true);
+normalRadio.checked = false;
+compensationRadio.checked = true;
+adminSessionChange();
+assert.strictEqual(dateInput.value, '2026-09-30', 'Admin makeup defaults to the actual entry date.');
+assert.strictEqual(dateInput.readOnly, false);
+
+const adminSupervisorSubmit = ui.slice(
+    ui.indexOf('window._arsvAddRecord = async function'),
+    ui.indexOf('window._arsvDeleteRecord = async function')
+);
+assert.match(adminSupervisorSubmit, /input\[name="arsv-type"\]:checked/);
 
 const fixture = [
     { id: 'team-1', date: '2026-09-16', round: 2, area: 'Factory 4' },

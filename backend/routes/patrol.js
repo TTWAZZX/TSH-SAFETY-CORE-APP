@@ -3026,7 +3026,7 @@ async function resolveSupervisorScheduledSession(employeeId, date, requestedSess
             err.code = 'PATROL_FUTURE_SUPERVISOR_CHECKIN_NOT_ALLOWED';
             throw err;
         }
-        if (patrolType === 'normal' && scheduledDate < today) {
+        if (patrolType === 'normal' && scheduledDate < today && !options.allowHistoricalNormal) {
             const err = new Error('A past scheduled round must be recorded as a makeup patrol.');
             err.statusCode = 409;
             err.code = 'PATROL_SUPERVISOR_MAKEUP_REQUIRED';
@@ -4965,6 +4965,7 @@ router.post('/admin-record/supervisor', isAdmin, async (req, res) => {
                 requireSession: true,
                 preserveActualDate: PatrolType === 'compensation',
                 patrolType: PatrolType,
+                allowHistoricalNormal: true,
             });
         const effectiveDate = resolved.date;
         const effective = new Date(effectiveDate);

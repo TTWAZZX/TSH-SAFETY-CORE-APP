@@ -1,5 +1,11 @@
 # TSH Safety Core Activity - Changelog And Handoff History
 
+## 2026-09-30 - Patrol Admin Self-Patrol historical backfill (local, unreleased)
+
+- Fixed Team & Overview > Sec. & Supervisor > Add New Record (Admin) so an Admin can record an overdue scheduled Self-Patrol as a normal on-schedule record. The saved date remains the selected scheduled date; Admin can still choose a makeup record and enter its actual walk date.
+- The exception is limited to the Admin on-behalf route in both Node and PHP. Personal Self-Patrol still requires makeup for an overdue round, and future rounds, duplicate occurrences and blocked leave rounds remain rejected.
+- Added a focused Node/PHP HTTP lifecycle regression proving personal historical-normal rejection, Admin historical-normal success, duplicate rejection and zero employee/roster/check-in/audit fixture residue. Relevant contract/parity tests and syntax checks pass. Cache key: `20260930-patrol-admin-self-backfill-r1`. No commit, push or deployment was performed.
+
 ## 2026-09-24 - Logged-out Forgot Password modal layer deployed
 
 - Deployed `main` commit `2ac8894`. Forgot Password now opens above the Login overlay for logged-out users; previously the form existed at layer 40 behind the layer-50 Login and became visible only after Login was hidden.
