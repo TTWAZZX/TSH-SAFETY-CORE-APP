@@ -1,10 +1,11 @@
 # TSH Safety Core Activity - Changelog And Handoff History
 
-## 2026-09-30 - Patrol Admin Self-Patrol historical backfill (local, unreleased)
+## 2026-09-30 - Patrol Admin Self-Patrol historical backfill deployed
 
 - Fixed Team & Overview > Sec. & Supervisor > Add New Record (Admin) so an Admin can record an overdue scheduled Self-Patrol as a normal on-schedule record. The saved date remains the selected scheduled date; Admin can still choose a makeup record and enter its actual walk date.
 - The exception is limited to the Admin on-behalf route in both Node and PHP. Personal Self-Patrol still requires makeup for an overdue round, and future rounds, duplicate occurrences and blocked leave rounds remain rejected.
-- Added a focused Node/PHP HTTP lifecycle regression proving personal historical-normal rejection, Admin historical-normal success, duplicate rejection and zero employee/roster/check-in/audit fixture residue. Relevant contract/parity tests and syntax checks pass. Cache key: `20260930-patrol-admin-self-backfill-r1`. No commit, push or deployment was performed.
+- Added a focused Node/PHP HTTP lifecycle regression proving personal historical-normal rejection, Admin historical-normal success, duplicate rejection and zero employee/roster/check-in/audit fixture residue. Relevant contract/parity tests and syntax checks pass. Cache key: `20260930-patrol-admin-self-backfill-r1`.
+- Commit `c283e00` is pushed on `main` and deployed to the shared-hosting PHP target at `dev.tshpcl.com/safety/tsh-safety-core`. FTPS download-back matched source `4/4`; public HTTPS hashes matched `3/3`, cache/UI markers were present and anonymous Self-Patrol remained `401`. Stored Production UAT Admin credentials returned `401`, so no authenticated mutation or browser UAT was attempted. No schema, existing business row, upload or setting changed. Rollback evidence is under `backups/production/patrol-admin-self-backfill-predeploy-20260930-162713/`.
 
 ## 2026-09-24 - Logged-out Forgot Password modal layer deployed
 

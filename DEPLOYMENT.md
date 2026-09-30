@@ -1,5 +1,14 @@
 # TSH Safety Core Activity - Deployment
 
+## Patrol Admin Self-Patrol historical backfill Production release (2026-09-30)
+
+Source commit `c283e00` is pushed on `main` and deployed to `https://dev.tshpcl.com/safety/tsh-safety-core`, the shared-hosting PHP Production target. The scoped runtime release contains only `index.html`, `public/js/main.js`, `public/js/pages/patrol.js` and `api/handlers/patrol.php`; Node changes remain local/API-parity test source.
+
+- Admin on-behalf Sec. & Supervisor entry may record an overdue scheduled Self-Patrol as normal while preserving its scheduled date, or select makeup and enter the actual walk date. Personal Self-Patrol remains strict; future rounds, duplicates and leave-blocked rounds remain rejected.
+- Focused Node/PHP HTTP lifecycle passed historical-normal personal rejection, Admin success, duplicate rejection and zero fixture residue. Contract/parity and syntax checks passed. The older shared-schedule lifecycle could not satisfy its unrelated local precondition of two area sessions on 2026-09-30 and cleaned its fixture residue to zero.
+- Exact runtime-before, source, FTPS download-back and HTTPS evidence is under `backups/production/patrol-admin-self-backfill-predeploy-20260930-162713/`. FTPS download-back SHA-256 matched `4/4`; public HTTPS SHA-256 matched `3/3`; the cache chain and Admin UI marker were present; anonymous `/api/patrol/my-self-patrol` returned `401`.
+- The configured Production UAT Admin credentials returned `401`, matching the pre-existing credential limitation, so authenticated Browser UAT was not attempted and no further login retry was made. Deployment created no schema, business-row, upload or setting mutation.
+
 ## Logged-out Forgot Password modal layer (2026-09-24)
 
 Commit `2ac8894` is pushed on `main` and deployed. Runtime scope is only `index.html`: the modal wrapper is layer 60 above the layer-50 Login overlay, making the public Forgot Password form visible and interactive without authentication.

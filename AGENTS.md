@@ -1,5 +1,11 @@
 # TSH Safety Core Activity - AGENTS.md
 
+## Patrol Admin Self-Patrol historical backfill Production release (2026-09-30)
+
+- `main` commit `c283e00` is deployed to the PHP Production target. Team & Overview > Sec. & Supervisor > Add New Record (Admin) can record an overdue scheduled Self-Patrol as normal using the scheduled date, or as makeup using an actual walk date. Personal Self-Patrol remains strict; future, duplicate and leave-blocked rounds remain rejected.
+- Focused Node/PHP lifecycle passed Admin historical-normal success, personal rejection, duplicate rejection and zero residue. FTPS download-back matched source `4/4`; HTTPS matched `3/3`; cache/UI markers were served and anonymous Self-Patrol remained `401`.
+- Runtime rollback and verification evidence is under `backups/production/patrol-admin-self-backfill-predeploy-20260930-162713/`. Stored Production UAT Admin credentials returned `401`, so authenticated Browser UAT was not attempted. No schema, existing business row, upload or setting changed.
+
 ## Logged-out Forgot Password modal layer Production follow-up (2026-09-24)
 
 - `main` commit `2ac8894` is deployed to the PHP Production target. The shared modal wrapper now renders at layer 60 above the Login overlay layer 50, so a logged-out user sees and can interact with Forgot Password immediately instead of the form remaining hidden until Login disappears.
