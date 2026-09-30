@@ -40,6 +40,10 @@ assert.match(node, /ScheduledSessionID IN \(\$\{placeholders\}\)/);
 assert.match(php, /ScheduledSessionID IN \(' \. \$placeholders/);
 
 assert.match(ui, /function patrolSelfScheduleChoiceItems/);
+assert.match(ui, /function patrolSupervisorOccurrenceDisplayItems/);
+assert.match(ui, /function patrolScheduleStatusBadgeClass/);
+assert.match(ui, /bg-emerald-100 text-emerald-700/);
+assert.match(ui, /bg-red-100 text-red-600/);
 assert.match(ui, /filter\(item => patrolScheduleDate\(item\)\.startsWith\(currentMonth\)\)/);
 assert.match(ui, /checkinType: date < today \? 'compensation' : \(date === today \? 'normal' : 'future'\)/);
 assert.match(ui, /รอบค้าง \/ เดินซ่อม/);
@@ -100,5 +104,29 @@ const fixture = [
 ];
 assert.strictEqual(fixture.length, 3, 'all area sessions remain selectable');
 assert.strictEqual(new Set(fixture.map(row => `${row.date}:${row.round}`)).size, 1, 'KPI keeps one calendar occurrence');
+
+const occurrenceDisplaySource = ui.match(/function patrolSupervisorOccurrenceDisplayItems\(items = \[\]\) \{[\s\S]*?\n\}/)?.[0];
+assert.ok(occurrenceDisplaySource, 'supervisor occurrence display helper must exist');
+const occurrenceDisplay = vm.runInNewContext(`(${occurrenceDisplaySource})`, {
+    patrolScheduleDate: item => item.date,
+    patrolScheduleRound: item => item.round,
+    patrolSessionId: item => item.id,
+    patrolScheduleArea: item => item.area,
+    patrolSessionRecords: item => item.records || [],
+    patrolSessionCompleted: item => Boolean(item.isCompleted || item.records?.length),
+    patrolSessionMakeup: item => item.status === 'makeup',
+    patrolSessionLeave: item => item.status === 'leave',
+    patrolSessionLeavePending: item => item.status === 'leave_pending',
+});
+const groupedMissed = occurrenceDisplay(fixture.map(row => ({ ...row, status: 'missed', records: [] })));
+assert.strictEqual(groupedMissed.length, 1, 'same date/round area choices render as one status row');
+assert.strictEqual(groupedMissed[0].areaName, '3 พื้นที่');
+assert.strictEqual(groupedMissed[0].status, 'missed');
+const sharedRecord = { id: 99, CheckinDate: '2026-09-16', Location: 'Factory 3' };
+const groupedChecked = occurrenceDisplay(fixture.map(row => ({ ...row, status: 'checked', isCompleted: true, records: [sharedRecord] })));
+assert.strictEqual(groupedChecked.length, 1);
+assert.strictEqual(groupedChecked[0].records.length, 1, 'shared occurrence record is not repeated for every area choice');
+assert.strictEqual(groupedChecked[0].areaName, 'Factory 3');
+assert.strictEqual(groupedChecked[0].status, 'checked');
 
 console.log('Patrol supervisor shared schedule contract test: PASS');

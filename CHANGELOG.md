@@ -1,5 +1,10 @@
 # TSH Safety Core Activity - Changelog And Handoff History
 
+## 2026-09-30 - Patrol Supervisor occurrence status visibility (local, unreleased)
+
+- Consolidated duplicate area choices for the same Sec. & Supervisor date/round into one read-only status row in Admin and attendance detail modals. This keeps Checked, Makeup, Missed and leave status visible without pushing completed occurrences behind three repeated area rows.
+- The schedule picker still exposes every valid area session, while KPI calculation and Node/PHP API behavior remain unchanged. Shared occurrence display/status regression passes with deduplicated records. Cache key: `20260930-patrol-admin-self-status-r2`. No commit, push or deployment was performed.
+
 ## 2026-09-30 - Patrol Admin Self-Patrol historical backfill deployed
 
 - Fixed Team & Overview > Sec. & Supervisor > Add New Record (Admin) so an Admin can record an overdue scheduled Self-Patrol as a normal on-schedule record. The saved date remains the selected scheduled date; Admin can still choose a makeup record and enter its actual walk date.

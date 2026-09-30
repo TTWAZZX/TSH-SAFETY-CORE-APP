@@ -545,6 +545,54 @@ function patrolScheduleRound(item = {}) {
     return item.patrolRound || item.PatrolRound || item.Round || '';
 }
 
+function patrolSupervisorOccurrenceDisplayItems(items = []) {
+    const groups = new Map();
+    items.forEach((item, index) => {
+        const date = patrolScheduleDate(item);
+        const round = patrolScheduleRound(item);
+        const scheduledId = String(item.ScheduleOccurrenceKey || item.ScheduledSessionID || patrolSessionId(item) || '');
+        const key = item.ScheduleOccurrenceKey || (date && round ? `${date}:${round}` : scheduledId || `${date}:${index}`);
+        if (!groups.has(key)) {
+            groups.set(key, {
+                ...item,
+                date,
+                patrolRound: round,
+                records: [],
+                isCompleted: false,
+                isMakeup: false,
+                _areas: [],
+                _recordKeys: new Set(),
+            });
+        }
+        const group = groups.get(key);
+        const area = patrolScheduleArea(item);
+        if (area && !group._areas.includes(area)) group._areas.push(area);
+        patrolSessionRecords(item).forEach((record, recordIndex) => {
+            const recordKey = String(record?.id ?? `${scheduledId}:${recordIndex}:${record?.CheckinDate || ''}`);
+            if (group._recordKeys.has(recordKey)) return;
+            group._recordKeys.add(recordKey);
+            group.records.push(record);
+        });
+        group.isCompleted = group.isCompleted || patrolSessionCompleted(item);
+        group.isMakeup = group.isMakeup || patrolSessionMakeup(item);
+        group.isLeave = group.isLeave || patrolSessionLeave(item);
+        group.isLeavePending = group.isLeavePending || patrolSessionLeavePending(item);
+    });
+    return [...groups.values()].map(group => {
+        const actualArea = group.records.find(record => String(record?.Location || '').trim())?.Location || '';
+        const areaName = actualArea || (group._areas.length > 1 ? `${group._areas.length} พื้นที่` : group._areas[0] || '');
+        const areaTitle = group._areas.join(' · ');
+        const status = group.isCompleted
+            ? (group.isMakeup ? 'makeup' : 'checked')
+            : group.isLeave ? 'leave'
+            : group.isLeavePending ? 'leave_pending'
+            : String(group.checkinStatus || group.completionStatus || group.status || 'open').toLowerCase();
+        delete group._areas;
+        delete group._recordKeys;
+        return { ...group, areaName, areaTitle, status, checkinStatus: status };
+    });
+}
+
 function patrolScheduleStatusLabel(item = {}) {
     const status = String(item.checkinStatus || item.completionStatus || item.status || '').toLowerCase();
     if (status === 'leave_pending' || patrolSessionLeavePending(item)) return 'Pending Leave';
@@ -555,6 +603,17 @@ function patrolScheduleStatusLabel(item = {}) {
     if (status === 'upcoming') return 'Upcoming';
     if (status === 'locked') return 'Locked';
     return patrolSessionCompleted(item) ? 'Checked' : 'Open';
+}
+
+function patrolScheduleStatusBadgeClass(item = {}) {
+    const label = patrolScheduleStatusLabel(item);
+    if (label === 'Checked') return 'bg-emerald-100 text-emerald-700';
+    if (label === 'Makeup') return 'bg-violet-100 text-violet-700';
+    if (label === 'Missed') return 'bg-red-100 text-red-600';
+    if (label === 'Leave') return 'bg-sky-100 text-sky-700';
+    if (label === 'Pending Leave') return 'bg-indigo-100 text-indigo-700';
+    if (label === 'Open') return 'bg-amber-100 text-amber-700';
+    return 'bg-slate-100 text-slate-500';
 }
 
 function patrolTypeMeta(type) {
@@ -5420,7 +5479,7 @@ function _patrolSupervisorDetailList(detail) {
     return periods.map(p => {
         const status = p.status || 'upcoming';
         const recs = Array.isArray(p.records) ? p.records : [];
-        const items = Array.isArray(p.items) ? p.items : [];
+        const items = patrolSupervisorOccurrenceDisplayItems(Array.isArray(p.items) ? p.items : []);
         return `<div class="rounded-xl border ${_patrolAdminStatusClass(status)} px-3 py-2">
           <div class="flex items-center justify-between gap-2">
             <p class="text-xs font-black">Month ${p.month} &middot; ${escHtml(status)}</p>
@@ -5428,11 +5487,11 @@ function _patrolSupervisorDetailList(detail) {
           </div>
           ${items.length ? `<div class="mt-2 space-y-1">
             ${items.map(item => {
-              const itemRecs = patrolSessionRecords(item);
+              const itemStatus = patrolScheduleStatusLabel(item);
               return `<div class="rounded-lg bg-white/70 px-2 py-1 text-[10px] text-slate-500">
                 <div class="flex items-center justify-between gap-2">
-                  <span class="truncate">${_patrolAdminDateLabel(item.date || item.PatrolDate)}${item.areaName ? ' &middot; ' + escHtml(item.areaName) : ''}${item.patrolRound ? ' &middot; R' + item.patrolRound : ''}</span>
-                  <span class="font-bold ${itemRecs.length ? 'text-emerald-600' : 'text-slate-400'}">${itemRecs.length ? 'Done' : 'Open'}</span>
+                  <span class="truncate" ${item.areaTitle ? `title="${escHtml(item.areaTitle)}"` : ''}>${_patrolAdminDateLabel(item.date || item.PatrolDate)}${item.areaName ? ' &middot; ' + escHtml(item.areaName) : ''}${item.patrolRound ? ' &middot; R' + item.patrolRound : ''}</span>
+                  <span class="flex-shrink-0 rounded-full px-2 py-0.5 font-bold ${patrolScheduleStatusBadgeClass(item)}">${escHtml(itemStatus)}</span>
                 </div>
                 ${_patrolLeaveInline(item)}
               </div>`;
@@ -5581,7 +5640,7 @@ function _arsvRenderQuotaDetail(detail, employeeId, year) {
     listEl.innerHTML = periods.map(p => {
         const status = p.status || 'upcoming';
         const recs = Array.isArray(p.records) ? p.records : [];
-        const items = Array.isArray(p.items) ? p.items : [];
+        const items = patrolSupervisorOccurrenceDisplayItems(Array.isArray(p.items) ? p.items : []);
         return `<div class="rounded-xl border ${_patrolAdminStatusClass(status)} px-3 py-2">
           <div class="flex items-center justify-between gap-2">
             <div class="text-xs font-black">Month ${p.month} · ${escHtml(status)}</div>
@@ -5589,12 +5648,11 @@ function _arsvRenderQuotaDetail(detail, employeeId, year) {
           </div>
           ${items.length ? `<div class="mt-2 space-y-1">
             ${items.map(item => {
-              const itemRecords = patrolSessionRecords(item);
               const itemStatus = patrolScheduleStatusLabel(item);
               return `<div class="rounded-lg bg-white/70 px-2 py-1 text-[10px] text-slate-500">
                 <div class="flex items-center justify-between gap-2">
-                  <span class="truncate">${_patrolAdminDateLabel(item.date || item.PatrolDate)}${item.areaName ? ' · ' + escHtml(item.areaName) : ''}${item.patrolRound ? ' · R' + item.patrolRound : ''}</span>
-                  <span class="font-bold ${itemRecords.length ? 'text-emerald-600' : String(item.status || '').toLowerCase() === 'locked' ? 'text-slate-300' : 'text-slate-400'}">${escHtml(itemStatus)}</span>
+                  <span class="truncate" ${item.areaTitle ? `title="${escHtml(item.areaTitle)}"` : ''}>${_patrolAdminDateLabel(item.date || item.PatrolDate)}${item.areaName ? ' · ' + escHtml(item.areaName) : ''}${item.patrolRound ? ' · R' + item.patrolRound : ''}</span>
+                  <span class="flex-shrink-0 rounded-full px-2 py-0.5 font-bold ${patrolScheduleStatusBadgeClass(item)}">${escHtml(itemStatus)}</span>
                 </div>
               </div>`;
             }).join('')}
