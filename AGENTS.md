@@ -1,5 +1,12 @@
 # TSH Safety Core Activity - AGENTS.md
 
+## Patrol Supervisor occurrence status visibility Production follow-up (2026-09-30)
+
+- `main` commit `980414f` is deployed to the PHP Production target. Admin and attendance detail modals now consolidate the three sibling area choices for one Sec. & Supervisor date/round into one occurrence row, so green Checked and red Missed status pills remain visible instead of completed records being pushed behind repeated area rows. Makeup and leave statuses retain distinct colors.
+- The picker still exposes every valid area session; KPI, Node/PHP API behavior and stored records are unchanged. Shared-schedule/check-in regressions and focused Node/PHP historical-backfill lifecycles passed with zero fixture residue.
+- Only `index.html`, `public/js/main.js` and `public/js/pages/patrol.js` were deployed. FTPS download-back and public HTTPS SHA-256 matched source `3/3`; markers were present and anonymous Self-Patrol remained `401`. Authenticated Browser UAT was not retried because the stored Production UAT Admin credentials had already returned `401` in the preceding release.
+- Runtime rollback and verification evidence is under `backups/production/patrol-supervisor-status-predeploy-20260930-171228/`. No schema, API rule, business row, upload or setting changed.
+
 ## Patrol Admin Self-Patrol historical backfill Production release (2026-09-30)
 
 - `main` commit `c283e00` is deployed to the PHP Production target. Team & Overview > Sec. & Supervisor > Add New Record (Admin) can record an overdue scheduled Self-Patrol as normal using the scheduled date, or as makeup using an actual walk date. Personal Self-Patrol remains strict; future, duplicate and leave-blocked rounds remain rejected.

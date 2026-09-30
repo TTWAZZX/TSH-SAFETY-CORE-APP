@@ -1,5 +1,14 @@
 # TSH Safety Core Activity - Deployment
 
+## Patrol Supervisor occurrence status visibility (2026-09-30)
+
+Commit `980414f` is pushed on `main` and deployed to `https://dev.tshpcl.com/safety/tsh-safety-core`. Runtime scope is only `index.html`, `public/js/main.js` and `public/js/pages/patrol.js`.
+
+- Admin and attendance detail modals consolidate sibling area choices for the same Sec. & Supervisor date/round into one read-only occurrence row. Completed records now show a green Checked pill, missed rows show red, and makeup/leave states retain distinct status colors instead of being pushed behind repeated area rows.
+- The Admin schedule picker retains every selectable area session. KPI calculation, API behavior and stored records are unchanged. Shared-schedule regression, Patrol check-in regression and focused Node/PHP historical-backfill lifecycles passed with zero fixture residue.
+- Exact runtime-before, source, FTPS download-back and HTTPS evidence is under `backups/production/patrol-supervisor-status-predeploy-20260930-171228/`. FTPS and public HTTPS SHA-256 matched source `3/3`; cache/status markers were present and anonymous Self-Patrol returned `401`.
+- Stored Production UAT Admin credentials were already confirmed invalid (`401`) during the immediately preceding release, so authenticated Browser UAT was not retried. Deployment made no schema, API-rule, business-row, upload or setting mutation.
+
 ## Patrol Admin Self-Patrol historical backfill Production release (2026-09-30)
 
 Source commit `c283e00` is pushed on `main` and deployed to `https://dev.tshpcl.com/safety/tsh-safety-core`, the shared-hosting PHP Production target. The scoped runtime release contains only `index.html`, `public/js/main.js`, `public/js/pages/patrol.js` and `api/handlers/patrol.php`; Node changes remain local/API-parity test source.
