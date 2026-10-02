@@ -6,6 +6,7 @@ backend/uploads/
 uploads/
 backups/
 exports/
+/output/
 backend/private-uploads/*
 !backend/private-uploads/.htaccess
 !backend/private-uploads/index.html
