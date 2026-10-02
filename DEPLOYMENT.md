@@ -1,5 +1,14 @@
 # TSH Safety Core Activity - Deployment
 
+## Patrol Self-Patrol full-year makeup selector (2026-10-02)
+
+Commit `80abf0c` is pushed on `main` and deployed to `https://dev.tshpcl.com/safety/tsh-safety-core`. Runtime scope is only `index.html`, `public/js/main.js` and `public/js/pages/patrol.js`.
+
+- Sec. & Supervisor Self-Patrol now retains every overdue, incomplete scheduled occurrence from earlier months of the selected year in the Makeup selector. Normal and read-only future choices remain limited to the current month; completed and leave-blocked occurrences remain excluded.
+- The focused selector regression proves a January missed round remains available in October while a November future round is excluded. Shared-schedule Node/PHP lifecycles passed with isolated same-day area fixtures and zero residue; Patrol contract/parity and Admin historical-backfill Node/PHP lifecycles also passed with zero residue.
+- Production had no predeploy runtime drift from commit `803f9da`. FTPS download-back and public HTTPS SHA-256 matched source `3/3`; cache/full-year selector markers were present and anonymous Self-Patrol returned `401`. Stored Production UAT credentials remain unavailable/invalid from the prior release, so authenticated Browser UAT was not retried.
+- Exact runtime-before, source, FTPS download-back and HTTPS evidence is under `backups/production/patrol-self-makeup-year-predeploy-20261002-091149/`. No API rule, schema, business row, upload or setting changed.
+
 ## Patrol Supervisor occurrence status visibility (2026-09-30)
 
 Commit `980414f` is pushed on `main` and deployed to `https://dev.tshpcl.com/safety/tsh-safety-core`. Runtime scope is only `index.html`, `public/js/main.js` and `public/js/pages/patrol.js`.

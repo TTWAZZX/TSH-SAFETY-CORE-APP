@@ -1,5 +1,12 @@
 # TSH Safety Core Activity - AGENTS.md
 
+## Patrol Self-Patrol full-year makeup selector Production follow-up (2026-10-02)
+
+- `main` commit `80abf0c` is deployed to the PHP Production target. Sec. & Supervisor Self-Patrol now keeps overdue, incomplete scheduled rounds from every earlier month of the selected year in the Makeup selector; normal and read-only future choices remain scoped to the current month, while completed and leave-blocked occurrences remain excluded.
+- A focused selector regression proves a January missed round remains selectable in October and excludes a November future round. Shared-schedule Node/PHP lifecycles passed with isolated same-day area fixtures and zero residue; Patrol contract/parity and Admin historical-backfill Node/PHP lifecycles also passed with zero residue.
+- Only `index.html`, `public/js/main.js` and `public/js/pages/patrol.js` were deployed. Production had no runtime drift from `803f9da`; FTPS download-back and public HTTPS SHA-256 matched source `3/3`, markers were present and anonymous Self-Patrol remained `401`. Authenticated Browser UAT was not retried because stored Production UAT credentials remain invalid/unavailable from the preceding release.
+- Runtime rollback and verification evidence is under `backups/production/patrol-self-makeup-year-predeploy-20261002-091149/`. No API rule, schema, business row, upload or setting changed.
+
 ## Patrol Supervisor occurrence status visibility Production follow-up (2026-09-30)
 
 - `main` commit `980414f` is deployed to the PHP Production target. Admin and attendance detail modals now consolidate the three sibling area choices for one Sec. & Supervisor date/round into one occurrence row, so green Checked and red Missed status pills remain visible instead of completed records being pushed behind repeated area rows. Makeup and leave statuses retain distinct colors.

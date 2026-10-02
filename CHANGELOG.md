@@ -1,10 +1,10 @@
 # TSH Safety Core Activity - Changelog And Handoff History
 
-## 2026-10-02 - Patrol Self-Patrol full-year makeup selector (local release candidate)
+## 2026-10-02 - Patrol Self-Patrol full-year makeup selector deployed
 
 - Fixed the Sec. & Supervisor Self-Patrol selector so overdue, incomplete scheduled rounds from earlier months in the selected year remain available under Makeup. Normal and read-only future choices remain limited to the current month; completed and leave-blocked occurrences remain excluded.
 - Added a focused selector regression proving a January missed round remains selectable in October while a November future round is excluded. The shared-schedule lifecycle now creates isolated same-day area fixtures when the local calendar has none; Node and PHP lifecycles pass with zero fixture residue. Patrol contract/parity and Admin historical-backfill Node/PHP lifecycles also pass.
-- Advanced the static cache chain to `20261002-patrol-self-makeup-year-r3`. No API rule, schema, stored business row or Production runtime has changed yet.
+- Advanced the static cache chain to `20261002-patrol-self-makeup-year-r3`. Commit `80abf0c` is pushed on `main` and deployed to `dev.tshpcl.com/safety/tsh-safety-core`. The static-only release deployed `index.html`, `public/js/main.js` and `public/js/pages/patrol.js`; FTPS download-back and public HTTPS SHA-256 matched source `3/3`, all cache/logic markers were present and anonymous Self-Patrol remained `401`. No API rule, schema, stored business row, upload or setting changed. Rollback evidence is under `backups/production/patrol-self-makeup-year-predeploy-20261002-091149/`.
 
 ## 2026-09-30 - Patrol Supervisor occurrence status visibility deployed
 
