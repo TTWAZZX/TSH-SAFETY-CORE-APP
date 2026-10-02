@@ -22,6 +22,25 @@ for (const inferred of ['LostDays', 'Severity', 'Medical Treatment', 'Lost Time'
 const phpCondition = phpRoute.match(/\$statCond = "([^"]+)";/)?.[1] || '';
 assert.strictEqual(phpCondition, "IsRecordable=1 AND AccidentType NOT IN ('Near Miss','First Aid')", 'PHP and Node must use the same explicit Recordable rule');
 
+const nodeInjuryCondition = nodeRoute.match(/const INJURY_ANALYTICS_CONDITION = "([^"]+)";/)?.[1] || '';
+const phpInjuryCondition = phpRoute.match(/\$injuryCond = "([^"]+)";/)?.[1] || '';
+assert.strictEqual(nodeInjuryCondition, "AccidentType <> 'Near Miss'", 'Node injury analytics must include First Aid and exclude only Near Miss');
+assert.strictEqual(phpInjuryCondition, "AccidentType<>'Near Miss'", 'PHP injury analytics must include First Aid and exclude only Near Miss');
+assert.strictEqual((nodeRoute.match(/AND \$\{INJURY_ANALYTICS_CONDITION\} \$\{yf\}/g) || []).length, 2, 'Node Injury Type and Body Part queries must use the injury analytics population');
+assert.strictEqual((phpRoute.match(/AND \$injuryCond AND YEAR\(AccidentDate\)=\?/g) || []).length, 2, 'PHP Injury Type and Body Part queries must use the injury analytics population');
+assert.ok(frontend.includes('นับทุกเคสที่มีการบาดเจ็บ รวม First Aid และไม่รวม Near Miss'), 'Both injury analytics cards must explain that First Aid is included');
+for (const source of [nodeRoute, phpRoute]) {
+    assert.ok(source.includes('BodySide'), 'Node/PHP accident contract must persist BodySide');
+    assert.ok(source.includes("'Left'"), 'Node/PHP accident contract must validate canonical body sides');
+    assert.ok(source.includes('ไม่ระบุข้าง'), 'Node/PHP analytics must retain legacy rows with an unspecified side');
+}
+assert.ok(frontend.includes('name="BodySide"'), 'Accident form must expose a Body Side selector');
+assert.ok(frontend.includes('กรุณาเลือกด้านของร่างกายที่บาดเจ็บ'), 'Accident form must require a side when Body Part is selected');
+assert.ok(frontend.includes('_validateAccidentForm(form, r)'), 'Edit validation must compare against the original report');
+assert.ok(frontend.includes('preservesLegacyLostTimeZero'), 'UI must allow an unchanged legacy Lost Time zero-day report to receive other corrections');
+assert.ok(nodeRoute.includes('allowLegacyLostTimeZero'), 'Node must support the scoped legacy Lost Time edit exception');
+assert.ok(phpRoute.includes('$allowLegacyLostTimeZero'), 'PHP must support the scoped legacy Lost Time edit exception');
+
 const frontendCondition = frontend.match(/function _accIsCountedStatReport\(r\) \{([\s\S]*?)\n\}/)?.[1] || '';
 assert.ok(frontendCondition.includes('Number(r?.IsRecordable) === 1'), 'UI counted badge/filter must require IsRecordable');
 assert.ok(!frontendCondition.includes('LostDays'), 'UI must not infer counted status from lost days');
@@ -68,5 +87,10 @@ const cases = [
     [{ AccidentType: 'Fatal', LostDays: 0, Severity: 'Critical', IsRecordable: 1 }, true],
 ];
 for (const [row, expected] of cases) assert.strictEqual(counted(row), expected, JSON.stringify(row));
+
+const includedInInjuryAnalytics = row => row.AccidentType !== 'Near Miss';
+assert.strictEqual(includedInInjuryAnalytics({ AccidentType: 'First Aid', IsRecordable: 0 }), true, 'First Aid must appear in injury analytics');
+assert.strictEqual(includedInInjuryAnalytics({ AccidentType: 'Medical Treatment', IsRecordable: 0 }), true, 'Non-recordable injury cases must remain visible in injury analytics');
+assert.strictEqual(includedInInjuryAnalytics({ AccidentType: 'Near Miss', IsRecordable: 0 }), false, 'Near Miss must not appear in injury analytics');
 
 console.log(`Accident Recordable contract passed: ${cases.length} classification scenarios, Node/PHP/API/UI parity.`);

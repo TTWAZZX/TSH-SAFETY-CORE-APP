@@ -4,6 +4,7 @@ import { guardSubmitHandler, installWindowActionLocks } from '../utils/async-ui.
 import { API } from '../api.js';
 import { openModal, openDetailModal, closeModal, showToast, showConfirmationModal, showLoading, hideLoading } from '../ui.js?v=20260602-mobile-nav-m53';
 import { captureCardImage, isSharedCardImageExportEnabled } from '../utils/card-image-export.js?v=20260820-card-image-phase2a';
+import { renderAccidentAnatomy } from '../utils/accident-anatomy.js?v=20261002-accident-accessibility-r3';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Constants
@@ -52,6 +53,15 @@ const BODY_PARTS = [
     'หลัง / เอว', 'แขน / ข้อศอก', 'มือ / นิ้วมือ', 'ขา / เข่า', 'เท้า / นิ้วเท้า',
     'ทั่วร่างกาย', 'อื่นๆ',
 ];
+const BODY_SIDES = [
+    { value: 'Left', label: 'ซ้าย / Left' },
+    { value: 'Right', label: 'ขวา / Right' },
+    { value: 'Bilateral', label: 'ทั้งสองข้าง / Bilateral' },
+    { value: 'Midline', label: 'กึ่งกลาง / Midline' },
+    { value: 'Not Applicable', label: 'ไม่เกี่ยวข้อง / N/A' },
+];
+const BODY_SIDE_LABELS = Object.fromEntries(BODY_SIDES.map(item => [item.value, item.label]));
+const _accBodySideLabel = value => BODY_SIDE_LABELS[String(value || '').trim()] || (value ? String(value) : 'ไม่ระบุข้าง / Unspecified');
 const ACC_OTHER_VALUE = 'อื่นๆ';
 const ACC_OTHER_PLACEHOLDER = 'ระบุรายละเอียดอื่นๆ / Specify other';
 const EMPLOYMENT_TYPES = ['พนักงานประจำ', 'พนักงานชั่วคราว', 'พนักงานรับเหมา', 'นักศึกษาฝึกงาน', ACC_OTHER_VALUE];
@@ -70,7 +80,7 @@ const SEV_COLOR = {
     'Critical': { bg: 'bg-red-100',     text: 'text-red-700'     },
     'Fatal':    { bg: 'bg-red-900',     text: 'text-white'       },
 };
-const ACCIDENT_LAYOUT_IMAGE = 'public/images/accident/tsh-factory-layout.jpg';
+const ACCIDENT_LAYOUT_DEFAULT_IMAGE = 'public/images/accident/tsh-factory-layout.jpg';
 const ACCIDENT_LAYOUT_DEFAULT_POINTS = [
     { x: 38, y: 36 }, // TSH Factory 1
     { x: 28, y: 68 }, // TSH Factory 2
@@ -88,12 +98,18 @@ let _activeTab      = 'dashboard';
 let _statsYear      = new Date().getFullYear();
 let _summary        = null;
 let _analytics      = null;
+let _analyticsReports = [];
+let _analyticsReportsYear = null;
+let _analyticsPreviousReports = [];
+let _analyticsPreviousReportsYear = null;
+let _analyticsFilters = { month: '', dept: '', area: '', type: '', injury: '', recordable: '', bodyPart: '', bodySide: '' };
 let _reports        = [];
+let _reportDrilldown = null;
 let _allDepts       = [];
 let _filter         = { dept: '', type: '', status: '', quick: '', year: new Date().getFullYear() };
 let _listenersReady = false;
 let _trendChart     = null;
-let _deptChart      = null;
+let _typeChart      = null;
 let _accEmpTimer    = null;
 let _accPersonTimer = null;
 let _accNearMissPeople = [];
@@ -103,6 +119,7 @@ let _perfData       = null; // cached Safety Performance record
 let _hotspotPositions = {};
 let _hotspotEditMode = false;
 let _hotspotEditArea = '';
+let _hotspotLayout = { IsDefault: true, FileURL: ACCIDENT_LAYOUT_DEFAULT_IMAGE };
 let _lastHotspotRows = [];
 let _accCardSaveHold = null;
 let _accCardSaveMenu = null;
@@ -110,8 +127,10 @@ const _accActionLocks = new Set();
 let _heroStatsRequest = 0;
 let _heroKpiRequest = 0;
 let _dashboardRequest = 0;
+let _dashboardDeptMetric = 'risk';
 let _analyticsRequest = 0;
 let _reportsRequest = 0;
+let _injuryMetric = 'cases';
 let _reportsPanelRequest = 0;
 let _employeeSearchRequest = 0;
 let _personSearchRequest = 0;
@@ -139,6 +158,41 @@ function _accSaveLocalHotspotPositions(positions) {
     try {
         localStorage.setItem(ACCIDENT_HOTSPOT_POSITIONS_STORAGE_KEY, JSON.stringify(positions || []));
     } catch (_) { /* local fallback is best effort only */ }
+}
+
+const ACCIDENT_ANALYTICS_QUERY_KEYS = {
+    month: 'accMonth', dept: 'accDept', area: 'accArea', type: 'accType', injury: 'accInjury',
+    recordable: 'accRecordable', bodyPart: 'accBodyPart', bodySide: 'accBodySide',
+};
+
+function _accRestoreAnalyticsDeepLink() {
+    try {
+        const url = new URL(window.location.href);
+        if (url.searchParams.get('accAnalytics') !== '1') return;
+        _activeTab = 'analytics';
+        const year = Number(url.searchParams.get('accYear'));
+        if (year >= 2000 && year <= 2200) {
+            _statsYear = year;
+            _filter.year = year;
+        }
+        Object.entries(ACCIDENT_ANALYTICS_QUERY_KEYS).forEach(([key, param]) => {
+            _analyticsFilters[key] = url.searchParams.get(param) || '';
+        });
+    } catch (_) { /* malformed URLs fall back to the normal Analytics state */ }
+}
+
+function _accSyncAnalyticsDeepLink() {
+    try {
+        const url = new URL(window.location.href);
+        url.searchParams.set('accAnalytics', '1');
+        url.searchParams.set('accYear', String(_statsYear));
+        Object.entries(ACCIDENT_ANALYTICS_QUERY_KEYS).forEach(([key, param]) => {
+            const value = String(_analyticsFilters[key] || '');
+            if (value) url.searchParams.set(param, value); else url.searchParams.delete(param);
+        });
+        history.replaceState(history.state, '', `${url.pathname}${url.search}${url.hash}`);
+        return url.href;
+    } catch (_) { return window.location.href; }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -172,6 +226,9 @@ export async function loadAccidentPage() {
             if (_inFilter.dept) _filter.dept = _inFilter.dept;
         }
     } catch (_) {}
+    _accRestoreAnalyticsDeepLink();
+    const yearSelect = document.getElementById('acc-year-sel');
+    if (yearSelect) yearSelect.value = String(_statsYear);
     switchTab(_activeTab);
     _loadHeroStats();
     _loadHeroKpiSummary();
@@ -305,6 +362,12 @@ function setupEventListeners() {
             // Clear caches so panels always fetch fresh data for the new year
             _summary   = null;
             _analytics = null;
+            _analyticsReports = [];
+            _analyticsReportsYear = null;
+            _analyticsPreviousReports = [];
+            _analyticsPreviousReportsYear = null;
+            _accResetAnalyticsFilters();
+            if (_activeTab === 'analytics') _accSyncAnalyticsDeepLink();
             _perfData  = null;
             _loadHeroStats();
             _loadHeroKpiSummary();
@@ -707,7 +770,7 @@ function _accRankBars(rows, maxValue, colorClass, emptyText) {
     </div>`;
 }
 
-function _accParetoChart(rows, emptyText) {
+function _accParetoChart(rows, emptyText, filterKey = '') {
     const allRows = Array.isArray(rows) ? rows : [];
     const sourceRows = allRows.slice(0, 5);
     const hasRows = sourceRows.length > 0;
@@ -789,12 +852,12 @@ function _accParetoChart(rows, emptyText) {
                     const ghostH = hasRows ? 0 : [72, 58, 44, 34, 26][i];
                     const displayH = p.barH || ghostH;
                     const displayY = bottom - displayH;
-                    return `
+                    return `<g ${filterKey && hasRows ? `data-analytics-filter-key="${_htmlEsc(filterKey)}" data-analytics-filter-value="${_htmlEsc(label)}" tabindex="0" role="button" aria-label="กรอง ${_htmlEsc(label)}" style="cursor:pointer"` : ''}>
                         <rect x="${barX}" y="${displayY}" width="${barWidth}" height="${displayH}" rx="5" fill="${fill}" opacity="${hasRows ? '0.92' : '0.35'}"/>
                         <text x="${p.x}" y="${displayY - 9}" text-anchor="middle" font-size="12" font-weight="800" fill="${hasRows ? '#1e293b' : '#94a3b8'}">${p.value}</text>
                         <text x="${p.x}" y="${bottom + 27}" text-anchor="middle" font-size="11" font-weight="700" fill="#475569">${_htmlEsc(shortLabel)}</text>
                         ${hasRows ? `<text x="${p.x}" y="${p.lineY - 13}" text-anchor="middle" font-size="11" font-weight="800" fill="#047857">${p.cumulative.toFixed(1)}%</text>` : ''}
-                    `;
+                    </g>`;
                 }).join('')}
                 ${hasRows ? `
                     <path d="${linePath}" fill="none" stroke="#10b981" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
@@ -811,6 +874,143 @@ function _accParetoChart(rows, emptyText) {
         </div>
     `;
 }
+
+function _accInjuryMetricValue(items, metric = _injuryMetric) {
+    if (metric === 'lostDays') return items.reduce((sum, item) => sum + (Number(item.LostDays) || 0), 0);
+    if (metric === 'severity') {
+        const weights = { Minor: 1, Moderate: 2, Serious: 3, Critical: 4, Fatal: 5 };
+        return items.reduce((sum, item) => sum + (weights[String(item.Severity || '')] || 1), 0);
+    }
+    return items.length;
+}
+
+function _accInjuryTopValue(items, field, fallback = 'ไม่ระบุ') {
+    const counts = new Map();
+    items.forEach(item => {
+        const value = String(item?.[field] || '').trim() || fallback;
+        counts.set(value, (counts.get(value) || 0) + 1);
+    });
+    return [...counts.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0], 'th'))[0] || [fallback, 0];
+}
+
+function _accInjuryIntelligenceCard(rows, reports = [], previousReports = [], options = {}) {
+    const injuryReports = (reports || []).filter(report => report.AccidentType !== 'Near Miss');
+    const previousInjuryReports = (previousReports || []).filter(report => report.AccidentType !== 'Near Miss');
+    const grouped = new Map();
+    injuryReports.forEach(report => {
+        const label = String(report.InjuryType || '').trim() || '(ไม่ระบุ Injury Type)';
+        if (!grouped.has(label)) grouped.set(label, []);
+        grouped.get(label).push(report);
+    });
+    // Keep API-projected categories visible if reports are not available yet.
+    (rows || []).forEach(row => {
+        const label = String(row.label || '').trim() || '(ไม่ระบุ Injury Type)';
+        if (!grouped.has(label)) grouped.set(label, []);
+    });
+    const previousGroups = new Map();
+    previousInjuryReports.forEach(report => {
+        const label = String(report.InjuryType || '').trim() || '(ไม่ระบุ Injury Type)';
+        if (!previousGroups.has(label)) previousGroups.set(label, []);
+        previousGroups.get(label).push(report);
+    });
+    const enriched = [...grouped.entries()].map(([label, items]) => {
+        const apiCount = parseInt((rows || []).find(row => String(row.label || '') === label)?.cnt, 10) || 0;
+        const count = items.length || apiCount;
+        const metricValue = items.length ? _accInjuryMetricValue(items) : count;
+        const priorCount = (previousGroups.get(label) || []).length;
+        const yoy = priorCount ? ((count - priorCount) * 100 / priorCount) : null;
+        return { label, items, count, metricValue, priorCount, yoy };
+    }).sort((a, b) => b.metricValue - a.metricValue || b.count - a.count || a.label.localeCompare(b.label, 'th'));
+    const total = enriched.reduce((sum, row) => sum + row.count, 0);
+    const totalLostDays = injuryReports.reduce((sum, report) => sum + (Number(report.LostDays) || 0), 0);
+    const recordable = injuryReports.filter(_accIsCountedStatReport).length;
+    const missingType = injuryReports.filter(report => !String(report.InjuryType || '').trim()).length;
+    const mode = enriched.length > 0 && enriched.length <= 3 ? 'focus' : 'pareto';
+    const maxMetric = Math.max(1, ...enriched.map(row => row.metricValue));
+    const top = enriched[0] || null;
+    const metricLabel = _injuryMetric === 'severity' ? 'Severity index' : _injuryMetric === 'lostDays' ? 'Lost Days' : 'Cases';
+    const selectedReports = top?.items || [];
+    const [topBodyPart, topBodyPartCount] = _accInjuryTopValue(selectedReports, 'BodyPart');
+    const [topDepartment, topDepartmentCount] = _accInjuryTopValue(selectedReports, 'Department');
+    const [topArea, topAreaCount] = _accInjuryTopValue(selectedReports, 'Area');
+    const monthCounts = MONTHS_TH.map((label, index) => ({
+        label,
+        month: index + 1,
+        count: selectedReports.filter(report => Number(String(report.AccidentDate || '').slice(5, 7)) === index + 1).length,
+    }));
+    const monthMax = Math.max(1, ...monthCounts.map(row => row.count));
+    const focusCases = selectedReports.slice(0, options.fullscreen ? 8 : 4);
+    const metricButtons = [['cases','Cases'],['severity','Severity'],['lostDays','Lost Days']]
+        .map(([value, label]) => `<button type="button" data-injury-metric="${value}" onclick="window._accSetInjuryMetric('${value}')" aria-pressed="${_injuryMetric === value}" style="min-height:44px" class="rounded-lg px-3 text-[10px] font-black transition focus:outline-none focus:ring-4 focus:ring-indigo-200 ${_injuryMetric === value ? 'bg-indigo-600 text-white shadow-sm' : 'text-slate-600 hover:bg-white'}">${label}</button>`).join('');
+    const toolbar = `<div class="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-slate-100 bg-slate-50/80 p-2" data-injury-toolbar data-acc-card-ignore>
+        <div class="grid grid-cols-3 gap-1" role="group" aria-label="เลือกตัวชี้วัด Injury Type">${metricButtons}</div>
+        <div class="flex gap-1" role="group" aria-label="เครื่องมือ Injury Type">
+            ${options.fullscreen ? '' : '<button type="button" data-injury-fullscreen-open aria-label="เปิด Injury Type แบบเต็มจอ" onclick="window._accOpenInjuryFullscreen()" style="min-height:44px" class="rounded-lg border border-indigo-100 bg-white px-3 text-[10px] font-black text-indigo-700 hover:bg-indigo-50 focus:outline-none focus:ring-4 focus:ring-indigo-200">ขยาย</button>'}
+            <button type="button" data-injury-export="png" aria-label="ส่งออก Injury Type เป็น PNG" onclick="window._accExportInjuryPNG()" style="min-height:44px" class="rounded-lg border border-slate-200 bg-white px-3 text-[10px] font-black text-slate-600 hover:bg-slate-100 focus:outline-none focus:ring-4 focus:ring-indigo-200">PNG</button>
+            <button type="button" data-injury-export="pdf" aria-label="ส่งออก Injury Type เป็น PDF" onclick="window._accExportInjuryPDF()" style="min-height:44px" class="rounded-lg border border-slate-200 bg-white px-3 text-[10px] font-black text-slate-600 hover:bg-slate-100 focus:outline-none focus:ring-4 focus:ring-indigo-200">PDF</button>
+        </div>
+    </div>`;
+    const summary = `<div class="grid grid-cols-2 gap-2 sm:grid-cols-4">
+        <div class="rounded-xl border border-indigo-100 bg-indigo-50/70 px-3 py-2"><p class="text-[9px] font-black uppercase text-indigo-500">Injury types</p><p class="mt-1 text-lg font-black tabular-nums text-slate-800">${enriched.length}</p></div>
+        <div class="rounded-xl border border-sky-100 bg-sky-50/70 px-3 py-2"><p class="text-[9px] font-black uppercase text-sky-500">Injury cases</p><p class="mt-1 text-lg font-black tabular-nums text-slate-800">${total}</p></div>
+        <div class="rounded-xl border border-rose-100 bg-rose-50/70 px-3 py-2"><p class="text-[9px] font-black uppercase text-rose-500">Recordable</p><p class="mt-1 text-lg font-black tabular-nums text-slate-800">${recordable}</p></div>
+        <div class="rounded-xl border border-orange-100 bg-orange-50/70 px-3 py-2"><p class="text-[9px] font-black uppercase text-orange-500">Lost Days</p><p class="mt-1 text-lg font-black tabular-nums text-slate-800">${totalLostDays}</p></div>
+    </div>`;
+    const empty = `<div class="flex min-h-[430px] flex-col items-center justify-center rounded-2xl border border-dashed border-slate-200 bg-slate-50 px-6 text-center" data-injury-empty>
+        <span class="flex h-12 w-12 items-center justify-center rounded-2xl bg-white text-slate-400 shadow-sm">⌁</span>
+        <p class="mt-3 text-sm font-black text-slate-700">${missingType ? `มี ${missingType} เคสที่ยังไม่ได้กรอก Injury Type` : 'ไม่มีเคสการบาดเจ็บตามตัวกรองนี้'}</p>
+        <p class="mt-1 text-xs font-medium text-slate-400">Near Miss ไม่รวมอยู่ในการวิเคราะห์การบาดเจ็บ</p>
+    </div>`;
+    if (!enriched.length) return `<div data-injury-intelligence data-injury-mode="empty" class="space-y-3">${toolbar}${summary}${empty}</div>`;
+
+    const focus = `<div class="grid gap-3 xl:grid-cols-[minmax(0,1.05fr)_minmax(260px,.95fr)]" data-injury-focus>
+        <div class="relative overflow-hidden rounded-2xl border border-indigo-100 bg-gradient-to-br from-indigo-950 via-indigo-900 to-violet-800 p-4 text-white">
+            <div class="pointer-events-none absolute -right-10 -top-12 h-40 w-40 rounded-full bg-fuchsia-400/20 blur-2xl"></div>
+            <div class="relative">
+                <div class="flex items-start justify-between gap-3"><div class="min-w-0"><p class="text-[9px] font-black uppercase tracking-[.16em] text-indigo-200">Primary injury pattern</p><h4 class="mt-2 break-words text-lg font-black leading-6">${_htmlEsc(top.label)}</h4></div><span class="rounded-full border border-white/15 bg-white/10 px-2.5 py-1 text-[9px] font-black">${top.priorCount === 0 ? 'NEW PATTERN' : `${top.yoy >= 0 ? '+' : ''}${top.yoy.toFixed(1)}% YoY`}</span></div>
+                <div class="mt-5 grid grid-cols-3 gap-2"><div class="rounded-xl bg-white/10 p-2"><b class="block text-xl font-black">${top.count}</b><small class="text-[9px] uppercase text-indigo-200">Cases</small></div><div class="rounded-xl bg-white/10 p-2"><b class="block text-xl font-black">${total ? (top.count * 100 / total).toFixed(1) : '0.0'}%</b><small class="text-[9px] uppercase text-indigo-200">Share</small></div><div class="rounded-xl bg-white/10 p-2"><b class="block text-xl font-black">${top.metricValue}</b><small class="text-[9px] uppercase text-indigo-200">${metricLabel}</small></div></div>
+                <div class="mt-4 grid grid-cols-3 gap-2 text-[10px]"><button type="button" onclick="window._accSetInjuryFilter('bodyPart','${_esc(topBodyPart === 'ไม่ระบุ' ? '' : topBodyPart)}')" style="min-height:54px" class="rounded-xl border border-white/10 bg-black/10 p-2 text-left hover:bg-white/10 focus:outline-none focus:ring-4 focus:ring-white/30"><span class="block text-indigo-200">Top Body Part</span><b class="mt-1 block break-words">${_htmlEsc(topBodyPart)} · ${topBodyPartCount}</b></button><button type="button" onclick="window._accSetInjuryFilter('dept','${_esc(topDepartment === 'ไม่ระบุ' ? '' : topDepartment)}')" style="min-height:54px" class="rounded-xl border border-white/10 bg-black/10 p-2 text-left hover:bg-white/10 focus:outline-none focus:ring-4 focus:ring-white/30"><span class="block text-indigo-200">Department</span><b class="mt-1 block break-words">${_htmlEsc(topDepartment)} · ${topDepartmentCount}</b></button><button type="button" onclick="window._accSetInjuryFilter('area','${_esc(topArea === 'ไม่ระบุ' ? '' : topArea)}')" style="min-height:54px" class="rounded-xl border border-white/10 bg-black/10 p-2 text-left hover:bg-white/10 focus:outline-none focus:ring-4 focus:ring-white/30"><span class="block text-indigo-200">Area</span><b class="mt-1 block break-words">${_htmlEsc(topArea)} · ${topAreaCount}</b></button></div>
+            </div>
+        </div>
+        <div class="rounded-2xl border border-slate-100 bg-slate-50/70 p-3">
+            <div class="flex items-center justify-between"><p class="text-[10px] font-black uppercase text-slate-500">12-month occurrence</p><span class="text-[9px] font-bold text-slate-400">คลิกเดือนเพื่อกรอง</span></div>
+            <div class="mt-4 grid grid-cols-6 grid-rows-2 items-end gap-1" style="min-height:220px" role="group" aria-label="แนวโน้ม Injury Type 12 เดือน">${monthCounts.map(row => `<button type="button" onclick="window._accSetInjuryFilter('month','${row.month}')" title="${row.label}: ${row.count} เคส" aria-label="${row.label} ${row.count} เคส" style="height:104px;min-width:24px" class="group flex flex-col justify-end gap-1 rounded focus:outline-none focus:ring-4 focus:ring-emerald-200"><span class="text-[8px] font-black text-slate-600">${row.count || ''}</span><span class="min-h-[4px] w-full rounded-t-md bg-gradient-to-t from-indigo-700 to-violet-400 transition group-hover:from-emerald-700 group-hover:to-teal-400" style="height:${row.count ? Math.max(12, row.count * 64 / monthMax) : 4}px;opacity:${row.count ? 1 : .18}"></span><span class="text-[8px] font-bold text-slate-500">${row.label.replace('.','')}</span></button>`).join('')}</div>
+            <div class="mt-3 space-y-2">${enriched.map((row, index) => `<button type="button" data-injury-row onclick="window._accSetInjuryFilter('injury','${_esc(row.label.startsWith('(ไม่ระบุ') ? '' : row.label)}')" style="min-height:44px" class="flex w-full items-center gap-2 rounded-xl border ${index === 0 ? 'border-indigo-200 bg-indigo-50' : 'border-slate-100 bg-white'} px-3 text-left hover:border-indigo-300 focus:outline-none focus:ring-4 focus:ring-indigo-200"><span class="flex h-6 w-6 items-center justify-center rounded-lg ${index === 0 ? 'bg-indigo-600 text-white' : 'bg-slate-100 text-slate-500'} text-[10px] font-black">${index + 1}</span><span class="min-w-0 flex-1 break-words text-xs font-black text-slate-700">${_htmlEsc(row.label)}</span><span class="text-xs font-black tabular-nums text-slate-800">${row.count}</span></button>`).join('')}</div>
+        </div>
+    </div>`;
+
+    let cumulative = 0;
+    const paretoRows = enriched.map((row, index) => {
+        cumulative += row.count;
+        const cumulativePct = total ? cumulative * 100 / total : 0;
+        const share = total ? row.count * 100 / total : 0;
+        const yoyLabel = row.priorCount === 0 ? 'New' : `${row.yoy >= 0 ? '+' : ''}${row.yoy.toFixed(1)}%`;
+        return `<button type="button" data-injury-row data-injury-label="${_htmlEsc(row.label)}" data-injury-share="${share.toFixed(1)}" data-injury-cumulative="${cumulativePct.toFixed(1)}" onclick="window._accSetInjuryFilter('injury','${_esc(row.label.startsWith('(ไม่ระบุ') ? '' : row.label)}')" style="min-height:44px" class="group w-full rounded-xl border border-slate-100 bg-white p-3 text-left transition hover:border-indigo-200 hover:bg-indigo-50/40 focus:outline-none focus:ring-4 focus:ring-indigo-200">
+            <div class="flex items-start gap-3"><span class="flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-lg ${index === 0 ? 'bg-indigo-600 text-white' : 'bg-slate-100 text-slate-500'} text-[10px] font-black">${index + 1}</span><span class="min-w-0 flex-1 break-words text-xs font-black leading-5 text-slate-700">${_htmlEsc(row.label)}</span><span class="flex-shrink-0 text-right"><b class="block text-sm font-black tabular-nums text-slate-800">${row.metricValue}</b><small class="text-[9px] font-bold text-slate-400">${metricLabel}</small></span></div>
+            <div class="mt-2 grid grid-cols-[minmax(0,1fr)_54px_54px] items-center gap-2"><div class="h-2 overflow-hidden rounded-full bg-slate-100"><div class="h-full rounded-full bg-gradient-to-r from-indigo-600 to-violet-400" style="width:${Math.max(4, row.metricValue * 100 / maxMetric)}%"></div></div><span class="text-right text-[9px] font-black text-slate-500">${share.toFixed(1)}%</span><span class="text-right text-[9px] font-black ${cumulativePct >= 80 ? 'text-amber-600' : 'text-emerald-600'}">Σ ${cumulativePct.toFixed(1)}%</span></div>
+            <div class="mt-2 flex items-center justify-between text-[9px] font-bold text-slate-400"><span>${row.count} cases</span><span class="${row.priorCount === 0 ? 'text-violet-600' : row.yoy > 0 ? 'text-rose-600' : 'text-emerald-600'}">${yoyLabel} YoY</span></div>
+        </button>`;
+    }).join('');
+    const pareto = `<div class="rounded-2xl border border-slate-100 bg-slate-50/60 p-3" data-injury-pareto><div class="mb-3 flex flex-wrap items-center justify-between gap-2"><div><p class="text-xs font-black text-slate-800">Pareto Ranking</p><p class="text-[10px] font-medium text-slate-400">แท่งแสดง ${metricLabel} · Σ แสดงสัดส่วนเคสสะสม · จุด 80% คือกลุ่มหลักที่ควรป้องกันก่อน</p></div><span class="rounded-full border border-amber-100 bg-amber-50 px-2.5 py-1 text-[9px] font-black text-amber-700">80% PRIORITY</span></div><div class="space-y-2 ${options.fullscreen ? '' : 'max-h-[520px] overflow-y-auto pr-1'}">${paretoRows}</div></div>`;
+    const related = `<div class="grid gap-3 lg:grid-cols-2" data-injury-related>
+        <div class="rounded-2xl border border-slate-100 bg-white p-3"><div class="flex items-center justify-between"><p class="text-xs font-black text-slate-800">Related cases</p><button type="button" onclick="window._accOpenInjuryReports('${_esc(top.label.startsWith('(ไม่ระบุ') ? '' : top.label)}')" style="min-height:44px" class="inline-flex items-center text-[10px] font-black text-indigo-600 hover:underline focus:outline-none focus:ring-4 focus:ring-indigo-200">ดูรายงานทั้งหมด →</button></div><div class="mt-2 space-y-2">${focusCases.length ? focusCases.map(report => `<button type="button" onclick="window._accViewReport(${Number(report.id) || 0})" style="min-height:44px" class="flex w-full items-center justify-between gap-3 rounded-xl border border-slate-100 bg-slate-50 px-3 text-left hover:border-indigo-200 focus:outline-none focus:ring-4 focus:ring-indigo-200"><span class="min-w-0"><b class="block truncate text-[11px] text-slate-700">${_htmlEsc(report.Department || '-')} · ${_htmlEsc(report.BodyPart || 'ไม่ระบุ Body Part')}</b><small class="text-[9px] font-bold text-slate-500">${_htmlEsc(String(report.AccidentDate || '').slice(0,10))} · ${_htmlEsc(report.AccidentType || '-')}</small></span><span aria-hidden="true" class="text-indigo-500">›</span></button>`).join('') : '<p class="py-5 text-center text-xs text-slate-500">ไม่มีรายการเคสในข้อมูลที่กรอง</p>'}</div></div>
+        <div class="rounded-2xl border border-slate-100 bg-white p-3"><p class="text-xs font-black text-slate-800">Data quality & interpretation</p><div class="mt-3 grid grid-cols-2 gap-2"><div class="rounded-xl bg-emerald-50 p-3"><b class="block text-lg font-black text-emerald-700">${total ? ((total - missingType) * 100 / total).toFixed(1) : '100.0'}%</b><small class="text-[9px] font-bold uppercase text-emerald-600">Type completeness</small></div><div class="rounded-xl ${missingType ? 'bg-amber-50' : 'bg-slate-50'} p-3"><b class="block text-lg font-black ${missingType ? 'text-amber-700' : 'text-slate-700'}">${missingType}</b><small class="text-[9px] font-bold uppercase text-slate-500">Unmapped data</small></div></div><p class="mt-3 text-[10px] font-medium leading-5 text-slate-500">Severity index ใช้น้ำหนัก Minor 1, Moderate 2, Serious 3, Critical 4 และ Fatal 5 เพื่อเปรียบเทียบรูปแบบ ไม่เปลี่ยนสูตร Recordable หรือ KPI หลัก</p></div>
+    </div>`;
+    return `<div data-injury-intelligence data-injury-mode="${mode}" role="region" aria-label="Injury Type Breakdown" class="space-y-3">${toolbar}${summary}${mode === 'focus' ? focus : pareto}${related}</div>`;
+}
+
+// Read-only renderer used by focused visual regression checks and reusable previews.
+// It deliberately does not touch Analytics state, filters, APIs or stored records.
+window._accRenderInjuryIntelligencePreview = (reports = [], previousReports = [], options = {}) => {
+    const injuryReports = (Array.isArray(reports) ? reports : []).filter(report => report.AccidentType !== 'Near Miss');
+    const groups = new Map();
+    injuryReports.forEach(report => {
+        const label = String(report.InjuryType || '').trim() || '(ไม่ระบุ Injury Type)';
+        groups.set(label, (groups.get(label) || 0) + 1);
+    });
+    const rows = [...groups.entries()].map(([label, cnt]) => ({ label, cnt }));
+    return _accInjuryIntelligenceCard(rows, injuryReports, Array.isArray(previousReports) ? previousReports : [], options);
+};
 
 function _accTrendLineChart(rows, emptyText, options = {}) {
     const cfg = {
@@ -920,11 +1120,11 @@ function _accTrendLineChart(rows, emptyText, options = {}) {
                 ${hasRows ? `<path d="${linePath} L ${left + width} ${bottom} L ${left} ${bottom} Z" fill="url(#${_htmlEsc(cfg.areaId)})"/>` : ''}
                 <path d="${linePath}" fill="none" stroke="${hasRows ? cfg.line : '#cbd5e1'}" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" ${hasRows ? '' : 'stroke-dasharray="5 5"'}/>
                 ${hasRows ? `<line x1="${left}" y1="${avgY}" x2="${left + width}" y2="${avgY}" stroke="${cfg.avg}" stroke-width="2" stroke-dasharray="6 5"/>` : ''}
-                ${points.map((p, i) => `
+                ${points.map((p, i) => `<g ${cfg.filterKey ? `data-analytics-filter-key="${_htmlEsc(cfg.filterKey)}" data-analytics-filter-value="${i + 1}" tabindex="0" role="button" aria-label="กรองเดือน ${_htmlEsc(monthLabels[i])}" style="cursor:pointer"` : ''}>
                     <circle cx="${p.x}" cy="${p.y}" r="${hasRows && i === peakIndex ? 6 : 4}" fill="${hasRows ? (i === peakIndex ? cfg.peak : cfg.line) : '#cbd5e1'}" stroke="#fff" stroke-width="2"/>
                     <text x="${p.x}" y="${p.y - 12}" text-anchor="middle" font-size="12" font-weight="800" fill="${hasRows ? (i === peakIndex ? '#b91c1c' : '#1e293b') : '#94a3b8'}">${p.value}</text>
                     <text x="${p.x}" y="${bottom + 26}" text-anchor="middle" font-size="11" font-weight="700" fill="#475569">${monthLabels[i]}</text>
-                `).join('')}
+                </g>`).join('')}
                 ${!hasRows ? `<text x="${left + width / 2}" y="${bottom - 82}" text-anchor="middle" font-size="12" font-weight="700" fill="#94a3b8">${_htmlEsc(emptyText || 'Waiting data')}</text>` : ''}
             </svg>
             <div class="mt-1 rounded-lg border border-slate-100 bg-slate-50 px-3 py-2 text-[11px] font-bold text-slate-500">
@@ -963,7 +1163,7 @@ function _accRenderHotspotOnly() {
     if (el) el.outerHTML = _accHotspotCard(_lastHotspotRows, 'Waiting for location data');
 }
 
-function _accHotspotCard(rows, emptyText) {
+function _accHotspotCard(rows, emptyText, previousRows = []) {
     const sourceRows = Array.isArray(rows) ? rows : [];
     const hasRows = sourceRows.length > 0;
     const displayRows = hasRows
@@ -973,14 +1173,23 @@ function _accHotspotCard(rows, emptyText) {
     const topRow = sourceRows[0] || null;
     const topCount = parseInt(topRow?.cnt, 10) || 0;
     const topShare = total ? (topCount * 100 / total) : 0;
+    const priorTopCount = parseInt((previousRows || []).find(row => _accHotspotKey(row.area) === _accHotspotKey(topRow?.area))?.cnt, 10) || 0;
+    const hotspotChange = priorTopCount ? ((topCount - priorTopCount) * 100 / priorTopCount) : null;
+    const hotspotChangeLabel = topRow && topCount > 0 && priorTopCount === 0
+        ? 'New hotspot'
+        : (hotspotChange === null ? 'No prior baseline' : `${hotspotChange >= 0 ? '+' : ''}${hotspotChange.toFixed(1)}% YoY`);
     const top3Total = sourceRows.slice(0, 3).reduce((sum, row) => sum + (parseInt(row.cnt, 10) || 0), 0);
     const concentration = total ? (top3Total * 100 / total) : 0;
     const maxValue = Math.max(1, ...displayRows.map(row => parseInt(row.cnt, 10) || 0));
     const colorSet = ['#ef4444', '#f97316', '#f59e0b', '#eab308', '#94a3b8'];
+    const layoutUrl = _safeFileHref(_hotspotLayout?.FileURL || ACCIDENT_LAYOUT_DEFAULT_IMAGE);
+    const layoutName = _hotspotLayout?.IsDefault === false
+        ? (_hotspotLayout.FileName || 'Custom Factory Layout')
+        : 'รูปมาตรฐานของระบบ';
     if (!_hotspotEditArea && displayRows[0]?.area) _hotspotEditArea = _accHotspotKey(displayRows[0].area);
 
     return `
-        <div id="acc-hotspot-card" class="rounded-xl border border-slate-100 bg-white p-3">
+        <div id="acc-hotspot-card" class="rounded-xl border border-slate-100 bg-white p-3" style="min-width:0;width:100%;max-width:100%;overflow:hidden">
             <div class="grid grid-cols-1 sm:grid-cols-3 gap-2 mb-3">
                 <div class="rounded-lg border border-slate-100 bg-slate-50 px-3 py-2">
                     <p class="text-[10px] font-black uppercase text-slate-400">Top Area</p>
@@ -995,12 +1204,14 @@ function _accHotspotCard(rows, emptyText) {
                     <p class="mt-0.5 text-sm font-black tabular-nums text-red-700">${concentration.toFixed(1)}%</p>
                 </div>
             </div>
+            <div class="mb-3 inline-flex min-h-[30px] items-center rounded-full border border-sky-100 bg-sky-50 px-3 text-[10px] font-black text-sky-700">${_htmlEsc(hotspotChangeLabel)}</div>
 
             ${_isAdmin ? `
-            <div class="mb-3 flex flex-col gap-2 rounded-xl border border-orange-100 bg-orange-50 px-3 py-2 sm:flex-row sm:items-center sm:justify-between" data-acc-card-ignore>
+            <div class="mb-3 flex flex-col gap-3 rounded-xl border border-orange-100 bg-orange-50 px-3 py-3 lg:flex-row lg:items-center lg:justify-between" data-acc-card-ignore>
                 <div class="min-w-0">
                     <p class="text-xs font-black text-orange-700">Hotspot position editor</p>
                     <p class="text-[11px] font-bold text-orange-500">${_hotspotEditMode ? 'Select area, then click the factory layout to place the point.' : 'Admin can fine-tune map points for production accuracy.'}</p>
+                    <p class="mt-1 truncate text-[10px] font-bold text-slate-500" title="${_htmlEsc(layoutName)}">Factory Layout: ${_htmlEsc(layoutName)}</p>
                 </div>
                 <div class="flex flex-wrap items-center gap-2">
                     <select class="form-input h-9 min-w-[220px] py-0 text-xs font-bold" onchange="window._accSetHotspotEditArea(this.value)" ${_hotspotEditMode ? '' : 'disabled'}>
@@ -1011,17 +1222,20 @@ function _accHotspotCard(rows, emptyText) {
                     </select>
                     <button type="button" onclick="window._accToggleHotspotEdit()" class="rounded-lg border border-orange-200 bg-white px-3 py-2 text-xs font-black text-orange-700 hover:bg-orange-100">${_hotspotEditMode ? 'Done editing' : 'Edit positions'}</button>
                     <button type="button" onclick="window._accSaveHotspotPositions()" class="rounded-lg bg-orange-600 px-3 py-2 text-xs font-black text-white hover:bg-orange-700" ${_hotspotEditMode ? '' : 'disabled'}>Save</button>
+                    <button type="button" onclick="window._accOpenLayoutUpload()" class="rounded-lg border border-emerald-200 bg-white px-3 py-2 text-xs font-black text-emerald-700 hover:bg-emerald-50">เปลี่ยนรูป</button>
+                    <button type="button" onclick="window._accResetLayoutImage()" class="rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-black text-slate-600 hover:bg-slate-50" ${_hotspotLayout?.IsDefault === false ? '' : 'disabled'}>คืนค่ารูปเดิม</button>
                 </div>
             </div>` : ''}
 
-            <div class="grid grid-cols-1 2xl:grid-cols-[minmax(560px,1.35fr)_minmax(300px,0.65fr)] gap-4 items-stretch">
-                <div class="rounded-xl border border-slate-100 bg-slate-50 p-3">
+            <div class="grid grid-cols-1 2xl:grid-cols-[minmax(560px,1.35fr)_minmax(300px,0.65fr)] gap-4 items-stretch" style="min-width:0;max-width:100%">
+                <div class="rounded-xl border border-slate-100 bg-slate-50 p-3" style="min-width:0;max-width:100%;overflow:hidden">
                     <div class="mb-2 flex items-center justify-between">
                         <span class="text-[10px] font-black uppercase text-slate-400">Factory Layout</span>
                         <span class="rounded-full bg-white px-2 py-0.5 text-[10px] font-black text-slate-500">${hasRows ? `${displayRows.length} hotspots` : 'standby'}</span>
                     </div>
-                    <div id="acc-hotspot-map" onclick="window._accHotspotMapClick(event)" class="relative overflow-hidden rounded-xl border border-slate-200 bg-white ${_hotspotEditMode ? 'cursor-crosshair ring-2 ring-orange-200' : ''}" style="min-height:420px">
-                        <img src="${ACCIDENT_LAYOUT_IMAGE}" alt="TSH factory layout" class="block w-full select-none object-contain" draggable="false"
+                    <div id="acc-hotspot-map" onclick="window._accHotspotMapClick(event)" class="relative overflow-hidden rounded-xl border border-slate-200 bg-white ${_hotspotEditMode ? 'cursor-crosshair ring-2 ring-orange-200' : ''}" style="min-width:0;width:100%;max-width:100%;min-height:420px">
+                        <img src="${layoutUrl}" alt="TSH factory layout" class="block w-full select-none object-contain" draggable="false"
+                            style="display:block;width:100%;max-width:100%;height:auto"
                             onerror="this.classList.add('hidden');this.nextElementSibling.classList.remove('hidden')">
                         <div class="hidden min-h-[420px] items-center justify-center px-6 text-center text-sm font-bold text-slate-400">Factory layout image is unavailable.</div>
                         ${displayRows.map((row, i) => {
@@ -1094,7 +1308,11 @@ window._accSetHotspotEditArea = value => {
 
 window._accSelectHotspotPoint = (event, area) => {
     event?.stopPropagation?.();
-    if (!_isAdmin || !_hotspotEditMode) return;
+    if (!_hotspotEditMode) {
+        window._accSetAnalyticsFilter?.('area', area);
+        return;
+    }
+    if (!_isAdmin) return;
     _hotspotEditArea = _accHotspotKey(area);
     _accRenderHotspotOnly();
 };
@@ -1153,150 +1371,134 @@ window._accSaveHotspotPositions = async () => {
     }
 };
 
-function _accBodyPartMap(rows, emptyText) {
-    const hasRows = Array.isArray(rows) && rows.length > 0;
-    const topRows = hasRows ? rows.slice(0, 5) : [];
-    const topTotal = topRows.reduce((sum, row) => sum + (parseInt(row.cnt, 10) || 0), 0);
-    const allTotal = hasRows ? rows.reduce((sum, row) => sum + (parseInt(row.cnt, 10) || 0), 0) : 0;
-    const otherTotal = Math.max(0, allTotal - topTotal);
-    const colors = ['#ef4444', '#f97316', '#eab308', '#10b981', '#6366f1'];
-    const textOf = row => String(row?.label || '').toLowerCase();
-    const hasPart = (...keywords) => topRows.some(row => keywords.some(keyword => textOf(row).includes(keyword)));
-    const parts = {
-        head: hasPart('head', 'face', 'eye', 'ear', 'mouth', 'nose', 'neck', 'ศีรษะ', 'หน้า', 'ตา', 'หู', 'ปาก', 'จมูก', 'คอ'),
-        torso: hasPart('chest', 'body', 'back', 'waist', 'shoulder', 'ท้อง', 'อก', 'ลำตัว', 'หลัง', 'เอว', 'ไหล่'),
-        arm: hasPart('arm', 'elbow', 'hand', 'finger', 'wrist', 'แขน', 'ศอก', 'มือ', 'นิ้วมือ', 'ข้อมือ'),
-        leg: hasPart('leg', 'knee', 'foot', 'ankle', 'toe', 'ขา', 'เข่า', 'เท้า', 'ข้อเท้า', 'นิ้วเท้า'),
-    };
-    const hotspotCount = Object.values(parts).filter(Boolean).length;
-    const topPart = topRows[0] || null;
-    const topPartCount = parseInt(topPart?.cnt, 10) || 0;
-    const topPartPct = allTotal ? (topPartCount * 100 / allTotal) : 0;
-    const maxCount = Math.max(1, ...topRows.map(row => parseInt(row.cnt, 10) || 0));
-    const bodyHotspots = `
-        ${parts.head ? `
-            <path d="M49 15 C53 8 67 8 71 15 C69 18 65 20 60 20 C55 20 51 18 49 15Z" fill="#ef4444" opacity="0.9"/>
-        ` : ''}
-        ${parts.torso ? `
-            <path d="M48 78 C52 73 68 73 72 78 C71 86 68 92 60 92 C52 92 49 86 48 78Z" fill="#ef4444" opacity="0.82"/>
-        ` : ''}
-        ${parts.arm ? `
-            <path d="M18 130 C15 136 17 146 24 148 C31 148 34 140 31 133 C28 126 22 125 18 130Z" fill="#ef4444" opacity="0.9"/>
-            <path d="M102 130 C105 136 103 146 96 148 C89 148 86 140 89 133 C92 126 98 125 102 130Z" fill="#ef4444" opacity="0.9"/>
-        ` : ''}
-        ${parts.leg ? `
-            <path d="M35 174 C31 184 31 197 37 202 C44 199 45 187 43 176 C41 169 38 168 35 174Z" fill="#ef4444" opacity="0.85"/>
-            <path d="M77 174 C75 187 76 199 83 202 C89 197 89 184 85 174 C82 168 79 169 77 174Z" fill="#ef4444" opacity="0.85"/>
-        ` : ''}
-    `;
-    const bodyRowHtml = hasRows ? topRows.map((row, i) => {
-        const count = parseInt(row.cnt, 10) || 0;
-        const pct = allTotal ? (count * 100 / allTotal) : 0;
-        return `
-            <tr class="border-b border-slate-100 last:border-0">
-                <td class="py-2 pr-2">
-                    <span class="inline-flex items-center gap-2 text-xs font-bold text-slate-700">
-                        <span class="inline-flex h-5 w-5 items-center justify-center rounded-full bg-slate-100 text-[10px] font-black text-slate-500">${i + 1}</span>
-                        <span class="w-2 h-2 rounded-full flex-shrink-0" style="background:${colors[i]}"></span>
-                        <span class="truncate max-w-[130px]" title="${_htmlEsc(row.label || '-')}">${_htmlEsc(row.label || '-')}</span>
-                    </span>
-                    <div class="mt-1 h-1 rounded-full bg-slate-100 overflow-hidden">
-                        <div class="h-full rounded-full" style="width:${Math.max(8, Math.round(count * 100 / maxCount))}%;background:${colors[i]}"></div>
-                    </div>
-                </td>
-                <td class="py-2 px-2 text-right text-xs font-black tabular-nums text-slate-700">${count.toLocaleString()}</td>
-                <td class="py-2 pl-2 text-right text-xs font-bold tabular-nums text-slate-500">${pct.toFixed(1)}%</td>
-            </tr>`;
-    }).join('') : Array.from({ length: 5 }, (_, i) => `
-            <tr class="border-b border-slate-100 last:border-0">
-                <td class="py-2 pr-2">
-                    <span class="inline-flex items-center gap-2 text-xs font-bold text-slate-400">
-                        <span class="inline-flex h-5 w-5 items-center justify-center rounded-full bg-slate-100 text-[10px] font-black text-slate-300">${i + 1}</span>
-                        <span class="w-2 h-2 rounded-full flex-shrink-0 bg-slate-200"></span>
-                        <span class="truncate max-w-[130px]">Waiting data</span>
-                    </span>
-                    <div class="mt-1 h-1 rounded-full bg-slate-100 overflow-hidden">
-                        <div class="h-full rounded-full bg-slate-200" style="width:${[64, 52, 40, 30, 22][i]}%"></div>
-                    </div>
-                </td>
-                <td class="py-2 px-2 text-right text-xs font-black tabular-nums text-slate-300">0</td>
-                <td class="py-2 pl-2 text-right text-xs font-bold tabular-nums text-slate-300">0.0%</td>
-            </tr>`).join('');
-    const otherPct = allTotal ? (otherTotal * 100 / allTotal) : 0;
-    return `
-        <div class="grid grid-cols-1 sm:grid-cols-3 gap-2 mb-3">
-            <div class="rounded-lg border border-slate-100 bg-slate-50 px-3 py-2">
-                <p class="text-[10px] font-black uppercase text-slate-400">Top Area</p>
-                <p class="mt-0.5 truncate text-xs font-black text-slate-800" title="${_htmlEsc(topPart?.label || 'Waiting data')}">${_htmlEsc(topPart?.label || 'Waiting data')}</p>
+window._accOpenLayoutUpload = () => {
+    if (!_isAdmin) return;
+    const currentUrl = _safeFileHref(_hotspotLayout?.FileURL || ACCIDENT_LAYOUT_DEFAULT_IMAGE);
+    openModal('เปลี่ยนรูป Factory Layout', `
+        <form id="acc-layout-upload-form" class="space-y-4">
+            <div class="overflow-hidden rounded-2xl border border-slate-200 bg-slate-50 p-3">
+                <img id="acc-layout-preview" src="${currentUrl}" alt="ตัวอย่าง Factory Layout" class="mx-auto block max-h-[420px] w-full rounded-xl bg-white object-contain">
             </div>
-            <div class="rounded-lg border border-red-100 bg-red-50 px-3 py-2">
-                <p class="text-[10px] font-black uppercase text-red-400">Top Share</p>
-                <p class="mt-0.5 text-sm font-black tabular-nums text-red-700">${topPartPct.toFixed(1)}%</p>
+            <label class="flex min-h-[96px] cursor-pointer flex-col items-center justify-center rounded-2xl border-2 border-dashed border-emerald-200 bg-emerald-50 px-4 text-center hover:bg-emerald-100">
+                <span class="text-sm font-black text-emerald-700">เลือกรูปแผนผังใหม่</span>
+                <span class="mt-1 text-xs font-medium text-emerald-600">JPG, PNG หรือ WEBP · ไม่เกิน 10 MB</span>
+                <input id="acc-layout-file" name="layoutFile" type="file" accept="image/jpeg,image/png,image/webp" class="sr-only" required>
+            </label>
+            <div id="acc-layout-file-meta" class="rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-bold text-slate-500">ยังไม่ได้เลือกไฟล์</div>
+            <p class="rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs font-bold text-amber-700">หลังเปลี่ยนรูป จุด Hotspot จะเก็บพิกัดเดิมไว้ กรุณาตรวจสอบและใช้ Edit positions หากแผนผังใหม่มีสัดส่วนต่างจากเดิม</p>
+            <div id="acc-layout-upload-progress" class="hidden overflow-hidden rounded-full bg-slate-100"><div class="h-2 rounded-full bg-emerald-500" style="width:0%"></div></div>
+            <p id="acc-layout-upload-error" class="hidden text-sm font-bold text-red-600"></p>
+            <div class="flex justify-end gap-2 border-t border-slate-100 pt-4">
+                <button type="button" onclick="window.closeModal()" class="min-h-[44px] rounded-xl border border-slate-200 bg-white px-4 text-sm font-black text-slate-600">ยกเลิก</button>
+                <button id="acc-layout-upload-submit" type="submit" class="min-h-[44px] rounded-xl bg-emerald-700 px-5 text-sm font-black text-white hover:bg-emerald-800">บันทึกรูปใหม่</button>
             </div>
-            <div class="rounded-lg border border-emerald-100 bg-emerald-50 px-3 py-2">
-                <p class="text-[10px] font-black uppercase text-emerald-500">Hotspots</p>
-                <p class="mt-0.5 text-sm font-black tabular-nums text-emerald-700">${hotspotCount}/4</p>
-            </div>
-        </div>
-        <div class="grid grid-cols-1 sm:grid-cols-[170px_1fr] gap-4 items-center">
-            <div class="rounded-xl border border-slate-100 bg-slate-50 p-3 flex justify-center">
-                <svg viewBox="0 0 120 220" class="w-[130px] h-[220px]" role="img" aria-label="Injury body map">
-                    <defs>
-                        <filter id="acc-body-soft-shadow" x="-20%" y="-20%" width="140%" height="140%">
-                            <feDropShadow dx="0" dy="2" stdDeviation="2" flood-color="#0f172a" flood-opacity="0.08"/>
-                        </filter>
-                    </defs>
-                    <g filter="url(#acc-body-soft-shadow)">
-                        <path d="M60 8
-                                 C50 8 43 16 43 27
-                                 C43 37 50 45 60 45
-                                 C70 45 77 37 77 27
-                                 C77 16 70 8 60 8Z"
-                              fill="#ffffff" stroke="#64748b" stroke-width="1.8" stroke-linejoin="round"/>
-                        <path d="M50 48
-                                 C53 51 56 53 60 53
-                                 C64 53 67 51 70 48
-                                 L78 56
-                                 C84 65 87 82 90 103
-                                 L99 141
-                                 C100 147 93 150 89 145
-                                 L78 110
-                                 C75 99 72 82 68 68
-                                 C72 92 73 118 69 143
-                                 L82 205
-                                 C84 214 72 217 69 208
-                                 L60 153
-                                 L51 208
-                                 C48 217 36 214 38 205
-                                 L51 143
-                                 C47 118 48 92 52 68
-                                 C48 82 45 99 42 110
-                                 L31 145
-                                 C27 150 20 147 21 141
-                                 L30 103
-                                 C33 82 36 65 42 56Z"
-                              fill="#ffffff" stroke="#64748b" stroke-width="1.8" stroke-linejoin="round" stroke-linecap="round"/>
-                        ${bodyHotspots}
-                        <path d="M53 25 C56 27 64 27 67 25" fill="none" stroke="#94a3b8" stroke-width="1.2" stroke-linecap="round"/>
-                        <path d="M45 63 C53 70 67 70 75 63" fill="none" stroke="#cbd5e1" stroke-width="1"/>
-                        <path d="M60 72 L60 151" fill="none" stroke="#cbd5e1" stroke-width="1"/>
-                        <path d="M51 143 C55 147 65 147 69 143" fill="none" stroke="#cbd5e1" stroke-width="1"/>
-                    </g>
-                </svg>
-            </div>
-            <div class="min-w-0">
-                <div class="grid grid-cols-[1fr_54px_54px] gap-2 px-1 pb-2 text-[10px] font-black uppercase tracking-wide text-slate-400">
-                    <span>Body Part</span><span class="text-right">Case</span><span class="text-right">%</span>
-                </div>
-                <table class="w-full table-fixed"><tbody>${bodyRowHtml}</tbody></table>
-                ${otherTotal ? `
-                <div class="grid grid-cols-[1fr_54px_54px] gap-2 px-1 pt-2 text-xs font-bold text-slate-500">
-                    <span>Others</span><span class="text-right tabular-nums">${otherTotal.toLocaleString()}</span><span class="text-right tabular-nums">${otherPct.toFixed(1)}%</span>
-                </div>` : ''}
-                ${!hasRows ? `<div class="mt-3 rounded-lg border border-dashed border-slate-200 bg-slate-50 px-3 py-2 text-center text-xs font-bold text-slate-400">${emptyText}</div>` : ''}
-            </div>
-        </div>`;
+        </form>
+    `, 'max-w-3xl');
+
+    const form = document.getElementById('acc-layout-upload-form');
+    const input = document.getElementById('acc-layout-file');
+    const preview = document.getElementById('acc-layout-preview');
+    const meta = document.getElementById('acc-layout-file-meta');
+    const error = document.getElementById('acc-layout-upload-error');
+    let previewUrl = '';
+    input?.addEventListener('change', () => {
+        if (previewUrl) URL.revokeObjectURL(previewUrl);
+        previewUrl = '';
+        const file = input.files?.[0];
+        if (!file) { meta.textContent = 'ยังไม่ได้เลือกไฟล์'; return; }
+        const allowed = ['image/jpeg', 'image/png', 'image/webp'];
+        if (!allowed.includes(file.type) || file.size <= 0 || file.size > 10 * 1024 * 1024) {
+            input.value = '';
+            error.textContent = 'กรุณาเลือก JPG, PNG หรือ WEBP ขนาดไม่เกิน 10 MB';
+            error.classList.remove('hidden');
+            return;
+        }
+        error.classList.add('hidden');
+        previewUrl = URL.createObjectURL(file);
+        preview.src = previewUrl;
+        const probe = new Image();
+        probe.onload = () => { meta.textContent = `${file.name} · ${(file.size / 1024 / 1024).toFixed(2)} MB · ${probe.naturalWidth} × ${probe.naturalHeight} px`; };
+        probe.onerror = () => { meta.textContent = `${file.name} · ไม่สามารถอ่านขนาดรูปได้`; };
+        probe.src = previewUrl;
+    });
+    form?.addEventListener('submit', guardSubmitHandler(async event => {
+        event.preventDefault();
+        const file = input?.files?.[0];
+        if (!file) {
+            error.textContent = 'กรุณาเลือกรูป Factory Layout';
+            error.classList.remove('hidden');
+            return;
+        }
+        const button = document.getElementById('acc-layout-upload-submit');
+        const progress = document.getElementById('acc-layout-upload-progress');
+        const bar = progress?.firstElementChild;
+        if (button) { button.disabled = true; button.textContent = 'กำลังอัปโหลด...'; }
+        progress?.classList.remove('hidden');
+        try {
+            const body = new FormData();
+            body.append('layoutFile', file);
+            const response = await API.upload('/accident/hotspot-layout', body, {
+                onProgress: value => { if (bar) bar.style.width = `${value}%`; },
+            });
+            _hotspotLayout = { ...(response?.data || {}), IsDefault: false };
+            if (previewUrl) URL.revokeObjectURL(previewUrl);
+            closeModal();
+            _accRenderHotspotOnly();
+            showToast('เปลี่ยนรูป Factory Layout แล้ว กรุณาตรวจสอบตำแหน่ง Hotspot', 'success');
+        } catch (err) {
+            error.textContent = _friendlyErr(err, 'อัปโหลดรูป Factory Layout ไม่สำเร็จ');
+            error.classList.remove('hidden');
+            if (button) { button.disabled = false; button.textContent = 'บันทึกรูปใหม่'; }
+        }
+    }));
+};
+
+window._accResetLayoutImage = async () => {
+    if (!_isAdmin || _hotspotLayout?.IsDefault !== false) return;
+    const confirmed = await showConfirmationModal('คืนค่ารูป Factory Layout', 'ต้องการลบรูปที่อัปโหลดและกลับไปใช้รูปมาตรฐานของระบบใช่หรือไม่? ตำแหน่ง Hotspot จะไม่ถูกลบ');
+    if (!confirmed) return;
+    try {
+        showLoading('กำลังคืนค่ารูป Factory Layout...');
+        await API.delete('/accident/hotspot-layout');
+        _hotspotLayout = { IsDefault: true, FileURL: ACCIDENT_LAYOUT_DEFAULT_IMAGE };
+        _accRenderHotspotOnly();
+        showToast('คืนค่ารูป Factory Layout มาตรฐานแล้ว', 'success');
+    } catch (err) {
+        showToast(_friendlyErr(err, 'คืนค่ารูป Factory Layout ไม่สำเร็จ'), 'error');
+    } finally { hideLoading(); }
+};
+
+function _accBodyPartMap(rows, emptyText, reports = []) {
+    return renderAccidentAnatomy(rows, _htmlEsc, emptyText, {
+        reports,
+        onSelect: row => window._accSetAnalyticsBodyFilter?.(row.bodyPart, row.bodySide),
+        onOpenReport: id => window._accViewReport?.(id),
+        onViewReports: row => window._accOpenAnalyticsReports?.({ bodyPart: row.bodyPart, bodySide: row.bodySide }),
+    });
 }
+
+const ACCIDENT_TYPE_CHART_COLORS = {
+    'Near Miss': '#f59e0b',
+    'First Aid': '#0ea5e9',
+    'Medical Treatment': '#f97316',
+    'Lost Time': '#e11d48',
+    'Fatal': '#334155',
+};
+
+window._accDashboardOpenAnalytics = (key = '', value = '') => {
+    _accResetAnalyticsFilters();
+    if (key && Object.prototype.hasOwnProperty.call(_analyticsFilters, key)) {
+        _analyticsFilters[key] = String(value || '');
+    }
+    _accSyncAnalyticsDeepLink();
+    switchTab('analytics');
+};
+
+window._accSetDashboardDeptMetric = metric => {
+    if (!['risk', 'cases', 'lostDays'].includes(metric) || metric === _dashboardDeptMetric) return;
+    _dashboardDeptMetric = metric;
+    _renderDashboardPanel();
+};
 
 async function _renderDashboardPanel() {
     const requestId = ++_dashboardRequest;
@@ -1331,7 +1533,40 @@ async function _renderDashboardPanel() {
     const total      = parseInt(kpi.total)      || 0;
     const lostDays   = parseInt(kpi.lostDays)   || 0;
     const fatal      = parseInt(kpi.fatal)      || 0;
-    const typeMax    = Math.max(1, ...byType.map(t => parseInt(t.cnt, 10) || 0));
+    const totalRecordable = parseInt(kpi.recordable, 10) || 0;
+    const nearMissTotal = parseInt(kpi.nearMiss, 10) || 0;
+    const topType = [...byType].sort((a, b) => (parseInt(b.cnt, 10) || 0) - (parseInt(a.cnt, 10) || 0))[0] || null;
+    const topDepartment = [...byDept].sort((a, b) => (parseInt(b.total, 10) || 0) - (parseInt(a.total, 10) || 0))[0] || null;
+    const trendMap = new Map((_summary?.trend || []).map(row => [Number(row.mo), row]));
+    const trend12 = MONTHS_TH.map((label, index) => {
+        const row = trendMap.get(index + 1) || {};
+        return {
+            mo: index + 1,
+            label,
+            total: parseInt(row.total, 10) || 0,
+            recordable: parseInt(row.recordable, 10) || 0,
+            nearMiss: parseInt(row.nearMiss, 10) || 0,
+            lostDays: parseInt(row.lostDays, 10) || 0,
+        };
+    });
+    const peakMonth = [...trend12].sort((a, b) => b.total - a.total || a.mo - b.mo)[0];
+    const activeMonths = trend12.filter(row => row.total > 0);
+    const latestMonth = activeMonths[activeMonths.length - 1] || null;
+    const previousMonth = latestMonth && latestMonth.mo > 1 ? trend12[latestMonth.mo - 2] : null;
+    const monthDelta = latestMonth ? latestMonth.total - (previousMonth?.total || 0) : 0;
+    const departmentRanking = byDept.map(row => {
+        const totalValue = parseInt(row.total, 10) || 0;
+        const recordableValue = parseInt(row.recordable, 10) || 0;
+        const lostDaysValue = parseInt(row.lostDays, 10) || 0;
+        const riskScore = totalValue + recordableValue * 3 + lostDaysValue * 2;
+        const metricValue = _dashboardDeptMetric === 'cases' ? totalValue : _dashboardDeptMetric === 'lostDays' ? lostDaysValue : riskScore;
+        return { ...row, totalValue, recordableValue, lostDaysValue, riskScore, metricValue };
+    }).sort((a, b) => b.metricValue - a.metricValue || b.riskScore - a.riskScore || b.totalValue - a.totalValue);
+    const maxDepartmentMetric = Math.max(1, ...departmentRanking.map(row => row.metricValue));
+    const executiveTone = totalRecordable > 0 ? 'ต้องติดตาม Recordable Case' : total > 0 ? 'ยังไม่พบ Recordable Case' : 'ยังไม่มีเหตุในปีที่เลือก';
+    const executiveText = total > 0
+        ? `ปี ${_statsYear} พบ ${total} เหตุการณ์ โดย ${nearMissTotal} รายการเป็น Near Miss${topDepartment?.Department ? ` และ ${topDepartment.Department} เป็นหนึ่งในแผนกที่ต้องติดตาม` : ''}`
+        : `ปี ${_statsYear} ยังไม่มีรายงานอุบัติเหตุ ระบบพร้อมแสดงแนวโน้มทันทีเมื่อมีข้อมูล`;
     const today = new Date();
     today.setHours(0, 0, 0, 0);
     const followup = {
@@ -1371,7 +1606,24 @@ async function _renderDashboardPanel() {
     ];
 
     panel.innerHTML = `
-    <div class="space-y-6">
+    <div class="space-y-6 rounded-[28px] p-3 sm:p-5" data-acc-dashboard-enterprise style="min-width:0;width:100%;max-width:100%;overflow:hidden;background:linear-gradient(180deg,#ecfdf5 0%,#f8fafc 28%,#f8fafc 100%)">
+
+        <section class="relative overflow-hidden rounded-2xl border border-emerald-200 p-4 text-white sm:p-5" style="background:linear-gradient(135deg,#052e2b,#065f46 55%,#0f766e);box-shadow:0 18px 40px rgba(6,78,59,.18)">
+            <div class="pointer-events-none absolute inset-0 opacity-10" style="background-image:radial-gradient(circle at 1px 1px,#fff 1px,transparent 0);background-size:22px 22px"></div>
+            <div class="relative z-10 flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+                <div>
+                    <span class="inline-flex items-center gap-2 rounded-full border border-white/20 bg-white/10 px-3 py-1 text-[10px] font-black uppercase tracking-[.14em]">Enterprise Safety Overview</span>
+                    <h2 class="mt-2 text-xl font-black">Safety Intelligence · Executive Dashboard</h2>
+                    <p class="mt-1 text-xs font-medium text-emerald-100">ภาพรวมแนวโน้ม ประเภทเหตุ และความเสี่ยงรายแผนกในทิศทางเดียวกับ Analytics Workspace</p>
+                </div>
+                <div class="grid grid-cols-2 gap-2 text-center sm:grid-cols-4">
+                    <div class="rounded-xl border border-white/15 bg-white/10 px-3 py-2"><p class="text-lg font-black tabular-nums">${total}</p><p class="text-[9px] uppercase text-emerald-100">Total cases</p></div>
+                    <div class="rounded-xl border border-white/15 bg-white/10 px-3 py-2"><p class="text-lg font-black tabular-nums">${totalRecordable}</p><p class="text-[9px] uppercase text-emerald-100">Recordable</p></div>
+                    <div class="rounded-xl border border-white/15 bg-white/10 px-3 py-2"><p class="text-lg font-black tabular-nums">${nearMissTotal}</p><p class="text-[9px] uppercase text-emerald-100">Near Miss</p></div>
+                    <div class="rounded-xl border border-white/15 bg-white/10 px-3 py-2"><p class="text-lg font-black tabular-nums">${_statsYear}</p><p class="text-[9px] uppercase text-emerald-100">Reporting year</p></div>
+                </div>
+            </div>
+        </section>
 
         <div id="acc-dashboard-performance"></div>
 
@@ -1427,6 +1679,26 @@ async function _renderDashboardPanel() {
             พบอุบัติเหตุถึงชีวิต ${fatal} รายในปี ${_statsYear}
         </div>` : ''}
 
+        <section class="relative overflow-hidden rounded-2xl border border-emerald-100 bg-white p-4 shadow-sm sm:p-5" data-acc-dashboard-insight>
+            <div class="pointer-events-none absolute -right-12 -top-16 h-40 w-40 rounded-full bg-emerald-100/60 blur-2xl"></div>
+            <div class="relative grid gap-4 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-center">
+                <div class="flex items-start gap-3">
+                    <span class="flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-2xl bg-gradient-to-br from-emerald-500 to-teal-700 text-white shadow-lg shadow-emerald-200">
+                        <svg class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.663 17h4.673M12 3v1m6.364.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z"/></svg>
+                    </span>
+                    <div>
+                        <div class="flex flex-wrap items-center gap-2"><h3 class="text-sm font-black text-slate-800">Executive Safety Insight</h3><span class="rounded-full px-2.5 py-1 text-[9px] font-black uppercase ${totalRecordable > 0 ? 'bg-rose-100 text-rose-700' : 'bg-emerald-100 text-emerald-700'}">${executiveTone}</span></div>
+                        <p class="mt-1 text-sm font-semibold leading-6 text-slate-600">${_htmlEsc(executiveText)}</p>
+                    </div>
+                </div>
+                <div class="grid grid-cols-3 gap-2 text-center">
+                    <div class="rounded-xl bg-slate-50 px-3 py-2"><p class="text-[9px] font-black uppercase text-slate-400">Peak month</p><p class="mt-1 text-sm font-black text-slate-800">${peakMonth?.total ? peakMonth.label : '—'}</p></div>
+                    <div class="rounded-xl bg-slate-50 px-3 py-2"><p class="text-[9px] font-black uppercase text-slate-400">Latest move</p><p class="mt-1 text-sm font-black ${monthDelta > 0 ? 'text-rose-600' : monthDelta < 0 ? 'text-emerald-600' : 'text-slate-600'}">${latestMonth ? `${monthDelta > 0 ? '+' : ''}${monthDelta}` : '—'}</p></div>
+                    <button type="button" onclick="window._accDashboardOpenAnalytics()" class="min-h-[54px] rounded-xl bg-slate-900 px-3 text-xs font-black text-white transition hover:bg-emerald-800">เปิด Analytics →</button>
+                </div>
+            </div>
+        </section>
+
         <!-- Trend Chart + Type Breakdown -->
         <div class="grid xl:grid-cols-[minmax(0,2fr)_minmax(280px,0.8fr)] gap-6">
 
@@ -1434,17 +1706,26 @@ async function _renderDashboardPanel() {
             <div class="ds-section overflow-hidden" data-acc-card-image="accident-safety-trend"
                  style="box-shadow:0 4px 16px rgba(14,165,233,0.08),0 1px 4px rgba(0,0,0,0.06)">
                 <div class="h-1 w-full" style="background:linear-gradient(90deg,#0ea5e9,#10b981)"></div>
-                <div class="p-5">
-                    <div class="flex items-center justify-between mb-4">
-                        <div class="flex items-center gap-2">
-                            <svg class="w-4 h-4 text-red-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6"/>
-                            </svg>
-                            <h3 class="text-sm font-bold text-slate-700">แนวโน้มอุบัติเหตุ (Safety Trend)</h3>
+                <div class="p-4 sm:p-5">
+                    <div class="mb-4 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                        <div class="flex min-w-0 items-start gap-3">
+                            <span class="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-xl bg-sky-50 text-sky-600">
+                                <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 17l6-6 4 4 8-8m0 0h-6m6 0v6"/></svg>
+                            </span>
+                            <div><h3 class="text-sm font-black text-slate-800">แนวโน้มอุบัติเหตุ (Safety Trend)</h3><p class="mt-0.5 text-xs font-medium text-slate-400">เปรียบเทียบเหตุทั้งหมด Recordable และ Near Miss รายเดือน</p></div>
                         </div>
-                        <span class="text-xs text-slate-400">ปี ${_statsYear}</span>
+                        <span class="inline-flex self-start rounded-full border border-emerald-100 bg-emerald-50 px-3 py-1 text-[10px] font-black text-emerald-700">YEAR ${_statsYear}</span>
                     </div>
-                    <div style="height:320px"><canvas id="acc-trend-chart"></canvas></div>
+                    <div class="mb-4 grid grid-cols-3 gap-2">
+                        <div class="rounded-xl border border-sky-100 bg-sky-50/70 px-3 py-2"><p class="text-[9px] font-black uppercase text-sky-600">Total cases</p><p class="mt-0.5 text-lg font-black tabular-nums text-slate-800">${total}</p></div>
+                        <div class="rounded-xl border border-rose-100 bg-rose-50/70 px-3 py-2"><p class="text-[9px] font-black uppercase text-rose-600">Recordable</p><p class="mt-0.5 text-lg font-black tabular-nums text-slate-800">${totalRecordable}</p></div>
+                        <div class="rounded-xl border border-amber-100 bg-amber-50/70 px-3 py-2"><p class="text-[9px] font-black uppercase text-amber-600">Near Miss</p><p class="mt-0.5 text-lg font-black tabular-nums text-slate-800">${nearMissTotal}</p></div>
+                    </div>
+                    <div class="rounded-2xl border border-slate-100 bg-gradient-to-b from-white to-slate-50/80 p-2 sm:p-3" style="height:320px"><canvas id="acc-trend-chart"></canvas></div>
+                    <div class="mt-3 flex flex-wrap items-center gap-2">
+                        <span class="text-[9px] font-black uppercase tracking-wide text-slate-400">Active months</span>
+                        ${activeMonths.length ? activeMonths.map(row => `<button type="button" onclick="window._accDashboardOpenAnalytics('month','${row.mo}')" class="rounded-full border border-sky-100 bg-sky-50 px-2.5 py-1 text-[10px] font-black text-sky-700 transition hover:border-sky-300 hover:bg-sky-100">${row.label} · ${row.total}</button>`).join('') : '<span class="text-[10px] font-bold text-slate-400">ยังไม่มีเดือนที่มีเหตุ</span>'}
+                    </div>
                 </div>
             </div>
 
@@ -1452,38 +1733,32 @@ async function _renderDashboardPanel() {
             <div class="ds-section overflow-hidden" data-acc-card-image="accident-case-mix"
                  style="box-shadow:0 4px 16px rgba(249,115,22,0.08),0 1px 4px rgba(0,0,0,0.06)">
                 <div class="h-1 w-full" style="background:linear-gradient(90deg,#f97316,#eab308)"></div>
-                <div class="p-5">
-                    <div class="flex items-center gap-2 mb-4">
-                        <svg class="w-4 h-4 text-orange-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 3.055A9.001 9.001 0 1020.945 13H11V3.055z"/>
-                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20.488 9H15V3.512A9.025 9.025 0 0120.488 9z"/>
-                        </svg>
-                        <h3 class="text-sm font-bold text-slate-700">ประเภทอุบัติเหตุ</h3>
+                <div class="p-4 sm:p-5">
+                    <div class="mb-4 flex items-start gap-3">
+                        <span class="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-xl bg-orange-50 text-orange-600"><svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 3.055A9.001 9.001 0 1020.945 13H11V3.055z"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20.488 9H15V3.512A9.025 9.025 0 0120.488 9z"/></svg></span>
+                        <div><h3 class="text-sm font-black text-slate-800">ประเภทอุบัติเหตุ</h3><p class="mt-0.5 text-xs font-medium text-slate-400">Case mix และสัดส่วนของเหตุแต่ละประเภท</p></div>
                     </div>
-                    <div class="mb-4 rounded-xl border border-orange-100 bg-orange-50 px-4 py-3">
-                        <p class="text-[10px] font-black uppercase text-orange-500">Case Mix</p>
-                        <p class="mt-1 text-2xl font-black tabular-nums text-slate-800">${total.toLocaleString()}</p>
-                        <p class="text-xs font-semibold text-slate-400">Total cases in ${_statsYear}</p>
+                    <div class="mb-4 grid grid-cols-2 gap-2">
+                        <div class="rounded-xl border border-orange-100 bg-orange-50/70 px-3 py-3"><p class="text-[9px] font-black uppercase text-orange-500">Total cases</p><p class="mt-1 text-2xl font-black tabular-nums text-slate-800">${total.toLocaleString()}</p><p class="text-[10px] font-semibold text-slate-400">in ${_statsYear}</p></div>
+                        <div class="rounded-xl border border-violet-100 bg-violet-50/70 px-3 py-3"><p class="text-[9px] font-black uppercase text-violet-500">Top type</p><p class="mt-1 truncate text-sm font-black text-slate-800" title="${_htmlEsc(topType?.AccidentType || 'Waiting data')}">${_htmlEsc(topType?.AccidentType || 'Waiting data')}</p><p class="mt-1 text-[10px] font-semibold text-slate-400">${parseInt(topType?.cnt, 10) || 0} cases</p></div>
                     </div>
                     ${byType.length === 0
                         ? `<div class="text-center py-10 text-slate-400 text-sm">ยังไม่มีข้อมูล</div>`
-                        : `<div class="space-y-3">
-                            ${byType.map(t => {
-                                const count = parseInt(t.cnt, 10) || 0;
-                                const pct = total ? Math.round(count * 100 / total) : 0;
-                                const barPct = Math.max(6, Math.round(count * 100 / typeMax));
-                                const col = TYPE_COLOR[t.AccidentType] || { bg: 'bg-slate-100' };
-                                return `
-                                <div>
-                                    <div class="flex items-center justify-between mb-1 text-xs">
-                                        <span class="min-w-0 truncate font-bold text-slate-700" title="${_htmlEsc(t.AccidentType || '-')}">${_htmlEsc(t.AccidentType || '-')}</span>
-                                        <span class="flex-shrink-0 font-black tabular-nums text-slate-600">${count} (${pct}%)</span>
-                                    </div>
-                                    <div class="w-full bg-slate-100 rounded-full h-2.5 overflow-hidden">
-                                        <div class="h-2.5 rounded-full ${col.bg}" style="width:${barPct}%"></div>
-                                    </div>
-                                </div>`;
-                            }).join('')}
+                        : `<div>
+                            <div class="relative mx-auto h-[210px] max-w-[260px]"><canvas id="acc-type-chart" aria-label="Accident type distribution"></canvas></div>
+                            <div class="mt-3 space-y-2">
+                                ${byType.map(t => {
+                                    const count = parseInt(t.cnt, 10) || 0;
+                                    const pct = total ? (count * 100 / total) : 0;
+                                    const color = ACCIDENT_TYPE_CHART_COLORS[t.AccidentType] || '#94a3b8';
+                                    return `<button type="button" onclick="window._accDashboardOpenAnalytics('type','${_esc(t.AccidentType || '')}')" class="flex min-h-[42px] w-full items-center gap-3 rounded-xl border border-slate-100 bg-slate-50/70 px-3 text-left transition hover:border-emerald-200 hover:bg-emerald-50">
+                                        <span class="h-2.5 w-2.5 flex-shrink-0 rounded-full" style="background:${color};box-shadow:0 0 0 4px ${color}18"></span>
+                                        <span class="min-w-0 flex-1 truncate text-xs font-black text-slate-700">${_htmlEsc(t.AccidentType || '-')}</span>
+                                        <span class="text-xs font-black tabular-nums text-slate-800">${count}</span>
+                                        <span class="w-12 text-right text-[10px] font-bold tabular-nums text-slate-400">${pct.toFixed(1)}%</span>
+                                    </button>`;
+                                }).join('')}
+                            </div>
                         </div>`}
                     ${fatal > 0 ? `
                     <div class="mt-4 rounded-xl bg-slate-900 text-white p-3 text-xs font-semibold flex items-center gap-2">
@@ -1500,22 +1775,55 @@ async function _renderDashboardPanel() {
         <div class="ds-section overflow-hidden" data-acc-card-image="accident-department-breakdown"
              style="box-shadow:0 4px 16px rgba(220,38,38,0.08),0 1px 4px rgba(0,0,0,0.06)">
             <div class="h-1 w-full" style="background:linear-gradient(90deg,#dc2626,#9f1239)"></div>
-            <div class="p-5">
-                <div class="flex items-center gap-2 mb-4">
-                    <svg class="w-4 h-4 text-red-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4"/>
-                    </svg>
-                    <h3 class="text-sm font-bold text-slate-700">อุบัติเหตุรายแผนก (${_statsYear})</h3>
+            <div class="p-4 sm:p-5">
+                <div class="mb-4 flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+                    <div class="flex items-start gap-3">
+                        <span class="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-xl bg-rose-50 text-rose-600"><svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4"/></svg></span>
+                        <div><h3 class="text-sm font-black text-slate-800">อุบัติเหตุรายแผนก (${_statsYear})</h3><p class="mt-0.5 text-xs font-medium text-slate-400">เปรียบเทียบ Minor / Near Miss กับ Recordable โดยไม่เปลี่ยนสูตรเดิม</p></div>
+                    </div>
+                    <div class="grid grid-cols-2 gap-2 sm:grid-cols-3">
+                        <div class="rounded-xl border border-slate-100 bg-slate-50 px-3 py-2"><p class="text-[9px] font-black uppercase text-slate-400">Departments</p><p class="text-base font-black tabular-nums text-slate-800">${byDept.length}</p></div>
+                        <div class="rounded-xl border border-emerald-100 bg-emerald-50/70 px-3 py-2"><p class="text-[9px] font-black uppercase text-emerald-600">Top department</p><p class="max-w-[180px] truncate text-xs font-black text-slate-800" title="${_htmlEsc(topDepartment?.Department || 'Waiting data')}">${_htmlEsc(topDepartment?.Department || 'Waiting data')}</p></div>
+                        <div class="col-span-2 rounded-xl border border-orange-100 bg-orange-50/70 px-3 py-2 sm:col-span-1"><p class="text-[9px] font-black uppercase text-orange-600">Recordable</p><p class="text-base font-black tabular-nums text-slate-800">${totalRecordable}</p></div>
+                    </div>
+                </div>
+                <div class="mb-4 flex flex-wrap items-center justify-between gap-2 rounded-xl border border-slate-100 bg-slate-50/70 p-2" data-acc-department-metric>
+                    <span class="px-2 text-[10px] font-black uppercase tracking-wide text-slate-400">จัดอันดับตาม</span>
+                    <div class="grid grid-cols-3 gap-1">
+                        ${[['risk','Risk score'],['cases','จำนวนเคส'],['lostDays','Lost Days']].map(([value,label]) => `<button type="button" onclick="window._accSetDashboardDeptMetric('${value}')" class="min-h-[36px] rounded-lg px-3 text-[10px] font-black transition ${_dashboardDeptMetric === value ? 'bg-slate-900 text-white shadow-sm' : 'text-slate-500 hover:bg-white'}">${label}</button>`).join('')}
+                    </div>
                 </div>
                 ${byDept.length === 0
                     ? `<div class="text-center py-12 text-slate-400"><p class="text-sm">ยังไม่มีข้อมูล</p></div>`
-                    : `<div style="height:${Math.max(180, byDept.length * 36)}px"><canvas id="acc-dept-chart"></canvas></div>`}
+                    : `<div class="grid gap-3 lg:grid-cols-2" data-acc-department-ranking>
+                        ${departmentRanking.map((row, index) => {
+                            const width = row.metricValue > 0 ? Math.max(8, Math.round(row.metricValue * 100 / maxDepartmentMetric)) : 0;
+                            const riskLevel = row.recordableValue > 0 || row.lostDaysValue > 0 ? 'Attention' : row.totalValue > 1 ? 'Watch' : 'Stable';
+                            const riskClass = riskLevel === 'Attention' ? 'bg-rose-100 text-rose-700' : riskLevel === 'Watch' ? 'bg-amber-100 text-amber-700' : 'bg-emerald-100 text-emerald-700';
+                            const bar = riskLevel === 'Attention' ? 'linear-gradient(90deg,#fb7185,#e11d48)' : riskLevel === 'Watch' ? 'linear-gradient(90deg,#fbbf24,#f97316)' : 'linear-gradient(90deg,#34d399,#0f766e)';
+                            return `<button type="button" onclick="window._accDashboardOpenAnalytics('dept','${_esc(row.Department || '')}')" class="group rounded-2xl border border-slate-100 bg-gradient-to-br from-white to-slate-50 p-4 text-left shadow-sm transition hover:-translate-y-0.5 hover:border-emerald-200 hover:shadow-lg">
+                                <div class="flex items-start gap-3">
+                                    <span class="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-xl ${index === 0 ? 'bg-slate-900 text-white' : 'bg-slate-100 text-slate-500'} text-xs font-black">${index + 1}</span>
+                                    <div class="min-w-0 flex-1">
+                                        <div class="flex items-start justify-between gap-3"><p class="truncate text-xs font-black text-slate-800" title="${_htmlEsc(row.Department || '—')}">${_htmlEsc(row.Department || '—')}</p><span class="rounded-full px-2 py-1 text-[9px] font-black uppercase ${riskClass}">${riskLevel}</span></div>
+                                        <div class="mt-3 h-2 overflow-hidden rounded-full bg-slate-100"><div class="h-full rounded-full transition-all duration-500" style="width:${width}%;background:${bar}"></div></div>
+                                        <div class="mt-3 grid grid-cols-4 gap-2">
+                                            <span><b class="block text-sm font-black tabular-nums text-slate-800">${row.totalValue}</b><small class="text-[9px] font-bold uppercase text-slate-400">Cases</small></span>
+                                            <span><b class="block text-sm font-black tabular-nums text-rose-600">${row.recordableValue}</b><small class="text-[9px] font-bold uppercase text-slate-400">Recordable</small></span>
+                                            <span><b class="block text-sm font-black tabular-nums text-orange-600">${row.lostDaysValue}</b><small class="text-[9px] font-bold uppercase text-slate-400">Lost days</small></span>
+                                            <span><b class="block text-sm font-black tabular-nums text-violet-600">${row.riskScore}</b><small class="text-[9px] font-bold uppercase text-slate-400">Risk score</small></span>
+                                        </div>
+                                    </div>
+                                </div>
+                            </button>`;
+                        }).join('')}
+                    </div>`}
             </div>
         </div>
 
     </div>`;
 
-    setTimeout(() => { _drawTrendChart(); _drawDeptChart(byDept); }, 0);
+    setTimeout(() => { _drawTrendChart(); _drawTypeChart(byType, total); }, 0);
     _renderPerformancePanel('acc-dashboard-performance');
 }
 
@@ -1524,109 +1832,98 @@ function _drawTrendChart() {
     if (!canvas || typeof Chart === 'undefined') return;
     if (_trendChart) { _trendChart.destroy(); _trendChart = null; }
 
-    const trend = _summary?.trend || [];
-    if (trend.length === 0) {
-        canvas.parentElement.innerHTML = `<p class="flex items-center justify-center h-full text-slate-400 text-sm">ยังไม่มีข้อมูล</p>`;
-        return;
-    }
+    const trendByMonth = new Map((_summary?.trend || []).map(row => [Number(row.mo), row]));
+    const trend = MONTHS_TH.map((label, index) => {
+        const row = trendByMonth.get(index + 1) || {};
+        return { label, total: parseInt(row.total, 10) || 0, recordable: parseInt(row.recordable, 10) || 0, nearMiss: parseInt(row.nearMiss, 10) || 0, lostDays: parseInt(row.lostDays, 10) || 0 };
+    });
+    const ctx = canvas.getContext('2d');
+    const areaGradient = ctx.createLinearGradient(0, 0, 0, 300);
+    areaGradient.addColorStop(0, 'rgba(14,165,233,.32)');
+    areaGradient.addColorStop(.58, 'rgba(45,212,191,.10)');
+    areaGradient.addColorStop(1, 'rgba(255,255,255,0)');
 
-    const labels = trend.map(t => t.period || MONTHS_TH[(parseInt(t.mo) - 1)] || t.mo);
-    const totals = trend.map(t => parseInt(t.total)      || 0);
-    const recs   = trend.map(t => parseInt(t.recordable) || 0);
-    const nearMiss = trend.map(t => parseInt(t.nearMiss) || 0);
-
-    _trendChart = new Chart(canvas.getContext('2d'), {
-        type: 'bar',
+    _trendChart = new Chart(ctx, {
+        type: 'line',
         data: {
-            labels,
+            labels: trend.map(row => row.label),
             datasets: [
-                { label: 'รวม', data: totals, backgroundColor: 'rgba(14,165,233,0.16)', borderColor: '#0ea5e9', borderWidth: 1.5, borderRadius: 6, maxBarThickness: 42, order: 3 },
-                { label: 'Recordable', data: recs, type: 'line', borderColor: '#ef4444', backgroundColor: '#ef4444', borderWidth: 2.5, pointRadius: 4, pointHoverRadius: 6, pointBackgroundColor: '#ef4444', tension: 0.32, fill: false, order: 1 },
-                { label: 'Near Miss', data: nearMiss, type: 'line', borderColor: '#f59e0b', backgroundColor: '#f59e0b', borderWidth: 2.25, pointRadius: 4, pointHoverRadius: 6, pointBackgroundColor: '#f59e0b', tension: 0.32, fill: false, order: 2 },
+                { label: 'รวม', data: trend.map(row => row.total), borderColor: '#0284c7', backgroundColor: areaGradient, borderWidth: 3, pointRadius: 3, pointHoverRadius: 7, pointBackgroundColor: '#fff', pointBorderColor: '#0284c7', pointBorderWidth: 2.5, tension: .38, fill: true, order: 3 },
+                { label: 'Recordable', data: trend.map(row => row.recordable), borderColor: '#e11d48', backgroundColor: '#e11d48', borderWidth: 2.25, pointRadius: 2.5, pointHoverRadius: 6, pointBackgroundColor: '#e11d48', tension: .35, fill: false, order: 1 },
+                { label: 'Near Miss', data: trend.map(row => row.nearMiss), borderColor: '#f59e0b', backgroundColor: '#f59e0b', borderWidth: 2.25, pointRadius: 2.5, pointHoverRadius: 6, pointBackgroundColor: '#f59e0b', borderDash: [7, 5], tension: .35, fill: false, order: 2 },
             ],
         },
         options: {
             responsive: true,
             maintainAspectRatio: false,
             interaction: { mode: 'index', intersect: false },
-            plugins: { legend: { position: 'top', align: 'end', labels: { font: { size: 11 }, usePointStyle: true, boxWidth: 8 } } },
-            scales: {
-                x: { grid: { display: false }, ticks: { font: { size: 11, weight: '600' }, color: '#475569' } },
-                y: { beginAtZero: true, ticks: { stepSize: 1, font: { size: 10 }, color: '#64748b' }, grid: { color: 'rgba(148,163,184,0.22)' } },
+            onHover: (event, elements) => { if (event.native?.target) event.native.target.style.cursor = elements.length ? 'pointer' : 'default'; },
+            onClick: (_event, elements) => {
+                if (elements[0]) window._accDashboardOpenAnalytics('month', String(elements[0].index + 1));
             },
+            plugins: {
+                legend: { position: 'top', align: 'end', labels: { color: '#475569', padding: 16, font: { size: 10, weight: '700' }, usePointStyle: true, boxWidth: 7 } },
+                tooltip: {
+                    displayColors: true,
+                    backgroundColor: 'rgba(15,23,42,.96)',
+                    padding: 12,
+                    titleFont: { size: 12, weight: '700' },
+                    bodyFont: { size: 11, weight: '600' },
+                    callbacks: { footer: items => `Lost Days: ${trend[items[0]?.dataIndex]?.lostDays || 0} · คลิกเพื่อเปิด Analytics` },
+                },
+            },
+            scales: {
+                x: { grid: { display: false }, border: { display: false }, ticks: { font: { size: 10, weight: '700' }, color: '#64748b' } },
+                y: { beginAtZero: true, suggestedMax: Math.max(2, ...trend.map(row => row.total)) + 1, border: { display: false }, ticks: { stepSize: 1, font: { size: 10, weight: '600' }, color: '#94a3b8' }, grid: { color: 'rgba(148,163,184,.16)', drawTicks: false } },
+            },
+            animation: { duration: 700, easing: 'easeOutQuart' },
         },
     });
 }
 
-function _drawDeptChart(byDept) {
-    const canvas = document.getElementById('acc-dept-chart');
-    if (!canvas || typeof Chart === 'undefined') return;
-    if (_deptChart) { _deptChart.destroy(); _deptChart = null; }
-    if (!byDept || byDept.length === 0) return;
-
-    const sorted    = [...byDept].sort((a, b) => parseInt(a.total) - parseInt(b.total));
-    // Full names stored separately for tooltip; axis labels truncated for display
-    const fullNames = sorted.map(d => d.Department);
-    const labels    = sorted.map(d => d.Department.length > 22 ? d.Department.slice(0, 21) + '…' : d.Department);
-    const totals    = sorted.map(d => parseInt(d.total)      || 0);
-    const recs      = sorted.map(d => Math.min(parseInt(d.recordable) || 0, parseInt(d.total) || 0)); // cap at total
-    const nonRecs   = totals.map((t, i) => Math.max(0, t - recs[i]));   // non-recordable = total − recordable
-
-    // Stacked bars: non-recordable (green) + recordable (orange) → full bar = total
-    // This makes it visually impossible for recordable to exceed total
-    _deptChart = new Chart(canvas.getContext('2d'), {
-        type: 'bar',
-        data: {
-            labels,
-            datasets: [
-                {
-                    label: 'Minor / Near Miss',
-                    data: nonRecs,
-                    backgroundColor: 'rgba(5,150,105,0.6)',
-                    borderColor: '#059669',
-                    borderWidth: 1,
-                    borderRadius: 0,
-                    borderSkipped: false,
-                    stack: 'a',
-                },
-                {
-                    label: 'Recordable',
-                    data: recs,
-                    backgroundColor: 'rgba(249,115,22,0.75)',
-                    borderColor: '#f97316',
-                    borderWidth: 1,
-                    borderRadius: 3,
-                    borderSkipped: false,
-                    stack: 'a',
-                },
-            ],
+function _drawTypeChart(byType, total) {
+    const canvas = document.getElementById('acc-type-chart');
+    if (_typeChart) { _typeChart.destroy(); _typeChart = null; }
+    if (!canvas || typeof Chart === 'undefined' || !Array.isArray(byType) || !byType.length) return;
+    const labels = byType.map(row => row.AccidentType || '-');
+    const values = byType.map(row => parseInt(row.cnt, 10) || 0);
+    const colors = labels.map(label => ACCIDENT_TYPE_CHART_COLORS[label] || '#94a3b8');
+    const centerText = {
+        id: 'accidentTypeCenterText',
+        afterDraw(chart) {
+            const { ctx, chartArea } = chart;
+            if (!chartArea) return;
+            const x = (chartArea.left + chartArea.right) / 2;
+            const y = (chartArea.top + chartArea.bottom) / 2;
+            ctx.save();
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            ctx.fillStyle = '#0f172a';
+            ctx.font = '900 28px sans-serif';
+            ctx.fillText(String(total || 0), x, y - 7);
+            ctx.fillStyle = '#94a3b8';
+            ctx.font = '700 9px sans-serif';
+            ctx.fillText('TOTAL CASES', x, y + 16);
+            ctx.restore();
         },
+    };
+    _typeChart = new Chart(canvas.getContext('2d'), {
+        type: 'doughnut',
+        data: { labels, datasets: [{ data: values, backgroundColor: colors, borderColor: '#fff', borderWidth: 4, hoverOffset: 7, spacing: 2 }] },
+        plugins: [centerText],
         options: {
-            indexAxis: 'y',
             responsive: true,
             maintainAspectRatio: false,
+            cutout: '68%',
+            onHover: (event, elements) => { if (event.native?.target) event.native.target.style.cursor = elements.length ? 'pointer' : 'default'; },
+            onClick: (_event, elements) => {
+                if (elements[0]) window._accDashboardOpenAnalytics('type', labels[elements[0].index]);
+            },
             plugins: {
-                legend: { position: 'top', labels: { font: { size: 11 }, usePointStyle: true, pointStyleWidth: 8 } },
-                tooltip: {
-                    callbacks: {
-                        title: ctx => fullNames[ctx[0].dataIndex] || labels[ctx[0].dataIndex],
-                        footer: ctx => {
-                            const idx = ctx[0].dataIndex;
-                            return `รวม: ${totals[idx]}`;
-                        },
-                    },
-                },
+                legend: { display: false },
+                tooltip: { backgroundColor: 'rgba(15,23,42,.96)', padding: 12, callbacks: { label: context => `${context.label}: ${context.raw} (${total ? (Number(context.raw) * 100 / total).toFixed(1) : '0.0'}%)` } },
             },
-            scales: {
-                x: { stacked: true, beginAtZero: true, ticks: { stepSize: 1, font: { size: 10 } }, grid: { color: 'rgba(0,0,0,0.04)' } },
-                y: { stacked: true, grid: { display: false }, ticks: {
-                    font: { size: 10 },
-                    callback: function(val) {
-                        const name = this.getLabelForValue(val);
-                        return name.length > 22 ? name.slice(0, 21) + '…' : name;
-                    },
-                }},
-            },
+            animation: { animateRotate: true, duration: 750, easing: 'easeOutQuart' },
         },
     });
 }
@@ -1634,18 +1931,337 @@ function _drawDeptChart(byDept) {
 // ─────────────────────────────────────────────────────────────────────────────
 // ANALYTICS PANEL
 // ─────────────────────────────────────────────────────────────────────────────
+function _accAnalyticsMonth(report) {
+    const month = Number(String(report?.AccidentDate || '').slice(5, 7));
+    return month >= 1 && month <= 12 ? month : 0;
+}
+
+function _accAnalyticsScopedReports(source = _analyticsReports) {
+    const f = _analyticsFilters;
+    return (source || []).filter(report => {
+        if (f.month && _accAnalyticsMonth(report) !== Number(f.month)) return false;
+        if (f.dept && String(report.Department || '') !== f.dept) return false;
+        if (f.area && String(report.Area || '') !== f.area) return false;
+        if (f.type && String(report.AccidentType || '') !== f.type) return false;
+        if (f.injury && String(report.InjuryType || '') !== f.injury) return false;
+        if (f.bodyPart && String(report.BodyPart || '') !== f.bodyPart) return false;
+        if (f.bodySide && String(report.BodySide || '') !== f.bodySide) return false;
+        if (f.recordable === 'recordable' && !_accIsCountedStatReport(report)) return false;
+        if (f.recordable === 'non-recordable' && _accIsCountedStatReport(report)) return false;
+        return true;
+    });
+}
+
+function _accAnalyticsGroup(rows, keyFn, buildRow) {
+    const grouped = new Map();
+    rows.forEach(report => {
+        const key = String(keyFn(report) || '').trim();
+        if (!key) return;
+        if (!grouped.has(key)) grouped.set(key, []);
+        grouped.get(key).push(report);
+    });
+    return [...grouped.entries()]
+        .map(([key, items]) => buildRow(key, items))
+        .sort((a, b) => Number(b.cnt ?? b.total ?? 0) - Number(a.cnt ?? a.total ?? 0));
+}
+
+function _accAnalyticsFromReports(rows) {
+    const injuryRows = rows.filter(report => report.AccidentType !== 'Near Miss');
+    const deptRank = _accAnalyticsGroup(rows, r => r.Department || '(ไม่ระบุแผนก)', (Department, items) => ({
+        Department,
+        total: items.length,
+        cnt: items.length,
+        recordable: items.filter(_accIsCountedStatReport).length,
+        lostDays: items.reduce((sum, item) => sum + (Number(item.LostDays) || 0), 0),
+        nearMiss: items.filter(item => item.AccidentType === 'Near Miss').length,
+        fatal: items.filter(item => item.AccidentType === 'Fatal').length,
+    })).sort((a, b) => ((b.recordable * 3) + (b.lostDays * 2) + b.total) - ((a.recordable * 3) + (a.lostDays * 2) + a.total));
+    const hotspot = _accAnalyticsGroup(rows, r => r.Area || '(ไม่ระบุพื้นที่)', (area, items) => ({
+        area, cnt: items.length, recordable: items.filter(_accIsCountedStatReport).length,
+        lostDays: items.reduce((sum, item) => sum + (Number(item.LostDays) || 0), 0),
+    }));
+    const injuryTypeStats = _accAnalyticsGroup(injuryRows, r => r.InjuryType || '(ไม่ระบุ)', (label, items) => ({ label, cnt: items.length }));
+    const bodyPartStats = _accAnalyticsGroup(
+        injuryRows,
+        r => `${r.BodyPart || '(ไม่ระบุ)'}\u0000${r.BodySide || ''}`,
+        (key, items) => {
+            const [bodyPart, bodySide = ''] = key.split('\u0000');
+            const sideText = bodySide ? _accBodySideLabel(bodySide).split(' / ')[0] : 'ไม่ระบุข้าง';
+            return { bodyPart, bodySide, label: `${bodyPart} · ${sideText}`, cnt: items.length };
+        }
+    );
+    const trend = Array.from({ length: 12 }, (_, index) => {
+        const monthRows = rows.filter(report => _accAnalyticsMonth(report) === index + 1);
+        return {
+            mo: index + 1,
+            total: monthRows.length,
+            nearMiss: monthRows.filter(report => report.AccidentType === 'Near Miss').length,
+            recordable: monthRows.filter(_accIsCountedStatReport).length,
+            lostDays: monthRows.reduce((sum, item) => sum + (Number(item.LostDays) || 0), 0),
+        };
+    });
+    return { deptRank, hotspot, injuryTypeStats, bodyPartStats, trend };
+}
+
+function _accAnalyticsFilterOptions(key) {
+    const field = { dept: 'Department', area: 'Area', type: 'AccidentType', injury: 'InjuryType' }[key];
+    if (!field) return [];
+    return [...new Set((_analyticsReports || []).map(report => String(report[field] || '').trim()).filter(Boolean))]
+        .sort((a, b) => a.localeCompare(b, 'th'));
+}
+
+function _accAnalyticsFilterSummary() {
+    const f = _analyticsFilters;
+    const items = [`ปี ${_statsYear}`];
+    if (f.month) items.push(MONTHS_TH[Number(f.month) - 1] || `เดือน ${f.month}`);
+    if (f.dept) items.push(f.dept);
+    if (f.area) items.push(f.area);
+    if (f.type) items.push(f.type);
+    if (f.injury) items.push(f.injury);
+    if (f.bodyPart) items.push(`${f.bodyPart}${f.bodySide ? ` · ${_accBodySideLabel(f.bodySide).split(' / ')[0]}` : ''}`);
+    if (f.recordable) items.push(f.recordable === 'recordable' ? 'Recordable' : 'Non-recordable');
+    return items;
+}
+
+function _accResetAnalyticsFilters() {
+    _analyticsFilters = { month: '', dept: '', area: '', type: '', injury: '', recordable: '', bodyPart: '', bodySide: '' };
+}
+
+window._accSetAnalyticsFilter = (key, value) => {
+    if (!Object.prototype.hasOwnProperty.call(_analyticsFilters, key)) return;
+    _analyticsFilters[key] = String(value || '');
+    _accSyncAnalyticsDeepLink();
+    _paintAnalyticsPanel();
+};
+
+window._accSetAnalyticsBodyFilter = (bodyPart, bodySide = '') => {
+    _analyticsFilters.bodyPart = String(bodyPart || '');
+    _analyticsFilters.bodySide = String(bodySide || '');
+    _accSyncAnalyticsDeepLink();
+    _paintAnalyticsPanel();
+};
+
+window._accClearAnalyticsFilters = () => {
+    _accResetAnalyticsFilters();
+    _accSyncAnalyticsDeepLink();
+    _paintAnalyticsPanel();
+};
+
+function _accIsInjuryFullscreenOpen() {
+    const wrapper = document.getElementById('modal-wrapper');
+    return Boolean(wrapper && !wrapper.classList.contains('hidden') && !wrapper.classList.contains('opacity-0')
+        && wrapper.querySelector('#modal-body [data-injury-intelligence]'));
+}
+
+window._accSetInjuryFilter = (key, value) => {
+    const fullscreenOpen = _accIsInjuryFullscreenOpen();
+    window._accSetAnalyticsFilter(key, value);
+    if (fullscreenOpen) setTimeout(() => window._accOpenInjuryFullscreen(), 0);
+};
+
+window._accSetInjuryMetric = metric => {
+    if (!['cases', 'severity', 'lostDays'].includes(metric) || metric === _injuryMetric) return;
+    const fullscreenOpen = _accIsInjuryFullscreenOpen();
+    _injuryMetric = metric;
+    _paintAnalyticsPanel();
+    if (fullscreenOpen) setTimeout(() => window._accOpenInjuryFullscreen(), 0);
+};
+
+function _accCurrentInjuryCardData() {
+    const scopedReports = _accAnalyticsScopedReports();
+    const previousReports = _analyticsPreviousReportsYear === _statsYear - 1
+        ? _accAnalyticsScopedReports(_analyticsPreviousReports) : [];
+    const derived = _accAnalyticsFromReports(scopedReports);
+    return { rows: derived.injuryTypeStats || [], scopedReports, previousReports };
+}
+
+window._accOpenInjuryFullscreen = () => {
+    const { rows, scopedReports, previousReports } = _accCurrentInjuryCardData();
+    openModal('Injury Type Intelligence', `
+        <div class="rounded-2xl bg-gradient-to-b from-indigo-50/70 to-white p-2 sm:p-4" data-injury-fullscreen>
+            <div class="mb-4"><span class="rounded-full border border-indigo-100 bg-indigo-50 px-3 py-1 text-[9px] font-black uppercase tracking-[.14em] text-indigo-700">Adaptive injury analysis</span><p class="mt-2 text-xs font-medium text-slate-500">Focus/Pareto, 12-month trend, severity, Lost Days และรายการเคสภายใต้ตัวกรองเดียวกับ Analytics</p></div>
+            ${_accInjuryIntelligenceCard(rows, scopedReports, previousReports, { fullscreen: true })}
+        </div>
+    `, 'max-w-7xl');
+};
+
+window._accOpenInjuryReports = injury => {
+    closeModal();
+    window._accOpenAnalyticsReports({ injury: String(injury || '') });
+};
+
+function _accInjuryExportTarget() {
+    return document.querySelector('#modal-body [data-injury-fullscreen]')
+        || document.querySelector('[data-acc-card-image="accident-injury-type-breakdown"]');
+}
+
+window._accExportInjuryPNG = () => {
+    const target = _accInjuryExportTarget();
+    if (target) _accDownloadCardImage(target);
+};
+
+window._accExportInjuryPDF = async () => {
+    const target = _accInjuryExportTarget();
+    if (!target || typeof html2canvas === 'undefined' || !window.jspdf?.jsPDF) {
+        showToast('ไม่พบ library สำหรับส่งออก PDF', 'error');
+        return;
+    }
+    try {
+        showLoading('กำลังสร้าง Injury Type PDF...');
+        const canvas = await html2canvas(target, {
+            backgroundColor: '#ffffff', scale: Math.min(2, window.devicePixelRatio || 1.5), useCORS: true,
+            onclone: doc => doc.querySelectorAll('[data-acc-card-ignore]').forEach(element => { element.style.display = 'none'; }),
+        });
+        const pdf = new window.jspdf.jsPDF({ orientation: canvas.width > canvas.height ? 'landscape' : 'portrait', unit: 'mm', format: 'a4' });
+        const margin = 8;
+        const pageWidth = pdf.internal.pageSize.getWidth();
+        const pageHeight = pdf.internal.pageSize.getHeight();
+        const imageWidth = pageWidth - margin * 2;
+        const imageHeight = canvas.height * imageWidth / canvas.width;
+        const printableHeight = pageHeight - margin * 2;
+        const image = canvas.toDataURL('image/jpeg', .94);
+        let offset = 0;
+        do {
+            if (offset > 0) pdf.addPage();
+            pdf.addImage(image, 'JPEG', margin, margin - offset, imageWidth, imageHeight, undefined, 'FAST');
+            offset += printableHeight;
+        } while (offset < imageHeight);
+        pdf.save(`injury-type-analysis-${_statsYear}.pdf`);
+        showToast('ส่งออก Injury Type PDF แล้ว', 'success');
+    } catch (error) {
+        showToast(_friendlyErr(error, 'ส่งออก Injury Type PDF ไม่สำเร็จ'), 'error');
+    } finally { hideLoading(); }
+};
+
+window._accOpenAnalyticsReports = filters => {
+    _reportDrilldown = {
+        month: _analyticsFilters.month,
+        area: _analyticsFilters.area,
+        injury: _analyticsFilters.injury,
+        recordable: _analyticsFilters.recordable,
+        bodyPart: _analyticsFilters.bodyPart,
+        bodySide: _analyticsFilters.bodySide,
+        ...(filters || {}),
+    };
+    _filter.year = _statsYear;
+    _filter.dept = _analyticsFilters.dept || '';
+    _filter.type = _analyticsFilters.type || '';
+    switchTab('reports');
+};
+
+window._accShowReportOnAnatomy = (bodyPart, bodySide = '', year = _statsYear) => {
+    closeModal();
+    _statsYear = Number(year) || _statsYear;
+    _filter.year = _statsYear;
+    _analytics = null;
+    _analyticsReports = [];
+    _analyticsReportsYear = null;
+    _analyticsPreviousReports = [];
+    _analyticsPreviousReportsYear = null;
+    _accResetAnalyticsFilters();
+    _analyticsFilters.bodyPart = String(bodyPart || '');
+    _analyticsFilters.bodySide = String(bodySide || '');
+    _accSyncAnalyticsDeepLink();
+    switchTab('analytics');
+};
+
+window._accExportAnalyticsPNG = () => {
+    const workspace = document.querySelector('[data-acc-card-image="accident-analytics-filtered-workspace"]');
+    if (workspace) _accDownloadCardImage(workspace);
+};
+
+window._accExportAnalyticsPDF = async () => {
+    const workspace = document.querySelector('[data-acc-card-image="accident-analytics-filtered-workspace"]');
+    if (!workspace || typeof html2canvas === 'undefined' || !window.jspdf?.jsPDF) {
+        showToast('ไม่พบ library สำหรับส่งออก PDF', 'error');
+        return;
+    }
+    try {
+        showLoading('กำลังสร้าง Analytics PDF...');
+        const canvas = await html2canvas(workspace, {
+            backgroundColor: '#ffffff', scale: Math.min(2, window.devicePixelRatio || 1.5), useCORS: true,
+            onclone: doc => doc.querySelectorAll('[data-acc-card-ignore]').forEach(element => { element.style.display = 'none'; }),
+        });
+        const pdf = new window.jspdf.jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
+        const pageWidth = pdf.internal.pageSize.getWidth();
+        const pageHeight = pdf.internal.pageSize.getHeight();
+        const margin = 8;
+        const imageWidth = pageWidth - margin * 2;
+        const imageHeight = canvas.height * imageWidth / canvas.width;
+        const printableHeight = pageHeight - margin * 2;
+        const image = canvas.toDataURL('image/jpeg', 0.94);
+        let offset = 0;
+        do {
+            if (offset > 0) pdf.addPage();
+            pdf.addImage(image, 'JPEG', margin, margin - offset, imageWidth, imageHeight, undefined, 'FAST');
+            offset += printableHeight;
+        } while (offset < imageHeight);
+        pdf.save(`accident-analytics-${_statsYear}.pdf`);
+        showToast('ส่งออก Analytics PDF แล้ว', 'success');
+    } catch (error) {
+        showToast(_friendlyErr(error, 'ส่งออก Analytics PDF ไม่สำเร็จ'), 'error');
+    } finally { hideLoading(); }
+};
+
+window._accCopyAnalyticsLink = async () => {
+    const link = _accSyncAnalyticsDeepLink();
+    try {
+        await navigator.clipboard.writeText(link);
+    } catch (_) {
+        const input = document.createElement('input');
+        input.value = link;
+        input.style.position = 'fixed'; input.style.left = '-9999px';
+        document.body.appendChild(input); input.select(); document.execCommand('copy'); input.remove();
+    }
+    showToast('คัดลอกลิงก์มุมมอง Analytics แล้ว', 'success');
+};
+
+function _accAnalyticsStateHtml(state) {
+    if (state === 'loading') return `
+        <div data-analytics-state="loading" role="status" aria-live="polite" aria-busy="true" class="space-y-5 rounded-[28px] bg-gradient-to-b from-emerald-50 to-slate-50 p-3 sm:p-5">
+            <span class="sr-only">กำลังโหลดข้อมูล Accident Analytics</span>
+            <div class="animate-pulse rounded-2xl bg-gradient-to-r from-emerald-900 via-emerald-700 to-teal-600 p-5">
+                <div class="h-3 w-36 rounded-full bg-white/25"></div><div class="mt-3 h-7 w-72 max-w-full rounded-lg bg-white/20"></div>
+                <div class="mt-5 grid grid-cols-2 gap-2 md:grid-cols-4"><div class="h-16 rounded-xl bg-white/15"></div><div class="h-16 rounded-xl bg-white/15"></div><div class="h-16 rounded-xl bg-white/15"></div><div class="h-16 rounded-xl bg-white/15"></div></div>
+            </div>
+            <div class="grid gap-5 xl:grid-cols-2"><div class="h-[420px] animate-pulse rounded-2xl border border-slate-200 bg-white shadow-sm"></div><div class="h-[420px] animate-pulse rounded-2xl border border-slate-200 bg-white shadow-sm"></div></div>
+            <div class="flex items-center justify-center gap-2 py-2 text-sm font-bold text-slate-500"><span class="h-2.5 w-2.5 animate-ping rounded-full bg-emerald-500"></span>กำลังเตรียมข้อมูลวิเคราะห์และแผนภาพ…</div>
+        </div>`;
+    return `
+        <div data-analytics-state="error" role="alert" aria-live="assertive" class="flex min-h-[420px] items-center justify-center rounded-[28px] border border-rose-100 bg-gradient-to-b from-rose-50/80 to-white p-5">
+            <div class="max-w-md text-center"><span class="mx-auto flex h-14 w-14 items-center justify-center rounded-2xl border border-rose-100 bg-white text-2xl text-rose-500 shadow-sm">!</span><h2 class="mt-4 text-lg font-black text-slate-800">โหลด Accident Analytics ไม่สำเร็จ</h2><p class="mt-2 text-sm leading-6 text-slate-500">ระบบไม่สามารถอ่านข้อมูลวิเคราะห์หรือรายการรายงานได้ในขณะนี้ ข้อมูลเดิมไม่ได้ถูกแก้ไข กรุณาตรวจสอบการเชื่อมต่อแล้วลองใหม่</p><button type="button" data-analytics-retry onclick="window._accRetryAnalytics()" class="mt-5 min-h-[44px] rounded-xl bg-rose-600 px-5 text-sm font-black text-white shadow-sm transition hover:bg-rose-700 focus:outline-none focus:ring-4 focus:ring-rose-200">ลองโหลดอีกครั้ง</button></div>
+        </div>`;
+}
+
+window._accRetryAnalytics = () => {
+    _analytics = null;
+    _analyticsReports = [];
+    _analyticsReportsYear = null;
+    _analyticsPreviousReports = [];
+    _analyticsPreviousReportsYear = null;
+    _renderAnalyticsPanel();
+};
+
 async function _renderAnalyticsPanel() {
     const requestId = ++_analyticsRequest;
     const year = _statsYear;
     const panel = document.getElementById('acc-panel-analytics');
     if (!panel) return;
-    panel.innerHTML = _spinnerHtml();
+    panel.innerHTML = _accAnalyticsStateHtml('loading');
 
     let loadFailed = false;
     try {
-        const res  = await API.get(`/accident/analytics?year=${year}`);
+        const [res, reportsRes, previousReportsRes] = await Promise.all([
+            API.get(`/accident/analytics?year=${year}`, { suppressErrorLog: true }),
+            API.get(`/accident/reports?year=${year}`, { suppressErrorLog: true }),
+            API.get(`/accident/reports?year=${year - 1}`, { suppressErrorLog: true }).catch(() => ({ data: [] })),
+        ]);
         if (requestId !== _analyticsRequest || year !== _statsYear || _activeTab !== 'analytics') return;
         _analytics = res.data || null;
+        _analyticsReports = Array.isArray(reportsRes?.data) ? reportsRes.data : [];
+        _analyticsReportsYear = year;
+        _analyticsPreviousReports = Array.isArray(previousReportsRes?.data) ? previousReportsRes.data : [];
+        _analyticsPreviousReportsYear = year - 1;
     } catch {
         if (requestId !== _analyticsRequest || year !== _statsYear || _activeTab !== 'analytics') return;
         _analytics = null;
@@ -1671,30 +2287,104 @@ async function _renderAnalyticsPanel() {
         if (requestId !== _analyticsRequest || year !== _statsYear || _activeTab !== 'analytics') return;
         _hotspotPositions = _accLoadLocalHotspotPositions();
     }
+    try {
+        const layoutRes = await API.get('/accident/hotspot-layout');
+        if (requestId !== _analyticsRequest || year !== _statsYear || _activeTab !== 'analytics') return;
+        if (_accApiResponseFailed(layoutRes)) throw new Error(`HTTP ${layoutRes.status}`);
+        _hotspotLayout = layoutRes?.data?.IsDefault === false && layoutRes.data.FileURL
+            ? { ...layoutRes.data, IsDefault: false }
+            : { IsDefault: true, FileURL: ACCIDENT_LAYOUT_DEFAULT_IMAGE };
+    } catch {
+        if (requestId !== _analyticsRequest || year !== _statsYear || _activeTab !== 'analytics') return;
+        _hotspotLayout = { IsDefault: true, FileURL: ACCIDENT_LAYOUT_DEFAULT_IMAGE };
+    }
     if (loadFailed) {
-        panel.innerHTML = '<div class="text-center py-16 text-slate-400 text-sm">โหลดข้อมูลวิเคราะห์ไม่สำเร็จ กรุณาลองใหม่</div>';
+        panel.innerHTML = _accAnalyticsStateHtml('error');
         return;
     }
 
-    const deptRank  = _analytics?.deptRank  || [];
-    const hotspot   = _analytics?.hotspot   || [];
+    _paintAnalyticsPanel();
+}
+
+function _paintAnalyticsPanel() {
+    const panel = document.getElementById('acc-panel-analytics');
+    if (!panel || _activeTab !== 'analytics') return;
+    const scopedReports = _accAnalyticsScopedReports();
+    const previousScopedReports = _analyticsPreviousReportsYear === _statsYear - 1
+        ? _accAnalyticsScopedReports(_analyticsPreviousReports) : [];
+    const derived = _analyticsReportsYear === _statsYear ? _accAnalyticsFromReports(scopedReports) : null;
+    const previousDerived = _analyticsPreviousReportsYear === _statsYear - 1
+        ? _accAnalyticsFromReports(previousScopedReports) : null;
+    const deptRank  = derived?.deptRank || _analytics?.deptRank || [];
+    const hotspot   = derived?.hotspot || _analytics?.hotspot || [];
     _lastHotspotRows = hotspot;
-    const injuryTypeStats = _analytics?.injuryTypeStats || [];
-    const bodyPartStats = _analytics?.bodyPartStats || [];
-    const trendRows = _summary?.trend || [];
+    const injuryTypeStats = derived?.injuryTypeStats || _analytics?.injuryTypeStats || [];
+    const bodyPartStats = derived?.bodyPartStats || _analytics?.bodyPartStats || [];
+    const trendRows = derived?.trend || _summary?.trend || [];
 
     const riskBadge = score => {
         if (score >= 10) return `<span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-bold bg-red-100 text-red-700"><span class="w-1.5 h-1.5 rounded-full bg-red-500 inline-block"></span>High</span>`;
         if (score >= 5)  return `<span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-bold bg-orange-100 text-orange-700"><span class="w-1.5 h-1.5 rounded-full bg-orange-500 inline-block"></span>Med</span>`;
         return `<span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-bold bg-amber-100 text-amber-700"><span class="w-1.5 h-1.5 rounded-full bg-amber-400 inline-block"></span>Low</span>`;
     };
+    const filterSummary = _accAnalyticsFilterSummary();
+    const hasActiveFilters = Object.values(_analyticsFilters).some(value => String(value || '').trim());
+    const injuryCases = scopedReports.filter(report => report.AccidentType !== 'Near Miss');
+    const missingBodyPart = injuryCases.filter(report => !String(report.BodyPart || '').trim()).length;
+    const missingBodySide = injuryCases.filter(report => report.BodyPart && !String(report.BodySide || '').trim()).length;
+    const priorCount = previousScopedReports.length;
+    const yoyPercent = priorCount ? ((scopedReports.length - priorCount) * 100 / priorCount) : null;
+    const yoyLabel = yoyPercent === null ? (scopedReports.length ? 'New' : '0.0%') : `${yoyPercent >= 0 ? '+' : ''}${yoyPercent.toFixed(1)}%`;
+    const selectOptions = (key, selected) => _accAnalyticsFilterOptions(key)
+        .map(value => `<option value="${_htmlEsc(value)}" ${selected===value?'selected':''}>${_htmlEsc(value)}</option>`).join('');
 
     panel.innerHTML = `
-    <div class="flex flex-col gap-6">
+    <div class="flex flex-col gap-6 rounded-[28px] p-3 sm:p-5" data-acc-card-image="accident-analytics-filtered-workspace" style="min-width:0;width:100%;max-width:100%;overflow:hidden;background:linear-gradient(180deg,#ecfdf5 0%,#f8fafc 24%,#f8fafc 100%)">
+
+        <section class="relative overflow-hidden rounded-2xl border border-emerald-200 p-4 sm:p-5 text-white" style="background:linear-gradient(135deg,#052e2b,#065f46 55%,#0f766e);box-shadow:0 18px 40px rgba(6,78,59,.18)">
+            <div class="pointer-events-none absolute inset-0 opacity-10" style="background-image:radial-gradient(circle at 1px 1px,#fff 1px,transparent 0);background-size:22px 22px"></div>
+            <div class="relative z-10 flex flex-col gap-4">
+                <div class="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+                    <div>
+                        <span class="inline-flex items-center gap-2 rounded-full border border-white/20 bg-white/10 px-3 py-1 text-[10px] font-black uppercase tracking-[.14em]">Enterprise Analytics Workspace</span>
+                        <h2 class="mt-2 text-xl font-black">Safety Intelligence · Accident Analytics</h2>
+                        <p class="mt-1 text-xs font-medium text-emerald-100">ตัวกรองเดียวควบคุม Summary, Ranking, Heatmap, Trend และรายการเคสที่เกี่ยวข้อง</p>
+                    </div>
+                    <div class="flex flex-col gap-2">
+                    <div class="grid grid-cols-2 gap-2 text-center lg:grid-cols-4">
+                        <div class="rounded-xl border border-white/15 bg-white/10 px-3 py-2"><p class="text-lg font-black">${scopedReports.length}</p><p class="text-[9px] uppercase text-emerald-100">Filtered cases</p></div>
+                        <div class="rounded-xl border border-white/15 bg-white/10 px-3 py-2"><p class="text-lg font-black">${missingBodyPart}</p><p class="text-[9px] uppercase text-emerald-100">Missing part</p></div>
+                        <div class="rounded-xl border border-white/15 bg-white/10 px-3 py-2"><p class="text-lg font-black">${missingBodySide}</p><p class="text-[9px] uppercase text-emerald-100">Missing side</p></div>
+                        <div class="rounded-xl border border-white/15 bg-white/10 px-3 py-2"><p class="text-lg font-black">${yoyLabel}</p><p class="text-[9px] uppercase text-emerald-100">vs ${_statsYear - 1}</p></div>
+                    </div>
+                    <div class="grid grid-cols-1 gap-2 sm:grid-cols-3" data-acc-card-ignore>
+                        <button type="button" onclick="window._accExportAnalyticsPNG()" class="min-h-[38px] rounded-xl border border-white/20 bg-white/10 px-3 text-xs font-black text-white hover:bg-white/20">Export PNG</button>
+                        <button type="button" onclick="window._accExportAnalyticsPDF()" class="min-h-[38px] rounded-xl border border-white/20 bg-white/10 px-3 text-xs font-black text-white hover:bg-white/20">Export PDF</button>
+                        <button type="button" onclick="window._accCopyAnalyticsLink()" class="min-h-[38px] rounded-xl border border-white/20 bg-white/10 px-3 text-xs font-black text-white hover:bg-white/20">คัดลอกลิงก์</button>
+                    </div>
+                    </div>
+                </div>
+                <div class="grid grid-cols-2 gap-2 md:grid-cols-4 xl:grid-cols-7" data-acc-card-ignore>
+                    <label class="text-[10px] font-bold text-emerald-100">เดือน<select data-analytics-select="month" class="mt-1 w-full rounded-lg border border-white/20 bg-white px-2 py-2 text-xs font-bold text-slate-700"><option value="">ทุกเดือน</option>${MONTHS_TH.map((month,index)=>`<option value="${index+1}" ${String(_analyticsFilters.month)===String(index+1)?'selected':''}>${month}</option>`).join('')}</select></label>
+                    <label class="text-[10px] font-bold text-emerald-100">Department<select data-analytics-select="dept" class="mt-1 w-full rounded-lg border border-white/20 bg-white px-2 py-2 text-xs font-bold text-slate-700"><option value="">ทุกแผนก</option>${selectOptions('dept',_analyticsFilters.dept)}</select></label>
+                    <label class="text-[10px] font-bold text-emerald-100">Area<select data-analytics-select="area" class="mt-1 w-full rounded-lg border border-white/20 bg-white px-2 py-2 text-xs font-bold text-slate-700"><option value="">ทุกพื้นที่</option>${selectOptions('area',_analyticsFilters.area)}</select></label>
+                    <label class="text-[10px] font-bold text-emerald-100">Accident Type<select data-analytics-select="type" class="mt-1 w-full rounded-lg border border-white/20 bg-white px-2 py-2 text-xs font-bold text-slate-700"><option value="">ทุกประเภท</option>${selectOptions('type',_analyticsFilters.type)}</select></label>
+                    <label class="text-[10px] font-bold text-emerald-100">Injury Type<select data-analytics-select="injury" class="mt-1 w-full rounded-lg border border-white/20 bg-white px-2 py-2 text-xs font-bold text-slate-700"><option value="">ทุกการบาดเจ็บ</option>${selectOptions('injury',_analyticsFilters.injury)}</select></label>
+                    <label class="text-[10px] font-bold text-emerald-100">KPI Scope<select data-analytics-select="recordable" class="mt-1 w-full rounded-lg border border-white/20 bg-white px-2 py-2 text-xs font-bold text-slate-700"><option value="">ทั้งหมด</option><option value="recordable" ${_analyticsFilters.recordable==='recordable'?'selected':''}>Recordable</option><option value="non-recordable" ${_analyticsFilters.recordable==='non-recordable'?'selected':''}>Non-recordable</option></select></label>
+                    <button type="button" onclick="window._accClearAnalyticsFilters()" class="mt-4 min-h-[38px] rounded-lg border border-white/25 bg-white/10 px-3 text-xs font-black text-white hover:bg-white/20">ล้างตัวกรองทั้งหมด</button>
+                </div>
+                <div class="flex flex-wrap items-center gap-2 rounded-xl border border-white/15 bg-black/10 px-3 py-2 text-xs">
+                    <span class="font-black text-emerald-100">กำลังดู:</span>
+                    ${filterSummary.map(item=>`<span class="rounded-full border border-white/15 bg-white/10 px-2.5 py-1 font-bold">${_htmlEsc(item)}</span>`).join('')}
+                </div>
+            </div>
+        </section>
+
+        ${scopedReports.length === 0 ? `<section data-analytics-state="${hasActiveFilters ? 'empty-filtered' : 'empty-year'}" role="status" class="flex flex-col gap-3 rounded-2xl border ${hasActiveFilters ? 'border-amber-200 bg-amber-50' : 'border-sky-200 bg-sky-50'} p-4 sm:flex-row sm:items-center sm:justify-between"><div><h3 class="text-sm font-black text-slate-800">${hasActiveFilters ? 'ไม่พบเคสที่ตรงกับตัวกรองนี้' : `ยังไม่มีรายงานอุบัติเหตุในปี ${_statsYear}`}</h3><p class="mt-1 text-xs font-medium text-slate-500">${hasActiveFilters ? 'ข้อมูลยังอยู่ครบ ลองล้างหรือปรับตัวกรองเพื่อดูผลลัพธ์อื่น' : 'นี่เป็นสถานะไม่มีข้อมูล ไม่ใช่ข้อผิดพลาดในการโหลดระบบ'}</p></div><button type="button" onclick="${hasActiveFilters ? 'window._accClearAnalyticsFilters()' : 'window._accRetryAnalytics()'}" class="min-h-[44px] rounded-xl border ${hasActiveFilters ? 'border-amber-300 bg-white text-amber-800' : 'border-sky-300 bg-white text-sky-800'} px-4 text-xs font-black">${hasActiveFilters ? 'ล้างตัวกรองทั้งหมด' : 'ตรวจสอบข้อมูลอีกครั้ง'}</button></section>` : ''}
 
         <!-- Department Risk Ranking -->
         <div class="order-4 ds-section overflow-hidden" data-acc-card-image="accident-department-risk-ranking"
-             style="box-shadow:0 4px 16px rgba(220,38,38,0.08),0 1px 4px rgba(0,0,0,0.06)">
+             style="min-width:0;max-width:100%;box-shadow:0 4px 16px rgba(220,38,38,0.08),0 1px 4px rgba(0,0,0,0.06)">
             <div class="h-1 w-full" style="background:linear-gradient(90deg,#dc2626,#7c3aed)"></div>
             <div class="p-5">
                 <div class="flex items-center gap-2 mb-1">
@@ -1706,7 +2396,7 @@ async function _renderAnalyticsPanel() {
                 <p class="text-xs text-slate-400 mb-4 ml-6">คะแนนความเสี่ยง = Recordable×3 + LostDays×2 + รวม</p>
                 ${deptRank.length === 0
                     ? `<div class="text-center py-10 text-slate-400 text-sm">ยังไม่มีข้อมูล</div>`
-                    : `<div class="overflow-x-auto">
+                    : `<div class="overflow-x-auto" style="display:block;width:100%;max-width:100%;overflow-x:auto">
                         <table class="ds-table text-left border-collapse text-sm">
                             <thead>
                                 <tr class="bg-slate-50 border-b-2 border-slate-200">
@@ -1724,7 +2414,7 @@ async function _renderAnalyticsPanel() {
                                     const score  = parseInt(d.recordable)*3 + parseInt(d.lostDays)*2 + parseInt(d.total);
                                     const isTop  = i === 0;
                                     return `
-                                    <tr class="hover:bg-slate-50 transition-colors" style="${isTop?'background:rgba(254,242,242,0.5)':''}">
+                                    <tr data-analytics-filter-key="dept" data-analytics-filter-value="${_htmlEsc(d.Department || '')}" tabindex="0" role="button" aria-label="กรอง Department ${_htmlEsc(d.Department || '')}" class="cursor-pointer hover:bg-emerald-50 transition-colors" style="${isTop?'background:rgba(254,242,242,0.5)':''}">
                                         <td class="px-3 py-3 font-bold ${isTop?'text-red-600':'text-slate-400'}">${i+1}</td>
                                         <td class="px-3 py-3 font-semibold text-slate-800">
                                             ${d.Department || '—'}
@@ -1743,7 +2433,7 @@ async function _renderAnalyticsPanel() {
             </div>
         </div>
 
-        <div class="order-2 grid xl:grid-cols-2 gap-6">
+        <div class="order-2 grid items-stretch xl:grid-cols-2 gap-6">
             <div class="ds-section overflow-hidden" data-acc-card-image="accident-injury-type-breakdown"
                  style="box-shadow:0 4px 16px rgba(14,165,233,0.08),0 1px 4px rgba(0,0,0,0.06)">
                 <div class="h-1 w-full" style="background:linear-gradient(90deg,#0ea5e9,#6366f1)"></div>
@@ -1754,10 +2444,10 @@ async function _renderAnalyticsPanel() {
                         </svg>
                         <div>
                             <h3 class="text-sm font-bold text-slate-700">Injury Type Breakdown</h3>
-                            <p class="text-xs text-slate-400">นับเฉพาะเคสอุบัติเหตุที่ใช้ในสถิติ ไม่รวม Near Miss</p>
+                            <p class="text-xs text-slate-400">นับทุกเคสที่มีการบาดเจ็บ รวม First Aid และไม่รวม Near Miss</p>
                         </div>
                     </div>
-                    ${_accParetoChart(injuryTypeStats, 'Waiting for injury type data')}
+                    ${_accInjuryIntelligenceCard(injuryTypeStats, scopedReports, previousScopedReports)}
                 </div>
             </div>
             <div class="ds-section overflow-hidden" data-acc-card-image="accident-body-part-ranking"
@@ -1770,20 +2460,20 @@ async function _renderAnalyticsPanel() {
                         </svg>
                         <div>
                             <h3 class="text-sm font-bold text-slate-700">Body Part Ranking</h3>
-                            <p class="text-xs text-slate-400">ส่วนร่างกายที่บาดเจ็บบ่อย ใช้จัดลำดับมาตรการป้องกัน</p>
+                            <p class="text-xs text-slate-400">นับทุกเคสที่มีการบาดเจ็บ รวม First Aid และไม่รวม Near Miss</p>
                         </div>
                     </div>
-                    ${_accBodyPartMap(bodyPartStats, 'ยังไม่มีข้อมูลส่วนร่างกายที่บาดเจ็บ')}
+                    ${_accBodyPartMap(bodyPartStats, missingBodyPart ? `มี ${missingBodyPart} เคสที่ยังไม่ได้กรอก Body Part` : 'ไม่มีเคสการบาดเจ็บตามตัวกรองนี้', scopedReports)}
                 </div>
             </div>
         </div>
 
         <!-- Hotspot + Trend Cards -->
-        <div class="order-1 grid grid-cols-1 gap-6">
+        <div class="order-1 grid grid-cols-1 gap-6" style="min-width:0;max-width:100%">
 
             <!-- Accident Hotspot -->
             <div class="ds-section overflow-hidden" data-acc-card-image="accident-hotspot"
-                 style="box-shadow:0 4px 16px rgba(249,115,22,0.08),0 1px 4px rgba(0,0,0,0.06)">
+                 style="min-width:0;max-width:100%;box-shadow:0 4px 16px rgba(249,115,22,0.08),0 1px 4px rgba(0,0,0,0.06)">
                 <div class="h-1 w-full" style="background:linear-gradient(90deg,#f97316,#eab308)"></div>
                 <div class="p-5">
                     <div class="flex items-center gap-2 mb-4">
@@ -1794,7 +2484,7 @@ async function _renderAnalyticsPanel() {
                         <h3 class="text-sm font-bold text-slate-700">Accident Hotspot</h3>
                         <span class="text-xs text-slate-400">(บริเวณที่เกิดบ่อย)</span>
                     </div>
-                    ${_accHotspotCard(hotspot, 'Waiting for location data')}
+                    ${_accHotspotCard(hotspot, 'Waiting for location data', previousDerived?.hotspot || [])}
                 </div>
             </div>
 
@@ -1816,6 +2506,7 @@ async function _renderAnalyticsPanel() {
                         </div>
                         ${_accTrendLineChart(trendRows, 'Waiting for accident trend data', {
                             key: 'accidentCases',
+                            filterKey: 'month',
                             label: 'Accident Cases',
                             ytdLabel: 'Accident Cases YTD',
                             avgLabel: 'Accident Avg / Month',
@@ -1847,6 +2538,7 @@ async function _renderAnalyticsPanel() {
                         </div>
                         ${_accTrendLineChart(trendRows, 'Waiting for Near Miss trend data', {
                             key: 'nearMiss',
+                            filterKey: 'month',
                             label: 'Near Miss Cases',
                             ytdLabel: 'Near Miss YTD',
                             avgLabel: 'Near Miss Avg / Month',
@@ -1873,6 +2565,22 @@ async function _renderAnalyticsPanel() {
             </div>
         </div>
     </div>`;
+    panel.querySelectorAll('[data-analytics-select]').forEach(select => {
+        select.addEventListener('change', () => window._accSetAnalyticsFilter(select.dataset.analyticsSelect, select.value));
+    });
+    const activateFilterTarget = target => {
+        const key = target?.dataset?.analyticsFilterKey;
+        if (!key) return;
+        window._accSetAnalyticsFilter(key, target.dataset.analyticsFilterValue || '');
+    };
+    panel.onclick = event => activateFilterTarget(event.target.closest('[data-analytics-filter-key]'));
+    panel.onkeydown = event => {
+        if (!['Enter', ' '].includes(event.key)) return;
+        const target = event.target.closest('[data-analytics-filter-key]');
+        if (!target) return;
+        event.preventDefault();
+        activateFilterTarget(target);
+    };
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1896,9 +2604,23 @@ async function _renderReportsPanel() {
     const depts   = _allDepts.length
         ? _allDepts
         : [...new Set(_reports.map(r => r.Department).filter(Boolean))].sort();
+    const drilldownLabels = _reportDrilldown ? [
+        _reportDrilldown.month ? (MONTHS_TH[Number(_reportDrilldown.month) - 1] || `เดือน ${_reportDrilldown.month}`) : '',
+        _filter.dept,
+        _reportDrilldown.area,
+        _filter.type,
+        _reportDrilldown.injury,
+        _reportDrilldown.bodyPart,
+        _reportDrilldown.bodySide ? _accBodySideLabel(_reportDrilldown.bodySide).split(' / ')[0] : '',
+        _reportDrilldown.recordable === 'recordable' ? 'Recordable' : (_reportDrilldown.recordable === 'non-recordable' ? 'Non-recordable' : ''),
+    ].filter(Boolean) : [];
 
     panel.innerHTML = `
     <div class="space-y-4">
+        ${_reportDrilldown ? `<div class="flex flex-col gap-2 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
+            <p class="text-xs font-bold text-emerald-800">เชื่อมจาก Analytics: ${drilldownLabels.map(_htmlEsc).join(' · ')}</p>
+            <button type="button" onclick="window._accClearReportDrilldown()" class="min-h-[36px] rounded-lg border border-emerald-200 bg-white px-3 text-xs font-black text-emerald-700">ล้างตัวกรองจาก Analytics</button>
+        </div>` : ''}
         <!-- Filter Bar -->
         <div class="rounded-2xl border border-slate-200 bg-white p-3 shadow-sm">
             <div class="grid grid-cols-2 md:grid-cols-[92px_minmax(160px,1fr)_minmax(150px,1fr)_130px_150px_auto_auto] gap-2 items-center">
@@ -1932,7 +2654,7 @@ async function _renderReportsPanel() {
                     <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 10v6m0 0l-3-3m3 3l3-3m4 7H5a2 2 0 01-2-2V7a2 2 0 012-2h4l2 2h8a2 2 0 012 2v9a2 2 0 01-2 2z"/></svg>
                     Excel
                 </button>
-                <span id="acc-rec-count" class="col-span-2 md:col-span-1 md:justify-self-end rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold text-slate-500">${_reports.length} รายการ</span>
+                <span id="acc-rec-count" class="col-span-2 md:col-span-1 md:justify-self-end rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold text-slate-500">${_visibleReports().length} รายการ</span>
             </div>
         </div>
 
@@ -1963,6 +2685,11 @@ async function _renderReportsPanel() {
         });
     });
 }
+
+window._accClearReportDrilldown = () => {
+    _reportDrilldown = null;
+    if (_activeTab === 'reports') _renderReportsPanel();
+};
 
 async function _fetchReports() {
     const requestId = ++_reportsRequest;
@@ -1997,8 +2724,21 @@ function _followupState(r) {
 }
 
 function _visibleReports() {
-    if (!_filter.quick) return _reports;
-    return _reports.filter(r => {
+    let rows = _reports;
+    if (_reportDrilldown) {
+        rows = rows.filter(report => {
+            if (_reportDrilldown.month && _accAnalyticsMonth(report) !== Number(_reportDrilldown.month)) return false;
+            if (_reportDrilldown.area && String(report.Area || '') !== String(_reportDrilldown.area)) return false;
+            if (_reportDrilldown.injury && String(report.InjuryType || '') !== String(_reportDrilldown.injury)) return false;
+            if (_reportDrilldown.bodyPart && String(report.BodyPart || '') !== String(_reportDrilldown.bodyPart)) return false;
+            if (_reportDrilldown.bodySide && String(report.BodySide || '') !== String(_reportDrilldown.bodySide)) return false;
+            if (_reportDrilldown.recordable === 'recordable' && !_accIsCountedStatReport(report)) return false;
+            if (_reportDrilldown.recordable === 'non-recordable' && _accIsCountedStatReport(report)) return false;
+            return true;
+        });
+    }
+    if (!_filter.quick) return rows;
+    return rows.filter(r => {
         const state = _followupState(r).key;
         if (_filter.quick === 'counted') return _accIsCountedStatReport(r);
         if (_filter.quick === 'notCounted') return !_accIsCountedStatReport(r);
@@ -2406,7 +3146,7 @@ function openAccidentForm(r, existingAttachments = []) {
                 <input type="time" name="AccidentTime" value="${d(r?.AccidentTime)}" class="form-input w-full">
             </div>
         </div>
-        <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+        <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
             <div>
                 <label class="block text-sm font-semibold text-slate-700 mb-1.5">สถานที่เกิดเหตุ (Location)</label>
                 <input name="Location" value="${_esc(d(r?.Location))}"
@@ -2487,6 +3227,14 @@ function openAccidentForm(r, existingAttachments = []) {
             <div>
                 <label class="block text-sm font-semibold text-slate-700 mb-1.5">ส่วนร่างกายที่บาดเจ็บ / Body Part</label>
                 ${_accOtherSelectHtml('BodyPart', BODY_PARTS, d(r?.BodyPart))}
+            </div>
+            <div>
+                <label class="block text-sm font-semibold text-slate-700 mb-1.5">ด้านของร่างกาย / Body Side</label>
+                <select name="BodySide" class="form-input w-full" aria-describedby="acc-body-side-help">
+                    <option value="">— เลือกด้าน / Select Side —</option>
+                    ${BODY_SIDES.map(item => `<option value="${item.value}" ${d(r?.BodySide)===item.value?'selected':''}>${item.label}</option>`).join('')}
+                </select>
+                <p id="acc-body-side-help" class="mt-1 text-[11px] text-slate-400">เลือกหลังจากระบุส่วนร่างกาย เพื่อแสดงตำแหน่งบนโมเดลให้ถูกต้อง</p>
             </div>
         </div>
         <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
@@ -2675,13 +3423,16 @@ function openAccidentForm(r, existingAttachments = []) {
         const severity = document.querySelector('#acc-form [name="Severity"]');
         const injury = document.querySelector('#acc-form [name="InjuryType"]');
         const bodyPart = document.querySelector('#acc-form [name="BodyPart"]');
+        const bodySide = document.querySelector('#acc-form [name="BodySide"]');
         if (isNear) {
             if (recordable) recordable.checked = false;
             if (lostDays) lostDays.value = 0;
             if (severity) severity.value = 'Minor';
             if (injury) injury.value = '';
             if (bodyPart) bodyPart.value = '';
+            if (bodySide) bodySide.value = '';
         }
+        if (bodySide) bodySide.disabled = isNear || !String(bodyPart?.value || '').trim();
         if (recordable) {
             if (isFirstAid) recordable.checked = false;
             if (isFatal) recordable.checked = true;
@@ -2707,7 +3458,10 @@ function openAccidentForm(r, existingAttachments = []) {
         if (statusSelect.value === 'Closed' && investigationSelect) investigationSelect.value = 'Closed';
     });
     document.querySelectorAll('#acc-form [data-acc-other-select]').forEach(select => {
-        select.addEventListener('change', () => _accSyncOtherInputs(document.getElementById('acc-form')));
+        select.addEventListener('change', () => {
+            _accSyncOtherInputs(document.getElementById('acc-form'));
+            if (select.name === 'BodyPart') syncNearMissSection();
+        });
     });
     _accSyncOtherInputs(document.getElementById('acc-form'));
     syncNearMissSection();
@@ -2764,7 +3518,7 @@ function openAccidentForm(r, existingAttachments = []) {
         const responsibleInput = document.getElementById('acc-responsible-search');
         const responsibleHidden = form.querySelector('[name="ResponsiblePerson"]');
         if (responsibleInput && responsibleHidden && !responsibleHidden.value.trim()) responsibleHidden.value = responsibleInput.value.trim();
-        const validationMessage = _validateAccidentForm(form);
+        const validationMessage = _validateAccidentForm(form, r);
         if (validationMessage) {
             if (errEl) { errEl.textContent = validationMessage; errEl.classList.remove('hidden'); }
             return;
@@ -3559,6 +4313,11 @@ function _nearMissDetailPanel(details, report = {}) {
 function _accStandardNarrativePanel(r) {
     const sections = [
         r.Description ? _accDocField('Incident Description / รายละเอียดเหตุการณ์', r.Description, { accent: 'red' }) : '',
+        (r.InjuryType || r.BodyPart || r.BodySide) ? `
+            ${_accDocField('Injury Type / ลักษณะการบาดเจ็บ', r.InjuryType, { accent: 'red' })}
+            ${_accDocField('Body Part / ส่วนร่างกาย', r.BodyPart, { accent: 'red' })}
+            ${_accDocField('Body Side / ด้านของร่างกาย', _accBodySideLabel(r.BodySide), { accent: 'red' })}
+        ` : '',
         r.MedicalTreatment ? _accDocField('Medical Treatment / การรักษาพยาบาล', r.MedicalTreatment, { accent: 'sky' }) : '',
         (r.RootCause || r.RootCauseDetail || r.ImmediateCause || r.UnsafeAct || r.UnsafeCondition) ? `
             ${_accDocField('Immediate Cause / สาเหตุทันที', r.ImmediateCause, { accent: 'amber' })}
@@ -3649,6 +4408,10 @@ function _renderAccidentDetail(r, auditRows = []) {
                     <p class="mt-1 text-sm font-bold ${overdue ? 'text-red-600' : 'text-slate-700'}">${_htmlEsc(fmtDate(r.DueDate))}</p>
                 </div>
             </div>
+            ${r.BodyPart ? `<div class="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3">
+                <div><p class="text-[10px] font-black uppercase text-emerald-600">Linked Anatomy</p><p class="text-sm font-bold text-slate-800">${_htmlEsc(r.BodyPart)}${r.BodySide ? ` · ${_htmlEsc(_accBodySideLabel(r.BodySide).split(' / ')[0])}` : ''}</p></div>
+                <button type="button" onclick="window._accShowReportOnAnatomy('${_esc(r.BodyPart)}','${_esc(r.BodySide || '')}',${Number(String(r.AccidentDate || '').slice(0,4)) || _statsYear})" class="min-h-[44px] rounded-xl bg-emerald-700 px-4 text-xs font-black text-white hover:bg-emerald-800">ดูบน Anatomy</button>
+            </div>` : ''}
 
             <div class="rounded-xl border border-slate-200 bg-white p-4">
                 <p class="text-xs font-bold uppercase text-slate-400 mb-3">Follow-up Timeline</p>
@@ -3875,6 +4638,7 @@ window._accExportPDF = async id => {
                     <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:9px">
                         ${_pdfField('Injury Type', v(r.InjuryType))}
                         ${_pdfField('Body Part', v(r.BodyPart))}
+                        ${_pdfField('Body Side', _accBodySideLabel(r.BodySide))}
                         ${_pdfField('Lost Days', r.LostDays > 0 ? r.LostDays + ' day(s)' : '0 day(s)')}
                         ${_pdfField('Recordable', recordableText)}
                         ${_pdfField('Medical Treatment', v(r.MedicalTreatment))}
@@ -3993,6 +4757,7 @@ window._accExportPDF = async id => {
                 <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px">
                     ${_pdfField('ประเภทการบาดเจ็บ', v(r.InjuryType))}
                     ${_pdfField('ส่วนของร่างกาย', v(r.BodyPart))}
+                    ${_pdfField('ด้านของร่างกาย', _accBodySideLabel(r.BodySide))}
                     ${_pdfField('วันหยุดงาน', r.LostDays > 0 ? r.LostDays + ' วัน' : '0 วัน')}
                     ${_pdfField('Recordable', r.IsRecordable ? 'ใช่' : 'ไม่ใช่')}
                     ${_pdfField('การรักษา', v(r.MedicalTreatment))}
@@ -4738,7 +5503,7 @@ function _isDateString(value) {
     return !value || /^\d{4}-\d{2}-\d{2}$/.test(String(value));
 }
 
-function _validateAccidentForm(form) {
+function _validateAccidentForm(form, originalReport = null) {
     const fd = new FormData(form);
     const otherMessage = _accOtherValidationMessage(form);
     if (otherMessage) return otherMessage;
@@ -4758,6 +5523,16 @@ function _validateAccidentForm(form) {
     const lostDays = Number(fd.get('LostDays') || 0);
     if (!Number.isFinite(lostDays) || lostDays < 0) return 'จำนวนวันหยุดงานต้องไม่ติดลบ';
     const type = String(fd.get('AccidentType') || '').trim();
+    const bodyPart = String(fd.get('BodyPart') || '').trim();
+    const bodySide = String(fd.get('BodySide') || '').trim();
+    const allowedBodySides = new Set(BODY_SIDES.map(item => item.value));
+    const preservesLegacyLostTimeZero = Boolean(
+        originalReport?.id
+        && String(originalReport.AccidentType || '').trim() === 'Lost Time'
+        && Number(originalReport.LostDays || 0) < 1
+        && type === 'Lost Time'
+        && lostDays < 1
+    );
     const isRecordable = ['1', 'on', 'true', 'yes'].includes(String(fd.get('IsRecordable') || '').trim().toLowerCase());
     const rootCause = String(fd.get('RootCause') || '').trim();
     const rootCauseDetail = String(fd.get('RootCauseDetail') || '').trim();
@@ -4767,8 +5542,11 @@ function _validateAccidentForm(form) {
     const needsRootCause = isRecordable || ['Medical Treatment', 'Lost Time', 'Fatal'].includes(type);
     if (type === 'Near Miss' && !String(fd.get('NearMissEvent') || '').trim()) return 'กรุณาระบุเหตุการณ์ Near Miss / Please describe the Near Miss event';
     if (type === 'Near Miss' && !String(fd.get('PotentialSeverity') || '').trim()) return 'กรุณาระบุระดับความรุนแรงที่อาจเกิดขึ้น / Please select potential severity';
+    if (type !== 'Near Miss' && bodyPart && !bodySide) return 'กรุณาเลือกด้านของร่างกายที่บาดเจ็บ / Please select Body Side';
+    if (!bodyPart && bodySide) return 'กรุณาเลือกส่วนร่างกายก่อนเลือกด้าน / Please select Body Part first';
+    if (bodySide && !allowedBodySides.has(bodySide)) return 'ด้านของร่างกายไม่ถูกต้อง / Invalid Body Side';
     if (['Near Miss', 'First Aid'].includes(type) && isRecordable) return `${type} ไม่สามารถกำหนดเป็น Recordable Case ได้`;
-    if (type === 'Lost Time' && lostDays < 1) return 'Lost Time ต้องระบุจำนวนวันหยุดงานมากกว่า 0';
+    if (type === 'Lost Time' && lostDays < 1 && !preservesLegacyLostTimeZero) return 'Lost Time ต้องระบุจำนวนวันหยุดงานมากกว่า 0';
     if (type === 'Medical Treatment' && !String(fd.get('MedicalTreatment') || '').trim()) return 'Medical Treatment ต้องระบุรายละเอียดการรักษา';
     if (type === 'Fatal' && !isRecordable) return 'Fatal ต้องกำหนดเป็น Recordable';
     if (needsRootCause && !rootCause && !rootCauseDetail) return 'กรุณาระบุสาเหตุหรือรายละเอียดสาเหตุ';
@@ -4806,5 +5584,5 @@ function _esc(str) {
 }
 
 installWindowActionLocks('accident', [
-  '_accSaveHotspotPositions', '_accShowCountedReports', '_accDeleteMonthlyReport', '_accViewReport', '_accEditReport', '_accDeleteReport', '_accExportPDF', '_accExportDashboardPDF', '_accDeleteAttachment', '_accToggleMonth'
+  '_accSaveHotspotPositions', '_accResetLayoutImage', '_accShowCountedReports', '_accDeleteMonthlyReport', '_accViewReport', '_accEditReport', '_accDeleteReport', '_accExportPDF', '_accExportDashboardPDF', '_accDeleteAttachment', '_accToggleMonth'
 ]);

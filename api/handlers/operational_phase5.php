@@ -198,12 +198,17 @@ function ensure_accident_tables(): void
         RootCause VARCHAR(255), RootCauseDetail TEXT, ImmediateCause VARCHAR(255), UnsafeAct TEXT, UnsafeCondition TEXT,
         CorrectiveAction TEXT, PreventiveAction TEXT, LostDays INT DEFAULT 0, IsRecordable TINYINT(1) DEFAULT 0,
         Status VARCHAR(50) DEFAULT 'Open', ReportedBy VARCHAR(100), CreatedBy VARCHAR(100),
-        InjuryType VARCHAR(100), BodyPart VARCHAR(100), MedicalTreatment TEXT, Position VARCHAR(100), EmploymentType VARCHAR(100),
+        InjuryType VARCHAR(100), BodyPart VARCHAR(100), BodySide VARCHAR(20), MedicalTreatment TEXT, Position VARCHAR(100), EmploymentType VARCHAR(100),
         ResponsiblePerson VARCHAR(100), DueDate DATE NULL, NearMissDetails TEXT,
         InvestigationStatus VARCHAR(50), PotentialSeverity VARCHAR(50), VerificationResult TEXT, VerifiedBy VARCHAR(100), VerifiedAt DATE NULL,
         IsDeleted TINYINT(1) DEFAULT 0, CreatedAt DATETIME DEFAULT CURRENT_TIMESTAMP, UpdatedAt DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
         KEY idx_date(AccidentDate), KEY idx_dept(Department), KEY idx_deleted(IsDeleted)
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
+    try {
+        db()->exec("ALTER TABLE accident_reports ADD COLUMN BodySide VARCHAR(20) NULL AFTER BodyPart");
+    } catch (Throwable $e) {
+        // Existing installations already provisioned by the additive migration.
+    }
     db()->exec("CREATE TABLE IF NOT EXISTS accident_attachments (
         id INT AUTO_INCREMENT PRIMARY KEY, AccidentID INT NOT NULL, FileName VARCHAR(255), FileURL TEXT, PublicID VARCHAR(255),
         FileType VARCHAR(100), FileSize BIGINT DEFAULT 0, UploadedBy VARCHAR(100), UploadedAt DATETIME DEFAULT CURRENT_TIMESTAMP,
@@ -234,6 +239,15 @@ function ensure_accident_tables(): void
         UpdatedAt DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
         UNIQUE KEY uq_acc_hotspot_area (AreaName),
         KEY idx_pinned (IsPinned)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
+    db()->exec("CREATE TABLE IF NOT EXISTS accident_hotspot_layout (
+        id TINYINT UNSIGNED NOT NULL PRIMARY KEY,
+        FileURL VARCHAR(1000) NOT NULL,
+        FileName VARCHAR(255) NOT NULL,
+        FileType VARCHAR(100) NOT NULL,
+        FileSize BIGINT UNSIGNED NOT NULL DEFAULT 0,
+        UpdatedBy VARCHAR(100) DEFAULT NULL,
+        UpdatedAt DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
 }
 
@@ -360,7 +374,7 @@ function p5_accident_near_miss_details(array $body): ?string
     return $details ? json_encode($details, JSON_UNESCAPED_UNICODE) : null;
 }
 
-function p5_accident_business_rule_error(array $body): ?string
+function p5_accident_business_rule_error(array $body, bool $allowLegacyLostTimeZero = false): ?string
 {
     $type = trim((string)($body['AccidentType'] ?? ''));
     if (!in_array($type, ['Near Miss', 'First Aid', 'Medical Treatment', 'Lost Time', 'Fatal'], true)) return 'Invalid accident type.';
@@ -368,10 +382,16 @@ function p5_accident_business_rule_error(array $body): ?string
     $lostDays = p5_int($body['LostDays'] ?? 0);
     $corrective = trim((string)($type === 'Near Miss' ? ($body['NearMissCAPA'] ?? $body['CorrectiveAction'] ?? '') : ($body['CorrectiveAction'] ?? '')));
     $needsRootCause = $recordable || in_array($type, ['Medical Treatment', 'Lost Time', 'Fatal'], true);
+    $bodyPart = trim((string)($body['BodyPart'] ?? ''));
+    $bodySide = trim((string)($body['BodySide'] ?? ''));
+    $allowedBodySides = ['Left', 'Right', 'Bilateral', 'Midline', 'Not Applicable'];
     if ($type === 'Near Miss' && trim((string)($body['NearMissEvent'] ?? '')) === '') return 'Near Miss event is required.';
     if ($type === 'Near Miss' && !in_array(trim((string)($body['PotentialSeverity'] ?? '')), ['Low', 'Medium', 'High', 'Critical'], true)) return 'Potential severity is required.';
+    if ($type !== 'Near Miss' && $bodyPart !== '' && $bodySide === '') return 'Please select Body Side.';
+    if ($bodyPart === '' && $bodySide !== '') return 'Please select Body Part first.';
+    if ($bodySide !== '' && !in_array($bodySide, $allowedBodySides, true)) return 'Invalid Body Side.';
     if (in_array($type, ['Near Miss', 'First Aid'], true) && $recordable) return $type . ' cannot be a Recordable Case.';
-    if ($type === 'Lost Time' && $lostDays < 1) return 'Lost Time requires at least one lost day.';
+    if ($type === 'Lost Time' && $lostDays < 1 && !$allowLegacyLostTimeZero) return 'Lost Time requires at least one lost day.';
     if ($type === 'Medical Treatment' && trim((string)($body['MedicalTreatment'] ?? '')) === '') return 'Medical treatment detail is required.';
     if ($type === 'Fatal' && !$recordable) return 'Fatal must be recordable.';
     if ($needsRootCause && trim((string)($body['RootCause'] ?? '')) === '' && trim((string)($body['RootCauseDetail'] ?? '')) === '') return 'Root cause is required.';
@@ -393,6 +413,7 @@ function handle_accident_routes(string $method, string $path): bool
         ensure_accident_tables();
     }
     $statCond = "IsRecordable=1 AND AccidentType NOT IN ('Near Miss','First Aid')";
+    $injuryCond = "AccidentType<>'Near Miss'";
     if ($method === 'GET' && $path === '/accident/reports') {
         $sql = "SELECT r.*,e.EmployeeName,e.Team,(SELECT COUNT(*) FROM accident_attachments a WHERE a.AccidentID=r.id) AS AttachmentCount FROM accident_reports r LEFT JOIN employees e ON e.EmployeeID=r.EmployeeID WHERE (r.IsDeleted IS NULL OR r.IsDeleted=0)";
         $p = [];
@@ -428,8 +449,8 @@ function handle_accident_routes(string $method, string $path): bool
             'hotspot' => db_rows("SELECT COALESCE(Area,'(Unspecified)') AS area,COUNT(*) AS cnt,SUM($statCond) AS recordable,SUM(CASE WHEN $statCond THEN LostDays ELSE 0 END) AS lostDays FROM accident_reports WHERE (IsDeleted IS NULL OR IsDeleted=0) AND YEAR(AccidentDate)=? GROUP BY Area ORDER BY cnt DESC LIMIT 8", $yp),
             'rootCauses' => db_rows("SELECT COALESCE(RootCause,'(Unspecified)') AS cause,COUNT(*) AS cnt FROM accident_reports WHERE (IsDeleted IS NULL OR IsDeleted=0) AND YEAR(AccidentDate)=? GROUP BY RootCause ORDER BY cnt DESC LIMIT 8", $yp),
             'nearMissTrend' => db_rows("SELECT MONTH(AccidentDate) AS mo,COUNT(*) AS cnt FROM accident_reports WHERE (IsDeleted IS NULL OR IsDeleted=0) AND AccidentType='Near Miss' AND YEAR(AccidentDate)=? GROUP BY MONTH(AccidentDate) ORDER BY mo", $yp),
-            'injuryTypeStats' => db_rows("SELECT COALESCE(NULLIF(InjuryType,''),'(Unspecified)') AS label,COUNT(*) AS cnt FROM accident_reports WHERE (IsDeleted IS NULL OR IsDeleted=0) AND $statCond AND YEAR(AccidentDate)=? GROUP BY label ORDER BY cnt DESC LIMIT 10", $yp),
-            'bodyPartStats' => db_rows("SELECT COALESCE(NULLIF(BodyPart,''),'(Unspecified)') AS label,COUNT(*) AS cnt FROM accident_reports WHERE (IsDeleted IS NULL OR IsDeleted=0) AND $statCond AND YEAR(AccidentDate)=? GROUP BY label ORDER BY cnt DESC LIMIT 10", $yp),
+            'injuryTypeStats' => db_rows("SELECT COALESCE(NULLIF(InjuryType,''),'(Unspecified)') AS label,COUNT(*) AS cnt FROM accident_reports WHERE (IsDeleted IS NULL OR IsDeleted=0) AND $injuryCond AND YEAR(AccidentDate)=? GROUP BY label ORDER BY cnt DESC LIMIT 10", $yp),
+            'bodyPartStats' => db_rows("SELECT COALESCE(NULLIF(BodyPart,''),'(ไม่ระบุ)') AS bodyPart,NULLIF(BodySide,'') AS bodySide,CONCAT(COALESCE(NULLIF(BodyPart,''),'(ไม่ระบุ)'),' · ',CASE NULLIF(BodySide,'') WHEN 'Left' THEN 'ซ้าย' WHEN 'Right' THEN 'ขวา' WHEN 'Bilateral' THEN 'ทั้งสองข้าง' WHEN 'Midline' THEN 'กึ่งกลาง' WHEN 'Not Applicable' THEN 'ไม่เกี่ยวข้อง' ELSE 'ไม่ระบุข้าง' END) AS label,COUNT(*) AS cnt FROM accident_reports WHERE (IsDeleted IS NULL OR IsDeleted=0) AND $injuryCond AND YEAR(AccidentDate)=? GROUP BY COALESCE(NULLIF(BodyPart,''),'(ไม่ระบุ)'),NULLIF(BodySide,'') ORDER BY cnt DESC LIMIT 10", $yp),
         ]]);
     }
     if ($method === 'GET' && $path === '/accident/hotspot-positions') {
@@ -455,22 +476,71 @@ function handle_accident_routes(string $method, string $path): bool
         }
         json_response(['success' => true, 'data' => db_rows('SELECT id,AreaName,DisplayName,MapXPercent,MapYPercent,IsPinned,UpdatedBy,UpdatedAt FROM accident_hotspot_positions ORDER BY AreaName ASC')]);
     }
+    if ($method === 'GET' && $path === '/accident/hotspot-layout') {
+        $layout = db_row('SELECT id,FileURL,FileName,FileType,FileSize,UpdatedBy,UpdatedAt FROM accident_hotspot_layout WHERE id=1 LIMIT 1');
+        json_response(['success' => true, 'data' => $layout ? array_merge($layout, ['IsDefault' => false]) : ['IsDefault' => true]]);
+    }
+    if ($method === 'POST' && $path === '/accident/hotspot-layout') {
+        require_admin();
+        $files = p5_store_files('layoutFile', 1, 'accident');
+        if (!$files) json_response(['success' => false, 'message' => 'Please select a Factory Layout image.'], 400);
+        $file = $files[0];
+        $allowedTypes = ['image/jpeg', 'image/png', 'image/webp'];
+        $allowedExt = ['jpg', 'jpeg', 'png', 'webp'];
+        if (!in_array($file['type'], $allowedTypes, true) || !in_array($file['ext'], $allowedExt, true) || (int)$file['size'] > 10 * 1024 * 1024) {
+            p5_cleanup($files);
+            json_response(['success' => false, 'message' => 'Factory Layout must be a valid JPG, PNG or WEBP image not exceeding 10 MB.'], 400);
+        }
+        $existing = db_row('SELECT FileURL FROM accident_hotspot_layout WHERE id=1 LIMIT 1');
+        try {
+            db_execute(
+                'INSERT INTO accident_hotspot_layout (id,FileURL,FileName,FileType,FileSize,UpdatedBy)
+                 VALUES (1,?,?,?,?,?)
+                 ON DUPLICATE KEY UPDATE FileURL=VALUES(FileURL),FileName=VALUES(FileName),FileType=VALUES(FileType),FileSize=VALUES(FileSize),UpdatedBy=VALUES(UpdatedBy)',
+                [$file['url'], $file['name'], $file['type'], $file['size'], p5_user_name($user)]
+            );
+        } catch (Throwable $e) {
+            p5_cleanup($files);
+            throw $e;
+        }
+        if ($existing && !empty($existing['FileURL']) && $existing['FileURL'] !== $file['url']) delete_uploaded_file($existing['FileURL']);
+        $layout = db_row('SELECT id,FileURL,FileName,FileType,FileSize,UpdatedBy,UpdatedAt FROM accident_hotspot_layout WHERE id=1');
+        json_response(['success' => true, 'data' => array_merge($layout, ['IsDefault' => false])]);
+    }
+    if ($method === 'DELETE' && $path === '/accident/hotspot-layout') {
+        require_admin();
+        $layout = db_row('SELECT FileURL FROM accident_hotspot_layout WHERE id=1 LIMIT 1');
+        db_execute('DELETE FROM accident_hotspot_layout WHERE id=1');
+        if ($layout && !empty($layout['FileURL'])) delete_uploaded_file($layout['FileURL']);
+        json_response(['success' => true, 'data' => ['IsDefault' => true]]);
+    }
     $isAccidentReportCreate = $method === 'POST' && $path === '/accident/reports';
     if ($isAccidentReportCreate || ($rp !== null && ($method === 'PUT' || $method === 'POST'))) {
         require_admin(); $b = p5_body(); $files = [];
         try {
             $emp = db_row('SELECT Department,Position FROM employees WHERE EmployeeID=? LIMIT 1', [trim((string)($b['EmployeeID'] ?? ''))]);
             if (!$emp || !p5_date($b['ReportDate'] ?? null) || !p5_date($b['AccidentDate'] ?? null) || empty($b['AccidentType'])) json_response(['success' => false, 'message' => 'Invalid accident report payload.'], 400);
-            $ruleError = p5_accident_business_rule_error($b);
+            $existingReport = null;
+            $allowLegacyLostTimeZero = false;
+            if (!$isAccidentReportCreate) {
+                $existingReport = db_row('SELECT id,AccidentType,LostDays FROM accident_reports WHERE id=? AND (IsDeleted IS NULL OR IsDeleted=0)', [(int)$rp['id']]);
+                if (!$existingReport) json_response(['success' => false, 'message' => 'Accident report not found.'], 404);
+                $allowLegacyLostTimeZero = trim((string)($existingReport['AccidentType'] ?? '')) === 'Lost Time'
+                    && p5_int($existingReport['LostDays'] ?? 0) < 1
+                    && trim((string)($b['AccidentType'] ?? '')) === 'Lost Time'
+                    && p5_int($b['LostDays'] ?? 0) < 1;
+            }
+            $ruleError = p5_accident_business_rule_error($b, $allowLegacyLostTimeZero);
             if ($ruleError !== null) json_response(['success' => false, 'message' => $ruleError], 400);
             $files = p5_store_files('files', 10, 'accident');
-            $vals = [p5_date($b['ReportDate']), p5_date($b['AccidentDate']), trim((string)($b['AccidentTime'] ?? '')) ?: null, trim((string)$b['EmployeeID']), $emp['Department'] ?? null, $b['Area'] ?? null, $b['Location'] ?? null, $b['AccidentType'], $b['Severity'] ?? 'Minor', $b['Description'] ?? '', $b['RootCause'] ?? null, $b['RootCauseDetail'] ?? '', $b['ImmediateCause'] ?? null, $b['UnsafeAct'] ?? null, $b['UnsafeCondition'] ?? null, $b['CorrectiveAction'] ?? '', $b['PreventiveAction'] ?? null, p5_int($b['LostDays'] ?? 0), p5_bool($b['IsRecordable'] ?? 0), $b['Status'] ?? 'Open', $b['ReportedBy'] ?? p5_user_name($user), $b['InjuryType'] ?? null, $b['BodyPart'] ?? null, $b['MedicalTreatment'] ?? null, $b['Position'] ?? ($emp['Position'] ?? null), $b['EmploymentType'] ?? null, $b['ResponsiblePerson'] ?? null, p5_date($b['DueDate'] ?? null), p5_accident_near_miss_details($b), $b['InvestigationStatus'] ?? (($b['Status'] ?? '') === 'Closed' ? 'Closed' : 'Reported'), $b['PotentialSeverity'] ?? null, $b['VerificationResult'] ?? null, $b['VerifiedBy'] ?? null, p5_date($b['VerifiedAt'] ?? null)];
+            $bodySide = ($b['AccidentType'] ?? '') === 'Near Miss' ? null : (trim((string)($b['BodySide'] ?? '')) ?: null);
+            $vals = [p5_date($b['ReportDate']), p5_date($b['AccidentDate']), trim((string)($b['AccidentTime'] ?? '')) ?: null, trim((string)$b['EmployeeID']), $emp['Department'] ?? null, $b['Area'] ?? null, $b['Location'] ?? null, $b['AccidentType'], $b['Severity'] ?? 'Minor', $b['Description'] ?? '', $b['RootCause'] ?? null, $b['RootCauseDetail'] ?? '', $b['ImmediateCause'] ?? null, $b['UnsafeAct'] ?? null, $b['UnsafeCondition'] ?? null, $b['CorrectiveAction'] ?? '', $b['PreventiveAction'] ?? null, p5_int($b['LostDays'] ?? 0), p5_bool($b['IsRecordable'] ?? 0), $b['Status'] ?? 'Open', $b['ReportedBy'] ?? p5_user_name($user), $b['InjuryType'] ?? null, $b['BodyPart'] ?? null, $bodySide, $b['MedicalTreatment'] ?? null, $b['Position'] ?? ($emp['Position'] ?? null), $b['EmploymentType'] ?? null, $b['ResponsiblePerson'] ?? null, p5_date($b['DueDate'] ?? null), p5_accident_near_miss_details($b), $b['InvestigationStatus'] ?? (($b['Status'] ?? '') === 'Closed' ? 'Closed' : 'Reported'), $b['PotentialSeverity'] ?? null, $b['VerificationResult'] ?? null, $b['VerifiedBy'] ?? null, p5_date($b['VerifiedAt'] ?? null)];
             if ($isAccidentReportCreate) {
-                db_execute('INSERT INTO accident_reports (ReportDate,AccidentDate,AccidentTime,EmployeeID,Department,Area,Location,AccidentType,Severity,Description,RootCause,RootCauseDetail,ImmediateCause,UnsafeAct,UnsafeCondition,CorrectiveAction,PreventiveAction,LostDays,IsRecordable,Status,ReportedBy,InjuryType,BodyPart,MedicalTreatment,Position,EmploymentType,ResponsiblePerson,DueDate,NearMissDetails,InvestigationStatus,PotentialSeverity,VerificationResult,VerifiedBy,VerifiedAt,CreatedBy) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)', array_merge($vals, [p5_user_name($user)]));
+                db_execute('INSERT INTO accident_reports (ReportDate,AccidentDate,AccidentTime,EmployeeID,Department,Area,Location,AccidentType,Severity,Description,RootCause,RootCauseDetail,ImmediateCause,UnsafeAct,UnsafeCondition,CorrectiveAction,PreventiveAction,LostDays,IsRecordable,Status,ReportedBy,InjuryType,BodyPart,BodySide,MedicalTreatment,Position,EmploymentType,ResponsiblePerson,DueDate,NearMissDetails,InvestigationStatus,PotentialSeverity,VerificationResult,VerifiedBy,VerifiedAt,CreatedBy) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)', array_merge($vals, [p5_user_name($user)]));
                 $id = (int)db()->lastInsertId();
             } else {
                 $id = (int)$rp['id'];
-                db_execute('UPDATE accident_reports SET ReportDate=?,AccidentDate=?,AccidentTime=?,EmployeeID=?,Department=?,Area=?,Location=?,AccidentType=?,Severity=?,Description=?,RootCause=?,RootCauseDetail=?,ImmediateCause=?,UnsafeAct=?,UnsafeCondition=?,CorrectiveAction=?,PreventiveAction=?,LostDays=?,IsRecordable=?,Status=?,ReportedBy=?,InjuryType=?,BodyPart=?,MedicalTreatment=?,Position=?,EmploymentType=?,ResponsiblePerson=?,DueDate=?,NearMissDetails=?,InvestigationStatus=?,PotentialSeverity=?,VerificationResult=?,VerifiedBy=?,VerifiedAt=? WHERE id=?', array_merge($vals, [$id]));
+                db_execute('UPDATE accident_reports SET ReportDate=?,AccidentDate=?,AccidentTime=?,EmployeeID=?,Department=?,Area=?,Location=?,AccidentType=?,Severity=?,Description=?,RootCause=?,RootCauseDetail=?,ImmediateCause=?,UnsafeAct=?,UnsafeCondition=?,CorrectiveAction=?,PreventiveAction=?,LostDays=?,IsRecordable=?,Status=?,ReportedBy=?,InjuryType=?,BodyPart=?,BodySide=?,MedicalTreatment=?,Position=?,EmploymentType=?,ResponsiblePerson=?,DueDate=?,NearMissDetails=?,InvestigationStatus=?,PotentialSeverity=?,VerificationResult=?,VerifiedBy=?,VerifiedAt=? WHERE id=?', array_merge($vals, [$id]));
             }
             foreach ($files as $f) db_execute('INSERT INTO accident_attachments (AccidentID,FileName,FileURL,PublicID,FileType,FileSize,UploadedBy) VALUES (?,?,?,?,?,?,?)', [$id, $f['name'], $f['url'], $f['stored'], $f['type'], $f['size'], p5_user_name($user)]);
             json_response(['success' => true, 'message' => 'Saved.', 'id' => $id]);

@@ -4,9 +4,11 @@
 
 const express = require('express');
 const router  = express.Router();
+const fs      = require('fs');
+const path    = require('path');
 const db      = require('../db');
 const { isAdmin }                        = require('../middleware/auth');
-const { storage, deleteLocalUpload, cleanOriginalFilename } = require('../storage');
+const { storage, deleteLocalUpload, cleanOriginalFilename, uploadsDir } = require('../storage');
 const { ensureAuditTable, logAudit } = require('../utils/audit');
 const multer  = require('multer');
 
@@ -50,6 +52,21 @@ const monthlyUpload = multer({
     limits: { fileSize: 20 * 1024 * 1024, files: 1 },
 }).single('reportFile');
 
+const layoutFileTypes = new Map([
+    ['image/jpeg', new Set(['jpg', 'jpeg'])],
+    ['image/png', new Set(['png'])],
+    ['image/webp', new Set(['webp'])],
+]);
+const layoutUpload = multer({
+    storage,
+    fileFilter: (_req, file, cb) => {
+        const ext = String(file.originalname || '').split('.').pop().toLowerCase();
+        const accepted = Boolean(layoutFileTypes.get(file.mimetype)?.has(ext));
+        cb(accepted ? null : new Error('Factory Layout must be JPG, PNG or WEBP.'), accepted);
+    },
+    limits: { fileSize: 10 * 1024 * 1024, files: 1 },
+}).single('layoutFile');
+
 // Wrap multer in a promise so we can await it inside async routes
 function runUpload(req, res) {
     return new Promise((resolve, reject) =>
@@ -69,12 +86,14 @@ const s = v => (v != null && typeof v === 'string') ? v.trim() : v;
 const MODULE = 'accident';
 const ACCIDENT_TYPES = new Set(['Near Miss', 'First Aid', 'Medical Treatment', 'Lost Time', 'Fatal']);
 const EXCLUDED_STATS_TYPES = ["Near Miss", "First Aid"];
+const BODY_SIDES = new Set(['Left', 'Right', 'Bilateral', 'Midline', 'Not Applicable']);
 const INVESTIGATION_STATUSES = new Set(['Reported', 'Under Investigation', 'CAPA Assigned', 'Verified', 'Closed']);
 const POTENTIAL_SEVERITIES = new Set(['Low', 'Medium', 'High', 'Critical']);
 const STATS_ACCIDENT_CONDITION = `
     IsRecordable = 1
     AND AccidentType NOT IN ('Near Miss', 'First Aid')
 `;
+const INJURY_ANALYTICS_CONDITION = "AccidentType <> 'Near Miss'";
 
 function userName(req) {
     const u = req.user || {};
@@ -85,6 +104,31 @@ function runMonthlyUpload(req, res) {
     return new Promise((resolve, reject) =>
         monthlyUpload(req, res, err => (err ? reject(err) : resolve()))
     );
+}
+
+function runLayoutUpload(req, res) {
+    return new Promise((resolve, reject) =>
+        layoutUpload(req, res, err => (err ? reject(err) : resolve()))
+    );
+}
+
+function validLayoutSignature(file) {
+    if (!file?.filename) return false;
+    const target = path.join(uploadsDir, path.basename(file.filename));
+    let handle;
+    try {
+        handle = fs.openSync(target, 'r');
+        const header = Buffer.alloc(12);
+        const length = fs.readSync(handle, header, 0, header.length, 0);
+        if (file.mimetype === 'image/jpeg') return length >= 3 && header[0] === 0xff && header[1] === 0xd8 && header[2] === 0xff;
+        if (file.mimetype === 'image/png') return length >= 8 && header.subarray(0, 8).equals(Buffer.from([0x89,0x50,0x4e,0x47,0x0d,0x0a,0x1a,0x0a]));
+        if (file.mimetype === 'image/webp') return length >= 12 && header.toString('ascii', 0, 4) === 'RIFF' && header.toString('ascii', 8, 12) === 'WEBP';
+        return false;
+    } catch (_) {
+        return false;
+    } finally {
+        if (handle !== undefined) fs.closeSync(handle);
+    }
 }
 
 function normalizeYear(value, fallback = null) {
@@ -250,7 +294,7 @@ function uploadErrorMessage(err) {
     return err?.message || 'อัปโหลดไฟล์ไม่สำเร็จ';
 }
 
-function accidentBusinessRuleError(body) {
+function accidentBusinessRuleError(body, { allowLegacyLostTimeZero = false } = {}) {
     const type = s(body.AccidentType);
     const isRecordable = boolFlag(body.IsRecordable) === 1;
     const lostDays = nonNegativeInt(body.LostDays, 0, 36500);
@@ -258,12 +302,17 @@ function accidentBusinessRuleError(body) {
     const correctiveAction = type === 'Near Miss'
         ? (s(body.NearMissCAPA) || s(body.CorrectiveAction))
         : s(body.CorrectiveAction);
+    const bodyPart = s(body.BodyPart);
+    const bodySide = s(body.BodySide);
 
     if (!ACCIDENT_TYPES.has(type)) return 'ประเภทอุบัติเหตุไม่ถูกต้อง / Invalid accident type';
     if (type === 'Near Miss' && !s(body.NearMissEvent)) return 'กรุณาระบุเหตุการณ์ Near Miss / Please describe the Near Miss event';
     if (type === 'Near Miss' && !normalizePotentialSeverity(body.PotentialSeverity)) return 'กรุณาระบุระดับความรุนแรงที่อาจเกิดขึ้น / Please select potential severity';
+    if (type !== 'Near Miss' && bodyPart && !bodySide) return 'กรุณาเลือกด้านของร่างกายที่บาดเจ็บ / Please select Body Side';
+    if (!bodyPart && bodySide) return 'กรุณาเลือกส่วนร่างกายก่อนเลือกด้าน / Please select Body Part first';
+    if (bodySide && !BODY_SIDES.has(bodySide)) return 'ด้านของร่างกายไม่ถูกต้อง / Invalid Body Side';
     if (EXCLUDED_STATS_TYPES.includes(type) && isRecordable) return `${type} ไม่สามารถกำหนดเป็น Recordable Case ได้`;
-    if (type === 'Lost Time' && lostDays < 1) return 'Lost Time ต้องระบุจำนวนวันหยุดงานมากกว่า 0';
+    if (type === 'Lost Time' && lostDays < 1 && !allowLegacyLostTimeZero) return 'Lost Time ต้องระบุจำนวนวันหยุดงานมากกว่า 0';
     if (type === 'Medical Treatment' && !s(body.MedicalTreatment)) return 'Medical Treatment ต้องระบุรายละเอียดการรักษา';
     if (type === 'Fatal' && !isRecordable) return 'Fatal ต้องกำหนดเป็น Recordable';
     if (needsRootCause && !s(body.RootCause) && !s(body.RootCauseDetail)) return 'กรุณาระบุสาเหตุหรือรายละเอียดสาเหตุ';
@@ -317,6 +366,7 @@ async function ensureTable() {
         "ALTER TABLE Accident_Reports ADD COLUMN EmploymentType   VARCHAR(50)  DEFAULT NULL",
         "ALTER TABLE Accident_Reports ADD COLUMN InjuryType       VARCHAR(100) DEFAULT NULL",
         "ALTER TABLE Accident_Reports ADD COLUMN BodyPart         VARCHAR(100) DEFAULT NULL",
+        "ALTER TABLE Accident_Reports ADD COLUMN BodySide         VARCHAR(20)  DEFAULT NULL AFTER BodyPart",
         "ALTER TABLE Accident_Reports ADD COLUMN MedicalTreatment TEXT",
         "ALTER TABLE Accident_Reports ADD COLUMN ImmediateCause   TEXT",
         "ALTER TABLE Accident_Reports ADD COLUMN UnsafeAct        TEXT",
@@ -392,6 +442,18 @@ async function ensureTable() {
             UpdatedAt    DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
             UNIQUE KEY uq_acc_hotspot_area (AreaName),
             KEY idx_pinned (IsPinned)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+    `);
+
+    await db.query(`
+        CREATE TABLE IF NOT EXISTS accident_hotspot_layout (
+            id          TINYINT UNSIGNED NOT NULL PRIMARY KEY,
+            FileURL     VARCHAR(1000) NOT NULL,
+            FileName    VARCHAR(255) NOT NULL,
+            FileType    VARCHAR(100) NOT NULL,
+            FileSize    BIGINT UNSIGNED NOT NULL DEFAULT 0,
+            UpdatedBy   VARCHAR(100) DEFAULT NULL,
+            UpdatedAt   DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
     `);
 
@@ -667,20 +729,31 @@ router.get('/analytics', async (req, res) => {
             SELECT COALESCE(NULLIF(InjuryType,''),'(ไม่ระบุ)') AS label, COUNT(*) AS cnt
             FROM Accident_Reports
             WHERE (IsDeleted IS NULL OR IsDeleted = 0)
-              AND ${STATS_ACCIDENT_CONDITION}
-              AND AccidentType <> 'Near Miss' ${yf}
+              AND ${INJURY_ANALYTICS_CONDITION} ${yf}
             GROUP BY COALESCE(NULLIF(InjuryType,''),'(ไม่ระบุ)')
             ORDER BY cnt DESC
             LIMIT 10
         `, yp);
 
         const [bodyPartStats] = await db.query(`
-            SELECT COALESCE(NULLIF(BodyPart,''),'(ไม่ระบุ)') AS label, COUNT(*) AS cnt
+            SELECT COALESCE(NULLIF(BodyPart,''),'(ไม่ระบุ)') AS bodyPart,
+                   NULLIF(BodySide,'') AS bodySide,
+                   CONCAT(
+                       COALESCE(NULLIF(BodyPart,''),'(ไม่ระบุ)'), ' · ',
+                       CASE NULLIF(BodySide,'')
+                           WHEN 'Left' THEN 'ซ้าย'
+                           WHEN 'Right' THEN 'ขวา'
+                           WHEN 'Bilateral' THEN 'ทั้งสองข้าง'
+                           WHEN 'Midline' THEN 'กึ่งกลาง'
+                           WHEN 'Not Applicable' THEN 'ไม่เกี่ยวข้อง'
+                           ELSE 'ไม่ระบุข้าง'
+                       END
+                   ) AS label,
+                   COUNT(*) AS cnt
             FROM Accident_Reports
             WHERE (IsDeleted IS NULL OR IsDeleted = 0)
-              AND ${STATS_ACCIDENT_CONDITION}
-              AND AccidentType <> 'Near Miss' ${yf}
-            GROUP BY COALESCE(NULLIF(BodyPart,''),'(ไม่ระบุ)')
+              AND ${INJURY_ANALYTICS_CONDITION} ${yf}
+            GROUP BY COALESCE(NULLIF(BodyPart,''),'(ไม่ระบุ)'), NULLIF(BodySide,'')
             ORDER BY cnt DESC
             LIMIT 10
         `, yp);
@@ -746,6 +819,76 @@ router.put('/hotspot-positions', isAdmin, async (req, res) => {
     }
 });
 
+// GET /api/accident/hotspot-layout
+router.get('/hotspot-layout', async (_req, res) => {
+    try {
+        const [rows] = await db.query(`
+            SELECT id, FileURL, FileName, FileType, FileSize, UpdatedBy, UpdatedAt
+            FROM accident_hotspot_layout WHERE id=1 LIMIT 1
+        `);
+        res.json({ success: true, data: rows[0] ? { ...rows[0], IsDefault: false } : { IsDefault: true } });
+    } catch (err) {
+        serverError(res, err, 'Cannot load Factory Layout configuration.');
+    }
+});
+
+// POST /api/accident/hotspot-layout (admin, multipart layoutFile)
+router.post('/hotspot-layout', isAdmin, async (req, res) => {
+    let uploaded = null;
+    try {
+        await ensureTable();
+        await runLayoutUpload(req, res);
+        uploaded = req.file;
+        if (!uploaded) return res.status(400).json({ success: false, message: 'Please select a Factory Layout image.' });
+        if (!validLayoutSignature(uploaded)) {
+            deleteLocalUpload(uploaded.publicUrl || uploaded.path);
+            uploaded = null;
+            return res.status(400).json({ success: false, message: 'The uploaded file is not a valid JPG, PNG or WEBP image.' });
+        }
+
+        const [existingRows] = await db.query('SELECT FileURL FROM accident_hotspot_layout WHERE id=1 LIMIT 1');
+        const fileUrl = uploaded.publicUrl || uploaded.path;
+        await db.query(`
+            INSERT INTO accident_hotspot_layout (id, FileURL, FileName, FileType, FileSize, UpdatedBy)
+            VALUES (1,?,?,?,?,?)
+            ON DUPLICATE KEY UPDATE
+                FileURL=VALUES(FileURL), FileName=VALUES(FileName), FileType=VALUES(FileType),
+                FileSize=VALUES(FileSize), UpdatedBy=VALUES(UpdatedBy)
+        `, [fileUrl, uploaded.originalName || cleanOriginalFilename(uploaded.originalname), uploaded.mimetype, uploaded.size || 0, userName(req)]);
+        const previousUrl = existingRows[0]?.FileURL;
+        if (previousUrl && previousUrl !== fileUrl) deleteLocalUpload(previousUrl);
+        const [[row]] = await db.query('SELECT id,FileURL,FileName,FileType,FileSize,UpdatedBy,UpdatedAt FROM accident_hotspot_layout WHERE id=1');
+        await logAudit(req, {
+            action: 'UPDATE_ACCIDENT_HOTSPOT_LAYOUT', module: MODULE, targetType: 'factory_layout', targetId: '1',
+            detail: `Factory Layout updated: ${row.FileName}`, metadata: { fileType: row.FileType, fileSize: Number(row.FileSize) || 0 }, statusCode: 200,
+        });
+        uploaded = null;
+        res.json({ success: true, data: { ...row, IsDefault: false } });
+    } catch (err) {
+        if (uploaded) deleteLocalUpload(uploaded.publicUrl || uploaded.path);
+        const status = err instanceof multer.MulterError || /Factory Layout/.test(String(err?.message || '')) ? 400 : 500;
+        if (status === 400) return res.status(400).json({ success: false, message: err.code === 'LIMIT_FILE_SIZE' ? 'Factory Layout must not exceed 10 MB.' : err.message });
+        serverError(res, err, 'Cannot update Factory Layout.');
+    }
+});
+
+// DELETE /api/accident/hotspot-layout (admin reset to bundled default)
+router.delete('/hotspot-layout', isAdmin, async (req, res) => {
+    try {
+        await ensureTable();
+        const [rows] = await db.query('SELECT FileURL,FileName FROM accident_hotspot_layout WHERE id=1 LIMIT 1');
+        await db.query('DELETE FROM accident_hotspot_layout WHERE id=1');
+        if (rows[0]?.FileURL) deleteLocalUpload(rows[0].FileURL);
+        await logAudit(req, {
+            action: 'RESET_ACCIDENT_HOTSPOT_LAYOUT', module: MODULE, targetType: 'factory_layout', targetId: '1',
+            detail: `Factory Layout reset to bundled default${rows[0]?.FileName ? ` from ${rows[0].FileName}` : ''}`, statusCode: 200,
+        });
+        res.json({ success: true, data: { IsDefault: true } });
+    } catch (err) {
+        serverError(res, err, 'Cannot reset Factory Layout.');
+    }
+});
+
 router.post('/reports', isAdmin, async (req, res) => {
     try {
         await ensureTable();
@@ -759,7 +902,7 @@ router.post('/reports', isAdmin, async (req, res) => {
             Area, Location, AccidentType, Severity, Description,
             RootCause, RootCauseDetail, ImmediateCause, UnsafeAct, UnsafeCondition,
             CorrectiveAction, PreventiveAction, LostDays, IsRecordable, Status,
-            ReportedBy, InjuryType, BodyPart, MedicalTreatment,
+            ReportedBy, InjuryType, BodyPart, BodySide, MedicalTreatment,
             Position, EmploymentType, ResponsiblePerson, DueDate,
             InvestigationStatus, PotentialSeverity, VerificationResult, VerifiedBy, VerifiedAt,
         } = req.body;
@@ -794,10 +937,10 @@ router.post('/reports', isAdmin, async (req, res) => {
               RootCause, RootCauseDetail, ImmediateCause, UnsafeAct, UnsafeCondition,
               CorrectiveAction, PreventiveAction,
               LostDays, IsRecordable, Status, ReportedBy, CreatedBy,
-              InjuryType, BodyPart, MedicalTreatment,
+              InjuryType, BodyPart, BodySide, MedicalTreatment,
               Position, EmploymentType, ResponsiblePerson, DueDate, NearMissDetails,
               InvestigationStatus, PotentialSeverity, VerificationResult, VerifiedBy, VerifiedAt)
-             VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+             VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
             [
                 s(ReportDate), s(AccidentDate), s(AccidentTime) || null,
                 empId, department, s(Area) || null, s(Location) || null,
@@ -809,7 +952,9 @@ router.post('/reports', isAdmin, async (req, res) => {
                 nonNegativeInt(LostDays, 0, 36500), boolFlag(IsRecordable),
                 s(Status) || 'Open',
                 s(ReportedBy) || userName(req), userName(req),
-                s(InjuryType) || null, s(BodyPart) || null, s(MedicalTreatment) || null,
+                s(InjuryType) || null, s(BodyPart) || null,
+                s(AccidentType) === 'Near Miss' ? null : (s(BodySide) || null),
+                s(MedicalTreatment) || null,
                 empPosition, s(EmploymentType) || null,
                 s(ResponsiblePerson) || null, s(DueDate) || null, nearMissJson,
                 normalizeInvestigationStatus(InvestigationStatus, Status),
@@ -852,7 +997,7 @@ router.put('/reports/:id', isAdmin, async (req, res) => {
             Area, Location, AccidentType, Severity, Description,
             RootCause, RootCauseDetail, ImmediateCause, UnsafeAct, UnsafeCondition,
             CorrectiveAction, PreventiveAction, LostDays, IsRecordable, Status,
-            ReportedBy, InjuryType, BodyPart, MedicalTreatment,
+            ReportedBy, InjuryType, BodyPart, BodySide, MedicalTreatment,
             Position, EmploymentType, ResponsiblePerson, DueDate,
             InvestigationStatus, PotentialSeverity, VerificationResult, VerifiedBy, VerifiedAt,
         } = req.body;
@@ -863,7 +1008,16 @@ router.put('/reports/:id', isAdmin, async (req, res) => {
         if (!isDateValue(ReportDate) || !isDateValue(AccidentDate) || !isDateValue(DueDate) || !isDateValue(VerifiedAt)) {
             return failValidation(req, res, 'รูปแบบวันที่ไม่ถูกต้อง');
         }
-        const ruleError = accidentBusinessRuleError(req.body);
+        const [[existing]] = await db.query(
+            'SELECT id, AccidentType, LostDays FROM Accident_Reports WHERE id = ? AND (IsDeleted IS NULL OR IsDeleted = 0)',
+            [id]
+        );
+        if (!existing) return failValidation(req, res, 'ไม่พบรายงาน', 404);
+        const allowLegacyLostTimeZero = s(existing.AccidentType) === 'Lost Time'
+            && nonNegativeInt(existing.LostDays, 0, 36500) < 1
+            && s(AccidentType) === 'Lost Time'
+            && nonNegativeInt(LostDays, 0, 36500) < 1;
+        const ruleError = accidentBusinessRuleError(req.body, { allowLegacyLostTimeZero });
         if (ruleError) return failValidation(req, res, ruleError);
 
         const empId = s(EmployeeID);
@@ -874,10 +1028,6 @@ router.put('/reports/:id', isAdmin, async (req, res) => {
         if (empRows.length === 0) {
             return failValidation(req, res, `ไม่พบรหัสพนักงาน "${empId}" ใน Employee Master Data`);
         }
-
-        // Verify the report exists (ownership check)
-        const [[existing]] = await db.query('SELECT id FROM Accident_Reports WHERE id = ? AND (IsDeleted IS NULL OR IsDeleted = 0)', [id]);
-        if (!existing) return failValidation(req, res, 'ไม่พบรายงาน', 404);
 
         const department = empRows[0].Department || null;
         const nearMissDetails = buildNearMissDetails(req.body);
@@ -891,7 +1041,7 @@ router.put('/reports/:id', isAdmin, async (req, res) => {
                 RootCause=?, RootCauseDetail=?, ImmediateCause=?, UnsafeAct=?, UnsafeCondition=?,
                 CorrectiveAction=?, PreventiveAction=?,
                 LostDays=?, IsRecordable=?, Status=?, ReportedBy=?,
-                InjuryType=?, BodyPart=?, MedicalTreatment=?,
+                InjuryType=?, BodyPart=?, BodySide=?, MedicalTreatment=?,
                 Position=?, EmploymentType=?, ResponsiblePerson=?, DueDate=?,
                 NearMissDetails=?,
                 InvestigationStatus=?, PotentialSeverity=?, VerificationResult=?, VerifiedBy=?, VerifiedAt=?
@@ -906,7 +1056,9 @@ router.put('/reports/:id', isAdmin, async (req, res) => {
                 s(CorrectiveAction) || '', s(PreventiveAction) || null,
                 nonNegativeInt(LostDays, 0, 36500), boolFlag(IsRecordable),
                 s(Status) || 'Open', s(ReportedBy) || userName(req),
-                s(InjuryType) || null, s(BodyPart) || null, s(MedicalTreatment) || null,
+                s(InjuryType) || null, s(BodyPart) || null,
+                s(AccidentType) === 'Near Miss' ? null : (s(BodySide) || null),
+                s(MedicalTreatment) || null,
                 s(Position) || null, s(EmploymentType) || null,
                 s(ResponsiblePerson) || null, s(DueDate) || null,
                 nearMissJson,
