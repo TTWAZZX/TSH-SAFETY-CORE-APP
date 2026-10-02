@@ -709,9 +709,9 @@ function patrolSelfScheduleChoiceItems(preferredId = '') {
     const today = patrolDateOnly(new Date());
     const currentMonth = today.slice(0, 7);
     const items = [
-        ...patrolSelfScheduledMonthOpenItems(),
+        ...patrolSelfScheduledMonthOpenItems().filter(item => patrolScheduleDate(item).startsWith(currentMonth)),
         ...patrolSelfMakeupScheduleItems(),
-    ].filter(item => patrolScheduleDate(item).startsWith(currentMonth));
+    ];
     const unique = [];
     const seen = new Set();
     for (const item of items) {

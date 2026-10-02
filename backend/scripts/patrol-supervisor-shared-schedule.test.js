@@ -44,13 +44,41 @@ assert.match(ui, /function patrolSupervisorOccurrenceDisplayItems/);
 assert.match(ui, /function patrolScheduleStatusBadgeClass/);
 assert.match(ui, /bg-emerald-100 text-emerald-700/);
 assert.match(ui, /bg-red-100 text-red-600/);
-assert.match(ui, /filter\(item => patrolScheduleDate\(item\)\.startsWith\(currentMonth\)\)/);
+assert.match(ui, /patrolSelfScheduledMonthOpenItems\(\)\.filter\(item => patrolScheduleDate\(item\)\.startsWith\(currentMonth\)\)/);
+assert.doesNotMatch(ui, /\.\.\.patrolSelfMakeupScheduleItems\(\),\s*\]\.filter\(item => patrolScheduleDate\(item\)\.startsWith\(currentMonth\)\)/);
 assert.match(ui, /checkinType: date < today \? 'compensation' : \(date === today \? 'normal' : 'future'\)/);
 assert.match(ui, /รอบค้าง \/ เดินซ่อม/);
 assert.match(ui, /data-type=/);
 assert.match(ui, /optionType === 'compensation'/);
 assert.match(ui, /max-height:\$\{isSupervisorPersonal \? '315px' : '200px'\}/);
 assert.match(ui, /รอบนี้ยังไม่ถึงกำหนด/);
+
+const selfScheduleChoiceSource = ui.slice(
+    ui.indexOf('function patrolSelfScheduleChoiceItems'),
+    ui.indexOf('function patrolSelfScheduleChoicesHTML')
+);
+const selfScheduleChoiceItems = vm.runInNewContext(`(${selfScheduleChoiceSource.replace(/^function patrolSelfScheduleChoiceItems/, 'function')})`, {
+    patrolDateOnly: value => typeof value === 'object' ? '2026-10-02' : String(value || '').slice(0, 10),
+    patrolSelfScheduledMonthOpenItems: () => [
+        { id: 'oct-future', date: '2026-10-07', round: 1, area: 'Factory 1' },
+        { id: 'nov-future', date: '2026-11-04', round: 1, area: 'Factory 2' },
+    ],
+    patrolSelfMakeupScheduleItems: () => [
+        { id: 'jan-missed', date: '2026-01-28', round: 2, area: 'Factory 3' },
+    ],
+    patrolSessionId: item => String(item.id || ''),
+    patrolSessionCompleted: () => false,
+    patrolSessionLeaveBlocking: () => false,
+    patrolScheduleDate: item => String(item.date || ''),
+    patrolScheduleRound: item => Number(item.round || 0),
+    patrolScheduleArea: item => String(item.area || ''),
+});
+const selfScheduleChoices = selfScheduleChoiceItems();
+assert.deepStrictEqual(
+    Array.from(selfScheduleChoices, item => `${item.id}:${item.checkinType}`),
+    ['jan-missed:compensation', 'oct-future:future'],
+    'The selector must retain overdue rounds from earlier months while limiting future choices to the current month.'
+);
 
 const adminSupervisorPickerStart = ui.indexOf('function _arsvRenderSchedulePicker');
 const adminSupervisorPicker = ui.slice(

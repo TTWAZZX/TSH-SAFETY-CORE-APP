@@ -49,6 +49,7 @@ async function cleanup() {
     await db.query('DELETE FROM Patrol_EmailOutbox WHERE EmployeeID=?', [employeeId]).catch(() => {});
     await db.query('DELETE FROM Patrol_Leave_Requests WHERE EmployeeID=?', [employeeId]).catch(() => {});
     await db.query('DELETE FROM Patrol_Self_Checkin WHERE EmployeeID=?', [employeeId]).catch(() => {});
+    await db.query('DELETE FROM Patrol_Sessions WHERE CreatedBy=?', [marker]).catch(() => {});
     await db.query("DELETE FROM Patrol_Roster WHERE EmployeeID=? AND RosterGroup='supervisor'", [employeeId]).catch(() => {});
     await db.query('DELETE FROM Employees WHERE EmployeeID=?', [employeeId]).catch(() => {});
 }
@@ -68,7 +69,7 @@ async function cleanup() {
     const today = bangkokToday();
     const year = Number(today.slice(0, 4));
     const month = Number(today.slice(5, 7));
-    const [todayRows] = await db.query(
+    let [todayRows] = await db.query(
         `SELECT s.SessionID,s.PatrolDate,s.PatrolRound,a.Name AS AreaName,a.Code AS AreaCode
            FROM Patrol_Sessions s
            LEFT JOIN Patrol_Areas a ON a.id=s.AreaID
@@ -76,13 +77,35 @@ async function cleanup() {
           ORDER BY s.PatrolRound,s.TeamID`,
         [today]
     );
-    const byRound = new Map();
-    for (const row of todayRows) {
-        const round = Number(row.PatrolRound || 0);
-        if (!byRound.has(round)) byRound.set(round, []);
-        byRound.get(round).push(row);
+    const findSharedCandidates = rows => {
+        const byRound = new Map();
+        for (const row of rows) {
+            const round = Number(row.PatrolRound || 0);
+            if (!byRound.has(round)) byRound.set(round, []);
+            byRound.get(round).push(row);
+        }
+        return [...byRound.values()].find(items => items.length >= 2);
+    };
+    let sharedCandidates = findSharedCandidates(todayRows);
+    if (!sharedCandidates) {
+        const [areas] = await db.query('SELECT id FROM Patrol_Areas ORDER BY SortOrder,id LIMIT 2');
+        assert.ok(areas.length >= 2, 'Local calendar fixture needs at least two Patrol areas');
+        for (const [index, area] of areas.entries()) {
+            await db.query(
+                "INSERT INTO Patrol_Sessions(SessionID,PatrolDate,Year,Description,TeamName,Status,CreatedBy,AreaID,PatrolRound) VALUES(?,?,?,?,?,'In Progress',?,?,1)",
+                [`${marker}_TODAY_${index + 1}`, `${today} 08:00:00`, year, marker, marker, marker, area.id]
+            );
+        }
+        [todayRows] = await db.query(
+            `SELECT s.SessionID,s.PatrolDate,s.PatrolRound,a.Name AS AreaName,a.Code AS AreaCode
+               FROM Patrol_Sessions s
+               LEFT JOIN Patrol_Areas a ON a.id=s.AreaID
+              WHERE DATE(s.PatrolDate)=? AND (s.Status IS NULL OR s.Status<>'Cancelled')
+              ORDER BY s.PatrolRound,s.TeamID`,
+            [today]
+        );
+        sharedCandidates = findSharedCandidates(todayRows);
     }
-    const sharedCandidates = [...byRound.values()].find(rows => rows.length >= 2);
     assert.ok(sharedCandidates, `Local calendar needs at least two area sessions on ${today}`);
 
     const [[monthProjection]] = await db.query(
@@ -170,7 +193,8 @@ async function cleanup() {
             (SELECT COUNT(*) FROM Employees WHERE EmployeeID=?) +
             (SELECT COUNT(*) FROM Patrol_Roster WHERE EmployeeID=?) +
             (SELECT COUNT(*) FROM Patrol_Self_Checkin WHERE EmployeeID=?) +
-            (SELECT COUNT(*) FROM Patrol_EmailOutbox WHERE EmployeeID=?) count`, [employeeId, employeeId, employeeId, employeeId]).catch(() => [[{ count: -1 }]]);
+            (SELECT COUNT(*) FROM Patrol_EmailOutbox WHERE EmployeeID=?) +
+            (SELECT COUNT(*) FROM Patrol_Sessions WHERE CreatedBy=?) count`, [employeeId, employeeId, employeeId, employeeId, marker]).catch(() => [[{ count: -1 }]]);
         console.log(`Patrol supervisor shared schedule UAT residue: ${Number(residue.count)}`);
         await db.end().catch(() => {});
     }
