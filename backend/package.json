@@ -84,6 +84,7 @@
     "uat:safety360-db-cross-system": "node scripts/safety360-db-cross-system-uat.js",
     "uat:safety360-browser": "node scripts/safety360-browser-uat.js",
     "uat:safety360-production-readonly": "node scripts/safety360-production-readonly-uat.js",
+    "uat:safety360-production-browser": "node scripts/safety360-production-browser-uat.js",
     "test:fourm-bulk-code": "node scripts/fourm-bulk-curriculum-code.test.js",
     "test:fourm-notice-responsible": "node scripts/fourm-notice-responsible.test.js",
     "test:fourm-training-log": "node scripts/fourm-training-log-contract.test.js",
