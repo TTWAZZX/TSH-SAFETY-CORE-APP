@@ -94,6 +94,65 @@ function mapLatestByKey(rows, keyFn, year) {
     return out;
 }
 
+function getCccfWorkerPersonalTargetResult(progressRow, fallbackPassPct = 80) {
+    if (!progressRow) return null;
+    const configuredCoverageTarget = Math.max(0, Number(progressRow.target || 0));
+    const rawRecords = Math.max(0, Number(progressRow.rawRecords || 0));
+    // CCCF Worker is a people-coverage activity. A scope/employee override can
+    // contain the covered headcount (for example 237), but Safety 360 answers
+    // whether this one employee has submitted at least one Form A. Never use
+    // the coverage denominator as an individual's required form count.
+    const yearlyTarget = configuredCoverageTarget > 0 ? 1 : 0;
+    const actualCount = yearlyTarget > 0 && rawRecords > 0 ? 1 : 0;
+    const passPct = Math.max(0, Math.min(100, Number(progressRow.passPct ?? fallbackPassPct)));
+    const completionPct = yearlyTarget > 0
+        ? Math.min(100, Math.round(actualCount * 100 / yearlyTarget))
+        : null;
+    return {
+        yearlyTarget,
+        actualCount,
+        completionPct,
+        passPct,
+        passed: completionPct === null ? null : completionPct >= passPct,
+        noData: false,
+        calculationScope: { type: 'employee', employeeId: String(progressRow.employeeId || '').trim() },
+        calculationMethod: 'cccf_worker_personal_binary_submission',
+        targetSource: progressRow.targetSource || null,
+        rawRecords,
+        configuredCoverageTarget,
+    };
+}
+
+function getCccfWorkerSafety360TargetResult(progressRow, unitProgress, fallbackPassPct = 80) {
+    if (!progressRow) return null;
+    const unitTarget = Math.max(0, Number(unitProgress?.unitTarget || 0));
+    const hasManualActual = unitProgress?.targetConfigured === true
+        && unitTarget > 0
+        && unitProgress?.achievedOverride !== null
+        && unitProgress?.achievedOverride !== undefined;
+    if (!hasManualActual) return getCccfWorkerPersonalTargetResult(progressRow, fallbackPassPct);
+    const actualCount = Math.max(0, Number(unitProgress.achievedOverride || 0));
+    const passPct = Math.max(0, Math.min(100, Number(progressRow.passPct ?? fallbackPassPct)));
+    const completionPct = Math.min(100, Math.round(actualCount * 100 / unitTarget));
+    return {
+        yearlyTarget: unitTarget,
+        actualCount,
+        completionPct,
+        passPct,
+        passed: completionPct >= passPct,
+        noData: false,
+        calculationScope: {
+            type: 'department_unit',
+            department: String(progressRow.department || unitProgress.department || '').trim(),
+            unit: String(progressRow.unit || unitProgress.unit || '').trim(),
+        },
+        calculationMethod: 'cccf_worker_unit_achieved_override',
+        targetSource: 'cccf_unit_targets.achieved_override',
+        rawRecords: Math.max(0, Number(progressRow.rawRecords || 0)),
+        configuredCoverageTarget: unitTarget,
+    };
+}
+
 async function getCccfWorkerProgress(db, year, options = {}) {
     const safeYear = Math.max(2000, Math.min(2100, Number(year) || new Date().getFullYear()));
     if (options.ensureSchema !== false) await ensureCccfWorkerVersionTables(db);
@@ -110,7 +169,7 @@ async function getCccfWorkerProgress(db, year, options = {}) {
         db.query("SELECT EmployeeID,YearlyTarget,PassPct,IsNA FROM Employee_Activity_Targets WHERE ActivityKey='cccf_worker'"),
         db.query('SELECT EmployeeID,COUNT(*) AS recordCount FROM CCCF_FormA_Worker WHERE YEAR(SubmitDate)=? GROUP BY EmployeeID', [safeYear]),
         db.query("SELECT TRIM(COALESCE(SafetyUnit,'')) AS Unit,MAX(TRIM(COALESCE(Department,''))) AS Department,COUNT(*) AS rawRecords FROM CCCF_FormA_Worker WHERE YEAR(SubmitDate)=? GROUP BY TRIM(COALESCE(SafetyUnit,''))", [safeYear]),
-        db.query('SELECT unit_name AS Unit,yearly_target AS UnitTarget FROM CCCF_Unit_Targets WHERE target_year=?', [safeYear]),
+        db.query('SELECT unit_name AS Unit,yearly_target AS UnitTarget,achieved_override AS AchievedOverride FROM CCCF_Unit_Targets WHERE target_year=?', [safeYear]),
         db.query("SELECT TRIM(u.name) AS Unit,TRIM(COALESCE(d.Name,'')) AS Department FROM Master_SafetyUnits u LEFT JOIN Master_Departments d ON d.id=u.department_id"),
         db.query("SELECT PositionName,YearlyTarget,PassPct,IsNA,TargetYear FROM Activity_Position_Template_Years WHERE ActivityKey='cccf_worker' AND TargetYear IN (?,0) ORDER BY CASE WHEN TargetYear=? THEN 0 ELSE 1 END", [safeYear, safeYear]),
         db.query("SELECT Department,Unit,YearlyTarget,PassPct,IsNA,TargetYear FROM Activity_Scope_Override_Years WHERE ActivityKey='cccf_worker' AND TargetYear IN (?,0) ORDER BY CASE WHEN TargetYear=? THEN 0 ELSE 1 END", [safeYear, safeYear]),
@@ -129,7 +188,7 @@ async function getCccfWorkerProgress(db, year, options = {}) {
     const ensureUnit = (unit, department = '') => {
         const key = String(unit || '').trim();
         if (!unitMap.has(key)) {
-            unitMap.set(key, { unit: key, department: String(department || '').trim(), unitTarget: 0, targetConfigured: false, personalTargetTotal: 0, actualTowardTarget: 0, rawRecords: 0, eligibleEmployees: 0, notStarted: 0, inProgress: 0, completed: 0, exceeded: 0 });
+            unitMap.set(key, { unit: key, department: String(department || '').trim(), unitTarget: 0, achievedOverride: null, targetConfigured: false, personalTargetTotal: 0, actualTowardTarget: 0, rawRecords: 0, eligibleEmployees: 0, notStarted: 0, inProgress: 0, completed: 0, exceeded: 0 });
         } else if (department && !unitMap.get(key).department) {
             unitMap.get(key).department = String(department).trim();
         }
@@ -137,7 +196,7 @@ async function getCccfWorkerProgress(db, year, options = {}) {
     };
     masterUnits.forEach(row => ensureUnit(row.Unit, row.Department));
     rawUnits.forEach(row => { ensureUnit(row.Unit, row.Department).rawRecords = Number(row.rawRecords || 0); });
-    unitTargets.forEach(row => { const item = ensureUnit(row.Unit); item.unitTarget = Math.max(0, Number(row.UnitTarget || 0)); item.targetConfigured = true; });
+    unitTargets.forEach(row => { const item = ensureUnit(row.Unit); item.unitTarget = Math.max(0, Number(row.UnitTarget || 0)); item.achievedOverride = row.AchievedOverride === null || row.AchievedOverride === undefined ? null : Math.max(0, Number(row.AchievedOverride || 0)); item.targetConfigured = true; });
 
     const employeeRows = [];
     for (const employee of employees) {
@@ -213,4 +272,4 @@ async function snapshotCccfWorkerTarget(db, employeeId, year, reason = 'form_sub
     return row;
 }
 
-module.exports = { getCccfWorkerProgress, snapshotCccfWorkerTarget, ensureCccfWorkerVersionTables };
+module.exports = { getCccfWorkerProgress, getCccfWorkerPersonalTargetResult, getCccfWorkerSafety360TargetResult, snapshotCccfWorkerTarget, ensureCccfWorkerVersionTables };

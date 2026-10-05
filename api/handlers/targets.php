@@ -85,8 +85,9 @@ function dynamic_activity_ratio(string $key, string $department, int $year): arr
     $dept = trim($department);
     $empty = ['numerator' => 0, 'denominator' => 0, 'completionPct' => null, 'noData' => true, 'department' => $dept];
     if ($dept === '') return $empty;
+    try {
     if ($key === 'patrol_issue') {
-        $rows = safe_rows(
+        $rows = db_rows(
             "SELECT COUNT(*) AS denominator,
                     SUM(CASE WHEN CurrentStatus='Closed' THEN 1 ELSE 0 END) AS numerator
                FROM patrol_issues
@@ -100,7 +101,7 @@ function dynamic_activity_ratio(string $key, string $department, int $year): arr
     }
     if ($key === 'yokoten') {
         $targetedTopics = [];
-        foreach (safe_rows(
+        foreach (db_rows(
             'SELECT YokotenID,TargetDepts,TargetUnits
                FROM yokotentopics
               WHERE IsActive=1
@@ -113,7 +114,7 @@ function dynamic_activity_ratio(string $key, string $department, int $year): arr
         if (!$targetedTopics) return $empty;
         $targetedIds = array_column($targetedTopics, 'YokotenID');
         $placeholders = implode(',', array_fill(0, count($targetedIds), '?'));
-        $responses = safe_rows(
+        $responses = db_rows(
             "SELECT r.YokotenID,COALESCE(NULLIF(r.SafetyUnit,''),NULLIF(e.Unit,''),NULLIF(e.Team,'')) AS EffectiveSafetyUnit
                FROM yokotenresponses r
                LEFT JOIN employees e ON e.EmployeeID=r.EmployeeID
@@ -122,7 +123,7 @@ function dynamic_activity_ratio(string $key, string $department, int $year): arr
             array_merge([$dept], $targetedIds)
         );
         $responseMap=[];foreach($responses as $response)$responseMap[(string)$response['YokotenID']]=$response;
-        $masterUnits=safe_rows('SELECT u.name,u.short_code,d.Name AS department FROM master_safetyunits u LEFT JOIN master_departments d ON d.id=u.department_id');
+        $masterUnits=db_rows('SELECT u.name,u.short_code,d.Name AS department FROM master_safetyunits u LEFT JOIN master_departments d ON d.id=u.department_id');
         $numerator=0;
         foreach($targetedTopics as $topic){
             $response=$responseMap[(string)$topic['YokotenID']]??null;
@@ -131,6 +132,10 @@ function dynamic_activity_ratio(string $key, string $department, int $year): arr
         }
         $denominator = count($targetedIds);
         return ['numerator' => $numerator, 'denominator' => $denominator, 'completionPct' => (int) round($numerator * 100 / $denominator), 'noData' => false, 'department' => $dept];
+    }
+    } catch (Throwable $error) {
+        $empty['calculationMethod'] = 'source_unavailable';
+        return $empty;
     }
     return $empty;
 }
@@ -165,9 +170,14 @@ function people_coverage(string $key, string $department, string $unit, int $yea
             $unitFilter = " AND TRIM(COALESCE(SafetyUnit,''))=?";
             $params[] = $scopedUnit;
         }
-        $rows = safe_rows("SELECT COUNT(*) AS numerator FROM cccf_forma_worker WHERE TRIM(COALESCE(Department,''))=? AND YEAR(SubmitDate)=?$unitFilter", $params);
+        $rows = safe_rows("SELECT COUNT(DISTINCT COALESCE(
+                            NULLIF(CONCAT('id:',TRIM(COALESCE(EmployeeID,''))),'id:'),
+                            NULLIF(CONCAT('name:',LOWER(TRIM(COALESCE(EmployeeName,'')))),'name:')
+                        )) AS numerator
+                           FROM cccf_forma_worker
+                          WHERE TRIM(COALESCE(Department,''))=? AND YEAR(SubmitDate)=?$unitFilter", $params);
         if (!$rows) return $empty;
-        return people_coverage_result($rows[0]['numerator'] ?? 0, $yearlyTarget, $dept, $scopedUnit, 'worker_form_records');
+        return people_coverage_result($rows[0]['numerator'] ?? 0, $yearlyTarget, $dept, $scopedUnit, 'distinct_worker_submitters');
     }
     if ($key === 'cccf_permanent') {
         $params = [$dept, $year];
@@ -176,7 +186,12 @@ function people_coverage(string $key, string $department, string $unit, int $yea
             $unitFilter = " AND EXISTS (SELECT 1 FROM employees e WHERE e.EmployeeID=f.AssigneeID AND TRIM(COALESCE(e.Unit,''))=?)";
             $params[] = $scopedUnit;
         }
-        $rows = safe_rows("SELECT COUNT(DISTINCT COALESCE(NULLIF(f.AssigneeID,''),NULLIF(f.SubmitterName,''))) AS numerator FROM cccf_forma_permanent f WHERE TRIM(COALESCE(f.Department,''))=? AND YEAR(f.SubmitDate)=?$unitFilter", $params);
+        $rows = safe_rows("SELECT COUNT(DISTINCT COALESCE(
+                            NULLIF(CONCAT('id:',TRIM(COALESCE(f.AssigneeID,''))),'id:'),
+                            NULLIF(CONCAT('name:',LOWER(TRIM(COALESCE(f.SubmitterName,'')))),'name:')
+                        )) AS numerator
+                           FROM cccf_forma_permanent f
+                          WHERE TRIM(COALESCE(f.Department,''))=? AND YEAR(f.SubmitDate)=?$unitFilter", $params);
         if (!$rows) return $empty;
         return people_coverage_result($rows[0]['numerator'] ?? 0, $yearlyTarget, $dept, $scopedUnit, 'distinct_permanent_assignees');
     }
@@ -186,7 +201,7 @@ function people_coverage(string $key, string $department, string $unit, int $yea
         return people_coverage_result($rows[0]['numerator'] ?? 0, $yearlyTarget, $dept, '', 'department_attendee_snapshot');
     }
     if ($key === 'training') {
-        $rows = safe_rows("SELECT COUNT(DISTINCT r.EmployeeID) AS numerator FROM training_records r JOIN employees e ON e.EmployeeID=r.EmployeeID WHERE TRIM(COALESCE(e.Department,''))=? AND YEAR(r.TrainingDate)=? AND r.IsPassed=1", [$dept, $year]);
+        $rows = safe_rows("SELECT COUNT(DISTINCT NULLIF(TRIM(r.EmployeeID),'')) AS numerator FROM training_records r JOIN employees e ON e.EmployeeID=r.EmployeeID WHERE TRIM(COALESCE(e.Department,''))=? AND YEAR(r.TrainingDate)=? AND r.IsPassed=1", [$dept, $year]);
         if (!$rows) return $empty;
         return people_coverage_result($rows[0]['numerator'] ?? 0, $yearlyTarget, $dept, '', 'distinct_passed_employees');
     }
@@ -197,7 +212,7 @@ function people_coverage(string $key, string $department, string $unit, int $yea
             $unitFilter = " AND EXISTS (SELECT 1 FROM employees e WHERE e.EmployeeID=h.ReporterID AND TRIM(COALESCE(e.Unit,''))=?)";
             $params[] = $scopedUnit;
         }
-        $rows = safe_rows("SELECT COUNT(DISTINCT NULLIF(h.ReporterID,'')) AS numerator FROM hiyarireports h WHERE TRIM(COALESCE(h.Department,''))=? AND YEAR(h.ReportDate)=? AND h.DeletedAt IS NULL$unitFilter", $params);
+        $rows = safe_rows("SELECT COUNT(DISTINCT NULLIF(TRIM(h.ReporterID),'')) AS numerator FROM hiyarireports h WHERE TRIM(COALESCE(h.Department,''))=? AND YEAR(h.ReportDate)=? AND h.DeletedAt IS NULL$unitFilter", $params);
         if (!$rows) return $empty;
         return people_coverage_result($rows[0]['numerator'] ?? 0, $yearlyTarget, $dept, $scopedUnit, 'distinct_near_miss_reporters');
     }
@@ -225,24 +240,28 @@ function fixed_count_alignment(string $key, string $employeeId, string $departme
     $empId = trim($employeeId);
     $dept = trim($department);
     $scopedUnit = trim($unit);
-    if ($key === 'patrol') {
-        $actual = (int) (safe_scalar(
-            'SELECT
+    try {
+        if ($key === 'patrol') {
+            $row = db_row(
+                'SELECT
                 (SELECT COUNT(*) FROM patrol_attendance WHERE UserID=? AND YEAR(PatrolDate)=?) +
-                (SELECT COUNT(*) FROM patrol_self_checkin WHERE EmployeeID=? AND Year=?)',
-            [$empId, $year, $empId, $year]
-        ) ?? 0);
-        return fixed_count_result($actual, $fallbackTarget, ['type' => 'employee', 'employeeId' => $empId], 'patrol_attendance_plus_self_checkin', 'activity_target');
-    }
-    if ($key === 'ky') {
-        $config = safe_rows('SELECT SafetyUnits FROM ky_program_config WHERE Year=? AND Department=? AND IsActive=1 LIMIT 1', [$year, $dept]);
-        $units = activity_target_parse_list($config[0]['SafetyUnits'] ?? null);
-        $useUnit = $scopedUnit !== '' && in_array($scopedUnit, $units, true);
-        $actual = (int) (safe_scalar(
-            "SELECT COUNT(*) FROM ky_activities WHERE Department=? " . ($useUnit ? 'AND SafetyUnit=? ' : '') . 'AND YEAR(ActivityDate)=?',
-            $useUnit ? [$dept, $scopedUnit, $year] : [$dept, $year]
-        ) ?? 0);
-        return fixed_count_result($actual, $fallbackTarget, ['type' => $useUnit ? 'department_unit' : 'department', 'department' => $dept, 'unit' => $useUnit ? $scopedUnit : ''], 'ky_scope_activity_count', 'activity_target');
+                (SELECT COUNT(*) FROM patrol_self_checkin WHERE EmployeeID=? AND Year=?) AS numerator',
+                [$empId, $year, $empId, $year]
+            );
+            return fixed_count_result($row['numerator'] ?? 0, $fallbackTarget, ['type' => 'employee', 'employeeId' => $empId], 'patrol_attendance_plus_self_checkin', 'activity_target');
+        }
+        if ($key === 'ky') {
+            $config = db_rows('SELECT SafetyUnits FROM ky_program_config WHERE Year=? AND Department=? AND IsActive=1 LIMIT 1', [$year, $dept]);
+            $units = activity_target_parse_list($config[0]['SafetyUnits'] ?? null);
+            $useUnit = $scopedUnit !== '' && in_array($scopedUnit, $units, true);
+            $row = db_row(
+                "SELECT COUNT(*) AS numerator FROM ky_activities WHERE Department=? " . ($useUnit ? 'AND SafetyUnit=? ' : '') . 'AND YEAR(ActivityDate)=?',
+                $useUnit ? [$dept, $scopedUnit, $year] : [$dept, $year]
+            );
+            return fixed_count_result($row['numerator'] ?? 0, $fallbackTarget, ['type' => $useUnit ? 'department_unit' : 'department', 'department' => $dept, 'unit' => $useUnit ? $scopedUnit : ''], 'ky_scope_activity_count', 'activity_target');
+        }
+    } catch (Throwable $error) {
+        return fixed_count_result(0, $fallbackTarget, null, 'source_unavailable', 'activity_target');
     }
     return fixed_count_result(0, $fallbackTarget, null, 'source_unavailable', 'activity_target');
 }
@@ -811,6 +830,15 @@ function handle_target_routes(string $method, string $path): bool
                 break;
             }
         }
+        $cccfWorkerUnit = null;
+        if ($cccfWorkerSelf) {
+            foreach (($cccfWorkerProgress['units'] ?? []) as $unitRow) {
+                if (trim((string) ($unitRow['unit'] ?? '')) === trim((string) ($cccfWorkerSelf['unit'] ?? ''))) {
+                    $cccfWorkerUnit = $unitRow;
+                    break;
+                }
+            }
+        }
         $dynamicRatios = [];
         foreach ($eligibleActivities as $activity) {
             if ($activity['metricType'] !== 'dynamic_ratio') continue;
@@ -824,11 +852,9 @@ function handle_target_routes(string $method, string $path): bool
         foreach ($eligibleActivities as $activity) {
             if ($activity['metricType'] !== 'people_coverage') continue;
             $target = $eligibleRows[$activity['key']];
-            $isPersonalCccfWorker = $activity['key'] === 'cccf_worker'
-                && isset($merged['templateMap']['cccf_worker'])
-                && empty($merged['templateMap']['cccf_worker']['IsNA'])
-                && (int) ($merged['templateMap']['cccf_worker']['YearlyTarget'] ?? 0) > 0;
-            if ($isPersonalCccfWorker) continue;
+            // My Targets always resolves CCCF Worker from personal progress (or
+            // the personal raw-record fallback), never from scope coverage.
+            if ($activity['key'] === 'cccf_worker') continue;
             $peopleCoverages[$activity['key']] = people_coverage(
                 $activity['key'],
                 (string) ($user['department'] ?? ''),
@@ -854,7 +880,9 @@ function handle_target_routes(string $method, string $path): bool
             'patrol' => safe_scalar('SELECT COUNT(*) FROM patrol_attendance WHERE UserID=? AND YEAR(PatrolDate)=?', [$user['id'], $year]),
             'patrol_issue' => safe_scalar('SELECT COUNT(*) FROM patrol_issues WHERE ReporterID=? AND YEAR(DateFound)=?', [$user['id'], $year]),
             'cccf_worker' => $cccfWorkerSelf ? (int) ($cccfWorkerSelf['actualTowardTarget'] ?? 0) : safe_scalar('SELECT COUNT(*) FROM cccf_forma_worker WHERE EmployeeID=? AND YEAR(SubmitDate)=?', [$user['id'], $year]),
-            'cccf_permanent' => safe_scalar('SELECT COUNT(*) FROM cccf_forma_permanent WHERE SubmitterName=? AND YEAR(SubmitDate)=?', [$user['name'], $year]),
+            'cccf_permanent' => safe_scalar("SELECT COUNT(*) FROM cccf_forma_permanent
+                                             WHERE (AssigneeID=? OR ((AssigneeID IS NULL OR TRIM(AssigneeID)='') AND TRIM(SubmitterName)=?))
+                                               AND YEAR(SubmitDate)=?", [$user['id'], $user['name'], $year]),
             'scw' => safe_scalar('SELECT COUNT(*) FROM scw_documents WHERE UploadedBy=? AND YEAR(UploadedAt)=?', [$user['name'], $year]),
             'training' => safe_scalar('SELECT COUNT(*) FROM training_records WHERE EmployeeID=? AND YEAR(TrainingDate)=? AND IsPassed=1', [$user['id'], $year]),
             'yokoten' => safe_scalar('SELECT COUNT(*) FROM yokotenresponses WHERE EmployeeID=? AND YEAR(ResponseDate)=?', [$user['id'], $year]),
@@ -865,34 +893,32 @@ function handle_target_routes(string $method, string $path): bool
         foreach ($eligibleActivities as $activity) {
             $row = $eligibleRows[$activity['key']];
             $ratio = $dynamicRatios[$activity['key']] ?? $peopleCoverages[$activity['key']] ?? $fixedCountAlignments[$activity['key']] ?? null;
-            $actual = $ratio ? (int) $ratio['numerator'] : (int) ($actuals[$activity['key']] ?? 0);
-            if ($ratio) $row['yearlyTarget'] = (int) $ratio['denominator'];
-            if ($activity['key'] === 'cccf_worker' && $cccfWorkerSelf) {
-                $row['yearlyTarget'] = (int) ($cccfWorkerSelf['target'] ?? 0);
-                $actual = (int) ($cccfWorkerSelf['actualTowardTarget'] ?? 0);
-                $row['rawRecords'] = (int) ($cccfWorkerSelf['rawRecords'] ?? 0);
+            $personalCccfWorker = $activity['key'] === 'cccf_worker'
+                ? cccf_worker_safety360_target_result($cccfWorkerSelf, $cccfWorkerUnit, (int) ($row['passPct'] ?? 80))
+                : null;
+            $actual = $personalCccfWorker ? $personalCccfWorker['actualCount'] : ($ratio ? (int) $ratio['numerator'] : (int) ($actuals[$activity['key']] ?? 0));
+            if ($personalCccfWorker) {
+                $row['yearlyTarget'] = $personalCccfWorker['yearlyTarget'];
+                $row['passPct'] = $personalCccfWorker['passPct'];
+                $row['rawRecords'] = $personalCccfWorker['rawRecords'];
+                $row['configuredCoverageTarget'] = $personalCccfWorker['configuredCoverageTarget'];
+            } elseif ($ratio) {
+                $row['yearlyTarget'] = (int) $ratio['denominator'];
             }
-            $pct = $ratio ? $ratio['completionPct'] : ($row['yearlyTarget'] > 0 ? min(100, (int) round($actual / $row['yearlyTarget'] * 100)) : null);
+            $pct = $personalCccfWorker ? $personalCccfWorker['completionPct'] : ($ratio ? $ratio['completionPct'] : ($row['yearlyTarget'] > 0 ? min(100, (int) round($actual / $row['yearlyTarget'] * 100)) : null));
             $row['actualCount'] = $actual;
             $row['completionPct'] = $pct;
-            $row['passed'] = $pct !== null ? $pct >= ($row['passPct'] ?? 80) : null;
-            $row['noData'] = $ratio ? $ratio['noData'] : false;
-            $row['calculationScope'] = $ratio ? ($ratio['calculationScope'] ?? ['type' => 'department', 'department' => $ratio['department']]) : null;
-            $row['calculationMethod'] = $ratio['calculationMethod'] ?? null;
-            $row['targetSource'] = $ratio['targetSource'] ?? null;
+            $row['passed'] = $personalCccfWorker ? $personalCccfWorker['passed'] : ($pct !== null ? $pct >= ($row['passPct'] ?? 80) : null);
+            $row['noData'] = $personalCccfWorker ? $personalCccfWorker['noData'] : ($ratio ? $ratio['noData'] : false);
+            $row['calculationScope'] = $personalCccfWorker ? $personalCccfWorker['calculationScope'] : ($ratio ? ($ratio['calculationScope'] ?? ['type' => 'department', 'department' => $ratio['department']]) : null);
+            $row['calculationMethod'] = $personalCccfWorker ? $personalCccfWorker['calculationMethod'] : ($ratio['calculationMethod'] ?? null);
+            $row['targetSource'] = $personalCccfWorker ? $personalCccfWorker['targetSource'] : ($ratio['targetSource'] ?? null);
             $row['eligibilityType'] = 'admin_configured';
             $row['eligibilitySource'] = $row['source'];
             $row['isMandatory'] = false;
-            $row['measurementSource'] = $ratio
+            $row['measurementSource'] = $personalCccfWorker ? 'employee_activity' : ($ratio
                 ? (!empty($ratio['targetSource']) && $ratio['targetSource'] !== 'activity_target' ? 'module' : 'system')
-                : 'employee_activity';
-            if ($activity['key'] === 'cccf_worker'
-                && isset($merged['templateMap']['cccf_worker'])
-                && empty($merged['templateMap']['cccf_worker']['IsNA'])
-                && (int) ($merged['templateMap']['cccf_worker']['YearlyTarget'] ?? 0) > 0) {
-                $row['calculationScope'] = ['type' => 'employee', 'employeeId' => (string) ($user['id'] ?? '')];
-                $row['calculationMethod'] = 'cccf_worker_progress_engine_actual_toward_target';
-            }
+                : 'employee_activity');
             $additionalTargets[] = $row;
         }
         $targets = array_merge([$mandatoryPolicyTarget], $additionalTargets);

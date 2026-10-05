@@ -5,7 +5,7 @@ const express = require('express');
 const router = express.Router();
 const db = require('../db');
 const { ACTIVITIES, getMergedTargets, getDynamicActivityRatio, getPeopleCoverage, getFixedCountAlignment } = require('./activity-targets');
-const { getCccfWorkerProgress } = require('../utils/cccf-worker-progress');
+const { getCccfWorkerProgress, getCccfWorkerSafety360TargetResult } = require('../utils/cccf-worker-progress');
 
 const n = (value) => parseInt(value, 10) || 0;
 const MAX_QUERY_LENGTH = 100;
@@ -34,22 +34,41 @@ function escapeLike(value) {
     return String(value || '').replace(/[=%_]/g, match => `=${match}`);
 }
 
-async function safeOne(sql, params = []) {
+function recordDataQualityFailure(state, source, affectsScore = false) {
+    if (!state || !source) return;
+    if (!state.failures.some(item => item.source === source && item.affectsScore === affectsScore)) {
+        state.failures.push({ source, affectsScore });
+    }
+}
+
+async function safeOne(sql, params = [], quality = null, source = '', affectsScore = false) {
     try {
         const [[row]] = await db.query(sql, params);
         return row || null;
     } catch {
+        recordDataQualityFailure(quality, source, affectsScore);
         return null;
     }
 }
 
-async function safeRows(sql, params = []) {
+async function safeRows(sql, params = [], quality = null, source = '') {
     try {
         const [rows] = await db.query(sql, params);
         return rows || [];
     } catch {
+        recordDataQualityFailure(quality, source, false);
         return [];
     }
+}
+
+function buildDataQuality(state) {
+    const failures = state?.failures || [];
+    return {
+        status: failures.length ? 'partial' : 'complete',
+        unavailableModules: [...new Set(failures.filter(item => item.affectsScore).map(item => item.source))],
+        unavailableDetails: [...new Set(failures.filter(item => !item.affectsScore).map(item => item.source))],
+        warnings: failures.map(item => ({ source: item.source, affectsScore: item.affectsScore, code: 'SOURCE_UNAVAILABLE' })),
+    };
 }
 
 function isAdminRequest(req) {
@@ -65,8 +84,10 @@ function clampScore(value) {
     return Math.max(0, Math.min(100, Math.round(Number(value) || 0)));
 }
 
-function buildRiskProfile(metrics, activityTargets = []) {
+function buildRiskProfile(metrics, activityTargets = [], dataQuality = null) {
     const riskEventCount = metrics.accidents + metrics.ppeViolations + metrics.patrolIssues;
+    const riskDataPartial = ['accident', 'ppe', 'patrol_issue']
+        .some(source => (dataQuality?.unavailableModules || []).includes(source));
     const configured = activityTargets.filter(Boolean);
     const evaluable = configured.filter(row => !row.noData && row.completionPct !== null && row.completionPct !== undefined);
     const score = evaluable.length
@@ -107,7 +128,9 @@ function buildRiskProfile(metrics, activityTargets = []) {
     if (!reasons.length) reasons.push('All configured targets are on track and no major risk event was detected');
     if (!nextActions.length) nextActions.push(configured.length ? 'Maintain progress against configured targets' : 'No target-based follow-up required');
 
-    const status = metrics.accidents > 0 || metrics.ppeViolations > 0 || (score !== null && score < 60)
+    const status = riskDataPartial
+        ? 'Data Partial'
+        : metrics.accidents > 0 || metrics.ppeViolations > 0 || (score !== null && score < 60)
         ? 'Action Needed'
         : metrics.patrolIssues > 0 || (score !== null && score < 80)
             ? 'Watch'
@@ -124,6 +147,7 @@ function buildRiskProfile(metrics, activityTargets = []) {
         thresholds: { good: 80, watch: 60 },
         counters: {
             riskEventCount,
+            riskDataPartial,
             configuredTargets: configured.length,
             evaluableTargets: evaluable.length,
         },
@@ -242,6 +266,7 @@ router.get('/profile/:employeeId', async (req, res) => {
             [employeeId]
         );
         if (!employee) return res.status(404).json({ success: false, message: 'ไม่พบพนักงาน' });
+        const qualityState = { failures: [] };
 
         const [
             patrol, patrolIssues, cccfWorker, cccfPermanent, training, trainingPassed,
@@ -251,49 +276,51 @@ router.get('/profile/:employeeId', async (req, res) => {
             fourmScopes, fourmLogs, cccfWorkerRecent, cccfPermanentRecent,
             ppeInspectionSummary, ppeInspectionRecent, ppeViolationRecent,
         ] = await Promise.all([
-            safeOne(`SELECT COUNT(*) AS cnt FROM Patrol_Attendance WHERE UserID=? AND YEAR(PatrolDate)=?`, [employeeId, year]),
-            safeOne(`SELECT COUNT(*) AS cnt FROM Patrol_Issues WHERE ReporterID=? AND YEAR(DateFound)=?`, [employeeId, year]),
-            safeOne(`SELECT COUNT(*) AS cnt FROM CCCF_FormA_Worker WHERE EmployeeID=? AND YEAR(SubmitDate)=?`, [employeeId, year]),
-            safeOne(`SELECT COUNT(*) AS cnt FROM CCCF_FormA_Permanent WHERE AssigneeID=? AND YEAR(SubmitDate)=?`, [employeeId, year]),
-            safeOne(`SELECT COUNT(*) AS cnt FROM Training_Records WHERE EmployeeID=? AND YEAR(TrainingDate)=?`, [employeeId, year]),
-            safeOne(`SELECT COUNT(*) AS cnt FROM Training_Records WHERE EmployeeID=? AND YEAR(TrainingDate)=? AND IsPassed=1`, [employeeId, year]),
-            safeOne(`SELECT COUNT(*) AS cnt FROM HiyariReports WHERE ReporterID=? AND YEAR(ReportDate)=?`, [employeeId, year]),
-            safeOne(`SELECT COUNT(*) AS cnt FROM KY_Activities WHERE ReporterID=? AND YEAR(ActivityDate)=?`, [employeeId, year]),
-            safeOne(`SELECT COUNT(*) AS cnt FROM YokotenResponses WHERE EmployeeID=? AND YEAR(ResponseDate)=?`, [employeeId, year]),
-            safeOne(`SELECT COUNT(*) AS cnt FROM Accident_Reports WHERE EmployeeID=? AND YEAR(AccidentDate)=? AND (IsDeleted IS NULL OR IsDeleted=0)`, [employeeId, year]),
-            safeOne(`SELECT COUNT(*) AS cnt FROM FourM_ChangeNotices WHERE (ResponsibleEmployeeID=? OR (ResponsibleEmployeeID IS NULL AND ResponsiblePerson=?)) AND YEAR(RequestDate)=?`, [employeeId, employee.EmployeeName, year]),
-            safeOne(`SELECT COUNT(*) AS cnt FROM FourM_ChangeNotices WHERE CreatedByID=? AND YEAR(RequestDate)=?`, [employeeId, year]),
-            safeOne(`SELECT COUNT(*) AS cnt FROM Policy_Acknowledgements WHERE UserID=?`, [employeeId]),
-            safeOne(`SELECT COUNT(*) AS cnt FROM SC_PPE_Violations WHERE EmployeeID=? AND YEAR(ViolationDate)=? AND (deleted_at IS NULL)`, [employeeId, year]),
-            safeOne(`SELECT COUNT(*) AS cnt FROM SCW_Documents WHERE UploadedBy=? AND YEAR(UploadedAt)=?`, [employee.EmployeeName, year]),
-            safeOne(`SELECT COUNT(*) AS cnt FROM OJT_Records WHERE Department=? AND YEAR(OJTDate)=?`, [employee.Department, year]),
+            safeOne(`SELECT COUNT(*) AS cnt FROM Patrol_Attendance WHERE UserID=? AND YEAR(PatrolDate)=?`, [employeeId, year], qualityState, 'patrol', true),
+            safeOne(`SELECT COUNT(*) AS cnt FROM Patrol_Issues WHERE ReporterID=? AND YEAR(DateFound)=?`, [employeeId, year], qualityState, 'patrol_issue', true),
+            safeOne(`SELECT COUNT(*) AS cnt FROM CCCF_FormA_Worker WHERE EmployeeID=? AND YEAR(SubmitDate)=?`, [employeeId, year], qualityState, 'cccf_worker', true),
+            safeOne(`SELECT COUNT(*) AS cnt FROM CCCF_FormA_Permanent
+                      WHERE (AssigneeID=? OR ((AssigneeID IS NULL OR TRIM(AssigneeID)='') AND TRIM(SubmitterName)=?))
+                        AND YEAR(SubmitDate)=?`, [employeeId, employee.EmployeeName, year], qualityState, 'cccf_permanent', true),
+            safeOne(`SELECT COUNT(*) AS cnt FROM Training_Records WHERE EmployeeID=? AND YEAR(TrainingDate)=?`, [employeeId, year], qualityState, 'training', true),
+            safeOne(`SELECT COUNT(*) AS cnt FROM Training_Records WHERE EmployeeID=? AND YEAR(TrainingDate)=? AND IsPassed=1`, [employeeId, year], qualityState, 'training', true),
+            safeOne(`SELECT COUNT(*) AS cnt FROM HiyariReports WHERE ReporterID=? AND YEAR(ReportDate)=?`, [employeeId, year], qualityState, 'hiyari', true),
+            safeOne(`SELECT COUNT(*) AS cnt FROM KY_Activities WHERE ReporterID=? AND YEAR(ActivityDate)=?`, [employeeId, year], qualityState, 'ky', true),
+            safeOne(`SELECT COUNT(*) AS cnt FROM YokotenResponses WHERE EmployeeID=? AND YEAR(ResponseDate)=?`, [employeeId, year], qualityState, 'yokoten', true),
+            safeOne(`SELECT COUNT(*) AS cnt FROM Accident_Reports WHERE EmployeeID=? AND YEAR(AccidentDate)=? AND (IsDeleted IS NULL OR IsDeleted=0)`, [employeeId, year], qualityState, 'accident', true),
+            safeOne(`SELECT COUNT(*) AS cnt FROM FourM_ChangeNotices WHERE (ResponsibleEmployeeID=? OR (ResponsibleEmployeeID IS NULL AND ResponsiblePerson=?)) AND YEAR(RequestDate)=?`, [employeeId, employee.EmployeeName, year], qualityState, 'fourm', true),
+            safeOne(`SELECT COUNT(*) AS cnt FROM FourM_ChangeNotices WHERE CreatedByID=? AND YEAR(RequestDate)=?`, [employeeId, year], qualityState, 'fourm', true),
+            safeOne(`SELECT COUNT(*) AS cnt FROM Policy_Acknowledgements WHERE UserID=?`, [employeeId], qualityState, 'policy'),
+            safeOne(`SELECT COUNT(*) AS cnt FROM SC_PPE_Violations WHERE EmployeeID=? AND YEAR(ViolationDate)=? AND (deleted_at IS NULL)`, [employeeId, year], qualityState, 'ppe', true),
+            safeOne(`SELECT COUNT(*) AS cnt FROM SCW_Documents WHERE UploadedBy=? AND YEAR(UploadedAt)=?`, [employee.EmployeeName, year], qualityState, 'scw', true),
+            safeOne(`SELECT COUNT(*) AS cnt FROM OJT_Records WHERE Department=? AND YEAR(OJTDate)=?`, [employee.Department, year], qualityState, 'scw'),
             safeRows(`SELECT id, PatrolDate, PatrolType, Area, Notes, RecordedBy
                       FROM Patrol_Attendance WHERE UserID=? AND YEAR(PatrolDate)=?
-                      ORDER BY PatrolDate DESC, id DESC LIMIT 12`, [employeeId, year]),
+                      ORDER BY PatrolDate DESC, id DESC LIMIT 12`, [employeeId, year], qualityState, 'patrol'),
             safeRows(`SELECT r.id, r.TrainingDate, r.Score, r.IsPassed, c.CourseName, c.CourseCode
                       FROM Training_Records r LEFT JOIN Training_Courses c ON c.id = r.CourseID
                       WHERE r.EmployeeID=? AND YEAR(r.TrainingDate)=?
-                      ORDER BY r.TrainingDate DESC, r.id DESC LIMIT 8`, [employeeId, year]),
+                      ORDER BY r.TrainingDate DESC, r.id DESC LIMIT 8`, [employeeId, year], qualityState, 'training'),
             safeRows(`SELECT id, ReportDate, Location, Description, Status
                       FROM HiyariReports WHERE ReporterID=? AND YEAR(ReportDate)=?
-                      ORDER BY ReportDate DESC LIMIT 6`, [employeeId, year]),
+                      ORDER BY ReportDate DESC LIMIT 6`, [employeeId, year], qualityState, 'hiyari'),
             safeRows(`SELECT id, ActivityDate, TeamName, HazardDescription, Status
                       FROM KY_Activities WHERE ReporterID=? AND YEAR(ActivityDate)=?
-                      ORDER BY ActivityDate DESC LIMIT 6`, [employeeId, year]),
+                      ORDER BY ActivityDate DESC LIMIT 6`, [employeeId, year], qualityState, 'ky'),
             safeRows(`SELECT id, AccidentDate, AccidentType, Status, Location
                       FROM Accident_Reports
                       WHERE EmployeeID=? AND YEAR(AccidentDate)=? AND (IsDeleted IS NULL OR IsDeleted=0)
-                      ORDER BY AccidentDate DESC LIMIT 6`, [employeeId, year]),
+                      ORDER BY AccidentDate DESC LIMIT 6`, [employeeId, year], qualityState, 'accident'),
             safeRows(`SELECT id, NoticeNo, RequestDate, Title, Status, ChangeType
                       FROM FourM_ChangeNotices
                       WHERE (CreatedByID=? OR ResponsibleEmployeeID=? OR (ResponsibleEmployeeID IS NULL AND ResponsiblePerson=?)) AND YEAR(RequestDate)=?
-                      ORDER BY RequestDate DESC LIMIT 6`, [employeeId, employeeId, employee.EmployeeName, year]),
+                      ORDER BY RequestDate DESC LIMIT 6`, [employeeId, employeeId, employee.EmployeeName, year], qualityState, 'fourm'),
             safeRows(`SELECT ResponseID, ResponseDate, YokotenID, ApprovalStatus, IsRelated
                       FROM YokotenResponses WHERE EmployeeID=? AND YEAR(ResponseDate)=?
-                      ORDER BY ResponseDate DESC LIMIT 6`, [employeeId, year]),
+                      ORDER BY ResponseDate DESC LIMIT 6`, [employeeId, year], qualityState, 'yokoten'),
             safeRows(`SELECT id, CheckinDate, Location, Notes
                       FROM Patrol_Self_Checkin WHERE EmployeeID=? AND Year=?
-                      ORDER BY CheckinDate DESC LIMIT 8`, [employeeId, year]),
+                      ORDER BY CheckinDate DESC LIMIT 8`, [employeeId, year], qualityState, 'patrol'),
             safeRows(`SELECT ce.id AS AssignmentID, ce.Status, ce.AssignedAt, ce.RemovedAt,
                              cur.id AS CurriculumID, cur.CurriculumCode, cur.CurriculumTitle,
                              cur.Department, cur.Year,
@@ -304,7 +331,7 @@ router.get('/profile/:employeeId', async (req, res) => {
                       WHERE ce.EmployeeID=? AND cur.Year=?
                       GROUP BY ce.id, ce.Status, ce.AssignedAt, ce.RemovedAt, cur.id, cur.CurriculumCode, cur.CurriculumTitle, cur.Department, cur.Year
                       ORDER BY ce.Status='Assigned' DESC, ce.AssignedAt DESC
-                      LIMIT 8`, [employeeId, year]),
+                      LIMIT 8`, [employeeId, year], qualityState, 'fourm_matrix'),
             safeRows(`SELECT l.id, l.Action, l.CurriculumID, l.CourseID, l.EmployeeID, l.OldValue, l.NewValue, l.PerformedBy, l.PerformedAt,
                              cur.CurriculumCode, cur.CurriculumTitle, c.CourseCode, c.CourseTitle
                       FROM FourM_CurriculumLogs l
@@ -312,30 +339,39 @@ router.get('/profile/:employeeId', async (req, res) => {
                       LEFT JOIN FourM_Courses c ON c.id = l.CourseID
                       WHERE l.EmployeeID=? AND YEAR(l.PerformedAt)=?
                       ORDER BY l.PerformedAt DESC
-                      LIMIT 10`, [employeeId, year]),
+                      LIMIT 10`, [employeeId, year], qualityState, 'fourm_matrix'),
             safeRows(`SELECT id, SubmitDate, JobArea, Equipment, SafetyUnit
                       FROM CCCF_FormA_Worker WHERE EmployeeID=? AND YEAR(SubmitDate)=?
-                      ORDER BY SubmitDate DESC, id DESC LIMIT 6`, [employeeId, year]),
+                      ORDER BY SubmitDate DESC, id DESC LIMIT 6`, [employeeId, year], qualityState, 'cccf_worker'),
             safeRows(`SELECT id, SubmitDate, JobArea, Summary, StopType, \`Rank\`
-                      FROM CCCF_FormA_Permanent WHERE AssigneeID=? AND YEAR(SubmitDate)=?
-                      ORDER BY SubmitDate DESC, id DESC LIMIT 6`, [employeeId, year]),
+                      FROM CCCF_FormA_Permanent
+                      WHERE (AssigneeID=? OR ((AssigneeID IS NULL OR TRIM(AssigneeID)='') AND TRIM(SubmitterName)=?))
+                        AND YEAR(SubmitDate)=?
+                      ORDER BY SubmitDate DESC, id DESC LIMIT 6`, [employeeId, employee.EmployeeName, year], qualityState, 'cccf_permanent'),
             safeOne(`SELECT COUNT(*) AS total,
                             SUM(CASE WHEN IsPass=1 THEN 1 ELSE 0 END) AS passed,
                             AVG(CompliancePct) AS avgCompliance
                      FROM SC_PPEInspections
-                     WHERE InspectedEmployeeID=? AND YEAR(InspectionDate)=? AND (deleted_at IS NULL)`, [employeeId, year]),
+                     WHERE InspectedEmployeeID=? AND YEAR(InspectionDate)=? AND (deleted_at IS NULL)`, [employeeId, year], qualityState, 'ppe', true),
             safeRows(`SELECT InspectionID, InspectionDate, Area, Department, WorkTypeName, IsPass, CompliancePct
                       FROM SC_PPEInspections
                       WHERE InspectedEmployeeID=? AND YEAR(InspectionDate)=? AND (deleted_at IS NULL)
-                      ORDER BY InspectionDate DESC, CreatedAt DESC LIMIT 8`, [employeeId, year]),
+                      ORDER BY InspectionDate DESC, CreatedAt DESC LIMIT 8`, [employeeId, year], qualityState, 'ppe'),
             safeRows(`SELECT ViolationID, ViolationDate, WarningLevel, ViolationNo, InspectorName, Note
                       FROM SC_PPE_Violations
                       WHERE EmployeeID=? AND YEAR(ViolationDate)=? AND (deleted_at IS NULL)
-                      ORDER BY ViolationDate DESC, CreatedAt DESC LIMIT 8`, [employeeId, year]),
+                      ORDER BY ViolationDate DESC, CreatedAt DESC LIMIT 8`, [employeeId, year], qualityState, 'ppe'),
         ]);
         const cccfWorkerProgress = await getCccfWorkerProgress(db, year, { ensureSchema: false }).catch(() => ({ employees: [] }));
         const cccfWorkerSelf = (cccfWorkerProgress.employees || [])
             .find(row => String(row.employeeId || '').trim() === String(employeeId || '').trim()) || null;
+        const cccfWorkerUnit = cccfWorkerSelf
+            ? (cccfWorkerProgress.units || []).find(row => String(row.unit || '').trim() === String(cccfWorkerSelf.unit || '').trim()) || null
+            : null;
+        if (cccfWorkerSelf) {
+            qualityState.failures = qualityState.failures.filter(item => !(item.source === 'cccf_worker' && item.affectsScore));
+        }
+        let dataQuality = buildDataQuality(qualityState);
 
         const metrics = {
             patrol: n(patrol?.cnt),
@@ -379,6 +415,10 @@ router.get('/profile/:employeeId', async (req, res) => {
         for (const activity of ACTIVITIES.filter(a => a.metricType === 'people_coverage')) {
             const target = effectiveTarget(activity.key);
             if (!target) continue;
+            // CCCF Worker is a personal progress-engine target in Safety 360.
+            // If the engine is unavailable, fall back to this employee's raw records below;
+            // never substitute a Department/Unit ratio for a personal result.
+            if (activity.key === 'cccf_worker') continue;
             peopleCoverages[activity.key] = await getPeopleCoverage(
                 activity.key,
                 { department: employee.Department, unit },
@@ -390,30 +430,43 @@ router.get('/profile/:employeeId', async (req, res) => {
             patrol: await getFixedCountAlignment('patrol', { employeeId, department: employee.Department, unit }, year, effectiveTarget('patrol')?.YearlyTarget),
             ky: await getFixedCountAlignment('ky', { employeeId, department: employee.Department, unit }, year, effectiveTarget('ky')?.YearlyTarget),
         };
+        for (const [source, result] of Object.entries({ ...dynamicRatios, ...peopleCoverages, ...fixedCountAlignments })) {
+            if (result?.calculationMethod === 'source_unavailable') {
+                recordDataQualityFailure(qualityState, source, true);
+            }
+        }
+        dataQuality = buildDataQuality(qualityState);
         const activityTargets = ACTIVITIES.map(activity => {
             const row = overrideMap[activity.key] || scopeMap[activity.key] || templateMap[activity.key] || null;
             const ratio = dynamicRatios[activity.key] || peopleCoverages[activity.key] || fixedCountAlignments[activity.key] || null;
-            if ((!row && !ratio) || row?.IsNA) return null;
-            const yearlyTarget = activity.key === 'cccf_worker' && cccfWorkerSelf
-                ? Number(cccfWorkerSelf.target || 0)
+            const personalCccfWorker = activity.key === 'cccf_worker'
+                ? getCccfWorkerSafety360TargetResult(cccfWorkerSelf, cccfWorkerUnit, row?.PassPct ?? 80)
+                : null;
+            if ((!row && !ratio && !personalCccfWorker) || row?.IsNA) return null;
+            const sourceUnavailable = activity.key === 'cccf_worker' && dataQuality.unavailableModules.includes('cccf_worker');
+            const yearlyTarget = personalCccfWorker
+                ? personalCccfWorker.yearlyTarget
                 : ratio ? ratio.denominator : Number(row.YearlyTarget);
-            const actualCount = activity.key === 'cccf_worker' && cccfWorkerSelf
-                ? Number(cccfWorkerSelf.actualTowardTarget || 0)
+            const actualCount = sourceUnavailable ? null : personalCccfWorker
+                ? personalCccfWorker.actualCount
                 : ratio ? ratio.numerator : Number(activityActuals[activity.key] || 0);
-            const completionPct = ratio ? ratio.completionPct : yearlyTarget > 0 ? Math.min(100, Math.round(actualCount / yearlyTarget * 100)) : null;
-            const passPct = Number(row?.PassPct ?? 80);
+            const completionPct = sourceUnavailable ? null : personalCccfWorker
+                ? personalCccfWorker.completionPct
+                : ratio ? ratio.completionPct : yearlyTarget > 0 ? Math.min(100, Math.round(actualCount / yearlyTarget * 100)) : null;
+            const passPct = personalCccfWorker ? personalCccfWorker.passPct : Number(row?.PassPct ?? 80);
             return {
                 activityKey: activity.key, label: activity.label, desc: activity.desc,
                 metricType: activity.metricType, scopeType: activity.scopeType, unitLabel: activity.unitLabel, targetMode: activity.targetMode,
                 yearlyTarget, passPct, actualCount, completionPct,
-                passed: completionPct !== null ? completionPct >= passPct : null,
+                passed: sourceUnavailable ? null : personalCccfWorker ? personalCccfWorker.passed : completionPct !== null ? completionPct >= passPct : null,
                 source: row?.source || (ratio?.targetSource && ratio.targetSource !== 'activity_target' ? 'module' : ratio ? 'system' : 'none'),
                 scope: row?.source === 'scope' ? { department: row.Department || '', unit: row.Unit || '' } : null,
-                noData: ratio ? ratio.noData : false,
-                calculationScope: ratio ? (ratio.calculationScope || { type: 'department', department: ratio.department }) : null,
-                rawRecords: activity.key === 'cccf_worker' && cccfWorkerSelf ? Number(cccfWorkerSelf.rawRecords || 0) : undefined,
-                calculationMethod: activity.key === 'cccf_worker' && cccfWorkerSelf ? 'cccf_worker_progress_engine_actual_toward_target' : (ratio?.calculationMethod || null),
-                targetSource: ratio?.targetSource || null,
+                noData: sourceUnavailable ? true : personalCccfWorker ? personalCccfWorker.noData : ratio ? ratio.noData : false,
+                calculationScope: personalCccfWorker ? personalCccfWorker.calculationScope : ratio ? (ratio.calculationScope || { type: 'department', department: ratio.department }) : null,
+                rawRecords: personalCccfWorker ? personalCccfWorker.rawRecords : undefined,
+                configuredCoverageTarget: personalCccfWorker ? personalCccfWorker.configuredCoverageTarget : undefined,
+                calculationMethod: sourceUnavailable ? 'source_unavailable' : personalCccfWorker ? personalCccfWorker.calculationMethod : (ratio?.calculationMethod || null),
+                targetSource: personalCccfWorker ? personalCccfWorker.targetSource : (ratio?.targetSource || null),
             };
         }).filter(Boolean);
         const evaluableActivityTargets = activityTargets.filter(row => !row.noData && row.passed !== null);
@@ -423,7 +476,7 @@ router.get('/profile/:employeeId', async (req, res) => {
             passed: evaluableActivityTargets.filter(row => row.passed === true).length,
             noData: activityTargets.length - evaluableActivityTargets.length,
         };
-        const riskProfile = buildRiskProfile(metrics, activityTargets);
+        const riskProfile = buildRiskProfile(metrics, activityTargets, dataQuality);
         const complianceSignals = buildComplianceSignals(metrics, activityTargets);
 
         const overallStatus = riskProfile.status;
@@ -480,6 +533,7 @@ router.get('/profile/:employeeId', async (req, res) => {
             success: true,
             data: {
                 year,
+                dataQuality,
                 employee: responseEmployee,
                 access: {
                     canViewSensitive: isAdmin,

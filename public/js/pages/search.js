@@ -161,6 +161,11 @@ function bindEvents() {
         }
         if (e.target.closest('#btn-export-person-excel')) exportPersonExcel();
         if (e.target.closest('#btn-print-person-audit')) printPersonAuditView();
+        if (e.target.closest('[data-retry-profile]') && _selectedEmployeeId) {
+            _activeProfileSignature = '';
+            await loadProfile(_selectedEmployeeId);
+            return;
+        }
         const profileTab = e.target.closest('[data-profile-tab]');
         if (profileTab && _selectedProfile) {
             _activeProfileTab = profileTab.dataset.profileTab || 'overview';
@@ -305,6 +310,8 @@ function renderProfile(data) {
     const latestActivity = latestTimelineDate(data.timeline || []);
     const access = data.access || {};
     const canExport = access.canExport === true;
+    const unavailable = new Set(data.dataQuality?.unavailableModules || []);
+    const riskDataPartial = ['accident', 'ppe', 'patrol_issue'].some(source => unavailable.has(source));
     return `
     <div class="space-y-5">
         <section class="ds-section overflow-hidden">
@@ -328,15 +335,28 @@ function renderProfile(data) {
             <div class="grid grid-cols-2 md:grid-cols-5 gap-px bg-slate-100">
                 ${kpiBox(score == null ? (targetConfigured ? 'No data' : 'No target') : score + '%', 'Safety Score', scoreColor)}
                 ${kpiBox(targetConfigured ? `${targetPassed}/${targetConfigured}` : 'No target', 'Activity Targets', targetConfigured ? '#0f766e' : '#64748b')}
-                ${kpiBox(riskEvents, 'Risk Events', riskEvents ? '#dc2626' : '#059669')}
-                ${kpiBox(`${m.trainingPassed || 0}/${m.training || 0}`, 'Training', '#0284c7')}
+                ${kpiBox(riskDataPartial ? 'Partial' : riskEvents, 'Risk Events', riskDataPartial ? '#d97706' : riskEvents ? '#dc2626' : '#059669')}
+                ${kpiBox(unavailable.has('training') ? 'No data' : `${m.trainingPassed || 0}/${m.training || 0}`, 'Training', unavailable.has('training') ? '#64748b' : '#0284c7')}
                 ${kpiBox(latestActivity, 'Latest Activity', '#475569', 'col-span-2 md:col-span-1')}
             </div>
         </section>
 
+        ${renderDataQualityNotice(data.dataQuality)}
         ${renderProfileTabs()}
         ${renderProfileTabContent(data)}
     </div>`;
+}
+
+function renderDataQualityNotice(dataQuality) {
+    if (!dataQuality || dataQuality.status === 'complete') return '';
+    const sources = [...new Set([...(dataQuality.unavailableModules || []), ...(dataQuality.unavailableDetails || [])])];
+    const labels = sources.length ? sources.join(', ') : 'one or more modules';
+    return `<section class="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3" role="alert" aria-live="polite">
+        <div class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <div><p class="text-sm font-bold text-amber-900">ข้อมูลบางส่วนยังโหลดไม่สำเร็จ / Some data is unavailable</p><p class="mt-1 text-xs text-amber-800">${escHtml(labels)} · ระบบไม่นำแหล่งข้อมูลที่อ่านไม่ได้ไปสรุปเป็น 0 หรือลดคะแนน / Unavailable sources are not treated as zero or included in scoring.</p></div>
+            <button type="button" data-retry-profile class="min-h-11 rounded-lg border border-amber-300 bg-white px-4 text-xs font-bold text-amber-900">ลองใหม่ / Retry</button>
+        </div>
+    </section>`;
 }
 
 function latestTimelineDate(items) {
@@ -460,7 +480,7 @@ function renderActivityTargets(rows, summary) {
                     <div class="flex items-start justify-between gap-2"><p class="text-sm font-bold text-slate-700">${escHtml(row.label)}</p><span class="text-xs font-extrabold" style="color:${color}">${row.noData ? '-' : `${pct}%`}</span></div>
                     <p class="text-[11px] font-bold mt-1 ${row.source === 'scope' ? 'text-emerald-600' : row.source === 'override' ? 'text-violet-600' : row.source === 'system' ? 'text-amber-600' : row.source === 'module' ? 'text-teal-600' : 'text-sky-600'}">${sourceLabel(row)}${calculationLabel(row) ? ` · ${calculationLabel(row)}` : ''}</p>
                     <div class="h-1.5 rounded-full bg-slate-100 overflow-hidden mt-3"><div class="h-full rounded-full" style="width:${pct}%;background:${color}"></div></div>
-                    <p class="text-xs text-slate-500 mt-2">${row.noData ? 'ไม่มีข้อมูลสำหรับคำนวณ' : `${escHtml(String(actual))}/${escHtml(String(target))} ${escHtml(row.unitLabel || 'records')} · pass ${escHtml(String(passPct))}%`}</p>
+                    <p class="text-xs text-slate-500 mt-2">${row.noData ? (row.calculationMethod === 'source_unavailable' ? 'ดึงข้อมูลไม่ได้ / Source unavailable' : 'ไม่มีข้อมูลสำหรับคำนวณ / No data to calculate') : `${escHtml(String(actual))}/${escHtml(String(target))} ${escHtml(row.unitLabel || 'records')} · pass ${escHtml(String(passPct))}%`}</p>
                 </div>`;
             }).join('')}
         </div>

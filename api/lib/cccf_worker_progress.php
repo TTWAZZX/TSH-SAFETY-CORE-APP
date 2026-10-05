@@ -84,6 +84,65 @@ function cccf_worker_ensure_version_tables(): void
     $ready = true;
 }
 
+function cccf_worker_personal_target_result(?array $progressRow, int $fallbackPassPct = 80): ?array
+{
+    if ($progressRow === null) return null;
+    $configuredCoverageTarget = max(0, (int) ($progressRow['target'] ?? 0));
+    $rawRecords = max(0, (int) ($progressRow['rawRecords'] ?? 0));
+    // CCCF Worker is people coverage. Scope/employee target values are covered
+    // headcounts, not the number of forms required from one Safety 360 person.
+    $yearlyTarget = $configuredCoverageTarget > 0 ? 1 : 0;
+    $actualCount = $yearlyTarget > 0 && $rawRecords > 0 ? 1 : 0;
+    $passPct = max(0, min(100, (int) ($progressRow['passPct'] ?? $fallbackPassPct)));
+    $completionPct = $yearlyTarget > 0
+        ? min(100, (int) round($actualCount * 100 / $yearlyTarget))
+        : null;
+    return [
+        'yearlyTarget'=>$yearlyTarget,
+        'actualCount'=>$actualCount,
+        'completionPct'=>$completionPct,
+        'passPct'=>$passPct,
+        'passed'=>$completionPct === null ? null : $completionPct >= $passPct,
+        'noData'=>false,
+        'calculationScope'=>['type'=>'employee', 'employeeId'=>trim((string) ($progressRow['employeeId'] ?? ''))],
+        'calculationMethod'=>'cccf_worker_personal_binary_submission',
+        'targetSource'=>$progressRow['targetSource'] ?? null,
+        'rawRecords'=>$rawRecords,
+        'configuredCoverageTarget'=>$configuredCoverageTarget,
+    ];
+}
+
+function cccf_worker_safety360_target_result(?array $progressRow, ?array $unitProgress, int $fallbackPassPct = 80): ?array
+{
+    if ($progressRow === null) return null;
+    $unitTarget = max(0, (int) ($unitProgress['unitTarget'] ?? 0));
+    $hasManualActual = !empty($unitProgress['targetConfigured'])
+        && $unitTarget > 0
+        && array_key_exists('achievedOverride', $unitProgress ?? [])
+        && $unitProgress['achievedOverride'] !== null;
+    if (!$hasManualActual) return cccf_worker_personal_target_result($progressRow, $fallbackPassPct);
+    $actualCount = max(0, (int) $unitProgress['achievedOverride']);
+    $passPct = max(0, min(100, (int) ($progressRow['passPct'] ?? $fallbackPassPct)));
+    $completionPct = min(100, (int) round($actualCount * 100 / $unitTarget));
+    return [
+        'yearlyTarget'=>$unitTarget,
+        'actualCount'=>$actualCount,
+        'completionPct'=>$completionPct,
+        'passPct'=>$passPct,
+        'passed'=>$completionPct >= $passPct,
+        'noData'=>false,
+        'calculationScope'=>[
+            'type'=>'department_unit',
+            'department'=>trim((string) ($progressRow['department'] ?? ($unitProgress['department'] ?? ''))),
+            'unit'=>trim((string) ($progressRow['unit'] ?? ($unitProgress['unit'] ?? ''))),
+        ],
+        'calculationMethod'=>'cccf_worker_unit_achieved_override',
+        'targetSource'=>'cccf_unit_targets.achieved_override',
+        'rawRecords'=>max(0, (int) ($progressRow['rawRecords'] ?? 0)),
+        'configuredCoverageTarget'=>$unitTarget,
+    ];
+}
+
 function cccf_worker_latest_map(array $rows, callable $keyFn, int $year): array
 {
     $out = [];
@@ -168,7 +227,7 @@ function cccf_worker_progress_data(int $year, bool $ensureSchema = true): array
         [$year]
     );
     $unitTargets = db_rows(
-        'SELECT unit_name Unit,yearly_target UnitTarget FROM cccf_unit_targets WHERE target_year=?',
+        'SELECT unit_name Unit,yearly_target UnitTarget,achieved_override AchievedOverride FROM cccf_unit_targets WHERE target_year=?',
         [$year]
     );
     $masterUnits = db_rows(
@@ -199,6 +258,7 @@ function cccf_worker_progress_data(int $year, bool $ensureSchema = true): array
                 'unit'=>$unit,
                 'department'=>$department,
                 'unitTarget'=>0,
+                'achievedOverride'=>null,
                 'targetConfigured'=>false,
                 'personalTargetTotal'=>0,
                 'actualTowardTarget'=>0,
@@ -223,6 +283,7 @@ function cccf_worker_progress_data(int $year, bool $ensureSchema = true): array
         $unit = trim((string) ($row['Unit'] ?? ''));
         $ensureUnit($unit);
         $unitMap[$unit]['unitTarget'] = max(0, (int) ($row['UnitTarget'] ?? 0));
+        $unitMap[$unit]['achievedOverride'] = ($row['AchievedOverride'] ?? null) === null ? null : max(0, (int) $row['AchievedOverride']);
         $unitMap[$unit]['targetConfigured'] = true;
     }
 

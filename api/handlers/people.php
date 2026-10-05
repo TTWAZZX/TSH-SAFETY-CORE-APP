@@ -3,9 +3,60 @@ declare(strict_types=1);
 
 require_once __DIR__ . '/../lib/cccf_worker_progress.php';
 
-function count_value(string $sql, array $params = []): int
+function people_record_data_quality_failure(?array &$state, string $source, bool $affectsScore = false): void
 {
-    return (int) (safe_scalar($sql, $params) ?? 0);
+    if ($state === null || $source === '') return;
+    foreach ($state['failures'] as $failure) {
+        if (($failure['source'] ?? '') === $source && !empty($failure['affectsScore']) === $affectsScore) return;
+    }
+    $state['failures'][] = ['source'=>$source, 'affectsScore'=>$affectsScore];
+}
+
+function count_value(string $sql, array $params = [], ?array &$quality = null, string $source = '', bool $affectsScore = false): int
+{
+    try {
+        $stmt = db()->prepare($sql);
+        $stmt->execute($params);
+        $row = $stmt->fetch();
+        return (int) (($row ? array_values($row)[0] : null) ?? 0);
+    } catch (Throwable $error) {
+        people_record_data_quality_failure($quality, $source, $affectsScore);
+        return 0;
+    }
+}
+
+function people_rows(string $sql, array $params, array &$quality, string $source): array
+{
+    try {
+        return db_rows($sql, $params);
+    } catch (Throwable $error) {
+        people_record_data_quality_failure($quality, $source, false);
+        return [];
+    }
+}
+
+function people_build_data_quality(array $state): array
+{
+    $score = [];
+    $detail = [];
+    $warnings = [];
+    foreach (($state['failures'] ?? []) as $failure) {
+        $source = (string) ($failure['source'] ?? '');
+        if ($source === '') continue;
+        if (!empty($failure['affectsScore'])) $score[$source] = true;
+        else $detail[$source] = true;
+        $warnings[$source . ':' . (!empty($failure['affectsScore']) ? '1' : '0')] = [
+            'source'=>$source,
+            'affectsScore'=>!empty($failure['affectsScore']),
+            'code'=>'SOURCE_UNAVAILABLE',
+        ];
+    }
+    return [
+        'status'=>$warnings ? 'partial' : 'complete',
+        'unavailableModules'=>array_keys($score),
+        'unavailableDetails'=>array_keys($detail),
+        'warnings'=>array_values($warnings),
+    ];
 }
 
 function people_text_length(string $value): int
@@ -115,6 +166,7 @@ function handle_people_routes(string $method, string $path): bool
     if (!$employee) {
         json_response(['success' => false, 'message' => 'Employee not found.'], 404);
     }
+    $qualityState = ['failures'=>[]];
     try {
         $cccfWorkerProgress = cccf_worker_progress_data($year, false);
     } catch (Throwable $error) {
@@ -127,28 +179,39 @@ function handle_people_routes(string $method, string $path): bool
             break;
         }
     }
-    $cccfWorkerRawCount = count_value('SELECT COUNT(*) FROM cccf_forma_worker WHERE EmployeeID=? AND YEAR(SubmitDate)=?', [$employeeId, $year]);
+    $cccfWorkerUnit = null;
+    if ($cccfWorkerSelf) {
+        foreach (($cccfWorkerProgress['units'] ?? []) as $unitRow) {
+            if (trim((string) ($unitRow['unit'] ?? '')) === trim((string) ($cccfWorkerSelf['unit'] ?? ''))) {
+                $cccfWorkerUnit = $unitRow;
+                break;
+            }
+        }
+    }
+    $cccfWorkerRawCount = count_value('SELECT COUNT(*) FROM cccf_forma_worker WHERE EmployeeID=? AND YEAR(SubmitDate)=?', [$employeeId, $year], $qualityState, 'cccf_worker', true);
     $metrics = [
-        'patrol' => count_value('SELECT COUNT(*) FROM patrol_attendance WHERE UserID=? AND YEAR(PatrolDate)=?', [$employeeId, $year]),
-        'patrolIssues' => count_value('SELECT COUNT(*) FROM patrol_issues WHERE ReporterID=? AND YEAR(DateFound)=?', [$employeeId, $year]),
+        'patrol' => count_value('SELECT COUNT(*) FROM patrol_attendance WHERE UserID=? AND YEAR(PatrolDate)=?', [$employeeId, $year], $qualityState, 'patrol', true),
+        'patrolIssues' => count_value('SELECT COUNT(*) FROM patrol_issues WHERE ReporterID=? AND YEAR(DateFound)=?', [$employeeId, $year], $qualityState, 'patrol_issue', true),
         'cccfWorker' => $cccfWorkerSelf ? (int) ($cccfWorkerSelf['actualTowardTarget'] ?? 0) : $cccfWorkerRawCount,
         'cccfWorkerRaw' => $cccfWorkerSelf ? (int) ($cccfWorkerSelf['rawRecords'] ?? 0) : $cccfWorkerRawCount,
         'cccfWorkerTarget' => $cccfWorkerSelf ? (int) ($cccfWorkerSelf['target'] ?? 0) : 0,
-        'cccfPermanent' => count_value('SELECT COUNT(*) FROM cccf_forma_permanent WHERE AssigneeID=? AND YEAR(SubmitDate)=?', [$employeeId, $year]),
-        'training' => count_value('SELECT COUNT(*) FROM training_records WHERE EmployeeID=? AND YEAR(TrainingDate)=?', [$employeeId, $year]),
-        'trainingPassed' => count_value('SELECT COUNT(*) FROM training_records WHERE EmployeeID=? AND YEAR(TrainingDate)=? AND IsPassed=1', [$employeeId, $year]),
-        'hiyari' => count_value('SELECT COUNT(*) FROM hiyarireports WHERE ReporterID=? AND YEAR(ReportDate)=?', [$employeeId, $year]),
-        'ky' => count_value('SELECT COUNT(*) FROM ky_activities WHERE ReporterID=? AND YEAR(ActivityDate)=?', [$employeeId, $year]),
-        'yokoten' => count_value('SELECT COUNT(*) FROM yokotenresponses WHERE EmployeeID=? AND YEAR(ResponseDate)=?', [$employeeId, $year]),
-        'accidents' => count_value('SELECT COUNT(*) FROM accident_reports WHERE EmployeeID=? AND YEAR(AccidentDate)=? AND (IsDeleted IS NULL OR IsDeleted=0)', [$employeeId, $year]),
-        'fourmOwner' => count_value('SELECT COUNT(*) FROM fourm_changenotices WHERE (ResponsibleEmployeeID=? OR (ResponsibleEmployeeID IS NULL AND ResponsiblePerson=?)) AND YEAR(RequestDate)=?', [$employeeId, $employee['EmployeeName'], $year]),
-        'fourmCreated' => count_value('SELECT COUNT(*) FROM fourm_changenotices WHERE CreatedByID=? AND YEAR(RequestDate)=?', [$employeeId, $year]),
-        'policyAck' => count_value('SELECT COUNT(*) FROM policy_acknowledgements WHERE UserID=?', [$employeeId]),
-        'ppeViolations' => count_value('SELECT COUNT(*) FROM sc_ppe_violations WHERE EmployeeID=? AND YEAR(ViolationDate)=? AND deleted_at IS NULL', [$employeeId, $year]),
-        'scwDocs' => count_value('SELECT COUNT(*) FROM scw_documents WHERE UploadedBy=? AND YEAR(UploadedAt)=?', [$employee['EmployeeName'], $year]),
-        'ojtDept' => count_value('SELECT COUNT(*) FROM ojt_records WHERE Department=? AND YEAR(OJTDate)=?', [$employee['Department'], $year]),
+        'cccfPermanent' => count_value("SELECT COUNT(*) FROM cccf_forma_permanent
+                                        WHERE (AssigneeID=? OR ((AssigneeID IS NULL OR TRIM(AssigneeID)='') AND TRIM(SubmitterName)=?))
+                                          AND YEAR(SubmitDate)=?", [$employeeId, $employee['EmployeeName'], $year], $qualityState, 'cccf_permanent', true),
+        'training' => count_value('SELECT COUNT(*) FROM training_records WHERE EmployeeID=? AND YEAR(TrainingDate)=?', [$employeeId, $year], $qualityState, 'training', true),
+        'trainingPassed' => count_value('SELECT COUNT(*) FROM training_records WHERE EmployeeID=? AND YEAR(TrainingDate)=? AND IsPassed=1', [$employeeId, $year], $qualityState, 'training', true),
+        'hiyari' => count_value('SELECT COUNT(*) FROM hiyarireports WHERE ReporterID=? AND YEAR(ReportDate)=?', [$employeeId, $year], $qualityState, 'hiyari', true),
+        'ky' => count_value('SELECT COUNT(*) FROM ky_activities WHERE ReporterID=? AND YEAR(ActivityDate)=?', [$employeeId, $year], $qualityState, 'ky', true),
+        'yokoten' => count_value('SELECT COUNT(*) FROM yokotenresponses WHERE EmployeeID=? AND YEAR(ResponseDate)=?', [$employeeId, $year], $qualityState, 'yokoten', true),
+        'accidents' => count_value('SELECT COUNT(*) FROM accident_reports WHERE EmployeeID=? AND YEAR(AccidentDate)=? AND (IsDeleted IS NULL OR IsDeleted=0)', [$employeeId, $year], $qualityState, 'accident', true),
+        'fourmOwner' => count_value('SELECT COUNT(*) FROM fourm_changenotices WHERE (ResponsibleEmployeeID=? OR (ResponsibleEmployeeID IS NULL AND ResponsiblePerson=?)) AND YEAR(RequestDate)=?', [$employeeId, $employee['EmployeeName'], $year], $qualityState, 'fourm', true),
+        'fourmCreated' => count_value('SELECT COUNT(*) FROM fourm_changenotices WHERE CreatedByID=? AND YEAR(RequestDate)=?', [$employeeId, $year], $qualityState, 'fourm', true),
+        'policyAck' => count_value('SELECT COUNT(*) FROM policy_acknowledgements WHERE UserID=?', [$employeeId], $qualityState, 'policy'),
+        'ppeViolations' => count_value('SELECT COUNT(*) FROM sc_ppe_violations WHERE EmployeeID=? AND YEAR(ViolationDate)=? AND deleted_at IS NULL', [$employeeId, $year], $qualityState, 'ppe', true),
+        'scwDocs' => count_value('SELECT COUNT(*) FROM scw_documents WHERE UploadedBy=? AND YEAR(UploadedAt)=?', [$employee['EmployeeName'], $year], $qualityState, 'scw', true),
+        'ojtDept' => count_value('SELECT COUNT(*) FROM ojt_records WHERE Department=? AND YEAR(OJTDate)=?', [$employee['Department'], $year], $qualityState, 'scw'),
     ];
-    $fourmScopes = safe_rows(
+    $fourmScopes = people_rows(
         'SELECT ce.id AS AssignmentID,ce.Status,ce.AssignedAt,ce.RemovedAt,cur.id AS CurriculumID,cur.CurriculumCode,cur.CurriculumTitle,cur.Department,cur.Year,
                 COUNT(DISTINCT CASE WHEN c.IsActive=1 THEN c.id END) AS CourseCount
          FROM fourm_curriculumemployees ce
@@ -157,9 +220,9 @@ function handle_people_routes(string $method, string $path): bool
          WHERE ce.EmployeeID=? AND cur.Year=?
          GROUP BY ce.id,ce.Status,ce.AssignedAt,ce.RemovedAt,cur.id,cur.CurriculumCode,cur.CurriculumTitle,cur.Department,cur.Year
          ORDER BY ce.Status=\'Assigned\' DESC,ce.AssignedAt DESC LIMIT 8',
-        [$employeeId, $year]
+        [$employeeId, $year], $qualityState, 'fourm_matrix'
     );
-    $fourmLogs = safe_rows(
+    $fourmLogs = people_rows(
         'SELECT l.id,l.Action,l.CurriculumID,l.CourseID,l.EmployeeID,l.OldValue,l.NewValue,l.PerformedBy,l.PerformedAt,
                 cur.CurriculumCode,cur.CurriculumTitle,c.CourseCode,c.CourseTitle
          FROM fourm_curriculumlogs l
@@ -167,19 +230,25 @@ function handle_people_routes(string $method, string $path): bool
          LEFT JOIN fourm_courses c ON c.id=l.CourseID
          WHERE l.EmployeeID=? AND YEAR(l.PerformedAt)=?
          ORDER BY l.PerformedAt DESC LIMIT 10',
-        [$employeeId, $year]
+        [$employeeId, $year], $qualityState, 'fourm_matrix'
     );
     $metrics['fourmScopes'] = count(array_filter($fourmScopes, static function ($row) {
         return ($row['Status'] ?? '') === 'Assigned';
     }));
     $metrics['fourmLogs'] = count($fourmLogs);
-    $metrics['ppeInspections'] = count_value('SELECT COUNT(*) FROM sc_ppeinspections WHERE InspectedEmployeeID=? AND YEAR(InspectionDate)=? AND deleted_at IS NULL', [$employeeId, $year]);
-    $metrics['ppeInspectionPassed'] = count_value('SELECT COUNT(*) FROM sc_ppeinspections WHERE InspectedEmployeeID=? AND YEAR(InspectionDate)=? AND deleted_at IS NULL AND IsPass=1', [$employeeId, $year]);
-    $ppeSummaryRows = safe_rows(
+    $metrics['ppeInspections'] = count_value('SELECT COUNT(*) FROM sc_ppeinspections WHERE InspectedEmployeeID=? AND YEAR(InspectionDate)=? AND deleted_at IS NULL', [$employeeId, $year], $qualityState, 'ppe', true);
+    $metrics['ppeInspectionPassed'] = count_value('SELECT COUNT(*) FROM sc_ppeinspections WHERE InspectedEmployeeID=? AND YEAR(InspectionDate)=? AND deleted_at IS NULL AND IsPass=1', [$employeeId, $year], $qualityState, 'ppe', true);
+    $ppeSummaryRows = people_rows(
         'SELECT AVG(CompliancePct) AS avgCompliance FROM sc_ppeinspections WHERE InspectedEmployeeID=? AND YEAR(InspectionDate)=? AND deleted_at IS NULL',
-        [$employeeId, $year]
+        [$employeeId, $year], $qualityState, 'ppe'
     );
     $metrics['ppeCompliancePct'] = isset($ppeSummaryRows[0]['avgCompliance']) ? (int) round((float) $ppeSummaryRows[0]['avgCompliance']) : null;
+    if ($cccfWorkerSelf) {
+        $qualityState['failures'] = array_values(array_filter($qualityState['failures'], static function ($failure) {
+            return !(($failure['source'] ?? '') === 'cccf_worker' && !empty($failure['affectsScore']));
+        }));
+    }
+    $dataQuality = people_build_data_quality($qualityState);
     $activityActuals = [
         'patrol' => $metrics['patrol'], 'patrol_issue' => $metrics['patrolIssues'],
         'cccf_worker' => $metrics['cccfWorker'], 'cccf_permanent' => $metrics['cccfPermanent'],
@@ -196,6 +265,9 @@ function handle_people_routes(string $method, string $path): bool
         if ($activity['metricType'] !== 'people_coverage') continue;
         $target = target_row($activity, $mergedTargets);
         if ($target['yearlyTarget'] === null) continue;
+        // CCCF Worker is personal in Safety 360. On progress-engine failure the
+        // personal raw count below is the fallback, never a Department/Unit ratio.
+        if ($activity['key'] === 'cccf_worker') continue;
         $peopleCoverages[$activity['key']] = people_coverage(
             $activity['key'],
             (string) ($employee['Department'] ?? ''),
@@ -217,28 +289,38 @@ function handle_people_routes(string $method, string $path): bool
             $target['yearlyTarget']
         );
     }
+    foreach (array_merge($dynamicRatios, $peopleCoverages, $fixedCountAlignments) as $source => $result) {
+        if (($result['calculationMethod'] ?? null) === 'source_unavailable') {
+            people_record_data_quality_failure($qualityState, (string) $source, true);
+        }
+    }
+    $dataQuality = people_build_data_quality($qualityState);
     $activityTargets = [];
     foreach (activity_definitions() as $activity) {
         $target = target_row($activity, $mergedTargets);
         $ratio = $dynamicRatios[$activity['key']] ?? $peopleCoverages[$activity['key']] ?? $fixedCountAlignments[$activity['key']] ?? null;
-        if ($target['isNA'] || ($ratio === null && $target['yearlyTarget'] === null)) continue;
-        $actual = $ratio ? (int) $ratio['numerator'] : (int) ($activityActuals[$activity['key']] ?? 0);
-        if ($ratio) $target['yearlyTarget'] = (int) $ratio['denominator'];
-        if ($activity['key'] === 'cccf_worker' && $cccfWorkerSelf) {
-            $target['yearlyTarget'] = (int) ($cccfWorkerSelf['target'] ?? 0);
-            $actual = (int) ($cccfWorkerSelf['actualTowardTarget'] ?? 0);
-            $target['rawRecords'] = (int) ($cccfWorkerSelf['rawRecords'] ?? 0);
+        $personalCccfWorker = $activity['key'] === 'cccf_worker'
+            ? cccf_worker_safety360_target_result($cccfWorkerSelf, $cccfWorkerUnit, (int) ($target['passPct'] ?? 80))
+            : null;
+        if ($target['isNA'] || ($ratio === null && $target['yearlyTarget'] === null && $personalCccfWorker === null)) continue;
+        $sourceUnavailable = $activity['key'] === 'cccf_worker' && in_array('cccf_worker', $dataQuality['unavailableModules'], true);
+        $actual = $sourceUnavailable ? null : ($personalCccfWorker ? $personalCccfWorker['actualCount'] : ($ratio ? (int) $ratio['numerator'] : (int) ($activityActuals[$activity['key']] ?? 0)));
+        if ($personalCccfWorker) {
+            $target['yearlyTarget'] = $personalCccfWorker['yearlyTarget'];
+            $target['passPct'] = $personalCccfWorker['passPct'];
+            $target['rawRecords'] = $personalCccfWorker['rawRecords'];
+            $target['configuredCoverageTarget'] = $personalCccfWorker['configuredCoverageTarget'];
+        } elseif ($ratio) {
+            $target['yearlyTarget'] = (int) $ratio['denominator'];
         }
-        $completion = $ratio ? $ratio['completionPct'] : ($target['yearlyTarget'] > 0 ? min(100, (int) round($actual / $target['yearlyTarget'] * 100)) : null);
+        $completion = $sourceUnavailable ? null : ($personalCccfWorker ? $personalCccfWorker['completionPct'] : ($ratio ? $ratio['completionPct'] : ($target['yearlyTarget'] > 0 ? min(100, (int) round($actual / $target['yearlyTarget'] * 100)) : null)));
         $target['actualCount'] = $actual;
         $target['completionPct'] = $completion;
-        $target['passed'] = $completion !== null ? $completion >= ($target['passPct'] ?? 80) : null;
-        $target['noData'] = $ratio ? $ratio['noData'] : false;
-        $target['calculationScope'] = $ratio ? ($ratio['calculationScope'] ?? ['type' => 'department', 'department' => $ratio['department']]) : null;
-        $target['calculationMethod'] = ($activity['key'] === 'cccf_worker' && $cccfWorkerSelf)
-            ? 'cccf_worker_progress_engine_actual_toward_target'
-            : ($ratio['calculationMethod'] ?? null);
-        $target['targetSource'] = $ratio['targetSource'] ?? null;
+        $target['passed'] = $sourceUnavailable ? null : ($personalCccfWorker ? $personalCccfWorker['passed'] : ($completion !== null ? $completion >= ($target['passPct'] ?? 80) : null));
+        $target['noData'] = $sourceUnavailable ? true : ($personalCccfWorker ? $personalCccfWorker['noData'] : ($ratio ? $ratio['noData'] : false));
+        $target['calculationScope'] = $personalCccfWorker ? $personalCccfWorker['calculationScope'] : ($ratio ? ($ratio['calculationScope'] ?? ['type' => 'department', 'department' => $ratio['department']]) : null);
+        $target['calculationMethod'] = $sourceUnavailable ? 'source_unavailable' : ($personalCccfWorker ? $personalCccfWorker['calculationMethod'] : ($ratio['calculationMethod'] ?? null));
+        $target['targetSource'] = $personalCccfWorker ? $personalCccfWorker['targetSource'] : ($ratio['targetSource'] ?? null);
         if ($target['source'] === 'none' && !empty($target['targetSource']) && $target['targetSource'] !== 'activity_target') $target['source'] = 'module';
         $activityTargets[] = $target;
     }
@@ -280,23 +362,30 @@ function handle_people_routes(string $method, string $path): bool
     if (count($activityTargets) === 0) $reasons[] = 'No effective activity target configured by Admin';
     if (count($reasons) === 0) $reasons[] = 'All configured targets are on track and no major risk event was detected';
     if (count($nextActions) === 0) $nextActions[] = count($activityTargets) > 0 ? 'Maintain progress against configured targets' : 'No target-based follow-up required';
-    $status = $metrics['accidents'] > 0 || $metrics['ppeViolations'] > 0 || ($score !== null && $score < 60)
+    $riskDataPartial = count(array_intersect(['accident', 'ppe', 'patrol_issue'], $dataQuality['unavailableModules'])) > 0;
+    $status = $riskDataPartial
+        ? 'Data Partial'
+        : ($metrics['accidents'] > 0 || $metrics['ppeViolations'] > 0 || ($score !== null && $score < 60)
         ? 'Action Needed'
         : ($metrics['patrolIssues'] > 0 || ($score !== null && $score < 80)
             ? 'Watch'
-            : ($score === null ? (count($activityTargets) > 0 ? 'No Data' : 'No Target') : 'Good'));
-    $patrolRecords = safe_rows('SELECT id,PatrolDate,PatrolType,Area,Notes,RecordedBy FROM patrol_attendance WHERE UserID=? AND YEAR(PatrolDate)=? ORDER BY PatrolDate DESC,id DESC LIMIT 12', [$employeeId, $year]);
-    $trainingRecords = safe_rows('SELECT r.id,r.TrainingDate,r.Score,r.IsPassed,c.CourseName,c.CourseCode FROM training_records r LEFT JOIN training_courses c ON c.id=r.CourseID WHERE r.EmployeeID=? AND YEAR(r.TrainingDate)=? ORDER BY r.TrainingDate DESC,r.id DESC LIMIT 8', [$employeeId, $year]);
-    $hiyariRecords = safe_rows('SELECT id,ReportDate,Location,Description,Status FROM hiyarireports WHERE ReporterID=? AND YEAR(ReportDate)=? ORDER BY ReportDate DESC LIMIT 6', [$employeeId, $year]);
-    $kyRecords = safe_rows('SELECT id,ActivityDate,TeamName,HazardDescription,Status FROM ky_activities WHERE ReporterID=? AND YEAR(ActivityDate)=? ORDER BY ActivityDate DESC LIMIT 6', [$employeeId, $year]);
-    $accidentRecords = safe_rows('SELECT id,AccidentDate,AccidentType,Status,Location FROM accident_reports WHERE EmployeeID=? AND YEAR(AccidentDate)=? AND (IsDeleted IS NULL OR IsDeleted=0) ORDER BY AccidentDate DESC LIMIT 6', [$employeeId, $year]);
-    $fourmRecords = safe_rows('SELECT id,NoticeNo,RequestDate,Title,Status,ChangeType FROM fourm_changenotices WHERE (CreatedByID=? OR ResponsibleEmployeeID=? OR (ResponsibleEmployeeID IS NULL AND ResponsiblePerson=?)) AND YEAR(RequestDate)=? ORDER BY RequestDate DESC LIMIT 6', [$employeeId, $employeeId, $employee['EmployeeName'], $year]);
-    $yokotenRecords = safe_rows('SELECT ResponseID,ResponseDate,YokotenID,ApprovalStatus,IsRelated FROM yokotenresponses WHERE EmployeeID=? AND YEAR(ResponseDate)=? ORDER BY ResponseDate DESC LIMIT 6', [$employeeId, $year]);
-    $selfPatrolRecords = safe_rows('SELECT id,CheckinDate,Location,Notes FROM patrol_self_checkin WHERE EmployeeID=? AND Year=? ORDER BY CheckinDate DESC LIMIT 8', [$employeeId, $year]);
-    $cccfWorkerRecords = safe_rows('SELECT id,SubmitDate,JobArea,Equipment,SafetyUnit FROM cccf_forma_worker WHERE EmployeeID=? AND YEAR(SubmitDate)=? ORDER BY SubmitDate DESC,id DESC LIMIT 6', [$employeeId, $year]);
-    $cccfPermanentRecords = safe_rows('SELECT id,SubmitDate,JobArea,Summary,StopType,`Rank` FROM cccf_forma_permanent WHERE AssigneeID=? AND YEAR(SubmitDate)=? ORDER BY SubmitDate DESC,id DESC LIMIT 6', [$employeeId, $year]);
-    $ppeInspectionRecords = safe_rows('SELECT InspectionID,InspectionDate,Area,Department,WorkTypeName,IsPass,CompliancePct FROM sc_ppeinspections WHERE InspectedEmployeeID=? AND YEAR(InspectionDate)=? AND deleted_at IS NULL ORDER BY InspectionDate DESC,CreatedAt DESC LIMIT 8', [$employeeId, $year]);
-    $ppeViolationRecords = safe_rows('SELECT ViolationID,ViolationDate,WarningLevel,ViolationNo,InspectorName,Note FROM sc_ppe_violations WHERE EmployeeID=? AND YEAR(ViolationDate)=? AND deleted_at IS NULL ORDER BY ViolationDate DESC,CreatedAt DESC LIMIT 8', [$employeeId, $year]);
+            : ($score === null ? (count($activityTargets) > 0 ? 'No Data' : 'No Target') : 'Good')));
+    $patrolRecords = people_rows('SELECT id,PatrolDate,PatrolType,Area,Notes,RecordedBy FROM patrol_attendance WHERE UserID=? AND YEAR(PatrolDate)=? ORDER BY PatrolDate DESC,id DESC LIMIT 12', [$employeeId, $year], $qualityState, 'patrol');
+    $trainingRecords = people_rows('SELECT r.id,r.TrainingDate,r.Score,r.IsPassed,c.CourseName,c.CourseCode FROM training_records r LEFT JOIN training_courses c ON c.id=r.CourseID WHERE r.EmployeeID=? AND YEAR(r.TrainingDate)=? ORDER BY r.TrainingDate DESC,r.id DESC LIMIT 8', [$employeeId, $year], $qualityState, 'training');
+    $hiyariRecords = people_rows('SELECT id,ReportDate,Location,Description,Status FROM hiyarireports WHERE ReporterID=? AND YEAR(ReportDate)=? ORDER BY ReportDate DESC LIMIT 6', [$employeeId, $year], $qualityState, 'hiyari');
+    $kyRecords = people_rows('SELECT id,ActivityDate,TeamName,HazardDescription,Status FROM ky_activities WHERE ReporterID=? AND YEAR(ActivityDate)=? ORDER BY ActivityDate DESC LIMIT 6', [$employeeId, $year], $qualityState, 'ky');
+    $accidentRecords = people_rows('SELECT id,AccidentDate,AccidentType,Status,Location FROM accident_reports WHERE EmployeeID=? AND YEAR(AccidentDate)=? AND (IsDeleted IS NULL OR IsDeleted=0) ORDER BY AccidentDate DESC LIMIT 6', [$employeeId, $year], $qualityState, 'accident');
+    $fourmRecords = people_rows('SELECT id,NoticeNo,RequestDate,Title,Status,ChangeType FROM fourm_changenotices WHERE (CreatedByID=? OR ResponsibleEmployeeID=? OR (ResponsibleEmployeeID IS NULL AND ResponsiblePerson=?)) AND YEAR(RequestDate)=? ORDER BY RequestDate DESC LIMIT 6', [$employeeId, $employeeId, $employee['EmployeeName'], $year], $qualityState, 'fourm');
+    $yokotenRecords = people_rows('SELECT ResponseID,ResponseDate,YokotenID,ApprovalStatus,IsRelated FROM yokotenresponses WHERE EmployeeID=? AND YEAR(ResponseDate)=? ORDER BY ResponseDate DESC LIMIT 6', [$employeeId, $year], $qualityState, 'yokoten');
+    $selfPatrolRecords = people_rows('SELECT id,CheckinDate,Location,Notes FROM patrol_self_checkin WHERE EmployeeID=? AND Year=? ORDER BY CheckinDate DESC LIMIT 8', [$employeeId, $year], $qualityState, 'patrol');
+    $cccfWorkerRecords = people_rows('SELECT id,SubmitDate,JobArea,Equipment,SafetyUnit FROM cccf_forma_worker WHERE EmployeeID=? AND YEAR(SubmitDate)=? ORDER BY SubmitDate DESC,id DESC LIMIT 6', [$employeeId, $year], $qualityState, 'cccf_worker');
+    $cccfPermanentRecords = people_rows("SELECT id,SubmitDate,JobArea,Summary,StopType,`Rank` FROM cccf_forma_permanent
+                                       WHERE (AssigneeID=? OR ((AssigneeID IS NULL OR TRIM(AssigneeID)='') AND TRIM(SubmitterName)=?))
+                                         AND YEAR(SubmitDate)=?
+                                       ORDER BY SubmitDate DESC,id DESC LIMIT 6", [$employeeId, $employee['EmployeeName'], $year], $qualityState, 'cccf_permanent');
+    $ppeInspectionRecords = people_rows('SELECT InspectionID,InspectionDate,Area,Department,WorkTypeName,IsPass,CompliancePct FROM sc_ppeinspections WHERE InspectedEmployeeID=? AND YEAR(InspectionDate)=? AND deleted_at IS NULL ORDER BY InspectionDate DESC,CreatedAt DESC LIMIT 8', [$employeeId, $year], $qualityState, 'ppe');
+    $ppeViolationRecords = people_rows('SELECT ViolationID,ViolationDate,WarningLevel,ViolationNo,InspectorName,Note FROM sc_ppe_violations WHERE EmployeeID=? AND YEAR(ViolationDate)=? AND deleted_at IS NULL ORDER BY ViolationDate DESC,CreatedAt DESC LIMIT 8', [$employeeId, $year], $qualityState, 'ppe');
+    $dataQuality = people_build_data_quality($qualityState);
     $timeline = [];
     foreach ($patrolRecords as $row) {
         $timeline[] = timeline_record('Patrol', 'patrol', $row, 'PatrolDate', 'Area', 'PatrolType', 'Notes');
@@ -391,7 +480,7 @@ function handle_people_routes(string $method, string $path): bool
         'reasons' => array_slice(array_values(array_unique($reasons)), 0, 8),
         'nextActions' => array_slice(array_values(array_unique($nextActions)), 0, 5),
         'thresholds' => ['good' => 80, 'watch' => 60],
-        'counters' => ['riskEventCount' => $riskEvents, 'configuredTargets' => count($activityTargets), 'evaluableTargets' => count($evaluableActivityTargets)],
+        'counters' => ['riskEventCount' => $riskEvents, 'riskDataPartial' => $riskDataPartial, 'configuredTargets' => count($activityTargets), 'evaluableTargets' => count($evaluableActivityTargets)],
     ];
     $responseEmployee = $isAdmin ? $employee : [
         'EmployeeID' => $employee['EmployeeID'] ?? '',
@@ -407,7 +496,7 @@ function handle_people_routes(string $method, string $path): bool
         'nextActions' => [], 'counters' => [],
     ];
     json_response(['success' => true, 'data' => [
-        'year' => $year, 'employee' => $responseEmployee,
+        'year' => $year, 'dataQuality' => $dataQuality, 'employee' => $responseEmployee,
         'access' => ['canViewSensitive' => $isAdmin, 'canViewRiskDetail' => $isAdmin, 'canExport' => $isAdmin, 'scope' => $isAdmin ? 'all' : 'self'],
         'metrics' => $metrics, 'complianceScore' => $score, 'overallStatus' => $status, 'riskProfile' => $responseRiskProfile,
         'activityTargets' => $activityTargets, 'activityTargetSummary' => $activityTargetSummary,

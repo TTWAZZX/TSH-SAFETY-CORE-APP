@@ -4,7 +4,7 @@ const express = require('express');
 const router  = express.Router();
 const db      = require('../db');
 const { isAdmin } = require('../middleware/auth');
-const { getCccfWorkerProgress } = require('../utils/cccf-worker-progress');
+const { getCccfWorkerProgress, getCccfWorkerSafety360TargetResult } = require('../utils/cccf-worker-progress');
 const { buildUnitCoverage } = require('../utils/yokoten-admin-scope');
 const {
     buildMandatoryPolicyTarget,
@@ -356,7 +356,7 @@ async function getDynamicActivityRatio(activityKey, department, year = new Date(
             return { numerator, denominator, completionPct: Math.round(numerator * 100 / denominator), noData: false, department: dept };
         }
     } catch {
-        return empty;
+        return { ...empty, calculationMethod: 'source_unavailable' };
     }
     return empty;
 }
@@ -388,12 +388,15 @@ async function getPeopleCoverage(activityKey, { department, unit = '' } = {}, ye
             const unitFilter = scopedUnit ? ' AND TRIM(COALESCE(SafetyUnit, \'\')) = ?' : '';
             if (scopedUnit) params.push(scopedUnit);
             const [[row]] = await db.query(
-                `SELECT COUNT(*) AS numerator
+                `SELECT COUNT(DISTINCT COALESCE(
+                            NULLIF(CONCAT('id:', TRIM(COALESCE(EmployeeID, ''))), 'id:'),
+                            NULLIF(CONCAT('name:', LOWER(TRIM(COALESCE(EmployeeName, '')))), 'name:')
+                        )) AS numerator
                    FROM CCCF_FormA_Worker
                   WHERE TRIM(COALESCE(Department, '')) = ? AND YEAR(SubmitDate) = ?${unitFilter}`,
                 params
             );
-            return peopleCoverageResult(row?.numerator, yearlyTarget, dept, scopedUnit, 'worker_form_records');
+            return peopleCoverageResult(row?.numerator, yearlyTarget, dept, scopedUnit, 'distinct_worker_submitters');
         }
         if (activityKey === 'cccf_permanent') {
             const params = [dept, year];
@@ -402,7 +405,10 @@ async function getPeopleCoverage(activityKey, { department, unit = '' } = {}, ye
                 : '';
             if (scopedUnit) params.push(scopedUnit);
             const [[row]] = await db.query(
-                `SELECT COUNT(DISTINCT COALESCE(NULLIF(f.AssigneeID, ''), NULLIF(f.SubmitterName, ''))) AS numerator
+                `SELECT COUNT(DISTINCT COALESCE(
+                            NULLIF(CONCAT('id:', TRIM(COALESCE(f.AssigneeID, ''))), 'id:'),
+                            NULLIF(CONCAT('name:', LOWER(TRIM(COALESCE(f.SubmitterName, '')))), 'name:')
+                        )) AS numerator
                    FROM CCCF_FormA_Permanent f
                   WHERE TRIM(COALESCE(f.Department, '')) = ? AND YEAR(f.SubmitDate) = ?${unitFilter}`,
                 params
@@ -420,7 +426,7 @@ async function getPeopleCoverage(activityKey, { department, unit = '' } = {}, ye
         }
         if (activityKey === 'training') {
             const [[row]] = await db.query(
-                `SELECT COUNT(DISTINCT r.EmployeeID) AS numerator
+                `SELECT COUNT(DISTINCT NULLIF(TRIM(r.EmployeeID), '')) AS numerator
                    FROM Training_Records r
                    JOIN Employees e ON e.EmployeeID = r.EmployeeID
                   WHERE TRIM(COALESCE(e.Department, '')) = ? AND YEAR(r.TrainingDate) = ? AND r.IsPassed = 1`,
@@ -435,7 +441,7 @@ async function getPeopleCoverage(activityKey, { department, unit = '' } = {}, ye
                 : '';
             if (scopedUnit) params.push(scopedUnit);
             const [[row]] = await db.query(
-                `SELECT COUNT(DISTINCT NULLIF(h.ReporterID, '')) AS numerator
+                `SELECT COUNT(DISTINCT NULLIF(TRIM(h.ReporterID), '')) AS numerator
                    FROM HiyariReports h
                   WHERE TRIM(COALESCE(h.Department, '')) = ? AND YEAR(h.ReportDate) = ?
                     AND h.DeletedAt IS NULL${unitFilter}`,
@@ -932,11 +938,9 @@ router.get('/me', async (req, res) => {
         const peopleCoverages = {};
         for (const activity of eligibleActivities.filter(a => a.metricType === 'people_coverage')) {
             const target = effectiveTarget(activity.key);
-            const isPersonalCccfWorker = activity.key === 'cccf_worker'
-                && templateMap.cccf_worker
-                && !templateMap.cccf_worker.IsNA
-                && Number(templateMap.cccf_worker.YearlyTarget || 0) > 0;
-            if (isPersonalCccfWorker) continue;
+            // My Targets must use personal CCCF progress (or personal raw-record fallback),
+            // regardless of whether the effective target came from template/scope/override.
+            if (activity.key === 'cccf_worker') continue;
             peopleCoverages[activity.key] = await getPeopleCoverage(
                 activity.key,
                 { department: req.user.department, unit },
@@ -958,6 +962,9 @@ router.get('/me', async (req, res) => {
             : { employees: [] };
         const cccfWorkerSelf = (cccfWorkerProgress.employees || [])
             .find(row => String(row.employeeId || '').trim() === String(empId || '').trim()) || null;
+        const cccfWorkerUnit = cccfWorkerSelf
+            ? (cccfWorkerProgress.units || []).find(row => String(row.unit || '').trim() === String(cccfWorkerSelf.unit || '').trim()) || null
+            : null;
 
         // Actual counts in parallel (silent fail per table)
         const [
@@ -967,7 +974,9 @@ router.get('/me', async (req, res) => {
             safeCount('SELECT COUNT(*) AS cnt FROM Patrol_Attendance WHERE UserID = ? AND YEAR(PatrolDate) = ?', [empId, year]),
             safeCount('SELECT COUNT(*) AS cnt FROM Patrol_Issues WHERE ReporterID = ? AND YEAR(DateFound) = ?', [empId, year]),
             safeCount('SELECT COUNT(*) AS cnt FROM CCCF_FormA_Worker WHERE EmployeeID = ? AND YEAR(SubmitDate) = ?', [empId, year]),
-            safeCount('SELECT COUNT(*) AS cnt FROM CCCF_FormA_Permanent WHERE SubmitterName = ? AND YEAR(SubmitDate) = ?', [empName, year]),
+            safeCount(`SELECT COUNT(*) AS cnt FROM CCCF_FormA_Permanent
+                        WHERE (AssigneeID = ? OR ((AssigneeID IS NULL OR TRIM(AssigneeID) = '') AND TRIM(SubmitterName) = ?))
+                          AND YEAR(SubmitDate) = ?`, [empId, empName, year]),
             safeCount('SELECT COUNT(*) AS cnt FROM SCW_Documents WHERE UploadedBy = ? AND YEAR(UploadedAt) = ?', [empName, year]),
             safeCount('SELECT COUNT(*) AS cnt FROM Training_Records WHERE EmployeeID = ? AND YEAR(TrainingDate) = ? AND IsPassed = 1', [empId, year]),
             safeCount('SELECT COUNT(*) AS cnt FROM YokotenResponses WHERE EmployeeID = ? AND YEAR(ResponseDate) = ?', [empId, year]),
@@ -990,19 +999,18 @@ router.get('/me', async (req, res) => {
         const additionalTargets = eligibleActivities.map(a => {
             const d           = overrideMap[a.key] || scopeMap[a.key] || templateMap[a.key] || null;
             const ratio       = dynamicRatios[a.key] || peopleCoverages[a.key] || fixedCountAlignments[a.key] || null;
-            const yearlyTarget = a.key === 'cccf_worker' && cccfWorkerSelf
-                ? Number(cccfWorkerSelf.target || 0)
+            const personalCccfWorker = a.key === 'cccf_worker'
+                ? getCccfWorkerSafety360TargetResult(cccfWorkerSelf, cccfWorkerUnit, d?.PassPct ?? 80)
+                : null;
+            const yearlyTarget = personalCccfWorker
+                ? personalCccfWorker.yearlyTarget
                 : d?.YearlyTarget ?? null;
-            const passPct     = d?.PassPct       ?? 80;
+            const passPct     = personalCccfWorker ? personalCccfWorker.passPct : d?.PassPct ?? 80;
             const isNA        = d?.IsNA ? true : false;
-            const actual      = actualMap[a.key];
-            const pct         = ratio ? ratio.completionPct : yearlyTarget && !isNA && actual !== null
+            const actual      = personalCccfWorker ? personalCccfWorker.actualCount : actualMap[a.key];
+            const pct         = personalCccfWorker ? personalCccfWorker.completionPct : ratio ? ratio.completionPct : yearlyTarget && !isNA && actual !== null
                 ? Math.min(Math.round((actual / yearlyTarget) * 100), 100)
                 : null;
-            const isPersonalCccfWorker = a.key === 'cccf_worker'
-                && templateMap.cccf_worker
-                && !templateMap.cccf_worker.IsNA
-                && Number(templateMap.cccf_worker.YearlyTarget || 0) > 0;
             return {
                 activityKey:   a.key,
                 label:         a.label,
@@ -1011,7 +1019,7 @@ router.get('/me', async (req, res) => {
                 scopeType:     a.scopeType,
                 unitLabel:     a.unitLabel,
                 targetMode:    a.targetMode,
-                yearlyTarget:  ratio ? ratio.denominator : yearlyTarget,
+                yearlyTarget:  personalCccfWorker ? personalCccfWorker.yearlyTarget : ratio ? ratio.denominator : yearlyTarget,
                 passPct,
                 isNA,
                 source:        d.source,
@@ -1020,17 +1028,18 @@ router.get('/me', async (req, res) => {
                 isMandatory: false,
                 targetYear:    d?.targetYear ?? null,
                 scope:         d?.source === 'scope' ? { department: d.Department, unit: d.Unit || '' } : null,
-                actualCount:   ratio ? ratio.numerator : actual,
+                actualCount:   personalCccfWorker ? personalCccfWorker.actualCount : ratio ? ratio.numerator : actual,
                 completionPct: pct,
-                passed:        pct !== null ? pct >= passPct : null,
-                noData:        ratio ? ratio.noData : false,
-                calculationScope: isPersonalCccfWorker
-                    ? { type: 'employee', employeeId: empId }
+                passed:        personalCccfWorker ? personalCccfWorker.passed : pct !== null ? pct >= passPct : null,
+                noData:        personalCccfWorker ? personalCccfWorker.noData : ratio ? ratio.noData : false,
+                calculationScope: personalCccfWorker
+                    ? personalCccfWorker.calculationScope
                     : ratio ? (ratio.calculationScope || { type: 'department', department: ratio.department }) : null,
-                rawRecords:     a.key === 'cccf_worker' && cccfWorkerSelf ? Number(cccfWorkerSelf.rawRecords || 0) : undefined,
-                calculationMethod: isPersonalCccfWorker ? 'cccf_worker_progress_engine_actual_toward_target' : (ratio?.calculationMethod || null),
-                targetSource: ratio?.targetSource || null,
-                measurementSource: ratio?.targetSource && ratio.targetSource !== 'activity_target'
+                rawRecords:     personalCccfWorker ? personalCccfWorker.rawRecords : undefined,
+                configuredCoverageTarget: personalCccfWorker ? personalCccfWorker.configuredCoverageTarget : undefined,
+                calculationMethod: personalCccfWorker ? personalCccfWorker.calculationMethod : (ratio?.calculationMethod || null),
+                targetSource: personalCccfWorker ? personalCccfWorker.targetSource : (ratio?.targetSource || null),
+                measurementSource: personalCccfWorker ? 'employee_activity' : ratio?.targetSource && ratio.targetSource !== 'activity_target'
                     ? 'module'
                     : ratio ? 'system' : 'employee_activity',
             };
