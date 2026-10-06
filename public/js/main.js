@@ -26,7 +26,8 @@ import { loadContractorPage } from './pages/contractor.js?v=20260715-phase32d-re
 import { loadHiyariPage } from './pages/hiyari.js?v=20260907-hiyari-pdf-summary-r2';
 import { loadKyPage } from './pages/ky.js?v=20260923-ky-annual-contest-r9';
 import { loadFourmPage } from './pages/fourm.js?v=20260923-fourm-curriculum-soft-disable-r1';
-import { loadJohnnyAiPage } from './pages/johnny-ai.js?v=20260715-phase32d-remaining-async-ux';
+import { loadJohnnyAiPage } from './pages/johnny-ai.js?v=20261006-johnny-phase5-workflow-r1';
+import { initJohnnyDrawer, syncJohnnyDrawerRoute, destroyJohnnyDrawer } from './johnny-drawer.js?v=20261006-johnny-phase5-workflow-r1';
 import { openProfileDrawer, closeProfileDrawer } from './pages/profile.js?v=20260924-company-email-self-service-r1';
 import { loadDashboardPage } from './pages/dashboard.js?v=20260822-cccf-shared-target-r4';
 import { loadSearchPage } from './pages/search.js?v=20261005-safety360-data-integrity-r1';
@@ -436,6 +437,11 @@ async function startApp(user, onboardingStatus = null) {
         return;
     }
 
+    initJohnnyDrawer({
+        userId: user.id || user.EmployeeID || '',
+        userName: user.name || user.EmployeeName || '',
+    });
+
     if (await consumeBbsQrIntent()) return;
     consumePendingGuideRoute();
     handleRouting();
@@ -524,11 +530,13 @@ function consumePendingGuideRoute() {
 
 function showLoginScreen() {
     UI.hideLoading();
+    destroyJohnnyDrawer();
     document.getElementById('app-container')?.classList.add('hidden');
     document.getElementById('login-overlay')?.classList.remove('hidden');
 }
 
 function handleLogout() {
+    destroyJohnnyDrawer();
     TSHSession.logout();
 }
 
@@ -774,6 +782,7 @@ async function handleRouting() {
 
     const hash = window.location.hash.replace('#', '') || 'dashboard';
     document.body.dataset.activePage = hash;
+    syncJohnnyDrawerRoute(hash);
     console.log('➡️ Navigate:', hash);
 
     // อัปเดต page title ใน header

@@ -86,6 +86,7 @@ return [
     'johnny_reindex_min_char_ratio' => (float) $read('JOHNNY_REINDEX_MIN_CHAR_RATIO', 0.65),
     'johnny_reindex_min_chunk_ratio' => (float) $read('JOHNNY_REINDEX_MIN_CHUNK_RATIO', 0.5),
     'johnny_operational_log_retention_days' => (int) $read('JOHNNY_OPERATIONAL_LOG_RETENTION_DAYS', 30),
+    'johnny_chat_retention_days' => (int) $read('JOHNNY_CHAT_RETENTION_DAYS', 180),
     'johnny_pdf_min_local_text_chars' => (int) $read('JOHNNY_PDF_MIN_LOCAL_TEXT_CHARS', 1000),
     'johnny_pdf_min_size_for_short_text_bytes' => (int) $read('JOHNNY_PDF_MIN_SIZE_FOR_SHORT_TEXT_BYTES', 122880),
     'johnny_pdf_max_bytes_per_text_char' => (int) $read('JOHNNY_PDF_MAX_BYTES_PER_TEXT_CHAR', 180),

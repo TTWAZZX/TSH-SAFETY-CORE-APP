@@ -5,7 +5,7 @@ const path = require('path');
 
 const ROOT = path.join(__dirname, '..', '..');
 const PHASE5_MARKER = 'JOHNNY_PHASE5_WORKFLOW_INTEGRATION';
-const CACHE_BUST = '20260708-johnny-phase5-workflow';
+const CACHE_BUST = '20261006-johnny-phase5-workflow-r1';
 
 function read(relativePath) {
     return fs.readFileSync(path.join(ROOT, relativePath), 'utf8').replace(/^\uFEFF/, '');
@@ -49,14 +49,16 @@ function main() {
     ]).length === 0);
     check(results, 'Node workflow action log endpoint exists', includesAll(nodeRoute, [
         "router.post('/workflow-actions'",
+        'normalizeWorkflowAction',
         "operation: 'workflow_action'",
-        "stage: action",
+        'stage: workflow.action',
         "Johnny workflow action:",
     ]).length === 0);
     check(results, 'PHP workflow action log endpoint exists', includesAll(phpRoute, [
         "path === '/johnny/workflow-actions'",
+        'johnny_normalize_workflow_action',
         "operation' => 'workflow_action'",
-        "stage' => $action",
+        "stage' => $workflow['action']",
         'Johnny workflow action:',
     ]).length === 0);
     check(results, 'permission audit allows user workflow action log', permissionAudit.includes('POST /api/johnny/workflow-actions'));

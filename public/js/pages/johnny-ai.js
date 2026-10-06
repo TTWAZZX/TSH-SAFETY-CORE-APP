@@ -108,6 +108,9 @@ function sourceBadge(sourceType = 'ai_general') {
     if (sourceType === 'system_data') {
         return '<span class="inline-flex items-center px-2 py-1 rounded-full text-[11px] font-bold bg-lime-50 text-lime-700 border border-lime-100">ข้อมูลจากระบบ TSH SCA</span>';
     }
+    if (sourceType === 'system_usage') {
+        return '<span class="inline-flex items-center px-2 py-1 rounded-full text-[11px] font-bold bg-violet-50 text-violet-700 border border-violet-100">คู่มือการใช้งานระบบ</span>';
+    }
     if (sourceType === 'image_analysis') {
         return '<span class="inline-flex items-center px-2 py-1 rounded-full text-[11px] font-bold bg-rose-50 text-rose-700 border border-rose-100">วิเคราะห์ความเสี่ยงจากรูปภาพ</span>';
     }
@@ -221,6 +224,65 @@ function renderText(text) {
     return escHtml(text || '').replace(/\n/g, '<br>');
 }
 
+const JOHNNY_FEEDBACK_REASONS = [
+    ['incorrect', 'ข้อมูลไม่ถูกต้อง'],
+    ['outdated', 'ข้อมูลล้าสมัย'],
+    ['unclear', 'คำตอบไม่ชัดเจน'],
+    ['missing_source', 'ไม่มีแหล่งอ้างอิงที่ต้องการ'],
+    ['unsafe', 'คำแนะนำอาจไม่ปลอดภัย'],
+    ['other', 'เหตุผลอื่น'],
+];
+
+function answerFeedbackHtml(msg) {
+    const messageId = Number(msg?.id || msg?.messageId || 0);
+    if (!messageId || msg?.isTyping) return '';
+    const rating = String(msg.FeedbackRating || msg.feedbackRating || '');
+    const reason = String(msg.FeedbackReasonCode || msg.feedbackReasonCode || 'other');
+    const busy = Boolean(msg.feedbackBusy);
+    const buttonClass = 'johnny-answer-feedback min-h-[44px] rounded-full border px-3 py-2 text-[11px] font-black disabled:opacity-50';
+    return `
+        <div class="mt-2 flex flex-wrap items-center gap-2" data-johnny-phase4-feedback="true" data-message-id="${messageId}">
+            <span class="text-[11px] font-bold text-slate-400">คำตอบนี้ช่วยได้ไหม</span>
+            <button type="button" class="${buttonClass} ${rating === 'helpful' ? 'border-emerald-300 bg-emerald-50 text-emerald-800' : 'border-slate-200 bg-white text-slate-600'}"
+                    data-feedback-rating="helpful" data-message-id="${messageId}" aria-pressed="${rating === 'helpful'}" ${busy ? 'disabled' : ''}>ช่วยได้</button>
+            <button type="button" class="${buttonClass} ${rating === 'not_helpful' ? 'border-amber-300 bg-amber-50 text-amber-800' : 'border-slate-200 bg-white text-slate-600'}"
+                    data-feedback-rating="not_helpful" data-message-id="${messageId}" aria-pressed="${rating === 'not_helpful'}" ${busy ? 'disabled' : ''}>ควรปรับปรุง</button>
+            ${rating === 'not_helpful' ? `
+                <label class="sr-only" for="johnny-feedback-reason-${messageId}">เหตุผลที่ควรปรับปรุง</label>
+                <select id="johnny-feedback-reason-${messageId}" class="johnny-answer-feedback-reason min-h-[44px] rounded-xl border border-amber-200 bg-white px-3 text-xs font-bold text-slate-700"
+                        data-message-id="${messageId}" ${busy ? 'disabled' : ''}>
+                    ${JOHNNY_FEEDBACK_REASONS.map(([code, label]) => `<option value="${code}" ${reason === code ? 'selected' : ''}>${label}</option>`).join('')}
+                </select>` : ''}
+            <span class="sr-only" aria-live="polite">${busy ? 'กำลังบันทึกความคิดเห็น' : (rating ? 'บันทึกความคิดเห็นแล้ว' : '')}</span>
+        </div>
+    `;
+}
+
+async function updateAnswerFeedback(messageId, rating = '', reasonCode = '') {
+    const message = _messages.find(item => Number(item.id || item.messageId || 0) === Number(messageId));
+    if (!message || message.feedbackBusy) return;
+    const current = String(message.FeedbackRating || message.feedbackRating || '');
+    message.feedbackBusy = true;
+    renderMessages();
+    try {
+        if (rating && rating === current && !reasonCode) {
+            await API.delete(`/johnny/messages/${encodeURIComponent(messageId)}/feedback`);
+            message.FeedbackRating = '';
+            message.FeedbackReasonCode = '';
+        } else {
+            const response = await API.put(`/johnny/messages/${encodeURIComponent(messageId)}/feedback`, { rating, reasonCode });
+            message.FeedbackRating = response?.data?.rating || rating;
+            message.FeedbackReasonCode = response?.data?.reasonCode || '';
+        }
+        showToast('บันทึกความคิดเห็นแล้ว', 'success');
+    } catch (error) {
+        showToast(error?.message || 'บันทึกความคิดเห็นไม่สำเร็จ', 'error');
+    } finally {
+        message.feedbackBusy = false;
+        renderMessages();
+    }
+}
+
 function imageRiskDraftActions(msg, sourceType) {
     if (sourceType !== 'image_analysis' || msg.isTyping) return '';
     const id = String(msg.id || msg.messageId || '');
@@ -241,6 +303,17 @@ function imageRiskDraftActions(msg, sourceType) {
 
 function workflowActionTargets(msg, sourceType) {
     if (msg.isTyping || (msg.Role || msg.role) === 'user') return [];
+    const registry = Array.isArray(_status?.workflow?.navigationTargets)
+        ? _status.workflow.navigationTargets
+        : [
+            { key: 'hiyari', route: 'hiyari', title: 'Hiyari Hatto' },
+            { key: 'ky', route: 'ky', title: 'KY Ability' },
+            { key: 'patrol', route: 'patrol', title: 'Safety Patrol' },
+        ];
+    const findTarget = value => {
+        const normalized = String(value || '').replace(/[^a-z0-9-]/gi, '').toLowerCase();
+        return registry.find(item => item.key === normalized || item.route === normalized) || null;
+    };
     const text = String(msg.MessageText || msg.answer || msg.text || '').toLowerCase();
     const citations = normalizeCitations(msg.CitationsJson ?? msg.citations);
     const haystack = [
@@ -249,6 +322,10 @@ function workflowActionTargets(msg, sourceType) {
         ...citations.map(item => `${item.type || ''} ${item.title || ''} ${item.sourceLabel || ''}`),
     ].join(' ').toLowerCase();
     const targets = [];
+    citations.forEach(citation => {
+        const target = findTarget(citation.module || citation.route);
+        if (target) targets.push({ id: target.key, route: target.route, label: `เปิด ${target.title}` });
+    });
     if (/(patrol|safety patrol|เดินตรวจ|ตรวจความปลอดภัย)/i.test(haystack)) {
         targets.push({ id: 'patrol', label: 'Open Patrol', hash: '#patrol' });
     }
@@ -258,7 +335,14 @@ function workflowActionTargets(msg, sourceType) {
     if (/(^|\s)(ky|kyt)(\s|$)|ky ability|kiken yochi|อันตรายก่อนเริ่มงาน/i.test(haystack)) {
         targets.push({ id: 'ky', label: 'Open KY', hash: '#ky' });
     }
-    return targets.filter((item, index, arr) => arr.findIndex(other => other.id === item.id) === index);
+    return targets
+        .map(item => {
+            const target = findTarget(item.id);
+            return target ? { id: target.key, route: target.route, label: item.label.startsWith('Open ') ? `เปิด ${target.title}` : item.label } : null;
+        })
+        .filter(Boolean)
+        .filter((item, index, arr) => arr.findIndex(other => other.id === item.id) === index)
+        .slice(0, 3);
 }
 
 function workflowActionButtons(msg, sourceType) {
@@ -268,8 +352,8 @@ function workflowActionButtons(msg, sourceType) {
     return `
         <div class="mt-2 flex flex-wrap gap-2" data-johnny-phase5="${JOHNNY_PHASE5_MARKER}">
             ${targets.map(target => `
-                <button type="button" class="johnny-workflow-action px-3 py-1.5 rounded-lg border border-slate-200 bg-white text-[11px] font-black text-slate-700 hover:bg-slate-50"
-                        data-target="${escHtml(target.id)}" data-action="deep_link" data-message-id="${escHtml(id)}" data-source-type="${escHtml(sourceType)}">
+                <button type="button" class="johnny-workflow-action min-h-[44px] px-3 py-2 rounded-lg border border-slate-200 bg-white text-[11px] font-black text-slate-700 hover:bg-slate-50"
+                        data-target="${escHtml(target.id)}" data-route="${escHtml(target.route)}" data-action="navigate" data-message-id="${escHtml(id)}" data-source-type="${escHtml(sourceType)}">
                     ${escHtml(target.label)}
                 </button>
             `).join('')}
@@ -291,6 +375,7 @@ function citationSectionTitle(type) {
     if (type === 'company_document') return 'ข้อมูลจากเอกสารบริษัท';
     if (type === 'safety_knowledge') return 'Safety Knowledge';
     if (type === 'system_data') return 'ข้อมูลจากระบบ TSH SCA';
+    if (type === 'system_usage') return 'คู่มือการใช้งานระบบ';
     if (type === 'image_analysis') return 'การวิเคราะห์รูปภาพ';
     return 'แหล่งอ้างอิง';
 }
@@ -312,6 +397,15 @@ function citationTheme(type) {
             link: 'text-lime-800 hover:text-lime-950 underline decoration-lime-300',
             badge: 'bg-lime-100 text-lime-800 border-lime-200',
             muted: 'text-lime-700/75',
+        };
+    }
+    if (type === 'system_usage') {
+        return {
+            box: 'border-violet-100 bg-violet-50/70',
+            title: 'text-violet-800',
+            link: 'text-violet-800 hover:text-violet-950 underline decoration-violet-300',
+            badge: 'bg-violet-100 text-violet-800 border-violet-200',
+            muted: 'text-violet-700/75',
         };
     }
     if (type === 'external_research') {
@@ -349,11 +443,38 @@ function displayHost(url) {
     }
 }
 
+async function openAuthenticatedKbFile(documentId, title = 'Knowledge Base document') {
+    const id = Number(documentId || 0);
+    if (!id) return;
+    const preview = window.open('about:blank', '_blank');
+    if (preview) preview.opener = null;
+    try {
+        const response = await API.get(`/johnny/kb-documents/${encodeURIComponent(id)}/file`);
+        if (!(response instanceof Response) || !response.ok) {
+            throw new Error('ไม่สามารถเปิดไฟล์เอกสารนี้ได้');
+        }
+        const blob = await response.blob();
+        const blobUrl = URL.createObjectURL(blob);
+        if (preview) {
+            preview.location.replace(blobUrl);
+        } else {
+            const link = document.createElement('a');
+            link.href = blobUrl;
+            link.download = String(title || `johnny-kb-${id}`);
+            link.click();
+        }
+        window.setTimeout(() => URL.revokeObjectURL(blobUrl), 60_000);
+    } catch (error) {
+        preview?.close();
+        showToast(error?.message || 'ไม่สามารถเปิดไฟล์ Knowledge Base ได้', 'error');
+    }
+}
+
 function citationHtml(msg) {
     const citations = normalizeCitations(msg.CitationsJson ?? msg.citations);
     if (!citations.length) return '';
     const groups = citationGroups(citations);
-    const order = ['image_analysis', 'company_document', 'safety_knowledge', 'system_data', 'external_research', ...Object.keys(groups).filter(type => !['image_analysis', 'company_document', 'safety_knowledge', 'system_data', 'external_research'].includes(type))];
+    const order = ['image_analysis', 'company_document', 'safety_knowledge', 'system_usage', 'system_data', 'external_research', ...Object.keys(groups).filter(type => !['image_analysis', 'company_document', 'safety_knowledge', 'system_usage', 'system_data', 'external_research'].includes(type))];
     const activeTypes = order.filter(type => groups[type]?.length);
     const total = activeTypes.reduce((sum, type) => sum + groups[type].length, 0);
     const summaryText = activeTypes
@@ -386,7 +507,13 @@ function citationHtml(msg) {
                         const keywordPercent = Number(item.keywordPercent ?? ((item.keywordScore || 0) * 100));
                         const scoreWidth = Math.max(0, Math.min(100, hybridPercent || 0));
                         const trace = item.trace || {};
-                        const titleHtml = href
+                        const privateDocumentId = type === 'company_document' ? Number(item.documentId || 0) : 0;
+                        const usageRoute = type === 'system_usage' ? String(item.route || '').replace(/[^a-z0-9-]/gi, '') : '';
+                        const titleHtml = privateDocumentId
+                            ? `<button type="button" class="johnny-kb-file-open text-left text-[12px] font-black ${theme.link}" data-document-id="${privateDocumentId}" data-document-title="${escHtml(title)}">${escHtml(title)}</button>`
+                            : usageRoute
+                            ? `<a class="text-[12px] font-black ${theme.link}" href="#${escHtml(usageRoute)}">${escHtml(title)}</a>`
+                            : href
                             ? `<a class="text-[12px] font-black ${theme.link}" href="${escHtml(href)}" target="_blank" rel="noopener">${escHtml(title)}</a>`
                             : `<div class="text-[12px] font-black ${theme.title}">${escHtml(title)}</div>`;
                         return `
@@ -614,6 +741,7 @@ function messageHtml(msg, index = 0) {
                 ${imageAnalysisFieldCardHtml(sourceType)}
                 ${citationHtml(msg)}
                 ${answerQualityBadgeHtml(msg)}
+                ${answerFeedbackHtml(msg)}
                 ${imageRiskDraftActions(msg, sourceType)}
                 ${workflowActionButtons(msg, sourceType)}
                 <div class="mt-2 flex flex-wrap items-center gap-2">
@@ -650,25 +778,34 @@ function renderMessages() {
         btn.addEventListener('click', () => createRiskDraft(btn.dataset.target, btn.dataset.messageId));
     });
     box.querySelectorAll('.johnny-workflow-action').forEach(btn => {
-        btn.addEventListener('click', () => openWorkflowTarget(btn.dataset.target, btn.dataset.action, btn.dataset.messageId, btn.dataset.sourceType));
+        btn.addEventListener('click', () => openWorkflowTarget(btn.dataset.target, btn.dataset.route, btn.dataset.action, btn.dataset.messageId));
     });
     box.querySelectorAll('.johnny-copy-answer').forEach(btn => {
         btn.addEventListener('click', () => copyJohnnyAnswer(btn.dataset.messageIndex));
     });
+    box.querySelectorAll('.johnny-answer-feedback').forEach(btn => {
+        btn.addEventListener('click', () => updateAnswerFeedback(btn.dataset.messageId, btn.dataset.feedbackRating));
+    });
+    box.querySelectorAll('.johnny-answer-feedback-reason').forEach(select => {
+        select.addEventListener('change', () => updateAnswerFeedback(select.dataset.messageId, 'not_helpful', select.value));
+    });
+    box.querySelectorAll('.johnny-kb-file-open').forEach(btn => {
+        btn.addEventListener('click', () => openAuthenticatedKbFile(btn.dataset.documentId, btn.dataset.documentTitle));
+    });
     box.scrollTop = box.scrollHeight;
 }
 
-async function logWorkflowAction(target, action, message = null, sourceType = '') {
+async function logWorkflowAction(target, action, message = null) {
     try {
-        await API.post('/johnny/workflow-actions', {
+        const response = await API.post('/johnny/workflow-actions', {
             target,
             action,
-            conversationId: _conversationId,
             messageId: message?.id || message?.messageId || null,
-            sourceType: sourceType || message?.SourceType || message?.sourceType || null,
-            createdAt: new Date().toISOString(),
         });
-    } catch (_) {}
+        return response?.data || null;
+    } catch (_) {
+        return null;
+    }
 }
 
 async function createRiskDraft(target, messageId = '') {
@@ -694,7 +831,7 @@ async function createRiskDraft(target, messageId = '') {
     };
     try {
         sessionStorage.setItem(IMAGE_RISK_DRAFT_KEY, JSON.stringify(draft));
-        await logWorkflowAction(target, 'draft', message, 'image_analysis');
+        await logWorkflowAction(target, 'draft', message);
         const hash = target === 'patrol' ? '#patrol' : `#${target}`;
         window.location.hash = hash;
         showToast('สร้าง draft แล้ว กรุณาตรวจสอบก่อนส่ง', 'success');
@@ -703,12 +840,15 @@ async function createRiskDraft(target, messageId = '') {
     }
 }
 
-async function openWorkflowTarget(target, action = 'deep_link', messageId = '', sourceType = '') {
-    const map = { hiyari: '#hiyari', ky: '#ky', patrol: '#patrol' };
-    if (!map[target]) return;
+async function openWorkflowTarget(target, requestedRoute = '', action = 'navigate', messageId = '') {
+    const registry = Array.isArray(_status?.workflow?.navigationTargets) ? _status.workflow.navigationTargets : [];
+    const localTarget = registry.find(item => item.key === target || item.route === requestedRoute)
+        || [{ key: 'hiyari', route: 'hiyari' }, { key: 'ky', route: 'ky' }, { key: 'patrol', route: 'patrol' }].find(item => item.key === target);
+    if (!localTarget) return;
     const message = _messages.find(item => String(item.id || item.messageId || '') === String(messageId)) || null;
-    await logWorkflowAction(target, action || 'deep_link', message, sourceType);
-    window.location.hash = map[target];
+    const workflow = await logWorkflowAction(localTarget.key, action || 'navigate', message);
+    const route = String(workflow?.route || localTarget.route || '').replace(/[^a-z0-9-]/gi, '');
+    if (route) window.location.hash = route;
 }
 
 function renderConversations() {
@@ -742,6 +882,7 @@ function renderStatus() {
     if (sidebarAvatar) sidebarAvatar.innerHTML = johnnyAvatar('w-11 h-11', 'text-lg');
     if (!el) return;
     const configured = Boolean(_status?.geminiConfigured);
+    const retentionDays = Number(_status?.privacy?.chatRetentionDays || 180);
     el.innerHTML = `
         <div class="flex items-center gap-3">
             ${johnnyAvatar('w-12 h-12', 'text-lg')}
@@ -752,6 +893,9 @@ function renderStatus() {
         </div>
         <div class="mt-3 rounded-xl border px-3 py-2 text-xs font-bold ${configured ? 'border-emerald-100 bg-emerald-50 text-emerald-700' : 'border-amber-100 bg-amber-50 text-amber-700'}">
             ${configured ? 'พร้อมคุยเรื่องความปลอดภัย' : 'จอห์นนี่ยังไม่พร้อมตอบ กรุณาแจ้งผู้ดูแลระบบ'}
+        </div>
+        <div class="mt-2 text-[11px] font-bold leading-relaxed text-slate-500">
+            ประวัติสนทนาเก็บ ${retentionDays} วัน และรูปวิเคราะห์จะถูกลบหลังประมวลผล
         </div>
     `;
 }
@@ -1011,17 +1155,42 @@ function renderObservability() {
     const logs = _observability.logs || {};
     const chat = _observability.chat || {};
     const kb = _observability.kb || {};
+    const feedback = _observability.feedback || {};
+    const workflow = _observability.workflow || {};
+    const releaseHealth = _observability.releaseHealth || {};
     const unverifiedRate = chat.assistantMessages ? Math.round((num(chat.unverifiedAnswers) / num(chat.assistantMessages)) * 100) : 0;
+    const releaseTone = releaseHealth.status === 'healthy' ? 'emerald' : (releaseHealth.status === 'needs_review' ? 'red' : 'amber');
+    const releaseLabel = {
+        healthy: 'Healthy',
+        watch: 'Watch',
+        needs_review: 'Needs review',
+        insufficient_feedback: 'Collecting feedback',
+    }[releaseHealth.status] || 'Unknown';
     el.innerHTML = `
         <div class="space-y-4" data-johnny-phase4-dashboard="true">
-            <div class="grid grid-cols-2 gap-3 lg:grid-cols-6">
+            <div class="grid grid-cols-2 gap-3 lg:grid-cols-4 xl:grid-cols-8">
                 ${renderMetricCard('Logs', num(logs.total).toLocaleString(), `${num(logs.errors)} errors / ${num(logs.warnings)} warnings`, num(logs.errors) ? 'red' : 'emerald')}
                 ${renderMetricCard('Last hour', num(logs.errorsLastHour).toLocaleString(), 'error events', num(logs.errorsLastHour) ? 'red' : 'emerald')}
                 ${renderMetricCard('Chat', num(chat.assistantMessages).toLocaleString(), `${num(chat.conversations)} conversations`, 'sky')}
                 ${renderMetricCard('Unverified', `${unverifiedRate}%`, `${num(chat.unverifiedAnswers)} answers`, unverifiedRate ? 'amber' : 'emerald')}
                 ${renderMetricCard('Latency', ms(logs.avgLatencyMs), `max ${ms(logs.maxLatencyMs)}`, num(logs.avgLatencyMs) > 10000 ? 'amber' : 'slate')}
                 ${renderMetricCard('KB ready', `${num(kb.readyDocs)}/${num(kb.totalDocs)}`, `${num(kb.declaredChunks)} chunks`, num(kb.errorDocs) ? 'red' : 'emerald')}
+                ${renderMetricCard('Helpful', `${num(feedback.helpfulRatePercent)}%`, `${num(feedback.total)} ratings`, num(feedback.notHelpful) ? 'amber' : 'emerald')}
+                ${renderMetricCard('Release health', releaseLabel, `${num(feedback.unsafeFeedback)} unsafe flags`, releaseTone)}
             </div>
+            <section class="rounded-xl border border-slate-100 bg-slate-50 p-3" data-johnny-phase4-release-health="${escHtml(releaseHealth.status || 'unknown')}">
+                <div class="flex flex-wrap items-center justify-between gap-2">
+                    <div>
+                        <div class="text-xs font-black uppercase tracking-widest text-slate-500">Quality release gate</div>
+                        <div class="mt-1 text-sm font-black text-slate-800">${escHtml(releaseLabel)}</div>
+                    </div>
+                    <div class="text-[11px] font-bold text-slate-500">Contract ${escHtml(feedback.contractVersion || releaseHealth.version || '-')}</div>
+                </div>
+                ${(releaseHealth.blockers || []).length || (releaseHealth.warnings || []).length
+                    ? `<div class="mt-2 text-xs font-bold text-amber-800">${escHtml([...(releaseHealth.blockers || []), ...(releaseHealth.warnings || [])].join(', '))}</div>`
+                    : `<div class="mt-2 text-xs text-slate-500">ยังไม่มีสัญญาณเตือนจาก threshold ที่กำหนด</div>`}
+                ${!releaseHealth.feedbackSampleReady ? '<div class="mt-1 text-[11px] text-slate-500">ต้องมี feedback อย่างน้อย 10 รายการก่อนใช้ Helpful rate เป็น release signal</div>' : ''}
+            </section>
             <div class="grid grid-cols-1 gap-4 xl:grid-cols-2">
                 <section>
                     <div class="mb-2 text-xs font-black uppercase tracking-widest text-slate-400">Operations</div>
@@ -1039,6 +1208,31 @@ function renderObservability() {
                         { label: 'Answers', value: row => num(row.total).toLocaleString() },
                         { label: 'Avg', value: row => ms(Math.round(num(row.avgLatencyMs))) },
                     ], 'No answer source rows')}
+                </section>
+                <section>
+                    <div class="mb-2 text-xs font-black uppercase tracking-widest text-slate-400">Feedback by source</div>
+                    ${renderMiniTable(feedback.sources, [
+                        { label: 'Source', value: row => row.sourceType || '-' },
+                        { label: 'Total', value: row => num(row.total).toLocaleString() },
+                        { label: 'Helpful', value: row => num(row.helpful).toLocaleString() },
+                        { label: 'Improve', value: row => num(row.notHelpful).toLocaleString() },
+                    ], 'No answer feedback yet')}
+                </section>
+                <section>
+                    <div class="mb-2 text-xs font-black uppercase tracking-widest text-slate-400">Improvement reasons</div>
+                    ${renderMiniTable(feedback.reasons, [
+                        { label: 'Reason', value: row => row.reasonCode || '-' },
+                        { label: 'Count', value: row => num(row.total).toLocaleString() },
+                    ], 'No improvement reason rows')}
+                </section>
+                <section>
+                    <div class="mb-2 text-xs font-black uppercase tracking-widest text-slate-400">Workflow handoffs</div>
+                    ${renderMiniTable(workflow.actions, [
+                        { label: 'Module', value: row => row.target || '-' },
+                        { label: 'Action', value: row => row.action || '-' },
+                        { label: 'Count', value: row => num(row.total).toLocaleString() },
+                        { label: 'Last', value: row => String(row.lastAt || '').slice(0, 16).replace('T', ' ') || '-' },
+                    ], 'No workflow handoffs yet')}
                 </section>
                 <section>
                     <div class="mb-2 text-xs font-black uppercase tracking-widest text-slate-400">Recent Issues</div>
@@ -2089,6 +2283,19 @@ async function deleteCurrentChat() {
     }
 }
 
+async function deleteAllChats() {
+    if (!_conversations.length) return;
+    if (!confirm('ลบประวัติสนทนา Johnny AI ทั้งหมดของคุณ? การดำเนินการนี้ย้อนกลับไม่ได้')) return;
+    try {
+        await API.delete('/johnny/conversations');
+        startNewChat();
+        await loadConversations();
+        showToast('ลบประวัติ Johnny AI ทั้งหมดแล้ว', 'success');
+    } catch (err) {
+        showToast(err?.message || 'ลบประวัติทั้งหมดไม่สำเร็จ', 'error');
+    }
+}
+
 async function submitMessage(text, options = {}) {
     const message = String(text || '').trim();
     if (!message || _busy) return;
@@ -2114,10 +2321,12 @@ async function submitMessage(text, options = {}) {
         _conversationId = data.conversationId || _conversationId;
         _messages = _messages.filter(item => !item.isTyping);
         _messages.push({
+            id: data.messageId || null,
             Role: 'assistant',
             MessageText: data.answer || '',
             SourceType: data.sourceType || 'ai_general',
             CitationsJson: data.citations || [],
+            Sources: data.sources || [],
             AnswerQuality: data.answerQuality || null,
         });
         renderMessages();
@@ -2166,10 +2375,12 @@ async function submitRiskImage(text) {
         _conversationId = data.conversationId || _conversationId;
         _messages = _messages.filter(item => !item.isTyping);
         _messages.push({
+            id: data.messageId || null,
             Role: 'assistant',
             MessageText: data.answer || '',
             SourceType: data.sourceType || 'image_analysis',
             CitationsJson: data.citations || [],
+            Sources: data.sources || [],
             AnswerQuality: data.answerQuality || null,
         });
         renderMessages();
@@ -2426,6 +2637,7 @@ function bindEvents() {
     document.getElementById('johnny-risk-image')?.addEventListener('change', handleRiskImageChange);
     document.getElementById('johnny-new-chat')?.addEventListener('click', startNewChat);
     document.getElementById('johnny-delete-chat')?.addEventListener('click', deleteCurrentChat);
+    document.getElementById('johnny-delete-all-chats')?.addEventListener('click', deleteAllChats);
     bindQuickPrompts();
     updateComposerMode();
 }
@@ -2471,6 +2683,7 @@ export async function loadJohnnyAiPage() {
                             <button id="johnny-delete-chat" type="button" class="text-xs font-bold text-red-500 hover:text-red-600">ลบแชทนี้</button>
                         </div>
                         <div id="johnny-conversation-list" class="space-y-2 max-h-[45vh] overflow-y-auto pr-1"></div>
+                        <button id="johnny-delete-all-chats" type="button" class="mt-3 w-full rounded-xl border border-red-100 bg-red-50 px-3 py-2 text-xs font-black text-red-600 hover:bg-red-100">ลบประวัติทั้งหมด</button>
                     </div>
                 </aside>
 
@@ -2520,7 +2733,7 @@ export async function loadJohnnyAiPage() {
                         </div>
                         <div class="johnny-composer-help mt-2 flex flex-wrap items-center justify-between gap-2 text-[11px] font-bold text-slate-400">
                             <span>มือถือหน้างาน: แนบรูป + เพิ่มบริบทสั้น ๆ จะช่วยให้ Johnny วิเคราะห์ตรงจุดขึ้น</span>
-                            <span class="text-emerald-600">Phase 2 mobile ready</span>
+                            <span class="text-emerald-600">รูปจะไม่ถูกเก็บหลังวิเคราะห์</span>
                         </div>
                         <div id="johnny-risk-image-preview"></div>
                     </form>

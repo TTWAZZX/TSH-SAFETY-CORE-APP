@@ -133,6 +133,11 @@ const USER_WORKFLOW_ALLOWLIST = new Set([
 
     // Johnny AI: authenticated, user-scoped workflows. Conversations are resolved by UserID.
     'POST /api/johnny/workflow-actions',
+    // Phase 4 answer feedback is limited to the authenticated user's own persisted assistant message.
+    // The payload is a fixed rating/reason contract and stores no prompt, answer, or free text.
+    'PUT /api/johnny/messages/:id/feedback',
+    'DELETE /api/johnny/messages/:id/feedback',
+    'DELETE /api/johnny/conversations',
     'DELETE /api/johnny/conversations/:id',
     'POST /api/johnny/analyze-image',
     'POST /api/johnny/chat',

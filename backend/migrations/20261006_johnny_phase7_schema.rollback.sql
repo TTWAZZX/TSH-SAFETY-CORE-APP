@@ -1,0 +1,5 @@
+-- Johnny AI Phase 7.1 rollback policy.
+-- Intentionally no executable DROP/DELETE statements.
+-- Runtime rollback restores the previous application files while retaining additive columns,
+-- johnny_answer_feedback, existing chat/feedback/KB/log rows and private Knowledge Base files.
+-- A destructive schema rollback requires a separate data-retention review and explicit approval.

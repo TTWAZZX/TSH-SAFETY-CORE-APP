@@ -1,0 +1,23 @@
+{
+  "version": "2026-10-06-phase4-r1",
+  "ratings": ["helpful", "not_helpful"],
+  "negativeReasons": [
+    { "code": "incorrect", "label": "ข้อมูลไม่ถูกต้อง" },
+    { "code": "outdated", "label": "ข้อมูลล้าสมัย" },
+    { "code": "unclear", "label": "คำตอบไม่ชัดเจน" },
+    { "code": "missing_source", "label": "ไม่มีแหล่งอ้างอิงที่ต้องการ" },
+    { "code": "unsafe", "label": "คำแนะนำอาจไม่ปลอดภัย" },
+    { "code": "other", "label": "เหตุผลอื่น" }
+  ],
+  "privacy": {
+    "storesMessageText": false,
+    "storesFreeText": false,
+    "storedFields": ["messageId", "conversationId", "userId", "rating", "reasonCode", "sourceType", "timestamps"]
+  },
+  "releaseThresholds": {
+    "minimumFeedbackSamples": 10,
+    "maximumNotHelpfulRatePercent": 25,
+    "maximumUnverifiedRatePercent": 20,
+    "maximumOperationalErrorRatePercent": 5
+  }
+}

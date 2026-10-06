@@ -143,6 +143,9 @@ function sniffUploadContentType(filePath) {
 }
 
 app.use('/uploads', (req, res, next) => {
+    if (/^\/johnny-kb-[^/]+$/i.test(req.path || '')) {
+        return res.status(404).end();
+    }
     if (req.query.filename) {
         const filename = cleanOriginalFilename(req.query.filename);
         const fallback = filename.replace(/[^\x20-\x7E]/g, '_').replace(/["\\]/g, '_');
@@ -155,6 +158,9 @@ app.use('/uploads', (req, res, next) => {
         if (detectedType) res.setHeader('Content-Type', detectedType);
     },
 }));
+
+// Shared JSON contracts are server-side inputs and must never be public assets.
+app.use('/shared', (_req, res) => res.status(404).end());
 
 // --- Request logger (lightweight, no external dep) ---
 app.use((req, res, next) => {

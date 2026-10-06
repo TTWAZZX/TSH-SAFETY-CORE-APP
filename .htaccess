@@ -2,6 +2,12 @@ RewriteEngine On
 RewriteBase /safety/tsh-safety-core/
 Options -Indexes
 
+# Johnny AI Knowledge Base files are available only through the authenticated API.
+RewriteRule ^uploads/johnny-kb-[^/]+$ - [R=404,L,NC]
+
+# Johnny server-side contracts are runtime inputs, not public web assets.
+RewriteRule ^shared(?:/|$) - [R=404,L,NC]
+
 # Preserve Bearer tokens when PHP runs behind Apache/FastCGI.
 RewriteCond %{HTTP:Authorization} .
 RewriteRule .* - [E=HTTP_AUTHORIZATION:%{HTTP:Authorization}]

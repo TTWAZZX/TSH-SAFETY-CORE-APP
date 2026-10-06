@@ -1,0 +1,27 @@
+<?php
+// Synthetic configuration for preflight testing only. No value is usable outside local tests.
+return [
+    'db_host' => '127.0.0.1',
+    'db_port' => 3306,
+    'db_user' => 'fixture_user',
+    'db_pass' => 'fixture_password_not_secret',
+    'db_name' => 'tsh_johnny_phase7_fixture',
+    'jwt_secret' => 'fixture_jwt_secret_not_valid_for_any_runtime_1234567890',
+    'public_upload_base_url' => 'https://example.invalid/uploads',
+    'public_app_url' => 'https://example.invalid',
+    'gemini_api_key' => 'fixture_gemini_key_not_secret',
+    'gemini_model' => 'fixture-model',
+    'gemini_models' => 'fixture-model,fixture-fallback',
+    'gemini_embedding_model' => 'fixture-embedding',
+    'gemini_api_base' => 'https://example.invalid/gemini',
+    'gemini_timeout_ms' => 30000,
+    'gemini_max_output_tokens' => 4096,
+    'johnny_kb_max_upload_mb' => 30,
+    'johnny_avatar_max_upload_mb' => 5,
+    'johnny_risk_image_max_upload_mb' => 8,
+    'johnny_chat_retention_days' => 180,
+    'johnny_operational_log_retention_days' => 30,
+    'johnny_web_research_enabled' => false,
+    'johnny_web_allowed_domains' => '',
+    'johnny_system_data_enabled' => false,
+];

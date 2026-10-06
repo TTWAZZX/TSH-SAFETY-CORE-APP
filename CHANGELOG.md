@@ -1,5 +1,61 @@
 # TSH Safety Core Activity - Changelog And Handoff History
 
+## 2026-10-06 - Johnny AI Phase 7.1 Production release blocker remediation (local only, HOLD)
+
+- Removed runtime DDL and automatic retention deletion from Node/PHP Johnny startup. Runtime now uses a read-only schema contract and fails closed with `503`; a standalone additive idempotent migration owns schema changes, while retention is a separate dry-run-first operator command requiring explicit apply confirmation.
+- Protected server-only `shared/` JSON contracts in Apache and Node. Added value-suppressed Production configuration/extension preflight, completed official PHP 7.4.33 lint/parity/preflight verification and updated the Production config example with all Johnny release controls.
+- Completed authenticated loopback-only Microsoft Edge UAT for the full workspace and Side Drawer at desktop/390 px. It passes answer source, feedback, shared-path 404, 44 px controls, no overflow, no failed Johnny API responses, no unexpected mutations and zero conversation/database residue. The in-app Browser controller remained unavailable before tab creation, so the guarded repository fallback was used.
+- Built a secret-free allowlisted candidate under `output/johnny-ai-phase7.1-release-candidate/` containing 13 runtime and seven operations files with SHA-256 manifest. Release remains `HOLD` until authorized Production config/drift checks, verified backups and a clean immutable scoped commit exist. No Production connection, deployment, mutation, commit or push was performed.
+
+## 2026-10-06 - Johnny AI Phase 7 Production pre-deploy review (read-only)
+
+- Completed a read-only Production pre-deploy review and kept the release at `HOLD`. Identified a 13-file PHP runtime candidate, recorded diagnostic sizes/SHA-256 hashes, separated Node parity files from the PHP upload set and confirmed the existing root `deploy-manifest.json` belongs to an older release.
+- Found release blockers: dirty/uncommitted source, schema bootstrap coupled to chat/log retention deletion, silently ignored migration errors, unverified Production configuration and PHP/MySQL capabilities, direct HTTP exposure risk for server-side `shared/` JSON contracts, missing Production runtime/database/KB backup and incomplete authenticated desktop/mobile Browser UAT.
+- Documented the additive schema inventory, configuration/extension preflight, narrow encrypted backup scope and non-destructive rollback procedure. Added `docs/johnny-phase7-production-predeploy-review.md` and a clearly marked `BLOCKED_REVIEW_ONLY_DO_NOT_DEPLOY` candidate manifest. No Production connection, deployment, mutation, commit or push was performed, and no secret value was recorded.
+
+## 2026-10-06 - Johnny AI Phase 6 Integrated Local UAT & Release Gate (local only, HOLD)
+
+- Added a guarded mock-only Node/PHP integration harness using disposable loopback MySQL databases. It passes authenticated lifecycle, feedback/privacy, ownership/Admin permission, observability, all 21 safe workflow routes, supported drafts, cascade cleanup and database-drop verification with zero chat residue.
+- Fixed PHP chat and image-analysis response parity by capturing the assistant `lastInsertId()` before the conversation timestamp update; returned message IDs now support feedback and workflow actions.
+- Phase 1–5 release regressions remain green. The repository permission audit still reports only two pre-existing unrelated 4M routes.
+- The release decision remains `HOLD` because the in-app Browser controller could not create a tab due to a missing kernel-assets path, so authenticated desktop/mobile visual evidence must be rerun. Production was not deployed and existing business data was not changed.
+
+## 2026-10-06 - Johnny AI Phase 5 Safe Workflow Integration and Guided Navigation (local only)
+
+- Replaced the duplicated three-module navigation allowlists with shared Node/PHP workflow contract `2026-10-06-phase5-r1`, derived from the Phase 3 System Usage Knowledge registry. Guided navigation now covers all 21 canonical module routes from both the full Johnny workspace and Side Drawer.
+- Hardened `/johnny/workflow-actions`: the server validates target/action, requires the current user's persisted assistant message and derives conversation/source metadata server-side. Unknown routes/actions fail closed, while legacy `deep_link` is normalized to `navigate`.
+- Kept all actions non-mutating (`autoSubmit=false`, `businessMutation=false`). Only Hiyari, KY and Patrol retain explicit image-analysis draft handoff through session storage; users must review the destination form and submit it themselves. Other modules support navigation only.
+- Added workflow-handoff summaries to Admin Observability and mock-only parity evaluation. Phase 5 passes Node `49/49`, PHP `37/37` and workflow smoke `9/9`; Phase 1–4, golden quality and mobile regressions remain passing. Permission audit adds no finding and retains two unrelated pre-existing 4M routes. Cache chain: `20261006-johnny-phase5-workflow-r1`.
+- No server, database, schema bootstrap, browser, network, commit, push or deployment was used, and no business data or operational log was mutated. Authenticated browser and isolated database lifecycle UAT remain pending before release.
+
+## 2026-10-06 - Johnny AI Phase 4 Quality Feedback, Observability and Release Readiness (local only)
+
+- Added answer-level Helpful/Needs improvement feedback to the full Johnny workspace and global Side Drawer. Negative feedback is restricted to six reason codes; Node/PHP ownership checks accept only the authenticated user's persisted assistant messages, support update/removal and retain one record per answer.
+- Added the shared `2026-10-06-phase4-r1` privacy contract and additive `johnny_answer_feedback` schema. Feedback stores no prompt, answer or free-text comment and is deleted with its chat message. No database/schema bootstrap was run during this local mock-only phase.
+- Extended admin Observability with feedback totals, Helpful rate, unsafe flags, source/reason breakdowns and deterministic release-health thresholds. `system_usage` answers are now included in verified-source metrics. The UI distinguishes insufficient sample, healthy, watch and needs-review states.
+- Phase 4 Node evaluation passes `42/42`, PHP passes `22/22`, Observability smoke passes `7/7`; Phase 1 `33/33`, Phase 2 `33/33`, Phase 3 `105/105`, golden quality `9/9` and mobile compact `14/14` remain passing. Permission audit adds no new finding and retains the two pre-existing unrelated 4M routes. Cache chain: `20261006-johnny-phase4-quality-r1`.
+- Verification was static/mock-only: no server, database, schema bootstrap, browser, network, commit, push or deployment was used, and no business data was read or mutated. Authenticated browser and isolated database lifecycle UAT remain pending before release.
+
+## 2026-10-06 - Johnny AI Phase 3 System Usage Knowledge & Answer Coverage (local only)
+
+- Added a shared versioned System Usage Knowledge catalog for all 21 application modules, derived from the project module registry and Help Center. Every entry defines aliases, purpose, audience, practical steps, reports, cautions and mock evaluation questions without using database rows.
+- Added matching Node/PHP product-help detection and routing. Named-module questions, whole-system requests and the Side Drawer prompt “หน้านี้ใช้งานอย่างไร” return deterministic Thai guidance with `system_usage` citations, module deep links and Phase 3 quality metadata. Usage guidance bypasses KB retrieval, live system-data queries, Gemini and web search.
+- Kept usage knowledge separated from authoritative company evidence: the catalog cannot answer live counts, employee records, policy, law or completion status. Six negative evaluation cases prove those questions remain outside product-help routing and continue through existing verified/fail-closed paths.
+- Mock-only evaluation passes Node `105/105` and PHP `135/135` across the same 92 scenarios, with all 21 module routes and 42 named questions covered. Phase 1 `33/33`, Phase 2 `33/33`, golden quality `9/9`, mobile compact `14/14`, syntax/lint and whitespace checks pass. Cache chain: `20261006-johnny-phase3-usage-r1`. No server, database, browser, network, commit, push or deployment was used.
+
+## 2026-10-06 - Johnny AI Phase 2 Global Side Drawer (local only)
+
+- Added an authenticated global `ถาม Johnny` launcher and responsive side drawer across application modules, while hiding it on the full Johnny AI workspace. The compact chat retains conversations per user, exposes history/new/delete actions, shows answer source/confidence metadata and opens company citations through the authenticated Knowledge Base endpoint.
+- Added bounded current-page metadata to the chat contract with Node/PHP parity. The prompt marks it as untrusted navigation context, permits it only for resolving “this page”, and forbids using it as company evidence. Logout/login destroys the drawer DOM and private in-memory chat state.
+- Added keyboard focus trapping/restoration, Escape close, live-region updates, touch sizing, mobile safe-area/bottom-navigation handling and reduced-motion behavior. Advanced image analysis and Knowledge Base administration remain in the full Johnny workspace.
+- Static/read-only checks pass Phase 2 `33/33`, Phase 1 regression `33/33`, golden quality `9/9`, mobile compact `14/14`, Node syntax, PHP lint and diff whitespace validation. The permission audit has no new finding and retains two pre-existing unrelated 4M `UNREVIEWED` routes. Browser UAT and database-backed lifecycle remain release-gate work; no commit, push or deployment was performed.
+
+## 2026-10-06 - Johnny AI Phase 1 Production Safety Foundation (local only)
+
+- Added Node/PHP parity for persisted answer-quality/source metadata, Medium confidence for image analysis, fail-closed system-data reads, configurable chat retention, user delete-all history, authenticated Knowledge Base file access and content-based file validation.
+- New KB documents use private storage; direct public access to both new and legacy `johnny-kb-*` files is blocked while the authenticated endpoint can read legacy files without migrating or modifying them. The UI fetches documents with the current bearer session, discloses retention/temporary-image behavior and no longer shows `Phase 2 mobile ready`.
+- Focused static/read-only smoke passes `33/33`, golden quality `9/9`, mobile compact `14/14`, Node syntax and PHP lint. Permission audit contains no new unreviewed route; its two failures remain the pre-existing unrelated 4M routes. No database-backed lifecycle or browser UAT was run because this phase was explicitly constrained to avoid business-data changes. No commit, push or deployment was performed.
+
 ## 2026-10-02 - Accident injury analytics, anatomy and Body Side deployed
 
 - Fixed Injury Type Breakdown and Body Part Ranking to use the injury-case population rather than the Recordable KPI population. Both cards now include First Aid and other non-recordable injury cases while continuing to exclude Near Miss; Recordable, Lost Days and accident-free-day KPI rules remain unchanged.

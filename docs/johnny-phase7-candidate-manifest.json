@@ -1,0 +1,119 @@
+{
+  "schemaVersion": 1,
+  "name": "Johnny AI Phase 7 production candidate",
+  "status": "SUPERSEDED_BY_PHASE71_STAGED_CANDIDATE_DO_NOT_DEPLOY",
+  "supersededBy": "output/johnny-ai-phase7.1-release-candidate/manifest.json",
+  "generatedAt": "2026-10-06T22:28:15+07:00",
+  "target": "PHP shared-hosting runtime",
+  "source": {
+    "branch": "main",
+    "head": "76bacad71ef1d3cc3c8e6e26ab6f082ba4931aaa",
+    "workingTreeClean": false,
+    "immutableReleaseCommit": false
+  },
+  "notes": [
+    "Hashes describe the current dirty local working tree and are not approved deployment hashes.",
+    "Regenerate this manifest only after blockers are closed and a clean immutable release commit exists.",
+    "The repository root deploy-manifest.json is an older BBS release and must not be reused for Johnny AI."
+  ],
+  "files": [
+    {
+      "path": ".htaccess",
+      "bytes": 1126,
+      "sha256": "f6d73f32e4a69de8e6604799e456f3c4378eb9f9fcd93f0f91335ad614beac98",
+      "disposition": "replace"
+    },
+    {
+      "path": "index.html",
+      "bytes": 98915,
+      "sha256": "855b4941282fa6f7875c7410f31fb0e3d6e559635d68616ffeda79f72d118e12",
+      "disposition": "replace"
+    },
+    {
+      "path": "public/style.css",
+      "bytes": 76991,
+      "sha256": "d82d72412e1c370ebe466d1d357625bf0ed2ee2285ee3d1af7c4afd9f3a0c1e6",
+      "disposition": "replace"
+    },
+    {
+      "path": "public/js/main.js",
+      "bytes": 67755,
+      "sha256": "5c21f0c1c02f4ba1c49845932808dc616050c5eb66699d02116365bdf5e924bd",
+      "disposition": "replace"
+    },
+    {
+      "path": "public/js/pages/johnny-ai.js",
+      "bytes": 169192,
+      "sha256": "cf270395483f7b42da16acecf871354c158186d2d5e0927acbcb7a1cc99f6521",
+      "disposition": "replace"
+    },
+    {
+      "path": "public/js/johnny-drawer.js",
+      "bytes": 30461,
+      "sha256": "96ecb6c748940dd792c185587089171ff0512979b25be7c976a125f50f345cd5",
+      "disposition": "new"
+    },
+    {
+      "path": "api/config.php",
+      "bytes": 6280,
+      "sha256": "a81fc01c2fee0ed27d402a6f7e134db10093d453bb1353ca852bcbb823b713a3",
+      "disposition": "replace"
+    },
+    {
+      "path": "api/handlers/johnny_ai.php",
+      "bytes": 186626,
+      "sha256": "4f63d319c51faa62cc1f89fa69fa9590ebb104695ea6a3e1b0bb34cf234b3fc3",
+      "disposition": "replace"
+    },
+    {
+      "path": "api/lib/johnny_quality_feedback.php",
+      "bytes": 3605,
+      "sha256": "1f11555bdf4cdf8ede7583765a3fa5c75ea756e89cb41f43f32411f5fc5adca2",
+      "disposition": "new"
+    },
+    {
+      "path": "api/lib/johnny_system_usage.php",
+      "bytes": 11572,
+      "sha256": "eab6d606853941cf43a96ac3876d6a4e3c7ac3c0f98853d5656f4af44b5d77f9",
+      "disposition": "new"
+    },
+    {
+      "path": "api/lib/johnny_workflow_actions.php",
+      "bytes": 2156,
+      "sha256": "d67d5dddcc0787d540660c2e57beebc18fbd27de3b1b46cc24919d2f079e32eb",
+      "disposition": "new"
+    },
+    {
+      "path": "shared/johnny-answer-feedback.json",
+      "bytes": 1038,
+      "sha256": "794ca472632d2c6c96fd417e42b80a7e70c13bb970f7c23862f6d38e523db328",
+      "disposition": "new"
+    },
+    {
+      "path": "shared/johnny-system-usage-knowledge.json",
+      "bytes": 27109,
+      "sha256": "08f7ee97c86636bb8a30c042d8d5941bf9c993ffa7056fc16b0546b15e0fb80b",
+      "disposition": "new"
+    }
+  ],
+  "existingRuntimePrerequisites": [
+    "api/index.php"
+  ],
+  "nodeParityFilesNotForPhpProductionUpload": [
+    "backend/server.js",
+    "backend/routes/johnny-ai.js",
+    "backend/lib/johnny-quality-feedback.js",
+    "backend/lib/johnny-system-usage.js",
+    "backend/lib/johnny-workflow-actions.js"
+  ],
+  "blockers": [
+    "dirty_worktree_and_no_immutable_release_commit",
+    "schema_bootstrap_and_retention_delete_are_coupled_to_runtime_requests",
+    "production_configuration_not_verified",
+    "shared_json_contracts_not_denied_from_direct_http_access",
+    "php_7_4_runtime_compatibility_and_required_extensions_not_verified",
+    "production_database_capabilities_and_schema_drift_not_verified",
+    "predeploy_runtime_database_and_kb_file_backup_not_created",
+    "authenticated_desktop_and_mobile_browser_uat_evidence_missing"
+  ]
+}
