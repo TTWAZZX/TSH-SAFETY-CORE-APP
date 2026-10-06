@@ -1,13 +1,13 @@
 # Johnny AI Phase 7.1 — Production Release Blocker Remediation
 
 Date: 2026-10-06
-Scope: Local remediation and release preparation only. No Production deployment or mutation.
+Scope: Completed controlled Production deployment and verification.
 
 ## Gate decision
 
-**HOLD — local engineering gates pass, but Production authorization gates are still pending.**
+**DEPLOYED - Production gates passed except authenticated Production Browser UAT, which is explicitly unavailable because both stored UAT credentials return 401.**
 
-The staged candidate is technically cleaner and the Phase 7 code blockers have been remediated. Deployment remains forbidden until an authorized Production configuration preflight, read-only drift/schema/file inventory, verified backups and a clean immutable scoped release commit are available.
+Release commit `a79927c` was built from a clean worktree after explicit approval. Configuration, drift, backup, schema migration, FTPS, HTTPS security and cleanup gates passed. Authentication was not bypassed to manufacture Browser evidence; the completed authenticated local desktop/mobile UAT remains the visual release evidence.
 
 ## Remediated blockers
 
@@ -57,7 +57,7 @@ Evidence: `backups/local/johnny-phase71-browser-20261006155553/`.
 
 ## Test results
 
-- Phase 7.1 static release gate: `37/37`.
+- Phase 7.1 static release gate: `40/40`.
 - Phase 1: `33/33`; Phase 2: `33/33`.
 - Phase 3 Node/PHP: `105/105`, `135/135`.
 - Phase 4 Node/PHP: `42/42`, `22/22`; observability `7/7`.
@@ -77,14 +77,15 @@ Evidence: `backups/local/johnny-phase71-browser-20261006155553/`.
 - `manifest.json`: per-file byte size and SHA-256;
 - secret-bearing `.env` and `api/config.local.php`: excluded and verified absent.
 
-Candidate manifest verification passes `13 runtime + 7 operations`, with zero secret files. Its status is intentionally `HOLD_PRODUCTION_PREFLIGHT_AND_IMMUTABLE_COMMIT_REQUIRED` because the source worktree is still dirty and not an immutable release commit.
+Candidate manifest verification passes `13 runtime + 7 operations`, with zero secret files. The approved rebuild records clean source commit `a79927cf3779fa6fb594c2af4b0e35677c78bc35`, status `READY_FOR_APPROVED_PRODUCTION_DEPLOYMENT` and matching SHA-256 for every packaged file.
 
-## Remaining Production gates
+## Production deployment result
 
-1. Run the value-suppressed config/extension preflight against the authorized Production configuration.
-2. Capture read-only Production runtime hashes, `INFORMATION_SCHEMA` compatibility, Johnny table counts/fingerprints and private/legacy KB-file inventory.
-3. Create and verify the approved runtime download-back, narrow Johnny database backup and KB-file backup.
-4. Create a clean, scoped immutable release commit, rebuild the candidate and verify every final hash.
-5. Obtain a new explicit deployment approval after the four items above pass.
+1. Value-suppressed configuration preflight passed on PHP 7.4.33 with every required runtime capability.
+2. Seven pre-existing runtime files matched `HEAD` after newline normalization; six candidate paths were recorded as absent/new.
+3. The scoped Johnny database/KB backup was downloaded, SHA-256 verified and structurally checked before migration.
+4. The additive migration reached seven ready tables with required columns/indexes/feedback foreign key and preserved all existing row counts.
+5. FTPS download-back matched `13/13`; public HTTPS matched `5/5`; shared contracts return `404`; anonymous Johnny status returns `401`.
+6. The helper, migration artifact and remote backup were removed with zero temporary Production residue.
 
-No Production connection, upload, schema change, data mutation, commit, push or deployment occurred in Phase 7.1.
+Evidence is under `backups/production/johnny-ai-predeploy-20261006-230555/`. Both stored Production UAT Admin and User credentials returned `401`; therefore authenticated Production Browser UAT remains unavailable and was not bypassed. No Johnny chat, feedback, workflow, KB file or non-Johnny business row was created, changed or deleted during deployment verification.

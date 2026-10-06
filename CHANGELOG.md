@@ -1,5 +1,12 @@
 # TSH Safety Core Activity - Changelog And Handoff History
 
+## 2026-10-06 - Johnny AI Phase 1-7.1 deployed to Production
+
+- Deployed immutable release commit `a79927c` to the PHP Production target: 13 runtime files covering the global responsive Side Drawer, 21-module system-usage knowledge, answer feedback/observability, safe workflow navigation, privacy/retention controls, authenticated private KB files, fail-closed system-data/schema behavior and Node/PHP parity.
+- Value-suppressed Production preflight passed on PHP 7.4.33 with all required capabilities. Predeploy runtime drift was clean after newline normalization, and a narrow Johnny-only database/KB backup was downloaded and verified before the additive migration.
+- Migration reached seven ready tables, added the feedback lifecycle and metadata columns/indexes/foreign key, and preserved all existing counts (10 settings, 16 conversations, 68 messages, 24 documents, 109 chunks and 14 operational logs; zero feedback). No existing business row or KB file was changed or deleted.
+- FTPS download-back passed `13/13`, public HTTPS SHA-256 passed `5/5`, shared contracts return `404`, anonymous API access returns `401`, and temporary release artifacts have zero Production residue. Stored Admin and User UAT credentials both returned `401`, so authenticated Production Browser UAT was not bypassed; the completed local authenticated desktop/mobile Browser UAT remains the visual evidence.
+
 ## 2026-10-06 - Johnny AI Phase 7.1 Production release blocker remediation (local only, HOLD)
 
 - Removed runtime DDL and automatic retention deletion from Node/PHP Johnny startup. Runtime now uses a read-only schema contract and fails closed with `503`; a standalone additive idempotent migration owns schema changes, while retention is a separate dry-run-first operator command requiring explicit apply confirmation.

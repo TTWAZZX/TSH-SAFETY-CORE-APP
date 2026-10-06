@@ -1,5 +1,15 @@
 # TSH Safety Core Activity - Deployment
 
+## Johnny AI Phase 1-7.1 (2026-10-06)
+
+Commit `a79927c` is deployed to `https://dev.tshpcl.com/safety/tsh-safety-core`. The scoped PHP runtime contains 13 files from the approved candidate manifest; Node files remain parity/test source.
+
+- Production configuration preflight passed with values suppressed on PHP 7.4.33. The seven pre-existing runtime files matched repository `HEAD` after newline normalization and the other six were recorded as new before upload.
+- The verified predeploy archive contains only the six existing Johnny tables, `app_settings` and the Johnny KB file directory. The additive schema migration produced seven ready tables and preserved all pre-existing Johnny row counts; it did not delete or rewrite business data.
+- FTPS download-back matched source `13/13`; public HTTPS SHA-256 matched `5/5`; shared server contracts return `404` and anonymous Johnny status returns `401`. Temporary helper, migration and remote backup artifacts were deleted and independently confirmed absent.
+- Runtime rollback evidence is `backups/production/johnny-ai-predeploy-20261006-230555/`. Restore the seven files marked present and remove only the six paths marked absent. Preserve the additive schema unless a separately approved data-safe schema rollback is required.
+- Both stored Production UAT Admin and User credentials returned `401`, so authenticated Production Browser UAT was not fabricated or bypassed. Local authenticated Edge evidence covers desktop/390 px workspace, Side Drawer, feedback, source display, permissions and zero fixture residue.
+
 ## Patrol Self-Patrol full-year makeup selector (2026-10-02)
 
 Commit `80abf0c` is pushed on `main` and deployed to `https://dev.tshpcl.com/safety/tsh-safety-core`. Runtime scope is only `index.html`, `public/js/main.js` and `public/js/pages/patrol.js`.
