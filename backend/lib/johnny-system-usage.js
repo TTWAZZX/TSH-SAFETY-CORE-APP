@@ -4,14 +4,19 @@ const fs = require('fs');
 const path = require('path');
 
 const KNOWLEDGE_PATH = path.resolve(__dirname, '..', '..', 'shared', 'johnny-system-usage-knowledge.json');
-const USAGE_PATTERN = /(วิธีใช้|ใช้งาน|ใช้ยังไง|ใช้อย่างไร|ทำยังไง|ทำอย่างไร|ขั้นตอน|เมนู|โมดูล|อยู่ตรงไหน|เปิดที่ไหน|(?:บันทึก|ส่ง|ดู|ติดตาม|ต่ออายุ|พิมพ์|สร้าง|เพิ่ม|แก้|เลือก|ตอบ).*(?:อย่างไร|ยังไง|ตรงไหน|ที่ไหน)|workflow|quick\s*start|how\s+to|where\s+(?:is|can)|permission|สิทธิ์|ใครใช้|หน้านี้|หน้า(?:นี้)?ใช้|หน้า.*ทำอะไร)/iu;
 const BROAD_PATTERN = /(ทุกโมดูล|ทุกเมนู|เมนูทั้งหมด|ระบบนี้|ภาพรวมการใช้งาน|คู่มือระบบ|เริ่มใช้งานระบบ|วิธีใช้ระบบ|ใช้งานระบบ|ใช้ระบบยังไง)/iu;
+const PAGE_REFERENCE_PATTERN = /(หน้านี้|เมนูนี้|ตรงนี้|หน้า(?:นี้)?ใช้|this\s+page|this\s+menu|on\s+this\s+page)/iu;
+const CONTEXTUAL_UI_ACTION_PATTERN = /(ต้องกด(?:ตรง)?ไหน|กดตรงไหน|อยู่(?:ตรง)?ไหน|เปิด(?:หน้า|เมนู)?(?:ที่)?ไหน|where\s+(?:is|can\s+i\s+find)|which\s+(?:button|menu|page))/iu;
+const UI_ACTION_PATTERN = /((?:กด|คลิก|เปิด|เข้า|เลือก|ไปที่).*(?:ตรงไหน|ที่ไหน|เมนู|หน้า|dashboard|analytics|ปุ่ม)|(?:เมนู|หน้า|โมดูล|dashboard|analytics).*(?:อยู่ไหน|อยู่ตรงไหน|ใช้อย่างไร|ใช้ยังไง|ใช้งาน|ทำอะไร)|workflow|quick\s*start|permission|สิทธิ์|ใครใช้|how\s+do\s+i\s+(?:open|use|access|find|navigate)|how\s+to\s+(?:open|use|access|find|navigate)|where\s+(?:is|can\s+i\s+find))/iu;
+const DOCUMENT_PATTERN = /(ตามเอกสาร|เอกสารบริษัท|เอกสารนี้|นโยบาย|ระเบียบ|ข้อกำหนด|มาตรฐาน|กฎหมาย|\bwi\b|company\s+(?:document|policy|rule|requirement)|what\s+does\s+company\s+policy\s+require|regulation|standard)/iu;
+const SAFETY_PATTERN = /(วิธีปฏิบัติงานอย่างปลอดภัย|ปฐมพยาบาล|ไฟไหม้|เพลิงไหม้|สารเคมี(?:รั่ว|หก|กระเด็น)|บาดเจ็บ|เหตุฉุกเฉิน|หมดสติ|วิธีใช้\s*ppe|ใช้\s*ppe\s*ที่ถูก|สวม\s*ppe|first\s+aid|fire\s+emergency|chemical\s+(?:spill|leak)|injur(?:y|ed)|emergency)/iu;
+const LIVE_DATA_PATTERN = /(วันนี้|ขณะนี้|ตอนนี้|ล่าสุด|กี่คน|กี่รายการ|กี่ครั้ง|จำนวน|สถานะล่าสุด|เช็กอินครบ|ยังไม่ปิด|current\s+(?:count|status)|how\s+many|latest\s+status)/iu;
 
 let cachedCatalog = null;
 
 function normalize(value) {
     return String(value || '')
-        .normalize('NFKC')
+        .normalize('NFC')
         .toLowerCase()
         .replace(/[_/]+/g, ' ')
         .replace(/[^\p{L}\p{M}\p{N}\s-]+/gu, ' ')
@@ -29,66 +34,111 @@ function loadSystemUsageCatalog() {
     return cachedCatalog;
 }
 
-function isSystemUsageQuestion(question, pageContext = null) {
-    const text = normalize(question);
-    if (!text) return false;
+function containsAlias(text, alias) {
+    if (!alias) return false;
+    if (/^[a-z0-9-]{1,3}$/i.test(alias)) return text.split(' ').includes(alias);
+    return text.includes(alias);
+}
+
+function emptyResult(catalog, overrides = {}) {
+    return {
+        matched: false,
+        pureUsage: false,
+        confidence: 0,
+        confidenceLevel: 'none',
+        reasons: [],
+        explicitUiIntent: false,
+        referencedPage: null,
+        referencedModules: [],
+        requiresKnowledgeBase: false,
+        mixedIntent: false,
+        broad: false,
+        entries: [],
+        version: catalog.version,
+        moduleCount: catalog.modules.length,
+        catalogTitles: [],
+        ...overrides,
+    };
+}
+
+function classifySignals(question, pageContext = null) {
     const catalog = loadSystemUsageCatalog();
-    if (catalog.modules.some(entry => (entry.questions || []).some(item => normalize(item) === text))) return true;
-    if (USAGE_PATTERN.test(text) || BROAD_PATTERN.test(text)) return true;
-    const page = normalize(pageContext?.page).replace(/\s+/g, '-');
-    return Boolean(page && /(หน้านี้|เมนูนี้|ตรงนี้|ใช้งาน|วิธี)/u.test(text));
+    const text = normalize(question);
+    if (!text) return emptyResult(catalog);
+
+    const pageKey = normalize(pageContext?.page).replace(/\s+/g, '-');
+    const pageEntry = catalog.modules.find(entry => entry.key === pageKey || entry.route === pageKey) || null;
+    const exactEntries = catalog.modules.filter(entry => (entry.questions || []).some(item => normalize(item) === text));
+    const referencedEntries = catalog.modules.filter(entry => {
+        const names = [entry.key, entry.route, entry.title, ...(entry.aliases || [])].map(normalize).filter(Boolean);
+        return names.some(name => containsAlias(text, name));
+    });
+    const broad = BROAD_PATTERN.test(text);
+    const pageReference = PAGE_REFERENCE_PATTERN.test(text);
+    const contextualUiAction = CONTEXTUAL_UI_ACTION_PATTERN.test(text);
+    const modulePurpose = /(?:โมดูล|หน้า|เมนู)/iu.test(text) && /(?:ใช้ทำอะไร|ทำอะไร|ใช้งานอย่างไร|ใช้ยังไง)/iu.test(text);
+    const explicitUiIntent = broad || exactEntries.length > 0 || modulePurpose || UI_ACTION_PATTERN.test(text) || pageReference || contextualUiAction;
+    const documentSignal = DOCUMENT_PATTERN.test(text) && exactEntries.length === 0 && !modulePurpose;
+    const safetySignal = SAFETY_PATTERN.test(text) && exactEntries.length === 0;
+    const liveDataSignal = LIVE_DATA_PATTERN.test(text) && exactEntries.length === 0;
+    const usePageContext = Boolean(pageEntry && (pageReference || contextualUiAction) && !referencedEntries.length);
+    const candidates = exactEntries.length
+        ? exactEntries
+        : referencedEntries.length
+            ? referencedEntries
+            : usePageContext
+                ? [pageEntry]
+                : [];
+    const matched = Boolean(broad || (explicitUiIntent && candidates.length > 0));
+    const requiresKnowledgeBase = Boolean(documentSignal || safetySignal);
+    const mixedIntent = Boolean(matched && (requiresKnowledgeBase || liveDataSignal));
+    const pureUsage = Boolean(matched && !mixedIntent && !liveDataSignal);
+    const reasons = [];
+    if (exactEntries.length) reasons.push('exact_catalog_question');
+    if (broad) reasons.push('broad_system_usage_request');
+    if (referencedEntries.length) reasons.push('explicit_module_reference');
+    if (usePageContext) reasons.push('explicit_ui_reference_with_page_context');
+    if (documentSignal) reasons.push('company_document_signal');
+    if (safetySignal) reasons.push('safety_or_emergency_signal');
+    if (liveDataSignal) reasons.push('live_system_data_signal');
+    if (explicitUiIntent && !matched) reasons.push('ui_intent_without_verified_module');
+
+    let confidence = 0;
+    if (matched) confidence = exactEntries.length || broad || usePageContext ? 1 : 0.9;
+    if (mixedIntent) confidence = Math.min(confidence, 0.75);
+    return emptyResult(catalog, {
+        matched,
+        pureUsage,
+        confidence,
+        confidenceLevel: confidence >= 0.85 ? 'high' : confidence >= 0.6 ? 'medium' : confidence > 0 ? 'low' : 'none',
+        reasons,
+        explicitUiIntent,
+        referencedPage: usePageContext ? pageEntry.key : null,
+        referencedModules: candidates.map(entry => entry.key),
+        requiresKnowledgeBase,
+        mixedIntent,
+        broad,
+        _candidates: candidates,
+    });
 }
 
-function entrySearchText(entry) {
-    return normalize([
-        entry.key,
-        entry.route,
-        entry.title,
-        ...(entry.aliases || []),
-        ...(entry.questions || []),
-    ].join(' '));
-}
-
-function scoreEntry(entry, normalizedQuestion, pageKey) {
-    let score = 0;
-    if (pageKey && (entry.key === pageKey || entry.route === pageKey)) score += 100;
-    for (const rawAlias of entry.aliases || []) {
-        const alias = normalize(rawAlias);
-        if (!alias) continue;
-        if (normalizedQuestion === alias) score += 80;
-        else if (normalizedQuestion.includes(alias)) score += 35 + Math.min(alias.length, 20);
-    }
-    for (const rawQuestion of entry.questions || []) {
-        const reference = normalize(rawQuestion);
-        if (reference && normalizedQuestion === reference) score += 70;
-    }
-    const key = normalize(entry.key).replace(/\s+/g, '-');
-    if (key && normalizedQuestion.includes(key)) score += 45;
-    const terms = new Set(normalizedQuestion.split(' ').filter(term => term.length >= 2));
-    const haystack = entrySearchText(entry);
-    for (const term of terms) if (haystack.includes(term)) score += 1;
-    return score;
+function isSystemUsageQuestion(question, pageContext = null) {
+    return classifySignals(question, pageContext).matched;
 }
 
 function searchSystemUsageKnowledge(question, pageContext = null, limit = 3) {
     const catalog = loadSystemUsageCatalog();
-    const normalizedQuestion = normalize(question);
-    const usageQuestion = isSystemUsageQuestion(question, pageContext);
-    if (!usageQuestion) return { matched: false, broad: false, entries: [], version: catalog.version };
-    const pageKey = normalize(pageContext?.page).replace(/\s+/g, '-');
-    const broad = BROAD_PATTERN.test(normalizedQuestion);
-    const ranked = catalog.modules
-        .map(entry => ({ entry, score: scoreEntry(entry, normalizedQuestion, pageKey) }))
-        .filter(item => item.score > 0)
-        .sort((a, b) => b.score - a.score || a.entry.key.localeCompare(b.entry.key));
-    const entries = ranked.slice(0, Math.max(1, Number(limit) || 3)).map(item => ({ ...item.entry, score: item.score }));
+    const classified = classifySignals(question, pageContext);
+    const { _candidates = [], ...publicClassification } = classified;
+    const candidates = classified.matched ? _candidates : [];
+    const entries = candidates.slice(0, Math.max(1, Number(limit) || 3)).map((entry, index) => ({
+        ...entry,
+        score: classified.reasons.includes('exact_catalog_question') ? 100 : index === 0 ? 90 : 80,
+    }));
     return {
-        matched: broad || entries.length > 0,
-        broad,
+        ...publicClassification,
         entries,
-        version: catalog.version,
-        moduleCount: catalog.modules.length,
-        catalogTitles: broad ? catalog.modules.map(entry => ({ key: entry.key, route: entry.route, title: entry.title })) : [],
+        catalogTitles: classified.broad ? catalog.modules.map(entry => ({ key: entry.key, route: entry.route, title: entry.title })) : [],
     };
 }
 

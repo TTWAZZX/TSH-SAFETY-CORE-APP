@@ -1,0 +1,74 @@
+{
+  "manifestVersion": "2026-10-07-phase8-immutable-candidate-r1",
+  "generatedAt": "2026-10-07T10:10:26+07:00",
+  "reviewMode": "local-remediation-and-immutable-candidate-no-production",
+  "baseCommit": "167a9b2558f7644e64b20e47194e0237bebf82ca",
+  "branch": "main",
+  "immutableCandidate": true,
+  "candidateCommit": "the Git commit containing this manifest; verify with git show HEAD:docs/johnny-phase8-candidate-manifest.json",
+  "decision": "GO_FOR_PRODUCTION_PREFLIGHT_HOLD_FOR_DEPLOYMENT",
+  "productionTarget": "php",
+  "productionRuntime": [
+    {"path": "api/handlers/johnny_ai.php", "disposition": "replace", "bytes": 184866, "sha256": "3ea4d8dab5d23e05c0195dddffbaa10e886ccb17ee3cda0bbf6a68ad56387609"},
+    {"path": "api/lib/johnny_system_usage.php", "disposition": "replace", "bytes": 15010, "sha256": "1bfbc8c111d91d7b9f76b33efb617148cd4e71c538ac95769521ad5277fe8d2c"},
+    {"path": "api/lib/johnny_evidence_ranking.php", "disposition": "new-until-production-drift-inventory-proves-otherwise", "bytes": 7513, "sha256": "b082958e0d019d031098721a83f5b50f00f424b4c8085217dc87e08083361253"},
+    {"path": "api/lib/johnny_answer_verification.php", "disposition": "new-until-production-drift-inventory-proves-otherwise", "bytes": 5320, "sha256": "0329e95ed7bfb4068acae6775b755b7db1fb66e93c27de7e42125b9d4810a3ff"}
+  ],
+  "nodeParityRuntimeNotForPhpProduction": [
+    {"path": "backend/routes/johnny-ai.js", "bytes": 173768, "sha256": "fc985e36a5a8b64b012f7b8a47dc30e984e20cffd814254870b01b6522a4390b"},
+    {"path": "backend/lib/johnny-system-usage.js", "bytes": 12689, "sha256": "ae13ad05b6fc11f5c559ea5b5899a8e5db877c7769275e163c54a48357f8ddbe"},
+    {"path": "backend/lib/johnny-evidence-ranking.js", "bytes": 6596, "sha256": "7cbf4ccb7e8f2721f77a8c693ef1d48b1d239d375dd7c8e8fd8e15d37bb11701"},
+    {"path": "backend/lib/johnny-answer-verification.js", "bytes": 4779, "sha256": "923568bd28650d7bf261877b9886fb95cd00bcec2f94eec4028b39d3c7866dcb"}
+  ],
+  "supportingScope": [
+    "backend/package.json",
+    "backend/scripts/johnny-phase3-system-usage-eval.js",
+    "backend/scripts/johnny-phase81-authenticated-local-uat.js",
+    "backend/scripts/johnny-phase81-browser-local-uat.js",
+    "backend/scripts/johnny-phase81-node-fixture-host.js",
+    "backend/scripts/johnny-phase81-php-router.php",
+    "backend/scripts/johnny-phase81-routing-remediation-eval.js",
+    "backend/scripts/johnny-phase81-routing-remediation-php-eval.php",
+    "backend/scripts/johnny-phase82-authenticated-multi-source-uat.js",
+    "backend/scripts/johnny-phase82-evidence-ranking-eval.js",
+    "backend/scripts/johnny-phase82-evidence-ranking-php-eval.php",
+    "backend/scripts/johnny-phase83-answer-verification-eval.js",
+    "backend/scripts/johnny-phase83-answer-verification-php-eval.php",
+    "backend/scripts/johnny-phase83-authenticated-answer-verification-uat.js",
+    "backend/scripts/johnny-phase84-controlled-real-model-eval.js",
+    "docs/johnny-phase8.1-routing-remediation.md",
+    "docs/johnny-phase8.1-authenticated-local-uat-closeout.md",
+    "docs/johnny-phase8.2-multi-source-retrieval-evidence-ranking.md",
+    "docs/johnny-phase8.3-claim-grounding-citation-integrity.md",
+    "docs/johnny-phase8.4-controlled-real-model-quality-gate.md",
+    "docs/johnny-phase8-release-candidate-predeploy-review.md",
+    "docs/johnny-phase8-immutable-candidate-closeout.md",
+    "docs/johnny-phase8-candidate-manifest.json",
+    "AGENTS.md"
+  ],
+  "explicitlyExcluded": [
+    {"path": "backend/scripts/patrol-checkin-v2.test.js", "reason": "pre-existing unrelated user change"},
+    {"path": ".tmp/", "reason": "ephemeral PHP 7.4 verification runtime; remove after review"},
+    {"path": "backups/local/", "reason": "local UAT evidence; never deploy as runtime"}
+  ],
+  "schemaMigration": false,
+  "newProductionConfigurationKeys": [],
+  "localVerification": {
+    "legacyRegression": "PASS",
+    "phase81NodePhpParity": "PASS",
+    "phase82NodePhpParityAndIntegratedMetadata": "PASS",
+    "phase83NodePhpParity": "PASS",
+    "php7433Compatibility": "PASS",
+    "authenticatedNodePhpLifecycle": "PASS",
+    "desktopAnd390pxBrowserUat": "PASS",
+    "controlledRealModelGate": "PASS",
+    "disposableDatabaseResidue": 0,
+    "productionTouched": false
+  },
+  "remainingDeploymentGates": [
+    "value-suppressed Production configuration and capability preflight",
+    "exact four-path Production drift inventory and download-back hashes",
+    "verified scoped Johnny database and Knowledge Base backup",
+    "separate explicit Production deployment authorization"
+  ]
+}

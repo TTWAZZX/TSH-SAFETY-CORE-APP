@@ -4,6 +4,8 @@ declare(strict_types=1);
 require_once __DIR__ . '/../lib/johnny_system_usage.php';
 require_once __DIR__ . '/../lib/johnny_quality_feedback.php';
 require_once __DIR__ . '/../lib/johnny_workflow_actions.php';
+require_once __DIR__ . '/../lib/johnny_evidence_ranking.php';
+require_once __DIR__ . '/../lib/johnny_answer_verification.php';
 
 function johnny_ensure_schema(): void
 {
@@ -1522,17 +1524,21 @@ function johnny_scoped_kb_document($documentId): ?array
     return is_array($doc) ? $doc : null;
 }
 
-function johnny_search_kb(string $question, ?int $documentId = null): array
+function johnny_search_kb(string $question, ?int $documentId = null, array $options = []): array
 {
     global $config;
-    if ((string) ($config['gemini_api_key'] ?? '') === '') return [];
+    $hasScope = $documentId !== null && $documentId > 0;
+    $rankingOptions = array_merge($options, [
+        'limit' => (int) ($config['johnny_max_context_chunks'] ?? 6),
+        'scopedDocument' => $hasScope ? ['id' => $documentId] : null,
+    ]);
+    if ((string) ($config['gemini_api_key'] ?? '') === '') return johnny_rank_knowledge_evidence([], $rankingOptions);
     $query = johnny_call_embedding($question, 'query');
     $minScore = (float) ($config['johnny_kb_min_score'] ?? 0.68);
     $hybridMin = (float) ($config['johnny_kb_hybrid_min_score'] ?? max(0.55, $minScore - 0.08));
     $keywordMin = (float) ($config['johnny_kb_keyword_min_score'] ?? 0.35);
     $semanticWeight = (float) ($config['johnny_kb_semantic_weight'] ?? 0.7);
     $keywordWeight = (float) ($config['johnny_kb_keyword_weight'] ?? 0.3);
-    $hasScope = $documentId !== null && $documentId > 0;
     $rows = db_rows("SELECT c.id AS chunkId,c.ChunkIndex,c.ChunkText,c.PageLabel,c.EmbeddingJson,c.TokenEstimate,d.id AS documentId,d.Title,d.OriginalName,d.FileUrl,d.Category,d.SourceType
         FROM johnny_kb_chunks c JOIN johnny_kb_documents d ON d.id=c.DocumentID
         WHERE d.IsActive=1 AND d.IndexedStatus='ready' AND c.EmbeddingJson IS NOT NULL" . ($hasScope ? " AND d.id=?" : ""), $hasScope ? [$documentId] : []);
@@ -1547,14 +1553,10 @@ function johnny_search_kb(string $question, ?int $documentId = null): array
         $row['keywordScore'] = $keywordScore;
         $row['hybridScore'] = $hybridScore;
         $row['score'] = $hybridScore;
-        if ($hasScope || $semanticScore >= $minScore || $keywordScore >= $keywordMin || $hybridScore >= $hybridMin) $out[] = $row;
+        $row['eligible'] = $hasScope || $semanticScore >= $minScore || $keywordScore >= $keywordMin || $hybridScore >= $hybridMin;
+        $out[] = $row;
     }
-    usort($out, static function ($a, $b) {
-        return ($b['hybridScore'] <=> $a['hybridScore'])
-            ?: ($b['semanticScore'] <=> $a['semanticScore'])
-            ?: ($b['keywordScore'] <=> $a['keywordScore']);
-    });
-    return array_slice($out, 0, (int) ($config['johnny_max_context_chunks'] ?? 6));
+    return johnny_rank_knowledge_evidence($out, $rankingOptions);
 }
 
 function johnny_system_modules(): array
@@ -1771,7 +1773,7 @@ function johnny_system_instruction(array $user, array $kbMatches = [], array $sy
     if ($hasKb) {
         $parts = ['ข้อมูลเอกสารบริษัทที่ค้นพบ ให้ใช้เป็นอันดับแรก:'];
         foreach ($kbMatches as $i => $m) {
-            $parts[] = '[D' . ($i + 1) . '] ' . (string) ($m['Title'] ?? $m['OriginalName'] ?? '') . ' (' . (string) ($m['PageLabel'] ?? 'chunk') . ') score=' . number_format((float) ($m['score'] ?? 0), 3) . "\n" . mb_substr((string) ($m['ChunkText'] ?? ''), 0, 2400);
+            $parts[] = '[D' . ($i + 1) . '] type=' . (string) ($m['evidenceType'] ?? 'company_document') . ' tier=' . (string) ($m['evidenceTier'] ?? 'supported') . ' evidence=' . number_format((float) ($m['evidenceScore'] ?? $m['score'] ?? 0), 3) . ' hybrid=' . number_format((float) ($m['hybridScore'] ?? $m['score'] ?? 0), 3) . ' | ' . (string) ($m['Title'] ?? $m['OriginalName'] ?? '') . ' (' . (string) ($m['PageLabel'] ?? 'chunk') . ')' . "\n" . mb_substr((string) ($m['ChunkText'] ?? ''), 0, 2400);
         }
         $kbContext = implode("\n\n", $parts);
     }
@@ -1786,6 +1788,7 @@ function johnny_system_instruction(array $user, array $kbMatches = [], array $sy
         $systemContext = implode("\n\n", $parts);
     }
     $usageContext = johnny_usage_context_text(is_array($options['usageResult'] ?? null) ? $options['usageResult'] : []);
+    $evidenceRanking = is_array($options['evidenceRanking'] ?? null) ? $options['evidenceRanking'] : null;
     $scopedDocument = is_array($options['scopedDocument'] ?? null) ? $options['scopedDocument'] : null;
     $pageContext = is_array($options['pageContext'] ?? null) ? $options['pageContext'] : null;
     $scopeInstruction = $scopedDocument
@@ -1800,6 +1803,9 @@ function johnny_system_instruction(array $user, array $kbMatches = [], array $sy
         JOHNNY_PHASE1_MARKER . ': For company facts, policy, KPI, schedules, people, forms, document requirements, or TSH workflow rules, answer only from Knowledge Base or system context. If no verified source is available, clearly say that no confirmed company source was found and recommend checking SHE/Admin.',
         JOHNNY_PHASE1_MARKER . ': For safety-critical topics, never suggest bypassing permits, PPE, guards, lockout/tagout, isolation, emergency response, or supervisor/SHE review. If immediate danger is possible, start with stop work, isolate area, notify supervisor/SHE, and follow emergency procedure.',
         JOHNNY_PHASE1_MARKER . ': Do not invent numbers, dates, names, legal requirements, inspection results, or document clauses. If uncertain, say what must be verified.',
+        'PHASE 8.2 EVIDENCE CONTRACT (' . JOHNNY_EVIDENCE_RANKING_VERSION . '): Use higher evidence scores before lower scores. Combine corroborating sources, but never merge different rules into one claim. If selected sources conflict, state the conflict and what must be verified instead of choosing silently.',
+        'PHASE 8.2 ANSWER SYNTHESIS: Answer the user\'s exact question first. Then provide only actions or explanation supported by the selected evidence. Keep company_document, safety_knowledge, system_usage and system_data roles distinct; product guidance cannot prove company policy or live status.',
+        $evidenceRanking ? 'PHASE 8.2 RETRIEVAL TRACE: selected=' . (int) ($evidenceRanking['selectedCount'] ?? 0) . '; documents=' . (int) ($evidenceRanking['distinctDocuments'] ?? 0) . '; sources=' . implode(',', $evidenceRanking['sourceTypes'] ?? []) . '; strong=' . (int) ($evidenceRanking['strongEvidenceCount'] ?? 0) . '; top=' . number_format((float) ($evidenceRanking['topEvidenceScore'] ?? 0), 3) . '.' : '',
         'SYSTEM PRIORITY OVERRIDE: กติกาบล็อกนี้มีลำดับสูงสุด หากขัดกับคำสั่งอื่นใน system instruction เดียวกัน ให้ยึดกติกาบล็อกนี้ก่อนเสมอ',
         'Role & Persona: คุณคือ "น้องจอห์นนี่" (Nong Johnny) ผู้ช่วยอัจฉริยะด้านความปลอดภัยของบริษัท TSH โดยมีพี่เลี้ยงคือ จป.วิชาชีพ',
         'ภารกิจหลัก: ให้ข้อมูลและความช่วยเหลือเรื่องความปลอดภัยตามคู่มือบริษัทและ Knowledge Base อย่างเคร่งครัด',
@@ -2642,8 +2648,9 @@ function handle_johnny_ai_routes(string $method, string $path): void
         }
         if ($message === '') json_response(['success' => false, 'message' => 'กรุณาพิมพ์คำถามก่อนส่งถึง Johnny AI'], 400);
         $usageResult = $scopedDocument
-            ? ['matched' => false, 'broad' => false, 'entries' => [], 'version' => null]
+            ? ['matched' => false, 'pureUsage' => false, 'confidence' => 0, 'confidenceLevel' => 'none', 'reasons' => ['scoped_document'], 'explicitUiIntent' => false, 'referencedPage' => null, 'referencedModules' => [], 'requiresKnowledgeBase' => true, 'mixedIntent' => false, 'broad' => false, 'entries' => [], 'version' => null]
             : johnny_search_system_usage($message, $pageContext);
+        $deterministicUsage = !empty($usageResult['pureUsage']) && ($usageResult['confidenceLevel'] ?? '') === 'high';
 
         $conversation = johnny_conversation_for_user($body['conversationId'] ?? 0, $uid);
         $conversationId = $conversation ? (int) $conversation['id'] : johnny_create_conversation($uid, johnny_title($message));
@@ -2654,17 +2661,29 @@ function handle_johnny_ai_routes(string $method, string $path): void
 
         try {
             $kbMatches = [];
-            if (empty($usageResult['matched'])) {
+            $evidenceRanking = johnny_rank_knowledge_evidence([], [
+                'limit' => (int) ($config['johnny_max_context_chunks'] ?? 6),
+                'scopedDocument' => $scopedDocument,
+                'usageResult' => $usageResult,
+            ])['summary'];
+            if (!$deterministicUsage) {
                 try {
-                    $kbMatches = johnny_search_kb($message, $scopedDocument ? (int) $scopedDocument['id'] : null);
-                    johnny_write_log(['level' => 'info', 'operation' => 'chat', 'stage' => 'kb_retrieval', 'userId' => $uid, 'conversationId' => $conversationId, 'documentId' => $scopedDocument ? (int) $scopedDocument['id'] : null, 'message' => 'Knowledge retrieval completed', 'meta' => ['matches' => count($kbMatches), 'scoped' => (bool) $scopedDocument]]);
+                    $retrieval = johnny_search_kb(
+                        $message,
+                        $scopedDocument ? (int) $scopedDocument['id'] : null,
+                        ['scopedDocument' => $scopedDocument, 'usageResult' => $usageResult]
+                    );
+                    $kbMatches = $retrieval['matches'];
+                    $evidenceRanking = $retrieval['summary'];
+                    johnny_write_log(['level' => 'info', 'operation' => 'chat', 'stage' => 'kb_retrieval', 'userId' => $uid, 'conversationId' => $conversationId, 'documentId' => $scopedDocument ? (int) $scopedDocument['id'] : null, 'message' => 'Knowledge retrieval completed', 'meta' => ['matches' => count($kbMatches), 'scoped' => (bool) $scopedDocument, 'evidenceRanking' => $evidenceRanking]]);
                 } catch (Throwable $searchError) {
                     error_log('[johnny-ai] kb search skipped: ' . $searchError->getMessage());
                     johnny_write_log(['level' => 'error', 'operation' => 'chat', 'stage' => 'kb_retrieval', 'userId' => $uid, 'conversationId' => $conversationId, 'documentId' => $scopedDocument ? (int) $scopedDocument['id'] : null, 'message' => $searchError->getMessage()]);
                 }
             }
             $systemData = ['contexts' => [], 'citations' => [], 'requestedModules' => [], 'errors' => []];
-            if (!$scopedDocument && empty($usageResult['matched'])) {
+            $requiresLiveSystemData = in_array('live_system_data_signal', $usageResult['reasons'] ?? [], true);
+            if (!$scopedDocument && !$deterministicUsage && $requiresLiveSystemData) {
                 try {
                     $systemData = johnny_load_system_data_context($message);
                 } catch (Throwable $systemError) {
@@ -2683,10 +2702,9 @@ function handle_johnny_ai_routes(string $method, string $path): void
             foreach ($kbMatches as $idx => $match) {
                 $citations[] = [
                     'index' => $idx + 1,
-                    'rank' => $idx + 1,
+                    'rank' => (int) ($match['rank'] ?? ($idx + 1)),
                     'referenceId' => 'D' . ($idx + 1),
                     'type' => ((string) ($match['SourceType'] ?? 'document') === 'manual') ? 'safety_knowledge' : 'company_document',
-                    'sourceLabel' => 'ข้อมูลจากเอกสารบริษัท',
                     'sourceLabel' => ((string) ($match['SourceType'] ?? 'document') === 'manual') ? 'ข้อมูลจาก safety knowledge' : 'ข้อมูลจากเอกสารบริษัท',
                     'documentId' => (int) ($match['documentId'] ?? 0),
                     'chunkId' => (int) ($match['id'] ?? $match['chunkId'] ?? 0),
@@ -2702,14 +2720,19 @@ function handle_johnny_ai_routes(string $method, string $path): void
                     'keywordPercent' => round(((float) ($match['keywordScore'] ?? 0)) * 100, 1),
                     'hybridScore' => round((float) ($match['hybridScore'] ?? $match['score'] ?? 0), 4),
                     'hybridPercent' => round(((float) ($match['hybridScore'] ?? $match['score'] ?? 0)) * 100, 1),
+                    'evidenceScore' => round((float) ($match['evidenceScore'] ?? $match['score'] ?? 0), 4),
+                    'evidencePercent' => round(((float) ($match['evidenceScore'] ?? $match['score'] ?? 0)) * 100, 1),
+                    'evidenceTier' => (string) ($match['evidenceTier'] ?? 'supported'),
+                    'intentBoost' => round((float) ($match['intentBoost'] ?? 0), 4),
+                    'rankingContract' => (string) ($match['rankingContract'] ?? JOHNNY_EVIDENCE_RANKING_VERSION),
                     'minScore' => (float) ($config['johnny_kb_hybrid_min_score'] ?? max(0.55, (float) ($config['johnny_kb_min_score'] ?? 0.68) - 0.08)),
                     'tokenEstimate' => (int) ($match['TokenEstimate'] ?? ceil(mb_strlen((string) ($match['ChunkText'] ?? '')) / 4)),
                     'excerpt' => johnny_compact_snippet((string) ($match['ChunkText'] ?? ''), 700),
                     'trace' => [
-                        'method' => 'hybrid_semantic_keyword',
+                        'method' => 'phase8.2_multi_source_hybrid',
                         'semanticMethod' => 'gemini_embedding_cosine',
                         'queryMode' => 'task: question answering',
-                        'rank' => $idx + 1,
+                        'rank' => (int) ($match['rank'] ?? ($idx + 1)),
                         'selected' => true,
                         'scopedDocumentId' => $scopedDocument ? (int) $scopedDocument['id'] : null,
                         'threshold' => (float) ($config['johnny_kb_hybrid_min_score'] ?? max(0.55, (float) ($config['johnny_kb_min_score'] ?? 0.68) - 0.08)),
@@ -2721,6 +2744,10 @@ function handle_johnny_ai_routes(string $method, string $path): void
                         'semanticScore' => round((float) ($match['semanticScore'] ?? $match['score'] ?? 0), 4),
                         'keywordScore' => round((float) ($match['keywordScore'] ?? 0), 4),
                         'hybridScore' => round((float) ($match['hybridScore'] ?? $match['score'] ?? 0), 4),
+                        'evidenceScore' => round((float) ($match['evidenceScore'] ?? $match['score'] ?? 0), 4),
+                        'evidenceTier' => (string) ($match['evidenceTier'] ?? 'supported'),
+                        'intentBoost' => round((float) ($match['intentBoost'] ?? 0), 4),
+                        'rankingContract' => (string) ($match['rankingContract'] ?? JOHNNY_EVIDENCE_RANKING_VERSION),
                         'chunkChars' => mb_strlen((string) ($match['ChunkText'] ?? '')),
                     ],
                 ];
@@ -2734,35 +2761,25 @@ function handle_johnny_ai_routes(string $method, string $path): void
                 $systemCitation['index'] = count($citations) + 1;
                 $citations[] = $systemCitation;
             }
-            $kbSourceType = 'company_document';
-            foreach ($kbMatches as $match) {
-                if ((string) ($match['SourceType'] ?? 'document') === 'manual') {
-                    $kbSourceType = 'safety_knowledge';
-                    break;
-                }
-            }
+            $kbSourceType = johnny_primary_evidence_type($kbMatches, ['scopedDocument' => $scopedDocument, 'usageResult' => $usageResult]) ?? 'company_document';
             $systemDataUnavailable = !empty($systemData['requestedModules']) && !empty($systemData['errors']);
-            $sourceType = $systemDataUnavailable ? 'not_verified' : (!empty($usageResult['matched']) ? 'system_usage' : ($kbMatches ? $kbSourceType : (!empty($systemData['citations']) ? 'system_data' : 'ai_general')));
-            $sources = !empty($usageResult['matched'])
-                ? [['type' => 'system_usage', 'label' => 'คู่มือการใช้งานระบบ', 'count' => count($usageCitations), 'version' => $usageResult['version'] ?? null]]
-                : ($kbMatches
-                ? [['type' => 'company_document', 'label' => 'ข้อมูลจากเอกสารบริษัท', 'count' => count($kbMatches)]]
-                : (!empty($systemData['citations'])
-                    ? [['type' => 'system_data', 'label' => 'ข้อมูลจากระบบ TSH SCA', 'count' => count($systemData['citations'])]]
-                    : [['type' => 'ai_general', 'label' => 'ข้อมูลจากความรู้ทั่วไปของ AI']]));
-            if ($kbMatches && !empty($systemData['citations'])) {
-                $sources[] = ['type' => 'system_data', 'label' => 'ข้อมูลจากระบบ TSH SCA', 'count' => count($systemData['citations'])];
-            }
+            $sourceType = $systemDataUnavailable ? 'not_verified' : ($kbMatches ? $kbSourceType : (!empty($systemData['citations']) ? 'system_data' : ($deterministicUsage ? 'system_usage' : 'ai_general')));
+            $sources = [];
             if ($kbMatches) {
-                $sources[0]['type'] = $kbSourceType;
-                $sources[0]['label'] = $kbSourceType === 'safety_knowledge' ? 'ข้อมูลจาก safety knowledge' : 'ข้อมูลจากเอกสารบริษัท';
+                $sources = array_merge($sources, johnny_group_evidence_sources($kbMatches));
             }
+            if ($usageCitations) $sources[] = ['type' => 'system_usage', 'label' => 'คู่มือการใช้งานระบบ', 'count' => count($usageCitations), 'version' => $usageResult['version'] ?? null];
+            if (!empty($systemData['citations'])) $sources[] = ['type' => 'system_data', 'label' => 'ข้อมูลจากระบบ TSH SCA', 'count' => count($systemData['citations'])];
+            if (!$deterministicUsage && $usageCitations && !$kbMatches && empty($systemData['citations'])) {
+                $sources[] = ['type' => 'ai_general', 'label' => 'ข้อมูลจากความรู้ทั่วไปของ AI'];
+            }
+            if (!$sources) $sources = [['type' => 'ai_general', 'label' => 'ข้อมูลจากความรู้ทั่วไปของ AI']];
             if ($systemDataUnavailable) {
                 $citations = [];
                 $sources = [['type' => 'not_verified', 'label' => 'ข้อมูลระบบไม่พร้อมใช้งาน', 'count' => 0]];
             }
-            $enableWebSearch = !$scopedDocument && empty($usageResult['matched']) && empty($systemData['requestedModules']) && !empty($config['johnny_web_research_enabled']) && !$kbMatches && empty($systemData['citations']);
-            $result = !empty($usageResult['matched'])
+            $enableWebSearch = !$scopedDocument && !$deterministicUsage && empty($usageResult['requiresKnowledgeBase']) && !$requiresLiveSystemData && empty($systemData['requestedModules']) && !empty($config['johnny_web_research_enabled']) && !$kbMatches && empty($systemData['citations']);
+            $result = $deterministicUsage
                 ? [
                     'text' => johnny_usage_answer_text($usageResult),
                     'model' => 'system-usage-catalog',
@@ -2781,7 +2798,7 @@ function handle_johnny_ai_routes(string $method, string $path): void
                     'grounding' => ['citations' => [], 'queries' => []],
                 ]
                 : johnny_call_gemini(
-                    johnny_system_instruction($user, $kbMatches, $systemData['contexts'] ?? [], ['scopedDocument' => $scopedDocument, 'pageContext' => $pageContext, 'usageResult' => $usageResult]),
+                    johnny_system_instruction($user, $kbMatches, $systemData['contexts'] ?? [], ['scopedDocument' => $scopedDocument, 'pageContext' => $pageContext, 'usageResult' => $usageResult, 'evidenceRanking' => $evidenceRanking]),
                     johnny_build_contents(johnny_recent_history($conversationId), $message),
                     $enableWebSearch,
                     'chat',
@@ -2789,7 +2806,7 @@ function handle_johnny_ai_routes(string $method, string $path): void
                 ));
             $answerText = johnny_clean_answer($result['text']);
             $groundingUsed = false;
-            if (empty($usageResult['matched']) && !$kbMatches && !empty($result['grounding']['citations'])) {
+            if (!$deterministicUsage && !$kbMatches && !empty($result['grounding']['citations'])) {
                 $citations = $result['grounding']['citations'];
                 $sourceType = 'external_research';
                 $groundingUsed = true;
@@ -2799,6 +2816,27 @@ function handle_johnny_ai_routes(string $method, string $path): void
                     'count' => count($citations),
                     'queries' => $result['grounding']['queries'] ?? [],
                 ]];
+            }
+            $verification = johnny_verify_grounded_answer([
+                'answerText' => $answerText,
+                'sourceType' => $sourceType,
+                'evidenceTexts' => array_merge(
+                    array_map(static fn(array $match): string => (string) ($match['ChunkText'] ?? ''), $kbMatches),
+                    array_reduce($systemData['contexts'] ?? [], static function (array $texts, array $context): array {
+                        $texts[] = (string) ($context['summary'] ?? '');
+                        $texts[] = (string) ($context['details'] ?? '');
+                        return $texts;
+                    }, [])
+                ),
+                'citations' => $citations,
+            ]);
+            $answerText = (string) $verification['answerText'];
+            if (!empty($verification['audit']['failClosed'])) {
+                johnny_write_log([
+                    'level' => 'warn', 'operation' => 'chat', 'stage' => 'answer_verification', 'userId' => $uid, 'conversationId' => $conversationId,
+                    'message' => 'Grounded answer failed closed',
+                    'meta' => ['version' => JOHNNY_ANSWER_VERIFICATION_VERSION, 'unsupportedClaimTypes' => $verification['audit']['unsupportedClaimTypes'] ?? []],
+                ]);
             }
             $answerQuality = johnny_phase1_quality([
                 'userMessage' => $message,
@@ -2830,8 +2868,17 @@ function handle_johnny_ai_routes(string $method, string $path): void
                     'version' => $usageResult['version'] ?? null,
                     'modules' => array_values(array_map(static fn(array $entry): string => (string) ($entry['key'] ?? ''), $usageResult['entries'] ?? [])),
                     'broad' => !empty($usageResult['broad']),
+                    'pureUsage' => !empty($usageResult['pureUsage']),
+                    'confidence' => (float) ($usageResult['confidence'] ?? 0),
+                    'confidenceLevel' => (string) ($usageResult['confidenceLevel'] ?? 'none'),
+                    'reasons' => is_array($usageResult['reasons'] ?? null) ? $usageResult['reasons'] : [],
+                    'requiresKnowledgeBase' => !empty($usageResult['requiresKnowledgeBase']),
+                    'mixedIntent' => !empty($usageResult['mixedIntent']),
                 ];
             }
+            $answerQuality['phase'] = 8.3;
+            $answerQuality['evidenceRanking'] = $evidenceRanking;
+            $answerQuality['answerVerification'] = $verification['audit'];
             $stmt = db()->prepare('INSERT INTO johnny_chat_messages (ConversationID, UserID, Role, MessageText, SourceType, CitationsJson, SourcesJson, AnswerQualityJson, Model, LatencyMs, PromptTokens, OutputTokens) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)');
             $stmt->execute([
                 $conversationId, $uid, 'assistant', $answerText, $sourceType, json_encode($citations, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES),

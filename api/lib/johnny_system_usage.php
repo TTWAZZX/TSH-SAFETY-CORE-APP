@@ -24,90 +24,138 @@ function johnny_usage_catalog(): array
     return $catalog;
 }
 
-function johnny_is_system_usage_question(string $question, ?array $pageContext = null): bool
+function johnny_usage_contains_alias(string $text, string $alias): bool
 {
-    $text = johnny_usage_normalize($question);
-    if ($text === '') return false;
+    if ($alias === '') return false;
+    if (preg_match('/^[a-z0-9-]{1,3}$/i', $alias)) return in_array($alias, explode(' ', $text), true);
+    return mb_strpos($text, $alias) !== false;
+}
+
+function johnny_usage_empty_result(array $catalog, array $overrides = []): array
+{
+    return array_merge([
+        'matched' => false,
+        'pureUsage' => false,
+        'confidence' => 0,
+        'confidenceLevel' => 'none',
+        'reasons' => [],
+        'explicitUiIntent' => false,
+        'referencedPage' => null,
+        'referencedModules' => [],
+        'requiresKnowledgeBase' => false,
+        'mixedIntent' => false,
+        'broad' => false,
+        'entries' => [],
+        'version' => $catalog['version'] ?? 'unknown',
+        'moduleCount' => count($catalog['modules'] ?? []),
+        'catalogTitles' => [],
+    ], $overrides);
+}
+
+function johnny_usage_classify_signals(string $question, ?array $pageContext = null): array
+{
     $catalog = johnny_usage_catalog();
+    $text = johnny_usage_normalize($question);
+    if ($text === '') return johnny_usage_empty_result($catalog);
+
+    $pageKey = str_replace(' ', '-', johnny_usage_normalize($pageContext['page'] ?? ''));
+    $pageEntry = null;
+    $exactEntries = [];
+    $referencedEntries = [];
     foreach ($catalog['modules'] as $entry) {
+        if (!is_array($entry)) continue;
+        if ($pageKey !== '' && in_array($pageKey, [(string) ($entry['key'] ?? ''), (string) ($entry['route'] ?? '')], true)) $pageEntry = $entry;
         foreach (($entry['questions'] ?? []) as $item) {
-            if (johnny_usage_normalize($item) === $text) return true;
+            if (johnny_usage_normalize($item) === $text) {
+                $exactEntries[] = $entry;
+                break;
+            }
+        }
+        $names = array_merge(
+            [(string) ($entry['key'] ?? ''), (string) ($entry['route'] ?? ''), (string) ($entry['title'] ?? '')],
+            is_array($entry['aliases'] ?? null) ? $entry['aliases'] : []
+        );
+        foreach ($names as $rawName) {
+            $name = johnny_usage_normalize($rawName);
+            if (johnny_usage_contains_alias($text, $name)) {
+                $referencedEntries[] = $entry;
+                break;
+            }
         }
     }
-    if (preg_match('/วิธีใช้|ใช้งาน|ใช้ยังไง|ใช้อย่างไร|ทำยังไง|ทำอย่างไร|ขั้นตอน|เมนู|โมดูล|อยู่ตรงไหน|เปิดที่ไหน|(?:บันทึก|ส่ง|ดู|ติดตาม|ต่ออายุ|พิมพ์|สร้าง|เพิ่ม|แก้|เลือก|ตอบ).*(?:อย่างไร|ยังไง|ตรงไหน|ที่ไหน)|workflow|quick\s*start|how\s+to|where\s+(?:is|can)|permission|สิทธิ์|ใครใช้|หน้านี้|หน้า(?:นี้)?ใช้|หน้า.*ทำอะไร/iu', $text)) return true;
-    if (preg_match('/ทุกโมดูล|ทุกเมนู|เมนูทั้งหมด|ระบบนี้|ภาพรวมการใช้งาน|คู่มือระบบ|เริ่มใช้งานระบบ|วิธีใช้ระบบ|ใช้งานระบบ|ใช้ระบบยังไง/iu', $text)) return true;
-    $page = johnny_usage_normalize($pageContext['page'] ?? '');
-    return $page !== '' && (bool) preg_match('/หน้านี้|เมนูนี้|ตรงนี้|ใช้งาน|วิธี/u', $text);
+
+    $broad = (bool) preg_match('/ทุกโมดูล|ทุกเมนู|เมนูทั้งหมด|ระบบนี้|ภาพรวมการใช้งาน|คู่มือระบบ|เริ่มใช้งานระบบ|วิธีใช้ระบบ|ใช้งานระบบ|ใช้ระบบยังไง/iu', $text);
+    $pageReference = (bool) preg_match('/หน้านี้|เมนูนี้|ตรงนี้|หน้า(?:นี้)?ใช้|this\s+page|this\s+menu|on\s+this\s+page/iu', $text);
+    $contextualUiAction = (bool) preg_match('/ต้องกด(?:ตรง)?ไหน|กดตรงไหน|อยู่(?:ตรง)?ไหน|เปิด(?:หน้า|เมนู)?(?:ที่)?ไหน|where\s+(?:is|can\s+i\s+find)|which\s+(?:button|menu|page)/iu', $text);
+    $uiAction = (bool) preg_match('/(?:กด|คลิก|เปิด|เข้า|เลือก|ไปที่).*(?:ตรงไหน|ที่ไหน|เมนู|หน้า|dashboard|analytics|ปุ่ม)|(?:เมนู|หน้า|โมดูล|dashboard|analytics).*(?:อยู่ไหน|อยู่ตรงไหน|ใช้อย่างไร|ใช้ยังไง|ใช้งาน|ทำอะไร)|workflow|quick\s*start|permission|สิทธิ์|ใครใช้|how\s+do\s+i\s+(?:open|use|access|find|navigate)|how\s+to\s+(?:open|use|access|find|navigate)|where\s+(?:is|can\s+i\s+find)/iu', $text);
+    $modulePurpose = (bool) preg_match('/(?:โมดูล|หน้า|เมนู)/iu', $text) && (bool) preg_match('/(?:ใช้ทำอะไร|ทำอะไร|ใช้งานอย่างไร|ใช้ยังไง)/iu', $text);
+    $explicitUiIntent = $broad || count($exactEntries) > 0 || $modulePurpose || $uiAction || $pageReference || $contextualUiAction;
+    $documentSignal = count($exactEntries) === 0 && !$modulePurpose && (bool) preg_match('/ตามเอกสาร|เอกสารบริษัท|เอกสารนี้|นโยบาย|ระเบียบ|ข้อกำหนด|มาตรฐาน|กฎหมาย|\bwi\b|company\s+(?:document|policy|rule|requirement)|what\s+does\s+company\s+policy\s+require|regulation|standard/iu', $text);
+    $safetySignal = count($exactEntries) === 0 && (bool) preg_match('/วิธีปฏิบัติงานอย่างปลอดภัย|ปฐมพยาบาล|ไฟไหม้|เพลิงไหม้|สารเคมี(?:รั่ว|หก|กระเด็น)|บาดเจ็บ|เหตุฉุกเฉิน|หมดสติ|วิธีใช้\s*ppe|ใช้\s*ppe\s*ที่ถูก|สวม\s*ppe|first\s+aid|fire\s+emergency|chemical\s+(?:spill|leak)|injur(?:y|ed)|emergency/iu', $text);
+    $liveDataSignal = count($exactEntries) === 0 && (bool) preg_match('/วันนี้|ขณะนี้|ตอนนี้|ล่าสุด|กี่คน|กี่รายการ|กี่ครั้ง|จำนวน|สถานะล่าสุด|เช็กอินครบ|ยังไม่ปิด|current\s+(?:count|status)|how\s+many|latest\s+status/iu', $text);
+    $usePageContext = is_array($pageEntry) && ($pageReference || $contextualUiAction) && count($referencedEntries) === 0;
+    $candidates = count($exactEntries) > 0
+        ? $exactEntries
+        : (count($referencedEntries) > 0 ? $referencedEntries : ($usePageContext ? [$pageEntry] : []));
+    $matched = $broad || ($explicitUiIntent && count($candidates) > 0);
+    $requiresKnowledgeBase = $documentSignal || $safetySignal;
+    $mixedIntent = $matched && ($requiresKnowledgeBase || $liveDataSignal);
+    $pureUsage = $matched && !$mixedIntent && !$liveDataSignal;
+    $reasons = [];
+    if (count($exactEntries) > 0) $reasons[] = 'exact_catalog_question';
+    if ($broad) $reasons[] = 'broad_system_usage_request';
+    if (count($referencedEntries) > 0) $reasons[] = 'explicit_module_reference';
+    if ($usePageContext) $reasons[] = 'explicit_ui_reference_with_page_context';
+    if ($documentSignal) $reasons[] = 'company_document_signal';
+    if ($safetySignal) $reasons[] = 'safety_or_emergency_signal';
+    if ($liveDataSignal) $reasons[] = 'live_system_data_signal';
+    if ($explicitUiIntent && !$matched) $reasons[] = 'ui_intent_without_verified_module';
+    $confidence = 0.0;
+    if ($matched) $confidence = count($exactEntries) > 0 || $broad || $usePageContext ? 1.0 : 0.9;
+    if ($mixedIntent) $confidence = min($confidence, 0.75);
+
+    return johnny_usage_empty_result($catalog, [
+        'matched' => $matched,
+        'pureUsage' => $pureUsage,
+        'confidence' => $confidence,
+        'confidenceLevel' => $confidence >= 0.85 ? 'high' : ($confidence >= 0.6 ? 'medium' : ($confidence > 0 ? 'low' : 'none')),
+        'reasons' => $reasons,
+        'explicitUiIntent' => $explicitUiIntent,
+        'referencedPage' => $usePageContext ? (string) ($pageEntry['key'] ?? '') : null,
+        'referencedModules' => array_values(array_map(static fn(array $entry): string => (string) ($entry['key'] ?? ''), $candidates)),
+        'requiresKnowledgeBase' => $requiresKnowledgeBase,
+        'mixedIntent' => $mixedIntent,
+        'broad' => $broad,
+        '_candidates' => $candidates,
+    ]);
 }
 
-function johnny_usage_entry_search_text(array $entry): string
+function johnny_is_system_usage_question(string $question, ?array $pageContext = null): bool
 {
-    return johnny_usage_normalize(implode(' ', array_merge(
-        [(string) ($entry['key'] ?? ''), (string) ($entry['route'] ?? ''), (string) ($entry['title'] ?? '')],
-        is_array($entry['aliases'] ?? null) ? $entry['aliases'] : [],
-        is_array($entry['questions'] ?? null) ? $entry['questions'] : []
-    )));
-}
-
-function johnny_usage_score_entry(array $entry, string $question, string $pageKey): int
-{
-    $score = 0;
-    if ($pageKey !== '' && in_array($pageKey, [(string) ($entry['key'] ?? ''), (string) ($entry['route'] ?? '')], true)) $score += 100;
-    foreach (($entry['aliases'] ?? []) as $rawAlias) {
-        $alias = johnny_usage_normalize($rawAlias);
-        if ($alias === '') continue;
-        if ($question === $alias) $score += 80;
-        elseif (mb_strpos($question, $alias) !== false) $score += 35 + min(mb_strlen($alias), 20);
-    }
-    foreach (($entry['questions'] ?? []) as $rawQuestion) {
-        $reference = johnny_usage_normalize($rawQuestion);
-        if ($reference !== '' && $question === $reference) $score += 70;
-    }
-    $key = str_replace(' ', '-', johnny_usage_normalize($entry['key'] ?? ''));
-    if ($key !== '' && mb_strpos($question, $key) !== false) $score += 45;
-    $terms = array_values(array_unique(array_filter(explode(' ', $question), static fn($term) => mb_strlen($term) >= 2)));
-    $haystack = johnny_usage_entry_search_text($entry);
-    foreach ($terms as $term) if (mb_strpos($haystack, $term) !== false) $score += 1;
-    return $score;
+    return !empty(johnny_usage_classify_signals($question, $pageContext)['matched']);
 }
 
 function johnny_search_system_usage(string $question, ?array $pageContext = null, int $limit = 3): array
 {
     $catalog = johnny_usage_catalog();
-    $normalized = johnny_usage_normalize($question);
-    if (!johnny_is_system_usage_question($question, $pageContext)) {
-        return ['matched' => false, 'broad' => false, 'entries' => [], 'version' => $catalog['version'] ?? 'unknown'];
-    }
-    $pageKey = str_replace(' ', '-', johnny_usage_normalize($pageContext['page'] ?? ''));
-    $broad = (bool) preg_match('/ทุกโมดูล|ทุกเมนู|เมนูทั้งหมด|ระบบนี้|ภาพรวมการใช้งาน|คู่มือระบบ|เริ่มใช้งานระบบ|วิธีใช้ระบบ|ใช้งานระบบ|ใช้ระบบยังไง/iu', $normalized);
-    $ranked = [];
-    foreach ($catalog['modules'] as $entry) {
-        if (!is_array($entry)) continue;
-        $score = johnny_usage_score_entry($entry, $normalized, $pageKey);
-        if ($score > 0) $ranked[] = ['entry' => $entry, 'score' => $score];
-    }
-    usort($ranked, static function (array $a, array $b): int {
-        $scoreCompare = ((int) $b['score']) <=> ((int) $a['score']);
-        return $scoreCompare !== 0 ? $scoreCompare : strcmp((string) ($a['entry']['key'] ?? ''), (string) ($b['entry']['key'] ?? ''));
-    });
+    $classified = johnny_usage_classify_signals($question, $pageContext);
+    $candidates = !empty($classified['matched']) && is_array($classified['_candidates'] ?? null) ? $classified['_candidates'] : [];
     $entries = [];
-    foreach (array_slice($ranked, 0, max(1, $limit)) as $item) {
-        $entries[] = array_merge($item['entry'], ['score' => (int) $item['score']]);
+    foreach (array_slice($candidates, 0, max(1, $limit)) as $index => $entry) {
+        $score = in_array('exact_catalog_question', $classified['reasons'] ?? [], true) ? 100 : ($index === 0 ? 90 : 80);
+        $entries[] = array_merge($entry, ['score' => $score]);
     }
     $titles = [];
-    if ($broad) {
+    if (!empty($classified['broad'])) {
         foreach ($catalog['modules'] as $entry) {
             $titles[] = ['key' => $entry['key'] ?? '', 'route' => $entry['route'] ?? '', 'title' => $entry['title'] ?? ''];
         }
     }
-    return [
-        'matched' => $broad || count($entries) > 0,
-        'broad' => $broad,
+    unset($classified['_candidates']);
+    return array_merge($classified, [
         'entries' => $entries,
-        'version' => $catalog['version'] ?? 'unknown',
-        'moduleCount' => count($catalog['modules']),
         'catalogTitles' => $titles,
-    ];
+    ]);
 }
 
 function johnny_usage_context_text(array $result): string

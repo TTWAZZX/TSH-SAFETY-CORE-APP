@@ -76,8 +76,8 @@ function compact(result) {
     check('usage answers have verified citations', nodeResults.filter(item => item.matched).every(item => item.citationTypes.length > 0 && item.citationTypes.every(type => type === 'system_usage')));
     check('usage answers are deterministic plain text', nodeResults.filter(item => item.matched).every(item => item.answer && !/[`*]|^#{1,6}\s/m.test(item.answer)));
 
-    check('Node chat bypasses KB/system/web for matched usage', nodeRoute.includes('if (!usageResult.matched)') && nodeRoute.includes('!usageResult.matched && !systemData.requestedModules.length') && nodeRoute.includes("model: 'system-usage-catalog'"));
-    check('PHP chat bypasses KB/system/web for matched usage', phpRoute.includes("empty($usageResult['matched'])") && phpRoute.includes("'model' => 'system-usage-catalog'"));
+    check('Node chat limits deterministic bypass to pure high-confidence usage', nodeRoute.includes("usageResult.pureUsage && usageResult.confidenceLevel === 'high'") && nodeRoute.includes('const result = deterministicUsage') && nodeRoute.includes("model: 'system-usage-catalog'"));
+    check('PHP chat limits deterministic bypass to pure high-confidence usage', phpRoute.includes("!empty($usageResult['pureUsage']) && ($usageResult['confidenceLevel'] ?? '') === 'high'") && phpRoute.includes('$result = $deterministicUsage') && phpRoute.includes("'model' => 'system-usage-catalog'"));
     check('PHP mock evaluator is available for parity run', fs.existsSync(phpRunner) && fs.readFileSync(phpRunner, 'utf8').includes('JOHNNY_PHASE3_SYSTEM_USAGE_KNOWLEDGE_PHP'));
     check('both chat runtimes expose system_usage source', nodeRoute.includes("type: 'system_usage'") && phpRoute.includes("'type' => 'system_usage'"));
     check('Node/PHP persist Phase 3 usage-quality metadata', nodeRoute.includes('usageKnowledge: {') && phpRoute.includes("$answerQuality['usageKnowledge']"));

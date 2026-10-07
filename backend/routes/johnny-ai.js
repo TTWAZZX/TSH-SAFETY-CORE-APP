@@ -24,6 +24,16 @@ const {
     getWorkflowActionContract,
     normalizeWorkflowAction,
 } = require('../lib/johnny-workflow-actions');
+const {
+    CONTRACT_VERSION: EVIDENCE_RANKING_VERSION,
+    rankKnowledgeEvidence,
+    groupEvidenceSources,
+    primaryEvidenceType,
+} = require('../lib/johnny-evidence-ranking');
+const {
+    CONTRACT_VERSION: ANSWER_VERIFICATION_VERSION,
+    verifyGroundedAnswer,
+} = require('../lib/johnny-answer-verification');
 
 const router = express.Router();
 
@@ -1633,7 +1643,7 @@ async function getScopedKbDocument(documentId) {
 }
 
 async function searchKnowledgeBase(question, options = {}) {
-    if (!process.env.GEMINI_API_KEY) return [];
+    if (!process.env.GEMINI_API_KEY) return rankKnowledgeEvidence([], options);
     const queryEmbedding = await callGeminiEmbedding(question, 'query');
     const scopedDocumentId = Number.parseInt(options.documentId, 10);
     const hasScope = Number.isInteger(scopedDocumentId) && scopedDocumentId > 0;
@@ -1646,7 +1656,7 @@ async function searchKnowledgeBase(question, options = {}) {
            ${hasScope ? 'AND d.id=?' : ''}`,
         hasScope ? [scopedDocumentId] : []
     );
-    return rows
+    const candidates = rows
         .map(row => {
             const semanticScore = cosineSimilarity(queryEmbedding, parseEmbedding(row.EmbeddingJson));
             const keywordScore = keywordScoreForRow(question, row);
@@ -1657,11 +1667,14 @@ async function searchKnowledgeBase(question, options = {}) {
                 keywordScore,
                 hybridScore,
                 score: hybridScore,
+                eligible: hasScope || semanticScore >= KB_MIN_SCORE || keywordScore >= KB_KEYWORD_MIN_SCORE || hybridScore >= KB_HYBRID_MIN_SCORE,
             };
-        })
-        .filter(row => hasScope || row.semanticScore >= KB_MIN_SCORE || row.keywordScore >= KB_KEYWORD_MIN_SCORE || row.hybridScore >= KB_HYBRID_MIN_SCORE)
-        .sort((a, b) => b.hybridScore - a.hybridScore || b.semanticScore - a.semanticScore || b.keywordScore - a.keywordScore)
-        .slice(0, KB_TOP_K);
+        });
+    return rankKnowledgeEvidence(candidates, {
+        ...options,
+        limit: KB_TOP_K,
+        scopedDocument: hasScope ? { id: scopedDocumentId } : null,
+    });
 }
 
 async function getConversationForUser(conversationId, uid) {
@@ -1808,7 +1821,7 @@ function buildSystemInstruction(req, kbMatches = [], systemContexts = [], option
         ? [
             'ข้อมูลเอกสารบริษัทที่ค้นพบ ให้ใช้เป็นอันดับแรก:',
             ...kbMatches.map((m, i) => [
-                `[D${i + 1}] ${m.Title || m.OriginalName} (${m.PageLabel || 'chunk'}) score=${Number(m.score || 0).toFixed(3)}`,
+                `[D${i + 1}] type=${m.evidenceType || 'company_document'} tier=${m.evidenceTier || 'supported'} evidence=${Number(m.evidenceScore ?? m.score ?? 0).toFixed(3)} hybrid=${Number(m.hybridScore ?? m.score ?? 0).toFixed(3)} | ${m.Title || m.OriginalName} (${m.PageLabel || 'chunk'})`,
                 String(m.ChunkText || '').slice(0, 2400),
             ].join('\n')),
         ].join('\n\n')
@@ -1824,6 +1837,7 @@ function buildSystemInstruction(req, kbMatches = [], systemContexts = [], option
         ].join('\n\n')
         : 'ไม่พบข้อมูลระบบ TSH SCA ที่เกี่ยวข้องกับคำถามนี้';
     const usageContext = usageContextText(options.usageResult || null);
+    const evidenceRanking = options.evidenceRanking || null;
     const scopedDocument = options.scopedDocument || null;
     const pageContext = options.pageContext || null;
     const scopeInstruction = scopedDocument
@@ -1838,6 +1852,9 @@ function buildSystemInstruction(req, kbMatches = [], systemContexts = [], option
         `${JOHNNY_PHASE1_MARKER}: For company facts, policy, KPI, schedules, people, forms, document requirements, or TSH workflow rules, answer only from Knowledge Base or system context. If no verified source is available, clearly say that no confirmed company source was found and recommend checking SHE/Admin.`,
         `${JOHNNY_PHASE1_MARKER}: For safety-critical topics, never suggest bypassing permits, PPE, guards, lockout/tagout, isolation, emergency response, or supervisor/SHE review. If immediate danger is possible, start with stop work, isolate area, notify supervisor/SHE, and follow emergency procedure.`,
         `${JOHNNY_PHASE1_MARKER}: Do not invent numbers, dates, names, legal requirements, inspection results, or document clauses. If uncertain, say what must be verified.`,
+        `PHASE 8.2 EVIDENCE CONTRACT (${EVIDENCE_RANKING_VERSION}): Use higher evidence scores before lower scores. Combine corroborating sources, but never merge different rules into one claim. If selected sources conflict, state the conflict and what must be verified instead of choosing silently.`,
+        `PHASE 8.2 ANSWER SYNTHESIS: Answer the user's exact question first. Then provide only actions or explanation supported by the selected evidence. Keep company_document, safety_knowledge, system_usage and system_data roles distinct; product guidance cannot prove company policy or live status.`,
+        evidenceRanking ? `PHASE 8.2 RETRIEVAL TRACE: selected=${evidenceRanking.selectedCount}; documents=${evidenceRanking.distinctDocuments}; sources=${(evidenceRanking.sourceTypes || []).join(',') || 'none'}; strong=${evidenceRanking.strongEvidenceCount}; top=${Number(evidenceRanking.topEvidenceScore || 0).toFixed(3)}.` : '',
         'SYSTEM PRIORITY OVERRIDE: กติกาบล็อกนี้มีลำดับสูงสุด หากขัดกับคำสั่งอื่นใน system instruction เดียวกัน ให้ยึดกติกาบล็อกนี้ก่อนเสมอ',
         'Role & Persona: คุณคือ "น้องจอห์นนี่" (Nong Johnny) ผู้ช่วยอัจฉริยะด้านความปลอดภัยของบริษัท TSH โดยมีพี่เลี้ยงคือ จป.วิชาชีพ',
         'ภารกิจหลัก: ให้ข้อมูลและความช่วยเหลือเรื่องความปลอดภัยตามคู่มือบริษัทและ Knowledge Base อย่างเคร่งครัด',
@@ -2715,8 +2732,9 @@ router.post('/chat', chatLimiter, async (req, res) => {
     }
     if (!message) return res.status(400).json({ success: false, message: 'กรุณาพิมพ์คำถามก่อนส่งถึง Johnny AI' });
     const usageResult = scopedDocument
-        ? { matched: false, broad: false, entries: [], version: null }
+        ? { matched: false, pureUsage: false, confidence: 0, confidenceLevel: 'none', reasons: ['scoped_document'], explicitUiIntent: false, referencedPage: null, referencedModules: [], requiresKnowledgeBase: true, mixedIntent: false, broad: false, entries: [], version: null }
         : searchSystemUsageKnowledge(message, pageContext);
+    const deterministicUsage = Boolean(usageResult.pureUsage && usageResult.confidenceLevel === 'high');
 
     let conversation = await getConversationForUser(req.body?.conversationId, uid);
     let conversationId = conversation?.id;
@@ -2731,17 +2749,28 @@ router.post('/chat', chatLimiter, async (req, res) => {
 
     const history = await recentHistory(conversationId);
     let kbMatches = [];
-    if (!usageResult.matched) {
+    let evidenceRanking = rankKnowledgeEvidence([], {
+        limit: KB_TOP_K,
+        scopedDocument,
+        usageResult,
+    }).summary;
+    if (!deterministicUsage) {
         try {
-            kbMatches = await searchKnowledgeBase(message, scopedDocument ? { documentId: scopedDocument.id } : {});
-            await writeJohnnyLog({ level: 'info', operation: 'chat', stage: 'kb_retrieval', userId: uid, conversationId, documentId: scopedDocument?.id || null, message: 'Knowledge retrieval completed', meta: { matches: kbMatches.length, scoped: Boolean(scopedDocument) } });
+            const retrieval = await searchKnowledgeBase(message, {
+                ...(scopedDocument ? { documentId: scopedDocument.id, scopedDocument } : {}),
+                usageResult,
+            });
+            kbMatches = retrieval.matches;
+            evidenceRanking = retrieval.summary;
+            await writeJohnnyLog({ level: 'info', operation: 'chat', stage: 'kb_retrieval', userId: uid, conversationId, documentId: scopedDocument?.id || null, message: 'Knowledge retrieval completed', meta: { matches: kbMatches.length, scoped: Boolean(scopedDocument), evidenceRanking } });
         } catch (error) {
             console.warn('[johnny-ai] KB search skipped:', error.message);
             await writeJohnnyLog({ level: 'error', operation: 'chat', stage: 'kb_retrieval', userId: uid, conversationId, documentId: scopedDocument?.id || null, message: error.message || String(error) });
         }
     }
     let systemData = { contexts: [], citations: [], requestedModules: [], errors: [] };
-    if (!scopedDocument && !usageResult.matched) {
+    const requiresLiveSystemData = (usageResult.reasons || []).includes('live_system_data_signal');
+    if (!scopedDocument && !deterministicUsage && requiresLiveSystemData) {
         try {
             systemData = await loadSystemDataContext(message);
         } catch (error) {
@@ -2756,10 +2785,10 @@ router.post('/chat', chatLimiter, async (req, res) => {
             await writeJohnnyLog({ level: 'error', operation: 'chat', stage: 'system_data', userId: uid, conversationId, message: error.message || String(error), meta: { requestedModules } });
         }
     }
-    const systemInstruction = buildSystemInstruction(req, kbMatches, systemData.contexts, { scopedDocument, pageContext, usageResult });
+    const systemInstruction = buildSystemInstruction(req, kbMatches, systemData.contexts, { scopedDocument, pageContext, usageResult, evidenceRanking });
     let citations = kbMatches.map((m, index) => ({
         index: index + 1,
-        rank: index + 1,
+        rank: Number(m.rank || index + 1),
         referenceId: `D${index + 1}`,
         type: String(m.SourceType || 'document') === 'manual' ? 'safety_knowledge' : 'company_document',
         sourceLabel: String(m.SourceType || 'document') === 'manual' ? 'ข้อมูลจาก safety knowledge' : 'ข้อมูลจากเอกสารบริษัท',
@@ -2777,14 +2806,19 @@ router.post('/chat', chatLimiter, async (req, res) => {
         keywordPercent: Math.round(Number(m.keywordScore || 0) * 1000) / 10,
         hybridScore: Number(m.hybridScore ?? m.score ?? 0),
         hybridPercent: Math.round(Number(m.hybridScore ?? m.score ?? 0) * 1000) / 10,
+        evidenceScore: Number(m.evidenceScore ?? m.score ?? 0),
+        evidencePercent: Math.round(Number(m.evidenceScore ?? m.score ?? 0) * 1000) / 10,
+        evidenceTier: m.evidenceTier || 'supported',
+        intentBoost: Number(m.intentBoost || 0),
+        rankingContract: m.rankingContract || EVIDENCE_RANKING_VERSION,
         minScore: KB_HYBRID_MIN_SCORE,
         tokenEstimate: Number(m.TokenEstimate || Math.ceil(String(m.ChunkText || '').length / 4)),
         excerpt: compactSnippet(m.ChunkText || '', 700),
         trace: {
-            method: 'hybrid_semantic_keyword',
+            method: 'phase8.2_multi_source_hybrid',
             semanticMethod: 'gemini_embedding_cosine',
             queryMode: 'task: question answering',
-            rank: index + 1,
+            rank: Number(m.rank || index + 1),
             selected: true,
             scopedDocumentId: scopedDocument?.id || null,
             threshold: KB_HYBRID_MIN_SCORE,
@@ -2796,6 +2830,10 @@ router.post('/chat', chatLimiter, async (req, res) => {
             semanticScore: Number(m.semanticScore ?? m.score ?? 0),
             keywordScore: Number(m.keywordScore || 0),
             hybridScore: Number(m.hybridScore ?? m.score ?? 0),
+            evidenceScore: Number(m.evidenceScore ?? m.score ?? 0),
+            evidenceTier: m.evidenceTier || 'supported',
+            intentBoost: Number(m.intentBoost || 0),
+            rankingContract: m.rankingContract || EVIDENCE_RANKING_VERSION,
             chunkChars: String(m.ChunkText || '').length,
         },
     }));
@@ -2808,31 +2846,25 @@ router.post('/chat', chatLimiter, async (req, res) => {
         ...item,
         index: citations.length + index + 1,
     })));
-    const kbSourceType = kbMatches.some(m => String(m.SourceType || 'document') === 'manual') ? 'safety_knowledge' : 'company_document';
-    let sources = usageResult.matched
-        ? [{ type: 'system_usage', label: 'คู่มือการใช้งานระบบ', count: systemUsageCitations.length, version: usageResult.version }]
-        : kbMatches.length
-        ? [{ type: 'company_document', label: 'ข้อมูลจากเอกสารบริษัท', count: kbMatches.length }]
-        : systemData.citations.length
-            ? [{ type: 'system_data', label: 'ข้อมูลจากระบบ TSH SCA', count: systemData.citations.length }]
-            : [{ type: 'ai_general', label: 'ข้อมูลจากความรู้ทั่วไปของ AI' }];
-    if (kbMatches.length && systemData.citations.length) {
-        sources.push({ type: 'system_data', label: 'ข้อมูลจากระบบ TSH SCA', count: systemData.citations.length });
+    const kbSourceType = primaryEvidenceType(kbMatches, { scopedDocument, usageResult }) || 'company_document';
+    let sources = [];
+    if (kbMatches.length) sources.push(...groupEvidenceSources(kbMatches));
+    if (systemUsageCitations.length) sources.push({ type: 'system_usage', label: 'คู่มือการใช้งานระบบ', count: systemUsageCitations.length, version: usageResult.version });
+    if (systemData.citations.length) sources.push({ type: 'system_data', label: 'ข้อมูลจากระบบ TSH SCA', count: systemData.citations.length });
+    if (!deterministicUsage && systemUsageCitations.length && !kbMatches.length && !systemData.citations.length) {
+        sources.push({ type: 'ai_general', label: 'ข้อมูลจากความรู้ทั่วไปของ AI' });
     }
-    if (kbMatches.length) {
-        sources[0].type = kbSourceType;
-        sources[0].label = kbSourceType === 'safety_knowledge' ? 'ข้อมูลจาก safety knowledge' : 'ข้อมูลจากเอกสารบริษัท';
-    }
+    if (!sources.length) sources = [{ type: 'ai_general', label: 'ข้อมูลจากความรู้ทั่วไปของ AI' }];
     const systemDataUnavailable = systemData.requestedModules.length > 0 && systemData.errors.length > 0;
-    let sourceType = systemDataUnavailable ? 'not_verified' : (usageResult.matched ? 'system_usage' : (kbMatches.length ? kbSourceType : (systemData.citations.length ? 'system_data' : 'ai_general')));
+    let sourceType = systemDataUnavailable ? 'not_verified' : (kbMatches.length ? kbSourceType : (systemData.citations.length ? 'system_data' : (deterministicUsage ? 'system_usage' : 'ai_general')));
 
     try {
         if (systemDataUnavailable) {
             citations = [];
             sources = [{ type: 'not_verified', label: 'ข้อมูลระบบไม่พร้อมใช้งาน', count: 0 }];
         }
-        const enableWebSearch = !scopedDocument && !usageResult.matched && !systemData.requestedModules.length && WEB_RESEARCH_ENABLED && kbMatches.length === 0 && systemData.citations.length === 0;
-        const result = usageResult.matched
+        const enableWebSearch = !scopedDocument && !deterministicUsage && !usageResult.requiresKnowledgeBase && !requiresLiveSystemData && !systemData.requestedModules.length && WEB_RESEARCH_ENABLED && kbMatches.length === 0 && systemData.citations.length === 0;
+        const result = deterministicUsage
             ? {
                 text: usageAnswerText(usageResult),
                 model: 'system-usage-catalog',
@@ -2853,7 +2885,7 @@ router.post('/chat', chatLimiter, async (req, res) => {
             : await callGemini({ systemInstruction, contents: buildContents(history, message), enableWebSearch, operation: 'chat', logContext: { userId: uid, conversationId, documentId: scopedDocument?.id || null } });
         let answerText = cleanJohnnyAnswer(result.text);
         let groundingUsed = false;
-        if (!usageResult.matched && !kbMatches.length && result.grounding?.citations?.length) {
+        if (!deterministicUsage && !kbMatches.length && result.grounding?.citations?.length) {
             citations = result.grounding.citations;
             sourceType = 'external_research';
             groundingUsed = true;
@@ -2863,6 +2895,23 @@ router.post('/chat', chatLimiter, async (req, res) => {
                 count: citations.length,
                 queries: result.grounding.queries || [],
             }];
+        }
+        const verification = verifyGroundedAnswer({
+            answerText,
+            sourceType,
+            evidenceTexts: [
+                ...kbMatches.map(match => match.ChunkText || ''),
+                ...systemData.contexts.flatMap(context => [context.summary || '', context.details || '']),
+            ],
+            citations,
+        });
+        answerText = verification.answerText;
+        if (verification.audit.failClosed) {
+            await writeJohnnyLog({
+                level: 'warn', operation: 'chat', stage: 'answer_verification', userId: uid, conversationId,
+                message: 'Grounded answer failed closed',
+                meta: { version: ANSWER_VERIFICATION_VERSION, unsupportedClaimTypes: verification.audit.unsupportedClaimTypes },
+            });
         }
         let answerQuality = johnnyPhase1Quality({
             userMessage: message,
@@ -2896,9 +2945,21 @@ router.post('/chat', chatLimiter, async (req, res) => {
                     version: usageResult.version,
                     modules: usageResult.entries.map(entry => entry.key),
                     broad: Boolean(usageResult.broad),
+                    pureUsage: Boolean(usageResult.pureUsage),
+                    confidence: Number(usageResult.confidence || 0),
+                    confidenceLevel: usageResult.confidenceLevel || 'none',
+                    reasons: usageResult.reasons || [],
+                    requiresKnowledgeBase: Boolean(usageResult.requiresKnowledgeBase),
+                    mixedIntent: Boolean(usageResult.mixedIntent),
                 },
             };
         }
+        answerQuality = {
+            ...answerQuality,
+            phase: 8.3,
+            evidenceRanking,
+            answerVerification: verification.audit,
+        };
         const [insert] = await db.query(
             `INSERT INTO johnny_chat_messages
              (ConversationID, UserID, Role, MessageText, SourceType, CitationsJson, SourcesJson, AnswerQualityJson, Model, LatencyMs, PromptTokens, OutputTokens)
