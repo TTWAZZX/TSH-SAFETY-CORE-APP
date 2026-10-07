@@ -10,7 +10,7 @@ const assert = (name, ok) => {
   if (!ok) process.exitCode = 1;
 };
 
-const cacheBust = '20261006-johnny-phase5-workflow-r1';
+const cacheBust = '20261007-johnny-launcher-avatar-r1';
 const index = read('index.html');
 const main = read('public/js/main.js');
 const frontend = read('public/js/pages/johnny-ai.js');

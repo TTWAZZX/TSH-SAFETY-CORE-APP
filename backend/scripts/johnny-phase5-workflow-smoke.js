@@ -5,7 +5,7 @@ const path = require('path');
 
 const ROOT = path.join(__dirname, '..', '..');
 const PHASE5_MARKER = 'JOHNNY_PHASE5_WORKFLOW_INTEGRATION';
-const CACHE_BUST = '20261006-johnny-phase5-workflow-r1';
+const CACHE_BUST = '20261007-johnny-launcher-avatar-r1';
 
 function read(relativePath) {
     return fs.readFileSync(path.join(ROOT, relativePath), 'utf8').replace(/^\uFEFF/, '');

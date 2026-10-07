@@ -8,7 +8,7 @@ const { spawn } = require('child_process');
 const ROOT = path.join(__dirname, '..', '..');
 const EDGE = process.env.JOHNNY_UAT_BROWSER || 'C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe';
 const PORT = Number(process.env.JOHNNY_PHASE4_UAT_CDP_PORT || 9684);
-const CACHE_BUST = '20261006-johnny-phase5-workflow-r1';
+const CACHE_BUST = '20261007-johnny-launcher-avatar-r1';
 const PHASE4_MARKER = 'JOHNNY_PHASE4_OBSERVABILITY';
 
 function readEnv() {

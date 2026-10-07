@@ -13,7 +13,7 @@ const permissionAudit = read('backend/scripts/permission-audit.js');
 const pkg = read('backend/package.json');
 const server = read('backend/server.js');
 const apacheRules = read('.htaccess');
-const cacheBust = '20261006-johnny-phase5-workflow-r1';
+const cacheBust = '20261007-johnny-launcher-avatar-r1';
 
 const checks = [];
 function check(name, ok) {

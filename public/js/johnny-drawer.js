@@ -22,6 +22,7 @@ let _userName = '';
 let _activePage = '';
 let _lastFocused = null;
 let _loadPromise = null;
+let _statusPromise = null;
 let _globalEventsBound = false;
 
 function rootEl() {
@@ -133,7 +134,20 @@ async function updateFeedback(messageId, rating = '', reasonCode = '') {
 function avatarHtml(size = 'johnny-global-avatar') {
     const url = String(_status?.johnnyAvatarUrl || _status?.avatarUrl || '');
     if (url) return `<img class="${size}" src="${escHtml(url)}" alt="Johnny AI">`;
+    return avatarFallbackHtml(size);
+}
+
+function avatarFallbackHtml(size = 'johnny-global-avatar') {
     return `<span class="${size} johnny-global-avatar-fallback" aria-hidden="true">J</span>`;
+}
+
+function renderAvatar(containerId, size) {
+    const container = document.getElementById(containerId);
+    if (!container) return;
+    container.innerHTML = avatarHtml(size);
+    container.querySelector('img')?.addEventListener('error', () => {
+        container.innerHTML = avatarFallbackHtml(size);
+    }, { once: true });
 }
 
 function sourceLabel(sourceType) {
@@ -283,13 +297,30 @@ function renderMessages() {
 }
 
 function renderHeader() {
-    const avatar = document.getElementById('johnny-global-header-avatar');
-    if (avatar) avatar.innerHTML = avatarHtml();
+    renderAvatar('johnny-global-launcher-avatar', 'johnny-global-launcher-icon');
+    renderAvatar('johnny-global-header-avatar', 'johnny-global-avatar');
     const privacy = document.getElementById('johnny-global-privacy');
     if (privacy) {
         const days = Number(_status?.privacy?.chatRetentionDays || 180);
         privacy.textContent = `ประวัติ ${days} วัน`;
     }
+}
+
+async function loadStatus({ force = false } = {}) {
+    if (_status && !force) return _status;
+    if (_statusPromise) return _statusPromise;
+    const owner = _userId;
+    const ownerRoot = rootEl();
+    const request = API.get('/johnny/status').then(response => {
+        if (!_initialized || owner !== _userId || ownerRoot !== rootEl()) return null;
+        _status = response?.data || null;
+        renderHeader();
+        return _status;
+    }).finally(() => {
+        if (_statusPromise === request) _statusPromise = null;
+    });
+    _statusPromise = request;
+    return request;
 }
 
 function renderHistory() {
@@ -460,11 +491,10 @@ async function ensureLoaded() {
     if (_loaded) return;
     if (_loadPromise) return _loadPromise;
     _loadPromise = (async () => {
-        const [statusResult] = await Promise.allSettled([
-            API.get('/johnny/status'),
+        await Promise.allSettled([
+            loadStatus(),
             loadConversations(),
         ]);
-        if (statusResult.status === 'fulfilled') _status = statusResult.value?.data || null;
         renderHeader();
         const recalled = Number(recalledConversation() || 0);
         if (recalled && _conversations.some(item => Number(item.id) === recalled)) await loadConversation(recalled);
@@ -541,6 +571,7 @@ export function destroyJohnnyDrawer() {
     _conversations = [];
     _messages = [];
     _status = null;
+    _statusPromise = null;
     _userId = '';
     _userName = '';
     _activePage = '';
@@ -549,12 +580,14 @@ export function destroyJohnnyDrawer() {
 }
 
 export function syncJohnnyDrawerRoute(page) {
+    const wasJohnnyWorkspace = _activePage === 'johnny-ai';
     _activePage = String(page || '');
     const root = rootEl();
     if (!root) return;
     const hidden = _activePage === 'johnny-ai';
     root.classList.toggle('is-page-hidden', hidden);
     if (hidden && _open) closeJohnnyDrawer({ restoreFocus: false });
+    if (wasJohnnyWorkspace && !hidden) void loadStatus({ force: true }).catch(() => {});
 }
 
 function bindEvents() {
@@ -590,7 +623,7 @@ function drawerHtml() {
     return `
         <div id="johnny-global-root" data-johnny-phase2="${PHASE2_MARKER}" class="johnny-global-root">
             <button id="johnny-global-launcher" type="button" class="johnny-global-launcher" aria-label="เปิดแชท Johnny AI" aria-controls="johnny-global-panel" aria-expanded="false">
-                <span class="johnny-global-launcher-icon" aria-hidden="true">J</span>
+                <span id="johnny-global-launcher-avatar" class="johnny-global-launcher-avatar" aria-hidden="true">${avatarHtml('johnny-global-launcher-icon')}</span>
                 <span class="johnny-global-launcher-label">ถาม Johnny</span>
             </button>
             <button id="johnny-global-backdrop" type="button" class="johnny-global-backdrop" aria-label="ปิดแชท Johnny AI" tabindex="-1"></button>
@@ -636,6 +669,7 @@ export function initJohnnyDrawer({ userId = '', userName = '' } = {}) {
     _conversations = [];
     _messages = [];
     _status = null;
+    _statusPromise = null;
     _loaded = false;
     _loadPromise = null;
     _open = false;
@@ -645,4 +679,5 @@ export function initJohnnyDrawer({ userId = '', userName = '' } = {}) {
     document.body.insertAdjacentHTML('beforeend', drawerHtml());
     bindEvents();
     syncJohnnyDrawerRoute(document.body.dataset.activePage || '');
+    void loadStatus().catch(() => {});
 }

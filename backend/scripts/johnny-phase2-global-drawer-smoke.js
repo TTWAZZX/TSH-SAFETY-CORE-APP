@@ -12,7 +12,7 @@ const index = read('index.html');
 const pkg = read('backend/package.json');
 const nodeRoute = read('backend/routes/johnny-ai.js');
 const phpRoute = read('api/handlers/johnny_ai.php');
-const cacheBust = '20261006-johnny-phase5-workflow-r1';
+const cacheBust = '20261007-johnny-launcher-avatar-r1';
 
 const checks = [];
 function check(name, ok) {
@@ -22,6 +22,8 @@ function check(name, ok) {
 
 check('Phase 2 marker', drawer.includes('JOHNNY_PHASE2_GLOBAL_SIDE_DRAWER'));
 check('global launcher and dialog', drawer.includes('johnny-global-launcher') && drawer.includes('role="dialog"') && drawer.includes('aria-modal="true"'));
+check('launcher uses configured Johnny avatar', drawer.includes('johnny-global-launcher-avatar') && drawer.includes("loadStatus().catch") && drawer.includes("johnnyAvatarUrl"));
+check('launcher avatar has safe fallback', drawer.includes("querySelector('img')?.addEventListener('error'") && drawer.includes('avatarFallbackHtml'));
 check('open and close controls', drawer.includes('openJohnnyDrawer') && drawer.includes('closeJohnnyDrawer'));
 check('route-aware hiding on full workspace', drawer.includes("_activePage === 'johnny-ai'") && drawer.includes('is-page-hidden'));
 check('lazy API loading', drawer.includes('async function ensureLoaded()') && drawer.includes("API.get('/johnny/status')"));

@@ -205,6 +205,11 @@ body { margin: 0; font-family: 'Kanit', sans-serif; background-color: #1e5c3e; }
     font-weight: 900;
 }
 
+.johnny-global-launcher-avatar {
+    display: inline-flex;
+    flex: 0 0 auto;
+}
+
 .johnny-global-launcher-icon {
     width: 2.65rem;
     height: 2.65rem;
