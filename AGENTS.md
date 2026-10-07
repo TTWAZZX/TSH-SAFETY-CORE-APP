@@ -1,5 +1,33 @@
 # TSH Safety Core Activity - AGENTS.md
 
+## Johnny global launcher avatar Production release (2026-10-07)
+
+- `main` commit `b42d845` is deployed to the PHP Production target. The global `ถาม Johnny` launcher now uses the same Admin-configured `johnnyAvatarUrl` as the main Johnny workspace, loads it read-only after authentication without opening the drawer, refreshes after leaving the Johnny workspace and safely falls back to `J` when absent or broken.
+- Only `index.html`, `public/style.css`, `public/js/main.js` and `public/js/johnny-drawer.js` were deployed. FTPS download-back and public HTTPS SHA-256 matched source `4/4`; cache marker `20261007-johnny-launcher-avatar-r1` and the launcher avatar marker are served. Anonymous Johnny remains `401` and both shared contracts remain `404`.
+- Production files had no unrelated drift after newline normalization. Rollback was not triggered. No PHP, Patrol, database, configuration, Knowledge Base or business data changed. Stored Production UAT credentials had returned `401` during the immediately preceding Phase 8 release, so no repeated failed login or authenticated visual UAT was performed.
+- Rollback/download evidence is under `backups/production/johnny-launcher-avatar-predeploy-20261007-112733/`; report: `docs/johnny-launcher-avatar-production-release.md`. Decision: `RELEASED_GO`.
+
+## Johnny AI Phase 8 Production release (2026-10-07)
+
+- `main` commit `fa1046c` is deployed to the PHP Production target. The release uploaded exactly four runtime paths: `api/handlers/johnny_ai.php`, `api/lib/johnny_system_usage.php`, `api/lib/johnny_evidence_ranking.php` and `api/lib/johnny_answer_verification.php`. Patrol, working-tree preflight/AGENTS changes, backups, `.tmp` and every other path were excluded.
+- The committed manifest was verified before upload and FTPS download-back matched source `4/4`. Production HTTPS returned `200`, anonymous Johnny status returned `401`, and both server-only shared contracts returned `404`. The `api` FTPS inventory contained zero suspected helper/preflight/backup/SQL residue; local release staging was removed.
+- Stored Production UAT Admin and User credentials both returned `401`, so authenticated read-only Production UAT was skipped without bypass, synthetic account or chat mutation. Accepted authenticated local desktop/390 px evidence remains applicable. Only normal failed-login security audit side effects may have occurred.
+- Phase 8 has no migration. No database, configuration, Knowledge Base or business data changed, and rollback was not triggered. Verified rollback remains under `backups/production/johnny-phase8-preflight-20261007-101608/`; release evidence is under `backups/production/johnny-phase8-release-20261007-105252/` and the report is `docs/johnny-phase8-production-release.md`. Decision: `RELEASED_GO`.
+
+## Johnny AI Phase 8 Protected Production Backup Helper Closeout (GO, 2026-10-07)
+
+- A separately authorized checksum-locked one-time helper closed the Phase 8 Production preflight blockers using value-suppressed checks, `SELECT`, `SHOW CREATE TABLE`, `INFORMATION_SCHEMA` and a read-only transaction only. Production PHP 7.4.33 and all required capabilities/config keys pass; six InnoDB Johnny tables, required columns/index and feedback cascade foreign key are ready.
+- Current scoped counts are 19 conversations, 88 messages, one feedback, 24 documents, 109 chunks, 26 operational logs and one avatar setting. The 2,827,661-byte SQL export SHA-256 is `a0a2b769ecfb9019b11a5a1e3ad1edad8f5e1e9dbe8ed99becd1bd83b11b9bdb`; two downloads match. The readable database ZIP SHA-256 is `b695c5d0a14128e061a22934cb280974785ed1a20cc6dc428326a8449a24ff4c`; scope/count/destructive-statement validation passes.
+- Helper fail-closed checks passed; SQL was HTTP `403` while present. Cleanup removed SQL/guard/marker/directory and helper, FTPS proved zero residue, and original `.htaccess` was restored byte-exact with SHA-256 `21386ca981c822701394382bc71252c2d8e523bd76cc4c4c9820b26c5259e13d`. Final HTTPS did not serve helper/export; anonymous Johnny remains `401` and shared contracts `404`.
+- Decision is `GO_FOR_CONTROLLED_RELEASE` for immutable commit `fa1046c`. No runtime upload, deployment, schema/business-data mutation, commit or push occurred. Evidence is under `backups/production/johnny-phase8-preflight-20261007-101608/`; full report: `docs/johnny-phase8-production-preflight.md`. A separate explicit release instruction is required.
+
+## Johnny AI Phase 8 Production Preflight (HOLD, 2026-10-07)
+
+- Immutable commit `fa1046c` was inspected against the PHP Production target using FTPS/HTTPS read-only operations only. Existing runtime files matched deployed Phase 7.1 after newline normalization, both new Phase 8 libraries were absent, download-back matched `2/2`, Production HTTPS returned `200`, anonymous Johnny returned `401`, and both shared contracts returned `404`.
+- Four legacy Johnny KB PDFs were downloaded twice with SHA-256/signature verification `4/4`; no private KB directory appeared in the Production `api` inventory. Combined runtime/KB download-back passed `6/6`. A readable file rollback archive and evidence are under `backups/production/johnny-phase8-preflight-20261007-101608/`.
+- Decision is `HOLD`: current value-suppressed Production PHP/config execution, fresh `INFORMATION_SCHEMA`/row counts and the narrow seven-table-plus-setting database export were unavailable through an existing read-only channel. Secret-bearing `.env` was not downloaded, and no temporary helper was uploaded without separate authorization. The rollback package is file/KB ready but not database-backup complete.
+- No Production runtime upload, deploy, schema/data change, authentication attempt, commit or push occurred. Full findings and the required checksum-locked helper closeout are in `docs/johnny-phase8-production-preflight.md`.
+
 ## Johnny AI Phase 8 Immutable Candidate Closeout (Local only, 2026-10-07)
 
 - The Phase 8.2 release blocker is remediated without changing runtime behavior. Its evaluator now independently requires persisted evidence-ranking metadata plus integrated Phase 8.3 phase and answer-verification audit metadata in Node/PHP; all four ranking scenarios and ten integration checks pass with parity.
