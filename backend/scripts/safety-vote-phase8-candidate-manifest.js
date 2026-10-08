@@ -84,7 +84,7 @@ const operationsDigest = sha256(Buffer.from(groups.migrations
 
 const manifest = {
   contract: '2026-10-08-safety-vote-phase0-r1',
-  phaseContract: '2026-10-08-safety-vote-phase8-preflight-r1',
+  phaseContract: '2026-10-08-safety-vote-phase8.3.1-disabled-mode-r1',
   protectedPreflightContract: '2026-10-08-safety-vote-phase8.2-r1',
   generatedAt: new Date().toISOString(),
   productionTarget: 'https://dev.tshpcl.com/safety/tsh-safety-core/',
@@ -93,9 +93,19 @@ const manifest = {
   immutable: false,
   decision: 'HOLD',
   holdReasons: [
-    'candidate is generated from a dirty, uncommitted working tree',
-    'Production authenticated non-mutating smoke requires an existing valid session; login itself writes login/audit state'
+    'candidate manifest is generated before the authorized immutable successor commit',
+    'Production deployment and push are explicitly outside Phase 8.3.1 authorization'
   ],
+  disabledMode: {
+    defaultAfterMigrations: true,
+    operationalRoutesFailClosed: true,
+    authenticatedReadonlyExceptions: [
+      'GET /api/safety-vote/admin/health',
+      'GET /api/safety-vote/admin/campaigns/:id/release-preflight'
+    ],
+    disabledErrorCode: 'SAFETY_VOTE_MODULE_DISABLED',
+    nodePhpParityGate: 'backend/scripts/safety-vote-phase831-disabled-gate.test.js'
+  },
   governance: {
     contract: '2026-10-08-safety-vote-phase8.1-she-governance-r1',
     owner: 'SHE',

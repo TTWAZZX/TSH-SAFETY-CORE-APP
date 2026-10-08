@@ -1,5 +1,12 @@
 # TSH Safety Core Activity - AGENTS.md
 
+## Safety Vote Phase 8.3.1 Disabled-mode Fail-closed Remediation (Local only, 2026-10-08)
+
+- Node and PHP now enforce one authenticated module-state gate before every Safety Vote Phase 1–7 router. When `module_enabled=0`, every operational route—including workspace, integrations and ballot submit—returns `503 SAFETY_VOTE_MODULE_DISABLED`; only authenticated read-only health and per-campaign release preflight remain reachable.
+- Additive migrations Phase 1–7 now finish with `module_enabled=0`; Phase 7 also finishes with `phase7_integrations_enabled=0`. Guarded fixtures must explicitly enable the module for ordinary regression/UAT.
+- The dedicated adversarial parity gate applies all seven migrations to separate loopback-only Node/PHP databases, checks disabled defaults/reapply behavior, direct API bypass denial and zero ballot/participation/request-key residue. Full Phase 1–7 regression, concurrency, backup/restore and desktop/390 px Browser UAT remain passing.
+- No Production connection, deployment or push occurred. The unrelated dirty `backend/scripts/patrol-checkin-v2.test.js` remains excluded and untouched by the scoped commit.
+
 ## Safety Vote Phase 8.2 Protected Production Preflight Closeout (2026-10-08)
 
 - A checksum-locked one-time protected helper completed fresh value-suppressed Production PHP/config/schema/privilege/clock/private-storage checks under contract `2026-10-08-safety-vote-phase8.2-r1`. Production PHP 7.4.33 and required capabilities pass; Safety Vote remains pre-deployment with zero tables, zero business rows and no private Safety Vote files.

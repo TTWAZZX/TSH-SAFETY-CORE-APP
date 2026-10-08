@@ -265,3 +265,7 @@ CROSS JOIN (
     SELECT 'SAFETY_VOTE_EXPORT' UNION ALL SELECT 'SAFETY_VOTE_AUDIT_VIEW' UNION ALL
     SELECT 'SAFETY_VOTE_ADMIN'
 ) p;
+
+UPDATE SafetyVote_Settings
+SET SettingValue='0',UpdatedBy='migration'
+WHERE SettingKey='module_enabled';

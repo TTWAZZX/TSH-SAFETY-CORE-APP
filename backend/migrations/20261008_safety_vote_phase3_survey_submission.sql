@@ -87,6 +87,6 @@ CREATE INDEX IF NOT EXISTS idx_sv_file_question ON SafetyVote_Files(QuestionID,U
 
 INSERT INTO SafetyVote_Settings(SettingKey,SettingValue,UpdatedBy) VALUES
 ('schema_version','2026-10-08-phase3-r1','migration'),
-('module_enabled','1','migration'),
+('module_enabled','0','migration'),
 ('phase3_contract','2026-10-08-safety-vote-phase3-r1','migration')
 ON DUPLICATE KEY UPDATE SettingValue=VALUES(SettingValue),UpdatedBy='migration';

@@ -1943,6 +1943,7 @@ app.use('/api/dashboard',         authenticateToken, dashboardRoutes);
 app.use('/api/module-forms',      authenticateToken, moduleFormsRoutes);
 app.use('/api/person-search',     authenticateToken, personSearchRoutes);
 app.use('/api/johnny',            authenticateToken, johnnyAiRoutes);
+app.use('/api/safety-vote',       authenticateToken, safetyVoteRoutes.operationalGate);
 app.use('/api/safety-vote',       authenticateToken, safetyVoteRoutes);
 app.use('/api/safety-vote',       authenticateToken, safetyVotePhase7Routes);
 app.use('/api/safety-vote',       authenticateToken, safetyVotePhase6Routes);

@@ -37,6 +37,8 @@
     "uat:safety-vote-phase7-api": "node scripts/safety-vote-phase7-api-uat.js",
     "uat:safety-vote-phase7-browser": "node scripts/safety-vote-phase7-browser-uat.js",
     "verify:safety-vote-phase7": "npm run test:safety-vote-phase7-parity && npm run test:safety-vote-phase7-migration && npm run verify:safety-vote-phase6 && npm run uat:safety-vote-phase7-api && npm run test:safety-vote-phase7-release-gates && npm run uat:safety-vote-phase7-browser",
+    "test:safety-vote-phase831-disabled": "node scripts/safety-vote-phase831-disabled-gate.test.js",
+    "verify:safety-vote-phase831": "npm run test:safety-vote-phase831-disabled && npm run verify:safety-vote-phase7",
     "preflight:safety-vote-phase8:manifest": "node scripts/safety-vote-phase8-candidate-manifest.js",
     "preflight:safety-vote-phase8:production-readonly": "node scripts/safety-vote-phase8-production-readonly.js",
     "preflight:safety-vote-phase82:protected": "node scripts/safety-vote-phase82-protected-preflight.js",

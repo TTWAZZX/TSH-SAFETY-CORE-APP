@@ -51,7 +51,7 @@ CREATE TABLE IF NOT EXISTS SafetyVote_NotificationDeliveries (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 INSERT INTO SafetyVote_Settings(SettingKey,SettingValue,UpdatedBy) VALUES
-('schema_version','2026-10-08-phase5-r1','migration'),('module_enabled','1','migration'),
+('schema_version','2026-10-08-phase5-r1','migration'),('module_enabled','0','migration'),
 ('phase5_contract','2026-10-08-safety-vote-phase5-r1','migration'),
 ('retention_days','2555','migration'),('notification_max_attempts','3','migration')
 ON DUPLICATE KEY UPDATE SettingValue=VALUES(SettingValue),UpdatedBy='migration';

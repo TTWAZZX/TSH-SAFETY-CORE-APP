@@ -52,7 +52,7 @@ ALTER TABLE SafetyVote_ResultSnapshots
 CREATE INDEX IF NOT EXISTS idx_sv_result_parent ON SafetyVote_ResultSnapshots(ParentSnapshotID,SnapshotNo);
 
 INSERT INTO SafetyVote_Settings(SettingKey,SettingValue,UpdatedBy) VALUES
-('schema_version','2026-10-08-phase6-r1','migration'),('module_enabled','1','migration'),
+('schema_version','2026-10-08-phase6-r1','migration'),('module_enabled','0','migration'),
 ('phase6_contract','2026-10-08-safety-vote-phase6-r1','migration'),
 ('secret_election_min_certifiers','2','migration')
 ON DUPLICATE KEY UPDATE SettingValue=VALUES(SettingValue),UpdatedBy='migration';

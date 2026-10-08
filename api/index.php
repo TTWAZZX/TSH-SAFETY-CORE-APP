@@ -723,6 +723,7 @@ try {
     handle_fourm_routes($method, $path);
     handle_admin_phase8_routes($method, $path);
     handle_johnny_ai_routes($method, $path);
+    sv_gate_request($method, $path);
     handle_safety_vote_phase7_routes($method, $path);
     handle_safety_vote_phase6_routes($method, $path);
     handle_safety_vote_phase5_routes($method, $path);

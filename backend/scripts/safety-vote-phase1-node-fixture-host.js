@@ -23,7 +23,9 @@ app.use('/public',express.static(path.join(root,'public')));
 app.get('/__phase2-browser',(_req,res)=>res.type('html').send(`<!doctype html><html lang="th"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><style>body{margin:0;background:#f8fafc;font-family:Arial,sans-serif}button,input,select,textarea,a{min-height:44px}a{display:inline-flex;align-items:center}*{box-sizing:border-box}</style><body><main id="safety-vote-page"></main><script>window.API_BASE=location.origin+'/api';window.TSHSession={getToken:()=> 'sv-user',logout:()=>{}};</script><script type="module">import {loadSafetyVotePage} from '/public/js/pages/safety-vote.js';loadSafetyVotePage();</script></body></html>`));
 app.get('/__phase3-admin-browser',(_req,res)=>res.type('html').send(`<!doctype html><html lang="th"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><style>body{margin:0;background:#f8fafc;font-family:Arial,sans-serif}button,input,select,textarea{min-height:44px;max-width:100%}*{box-sizing:border-box}.hidden{display:none}.flex,.grid{display:flex;flex-wrap:wrap;gap:8px}.overflow-x-auto{max-width:100%;overflow-x:auto}main,section{max-width:100%}table{max-width:100%}</style><body><main id="safety-vote-admin"></main><script>window.API_BASE=location.origin+'/api';window.TSHSession={getToken:()=> 'sv-admin',logout:()=>{}};window.XLSX={};window.jspdf={};</script><script type="module">import {renderSafetyVoteFoundation} from '/public/js/pages/admin-safety-vote.js';renderSafetyVoteFoundation(document.getElementById('safety-vote-admin'));</script></body></html>`));
 app.use((req,res,next)=>{const token=String(req.get('authorization')||'').replace(/^Bearer\s+/i,'');if(!users[token])return res.status(401).json({success:false});req.user={...users[token]};next();});
-app.use('/api/safety-vote',require('../routes/safety-vote'));
+const safetyVoteRoutes=require('../routes/safety-vote');
+app.use('/api/safety-vote',safetyVoteRoutes.operationalGate);
+app.use('/api/safety-vote',safetyVoteRoutes);
 app.use('/api/safety-vote',require('../routes/safety-vote-phase7'));
 app.use('/api/safety-vote',require('../routes/safety-vote-phase6'));
 app.use('/api/safety-vote',require('../routes/safety-vote-phase5'));
@@ -31,4 +33,12 @@ app.use('/api/safety-vote',require('../routes/safety-vote-phase4'));
 app.use('/api/safety-vote',require('../routes/safety-vote-phase3'));
 app.use('/api/safety-vote',require('../routes/safety-vote-phase2'));
 app.get('/__ready',(_req,res)=>res.json({success:true}));
-app.listen(port,'127.0.0.1',()=>console.log(`SAFETY_VOTE_FIXTURE_READY ${port}`));
+async function start(){
+    if(process.env.SAFETY_VOTE_FIXTURE_KEEP_DISABLED!=='1'){
+        const db=require('../db');
+        await db.query("UPDATE SafetyVote_Settings SET SettingValue='1',UpdatedBy='guarded-fixture' WHERE SettingKey='module_enabled'");
+        await db.query("UPDATE SafetyVote_Settings SET SettingValue='1',UpdatedBy='guarded-fixture' WHERE SettingKey='phase7_integrations_enabled'").catch(()=>{});
+    }
+    app.listen(port,'127.0.0.1',()=>console.log(`SAFETY_VOTE_FIXTURE_READY ${port}`));
+}
+start().catch(error=>{console.error(error);process.exit(1);});

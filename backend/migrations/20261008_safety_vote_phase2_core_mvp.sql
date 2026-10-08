@@ -149,6 +149,6 @@ CREATE TABLE IF NOT EXISTS SafetyVote_RequestKeys (
 
 INSERT INTO SafetyVote_Settings(SettingKey,SettingValue,UpdatedBy) VALUES
 ('schema_version','2026-10-08-phase2-r1','migration'),
-('module_enabled','1','migration'),
+('module_enabled','0','migration'),
 ('phase2_contract','2026-10-08-safety-vote-phase2-r1','migration')
 ON DUPLICATE KEY UPDATE SettingValue=VALUES(SettingValue),UpdatedBy='migration';

@@ -52,6 +52,7 @@ CREATE TABLE IF NOT EXISTS SafetyVote_OperationalAlerts (
 INSERT INTO SafetyVote_Settings(SettingKey,SettingValue,UpdatedBy) VALUES
 ('schema_version','2026-10-08-phase7-r1','migration'),
 ('phase7_contract','2026-10-08-safety-vote-phase7-r1','migration'),
-('phase7_integrations_enabled','1','migration'),
+('module_enabled','0','migration'),
+('phase7_integrations_enabled','0','migration'),
 ('phase7_adapter_mode','fixture_only','migration')
 ON DUPLICATE KEY UPDATE SettingValue=VALUES(SettingValue),UpdatedBy='migration';

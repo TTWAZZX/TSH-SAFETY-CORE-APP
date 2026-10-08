@@ -48,8 +48,16 @@ const sourceOnly = [
   ...[2, 3, 4, 5, 6, 7].map((phase) => `backend/routes/safety-vote-phase${phase}.js`),
   ...[1, 2, 3, 4, 5, 6, 7].map((phase) => `backend/services/safety-vote-phase${phase}.js`),
   'backend/scripts/permission-audit.js',
+  'backend/scripts/safety-vote-phase1-api-uat.js',
+  'backend/scripts/safety-vote-phase1-node-fixture-host.js',
+  'backend/scripts/safety-vote-phase1-php-router.php',
+  'backend/scripts/safety-vote-phase3-api-uat.js',
+  'backend/scripts/safety-vote-phase4-api-uat.js',
+  'backend/scripts/safety-vote-phase5-api-uat.js',
+  'backend/scripts/safety-vote-phase7-migration.test.js',
   'backend/scripts/safety-vote-phase82-protected-helper.php.template',
   'backend/scripts/safety-vote-phase82-protected-preflight.js',
+  'backend/scripts/safety-vote-phase831-disabled-gate.test.js',
   'backend/package.json',
   'package.json'
 ];
