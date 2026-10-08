@@ -217,7 +217,7 @@ function parseRouterRoutes(fileName, text, mount) {
             key: `${method} ${route}`,
             admin: line.includes('isAdmin') || line.includes('requireAdmin'),
             mountedAdmin: !!mount?.adminMounted,
-            inlineGuard: /req\.user\??\.(role|Role).*Admin|req\.user\??\.(role|Role)[\s\S]{0,80}Admin|isAdminUser|requirePermission\s*\(\s*req\s*,\s*res\s*,|canReviewPatrolLeave\s*\(\s*req\s*\)/.test(snippet),
+            inlineGuard: /req\.user\??\.(role|Role).*Admin|req\.user\??\.(role|Role)[\s\S]{0,80}Admin|isAdminUser|requirePermission\s*\(\s*req\s*,\s*res\s*,|canReviewPatrolLeave\s*\(\s*req\s*\)|permit\s*\(\s*['"]SAFETY_VOTE_/.test(snippet),
         });
     });
     return rows;

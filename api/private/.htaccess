@@ -1,0 +1,6 @@
+Require all denied
+
+<IfModule mod_headers.c>
+    Header always set Cache-Control "no-store"
+    Header always set X-Content-Type-Options "nosniff"
+</IfModule>

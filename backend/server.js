@@ -95,6 +95,13 @@ const bbsCommunityRoutes      = require('./routes/bbs-community');
 const bbsInspectorRoutes      = require('./routes/bbs-inspectors');
 const bbsInspectorScheduleRoutes = require('./routes/bbs-inspector-schedules');
 const bbsCardDesignerRoutes  = require('./routes/bbs-card-designer');
+const safetyVoteRoutes       = require('./routes/safety-vote');
+const safetyVotePhase2Routes = require('./routes/safety-vote-phase2');
+const safetyVotePhase3Routes = require('./routes/safety-vote-phase3');
+const safetyVotePhase4Routes = require('./routes/safety-vote-phase4');
+const safetyVotePhase5Routes = require('./routes/safety-vote-phase5');
+const safetyVotePhase6Routes = require('./routes/safety-vote-phase6');
+const safetyVotePhase7Routes = require('./routes/safety-vote-phase7');
 const { createBbsRolloutAccessMiddleware } = require('./services/bbs-rollout-access');
 
 // =================================================================
@@ -120,7 +127,7 @@ app.use(cors({
         callback(new Error('Not allowed by CORS'));
     },
     methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE'],
-    allowedHeaders: ['Content-Type', 'Authorization'],
+    allowedHeaders: ['Content-Type', 'Authorization', 'Idempotency-Key'],
 }));
 
 // Tightened body size limit (was 50mb)
@@ -1936,6 +1943,13 @@ app.use('/api/dashboard',         authenticateToken, dashboardRoutes);
 app.use('/api/module-forms',      authenticateToken, moduleFormsRoutes);
 app.use('/api/person-search',     authenticateToken, personSearchRoutes);
 app.use('/api/johnny',            authenticateToken, johnnyAiRoutes);
+app.use('/api/safety-vote',       authenticateToken, safetyVoteRoutes);
+app.use('/api/safety-vote',       authenticateToken, safetyVotePhase7Routes);
+app.use('/api/safety-vote',       authenticateToken, safetyVotePhase6Routes);
+app.use('/api/safety-vote',       authenticateToken, safetyVotePhase5Routes);
+app.use('/api/safety-vote',       authenticateToken, safetyVotePhase4Routes);
+app.use('/api/safety-vote',       authenticateToken, safetyVotePhase3Routes);
+app.use('/api/safety-vote',       authenticateToken, safetyVotePhase2Routes);
 app.use('/api/bbs',               authenticateToken, bbsSmartCardRoutes);
 app.use('/api/bbs',               authenticateToken, bbsChecklistRoutes);
 app.use('/api/bbs',               authenticateToken, bbsObservationRoutes);

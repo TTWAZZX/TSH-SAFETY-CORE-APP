@@ -1,0 +1,298 @@
+<?php
+declare(strict_types=1);
+
+header('Content-Type: application/json; charset=utf-8');
+header('Cache-Control: no-store, max-age=0');
+header('X-Content-Type-Options: nosniff');
+
+const RUN_TOKEN_SHA256 = '__RUN_TOKEN_SHA256__';
+const CLEANUP_TOKEN_SHA256 = '__CLEANUP_TOKEN_SHA256__';
+const BACKUP_ID = '__BACKUP_ID__';
+const GUARD_NAME = '__GUARD_NAME__';
+const EXPORT_NAME = 'safety-vote-phase82-scoped.sql';
+
+function respond(array $payload, int $status = 200): void
+{
+    http_response_code($status);
+    echo json_encode($payload, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
+    exit;
+}
+
+function authorized(string $expectedHash): bool
+{
+    $token = (string) ($_SERVER['HTTP_X_SAFETY_VOTE_PREFLIGHT_TOKEN'] ?? '');
+    return $token !== '' && hash_equals($expectedHash, hash('sha256', $token));
+}
+
+function integrity_ready(): bool
+{
+    $guard = __DIR__ . DIRECTORY_SEPARATOR . GUARD_NAME;
+    if (!is_file($guard)) return false;
+    $expected = strtolower(trim((string) file_get_contents($guard)));
+    return preg_match('/^[a-f0-9]{64}$/', $expected) === 1
+        && hash_equals($expected, hash_file('sha256', __FILE__));
+}
+
+function sql_value(PDO $pdo, $value): string
+{
+    return $value === null ? 'NULL' : $pdo->quote((string) $value);
+}
+
+function write_insert($handle, PDO $pdo, string $table, array $row): void
+{
+    $columns = array_map(static function ($name): string {
+        return '`' . str_replace('`', '``', (string) $name) . '`';
+    }, array_keys($row));
+    $values = array_map(static function ($value) use ($pdo): string {
+        return sql_value($pdo, $value);
+    }, array_values($row));
+    fwrite($handle, 'INSERT INTO `' . $table . '` (' . implode(',', $columns) . ') VALUES (' . implode(',', $values) . ");\n");
+}
+
+function remove_tree_if_present(string $backupDir): array
+{
+    $removed = [];
+    foreach ([EXPORT_NAME, '.htaccess', '.used'] as $name) {
+        $target = $backupDir . DIRECTORY_SEPARATOR . $name;
+        if (is_file($target) && @unlink($target)) $removed[] = $name;
+    }
+    if (is_dir($backupDir) && @rmdir($backupDir)) $removed[] = 'backup-directory';
+    $privateDir = dirname($backupDir);
+    if (is_dir($privateDir) && count(scandir($privateDir) ?: []) === 2 && @rmdir($privateDir)) {
+        $removed[] = 'empty-private-directory';
+    }
+    return $removed;
+}
+
+if (!integrity_ready()) respond(['success' => false, 'code' => 'HELPER_INTEGRITY_FAILED'], 409);
+if (($_SERVER['REQUEST_METHOD'] ?? '') !== 'POST') respond(['success' => false, 'code' => 'METHOD_NOT_ALLOWED'], 405);
+
+$backupDir = __DIR__ . DIRECTORY_SEPARATOR . 'private' . DIRECTORY_SEPARATOR . BACKUP_ID;
+$action = strtolower(trim((string) ($_SERVER['HTTP_X_SAFETY_VOTE_PREFLIGHT_ACTION'] ?? 'backup')));
+if ($action === 'cleanup') {
+    if (!authorized(CLEANUP_TOKEN_SHA256)) respond(['success' => false, 'code' => 'UNAUTHORIZED'], 401);
+    $removed = remove_tree_if_present($backupDir);
+    $guard = __DIR__ . DIRECTORY_SEPARATOR . GUARD_NAME;
+    if (is_file($guard) && @unlink($guard)) $removed[] = 'guard';
+    $self = __FILE__;
+    register_shutdown_function(static function () use ($self): void { @unlink($self); });
+    respond(['success' => true, 'marker' => 'SAFETY_VOTE_PHASE82_HELPER_CLEANUP', 'removed' => $removed, 'selfRemovalScheduled' => true]);
+}
+if ($action !== 'backup') respond(['success' => false, 'code' => 'UNKNOWN_ACTION'], 400);
+if (!authorized(RUN_TOKEN_SHA256)) respond(['success' => false, 'code' => 'UNAUTHORIZED'], 401);
+
+try {
+    $failureStage = 'backup_directory';
+    if (!is_dir($backupDir) && !mkdir($backupDir, 0700, true) && !is_dir($backupDir)) {
+        throw new RuntimeException('BACKUP_DIRECTORY_CREATE_FAILED');
+    }
+    file_put_contents($backupDir . DIRECTORY_SEPARATOR . '.htaccess', "Require all denied\nDeny from all\n", LOCK_EX);
+    $usedPath = $backupDir . DIRECTORY_SEPARATOR . '.used';
+    $used = @fopen($usedPath, 'x');
+    if ($used === false) respond(['success' => false, 'code' => 'TOKEN_ALREADY_USED'], 409);
+    fwrite($used, gmdate('c'));
+    fclose($used);
+
+    $failureStage = 'configuration';
+    $config = require __DIR__ . '/config.php';
+    if (!is_array($config)) throw new RuntimeException('CONFIG_NOT_ARRAY');
+    $requiredConfig = ['db_host', 'db_port', 'db_user', 'db_name', 'jwt_secret', 'public_app_url'];
+    $configKeys = [];
+    foreach ($requiredConfig as $key) {
+        $present = array_key_exists($key, $config);
+        $nonEmpty = $present && (!is_string($config[$key]) || trim((string) $config[$key]) !== '');
+        $configKeys[$key] = ['present' => $present, 'nonEmpty' => $nonEmpty];
+    }
+    $capabilities = [
+        'pdo_mysql' => extension_loaded('pdo_mysql'),
+        'json' => extension_loaded('json'),
+        'mbstring' => extension_loaded('mbstring'),
+        'fileinfo' => extension_loaded('fileinfo'),
+        'zip' => class_exists('ZipArchive'),
+        'imageMetadata' => function_exists('getimagesize'),
+        'hash' => function_exists('hash_file'),
+        'openssl' => extension_loaded('openssl'),
+        'httpsClient' => function_exists('curl_init') || filter_var((string) ini_get('allow_url_fopen'), FILTER_VALIDATE_BOOLEAN),
+    ];
+    $configReady = true;
+    foreach ($configKeys as $status) if (!$status['present'] || !$status['nonEmpty']) $configReady = false;
+    $capabilitiesReady = version_compare(PHP_VERSION, '7.4.0', '>=');
+    foreach ($capabilities as $available) if (!$available) $capabilitiesReady = false;
+
+    $providerKeys = ['SAFETY_VOTE_NOTIFICATION_TRANSPORT', 'SAFETY_VOTE_PHASE7_ADAPTER_MODE', 'SAFETY_VOTE_PHASE7_EVIDENCE_MODE'];
+    $providers = [];
+    foreach ($providerKeys as $key) {
+        $value = getenv($key);
+        $providers[$key] = ['configured' => $value !== false && trim((string) $value) !== ''];
+    }
+
+    $failureStage = 'database_connection';
+    $dsn = 'mysql:host=' . (string) $config['db_host'] . ';port=' . (int) $config['db_port']
+        . ';dbname=' . (string) $config['db_name'] . ';charset=utf8mb4';
+    $pdo = new PDO($dsn, (string) $config['db_user'], (string) $config['db_pass'], [
+        PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
+        PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
+        PDO::ATTR_EMULATE_PREPARES => false,
+    ]);
+    $schemaName = (string) $config['db_name'];
+
+    $failureStage = 'schema_inventory';
+    $tableStmt = $pdo->prepare("SELECT TABLE_NAME,ENGINE,TABLE_COLLATION FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_SCHEMA=? AND LEFT(TABLE_NAME,11)='SafetyVote_' ORDER BY TABLE_NAME");
+    $tableStmt->execute([$schemaName]);
+    $tableRows = $tableStmt->fetchAll();
+    $tables = array_map(static function ($row): string { return (string) $row['TABLE_NAME']; }, $tableRows);
+
+    $failureStage = 'read_only_transaction';
+    $rowCounts = [];
+    $pdo->exec('SET TRANSACTION READ ONLY');
+    $pdo->beginTransaction();
+    foreach ($tables as $table) {
+        $rowCounts[$table] = (int) $pdo->query('SELECT COUNT(*) FROM `' . str_replace('`', '``', $table) . '`')->fetchColumn();
+    }
+
+    $settings = [];
+    if (in_array('SafetyVote_Settings', $tables, true)) {
+        $settings = $pdo->query('SELECT SettingKey,SettingValue,UpdatedAt,UpdatedBy FROM SafetyVote_Settings ORDER BY SettingKey')->fetchAll();
+    }
+    $settingsMap = [];
+    foreach ($settings as $row) $settingsMap[(string) $row['SettingKey']] = (string) $row['SettingValue'];
+
+    $failureStage = 'permission_inventory';
+    $requiredPermissions = [
+        'SAFETY_VOTE_VIEW', 'SAFETY_VOTE_CREATE', 'SAFETY_VOTE_MANAGE', 'SAFETY_VOTE_ELIGIBILITY_MANAGE',
+        'SAFETY_VOTE_SUBMISSION_REVIEW', 'SAFETY_VOTE_JURY', 'SAFETY_VOTE_RESULT_VIEW',
+        'SAFETY_VOTE_CERTIFY', 'SAFETY_VOTE_EXPORT', 'SAFETY_VOTE_AUDIT_VIEW', 'SAFETY_VOTE_ADMIN',
+    ];
+    $permissionRows = [];
+    $permissionColumns = [];
+    $permissionSchemaCompatible = false;
+    $permissionTableName = null;
+    $permissionTableStmt = $pdo->prepare("SELECT TABLE_NAME FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_SCHEMA=? AND LOWER(TABLE_NAME)='admin_rolepermissions' ORDER BY TABLE_NAME LIMIT 1");
+    $permissionTableStmt->execute([$schemaName]);
+    $permissionTableName = $permissionTableStmt->fetchColumn();
+    if (is_string($permissionTableName) && $permissionTableName !== '') {
+        $permissionColumnStmt = $pdo->prepare("SELECT LOWER(COLUMN_NAME) FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA=? AND LOWER(TABLE_NAME)='admin_rolepermissions' ORDER BY ORDINAL_POSITION");
+        $permissionColumnStmt->execute([$schemaName]);
+        $permissionColumns = array_map('strval', $permissionColumnStmt->fetchAll(PDO::FETCH_COLUMN));
+        $permissionSchemaCompatible = count(array_intersect(['role', 'permission', 'granted'], $permissionColumns)) === 3;
+        if ($permissionSchemaCompatible) {
+            $marks = implode(',', array_fill(0, count($requiredPermissions), '?'));
+            $quotedPermissionTable = '`' . str_replace('`', '``', $permissionTableName) . '`';
+            $permStmt = $pdo->prepare("SELECT role,permission,granted FROM $quotedPermissionTable WHERE permission IN ($marks) ORDER BY role,permission");
+            $permStmt->execute($requiredPermissions);
+            $permissionRows = $permStmt->fetchAll();
+        }
+    }
+
+    $failureStage = 'privilege_inventory';
+    $grantRows = $pdo->query('SHOW GRANTS')->fetchAll(PDO::FETCH_NUM);
+    $grantText = strtoupper(implode("\n", array_map(static function ($row): string { return (string) ($row[0] ?? ''); }, $grantRows)));
+    $allPrivileges = strpos($grantText, 'ALL PRIVILEGES') !== false;
+    $privileges = [];
+    foreach (['SELECT', 'INSERT', 'UPDATE', 'DELETE', 'CREATE', 'ALTER', 'INDEX', 'REFERENCES'] as $privilege) {
+        $privileges[strtolower($privilege)] = $allPrivileges || preg_match('/(^|[ ,])' . $privilege . '([ ,]|$)/', $grantText) === 1;
+    }
+
+    $failureStage = 'clock_inventory';
+    $clock = $pdo->query('SELECT NOW() dbNow,UTC_TIMESTAMP() dbUtc,@@session.time_zone sessionTimeZone,@@global.time_zone globalTimeZone')->fetch();
+    $privateSafetyVote = __DIR__ . DIRECTORY_SEPARATOR . 'private' . DIRECTORY_SEPARATOR . 'safety-vote';
+    $privateFilesPresent = is_dir($privateSafetyVote) && count(scandir($privateSafetyVote) ?: []) > 2;
+
+    $failureStage = 'privacy_safe_export';
+    $exportPath = $backupDir . DIRECTORY_SEPARATOR . EXPORT_NAME;
+    $tempPath = $exportPath . '.tmp';
+    $handle = fopen($tempPath, 'wb');
+    if ($handle === false) throw new RuntimeException('EXPORT_OPEN_FAILED');
+    fwrite($handle, "-- Safety Vote Phase 8.2 privacy-safe pre-deployment backup\n");
+    fwrite($handle, "-- No ballot, answer, participation, eligibility, submission, nomination or private-file content is exported.\n\n");
+    foreach ($tables as $table) {
+        $create = $pdo->query('SHOW CREATE TABLE `' . str_replace('`', '``', $table) . '`')->fetch(PDO::FETCH_NUM);
+        fwrite($handle, '-- Schema: `' . $table . "`\n" . (string) $create[1] . ";\n\n");
+    }
+    foreach ($settings as $row) write_insert($handle, $pdo, 'SafetyVote_Settings', $row);
+    if ($settings) fwrite($handle, "\n");
+    foreach ($permissionRows as $row) write_insert($handle, $pdo, (string) $permissionTableName, $row);
+    fclose($handle);
+    $pdo->rollBack();
+    if (!rename($tempPath, $exportPath)) throw new RuntimeException('EXPORT_FINALIZE_FAILED');
+    @chmod($exportPath, 0600);
+
+    $businessRows = 0;
+    foreach ($rowCounts as $table => $count) if ($table !== 'SafetyVote_Settings') $businessRows += $count;
+    $permissionsReady = count(array_unique(array_column($permissionRows, 'permission'))) === count($requiredPermissions);
+    $databaseBackupComplete = $businessRows === 0;
+    $privateBackupComplete = !$privateFilesPresent;
+
+    $failureStage = 'response';
+    respond([
+        'success' => true,
+        'marker' => 'SAFETY_VOTE_PHASE82_PROTECTED_PREFLIGHT',
+        'valuesSuppressed' => true,
+        'helperIntegrityVerified' => true,
+        'phpVersion' => PHP_VERSION,
+        'phpTimeZone' => date_default_timezone_get(),
+        'configReady' => $configReady,
+        'configKeys' => $configKeys,
+        'capabilitiesReady' => $capabilitiesReady,
+        'capabilities' => $capabilities,
+        'providers' => $providers,
+        'providerPolicy' => ['externalProvidersOptionalForCorePilot' => true, 'unconfiguredFailsClosed' => true],
+        'schema' => [
+            'state' => count($tables) === 0 ? 'absent_predeployment' : 'existing',
+            'tableCount' => count($tables),
+            'tables' => $tableRows,
+            'settings' => [
+                'contractVersion' => $settingsMap['contract_version'] ?? null,
+                'schemaVersion' => $settingsMap['schema_version'] ?? null,
+                'moduleEnabled' => $settingsMap['module_enabled'] ?? null,
+            ],
+            'rowCounts' => $rowCounts,
+            'businessRowCount' => $businessRows,
+        ],
+        'permissions' => [
+            'requiredCount' => count($requiredPermissions),
+            'existingDistinctCount' => count(array_unique(array_column($permissionRows, 'permission'))),
+            'schemaCompatible' => $permissionSchemaCompatible,
+            'columnNames' => $permissionColumns,
+            'readyBeforeMigration' => $permissionsReady,
+        ],
+        'databasePrivileges' => $privileges,
+        'clock' => [
+            'dbNow' => $clock['dbNow'] ?? null,
+            'dbUtc' => $clock['dbUtc'] ?? null,
+            'sessionTimeZone' => $clock['sessionTimeZone'] ?? null,
+            'globalTimeZone' => $clock['globalTimeZone'] ?? null,
+            'safetyVoteScheduleTimeZone' => 'Asia/Bangkok',
+        ],
+        'privateStorage' => [
+            'parentWritable' => is_writable(dirname($backupDir)),
+            'safetyVoteDirectoryExists' => is_dir($privateSafetyVote),
+            'privateFilesPresent' => $privateFilesPresent,
+            'backupComplete' => $privateBackupComplete,
+        ],
+        'backup' => [
+            'relativePath' => 'api/private/' . BACKUP_ID . '/' . EXPORT_NAME,
+            'bytes' => filesize($exportPath),
+            'sha256' => hash_file('sha256', $exportPath),
+            'schemaOnlyForBusinessTables' => true,
+            'settingsRows' => count($settings),
+            'permissionRows' => count($permissionRows),
+            'businessDataExported' => false,
+            'ballotChoicesExported' => false,
+            'voterChoiceMappingCreated' => false,
+            'databaseBackupComplete' => $databaseBackupComplete,
+            'privateBackupComplete' => $privateBackupComplete,
+        ],
+        'readOnlyDatabaseTransaction' => true,
+        'ddlExecuted' => false,
+        'dmlExecuted' => false,
+    ]);
+} catch (Throwable $error) {
+    error_log('Safety Vote Phase 8.2 protected preflight failed: ' . $error->getMessage());
+    respond([
+        'success' => false,
+        'code' => 'PREFLIGHT_FAILED',
+        'failureStage' => isset($failureStage) ? $failureStage : 'bootstrap',
+        'valuesSuppressed' => true,
+    ], 500);
+}

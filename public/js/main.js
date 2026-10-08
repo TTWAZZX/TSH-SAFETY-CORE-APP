@@ -14,7 +14,7 @@ import { loadPatrolPage } from './pages/patrol.js?v=20261002-patrol-self-makeup-
 import { loadCccfPage } from './pages/cccf.js?v=20260907-cccf-permanent-pdf-layout-r2';
 import { loadKpiPage } from './pages/kpi.js?v=20260715-phase32d-remaining-async-ux';
 import { loadYokotenPage } from './pages/yokoten.js?v=20260825-yokoten-department-relevance-r1';
-import { loadAdminPage } from './pages/admin.js?v=20260924-employee-master-mobile-r2';
+import { loadAdminPage } from './pages/admin.js?v=20261008-safety-vote-phase4-r1';
 import { loadMachineSafetyPage } from './pages/machine-safety.js?v=20260820-card-image-phase2b';
 import { loadForkliftPage } from './pages/forklift.js?v=20260831-forklift-renewal-retry-r1';
 import { loadOjtPage } from './pages/ojt.js?v=20260820-card-image-phase2d';
@@ -27,6 +27,7 @@ import { loadHiyariPage } from './pages/hiyari.js?v=20260907-hiyari-pdf-summary-
 import { loadKyPage } from './pages/ky.js?v=20260923-ky-annual-contest-r9';
 import { loadFourmPage } from './pages/fourm.js?v=20260923-fourm-curriculum-soft-disable-r1';
 import { loadJohnnyAiPage } from './pages/johnny-ai.js?v=20261007-johnny-launcher-avatar-r1';
+import { loadSafetyVotePage } from './pages/safety-vote.js?v=20261008-safety-vote-phase4-r1';
 import { initJohnnyDrawer, syncJohnnyDrawerRoute, destroyJohnnyDrawer } from './johnny-drawer.js?v=20261007-johnny-launcher-avatar-r1';
 import { openProfileDrawer, closeProfileDrawer } from './pages/profile.js?v=20260924-company-email-self-service-r1';
 import { loadDashboardPage } from './pages/dashboard.js?v=20260822-cccf-shared-target-r4';
@@ -429,6 +430,7 @@ async function startApp(user, onboardingStatus = null) {
 
     toggleAdminFeatures();
     await refreshBbsNavigation();
+    await refreshSafetyVoteNavigation();
 
     // เริ่ม routing หลัง login สำเร็จเท่านั้น
     const gate = await getSafetyUnitGateRequirement(onboardingStatus);
@@ -574,6 +576,11 @@ async function refreshBbsNavigation() {
         const response = await apiFetch('/bbs/me/context', { suppressErrorLog: true });
         if (AppState.isAdmin || response?.data?.pilot?.inPilot) nav.classList.remove('hidden');
     } catch (_) {}
+}
+
+async function refreshSafetyVoteNavigation() {
+    const nav=document.getElementById('safety-vote-nav-item');if(!nav)return;nav.classList.add('hidden');
+    try{const health=await apiFetch('/safety-vote/admin/health',{suppressErrorLog:true});if(health?.data?.ready&&health?.data?.moduleEnabled)nav.classList.remove('hidden');}catch(_){}
 }
 
 function normalizeSafetyGateName(value) {
@@ -883,6 +890,9 @@ async function handleRouting() {
             break;
         case 'bbs-smart-card':
             await loadBbsSmartCardPage();
+            break;
+        case 'safety-vote':
+            await loadSafetyVotePage();
             break;
         case 'contractor':
             await loadContractorPage();
