@@ -2,9 +2,9 @@
   "contract": "2026-10-08-safety-vote-phase0-r1",
   "phaseContract": "2026-10-08-safety-vote-phase8.3.1-disabled-mode-r1",
   "protectedPreflightContract": "2026-10-08-safety-vote-phase8.2-r1",
-  "generatedAt": "2026-10-08T10:08:40.493Z",
+  "generatedAt": "2026-10-08T10:15:44.918Z",
   "productionTarget": "https://dev.tshpcl.com/safety/tsh-safety-core/",
-  "sourceCommit": "f37efe248b598e2c85834d658a804cd2c08fdc4d",
+  "sourceCommit": "63e1f5bb90cdedf1e41f71de640a78eb81634ef4",
   "sourceBranch": "main",
   "immutable": true,
   "decision": "GO_FOR_CONTROLLED_STAGED_DEPLOYMENT",
@@ -43,7 +43,7 @@
   },
   "digests": {
     "runtimeScopeSha256": "b60ce2b04dd6427fbac7baf1ee1e6d72036b128966aed43fc7a51e20f6abebe3",
-    "migrationScopeSha256": "430ef0e812cd70a479756c8b4d1fbb84f20619d9fcaa0177cc7c55e6bd22eed2"
+    "migrationScopeSha256": "46becd538b5cb32584deee706db965f3cdeca07982b049c352f1ebfab254afd1"
   },
   "groups": {
     "runtime": [
@@ -269,7 +269,7 @@
         "path": "backend/migrations/20261008_safety_vote_phase1_foundation.sql",
         "exists": true,
         "bytes": 11879,
-        "sha256": "4c57722d9e9c9d74db7fdd38d226a38907b66c1f33f34cd23d983762cc6e416b",
+        "sha256": "96b9947f25e5c01f3b76690e4c21cece8ff81f4d8bb4e21495d046e4479e6a30",
         "status": "  ",
         "trackedAtHead": true,
         "hashSource": "git_blob"
@@ -621,8 +621,8 @@
       {
         "path": "backend/scripts/safety-vote-phase82-protected-preflight.js",
         "exists": true,
-        "bytes": 16799,
-        "sha256": "f07b1ee08d0800f7201377e2b1abc54a6bf2499ffa2588ed7ef19062137a12c1",
+        "bytes": 16951,
+        "sha256": "c427ac3d219a7f1b0f5d73167c25d04a9124b8990f01f1a3f8dff050b7d541e9",
         "status": "  ",
         "trackedAtHead": true,
         "hashSource": "git_blob"
