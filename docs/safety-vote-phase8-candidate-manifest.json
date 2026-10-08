@@ -2,15 +2,15 @@
   "contract": "2026-10-08-safety-vote-phase0-r1",
   "phaseContract": "2026-10-08-safety-vote-phase8.3.1-disabled-mode-r1",
   "protectedPreflightContract": "2026-10-08-safety-vote-phase8.2-r1",
-  "generatedAt": "2026-10-08T09:57:38.985Z",
+  "generatedAt": "2026-10-08T10:08:40.493Z",
   "productionTarget": "https://dev.tshpcl.com/safety/tsh-safety-core/",
-  "sourceCommit": "d9a861becbd3da407d55b69ae23c2bc47eee7b83",
+  "sourceCommit": "f37efe248b598e2c85834d658a804cd2c08fdc4d",
   "sourceBranch": "main",
-  "immutable": false,
-  "decision": "HOLD",
+  "immutable": true,
+  "decision": "GO_FOR_CONTROLLED_STAGED_DEPLOYMENT",
   "holdReasons": [
-    "candidate manifest is generated before the authorized immutable successor commit",
-    "Production deployment and push are explicitly outside Phase 8.3.1 authorization"
+    "Module and integrations must remain disabled until separately authorized enablement",
+    "Authenticated smoke must use normal authentication and remain GET-only after login"
   ],
   "disabledMode": {
     "defaultAfterMigrations": true,
@@ -42,7 +42,7 @@
     "authenticatedSmoke": "HOLD_NO_EXISTING_VALID_SESSION"
   },
   "digests": {
-    "runtimeScopeSha256": "2c87748f922c91676072a86e2a097e45638062961ed2cc5f099832d4d188a59b",
+    "runtimeScopeSha256": "b60ce2b04dd6427fbac7baf1ee1e6d72036b128966aed43fc7a51e20f6abebe3",
     "migrationScopeSha256": "430ef0e812cd70a479756c8b4d1fbb84f20619d9fcaa0177cc7c55e6bd22eed2"
   },
   "groups": {
@@ -50,26 +50,29 @@
       {
         "path": "api/index.php",
         "exists": true,
-        "bytes": 77218,
-        "sha256": "0995f8d5a9740cd9162f21ec8fe302b098eeb1255b49e9feb33e2e3f4c8d16d4",
-        "status": " M",
-        "trackedAtHead": true
+        "bytes": 75811,
+        "sha256": "7ce4b8103d5cdbd7225a63f703ac27f76b5ffb067d917171ebd7ee1d742c4e62",
+        "status": "  ",
+        "trackedAtHead": true,
+        "hashSource": "git_blob"
       },
       {
         "path": "api/handlers/admin_phase8.php",
         "exists": true,
-        "bytes": 123574,
-        "sha256": "1da8d60e8c381ed1db1ad7a300ed84d3a77d87d4d586e4b4c9c82d52e7a3385d",
+        "bytes": 121911,
+        "sha256": "30e93fbd40e5f60a43f1a4f7a04c1b31af0eba0324c9a36356ffc682e7ddcf65",
         "status": "  ",
-        "trackedAtHead": true
+        "trackedAtHead": true,
+        "hashSource": "git_blob"
       },
       {
         "path": "api/handlers/safety_vote.php",
         "exists": true,
         "bytes": 25958,
         "sha256": "6ffdb23ae14d4a73622f504dd98098c47f8b79ccf12190b9a8a6b4ce7d653040",
-        "status": " M",
-        "trackedAtHead": true
+        "status": "  ",
+        "trackedAtHead": true,
+        "hashSource": "git_blob"
       },
       {
         "path": "api/handlers/safety_vote_phase2.php",
@@ -77,7 +80,8 @@
         "bytes": 21246,
         "sha256": "4a7a5778244080cb7a36d66048dd503faef508b9cbe93706911ddd07e9738294",
         "status": "  ",
-        "trackedAtHead": true
+        "trackedAtHead": true,
+        "hashSource": "git_blob"
       },
       {
         "path": "api/handlers/safety_vote_phase3.php",
@@ -85,7 +89,8 @@
         "bytes": 28657,
         "sha256": "ad2d5e10aad381ff206363f7660ba3700287a614dad8cdd93f2a6c3ae4059dd1",
         "status": "  ",
-        "trackedAtHead": true
+        "trackedAtHead": true,
+        "hashSource": "git_blob"
       },
       {
         "path": "api/handlers/safety_vote_phase4.php",
@@ -93,7 +98,8 @@
         "bytes": 27134,
         "sha256": "ae73a57777aae33847832afce70155ef9377bbdcaabee4312f76193178c3b52d",
         "status": "  ",
-        "trackedAtHead": true
+        "trackedAtHead": true,
+        "hashSource": "git_blob"
       },
       {
         "path": "api/handlers/safety_vote_phase5.php",
@@ -101,7 +107,8 @@
         "bytes": 18963,
         "sha256": "b4c40d91ecd9c15641cade3dc425c20460130129059d634accb6c122e71eed2a",
         "status": "  ",
-        "trackedAtHead": true
+        "trackedAtHead": true,
+        "hashSource": "git_blob"
       },
       {
         "path": "api/handlers/safety_vote_phase6.php",
@@ -109,7 +116,8 @@
         "bytes": 18954,
         "sha256": "fc3710edd1e33012b438fd492432c00d6ebe06563e48fcbca0482d91be02b35f",
         "status": "  ",
-        "trackedAtHead": true
+        "trackedAtHead": true,
+        "hashSource": "git_blob"
       },
       {
         "path": "api/handlers/safety_vote_phase7.php",
@@ -117,7 +125,8 @@
         "bytes": 12382,
         "sha256": "00798d6caa1385ed22a83873b400fddbbfb36ccfc8b24d1d6cbf89f026c1c6fd",
         "status": "  ",
-        "trackedAtHead": true
+        "trackedAtHead": true,
+        "hashSource": "git_blob"
       },
       {
         "path": "api/lib/safety_vote_phase1.php",
@@ -125,7 +134,8 @@
         "bytes": 7171,
         "sha256": "637975195f3dba450ec263365e19baae290be70c7bda24242549269a505eecce",
         "status": "  ",
-        "trackedAtHead": true
+        "trackedAtHead": true,
+        "hashSource": "git_blob"
       },
       {
         "path": "api/lib/safety_vote_phase2.php",
@@ -133,7 +143,8 @@
         "bytes": 4356,
         "sha256": "456feaee2d33d9bc740fd96ee9b04c9faf5d7f003cd8be0be22f29ec17de5534",
         "status": "  ",
-        "trackedAtHead": true
+        "trackedAtHead": true,
+        "hashSource": "git_blob"
       },
       {
         "path": "api/lib/safety_vote_phase3.php",
@@ -141,7 +152,8 @@
         "bytes": 12620,
         "sha256": "5db18a9d02abfd1d1fd9167483e256656bac6bbb412244b2914ac70bb9922e7d",
         "status": "  ",
-        "trackedAtHead": true
+        "trackedAtHead": true,
+        "hashSource": "git_blob"
       },
       {
         "path": "api/lib/safety_vote_phase4.php",
@@ -149,7 +161,8 @@
         "bytes": 6715,
         "sha256": "705b12958f7066c0080c22ebba2cea4fc1c977d0080ba69b9f15b0afc17f85bc",
         "status": "  ",
-        "trackedAtHead": true
+        "trackedAtHead": true,
+        "hashSource": "git_blob"
       },
       {
         "path": "api/lib/safety_vote_phase5.php",
@@ -157,7 +170,8 @@
         "bytes": 3587,
         "sha256": "119f03d5bb7527e8bdaac06d0f7c3e162a9c74a163a68e0006e8b3daa4d93ff6",
         "status": "  ",
-        "trackedAtHead": true
+        "trackedAtHead": true,
+        "hashSource": "git_blob"
       },
       {
         "path": "api/lib/safety_vote_phase6.php",
@@ -165,7 +179,8 @@
         "bytes": 4631,
         "sha256": "9068354d1c6dd80c8c9f5a4165ce8ef30b49394cb303a80c8324fe9e969d559d",
         "status": "  ",
-        "trackedAtHead": true
+        "trackedAtHead": true,
+        "hashSource": "git_blob"
       },
       {
         "path": "api/lib/safety_vote_phase7.php",
@@ -173,7 +188,8 @@
         "bytes": 4958,
         "sha256": "987a3ef07a7c7374c716fec044f1e32c9bf581cb558d6890c4544ff6a6ad74e4",
         "status": "  ",
-        "trackedAtHead": true
+        "trackedAtHead": true,
+        "hashSource": "git_blob"
       },
       {
         "path": "api/private/.htaccess",
@@ -181,7 +197,8 @@
         "bytes": 159,
         "sha256": "36124092a8e7524264284612d5d65ab9e2f53d411abfc14c907f951c7c531600",
         "status": "  ",
-        "trackedAtHead": true
+        "trackedAtHead": true,
+        "hashSource": "git_blob"
       },
       {
         "path": "api/private/index.html",
@@ -189,39 +206,44 @@
         "bytes": 62,
         "sha256": "93a1e6a29a9a24fdf67b23c02a671588a047819cdf5c187bad49ee627fb4df28",
         "status": "  ",
-        "trackedAtHead": true
+        "trackedAtHead": true,
+        "hashSource": "git_blob"
       },
       {
         "path": "index.html",
         "exists": true,
-        "bytes": 99548,
-        "sha256": "750a3a67d022e64b23bdf513a8279250b8458c0c51af044e4f44d6d27b48a59a",
+        "bytes": 98386,
+        "sha256": "82a87abf5170ed39116fb119b19c5dea1380df54e47ac588d67ea7819fe1615f",
         "status": "  ",
-        "trackedAtHead": true
+        "trackedAtHead": true,
+        "hashSource": "git_blob"
       },
       {
         "path": "public/js/main.js",
         "exists": true,
-        "bytes": 68321,
-        "sha256": "675e2bb299de2aa1958dcef993191b9bcd980839fa40bb63599ca3771767e297",
+        "bytes": 66946,
+        "sha256": "bf7f64f7ce5a46542d5c11c47420c4a38b1e1406176b8256074d9073c231463d",
         "status": "  ",
-        "trackedAtHead": true
+        "trackedAtHead": true,
+        "hashSource": "git_blob"
       },
       {
         "path": "public/js/module-meta.js",
         "exists": true,
-        "bytes": 10964,
-        "sha256": "6e3605845db9ae4fe365b5474504dbaa3ccc656d348439e1481a22bfcbc17c50",
+        "bytes": 10860,
+        "sha256": "ee42e9ea41375015f525fce32fc60d9b6f84924b239b9d935e34b5e1902d21dd",
         "status": "  ",
-        "trackedAtHead": true
+        "trackedAtHead": true,
+        "hashSource": "git_blob"
       },
       {
         "path": "public/js/pages/admin.js",
         "exists": true,
-        "bytes": 698357,
-        "sha256": "d9f28727a4b1d61ffcd2252eb2177d041b0e19a81c52ac6f6fe4924f507f8f08",
+        "bytes": 689655,
+        "sha256": "812b1e9b3dc9b9251af89f151e3759f445af13d0c4753821cbdeea3636900de9",
         "status": "  ",
-        "trackedAtHead": true
+        "trackedAtHead": true,
+        "hashSource": "git_blob"
       },
       {
         "path": "public/js/pages/admin-safety-vote.js",
@@ -229,7 +251,8 @@
         "bytes": 54240,
         "sha256": "cf4be089ce6f61752246e200cb8424a3557577600d9eb7785b38243d70846c66",
         "status": "  ",
-        "trackedAtHead": true
+        "trackedAtHead": true,
+        "hashSource": "git_blob"
       },
       {
         "path": "public/js/pages/safety-vote.js",
@@ -237,7 +260,8 @@
         "bytes": 23567,
         "sha256": "09ed03d592a5cff6abcfb50467e4719444d7d2a50f71d6758385fc68b4326d71",
         "status": "  ",
-        "trackedAtHead": true
+        "trackedAtHead": true,
+        "hashSource": "git_blob"
       }
     ],
     "migrations": [
@@ -246,8 +270,9 @@
         "exists": true,
         "bytes": 11879,
         "sha256": "4c57722d9e9c9d74db7fdd38d226a38907b66c1f33f34cd23d983762cc6e416b",
-        "status": " M",
-        "trackedAtHead": true
+        "status": "  ",
+        "trackedAtHead": true,
+        "hashSource": "git_blob"
       },
       {
         "path": "backend/migrations/20261008_safety_vote_phase1_foundation.rollback.sql",
@@ -255,15 +280,17 @@
         "bytes": 586,
         "sha256": "f3aa81bae10453d1c6549d3676bb51ca94320096f57c63c800a7dcbe3e3fd190",
         "status": "  ",
-        "trackedAtHead": true
+        "trackedAtHead": true,
+        "hashSource": "git_blob"
       },
       {
         "path": "backend/migrations/20261008_safety_vote_phase2_core_mvp.sql",
         "exists": true,
         "bytes": 7764,
         "sha256": "4cdb5dfea911bf7bd257aa2828311b251dbf6f92de5f8580dbb6627a321ce54b",
-        "status": " M",
-        "trackedAtHead": true
+        "status": "  ",
+        "trackedAtHead": true,
+        "hashSource": "git_blob"
       },
       {
         "path": "backend/migrations/20261008_safety_vote_phase2_core_mvp.rollback.sql",
@@ -271,15 +298,17 @@
         "bytes": 312,
         "sha256": "9bf9042e92e397a07723d678646edf3c3d29d5b659aff37298db8e7bf99f6cc9",
         "status": "  ",
-        "trackedAtHead": true
+        "trackedAtHead": true,
+        "hashSource": "git_blob"
       },
       {
         "path": "backend/migrations/20261008_safety_vote_phase3_survey_submission.sql",
         "exists": true,
         "bytes": 4912,
         "sha256": "bb04fb438f286a0b81dea38eb1e4b94aa934c9b5e28e6c211a43b47297008c78",
-        "status": " M",
-        "trackedAtHead": true
+        "status": "  ",
+        "trackedAtHead": true,
+        "hashSource": "git_blob"
       },
       {
         "path": "backend/migrations/20261008_safety_vote_phase3_survey_submission.rollback.sql",
@@ -287,15 +316,17 @@
         "bytes": 376,
         "sha256": "b4455910837c5053457638294a2af38ca4bc7ed79b4c71a5c715647dffb2e954",
         "status": "  ",
-        "trackedAtHead": true
+        "trackedAtHead": true,
+        "hashSource": "git_blob"
       },
       {
         "path": "backend/migrations/20261008_safety_vote_phase4_jury_scoring.sql",
         "exists": true,
         "bytes": 9190,
         "sha256": "15006a2b947e192a42360d8115d8ab88453331ba1483856a7ea7ed1db5afe024",
-        "status": " M",
-        "trackedAtHead": true
+        "status": "  ",
+        "trackedAtHead": true,
+        "hashSource": "git_blob"
       },
       {
         "path": "backend/migrations/20261008_safety_vote_phase4_jury_scoring.rollback.sql",
@@ -303,15 +334,17 @@
         "bytes": 327,
         "sha256": "fc14519ce3fb73a452bb3cd92410a51b60fffb4b6be7be2bb636eac268954967",
         "status": "  ",
-        "trackedAtHead": true
+        "trackedAtHead": true,
+        "hashSource": "git_blob"
       },
       {
         "path": "backend/migrations/20261008_safety_vote_phase5_operations.sql",
         "exists": true,
         "bytes": 4365,
         "sha256": "ff18bda56b506ea9d223ee51d0215d2eff434a79036ec2f0e371d32671d9ae05",
-        "status": " M",
-        "trackedAtHead": true
+        "status": "  ",
+        "trackedAtHead": true,
+        "hashSource": "git_blob"
       },
       {
         "path": "backend/migrations/20261008_safety_vote_phase5_operations.rollback.sql",
@@ -319,15 +352,17 @@
         "bytes": 270,
         "sha256": "d500745987fa93a62ae83d42d895f22b82275f70cfbd8f38c8f314fda8298bb9",
         "status": "  ",
-        "trackedAtHead": true
+        "trackedAtHead": true,
+        "hashSource": "git_blob"
       },
       {
         "path": "backend/migrations/20261008_safety_vote_phase6_secret_election.sql",
         "exists": true,
         "bytes": 4192,
         "sha256": "979e5d27b694474e280c835a620ba517fdaa54a4ceecd46445b2a46e471e8dd8",
-        "status": " M",
-        "trackedAtHead": true
+        "status": "  ",
+        "trackedAtHead": true,
+        "hashSource": "git_blob"
       },
       {
         "path": "backend/migrations/20261008_safety_vote_phase6_secret_election.rollback.sql",
@@ -335,15 +370,17 @@
         "bytes": 428,
         "sha256": "8e50b454458281e42ab6d458f36ee1fc833af42fe72cae834ae05eff7b9ff0e3",
         "status": "  ",
-        "trackedAtHead": true
+        "trackedAtHead": true,
+        "hashSource": "git_blob"
       },
       {
         "path": "backend/migrations/20261008_safety_vote_phase7_integrations_governance.sql",
         "exists": true,
         "bytes": 4111,
         "sha256": "a0d47b29f3802c070139f0e58b12de666f34471a90a57bfbeb7ab1dfe555f4d1",
-        "status": " M",
-        "trackedAtHead": true
+        "status": "  ",
+        "trackedAtHead": true,
+        "hashSource": "git_blob"
       },
       {
         "path": "backend/migrations/20261008_safety_vote_phase7_integrations_governance.rollback.sql",
@@ -351,33 +388,37 @@
         "bytes": 422,
         "sha256": "4ca3d1ecd28585d82fd5fabde33b4ac514600b4930f2ac4f4f3911a445767552",
         "status": "  ",
-        "trackedAtHead": true
+        "trackedAtHead": true,
+        "hashSource": "git_blob"
       }
     ],
     "sourceOnly": [
       {
         "path": "backend/server.js",
         "exists": true,
-        "bytes": 114961,
-        "sha256": "ecd5f43a4e8a90c0f0e8e4d375f510e9a94823dea1ccc8c400f5c13e6316af44",
-        "status": " M",
-        "trackedAtHead": true
+        "bytes": 112690,
+        "sha256": "3884df906c38214b74674c2949255f6bec5002dff616f9e30b0295380dbed629",
+        "status": "  ",
+        "trackedAtHead": true,
+        "hashSource": "git_blob"
       },
       {
         "path": "backend/routes/admin.js",
         "exists": true,
-        "bytes": 158478,
-        "sha256": "977ebd6548d56638fa8c62e4bfa91b3eaa20d7fa5e6b39c87516ec3afa7bc60a",
+        "bytes": 155607,
+        "sha256": "111d516422f9975ccf9ab6acfd4692eed201ef1c4abf62ff58e8c9bf8a734899",
         "status": "  ",
-        "trackedAtHead": true
+        "trackedAtHead": true,
+        "hashSource": "git_blob"
       },
       {
         "path": "backend/routes/safety-vote.js",
         "exists": true,
         "bytes": 26342,
         "sha256": "9bfa3009bacb2d29fd5c54975fc5937920b0641d04838c19104685493b0c82aa",
-        "status": " M",
-        "trackedAtHead": true
+        "status": "  ",
+        "trackedAtHead": true,
+        "hashSource": "git_blob"
       },
       {
         "path": "backend/routes/safety-vote-phase2.js",
@@ -385,7 +426,8 @@
         "bytes": 20174,
         "sha256": "5f1a445fa5846e1b5ec748bcd26a4d157b951adbfce99cc960f97cb01c0e8304",
         "status": "  ",
-        "trackedAtHead": true
+        "trackedAtHead": true,
+        "hashSource": "git_blob"
       },
       {
         "path": "backend/routes/safety-vote-phase3.js",
@@ -393,7 +435,8 @@
         "bytes": 30015,
         "sha256": "ba7696cd4153137276b3ec09f5a285f8a071175351fb33b1366ebd633998bf40",
         "status": "  ",
-        "trackedAtHead": true
+        "trackedAtHead": true,
+        "hashSource": "git_blob"
       },
       {
         "path": "backend/routes/safety-vote-phase4.js",
@@ -401,7 +444,8 @@
         "bytes": 25457,
         "sha256": "9de53dc0f3e2efcba830fac110f9b39300a9daa09b6281d25e5718492c18a0f0",
         "status": "  ",
-        "trackedAtHead": true
+        "trackedAtHead": true,
+        "hashSource": "git_blob"
       },
       {
         "path": "backend/routes/safety-vote-phase5.js",
@@ -409,7 +453,8 @@
         "bytes": 19059,
         "sha256": "3228b79cabd7a3c34fca126ec8cd9a0a2e8da8fd9ed32b9cc63963c314c968e0",
         "status": "  ",
-        "trackedAtHead": true
+        "trackedAtHead": true,
+        "hashSource": "git_blob"
       },
       {
         "path": "backend/routes/safety-vote-phase6.js",
@@ -417,7 +462,8 @@
         "bytes": 23271,
         "sha256": "085686123a3a2ad797ff8a7d1184a3d2aabf086f417a434e2fce938b79c2adf9",
         "status": "  ",
-        "trackedAtHead": true
+        "trackedAtHead": true,
+        "hashSource": "git_blob"
       },
       {
         "path": "backend/routes/safety-vote-phase7.js",
@@ -425,7 +471,8 @@
         "bytes": 12474,
         "sha256": "4840da337fd8ea0c140344096b7a9db8ba393a1085673750759302c4c00149f9",
         "status": "  ",
-        "trackedAtHead": true
+        "trackedAtHead": true,
+        "hashSource": "git_blob"
       },
       {
         "path": "backend/services/safety-vote-phase1.js",
@@ -433,7 +480,8 @@
         "bytes": 7253,
         "sha256": "3776ca0bac34bb53dc4d0b053f1b94815be03664dad374a4829114fd36321509",
         "status": "  ",
-        "trackedAtHead": true
+        "trackedAtHead": true,
+        "hashSource": "git_blob"
       },
       {
         "path": "backend/services/safety-vote-phase2.js",
@@ -441,7 +489,8 @@
         "bytes": 4456,
         "sha256": "ae69fafea2f6c6d0e2c9a0d549f0ce45393ecd3512ca4af6c4f94899e45d753f",
         "status": "  ",
-        "trackedAtHead": true
+        "trackedAtHead": true,
+        "hashSource": "git_blob"
       },
       {
         "path": "backend/services/safety-vote-phase3.js",
@@ -449,7 +498,8 @@
         "bytes": 11882,
         "sha256": "b519e51809eecef896b077cc751b75b72bc44272159d1613608848ca6d602b72",
         "status": "  ",
-        "trackedAtHead": true
+        "trackedAtHead": true,
+        "hashSource": "git_blob"
       },
       {
         "path": "backend/services/safety-vote-phase4.js",
@@ -457,7 +507,8 @@
         "bytes": 6055,
         "sha256": "b6028a5189dd3247fccf116b961392c94a3f50b12cbb5eb032b6c007cdfe60e4",
         "status": "  ",
-        "trackedAtHead": true
+        "trackedAtHead": true,
+        "hashSource": "git_blob"
       },
       {
         "path": "backend/services/safety-vote-phase5.js",
@@ -465,7 +516,8 @@
         "bytes": 3587,
         "sha256": "4ee0baa310fef29c98e91f9bc7ea43e21b5e2885cf7b0d900ac17506c3408128",
         "status": "  ",
-        "trackedAtHead": true
+        "trackedAtHead": true,
+        "hashSource": "git_blob"
       },
       {
         "path": "backend/services/safety-vote-phase6.js",
@@ -473,7 +525,8 @@
         "bytes": 4380,
         "sha256": "0db6a3bd3e05140721c2bec31a5a09bbb10ef70cf3bae95cd4c168e3b74e4155",
         "status": "  ",
-        "trackedAtHead": true
+        "trackedAtHead": true,
+        "hashSource": "git_blob"
       },
       {
         "path": "backend/services/safety-vote-phase7.js",
@@ -481,71 +534,80 @@
         "bytes": 4519,
         "sha256": "d53cc8719d3b5c789ec9c519e3c694462c7371e9b51bb77a42d31590aa34a441",
         "status": "  ",
-        "trackedAtHead": true
+        "trackedAtHead": true,
+        "hashSource": "git_blob"
       },
       {
         "path": "backend/scripts/permission-audit.js",
         "exists": true,
-        "bytes": 11885,
-        "sha256": "3b2a26713641061d95a452c4cf8bb7091b30bf55a85f125200752d1452ea0406",
+        "bytes": 11619,
+        "sha256": "fae98b336bfd189a64ff0645ee8b9cbd445557c43a12fda66dc736ae7cf115a5",
         "status": "  ",
-        "trackedAtHead": true
+        "trackedAtHead": true,
+        "hashSource": "git_blob"
       },
       {
         "path": "backend/scripts/safety-vote-phase1-api-uat.js",
         "exists": true,
         "bytes": 15570,
         "sha256": "f94a290604f2c6be53ea4f7b76d70cd8858fa29b811dc69ff12fa393039bf86c",
-        "status": " M",
-        "trackedAtHead": true
+        "status": "  ",
+        "trackedAtHead": true,
+        "hashSource": "git_blob"
       },
       {
         "path": "backend/scripts/safety-vote-phase1-node-fixture-host.js",
         "exists": true,
         "bytes": 4332,
         "sha256": "717655eafecb5572e7c68acccf2183a553a69e4dee27385ad58c670012e585de",
-        "status": " M",
-        "trackedAtHead": true
+        "status": "  ",
+        "trackedAtHead": true,
+        "hashSource": "git_blob"
       },
       {
         "path": "backend/scripts/safety-vote-phase1-php-router.php",
         "exists": true,
         "bytes": 4817,
         "sha256": "58589c7373e8a3a5fdb40288153a05aa063c1deac2594e66cce39c7b6c943046",
-        "status": " M",
-        "trackedAtHead": true
+        "status": "  ",
+        "trackedAtHead": true,
+        "hashSource": "git_blob"
       },
       {
         "path": "backend/scripts/safety-vote-phase3-api-uat.js",
         "exists": true,
         "bytes": 11289,
         "sha256": "72e50a13dcf5423fc5152ea74c1cbf979f15368ecd14a1769a031dfbfaf60a99",
-        "status": " M",
-        "trackedAtHead": true
+        "status": "  ",
+        "trackedAtHead": true,
+        "hashSource": "git_blob"
       },
       {
         "path": "backend/scripts/safety-vote-phase4-api-uat.js",
         "exists": true,
         "bytes": 13244,
         "sha256": "4e181e0929ec5a0a123429fb3ce556b2517c9071af2ae70fa5ce3b3eab5c7c72",
-        "status": " M",
-        "trackedAtHead": true
+        "status": "  ",
+        "trackedAtHead": true,
+        "hashSource": "git_blob"
       },
       {
         "path": "backend/scripts/safety-vote-phase5-api-uat.js",
         "exists": true,
         "bytes": 12552,
         "sha256": "adf53eb7238816f0e21f8a22ff0affcd0457760a1add94924398ac07f1c86cdd",
-        "status": " M",
-        "trackedAtHead": true
+        "status": "  ",
+        "trackedAtHead": true,
+        "hashSource": "git_blob"
       },
       {
         "path": "backend/scripts/safety-vote-phase7-migration.test.js",
         "exists": true,
         "bytes": 3319,
         "sha256": "0b3ae98cf6f8ed1476dd87e280fa919d841f15eb88efcf816a27d9e10df56d48",
-        "status": " M",
-        "trackedAtHead": true
+        "status": "  ",
+        "trackedAtHead": true,
+        "hashSource": "git_blob"
       },
       {
         "path": "backend/scripts/safety-vote-phase82-protected-helper.php.template",
@@ -553,7 +615,8 @@
         "bytes": 15032,
         "sha256": "4b1c2d05022f94c95ddf441eb2090449191785c482824a39d2ce5eac34107a6c",
         "status": "  ",
-        "trackedAtHead": true
+        "trackedAtHead": true,
+        "hashSource": "git_blob"
       },
       {
         "path": "backend/scripts/safety-vote-phase82-protected-preflight.js",
@@ -561,31 +624,35 @@
         "bytes": 16799,
         "sha256": "f07b1ee08d0800f7201377e2b1abc54a6bf2499ffa2588ed7ef19062137a12c1",
         "status": "  ",
-        "trackedAtHead": true
+        "trackedAtHead": true,
+        "hashSource": "git_blob"
       },
       {
         "path": "backend/scripts/safety-vote-phase831-disabled-gate.test.js",
         "exists": true,
         "bytes": 8524,
         "sha256": "cf777283060544deed749ca2d5e07701b51194f745bfac44d32fd4dd1e238b00",
-        "status": "??",
-        "trackedAtHead": false
+        "status": "  ",
+        "trackedAtHead": true,
+        "hashSource": "git_blob"
       },
       {
         "path": "backend/package.json",
         "exists": true,
-        "bytes": 32800,
-        "sha256": "4fa9234c691c2c630a48d966d0e2820e838afd9bbe2daf1ef20f43dfbd95ea4c",
-        "status": " M",
-        "trackedAtHead": true
+        "bytes": 32434,
+        "sha256": "bc0f136c010b5dae8793a768ac4ff25c6cb4051730b97529919f7d6c4684c374",
+        "status": "  ",
+        "trackedAtHead": true,
+        "hashSource": "git_blob"
       },
       {
         "path": "package.json",
         "exists": true,
-        "bytes": 5405,
-        "sha256": "cf58e7e1cc1f2950dcc347d54ca420fefb66a5f660e5d02ae8b8f38ad891c8db",
-        "status": " M",
-        "trackedAtHead": true
+        "bytes": 5352,
+        "sha256": "67f6891fae31cde4c74c0e31285130058ba292b96d56c102b791d3351c5e9872",
+        "status": "  ",
+        "trackedAtHead": true,
+        "hashSource": "git_blob"
       }
     ]
   },

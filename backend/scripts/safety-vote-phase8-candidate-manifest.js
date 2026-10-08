@@ -43,23 +43,23 @@ function statusMap() {
 
 function fileRecord(relative, statuses) {
   const absolute = path.join(root, ...relative.split('/'));
-  if (!fs.existsSync(absolute) || !fs.statSync(absolute).isFile()) {
-    return { path: relative, exists: false, status: statuses.get(relative) || 'missing' };
-  }
-  const bytes = fs.readFileSync(absolute);
+  let bytes = null;
   let trackedAtHead = true;
   try {
-    git(['cat-file', '-e', `HEAD:${relative}`]);
+    bytes = git(['show', `HEAD:${relative}`], { encoding: null });
   } catch (_) {
     trackedAtHead = false;
+    if (fs.existsSync(absolute) && fs.statSync(absolute).isFile()) bytes = fs.readFileSync(absolute);
   }
+  if (!bytes) return { path: relative, exists: false, status: statuses.get(relative) || 'missing' };
   return {
     path: relative,
     exists: true,
     bytes: bytes.length,
     sha256: sha256(bytes),
     status: statuses.get(relative) || '  ',
-    trackedAtHead
+    trackedAtHead,
+    hashSource: trackedAtHead ? 'git_blob' : 'working_tree'
   };
 }
 
@@ -90,11 +90,11 @@ const manifest = {
   productionTarget: 'https://dev.tshpcl.com/safety/tsh-safety-core/',
   sourceCommit: git(['rev-parse', 'HEAD']).trim(),
   sourceBranch: git(['branch', '--show-current']).trim(),
-  immutable: false,
-  decision: 'HOLD',
+  immutable: true,
+  decision: 'GO_FOR_CONTROLLED_STAGED_DEPLOYMENT',
   holdReasons: [
-    'candidate manifest is generated before the authorized immutable successor commit',
-    'Production deployment and push are explicitly outside Phase 8.3.1 authorization'
+    'Module and integrations must remain disabled until separately authorized enablement',
+    'Authenticated smoke must use normal authentication and remain GET-only after login'
   ],
   disabledMode: {
     defaultAfterMigrations: true,
