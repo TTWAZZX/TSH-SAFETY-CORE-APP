@@ -200,6 +200,25 @@ body {
     .sv-tablet-drawer aside { transition: none; }
 }
 
+/* Safety Vote UX Phase 7 — governance, audit and release evidence */
+.svg-shell{width:100%;min-width:0;max-width:none;padding:clamp(12px,2vw,28px);padding-bottom:calc(92px + env(safe-area-inset-bottom));background:#f4f7fb;color:#12213a;min-height:100vh;overflow-x:clip}
+.svg-shell *{box-sizing:border-box}.svg-shell button,.svg-shell a,.svg-shell input,.svg-shell select{min-height:44px}.svg-shell :focus-visible{outline:3px solid #f59e0b;outline-offset:3px}
+.svg-hero{display:flex;align-items:flex-start;gap:16px;padding:clamp(22px,3vw,38px);margin:16px 0;border-radius:22px;background:linear-gradient(125deg,#132554,#234fd0);color:#fff}.svg-hero>div{min-width:0;flex:1}.svg-hero h1{font-size:clamp(1.65rem,3vw,2.45rem);line-height:1.1;margin:.2rem 0 .6rem}.svg-hero p{max-width:920px;margin:.25rem 0;line-height:1.55}.svg-hero .sv-eyebrow{color:#64e6be}.svg-hero .sv-status-badge{flex:none;margin-left:auto}
+.svg-grid{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:16px;align-items:start}.svg-panel{min-width:0;background:#fff;border:1px solid #d9e2ef;border-radius:18px;padding:clamp(16px,2vw,24px);box-shadow:0 10px 26px rgba(21,42,82,.05)}.svg-panel--wide{grid-column:1/-1}.svg-panel__heading{display:flex;align-items:flex-start;justify-content:space-between;gap:16px;margin-bottom:16px}.svg-panel__heading h2{margin:.15rem 0;font-size:clamp(1.15rem,2vw,1.45rem)}
+.svg-summary,.svg-inline-status{display:flex;justify-content:space-between;gap:12px;align-items:center;padding:14px 16px;border-radius:13px;margin-bottom:14px}.svg-summary.is-pass,.svg-inline-status.is-pass{background:#ebfbf4;border:1px solid #73d8ad;color:#075f43}.svg-summary.is-hold,.svg-inline-status.is-hold{background:#fff7e8;border:1px solid #f6c668;color:#784507}.svg-summary span,.svg-inline-status span{font-size:.9rem}
+.svg-check-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px}.svg-check{min-width:0;border:1px solid #d8e2ef;border-radius:14px;padding:14px}.svg-check.is-pass{border-color:#73d8ad;background:#f5fdf9}.svg-check.is-block{border-color:#f4a0a9;background:#fff6f7}.svg-check>div{display:flex;justify-content:space-between;gap:10px}.svg-check dl,.svg-preview dl,.svg-acceptance-list dl{display:grid;gap:8px;margin:12px 0 0}.svg-check dl div,.svg-preview dl div,.svg-acceptance-list dl div{min-width:0}.svg-check dt,.svg-preview dt,.svg-acceptance-list dt{font-size:.78rem;color:#60708a}.svg-check dd,.svg-preview dd,.svg-acceptance-list dd{margin:3px 0 0;overflow-wrap:anywhere}.svg-check code,.svg-hash code,.svg-preview code,.svg-acceptance-list code,.svg-timeline code{display:block;max-width:100%;font-size:.77rem;overflow-wrap:anywhere;word-break:break-all}
+.svg-hash{margin-top:14px;padding:14px;border:1px solid #aebeff;background:#f1f4ff;border-radius:13px}.svg-hash span{display:block;font-size:.8rem;color:#465672;margin-bottom:6px}.svg-hash .sv-button{margin-top:10px}
+.svg-preflight{display:grid;grid-template-columns:minmax(220px,.38fr) minmax(0,1fr);gap:18px}.svg-decision{display:flex;flex-direction:column;justify-content:center;align-items:flex-start;border-radius:16px;padding:20px}.svg-decision.is-ready{background:#eafbf3;border:1px solid #6bd7a5}.svg-decision.is-hold{background:#fff0f1;border:1px solid #ef929e}.svg-decision strong{font-size:clamp(1.45rem,3vw,2rem);margin:.35rem 0}.svg-preflight-list{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;list-style:none;padding:0;margin:0}.svg-preflight-list li{display:flex;justify-content:space-between;align-items:center;gap:10px;padding:11px 12px;border-radius:10px;background:#f3f6fa}.svg-preflight-list li.is-pass strong{color:#087654}.svg-preflight-list li.is-block{background:#fff1f2}.svg-preflight-list li.is-block strong{color:#bd1738}.svg-warning{grid-column:1/-1;margin:0;padding:12px;border-radius:10px;background:#fff7e8;color:#784507}
+.svg-acceptance-list{display:grid;gap:10px}.svg-acceptance-list article{border:1px solid #d8e2ef;border-radius:14px;padding:14px}.svg-acceptance-list article.is-accepted{border-color:#65d5a0;background:#f2fcf7}.svg-acceptance-list article>div{display:flex;justify-content:space-between;gap:10px}.svg-inline-status{margin-top:12px}.svg-help{color:#5b6b84;font-size:.85rem;overflow-wrap:anywhere}
+.svg-kpis{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}.svg-kpis article{background:#f3f6fa;border-radius:13px;padding:15px}.svg-kpis article.is-alert{background:#fff1f2}.svg-kpis span{display:block;color:#5d6c84;font-size:.84rem}.svg-kpis strong{display:block;font-size:1.65rem;margin-top:5px}.svg-privacy{display:flex;gap:14px;flex-wrap:wrap;margin-top:13px;padding:12px;border-radius:12px;background:#eefaf5;color:#075f43}
+.svg-handoff-controls{display:flex;align-items:end;gap:12px;flex-wrap:wrap}.svg-handoff-controls label{display:grid;gap:6px;min-width:min(100%,300px);font-weight:700}.svg-handoff-controls select{width:100%;border:1px solid #bcc9dc;border-radius:10px;background:#fff;padding:0 12px}.svg-preview{margin-top:16px;border:1px solid #95a8f6;border-radius:15px;padding:16px;background:#f6f7ff}.svg-preview dl{grid-template-columns:repeat(2,minmax(0,1fr))}.svg-preview>p{overflow-wrap:anywhere}.svg-preview>.sv-button{margin-top:8px}
+.svg-timeline{list-style:none;padding:0;margin:0;display:grid;gap:0}.svg-timeline li{display:grid;grid-template-columns:18px minmax(0,1fr);gap:12px;position:relative;padding-bottom:18px}.svg-timeline li>span{width:13px;height:13px;border-radius:50%;background:#15a178;margin-top:4px}.svg-timeline li:not(:last-child)>span:after{content:"";position:absolute;left:6px;top:19px;bottom:0;border-left:2px solid #cdd8e6}.svg-timeline small,.svg-timeline p{display:block;color:#5d6c84;margin:3px 0}.svg-timeline code{margin-top:5px}
+.svg-partial{margin:0 0 16px}.svg-partial h2{font-size:1rem}.svg-partial article{display:flex;justify-content:space-between;gap:12px;padding:12px 14px;margin-top:8px;border:1px solid #9dd9ee;background:#effaff;color:#075982;border-radius:12px}.svg-message{padding:13px 16px;border-radius:12px;margin:0 0 14px}.svg-message.is-success{background:#eafbf3;color:#075f43;border:1px solid #65d5a0}.svg-message.is-error{background:#fff1f2;color:#a41132;border:1px solid #ef929e}.svg-empty{padding:18px;border:1px dashed #bac7d9;border-radius:13px;background:#f8fafc}.svg-empty p{margin-bottom:0;color:#5d6c84}
+.svg-action-bar{position:fixed;z-index:35;left:0;right:0;bottom:0;display:flex;justify-content:space-between;align-items:center;gap:12px;padding:12px max(20px,calc((100vw - 1920px)/2 + 20px)) calc(12px + env(safe-area-inset-bottom));background:rgba(255,255,255,.97);border-top:1px solid #d4deeb;box-shadow:0 -8px 28px rgba(18,38,77,.1);backdrop-filter:blur(10px)}.svg-action-bar>div{display:flex;gap:8px;flex-wrap:wrap}.svg-action-bar .sv-button{min-width:130px}
+@media(max-width:900px){.svg-grid{grid-template-columns:1fr}.svg-panel--wide{grid-column:auto}.svg-check-grid{grid-template-columns:1fr}.svg-preflight{grid-template-columns:1fr}.svg-preview dl{grid-template-columns:1fr}}
+@media(max-width:600px){.svg-shell{padding:12px;padding-bottom:calc(330px + env(safe-area-inset-bottom))}.svg-hero{display:grid;padding:18px 14px;border-radius:18px}.svg-hero .sv-status-badge{margin:0}.svg-summary,.svg-inline-status,.svg-partial article{align-items:flex-start;flex-direction:column}.svg-preflight-list{grid-template-columns:1fr}.svg-kpis{grid-template-columns:1fr 1fr}.svg-action-bar{display:grid;padding:12px 12px calc(12px + env(safe-area-inset-bottom))}.svg-action-bar>div{display:grid;grid-template-columns:1fr}.svg-action-bar .sv-button{width:100%}.svg-handoff-controls{display:grid}.svg-handoff-controls label,.svg-handoff-controls .sv-button{width:100%}.svg-acceptance-list article>div{display:grid}}
+@media(prefers-reduced-motion:reduce){.svg-shell *{scroll-behavior:auto!important;transition-duration:.01ms!important;animation-duration:.01ms!important}}
+
 /* Safety Vote UX/UI Phase 2 — campaign creation and readiness wizard */
 .svw-shell { width: 100%; min-width: 0; min-height: 100%; padding: clamp(.75rem, 2vw, 1.75rem); padding-bottom: calc(6.5rem + env(safe-area-inset-bottom)); color: #0f172a; }
 .svw-shell *, .svw-shell *::before, .svw-shell *::after { box-sizing: border-box; }
@@ -681,6 +700,82 @@ body {
 }
 @media (prefers-reduced-motion: reduce) {
     .svo-shell *, .svo-shell *::before, .svo-shell *::after { scroll-behavior: auto !important; transition: none !important; animation: none !important; }
+}
+
+/* Safety Vote UX/UI Phase 6 — Result Review, Certification and Publication */
+.svr-shell { --svr-blue: #173b88; width: 100%; min-width: 0; max-width: none; min-height: 100%; overflow-x: clip; padding: clamp(.75rem, 2vw, 1.75rem); padding-bottom: calc(6.75rem + env(safe-area-inset-bottom)); background: #f5f8fc; color: #10213e; }
+.svr-shell button, .svr-shell input, .svr-shell select, .svr-shell textarea, .svr-shell a { min-width: 44px; min-height: 44px; }
+.svr-shell :focus-visible { outline: 3px solid #f59e0b; outline-offset: 3px; }
+.svr-hero { display: grid; grid-template-columns: 44px minmax(0, 1fr) auto; align-items: start; gap: 1rem; margin-top: 1rem; border-radius: 1.25rem; padding: clamp(1.25rem, 3vw, 2rem); background: linear-gradient(120deg, #172554, #1d4ed8); color: #fff; }
+.svr-hero h1 { margin: .2rem 0 .35rem; font-size: clamp(1.65rem, 3vw, 2.65rem); line-height: 1.12; }
+.svr-hero p { margin: 0; max-width: 72ch; }
+.svr-grid { display: grid; grid-template-columns: minmax(300px, .82fr) minmax(420px, 1.18fr); gap: 1rem; margin-top: 1rem; }
+.svr-panel { min-width: 0; border: 1px solid #d7e1ee; border-radius: 1rem; padding: clamp(1rem, 2vw, 1.35rem); background: #fff; box-shadow: 0 10px 26px rgb(15 23 42 / .05); }
+.svr-panel__heading { display: flex; align-items: start; justify-content: space-between; gap: 1rem; margin-bottom: 1rem; }
+.svr-panel__heading h2 { margin: .15rem 0 0; font-size: 1.15rem; }
+.svr-panel__heading > span { border-radius: 999px; padding: .35rem .65rem; background: #eef4ff; color: #1d4ed8; font-weight: 700; }
+.svr-snapshot-list { display: grid; gap: .65rem; }
+.svr-snapshot { display: grid; min-width: 0; width: 100%; grid-template-columns: minmax(0, 1fr) auto; gap: .25rem 1rem; border: 1px solid #d8e2ef; border-radius: .85rem; padding: .85rem; text-align: left; background: #fff; color: inherit; cursor: pointer; }
+.svr-snapshot:hover, .svr-snapshot.is-selected { border-color: #2563eb; background: #eff6ff; }
+.svr-snapshot strong { color: #1d4ed8; }
+.svr-snapshot small { color: #64748b; }
+.svr-snapshot code { grid-column: 1 / -1; min-width: 0; overflow-wrap: anywhere; color: #334155; font-size: .75rem; }
+.svr-readiness { border-radius: .85rem; padding: .85rem 1rem; }
+.svr-readiness.is-ready { border: 1px solid #86efac; background: #f0fdf4; color: #166534; }
+.svr-readiness.is-blocked { border: 1px solid #fca5a5; background: #fff1f2; color: #9f1239; }
+.svr-readiness ul { margin: .55rem 0 0; padding-left: 1.15rem; }
+.svr-metadata { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .65rem; margin: 1rem 0; }
+.svr-metadata div { border-radius: .75rem; padding: .75rem; background: #f8fafc; }
+.svr-metadata dt { color: #64748b; font-size: .78rem; }
+.svr-metadata dd { margin: .25rem 0 0; overflow-wrap: anywhere; font-weight: 750; }
+.svr-exact-hash { display: grid; gap: .55rem; border: 1px solid #a5b4fc; border-radius: .85rem; padding: .9rem; background: #eef2ff; }
+.svr-exact-hash code, .sv-hash-review code { display: block; overflow-wrap: anywhere; color: #1e1b4b; font-size: .78rem; }
+.svr-exact-hash .sv-button { justify-self: start; }
+.svr-verification__summary { display: flex; justify-content: space-between; gap: 1rem; border-radius: .8rem; padding: .85rem; background: #f8fafc; }
+.svr-verification ul { display: grid; gap: .45rem; margin: .8rem 0 0; padding: 0; list-style: none; }
+.svr-verification li { display: flex; justify-content: space-between; gap: 1rem; border-bottom: 1px solid #e2e8f0; padding: .5rem 0; }
+.svr-verification li.is-pass strong { color: #047857; }
+.svr-verification li.is-block strong { color: #be123c; }
+.svr-publication { border-radius: .85rem; padding: 1rem; }
+.svr-publication.is-hidden { border: 1px dashed #94a3b8; background: #f8fafc; }
+.svr-publication.is-visible { border: 1px solid #86efac; background: #f0fdf4; }
+.svr-public-rows { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .6rem; margin-top: .8rem; }
+.svr-public-rows article { display: grid; gap: .2rem; border-radius: .7rem; padding: .75rem; background: #fff; }
+.svr-partial-list { display: grid; gap: .5rem; margin-top: 1rem; }
+.svr-partial-list h2 { margin: 0; font-size: 1rem; }
+.svr-partial-list article, .svr-partial { display: grid; gap: .2rem; border: 1px solid #bae6fd; border-radius: .8rem; padding: .8rem 1rem; background: #f0f9ff; color: #075985; }
+.svr-partial p, .svr-empty p, .svr-help { margin: .35rem 0 0; color: #64748b; }
+.svr-message, .svr-receipt { display: grid; gap: .25rem; margin-top: 1rem; border-radius: .8rem; padding: .8rem 1rem; }
+.svr-message.is-error { border: 1px solid #fda4af; background: #fff1f2; color: #9f1239; }
+.svr-message.is-success, .svr-receipt { border: 1px solid #86efac; background: #f0fdf4; color: #166534; }
+.svr-receipt code { overflow-wrap: anywhere; }
+.svr-assignment-form { display: grid; grid-template-columns: minmax(0, 1fr) minmax(180px, .35fr) auto; align-items: end; gap: .75rem; margin-top: 1rem; }
+.svr-assignment-form label { display: grid; gap: .35rem; }
+.svr-assignment-form input, .svr-assignment-form select, .sv-dialog__field input { width: 100%; border: 1px solid #cbd5e1; border-radius: .7rem; padding: .65rem .75rem; background: #fff; color: #0f172a; }
+.sv-hash-review { display: grid; gap: .4rem; border: 1px solid #a5b4fc; border-radius: .75rem; padding: .75rem; background: #eef2ff; }
+.svr-action-bar { position: fixed; z-index: 50; right: 0; bottom: 0; left: var(--sidebar-width, 0px); display: flex; align-items: center; justify-content: space-between; gap: .65rem; border-top: 1px solid #cbd5e1; padding: .75rem clamp(.75rem, 2vw, 1.75rem) max(.75rem, env(safe-area-inset-bottom)); background: rgb(255 255 255 / .97); box-shadow: 0 -8px 24px rgb(15 23 42 / .08); backdrop-filter: blur(10px); }
+.svr-action-bar > div { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: .5rem; }
+@media (max-width: 1023px) {
+    .svr-grid { grid-template-columns: 1fr; }
+    .svr-action-bar { left: 0; }
+}
+@media (max-width: 767px) {
+    .svr-shell { padding: .7rem; padding-bottom: calc(15rem + env(safe-area-inset-bottom)); }
+    .svr-hero { grid-template-columns: 44px minmax(0, 1fr); }
+    .svr-hero > .sv-status-badge { grid-column: 2; justify-self: start; }
+    .svr-metadata, .svr-public-rows, .svr-assignment-form { grid-template-columns: 1fr; }
+    .svr-verification__summary { flex-direction: column; }
+    .svr-action-bar { align-items: stretch; flex-direction: column-reverse; }
+    .svr-action-bar > div { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .svr-action-bar .sv-button { width: 100%; }
+}
+@media (max-width: 430px) {
+    .svr-shell { padding-bottom: calc(24rem + env(safe-area-inset-bottom)); }
+    .svr-action-bar > div { grid-template-columns: 1fr; }
+    .svr-snapshot { grid-template-columns: 1fr; }
+}
+@media (prefers-reduced-motion: reduce) {
+    .svr-shell *, .svr-shell *::before, .svr-shell *::after { scroll-behavior: auto !important; transition: none !important; animation: none !important; }
 }
 body { margin: 0; font-family: 'Kanit', sans-serif; background-color: #1e5c3e; }
 *,

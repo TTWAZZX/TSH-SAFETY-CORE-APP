@@ -129,3 +129,96 @@ export function openSafetyVoteReasonDialog({
         else if (!event.shiftKey && root.activeElement === last) { event.preventDefault(); first.focus(); }
     });
 }
+
+export function openSafetyVoteHashReasonDialog({
+    title,
+    description,
+    expectedHash,
+    confirmLabel = 'ยืนยันการรับรอง',
+    onConfirm = () => {},
+    root = document
+}) {
+    closeSafetyVoteDialog(root);
+    dialogRestoreTarget = root.activeElement;
+    const hash = String(expectedHash || '').toLowerCase();
+    const host = root.createElement('div');
+    host.dataset.svDialog = 'hash-reason';
+    host.className = 'sv-dialog-layer';
+    host.innerHTML = `<div class="sv-dialog-backdrop" data-sv-dialog-close></div><section class="sv-dialog" role="alertdialog" aria-modal="true" aria-labelledby="sv-dialog-title" aria-describedby="sv-dialog-description"><h2 id="sv-dialog-title">${escHtml(title)}</h2><p id="sv-dialog-description">${escHtml(description)}</p><div class="sv-hash-review"><span>Result SHA-256 ที่ต้องตรวจสอบ</span><code>${escHtml(hash)}</code></div><label class="sv-dialog__field" for="sv-dialog-hash"><span>กรอก Result SHA-256 ให้ตรงกันทุกตัว</span><input id="sv-dialog-hash" type="text" inputmode="text" autocomplete="off" spellcheck="false" maxlength="64" aria-describedby="sv-dialog-hash-error"></label><p id="sv-dialog-hash-error" class="sv-dialog__error" role="alert" aria-live="assertive"></p><label class="sv-dialog__field" for="sv-dialog-reason"><span>เหตุผลการรับรอง</span><textarea id="sv-dialog-reason" rows="4" maxlength="1000" aria-describedby="sv-dialog-reason-error"></textarea></label><p id="sv-dialog-reason-error" class="sv-dialog__error" role="alert" aria-live="assertive"></p><div class="sv-dialog__actions"><button type="button" class="sv-button sv-button--secondary" data-sv-dialog-close>ยกเลิก</button><button type="button" class="sv-button sv-button--danger" data-sv-dialog-confirm disabled>${escHtml(confirmLabel)}</button></div></section>`;
+    root.body.appendChild(host);
+    const hashInput = host.querySelector('#sv-dialog-hash'), reasonInput = host.querySelector('#sv-dialog-reason');
+    const confirm = host.querySelector('[data-sv-dialog-confirm]');
+    const focusable = [hashInput, reasonInput, ...host.querySelectorAll('button')];
+    const validate = () => {
+        const hashMatches = hash.length === 64 && hashInput.value.trim().toLowerCase() === hash;
+        const hasReason = Boolean(reasonInput.value.trim());
+        confirm.disabled = !(hashMatches && hasReason);
+        return { hashMatches, hasReason };
+    };
+    hashInput.addEventListener('input', validate);
+    reasonInput.addEventListener('input', validate);
+    hashInput.focus();
+    const close = () => closeSafetyVoteDialog(root);
+    host.querySelectorAll('[data-sv-dialog-close]').forEach(button => button.addEventListener('click', close));
+    confirm.addEventListener('click', async () => {
+        const checked = validate();
+        if (!checked.hashMatches) { host.querySelector('#sv-dialog-hash-error').textContent = 'Result SHA-256 ไม่ตรงกับ snapshot ที่เลือก'; hashInput.setAttribute('aria-invalid', 'true'); hashInput.focus(); return; }
+        if (!checked.hasReason) { host.querySelector('#sv-dialog-reason-error').textContent = 'กรุณาระบุเหตุผลก่อนยืนยัน'; reasonInput.setAttribute('aria-invalid', 'true'); reasonInput.focus(); return; }
+        confirm.disabled = true; hashInput.disabled = true; reasonInput.disabled = true;
+        try { await onConfirm({ resultHash: hashInput.value.trim().toLowerCase(), reason: reasonInput.value.trim() }); close(); }
+        catch (error) { hashInput.disabled = false; reasonInput.disabled = false; validate(); host.querySelector('#sv-dialog-reason-error').textContent = error?.message || 'ยังรับรองผลไม่ได้ กรุณาตรวจสอบสิทธิ์และสถานะ'; }
+    });
+    host.addEventListener('keydown', event => {
+        if (event.key === 'Escape') { event.preventDefault(); close(); return; }
+        if (event.key !== 'Tab') return;
+        const enabled = focusable.filter(node => node && !node.disabled), first = enabled[0], last = enabled.at(-1);
+        if (event.shiftKey && root.activeElement === first) { event.preventDefault(); last?.focus(); }
+        else if (!event.shiftKey && root.activeElement === last) { event.preventDefault(); first?.focus(); }
+    });
+}
+
+export function openSafetyVoteTypedConfirmationDialog({
+    title,
+    description,
+    expectedConfirmation,
+    referenceLabel = '',
+    referenceRequired = false,
+    confirmLabel = 'ยืนยันและบันทึกหลักฐาน',
+    onConfirm = () => {},
+    root = document
+}) {
+    closeSafetyVoteDialog(root);
+    dialogRestoreTarget = root.activeElement;
+    const expected = String(expectedConfirmation || '');
+    const host = root.createElement('div');
+    host.dataset.svDialog = 'typed-confirmation';
+    host.className = 'sv-dialog-layer';
+    host.innerHTML = `<div class="sv-dialog-backdrop" data-sv-dialog-close></div><section class="sv-dialog" role="alertdialog" aria-modal="true" aria-labelledby="sv-dialog-title" aria-describedby="sv-dialog-description"><h2 id="sv-dialog-title">${escHtml(title)}</h2><p id="sv-dialog-description">${escHtml(description)}</p>${referenceLabel ? `<label class="sv-dialog__field" for="sv-dialog-reference"><span>${escHtml(referenceLabel)}</span><input id="sv-dialog-reference" type="text" maxlength="255" autocomplete="off"></label>` : ''}<div class="sv-hash-review"><span>ข้อความยืนยันที่ต้องกรอกให้ตรงทุกตัว</span><code>${escHtml(expected)}</code></div><label class="sv-dialog__field" for="sv-dialog-confirmation"><span>กรอกข้อความยืนยัน</span><input id="sv-dialog-confirmation" type="text" maxlength="160" autocomplete="off" spellcheck="false" aria-describedby="sv-dialog-confirmation-error"></label><p id="sv-dialog-confirmation-error" class="sv-dialog__error" role="alert" aria-live="assertive"></p><div class="sv-dialog__actions"><button type="button" class="sv-button sv-button--secondary" data-sv-dialog-close>ยกเลิก</button><button type="button" class="sv-button sv-button--danger" data-sv-dialog-confirm disabled>${escHtml(confirmLabel)}</button></div></section>`;
+    root.body.appendChild(host);
+    const reference = host.querySelector('#sv-dialog-reference'), confirmation = host.querySelector('#sv-dialog-confirmation'), confirm = host.querySelector('[data-sv-dialog-confirm]');
+    const focusable = [reference, confirmation, ...host.querySelectorAll('button')].filter(Boolean);
+    const validate = () => {
+        const exact = expected && confirmation.value.trim() === expected;
+        const hasReference = !referenceRequired || Boolean(reference?.value.trim());
+        confirm.disabled = !(exact && hasReference);
+        return { exact, hasReference };
+    };
+    reference?.addEventListener('input', validate); confirmation.addEventListener('input', validate); (reference || confirmation).focus();
+    const close = () => closeSafetyVoteDialog(root);
+    host.querySelectorAll('[data-sv-dialog-close]').forEach(button => button.addEventListener('click', close));
+    confirm.addEventListener('click', async () => {
+        const checked = validate(), error = host.querySelector('#sv-dialog-confirmation-error');
+        if (!checked.hasReference) { error.textContent = 'กรุณาระบุแหล่งอ้างอิงหลักฐานก่อนยืนยัน'; reference?.focus(); return; }
+        if (!checked.exact) { error.textContent = 'ข้อความยืนยันไม่ตรงกับข้อความที่กำหนด'; confirmation.setAttribute('aria-invalid', 'true'); confirmation.focus(); return; }
+        confirm.disabled = true; confirmation.disabled = true; if (reference) reference.disabled = true;
+        try { await onConfirm({ confirmation: confirmation.value.trim(), evidenceReference: reference?.value.trim() || '' }); close(); }
+        catch (caught) { confirmation.disabled = false; if (reference) reference.disabled = false; validate(); error.textContent = caught?.message || 'ยังบันทึกคำยืนยันไม่ได้ กรุณาตรวจสอบสิทธิ์และสถานะ'; }
+    });
+    host.addEventListener('keydown', event => {
+        if (event.key === 'Escape') { event.preventDefault(); close(); return; }
+        if (event.key !== 'Tab') return;
+        const enabled = focusable.filter(node => !node.disabled), first = enabled[0], last = enabled.at(-1);
+        if (event.shiftKey && root.activeElement === first) { event.preventDefault(); last?.focus(); }
+        else if (!event.shiftKey && root.activeElement === last) { event.preventDefault(); first?.focus(); }
+    });
+}

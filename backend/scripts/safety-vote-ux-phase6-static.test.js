@@ -1,0 +1,86 @@
+'use strict';
+
+const assert = require('assert');
+const fs = require('fs');
+const path = require('path');
+const { pathToFileURL } = require('url');
+const root = path.resolve(__dirname, '..', '..');
+const read = relative => fs.readFileSync(path.join(root, relative), 'utf8');
+
+(async () => {
+    const workspace = read('public/js/pages/admin-safety-vote-results.js');
+    const center = read('public/js/pages/admin-safety-vote-ux1.js');
+    const components = read('public/js/pages/safety-vote-ux-components.js');
+    const css = read('public/style.css');
+    const main = read('public/js/main.js');
+    const html = read('index.html');
+    const preflight = read('docs/safety-vote-ux-phase6-preflight-scope.md');
+    const modelSource = read('public/js/pages/safety-vote-results-model.mjs');
+    const model = await import(pathToFileURL(path.join(root, 'public', 'js', 'pages', 'safety-vote-results-model.mjs')).href);
+    let checks = 0;
+    const check = (value, message) => { checks += 1; assert(value, message); };
+
+    check(components.includes('__TSH_FEATURE_FLAGS__?.safetyVoteUxV1 === true'), 'UX flag must remain strict opt-in');
+    check(center.includes('renderLegacySafetyVoteFoundation(container)'), 'flag-off legacy rollback is missing');
+    check(center.includes("action: 'open-results'") && center.includes('renderSafetyVoteResultsWorkspace'), 'Admin result workspace entry is missing');
+    check(workspace.includes('/results/snapshots`'), 'snapshot read API is missing');
+    check(workspace.includes('/results/calculate`'), 'standard calculation handoff is missing');
+    check(workspace.includes('/results/recount`'), 'secret recount handoff is missing');
+    check(workspace.includes('/freeze`'), 'freeze transition is missing');
+    check(workspace.includes("secret ? 'certify-secret' : 'certify'"), 'campaign-adaptive certification route is missing');
+    check(workspace.includes('/publish`'), 'publication route is missing');
+    check(workspace.includes('/certifiers`'), 'existing certifier assignment route is missing');
+    check(workspace.includes('/release-verification`'), 'SHE governance verification read is missing');
+    check(workspace.includes('/campaigns/${id}/results`'), 'published secret result read is missing');
+    check(!workspace.includes('/acceptance-evidence'), 'Phase 6 must not mutate SHE acceptance evidence');
+    check(!workspace.includes('/integrations/handoffs/confirm'), 'Phase 6 must not hand off results externally');
+    check(!workspace.includes('/revoke-certification'), 'revocation is outside Phase 6 UX scope');
+    check(workspace.includes('openSafetyVoteHashReasonDialog'), 'exact-hash certification dialog is missing');
+    check(components.includes('maxlength="64"') && components.includes('resultHash: hashInput.value.trim().toLowerCase()'), 'exact 64-character hash entry is incomplete');
+    check(components.includes('role="alertdialog"') && components.includes('aria-modal="true"'), 'irreversible certification dialog semantics are incomplete');
+    check(workspace.includes('dual control') && workspace.includes('certify-secret'), 'secret dual-control wording/route is incomplete');
+    check(workspace.includes('ไม่แสดงรายละเอียดก่อนเผยแพร่'), 'pre-publication privacy wording is missing');
+    check(workspace.includes('state.partial') && workspace.includes('ไม่ถือว่าผ่าน'), 'partial governance state is missing');
+    check(workspace.includes('SAFETY_VOTE_MODULE_DISABLED') && workspace.includes('fail-closed'), 'module-disabled fail-closed state is missing');
+    check(workspace.includes('PERMISSION_DENIED') && workspace.includes('state.denied'), 'permission denied state is missing');
+    check(workspace.includes('if (state.busy) return'), 'duplicate action guard is missing');
+    check(workspace.includes('navigator.clipboard') && workspace.includes('Exact Result SHA-256'), 'exact hash review/copy affordance is missing');
+    check(modelSource.includes('ResultVisibility') && workspace.includes('publicPreview'), 'result visibility preview is missing');
+    check(!workspace.includes('SafetyVote_ResultRows'), 'client must not query result tables directly');
+    check(!workspace.includes('BallotAnswers'), 'client must not query ballot answers');
+    check(/safety-vote-ux(?:6|7)-r1/.test(main) && /safety-vote-ux(?:6|7)-r1/.test(html), 'Phase 6-or-later cache chain is incomplete');
+    check(css.includes('Safety Vote UX/UI Phase 6'), 'Phase 6 CSS scope marker is missing');
+    check(css.includes('.svr-action-bar') && css.includes('env(safe-area-inset-bottom)'), 'sticky action bar safe-area support is missing');
+    check(css.includes('.svr-shell button') && css.includes('min-height: 44px'), '44 px controls are not enforced');
+    check(css.includes('.svr-shell :focus-visible'), 'keyboard focus indicator is missing');
+    check(css.includes('@media (max-width: 430px)') && css.includes('@media (max-width: 767px)') && css.includes('@media (max-width: 1023px)'), 'responsive breakpoints are incomplete');
+    check(css.includes('@media (prefers-reduced-motion: reduce)'), 'reduced-motion support is missing');
+    check(css.includes('overflow-x: clip'), 'horizontal overflow containment is missing');
+
+    const frozen = model.normalizeSnapshot({ id: 7, SnapshotNo: 2, Status: 'Frozen', ResultHash: 'a'.repeat(64), ReconciliationState: 'balanced', QuorumState: 'met', TieState: 'none' });
+    check(frozen.canCertify && !frozen.canFreeze && !frozen.canPublish, 'Frozen snapshot actions are incorrect');
+    const certified = model.normalizeSnapshot({ id: 8, SnapshotNo: 3, Status: 'Certified', ResultHash: 'b'.repeat(64) });
+    check(certified.canPublish && certified.canCertify, 'Certified snapshot actions are incorrect');
+    check(model.selectedSnapshot([{ id: 1, SnapshotNo: 1 }, { id: 2, SnapshotNo: 2 }], 1).id === 1, 'snapshot selection is incorrect');
+    check(model.selectedSnapshot(model.snapshotList([frozen]), frozen.id).reconciliation === 'balanced', 'normalized snapshot selection must preserve readiness metadata');
+    check(model.snapshotList([{ id: 1, SnapshotNo: 1 }, { id: 2, SnapshotNo: 2 }])[0].id === 2, 'snapshot ordering is incorrect');
+    check(model.resultReadiness(frozen, { secret: true, verification: { privacySafe: true, identityMappings: 0 } }).ready, 'balanced private snapshot should be ready');
+    check(!model.resultReadiness({ ...frozen, tie: 'tie' }, { secret: true, verification: { privacySafe: true, identityMappings: 0 } }).ready, 'tie state must block readiness');
+    check(!model.resultReadiness(frozen, { secret: true, verification: { privacySafe: false, identityMappings: 1 } }).ready, 'identity mapping must block secret readiness');
+    check(model.isSecretCampaign({ CampaignType: 'secret_election' }), 'secret election detection failed');
+    check(model.isSecretCampaign({ PrivacyMode: 'secret_ballot' }), 'secret ballot detection failed');
+    check(!model.isSecretCampaign({ CampaignType: 'survey', PrivacyMode: 'confidential' }), 'non-secret campaign misclassified');
+    check(!model.publicPreview({ campaign: { ResultVisibility: 'certified_only' }, snapshot: frozen }).visible, 'pre-publication preview must remain hidden');
+    const preview = model.publicPreview({ campaign: {}, snapshot: { published: true }, published: { rows: [{ positionCode: 'P1', count: 4, rank: 1, state: 'elected' }] } });
+    check(preview.visible && preview.rows[0].count === 4, 'published preview is incorrect');
+    const verification = model.verificationChecks({ checks: { report: { storedHash: 'a', calculatedHash: 'a' }, result: { storedHash: 'b', calculatedHash: 'c' } } });
+    check(verification[0].pass && !verification[1].pass, 'verification comparison is incorrect');
+
+    for (const excluded of ['backend/routes/**', 'api/**', 'backend/migrations/**', 'shared/**']) check(preflight.includes(excluded), `excluded scope missing: ${excluded}`);
+    check(preflight.includes('d0a9b08e3f3b4a230de3991ef663a25daeacdbe5'), 'immutable Phase 6 baseline is missing');
+    check(preflight.includes('ambiguous-column') && preflight.includes('jury-progress'), 'baseline jury-progress limitation is missing');
+    check(preflight.includes('SAFETY_VOTE_CERTIFY') && preflight.includes('exact result hash'), 'certification ownership is incomplete');
+    check(preflight.includes('GO_FOR_UX_PHASE6_LOCAL_IMPLEMENTATION_WITH_BASELINE_LIMITATION'), 'preflight decision is missing');
+
+    console.log(`Safety Vote UX Phase 6 static/unit/accessibility/scope contract: PASS (${checks} assertions)`);
+})().catch(error => { console.error(error.stack || error); process.exitCode = 1; });

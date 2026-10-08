@@ -8,10 +8,12 @@ import {
     safetyVoteEmptyState,
     safetyVoteRoleNav,
     safetyVoteStatusBadge
-} from './safety-vote-ux-components.js?v=20261008-safety-vote-ux5-r1';
+} from './safety-vote-ux-components.js?v=20261008-safety-vote-ux7-r1';
 import { campaignMetrics, isNearClose, sectionsForCampaign, statusGroup } from './safety-vote-ux-model.mjs?v=20261008-safety-vote-ux1-r1';
 import { renderSafetyVoteCampaignWizard } from './safety-vote-campaign-wizard.js?v=20261008-safety-vote-ux2-r1';
-import { renderSafetyVoteOperationsWorkspace } from './admin-safety-vote-operations.js?v=20261008-safety-vote-ux5-r1';
+import { renderSafetyVoteOperationsWorkspace } from './admin-safety-vote-operations.js?v=20261008-safety-vote-ux7-r1';
+import { renderSafetyVoteResultsWorkspace } from './admin-safety-vote-results.js?v=20261008-safety-vote-ux7-r1';
+import { renderSafetyVoteGovernanceWorkspace } from './admin-safety-vote-governance.js?v=20261008-safety-vote-ux7-r1';
 
 const VIEW_LABELS = {
     active: 'กำลังดำเนินการ',
@@ -100,7 +102,7 @@ function detailMarkup(row) {
     if (!row) return `<section class="sv-master-detail__detail sv-detail-placeholder" aria-label="รายละเอียดแคมเปญ"><span aria-hidden="true">←</span><h2>เลือกแคมเปญเพื่อดูรายละเอียด</h2><p>รายละเอียดและเมนูที่เกี่ยวข้องกับประเภทแคมเปญจะแสดงในพื้นที่นี้</p></section>`;
     const sections = sectionsForCampaign(row);
     const draftWarning = String(row.Status).toLowerCase() === 'draft' ? `<div class="sv-readiness-warning" role="status"><strong>ควรตรวจความพร้อมก่อนเปิดแคมเปญ</strong><span>ตรวจเนื้อหา ผู้มีสิทธิ์ กำหนดการ และการแสดงผลให้ครบในพื้นที่จัดการ</span></div>` : '';
-    return `<section class="sv-master-detail__detail" aria-labelledby="sv-detail-title"><div class="sv-detail-header"><div><p class="sv-eyebrow">${escHtml(row.CampaignCode)}</p><h2 id="sv-detail-title">${escHtml(row.TitleTh || 'ไม่มีชื่อแคมเปญ')}</h2><p>${escHtml(TYPE_LABELS[row.CampaignType] || row.CampaignType || 'ไม่ระบุประเภท')} · ${escHtml(PRIVACY_LABELS[row.PrivacyMode] || 'ไม่ระบุรูปแบบความเป็นส่วนตัว')}</p></div>${safetyVoteStatusBadge(row.Status)}</div>${draftWarning}<nav class="sv-workspace-nav" aria-label="ส่วนงานสำหรับแคมเปญประเภท ${escHtml(TYPE_LABELS[row.CampaignType] || row.CampaignType || '')}">${sections.map(([key, label], index) => `<button type="button" data-sv-section="${key}" ${index === 0 ? 'aria-current="page"' : ''}>${escHtml(label)}</button>`).join('')}</nav><dl class="sv-detail-summary"><div><dt>ผู้รับผิดชอบ</dt><dd>${escHtml(row.OwnerEmployeeID || 'ยังไม่ระบุ')}</dd></div><div><dt>เปิดกิจกรรม</dt><dd>${formattedDate(row.ScheduledOpenAt || row.OpenAt)}</dd></div><div><dt>ปิดกิจกรรม</dt><dd>${formattedDate(row.ScheduledCloseAt || row.CloseAt)}</dd></div><div><dt>การแสดงผล</dt><dd>${escHtml(RESULT_LABELS[row.ResultVisibility] || 'ตามการตั้งค่าแคมเปญ')}</dd></div></dl>${safetyVoteActionBar([{ label: 'ศูนย์ปฏิบัติการ', action: 'open-operations', primary: true }, { label: 'พื้นที่จัดการ', action: 'open-workspace' }, { label: 'ยกเลิกการเลือก', action: 'clear-selection' }])}</section>`;
+    return `<section class="sv-master-detail__detail" aria-labelledby="sv-detail-title"><div class="sv-detail-header"><div><p class="sv-eyebrow">${escHtml(row.CampaignCode)}</p><h2 id="sv-detail-title">${escHtml(row.TitleTh || 'ไม่มีชื่อแคมเปญ')}</h2><p>${escHtml(TYPE_LABELS[row.CampaignType] || row.CampaignType || 'ไม่ระบุประเภท')} · ${escHtml(PRIVACY_LABELS[row.PrivacyMode] || 'ไม่ระบุรูปแบบความเป็นส่วนตัว')}</p></div>${safetyVoteStatusBadge(row.Status)}</div>${draftWarning}<nav class="sv-workspace-nav" aria-label="ส่วนงานสำหรับแคมเปญประเภท ${escHtml(TYPE_LABELS[row.CampaignType] || row.CampaignType || '')}">${sections.map(([key, label], index) => `<button type="button" data-sv-section="${key}" ${index === 0 ? 'aria-current="page"' : ''}>${escHtml(label)}</button>`).join('')}</nav><dl class="sv-detail-summary"><div><dt>ผู้รับผิดชอบ</dt><dd>${escHtml(row.OwnerEmployeeID || 'ยังไม่ระบุ')}</dd></div><div><dt>เปิดกิจกรรม</dt><dd>${formattedDate(row.ScheduledOpenAt || row.OpenAt)}</dd></div><div><dt>ปิดกิจกรรม</dt><dd>${formattedDate(row.ScheduledCloseAt || row.CloseAt)}</dd></div><div><dt>การแสดงผล</dt><dd>${escHtml(RESULT_LABELS[row.ResultVisibility] || 'ตามการตั้งค่าแคมเปญ')}</dd></div></dl>${safetyVoteActionBar([{ label: 'ศูนย์ปฏิบัติการ', action: 'open-operations' }, { label: 'ผลและการรับรอง', action: 'open-results' }, { label: 'ธรรมาภิบาล', action: 'open-governance', primary: true }, { label: 'พื้นที่จัดการ', action: 'open-workspace' }, { label: 'ยกเลิกการเลือก', action: 'clear-selection' }])}</section>`;
 }
 
 function render() {
@@ -149,6 +151,18 @@ function openOperationsWorkspace() {
     renderSafetyVoteOperationsWorkspace(state.container, { campaign: row, onClose: () => render() });
 }
 
+function openResultsWorkspace() {
+    const row = selectedCampaign();
+    if (!row) return;
+    renderSafetyVoteResultsWorkspace(state.container, { campaign: row, onClose: () => render() });
+}
+
+function openGovernanceWorkspace() {
+    const row = selectedCampaign();
+    if (!row) return;
+    renderSafetyVoteGovernanceWorkspace(state.container, { campaign: row, onClose: () => render() });
+}
+
 function handleAction(action) {
     if (action === 'retry') { load(); return; }
     if (action === 'clear-search') { state.query = ''; render(); return; }
@@ -157,6 +171,8 @@ function handleAction(action) {
     if (action === 'close-drawer') { state.drawerOpen = false; render(); return; }
     if (action === 'new-campaign') { openCampaignWizard(); return; }
     if (action === 'open-operations') { openOperationsWorkspace(); return; }
+    if (action === 'open-results') { openResultsWorkspace(); return; }
+    if (action === 'open-governance') { openGovernanceWorkspace(); return; }
     if (action === 'open-workspace') {
         const row = selectedCampaign();
         if (!row) return;

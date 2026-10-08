@@ -1,5 +1,19 @@
 # TSH Safety Core Activity - AGENTS.md
 
+## Safety Vote UX/UI Phase 7 Governance, Audit and Release Evidence Workspace (Local only, 2026-10-08)
+
+- The strict-opt-in `safetyVoteUxV1` presentation now provides the Admin “ธรรมาภิบาลและหลักฐานการปล่อยใช้งาน Safety Vote” workspace with immutable checksum comparison, SHE-owned acceptance evidence, privacy-safe bounded timeline, observability/alert summary, aggregate handoff preview, fixture-only exact confirmation and authoritative release-preflight HOLD. The flag remains default OFF and `module_enabled` remains independently fail-closed.
+- Authenticated guarded Chrome UAT passes Admin, audit-view-only, denied and module-disabled flows at 390×844, 430×932, 768×1024, 1366×768 and 1920×1080. Direct in-app Browser inspection also passes the 390×844 held fixture with no horizontal overflow, sub-44 px visible target, Production authorization, protected voter/choice disclosure or browser exception.
+- Phase 7/6/5/4/3/2/1 static contracts pass 59/58/54/50/45/43/30 assertions. Safety Vote Phase 1–7 Node/PHP parity, Phase 8.3.1 disabled-mode parity and the existing guarded Phase 7 Node/PHP lifecycle pass. UAT retained two ballots and zero identity mappings, added exactly one SHE acceptance and one locally delivered fixture handoff, left Production/external delivery false and removed all disposable database/report residue.
+- Immutable source remains false in the existing release-preflight contract, so the workspace correctly reports `HOLD` and never authorizes deployment. Accepted evidence: `backups/local/safety-vote-ux-phase7-1791473598403/`; report: `docs/safety-vote-ux-phase7-governance-audit-release-evidence-workspace.md`. No route/API/schema/migration or protected business logic changed; no Production connection, external dispatch, deploy, commit or push occurred. Decision: `PASS_LOCAL_UAT_READY_FOR_UX_PHASE8`.
+
+## Safety Vote UX/UI Phase 6 Result Review, Certification and Publication (Local only, 2026-10-08)
+
+- The strict-opt-in `safetyVoteUxV1` presentation now provides the Admin “ตรวจสอบและรับรองผล Safety Vote” workspace with immutable snapshot comparison, readiness metadata, complete SHA-256 review/re-entry, reasoned recount, standard freeze/certification/publication and secret-election two-person certification. The flag remains default OFF and `module_enabled` remains independently fail-closed.
+- Authenticated guarded Chrome UAT passes Admin, two independent certifiers, result-view-only and denied flows at 390×844, 430×932, 768×1024, 1366×768 and 1920×1080. There is no horizontal overflow, sub-44 px visible target, protected identity/choice leakage, unexpected API error or browser exception; partial capabilities and module-disabled states fail closed.
+- Phase 6/5/4/3/2/1 static contracts pass 58/54/50/45/43/30 assertions. Safety Vote Phase 1–7 Node/PHP parity, Phase 8.3.1 disabled-mode parity and the guarded Phase 6 Node/PHP API lifecycle pass. UX UAT retained two ballots/two participations/zero identity mappings, created one reasoned recount and three intended certifications, and left zero disposable-database residue.
+- No route, API, shared contract, migration, schema or result-calculation logic changed. Accepted evidence: `backups/local/safety-vote-ux-phase6-1791472485401/`; report: `docs/safety-vote-ux-phase6-result-review-certification-publication-workspace.md`. No Production connection, deploy, commit or push occurred. Decision: `PASS_LOCAL_UAT_READY_FOR_UX_PHASE7`.
+
 ## Safety Vote UX/UI Phase 5 Operations, Analytics and Result Readiness (Local only, 2026-10-08)
 
 - The strict-opt-in `safetyVoteUxV1` presentation now provides the Admin “ศูนย์ปฏิบัติการ Safety Vote” with campaign/stage health, safe lifecycle timeline, server-suppressed turnout funnel, notification delivery/queue status, result-snapshot readiness and confirmed aggregate report/schedule actions. The flag remains default OFF and `module_enabled` remains independently fail-closed.
