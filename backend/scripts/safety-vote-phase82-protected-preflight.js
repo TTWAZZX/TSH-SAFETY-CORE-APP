@@ -209,7 +209,14 @@ async function main() {
     multipleStatements: true
   });
   await restore.query('CREATE TABLE Admin_RolePermissions(role VARCHAR(50),permission VARCHAR(100),granted TINYINT,PRIMARY KEY(role,permission))');
-  if (/(CREATE\s+TABLE|INSERT\s+INTO|SET\s+FOREIGN_KEY_CHECKS)/i.test(sql)) await restore.query(sql);
+  if (/(CREATE\s+TABLE|INSERT\s+INTO|SET\s+FOREIGN_KEY_CHECKS)/i.test(sql)) {
+    await restore.query('SET FOREIGN_KEY_CHECKS=0');
+    try {
+      await restore.query(sql);
+    } finally {
+      await restore.query('SET FOREIGN_KEY_CHECKS=1');
+    }
+  }
   const [[restoredTables]] = await restore.query("SELECT COUNT(*) count FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_SCHEMA=? AND LEFT(TABLE_NAME,11)='SafetyVote_'", [restoreDb]);
   const [[restoredSettings]] = Number(restoredTables.count) > 0 && sql.includes('SafetyVote_Settings')
     ? await restore.query('SELECT COUNT(*) count FROM SafetyVote_Settings')

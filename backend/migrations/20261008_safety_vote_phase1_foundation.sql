@@ -251,7 +251,7 @@ INSERT INTO SafetyVote_Settings(SettingKey,SettingValue,UpdatedBy) VALUES
 ('allowed_file_types','image/jpeg,image/png,image/webp,application/pdf','migration')
 ON DUPLICATE KEY UPDATE SettingKey=VALUES(SettingKey);
 
-INSERT IGNORE INTO Admin_RolePermissions(role,permission,granted)
+INSERT IGNORE INTO admin_rolepermissions(role,permission,granted)
 SELECT r.role,p.permission,IF(r.role='ADMIN',1,IF(p.permission='SAFETY_VOTE_VIEW',1,0))
 FROM (
     SELECT 'ADMIN' role UNION ALL SELECT 'USER' UNION ALL SELECT 'VIEWER' UNION ALL
