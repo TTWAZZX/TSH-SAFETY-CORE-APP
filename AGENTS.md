@@ -1,5 +1,41 @@
 # TSH Safety Core Activity - AGENTS.md
 
+## Safety Vote UX/UI Phase 5 Operations, Analytics and Result Readiness (Local only, 2026-10-08)
+
+- The strict-opt-in `safetyVoteUxV1` presentation now provides the Admin “ศูนย์ปฏิบัติการ Safety Vote” with campaign/stage health, safe lifecycle timeline, server-suppressed turnout funnel, notification delivery/queue status, result-snapshot readiness and confirmed aggregate report/schedule actions. The flag remains default OFF and `module_enabled` remains independently fail-closed.
+- Authenticated guarded Chrome UAT passes Admin/result-view-only/denied flows at 390×844, 430×932, 768×1024, 1366×768 and 1920×1080 with no horizontal overflow, sub-44 px visible targets, protected ballot/identity leakage, unexpected API errors or browser exceptions. Secret dimensions, denied access, module disabled and partial capabilities fail closed.
+- Phase 5/4/3/2/1 static contracts pass 54/50/45/43/30 assertions. Safety Vote Phase 1–7 Node/PHP parity, Phase 8.3.1 disabled-mode parity and existing guarded Phase 5 Node/PHP API lifecycle pass. Confirmed UX actions added seven test notifications, one aggregate report/export and one due schedule transition while ballots/participation stayed unchanged, identity/certification stayed zero and generated-file/disposable-database residue is zero.
+- The baseline Node/PHP jury-progress query has an ambiguous unqualified `Status` column and returns 500 with data; route/API changes were excluded, so the UX exposes a production-worded partial state and preserves all other panels. Evidence: `backups/local/safety-vote-ux-phase5-1791466271326/`; report: `docs/safety-vote-ux-phase5-operations-analytics-result-readiness-workspace.md`. No Production connection, API/schema/migration change, deploy, commit or push occurred. Decision: `PASS_LOCAL_UAT_READY_FOR_UX_PHASE6_WITH_BASELINE_LIMITATION`.
+
+## Safety Vote UX/UI Phase 4 Juror Assignment and Scoring Workspace (Local only, 2026-10-08)
+
+- The strict-opt-in `safetyVoteUxV1` presentation now provides “งานประเมินของฉัน”, assignment status/progress, server-derived blind candidate aliases, criteria scoring, local draft recovery, complete-sheet server autosave, validation/review and accessible immutable-submit/recusal dialogs. The flag remains default OFF and server `module_enabled` remains independently fail-closed.
+- Authenticated guarded Chrome UAT passes Juror flows at 390×844, 430×932, 768×1024, 1366×768 and 1920×1080 with no horizontal overflow, no sub-44 px visible targets, real-name leakage, duplicate submit, unassigned detail disclosure or privacy-unsafe receipt. Permission denial and module-disabled states pass.
+- Phase 4/3/2/1 static contracts pass 50/45/43/30 assertions. Safety Vote Phase 1–7 Node/PHP parity and Phase 8.3.1 disabled-mode parity pass. The guarded lifecycle produced five immutable submitted assignments, one recusal, 20 submitted score rows, no ballot/participation/certification/result mutation and zero browser/disposable-database residue.
+- Evidence is under `backups/local/safety-vote-ux-phase4-1791464614885/`; report: `docs/safety-vote-ux-phase4-juror-assignment-scoring-workspace.md`. No Production connection, API/schema/migration change, deploy, commit or push occurred. Decision: `PASS_LOCAL_UAT_READY_FOR_UX_PHASE5`.
+
+## Safety Vote UX/UI Phase 3 User Participation and Ballot Review (Local only, 2026-10-08)
+
+- The strict-opt-in `safetyVoteUxV1` presentation now provides “กิจกรรมของฉัน”, campaign-adaptive participation, review-before-submit, accessible immutable confirmation, stable ballot retry keys, duplicate-submit protection and privacy-safe receipts. The flag remains default OFF and server `module_enabled` remains independently fail-closed.
+- Authenticated local Chrome UAT passes at 390×844, 430×932, 768×1024, 1366×768 and 1920×1080 with no horizontal overflow, no sub-44 px visible targets, exact idempotent replay, changed-payload conflict, permission denial and module-disabled states. Secret-ballot identity rows remained zero.
+- Phase 3/2/1 static contracts pass 45/43/30 assertions. Safety Vote Phase 1–7 Node/PHP parity and Phase 8.3.1 disabled-mode parity pass. The guarded lifecycle produced six intended ballots/participations, no jury/certification/result mutation and zero disposable-database residue.
+- Evidence is under `backups/local/safety-vote-ux-phase3-1791463635656/`; report: `docs/safety-vote-ux-phase3-user-participation-ballot-review-workspace.md`. No Production connection, schema/migration change, deploy, commit or push occurred. Decision: `PASS_LOCAL_UAT_READY_FOR_UX_PHASE4`.
+
+## Safety Vote UX/UI Phase 2 Campaign Creation and Readiness Workspace (Local only, 2026-10-08)
+
+- On authoritative baseline `84914eb0ba69f4b12ace9ed5be3d671bf69e718b`, the strict opt-in Safety Vote shell now includes six campaign templates and an eight-step responsive creation/readiness wizard with serialised autosave, validation summary, real-role previews, eligibility preview/freeze, readiness checklist, accessible confirmations and a safe-area-aware sticky action bar. Flag OFF still renders the legacy UI; `module_enabled=0` remains fail-closed without campaign reads.
+- Survey/Popular Vote may open only after the existing server preflight passes. Secret Election, Submission Challenge, Nomination and Jury Scoring route to the preserved advanced workspace and are never opened by guessed setup. No Node/PHP route or contract, migration, schema, ballot/privacy/eligibility/jury/certification/result logic changed.
+- Static/unit gates pass 43 assertions, Phase 1 regression passes 30 assertions, Phase 1–7 Node/PHP parity and the Phase 8.3.1 disabled gate pass. Authenticated guarded Chrome UAT passes Admin/User/Juror at all five required viewports, with zero overflow, sub-44 px actionable targets, console errors, unexpected 5xx or disposable database residue.
+- The UAT mutation ledger contained exactly five opened wizard campaigns, five questions and five frozen eligibility snapshots, with zero ballot/participation/jury-score/certification/result rows before the guarded database was dropped. Accepted evidence: `backups/local/safety-vote-ux-phase2-1791462675106/`; report: `docs/safety-vote-ux-phase2-campaign-creation-readiness-workspace.md`.
+- Decision: `LOCAL_UX_PHASE2_PASS — FEATURE_DEFAULT_OFF — NO_PRODUCTION_CHANGE`. No Production connection, deploy, commit or push occurred.
+
+## Safety Vote UX/UI Phase 1 Responsive Shell and Admin Campaign Center (Local only, 2026-10-08)
+
+- On authoritative baseline `84914eb0ba69f4b12ace9ed5be3d671bf69e718b`, a strict opt-in `safetyVoteUxV1` presentation shell now provides the full-width Thai Admin campaign center, KPI/search/status views, desktop table/master-detail, tablet drawer, mobile cards, shared accessible states/dialog/action bar and assignment-aware User/Juror navigation. Flag OFF renders the existing UI unchanged; server `module_enabled` remains default disabled and fail-closed.
+- No Node/PHP API, shared contract, migration, schema, ballot/privacy/eligibility/jury/certification/result logic changed. Phase 1–7 Node/PHP parity and the Phase 8.3.1 disabled gate pass.
+- Authenticated guarded Chrome UAT passes Admin/User/Juror at all five required viewports (15 combinations), with no horizontal overflow, minimum 44×44 px visible controls, keyboard/dialog/drawer semantics, adaptive navigation, denied/empty/disabled states, zero console/5xx errors and zero disposable database residue. Accepted evidence: `backups/local/safety-vote-ux-phase1-1791461607095/`.
+- Decision: `LOCAL_UX_PHASE1_PASS — FEATURE_DEFAULT_OFF — NO_PRODUCTION_CHANGE`. No Production connection, deploy, commit or push occurred. Full report: `docs/safety-vote-ux-phase1-responsive-admin-campaign-center.md`; entry gate: `docs/safety-vote-ux-phase1-preflight-scope.md`.
+
 ## Safety Vote Phase 8.3.1 Disabled-mode Fail-closed Remediation (Local only, 2026-10-08)
 
 - Node and PHP now enforce one authenticated module-state gate before every Safety Vote Phase 1–7 router. When `module_enabled=0`, every operational route—including workspace, integrations and ballot submit—returns `503 SAFETY_VOTE_MODULE_DISABLED`; only authenticated read-only health and per-campaign release preflight remain reachable.
@@ -71,6 +107,22 @@
 - Contract `2026-10-08-safety-vote-phase0-r1` now has a local Platform Foundation: explicit additive/idempotent ten-table migration, data-preserving disable rollback, 11 permission keys, fail-closed schema health, Node/PHP Draft Campaign CRUD/void parity, read-only System Console Master picker, eligibility rule preview, private files and bounded audit.
 - Guarded disposable migration and authenticated Node/PHP API lifecycle pass, including private-file denial/removal and zero disposable-database residue. The user module and ballot submission remain absent/disabled; `module_enabled=0`.
 - The real local schema was inspected read-only before implementation. No Production connection, deploy, commit or push occurred, and the unrelated dirty `backend/scripts/patrol-checkin-v2.test.js` remains untouched. Closeout: `docs/safety-vote-phase1-platform-foundation.md`. Decision: `PHASE_1_LOCAL_PASS — READY_FOR_PHASE_2_AUTHORIZATION — HOLD_FOR_PRODUCTION`.
+## Safety Vote UX/UI Phase 1 Baseline Entry Gate (Historical HOLD, superseded 2026-10-08)
+
+- This entry preserves the pre-pull audit at `aa270b0`. It was superseded when `origin/main` supplied the authoritative Safety Vote baseline through commit `84914eb`; the original HOLD evidence remains useful as an audit trail but is no longer the current source-availability decision.
+
+- Phase 1 stopped before Runtime edits with decision `HOLD_BASELINE_NOT_FOUND`. The current worktree, all available local/remote-tracking refs, Git content/path history and a fresh read-only `git ls-remote --heads origin` check contain no authoritative Safety Vote page/module, Node route, PHP handler, shared contract, migration, explicit Juror/Ballot capability contract or Safety Vote feature flag.
+- `main`, `origin/main` and `origin/HEAD` remain at `aa270b0`; the live `origin` exposes only `main`, `integration/production-bbs-20260905`, `restore-working-version` and `wip/bbs-card-designer-10f2`. `aa270b0` is an immutable current-app reference, not a Safety Vote baseline.
+- Admin/User/Juror authenticated UAT and the five required viewport runs are correctly `NOT TESTABLE`, not passed or failed, because no Safety Vote routes exist. No voting engine, schema, API or inferred privacy/ballot contract was created. Phase 2 is not authorized until Phase 1 is unblocked and accepted.
+- Only this documentation-only gate report and the instruction log changed during the attempt. No Runtime, API, database, schema, configuration, business data or authentication data changed; no checkout/fetch/server/database/Production operation, deploy, commit or push occurred. Evidence and the resume command: `docs/safety-vote-ux-phase1-baseline-gate-hold.md`.
+
+## Safety Vote UX/UI Phase 0 — UX Audit and Responsive Design Contract (Local only, 2026-10-08)
+
+- The source-availability constraint recorded during this audit was superseded by the later `84914eb` baseline import. The UX findings and responsive design contract remain the governing input for the separate UX/UI workstream.
+- The Phase 0 read-only source/UI audit and responsive design contract is complete. It defines production information architecture, Thai-first wording, a full-width desktop workspace, mobile-first Admin/User/Juror wireflows, role/action visibility, campaign-type adaptive navigation, shared components, WCAG 2.2 AA criteria and an authenticated UAT matrix at 390×844, 430×932, 768×1024, 1366×768 and 1920×1080.
+- The audited `main` snapshot at `aa270b0` contains no registered Safety Vote page, frontend module, backend/PHP route, migration or explicit Juror/Ballot contract. Existing evidence is limited to the responsive global shell and binary Admin/User routing, so current Safety Vote visual/authenticated UAT is correctly recorded as not testable rather than passed.
+- Phase 1 must first locate and record the authoritative Safety Vote source and immutable baseline. If it remains absent or ambiguous, work stops at `HOLD_BASELINE_NOT_FOUND`; no parallel voting engine or schema may be invented. Once confirmed, Phase 1 is limited to a feature-flagged responsive shell and Admin Campaign Center without changing ballot, privacy, eligibility, certification or result behavior.
+- No Runtime, API, database, schema, configuration, business data or authentication data changed. No server/database/Production connection, deployment, commit or push occurred. Full contract and the copy-ready Phase 1 instruction: `docs/safety-vote-ux-phase0-audit-responsive-contract.md`. Decision: `PHASE_0_CONTRACT_COMPLETE_HOLD_FOR_RUNTIME_IMPLEMENTATION`.
 
 ## Johnny global launcher avatar Production release (2026-10-07)
 

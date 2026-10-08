@@ -1,0 +1,23 @@
+'use strict';
+const assert=require('assert'),fs=require('fs'),path=require('path'),{pathToFileURL}=require('url');
+const root=path.resolve(__dirname,'..','..'),read=p=>fs.readFileSync(path.join(root,p),'utf8');
+(async()=>{
+  const admin=read('public/js/pages/admin-safety-vote-ux1.js'),components=read('public/js/pages/safety-vote-ux-components.js'),user=read('public/js/pages/safety-vote-page-ux1.js'),css=read('public/style.css'),preflight=read('docs/safety-vote-ux-phase1-preflight-scope.md');
+  assert(components.includes('__TSH_FEATURE_FLAGS__?.safetyVoteUxV1 === true'),'UX flag must be strict opt-in');
+  assert(admin.includes('renderLegacySafetyVoteFoundation(container)'),'flag-off fallback must preserve legacy UI');
+  assert(admin.includes("!state.health?.ready || !state.health?.moduleEnabled"),'module readiness must gate campaign reads');
+  assert(admin.includes('จัดการ Safety Vote')&&admin.includes('ใกล้ปิดใน 72 ชม.'),'production Admin wording missing');
+  for(const marker of ['active','draft','scheduled','completed','archived'])assert(admin.includes(`${marker}:`)||admin.includes(`'${marker}'`),`view ${marker} missing`);
+  for(const marker of ['sv-campaign-table','sv-campaign-cards','sv-tablet-drawer','sv-readiness-warning','sv-skeleton'])assert(admin.includes(marker)||css.includes(marker),`${marker} missing`);
+  for(const marker of ['role="alertdialog"','aria-modal="true"','aria-live="polite"','aria-label="พื้นที่ Safety Vote ตามบทบาท"'])assert(admin.includes(marker)||components.includes(marker),`${marker} semantics missing`);
+  assert(user.includes('showJury: jury > 0')&&user.includes('sv-jury-workspace'),'Juror navigation must remain assignment-aware');
+  assert(css.includes('min-height: 44px')&&css.includes('@media (prefers-reduced-motion: reduce)'),'touch/reduced-motion contract missing');
+  for(const excluded of ['backend/routes','api/handlers','backend/migrations'])assert(preflight.includes(excluded),`excluded scope ${excluded} missing`);
+  const model=await import(pathToFileURL(path.join(root,'public','js','pages','safety-vote-ux-model.mjs')).href);
+  assert.strictEqual(model.statusGroup('Draft'),'draft');assert.strictEqual(model.statusGroup('Published'),'completed');assert.strictEqual(model.statusGroup('Voided'),'archived');assert.strictEqual(model.statusGroup('Open'),'active');
+  const now=new Date('2026-10-08T00:00:00Z'),rows=[{Status:'Draft'},{Status:'Open',CloseAt:'2026-10-10T00:00:00Z'},{Status:'Open',CloseAt:'2026-10-20T00:00:00Z'},{Status:'Closed'},{Status:'Published'}],m=model.campaignMetrics(rows,now);
+  assert.deepStrictEqual(m,{draft:1,open:2,nearClose:1,closed:2});
+  const survey=model.sectionsForCampaign({CampaignType:'survey'}).map(x=>x[0]),judged=model.sectionsForCampaign({CampaignType:'jury_scoring'}).map(x=>x[0]);
+  assert(!survey.includes('jury'),'Survey must not expose jury navigation');assert(judged.includes('jury'),'Judged campaign must expose jury navigation');
+  console.log('Safety Vote UX Phase 1 static/unit/accessibility/scope contract: PASS (30 assertions)');
+})().catch(e=>{console.error(e.stack||e);process.exitCode=1;});
