@@ -75,6 +75,7 @@
     "test:safety-vote-phase96-feature-flag": "node scripts/safety-vote-phase96-feature-flag-static.test.js",
     "test:safety-vote-phase96-mime": "node scripts/safety-vote-phase96-mime-remediation-static.test.js",
     "review:safety-vote-phase96-mime": "node scripts/safety-vote-phase96-mime-remediation-review.js --validate-local",
+    "test:safety-vote-phase96-admin-target": "node scripts/safety-vote-phase96-admin-render-target.test.js",
     "preflight:safety-vote-phase8:manifest": "node scripts/safety-vote-phase8-candidate-manifest.js",
     "preflight:safety-vote-phase8:production-readonly": "node scripts/safety-vote-phase8-production-readonly.js",
     "preflight:safety-vote-phase82:protected": "node scripts/safety-vote-phase82-protected-preflight.js",

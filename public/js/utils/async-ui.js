@@ -273,6 +273,15 @@ export function createLatestRenderTarget(key, element) {
         set innerHTML(value) {
             if (isCurrent()) element.innerHTML = value;
         },
+        querySelector(selector) {
+            return isCurrent() ? element.querySelector?.(selector) || null : null;
+        },
+        querySelectorAll(selector) {
+            return isCurrent() ? element.querySelectorAll?.(selector) || [] : [];
+        },
+        addEventListener(...args) {
+            if (isCurrent()) element.addEventListener?.(...args);
+        },
     };
     return { ...request, target, isCurrent };
 }

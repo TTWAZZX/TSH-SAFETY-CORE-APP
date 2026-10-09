@@ -1,6 +1,6 @@
 import { showToast, showError, openModal, openDetailModal, closeModal, escHtml, metricCard, emptyState, statusBadge as dsStatusBadge } from '../ui.js?v=20260602-mobile-nav-m53';
 import { API } from '../api.js?v=20260908-bbs-navigation-loading-r1';
-import { createLatestRenderTarget, guardActionHandler, guardSubmitHandler, sectionSkeleton, withActionLock } from '../utils/async-ui.js?v=20260715-phase32c-residual-async';
+import { createLatestRenderTarget, guardActionHandler, guardSubmitHandler, sectionSkeleton, withActionLock } from '../utils/async-ui.js?v=20261009-safety-vote-phase96-r1';
 import { beginBbsOperation } from '../utils/bbs-async-ui.js?v=20260908-bbs-navigation-loading-r1';
 import { renderSafetyVoteFoundation } from './admin-safety-vote-ux1.js?v=20261009-safety-vote-ux8-r1';
 
