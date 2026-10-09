@@ -39,7 +39,7 @@ const read = relativePath => fs.readFileSync(path.join(root, relativePath), 'utf
     assert((wizard.match(/await state\.saveChain/g) || []).length >= 2, 'navigation and eligibility preview must serialize behind autosave');
 
     const draft = model.createWizardDraft();
-    assert.strictEqual(model.validateStep(1, draft).length, 2, 'empty general details must fail validation');
+    assert.strictEqual(model.validateStep(1, draft).length, 1, 'title is required while campaign code is server-generated');
     draft.campaignCode = 'UX2-UNIT';
     draft.titleTh = 'ทดสอบสร้างแคมเปญ';
     draft.questions[0].title = 'ให้คะแนนกิจกรรม';

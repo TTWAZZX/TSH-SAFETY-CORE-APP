@@ -24,14 +24,20 @@ function normalizeCode(value) {
     return code || null;
 }
 
-function normalizeCampaign(input = {}) {
+function formatCampaignCode(sequence, year = new Date().getFullYear()) {
+    const number = Number(sequence), yearNumber = Number(year);
+    if (!Number.isInteger(number) || number < 1 || number > 999 || !Number.isInteger(yearNumber) || yearNumber < 2000 || yearNumber > 9999) return null;
+    return `SHE-${String(number).padStart(3, '0')}-${yearNumber}`;
+}
+
+function normalizeCampaign(input = {}, options = {}) {
     const campaignType = clean(input.campaignType || input.CampaignType || 'popular_vote', 40).toLowerCase();
     const privacyMode = clean(input.privacyMode || input.PrivacyMode || 'identified', 24).toLowerCase();
     const resultVisibility = clean(input.resultVisibility || input.ResultVisibility || 'hidden_until_close', 24).toLowerCase();
     const titleTh = clean(input.titleTh || input.TitleTh, 200);
     const campaignCode = normalizeCode(input.campaignCode || input.CampaignCode);
     const errors = [];
-    if (!campaignCode) errors.push({ field: 'campaignCode', code: 'REQUIRED' });
+    if (options.requireCampaignCode !== false && !campaignCode) errors.push({ field: 'campaignCode', code: 'REQUIRED' });
     if (!titleTh) errors.push({ field: 'titleTh', code: 'REQUIRED' });
     if (!CAMPAIGN_TYPES.includes(campaignType)) errors.push({ field: 'campaignType', code: 'INVALID_ENUM' });
     if (!PRIVACY_MODES.includes(privacyMode)) errors.push({ field: 'privacyMode', code: 'INVALID_ENUM' });
@@ -110,4 +116,4 @@ function canonicalHash(value) {
     return crypto.createHash('sha256').update(JSON.stringify(sort(value))).digest('hex');
 }
 
-module.exports = { CONTRACT_VERSION, CAMPAIGN_TYPES, PRIVACY_MODES, RESULT_VISIBILITY, RULE_ATTRIBUTES, RULE_OPERATORS, RULE_EFFECTS, clean, positiveInt, normalizeCode, normalizeCampaign, normalizeRule, normalizeRules, evaluateEligibility, canonicalHash };
+module.exports = { CONTRACT_VERSION, CAMPAIGN_TYPES, PRIVACY_MODES, RESULT_VISIBILITY, RULE_ATTRIBUTES, RULE_OPERATORS, RULE_EFFECTS, clean, positiveInt, normalizeCode, formatCampaignCode, normalizeCampaign, normalizeRule, normalizeRules, evaluateEligibility, canonicalHash };

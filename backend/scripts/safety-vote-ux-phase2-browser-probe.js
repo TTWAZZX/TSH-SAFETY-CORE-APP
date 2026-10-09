@@ -11,6 +11,8 @@ const chromeCandidates = [process.env.SAFETY_VOTE_BROWSER, 'C:\\Program Files\\G
 const chromePath = chromeCandidates.find(fs.existsSync);
 const port = Number(process.env.SAFETY_VOTE_UX2_CDP_PORT || 9872);
 const profile = fs.mkdtempSync(path.join(os.tmpdir(), 'tsh-sv-ux2-'));
+const optionImage = path.join(profile, 'phase102-option.png');
+fs.writeFileSync(optionImage, Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M/wHwAF/gL+3rq8WQAAAABJRU5ErkJggg==', 'base64'));
 const evidence = path.join(path.resolve(__dirname, '..', '..'), 'backups', 'local', `safety-vote-ux-phase2-${Date.now()}`);
 const pending = new Map();
 const consoleErrors = [];
@@ -59,6 +61,13 @@ async function setValue(selector, value) {
     assert(found, `input target unavailable: ${selector}`);
 }
 
+async function setFile(selector, filePath) {
+    const documentNode = await cmd('DOM.getDocument');
+    const target = await cmd('DOM.querySelector', { nodeId: documentNode.root.nodeId, selector });
+    assert(target.nodeId, `file input unavailable: ${selector}`);
+    await cmd('DOM.setFileInputFiles', { nodeId: target.nodeId, files: [filePath] });
+}
+
 async function shot(name) {
     const response = await cmd('Page.captureScreenshot', { format: 'png', captureBeyondViewport: false });
     fs.mkdirSync(evidence, { recursive: true });
@@ -87,19 +96,61 @@ async function completeWizard(viewport, ordinal) {
         assert(await ev(`document.activeElement?.classList.contains('svw-validation')`), 'validation summary must receive focus');
     }
 
-    const suffix = viewport.replace('x', '-');
-    await setValue('[data-svw-field="campaignCode"]', `UX2-${suffix}`);
+    assert(await ev(`document.querySelector('#svw-campaignCode')?.readOnly===true&&document.querySelector('#svw-campaignCode')?.value==='SHE-001-YYYY'`), 'campaign code preview must be generated/read-only');
     await setValue('[data-svw-field="titleTh"]', `กิจกรรมความปลอดภัย ${viewport}`);
     await setValue('[data-svw-field="summary"]', 'เลือกแนวคิดที่ช่วยลดความเสี่ยงในการทำงาน');
     if (ordinal === 0) {
         await wait(`document.querySelector('[data-svw-save-status]')?.dataset.state==='saved'`, 'autosave saved state');
+        assert(await ev(`/^SHE-001-\\d{4}$/.test(document.querySelector('#svw-campaignCode')?.value||'')`), 'server-generated campaign code must replace the preview');
     }
     await click('[data-svw-action="next"]');
     await wait(`document.querySelector('.svw-main')?.dataset.step==='privacy'`, 'privacy step');
+    assert(await ev(`document.querySelectorAll('input[name=svw-privacy]').length===4&&document.querySelectorAll('.svw-privacy-notice li').length===3&&document.querySelector('.svw-privacy-warning')?.textContent.includes('ตรึงรายชื่อ')`), 'privacy explanation must disclose storage, access and lifecycle limits');
+    await click('input[name=svw-privacy][value=anonymous]');
+    await wait(`document.querySelector('.svw-privacy-notice')?.textContent.includes('ป้องกันการตอบซ้ำ')`, 'anonymous privacy detail');
+    await click('input[name=svw-privacy][value=identified]');
     await click('[data-svw-action="next"]');
     await wait(`document.querySelector('.svw-main')?.dataset.step==='content'`, 'content step');
+    assert.strictEqual(await ev(`document.querySelectorAll('[data-svw-question-field="questionType"] option').length`), 9, 'popular vote must expose its supported advanced question types');
+    await setValue('[data-svw-question-field="questionType"][data-index="0"]', 'ranking');
     await setValue('[data-svw-field="question-0-title"]', 'เลือกแนวคิดความปลอดภัยที่ชื่นชอบ');
-    await setValue('[data-svw-field="question-0-options"]', 'แนวคิดลดการลื่นล้ม\nแนวคิดตรวจเครื่องจักรก่อนเริ่มงาน');
+    await setValue('[data-svw-option-field="label"][data-question-index="0"][data-option-index="0"]', 'แนวคิดลดการลื่นล้ม');
+    await setValue('[data-svw-option-field="description"][data-question-index="0"][data-option-index="0"]', 'ใช้พื้นผิวและป้ายเตือนที่เห็นชัด');
+    await setValue('[data-svw-option-field="label"][data-question-index="0"][data-option-index="1"]', 'แนวคิดตรวจเครื่องจักรก่อนเริ่มงาน');
+    await setValue('[data-svw-bulk-input="0"]', 'แนวคิด PPE | ตรวจอุปกรณ์ป้องกันก่อนใช้งาน\nแนวคิด 5ส | จัดพื้นที่ให้ปลอดสิ่งกีดขวาง');
+    await click('[data-svw-bulk-apply="0"]');
+    await wait(`document.querySelectorAll('[data-svw-option-card]').length===4`, 'bulk imported option cards');
+    assert(await ev(`document.querySelectorAll('.svw-question-preview .svw-live-option').length===4`), 'live preview must render imported options');
+    const beforeMove = await ev(`[...document.querySelectorAll('[data-svw-option-field=label]')].map(x=>x.value).join('|')`);
+    await click('[data-svw-move-option="up"][data-option-index="3"]');
+    assert.notStrictEqual(await ev(`[...document.querySelectorAll('[data-svw-option-field=label]')].map(x=>x.value).join('|')`), beforeMove, 'option order must change');
+    await setValue('[data-svw-question-config="maxSelections"][data-question-index="0"]', '5');
+    assert(await ev(`document.querySelector('.svw-question-errors')?.textContent.includes('จำนวนตัวเลือก')`), 'ranking maximum must be validated against option count');
+    await click('[data-svw-action="next"]');
+    await wait(`Boolean(document.querySelector('.svw-validation[role=alert]'))`, 'advanced validation summary');
+    await setValue('[data-svw-question-config="maxSelections"][data-question-index="0"]', '4');
+    await setFile('[data-svw-option-image][data-question-index="0"][data-option-index="0"]', optionImage);
+    await wait(`Boolean(document.querySelector('[data-svw-option-card="0:0"] .svw-option-media img'))`, 'private option image preview');
+    assert(await ev(`document.querySelector('[data-svw-option-card="0:0"] .svw-option-media img')?.src.startsWith('blob:')`), 'option preview must use a private blob URL');
+    await click('[data-svw-action="add-question"]');
+    await wait(`document.querySelectorAll('.svw-question').length===2`, 'second question card');
+    await click('[data-svw-move-question="up"][data-index="1"]');
+    assert.strictEqual(await ev(`document.querySelector('[data-svw-field="question-0-title"]')?.value`), '', 'question reorder must move the new card');
+    await click('[data-svw-move-question="down"][data-index="0"]');
+    await setValue('[data-svw-field="question-1-title"]', 'ให้คะแนนความชัดเจนของแนวคิด');
+    await setValue('[data-svw-question-field="questionType"][data-index="1"]', 'rating');
+    await setValue('[data-svw-validation-field="minNumber"][data-question-index="1"]', '5');
+    await setValue('[data-svw-validation-field="maxNumber"][data-question-index="1"]', '5');
+    assert(await ev(`document.querySelectorAll('.svw-question-errors').length>=1`), 'invalid rating range must be visible');
+    await setValue('[data-svw-validation-field="minNumber"][data-question-index="1"]', '1');
+    await setValue('[data-svw-validation-field="maxNumber"][data-question-index="1"]', '10');
+    await setValue('[data-svw-condition-field="questionCode"][data-question-index="1"]', 'Q1');
+    assert(await ev(`document.querySelector('[data-svw-condition-field="operator"][data-question-index="1"]')?.disabled===false`), 'conditional logic controls must activate for an earlier question');
+    await setValue('[data-svw-option-field="mediaType"][data-question-index="0"][data-option-index="0"]', 'video');
+    await setValue('[data-svw-option-field="mediaUrl"][data-question-index="0"][data-option-index="0"]', 'https://youtu.be/dQw4w9WgXcQ');
+    await setValue('[data-svw-option-field="mediaTitle"][data-question-index="0"][data-option-index="0"]', 'Safety training clip');
+    assert(await ev(`document.querySelector('.svw-question-preview a[rel="noopener noreferrer"]')?.textContent.includes('วิดีโอ')`), 'media preview must use a privacy-safe explicit link');
+    await shot(`phase104-media-advanced-builder-${viewport}.png`);
     await click('[data-svw-action="next"]');
     await wait(`document.querySelector('.svw-main')?.dataset.step==='eligibility'`, 'eligibility step');
     await click('[data-svw-action="preview-eligibility"]');
@@ -135,7 +186,33 @@ async function completeWizard(viewport, ordinal) {
     await wait(`Boolean(document.querySelector('[role=alertdialog]'))`, 'open confirmation dialog');
     await click('[data-sv-dialog-confirm]');
     await wait(`Boolean(document.querySelector('.sv-admin-hero'))`, 'campaign center after open');
-    return { viewport, ...layout, readiness: true, userPreview: true, jurorPreview: true, confirmDialogs: true };
+    await click('[data-sv-select]');
+    await click('[data-sv-action="open-versions"]');
+    await wait(`Boolean(document.querySelector('.sv-version-policy'))`, 'version policy workspace');
+    assert(await ev(`document.querySelector('.sv-version-policy')?.textContent.includes('immutable')&&Boolean(document.querySelector('[data-sv-create-revision]'))`), 'post-open policy and revision action must be visible');
+    await setValue('[data-sv-revision-reason]', 'Improve wording and media after controlled review');
+    await ev(`document.querySelector('#toast-container')?.remove()`);
+    await click('[data-sv-create-revision]');
+    await wait(`document.querySelectorAll('.sv-version-list article').length===2||Boolean(document.querySelector('#toast-container'))`, 'offline revision result');
+    assert.strictEqual(await ev(`document.querySelectorAll('.sv-version-list article').length`),2,await ev(`document.querySelector('#toast-container')?.textContent||'revision list did not refresh'`));
+    assert(await ev(`document.querySelector('.sv-version-workspace header')?.textContent.includes('V1')`), 'live version must remain V1 while Open');
+    await shot(`phase104-version-policy-${viewport}.png`);
+    await click('[data-sv-back-center]');
+    return { viewport, ...layout, readiness: true, userPreview: true, jurorPreview: true, confirmDialogs: true, versionPolicy: true };
+}
+
+async function inspectSystemConsole() {
+    await cmd('Page.navigate', { url: `${origin}/__phase101-system-console` });
+    await wait(`document.querySelectorAll('.admin-console-group').length===4&&Boolean(document.querySelector('#tab-btn-safety-vote-foundation.is-active'))`, 'grouped System Console');
+    const state = await ev(`(()=>({groups:[...document.querySelectorAll('.admin-console-group')].map(x=>x.textContent.trim()),visibleTabs:[...document.querySelectorAll('.admin-console-tab')].filter(x=>!x.hidden).map(x=>x.textContent.trim()),allText:document.querySelector('.admin-console-navigation')?.textContent||'',overflow:document.documentElement.scrollWidth>document.documentElement.clientWidth+2}))()`);
+    assert.deepStrictEqual(state.groups, ['ภาพรวม','การดำเนินงาน','บุคลากรและสิทธิ์','การกำกับดูแล']);
+    assert(state.visibleTabs.includes('Safety Vote') && state.visibleTabs.length <= 4, 'Operations group must be bounded');
+    assert(!state.allText.includes('UX'), 'Retired UX badge must not render');
+    assert.strictEqual(state.overflow, false, 'Grouped System Console must not overflow');
+    await click('#admin-group-people');
+    await wait(`Boolean(document.querySelector('#tab-btn-employees.is-active'))`, 'People group selection');
+    assert(await ev(`[...document.querySelectorAll('.admin-console-tab')].filter(x=>!x.hidden).length===3`), 'People group tab count');
+    await shot('phase101-system-console-grouped-navigation.png');
 }
 
 const viewports = [
@@ -186,6 +263,7 @@ const viewports = [
     for (let ordinal = 0; ordinal < viewports.length; ordinal++) {
         const [name, width, height, mobile] = viewports[ordinal];
         await cmd('Emulation.setDeviceMetricsOverride', { width, height, mobile, deviceScaleFactor: 1 });
+        if (ordinal === 0) await inspectSystemConsole();
         await cmd('Page.navigate', { url: `${origin}/__ux1-admin?phase=2&viewport=${name}` });
         await wait(`Boolean(document.querySelector('.sv-admin-hero'))`, 'Admin campaign center');
         matrix.push(await completeWizard(name, ordinal));

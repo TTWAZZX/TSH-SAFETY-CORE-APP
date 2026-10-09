@@ -26,6 +26,7 @@ require __DIR__ . '/handlers/safety_vote_phase4.php';
 require __DIR__ . '/handlers/safety_vote_phase5.php';
 require __DIR__ . '/handlers/safety_vote_phase6.php';
 require __DIR__ . '/handlers/safety_vote_phase7.php';
+require __DIR__ . '/handlers/safety_vote_phase10_4.php';
 require __DIR__ . '/handlers/bbs_smart_card.php';
 require __DIR__ . '/handlers/bbs_checklists.php';
 require __DIR__ . '/handlers/bbs_observations.php';
@@ -724,6 +725,7 @@ try {
     handle_admin_phase8_routes($method, $path);
     handle_johnny_ai_routes($method, $path);
     sv_gate_request($method, $path);
+    handle_safety_vote_phase10_4_routes($method, $path);
     handle_safety_vote_phase7_routes($method, $path);
     handle_safety_vote_phase6_routes($method, $path);
     handle_safety_vote_phase5_routes($method, $path);

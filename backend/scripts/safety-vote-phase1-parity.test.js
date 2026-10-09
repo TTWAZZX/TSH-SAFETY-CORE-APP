@@ -27,6 +27,7 @@ const fixture = {
 
 const nodeResult = {
     campaigns: fixture.campaigns.map(contract.normalizeCampaign),
+    campaignCodes: [1, 9, 999, 0, 1000].map(sequence => contract.formatCampaignCode(sequence, 2026)),
     ruleSet: contract.normalizeRules(fixture.rules),
 };
 nodeResult.eligible = contract.evaluateEligibility(nodeResult.ruleSet.rules, fixture.employees);

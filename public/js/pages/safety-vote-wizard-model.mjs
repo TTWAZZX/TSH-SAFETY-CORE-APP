@@ -18,15 +18,16 @@ export const CORE_TEMPLATES = Object.freeze([
     { key: 'jury_scoring', label: 'การประกวดโดยคณะกรรมการ', description: 'กำหนดเกณฑ์และมอบหมายกรรมการ', privacyMode: 'confidential', questionType: 'single_choice', advancedRequired: true }
 ]);
 
-const OPTION_TYPES = new Set(['single_choice', 'multiple_choice', 'yes_no_abstain', 'likert', 'ranking', 'matrix', 'allocation', 'token']);
-const QUESTION_TYPES = Object.freeze({
-    survey: ['single_choice', 'multiple_choice', 'yes_no_abstain', 'rating', 'likert', 'short_text', 'long_text'],
-    popular_vote: ['single_choice', 'multiple_choice'],
+export const OPTION_TYPES = new Set(['single_choice', 'multiple_choice', 'yes_no_abstain', 'likert', 'ranking', 'matrix', 'allocation', 'token']);
+export const QUESTION_TYPES = Object.freeze({
+    survey: ['single_choice', 'multiple_choice', 'yes_no_abstain', 'rating', 'likert', 'ranking', 'matrix', 'allocation', 'token', 'short_text', 'long_text', 'date_time', 'employee_picker', 'organization_picker', 'file_upload'],
+    popular_vote: ['single_choice', 'multiple_choice', 'yes_no_abstain', 'rating', 'likert', 'ranking', 'matrix', 'allocation', 'token'],
     secret_election: ['single_choice', 'multiple_choice'],
-    submission_challenge: ['long_text', 'file_upload'],
-    nomination: ['employee_picker', 'long_text'],
-    jury_scoring: ['single_choice', 'multiple_choice', 'rating']
+    submission_challenge: ['short_text', 'long_text', 'date_time', 'file_upload'],
+    nomination: ['employee_picker', 'organization_picker', 'short_text', 'long_text', 'date_time', 'file_upload'],
+    jury_scoring: ['single_choice', 'multiple_choice', 'rating', 'likert', 'ranking', 'short_text', 'long_text']
 });
+export const SECRET_BLOCKED_TYPES = new Set(['short_text', 'long_text', 'employee_picker', 'organization_picker', 'file_upload', 'matrix']);
 
 export function templateFor(type) {
     return CORE_TEMPLATES.find(item => item.key === type) || CORE_TEMPLATES[0];
@@ -40,6 +41,27 @@ export function hasOptions(questionType) {
     return OPTION_TYPES.has(questionType);
 }
 
+export function questionTypeAllowedForPrivacy(questionType, privacyMode) {
+    if (privacyMode === 'secret_ballot') return !SECRET_BLOCKED_TYPES.has(questionType);
+    if (privacyMode === 'anonymous') return questionType !== 'file_upload';
+    return true;
+}
+
+export function defaultOptionsForType(questionType) {
+    if (questionType === 'yes_no_abstain') return ['ใช่', 'ไม่ใช่', 'งดออกเสียง'].map(label => ({ label }));
+    if (questionType === 'likert') return ['ไม่เห็นด้วยอย่างยิ่ง', 'ไม่เห็นด้วย', 'เป็นกลาง', 'เห็นด้วย', 'เห็นด้วยอย่างยิ่ง'].map(label => ({ label }));
+    return hasOptions(questionType) ? [{ label: '' }, { label: '' }] : [];
+}
+
+export function defaultValidationForType(questionType) {
+    if (questionType === 'rating') return { minNumber: 1, maxNumber: 5 };
+    if (questionType === 'short_text') return { minLength: 1, maxLength: 1000 };
+    if (questionType === 'long_text') return { minLength: 1, maxLength: 10000 };
+    if (['employee_picker', 'organization_picker'].includes(questionType)) return { minLength: 1, maxLength: 1000 };
+    if (['allocation', 'token'].includes(questionType)) return { totalMax: 100 };
+    return {};
+}
+
 export function defaultQuestion(type = 'survey', index = 0) {
     const questionType = templateFor(type).questionType;
     return {
@@ -50,7 +72,11 @@ export function defaultQuestion(type = 'survey', index = 0) {
         isRequired: true,
         minSelections: 1,
         maxSelections: questionType === 'multiple_choice' ? 2 : 1,
-        options: hasOptions(questionType) ? [{ label: '' }, { label: '' }] : []
+        randomizeOptions: false,
+        allowComment: false,
+        validation: defaultValidationForType(questionType),
+        displayCondition: null,
+        options: defaultOptionsForType(questionType)
     };
 }
 
@@ -78,14 +104,46 @@ export function applyTemplate(draft, type) {
     };
 }
 
-function validQuestion(question) {
-    if (!question?.title?.trim() || !questionTypesFor(question._campaignType || 'survey').includes(question.questionType)) return false;
-    if (!hasOptions(question.questionType)) return true;
-    return Array.isArray(question.options) && question.options.length >= 2 && question.options.every(option => option.label?.trim());
+export function questionValidationErrors(question, draft, index) {
+    const errors = [];
+    if (!question?.title?.trim()) errors.push('กรุณาระบุคำถามหรือหัวข้อ');
+    if (!questionTypesFor(draft.campaignType).includes(question.questionType)) errors.push('ประเภทคำถามไม่รองรับกับแคมเปญนี้');
+    if (!questionTypeAllowedForPrivacy(question.questionType, draft.privacyMode)) errors.push('ประเภทคำถามนี้ไม่รองรับระดับความเป็นส่วนตัวที่เลือก');
+    const options = Array.isArray(question.options) ? question.options : [];
+    const min = Number(question.minSelections ?? (question.isRequired === false ? 0 : 1)), max = Number(question.maxSelections ?? 1);
+    if (!Number.isInteger(min) || !Number.isInteger(max) || min < 0 || max < 1 || min > max) errors.push('จำนวนตัวเลือกขั้นต่ำ/สูงสุดไม่ถูกต้อง');
+    if (['single_choice','yes_no_abstain','likert'].includes(question.questionType) && (min > 1 || max !== 1)) errors.push('คำถามชนิดนี้เลือกได้สูงสุดหนึ่งรายการ');
+    if (hasOptions(question.questionType)) {
+        if (options.length < 2 || options.length > 100 || options.some(option => !option.label?.trim())) errors.push('ต้องมีตัวเลือก 2–100 รายการและระบุชื่อให้ครบ');
+        if (['multiple_choice','ranking'].includes(question.questionType) && max > options.length) errors.push('จำนวนที่เลือกสูงสุดต้องไม่เกินจำนวนตัวเลือก');
+    }
+    const validation = question.validation || {};
+    if (question.questionType === 'rating' && (!Number.isFinite(Number(validation.minNumber)) || !Number.isFinite(Number(validation.maxNumber)) || Number(validation.minNumber) >= Number(validation.maxNumber))) errors.push('ช่วงคะแนนต้องเป็นตัวเลขและค่าต่ำสุดต้องน้อยกว่าค่าสูงสุด');
+    if (['short_text','long_text','employee_picker','organization_picker'].includes(question.questionType)) {
+        const hardMax = question.questionType === 'long_text' ? 10000 : 1000, minLength=Number(validation.minLength), maxLength=Number(validation.maxLength);
+        if (!Number.isInteger(minLength) || !Number.isInteger(maxLength) || minLength < 0 || maxLength < 1 || minLength > maxLength || maxLength > hardMax) errors.push(`ความยาวคำตอบต้องอยู่ในช่วง 0–${hardMax} ตัวอักษร`);
+    }
+    if (['allocation','token'].includes(question.questionType) && (!Number.isFinite(Number(validation.totalMax)) || Number(validation.totalMax) <= 0)) errors.push('คะแนนรวมสูงสุดต้องมากกว่า 0');
+    if (question.displayCondition) {
+        const earlier = draft.questions.slice(0,index).map(item => item.questionCode);
+        if (!earlier.includes(question.displayCondition.questionCode)) errors.push('เงื่อนไขการแสดงผลต้องอ้างอิงคำถามก่อนหน้า');
+        if (!['equals','not_equals','includes','not_includes','answered','not_answered'].includes(question.displayCondition.operator)) errors.push('ตัวดำเนินการของเงื่อนไขไม่ถูกต้อง');
+    }
+    return errors;
 }
 
 export function contentValid(draft) {
-    return Array.isArray(draft.questions) && draft.questions.length > 0 && draft.questions.every(question => validQuestion({ ...question, _campaignType: draft.campaignType }));
+    return contentValidationErrors(draft).length===0;
+}
+
+export function contentValidationErrors(draft) {
+    if (!Array.isArray(draft.questions) || !draft.questions.length) return ['ต้องมีคำถามอย่างน้อยหนึ่งข้อ'];
+    const errors=[];
+    if(draft.questions.length>50)errors.push('เพิ่มคำถามได้สูงสุด 50 ข้อ');
+    const codes=draft.questions.map(question=>question.questionCode);
+    if(codes.some(code=>!code)||new Set(codes).size!==codes.length)errors.push('รหัสคำถามต้องไม่ว่างและไม่ซ้ำกัน');
+    errors.push(...draft.questions.flatMap((question,index)=>questionValidationErrors(question,draft,index).map(error=>`ข้อ ${index+1}: ${error}`)));
+    return errors;
 }
 
 export function scheduleValid(draft) {
@@ -102,11 +160,10 @@ export function validateStep(step, draft) {
     const errors = [];
     if (step === 0 && !CORE_TEMPLATES.some(item => item.key === draft.campaignType)) errors.push('กรุณาเลือกประเภทแคมเปญ');
     if (step === 1) {
-        if (!draft.campaignCode.trim()) errors.push('กรุณาระบุรหัสแคมเปญ');
         if (!draft.titleTh.trim()) errors.push('กรุณาระบุชื่อแคมเปญภาษาไทย');
     }
     if (step === 2 && !privacyValid(draft)) errors.push('บัตรลงคะแนนลับไม่สามารถแสดงผลระหว่างกิจกรรมได้');
-    if (step === 3 && !contentValid(draft)) errors.push('กรุณากรอกเนื้อหาและตัวเลือกที่จำเป็นให้ครบ');
+    if (step === 3) errors.push(...contentValidationErrors(draft));
     if (step === 4) {
         if (!draft.rules.length) errors.push('ต้องมีกฎผู้มีสิทธิ์อย่างน้อยหนึ่งข้อ');
         if (!Number(draft.eligibilityPreview?.eligibleCount)) errors.push('ต้องตรวจสอบแล้วพบผู้มีสิทธิ์อย่างน้อยหนึ่งคน');
@@ -158,7 +215,10 @@ export function builderPayload(draft) {
         minSelections: Number(question.minSelections ?? (question.isRequired === false ? 0 : 1)),
         maxSelections: Number(question.maxSelections || 1),
         sortOrder: index + 1,
-        validation: question.questionType === 'rating' ? { minNumber: 1, maxNumber: 5 } : {},
-        options: hasOptions(question.questionType) ? question.options.map((option, optionIndex) => ({ optionCode: option.optionCode || `O${optionIndex + 1}`, label: option.label, description: option.description || null, sortOrder: optionIndex + 1 })) : []
+        randomizeOptions: Boolean(question.randomizeOptions),
+        allowComment: Boolean(question.allowComment),
+        validation: question.validation || defaultValidationForType(question.questionType),
+        displayCondition: question.displayCondition || null,
+        options: hasOptions(question.questionType) ? question.options.map((option, optionIndex) => ({ optionCode: option.optionCode || `O${optionIndex + 1}`, label: option.label, description: option.description || null, fileId: Number(option.fileId || 0) || null, sortOrder: optionIndex + 1 })) : []
     }));
 }
