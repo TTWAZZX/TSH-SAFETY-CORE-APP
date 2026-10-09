@@ -1,5 +1,12 @@
 # TSH Safety Core Activity - AGENTS.md
 
+## Safety Vote Phase 9.5B Bounded-pilot Enablement Preflight (HOLD, 2026-10-09)
+
+- Read-only/value-suppressed Production preflight double-downloaded all 41 runtime paths and matched immutable commit `021b2397f8ab668f6b6fab6aa1d7a5f40bf0533b` byte-exact. The bearer session, Phase 7 schema health, 39-table/zero-business-row protected evidence, `module_enabled=0`, `phase7_integrations_enabled=0`, zero configured providers and checksum-locked rollback package all pass.
+- The bounded-access gate fails: all 2,543 employee accounts derive `SAFETY_VOTE_VIEW` from populated roles (`ADMIN` 4, `USER` 2,536, `VIEWER` 3). Admins also have all 11 Safety Vote permissions/Admin bypass. User override and orphan-override rows are both zero, so the exact effective breadth is provable and is not a bounded pilot cohort.
+- A review-only checksum-locked helper candidate SHA-256 `bf1ad0adf834a7efc9f4bd54075b157d32728b85580782913619b743977b9707` would change only `SafetyVote_Settings.module_enabled: 0 -> 1`, require integrations/providers off and zero business rows, and create an exact private rollback backup before mutation. It has no package command and is not authorized for Production execution.
+- Evidence: `backups/production/safety-vote-phase95b-preflight-20261009055655/`, result SHA-256 `bee40471db0058c9a222b79b85dd97fffc215baeaa9d844e21daeca5ec4344f2`; report: `docs/safety-vote-phase95b-bounded-pilot-enablement-preflight.md`. No login, Production mutation, helper upload, personal-data recording, email/notification, deploy or push occurred. Decision: `HOLD_PILOT_COHORT_NOT_PROVEN`; Phase 9.5B activation and Phase 9.6 have not started.
+
 ## Safety Vote Phase 9.5A Guarded Runtime Deployment (PASS, module remains disabled, 2026-10-09)
 
 - Immutable commit `021b2397f8ab668f6b6fab6aa1d7a5f40bf0533b` supplied all 41 Production runtime files directly from Git objects. Fresh remote-before validation matched 25 existing paths by double-download SHA-256 and reconfirmed 16 paths absent; the checksum-locked rollback ZIP/manifest remained valid.
