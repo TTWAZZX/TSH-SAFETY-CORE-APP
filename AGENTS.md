@@ -1,5 +1,13 @@
 # TSH Safety Core Activity - AGENTS.md
 
+## Safety Vote Phase 9.5A Guarded Runtime Deployment (PASS, module remains disabled, 2026-10-09)
+
+- Immutable commit `021b2397f8ab668f6b6fab6aa1d7a5f40bf0533b` supplied all 41 Production runtime files directly from Git objects. Fresh remote-before validation matched 25 existing paths by double-download SHA-256 and reconfirmed 16 paths absent; the checksum-locked rollback ZIP/manifest remained valid.
+- FTPS uploaded exactly the 41 allowlisted paths and double-download verified `41/41` byte-exact against the immutable candidate. Evidence: `backups/production/safety-vote-phase95a-deploy-20261009045708/`, result SHA-256 `225959272bccf3a1b24eead9a6633a65c12edc2fabf40e6233ece18312f69e94`. Automatic rollback was ready and not triggered; a separate guarded rollback entrypoint verifies the deployed candidate before restoring 25 remote-before files and removing 16 proven-new paths.
+- Fresh protected pre/post checks independently confirmed 39 tables, 11 permissions, zero business rows, `module_enabled=0`, `phase7_integrations_enabled=0`, zero configured providers, verified privacy-safe backup/restore, byte-exact `.htaccess` restoration and zero helper/backup residue. Postcheck evidence: `backups/production/safety-vote-phase82-preflight-20261009050056/`.
+- Post-deploy authenticated GET-only smoke passed: health returned `200`/ready/module disabled and campaigns failed closed with `503 SAFETY_VOTE_MODULE_DISABLED`; both responses used `private, no-store, max-age=0`. Evidence: `backups/production/safety-vote-phase95-auth-smoke-20261009050124/`, result SHA-256 `4883f4b204e2d3b47fad371c65aa008d46b2323ba7564893c938cdbe4ed1b0a3`.
+- No migration, login, business-data write, module/integration opening, email/notification, external delivery or push occurred. Phase 9.5B requires separate authorization before bounded pilot enablement; Phase 9.6 has not started. Report: `docs/safety-vote-phase95a-guarded-runtime-deployment.md`. Decision: `PHASE_9_5A_RUNTIME_DEPLOY_PASS_MODULE_DISABLED`.
+
 ## Safety Vote Phase 9.5 Controlled Pilot Preflight (Authenticated entry PASS; deployment not started, 2026-10-09)
 
 - The user attested that the exposed Gmail App Password was revoked/replaced and `backend/.env` updated. Value-suppressed checks confirm an SMTP credential is present, `.env` is ignored and untracked, and no secret value/hash was recorded; no SMTP authentication or email delivery was attempted.

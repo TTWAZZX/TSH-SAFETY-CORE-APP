@@ -4,6 +4,8 @@ Date: 2026-10-09
 
 Decision: `PASS_AUTHENTICATED_ENTRY_GATE_PILOT_DEPLOYMENT_NOT_STARTED`
 
+Status note: this entry-gate record was subsequently followed by the accepted Phase 9.5A guarded runtime deployment documented in `docs/safety-vote-phase95a-guarded-runtime-deployment.md`; its “deployment not started” wording describes the preflight point in time.
+
 ## Outcome
 
 Phase 9.5 completed its pre-deployment checks and authenticated GET-only entry smoke, then stopped before deployment as required. Candidate integrity, disabled Production posture, remote-drift coverage, rollback packaging and authenticated-session readiness pass.
