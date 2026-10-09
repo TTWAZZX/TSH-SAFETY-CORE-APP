@@ -18,6 +18,7 @@ const stamp = new Date().toISOString().replace(/[-:TZ.]/g, '').slice(0, 14);
 const evidenceRoot = path.join(root, 'backups', 'production', `safety-vote-phase96-browser-smoke-${stamp}`);
 const viewports = [[390, 844], [430, 932], [768, 1024], [1366, 768], [1920, 1080]];
 const expectLegacy = process.argv.includes('--expect-legacy');
+const allowExistingCampaigns = process.argv.includes('--allow-existing-campaigns');
 const runtimeErrors = [], apiResponses = [], networkMethods = [];
 let browser, client, browserStderr = '';
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
@@ -130,6 +131,7 @@ async function inspectUser(width, height) {
   await client.command('Emulation.setDeviceMetricsOverride', { width, height, deviceScaleFactor: 1, mobile: width < 800 });
   await navigate(`${baseUrl}/index.html?phase96=${stamp}#safety-vote`);
   if (expectLegacy) await waitFor(`Boolean(document.querySelector('#safety-vote-page .mx-auto.max-w-6xl'))`);
+  else if (allowExistingCampaigns) await waitFor(`Boolean(document.querySelector('.svp-shell[data-sv-participation]'))`);
   else await waitFor(`Boolean(document.querySelector('.svp-shell[data-sv-participation] .svp-empty'))`);
   if (expectLegacy) return evaluate(`(() => { const page=document.querySelector('#safety-vote-page .mx-auto.max-w-6xl'); return { featureFlag: window.__TSH_FEATURE_FLAGS__?.safetyVoteUxV1 === true, shell: Boolean(page), navigation: true, emptyState: Boolean(page && !page.querySelector('[data-sv-open]')), overflow: document.documentElement.scrollWidth > document.documentElement.clientWidth + 1 }; })()`);
   return evaluate(`(() => { const shell=document.querySelector('.svp-shell[data-sv-participation]'); const nav=shell?.querySelector('.sv-role-nav'); return { featureFlag: window.__TSH_FEATURE_FLAGS__?.safetyVoteUxV1 === true, shell: Boolean(shell), navigation: Boolean(nav), emptyState: Boolean(shell?.querySelector('.svp-empty')), overflow: document.documentElement.scrollWidth > document.documentElement.clientWidth + 1 }; })()`);
@@ -141,6 +143,7 @@ async function inspectAdmin(width, height) {
   await waitFor(`typeof window._adminTab === 'function' && Boolean(document.querySelector('#admin-content-area'))`);
   await evaluate(`window._adminTab('safety-vote-foundation')`);
   if (expectLegacy) await waitFor(`Boolean(document.querySelector('#admin-content-area .animate-fade-in'))`);
+  else if (allowExistingCampaigns) await waitFor(`Boolean(document.querySelector('.sv-ux-shell[data-sv-ux-version]'))`);
   else await waitFor(`Boolean(document.querySelector('.sv-ux-shell[data-sv-ux-version] .sv-empty-state'))`);
   if (expectLegacy) return evaluate(`(() => { const shell=document.querySelector('#admin-content-area .animate-fade-in'); return { featureFlag: window.__TSH_FEATURE_FLAGS__?.safetyVoteUxV1 === true, shell: Boolean(shell), navigation: true, userNavigation: true, adminCurrent: true, emptyState: Boolean(shell && !shell.querySelector('[onclick^="window._svSelect"]')), overflow: document.documentElement.scrollWidth > document.documentElement.clientWidth + 1 }; })()`);
   return evaluate(`(() => { const shell=document.querySelector('.sv-ux-shell[data-sv-ux-version]'); const nav=shell?.querySelector('.sv-role-nav'); return { featureFlag: window.__TSH_FEATURE_FLAGS__?.safetyVoteUxV1 === true, shell: Boolean(shell), navigation: Boolean(nav), userNavigation: Boolean(nav?.querySelector('[data-sv-role-link="user"]')), adminCurrent: nav?.querySelector('[data-sv-role-link="admin"]')?.getAttribute('aria-current') === 'page', emptyState: Boolean(shell?.querySelector('.sv-empty-state')), overflow: document.documentElement.scrollWidth > document.documentElement.clientWidth + 1 }; })()`);
@@ -164,8 +167,8 @@ async function main() {
   for (const [width, height] of (expectLegacy ? [[1366, 768]] : viewports)) {
     const userPage = await inspectUser(width, height);
     const adminPage = await inspectAdmin(width, height);
-    assert(userPage.featureFlag === !expectLegacy && userPage.shell && userPage.navigation && userPage.emptyState && !userPage.overflow, `User page failed at ${width}x${height}`);
-    assert(adminPage.featureFlag === !expectLegacy && adminPage.shell && adminPage.navigation && adminPage.userNavigation && adminPage.adminCurrent && adminPage.emptyState && !adminPage.overflow, `Admin page failed at ${width}x${height}`);
+    assert(userPage.featureFlag === !expectLegacy && userPage.shell && userPage.navigation && (allowExistingCampaigns || userPage.emptyState) && !userPage.overflow, `User page failed at ${width}x${height}`);
+    assert(adminPage.featureFlag === !expectLegacy && adminPage.shell && adminPage.navigation && adminPage.userNavigation && adminPage.adminCurrent && (allowExistingCampaigns || adminPage.emptyState) && !adminPage.overflow, `Admin page failed at ${width}x${height}`);
     checks.push({ viewport: `${width}x${height}`, userPage, adminPage });
   }
   const nonGet = networkMethods.filter(item => item.url.startsWith(baseUrl) && !['GET', 'HEAD', 'OPTIONS'].includes(item.method));
@@ -180,6 +183,7 @@ async function main() {
     api: { responsesObserved: apiResponses.length, allStatus200: true, allPrivateNoStore: true, responseBodiesRecorded: false },
     browser: { consoleErrors: 0, runtimeExceptions: 0, horizontalOverflow: false },
     constraints: { loginAttempted: false, nonGetProductionRequests: 0, businessDataWritten: false, campaignCreated: false, permissionChanged: false, emailOrNotificationSent: false, secretRecorded: false },
+    existingCampaignsAllowed: allowExistingCampaigns,
     decision: expectLegacy ? 'PASS_PHASE96_ROLLBACK_LEGACY_UI_GET_ONLY_SMOKE' : 'PASS_PHASE96_AUTHENTICATED_GET_ONLY_BROWSER_SMOKE'
   };
   fs.mkdirSync(evidenceRoot, { recursive: true });
