@@ -6,14 +6,15 @@ import {
     openSafetyVoteConfirmDialog,
     safetyVoteActionBar,
     safetyVoteEmptyState,
+    safetyVoteJourneyNav,
     safetyVoteRoleNav,
     safetyVoteStatusBadge
-} from './safety-vote-ux-components.js?v=20261008-safety-vote-ux7-r1';
+} from './safety-vote-ux-components.js?v=20261009-safety-vote-ux8-r1';
 import { campaignMetrics, isNearClose, sectionsForCampaign, statusGroup } from './safety-vote-ux-model.mjs?v=20261008-safety-vote-ux1-r1';
 import { renderSafetyVoteCampaignWizard } from './safety-vote-campaign-wizard.js?v=20261008-safety-vote-ux2-r1';
-import { renderSafetyVoteOperationsWorkspace } from './admin-safety-vote-operations.js?v=20261008-safety-vote-ux7-r1';
-import { renderSafetyVoteResultsWorkspace } from './admin-safety-vote-results.js?v=20261008-safety-vote-ux7-r1';
-import { renderSafetyVoteGovernanceWorkspace } from './admin-safety-vote-governance.js?v=20261008-safety-vote-ux7-r1';
+import { renderSafetyVoteOperationsWorkspace } from './admin-safety-vote-operations.js?v=20261009-safety-vote-ux8-r1';
+import { renderSafetyVoteResultsWorkspace } from './admin-safety-vote-results.js?v=20261009-safety-vote-ux8-r1';
+import { renderSafetyVoteGovernanceWorkspace } from './admin-safety-vote-governance.js?v=20261009-safety-vote-ux8-r1';
 
 const VIEW_LABELS = {
     active: 'กำลังดำเนินการ',
@@ -113,6 +114,7 @@ function render() {
     if (systemState) { container.innerHTML = systemState; bind(); return; }
     const rows = visibleCampaigns(), kpi = campaignMetrics(state.campaigns), selected = selectedCampaign();
     container.innerHTML = `<div class="sv-ux-shell" data-sv-ux-version="2026-10-08-safety-vote-ux1-r1">${safetyVoteRoleNav({ active: 'admin', showAdmin: true })}<header class="sv-admin-hero"><div><p class="sv-eyebrow">ศูนย์จัดการกิจกรรม</p><h1>จัดการ Safety Vote</h1><p>ติดตามแคมเปญ จัดลำดับงาน และเข้าสู่พื้นที่จัดการตามประเภทกิจกรรม</p></div><button type="button" class="sv-button sv-button--primary" data-sv-action="new-campaign">สร้างแคมเปญ</button></header><section class="sv-kpi-grid" aria-label="ภาพรวมแคมเปญ"><button data-sv-view="draft"><span>ฉบับร่าง</span><strong>${kpi.draft}</strong></button><button data-sv-view="active"><span>กำลังเปิด</span><strong>${kpi.open}</strong></button><button data-sv-view="active"><span>ใกล้ปิดใน 72 ชม.</span><strong>${kpi.nearClose}</strong></button><button data-sv-view="completed"><span>ปิดแล้ว</span><strong>${kpi.closed}</strong></button></section><section class="sv-list-panel" aria-labelledby="sv-campaign-list-title"><div class="sv-list-panel__heading"><div><p class="sv-eyebrow">รายการแคมเปญ</p><h2 id="sv-campaign-list-title">${VIEW_LABELS[state.view]}</h2></div><button class="sv-button sv-button--secondary sv-tablet-drawer-trigger" type="button" data-sv-action="open-drawer" aria-expanded="${state.drawerOpen}">เลือกแคมเปญ</button></div><div class="sv-toolbar"><label class="sv-search"><span class="sr-only">ค้นหาแคมเปญ</span><input type="search" value="${escHtml(state.query)}" placeholder="ค้นหาชื่อ รหัส หรือผู้รับผิดชอบ" data-sv-search></label><div class="sv-view-tabs" role="tablist" aria-label="สถานะแคมเปญ">${Object.entries(VIEW_LABELS).map(([key, label]) => `<button type="button" role="tab" data-sv-view="${key}" aria-selected="${state.view === key}">${escHtml(label)}</button>`).join('')}</div><label class="sv-sort"><span>เรียงตาม</span><select data-sv-sort><option value="updated_desc" ${state.sort === 'updated_desc' ? 'selected' : ''}>อัปเดตล่าสุด</option><option value="title_asc" ${state.sort === 'title_asc' ? 'selected' : ''}>ชื่อ ก–ฮ</option><option value="status_asc" ${state.sort === 'status_asc' ? 'selected' : ''}>สถานะ</option></select></label></div><div class="sv-master-detail"><div class="sv-master-detail__list">${campaignListMarkup(rows)}</div>${detailMarkup(selected)}</div></section><div class="sv-tablet-drawer ${state.drawerOpen ? 'is-open' : ''}" aria-hidden="${!state.drawerOpen}"><button type="button" class="sv-tablet-drawer__backdrop" data-sv-action="close-drawer" tabindex="-1" aria-label="ปิดรายการแคมเปญ"></button><aside role="dialog" aria-modal="true" aria-labelledby="sv-drawer-title"><div class="sv-tablet-drawer__header"><h2 id="sv-drawer-title">เลือกแคมเปญ</h2><button type="button" class="sv-icon-button" data-sv-action="close-drawer" aria-label="ปิด">×</button></div>${campaignListMarkup(rows, 'drawer')}</aside></div><p class="sr-only" aria-live="polite">แสดง ${rows.length} แคมเปญ</p></div>`;
+    container.querySelector('.sv-role-nav')?.insertAdjacentHTML('afterend', safetyVoteJourneyNav({ role: 'admin', current: 'center', campaign: selected || {} }));
     bind();
 }
 
@@ -124,7 +126,19 @@ function bind() {
     container?.querySelectorAll('[data-sv-select]').forEach(button => button.addEventListener('click', () => { state.selectedId = Number(button.dataset.svSelect); state.drawerOpen = false; render(); state.container?.querySelector('#sv-detail-title')?.focus?.(); }));
     container?.querySelectorAll('[data-sv-action]').forEach(button => button.addEventListener('click', () => handleAction(button.dataset.svAction)));
     container?.querySelectorAll('[data-sv-section]').forEach(button => button.addEventListener('click', () => { container.querySelectorAll('[data-sv-section]').forEach(item => item.removeAttribute('aria-current')); button.setAttribute('aria-current', 'page'); }));
+    container?.querySelectorAll('[data-sv-journey-step]').forEach(button => button.addEventListener('click', () => handleJourneyStep(button.dataset.svJourneyStep)));
     container?.addEventListener('keydown', event => { if (event.key === 'Escape' && state.drawerOpen) { state.drawerOpen = false; render(); container.querySelector('[data-sv-action="open-drawer"]')?.focus(); } }, { once: true });
+}
+
+function handleJourneyStep(step) {
+    if (step === 'readiness') { openCampaignWizard(); return; }
+    if (step === 'operations') { openOperationsWorkspace(); return; }
+    if (step === 'results') { openResultsWorkspace(); return; }
+    if (step === 'governance') { openGovernanceWorkspace(); return; }
+    if (step === 'participation' || step === 'jury') {
+        const row = selectedCampaign();
+        if (row) openLegacyWorkspace(row.id);
+    }
 }
 
 async function openLegacyWorkspace(campaignId = null) {
@@ -141,26 +155,27 @@ function openCampaignWizard() {
     renderSafetyVoteCampaignWizard(container, {
         onClose: () => load(),
         onComplete: () => load(),
-        onOpenAdvanced: campaignId => openLegacyWorkspace(campaignId)
+        onOpenAdvanced: campaignId => openLegacyWorkspace(campaignId),
+        onNavigate: handleJourneyStep
     });
 }
 
 function openOperationsWorkspace() {
     const row = selectedCampaign();
     if (!row) return;
-    renderSafetyVoteOperationsWorkspace(state.container, { campaign: row, onClose: () => render() });
+    renderSafetyVoteOperationsWorkspace(state.container, { campaign: row, onClose: () => render(), onNavigate: handleJourneyStep });
 }
 
 function openResultsWorkspace() {
     const row = selectedCampaign();
     if (!row) return;
-    renderSafetyVoteResultsWorkspace(state.container, { campaign: row, onClose: () => render() });
+    renderSafetyVoteResultsWorkspace(state.container, { campaign: row, onClose: () => render(), onNavigate: handleJourneyStep });
 }
 
 function openGovernanceWorkspace() {
     const row = selectedCampaign();
     if (!row) return;
-    renderSafetyVoteGovernanceWorkspace(state.container, { campaign: row, onClose: () => render() });
+    renderSafetyVoteGovernanceWorkspace(state.container, { campaign: row, onClose: () => render(), onNavigate: handleJourneyStep });
 }
 
 function handleAction(action) {

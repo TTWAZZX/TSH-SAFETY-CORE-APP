@@ -1,4 +1,5 @@
 import { escHtml } from '../ui.js?v=20260602-mobile-nav-m53';
+import { journeyPosition } from './safety-vote-journey-model.mjs?v=20261009-safety-vote-ux8-r1';
 
 const STATUS_COPY = {
     Draft: ['ฉบับร่าง', 'draft'],
@@ -29,6 +30,31 @@ export function safetyVoteRoleNav({ active = 'user', showAdmin = false, showJury
         { key: 'admin', label: 'จัดการ Safety Vote', href: '#admin', show: showAdmin }
     ].filter(item => item.show);
     return `<nav class="sv-role-nav" aria-label="พื้นที่ Safety Vote ตามบทบาท">${items.map(item => `<a class="sv-role-nav__item" href="${item.href}" ${item.key === active ? 'aria-current="page"' : ''} data-sv-role-link="${item.key}">${escHtml(item.label)}</a>`).join('')}</nav>`;
+}
+
+export function safetyVoteJourneyNav({ role = 'admin', current = 'center', campaign = {}, onPage = false } = {}) {
+    const campaignType = campaign.CampaignType || campaign.campaignType || 'popular_vote';
+    const { steps, index } = journeyPosition({ role, campaignType, current });
+    const title = campaign.TitleTh || campaign.titleTh || campaign.CampaignCode || campaign.campaignCode || '';
+    const crumbs = [
+        `<a href="${role === 'admin' ? '#admin' : '#safety-vote'}" data-sv-journey-home>${role === 'admin' ? 'จัดการ Safety Vote' : role === 'jury' ? 'งานประเมินของฉัน' : 'กิจกรรมของฉัน'}</a>`,
+        title ? `<span aria-current="location">${escHtml(title)}</span>` : ''
+    ].filter(Boolean).join('<span aria-hidden="true">/</span>');
+    return `<div class="sv-journey" data-sv-journey="2026-10-09-safety-vote-ux8-r1"><nav class="sv-breadcrumbs" aria-label="เส้นทางปัจจุบัน">${crumbs}</nav><nav class="sv-journey-steps" aria-label="ขั้นตอน Safety Vote"><ol>${steps.map((step, stepIndex) => `<li class="${stepIndex < index ? 'is-complete' : stepIndex === index ? 'is-current' : ''}"><button type="button" data-sv-journey-step="${step.key}" ${stepIndex === index ? 'aria-current="step"' : ''} ${onPage || stepIndex === index ? 'disabled' : ''}><span aria-hidden="true">${stepIndex + 1}</span><strong>${escHtml(step.label)}</strong></button></li>`).join('')}</ol></nav><p class="sr-only" aria-live="polite">${index >= 0 ? `ขั้นตอนปัจจุบัน ${index + 1} จาก ${steps.length}: ${escHtml(steps[index].label)}` : 'พื้นที่ Safety Vote'}</p></div>`;
+}
+
+export function safetyVoteStatePanel({ kind = 'error', eyebrow = '', title, description, retryAction = '', backHref = '' } = {}) {
+    const role = kind === 'denied' || kind === 'error' ? 'alert' : 'status';
+    return `<section class="svp-state svp-state--${escHtml(kind)}" role="${role}" tabindex="-1" data-sv-state="${escHtml(kind)}">${eyebrow ? `<p class="sv-eyebrow">${escHtml(eyebrow)}</p>` : ''}<h1>${escHtml(title || 'Safety Vote ยังไม่พร้อม')}</h1><p>${escHtml(description || 'ยังไม่สามารถแสดงข้อมูลส่วนนี้ได้')}</p>${retryAction ? `<button type="button" class="sv-button sv-button--primary" data-sv-retry="${escHtml(retryAction)}">ลองอีกครั้ง</button>` : ''}${backHref ? `<a class="sv-button sv-button--secondary" href="${escHtml(backHref)}">กลับหน้าหลัก</a>` : ''}</section>`;
+}
+
+export function focusSafetyVoteHeading(root = document) {
+    requestAnimationFrame(() => {
+        const heading = root?.querySelector?.('h1');
+        if (!heading) return;
+        heading.setAttribute('tabindex', '-1');
+        heading.focus({ preventScroll: true });
+    });
 }
 
 export function safetyVoteEmptyState({ title, description, actionLabel = '', action = '' }) {

@@ -49,7 +49,7 @@ const read = relative => fs.readFileSync(path.join(root, relative), 'utf8');
     check(!workspace.includes('SafetyVote_'), 'client must not query Safety Vote tables directly');
     check(!workspace.includes('BallotAnswers') && !workspace.includes('BallotIdentities'), 'client must not query ballot identity or answers');
     check(!workspace.includes('fetch('), 'workspace must use authenticated API client only');
-    check(/safety-vote-ux7-r1/.test(main) && /safety-vote-ux7-r1/.test(html), 'Phase 7 cache chain is incomplete');
+    check(/safety-vote-ux(?:7|8)-r1/.test(main) && /safety-vote-ux(?:7|8)-r1/.test(html), 'Phase 7-or-later cache chain is incomplete');
     check(css.includes('Safety Vote UX Phase 7'), 'Phase 7 CSS marker is missing');
     check(css.includes('.svg-action-bar') && css.includes('env(safe-area-inset-bottom)'), 'sticky action bar safe-area support is missing');
     check(css.includes('.svg-shell button') && css.includes('min-height:44px'), '44 px targets are not enforced');

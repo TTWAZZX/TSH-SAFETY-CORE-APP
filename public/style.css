@@ -200,6 +200,27 @@ body {
     .sv-tablet-drawer aside { transition: none; }
 }
 
+/* Safety Vote UX Phase 8 — integrated journey and release-candidate closeout */
+.sv-journey { width: 100%; min-width: 0; margin: .75rem 0 1rem; color: #17233c; overflow: hidden; }
+.sv-breadcrumbs { display: flex; align-items: center; gap: .5rem; min-height: 44px; padding: 0 .25rem; font-size: .82rem; color: #5c6c84; }
+.sv-breadcrumbs a { display: inline-flex; align-items: center; min-height: 44px; color: #075985; font-weight: 800; text-decoration: none; }
+.sv-breadcrumbs span[aria-current="location"] { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sv-journey-steps { width: 100%; min-width: 0; overflow-x: auto; overscroll-behavior-inline: contain; scrollbar-width: thin; }
+.sv-journey-steps ol { display: grid; grid-auto-flow: column; grid-auto-columns: minmax(148px,1fr); min-width: max-content; margin: 0; padding: .25rem; list-style: none; }
+.sv-journey-steps li { position: relative; min-width: 0; }
+.sv-journey-steps li:not(:last-child)::after { content: ""; position: absolute; z-index: 0; top: 25px; right: -8px; width: 16px; border-top: 2px solid #cad5e3; }
+.sv-journey-steps button { position: relative; z-index: 1; display: grid; grid-template-columns: 32px minmax(0,1fr); align-items: center; gap: .45rem; width: calc(100% - .45rem); min-height: 52px; padding: .4rem .55rem; border: 1px solid #d6dfeb; border-radius: .75rem; background: #fff; color: #4b5b72; text-align: left; }
+.sv-journey-steps button > span { display: grid; width: 30px; height: 30px; place-items: center; border-radius: 50%; background: #e8edf4; font-size: .76rem; font-weight: 900; }
+.sv-journey-steps button > strong { line-height: 1.25; font-size: .78rem; }
+.sv-journey-steps .is-complete button { border-color: #8bd5b8; background: #f1fbf6; color: #086148; }
+.sv-journey-steps .is-current button { border-color: #2350c5; background: #eef3ff; color: #173d9e; box-shadow: inset 0 0 0 1px #2350c5; }
+.sv-journey-steps button:disabled { opacity: 1; cursor: default; }
+.sv-journey-steps button:not(:disabled):hover { border-color: #5577d7; background: #f5f7ff; }
+.sv-journey :focus-visible { outline: 3px solid #f59e0b; outline-offset: 2px; }
+.sv-ux-shell, .svp-shell, .svj-shell, .svw-shell, .svo-shell, .svr-shell, .svg-shell { overflow-x: clip; }
+@media(max-width:600px){.sv-journey{margin:.35rem 0 .75rem}.sv-breadcrumbs{padding:0}.sv-journey-steps ol{grid-auto-columns:minmax(132px,72vw)}.sv-journey-steps button{min-height:56px}}
+@media(prefers-reduced-motion:reduce){.sv-journey *{scroll-behavior:auto!important;transition:none!important}}
+
 /* Safety Vote UX Phase 7 — governance, audit and release evidence */
 .svg-shell{width:100%;min-width:0;max-width:none;padding:clamp(12px,2vw,28px);padding-bottom:calc(92px + env(safe-area-inset-bottom));background:#f4f7fb;color:#12213a;min-height:100vh;overflow-x:clip}
 .svg-shell *{box-sizing:border-box}.svg-shell button,.svg-shell a,.svg-shell input,.svg-shell select{min-height:44px}.svg-shell :focus-visible{outline:3px solid #f59e0b;outline-offset:3px}

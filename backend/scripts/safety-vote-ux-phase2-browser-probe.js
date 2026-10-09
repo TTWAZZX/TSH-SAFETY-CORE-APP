@@ -196,7 +196,7 @@ const viewports = [
         }
     }
 
-    for (const [role, route, ready] of [['user', '/__ux1-user', '[data-sv-open]'], ['juror', '/__ux1-juror', '#sv-jury-workspace']]) {
+    for (const [role, route, ready] of [['user', '/__ux1-user', '[data-svp-campaign]'], ['juror', '/__ux1-juror', '#sv-jury-workspace']]) {
         for (const [name, width, height, mobile] of viewports) {
             await cmd('Emulation.setDeviceMetricsOverride', { width, height, mobile, deviceScaleFactor: 1 });
             await cmd('Page.navigate', { url: `${origin}${route}?phase=2&viewport=${name}` });

@@ -44,7 +44,7 @@ const read = relativePath => fs.readFileSync(path.join(root, relativePath), 'utf
     check(workspace.includes('ASSIGNMENT_NOT_FOUND'), 'direct-link assignment denial is missing');
     check(workspace.includes('SAFETY_VOTE_MODULE_DISABLED'), 'module fail-closed state is missing');
     check(workspace.includes('SCORE_SHEET_LOCKED') || workspace.includes('assignmentState(current.data.assignment)'), 'authoritative submit recovery is missing');
-    check(/safety-vote-ux(?:4|5|6|7)-r1/.test(main) && /safety-vote-ux(?:4|5|6|7)-r1/.test(html), 'Phase 4-or-later cache chain is incomplete');
+    check(/safety-vote-ux(?:4|5|6|7|8)-r1/.test(main) && /safety-vote-ux(?:4|5|6|7|8)-r1/.test(html), 'Phase 4-or-later cache chain is incomplete');
     check(css.includes('Safety Vote UX/UI Phase 4'), 'Phase 4 scoped CSS marker is missing');
     check(css.includes('.svj-action-bar') && css.includes('env(safe-area-inset-bottom'), 'responsive sticky action bar is missing safe-area handling');
     check(css.includes('min-height: 44px'), '44 px touch targets are not enforced');

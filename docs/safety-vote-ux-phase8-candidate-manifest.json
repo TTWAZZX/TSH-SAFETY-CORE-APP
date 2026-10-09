@@ -1,0 +1,185 @@
+{
+    "contract":  "2026-10-09-safety-vote-ux8-r1",
+    "baseline":  "077c5977283a55756bdfcfe5dfb804e32f716aa8",
+    "branch":  "main",
+    "featureFlag":  {
+                        "key":  "safetyVoteUxV1",
+                        "strictOptIn":  true,
+                        "defaultEnabled":  false
+                    },
+    "moduleEnabledDefault":  false,
+    "protectedScopeChanges":  [
+
+                              ],
+    "excludedDirty":  [
+                          "backend/scripts/patrol-checkin-v2.test.js"
+                      ],
+    "productionConnected":  false,
+    "externalDelivery":  false,
+    "deployAuthorized":  false,
+    "releaseDecision":  "HOLD",
+    "files":  [
+                  {
+                      "path":  "AGENTS.md",
+                      "sha256":  "32c847ffe2a8dd2107477e14bbc5f3bdf7c0da1dcce71774b022487fd064be06",
+                      "bytes":  205583,
+                      "scope":  "documentation"
+                  },
+                  {
+                      "path":  "backend/package.json",
+                      "sha256":  "67512b0075177a47f5d8b71f6e3c40f09f77f70531296d575c0a128084a31ac2",
+                      "bytes":  36609,
+                      "scope":  "local_verification"
+                  },
+                  {
+                      "path":  "backend/scripts/safety-vote-ux-phase1-browser-probe.js",
+                      "sha256":  "6766deee0d1ceaca5680545e4fdfcdc9d312b1e21db37bfe7346611a22517f1f",
+                      "bytes":  9700,
+                      "scope":  "local_verification"
+                  },
+                  {
+                      "path":  "backend/scripts/safety-vote-ux-phase2-browser-probe.js",
+                      "sha256":  "6b198fd4c1ac3bfb96e1e43e1e8b21819a16fcdba8265a25b65e4f6371bd40fc",
+                      "bytes":  16916,
+                      "scope":  "local_verification"
+                  },
+                  {
+                      "path":  "backend/scripts/safety-vote-ux-phase3-static.test.js",
+                      "sha256":  "3c0944a9a59a6d6951f73e06e66738cad846a6eb67c5ac2a5b5be5fe580dc8c4",
+                      "bytes":  7748,
+                      "scope":  "local_verification"
+                  },
+                  {
+                      "path":  "backend/scripts/safety-vote-ux-phase4-static.test.js",
+                      "sha256":  "85c5813ceaf25882964556fa03b9f62ab836da3fcf01e8a65b581af09633abdb",
+                      "bytes":  8030,
+                      "scope":  "local_verification"
+                  },
+                  {
+                      "path":  "backend/scripts/safety-vote-ux-phase5-static.test.js",
+                      "sha256":  "6a99dbae22571fc406e855c17523c1891094adf391e394b26a2a78eb092c3fde",
+                      "bytes":  8530,
+                      "scope":  "local_verification"
+                  },
+                  {
+                      "path":  "backend/scripts/safety-vote-ux-phase6-static.test.js",
+                      "sha256":  "9263ec36078dda17d70a566288f52cca66644d8e7680e525de59c8e82169395e",
+                      "bytes":  8781,
+                      "scope":  "local_verification"
+                  },
+                  {
+                      "path":  "backend/scripts/safety-vote-ux-phase7-static.test.js",
+                      "sha256":  "ee37b117d921a2c2457899105b8626287c552fd3ee362316e04c3b380dccea7e",
+                      "bytes":  9767,
+                      "scope":  "local_verification"
+                  },
+                  {
+                      "path":  "backend/scripts/safety-vote-ux-phase8-evidence.js",
+                      "sha256":  "18710af26ed90837fd93c7fdbc42d6bff8d76b76c4d36b266ba808020a7b1b34",
+                      "bytes":  6392,
+                      "scope":  "local_verification"
+                  },
+                  {
+                      "path":  "backend/scripts/safety-vote-ux-phase8-static.test.js",
+                      "sha256":  "e1425538e50d2d074c446c03492e5ad4b98ae433c567448e627a52701ef749c6",
+                      "bytes":  7188,
+                      "scope":  "local_verification"
+                  },
+                  {
+                      "path":  "docs/safety-vote-ux-phase8-integrated-journey-accessibility-release-candidate-closeout.md",
+                      "sha256":  "043f756e590c2e557ff4d3fe975177d6aff2596b6d641885a7cad329166e7d65",
+                      "bytes":  9892,
+                      "scope":  "documentation"
+                  },
+                  {
+                      "path":  "docs/safety-vote-ux-phase8-preflight-scope.md",
+                      "sha256":  "bc7eca8da64ef16ae839fd945caef46e2b2166e56430d04f761b62596b1e92af",
+                      "bytes":  3344,
+                      "scope":  "documentation"
+                  },
+                  {
+                      "path":  "index.html",
+                      "sha256":  "0e21ae21bf0a756daeba18d4c6ddfecc48905248354021f68d98729e3f94c3b0",
+                      "bytes":  99537,
+                      "scope":  "presentation"
+                  },
+                  {
+                      "path":  "package.json",
+                      "sha256":  "f3794e033bcaa63abe3800cac2984da2fa8e61e7e43f67795e351fab3173d52b",
+                      "bytes":  6269,
+                      "scope":  "local_verification"
+                  },
+                  {
+                      "path":  "public/js/main.js",
+                      "sha256":  "ab71558455ef866ecac983cad227c002deac3d122e58464298d75f60cb42f4d0",
+                      "bytes":  68324,
+                      "scope":  "presentation"
+                  },
+                  {
+                      "path":  "public/js/pages/admin.js",
+                      "sha256":  "fcd46c8c0f346cde72d8d04f49f218b78b93ab4fab75bcf0f3a6dde49eb40358",
+                      "bytes":  699314,
+                      "scope":  "presentation"
+                  },
+                  {
+                      "path":  "public/js/pages/admin-safety-vote-governance.js",
+                      "sha256":  "b3416628b78d9cb214e79ea66ac0584287397c5702009008027c02326c476335",
+                      "bytes":  24805,
+                      "scope":  "presentation"
+                  },
+                  {
+                      "path":  "public/js/pages/admin-safety-vote-operations.js",
+                      "sha256":  "81839b35aa5da500c8de04078184680f6f2145368a27add7b30a7a80ce3d53e8",
+                      "bytes":  30058,
+                      "scope":  "presentation"
+                  },
+                  {
+                      "path":  "public/js/pages/admin-safety-vote-results.js",
+                      "sha256":  "d3c9c241271b257b4a95e81bfbe296f4d0a923340a5858d66afa0e3f1068334c",
+                      "bytes":  25682,
+                      "scope":  "presentation"
+                  },
+                  {
+                      "path":  "public/js/pages/admin-safety-vote-ux1.js",
+                      "sha256":  "3f36ba5f85959adf07f88b37fe81ec38f81cf6f3f26778e35e14df9fa0281455",
+                      "bytes":  25218,
+                      "scope":  "presentation"
+                  },
+                  {
+                      "path":  "public/js/pages/safety-vote-campaign-wizard.js",
+                      "sha256":  "3c8ca4299f2ad1dc9ea16e397df607645aa4fc6218274e324ab583c43b0e8d69",
+                      "bytes":  31939,
+                      "scope":  "presentation"
+                  },
+                  {
+                      "path":  "public/js/pages/safety-vote-journey-model.mjs",
+                      "sha256":  "64de00923f331c9468e43e40a5c9310c0eb5e06fd953d6490a931e8da1a18622",
+                      "bytes":  1738,
+                      "scope":  "presentation"
+                  },
+                  {
+                      "path":  "public/js/pages/safety-vote-jury-workspace.js",
+                      "sha256":  "7abb5633e248549849972d6b89fd176d9b8a7976ee1f6586ef86f7337600c4ff",
+                      "bytes":  32314,
+                      "scope":  "presentation"
+                  },
+                  {
+                      "path":  "public/js/pages/safety-vote-page-ux1.js",
+                      "sha256":  "51bc638bf27aaed7b85210f112b14b1af416c5cb780cad81a56294b478c2d7c5",
+                      "bytes":  41282,
+                      "scope":  "presentation"
+                  },
+                  {
+                      "path":  "public/js/pages/safety-vote-ux-components.js",
+                      "sha256":  "fc4a760c6350b04c0d6d158a3dd4e7dd6598da706f75e26f9eab78c56fe8ca43",
+                      "bytes":  23414,
+                      "scope":  "presentation"
+                  },
+                  {
+                      "path":  "public/style.css",
+                      "sha256":  "910eb9c54530c8858db7e84d364eb9bc12d7288bf5bd0037e73106f18b302933",
+                      "bytes":  150071,
+                      "scope":  "presentation"
+                  }
+              ]
+}

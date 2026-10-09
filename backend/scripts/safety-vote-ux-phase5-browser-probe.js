@@ -18,7 +18,6 @@ const pending = new Map();
 const consoleErrors = [];
 const unexpectedApiErrors = [];
 const expectedApiErrors = [];
-const knownPartialApiErrors = [];
 let expectHttpError = false;
 let chrome;
 let ws;
@@ -103,8 +102,7 @@ const viewports = [
         if (message.method === 'Runtime.exceptionThrown') consoleErrors.push(message.params?.exceptionDetails?.exception?.description || message.params?.exceptionDetails?.text);
         if (message.method === 'Network.responseReceived' && message.params.response.status >= 400 && !message.params.response.url.endsWith('/favicon.ico')) {
             const item = `${message.params.response.status} ${message.params.response.url}`;
-            const knownJuryProgressAmbiguity = message.params.response.status === 500 && /\/jury\/progress(?:\?|$)/.test(message.params.response.url);
-            (knownJuryProgressAmbiguity ? knownPartialApiErrors : expectHttpError ? expectedApiErrors : unexpectedApiErrors).push(item);
+            (expectHttpError ? expectedApiErrors : unexpectedApiErrors).push(item);
         }
         const request = pending.get(message.id);
         if (request) { pending.delete(message.id); message.error ? request.reject(new Error(message.error.message)) : request.resolve(message.result); }
@@ -128,7 +126,8 @@ const viewports = [
         const body = await ev(`document.body.textContent`);
         assert(!body.includes('SV-V01') && !body.includes('private fixture detail') && !body.includes('Alice Real'), `${name} protected data leaked into Operations UI`);
         assert(body.includes('Privacy threshold') && body.includes('exact result hash'), `${name} privacy/certification wording`);
-        assert(body.includes('ข้อมูลบางส่วนไม่พร้อม') && body.includes('ความคืบหน้างานกรรมการ'), `${name} documented jury-progress partial state`);
+        assert(body.includes('3/6') && body.includes('งานที่กรรมการส่งแล้ว') && body.includes('ถอนตัว 1'), `${name} jury-progress aggregation`);
+        assert(!body.includes('ความคืบหน้างานกรรมการ ไม่พร้อมใช้งาน'), `${name} jury-progress must not render a partial-data warning`);
         await shot(`operations-${name}.png`);
 
         if (ordinal === 0) {
@@ -196,7 +195,7 @@ const viewports = [
         privacyThresholdSuppression: true, secretDimensionForbidden: true, notificationPreviewAggregateOnly: true,
         scheduleConfirmation: true, notificationQueueConfirmation: true, aggregateExportConfirmation: true,
         reportIntegrityReceipt: true, certificationOwnershipReadOnly: true, partialCapabilityState: true,
-        permissionDenied: true, moduleDisabledFailClosed: true, knownPartialApiErrors, expectedApiErrors, unexpectedApiErrors, consoleErrors
+        permissionDenied: true, moduleDisabledFailClosed: true, juryProgressFunctional: true, expectedApiErrors, unexpectedApiErrors, consoleErrors
     };
     fs.writeFileSync(path.join(evidence, 'result.json'), JSON.stringify(result, null, 2));
     const digest = crypto.createHash('sha256').update(fs.readFileSync(path.join(evidence, 'result.json'))).digest('hex');
@@ -204,7 +203,7 @@ const viewports = [
     assert(expectedApiErrors.some(item => item.startsWith('403 ') && item.includes('analytics/organization')), 'secret-dimension 403 evidence missing');
     assert(expectedApiErrors.some(item => item.startsWith('403 ') && item.includes('/exports')), 'export capability 403 evidence missing');
     assert(expectedApiErrors.some(item => item.startsWith('503 ')), 'module-disabled 503 evidence missing');
-    assert(knownPartialApiErrors.some(item => item.includes('/jury/progress')), 'documented jury-progress partial-state evidence missing');
+    assert(![...expectedApiErrors, ...unexpectedApiErrors].some(item => item.startsWith('500 ') && item.includes('/jury/progress')), 'jury-progress returned HTTP 500');
     assert.deepStrictEqual(consoleErrors, []);
     assert.deepStrictEqual(unexpectedApiErrors, []);
     console.log(`Safety Vote UX Phase 5 authenticated Admin five-viewport browser UAT: PASS (${evidence}, result SHA-256 ${digest})`);

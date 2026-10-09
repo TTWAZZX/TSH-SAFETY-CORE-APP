@@ -48,7 +48,7 @@ const read = relative => fs.readFileSync(path.join(root, relative), 'utf8');
     check(modelSource.includes('ResultVisibility') && workspace.includes('publicPreview'), 'result visibility preview is missing');
     check(!workspace.includes('SafetyVote_ResultRows'), 'client must not query result tables directly');
     check(!workspace.includes('BallotAnswers'), 'client must not query ballot answers');
-    check(/safety-vote-ux(?:6|7)-r1/.test(main) && /safety-vote-ux(?:6|7)-r1/.test(html), 'Phase 6-or-later cache chain is incomplete');
+    check(/safety-vote-ux(?:6|7|8)-r1/.test(main) && /safety-vote-ux(?:6|7|8)-r1/.test(html), 'Phase 6-or-later cache chain is incomplete');
     check(css.includes('Safety Vote UX/UI Phase 6'), 'Phase 6 CSS scope marker is missing');
     check(css.includes('.svr-action-bar') && css.includes('env(safe-area-inset-bottom)'), 'sticky action bar safe-area support is missing');
     check(css.includes('.svr-shell button') && css.includes('min-height: 44px'), '44 px controls are not enforced');

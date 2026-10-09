@@ -1,9 +1,9 @@
 import { API } from '../api.js?v=20260908-bbs-navigation-loading-r1';
 import { escHtml, showToast } from '../ui.js?v=20260602-mobile-nav-m53';
-import { isSafetyVoteUxV1Enabled, safetyVoteRoleNav, safetyVoteStatusBadge, openSafetyVoteConfirmDialog, openSafetyVoteReasonDialog, openSafetyVoteHashReasonDialog } from './safety-vote-ux-components.js?v=20261008-safety-vote-ux6-r1';
+import { isSafetyVoteUxV1Enabled, safetyVoteJourneyNav, safetyVoteRoleNav, safetyVoteStatusBadge, openSafetyVoteConfirmDialog, openSafetyVoteReasonDialog, openSafetyVoteHashReasonDialog } from './safety-vote-ux-components.js?v=20261009-safety-vote-ux8-r1';
 import { snapshotList, selectedSnapshot, resultReadiness, verificationChecks, publicPreview, isSecretCampaign } from './safety-vote-results-model.mjs?v=20261008-safety-vote-ux6-r1';
 
-const state = { container: null, campaign: null, onClose: null, snapshots: [], stages: [], verification: null, published: null, selectedId: null, loading: true, denied: false, moduleDisabled: false, error: null, partial: [], busy: false, notice: '', actionError: '', receipt: null };
+const state = { container: null, campaign: null, onClose: null, onNavigate: null, snapshots: [], stages: [], verification: null, published: null, selectedId: null, loading: true, denied: false, moduleDisabled: false, error: null, partial: [], busy: false, notice: '', actionError: '', receipt: null };
 
 function dateTime(value) {
     if (!value) return '—';
@@ -59,6 +59,7 @@ function render() {
     state.selectedId = snapshot?.id || null;
     const partial = state.partial.length ? `<section class="svr-partial-list" aria-labelledby="svr-partial-title"><h2 id="svr-partial-title">ข้อมูลบางส่วนไม่พร้อม</h2>${state.partial.map(item => `<article role="status"><strong>${escHtml(item.label)}</strong><span>${escHtml(item.message)}</span></article>`).join('')}</section>` : '';
     state.container.innerHTML = `<div class="svr-shell" data-sv-results="2026-10-08-safety-vote-ux6-r1">${safetyVoteRoleNav({ active: 'admin', showAdmin: true })}<header class="svr-hero"><button type="button" class="sv-icon-button" data-svr-action="back" aria-label="กลับศูนย์จัดการ Safety Vote">←</button><div><p class="sv-eyebrow">ตรวจสอบและรับรองผล Safety Vote</p><h1>${escHtml(state.campaign.TitleTh || state.campaign.CampaignCode || 'Safety Vote')}</h1><p>${secret ? 'Secret Election · dual control' : 'ผลมาตรฐาน'} · ตรวจ snapshot และ exact hash ก่อนดำเนินการที่ย้อนกลับไม่ได้</p></div>${safetyVoteStatusBadge(state.campaign.Status)}</header>${partial}${state.actionError ? `<div class="svr-message is-error" role="alert">${escHtml(state.actionError)}</div>` : ''}${state.notice ? `<div class="svr-message is-success" role="status">${escHtml(state.notice)}</div>` : ''}${state.receipt ? `<div class="svr-receipt" role="status"><strong>${escHtml(state.receipt.title)}</strong><span>Snapshot ${Number(state.receipt.snapshotId || 0)} · ${escHtml(state.receipt.status || '')}</span><code>${escHtml(state.receipt.resultHash || '')}</code></div>` : ''}<main class="svr-grid"><section class="svr-panel svr-panel--snapshots" aria-labelledby="svr-snapshots-title"><div class="svr-panel__heading"><div><p class="sv-eyebrow">Immutable result versions</p><h2 id="svr-snapshots-title">เปรียบเทียบ Snapshot</h2></div><span>${rows.length.toLocaleString('th-TH')} รุ่น</span></div>${snapshotCards(rows, snapshot)}</section><section class="svr-panel" aria-labelledby="svr-readiness-title"><div class="svr-panel__heading"><div><p class="sv-eyebrow">Readiness</p><h2 id="svr-readiness-title">ความพร้อมและ exact hash</h2></div></div>${readinessPanel(snapshot, secret)}</section><section class="svr-panel" aria-labelledby="svr-governance-title"><div class="svr-panel__heading"><div><p class="sv-eyebrow">SHE governance</p><h2 id="svr-governance-title">หลักฐานการควบคุมและความเป็นส่วนตัว</h2></div></div>${verificationPanel(secret)}</section><section class="svr-panel" aria-labelledby="svr-public-title"><div class="svr-panel__heading"><div><p class="sv-eyebrow">Visibility preview</p><h2 id="svr-public-title">ตัวอย่างหลังเผยแพร่</h2></div></div>${publicationPanel(snapshot)}</section></main>${certifierAssignment(secret)}${actions(snapshot, secret)}</div>`;
+    state.container.querySelector('.sv-role-nav')?.insertAdjacentHTML('afterend', safetyVoteJourneyNav({ role: 'admin', current: 'results', campaign: state.campaign, onPage: typeof state.onNavigate !== 'function' }));
     bind();
 }
 
@@ -155,6 +156,7 @@ async function assignCertifier() {
 }
 
 function bind() {
+    state.container?.querySelectorAll('[data-sv-journey-step]').forEach(button => button.addEventListener('click', () => state.onNavigate?.(button.dataset.svJourneyStep)));
     state.container?.querySelectorAll('[data-svr-snapshot]').forEach(button => button.addEventListener('click', () => { state.selectedId = Number(button.dataset.svrSnapshot); render(); }));
     state.container?.querySelectorAll('[data-svr-action]').forEach(button => button.addEventListener('click', async () => {
         const action = button.dataset.svrAction;
@@ -166,9 +168,9 @@ function bind() {
     }));
 }
 
-export async function renderSafetyVoteResultsWorkspace(container, { campaign = null, onClose = null } = {}) {
+export async function renderSafetyVoteResultsWorkspace(container, { campaign = null, onClose = null, onNavigate = null } = {}) {
     if (!isSafetyVoteUxV1Enabled() || !container || !campaign?.id) return false;
-    Object.assign(state, { container, campaign, onClose, snapshots: [], stages: [], verification: null, published: null, selectedId: null, loading: true, denied: false, moduleDisabled: false, error: null, partial: [], busy: false, notice: '', actionError: '', receipt: null });
+    Object.assign(state, { container, campaign, onClose, onNavigate, snapshots: [], stages: [], verification: null, published: null, selectedId: null, loading: true, denied: false, moduleDisabled: false, error: null, partial: [], busy: false, notice: '', actionError: '', receipt: null });
     await loadData();
     return true;
 }

@@ -1,13 +1,13 @@
 import { API } from '../api.js?v=20260908-bbs-navigation-loading-r1';
 import { escHtml, showToast } from '../ui.js?v=20260602-mobile-nav-m53';
-import { isSafetyVoteUxV1Enabled, openSafetyVoteConfirmDialog, safetyVoteRoleNav, safetyVoteStatusBadge } from './safety-vote-ux-components.js?v=20261008-safety-vote-ux5-r1';
+import { isSafetyVoteUxV1Enabled, openSafetyVoteConfirmDialog, safetyVoteJourneyNav, safetyVoteRoleNav, safetyVoteStatusBadge } from './safety-vote-ux-components.js?v=20261009-safety-vote-ux8-r1';
 import {
     juryProgress, metricView, notificationSummary, operationalWarnings, preferredSnapshot,
     safeTimeline, snapshotReadiness, stageRows, statusCounts, valueOf
 } from './safety-vote-operations-model.mjs?v=20261008-safety-vote-ux5-r1';
 
 const state = {
-    container: null, campaign: null, onClose: null, operations: null, analytics: null, analyticsPrivacy: false,
+    container: null, campaign: null, onClose: null, onNavigate: null, operations: null, analytics: null, analyticsPrivacy: false,
     juryRows: [], stages: [], snapshots: [], partialIssues: [], loading: true, error: null, denied: false,
     moduleDisabled: false, busy: false, manageUnavailable: false, exportUnavailable: false,
     notificationPreview: null, latestReport: null, actionError: '', actionNotice: ''
@@ -99,6 +99,7 @@ function render() {
     const campaign = state.campaign || {}, operations = state.operations || {}, funnel = operations.funnel || {}, status = operations.campaign?.status || campaign.Status || 'Draft';
     const notificationCounts = statusCounts(operations.notifications || []), exportCounts = statusCounts(operations.exports || []);
     state.container.innerHTML = `<div class="svo-shell" data-sv-operations="2026-10-08-safety-vote-ux5-r1">${safetyVoteRoleNav({ active: 'admin', showAdmin: true })}<header class="svo-hero"><button type="button" class="sv-icon-button" data-svo-action="back" aria-label="กลับศูนย์จัดการ Safety Vote">←</button><div><p class="sv-eyebrow">ศูนย์ปฏิบัติการ Safety Vote</p><h1>${escHtml(campaign.TitleTh || campaign.titleTh || 'แคมเปญ Safety Vote')}</h1><p>${escHtml(campaign.CampaignCode || campaign.campaignCode || '')} · ข้อมูลรวมสำหรับติดตามความพร้อม ไม่ใช่หน้ารับรองหรือคำนวณผล</p></div>${safetyVoteStatusBadge(status)}</header>${warningMarkup()}${state.actionError ? `<div class="svo-action-message is-error" role="alert">${escHtml(state.actionError)}</div>` : ''}${state.actionNotice ? `<div class="svo-action-message is-success" role="status">${escHtml(state.actionNotice)}</div>` : ''}<section class="svo-kpi-grid" aria-label="Funnel การเข้าร่วมที่ผ่านเกณฑ์ความเป็นส่วนตัว">${metricCard('ผู้มีสิทธิ์', funnel.eligible)}${metricCard('เริ่มแล้ว', funnel.started)}${metricCard('ส่งแล้ว', funnel.submitted)}${metricCard('บัตรที่รับ', funnel.accepted)}</section><div class="svo-privacy-banner" role="note"><strong>Privacy threshold ทำงานที่เซิร์ฟเวอร์</strong><span>ค่าที่ถูกปกปิดจะไม่ถูกคำนวณย้อนกลับ และหน้าจอนี้ไม่อ่านตัวเลือกลงคะแนน รายชื่อผู้ลงคะแนน หรือ blind identity</span></div><main class="svo-grid"><section class="svo-panel svo-panel--timeline" aria-labelledby="svo-timeline-title"><div class="svo-panel__heading"><div><p class="sv-eyebrow">Lifecycle</p><h2 id="svo-timeline-title">กำหนดการและ Timeline</h2></div><span>${escHtml(operations.campaign?.timeZone || 'Asia/Bangkok')}</span></div><dl class="svo-schedule"><div><dt>เปิด</dt><dd>${dateTime(operations.campaign?.scheduledOpenAt)}</dd></div><div><dt>ปิด</dt><dd>${dateTime(operations.campaign?.scheduledCloseAt)}</dd></div></dl>${timelineMarkup()}</section><section class="svo-panel" aria-labelledby="svo-jury-title"><div class="svo-panel__heading"><div><p class="sv-eyebrow">Stage health</p><h2 id="svo-jury-title">รอบและงานกรรมการ</h2></div></div>${stagesMarkup()}</section><section class="svo-panel" aria-labelledby="svo-analytics-title"><div class="svo-panel__heading"><div><p class="sv-eyebrow">Privacy-safe analytics</p><h2 id="svo-analytics-title">การเข้าร่วมตามหน่วยงาน</h2></div></div>${analyticsMarkup()}</section><section class="svo-panel" aria-labelledby="svo-notification-title"><div class="svo-panel__heading"><div><p class="sv-eyebrow">Delivery health</p><h2 id="svo-notification-title">สถานะการแจ้งเตือน</h2></div><span>${Number(notificationCounts.Failed || 0) ? 'ต้องตรวจสอบ' : 'ติดตามจากสถานะรวม'}</span></div>${notificationMarkup()}</section><section class="svo-panel svo-panel--results" aria-labelledby="svo-result-title"><div class="svo-panel__heading"><div><p class="sv-eyebrow">Result readiness</p><h2 id="svo-result-title">Snapshot และรายงาน</h2></div><span>Export สำเร็จ ${Number(exportCounts.Completed || 0)}</span></div>${resultsMarkup()}</section></main><footer class="svo-action-bar"><button type="button" class="sv-button sv-button--secondary" data-svo-action="back">กลับศูนย์จัดการ</button><div><button type="button" class="sv-button sv-button--secondary" data-svo-action="refresh" ${state.busy ? 'disabled' : ''}>รีเฟรช</button><button type="button" class="sv-button sv-button--primary" data-svo-action="process-schedule" ${state.manageUnavailable || state.busy ? 'disabled' : ''}>ประมวลผลกำหนดการ</button></div></footer></div>`;
+    state.container.querySelector('.sv-role-nav')?.insertAdjacentHTML('afterend', safetyVoteJourneyNav({ role: 'admin', current: 'operations', campaign, onPage: typeof state.onNavigate !== 'function' }));
     bind();
 }
 
@@ -208,6 +209,7 @@ function confirmAction(action) {
 }
 
 function bind() {
+    state.container?.querySelectorAll('[data-sv-journey-step]').forEach(button => button.addEventListener('click', () => state.onNavigate?.(button.dataset.svJourneyStep)));
     state.container?.querySelectorAll('[data-svo-action]').forEach(button => button.addEventListener('click', () => {
         const action = button.dataset.svoAction;
         if (action === 'back') state.onClose?.();
@@ -217,9 +219,9 @@ function bind() {
     }));
 }
 
-export async function renderSafetyVoteOperationsWorkspace(container, { campaign = null, onClose = null } = {}) {
+export async function renderSafetyVoteOperationsWorkspace(container, { campaign = null, onClose = null, onNavigate = null } = {}) {
     if (!isSafetyVoteUxV1Enabled() || !container || !campaign?.id) return false;
-    Object.assign(state, { container, campaign, onClose, operations: null, analytics: null, analyticsPrivacy: false, juryRows: [], stages: [], snapshots: [], partialIssues: [], loading: true, error: null, denied: false, moduleDisabled: false, busy: false, manageUnavailable: false, exportUnavailable: false, notificationPreview: null, latestReport: null, actionError: '', actionNotice: '' });
+    Object.assign(state, { container, campaign, onClose, onNavigate, operations: null, analytics: null, analyticsPrivacy: false, juryRows: [], stages: [], snapshots: [], partialIssues: [], loading: true, error: null, denied: false, moduleDisabled: false, busy: false, manageUnavailable: false, exportUnavailable: false, notificationPreview: null, latestReport: null, actionError: '', actionNotice: '' });
     await loadData();
     return true;
 }

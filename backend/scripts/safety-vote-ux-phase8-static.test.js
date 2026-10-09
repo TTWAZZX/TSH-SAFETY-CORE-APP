@@ -1,0 +1,81 @@
+'use strict';
+
+const assert = require('assert');
+const fs = require('fs');
+const path = require('path');
+const { pathToFileURL } = require('url');
+const root = path.resolve(__dirname, '..', '..');
+const read = relative => fs.readFileSync(path.join(root, relative), 'utf8');
+
+(async () => {
+    const components = read('public/js/pages/safety-vote-ux-components.js');
+    const center = read('public/js/pages/admin-safety-vote-ux1.js');
+    const wizard = read('public/js/pages/safety-vote-campaign-wizard.js');
+    const participation = read('public/js/pages/safety-vote-page-ux1.js');
+    const jury = read('public/js/pages/safety-vote-jury-workspace.js');
+    const operations = read('public/js/pages/admin-safety-vote-operations.js');
+    const results = read('public/js/pages/admin-safety-vote-results.js');
+    const governance = read('public/js/pages/admin-safety-vote-governance.js');
+    const css = read('public/style.css');
+    const main = read('public/js/main.js');
+    const html = read('index.html');
+    const preflight = read('docs/safety-vote-ux-phase8-preflight-scope.md');
+    const model = await import(pathToFileURL(path.join(root, 'public', 'js', 'pages', 'safety-vote-journey-model.mjs')).href);
+    let checks = 0;
+    const check = (value, message) => { checks += 1; assert(value, message); };
+
+    check(components.includes('__TSH_FEATURE_FLAGS__?.safetyVoteUxV1 === true'), 'strict feature opt-in changed');
+    check(center.includes('renderLegacySafetyVoteFoundation(container)'), 'feature-off rollback is missing');
+    check(components.includes('safetyVoteJourneyNav'), 'shared journey component is missing');
+    check(components.includes('aria-label="เส้นทางปัจจุบัน"'), 'breadcrumb accessible name is missing');
+    check(components.includes('aria-label="ขั้นตอน Safety Vote"'), 'journey accessible name is missing');
+    check(components.includes('aria-current="step"'), 'current-step semantics are missing');
+    check(components.includes('aria-live="polite"'), 'journey live status is missing');
+    check(components.includes('safetyVoteStatePanel'), 'shared state panel is missing');
+    check(components.includes('focusSafetyVoteHeading'), 'heading focus helper is missing');
+    check(center.includes("current: 'center'"), 'Campaign Center journey state is missing');
+    check(wizard.includes("current: 'readiness'"), 'readiness journey state is missing');
+    check(participation.includes("current: 'participation'"), 'participation journey state is missing');
+    check(jury.includes("current: 'jury'"), 'jury journey state is missing');
+    check(operations.includes("current: 'operations'"), 'operations journey state is missing');
+    check(results.includes("current: 'results'"), 'results journey state is missing');
+    check(governance.includes("current: 'governance'"), 'governance journey state is missing');
+    check(center.includes('handleJourneyStep') && center.includes('openOperationsWorkspace') && center.includes('openResultsWorkspace') && center.includes('openGovernanceWorkspace'), 'Admin cross-workspace navigation is incomplete');
+    check(participation.includes('data-sv-role-link="jury"'), 'User-to-Juror authorized role link regressed');
+    check(jury.includes('data-sv-role-link="user"'), 'Juror-to-User authorized role link regressed');
+    check(operations.includes('state.partial') && results.includes('state.partial') && governance.includes('state.partial'), 'partial-capability states regressed');
+    check(participation.includes('SAFETY_VOTE_MODULE_DISABLED') && jury.includes('SAFETY_VOTE_MODULE_DISABLED'), 'User/Juror module-disabled handling regressed');
+    check(operations.includes('SAFETY_VOTE_MODULE_DISABLED') && results.includes('SAFETY_VOTE_MODULE_DISABLED') && governance.includes('SAFETY_VOTE_MODULE_DISABLED'), 'Admin module-disabled handling regressed');
+    check(governance.includes("decision") && governance.includes('Production connected:') && governance.includes('Deploy authorized:'), 'release HOLD evidence is missing');
+    check(governance.includes('externalDelivery !== false'), 'external delivery fail-closed check regressed');
+    check(!components.includes('SafetyVote_') && !components.includes('fetch('), 'shared presentation component must not query storage/API');
+    check(!center.includes('BallotAnswers') && !participation.includes('BallotIdentities'), 'protected table coupling detected');
+    check(css.includes('Safety Vote UX Phase 8'), 'Phase 8 CSS marker is missing');
+    check(css.includes('.sv-breadcrumbs') && css.includes('.sv-journey-steps'), 'journey CSS is incomplete');
+    check(css.includes('overflow-x: auto') && css.includes('overflow-x: clip'), 'overflow containment is incomplete');
+    check(css.includes('min-height: 52px') && css.includes('min-height:56px'), '44px+ journey targets are not enforced');
+    check(css.includes(':focus-visible'), 'visible focus treatment is missing');
+    check(css.includes('prefers-reduced-motion:reduce'), 'reduced-motion support is missing');
+    check(/safety-vote-ux8-r1/.test(main) && /safety-vote-ux8-r1/.test(html), 'Phase 8 cache chain is incomplete');
+
+    const adminPopular = model.journeyForCampaign({ role: 'admin', campaignType: 'popular_vote' });
+    check(adminPopular[0].key === 'center' && adminPopular.at(-1).key === 'governance', 'Admin journey endpoints are incorrect');
+    check(!adminPopular.some(step => step.key === 'jury'), 'popular vote must not show Jury step');
+    const adminJury = model.journeyForCampaign({ role: 'admin', campaignType: 'hybrid_scoring' });
+    check(adminJury.some(step => step.key === 'jury'), 'jury-capable campaign must show Jury step');
+    const user = model.journeyForCampaign({ role: 'user', campaignType: 'survey' });
+    check(user.length === 1 && user[0].key === 'participation', 'User journey must remain scoped');
+    const juror = model.journeyForCampaign({ role: 'jury', campaignType: 'jury_scoring' });
+    check(juror.length === 1 && juror[0].key === 'jury', 'Juror journey must remain scoped');
+    const position = model.journeyPosition({ role: 'admin', campaignType: 'secret_election', current: 'results' });
+    check(position.current?.key === 'results' && position.index > 0, 'journey position is incorrect');
+    check(model.normalizeJourneyType('jury_scoring') === 'judged_contest', 'jury type normalization is incorrect');
+
+    for (const excluded of ['backend/routes/**', 'api/**', 'backend/migrations/**', 'shared/**']) check(preflight.includes(excluded), `excluded scope missing: ${excluded}`);
+    check(preflight.includes('077c5977283a55756bdfcfe5dfb804e32f716aa8'), 'authoritative baseline is missing');
+    check(preflight.includes('HOLD'), 'release HOLD is missing');
+    check(preflight.includes('backend/scripts/patrol-checkin-v2.test.js'), 'pre-existing dirty file boundary is missing');
+    check(preflight.includes('NO_PRODUCTION_CONNECTION'), 'Production exclusion evidence is missing');
+
+    console.log(`Safety Vote UX Phase 8 static/unit/accessibility/scope contract: PASS (${checks} assertions)`);
+})().catch(error => { console.error(error.stack || error); process.exitCode = 1; });

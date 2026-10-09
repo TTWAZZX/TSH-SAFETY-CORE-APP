@@ -39,7 +39,7 @@ const read = relativePath => fs.readFileSync(path.join(root, relativePath), 'utf
     check(page.includes('loadLegacySafetyVotePage') && page.includes('data-svp-jury'), 'existing Juror workspace handoff is missing');
     check(page.includes('state.moduleDisabled') && page.includes('MODULE_DISABLED'), 'module_enabled fail-closed state is missing');
     check(page.includes('state.denied') && page.includes('PERMISSION_DENIED'), 'permission denied state is missing');
-    check(/safety-vote-ux(?:3|4|5|6|7)-r1/.test(main) && /safety-vote-ux(?:3|4|5|6|7)-r1/.test(html), 'Phase 3-or-later cache chain is incomplete');
+    check(/safety-vote-ux(?:3|4|5|6|7|8)-r1/.test(main) && /safety-vote-ux(?:3|4|5|6|7|8)-r1/.test(html), 'Phase 3-or-later cache chain is incomplete');
     check(css.includes('Safety Vote UX/UI Phase 3'), 'Phase 3 scoped CSS marker is missing');
     check(css.includes('.svp-action-bar') && css.includes('env(safe-area-inset-bottom'), 'responsive sticky action bar is missing safe-area handling');
     check(css.includes('min-height: 44px'), '44 px touch targets are not enforced');

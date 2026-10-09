@@ -1,9 +1,9 @@
 import { API } from '../api.js?v=20260908-bbs-navigation-loading-r1';
 import { escHtml, showToast } from '../ui.js?v=20260602-mobile-nav-m53';
-import { isSafetyVoteUxV1Enabled, safetyVoteRoleNav, safetyVoteStatusBadge, openSafetyVoteTypedConfirmationDialog } from './safety-vote-ux-components.js?v=20261008-safety-vote-ux7-r1';
+import { isSafetyVoteUxV1Enabled, safetyVoteJourneyNav, safetyVoteRoleNav, safetyVoteStatusBadge, openSafetyVoteTypedConfirmationDialog } from './safety-vote-ux-components.js?v=20261009-safety-vote-ux8-r1';
 import { normalizeVerification, normalizeAcceptance, normalizePreflight, normalizeObservability, normalizeCatalog, normalizePreview, evidenceTimeline } from './safety-vote-governance-model.mjs?v=20261008-safety-vote-ux7-r1';
 
-const state = { container: null, campaign: null, onClose: null, loading: true, denied: false, moduleDisabled: false, error: null, partial: [], verification: null, acceptance: null, preflight: null, observability: null, catalog: [], providers: null, preview: null, receipts: [], busy: false, notice: '', actionError: '' };
+const state = { container: null, campaign: null, onClose: null, onNavigate: null, loading: true, denied: false, moduleDisabled: false, error: null, partial: [], verification: null, acceptance: null, preflight: null, observability: null, catalog: [], providers: null, preview: null, receipts: [], busy: false, notice: '', actionError: '' };
 
 function dateTime(value) {
     if (!value) return '—';
@@ -68,6 +68,7 @@ function render() {
     const partial = state.partial.length ? `<section class="svg-partial" aria-labelledby="svg-partial-title"><h2 id="svg-partial-title">ข้อมูลบางส่วนไม่พร้อม</h2>${state.partial.map(item => `<article role="status"><strong>${escHtml(item.label)}</strong><span>${escHtml(item.message)}</span></article>`).join('')}</section>` : '';
     const accepted = normalizeAcceptance(state.acceptance).ready;
     state.container.innerHTML = `<div class="svg-shell" data-sv-governance="2026-10-08-safety-vote-ux7-r1">${safetyVoteRoleNav({ active: 'admin', showAdmin: true })}<header class="svg-hero"><button class="sv-icon-button" data-svg-action="back" aria-label="กลับศูนย์จัดการ Safety Vote">←</button><div><p class="sv-eyebrow">ธรรมาภิบาลและหลักฐานการปล่อยใช้งาน Safety Vote</p><h1>${escHtml(state.campaign.TitleTh || state.campaign.CampaignCode || 'Safety Vote')}</h1><p>ตรวจ checksum, SHE acceptance, privacy-safe audit และ release HOLD โดยไม่อนุญาต Production หรือ external delivery</p></div>${safetyVoteStatusBadge(state.campaign.Status)}</header>${partial}${state.actionError ? `<div class="svg-message is-error" role="alert">${escHtml(state.actionError)}</div>` : ''}${state.notice ? `<div class="svg-message is-success" role="status">${escHtml(state.notice)}</div>` : ''}<main class="svg-grid"><section class="svg-panel svg-panel--wide" aria-labelledby="svg-preflight-title"><div class="svg-panel__heading"><div><p class="sv-eyebrow">Authoritative release gate</p><h2 id="svg-preflight-title">Release preflight checklist</h2></div></div>${preflightPanel()}</section><section class="svg-panel svg-panel--wide" aria-labelledby="svg-verification-title"><div class="svg-panel__heading"><div><p class="sv-eyebrow">Immutable evidence</p><h2 id="svg-verification-title">ตรวจ checksum และ privacy separation</h2></div></div>${verificationPanel()}</section><section class="svg-panel" aria-labelledby="svg-acceptance-title"><div class="svg-panel__heading"><div><p class="sv-eyebrow">SHE ownership</p><h2 id="svg-acceptance-title">Acceptance evidence</h2></div></div>${acceptancePanel()}</section><section class="svg-panel" aria-labelledby="svg-observability-title"><div class="svg-panel__heading"><div><p class="sv-eyebrow">Privacy-safe operations</p><h2 id="svg-observability-title">Observability และ alerts</h2></div></div>${observabilityPanel()}</section><section class="svg-panel svg-panel--wide" aria-labelledby="svg-handoff-title"><div class="svg-panel__heading"><div><p class="sv-eyebrow">No automatic delivery</p><h2 id="svg-handoff-title">Integration handoff preview</h2></div></div>${handoffPanel()}</section><section class="svg-panel svg-panel--wide" aria-labelledby="svg-timeline-title"><div class="svg-panel__heading"><div><p class="sv-eyebrow">Bounded audit evidence</p><h2 id="svg-timeline-title">Timeline หลักฐาน</h2></div></div>${timelinePanel()}</section></main><footer class="svg-action-bar"><button class="sv-button sv-button--secondary" data-svg-action="back">กลับศูนย์จัดการ</button><div><button class="sv-button sv-button--secondary" data-svg-action="refresh" ${state.busy ? 'disabled' : ''}>รีเฟรชหลักฐาน</button><button class="sv-button sv-button--primary" data-svg-action="accept-she" ${normalizePreflight(state.preflight).available && !state.busy && !accepted ? '' : 'disabled'}>${accepted ? 'SHE acceptance บันทึกแล้ว' : 'Approve by SHE'}</button></div></footer></div>`;
+    state.container.querySelector('.sv-role-nav')?.insertAdjacentHTML('afterend', safetyVoteJourneyNav({ role: 'admin', current: 'governance', campaign: state.campaign, onPage: typeof state.onNavigate !== 'function' }));
     bind();
 }
 
@@ -127,6 +128,7 @@ function confirmHandoff() {
 }
 
 function bind() {
+    state.container?.querySelectorAll('[data-sv-journey-step]').forEach(button => button.addEventListener('click', () => state.onNavigate?.(button.dataset.svJourneyStep)));
     state.container?.querySelectorAll('[data-svg-copy]').forEach(button => button.addEventListener('click', async () => { const value = button.dataset.svgCopy; if (value) { await navigator.clipboard?.writeText(value); showToast('คัดลอก SHA-256 แล้ว', 'success'); } }));
     state.container?.querySelectorAll('[data-svg-action]').forEach(button => button.addEventListener('click', () => {
         const action = button.dataset.svgAction;
@@ -138,9 +140,9 @@ function bind() {
     }));
 }
 
-export async function renderSafetyVoteGovernanceWorkspace(container, { campaign = null, onClose = null } = {}) {
+export async function renderSafetyVoteGovernanceWorkspace(container, { campaign = null, onClose = null, onNavigate = null } = {}) {
     if (!isSafetyVoteUxV1Enabled() || !container || !campaign?.id) return false;
-    Object.assign(state, { container, campaign, onClose, loading: true, denied: false, moduleDisabled: false, error: null, partial: [], verification: null, acceptance: null, preflight: null, observability: null, catalog: [], providers: null, preview: null, receipts: [], busy: false, notice: '', actionError: '' });
+    Object.assign(state, { container, campaign, onClose, onNavigate, loading: true, denied: false, moduleDisabled: false, error: null, partial: [], verification: null, acceptance: null, preflight: null, observability: null, catalog: [], providers: null, preview: null, receipts: [], busy: false, notice: '', actionError: '' });
     await loadData();
     return true;
 }
