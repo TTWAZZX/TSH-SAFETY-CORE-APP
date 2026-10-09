@@ -2,11 +2,11 @@
 
 Date: 2026-10-09
 
-Decision: `HOLD_NO_EXISTING_AUTHENTICATED_SESSION`
+Decision: `PASS_AUTHENTICATED_ENTRY_GATE_PILOT_DEPLOYMENT_NOT_STARTED`
 
 ## Outcome
 
-Phase 9.5 completed its pre-deployment checks and stopped before deployment. Candidate integrity, disabled Production posture, remote-drift coverage and rollback packaging pass. Authenticated-session readiness fails because there is no existing Production token/session that can be used for GET-only smoke without login mutation.
+Phase 9.5 completed its pre-deployment checks and authenticated GET-only entry smoke, then stopped before deployment as required. Candidate integrity, disabled Production posture, remote-drift coverage, rollback packaging and authenticated-session readiness pass.
 
 No Production login, authentication bypass, runtime deployment, module opening, external delivery, SMTP authentication, email or push occurred.
 
@@ -62,15 +62,12 @@ Offline rollback evidence: `backups/production/safety-vote-phase95-preflight-202
 
 The archive contains no `.env`, credential, database business data or private Safety Vote content. Database rollback for this phase is not applicable because no schema migration is authorized; the safe posture remains module/integrations disabled.
 
-## Blocking gate
+## Authenticated GET-only gate
 
-Production usernames/passwords are present, but no existing bearer token/session is available. Logging in would create login/audit mutations and therefore is not a non-mutating pre-deployment smoke. Authentication was not attempted or bypassed.
+The initial preflight found no existing bearer token/session. Logging in would create login/audit mutations, so authentication was not attempted or bypassed.
 
-The dedicated value-suppressed GET-only smoke runner now accepts exactly one of `SAFETY_VOTE_PHASE95_PROD_BEARER_TOKEN` or `SAFETY_VOTE_PHASE95_PROD_SESSION_COOKIE` from ignored `backend/.env`. It never records the credential value or response body and permits only the authenticated health GET plus a module-disabled campaigns GET. The first guarded run found neither key, emitted zero HTTP requests and stopped at `HOLD_NO_EXISTING_AUTHENTICATED_SESSION`. Evidence: `backups/production/safety-vote-phase95-auth-smoke-20261009042622/`; result SHA-256: `079e36795c59b7d21b7d490d5f76b50a426f336fac1334612027c3ad02a43be9`.
+The dedicated value-suppressed GET-only smoke runner accepts exactly one of `SAFETY_VOTE_PHASE95_PROD_BEARER_TOKEN` or `SAFETY_VOTE_PHASE95_PROD_SESSION_COOKIE` from ignored `backend/.env`. It never records the credential value or response body and permits only the authenticated health GET plus a module-disabled campaigns GET. The first guarded run found neither key, emitted zero HTTP requests and stopped at `HOLD_NO_EXISTING_AUTHENTICATED_SESSION`. Evidence: `backups/production/safety-vote-phase95-auth-smoke-20261009042622/`; result SHA-256: `079e36795c59b7d21b7d490d5f76b50a426f336fac1334612027c3ad02a43be9`.
 
-Deployment is not authorized while this gate remains unresolved. A safe next step requires either:
+After the user stored an existing bearer token directly in ignored `backend/.env`, the fresh guarded smoke passed without login. Authenticated health returned `200`, reported ready and confirmed `module_enabled=false`. The campaigns GET returned the required fail-closed `503 SAFETY_VOTE_MODULE_DISABLED`. Both responses used JSON and `Cache-Control: no-store`; no token, response body or protected business value was recorded. Evidence: `backups/production/safety-vote-phase95-auth-smoke-20261009044244/`; result SHA-256: `83f677656dd736e7cb74e3e8328cae32be6bf085819eeb887c714dcf74b2992b`.
 
-1. an already-authenticated, valid Production session supplied through the approved secure channel for GET-only smoke; or
-2. separate SHE authorization explicitly accepting a controlled login mutation, with bounded audit expectations and no campaign/business mutation.
-
-Until then, Phase 9.5 remains `HOLD` and Phase 9.6 must not begin.
+The authenticated entry gate is resolved. Controlled pilot deployment was explicitly prohibited in this run and has not started. Module and external integrations remain disabled; Phase 9.6 must not begin until the controlled pilot is separately authorized, executed and accepted.
