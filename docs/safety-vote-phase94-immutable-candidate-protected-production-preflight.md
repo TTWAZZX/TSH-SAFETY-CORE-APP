@@ -6,7 +6,25 @@ Contract: `2026-10-09-safety-vote-phase9.4-r1`
 
 Production target: `https://dev.tshpcl.com/safety/tsh-safety-core/`
 
-Decision: `PHASE_9_4_COMPLETE_HOLD_MODULE_ENABLED_REMOTE_DRIFT_AUTHENTICATED_SMOKE`
+Decision: `HOLD_REMEDIATION_FAILED`
+
+## Guarded remediation attempt
+
+A separately authorized one-time helper attempted to establish the required disabled posture by changing only `SafetyVote_Settings.module_enabled` to `0`. Its preconditions required the exact Phase 7 contract/schema, 39 tables, `phase7_integrations_enabled=0`, zero Safety Vote business rows and a valid module setting. The update was enclosed in a serializable transaction with rollback on exception and was required to affect exactly one row.
+
+The helper returned value-suppressed HTTP `500 REMEDIATION_FAILED` before producing a successful before/after result or downloadable rollback artifact. Following the explicit fail-closed instruction, no retry and no subsequent protected preflight were performed. Although the transaction was designed to roll back on exception, the current Production setting is treated as unverified until a separately authorized read-only check proves it; it is not assumed to have changed.
+
+Failure evidence: `backups/production/safety-vote-phase94-remediation-20261009030348/`
+
+Cleanup evidence confirms:
+
+- one-time helper cleanup returned `200`;
+- Production `.htaccess` was restored to its original SHA-256 `21386ca981c822701394382bc71252c2d8e523bd76cc4c4c9820b26c5259e13d`;
+- helper, checksum guard and private backup directory residue is zero;
+- local staging containing one-time tokens was removed;
+- no runtime deployment or push occurred.
+
+The failed helper/template source is retained only for forensic diagnosis and deliberately has no package command. It must not be rerun without a separate review and authorization.
 
 ## Outcome
 

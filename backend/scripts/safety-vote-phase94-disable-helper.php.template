@@ -1,0 +1,170 @@
+<?php
+declare(strict_types=1);
+
+// Forensic source for the failed 2026-10-09 guarded attempt. Do not rerun without a separately reviewed diagnosis and authorization.
+
+header('Content-Type: application/json; charset=utf-8');
+header('Cache-Control: no-store, max-age=0');
+header('X-Content-Type-Options: nosniff');
+
+const RUN_TOKEN_SHA256 = '__RUN_TOKEN_SHA256__';
+const CLEANUP_TOKEN_SHA256 = '__CLEANUP_TOKEN_SHA256__';
+const BACKUP_ID = '__BACKUP_ID__';
+const GUARD_NAME = '__GUARD_NAME__';
+const BACKUP_NAME = 'module-enabled-rollback.sql';
+
+function respond(array $payload, int $status = 200): void
+{
+    http_response_code($status);
+    echo json_encode($payload, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
+    exit;
+}
+
+function authorized(string $expectedHash): bool
+{
+    $token = (string) ($_SERVER['HTTP_X_SAFETY_VOTE_REMEDIATION_TOKEN'] ?? '');
+    return $token !== '' && hash_equals($expectedHash, hash('sha256', $token));
+}
+
+function integrity_ready(): bool
+{
+    $guard = __DIR__ . DIRECTORY_SEPARATOR . GUARD_NAME;
+    if (!is_file($guard)) return false;
+    $expected = strtolower(trim((string) file_get_contents($guard)));
+    return preg_match('/^[a-f0-9]{64}$/', $expected) === 1
+        && hash_equals($expected, hash_file('sha256', __FILE__));
+}
+
+function remove_tree_if_present(string $backupDir): array
+{
+    $removed = [];
+    foreach ([BACKUP_NAME, '.htaccess', '.used'] as $name) {
+        $target = $backupDir . DIRECTORY_SEPARATOR . $name;
+        if (is_file($target) && @unlink($target)) $removed[] = $name;
+    }
+    if (is_dir($backupDir) && @rmdir($backupDir)) $removed[] = 'backup-directory';
+    $privateDir = dirname($backupDir);
+    if (is_dir($privateDir) && count(scandir($privateDir) ?: []) === 2 && @rmdir($privateDir)) $removed[] = 'empty-private-directory';
+    return $removed;
+}
+
+if (!integrity_ready()) respond(['success' => false, 'code' => 'HELPER_INTEGRITY_FAILED'], 409);
+if (($_SERVER['REQUEST_METHOD'] ?? '') !== 'POST') respond(['success' => false, 'code' => 'METHOD_NOT_ALLOWED'], 405);
+
+$backupDir = __DIR__ . DIRECTORY_SEPARATOR . 'private' . DIRECTORY_SEPARATOR . BACKUP_ID;
+$action = strtolower(trim((string) ($_SERVER['HTTP_X_SAFETY_VOTE_REMEDIATION_ACTION'] ?? 'disable')));
+if ($action === 'cleanup') {
+    if (!authorized(CLEANUP_TOKEN_SHA256)) respond(['success' => false, 'code' => 'UNAUTHORIZED'], 401);
+    $removed = remove_tree_if_present($backupDir);
+    $guard = __DIR__ . DIRECTORY_SEPARATOR . GUARD_NAME;
+    if (is_file($guard) && @unlink($guard)) $removed[] = 'guard';
+    $self = __FILE__;
+    register_shutdown_function(static function () use ($self): void { @unlink($self); });
+    respond(['success' => true, 'marker' => 'SAFETY_VOTE_PHASE94_REMEDIATION_CLEANUP', 'removed' => $removed, 'selfRemovalScheduled' => true]);
+}
+if ($action !== 'disable') respond(['success' => false, 'code' => 'UNKNOWN_ACTION'], 400);
+if (!authorized(RUN_TOKEN_SHA256)) respond(['success' => false, 'code' => 'UNAUTHORIZED'], 401);
+
+$pdo = null;
+try {
+    if (!is_dir($backupDir) && !mkdir($backupDir, 0700, true) && !is_dir($backupDir)) throw new RuntimeException('BACKUP_DIRECTORY_CREATE_FAILED');
+    file_put_contents($backupDir . DIRECTORY_SEPARATOR . '.htaccess', "Require all denied\nDeny from all\n", LOCK_EX);
+    $used = @fopen($backupDir . DIRECTORY_SEPARATOR . '.used', 'x');
+    if ($used === false) respond(['success' => false, 'code' => 'TOKEN_ALREADY_USED'], 409);
+    fwrite($used, gmdate('c'));
+    fclose($used);
+
+    $config = require __DIR__ . '/config.php';
+    if (!is_array($config)) throw new RuntimeException('CONFIG_NOT_ARRAY');
+    $pdo = new PDO(
+        'mysql:host=' . (string) $config['db_host'] . ';port=' . (int) $config['db_port'] . ';dbname=' . (string) $config['db_name'] . ';charset=utf8mb4',
+        (string) $config['db_user'],
+        (string) $config['db_pass'],
+        [PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION, PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC, PDO::ATTR_EMULATE_PREPARES => false]
+    );
+    $schema = (string) $config['db_name'];
+    $tableStmt = $pdo->prepare("SELECT TABLE_NAME FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_SCHEMA=? AND LEFT(TABLE_NAME,11)='SafetyVote_' ORDER BY TABLE_NAME");
+    $tableStmt->execute([$schema]);
+    $tables = array_map('strval', $tableStmt->fetchAll(PDO::FETCH_COLUMN));
+    if (count($tables) !== 39 || !in_array('SafetyVote_Settings', $tables, true)) throw new RuntimeException('SCHEMA_NOT_EXPECTED_PHASE7');
+
+    $pdo->exec('SET TRANSACTION ISOLATION LEVEL SERIALIZABLE');
+    $pdo->beginTransaction();
+    $keys = ['contract_version', 'schema_version', 'module_enabled', 'phase7_integrations_enabled'];
+    $marks = implode(',', array_fill(0, count($keys), '?'));
+    $settingsStmt = $pdo->prepare("SELECT SettingKey,SettingValue,UpdatedAt,UpdatedBy FROM SafetyVote_Settings WHERE SettingKey IN ($marks) FOR UPDATE");
+    $settingsStmt->execute($keys);
+    $settings = [];
+    foreach ($settingsStmt->fetchAll() as $row) $settings[(string) $row['SettingKey']] = $row;
+    foreach ($keys as $key) if (!isset($settings[$key])) throw new RuntimeException('REQUIRED_SETTING_MISSING');
+    if ((string) $settings['contract_version']['SettingValue'] !== '2026-10-08-safety-vote-phase0-r1'
+        || (string) $settings['schema_version']['SettingValue'] !== '2026-10-08-phase7-r1') throw new RuntimeException('CONTRACT_OR_SCHEMA_VERSION_DRIFT');
+    if ((string) $settings['phase7_integrations_enabled']['SettingValue'] !== '0') throw new RuntimeException('INTEGRATIONS_NOT_DISABLED');
+    $before = (string) $settings['module_enabled']['SettingValue'];
+    if (!in_array($before, ['0', '1'], true)) throw new RuntimeException('MODULE_SETTING_INVALID');
+
+    $businessRowsBefore = 0;
+    foreach ($tables as $table) {
+        if ($table === 'SafetyVote_Settings') continue;
+        $businessRowsBefore += (int) $pdo->query('SELECT COUNT(*) FROM `' . str_replace('`', '``', $table) . '`')->fetchColumn();
+    }
+    if ($businessRowsBefore !== 0) throw new RuntimeException('BUSINESS_ROWS_PRESENT');
+
+    $row = $settings['module_enabled'];
+    $quoted = static function (PDO $db, $value): string { return $value === null ? 'NULL' : $db->quote((string) $value); };
+    $rollback = "-- Safety Vote Phase 9.4 guarded module setting rollback\n"
+        . "UPDATE `SafetyVote_Settings` SET `SettingValue`=" . $quoted($pdo, $row['SettingValue'])
+        . ",`UpdatedAt`=" . $quoted($pdo, $row['UpdatedAt'])
+        . ",`UpdatedBy`=" . $quoted($pdo, $row['UpdatedBy'])
+        . " WHERE `SettingKey`='module_enabled';\n";
+    $backupPath = $backupDir . DIRECTORY_SEPARATOR . BACKUP_NAME;
+    if (file_put_contents($backupPath, $rollback, LOCK_EX) === false) throw new RuntimeException('ROLLBACK_BACKUP_WRITE_FAILED');
+    @chmod($backupPath, 0600);
+
+    $rowsChanged = 0;
+    if ($before === '1') {
+        $update = $pdo->prepare("UPDATE SafetyVote_Settings SET SettingValue='0',UpdatedAt=NOW(),UpdatedBy='phase94_guarded_disable' WHERE SettingKey='module_enabled' AND SettingValue='1'");
+        $update->execute();
+        $rowsChanged = $update->rowCount();
+        if ($rowsChanged !== 1) throw new RuntimeException('MODULE_DISABLE_NOT_EXACTLY_ONE_ROW');
+    }
+    $afterStmt = $pdo->query("SELECT SettingKey,SettingValue FROM SafetyVote_Settings WHERE SettingKey IN ('module_enabled','phase7_integrations_enabled') FOR UPDATE");
+    $after = [];
+    foreach ($afterStmt->fetchAll() as $afterRow) $after[(string) $afterRow['SettingKey']] = (string) $afterRow['SettingValue'];
+    if (($after['module_enabled'] ?? null) !== '0' || ($after['phase7_integrations_enabled'] ?? null) !== '0') throw new RuntimeException('POST_CHANGE_SETTING_VERIFICATION_FAILED');
+
+    $businessRowsAfter = 0;
+    foreach ($tables as $table) {
+        if ($table === 'SafetyVote_Settings') continue;
+        $businessRowsAfter += (int) $pdo->query('SELECT COUNT(*) FROM `' . str_replace('`', '``', $table) . '`')->fetchColumn();
+    }
+    if ($businessRowsAfter !== 0) throw new RuntimeException('POST_CHANGE_BUSINESS_ROWS_PRESENT');
+    $pdo->commit();
+
+    respond([
+        'success' => true,
+        'marker' => 'SAFETY_VOTE_PHASE94_GUARDED_DISABLE',
+        'valuesSuppressed' => true,
+        'helperIntegrityVerified' => true,
+        'tableCount' => count($tables),
+        'contractVersionVerified' => true,
+        'schemaVersionVerified' => true,
+        'beforeModuleWasEnabled' => $before === '1',
+        'afterModuleDisabled' => true,
+        'integrationsDisabledBeforeAndAfter' => true,
+        'businessRowsBefore' => $businessRowsBefore,
+        'businessRowsAfter' => $businessRowsAfter,
+        'rowsChanged' => $rowsChanged,
+        'dmlLimitedToModuleSetting' => true,
+        'ddlExecuted' => false,
+        'backup' => [
+            'relativePath' => 'api/private/' . BACKUP_ID . '/' . BACKUP_NAME,
+            'bytes' => filesize($backupPath),
+            'sha256' => hash_file('sha256', $backupPath),
+        ],
+    ]);
+} catch (Throwable $error) {
+    if ($pdo instanceof PDO && $pdo->inTransaction()) $pdo->rollBack();
+    error_log('Safety Vote Phase 9.4 guarded disable failed: ' . $error->getMessage());
+    respond(['success' => false, 'code' => 'REMEDIATION_FAILED', 'valuesSuppressed' => true], 500);
+}
