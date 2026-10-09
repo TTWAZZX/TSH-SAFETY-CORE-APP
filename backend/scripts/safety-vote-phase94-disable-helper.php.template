@@ -1,7 +1,7 @@
 <?php
 declare(strict_types=1);
 
-// Forensic source for the failed 2026-10-09 guarded attempt. Do not rerun without a separately reviewed diagnosis and authorization.
+// Corrected review candidate. This template has no package command and is not authorized for Production execution.
 
 header('Content-Type: application/json; charset=utf-8');
 header('Cache-Control: no-store, max-age=0');
@@ -66,7 +66,9 @@ if ($action !== 'disable') respond(['success' => false, 'code' => 'UNKNOWN_ACTIO
 if (!authorized(RUN_TOKEN_SHA256)) respond(['success' => false, 'code' => 'UNAUTHORIZED'], 401);
 
 $pdo = null;
+$failureStage = 'bootstrap';
 try {
+    $failureStage = 'backup_directory';
     if (!is_dir($backupDir) && !mkdir($backupDir, 0700, true) && !is_dir($backupDir)) throw new RuntimeException('BACKUP_DIRECTORY_CREATE_FAILED');
     file_put_contents($backupDir . DIRECTORY_SEPARATOR . '.htaccess', "Require all denied\nDeny from all\n", LOCK_EX);
     $used = @fopen($backupDir . DIRECTORY_SEPARATOR . '.used', 'x');
@@ -74,6 +76,7 @@ try {
     fwrite($used, gmdate('c'));
     fclose($used);
 
+    $failureStage = 'configuration';
     $config = require __DIR__ . '/config.php';
     if (!is_array($config)) throw new RuntimeException('CONFIG_NOT_ARRAY');
     $pdo = new PDO(
@@ -83,13 +86,18 @@ try {
         [PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION, PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC, PDO::ATTR_EMULATE_PREPARES => false]
     );
     $schema = (string) $config['db_name'];
+    $failureStage = 'schema_inventory';
     $tableStmt = $pdo->prepare("SELECT TABLE_NAME FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_SCHEMA=? AND LEFT(TABLE_NAME,11)='SafetyVote_' ORDER BY TABLE_NAME");
     $tableStmt->execute([$schema]);
     $tables = array_map('strval', $tableStmt->fetchAll(PDO::FETCH_COLUMN));
-    if (count($tables) !== 39 || !in_array('SafetyVote_Settings', $tables, true)) throw new RuntimeException('SCHEMA_NOT_EXPECTED_PHASE7');
+    $tablesByLower = [];
+    foreach ($tables as $table) $tablesByLower[strtolower($table)] = $table;
+    if (count($tables) !== 39 || !isset($tablesByLower['safetyvote_settings'])) throw new RuntimeException('SCHEMA_NOT_EXPECTED_PHASE7');
 
+    $failureStage = 'transaction_start';
     $pdo->exec('SET TRANSACTION ISOLATION LEVEL SERIALIZABLE');
     $pdo->beginTransaction();
+    $failureStage = 'settings_precondition';
     $keys = ['contract_version', 'schema_version', 'module_enabled', 'phase7_integrations_enabled'];
     $marks = implode(',', array_fill(0, count($keys), '?'));
     $settingsStmt = $pdo->prepare("SELECT SettingKey,SettingValue,UpdatedAt,UpdatedBy FROM SafetyVote_Settings WHERE SettingKey IN ($marks) FOR UPDATE");
@@ -103,13 +111,15 @@ try {
     $before = (string) $settings['module_enabled']['SettingValue'];
     if (!in_array($before, ['0', '1'], true)) throw new RuntimeException('MODULE_SETTING_INVALID');
 
+    $failureStage = 'business_rows_precondition';
     $businessRowsBefore = 0;
     foreach ($tables as $table) {
-        if ($table === 'SafetyVote_Settings') continue;
+        if (strtolower($table) === 'safetyvote_settings') continue;
         $businessRowsBefore += (int) $pdo->query('SELECT COUNT(*) FROM `' . str_replace('`', '``', $table) . '`')->fetchColumn();
     }
     if ($businessRowsBefore !== 0) throw new RuntimeException('BUSINESS_ROWS_PRESENT');
 
+    $failureStage = 'rollback_backup';
     $row = $settings['module_enabled'];
     $quoted = static function (PDO $db, $value): string { return $value === null ? 'NULL' : $db->quote((string) $value); };
     $rollback = "-- Safety Vote Phase 9.4 guarded module setting rollback\n"
@@ -121,24 +131,28 @@ try {
     if (file_put_contents($backupPath, $rollback, LOCK_EX) === false) throw new RuntimeException('ROLLBACK_BACKUP_WRITE_FAILED');
     @chmod($backupPath, 0600);
 
+    $failureStage = 'module_disable';
     $rowsChanged = 0;
     if ($before === '1') {
-        $update = $pdo->prepare("UPDATE SafetyVote_Settings SET SettingValue='0',UpdatedAt=NOW(),UpdatedBy='phase94_guarded_disable' WHERE SettingKey='module_enabled' AND SettingValue='1'");
+        $update = $pdo->prepare("UPDATE SafetyVote_Settings SET SettingValue='0',UpdatedAt=NOW(),UpdatedBy='phase94_disable' WHERE SettingKey='module_enabled' AND SettingValue='1'");
         $update->execute();
         $rowsChanged = $update->rowCount();
         if ($rowsChanged !== 1) throw new RuntimeException('MODULE_DISABLE_NOT_EXACTLY_ONE_ROW');
     }
+    $failureStage = 'post_change_settings';
     $afterStmt = $pdo->query("SELECT SettingKey,SettingValue FROM SafetyVote_Settings WHERE SettingKey IN ('module_enabled','phase7_integrations_enabled') FOR UPDATE");
     $after = [];
     foreach ($afterStmt->fetchAll() as $afterRow) $after[(string) $afterRow['SettingKey']] = (string) $afterRow['SettingValue'];
     if (($after['module_enabled'] ?? null) !== '0' || ($after['phase7_integrations_enabled'] ?? null) !== '0') throw new RuntimeException('POST_CHANGE_SETTING_VERIFICATION_FAILED');
 
+    $failureStage = 'post_change_business_rows';
     $businessRowsAfter = 0;
     foreach ($tables as $table) {
-        if ($table === 'SafetyVote_Settings') continue;
+        if (strtolower($table) === 'safetyvote_settings') continue;
         $businessRowsAfter += (int) $pdo->query('SELECT COUNT(*) FROM `' . str_replace('`', '``', $table) . '`')->fetchColumn();
     }
     if ($businessRowsAfter !== 0) throw new RuntimeException('POST_CHANGE_BUSINESS_ROWS_PRESENT');
+    $failureStage = 'commit';
     $pdo->commit();
 
     respond([
@@ -166,5 +180,5 @@ try {
 } catch (Throwable $error) {
     if ($pdo instanceof PDO && $pdo->inTransaction()) $pdo->rollBack();
     error_log('Safety Vote Phase 9.4 guarded disable failed: ' . $error->getMessage());
-    respond(['success' => false, 'code' => 'REMEDIATION_FAILED', 'valuesSuppressed' => true], 500);
+    respond(['success' => false, 'code' => 'REMEDIATION_FAILED', 'failureStage' => $failureStage, 'valuesSuppressed' => true], 500);
 }

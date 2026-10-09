@@ -1,6 +1,6 @@
 'use strict';
 
-// Forensic source for the failed 2026-10-09 guarded attempt. Do not rerun without a separately reviewed diagnosis and authorization.
+// Corrected review candidate. This orchestrator has no package command and is not authorized for Production execution.
 
 const assert = require('assert');
 const crypto = require('crypto');

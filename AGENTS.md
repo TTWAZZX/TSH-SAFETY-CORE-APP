@@ -1,5 +1,12 @@
 # TSH Safety Core Activity - AGENTS.md
 
+## Safety Vote Phase 9.4 Remediation Local Diagnosis and Corrected Review Candidate (Local only, 2026-10-09)
+
+- The failed Production attempt was diagnosed without reconnecting to Production. The forensic helper wrote `phase94_guarded_disable` (23 characters) into `SafetyVote_Settings.UpdatedBy VARCHAR(20)`; the restored Production schema reproduces `ER_DATA_TOO_LONG` under `STRICT_TRANS_TABLES`. Local non-strict mode demonstrated the same defect by truncating the actor to `phase94_guarded_disa`. A secondary portability defect used a case-sensitive `SafetyVote_Settings` table-name check against `INFORMATION_SCHEMA` output.
+- The review-only correction uses schema-bounded actor `phase94_disable`, normalizes the 39-table inventory by lowercase name and returns only a bounded failure-stage enum on error. The Production orchestrator deliberately has no package command and is not authorized for execution. Only the loopback guarded regression has a package command.
+- Twice-run regression restores the accepted 39-table Production schema/settings snapshot into a guarded disposable Local database, reproduces the strict-mode failure, proves one exact `1 -> 0` update with integrations still off and business rows zero, verifies preservation of the prior row in rollback SQL, completes helper cleanup and leaves zero database/config/token residue. Phase 9.3 aggregate and UX Phase 8 static regressions remain passing.
+- Report: `docs/safety-vote-phase94-remediation-local-diagnosis.md`. No Production connection/change/retry, protected recheck, runtime deploy or push occurred. The live Production module setting remains unverified after the failed attempt, and Phase 9.5/9.6 remain blocked. Decision: `CORRECTED_REMEDIATION_CANDIDATE_READY_FOR_REVIEW_NOT_AUTHORIZED_FOR_PRODUCTION_RETRY`.
+
 ## Safety Vote Phase 9.4 Immutable Candidate and Fresh Protected Production Preflight (HOLD, 2026-10-09)
 
 - A separately authorized guarded remediation attempt to change only `SafetyVote_Settings.module_enabled` to `0` failed closed with value-suppressed `500 REMEDIATION_FAILED` before a successful before/after result or rollback-backup download was produced. The helper transaction was designed to roll back on exception, but the current setting is treated as unverified rather than assumed. No retry or protected recheck was attempted because the instruction required stopping at the first failed gate.
