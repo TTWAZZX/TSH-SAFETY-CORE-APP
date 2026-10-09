@@ -72,6 +72,7 @@
     "preflight:safety-vote-phase95": "node scripts/safety-vote-phase95-controlled-pilot-preflight.js",
     "smoke:safety-vote-phase95:authenticated-get": "node scripts/safety-vote-phase95-authenticated-get-smoke.js",
     "preflight:safety-vote-phase95b": "node scripts/safety-vote-phase95b-bounded-pilot-preflight.js",
+    "test:safety-vote-phase96-feature-flag": "node scripts/safety-vote-phase96-feature-flag-static.test.js",
     "preflight:safety-vote-phase8:manifest": "node scripts/safety-vote-phase8-candidate-manifest.js",
     "preflight:safety-vote-phase8:production-readonly": "node scripts/safety-vote-phase8-production-readonly.js",
     "preflight:safety-vote-phase82:protected": "node scripts/safety-vote-phase82-protected-preflight.js",

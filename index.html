@@ -55,6 +55,11 @@
         // Dark mode disabled — always light
         document.documentElement.classList.remove('dark');
         localStorage.removeItem('theme');
+
+        // Safety Vote Phase 9.6: company-wide UX rollout; server-side module and integration gates remain authoritative.
+        window.__TSH_FEATURE_FLAGS__ = Object.assign({}, window.__TSH_FEATURE_FLAGS__, {
+            safetyVoteUxV1: true
+        });
     </script>
 </head>
 
