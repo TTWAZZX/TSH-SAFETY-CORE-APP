@@ -1,0 +1,1013 @@
+{
+  "contract": "2026-10-09-safety-vote-phase9.4-r1",
+  "generatedAt": "2026-10-09T02:53:29.985Z",
+  "productionTarget": "https://dev.tshpcl.com/safety/tsh-safety-core/",
+  "sourceCommit": "021b2397f8ab668f6b6fab6aa1d7a5f40bf0533b",
+  "sourceTree": "0cf097bc429ad0f4ae348b820fd9504c5ff538a4",
+  "parentCommit": "077c5977283a55756bdfcfe5dfb804e32f716aa8",
+  "sourceBranch": "main",
+  "immutable": true,
+  "candidateDeltaFiles": [
+    {
+      "path": "AGENTS.md",
+      "bytes": 209765,
+      "sha256": "7b6e215daed1b887c759129b38cbac4f59f34b3ae129dc48a11b701f1f7273f3",
+      "hashSource": "git_blob"
+    },
+    {
+      "path": "api/handlers/safety_vote.php",
+      "bytes": 33811,
+      "sha256": "a1ba95b5279c74e62fb68ea77b1ab4a49c3b67ac7f78e88dcc248122da5d477c",
+      "hashSource": "git_blob"
+    },
+    {
+      "path": "api/handlers/safety_vote_phase4.php",
+      "bytes": 27142,
+      "sha256": "e5ad6033bcfde54d0bdb45edb7f1794c12e56288588ebe02b979acd51603a763",
+      "hashSource": "git_blob"
+    },
+    {
+      "path": "backend/package.json",
+      "bytes": 37126,
+      "sha256": "49f3db86af6b31fecbf3fdbe4a92fe5abceb67ed46428701359a2aac0291501f",
+      "hashSource": "git_blob"
+    },
+    {
+      "path": "backend/routes/safety-vote-phase4.js",
+      "bytes": 25465,
+      "sha256": "4ebcb95010f92511a0727162c614b966c651785a889fc6613a161afa93520456",
+      "hashSource": "git_blob"
+    },
+    {
+      "path": "backend/routes/safety-vote.js",
+      "bytes": 33419,
+      "sha256": "c44f9a1fe040c718fb639a5ee17f9b447616fd25321f4c103c86d5dd42230c7b",
+      "hashSource": "git_blob"
+    },
+    {
+      "path": "backend/scripts/safety-vote-phase1-node-fixture-host.js",
+      "bytes": 11592,
+      "sha256": "c558ff776003a43cc65d79c46a6c472cd9f941f399112a3d64931990fd3d3d44",
+      "hashSource": "git_blob"
+    },
+    {
+      "path": "backend/scripts/safety-vote-phase91-jury-progress-regression.test.js",
+      "bytes": 10296,
+      "sha256": "dc6642d0e0df645f56aa16c7bcc275a5542eb9f730d4270a5a2ebbd096fc41d8",
+      "hashSource": "git_blob"
+    },
+    {
+      "path": "backend/scripts/safety-vote-phase92-adversarial-security.test.js",
+      "bytes": 16771,
+      "sha256": "089d34cb57e34dc09819b6d28f4212795e0e6b3482309342d2cb9d9c63b7dd05",
+      "hashSource": "git_blob"
+    },
+    {
+      "path": "backend/scripts/safety-vote-phase93-rehearsal-regression.test.js",
+      "bytes": 16286,
+      "sha256": "af98b8aafa895b0266cd062bce142eafafed5279e28d6ca17fb6cbf44e2ee91f",
+      "hashSource": "git_blob"
+    },
+    {
+      "path": "backend/scripts/safety-vote-phase93-runbooks-static.test.js",
+      "bytes": 3089,
+      "sha256": "713fd1174654e258e4ac0d21d05f58f294cb61c657eff3d2db9c926b5d7f2188",
+      "hashSource": "git_blob"
+    },
+    {
+      "path": "backend/scripts/safety-vote-phase94-candidate-manifest.js",
+      "bytes": 4113,
+      "sha256": "e9ed1d6210cc48857ab7b44a7f927a3c807fc1432d6da7ba8a995b678088f999",
+      "hashSource": "git_blob"
+    },
+    {
+      "path": "backend/scripts/safety-vote-phase94-scope.js",
+      "bytes": 2879,
+      "sha256": "676459b61cfdb08728f57b842f58ade05494530a9e4b465c46da28c88c2a1f51",
+      "hashSource": "git_blob"
+    },
+    {
+      "path": "backend/scripts/safety-vote-ux-phase1-browser-probe.js",
+      "bytes": 9688,
+      "sha256": "53144d97269e71af6c6fc589c394ab9426bb09d86954174f433066c551d4ca2c",
+      "hashSource": "git_blob"
+    },
+    {
+      "path": "backend/scripts/safety-vote-ux-phase2-browser-probe.js",
+      "bytes": 16659,
+      "sha256": "38c507c4271c4f3f0c0540be6f5da24205dcf03cdb74d13451825cfa92ee116c",
+      "hashSource": "git_blob"
+    },
+    {
+      "path": "backend/scripts/safety-vote-ux-phase3-static.test.js",
+      "bytes": 7670,
+      "sha256": "ad361de8a9d2a6597c08b3869975f2e27d55d41683d0deb7f6c5fbfb90e513cd",
+      "hashSource": "git_blob"
+    },
+    {
+      "path": "backend/scripts/safety-vote-ux-phase4-static.test.js",
+      "bytes": 7941,
+      "sha256": "bb6187a8966789740fb6bf466037244cf8302f2d20611fc93dfa6e00b9560dbe",
+      "hashSource": "git_blob"
+    },
+    {
+      "path": "backend/scripts/safety-vote-ux-phase5-browser-probe.js",
+      "bytes": 15076,
+      "sha256": "81b0d0579c92228b9fcd8f59ba94e226aca45dc5593988f29f49a00afc0e0993",
+      "hashSource": "git_blob"
+    },
+    {
+      "path": "backend/scripts/safety-vote-ux-phase5-static.test.js",
+      "bytes": 8444,
+      "sha256": "bff4c50068a3de2d0fae6cf4656ef9c995994f130bcaa5235934c8f3c66e40c9",
+      "hashSource": "git_blob"
+    },
+    {
+      "path": "backend/scripts/safety-vote-ux-phase6-static.test.js",
+      "bytes": 8696,
+      "sha256": "2d3ef12d8afa723a7d4cac3c8ed07858b23145c1177522439585c69a234f9229",
+      "hashSource": "git_blob"
+    },
+    {
+      "path": "backend/scripts/safety-vote-ux-phase7-static.test.js",
+      "bytes": 9679,
+      "sha256": "06abb040cd90cb9a043536802aff771237e3cd0cdb72a7b4fad491930d873a70",
+      "hashSource": "git_blob"
+    },
+    {
+      "path": "backend/scripts/safety-vote-ux-phase8-evidence.js",
+      "bytes": 6392,
+      "sha256": "18710af26ed90837fd93c7fdbc42d6bff8d76b76c4d36b266ba808020a7b1b34",
+      "hashSource": "git_blob"
+    },
+    {
+      "path": "backend/scripts/safety-vote-ux-phase8-static.test.js",
+      "bytes": 7188,
+      "sha256": "e1425538e50d2d074c446c03492e5ad4b98ae433c567448e627a52701ef749c6",
+      "hashSource": "git_blob"
+    },
+    {
+      "path": "backend/server.js",
+      "bytes": 112759,
+      "sha256": "20331463fdf7510623089252732feadf10abd51a74efa527dc26c23f5cc5f432",
+      "hashSource": "git_blob"
+    },
+    {
+      "path": "docs/safety-vote-phase91-jury-progress-remediation.md",
+      "bytes": 3969,
+      "sha256": "b1033012eb416c0ec67e510f3068b9e94ff50d1fc6a6f511e3285d0a93e87527",
+      "hashSource": "git_blob"
+    },
+    {
+      "path": "docs/safety-vote-phase92-security-privacy-hardening.md",
+      "bytes": 5833,
+      "sha256": "d5de31c0baf76796f71bfc22cb85754bffa4914c622940f54176c4471ebf059f",
+      "hashSource": "git_blob"
+    },
+    {
+      "path": "docs/safety-vote-phase93-eligibility-diff-runbook.md",
+      "bytes": 2696,
+      "sha256": "7e4c633730aba1fcf5f46b6a30738325503f4229e6a1d2c69755842a7126d817",
+      "hashSource": "git_blob"
+    },
+    {
+      "path": "docs/safety-vote-phase93-incident-rollback-runbook.md",
+      "bytes": 2472,
+      "sha256": "3b96ac1de4ee649f82d93919a656c0efd1d18a19ab8d9e4419a7e3fa429c3c89",
+      "hashSource": "git_blob"
+    },
+    {
+      "path": "docs/safety-vote-phase93-rehearsal-eligibility-diff-operational-runbooks.md",
+      "bytes": 5206,
+      "sha256": "4ea3cdf5195ec71928d97aadbaaebd79bca39da78f1add82a2362d6081e98807",
+      "hashSource": "git_blob"
+    },
+    {
+      "path": "docs/safety-vote-phase93-rehearsal-runbook.md",
+      "bytes": 3756,
+      "sha256": "a7fa01333278cad7beb4f99a1922ff9c98d2471747a6a267f7407141e7796d69",
+      "hashSource": "git_blob"
+    },
+    {
+      "path": "docs/safety-vote-phase94-preflight-scope.md",
+      "bytes": 2458,
+      "sha256": "7844512742ad53e5a0a0271e36bf76f1ab374d50c1ac7a66cf66ec3ebdf25883",
+      "hashSource": "git_blob"
+    },
+    {
+      "path": "docs/safety-vote-ux-phase8-candidate-manifest.json",
+      "bytes": 8980,
+      "sha256": "5aeaa9fe51e3d865bca69ca4f9424987e3f498f3502d527c94ba99951593dcbc",
+      "hashSource": "git_blob"
+    },
+    {
+      "path": "docs/safety-vote-ux-phase8-integrated-journey-accessibility-release-candidate-closeout.md",
+      "bytes": 9892,
+      "sha256": "043f756e590c2e557ff4d3fe975177d6aff2596b6d641885a7cad329166e7d65",
+      "hashSource": "git_blob"
+    },
+    {
+      "path": "docs/safety-vote-ux-phase8-preflight-scope.md",
+      "bytes": 3344,
+      "sha256": "bc7eca8da64ef16ae839fd945caef46e2b2166e56430d04f761b62596b1e92af",
+      "hashSource": "git_blob"
+    },
+    {
+      "path": "index.html",
+      "bytes": 98376,
+      "sha256": "318b240930209d5562e9f401b92b9991ad584b4b0cbb174986c0cf9dd468a110",
+      "hashSource": "git_blob"
+    },
+    {
+      "path": "package.json",
+      "bytes": 6932,
+      "sha256": "a54ef9fe400e52b39ac6bbd799a2d9658e78c5c79a1c1ae96f80351c9a52c79f",
+      "hashSource": "git_blob"
+    },
+    {
+      "path": "public/js/main.js",
+      "bytes": 66949,
+      "sha256": "68c7ec67707670e69d5dc68bb3064970f9fc7af4d3ba82e8c090edfa676f9bad",
+      "hashSource": "git_blob"
+    },
+    {
+      "path": "public/js/pages/admin-safety-vote-governance.js",
+      "bytes": 24665,
+      "sha256": "3b969af14f5c90f066c43c68ec0ace1b89049c6d67a1542497d3aba26a406837",
+      "hashSource": "git_blob"
+    },
+    {
+      "path": "public/js/pages/admin-safety-vote-operations.js",
+      "bytes": 29839,
+      "sha256": "60f8d8ae11fd39a35dff993e5e2e9bf702f018671876b143e05f8b274fdede1c",
+      "hashSource": "git_blob"
+    },
+    {
+      "path": "public/js/pages/admin-safety-vote-results.js",
+      "bytes": 25514,
+      "sha256": "48d0107bdcc31d6a3c44100accb06e6123d104c753f79f3e873115488929c46d",
+      "hashSource": "git_blob"
+    },
+    {
+      "path": "public/js/pages/admin-safety-vote-ux1.js",
+      "bytes": 25018,
+      "sha256": "ddb2f308f50a08bace294630cad0a91e93430362bdee1dbd18fd16716a018d35",
+      "hashSource": "git_blob"
+    },
+    {
+      "path": "public/js/pages/admin.js",
+      "bytes": 689651,
+      "sha256": "8b853cad4eb9b83b22392bb519f886df57ebb4ec610e7769e6116ccb3f172b46",
+      "hashSource": "git_blob"
+    },
+    {
+      "path": "public/js/pages/safety-vote-campaign-wizard.js",
+      "bytes": 31745,
+      "sha256": "974e0fb072e4453d2284837cd048779ed87be8e496c6ac9207503d8c8882e3a5",
+      "hashSource": "git_blob"
+    },
+    {
+      "path": "public/js/pages/safety-vote-journey-model.mjs",
+      "bytes": 1738,
+      "sha256": "64de00923f331c9468e43e40a5c9310c0eb5e06fd953d6490a931e8da1a18622",
+      "hashSource": "git_blob"
+    },
+    {
+      "path": "public/js/pages/safety-vote-jury-workspace.js",
+      "bytes": 32041,
+      "sha256": "595ebf47f7e7d8072118bee8718c4fe7bc657600ebe566bdb5819d8032137df5",
+      "hashSource": "git_blob"
+    },
+    {
+      "path": "public/js/pages/safety-vote-page-ux1.js",
+      "bytes": 40996,
+      "sha256": "87b45ae6fe901f4622397a8f29ff43b4a6acca3e2c0f6ed186f4b75b63c94c69",
+      "hashSource": "git_blob"
+    },
+    {
+      "path": "public/js/pages/safety-vote-ux-components.js",
+      "bytes": 23193,
+      "sha256": "c81aa14e5f2d3272067b953b944ab21d770f54de2525841628ccc468c5113870",
+      "hashSource": "git_blob"
+    },
+    {
+      "path": "public/style.css",
+      "bytes": 146389,
+      "sha256": "ff53cf7ddc8edaeb1d58591b95c9b8f018c1d3e0f69f90cfc12b71306eee3e24",
+      "hashSource": "git_blob"
+    }
+  ],
+  "groups": {
+    "runtime": [
+      {
+        "path": "api/index.php",
+        "bytes": 75811,
+        "sha256": "7ce4b8103d5cdbd7225a63f703ac27f76b5ffb067d917171ebd7ee1d742c4e62",
+        "hashSource": "git_blob"
+      },
+      {
+        "path": "api/handlers/admin_phase8.php",
+        "bytes": 121911,
+        "sha256": "30e93fbd40e5f60a43f1a4f7a04c1b31af0eba0324c9a36356ffc682e7ddcf65",
+        "hashSource": "git_blob"
+      },
+      {
+        "path": "api/handlers/safety_vote.php",
+        "bytes": 33811,
+        "sha256": "a1ba95b5279c74e62fb68ea77b1ab4a49c3b67ac7f78e88dcc248122da5d477c",
+        "hashSource": "git_blob"
+      },
+      {
+        "path": "api/handlers/safety_vote_phase2.php",
+        "bytes": 21246,
+        "sha256": "4a7a5778244080cb7a36d66048dd503faef508b9cbe93706911ddd07e9738294",
+        "hashSource": "git_blob"
+      },
+      {
+        "path": "api/handlers/safety_vote_phase3.php",
+        "bytes": 28657,
+        "sha256": "ad2d5e10aad381ff206363f7660ba3700287a614dad8cdd93f2a6c3ae4059dd1",
+        "hashSource": "git_blob"
+      },
+      {
+        "path": "api/handlers/safety_vote_phase4.php",
+        "bytes": 27142,
+        "sha256": "e5ad6033bcfde54d0bdb45edb7f1794c12e56288588ebe02b979acd51603a763",
+        "hashSource": "git_blob"
+      },
+      {
+        "path": "api/handlers/safety_vote_phase5.php",
+        "bytes": 18963,
+        "sha256": "b4c40d91ecd9c15641cade3dc425c20460130129059d634accb6c122e71eed2a",
+        "hashSource": "git_blob"
+      },
+      {
+        "path": "api/handlers/safety_vote_phase6.php",
+        "bytes": 18954,
+        "sha256": "fc3710edd1e33012b438fd492432c00d6ebe06563e48fcbca0482d91be02b35f",
+        "hashSource": "git_blob"
+      },
+      {
+        "path": "api/handlers/safety_vote_phase7.php",
+        "bytes": 12382,
+        "sha256": "00798d6caa1385ed22a83873b400fddbbfb36ccfc8b24d1d6cbf89f026c1c6fd",
+        "hashSource": "git_blob"
+      },
+      {
+        "path": "api/lib/safety_vote_phase1.php",
+        "bytes": 7171,
+        "sha256": "637975195f3dba450ec263365e19baae290be70c7bda24242549269a505eecce",
+        "hashSource": "git_blob"
+      },
+      {
+        "path": "api/lib/safety_vote_phase2.php",
+        "bytes": 4356,
+        "sha256": "456feaee2d33d9bc740fd96ee9b04c9faf5d7f003cd8be0be22f29ec17de5534",
+        "hashSource": "git_blob"
+      },
+      {
+        "path": "api/lib/safety_vote_phase3.php",
+        "bytes": 12620,
+        "sha256": "5db18a9d02abfd1d1fd9167483e256656bac6bbb412244b2914ac70bb9922e7d",
+        "hashSource": "git_blob"
+      },
+      {
+        "path": "api/lib/safety_vote_phase4.php",
+        "bytes": 6715,
+        "sha256": "705b12958f7066c0080c22ebba2cea4fc1c977d0080ba69b9f15b0afc17f85bc",
+        "hashSource": "git_blob"
+      },
+      {
+        "path": "api/lib/safety_vote_phase5.php",
+        "bytes": 3587,
+        "sha256": "119f03d5bb7527e8bdaac06d0f7c3e162a9c74a163a68e0006e8b3daa4d93ff6",
+        "hashSource": "git_blob"
+      },
+      {
+        "path": "api/lib/safety_vote_phase6.php",
+        "bytes": 4631,
+        "sha256": "9068354d1c6dd80c8c9f5a4165ce8ef30b49394cb303a80c8324fe9e969d559d",
+        "hashSource": "git_blob"
+      },
+      {
+        "path": "api/lib/safety_vote_phase7.php",
+        "bytes": 4958,
+        "sha256": "987a3ef07a7c7374c716fec044f1e32c9bf581cb558d6890c4544ff6a6ad74e4",
+        "hashSource": "git_blob"
+      },
+      {
+        "path": "api/private/.htaccess",
+        "bytes": 159,
+        "sha256": "36124092a8e7524264284612d5d65ab9e2f53d411abfc14c907f951c7c531600",
+        "hashSource": "git_blob"
+      },
+      {
+        "path": "api/private/index.html",
+        "bytes": 62,
+        "sha256": "93a1e6a29a9a24fdf67b23c02a671588a047819cdf5c187bad49ee627fb4df28",
+        "hashSource": "git_blob"
+      },
+      {
+        "path": "index.html",
+        "bytes": 98376,
+        "sha256": "318b240930209d5562e9f401b92b9991ad584b4b0cbb174986c0cf9dd468a110",
+        "hashSource": "git_blob"
+      },
+      {
+        "path": "public/js/main.js",
+        "bytes": 66949,
+        "sha256": "68c7ec67707670e69d5dc68bb3064970f9fc7af4d3ba82e8c090edfa676f9bad",
+        "hashSource": "git_blob"
+      },
+      {
+        "path": "public/js/module-meta.js",
+        "bytes": 10860,
+        "sha256": "ee42e9ea41375015f525fce32fc60d9b6f84924b239b9d935e34b5e1902d21dd",
+        "hashSource": "git_blob"
+      },
+      {
+        "path": "public/js/pages/admin.js",
+        "bytes": 689651,
+        "sha256": "8b853cad4eb9b83b22392bb519f886df57ebb4ec610e7769e6116ccb3f172b46",
+        "hashSource": "git_blob"
+      },
+      {
+        "path": "public/js/pages/admin-safety-vote.js",
+        "bytes": 54240,
+        "sha256": "cf4be089ce6f61752246e200cb8424a3557577600d9eb7785b38243d70846c66",
+        "hashSource": "git_blob"
+      },
+      {
+        "path": "public/js/pages/safety-vote.js",
+        "bytes": 23567,
+        "sha256": "09ed03d592a5cff6abcfb50467e4719444d7d2a50f71d6758385fc68b4326d71",
+        "hashSource": "git_blob"
+      },
+      {
+        "path": "public/js/pages/admin-safety-vote-ux1.js",
+        "bytes": 25018,
+        "sha256": "ddb2f308f50a08bace294630cad0a91e93430362bdee1dbd18fd16716a018d35",
+        "hashSource": "git_blob"
+      },
+      {
+        "path": "public/js/pages/admin-safety-vote-operations.js",
+        "bytes": 29839,
+        "sha256": "60f8d8ae11fd39a35dff993e5e2e9bf702f018671876b143e05f8b274fdede1c",
+        "hashSource": "git_blob"
+      },
+      {
+        "path": "public/js/pages/admin-safety-vote-results.js",
+        "bytes": 25514,
+        "sha256": "48d0107bdcc31d6a3c44100accb06e6123d104c753f79f3e873115488929c46d",
+        "hashSource": "git_blob"
+      },
+      {
+        "path": "public/js/pages/admin-safety-vote-governance.js",
+        "bytes": 24665,
+        "sha256": "3b969af14f5c90f066c43c68ec0ace1b89049c6d67a1542497d3aba26a406837",
+        "hashSource": "git_blob"
+      },
+      {
+        "path": "public/js/pages/safety-vote-campaign-wizard.js",
+        "bytes": 31745,
+        "sha256": "974e0fb072e4453d2284837cd048779ed87be8e496c6ac9207503d8c8882e3a5",
+        "hashSource": "git_blob"
+      },
+      {
+        "path": "public/js/pages/safety-vote-jury-workspace.js",
+        "bytes": 32041,
+        "sha256": "595ebf47f7e7d8072118bee8718c4fe7bc657600ebe566bdb5819d8032137df5",
+        "hashSource": "git_blob"
+      },
+      {
+        "path": "public/js/pages/safety-vote-page-ux1.js",
+        "bytes": 40996,
+        "sha256": "87b45ae6fe901f4622397a8f29ff43b4a6acca3e2c0f6ed186f4b75b63c94c69",
+        "hashSource": "git_blob"
+      },
+      {
+        "path": "public/js/pages/safety-vote-ux-components.js",
+        "bytes": 23193,
+        "sha256": "c81aa14e5f2d3272067b953b944ab21d770f54de2525841628ccc468c5113870",
+        "hashSource": "git_blob"
+      },
+      {
+        "path": "public/js/pages/safety-vote-wizard-model.mjs",
+        "bytes": 10450,
+        "sha256": "cbbf8a03df19150be0eb1fcfe4282ffb3f23d9cbb5969b330e6b6d12ab163f80",
+        "hashSource": "git_blob"
+      },
+      {
+        "path": "public/js/pages/safety-vote-ux-model.mjs",
+        "bytes": 2393,
+        "sha256": "3b41fccf18d7657951655964a66d7caab65b5b2b516166c827bac3e32032dc64",
+        "hashSource": "git_blob"
+      },
+      {
+        "path": "public/js/pages/safety-vote-results-model.mjs",
+        "bytes": 5274,
+        "sha256": "7e65ee0f1ecedbce3500ed0934e5706f976f861fb8d2ffe13af5d86f7caa6383",
+        "hashSource": "git_blob"
+      },
+      {
+        "path": "public/js/pages/safety-vote-participation-model.mjs",
+        "bytes": 10326,
+        "sha256": "e34a28370ea657784888f714bc1199ee38843ab5f50a7414f1a9fd28c7cbfcb2",
+        "hashSource": "git_blob"
+      },
+      {
+        "path": "public/js/pages/safety-vote-operations-model.mjs",
+        "bytes": 6150,
+        "sha256": "e9c6312ae182561750379ae3297a323ad37a5046c26716805189c936bd2bea34",
+        "hashSource": "git_blob"
+      },
+      {
+        "path": "public/js/pages/safety-vote-jury-model.mjs",
+        "bytes": 4715,
+        "sha256": "f1c9be0db5acde56031f0582608c9c96fcaf60a83ef531b19e814f0e6c6b61f9",
+        "hashSource": "git_blob"
+      },
+      {
+        "path": "public/js/pages/safety-vote-journey-model.mjs",
+        "bytes": 1738,
+        "sha256": "64de00923f331c9468e43e40a5c9310c0eb5e06fd953d6490a931e8da1a18622",
+        "hashSource": "git_blob"
+      },
+      {
+        "path": "public/js/pages/safety-vote-governance-model.mjs",
+        "bytes": 5960,
+        "sha256": "66961957927ee18bc47dceb3d15adde1362e2673c846a7aa5d40a053fad85038",
+        "hashSource": "git_blob"
+      },
+      {
+        "path": "public/style.css",
+        "bytes": 146389,
+        "sha256": "ff53cf7ddc8edaeb1d58591b95c9b8f018c1d3e0f69f90cfc12b71306eee3e24",
+        "hashSource": "git_blob"
+      }
+    ],
+    "migrations": [
+      {
+        "path": "backend/migrations/20261008_safety_vote_phase1_foundation.sql",
+        "bytes": 11879,
+        "sha256": "96b9947f25e5c01f3b76690e4c21cece8ff81f4d8bb4e21495d046e4479e6a30",
+        "hashSource": "git_blob"
+      },
+      {
+        "path": "backend/migrations/20261008_safety_vote_phase1_foundation.rollback.sql",
+        "bytes": 586,
+        "sha256": "f3aa81bae10453d1c6549d3676bb51ca94320096f57c63c800a7dcbe3e3fd190",
+        "hashSource": "git_blob"
+      },
+      {
+        "path": "backend/migrations/20261008_safety_vote_phase2_core_mvp.sql",
+        "bytes": 7764,
+        "sha256": "4cdb5dfea911bf7bd257aa2828311b251dbf6f92de5f8580dbb6627a321ce54b",
+        "hashSource": "git_blob"
+      },
+      {
+        "path": "backend/migrations/20261008_safety_vote_phase2_core_mvp.rollback.sql",
+        "bytes": 312,
+        "sha256": "9bf9042e92e397a07723d678646edf3c3d29d5b659aff37298db8e7bf99f6cc9",
+        "hashSource": "git_blob"
+      },
+      {
+        "path": "backend/migrations/20261008_safety_vote_phase3_survey_submission.sql",
+        "bytes": 4912,
+        "sha256": "bb04fb438f286a0b81dea38eb1e4b94aa934c9b5e28e6c211a43b47297008c78",
+        "hashSource": "git_blob"
+      },
+      {
+        "path": "backend/migrations/20261008_safety_vote_phase3_survey_submission.rollback.sql",
+        "bytes": 376,
+        "sha256": "b4455910837c5053457638294a2af38ca4bc7ed79b4c71a5c715647dffb2e954",
+        "hashSource": "git_blob"
+      },
+      {
+        "path": "backend/migrations/20261008_safety_vote_phase4_jury_scoring.sql",
+        "bytes": 9190,
+        "sha256": "15006a2b947e192a42360d8115d8ab88453331ba1483856a7ea7ed1db5afe024",
+        "hashSource": "git_blob"
+      },
+      {
+        "path": "backend/migrations/20261008_safety_vote_phase4_jury_scoring.rollback.sql",
+        "bytes": 327,
+        "sha256": "fc14519ce3fb73a452bb3cd92410a51b60fffb4b6be7be2bb636eac268954967",
+        "hashSource": "git_blob"
+      },
+      {
+        "path": "backend/migrations/20261008_safety_vote_phase5_operations.sql",
+        "bytes": 4365,
+        "sha256": "ff18bda56b506ea9d223ee51d0215d2eff434a79036ec2f0e371d32671d9ae05",
+        "hashSource": "git_blob"
+      },
+      {
+        "path": "backend/migrations/20261008_safety_vote_phase5_operations.rollback.sql",
+        "bytes": 270,
+        "sha256": "d500745987fa93a62ae83d42d895f22b82275f70cfbd8f38c8f314fda8298bb9",
+        "hashSource": "git_blob"
+      },
+      {
+        "path": "backend/migrations/20261008_safety_vote_phase6_secret_election.sql",
+        "bytes": 4192,
+        "sha256": "979e5d27b694474e280c835a620ba517fdaa54a4ceecd46445b2a46e471e8dd8",
+        "hashSource": "git_blob"
+      },
+      {
+        "path": "backend/migrations/20261008_safety_vote_phase6_secret_election.rollback.sql",
+        "bytes": 428,
+        "sha256": "8e50b454458281e42ab6d458f36ee1fc833af42fe72cae834ae05eff7b9ff0e3",
+        "hashSource": "git_blob"
+      },
+      {
+        "path": "backend/migrations/20261008_safety_vote_phase7_integrations_governance.sql",
+        "bytes": 4111,
+        "sha256": "a0d47b29f3802c070139f0e58b12de666f34471a90a57bfbeb7ab1dfe555f4d1",
+        "hashSource": "git_blob"
+      },
+      {
+        "path": "backend/migrations/20261008_safety_vote_phase7_integrations_governance.rollback.sql",
+        "bytes": 422,
+        "sha256": "4ca3d1ecd28585d82fd5fabde33b4ac514600b4930f2ac4f4f3911a445767552",
+        "hashSource": "git_blob"
+      }
+    ],
+    "sourceOnly": [
+      {
+        "path": "backend/server.js",
+        "bytes": 112759,
+        "sha256": "20331463fdf7510623089252732feadf10abd51a74efa527dc26c23f5cc5f432",
+        "hashSource": "git_blob"
+      },
+      {
+        "path": "backend/routes/admin.js",
+        "bytes": 155607,
+        "sha256": "111d516422f9975ccf9ab6acfd4692eed201ef1c4abf62ff58e8c9bf8a734899",
+        "hashSource": "git_blob"
+      },
+      {
+        "path": "backend/routes/safety-vote.js",
+        "bytes": 33419,
+        "sha256": "c44f9a1fe040c718fb639a5ee17f9b447616fd25321f4c103c86d5dd42230c7b",
+        "hashSource": "git_blob"
+      },
+      {
+        "path": "backend/routes/safety-vote-phase2.js",
+        "bytes": 20174,
+        "sha256": "5f1a445fa5846e1b5ec748bcd26a4d157b951adbfce99cc960f97cb01c0e8304",
+        "hashSource": "git_blob"
+      },
+      {
+        "path": "backend/routes/safety-vote-phase3.js",
+        "bytes": 30015,
+        "sha256": "ba7696cd4153137276b3ec09f5a285f8a071175351fb33b1366ebd633998bf40",
+        "hashSource": "git_blob"
+      },
+      {
+        "path": "backend/routes/safety-vote-phase4.js",
+        "bytes": 25465,
+        "sha256": "4ebcb95010f92511a0727162c614b966c651785a889fc6613a161afa93520456",
+        "hashSource": "git_blob"
+      },
+      {
+        "path": "backend/routes/safety-vote-phase5.js",
+        "bytes": 19059,
+        "sha256": "3228b79cabd7a3c34fca126ec8cd9a0a2e8da8fd9ed32b9cc63963c314c968e0",
+        "hashSource": "git_blob"
+      },
+      {
+        "path": "backend/routes/safety-vote-phase6.js",
+        "bytes": 23271,
+        "sha256": "085686123a3a2ad797ff8a7d1184a3d2aabf086f417a434e2fce938b79c2adf9",
+        "hashSource": "git_blob"
+      },
+      {
+        "path": "backend/routes/safety-vote-phase7.js",
+        "bytes": 12474,
+        "sha256": "4840da337fd8ea0c140344096b7a9db8ba393a1085673750759302c4c00149f9",
+        "hashSource": "git_blob"
+      },
+      {
+        "path": "backend/services/safety-vote-phase1.js",
+        "bytes": 7253,
+        "sha256": "3776ca0bac34bb53dc4d0b053f1b94815be03664dad374a4829114fd36321509",
+        "hashSource": "git_blob"
+      },
+      {
+        "path": "backend/services/safety-vote-phase2.js",
+        "bytes": 4456,
+        "sha256": "ae69fafea2f6c6d0e2c9a0d549f0ce45393ecd3512ca4af6c4f94899e45d753f",
+        "hashSource": "git_blob"
+      },
+      {
+        "path": "backend/services/safety-vote-phase3.js",
+        "bytes": 11882,
+        "sha256": "b519e51809eecef896b077cc751b75b72bc44272159d1613608848ca6d602b72",
+        "hashSource": "git_blob"
+      },
+      {
+        "path": "backend/services/safety-vote-phase4.js",
+        "bytes": 6055,
+        "sha256": "b6028a5189dd3247fccf116b961392c94a3f50b12cbb5eb032b6c007cdfe60e4",
+        "hashSource": "git_blob"
+      },
+      {
+        "path": "backend/services/safety-vote-phase5.js",
+        "bytes": 3587,
+        "sha256": "4ee0baa310fef29c98e91f9bc7ea43e21b5e2885cf7b0d900ac17506c3408128",
+        "hashSource": "git_blob"
+      },
+      {
+        "path": "backend/services/safety-vote-phase6.js",
+        "bytes": 4380,
+        "sha256": "0db6a3bd3e05140721c2bec31a5a09bbb10ef70cf3bae95cd4c168e3b74e4155",
+        "hashSource": "git_blob"
+      },
+      {
+        "path": "backend/services/safety-vote-phase7.js",
+        "bytes": 4519,
+        "sha256": "d53cc8719d3b5c789ec9c519e3c694462c7371e9b51bb77a42d31590aa34a441",
+        "hashSource": "git_blob"
+      },
+      {
+        "path": "backend/scripts/permission-audit.js",
+        "bytes": 11619,
+        "sha256": "fae98b336bfd189a64ff0645ee8b9cbd445557c43a12fda66dc736ae7cf115a5",
+        "hashSource": "git_blob"
+      },
+      {
+        "path": "backend/scripts/safety-vote-phase1-api-uat.js",
+        "bytes": 15570,
+        "sha256": "f94a290604f2c6be53ea4f7b76d70cd8858fa29b811dc69ff12fa393039bf86c",
+        "hashSource": "git_blob"
+      },
+      {
+        "path": "backend/scripts/safety-vote-phase1-node-fixture-host.js",
+        "bytes": 11592,
+        "sha256": "c558ff776003a43cc65d79c46a6c472cd9f941f399112a3d64931990fd3d3d44",
+        "hashSource": "git_blob"
+      },
+      {
+        "path": "backend/scripts/safety-vote-phase1-php-router.php",
+        "bytes": 4817,
+        "sha256": "58589c7373e8a3a5fdb40288153a05aa063c1deac2594e66cce39c7b6c943046",
+        "hashSource": "git_blob"
+      },
+      {
+        "path": "backend/scripts/safety-vote-phase3-api-uat.js",
+        "bytes": 11289,
+        "sha256": "72e50a13dcf5423fc5152ea74c1cbf979f15368ecd14a1769a031dfbfaf60a99",
+        "hashSource": "git_blob"
+      },
+      {
+        "path": "backend/scripts/safety-vote-phase4-api-uat.js",
+        "bytes": 13244,
+        "sha256": "4e181e0929ec5a0a123429fb3ce556b2517c9071af2ae70fa5ce3b3eab5c7c72",
+        "hashSource": "git_blob"
+      },
+      {
+        "path": "backend/scripts/safety-vote-phase5-api-uat.js",
+        "bytes": 12552,
+        "sha256": "adf53eb7238816f0e21f8a22ff0affcd0457760a1add94924398ac07f1c86cdd",
+        "hashSource": "git_blob"
+      },
+      {
+        "path": "backend/scripts/safety-vote-phase7-migration.test.js",
+        "bytes": 3319,
+        "sha256": "0b3ae98cf6f8ed1476dd87e280fa919d841f15eb88efcf816a27d9e10df56d48",
+        "hashSource": "git_blob"
+      },
+      {
+        "path": "backend/scripts/safety-vote-phase82-protected-helper.php.template",
+        "bytes": 15032,
+        "sha256": "4b1c2d05022f94c95ddf441eb2090449191785c482824a39d2ce5eac34107a6c",
+        "hashSource": "git_blob"
+      },
+      {
+        "path": "backend/scripts/safety-vote-phase82-protected-preflight.js",
+        "bytes": 16951,
+        "sha256": "c427ac3d219a7f1b0f5d73167c25d04a9124b8990f01f1a3f8dff050b7d541e9",
+        "hashSource": "git_blob"
+      },
+      {
+        "path": "backend/scripts/safety-vote-phase831-disabled-gate.test.js",
+        "bytes": 8524,
+        "sha256": "cf777283060544deed749ca2d5e07701b51194f745bfac44d32fd4dd1e238b00",
+        "hashSource": "git_blob"
+      },
+      {
+        "path": "backend/package.json",
+        "bytes": 37126,
+        "sha256": "49f3db86af6b31fecbf3fdbe4a92fe5abceb67ed46428701359a2aac0291501f",
+        "hashSource": "git_blob"
+      },
+      {
+        "path": "package.json",
+        "bytes": 6932,
+        "sha256": "a54ef9fe400e52b39ac6bbd799a2d9658e78c5c79a1c1ae96f80351c9a52c79f",
+        "hashSource": "git_blob"
+      },
+      {
+        "path": "backend/scripts/safety-vote-phase91-jury-progress-regression.test.js",
+        "bytes": 10296,
+        "sha256": "dc6642d0e0df645f56aa16c7bcc275a5542eb9f730d4270a5a2ebbd096fc41d8",
+        "hashSource": "git_blob"
+      },
+      {
+        "path": "backend/scripts/safety-vote-phase92-adversarial-security.test.js",
+        "bytes": 16771,
+        "sha256": "089d34cb57e34dc09819b6d28f4212795e0e6b3482309342d2cb9d9c63b7dd05",
+        "hashSource": "git_blob"
+      },
+      {
+        "path": "backend/scripts/safety-vote-phase93-rehearsal-regression.test.js",
+        "bytes": 16286,
+        "sha256": "af98b8aafa895b0266cd062bce142eafafed5279e28d6ca17fb6cbf44e2ee91f",
+        "hashSource": "git_blob"
+      },
+      {
+        "path": "backend/scripts/safety-vote-phase93-runbooks-static.test.js",
+        "bytes": 3089,
+        "sha256": "713fd1174654e258e4ac0d21d05f58f294cb61c657eff3d2db9c926b5d7f2188",
+        "hashSource": "git_blob"
+      },
+      {
+        "path": "backend/scripts/safety-vote-phase94-scope.js",
+        "bytes": 2879,
+        "sha256": "676459b61cfdb08728f57b842f58ade05494530a9e4b465c46da28c88c2a1f51",
+        "hashSource": "git_blob"
+      },
+      {
+        "path": "backend/scripts/safety-vote-phase94-candidate-manifest.js",
+        "bytes": 4113,
+        "sha256": "e9ed1d6210cc48857ab7b44a7f927a3c807fc1432d6da7ba8a995b678088f999",
+        "hashSource": "git_blob"
+      },
+      {
+        "path": "backend/scripts/safety-vote-ux-phase1-browser-probe.js",
+        "bytes": 9688,
+        "sha256": "53144d97269e71af6c6fc589c394ab9426bb09d86954174f433066c551d4ca2c",
+        "hashSource": "git_blob"
+      },
+      {
+        "path": "backend/scripts/safety-vote-ux-phase2-browser-probe.js",
+        "bytes": 16659,
+        "sha256": "38c507c4271c4f3f0c0540be6f5da24205dcf03cdb74d13451825cfa92ee116c",
+        "hashSource": "git_blob"
+      },
+      {
+        "path": "backend/scripts/safety-vote-ux-phase3-static.test.js",
+        "bytes": 7670,
+        "sha256": "ad361de8a9d2a6597c08b3869975f2e27d55d41683d0deb7f6c5fbfb90e513cd",
+        "hashSource": "git_blob"
+      },
+      {
+        "path": "backend/scripts/safety-vote-ux-phase4-static.test.js",
+        "bytes": 7941,
+        "sha256": "bb6187a8966789740fb6bf466037244cf8302f2d20611fc93dfa6e00b9560dbe",
+        "hashSource": "git_blob"
+      },
+      {
+        "path": "backend/scripts/safety-vote-ux-phase5-browser-probe.js",
+        "bytes": 15076,
+        "sha256": "81b0d0579c92228b9fcd8f59ba94e226aca45dc5593988f29f49a00afc0e0993",
+        "hashSource": "git_blob"
+      },
+      {
+        "path": "backend/scripts/safety-vote-ux-phase5-static.test.js",
+        "bytes": 8444,
+        "sha256": "bff4c50068a3de2d0fae6cf4656ef9c995994f130bcaa5235934c8f3c66e40c9",
+        "hashSource": "git_blob"
+      },
+      {
+        "path": "backend/scripts/safety-vote-ux-phase6-static.test.js",
+        "bytes": 8696,
+        "sha256": "2d3ef12d8afa723a7d4cac3c8ed07858b23145c1177522439585c69a234f9229",
+        "hashSource": "git_blob"
+      },
+      {
+        "path": "backend/scripts/safety-vote-ux-phase7-static.test.js",
+        "bytes": 9679,
+        "sha256": "06abb040cd90cb9a043536802aff771237e3cd0cdb72a7b4fad491930d873a70",
+        "hashSource": "git_blob"
+      },
+      {
+        "path": "backend/scripts/safety-vote-ux-phase8-evidence.js",
+        "bytes": 6392,
+        "sha256": "18710af26ed90837fd93c7fdbc42d6bff8d76b76c4d36b266ba808020a7b1b34",
+        "hashSource": "git_blob"
+      },
+      {
+        "path": "backend/scripts/safety-vote-ux-phase8-static.test.js",
+        "bytes": 7188,
+        "sha256": "e1425538e50d2d074c446c03492e5ad4b98ae433c567448e627a52701ef749c6",
+        "hashSource": "git_blob"
+      }
+    ],
+    "documents": [
+      {
+        "path": "AGENTS.md",
+        "bytes": 209765,
+        "sha256": "7b6e215daed1b887c759129b38cbac4f59f34b3ae129dc48a11b701f1f7273f3",
+        "hashSource": "git_blob"
+      },
+      {
+        "path": "docs/safety-vote-ux-phase8-preflight-scope.md",
+        "bytes": 3344,
+        "sha256": "bc7eca8da64ef16ae839fd945caef46e2b2166e56430d04f761b62596b1e92af",
+        "hashSource": "git_blob"
+      },
+      {
+        "path": "docs/safety-vote-ux-phase8-integrated-journey-accessibility-release-candidate-closeout.md",
+        "bytes": 9892,
+        "sha256": "043f756e590c2e557ff4d3fe975177d6aff2596b6d641885a7cad329166e7d65",
+        "hashSource": "git_blob"
+      },
+      {
+        "path": "docs/safety-vote-ux-phase8-candidate-manifest.json",
+        "bytes": 8980,
+        "sha256": "5aeaa9fe51e3d865bca69ca4f9424987e3f498f3502d527c94ba99951593dcbc",
+        "hashSource": "git_blob"
+      },
+      {
+        "path": "docs/safety-vote-phase91-jury-progress-remediation.md",
+        "bytes": 3969,
+        "sha256": "b1033012eb416c0ec67e510f3068b9e94ff50d1fc6a6f511e3285d0a93e87527",
+        "hashSource": "git_blob"
+      },
+      {
+        "path": "docs/safety-vote-phase92-security-privacy-hardening.md",
+        "bytes": 5833,
+        "sha256": "d5de31c0baf76796f71bfc22cb85754bffa4914c622940f54176c4471ebf059f",
+        "hashSource": "git_blob"
+      },
+      {
+        "path": "docs/safety-vote-phase93-rehearsal-runbook.md",
+        "bytes": 3756,
+        "sha256": "a7fa01333278cad7beb4f99a1922ff9c98d2471747a6a267f7407141e7796d69",
+        "hashSource": "git_blob"
+      },
+      {
+        "path": "docs/safety-vote-phase93-eligibility-diff-runbook.md",
+        "bytes": 2696,
+        "sha256": "7e4c633730aba1fcf5f46b6a30738325503f4229e6a1d2c69755842a7126d817",
+        "hashSource": "git_blob"
+      },
+      {
+        "path": "docs/safety-vote-phase93-incident-rollback-runbook.md",
+        "bytes": 2472,
+        "sha256": "3b96ac1de4ee649f82d93919a656c0efd1d18a19ab8d9e4419a7e3fa429c3c89",
+        "hashSource": "git_blob"
+      },
+      {
+        "path": "docs/safety-vote-phase93-rehearsal-eligibility-diff-operational-runbooks.md",
+        "bytes": 5206,
+        "sha256": "4ea3cdf5195ec71928d97aadbaaebd79bca39da78f1add82a2362d6081e98807",
+        "hashSource": "git_blob"
+      },
+      {
+        "path": "docs/safety-vote-phase94-preflight-scope.md",
+        "bytes": 2458,
+        "sha256": "7844512742ad53e5a0a0271e36bf76f1ab374d50c1ac7a66cf66ec3ebdf25883",
+        "hashSource": "git_blob"
+      }
+    ]
+  },
+  "digests": {
+    "candidateDeltaSha256": "3f125ca7ccdb3415cd5be9352d42c05fe52f2aae20366434bc6b553e78674cca",
+    "runtimeScopeSha256": "d4ae391636f019f572acd558365fe647ea9beca1d1afc46100769589a4984fdc",
+    "migrationScopeSha256": "46becd538b5cb32584deee706db965f3cdeca07982b049c352f1ebfab254afd1",
+    "sourceOnlyScopeSha256": "0cd5932b3bda327a64484f0574f3a827c2eb91b71d335d7c3d78256e94d1ae90",
+    "documentScopeSha256": "2f927fadb5dac524b392f074295f30bb4d225d2cd23ecb6c69ac12e4857e5dfb"
+  },
+  "controls": {
+    "moduleDefaultDisabled": true,
+    "integrationsDefaultDisabled": true,
+    "protectedPreflightValueSuppressed": true,
+    "authenticatedSmokeRequired": true,
+    "deployAuthorized": false,
+    "productionMutationAuthorized": false
+  },
+  "explicitExclusions": [
+    {
+      "path": "backend/scripts/patrol-checkin-v2.test.js",
+      "reason": "pre-existing unrelated dirty file"
+    },
+    {
+      "path": "api/private/safety-vote/",
+      "reason": "private business files are backup data, never release payload"
+    },
+    {
+      "path": "backend/private-uploads/",
+      "reason": "private business files are backup data, never release payload"
+    },
+    {
+      "path": "backups/",
+      "reason": "local and Production evidence is never deployable runtime"
+    }
+  ],
+  "worktreeExceptions": [
+    "backend/scripts/patrol-checkin-v2.test.js"
+  ],
+  "decision": "IMMUTABLE_CANDIDATE_READY_FOR_FRESH_PROTECTED_PREFLIGHT"
+}
