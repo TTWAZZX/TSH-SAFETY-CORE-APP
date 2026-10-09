@@ -66,6 +66,8 @@ The archive contains no `.env`, credential, database business data or private Sa
 
 Production usernames/passwords are present, but no existing bearer token/session is available. Logging in would create login/audit mutations and therefore is not a non-mutating pre-deployment smoke. Authentication was not attempted or bypassed.
 
+The dedicated value-suppressed GET-only smoke runner now accepts exactly one of `SAFETY_VOTE_PHASE95_PROD_BEARER_TOKEN` or `SAFETY_VOTE_PHASE95_PROD_SESSION_COOKIE` from ignored `backend/.env`. It never records the credential value or response body and permits only the authenticated health GET plus a module-disabled campaigns GET. The first guarded run found neither key, emitted zero HTTP requests and stopped at `HOLD_NO_EXISTING_AUTHENTICATED_SESSION`. Evidence: `backups/production/safety-vote-phase95-auth-smoke-20261009042622/`; result SHA-256: `079e36795c59b7d21b7d490d5f76b50a426f336fac1334612027c3ad02a43be9`.
+
 Deployment is not authorized while this gate remains unresolved. A safe next step requires either:
 
 1. an already-authenticated, valid Production session supplied through the approved secure channel for GET-only smoke; or

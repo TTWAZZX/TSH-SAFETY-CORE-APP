@@ -70,6 +70,7 @@
     "verify:safety-vote-phase93": "npm run test:safety-vote-phase93-runbooks && npm run test:safety-vote-phase93-rehearsal && npm run test:safety-vote-phase92-adversarial && npm run test:safety-vote-phase91-jury-progress && npm run test:safety-vote-phase831-disabled",
     "test:safety-vote-phase94-remediation-local": "node scripts/safety-vote-phase94-remediation-local-regression.test.js",
     "preflight:safety-vote-phase95": "node scripts/safety-vote-phase95-controlled-pilot-preflight.js",
+    "smoke:safety-vote-phase95:authenticated-get": "node scripts/safety-vote-phase95-authenticated-get-smoke.js",
     "preflight:safety-vote-phase8:manifest": "node scripts/safety-vote-phase8-candidate-manifest.js",
     "preflight:safety-vote-phase8:production-readonly": "node scripts/safety-vote-phase8-production-readonly.js",
     "preflight:safety-vote-phase82:protected": "node scripts/safety-vote-phase82-protected-preflight.js",
