@@ -1,0 +1,68 @@
+{
+  "contract": "2026-10-09-safety-vote-phase9.6-mime-r1",
+  "mode": "review_only_local",
+  "sourceCommit": "5a6e6c4daa706647df1036cc65c57c92186d97fb",
+  "sourceTree": "92e0d3a9da2c1ca14660affa1344b0727421a668",
+  "runtimeAllowlist": [
+    {
+      "path": ".htaccess",
+      "bytes": 1328,
+      "sha256": "7c648d9a72e469b427cb65e40aff98d329bd2631d5a9fea0dc3787d9b9bb730d",
+      "change": "AddType application/javascript .mjs"
+    }
+  ],
+  "productionBefore": {
+    "evidencePath": "backups/production/safety-vote-phase82-preflight-20261009063228/htaccess-before-a",
+    "bytes": 1246,
+    "sha256": "21386ca981c822701394382bc71252c2d8e523bd76cc4c4c9820b26c5259e13d"
+  },
+  "rollback": {
+    "restoreFiles": [
+      {
+        "path": ".htaccess",
+        "source": "backups/production/safety-vote-phase82-preflight-20261009063228/htaccess-before-a",
+        "bytes": 1246,
+        "sha256": "21386ca981c822701394382bc71252c2d8e523bd76cc4c4c9820b26c5259e13d"
+      }
+    ],
+    "removeOnRollback": [],
+    "doubleDownloadRequired": true
+  },
+  "mimeProbes": [
+    { "path": "public/js/pages/safety-vote-governance-model.mjs", "bytes": 5960, "sha256": "66961957927ee18bc47dceb3d15adde1362e2673c846a7aa5d40a053fad85038" },
+    { "path": "public/js/pages/safety-vote-journey-model.mjs", "bytes": 1738, "sha256": "64de00923f331c9468e43e40a5c9310c0eb5e06fd953d6490a931e8da1a18622" },
+    { "path": "public/js/pages/safety-vote-jury-model.mjs", "bytes": 4715, "sha256": "f1c9be0db5acde56031f0582608c9c96fcaf60a83ef531b19e814f0e6c6b61f9" },
+    { "path": "public/js/pages/safety-vote-operations-model.mjs", "bytes": 6150, "sha256": "e9c6312ae182561750379ae3297a323ad37a5046c26716805189c936bd2bea34" },
+    { "path": "public/js/pages/safety-vote-participation-model.mjs", "bytes": 10326, "sha256": "e34a28370ea657784888f714bc1199ee38843ab5f50a7414f1a9fd28c7cbfcb2" },
+    { "path": "public/js/pages/safety-vote-results-model.mjs", "bytes": 5274, "sha256": "7e65ee0f1ecedbce3500ed0934e5706f976f861fb8d2ffe13af5d86f7caa6383" },
+    { "path": "public/js/pages/safety-vote-ux-model.mjs", "bytes": 2393, "sha256": "3b41fccf18d7657951655964a66d7caab65b5b2b516166c827bac3e32032dc64" },
+    { "path": "public/js/pages/safety-vote-wizard-model.mjs", "bytes": 10450, "sha256": "cbbf8a03df19150be0eb1fcfe4282ffb3f23d9cbb5969b330e6b6d12ab163f80" }
+  ],
+  "requiredGates": {
+    "remoteBeforeDoubleDownloadMatches": true,
+    "candidateFromGitObject": true,
+    "uploadPathCount": 1,
+    "deployedDoubleDownloadMatches": true,
+    "allMimeProbeStatus": 200,
+    "allMimeProbeContentType": "application/javascript",
+    "authenticatedBrowserSmokeGetOnly": true,
+    "anonymousDenialRequired": true,
+    "moduleEnabledRemains": true,
+    "integrationsEnabledRemains": false,
+    "configuredExternalProvidersRemain": 0,
+    "businessRowsRemain": 0,
+    "rollbackOnAnyFailure": true,
+    "zeroResidueRequired": true
+  },
+  "constraints": {
+    "productionConnectionAuthorized": false,
+    "deploymentAuthorized": false,
+    "loginAuthorized": false,
+    "permissionChangeAuthorized": false,
+    "campaignCreationAuthorized": false,
+    "businessDataWriteAuthorized": false,
+    "emailOrNotificationAuthorized": false,
+    "externalIntegrationEnablementAuthorized": false,
+    "pushAuthorized": false
+  }
+}

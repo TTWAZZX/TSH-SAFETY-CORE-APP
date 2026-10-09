@@ -1,5 +1,13 @@
 # TSH Safety Core Activity - AGENTS.md
 
+## Safety Vote Phase 9.6 MIME Remediation Candidate (Local only / review ready, 2026-10-09)
+
+- The Phase 9.6 browser failure was reproduced from retained evidence without reconnecting to Production: root `.htaccess` matched Production byte-exact at SHA-256 `21386ca981c822701394382bc71252c2d8e523bd76cc4c4c9820b26c5259e13d` and had no `.mjs` MIME mapping. Safety Vote runtime imports eight `.mjs` files; Chrome reported the first three rejected with an empty MIME type before application bootstrap.
+- Immutable remediation candidate `5a6e6c4daa706647df1036cc65c57c92186d97fb` (tree `92e0d3a9da2c1ca14660affa1344b0727421a668`) adds only `AddType application/javascript .mjs` to root `.htaccess`. The runtime allowlist contains one path; its Git-blob SHA-256 is `7c648d9a72e469b427cb65e40aff98d329bd2631d5a9fea0dc3787d9b9bb730d`.
+- Static regression proves the normalized candidate differs from the retained Production baseline only by the two-line comment/directive insertion, does not override `.js` or broaden file access, and inventories all eight imported `.mjs` modules. Local Apache syntax passed and loopback HTTP returned `200 application/javascript`. UX Phase 1–8 and disabled-mode parity remained passing.
+- Checksum-locked review manifest SHA-256 is `73cb28d24e81782e88d7bf34548290a9a337c6a74afc7aa5283d6a4646168ab4`. Its rollback restores the exact retained 1,246-byte Production `.htaccess`; the local memory-restore drill matched SHA-256 `21386ca981c822701394382bc71252c2d8e523bd76cc4c4c9820b26c5259e13d`. The review runner exposes only `--validate-local` and deliberately has no Production execution mode.
+- Report: `docs/safety-vote-phase96-mime-remediation-local-candidate.md`; manifest: `docs/safety-vote-phase96-mime-remediation-manifest.json`. No Production connection/change, deploy, login, push, permission change, business-data write, campaign creation, email/notification or external integration action occurred. Decision: `MIME_REMEDIATION_CANDIDATE_READY_FOR_REVIEW_NOT_AUTHORIZED`.
+
 ## Safety Vote Phase 9.5C / 9.6 Full Core Rollout (ROLLED BACK / HOLD, 2026-10-09)
 
 - Immutable candidate `47411cbdd3773e9f2e87472732596178313372f2` (tree `78a0531eece0c04e6a21b8e0a42a483779f23888`) changed the Production presentation switch only: `index.html` sets `safetyVoteUxV1=true` before `main.js`. UX Phase 1–8 static contracts, disabled-mode parity and the Phase 9.6 feature-flag regression passed locally.
