@@ -1,5 +1,12 @@
 # TSH Safety Core Activity - AGENTS.md
 
+## Safety Vote Phase 9.5 Controlled Pilot Preflight (HOLD, 2026-10-09)
+
+- The user attested that the exposed Gmail App Password was revoked/replaced and `backend/.env` updated. Value-suppressed checks confirm an SMTP credential is present, `.env` is ignored and untracked, and no secret value/hash was recorded; no SMTP authentication or email delivery was attempted.
+- The immutable 41-path runtime candidate remains commit `021b2397f8ab668f6b6fab6aa1d7a5f40bf0533b`, tree `0cf097bc429ad0f4ae348b820fd9504c5ff538a4`, manifest SHA-256 `3905304ffef25e3bcbd3d0febdeb51261a68cc8930b6f976bafa97547301ee6c` and runtime digest `d4ae391636f019f572acd558365fe647ea9beca1d1afc46100769589a4984fdc`. The verified Phase 9.4 postcheck shows module/integrations disabled, providers unconfigured, 39 tables and zero business rows.
+- Existing read-only drift evidence covers all 41 runtime paths: 25 remote-before files are hash-verified for restoration and 16 paths are proven absent for removal on rollback. The offline rollback archive contains 26 entries, is 306,679 bytes and has SHA-256 `df5132fb7079427d17a3ff1a2b851e284a865b4aa1fae7d2b49f03d50396a394`; manifest SHA-256 is `31ba29f6a718f5f778921e0dc2175c5ab5d8c783717eeb24feec4ad911acebbd`.
+- Preflight stops at `HOLD_NO_EXISTING_AUTHENTICATED_SESSION`: only Production usernames/passwords are configured, with no existing token/session for non-mutating GET-only smoke. Login was not attempted because it writes authentication/audit state; authentication was not bypassed. No new Production connection, runtime deploy, module opening, external delivery, email or push occurred. Evidence: `backups/production/safety-vote-phase95-preflight-20261009035440/`; report: `docs/safety-vote-phase95-controlled-pilot-preflight.md`. Phase 9.6 has not started.
+
 ## Safety Vote Phase 9.4 Corrected Production Remediation Retry (PASS, release remains HOLD, 2026-10-09)
 
 - Corrected immutable remediation candidate `24ef0f60f31ab63ff17582dafe7c2eddcc157847` passed a fresh protected precheck: Phase 7 contract/schema, 39 tables, 11 permissions, zero Safety Vote business rows, external providers unconfigured and `phase7_integrations_enabled=0`. The precheck still observed `module_enabled=1`; its privacy-safe backup/restore and helper cleanup passed with zero residue.
