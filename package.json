@@ -31,6 +31,7 @@
     "smoke:safety-vote-phase95:authenticated-get": "npm --prefix backend run smoke:safety-vote-phase95:authenticated-get",
     "preflight:safety-vote-phase95b": "npm --prefix backend run preflight:safety-vote-phase95b",
     "test:safety-vote-phase96-feature-flag": "npm --prefix backend run test:safety-vote-phase96-feature-flag",
+    "test:safety-vote-phase96-mime": "npm --prefix backend run test:safety-vote-phase96-mime",
     "preflight:safety-vote-phase8:manifest": "npm --prefix backend run preflight:safety-vote-phase8:manifest",
     "preflight:safety-vote-phase8:production-readonly": "npm --prefix backend run preflight:safety-vote-phase8:production-readonly",
     "preflight:safety-vote-phase82:protected": "npm --prefix backend run preflight:safety-vote-phase82:protected",

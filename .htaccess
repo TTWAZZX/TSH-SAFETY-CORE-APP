@@ -2,6 +2,9 @@ RewriteEngine On
 RewriteBase /safety/tsh-safety-core/
 Options -Indexes
 
+# ES modules must be served with a JavaScript MIME type on shared hosting.
+AddType application/javascript .mjs
+
 # Johnny AI Knowledge Base files are available only through the authenticated API.
 RewriteRule ^uploads/johnny-kb-[^/]+$ - [R=404,L,NC]
 
