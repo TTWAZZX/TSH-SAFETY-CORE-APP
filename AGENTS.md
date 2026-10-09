@@ -1,5 +1,13 @@
 # TSH Safety Core Activity - AGENTS.md
 
+## Safety Vote Phase 9.5B Company-wide Module Enablement (PASS, integrations remain disabled, 2026-10-09)
+
+- The user explicitly superseded the bounded-pilot objective and accepted company-wide visibility for all 2,543 role-derived accounts. Permissions were not changed: four Admin accounts retain all 11 Safety Vote permissions/Admin bypass; populated User and Viewer roles retain `SAFETY_VOTE_VIEW` only.
+- Fresh prechecks matched the immutable Production runtime `41/41`, verified the bearer session and rollback package, and confirmed 39 tables, 11 permissions, zero business rows, `module_enabled=0`, `phase7_integrations_enabled=0`, zero configured providers and zero helper/backup residue.
+- Checksum-locked candidate SHA-256 `bf1ad0adf834a7efc9f4bd54075b157d32728b85580782913619b743977b9707` changed exactly one row, `SafetyVote_Settings.module_enabled: 0 -> 1`. The 209-byte private rollback SQL matched two downloads with SHA-256 `074a4be4ddae07b75e7d5f92fb0c3dcddba973cc9ed0a85b302a1f5300ebc982`, direct HTTPS returned `403`, `.htaccess` was restored byte-exact and remote residue is zero.
+- Fresh protected postcheck confirmed `module_enabled=1`, integrations/providers still off, 39 tables, zero business rows, no DDL/DML and zero residue. Authenticated GET-only smoke returned `200` for health and campaigns with zero campaign rows and `private, no-store, max-age=0`. Activation evidence: `backups/production/safety-vote-phase95b-enable-20261009060715/`; smoke: `backups/production/safety-vote-phase95b-enabled-smoke-20261009060816/`.
+- No login, permission change, campaign creation, business-data write, email/notification, runtime deploy or push occurred. The separate `safetyVoteUxV1` presentation remains strict opt-in/default OFF because no runtime/config enablement was authorized. Report: `docs/safety-vote-phase95b-company-wide-module-enablement.md`. Decision: `PHASE_9_5B_COMPANY_WIDE_MODULE_ENABLE_PASS_INTEGRATIONS_DISABLED`; Phase 9.6 has not started.
+
 ## Safety Vote Phase 9.5B Bounded-pilot Enablement Preflight (HOLD, 2026-10-09)
 
 - Read-only/value-suppressed Production preflight double-downloaded all 41 runtime paths and matched immutable commit `021b2397f8ab668f6b6fab6aa1d7a5f40bf0533b` byte-exact. The bearer session, Phase 7 schema health, 39-table/zero-business-row protected evidence, `module_enabled=0`, `phase7_integrations_enabled=0`, zero configured providers and checksum-locked rollback package all pass.

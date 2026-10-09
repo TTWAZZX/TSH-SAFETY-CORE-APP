@@ -4,6 +4,8 @@ Date: 2026-10-09
 
 Decision: `HOLD_PILOT_COHORT_NOT_PROVEN`
 
+Status note: this bounded-pilot HOLD was subsequently superseded by explicit authorization for company-wide module visibility. The accepted enablement is documented in `docs/safety-vote-phase95b-company-wide-module-enablement.md`; the access findings below remain the authoritative pre-change evidence.
+
 ## Outcome
 
 The read-only, value-suppressed Phase 9.5B preflight completed and correctly stopped before module enablement. Production runtime, rollback readiness, schema posture, disabled settings, external-provider posture and the existing bearer session pass. The access gate does not pass because the current role matrix grants `SAFETY_VOTE_VIEW` to every populated role, producing a role-derived access surface of all 2,543 employee accounts rather than an explicitly approved bounded pilot cohort.
