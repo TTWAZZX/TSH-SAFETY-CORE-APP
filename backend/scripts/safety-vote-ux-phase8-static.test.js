@@ -33,7 +33,7 @@ const read = relative => fs.readFileSync(path.join(root, relative), 'utf8');
     check(components.includes('aria-live="polite"'), 'journey live status is missing');
     check(components.includes('safetyVoteStatePanel'), 'shared state panel is missing');
     check(components.includes('focusSafetyVoteHeading'), 'heading focus helper is missing');
-    check(center.includes("current: 'center'"), 'Campaign Center journey state is missing');
+    check(center.includes('sv-admin-workspaces') && center.includes("['campaigns', 'แคมเปญ']"), 'task-oriented Campaign Center navigation is missing');
     check(wizard.includes("current: 'readiness'"), 'readiness journey state is missing');
     check(participation.includes("current: 'participation'"), 'participation journey state is missing');
     check(jury.includes("current: 'jury'"), 'jury journey state is missing');
@@ -56,7 +56,7 @@ const read = relative => fs.readFileSync(path.join(root, relative), 'utf8');
     check(css.includes('min-height: 52px') && css.includes('min-height:56px'), '44px+ journey targets are not enforced');
     check(css.includes(':focus-visible'), 'visible focus treatment is missing');
     check(css.includes('prefers-reduced-motion:reduce'), 'reduced-motion support is missing');
-    check(/registration-workflow-r1/.test(main) && /first-login-reentry-r1/.test(html), 'Phase 8/current cache chain is incomplete');
+    check(/renderSafetyVoteFoundation/.test(read('public/js/pages/admin.js')) && /safety-vote-phase9abc-enabled-r1/.test(html), 'Phase 8/current cache chain is incomplete');
 
     const adminPopular = model.journeyForCampaign({ role: 'admin', campaignType: 'popular_vote' });
     check(adminPopular[0].key === 'center' && adminPopular.at(-1).key === 'governance', 'Admin journey endpoints are incorrect');

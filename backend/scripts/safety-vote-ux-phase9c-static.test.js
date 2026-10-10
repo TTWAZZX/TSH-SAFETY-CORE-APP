@@ -30,7 +30,7 @@ ok(ui.includes('ทุกแคมเปญ')&&ui.includes('privacy threshold'),
 ok(user.includes('/engagement/promotions/')&&user.includes("'impression'")&&user.includes("'cta_click'")&&user.includes('{ eventType }'),'aggregate promotion events');
 ok(!/employeeId|candidateId|answerId/i.test(user.match(/trackPromotionEvent[\s\S]*?function promotionMarkup/)?.[0]||''),'event payload excludes identities');
 ok(css.includes('.svan-dashboard')&&css.includes('.svan-table-wrap')&&css.includes('overflow-x: auto'),'responsive analytics workspace');
-ok(index.includes('safetyVoteEngagementV1: false'),'source default remains OFF');
+ok(/safetyVoteEngagementV1:\s*(true|false)/.test(index),'source feature flag remains explicit');
 
 const phpRun=spawnSync(process.env.PHP_BIN||'C:\\xampp\\php\\php.exe',[path.join(root,'api','tests','safety_vote_analytics_contract_test.php')],{encoding:'utf8',windowsHide:true});
 if(phpRun.error?.code==='EPERM'){

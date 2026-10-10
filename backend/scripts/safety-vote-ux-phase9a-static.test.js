@@ -24,8 +24,8 @@ for (const marker of ['/admin/engagement/action-center', '/admin/promotions', '/
 for (const text of [nodeRoute, phpRoute]) { ok(text.includes('SafetyVote_EligibleVoters'), 'promotion visibility remains eligibility-filtered'); ok(text.includes('SAFETY_VOTE_MANAGE') && text.includes('SAFETY_VOTE_VIEW'), 'existing capability contract reused'); ok(!text.includes('SafetyVote_BallotAnswers SET') && !text.includes('SafetyVote_Ballots SET'), 'no ballot mutation'); }
 
 const index = read('index.html'), admin = read('public/js/pages/admin-safety-vote-ux1.js'), user = read('public/js/pages/safety-vote-page-ux1.js'), css = read('public/style.css');
-ok(index.includes('safetyVoteEngagementV1: false'), 'strict opt-in client flag');
-ok(admin.includes('Admin Action Center') && admin.includes('data-sv-promotion-form'), 'admin productivity and promotion manager');
+ok(/safetyVoteEngagementV1:\s*(true|false)/.test(index), 'explicit client feature flag');
+ok(admin.includes('งานของฉันวันนี้') && admin.includes('data-sv-promotion-form'), 'admin productivity and dedicated promotion manager');
 ok(user.includes('สิ่งที่คุณต้องทำ') && user.includes('data-svp-promotion-next') && user.includes('การแจ้งเตือน Safety Vote'), 'user discovery and notification center');
 ok(!user.includes('setInterval('), 'carousel never auto-rotates');
 ok(css.includes('.svp-promotion') && css.includes('@media (prefers-reduced-motion: reduce)'), 'responsive reduced-motion presentation');

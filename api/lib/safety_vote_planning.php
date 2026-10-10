@@ -2,6 +2,7 @@
 declare(strict_types=1);
 
 const SVPL_CONTRACT = '2026-10-10-safety-vote-ux-phase9b-r1';
+const SVPL_REVIEW_CONTRACT = '2026-10-10-safety-vote-admin-review-r1';
 
 function svpl_clean($value, int $max=255):string {
     $text=preg_replace('/[\x00-\x1F\x7F]/u',' ',(string)($value??''));
@@ -25,3 +26,18 @@ function svpl_safe_template(array $raw):array {
 function svpl_notification_preview(array $input):array {
     $campaign=svpl_int($input['campaignId']??null);$audience=in_array($input['audience']??'', ['eligible','nonparticipants'],true)?(string)$input['audience']:null;$channel=in_array($input['channel']??'', ['in_app','email'],true)?(string)$input['channel']:null;$event=svpl_clean($input['eventType']??'announcement',50);$template=svpl_clean($input['templateKey']??'admin_composer',80);$title=svpl_clean($input['title']??'',160);$message=svpl_clean($input['message']??'',300);$scheduled=svpl_clean($input['scheduledAt']??'',32);$matched=preg_match('/^(\d{4}-\d{2}-\d{2})[T ](\d{2}):(\d{2})/',$scheduled,$m)===1;$hour=$matched?(int)$m[2]:null;$errors=[];if(!$campaign)$errors[]=['field'=>'campaignId','code'=>'REQUIRED'];if(!$audience)$errors[]=['field'=>'audience','code'=>'INVALID_ENUM'];if(!$channel)$errors[]=['field'=>'channel','code'=>'INVALID_ENUM'];if(!$matched)$errors[]=['field'=>'scheduledAt','code'=>'INVALID_DATE'];if($title==='')$errors[]=['field'=>'title','code'=>'REQUIRED'];if($message==='')$errors[]=['field'=>'message','code'=>'REQUIRED'];return['ok'=>count($errors)===0,'errors'=>$errors,'value'=>['campaignId'=>$campaign,'audience'=>$audience,'channel'=>$channel,'eventType'=>$event,'templateKey'=>$template,'title'=>$title,'message'=>$message,'scheduledAt'=>$scheduled,'quietHoursBlocked'=>$hour!==null&&($hour>=21||$hour<7),'windowKey'=>$matched?$m[1]:null]];
 }
+
+function svpl_review_note(array $input):array {
+    $allowed=['general','readiness','schedule','content','governance'];$forbidden=null;
+    foreach(array_keys($input)as$key)if(preg_match('/ballot|answer|choice|candidate|voter|receipt|jury.?score|response.?identity/i',(string)$key)){$forbidden=(string)$key;break;}
+    $note=svpl_clean($input['note']??'',800);$category=in_array((string)($input['category']??'general'),$allowed,true)?(string)($input['category']??'general'):null;$errors=[];
+    if($note==='')$errors[]=['field'=>'note','code'=>'REQUIRED'];if($category===null)$errors[]=['field'=>'category','code'=>'INVALID_ENUM'];
+    if($forbidden!==null||preg_match('/ballot\s*id|voter.{0,20}choice|jury\s*score|receipt\s*id|รหัสบัตรลงคะแนน|คำตอบของผู้ใช้|ตัวเลือกที่ลงคะแนน|คะแนนกรรมการรายบุคคล/iu',$note))$errors[]=['field'=>$forbidden??'note','code'=>'BALLOT_DATA_NOT_ALLOWED'];
+    return['ok'=>count($errors)===0,'errors'=>$errors,'value'=>['note'=>$note,'category'=>$category]];
+}
+function svpl_review_readiness(array $row):array {
+    $open=!empty($row['ScheduledOpenAt'])?strtotime((string)$row['ScheduledOpenAt']):false;$close=!empty($row['ScheduledCloseAt'])?strtotime((string)$row['ScheduledCloseAt']):false;
+    $checks=[['key'=>'owner','label'=>'ระบุผู้รับผิดชอบ','passed'=>svpl_clean($row['OwnerEmployeeID']??'',20)!==''],['key'=>'content','label'=>'มีคำถามหรือเนื้อหาที่ใช้งาน','passed'=>(int)($row['QuestionCount']??0)>0],['key'=>'eligibility','label'=>'มีกฎผู้มีสิทธิ์','passed'=>(int)($row['EligibilityRuleCount']??0)>0],['key'=>'schedule','label'=>'กำหนดเวลาเปิดและปิดถูกต้อง','passed'=>$open!==false&&$close!==false&&$close>$open]];
+    $passed=count(array_filter($checks,fn($x)=>$x['passed']));return['passed'=>$passed,'total'=>count($checks),'percent'=>(int)round($passed/count($checks)*100),'blockers'=>array_values(array_filter($checks,fn($x)=>!$x['passed'])),'authoritative'=>false];
+}
+function svpl_schedule_conflicts(array $rows):array {$groups=[];$result=[];foreach($rows as$row){$key=(int)$row['CampaignID'].':'.svpl_clean($row['Channel']??'',30);$groups[$key][]=$row;}foreach($groups as$group){usort($group,fn($a,$b)=>strtotime((string)$a['ScheduledAt'])<=>strtotime((string)$b['ScheduledAt']));for($i=1;$i<count($group);$i++){if(abs(strtotime((string)$group[$i]['ScheduledAt'])-strtotime((string)$group[$i-1]['ScheduledAt']))<=1800){$id=(int)$group[$i]['CampaignID'];$result[$id]=($result[$id]??0)+1;}}}return$result;}

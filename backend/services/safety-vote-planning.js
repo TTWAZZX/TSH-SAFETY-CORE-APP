@@ -2,6 +2,7 @@
 
 const crypto = require('crypto');
 const CONTRACT_VERSION = '2026-10-10-safety-vote-ux-phase9b-r1';
+const REVIEW_CONTRACT_VERSION = '2026-10-10-safety-vote-admin-review-r1';
 const FILTER_KEYS = new Set(['search', 'status', 'campaignType', 'owner', 'sort', 'month']);
 const SORTS = new Set(['updated_desc', 'title_asc', 'status_asc', 'open_asc']);
 
@@ -77,4 +78,53 @@ function normalizeNotificationPreview(input = {}) {
     return { ok: errors.length === 0, errors, value: { campaignId, audience, channel, eventType, templateKey, title, message, scheduledAt, quietHoursBlocked, windowKey: match ? match[1] : null } };
 }
 
-module.exports = { CONTRACT_VERSION, clean, positiveInt, sha256, normalizeSavedView, normalizeTemplateName, safeTemplateConfig, normalizeNotificationPreview };
+const REVIEW_CATEGORIES = new Set(['general', 'readiness', 'schedule', 'content', 'governance']);
+const SENSITIVE_REVIEW_KEYS = /(ballot|answer|choice|candidate|voter|receipt|jury.?score|response.?identity)/i;
+const SENSITIVE_REVIEW_TEXT = /(ballot\s*id|voter.{0,20}choice|jury\s*score|receipt\s*id|รหัสบัตรลงคะแนน|คำตอบของผู้ใช้|ตัวเลือกที่ลงคะแนน|คะแนนกรรมการรายบุคคล)/iu;
+
+function normalizeReviewNote(input = {}) {
+    const forbiddenField = Object.keys(input || {}).find(key => SENSITIVE_REVIEW_KEYS.test(key));
+    const note = clean(input.note, 800);
+    const category = REVIEW_CATEGORIES.has(String(input.category || 'general')) ? String(input.category || 'general') : null;
+    const errors = [];
+    if (!note) errors.push({ field: 'note', code: 'REQUIRED' });
+    if (!category) errors.push({ field: 'category', code: 'INVALID_ENUM' });
+    if (forbiddenField || SENSITIVE_REVIEW_TEXT.test(note)) errors.push({ field: forbiddenField || 'note', code: 'BALLOT_DATA_NOT_ALLOWED' });
+    return { ok: errors.length === 0, errors, value: { note, category } };
+}
+
+function reviewReadiness(row = {}) {
+    const open = row.ScheduledOpenAt ? new Date(row.ScheduledOpenAt) : null;
+    const close = row.ScheduledCloseAt ? new Date(row.ScheduledCloseAt) : null;
+    const checks = [
+        { key: 'owner', label: 'ระบุผู้รับผิดชอบ', passed: Boolean(clean(row.OwnerEmployeeID, 20)) },
+        { key: 'content', label: 'มีคำถามหรือเนื้อหาที่ใช้งาน', passed: Number(row.QuestionCount || 0) > 0 },
+        { key: 'eligibility', label: 'มีกฎผู้มีสิทธิ์', passed: Number(row.EligibilityRuleCount || 0) > 0 },
+        { key: 'schedule', label: 'กำหนดเวลาเปิดและปิดถูกต้อง', passed: Boolean(open && close && !Number.isNaN(open.getTime()) && close > open) }
+    ];
+    const passed = checks.filter(item => item.passed).length;
+    return { passed, total: checks.length, percent: Math.round(passed / checks.length * 100), blockers: checks.filter(item => !item.passed), authoritative: false };
+}
+
+function scheduleConflicts(rows = []) {
+    const groups = new Map();
+    for (const row of rows) {
+        const key = `${Number(row.CampaignID)}:${clean(row.Channel, 30)}`;
+        if (!groups.has(key)) groups.set(key, []);
+        groups.get(key).push(row);
+    }
+    const result = new Map();
+    for (const group of groups.values()) {
+        group.sort((a, b) => new Date(a.ScheduledAt) - new Date(b.ScheduledAt));
+        for (let i = 1; i < group.length; i += 1) {
+            const minutes = Math.abs(new Date(group[i].ScheduledAt) - new Date(group[i - 1].ScheduledAt)) / 60000;
+            if (minutes <= 30) {
+                const id = Number(group[i].CampaignID);
+                result.set(id, (result.get(id) || 0) + 1);
+            }
+        }
+    }
+    return result;
+}
+
+module.exports = { CONTRACT_VERSION, REVIEW_CONTRACT_VERSION, clean, positiveInt, sha256, normalizeSavedView, normalizeTemplateName, safeTemplateConfig, normalizeNotificationPreview, normalizeReviewNote, reviewReadiness, scheduleConflicts };

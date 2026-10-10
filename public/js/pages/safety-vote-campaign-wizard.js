@@ -27,6 +27,13 @@ const RESULT_OPTIONS = [
     ['live', 'แสดงระหว่างกิจกรรม'], ['certified_only', 'แสดงหลังรับรองผล'], ['published', 'เผยแพร่แล้ว']
 ];
 
+function localInputDate(value) {
+    if (!value) return '';
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) return '';
+    return new Date(date.getTime() - date.getTimezoneOffset() * 60000).toISOString().slice(0, 16);
+}
+
 function inputField(name, label, value = '', type = 'text', options = '') {
     return `<label class="svw-field"><span>${escHtml(label)}</span><input id="svw-${name}" data-svw-field="${name}" type="${type}" value="${escHtml(value ?? '')}" ${options}></label>`;
 }
@@ -113,8 +120,99 @@ function stepMarkup(step, draft, persisted, previewMode) {
     return [stepType, stepDetails, stepPrivacy, stepContent, stepEligibility, stepSchedule, stepResults][step]?.(draft) || stepReview(draft, persisted, previewMode);
 }
 
-export function renderSafetyVoteCampaignWizard(container, { onClose = () => {}, onComplete = () => {}, onOpenAdvanced = () => {}, onNavigate = null } = {}) {
-    const state = { step: 0, maxStep: 0, draft: createWizardDraft(), persisted: { campaignId: null, versionId: null, rowVersion: null, builderSaved: false }, saveState: 'idle', saveMessage: 'ยังไม่ได้บันทึก', errors: [], previewMode: 'user', dirty: false, timer: null, saveChain: Promise.resolve(), objectUrls: new Set(), hydratingFiles: new Set() };
+export function renderSafetyVoteCampaignWizard(container, { campaignId = null, initialTemplateKey = null, initialConfig = null, sourceLabel = '', onClose = () => {}, onComplete = () => {}, onOpenAdvanced = () => {}, onNavigate = null } = {}) {
+    let recoveryKey = `safetyVoteAdminDraft:v1:${campaignId ? Number(campaignId) : 'new'}`;
+    const state = { step: 0, maxStep: 0, draft: createWizardDraft(), persisted: { campaignId: null, versionId: null, rowVersion: null, builderSaved: false, preservedMedia: [], serverUpdatedAt: null }, saveState: 'idle', saveMessage: 'ยังไม่ได้บันทึก', errors: [], previewMode: 'user', dirty: false, timer: null, saveChain: Promise.resolve(), objectUrls: new Set(), hydratingFiles: new Set(), recovery: null };
+
+    const clone = value => JSON.parse(JSON.stringify(value));
+    const configDraft = config => {
+        const version = config?.version || {}, type = version.campaignType || version.CampaignType || 'survey';
+        const base = applyTemplate(createWizardDraft(), type);
+        const rules = Array.isArray(config?.rules) ? config.rules.map((rule, index) => ({
+            ruleGroup: Number(rule.ruleGroup || rule.RuleGroup || 1), ruleOrder: Number(rule.ruleOrder || rule.RuleOrder || index + 1),
+            effect: rule.effect || rule.Effect || 'include', attributeKey: rule.attributeKey || rule.AttributeKey || 'all',
+            operator: rule.operator || rule.Operator || 'EQUALS', values: clone(rule.values || []), reason: rule.reason || rule.Reason || ''
+        })) : [];
+        return {
+            ...base,
+            titleTh: version.titleTh || version.TitleTh ? `${version.titleTh || version.TitleTh} (สำเนา)` : '',
+            titleEn: version.titleEn || version.TitleEn || '', summary: version.summary || version.Summary || '', description: version.description || version.Description || '',
+            privacyMode: version.privacyMode || version.PrivacyMode || base.privacyMode,
+            privacyThreshold: Number(version.privacyThreshold || version.PrivacyThreshold || base.privacyThreshold),
+            discoveryMode: version.discoveryMode || version.DiscoveryMode || base.discoveryMode,
+            resultVisibility: version.resultVisibility || version.ResultVisibility || base.resultVisibility,
+            campaignCode: '', openAt: '', closeAt: '',
+            questions: Array.isArray(config?.questions) && config.questions.length ? clone(config.questions) : base.questions,
+            rules: rules.length ? rules : base.rules,
+            eligibilityPreview: null, eligibilityFrozen: false
+        };
+    };
+
+    const safeRecoveryDraft = () => JSON.parse(JSON.stringify(state.draft, (key, value) => ['previewUrl', 'imageUnavailable'].includes(key) ? undefined : value));
+    const writeRecovery = () => {
+        try { sessionStorage.setItem(recoveryKey, JSON.stringify({ savedAt: Date.now(), step: state.step, maxStep: state.maxStep, draft: safeRecoveryDraft() })); } catch (_) {}
+    };
+    const clearRecovery = () => { try { sessionStorage.removeItem(recoveryKey); } catch (_) {} state.recovery = null; };
+    const readRecovery = () => {
+        try {
+            const record = JSON.parse(sessionStorage.getItem(recoveryKey) || 'null');
+            if (!record?.draft || !Number.isFinite(Number(record.savedAt)) || Date.now() - Number(record.savedAt) > 24 * 60 * 60 * 1000) { clearRecovery(); return null; }
+            return record;
+        } catch (_) { clearRecovery(); return null; }
+    };
+
+    const hydrateDraft = async id => {
+        container.innerHTML = '<div class="svw-shell" aria-busy="true" aria-live="polite"><div class="sv-state-panel"><h1>กำลังเปิดแคมเปญฉบับร่าง…</h1><p>ระบบกำลังโหลดข้อมูลล่าสุดก่อนอนุญาตให้แก้ไข</p></div></div>';
+        try {
+            const detail = await API.get(`/safety-vote/admin/campaigns/${Number(id)}`), row = detail.data?.campaign || {};
+            if (String(row.Status || '').toLowerCase() !== 'draft') throw new Error('แก้ไขได้เฉพาะแคมเปญฉบับร่าง');
+            const [builder, media] = await Promise.all([
+                API.get(`/safety-vote/admin/campaigns/${Number(id)}/builder`),
+                API.get(`/safety-vote/admin/campaigns/${Number(id)}/versions/${Number(row.CurrentVersionID)}/media`)
+            ]);
+            const questions = builder.data?.questions || [], mediaItems = media.data?.items || [], optionMediaKeys = new Set();
+            for (const item of mediaItems) {
+                if (item.scopeType !== 'option') continue;
+                const question = questions.find(value => value.questionCode === item.questionCode), option = question?.options?.find(value => value.optionCode === item.optionCode);
+                if (!option) continue;
+                option.mediaType = item.mediaType || ''; option.mediaUrl = item.url || ''; option.mediaTitle = item.title || '';
+                optionMediaKeys.add(`${item.scopeType}|${item.questionCode || ''}|${item.optionCode || ''}|${item.mediaType || ''}|${item.url || ''}`);
+            }
+            state.draft = {
+                ...state.draft,
+                campaignType: row.CampaignType || state.draft.campaignType,
+                campaignCode: row.CampaignCode || '',
+                titleTh: row.TitleTh || '', titleEn: row.TitleEn || '',
+                summary: row.Summary || '', description: row.Description || '',
+                privacyMode: row.PrivacyMode || state.draft.privacyMode,
+                privacyThreshold: Number(row.PrivacyThreshold || 5),
+                discoveryMode: row.DiscoveryMode || 'eligible_only',
+                openAt: localInputDate(row.OpenAt || row.ScheduledOpenAt),
+                closeAt: localInputDate(row.CloseAt || row.ScheduledCloseAt),
+                resultVisibility: row.ResultVisibility || 'hidden_until_close',
+                questions: questions.length ? questions : state.draft.questions,
+                rules: (detail.data?.eligibilityRules || []).map((rule, index) => ({
+                    ruleGroup: Number(rule.RuleGroup || rule.ruleGroup || 1),
+                    ruleOrder: Number(rule.RuleOrder || rule.ruleOrder || index + 1),
+                    effect: rule.Effect || rule.effect || 'include',
+                    attributeKey: rule.AttributeKey || rule.attributeKey || 'all',
+                    operator: rule.Operator || rule.operator || 'EQUALS',
+                    values: rule.values || [], reason: rule.Reason || rule.reason || ''
+                }))
+            };
+            if (!state.draft.rules.length) state.draft.rules = createWizardDraft().rules;
+            state.persisted = { campaignId: Number(row.id), versionId: Number(row.CurrentVersionID), rowVersion: Number(row.RowVersion), builderSaved: questions.length > 0, preservedMedia: mediaItems.filter(item => !optionMediaKeys.has(`${item.scopeType}|${item.questionCode || ''}|${item.optionCode || ''}|${item.mediaType || ''}|${item.url || ''}`)), serverUpdatedAt: row.UpdatedAt || null };
+            state.maxStep = WIZARD_STEPS.length - 1;
+            state.saveState = 'saved'; state.saveMessage = 'โหลดฉบับร่างล่าสุดแล้ว';
+            const recovery = readRecovery(), serverTime = new Date(row.UpdatedAt || 0).getTime();
+            state.recovery = recovery && Number(recovery.savedAt) > serverTime ? recovery : null;
+            if (recovery && !state.recovery) clearRecovery();
+            render();
+        } catch (error) {
+            container.innerHTML = `<div class="svw-shell"><section class="sv-state-panel sv-state-panel--error" role="alert"><h1>เปิดแคมเปญฉบับร่างไม่ได้</h1><p>${escHtml(error?.message || 'กรุณาลองใหม่')}</p><button type="button" class="sv-button sv-button--secondary" data-svw-load-close>กลับรายการแคมเปญ</button></section></div>`;
+            container.querySelector('[data-svw-load-close]')?.addEventListener('click', onClose);
+        }
+    };
 
     const setSaveState = (kind, message) => {
         state.saveState = kind; state.saveMessage = message;
@@ -160,16 +258,22 @@ export function renderSafetyVoteCampaignWizard(container, { onClose = () => {}, 
                 ? await API.put(`/safety-vote/admin/campaigns/${state.persisted.campaignId}`, { ...payload, rowVersion: state.persisted.rowVersion })
                 : await API.post('/safety-vote/admin/campaigns', payload);
             const row = response.data?.campaign || response.data;
+            const previousRecoveryKey = recoveryKey;
             state.persisted.campaignId = Number(row.id);
+            recoveryKey = `safetyVoteAdminDraft:v1:${state.persisted.campaignId}`;
+            if (previousRecoveryKey !== recoveryKey) { try { sessionStorage.removeItem(previousRecoveryKey); } catch (_) {} }
             state.persisted.versionId = Number(row.CurrentVersionID || row.currentVersionId || state.persisted.versionId || 0);
             state.persisted.rowVersion = Number(row.RowVersion || row.rowVersion || 1);
+            state.persisted.serverUpdatedAt = row.UpdatedAt || row.updatedAt || new Date().toISOString();
             state.draft.campaignCode = row.CampaignCode || row.campaignCode || state.draft.campaignCode;
             const codeField = container.querySelector('#svw-campaignCode');
             if (codeField && state.draft.campaignCode) codeField.value = state.draft.campaignCode;
             state.dirty = false;
+            clearRecovery();
             setSaveState('saved', `บันทึกแล้ว ${new Intl.DateTimeFormat('th-TH',{hour:'2-digit',minute:'2-digit'}).format(new Date())}`);
             return true;
         } catch (error) {
+            writeRecovery();
             setSaveState('error', 'บันทึกไม่สำเร็จ — ลองอีกครั้ง');
             throw error;
         }
@@ -184,9 +288,9 @@ export function renderSafetyVoteCampaignWizard(container, { onClose = () => {}, 
         return questions.map((question,questionIndex) => ({ ...question, options: (question.options || []).map((option,optionIndex) => ({ ...option, ...(previews.get(`${question.questionCode||`Q${questionIndex+1}`}|${option.optionCode||`O${optionIndex+1}`}`) || {}) })) }));
     };
 
-    const mediaPayload = () => state.draft.questions.flatMap((question,questionIndex)=>(question.options||[]).map((option,optionIndex)=>({
+    const mediaPayload = () => [...(state.persisted.preservedMedia || []), ...state.draft.questions.flatMap((question,questionIndex)=>(question.options||[]).map((option,optionIndex)=>({
         mediaType:option.mediaType, scopeType:'option', questionCode:question.questionCode||`Q${questionIndex+1}`, optionCode:option.optionCode||`O${optionIndex+1}`, url:option.mediaUrl, title:option.mediaTitle
-    })).filter(item=>item.mediaType&&item.url));
+    })).filter(item=>item.mediaType&&item.url))];
 
     const saveBuilder = async () => {
         if (!contentValid(state.draft) || !await persistCampaign()) return false;
@@ -196,8 +300,8 @@ export function renderSafetyVoteCampaignWizard(container, { onClose = () => {}, 
             await API.put(`/safety-vote/admin/campaigns/${state.persisted.campaignId}/versions/${state.persisted.versionId}/media`, { items: mediaPayload() });
             state.persisted.builderSaved = true;
             if (response.data?.questions?.length) state.draft.questions = preserveOptionPreviews(response.data.questions);
-            state.dirty = false; setSaveState('saved', 'บันทึกเนื้อหาแล้ว'); return true;
-        } catch (error) { state.persisted.builderSaved = false; setSaveState('error', 'บันทึกเนื้อหาไม่สำเร็จ — ลองอีกครั้ง'); throw error; }
+            state.dirty = false; clearRecovery(); setSaveState('saved', 'บันทึกเนื้อหาแล้ว'); return true;
+        } catch (error) { state.persisted.builderSaved = false; writeRecovery(); setSaveState('error', 'บันทึกเนื้อหาไม่สำเร็จ — ลองอีกครั้ง'); throw error; }
     };
 
     const saveRules = async () => {
@@ -219,6 +323,7 @@ export function renderSafetyVoteCampaignWizard(container, { onClose = () => {}, 
 
     const enqueueSave = () => {
         clearTimeout(state.timer); state.dirty = true; setSaveState('dirty', 'ยังไม่ได้บันทึก');
+        writeRecovery();
         if (![1,2,3,5,6].includes(state.step)) return;
         state.timer = setTimeout(() => { state.saveChain = state.saveChain.then(() => persistForStep(state.step)).catch(()=>{}); }, 800);
     };
@@ -284,7 +389,10 @@ export function renderSafetyVoteCampaignWizard(container, { onClose = () => {}, 
 
     const render = () => {
         const [stepKey, stepTitle] = WIZARD_STEPS[state.step];
-        container.innerHTML = `<div class="svw-shell" data-sv-wizard="2026-10-08-safety-vote-ux2-r1"><header class="svw-header"><button type="button" class="sv-icon-button" data-svw-action="close" aria-label="กลับศูนย์จัดการ">←</button><div><p class="sv-eyebrow">สร้างแคมเปญ</p><h1>${escHtml(stepTitle)}</h1></div><div class="svw-progress-copy">ขั้น ${state.step + 1} จาก ${WIZARD_STEPS.length}</div></header><div class="svw-progress" role="progressbar" aria-label="ความคืบหน้าการสร้างแคมเปญ" aria-valuemin="1" aria-valuemax="8" aria-valuenow="${state.step + 1}"><span style="width:${(state.step + 1) / WIZARD_STEPS.length * 100}%"></span></div><div class="svw-layout"><nav class="svw-step-nav" aria-label="ขั้นตอนสร้างแคมเปญ">${WIZARD_STEPS.map(([key,label],index)=>`<button type="button" data-svw-step="${index}" ${index===state.step?'aria-current="step"':''} ${index>state.maxStep?'disabled':''}><span>${index+1}</span><span>${escHtml(label)}</span></button>`).join('')}</nav><main class="svw-main" data-step="${stepKey}">${state.errors.length?`<section class="svw-validation" role="alert" tabindex="-1"><h2>กรุณาตรวจสอบข้อมูล</h2><ul>${state.errors.map(error=>`<li>${escHtml(error)}</li>`).join('')}</ul></section>`:''}<section class="svw-card">${stepMarkup(state.step,state.draft,state.persisted,state.previewMode)}</section></main></div><div class="svw-save-status" data-svw-save-status data-state="${state.saveState}" aria-live="polite">${escHtml(state.saveMessage)}</div><footer class="svw-action-bar"><button type="button" class="sv-button sv-button--secondary" data-svw-action="back" ${state.step===0?'disabled':''}>ย้อนกลับ</button><div>${state.saveState==='error'?'<button type="button" class="sv-button sv-button--secondary" data-svw-action="retry">ลองบันทึกอีกครั้ง</button>':''}${state.step===7?reviewAction():`<button type="button" class="sv-button sv-button--primary" data-svw-action="next">ถัดไป</button>`}</div></footer></div>`;
+        const editing = Boolean(state.persisted.campaignId);
+        const readiness = readinessItems(state.draft, state.persisted), readyCount = readiness.filter(item => item.pass).length;
+        const recovery = state.recovery ? `<section class="svw-recovery" role="status"><div><strong>พบข้อมูลล่าสุดที่ยังไม่ได้บันทึก</strong><span>บันทึกชั่วคราวในเบราว์เซอร์เมื่อ ${new Intl.DateTimeFormat('th-TH',{dateStyle:'short',timeStyle:'short'}).format(new Date(state.recovery.savedAt))}</span></div><div><button type="button" class="sv-button sv-button--primary" data-svw-recovery="restore">กู้คืนข้อมูล</button><button type="button" class="sv-button sv-button--secondary" data-svw-recovery="discard">ไม่ใช้ข้อมูลที่กู้คืน</button></div></section>` : '';
+        container.innerHTML = `<div class="svw-shell" data-sv-wizard="2026-10-11-admin-guided-drafts-r1"><header class="svw-header"><button type="button" class="sv-icon-button" data-svw-action="close" aria-label="กลับศูนย์จัดการ">←</button><div><p class="sv-eyebrow">${editing ? 'แก้ไขแคมเปญฉบับร่าง' : 'สร้างแคมเปญ'}${sourceLabel ? ` · ${escHtml(sourceLabel)}` : ''}</p><h1>${escHtml(stepTitle)}</h1>${state.persisted.serverUpdatedAt ? `<small>แก้ไขล่าสุด ${new Intl.DateTimeFormat('th-TH',{dateStyle:'short',timeStyle:'short'}).format(new Date(state.persisted.serverUpdatedAt))}</small>` : ''}</div><div class="svw-progress-copy">ขั้น ${state.step + 1} จาก ${WIZARD_STEPS.length}</div></header><div class="svw-progress" role="progressbar" aria-label="ความคืบหน้าการสร้างแคมเปญ" aria-valuemin="1" aria-valuemax="8" aria-valuenow="${state.step + 1}"><span style="width:${(state.step + 1) / WIZARD_STEPS.length * 100}%"></span></div>${recovery}<section class="svw-readiness-summary" aria-label="ความพร้อมเบื้องต้น"><div><strong>ความพร้อม ${readyCount}/${readiness.length}</strong><span>${readyCount === readiness.length ? 'พร้อมตรวจสอบขั้นสุดท้าย' : 'ระบบจะอัปเดตตามข้อมูลที่กรอก'}</span></div><div class="sv-readiness-meter" role="progressbar" aria-label="ความพร้อมของแคมเปญ" aria-valuemin="0" aria-valuemax="${readiness.length}" aria-valuenow="${readyCount}"><span style="width:${readiness.length ? readyCount/readiness.length*100 : 0}%"></span></div></section><div class="svw-layout"><nav class="svw-step-nav" aria-label="ขั้นตอนสร้างแคมเปญ">${WIZARD_STEPS.map(([key,label],index)=>`<button type="button" data-svw-step="${index}" ${index===state.step?'aria-current="step"':''} ${index>state.maxStep?'disabled':''}><span>${index+1}</span><span>${escHtml(label)}</span></button>`).join('')}</nav><main class="svw-main" data-step="${stepKey}">${state.errors.length?`<section class="svw-validation" role="alert" tabindex="-1"><h2>กรุณาตรวจสอบข้อมูล</h2><ul>${state.errors.map(error=>`<li>${escHtml(error)}</li>`).join('')}</ul></section>`:''}<section class="svw-card">${stepMarkup(state.step,state.draft,state.persisted,state.previewMode)}</section></main></div><div class="svw-save-status" data-svw-save-status data-state="${state.saveState}" aria-live="polite">${escHtml(state.saveMessage)}</div><footer class="svw-action-bar"><button type="button" class="sv-button sv-button--secondary" data-svw-action="back" ${state.step===0?'disabled':''}>ย้อนกลับ</button><div>${state.saveState==='error'?'<button type="button" class="sv-button sv-button--secondary" data-svw-action="retry">ลองบันทึกอีกครั้ง</button>':''}${state.step===7?reviewAction():`<button type="button" class="sv-button sv-button--primary" data-svw-action="next">ถัดไป</button>`}</div></footer></div>`;
         container.querySelector('.svw-header')?.insertAdjacentHTML('beforebegin', safetyVoteJourneyNav({ role: 'admin', current: 'readiness', campaign: state.draft, onPage: typeof onNavigate !== 'function' }));
         bind();
         if (state.step === 3) hydrateOptionImages();
@@ -310,22 +418,25 @@ export function renderSafetyVoteCampaignWizard(container, { onClose = () => {}, 
 
     const freezeEligibility = () => openSafetyVoteConfirmDialog({title:'ยืนยันการตรึงรายชื่อผู้มีสิทธิ์',description:`ระบบจะบันทึกรายชื่อผู้มีสิทธิ์ ${Number(state.draft.eligibilityPreview?.eligibleCount||0).toLocaleString('th-TH')} คนเป็น snapshot สำหรับแคมเปญนี้ การเปลี่ยนกฎภายหลังต้องตรวจสอบและตรึงใหม่`,confirmLabel:'ยืนยันและตรึงรายชื่อ',onConfirm:async()=>{const response=await API.post(`/safety-vote/admin/campaigns/${state.persisted.campaignId}/eligibility/freeze`,{reason:'Safety Vote UX Phase 2 readiness wizard'});state.draft.eligibilityFrozen=true;state.draft.eligibilityPreview={...state.draft.eligibilityPreview,...response.data};setSaveState('saved','ตรึงรายชื่อผู้มีสิทธิ์แล้ว');render();}});
 
-    const openCampaign = () => openSafetyVoteConfirmDialog({title:'ยืนยันการเปิดแคมเปญ',description:'เมื่อเปิดแล้ว เนื้อหาและรายชื่อผู้มีสิทธิ์ชุดนี้จะถูกใช้รับคำตอบ การแก้ไขฉบับร่างจะถูกจำกัดตามกติกาเดิมของระบบ',confirmLabel:'เปิดแคมเปญ',onConfirm:async()=>{const response=await API.post(`/safety-vote/admin/campaigns/${state.persisted.campaignId}/lifecycle/open`,{});showToast('เปิดแคมเปญแล้ว','success');await onComplete({campaignId:state.persisted.campaignId,status:response.data?.status||'Open'});}});
+    const openCampaign = () => openSafetyVoteConfirmDialog({title:'ยืนยันการเปิดแคมเปญ',description:'เมื่อเปิดแล้ว เนื้อหาและรายชื่อผู้มีสิทธิ์ชุดนี้จะถูกใช้รับคำตอบ การแก้ไขฉบับร่างจะถูกจำกัดตามกติกาเดิมของระบบ',confirmLabel:'เปิดแคมเปญ',onConfirm:async()=>{const response=await API.post(`/safety-vote/admin/campaigns/${state.persisted.campaignId}/lifecycle/open`,{});showToast('เปิดแคมเปญแล้ว','success');cleanup();await onComplete({campaignId:state.persisted.campaignId,status:response.data?.status||'Open'});}});
 
-    const cleanup = () => { clearTimeout(state.timer); state.objectUrls.forEach(url=>URL.revokeObjectURL(url)); state.objectUrls.clear(); };
+    const beforeUnload = event => { if (!state.dirty && state.saveState !== 'saving') return; event.preventDefault(); event.returnValue = ''; };
+    const cleanup = () => { clearTimeout(state.timer); window.removeEventListener('beforeunload', beforeUnload); state.objectUrls.forEach(url=>URL.revokeObjectURL(url)); state.objectUrls.clear(); };
     const finishClose = () => { cleanup(); onClose(); };
     const requestClose = () => { if(!state.dirty&&state.saveState!=='saving')return finishClose();openSafetyVoteConfirmDialog({title:'ออกจากการสร้างแคมเปญ',description:'ข้อมูลที่บันทึกแล้วจะยังอยู่ แต่ข้อมูลล่าสุดที่ยังไม่ได้บันทึกอาจสูญหาย',confirmLabel:'ออกจากหน้านี้',tone:'danger',onConfirm:finishClose}); };
+    const requestNavigate = step => { const proceed = () => { cleanup(); onNavigate?.(step); }; if(!state.dirty&&state.saveState!=='saving')return proceed();openSafetyVoteConfirmDialog({title:'ออกจากแคมเปญฉบับร่าง',description:'ระบบเก็บข้อมูลล่าสุดไว้สำหรับกู้คืน แต่การเปลี่ยนพื้นที่ตอนนี้อาจทำให้ข้อมูลที่ยังไม่ส่งถึงเซิร์ฟเวอร์ไม่ถูกบันทึก',confirmLabel:'เปลี่ยนพื้นที่',tone:'danger',onConfirm:proceed}); };
 
     const bind = () => {
-        container.querySelectorAll('[data-sv-journey-step]').forEach(button => button.addEventListener('click', () => onNavigate?.(button.dataset.svJourneyStep)));
+        container.querySelectorAll('[data-sv-journey-step]').forEach(button => button.addEventListener('click', () => requestNavigate(button.dataset.svJourneyStep)));
+        container.querySelectorAll('[data-svw-recovery]').forEach(button => button.addEventListener('click', () => { if (button.dataset.svwRecovery === 'restore') { state.draft = clone(state.recovery.draft); state.step = Math.max(0, Math.min(7, Number(state.recovery.step || 0))); state.maxStep = Math.max(state.step, Math.min(7, Number(state.recovery.maxStep || 0))); state.dirty = true; state.recovery = null; setSaveState('dirty', 'กู้คืนข้อมูลแล้ว — ยังไม่ได้บันทึก'); writeRecovery(); } else clearRecovery(); render(); }));
         container.querySelectorAll('[data-svw-field],[data-svw-question-field],[data-svw-option-field],[data-svw-question-config],[data-svw-validation-field],[data-svw-condition-field],[data-svw-rule-field]').forEach(input=>input.addEventListener('input',()=>{readFields();if(input.dataset.svwRuleField){state.draft.eligibilityPreview=null;state.draft.eligibilityFrozen=false;}if(input.dataset.svwOptionField||input.dataset.svwQuestionConfig||input.dataset.svwValidationField||input.dataset.svwConditionField)state.persisted.builderSaved=false;enqueueSave();}));
         container.querySelectorAll('[data-svw-option-field]').forEach(input=>input.addEventListener('change',()=>{readFields();render();}));
         container.querySelectorAll('[data-svw-question-config],[data-svw-validation-field]').forEach(input=>input.addEventListener('change',()=>{readFields();const question=state.draft.questions[Number(input.dataset.questionIndex)];if(question&&input.dataset.svwQuestionConfig==='isRequired')question.minSelections=question.isRequired===false?0:Math.max(1,Number(question.minSelections||1));state.persisted.builderSaved=false;render();}));
         container.querySelectorAll('[data-svw-condition-field]').forEach(input=>input.addEventListener('change',()=>{readFields();state.persisted.builderSaved=false;render();}));
         container.querySelectorAll('[data-svw-question-field="questionType"]').forEach(input=>input.addEventListener('change',async()=>{const question=state.draft.questions[Number(input.dataset.index)],previousType=question?.questionType;readFields();if(question){if(hasOptions(previousType)&&!hasOptions(question.questionType)){try{for(const option of question.options||[])await deleteOptionFile(option);}catch(error){question.questionType=previousType;showToast(error?.message||'เปลี่ยนรูปแบบคำถามไม่สำเร็จ','error');return render();}}question.options=hasOptions(question.questionType)?(question.options?.length?question.options:defaultOptionsForType(question.questionType)):[];question.validation=defaultValidationForType(question.questionType);question.minSelections=question.isRequired===false?0:1;question.maxSelections=['multiple_choice','ranking'].includes(question.questionType)?Math.min(2,question.options.length):1;}state.persisted.builderSaved=false;enqueueSave();render();}));
         container.querySelectorAll('[data-svw-rule-field="attributeKey"]').forEach(input=>input.addEventListener('change',()=>{readFields();state.draft.eligibilityPreview=null;state.draft.eligibilityFrozen=false;render();}));
-        container.querySelectorAll('input[type="radio"][data-svw-field]').forEach(input=>input.addEventListener('change',()=>{readFields();render();}));
-        container.querySelectorAll('[data-svw-template]').forEach(button=>button.addEventListener('click',()=>{state.draft=applyTemplate(state.draft,button.dataset.svwTemplate);state.persisted.builderSaved=false;state.dirty=true;setSaveState('dirty','ยังไม่ได้บันทึก');render();}));
+        container.querySelectorAll('input[type="radio"][data-svw-field]').forEach(input=>input.addEventListener('change',()=>{readFields();enqueueSave();render();}));
+        container.querySelectorAll('[data-svw-template]').forEach(button=>button.addEventListener('click',()=>{state.draft=applyTemplate(state.draft,button.dataset.svwTemplate);state.persisted.builderSaved=false;enqueueSave();render();}));
         container.querySelectorAll('[data-svw-step]').forEach(button=>button.addEventListener('click',()=>{readFields();state.step=Number(button.dataset.svwStep);state.errors=[];render();}));
         container.querySelectorAll('[data-svw-preview]').forEach(button=>button.addEventListener('click',()=>{state.previewMode=button.dataset.svwPreview;render();}));
         container.querySelectorAll('[data-svw-add-option]').forEach(button=>button.addEventListener('click',()=>{readFields();const question=state.draft.questions[Number(button.dataset.svwAddOption)];if(!question)return;if((question.options||[]).length>=100)return showToast('หนึ่งคำถามมีตัวเลือกได้สูงสุด 100 รายการ','error');question.options=[...(question.options||[]),{label:'',description:'',fileId:null}];state.persisted.builderSaved=false;enqueueSave();render();}));
@@ -336,10 +447,17 @@ export function renderSafetyVoteCampaignWizard(container, { onClose = () => {}, 
         container.querySelectorAll('[data-svw-remove-option-image]').forEach(button=>button.addEventListener('click',async()=>{readFields();const option=state.draft.questions[Number(button.dataset.questionIndex)]?.options?.[Number(button.dataset.optionIndex)];if(!option)return;try{await deleteOptionFile(option);state.persisted.builderSaved=false;enqueueSave();render();}catch(error){showToast(error?.message||'ลบรูปภาพไม่สำเร็จ','error');}}));
         container.querySelectorAll('[data-svw-remove-option]').forEach(button=>button.addEventListener('click',async()=>{readFields();const question=state.draft.questions[Number(button.dataset.questionIndex)],index=Number(button.dataset.optionIndex),option=question?.options?.[index];if(!question||!option||question.options.length<=2)return;try{await deleteOptionFile(option);question.options.splice(index,1);state.persisted.builderSaved=false;enqueueSave();render();}catch(error){showToast(error?.message||'ลบตัวเลือกไม่สำเร็จ','error');}}));
         container.querySelectorAll('[data-svw-remove-question]').forEach(button=>button.addEventListener('click',async()=>{readFields();const index=Number(button.dataset.svwRemoveQuestion),question=state.draft.questions[index];if(!question||state.draft.questions.length<=1)return;try{for(const option of question.options||[])await deleteOptionFile(option);state.draft.questions.splice(index,1);state.persisted.builderSaved=false;enqueueSave();render();}catch(error){showToast(error?.message||'ลบคำถามไม่สำเร็จ','error');}}));
-        container.querySelectorAll('[data-svw-remove-rule]').forEach(button=>button.addEventListener('click',()=>{state.draft.rules.splice(Number(button.dataset.svwRemoveRule),1);state.draft.eligibilityPreview=null;state.draft.eligibilityFrozen=false;render();}));
-        container.querySelectorAll('[data-svw-action]').forEach(button=>button.addEventListener('click',()=>{const action=button.dataset.svwAction;if(action==='next')next();else if(action==='back'){readFields();state.step=Math.max(0,state.step-1);state.errors=[];render();}else if(action==='close')requestClose();else if(action==='retry')persistForStep(state.step).catch(()=>{});else if(action==='add-question'){const question=defaultQuestion(state.draft.campaignType,state.draft.questions.length);question.questionCode=nextQuestionCode();state.draft.questions.push(question);state.persisted.builderSaved=false;render();}else if(action==='add-rule'){state.draft.rules.push({effect:'include',attributeKey:'department_id',operator:'IN',values:[],reason:'กำหนดจาก wizard'});state.draft.eligibilityPreview=null;state.draft.eligibilityFrozen=false;render();}else if(action==='preview-eligibility')previewEligibility();else if(action==='freeze-eligibility')freezeEligibility();else if(action==='open')openCampaign();else if(action==='advanced')onOpenAdvanced(state.persisted.campaignId);}));
+        container.querySelectorAll('[data-svw-remove-rule]').forEach(button=>button.addEventListener('click',()=>{state.draft.rules.splice(Number(button.dataset.svwRemoveRule),1);state.draft.eligibilityPreview=null;state.draft.eligibilityFrozen=false;enqueueSave();render();}));
+        container.querySelectorAll('[data-svw-action]').forEach(button=>button.addEventListener('click',()=>{const action=button.dataset.svwAction;if(action==='next')next();else if(action==='back'){readFields();state.step=Math.max(0,state.step-1);state.errors=[];render();}else if(action==='close')requestClose();else if(action==='retry')persistForStep(state.step).catch(()=>{});else if(action==='add-question'){const question=defaultQuestion(state.draft.campaignType,state.draft.questions.length);question.questionCode=nextQuestionCode();state.draft.questions.push(question);state.persisted.builderSaved=false;enqueueSave();render();}else if(action==='add-rule'){state.draft.rules.push({effect:'include',attributeKey:'department_id',operator:'IN',values:[],reason:'กำหนดจาก wizard'});state.draft.eligibilityPreview=null;state.draft.eligibilityFrozen=false;enqueueSave();render();}else if(action==='preview-eligibility')previewEligibility();else if(action==='freeze-eligibility')freezeEligibility();else if(action==='open')openCampaign();else if(action==='advanced'){cleanup();onOpenAdvanced(state.persisted.campaignId);}}));
     };
 
-    render();
+    window.addEventListener('beforeunload', beforeUnload);
+    if (campaignId) hydrateDraft(campaignId); else {
+        if (initialConfig) state.draft = configDraft(initialConfig);
+        else if (initialTemplateKey) state.draft = applyTemplate(createWizardDraft(), initialTemplateKey);
+        state.recovery = readRecovery();
+        if (sourceLabel) state.saveMessage = `เริ่มจาก ${sourceLabel} — ยังไม่ได้บันทึก`;
+        render();
+    }
     return { getState:()=>structuredClone({step:state.step,maxStep:state.maxStep,draft:state.draft,persisted:state.persisted,saveState:state.saveState}), destroy:cleanup };
 }

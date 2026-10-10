@@ -1,0 +1,52 @@
+{
+  "contract": "2026-10-10-safety-vote-admin-phase123-release-prep-r1",
+  "generatedAt": "2026-10-10T22:42:32+07:00",
+  "status": "READY_FOR_AUTHORIZED_IMMUTABLE_COMMIT",
+  "source": {
+    "branch": "main",
+    "baseCommit": "20b09f9b1a3369d3d989614e0ed7b93fc096db42",
+    "candidateCommit": null,
+    "candidateCommitState": "PENDING_EXPLICIT_USER_AUTHORIZATION"
+  },
+  "productionRuntimeAllowlist": [
+    { "path": "api/handlers/safety_vote_planning.php", "bytes": 20901, "sha256": "b625c6199f57db2adf7bd8edcc366ac574c4f163b20e8a9967fcab44389a76e9", "rollback": "restore_head_baseline" },
+    { "path": "api/lib/safety_vote_planning.php", "bytes": 8941, "sha256": "a0afa8bf6cf9932669ebff015c13273ad40c792a4332aa39200bbcd321f5a8ee", "rollback": "restore_head_baseline" },
+    { "path": "backend/routes/safety-vote-planning.js", "bytes": 25201, "sha256": "bbb0f755169cc66f82fe4423ce8dc4bd12cf65d8b6f2b97c68448158ae25375e", "rollback": "restore_head_baseline" },
+    { "path": "backend/services/safety-vote-planning.js", "bytes": 9782, "sha256": "6e679c63ce7ba4604d0fe1209b4a1eba4413e250eb585117684a10856e134c6e", "rollback": "restore_head_baseline" },
+    { "path": "index.html", "bytes": 100662, "sha256": "9153084480f5397afde91e47a04ca3e3bbdc0916a648a2d1dfc8af24febc727e", "rollback": "restore_head_baseline" },
+    { "path": "public/js/pages/admin-safety-vote-ux1.js", "bytes": 78235, "sha256": "1f9c0ecc23c9f3f5fa52ed4a28c019e703bfc30da7e48f7c9337f3ca87947470", "rollback": "restore_head_baseline" },
+    { "path": "public/js/pages/admin.js", "bytes": 703453, "sha256": "9c5f83852f311853bcc3d76e6b477e58b0080d5343f0aad6d2788dc8032abe3a", "rollback": "restore_head_baseline" },
+    { "path": "public/js/pages/safety-vote-campaign-wizard.js", "bytes": 73840, "sha256": "e265ca33e97cbe08dcc6fb6a1e6a569c823135ffbb71026e334ad91167402b34", "rollback": "restore_head_baseline" },
+    { "path": "public/style.css", "bytes": 198985, "sha256": "bffd145e436c1b3be2a4af71f4eca188d270227d790ed75f5a26d13ad2b94425", "rollback": "restore_head_baseline" },
+    { "path": "public/js/pages/admin-safety-vote-review.js", "bytes": 13432, "sha256": "3d223f6b20740d62b2cf7963a543ac9f997d7e4a3936b48e5dcadddbd20c9d53", "rollback": "remove_only_if_production_preflight_proves_absent" }
+  ],
+  "schema": {
+    "migrations": [],
+    "rollbackSql": [],
+    "statement": "Phase 1-3 reuses existing schema and AuditLogs; no DDL or schema migration is authorized."
+  },
+  "packages": {
+    "candidate": {
+      "path": "backups/local/safety-vote-admin-phase123-release-prep-20261010-224232/candidate-worktree.zip",
+      "bytes": 245663,
+      "sha256": "30685ce2784c344298f316b910008cfdbf7cbcd7dfe151c599a6a6cfc16da642"
+    },
+    "rollback": {
+      "path": "backups/local/safety-vote-admin-phase123-release-prep-20261010-224232/rollback-head-20b09f9.zip",
+      "bytes": 225980,
+      "sha256": "7a4fec5fa82669dd8ca81d751b3598af759fca6b032b24db36a9cfa89b63850f",
+      "restoreFiles": 9,
+      "conditionalRemoveFiles": ["public/js/pages/admin-safety-vote-review.js"]
+    }
+  },
+  "releaseGuards": {
+    "productionConnectionPerformed": false,
+    "deploymentPerformed": false,
+    "commitPerformed": false,
+    "pushPerformed": false,
+    "externalNotificationDispatch": false,
+    "requiresProductionReadOnlyDriftCheck": true,
+    "requiresAuthenticatedProductionGetOnlySmoke": true,
+    "requiresExplicitDeployAuthorization": true
+  }
+}
