@@ -142,7 +142,8 @@ function prepareCandidateAndRollback(commit, tree) {
     const knowledge = JSON.parse(fs.readFileSync(under(candidateRoot, 'shared/johnny-system-usage-knowledge.json'), 'utf8'));
     assert(index.includes('fullwidth-r1-compact-r1'), 'Compact layout cache marker missing');
     assert(adminSafetyVote.includes("./admin-safety-vote-review.js?v=20261010-safety-vote-admin-review-r1"), 'Admin review runtime dependency missing');
-    assert(drawer.includes('johnny-launcher-position'), 'Johnny draggable launcher contract missing');
+    assert(drawer.includes("tsh_johnny_launcher_position_${_userId || 'user'}"), 'Johnny draggable launcher persistence contract missing');
+    assert(drawer.includes("addEventListener('pointerdown', handleLauncherPointerDown)"), 'Johnny draggable launcher pointer contract missing');
     assert(String(knowledge.version || '').includes('safety-vote'), 'Safety Vote Johnny knowledge version missing');
 
     rollbackManifest = {
