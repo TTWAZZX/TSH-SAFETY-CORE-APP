@@ -83,7 +83,11 @@
     "uat:machine-safety-responsive": "npm --prefix backend run uat:machine-safety-responsive",
     "smoke:ky-email": "npm --prefix backend run smoke:ky-email",
     "smoke:remote": "npm --prefix backend run smoke:remote",
-    "uat:preflight": "npm --prefix backend run uat:preflight"
+    "uat:preflight": "npm --prefix backend run uat:preflight",
+    "test:safety-vote-ux-phase9a": "npm --prefix backend run test:safety-vote-ux-phase9a",
+    "verify:safety-vote-ux-phase9a": "npm --prefix backend run verify:safety-vote-ux-phase9a",
+    "uat:safety-vote-ux-phase9a-api": "npm --prefix backend run uat:safety-vote-ux-phase9a-api",
+    "uat:safety-vote-ux-phase9a-browser": "npm --prefix backend run uat:safety-vote-ux-phase9a-browser"
   },
   "dependencies": {
     "bcrypt": "^6.0.0",
@@ -98,5 +102,8 @@
     "mysql2": "^3.14.5",
     "uuid": "^8.3.2",
     "xlsx": "^0.18.5"
+  },
+  "devDependencies": {
+    "playwright": "^1.64.0"
   }
 }

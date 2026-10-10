@@ -419,6 +419,93 @@ body {
 }
 @media (prefers-reduced-motion: reduce) { .svw-progress > span { transition: none; } }
 
+/* Safety Vote UX/UI Phase 9A — engagement, promotion and admin productivity */
+.sv-engagement, .sv-engagement-state { margin: 1rem 0; border: 1px solid #bbf7d0; border-radius: 1rem; background: #fff; padding: 1rem; }
+.sv-engagement-state { display: grid; gap: .25rem; border-color: #fde68a; background: #fffbeb; color: #92400e; }
+.sv-engagement__heading, .svp-notification-center__heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 1rem; }
+.sv-engagement__heading h2, .sv-engagement__heading p, .svp-notification-center__heading h2 { margin: 0; }
+.sv-engagement__heading > div > p:last-child { color: #64748b; }
+.sv-engagement-summary { display: grid; grid-template-columns: repeat(4,minmax(0,1fr)); gap: .65rem; margin-top: 1rem; }
+.sv-engagement-summary > div { display: grid; gap: .2rem; padding: .8rem; border-radius: .75rem; background: #f0fdf4; }
+.sv-engagement-summary strong { color: #047857; font-size: 1.45rem; }
+.sv-engagement-summary span { color: #64748b; font-size: .78rem; }
+.sv-task-list { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: .65rem; margin-top: .8rem; }
+.sv-task-list button { display: grid; min-width: 0; min-height: 92px; grid-template-columns: auto minmax(0,1fr) auto; gap: .3rem .6rem; align-items: center; border: 1px solid #e2e8f0; border-radius: .75rem; background: #fff; padding: .75rem; color: #0f172a; text-align: left; }
+.sv-task-list button strong, .sv-task-list button small { min-width: 0; overflow-wrap: anywhere; }
+.sv-task-list button small { grid-column: 2 / -1; color: #64748b; }
+.sv-task-tone { border-radius: 999px; padding: .25rem .5rem; font-size: .7rem; font-weight: 900; }
+.sv-task-tone--high { background: #ffe4e6; color: #be123c; }
+.sv-task-tone--medium { background: #fef3c7; color: #92400e; }
+.sv-engagement-empty { margin: .8rem 0 0; border-radius: .75rem; padding: .8rem; background: #f0fdf4; color: #047857; }
+.sv-promotion-panel { margin-top: 1rem; border-top: 1px solid #e2e8f0; padding-top: .5rem; }
+.sv-promotion-panel > summary { min-height: 44px; padding: .7rem 0; cursor: pointer; color: #047857; font-weight: 900; }
+.sv-promotion-layout { display: grid; grid-template-columns: minmax(280px,.9fr) minmax(320px,1.1fr); gap: 1rem; }
+.sv-promotion-form { display: grid; gap: .65rem; padding: 1rem; border-radius: .85rem; background: #f8fafc; }
+.sv-promotion-form h3 { margin: 0; }
+.sv-promotion-form label { display: grid; gap: .3rem; color: #334155; font-size: .78rem; font-weight: 800; }
+.sv-promotion-form input, .sv-promotion-form select, .sv-promotion-form textarea { width: 100%; min-width: 0; min-height: 44px; border: 1px solid #cbd5e1; border-radius: .65rem; background: #fff; padding: .65rem .75rem; color: #0f172a; }
+.sv-promotion-form__grid, .sv-promotion-assets { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: .65rem; }
+.sv-promotion-form__actions { display: flex; justify-content: flex-end; gap: .5rem; flex-wrap: wrap; }
+.sv-promotion-list { display: grid; align-content: start; gap: .55rem; }
+.sv-promotion-list article { display: flex; min-width: 0; align-items: center; justify-content: space-between; gap: .75rem; border: 1px solid #e2e8f0; border-radius: .75rem; padding: .75rem; }
+.sv-promotion-list article > div { display: grid; min-width: 0; gap: .25rem; }
+.sv-promotion-list article strong, .sv-promotion-list article small { overflow-wrap: anywhere; }
+.sv-promotion-list article small { color: #64748b; }
+
+.svp-promotion { position: relative; min-height: 250px; margin-top: 1rem; overflow: hidden; border-radius: 1.25rem; background: #064e3b; color: #fff; }
+.svp-promotion > article { position: absolute; inset: 0; }
+.svp-promotion img, .svp-promotion__fallback { width: 100%; height: 100%; min-height: 250px; object-fit: cover; }
+.svp-promotion__fallback { display: grid; place-items: center; background: linear-gradient(125deg,#064e3b,#0f766e 55%,#0891b2); color: rgb(255 255 255 / .2); font-size: clamp(2rem,8vw,7rem); font-weight: 900; }
+.svp-promotion__shade { position: absolute; inset: 0; display: grid; align-content: center; justify-items: start; gap: .45rem; padding: clamp(1.25rem,4vw,3rem); padding-right: min(45%,30rem); background: linear-gradient(90deg,rgb(2 44 34 / .94),rgb(2 44 34 / .58) 65%,transparent); }
+.svp-promotion__shade h2, .svp-promotion__shade p { margin: 0; }
+.svp-promotion__shade h2 { font-size: clamp(1.45rem,3vw,2.5rem); font-weight: 900; }
+.svp-promotion__shade p { color: #d1fae5; }
+.svp-promotion__controls { position: absolute; z-index: 2; right: 1rem; bottom: 1rem; display: flex; align-items: center; gap: .45rem; border-radius: 999px; padding: .25rem .4rem; background: rgb(2 44 34 / .82); }
+.svp-promotion__controls .sv-icon-button { border-color: rgb(255 255 255 / .35); color: #fff; }
+.svp-my-tasks { display: grid; grid-template-columns: minmax(190px,.55fr) minmax(0,1.45fr); gap: 1rem; align-items: center; margin: 1rem 0; border: 1px solid #bae6fd; border-radius: 1rem; background: #f0f9ff; padding: 1rem; }
+.svp-my-tasks h2, .svp-my-tasks p { margin: 0; }
+.svp-my-tasks__grid { display: grid; grid-template-columns: repeat(3,minmax(0,1fr)); gap: .55rem; }
+.svp-my-tasks__grid button, .svp-my-tasks__done { display: grid; min-height: 72px; place-content: center; border: 1px solid #bae6fd; border-radius: .75rem; background: #fff; padding: .65rem; color: #0c4a6e; text-align: center; }
+.svp-my-tasks__grid strong { font-size: 1.3rem; }
+.svp-campaign-card__cover { display: block; height: 128px; margin: -1rem -1rem .25rem; overflow: hidden; border-radius: 1rem 1rem 0 0; background: #d1fae5; }
+.svp-campaign-card__cover img { width: 100%; height: 100%; object-fit: cover; }
+.svp-campaign-card__cover--fallback { display: grid; place-items: center; background: linear-gradient(125deg,#d1fae5,#bae6fd); color: #047857; font-size: 2rem; font-weight: 900; }
+.svp-deadline-chip { border-radius: 999px; background: #fef3c7; padding: .25rem .5rem; color: #92400e; font-size: .7rem; }
+.svp-notification-center { margin-top: 1rem; border: 1px solid #dbe4ee; border-radius: 1rem; background: #fff; padding: 1rem; }
+.svp-notification-center__list { display: grid; gap: .45rem; margin-top: .75rem; }
+.svp-notification-center__list article { border: 1px solid #e2e8f0; border-radius: .75rem; }
+.svp-notification-center__list article.is-unread { border-color: #7dd3fc; background: #f0f9ff; }
+.svp-notification-center__list button { display: grid; width: 100%; gap: .2rem; border: 0; border-radius: inherit; background: transparent; padding: .75rem; color: #0f172a; text-align: left; }
+.svp-notification-center__list span, .svp-notification-center__list small, .svp-notification-center__empty { color: #64748b; }
+.svp-campaign-intro { margin-bottom: .85rem; border: 1px solid #a7f3d0; border-radius: 1rem; background: #f0fdf4; padding: 1rem; }
+.svp-campaign-intro h2, .svp-campaign-intro p { margin: 0; }
+.svp-campaign-intro dl { display: grid; grid-template-columns: repeat(4,minmax(0,1fr)); gap: .55rem; margin: .8rem 0 0; }
+.svp-campaign-intro dl > div { display: grid; gap: .15rem; border-radius: .65rem; background: #fff; padding: .65rem; }
+.svp-campaign-intro dt { color: #64748b; font-size: .72rem; font-weight: 800; }
+.svp-campaign-intro dd { margin: 0; font-weight: 800; overflow-wrap: anywhere; }
+.svp-campaign-intro details { margin-top: .75rem; border-top: 1px solid #bbf7d0; padding-top: .5rem; }
+.svp-campaign-intro summary { min-height: 44px; padding: .6rem 0; cursor: pointer; font-weight: 900; }
+
+@media (max-width: 1023px) {
+    .sv-promotion-layout, .svp-my-tasks { grid-template-columns: 1fr; }
+    .svp-campaign-intro dl { grid-template-columns: repeat(2,minmax(0,1fr)); }
+}
+@media (max-width: 767px) {
+    .sv-engagement__heading, .svp-notification-center__heading { align-items: stretch; flex-direction: column; }
+    .sv-engagement-summary, .sv-task-list { grid-template-columns: repeat(2,minmax(0,1fr)); }
+    .sv-task-list button { grid-template-columns: 1fr auto; }
+    .sv-task-tone { width: fit-content; }
+    .sv-task-list button small { grid-column: 1 / -1; }
+    .sv-promotion-form__grid, .sv-promotion-assets, .svp-my-tasks__grid { grid-template-columns: 1fr; }
+    .sv-promotion-form__actions { display: grid; grid-template-columns: 1fr; }
+    .sv-promotion-list article { align-items: stretch; flex-direction: column; }
+    .svp-promotion, .svp-promotion img, .svp-promotion__fallback { min-height: 310px; }
+    .svp-promotion__shade { align-content: end; padding: 1rem 1rem 4rem; background: linear-gradient(0deg,rgb(2 44 34 / .96),rgb(2 44 34 / .45) 78%,transparent); }
+    .svp-campaign-intro dl { grid-template-columns: 1fr; }
+}
+@media (max-width: 430px) { .sv-engagement-summary { grid-template-columns: 1fr 1fr; } }
+@media (prefers-reduced-motion: reduce) { .svp-campaign-card:hover { transform: none; } }
+
 /* Safety Vote UX/UI Phase 3 — user participation and ballot review */
 .svp-shell {
     width: 100%; min-width: 0; padding: clamp(.75rem, 2vw, 1.75rem); padding-bottom: calc(6.5rem + env(safe-area-inset-bottom));
@@ -3798,3 +3885,4 @@ body.mobile-pwa-standalone #login-overlay {
         height: var(--app-visual-viewport-height);
     }
 }
+

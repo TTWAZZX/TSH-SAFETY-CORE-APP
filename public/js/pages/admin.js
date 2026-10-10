@@ -2,7 +2,7 @@ import { showToast, showError, openModal, openDetailModal, closeModal, escHtml, 
 import { API } from '../api.js?v=20260908-bbs-navigation-loading-r1';
 import { createLatestRenderTarget, guardActionHandler, guardSubmitHandler, sectionSkeleton, withActionLock } from '../utils/async-ui.js?v=20261009-safety-vote-phase96-r1';
 import { beginBbsOperation } from '../utils/bbs-async-ui.js?v=20260908-bbs-navigation-loading-r1';
-import { renderSafetyVoteFoundation } from './admin-safety-vote-ux1.js?v=20261009-safety-vote-phase104-r1';
+import { renderSafetyVoteFoundation } from './admin-safety-vote-ux1.js?v=20261010-safety-vote-ux9a-r1';
 
 // â”€â”€â”€ Button loading helper (disable + spinner, returns original HTML) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 const _SPIN_HTML = `<svg class="w-3.5 h-3.5 animate-spin inline-block" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"/><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"/></svg>`;

@@ -3,13 +3,14 @@ import { escHtml, showToast } from '../ui.js?v=20260602-mobile-nav-m53';
 import { renderSafetyVoteFoundation as renderLegacySafetyVoteFoundation } from './admin-safety-vote.js?v=20261008-safety-vote-phase4-r1';
 import {
     isSafetyVoteUxV1Enabled,
+    isSafetyVoteEngagementV1Enabled,
     openSafetyVoteConfirmDialog,
     safetyVoteActionBar,
     safetyVoteEmptyState,
     safetyVoteJourneyNav,
     safetyVoteRoleNav,
     safetyVoteStatusBadge
-} from './safety-vote-ux-components.js?v=20261009-safety-vote-ux8-r1';
+} from './safety-vote-ux-components.js?v=20261010-safety-vote-ux9a-r1';
 import { campaignMetrics, isNearClose, sectionsForCampaign, statusGroup } from './safety-vote-ux-model.mjs?v=20261008-safety-vote-ux1-r1';
 import { renderSafetyVoteCampaignWizard } from './safety-vote-campaign-wizard.js?v=20261009-safety-vote-phase104-r1';
 import { renderSafetyVoteOperationsWorkspace } from './admin-safety-vote-operations.js?v=20261009-safety-vote-ux8-r1';
@@ -45,8 +46,43 @@ const state = {
     loading: true,
     error: null,
     denied: false,
-    container: null
+    container: null,
+    engagement: null,
+    promotions: [],
+    engagementUnavailable: false,
+    promotionEditorId: null
 };
+
+function localInputDate(value, fallbackHours = 0) {
+    const date = value ? new Date(value) : new Date(Date.now() + fallbackHours * 3600000);
+    if (Number.isNaN(date.getTime())) return '';
+    return new Date(date.getTime() - date.getTimezoneOffset() * 60000).toISOString().slice(0, 16);
+}
+
+function engagementMarkup() {
+    if (!isSafetyVoteEngagementV1Enabled()) return '';
+    if (state.engagementUnavailable) return `<section class="sv-engagement-state" role="status"><strong>เครื่องมือประชาสัมพันธ์ยังปิดอยู่</strong><span>Campaign Center ยังใช้งานได้ตามปกติ และไม่มีการอ่านข้อมูล Engagement เพิ่มเติม</span></section>`;
+    const data = state.engagement || { tasks: [], summary: {} }, tasks = data.tasks || [], summary = data.summary || {};
+    const editing = state.promotions.find(item => Number(item.id) === Number(state.promotionEditorId)) || null;
+    const campaignId = editing?.campaignId || state.selectedId || state.campaigns[0]?.id || '';
+    return `<section class="sv-engagement" aria-labelledby="sv-engagement-title">
+        <div class="sv-engagement__heading"><div><p class="sv-eyebrow">งานที่ต้องดำเนินการ</p><h2 id="sv-engagement-title">Admin Action Center</h2><p>รวมรายการสำคัญโดยไม่แสดงคำตอบ ตัวเลือกลงคะแนน หรือข้อมูลผู้ใช้รายบุคคล</p></div><button type="button" class="sv-button sv-button--primary" data-sv-promotion-new>สร้างป้ายกิจกรรม</button></div>
+        <div class="sv-engagement-summary" aria-label="ภาพรวมงาน"><div><strong>${Number(summary.total || 0)}</strong><span>งานที่ต้องตรวจ</span></div><div><strong>${Number(summary.high || 0)}</strong><span>เร่งด่วน</span></div><div><strong>${Number(summary.livePromotions || 0)}</strong><span>ป้ายกำลังแสดง</span></div><div><strong>${Number(summary.promotionDrafts || 0)}</strong><span>ป้ายฉบับร่าง</span></div></div>
+        ${tasks.length ? `<div class="sv-task-list">${tasks.slice(0, 8).map(task => `<button type="button" data-sv-task-campaign="${Number(task.campaignId)}" data-sv-task-action="${escHtml(task.action)}"><span class="sv-task-tone sv-task-tone--${task.severity === 'high' ? 'high' : 'medium'}">${task.severity === 'high' ? 'เร่งด่วน' : 'ติดตาม'}</span><strong>${escHtml(task.title || task.campaignCode)}</strong><small>${escHtml(task.message)}</small><span>เปิดรายการ →</span></button>`).join('')}</div>` : `<p class="sv-engagement-empty">ยังไม่มีงานเร่งด่วนในขณะนี้</p>`}
+        <details class="sv-promotion-panel" ${state.promotionEditorId === 0 || editing ? 'open' : ''}><summary>ป้ายประชาสัมพันธ์ ${state.promotions.length ? `(${state.promotions.length})` : ''}</summary><div class="sv-promotion-layout">
+            <form class="sv-promotion-form" data-sv-promotion-form><h3>${editing ? 'แก้ไขป้ายกิจกรรม' : 'สร้างป้ายกิจกรรม'}</h3>
+                <label><span>กิจกรรม</span><select name="campaignId" required>${state.campaigns.filter(row => row.Status !== 'Voided').map(row => `<option value="${Number(row.id)}" ${Number(row.id) === Number(campaignId) ? 'selected' : ''}>${escHtml(row.CampaignCode)} · ${escHtml(row.TitleTh || 'ไม่มีชื่อ')}</option>`).join('')}</select></label>
+                <label><span>หัวข้อ</span><input name="titleTh" maxlength="160" required value="${escHtml(editing?.titleTh || '')}"></label>
+                <label><span>คำอธิบายสั้น</span><textarea name="subtitleTh" maxlength="500" rows="3">${escHtml(editing?.subtitleTh || '')}</textarea></label>
+                <div class="sv-promotion-form__grid"><label><span>ข้อความบนปุ่ม</span><input name="ctaLabel" maxlength="40" required value="${escHtml(editing?.ctaLabel || 'ดูรายละเอียด')}"></label><label><span>ลำดับ 0–100</span><input name="priority" type="number" min="0" max="100" value="${Number(editing?.priority || 0)}"></label><label><span>เริ่มแสดง</span><input name="startAt" type="datetime-local" required value="${localInputDate(editing?.startAt)}"></label><label><span>สิ้นสุด</span><input name="endAt" type="datetime-local" required value="${localInputDate(editing?.endAt, 168)}"></label></div>
+                <label><span>คำอธิบายภาพสำหรับ Screen Reader</span><input name="altText" maxlength="240" value="${escHtml(editing?.altText || '')}" placeholder="จำเป็นเมื่อแนบภาพ"></label>
+                <div class="sv-promotion-assets"><label><span>ภาพ Desktop</span><input name="desktop" type="file" accept="image/jpeg,image/png,image/webp"></label><label><span>ภาพ Mobile</span><input name="mobile" type="file" accept="image/jpeg,image/png,image/webp"></label></div>
+                <input type="hidden" name="rowVersion" value="${Number(editing?.rowVersion || 0)}"><div class="sv-promotion-form__actions"><button type="button" class="sv-button sv-button--secondary" data-sv-promotion-cancel>ยกเลิก</button><button type="submit" class="sv-button sv-button--secondary" name="intent" value="Draft">บันทึกฉบับร่าง</button><button type="submit" class="sv-button sv-button--primary" name="intent" value="Published">เผยแพร่</button></div>
+            </form>
+            <div class="sv-promotion-list" aria-label="รายการป้ายประชาสัมพันธ์">${state.promotions.length ? state.promotions.map(item => `<article><div><span class="sv-status-badge sv-status-badge--${item.status === 'Published' ? 'open' : item.status === 'Archived' ? 'archived' : 'draft'}"><span class="sv-status-dot"></span>${item.status === 'Published' ? 'เผยแพร่' : item.status === 'Archived' ? 'เก็บถาวร' : 'ฉบับร่าง'}</span><strong>${escHtml(item.titleTh)}</strong><small>${escHtml(item.campaignCode)} · ${formattedDate(item.startAt)}–${formattedDate(item.endAt)}</small></div><button type="button" class="sv-button sv-button--secondary" data-sv-promotion-edit="${Number(item.id)}">แก้ไข</button></article>`).join('') : '<p>ยังไม่มีป้ายประชาสัมพันธ์</p>'}</div>
+        </div></details>
+    </section>`;
+}
 
 function visibleCampaigns() {
     const query = state.query.trim().toLocaleLowerCase('th');
@@ -114,6 +150,9 @@ function render() {
     if (systemState) { container.innerHTML = systemState; bind(); return; }
     const rows = visibleCampaigns(), kpi = campaignMetrics(state.campaigns), selected = selectedCampaign();
     container.innerHTML = `<div class="sv-ux-shell" data-sv-ux-version="2026-10-08-safety-vote-ux1-r1">${safetyVoteRoleNav({ active: 'admin', showAdmin: true })}<header class="sv-admin-hero"><div><p class="sv-eyebrow">ศูนย์จัดการกิจกรรม</p><h1>จัดการ Safety Vote</h1><p>ติดตามแคมเปญ จัดลำดับงาน และเข้าสู่พื้นที่จัดการตามประเภทกิจกรรม</p></div><button type="button" class="sv-button sv-button--primary" data-sv-action="new-campaign">สร้างแคมเปญ</button></header><section class="sv-kpi-grid" aria-label="ภาพรวมแคมเปญ"><button data-sv-view="draft"><span>ฉบับร่าง</span><strong>${kpi.draft}</strong></button><button data-sv-view="active"><span>กำลังเปิด</span><strong>${kpi.open}</strong></button><button data-sv-view="active"><span>ใกล้ปิดใน 72 ชม.</span><strong>${kpi.nearClose}</strong></button><button data-sv-view="completed"><span>ปิดแล้ว</span><strong>${kpi.closed}</strong></button></section><section class="sv-list-panel" aria-labelledby="sv-campaign-list-title"><div class="sv-list-panel__heading"><div><p class="sv-eyebrow">รายการแคมเปญ</p><h2 id="sv-campaign-list-title">${VIEW_LABELS[state.view]}</h2></div><button class="sv-button sv-button--secondary sv-tablet-drawer-trigger" type="button" data-sv-action="open-drawer" aria-expanded="${state.drawerOpen}">เลือกแคมเปญ</button></div><div class="sv-toolbar"><label class="sv-search"><span class="sr-only">ค้นหาแคมเปญ</span><input type="search" value="${escHtml(state.query)}" placeholder="ค้นหาชื่อ รหัส หรือผู้รับผิดชอบ" data-sv-search></label><div class="sv-view-tabs" role="tablist" aria-label="สถานะแคมเปญ">${Object.entries(VIEW_LABELS).map(([key, label]) => `<button type="button" role="tab" data-sv-view="${key}" aria-selected="${state.view === key}">${escHtml(label)}</button>`).join('')}</div><label class="sv-sort"><span>เรียงตาม</span><select data-sv-sort><option value="updated_desc" ${state.sort === 'updated_desc' ? 'selected' : ''}>อัปเดตล่าสุด</option><option value="title_asc" ${state.sort === 'title_asc' ? 'selected' : ''}>ชื่อ ก–ฮ</option><option value="status_asc" ${state.sort === 'status_asc' ? 'selected' : ''}>สถานะ</option></select></label></div><div class="sv-master-detail"><div class="sv-master-detail__list">${campaignListMarkup(rows)}</div>${detailMarkup(selected)}</div></section><div class="sv-tablet-drawer ${state.drawerOpen ? 'is-open' : ''}" aria-hidden="${!state.drawerOpen}"><button type="button" class="sv-tablet-drawer__backdrop" data-sv-action="close-drawer" tabindex="-1" aria-label="ปิดรายการแคมเปญ"></button><aside role="dialog" aria-modal="true" aria-labelledby="sv-drawer-title"><div class="sv-tablet-drawer__header"><h2 id="sv-drawer-title">เลือกแคมเปญ</h2><button type="button" class="sv-icon-button" data-sv-action="close-drawer" aria-label="ปิด">×</button></div>${campaignListMarkup(rows, 'drawer')}</aside></div><p class="sr-only" aria-live="polite">แสดง ${rows.length} แคมเปญ</p></div>`;
+    container.querySelector('.sv-ux-shell')?.setAttribute('data-sv-engagement-version', '2026-10-10-safety-vote-ux-phase9a-r1');
+    container.querySelector('.sv-kpi-grid')?.insertAdjacentHTML('afterend', engagementMarkup());
+    if (Number(state.promotionEditorId) > 0) container.querySelector('.sv-promotion-form__actions')?.insertAdjacentHTML('afterbegin', '<button type="submit" class="sv-button sv-button--secondary" name="intent" value="Archived">เก็บถาวร</button>');
     container.querySelector('.sv-role-nav')?.insertAdjacentHTML('afterend', safetyVoteJourneyNav({ role: 'admin', current: 'center', campaign: selected || {} }));
     bind();
 }
@@ -127,7 +166,47 @@ function bind() {
     container?.querySelectorAll('[data-sv-action]').forEach(button => button.addEventListener('click', () => handleAction(button.dataset.svAction)));
     container?.querySelectorAll('[data-sv-section]').forEach(button => button.addEventListener('click', () => { container.querySelectorAll('[data-sv-section]').forEach(item => item.removeAttribute('aria-current')); button.setAttribute('aria-current', 'page'); }));
     container?.querySelectorAll('[data-sv-journey-step]').forEach(button => button.addEventListener('click', () => handleJourneyStep(button.dataset.svJourneyStep)));
+    container?.querySelector('[data-sv-promotion-new]')?.addEventListener('click', () => { state.promotionEditorId = 0; render(); requestAnimationFrame(() => container.querySelector('[data-sv-promotion-form] input[name="titleTh"]')?.focus()); });
+    container?.querySelector('[data-sv-promotion-cancel]')?.addEventListener('click', () => { state.promotionEditorId = null; render(); });
+    container?.querySelectorAll('[data-sv-promotion-edit]').forEach(button => button.addEventListener('click', () => { state.promotionEditorId = Number(button.dataset.svPromotionEdit); render(); requestAnimationFrame(() => container.querySelector('[data-sv-promotion-form] input[name="titleTh"]')?.focus()); }));
+    container?.querySelectorAll('[data-sv-task-campaign]').forEach(button => button.addEventListener('click', () => { state.selectedId = Number(button.dataset.svTaskCampaign); const action = button.dataset.svTaskAction; if (action === 'operations') openOperationsWorkspace(); else if (action === 'results') openResultsWorkspace(); else if (action === 'workspace') handleAction('open-workspace'); else render(); }));
+    container?.querySelector('[data-sv-promotion-form]')?.addEventListener('submit', event => { event.preventDefault(); const intent = event.submitter?.value || 'Draft'; if (intent === 'Published') openSafetyVoteConfirmDialog({ title: 'เผยแพร่ป้ายกิจกรรม', description: 'ป้ายจะแสดงเฉพาะผู้มีสิทธิ์ตามช่วงเวลาที่กำหนด และไม่เปลี่ยนสิทธิ์เข้าร่วมหรือเนื้อหาบัตรลงคะแนน', confirmLabel: 'เผยแพร่', onConfirm: () => savePromotion(event.currentTarget, intent) }); else savePromotion(event.currentTarget, intent); });
     container?.addEventListener('keydown', event => { if (event.key === 'Escape' && state.drawerOpen) { state.drawerOpen = false; render(); container.querySelector('[data-sv-action="open-drawer"]')?.focus(); } }, { once: true });
+}
+
+async function savePromotion(form, status) {
+    if (!form.reportValidity()) return;
+    const values = new FormData(form), desktop = values.get('desktop'), mobile = values.get('mobile');
+    const editing = state.promotions.find(item => Number(item.id) === Number(state.promotionEditorId));
+    const altText = String(values.get('altText') || '').trim();
+    if ((desktop?.size || mobile?.size || editing?.desktopFileId || editing?.mobileFileId) && !altText) { showToast('กรุณาระบุคำอธิบายภาพสำหรับผู้ใช้ Screen Reader', 'warning'); form.elements.altText?.focus(); return; }
+    const payload = { campaignId: Number(values.get('campaignId')), titleTh: String(values.get('titleTh') || '').trim(), subtitleTh: String(values.get('subtitleTh') || '').trim(), ctaLabel: String(values.get('ctaLabel') || '').trim(), altText, priority: Number(values.get('priority') || 0), startAt: new Date(String(values.get('startAt'))).toISOString(), endAt: new Date(String(values.get('endAt'))).toISOString(), status, rowVersion: Number(values.get('rowVersion') || 0) || undefined };
+    [...form.elements].forEach(element => { element.disabled = true; });
+    try {
+        let response = editing ? await API.put(`/safety-vote/admin/promotions/${Number(editing.id)}`, payload) : await API.post('/safety-vote/admin/promotions', payload);
+        const id = Number(response.data.id);
+        for (const [slot, file] of [['desktop', desktop], ['mobile', mobile]]) if (file?.size) { const body = new FormData(); body.append('file', file); response = await API.upload(`/safety-vote/admin/promotions/${id}/assets/${slot}`, body); }
+        state.promotionEditorId = null;
+        await loadEngagement();
+        render();
+        showToast(status === 'Published' ? 'เผยแพร่ป้ายกิจกรรมแล้ว' : 'บันทึกป้ายฉบับร่างแล้ว', 'success');
+    } catch (error) {
+        showToast(error?.message || 'บันทึกป้ายกิจกรรมไม่สำเร็จ', 'error');
+        [...form.elements].forEach(element => { element.disabled = false; });
+    }
+}
+
+async function loadEngagement() {
+    if (!isSafetyVoteEngagementV1Enabled()) { state.engagement = null; state.promotions = []; state.engagementUnavailable = false; return; }
+    try {
+        const [center, promotions] = await Promise.all([API.get('/safety-vote/admin/engagement/action-center', { suppressErrorLog: true }), API.get('/safety-vote/admin/promotions', { suppressErrorLog: true })]);
+        state.engagement = center.data || null;
+        state.promotions = promotions.data?.rows || [];
+        state.engagementUnavailable = false;
+    } catch (error) {
+        if (['SAFETY_VOTE_ENGAGEMENT_DISABLED', 'SAFETY_VOTE_ENGAGEMENT_SETUP_REQUIRED'].includes(error?.code)) { state.engagementUnavailable = true; state.engagement = null; state.promotions = []; return; }
+        throw error;
+    }
 }
 
 function handleJourneyStep(step) {
@@ -229,6 +308,7 @@ async function load() {
         const campaigns = await API.get('/safety-vote/admin/campaigns', { suppressErrorLog: true });
         state.campaigns = campaigns.data?.rows || [];
         await enrichOpenCampaigns(state.campaigns);
+        await loadEngagement();
         if (state.selectedId && !state.campaigns.some(row => Number(row.id) === Number(state.selectedId))) state.selectedId = null;
     } catch (error) {
         state.denied = Number(error?.status) === 403 || error?.code === 'PERMISSION_DENIED';

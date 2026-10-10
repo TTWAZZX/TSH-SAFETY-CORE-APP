@@ -17,6 +17,10 @@ export function isSafetyVoteUxV1Enabled() {
     return globalThis.window?.__TSH_FEATURE_FLAGS__?.safetyVoteUxV1 === true;
 }
 
+export function isSafetyVoteEngagementV1Enabled() {
+    return isSafetyVoteUxV1Enabled() && globalThis.window?.__TSH_FEATURE_FLAGS__?.safetyVoteEngagementV1 === true;
+}
+
 export function safetyVoteStatusBadge(status, extraClass = '') {
     const key = String(status || 'Draft');
     const [label, tone] = STATUS_COPY[key] || [key || 'ไม่ทราบสถานะ', 'neutral'];
@@ -24,6 +28,9 @@ export function safetyVoteStatusBadge(status, extraClass = '') {
 }
 
 export function safetyVoteRoleNav({ active = 'user', showAdmin = false, showJury = false, juryCount = 0 } = {}) {
+    const currentUser = globalThis.window?.TSHSession?.getUser?.() || {};
+    const currentRole = currentUser.role ?? currentUser.Role ?? currentUser.roleName ?? currentUser.RoleName ?? '';
+    showAdmin = showAdmin || String(currentRole).trim().toLowerCase() === 'admin';
     const items = [
         { key: 'user', label: 'กิจกรรมของฉัน', href: '#safety-vote', show: true },
         { key: 'jury', label: `งานประเมิน${juryCount ? ` (${juryCount})` : ''}`, href: '#safety-vote', show: showJury },

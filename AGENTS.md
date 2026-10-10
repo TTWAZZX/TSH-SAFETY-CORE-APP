@@ -1,5 +1,12 @@
 # TSH Safety Core Activity - AGENTS.md
 
+## Safety Vote UX/UI Phase 9A Engagement, Promotion and Admin Productivity (Local only, 2026-10-10)
+
+- The independently opt-in `safetyVoteEngagementV1` presentation and server `engagement_enabled` setting now provide an Admin Action Center, eligibility-scoped campaign promotions, private responsive banner assets, richer User campaign discovery, personal action summary, campaign introduction and per-user notification read state. Both new gates remain default OFF; `module_enabled` remains independently fail-closed.
+- Authenticated Node/PHP API lifecycle and Admin/User Browser UAT pass at 390×844, 430×932, 768×1024, 1366×768 and 1920×1080 with no horizontal overflow, sub-44 px visible target, console error, permission bypass or protected business-row mutation. Promotion delivery requires the existing frozen eligibility contract and does not expose votes, choices, jury scores or identities.
+- Phase 9A static/unit/contract checks pass 29 assertions, PHP contract checks pass 3 assertions, the additive/idempotent 42-table disposable migration and data-preserving disable rollback pass, and UX Phase 8, Phase 10.4 and Phase 8.3.1 disabled-mode regressions pass. Disposable database, private test image and rejected-run evidence residue is zero.
+- Accepted evidence: `backups/local/safety-vote-ux-phase9a-1791604898562/`; report: `docs/safety-vote-ux-phase9a-engagement-promotion-admin-productivity.md`. No Production connection, external delivery, deploy, commit or push occurred. Decision: `PASS_LOCAL_UAT_READY_FOR_UX_PHASE9B`.
+
 ## Safety Vote Phase 10.4 Production Deployment (PASS, 2026-10-09)
 
 - Immutable candidate `035be38f8dd1dd44bb43501ffa9dc0a876716d0b` (tree `7b889e8aadb9db17db1b8529020b39c25a2e7e2b`) deployed 14 allowlisted Production runtime paths; double-download SHA-256 matched `14/14`. Runtime rollback covers 12 verified prior files plus removal of two proven-new paths; manifest SHA-256 is `0ca24058b334bb14827b2d7fcb2c2d00a782612cdcb7f993239c715d103709ff`.

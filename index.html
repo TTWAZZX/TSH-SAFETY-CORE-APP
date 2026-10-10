@@ -32,7 +32,7 @@
     <script src="https://cdn.jsdelivr.net/npm/flatpickr"></script>
     <script src="https://npmcdn.com/flatpickr/dist/l10n/th.js"></script>
 
-    <link rel="stylesheet" href="public/style.css?v=20261009-safety-vote-phase10-4-r1">
+    <link rel="stylesheet" href="public/style.css?v=20261010-safety-vote-ux9a-r1">
 
     <style>
         /* Employee Master is rendered from a JS template; keep phone controls independent of Tailwind CDN scanning. */
@@ -58,7 +58,8 @@
 
         // Safety Vote Phase 9.6: company-wide UX rollout; server-side module and integration gates remain authoritative.
         window.__TSH_FEATURE_FLAGS__ = Object.assign({}, window.__TSH_FEATURE_FLAGS__, {
-            safetyVoteUxV1: true
+            safetyVoteUxV1: true,
+            safetyVoteEngagementV1: false
         });
     </script>
 </head>
@@ -1159,7 +1160,7 @@
     </script>
 
     <!-- main.js โหลดหลังสุด -->
-    <script type="module" src="public/js/main.js?v=20261010-first-login-reentry-r1"></script>
+    <script type="module" src="public/js/main.js?v=20261010-first-login-reentry-r1-safety-vote-ux9a-r1"></script>
     <script>
         if ('serviceWorker' in navigator && (location.protocol === 'https:' || location.hostname === 'localhost' || location.hostname === '127.0.0.1')) {
             window.addEventListener('load', () => {

@@ -411,7 +411,12 @@
     "audit:bbs-query-performance": "node scripts/bbs-query-performance-audit.js",
     "test:bbs-integration-print": "node scripts/bbs-integration-print.test.js",
     "uat:bbs-batch-duplex-browser": "node scripts/bbs-batch-duplex-browser-uat.js",
-    "setup:bbs-integration-local": "node scripts/bbs-integration-local-setup.js"
+    "setup:bbs-integration-local": "node scripts/bbs-integration-local-setup.js",
+    "test:safety-vote-ux-phase9a": "node scripts/safety-vote-ux-phase9a-static.test.js",
+    "test:safety-vote-ux-phase9a-migration": "node scripts/safety-vote-ux-phase9a-migration.test.js",
+    "uat:safety-vote-ux-phase9a-api": "node scripts/safety-vote-ux-phase9a-api-uat.js",
+    "uat:safety-vote-ux-phase9a-browser": "node scripts/safety-vote-ux-phase9a-browser-uat.js",
+    "verify:safety-vote-ux-phase9a": "npm run test:safety-vote-ux-phase9a && npm run test:safety-vote-ux-phase9a-migration && npm run test:safety-vote-ux-phase8 && npm run test:safety-vote-phase104 && npm run test:safety-vote-phase831-disabled"
   },
   "keywords": [],
   "author": "",
