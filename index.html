@@ -59,12 +59,8 @@
         // Safety Vote Phase 9.6: company-wide UX rollout; server-side module and integration gates remain authoritative.
         window.__TSH_FEATURE_FLAGS__ = Object.assign({}, window.__TSH_FEATURE_FLAGS__, {
             safetyVoteUxV1: true,
-            safetyVoteEngagementV1: false
+            safetyVoteEngagementV1: true
         });
-        // Local-only opt-in for Phase 9A/9B. Non-loopback environments remain default OFF.
-        if (['localhost', '127.0.0.1', '::1'].includes(window.location.hostname)) {
-            window.__TSH_FEATURE_FLAGS__.safetyVoteEngagementV1 = true;
-        }
     </script>
 </head>
 
