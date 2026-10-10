@@ -17,8 +17,6 @@ const confirmation = 'DEPLOY_APP_COMPACT_SAFETY_VOTE_RUNTIME';
 const runtimePaths = [
     'api/handlers/safety_vote_planning.php',
     'api/lib/safety_vote_planning.php',
-    'backend/routes/safety-vote-planning.js',
-    'backend/services/safety-vote-planning.js',
     'public/js/pages/admin-safety-vote-review.js',
     'public/js/pages/admin-safety-vote-ux1.js',
     'public/js/pages/admin.js',
