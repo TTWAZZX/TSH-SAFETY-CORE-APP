@@ -1,6 +1,81 @@
 <?php
 declare(strict_types=1);
 
+function foundation_registration_admin_recipient(): string
+{
+    global $config;
+    foreach (['registration_admin_email', 'admin_email', 'safety_admin_email'] as $key) {
+        $value = trim((string)($config[$key] ?? ''));
+        if ($value !== '') return $value;
+    }
+    return '';
+}
+
+function foundation_registration_admin_email_template(array $data): array
+{
+    global $config;
+    $escape = static fn($value): string => htmlspecialchars((string)$value, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8');
+    $title = 'มีคำขอสมัครบัญชีใหม่รอตรวจสอบ';
+    $department = trim((string)($data['department'] ?? ''));
+    $unit = trim((string)($data['unit'] ?? ''));
+    $departmentUnit = implode(' / ', array_values(array_filter([$department, $unit], static fn($value) => $value !== '')));
+    $appUrl = rtrim(trim((string)($config['public_app_url'] ?? '')), '/');
+    $adminUrl = preg_match('/^https?:\/\//i', $appUrl) ? $appUrl.'/#admin' : '';
+    $rows = [
+        ['ชื่อผู้สมัคร', $data['employeeName'] ?? '-'],
+        ['รหัสพนักงาน', $data['employeeId'] ?? '-'],
+        ['แผนก / หน่วยงาน', $departmentUnit !== '' ? $departmentUnit : '-'],
+        ['ตำแหน่ง', $data['position'] ?? '-'],
+        ['CompanyEmail', $data['companyEmail'] ?? 'ไม่ได้ระบุ'],
+        ['เลขอ้างอิง', $data['referenceCode'] ?? '-'],
+        ['เวลาส่งคำขอ', $data['submittedAt'] ?? date('c')],
+    ];
+    $detailRows = '';
+    foreach ($rows as $index => $row) {
+        $border = $index > 0 ? 'border-top:1px solid #e2e8f0;' : '';
+        $detailRows .= '<tr><td style="padding:10px 14px;color:#64748b;'.$border.'">'.$escape($row[0]).'</td>'
+            .'<td style="padding:10px 14px;text-align:right;font-weight:700;'.$border.'">'.$escape($row[1]).'</td></tr>';
+    }
+    $button = $adminUrl !== ''
+        ? '<p style="margin:24px 0 0"><a href="'.$escape($adminUrl).'" target="_blank" rel="noopener" style="display:inline-block;padding:12px 20px;border-radius:10px;background:#059669;color:#fff;text-decoration:none;font-weight:800">เปิดหน้าตรวจสอบคำขอ</a></p>'
+        : '';
+    $html = '<!doctype html><html><body style="margin:0;background:#f1f5f9;font-family:Arial,Noto Sans Thai,sans-serif;color:#1e293b">'
+        .'<table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="padding:28px 12px"><tr><td align="center">'
+        .'<table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="max-width:620px;background:#fff;border-radius:16px;overflow:hidden">'
+        .'<tr><td style="padding:22px 26px;background:#065f46;color:#fff"><strong style="font-size:20px">TSH Safety Core</strong></td></tr>'
+        .'<tr><td style="padding:28px 26px"><h1 style="font-size:21px;margin:0 0 10px">'.$title.'</h1>'
+        .'<p style="margin:0 0 20px;color:#475569;line-height:1.7">กรุณาตรวจสอบข้อมูลก่อนอนุมัติ ระบบยังไม่ได้สร้างหรือแก้ไขบัญชี Employee Master</p>'
+        .'<table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:12px">'.$detailRows.'</table>'
+        .$button.'<p style="font-size:12px;color:#94a3b8;margin:24px 0 0">อีเมลนี้ส่งโดยระบบอัตโนมัติ กรุณาอย่าตอบกลับ</p>'
+        .'</td></tr></table></td></tr></table></body></html>';
+    $text = $title
+        ."\nชื่อผู้สมัคร: ".($data['employeeName'] ?? '-')
+        ."\nรหัสพนักงาน: ".($data['employeeId'] ?? '-')
+        ."\nแผนก / หน่วยงาน: ".($departmentUnit !== '' ? $departmentUnit : '-')
+        ."\nตำแหน่ง: ".($data['position'] ?? '-')
+        ."\nCompanyEmail: ".($data['companyEmail'] ?? 'ไม่ได้ระบุ')
+        ."\nเลขอ้างอิง: ".($data['referenceCode'] ?? '-')
+        .($adminUrl !== '' ? "\nตรวจสอบคำขอ: $adminUrl" : '');
+    return ['subject'=>'TSH Safety Core | '.$title, 'text'=>$text, 'html'=>$html];
+}
+
+function foundation_notify_registration_admin(array $data): array
+{
+    $recipient = foundation_registration_admin_recipient();
+    if ($recipient === '') {
+        return ['action'=>'REGISTRATION_ADMIN_EMAIL_SKIPPED','reason'=>'admin_recipient_not_configured'];
+    }
+    try {
+        $mail = foundation_registration_admin_email_template($data);
+        $result = mailer_send_mail($recipient, $mail['subject'], $mail['text'], $mail['html']);
+        return !empty($result['sent'])
+            ? ['action'=>'REGISTRATION_ADMIN_EMAIL_SENT','reason'=>null]
+            : ['action'=>'REGISTRATION_ADMIN_EMAIL_SKIPPED','reason'=>(string)($result['reason'] ?? 'delivery_skipped')];
+    } catch (Throwable $error) {
+        return ['action'=>'REGISTRATION_ADMIN_EMAIL_FAILED','reason'=>mb_substr($error->getMessage(), 0, 200)];
+    }
+}
+
 function handle_foundation_routes(string $method, string $path): bool
 {
     if ($method === 'GET' && $path === '/onboarding/status') {
@@ -87,7 +162,7 @@ function handle_foundation_routes(string $method, string $path): bool
                 'status'=>$status,
                 'submittedAt'=>$request['SubmittedAt'] ?? null,
                 'reviewedAt'=>$request['ReviewedAt'] ?? null,
-                'rejectionReason'=>$status === 'Rejected' ? ($request['RejectionReason'] ?? null) : null,
+                'rejectionReason'=>in_array($status, ['Rejected','Cancelled'], true) ? ($request['RejectionReason'] ?? null) : null,
                 'nextAction'=>$nextAction,
                 'notification'=>[
                     'channel'=>'portal',
@@ -226,6 +301,20 @@ function handle_foundation_routes(string $method, string $path): bool
                 throw $error;
             }
             auth_audit_log('ACCOUNT_REGISTRATION_REQUESTED', $employeeId, 202, ['referenceCode'=>$referenceCode,'status'=>'Pending']);
+            $adminNotification = foundation_notify_registration_admin([
+                'employeeName'=>$employeeName,
+                'employeeId'=>$employeeId,
+                'department'=>$department,
+                'unit'=>$unit,
+                'position'=>$position,
+                'companyEmail'=>$companyEmail !== '' ? $companyEmail : null,
+                'referenceCode'=>$referenceCode,
+                'submittedAt'=>date('c'),
+            ]);
+            auth_audit_log($adminNotification['action'], $employeeId, 202, [
+                'referenceCode'=>$referenceCode,
+                'reason'=>$adminNotification['reason'],
+            ]);
             json_response([
                 'success'=>true,
                 'pending'=>true,

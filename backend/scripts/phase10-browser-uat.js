@@ -304,6 +304,12 @@ async function runBrowser(identity) {
     await setViewport(1366, 860, false);
     await client.command('Page.navigate', { url: `${appUrl}?phase10=${Date.now()}` });
 
+    await waitFor(`window.__tshLoginReady===true&&document.getElementById('first-login-hint')`, 'login guidance');
+    const loginGuidance = await client.eval(`document.getElementById('first-login-hint').innerText`);
+    assert.match(loginGuidance, /บัญชีพนักงานใหม่\?/u);
+    assert.match(loginGuidance, /หากเคยเปลี่ยนแล้ว ให้ใช้รหัสผ่านล่าสุด/u);
+    evidence.checks.conditionalLoginGuidance = true;
+
     await login(ids.flow, passwords.flowCurrent);
     await waitFor(`document.getElementById('change-password-form')?.dataset?.forced==='1'`, 'forced password modal');
     evidence.checks.passwordGate = true;
@@ -330,7 +336,49 @@ async function runBrowser(identity) {
         document.getElementById('safety-unit-gate-form').requestSubmit();
         return true;
     })()`);
-    await waitFor(`!document.getElementById('safety-unit-gate-page')&&document.getElementById('app-container')&&!document.getElementById('app-container').classList.contains('hidden')`, 'READY user shell');
+    await waitFor(`document.getElementById('onboarding-complete-relogin')
+        &&!document.getElementById('modal-wrapper')?.classList.contains('hidden')`, 'onboarding completion dialog');
+    await sleep(400);
+    const completion = await client.eval(`(() => ({
+        title:document.getElementById('modal-title')?.innerText,
+        body:document.getElementById('modal-body')?.innerText,
+        closeHidden:document.getElementById('modal-close-btn')?.classList.contains('hidden')===true,
+        targetHeight:document.getElementById('onboarding-complete-relogin')?.getBoundingClientRect().height,
+        targetClass:document.getElementById('onboarding-complete-relogin')?.className,
+        sessionPresent:Boolean(localStorage.getItem('tsh_token'))
+    }))()`);
+    assert.strictEqual(completion.title, 'ตั้งค่าบัญชีสำเร็จ');
+    assert.match(completion.body, /กรุณาออกจากระบบและเข้าสู่ระบบอีกครั้งด้วยรหัสผ่านใหม่/u);
+    assert.strictEqual(completion.closeHidden, true);
+    if (blockExternalAssets) assert.match(completion.targetClass, /min-h-\[44px\]/u);
+    else assert(completion.targetHeight >= 44, `Completion action target was ${completion.targetHeight}px`);
+    assert.strictEqual(completion.sessionPresent, true);
+    evidence.checks.completionDialog = true;
+    await screenshot('03-onboarding-complete.png');
+
+    await client.eval(`document.getElementById('onboarding-complete-relogin').click();true`);
+    await waitFor(`window.__tshLoginReady===true
+        &&!localStorage.getItem('tsh_token')
+        &&!document.getElementById('login-overlay')?.classList.contains('hidden')
+        &&!document.getElementById('login-success-message')?.classList.contains('hidden')`, 'guided re-login screen');
+    const reentry = await client.eval(`(() => ({
+        employeeId:document.getElementById('login-employee-id')?.value,
+        password:document.getElementById('login-password')?.value,
+        notice:document.getElementById('login-success-message')?.innerText,
+        focused:document.activeElement?.id
+    }))()`);
+    assert.strictEqual(reentry.employeeId, ids.flow);
+    assert.strictEqual(reentry.password, '');
+    assert.match(reentry.notice, /กรุณาเข้าสู่ระบบอีกครั้งด้วยรหัสผ่านใหม่/u);
+    assert.strictEqual(reentry.focused, 'login-password');
+    evidence.checks.guidedRelogin = true;
+    await screenshot('04-guided-relogin.png');
+
+    await login(ids.flow, passwords.flowReady);
+    await waitFor(`document.getElementById('app-container')
+        &&!document.getElementById('app-container').classList.contains('hidden')
+        &&!document.getElementById('change-password-form')
+        &&!document.getElementById('safety-unit-gate-page')`, 'READY user shell after re-login');
     const readyUser = await client.eval(`(() => ({
         user:JSON.parse(localStorage.getItem('tsh_user')||'{}'),
         adminHidden:document.getElementById('admin-menu-section')?.classList.contains('hidden')===true,
@@ -346,7 +394,7 @@ async function runBrowser(identity) {
         ? 'NOT_ASSERTED_EXTERNAL_CSS_BLOCKED'
         : true;
     evidence.checks.userAdminForbidden = true;
-    await screenshot('03-user-ready-desktop.png');
+    await screenshot('05-user-ready-desktop.png');
 
     await client.command('Page.reload', { ignoreCache: true });
     await waitFor(`document.getElementById('app-container')&&!document.getElementById('app-container').classList.contains('hidden')&&!document.getElementById('change-password-form')&&!document.getElementById('safety-unit-gate-page')`, 'session persistence after refresh');
@@ -360,7 +408,7 @@ async function runBrowser(identity) {
     evidence.checks.mobileLayout = blockExternalAssets && mobile.overflow
         ? 'NOT_ASSERTED_EXTERNAL_CSS_BLOCKED'
         : true;
-    await screenshot('04-user-ready-mobile.png');
+    await screenshot('06-user-ready-mobile.png');
 
     await setViewport(1366, 860, false);
     await logout();
@@ -386,7 +434,7 @@ async function runBrowser(identity) {
         ? 'NOT_ASSERTED_EXTERNAL_CSS_BLOCKED'
         : true;
     evidence.checks.adminApiAllowed = true;
-    await screenshot('05-admin-ready.png');
+    await screenshot('07-admin-ready.png');
     await logout();
 
     evidence.database = identity;

@@ -66,6 +66,7 @@ return [
     'safety_admin_email' => (string) $read('SAFETY_ADMIN_EMAIL', ''),
     'hiyari_admin_email' => (string) $read('HIYARI_ADMIN_EMAIL', ''),
     'admin_email' => (string) $read('ADMIN_EMAIL', ''),
+    'registration_admin_email' => (string) $read('REGISTRATION_ADMIN_EMAIL', $read('ADMIN_EMAIL', '')),
     'fourm_admin_email' => (string) $read('FOURM_ADMIN_EMAIL', ''),
     'public_upload_base_url' => (string) $read('PUBLIC_UPLOAD_BASE_URL', ''),
     'public_app_url' => (string) $read('PUBLIC_APP_URL', $read('APP_BASE_URL', '')),

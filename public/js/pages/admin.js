@@ -5449,6 +5449,7 @@ async function renderRegistrationRequestsTab(container) {
                     <button type="button" onclick="window._registrationReload()" class="px-3 py-2 rounded-lg border border-slate-200 text-xs font-bold text-slate-600 hover:bg-slate-50">รีเฟรช</button>
                 </div>
                 <div id="registration-summary" class="grid grid-cols-2 lg:grid-cols-5 gap-2 mt-4"></div>
+                <div id="registration-email-readiness" class="mt-3"></div>
                 <div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-[150px,190px,150px,150px,minmax(200px,1fr),auto] gap-2 mt-4">
                     <select id="registration-status-filter" class="form-input rounded-lg text-sm" onchange="window._registrationFilterStatus(this.value)">
                         ${['Pending','Approved','Rejected','Cancelled','all'].map(value => `<option value="${value}" ${value==='Pending'?'selected':''}>${value==='all'?'ทุกสถานะ':value}</option>`).join('')}
@@ -5500,9 +5501,12 @@ async function renderRegistrationRequestsTab(container) {
         _registrationAdminState.q = String(value || '').trim();
         _loadRegistrationRequests();
     };
-    window._registrationApprove = async (id, btn) => {
-        if (!confirm('อนุมัติคำขอนี้และสร้างบัญชี Employee Role User ใช่หรือไม่?')) return;
-        const original = _btnLoad(btn, 'กำลังอนุมัติ...');
+    window._registrationApprove = async (id, btn, employeeExists = false) => {
+        const confirmation = employeeExists
+            ? 'พบรหัสพนักงานนี้ใน Employee Master แล้ว ระบบจะไม่แก้ไขบัญชีเดิม และจะปิดคำขอซ้ำออกจากรายการรอตรวจสอบ ใช่หรือไม่?'
+            : 'อนุมัติคำขอนี้และสร้างบัญชี Employee Role User ใช่หรือไม่?';
+        if (!confirm(confirmation)) return;
+        const original = _btnLoad(btn, employeeExists ? 'กำลังปิดคำขอซ้ำ...' : 'กำลังอนุมัติ...');
         try {
             const response = await API.post(`/admin/registration-requests/${id}/approve`, {});
             showToast(response.message || 'อนุมัติคำขอแล้ว', 'success');
@@ -5547,6 +5551,7 @@ async function _loadRegistrationRequests() {
         _registrationAdminState.rows = response.data || [];
         _registrationAdminState.summary = response.summary || {};
         _renderRegistrationSummary();
+        _renderRegistrationEmailReadiness();
         _renderRegistrationDepartmentFilter();
         _renderRegistrationRows();
     } catch (error) {
@@ -5566,6 +5571,7 @@ function _renderRegistrationSummary() {
         ['ปฏิเสธ', summary.rejected, 'text-rose-600'],
         ['ยกเลิก', summary.cancelled, 'text-slate-500'],
         ['ค้างเกิน 3 วัน', summary.stalePending, 'text-orange-600'],
+        ['พบใน Master แล้ว', summary.duplicatePending, 'text-amber-700'],
         ['อนุมัติเฉลี่ย (ชม.)', summary.averageReviewHours, 'text-blue-600'],
         ['Master ไม่ครบ', summary.incompleteMaster, 'text-violet-600'],
         ['คำขอใหม่ 24 ชม.', summary.newLast24h, 'text-cyan-600'],
@@ -5576,6 +5582,21 @@ function _renderRegistrationSummary() {
             <p class="text-lg font-black ${color}">${Number(value)||0}</p>
             <p class="text-[10px] text-slate-500">${label}</p>
         </div>`).join('');
+}
+
+function _renderRegistrationEmailReadiness() {
+    const el = document.getElementById('registration-email-readiness');
+    if (!el) return;
+    const summary = _registrationAdminState.summary || {};
+    const ready = Boolean(summary.smtpConfigured && summary.adminEmailConfigured);
+    const message = ready
+        ? 'พร้อมส่งอีเมลแจ้ง Admin เมื่อมีคำขอสมัครใหม่'
+        : !summary.smtpConfigured
+            ? 'ยังไม่พร้อมส่งอีเมลแจ้ง Admin: กรุณาตรวจสอบการตั้งค่า SMTP'
+            : 'ยังไม่พร้อมส่งอีเมลแจ้ง Admin: กรุณาตั้งค่า REGISTRATION_ADMIN_EMAIL หรือ ADMIN_EMAIL';
+    el.innerHTML = `<div class="rounded-xl border px-3 py-2 text-xs font-semibold ${ready
+        ? 'border-emerald-200 bg-emerald-50 text-emerald-700'
+        : 'border-amber-200 bg-amber-50 text-amber-800'}">${message}</div>`;
 }
 
 function _renderRegistrationDepartmentFilter() {
@@ -5607,7 +5628,8 @@ function _renderRegistrationRows() {
             <th class="p-3">สถานะ</th><th class="p-3">วันที่ส่ง</th><th class="p-3 text-right">ดำเนินการ</th>
         </tr></thead>
         <tbody>${rows.map(row => `<tr class="border-b border-slate-100 align-top">
-            <td class="p-3"><p class="font-bold text-slate-800">${escHtml(row.EmployeeName||'-')}</p><p class="text-slate-500">${escHtml(row.EmployeeID||'-')} · ${escHtml(row.ReferenceCode||'-')}</p></td>
+            <td class="p-3"><p class="font-bold text-slate-800">${escHtml(row.EmployeeName||'-')}</p><p class="text-slate-500">${escHtml(row.EmployeeID||'-')} · ${escHtml(row.ReferenceCode||'-')}</p>
+                ${Number(row.EmployeeExists||0)===1?`<p class="mt-1 font-semibold text-amber-700">พบรหัสนี้ใน Employee Master แล้ว${Number(row.ExistingAccountActive||0)===1?' และมีบัญชีที่เปิดใช้งานอยู่':''}</p>`:''}</td>
             <td class="p-3"><p>${escHtml(row.Department||'-')}</p><p class="text-slate-500">${escHtml(row.Unit||'-')} · ${escHtml(row.Position||'-')}</p></td>
             <td class="p-3">${escHtml(row.CompanyEmail||'ไม่ระบุ')}</td>
             <td class="p-3"><span class="inline-flex px-2 py-1 rounded-full border font-bold ${statusClass(row.Status)}">${escHtml(row.Status||'-')}</span>${row.RejectionReason?`<p class="mt-1 text-rose-600">${escHtml(row.RejectionReason)}</p>`:''}
@@ -5617,7 +5639,7 @@ function _renderRegistrationRows() {
             </td>
             <td class="p-3 text-slate-500">${row.SubmittedAt?new Date(row.SubmittedAt).toLocaleString('th-TH'):'-'}</td>
             <td class="p-3 text-right">${row.Status==='Pending'?`<div class="flex justify-end gap-1">
-                <button type="button" onclick="window._registrationApprove(${Number(row.ID)},this)" class="px-2.5 py-1.5 rounded-lg bg-emerald-600 text-white font-bold">อนุมัติ</button>
+                <button type="button" onclick="window._registrationApprove(${Number(row.ID)},this,${Number(row.EmployeeExists||0)===1?'true':'false'})" class="px-2.5 py-1.5 rounded-lg ${Number(row.EmployeeExists||0)===1?'bg-amber-600':'bg-emerald-600'} text-white font-bold">${Number(row.EmployeeExists||0)===1?'ปิดคำขอซ้ำ':'อนุมัติ'}</button>
                 <button type="button" onclick="window._registrationReject(${Number(row.ID)},this)" class="px-2.5 py-1.5 rounded-lg border border-rose-200 text-rose-600 font-bold">ปฏิเสธ</button>
             </div>`:`<span class="text-slate-400">${escHtml(row.ReviewedBy||'-')}</span>`}</td>
         </tr>`).join('')}</tbody>

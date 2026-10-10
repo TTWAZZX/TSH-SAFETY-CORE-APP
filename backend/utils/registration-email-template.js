@@ -66,4 +66,72 @@ function registrationEmailTemplate({ status, employeeName, employeeId, reference
     return { subject: `TSH Safety Core | ${title}`, text, html };
 }
 
-module.exports = { registrationEmailTemplate };
+function registrationAdminRecipient(env = process.env) {
+    return String(
+        env.REGISTRATION_ADMIN_EMAIL
+        || env.ADMIN_EMAIL
+        || env.SAFETY_ADMIN_EMAIL
+        || ''
+    ).trim();
+}
+
+function registrationAdminEmailTemplate({
+    employeeName,
+    employeeId,
+    department,
+    unit,
+    position,
+    companyEmail,
+    referenceCode,
+    submittedAt,
+    appUrl,
+}) {
+    const resolvedAppUrl = normalizeLoginUrl(appUrl);
+    const adminUrl = resolvedAppUrl ? `${resolvedAppUrl}/#admin` : '';
+    const title = 'มีคำขอสมัครบัญชีใหม่รอตรวจสอบ';
+    const rows = [
+        ['ชื่อผู้สมัคร', employeeName || '-'],
+        ['รหัสพนักงาน', employeeId || '-'],
+        ['แผนก / หน่วยงาน', [department, unit].filter(Boolean).join(' / ') || '-'],
+        ['ตำแหน่ง', position || '-'],
+        ['CompanyEmail', companyEmail || 'ไม่ได้ระบุ'],
+        ['เลขอ้างอิง', referenceCode || '-'],
+        ['เวลาส่งคำขอ', submittedAt || new Date().toISOString()],
+    ];
+    const detailRows = rows.map(([label, value], index) => `
+        <tr><td style="padding:10px 14px;color:#64748b;${index ? 'border-top:1px solid #e2e8f0' : ''}">${escapeHtml(label)}</td>
+        <td style="padding:10px 14px;text-align:right;font-weight:700;${index ? 'border-top:1px solid #e2e8f0' : ''}">${escapeHtml(value)}</td></tr>`).join('');
+    const button = adminUrl
+        ? `<p style="margin:24px 0 0"><a href="${escapeHtml(adminUrl)}" target="_blank" rel="noopener" style="display:inline-block;padding:12px 20px;border-radius:10px;background:#059669;color:#fff;text-decoration:none;font-weight:800">เปิดหน้าตรวจสอบคำขอ</a></p>`
+        : '';
+    const html = `<!doctype html><html><body style="margin:0;background:#f1f5f9;font-family:Arial,'Noto Sans Thai',sans-serif;color:#1e293b">
+      <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="padding:28px 12px"><tr><td align="center">
+        <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="max-width:620px;background:#fff;border-radius:16px;overflow:hidden">
+          <tr><td style="padding:22px 26px;background:#065f46;color:#fff"><strong style="font-size:20px">TSH Safety Core</strong></td></tr>
+          <tr><td style="padding:28px 26px"><h1 style="font-size:21px;margin:0 0 10px">${title}</h1>
+            <p style="margin:0 0 20px;color:#475569;line-height:1.7">กรุณาตรวจสอบข้อมูลก่อนอนุมัติ ระบบยังไม่ได้สร้างหรือแก้ไขบัญชี Employee Master</p>
+            <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:12px">${detailRows}</table>
+            ${button}
+            <p style="font-size:12px;color:#94a3b8;margin:24px 0 0">อีเมลนี้ส่งโดยระบบอัตโนมัติ กรุณาอย่าตอบกลับ</p>
+          </td></tr>
+        </table>
+      </td></tr></table>
+    </body></html>`;
+    const text = [
+        title,
+        `ชื่อผู้สมัคร: ${employeeName || '-'}`,
+        `รหัสพนักงาน: ${employeeId || '-'}`,
+        `แผนก / หน่วยงาน: ${[department, unit].filter(Boolean).join(' / ') || '-'}`,
+        `ตำแหน่ง: ${position || '-'}`,
+        `CompanyEmail: ${companyEmail || 'ไม่ได้ระบุ'}`,
+        `เลขอ้างอิง: ${referenceCode || '-'}`,
+        adminUrl ? `ตรวจสอบคำขอ: ${adminUrl}` : '',
+    ].filter(Boolean).join('\n');
+    return { subject: `TSH Safety Core | ${title}`, text, html };
+}
+
+module.exports = {
+    registrationEmailTemplate,
+    registrationAdminEmailTemplate,
+    registrationAdminRecipient,
+};

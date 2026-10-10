@@ -1401,22 +1401,23 @@ function handle_admin_phase8_routes(string $method, string $path): bool
         $where = ' WHERE 1=1'; $params = [];
         if ($status !== 'all') {
             if (!in_array($status,$allowed,true)) json_response(['success'=>false,'message'=>'Invalid registration status.'],400);
-            $where .= ' AND Status=?'; $params[] = $status;
+            $where .= ' AND r.Status=?'; $params[] = $status;
         }
-        if ($department !== '') { $where .= ' AND Department=?'; $params[] = $department; }
-        if ($dateFrom !== '') { $where .= ' AND SubmittedAt>=?'; $params[] = $dateFrom.' 00:00:00'; }
-        if ($dateTo !== '') { $where .= ' AND SubmittedAt<=?'; $params[] = $dateTo.' 23:59:59'; }
+        if ($department !== '') { $where .= ' AND r.Department=?'; $params[] = $department; }
+        if ($dateFrom !== '') { $where .= ' AND r.SubmittedAt>=?'; $params[] = $dateFrom.' 00:00:00'; }
+        if ($dateTo !== '') { $where .= ' AND r.SubmittedAt<=?'; $params[] = $dateTo.' 23:59:59'; }
         if ($q !== '') {
             $like = '%'.$q.'%';
-            $where .= ' AND (EmployeeID LIKE ? OR EmployeeName LIKE ? OR ReferenceCode LIKE ? OR CompanyEmail LIKE ?)';
+            $where .= ' AND (r.EmployeeID LIKE ? OR r.EmployeeName LIKE ? OR r.ReferenceCode LIKE ? OR r.CompanyEmail LIKE ?)';
             array_push($params,$like,$like,$like,$like);
         }
-        $rows = db_rows("SELECT ID,ReferenceCode,EmployeeID,EmployeeName,Department,Unit,Position,CompanyEmail,Status,RejectionReason,SubmittedAt,UpdatedAt,ReviewedAt,ReviewedBy,StatusViewedAt,StatusViewCount FROM registration_requests$where ORDER BY (Status='Pending') DESC,SubmittedAt DESC,ID DESC LIMIT 500",$params);
-        $summary = db_row("SELECT COUNT(*) total,SUM(Status='Pending') pending,SUM(Status='Approved') approved,SUM(Status='Rejected') rejected,SUM(Status='Cancelled') cancelled,SUM(Status='Pending' AND SubmittedAt<DATE_SUB(NOW(),INTERVAL 3 DAY)) stalePending,ROUND(AVG(CASE WHEN ReviewedAt IS NOT NULL THEN TIMESTAMPDIFF(MINUTE,SubmittedAt,ReviewedAt)/60 END),2) averageReviewHours,SUM(EmployeeName IS NULL OR TRIM(EmployeeName)='' OR Department IS NULL OR TRIM(Department)='' OR Position IS NULL OR TRIM(Position)='') incompleteMaster,SUM(SubmittedAt>=DATE_SUB(NOW(),INTERVAL 1 DAY)) newLast24h FROM registration_requests") ?: [];
+        $rows = db_rows("SELECT r.ID,r.ReferenceCode,r.EmployeeID,r.EmployeeName,r.Department,r.Unit,r.Position,r.CompanyEmail,r.Status,r.RejectionReason,r.SubmittedAt,r.UpdatedAt,r.ReviewedAt,r.ReviewedBy,r.StatusViewedAt,r.StatusViewCount,CASE WHEN e.EmployeeID IS NULL THEN 0 ELSE 1 END EmployeeExists,CASE WHEN e.Password IS NULL OR e.Password='' THEN 0 ELSE 1 END ExistingAccountActive FROM registration_requests r LEFT JOIN employees e ON e.EmployeeID=r.EmployeeID$where ORDER BY (r.Status='Pending') DESC,r.SubmittedAt DESC,r.ID DESC LIMIT 500",$params);
+        $summary = db_row("SELECT COUNT(*) total,SUM(r.Status='Pending') pending,SUM(r.Status='Approved') approved,SUM(r.Status='Rejected') rejected,SUM(r.Status='Cancelled') cancelled,SUM(r.Status='Pending' AND r.SubmittedAt<DATE_SUB(NOW(),INTERVAL 3 DAY)) stalePending,SUM(r.Status='Pending' AND e.EmployeeID IS NOT NULL) duplicatePending,ROUND(AVG(CASE WHEN r.ReviewedAt IS NOT NULL THEN TIMESTAMPDIFF(MINUTE,r.SubmittedAt,r.ReviewedAt)/60 END),2) averageReviewHours,SUM(r.EmployeeName IS NULL OR TRIM(r.EmployeeName)='' OR r.Department IS NULL OR TRIM(r.Department)='' OR r.Position IS NULL OR TRIM(r.Position)='') incompleteMaster,SUM(r.SubmittedAt>=DATE_SUB(NOW(),INTERVAL 1 DAY)) newLast24h FROM registration_requests r LEFT JOIN employees e ON e.EmployeeID=r.EmployeeID") ?: [];
         $failed = db_row("SELECT COUNT(*) failed24h,COUNT(DISTINCT TargetID) distinctEmployees24h FROM admin_auditlogs WHERE Module='auth' AND StatusCode>=400 AND ActionTime>=DATE_SUB(NOW(),INTERVAL 1 DAY)") ?: [];
         $summary['failedAttempts24h']=(int)($failed['failed24h']??0);
         $summary['failedEmployees24h']=(int)($failed['distinctEmployees24h']??0);
         $summary['smtpConfigured']=mailer_smtp_configured();
+        $summary['adminEmailConfigured']=foundation_registration_admin_recipient() !== '';
         $summary['cleanupPolicy']=['processedRequestRetentionDays'=>365,'failedAttemptRetentionDays'=>90,'automaticDelete'=>false];
         json_response(['success'=>true,'data'=>$rows,'summary'=>$summary]);
     }
@@ -1435,7 +1436,20 @@ function handle_admin_phase8_routes(string $method, string $path): bool
             if (($request['Status']??'') !== 'Pending') { $pdo->rollBack(); json_response(['success'=>false,'message'=>'Registration request is already '.($request['Status']??'processed').'.'],409); }
             $stmt = $pdo->prepare('SELECT EmployeeID FROM employees WHERE EmployeeID=? LIMIT 1');
             $stmt->execute([$request['EmployeeID']]);
-            if ($stmt->fetch()) { $pdo->rollBack(); json_response(['success'=>false,'message'=>'Employee ID already exists in Employee Master.'],409); }
+            if ($stmt->fetch()) {
+                $duplicateReason = 'ปิดคำขอซ้ำ: พบรหัสพนักงานนี้ใน Employee Master แล้ว กรุณาเปิดใช้งานบัญชีเดิมหรือใช้เมนูลืมรหัสผ่าน';
+                $stmt = $pdo->prepare("UPDATE registration_requests SET Status='Cancelled',RejectionReason=?,PasswordHash=NULL,ReviewedAt=NOW(),ReviewedBy=? WHERE ID=? AND Status='Pending'");
+                $stmt->execute([$duplicateReason,(string)($user['id']??''),$request['ID']]);
+                if ($stmt->rowCount() !== 1) throw new RuntimeException('Registration duplicate resolution state changed before commit.');
+                $pdo->commit();
+                admin8_log($user,'CLOSE_DUPLICATE_REGISTRATION_REQUEST','RegistrationRequest',(string)$request['ID'],'Closed duplicate request for existing Employee '.$request['EmployeeID'].'; existing account was not changed.');
+                json_response([
+                    'success'=>true,
+                    'code'=>'REGISTRATION_DUPLICATE_CLOSED',
+                    'resolution'=>'duplicate_closed',
+                    'message'=>'พบรหัสพนักงานนี้ใน Employee Master แล้ว ระบบไม่ได้สร้างหรือแก้ไขบัญชีเดิม และปิดคำขอซ้ำออกจากรายการรอตรวจสอบแล้ว กรุณาให้พนักงานเปิดใช้งานบัญชีเดิมหรือใช้เมนูลืมรหัสผ่าน',
+                ]);
+            }
             if (!empty($request['CompanyEmail'])) {
                 $stmt = $pdo->prepare('SELECT EmployeeID FROM employees WHERE LOWER(CompanyEmail)=LOWER(?) LIMIT 1');
                 $stmt->execute([$request['CompanyEmail']]);

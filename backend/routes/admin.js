@@ -23,7 +23,7 @@ const {
 } = require('../utils/company-email');
 const { getCccfWorkerProgress } = require('../utils/cccf-worker-progress');
 const { sendMail, smtpConfigured } = require('../utils/email');
-const { registrationEmailTemplate } = require('../utils/registration-email-template');
+const { registrationEmailTemplate, registrationAdminRecipient } = require('../utils/registration-email-template');
 const { ProfileValidationError } = require('../utils/profile-validator');
 const { buildKySafetyCoreCountMap } = require('../utils/safety-core-ky');
 const {
@@ -1269,24 +1269,28 @@ router.get('/registration-requests', async (req, res) => {
         if (dateFrom === null || dateTo === null || (dateFrom && dateTo && dateFrom > dateTo)) {
             return res.status(400).json({ success: false, message: 'Invalid registration date range.' });
         }
-        let sql = `SELECT ID,ReferenceCode,EmployeeID,EmployeeName,Department,Unit,Position,
-                          CompanyEmail,Status,RejectionReason,SubmittedAt,UpdatedAt,ReviewedAt,ReviewedBy,
-                          StatusViewedAt,StatusViewCount
-                   FROM registration_requests WHERE 1=1`;
+        let sql = `SELECT r.ID,r.ReferenceCode,r.EmployeeID,r.EmployeeName,r.Department,r.Unit,r.Position,
+                          r.CompanyEmail,r.Status,r.RejectionReason,r.SubmittedAt,r.UpdatedAt,r.ReviewedAt,r.ReviewedBy,
+                          r.StatusViewedAt,r.StatusViewCount,
+                          CASE WHEN e.EmployeeID IS NULL THEN 0 ELSE 1 END EmployeeExists,
+                          CASE WHEN e.Password IS NULL OR e.Password='' THEN 0 ELSE 1 END ExistingAccountActive
+                   FROM registration_requests r
+                   LEFT JOIN Employees e ON e.EmployeeID=r.EmployeeID
+                   WHERE 1=1`;
         const params = [];
         if (status !== 'all') {
             if (!allowedStatuses.includes(status)) return res.status(400).json({ success: false, message: 'Invalid registration status.' });
-            sql += ' AND Status=?'; params.push(status);
+            sql += ' AND r.Status=?'; params.push(status);
         }
-        if (department) { sql += ' AND Department=?'; params.push(department); }
-        if (dateFrom) { sql += ' AND SubmittedAt>=?'; params.push(`${dateFrom} 00:00:00`); }
-        if (dateTo) { sql += ' AND SubmittedAt<?'; params.push(`${dateTo} 23:59:59`); }
+        if (department) { sql += ' AND r.Department=?'; params.push(department); }
+        if (dateFrom) { sql += ' AND r.SubmittedAt>=?'; params.push(`${dateFrom} 00:00:00`); }
+        if (dateTo) { sql += ' AND r.SubmittedAt<?'; params.push(`${dateTo} 23:59:59`); }
         if (q) {
             const like = `%${q}%`;
-            sql += ' AND (EmployeeID LIKE ? OR EmployeeName LIKE ? OR ReferenceCode LIKE ? OR CompanyEmail LIKE ?)';
+            sql += ' AND (r.EmployeeID LIKE ? OR r.EmployeeName LIKE ? OR r.ReferenceCode LIKE ? OR r.CompanyEmail LIKE ?)';
             params.push(like, like, like, like);
         }
-        const [rows] = await db.query(`${sql} ORDER BY (Status='Pending') DESC,SubmittedAt DESC,ID DESC LIMIT 500`, params);
+        const [rows] = await db.query(`${sql} ORDER BY (r.Status='Pending') DESC,r.SubmittedAt DESC,r.ID DESC LIMIT 500`, params);
         const [[summary]] = await db.query(
             `SELECT COUNT(*) total,
                     SUM(Status='Pending') pending,
@@ -1294,6 +1298,7 @@ router.get('/registration-requests', async (req, res) => {
                     SUM(Status='Rejected') rejected,
                     SUM(Status='Cancelled') cancelled,
                     SUM(Status='Pending' AND SubmittedAt<DATE_SUB(NOW(),INTERVAL 3 DAY)) stalePending,
+                    SUM(Status='Pending' AND EXISTS(SELECT 1 FROM Employees e WHERE e.EmployeeID=registration_requests.EmployeeID)) duplicatePending,
                     ROUND(AVG(CASE WHEN ReviewedAt IS NOT NULL THEN TIMESTAMPDIFF(MINUTE,SubmittedAt,ReviewedAt)/60 END),2) averageReviewHours,
                     SUM(EmployeeName IS NULL OR TRIM(EmployeeName)='' OR Department IS NULL OR TRIM(Department)='' OR Position IS NULL OR TRIM(Position)='') incompleteMaster,
                     SUM(SubmittedAt>=DATE_SUB(NOW(),INTERVAL 1 DAY)) newLast24h
@@ -1310,6 +1315,7 @@ router.get('/registration-requests', async (req, res) => {
                 failedAttempts24h: Number(failedSummary?.failed24h || 0),
                 failedEmployees24h: Number(failedSummary?.distinctEmployees24h || 0),
                 smtpConfigured: smtpConfigured(),
+                adminEmailConfigured: Boolean(registrationAdminRecipient()),
                 cleanupPolicy: {
                     processedRequestRetentionDays: 365,
                     failedAttemptRetentionDays: 90,
@@ -1342,8 +1348,23 @@ router.post('/registration-requests/:id/approve', async (req, res) => {
         }
         const [[employee]] = await connection.query('SELECT EmployeeID FROM Employees WHERE EmployeeID=? LIMIT 1', [request.EmployeeID]);
         if (employee) {
-            await connection.rollback();
-            return res.status(409).json({ success: false, message: 'Employee ID already exists in Employee Master.' });
+            const duplicateReason = 'ปิดคำขอซ้ำ: พบรหัสพนักงานนี้ใน Employee Master แล้ว กรุณาเปิดใช้งานบัญชีเดิมหรือใช้เมนูลืมรหัสผ่าน';
+            const [closed] = await connection.query(
+                `UPDATE registration_requests
+                 SET Status='Cancelled',RejectionReason=?,PasswordHash=NULL,ReviewedAt=NOW(),ReviewedBy=?
+                 WHERE ID=? AND Status='Pending'`,
+                [duplicateReason, req.user?.id || null, request.ID]
+            );
+            if (closed.affectedRows !== 1) throw new Error('Registration duplicate resolution state changed before commit.');
+            await connection.commit();
+            await auditLog(req, 'CLOSE_DUPLICATE_REGISTRATION_REQUEST', 'RegistrationRequest', String(request.ID),
+                `Closed duplicate request for existing Employee ${request.EmployeeID}; existing account was not changed.`);
+            return res.json({
+                success: true,
+                code: 'REGISTRATION_DUPLICATE_CLOSED',
+                resolution: 'duplicate_closed',
+                message: 'พบรหัสพนักงานนี้ใน Employee Master แล้ว ระบบไม่ได้สร้างหรือแก้ไขบัญชีเดิม และปิดคำขอซ้ำออกจากรายการรอตรวจสอบแล้ว กรุณาให้พนักงานเปิดใช้งานบัญชีเดิมหรือใช้เมนูลืมรหัสผ่าน',
+            });
         }
         if (request.CompanyEmail) {
             const [[emailOwner]] = await connection.query('SELECT EmployeeID FROM Employees WHERE LOWER(CompanyEmail)=LOWER(?) LIMIT 1', [request.CompanyEmail]);

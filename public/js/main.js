@@ -14,7 +14,7 @@ import { loadPatrolPage } from './pages/patrol.js?v=20261002-patrol-self-makeup-
 import { loadCccfPage } from './pages/cccf.js?v=20260907-cccf-permanent-pdf-layout-r2';
 import { loadKpiPage } from './pages/kpi.js?v=20260715-phase32d-remaining-async-ux';
 import { loadYokotenPage } from './pages/yokoten.js?v=20260825-yokoten-department-relevance-r1';
-import { loadAdminPage } from './pages/admin.js?v=20261009-safety-vote-ux8-r1';
+import { loadAdminPage } from './pages/admin.js?v=20261010-registration-workflow-r1';
 import { loadMachineSafetyPage } from './pages/machine-safety.js?v=20260820-card-image-phase2b';
 import { loadForkliftPage } from './pages/forklift.js?v=20260831-forklift-renewal-retry-r1';
 import { loadOjtPage } from './pages/ojt.js?v=20260820-card-image-phase2d';
@@ -74,6 +74,7 @@ const AppState = {
     isAdmin: false
 };
 let _safetyUnitGateActive = false;
+const FIRST_LOGIN_REENTRY_KEY = 'tsh_first_login_reentry';
 let _companyEmailVerificationResult = null;
 let _passwordResetToken = null;
 
@@ -535,6 +536,64 @@ function showLoginScreen() {
     destroyJohnnyDrawer();
     document.getElementById('app-container')?.classList.add('hidden');
     document.getElementById('login-overlay')?.classList.remove('hidden');
+    showFirstLoginReentryNotice();
+}
+
+function rememberFirstLoginReentry(user) {
+    try {
+        sessionStorage.setItem(FIRST_LOGIN_REENTRY_KEY, JSON.stringify({
+            employeeId: String(user?.id || user?.EmployeeID || '').trim(),
+        }));
+    } catch (_) {}
+}
+
+function showFirstLoginReentryNotice() {
+    let state = null;
+    try {
+        state = JSON.parse(sessionStorage.getItem(FIRST_LOGIN_REENTRY_KEY) || 'null');
+        sessionStorage.removeItem(FIRST_LOGIN_REENTRY_KEY);
+    } catch (_) {
+        try { sessionStorage.removeItem(FIRST_LOGIN_REENTRY_KEY); } catch (_) {}
+    }
+    if (!state) return;
+
+    const employeeInput = document.getElementById('login-employee-id');
+    const passwordInput = document.getElementById('login-password');
+    const notice = document.getElementById('login-success-message');
+    if (employeeInput && state.employeeId) employeeInput.value = state.employeeId;
+    if (passwordInput) passwordInput.value = '';
+    if (notice) {
+        notice.textContent = 'ตั้งค่าบัญชีสำเร็จแล้ว กรุณาเข้าสู่ระบบอีกครั้งด้วยรหัสผ่านใหม่ เพื่อโหลดสิทธิ์และเมนูล่าสุด';
+        notice.classList.remove('hidden');
+    }
+    setTimeout(() => passwordInput?.focus(), 50);
+}
+
+function showFirstLoginCompletion(user, { safetyUnitSelected = false } = {}) {
+    const detail = safetyUnitSelected
+        ? 'ระบบบันทึกรหัสผ่านใหม่และ Safety Unit ของคุณเรียบร้อยแล้ว'
+        : 'ระบบบันทึกรหัสผ่านใหม่ของคุณเรียบร้อยแล้ว';
+    UI.openModal('ตั้งค่าบัญชีสำเร็จ', `
+        <div class="space-y-4 py-1 text-center">
+            <div class="mx-auto flex h-14 w-14 items-center justify-center rounded-full bg-emerald-100 text-2xl font-black text-emerald-700" aria-hidden="true">✓</div>
+            <div class="space-y-2">
+                <p class="text-sm font-bold text-slate-800">${detail}</p>
+                <p class="text-sm leading-6 text-slate-600">กรุณาออกจากระบบและเข้าสู่ระบบอีกครั้งด้วยรหัสผ่านใหม่ เพื่อโหลดสิทธิ์และเมนูล่าสุด</p>
+            </div>
+            <button type="button" id="onboarding-complete-relogin"
+                class="min-h-[44px] w-full rounded-xl bg-emerald-600 px-4 py-3 text-sm font-bold text-white hover:bg-emerald-700 focus:outline-none focus:ring-4 focus:ring-emerald-200">
+                ออกจากระบบเพื่อเข้าสู่ระบบใหม่
+            </button>
+        </div>`, 'max-w-md');
+
+    const closeButton = document.getElementById('modal-close-btn');
+    closeButton?.classList.add('hidden');
+    closeButton?.setAttribute('aria-hidden', 'true');
+    if (closeButton) closeButton.disabled = true;
+    document.getElementById('onboarding-complete-relogin')?.addEventListener('click', () => {
+        rememberFirstLoginReentry(user);
+        TSHSession.logout();
+    }, { once: true });
 }
 
 function handleLogout() {
@@ -661,7 +720,7 @@ function renderSafetyUnitGate(profile, units) {
     gate.innerHTML = `
         <section class="w-full max-w-xl rounded-2xl border border-emerald-100 bg-white shadow-sm overflow-hidden">
             <div class="px-5 py-4 border-b border-slate-100 bg-emerald-50/70">
-                <p class="text-[10px] font-black uppercase tracking-widest text-emerald-700">First-use setup</p>
+                <p class="text-[10px] font-black uppercase tracking-widest text-emerald-700">ตั้งค่าบัญชีครั้งแรก</p>
                 <h2 class="mt-1 text-lg font-black text-slate-800">เลือก Safety Unit ก่อนใช้งาน</h2>
                 <p class="mt-1 text-sm text-slate-500">แผนกของคุณมีการตั้งค่า Safety Unit ไว้ กรุณาเลือกหน่วยงานของคุณเพื่อเปิดใช้งานระบบต่อ</p>
             </div>
@@ -691,7 +750,7 @@ function renderSafetyUnitGate(profile, units) {
                 </button>
                 <div class="flex flex-col sm:flex-row gap-2 sm:justify-between pt-2">
                     <button type="button" id="safety-unit-gate-logout" class="px-4 py-2 rounded-xl border border-slate-200 bg-white text-sm font-bold text-slate-600 hover:bg-slate-50">ออกจากระบบ</button>
-                    <button type="submit" id="safety-unit-gate-save" class="px-5 py-2 rounded-xl bg-emerald-600 text-white text-sm font-bold hover:bg-emerald-700">บันทึกและเข้าใช้งาน</button>
+                    <button type="submit" id="safety-unit-gate-save" class="min-h-[44px] px-5 py-2 rounded-xl bg-emerald-600 text-white text-sm font-bold hover:bg-emerald-700">บันทึกและดำเนินการต่อ</button>
                 </div>
             </form>
         </section>`;
@@ -737,8 +796,7 @@ async function handleSafetyUnitGateSubmit(event) {
         AppState.isAdmin = (res.user.role === 'Admin' || res.user.Role === 'Admin');
         _safetyUnitGateActive = false;
         document.getElementById('safety-unit-gate-page')?.remove();
-        UI.showToast('บันทึก Safety Unit สำเร็จ', 'success');
-        await startApp(res.user, status);
+        showFirstLoginCompletion(res.user, { safetyUnitSelected: true });
     } catch (err) {
         const ambiguousFailure = err instanceof TypeError
             || err?.recoveryRequired === true
@@ -758,7 +816,7 @@ async function handleSafetyUnitGateSubmit(event) {
         }
         if (btn) {
             btn.disabled = false;
-            btn.textContent = 'บันทึกและเข้าใช้งาน';
+            btn.textContent = 'บันทึกและดำเนินการต่อ';
         }
     }
 }
@@ -1227,7 +1285,12 @@ async function handleChangePassword(e) {
             // Let the password modal finish its close animation before the next
             // onboarding surface is rendered, otherwise both overlays briefly stack.
             await new Promise(resolve => setTimeout(resolve, 320));
-            await startApp(res.user, res.status || res.onboardingStatus);
+            const status = res.status || res.onboardingStatus;
+            if (forced && status === 'READY' && res.nextAction === 'ENTER_APP') {
+                showFirstLoginCompletion(res.user);
+                return;
+            }
+            await startApp(res.user, status);
         }
     } catch (err) {
         showError(err?.message || 'เกิดข้อผิดพลาด กรุณาลองใหม่');
@@ -1271,8 +1334,7 @@ async function recoverSafetyUnitContinuation() {
     if (status === 'READY') {
         _safetyUnitGateActive = false;
         document.getElementById('safety-unit-gate-page')?.remove();
-        UI.showToast('ยืนยันการบันทึก Safety Unit แล้ว', 'success');
-        await startApp(verification.user, status);
+        showFirstLoginCompletion(verification.user, { safetyUnitSelected: true });
         return;
     }
     if (status === 'PASSWORD_CHANGE_REQUIRED') {
@@ -1306,6 +1368,7 @@ async function recoverSafetyUnitContinuation() {
 async function recoverPasswordContinuation() {
     const recheckBtn = document.getElementById('cp-recheck-btn');
     const errorEl = document.getElementById('cp-error');
+    const forced = document.getElementById('change-password-form')?.dataset?.forced === '1';
     if (recheckBtn) {
         recheckBtn.disabled = true;
         recheckBtn.textContent = 'กำลังตรวจสอบ...';
@@ -1335,6 +1398,11 @@ async function recoverPasswordContinuation() {
 
     UI.closeModal();
     UI.showToast('ยืนยันการเปลี่ยนรหัสผ่านแล้ว', 'success');
+    if (forced && status === 'READY') {
+        await new Promise(resolve => setTimeout(resolve, 320));
+        showFirstLoginCompletion(verification.user);
+        return;
+    }
     await startApp(verification.user, status);
 }
 

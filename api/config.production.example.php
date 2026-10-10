@@ -21,6 +21,7 @@ return [
     'smtp_from' => 'safetytsh@gmail.com',
     'smtp_from_name' => 'TSH Safety Core',
     'admin_email' => 'sattaya_w@thaisummit-harness.co.th',
+    'registration_admin_email' => 'sattaya_w@thaisummit-harness.co.th',
     'fourm_admin_email' => 'sattaya_w@thaisummit-harness.co.th',
     'gemini_api_key' => 'SET_GEMINI_API_KEY',
     'gemini_model' => 'gemini-3.5-flash',

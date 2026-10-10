@@ -29,6 +29,11 @@ const {
     ensureEmployeeCompanyEmailColumn,
 } = require('./utils/company-email');
 const { getEmailRequirementRule } = require('./utils/email-requirement');
+const { sendMail } = require('./utils/email');
+const {
+    registrationAdminEmailTemplate,
+    registrationAdminRecipient,
+} = require('./utils/registration-email-template');
 const {
     PasswordContinuationError,
     executePasswordContinuation,
@@ -750,7 +755,7 @@ app.post('/api/register/status', registrationStatusLimiter, async (req, res) => 
                 status,
                 submittedAt: request.SubmittedAt,
                 reviewedAt: request.ReviewedAt,
-                rejectionReason: status === 'Rejected' ? request.RejectionReason : null,
+                rejectionReason: ['Rejected', 'Cancelled'].includes(status) ? request.RejectionReason : null,
                 nextAction,
                 notification: {
                     channel: 'portal',
@@ -902,6 +907,34 @@ app.post('/api/register', registerLimiter, async (req, res) => {
                 throw error;
             }
             await logAuthAudit(req, 'ACCOUNT_REGISTRATION_REQUESTED', employeeId, 202, { referenceCode, status: 'Pending' });
+            const adminRecipient = registrationAdminRecipient();
+            if (!adminRecipient) {
+                await logAuthAudit(req, 'REGISTRATION_ADMIN_EMAIL_SKIPPED', employeeId, 202, {
+                    referenceCode, reason: 'admin_recipient_not_configured',
+                });
+            } else {
+                try {
+                    const adminMail = registrationAdminEmailTemplate({
+                        employeeName, employeeId, department, unit, position,
+                        companyEmail: emailCheck.email,
+                        referenceCode,
+                        submittedAt: new Date().toISOString(),
+                        appUrl: process.env.PUBLIC_APP_URL || process.env.PUBLIC_UPLOAD_BASE_URL || process.env.APP_BASE_URL || '',
+                    });
+                    const delivery = await sendMail({ to: adminRecipient, ...adminMail });
+                    await logAuthAudit(
+                        req,
+                        delivery?.sent ? 'REGISTRATION_ADMIN_EMAIL_SENT' : 'REGISTRATION_ADMIN_EMAIL_SKIPPED',
+                        employeeId,
+                        202,
+                        { referenceCode, reason: delivery?.reason || null }
+                    );
+                } catch (mailError) {
+                    await logAuthAudit(req, 'REGISTRATION_ADMIN_EMAIL_FAILED', employeeId, 202, {
+                        referenceCode, reason: String(mailError?.message || 'delivery_failed').slice(0, 200),
+                    });
+                }
+            }
             return res.status(202).json({
                 success: true,
                 pending: true,
