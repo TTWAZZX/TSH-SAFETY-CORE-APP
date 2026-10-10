@@ -170,7 +170,7 @@ async function httpsVerify(candidate, commit) {
         verified.push({ path: relative, bytes: body.length, sha256: sha256(body), status: response.status });
     }
     const protectedKnowledge = await fetch(`${baseUrl}/shared/johnny-system-usage-knowledge.json?release=${Date.now()}`, { redirect: 'manual', cache: 'no-store' });
-    assert.equal(protectedKnowledge.status, 403, 'Shared Johnny knowledge must remain denied over HTTPS');
+    assert([403, 404].includes(protectedKnowledge.status), 'Shared Johnny knowledge must remain unavailable over HTTPS');
     return { public: verified, protectedKnowledgeStatus: protectedKnowledge.status };
 }
 
