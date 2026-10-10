@@ -34,6 +34,8 @@ const evidenceRoot = path.join(root, 'backups', 'production', `app-compact-safet
 const candidateRoot = path.join(evidenceRoot, 'candidate');
 const rollbackRoot = path.join(evidenceRoot, 'rollback-package');
 const bearer = String(process.env.SAFETY_VOTE_PHASE95_PROD_BEARER_TOKEN || '').trim();
+const adminId = String(process.env.PROD_UAT_ADMIN_ID || '').trim();
+const adminPassword = String(process.env.PROD_UAT_ADMIN_PASSWORD || '');
 const sha256 = value => crypto.createHash('sha256').update(value).digest('hex');
 const fileSha = file => sha256(fs.readFileSync(file));
 const normalizeText = value => Buffer.from(value).toString('utf8').replace(/\r\n/g, '\n');
@@ -174,12 +176,24 @@ async function httpsVerify(candidate, commit) {
     return { public: verified, protectedKnowledgeStatus: protectedKnowledge.status };
 }
 
-async function authenticatedSmoke() {
-    assert(bearer && bearer.split('.').length === 3, 'Existing Production bearer token is required');
+async function resolveSmokeToken() {
     assert(!String(process.env.SAFETY_VOTE_PHASE95_PROD_SESSION_COOKIE || '').trim(), 'Ambiguous authentication inputs');
+    if (bearer && bearer.split('.').length === 3) {
+        const probe = await fetch(`${baseUrl}/api/index.php?route=safety-vote/admin/health`, { method: 'GET', redirect: 'manual', headers: { Authorization: `Bearer ${bearer}`, Accept: 'application/json', 'Cache-Control': 'no-cache' } });
+        if (probe.status === 200) return { token: bearer, source: 'existing_bearer', loginPerformed: false };
+    }
+    assert(adminId && adminPassword, 'Production Admin UAT credentials are required when the existing bearer is unavailable');
+    const response = await fetch(`${baseUrl}/api/login`, { method: 'POST', redirect: 'manual', headers: { 'Content-Type': 'application/json', Accept: 'application/json', 'Cache-Control': 'no-cache' }, body: JSON.stringify({ employeeId: adminId, password: adminPassword }) });
+    const body = await response.json().catch(() => null);
+    assert.equal(response.status, 200, `Production Admin login failed with ${response.status}`);
+    assert(body?.token && body?.user, 'Production Admin login token/user missing');
+    return { token: body.token, source: 'ephemeral_admin_login', loginPerformed: true };
+}
+
+async function authenticatedSmoke(auth) {
     const requests = [];
     for (const relative of ['/api/index.php?route=safety-vote/admin/health', '/api/index.php?route=safety-vote/admin/campaigns']) {
-        const response = await fetch(`${baseUrl}${relative}`, { method: 'GET', redirect: 'manual', headers: { Authorization: `Bearer ${bearer}`, Accept: 'application/json', 'Cache-Control': 'no-cache' } });
+        const response = await fetch(`${baseUrl}${relative}`, { method: 'GET', redirect: 'manual', headers: { Authorization: `Bearer ${auth.token}`, Accept: 'application/json', 'Cache-Control': 'no-cache' } });
         const body = await response.json().catch(() => null);
         const cache = response.headers.get('cache-control') || '';
         assert.equal(response.status, 200, `Authenticated GET failed: ${relative}`);
@@ -193,7 +207,7 @@ async function authenticatedSmoke() {
     }
     const anonymous = await fetch(`${baseUrl}/api/index.php?route=safety-vote/admin/health`, { headers: { Accept: 'application/json' }, cache: 'no-store' });
     assert.equal(anonymous.status, 401, 'Anonymous Safety Vote health must remain denied');
-    return { requests, anonymousHealthDenied: anonymous.status };
+    return { requests, anonymousHealthDenied: anonymous.status, authenticationSource: auth.source, loginPerformed: auth.loginPerformed, credentialRecorded: false, tokenRecorded: false };
 }
 
 function rollbackRuntime(prepared) {
@@ -222,12 +236,13 @@ async function main() {
 
     let prepared;
     try {
+        const auth = await resolveSmokeToken();
         prepared = prepareCandidateAndRollback(commit, tree);
         mutationStarted = true;
         for (const file of prepared.candidate) assert(ftps('upload', file.path, file.candidatePath).ok, `Upload failed: ${file.path}`);
         const deployed = prepared.candidate.map(file => doubleDownload(file.path, 'deployed', file.sha256));
         const https = await httpsVerify(prepared.candidate, commit);
-        const smoke = await authenticatedSmoke();
+        const smoke = await authenticatedSmoke(auth);
         const result = {
             contract: '2026-10-10-app-compact-safety-vote-production-r1',
             generatedAt: new Date().toISOString(),
