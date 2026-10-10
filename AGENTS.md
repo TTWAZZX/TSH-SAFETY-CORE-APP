@@ -1,5 +1,12 @@
 # TSH Safety Core Activity - AGENTS.md
 
+## Safety Vote UX/UI Phase 9C Engagement Analytics, Delivery Governance and Campaign Optimization (Local only, 2026-10-10)
+
+- The independently gated engagement analytics workspace adds privacy-thresholded campaign comparison, anonymous promotion/CTA performance, grouped notification delivery governance, suppression review, campaign/channel schedule-conflict warnings, deterministic optimization recommendations and authorized aggregate-only CSV. User promotion events store only daily aggregate impression/CTA counters with no Employee ID, recipient, ballot, answer, candidate or voter column.
+- `safetyVoteEngagementV1=false` and `engagement_enabled=0` remain source/migration defaults; `module_enabled` remains independently fail-closed. The loopback Local database was migrated and explicitly enabled for review, while the route-scoped analytics gate preserves legacy read-only preflight behavior. No external notification dispatch or retry occurs.
+- Phase 9C static/Node-PHP contract passed 43 assertions, PHP contract passed 9, the additive/idempotent 45-table disposable migration and data-preserving rollback passed, and Phase 9A, Phase 9B, UX Phase 8, Phase 10.4 and Phase 8.3.1 disabled-mode regressions passed. Authenticated Admin/User Browser UAT passed ten viewport/role combinations plus permission/module/engagement fail-closed states with zero overflow, small targets, console errors, protected mutations or disposable database residue.
+- Accepted evidence: `backups/local/safety-vote-ux-phase9c-api-1791622224578/` and `backups/local/safety-vote-ux-phase9c-1791622241462/`; report: `docs/safety-vote-ux-phase9c-engagement-analytics-delivery-governance-campaign-optimization.md`. No Production connection, external delivery, deploy, commit or push occurred. Decision: `PASS_LOCAL_UAT_READY_FOR_UX_PHASE9D`.
+
 ## Safety Vote UX/UI Phase 9B Admin Planning, Content and Communication (Local only, 2026-10-10)
 
 - The independently gated planning workspace adds campaign calendar, per-admin saved views, config-only templates/duplication, current-version private promotion assets, real-config User/Juror preview, token-free share link/QR and aggregate notification planning with quiet-hours plus exact queue confirmation. `safetyVoteEngagementV1=false` and `engagement_enabled=0` remain defaults; `module_enabled` remains independently fail-closed.

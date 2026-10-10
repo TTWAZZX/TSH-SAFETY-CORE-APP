@@ -1,7 +1,7 @@
 import { API } from '../api.js?v=20260908-bbs-navigation-loading-r1';
 import { escHtml, showToast } from '../ui.js?v=20260602-mobile-nav-m53';
 import { loadSafetyVotePage as loadLegacySafetyVotePage } from './safety-vote.js?v=20261008-safety-vote-phase4-r1';
-import { isSafetyVoteUxV1Enabled, isSafetyVoteEngagementV1Enabled, openSafetyVoteConfirmDialog, safetyVoteJourneyNav, safetyVoteRoleNav } from './safety-vote-ux-components.js?v=20261010-safety-vote-ux9b-r1';
+import { isSafetyVoteUxV1Enabled, isSafetyVoteEngagementV1Enabled, openSafetyVoteConfirmDialog, safetyVoteJourneyNav, safetyVoteRoleNav } from './safety-vote-ux-components.js?v=20261010-safety-vote-ux9c-r1';
 import { loadSafetyVoteJuryWorkspace } from './safety-vote-jury-workspace.js?v=20261009-safety-vote-ux8-r1';
 import {
     CAMPAIGN_TYPE_LABELS, PRIVACY_LABELS, buildBallotPayload, campaignType, filterCampaigns,
@@ -15,8 +15,16 @@ const state = {
     page: null, campaigns: [], detail: null, assignments: [], nominations: [], notifications: [], notificationCenter: [], promotions: [], promotionIndex: 0, submissions: [],
     view: 'open', query: '', screen: 'list', mode: 'edit', answers: {}, errors: [], receipt: null,
     loading: true, error: null, denied: false, moduleDisabled: false, inFlight: false, requestKey: '',
-    workflowDraftId: null, workflowReference: '', submitError: null, objectUrls: new Set()
+    workflowDraftId: null, workflowReference: '', submitError: null, objectUrls: new Set(), trackedPromotionEvents: new Set()
 };
+
+function trackPromotionEvent(promotionId, eventType) {
+    if (!isSafetyVoteEngagementV1Enabled() || !promotionId) return;
+    const key = `${Number(promotionId)}:${eventType}`;
+    if (state.trackedPromotionEvents.has(key)) return;
+    state.trackedPromotionEvents.add(key);
+    API.post(`/safety-vote/engagement/promotions/${Number(promotionId)}/events`, { eventType }, { suppressErrorLog: true }).catch(() => state.trackedPromotionEvents.delete(key));
+}
 
 function bindRoleNavigation() {
     state.page.querySelector('[data-sv-role-link="admin"]')?.addEventListener('click', () => {
@@ -31,7 +39,7 @@ function promotionForCampaign(campaignId) {
 function promotionBannerMarkup() {
     if (!isSafetyVoteEngagementV1Enabled() || !state.promotions.length) return '';
     const index = Math.min(state.promotionIndex, state.promotions.length - 1), item = state.promotions[index], fileId = item.mobileFileId || item.desktopFileId;
-    return `<section class="svp-promotion" aria-roledescription="carousel" aria-label="กิจกรรมประชาสัมพันธ์"><article aria-label="${index + 1} จาก ${state.promotions.length}">${fileId ? `<img data-svp-promotion-file="${Number(fileId)}" data-desktop-file="${Number(item.desktopFileId || fileId)}" alt="${escHtml(item.altText || '')}">` : '<div class="svp-promotion__fallback" aria-hidden="true">Safety Vote</div>'}<div class="svp-promotion__shade"><p class="sv-eyebrow">กิจกรรมแนะนำ</p><h2>${escHtml(item.titleTh)}</h2><p>${escHtml(item.subtitleTh || item.campaignTitle || '')}</p><button type="button" class="sv-button sv-button--primary" data-svp-campaign="${Number(item.campaignId)}">${escHtml(item.ctaLabel || 'ดูรายละเอียด')}</button></div></article>${state.promotions.length > 1 ? `<div class="svp-promotion__controls"><button type="button" class="sv-icon-button" data-svp-promotion-prev aria-label="ป้ายก่อนหน้า">←</button><span>${index + 1}/${state.promotions.length}</span><button type="button" class="sv-icon-button" data-svp-promotion-next aria-label="ป้ายถัดไป">→</button></div>` : ''}</section>`;
+    return `<section class="svp-promotion" aria-roledescription="carousel" aria-label="กิจกรรมประชาสัมพันธ์"><article aria-label="${index + 1} จาก ${state.promotions.length}">${fileId ? `<img data-svp-promotion-file="${Number(fileId)}" data-desktop-file="${Number(item.desktopFileId || fileId)}" alt="${escHtml(item.altText || '')}">` : '<div class="svp-promotion__fallback" aria-hidden="true">Safety Vote</div>'}<div class="svp-promotion__shade"><p class="sv-eyebrow">กิจกรรมแนะนำ</p><h2>${escHtml(item.titleTh)}</h2><p>${escHtml(item.subtitleTh || item.campaignTitle || '')}</p><button type="button" class="sv-button sv-button--primary" data-svp-campaign="${Number(item.campaignId)}" data-svp-promotion-cta="${Number(item.id)}">${escHtml(item.ctaLabel || 'ดูรายละเอียด')}</button></div></article>${state.promotions.length > 1 ? `<div class="svp-promotion__controls"><button type="button" class="sv-icon-button" data-svp-promotion-prev aria-label="ป้ายก่อนหน้า">←</button><span>${index + 1}/${state.promotions.length}</span><button type="button" class="sv-icon-button" data-svp-promotion-next aria-label="ป้ายถัดไป">→</button></div>` : ''}</section>`;
 }
 
 function taskStripMarkup() {
@@ -102,6 +110,7 @@ function renderList() {
     state.page.querySelector('.svp-hero')?.insertAdjacentHTML('beforebegin', promotionBannerMarkup());
     state.page.querySelector('.svp-hero')?.insertAdjacentHTML('afterend', taskStripMarkup());
     state.page.querySelector('main')?.insertAdjacentHTML('beforeend', notificationCenterMarkup());
+    if (state.promotions[state.promotionIndex]) trackPromotionEvent(state.promotions[state.promotionIndex].id, 'impression');
     state.page.querySelector('.sv-role-nav')?.insertAdjacentHTML('afterend', safetyVoteJourneyNav({ role: 'user', current: 'participation', campaign: {}, onPage: true }));
     bindList();
     hydratePromotionImages();
@@ -275,6 +284,7 @@ function bindList() {
     state.page.querySelector('[data-svp-search]')?.addEventListener('input', event => { state.query = event.target.value; renderList(); requestAnimationFrame(() => { const input = state.page.querySelector('[data-svp-search]'); input?.focus(); input?.setSelectionRange(state.query.length, state.query.length); }); });
     state.page.querySelectorAll('[data-svp-view]').forEach(button => button.addEventListener('click', () => { state.view = button.dataset.svpView; renderList(); }));
     state.page.querySelectorAll('[data-svp-campaign]').forEach(button => button.addEventListener('click', () => openCampaign(Number(button.dataset.svpCampaign))));
+    state.page.querySelector('[data-svp-promotion-cta]')?.addEventListener('click', event => trackPromotionEvent(event.currentTarget.dataset.svpPromotionCta, 'cta_click'));
     state.page.querySelector('[data-sv-role-link="jury"]')?.addEventListener('click', event => { event.preventDefault(); loadSafetyVoteJuryWorkspace({ page: state.page, onUser: load }); });
     state.page.querySelectorAll('[data-svp-jury]').forEach(button => button.addEventListener('click', () => loadSafetyVoteJuryWorkspace({ page: state.page, initialAssignmentId: Number(button.dataset.svpJury), onUser: load })));
     state.page.querySelector('[data-svp-promotion-prev]')?.addEventListener('click', () => { state.promotionIndex = (state.promotionIndex - 1 + state.promotions.length) % state.promotions.length; renderList(); });

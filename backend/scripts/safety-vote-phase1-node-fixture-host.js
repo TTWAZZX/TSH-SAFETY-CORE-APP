@@ -50,6 +50,7 @@ app.use('/api/safety-vote',safetyVoteRoutes.operationalGate);
 app.use('/api/safety-vote',safetyVoteRoutes);
 app.use('/api/safety-vote',require('../routes/safety-vote-engagement'));
 app.use('/api/safety-vote',require('../routes/safety-vote-planning'));
+app.use('/api/safety-vote',require('../routes/safety-vote-analytics'));
 app.use('/api/safety-vote',require('../routes/safety-vote-phase10-4'));
 app.use('/api/safety-vote',require('../routes/safety-vote-phase7'));
 app.use('/api/safety-vote',require('../routes/safety-vote-phase6'));

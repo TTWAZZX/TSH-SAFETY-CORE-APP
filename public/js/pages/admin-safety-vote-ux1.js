@@ -16,7 +16,7 @@ import { renderSafetyVoteCampaignWizard } from './safety-vote-campaign-wizard.js
 import { renderSafetyVoteOperationsWorkspace } from './admin-safety-vote-operations.js?v=20261009-safety-vote-ux8-r1';
 import { renderSafetyVoteResultsWorkspace } from './admin-safety-vote-results.js?v=20261009-safety-vote-ux8-r1';
 import { renderSafetyVoteGovernanceWorkspace } from './admin-safety-vote-governance.js?v=20261009-safety-vote-ux8-r1';
-import { renderSafetyVotePlanningWorkspace } from './admin-safety-vote-planning.js?v=20261010-safety-vote-ux9b-r1';
+import { renderSafetyVotePlanningWorkspace } from './admin-safety-vote-planning.js?v=20261010-safety-vote-ux9c-r1';
 
 const VIEW_LABELS = {
     active: 'กำลังดำเนินการ',

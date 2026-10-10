@@ -6,6 +6,53 @@ body {
     -webkit-text-size-adjust: 100%;
 }
 
+/* Safety Vote UX Phase 9C — aggregate engagement analytics */
+.svan-dashboard { display: grid; gap: 1rem; }
+.svan-toolbar, .svan-panel { background: #fff; border: 1px solid #dbe5e1; border-radius: 18px; padding: 1rem; min-width: 0; }
+.svan-toolbar { display: grid; gap: 1rem; }
+.svan-toolbar__filters { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: .75rem; align-items: end; }
+.svan-toolbar__filters .svpl-actions { grid-column: 1 / -1; }
+.svan-kpis { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: .75rem; }
+.svan-kpis article { min-width: 0; border-radius: 16px; padding: 1rem; background: linear-gradient(135deg, #ecfdf5, #f0fdfa); border: 1px solid #a7f3d0; display: grid; gap: .35rem; }
+.svan-kpis span { color: #52636d; font-size: .82rem; }
+.svan-kpis strong { color: #065f46; font-size: clamp(1.25rem, 2vw, 2rem); overflow-wrap: anywhere; }
+.svan-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 1rem; align-items: start; }
+.svan-panel { display: grid; gap: .85rem; }
+.svan-panel__heading { display: flex; justify-content: space-between; align-items: flex-start; gap: .75rem; }
+.svan-panel h3 { color: #123047; font-size: 1.05rem; font-weight: 800; }
+.svan-privacy-chip { display: inline-flex; align-items: center; min-height: 32px; padding: .25rem .65rem; border-radius: 999px; color: #047857; background: #ecfdf5; border: 1px solid #a7f3d0; font-size: .75rem; white-space: nowrap; }
+.svan-table-wrap { width: 100%; overflow-x: auto; border: 1px solid #e2e8f0; border-radius: 14px; }
+.svan-table-wrap table { width: 100%; min-width: 840px; border-collapse: collapse; }
+.svan-table-wrap th, .svan-table-wrap td { padding: .75rem; border-bottom: 1px solid #e8eef2; text-align: left; vertical-align: top; }
+.svan-table-wrap thead th { background: #f8fafc; color: #52636d; font-size: .75rem; }
+.svan-table-wrap tbody th { display: grid; gap: .2rem; min-width: 220px; }
+.svan-table-wrap tbody th span { color: #64748b; font-size: .75rem; font-weight: 500; }
+.svan-suppressed { color: #7c5d12; font-size: .75rem; overflow-wrap: anywhere; }
+.svan-list { display: grid; gap: .65rem; }
+.svan-list article { border: 1px solid #e2e8f0; border-radius: 14px; padding: .8rem; display: grid; gap: .55rem; min-width: 0; }
+.svan-list article > div:first-child { display: flex; align-items: flex-start; justify-content: space-between; gap: .75rem; }
+.svan-list article span, .svan-list article small, .svan-list article p { color: #64748b; overflow-wrap: anywhere; }
+.svan-list dl { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: .5rem; margin: 0; }
+.svan-list dl div { background: #f8fafc; border-radius: 10px; padding: .55rem; }
+.svan-list dt { color: #64748b; font-size: .72rem; }
+.svan-list dd { margin: .2rem 0 0; color: #123047; font-weight: 750; overflow-wrap: anywhere; }
+.svan-list .is-warning { border-color: #fbbf24; background: #fffbeb; }
+.svan-list .is-high { border-color: #fca5a5; background: #fff7f7; }
+.svan-list .is-medium { border-color: #fde68a; background: #fffbeb; }
+
+@media (max-width: 900px) {
+    .svan-toolbar__filters, .svan-kpis, .svan-grid { grid-template-columns: 1fr 1fr; }
+    .svan-toolbar__filters .svpl-actions { grid-column: 1 / -1; }
+}
+
+@media (max-width: 600px) {
+    .svan-toolbar, .svan-panel { border-radius: 14px; padding: .85rem; }
+    .svan-toolbar__filters, .svan-kpis, .svan-grid { grid-template-columns: 1fr; }
+    .svan-panel__heading, .svan-list article > div:first-child { align-items: stretch; flex-direction: column; }
+    .svan-privacy-chip { white-space: normal; }
+    .svan-list dl { grid-template-columns: 1fr; }
+}
+
 /* Safety Vote UX/UI Phase 1 — feature-flagged presentation shell */
 .sv-ux-shell {
     width: 100%;
