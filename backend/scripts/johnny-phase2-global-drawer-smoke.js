@@ -12,7 +12,9 @@ const index = read('index.html');
 const pkg = read('backend/package.json');
 const nodeRoute = read('backend/routes/johnny-ai.js');
 const phpRoute = read('api/handlers/johnny_ai.php');
-const cacheBust = '20261007-johnny-launcher-avatar-r1';
+const pageCacheBust = '20261007-johnny-launcher-avatar-r1';
+const drawerCacheBust = '20261010-johnny-draggable-launcher-r1';
+const entrypointCacheMarker = 'johnny-drag-r1';
 
 const checks = [];
 function check(name, ok) {
@@ -51,15 +53,15 @@ check('mobile full-screen drawer CSS', style.includes('height: var(--app-visual-
 check('mobile safe-area launcher', style.includes('bottom: calc(var(--mobile-bottom-nav-height) + 0.75rem)') && style.includes('env(safe-area-inset-right, 0px)'));
 check('touch-size controls', style.includes('min-height: 3.25rem') && style.includes('min-height: 2.75rem'));
 check('reduced-motion support', style.includes('@media (prefers-reduced-motion: reduce)'));
-check('Phase 2 cache chain in index', index.includes(`public/style.css?v=${cacheBust}`) && index.includes(`public/js/main.js?v=${cacheBust}`));
-check('Phase 2 cache chain in main', main.includes(`johnny-drawer.js?v=${cacheBust}`) && main.includes(`pages/johnny-ai.js?v=${cacheBust}`));
+check('Phase 2 cache chain in index', index.includes('public/style.css?v=') && index.includes('public/js/main.js?v=') && index.includes(entrypointCacheMarker));
+check('Phase 2 cache chain in main', main.includes(`johnny-drawer.js?v=${drawerCacheBust}`) && main.includes(`pages/johnny-ai.js?v=${pageCacheBust}`));
 check('package script registered', pkg.includes('smoke:johnny-phase2-global-drawer'));
 check('no obsolete visible phase copy', !drawer.includes('Phase 2 mobile ready'));
 
 const passed = checks.filter(item => item.ok).length;
 console.log(JSON.stringify({
     marker: 'JOHNNY_PHASE2_GLOBAL_SIDE_DRAWER',
-    cacheBust,
+    cacheBust: { pageCacheBust, drawerCacheBust, entrypointCacheMarker },
     passed,
     total: checks.length,
     checks,

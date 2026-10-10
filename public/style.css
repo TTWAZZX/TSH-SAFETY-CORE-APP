@@ -1164,8 +1164,23 @@ body { margin: 0; font-family: 'Kanit', sans-serif; background-color: #1e5c3e; }
     font-size: 0.8rem;
     font-weight: 900;
     box-shadow: 0 18px 40px rgba(6, 78, 59, 0.28), 0 4px 12px rgba(15, 23, 42, 0.16);
-    cursor: pointer;
+    cursor: grab;
+    touch-action: none;
+    user-select: none;
+    -webkit-user-select: none;
     transition: transform 0.18s ease, box-shadow 0.18s ease, opacity 0.18s ease;
+}
+
+.johnny-global-launcher.is-positioned {
+    right: auto;
+    bottom: auto;
+}
+
+.johnny-global-launcher.is-dragging {
+    cursor: grabbing;
+    transform: none;
+    transition: none;
+    box-shadow: 0 24px 54px rgba(6, 78, 59, 0.36), 0 6px 18px rgba(15, 23, 42, 0.2);
 }
 
 .johnny-global-launcher:hover,
@@ -1786,6 +1801,11 @@ body.johnny-global-open {
         padding: 0.3rem;
     }
 
+    .johnny-global-launcher.is-positioned {
+        right: auto;
+        bottom: auto;
+    }
+
     .johnny-global-launcher-icon {
         width: 2.65rem;
         height: 2.65rem;
@@ -1834,6 +1854,258 @@ body.johnny-global-open {
         min-height: 3.25rem;
         font-size: 1rem;
     }
+}
+
+/* Core surface standard — shared application tokens and canvas. */
+:root {
+    --app-canvas: #e3ece8;
+    --app-canvas-deep: #d8e6e0;
+    --app-canvas-soft: #edf3f0;
+    --app-surface: #ffffff;
+    --app-surface-muted: #f2f6f4;
+    --app-border: #c2d1cb;
+    --app-border-strong: #a9bdb4;
+    --app-shadow-sm: 0 2px 7px rgb(15 68 51 / .08), 0 1px 2px rgb(15 23 42 / .07);
+    --app-shadow-card: 0 9px 26px rgb(15 68 51 / .09), 0 1px 3px rgb(15 23 42 / .08);
+}
+
+.app-workspace {
+    background:
+        radial-gradient(circle at 92% 5%, rgb(255 255 255 / .58), transparent 32rem),
+        linear-gradient(135deg, var(--app-canvas) 0%, var(--app-canvas-deep) 58%, var(--app-canvas-soft) 100%);
+}
+
+.app-workspace > header {
+    border-color: var(--app-border) !important;
+    background: rgb(255 255 255 / .96) !important;
+    box-shadow: 0 2px 10px rgb(15 68 51 / .09) !important;
+    backdrop-filter: blur(12px);
+}
+
+#main-content { background: transparent; }
+
+/* Existing Tailwind-built modules share the same neutral surface hierarchy. */
+#main-content .border-slate-100 { border-color: var(--app-border) !important; }
+#main-content .border-slate-200 { border-color: var(--app-border-strong) !important; }
+#main-content .bg-slate-50 { background-color: var(--app-surface-muted) !important; }
+#main-content .shadow-sm { box-shadow: var(--app-shadow-sm) !important; }
+#main-content :is(.card, .ds-surface, .ds-section, .ds-filter-bar, .ds-metric-card, .ds-table-wrap) {
+    border-color: var(--app-border);
+    box-shadow: var(--app-shadow-sm);
+}
+#main-content :is(.ds-empty-state, .ds-table thead tr) {
+    background: var(--app-surface-muted);
+    border-color: var(--app-border);
+}
+#main-content .ds-table td { border-bottom-color: var(--app-border); }
+
+/* Compact application density — use more of the viewport without shrinking controls. */
+:root {
+    --app-page-gutter: .5rem;
+    --app-page-gutter-mobile: .5rem;
+    --app-section-gap-lg: .75rem;
+    --app-section-gap-md: .5rem;
+}
+
+.app-workspace > header {
+    min-height: 3.25rem;
+    padding-top: .375rem !important;
+    padding-bottom: .375rem !important;
+}
+
+#main-content {
+    padding: var(--app-page-gutter) !important;
+}
+
+/* Normalize only layout density utilities inside rendered pages. Interactive hit areas stay unchanged. */
+#main-content > .page-content :is(.space-y-6, .space-y-5) > :not([hidden]) ~ :not([hidden]) {
+    margin-top: var(--app-section-gap-lg) !important;
+}
+
+#main-content > .page-content .space-y-4 > :not([hidden]) ~ :not([hidden]) {
+    margin-top: var(--app-section-gap-md) !important;
+}
+
+#main-content > .page-content :is(.gap-8, .gap-6, .gap-5) {
+    gap: var(--app-section-gap-lg) !important;
+}
+
+#main-content > .page-content .gap-4 {
+    gap: var(--app-section-gap-md) !important;
+}
+
+#main-content > .page-content .p-8 {
+    padding: 1rem !important;
+}
+
+#main-content > .page-content .p-6 {
+    padding: .875rem !important;
+}
+
+#main-content > .page-content .p-5 {
+    padding: .75rem !important;
+}
+
+#main-content > .page-content .p-4 {
+    padding: .625rem !important;
+}
+
+#main-content > .page-content :is(.py-8, .py-6) {
+    padding-top: 1rem !important;
+    padding-bottom: 1rem !important;
+}
+
+@media (max-width: 767px) {
+    #main-content {
+        padding-top: var(--app-page-gutter-mobile) !important;
+        padding-right: var(--app-page-gutter-mobile) !important;
+        padding-left: var(--app-page-gutter-mobile) !important;
+    }
+
+    .app-workspace > header {
+        min-height: 3rem;
+    }
+
+    #main-content > .page-content .p-8,
+    #main-content > .page-content .p-6,
+    #main-content > .page-content .p-5 {
+        padding: .75rem !important;
+    }
+}
+
+/* Safety Vote inherits the same canvas instead of rendering a separate pale sheet. */
+:is(.sv-ux-shell, .svw-shell, .svp-shell, .svj-shell, .svo-shell, .svr-shell, .svg-shell, .sv-planning) {
+    background: transparent;
+}
+
+:is(
+    .sv-role-nav,
+    .sv-kpi-grid > button,
+    .sv-list-panel,
+    .sv-master-detail__detail,
+    .sv-campaign-table-wrap,
+    .sv-campaign-card,
+    .sv-empty-state,
+    .sv-admin-workspaces,
+    .sv-workspace-hero,
+    .sv-admin-tool-grid > button,
+    .sv-promotion-editor,
+    .sv-promotion-library,
+    .sv-review-summary > button,
+    .sv-review-list,
+    .sv-review-detail,
+    .svw-step-nav,
+    .svw-card,
+    .svw-question,
+    .svw-option-card,
+    .svp-toolbar,
+    .svp-campaign-card,
+    .svp-my-tasks,
+    .svp-empty,
+    .svp-notification-center,
+    .svj-card,
+    .svj-sheet,
+    .svo-kpi,
+    .svo-panel,
+    .svr-panel,
+    .svg-panel,
+    .svpl-card,
+    .svpl-toolbar,
+    .svpl-saved,
+    .svpl-template-list,
+    .svpl-assets,
+    .svpl-role-preview,
+    .svpl-delivery-preview,
+    .svan-toolbar,
+    .svan-panel
+) {
+    border-color: var(--app-border);
+    box-shadow: var(--app-shadow-card);
+}
+
+:is(
+    .sv-detail-summary > div,
+    .svw-question,
+    .svo-schedule > div,
+    .svr-metadata > div,
+    .svan-table-wrap thead th,
+    .svan-list dl > div
+) {
+    background: var(--app-surface-muted);
+}
+
+:is(.sv-campaign-table th, .svan-table-wrap thead th) { background: #e9f0ed; }
+
+:is(.sv-campaign-table td, .sv-action-bar, .sv-context-actions, .sv-campaign-card__actions, .sv-review-detail > section) {
+    border-color: var(--app-border);
+}
+
+/* Unified page shell — every module fills the same workspace after the sidebar. */
+#main-content > .page-content {
+    width: 100%;
+    max-width: none;
+    min-width: 0;
+    min-height: 100%;
+}
+
+#main-content > .page-content:not(.hidden) {
+    width: 100% !important;
+    max-width: none !important;
+    margin: 0 !important;
+}
+
+#main-content > .page-content:not(.hidden) > :first-child:not(.fixed):not([role="dialog"]) {
+    width: 100%;
+    max-width: none !important;
+    min-width: 0;
+    margin-right: 0 !important;
+    margin-left: 0 !important;
+}
+
+/* Legacy centered page wrappers keep their internal layout but no longer cap the module width. */
+#main-content > .page-content:not(.hidden) > [class*="max-w-"][class*="mx-auto"] {
+    width: 100%;
+    max-width: none !important;
+    margin-right: 0 !important;
+    margin-left: 0 !important;
+    padding-right: 0 !important;
+    padding-left: 0 !important;
+}
+
+/* Safety Vote owns vertical rhythm only; the global main gutter owns horizontal alignment. */
+#safety-vote-page > :is(.sv-ux-shell, .svw-shell, .svp-shell, .svj-shell, .svo-shell, .svr-shell, .svg-shell, .sv-planning) {
+    padding-right: 0 !important;
+    padding-left: 0 !important;
+}
+
+body[data-active-page="safety-vote"] #safety-vote-page:not(.hidden),
+body[data-active-page="admin"] #admin-page:not(.hidden) {
+    width: 100% !important;
+    min-height: 100% !important;
+    margin: 0 !important;
+}
+
+#admin-page .admin-console-content {
+    padding-right: 0;
+    padding-left: 0;
+}
+
+@media (max-width: 767px) {
+    #main-content > .page-content:not(.hidden),
+    body[data-active-page="safety-vote"] #safety-vote-page:not(.hidden),
+    body[data-active-page="admin"] #admin-page:not(.hidden) {
+        width: 100% !important;
+        min-height: 100% !important;
+        margin: 0 !important;
+    }
+}
+
+@media (max-width: 767px) {
+    :root {
+        --app-canvas: #e1ebe6;
+        --app-canvas-deep: #d9e6e0;
+    }
+    .app-workspace { background: linear-gradient(155deg, var(--app-canvas), var(--app-canvas-deep)); }
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -4464,3 +4736,149 @@ body[data-active-page="admin"] #admin-page:not(.hidden) {
 .sv-review{display:grid;gap:16px;max-width:none;width:100%}.sv-review-summary{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px}.sv-review-summary button{min-height:76px;border:1px solid #cbd5e1;border-radius:14px;background:#fff;padding:12px;text-align:left;display:grid;gap:4px}.sv-review-summary strong{font-size:1.5rem;color:#065f46}.sv-review-summary span{color:#475569}.sv-review-layout{display:grid;grid-template-columns:minmax(320px,.9fr) minmax(460px,1.35fr);gap:16px;min-height:560px}.sv-review-list,.sv-review-detail{border:1px solid #cbd5e1;border-radius:16px;background:#fff;overflow:auto}.sv-review-list{display:flex;flex-direction:column;padding:10px;gap:8px}.sv-review-list>[role="listitem"]{min-height:88px;border:1px solid #e2e8f0;border-radius:12px;background:#fff;padding:12px;text-align:left;display:grid;gap:6px}.sv-review-list>[role="listitem"][aria-current="true"]{border-color:#059669;background:#ecfdf5}.sv-review-list>[role="listitem"]>span:first-child{display:flex;justify-content:space-between;gap:12px;align-items:start}.sv-review-list small,.sv-muted{color:#64748b}.sv-review-list em{font-style:normal;color:#b45309}.sv-review-state{justify-self:start;border-radius:999px;padding:4px 9px;font-size:.78rem;background:#e2e8f0}.sv-review-state--needs_attention{background:#fef3c7;color:#92400e}.sv-review-state--ready_for_authoritative_check{background:#d1fae5;color:#065f46}.sv-review-detail{padding:18px;display:grid;align-content:start;gap:16px}.sv-review-detail>header{display:flex;justify-content:space-between;gap:12px}.sv-review-detail>section{border-top:1px solid #e2e8f0;padding-top:14px}.sv-review-detail h3{margin:0 0 8px;font-size:1rem}.sv-review-detail ul,.sv-review-detail ol{margin:8px 0;padding-left:22px}.sv-readiness-meter{display:flex;align-items:center;gap:12px}.sv-readiness-meter>span{height:10px;flex:1;background:#e2e8f0;border-radius:999px;overflow:hidden}.sv-readiness-meter i{display:block;height:100%;background:#059669}.sv-review-actions{display:flex;flex-wrap:wrap;gap:8px}.sv-review-detail form{display:grid;grid-template-columns:170px 1fr auto;gap:10px;align-items:end}.sv-review-detail label{display:grid;gap:5px}.sv-review-detail select,.sv-review-detail textarea{min-height:44px;border:1px solid #cbd5e1;border-radius:10px;padding:9px}.sv-review-detail textarea{min-height:80px;resize:vertical}.sv-review-notes,.sv-governance-timeline{display:grid;gap:10px}.sv-review-notes li,.sv-governance-timeline li{display:grid;gap:3px}.sv-review-empty{min-height:220px;display:grid;place-content:center;text-align:center;gap:6px;padding:24px;color:#64748b}
 @media(max-width:1023px){.sv-review-layout{grid-template-columns:1fr}.sv-review-detail.is-open{position:fixed;inset:72px 0 0 auto;width:min(92vw,620px);z-index:1200;border-radius:18px 0 0 0;box-shadow:-18px 0 50px rgba(15,23,42,.24)}.sv-review-detail form{grid-template-columns:1fr}.sv-review-summary{grid-template-columns:repeat(2,minmax(0,1fr))}}
 @media(max-width:520px){.sv-review-summary{grid-template-columns:1fr 1fr}.sv-review-summary button{min-height:72px}.sv-review-detail.is-open{inset:56px 0 0;width:100vw;border-radius:0}.sv-review-actions>*{width:100%}}
+
+/* Safety Vote typography alignment — follow the same Kanit scale and weights as the core modules. */
+:is(.sv-ux-shell, .svw-shell, .svp-shell, .svj-shell, .svo-shell, .svr-shell, .svg-shell, .sv-planning, .sv-dialog-layer) {
+    font-family: 'Kanit', sans-serif;
+    font-size: .875rem;
+    font-weight: 400;
+    line-height: 1.55;
+    letter-spacing: normal;
+}
+:is(.sv-ux-shell, .svw-shell, .svp-shell, .svj-shell, .svo-shell, .svr-shell, .svg-shell, .sv-planning, .sv-dialog-layer)
+    :is(button, input, select, textarea) {
+    font: inherit;
+}
+:is(.sv-ux-shell, .svw-shell, .svp-shell, .svj-shell, .svo-shell, .svr-shell, .svg-shell, .sv-planning, .sv-dialog-layer)
+    :is(button, [role="button"], summary, th, label) {
+    font-weight: 600;
+}
+:is(.sv-ux-shell, .svw-shell, .svp-shell, .svj-shell, .svo-shell, .svr-shell, .svg-shell, .sv-planning, .sv-dialog-layer)
+    :is(h1, h2, h3, h4, strong) {
+    letter-spacing: normal;
+}
+:is(.sv-ux-shell, .svw-shell, .svp-shell, .svj-shell, .svo-shell, .svr-shell, .svg-shell, .sv-planning, .sv-dialog-layer) h1 {
+    font-size: clamp(1.375rem, 1.8vw, 1.75rem);
+    font-weight: 700;
+    line-height: 1.3;
+}
+:is(.sv-ux-shell, .svw-shell, .svp-shell, .svj-shell, .svo-shell, .svr-shell, .svg-shell, .sv-planning, .sv-dialog-layer) h2 {
+    font-size: 1.125rem;
+    font-weight: 700;
+    line-height: 1.4;
+}
+:is(.sv-ux-shell, .svw-shell, .svp-shell, .svj-shell, .svo-shell, .svr-shell, .svg-shell, .sv-planning, .sv-dialog-layer) h3 {
+    font-size: 1rem;
+    font-weight: 600;
+    line-height: 1.45;
+}
+:is(.sv-ux-shell, .svw-shell, .svp-shell, .svj-shell, .svo-shell, .svr-shell, .svg-shell, .sv-planning, .sv-dialog-layer) h4 {
+    font-size: .9375rem;
+    font-weight: 600;
+    line-height: 1.45;
+}
+:is(.sv-ux-shell, .svw-shell, .svp-shell, .svj-shell, .svo-shell, .svr-shell, .svg-shell, .sv-planning, .sv-dialog-layer) strong {
+    font-weight: 600;
+}
+:is(.sv-admin-hero, .sv-workspace-hero, .svp-hero, .svp-detail-header, .svj-hero, .svj-detail-header, .svo-hero, .svr-hero, .svg-hero, .sv-planning__hero) h1 {
+    font-size: clamp(1.375rem, 1.8vw, 1.75rem);
+    font-weight: 700;
+    line-height: 1.3;
+}
+:is(.sv-eyebrow, .sv-status-badge, .sv-task-tone, .sv-review-state) {
+    font-weight: 600;
+    letter-spacing: .03em;
+}
+:is(.sv-kpi-grid, .sv-engagement-summary, .svp-hero__count, .svj-progress-card, .svo-kpi, .svg-kpis, .sv-review-summary) strong {
+    font-weight: 700;
+}
+
+@media (max-width: 600px) {
+    :is(.sv-ux-shell, .svw-shell, .svp-shell, .svj-shell, .svo-shell, .svr-shell, .svg-shell, .sv-planning, .sv-dialog-layer) {
+        font-size: .875rem;
+    }
+    :is(.sv-admin-hero, .sv-workspace-hero, .svp-hero, .svp-detail-header, .svj-hero, .svj-detail-header, .svo-hero, .svr-hero, .svg-hero, .sv-planning__hero) h1 {
+        font-size: 1.375rem;
+    }
+}
+
+/* Core surface standard — final cascade enforcement after module-specific styles. */
+#main-content .border-slate-100 { border-color: var(--app-border) !important; }
+#main-content .border-slate-200 { border-color: var(--app-border-strong) !important; }
+#main-content .bg-slate-50 { background-color: var(--app-surface-muted) !important; }
+#main-content .shadow-sm { box-shadow: var(--app-shadow-sm) !important; }
+#main-content :is(.card, .ds-surface, .ds-section, .ds-filter-bar, .ds-metric-card, .ds-table-wrap) {
+    border-color: var(--app-border);
+    box-shadow: var(--app-shadow-sm);
+}
+#main-content :is(.ds-empty-state, .ds-table thead tr) {
+    background: var(--app-surface-muted);
+    border-color: var(--app-border);
+}
+#main-content .ds-table td { border-bottom-color: var(--app-border); }
+
+:is(.sv-ux-shell, .svw-shell, .svp-shell, .svj-shell, .svo-shell, .svr-shell, .svg-shell, .sv-planning) {
+    background: transparent;
+}
+
+:is(
+    .sv-role-nav,
+    .sv-kpi-grid > button,
+    .sv-list-panel,
+    .sv-master-detail__detail,
+    .sv-campaign-table-wrap,
+    .sv-campaign-card,
+    .sv-empty-state,
+    .sv-admin-workspaces,
+    .sv-workspace-hero,
+    .sv-admin-tool-grid > button,
+    .sv-promotion-editor,
+    .sv-promotion-library,
+    .sv-review-summary > button,
+    .sv-review-list,
+    .sv-review-detail,
+    .svw-step-nav,
+    .svw-card,
+    .svw-question,
+    .svw-option-card,
+    .svp-toolbar,
+    .svp-campaign-card,
+    .svp-my-tasks,
+    .svp-empty,
+    .svp-notification-center,
+    .svj-card,
+    .svj-sheet,
+    .svo-kpi,
+    .svo-panel,
+    .svr-panel,
+    .svg-panel,
+    .svpl-card,
+    .svpl-toolbar,
+    .svpl-saved,
+    .svpl-template-list,
+    .svpl-assets,
+    .svpl-role-preview,
+    .svpl-delivery-preview,
+    .svan-toolbar,
+    .svan-panel
+) {
+    border-color: var(--app-border);
+    box-shadow: var(--app-shadow-card);
+}
+
+:is(
+    .sv-detail-summary > div,
+    .svw-question,
+    .svo-schedule > div,
+    .svr-metadata > div,
+    .svan-table-wrap thead th,
+    .svan-list dl > div
+) {
+    background: var(--app-surface-muted);
+}
+
+:is(.sv-campaign-table th, .svan-table-wrap thead th) { background: #e9f0ed; }
+
+:is(.sv-campaign-table td, .sv-action-bar, .sv-context-actions, .sv-campaign-card__actions, .sv-review-detail > section) {
+    border-color: var(--app-border);
+}

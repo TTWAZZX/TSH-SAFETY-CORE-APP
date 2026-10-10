@@ -29,7 +29,8 @@ function main() {
     const permissionAudit = read('backend/scripts/permission-audit.js');
 
     check('Phase 5 contract version', contract.version === '2026-10-06-phase5-r1');
-    check('navigation covers every knowledge module', contract.navigationTargets.length === catalog.modules.length && contract.navigationTargets.length === 21);
+    check('navigation covers every knowledge module', contract.navigationTargets.length === catalog.modules.length);
+    check('navigation includes Safety Vote', contract.navigationTargets.some(item => item.key === 'safety-vote' && item.route === 'safety-vote'));
     check('navigation order matches knowledge catalog', contract.navigationTargets.every((item, index) => item.key === catalog.modules[index].key && item.route === catalog.modules[index].route));
     check('draft targets remain restricted', JSON.stringify(contract.draftTargets.map(item => item.key)) === JSON.stringify(['patrol', 'hiyari', 'ky'].sort((a, b) => catalog.modules.findIndex(x => x.key === a) - catalog.modules.findIndex(x => x.key === b))));
     check('contract forbids automatic submission', contract.autoSubmit === false && contract.businessMutation === false);

@@ -24,6 +24,9 @@ let _lastFocused = null;
 let _loadPromise = null;
 let _statusPromise = null;
 let _globalEventsBound = false;
+let _launcherDrag = null;
+let _suppressLauncherClick = false;
+let _launcherViewportEventsBound = false;
 
 function rootEl() {
     return document.getElementById('johnny-global-root');
@@ -31,6 +34,168 @@ function rootEl() {
 
 function storageKey() {
     return `tsh_johnny_drawer_conversation_${_userId || 'user'}`;
+}
+
+function launcherPositionKey() {
+    return `tsh_johnny_launcher_position_${_userId || 'user'}`;
+}
+
+function recalledLauncherPosition() {
+    try {
+        const value = JSON.parse(localStorage.getItem(launcherPositionKey()) || 'null');
+        const x = Number(value?.x);
+        const y = Number(value?.y);
+        return Number.isFinite(x) && Number.isFinite(y) ? { x, y } : null;
+    } catch {
+        return null;
+    }
+}
+
+function rememberLauncherPosition(position) {
+    try {
+        localStorage.setItem(launcherPositionKey(), JSON.stringify({
+            x: Math.round(position.x),
+            y: Math.round(position.y),
+        }));
+    } catch {}
+}
+
+function launcherBounds(launcher) {
+    const viewport = window.visualViewport;
+    const viewportLeft = Number(viewport?.offsetLeft || 0);
+    const viewportTop = Number(viewport?.offsetTop || 0);
+    const viewportWidth = Number(viewport?.width || window.innerWidth || document.documentElement.clientWidth || 0);
+    const viewportHeight = Number(viewport?.height || window.innerHeight || document.documentElement.clientHeight || 0);
+    const rect = launcher.getBoundingClientRect();
+    const gap = 8;
+    const minX = viewportLeft + gap;
+    const minY = viewportTop + gap;
+    return {
+        minX,
+        minY,
+        maxX: Math.max(minX, viewportLeft + viewportWidth - rect.width - gap),
+        maxY: Math.max(minY, viewportTop + viewportHeight - rect.height - gap),
+    };
+}
+
+function placeLauncher(position, { persist = false } = {}) {
+    const launcher = document.getElementById('johnny-global-launcher');
+    if (!launcher || !position) return null;
+    launcher.classList.add('is-positioned');
+    launcher.style.right = 'auto';
+    launcher.style.bottom = 'auto';
+    const bounds = launcherBounds(launcher);
+    const x = Math.min(bounds.maxX, Math.max(bounds.minX, Number(position.x) || 0));
+    const y = Math.min(bounds.maxY, Math.max(bounds.minY, Number(position.y) || 0));
+    launcher.style.left = `${Math.round(x)}px`;
+    launcher.style.top = `${Math.round(y)}px`;
+    if (persist) rememberLauncherPosition({ x, y });
+    return { x, y };
+}
+
+function restoreLauncherPosition() {
+    const position = recalledLauncherPosition();
+    if (position) placeLauncher(position);
+}
+
+function resetLauncherPosition() {
+    const launcher = document.getElementById('johnny-global-launcher');
+    try { localStorage.removeItem(launcherPositionKey()); } catch {}
+    if (!launcher) return;
+    launcher.classList.remove('is-positioned', 'is-dragging');
+    launcher.style.removeProperty('left');
+    launcher.style.removeProperty('top');
+    launcher.style.removeProperty('right');
+    launcher.style.removeProperty('bottom');
+}
+
+function handleLauncherPointerDown(event) {
+    if (event.button !== 0 || _open) return;
+    const launcher = event.currentTarget;
+    launcher.classList.add('is-dragging');
+    const rect = launcher.getBoundingClientRect();
+    _launcherDrag = {
+        pointerId: event.pointerId,
+        startX: event.clientX,
+        startY: event.clientY,
+        originX: rect.left,
+        originY: rect.top,
+        moved: false,
+    };
+    try { launcher.setPointerCapture(event.pointerId); } catch {}
+}
+
+function handleLauncherPointerMove(event) {
+    if (!_launcherDrag || event.pointerId !== _launcherDrag.pointerId) return;
+    const deltaX = event.clientX - _launcherDrag.startX;
+    const deltaY = event.clientY - _launcherDrag.startY;
+    if (!_launcherDrag.moved && Math.hypot(deltaX, deltaY) < 6) return;
+    _launcherDrag.moved = true;
+    event.preventDefault();
+    placeLauncher({
+        x: _launcherDrag.originX + deltaX,
+        y: _launcherDrag.originY + deltaY,
+    });
+}
+
+function handleLauncherPointerEnd(event) {
+    if (!_launcherDrag || event.pointerId !== _launcherDrag.pointerId) return;
+    const launcher = event.currentTarget;
+    const moved = _launcherDrag.moved;
+    _launcherDrag = null;
+    launcher.classList.remove('is-dragging');
+    try { launcher.releasePointerCapture(event.pointerId); } catch {}
+    if (!moved) return;
+    const rect = launcher.getBoundingClientRect();
+    placeLauncher({ x: rect.left, y: rect.top }, { persist: true });
+    _suppressLauncherClick = true;
+    window.setTimeout(() => { _suppressLauncherClick = false; }, 0);
+}
+
+function handleLauncherKeydown(event) {
+    if (!event.altKey) return;
+    if (event.key === 'Home') {
+        event.preventDefault();
+        resetLauncherPosition();
+        return;
+    }
+    const directions = {
+        ArrowLeft: [-1, 0],
+        ArrowRight: [1, 0],
+        ArrowUp: [0, -1],
+        ArrowDown: [0, 1],
+    };
+    const direction = directions[event.key];
+    if (!direction) return;
+    event.preventDefault();
+    const launcher = event.currentTarget;
+    const rect = launcher.getBoundingClientRect();
+    const step = event.shiftKey ? 32 : 12;
+    placeLauncher({
+        x: rect.left + direction[0] * step,
+        y: rect.top + direction[1] * step,
+    }, { persist: true });
+}
+
+function handleLauncherViewportChange() {
+    if (!_initialized || _open) return;
+    restoreLauncherPosition();
+}
+
+function bindLauncherViewportEvents() {
+    if (_launcherViewportEventsBound) return;
+    window.addEventListener('resize', handleLauncherViewportChange);
+    window.visualViewport?.addEventListener('resize', handleLauncherViewportChange);
+    window.visualViewport?.addEventListener('scroll', handleLauncherViewportChange);
+    _launcherViewportEventsBound = true;
+}
+
+function unbindLauncherViewportEvents() {
+    if (!_launcherViewportEventsBound) return;
+    window.removeEventListener('resize', handleLauncherViewportChange);
+    window.visualViewport?.removeEventListener('resize', handleLauncherViewportChange);
+    window.visualViewport?.removeEventListener('scroll', handleLauncherViewportChange);
+    _launcherViewportEventsBound = false;
 }
 
 function rememberConversation(id) {
@@ -576,6 +741,9 @@ export function destroyJohnnyDrawer() {
     _userName = '';
     _activePage = '';
     _lastFocused = null;
+    _launcherDrag = null;
+    _suppressLauncherClick = false;
+    unbindLauncherViewportEvents();
     document.body.classList.remove('johnny-global-open');
 }
 
@@ -591,7 +759,20 @@ export function syncJohnnyDrawerRoute(page) {
 }
 
 function bindEvents() {
-    document.getElementById('johnny-global-launcher')?.addEventListener('click', openJohnnyDrawer);
+    const launcher = document.getElementById('johnny-global-launcher');
+    launcher?.addEventListener('click', event => {
+        if (_suppressLauncherClick) {
+            event.preventDefault();
+            _suppressLauncherClick = false;
+            return;
+        }
+        openJohnnyDrawer();
+    });
+    launcher?.addEventListener('pointerdown', handleLauncherPointerDown);
+    launcher?.addEventListener('pointermove', handleLauncherPointerMove);
+    launcher?.addEventListener('pointerup', handleLauncherPointerEnd);
+    launcher?.addEventListener('pointercancel', handleLauncherPointerEnd);
+    launcher?.addEventListener('keydown', handleLauncherKeydown);
     document.getElementById('johnny-global-close')?.addEventListener('click', () => closeJohnnyDrawer());
     document.getElementById('johnny-global-backdrop')?.addEventListener('click', () => closeJohnnyDrawer());
     document.getElementById('johnny-global-new')?.addEventListener('click', startNewChat);
@@ -622,9 +803,10 @@ function bindEvents() {
 function drawerHtml() {
     return `
         <div id="johnny-global-root" data-johnny-phase2="${PHASE2_MARKER}" class="johnny-global-root">
-            <button id="johnny-global-launcher" type="button" class="johnny-global-launcher" aria-label="เปิดแชท Johnny AI" aria-controls="johnny-global-panel" aria-expanded="false">
+            <button id="johnny-global-launcher" type="button" class="johnny-global-launcher" aria-label="เปิดแชท Johnny AI" aria-describedby="johnny-global-launcher-help" aria-controls="johnny-global-panel" aria-expanded="false" title="ลากเพื่อย้ายตำแหน่ง หรือกดเพื่อเปิดแชท">
                 <span id="johnny-global-launcher-avatar" class="johnny-global-launcher-avatar" aria-hidden="true">${avatarHtml('johnny-global-launcher-icon')}</span>
                 <span class="johnny-global-launcher-label">ถาม Johnny</span>
+                <span id="johnny-global-launcher-help" class="sr-only">ลากเพื่อย้ายตำแหน่ง ใช้ Alt พร้อมปุ่มลูกศรเพื่อขยับ หรือ Alt พร้อม Home เพื่อกลับตำแหน่งเริ่มต้น</span>
             </button>
             <button id="johnny-global-backdrop" type="button" class="johnny-global-backdrop" aria-label="ปิดแชท Johnny AI" tabindex="-1"></button>
             <aside id="johnny-global-panel" class="johnny-global-panel" role="dialog" aria-modal="true" aria-labelledby="johnny-global-title" aria-hidden="true">
@@ -678,6 +860,8 @@ export function initJohnnyDrawer({ userId = '', userName = '' } = {}) {
     _initialized = true;
     document.body.insertAdjacentHTML('beforeend', drawerHtml());
     bindEvents();
+    bindLauncherViewportEvents();
+    window.requestAnimationFrame(restoreLauncherPosition);
     syncJohnnyDrawerRoute(document.body.dataset.activePage || '');
     void loadStatus().catch(() => {});
 }

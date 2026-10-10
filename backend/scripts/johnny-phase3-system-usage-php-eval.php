@@ -21,7 +21,14 @@ if (preg_match('/export const MODULE_ORDER\s*=\s*\[(.*?)\];/s', $manifestText, $
     $manifestKeys = $keys[1] ?? [];
 }
 $catalogKeys = array_values(array_map(static fn(array $entry): string => (string) ($entry['key'] ?? ''), $catalog['modules']));
+$check('catalog version includes Safety Vote guidance', preg_match('/^2026-10-10-safety-vote-r\d+$/', (string) ($catalog['version'] ?? '')) === 1);
 $check('catalog covers registered modules', $catalogKeys === $manifestKeys, count($catalogKeys) . '/' . count($manifestKeys));
+$safetyVoteGuide = current(array_filter($catalog['modules'], static fn(array $entry): bool => ($entry['key'] ?? '') === 'safety-vote')) ?: [];
+$safetyVoteWarnings = json_encode($safetyVoteGuide['warnings'] ?? [], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) ?: '';
+$safetyVoteSteps = json_encode($safetyVoteGuide['steps'] ?? [], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) ?: '';
+$check('Safety Vote guidance covers User Juror and Admin', in_array('User', $safetyVoteGuide['audience'] ?? [], true) && in_array('Juror', $safetyVoteGuide['audience'] ?? [], true) && in_array('Admin', $safetyVoteGuide['audience'] ?? [], true));
+$check('Safety Vote guidance preserves privacy boundaries', count(array_filter(['voter-to-choice', 'response identity', 'blind identity', 'privacy threshold'], static fn(string $term): bool => strpos($safetyVoteWarnings, $term) !== false)) === 4);
+$check('Safety Vote guidance covers drafts and promotion', mb_strpos($safetyVoteSteps, 'ฉบับร่าง') !== false && mb_strpos($safetyVoteSteps, 'ป้ายกิจกรรม') !== false);
 
 foreach ($catalog['modules'] as $module) {
     foreach (($module['questions'] ?? []) as $question) {

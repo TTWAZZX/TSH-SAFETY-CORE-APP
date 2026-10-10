@@ -38,10 +38,14 @@ function compact(result) {
         assert.ok(ok, `${name}${detail ? `: ${detail}` : ''}`);
     };
 
-    check('catalog version is Phase 3', /^2026-10-06-phase3-/.test(catalog.version));
+    check('catalog version includes Safety Vote guidance', /^2026-10-10-safety-vote-r\d+$/.test(catalog.version));
     check('catalog covers every registered module', catalog.modules.length === moduleOrder.length, `${catalog.modules.length}/${moduleOrder.length}`);
     check('catalog keys match module registry order', JSON.stringify(catalog.modules.map(item => item.key)) === JSON.stringify(moduleOrder));
     check('every module has complete usage guidance', catalog.modules.every(item => item.key && item.route && item.title && item.purpose && item.aliases?.length && item.audience?.length && item.steps?.length >= 3 && item.warnings?.length && item.questions?.length >= 2));
+    const safetyVoteGuide = catalog.modules.find(item => item.key === 'safety-vote');
+    check('Safety Vote guidance covers User Juror and Admin', safetyVoteGuide?.audience?.includes('User') && safetyVoteGuide?.audience?.includes('Juror') && safetyVoteGuide?.audience?.includes('Admin'));
+    check('Safety Vote guidance preserves privacy boundaries', ['voter-to-choice', 'response identity', 'blind identity', 'privacy threshold'].every(term => JSON.stringify(safetyVoteGuide?.warnings || []).includes(term)));
+    check('Safety Vote guidance covers drafts and promotion', JSON.stringify(safetyVoteGuide?.steps || []).includes('ฉบับร่าง') && JSON.stringify(safetyVoteGuide?.steps || []).includes('ป้ายกิจกรรม'));
 
     const cases = [];
     for (const module of catalog.modules) {
