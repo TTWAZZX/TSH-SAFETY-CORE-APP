@@ -21,6 +21,14 @@
     "verify:safety-vote-ux-phase7": "npm --prefix backend run verify:safety-vote-ux-phase7",
     "test:safety-vote-ux-phase8": "npm --prefix backend run test:safety-vote-ux-phase8",
     "verify:safety-vote-ux-phase8": "npm --prefix backend run verify:safety-vote-ux-phase8",
+    "test:safety-vote-ux-phase9a": "npm --prefix backend run test:safety-vote-ux-phase9a",
+    "verify:safety-vote-ux-phase9a": "npm --prefix backend run verify:safety-vote-ux-phase9a",
+    "uat:safety-vote-ux-phase9a-api": "npm --prefix backend run uat:safety-vote-ux-phase9a-api",
+    "uat:safety-vote-ux-phase9a-browser": "npm --prefix backend run uat:safety-vote-ux-phase9a-browser",
+    "test:safety-vote-ux-phase9b": "npm --prefix backend run test:safety-vote-ux-phase9b",
+    "verify:safety-vote-ux-phase9b": "npm --prefix backend run verify:safety-vote-ux-phase9b",
+    "uat:safety-vote-ux-phase9b-api": "npm --prefix backend run uat:safety-vote-ux-phase9b-api",
+    "uat:safety-vote-ux-phase9b-browser": "npm --prefix backend run uat:safety-vote-ux-phase9b-browser",
     "test:safety-vote-phase91-jury-progress": "npm --prefix backend run test:safety-vote-phase91-jury-progress",
     "test:safety-vote-phase92-adversarial": "npm --prefix backend run test:safety-vote-phase92-adversarial",
     "test:safety-vote-phase93-rehearsal": "npm --prefix backend run test:safety-vote-phase93-rehearsal",
@@ -83,11 +91,7 @@
     "uat:machine-safety-responsive": "npm --prefix backend run uat:machine-safety-responsive",
     "smoke:ky-email": "npm --prefix backend run smoke:ky-email",
     "smoke:remote": "npm --prefix backend run smoke:remote",
-    "uat:preflight": "npm --prefix backend run uat:preflight",
-    "test:safety-vote-ux-phase9a": "npm --prefix backend run test:safety-vote-ux-phase9a",
-    "verify:safety-vote-ux-phase9a": "npm --prefix backend run verify:safety-vote-ux-phase9a",
-    "uat:safety-vote-ux-phase9a-api": "npm --prefix backend run uat:safety-vote-ux-phase9a-api",
-    "uat:safety-vote-ux-phase9a-browser": "npm --prefix backend run uat:safety-vote-ux-phase9a-browser"
+    "uat:preflight": "npm --prefix backend run uat:preflight"
   },
   "dependencies": {
     "bcrypt": "^6.0.0",

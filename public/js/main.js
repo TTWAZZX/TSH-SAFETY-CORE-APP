@@ -27,7 +27,7 @@ import { loadHiyariPage } from './pages/hiyari.js?v=20260907-hiyari-pdf-summary-
 import { loadKyPage } from './pages/ky.js?v=20260923-ky-annual-contest-r9';
 import { loadFourmPage } from './pages/fourm.js?v=20260923-fourm-curriculum-soft-disable-r1';
 import { loadJohnnyAiPage } from './pages/johnny-ai.js?v=20261007-johnny-launcher-avatar-r1';
-import { loadSafetyVotePage } from './pages/safety-vote-page-ux1.js?v=20261010-safety-vote-ux9a-r1';
+import { loadSafetyVotePage } from './pages/safety-vote-page-ux1.js?v=20261010-safety-vote-ux9b-r1';
 import { initJohnnyDrawer, syncJohnnyDrawerRoute, destroyJohnnyDrawer } from './johnny-drawer.js?v=20261007-johnny-launcher-avatar-r1';
 import { openProfileDrawer, closeProfileDrawer } from './pages/profile.js?v=20260924-company-email-self-service-r1';
 import { loadDashboardPage } from './pages/dashboard.js?v=20260822-cccf-shared-target-r4';
@@ -845,7 +845,9 @@ async function handleRouting() {
         return;
     }
 
-    const hash = window.location.hash.replace('#', '') || 'dashboard';
+    const rawHash = window.location.hash.replace('#', '') || 'dashboard';
+    const safetyVoteShare = /^safety-vote=([A-Za-z0-9-]{1,40})$/.test(rawHash);
+    const hash = safetyVoteShare ? 'safety-vote' : rawHash;
     document.body.dataset.activePage = hash;
     syncJohnnyDrawerRoute(hash);
     console.log('➡️ Navigate:', hash);

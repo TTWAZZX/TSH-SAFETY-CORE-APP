@@ -1,7 +1,7 @@
 import { API } from '../api.js?v=20260908-bbs-navigation-loading-r1';
 import { escHtml, showToast } from '../ui.js?v=20260602-mobile-nav-m53';
 import { loadSafetyVotePage as loadLegacySafetyVotePage } from './safety-vote.js?v=20261008-safety-vote-phase4-r1';
-import { isSafetyVoteUxV1Enabled, isSafetyVoteEngagementV1Enabled, openSafetyVoteConfirmDialog, safetyVoteJourneyNav, safetyVoteRoleNav } from './safety-vote-ux-components.js?v=20261010-safety-vote-ux9a-r1';
+import { isSafetyVoteUxV1Enabled, isSafetyVoteEngagementV1Enabled, openSafetyVoteConfirmDialog, safetyVoteJourneyNav, safetyVoteRoleNav } from './safety-vote-ux-components.js?v=20261010-safety-vote-ux9b-r1';
 import { loadSafetyVoteJuryWorkspace } from './safety-vote-jury-workspace.js?v=20261009-safety-vote-ux8-r1';
 import {
     CAMPAIGN_TYPE_LABELS, PRIVACY_LABELS, buildBallotPayload, campaignType, filterCampaigns,
@@ -17,6 +17,12 @@ const state = {
     loading: true, error: null, denied: false, moduleDisabled: false, inFlight: false, requestKey: '',
     workflowDraftId: null, workflowReference: '', submitError: null, objectUrls: new Set()
 };
+
+function bindRoleNavigation() {
+    state.page.querySelector('[data-sv-role-link="admin"]')?.addEventListener('click', () => {
+        window._saveTab?.('admin', 'safety-vote-foundation');
+    });
+}
 
 function promotionForCampaign(campaignId) {
     return state.promotions.find(item => Number(item.campaignId) === Number(campaignId)) || null;
@@ -265,6 +271,7 @@ function confirmSubmit() {
 }
 
 function bindList() {
+    bindRoleNavigation();
     state.page.querySelector('[data-svp-search]')?.addEventListener('input', event => { state.query = event.target.value; renderList(); requestAnimationFrame(() => { const input = state.page.querySelector('[data-svp-search]'); input?.focus(); input?.setSelectionRange(state.query.length, state.query.length); }); });
     state.page.querySelectorAll('[data-svp-view]').forEach(button => button.addEventListener('click', () => { state.view = button.dataset.svpView; renderList(); }));
     state.page.querySelectorAll('[data-svp-campaign]').forEach(button => button.addEventListener('click', () => openCampaign(Number(button.dataset.svpCampaign))));
@@ -280,9 +287,10 @@ function bindList() {
 }
 
 function bindDetail() {
+    bindRoleNavigation();
     state.page.querySelectorAll('[data-svp-action]').forEach(button => button.addEventListener('click', () => {
         const action = button.dataset.svpAction;
-        if (action === 'back-list') { state.screen = 'list'; state.detail = null; state.answers = {}; state.receipt = null; state.requestKey = ''; renderList(); }
+        if (action === 'back-list') { if (/^#safety-vote=/.test(location.hash)) history.replaceState(null, '', `${location.pathname}${location.search}#safety-vote`); state.screen = 'list'; state.detail = null; state.answers = {}; state.receipt = null; state.requestKey = ''; renderList(); }
         else if (action === 'review') requestReview();
         else if (action === 'edit') { state.mode = 'edit'; state.submitError = null; if (isBallotCampaign(state.detail.campaign)) state.requestKey = ''; renderDetail(); }
         else if (action === 'confirm') confirmSubmit();
@@ -339,7 +347,13 @@ async function load() {
         state.moduleDisabled = error?.code === 'SAFETY_VOTE_MODULE_DISABLED';
         state.denied = !state.moduleDisabled && (error?.code === 'PERMISSION_DENIED' || Number(error?.status) === 403);
         state.error = state.moduleDisabled || state.denied ? null : error; state.campaigns = [];
-    } finally { state.loading = false; render(); }
+    } finally {
+        state.loading = false;
+        const sharedCode = /^#safety-vote=([A-Za-z0-9-]{1,40})$/.exec(location.hash)?.[1];
+        const sharedCampaign = sharedCode ? state.campaigns.find(row => String(row.CampaignCode || '').toUpperCase() === decodeURIComponent(sharedCode).toUpperCase()) : null;
+        if (sharedCampaign && !state.moduleDisabled && !state.denied && !state.error) await openCampaign(Number(sharedCampaign.id));
+        else render();
+    }
 }
 
 export async function loadSafetyVotePage() {

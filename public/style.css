@@ -3886,3 +3886,92 @@ body.mobile-pwa-standalone #login-overlay {
     }
 }
 
+/* Safety Vote UX Phase 9B — Admin planning, content and communication */
+.sv-planning-launch { margin: 1rem 0; padding: 1rem; display: flex; align-items: center; justify-content: space-between; gap: 1rem; border: 1px solid #bfdbfe; border-radius: 1rem; background: linear-gradient(135deg,#eff6ff,#f0fdfa); }
+.sv-planning-launch h2, .sv-planning-launch p { margin: 0; }
+.sv-planning-launch > div { display: grid; gap: .25rem; }
+.sv-planning { width: 100%; max-width: none; padding: clamp(.75rem,2vw,1.5rem); padding-bottom: 6rem; color: #0f172a; }
+.sv-planning__hero { display: flex; align-items: flex-start; justify-content: space-between; gap: 1rem; padding: clamp(1rem,2vw,1.5rem); border-radius: 1.25rem; background: linear-gradient(135deg,#064e3b,#0f766e); color: #fff; }
+.sv-planning__hero h1, .sv-planning__hero p { margin: 0; }
+.sv-planning__hero > div { display: grid; gap: .35rem; }
+.sv-planning__hero .sv-eyebrow { color: #a7f3d0; }
+.sv-planning__tabs { display: flex; gap: .5rem; margin: 1rem 0; padding-bottom: .25rem; overflow-x: auto; scrollbar-width: thin; }
+.sv-planning__tabs button { min-height: 44px; flex: 0 0 auto; padding: .65rem .9rem; border: 1px solid #cbd5e1; border-radius: .75rem; background: #fff; color: #475569; font-weight: 800; }
+.sv-planning__tabs button[aria-selected="true"] { border-color: #059669; background: #ecfdf5; color: #047857; box-shadow: inset 0 0 0 1px #059669; }
+.svpl-section { display: grid; gap: 1rem; min-width: 0; }
+.svpl-card, .svpl-toolbar, .svpl-saved, .svpl-template-list, .svpl-assets, .svpl-role-preview, .svpl-delivery-preview { border: 1px solid #dbe4ee; border-radius: 1rem; background: #fff; padding: 1rem; min-width: 0; }
+.svpl-card h2, .svpl-card p, .svpl-toolbar h2, .svpl-toolbar p, .svpl-saved h2, .svpl-saved p { margin: 0; }
+.svpl-card { display: grid; gap: .8rem; }
+.svpl-toolbar { display: grid; grid-template-columns: minmax(240px,1fr) repeat(2,minmax(160px,220px)); gap: .75rem; align-items: end; }
+.svpl-field { display: grid; gap: .35rem; min-width: 0; font-weight: 700; color: #334155; }
+.svpl-field > span { font-size: .8rem; }
+.svpl-field input, .svpl-field select, .svpl-field textarea { width: 100%; min-width: 0; min-height: 44px; padding: .65rem .75rem; border: 1px solid #cbd5e1; border-radius: .65rem; background: #fff; color: #0f172a; }
+.svpl-field textarea { min-height: 104px; resize: vertical; }
+.svpl-check { display: inline-flex; align-items: center; gap: .55rem; min-height: 44px; }
+.svpl-check input { width: 20px; height: 20px; }
+.svpl-calendar { display: grid; gap: .65rem; }
+.svpl-calendar article { display: grid; grid-template-columns: minmax(150px,210px) minmax(0,1fr) auto; align-items: center; gap: .8rem; padding: .85rem 1rem; border: 1px solid #e2e8f0; border-radius: .85rem; background: #fff; }
+.svpl-calendar article div, .svpl-template-list article > div, .svpl-assets article { display: grid; gap: .2rem; min-width: 0; }
+.svpl-calendar time, .svpl-calendar small, .svpl-calendar span, .svpl-template-list span, .svpl-template-list small, .svpl-assets span, .svpl-assets small { color: #64748b; font-size: .8rem; overflow-wrap: anywhere; }
+.svpl-saved { display: grid; grid-template-columns: minmax(180px,.7fr) minmax(320px,1.3fr); gap: 1rem; }
+.svpl-saved form { display: grid; grid-template-columns: minmax(180px,1fr) auto auto; gap: .6rem; align-items: end; }
+.svpl-saved__list { grid-column: 1/-1; display: grid; grid-template-columns: repeat(auto-fill,minmax(220px,1fr)); gap: .6rem; }
+.svpl-saved__list article { display: flex; align-items: stretch; gap: .35rem; border: 1px solid #e2e8f0; border-radius: .75rem; overflow: hidden; }
+.svpl-saved__list article > button:first-child { min-height: 44px; flex: 1; display: grid; gap: .15rem; padding: .7rem; border: 0; background: #f8fafc; text-align: left; }
+.svpl-template-list, .svpl-assets { display: grid; grid-template-columns: repeat(auto-fill,minmax(245px,1fr)); gap: .75rem; }
+.svpl-template-list article { display: flex; flex-direction: column; justify-content: space-between; gap: .9rem; padding: .85rem; border: 1px solid #e2e8f0; border-radius: .85rem; }
+.svpl-template-list article > div:last-child, .svpl-actions, .svpl-asset-target { display: flex; flex-wrap: wrap; gap: .6rem; }
+.svpl-template-list .svpl-empty, .svpl-assets .svpl-empty { grid-column: 1/-1; }
+.svpl-card form { display: grid; gap: .75rem; }
+.svpl-asset-target { padding: .8rem; border-radius: .75rem; background: #f8fafc; }
+.svpl-asset-target > * { flex: 1 1 220px; }
+.svpl-assets article { align-content: start; padding: .75rem; border: 1px solid #e2e8f0; border-radius: .85rem; }
+.svpl-asset-preview { aspect-ratio: 16/8; overflow: hidden; border-radius: .65rem; background: #e2e8f0; }
+.svpl-asset-preview img { width: 100%; height: 100%; object-fit: cover; }
+.svpl-role-preview { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 1rem; }
+.svpl-role-preview > div { min-width: 0; overflow: hidden; padding: .8rem; border: 1px solid #e2e8f0; border-radius: .85rem; background: #f8fafc; }
+.svpl-share { display: grid; grid-template-columns: minmax(160px,220px) minmax(0,1fr); gap: 1rem; align-items: center; }
+.svpl-share [data-svpl-qr] { min-height: 160px; display: grid; place-items: center; padding: .75rem; border: 1px dashed #94a3b8; border-radius: .85rem; background: #fff; text-align: center; }
+.svpl-share [data-svpl-qr] img { display: block; width: 100%; max-width: 200px; height: auto; }
+.svpl-share > div:last-child { display: grid; gap: .45rem; justify-items: start; }
+.svpl-form-grid { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: .75rem; }
+.svpl-delivery-preview { display: grid; grid-template-columns: repeat(4,minmax(0,1fr)); gap: .65rem; }
+.svpl-delivery-preview h3, .svpl-delivery-preview p { grid-column: 1/-1; margin: 0; }
+.svpl-delivery-preview > div { display: grid; gap: .2rem; padding: .8rem; border-radius: .75rem; background: #f0fdf4; }
+.svpl-delivery-preview strong { color: #047857; font-size: 1.35rem; }
+.svpl-delivery-preview span { color: #64748b; font-size: .78rem; }
+.svpl-delivery-preview p { padding: .75rem; border-radius: .65rem; background: #ecfdf5; color: #047857; }
+.svpl-delivery-preview p.is-blocked { background: #fff7ed; color: #9a3412; }
+.svpl-empty { min-height: 150px; display: grid; place-content: center; gap: .25rem; padding: 1rem; border: 1px dashed #cbd5e1; border-radius: .9rem; background: #f8fafc; color: #64748b; text-align: center; }
+.svpl-empty strong { color: #334155; }
+.svpl-note { margin: 0; padding: .75rem; border-radius: .65rem; background: #fffbeb; color: #92400e; }
+.sv-planning :focus-visible, .sv-planning-launch :focus-visible { outline: 3px solid #2563eb; outline-offset: 2px; }
+.sv-planning button, .sv-planning a, .sv-planning input, .sv-planning select, .sv-planning textarea, .sv-planning summary { min-height: 44px; }
+.sv-planning input[type="checkbox"], .sv-planning input[type="radio"] { min-width: 44px; }
+
+@media (max-width: 1023px) {
+    .svpl-toolbar { grid-template-columns: minmax(0,1fr) repeat(2,minmax(140px,180px)); }
+    .svpl-role-preview { grid-template-columns: 1fr; }
+    .svpl-delivery-preview { grid-template-columns: repeat(2,minmax(0,1fr)); }
+}
+@media (max-width: 767px) {
+    .sv-planning { padding: .65rem; padding-bottom: calc(6rem + env(safe-area-inset-bottom)); }
+    .sv-planning-launch, .sv-planning__hero { align-items: stretch; flex-direction: column; }
+    .sv-planning-launch .sv-button, .sv-planning__hero .sv-button { width: 100%; }
+    .svpl-toolbar, .svpl-saved, .svpl-saved form, .svpl-form-grid { grid-template-columns: 1fr; }
+    .svpl-saved__list { grid-column: auto; }
+    .svpl-calendar article { grid-template-columns: 1fr auto; }
+    .svpl-calendar article time { grid-column: 1/-1; }
+    .svpl-share { grid-template-columns: 1fr; }
+    .svpl-share [data-svpl-qr] { max-width: 240px; width: 100%; margin-inline: auto; }
+    .svpl-actions .sv-button { width: 100%; }
+}
+@media (max-width: 430px) {
+    .svpl-template-list, .svpl-assets, .svpl-saved__list, .svpl-delivery-preview { grid-template-columns: 1fr; }
+    .svpl-calendar article { grid-template-columns: minmax(0,1fr); }
+    .svpl-calendar article time { grid-column: auto; }
+    .svpl-calendar article .sv-status-badge { justify-self: start; }
+}
+@media (prefers-reduced-motion: reduce) {
+    .sv-planning *, .sv-planning-launch * { scroll-behavior: auto !important; transition-duration: .01ms !important; animation-duration: .01ms !important; }
+}

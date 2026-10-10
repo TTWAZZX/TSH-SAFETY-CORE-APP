@@ -109,6 +109,7 @@ const safetyVotePhase6Routes = require('./routes/safety-vote-phase6');
 const safetyVotePhase7Routes = require('./routes/safety-vote-phase7');
 const safetyVotePhase104Routes = require('./routes/safety-vote-phase10-4');
 const safetyVoteEngagementRoutes = require('./routes/safety-vote-engagement');
+const safetyVotePlanningRoutes = require('./routes/safety-vote-planning');
 const { createBbsRolloutAccessMiddleware } = require('./services/bbs-rollout-access');
 
 // =================================================================
@@ -1982,6 +1983,7 @@ app.use('/api/safety-vote',       safetyVoteRoutes.securityHeaders);
 app.use('/api/safety-vote',       authenticateToken, safetyVoteRoutes.operationalGate);
 app.use('/api/safety-vote',       authenticateToken, safetyVoteRoutes);
 app.use('/api/safety-vote',       authenticateToken, safetyVoteEngagementRoutes);
+app.use('/api/safety-vote',       authenticateToken, safetyVotePlanningRoutes);
 app.use('/api/safety-vote',       authenticateToken, safetyVotePhase104Routes);
 app.use('/api/safety-vote',       authenticateToken, safetyVotePhase7Routes);
 app.use('/api/safety-vote',       authenticateToken, safetyVotePhase6Routes);

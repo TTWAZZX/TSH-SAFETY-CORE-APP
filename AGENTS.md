@@ -1,5 +1,12 @@
 # TSH Safety Core Activity - AGENTS.md
 
+## Safety Vote UX/UI Phase 9B Admin Planning, Content and Communication (Local only, 2026-10-10)
+
+- The independently gated planning workspace adds campaign calendar, per-admin saved views, config-only templates/duplication, current-version private promotion assets, real-config User/Juror preview, token-free share link/QR and aggregate notification planning with quiet-hours plus exact queue confirmation. `safetyVoteEngagementV1=false` and `engagement_enabled=0` remain defaults; `module_enabled` remains independently fail-closed.
+- Template/config duplication explicitly excludes files/media, frozen eligibility, employee-specific rules, participation, ballots, answers, jury data, results, certifications and notification history. Share links still require authentication and frozen eligibility. The composer queues through the existing adapter contract and never calls the dispatcher during fixture UAT.
+- Phase 9B static/Node-PHP contract passed 44 assertions, PHP contract passed 3, the additive/idempotent 44-table disposable migration and data-preserving rollback passed, and Phase 9A, UX Phase 8, Phase 10.4 and Phase 8.3.1 regressions passed. Authenticated Admin/User Browser UAT passed ten viewport/role combinations plus permission/module/engagement fail-closed states with zero overflow, small targets, console errors, protected mutations or fixture writes.
+- Accepted evidence: `backups/local/safety-vote-ux-phase9b-1791607128108/` and `backups/local/safety-vote-ux-phase9b-api-1791606995261/`; report: `docs/safety-vote-ux-phase9b-admin-planning-content-communication-workspace.md`. Disposable database, private-file and rejected-run evidence residue is zero. No Production connection, external delivery, deploy, commit or push occurred. Decision: `PASS_LOCAL_UAT_READY_FOR_UX_PHASE9C`.
+
 ## Safety Vote UX/UI Phase 9A Engagement, Promotion and Admin Productivity (Local only, 2026-10-10)
 
 - The independently opt-in `safetyVoteEngagementV1` presentation and server `engagement_enabled` setting now provide an Admin Action Center, eligibility-scoped campaign promotions, private responsive banner assets, richer User campaign discovery, personal action summary, campaign introduction and per-user notification read state. Both new gates remain default OFF; `module_enabled` remains independently fail-closed.
