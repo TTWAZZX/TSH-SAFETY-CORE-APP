@@ -107,6 +107,7 @@
     "test:safety-vote-typography": "node scripts/safety-vote-typography-static.test.js",
     "test:app-surface-contrast": "node scripts/app-surface-contrast-static.test.js",
     "test:app-fullwidth-shell": "node scripts/app-fullwidth-shell-static.test.js",
+    "deploy:app-compact-safety-vote": "node scripts/app-compact-safety-vote-production-deploy.js",
     "test:safety-vote-ux-phase9c-migration": "node scripts/safety-vote-ux-phase9c-migration.test.js",
     "uat:safety-vote-ux-phase9c-api": "node scripts/safety-vote-ux-phase9c-api-uat.js",
     "uat:safety-vote-ux-phase9c-browser": "node scripts/safety-vote-ux-phase9c-browser-uat.js",
