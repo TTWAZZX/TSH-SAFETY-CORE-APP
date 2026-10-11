@@ -28,6 +28,7 @@ check('PHP separates the same three settings keys', php.includes("BRANDING_PUBLI
 check('Node and PHP cap immutable history at 12 versions', nodeRoute.includes('HISTORY_LIMIT = 12') && php.includes('BRANDING_HISTORY_LIMIT = 12'));
 check('Node mutation routes are Admin-only', ["router.put('/draft', isAdmin", "router.delete('/draft', isAdmin", "router.post('/publish', isAdmin", "router.post('/versions/:versionId/rollback', isAdmin"].every(value => nodeRoute.includes(value)));
 check('PHP Branding workspace requires Admin', php.includes('$user = require_admin()'));
+check('PHP Branding workspace is private and non-cacheable', php.includes("header('Cache-Control: private, no-store, max-age=0')") && php.includes("header('Pragma: no-cache')"));
 check('Publish requires explicit confirmation in Node and PHP', nodeRoute.includes("confirmation !== 'PUBLISH_BRANDING'") && php.includes("!== 'PUBLISH_BRANDING'"));
 check('Rollback requires explicit confirmation in Node and PHP', nodeRoute.includes("confirmation !== 'ROLLBACK_BRANDING'") && php.includes("!== 'ROLLBACK_BRANDING'"));
 check('Draft publish uses optimistic conflict checking', nodeRoute.includes('BRANDING_DRAFT_CONFLICT') && php.includes('BRANDING_DRAFT_CONFLICT') && nodeRoute.includes('expectedDraftUpdatedAt') && php.includes('expectedDraftUpdatedAt'));

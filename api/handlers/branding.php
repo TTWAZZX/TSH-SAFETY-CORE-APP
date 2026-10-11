@@ -169,6 +169,8 @@ function branding_audit(array $user, string $action, string $targetId, array $me
 function handle_branding_routes(string $method, string $path): bool
 {
     if (strpos($path, '/branding/') !== 0) return false;
+    header('Cache-Control: private, no-store, max-age=0');
+    header('Pragma: no-cache');
     $user = require_admin();
     branding_ensure_table();
 
