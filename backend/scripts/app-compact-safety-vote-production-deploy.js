@@ -12,7 +12,7 @@ const root = path.resolve(__dirname, '..', '..');
 const ftpsHelper = path.join(__dirname, 'patrol-checkin-v2-ftps.ps1');
 const php = process.env.PHP_BIN || 'C:\\xampp\\php\\php.exe';
 const baseUrl = 'https://dev.tshpcl.com/safety/tsh-safety-core';
-const productionBaseline = '5ccf6c006b8b27ae5cbff2dd948d2ceffaa4a0f7';
+const productionBaseline = '3ef12b05234b77114e67dda16e3ce4a35fb1bb8e';
 const confirmation = 'DEPLOY_APP_BRANDING_JOHNNY_RUNTIME';
 const runtimePaths = [
     'api/handlers/platform.php',
@@ -34,7 +34,7 @@ const runtimePaths = [
     'public/js/pages/safety-culture.js',
     'public/style.css',
 ];
-const newPaths = new Set(['api/handlers/branding.php']);
+const newPaths = new Set();
 const publicPaths = runtimePaths.filter(relative => relative === 'index.html' || relative.startsWith('public/'));
 const stamp = new Date().toISOString().replace(/[-:TZ.]/g, '').slice(0, 14);
 const evidenceRoot = path.join(root, 'backups', 'production', `app-branding-johnny-deploy-${stamp}`);
