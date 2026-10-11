@@ -32,6 +32,7 @@ const moduleKeys = [...moduleOrder.matchAll(/'([^']+)'/g)].map(match => match[1]
 check('desktop login brand panel has a stable customization target', html.includes('id="login-brand-panel"'));
 check('legacy module grid is hidden until the guide entry is rendered', html.includes('id="login-guide-desktop-host" class="hidden"'));
 check('desktop guide entry exposes one consolidated guide action', desktopPanel.includes('ดูคู่มือทั้งหมด') && desktopPanel.includes('login-guide-entry'));
+check('desktop guide entry uses a concise module-wide description', desktopPanel.includes('รวมวิธีใช้ทุกโมดูล') && !desktopPanel.includes('รวมวิธีใช้ทุกโมดูลและ Safety Vote'));
 check('desktop guide entry no longer renders module cards', !desktopPanel.includes('LOGIN_MODULE_GUIDES.map(compactCardHtml)') && !desktopPanel.includes('login-guide-list'));
 check('desktop guide entry is compact and moved into the footer above copyright', css.includes('#login-guide-desktop-host') && css.includes('margin-bottom: .8rem') && guides.includes("footer.insertBefore(desktopHost, footerDivider || footer.firstChild)") && !html.includes('data-module-count'));
 check('guide center remains the destination for the consolidated action', guides.includes("if (event.target.closest('[data-guide-all]'))") && guides.includes('openGuideCenter();'));

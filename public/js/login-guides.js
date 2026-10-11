@@ -354,7 +354,7 @@ function desktopPanelHtml() {
         <div class="login-guide-entry">
             <div class="login-guide-entry-copy">
                 <p class="login-guide-eyebrow">ศูนย์คู่มือการใช้งาน</p>
-                <p>รวมวิธีใช้ทุกโมดูลและ Safety Vote</p>
+                <p>รวมวิธีใช้ทุกโมดูล</p>
             </div>
             <button type="button" class="login-guide-all-btn" data-guide-all>
                 <span>${moduleIcon('policy')}</span>

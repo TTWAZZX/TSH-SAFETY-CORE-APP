@@ -8,11 +8,11 @@ const main = read('public/js/main.js');
 const html = read('index.html');
 
 assert.match(html, /บัญชีพนักงานใหม่\?/u);
-assert.match(html, /หากยังไม่เคยเปลี่ยนรหัสผ่าน/u);
-assert.match(html, /หากเคยเปลี่ยนแล้ว ให้ใช้รหัสผ่านล่าสุด/u);
+assert.match(html, /เข้าสู่ระบบครั้งแรก: ใช้รหัสพนักงานเป็นรหัสผ่าน/u);
+assert.match(html, /เคยเปลี่ยนแล้ว: ใช้รหัสผ่านล่าสุด/u);
 assert.match(html, /text-\[11px\][^>]*>บัญชีพนักงานใหม่\?/u);
-assert.match(html, /whitespace-nowrap[^>]*>รหัสผ่านเริ่มต้น</u);
-assert.match(html, /whitespace-nowrap[^>]*>“ลืมรหัสผ่าน\?”</u);
+assert.doesNotMatch(html, /หากยังไม่เคยเปลี่ยนรหัสผ่าน ให้ใช้รหัสพนักงาน 6 หลัก/u);
+assert.doesNotMatch(html, /หรือเลือก <span class="whitespace-nowrap">“ลืมรหัสผ่าน\?”/u);
 assert.match(html, /id="login-success-message"[^>]*role="status"[^>]*aria-live="polite"/u);
 
 assert.match(main, /const FIRST_LOGIN_REENTRY_KEY = 'tsh_first_login_reentry'/u);

@@ -307,7 +307,8 @@ async function runBrowser(identity) {
     await waitFor(`window.__tshLoginReady===true&&document.getElementById('first-login-hint')`, 'login guidance');
     const loginGuidance = await client.eval(`document.getElementById('first-login-hint').innerText`);
     assert.match(loginGuidance, /บัญชีพนักงานใหม่\?/u);
-    assert.match(loginGuidance, /หากเคยเปลี่ยนแล้ว ให้ใช้รหัสผ่านล่าสุด/u);
+    assert.match(loginGuidance, /เข้าสู่ระบบครั้งแรก: ใช้รหัสพนักงานเป็นรหัสผ่าน/u);
+    assert.match(loginGuidance, /เคยเปลี่ยนแล้ว: ใช้รหัสผ่านล่าสุด/u);
     evidence.checks.conditionalLoginGuidance = true;
 
     await login(ids.flow, passwords.flowCurrent);
